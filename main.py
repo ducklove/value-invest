@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="한국 주식 가치투자 분석")
 
 STATIC_DIR = Path(__file__).parent / "static"
+ANALYSIS_SEMAPHORE = asyncio.Semaphore(2)
+ANALYSIS_LOCKS: dict[str, asyncio.Lock] = {}
+ANALYSIS_LOCKS_GUARD = asyncio.Lock()
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,6 +68,15 @@ async def search(q: str = Query(..., min_length=1)):
     return results
 
 
+async def _get_analysis_lock(stock_code: str) -> asyncio.Lock:
+    async with ANALYSIS_LOCKS_GUARD:
+        lock = ANALYSIS_LOCKS.get(stock_code)
+        if lock is None:
+            lock = asyncio.Lock()
+            ANALYSIS_LOCKS[stock_code] = lock
+        return lock
+
+
 def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -76,6 +88,13 @@ async def analyze_stock(stock_code: str):
     if meta:
         fin_data = await cache.get_financial_data(stock_code)
         mkt_data = await cache.get_market_data(stock_code)
+        try:
+            refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
+            if refreshed:
+                mkt_data = refreshed
+                await cache.save_market_data(stock_code, refreshed)
+        except Exception as e:
+            logger.warning(f"시장 데이터 재계산 실패({stock_code}): {e}")
         result = analyzer.analyze(fin_data, mkt_data)
         return {
             "stock_code": stock_code,
@@ -93,81 +112,98 @@ async def analyze_stock(stock_code: str):
     corp_name = await cache.get_corp_name(stock_code)
 
     async def stream():
-        yield _sse_event("progress", {"step": "start", "message": f"{corp_name} 분석을 시작합니다..."})
+        stock_lock = await _get_analysis_lock(stock_code)
 
-        # DART 재무제표 수집
-        yield _sse_event("progress", {"step": "dart_start", "message": "DART 재무제표를 수집합니다..."})
-        fin_data = []
-        try:
-            async def on_dart_progress(current, total, year):
-                yield_event = _sse_event("progress", {
-                    "step": "dart_fetch",
-                    "message": f"DART 재무제표 조회 중... ({current}/{total}) - {year}년",
-                    "current": current, "total": total, "year": year,
+        if stock_lock.locked():
+            yield _sse_event("progress", {"step": "queued", "message": "같은 종목 분석이 진행 중입니다. 완료 후 캐시 결과를 사용합니다..."})
+        if ANALYSIS_SEMAPHORE.locked():
+            yield _sse_event("progress", {"step": "queued_global", "message": "다른 분석 작업이 많아 잠시 대기합니다..."})
+
+        async with stock_lock:
+            meta = await cache.get_analysis_meta(stock_code)
+            if meta:
+                fin_data = await cache.get_financial_data(stock_code)
+                mkt_data = await cache.get_market_data(stock_code)
+                try:
+                    refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
+                    if refreshed:
+                        mkt_data = refreshed
+                        await cache.save_market_data(stock_code, refreshed)
+                except Exception as e:
+                    logger.warning(f"시장 데이터 재계산 실패({stock_code}): {e}")
+                result = analyzer.analyze(fin_data, mkt_data)
+                yield _sse_event("result", {
+                    "stock_code": stock_code,
+                    "corp_name": meta["corp_name"],
+                    "cached": True,
+                    "analyzed_at": meta["analyzed_at"],
+                    **result,
                 })
-                # We can't yield from a callback, so we use a list to collect events
-                progress_events.append(yield_event)
+                return
 
-            # Use a different approach: yield progress inline
-            from datetime import datetime as dt
-            end_year = dt.now().year - 1
-            start_year = dart_client.DART_ANNUAL_DATA_START_YEAR
-            total_years = end_year - start_year + 1
+            async with ANALYSIS_SEMAPHORE:
+                yield _sse_event("progress", {"step": "start", "message": f"{corp_name} 분석을 시작합니다..."})
 
-            for i, year in enumerate(range(start_year, end_year + 1)):
-                yield _sse_event("progress", {
-                    "step": "dart_fetch",
-                    "message": f"DART 재무제표 조회 중... ({i+1}/{total_years}) - {year}년",
-                    "current": i + 1, "total": total_years,
+                # DART 재무제표 수집
+                yield _sse_event("progress", {"step": "dart_start", "message": "DART 재무제표를 수집합니다..."})
+                fin_data = []
+                try:
+                    from datetime import datetime as dt
+                    end_year = dt.now().year - 1
+                    start_year = dart_client.DART_ANNUAL_DATA_START_YEAR
+                    total_years = end_year - start_year + 1
+
+                    for i, year in enumerate(range(start_year, end_year + 1)):
+                        yield _sse_event("progress", {
+                            "step": "dart_fetch",
+                            "message": f"DART 재무제표 조회 중... ({i+1}/{total_years}) - {year}년",
+                            "current": i + 1, "total": total_years,
+                        })
+                        stmt = await dart_client.fetch_financial_statement(corp_code, year)
+                        if stmt:
+                            fin_data.append(stmt)
+                        await asyncio.sleep(0.5)
+
+                    yield _sse_event("progress", {
+                        "step": "dart_done",
+                        "message": f"DART 재무제표 수집 완료 ({len(fin_data)}개년 데이터)",
+                    })
+                except Exception as e:
+                    logger.error(f"DART 재무제표 조회 실패: {e}")
+                    yield _sse_event("progress", {"step": "dart_error", "message": f"DART 조회 실패: {e}"})
+
+                yield _sse_event("progress", {"step": "market_start", "message": "시장 데이터와 파생 지표를 계산합니다..."})
+                mkt_data = []
+                try:
+                    mkt_data = await stock_price.fetch_market_data(stock_code, fin_data)
+                    yield _sse_event("progress", {
+                        "step": "market_done",
+                        "message": f"시장 데이터 수집 완료 ({len(mkt_data)}개년 데이터)",
+                    })
+                except Exception as e:
+                    logger.error(f"시장 데이터 조회 실패: {e}")
+                    yield _sse_event("progress", {"step": "market_error", "message": f"시장 데이터 조회 실패: {e}"})
+
+                if not fin_data and not mkt_data:
+                    yield _sse_event("error", {"message": "데이터를 가져올 수 없습니다."})
+                    return
+
+                yield _sse_event("progress", {"step": "saving", "message": "데이터를 캐시에 저장합니다..."})
+                if fin_data:
+                    await cache.save_financial_data(stock_code, fin_data)
+                if mkt_data:
+                    await cache.save_market_data(stock_code, mkt_data)
+                await cache.save_analysis_meta(stock_code, corp_name or stock_code)
+
+                yield _sse_event("progress", {"step": "analyzing", "message": "지표를 계산합니다..."})
+                result = analyzer.analyze(fin_data, mkt_data)
+
+                yield _sse_event("result", {
+                    "stock_code": stock_code,
+                    "corp_name": corp_name,
+                    "cached": False,
+                    **result,
                 })
-                stmt = await dart_client.fetch_financial_statement(corp_code, year)
-                if stmt:
-                    fin_data.append(stmt)
-                await asyncio.sleep(0.5)
-
-            yield _sse_event("progress", {
-                "step": "dart_done",
-                "message": f"DART 재무제표 수집 완료 ({len(fin_data)}개년 데이터)",
-            })
-        except Exception as e:
-            logger.error(f"DART 재무제표 조회 실패: {e}")
-            yield _sse_event("progress", {"step": "dart_error", "message": f"DART 조회 실패: {e}"})
-
-        # pykrx 시장 데이터 수집
-        yield _sse_event("progress", {"step": "market_start", "message": "KRX 시장 데이터를 수집합니다... (PER/PBR/EPS/주가)"})
-        mkt_data = []
-        try:
-            mkt_data = await stock_price.fetch_market_data(stock_code)
-            yield _sse_event("progress", {
-                "step": "market_done",
-                "message": f"KRX 시장 데이터 수집 완료 ({len(mkt_data)}개년 데이터)",
-            })
-        except Exception as e:
-            logger.error(f"pykrx 시장 데이터 조회 실패: {e}")
-            yield _sse_event("progress", {"step": "market_error", "message": f"KRX 조회 실패: {e}"})
-
-        if not fin_data and not mkt_data:
-            yield _sse_event("error", {"message": "데이터를 가져올 수 없습니다."})
-            return
-
-        # 캐시 저장
-        yield _sse_event("progress", {"step": "saving", "message": "데이터를 캐시에 저장합니다..."})
-        if fin_data:
-            await cache.save_financial_data(stock_code, fin_data)
-        if mkt_data:
-            await cache.save_market_data(stock_code, mkt_data)
-        await cache.save_analysis_meta(stock_code, corp_name or stock_code)
-
-        # 분석
-        yield _sse_event("progress", {"step": "analyzing", "message": "지표를 계산합니다..."})
-        result = analyzer.analyze(fin_data, mkt_data)
-
-        yield _sse_event("result", {
-            "stock_code": stock_code,
-            "corp_name": corp_name,
-            "cached": False,
-            **result,
-        })
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 

@@ -1,115 +1,180 @@
 import asyncio
-from functools import partial
 from datetime import datetime
+from statistics import median
 
 import pandas as pd
-from pykrx import stock as pykrx_stock
+import yfinance as yf
 
 
-def _get_market_fundamental(stock_code: str, start: str, end: str) -> pd.DataFrame:
-    """pykrx에서 PER/PBR/EPS/BPS/배당수익률 조회 (동기)."""
-    df = pykrx_stock.get_market_fundamental_by_date(
-        start, end, stock_code, freq="y"
+def _get_yfinance_aux(stock_code: str, start_year: int, end_year: int) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+    """yfinance에서 종가/주식수/배당/분할 이력 조회."""
+    ticker = yf.Ticker(f"{stock_code}.KS")
+    history = ticker.history(
+        start=f"{start_year}-01-01",
+        end=f"{end_year}-12-31",
+        interval="1mo",
+        auto_adjust=False,
     )
-    return df
+    shares = ticker.get_shares_full(start="2015-01-01")
+    dividends = ticker.dividends
+    splits = ticker.splits
+    close_series = history["Close"] if "Close" in history else pd.Series(dtype="float64")
+    return close_series, shares, dividends, splits
 
 
-def _get_market_ohlcv(stock_code: str, start: str, end: str) -> pd.DataFrame:
-    """pykrx에서 OHLCV 조회 (동기)."""
-    df = pykrx_stock.get_market_ohlcv_by_date(
-        start, end, stock_code, freq="y"
-    )
-    return df
+def _safe_float(value):
+    if value is None or pd.isna(value):
+        return None
+    try:
+        numeric = float(value)
+        return numeric if numeric != 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
-def _get_market_cap(stock_code: str, start: str, end: str) -> pd.DataFrame:
-    """pykrx에서 시가총액 조회 (동기)."""
-    df = pykrx_stock.get_market_cap_by_date(
-        start, end, stock_code, freq="y"
-    )
-    return df
+def _safe_div(numerator, denominator, multiply=1.0):
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    return round(numerator / denominator * multiply, 2)
+
+
+def _group_last_by_year(series: pd.Series | None) -> dict[int, float]:
+    if series is None or series.empty:
+        return {}
+    cleaned = series.dropna()
+    if cleaned.empty:
+        return {}
+    grouped = cleaned.groupby(cleaned.index.year).last()
+    return {int(year): _safe_float(value) for year, value in grouped.items()}
+
+
+def _group_sum_by_year(series: pd.Series | None) -> dict[int, float]:
+    if series is None or series.empty:
+        return {}
+    cleaned = series.dropna()
+    if cleaned.empty:
+        return {}
+    grouped = cleaned.groupby(cleaned.index.year).sum()
+    return {int(year): _safe_float(value) for year, value in grouped.items()}
+
+
+def _group_close_by_year(series: pd.Series | None) -> dict[int, float]:
+    if series is None or series.empty:
+        return {}
+    cleaned = series.dropna()
+    if cleaned.empty:
+        return {}
+    grouped = cleaned.groupby(cleaned.index.year).last()
+    return {int(year): _safe_float(value) for year, value in grouped.items()}
+
+
+def _normalized_split_events(series: pd.Series | None) -> list[tuple[datetime, float]]:
+    if series is None or series.empty:
+        return []
+    cleaned = series[series > 0].sort_index()
+    events: list[tuple[datetime, float]] = []
+    last_dt = None
+    last_ratio = None
+    for idx, ratio in cleaned.items():
+        dt = idx.to_pydatetime()
+        ratio = _safe_float(ratio)
+        if ratio is None:
+            continue
+        if last_dt and last_ratio == ratio and abs((dt - last_dt).days) <= 30:
+            continue
+        events.append((dt, ratio))
+        last_dt = dt
+        last_ratio = ratio
+    return events
+
+
+def _adjust_shares_for_splits(shares_by_year: dict[int, float], split_events: list[tuple[datetime, float]]) -> dict[int, float]:
+    adjusted = {}
+    for year, shares in shares_by_year.items():
+        current_shares = shares
+        for dt, ratio in split_events:
+            if dt.year <= year:
+                continue
+            future_scales = [value for future_year, value in shares_by_year.items() if future_year >= dt.year and value]
+            if not future_scales:
+                continue
+            # yfinance 주식수 이력에는 이미 분할 보정된 연도가 섞여 있다.
+            # 이후 연도 대표값 대비 충분히 작은 경우에만 분할 배수를 적용한다.
+            post_split_scale = median(future_scales)
+            raw_scale_ceiling = (post_split_scale / ratio) * 1.5
+            if current_shares <= raw_scale_ceiling:
+                current_shares *= ratio
+        adjusted[year] = round(current_shares, 2) if current_shares is not None else None
+    return adjusted
+
+
+def market_data_needs_refresh(data: list[dict]) -> bool:
+    """기존 캐시에 파생 지표가 비어 있으면 재계산 대상."""
+    if not data:
+        return True
+    keys = ("per", "pbr", "eps", "bps", "dividend_yield", "market_cap")
+    return not any(row.get(key) is not None for row in data for key in keys)
 
 
 async def fetch_market_data(
-    stock_code: str, start_year: int = 2000, end_year: int | None = None
+    stock_code: str,
+    financial_data: list[dict] | None = None,
+    start_year: int = 2000,
+    end_year: int | None = None,
 ) -> list[dict]:
-    """pykrx에서 시장 데이터를 비동기로 가져온다."""
+    """시장 데이터와 파생 지표를 조회한다.
+
+    - 종가: pykrx
+    - 주식수/배당: yfinance
+    - EPS/BPS/PER/PBR/시총/배당수익률: 재무제표와 결합해 파생 계산
+    """
     if end_year is None:
         end_year = datetime.now().year
 
-    start = f"{start_year}0101"
-    end = f"{end_year}1231"
-
     loop = asyncio.get_event_loop()
+    aux_future = loop.run_in_executor(None, _get_yfinance_aux, stock_code, start_year, end_year)
+    try:
+        close_series, shares_series, dividends_series, splits_series = await aux_future
+    except Exception:
+        close_series = pd.Series(dtype="float64")
+        shares_series = pd.Series(dtype="float64")
+        dividends_series = pd.Series(dtype="float64")
+        splits_series = pd.Series(dtype="float64")
 
-    fund_df, ohlcv_df, cap_df = await asyncio.gather(
-        loop.run_in_executor(None, partial(_get_market_fundamental, stock_code, start, end)),
-        loop.run_in_executor(None, partial(_get_market_ohlcv, stock_code, start, end)),
-        loop.run_in_executor(None, partial(_get_market_cap, stock_code, start, end)),
-    )
+    year_data: dict[int, dict] = {}
+    for year, close_price in _group_close_by_year(close_series).items():
+        year_data[year] = {"year": year, "close_price": close_price}
 
-    results = []
-    years_seen = set()
+    shares_by_year = _group_last_by_year(shares_series)
+    split_events = _normalized_split_events(splits_series)
+    shares_by_year = _adjust_shares_for_splits(shares_by_year, split_events)
+    dividends_by_year = _group_sum_by_year(dividends_series)
+    fin_by_year = {item["year"]: item for item in (financial_data or [])}
 
-    for df, is_fund, is_ohlcv, is_cap in [
-        (fund_df, True, False, False),
-        (ohlcv_df, False, True, False),
-        (cap_df, False, False, True),
-    ]:
-        if df is None or df.empty:
-            continue
-        for idx, row in df.iterrows():
-            year = idx.year if hasattr(idx, "year") else int(str(idx)[:4])
-            if year not in years_seen:
-                years_seen.add(year)
+    for year, shares in shares_by_year.items():
+        year_data.setdefault(year, {"year": year})["shares_outstanding"] = shares
 
-    all_years = sorted(years_seen) if years_seen else list(range(start_year, end_year + 1))
+    for year, dps in dividends_by_year.items():
+        year_data.setdefault(year, {"year": year})["dividend_per_share"] = dps
 
-    year_data = {}
-    for y in all_years:
-        year_data[y] = {"year": y}
+    for year, row in year_data.items():
+        close_price = row.get("close_price")
+        shares = row.get("shares_outstanding")
+        fin = fin_by_year.get(year, {})
 
-    def _safe_float(val):
-        if pd.isna(val):
-            return None
-        try:
-            v = float(val)
-            return v if v != 0 else None
-        except (ValueError, TypeError):
-            return None
+        if fin and shares:
+            eps = _safe_div(fin.get("net_income"), shares)
+            bps = _safe_div(fin.get("total_equity"), shares)
+            row["eps"] = eps
+            row["bps"] = bps
+            row["per"] = _safe_div(close_price, eps) if close_price else None
+            row["pbr"] = _safe_div(close_price, bps) if close_price else None
+            row["market_cap"] = round(close_price * shares, 2) if close_price else None
 
-    if fund_df is not None and not fund_df.empty:
-        for idx, row in fund_df.iterrows():
-            year = idx.year if hasattr(idx, "year") else int(str(idx)[:4])
-            if year not in year_data:
-                year_data[year] = {"year": year}
-            d = year_data[year]
-            if "BPS" in row.index:
-                d["bps"] = _safe_float(row["BPS"])
-            if "PER" in row.index:
-                d["per"] = _safe_float(row["PER"])
-            if "PBR" in row.index:
-                d["pbr"] = _safe_float(row["PBR"])
-            if "EPS" in row.index:
-                d["eps"] = _safe_float(row["EPS"])
-            if "DIV" in row.index:
-                d["dividend_yield"] = _safe_float(row["DIV"])
+        dps = row.get("dividend_per_share")
+        row["dividend_yield"] = _safe_div(dps, close_price, 100) if dps and close_price else None
 
-    if ohlcv_df is not None and not ohlcv_df.empty:
-        for idx, row in ohlcv_df.iterrows():
-            year = idx.year if hasattr(idx, "year") else int(str(idx)[:4])
-            if year not in year_data:
-                year_data[year] = {"year": year}
-            if "종가" in row.index:
-                year_data[year]["close_price"] = _safe_float(row["종가"])
+        row.pop("shares_outstanding", None)
+        row.pop("dividend_per_share", None)
 
-    if cap_df is not None and not cap_df.empty:
-        for idx, row in cap_df.iterrows():
-            year = idx.year if hasattr(idx, "year") else int(str(idx)[:4])
-            if year not in year_data:
-                year_data[year] = {"year": year}
-            if "시가총액" in row.index:
-                year_data[year]["market_cap"] = _safe_float(row["시가총액"])
-
-    results = [year_data[y] for y in sorted(year_data.keys())]
-    return results
+    return [year_data[year] for year in sorted(year_data.keys())]
