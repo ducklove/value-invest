@@ -5,8 +5,12 @@ def _safe_div(numerator, denominator, multiply=1.0):
     return round(numerator / denominator * multiply, 2)
 
 
-def analyze(financial_data: list[dict], market_data: list[dict]) -> dict:
-    """재무 + 시장 데이터를 병합하여 9개 지표 시계열 계산."""
+def analyze(
+    financial_data: list[dict],
+    market_data: list[dict],
+    weekly_market_data: list[dict] | None = None,
+) -> dict:
+    """재무 + 시장 데이터를 병합하여 연간/주간 지표 시계열 계산."""
 
     # 연도별 인덱싱
     fin_by_year = {d["year"]: d for d in financial_data}
@@ -66,6 +70,25 @@ def analyze(financial_data: list[dict], market_data: list[dict]) -> dict:
         )
         operating_margin_series.append({"year": year, "value": op_margin})
 
+    weekly_indicators = {
+        "주간 주가 (최근 3년)": [
+            {"date": item["date"], "value": item.get("close_price")}
+            for item in (weekly_market_data or [])
+        ],
+        "주간 PER (최근 3년)": [
+            {"date": item["date"], "value": item.get("per")}
+            for item in (weekly_market_data or [])
+        ],
+        "주간 PBR (최근 3년)": [
+            {"date": item["date"], "value": item.get("pbr")}
+            for item in (weekly_market_data or [])
+        ],
+        "주간 배당수익률 (최근 3년)": [
+            {"date": item["date"], "value": item.get("dividend_yield")}
+            for item in (weekly_market_data or [])
+        ],
+    }
+
     return {
         "years": all_years,
         "indicators": {
@@ -79,4 +102,5 @@ def analyze(financial_data: list[dict], market_data: list[dict]) -> dict:
             "EPS (원)": eps_series,
             "EPS 성장률 (%)": eps_growth_series,
         },
+        "weekly_indicators": weekly_indicators,
     }

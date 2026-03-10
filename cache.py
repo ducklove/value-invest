@@ -27,6 +27,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS financial_data (
                 stock_code TEXT NOT NULL,
                 year INTEGER NOT NULL,
+                report_date TEXT,
                 revenue REAL,
                 operating_profit REAL,
                 net_income REAL,
@@ -57,9 +58,18 @@ async def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
         """)
+        await _ensure_column(db, "financial_data", "report_date", "TEXT")
         await db.commit()
     finally:
         await db.close()
+
+
+async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, definition: str):
+    cursor = await db.execute(f"PRAGMA table_info({table})")
+    rows = await cursor.fetchall()
+    columns = {row["name"] for row in rows}
+    if column not in columns:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 async def is_corp_codes_loaded() -> bool:
@@ -128,12 +138,13 @@ async def save_financial_data(stock_code: str, data: list[dict]):
     try:
         await db.executemany(
             "INSERT OR REPLACE INTO financial_data "
-            "(stock_code, year, revenue, operating_profit, net_income, total_assets, total_liabilities, total_equity) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(stock_code, year, report_date, revenue, operating_profit, net_income, total_assets, total_liabilities, total_equity) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     stock_code,
                     d["year"],
+                    d.get("report_date"),
                     d.get("revenue"),
                     d.get("operating_profit"),
                     d.get("net_income"),

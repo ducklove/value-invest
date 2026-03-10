@@ -1,5 +1,6 @@
 import httpx
 import asyncio
+import re
 import zipfile
 import io
 import xml.etree.ElementTree as ET
@@ -126,6 +127,50 @@ async def fetch_financial_statement(
 
     result["year"] = year
     return result
+
+
+async def fetch_annual_report_dates(
+    corp_code: str, start_year: int = DART_ANNUAL_DATA_START_YEAR, end_year: int | None = None
+) -> dict[int, str]:
+    """사업보고서 접수일을 회계연도별로 반환한다."""
+    if end_year is None:
+        from datetime import datetime
+        end_year = datetime.now().year - 1
+
+    params = {
+        "crtfc_key": API_KEY,
+        "corp_code": corp_code,
+        "bgn_de": f"{start_year + 1}0101",
+        "end_de": f"{end_year + 1}1231",
+        "last_reprt_at": "Y",
+        "pblntf_ty": "A",
+        "page_count": "100",
+    }
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(f"{BASE_URL}/list.json", params=params)
+
+    if resp.status_code != 200:
+        return {}
+
+    data = resp.json()
+    if data.get("status") != "000":
+        return {}
+
+    report_dates: dict[int, str] = {}
+    for item in data.get("list", []):
+        report_nm = item.get("report_nm", "")
+        if not report_nm.startswith("사업보고서"):
+            continue
+        match = re.search(r"\((\d{4})\.", report_nm)
+        if not match:
+            continue
+        year = int(match.group(1))
+        if year < start_year or year > end_year:
+            continue
+        report_dates[year] = item.get("rcept_dt", "")
+
+    return report_dates
 
 
 async def fetch_financial_statements(

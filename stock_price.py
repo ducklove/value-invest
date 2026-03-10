@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from statistics import median
 
 import pandas as pd
@@ -20,6 +20,21 @@ def _get_yfinance_aux(stock_code: str, start_year: int, end_year: int) -> tuple[
     splits = ticker.splits
     close_series = history["Close"] if "Close" in history else pd.Series(dtype="float64")
     return close_series, shares, dividends, splits
+
+
+def _get_weekly_yfinance_aux(stock_code: str, start_date: datetime, end_date: datetime) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """최근 주간 종가/주식수/배당 이력 조회."""
+    ticker = yf.Ticker(f"{stock_code}.KS")
+    history = ticker.history(
+        start=start_date.strftime("%Y-%m-%d"),
+        end=(end_date + timedelta(days=7)).strftime("%Y-%m-%d"),
+        interval="1wk",
+        auto_adjust=False,
+    )
+    shares = ticker.get_shares_full(start=(start_date - timedelta(days=370)).strftime("%Y-%m-%d"))
+    dividends = ticker.dividends
+    close_series = history["Close"] if "Close" in history else pd.Series(dtype="float64")
+    return close_series, shares, dividends
 
 
 def _safe_float(value):
@@ -66,6 +81,33 @@ def _group_close_by_year(series: pd.Series | None) -> dict[int, float]:
         return {}
     grouped = cleaned.groupby(cleaned.index.year).last()
     return {int(year): _safe_float(value) for year, value in grouped.items()}
+
+
+def _normalize_datetime_index(series: pd.Series | None) -> pd.Series:
+    if series is None or series.empty:
+        return pd.Series(dtype="float64")
+    normalized = series.dropna().copy()
+    if normalized.empty:
+        return pd.Series(dtype="float64")
+    index = pd.DatetimeIndex(normalized.index)
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    normalized.index = index.normalize()
+    normalized = normalized.groupby(normalized.index).last()
+    return normalized.sort_index()
+
+
+def _parse_report_date(value: str | None, year: int | None = None) -> datetime | None:
+    if value:
+        stripped = value.strip()
+        for fmt in ("%Y%m%d", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(stripped, fmt)
+            except ValueError:
+                continue
+    if year is not None:
+        return datetime(year + 1, 3, 31)
+    return None
 
 
 def _normalized_split_events(series: pd.Series | None) -> list[tuple[datetime, float]]:
@@ -124,8 +166,7 @@ async def fetch_market_data(
 ) -> list[dict]:
     """시장 데이터와 파생 지표를 조회한다.
 
-    - 종가: pykrx
-    - 주식수/배당: yfinance
+    - 종가/주식수/배당: yfinance
     - EPS/BPS/PER/PBR/시총/배당수익률: 재무제표와 결합해 파생 계산
     """
     if end_year is None:
@@ -178,3 +219,82 @@ async def fetch_market_data(
         row.pop("dividend_per_share", None)
 
     return [year_data[year] for year in sorted(year_data.keys())]
+
+
+async def fetch_weekly_market_data(
+    stock_code: str,
+    financial_data: list[dict] | None = None,
+    years: int = 3,
+) -> list[dict]:
+    """최근 N년 주간 밸류에이션 시계열을 계산한다."""
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=years * 370)
+
+    loop = asyncio.get_event_loop()
+    aux_future = loop.run_in_executor(None, _get_weekly_yfinance_aux, stock_code, start_date, end_date)
+    try:
+        close_series, shares_series, dividends_series = await aux_future
+    except Exception:
+        close_series = pd.Series(dtype="float64")
+        shares_series = pd.Series(dtype="float64")
+        dividends_series = pd.Series(dtype="float64")
+
+    close_series = _normalize_datetime_index(close_series)
+    if close_series.empty:
+        return []
+
+    week_dates = pd.DatetimeIndex(close_series.index)
+    shares_series = _normalize_datetime_index(shares_series)
+    dividends_series = _normalize_datetime_index(dividends_series)
+
+    if not shares_series.empty:
+        shares_by_week = shares_series.reindex(week_dates, method="ffill")
+    else:
+        shares_by_week = pd.Series(index=week_dates, dtype="float64")
+
+    financial_timeline = []
+    for item in financial_data or []:
+        report_date = _parse_report_date(item.get("report_date"), item.get("year"))
+        if report_date is None:
+            continue
+        financial_timeline.append((report_date, item))
+    financial_timeline.sort(key=lambda x: x[0])
+
+    results = []
+    active_financial = None
+    timeline_index = 0
+
+    for week_date, close_price in close_series.items():
+        while timeline_index < len(financial_timeline) and financial_timeline[timeline_index][0] <= week_date.to_pydatetime():
+            active_financial = financial_timeline[timeline_index][1]
+            timeline_index += 1
+
+        shares = _safe_float(shares_by_week.get(week_date))
+        close_value = _safe_float(close_price)
+        row = {
+            "date": week_date.strftime("%Y-%m-%d"),
+            "close_price": close_value,
+            "per": None,
+            "pbr": None,
+            "eps": None,
+            "bps": None,
+            "dividend_yield": None,
+            "market_cap": round(close_value * shares, 2) if close_value and shares else None,
+        }
+
+        if active_financial and shares:
+            eps = _safe_div(active_financial.get("net_income"), shares)
+            bps = _safe_div(active_financial.get("total_equity"), shares)
+            row["eps"] = eps
+            row["bps"] = bps
+            row["per"] = _safe_div(close_value, eps) if close_value else None
+            row["pbr"] = _safe_div(close_value, bps) if close_value else None
+
+        if not dividends_series.empty and close_value:
+            trailing_start = week_date - pd.Timedelta(days=365)
+            trailing_dividends = dividends_series[(dividends_series.index > trailing_start) & (dividends_series.index <= week_date)].sum()
+            row["dividend_yield"] = _safe_div(_safe_float(trailing_dividends), close_value, 100)
+
+        results.append(row)
+
+    return results

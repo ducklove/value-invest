@@ -81,12 +81,43 @@ def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+async def _ensure_financial_report_dates(stock_code: str, corp_code: str | None, fin_data: list[dict]) -> list[dict]:
+    if not fin_data or all(item.get("report_date") for item in fin_data):
+        return fin_data
+    if not corp_code:
+        return fin_data
+
+    years = [item["year"] for item in fin_data if item.get("year") is not None]
+    if not years:
+        return fin_data
+
+    report_dates = await dart_client.fetch_annual_report_dates(corp_code, min(years), max(years))
+    updated = False
+    for item in fin_data:
+        if item.get("report_date"):
+            continue
+        report_date = report_dates.get(item["year"])
+        if report_date:
+            item["report_date"] = report_date
+            updated = True
+
+    if updated:
+        await cache.save_financial_data(stock_code, fin_data)
+
+    return fin_data
+
+
 @app.get("/api/analyze/{stock_code}")
 async def analyze_stock(stock_code: str):
+    corp_code = await cache.get_corp_code(stock_code)
+    if not corp_code:
+        raise HTTPException(status_code=404, detail="종목코드를 찾을 수 없습니다.")
+
     # 캐시 확인
     meta = await cache.get_analysis_meta(stock_code)
     if meta:
         fin_data = await cache.get_financial_data(stock_code)
+        fin_data = await _ensure_financial_report_dates(stock_code, corp_code, fin_data)
         mkt_data = await cache.get_market_data(stock_code)
         try:
             refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
@@ -95,7 +126,12 @@ async def analyze_stock(stock_code: str):
                 await cache.save_market_data(stock_code, refreshed)
         except Exception as e:
             logger.warning(f"시장 데이터 재계산 실패({stock_code}): {e}")
-        result = analyzer.analyze(fin_data, mkt_data)
+        try:
+            weekly_mkt_data = await stock_price.fetch_weekly_market_data(stock_code, fin_data)
+        except Exception as e:
+            logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {e}")
+            weekly_mkt_data = []
+        result = analyzer.analyze(fin_data, mkt_data, weekly_mkt_data)
         return {
             "stock_code": stock_code,
             "corp_name": meta["corp_name"],
@@ -103,11 +139,6 @@ async def analyze_stock(stock_code: str):
             "analyzed_at": meta["analyzed_at"],
             **result,
         }
-
-    # corp_code 조회
-    corp_code = await cache.get_corp_code(stock_code)
-    if not corp_code:
-        raise HTTPException(status_code=404, detail="종목코드를 찾을 수 없습니다.")
 
     corp_name = await cache.get_corp_name(stock_code)
 
@@ -123,6 +154,7 @@ async def analyze_stock(stock_code: str):
             meta = await cache.get_analysis_meta(stock_code)
             if meta:
                 fin_data = await cache.get_financial_data(stock_code)
+                fin_data = await _ensure_financial_report_dates(stock_code, corp_code, fin_data)
                 mkt_data = await cache.get_market_data(stock_code)
                 try:
                     refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
@@ -131,7 +163,12 @@ async def analyze_stock(stock_code: str):
                         await cache.save_market_data(stock_code, refreshed)
                 except Exception as e:
                     logger.warning(f"시장 데이터 재계산 실패({stock_code}): {e}")
-                result = analyzer.analyze(fin_data, mkt_data)
+                try:
+                    weekly_mkt_data = await stock_price.fetch_weekly_market_data(stock_code, fin_data)
+                except Exception as e:
+                    logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {e}")
+                    weekly_mkt_data = []
+                result = analyzer.analyze(fin_data, mkt_data, weekly_mkt_data)
                 yield _sse_event("result", {
                     "stock_code": stock_code,
                     "corp_name": meta["corp_name"],
@@ -143,6 +180,7 @@ async def analyze_stock(stock_code: str):
 
             async with ANALYSIS_SEMAPHORE:
                 yield _sse_event("progress", {"step": "start", "message": f"{corp_name} 분석을 시작합니다..."})
+                report_dates = {}
 
                 # DART 재무제표 수집
                 yield _sse_event("progress", {"step": "dart_start", "message": "DART 재무제표를 수집합니다..."})
@@ -152,6 +190,7 @@ async def analyze_stock(stock_code: str):
                     end_year = dt.now().year - 1
                     start_year = dart_client.DART_ANNUAL_DATA_START_YEAR
                     total_years = end_year - start_year + 1
+                    report_dates = await dart_client.fetch_annual_report_dates(corp_code, start_year, end_year)
 
                     for i, year in enumerate(range(start_year, end_year + 1)):
                         yield _sse_event("progress", {
@@ -161,6 +200,9 @@ async def analyze_stock(stock_code: str):
                         })
                         stmt = await dart_client.fetch_financial_statement(corp_code, year)
                         if stmt:
+                            report_date = report_dates.get(year)
+                            if report_date:
+                                stmt["report_date"] = report_date
                             fin_data.append(stmt)
                         await asyncio.sleep(0.5)
 
@@ -196,7 +238,12 @@ async def analyze_stock(stock_code: str):
                 await cache.save_analysis_meta(stock_code, corp_name or stock_code)
 
                 yield _sse_event("progress", {"step": "analyzing", "message": "지표를 계산합니다..."})
-                result = analyzer.analyze(fin_data, mkt_data)
+                try:
+                    weekly_mkt_data = await stock_price.fetch_weekly_market_data(stock_code, fin_data)
+                except Exception as e:
+                    logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {e}")
+                    weekly_mkt_data = []
+                result = analyzer.analyze(fin_data, mkt_data, weekly_mkt_data)
 
                 yield _sse_event("result", {
                     "stock_code": stock_code,

@@ -115,6 +115,10 @@ body {
   margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5;
 }
 
+.section-heading {
+  font-size: 17px; margin: 8px 0 12px; color: var(--text);
+}
+
 /* Charts grid */
 .charts-grid {
   display:grid; grid-template-columns: repeat(2, 1fr); gap:20px;
@@ -266,6 +270,10 @@ body {
     <p>종목코드 또는 회사명으로 검색하면 가치투자 지표를 분석합니다.</p>
   </div>
 
+  <h2 class="section-heading" id="weeklySectionTitle" style="display:none;">최근 3년 주간 밸류에이션</h2>
+  <div class="charts-grid" id="weeklyChartsGrid" style="display:none;"></div>
+
+  <h2 class="section-heading" id="annualSectionTitle" style="display:none;">연간 지표</h2>
   <div class="charts-grid" id="chartsGrid" style="display:none;"></div>
 
   <div class="reports-section" id="reportsSection">
@@ -301,9 +309,13 @@ body {
 </div>
 
 <script>
-const CHART_KEYS = [
+const ANNUAL_CHART_KEYS = [
   '주가 (원)', 'PER', 'PBR', 'ROE (%)', '배당수익률 (%)',
   '부채비율 (%)', '영업이익률 (%)', 'EPS (원)', 'EPS 성장률 (%)'
+];
+
+const WEEKLY_CHART_KEYS = [
+  '주간 주가 (최근 3년)', '주간 PER (최근 3년)', '주간 PBR (최근 3년)', '주간 배당수익률 (최근 3년)'
 ];
 
 const CHART_COLORS = [
@@ -493,23 +505,85 @@ function getSeriesCoverage(series) {
   return startYear === endYear ? String(startYear) : `${startYear}-${endYear}`;
 }
 
-function renderCoverageSummary(indicators) {
+function renderCoverageSummary(indicators, weeklyIndicators) {
   const parts = [];
   const priceCoverage = getSeriesCoverage(indicators['주가 (원)']);
   const dividendCoverage = getSeriesCoverage(indicators['배당수익률 (%)']);
   const valuationCoverage = getSeriesCoverage(indicators['PER']);
   const financialCoverage = getSeriesCoverage(indicators['ROE (%)']);
+  const weeklyCoverage = (weeklyIndicators?.['주간 PER (최근 3년)'] || []).filter(item => item && item.value !== null && item.value !== undefined);
 
   if (priceCoverage) parts.push(`주가 ${priceCoverage}`);
   if (dividendCoverage) parts.push(`배당 ${dividendCoverage}`);
   if (valuationCoverage) parts.push(`PER/PBR/EPS ${valuationCoverage}`);
   if (financialCoverage) parts.push(`ROE/부채비율/영업이익률 ${financialCoverage}`);
+  if (weeklyCoverage.length > 0) parts.push('주간 PER/PBR은 사업보고서 공시일 기준 적용');
 
   if (parts.length === 0) {
     return '지표별 제공 연도는 데이터 소스에 따라 다릅니다.';
   }
 
   return `지표별 데이터 범위: ${parts.join(' · ')}`;
+}
+
+function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
+  container.innerHTML = '';
+
+  chartKeys.forEach((key, i) => {
+    const series = indicatorMap[key] || [];
+    if (series.length === 0) return;
+
+    const labelField = Object.prototype.hasOwnProperty.call(series[0], 'date') ? 'date' : 'year';
+    const labels = series.map(d => d[labelField]);
+    const values = series.map(d => d.value);
+
+    const card = document.createElement('div');
+    card.className = 'chart-card';
+    card.innerHTML = `<h3>${key}</h3><canvas id="${prefix}-chart-${i}"></canvas>`;
+    container.appendChild(card);
+
+    const ctx = document.getElementById(`${prefix}-chart-${i}`).getContext('2d');
+    charts[key] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: key,
+          data: values,
+          borderColor: CHART_COLORS[i % CHART_COLORS.length],
+          backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '22',
+          borderWidth: 2.5,
+          pointRadius: labelField === 'date' ? 0 : 4,
+          pointBackgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+          fill: true,
+          tension: 0.3,
+          spanGaps: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                if (ctx.parsed.y === null) return 'N/A';
+                return `${key}: ${ctx.parsed.y.toLocaleString()}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: gridColor },
+            ticks: { color: tickColor, maxTicksLimit: labelField === 'date' ? 8 : 12 }
+          },
+          y: { grid: { color: gridColor }, ticks: { color: tickColor } }
+        }
+      }
+    });
+  });
 }
 
 function resetProgress() {
@@ -697,7 +771,7 @@ function renderResult(data) {
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
   document.getElementById('companyMeta').textContent = cachedText;
-  document.getElementById('coverageNote').textContent = renderCoverageSummary(data.indicators || {});
+  document.getElementById('coverageNote').textContent = renderCoverageSummary(data.indicators || {}, data.weekly_indicators || {});
   trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
 
   // Load reports asynchronously
@@ -705,8 +779,16 @@ function renderResult(data) {
 
   // Hide empty state, show charts
   document.getElementById('emptyState').style.display = 'none';
+  const weeklyTitle = document.getElementById('weeklySectionTitle');
+  const weeklyGrid = document.getElementById('weeklyChartsGrid');
+  const annualTitle = document.getElementById('annualSectionTitle');
   const grid = document.getElementById('chartsGrid');
+  const hasWeeklyCharts = WEEKLY_CHART_KEYS.some(key => (data.weekly_indicators?.[key] || []).length > 0);
+  weeklyTitle.style.display = hasWeeklyCharts ? 'block' : 'none';
+  weeklyGrid.style.display = hasWeeklyCharts ? 'grid' : 'none';
+  annualTitle.style.display = 'block';
   grid.style.display = 'grid';
+  weeklyGrid.innerHTML = '';
   grid.innerHTML = '';
 
   // Destroy existing charts
@@ -717,55 +799,10 @@ function renderResult(data) {
   const gridColor = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)';
   const tickColor = isDark ? '#94a3b8' : '#666';
 
-  CHART_KEYS.forEach((key, i) => {
-    const series = data.indicators[key] || [];
-    const card = document.createElement('div');
-    card.className = 'chart-card';
-    card.innerHTML = `<h3>${key}</h3><canvas id="chart-${i}"></canvas>`;
-    grid.appendChild(card);
-
-    const labels = series.map(d => d.year);
-    const values = series.map(d => d.value);
-
-    const ctx = document.getElementById(`chart-${i}`).getContext('2d');
-    charts[key] = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: key,
-          data: values,
-          borderColor: CHART_COLORS[i],
-          backgroundColor: CHART_COLORS[i] + '22',
-          borderWidth: 2.5,
-          pointRadius: 4,
-          pointBackgroundColor: CHART_COLORS[i],
-          fill: true,
-          tension: 0.3,
-          spanGaps: true,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                if (ctx.parsed.y === null) return 'N/A';
-                return `${key}: ${ctx.parsed.y.toLocaleString()}`;
-              }
-            }
-          }
-        },
-        scales: {
-          x: { grid: { color: gridColor }, ticks: { color: tickColor } },
-          y: { grid: { color: gridColor }, ticks: { color: tickColor } }
-        }
-      }
-    });
-  });
+  if (hasWeeklyCharts) {
+    renderChartGrid(weeklyGrid, WEEKLY_CHART_KEYS, data.weekly_indicators || {}, gridColor, tickColor, 'weekly');
+  }
+  renderChartGrid(grid, ANNUAL_CHART_KEYS, data.indicators || {}, gridColor, tickColor, 'annual');
 }
 
 // Recent list
