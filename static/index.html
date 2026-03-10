@@ -76,14 +76,6 @@ body {
 .main { flex:1; padding: 24px 32px; overflow-y: auto; }
 .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
 .header h1 { font-size: 24px; }
-.deployment-note {
-  display:none; margin-bottom:20px; padding:12px 14px; border-radius:10px;
-  border:1px solid #f59e0b; background:#fffbeb; color:#92400e; font-size:13px; line-height:1.5;
-}
-[data-theme="dark"] .deployment-note {
-  background: rgba(245, 158, 11, 0.12); color:#fcd34d; border-color:#d97706;
-}
-
 /* Theme toggle */
 .theme-toggle {
   background: var(--surface); border:1px solid var(--border); border-radius:8px;
@@ -255,9 +247,6 @@ body {
     <h1>가치투자 분석</h1>
     <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환">🌓</button>
   </div>
-
-  <div class="deployment-note" id="deploymentNote"></div>
-
   <div class="search-container">
     <input class="search-input" id="searchInput" placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930)" autocomplete="off">
     <div class="dropdown" id="dropdown"></div>
@@ -356,24 +345,6 @@ function requireApiConfiguration() {
   if (!hasApiConfiguration()) {
     throw new Error('GitHub Pages에서는 app-config.js의 apiBaseUrl에 FastAPI 서버 주소를 설정해야 합니다.');
   }
-}
-
-function showDeploymentNote() {
-  const note = document.getElementById('deploymentNote');
-  if (!IS_GITHUB_PAGES) return;
-
-  note.style.display = 'block';
-  if (!API_BASE_URL) {
-    note.textContent = 'GitHub Pages 프런트가 배포되었습니다. app-config.js의 apiBaseUrl에 FastAPI 서버 주소를 넣어야 검색과 분석이 동작합니다.';
-    return;
-  }
-
-  if (window.location.protocol === 'https:' && API_BASE_URL.startsWith('http://')) {
-    note.textContent = `현재 API 주소 ${API_BASE_URL}는 HTTP라서 GitHub Pages(HTTPS)에서 브라우저가 차단할 수 있습니다. HTTPS 주소로 바꾸면 정상 동작합니다.`;
-    return;
-  }
-
-  note.textContent = `GitHub Pages 프런트가 ${API_BASE_URL} API를 사용하도록 설정되어 있습니다.`;
 }
 
 // Theme
@@ -899,7 +870,6 @@ async function loadReports(stockCode) {
 }
 
 // Init
-showDeploymentNote();
 loadRecentList();
 </script>
 </body>
