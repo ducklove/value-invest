@@ -82,6 +82,39 @@ def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+async def _build_analysis_response(
+    stock_code: str,
+    corp_name: str,
+    fin_data: list[dict],
+    mkt_data: list[dict],
+    cached: bool,
+    analyzed_at: str | None = None,
+) -> dict:
+    try:
+        weekly_mkt_data = await stock_price.fetch_weekly_market_data(stock_code, fin_data)
+    except Exception as e:
+        logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {e}")
+        weekly_mkt_data = []
+
+    try:
+        quote_snapshot = await stock_price.fetch_quote_snapshot(stock_code)
+    except Exception as e:
+        logger.warning(f"현재가 스냅샷 계산 실패({stock_code}): {e}")
+        quote_snapshot = {}
+
+    result = analyzer.analyze(fin_data, mkt_data, weekly_mkt_data)
+    payload = {
+        "stock_code": stock_code,
+        "corp_name": corp_name,
+        "cached": cached,
+        "quote_snapshot": quote_snapshot,
+        **result,
+    }
+    if analyzed_at:
+        payload["analyzed_at"] = analyzed_at
+    return payload
+
+
 async def _ensure_financial_report_dates(stock_code: str, corp_code: str | None, fin_data: list[dict]) -> list[dict]:
     if not fin_data or all(item.get("report_date") for item in fin_data):
         return fin_data
@@ -127,19 +160,14 @@ async def analyze_stock(stock_code: str):
                 await cache.save_market_data(stock_code, refreshed)
         except Exception as e:
             logger.warning(f"시장 데이터 재계산 실패({stock_code}): {e}")
-        try:
-            weekly_mkt_data = await stock_price.fetch_weekly_market_data(stock_code, fin_data)
-        except Exception as e:
-            logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {e}")
-            weekly_mkt_data = []
-        result = analyzer.analyze(fin_data, mkt_data, weekly_mkt_data)
-        return {
-            "stock_code": stock_code,
-            "corp_name": meta["corp_name"],
-            "cached": True,
-            "analyzed_at": meta["analyzed_at"],
-            **result,
-        }
+        return await _build_analysis_response(
+            stock_code,
+            meta["corp_name"],
+            fin_data,
+            mkt_data,
+            cached=True,
+            analyzed_at=meta["analyzed_at"],
+        )
 
     corp_name = await cache.get_corp_name(stock_code)
 
@@ -164,19 +192,15 @@ async def analyze_stock(stock_code: str):
                         await cache.save_market_data(stock_code, refreshed)
                 except Exception as e:
                     logger.warning(f"시장 데이터 재계산 실패({stock_code}): {e}")
-                try:
-                    weekly_mkt_data = await stock_price.fetch_weekly_market_data(stock_code, fin_data)
-                except Exception as e:
-                    logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {e}")
-                    weekly_mkt_data = []
-                result = analyzer.analyze(fin_data, mkt_data, weekly_mkt_data)
-                yield _sse_event("result", {
-                    "stock_code": stock_code,
-                    "corp_name": meta["corp_name"],
-                    "cached": True,
-                    "analyzed_at": meta["analyzed_at"],
-                    **result,
-                })
+                payload = await _build_analysis_response(
+                    stock_code,
+                    meta["corp_name"],
+                    fin_data,
+                    mkt_data,
+                    cached=True,
+                    analyzed_at=meta["analyzed_at"],
+                )
+                yield _sse_event("result", payload)
                 return
 
             async with ANALYSIS_SEMAPHORE:
@@ -239,19 +263,14 @@ async def analyze_stock(stock_code: str):
                 await cache.save_analysis_meta(stock_code, corp_name or stock_code)
 
                 yield _sse_event("progress", {"step": "analyzing", "message": "지표를 계산합니다..."})
-                try:
-                    weekly_mkt_data = await stock_price.fetch_weekly_market_data(stock_code, fin_data)
-                except Exception as e:
-                    logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {e}")
-                    weekly_mkt_data = []
-                result = analyzer.analyze(fin_data, mkt_data, weekly_mkt_data)
-
-                yield _sse_event("result", {
-                    "stock_code": stock_code,
-                    "corp_name": corp_name,
-                    "cached": False,
-                    **result,
-                })
+                payload = await _build_analysis_response(
+                    stock_code,
+                    corp_name,
+                    fin_data,
+                    mkt_data,
+                    cached=False,
+                )
+                yield _sse_event("result", payload)
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 

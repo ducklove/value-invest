@@ -37,6 +37,13 @@ def _get_weekly_yfinance_aux(stock_code: str, start_date: datetime, end_date: da
     return close_series, shares, dividends
 
 
+def _get_quote_yfinance_aux(stock_code: str) -> pd.Series:
+    """최근 일봉 종가 이력 조회."""
+    ticker = yf.Ticker(f"{stock_code}.KS")
+    history = ticker.history(period="10d", interval="1d", auto_adjust=False)
+    return history["Close"] if "Close" in history else pd.Series(dtype="float64")
+
+
 def _safe_float(value):
     if value is None or pd.isna(value):
         return None
@@ -316,3 +323,34 @@ async def fetch_weekly_market_data(
         results.append(row)
 
     return results
+
+
+async def fetch_quote_snapshot(stock_code: str) -> dict:
+    """현재가와 직전 종가 대비 등락률을 반환한다."""
+    loop = asyncio.get_event_loop()
+    try:
+        close_series = await loop.run_in_executor(None, _get_quote_yfinance_aux, stock_code)
+    except Exception:
+        close_series = pd.Series(dtype="float64")
+
+    close_series = _normalize_datetime_index(close_series)
+    if close_series.empty:
+        return {}
+
+    latest_date = close_series.index[-1]
+    latest_close = _safe_float(close_series.iloc[-1])
+    previous_close = _safe_float(close_series.iloc[-2]) if len(close_series) >= 2 else None
+
+    change = None
+    change_pct = None
+    if latest_close is not None and previous_close is not None:
+        change = round(latest_close - previous_close, 2)
+        change_pct = _safe_div(latest_close - previous_close, previous_close, 100)
+
+    return {
+        "date": latest_date.strftime("%Y-%m-%d"),
+        "price": latest_close,
+        "previous_close": previous_close,
+        "change": change,
+        "change_pct": change_pct,
+    }

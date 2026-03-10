@@ -111,6 +111,28 @@ body {
 }
 .company-info h2 { font-size:22px; margin-bottom:4px; }
 .company-info .meta { color:var(--text-secondary); font-size:14px; }
+.company-info .header-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+}
+.company-info .quote {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+}
+.company-info .quote-price {
+  font-size: 22px; font-weight: 700; color: var(--text);
+}
+.company-info .quote-change {
+  font-size: 14px; font-weight: 700; padding: 4px 8px; border-radius: 999px;
+}
+.company-info .quote-change.up { color: #b91c1c; background: #fee2e2; }
+.company-info .quote-change.down { color: #1d4ed8; background: #dbeafe; }
+.company-info .quote-change.flat { color: var(--text-secondary); background: var(--sidebar-bg); }
+.company-info .quote-date {
+  font-size: 12px; color: var(--text-secondary);
+}
+[data-theme="dark"] .company-info .quote-change.up { color: #fecaca; background: rgba(127,29,29,0.45); }
+[data-theme="dark"] .company-info .quote-change.down { color: #bfdbfe; background: rgba(30,64,175,0.45); }
+[data-theme="dark"] .company-info .quote-change.flat { background: rgba(51,65,85,0.9); }
 .company-info .coverage {
   margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5;
 }
@@ -260,7 +282,14 @@ body {
   </div>
 
   <div class="company-info" id="companyInfo">
-    <h2 id="companyName"></h2>
+    <div class="header-row">
+      <h2 id="companyName"></h2>
+      <div class="quote" id="quoteSummary" style="display:none;">
+        <span class="quote-price" id="quotePrice"></span>
+        <span class="quote-change" id="quoteChange"></span>
+        <span class="quote-date" id="quoteDate"></span>
+      </div>
+    </div>
     <div class="meta" id="companyMeta"></div>
     <div class="coverage" id="coverageNote"></div>
   </div>
@@ -772,6 +801,29 @@ function renderResult(data) {
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
   document.getElementById('companyMeta').textContent = cachedText;
   document.getElementById('coverageNote').textContent = renderCoverageSummary(data.indicators || {}, data.weekly_indicators || {});
+  const quoteSummary = document.getElementById('quoteSummary');
+  const quotePrice = document.getElementById('quotePrice');
+  const quoteChange = document.getElementById('quoteChange');
+  const quoteDate = document.getElementById('quoteDate');
+  const quote = data.quote_snapshot || {};
+  if (quote.price !== null && quote.price !== undefined) {
+    quoteSummary.style.display = 'flex';
+    quotePrice.textContent = `${Number(quote.price).toLocaleString()}원`;
+    const change = Number(quote.change || 0);
+    const changePct = quote.change_pct;
+    const changePrefix = change > 0 ? '+' : '';
+    quoteChange.textContent = changePct !== null && changePct !== undefined
+      ? `${changePrefix}${change.toLocaleString()}원 (${changePrefix}${Number(changePct).toLocaleString()}%)`
+      : '변동 정보 없음';
+    quoteChange.className = 'quote-change';
+    quoteChange.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
+    quoteDate.textContent = quote.date ? `${quote.date} 종가 기준` : '';
+  } else {
+    quoteSummary.style.display = 'none';
+    quotePrice.textContent = '';
+    quoteChange.textContent = '';
+    quoteDate.textContent = '';
+  }
   trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
 
   // Load reports asynchronously
