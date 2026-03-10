@@ -5,6 +5,12 @@ def _safe_div(numerator, denominator, multiply=1.0):
     return round(numerator / denominator * multiply, 2)
 
 
+def _to_eok_won(value):
+    if value is None:
+        return None
+    return round(value / 100_000_000, 2)
+
+
 def analyze(
     financial_data: list[dict],
     market_data: list[dict],
@@ -39,7 +45,7 @@ def analyze(
         price_series.append({"year": year, "value": close_price})
 
         market_cap = mkt.get("market_cap")
-        market_cap_series.append({"year": year, "value": market_cap})
+        market_cap_series.append({"year": year, "value": _to_eok_won(market_cap)})
 
         per = mkt.get("per")
         per_series.append({"year": year, "value": per})
@@ -97,7 +103,7 @@ def analyze(
         "years": all_years,
         "indicators": {
             "주가 (원)": price_series,
-            "시가총액 (원)": market_cap_series,
+            "시가총액 (억원)": market_cap_series,
             "PER": per_series,
             "PBR": pbr_series,
             "ROE (%)": roe_series,
