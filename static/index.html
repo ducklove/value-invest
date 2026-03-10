@@ -111,6 +111,9 @@ body {
 }
 .company-info h2 { font-size:22px; margin-bottom:4px; }
 .company-info .meta { color:var(--text-secondary); font-size:14px; }
+.company-info .coverage {
+  margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5;
+}
 
 /* Charts grid */
 .charts-grid {
@@ -255,6 +258,7 @@ body {
   <div class="company-info" id="companyInfo">
     <h2 id="companyName"></h2>
     <div class="meta" id="companyMeta"></div>
+    <div class="coverage" id="coverageNote"></div>
   </div>
 
   <div id="emptyState" class="empty-state">
@@ -471,12 +475,42 @@ const STEP_LABELS = {
   dart_fetch: 'DART 재무제표 조회',
   dart_done: 'DART 수집 완료',
   dart_error: 'DART 조회 실패',
-  market_start: 'KRX 시장 데이터 수집',
-  market_done: 'KRX 수집 완료',
-  market_error: 'KRX 조회 실패',
+  market_start: '시장 데이터 및 파생 지표 계산',
+  market_done: '시장 데이터 수집 완료',
+  market_error: '시장 데이터 조회 실패',
   saving: '캐시 저장',
   analyzing: '지표 계산',
 };
+
+function getSeriesCoverage(series) {
+  const years = (series || [])
+    .filter(item => item && item.value !== null && item.value !== undefined)
+    .map(item => item.year)
+    .filter(year => Number.isFinite(year));
+  if (years.length === 0) return '';
+  const startYear = Math.min(...years);
+  const endYear = Math.max(...years);
+  return startYear === endYear ? String(startYear) : `${startYear}-${endYear}`;
+}
+
+function renderCoverageSummary(indicators) {
+  const parts = [];
+  const priceCoverage = getSeriesCoverage(indicators['주가 (원)']);
+  const dividendCoverage = getSeriesCoverage(indicators['배당수익률 (%)']);
+  const valuationCoverage = getSeriesCoverage(indicators['PER']);
+  const financialCoverage = getSeriesCoverage(indicators['ROE (%)']);
+
+  if (priceCoverage) parts.push(`주가 ${priceCoverage}`);
+  if (dividendCoverage) parts.push(`배당 ${dividendCoverage}`);
+  if (valuationCoverage) parts.push(`PER/PBR/EPS ${valuationCoverage}`);
+  if (financialCoverage) parts.push(`ROE/부채비율/영업이익률 ${financialCoverage}`);
+
+  if (parts.length === 0) {
+    return '지표별 제공 연도는 데이터 소스에 따라 다릅니다.';
+  }
+
+  return `지표별 데이터 범위: ${parts.join(' · ')}`;
+}
 
 function resetProgress() {
   document.getElementById('progressBar').style.width = '0%';
@@ -663,6 +697,7 @@ function renderResult(data) {
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
   document.getElementById('companyMeta').textContent = cachedText;
+  document.getElementById('coverageNote').textContent = renderCoverageSummary(data.indicators || {});
   trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
 
   // Load reports asynchronously
