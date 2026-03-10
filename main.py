@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -11,6 +12,7 @@ import cache
 import dart_client
 import stock_price
 import analyzer
+import report_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,6 +20,20 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="한국 주식 가치투자 분석")
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://ducklove.github.io",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.on_event("startup")
@@ -36,6 +52,11 @@ async def startup():
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/app-config.js")
+async def app_config():
+    return FileResponse(STATIC_DIR / "app-config.js", media_type="application/javascript")
 
 
 @app.get("/api/search")
@@ -149,6 +170,17 @@ async def analyze_stock(stock_code: str):
         })
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.get("/api/reports/{stock_code}")
+async def get_reports(stock_code: str):
+    """증권사 리포트 목록 (WiseReport, 최근 3년)."""
+    try:
+        reports = await report_client.fetch_reports(stock_code)
+        return {"stock_code": stock_code, "reports": reports}
+    except Exception as e:
+        logger.error(f"증권사 리포트 조회 실패: {e}")
+        return {"stock_code": stock_code, "reports": [], "error": str(e)}
 
 
 @app.delete("/api/cache/{stock_code}")
