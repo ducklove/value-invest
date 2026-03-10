@@ -3,7 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="한국 상장사의 재무 데이터와 시장 지표를 바탕으로 가치투자 관점에서 분석합니다.">
 <title>한국 주식 가치투자 분석</title>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-KE611DTCFZ"></script>
+<script src="./app-config.js"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+const APP_CONFIG = window.APP_CONFIG || {};
+const GA_MEASUREMENT_ID = 'G-KE611DTCFZ';
+const GA_STREAM_ID = '13881342022';
+const IS_LOCALHOST = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
+window['ga-disable-' + GA_MEASUREMENT_ID] = IS_LOCALHOST;
+gtag('js', new Date());
+gtag('config', GA_MEASUREMENT_ID, { anonymize_ip: true });
+
+function trackEvent(name, params = {}) {
+  if (IS_LOCALHOST || typeof gtag !== 'function') return;
+  gtag('event', name, { stream_id: GA_STREAM_ID, ...params });
+}
+</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
 :root {
@@ -56,6 +76,13 @@ body {
 .main { flex:1; padding: 24px 32px; overflow-y: auto; }
 .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
 .header h1 { font-size: 24px; }
+.deployment-note {
+  display:none; margin-bottom:20px; padding:12px 14px; border-radius:10px;
+  border:1px solid #f59e0b; background:#fffbeb; color:#92400e; font-size:13px; line-height:1.5;
+}
+[data-theme="dark"] .deployment-note {
+  background: rgba(245, 158, 11, 0.12); color:#fcd34d; border-color:#d97706;
+}
 
 /* Theme toggle */
 .theme-toggle {
@@ -135,6 +162,77 @@ body {
 }
 .progress-steps .done { color:var(--primary); }
 .progress-steps .active { color:var(--text); font-weight:600; }
+.cancel-btn {
+  margin-top: 16px; padding: 8px 24px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; font-size: 13px; transition: all 0.15s;
+}
+.cancel-btn:hover { border-color: #dc2626; color: #dc2626; }
+
+/* Reports section */
+.reports-section {
+  margin-top: 32px; display: none;
+}
+.reports-section h2 {
+  font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+}
+.reports-section .report-count {
+  font-size: 13px; color: var(--text-secondary); font-weight: normal;
+}
+.reports-table-wrap {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden;
+}
+.reports-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.reports-table thead th {
+  background: var(--sidebar-bg); padding: 10px 12px; text-align: left;
+  font-weight: 600; color: var(--text-secondary); font-size: 12px;
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.reports-table tbody td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.reports-table tbody tr:last-child td { border-bottom: none; }
+.reports-table tbody tr:hover { background: var(--sidebar-bg); }
+.report-title a {
+  color: var(--primary); text-decoration: none; font-weight: 500;
+}
+.report-title a:hover { text-decoration: underline; }
+.report-summary {
+  color: var(--text-secondary); font-size: 12px; margin-top: 4px;
+  line-height: 1.4; max-width: 400px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.badge-buy { background: #dcfce7; color: #166534; }
+.badge-hold { background: #fef9c3; color: #854d0e; }
+.badge-sell { background: #fee2e2; color: #991b1b; }
+[data-theme="dark"] .badge-buy { background: #14532d; color: #86efac; }
+[data-theme="dark"] .badge-hold { background: #713f12; color: #fde047; }
+[data-theme="dark"] .badge-sell { background: #7f1d1d; color: #fca5a5; }
+.report-target { font-weight: 600; white-space: nowrap; }
+.report-date { white-space: nowrap; color: var(--text-secondary); }
+.report-firm { white-space: nowrap; }
+.reports-more {
+  display: block; width: 100%; padding: 12px; border: none;
+  background: var(--sidebar-bg); color: var(--primary); cursor: pointer;
+  font-size: 13px; font-weight: 500; border-top: 1px solid var(--border);
+}
+.reports-more:hover { background: var(--border); }
+.reports-loading {
+  text-align: center; padding: 24px; color: var(--text-secondary); font-size: 14px;
+}
+@media (max-width:900px) {
+  .reports-table { font-size: 12px; }
+  .reports-table thead th, .reports-table tbody td { padding: 8px 6px; }
+  .report-summary { display: none; }
+}
 
 /* Empty state */
 .empty-state {
@@ -158,6 +256,8 @@ body {
     <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환">🌓</button>
   </div>
 
+  <div class="deployment-note" id="deploymentNote"></div>
+
   <div class="search-container">
     <input class="search-input" id="searchInput" placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930)" autocomplete="off">
     <div class="dropdown" id="dropdown"></div>
@@ -174,6 +274,26 @@ body {
   </div>
 
   <div class="charts-grid" id="chartsGrid" style="display:none;"></div>
+
+  <div class="reports-section" id="reportsSection">
+    <h2>증권사 리포트 <span class="report-count" id="reportCount"></span></h2>
+    <div class="reports-table-wrap">
+      <div class="reports-loading" id="reportsLoading">리포트를 불러오는 중...</div>
+      <table class="reports-table" id="reportsTable" style="display:none;">
+        <thead>
+          <tr>
+            <th>날짜</th>
+            <th>증권사</th>
+            <th>제목 / 요약</th>
+            <th>투자의견</th>
+            <th>목표가</th>
+          </tr>
+        </thead>
+        <tbody id="reportsBody"></tbody>
+      </table>
+      <button class="reports-more" id="reportsMore" style="display:none;" onclick="showMoreReports()">더 보기</button>
+    </div>
+  </div>
 </div>
 
 <div class="loading-overlay" id="loadingOverlay">
@@ -183,6 +303,7 @@ body {
     <div class="loading-detail" id="loadingDetail"></div>
     <div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
     <div class="progress-steps" id="progressSteps"></div>
+    <button class="cancel-btn" id="cancelBtn" onclick="cancelAnalysis()">분석 취소</button>
   </div>
 </div>
 
@@ -200,6 +321,60 @@ const CHART_COLORS = [
 let charts = {};
 let searchTimeout = null;
 let selectedIdx = -1;
+let currentAbortController = null;
+const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
+const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
+
+function buildApiUrl(path) {
+  return `${API_BASE_URL}${path}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeExternalUrl(value) {
+  if (!value) return '';
+  try {
+    const url = new URL(value, window.location.href);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function hasApiConfiguration() {
+  return !IS_GITHUB_PAGES || Boolean(API_BASE_URL);
+}
+
+function requireApiConfiguration() {
+  if (!hasApiConfiguration()) {
+    throw new Error('GitHub Pages에서는 app-config.js의 apiBaseUrl에 FastAPI 서버 주소를 설정해야 합니다.');
+  }
+}
+
+function showDeploymentNote() {
+  const note = document.getElementById('deploymentNote');
+  if (!IS_GITHUB_PAGES) return;
+
+  note.style.display = 'block';
+  if (!API_BASE_URL) {
+    note.textContent = 'GitHub Pages 프런트가 배포되었습니다. app-config.js의 apiBaseUrl에 FastAPI 서버 주소를 넣어야 검색과 분석이 동작합니다.';
+    return;
+  }
+
+  if (window.location.protocol === 'https:' && API_BASE_URL.startsWith('http://')) {
+    note.textContent = `현재 API 주소 ${API_BASE_URL}는 HTTP라서 GitHub Pages(HTTPS)에서 브라우저가 차단할 수 있습니다. HTTPS 주소로 바꾸면 정상 동작합니다.`;
+    return;
+  }
+
+  note.textContent = `GitHub Pages 프런트가 ${API_BASE_URL} API를 사용하도록 설정되어 있습니다.`;
+}
 
 // Theme
 function toggleTheme() {
@@ -208,6 +383,7 @@ function toggleTheme() {
   html.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
   Object.values(charts).forEach(c => c.update());
+  trackEvent('theme_toggle', { theme: next });
 }
 (function initTheme() {
   const saved = localStorage.getItem('theme');
@@ -267,35 +443,54 @@ document.addEventListener('click', (e) => {
 });
 
 async function doSearchAndAnalyze(q) {
-  const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  const data = await resp.json();
-  if (data.length > 0) {
-    searchInput.value = data[0].corp_name;
-    analyzeStock(data[0].stock_code);
+  try {
+    requireApiConfiguration();
+    const resp = await fetch(buildApiUrl(`/api/search?q=${encodeURIComponent(q)}`));
+    const data = await resp.json();
+    if (data.length > 0) {
+      searchInput.value = data[0].corp_name;
+      trackEvent('stock_select', { stock_code: data[0].stock_code, source: 'enter' });
+      analyzeStock(data[0].stock_code);
+    }
+  } catch (error) {
+    alert(error.message || '검색 중 오류가 발생했습니다.');
   }
 }
 
 async function doSearch(q) {
-  const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  const data = await resp.json();
-  dropdown.innerHTML = '';
-  if (data.length === 0) {
-    dropdown.innerHTML = '<div class="dropdown-item" style="color:var(--text-secondary)">검색 결과 없음</div>';
-  } else {
-    data.forEach(item => {
-      const div = document.createElement('div');
-      div.className = 'dropdown-item';
-      div.dataset.stock = item.stock_code;
-      div.innerHTML = `<span>${item.corp_name}</span><span style="color:var(--text-secondary)">${item.stock_code}</span>`;
-      div.addEventListener('click', () => {
-        dropdown.classList.remove('show');
-        searchInput.value = item.corp_name;
-        analyzeStock(item.stock_code);
+  try {
+    requireApiConfiguration();
+    const resp = await fetch(buildApiUrl(`/api/search?q=${encodeURIComponent(q)}`));
+    const data = await resp.json();
+    dropdown.innerHTML = '';
+    if (data.length === 0) {
+      dropdown.innerHTML = '<div class="dropdown-item" style="color:var(--text-secondary)">검색 결과 없음</div>';
+    } else {
+      data.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'dropdown-item';
+        div.dataset.stock = item.stock_code;
+        const name = document.createElement('span');
+        name.textContent = item.corp_name;
+        const code = document.createElement('span');
+        code.style.color = 'var(--text-secondary)';
+        code.textContent = item.stock_code;
+        div.append(name, code);
+        div.addEventListener('click', () => {
+          dropdown.classList.remove('show');
+          searchInput.value = item.corp_name;
+          trackEvent('stock_select', { stock_code: item.stock_code, source: 'dropdown' });
+          analyzeStock(item.stock_code);
+        });
+        dropdown.appendChild(div);
       });
-      dropdown.appendChild(div);
-    });
+    }
+    trackEvent('search_results', { result_count: data.length });
+    dropdown.classList.add('show');
+  } catch (error) {
+    dropdown.innerHTML = `<div class="dropdown-item" style="color:var(--text-secondary)">${escapeHtml(error.message || '검색 중 오류가 발생했습니다.')}</div>`;
+    dropdown.classList.add('show');
   }
-  dropdown.classList.add('show');
 }
 
 // Analyze
@@ -333,18 +528,40 @@ function markLastStepDone() {
   if (active) { active.classList.remove('active'); active.classList.add('done'); active.textContent = '\u2713 ' + active.textContent; }
 }
 
+function cancelAnalysis() {
+  if (currentAbortController) {
+    currentAbortController.abort();
+    currentAbortController = null;
+  }
+}
+
 async function analyzeStock(stockCode) {
+  try {
+    requireApiConfiguration();
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+
+  // 이전 분석 진행중이면 취소
+  if (currentAbortController) currentAbortController.abort();
+  currentAbortController = new AbortController();
+  const signal = currentAbortController.signal;
+
   const overlay = document.getElementById('loadingOverlay');
   const loadingText = document.getElementById('loadingText');
   const loadingDetail = document.getElementById('loadingDetail');
   const progressBar = document.getElementById('progressBar');
+  const cancelBtn = document.getElementById('cancelBtn');
 
   overlay.classList.add('show');
+  cancelBtn.style.display = 'inline-block';
   resetProgress();
   loadingText.textContent = '데이터를 분석하고 있습니다...';
 
   try {
-    const resp = await fetch(`/api/analyze/${stockCode}`);
+    trackEvent('analysis_start', { stock_code: stockCode });
+    const resp = await fetch(buildApiUrl(`/api/analyze/${stockCode}`), { signal });
     const contentType = resp.headers.get('content-type') || '';
 
     // 캐시 히트: 일반 JSON 응답
@@ -366,6 +583,10 @@ async function analyzeStock(stockCode) {
     let buffer = '';
     let resultData = null;
     let lastDartStep = '';
+    let eventType = '';
+
+    // signal로 취소 시 reader도 정리
+    signal.addEventListener('abort', () => { reader.cancel(); });
 
     while (true) {
       const { done, value } = await reader.read();
@@ -375,7 +596,6 @@ async function analyzeStock(stockCode) {
       const lines = buffer.split('\n');
       buffer = lines.pop();
 
-      let eventType = '';
       for (const line of lines) {
         if (line.startsWith('event: ')) {
           eventType = line.slice(7).trim();
@@ -432,14 +652,35 @@ async function analyzeStock(stockCode) {
       }
     }
 
+    // 스트림 종료 후 버퍼에 남은 데이터 처리
+    if (buffer.trim()) {
+      const remainingLines = buffer.split('\n');
+      for (const line of remainingLines) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          const payload = JSON.parse(line.slice(6));
+          if (eventType === 'result') {
+            resultData = payload;
+          }
+          eventType = '';
+        }
+      }
+    }
+
     if (resultData) {
       await new Promise(r => setTimeout(r, 300));
       renderResult(resultData);
       loadRecentList();
     }
   } catch (e) {
-    alert('서버 오류: ' + e.message);
+    if (e.name === 'AbortError') {
+      // 사용자가 취소함 - 무시
+    } else {
+      alert('서버 오류: ' + e.message);
+    }
   } finally {
+    currentAbortController = null;
     overlay.classList.remove('show');
   }
 }
@@ -451,6 +692,10 @@ function renderResult(data) {
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
   document.getElementById('companyMeta').textContent = cachedText;
+  trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
+
+  // Load reports asynchronously
+  loadReports(data.stock_code);
 
   // Hide empty state, show charts
   document.getElementById('emptyState').style.display = 'none';
@@ -519,34 +764,142 @@ function renderResult(data) {
 
 // Recent list
 async function loadRecentList() {
+  if (!hasApiConfiguration()) {
+    document.getElementById('recentList').innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">GitHub Pages에서는 API 서버 연결 후 최근 분석 목록을 불러옵니다.</div>';
+    return;
+  }
+
   try {
-    const resp = await fetch('/api/cache/list');
+    const resp = await fetch(buildApiUrl('/api/cache/list'));
     const data = await resp.json();
     const container = document.getElementById('recentList');
     if (data.length === 0) {
       container.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">아직 분석한 종목이 없습니다.</div>';
       return;
     }
-    container.innerHTML = data.map(item => `
-      <div class="sidebar-item">
-        <div class="info" onclick="analyzeStock('${item.stock_code}')">
-          <div class="name">${item.corp_name}</div>
-          <div class="code">${item.stock_code}</div>
-        </div>
-        <button class="delete-btn" onclick="deleteCache('${item.stock_code}')" title="삭제">&times;</button>
-      </div>
-    `).join('');
+    container.innerHTML = '';
+    data.forEach(item => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'sidebar-item';
+
+      const info = document.createElement('div');
+      info.className = 'info';
+      info.addEventListener('click', () => analyzeStock(item.stock_code));
+
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = item.corp_name;
+
+      const code = document.createElement('div');
+      code.className = 'code';
+      code.textContent = item.stock_code;
+      info.append(name, code);
+
+      const button = document.createElement('button');
+      button.className = 'delete-btn';
+      button.title = '삭제';
+      button.innerHTML = '&times;';
+      button.addEventListener('click', () => deleteCache(item.stock_code));
+
+      wrapper.append(info, button);
+      container.appendChild(wrapper);
+    });
   } catch (e) {}
 }
 
 async function deleteCache(stockCode) {
   try {
-    await fetch(`/api/cache/${stockCode}`, { method: 'DELETE' });
+    await fetch(buildApiUrl(`/api/cache/${stockCode}`), { method: 'DELETE' });
     loadRecentList();
   } catch (e) {}
 }
 
+// Reports
+let allReports = [];
+let reportDisplayCount = 20;
+
+function getRecommBadge(recomm) {
+  if (!recomm) return '';
+  const r = recomm.toUpperCase();
+  if (r.includes('BUY') || r.includes('매수') || r.includes('강력')) return `<span class="badge badge-buy">${recomm}</span>`;
+  if (r.includes('SELL') || r.includes('매도') || r.includes('비중축소')) return `<span class="badge badge-sell">${recomm}</span>`;
+  return `<span class="badge badge-hold">${recomm}</span>`;
+}
+
+function renderReportsTable(reports, limit) {
+  const tbody = document.getElementById('reportsBody');
+  const slice = reports.slice(0, limit);
+  tbody.innerHTML = slice.map(r => {
+    const safeTitle = escapeHtml(r.title);
+    const safeSummary = r.summary ? `<div class="report-summary">${escapeHtml(r.summary)}</div>` : '';
+    const safeAnalyst = escapeHtml(r.analyst);
+    const safeFirm = escapeHtml(r.firm_short || r.firm);
+    const safeDate = escapeHtml(r.date);
+    const safeHref = safeExternalUrl(r.pdf_url);
+    const titleLink = safeHref
+      ? `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>`
+      : safeTitle;
+    const targetPrc = r.target_price ? Number(r.target_price.replace(/,/g, '')).toLocaleString() + '원' : '-';
+    return `<tr>
+      <td class="report-date">${safeDate}</td>
+      <td class="report-firm">${safeFirm}</td>
+      <td class="report-title">${titleLink}${safeSummary}<div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${safeAnalyst}</div></td>
+      <td>${getRecommBadge(escapeHtml(r.recommendation))}</td>
+      <td class="report-target">${escapeHtml(targetPrc)}</td>
+    </tr>`;
+  }).join('');
+
+  const moreBtn = document.getElementById('reportsMore');
+  moreBtn.style.display = reports.length > limit ? 'block' : 'none';
+  moreBtn.textContent = `더 보기 (${limit}/${reports.length}건)`;
+}
+
+function showMoreReports() {
+  reportDisplayCount += 20;
+  renderReportsTable(allReports, reportDisplayCount);
+}
+
+async function loadReports(stockCode) {
+  const section = document.getElementById('reportsSection');
+  const loading = document.getElementById('reportsLoading');
+  const table = document.getElementById('reportsTable');
+  const countEl = document.getElementById('reportCount');
+
+  section.style.display = 'block';
+  loading.style.display = 'block';
+  table.style.display = 'none';
+  countEl.textContent = '';
+  allReports = [];
+  reportDisplayCount = 20;
+
+  if (!hasApiConfiguration()) {
+    loading.style.display = 'block';
+    loading.textContent = 'GitHub Pages에서는 API 서버 연결 후 리포트를 불러올 수 있습니다.';
+    return;
+  }
+
+  try {
+    const resp = await fetch(buildApiUrl(`/api/reports/${stockCode}`));
+    const data = await resp.json();
+    allReports = data.reports || [];
+    loading.style.display = 'none';
+
+    if (allReports.length === 0) {
+      loading.style.display = 'block';
+      loading.textContent = '증권사 리포트가 없습니다.';
+      return;
+    }
+
+    countEl.textContent = `(최근 3년, ${allReports.length}건)`;
+    table.style.display = 'table';
+    renderReportsTable(allReports, reportDisplayCount);
+  } catch (e) {
+    loading.textContent = '리포트를 불러오지 못했습니다.';
+  }
+}
+
 // Init
+showDeploymentNote();
 loadRecentList();
 </script>
 </body>
