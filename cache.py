@@ -21,6 +21,7 @@ async def init_db():
                 stock_code TEXT PRIMARY KEY,
                 corp_code TEXT NOT NULL,
                 corp_name TEXT NOT NULL,
+                modify_date TEXT,
                 updated_at TEXT NOT NULL
             );
 
@@ -58,6 +59,7 @@ async def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
         """)
+        await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
         await _ensure_column(db, "financial_data", "report_date", "TEXT")
         await db.commit()
     finally:
@@ -82,13 +84,27 @@ async def is_corp_codes_loaded() -> bool:
         await db.close()
 
 
+async def corp_codes_need_refresh() -> bool:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT COUNT(*) AS total, SUM(CASE WHEN modify_date IS NOT NULL AND modify_date != '' THEN 1 ELSE 0 END) AS filled FROM corp_codes"
+        )
+        row = await cursor.fetchone()
+        total = row["total"] or 0
+        filled = row["filled"] or 0
+        return total > 0 and filled == 0
+    finally:
+        await db.close()
+
+
 async def save_corp_codes(codes: list[dict]):
     db = await get_db()
     try:
         now = datetime.now().isoformat()
         await db.executemany(
-            "INSERT OR REPLACE INTO corp_codes (stock_code, corp_code, corp_name, updated_at) VALUES (?, ?, ?, ?)",
-            [(c["stock_code"], c["corp_code"], c["corp_name"], now) for c in codes],
+            "INSERT OR REPLACE INTO corp_codes (stock_code, corp_code, corp_name, modify_date, updated_at) VALUES (?, ?, ?, ?, ?)",
+            [(c["stock_code"], c["corp_code"], c["corp_name"], c.get("modify_date"), now) for c in codes],
         )
         await db.commit()
     finally:
@@ -100,11 +116,29 @@ async def search_corp(query: str) -> list[dict]:
     try:
         cursor = await db.execute(
             "SELECT stock_code, corp_code, corp_name FROM corp_codes "
-            "WHERE corp_name LIKE ? OR stock_code LIKE ? LIMIT 20",
-            (f"%{query}%", f"%{query}%"),
+            "WHERE corp_name LIKE ? OR stock_code LIKE ? "
+            "ORDER BY "
+            "CASE "
+            "WHEN stock_code = ? THEN 0 "
+            "WHEN corp_name = ? THEN 1 "
+            "WHEN corp_name LIKE ? THEN 2 "
+            "ELSE 3 END, "
+            "COALESCE(modify_date, '') DESC, "
+            "LENGTH(corp_name), stock_code "
+            "LIMIT 20",
+            (f"%{query}%", f"%{query}%", query, query, f"{query}%"),
         )
         rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
+        results = []
+        exact_name_seen = set()
+        for row in rows:
+            item = dict(row)
+            if item["corp_name"] == query:
+                if item["corp_name"] in exact_name_seen:
+                    continue
+                exact_name_seen.add(item["corp_name"])
+            results.append(item)
+        return results
     finally:
         await db.close()
 

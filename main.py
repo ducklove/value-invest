@@ -42,8 +42,9 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await cache.init_db()
-    if not await cache.is_corp_codes_loaded():
-        logger.info("corp_codes 테이블이 비어 있습니다. DART에서 다운로드합니다...")
+    needs_corp_refresh = not await cache.is_corp_codes_loaded() or await cache.corp_codes_need_refresh()
+    if needs_corp_refresh:
+        logger.info("corp_codes 테이블을 DART 기준으로 갱신합니다...")
         try:
             codes = await dart_client.fetch_corp_codes()
             await cache.save_corp_codes(codes)

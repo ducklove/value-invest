@@ -56,6 +56,7 @@ async def fetch_corp_codes() -> list[dict]:
                     "corp_code": item.findtext("corp_code", "").strip(),
                     "corp_name": item.findtext("corp_name", "").strip(),
                     "stock_code": stock_code,
+                    "modify_date": item.findtext("modify_date", "").strip(),
                 }
             )
     return codes
