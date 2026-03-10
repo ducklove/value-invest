@@ -111,7 +111,7 @@ async def analyze_stock(stock_code: str):
             # Use a different approach: yield progress inline
             from datetime import datetime as dt
             end_year = dt.now().year - 1
-            start_year = 2000
+            start_year = dart_client.DART_ANNUAL_DATA_START_YEAR
             total_years = end_year - start_year + 1
 
             for i, year in enumerate(range(start_year, end_year + 1)):

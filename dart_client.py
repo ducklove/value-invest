@@ -7,6 +7,7 @@ from pathlib import Path
 
 API_KEY = ""
 BASE_URL = "https://opendart.fss.or.kr/api"
+DART_ANNUAL_DATA_START_YEAR = 2015
 
 # 재무제표 항목명 매핑
 ACCOUNT_NAMES = {
@@ -128,7 +129,7 @@ async def fetch_financial_statement(
 
 
 async def fetch_financial_statements(
-    corp_code: str, start_year: int = 2000, end_year: int | None = None,
+    corp_code: str, start_year: int = DART_ANNUAL_DATA_START_YEAR, end_year: int | None = None,
     on_progress=None,
 ) -> list[dict]:
     """여러 연도의 재무제표를 순차 호출 (rate limit 준수)."""
