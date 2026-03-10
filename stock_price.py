@@ -150,6 +150,21 @@ def _adjust_shares_for_splits(shares_by_year: dict[int, float], split_events: li
     return adjusted
 
 
+def _forward_fill_year_values(values_by_year: dict[int, float], target_years: list[int]) -> dict[int, float]:
+    if not values_by_year:
+        return {}
+    filled = dict(values_by_year)
+    last_value = None
+    for year in sorted(target_years):
+        current = filled.get(year)
+        if current is not None:
+            last_value = current
+            continue
+        if last_value is not None:
+            filled[year] = last_value
+    return filled
+
+
 def market_data_needs_refresh(data: list[dict]) -> bool:
     """기존 캐시에 파생 지표가 비어 있으면 재계산 대상."""
     if not data:
@@ -191,6 +206,7 @@ async def fetch_market_data(
     shares_by_year = _adjust_shares_for_splits(shares_by_year, split_events)
     dividends_by_year = _group_sum_by_year(dividends_series)
     fin_by_year = {item["year"]: item for item in (financial_data or [])}
+    shares_by_year = _forward_fill_year_values(shares_by_year, sorted(year_data.keys()))
 
     for year, shares in shares_by_year.items():
         year_data.setdefault(year, {"year": year})["shares_outstanding"] = shares
@@ -203,6 +219,9 @@ async def fetch_market_data(
         shares = row.get("shares_outstanding")
         fin = fin_by_year.get(year, {})
 
+        if close_price and shares:
+            row["market_cap"] = round(close_price * shares, 2)
+
         if fin and shares:
             eps = _safe_div(fin.get("net_income"), shares)
             bps = _safe_div(fin.get("total_equity"), shares)
@@ -210,7 +229,6 @@ async def fetch_market_data(
             row["bps"] = bps
             row["per"] = _safe_div(close_price, eps) if close_price else None
             row["pbr"] = _safe_div(close_price, bps) if close_price else None
-            row["market_cap"] = round(close_price * shares, 2) if close_price else None
 
         dps = row.get("dividend_per_share")
         row["dividend_yield"] = _safe_div(dps, close_price, 100) if dps and close_price else None
