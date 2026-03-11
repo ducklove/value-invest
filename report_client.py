@@ -5,6 +5,7 @@ from datetime import datetime
 
 WISEREPORT_API = "https://comp.wisereport.co.kr/company/ajax/c1080001_data.aspx"
 WISEREPORT_PDF = "http://www.wisereport.co.kr/comm/LoadReport.aspx"
+WISEREPORT_COMPANY_REPORTS = "https://comp.wisereport.co.kr/company/c1080001.aspx"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
@@ -37,6 +38,7 @@ async def fetch_reports(stock_code: str, max_pages: int = 5, per_page: int = 20)
     """WiseReport에서 증권사 리포트 목록을 가져온다. 최근 3년치."""
     cutoff_year = datetime.now().year - 3
     reports = []
+    source_url = f"{WISEREPORT_COMPANY_REPORTS}?cmp_cd={stock_code}"
 
     async with httpx.AsyncClient(timeout=15, headers=HEADERS) as client:
         for page in range(1, max_pages + 1):
@@ -79,6 +81,7 @@ async def fetch_reports(stock_code: str, max_pages: int = 5, per_page: int = 20)
                     "recommendation": recomm,
                     "summary": _clean_html(item.get("COMMENT2", "")),
                     "pdf_url": pdf_url,
+                    "source_url": source_url,
                     "pages": item.get("PAGE_CNT", 0),
                 })
 

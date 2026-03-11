@@ -200,6 +200,9 @@ body {
 .reports-section .report-count {
   font-size: 13px; color: var(--text-secondary); font-weight: normal;
 }
+.report-note {
+  margin: -8px 0 12px; color: var(--text-secondary); font-size: 12px; line-height: 1.5;
+}
 .reports-table-wrap {
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
   overflow: hidden;
@@ -222,6 +225,13 @@ body {
   color: var(--primary); text-decoration: none; font-weight: 500;
 }
 .report-title a:hover { text-decoration: underline; }
+.report-link-note {
+  margin-top: 4px; font-size: 11px; color: var(--text-secondary);
+}
+.report-link-note a {
+  color: var(--primary); text-decoration: none;
+}
+.report-link-note a:hover { text-decoration: underline; }
 .report-summary {
   color: var(--text-secondary); font-size: 12px; margin-top: 4px;
   line-height: 1.4; max-width: 400px;
@@ -307,6 +317,7 @@ body {
 
   <div class="reports-section" id="reportsSection">
     <h2>증권사 리포트 <span class="report-count" id="reportCount"></span></h2>
+    <div class="report-note">와이즈리포트는 개별 PDF 딥링크에 세션 검사를 걸어 두어 직접 열기가 자주 막힙니다. 아래 링크는 회사의 공개 리포트 페이지로 연결됩니다.</div>
     <div class="reports-table-wrap">
       <div class="reports-loading" id="reportsLoading">리포트를 불러오는 중...</div>
       <table class="reports-table" id="reportsTable" style="display:none;">
@@ -930,15 +941,18 @@ function renderReportsTable(reports, limit) {
     const safeAnalyst = escapeHtml(r.analyst);
     const safeFirm = escapeHtml(r.firm_short || r.firm);
     const safeDate = escapeHtml(r.date);
-    const safeHref = safeExternalUrl(r.pdf_url);
+    const safeHref = safeExternalUrl(r.source_url || r.pdf_url);
     const titleLink = safeHref
       ? `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>`
       : safeTitle;
+    const linkNote = safeHref
+      ? `<div class="report-link-note"><a href="${safeHref}" target="_blank" rel="noopener noreferrer">WiseReport 최근리포트 페이지에서 열기</a></div>`
+      : '';
     const targetPrc = r.target_price ? Number(r.target_price.replace(/,/g, '')).toLocaleString() + '원' : '-';
     return `<tr>
       <td class="report-date">${safeDate}</td>
       <td class="report-firm">${safeFirm}</td>
-      <td class="report-title">${titleLink}${safeSummary}<div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${safeAnalyst}</div></td>
+      <td class="report-title">${titleLink}${safeSummary}${linkNote}<div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${safeAnalyst}</div></td>
       <td>${getRecommBadge(escapeHtml(r.recommendation))}</td>
       <td class="report-target">${escapeHtml(targetPrc)}</td>
     </tr>`;
