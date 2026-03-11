@@ -317,7 +317,7 @@ body {
 
   <div class="reports-section" id="reportsSection">
     <h2>증권사 리포트 <span class="report-count" id="reportCount"></span></h2>
-    <div class="report-note">와이즈리포트는 개별 PDF 딥링크에 세션 검사를 걸어 두어 직접 열기가 자주 막힙니다. 아래 링크는 회사의 공개 리포트 페이지로 연결됩니다.</div>
+    <div class="report-note">제목을 누르면 네이버 금융 리서치의 공개 PDF 원문이 열립니다. 아래 작은 링크는 본문 페이지입니다.</div>
     <div class="reports-table-wrap">
       <div class="reports-loading" id="reportsLoading">리포트를 불러오는 중...</div>
       <table class="reports-table" id="reportsTable" style="display:none;">
@@ -941,12 +941,13 @@ function renderReportsTable(reports, limit) {
     const safeAnalyst = escapeHtml(r.analyst);
     const safeFirm = escapeHtml(r.firm_short || r.firm);
     const safeDate = escapeHtml(r.date);
-    const safeHref = safeExternalUrl(r.source_url || r.pdf_url);
+    const safeHref = safeExternalUrl(r.pdf_url || r.source_url);
     const titleLink = safeHref
       ? `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>`
       : safeTitle;
-    const linkNote = safeHref
-      ? `<div class="report-link-note"><a href="${safeHref}" target="_blank" rel="noopener noreferrer">WiseReport 최근리포트 페이지에서 열기</a></div>`
+    const safeReadHref = safeExternalUrl(r.source_url);
+    const linkNote = safeReadHref
+      ? `<div class="report-link-note"><a href="${safeReadHref}" target="_blank" rel="noopener noreferrer">네이버 리서치 본문 페이지</a></div>`
       : '';
     const targetPrc = r.target_price ? Number(r.target_price.replace(/,/g, '')).toLocaleString() + '원' : '-';
     return `<tr>

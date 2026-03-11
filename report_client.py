@@ -1,20 +1,26 @@
-import httpx
+import asyncio
 import re
 from datetime import datetime
+from urllib.parse import urljoin
+
+import httpx
+from bs4 import BeautifulSoup
 
 
-WISEREPORT_API = "https://comp.wisereport.co.kr/company/ajax/c1080001_data.aspx"
-WISEREPORT_PDF = "http://www.wisereport.co.kr/comm/LoadReport.aspx"
-WISEREPORT_COMPANY_REPORTS = "https://comp.wisereport.co.kr/company/c1080001.aspx"
+NAVER_RESEARCH_LIST = "https://finance.naver.com/research/company_list.naver"
+NAVER_RESEARCH_READ = "https://finance.naver.com/research/company_read.naver"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-    "Referer": "https://comp.wisereport.co.kr/",
+    "Referer": "https://finance.naver.com/",
 }
 
 
+def _decode_html(resp: httpx.Response) -> str:
+    return resp.content.decode("euc-kr", errors="ignore")
+
+
 def _clean_html(text: str) -> str:
-    """HTML 태그 및 불필요한 공백 제거."""
     if not text:
         return ""
     text = re.sub(r"<[^>]+>", " ", text)
@@ -23,66 +29,111 @@ def _clean_html(text: str) -> str:
 
 
 def _parse_date(date_str: str) -> str:
-    """'26/02/12' -> '2026-02-12' 형식 변환."""
     if not date_str:
         return ""
-    parts = date_str.split("/")
+    parts = date_str.strip().split(".")
     if len(parts) == 3:
         yy, mm, dd = parts
         year = int(yy) + 2000 if int(yy) < 100 else int(yy)
-        return f"{year}-{mm}-{dd}"
+        return f"{year}-{mm.zfill(2)}-{dd.zfill(2)}"
     return date_str
 
 
+def _normalize_target_price(value: str) -> str:
+    if not value:
+        return ""
+    if "없음" in value:
+        return ""
+    match = re.search(r"[\d,]+", value)
+    return match.group(0) if match else ""
+
+
+async def _fetch_report_detail(client: httpx.AsyncClient, source_url: str) -> dict:
+    try:
+        resp = await client.get(source_url)
+        if resp.status_code != 200:
+            return {}
+    except Exception:
+        return {}
+
+    soup = BeautifulSoup(_decode_html(resp), "html.parser")
+
+    pdf_link = soup.select_one("th.view_report a[href]")
+    body_root = soup.select_one("td.view_cnt")
+    body_div = body_root.find("div") if body_root else None
+    target_el = soup.select_one("div.view_info_1 em.money")
+    recomm_el = soup.select_one("div.view_info_1 em.coment")
+
+    return {
+        "target_price": _normalize_target_price(target_el.get_text(" ", strip=True) if target_el else ""),
+        "recommendation": "" if recomm_el is None or "없음" in recomm_el.get_text(" ", strip=True) else recomm_el.get_text(" ", strip=True),
+        "summary": _clean_html(body_div.get_text(" ", strip=True) if body_div else ""),
+        "pdf_url": urljoin(NAVER_RESEARCH_READ, pdf_link["href"]) if pdf_link else "",
+    }
+
+
 async def fetch_reports(stock_code: str, max_pages: int = 5, per_page: int = 20) -> list[dict]:
-    """WiseReport에서 증권사 리포트 목록을 가져온다. 최근 3년치."""
     cutoff_year = datetime.now().year - 3
     reports = []
-    source_url = f"{WISEREPORT_COMPANY_REPORTS}?cmp_cd={stock_code}"
+    detail_limit = asyncio.Semaphore(6)
 
-    async with httpx.AsyncClient(timeout=15, headers=HEADERS) as client:
+    async with httpx.AsyncClient(timeout=15, headers=HEADERS, follow_redirects=True) as client:
         for page in range(1, max_pages + 1):
-            resp = await client.get(WISEREPORT_API, params={
-                "cmp_cd": stock_code,
-                "perPage": str(per_page),
-                "curPage": str(page),
-            })
-
+            resp = await client.get(
+                NAVER_RESEARCH_LIST,
+                params={
+                    "searchType": "itemCode",
+                    "itemCode": stock_code,
+                    "page": str(page),
+                },
+            )
             if resp.status_code != 200:
                 break
 
-            data = resp.json()
-            items = data.get("lists", [])
-            if not items:
-                break
+            soup = BeautifulSoup(_decode_html(resp), "html.parser")
+            rows = soup.select("table.type_1 tr")
+            page_reports = []
 
-            for item in items:
-                date_str = _parse_date(item.get("ANL_DT", ""))
+            for row in rows:
+                cells = row.find_all("td")
+                if len(cells) < 6:
+                    continue
+
+                title_link = cells[1].find("a", href=True)
+                if title_link is None:
+                    continue
+
+                date_str = _parse_date(cells[4].get_text(" ", strip=True))
                 if date_str and int(date_str[:4]) < cutoff_year:
                     return reports
 
-                pdf_url = ""
-                rpt_id = item.get("RPT_ID")
-                brk_cd = item.get("BRK_CD")
-                file_nm = item.get("FILE_NM")
-                if rpt_id and brk_cd and file_nm:
-                    pdf_url = f"{WISEREPORT_PDF}?rpt_id={rpt_id}&brk_cd={brk_cd}&fpath={file_nm}&target=comp"
-
-                target_prc = item.get("TARGET_PRC", "")
-                recomm = item.get("RECOMM", "")
-
-                reports.append({
+                pdf_link = cells[3].find("a", href=True)
+                page_reports.append({
                     "date": date_str,
-                    "title": item.get("RPT_TITLE", ""),
-                    "analyst": item.get("ANL_NM_KOR", ""),
-                    "firm": item.get("BRK_NM_KOR", ""),
-                    "firm_short": item.get("BRK_NM_SHORT_KOR", ""),
-                    "target_price": target_prc,
-                    "recommendation": recomm,
-                    "summary": _clean_html(item.get("COMMENT2", "")),
-                    "pdf_url": pdf_url,
-                    "source_url": source_url,
-                    "pages": item.get("PAGE_CNT", 0),
+                    "title": title_link.get_text(" ", strip=True),
+                    "analyst": "",
+                    "firm": cells[2].get_text(" ", strip=True),
+                    "firm_short": cells[2].get_text(" ", strip=True),
+                    "target_price": "",
+                    "recommendation": "",
+                    "summary": "",
+                    "pdf_url": urljoin(NAVER_RESEARCH_LIST, pdf_link["href"]) if pdf_link else "",
+                    "source_url": urljoin(NAVER_RESEARCH_LIST, title_link["href"]),
+                    "pages": 0,
                 })
+
+            if not page_reports:
+                break
+
+            async def enrich(report: dict) -> dict:
+                if not report["source_url"]:
+                    return report
+                async with detail_limit:
+                    detail = await _fetch_report_detail(client, report["source_url"])
+                if detail:
+                    report.update({key: value for key, value in detail.items() if value})
+                return report
+
+            reports.extend(await asyncio.gather(*(enrich(report) for report in page_reports)))
 
     return reports

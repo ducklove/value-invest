@@ -2,5 +2,6 @@ fastapi
 uvicorn[standard]
 aiosqlite
 httpx
+beautifulsoup4
 pykrx
 yfinance
