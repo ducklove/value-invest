@@ -48,6 +48,32 @@ def _normalize_target_price(value: str) -> str:
     return match.group(0) if match else ""
 
 
+def _parse_row_report(row) -> dict | None:
+    cells = row.find_all("td")
+    if len(cells) < 6:
+        return None
+
+    title_link = cells[1].find("a", href=True)
+    if title_link is None:
+        return None
+
+    pdf_link = cells[3].find("a", href=True)
+    firm = cells[2].get_text(" ", strip=True)
+    return {
+        "date": _parse_date(cells[4].get_text(" ", strip=True)),
+        "title": title_link.get_text(" ", strip=True),
+        "analyst": "",
+        "firm": firm,
+        "firm_short": firm,
+        "target_price": "",
+        "recommendation": "",
+        "summary": "",
+        "pdf_url": urljoin(NAVER_RESEARCH_LIST, pdf_link["href"]) if pdf_link else "",
+        "source_url": urljoin(NAVER_RESEARCH_LIST, title_link["href"]),
+        "pages": 0,
+    }
+
+
 async def _fetch_report_detail(client: httpx.AsyncClient, source_url: str) -> dict:
     try:
         resp = await client.get(source_url)
@@ -70,6 +96,32 @@ async def _fetch_report_detail(client: httpx.AsyncClient, source_url: str) -> di
         "summary": _clean_html(body_div.get_text(" ", strip=True) if body_div else ""),
         "pdf_url": urljoin(NAVER_RESEARCH_READ, pdf_link["href"]) if pdf_link else "",
     }
+
+
+async def fetch_latest_report(stock_code: str) -> dict | None:
+    async with httpx.AsyncClient(timeout=15, headers=HEADERS, follow_redirects=True) as client:
+        resp = await client.get(
+            NAVER_RESEARCH_LIST,
+            params={
+                "searchType": "itemCode",
+                "itemCode": stock_code,
+                "page": "1",
+            },
+        )
+        if resp.status_code != 200:
+            return None
+
+        soup = BeautifulSoup(_decode_html(resp), "html.parser")
+        for row in soup.select("table.type_1 tr"):
+            report = _parse_row_report(row)
+            if report is None:
+                continue
+            if report["source_url"]:
+                detail = await _fetch_report_detail(client, report["source_url"])
+                if detail:
+                    report.update({key: value for key, value in detail.items() if value})
+            return report
+    return None
 
 
 async def fetch_reports(stock_code: str, max_pages: int = 5, per_page: int = 20) -> list[dict]:
@@ -95,32 +147,15 @@ async def fetch_reports(stock_code: str, max_pages: int = 5, per_page: int = 20)
             page_reports = []
 
             for row in rows:
-                cells = row.find_all("td")
-                if len(cells) < 6:
+                report = _parse_row_report(row)
+                if report is None:
                     continue
 
-                title_link = cells[1].find("a", href=True)
-                if title_link is None:
-                    continue
-
-                date_str = _parse_date(cells[4].get_text(" ", strip=True))
+                date_str = report["date"]
                 if date_str and int(date_str[:4]) < cutoff_year:
                     return reports
 
-                pdf_link = cells[3].find("a", href=True)
-                page_reports.append({
-                    "date": date_str,
-                    "title": title_link.get_text(" ", strip=True),
-                    "analyst": "",
-                    "firm": cells[2].get_text(" ", strip=True),
-                    "firm_short": cells[2].get_text(" ", strip=True),
-                    "target_price": "",
-                    "recommendation": "",
-                    "summary": "",
-                    "pdf_url": urljoin(NAVER_RESEARCH_LIST, pdf_link["href"]) if pdf_link else "",
-                    "source_url": urljoin(NAVER_RESEARCH_LIST, title_link["href"]),
-                    "pages": 0,
-                })
+                page_reports.append(report)
 
             if not page_reports:
                 break

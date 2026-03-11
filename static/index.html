@@ -928,6 +928,7 @@ async function deleteCache(stockCode) {
 // Reports
 let allReports = [];
 let reportDisplayCount = 20;
+let reportsRequestId = 0;
 
 function getRecommBadge(recomm) {
   if (!recomm) return '';
@@ -979,9 +980,11 @@ async function loadReports(stockCode) {
   const loading = document.getElementById('reportsLoading');
   const table = document.getElementById('reportsTable');
   const countEl = document.getElementById('reportCount');
+  const requestId = ++reportsRequestId;
 
   section.style.display = 'block';
   loading.style.display = 'block';
+  loading.textContent = '최신 리포트를 불러오는 중...';
   table.style.display = 'none';
   countEl.textContent = '';
   allReports = [];
@@ -993,15 +996,39 @@ async function loadReports(stockCode) {
     return;
   }
 
+  let latestReport = null;
+  try {
+    const latestResp = await fetch(buildApiUrl(`/api/reports/${stockCode}/latest`));
+    const latestData = await latestResp.json();
+    if (requestId !== reportsRequestId) return;
+    latestReport = latestData.report || null;
+
+    if (latestReport) {
+      allReports = [latestReport];
+      loading.style.display = 'none';
+      countEl.textContent = latestData.cached ? '(최신 1건, 캐시)' : '(최신 1건 먼저 표시 중)';
+      table.style.display = 'table';
+      renderReportsTable(allReports, 1);
+    }
+  } catch (e) {}
+
   try {
     const resp = await fetch(buildApiUrl(`/api/reports/${stockCode}`));
     const data = await resp.json();
+    if (requestId !== reportsRequestId) return;
+
     allReports = data.reports || [];
     loading.style.display = 'none';
 
     if (allReports.length === 0) {
-      loading.style.display = 'block';
-      loading.textContent = '증권사 리포트가 없습니다.';
+      if (latestReport) {
+        countEl.textContent = '(최신 1건만 표시)';
+        table.style.display = 'table';
+        renderReportsTable([latestReport], 1);
+      } else {
+        loading.style.display = 'block';
+        loading.textContent = '증권사 리포트가 없습니다.';
+      }
       return;
     }
 
@@ -1009,7 +1036,15 @@ async function loadReports(stockCode) {
     table.style.display = 'table';
     renderReportsTable(allReports, reportDisplayCount);
   } catch (e) {
-    loading.textContent = '리포트를 불러오지 못했습니다.';
+    if (requestId !== reportsRequestId) return;
+    if (latestReport) {
+      loading.style.display = 'none';
+      countEl.textContent = '(최신 1건만 표시)';
+      table.style.display = 'table';
+      renderReportsTable([latestReport], 1);
+    } else {
+      loading.textContent = '리포트를 불러오지 못했습니다.';
+    }
   }
 }
 

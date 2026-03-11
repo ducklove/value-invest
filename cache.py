@@ -57,6 +57,12 @@ async def init_db():
                 analyzed_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS latest_report_cache (
+                stock_code TEXT PRIMARY KEY,
+                report_json TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
         """)
         await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
@@ -277,6 +283,7 @@ async def delete_analysis(stock_code: str):
         await db.execute("DELETE FROM financial_data WHERE stock_code = ?", (stock_code,))
         await db.execute("DELETE FROM market_data WHERE stock_code = ?", (stock_code,))
         await db.execute("DELETE FROM analysis_meta WHERE stock_code = ?", (stock_code,))
+        await db.execute("DELETE FROM latest_report_cache WHERE stock_code = ?", (stock_code,))
         await db.commit()
     finally:
         await db.close()
@@ -290,5 +297,40 @@ async def get_cached_analyses() -> list[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def save_latest_report(stock_code: str, report: dict):
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR REPLACE INTO latest_report_cache (stock_code, report_json, fetched_at) VALUES (?, ?, ?)",
+            (stock_code, json.dumps(report, ensure_ascii=False), datetime.now().isoformat()),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_latest_report(stock_code: str, ttl_minutes: int) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT report_json, fetched_at FROM latest_report_cache WHERE stock_code = ?",
+            (stock_code,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+
+        fetched_at = datetime.fromisoformat(row["fetched_at"])
+        age_seconds = (datetime.now() - fetched_at).total_seconds()
+        if age_seconds > ttl_minutes * 60:
+            return None
+
+        report = json.loads(row["report_json"])
+        report["_cached_at"] = row["fetched_at"]
+        return report
     finally:
         await db.close()

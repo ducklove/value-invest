@@ -25,6 +25,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 ANALYSIS_SEMAPHORE = asyncio.Semaphore(2)
 ANALYSIS_LOCKS: dict[str, asyncio.Lock] = {}
 ANALYSIS_LOCKS_GUARD = asyncio.Lock()
+LATEST_REPORT_CACHE_TTL_MINUTES = 15
 
 app.add_middleware(
     CORSMiddleware,
@@ -296,6 +297,23 @@ async def get_reports(stock_code: str):
     except Exception as e:
         logger.error(f"증권사 리포트 조회 실패: {e}")
         return {"stock_code": stock_code, "reports": [], "error": str(e)}
+
+
+@app.get("/api/reports/{stock_code}/latest")
+async def get_latest_report(stock_code: str):
+    try:
+        cached_report = await cache.get_latest_report(stock_code, LATEST_REPORT_CACHE_TTL_MINUTES)
+        if cached_report:
+            cached_at = cached_report.pop("_cached_at", None)
+            return {"stock_code": stock_code, "report": cached_report, "cached": True, "cached_at": cached_at}
+
+        report = await report_client.fetch_latest_report(stock_code)
+        if report:
+            await cache.save_latest_report(stock_code, report)
+        return {"stock_code": stock_code, "report": report, "cached": False}
+    except Exception as e:
+        logger.error(f"최신 증권사 리포트 조회 실패: {e}")
+        return {"stock_code": stock_code, "report": None, "cached": False, "error": str(e)}
 
 
 @app.get("/api/report-pdf")
