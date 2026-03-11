@@ -22,7 +22,7 @@ def _get_yfinance_aux(stock_code: str, start_year: int, end_year: int) -> tuple[
     return close_series, shares, dividends, splits
 
 
-def _get_weekly_yfinance_aux(stock_code: str, start_date: datetime, end_date: datetime) -> tuple[pd.Series, pd.Series, pd.Series]:
+def _get_weekly_yfinance_aux(stock_code: str, start_date: datetime, end_date: datetime) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
     """최근 주간 종가/주식수/배당 이력 조회."""
     ticker = yf.Ticker(f"{stock_code}.KS")
     history = ticker.history(
@@ -33,8 +33,9 @@ def _get_weekly_yfinance_aux(stock_code: str, start_date: datetime, end_date: da
     )
     shares = ticker.get_shares_full(start=(start_date - timedelta(days=370)).strftime("%Y-%m-%d"))
     dividends = ticker.dividends
+    splits = ticker.splits
     close_series = history["Close"] if "Close" in history else pd.Series(dtype="float64")
-    return close_series, shares, dividends
+    return close_series, shares, dividends, splits
 
 
 def _get_quote_yfinance_aux(stock_code: str) -> pd.Series:
@@ -117,15 +118,15 @@ def _parse_report_date(value: str | None, year: int | None = None) -> datetime |
     return None
 
 
-def _normalized_split_events(series: pd.Series | None) -> list[tuple[datetime, float]]:
+def _normalized_split_events(series: pd.Series | None) -> list[tuple[pd.Timestamp, float]]:
     if series is None or series.empty:
         return []
     cleaned = series[series > 0].sort_index()
-    events: list[tuple[datetime, float]] = []
+    events: list[tuple[pd.Timestamp, float]] = []
     last_dt = None
     last_ratio = None
     for idx, ratio in cleaned.items():
-        dt = idx.to_pydatetime()
+        dt = idx
         ratio = _safe_float(ratio)
         if ratio is None:
             continue
@@ -154,6 +155,33 @@ def _adjust_shares_for_splits(shares_by_year: dict[int, float], split_events: li
             if current_shares <= raw_scale_ceiling:
                 current_shares *= ratio
         adjusted[year] = round(current_shares, 2) if current_shares is not None else None
+    return adjusted
+
+
+def _split_adjustment_factor(ratio: float | None) -> float:
+    ratio = _safe_float(ratio)
+    if ratio is None or ratio == 1:
+        return 1.0
+    return ratio if ratio < 1 else 1 / ratio
+
+
+def _adjust_dividends_for_splits(dividends: pd.Series | None, split_events: list[tuple[pd.Timestamp, float]]) -> pd.Series:
+    if dividends is None or dividends.empty or not split_events:
+        return dividends if dividends is not None else pd.Series(dtype="float64")
+
+    adjusted = dividends.copy()
+    for split_dt, ratio in split_events:
+        split_dt = pd.Timestamp(split_dt)
+        if getattr(adjusted.index, "tz", None) is None and split_dt.tz is not None:
+            split_dt = split_dt.tz_localize(None)
+        elif getattr(adjusted.index, "tz", None) is not None and split_dt.tz is None:
+            split_dt = split_dt.tz_localize(adjusted.index.tz)
+        factor = _split_adjustment_factor(ratio)
+        if factor == 1:
+            continue
+        mask = adjusted.index < split_dt
+        if mask.any():
+            adjusted.loc[mask] = adjusted.loc[mask] * factor
     return adjusted
 
 
@@ -211,6 +239,7 @@ async def fetch_market_data(
     shares_by_year = _group_last_by_year(shares_series)
     split_events = _normalized_split_events(splits_series)
     shares_by_year = _adjust_shares_for_splits(shares_by_year, split_events)
+    dividends_series = _adjust_dividends_for_splits(dividends_series, split_events)
     dividends_by_year = _group_sum_by_year(dividends_series)
     fin_by_year = {item["year"]: item for item in (financial_data or [])}
     shares_by_year = _forward_fill_year_values(shares_by_year, sorted(year_data.keys()))
@@ -257,11 +286,12 @@ async def fetch_weekly_market_data(
     loop = asyncio.get_event_loop()
     aux_future = loop.run_in_executor(None, _get_weekly_yfinance_aux, stock_code, start_date, end_date)
     try:
-        close_series, shares_series, dividends_series = await aux_future
+        close_series, shares_series, dividends_series, splits_series = await aux_future
     except Exception:
         close_series = pd.Series(dtype="float64")
         shares_series = pd.Series(dtype="float64")
         dividends_series = pd.Series(dtype="float64")
+        splits_series = pd.Series(dtype="float64")
 
     close_series = _normalize_datetime_index(close_series)
     if close_series.empty:
@@ -270,6 +300,8 @@ async def fetch_weekly_market_data(
     week_dates = pd.DatetimeIndex(close_series.index)
     shares_series = _normalize_datetime_index(shares_series)
     dividends_series = _normalize_datetime_index(dividends_series)
+    split_events = _normalized_split_events(splits_series)
+    dividends_series = _normalize_datetime_index(_adjust_dividends_for_splits(dividends_series, split_events))
 
     if not shares_series.empty:
         shares_by_week = shares_series.reindex(week_dates, method="ffill")
