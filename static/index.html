@@ -393,6 +393,11 @@ function safeExternalUrl(value) {
   }
 }
 
+function buildReportPdfUrl(pdfUrl) {
+  if (!pdfUrl) return '';
+  return buildApiUrl(`/api/report-pdf?url=${encodeURIComponent(pdfUrl)}`);
+}
+
 function hasApiConfiguration() {
   return !IS_GITHUB_PAGES || Boolean(API_BASE_URL);
 }
@@ -941,7 +946,7 @@ function renderReportsTable(reports, limit) {
     const safeAnalyst = escapeHtml(r.analyst);
     const safeFirm = escapeHtml(r.firm_short || r.firm);
     const safeDate = escapeHtml(r.date);
-    const safeHref = safeExternalUrl(r.pdf_url || r.source_url);
+    const safeHref = safeExternalUrl(buildReportPdfUrl(r.pdf_url) || r.source_url);
     const titleLink = safeHref
       ? `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>`
       : safeTitle;
