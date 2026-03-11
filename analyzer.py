@@ -32,12 +32,10 @@ def analyze(
     pbr_series = []
     roe_series = []
     dividend_series = []
+    dividend_per_share_series = []
     debt_ratio_series = []
     operating_margin_series = []
     eps_series = []
-    eps_growth_series = []
-
-    prev_eps = None
 
     for year in market_years:
         mkt = mkt_by_year.get(year, {})
@@ -55,14 +53,12 @@ def analyze(
 
         div_yield = mkt.get("dividend_yield")
         dividend_series.append({"year": year, "value": div_yield})
+
+        dps = mkt.get("dividend_per_share")
+        dividend_per_share_series.append({"year": year, "value": dps})
+
         eps = mkt.get("eps")
         eps_series.append({"year": year, "value": eps})
-
-        eps_growth = None
-        if eps is not None and prev_eps is not None and prev_eps != 0:
-            eps_growth = round((eps - prev_eps) / abs(prev_eps) * 100, 2)
-        eps_growth_series.append({"year": year, "value": eps_growth})
-        prev_eps = eps
 
     for year in financial_years:
         fin = fin_by_year.get(year, {})
@@ -107,11 +103,11 @@ def analyze(
             "PER": per_series,
             "PBR": pbr_series,
             "ROE (%)": roe_series,
+            "EPS (원)": eps_series,
             "배당수익률 (%)": dividend_series,
             "부채비율 (%)": debt_ratio_series,
             "영업이익률 (%)": operating_margin_series,
-            "EPS (원)": eps_series,
-            "EPS 성장률 (%)": eps_growth_series,
+            "주당배당금 (원)": dividend_per_share_series,
         },
         "weekly_indicators": weekly_indicators,
     }

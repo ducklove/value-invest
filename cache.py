@@ -46,6 +46,7 @@ async def init_db():
                 pbr REAL,
                 eps REAL,
                 bps REAL,
+                dividend_per_share REAL,
                 dividend_yield REAL,
                 market_cap REAL,
                 PRIMARY KEY (stock_code, year)
@@ -73,6 +74,7 @@ async def init_db():
         """)
         await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
         await _ensure_column(db, "financial_data", "report_date", "TEXT")
+        await _ensure_column(db, "market_data", "dividend_per_share", "REAL")
         await db.commit()
     finally:
         await db.close()
@@ -224,8 +226,8 @@ async def save_market_data(stock_code: str, data: list[dict]):
     try:
         await db.executemany(
             "INSERT OR REPLACE INTO market_data "
-            "(stock_code, year, close_price, per, pbr, eps, bps, dividend_yield, market_cap) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(stock_code, year, close_price, per, pbr, eps, bps, dividend_per_share, dividend_yield, market_cap) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     stock_code,
@@ -235,6 +237,7 @@ async def save_market_data(stock_code: str, data: list[dict]):
                     d.get("pbr"),
                     d.get("eps"),
                     d.get("bps"),
+                    d.get("dividend_per_share"),
                     d.get("dividend_yield"),
                     d.get("market_cap"),
                 )

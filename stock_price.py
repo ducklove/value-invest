@@ -176,7 +176,7 @@ def market_data_needs_refresh(data: list[dict]) -> bool:
     """기존 캐시에 파생 지표가 비어 있으면 재계산 대상."""
     if not data:
         return True
-    keys = ("per", "pbr", "eps", "bps", "dividend_yield", "market_cap")
+    keys = ("per", "pbr", "eps", "bps", "dividend_per_share", "dividend_yield", "market_cap")
     return not any(row.get(key) is not None for row in data for key in keys)
 
 
@@ -241,7 +241,6 @@ async def fetch_market_data(
         row["dividend_yield"] = _safe_div(dps, close_price, 100) if dps and close_price else None
 
         row.pop("shares_outstanding", None)
-        row.pop("dividend_per_share", None)
 
     return [year_data[year] for year in sorted(year_data.keys())]
 
