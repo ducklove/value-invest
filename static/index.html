@@ -369,6 +369,7 @@ let selectedIdx = -1;
 let currentAbortController = null;
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
 const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
+const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function buildApiUrl(path) {
   return `${API_BASE_URL}${path}`;
@@ -396,6 +397,37 @@ function safeExternalUrl(value) {
 function buildReportPdfUrl(pdfUrl) {
   if (!pdfUrl) return '';
   return buildApiUrl(`/api/report-pdf?url=${encodeURIComponent(pdfUrl)}`);
+}
+
+function getReportCacheKey(stockCode) {
+  return `report_cache:${stockCode}`;
+}
+
+function loadReportCache(stockCode) {
+  try {
+    const raw = localStorage.getItem(getReportCacheKey(stockCode));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed.savedAt || (Date.now() - parsed.savedAt) > REPORT_LOCAL_CACHE_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveReportCache(stockCode, payload) {
+  try {
+    localStorage.setItem(getReportCacheKey(stockCode), JSON.stringify({
+      ...payload,
+      savedAt: Date.now(),
+    }));
+  } catch {}
+}
+
+function sameReport(a, b) {
+  if (!a || !b) return false;
+  return a.date === b.date && a.title === b.title && a.firm === b.firm && a.pdf_url === b.pdf_url;
 }
 
 function hasApiConfiguration() {
@@ -996,23 +1028,60 @@ async function loadReports(stockCode) {
     return;
   }
 
-  let latestReport = null;
+  const localCache = loadReportCache(stockCode);
+  let latestReport = localCache?.latestReport || null;
+  let renderedFromCache = false;
+
+  if (Array.isArray(localCache?.reports) && localCache.reports.length > 0) {
+    allReports = localCache.reports;
+    countEl.textContent = `(최근 3년, ${allReports.length}건 · 캐시)`;
+    table.style.display = 'table';
+    loading.style.display = 'none';
+    renderReportsTable(allReports, reportDisplayCount);
+    renderedFromCache = true;
+  } else if (latestReport) {
+    allReports = [latestReport];
+    countEl.textContent = '(최신 1건 · 캐시)';
+    table.style.display = 'table';
+    loading.style.display = 'none';
+    renderReportsTable(allReports, 1);
+    renderedFromCache = true;
+  }
+
   try {
-    const latestResp = await fetch(buildApiUrl(`/api/reports/${stockCode}/latest`));
+    const latestResp = await fetch(buildApiUrl(`/api/reports/${stockCode}/latest?refresh=1`));
     const latestData = await latestResp.json();
     if (requestId !== reportsRequestId) return;
-    latestReport = latestData.report || null;
+    const networkLatest = latestData.report || null;
+    const latestChanged = latestData.changed ?? !sameReport(latestReport, networkLatest);
 
-    if (latestReport) {
+    if (networkLatest) {
+      latestReport = networkLatest;
+      saveReportCache(stockCode, {
+        latestReport,
+        reports: Array.isArray(localCache?.reports) ? localCache.reports : [],
+      });
+    }
+
+    if (networkLatest && (!renderedFromCache || latestChanged)) {
       allReports = [latestReport];
       loading.style.display = 'none';
-      countEl.textContent = latestData.cached ? '(최신 1건, 캐시)' : '(최신 1건 먼저 표시 중)';
+      countEl.textContent = latestChanged ? '(최신 1건 갱신됨)' : '(최신 1건 확인됨)';
       table.style.display = 'table';
       renderReportsTable(allReports, 1);
     }
   } catch (e) {}
 
   try {
+    const shouldRefreshFullReports =
+      !Array.isArray(localCache?.reports) ||
+      localCache.reports.length === 0 ||
+      !sameReport(localCache.latestReport, latestReport);
+
+    if (!shouldRefreshFullReports) {
+      return;
+    }
+
     const resp = await fetch(buildApiUrl(`/api/reports/${stockCode}`));
     const data = await resp.json();
     if (requestId !== reportsRequestId) return;
@@ -1035,6 +1104,7 @@ async function loadReports(stockCode) {
     countEl.textContent = `(최근 3년, ${allReports.length}건)`;
     table.style.display = 'table';
     renderReportsTable(allReports, reportDisplayCount);
+    saveReportCache(stockCode, { latestReport: allReports[0] || latestReport, reports: allReports });
   } catch (e) {
     if (requestId !== reportsRequestId) return;
     if (latestReport) {
