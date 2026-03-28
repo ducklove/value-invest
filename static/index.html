@@ -151,6 +151,9 @@ body {
   border-radius:12px; padding:16px 20px;
 }
 .chart-card h3 { font-size:15px; margin-bottom:12px; color:var(--text-secondary); }
+.chart-note {
+  margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.4;
+}
 .chart-card canvas { width:100%!important; height:220px!important; }
 
 /* Loading overlay */
@@ -362,6 +365,7 @@ const CHART_COLORS = [
   '#e11d48','#2563eb','#7c3aed','#059669','#d97706',
   '#dc2626','#0891b2','#4f46e5','#c026d3'
 ];
+const PER_DISPLAY_MAX = 100;
 
 let charts = {};
 let searchTimeout = null;
@@ -614,12 +618,42 @@ function renderCoverageSummary(indicators, weeklyIndicators) {
   if (financialCoverage) parts.push(`ROE/부채비율/영업이익률 ${financialCoverage}`);
   if (weeklyCoverage) parts.push(`주간 지표 ${weeklyCoverage.startDate}~${weeklyCoverage.endDate}`);
   if (weeklyCoverage) parts.push('주간 PER/PBR은 사업보고서 공시일 기준 적용');
+  if (valuationCoverage || weeklyCoverage) parts.push(`PER 차트는 음수와 ${PER_DISPLAY_MAX}배 초과 구간을 제외`);
 
   if (parts.length === 0) {
     return '지표별 제공 연도는 데이터 소스에 따라 다릅니다.';
   }
 
   return `지표별 데이터 범위: ${parts.join(' · ')}`;
+}
+
+function isPerChart(key) {
+  return key === 'PER' || key === '주간 PER';
+}
+
+function normalizeChartValue(value) {
+  return value === null || value === undefined ? null : Number(value);
+}
+
+function buildChartSeries(key, series) {
+  const labelField = Object.prototype.hasOwnProperty.call(series[0], 'date') ? 'date' : 'year';
+  const labels = series.map(item => item[labelField]);
+  const rawValues = series.map(item => normalizeChartValue(item.value));
+  let values = rawValues.slice();
+  let note = '';
+  let spanGaps = true;
+
+  if (isPerChart(key)) {
+    values = rawValues.map(value => {
+      if (value === null || !Number.isFinite(value)) return null;
+      if (value <= 0 || Math.abs(value) > PER_DISPLAY_MAX) return null;
+      return value;
+    });
+    note = `표시 기준: 음수 PER와 ${PER_DISPLAY_MAX}배 초과 구간은 추세 왜곡을 막기 위해 제외합니다.`;
+    spanGaps = false;
+  }
+
+  return { labelField, labels, values, rawValues, note, spanGaps };
 }
 
 function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
@@ -629,13 +663,17 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
     const series = indicatorMap[key] || [];
     if (series.length === 0) return;
 
-    const labelField = Object.prototype.hasOwnProperty.call(series[0], 'date') ? 'date' : 'year';
-    const labels = series.map(d => d[labelField]);
-    const values = series.map(d => d.value);
+    const { labelField, labels, values, rawValues, note, spanGaps } = buildChartSeries(key, series);
 
     const card = document.createElement('div');
     card.className = 'chart-card';
     card.innerHTML = `<h3>${key}</h3><canvas id="${prefix}-chart-${i}"></canvas>`;
+    if (note) {
+      const noteEl = document.createElement('div');
+      noteEl.className = 'chart-note';
+      noteEl.textContent = note;
+      card.appendChild(noteEl);
+    }
     container.appendChild(card);
 
     const ctx = document.getElementById(`${prefix}-chart-${i}`).getContext('2d');
@@ -653,7 +691,7 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
           pointBackgroundColor: CHART_COLORS[i % CHART_COLORS.length],
           fill: true,
           tension: 0.3,
-          spanGaps: true,
+          spanGaps,
         }]
       },
       options: {
@@ -664,7 +702,13 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
           tooltip: {
             callbacks: {
               label: (ctx) => {
-                if (ctx.parsed.y === null) return 'N/A';
+                const rawValue = rawValues[ctx.dataIndex];
+                if (ctx.parsed.y === null) {
+                  if (isPerChart(key) && rawValue !== null && Number.isFinite(rawValue)) {
+                    return `${key}: 표시 제외 (${rawValue.toLocaleString()})`;
+                  }
+                  return 'N/A';
+                }
                 return `${key}: ${ctx.parsed.y.toLocaleString()}`;
               }
             }
