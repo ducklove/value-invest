@@ -74,15 +74,32 @@ body {
   margin-bottom: 6px; transition: background 0.15s;
 }
 .sidebar-item:hover { background: var(--border); }
-.sidebar-item { display:flex; align-items:center; justify-content:space-between; }
-.sidebar-item .info { flex:1; min-width:0; }
-.sidebar-item .name { font-weight: 600; font-size: 14px; }
+.sidebar-item { display:flex; align-items:flex-start; justify-content:space-between; gap: 8px; }
+.sidebar-item .info {
+  flex:1; min-width:0;
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: baseline;
+}
+.sidebar-item .name {
+  font-weight: 600; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .sidebar-item .code { font-size: 12px; color: var(--text-secondary); }
+.sidebar-item .quote-price,
 .sidebar-item .quote-meta {
-  margin-top: 4px;
   font-size: 12px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.sidebar-item .quote-price {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
 }
 .sidebar-item .quote-change.up { color: #b91c1c; }
 .sidebar-item .quote-change.down { color: #1d4ed8; }
@@ -1063,6 +1080,10 @@ async function loadRecentList() {
 
       const quote = item.quote_snapshot || {};
       if (quote.price !== null && quote.price !== undefined) {
+        const quotePrice = document.createElement('div');
+        quotePrice.className = 'quote-price';
+        quotePrice.textContent = Number(quote.price).toLocaleString();
+
         const quoteMeta = document.createElement('div');
         quoteMeta.className = 'quote-meta';
         const change = Number(quote.change || 0);
@@ -1070,10 +1091,10 @@ async function loadRecentList() {
         const changePrefix = change > 0 ? '+' : '';
         const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
         const changeText = changePct !== null && changePct !== undefined
-          ? `${changePrefix}${change.toLocaleString()}원 (${changePrefix}${Number(changePct).toLocaleString()}%)`
+          ? `${changePrefix}${change.toLocaleString()} (${changePrefix}${Number(changePct).toLocaleString()}%)`
           : '변동 정보 없음';
-        quoteMeta.innerHTML = `${Number(quote.price).toLocaleString()}원 <span class="quote-change ${changeClass}">${changeText}</span>`;
-        info.appendChild(quoteMeta);
+        quoteMeta.innerHTML = `<span class="quote-change ${changeClass}">${changeText}</span>`;
+        info.append(quotePrice, quoteMeta);
       }
 
       const button = document.createElement('button');
