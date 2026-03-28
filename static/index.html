@@ -836,6 +836,13 @@ function shouldUseZeroBaseline(values) {
   return validValues.length > 0 && validValues.every(value => value >= 0);
 }
 
+function formatWeeklyTickLabel(value) {
+  if (typeof value !== 'string') return value;
+  const match = value.match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match) return value;
+  return `${match[1].slice(-2)}.${match[2]}`;
+}
+
 function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
   container.innerHTML = '';
 
@@ -906,7 +913,11 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
         scales: {
           x: {
             grid: { color: gridColor },
-            ticks: { color: tickColor, maxTicksLimit: labelField === 'date' ? 8 : 12 }
+            ticks: {
+              color: tickColor,
+              maxTicksLimit: labelField === 'date' ? 8 : 12,
+              callback: (_, index) => labelField === 'date' ? formatWeeklyTickLabel(labels[index]) : labels[index],
+            }
           },
           y: {
             min: zeroBaseline ? 0 : undefined,
