@@ -10,10 +10,46 @@ import httpx
 
 BASE_URL = os.getenv("KIS_PROXY_BASE_URL", "http://cantabile.tplinkdns.com:3288").rstrip("/")
 TIMEOUT_SECONDS = float(os.getenv("KIS_PROXY_TIMEOUT_SECONDS", "20"))
+_client: httpx.AsyncClient | None = None
+_client_lock: asyncio.Lock | None = None
 
 
 class KISProxyError(RuntimeError):
     pass
+
+
+def _get_client_lock() -> asyncio.Lock:
+    global _client_lock
+    if _client_lock is None:
+        _client_lock = asyncio.Lock()
+    return _client_lock
+
+
+async def init_client():
+    await _get_client()
+
+
+async def close_client():
+    global _client
+    async with _get_client_lock():
+        client = _client
+        _client = None
+    if client is not None:
+        await client.aclose()
+
+
+async def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is not None:
+        return _client
+
+    async with _get_client_lock():
+        if _client is None:
+            _client = httpx.AsyncClient(
+                timeout=TIMEOUT_SECONDS,
+                follow_redirects=True,
+            )
+        return _client
 
 
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -21,11 +57,8 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
     last_exc = None
     for attempt in range(3):
         try:
-            async with httpx.AsyncClient(
-                timeout=TIMEOUT_SECONDS,
-                follow_redirects=True,
-            ) as client:
-                response = await client.get(url, params=params)
+            client = await _get_client()
+            response = await client.get(url, params=params)
             response.raise_for_status()
             payload = response.json()
             return payload if isinstance(payload, dict) else {}

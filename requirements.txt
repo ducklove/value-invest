@@ -4,3 +4,5 @@ aiosqlite
 httpx
 beautifulsoup4
 yfinance
+google-auth
+requests

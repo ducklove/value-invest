@@ -10,6 +10,7 @@ async def get_db() -> aiosqlite.Connection:
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA foreign_keys=ON")
     return db
 
 
@@ -58,6 +59,33 @@ async def init_db():
                 analyzed_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+                google_sub TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                name TEXT NOT NULL,
+                picture TEXT,
+                email_verified INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_login_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                session_token_hash TEXT PRIMARY KEY,
+                google_sub TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS user_recent_analyses (
+                google_sub TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                viewed_at TEXT NOT NULL,
+                PRIMARY KEY (google_sub, stock_code),
+                FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE,
+                FOREIGN KEY (stock_code) REFERENCES analysis_meta(stock_code) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS latest_report_cache (
                 stock_code TEXT PRIMARY KEY,
                 report_json TEXT NOT NULL,
@@ -71,10 +99,13 @@ async def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
+            CREATE INDEX IF NOT EXISTS idx_user_sessions_google_sub ON user_sessions(google_sub);
+            CREATE INDEX IF NOT EXISTS idx_user_recent_viewed_at ON user_recent_analyses(google_sub, viewed_at DESC);
         """)
         await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
         await _ensure_column(db, "financial_data", "report_date", "TEXT")
         await _ensure_column(db, "market_data", "dividend_per_share", "REAL")
+        await _ensure_column(db, "analysis_meta", "payload_json", "TEXT")
         await db.commit()
     finally:
         await db.close()
@@ -265,9 +296,39 @@ async def get_market_data(stock_code: str) -> list[dict]:
 async def save_analysis_meta(stock_code: str, corp_name: str):
     db = await get_db()
     try:
+        cursor = await db.execute(
+            "SELECT payload_json FROM analysis_meta WHERE stock_code = ?",
+            (stock_code,),
+        )
+        row = await cursor.fetchone()
         await db.execute(
-            "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at) VALUES (?, ?, ?)",
-            (stock_code, corp_name, datetime.now().isoformat()),
+            "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+            (
+                stock_code,
+                corp_name,
+                datetime.now().isoformat(),
+                row["payload_json"] if row else None,
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def save_analysis_snapshot(stock_code: str, corp_name: str, payload: dict):
+    db = await get_db()
+    try:
+        analyzed_at = payload.get("analyzed_at") or datetime.now().isoformat()
+        snapshot = dict(payload)
+        snapshot["analyzed_at"] = analyzed_at
+        await db.execute(
+            "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+            (
+                stock_code,
+                corp_name,
+                analyzed_at,
+                json.dumps(snapshot, ensure_ascii=False),
+            ),
         )
         await db.commit()
     finally:
@@ -286,6 +347,33 @@ async def get_analysis_meta(stock_code: str) -> dict | None:
         await db.close()
 
 
+async def get_analysis_snapshot(stock_code: str) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT stock_code, corp_name, analyzed_at, payload_json FROM analysis_meta WHERE stock_code = ?",
+            (stock_code,),
+        )
+        row = await cursor.fetchone()
+        if not row or not row["payload_json"]:
+            return None
+        try:
+            payload = json.loads(row["payload_json"])
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        payload.setdefault("stock_code", row["stock_code"])
+        payload.setdefault("corp_name", row["corp_name"])
+        payload.setdefault("analyzed_at", row["analyzed_at"])
+        payload["cached"] = True
+        return payload
+    finally:
+        await db.close()
+
+
 async def delete_analysis(stock_code: str):
     db = await get_db()
     try:
@@ -299,14 +387,169 @@ async def delete_analysis(stock_code: str):
         await db.close()
 
 
-async def get_cached_analyses() -> list[dict]:
+async def upsert_user(user: dict):
+    db = await get_db()
+    try:
+        now = datetime.now().isoformat()
+        await db.execute(
+            """
+            INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(google_sub) DO UPDATE SET
+                email = excluded.email,
+                name = excluded.name,
+                picture = excluded.picture,
+                email_verified = excluded.email_verified,
+                last_login_at = excluded.last_login_at
+            """,
+            (
+                user["google_sub"],
+                user["email"],
+                user["name"],
+                user.get("picture"),
+                1 if user.get("email_verified") else 0,
+                now,
+                now,
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def create_user_session(session_token_hash: str, google_sub: str, expires_at: str):
+    db = await get_db()
+    try:
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO user_sessions (session_token_hash, google_sub, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (session_token_hash, google_sub, datetime.now().isoformat(), expires_at),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_user_by_session(session_token_hash: str) -> dict | None:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT stock_code, corp_name, analyzed_at FROM analysis_meta ORDER BY analyzed_at DESC"
+            """
+            SELECT u.google_sub, u.email, u.name, u.picture, u.email_verified
+            FROM user_sessions s
+            JOIN users u ON u.google_sub = s.google_sub
+            WHERE s.session_token_hash = ? AND s.expires_at > ?
+            """,
+            (session_token_hash, datetime.now().isoformat()),
         )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def delete_user_session(session_token_hash: str):
+    db = await get_db()
+    try:
+        await db.execute(
+            "DELETE FROM user_sessions WHERE session_token_hash = ?",
+            (session_token_hash,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def delete_expired_sessions():
+    db = await get_db()
+    try:
+        await db.execute(
+            "DELETE FROM user_sessions WHERE expires_at <= ?",
+            (datetime.now().isoformat(),),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def touch_user_recent_analysis(google_sub: str, stock_code: str):
+    db = await get_db()
+    try:
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO user_recent_analyses (google_sub, stock_code, viewed_at)
+            VALUES (?, ?, ?)
+            """,
+            (google_sub, stock_code, datetime.now().isoformat()),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def delete_user_recent_analysis(google_sub: str, stock_code: str):
+    db = await get_db()
+    try:
+        await db.execute(
+            "DELETE FROM user_recent_analyses WHERE google_sub = ? AND stock_code = ?",
+            (google_sub, stock_code),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_cached_analyses(
+    limit: int | None = None,
+    include_quotes: bool = False,
+    google_sub: str | None = None,
+) -> list[dict]:
+    db = await get_db()
+    try:
+        select_fields = "stock_code, corp_name, analyzed_at"
+        if include_quotes:
+            select_fields += ", payload_json"
+
+        if google_sub:
+            query = (
+                f"SELECT a.stock_code, a.corp_name, r.viewed_at AS analyzed_at"
+                + (", a.payload_json" if include_quotes else "")
+                + " FROM user_recent_analyses r"
+                + " JOIN analysis_meta a ON a.stock_code = r.stock_code"
+                + " WHERE r.google_sub = ?"
+                + " ORDER BY r.viewed_at DESC"
+            )
+            params: tuple = (google_sub,)
+        else:
+            query = f"SELECT {select_fields} FROM analysis_meta ORDER BY analyzed_at DESC"
+            params = ()
+
+        if limit is not None:
+            query += " LIMIT ?"
+            params = (*params, limit)
+
+        cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
+        items = []
+        for row in rows:
+            item = dict(row)
+            if include_quotes:
+                payload_json = item.pop("payload_json", None)
+                quote_snapshot = {}
+                if payload_json:
+                    try:
+                        payload = json.loads(payload_json)
+                    except json.JSONDecodeError:
+                        payload = {}
+                    if isinstance(payload, dict):
+                        cached_quote = payload.get("quote_snapshot")
+                        if isinstance(cached_quote, dict):
+                            quote_snapshot = cached_quote
+                item["quote_snapshot"] = quote_snapshot
+            items.append(item)
+        return items
     finally:
         await db.close()
 

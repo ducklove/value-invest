@@ -638,9 +638,23 @@ async def fetch_weekly_market_data(
         datetime.combine(start_date, datetime.min.time()),
         datetime.combine(end_date, datetime.min.time()),
     )
-    financials_payload = await kis_proxy_client.get_financials(stock_code)
+    financials_payload, dividends_payload = await asyncio.gather(
+        kis_proxy_client.get_financials(stock_code),
+        kis_proxy_client.get_dividends(
+            stock_code,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+        return_exceptions=True,
+    )
+    if isinstance(financials_payload, Exception):
+        raise financials_payload
+    if isinstance(dividends_payload, Exception):
+        logger.warning("KIS weekly dividend fetch failed (%s): %s", stock_code, dividends_payload)
+        dividends_payload = {}
     normalized_financials = _normalize_financial_rows(financials_payload, None)
     financial_timeline = _financial_timeline(financial_data, normalized_financials)
+    kis_dividend_events = _build_dividend_events(dividends_payload.get("items"))
 
     try:
         close_series, shares_series, dividends_series, splits_series = await yf_future
@@ -681,6 +695,9 @@ async def fetch_weekly_market_data(
             eps = active_financial.get("eps") if active_financial else None
             bps = active_financial.get("bps") if active_financial else None
             shares = active_financial.get("shares_outstanding") if active_financial else None
+            trailing_dividends = _sum_trailing_dividends(kis_dividend_events, trade_date)
+            if trailing_dividends is None and kis_dividend_events and close_price is not None:
+                trailing_dividends = 0.0
 
             results.append(
                 {
@@ -690,7 +707,9 @@ async def fetch_weekly_market_data(
                     "pbr": _safe_div(close_price, bps) if close_price else None,
                     "eps": eps,
                     "bps": bps,
-                    "dividend_yield": None,
+                    "dividend_yield": _safe_div(trailing_dividends, close_price, 100)
+                    if trailing_dividends is not None and close_price
+                    else None,
                     "market_cap": round(close_price * shares, 2) if close_price and shares else None,
                 }
             )
@@ -708,6 +727,8 @@ async def fetch_weekly_market_data(
     results = []
     active_financial = None
     timeline_index = 0
+    has_yfinance_dividend_source = pd is not None and dividends_series is not None and not dividends_series.empty
+    has_kis_dividend_source = bool(kis_dividend_events)
 
     for week_date, close_price in close_series.items():
         trade_datetime = week_date.to_pydatetime() if hasattr(week_date, "to_pydatetime") else week_date
@@ -724,14 +745,14 @@ async def fetch_weekly_market_data(
             shares = active_shares
 
         trailing_dividends = None
-        if pd is not None and dividends_series is not None and not dividends_series.empty:
+        if has_yfinance_dividend_source:
             trailing_start = week_date - pd.Timedelta(days=365)
             trailing_value = dividends_series[(dividends_series.index > trailing_start) & (dividends_series.index <= week_date)].sum()
             trailing_dividends = _safe_float(trailing_value, zero_as_none=False)
-        elif close_value is not None:
-            trailing_dividends = 0.0
+        elif has_kis_dividend_source:
+            trailing_dividends = _sum_trailing_dividends(kis_dividend_events, trade_datetime.date())
 
-        if trailing_dividends is None and close_value is not None:
+        if trailing_dividends is None and close_value is not None and (has_yfinance_dividend_source or has_kis_dividend_source):
             trailing_dividends = 0.0
 
         results.append(

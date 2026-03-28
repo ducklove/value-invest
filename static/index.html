@@ -24,14 +24,32 @@ function trackEvent(name, params = {}) {
   gtag('event', name, { stream_id: GA_STREAM_ID, ...params });
 }
 </script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="./static/styles.css">
+<link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 
 <aside class="sidebar">
+  <div class="auth-panel" id="authPanel">
+    <div class="auth-copy">
+      <strong id="authStatusTitle">로그인해 최근 분석을 저장하세요</strong>
+      <span id="authStatusDetail">Google로 로그인하면 최근 본 종목을 내 계정 기준으로 관리할 수 있습니다.</span>
+    </div>
+    <div class="auth-actions">
+      <div id="googleSignInButton"></div>
+      <div class="auth-user" id="authUser" style="display:none;">
+        <img class="auth-avatar" id="authAvatar" alt="프로필">
+        <div class="auth-user-copy">
+          <div class="auth-user-name" id="authUserName"></div>
+          <div class="auth-user-email" id="authUserEmail"></div>
+        </div>
+        <button class="auth-logout" id="logoutBtn" type="button" onclick="logout()">로그아웃</button>
+      </div>
+    </div>
+  </div>
   <div class="sidebar-header">
-    <h3>최근 분석 종목</h3>
+    <h3 id="recentListTitle">최근 분석 종목</h3>
     <button class="sidebar-refresh" id="recentRefreshBtn" type="button" onclick="refreshRecentList()">새로고침</button>
   </div>
   <div id="recentList">
@@ -106,6 +124,6 @@ function trackEvent(name, params = {}) {
   </div>
 </div>
 
-<script src="./static/app.js" defer></script>
+<script src="./app.js" defer></script>
 </body>
 </html>

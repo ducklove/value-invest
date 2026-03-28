@@ -23,12 +23,26 @@ let activeStockCode = null;
 let activeIndicators = {};
 let quoteRefreshTimer = null;
 let activeQuoteLoading = false;
+let authConfig = null;
+let currentUser = null;
+let googleButtonRetryTimer = null;
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
 const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
 const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function buildApiUrl(path) {
   return `${API_BASE_URL}${path}`;
+}
+
+function apiFetch(path, options = {}) {
+  const init = {
+    credentials: 'include',
+    ...options,
+  };
+  if (options.headers) {
+    init.headers = { ...options.headers };
+  }
+  return fetch(buildApiUrl(path), init);
 }
 
 function escapeHtml(value) {
@@ -94,6 +108,168 @@ function requireApiConfiguration() {
   if (!hasApiConfiguration()) {
     throw new Error('GitHub Pages에서는 app-config.js의 apiBaseUrl에 FastAPI 서버 주소를 설정해야 합니다.');
   }
+}
+
+function updateAnalyticsAuthState() {
+  if (IS_LOCALHOST || typeof gtag !== 'function') return;
+  gtag('set', 'user_properties', {
+    login_state: currentUser ? 'logged_in' : 'guest',
+  });
+}
+
+async function loadAuthConfig() {
+  if (!hasApiConfiguration()) {
+    authConfig = { enabled: false, googleClientId: '' };
+    return authConfig;
+  }
+
+  try {
+    const resp = await apiFetch('/api/auth/config');
+    authConfig = await resp.json();
+  } catch (error) {
+    authConfig = { enabled: false, googleClientId: '' };
+  }
+  return authConfig;
+}
+
+async function loadCurrentUser() {
+  if (!hasApiConfiguration()) {
+    currentUser = null;
+    return currentUser;
+  }
+
+  try {
+    const resp = await apiFetch('/api/auth/me');
+    if (!resp.ok) {
+      currentUser = null;
+      return currentUser;
+    }
+    const data = await resp.json();
+    currentUser = data.user || null;
+  } catch (error) {
+    currentUser = null;
+  }
+  return currentUser;
+}
+
+function updateRecentListTitle() {
+  const title = document.getElementById('recentListTitle');
+  if (!title) return;
+  title.textContent = currentUser ? '내 최근 분석' : '최근 분석 종목';
+}
+
+function scheduleGoogleButtonRender() {
+  if (googleButtonRetryTimer !== null) return;
+  googleButtonRetryTimer = window.setTimeout(() => {
+    googleButtonRetryTimer = null;
+    renderGoogleButton();
+  }, 300);
+}
+
+function renderGoogleButton() {
+  const container = document.getElementById('googleSignInButton');
+  if (!container) return;
+
+  if (currentUser || !authConfig?.enabled || !authConfig?.googleClientId) {
+    container.innerHTML = '';
+    return;
+  }
+
+  if (!window.google?.accounts?.id) {
+    scheduleGoogleButtonRender();
+    return;
+  }
+
+  container.innerHTML = '';
+  window.google.accounts.id.initialize({
+    client_id: authConfig.googleClientId,
+    callback: handleGoogleCredential,
+    auto_select: false,
+    ux_mode: 'popup',
+  });
+  window.google.accounts.id.renderButton(container, {
+    theme: 'outline',
+    size: 'large',
+    shape: 'pill',
+    text: 'signin_with',
+    width: 280,
+    locale: 'ko',
+  });
+}
+
+function renderAuthState() {
+  const statusTitle = document.getElementById('authStatusTitle');
+  const statusDetail = document.getElementById('authStatusDetail');
+  const authUser = document.getElementById('authUser');
+  const avatar = document.getElementById('authAvatar');
+  const name = document.getElementById('authUserName');
+  const email = document.getElementById('authUserEmail');
+
+  updateRecentListTitle();
+  updateAnalyticsAuthState();
+
+  if (currentUser) {
+    statusTitle.textContent = '내 계정으로 최근 분석을 저장 중입니다';
+    statusDetail.textContent = '이제 최근 분석 목록이 내 Google 계정 기준으로 분리되어 표시됩니다.';
+    authUser.style.display = 'grid';
+    avatar.src = currentUser.picture || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+    name.textContent = currentUser.name || currentUser.email;
+    email.textContent = currentUser.email || '';
+  } else if (authConfig?.enabled) {
+    statusTitle.textContent = '로그인해 최근 분석을 저장하세요';
+    statusDetail.textContent = 'Google로 로그인하면 최근 본 종목을 내 계정 기준으로 관리할 수 있습니다.';
+    authUser.style.display = 'none';
+  } else {
+    statusTitle.textContent = 'Google 로그인이 아직 설정되지 않았습니다';
+    statusDetail.textContent = '서버 설정이 완료되면 계정별 최근 분석 저장을 사용할 수 있습니다.';
+    authUser.style.display = 'none';
+  }
+
+  renderGoogleButton();
+}
+
+async function handleGoogleCredential(googleResponse) {
+  if (!googleResponse?.credential) return;
+
+  try {
+    const resp = await apiFetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: googleResponse.credential }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.detail || 'Google 로그인에 실패했습니다.');
+    }
+    currentUser = data.user || null;
+    renderAuthState();
+    trackEvent('login_success', { provider: 'google' });
+    loadRecentList();
+  } catch (error) {
+    trackEvent('login_error', { provider: 'google' });
+    alert(error.message || 'Google 로그인에 실패했습니다.');
+  }
+}
+
+async function logout() {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+  } catch (error) {
+  } finally {
+    if (window.google?.accounts?.id) {
+      window.google.accounts.id.disableAutoSelect();
+    }
+    currentUser = null;
+    renderAuthState();
+    trackEvent('logout', { provider: 'google' });
+    loadRecentList();
+  }
+}
+
+async function initAuth() {
+  await loadAuthConfig();
+  await loadCurrentUser();
+  renderAuthState();
 }
 
 // Theme
@@ -165,7 +341,7 @@ document.addEventListener('click', (e) => {
 async function doSearchAndAnalyze(q) {
   try {
     requireApiConfiguration();
-    const resp = await fetch(buildApiUrl(`/api/search?q=${encodeURIComponent(q)}`));
+    const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
     const data = await resp.json();
     if (data.length > 0) {
       searchInput.value = data[0].corp_name;
@@ -180,7 +356,7 @@ async function doSearchAndAnalyze(q) {
 async function doSearch(q) {
   try {
     requireApiConfiguration();
-    const resp = await fetch(buildApiUrl(`/api/search?q=${encodeURIComponent(q)}`));
+    const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
     const data = await resp.json();
     dropdown.innerHTML = '';
     if (data.length === 0) {
@@ -346,7 +522,7 @@ async function refreshActiveQuote() {
   if (!activeStockCode || activeQuoteLoading || document.hidden || currentAbortController) return;
   activeQuoteLoading = true;
   try {
-    const resp = await fetch(buildApiUrl(`/api/quote/${activeStockCode}`));
+    const resp = await apiFetch(`/api/quote/${activeStockCode}`);
     if (!resp.ok) return;
     const quote = await resp.json();
     renderQuoteSnapshot(quote, activeIndicators);
@@ -547,7 +723,7 @@ async function analyzeStock(stockCode) {
 
   try {
     trackEvent('analysis_start', { stock_code: stockCode });
-    const resp = await fetch(buildApiUrl(`/api/analyze/${stockCode}`), { signal });
+    const resp = await apiFetch(`/api/analyze/${stockCode}`, { signal });
     const contentType = resp.headers.get('content-type') || '';
 
     // 캐시 히트: 일반 JSON 응답
@@ -718,6 +894,7 @@ function renderResult(data) {
 // Recent list
 async function loadRecentList() {
   const refreshBtn = document.getElementById('recentRefreshBtn');
+  updateRecentListTitle();
   if (!hasApiConfiguration()) {
     document.getElementById('recentList').innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">GitHub Pages에서는 API 서버 연결 후 최근 분석 목록을 불러옵니다.</div>';
     if (refreshBtn) refreshBtn.disabled = true;
@@ -732,11 +909,13 @@ async function loadRecentList() {
   }
 
   try {
-    const resp = await fetch(buildApiUrl('/api/cache/list?include_quotes=true'));
+    const resp = await apiFetch('/api/cache/list?include_quotes=true');
     const data = await resp.json();
     const container = document.getElementById('recentList');
     if (data.length === 0) {
-      container.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">아직 분석한 종목이 없습니다.</div>';
+      container.innerHTML = currentUser
+        ? '<div style="color:var(--text-secondary);font-size:13px;">내 계정에 저장된 분석이 아직 없습니다.</div>'
+        : '<div style="color:var(--text-secondary);font-size:13px;">아직 분석한 종목이 없습니다.</div>';
       return;
     }
     container.innerHTML = '';
@@ -796,7 +975,7 @@ function refreshRecentList() {
 
 async function deleteCache(stockCode) {
   try {
-    await fetch(buildApiUrl(`/api/cache/${stockCode}`), { method: 'DELETE' });
+    await apiFetch(`/api/cache/${stockCode}`, { method: 'DELETE' });
     loadRecentList();
   } catch (e) {}
 }
@@ -893,7 +1072,7 @@ async function loadReports(stockCode) {
   }
 
   try {
-    const latestResp = await fetch(buildApiUrl(`/api/reports/${stockCode}/latest?refresh=1`));
+    const latestResp = await apiFetch(`/api/reports/${stockCode}/latest?refresh=1`);
     const latestData = await latestResp.json();
     if (requestId !== reportsRequestId) return;
     const networkLatest = latestData.report || null;
@@ -926,7 +1105,7 @@ async function loadReports(stockCode) {
       return;
     }
 
-    const resp = await fetch(buildApiUrl(`/api/reports/${stockCode}`));
+    const resp = await apiFetch(`/api/reports/${stockCode}`);
     const data = await resp.json();
     if (requestId !== reportsRequestId) return;
 
@@ -963,5 +1142,11 @@ async function loadReports(stockCode) {
 }
 
 // Init
-loadRecentList();
-ensureQuoteRefreshTimer();
+async function initApp() {
+  await initAuth();
+  await loadRecentList();
+  ensureQuoteRefreshTimer();
+  trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
+}
+
+initApp();

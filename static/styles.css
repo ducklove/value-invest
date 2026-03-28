@@ -25,6 +25,73 @@ body {
   width: 340px; background: var(--sidebar-bg); border-right: 1px solid var(--border);
   padding: 20px; flex-shrink: 0; overflow-y: auto;
 }
+.auth-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.auth-copy {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.auth-copy strong {
+  font-size: 14px;
+}
+.auth-copy span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.auth-actions {
+  display: grid;
+  gap: 10px;
+}
+.auth-user {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.auth-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: var(--border);
+}
+.auth-user-copy {
+  min-width: 0;
+}
+.auth-user-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.auth-user-email {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.auth-logout {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.auth-logout:hover {
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
 .sidebar-header {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin-bottom: 12px;
@@ -325,3 +392,14 @@ body {
   text-align:center; margin-top:80px; color:var(--text-secondary);
 }
 .empty-state h2 { font-size:20px; margin-bottom:8px; color:var(--text); }
+
+@media (max-width:900px) {
+  body {
+    display: block;
+  }
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}

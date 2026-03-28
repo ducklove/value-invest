@@ -5,15 +5,17 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import auth_service
 import cache
 import dart_client
 import stock_price
 import analyzer
+import kis_proxy_client
 import report_client
 
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +30,7 @@ ANALYSIS_LOCKS_GUARD = asyncio.Lock()
 LATEST_REPORT_CACHE_TTL_MINUTES = 15
 REPORT_LIST_CACHE_TTL_MINUTES = 60
 RECENT_QUOTES_SEMAPHORE = asyncio.Semaphore(4)
+SESSION_COOKIE_NAME = auth_service.SESSION_COOKIE_NAME
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,8 +40,9 @@ app.add_middleware(
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "https://ducklove.github.io",
+        "https://cantabile.tplinkdns.com:3691",
     ],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -46,7 +50,9 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    await kis_proxy_client.init_client()
     await cache.init_db()
+    await cache.delete_expired_sessions()
     needs_corp_refresh = not await cache.is_corp_codes_loaded() or await cache.corp_codes_need_refresh()
     if needs_corp_refresh:
         logger.info("corp_codes 테이블을 DART 기준으로 갱신합니다...")
@@ -58,6 +64,11 @@ async def startup():
             logger.error(f"corp_codes 다운로드 실패: {e}")
 
 
+@app.on_event("shutdown")
+async def shutdown():
+    await kis_proxy_client.close_client()
+
+
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
@@ -65,7 +76,144 @@ async def index():
 
 @app.get("/app-config.js")
 async def app_config():
-    return FileResponse(STATIC_DIR / "app-config.js", media_type="application/javascript")
+    payload = {"apiBaseUrl": ""}
+    return Response(
+        content=f"window.APP_CONFIG = {json.dumps(payload, ensure_ascii=False)};",
+        media_type="application/javascript",
+    )
+
+
+@app.get("/styles.css")
+async def styles():
+    return FileResponse(STATIC_DIR / "styles.css", media_type="text/css")
+
+
+@app.get("/app.js")
+async def app_js():
+    return FileResponse(STATIC_DIR / "app.js", media_type="application/javascript")
+
+
+def _is_secure_request(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    return request.url.scheme == "https" or forwarded_proto == "https"
+
+
+def _session_cookie_samesite(request: Request) -> str:
+    return "none" if _is_secure_request(request) else "lax"
+
+
+def _serialize_user(user: dict | None) -> dict | None:
+    if not user:
+        return None
+    return {
+        "google_sub": user["google_sub"],
+        "email": user["email"],
+        "name": user["name"],
+        "picture": user.get("picture") or "",
+        "email_verified": bool(user.get("email_verified")),
+    }
+
+
+async def _get_current_user(request: Request) -> dict | None:
+    if not auth_service.is_enabled():
+        return None
+
+    session_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not session_token:
+        return None
+
+    try:
+        token_hash = auth_service.hash_session_token(session_token)
+    except RuntimeError:
+        return None
+    return await cache.get_user_by_session(token_hash)
+
+
+def _set_session_cookie(response: Response, request: Request, session_token: str):
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_token,
+        max_age=auth_service.SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=_is_secure_request(request),
+        samesite=_session_cookie_samesite(request),
+        path="/",
+    )
+
+
+def _clear_session_cookie(response: Response, request: Request):
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path="/",
+        secure=_is_secure_request(request),
+        samesite=_session_cookie_samesite(request),
+    )
+
+
+async def _remember_recent_analysis(user: dict | None, stock_code: str):
+    if user:
+        await cache.touch_user_recent_analysis(user["google_sub"], stock_code)
+
+
+@app.get("/api/auth/config")
+async def auth_config():
+    config = auth_service.public_config()
+    return {
+        "enabled": config["enabled"],
+        "googleClientId": config["google_client_id"],
+    }
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    user = await _get_current_user(request)
+    return {
+        "enabled": auth_service.is_enabled(),
+        "authenticated": bool(user),
+        "user": _serialize_user(user),
+    }
+
+
+@app.post("/api/auth/google")
+async def auth_google(request: Request, response: Response, payload: dict = Body(...)):
+    if not auth_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Google 로그인이 아직 설정되지 않았습니다.")
+
+    credential = str((payload or {}).get("credential") or "").strip()
+    if not credential:
+        raise HTTPException(status_code=400, detail="Google 로그인 토큰이 없습니다.")
+
+    try:
+        user = await auth_service.verify_google_credential(credential)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Google 로그인 검증에 실패했습니다.") from exc
+    except Exception as exc:
+        logger.warning("Google 로그인 검증 실패: %s", exc)
+        raise HTTPException(status_code=502, detail="Google 인증 서버를 확인하지 못했습니다.") from exc
+
+    await cache.upsert_user(user)
+    await cache.delete_expired_sessions()
+
+    session_token = auth_service.new_session_token()
+    await cache.create_user_session(
+        auth_service.hash_session_token(session_token),
+        user["google_sub"],
+        auth_service.session_expiry_iso(),
+    )
+    _set_session_cookie(response, request, session_token)
+    return {"ok": True, "user": _serialize_user(user)}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    session_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if session_token and auth_service.is_enabled():
+        try:
+            await cache.delete_user_session(auth_service.hash_session_token(session_token))
+        except RuntimeError:
+            pass
+    _clear_session_cookie(response, request)
+    return {"ok": True}
 
 
 @app.get("/api/search")
@@ -124,16 +272,16 @@ async def _build_analysis_response(
     cached: bool,
     analyzed_at: str | None = None,
 ) -> dict:
-    try:
-        weekly_mkt_data = await stock_price.fetch_weekly_market_data(stock_code, fin_data)
-    except Exception as e:
-        logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {e}")
+    weekly_mkt_data, quote_snapshot = await asyncio.gather(
+        stock_price.fetch_weekly_market_data(stock_code, fin_data),
+        stock_price.fetch_quote_snapshot(stock_code),
+        return_exceptions=True,
+    )
+    if isinstance(weekly_mkt_data, Exception):
+        logger.warning(f"주간 시장 데이터 계산 실패({stock_code}): {weekly_mkt_data}")
         weekly_mkt_data = []
-
-    try:
-        quote_snapshot = await stock_price.fetch_quote_snapshot(stock_code)
-    except Exception as e:
-        logger.warning(f"현재가 스냅샷 계산 실패({stock_code}): {e}")
+    if isinstance(quote_snapshot, Exception):
+        logger.warning(f"현재가 스냅샷 계산 실패({stock_code}): {quote_snapshot}")
         quote_snapshot = {}
 
     result = analyzer.analyze(fin_data, mkt_data, weekly_mkt_data)
@@ -149,9 +297,15 @@ async def _build_analysis_response(
     return payload
 
 
+def _has_quote_snapshot(quote_snapshot: dict | None) -> bool:
+    return isinstance(quote_snapshot, dict) and quote_snapshot.get("price") is not None
+
+
 async def _attach_quote_snapshots(items: list[dict]) -> list[dict]:
     async def enrich(item: dict) -> dict:
         enriched = dict(item)
+        if _has_quote_snapshot(enriched.get("quote_snapshot")):
+            return enriched
         try:
             async with RECENT_QUOTES_SEMAPHORE:
                 enriched["quote_snapshot"] = await stock_price.fetch_quote_snapshot(item["stock_code"])
@@ -196,33 +350,66 @@ async def _ensure_financial_coverage(stock_code: str, corp_code: str | None, fin
     return await _ensure_financial_report_dates(stock_code, corp_code, merged)
 
 
-@app.get("/api/analyze/{stock_code}")
-async def analyze_stock(stock_code: str):
-    corp_code = await cache.get_corp_code(stock_code)
-    if not corp_code:
-        raise HTTPException(status_code=404, detail="종목코드를 찾을 수 없습니다.")
+async def _load_cached_analysis_payload(
+    stock_code: str,
+    corp_code: str | None,
+    corp_name: str,
+    analyzed_at: str | None,
+) -> dict:
+    fin_data = await cache.get_financial_data(stock_code)
+    if corp_code:
+        fin_data = await _ensure_financial_report_dates(stock_code, corp_code, fin_data)
 
-    # 캐시 확인
-    meta = await cache.get_analysis_meta(stock_code)
-    if meta:
-        fin_data = await cache.get_financial_data(stock_code)
+    mkt_data = await cache.get_market_data(stock_code)
+    needs_market_refresh = stock_price.market_data_needs_refresh(mkt_data)
+
+    if corp_code and (not fin_data or needs_market_refresh):
         fin_data = await _ensure_financial_coverage(stock_code, corp_code, fin_data)
-        mkt_data = await cache.get_market_data(stock_code)
+
+    if needs_market_refresh:
         try:
             refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
             if refreshed:
                 mkt_data = refreshed
                 await cache.save_market_data(stock_code, refreshed)
         except Exception as e:
-            logger.warning(f"시장 데이터 재계산 실패({stock_code}): {e}")
-        return await _build_analysis_response(
+            logger.warning(f"시장 데이터 갱신 실패({stock_code}): {e}")
+
+    payload = await _build_analysis_response(
+        stock_code,
+        corp_name,
+        fin_data,
+        mkt_data,
+        cached=True,
+        analyzed_at=analyzed_at,
+    )
+    await cache.save_analysis_snapshot(stock_code, corp_name, payload)
+    return payload
+
+
+@app.get("/api/analyze/{stock_code}")
+async def analyze_stock(stock_code: str, request: Request):
+    current_user = await _get_current_user(request)
+    snapshot = await cache.get_analysis_snapshot(stock_code)
+    if snapshot:
+        await _remember_recent_analysis(current_user, stock_code)
+        return snapshot
+
+    meta = await cache.get_analysis_meta(stock_code)
+    if meta:
+        corp_code = await cache.get_corp_code(stock_code)
+        payload = await _load_cached_analysis_payload(
             stock_code,
+            corp_code,
             meta["corp_name"],
-            fin_data,
-            mkt_data,
-            cached=True,
-            analyzed_at=meta["analyzed_at"],
+            meta.get("analyzed_at"),
         )
+        await _remember_recent_analysis(current_user, stock_code)
+        return payload
+
+    corp_code = await cache.get_corp_code(stock_code)
+    if not corp_code:
+        raise HTTPException(status_code=404, detail="종목코드를 찾을 수 없습니다.")
 
     corp_name = await cache.get_corp_name(stock_code)
 
@@ -235,26 +422,21 @@ async def analyze_stock(stock_code: str):
             yield _sse_event("progress", {"step": "queued_global", "message": "다른 분석 작업이 많아 잠시 대기합니다..."})
 
         async with stock_lock:
+            snapshot = await cache.get_analysis_snapshot(stock_code)
+            if snapshot:
+                await _remember_recent_analysis(current_user, stock_code)
+                yield _sse_event("result", snapshot)
+                return
+
             meta = await cache.get_analysis_meta(stock_code)
             if meta:
-                fin_data = await cache.get_financial_data(stock_code)
-                fin_data = await _ensure_financial_coverage(stock_code, corp_code, fin_data)
-                mkt_data = await cache.get_market_data(stock_code)
-                try:
-                    refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
-                    if refreshed:
-                        mkt_data = refreshed
-                        await cache.save_market_data(stock_code, refreshed)
-                except Exception as e:
-                    logger.warning(f"시장 데이터 재계산 실패({stock_code}): {e}")
-                payload = await _build_analysis_response(
+                payload = await _load_cached_analysis_payload(
                     stock_code,
+                    corp_code,
                     meta["corp_name"],
-                    fin_data,
-                    mkt_data,
-                    cached=True,
-                    analyzed_at=meta["analyzed_at"],
+                    meta.get("analyzed_at"),
                 )
+                await _remember_recent_analysis(current_user, stock_code)
                 yield _sse_event("result", payload)
                 return
 
@@ -324,7 +506,6 @@ async def analyze_stock(stock_code: str):
                     await cache.save_financial_data(stock_code, fin_data)
                 if mkt_data:
                     await cache.save_market_data(stock_code, mkt_data)
-                await cache.save_analysis_meta(stock_code, corp_name or stock_code)
 
                 yield _sse_event("progress", {"step": "analyzing", "message": "지표를 계산합니다..."})
                 payload = await _build_analysis_response(
@@ -334,6 +515,8 @@ async def analyze_stock(stock_code: str):
                     mkt_data,
                     cached=False,
                 )
+                await cache.save_analysis_snapshot(stock_code, corp_name or stock_code, payload)
+                await _remember_recent_analysis(current_user, stock_code)
                 yield _sse_event("result", payload)
 
     return StreamingResponse(stream(), media_type="text/event-stream")
@@ -412,14 +595,23 @@ async def proxy_report_pdf(url: str = Query(..., min_length=1)):
 
 
 @app.delete("/api/cache/{stock_code}")
-async def delete_cache(stock_code: str):
+async def delete_cache(stock_code: str, request: Request):
+    current_user = await _get_current_user(request)
+    if current_user:
+        await cache.delete_user_recent_analysis(current_user["google_sub"], stock_code)
+        return {"ok": True, "scope": "user"}
     await cache.delete_analysis(stock_code)
-    return {"ok": True}
+    return {"ok": True, "scope": "global"}
 
 
 @app.get("/api/cache/list")
-async def cache_list(include_quotes: bool = Query(False)):
-    items = await cache.get_cached_analyses()
+async def cache_list(request: Request, include_quotes: bool = Query(False)):
+    current_user = await _get_current_user(request)
+    items = await cache.get_cached_analyses(
+        limit=20,
+        include_quotes=include_quotes,
+        google_sub=current_user["google_sub"] if current_user else None,
+    )
     if include_quotes:
         return await _attach_quote_snapshots(items)
     return items
