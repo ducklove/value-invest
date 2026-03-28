@@ -77,19 +77,19 @@ def analyze(
         operating_margin_series.append({"year": year, "value": op_margin})
 
     weekly_indicators = {
-        "주간 주가 (최근 3년)": [
+        "주간 주가": [
             {"date": item["date"], "value": item.get("close_price")}
             for item in (weekly_market_data or [])
         ],
-        "주간 PER (최근 3년)": [
+        "주간 PER": [
             {"date": item["date"], "value": item.get("per")}
             for item in (weekly_market_data or [])
         ],
-        "주간 PBR (최근 3년)": [
+        "주간 PBR": [
             {"date": item["date"], "value": item.get("pbr")}
             for item in (weekly_market_data or [])
         ],
-        "주간 배당수익률 (최근 3년)": [
+        "주간 배당수익률": [
             {"date": item["date"], "value": item.get("dividend_yield")}
             for item in (weekly_market_data or [])
         ],

@@ -166,6 +166,13 @@ async def _ensure_financial_report_dates(stock_code: str, corp_code: str | None,
     return fin_data
 
 
+async def _ensure_financial_coverage(stock_code: str, corp_code: str | None, fin_data: list[dict]) -> list[dict]:
+    merged = await stock_price.ensure_financial_data_coverage(stock_code, fin_data)
+    if merged != fin_data:
+        await cache.save_financial_data(stock_code, merged)
+    return await _ensure_financial_report_dates(stock_code, corp_code, merged)
+
+
 @app.get("/api/analyze/{stock_code}")
 async def analyze_stock(stock_code: str):
     corp_code = await cache.get_corp_code(stock_code)
@@ -176,7 +183,7 @@ async def analyze_stock(stock_code: str):
     meta = await cache.get_analysis_meta(stock_code)
     if meta:
         fin_data = await cache.get_financial_data(stock_code)
-        fin_data = await _ensure_financial_report_dates(stock_code, corp_code, fin_data)
+        fin_data = await _ensure_financial_coverage(stock_code, corp_code, fin_data)
         mkt_data = await cache.get_market_data(stock_code)
         try:
             refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
@@ -208,7 +215,7 @@ async def analyze_stock(stock_code: str):
             meta = await cache.get_analysis_meta(stock_code)
             if meta:
                 fin_data = await cache.get_financial_data(stock_code)
-                fin_data = await _ensure_financial_report_dates(stock_code, corp_code, fin_data)
+                fin_data = await _ensure_financial_coverage(stock_code, corp_code, fin_data)
                 mkt_data = await cache.get_market_data(stock_code)
                 try:
                     refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
@@ -263,6 +270,15 @@ async def analyze_stock(stock_code: str):
                 except Exception as e:
                     logger.error(f"DART 재무제표 조회 실패: {e}")
                     yield _sse_event("progress", {"step": "dart_error", "message": f"DART 조회 실패: {e}"})
+
+                try:
+                    fin_data = await _ensure_financial_coverage(stock_code, corp_code, fin_data)
+                    yield _sse_event("progress", {
+                        "step": "dart_done",
+                        "message": f"연간 재무 범위 보강 완료 ({len(fin_data)}개년 데이터)",
+                    })
+                except Exception as e:
+                    logger.warning(f"재무 범위 보강 실패({stock_code}): {e}")
 
                 yield _sse_event("progress", {"step": "market_start", "message": "시장 데이터와 파생 지표를 계산합니다..."})
                 mkt_data = []

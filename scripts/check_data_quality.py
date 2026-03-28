@@ -86,9 +86,7 @@ def _detect_series_anomalies(
         split_summaries = [f"{ts.date()} x{ratio:g}" for ts, ratio in split_events]
         for year, raw_value in sorted(raw_dividends_by_year.items()):
             adjusted_value = adjusted_dividends_by_year.get(year)
-            if raw_value is None or adjusted_value is None:
-                continue
-            if raw_value == 0:
+            if raw_value is None or adjusted_value is None or raw_value == 0:
                 continue
             diff_ratio = abs(adjusted_value - raw_value) / abs(raw_value)
             if diff_ratio >= 0.5:
@@ -141,9 +139,9 @@ async def _inspect_stock(stock_code: str, args: argparse.Namespace) -> dict:
         raw_splits = None
 
     split_events = stock_price._normalized_split_events(raw_splits)
-    adjusted_dividends = stock_price._adjust_dividends_for_splits(raw_dividends, split_events)
-    raw_dividends_by_year = stock_price._group_sum_by_year(raw_dividends)
-    adjusted_dividends_by_year = stock_price._group_sum_by_year(adjusted_dividends)
+    adjusted_dividends = raw_dividends
+    raw_dividends_by_year = stock_price._group_sum_by_year_series(raw_dividends)
+    adjusted_dividends_by_year = stock_price._group_sum_by_year_series(adjusted_dividends)
 
     findings = _detect_series_anomalies(
         stock_code,
