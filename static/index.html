@@ -419,12 +419,17 @@ const CHART_COLORS = [
   '#dc2626','#0891b2','#4f46e5','#c026d3'
 ];
 const PER_DISPLAY_MAX = 100;
+const QUOTE_REFRESH_INTERVAL_MS = 10_000;
 
 let charts = {};
 let searchTimeout = null;
 let selectedIdx = -1;
 let currentAbortController = null;
 let recentListLoading = false;
+let activeStockCode = null;
+let activeIndicators = {};
+let quoteRefreshTimer = null;
+let activeQuoteLoading = false;
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
 const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
 const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -701,6 +706,60 @@ function renderCurrentValuationSummary(indicators, quoteSnapshot) {
   const dividendYield = latestDps !== null ? (latestDps / currentPrice) * 100 : null;
 
   return `현재가 기준 PER ${formatMetricNumber(per)} · PBR ${formatMetricNumber(pbr)} · 배당수익률 ${formatMetricNumber(dividendYield, '%')}`;
+}
+
+function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
+  const quoteSummary = document.getElementById('quoteSummary');
+  const quotePrice = document.getElementById('quotePrice');
+  const quoteChange = document.getElementById('quoteChange');
+  const quoteDate = document.getElementById('quoteDate');
+  const coverageNote = document.getElementById('coverageNote');
+  const quote = quoteSnapshot || {};
+
+  if (quote.price !== null && quote.price !== undefined) {
+    quoteSummary.style.display = 'flex';
+    quotePrice.textContent = `${Number(quote.price).toLocaleString()}원`;
+    const change = Number(quote.change || 0);
+    const changePct = quote.change_pct;
+    const changePrefix = change > 0 ? '+' : '';
+    quoteChange.textContent = changePct !== null && changePct !== undefined
+      ? `${changePrefix}${change.toLocaleString()}원 (${changePrefix}${Number(changePct).toLocaleString()}%)`
+      : '변동 정보 없음';
+    quoteChange.className = 'quote-change';
+    quoteChange.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
+    quoteDate.textContent = quote.date ? `${quote.date} 기준` : '';
+  } else {
+    quoteSummary.style.display = 'none';
+    quotePrice.textContent = '';
+    quoteChange.textContent = '';
+    quoteDate.textContent = '';
+  }
+
+  coverageNote.textContent = renderCurrentValuationSummary(indicators || {}, quote);
+}
+
+async function refreshActiveQuote() {
+  if (!activeStockCode || activeQuoteLoading || document.hidden || currentAbortController) return;
+  activeQuoteLoading = true;
+  try {
+    const resp = await fetch(buildApiUrl(`/api/quote/${activeStockCode}`));
+    if (!resp.ok) return;
+    const quote = await resp.json();
+    renderQuoteSnapshot(quote, activeIndicators);
+  } catch (e) {
+  } finally {
+    activeQuoteLoading = false;
+  }
+}
+
+function ensureQuoteRefreshTimer() {
+  if (quoteRefreshTimer !== null) return;
+  quoteRefreshTimer = window.setInterval(() => {
+    if (!document.hidden) {
+      loadRecentList();
+      refreshActiveQuote();
+    }
+  }, QUOTE_REFRESH_INTERVAL_MS);
 }
 
 function isPerChart(key) {
@@ -1002,33 +1061,12 @@ function renderResult(data) {
   // Company info
   const infoEl = document.getElementById('companyInfo');
   infoEl.style.display = 'block';
+  activeStockCode = data.stock_code;
+  activeIndicators = data.indicators || {};
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
   document.getElementById('companyMeta').textContent = cachedText;
-  document.getElementById('coverageNote').textContent = renderCurrentValuationSummary(data.indicators || {}, data.quote_snapshot || {});
-  const quoteSummary = document.getElementById('quoteSummary');
-  const quotePrice = document.getElementById('quotePrice');
-  const quoteChange = document.getElementById('quoteChange');
-  const quoteDate = document.getElementById('quoteDate');
-  const quote = data.quote_snapshot || {};
-  if (quote.price !== null && quote.price !== undefined) {
-    quoteSummary.style.display = 'flex';
-    quotePrice.textContent = `${Number(quote.price).toLocaleString()}원`;
-    const change = Number(quote.change || 0);
-    const changePct = quote.change_pct;
-    const changePrefix = change > 0 ? '+' : '';
-    quoteChange.textContent = changePct !== null && changePct !== undefined
-      ? `${changePrefix}${change.toLocaleString()}원 (${changePrefix}${Number(changePct).toLocaleString()}%)`
-      : '변동 정보 없음';
-    quoteChange.className = 'quote-change';
-    quoteChange.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
-    quoteDate.textContent = quote.date ? `${quote.date} 기준` : '';
-  } else {
-    quoteSummary.style.display = 'none';
-    quotePrice.textContent = '';
-    quoteChange.textContent = '';
-    quoteDate.textContent = '';
-  }
+  renderQuoteSnapshot(data.quote_snapshot || {}, activeIndicators);
   trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
 
   // Load reports asynchronously
@@ -1315,6 +1353,7 @@ async function loadReports(stockCode) {
 
 // Init
 loadRecentList();
+ensureQuoteRefreshTimer();
 </script>
 </body>
 </html>

@@ -74,6 +74,14 @@ async def search(q: str = Query(..., min_length=1)):
     return results
 
 
+@app.get("/api/quote/{stock_code}")
+async def quote_snapshot(stock_code: str):
+    corp_code = await cache.get_corp_code(stock_code)
+    if not corp_code:
+        raise HTTPException(status_code=404, detail="종목코드를 찾을 수 없습니다.")
+    return await stock_price.fetch_quote_snapshot(stock_code)
+
+
 async def _get_analysis_lock(stock_code: str) -> asyncio.Lock:
     async with ANALYSIS_LOCKS_GUARD:
         lock = ANALYSIS_LOCKS.get(stock_code)
