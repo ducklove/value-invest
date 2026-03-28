@@ -74,13 +74,18 @@ body {
   margin-bottom: 6px; transition: background 0.15s;
 }
 .sidebar-item:hover { background: var(--border); }
-.sidebar-item { display:flex; align-items:flex-start; justify-content:space-between; gap: 8px; }
-.sidebar-item .info {
-  flex:1; min-width:0;
-  display:flex;
+.sidebar-item {
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items:center;
-  justify-content:space-between;
-  gap: 10px;
+  column-gap: 8px;
+}
+.sidebar-item .info {
+  min-width:0;
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items:baseline;
+  column-gap: 12px;
 }
 .sidebar-item .name {
   font-weight: 600; font-size: 14px;
@@ -90,6 +95,7 @@ body {
   display:flex;
   align-items:baseline;
   gap: 6px;
+  justify-self: end;
   flex-shrink: 0;
 }
 .sidebar-item .quote-price,
@@ -113,7 +119,6 @@ body {
   color:var(--text-secondary); font-size:16px; padding:4px 6px; border-radius:4px;
   transition: opacity 0.15s, color 0.15s;
   flex-shrink:0;
-  margin-top: -2px;
 }
 .sidebar-item:hover .delete-btn { opacity:1; }
 .sidebar-item .delete-btn:hover { color:#dc2626; }
