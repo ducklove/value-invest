@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Query, Request, Response
@@ -177,6 +177,12 @@ def _append_query_value(url: str, key: str, value: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(query_pairs)))
 
 
+async def _read_post_fields(request: Request) -> dict[str, str]:
+    body = (await request.body()).decode("utf-8", errors="ignore")
+    parsed = parse_qs(body, keep_blank_values=True)
+    return {key: values[-1] for key, values in parsed.items() if values}
+
+
 async def _remember_recent_analysis(user: dict | None, stock_code: str):
     if user:
         await cache.touch_user_recent_analysis(user["google_sub"], stock_code)
@@ -250,7 +256,7 @@ async def auth_google_callback(request: Request):
     if not auth_service.is_enabled():
         return RedirectResponse(_append_query_value(return_to, "auth_error", "not_configured"), status_code=303)
 
-    form = await request.form()
+    form = await _read_post_fields(request)
     credential = str(form.get("credential") or "").strip()
     csrf_cookie = str(request.cookies.get("g_csrf_token") or "").strip()
     csrf_form = str(form.get("g_csrf_token") or "").strip()
