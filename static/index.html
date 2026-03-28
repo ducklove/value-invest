@@ -151,10 +151,14 @@ body {
   border-radius:12px; padding:16px 20px;
 }
 .chart-card h3 { font-size:15px; margin-bottom:12px; color:var(--text-secondary); }
+.chart-canvas-wrap {
+  position: relative;
+  height: 220px;
+}
 .chart-note {
   margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.4;
 }
-.chart-card canvas { width:100%!important; height:220px!important; }
+.chart-card canvas { display:block; width:100%!important; height:100%!important; }
 
 /* Loading overlay */
 .loading-overlay {
@@ -664,10 +668,11 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
     if (series.length === 0) return;
 
     const { labelField, labels, values, rawValues, note, spanGaps } = buildChartSeries(key, series);
+    const isWeeklyChart = labelField === 'date';
 
     const card = document.createElement('div');
     card.className = 'chart-card';
-    card.innerHTML = `<h3>${key}</h3><canvas id="${prefix}-chart-${i}"></canvas>`;
+    card.innerHTML = `<h3>${key}</h3><div class="chart-canvas-wrap"><canvas id="${prefix}-chart-${i}"></canvas></div>`;
     if (note) {
       const noteEl = document.createElement('div');
       noteEl.className = 'chart-note';
@@ -687,9 +692,11 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
           borderColor: CHART_COLORS[i % CHART_COLORS.length],
           backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '22',
           borderWidth: 2.5,
-          pointRadius: labelField === 'date' ? 0 : 4,
+          pointRadius: isWeeklyChart ? 0 : 4,
+          pointHoverRadius: isWeeklyChart ? 4 : 6,
+          pointHitRadius: isWeeklyChart ? 12 : 8,
           pointBackgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-          fill: true,
+          fill: !isWeeklyChart,
           tension: 0.3,
           spanGaps,
         }]
@@ -697,6 +704,11 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: {
+          mode: 'nearest',
+          axis: 'xy',
+          intersect: true,
+        },
         plugins: {
           legend: { display: false },
           tooltip: {
