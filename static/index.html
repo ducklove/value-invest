@@ -53,7 +53,22 @@ body {
   width: 260px; background: var(--sidebar-bg); border-right: 1px solid var(--border);
   padding: 20px; flex-shrink: 0; overflow-y: auto;
 }
-.sidebar h3 { font-size: 14px; color: var(--text-secondary); margin-bottom: 12px; }
+.sidebar-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 12px;
+}
+.sidebar h3 { font-size: 14px; color: var(--text-secondary); }
+.sidebar-refresh {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sidebar-refresh:hover { color: var(--text); border-color: var(--text-secondary); }
+.sidebar-refresh:disabled { opacity: 0.6; cursor: wait; }
 .sidebar-item {
   padding: 10px 12px; border-radius: 8px; cursor: pointer;
   margin-bottom: 6px; transition: background 0.15s;
@@ -63,6 +78,15 @@ body {
 .sidebar-item .info { flex:1; min-width:0; }
 .sidebar-item .name { font-weight: 600; font-size: 14px; }
 .sidebar-item .code { font-size: 12px; color: var(--text-secondary); }
+.sidebar-item .quote-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-item .quote-change.up { color: #b91c1c; }
+.sidebar-item .quote-change.down { color: #1d4ed8; }
+.sidebar-item .quote-change.flat { color: var(--text-secondary); }
 .sidebar-item .delete-btn {
   opacity:0; border:none; background:none; cursor:pointer;
   color:var(--text-secondary); font-size:16px; padding:4px 6px; border-radius:4px;
@@ -282,7 +306,10 @@ body {
 <body>
 
 <aside class="sidebar">
-  <h3>최근 분석 종목</h3>
+  <div class="sidebar-header">
+    <h3>최근 분석 종목</h3>
+    <button class="sidebar-refresh" id="recentRefreshBtn" type="button" onclick="refreshRecentList()">새로고침</button>
+  </div>
   <div id="recentList">
     <div style="color:var(--text-secondary);font-size:13px;">아직 분석한 종목이 없습니다.</div>
   </div>
@@ -375,6 +402,7 @@ let charts = {};
 let searchTimeout = null;
 let selectedIdx = -1;
 let currentAbortController = null;
+let recentListLoading = false;
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
 const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
 const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -993,13 +1021,22 @@ function renderResult(data) {
 
 // Recent list
 async function loadRecentList() {
+  const refreshBtn = document.getElementById('recentRefreshBtn');
   if (!hasApiConfiguration()) {
     document.getElementById('recentList').innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">GitHub Pages에서는 API 서버 연결 후 최근 분석 목록을 불러옵니다.</div>';
+    if (refreshBtn) refreshBtn.disabled = true;
     return;
   }
 
+  if (recentListLoading) return;
+  recentListLoading = true;
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '갱신 중';
+  }
+
   try {
-    const resp = await fetch(buildApiUrl('/api/cache/list'));
+    const resp = await fetch(buildApiUrl('/api/cache/list?include_quotes=true'));
     const data = await resp.json();
     const container = document.getElementById('recentList');
     if (data.length === 0) {
@@ -1024,6 +1061,21 @@ async function loadRecentList() {
       code.textContent = item.stock_code;
       info.append(name, code);
 
+      const quote = item.quote_snapshot || {};
+      if (quote.price !== null && quote.price !== undefined) {
+        const quoteMeta = document.createElement('div');
+        quoteMeta.className = 'quote-meta';
+        const change = Number(quote.change || 0);
+        const changePct = quote.change_pct;
+        const changePrefix = change > 0 ? '+' : '';
+        const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+        const changeText = changePct !== null && changePct !== undefined
+          ? `${changePrefix}${change.toLocaleString()}원 (${changePrefix}${Number(changePct).toLocaleString()}%)`
+          : '변동 정보 없음';
+        quoteMeta.innerHTML = `${Number(quote.price).toLocaleString()}원 <span class="quote-change ${changeClass}">${changeText}</span>`;
+        info.appendChild(quoteMeta);
+      }
+
       const button = document.createElement('button');
       button.className = 'delete-btn';
       button.title = '삭제';
@@ -1033,7 +1085,18 @@ async function loadRecentList() {
       wrapper.append(info, button);
       container.appendChild(wrapper);
     });
-  } catch (e) {}
+  } catch (e) {
+  } finally {
+    recentListLoading = false;
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = '새로고침';
+    }
+  }
+}
+
+function refreshRecentList() {
+  loadRecentList();
 }
 
 async function deleteCache(stockCode) {

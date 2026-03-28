@@ -27,6 +27,7 @@ ANALYSIS_LOCKS: dict[str, asyncio.Lock] = {}
 ANALYSIS_LOCKS_GUARD = asyncio.Lock()
 LATEST_REPORT_CACHE_TTL_MINUTES = 15
 REPORT_LIST_CACHE_TTL_MINUTES = 60
+RECENT_QUOTES_SEMAPHORE = asyncio.Semaphore(4)
 
 app.add_middleware(
     CORSMiddleware,
@@ -138,6 +139,20 @@ async def _build_analysis_response(
     if analyzed_at:
         payload["analyzed_at"] = analyzed_at
     return payload
+
+
+async def _attach_quote_snapshots(items: list[dict]) -> list[dict]:
+    async def enrich(item: dict) -> dict:
+        enriched = dict(item)
+        try:
+            async with RECENT_QUOTES_SEMAPHORE:
+                enriched["quote_snapshot"] = await stock_price.fetch_quote_snapshot(item["stock_code"])
+        except Exception as exc:
+            logger.warning("사이드바 현재가 조회 실패(%s): %s", item.get("stock_code"), exc)
+            enriched["quote_snapshot"] = {}
+        return enriched
+
+    return await asyncio.gather(*(enrich(item) for item in items))
 
 
 async def _ensure_financial_report_dates(stock_code: str, corp_code: str | None, fin_data: list[dict]) -> list[dict]:
@@ -395,8 +410,11 @@ async def delete_cache(stock_code: str):
 
 
 @app.get("/api/cache/list")
-async def cache_list():
-    return await cache.get_cached_analyses()
+async def cache_list(include_quotes: bool = Query(False)):
+    items = await cache.get_cached_analyses()
+    if include_quotes:
+        return await _attach_quote_snapshots(items)
+    return items
 
 
 # 정적 파일 서빙 (CSS, JS 등 추가 시 대비)
