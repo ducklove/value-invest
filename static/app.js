@@ -1,0 +1,967 @@
+const ANNUAL_CHART_KEYS = [
+  '주가 (원)', '시가총액 (억원)', 'PER', 'PBR', 'ROE (%)', 'EPS (원)',
+  '부채비율 (%)', '영업이익률 (%)', '배당수익률 (%)', '주당배당금 (원)'
+];
+
+const WEEKLY_CHART_KEYS = [
+  '주간 주가', '주간 PER', '주간 PBR', '주간 배당수익률'
+];
+
+const CHART_COLORS = [
+  '#e11d48','#2563eb','#7c3aed','#059669','#d97706',
+  '#dc2626','#0891b2','#4f46e5','#c026d3'
+];
+const PER_DISPLAY_MAX = 100;
+const QUOTE_REFRESH_INTERVAL_MS = 10_000;
+
+let charts = {};
+let searchTimeout = null;
+let selectedIdx = -1;
+let currentAbortController = null;
+let recentListLoading = false;
+let activeStockCode = null;
+let activeIndicators = {};
+let quoteRefreshTimer = null;
+let activeQuoteLoading = false;
+const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
+const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
+const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+function buildApiUrl(path) {
+  return `${API_BASE_URL}${path}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeExternalUrl(value) {
+  if (!value) return '';
+  try {
+    const url = new URL(value, window.location.href);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function buildReportPdfUrl(pdfUrl) {
+  if (!pdfUrl) return '';
+  return buildApiUrl(`/api/report-pdf?url=${encodeURIComponent(pdfUrl)}`);
+}
+
+function getReportCacheKey(stockCode) {
+  return `report_cache:${stockCode}`;
+}
+
+function loadReportCache(stockCode) {
+  try {
+    const raw = localStorage.getItem(getReportCacheKey(stockCode));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed.savedAt || (Date.now() - parsed.savedAt) > REPORT_LOCAL_CACHE_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveReportCache(stockCode, payload) {
+  try {
+    localStorage.setItem(getReportCacheKey(stockCode), JSON.stringify({
+      ...payload,
+      savedAt: Date.now(),
+    }));
+  } catch {}
+}
+
+function sameReport(a, b) {
+  if (!a || !b) return false;
+  return a.date === b.date && a.title === b.title && a.firm === b.firm && a.pdf_url === b.pdf_url;
+}
+
+function hasApiConfiguration() {
+  return !IS_GITHUB_PAGES || Boolean(API_BASE_URL);
+}
+
+function requireApiConfiguration() {
+  if (!hasApiConfiguration()) {
+    throw new Error('GitHub Pages에서는 app-config.js의 apiBaseUrl에 FastAPI 서버 주소를 설정해야 합니다.');
+  }
+}
+
+// Theme
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  Object.values(charts).forEach(c => c.update());
+  trackEvent('theme_toggle', { theme: next });
+}
+(function initTheme() {
+  const saved = localStorage.getItem('theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+})();
+
+// Search
+const searchInput = document.getElementById('searchInput');
+const dropdown = document.getElementById('dropdown');
+
+function updateActiveItem() {
+  const items = dropdown.querySelectorAll('.dropdown-item[data-stock]');
+  items.forEach((el, i) => el.classList.toggle('active', i === selectedIdx));
+  if (selectedIdx >= 0 && items[selectedIdx]) {
+    items[selectedIdx].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  selectedIdx = -1;
+  const q = searchInput.value.trim();
+  if (q.length < 1) { dropdown.classList.remove('show'); return; }
+  searchTimeout = setTimeout(() => doSearch(q), 250);
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  const items = dropdown.querySelectorAll('.dropdown-item[data-stock]');
+  if (e.key === 'Escape') { dropdown.classList.remove('show'); selectedIdx = -1; return; }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (items.length > 0) { selectedIdx = Math.min(selectedIdx + 1, items.length - 1); updateActiveItem(); }
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (items.length > 0) { selectedIdx = Math.max(selectedIdx - 1, 0); updateActiveItem(); }
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    dropdown.classList.remove('show');
+    if (selectedIdx >= 0 && items[selectedIdx]) {
+      items[selectedIdx].click();
+    } else if (items.length > 0) {
+      items[0].click();
+    } else {
+      const q = searchInput.value.trim();
+      if (q.length > 0) doSearchAndAnalyze(q);
+    }
+    selectedIdx = -1;
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-container')) dropdown.classList.remove('show');
+});
+
+async function doSearchAndAnalyze(q) {
+  try {
+    requireApiConfiguration();
+    const resp = await fetch(buildApiUrl(`/api/search?q=${encodeURIComponent(q)}`));
+    const data = await resp.json();
+    if (data.length > 0) {
+      searchInput.value = data[0].corp_name;
+      trackEvent('stock_select', { stock_code: data[0].stock_code, source: 'enter' });
+      analyzeStock(data[0].stock_code);
+    }
+  } catch (error) {
+    alert(error.message || '검색 중 오류가 발생했습니다.');
+  }
+}
+
+async function doSearch(q) {
+  try {
+    requireApiConfiguration();
+    const resp = await fetch(buildApiUrl(`/api/search?q=${encodeURIComponent(q)}`));
+    const data = await resp.json();
+    dropdown.innerHTML = '';
+    if (data.length === 0) {
+      dropdown.innerHTML = '<div class="dropdown-item" style="color:var(--text-secondary)">검색 결과 없음</div>';
+    } else {
+      data.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'dropdown-item';
+        div.dataset.stock = item.stock_code;
+        const name = document.createElement('span');
+        name.textContent = item.corp_name;
+        const code = document.createElement('span');
+        code.style.color = 'var(--text-secondary)';
+        code.textContent = item.stock_code;
+        div.append(name, code);
+        div.addEventListener('click', () => {
+          dropdown.classList.remove('show');
+          searchInput.value = item.corp_name;
+          trackEvent('stock_select', { stock_code: item.stock_code, source: 'dropdown' });
+          analyzeStock(item.stock_code);
+        });
+        dropdown.appendChild(div);
+      });
+    }
+    trackEvent('search_results', { result_count: data.length });
+    dropdown.classList.add('show');
+  } catch (error) {
+    dropdown.innerHTML = `<div class="dropdown-item" style="color:var(--text-secondary)">${escapeHtml(error.message || '검색 중 오류가 발생했습니다.')}</div>`;
+    dropdown.classList.add('show');
+  }
+}
+
+// Analyze
+const STEP_LABELS = {
+  start: '분석 시작',
+  dart_start: 'DART 재무제표 수집',
+  dart_fetch: 'DART 재무제표 조회',
+  dart_done: 'DART 수집 완료',
+  dart_error: 'DART 조회 실패',
+  market_start: '시장 데이터 및 파생 지표 계산',
+  market_done: '시장 데이터 수집 완료',
+  market_error: '시장 데이터 조회 실패',
+  saving: '캐시 저장',
+  analyzing: '지표 계산',
+};
+
+function getSeriesCoverage(series) {
+  const years = (series || [])
+    .filter(item => item && item.value !== null && item.value !== undefined)
+    .map(item => item.year)
+    .filter(year => Number.isFinite(year));
+  if (years.length === 0) return '';
+  const startYear = Math.min(...years);
+  const endYear = Math.max(...years);
+  return startYear === endYear ? String(startYear) : `${startYear}-${endYear}`;
+}
+
+function getWeeklyDateCoverage(series) {
+  const dates = (series || [])
+    .filter(item => item && item.value !== null && item.value !== undefined && item.date)
+    .map(item => item.date)
+    .sort();
+  if (dates.length === 0) return null;
+  return {
+    startDate: dates[0],
+    endDate: dates[dates.length - 1],
+  };
+}
+
+function formatWeeklySectionTitle(weeklyIndicators) {
+  const coverage = getWeeklyDateCoverage(weeklyIndicators?.['주간 주가'] || weeklyIndicators?.['주간 PER'] || []);
+  if (!coverage) return '주간 밸류에이션';
+  return `주간 밸류에이션 (${coverage.startDate} ~ ${coverage.endDate})`;
+}
+
+function getLatestIndicatorValue(series) {
+  const entries = (series || []).filter(item => item && item.value !== null && item.value !== undefined && Number.isFinite(Number(item.value)));
+  if (entries.length === 0) return null;
+  return Number(entries[entries.length - 1].value);
+}
+
+function formatMetricNumber(value, suffix = '') {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? 'N/A'
+    : `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
+}
+
+function getLatestDerivedBps(indicators) {
+  const priceByYear = new Map((indicators['주가 (원)'] || []).map(item => [item.year, Number(item.value)]));
+  const pbrSeries = indicators['PBR'] || [];
+
+  for (let index = pbrSeries.length - 1; index >= 0; index -= 1) {
+    const item = pbrSeries[index];
+    const pbr = Number(item?.value);
+    const price = priceByYear.get(item?.year);
+    if (Number.isFinite(price) && Number.isFinite(pbr) && pbr > 0) {
+      return price / pbr;
+    }
+  }
+
+  return null;
+}
+
+function getCurrentValuationMetrics(indicators, quoteSnapshot) {
+  const currentPrice = Number(quoteSnapshot?.price);
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    return { per: null, pbr: null, dividendYield: null };
+  }
+
+  const latestEps = getLatestIndicatorValue(indicators['EPS (원)']);
+  const latestDps = getLatestIndicatorValue(indicators['주당배당금 (원)']);
+  const latestBps = getLatestDerivedBps(indicators);
+
+  return {
+    per: latestEps && latestEps > 0 ? currentPrice / latestEps : null,
+    pbr: latestBps && latestBps > 0 ? currentPrice / latestBps : null,
+    dividendYield: latestDps !== null ? (latestDps / currentPrice) * 100 : null,
+  };
+}
+
+function renderCurrentValuationSummary(indicators, quoteSnapshot) {
+  const metrics = getCurrentValuationMetrics(indicators, quoteSnapshot);
+  return [
+    { label: 'PER', value: formatMetricNumber(metrics.per) },
+    { label: 'PBR', value: formatMetricNumber(metrics.pbr) },
+    { label: '배당수익률', value: formatMetricNumber(metrics.dividendYield, '%') },
+  ].map(item => (
+    `<div class="valuation-card"><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span></div>`
+  )).join('');
+}
+
+function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
+  const quoteSummary = document.getElementById('quoteSummary');
+  const quotePrice = document.getElementById('quotePrice');
+  const quoteChange = document.getElementById('quoteChange');
+  const quoteDate = document.getElementById('quoteDate');
+  const coverageNote = document.getElementById('coverageNote');
+  const quote = quoteSnapshot || {};
+
+  if (quote.price !== null && quote.price !== undefined) {
+    quoteSummary.style.display = 'flex';
+    quotePrice.textContent = `${Number(quote.price).toLocaleString()}원`;
+    const change = Number(quote.change || 0);
+    const changePct = quote.change_pct;
+    const changePrefix = change > 0 ? '+' : '';
+    quoteChange.textContent = changePct !== null && changePct !== undefined
+      ? `${changePrefix}${change.toLocaleString()}원 (${changePrefix}${Number(changePct).toLocaleString()}%)`
+      : '변동 정보 없음';
+    quoteChange.className = 'quote-change';
+    quoteChange.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
+    quoteDate.textContent = quote.date ? `${quote.date} 기준` : '';
+  } else {
+    quoteSummary.style.display = 'none';
+    quotePrice.textContent = '';
+    quoteChange.textContent = '';
+    quoteDate.textContent = '';
+  }
+
+  coverageNote.innerHTML = renderCurrentValuationSummary(indicators || {}, quote);
+}
+
+async function refreshActiveQuote() {
+  if (!activeStockCode || activeQuoteLoading || document.hidden || currentAbortController) return;
+  activeQuoteLoading = true;
+  try {
+    const resp = await fetch(buildApiUrl(`/api/quote/${activeStockCode}`));
+    if (!resp.ok) return;
+    const quote = await resp.json();
+    renderQuoteSnapshot(quote, activeIndicators);
+  } catch (e) {
+  } finally {
+    activeQuoteLoading = false;
+  }
+}
+
+function ensureQuoteRefreshTimer() {
+  if (quoteRefreshTimer !== null) return;
+  quoteRefreshTimer = window.setInterval(() => {
+    if (!document.hidden) {
+      refreshActiveQuote();
+    }
+  }, QUOTE_REFRESH_INTERVAL_MS);
+}
+
+function isPerChart(key) {
+  return key === 'PER' || key === '주간 PER';
+}
+
+function normalizeChartValue(value) {
+  return value === null || value === undefined ? null : Number(value);
+}
+
+function buildChartSeries(key, series) {
+  const labelField = Object.prototype.hasOwnProperty.call(series[0], 'date') ? 'date' : 'year';
+  const labels = series.map(item => item[labelField]);
+  const rawValues = series.map(item => normalizeChartValue(item.value));
+  let values = rawValues.slice();
+  let note = '';
+  let spanGaps = true;
+
+  if (isPerChart(key)) {
+    values = rawValues.map(value => {
+      if (value === null || !Number.isFinite(value)) return null;
+      if (value <= 0 || Math.abs(value) > PER_DISPLAY_MAX) return null;
+      return value;
+    });
+    note = `표시 기준: 음수 PER와 ${PER_DISPLAY_MAX}배 초과 구간은 추세 왜곡을 막기 위해 제외합니다.`;
+    spanGaps = false;
+  }
+
+  return { labelField, labels, values, rawValues, note, spanGaps };
+}
+
+function shouldUseZeroBaseline(values) {
+  const validValues = (values || []).filter(value => value !== null && Number.isFinite(value));
+  return validValues.length > 0 && validValues.every(value => value >= 0);
+}
+
+function formatWeeklyTickLabel(value) {
+  if (typeof value !== 'string') return value;
+  const match = value.match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match) return value;
+  return `${match[1].slice(-2)}.${match[2]}`;
+}
+
+function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
+  container.innerHTML = '';
+
+  chartKeys.forEach((key, i) => {
+    const series = indicatorMap[key] || [];
+    if (series.length === 0) return;
+
+    const { labelField, labels, values, rawValues, note, spanGaps } = buildChartSeries(key, series);
+    const isWeeklyChart = labelField === 'date';
+    const zeroBaseline = shouldUseZeroBaseline(values);
+
+    const card = document.createElement('div');
+    card.className = 'chart-card';
+    card.innerHTML = `<h3>${key}</h3><div class="chart-canvas-wrap"><canvas id="${prefix}-chart-${i}"></canvas></div>`;
+    if (note) {
+      const noteEl = document.createElement('div');
+      noteEl.className = 'chart-note';
+      noteEl.textContent = note;
+      card.appendChild(noteEl);
+    }
+    container.appendChild(card);
+
+    const ctx = document.getElementById(`${prefix}-chart-${i}`).getContext('2d');
+    charts[key] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: key,
+          data: values,
+          borderColor: CHART_COLORS[i % CHART_COLORS.length],
+          backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '22',
+          borderWidth: 2.5,
+          pointRadius: isWeeklyChart ? 0 : 4,
+          pointHoverRadius: isWeeklyChart ? 4 : 6,
+          pointHitRadius: isWeeklyChart ? 12 : 8,
+          pointBackgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+          fill: !isWeeklyChart,
+          tension: 0.3,
+          spanGaps,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: 'nearest',
+          axis: 'xy',
+          intersect: true,
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const rawValue = rawValues[ctx.dataIndex];
+                if (ctx.parsed.y === null) {
+                  if (isPerChart(key) && rawValue !== null && Number.isFinite(rawValue)) {
+                    return `${key}: 표시 제외 (${rawValue.toLocaleString()})`;
+                  }
+                  return 'N/A';
+                }
+                return `${key}: ${ctx.parsed.y.toLocaleString()}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: gridColor },
+            ticks: {
+              color: tickColor,
+              maxTicksLimit: labelField === 'date' ? 8 : 12,
+              callback: (_, index) => labelField === 'date' ? formatWeeklyTickLabel(labels[index]) : labels[index],
+            }
+          },
+          y: {
+            min: zeroBaseline ? 0 : undefined,
+            grid: { color: gridColor },
+            ticks: { color: tickColor }
+          }
+        }
+      }
+    });
+  });
+}
+
+function resetProgress() {
+  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('progressSteps').innerHTML = '';
+  document.getElementById('loadingDetail').textContent = '';
+}
+
+function addStep(text, cls) {
+  const steps = document.getElementById('progressSteps');
+  const div = document.createElement('div');
+  div.className = cls || '';
+  div.textContent = text;
+  steps.appendChild(div);
+  steps.scrollTop = steps.scrollHeight;
+}
+
+function markLastStepDone() {
+  const steps = document.getElementById('progressSteps');
+  const active = steps.querySelector('.active:last-child');
+  if (active) { active.classList.remove('active'); active.classList.add('done'); active.textContent = '\u2713 ' + active.textContent; }
+}
+
+function cancelAnalysis() {
+  if (currentAbortController) {
+    currentAbortController.abort();
+    currentAbortController = null;
+  }
+}
+
+async function analyzeStock(stockCode) {
+  try {
+    requireApiConfiguration();
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+
+  // 이전 분석 진행중이면 취소
+  if (currentAbortController) currentAbortController.abort();
+  currentAbortController = new AbortController();
+  const signal = currentAbortController.signal;
+
+  const overlay = document.getElementById('loadingOverlay');
+  const loadingText = document.getElementById('loadingText');
+  const loadingDetail = document.getElementById('loadingDetail');
+  const progressBar = document.getElementById('progressBar');
+  const cancelBtn = document.getElementById('cancelBtn');
+
+  overlay.classList.add('show');
+  cancelBtn.style.display = 'inline-block';
+  resetProgress();
+  loadingText.textContent = '데이터를 분석하고 있습니다...';
+
+  try {
+    trackEvent('analysis_start', { stock_code: stockCode });
+    const resp = await fetch(buildApiUrl(`/api/analyze/${stockCode}`), { signal });
+    const contentType = resp.headers.get('content-type') || '';
+
+    // 캐시 히트: 일반 JSON 응답
+    if (contentType.includes('application/json')) {
+      if (!resp.ok) {
+        const err = await resp.json();
+        alert(err.detail || '분석 실패');
+        return;
+      }
+      const data = await resp.json();
+      renderResult(data);
+      loadRecentList();
+      return;
+    }
+
+    // SSE 스트리밍 응답
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let resultData = null;
+    let lastDartStep = '';
+    let eventType = '';
+
+    // signal로 취소 시 reader도 정리
+    signal.addEventListener('abort', () => { reader.cancel(); });
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          const payload = JSON.parse(line.slice(6));
+
+          if (eventType === 'progress') {
+            const step = payload.step;
+            loadingText.textContent = payload.message;
+
+            if (step === 'dart_fetch') {
+              const pct = Math.round((payload.current / payload.total) * 60);
+              progressBar.style.width = pct + '%';
+              loadingDetail.textContent = `${payload.current} / ${payload.total}`;
+              if (lastDartStep !== 'dart_fetch') {
+                markLastStepDone();
+                addStep('DART 재무제표 연도별 조회 중...', 'active');
+              }
+              lastDartStep = 'dart_fetch';
+            } else if (step === 'dart_done' || step === 'dart_error') {
+              markLastStepDone();
+              progressBar.style.width = '60%';
+              loadingDetail.textContent = '';
+              addStep(payload.message, step === 'dart_done' ? 'done' : '');
+              lastDartStep = step;
+            } else if (step === 'market_start') {
+              markLastStepDone();
+              progressBar.style.width = '65%';
+              addStep(payload.message, 'active');
+            } else if (step === 'market_done' || step === 'market_error') {
+              markLastStepDone();
+              progressBar.style.width = '85%';
+              addStep(payload.message, step === 'market_done' ? 'done' : '');
+            } else if (step === 'saving') {
+              progressBar.style.width = '90%';
+              addStep(payload.message, 'active');
+            } else if (step === 'analyzing') {
+              markLastStepDone();
+              progressBar.style.width = '95%';
+              addStep(payload.message, 'active');
+            } else if (step === 'start') {
+              addStep(payload.message, 'active');
+            }
+          } else if (eventType === 'result') {
+            progressBar.style.width = '100%';
+            markLastStepDone();
+            addStep('분석 완료!', 'done');
+            resultData = payload;
+          } else if (eventType === 'error') {
+            alert(payload.message || '분석 실패');
+          }
+          eventType = '';
+        }
+      }
+    }
+
+    // 스트림 종료 후 버퍼에 남은 데이터 처리
+    if (buffer.trim()) {
+      const remainingLines = buffer.split('\n');
+      for (const line of remainingLines) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          const payload = JSON.parse(line.slice(6));
+          if (eventType === 'result') {
+            resultData = payload;
+          }
+          eventType = '';
+        }
+      }
+    }
+
+    if (resultData) {
+      await new Promise(r => setTimeout(r, 300));
+      renderResult(resultData);
+      loadRecentList();
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      // 사용자가 취소함 - 무시
+    } else {
+      alert('서버 오류: ' + e.message);
+    }
+  } finally {
+    currentAbortController = null;
+    overlay.classList.remove('show');
+  }
+}
+
+function renderResult(data) {
+  // Company info
+  const infoEl = document.getElementById('companyInfo');
+  infoEl.style.display = 'block';
+  activeStockCode = data.stock_code;
+  activeIndicators = data.indicators || {};
+  document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
+  const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
+  document.getElementById('companyMeta').textContent = cachedText;
+  renderQuoteSnapshot(data.quote_snapshot || {}, activeIndicators);
+  trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
+
+  // Load reports asynchronously
+  loadReports(data.stock_code);
+
+  // Hide empty state, show charts
+  document.getElementById('emptyState').style.display = 'none';
+  const weeklyTitle = document.getElementById('weeklySectionTitle');
+  const weeklyGrid = document.getElementById('weeklyChartsGrid');
+  const annualTitle = document.getElementById('annualSectionTitle');
+  const grid = document.getElementById('chartsGrid');
+  const hasWeeklyCharts = WEEKLY_CHART_KEYS.some(key => (data.weekly_indicators?.[key] || []).length > 0);
+  weeklyTitle.textContent = formatWeeklySectionTitle(data.weekly_indicators || {});
+  weeklyTitle.style.display = hasWeeklyCharts ? 'block' : 'none';
+  weeklyGrid.style.display = hasWeeklyCharts ? 'grid' : 'none';
+  annualTitle.style.display = 'block';
+  grid.style.display = 'grid';
+  weeklyGrid.innerHTML = '';
+  grid.innerHTML = '';
+
+  // Destroy existing charts
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)';
+  const tickColor = isDark ? '#94a3b8' : '#666';
+
+  if (hasWeeklyCharts) {
+    renderChartGrid(weeklyGrid, WEEKLY_CHART_KEYS, data.weekly_indicators || {}, gridColor, tickColor, 'weekly');
+  }
+  renderChartGrid(grid, ANNUAL_CHART_KEYS, data.indicators || {}, gridColor, tickColor, 'annual');
+}
+
+// Recent list
+async function loadRecentList() {
+  const refreshBtn = document.getElementById('recentRefreshBtn');
+  if (!hasApiConfiguration()) {
+    document.getElementById('recentList').innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">GitHub Pages에서는 API 서버 연결 후 최근 분석 목록을 불러옵니다.</div>';
+    if (refreshBtn) refreshBtn.disabled = true;
+    return;
+  }
+
+  if (recentListLoading) return;
+  recentListLoading = true;
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '갱신 중';
+  }
+
+  try {
+    const resp = await fetch(buildApiUrl('/api/cache/list?include_quotes=true'));
+    const data = await resp.json();
+    const container = document.getElementById('recentList');
+    if (data.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">아직 분석한 종목이 없습니다.</div>';
+      return;
+    }
+    container.innerHTML = '';
+    data.forEach(item => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'sidebar-item';
+
+      const info = document.createElement('div');
+      info.className = 'info';
+      info.addEventListener('click', () => analyzeStock(item.stock_code));
+
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = item.corp_name;
+
+      const quote = item.quote_snapshot || {};
+      const quotePrice = document.createElement('div');
+      quotePrice.className = 'quote-price';
+      const quoteMeta = document.createElement('div');
+      quoteMeta.className = 'quote-meta';
+
+      if (quote.price !== null && quote.price !== undefined) {
+        quotePrice.textContent = Number(quote.price).toLocaleString();
+        const change = Number(quote.change || 0);
+        const changePct = quote.change_pct;
+        const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+        const changeText = changePct !== null && changePct !== undefined
+          ? `${change > 0 ? '+' : ''}${Number(changePct).toLocaleString()}%`
+          : '변동 정보 없음';
+        quoteMeta.innerHTML = `<span class="quote-change ${changeClass}">${changeText}</span>`;
+      }
+
+      info.append(name, quotePrice, quoteMeta);
+
+      const button = document.createElement('button');
+      button.className = 'delete-btn';
+      button.title = '삭제';
+      button.innerHTML = '&times;';
+      button.addEventListener('click', () => deleteCache(item.stock_code));
+
+      wrapper.append(info, button);
+      container.appendChild(wrapper);
+    });
+  } catch (e) {
+  } finally {
+    recentListLoading = false;
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = '새로고침';
+    }
+  }
+}
+
+function refreshRecentList() {
+  loadRecentList();
+}
+
+async function deleteCache(stockCode) {
+  try {
+    await fetch(buildApiUrl(`/api/cache/${stockCode}`), { method: 'DELETE' });
+    loadRecentList();
+  } catch (e) {}
+}
+
+// Reports
+let allReports = [];
+let reportDisplayCount = 20;
+let reportsRequestId = 0;
+
+function getRecommBadge(recomm) {
+  if (!recomm) return '';
+  const r = recomm.toUpperCase();
+  if (r.includes('BUY') || r.includes('매수') || r.includes('강력')) return `<span class="badge badge-buy">${recomm}</span>`;
+  if (r.includes('SELL') || r.includes('매도') || r.includes('비중축소')) return `<span class="badge badge-sell">${recomm}</span>`;
+  return `<span class="badge badge-hold">${recomm}</span>`;
+}
+
+function renderReportsTable(reports, limit) {
+  const tbody = document.getElementById('reportsBody');
+  const slice = reports.slice(0, limit);
+  tbody.innerHTML = slice.map(r => {
+    const safeTitle = escapeHtml(r.title);
+    const safeSummary = r.summary ? `<div class="report-summary">${escapeHtml(r.summary)}</div>` : '';
+    const safeAnalyst = escapeHtml(r.analyst);
+    const safeFirm = escapeHtml(r.firm_short || r.firm);
+    const safeDate = escapeHtml(r.date);
+    const safeHref = safeExternalUrl(buildReportPdfUrl(r.pdf_url) || r.source_url);
+    const titleLink = safeHref
+      ? `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>`
+      : safeTitle;
+    const safeReadHref = safeExternalUrl(r.source_url);
+    const linkNote = safeReadHref
+      ? `<div class="report-link-note"><a href="${safeReadHref}" target="_blank" rel="noopener noreferrer">네이버 리서치 본문 페이지</a></div>`
+      : '';
+    const targetPrc = r.target_price ? Number(r.target_price.replace(/,/g, '')).toLocaleString() + '원' : '-';
+    return `<tr>
+      <td class="report-date">${safeDate}</td>
+      <td class="report-firm">${safeFirm}</td>
+      <td class="report-title">${titleLink}${safeSummary}${linkNote}<div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${safeAnalyst}</div></td>
+      <td>${getRecommBadge(escapeHtml(r.recommendation))}</td>
+      <td class="report-target">${escapeHtml(targetPrc)}</td>
+    </tr>`;
+  }).join('');
+
+  const moreBtn = document.getElementById('reportsMore');
+  moreBtn.style.display = reports.length > limit ? 'block' : 'none';
+  moreBtn.textContent = `더 보기 (${limit}/${reports.length}건)`;
+}
+
+function showMoreReports() {
+  reportDisplayCount += 20;
+  renderReportsTable(allReports, reportDisplayCount);
+}
+
+async function loadReports(stockCode) {
+  const section = document.getElementById('reportsSection');
+  const loading = document.getElementById('reportsLoading');
+  const table = document.getElementById('reportsTable');
+  const countEl = document.getElementById('reportCount');
+  const requestId = ++reportsRequestId;
+
+  section.style.display = 'block';
+  loading.style.display = 'block';
+  loading.textContent = '최신 리포트를 불러오는 중...';
+  table.style.display = 'none';
+  countEl.textContent = '';
+  allReports = [];
+  reportDisplayCount = 20;
+
+  if (!hasApiConfiguration()) {
+    loading.style.display = 'block';
+    loading.textContent = 'GitHub Pages에서는 API 서버 연결 후 리포트를 불러올 수 있습니다.';
+    return;
+  }
+
+  const localCache = loadReportCache(stockCode);
+  let latestReport = localCache?.latestReport || null;
+  let renderedFromCache = false;
+
+  if (Array.isArray(localCache?.reports) && localCache.reports.length > 0) {
+    allReports = localCache.reports;
+    countEl.textContent = `(최근 3년, ${allReports.length}건 · 캐시)`;
+    table.style.display = 'table';
+    loading.style.display = 'none';
+    renderReportsTable(allReports, reportDisplayCount);
+    renderedFromCache = true;
+  } else if (latestReport) {
+    allReports = [latestReport];
+    countEl.textContent = '(최신 1건 · 캐시)';
+    table.style.display = 'table';
+    loading.style.display = 'none';
+    renderReportsTable(allReports, 1);
+    renderedFromCache = true;
+  }
+
+  try {
+    const latestResp = await fetch(buildApiUrl(`/api/reports/${stockCode}/latest?refresh=1`));
+    const latestData = await latestResp.json();
+    if (requestId !== reportsRequestId) return;
+    const networkLatest = latestData.report || null;
+    const latestChanged = latestData.changed ?? !sameReport(latestReport, networkLatest);
+
+    if (networkLatest) {
+      latestReport = networkLatest;
+      saveReportCache(stockCode, {
+        latestReport,
+        reports: Array.isArray(localCache?.reports) ? localCache.reports : [],
+      });
+    }
+
+    if (networkLatest && (!renderedFromCache || latestChanged)) {
+      allReports = [latestReport];
+      loading.style.display = 'none';
+      countEl.textContent = latestChanged ? '(최신 1건 갱신됨)' : '(최신 1건 확인됨)';
+      table.style.display = 'table';
+      renderReportsTable(allReports, 1);
+    }
+  } catch (e) {}
+
+  try {
+    const shouldRefreshFullReports =
+      !Array.isArray(localCache?.reports) ||
+      localCache.reports.length === 0 ||
+      !sameReport(localCache.latestReport, latestReport);
+
+    if (!shouldRefreshFullReports) {
+      return;
+    }
+
+    const resp = await fetch(buildApiUrl(`/api/reports/${stockCode}`));
+    const data = await resp.json();
+    if (requestId !== reportsRequestId) return;
+
+    allReports = data.reports || [];
+    loading.style.display = 'none';
+
+    if (allReports.length === 0) {
+      if (latestReport) {
+        countEl.textContent = '(최신 1건만 표시)';
+        table.style.display = 'table';
+        renderReportsTable([latestReport], 1);
+      } else {
+        loading.style.display = 'block';
+        loading.textContent = '증권사 리포트가 없습니다.';
+      }
+      return;
+    }
+
+    countEl.textContent = `(최근 3년, ${allReports.length}건)`;
+    table.style.display = 'table';
+    renderReportsTable(allReports, reportDisplayCount);
+    saveReportCache(stockCode, { latestReport: allReports[0] || latestReport, reports: allReports });
+  } catch (e) {
+    if (requestId !== reportsRequestId) return;
+    if (latestReport) {
+      loading.style.display = 'none';
+      countEl.textContent = '(최신 1건만 표시)';
+      table.style.display = 'table';
+      renderReportsTable([latestReport], 1);
+    } else {
+      loading.textContent = '리포트를 불러오지 못했습니다.';
+    }
+  }
+}
+
+// Init
+loadRecentList();
+ensureQuoteRefreshTimer();
