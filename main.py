@@ -183,6 +183,28 @@ async def _read_post_fields(request: Request) -> dict[str, str]:
     return {key: values[-1] for key, values in parsed.items() if values}
 
 
+def _default_user_preference() -> dict:
+    return {
+        "is_starred": False,
+        "is_pinned": False,
+        "note": "",
+        "updated_at": None,
+    }
+
+
+async def _decorate_analysis_payload(payload: dict, user: dict | None) -> dict:
+    enriched = dict(payload)
+    enriched["authenticated"] = bool(user)
+    if user:
+        enriched["user_preference"] = await cache.get_user_stock_preference(
+            user["google_sub"],
+            payload["stock_code"],
+        )
+    else:
+        enriched["user_preference"] = _default_user_preference()
+    return enriched
+
+
 async def _remember_recent_analysis(user: dict | None, stock_code: str):
     if user:
         await cache.touch_user_recent_analysis(user["google_sub"], stock_code)
@@ -290,6 +312,39 @@ async def auth_google_callback(request: Request):
 async def search(q: str = Query(..., min_length=1)):
     results = await cache.search_corp(q)
     return results
+
+
+@app.get("/api/preferences/{stock_code}")
+async def get_stock_preference(stock_code: str, request: Request):
+    current_user = await _get_current_user(request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    preference = await cache.get_user_stock_preference(current_user["google_sub"], stock_code)
+    return {
+        "stock_code": stock_code,
+        "authenticated": True,
+        "user_preference": preference,
+    }
+
+
+@app.put("/api/preferences/{stock_code}")
+async def update_stock_preference(stock_code: str, request: Request, payload: dict = Body(...)):
+    current_user = await _get_current_user(request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+
+    preference = await cache.save_user_stock_preference(
+        current_user["google_sub"],
+        stock_code,
+        is_starred=payload.get("is_starred") if "is_starred" in payload else None,
+        is_pinned=payload.get("is_pinned") if "is_pinned" in payload else None,
+        note=payload.get("note") if "note" in payload else None,
+    )
+    return {
+        "stock_code": stock_code,
+        "authenticated": True,
+        "user_preference": preference,
+    }
 
 
 @app.get("/api/quote/{stock_code}")
@@ -463,7 +518,7 @@ async def analyze_stock(stock_code: str, request: Request):
     snapshot = await cache.get_analysis_snapshot(stock_code)
     if snapshot:
         await _remember_recent_analysis(current_user, stock_code)
-        return snapshot
+        return await _decorate_analysis_payload(snapshot, current_user)
 
     meta = await cache.get_analysis_meta(stock_code)
     if meta:
@@ -475,7 +530,7 @@ async def analyze_stock(stock_code: str, request: Request):
             meta.get("analyzed_at"),
         )
         await _remember_recent_analysis(current_user, stock_code)
-        return payload
+        return await _decorate_analysis_payload(payload, current_user)
 
     corp_code = await cache.get_corp_code(stock_code)
     if not corp_code:
@@ -495,7 +550,7 @@ async def analyze_stock(stock_code: str, request: Request):
             snapshot = await cache.get_analysis_snapshot(stock_code)
             if snapshot:
                 await _remember_recent_analysis(current_user, stock_code)
-                yield _sse_event("result", snapshot)
+                yield _sse_event("result", await _decorate_analysis_payload(snapshot, current_user))
                 return
 
             meta = await cache.get_analysis_meta(stock_code)
@@ -507,7 +562,7 @@ async def analyze_stock(stock_code: str, request: Request):
                     meta.get("analyzed_at"),
                 )
                 await _remember_recent_analysis(current_user, stock_code)
-                yield _sse_event("result", payload)
+                yield _sse_event("result", await _decorate_analysis_payload(payload, current_user))
                 return
 
             async with ANALYSIS_SEMAPHORE:
@@ -587,7 +642,7 @@ async def analyze_stock(stock_code: str, request: Request):
                 )
                 await cache.save_analysis_snapshot(stock_code, corp_name or stock_code, payload)
                 await _remember_recent_analysis(current_user, stock_code)
-                yield _sse_event("result", payload)
+                yield _sse_event("result", await _decorate_analysis_payload(payload, current_user))
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 

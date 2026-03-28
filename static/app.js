@@ -27,6 +27,8 @@ let authConfig = null;
 let currentUser = null;
 let googleButtonRetryTimer = null;
 let googleAuthInitialized = false;
+let currentUserPreference = null;
+let preferenceSaving = false;
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
 const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
 const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -156,11 +158,153 @@ async function loadCurrentUser() {
 function updateRecentListTitle() {
   const title = document.getElementById('recentListTitle');
   if (!title) return;
-  title.textContent = currentUser ? '내 최근 분석' : '최근 분석 종목';
+  title.textContent = currentUser ? '내 목록' : '최근 분석 종목';
 }
 
 function buildGoogleLoginUri() {
   return buildApiUrl('/api/auth/google/callback');
+}
+
+function normalizeUserPreference(preference) {
+  return {
+    is_starred: Boolean(preference?.is_starred),
+    is_pinned: Boolean(preference?.is_pinned),
+    note: preference?.note || '',
+    updated_at: preference?.updated_at || null,
+  };
+}
+
+function setPreferenceStatus(message = '', tone = '') {
+  const status = document.getElementById('preferenceStatus');
+  if (!status) return;
+  status.className = 'personalization-status';
+  if (tone) {
+    status.classList.add(tone);
+  }
+  status.textContent = message;
+}
+
+function renderUserPreference() {
+  const panel = document.getElementById('personalizationPanel');
+  const favoriteBtn = document.getElementById('favoriteBtn');
+  const pinBtn = document.getElementById('pinBtn');
+  const saveNoteBtn = document.getElementById('saveNoteBtn');
+  const note = document.getElementById('preferenceNote');
+  if (!panel || !favoriteBtn || !pinBtn || !saveNoteBtn || !note) return;
+
+  if (!activeStockCode) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  currentUserPreference = normalizeUserPreference(currentUserPreference);
+  const isLoggedIn = Boolean(currentUser);
+
+  favoriteBtn.classList.toggle('active', currentUserPreference.is_starred);
+  pinBtn.classList.toggle('active', currentUserPreference.is_pinned);
+  favoriteBtn.textContent = currentUserPreference.is_starred ? '관심중' : '관심종목';
+  pinBtn.textContent = currentUserPreference.is_pinned ? '핀 고정됨' : '핀 고정';
+  favoriteBtn.disabled = !isLoggedIn || preferenceSaving;
+  pinBtn.disabled = !isLoggedIn || preferenceSaving;
+  saveNoteBtn.disabled = !isLoggedIn || preferenceSaving;
+  note.disabled = !isLoggedIn || preferenceSaving;
+  note.value = currentUserPreference.note || '';
+
+  if (!isLoggedIn) {
+    setPreferenceStatus('로그인하면 관심종목, 핀 고정, 개인 메모를 저장할 수 있습니다.', 'warning');
+  } else if (!document.getElementById('preferenceStatus').textContent) {
+    setPreferenceStatus('이 종목을 내 목록에 저장해 두세요.');
+  }
+}
+
+async function refreshActivePreference() {
+  if (!activeStockCode || !currentUser) {
+    currentUserPreference = normalizeUserPreference(null);
+    renderUserPreference();
+    return;
+  }
+
+  try {
+    const resp = await apiFetch(`/api/preferences/${activeStockCode}`);
+    if (!resp.ok) {
+      throw new Error('개인화 설정을 불러오지 못했습니다.');
+    }
+    const data = await resp.json();
+    currentUserPreference = normalizeUserPreference(data.user_preference);
+    setPreferenceStatus('');
+  } catch (error) {
+    currentUserPreference = normalizeUserPreference(null);
+    setPreferenceStatus(error.message || '개인화 설정을 불러오지 못했습니다.', 'warning');
+  }
+  renderUserPreference();
+}
+
+async function saveUserPreference(changes, successMessage) {
+  if (!currentUser || !activeStockCode || preferenceSaving) return;
+  preferenceSaving = true;
+  renderUserPreference();
+  setPreferenceStatus('저장 중...');
+
+  try {
+    const resp = await apiFetch(`/api/preferences/${activeStockCode}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(changes),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.detail || '개인화 설정을 저장하지 못했습니다.');
+    }
+    currentUserPreference = normalizeUserPreference(data.user_preference);
+    renderUserPreference();
+    setPreferenceStatus(successMessage, 'saved');
+    loadRecentList();
+  } catch (error) {
+    renderUserPreference();
+    setPreferenceStatus(error.message || '개인화 설정을 저장하지 못했습니다.', 'warning');
+  } finally {
+    preferenceSaving = false;
+    renderUserPreference();
+  }
+}
+
+async function toggleFavorite() {
+  if (!currentUser) {
+    renderUserPreference();
+    return;
+  }
+  const nextValue = !normalizeUserPreference(currentUserPreference).is_starred;
+  currentUserPreference = { ...normalizeUserPreference(currentUserPreference), is_starred: nextValue };
+  renderUserPreference();
+  await saveUserPreference(
+    { is_starred: nextValue },
+    nextValue ? '관심종목에 추가했습니다.' : '관심종목에서 제거했습니다.',
+  );
+}
+
+async function togglePin() {
+  if (!currentUser) {
+    renderUserPreference();
+    return;
+  }
+  const nextValue = !normalizeUserPreference(currentUserPreference).is_pinned;
+  currentUserPreference = { ...normalizeUserPreference(currentUserPreference), is_pinned: nextValue };
+  renderUserPreference();
+  await saveUserPreference(
+    { is_pinned: nextValue },
+    nextValue ? '사이드바 상단에 고정했습니다.' : '핀 고정을 해제했습니다.',
+  );
+}
+
+async function savePreferenceNote() {
+  if (!currentUser) {
+    renderUserPreference();
+    return;
+  }
+  const note = document.getElementById('preferenceNote').value;
+  currentUserPreference = { ...normalizeUserPreference(currentUserPreference), note };
+  await saveUserPreference({ note }, '메모를 저장했습니다.');
 }
 
 function scheduleGoogleButtonRender() {
@@ -220,14 +364,14 @@ function renderAuthState() {
 
   if (currentUser) {
     statusTitle.textContent = '내 계정으로 최근 분석을 저장 중입니다';
-    statusDetail.textContent = '이제 최근 분석 목록이 내 Google 계정 기준으로 분리되어 표시됩니다.';
+    statusDetail.textContent = '이제 최근 분석, 관심종목, 핀 고정, 개인 메모가 내 Google 계정 기준으로 저장됩니다.';
     authUser.style.display = 'grid';
     avatar.src = currentUser.picture || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
     name.textContent = currentUser.name || currentUser.email;
     email.textContent = currentUser.email || '';
   } else if (authConfig?.enabled) {
     statusTitle.textContent = '로그인해 최근 분석을 저장하세요';
-    statusDetail.textContent = 'Google로 로그인하면 최근 본 종목을 내 계정 기준으로 관리할 수 있습니다.';
+    statusDetail.textContent = 'Google로 로그인하면 최근 본 종목, 관심종목, 핀 고정, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
     authUser.style.display = 'none';
   } else {
     statusTitle.textContent = 'Google 로그인이 아직 설정되지 않았습니다';
@@ -248,6 +392,7 @@ async function logout() {
     }
     currentUser = null;
     renderAuthState();
+    refreshActivePreference();
     trackEvent('logout', { provider: 'google' });
     loadRecentList();
   }
@@ -282,6 +427,7 @@ async function initAuth() {
   await loadAuthConfig();
   await loadCurrentUser();
   renderAuthState();
+  await refreshActivePreference();
   consumeAuthRedirectResult();
 }
 
@@ -866,9 +1012,11 @@ function renderResult(data) {
   infoEl.style.display = 'block';
   activeStockCode = data.stock_code;
   activeIndicators = data.indicators || {};
+  currentUserPreference = normalizeUserPreference(data.user_preference);
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
   document.getElementById('companyMeta').textContent = cachedText;
+  renderUserPreference();
   renderQuoteSnapshot(data.quote_snapshot || {}, activeIndicators);
   trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
 
@@ -927,7 +1075,7 @@ async function loadRecentList() {
     const container = document.getElementById('recentList');
     if (data.length === 0) {
       container.innerHTML = currentUser
-        ? '<div style="color:var(--text-secondary);font-size:13px;">내 계정에 저장된 분석이 아직 없습니다.</div>'
+        ? '<div style="color:var(--text-secondary);font-size:13px;">내 계정에 저장된 종목이 아직 없습니다.</div>'
         : '<div style="color:var(--text-secondary);font-size:13px;">아직 분석한 종목이 없습니다.</div>';
       return;
     }
@@ -943,6 +1091,33 @@ async function loadRecentList() {
       const name = document.createElement('div');
       name.className = 'name';
       name.textContent = item.corp_name;
+      const nameRow = document.createElement('div');
+      nameRow.className = 'name-row';
+      nameRow.appendChild(name);
+
+      const badges = document.createElement('div');
+      badges.className = 'badges';
+      if (item.is_pinned) {
+        const badge = document.createElement('span');
+        badge.className = 'sidebar-badge pin';
+        badge.textContent = 'PIN';
+        badges.appendChild(badge);
+      }
+      if (item.is_starred) {
+        const badge = document.createElement('span');
+        badge.className = 'sidebar-badge star';
+        badge.textContent = '관심';
+        badges.appendChild(badge);
+      }
+      if (item.note) {
+        const badge = document.createElement('span');
+        badge.className = 'sidebar-badge note';
+        badge.textContent = '메모';
+        badges.appendChild(badge);
+      }
+      if (badges.childElementCount > 0) {
+        nameRow.appendChild(badges);
+      }
 
       const quote = item.quote_snapshot || {};
       const quotePrice = document.createElement('div');
@@ -961,7 +1136,7 @@ async function loadRecentList() {
         quoteMeta.innerHTML = `<span class="quote-change ${changeClass}">${changeText}</span>`;
       }
 
-      info.append(name, quotePrice, quoteMeta);
+      info.append(nameRow, quotePrice, quoteMeta);
 
       const button = document.createElement('button');
       button.className = 'delete-btn';

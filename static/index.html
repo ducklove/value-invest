@@ -77,6 +77,15 @@ function trackEvent(name, params = {}) {
       </div>
     </div>
     <div class="meta" id="companyMeta"></div>
+    <div class="personalization-panel" id="personalizationPanel">
+      <div class="personalization-actions">
+        <button class="personalization-btn" id="favoriteBtn" type="button" onclick="toggleFavorite()">관심종목</button>
+        <button class="personalization-btn" id="pinBtn" type="button" onclick="togglePin()">핀 고정</button>
+        <button class="personalization-btn primary" id="saveNoteBtn" type="button" onclick="savePreferenceNote()">메모 저장</button>
+      </div>
+      <textarea class="personalization-note" id="preferenceNote" rows="3" placeholder="이 종목에 대한 내 메모를 남겨보세요."></textarea>
+      <div class="personalization-status" id="preferenceStatus"></div>
+    </div>
     <div class="coverage" id="coverageNote"></div>
   </div>
 

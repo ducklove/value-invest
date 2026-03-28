@@ -86,6 +86,17 @@ async def init_db():
                 FOREIGN KEY (stock_code) REFERENCES analysis_meta(stock_code) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS user_stock_preferences (
+                google_sub TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                is_starred INTEGER NOT NULL DEFAULT 0,
+                is_pinned INTEGER NOT NULL DEFAULT 0,
+                note TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (google_sub, stock_code),
+                FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS latest_report_cache (
                 stock_code TEXT PRIMARY KEY,
                 report_json TEXT NOT NULL,
@@ -101,6 +112,7 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
             CREATE INDEX IF NOT EXISTS idx_user_sessions_google_sub ON user_sessions(google_sub);
             CREATE INDEX IF NOT EXISTS idx_user_recent_viewed_at ON user_recent_analyses(google_sub, viewed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_stock_prefs_rank ON user_stock_preferences(google_sub, is_pinned DESC, is_starred DESC, updated_at DESC);
         """)
         await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
         await _ensure_column(db, "financial_data", "report_date", "TEXT")
@@ -501,6 +513,78 @@ async def delete_user_recent_analysis(google_sub: str, stock_code: str):
         await db.close()
 
 
+async def get_user_stock_preference(google_sub: str, stock_code: str) -> dict:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT is_starred, is_pinned, note, updated_at
+            FROM user_stock_preferences
+            WHERE google_sub = ? AND stock_code = ?
+            """,
+            (google_sub, stock_code),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return {
+                "is_starred": False,
+                "is_pinned": False,
+                "note": "",
+                "updated_at": None,
+            }
+        return {
+            "is_starred": bool(row["is_starred"]),
+            "is_pinned": bool(row["is_pinned"]),
+            "note": row["note"] or "",
+            "updated_at": row["updated_at"],
+        }
+    finally:
+        await db.close()
+
+
+async def save_user_stock_preference(
+    google_sub: str,
+    stock_code: str,
+    *,
+    is_starred: bool | None = None,
+    is_pinned: bool | None = None,
+    note: str | None = None,
+) -> dict:
+    current = await get_user_stock_preference(google_sub, stock_code)
+    next_pref = {
+        "is_starred": current["is_starred"] if is_starred is None else bool(is_starred),
+        "is_pinned": current["is_pinned"] if is_pinned is None else bool(is_pinned),
+        "note": current["note"] if note is None else note.strip()[:2000],
+    }
+
+    db = await get_db()
+    try:
+        updated_at = datetime.now().isoformat()
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO user_stock_preferences (
+                google_sub, stock_code, is_starred, is_pinned, note, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                google_sub,
+                stock_code,
+                1 if next_pref["is_starred"] else 0,
+                1 if next_pref["is_pinned"] else 0,
+                next_pref["note"],
+                updated_at,
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    return {
+        **next_pref,
+        "updated_at": updated_at,
+    }
+
+
 async def get_cached_analyses(
     limit: int | None = None,
     include_quotes: bool = False,
@@ -514,14 +598,25 @@ async def get_cached_analyses(
 
         if google_sub:
             query = (
-                f"SELECT a.stock_code, a.corp_name, r.viewed_at AS analyzed_at"
+                f"SELECT a.stock_code, a.corp_name, items.viewed_at AS analyzed_at"
                 + (", a.payload_json" if include_quotes else "")
-                + " FROM user_recent_analyses r"
-                + " JOIN analysis_meta a ON a.stock_code = r.stock_code"
-                + " WHERE r.google_sub = ?"
-                + " ORDER BY r.viewed_at DESC"
+                + ", COALESCE(p.is_starred, 0) AS is_starred"
+                + ", COALESCE(p.is_pinned, 0) AS is_pinned"
+                + ", COALESCE(p.note, '') AS note"
+                + " FROM ("
+                + "   SELECT stock_code, MAX(viewed_at) AS viewed_at"
+                + "   FROM ("
+                + "     SELECT stock_code, viewed_at FROM user_recent_analyses WHERE google_sub = ?"
+                + "     UNION ALL"
+                + "     SELECT stock_code, NULL AS viewed_at FROM user_stock_preferences WHERE google_sub = ? AND (is_starred = 1 OR is_pinned = 1)"
+                + "   ) user_items"
+                + "   GROUP BY stock_code"
+                + " ) items"
+                + " JOIN analysis_meta a ON a.stock_code = items.stock_code"
+                + " LEFT JOIN user_stock_preferences p ON p.google_sub = ? AND p.stock_code = items.stock_code"
+                + " ORDER BY COALESCE(p.is_pinned, 0) DESC, COALESCE(p.is_starred, 0) DESC, items.viewed_at DESC"
             )
-            params: tuple = (google_sub,)
+            params: tuple = (google_sub, google_sub, google_sub)
         else:
             query = f"SELECT {select_fields} FROM analysis_meta ORDER BY analyzed_at DESC"
             params = ()
@@ -535,6 +630,9 @@ async def get_cached_analyses(
         items = []
         for row in rows:
             item = dict(row)
+            item["is_starred"] = bool(item.get("is_starred"))
+            item["is_pinned"] = bool(item.get("is_pinned"))
+            item["note"] = item.get("note") or ""
             if include_quotes:
                 payload_json = item.pop("payload_json", None)
                 quote_snapshot = {}
