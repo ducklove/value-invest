@@ -756,7 +756,6 @@ function ensureQuoteRefreshTimer() {
   if (quoteRefreshTimer !== null) return;
   quoteRefreshTimer = window.setInterval(() => {
     if (!document.hidden) {
-      loadRecentList();
       refreshActiveQuote();
     }
   }, QUOTE_REFRESH_INTERVAL_MS);
