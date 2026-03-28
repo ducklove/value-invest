@@ -660,6 +660,11 @@ function buildChartSeries(key, series) {
   return { labelField, labels, values, rawValues, note, spanGaps };
 }
 
+function shouldUseZeroBaseline(values) {
+  const validValues = (values || []).filter(value => value !== null && Number.isFinite(value));
+  return validValues.length > 0 && validValues.every(value => value >= 0);
+}
+
 function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
   container.innerHTML = '';
 
@@ -669,6 +674,7 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
 
     const { labelField, labels, values, rawValues, note, spanGaps } = buildChartSeries(key, series);
     const isWeeklyChart = labelField === 'date';
+    const zeroBaseline = shouldUseZeroBaseline(values);
 
     const card = document.createElement('div');
     card.className = 'chart-card';
@@ -731,7 +737,11 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
             grid: { color: gridColor },
             ticks: { color: tickColor, maxTicksLimit: labelField === 'date' ? 8 : 12 }
           },
-          y: { grid: { color: gridColor }, ticks: { color: tickColor } }
+          y: {
+            min: zeroBaseline ? 0 : undefined,
+            grid: { color: gridColor },
+            ticks: { color: tickColor }
+          }
         }
       }
     });
