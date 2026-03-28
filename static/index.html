@@ -185,7 +185,38 @@ body {
 [data-theme="dark"] .company-info .quote-change.down { color: #bfdbfe; background: rgba(30,64,175,0.45); }
 [data-theme="dark"] .company-info .quote-change.flat { background: rgba(51,65,85,0.9); }
 .company-info .coverage {
-  margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5;
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.valuation-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(37,99,235,0.05), rgba(37,99,235,0.01));
+}
+.valuation-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+.valuation-value {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width:900px) {
+  .company-info .coverage {
+    grid-template-columns: 1fr;
+  }
 }
 
 .section-heading {
@@ -696,21 +727,32 @@ function getLatestDerivedBps(indicators) {
   return null;
 }
 
-function renderCurrentValuationSummary(indicators, quoteSnapshot) {
+function getCurrentValuationMetrics(indicators, quoteSnapshot) {
   const currentPrice = Number(quoteSnapshot?.price);
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
-    return '현재가 기준 PER N/A · PBR N/A · 배당수익률 N/A';
+    return { per: null, pbr: null, dividendYield: null };
   }
 
   const latestEps = getLatestIndicatorValue(indicators['EPS (원)']);
   const latestDps = getLatestIndicatorValue(indicators['주당배당금 (원)']);
   const latestBps = getLatestDerivedBps(indicators);
 
-  const per = latestEps && latestEps > 0 ? currentPrice / latestEps : null;
-  const pbr = latestBps && latestBps > 0 ? currentPrice / latestBps : null;
-  const dividendYield = latestDps !== null ? (latestDps / currentPrice) * 100 : null;
+  return {
+    per: latestEps && latestEps > 0 ? currentPrice / latestEps : null,
+    pbr: latestBps && latestBps > 0 ? currentPrice / latestBps : null,
+    dividendYield: latestDps !== null ? (latestDps / currentPrice) * 100 : null,
+  };
+}
 
-  return `현재가 기준 PER ${formatMetricNumber(per)} · PBR ${formatMetricNumber(pbr)} · 배당수익률 ${formatMetricNumber(dividendYield, '%')}`;
+function renderCurrentValuationSummary(indicators, quoteSnapshot) {
+  const metrics = getCurrentValuationMetrics(indicators, quoteSnapshot);
+  return [
+    { label: 'PER', value: formatMetricNumber(metrics.per) },
+    { label: 'PBR', value: formatMetricNumber(metrics.pbr) },
+    { label: '배당수익률', value: formatMetricNumber(metrics.dividendYield, '%') },
+  ].map(item => (
+    `<div class="valuation-card"><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span></div>`
+  )).join('');
 }
 
 function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
@@ -740,7 +782,7 @@ function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
     quoteDate.textContent = '';
   }
 
-  coverageNote.textContent = renderCurrentValuationSummary(indicators || {}, quote);
+  coverageNote.innerHTML = renderCurrentValuationSummary(indicators || {}, quote);
 }
 
 async function refreshActiveQuote() {
