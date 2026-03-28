@@ -6,3 +6,4 @@ beautifulsoup4
 yfinance
 google-auth
 requests
+python-multipart

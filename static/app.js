@@ -26,6 +26,7 @@ let activeQuoteLoading = false;
 let authConfig = null;
 let currentUser = null;
 let googleButtonRetryTimer = null;
+let googleAuthInitialized = false;
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
 const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
 const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -158,6 +159,10 @@ function updateRecentListTitle() {
   title.textContent = currentUser ? '내 최근 분석' : '최근 분석 종목';
 }
 
+function buildGoogleLoginUri() {
+  return buildApiUrl('/api/auth/google/callback');
+}
+
 function scheduleGoogleButtonRender() {
   if (googleButtonRetryTimer !== null) return;
   googleButtonRetryTimer = window.setTimeout(() => {
@@ -180,13 +185,18 @@ function renderGoogleButton() {
     return;
   }
 
+  if (!googleAuthInitialized) {
+    window.google.accounts.id.initialize({
+      client_id: authConfig.googleClientId,
+      auto_select: false,
+      ux_mode: 'redirect',
+      login_uri: buildGoogleLoginUri(),
+      use_fedcm_for_button: true,
+    });
+    googleAuthInitialized = true;
+  }
+
   container.innerHTML = '';
-  window.google.accounts.id.initialize({
-    client_id: authConfig.googleClientId,
-    callback: handleGoogleCredential,
-    auto_select: false,
-    ux_mode: 'popup',
-  });
   window.google.accounts.id.renderButton(container, {
     theme: 'outline',
     size: 'large',
@@ -228,29 +238,6 @@ function renderAuthState() {
   renderGoogleButton();
 }
 
-async function handleGoogleCredential(googleResponse) {
-  if (!googleResponse?.credential) return;
-
-  try {
-    const resp = await apiFetch('/api/auth/google', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credential: googleResponse.credential }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      throw new Error(data.detail || 'Google 로그인에 실패했습니다.');
-    }
-    currentUser = data.user || null;
-    renderAuthState();
-    trackEvent('login_success', { provider: 'google' });
-    loadRecentList();
-  } catch (error) {
-    trackEvent('login_error', { provider: 'google' });
-    alert(error.message || 'Google 로그인에 실패했습니다.');
-  }
-}
-
 async function logout() {
   try {
     await apiFetch('/api/auth/logout', { method: 'POST' });
@@ -266,10 +253,36 @@ async function logout() {
   }
 }
 
+function consumeAuthRedirectResult() {
+  const url = new URL(window.location.href);
+  const auth = url.searchParams.get('auth');
+  const authError = url.searchParams.get('auth_error');
+  if (!auth && !authError) return;
+
+  url.searchParams.delete('auth');
+  url.searchParams.delete('auth_error');
+  window.history.replaceState({}, '', url.toString());
+
+  if (auth === 'success') {
+    trackEvent('login_success', { provider: 'google', method: 'redirect' });
+    return;
+  }
+
+  trackEvent('login_error', { provider: 'google', reason: authError || 'unknown' });
+  if (authError === 'csrf') {
+    alert('Google 로그인 보안 검증에 실패했습니다. 다시 시도해 주세요.');
+  } else if (authError === 'not_configured') {
+    alert('서버 설정이 아직 완료되지 않았습니다.');
+  } else {
+    alert('Google 로그인에 실패했습니다.');
+  }
+}
+
 async function initAuth() {
   await loadAuthConfig();
   await loadCurrentUser();
   renderAuthState();
+  consumeAuthRedirectResult();
 }
 
 // Theme

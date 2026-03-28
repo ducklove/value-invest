@@ -2,12 +2,12 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import auth_service
@@ -31,6 +31,12 @@ LATEST_REPORT_CACHE_TTL_MINUTES = 15
 REPORT_LIST_CACHE_TTL_MINUTES = 60
 RECENT_QUOTES_SEMAPHORE = asyncio.Semaphore(4)
 SESSION_COOKIE_NAME = auth_service.SESSION_COOKIE_NAME
+TRUSTED_RETURN_ORIGINS = {
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://ducklove.github.io",
+    "https://cantabile.tplinkdns.com:3691",
+}
 
 app.add_middleware(
     CORSMiddleware,
@@ -150,6 +156,27 @@ def _clear_session_cookie(response: Response, request: Request):
     )
 
 
+def _normalize_return_to(value: str | None) -> str:
+    if not value:
+        return "/"
+
+    parsed = urlparse(value)
+    if not parsed.scheme and value.startswith("/"):
+        return value
+
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    if origin in TRUSTED_RETURN_ORIGINS:
+        return value
+    return "/"
+
+
+def _append_query_value(url: str, key: str, value: str) -> str:
+    parsed = urlparse(url)
+    query_pairs = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if k != key]
+    query_pairs.append((key, value))
+    return urlunparse(parsed._replace(query=urlencode(query_pairs)))
+
+
 async def _remember_recent_analysis(user: dict | None, stock_code: str):
     if user:
         await cache.touch_user_recent_analysis(user["google_sub"], stock_code)
@@ -214,6 +241,43 @@ async def auth_logout(request: Request, response: Response):
             pass
     _clear_session_cookie(response, request)
     return {"ok": True}
+
+
+@app.post("/api/auth/google/callback")
+async def auth_google_callback(request: Request):
+    return_to = _normalize_return_to(request.query_params.get("return_to"))
+
+    if not auth_service.is_enabled():
+        return RedirectResponse(_append_query_value(return_to, "auth_error", "not_configured"), status_code=303)
+
+    form = await request.form()
+    credential = str(form.get("credential") or "").strip()
+    csrf_cookie = str(request.cookies.get("g_csrf_token") or "").strip()
+    csrf_form = str(form.get("g_csrf_token") or "").strip()
+
+    if not credential or not csrf_cookie or csrf_cookie != csrf_form:
+        return RedirectResponse(_append_query_value(return_to, "auth_error", "csrf"), status_code=303)
+
+    try:
+        user = await auth_service.verify_google_credential(credential)
+    except Exception as exc:
+        logger.warning("Google redirect login verification failed: %s", exc)
+        return RedirectResponse(_append_query_value(return_to, "auth_error", "google"), status_code=303)
+
+    await cache.upsert_user(user)
+    await cache.delete_expired_sessions()
+
+    session_token = auth_service.new_session_token()
+    await cache.create_user_session(
+        auth_service.hash_session_token(session_token),
+        user["google_sub"],
+        auth_service.session_expiry_iso(),
+    )
+
+    redirect_target = _append_query_value(return_to, "auth", "success")
+    response = RedirectResponse(redirect_target, status_code=303)
+    _set_session_cookie(response, request, session_token)
+    return response
 
 
 @app.get("/api/search")
