@@ -109,6 +109,7 @@ body {
   color:var(--text-secondary); font-size:16px; padding:4px 6px; border-radius:4px;
   transition: opacity 0.15s, color 0.15s;
   flex-shrink:0;
+  margin-top: -2px;
 }
 .sidebar-item:hover .delete-btn { opacity:1; }
 .sidebar-item .delete-btn:hover { color:#dc2626; }
@@ -1076,16 +1077,15 @@ async function loadRecentList() {
       const code = document.createElement('div');
       code.className = 'code';
       code.textContent = item.stock_code;
-      info.append(name, code);
 
       const quote = item.quote_snapshot || {};
-      if (quote.price !== null && quote.price !== undefined) {
-        const quotePrice = document.createElement('div');
-        quotePrice.className = 'quote-price';
-        quotePrice.textContent = Number(quote.price).toLocaleString();
+      const quotePrice = document.createElement('div');
+      quotePrice.className = 'quote-price';
+      const quoteMeta = document.createElement('div');
+      quoteMeta.className = 'quote-meta';
 
-        const quoteMeta = document.createElement('div');
-        quoteMeta.className = 'quote-meta';
+      if (quote.price !== null && quote.price !== undefined) {
+        quotePrice.textContent = Number(quote.price).toLocaleString();
         const change = Number(quote.change || 0);
         const changePct = quote.change_pct;
         const changePrefix = change > 0 ? '+' : '';
@@ -1094,8 +1094,9 @@ async function loadRecentList() {
           ? `${changePrefix}${change.toLocaleString()} (${changePrefix}${Number(changePct).toLocaleString()}%)`
           : '변동 정보 없음';
         quoteMeta.innerHTML = `<span class="quote-change ${changeClass}">${changeText}</span>`;
-        info.append(quotePrice, quoteMeta);
       }
+
+      info.append(name, quotePrice, code, quoteMeta);
 
       const button = document.createElement('button');
       button.className = 'delete-btn';
