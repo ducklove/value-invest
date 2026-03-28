@@ -658,27 +658,49 @@ function formatWeeklySectionTitle(weeklyIndicators) {
   return `주간 밸류에이션 (${coverage.startDate} ~ ${coverage.endDate})`;
 }
 
-function renderCoverageSummary(indicators, weeklyIndicators) {
-  const parts = [];
-  const priceCoverage = getSeriesCoverage(indicators['주가 (원)']);
-  const dividendCoverage = getSeriesCoverage(indicators['배당수익률 (%)']);
-  const valuationCoverage = getSeriesCoverage(indicators['PER']);
-  const financialCoverage = getSeriesCoverage(indicators['ROE (%)']);
-  const weeklyCoverage = getWeeklyDateCoverage(weeklyIndicators?.['주간 PER'] || []);
+function getLatestIndicatorValue(series) {
+  const entries = (series || []).filter(item => item && item.value !== null && item.value !== undefined && Number.isFinite(Number(item.value)));
+  if (entries.length === 0) return null;
+  return Number(entries[entries.length - 1].value);
+}
 
-  if (priceCoverage) parts.push(`주가 ${priceCoverage}`);
-  if (dividendCoverage) parts.push(`배당 ${dividendCoverage}`);
-  if (valuationCoverage) parts.push(`PER/PBR/EPS ${valuationCoverage}`);
-  if (financialCoverage) parts.push(`ROE/부채비율/영업이익률 ${financialCoverage}`);
-  if (weeklyCoverage) parts.push(`주간 지표 ${weeklyCoverage.startDate}~${weeklyCoverage.endDate}`);
-  if (weeklyCoverage) parts.push('주간 PER/PBR은 사업보고서 공시일 기준 적용');
-  if (valuationCoverage || weeklyCoverage) parts.push(`PER 차트는 음수와 ${PER_DISPLAY_MAX}배 초과 구간을 제외`);
+function formatMetricNumber(value, suffix = '') {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? 'N/A'
+    : `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
+}
 
-  if (parts.length === 0) {
-    return '지표별 제공 연도는 데이터 소스에 따라 다릅니다.';
+function getLatestDerivedBps(indicators) {
+  const priceByYear = new Map((indicators['주가 (원)'] || []).map(item => [item.year, Number(item.value)]));
+  const pbrSeries = indicators['PBR'] || [];
+
+  for (let index = pbrSeries.length - 1; index >= 0; index -= 1) {
+    const item = pbrSeries[index];
+    const pbr = Number(item?.value);
+    const price = priceByYear.get(item?.year);
+    if (Number.isFinite(price) && Number.isFinite(pbr) && pbr > 0) {
+      return price / pbr;
+    }
   }
 
-  return `지표별 데이터 범위: ${parts.join(' · ')}`;
+  return null;
+}
+
+function renderCurrentValuationSummary(indicators, quoteSnapshot) {
+  const currentPrice = Number(quoteSnapshot?.price);
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    return '현재가 기준 PER N/A · PBR N/A · 배당수익률 N/A';
+  }
+
+  const latestEps = getLatestIndicatorValue(indicators['EPS (원)']);
+  const latestDps = getLatestIndicatorValue(indicators['주당배당금 (원)']);
+  const latestBps = getLatestDerivedBps(indicators);
+
+  const per = latestEps && latestEps > 0 ? currentPrice / latestEps : null;
+  const pbr = latestBps && latestBps > 0 ? currentPrice / latestBps : null;
+  const dividendYield = latestDps !== null ? (latestDps / currentPrice) * 100 : null;
+
+  return `현재가 기준 PER ${formatMetricNumber(per)} · PBR ${formatMetricNumber(pbr)} · 배당수익률 ${formatMetricNumber(dividendYield, '%')}`;
 }
 
 function isPerChart(key) {
@@ -983,7 +1005,7 @@ function renderResult(data) {
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
   document.getElementById('companyMeta').textContent = cachedText;
-  document.getElementById('coverageNote').textContent = renderCoverageSummary(data.indicators || {}, data.weekly_indicators || {});
+  document.getElementById('coverageNote').textContent = renderCurrentValuationSummary(data.indicators || {}, data.quote_snapshot || {});
   const quoteSummary = document.getElementById('quoteSummary');
   const quotePrice = document.getElementById('quotePrice');
   const quoteChange = document.getElementById('quoteChange');
