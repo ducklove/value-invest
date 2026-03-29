@@ -1,3 +1,6 @@
+import re
+
+import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
@@ -5,6 +8,48 @@ import stock_price
 from deps import get_current_user
 
 router = APIRouter()
+
+
+@router.get("/api/market-summary")
+async def market_summary():
+    async def fetch_index(code: str) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                r = await c.get(
+                    f"https://finance.naver.com/sise/sise_index.naver?code={code}",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                value = re.search(r'id="now_value"[^>]*>([^<]+)', r.text)
+                spans = re.findall(r'<span[^>]*>([^<]+)</span>', r.text[r.text.find('change_value_and_rate'):r.text.find('change_value_and_rate') + 300]) if 'change_value_and_rate' in r.text else []
+                direction = re.search(r'class="quotient\s+(up|dn)"', r.text)
+                change_val = spans[0] if spans else None
+                d = direction.group(1) if direction else ""
+                return {
+                    "value": value.group(1).strip() if value else None,
+                    "change": change_val,
+                    "direction": "up" if d == "up" else "down" if d == "dn" else "",
+                }
+        except Exception:
+            return {}
+
+    async def fetch_fx() -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                r = await c.get("https://finance.naver.com/marketindex/", headers={"User-Agent": "Mozilla/5.0"})
+                value = re.search(r'class="value"[^>]*>([0-9,.]+)', r.text)
+                change = re.search(r'class="change"[^>]*>([0-9,.]+)', r.text)
+                d = re.search(r'class="head_info.*?class="(up|down)"', r.text, re.DOTALL)
+                return {
+                    "value": value.group(1).strip() if value else None,
+                    "change": change.group(1).strip() if change else None,
+                    "direction": d.group(1) if d else "",
+                }
+        except Exception:
+            return {}
+
+    import asyncio
+    kospi, kosdaq, fx = await asyncio.gather(fetch_index("KOSPI"), fetch_index("KOSDAQ"), fetch_fx())
+    return {"kospi": kospi, "kosdaq": kosdaq, "usd_krw": fx}
 
 
 @router.get("/api/search")

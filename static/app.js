@@ -1617,7 +1617,8 @@ function renderPortfolio() {
     const avgPrice = item.avg_price;
     const invested = qty * avgPrice;
     const marketValue = price !== null ? qty * price : null;
-    const returnPct = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
+    const rawReturn = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
+    const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;
     const dailyPnl = price !== null ? qty * change : 0;
     totalInvested += invested;
     if (marketValue !== null) totalMarketValue += marketValue;
@@ -1681,7 +1682,7 @@ function renderPortfolio() {
 
     if (isEditing) {
       return `<tr data-code="${r.stock_code}">
-        <td><strong>${escapeHtml(r.stock_name)}</strong> <span class="pf-stock-code">${r.stock_code}</span></td>
+        <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}');return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span></td>
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
@@ -1696,7 +1697,7 @@ function renderPortfolio() {
       </tr>`;
     }
     return `<tr draggable="true" data-code="${r.stock_code}">
-      <td><strong>${escapeHtml(r.stock_name)}</strong> <span class="pf-stock-code">${r.stock_code}</span></td>
+      <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}');return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span></td>
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
       <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
@@ -1932,6 +1933,37 @@ async function pfAddFromSearch(code, name) {
   } catch (e) { alert(e.message); }
 }
 
+function pfGoAnalyze(stockCode) {
+  // For preferred stocks, try common stock code (replace last char with 0)
+  let analyzeCode = stockCode;
+  if (/^[0-9]{5}[^0]$/.test(stockCode) || /^[0-9]{5}[A-Z]$/.test(stockCode)) {
+    analyzeCode = stockCode.slice(0, -1) + '0';
+  }
+  switchView('analysis');
+  analyzeStock(analyzeCode);
+}
+
+async function loadMarketSummary() {
+  try {
+    const resp = await apiFetch('/api/market-summary');
+    if (!resp.ok) return;
+    const d = await resp.json();
+    const bar = document.getElementById('marketBar');
+    if (!bar) return;
+    const items = [
+      { label: 'KOSPI', ...d.kospi },
+      { label: 'KOSDAQ', ...d.kosdaq },
+      { label: 'USD/KRW', ...d.usd_krw },
+    ];
+    bar.innerHTML = items.map(i => {
+      if (!i.value) return '';
+      const cls = i.direction === 'up' ? 'mi-up' : i.direction === 'down' ? 'mi-down' : '';
+      const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '-' : '';
+      return `<div class="mi"><span class="mi-label">${i.label}</span> <span class="mi-val">${i.value}</span> <span class="mi-chg ${cls}">${sign}${i.change || ''}</span></div>`;
+    }).join('');
+  } catch {}
+}
+
 function toggleCsvPanel() {
   const panel = document.getElementById('pfCsvPanel');
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
@@ -1988,6 +2020,8 @@ async function submitCsv(mode) {
 async function initApp() {
   await initAuth();
   await loadRecentList();
+  loadMarketSummary();
+  setInterval(loadMarketSummary, 60_000);
   ensureQuoteRefreshTimer();
   trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
 }

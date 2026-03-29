@@ -110,6 +110,16 @@ body {
   color: var(--text);
   border-color: var(--text-secondary);
 }
+.market-bar {
+  display: flex; gap: 6px; margin-bottom: 10px; font-size: 11px;
+  font-variant-numeric: tabular-nums; color: var(--text-secondary);
+}
+.market-bar .mi { flex: 1; text-align: center; }
+.market-bar .mi-label { font-weight: 700; }
+.market-bar .mi-val { font-weight: 600; color: var(--text); }
+.market-bar .mi-chg { font-size: 10px; }
+.market-bar .mi-up { color: #b91c1c; }
+.market-bar .mi-down { color: #1d4ed8; }
 .sidebar-tabs {
   display: flex;
   margin-bottom: 12px;
@@ -556,7 +566,7 @@ body {
 }
 .pf-add-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
 .pf-csv-toggle {
-  padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+  margin-left: auto; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 600;
   cursor: pointer; transition: color 0.15s; white-space: nowrap; flex-shrink: 0;
 }
@@ -612,6 +622,8 @@ body {
 .pf-table tbody tr[draggable="true"]:active { cursor: grabbing; }
 .pf-table tbody tr.dragging { opacity: 0.4; }
 .pf-table tbody tr.drag-over td { border-top: 2px solid var(--primary); }
+.pf-stock-link { color: var(--text); text-decoration: none; }
+.pf-stock-link:hover { color: var(--primary); }
 .pf-stock-code { font-size: 11px; color: var(--text-secondary); }
 .pf-return.positive { color: #b91c1c; }
 .pf-return.negative { color: #1d4ed8; }
