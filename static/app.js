@@ -156,6 +156,18 @@ async function loadCurrentUser() {
   return currentUser;
 }
 
+async function syncAuthState(options = {}) {
+  const { refreshRecentList = false, refreshPreference = false } = options;
+  await loadCurrentUser();
+  renderAuthState();
+  if (refreshPreference) {
+    await refreshActivePreference();
+  }
+  if (refreshRecentList) {
+    await loadRecentList();
+  }
+}
+
 function updateRecentListTitle() {
   const title = document.getElementById('recentListTitle');
   if (!title) return;
@@ -482,9 +494,7 @@ function consumeAuthRedirectResult() {
 
 async function initAuth() {
   await loadAuthConfig();
-  await loadCurrentUser();
-  renderAuthState();
-  await refreshActivePreference();
+  await syncAuthState({ refreshPreference: true });
   consumeAuthRedirectResult();
 }
 
@@ -1403,3 +1413,17 @@ async function initApp() {
 }
 
 initApp();
+
+window.addEventListener('pageshow', () => {
+  syncAuthState({ refreshRecentList: true, refreshPreference: true });
+});
+
+window.addEventListener('focus', () => {
+  syncAuthState({ refreshRecentList: true, refreshPreference: true });
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    syncAuthState({ refreshRecentList: true, refreshPreference: true });
+  }
+});
