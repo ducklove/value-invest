@@ -1486,6 +1486,281 @@ async function loadReports(stockCode) {
   }
 }
 
+// --- Portfolio ---
+let activeView = 'analysis';
+let portfolioItems = [];
+let portfolioLoading = false;
+let pfSearchTimeout = null;
+let pfEditingCode = null;
+
+function switchView(view) {
+  activeView = view;
+  document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
+  document.getElementById('analysisView').style.display = view === 'analysis' ? 'block' : 'none';
+  document.getElementById('portfolioView').style.display = view === 'portfolio' ? 'block' : 'none';
+  if (view === 'portfolio') loadPortfolio();
+}
+
+async function loadPortfolio() {
+  if (portfolioLoading) return;
+  portfolioLoading = true;
+  try {
+    const resp = await apiFetch('/api/portfolio');
+    if (!resp.ok) {
+      if (resp.status === 401) {
+        document.getElementById('pfEmpty').textContent = '로그인이 필요합니다.';
+        document.getElementById('pfEmpty').style.display = 'block';
+        document.getElementById('pfTable').style.display = 'none';
+        return;
+      }
+      return;
+    }
+    portfolioItems = await resp.json();
+    renderPortfolio();
+  } catch {} finally {
+    portfolioLoading = false;
+  }
+}
+
+function renderPortfolio() {
+  const tbody = document.getElementById('pfBody');
+  const tfoot = document.getElementById('pfFoot');
+  const summary = document.getElementById('pfSummary');
+  const table = document.getElementById('pfTable');
+  const empty = document.getElementById('pfEmpty');
+
+  if (!portfolioItems.length) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    summary.innerHTML = '';
+    return;
+  }
+  table.style.display = 'table';
+  empty.style.display = 'none';
+
+  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0;
+
+  const rows = portfolioItems.map(item => {
+    const q = item.quote || {};
+    const price = q.price ?? null;
+    const change = q.change ?? 0;
+    const changePct = q.change_pct ?? null;
+    const qty = item.quantity;
+    const avgPrice = item.avg_price;
+    const invested = qty * avgPrice;
+    const marketValue = price !== null ? qty * price : null;
+    const returnPct = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
+    const dailyPnl = price !== null ? qty * change : 0;
+    totalInvested += invested;
+    if (marketValue !== null) totalMarketValue += marketValue;
+    totalDailyPnl += dailyPnl;
+    return { ...item, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
+  });
+
+  const totalReturnPct = totalInvested > 0 ? ((totalMarketValue - totalInvested) / totalInvested * 100) : 0;
+  const prevTotalValue = totalMarketValue - totalDailyPnl;
+  const dailyReturnPct = prevTotalValue > 0 ? (totalDailyPnl / prevTotalValue * 100) : 0;
+
+  // Summary cards
+  summary.innerHTML = `
+    <div class="pf-summary-card">
+      <div class="pf-summary-label">총 평가금액</div>
+      <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
+      <div class="pf-summary-sub">투자금액 ${fmtKrw(totalInvested)}</div>
+    </div>
+    <div class="pf-summary-card">
+      <div class="pf-summary-label">총 수익률</div>
+      <div class="pf-summary-value ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</div>
+      <div class="pf-summary-sub ${returnClass(totalMarketValue - totalInvested)}">${fmtSignedKrw(totalMarketValue - totalInvested)}</div>
+    </div>
+    <div class="pf-summary-card">
+      <div class="pf-summary-label">일간 수익</div>
+      <div class="pf-summary-value ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
+      <div class="pf-summary-sub ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
+    </div>`;
+
+  // Table body
+  tbody.innerHTML = rows.map((r, i) => {
+    const weight = totalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / totalMarketValue * 100) : 0;
+    const isEditing = pfEditingCode === r.stock_code;
+
+    if (isEditing) {
+      return `<tr>
+        <td><strong>${escapeHtml(r.stock_name)}</strong> <span class="pf-stock-code">${r.stock_code}</span></td>
+        <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
+        <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
+        <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
+        <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="1" min="1"></td>
+        <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
+        <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
+        <td class="pf-col-num">${fmtPct(weight)}</td>
+        <td class="pf-col-act"><div class="pf-row-actions">
+          <button class="pf-row-btn" onclick="savePortfolioEdit('${r.stock_code}','${escapeHtml(r.stock_name)}')" title="저장">V</button>
+          <button class="pf-row-btn" onclick="cancelPortfolioEdit()" title="취소">X</button>
+        </div></td>
+      </tr>`;
+    }
+    return `<tr>
+      <td><strong>${escapeHtml(r.stock_name)}</strong> <span class="pf-stock-code">${r.stock_code}</span></td>
+      <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
+      <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
+      <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
+      <td class="pf-col-num">${fmtNum(r.qty)}</td>
+      <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
+      <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
+      <td class="pf-col-num">${fmtPct(weight)}</td>
+      <td class="pf-col-act"><div class="pf-row-actions">
+        <button class="pf-row-btn" onclick="startPortfolioEdit('${r.stock_code}')" title="편집">E</button>
+        <button class="pf-row-btn delete" onclick="deletePortfolioItem('${r.stock_code}')" title="삭제">X</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+
+  // Footer
+  tfoot.innerHTML = `<tr>
+    <td colspan="6">합계</td>
+    <td class="pf-col-num">${fmtNum(totalMarketValue)}</td>
+    <td class="pf-col-num">100%</td>
+    <td></td>
+  </tr>`;
+}
+
+function returnClass(val) {
+  if (val === null || val === undefined) return '';
+  return val > 0 ? 'pf-return positive' : val < 0 ? 'pf-return negative' : '';
+}
+function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
+function fmtKrw(n) { return n !== null ? Number(Math.round(n)).toLocaleString() + '원' : '-'; }
+function fmtSignedKrw(n) {
+  if (n === null) return '-';
+  const r = Math.round(n);
+  return (r > 0 ? '+' : '') + r.toLocaleString() + '원';
+}
+function fmtPct(n) {
+  if (n === null || n === undefined) return '-';
+  return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
+}
+function fmtChangePct(pct, change) {
+  if (pct === null || pct === undefined) return '-';
+  const cls = change > 0 ? 'positive' : change < 0 ? 'negative' : '';
+  return `<span class="pf-return ${cls}">${fmtPct(pct)}</span>`;
+}
+
+function startPortfolioEdit(stockCode) {
+  pfEditingCode = stockCode;
+  renderPortfolio();
+  const priceInput = document.getElementById('pfEditPrice');
+  if (priceInput) priceInput.focus();
+}
+
+function cancelPortfolioEdit() {
+  pfEditingCode = null;
+  renderPortfolio();
+}
+
+async function savePortfolioEdit(stockCode, stockName) {
+  const qty = parseInt(document.getElementById('pfEditQty').value, 10);
+  const price = parseFloat(document.getElementById('pfEditPrice').value);
+  if (isNaN(qty) || qty <= 0 || isNaN(price) || price < 0) {
+    alert('수량과 매입가를 올바르게 입력해 주세요.');
+    return;
+  }
+  try {
+    const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_name: stockName, quantity: qty, avg_price: price }),
+    });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || '저장 실패');
+    }
+    pfEditingCode = null;
+    await loadPortfolio();
+  } catch (e) { alert(e.message); }
+}
+
+async function deletePortfolioItem(stockCode) {
+  try {
+    const resp = await apiFetch(`/api/portfolio/${stockCode}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error('삭제 실패');
+    await loadPortfolio();
+  } catch (e) { alert(e.message); }
+}
+
+// Portfolio add - search
+(function initPfSearch() {
+  document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('pfAddInput');
+    const dropdown = document.getElementById('pfDropdown');
+    if (!input || !dropdown) return;
+
+    input.addEventListener('input', () => {
+      clearTimeout(pfSearchTimeout);
+      const q = input.value.trim();
+      if (q.length < 1) { dropdown.classList.remove('show'); return; }
+      pfSearchTimeout = setTimeout(async () => {
+        try {
+          const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
+          const results = await resp.json();
+          if (!results.length) { dropdown.classList.remove('show'); return; }
+          dropdown.innerHTML = results.map(r =>
+            `<div class="dropdown-item" data-code="${r.stock_code}" data-name="${escapeHtml(r.corp_name)}">${escapeHtml(r.corp_name)} <span style="color:var(--text-secondary)">${r.stock_code}</span></div>`
+          ).join('');
+          dropdown.classList.add('show');
+          dropdown.querySelectorAll('.dropdown-item').forEach(el => {
+            el.addEventListener('click', () => pfAddFromSearch(el.dataset.code, el.dataset.name));
+          });
+        } catch {}
+      }, 200);
+    });
+
+    input.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        dropdown.classList.remove('show');
+        const q = input.value.trim();
+        if (!q) return;
+        // Try as stock code directly
+        if (/^\d{6}$/.test(q)) {
+          const resp = await apiFetch(`/api/portfolio/resolve-name?code=${q}`);
+          const data = await resp.json();
+          pfAddFromSearch(q, data.stock_name || q);
+        }
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!input.contains(e.target) && !dropdown.contains(e.target)) dropdown.classList.remove('show');
+    });
+  });
+})();
+
+async function pfAddFromSearch(code, name) {
+  document.getElementById('pfDropdown').classList.remove('show');
+  document.getElementById('pfAddInput').value = '';
+  // Check if already in portfolio
+  const existing = portfolioItems.find(i => i.stock_code === code);
+  if (existing) {
+    startPortfolioEdit(code);
+    return;
+  }
+  // Add with default values, open edit
+  try {
+    const resp = await apiFetch(`/api/portfolio/${code}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_name: name, quantity: 1, avg_price: 0 }),
+    });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || '추가 실패');
+    }
+    pfEditingCode = code;
+    await loadPortfolio();
+  } catch (e) { alert(e.message); }
+}
+
 // Init
 async function initApp() {
   await initAuth();

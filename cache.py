@@ -110,6 +110,19 @@ async def init_db():
                 fetched_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS user_portfolio (
+                google_sub TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 0,
+                avg_price REAL NOT NULL DEFAULT 0,
+                sort_order INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (google_sub, stock_code),
+                FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
             CREATE INDEX IF NOT EXISTS idx_user_sessions_google_sub ON user_sessions(google_sub);
             CREATE INDEX IF NOT EXISTS idx_user_recent_viewed_at ON user_recent_analyses(google_sub, viewed_at DESC);
@@ -775,6 +788,108 @@ async def unstar_stock(google_sub: str, stock_code: str):
             WHERE google_sub = ? AND stock_code = ?
             """,
             (datetime.now().isoformat(), google_sub, stock_code),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+# --- Portfolio ---
+
+async def resolve_stock_name(stock_code: str) -> str | None:
+    name = await get_corp_name(stock_code)
+    if name:
+        return name
+    base_code = stock_code[:-1] + "0"
+    base_name = await get_corp_name(base_code)
+    if not base_name:
+        return None
+    suffix = stock_code[-1]
+    if suffix == "5":
+        return f"{base_name}(우)"
+    if suffix == "7":
+        return f"{base_name}(우B)"
+    return f"{base_name}({suffix})"
+
+
+async def get_portfolio(google_sub: str) -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT stock_code, stock_name, quantity, avg_price, sort_order
+            FROM user_portfolio
+            WHERE google_sub = ?
+            ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, created_at ASC
+            """,
+            (google_sub,),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+    finally:
+        await db.close()
+
+
+async def save_portfolio_item(
+    google_sub: str, stock_code: str, stock_name: str, quantity: int, avg_price: float,
+) -> dict:
+    db = await get_db()
+    try:
+        now = datetime.now().isoformat()
+        cursor = await db.execute(
+            "SELECT sort_order FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            (google_sub, stock_code),
+        )
+        existing = await cursor.fetchone()
+        sort_order = existing["sort_order"] if existing else None
+
+        if sort_order is None and not existing:
+            cursor = await db.execute(
+                "SELECT MIN(sort_order) AS mn FROM user_portfolio WHERE google_sub = ? AND sort_order IS NOT NULL",
+                (google_sub,),
+            )
+            row = await cursor.fetchone()
+            min_order = row["mn"] if row and row["mn"] is not None else 0
+            sort_order = min_order - 1
+
+        await db.execute(
+            """
+            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(google_sub, stock_code) DO UPDATE SET
+                stock_name = excluded.stock_name,
+                quantity = excluded.quantity,
+                avg_price = excluded.avg_price,
+                updated_at = excluded.updated_at
+            """,
+            (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, now, now),
+        )
+        await db.commit()
+        return {"stock_code": stock_code, "stock_name": stock_name, "quantity": quantity, "avg_price": avg_price}
+    finally:
+        await db.close()
+
+
+async def delete_portfolio_item(google_sub: str, stock_code: str):
+    db = await get_db()
+    try:
+        await db.execute(
+            "DELETE FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            (google_sub, stock_code),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def save_portfolio_order(google_sub: str, ordered_stock_codes: list[str]):
+    db = await get_db()
+    try:
+        await db.executemany(
+            "UPDATE user_portfolio SET sort_order = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
+            [
+                (index, datetime.now().isoformat(), google_sub, code)
+                for index, code in enumerate(ordered_stock_codes)
+            ],
         )
         await db.commit()
     finally:

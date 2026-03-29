@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 import cache
 import dart_client
 import kis_proxy_client
-from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router
+from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ app.include_router(analysis_router)
 app.include_router(reports_router)
 app.include_router(stocks_router)
 app.include_router(cache_router)
+app.include_router(portfolio_router)
 
 
 @app.get("/")

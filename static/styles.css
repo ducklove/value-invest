@@ -221,7 +221,16 @@ body {
 /* Main */
 .main { flex:1; padding: 24px 32px; overflow-y: auto; }
 .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
-.header h1 { font-size: 24px; }
+.main-nav { display: flex; gap: 0; }
+.nav-btn {
+  padding: 8px 20px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-secondary); font-size: 15px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-btn:first-child { border-radius: 10px 0 0 10px; }
+.nav-btn:last-child { border-radius: 0 10px 10px 0; border-left: none; }
+.nav-btn:hover { color: var(--text); }
+.nav-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
 /* Theme toggle */
 .theme-toggle {
   background: var(--surface); border:1px solid var(--border); border-radius:8px;
@@ -526,6 +535,63 @@ body {
 }
 .empty-state h2 { font-size:20px; margin-bottom:8px; color:var(--text); }
 
+/* Portfolio */
+.pf-summary {
+  display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;
+}
+.pf-summary-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 16px; min-width: 140px; flex: 1;
+}
+.pf-summary-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.pf-summary-value { font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.pf-summary-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pf-add-bar { position: relative; margin-bottom: 16px; max-width: 500px; }
+.pf-add-input {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px;
+  font-size: 14px; background: var(--input-bg); color: var(--text); outline: none;
+}
+.pf-add-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+.pf-dropdown { max-width: 500px; }
+.pf-table-wrap {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+}
+.pf-table {
+  width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.pf-table thead th {
+  background: var(--sidebar-bg); padding: 10px 12px; text-align: left;
+  font-weight: 600; color: var(--text-secondary); font-size: 12px;
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.pf-table tbody td, .pf-table tfoot td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle;
+}
+.pf-table tbody tr:last-child td { border-bottom: none; }
+.pf-table tbody tr:hover { background: var(--sidebar-bg); }
+.pf-table tfoot td { font-weight: 700; background: var(--sidebar-bg); border-top: 2px solid var(--border); }
+.pf-col-num { text-align: right; }
+.pf-col-act { width: 36px; text-align: center; }
+.pf-stock-code { font-size: 11px; color: var(--text-secondary); }
+.pf-return.positive { color: #b91c1c; }
+.pf-return.negative { color: #1d4ed8; }
+.pf-edit-input {
+  width: 80px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px;
+  font-size: 13px; text-align: right; background: var(--input-bg); color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.pf-edit-input:focus { border-color: var(--primary); outline: none; }
+.pf-row-actions { display: flex; gap: 4px; justify-content: center; }
+.pf-row-btn {
+  border: none; background: none; cursor: pointer; color: var(--text-secondary);
+  font-size: 14px; padding: 2px 4px; border-radius: 4px; transition: color 0.15s;
+}
+.pf-row-btn:hover { color: var(--primary); }
+.pf-row-btn.delete:hover { color: #dc2626; }
+.pf-empty {
+  text-align: center; padding: 40px; color: var(--text-secondary); font-size: 14px;
+}
+
 @media (max-width:900px) {
   body {
     display: block;
@@ -535,4 +601,6 @@ body {
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
+  .pf-table { font-size: 12px; }
+  .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
 }

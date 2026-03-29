@@ -78,9 +78,14 @@ function trackEvent(name, params = {}) {
 
 <div class="main">
   <div class="header">
-    <h1>가치투자 분석</h1>
+    <nav class="main-nav">
+      <button class="nav-btn active" data-view="analysis" onclick="switchView('analysis')">분석</button>
+      <button class="nav-btn" data-view="portfolio" onclick="switchView('portfolio')">포트폴리오</button>
+    </nav>
     <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환">🌓</button>
   </div>
+
+  <div id="analysisView">
   <div class="search-container">
     <input class="search-input" id="searchInput" placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930)" autocomplete="off">
     <div class="dropdown" id="dropdown"></div>
@@ -138,6 +143,39 @@ function trackEvent(name, params = {}) {
       <button class="reports-more" id="reportsMore" style="display:none;" onclick="showMoreReports()">더 보기</button>
     </div>
   </div>
+  </div><!-- /analysisView -->
+
+  <div id="portfolioView" style="display:none;">
+    <div class="pf-summary" id="pfSummary"></div>
+
+    <div class="pf-add-bar">
+      <input class="pf-add-input" id="pfAddInput" placeholder="종목코드 또는 종목명 (예: 005930, 삼성전자)" autocomplete="off">
+      <div class="dropdown pf-dropdown" id="pfDropdown"></div>
+    </div>
+
+    <div class="pf-table-wrap">
+      <table class="pf-table" id="pfTable">
+        <thead>
+          <tr>
+            <th class="pf-col-name">종목명</th>
+            <th class="pf-col-num">등락률</th>
+            <th class="pf-col-num">매입가</th>
+            <th class="pf-col-num">현재가</th>
+            <th class="pf-col-num">수량</th>
+            <th class="pf-col-num">수익률</th>
+            <th class="pf-col-num">평가금액</th>
+            <th class="pf-col-num">비중</th>
+            <th class="pf-col-act"></th>
+          </tr>
+        </thead>
+        <tbody id="pfBody"></tbody>
+        <tfoot id="pfFoot"></tfoot>
+      </table>
+    </div>
+    <div class="pf-empty" id="pfEmpty" style="display:none;">
+      포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.
+    </div>
+  </div><!-- /portfolioView -->
 </div>
 
 <div class="loading-overlay" id="loadingOverlay">
