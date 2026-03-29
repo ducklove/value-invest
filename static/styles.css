@@ -145,9 +145,9 @@ body {
 .sidebar-item .info {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 62px 48px;
   align-items: center;
-  column-gap: 8px;
+  column-gap: 6px;
 }
 .sidebar-item .name {
   font-weight: 600; font-size: 14px;
@@ -189,20 +189,20 @@ body {
   background: rgba(5,150,105,0.12);
   color: #047857;
 }
-.sidebar-item .quote-cell {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
 .sidebar-item .quote-price {
   font-size: 12px;
   font-weight: 700;
   color: var(--text);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
-.sidebar-item .quote-change { font-size: 11px; }
+.sidebar-item .quote-change {
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .sidebar-item .quote-change.up { color: #b91c1c; }
 .sidebar-item .quote-change.down { color: #1d4ed8; }
 .sidebar-item .quote-change.flat { color: var(--text-secondary); }

@@ -1221,30 +1221,23 @@ async function loadRecentList() {
       }
 
       const quote = item.quote_snapshot || {};
-      const quoteCell = document.createElement('div');
-      quoteCell.className = 'quote-cell';
+      const quotePrice = document.createElement('div');
+      quotePrice.className = 'quote-price';
+      const quoteChange = document.createElement('div');
+      quoteChange.className = 'quote-change';
 
       if (quote.price !== null && quote.price !== undefined) {
-        const quotePrice = document.createElement('span');
-        quotePrice.className = 'quote-price';
         quotePrice.textContent = Number(quote.price).toLocaleString();
-        quoteCell.appendChild(quotePrice);
-
         const change = Number(quote.change || 0);
         const changePct = quote.change_pct;
         const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
-        const changeText = changePct !== null && changePct !== undefined
-          ? `${change > 0 ? '+' : ''}${Number(changePct).toLocaleString()}%`
-          : '';
-        if (changeText) {
-          const changeSpan = document.createElement('span');
-          changeSpan.className = `quote-change ${changeClass}`;
-          changeSpan.textContent = changeText;
-          quoteCell.appendChild(changeSpan);
+        quoteChange.classList.add(changeClass);
+        if (changePct !== null && changePct !== undefined) {
+          quoteChange.textContent = `${change > 0 ? '+' : ''}${Number(changePct).toLocaleString()}%`;
         }
       }
 
-      info.append(nameRow, quoteCell);
+      info.append(nameRow, quotePrice, quoteChange);
       wrapper.appendChild(info);
 
       if (currentUser) {
