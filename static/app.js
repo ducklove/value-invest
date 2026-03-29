@@ -1152,6 +1152,38 @@ async function loadRecentList() {
     recentListItems.forEach((item, index) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'sidebar-item';
+      wrapper.dataset.index = index;
+
+      if (currentUser) {
+        wrapper.draggable = true;
+        wrapper.addEventListener('dragstart', (e) => {
+          wrapper.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(index));
+        });
+        wrapper.addEventListener('dragend', () => {
+          wrapper.classList.remove('dragging');
+          container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        });
+        wrapper.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const dragging = container.querySelector('.dragging');
+          if (dragging !== wrapper) wrapper.classList.add('drag-over');
+        });
+        wrapper.addEventListener('dragleave', () => {
+          wrapper.classList.remove('drag-over');
+        });
+        wrapper.addEventListener('drop', (e) => {
+          e.preventDefault();
+          wrapper.classList.remove('drag-over');
+          const fromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+          const toIndex = parseInt(wrapper.dataset.index, 10);
+          if (fromIndex !== toIndex && !isNaN(fromIndex) && !isNaN(toIndex)) {
+            dropRecentItem(fromIndex, toIndex);
+          }
+        });
+      }
 
       const info = document.createElement('div');
       info.className = 'info';
@@ -1189,49 +1221,33 @@ async function loadRecentList() {
       }
 
       const quote = item.quote_snapshot || {};
-      const quotePrice = document.createElement('div');
-      quotePrice.className = 'quote-price';
-      const quoteMeta = document.createElement('div');
-      quoteMeta.className = 'quote-meta';
+      const quoteRow = document.createElement('div');
+      quoteRow.className = 'quote-row';
 
       if (quote.price !== null && quote.price !== undefined) {
+        const quotePrice = document.createElement('span');
+        quotePrice.className = 'quote-price';
         quotePrice.textContent = Number(quote.price).toLocaleString();
+        quoteRow.appendChild(quotePrice);
+
         const change = Number(quote.change || 0);
         const changePct = quote.change_pct;
         const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
         const changeText = changePct !== null && changePct !== undefined
           ? `${change > 0 ? '+' : ''}${Number(changePct).toLocaleString()}%`
-          : '변동 정보 없음';
-        quoteMeta.innerHTML = `<span class="quote-change ${changeClass}">${changeText}</span>`;
+          : '';
+        if (changeText) {
+          const changeSpan = document.createElement('span');
+          changeSpan.className = `quote-change ${changeClass}`;
+          changeSpan.textContent = changeText;
+          quoteRow.appendChild(changeSpan);
+        }
       }
 
-      info.append(nameRow, quotePrice, quoteMeta);
-
+      info.append(nameRow, quoteRow);
       wrapper.appendChild(info);
+
       if (currentUser) {
-        const actions = document.createElement('div');
-        actions.className = 'sidebar-actions';
-
-        const upBtn = document.createElement('button');
-        upBtn.className = 'reorder-btn';
-        upBtn.title = '위로 이동';
-        upBtn.textContent = '↑';
-        upBtn.disabled = index === 0;
-        upBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          moveRecentItem(index, -1);
-        });
-
-        const downBtn = document.createElement('button');
-        downBtn.className = 'reorder-btn';
-        downBtn.title = '아래로 이동';
-        downBtn.textContent = '↓';
-        downBtn.disabled = index === recentListItems.length - 1;
-        downBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          moveRecentItem(index, 1);
-        });
-
         const button = document.createElement('button');
         button.className = 'delete-btn';
         button.title = '삭제';
@@ -1240,9 +1256,7 @@ async function loadRecentList() {
           event.stopPropagation();
           deleteCache(item.stock_code);
         });
-
-        actions.append(upBtn, downBtn, button);
-        wrapper.appendChild(actions);
+        wrapper.appendChild(button);
       }
       container.appendChild(wrapper);
     });
@@ -1293,6 +1307,22 @@ async function moveRecentItem(index, delta) {
   const nextItems = recentListItems.slice();
   const [moved] = nextItems.splice(index, 1);
   nextItems.splice(nextIndex, 0, moved);
+  recentListItems = nextItems;
+
+  try {
+    await saveRecentOrder(nextItems.map(item => item.stock_code));
+    await loadRecentList();
+  } catch (error) {
+    alert(error.message || '순서를 저장하지 못했습니다.');
+    await loadRecentList();
+  }
+}
+
+async function dropRecentItem(fromIndex, toIndex) {
+  if (!currentUser) return;
+  const nextItems = recentListItems.slice();
+  const [moved] = nextItems.splice(fromIndex, 1);
+  nextItems.splice(toIndex, 0, moved);
   recentListItems = nextItems;
 
   try {
