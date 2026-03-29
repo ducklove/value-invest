@@ -207,8 +207,34 @@ body {
   transition: opacity 0.15s, color 0.15s;
   flex-shrink:0;
 }
+.sidebar-item .sidebar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sidebar-item .reorder-btn,
+.sidebar-item .delete-btn {
+  opacity:0; border:none; background:none; cursor:pointer;
+  color:var(--text-secondary); font-size:16px; padding:4px 6px; border-radius:4px;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  flex-shrink:0;
+}
+.sidebar-item .reorder-btn {
+  font-size: 13px;
+  line-height: 1;
+}
+.sidebar-item:hover .reorder-btn,
 .sidebar-item:hover .delete-btn { opacity:1; }
+.sidebar-item .reorder-btn:hover,
 .sidebar-item .delete-btn:hover { color:#dc2626; }
+.sidebar-item .reorder-btn:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.sidebar-item .reorder-btn:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
 
 /* Main */
 .main { flex:1; padding: 24px 32px; overflow-y: auto; }

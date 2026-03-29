@@ -19,6 +19,7 @@ let searchTimeout = null;
 let selectedIdx = -1;
 let currentAbortController = null;
 let recentListLoading = false;
+let recentListItems = [];
 let activeStockCode = null;
 let activeIndicators = {};
 let quoteRefreshTimer = null;
@@ -1140,14 +1141,15 @@ async function loadRecentList() {
     const resp = await apiFetch('/api/cache/list?include_quotes=true');
     const data = await resp.json();
     const container = document.getElementById('recentList');
-    if (data.length === 0) {
+    recentListItems = Array.isArray(data) ? data.slice() : [];
+    if (recentListItems.length === 0) {
       container.innerHTML = currentUser
         ? '<div style="color:var(--text-secondary);font-size:13px;">내 계정에 저장된 종목이 아직 없습니다.</div>'
         : '<div style="color:var(--text-secondary);font-size:13px;">아직 분석한 종목이 없습니다.</div>';
       return;
     }
     container.innerHTML = '';
-    data.forEach(item => {
+    recentListItems.forEach((item, index) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'sidebar-item';
 
@@ -1207,12 +1209,40 @@ async function loadRecentList() {
 
       wrapper.appendChild(info);
       if (currentUser) {
+        const actions = document.createElement('div');
+        actions.className = 'sidebar-actions';
+
+        const upBtn = document.createElement('button');
+        upBtn.className = 'reorder-btn';
+        upBtn.title = '위로 이동';
+        upBtn.textContent = '↑';
+        upBtn.disabled = index === 0;
+        upBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          moveRecentItem(index, -1);
+        });
+
+        const downBtn = document.createElement('button');
+        downBtn.className = 'reorder-btn';
+        downBtn.title = '아래로 이동';
+        downBtn.textContent = '↓';
+        downBtn.disabled = index === recentListItems.length - 1;
+        downBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          moveRecentItem(index, 1);
+        });
+
         const button = document.createElement('button');
         button.className = 'delete-btn';
         button.title = '삭제';
         button.innerHTML = '&times;';
-        button.addEventListener('click', () => deleteCache(item.stock_code));
-        wrapper.appendChild(button);
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          deleteCache(item.stock_code);
+        });
+
+        actions.append(upBtn, downBtn, button);
+        wrapper.appendChild(actions);
       }
       container.appendChild(wrapper);
     });
@@ -1240,6 +1270,37 @@ async function deleteCache(stockCode) {
     loadRecentList();
   } catch (e) {
     alert(e.message || '삭제하지 못했습니다.');
+  }
+}
+
+async function saveRecentOrder(stockCodes) {
+  const resp = await apiFetch('/api/cache/order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stock_codes: stockCodes }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data.detail || '순서를 저장하지 못했습니다.');
+  }
+}
+
+async function moveRecentItem(index, delta) {
+  if (!currentUser) return;
+  const nextIndex = index + delta;
+  if (nextIndex < 0 || nextIndex >= recentListItems.length) return;
+
+  const nextItems = recentListItems.slice();
+  const [moved] = nextItems.splice(index, 1);
+  nextItems.splice(nextIndex, 0, moved);
+  recentListItems = nextItems;
+
+  try {
+    await saveRecentOrder(nextItems.map(item => item.stock_code));
+    await loadRecentList();
+  } catch (error) {
+    alert(error.message || '순서를 저장하지 못했습니다.');
+    await loadRecentList();
   }
 }
 

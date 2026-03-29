@@ -29,6 +29,13 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
                 await main.delete_cache("005930", request)
         self.assertEqual(exc_info.exception.status_code, 401)
 
+    async def test_update_cache_order_requires_login(self):
+        request = _request("/api/cache/order")
+        with patch("main._get_current_user", new=AsyncMock(return_value=None)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await main.update_cache_order(request, {"stock_codes": ["005930"]})
+        self.assertEqual(exc_info.exception.status_code, 401)
+
     async def test_login_page_redirects_authenticated_user(self):
         request = _request("/login")
         with patch("main._get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):

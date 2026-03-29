@@ -91,6 +91,7 @@ async def init_db():
                 stock_code TEXT NOT NULL,
                 is_starred INTEGER NOT NULL DEFAULT 0,
                 is_pinned INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER,
                 note TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (google_sub, stock_code),
@@ -118,6 +119,7 @@ async def init_db():
         await _ensure_column(db, "financial_data", "report_date", "TEXT")
         await _ensure_column(db, "market_data", "dividend_per_share", "REAL")
         await _ensure_column(db, "analysis_meta", "payload_json", "TEXT")
+        await _ensure_column(db, "user_stock_preferences", "sort_order", "INTEGER")
         await db.commit()
     finally:
         await db.close()
@@ -518,7 +520,7 @@ async def get_user_stock_preference(google_sub: str, stock_code: str) -> dict:
     try:
         cursor = await db.execute(
             """
-            SELECT is_starred, is_pinned, note, updated_at
+            SELECT is_starred, is_pinned, sort_order, note, updated_at
             FROM user_stock_preferences
             WHERE google_sub = ? AND stock_code = ?
             """,
@@ -529,12 +531,14 @@ async def get_user_stock_preference(google_sub: str, stock_code: str) -> dict:
             return {
                 "is_starred": False,
                 "is_pinned": False,
+                "sort_order": None,
                 "note": "",
                 "updated_at": None,
             }
         return {
             "is_starred": bool(row["is_starred"]),
             "is_pinned": bool(row["is_pinned"]),
+            "sort_order": row["sort_order"],
             "note": row["note"] or "",
             "updated_at": row["updated_at"],
         }
@@ -549,11 +553,13 @@ async def save_user_stock_preference(
     is_starred: bool | None = None,
     is_pinned: bool | None = None,
     note: str | None = None,
+    sort_order: int | None = None,
 ) -> dict:
     current = await get_user_stock_preference(google_sub, stock_code)
     next_pref = {
         "is_starred": current["is_starred"] if is_starred is None else bool(is_starred),
         "is_pinned": current["is_pinned"] if is_pinned is None else bool(is_pinned),
+        "sort_order": current["sort_order"] if sort_order is None else int(sort_order),
         "note": current["note"] if note is None else note.strip()[:2000],
     }
 
@@ -563,14 +569,15 @@ async def save_user_stock_preference(
         await db.execute(
             """
             INSERT OR REPLACE INTO user_stock_preferences (
-                google_sub, stock_code, is_starred, is_pinned, note, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 google_sub,
                 stock_code,
                 1 if next_pref["is_starred"] else 0,
                 1 if next_pref["is_pinned"] else 0,
+                next_pref["sort_order"],
                 next_pref["note"],
                 updated_at,
             ),
@@ -602,6 +609,7 @@ async def get_cached_analyses(
                 + (", a.payload_json" if include_quotes else "")
                 + ", COALESCE(p.is_starred, 0) AS is_starred"
                 + ", COALESCE(p.is_pinned, 0) AS is_pinned"
+                + ", p.sort_order AS sort_order"
                 + ", COALESCE(p.note, '') AS note"
                 + " FROM ("
                 + "   SELECT stock_code, MAX(viewed_at) AS viewed_at"
@@ -614,7 +622,7 @@ async def get_cached_analyses(
                 + " ) items"
                 + " JOIN analysis_meta a ON a.stock_code = items.stock_code"
                 + " LEFT JOIN user_stock_preferences p ON p.google_sub = ? AND p.stock_code = items.stock_code"
-                + " ORDER BY COALESCE(p.is_pinned, 0) DESC, COALESCE(p.is_starred, 0) DESC, items.viewed_at DESC"
+                + " ORDER BY CASE WHEN p.sort_order IS NULL THEN 1 ELSE 0 END, p.sort_order ASC, COALESCE(p.is_pinned, 0) DESC, COALESCE(p.is_starred, 0) DESC, items.viewed_at DESC"
             )
             params: tuple = (google_sub, google_sub, google_sub)
         else:
@@ -632,6 +640,7 @@ async def get_cached_analyses(
             item = dict(row)
             item["is_starred"] = bool(item.get("is_starred"))
             item["is_pinned"] = bool(item.get("is_pinned"))
+            item["sort_order"] = item.get("sort_order")
             item["note"] = item.get("note") or ""
             if include_quotes:
                 payload_json = item.pop("payload_json", None)
@@ -648,6 +657,29 @@ async def get_cached_analyses(
                 item["quote_snapshot"] = quote_snapshot
             items.append(item)
         return items
+    finally:
+        await db.close()
+
+
+async def save_user_stock_order(google_sub: str, ordered_stock_codes: list[str]):
+    db = await get_db()
+    try:
+        updated_at = datetime.now().isoformat()
+        await db.executemany(
+            """
+            INSERT INTO user_stock_preferences (
+                google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at
+            ) VALUES (?, ?, 0, 0, ?, '', ?)
+            ON CONFLICT(google_sub, stock_code) DO UPDATE SET
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at
+            """,
+            [
+                (google_sub, stock_code, index, updated_at)
+                for index, stock_code in enumerate(ordered_stock_codes)
+            ],
+        )
+        await db.commit()
     finally:
         await db.close()
 
