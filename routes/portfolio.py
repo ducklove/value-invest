@@ -58,47 +58,122 @@ async def _fetch_naver_world_stock(reuters_code: str) -> dict | None:
         return None
 
 
+_EXCHANGE_SUFFIXES = (
+    "", ".O", ".K", ".N", ".HM", ".HK", ".T", ".SS", ".SZ", ".L", ".AX",
+    ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".SW", ".ST", ".CO", ".HE",
+)
+
+_YFINANCE_SUFFIXES = (
+    "", ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".L", ".AX", ".T",
+    ".HK", ".SS", ".SZ", ".SW", ".ST", ".CO",
+)
+
+_CURRENCY_MAP = {
+    "USD": "USA", "EUR": "DEU", "GBP": "GBR", "JPY": "JPN",
+    "HKD": "HKG", "CNY": "CHN", "AUD": "AUS", "CAD": "CAN",
+    "CHF": "CHE", "SEK": "SWE", "DKK": "DNK", "NOK": "NOR",
+    "TWD": "TWN", "VND": "VNM",
+}
+
+
 async def _resolve_foreign_name(ticker: str) -> str | None:
-    """Try common exchange suffixes to find the stock on Naver."""
-    for suffix in ("", ".O", ".K", ".N", ".HM", ".HK", ".T", ".SS", ".SZ", ".L", ".AX"):
+    """Try Naver first, then yfinance as fallback."""
+    # If ticker already has a dot (e.g., EUN2.DE), try as-is first
+    if "." in ticker:
+        d = await _fetch_naver_world_stock(ticker)
+        if d:
+            return d.get("stockName") or d.get("stockNameEng")
+    for suffix in _EXCHANGE_SUFFIXES:
         code = ticker + suffix if suffix else ticker
         d = await _fetch_naver_world_stock(code)
         if d:
             return d.get("stockName") or d.get("stockNameEng")
+    # yfinance fallback
+    return await _yfinance_resolve_name(ticker)
+
+
+async def _yfinance_resolve_name(ticker: str) -> str | None:
+    try:
+        import yfinance as yf
+        loop = asyncio.get_event_loop()
+        # Try ticker as-is first, then with suffixes
+        candidates = [ticker] if "." in ticker else [ticker + s for s in _YFINANCE_SUFFIXES]
+        for candidate in candidates:
+            try:
+                t = await loop.run_in_executor(None, partial(yf.Ticker, candidate))
+                info = await loop.run_in_executor(None, lambda: t.info)
+                name = info.get("shortName") or info.get("longName")
+                if name:
+                    return name
+            except Exception:
+                continue
+    except Exception:
+        pass
     return None
 
 
 async def _resolve_foreign_reuters(ticker: str) -> str | None:
-    """Find the full reuters code for a ticker."""
-    for suffix in ("", ".O", ".K", ".N", ".HM", ".HK", ".T", ".SS", ".SZ", ".L", ".AX"):
+    """Find the full reuters code on Naver, or return ticker as-is for yfinance."""
+    if "." in ticker:
+        d = await _fetch_naver_world_stock(ticker)
+        if d:
+            return d.get("reutersCode") or ticker
+    for suffix in _EXCHANGE_SUFFIXES:
         code = ticker + suffix if suffix else ticker
         d = await _fetch_naver_world_stock(code)
         if d:
             return d.get("reutersCode") or code
-    return None
+    # Not on Naver — return original ticker for yfinance fallback
+    return ticker
 
 
 async def _fetch_foreign_quote(reuters_code: str) -> dict:
+    # Try Naver first
     d = await _fetch_naver_world_stock(reuters_code)
-    if not d or not d.get("closePrice"):
-        return {}
+    if d and d.get("closePrice"):
+        try:
+            price_str = str(d["closePrice"]).replace(",", "")
+            price = float(price_str)
+            change_str = str(d.get("compareToPreviousClosePrice", "0")).replace(",", "")
+            change = float(change_str)
+            change_pct = float(d.get("fluctuationsRatio", 0))
+            nation = d.get("nationType", "")
+            price_krw = await _fx_to_krw(nation, price)
+            change_krw = await _fx_to_krw(nation, change)
+            return {
+                "price": round(price_krw),
+                "change": round(change_krw),
+                "change_pct": change_pct,
+                "nation": d.get("nationName", ""),
+            }
+        except Exception as exc:
+            logger.warning("해외주식 시세 파싱 실패(%s): %s", reuters_code, exc)
+
+    # yfinance fallback
+    return await _yfinance_fetch_quote(reuters_code)
+
+
+async def _yfinance_fetch_quote(ticker: str) -> dict:
     try:
-        price_str = str(d["closePrice"]).replace(",", "")
-        price = float(price_str)
-        change_str = str(d.get("compareToPreviousClosePrice", "0")).replace(",", "")
-        change = float(change_str)
-        change_pct = float(d.get("fluctuationsRatio", 0))
-        nation = d.get("nationType", "")
+        import yfinance as yf
+        loop = asyncio.get_event_loop()
+        t = await loop.run_in_executor(None, partial(yf.Ticker, ticker))
+        fi = await loop.run_in_executor(None, lambda: t.fast_info)
+        price = fi.last_price
+        prev = fi.previous_close
+        currency = (fi.currency or "USD").upper()
+        change = round(price - prev, 4) if price and prev else 0
+        change_pct = round(change / prev * 100, 2) if prev else None
+        nation = _CURRENCY_MAP.get(currency, "USA")
         price_krw = await _fx_to_krw(nation, price)
         change_krw = await _fx_to_krw(nation, change)
         return {
             "price": round(price_krw),
             "change": round(change_krw),
             "change_pct": change_pct,
-            "nation": d.get("nationName", ""),
         }
     except Exception as exc:
-        logger.warning("해외주식 시세 파싱 실패(%s): %s", reuters_code, exc)
+        logger.warning("yfinance 시세 조회 실패(%s): %s", ticker, exc)
         return {}
 
 
@@ -183,7 +258,15 @@ async def _detect_currency(stock_code: str) -> str:
     if d:
         nation = d.get("nationType", "")
         return _NATION_TO_CURRENCY.get(nation, "USD")
-    return "USD"
+    # yfinance fallback
+    try:
+        import yfinance as yf
+        loop = asyncio.get_event_loop()
+        t = await loop.run_in_executor(None, partial(yf.Ticker, stock_code))
+        fi = await loop.run_in_executor(None, lambda: t.fast_info)
+        return (fi.currency or "USD").upper()
+    except Exception:
+        return "USD"
 
 
 async def _fx_to_krw(nation: str, amount: float) -> float:

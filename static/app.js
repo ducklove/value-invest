@@ -1864,7 +1864,7 @@ async function deletePortfolioItem(stockCode) {
           const results = await resp.json();
           if (!results.length) {
             // No domestic results — try as foreign ticker
-            if (/^[A-Z]/i.test(raw)) {
+            if (/^[A-Z0-9]/i.test(raw) && /[A-Z]/i.test(raw)) {
               const r2 = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(raw.trim())}`);
               const d = await r2.json();
               if (d.stock_name) {
