@@ -20,13 +20,19 @@ async def market_summary():
                     headers={"User-Agent": "Mozilla/5.0"},
                 )
                 value = re.search(r'id="now_value"[^>]*>([^<]+)', r.text)
-                spans = re.findall(r'<span[^>]*>([^<]+)</span>', r.text[r.text.find('change_value_and_rate'):r.text.find('change_value_and_rate') + 300]) if 'change_value_and_rate' in r.text else []
                 direction = re.search(r'class="quotient\s+(up|dn)"', r.text)
-                change_val = spans[0] if spans else None
                 d = direction.group(1) if direction else ""
+                # Pattern: <span>21.59</span> -0.40%
+                change_block = re.search(
+                    r'change_value_and_rate"[^>]*><span>([^<]+)</span>\s*([-+]?[0-9.]+%)',
+                    r.text,
+                )
+                change_val = change_block.group(1).strip() if change_block else None
+                change_pct = change_block.group(2).strip() if change_block else None
                 return {
                     "value": value.group(1).strip() if value else None,
                     "change": change_val,
+                    "change_pct": change_pct,
                     "direction": "up" if d == "up" else "down" if d == "dn" else "",
                 }
         except Exception:

@@ -1959,7 +1959,8 @@ async function loadMarketSummary() {
       if (!i.value) return '';
       const cls = i.direction === 'up' ? 'mi-up' : i.direction === 'down' ? 'mi-down' : '';
       const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '-' : '';
-      return `<div class="mi"><span class="mi-label">${i.label}</span> <span class="mi-val">${i.value}</span> <span class="mi-chg ${cls}">${sign}${i.change || ''}</span></div>`;
+      const pct = i.change_pct ? ` (${i.change_pct})` : '';
+      return `<div class="mi"><span class="mi-label">${i.label}</span> <span class="mi-val">${i.value}</span> <span class="mi-chg ${cls}">${sign}${i.change || ''}${pct}</span></div>`;
     }).join('');
   } catch {}
 }
