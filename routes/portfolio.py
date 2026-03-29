@@ -177,25 +177,35 @@ async def _yfinance_fetch_quote(ticker: str) -> dict:
         return {}
 
 
+import time as _time
+
+_quote_cache: dict[str, tuple[float, dict]] = {}
+_QUOTE_CACHE_TTL = 60
+
+
 async def _fetch_quote(stock_code: str) -> dict:
+    now = _time.monotonic()
+    cached = _quote_cache.get(stock_code)
+    if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
+        return cached[1]
     if _is_korean_stock(stock_code):
-        return await stock_price.fetch_quote_snapshot(stock_code)
-    # stock_code is reuters code for foreign stocks (e.g., AAPL.O)
-    return await _fetch_foreign_quote(stock_code)
+        q = await stock_price.fetch_quote_snapshot(stock_code)
+    else:
+        q = await _fetch_foreign_quote(stock_code)
+    _quote_cache[stock_code] = (now, q)
+    return q
 
 
-async def _enrich_with_quotes(items: list[dict]) -> list[dict]:
-    async def fetch(item: dict) -> dict:
+async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
+    """Attach only already-cached quotes (no network calls)."""
+    now = _time.monotonic()
+    result = []
+    for item in items:
         enriched = dict(item)
-        try:
-            async with RECENT_QUOTES_SEMAPHORE:
-                enriched["quote"] = await _fetch_quote(item["stock_code"])
-        except Exception as exc:
-            logger.warning("포트폴리오 현재가 조회 실패(%s): %s", item.get("stock_code"), exc)
-            enriched["quote"] = {}
-        return enriched
-
-    return await asyncio.gather(*(fetch(item) for item in items))
+        cached = _quote_cache.get(item["stock_code"])
+        enriched["quote"] = cached[1] if cached and (now - cached[0]) < _QUOTE_CACHE_TTL else {}
+        result.append(enriched)
+    return result
 
 
 QUOTE_RATE_INTERVAL = 0.22  # ~4.5 req/s, stays under 5/s limit
@@ -314,7 +324,7 @@ def _require_user(user):
 async def get_portfolio(request: Request):
     user = _require_user(await get_current_user(request))
     items = await cache.get_portfolio(user["google_sub"])
-    return await _enrich_with_quotes(items)
+    return await _enrich_with_cached_quotes(items)
 
 
 @router.put("/api/portfolio/{stock_code}")

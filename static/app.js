@@ -1527,6 +1527,10 @@ async function loadPortfolio() {
     portfolioItems = await resp.json();
     renderPortfolio();
     schedulePfQuoteRefresh();
+    // Fetch fresh quotes in background if any are missing
+    if (portfolioItems.some(i => !i.quote || i.quote.price == null)) {
+      refreshPfQuotes();
+    }
   } catch {} finally {
     portfolioLoading = false;
   }
@@ -1830,8 +1834,15 @@ async function savePortfolioEdit(stockCode, stockName) {
       const d = await resp.json().catch(() => ({}));
       throw new Error(d.detail || '저장 실패');
     }
+    // Update local item without full reload
+    const item = portfolioItems.find(i => i.stock_code === stockCode);
+    if (item) {
+      item.quantity = qty;
+      item.avg_price = price;
+      item.stock_name = stockName;
+    }
     pfEditingCode = null;
-    await loadPortfolio();
+    renderPortfolio();
   } catch (e) { alert(e.message); }
 }
 
@@ -1839,7 +1850,8 @@ async function deletePortfolioItem(stockCode) {
   try {
     const resp = await apiFetch(`/api/portfolio/${stockCode}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error('삭제 실패');
-    await loadPortfolio();
+    portfolioItems = portfolioItems.filter(i => i.stock_code !== stockCode);
+    renderPortfolio();
   } catch (e) { alert(e.message); }
 }
 
