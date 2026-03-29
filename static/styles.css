@@ -560,10 +560,13 @@ body {
   width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums;
 }
 .pf-table thead th {
-  background: var(--sidebar-bg); padding: 10px 12px; text-align: left;
+  background: var(--sidebar-bg); padding: 10px 12px;
   font-weight: 600; color: var(--text-secondary); font-size: 12px;
   border-bottom: 1px solid var(--border); white-space: nowrap;
 }
+.pf-table thead th.pf-col-name { text-align: left; }
+.pf-table thead th.pf-col-num { text-align: right; }
+.pf-table thead th.pf-col-act { text-align: center; }
 .pf-table tbody td, .pf-table tfoot td {
   padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle;
 }

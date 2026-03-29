@@ -1695,17 +1695,36 @@ async function deletePortfolioItem(stockCode) {
     const dropdown = document.getElementById('pfDropdown');
     if (!input || !dropdown) return;
 
+    function prefVariants(code, name) {
+      const items = [{ code, name }];
+      if (code.endsWith('0')) {
+        items.push({ code: code.slice(0, -1) + '5', name: name + '(우)' });
+        items.push({ code: code.slice(0, -1) + '7', name: name + '(우B)' });
+      }
+      return items;
+    }
+
     input.addEventListener('input', () => {
       clearTimeout(pfSearchTimeout);
-      const q = input.value.trim();
-      if (q.length < 1) { dropdown.classList.remove('show'); return; }
+      const raw = input.value.trim();
+      if (raw.length < 1) { dropdown.classList.remove('show'); return; }
+
+      // Strip preferred suffix for search
+      const q = raw.replace(/(우B|우)$/, '').trim() || raw;
+
       pfSearchTimeout = setTimeout(async () => {
         try {
           const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
           const results = await resp.json();
           if (!results.length) { dropdown.classList.remove('show'); return; }
-          dropdown.innerHTML = results.map(r =>
-            `<div class="dropdown-item" data-code="${r.stock_code}" data-name="${escapeHtml(r.corp_name)}">${escapeHtml(r.corp_name)} <span style="color:var(--text-secondary)">${r.stock_code}</span></div>`
+
+          const all = results.flatMap(r => prefVariants(r.stock_code, r.corp_name));
+          // If user typed a preferred suffix, filter to matching variants
+          const filtered = raw !== q ? all.filter(v => v.name.includes('(우')) : all;
+          const items = filtered.length ? filtered : all;
+
+          dropdown.innerHTML = items.map(r =>
+            `<div class="dropdown-item" data-code="${r.code}" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)} <span style="color:var(--text-secondary)">${r.code}</span></div>`
           ).join('');
           dropdown.classList.add('show');
           dropdown.querySelectorAll('.dropdown-item').forEach(el => {
@@ -1721,7 +1740,6 @@ async function deletePortfolioItem(stockCode) {
         dropdown.classList.remove('show');
         const q = input.value.trim();
         if (!q) return;
-        // Try as stock code directly
         if (/^\d{6}$/.test(q)) {
           const resp = await apiFetch(`/api/portfolio/resolve-name?code=${q}`);
           const data = await resp.json();
