@@ -860,6 +860,15 @@ async def save_portfolio_item(
         await db.close()
 
 
+async def clear_portfolio(google_sub: str):
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
+        await db.commit()
+    finally:
+        await db.close()
+
+
 async def delete_portfolio_item(google_sub: str, stock_code: str):
     db = await get_db()
     try:

@@ -552,6 +552,33 @@ body {
   font-size: 14px; background: var(--input-bg); color: var(--text); outline: none;
 }
 .pf-add-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+.pf-csv-toggle {
+  margin-top: 8px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: color 0.15s;
+}
+.pf-csv-toggle:hover { color: var(--text); }
+.pf-csv-panel {
+  margin-top: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); max-width: 500px;
+}
+.pf-csv-input {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font-family: monospace; font-size: 13px; background: var(--input-bg); color: var(--text);
+  resize: vertical; line-height: 1.5;
+}
+.pf-csv-input:focus { border-color: var(--primary); outline: none; }
+.pf-csv-actions { display: flex; gap: 8px; margin-top: 10px; }
+.pf-csv-btn {
+  padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--primary); color: white; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: opacity 0.15s;
+}
+.pf-csv-btn:hover { opacity: 0.85; }
+.pf-csv-btn:disabled { opacity: 0.5; cursor: wait; }
+.pf-csv-btn.danger { background: #dc2626; border-color: #dc2626; }
+.pf-csv-btn.cancel { background: var(--surface); color: var(--text-secondary); }
+.pf-csv-btn.cancel:hover { color: var(--text); }
 .pf-dropdown { max-width: 500px; }
 .pf-table-wrap {
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;

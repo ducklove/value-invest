@@ -110,6 +110,54 @@ async def save_portfolio_order(request: Request, payload: dict = Body(...)):
     return {"ok": True}
 
 
+@router.post("/api/portfolio/bulk")
+async def bulk_import(request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    mode = str(payload.get("mode", "add")).strip()
+    rows = payload.get("items")
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=400, detail="등록할 종목이 없습니다.")
+
+    # Validate all rows first
+    parsed = []
+    errors = []
+    for i, row in enumerate(rows):
+        code = str(row.get("stock_code") or "").strip()
+        if not code:
+            errors.append(f"행 {i+1}: 종목코드가 비어 있습니다.")
+            continue
+        try:
+            qty = int(row.get("quantity", 0))
+            price = float(row.get("avg_price", 0))
+        except (TypeError, ValueError):
+            errors.append(f"행 {i+1} ({code}): 수량/매입가가 올바르지 않습니다.")
+            continue
+        if qty <= 0:
+            errors.append(f"행 {i+1} ({code}): 수량은 1 이상이어야 합니다.")
+            continue
+        parsed.append({"stock_code": code, "quantity": qty, "avg_price": price})
+
+    if errors:
+        raise HTTPException(status_code=400, detail="\n".join(errors))
+
+    # Resolve names concurrently
+    async def resolve(item):
+        name = await _resolve_name(item["stock_code"])
+        return {**item, "stock_name": name or item["stock_code"]}
+
+    resolved = await asyncio.gather(*(resolve(p) for p in parsed))
+
+    if mode == "replace":
+        await cache.clear_portfolio(user["google_sub"])
+
+    for item in resolved:
+        await cache.save_portfolio_item(
+            user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"],
+        )
+
+    return {"ok": True, "imported": len(resolved), "mode": mode}
+
+
 @router.get("/api/portfolio/resolve-name")
 async def resolve_name(code: str = Query(..., min_length=1)):
     name = await _resolve_name(code.strip())

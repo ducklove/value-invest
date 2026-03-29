@@ -1882,6 +1882,58 @@ async function pfAddFromSearch(code, name) {
   } catch (e) { alert(e.message); }
 }
 
+function toggleCsvPanel() {
+  const panel = document.getElementById('pfCsvPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+async function submitCsv(mode) {
+  const text = document.getElementById('pfCsvInput').value.trim();
+  if (!text) { alert('CSV 데이터를 입력해 주세요.'); return; }
+
+  if (mode === 'replace' && !confirm('기존 포트폴리오를 모두 삭제하고 새로 등록합니다. 계속할까요?')) return;
+
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const items = [];
+  const errors = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const parts = lines[i].split(/[,\t]/).map(s => s.trim());
+    if (parts.length < 3) { errors.push(`행 ${i+1}: 종목코드,매입가,수량 3개 필드가 필요합니다.`); continue; }
+    const [code, priceStr, qtyStr] = parts;
+    const price = Number(priceStr);
+    const qty = parseInt(qtyStr, 10);
+    if (!code) { errors.push(`행 ${i+1}: 종목코드가 비어 있습니다.`); continue; }
+    if (isNaN(price) || price < 0) { errors.push(`행 ${i+1}: 매입가가 올바르지 않습니다.`); continue; }
+    if (isNaN(qty) || qty <= 0) { errors.push(`행 ${i+1}: 수량은 1 이상이어야 합니다.`); continue; }
+    items.push({ stock_code: code, avg_price: price, quantity: qty });
+  }
+
+  if (errors.length) { alert(errors.join('\n')); return; }
+  if (!items.length) { alert('등록할 종목이 없습니다.'); return; }
+
+  const btns = document.querySelectorAll('.pf-csv-btn');
+  btns.forEach(b => b.disabled = true);
+
+  try {
+    const resp = await apiFetch('/api/portfolio/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, items }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '등록 실패');
+    document.getElementById('pfCsvInput').value = '';
+    document.getElementById('pfCsvPanel').style.display = 'none';
+    alert(`${data.imported}개 종목이 ${mode === 'replace' ? '교체' : '추가'} 등록되었습니다.`);
+    await loadPortfolio();
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
 // Init
 async function initApp() {
   await initAuth();

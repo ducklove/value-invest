@@ -120,6 +120,37 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         name = await cache.resolve_stock_name("005935")
         self.assertIsNone(name)
 
+    # --- Bulk / clear ---
+
+    async def test_clear_portfolio(self):
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        await cache.clear_portfolio("u1")
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(len(items), 0)
+
+    async def test_clear_then_add(self):
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await cache.clear_portfolio("u1")
+        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 50, 190000)
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["stock_code"], "000660")
+
+    async def test_bulk_add_preserves_existing(self):
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(len(items), 2)
+
+    async def test_bulk_replace_clears_first(self):
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await cache.clear_portfolio("u1")
+        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 50, 190000)
+        items = await cache.get_portfolio("u1")
+        self.assertNotIn("005930", [i["stock_code"] for i in items])
+        self.assertIn("000660", [i["stock_code"] for i in items])
+
     async def test_resolve_unknown_stock(self):
         name = await cache.resolve_stock_name("999999")
         self.assertIsNone(name)
