@@ -800,25 +800,6 @@ async def resolve_stock_name(stock_code: str) -> str | None:
     name = await get_corp_name(stock_code)
     if name:
         return name
-    # Try common base code patterns
-    for base in (stock_code[:-1] + "0", stock_code[:-2] + "00"):
-        base_name = await get_corp_name(base)
-        if base_name:
-            return f"{base_name}(우)"
-    # Prefix-based fallback for irregular codes
-    db = await get_db()
-    try:
-        for length in (5, 4):
-            prefix = stock_code[:length]
-            cursor = await db.execute(
-                "SELECT corp_name FROM corp_codes WHERE stock_code LIKE ? AND stock_code != ? LIMIT 1",
-                (prefix + "%", stock_code),
-            )
-            row = await cursor.fetchone()
-            if row:
-                return f"{row['corp_name']}(우)"
-    finally:
-        await db.close()
     return None
 
 

@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import re
 
+import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
@@ -9,6 +11,26 @@ from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _fetch_naver_stock_name(stock_code: str) -> str | None:
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"https://finance.naver.com/item/main.naver?code={stock_code}",
+                follow_redirects=True,
+            )
+            m = re.search(r"<title>\s*(.+?)\s*:\s*N", resp.text)
+            return m.group(1).strip() if m else None
+    except Exception:
+        return None
+
+
+async def _resolve_name(stock_code: str) -> str | None:
+    name = await cache.resolve_stock_name(stock_code)
+    if name:
+        return name
+    return await _fetch_naver_stock_name(stock_code)
 
 
 async def _enrich_with_quotes(items: list[dict]) -> list[dict]:
@@ -44,7 +66,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
 
     stock_name = str(payload.get("stock_name") or "").strip()
     if not stock_name:
-        resolved = await cache.resolve_stock_name(stock_code)
+        resolved = await _resolve_name(stock_code)
         if resolved:
             stock_name = resolved
         else:
@@ -90,5 +112,5 @@ async def save_portfolio_order(request: Request, payload: dict = Body(...)):
 
 @router.get("/api/portfolio/resolve-name")
 async def resolve_name(code: str = Query(..., min_length=1)):
-    name = await cache.resolve_stock_name(code.strip())
+    name = await _resolve_name(code.strip())
     return {"stock_code": code.strip(), "stock_name": name}

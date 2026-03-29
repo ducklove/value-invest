@@ -115,21 +115,10 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         name = await cache.resolve_stock_name("005930")
         self.assertEqual(name, "삼성전자")
 
-    async def test_resolve_preferred_stock_5(self):
+    async def test_resolve_returns_none_for_preferred(self):
+        """Preferred stocks are not in corp_codes; resolve returns None (Naver fallback in route)."""
         name = await cache.resolve_stock_name("005935")
-        self.assertEqual(name, "삼성전자(우)")
-
-    async def test_resolve_preferred_stock_7(self):
-        name = await cache.resolve_stock_name("005937")
-        self.assertEqual(name, "삼성전자(우)")
-
-    async def test_resolve_preferred_stock_9(self):
-        name = await cache.resolve_stock_name("005939")
-        self.assertEqual(name, "삼성전자(우)")
-
-    async def test_resolve_preferred_stock_K(self):
-        name = await cache.resolve_stock_name("00593K")
-        self.assertEqual(name, "삼성전자(우)")
+        self.assertIsNone(name)
 
     async def test_resolve_unknown_stock(self):
         name = await cache.resolve_stock_name("999999")

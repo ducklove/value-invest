@@ -1790,23 +1790,12 @@ async function deletePortfolioItem(stockCode) {
     const dropdown = document.getElementById('pfDropdown');
     if (!input || !dropdown) return;
 
-    function prefVariants(code, name) {
-      const items = [{ code, name }];
-      if (code.endsWith('0')) {
-        for (const s of ['5', '7', '8', '9', 'K', 'L']) {
-          items.push({ code: code.slice(0, -1) + s, name: name + '(우)' });
-        }
-      }
-      return items;
-    }
-
     input.addEventListener('input', () => {
       clearTimeout(pfSearchTimeout);
       const raw = input.value.trim();
       if (raw.length < 1) { dropdown.classList.remove('show'); return; }
 
-      // Strip preferred suffix for search
-      const q = raw.replace(/(우B|우)$/, '').trim() || raw;
+      const q = raw.replace(/(우[A-Z]?|우)$/, '').trim() || raw;
 
       pfSearchTimeout = setTimeout(async () => {
         try {
@@ -1814,13 +1803,8 @@ async function deletePortfolioItem(stockCode) {
           const results = await resp.json();
           if (!results.length) { dropdown.classList.remove('show'); return; }
 
-          const all = results.flatMap(r => prefVariants(r.stock_code, r.corp_name));
-          // If user typed a preferred suffix, filter to matching variants
-          const filtered = raw !== q ? all.filter(v => v.name.includes('(우')) : all;
-          const items = filtered.length ? filtered : all;
-
-          dropdown.innerHTML = items.map(r =>
-            `<div class="dropdown-item" data-code="${r.code}" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)} <span style="color:var(--text-secondary)">${r.code}</span></div>`
+          dropdown.innerHTML = results.map(r =>
+            `<div class="dropdown-item" data-code="${r.stock_code}" data-name="${escapeHtml(r.corp_name)}">${escapeHtml(r.corp_name)} <span style="color:var(--text-secondary)">${r.stock_code}</span></div>`
           ).join('');
           dropdown.classList.add('show');
           dropdown.querySelectorAll('.dropdown-item').forEach(el => {
@@ -1836,7 +1820,7 @@ async function deletePortfolioItem(stockCode) {
         dropdown.classList.remove('show');
         const q = input.value.trim();
         if (!q) return;
-        if (/^\d{6}$/.test(q)) {
+        if (/^[0-9A-Z]{6}$/i.test(q)) {
           const resp = await apiFetch(`/api/portfolio/resolve-name?code=${q}`);
           const data = await resp.json();
           pfAddFromSearch(q, data.stock_name || q);
@@ -1853,18 +1837,17 @@ async function deletePortfolioItem(stockCode) {
 async function pfAddFromSearch(code, name) {
   document.getElementById('pfDropdown').classList.remove('show');
   document.getElementById('pfAddInput').value = '';
-  // Check if already in portfolio
   const existing = portfolioItems.find(i => i.stock_code === code);
   if (existing) {
     startPortfolioEdit(code);
     return;
   }
-  // Add with default values, open edit
   try {
+    // stock_name empty → backend resolves via Naver Finance
     const resp = await apiFetch(`/api/portfolio/${code}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stock_name: name, quantity: 1, avg_price: 0 }),
+      body: JSON.stringify({ stock_name: '', quantity: 1, avg_price: 0 }),
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
