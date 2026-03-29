@@ -31,7 +31,7 @@ let googleButtonRetryCount = 0;
 let currentUserPreference = null;
 let preferenceSaving = false;
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
-const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
+const IS_GITHUB_PAGES_SITE = window.location.hostname.endsWith('github.io');
 const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function buildApiUrl(path) {
@@ -105,7 +105,7 @@ function sameReport(a, b) {
 }
 
 function hasApiConfiguration() {
-  return !IS_GITHUB_PAGES || Boolean(API_BASE_URL);
+  return !IS_GITHUB_PAGES_SITE || Boolean(API_BASE_URL);
 }
 
 function requireApiConfiguration() {
@@ -180,7 +180,7 @@ function buildGoogleLoginUri() {
 
 function buildLoginPageUrl() {
   const path = `/login?return_to=${encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)}`;
-  if (IS_GITHUB_PAGES && API_BASE_URL) {
+  if (IS_GITHUB_PAGES_SITE && API_BASE_URL) {
     return `${API_BASE_URL.replace(/\/$/, '')}${path}`;
   }
   return path;
@@ -379,7 +379,7 @@ function renderGoogleButton() {
     return;
   }
 
-  if (IS_GITHUB_PAGES && API_BASE_URL) {
+  if (IS_GITHUB_PAGES_SITE && API_BASE_URL) {
     container.innerHTML = `<a class="auth-login-link" href="${escapeHtml(buildLoginPageUrl())}">서버 버전에서 로그인</a>`;
     return;
   }
@@ -435,7 +435,7 @@ function renderAuthState() {
     email.textContent = currentUser.email || '';
   } else if (authConfig?.enabled) {
     statusTitle.textContent = '로그인해 최근 분석을 저장하세요';
-    statusDetail.textContent = IS_GITHUB_PAGES
+    statusDetail.textContent = IS_GITHUB_PAGES_SITE
       ? 'GitHub Pages에서는 서버 버전으로 이동해 로그인한 뒤 개인화 기능을 사용할 수 있습니다.'
       : 'Google로 로그인하면 최근 본 종목, 관심종목, 핀 고정, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
     authUser.style.display = 'none';
