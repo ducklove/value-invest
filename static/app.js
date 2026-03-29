@@ -309,6 +309,22 @@ async function toggleFavorite() {
   );
 }
 
+async function autoStarCurrentStock() {
+  if (!currentUser || !activeStockCode) return;
+  try {
+    const resp = await apiFetch(`/api/preferences/${activeStockCode}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_starred: true }),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      currentUserPreference = normalizeUserPreference(data.user_preference);
+      renderUserPreference();
+    }
+  } catch {}
+}
+
 async function savePreferenceNote() {
   if (!currentUser) {
     renderUserPreference();
@@ -952,6 +968,9 @@ async function analyzeStock(stockCode) {
       }
       const data = await resp.json();
       renderResult(data);
+      if (activeTab === 'starred' && currentUser && !data.user_preference?.is_starred) {
+        await autoStarCurrentStock();
+      }
       loadRecentList();
       return;
     }
@@ -1050,6 +1069,9 @@ async function analyzeStock(stockCode) {
     if (resultData) {
       await new Promise(r => setTimeout(r, 300));
       renderResult(resultData);
+      if (activeTab === 'starred' && currentUser && !resultData.user_preference?.is_starred) {
+        await autoStarCurrentStock();
+      }
       loadRecentList();
     }
   } catch (e) {
@@ -1140,7 +1162,7 @@ async function loadRecentList() {
       wrapper.className = 'sidebar-item';
       wrapper.dataset.index = index;
 
-      if (currentUser && activeTab === 'recent') {
+      if (currentUser) {
         wrapper.draggable = true;
         wrapper.addEventListener('dragstart', (e) => {
           wrapper.classList.add('dragging');
@@ -1220,10 +1242,10 @@ async function loadRecentList() {
       info.append(nameRow, quotePrice, quoteChange);
       wrapper.appendChild(info);
 
-      if (currentUser && activeTab === 'recent') {
+      if (currentUser) {
         const button = document.createElement('button');
         button.className = 'delete-btn';
-        button.title = '삭제';
+        button.title = activeTab === 'starred' ? '관심 해제' : '삭제';
         button.innerHTML = '&times;';
         button.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -1245,7 +1267,7 @@ function refreshRecentList() {
 
 async function deleteCache(stockCode) {
   try {
-    const resp = await apiFetch(`/api/cache/${stockCode}`, { method: 'DELETE' });
+    const resp = await apiFetch(`/api/cache/${stockCode}?tab=${activeTab}`, { method: 'DELETE' });
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.detail || '삭제하지 못했습니다.');
@@ -1260,7 +1282,7 @@ async function saveRecentOrder(stockCodes) {
   const resp = await apiFetch('/api/cache/order', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stock_codes: stockCodes }),
+    body: JSON.stringify({ stock_codes: stockCodes, tab: activeTab }),
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {

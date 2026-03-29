@@ -120,6 +120,7 @@ async def init_db():
         await _ensure_column(db, "market_data", "dividend_per_share", "REAL")
         await _ensure_column(db, "analysis_meta", "payload_json", "TEXT")
         await _ensure_column(db, "user_stock_preferences", "sort_order", "INTEGER")
+        await _ensure_column(db, "user_stock_preferences", "starred_order", "INTEGER")
         await db.commit()
     finally:
         await db.close()
@@ -564,7 +565,7 @@ async def get_user_stock_preference(google_sub: str, stock_code: str) -> dict:
     try:
         cursor = await db.execute(
             """
-            SELECT is_starred, is_pinned, sort_order, note, updated_at
+            SELECT is_starred, is_pinned, sort_order, starred_order, note, updated_at
             FROM user_stock_preferences
             WHERE google_sub = ? AND stock_code = ?
             """,
@@ -576,6 +577,7 @@ async def get_user_stock_preference(google_sub: str, stock_code: str) -> dict:
                 "is_starred": False,
                 "is_pinned": False,
                 "sort_order": None,
+                "starred_order": None,
                 "note": "",
                 "updated_at": None,
             }
@@ -583,6 +585,7 @@ async def get_user_stock_preference(google_sub: str, stock_code: str) -> dict:
             "is_starred": bool(row["is_starred"]),
             "is_pinned": bool(row["is_pinned"]),
             "sort_order": row["sort_order"],
+            "starred_order": row["starred_order"],
             "note": row["note"] or "",
             "updated_at": row["updated_at"],
         }
@@ -610,11 +613,20 @@ async def save_user_stock_preference(
     db = await get_db()
     try:
         updated_at = datetime.now().isoformat()
+        becoming_starred = next_pref["is_starred"] and not current["is_starred"]
+        becoming_unstarred = not next_pref["is_starred"] and current["is_starred"]
+
+        if becoming_starred:
+            await db.execute(
+                "UPDATE user_stock_preferences SET starred_order = starred_order + 1 WHERE google_sub = ? AND starred_order IS NOT NULL",
+                (google_sub,),
+            )
+
         await db.execute(
             """
             INSERT OR REPLACE INTO user_stock_preferences (
-                google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                google_sub, stock_code, is_starred, is_pinned, sort_order, starred_order, note, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 google_sub,
@@ -622,6 +634,7 @@ async def save_user_stock_preference(
                 1 if next_pref["is_starred"] else 0,
                 1 if next_pref["is_pinned"] else 0,
                 next_pref["sort_order"],
+                0 if becoming_starred else (None if becoming_unstarred else current.get("starred_order")),
                 next_pref["note"],
                 updated_at,
             ),
@@ -657,7 +670,7 @@ async def get_cached_analyses(
                 + " FROM user_stock_preferences p"
                 + " JOIN analysis_meta a ON a.stock_code = p.stock_code"
                 + " WHERE p.google_sub = ? AND p.is_starred = 1"
-                + " ORDER BY p.updated_at DESC"
+                + " ORDER BY CASE WHEN p.starred_order IS NULL THEN 1 ELSE 0 END, p.starred_order ASC, p.updated_at DESC"
             )
             params: tuple = (google_sub,)
         elif google_sub:
@@ -726,6 +739,42 @@ async def save_user_stock_order(google_sub: str, ordered_stock_codes: list[str])
                 (google_sub, stock_code, index, updated_at)
                 for index, stock_code in enumerate(ordered_stock_codes)
             ],
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def save_starred_order(google_sub: str, ordered_stock_codes: list[str]):
+    db = await get_db()
+    try:
+        updated_at = datetime.now().isoformat()
+        await db.executemany(
+            """
+            UPDATE user_stock_preferences
+            SET starred_order = ?, updated_at = ?
+            WHERE google_sub = ? AND stock_code = ?
+            """,
+            [
+                (index, updated_at, google_sub, stock_code)
+                for index, stock_code in enumerate(ordered_stock_codes)
+            ],
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def unstar_stock(google_sub: str, stock_code: str):
+    db = await get_db()
+    try:
+        await db.execute(
+            """
+            UPDATE user_stock_preferences
+            SET is_starred = 0, starred_order = NULL, updated_at = ?
+            WHERE google_sub = ? AND stock_code = ?
+            """,
+            (datetime.now().isoformat(), google_sub, stock_code),
         )
         await db.commit()
     finally:
