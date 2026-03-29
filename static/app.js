@@ -1492,15 +1492,22 @@ let portfolioItems = [];
 let portfolioLoading = false;
 let pfSearchTimeout = null;
 let pfEditingCode = null;
-let pfSortKey = null;   // null = manual order, 'name' | 'changePct' | 'returnPct' | 'marketValue'
+let pfSortKey = null;
 let pfSortAsc = true;
+let pfQuoteTimer = null;
+let pfQuoteRefreshing = false;
+const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
   activeView = view;
   document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   document.getElementById('analysisView').style.display = view === 'analysis' ? 'block' : 'none';
   document.getElementById('portfolioView').style.display = view === 'portfolio' ? 'block' : 'none';
-  if (view === 'portfolio') loadPortfolio();
+  if (view === 'portfolio') {
+    loadPortfolio();
+  } else {
+    if (pfQuoteTimer) { clearInterval(pfQuoteTimer); pfQuoteTimer = null; }
+  }
 }
 
 async function loadPortfolio() {
@@ -1519,8 +1526,51 @@ async function loadPortfolio() {
     }
     portfolioItems = await resp.json();
     renderPortfolio();
+    schedulePfQuoteRefresh();
   } catch {} finally {
     portfolioLoading = false;
+  }
+}
+
+function schedulePfQuoteRefresh() {
+  if (pfQuoteTimer) clearInterval(pfQuoteTimer);
+  pfQuoteTimer = setInterval(() => {
+    if (activeView === 'portfolio' && portfolioItems.length && !pfQuoteRefreshing) {
+      refreshPfQuotes();
+    }
+  }, PF_QUOTE_REFRESH_MS);
+}
+
+async function refreshPfQuotes() {
+  if (pfQuoteRefreshing || !currentUser) return;
+  pfQuoteRefreshing = true;
+  try {
+    const resp = await apiFetch('/api/portfolio/quotes');
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const msg = JSON.parse(line.slice(6));
+          if (msg.done) break;
+          const item = portfolioItems.find(i => i.stock_code === msg.stock_code);
+          if (item) {
+            item.quote = msg.quote;
+            renderPortfolio();
+          }
+        } catch {}
+      }
+    }
+  } catch {} finally {
+    pfQuoteRefreshing = false;
   }
 }
 

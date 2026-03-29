@@ -546,16 +546,19 @@ body {
 .pf-summary-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
 .pf-summary-value { font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .pf-summary-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-variant-numeric: tabular-nums; }
-.pf-add-bar { position: relative; margin-bottom: 16px; max-width: 500px; }
+.pf-add-bar {
+  position: relative; margin-bottom: 16px;
+  display: flex; align-items: center; gap: 10px;
+}
 .pf-add-input {
-  width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px;
+  flex: 1; max-width: 500px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px;
   font-size: 14px; background: var(--input-bg); color: var(--text); outline: none;
 }
 .pf-add-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
 .pf-csv-toggle {
-  margin-top: 8px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 600;
-  cursor: pointer; transition: color 0.15s;
+  cursor: pointer; transition: color 0.15s; white-space: nowrap; flex-shrink: 0;
 }
 .pf-csv-toggle:hover { color: var(--text); }
 .pf-csv-panel {

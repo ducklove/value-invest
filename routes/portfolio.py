@@ -47,6 +47,31 @@ async def _enrich_with_quotes(items: list[dict]) -> list[dict]:
     return await asyncio.gather(*(fetch(item) for item in items))
 
 
+QUOTE_RATE_INTERVAL = 0.22  # ~4.5 req/s, stays under 5/s limit
+
+
+@router.get("/api/portfolio/quotes")
+async def stream_portfolio_quotes(request: Request):
+    """Stream quote updates one by one with rate limiting."""
+    user = _require_user(await get_current_user(request))
+    items = await cache.get_portfolio(user["google_sub"])
+
+    async def generate():
+        import json as _json
+        for item in items:
+            code = item["stock_code"]
+            try:
+                quote = await stock_price.fetch_quote_snapshot(code)
+            except Exception:
+                quote = {}
+            yield f"data: {_json.dumps({'stock_code': code, 'quote': quote}, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(QUOTE_RATE_INTERVAL)
+        yield "data: {\"done\": true}\n\n"
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
 def _require_user(user):
     if not user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
