@@ -78,6 +78,31 @@ class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
         codes = [item["stock_code"] for item in items]
         self.assertEqual(codes[0], "333333", "Re-searched existing stock should move to top")
 
+    async def test_overflow_trims_oldest_unpinned(self):
+        """When the list exceeds 20 items, the last unpinned item is removed."""
+        db = await cache.get_db()
+        try:
+            codes = [f"{i:06d}" for i in range(100, 125)]
+            await db.executemany(
+                "INSERT OR IGNORE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+                [(c, f"Corp{c}", "2026-01-01T00:00:00", "{}") for c in codes],
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+        for c in codes[:20]:
+            await cache.touch_user_recent_analysis("u1", c)
+
+        items = await cache.get_cached_analyses(google_sub="u1")
+        self.assertEqual(len(items), 20)
+
+        # Add 21st item
+        await cache.touch_user_recent_analysis("u1", codes[20])
+        items = await cache.get_cached_analyses(google_sub="u1")
+        self.assertLessEqual(len(items), 20)
+        self.assertEqual(items[0]["stock_code"], codes[20])
+
     async def test_deleted_item_reappears_on_re_search(self):
         """After deleting an item and re-searching, it should reappear at the top."""
         await cache.save_user_stock_order("u1", ["111111", "222222", "333333"])

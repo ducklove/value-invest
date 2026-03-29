@@ -488,6 +488,9 @@ async def delete_expired_sessions():
         await db.close()
 
 
+USER_RECENT_MAX = 20
+
+
 async def touch_user_recent_analysis(google_sub: str, stock_code: str):
     db = await get_db()
     try:
@@ -517,6 +520,28 @@ async def touch_user_recent_analysis(google_sub: str, stock_code: str):
             """,
             (google_sub, stock_code, now),
         )
+        # Remove overflow items beyond the limit (keep starred/pinned)
+        cursor = await db.execute(
+            """
+            SELECT r.stock_code
+            FROM user_recent_analyses r
+            LEFT JOIN user_stock_preferences p
+                ON p.google_sub = r.google_sub AND p.stock_code = r.stock_code
+            WHERE r.google_sub = ?
+              AND COALESCE(p.is_starred, 0) = 0
+              AND COALESCE(p.is_pinned, 0) = 0
+            ORDER BY COALESCE(p.sort_order, 999999) ASC
+            LIMIT -1 OFFSET ?
+            """,
+            (google_sub, USER_RECENT_MAX),
+        )
+        overflow = [row["stock_code"] for row in await cursor.fetchall()]
+        if overflow:
+            placeholders = ",".join("?" for _ in overflow)
+            await db.execute(
+                f"DELETE FROM user_recent_analyses WHERE google_sub = ? AND stock_code IN ({placeholders})",
+                (google_sub, *overflow),
+            )
         await db.commit()
     finally:
         await db.close()
