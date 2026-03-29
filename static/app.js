@@ -1221,14 +1221,14 @@ async function loadRecentList() {
       }
 
       const quote = item.quote_snapshot || {};
-      const quoteRow = document.createElement('div');
-      quoteRow.className = 'quote-row';
+      const quoteCell = document.createElement('div');
+      quoteCell.className = 'quote-cell';
 
       if (quote.price !== null && quote.price !== undefined) {
         const quotePrice = document.createElement('span');
         quotePrice.className = 'quote-price';
         quotePrice.textContent = Number(quote.price).toLocaleString();
-        quoteRow.appendChild(quotePrice);
+        quoteCell.appendChild(quotePrice);
 
         const change = Number(quote.change || 0);
         const changePct = quote.change_pct;
@@ -1240,11 +1240,11 @@ async function loadRecentList() {
           const changeSpan = document.createElement('span');
           changeSpan.className = `quote-change ${changeClass}`;
           changeSpan.textContent = changeText;
-          quoteRow.appendChild(changeSpan);
+          quoteCell.appendChild(changeSpan);
         }
       }
 
-      info.append(nameRow, quoteRow);
+      info.append(nameRow, quoteCell);
       wrapper.appendChild(info);
 
       if (currentUser) {
