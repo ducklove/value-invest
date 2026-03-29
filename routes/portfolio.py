@@ -92,19 +92,18 @@ async def _resolve_foreign_name(ticker: str) -> str | None:
     return await _yfinance_resolve_name(ticker)
 
 
-async def _yfinance_resolve_name(ticker: str) -> str | None:
+async def _yfinance_find_ticker(ticker: str) -> str | None:
+    """Find a working yfinance ticker, trying various exchange suffixes."""
     try:
         import yfinance as yf
         loop = asyncio.get_event_loop()
-        # Try ticker as-is first, then with suffixes
         candidates = [ticker] if "." in ticker else [ticker + s for s in _YFINANCE_SUFFIXES]
         for candidate in candidates:
             try:
                 t = await loop.run_in_executor(None, partial(yf.Ticker, candidate))
                 info = await loop.run_in_executor(None, lambda: t.info)
-                name = info.get("shortName") or info.get("longName")
-                if name:
-                    return name
+                if info.get("shortName") or info.get("longName"):
+                    return candidate
             except Exception:
                 continue
     except Exception:
@@ -112,8 +111,22 @@ async def _yfinance_resolve_name(ticker: str) -> str | None:
     return None
 
 
+async def _yfinance_resolve_name(ticker: str) -> str | None:
+    try:
+        import yfinance as yf
+        found = await _yfinance_find_ticker(ticker)
+        if not found:
+            return None
+        loop = asyncio.get_event_loop()
+        t = await loop.run_in_executor(None, partial(yf.Ticker, found))
+        info = await loop.run_in_executor(None, lambda: t.info)
+        return info.get("shortName") or info.get("longName")
+    except Exception:
+        return None
+
+
 async def _resolve_foreign_reuters(ticker: str) -> str | None:
-    """Find the full reuters code on Naver, or return ticker as-is for yfinance."""
+    """Find the full reuters code on Naver, or a working yfinance ticker."""
     if "." in ticker:
         d = await _fetch_naver_world_stock(ticker)
         if d:
@@ -123,8 +136,9 @@ async def _resolve_foreign_reuters(ticker: str) -> str | None:
         d = await _fetch_naver_world_stock(code)
         if d:
             return d.get("reutersCode") or code
-    # Not on Naver — return original ticker for yfinance fallback
-    return ticker
+    # yfinance fallback — find a working ticker with suffix
+    found = await _yfinance_find_ticker(ticker)
+    return found or ticker
 
 
 async def _fetch_foreign_quote(reuters_code: str) -> dict:
@@ -183,6 +197,9 @@ _quote_cache: dict[str, tuple[float, dict]] = {}
 _QUOTE_CACHE_TTL = 60
 
 
+_ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 -> A200.AX)
+
+
 async def _fetch_quote(stock_code: str) -> dict:
     now = _time.monotonic()
     cached = _quote_cache.get(stock_code)
@@ -191,7 +208,14 @@ async def _fetch_quote(stock_code: str) -> dict:
     if _is_korean_stock(stock_code):
         q = await stock_price.fetch_quote_snapshot(stock_code)
     else:
-        q = await _fetch_foreign_quote(stock_code)
+        # Use resolved ticker if available, otherwise try to resolve
+        ticker = _ticker_map.get(stock_code, stock_code)
+        q = await _fetch_foreign_quote(ticker)
+        if not q and ticker == stock_code and "." not in stock_code:
+            resolved = await _resolve_foreign_reuters(stock_code)
+            if resolved and resolved != stock_code:
+                _ticker_map[stock_code] = resolved
+                q = await _fetch_foreign_quote(resolved)
     _quote_cache[stock_code] = (now, q)
     return q
 
@@ -272,11 +296,14 @@ async def _detect_currency(stock_code: str) -> str:
     try:
         import yfinance as yf
         loop = asyncio.get_event_loop()
-        t = await loop.run_in_executor(None, partial(yf.Ticker, stock_code))
-        fi = await loop.run_in_executor(None, lambda: t.fast_info)
-        return (fi.currency or "USD").upper()
+        found = await _yfinance_find_ticker(stock_code)
+        if found:
+            t = await loop.run_in_executor(None, partial(yf.Ticker, found))
+            fi = await loop.run_in_executor(None, lambda: t.fast_info)
+            return (fi.currency or "USD").upper()
     except Exception:
-        return "USD"
+        pass
+    return "USD"
 
 
 async def _fx_to_krw(nation: str, amount: float) -> float:
