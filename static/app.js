@@ -325,6 +325,39 @@ function scheduleGoogleButtonRender() {
   }, 300);
 }
 
+async function submitGoogleCredential(credential) {
+  const resp = await apiFetch('/api/auth/google', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data.detail || 'Google 로그인에 실패했습니다.');
+  }
+  currentUser = data.user || null;
+  return data;
+}
+
+async function handleGoogleCredentialResponse(response) {
+  const credential = response?.credential;
+  if (!credential) {
+    alert('Google 로그인 토큰을 받지 못했습니다.');
+    return;
+  }
+
+  try {
+    await submitGoogleCredential(credential);
+    renderAuthState();
+    await refreshActivePreference();
+    await loadRecentList();
+    trackEvent('login_success', { provider: 'google', method: 'popup' });
+  } catch (error) {
+    trackEvent('login_error', { provider: 'google', reason: 'popup_callback' });
+    alert(error.message || 'Google 로그인에 실패했습니다.');
+  }
+}
+
 function renderGoogleButton() {
   const container = document.getElementById('googleSignInButton');
   if (!container) return;
@@ -352,9 +385,7 @@ function renderGoogleButton() {
     window.google.accounts.id.initialize({
       client_id: authConfig.googleClientId,
       auto_select: false,
-      ux_mode: 'redirect',
-      login_uri: buildGoogleLoginUri(),
-      use_fedcm_for_button: true,
+      callback: handleGoogleCredentialResponse,
     });
     googleAuthInitialized = true;
   }

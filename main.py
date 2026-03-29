@@ -205,7 +205,7 @@ def _render_login_page(return_to: str | None) -> str:
     normalized_return_to = _normalize_return_to(return_to)
     escaped_return_to = json.dumps(normalized_return_to, ensure_ascii=False)
     escaped_google_client_id = json.dumps(auth_service.public_config()["google_client_id"], ensure_ascii=False)
-    callback_url = json.dumps("/api/auth/google/callback", ensure_ascii=False)
+    auth_url = json.dumps("/api/auth/google", ensure_ascii=False)
     home_url = json.dumps(normalized_return_to or "/", ensure_ascii=False)
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -279,7 +279,34 @@ def _render_login_page(return_to: str | None) -> str:
   <script>
     const RETURN_TO = {escaped_return_to};
     const GOOGLE_CLIENT_ID = {escaped_google_client_id};
-    const LOGIN_URI = {callback_url} + (RETURN_TO && RETURN_TO !== '/' ? '?return_to=' + encodeURIComponent(RETURN_TO) : '');
+    const AUTH_URL = {auth_url};
+
+    async function submitGoogleCredential(credential) {{
+      const resp = await fetch(AUTH_URL, {{
+        method: 'POST',
+        credentials: 'include',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ credential }}),
+      }});
+      const data = await resp.json().catch(() => ({{}}));
+      if (!resp.ok) {{
+        throw new Error(data.detail || 'Google 로그인에 실패했습니다.');
+      }}
+      return data;
+    }}
+
+    async function handleGoogleCredentialResponse(response) {{
+      if (!response?.credential) {{
+        alert('Google 로그인 토큰을 받지 못했습니다.');
+        return;
+      }}
+      try {{
+        await submitGoogleCredential(response.credential);
+        window.location.replace(RETURN_TO || '/');
+      }} catch (error) {{
+        alert(error.message || 'Google 로그인에 실패했습니다.');
+      }}
+    }}
 
     function renderLoginButton() {{
       if (!GOOGLE_CLIENT_ID || !window.google?.accounts?.id) {{
@@ -289,9 +316,7 @@ def _render_login_page(return_to: str | None) -> str:
       window.google.accounts.id.initialize({{
         client_id: GOOGLE_CLIENT_ID,
         auto_select: false,
-        ux_mode: 'redirect',
-        login_uri: LOGIN_URI,
-        use_fedcm_for_button: true,
+        callback: handleGoogleCredentialResponse,
       }});
       window.google.accounts.id.renderButton(
         document.getElementById('googleSignInButton'),
