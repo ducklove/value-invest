@@ -324,6 +324,11 @@ function renderGoogleButton() {
     return;
   }
 
+  if (IS_GITHUB_PAGES && API_BASE_URL) {
+    container.innerHTML = `<a class="auth-login-link" href="${escapeHtml(API_BASE_URL)}/">서버 버전에서 로그인</a>`;
+    return;
+  }
+
   if (!window.google?.accounts?.id) {
     scheduleGoogleButtonRender();
     return;
@@ -371,7 +376,9 @@ function renderAuthState() {
     email.textContent = currentUser.email || '';
   } else if (authConfig?.enabled) {
     statusTitle.textContent = '로그인해 최근 분석을 저장하세요';
-    statusDetail.textContent = 'Google로 로그인하면 최근 본 종목, 관심종목, 핀 고정, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
+    statusDetail.textContent = IS_GITHUB_PAGES
+      ? 'GitHub Pages에서는 서버 버전으로 이동해 로그인한 뒤 개인화 기능을 사용할 수 있습니다.'
+      : 'Google로 로그인하면 최근 본 종목, 관심종목, 핀 고정, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
     authUser.style.display = 'none';
   } else {
     statusTitle.textContent = 'Google 로그인이 아직 설정되지 않았습니다';

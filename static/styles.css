@@ -49,6 +49,24 @@ body {
   display: grid;
   gap: 10px;
 }
+.auth-login-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.auth-login-link:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
 .auth-user {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
