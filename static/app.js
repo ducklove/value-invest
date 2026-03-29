@@ -1509,10 +1509,6 @@ async function getUsdKrwRate() {
   } catch {}
   return cachedFxRate || 1450;
 }
-function toKrw(amount, currency) {
-  if (!currency || currency === 'KRW') return amount;
-  return amount * (cachedFxRate || 1450);
-}
 
 function switchView(view) {
   activeView = view;
@@ -1628,23 +1624,24 @@ function renderPortfolio() {
   const rows = portfolioItems.map(item => {
     const q = item.quote || {};
     const cur = item.currency || 'KRW';
-    const price = q.price ?? null;
-    const change = q.change ?? 0;
+    const fx = (cur !== 'KRW') ? (cachedFxRate || 1450) : 1;
+    const rawPrice = q.price ?? null;
+    const rawChange = q.change ?? 0;
     const changePct = q.change_pct ?? null;
+    // Convert foreign prices to KRW
+    const price = rawPrice !== null ? Math.round(rawPrice * fx) : null;
+    const change = Math.round(rawChange * fx);
     const qty = item.quantity;
-    const avgPrice = item.avg_price;
+    const avgPrice = item.avg_price; // already in KRW
     const invested = qty * avgPrice;
     const marketValue = price !== null ? qty * price : null;
     const rawReturn = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
     const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;
     const dailyPnl = price !== null ? qty * change : 0;
-    const investedKrw = toKrw(invested, cur);
-    const marketValueKrw = marketValue !== null ? toKrw(marketValue, cur) : null;
-    const dailyPnlKrw = toKrw(dailyPnl, cur);
-    totalInvested += investedKrw;
-    if (marketValueKrw !== null) totalMarketValue += marketValueKrw;
-    totalDailyPnl += dailyPnlKrw;
-    return { ...item, cur, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl, marketValueKrw };
+    totalInvested += invested;
+    if (marketValue !== null) totalMarketValue += marketValue;
+    totalDailyPnl += dailyPnl;
+    return { ...item, cur, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
   });
 
   // Sort rows
@@ -1698,7 +1695,7 @@ function renderPortfolio() {
 
   // Table body
   tbody.innerHTML = rows.map((r, i) => {
-    const weight = totalMarketValue > 0 && r.marketValueKrw !== null ? (r.marketValueKrw / totalMarketValue * 100) : 0;
+    const weight = totalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / totalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
     const curTag = r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
 
@@ -1706,11 +1703,11 @@ function renderPortfolio() {
       return `<tr data-code="${r.stock_code}">
         <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}');return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
-        <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="any"></td>
-        <td class="pf-col-num">${r.price !== null ? fmtPrice(r.price, r.cur) : '-'}</td>
+        <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
+        <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="1"></td>
         <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-        <td class="pf-col-num">${r.marketValueKrw !== null ? fmtNum(Math.round(r.marketValueKrw)) : '-'}</td>
+        <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
         <td class="pf-col-num">${fmtPct(weight)}</td>
         <td class="pf-col-act"><div class="pf-row-actions">
           <button class="pf-row-btn" onclick="savePortfolioEdit('${r.stock_code}','${escapeHtml(r.stock_name)}')" title="저장">V</button>
@@ -1721,11 +1718,11 @@ function renderPortfolio() {
     return `<tr draggable="true" data-code="${r.stock_code}">
       <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}');return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
-      <td class="pf-col-num">${fmtPrice(r.avgPrice, r.cur)}</td>
-      <td class="pf-col-num">${r.price !== null ? fmtPrice(r.price, r.cur) : '-'}</td>
+      <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
+      <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
       <td class="pf-col-num">${fmtNum(r.qty)}</td>
       <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-      <td class="pf-col-num">${r.marketValueKrw !== null ? fmtNum(Math.round(r.marketValueKrw)) : '-'}</td>
+      <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
       <td class="pf-col-num">${fmtPct(weight)}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
         <button class="pf-row-btn" onclick="startPortfolioEdit('${r.stock_code}')" title="편집">E</button>
@@ -1778,11 +1775,6 @@ function returnClass(val) {
   return val > 0 ? 'pf-return positive' : val < 0 ? 'pf-return negative' : '';
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
-function fmtPrice(n, cur) {
-  if (n === null || n === undefined) return '-';
-  if (cur && cur !== 'KRW') return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return Number(n).toLocaleString();
-}
 function fmtKrw(n) { return n !== null ? Number(Math.round(n)).toLocaleString() + '원' : '-'; }
 function fmtSignedKrw(n) {
   if (n === null) return '-';
