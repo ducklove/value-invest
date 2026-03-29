@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from functools import partial
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
@@ -11,6 +12,10 @@ from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _is_korean_stock(code: str) -> bool:
+    return len(code) == 6 and code[:5].isdigit()
 
 
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
@@ -27,10 +32,51 @@ async def _fetch_naver_stock_name(stock_code: str) -> str | None:
 
 
 async def _resolve_name(stock_code: str) -> str | None:
-    name = await cache.resolve_stock_name(stock_code)
-    if name:
-        return name
-    return await _fetch_naver_stock_name(stock_code)
+    if _is_korean_stock(stock_code):
+        name = await cache.resolve_stock_name(stock_code)
+        if name:
+            return name
+        return await _fetch_naver_stock_name(stock_code)
+    return await _fetch_yfinance_name(stock_code)
+
+
+async def _fetch_yfinance_name(ticker: str) -> str | None:
+    try:
+        import yfinance as yf
+        loop = asyncio.get_event_loop()
+        t = await loop.run_in_executor(None, partial(yf.Ticker, ticker))
+        info = await loop.run_in_executor(None, lambda: t.info)
+        return info.get("shortName") or info.get("longName")
+    except Exception:
+        return None
+
+
+async def _fetch_foreign_quote(ticker: str) -> dict:
+    try:
+        import yfinance as yf
+        loop = asyncio.get_event_loop()
+        t = await loop.run_in_executor(None, partial(yf.Ticker, ticker))
+        fi = await loop.run_in_executor(None, lambda: t.fast_info)
+        price = fi.last_price
+        prev = fi.previous_close
+        currency = fi.currency or "USD"
+        change = round(price - prev, 4) if price and prev else 0
+        change_pct = round(change / prev * 100, 2) if prev else None
+        return {
+            "price": round(price, 2) if price else None,
+            "change": round(change, 2),
+            "change_pct": change_pct,
+            "currency": currency,
+        }
+    except Exception as exc:
+        logger.warning("해외주식 시세 조회 실패(%s): %s", ticker, exc)
+        return {}
+
+
+async def _fetch_quote(stock_code: str) -> dict:
+    if _is_korean_stock(stock_code):
+        return await stock_price.fetch_quote_snapshot(stock_code)
+    return await _fetch_foreign_quote(stock_code)
 
 
 async def _enrich_with_quotes(items: list[dict]) -> list[dict]:
@@ -38,7 +84,7 @@ async def _enrich_with_quotes(items: list[dict]) -> list[dict]:
         enriched = dict(item)
         try:
             async with RECENT_QUOTES_SEMAPHORE:
-                enriched["quote"] = await stock_price.fetch_quote_snapshot(item["stock_code"])
+                enriched["quote"] = await _fetch_quote(item["stock_code"])
         except Exception as exc:
             logger.warning("포트폴리오 현재가 조회 실패(%s): %s", item.get("stock_code"), exc)
             enriched["quote"] = {}
@@ -61,7 +107,7 @@ async def stream_portfolio_quotes(request: Request):
         for item in items:
             code = item["stock_code"]
             try:
-                quote = await stock_price.fetch_quote_snapshot(code)
+                quote = await _fetch_quote(code)
             except Exception:
                 quote = {}
             yield f"data: {_json.dumps({'stock_code': code, 'quote': quote}, ensure_ascii=False)}\n\n"
@@ -113,7 +159,8 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     if avg_price < 0:
         raise HTTPException(status_code=400, detail="매입가는 0 이상이어야 합니다.")
 
-    result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price)
+    currency = str(payload.get("currency") or ("KRW" if _is_korean_stock(stock_code) else "USD")).upper()
+    result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price, currency)
     return {"ok": True, **result}
 
 
@@ -176,8 +223,9 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
         await cache.clear_portfolio(user["google_sub"])
 
     for item in resolved:
+        currency = "KRW" if _is_korean_stock(item["stock_code"]) else "USD"
         await cache.save_portfolio_item(
-            user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"],
+            user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], currency,
         )
 
     return {"ok": True, "imported": len(resolved), "mode": mode}

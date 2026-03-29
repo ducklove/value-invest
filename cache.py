@@ -134,6 +134,7 @@ async def init_db():
         await _ensure_column(db, "analysis_meta", "payload_json", "TEXT")
         await _ensure_column(db, "user_stock_preferences", "sort_order", "INTEGER")
         await _ensure_column(db, "user_stock_preferences", "starred_order", "INTEGER")
+        await _ensure_column(db, "user_portfolio", "currency", "TEXT DEFAULT 'KRW'")
         await db.commit()
     finally:
         await db.close()
@@ -808,7 +809,7 @@ async def get_portfolio(google_sub: str) -> list[dict]:
     try:
         cursor = await db.execute(
             """
-            SELECT stock_code, stock_name, quantity, avg_price, sort_order
+            SELECT stock_code, stock_name, quantity, avg_price, sort_order, COALESCE(currency, 'KRW') AS currency
             FROM user_portfolio
             WHERE google_sub = ?
             ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, created_at ASC
@@ -822,6 +823,7 @@ async def get_portfolio(google_sub: str) -> list[dict]:
 
 async def save_portfolio_item(
     google_sub: str, stock_code: str, stock_name: str, quantity: int, avg_price: float,
+    currency: str = "KRW",
 ) -> dict:
     db = await get_db()
     try:
@@ -844,18 +846,19 @@ async def save_portfolio_item(
 
         await db.execute(
             """
-            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(google_sub, stock_code) DO UPDATE SET
                 stock_name = excluded.stock_name,
                 quantity = excluded.quantity,
                 avg_price = excluded.avg_price,
+                currency = excluded.currency,
                 updated_at = excluded.updated_at
             """,
-            (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, now, now),
+            (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, now, now),
         )
         await db.commit()
-        return {"stock_code": stock_code, "stock_name": stock_name, "quantity": quantity, "avg_price": avg_price}
+        return {"stock_code": stock_code, "stock_name": stock_name, "quantity": quantity, "avg_price": avg_price, "currency": currency}
     finally:
         await db.close()
 
