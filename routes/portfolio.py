@@ -130,6 +130,13 @@ _fx_cache: dict[str, float] = {}
 _fx_cache_ts: float = 0
 _FX_CACHE_TTL = 300  # 5 minutes
 
+_NATION_TO_CURRENCY = {
+    "USA": "USD", "VNM": "VND", "JPN": "JPY", "CHN": "CNY",
+    "HKG": "HKD", "GBR": "GBP", "TWN": "TWD", "AUS": "AUD",
+    "CAN": "CAD", "CHE": "CHF", "DEU": "EUR", "FRA": "EUR",
+    "NLD": "EUR", "ITA": "EUR", "ESP": "EUR",
+}
+
 _NATION_TO_FX = {
     "USA": "FX_USDKRW", "VNM": "FX_VNDKRW", "JPN": "FX_JPYKRW",
     "CHN": "FX_CNYKRW", "HKG": "FX_HKDKRW", "GBR": "FX_GBPKRW",
@@ -169,6 +176,14 @@ async def _get_fx_rates() -> dict[str, float]:
     except Exception:
         pass
     return _fx_cache
+
+
+async def _detect_currency(stock_code: str) -> str:
+    d = await _fetch_naver_world_stock(stock_code)
+    if d:
+        nation = d.get("nationType", "")
+        return _NATION_TO_CURRENCY.get(nation, "USD")
+    return "USD"
 
 
 async def _fx_to_krw(nation: str, amount: float) -> float:
@@ -247,7 +262,12 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     if avg_price < 0:
         raise HTTPException(status_code=400, detail="매입가는 0 이상이어야 합니다.")
 
-    currency = str(payload.get("currency") or ("KRW" if _is_korean_stock(stock_code) else "USD")).upper()
+    currency = str(payload.get("currency") or "").upper()
+    if not currency:
+        if _is_korean_stock(stock_code):
+            currency = "KRW"
+        else:
+            currency = await _detect_currency(stock_code)
     result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price, currency)
     return {"ok": True, **result}
 
@@ -311,7 +331,7 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
         await cache.clear_portfolio(user["google_sub"])
 
     for item in resolved:
-        currency = "KRW" if _is_korean_stock(item["stock_code"]) else "USD"
+        currency = "KRW" if _is_korean_stock(item["stock_code"]) else await _detect_currency(item["stock_code"])
         await cache.save_portfolio_item(
             user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], currency,
         )
