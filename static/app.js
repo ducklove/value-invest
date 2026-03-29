@@ -1795,7 +1795,8 @@ async function deletePortfolioItem(stockCode) {
       const raw = input.value.trim();
       if (raw.length < 1) { dropdown.classList.remove('show'); return; }
 
-      const q = raw.replace(/(우[A-Z]?|우)$/, '').trim() || raw;
+      const q = raw.replace(/(우[A-Z0-9]?|우)$/, '').trim() || raw;
+      const wantPref = q !== raw;
 
       pfSearchTimeout = setTimeout(async () => {
         try {
@@ -1803,8 +1804,31 @@ async function deletePortfolioItem(stockCode) {
           const results = await resp.json();
           if (!results.length) { dropdown.classList.remove('show'); return; }
 
-          dropdown.innerHTML = results.map(r =>
-            `<div class="dropdown-item" data-code="${r.stock_code}" data-name="${escapeHtml(r.corp_name)}">${escapeHtml(r.corp_name)} <span style="color:var(--text-secondary)">${r.stock_code}</span></div>`
+          let items;
+          if (wantPref) {
+            // Resolve preferred stock names from backend
+            const prefCodes = results.flatMap(r => {
+              const base = r.stock_code;
+              if (!base.endsWith('0')) return [];
+              return ['5','7','8','9','K','L'].map(s => base.slice(0,-1) + s);
+            });
+            const resolved = await Promise.all(
+              prefCodes.map(async c => {
+                try {
+                  const r2 = await apiFetch(`/api/portfolio/resolve-name?code=${c}`);
+                  const d = await r2.json();
+                  return d.stock_name ? { code: c, name: d.stock_name } : null;
+                } catch { return null; }
+              })
+            );
+            items = resolved.filter(Boolean);
+          } else {
+            items = results.map(r => ({ code: r.stock_code, name: r.corp_name }));
+          }
+
+          if (!items.length) { dropdown.classList.remove('show'); return; }
+          dropdown.innerHTML = items.map(r =>
+            `<div class="dropdown-item" data-code="${r.code}" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)} <span style="color:var(--text-secondary)">${r.code}</span></div>`
           ).join('');
           dropdown.classList.add('show');
           dropdown.querySelectorAll('.dropdown-item').forEach(el => {
