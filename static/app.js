@@ -1627,7 +1627,7 @@ function renderPortfolio() {
     return { ...item, cur, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
   });
 
-  // Sort rows
+  // Sort rows, but keep editing item at top
   if (pfSortKey) {
     rows.sort((a, b) => {
       let va, vb;
@@ -1639,6 +1639,13 @@ function renderPortfolio() {
       vb = b[pfSortKey] ?? -Infinity;
       return pfSortAsc ? va - vb : vb - va;
     });
+  }
+  if (pfEditingCode) {
+    const idx = rows.findIndex(r => r.stock_code === pfEditingCode);
+    if (idx > 0) {
+      const [editing] = rows.splice(idx, 1);
+      rows.unshift(editing);
+    }
   }
 
   // Update sort arrows in header
