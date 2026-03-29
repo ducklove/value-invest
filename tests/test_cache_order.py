@@ -48,3 +48,37 @@ class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
         await cache.save_user_stock_order("u1", ["222222", "111111", "333333"])
         items = await cache.get_cached_analyses(google_sub="u1")
         self.assertEqual([item["stock_code"] for item in items], ["222222", "111111", "333333"])
+
+    async def test_new_item_appears_at_top_after_reorder(self):
+        """After drag-and-drop reorder, a newly searched stock should appear at the top."""
+        await cache.save_user_stock_order("u1", ["222222", "111111", "333333"])
+
+        # Add a new stock
+        db = await cache.get_db()
+        try:
+            await db.execute(
+                "INSERT INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+                ("444444", "Delta", "2026-01-04T00:00:00", "{}"),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+        await cache.touch_user_recent_analysis("u1", "444444")
+        items = await cache.get_cached_analyses(google_sub="u1")
+        codes = [item["stock_code"] for item in items]
+        self.assertEqual(codes[0], "444444", "Newly searched stock should be at top")
+
+    async def test_deleted_item_reappears_on_re_search(self):
+        """After deleting an item and re-searching, it should reappear at the top."""
+        await cache.save_user_stock_order("u1", ["111111", "222222", "333333"])
+
+        await cache.delete_user_recent_analysis("u1", "222222")
+        items = await cache.get_cached_analyses(google_sub="u1")
+        codes = [item["stock_code"] for item in items]
+        self.assertNotIn("222222", codes)
+
+        await cache.touch_user_recent_analysis("u1", "222222")
+        items = await cache.get_cached_analyses(google_sub="u1")
+        codes = [item["stock_code"] for item in items]
+        self.assertEqual(codes[0], "222222", "Re-searched stock should be at top")
