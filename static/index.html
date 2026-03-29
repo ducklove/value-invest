@@ -5,30 +5,48 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="한국 상장사의 재무 데이터와 시장 지표를 바탕으로 가치투자 관점에서 분석합니다.">
 <title>한국 주식 가치투자 분석</title>
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-KE611DTCFZ"></script>
 <script src="./app-config.js"></script>
 <script>
+const APP_CONFIG = window.APP_CONFIG || {};
+const IS_GITHUB_PAGES = window.location.hostname.endsWith('github.io');
+const SHOULD_REDIRECT_TO_APP_SERVER = IS_GITHUB_PAGES && Boolean(APP_CONFIG.apiBaseUrl);
+
+if (SHOULD_REDIRECT_TO_APP_SERVER) {
+  const redirectTarget = new URL(APP_CONFIG.apiBaseUrl);
+  redirectTarget.search = window.location.search;
+  redirectTarget.hash = window.location.hash;
+  window.location.replace(redirectTarget.toString());
+}
+
 window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
-const APP_CONFIG = window.APP_CONFIG || {};
 const GA_MEASUREMENT_ID = 'G-KE611DTCFZ';
 const GA_STREAM_ID = '13881342022';
 const IS_LOCALHOST = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
 window['ga-disable-' + GA_MEASUREMENT_ID] = IS_LOCALHOST;
-gtag('js', new Date());
-gtag('config', GA_MEASUREMENT_ID, { anonymize_ip: true });
+if (!SHOULD_REDIRECT_TO_APP_SERVER) {
+  gtag('js', new Date());
+  gtag('config', GA_MEASUREMENT_ID, { anonymize_ip: true });
+}
 
 function trackEvent(name, params = {}) {
-  if (IS_LOCALHOST || typeof gtag !== 'function') return;
+  if (IS_LOCALHOST || SHOULD_REDIRECT_TO_APP_SERVER || typeof gtag !== 'function') return;
   gtag('event', name, { stream_id: GA_STREAM_ID, ...params });
 }
 </script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-KE611DTCFZ"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+<noscript>
+  <div style="padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    GitHub Pages 버전은 서버로 이동해 사용합니다.
+    <a href="https://cantabile.tplinkdns.com:3691/">서버 버전 열기</a>
+  </div>
+</noscript>
 
 <aside class="sidebar">
   <div class="auth-panel" id="authPanel">
