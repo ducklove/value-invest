@@ -1880,7 +1880,23 @@ async function deletePortfolioItem(stockCode) {
         try {
           const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
           const results = await resp.json();
-          if (!results.length) { dropdown.classList.remove('show'); return; }
+          if (!results.length) {
+            // No domestic results — try as foreign ticker
+            if (/^[A-Z]{1,5}$/i.test(raw)) {
+              const ticker = raw.toUpperCase();
+              const r2 = await apiFetch(`/api/portfolio/resolve-name?code=${ticker}`);
+              const d = await r2.json();
+              if (d.stock_name) {
+                dropdown.innerHTML = `<div class="dropdown-item" data-code="${ticker}" data-name="${escapeHtml(d.stock_name)}">${escapeHtml(d.stock_name)} <span style="color:var(--text-secondary)">${ticker}</span></div>`;
+                dropdown.classList.add('show');
+                dropdown.querySelectorAll('.dropdown-item').forEach(el => {
+                  el.addEventListener('click', () => pfAddFromSearch(el.dataset.code, el.dataset.name));
+                });
+                return;
+              }
+            }
+            dropdown.classList.remove('show'); return;
+          }
 
           let items;
           if (wantPref) {
@@ -1920,9 +1936,10 @@ async function deletePortfolioItem(stockCode) {
       if (e.key === 'Enter') {
         e.preventDefault();
         dropdown.classList.remove('show');
-        const q = input.value.trim();
+        const q = input.value.trim().toUpperCase();
         if (!q) return;
-        if (/^[0-9A-Z]{6}$/i.test(q)) {
+        // Accept Korean codes (6 chars) or foreign tickers (1-5 alpha chars)
+        if (/^[0-9A-Z]{1,6}$/i.test(q)) {
           const resp = await apiFetch(`/api/portfolio/resolve-name?code=${q}`);
           const data = await resp.json();
           pfAddFromSearch(q, data.stock_name || q);
