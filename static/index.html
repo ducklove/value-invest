@@ -157,13 +157,13 @@ function trackEvent(name, params = {}) {
       <table class="pf-table" id="pfTable">
         <thead>
           <tr>
-            <th class="pf-col-name">종목명</th>
-            <th class="pf-col-num">등락률</th>
+            <th class="pf-col-name pf-sortable" data-sort="name" onclick="pfSort('name')">종목명</th>
+            <th class="pf-col-num pf-sortable" data-sort="changePct" onclick="pfSort('changePct')">등락률</th>
             <th class="pf-col-num">매입가</th>
             <th class="pf-col-num">현재가</th>
             <th class="pf-col-num">수량</th>
-            <th class="pf-col-num">수익률</th>
-            <th class="pf-col-num">평가금액</th>
+            <th class="pf-col-num pf-sortable" data-sort="returnPct" onclick="pfSort('returnPct')">수익률</th>
+            <th class="pf-col-num pf-sortable" data-sort="marketValue" onclick="pfSort('marketValue')">평가금액</th>
             <th class="pf-col-num">비중</th>
             <th class="pf-col-act"></th>
           </tr>

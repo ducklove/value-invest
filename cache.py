@@ -796,20 +796,36 @@ async def unstar_stock(google_sub: str, stock_code: str):
 
 # --- Portfolio ---
 
+_PREF_SUFFIXES = {
+    "5": "(우)", "7": "(우B)", "8": "(우C)",
+    "K": "(우)", "L": "(우B)",
+}
+
+
 async def resolve_stock_name(stock_code: str) -> str | None:
     name = await get_corp_name(stock_code)
     if name:
         return name
+    # Try replacing last digit with 0 (most common pattern)
     base_code = stock_code[:-1] + "0"
     base_name = await get_corp_name(base_code)
-    if not base_name:
-        return None
-    suffix = stock_code[-1]
-    if suffix == "5":
-        return f"{base_name}(우)"
-    if suffix == "7":
-        return f"{base_name}(우B)"
-    return f"{base_name}({suffix})"
+    if base_name:
+        label = _PREF_SUFFIXES.get(stock_code[-1], f"({stock_code[-1]})")
+        return f"{base_name}{label}"
+    # Try LIKE search for the first 4-5 digits to catch irregular codes
+    db = await get_db()
+    try:
+        prefix = stock_code[:4]
+        cursor = await db.execute(
+            "SELECT corp_name, stock_code FROM corp_codes WHERE stock_code LIKE ? LIMIT 1",
+            (prefix + "%",),
+        )
+        row = await cursor.fetchone()
+        if row and row["stock_code"] != stock_code:
+            return f"{row['corp_name']}(우)"
+    finally:
+        await db.close()
+    return None
 
 
 async def get_portfolio(google_sub: str) -> list[dict]:

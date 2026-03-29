@@ -1492,6 +1492,8 @@ let portfolioItems = [];
 let portfolioLoading = false;
 let pfSearchTimeout = null;
 let pfEditingCode = null;
+let pfSortKey = null;   // null = manual order, 'name' | 'changePct' | 'returnPct' | 'marketValue'
+let pfSortAsc = true;
 
 function switchView(view) {
   activeView = view;
@@ -1520,6 +1522,22 @@ async function loadPortfolio() {
   } catch {} finally {
     portfolioLoading = false;
   }
+}
+
+function pfSort(key) {
+  if (pfSortKey === key) {
+    if (!pfSortAsc) {
+      // third click: back to manual order
+      pfSortKey = null;
+      pfSortAsc = true;
+    } else {
+      pfSortAsc = false;
+    }
+  } else {
+    pfSortKey = key;
+    pfSortAsc = key === 'name'; // name defaults asc, numbers desc
+  }
+  renderPortfolio();
 }
 
 function renderPortfolio() {
@@ -1557,6 +1575,33 @@ function renderPortfolio() {
     return { ...item, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
   });
 
+  // Sort rows
+  if (pfSortKey) {
+    rows.sort((a, b) => {
+      let va, vb;
+      if (pfSortKey === 'name') {
+        va = a.stock_name; vb = b.stock_name;
+        return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      }
+      va = a[pfSortKey] ?? -Infinity;
+      vb = b[pfSortKey] ?? -Infinity;
+      return pfSortAsc ? va - vb : vb - va;
+    });
+  }
+
+  // Update sort arrows in header
+  document.querySelectorAll('.pf-sortable').forEach(th => {
+    const key = th.dataset.sort;
+    const existing = th.querySelector('.pf-sort-arrow');
+    if (existing) existing.remove();
+    if (pfSortKey === key) {
+      const arrow = document.createElement('span');
+      arrow.className = 'pf-sort-arrow';
+      arrow.textContent = pfSortAsc ? ' \u25B2' : ' \u25BC';
+      th.appendChild(arrow);
+    }
+  });
+
   const totalReturnPct = totalInvested > 0 ? ((totalMarketValue - totalInvested) / totalInvested * 100) : 0;
   const prevTotalValue = totalMarketValue - totalDailyPnl;
   const dailyReturnPct = prevTotalValue > 0 ? (totalDailyPnl / prevTotalValue * 100) : 0;
@@ -1585,7 +1630,7 @@ function renderPortfolio() {
     const isEditing = pfEditingCode === r.stock_code;
 
     if (isEditing) {
-      return `<tr>
+      return `<tr data-code="${r.stock_code}">
         <td><strong>${escapeHtml(r.stock_name)}</strong> <span class="pf-stock-code">${r.stock_code}</span></td>
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
@@ -1600,7 +1645,7 @@ function renderPortfolio() {
         </div></td>
       </tr>`;
     }
-    return `<tr>
+    return `<tr draggable="true" data-code="${r.stock_code}">
       <td><strong>${escapeHtml(r.stock_name)}</strong> <span class="pf-stock-code">${r.stock_code}</span></td>
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
@@ -1623,6 +1668,36 @@ function renderPortfolio() {
     <td class="pf-col-num">100%</td>
     <td></td>
   </tr>`;
+
+  // Drag-and-drop on rows (manual order only)
+  if (!pfSortKey && currentUser) {
+    tbody.querySelectorAll('tr[draggable]').forEach(tr => {
+      tr.addEventListener('dragstart', (e) => {
+        tr.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', tr.dataset.code);
+      });
+      tr.addEventListener('dragend', () => {
+        tr.classList.remove('dragging');
+        tbody.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      });
+      tr.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (!tr.classList.contains('dragging')) tr.classList.add('drag-over');
+      });
+      tr.addEventListener('dragleave', () => tr.classList.remove('drag-over'));
+      tr.addEventListener('drop', (e) => {
+        e.preventDefault();
+        tr.classList.remove('drag-over');
+        const fromCode = e.dataTransfer.getData('text/plain');
+        const toCode = tr.dataset.code;
+        if (fromCode && toCode && fromCode !== toCode) pfDropRow(fromCode, toCode);
+      });
+    });
+  } else {
+    tbody.querySelectorAll('tr[draggable]').forEach(tr => tr.removeAttribute('draggable'));
+  }
 }
 
 function returnClass(val) {
@@ -1644,6 +1719,26 @@ function fmtChangePct(pct, change) {
   if (pct === null || pct === undefined) return '-';
   const cls = change > 0 ? 'positive' : change < 0 ? 'negative' : '';
   return `<span class="pf-return ${cls}">${fmtPct(pct)}</span>`;
+}
+
+async function pfDropRow(fromCode, toCode) {
+  const fromIdx = portfolioItems.findIndex(i => i.stock_code === fromCode);
+  const toIdx = portfolioItems.findIndex(i => i.stock_code === toCode);
+  if (fromIdx < 0 || toIdx < 0) return;
+  const next = portfolioItems.slice();
+  const [moved] = next.splice(fromIdx, 1);
+  next.splice(toIdx, 0, moved);
+  portfolioItems = next;
+  renderPortfolio();
+  try {
+    await apiFetch('/api/portfolio/order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_codes: next.map(i => i.stock_code) }),
+    });
+  } catch (e) {
+    await loadPortfolio();
+  }
 }
 
 function startPortfolioEdit(stockCode) {
@@ -1700,6 +1795,7 @@ async function deletePortfolioItem(stockCode) {
       if (code.endsWith('0')) {
         items.push({ code: code.slice(0, -1) + '5', name: name + '(우)' });
         items.push({ code: code.slice(0, -1) + '7', name: name + '(우B)' });
+        items.push({ code: code.slice(0, -1) + '8', name: name + '(우C)' });
       }
       return items;
     }

@@ -575,6 +575,13 @@ body {
 .pf-table tfoot td { font-weight: 700; background: var(--sidebar-bg); border-top: 2px solid var(--border); }
 .pf-col-num { text-align: right; }
 .pf-col-act { width: 36px; text-align: center; }
+.pf-sortable { cursor: pointer; user-select: none; }
+.pf-sortable:hover { color: var(--text); }
+.pf-sortable .pf-sort-arrow { font-size: 10px; margin-left: 3px; }
+.pf-table tbody tr[draggable="true"] { cursor: grab; }
+.pf-table tbody tr[draggable="true"]:active { cursor: grabbing; }
+.pf-table tbody tr.dragging { opacity: 0.4; }
+.pf-table tbody tr.drag-over td { border-top: 2px solid var(--primary); }
 .pf-stock-code { font-size: 11px; color: var(--text-secondary); }
 .pf-return.positive { color: #b91c1c; }
 .pf-return.negative { color: #1d4ed8; }
