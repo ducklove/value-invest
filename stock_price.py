@@ -378,6 +378,45 @@ def _normalize_financial_rows(
     return normalized
 
 
+def _derive_normalized_financial_rows(
+    financial_data: list[dict] | None,
+    listed_shares: float | None,
+) -> dict[int, dict]:
+    normalized: dict[int, dict] = {}
+    for item in financial_data or []:
+        year = item.get("year")
+        if year is None:
+            continue
+        shares = listed_shares
+        eps = None
+        bps = None
+        net_income = _safe_float(item.get("net_income"), zero_as_none=False)
+        total_equity = _safe_float(item.get("total_equity"), zero_as_none=False)
+        if shares and shares > 0:
+            if net_income is not None:
+                eps = round(net_income / shares, 2)
+            if total_equity is not None:
+                bps = round(total_equity / shares, 2)
+        normalized[year] = {
+            "eps": eps,
+            "bps": bps,
+            "shares_outstanding": shares,
+        }
+    return normalized
+
+
+def _merge_normalized_financial_rows(
+    primary: dict[int, dict],
+    fallback: dict[int, dict],
+) -> dict[int, dict]:
+    merged: dict[int, dict] = {}
+    for year in sorted(set(primary) | set(fallback)):
+        row = dict(fallback.get(year, {}))
+        row.update({key: value for key, value in primary.get(year, {}).items() if value is not None})
+        merged[year] = row
+    return merged
+
+
 def _extract_kis_financial_data(financials_payload: dict) -> list[dict]:
     balance_by_year: dict[int, dict] = {}
     income_by_year: dict[int, dict] = {}
@@ -531,13 +570,17 @@ async def fetch_market_data(
     )
 
     if isinstance(adjusted_history_payload, Exception):
-        raise adjusted_history_payload
+        logger.warning("KIS adjusted history fetch failed (%s): %s", stock_code, adjusted_history_payload)
+        adjusted_history_payload = {}
     if isinstance(raw_history_payload, Exception):
-        raise raw_history_payload
+        logger.warning("KIS raw history fetch failed (%s): %s", stock_code, raw_history_payload)
+        raw_history_payload = {}
     if isinstance(dividends_payload, Exception):
-        raise dividends_payload
+        logger.warning("KIS dividend fetch failed (%s): %s", stock_code, dividends_payload)
+        dividends_payload = {}
     if isinstance(financials_payload, Exception):
-        raise financials_payload
+        logger.warning("KIS financial fetch failed (%s): %s", stock_code, financials_payload)
+        financials_payload = {}
     if isinstance(quote_payload, Exception):
         logger.warning("현재 상장주식수 조회 실패(%s): %s", stock_code, quote_payload)
         quote_payload = {}
@@ -574,7 +617,10 @@ async def fetch_market_data(
     }
 
     listed_shares = _safe_float(_get_first(_quote_summary(quote_payload), "listed_shares", "lstn_stcn"))
-    normalized_financials = _normalize_financial_rows(financials_payload, listed_shares)
+    normalized_financials = _merge_normalized_financial_rows(
+        _normalize_financial_rows(financials_payload, listed_shares),
+        _derive_normalized_financial_rows(financial_data, listed_shares),
+    )
 
     target_years = sorted(
         year
@@ -648,11 +694,15 @@ async def fetch_weekly_market_data(
         return_exceptions=True,
     )
     if isinstance(financials_payload, Exception):
-        raise financials_payload
+        logger.warning("KIS weekly financial fetch failed (%s): %s", stock_code, financials_payload)
+        financials_payload = {}
     if isinstance(dividends_payload, Exception):
         logger.warning("KIS weekly dividend fetch failed (%s): %s", stock_code, dividends_payload)
         dividends_payload = {}
-    normalized_financials = _normalize_financial_rows(financials_payload, None)
+    normalized_financials = _merge_normalized_financial_rows(
+        _normalize_financial_rows(financials_payload, None),
+        _derive_normalized_financial_rows(financial_data, None),
+    )
     financial_timeline = _financial_timeline(financial_data, normalized_financials)
     kis_dividend_events = _build_dividend_events(dividends_payload.get("items"))
 

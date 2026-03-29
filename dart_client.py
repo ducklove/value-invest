@@ -1,12 +1,13 @@
 import httpx
 import asyncio
+import os
 import re
 import zipfile
 import io
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-API_KEY = ""
+API_KEY = os.getenv("OPENDART_API_KEY", "")
 BASE_URL = "https://opendart.fss.or.kr/api"
 DART_ANNUAL_DATA_START_YEAR = 2015
 
@@ -23,6 +24,8 @@ ACCOUNT_NAMES = {
 
 def load_api_key():
     global API_KEY
+    if API_KEY:
+        return
     keys_path = Path(__file__).parent / "keys.txt"
     if keys_path.exists():
         for line in keys_path.read_text().strip().splitlines():

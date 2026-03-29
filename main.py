@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
@@ -29,6 +30,7 @@ ANALYSIS_LOCKS: dict[str, asyncio.Lock] = {}
 ANALYSIS_LOCKS_GUARD = asyncio.Lock()
 LATEST_REPORT_CACHE_TTL_MINUTES = 15
 REPORT_LIST_CACHE_TTL_MINUTES = 60
+ANALYSIS_SNAPSHOT_TTL_MINUTES = 60
 RECENT_QUOTES_SEMAPHORE = asyncio.Semaphore(4)
 SESSION_COOKIE_NAME = auth_service.SESSION_COOKIE_NAME
 TRUSTED_RETURN_ORIGINS = {
@@ -183,6 +185,133 @@ async def _read_post_fields(request: Request) -> dict[str, str]:
     return {key: values[-1] for key, values in parsed.items() if values}
 
 
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _analysis_snapshot_is_stale(analyzed_at: str | None) -> bool:
+    analyzed_dt = _parse_iso_datetime(analyzed_at)
+    if analyzed_dt is None:
+        return True
+    return datetime.now() - analyzed_dt > timedelta(minutes=ANALYSIS_SNAPSHOT_TTL_MINUTES)
+
+
+def _render_login_page(return_to: str | None) -> str:
+    normalized_return_to = _normalize_return_to(return_to)
+    escaped_return_to = json.dumps(normalized_return_to, ensure_ascii=False)
+    escaped_google_client_id = json.dumps(auth_service.public_config()["google_client_id"], ensure_ascii=False)
+    callback_url = json.dumps("/api/auth/google/callback", ensure_ascii=False)
+    home_url = json.dumps(normalized_return_to or "/", ensure_ascii=False)
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google 로그인</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body {{
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f7fb;
+      color: #111827;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }}
+    .card {{
+      width: min(100%, 420px);
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 20px;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+      padding: 28px;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      font-size: 24px;
+    }}
+    p {{
+      margin: 0;
+      color: #4b5563;
+      line-height: 1.6;
+      font-size: 14px;
+    }}
+    .actions {{
+      display: grid;
+      gap: 12px;
+      margin-top: 20px;
+    }}
+    .back-link {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      text-decoration: none;
+      color: #111827;
+      font-weight: 600;
+    }}
+    .note {{
+      margin-top: 14px;
+      font-size: 12px;
+      color: #6b7280;
+    }}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Google 로그인</h1>
+    <p>로그인하면 최근 분석 종목, 관심종목, 핀 고정, 메모를 계정 기준으로 저장합니다.</p>
+    <div class="actions">
+      <div id="googleSignInButton"></div>
+      <a class="back-link" href={home_url}>분석 화면으로 돌아가기</a>
+    </div>
+    <div class="note">버튼이 보이지 않으면 브라우저의 Google 계정 스크립트 차단 여부를 확인하세요.</div>
+  </main>
+  <script>
+    const RETURN_TO = {escaped_return_to};
+    const GOOGLE_CLIENT_ID = {escaped_google_client_id};
+    const LOGIN_URI = {callback_url} + (RETURN_TO && RETURN_TO !== '/' ? '?return_to=' + encodeURIComponent(RETURN_TO) : '');
+
+    function renderLoginButton() {{
+      if (!GOOGLE_CLIENT_ID || !window.google?.accounts?.id) {{
+        window.setTimeout(renderLoginButton, 250);
+        return;
+      }}
+      window.google.accounts.id.initialize({{
+        client_id: GOOGLE_CLIENT_ID,
+        auto_select: false,
+        ux_mode: 'redirect',
+        login_uri: LOGIN_URI,
+        use_fedcm_for_button: true,
+      }});
+      window.google.accounts.id.renderButton(
+        document.getElementById('googleSignInButton'),
+        {{
+          theme: 'outline',
+          size: 'large',
+          shape: 'pill',
+          text: 'signin_with',
+          width: 320,
+          locale: 'ko',
+        }},
+      );
+    }}
+
+    renderLoginButton();
+  </script>
+</body>
+</html>"""
+
+
 def _default_user_preference() -> dict:
     return {
         "is_starred": False,
@@ -227,6 +356,26 @@ async def auth_me(request: Request):
         "authenticated": bool(user),
         "user": _serialize_user(user),
     }
+
+
+@app.get("/login", response_class=Response)
+async def login_page(request: Request):
+    if not auth_service.is_enabled():
+        return Response(
+            content="<h1>Google 로그인이 아직 설정되지 않았습니다.</h1>",
+            media_type="text/html; charset=utf-8",
+            status_code=503,
+        )
+
+    current_user = await _get_current_user(request)
+    return_to = request.query_params.get("return_to")
+    if current_user:
+        return RedirectResponse(_normalize_return_to(return_to), status_code=303)
+
+    return Response(
+        content=_render_login_page(return_to),
+        media_type="text/html; charset=utf-8",
+    )
 
 
 @app.post("/api/auth/google")
@@ -516,7 +665,7 @@ async def _load_cached_analysis_payload(
 async def analyze_stock(stock_code: str, request: Request):
     current_user = await _get_current_user(request)
     snapshot = await cache.get_analysis_snapshot(stock_code)
-    if snapshot:
+    if snapshot and not _analysis_snapshot_is_stale(snapshot.get("analyzed_at")):
         await _remember_recent_analysis(current_user, stock_code)
         return await _decorate_analysis_payload(snapshot, current_user)
 
@@ -548,7 +697,7 @@ async def analyze_stock(stock_code: str, request: Request):
 
         async with stock_lock:
             snapshot = await cache.get_analysis_snapshot(stock_code)
-            if snapshot:
+            if snapshot and not _analysis_snapshot_is_stale(snapshot.get("analyzed_at")):
                 await _remember_recent_analysis(current_user, stock_code)
                 yield _sse_event("result", await _decorate_analysis_payload(snapshot, current_user))
                 return
@@ -722,11 +871,10 @@ async def proxy_report_pdf(url: str = Query(..., min_length=1)):
 @app.delete("/api/cache/{stock_code}")
 async def delete_cache(stock_code: str, request: Request):
     current_user = await _get_current_user(request)
-    if current_user:
-        await cache.delete_user_recent_analysis(current_user["google_sub"], stock_code)
-        return {"ok": True, "scope": "user"}
-    await cache.delete_analysis(stock_code)
-    return {"ok": True, "scope": "global"}
+    if not current_user:
+        raise HTTPException(status_code=401, detail="로그인 후 내 목록에서만 삭제할 수 있습니다.")
+    await cache.delete_user_recent_analysis(current_user["google_sub"], stock_code)
+    return {"ok": True, "scope": "user"}
 
 
 @app.get("/api/cache/list")

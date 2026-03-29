@@ -27,6 +27,7 @@ let authConfig = null;
 let currentUser = null;
 let googleButtonRetryTimer = null;
 let googleAuthInitialized = false;
+let googleButtonRetryCount = 0;
 let currentUserPreference = null;
 let preferenceSaving = false;
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
@@ -163,6 +164,14 @@ function updateRecentListTitle() {
 
 function buildGoogleLoginUri() {
   return buildApiUrl('/api/auth/google/callback');
+}
+
+function buildLoginPageUrl() {
+  const path = `/login?return_to=${encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)}`;
+  if (IS_GITHUB_PAGES && API_BASE_URL) {
+    return `${API_BASE_URL.replace(/\/$/, '')}${path}`;
+  }
+  return path;
 }
 
 function normalizeUserPreference(preference) {
@@ -311,6 +320,7 @@ function scheduleGoogleButtonRender() {
   if (googleButtonRetryTimer !== null) return;
   googleButtonRetryTimer = window.setTimeout(() => {
     googleButtonRetryTimer = null;
+    googleButtonRetryCount += 1;
     renderGoogleButton();
   }, 300);
 }
@@ -325,11 +335,15 @@ function renderGoogleButton() {
   }
 
   if (IS_GITHUB_PAGES && API_BASE_URL) {
-    container.innerHTML = `<a class="auth-login-link" href="${escapeHtml(API_BASE_URL)}/">서버 버전에서 로그인</a>`;
+    container.innerHTML = `<a class="auth-login-link" href="${escapeHtml(buildLoginPageUrl())}">서버 버전에서 로그인</a>`;
     return;
   }
 
   if (!window.google?.accounts?.id) {
+    if (googleButtonRetryCount >= 5) {
+      container.innerHTML = `<a class="auth-login-link" href="${escapeHtml(buildLoginPageUrl())}">로그인 페이지에서 계속</a>`;
+      return;
+    }
     scheduleGoogleButtonRender();
     return;
   }
@@ -360,6 +374,7 @@ function renderAuthState() {
   const statusTitle = document.getElementById('authStatusTitle');
   const statusDetail = document.getElementById('authStatusDetail');
   const authUser = document.getElementById('authUser');
+  const loginLink = document.getElementById('authLoginLink');
   const avatar = document.getElementById('authAvatar');
   const name = document.getElementById('authUserName');
   const email = document.getElementById('authUserEmail');
@@ -371,6 +386,7 @@ function renderAuthState() {
     statusTitle.textContent = '내 계정으로 최근 분석을 저장 중입니다';
     statusDetail.textContent = '이제 최근 분석, 관심종목, 핀 고정, 개인 메모가 내 Google 계정 기준으로 저장됩니다.';
     authUser.style.display = 'grid';
+    loginLink.style.display = 'none';
     avatar.src = currentUser.picture || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
     name.textContent = currentUser.name || currentUser.email;
     email.textContent = currentUser.email || '';
@@ -380,10 +396,13 @@ function renderAuthState() {
       ? 'GitHub Pages에서는 서버 버전으로 이동해 로그인한 뒤 개인화 기능을 사용할 수 있습니다.'
       : 'Google로 로그인하면 최근 본 종목, 관심종목, 핀 고정, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
     authUser.style.display = 'none';
+    loginLink.href = buildLoginPageUrl();
+    loginLink.style.display = 'inline-flex';
   } else {
     statusTitle.textContent = 'Google 로그인이 아직 설정되지 않았습니다';
     statusDetail.textContent = '서버 설정이 완료되면 계정별 최근 분석 저장을 사용할 수 있습니다.';
     authUser.style.display = 'none';
+    loginLink.style.display = 'none';
   }
 
   renderGoogleButton();
@@ -1145,13 +1164,15 @@ async function loadRecentList() {
 
       info.append(nameRow, quotePrice, quoteMeta);
 
-      const button = document.createElement('button');
-      button.className = 'delete-btn';
-      button.title = '삭제';
-      button.innerHTML = '&times;';
-      button.addEventListener('click', () => deleteCache(item.stock_code));
-
-      wrapper.append(info, button);
+      wrapper.appendChild(info);
+      if (currentUser) {
+        const button = document.createElement('button');
+        button.className = 'delete-btn';
+        button.title = '삭제';
+        button.innerHTML = '&times;';
+        button.addEventListener('click', () => deleteCache(item.stock_code));
+        wrapper.appendChild(button);
+      }
       container.appendChild(wrapper);
     });
   } catch (e) {
@@ -1170,9 +1191,15 @@ function refreshRecentList() {
 
 async function deleteCache(stockCode) {
   try {
-    await apiFetch(`/api/cache/${stockCode}`, { method: 'DELETE' });
+    const resp = await apiFetch(`/api/cache/${stockCode}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || '삭제하지 못했습니다.');
+    }
     loadRecentList();
-  } catch (e) {}
+  } catch (e) {
+    alert(e.message || '삭제하지 못했습니다.');
+  }
 }
 
 // Reports

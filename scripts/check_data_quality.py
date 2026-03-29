@@ -139,7 +139,7 @@ async def _inspect_stock(stock_code: str, args: argparse.Namespace) -> dict:
         raw_splits = None
 
     split_events = stock_price._normalized_split_events(raw_splits)
-    adjusted_dividends = raw_dividends
+    adjusted_dividends = stock_price._adjust_dividends_for_splits(raw_dividends, split_events)
     raw_dividends_by_year = stock_price._group_sum_by_year_series(raw_dividends)
     adjusted_dividends_by_year = stock_price._group_sum_by_year_series(adjusted_dividends)
 

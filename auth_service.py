@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import os
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -28,8 +29,8 @@ def _load_keys() -> dict[str, str]:
 
 
 _KEYS = _load_keys()
-GOOGLE_CLIENT_ID = _KEYS.get("GOOGLE_CLIENT_ID", "")
-SESSION_SECRET = _KEYS.get("SESSION_SECRET", "")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", _KEYS.get("GOOGLE_CLIENT_ID", ""))
+SESSION_SECRET = os.getenv("SESSION_SECRET", _KEYS.get("SESSION_SECRET", ""))
 
 
 def is_enabled() -> bool:
