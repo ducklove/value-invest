@@ -83,8 +83,8 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="수량과 매입가는 숫자여야 합니다.")
 
-    if quantity <= 0:
-        raise HTTPException(status_code=400, detail="수량은 1 이상이어야 합니다.")
+    if quantity == 0:
+        raise HTTPException(status_code=400, detail="수량은 0이 아닌 값이어야 합니다.")
     if avg_price < 0:
         raise HTTPException(status_code=400, detail="매입가는 0 이상이어야 합니다.")
 
@@ -132,8 +132,8 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
         except (TypeError, ValueError):
             errors.append(f"행 {i+1} ({code}): 수량/매입가가 올바르지 않습니다.")
             continue
-        if qty <= 0:
-            errors.append(f"행 {i+1} ({code}): 수량은 1 이상이어야 합니다.")
+        if qty == 0:
+            errors.append(f"행 {i+1} ({code}): 수량은 0이 아닌 값이어야 합니다.")
             continue
         parsed.append({"stock_code": code, "quantity": qty, "avg_price": price})
 

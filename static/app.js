@@ -1635,7 +1635,7 @@ function renderPortfolio() {
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
-        <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="1" min="1"></td>
+        <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="1"></td>
         <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
         <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
         <td class="pf-col-num">${fmtPct(weight)}</td>
@@ -1756,7 +1756,7 @@ function cancelPortfolioEdit() {
 async function savePortfolioEdit(stockCode, stockName) {
   const qty = parseInt(document.getElementById('pfEditQty').value, 10);
   const price = parseFloat(document.getElementById('pfEditPrice').value);
-  if (isNaN(qty) || qty <= 0 || isNaN(price) || price < 0) {
+  if (isNaN(qty) || qty === 0 || isNaN(price) || price < 0) {
     alert('수량과 매입가를 올바르게 입력해 주세요.');
     return;
   }
@@ -1905,7 +1905,7 @@ async function submitCsv(mode) {
     const qty = parseInt(qtyStr, 10);
     if (!code) { errors.push(`행 ${i+1}: 종목코드가 비어 있습니다.`); continue; }
     if (isNaN(price) || price < 0) { errors.push(`행 ${i+1}: 매입가가 올바르지 않습니다.`); continue; }
-    if (isNaN(qty) || qty <= 0) { errors.push(`행 ${i+1}: 수량은 1 이상이어야 합니다.`); continue; }
+    if (isNaN(qty) || qty === 0) { errors.push(`행 ${i+1}: 수량은 0이 아닌 값이어야 합니다.`); continue; }
     items.push({ stock_code: code, avg_price: price, quantity: qty });
   }
 
