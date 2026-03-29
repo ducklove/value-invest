@@ -491,41 +491,32 @@ async def delete_expired_sessions():
 async def touch_user_recent_analysis(google_sub: str, stock_code: str):
     db = await get_db()
     try:
-        cursor = await db.execute(
-            "SELECT 1 FROM user_recent_analyses WHERE google_sub = ? AND stock_code = ?",
-            (google_sub, stock_code),
-        )
-        is_new = await cursor.fetchone() is None
-
+        now = datetime.now().isoformat()
         await db.execute(
             """
             INSERT OR REPLACE INTO user_recent_analyses (google_sub, stock_code, viewed_at)
             VALUES (?, ?, ?)
             """,
-            (google_sub, stock_code, datetime.now().isoformat()),
+            (google_sub, stock_code, now),
         )
-
-        if is_new:
-            await db.execute(
-                """
-                UPDATE user_stock_preferences
-                SET sort_order = sort_order + 1
-                WHERE google_sub = ? AND sort_order IS NOT NULL
-                """,
-                (google_sub,),
-            )
-            now = datetime.now().isoformat()
-            await db.execute(
-                """
-                INSERT INTO user_stock_preferences (google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at)
-                VALUES (?, ?, 0, 0, 0, '', ?)
-                ON CONFLICT(google_sub, stock_code) DO UPDATE SET
-                    sort_order = 0,
-                    updated_at = excluded.updated_at
-                """,
-                (google_sub, stock_code, now),
-            )
-
+        await db.execute(
+            """
+            UPDATE user_stock_preferences
+            SET sort_order = sort_order + 1
+            WHERE google_sub = ? AND sort_order IS NOT NULL
+            """,
+            (google_sub,),
+        )
+        await db.execute(
+            """
+            INSERT INTO user_stock_preferences (google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at)
+            VALUES (?, ?, 0, 0, 0, '', ?)
+            ON CONFLICT(google_sub, stock_code) DO UPDATE SET
+                sort_order = 0,
+                updated_at = excluded.updated_at
+            """,
+            (google_sub, stock_code, now),
+        )
         await db.commit()
     finally:
         await db.close()

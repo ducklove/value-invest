@@ -69,6 +69,15 @@ class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
         codes = [item["stock_code"] for item in items]
         self.assertEqual(codes[0], "444444", "Newly searched stock should be at top")
 
+    async def test_existing_item_moves_to_top_on_re_search(self):
+        """Re-searching an existing item should move it to the top."""
+        await cache.save_user_stock_order("u1", ["111111", "222222", "333333"])
+
+        await cache.touch_user_recent_analysis("u1", "333333")
+        items = await cache.get_cached_analyses(google_sub="u1")
+        codes = [item["stock_code"] for item in items]
+        self.assertEqual(codes[0], "333333", "Re-searched existing stock should move to top")
+
     async def test_deleted_item_reappears_on_re_search(self):
         """After deleting an item and re-searching, it should reappear at the top."""
         await cache.save_user_stock_order("u1", ["111111", "222222", "333333"])
