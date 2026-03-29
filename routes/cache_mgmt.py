@@ -42,12 +42,13 @@ async def update_cache_order(request: Request, payload: dict = Body(...)):
 
 
 @router.get("/api/cache/list")
-async def cache_list(request: Request, include_quotes: bool = Query(False)):
+async def cache_list(request: Request, include_quotes: bool = Query(False), tab: str = Query("recent")):
     current_user = await get_current_user(request)
     items = await cache.get_cached_analyses(
         limit=20,
         include_quotes=include_quotes,
         google_sub=current_user["google_sub"] if current_user else None,
+        tab=tab,
     )
     if include_quotes:
         return await attach_quote_snapshots(items)

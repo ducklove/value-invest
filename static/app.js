@@ -31,6 +31,7 @@ let googleAuthInitialized = false;
 let googleButtonRetryCount = 0;
 let currentUserPreference = null;
 let preferenceSaving = false;
+let activeTab = 'recent';
 const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
 const IS_GITHUB_PAGES_SITE = window.location.hostname.endsWith('github.io');
 const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -169,10 +170,18 @@ async function syncAuthState(options = {}) {
   }
 }
 
-function updateRecentListTitle() {
-  const title = document.getElementById('recentListTitle');
-  if (!title) return;
-  title.textContent = currentUser ? '내 목록' : '최근 분석 종목';
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.sidebar-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  loadRecentList();
+}
+
+function updateSidebarTabs() {
+  const tabs = document.getElementById('sidebarTabs');
+  if (!tabs) return;
+  tabs.style.display = currentUser ? 'flex' : 'none';
 }
 
 function buildGoogleLoginUri() {
@@ -190,7 +199,6 @@ function buildLoginPageUrl() {
 function normalizeUserPreference(preference) {
   return {
     is_starred: Boolean(preference?.is_starred),
-    is_pinned: Boolean(preference?.is_pinned),
     note: preference?.note || '',
     updated_at: preference?.updated_at || null,
   };
@@ -209,10 +217,9 @@ function setPreferenceStatus(message = '', tone = '') {
 function renderUserPreference() {
   const panel = document.getElementById('personalizationPanel');
   const favoriteBtn = document.getElementById('favoriteBtn');
-  const pinBtn = document.getElementById('pinBtn');
   const saveNoteBtn = document.getElementById('saveNoteBtn');
   const note = document.getElementById('preferenceNote');
-  if (!panel || !favoriteBtn || !pinBtn || !saveNoteBtn || !note) return;
+  if (!panel || !favoriteBtn || !saveNoteBtn || !note) return;
 
   if (!activeStockCode) {
     panel.style.display = 'none';
@@ -224,19 +231,16 @@ function renderUserPreference() {
   const isLoggedIn = Boolean(currentUser);
 
   favoriteBtn.classList.toggle('active', currentUserPreference.is_starred);
-  pinBtn.classList.toggle('active', currentUserPreference.is_pinned);
   favoriteBtn.textContent = currentUserPreference.is_starred ? '관심중' : '관심종목';
-  pinBtn.textContent = currentUserPreference.is_pinned ? '핀 고정됨' : '핀 고정';
   favoriteBtn.disabled = !isLoggedIn || preferenceSaving;
-  pinBtn.disabled = !isLoggedIn || preferenceSaving;
   saveNoteBtn.disabled = !isLoggedIn || preferenceSaving;
   note.disabled = !isLoggedIn || preferenceSaving;
   note.value = currentUserPreference.note || '';
 
   if (!isLoggedIn) {
-    setPreferenceStatus('로그인하면 관심종목, 핀 고정, 개인 메모를 저장할 수 있습니다.', 'warning');
+    setPreferenceStatus('로그인하면 관심종목과 개인 메모를 저장할 수 있습니다.', 'warning');
   } else if (!document.getElementById('preferenceStatus').textContent) {
-    setPreferenceStatus('이 종목을 내 목록에 저장해 두세요.');
+    setPreferenceStatus('관심종목에 추가하면 관심 목록 탭에서 모아볼 수 있습니다.');
   }
 }
 
@@ -302,20 +306,6 @@ async function toggleFavorite() {
   await saveUserPreference(
     { is_starred: nextValue },
     nextValue ? '관심종목에 추가했습니다.' : '관심종목에서 제거했습니다.',
-  );
-}
-
-async function togglePin() {
-  if (!currentUser) {
-    renderUserPreference();
-    return;
-  }
-  const nextValue = !normalizeUserPreference(currentUserPreference).is_pinned;
-  currentUserPreference = { ...normalizeUserPreference(currentUserPreference), is_pinned: nextValue };
-  renderUserPreference();
-  await saveUserPreference(
-    { is_pinned: nextValue },
-    nextValue ? '사이드바 상단에 고정했습니다.' : '핀 고정을 해제했습니다.',
   );
 }
 
@@ -423,12 +413,12 @@ function renderAuthState() {
   const name = document.getElementById('authUserName');
   const email = document.getElementById('authUserEmail');
 
-  updateRecentListTitle();
+  updateSidebarTabs();
   updateAnalyticsAuthState();
 
   if (currentUser) {
     statusTitle.textContent = '내 계정으로 최근 분석을 저장 중입니다';
-    statusDetail.textContent = '이제 최근 분석, 관심종목, 핀 고정, 개인 메모가 내 Google 계정 기준으로 저장됩니다.';
+    statusDetail.textContent = '최근 검색, 관심종목, 개인 메모가 내 Google 계정 기준으로 저장됩니다.';
     authUser.style.display = 'grid';
     loginLink.style.display = 'none';
     avatar.src = currentUser.picture || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
@@ -438,7 +428,7 @@ function renderAuthState() {
     statusTitle.textContent = '로그인해 최근 분석을 저장하세요';
     statusDetail.textContent = IS_GITHUB_PAGES_SITE
       ? 'GitHub Pages에서는 서버 버전으로 이동해 로그인한 뒤 개인화 기능을 사용할 수 있습니다.'
-      : 'Google로 로그인하면 최근 본 종목, 관심종목, 핀 고정, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
+      : 'Google로 로그인하면 최근 검색, 관심종목, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
     authUser.style.display = 'none';
     loginLink.href = buildLoginPageUrl();
     loginLink.style.display = 'inline-flex';
@@ -1122,30 +1112,26 @@ function renderResult(data) {
 
 // Recent list
 async function loadRecentList() {
-  const refreshBtn = document.getElementById('recentRefreshBtn');
-  updateRecentListTitle();
+  updateSidebarTabs();
   if (!hasApiConfiguration()) {
     document.getElementById('recentList').innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">GitHub Pages에서는 API 서버 연결 후 최근 분석 목록을 불러옵니다.</div>';
-    if (refreshBtn) refreshBtn.disabled = true;
     return;
   }
 
   if (recentListLoading) return;
   recentListLoading = true;
-  if (refreshBtn) {
-    refreshBtn.disabled = true;
-    refreshBtn.textContent = '갱신 중';
-  }
 
   try {
-    const resp = await apiFetch('/api/cache/list?include_quotes=true');
+    const tab = currentUser ? activeTab : 'recent';
+    const resp = await apiFetch(`/api/cache/list?include_quotes=true&tab=${tab}`);
     const data = await resp.json();
     const container = document.getElementById('recentList');
     recentListItems = Array.isArray(data) ? data.slice() : [];
     if (recentListItems.length === 0) {
-      container.innerHTML = currentUser
-        ? '<div style="color:var(--text-secondary);font-size:13px;">내 계정에 저장된 종목이 아직 없습니다.</div>'
-        : '<div style="color:var(--text-secondary);font-size:13px;">아직 분석한 종목이 없습니다.</div>';
+      const emptyMsg = currentUser
+        ? (tab === 'starred' ? '관심종목이 없습니다. 분석 화면에서 관심종목을 추가하세요.' : '최근 검색한 종목이 없습니다.')
+        : '아직 분석한 종목이 없습니다.';
+      container.innerHTML = `<div style="color:var(--text-secondary);font-size:13px;">${emptyMsg}</div>`;
       return;
     }
     container.innerHTML = '';
@@ -1154,7 +1140,7 @@ async function loadRecentList() {
       wrapper.className = 'sidebar-item';
       wrapper.dataset.index = index;
 
-      if (currentUser) {
+      if (currentUser && activeTab === 'recent') {
         wrapper.draggable = true;
         wrapper.addEventListener('dragstart', (e) => {
           wrapper.classList.add('dragging');
@@ -1198,13 +1184,7 @@ async function loadRecentList() {
 
       const badges = document.createElement('div');
       badges.className = 'badges';
-      if (item.is_pinned) {
-        const badge = document.createElement('span');
-        badge.className = 'sidebar-badge pin';
-        badge.textContent = 'PIN';
-        badges.appendChild(badge);
-      }
-      if (item.is_starred) {
+      if (item.is_starred && activeTab !== 'starred') {
         const badge = document.createElement('span');
         badge.className = 'sidebar-badge star';
         badge.textContent = '관심';
@@ -1240,7 +1220,7 @@ async function loadRecentList() {
       info.append(nameRow, quotePrice, quoteChange);
       wrapper.appendChild(info);
 
-      if (currentUser) {
+      if (currentUser && activeTab === 'recent') {
         const button = document.createElement('button');
         button.className = 'delete-btn';
         button.title = '삭제';
@@ -1256,10 +1236,6 @@ async function loadRecentList() {
   } catch (e) {
   } finally {
     recentListLoading = false;
-    if (refreshBtn) {
-      refreshBtn.disabled = false;
-      refreshBtn.textContent = '새로고침';
-    }
   }
 }
 

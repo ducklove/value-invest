@@ -640,6 +640,7 @@ async def get_cached_analyses(
     limit: int | None = None,
     include_quotes: bool = False,
     google_sub: str | None = None,
+    tab: str = "recent",
 ) -> list[dict]:
     db = await get_db()
     try:
@@ -647,28 +648,31 @@ async def get_cached_analyses(
         if include_quotes:
             select_fields += ", payload_json"
 
-        if google_sub:
+        if google_sub and tab == "starred":
             query = (
-                f"SELECT a.stock_code, a.corp_name, items.viewed_at AS analyzed_at"
+                "SELECT a.stock_code, a.corp_name, a.analyzed_at"
+                + (", a.payload_json" if include_quotes else "")
+                + ", 1 AS is_starred"
+                + ", COALESCE(p.note, '') AS note"
+                + " FROM user_stock_preferences p"
+                + " JOIN analysis_meta a ON a.stock_code = p.stock_code"
+                + " WHERE p.google_sub = ? AND p.is_starred = 1"
+                + " ORDER BY p.updated_at DESC"
+            )
+            params: tuple = (google_sub,)
+        elif google_sub:
+            query = (
+                "SELECT a.stock_code, a.corp_name, r.viewed_at AS analyzed_at"
                 + (", a.payload_json" if include_quotes else "")
                 + ", COALESCE(p.is_starred, 0) AS is_starred"
-                + ", COALESCE(p.is_pinned, 0) AS is_pinned"
-                + ", p.sort_order AS sort_order"
                 + ", COALESCE(p.note, '') AS note"
-                + " FROM ("
-                + "   SELECT stock_code, MAX(viewed_at) AS viewed_at"
-                + "   FROM ("
-                + "     SELECT stock_code, viewed_at FROM user_recent_analyses WHERE google_sub = ?"
-                + "     UNION ALL"
-                + "     SELECT stock_code, NULL AS viewed_at FROM user_stock_preferences WHERE google_sub = ? AND (is_starred = 1 OR is_pinned = 1)"
-                + "   ) user_items"
-                + "   GROUP BY stock_code"
-                + " ) items"
-                + " JOIN analysis_meta a ON a.stock_code = items.stock_code"
-                + " LEFT JOIN user_stock_preferences p ON p.google_sub = ? AND p.stock_code = items.stock_code"
-                + " ORDER BY CASE WHEN p.sort_order IS NULL THEN 1 ELSE 0 END, p.sort_order ASC, COALESCE(p.is_pinned, 0) DESC, COALESCE(p.is_starred, 0) DESC, items.viewed_at DESC"
+                + " FROM user_recent_analyses r"
+                + " JOIN analysis_meta a ON a.stock_code = r.stock_code"
+                + " LEFT JOIN user_stock_preferences p ON p.google_sub = r.google_sub AND p.stock_code = r.stock_code"
+                + " WHERE r.google_sub = ?"
+                + " ORDER BY CASE WHEN p.sort_order IS NULL THEN 1 ELSE 0 END, p.sort_order ASC, r.viewed_at DESC"
             )
-            params: tuple = (google_sub, google_sub, google_sub)
+            params = (google_sub,)
         else:
             query = f"SELECT {select_fields} FROM analysis_meta ORDER BY analyzed_at DESC"
             params = ()
@@ -683,9 +687,9 @@ async def get_cached_analyses(
         for row in rows:
             item = dict(row)
             item["is_starred"] = bool(item.get("is_starred"))
-            item["is_pinned"] = bool(item.get("is_pinned"))
-            item["sort_order"] = item.get("sort_order")
             item["note"] = item.get("note") or ""
+            item.pop("sort_order", None)
+            item.pop("is_pinned", None)
             if include_quotes:
                 payload_json = item.pop("payload_json", None)
                 quote_snapshot = {}
