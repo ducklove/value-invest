@@ -796,33 +796,27 @@ async def unstar_stock(google_sub: str, stock_code: str):
 
 # --- Portfolio ---
 
-_PREF_SUFFIXES = {
-    "5": "(우)", "7": "(우B)", "8": "(우C)",
-    "K": "(우)", "L": "(우B)",
-}
-
-
 async def resolve_stock_name(stock_code: str) -> str | None:
     name = await get_corp_name(stock_code)
     if name:
         return name
-    # Try replacing last digit with 0 (most common pattern)
-    base_code = stock_code[:-1] + "0"
-    base_name = await get_corp_name(base_code)
-    if base_name:
-        label = _PREF_SUFFIXES.get(stock_code[-1], f"({stock_code[-1]})")
-        return f"{base_name}{label}"
-    # Try LIKE search for the first 4-5 digits to catch irregular codes
+    # Try common base code patterns
+    for base in (stock_code[:-1] + "0", stock_code[:-2] + "00"):
+        base_name = await get_corp_name(base)
+        if base_name:
+            return f"{base_name}(우)"
+    # Prefix-based fallback for irregular codes
     db = await get_db()
     try:
-        prefix = stock_code[:4]
-        cursor = await db.execute(
-            "SELECT corp_name, stock_code FROM corp_codes WHERE stock_code LIKE ? LIMIT 1",
-            (prefix + "%",),
-        )
-        row = await cursor.fetchone()
-        if row and row["stock_code"] != stock_code:
-            return f"{row['corp_name']}(우)"
+        for length in (5, 4):
+            prefix = stock_code[:length]
+            cursor = await db.execute(
+                "SELECT corp_name FROM corp_codes WHERE stock_code LIKE ? AND stock_code != ? LIMIT 1",
+                (prefix + "%", stock_code),
+            )
+            row = await cursor.fetchone()
+            if row:
+                return f"{row['corp_name']}(우)"
     finally:
         await db.close()
     return None

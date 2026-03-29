@@ -1793,9 +1793,9 @@ async function deletePortfolioItem(stockCode) {
     function prefVariants(code, name) {
       const items = [{ code, name }];
       if (code.endsWith('0')) {
-        items.push({ code: code.slice(0, -1) + '5', name: name + '(우)' });
-        items.push({ code: code.slice(0, -1) + '7', name: name + '(우B)' });
-        items.push({ code: code.slice(0, -1) + '8', name: name + '(우C)' });
+        for (const s of ['5', '7', '8', '9', 'K', 'L']) {
+          items.push({ code: code.slice(0, -1) + s, name: name + '(우)' });
+        }
       }
       return items;
     }

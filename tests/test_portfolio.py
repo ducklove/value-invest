@@ -115,13 +115,21 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         name = await cache.resolve_stock_name("005930")
         self.assertEqual(name, "삼성전자")
 
-    async def test_resolve_preferred_stock(self):
+    async def test_resolve_preferred_stock_5(self):
         name = await cache.resolve_stock_name("005935")
         self.assertEqual(name, "삼성전자(우)")
 
-    async def test_resolve_preferred_stock_b(self):
+    async def test_resolve_preferred_stock_7(self):
         name = await cache.resolve_stock_name("005937")
-        self.assertEqual(name, "삼성전자(우B)")
+        self.assertEqual(name, "삼성전자(우)")
+
+    async def test_resolve_preferred_stock_9(self):
+        name = await cache.resolve_stock_name("005939")
+        self.assertEqual(name, "삼성전자(우)")
+
+    async def test_resolve_preferred_stock_K(self):
+        name = await cache.resolve_stock_name("00593K")
+        self.assertEqual(name, "삼성전자(우)")
 
     async def test_resolve_unknown_stock(self):
         name = await cache.resolve_stock_name("999999")
