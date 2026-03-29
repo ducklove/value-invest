@@ -37,45 +37,75 @@ async def _resolve_name(stock_code: str) -> str | None:
         if name:
             return name
         return await _fetch_naver_stock_name(stock_code)
-    return await _fetch_yfinance_name(stock_code)
+    return await _resolve_foreign_name(stock_code)
 
 
-async def _fetch_yfinance_name(ticker: str) -> str | None:
+async def _fetch_naver_world_stock(reuters_code: str) -> dict | None:
+    """Fetch foreign stock info from Naver world stock API."""
     try:
-        import yfinance as yf
-        loop = asyncio.get_event_loop()
-        t = await loop.run_in_executor(None, partial(yf.Ticker, ticker))
-        info = await loop.run_in_executor(None, lambda: t.info)
-        return info.get("shortName") or info.get("longName")
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"https://api.stock.naver.com/stock/{reuters_code}/basic",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            if resp.status_code != 200:
+                return None
+            d = resp.json()
+            if not d.get("stockName"):
+                return None
+            return d
     except Exception:
         return None
 
 
-async def _fetch_foreign_quote(ticker: str) -> dict:
+async def _resolve_foreign_name(ticker: str) -> str | None:
+    """Try common exchange suffixes to find the stock on Naver."""
+    for suffix in ("", ".O", ".K", ".N", ".HM", ".HK", ".T", ".SS", ".SZ", ".L", ".AX"):
+        code = ticker + suffix if suffix else ticker
+        d = await _fetch_naver_world_stock(code)
+        if d:
+            return d.get("stockName") or d.get("stockNameEng")
+    return None
+
+
+async def _resolve_foreign_reuters(ticker: str) -> str | None:
+    """Find the full reuters code for a ticker."""
+    for suffix in ("", ".O", ".K", ".N", ".HM", ".HK", ".T", ".SS", ".SZ", ".L", ".AX"):
+        code = ticker + suffix if suffix else ticker
+        d = await _fetch_naver_world_stock(code)
+        if d:
+            return d.get("reutersCode") or code
+    return None
+
+
+async def _fetch_foreign_quote(reuters_code: str) -> dict:
+    d = await _fetch_naver_world_stock(reuters_code)
+    if not d or not d.get("closePrice"):
+        return {}
     try:
-        import yfinance as yf
-        loop = asyncio.get_event_loop()
-        t = await loop.run_in_executor(None, partial(yf.Ticker, ticker))
-        fi = await loop.run_in_executor(None, lambda: t.fast_info)
-        price = fi.last_price
-        prev = fi.previous_close
-        currency = fi.currency or "USD"
-        change = round(price - prev, 4) if price and prev else 0
-        change_pct = round(change / prev * 100, 2) if prev else None
+        price_str = str(d["closePrice"]).replace(",", "")
+        price = float(price_str)
+        change_str = str(d.get("compareToPreviousClosePrice", "0")).replace(",", "")
+        change = float(change_str)
+        change_pct = float(d.get("fluctuationsRatio", 0))
+        nation = d.get("nationType", "")
+        price_krw = await _fx_to_krw(nation, price)
+        change_krw = await _fx_to_krw(nation, change)
         return {
-            "price": round(price, 2) if price else None,
-            "change": round(change, 2),
+            "price": round(price_krw),
+            "change": round(change_krw),
             "change_pct": change_pct,
-            "currency": currency,
+            "nation": d.get("nationName", ""),
         }
     except Exception as exc:
-        logger.warning("해외주식 시세 조회 실패(%s): %s", ticker, exc)
+        logger.warning("해외주식 시세 파싱 실패(%s): %s", reuters_code, exc)
         return {}
 
 
 async def _fetch_quote(stock_code: str) -> dict:
     if _is_korean_stock(stock_code):
         return await stock_price.fetch_quote_snapshot(stock_code)
+    # stock_code is reuters code for foreign stocks (e.g., AAPL.O)
     return await _fetch_foreign_quote(stock_code)
 
 
@@ -94,6 +124,64 @@ async def _enrich_with_quotes(items: list[dict]) -> list[dict]:
 
 
 QUOTE_RATE_INTERVAL = 0.22  # ~4.5 req/s, stays under 5/s limit
+
+# --- FX rate cache ---
+_fx_cache: dict[str, float] = {}
+_fx_cache_ts: float = 0
+_FX_CACHE_TTL = 300  # 5 minutes
+
+_NATION_TO_FX = {
+    "USA": "FX_USDKRW", "VNM": "FX_VNDKRW", "JPN": "FX_JPYKRW",
+    "CHN": "FX_CNYKRW", "HKG": "FX_HKDKRW", "GBR": "FX_GBPKRW",
+    "EUR": "FX_EURKRW", "DEU": "FX_EURKRW", "FRA": "FX_EURKRW",
+    "TWN": "FX_TWDKRW", "AUS": "FX_AUDKRW", "CAN": "FX_CADKRW",
+    "CHE": "FX_CHFKRW",
+}
+_FX_UNIT = {"FX_JPYKRW": 100, "FX_VNDKRW": 100}
+
+
+async def _get_fx_rates() -> dict[str, float]:
+    import time
+    global _fx_cache, _fx_cache_ts
+    if _fx_cache and (time.time() - _fx_cache_ts) < _FX_CACHE_TTL:
+        return _fx_cache
+    try:
+        rates = {}
+        async with httpx.AsyncClient(timeout=5) as c:
+            for page in (1, 2):
+                r = await c.get(
+                    f"https://finance.naver.com/marketindex/exchangeList.naver?page={page}",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                import re as _re
+                rows = _re.findall(
+                    r'marketindexCd=(\w+)"[^>]*>[^<]*</a>.*?<td class="sale">([^<]+)',
+                    r.text, _re.DOTALL,
+                )
+                for code, val in rows:
+                    try:
+                        rates[code] = float(val.strip().replace(",", ""))
+                    except ValueError:
+                        pass
+        if rates:
+            _fx_cache = rates
+            _fx_cache_ts = time.time()
+    except Exception:
+        pass
+    return _fx_cache
+
+
+async def _fx_to_krw(nation: str, amount: float) -> float:
+    """Convert foreign currency amount to KRW."""
+    fx_code = _NATION_TO_FX.get(nation)
+    if not fx_code:
+        return amount  # unknown nation, assume already KRW-like
+    rates = await _get_fx_rates()
+    rate = rates.get(fx_code)
+    if not rate:
+        return amount
+    unit = _FX_UNIT.get(fx_code, 1)
+    return amount * rate / unit
 
 
 @router.get("/api/portfolio/quotes")
@@ -233,5 +321,14 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
 
 @router.get("/api/portfolio/resolve-name")
 async def resolve_name(code: str = Query(..., min_length=1)):
-    name = await _resolve_name(code.strip())
-    return {"stock_code": code.strip(), "stock_name": name}
+    code = code.strip()
+    if _is_korean_stock(code):
+        name = await _resolve_name(code)
+        return {"stock_code": code, "stock_name": name}
+    # Foreign: find reuters code
+    reuters = await _resolve_foreign_reuters(code)
+    if reuters:
+        d = await _fetch_naver_world_stock(reuters)
+        name = d.get("stockName") or d.get("stockNameEng") if d else None
+        return {"stock_code": reuters, "stock_name": name, "reuters_code": reuters}
+    return {"stock_code": code, "stock_name": None}

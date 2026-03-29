@@ -1497,18 +1497,6 @@ let pfSortAsc = false;
 let pfQuoteTimer = null;
 let pfQuoteRefreshing = false;
 const PF_QUOTE_REFRESH_MS = 60_000;
-let cachedFxRate = null;  // USD/KRW
-
-async function getUsdKrwRate() {
-  if (cachedFxRate) return cachedFxRate;
-  try {
-    const resp = await apiFetch('/api/market-summary');
-    const d = await resp.json();
-    const val = d?.usd_krw?.value;
-    if (val) cachedFxRate = parseFloat(val.replace(/,/g, ''));
-  } catch {}
-  return cachedFxRate || 1450;
-}
 
 function switchView(view) {
   activeView = view;
@@ -1526,7 +1514,6 @@ async function loadPortfolio() {
   if (portfolioLoading) return;
   portfolioLoading = true;
   try {
-    await getUsdKrwRate();
     const resp = await apiFetch('/api/portfolio');
     if (!resp.ok) {
       if (resp.status === 401) {
@@ -1624,13 +1611,9 @@ function renderPortfolio() {
   const rows = portfolioItems.map(item => {
     const q = item.quote || {};
     const cur = item.currency || 'KRW';
-    const fx = (cur !== 'KRW') ? (cachedFxRate || 1450) : 1;
-    const rawPrice = q.price ?? null;
-    const rawChange = q.change ?? 0;
+    const price = q.price ?? null;
+    const change = q.change ?? 0;
     const changePct = q.change_pct ?? null;
-    // Convert foreign prices to KRW
-    const price = rawPrice !== null ? Math.round(rawPrice * fx) : null;
-    const change = Math.round(rawChange * fx);
     const qty = item.quantity;
     const avgPrice = item.avg_price; // already in KRW
     const invested = qty * avgPrice;
@@ -1874,12 +1857,12 @@ async function deletePortfolioItem(stockCode) {
           const results = await resp.json();
           if (!results.length) {
             // No domestic results — try as foreign ticker
-            if (/^[A-Z]{1,5}$/i.test(raw)) {
-              const ticker = raw.toUpperCase();
-              const r2 = await apiFetch(`/api/portfolio/resolve-name?code=${ticker}`);
+            if (/^[A-Z]/i.test(raw)) {
+              const r2 = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(raw.trim())}`);
               const d = await r2.json();
               if (d.stock_name) {
-                dropdown.innerHTML = `<div class="dropdown-item" data-code="${ticker}" data-name="${escapeHtml(d.stock_name)}">${escapeHtml(d.stock_name)} <span style="color:var(--text-secondary)">${ticker}</span></div>`;
+                const resolvedCode = d.stock_code || raw.trim();
+                dropdown.innerHTML = `<div class="dropdown-item" data-code="${resolvedCode}" data-name="${escapeHtml(d.stock_name)}">${escapeHtml(d.stock_name)} <span style="color:var(--text-secondary)">${resolvedCode}</span></div>`;
                 dropdown.classList.add('show');
                 dropdown.querySelectorAll('.dropdown-item').forEach(el => {
                   el.addEventListener('click', () => pfAddFromSearch(el.dataset.code, el.dataset.name));
@@ -1928,14 +1911,12 @@ async function deletePortfolioItem(stockCode) {
       if (e.key === 'Enter') {
         e.preventDefault();
         dropdown.classList.remove('show');
-        const q = input.value.trim().toUpperCase();
+        const q = input.value.trim();
         if (!q) return;
-        // Accept Korean codes (6 chars) or foreign tickers (1-5 alpha chars)
-        if (/^[0-9A-Z]{1,6}$/i.test(q)) {
-          const resp = await apiFetch(`/api/portfolio/resolve-name?code=${q}`);
-          const data = await resp.json();
-          pfAddFromSearch(q, data.stock_name || q);
-        }
+        const resp = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(q)}`);
+        const data = await resp.json();
+        const resolvedCode = data.stock_code || q;
+        pfAddFromSearch(resolvedCode, data.stock_name || q);
       }
     });
 
