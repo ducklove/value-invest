@@ -300,14 +300,18 @@ async def stream_portfolio_quotes(request: Request):
 
     async def generate():
         import json as _json
+        now = _time.monotonic()
         for item in items:
             code = item["stock_code"]
+            cached = _quote_cache.get(code)
+            was_cached = cached and (now - cached[0]) < _QUOTE_CACHE_TTL
             try:
                 quote = await _fetch_quote(code)
             except Exception:
                 quote = {}
             yield f"data: {_json.dumps({'stock_code': code, 'quote': quote}, ensure_ascii=False)}\n\n"
-            await asyncio.sleep(QUOTE_RATE_INTERVAL)
+            if not was_cached:
+                await asyncio.sleep(QUOTE_RATE_INTERVAL)
         yield "data: {\"done\": true}\n\n"
 
     from fastapi.responses import StreamingResponse

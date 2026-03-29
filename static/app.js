@@ -1527,10 +1527,7 @@ async function loadPortfolio() {
     portfolioItems = await resp.json();
     renderPortfolio();
     schedulePfQuoteRefresh();
-    // Fetch fresh quotes in background if any are missing
-    if (portfolioItems.some(i => !i.quote || i.quote.price == null)) {
-      refreshPfQuotes();
-    }
+    refreshPfQuotes();
   } catch {} finally {
     portfolioLoading = false;
   }
