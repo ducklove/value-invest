@@ -1885,10 +1885,11 @@ function renderPortfolio() {
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
-    const isSpecialFloat = ['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(r.stock_code);
+    const isCash = r.stock_code.startsWith('CASH_');
+    const isSpecialFloat = ['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(r.stock_code) || isCash;
     const curTag = r.stock_code === 'KRX_GOLD' ? ' <span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isSpecialFloat ? 'any' : '1';
-    const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : 8;
+    const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : isCash ? 2 : 8;
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
 
     const groupOpts = pfGroups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
@@ -2099,6 +2100,18 @@ async function deletePortfolioItem(stockCode) {
             { code: 'KRX_GOLD', name: 'KRX 금현물', keywords: ['금', '금현물', 'krx금', 'krx_gold', 'gold'] },
             { code: 'CRYPTO_BTC', name: '비트코인', keywords: ['btc', '비트코인', 'bitcoin'] },
             { code: 'CRYPTO_ETH', name: '이더리움', keywords: ['eth', '이더리움', 'ethereum'] },
+            { code: 'CASH_KRW', name: '원화', keywords: ['krw', '원화', '현금', '원'] },
+            { code: 'CASH_USD', name: '미국 달러', keywords: ['usd', '달러', '미국달러', 'dollar'] },
+            { code: 'CASH_EUR', name: '유로', keywords: ['eur', '유로', 'euro'] },
+            { code: 'CASH_JPY', name: '일본 엔', keywords: ['jpy', '엔', '일본엔', 'yen'] },
+            { code: 'CASH_CNY', name: '중국 위안', keywords: ['cny', '위안', '중국위안', 'yuan'] },
+            { code: 'CASH_HKD', name: '홍콩 달러', keywords: ['hkd', '홍콩달러'] },
+            { code: 'CASH_GBP', name: '영국 파운드', keywords: ['gbp', '파운드', 'pound'] },
+            { code: 'CASH_AUD', name: '호주 달러', keywords: ['aud', '호주달러'] },
+            { code: 'CASH_CAD', name: '캐나다 달러', keywords: ['cad', '캐나다달러'] },
+            { code: 'CASH_CHF', name: '스위스 프랑', keywords: ['chf', '프랑', '스위스프랑'] },
+            { code: 'CASH_VND', name: '베트남 동', keywords: ['vnd', '베트남동', '동'] },
+            { code: 'CASH_TWD', name: '대만 달러', keywords: ['twd', '대만달러'] },
           ];
           const qLower = raw.toLowerCase();
           const matchedSpecial = specialAssets.filter(a => a.keywords.some(k => qLower.includes(k)) || a.code.toLowerCase() === qLower);
@@ -2204,8 +2217,8 @@ async function pfAddFromSearch(code, name) {
 }
 
 function pfGoAnalyze(stockCode) {
-  // Special assets & foreign stocks: no analysis support
-  if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(stockCode)) return;
+  // Special assets, cash & foreign stocks: no analysis support
+  if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(stockCode) || stockCode.startsWith('CASH_')) return;
   const isKorean = stockCode.length === 6 && /^\d{5}/.test(stockCode);
   if (!isKorean) return;
   // For preferred stocks, try common stock code (replace last char with 0)

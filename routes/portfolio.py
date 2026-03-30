@@ -16,9 +16,28 @@ router = APIRouter()
 
 _SPECIAL_ASSETS = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
 
+_CASH_NAMES = {
+    "CASH_KRW": "원화", "CASH_USD": "미국 달러", "CASH_EUR": "유로",
+    "CASH_JPY": "일본 엔", "CASH_CNY": "중국 위안", "CASH_HKD": "홍콩 달러",
+    "CASH_GBP": "영국 파운드", "CASH_AUD": "호주 달러", "CASH_CAD": "캐나다 달러",
+    "CASH_CHF": "스위스 프랑", "CASH_TWD": "대만 달러", "CASH_VND": "베트남 동",
+    "CASH_SEK": "스웨덴 크로나", "CASH_DKK": "덴마크 크로네", "CASH_NOK": "노르웨이 크로네",
+}
+
+_CASH_FX_CODE = {
+    "CASH_USD": "FX_USDKRW", "CASH_EUR": "FX_EURKRW", "CASH_JPY": "FX_JPYKRW",
+    "CASH_CNY": "FX_CNYKRW", "CASH_HKD": "FX_HKDKRW", "CASH_GBP": "FX_GBPKRW",
+    "CASH_AUD": "FX_AUDKRW", "CASH_CAD": "FX_CADKRW", "CASH_CHF": "FX_CHFKRW",
+    "CASH_TWD": "FX_TWDKRW", "CASH_VND": "FX_VNDKRW",
+}
+
+
+def _is_cash_asset(code: str) -> bool:
+    return code.startswith("CASH_")
+
 
 def _is_special_asset(code: str) -> bool:
-    return code in _SPECIAL_ASSETS
+    return code in _SPECIAL_ASSETS or _is_cash_asset(code)
 
 
 def _is_korean_stock(code: str) -> bool:
@@ -52,6 +71,8 @@ _SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "CRYPTO_BTC": "비트코인
 async def _resolve_name(stock_code: str) -> str | None:
     if stock_code in _SPECIAL_ASSET_NAMES:
         return _SPECIAL_ASSET_NAMES[stock_code]
+    if stock_code in _CASH_NAMES:
+        return _CASH_NAMES[stock_code]
     if _is_korean_stock(stock_code):
         name = await cache.resolve_stock_name(stock_code)
         if name:
@@ -266,6 +287,22 @@ async def _fetch_crypto_quote(stock_code: str) -> dict:
     return {}
 
 
+async def _fetch_cash_quote(stock_code: str) -> dict:
+    """Fetch cash quote: KRW=1, others=FX rate to KRW."""
+    if stock_code == "CASH_KRW":
+        return {"price": 1, "change": 0, "change_pct": 0}
+    fx_code = _CASH_FX_CODE.get(stock_code)
+    if not fx_code:
+        return {}
+    rates = await _get_fx_rates()
+    rate = rates.get(fx_code)
+    if not rate:
+        return {}
+    unit = _FX_UNIT.get(fx_code, 1)
+    price = rate / unit
+    return {"price": round(price, 2), "change": 0, "change_pct": 0}
+
+
 _quote_cache: dict[str, tuple[float, dict]] = {}
 _QUOTE_CACHE_TTL = 60
 
@@ -278,7 +315,9 @@ async def _fetch_quote(stock_code: str) -> dict:
     cached = _quote_cache.get(stock_code)
     if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
         return cached[1]
-    if stock_code == "KRX_GOLD":
+    if _is_cash_asset(stock_code):
+        q = await _fetch_cash_quote(stock_code)
+    elif stock_code == "KRX_GOLD":
         q = await _fetch_krx_gold_quote()
     elif stock_code in _CRYPTO_UPBIT_MAP:
         q = await _fetch_crypto_quote(stock_code)
@@ -525,7 +564,9 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
 
     currency = str(payload.get("currency") or "").upper()
     if not currency:
-        if _is_korean_stock(stock_code) or _is_special_asset(stock_code):
+        if _is_cash_asset(stock_code):
+            currency = stock_code.replace("CASH_", "")
+        elif _is_korean_stock(stock_code) or _is_special_asset(stock_code):
             currency = "KRW"
         else:
             currency = await _detect_currency(stock_code)
@@ -605,7 +646,9 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
 @router.get("/api/portfolio/resolve-name")
 async def resolve_name(code: str = Query(..., min_length=1)):
     code = code.strip()
-    if _is_special_asset(code):
+    if _is_cash_asset(code):
+        return {"stock_code": code, "stock_name": _CASH_NAMES.get(code, code)}
+    if code in _SPECIAL_ASSETS:
         return {"stock_code": code, "stock_name": _SPECIAL_ASSET_NAMES.get(code, code)}
     if _is_korean_stock(code):
         name = await _resolve_name(code)

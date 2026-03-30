@@ -184,8 +184,12 @@ _DEFAULT_GROUPS = [
 _SPECIAL_ASSETS_SET = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
 
 
+def _is_special_or_cash(code: str) -> bool:
+    return code in _SPECIAL_ASSETS_SET or code.startswith("CASH_")
+
+
 def _default_group_for_code(stock_code: str) -> str:
-    if stock_code in _SPECIAL_ASSETS_SET:
+    if _is_special_or_cash(stock_code):
         return "기타"
     if len(stock_code) == 6 and stock_code[:5].isdigit():
         return "한국주식"
