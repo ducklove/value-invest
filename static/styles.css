@@ -562,6 +562,16 @@ body {
 .pf-summary-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
 .pf-summary-value { font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .pf-summary-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pf-filter-bar {
+  display: flex; gap: 6px; margin-bottom: 16px;
+}
+.pf-filter-btn {
+  padding: 6px 16px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text-secondary); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.pf-filter-btn:hover { color: var(--text); }
+.pf-filter-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
 .pf-add-bar {
   position: relative; margin-bottom: 16px;
   display: flex; align-items: center; gap: 10px;

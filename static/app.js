@@ -1592,6 +1592,7 @@ let pfSortKey = 'marketValue';
 let pfSortAsc = false;
 let pfQuoteTimer = null;
 let pfQuoteRefreshing = false;
+let pfMarketFilter = 'all'; // 'all' | 'kr' | 'us'
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -1712,6 +1713,18 @@ function pfSort(key) {
   renderPortfolio();
 }
 
+function pfIsKorean(code) {
+  return code.length === 6 && /^\d{5}/.test(code);
+}
+
+function pfSetFilter(filter) {
+  pfMarketFilter = filter;
+  document.querySelectorAll('.pf-filter-btn').forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.filter === filter)
+  );
+  renderPortfolio();
+}
+
 function renderPortfolio() {
   const tbody = document.getElementById('pfBody');
   const tfoot = document.getElementById('pfFoot');
@@ -1719,18 +1732,28 @@ function renderPortfolio() {
   const table = document.getElementById('pfTable');
   const empty = document.getElementById('pfEmpty');
 
+  // Show/hide filter bar and update counts
+  const filterBar = document.getElementById('pfFilterBar');
+  if (filterBar) {
+    filterBar.style.display = portfolioItems.length ? 'flex' : 'none';
+    if (portfolioItems.length) {
+      const krCount = portfolioItems.filter(i => pfIsKorean(i.stock_code)).length;
+      const usCount = portfolioItems.length - krCount;
+      filterBar.querySelector('[data-filter="all"]').textContent = `전체 (${portfolioItems.length})`;
+      filterBar.querySelector('[data-filter="kr"]').textContent = `한국 (${krCount})`;
+      filterBar.querySelector('[data-filter="us"]').textContent = `해외 (${usCount})`;
+    }
+  }
+
   if (!portfolioItems.length) {
     table.style.display = 'none';
     empty.style.display = 'block';
+    empty.textContent = '포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.';
     summary.innerHTML = '';
     return;
   }
-  table.style.display = 'table';
-  empty.style.display = 'none';
 
-  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0;
-
-  const rows = portfolioItems.map(item => {
+  const allRows = portfolioItems.map(item => {
     const q = item.quote || {};
     const cur = item.currency || 'KRW';
     const price = q.price ?? null;
@@ -1743,10 +1766,28 @@ function renderPortfolio() {
     const rawReturn = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
     const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;
     const dailyPnl = price !== null ? qty * change : 0;
-    totalInvested += invested;
-    if (marketValue !== null) totalMarketValue += marketValue;
-    totalDailyPnl += dailyPnl;
     return { ...item, cur, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
+  });
+
+  // Apply market filter
+  const rows = pfMarketFilter === 'all' ? allRows
+    : allRows.filter(r => pfMarketFilter === 'kr' ? pfIsKorean(r.stock_code) : !pfIsKorean(r.stock_code));
+
+  if (!rows.length) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    empty.textContent = pfMarketFilter === 'kr' ? '한국 주식이 없습니다.' : '해외 주식이 없습니다.';
+    summary.innerHTML = '';
+    return;
+  }
+  table.style.display = 'table';
+  empty.style.display = 'none';
+
+  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0;
+  rows.forEach(r => {
+    totalInvested += r.invested;
+    if (r.marketValue !== null) totalMarketValue += r.marketValue;
+    totalDailyPnl += r.dailyPnl;
   });
 
   // Sort rows, but keep editing item at top

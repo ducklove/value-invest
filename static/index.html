@@ -149,6 +149,12 @@ function trackEvent(name, params = {}) {
   <div id="portfolioView" style="display:none;">
     <div class="pf-summary" id="pfSummary"></div>
 
+    <div class="pf-filter-bar" id="pfFilterBar">
+      <button class="pf-filter-btn active" data-filter="all" onclick="pfSetFilter('all')">전체</button>
+      <button class="pf-filter-btn" data-filter="kr" onclick="pfSetFilter('kr')">한국</button>
+      <button class="pf-filter-btn" data-filter="us" onclick="pfSetFilter('us')">해외</button>
+    </div>
+
     <div class="pf-add-bar">
       <input class="pf-add-input" id="pfAddInput" placeholder="종목코드 또는 종목명 (예: 005930, 삼성전자)" autocomplete="off">
       <div class="dropdown pf-dropdown" id="pfDropdown"></div>
