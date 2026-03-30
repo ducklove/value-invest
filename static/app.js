@@ -13,6 +13,72 @@ const CHART_COLORS = [
 ];
 const PER_DISPLAY_MAX = 100;
 const QUOTE_REFRESH_INTERVAL_MS = 10_000;
+const KIS_PROXY_BASE_URL = (APP_CONFIG.kisProxyBaseUrl || '').replace(/\/$/, '');
+
+async function fetchQuoteSnapshot(stockCode) {
+  if (!KIS_PROXY_BASE_URL) return null;
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(start.getDate() - 14);
+  const fmt = d => d.toISOString().slice(0, 10);
+  const [quoteResp, histResp] = await Promise.all([
+    fetch(`${KIS_PROXY_BASE_URL}/v1/stocks/${stockCode}/quote`),
+    fetch(`${KIS_PROXY_BASE_URL}/v1/stocks/${stockCode}/history?start_date=${fmt(start)}&end_date=${fmt(today)}&period=D&adjusted=true`),
+  ]);
+  if (!quoteResp.ok && !histResp.ok) return null;
+  const quoteData = quoteResp.ok ? await quoteResp.json() : {};
+  const histData = histResp.ok ? await histResp.json() : {};
+  const s = quoteData.summary || {};
+  const items = (histData.items || []).sort((a, b) =>
+    (a.stck_bsop_date || a.date || '').localeCompare(b.stck_bsop_date || b.date || ''));
+  const lastItem = items[items.length - 1];
+  const histDate = lastItem ? (lastItem.stck_bsop_date || lastItem.date || lastItem.trade_date || lastItem.business_date || '') : '';
+
+  let price = s.current_price ?? s.price ?? s.stck_prpr ?? null;
+  let change = s.change ?? s.price_change ?? s.prdy_vrss ?? null;
+  let changePct = s.change_rate ?? s.change_pct ?? s.prdy_ctrt ?? null;
+  let prevClose = s.previous_close ?? s.base_price ?? s.stck_sdpr ?? null;
+
+  if (prevClose == null && price != null && change != null) prevClose = price - change;
+  else if (prevClose == null && items.length >= 2) {
+    const prev = items[items.length - 2];
+    prevClose = parseFloat(prev.stck_clpr ?? prev.close_price ?? prev.close) || null;
+  }
+  if (price == null && lastItem) {
+    price = parseFloat(lastItem.stck_clpr ?? lastItem.close_price ?? lastItem.close) || null;
+  }
+  if (change == null && price != null && prevClose != null) {
+    change = Math.round((price - prevClose) * 100) / 100;
+    changePct = prevClose ? Math.round((price - prevClose) / prevClose * 10000) / 100 : null;
+  }
+
+  let dateStr = '';
+  if (histDate) {
+    const d = histDate.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+    dateStr = d.length === 10 ? d : histDate;
+  }
+
+  return { date: dateStr || fmt(today), price, previous_close: prevClose, change, change_pct: changePct };
+}
+
+const GUEST_RECENT_KEY = 'guest_recent';
+const GUEST_RECENT_MAX = 20;
+
+function getGuestRecent() {
+  try { return JSON.parse(localStorage.getItem(GUEST_RECENT_KEY)) || []; } catch { return []; }
+}
+
+function saveGuestRecent(stockCode, corpName) {
+  const list = getGuestRecent().filter(i => i.stock_code !== stockCode);
+  list.unshift({ stock_code: stockCode, corp_name: corpName });
+  if (list.length > GUEST_RECENT_MAX) list.length = GUEST_RECENT_MAX;
+  localStorage.setItem(GUEST_RECENT_KEY, JSON.stringify(list));
+}
+
+function removeGuestRecent(stockCode) {
+  const list = getGuestRecent().filter(i => i.stock_code !== stockCode);
+  localStorage.setItem(GUEST_RECENT_KEY, JSON.stringify(list));
+}
 
 function flashEl(el) {
   if (!el) return;
@@ -762,9 +828,8 @@ async function refreshActiveQuote() {
   if (!activeStockCode || activeQuoteLoading || document.hidden || currentAbortController) return;
   activeQuoteLoading = true;
   try {
-    const resp = await apiFetch(`/api/quote/${activeStockCode}`);
-    if (!resp.ok) return;
-    const quote = await resp.json();
+    const quote = await fetchQuoteSnapshot(activeStockCode);
+    if (!quote) return;
     renderQuoteSnapshot(quote, activeIndicators);
     flashEl(document.getElementById('quoteSummary'));
   } catch (e) {
@@ -976,6 +1041,7 @@ async function analyzeStock(stockCode) {
       }
       const data = await resp.json();
       renderResult(data);
+      if (!currentUser) saveGuestRecent(data.stock_code, data.corp_name);
       if (activeTab === 'starred' && currentUser && !data.user_preference?.is_starred) {
         await autoStarCurrentStock();
       }
@@ -1077,6 +1143,7 @@ async function analyzeStock(stockCode) {
     if (resultData) {
       await new Promise(r => setTimeout(r, 300));
       renderResult(resultData);
+      if (!currentUser) saveGuestRecent(resultData.stock_code, resultData.corp_name);
       if (activeTab === 'starred' && currentUser && !resultData.user_preference?.is_starred) {
         await autoStarCurrentStock();
       }
@@ -1152,11 +1219,26 @@ async function loadRecentList() {
   recentListLoading = true;
 
   try {
-    const tab = currentUser ? activeTab : 'recent';
-    const resp = await apiFetch(`/api/cache/list?include_quotes=true&tab=${tab}`);
-    const data = await resp.json();
     const container = document.getElementById('recentList');
-    recentListItems = Array.isArray(data) ? data.slice() : [];
+    const tab = currentUser ? activeTab : 'recent';
+
+    if (currentUser) {
+      const resp = await apiFetch(`/api/cache/list?tab=${tab}`);
+      const data = await resp.json();
+      recentListItems = Array.isArray(data) ? data.slice() : [];
+    } else {
+      recentListItems = getGuestRecent();
+    }
+
+    // Attach quotes from KIS_PROXY directly
+    if (KIS_PROXY_BASE_URL && recentListItems.length > 0) {
+      const quoteResults = await Promise.allSettled(
+        recentListItems.map(item => fetchQuoteSnapshot(item.stock_code))
+      );
+      quoteResults.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value) recentListItems[i].quote_snapshot = r.value;
+      });
+    }
     if (recentListItems.length === 0) {
       const emptyMsg = currentUser
         ? (tab === 'starred' ? '관심종목이 없습니다. 분석 화면에서 관심종목을 추가하세요.' : '최근 검색한 종목이 없습니다.')
@@ -1250,17 +1332,20 @@ async function loadRecentList() {
       info.append(nameRow, quotePrice, quoteChange);
       wrapper.appendChild(info);
 
-      if (currentUser) {
-        const button = document.createElement('button');
-        button.className = 'delete-btn';
-        button.title = activeTab === 'starred' ? '관심 해제' : '삭제';
-        button.innerHTML = '&times;';
-        button.addEventListener('click', (event) => {
-          event.stopPropagation();
+      const button = document.createElement('button');
+      button.className = 'delete-btn';
+      button.title = activeTab === 'starred' ? '관심 해제' : '삭제';
+      button.innerHTML = '&times;';
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (currentUser) {
           deleteCache(item.stock_code);
-        });
-        wrapper.appendChild(button);
-      }
+        } else {
+          removeGuestRecent(item.stock_code);
+          loadRecentList();
+        }
+      });
+      wrapper.appendChild(button);
       container.appendChild(wrapper);
     });
   } catch (e) {
@@ -1554,30 +1639,43 @@ async function refreshPfQuotes() {
   if (pfQuoteRefreshing || !currentUser) return;
   pfQuoteRefreshing = true;
   try {
-    const resp = await apiFetch('/api/portfolio/quotes');
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const msg = JSON.parse(line.slice(6));
-          if (msg.done) break;
-          const item = portfolioItems.find(i => i.stock_code === msg.stock_code);
-          if (item) {
-            item.quote = msg.quote;
-            renderPortfolio();
-            const row = document.querySelector(`#pfBody tr[data-code="${msg.stock_code}"]`);
-            flashEl(row);
-          }
-        } catch {}
+    if (KIS_PROXY_BASE_URL) {
+      const results = await Promise.allSettled(
+        portfolioItems.map(item => fetchQuoteSnapshot(item.stock_code))
+      );
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value) {
+          portfolioItems[i].quote = r.value;
+          renderPortfolio();
+          const row = document.querySelector(`#pfBody tr[data-code="${portfolioItems[i].stock_code}"]`);
+          flashEl(row);
+        }
+      });
+    } else {
+      const resp = await apiFetch('/api/portfolio/quotes');
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const msg = JSON.parse(line.slice(6));
+            if (msg.done) break;
+            const item = portfolioItems.find(i => i.stock_code === msg.stock_code);
+            if (item) {
+              item.quote = msg.quote;
+              renderPortfolio();
+              const row = document.querySelector(`#pfBody tr[data-code="${msg.stock_code}"]`);
+              flashEl(row);
+            }
+          } catch {}
+        }
       }
     }
   } catch {} finally {
