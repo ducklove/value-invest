@@ -14,6 +14,13 @@ const CHART_COLORS = [
 const PER_DISPLAY_MAX = 100;
 const QUOTE_REFRESH_INTERVAL_MS = 10_000;
 
+function flashEl(el) {
+  if (!el) return;
+  el.classList.remove('flash-update');
+  void el.offsetWidth;
+  el.classList.add('flash-update');
+}
+
 let charts = {};
 let searchTimeout = null;
 let selectedIdx = -1;
@@ -759,6 +766,7 @@ async function refreshActiveQuote() {
     if (!resp.ok) return;
     const quote = await resp.json();
     renderQuoteSnapshot(quote, activeIndicators);
+    flashEl(document.getElementById('quoteSummary'));
   } catch (e) {
   } finally {
     activeQuoteLoading = false;
@@ -1566,6 +1574,8 @@ async function refreshPfQuotes() {
           if (item) {
             item.quote = msg.quote;
             renderPortfolio();
+            const row = document.querySelector(`#pfBody tr[data-code="${msg.stock_code}"]`);
+            flashEl(row);
           }
         } catch {}
       }
@@ -1979,6 +1989,7 @@ function pfGoAnalyze(stockCode) {
   analyzeStock(analyzeCode);
 }
 
+let marketBarLoaded = false;
 async function loadMarketSummary() {
   try {
     const resp = await apiFetch('/api/market-summary');
@@ -2001,6 +2012,8 @@ async function loadMarketSummary() {
         : `<span class="mi-val">${i.value}</span>`;
       return `<div class="mi"><span class="mi-label">${i.label}</span>${valHtml}</div>`;
     }).join('');
+    if (marketBarLoaded) flashEl(bar);
+    marketBarLoaded = true;
   } catch {}
 }
 

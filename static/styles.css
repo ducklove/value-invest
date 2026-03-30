@@ -119,6 +119,12 @@ body {
 .market-bar .mi-val { font-weight: 600; color: var(--text); }
 .market-bar .mi-up { color: #b91c1c; }
 .market-bar .mi-down { color: #1d4ed8; }
+@keyframes flash-update {
+  0% { background-color: rgba(250, 204, 21, 0.25); }
+  100% { background-color: transparent; }
+}
+.flash-update { animation: flash-update 0.8s ease-out; }
+
 .sidebar-tabs {
   display: flex;
   margin-bottom: 12px;
