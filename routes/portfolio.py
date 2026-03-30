@@ -219,13 +219,13 @@ async def _fetch_krx_gold_quote() -> dict:
                 html,
             )
             if len(rows) >= 2:
-                today_price = float(rows[0][1].replace(",", ""))
-                prev_price = float(rows[1][1].replace(",", ""))
-                change = round(today_price - prev_price, 2)
+                today_price = round(float(rows[0][1].replace(",", "")))
+                prev_price = round(float(rows[1][1].replace(",", "")))
+                change = today_price - prev_price
                 change_pct = round(change / prev_price * 100, 2) if prev_price else 0
                 return {"price": today_price, "change": change, "change_pct": change_pct}
             if rows:
-                today_price = float(rows[0][1].replace(",", ""))
+                today_price = round(float(rows[0][1].replace(",", "")))
                 return {"price": today_price, "change": 0, "change_pct": 0}
     except Exception as e:
         logger.warning("KRX gold quote fetch failed: %s", e)

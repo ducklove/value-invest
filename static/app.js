@@ -1853,7 +1853,7 @@ function renderPortfolio() {
     const isGold = r.stock_code === 'KRX_GOLD';
     const curTag = isGold ? ' <span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isGold ? 'any' : '1';
-    const fmtQty = isGold ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2}) + 'g' : '-') : fmtNum;
+    const fmtQty = isGold ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2}) : '-') : fmtNum;
 
     if (isEditing) {
       return `<tr data-code="${r.stock_code}">
