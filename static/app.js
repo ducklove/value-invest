@@ -1594,7 +1594,7 @@ let pfQuoteTimer = null;
 let pfQuoteRefreshing = false;
 let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
-let pfGroupSort = false;  // independent group sort toggle
+let pfGroupSort = true;   // independent group sort toggle
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
