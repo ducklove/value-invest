@@ -149,6 +149,12 @@ function trackEvent(name, params = {}) {
   <div id="portfolioView" style="display:none;">
     <div class="pf-summary" id="pfSummary"></div>
 
+    <div class="pf-tab-bar">
+      <button class="pf-tab active" data-tab="holdings" onclick="pfSwitchTab('holdings')">보유종목</button>
+      <button class="pf-tab" data-tab="performance" onclick="pfSwitchTab('performance')">성과분석</button>
+    </div>
+
+    <div id="pfHoldingsTab">
     <div class="pf-filter-bar" id="pfFilterBar"></div>
 
     <div class="pf-add-bar">
@@ -188,6 +194,36 @@ function trackEvent(name, params = {}) {
     <div class="pf-empty" id="pfEmpty" style="display:none;">
       포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.
     </div>
+    </div><!-- /pfHoldingsTab -->
+
+    <div id="pfPerformanceTab" style="display:none;">
+      <div class="pf-nav-chart-wrap">
+        <div class="pf-nav-header">
+          <h3>NAV 기준가 추이</h3>
+          <button class="pf-snapshot-btn" onclick="triggerSnapshot()">스냅샷 저장</button>
+        </div>
+        <canvas id="pfNavCanvas" width="800" height="300"></canvas>
+        <div class="pf-nav-returns" id="pfNavReturns"></div>
+      </div>
+
+      <div class="pf-cashflow-section">
+        <h3>자금 입출금</h3>
+        <div class="pf-cf-form">
+          <select id="pfCfType">
+            <option value="deposit">입금</option>
+            <option value="withdrawal">출금</option>
+          </select>
+          <input type="date" id="pfCfDate">
+          <input type="number" id="pfCfAmount" placeholder="금액 (원)" min="0">
+          <input type="text" id="pfCfMemo" placeholder="메모 (선택)">
+          <button onclick="addCashflow()">등록</button>
+        </div>
+        <table class="pf-cf-table" id="pfCfTable">
+          <thead><tr><th>날짜</th><th>구분</th><th>금액</th><th>기준가</th><th>좌수변동</th><th>메모</th><th></th></tr></thead>
+          <tbody id="pfCfBody"></tbody>
+        </table>
+      </div>
+    </div><!-- /pfPerformanceTab -->
   </div><!-- /portfolioView -->
 </div>
 

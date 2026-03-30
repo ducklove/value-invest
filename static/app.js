@@ -2503,3 +2503,202 @@ document.addEventListener('visibilitychange', () => {
     syncAuthState({ refreshRecentList: true, refreshPreference: true });
   }
 });
+
+// --- Portfolio Performance Tab ---
+let pfActiveTab = 'holdings';
+
+function pfSwitchTab(tab) {
+  pfActiveTab = tab;
+  document.querySelectorAll('.pf-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+  document.getElementById('pfHoldingsTab').style.display = tab === 'holdings' ? '' : 'none';
+  document.getElementById('pfPerformanceTab').style.display = tab === 'performance' ? '' : 'none';
+  if (tab === 'performance') loadPerformanceData();
+}
+
+async function loadPerformanceData() {
+  const dateInput = document.getElementById('pfCfDate');
+  if (dateInput && !dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+  try {
+    const [navResp, cfResp] = await Promise.all([
+      apiFetch('/api/portfolio/nav-history'),
+      apiFetch('/api/portfolio/cashflows'),
+    ]);
+    const navData = navResp.ok ? await navResp.json() : [];
+    const cfData = cfResp.ok ? await cfResp.json() : [];
+    renderNavChart(navData);
+    renderNavReturns(navData);
+    renderCashflows(cfData);
+  } catch {}
+}
+
+function renderNavChart(data) {
+  const canvas = document.getElementById('pfNavCanvas');
+  if (!canvas || !data.length) {
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('스냅샷 데이터가 없습니다. "스냅샷 저장" 버튼을 눌러 첫 스냅샷을 생성하세요.', canvas.width / 2, canvas.height / 2);
+    }
+    return;
+  }
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 300 * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = '300px';
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 300;
+  ctx.clearRect(0, 0, W, H);
+
+  const pad = { top: 20, right: 20, bottom: 40, left: 60 };
+  const cw = W - pad.left - pad.right;
+  const ch = H - pad.top - pad.bottom;
+
+  const navs = data.map(d => d.nav);
+  const minNav = Math.min(...navs) * 0.995;
+  const maxNav = Math.max(...navs) * 1.005;
+  const range = maxNav - minNav || 1;
+
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const lineColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+
+  // Grid
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (ch / 4) * i;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cw, y); ctx.stroke();
+    const val = maxNav - (range / 4) * i;
+    ctx.fillStyle = textColor; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(val.toFixed(1), pad.left - 8, y + 4);
+  }
+
+  // Base line at 1000
+  if (minNav <= 1000 && maxNav >= 1000) {
+    const baseY = pad.top + ch * (1 - (1000 - minNav) / range);
+    ctx.strokeStyle = '#888'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(pad.left, baseY); ctx.lineTo(pad.left + cw, baseY); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // NAV line
+  ctx.strokeStyle = lineColor; ctx.lineWidth = 2;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    const x = pad.left + (cw / Math.max(data.length - 1, 1)) * i;
+    const y = pad.top + ch * (1 - (d.nav - minNav) / range);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Fill area
+  const lastX = pad.left + cw;
+  const baseLineY = pad.top + ch;
+  ctx.lineTo(lastX, baseLineY);
+  ctx.lineTo(pad.left, baseLineY);
+  ctx.closePath();
+  ctx.fillStyle = lineColor.replace(')', ', 0.1)').replace('rgb', 'rgba');
+  ctx.fill();
+
+  // X labels
+  ctx.fillStyle = textColor; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(data.length / 8));
+  data.forEach((d, i) => {
+    if (i % step === 0 || i === data.length - 1) {
+      const x = pad.left + (cw / Math.max(data.length - 1, 1)) * i;
+      ctx.fillText(d.date.slice(5), x, H - pad.bottom + 16);
+    }
+  });
+}
+
+function renderNavReturns(data) {
+  const el = document.getElementById('pfNavReturns');
+  if (!el || !data.length) { if (el) el.innerHTML = ''; return; }
+  const latest = data[data.length - 1];
+  const baseNav = 1000;
+  const totalReturn = ((latest.nav / baseNav) - 1) * 100;
+
+  function retSince(daysAgo) {
+    if (data.length < 2) return null;
+    const target = new Date();
+    target.setDate(target.getDate() - daysAgo);
+    const targetStr = target.toISOString().slice(0, 10);
+    let prev = data[0];
+    for (const d of data) { if (d.date <= targetStr) prev = d; else break; }
+    return ((latest.nav / prev.nav) - 1) * 100;
+  }
+
+  const periods = [
+    { label: '전일', val: data.length >= 2 ? ((latest.nav / data[data.length - 2].nav) - 1) * 100 : null },
+    { label: '1주', val: retSince(7) },
+    { label: '1개월', val: retSince(30) },
+    { label: '3개월', val: retSince(90) },
+    { label: '전체', val: totalReturn },
+  ];
+  el.innerHTML = periods.map(p => {
+    if (p.val === null) return '';
+    const cls = p.val > 0 ? 'pf-return positive' : p.val < 0 ? 'pf-return negative' : '';
+    return `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${cls}">${p.val > 0 ? '+' : ''}${p.val.toFixed(2)}%</div></div>`;
+  }).join('');
+}
+
+function renderCashflows(data) {
+  const tbody = document.getElementById('pfCfBody');
+  if (!tbody) return;
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);">입출금 내역이 없습니다.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(cf => `<tr>
+    <td>${cf.date}</td>
+    <td>${cf.type === 'deposit' ? '입금' : '출금'}</td>
+    <td class="pf-col-num">${fmtNum(Math.round(cf.amount))}원</td>
+    <td class="pf-col-num">${cf.nav_at_time ? cf.nav_at_time.toFixed(2) : '-'}</td>
+    <td class="pf-col-num">${cf.units_change ? (cf.units_change > 0 ? '+' : '') + cf.units_change.toFixed(2) : '-'}</td>
+    <td>${cf.memo || ''}</td>
+    <td><button class="pf-row-btn delete" onclick="deleteCashflow(${cf.id})">X</button></td>
+  </tr>`).join('');
+}
+
+async function addCashflow() {
+  const type = document.getElementById('pfCfType').value;
+  const date = document.getElementById('pfCfDate').value;
+  const amount = parseFloat(document.getElementById('pfCfAmount').value);
+  const memo = document.getElementById('pfCfMemo').value.trim();
+  if (!amount || amount <= 0) { alert('금액을 입력해 주세요.'); return; }
+  try {
+    const resp = await apiFetch('/api/portfolio/cashflows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, date: date || undefined, amount, memo: memo || undefined }),
+    });
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || '등록 실패'); }
+    document.getElementById('pfCfAmount').value = '';
+    document.getElementById('pfCfMemo').value = '';
+    loadPerformanceData();
+  } catch (e) { alert(e.message); }
+}
+
+async function deleteCashflow(id) {
+  if (!confirm('이 입출금 내역을 삭제할까요?')) return;
+  try {
+    await apiFetch(`/api/portfolio/cashflows/${id}`, { method: 'DELETE' });
+    loadPerformanceData();
+  } catch (e) { alert(e.message); }
+}
+
+async function triggerSnapshot() {
+  try {
+    const resp = await apiFetch('/api/portfolio/snapshot-now', { method: 'POST' });
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || '실패'); }
+    const d = await resp.json();
+    alert(`${d.date} 스냅샷이 저장되었습니다.`);
+    loadPerformanceData();
+  } catch (e) { alert(e.message); }
+}

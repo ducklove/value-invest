@@ -562,6 +562,57 @@ body {
 .pf-summary-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
 .pf-summary-value { font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .pf-summary-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-variant-numeric: tabular-nums; }
+/* Portfolio tab bar */
+.pf-tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
+.pf-tab {
+  padding: 8px 20px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text-secondary); font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.pf-tab:hover { color: var(--text); }
+.pf-tab.active { background: var(--primary); border-color: var(--primary); color: white; }
+
+/* NAV chart */
+.pf-nav-chart-wrap { margin-bottom: 24px; }
+.pf-nav-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.pf-nav-header h3 { margin: 0; font-size: 16px; }
+.pf-snapshot-btn {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
+}
+.pf-snapshot-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+#pfNavCanvas { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.pf-nav-returns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.pf-nav-ret-card {
+  flex: 1; min-width: 80px; padding: 8px 12px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; text-align: center;
+}
+.pf-nav-ret-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
+.pf-nav-ret-value { font-size: 16px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* Cashflow section */
+.pf-cashflow-section { margin-top: 24px; }
+.pf-cashflow-section h3 { font-size: 16px; margin: 0 0 12px; }
+.pf-cf-form {
+  display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+}
+.pf-cf-form select, .pf-cf-form input {
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 13px;
+}
+.pf-cf-form input[type="number"] { width: 140px; }
+.pf-cf-form input[type="text"] { width: 120px; }
+.pf-cf-form button {
+  padding: 8px 16px; border: none; border-radius: 8px;
+  background: var(--primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.pf-cf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pf-cf-table th {
+  text-align: left; padding: 8px 6px; border-bottom: 2px solid var(--border);
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+}
+.pf-cf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); }
+
 .pf-filter-bar {
   display: flex; gap: 6px; margin-bottom: 16px;
 }

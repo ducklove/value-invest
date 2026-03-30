@@ -132,6 +132,33 @@ async def init_db():
                 FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+                google_sub TEXT NOT NULL,
+                date TEXT NOT NULL,
+                total_value REAL NOT NULL DEFAULT 0,
+                total_invested REAL NOT NULL DEFAULT 0,
+                nav REAL NOT NULL DEFAULT 1000,
+                total_units REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (google_sub, date),
+                FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_cashflows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                google_sub TEXT NOT NULL,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                nav_at_time REAL,
+                units_change REAL,
+                memo TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_sub_date ON portfolio_snapshots(google_sub, date);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_cashflows_sub ON portfolio_cashflows(google_sub, date);
+
             CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
             CREATE INDEX IF NOT EXISTS idx_user_sessions_google_sub ON user_sessions(google_sub);
             CREATE INDEX IF NOT EXISTS idx_user_recent_viewed_at ON user_recent_analyses(google_sub, viewed_at DESC);
@@ -1079,6 +1106,103 @@ async def save_portfolio_groups_order(google_sub: str, group_names: list[str]):
             [(i, google_sub, name) for i, name in enumerate(group_names)],
         )
         await db.commit()
+    finally:
+        await db.close()
+
+
+# --- Portfolio NAV / Snapshots / Cashflows ---
+
+async def get_latest_snapshot(google_sub: str) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT date, total_value, total_invested, nav, total_units FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date DESC LIMIT 1",
+            (google_sub,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float):
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (google_sub, date, total_value, total_invested, nav, total_units),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_nav_history(google_sub: str) -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT date, nav, total_value, total_invested, total_units FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date ASC",
+            (google_sub,),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+    finally:
+        await db.close()
+
+
+async def get_cashflows(google_sub: str) -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id, date, type, amount, nav_at_time, units_change, memo, created_at FROM portfolio_cashflows WHERE google_sub = ? ORDER BY date DESC, created_at DESC",
+            (google_sub,),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+    finally:
+        await db.close()
+
+
+async def add_cashflow(google_sub: str, date: str, cf_type: str, amount: float, memo: str | None, nav_at_time: float | None, units_change: float | None) -> dict:
+    db = await get_db()
+    try:
+        now = datetime.now().isoformat()
+        cursor = await db.execute(
+            "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (google_sub, date, cf_type, amount, nav_at_time, units_change, memo, now),
+        )
+        await db.commit()
+        return {"id": cursor.lastrowid, "date": date, "type": cf_type, "amount": amount, "nav_at_time": nav_at_time, "units_change": units_change, "memo": memo, "created_at": now}
+    finally:
+        await db.close()
+
+
+async def delete_cashflow(google_sub: str, cf_id: int):
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM portfolio_cashflows WHERE id = ? AND google_sub = ?", (cf_id, google_sub))
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_all_users_with_portfolio() -> list[str]:
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT DISTINCT google_sub FROM user_portfolio")
+        return [row["google_sub"] for row in await cursor.fetchall()]
+    finally:
+        await db.close()
+
+
+async def get_pending_cashflows(google_sub: str, date: str) -> list[dict]:
+    """Get cashflows for a specific date that haven't been applied to snapshots yet."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id, type, amount, units_change FROM portfolio_cashflows WHERE google_sub = ? AND date = ?",
+            (google_sub, date),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
     finally:
         await db.close()
 

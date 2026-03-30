@@ -1,0 +1,10 @@
+[Unit]
+Description=Portfolio daily NAV snapshot
+After=network.target
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+WorkingDirectory=/home/cantabile/Works/value_invest
+ExecStart=/usr/bin/python3 snapshot_nav.py

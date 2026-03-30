@@ -652,3 +652,62 @@ async def resolve_name(code: str = Query(..., min_length=1)):
         name = d.get("stockName") or d.get("stockNameEng") if d else None
         return {"stock_code": reuters, "stock_name": name, "reuters_code": reuters}
     return {"stock_code": code, "stock_name": None}
+
+
+# --- NAV / Snapshots / Cashflows ---
+
+@router.get("/api/portfolio/nav-history")
+async def get_nav_history(request: Request):
+    user = _require_user(await get_current_user(request))
+    return await cache.get_nav_history(user["google_sub"])
+
+
+@router.get("/api/portfolio/cashflows")
+async def get_cashflows(request: Request):
+    user = _require_user(await get_current_user(request))
+    return await cache.get_cashflows(user["google_sub"])
+
+
+@router.post("/api/portfolio/cashflows")
+async def add_cashflow(request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    cf_type = str(payload.get("type") or "").strip()
+    if cf_type not in ("deposit", "withdrawal"):
+        raise HTTPException(status_code=400, detail="type은 deposit 또는 withdrawal이어야 합니다.")
+    amount = payload.get("amount")
+    if amount is None or float(amount) <= 0:
+        raise HTTPException(status_code=400, detail="금액은 0보다 커야 합니다.")
+    amount = float(amount)
+    cf_date = str(payload.get("date") or "").strip()
+    if not cf_date:
+        from datetime import date
+        cf_date = date.today().isoformat()
+    memo = str(payload.get("memo") or "").strip() or None
+
+    # Get latest NAV for units calculation
+    latest = await cache.get_latest_snapshot(user["google_sub"])
+    nav_at_time = latest["nav"] if latest else 1000.0
+    units_change = amount / nav_at_time
+    if cf_type == "withdrawal":
+        units_change = -units_change
+
+    result = await cache.add_cashflow(user["google_sub"], cf_date, cf_type, amount, memo, nav_at_time, units_change)
+    return {"ok": True, **result}
+
+
+@router.delete("/api/portfolio/cashflows/{cf_id}")
+async def delete_cashflow(cf_id: int, request: Request):
+    user = _require_user(await get_current_user(request))
+    await cache.delete_cashflow(user["google_sub"], cf_id)
+    return {"ok": True}
+
+
+@router.post("/api/portfolio/snapshot-now")
+async def trigger_snapshot(request: Request):
+    """Manually trigger a snapshot (for testing)."""
+    user = _require_user(await get_current_user(request))
+    from datetime import date
+    from snapshot_nav import take_snapshot
+    snap_date = date.today().isoformat()
+    await take_snapshot(user["google_sub"], snap_date)
+    return {"ok": True, "date": snap_date}
