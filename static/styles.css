@@ -115,8 +115,8 @@ body {
   font-variant-numeric: tabular-nums; color: var(--text-secondary);
 }
 .market-bar .mi { display: flex; justify-content: space-between; align-items: center; }
-.market-bar .mi-label { font-weight: 700; }
-.market-bar .mi-right { text-align: right; }
+.market-bar .mi-label { font-weight: 700; min-width: 52px; }
+.market-bar .mi-right { text-align: right; flex: 1; }
 .market-bar .mi-val { font-weight: 600; color: var(--text); }
 .market-bar .mi-chg { font-size: 10px; }
 .market-bar .mi-up { color: #b91c1c; }

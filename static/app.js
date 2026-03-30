@@ -2005,12 +2005,11 @@ async function loadMarketSummary() {
     bar.innerHTML = items.map(i => {
       if (!i.value) return '';
       const cls = i.direction === 'up' ? 'mi-up' : i.direction === 'down' ? 'mi-down' : '';
-      const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '-' : '';
-      const isIndex = i.label === 'KOSPI' || i.label === 'KOSDAQ';
-      const chg = isIndex
-        ? (i.change_pct ? `${sign}${i.change_pct}` : '')
-        : (i.change ? `${sign}${i.change}` : '');
-      return `<div class="mi"><span class="mi-label">${i.label}</span><span class="mi-right"><span class="mi-val">${i.value}</span>${chg ? ` <span class="mi-chg ${cls}">(${chg})</span>` : ''}</span></div>`;
+      const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '' : '';
+      const chgVal = i.change ? `${sign}${i.change}` : '';
+      const chgPct = i.change_pct ? `${sign}${i.change_pct}` : '';
+      const detail = [chgVal, chgPct].filter(Boolean).join(' ');
+      return `<div class="mi"><span class="mi-label">${i.label}</span><span class="mi-right"><span class="mi-val">${i.value}</span>${detail ? ` <span class="mi-chg ${cls}">(${detail})</span>` : ''}</span></div>`;
     }).join('');
     if (marketBarLoaded) flashEl(bar);
     marketBarLoaded = true;
