@@ -44,14 +44,6 @@ def _is_korean_stock(code: str) -> bool:
     return len(code) == 6 and code[:5].isdigit()
 
 
-def _default_group_for_code(code: str) -> str:
-    if _is_special_asset(code):
-        return "기타"
-    if _is_korean_stock(code):
-        return "한국주식"
-    return "해외주식"
-
-
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=5) as client:

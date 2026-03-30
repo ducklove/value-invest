@@ -145,6 +145,18 @@ async def init_db():
         await _ensure_column(db, "user_stock_preferences", "starred_order", "INTEGER")
         await _ensure_column(db, "user_portfolio", "currency", "TEXT DEFAULT 'KRW'")
         await _ensure_column(db, "user_portfolio", "group_name", "TEXT")
+        await _ensure_column(db, "portfolio_groups", "default_type", "TEXT")
+        # Backfill default_type for existing default groups by sort_order
+        _type_by_order = {0: "kr", 1: "foreign", 2: "etc"}
+        for order, dtype in _type_by_order.items():
+            await db.execute(
+                "UPDATE portfolio_groups SET default_type = ? WHERE is_default = 1 AND sort_order = ? AND default_type IS NULL",
+                (dtype, order),
+            )
+        # If sort_order was changed, fill by name pattern as fallback
+        await db.execute("UPDATE portfolio_groups SET default_type = 'kr' WHERE is_default = 1 AND default_type IS NULL AND group_name LIKE '%한국%'")
+        await db.execute("UPDATE portfolio_groups SET default_type = 'foreign' WHERE is_default = 1 AND default_type IS NULL AND group_name LIKE '%해외%'")
+        await db.execute("UPDATE portfolio_groups SET default_type = 'etc' WHERE is_default = 1 AND default_type IS NULL")
         # Migrate: ensure default groups exist for all users with portfolio items
         cursor = await db.execute("SELECT DISTINCT google_sub FROM user_portfolio")
         subs = [row["google_sub"] for row in await cursor.fetchall()]
@@ -176,9 +188,9 @@ async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, defi
 
 
 _DEFAULT_GROUPS = [
-    ("한국주식", 0, 1),
-    ("해외주식", 1, 1),
-    ("기타", 2, 1),
+    ("한국주식", 0, 1, "kr"),
+    ("해외주식", 1, 1, "foreign"),
+    ("기타", 2, 1, "etc"),
 ]
 
 _SPECIAL_ASSETS_SET = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
@@ -188,12 +200,30 @@ def _is_special_or_cash(code: str) -> bool:
     return code in _SPECIAL_ASSETS_SET or code.startswith("CASH_")
 
 
-def _default_group_for_code(stock_code: str) -> str:
+def _default_type_for_code(stock_code: str) -> str:
+    """Return the default_type key (kr/foreign/etc) for a stock code."""
     if _is_special_or_cash(stock_code):
-        return "기타"
+        return "etc"
     if len(stock_code) == 6 and stock_code[:5].isdigit():
-        return "한국주식"
-    return "해외주식"
+        return "kr"
+    return "foreign"
+
+
+async def _resolve_default_group_name(db: aiosqlite.Connection, google_sub: str, stock_code: str) -> str:
+    """Look up the actual current group name for a default group type, even if renamed."""
+    dtype = _default_type_for_code(stock_code)
+    cursor = await db.execute(
+        "SELECT group_name FROM portfolio_groups WHERE google_sub = ? AND default_type = ?",
+        (google_sub, dtype),
+    )
+    row = await cursor.fetchone()
+    if row:
+        return row["group_name"]
+    # Fallback: original name
+    for name, _, _, dt in _DEFAULT_GROUPS:
+        if dt == dtype:
+            return name
+    return "기타"
 
 
 async def _ensure_default_groups(db: aiosqlite.Connection, google_sub: str):
@@ -204,10 +234,10 @@ async def _ensure_default_groups(db: aiosqlite.Connection, google_sub: str):
     row = await cursor.fetchone()
     if row["cnt"] >= len(_DEFAULT_GROUPS):
         return
-    for name, order, is_default in _DEFAULT_GROUPS:
+    for name, order, is_default, dtype in _DEFAULT_GROUPS:
         await db.execute(
-            "INSERT OR IGNORE INTO portfolio_groups (google_sub, group_name, sort_order, is_default) VALUES (?, ?, ?, ?)",
-            (google_sub, name, order, is_default),
+            "INSERT OR IGNORE INTO portfolio_groups (google_sub, group_name, sort_order, is_default, default_type) VALUES (?, ?, ?, ?, ?)",
+            (google_sub, name, order, is_default, dtype),
         )
 
 
@@ -902,7 +932,7 @@ async def save_portfolio_item(
             if existing:
                 group_name = existing["group_name"]
             else:
-                group_name = _default_group_for_code(stock_code)
+                group_name = await _resolve_default_group_name(db, google_sub, stock_code)
 
         if sort_order is None and not existing:
             cursor = await db.execute(
@@ -1027,7 +1057,7 @@ async def delete_portfolio_group(google_sub: str, group_name: str):
         )
         items = await cursor.fetchall()
         for item in items:
-            default_grp = _default_group_for_code(item["stock_code"])
+            default_grp = await _resolve_default_group_name(db, google_sub, item["stock_code"])
             await db.execute(
                 "UPDATE user_portfolio SET group_name = ? WHERE google_sub = ? AND stock_code = ?",
                 (default_grp, google_sub, item["stock_code"]),
