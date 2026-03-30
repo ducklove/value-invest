@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-_SPECIAL_ASSETS = {"KRX_GOLD"}
+_SPECIAL_ASSETS = {"KRX_GOLD", "BTC", "ETH"}
 
 
 def _is_special_asset(code: str) -> bool:
@@ -22,7 +22,7 @@ def _is_special_asset(code: str) -> bool:
 
 
 def _is_korean_stock(code: str) -> bool:
-    return _is_special_asset(code) or (len(code) == 6 and code[:5].isdigit())
+    return code == "KRX_GOLD" or (len(code) == 6 and code[:5].isdigit())
 
 
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
@@ -38,7 +38,7 @@ async def _fetch_naver_stock_name(stock_code: str) -> str | None:
         return None
 
 
-_SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물"}
+_SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "BTC": "비트코인", "ETH": "이더리움"}
 
 
 async def _resolve_name(stock_code: str) -> str | None:
@@ -232,6 +232,32 @@ async def _fetch_krx_gold_quote() -> dict:
     return {}
 
 
+_CRYPTO_UPBIT_MAP = {"BTC": "KRW-BTC", "ETH": "KRW-ETH"}
+
+
+async def _fetch_crypto_quote(stock_code: str) -> dict:
+    """Fetch crypto price in KRW from Upbit API."""
+    market = _CRYPTO_UPBIT_MAP.get(stock_code)
+    if not market:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"https://api.upbit.com/v1/ticker?markets={market}",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            data = resp.json()
+            if data and isinstance(data, list):
+                d = data[0]
+                price = round(d["trade_price"])
+                change = round(d["signed_change_price"])
+                change_pct = round(d["signed_change_rate"] * 100, 2)
+                return {"price": price, "change": change, "change_pct": change_pct}
+    except Exception as e:
+        logger.warning("Crypto quote fetch failed for %s: %s", stock_code, e)
+    return {}
+
+
 _quote_cache: dict[str, tuple[float, dict]] = {}
 _QUOTE_CACHE_TTL = 60
 
@@ -246,6 +272,8 @@ async def _fetch_quote(stock_code: str) -> dict:
         return cached[1]
     if stock_code == "KRX_GOLD":
         q = await _fetch_krx_gold_quote()
+    elif stock_code in _CRYPTO_UPBIT_MAP:
+        q = await _fetch_crypto_quote(stock_code)
     elif _is_korean_stock(stock_code):
         q = await stock_price.fetch_quote_snapshot(stock_code)
     else:
@@ -429,7 +457,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
 
     currency = str(payload.get("currency") or "").upper()
     if not currency:
-        if _is_korean_stock(stock_code):
+        if _is_korean_stock(stock_code) or _is_special_asset(stock_code):
             currency = "KRW"
         else:
             currency = await _detect_currency(stock_code)
@@ -496,7 +524,8 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
         await cache.clear_portfolio(user["google_sub"])
 
     for item in resolved:
-        currency = "KRW" if _is_korean_stock(item["stock_code"]) else await _detect_currency(item["stock_code"])
+        code = item["stock_code"]
+        currency = "KRW" if _is_korean_stock(code) or _is_special_asset(code) else await _detect_currency(code)
         await cache.save_portfolio_item(
             user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], currency,
         )
@@ -507,6 +536,8 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
 @router.get("/api/portfolio/resolve-name")
 async def resolve_name(code: str = Query(..., min_length=1)):
     code = code.strip()
+    if _is_special_asset(code):
+        return {"stock_code": code, "stock_name": _SPECIAL_ASSET_NAMES.get(code, code)}
     if _is_korean_stock(code):
         name = await _resolve_name(code)
         return {"stock_code": code, "stock_name": name}
