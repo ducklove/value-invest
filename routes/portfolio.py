@@ -14,8 +14,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+_SPECIAL_ASSETS = {"KRX_GOLD"}
+
+
+def _is_special_asset(code: str) -> bool:
+    return code in _SPECIAL_ASSETS
+
+
 def _is_korean_stock(code: str) -> bool:
-    return len(code) == 6 and code[:5].isdigit()
+    return _is_special_asset(code) or (len(code) == 6 and code[:5].isdigit())
 
 
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
@@ -31,7 +38,12 @@ async def _fetch_naver_stock_name(stock_code: str) -> str | None:
         return None
 
 
+_SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물"}
+
+
 async def _resolve_name(stock_code: str) -> str | None:
+    if stock_code in _SPECIAL_ASSET_NAMES:
+        return _SPECIAL_ASSET_NAMES[stock_code]
     if _is_korean_stock(stock_code):
         name = await cache.resolve_stock_name(stock_code)
         if name:
@@ -193,6 +205,33 @@ async def _yfinance_fetch_quote(ticker: str) -> dict:
 
 import time as _time
 
+async def _fetch_krx_gold_quote() -> dict:
+    """Fetch KRX gold spot price from Naver Finance gold page."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                "https://finance.naver.com/marketindex/goldDailyQuote.naver",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            html = resp.content.decode("euc-kr", errors="ignore")
+            rows = re.findall(
+                r'<tr class="(?:up|down)">\s*<td class="date">([^<]+)</td>\s*<td class="num">([^<]+)',
+                html,
+            )
+            if len(rows) >= 2:
+                today_price = float(rows[0][1].replace(",", ""))
+                prev_price = float(rows[1][1].replace(",", ""))
+                change = round(today_price - prev_price, 2)
+                change_pct = round(change / prev_price * 100, 2) if prev_price else 0
+                return {"price": today_price, "change": change, "change_pct": change_pct}
+            if rows:
+                today_price = float(rows[0][1].replace(",", ""))
+                return {"price": today_price, "change": 0, "change_pct": 0}
+    except Exception as e:
+        logger.warning("KRX gold quote fetch failed: %s", e)
+    return {}
+
+
 _quote_cache: dict[str, tuple[float, dict]] = {}
 _QUOTE_CACHE_TTL = 60
 
@@ -205,7 +244,9 @@ async def _fetch_quote(stock_code: str) -> dict:
     cached = _quote_cache.get(stock_code)
     if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
         return cached[1]
-    if _is_korean_stock(stock_code):
+    if stock_code == "KRX_GOLD":
+        q = await _fetch_krx_gold_quote()
+    elif _is_korean_stock(stock_code):
         q = await stock_price.fetch_quote_snapshot(stock_code)
     else:
         # Use resolved ticker if available, otherwise try to resolve
@@ -376,7 +417,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         raise HTTPException(status_code=400, detail="수량과 매입가를 입력해 주세요.")
 
     try:
-        quantity = int(quantity)
+        quantity = float(quantity)
         avg_price = float(avg_price)
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="수량과 매입가는 숫자여야 합니다.")
@@ -431,7 +472,7 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
             errors.append(f"행 {i+1}: 종목코드가 비어 있습니다.")
             continue
         try:
-            qty = int(row.get("quantity", 0))
+            qty = float(row.get("quantity", 0))
             price = float(row.get("avg_price", 0))
         except (TypeError, ValueError):
             errors.append(f"행 {i+1} ({code}): 수량/매입가가 올바르지 않습니다.")

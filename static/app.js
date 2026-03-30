@@ -1714,7 +1714,7 @@ function pfSort(key) {
 }
 
 function pfIsKorean(code) {
-  return code.length === 6 && /^\d{5}/.test(code);
+  return code === 'KRX_GOLD' || (code.length === 6 && /^\d{5}/.test(code));
 }
 
 function pfSetFilter(filter) {
@@ -1850,7 +1850,10 @@ function renderPortfolio() {
   tbody.innerHTML = rows.map((r, i) => {
     const weight = totalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / totalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
-    const curTag = r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
+    const isGold = r.stock_code === 'KRX_GOLD';
+    const curTag = isGold ? ' <span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
+    const qtyStep = isGold ? 'any' : '1';
+    const fmtQty = isGold ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2}) + 'g' : '-') : fmtNum;
 
     if (isEditing) {
       return `<tr data-code="${r.stock_code}">
@@ -1858,7 +1861,7 @@ function renderPortfolio() {
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
-        <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="1"></td>
+        <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
         <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
         <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
         <td class="pf-col-num">${fmtPct(weight)}</td>
@@ -1873,7 +1876,7 @@ function renderPortfolio() {
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
       <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
-      <td class="pf-col-num">${fmtNum(r.qty)}</td>
+      <td class="pf-col-num">${fmtQty(r.qty)}</td>
       <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
       <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
       <td class="pf-col-num">${fmtPct(weight)}</td>
@@ -1977,7 +1980,7 @@ function cancelPortfolioEdit() {
 }
 
 async function savePortfolioEdit(stockCode, stockName) {
-  const qty = parseInt(document.getElementById('pfEditQty').value, 10);
+  const qty = parseFloat(document.getElementById('pfEditQty').value);
   const price = parseFloat(document.getElementById('pfEditPrice').value);
   if (isNaN(qty) || qty === 0 || isNaN(price) || price < 0) {
     alert('수량과 매입가를 올바르게 입력해 주세요.');
@@ -2031,9 +2034,16 @@ async function deletePortfolioItem(stockCode) {
 
       pfSearchTimeout = setTimeout(async () => {
         try {
+          // Special asset matching
+          const specialAssets = [
+            { code: 'KRX_GOLD', name: 'KRX 금현물', keywords: ['금', '금현물', 'krx금', 'krx_gold', 'gold'] },
+          ];
+          const qLower = raw.toLowerCase();
+          const matchedSpecial = specialAssets.filter(a => a.keywords.some(k => qLower.includes(k)) || a.code.toLowerCase() === qLower);
+
           const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
           const results = await resp.json();
-          if (!results.length) {
+          if (!results.length && !matchedSpecial.length) {
             // No domestic results — try as foreign ticker
             if (/^[A-Z0-9]/i.test(raw) && /[A-Z]/i.test(raw)) {
               const r2 = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(raw.trim())}`);
@@ -2073,6 +2083,9 @@ async function deletePortfolioItem(stockCode) {
             items = results.map(r => ({ code: r.stock_code, name: r.corp_name }));
           }
 
+          // Prepend matched special assets
+          const specialItems = matchedSpecial.map(a => ({ code: a.code, name: a.name }));
+          items = [...specialItems, ...items.filter(i => !specialItems.some(s => s.code === i.code))];
           if (!items.length) { dropdown.classList.remove('show'); return; }
           dropdown.innerHTML = items.map(r =>
             `<div class="dropdown-item" data-code="${r.code}" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)} <span style="color:var(--text-secondary)">${r.code}</span></div>`
@@ -2129,7 +2142,8 @@ async function pfAddFromSearch(code, name) {
 }
 
 function pfGoAnalyze(stockCode) {
-  // Foreign stocks: no analysis support
+  // Special assets & foreign stocks: no analysis support
+  if (stockCode === 'KRX_GOLD') return;
   const isKorean = stockCode.length === 6 && /^\d{5}/.test(stockCode);
   if (!isKorean) return;
   // For preferred stocks, try common stock code (replace last char with 0)
@@ -2189,7 +2203,7 @@ async function submitCsv(mode) {
     if (parts.length < 3) { errors.push(`행 ${i+1}: 종목코드,매입가,수량 3개 필드가 필요합니다.`); continue; }
     const [code, priceStr, qtyStr] = parts;
     const price = Number(priceStr);
-    const qty = parseInt(qtyStr, 10);
+    const qty = parseFloat(qtyStr);
     if (!code) { errors.push(`행 ${i+1}: 종목코드가 비어 있습니다.`); continue; }
     if (isNaN(price) || price < 0) { errors.push(`행 ${i+1}: 매입가가 올바르지 않습니다.`); continue; }
     if (isNaN(qty) || qty === 0) { errors.push(`행 ${i+1}: 수량은 0이 아닌 값이어야 합니다.`); continue; }

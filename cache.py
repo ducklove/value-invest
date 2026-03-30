@@ -822,7 +822,7 @@ async def get_portfolio(google_sub: str) -> list[dict]:
 
 
 async def save_portfolio_item(
-    google_sub: str, stock_code: str, stock_name: str, quantity: int, avg_price: float,
+    google_sub: str, stock_code: str, stock_name: str, quantity: float, avg_price: float,
     currency: str = "KRW",
 ) -> dict:
     db = await get_db()
