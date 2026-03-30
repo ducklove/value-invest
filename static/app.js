@@ -1620,7 +1620,14 @@ async function loadPortfolio() {
       }
       return;
     }
-    portfolioItems = await resp.json();
+    const freshItems = await resp.json();
+    // Preserve existing quotes from previous load
+    const prevQuotes = {};
+    portfolioItems.forEach(i => { if (i.quote && i.quote.price != null) prevQuotes[i.stock_code] = i.quote; });
+    portfolioItems = freshItems.map(item => {
+      if (!item.quote || item.quote.price == null) item.quote = prevQuotes[item.stock_code] || item.quote;
+      return item;
+    });
     renderPortfolio();
     schedulePfQuoteRefresh();
     refreshPfQuotes();
