@@ -2103,10 +2103,11 @@ async function loadMarketSummary() {
     bar.innerHTML = items.map(i => {
       if (!i.value) return '';
       const cls = i.direction === 'up' ? 'mi-up' : i.direction === 'down' ? 'mi-down' : '';
-      const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '' : '';
+      const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '-' : '';
+      const rawPct = i.change_pct ? i.change_pct.replace(/^[-+]/, '') : '';
       const chgVal = i.change ? `${sign}${i.change}` : '';
-      const chgPct = i.change_pct ? `(${sign}${i.change_pct})` : '';
-      return `<div class="mi"><span class="mi-label">${i.label}</span><span class="mi-right"><span class="mi-val">${i.value}</span>${chgVal ? ` <span class="mi-chg ${cls}">${chgVal}</span>` : ''}${chgPct ? ` <span class="mi-chg ${cls}">${chgPct}</span>` : ''}</span></div>`;
+      const chgPct = rawPct ? `(${sign}${rawPct})` : '';
+      return `<span class="mi-label">${i.label}</span><span class="mi-val">${i.value}</span><span class="mi-chg ${cls}">${chgVal} ${chgPct}</span>`;
     }).join('');
     if (marketBarLoaded) flashEl(bar);
     marketBarLoaded = true;
