@@ -828,8 +828,12 @@ async function refreshActiveQuote() {
   if (!activeStockCode || activeQuoteLoading || document.hidden || currentAbortController) return;
   activeQuoteLoading = true;
   try {
-    const quote = await fetchQuoteSnapshot(activeStockCode);
-    if (!quote) return;
+    let quote = KIS_PROXY_BASE_URL ? await fetchQuoteSnapshot(activeStockCode) : null;
+    if (!quote) {
+      const resp = await apiFetch(`/api/quote/${activeStockCode}`);
+      if (!resp.ok) return;
+      quote = await resp.json();
+    }
     renderQuoteSnapshot(quote, activeIndicators);
     flashEl(document.getElementById('quoteSummary'));
   } catch (e) {
@@ -1223,21 +1227,20 @@ async function loadRecentList() {
     const tab = currentUser ? activeTab : 'recent';
 
     if (currentUser) {
-      const resp = await apiFetch(`/api/cache/list?tab=${tab}`);
+      const resp = await apiFetch(`/api/cache/list?include_quotes=true&tab=${tab}`);
       const data = await resp.json();
       recentListItems = Array.isArray(data) ? data.slice() : [];
     } else {
       recentListItems = getGuestRecent();
-    }
-
-    // Attach quotes from KIS_PROXY directly
-    if (KIS_PROXY_BASE_URL && recentListItems.length > 0) {
-      const quoteResults = await Promise.allSettled(
-        recentListItems.map(item => fetchQuoteSnapshot(item.stock_code))
-      );
-      quoteResults.forEach((r, i) => {
-        if (r.status === 'fulfilled' && r.value) recentListItems[i].quote_snapshot = r.value;
-      });
+      // Attach quotes from KIS_PROXY directly for guest
+      if (KIS_PROXY_BASE_URL && recentListItems.length > 0) {
+        const quoteResults = await Promise.allSettled(
+          recentListItems.map(item => fetchQuoteSnapshot(item.stock_code))
+        );
+        quoteResults.forEach((r, i) => {
+          if (r.status === 'fulfilled' && r.value) recentListItems[i].quote_snapshot = r.value;
+        });
+      }
     }
     if (recentListItems.length === 0) {
       const emptyMsg = currentUser
@@ -1285,7 +1288,7 @@ async function loadRecentList() {
 
       const info = document.createElement('div');
       info.className = 'info';
-      info.addEventListener('click', () => analyzeStock(item.stock_code));
+      info.addEventListener('click', () => { switchView('analysis'); analyzeStock(item.stock_code); });
 
       const name = document.createElement('div');
       name.className = 'name';
@@ -1639,19 +1642,22 @@ async function refreshPfQuotes() {
   if (pfQuoteRefreshing || !currentUser) return;
   pfQuoteRefreshing = true;
   try {
+    let kisOk = false;
     if (KIS_PROXY_BASE_URL) {
       const results = await Promise.allSettled(
         portfolioItems.map(item => fetchQuoteSnapshot(item.stock_code))
       );
       results.forEach((r, i) => {
         if (r.status === 'fulfilled' && r.value) {
+          kisOk = true;
           portfolioItems[i].quote = r.value;
           renderPortfolio();
           const row = document.querySelector(`#pfBody tr[data-code="${portfolioItems[i].stock_code}"]`);
           flashEl(row);
         }
       });
-    } else {
+    }
+    if (!kisOk) {
       const resp = await apiFetch('/api/portfolio/quotes');
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
@@ -2102,11 +2108,12 @@ async function loadMarketSummary() {
     ];
     bar.innerHTML = items.map(i => {
       if (!i.value) return '';
-      const cls = i.direction === 'up' ? 'mi-up' : i.direction === 'down' ? 'mi-down' : '';
-      const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '-' : '';
-      const rawPct = i.change_pct ? i.change_pct.replace(/^[-+]/, '') : '';
+      const rawPct = (i.change_pct || '').replace(/[-+%]/g, '');
+      const isDown = (i.change_pct || '').startsWith('-');
+      const cls = isDown ? 'mi-down' : rawPct ? 'mi-up' : '';
+      const sign = isDown ? '-' : rawPct ? '+' : '';
       const chgVal = i.change ? `${sign}${i.change}` : '';
-      const chgPct = rawPct ? `(${sign}${rawPct})` : '';
+      const chgPct = rawPct ? `(${sign}${rawPct}%)` : '';
       return `<span class="mi-label">${i.label}</span><span class="mi-val">${i.value}</span><span class="mi-chg ${cls}">${chgVal} ${chgPct}</span>`;
     }).join('');
     if (marketBarLoaded) flashEl(bar);
