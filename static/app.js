@@ -1594,6 +1594,7 @@ let pfQuoteTimer = null;
 let pfQuoteRefreshing = false;
 let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
+let pfGroupSort = false;  // independent group sort toggle
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -1704,9 +1705,10 @@ async function refreshPfQuotes() {
 }
 
 function pfSort(key) {
-  if (pfSortKey === key) {
+  if (key === 'group') {
+    pfGroupSort = !pfGroupSort;
+  } else if (pfSortKey === key) {
     if (!pfSortAsc) {
-      // third click: back to manual order
       pfSortKey = null;
       pfSortAsc = true;
     } else {
@@ -1714,7 +1716,7 @@ function pfSort(key) {
     }
   } else {
     pfSortKey = key;
-    pfSortAsc = key === 'name'; // name defaults asc, numbers desc
+    pfSortAsc = key === 'name';
   }
   renderPortfolio();
 }
@@ -1810,24 +1812,29 @@ function renderPortfolio() {
     totalDailyPnl += r.dailyPnl;
   });
 
-  // Sort rows, but keep editing item at top
-  if (pfSortKey) {
+  // Sort rows: group sort (primary, if on) + column sort (secondary)
+  if (pfGroupSort || pfSortKey) {
+    const grpOrder = {};
+    if (pfGroupSort) pfGroups.forEach((g, i) => grpOrder[g.group_name] = i);
     rows.sort((a, b) => {
-      let va, vb;
-      if (pfSortKey === 'name') {
-        va = a.stock_name; vb = b.stock_name;
-        return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      // Primary: group sort
+      if (pfGroupSort) {
+        const ga = grpOrder[pfGetGroup(a)] ?? 999;
+        const gb = grpOrder[pfGetGroup(b)] ?? 999;
+        if (ga !== gb) return ga - gb;
       }
-      if (pfSortKey === 'group') {
-        const orderMap = {};
-        pfGroups.forEach((g, i) => orderMap[g.group_name] = i);
-        va = orderMap[pfGetGroup(a)] ?? 999;
-        vb = orderMap[pfGetGroup(b)] ?? 999;
+      // Secondary: column sort
+      if (pfSortKey) {
+        let va, vb;
+        if (pfSortKey === 'name') {
+          va = a.stock_name; vb = b.stock_name;
+          return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+        }
+        va = a[pfSortKey] ?? -Infinity;
+        vb = b[pfSortKey] ?? -Infinity;
         return pfSortAsc ? va - vb : vb - va;
       }
-      va = a[pfSortKey] ?? -Infinity;
-      vb = b[pfSortKey] ?? -Infinity;
-      return pfSortAsc ? va - vb : vb - va;
+      return 0;
     });
   }
   if (pfEditingCode) {
@@ -1843,10 +1850,11 @@ function renderPortfolio() {
     const key = th.dataset.sort;
     const existing = th.querySelector('.pf-sort-arrow');
     if (existing) existing.remove();
-    if (pfSortKey === key) {
+    const isActive = key === 'group' ? pfGroupSort : pfSortKey === key;
+    if (isActive) {
       const arrow = document.createElement('span');
       arrow.className = 'pf-sort-arrow';
-      arrow.textContent = pfSortAsc ? ' \u25B2' : ' \u25BC';
+      arrow.textContent = key === 'group' ? ' \u25BC' : (pfSortAsc ? ' \u25B2' : ' \u25BC');
       th.appendChild(arrow);
     }
   });
@@ -1928,7 +1936,7 @@ function renderPortfolio() {
   </tr>`;
 
   // Drag-and-drop on rows (manual order only)
-  if (!pfSortKey && currentUser) {
+  if (!pfSortKey && !pfGroupSort && currentUser) {
     tbody.querySelectorAll('tr[draggable]').forEach(tr => {
       tr.addEventListener('dragstart', (e) => {
         tr.classList.add('dragging');
