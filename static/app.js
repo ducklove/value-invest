@@ -2007,9 +2007,8 @@ async function loadMarketSummary() {
       const cls = i.direction === 'up' ? 'mi-up' : i.direction === 'down' ? 'mi-down' : '';
       const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '' : '';
       const chgVal = i.change ? `${sign}${i.change}` : '';
-      const chgPct = i.change_pct ? `${sign}${i.change_pct}` : '';
-      const detail = [chgVal, chgPct].filter(Boolean).join(' ');
-      return `<div class="mi"><span class="mi-label">${i.label}</span><span class="mi-right"><span class="mi-val">${i.value}</span>${detail ? ` <span class="mi-chg ${cls}">(${detail})</span>` : ''}</span></div>`;
+      const chgPct = i.change_pct ? `(${sign}${i.change_pct})` : '';
+      return `<div class="mi"><span class="mi-label">${i.label}</span><span class="mi-right"><span class="mi-val">${i.value}</span>${chgVal ? ` <span class="mi-chg ${cls}">${chgVal}</span>` : ''}${chgPct ? ` <span class="mi-chg ${cls}">${chgPct}</span>` : ''}</span></div>`;
     }).join('');
     if (marketBarLoaded) flashEl(bar);
     marketBarLoaded = true;

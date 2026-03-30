@@ -45,9 +45,21 @@ async def market_summary():
                 value = re.search(r'class="value"[^>]*>([0-9,.]+)', r.text)
                 change = re.search(r'class="change"[^>]*>([0-9,.]+)', r.text)
                 d = re.search(r'class="head_info.*?class="(up|down)"', r.text, re.DOTALL)
+                val_str = value.group(1).strip().replace(",", "") if value else None
+                chg_str = change.group(1).strip().replace(",", "") if change else None
+                change_pct = None
+                if val_str and chg_str:
+                    try:
+                        v, c = float(val_str), float(chg_str)
+                        prev = v - c if d and d.group(1) == "up" else v + c
+                        if prev:
+                            change_pct = f"{c / prev * 100:.2f}%"
+                    except ValueError:
+                        pass
                 return {
                     "value": value.group(1).strip() if value else None,
                     "change": change.group(1).strip() if change else None,
+                    "change_pct": change_pct,
                     "direction": d.group(1) if d else "",
                 }
         except Exception:
