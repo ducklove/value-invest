@@ -1995,8 +1995,11 @@ async function loadMarketSummary() {
       if (!i.value) return '';
       const cls = i.direction === 'up' ? 'mi-up' : i.direction === 'down' ? 'mi-down' : '';
       const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '-' : '';
-      const pct = i.change_pct ? ` (${i.change_pct})` : '';
-      return `<div class="mi"><span class="mi-label">${i.label}</span> <span class="mi-val">${i.value}</span> <span class="mi-chg ${cls}">${sign}${i.change || ''}${pct}</span></div>`;
+      const isIndex = i.label === 'KOSPI' || i.label === 'KOSDAQ';
+      const valHtml = isIndex
+        ? `<span class="mi-val ${cls}">${sign}${i.change_pct || ''}</span>`
+        : `<span class="mi-val">${i.value}</span>`;
+      return `<div class="mi"><span class="mi-label">${i.label}</span>${valHtml}</div>`;
     }).join('');
   } catch {}
 }
