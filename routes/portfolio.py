@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-_SPECIAL_ASSETS = {"KRX_GOLD", "BTC", "ETH"}
+_SPECIAL_ASSETS = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
 
 
 def _is_special_asset(code: str) -> bool:
@@ -38,7 +38,7 @@ async def _fetch_naver_stock_name(stock_code: str) -> str | None:
         return None
 
 
-_SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "BTC": "비트코인", "ETH": "이더리움"}
+_SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "CRYPTO_BTC": "비트코인", "CRYPTO_ETH": "이더리움"}
 
 
 async def _resolve_name(stock_code: str) -> str | None:
@@ -232,7 +232,7 @@ async def _fetch_krx_gold_quote() -> dict:
     return {}
 
 
-_CRYPTO_UPBIT_MAP = {"BTC": "KRW-BTC", "ETH": "KRW-ETH"}
+_CRYPTO_UPBIT_MAP = {"CRYPTO_BTC": "KRW-BTC", "CRYPTO_ETH": "KRW-ETH"}
 
 
 async def _fetch_crypto_quote(stock_code: str) -> dict:

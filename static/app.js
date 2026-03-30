@@ -1713,7 +1713,7 @@ function pfSort(key) {
   renderPortfolio();
 }
 
-const _PF_SPECIAL = new Set(['KRX_GOLD', 'BTC', 'ETH']);
+const _PF_SPECIAL = new Set(['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH']);
 
 function pfMarketType(code) {
   if (_PF_SPECIAL.has(code)) return 'etc';
@@ -1861,7 +1861,7 @@ function renderPortfolio() {
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
-    const isSpecialFloat = ['KRX_GOLD', 'BTC', 'ETH'].includes(r.stock_code);
+    const isSpecialFloat = ['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(r.stock_code);
     const curTag = r.stock_code === 'KRX_GOLD' ? ' <span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isSpecialFloat ? 'any' : '1';
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : 8;
@@ -2049,8 +2049,8 @@ async function deletePortfolioItem(stockCode) {
           // Special asset matching
           const specialAssets = [
             { code: 'KRX_GOLD', name: 'KRX 금현물', keywords: ['금', '금현물', 'krx금', 'krx_gold', 'gold'] },
-            { code: 'BTC', name: '비트코인', keywords: ['btc', '비트코인', 'bitcoin'] },
-            { code: 'ETH', name: '이더리움', keywords: ['eth', '이더리움', 'ethereum'] },
+            { code: 'CRYPTO_BTC', name: '비트코인', keywords: ['btc', '비트코인', 'bitcoin'] },
+            { code: 'CRYPTO_ETH', name: '이더리움', keywords: ['eth', '이더리움', 'ethereum'] },
           ];
           const qLower = raw.toLowerCase();
           const matchedSpecial = specialAssets.filter(a => a.keywords.some(k => qLower.includes(k)) || a.code.toLowerCase() === qLower);
@@ -2157,7 +2157,7 @@ async function pfAddFromSearch(code, name) {
 
 function pfGoAnalyze(stockCode) {
   // Special assets & foreign stocks: no analysis support
-  if (['KRX_GOLD', 'BTC', 'ETH'].includes(stockCode)) return;
+  if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(stockCode)) return;
   const isKorean = stockCode.length === 6 && /^\d{5}/.test(stockCode);
   if (!isKorean) return;
   // For preferred stocks, try common stock code (replace last char with 0)
