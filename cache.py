@@ -123,6 +123,15 @@ async def init_db():
                 FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS portfolio_groups (
+                google_sub TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                is_default INTEGER DEFAULT 0,
+                PRIMARY KEY (google_sub, group_name),
+                FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
             CREATE INDEX IF NOT EXISTS idx_user_sessions_google_sub ON user_sessions(google_sub);
             CREATE INDEX IF NOT EXISTS idx_user_recent_viewed_at ON user_recent_analyses(google_sub, viewed_at DESC);
@@ -135,6 +144,24 @@ async def init_db():
         await _ensure_column(db, "user_stock_preferences", "sort_order", "INTEGER")
         await _ensure_column(db, "user_stock_preferences", "starred_order", "INTEGER")
         await _ensure_column(db, "user_portfolio", "currency", "TEXT DEFAULT 'KRW'")
+        await _ensure_column(db, "user_portfolio", "group_name", "TEXT")
+        # Migrate: ensure default groups exist for all users with portfolio items
+        cursor = await db.execute("SELECT DISTINCT google_sub FROM user_portfolio")
+        subs = [row["google_sub"] for row in await cursor.fetchall()]
+        for sub in subs:
+            await _ensure_default_groups(db, sub)
+            await db.execute("""
+                UPDATE user_portfolio SET group_name = '기타'
+                WHERE google_sub = ? AND group_name IS NULL AND stock_code IN ('KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH')
+            """, (sub,))
+            await db.execute("""
+                UPDATE user_portfolio SET group_name = '한국주식'
+                WHERE google_sub = ? AND group_name IS NULL AND length(stock_code) = 6 AND substr(stock_code, 1, 5) GLOB '[0-9][0-9][0-9][0-9][0-9]'
+            """, (sub,))
+            await db.execute("""
+                UPDATE user_portfolio SET group_name = '해외주식'
+                WHERE google_sub = ? AND group_name IS NULL
+            """, (sub,))
         await db.commit()
     finally:
         await db.close()
@@ -146,6 +173,31 @@ async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, defi
     columns = {row["name"] for row in rows}
     if column not in columns:
         await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+_DEFAULT_GROUPS = [
+    ("한국주식", 0, 1),
+    ("해외주식", 1, 1),
+    ("기타", 2, 1),
+]
+
+_SPECIAL_ASSETS_SET = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
+
+
+def _default_group_for_code(stock_code: str) -> str:
+    if stock_code in _SPECIAL_ASSETS_SET:
+        return "기타"
+    if len(stock_code) == 6 and stock_code[:5].isdigit():
+        return "한국주식"
+    return "해외주식"
+
+
+async def _ensure_default_groups(db: aiosqlite.Connection, google_sub: str):
+    for name, order, is_default in _DEFAULT_GROUPS:
+        await db.execute(
+            "INSERT OR IGNORE INTO portfolio_groups (google_sub, group_name, sort_order, is_default) VALUES (?, ?, ?, ?)",
+            (google_sub, name, order, is_default),
+        )
 
 
 async def is_corp_codes_loaded() -> bool:
@@ -809,7 +861,8 @@ async def get_portfolio(google_sub: str) -> list[dict]:
     try:
         cursor = await db.execute(
             """
-            SELECT stock_code, stock_name, quantity, avg_price, sort_order, COALESCE(currency, 'KRW') AS currency
+            SELECT stock_code, stock_name, quantity, avg_price, sort_order,
+                   COALESCE(currency, 'KRW') AS currency, group_name
             FROM user_portfolio
             WHERE google_sub = ?
             ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, created_at ASC
@@ -823,17 +876,22 @@ async def get_portfolio(google_sub: str) -> list[dict]:
 
 async def save_portfolio_item(
     google_sub: str, stock_code: str, stock_name: str, quantity: float, avg_price: float,
-    currency: str = "KRW",
+    currency: str = "KRW", group_name: str | None = None,
 ) -> dict:
     db = await get_db()
     try:
         now = datetime.now().isoformat()
         cursor = await db.execute(
-            "SELECT sort_order FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            "SELECT sort_order, group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
             (google_sub, stock_code),
         )
         existing = await cursor.fetchone()
         sort_order = existing["sort_order"] if existing else None
+        if group_name is None:
+            if existing:
+                group_name = existing["group_name"]
+            else:
+                group_name = _default_group_for_code(stock_code)
 
         if sort_order is None and not existing:
             cursor = await db.execute(
@@ -846,19 +904,20 @@ async def save_portfolio_item(
 
         await db.execute(
             """
-            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(google_sub, stock_code) DO UPDATE SET
                 stock_name = excluded.stock_name,
                 quantity = excluded.quantity,
                 avg_price = excluded.avg_price,
                 currency = excluded.currency,
+                group_name = excluded.group_name,
                 updated_at = excluded.updated_at
             """,
-            (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, now, now),
+            (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, now, now),
         )
         await db.commit()
-        return {"stock_code": stock_code, "stock_name": stock_name, "quantity": quantity, "avg_price": avg_price, "currency": currency}
+        return {"stock_code": stock_code, "stock_name": stock_name, "quantity": quantity, "avg_price": avg_price, "currency": currency, "group_name": group_name}
     finally:
         await db.close()
 
@@ -893,6 +952,78 @@ async def save_portfolio_order(google_sub: str, ordered_stock_codes: list[str]):
                 (index, datetime.now().isoformat(), google_sub, code)
                 for index, code in enumerate(ordered_stock_codes)
             ],
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_portfolio_groups(google_sub: str) -> list[dict]:
+    db = await get_db()
+    try:
+        await _ensure_default_groups(db, google_sub)
+        await db.commit()
+        cursor = await db.execute(
+            "SELECT group_name, sort_order, is_default FROM portfolio_groups WHERE google_sub = ? ORDER BY sort_order ASC",
+            (google_sub,),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+    finally:
+        await db.close()
+
+
+async def add_portfolio_group(google_sub: str, group_name: str) -> dict:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT MAX(sort_order) AS mx FROM portfolio_groups WHERE google_sub = ?",
+            (google_sub,),
+        )
+        row = await cursor.fetchone()
+        next_order = (row["mx"] or 0) + 1
+        await db.execute(
+            "INSERT INTO portfolio_groups (google_sub, group_name, sort_order, is_default) VALUES (?, ?, ?, 0)",
+            (google_sub, group_name, next_order),
+        )
+        await db.commit()
+        return {"group_name": group_name, "sort_order": next_order, "is_default": 0}
+    finally:
+        await db.close()
+
+
+async def rename_portfolio_group(google_sub: str, old_name: str, new_name: str):
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE portfolio_groups SET group_name = ? WHERE google_sub = ? AND group_name = ?",
+            (new_name, google_sub, old_name),
+        )
+        await db.execute(
+            "UPDATE user_portfolio SET group_name = ? WHERE google_sub = ? AND group_name = ?",
+            (new_name, google_sub, old_name),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def delete_portfolio_group(google_sub: str, group_name: str):
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT stock_code FROM user_portfolio WHERE google_sub = ? AND group_name = ?",
+            (google_sub, group_name),
+        )
+        items = await cursor.fetchall()
+        for item in items:
+            default_grp = _default_group_for_code(item["stock_code"])
+            await db.execute(
+                "UPDATE user_portfolio SET group_name = ? WHERE google_sub = ? AND stock_code = ?",
+                (default_grp, google_sub, item["stock_code"]),
+            )
+        await db.execute(
+            "DELETE FROM portfolio_groups WHERE google_sub = ? AND group_name = ?",
+            (google_sub, group_name),
         )
         await db.commit()
     finally:

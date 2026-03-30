@@ -25,6 +25,14 @@ def _is_korean_stock(code: str) -> bool:
     return len(code) == 6 and code[:5].isdigit()
 
 
+def _default_group_for_code(code: str) -> str:
+    if _is_special_asset(code):
+        return "기타"
+    if _is_korean_stock(code):
+        return "한국주식"
+    return "해외주식"
+
+
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
@@ -388,6 +396,54 @@ async def _fx_to_krw(nation: str, amount: float) -> float:
     return amount * rate / unit
 
 
+@router.get("/api/portfolio/groups")
+async def get_groups(request: Request):
+    user = _require_user(await get_current_user(request))
+    return await cache.get_portfolio_groups(user["google_sub"])
+
+
+@router.post("/api/portfolio/groups")
+async def add_group(request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="그룹명을 입력해 주세요.")
+    groups = await cache.get_portfolio_groups(user["google_sub"])
+    if any(g["group_name"] == name for g in groups):
+        raise HTTPException(status_code=400, detail="이미 존재하는 그룹명입니다.")
+    result = await cache.add_portfolio_group(user["google_sub"], name)
+    return {"ok": True, **result}
+
+
+@router.put("/api/portfolio/groups/{group_name}")
+async def rename_group(group_name: str, request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    new_name = str(payload.get("new_name") or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="새 그룹명을 입력해 주세요.")
+    groups = await cache.get_portfolio_groups(user["google_sub"])
+    target = next((g for g in groups if g["group_name"] == group_name), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="그룹을 찾을 수 없습니다.")
+    if any(g["group_name"] == new_name for g in groups):
+        raise HTTPException(status_code=400, detail="이미 존재하는 그룹명입니다.")
+    await cache.rename_portfolio_group(user["google_sub"], group_name, new_name)
+    return {"ok": True}
+
+
+@router.delete("/api/portfolio/groups/{group_name}")
+async def delete_group(group_name: str, request: Request):
+    user = _require_user(await get_current_user(request))
+    groups = await cache.get_portfolio_groups(user["google_sub"])
+    target = next((g for g in groups if g["group_name"] == group_name), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="그룹을 찾을 수 없습니다.")
+    if target["is_default"]:
+        raise HTTPException(status_code=400, detail="기본 그룹은 삭제할 수 없습니다.")
+    await cache.delete_portfolio_group(user["google_sub"], group_name)
+    return {"ok": True}
+
+
 @router.get("/api/portfolio/quotes")
 async def stream_portfolio_quotes(request: Request):
     """Stream quote updates one by one with rate limiting."""
@@ -423,6 +479,7 @@ def _require_user(user):
 @router.get("/api/portfolio")
 async def get_portfolio(request: Request):
     user = _require_user(await get_current_user(request))
+    await cache.get_portfolio_groups(user["google_sub"])  # ensure default groups
     items = await cache.get_portfolio(user["google_sub"])
     return await _enrich_with_cached_quotes(items)
 
@@ -461,7 +518,8 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
             currency = "KRW"
         else:
             currency = await _detect_currency(stock_code)
-    result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price, currency)
+    group_name = str(payload.get("group_name") or "").strip() or None
+    result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price, currency, group_name)
     return {"ok": True, **result}
 
 

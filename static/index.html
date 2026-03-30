@@ -149,11 +149,7 @@ function trackEvent(name, params = {}) {
   <div id="portfolioView" style="display:none;">
     <div class="pf-summary" id="pfSummary"></div>
 
-    <div class="pf-filter-bar" id="pfFilterBar">
-      <button class="pf-filter-btn active" data-filter="kr" onclick="pfToggleFilter('kr')">한국</button>
-      <button class="pf-filter-btn active" data-filter="foreign" onclick="pfToggleFilter('foreign')">해외</button>
-      <button class="pf-filter-btn active" data-filter="etc" onclick="pfToggleFilter('etc')">기타</button>
-    </div>
+    <div class="pf-filter-bar" id="pfFilterBar"></div>
 
     <div class="pf-add-bar">
       <input class="pf-add-input" id="pfAddInput" placeholder="종목코드 또는 종목명 (예: 005930, 삼성전자)" autocomplete="off">
@@ -174,6 +170,7 @@ function trackEvent(name, params = {}) {
         <thead>
           <tr>
             <th class="pf-col-name pf-sortable" data-sort="name" onclick="pfSort('name')">종목명</th>
+            <th class="pf-col-group pf-sortable" data-sort="group" onclick="pfSort('group')">그룹</th>
             <th class="pf-col-num pf-sortable" data-sort="changePct" onclick="pfSort('changePct')">등락률</th>
             <th class="pf-col-num">매입가</th>
             <th class="pf-col-num">현재가</th>
@@ -202,6 +199,20 @@ function trackEvent(name, params = {}) {
     <div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
     <div class="progress-steps" id="progressSteps"></div>
     <button class="cancel-btn" id="cancelBtn" onclick="cancelAnalysis()">분석 취소</button>
+  </div>
+</div>
+
+<div class="pf-modal-overlay" id="pfGroupModal" style="display:none;" onclick="if(event.target===this)closeGroupModal()">
+  <div class="pf-modal">
+    <div class="pf-modal-header">
+      <h3>그룹 관리</h3>
+      <button class="pf-modal-close" onclick="closeGroupModal()">&times;</button>
+    </div>
+    <div class="pf-modal-body" id="pfGroupModalBody"></div>
+    <div class="pf-modal-footer">
+      <input class="pf-modal-input" id="pfNewGroupInput" placeholder="새 그룹명" onkeydown="if(event.key==='Enter')addNewGroup()">
+      <button class="pf-modal-add-btn" onclick="addNewGroup()">추가</button>
+    </div>
   </div>
 </div>
 

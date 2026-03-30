@@ -1592,7 +1592,8 @@ let pfSortKey = 'marketValue';
 let pfSortAsc = false;
 let pfQuoteTimer = null;
 let pfQuoteRefreshing = false;
-let pfMarketFilter = new Set(['kr', 'foreign', 'etc']);
+let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
+let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -1622,6 +1623,11 @@ async function loadPortfolio() {
       return;
     }
     const freshItems = await resp.json();
+    // Load groups
+    try {
+      const gResp = await apiFetch('/api/portfolio/groups');
+      if (gResp.ok) pfGroups = await gResp.json();
+    } catch {}
     // Preserve existing quotes from previous load
     const prevQuotes = {};
     portfolioItems.forEach(i => { if (i.quote && i.quote.price != null) prevQuotes[i.stock_code] = i.quote; });
@@ -1713,22 +1719,20 @@ function pfSort(key) {
   renderPortfolio();
 }
 
-const _PF_SPECIAL = new Set(['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH']);
-
-function pfMarketType(code) {
-  if (_PF_SPECIAL.has(code)) return 'etc';
-  if (code.length === 6 && /^\d{5}/.test(code)) return 'kr';
-  return 'foreign';
+function pfGetGroup(item) {
+  return item.group_name || '기타';
 }
 
-function pfToggleFilter(key) {
-  if (pfMarketFilter.has(key)) pfMarketFilter.delete(key);
-  else pfMarketFilter.add(key);
-  // If none selected, re-select all
-  if (pfMarketFilter.size === 0) { pfMarketFilter.add('kr'); pfMarketFilter.add('foreign'); pfMarketFilter.add('etc'); }
-  document.querySelectorAll('.pf-filter-btn').forEach(btn =>
-    btn.classList.toggle('active', pfMarketFilter.has(btn.dataset.filter))
-  );
+function pfToggleGroupFilter(groupName) {
+  if (pfGroupFilter === null) {
+    pfGroupFilter = new Set([groupName]);
+  } else if (pfGroupFilter.has(groupName)) {
+    pfGroupFilter.delete(groupName);
+    if (pfGroupFilter.size === 0) pfGroupFilter = null;
+  } else {
+    pfGroupFilter.add(groupName);
+    if (pfGroups.length && pfGroupFilter.size === pfGroups.length) pfGroupFilter = null;
+  }
   renderPortfolio();
 }
 
@@ -1743,12 +1747,18 @@ function renderPortfolio() {
   const filterBar = document.getElementById('pfFilterBar');
   if (filterBar) {
     filterBar.style.display = portfolioItems.length ? 'flex' : 'none';
-    if (portfolioItems.length) {
-      const counts = { kr: 0, foreign: 0, etc: 0 };
-      portfolioItems.forEach(i => counts[pfMarketType(i.stock_code)]++);
-      filterBar.querySelector('[data-filter="kr"]').textContent = `한국 (${counts.kr})`;
-      filterBar.querySelector('[data-filter="foreign"]').textContent = `해외 (${counts.foreign})`;
-      filterBar.querySelector('[data-filter="etc"]').textContent = `기타 (${counts.etc})`;
+    if (portfolioItems.length && pfGroups.length) {
+      const counts = {};
+      pfGroups.forEach(g => counts[g.group_name] = 0);
+      portfolioItems.forEach(i => {
+        const gn = pfGetGroup(i);
+        if (counts[gn] !== undefined) counts[gn]++;
+        else counts[gn] = 1;
+      });
+      filterBar.innerHTML = pfGroups.map(g => {
+        const active = pfGroupFilter === null || pfGroupFilter.has(g.group_name);
+        return `<button class="pf-filter-btn${active ? ' active' : ''}" onclick="pfToggleGroupFilter('${escapeHtml(g.group_name)}')">${escapeHtml(g.group_name)} (${counts[g.group_name] || 0})</button>`;
+      }).join('') + `<button class="pf-filter-btn pf-group-manage-btn" onclick="openGroupModal()" title="그룹 관리">\u2699</button>`;
     }
   }
 
@@ -1780,9 +1790,8 @@ function renderPortfolio() {
   let grandTotalMarketValue = 0;
   allRows.forEach(r => { if (r.marketValue !== null) grandTotalMarketValue += r.marketValue; });
 
-  // Apply market filter
-  const allSelected = pfMarketFilter.size === 3;
-  const rows = allSelected ? allRows : allRows.filter(r => pfMarketFilter.has(pfMarketType(r.stock_code)));
+  // Apply group filter
+  const rows = pfGroupFilter === null ? allRows : allRows.filter(r => pfGroupFilter.has(pfGetGroup(r)));
 
   if (!rows.length) {
     table.style.display = 'none';
@@ -1805,8 +1814,9 @@ function renderPortfolio() {
   if (pfSortKey) {
     rows.sort((a, b) => {
       let va, vb;
-      if (pfSortKey === 'name') {
-        va = a.stock_name; vb = b.stock_name;
+      if (pfSortKey === 'name' || pfSortKey === 'group') {
+        va = pfSortKey === 'group' ? pfGetGroup(a) : a.stock_name;
+        vb = pfSortKey === 'group' ? pfGetGroup(b) : b.stock_name;
         return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
       }
       va = a[pfSortKey] ?? -Infinity;
@@ -1867,9 +1877,12 @@ function renderPortfolio() {
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : 8;
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
 
+    const groupOpts = pfGroups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
+
     if (isEditing) {
       return `<tr data-code="${r.stock_code}">
         <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}');return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
+        <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
@@ -1885,6 +1898,7 @@ function renderPortfolio() {
     }
     return `<tr draggable="true" data-code="${r.stock_code}">
       <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}');return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
+      <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
       <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
@@ -1901,7 +1915,7 @@ function renderPortfolio() {
 
   // Footer
   tfoot.innerHTML = `<tr>
-    <td colspan="6">합계</td>
+    <td colspan="7">합계</td>
     <td class="pf-col-num">${fmtNum(totalMarketValue)}</td>
     <td class="pf-col-num">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td></td>
@@ -1977,6 +1991,26 @@ async function pfDropRow(fromCode, toCode) {
   } catch (e) {
     await loadPortfolio();
   }
+}
+
+async function pfChangeGroup(stockCode, groupName) {
+  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  if (!item) return;
+  try {
+    const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stock_name: item.stock_name,
+        quantity: item.quantity,
+        avg_price: item.avg_price,
+        group_name: groupName,
+      }),
+    });
+    if (!resp.ok) throw new Error('그룹 변경 실패');
+    item.group_name = groupName;
+    renderPortfolio();
+  } catch (e) { alert(e.message); }
 }
 
 function startPortfolioEdit(stockCode) {
@@ -2167,6 +2201,111 @@ function pfGoAnalyze(stockCode) {
   }
   switchView('analysis');
   analyzeStock(analyzeCode);
+}
+
+// --- Group management modal ---
+function openGroupModal() {
+  document.getElementById('pfGroupModal').style.display = 'flex';
+  renderGroupModalBody();
+}
+
+function closeGroupModal() {
+  document.getElementById('pfGroupModal').style.display = 'none';
+}
+
+function renderGroupModalBody() {
+  const body = document.getElementById('pfGroupModalBody');
+  const counts = {};
+  portfolioItems.forEach(i => {
+    const g = pfGetGroup(i);
+    counts[g] = (counts[g] || 0) + 1;
+  });
+  body.innerHTML = pfGroups.map(g => {
+    const cnt = counts[g.group_name] || 0;
+    const delBtn = g.is_default
+      ? ''
+      : `<button class="pf-grp-del" onclick="deleteGroup('${escapeHtml(g.group_name)}')" title="삭제">&times;</button>`;
+    return `<div class="pf-grp-row">
+      <input class="pf-grp-name" value="${escapeHtml(g.group_name)}" data-orig="${escapeHtml(g.group_name)}" onblur="renameGroup(this)">
+      <span class="pf-grp-cnt">${cnt}종목</span>
+      ${delBtn}
+    </div>`;
+  }).join('');
+}
+
+async function addNewGroup() {
+  const input = document.getElementById('pfNewGroupInput');
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    const resp = await apiFetch('/api/portfolio/groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || '추가 실패');
+    }
+    const result = await resp.json();
+    pfGroups.push(result);
+    input.value = '';
+    renderGroupModalBody();
+    renderPortfolio();
+  } catch (e) { alert(e.message); }
+}
+
+async function renameGroup(inputEl) {
+  const orig = inputEl.dataset.orig;
+  const newName = inputEl.value.trim();
+  if (!newName || newName === orig) {
+    inputEl.value = orig;
+    return;
+  }
+  try {
+    const resp = await apiFetch(`/api/portfolio/groups/${encodeURIComponent(orig)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_name: newName }),
+    });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || '변경 실패');
+    }
+    const g = pfGroups.find(g => g.group_name === orig);
+    if (g) g.group_name = newName;
+    portfolioItems.forEach(i => { if (i.group_name === orig) i.group_name = newName; });
+    if (pfGroupFilter && pfGroupFilter.has(orig)) {
+      pfGroupFilter.delete(orig);
+      pfGroupFilter.add(newName);
+    }
+    inputEl.dataset.orig = newName;
+    renderPortfolio();
+  } catch (e) {
+    alert(e.message);
+    inputEl.value = orig;
+  }
+}
+
+async function deleteGroup(groupName) {
+  const counts = {};
+  portfolioItems.forEach(i => {
+    const g = pfGetGroup(i);
+    counts[g] = (counts[g] || 0) + 1;
+  });
+  const cnt = counts[groupName] || 0;
+  if (cnt > 0 && !confirm(`"${groupName}" 그룹에 ${cnt}개 종목이 있습니다. 삭제하면 기본 그룹으로 이동합니다. 삭제할까요?`)) return;
+  try {
+    const resp = await apiFetch(`/api/portfolio/groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || '삭제 실패');
+    }
+    pfGroups = pfGroups.filter(g => g.group_name !== groupName);
+    if (pfGroupFilter) pfGroupFilter.delete(groupName);
+    await loadPortfolio();
+    renderGroupModalBody();
+  } catch (e) { alert(e.message); }
 }
 
 let marketBarLoaded = false;
