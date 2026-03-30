@@ -2693,12 +2693,3 @@ async function deleteCashflow(id) {
   } catch (e) { alert(e.message); }
 }
 
-async function triggerSnapshot() {
-  try {
-    const resp = await apiFetch('/api/portfolio/snapshot-now', { method: 'POST' });
-    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || '실패'); }
-    const d = await resp.json();
-    alert(`${d.date} 스냅샷이 저장되었습니다.`);
-    loadPerformanceData();
-  } catch (e) { alert(e.message); }
-}

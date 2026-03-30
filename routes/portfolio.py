@@ -702,12 +702,3 @@ async def delete_cashflow(cf_id: int, request: Request):
     return {"ok": True}
 
 
-@router.post("/api/portfolio/snapshot-now")
-async def trigger_snapshot(request: Request):
-    """Manually trigger a snapshot (for testing)."""
-    user = _require_user(await get_current_user(request))
-    from datetime import date
-    from snapshot_nav import take_snapshot
-    snap_date = date.today().isoformat()
-    await take_snapshot(user["google_sub"], snap_date)
-    return {"ok": True, "date": snap_date}
