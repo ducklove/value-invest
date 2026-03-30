@@ -624,6 +624,11 @@ body {
   background: none; border: none; color: var(--text-secondary); font-size: 18px;
   cursor: pointer; line-height: 1; padding: 2px 6px;
 }
+.pf-grp-drag {
+  cursor: grab; color: var(--text-secondary); font-size: 14px; user-select: none; padding: 2px 4px;
+}
+.pf-grp-row.dragging { opacity: 0.4; }
+.pf-grp-row.drag-over { border-top: 2px solid var(--primary); }
 .pf-grp-del:hover { color: #e74c3c; }
 .pf-add-bar {
   position: relative; margin-bottom: 16px;

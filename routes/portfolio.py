@@ -444,6 +444,16 @@ async def delete_group(group_name: str, request: Request):
     return {"ok": True}
 
 
+@router.put("/api/portfolio/groups-order")
+async def save_groups_order(request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    names = payload.get("group_names")
+    if not isinstance(names, list) or not names:
+        raise HTTPException(status_code=400, detail="그룹 목록이 필요합니다.")
+    await cache.save_portfolio_groups_order(user["google_sub"], names)
+    return {"ok": True}
+
+
 @router.get("/api/portfolio/quotes")
 async def stream_portfolio_quotes(request: Request):
     """Stream quote updates one by one with rate limiting."""

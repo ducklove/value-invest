@@ -1030,6 +1030,18 @@ async def delete_portfolio_group(google_sub: str, group_name: str):
         await db.close()
 
 
+async def save_portfolio_groups_order(google_sub: str, group_names: list[str]):
+    db = await get_db()
+    try:
+        await db.executemany(
+            "UPDATE portfolio_groups SET sort_order = ? WHERE google_sub = ? AND group_name = ?",
+            [(i, google_sub, name) for i, name in enumerate(group_names)],
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
 async def save_latest_report(stock_code: str, report: dict):
     db = await get_db()
     try:

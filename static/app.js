@@ -1814,10 +1814,16 @@ function renderPortfolio() {
   if (pfSortKey) {
     rows.sort((a, b) => {
       let va, vb;
-      if (pfSortKey === 'name' || pfSortKey === 'group') {
-        va = pfSortKey === 'group' ? pfGetGroup(a) : a.stock_name;
-        vb = pfSortKey === 'group' ? pfGetGroup(b) : b.stock_name;
+      if (pfSortKey === 'name') {
+        va = a.stock_name; vb = b.stock_name;
         return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      }
+      if (pfSortKey === 'group') {
+        const orderMap = {};
+        pfGroups.forEach((g, i) => orderMap[g.group_name] = i);
+        va = orderMap[pfGetGroup(a)] ?? 999;
+        vb = orderMap[pfGetGroup(b)] ?? 999;
+        return pfSortAsc ? va - vb : vb - va;
       }
       va = a[pfSortKey] ?? -Infinity;
       vb = b[pfSortKey] ?? -Infinity;
@@ -2220,17 +2226,47 @@ function renderGroupModalBody() {
     const g = pfGetGroup(i);
     counts[g] = (counts[g] || 0) + 1;
   });
-  body.innerHTML = pfGroups.map(g => {
+  body.innerHTML = pfGroups.map((g, i) => {
     const cnt = counts[g.group_name] || 0;
     const delBtn = g.is_default
       ? ''
       : `<button class="pf-grp-del" onclick="deleteGroup('${escapeHtml(g.group_name)}')" title="삭제">&times;</button>`;
-    return `<div class="pf-grp-row">
+    return `<div class="pf-grp-row" draggable="true" data-grp-idx="${i}">
+      <span class="pf-grp-drag" title="드래그하여 순서 변경">&#x2630;</span>
       <input class="pf-grp-name" value="${escapeHtml(g.group_name)}" data-orig="${escapeHtml(g.group_name)}" onblur="renameGroup(this)">
       <span class="pf-grp-cnt">${cnt}종목</span>
       ${delBtn}
     </div>`;
   }).join('');
+  // Drag-and-drop for group reorder
+  body.querySelectorAll('.pf-grp-row[draggable]').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', row.dataset.grpIdx);
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!row.classList.contains('dragging')) row.classList.add('drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', async e => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+      const toIdx = parseInt(row.dataset.grpIdx);
+      if (isNaN(fromIdx) || isNaN(toIdx) || fromIdx === toIdx) return;
+      const [moved] = pfGroups.splice(fromIdx, 1);
+      pfGroups.splice(toIdx, 0, moved);
+      renderGroupModalBody();
+      renderPortfolio();
+      try {
+        await apiFetch('/api/portfolio/groups-order', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group_names: pfGroups.map(g => g.group_name) }),
+        });
+      } catch {}
+    });
+  });
 }
 
 async function addNewGroup() {
