@@ -2247,7 +2247,7 @@ function renderGroupModalBody() {
     if (price !== null) s.dailyPnl += qty * change;
   });
   const defaultCount = pfGroups.filter(x => x.is_default).length;
-  body.innerHTML = pfGroups.map((g, i) => {
+  const rowsHtml = pfGroups.map((g, i) => {
     const s = stats[g.group_name] || { cnt: 0, invested: 0, mv: 0, dailyPnl: 0 };
     const weight = grandMV > 0 ? (s.mv / grandMV * 100) : 0;
     const returnPct = s.invested > 0 ? ((s.mv - s.invested) / s.invested * 100) : 0;
@@ -2257,21 +2257,26 @@ function renderGroupModalBody() {
     const delBtn = canDelete
       ? `<button class="pf-grp-del" onclick="deleteGroup('${escapeHtml(g.group_name)}')" title="삭제">&times;</button>`
       : '';
-    return `<div class="pf-grp-row" draggable="true" data-grp-idx="${i}">
-      <span class="pf-grp-drag" title="드래그하여 순서 변경">&#x2630;</span>
-      <input class="pf-grp-name" value="${escapeHtml(g.group_name)}" data-orig="${escapeHtml(g.group_name)}" onblur="renameGroup(this)">
-      <span class="pf-grp-cnt">${s.cnt}종목</span>
-      ${delBtn}
-    </div>
-    <div class="pf-grp-stats">
-      <span>비중 <b>${weight.toFixed(1)}%</b></span>
-      <span>평가 <b>${fmtNum(Math.round(s.mv))}원</b></span>
-      <span class="${returnClass(returnPct)}">수익률 <b>${fmtPct(returnPct)}</b></span>
-      <span class="${returnClass(s.dailyPnl)}">일간 <b>${fmtPct(dailyPct)}</b> (${fmtSignedKrw(s.dailyPnl)})</span>
-    </div>`;
+    return `<tr class="pf-grp-tr" draggable="true" data-grp-idx="${i}">
+      <td class="pf-grp-td-drag"><span class="pf-grp-drag" title="드래그하여 순서 변경">&#x2630;</span></td>
+      <td class="pf-grp-td-name"><input class="pf-grp-name" value="${escapeHtml(g.group_name)}" data-orig="${escapeHtml(g.group_name)}" onblur="renameGroup(this)"></td>
+      <td class="pf-grp-td-num">${s.cnt}</td>
+      <td class="pf-grp-td-num">${weight.toFixed(1)}%</td>
+      <td class="pf-grp-td-num">${fmtNum(Math.round(s.mv))}</td>
+      <td class="pf-grp-td-num"><span class="${returnClass(returnPct)}">${fmtPct(returnPct)}</span></td>
+      <td class="pf-grp-td-num"><span class="${returnClass(dailyPct)}">${fmtPct(dailyPct)}</span></td>
+      <td class="pf-grp-td-num"><span class="${returnClass(s.dailyPnl)}">${fmtSignedKrw(s.dailyPnl)}</span></td>
+      <td class="pf-grp-td-act">${delBtn}</td>
+    </tr>`;
   }).join('');
+  body.innerHTML = `<table class="pf-grp-table">
+    <thead><tr>
+      <th></th><th>그룹명</th><th>종목</th><th>비중</th><th>평가금액</th><th>수익률</th><th>일간</th><th>일간수익</th><th></th>
+    </tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>`;
   // Drag-and-drop for group reorder
-  body.querySelectorAll('.pf-grp-row[draggable]').forEach(row => {
+  body.querySelectorAll('.pf-grp-tr[draggable]').forEach(row => {
     row.addEventListener('dragstart', e => {
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', row.dataset.grpIdx);

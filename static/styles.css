@@ -586,7 +586,7 @@ body {
 }
 .pf-modal {
   background: var(--surface); border-radius: 12px; padding: 0;
-  min-width: 340px; max-width: 520px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  min-width: 340px; max-width: 700px; width: 95%; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
 }
 .pf-modal-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -609,11 +609,6 @@ body {
   padding: 8px 16px; border: none; border-radius: 8px;
   background: var(--primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.pf-grp-row {
-  display: flex; align-items: center; gap: 8px; padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-}
-.pf-grp-row:last-child { border-bottom: none; }
 .pf-grp-name {
   flex: 1; padding: 6px 8px; border: 1px solid transparent; border-radius: 6px;
   background: transparent; color: var(--text); font-size: 14px;
@@ -624,19 +619,22 @@ body {
   background: none; border: none; color: var(--text-secondary); font-size: 18px;
   cursor: pointer; line-height: 1; padding: 2px 6px;
 }
-.pf-grp-stats {
-  display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 2px 0 10px 32px;
-  font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border);
-  margin-bottom: 2px;
+.pf-grp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pf-grp-table th {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary); text-align: right;
+  padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
-.pf-grp-stats b { font-weight: 700; color: var(--text); }
-.pf-grp-stats .pf-return.positive b { color: #e74c3c; }
-.pf-grp-stats .pf-return.negative b { color: #2980b9; }
+.pf-grp-table th:nth-child(2) { text-align: left; }
+.pf-grp-td-drag { width: 24px; text-align: center; }
+.pf-grp-td-name { text-align: left; }
+.pf-grp-td-num { text-align: right; padding: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pf-grp-td-act { width: 28px; text-align: center; }
+.pf-grp-tr { border-bottom: 1px solid var(--border); }
 .pf-grp-drag {
   cursor: grab; color: var(--text-secondary); font-size: 14px; user-select: none; padding: 2px 4px;
 }
-.pf-grp-row.dragging { opacity: 0.4; }
-.pf-grp-row.drag-over { border-top: 2px solid var(--primary); }
+.pf-grp-tr.dragging { opacity: 0.4; }
+.pf-grp-tr.drag-over { outline: 2px solid var(--primary); }
 .pf-grp-del:hover { color: #e74c3c; }
 .pf-add-bar {
   position: relative; margin-bottom: 16px;
