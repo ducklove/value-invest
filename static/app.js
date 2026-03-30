@@ -1900,7 +1900,7 @@ function renderPortfolio() {
 
     if (isEditing) {
       return `<tr data-code="${r.stock_code}">
-        <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}');return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
+        <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
         <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
@@ -1916,7 +1916,7 @@ function renderPortfolio() {
       </tr>`;
     }
     return `<tr draggable="true" data-code="${r.stock_code}">
-      <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}');return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
+      <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
       <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
@@ -2220,18 +2220,56 @@ async function pfAddFromSearch(code, name) {
   } catch (e) { alert(e.message); }
 }
 
-function pfGoAnalyze(stockCode) {
+function _isPreferredStock(code) {
+  return /^[0-9]{5}[^0]$/.test(code) || /^[0-9]{5}[A-Z]$/.test(code);
+}
+
+function pfGoAnalyze(stockCode, e) {
   // Special assets, cash & foreign stocks: no analysis support
   if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(stockCode) || stockCode.startsWith('CASH_')) return;
   const isKorean = stockCode.length === 6 && /^\d{5}/.test(stockCode);
   if (!isKorean) return;
-  // For preferred stocks, try common stock code (replace last char with 0)
-  let analyzeCode = stockCode;
-  if (/^[0-9]{5}[^0]$/.test(stockCode) || /^[0-9]{5}[A-Z]$/.test(stockCode)) {
-    analyzeCode = stockCode.slice(0, -1) + '0';
+
+  if (_isPreferredStock(stockCode)) {
+    const commonCode = stockCode.slice(0, -1) + '0';
+    // Show popup menu near click
+    _showPrefMenu(stockCode, commonCode, e);
+    return;
   }
   switchView('analysis');
-  analyzeStock(analyzeCode);
+  analyzeStock(stockCode);
+}
+
+function _showPrefMenu(prefCode, commonCode, e) {
+  // Remove any existing menu
+  document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
+  const menu = document.createElement('div');
+  menu.className = 'pf-pref-menu';
+  menu.innerHTML = `
+    <div class="pf-pref-item" data-action="common">본주 분석 (${commonCode})</div>
+    <div class="pf-pref-item" data-action="spread">우선주 괴리율 대시보드</div>
+  `;
+  document.body.appendChild(menu);
+  // Position near click or element
+  const rect = e && e.target ? e.target.getBoundingClientRect() : { left: 100, bottom: 100 };
+  menu.style.left = rect.left + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+
+  menu.querySelector('[data-action="common"]').addEventListener('click', () => {
+    menu.remove();
+    switchView('analysis');
+    analyzeStock(commonCode);
+  });
+  menu.querySelector('[data-action="spread"]').addEventListener('click', () => {
+    menu.remove();
+    window.open(`https://ducklove.github.io/common_preferred_spread/?code=${prefCode}`, '_blank');
+  });
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', function close(ev) {
+      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); }
+    });
+  }, 0);
 }
 
 // --- Group management modal ---

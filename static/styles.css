@@ -562,6 +562,17 @@ body {
 .pf-summary-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
 .pf-summary-value { font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .pf-summary-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-variant-numeric: tabular-nums; }
+/* Preferred stock popup menu */
+.pf-pref-menu {
+  position: fixed; z-index: 1001; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  min-width: 200px; overflow: hidden;
+}
+.pf-pref-item {
+  padding: 10px 16px; cursor: pointer; font-size: 13px; color: var(--text);
+}
+.pf-pref-item:hover { background: var(--primary); color: white; }
+
 /* Portfolio tab bar */
 .pf-tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
 .pf-tab {
