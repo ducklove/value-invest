@@ -1666,9 +1666,11 @@ async function refreshPfQuotes() {
         if (r.status === 'fulfilled' && r.value) {
           kisOk = true;
           portfolioItems[i].quote = r.value;
-          renderPortfolio();
-          const row = document.querySelector(`#pfBody tr[data-code="${portfolioItems[i].stock_code}"]`);
-          flashEl(row);
+          if (!pfEditingCode) {
+            renderPortfolio();
+            const row = document.querySelector(`#pfBody tr[data-code="${portfolioItems[i].stock_code}"]`);
+            flashEl(row);
+          }
         }
       });
     }
@@ -1691,9 +1693,11 @@ async function refreshPfQuotes() {
             const item = portfolioItems.find(i => i.stock_code === msg.stock_code);
             if (item) {
               item.quote = msg.quote;
-              renderPortfolio();
-              const row = document.querySelector(`#pfBody tr[data-code="${msg.stock_code}"]`);
-              flashEl(row);
+              if (!pfEditingCode) {
+                renderPortfolio();
+                const row = document.querySelector(`#pfBody tr[data-code="${msg.stock_code}"]`);
+                flashEl(row);
+              }
             }
           } catch {}
         }
