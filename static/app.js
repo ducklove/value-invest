@@ -1776,6 +1776,10 @@ function renderPortfolio() {
     return { ...item, cur, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
   });
 
+  // Total market value across ALL items (for weight calculation)
+  let grandTotalMarketValue = 0;
+  allRows.forEach(r => { if (r.marketValue !== null) grandTotalMarketValue += r.marketValue; });
+
   // Apply market filter
   const allSelected = pfMarketFilter.size === 3;
   const rows = allSelected ? allRows : allRows.filter(r => pfMarketFilter.has(pfMarketType(r.stock_code)));
@@ -1855,7 +1859,7 @@ function renderPortfolio() {
 
   // Table body
   tbody.innerHTML = rows.map((r, i) => {
-    const weight = totalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / totalMarketValue * 100) : 0;
+    const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
     const isSpecialFloat = ['KRX_GOLD', 'BTC', 'ETH'].includes(r.stock_code);
     const curTag = r.stock_code === 'KRX_GOLD' ? ' <span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
@@ -1899,7 +1903,7 @@ function renderPortfolio() {
   tfoot.innerHTML = `<tr>
     <td colspan="6">합계</td>
     <td class="pf-col-num">${fmtNum(totalMarketValue)}</td>
-    <td class="pf-col-num">100%</td>
+    <td class="pf-col-num">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td></td>
   </tr>`;
 
