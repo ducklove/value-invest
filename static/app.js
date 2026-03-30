@@ -2007,10 +2007,10 @@ async function loadMarketSummary() {
       const cls = i.direction === 'up' ? 'mi-up' : i.direction === 'down' ? 'mi-down' : '';
       const sign = i.direction === 'up' ? '+' : i.direction === 'down' ? '-' : '';
       const isIndex = i.label === 'KOSPI' || i.label === 'KOSDAQ';
-      const valHtml = isIndex
-        ? `<span class="mi-val ${cls}">${sign}${i.change_pct || ''}</span>`
-        : `<span class="mi-val">${i.value}</span>`;
-      return `<div class="mi"><span class="mi-label">${i.label}</span>${valHtml}</div>`;
+      const chg = isIndex
+        ? (i.change_pct ? `${sign}${i.change_pct}` : '')
+        : (i.change ? `${sign}${i.change}` : '');
+      return `<div class="mi"><span class="mi-label">${i.label}</span><span class="mi-right"><span class="mi-val">${i.value}</span>${chg ? ` <span class="mi-chg ${cls}">(${chg})</span>` : ''}</span></div>`;
     }).join('');
     if (marketBarLoaded) flashEl(bar);
     marketBarLoaded = true;
