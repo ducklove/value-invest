@@ -193,6 +193,13 @@ def _default_group_for_code(stock_code: str) -> str:
 
 
 async def _ensure_default_groups(db: aiosqlite.Connection, google_sub: str):
+    cursor = await db.execute(
+        "SELECT COUNT(*) AS cnt FROM portfolio_groups WHERE google_sub = ? AND is_default = 1",
+        (google_sub,),
+    )
+    row = await cursor.fetchone()
+    if row["cnt"] >= len(_DEFAULT_GROUPS):
+        return
     for name, order, is_default in _DEFAULT_GROUPS:
         await db.execute(
             "INSERT OR IGNORE INTO portfolio_groups (google_sub, group_name, sort_order, is_default) VALUES (?, ?, ?, ?)",
