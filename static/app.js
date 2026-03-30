@@ -2236,9 +2236,11 @@ function renderGroupModalBody() {
   });
   body.innerHTML = pfGroups.map((g, i) => {
     const cnt = counts[g.group_name] || 0;
-    const delBtn = g.is_default
-      ? ''
-      : `<button class="pf-grp-del" onclick="deleteGroup('${escapeHtml(g.group_name)}')" title="삭제">&times;</button>`;
+    const defaultCount = pfGroups.filter(x => x.is_default).length;
+    const canDelete = !g.is_default || defaultCount > 3;
+    const delBtn = canDelete
+      ? `<button class="pf-grp-del" onclick="deleteGroup('${escapeHtml(g.group_name)}')" title="삭제">&times;</button>`
+      : '';
     return `<div class="pf-grp-row" draggable="true" data-grp-idx="${i}">
       <span class="pf-grp-drag" title="드래그하여 순서 변경">&#x2630;</span>
       <input class="pf-grp-name" value="${escapeHtml(g.group_name)}" data-orig="${escapeHtml(g.group_name)}" onblur="renameGroup(this)">

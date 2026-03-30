@@ -438,7 +438,8 @@ async def delete_group(group_name: str, request: Request):
     target = next((g for g in groups if g["group_name"] == group_name), None)
     if not target:
         raise HTTPException(status_code=404, detail="그룹을 찾을 수 없습니다.")
-    if target["is_default"]:
+    default_count = sum(1 for g in groups if g["is_default"])
+    if target["is_default"] and default_count <= 3:
         raise HTTPException(status_code=400, detail="기본 그룹은 삭제할 수 없습니다.")
     await cache.delete_portfolio_group(user["google_sub"], group_name)
     return {"ok": True}
