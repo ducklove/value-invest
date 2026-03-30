@@ -1714,7 +1714,7 @@ function pfSort(key) {
 }
 
 function pfIsKorean(code) {
-  return code === 'KRX_GOLD' || (code.length === 6 && /^\d{5}/.test(code));
+  return code.length === 6 && /^\d{5}/.test(code);
 }
 
 function pfSetFilter(filter) {
@@ -1741,7 +1741,7 @@ function renderPortfolio() {
       const usCount = portfolioItems.length - krCount;
       filterBar.querySelector('[data-filter="all"]').textContent = `전체 (${portfolioItems.length})`;
       filterBar.querySelector('[data-filter="kr"]').textContent = `한국 (${krCount})`;
-      filterBar.querySelector('[data-filter="us"]').textContent = `해외 (${usCount})`;
+      filterBar.querySelector('[data-filter="us"]').textContent = `해외/기타 (${usCount})`;
     }
   }
 
@@ -1776,7 +1776,7 @@ function renderPortfolio() {
   if (!rows.length) {
     table.style.display = 'none';
     empty.style.display = 'block';
-    empty.textContent = pfMarketFilter === 'kr' ? '한국 주식이 없습니다.' : '해외 주식이 없습니다.';
+    empty.textContent = pfMarketFilter === 'kr' ? '한국 주식이 없습니다.' : '해외/기타 종목이 없습니다.';
     summary.innerHTML = '';
     return;
   }
@@ -1853,7 +1853,8 @@ function renderPortfolio() {
     const isSpecialFloat = ['KRX_GOLD', 'BTC', 'ETH'].includes(r.stock_code);
     const curTag = r.stock_code === 'KRX_GOLD' ? ' <span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isSpecialFloat ? 'any' : '1';
-    const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 8}) : '-') : fmtNum;
+    const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : 8;
+    const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
 
     if (isEditing) {
       return `<tr data-code="${r.stock_code}">

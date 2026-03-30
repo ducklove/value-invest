@@ -22,7 +22,7 @@ def _is_special_asset(code: str) -> bool:
 
 
 def _is_korean_stock(code: str) -> bool:
-    return code == "KRX_GOLD" or (len(code) == 6 and code[:5].isdigit())
+    return len(code) == 6 and code[:5].isdigit()
 
 
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
