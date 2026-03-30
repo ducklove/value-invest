@@ -1592,7 +1592,7 @@ let pfSortKey = 'marketValue';
 let pfSortAsc = false;
 let pfQuoteTimer = null;
 let pfQuoteRefreshing = false;
-let pfMarketFilter = 'all'; // 'all' | 'kr' | 'us'
+let pfMarketFilter = new Set(['kr', 'foreign', 'etc']);
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -1713,14 +1713,21 @@ function pfSort(key) {
   renderPortfolio();
 }
 
-function pfIsKorean(code) {
-  return code.length === 6 && /^\d{5}/.test(code);
+const _PF_SPECIAL = new Set(['KRX_GOLD', 'BTC', 'ETH']);
+
+function pfMarketType(code) {
+  if (_PF_SPECIAL.has(code)) return 'etc';
+  if (code.length === 6 && /^\d{5}/.test(code)) return 'kr';
+  return 'foreign';
 }
 
-function pfSetFilter(filter) {
-  pfMarketFilter = filter;
+function pfToggleFilter(key) {
+  if (pfMarketFilter.has(key)) pfMarketFilter.delete(key);
+  else pfMarketFilter.add(key);
+  // If none selected, re-select all
+  if (pfMarketFilter.size === 0) { pfMarketFilter.add('kr'); pfMarketFilter.add('foreign'); pfMarketFilter.add('etc'); }
   document.querySelectorAll('.pf-filter-btn').forEach(btn =>
-    btn.classList.toggle('active', btn.dataset.filter === filter)
+    btn.classList.toggle('active', pfMarketFilter.has(btn.dataset.filter))
   );
   renderPortfolio();
 }
@@ -1737,11 +1744,11 @@ function renderPortfolio() {
   if (filterBar) {
     filterBar.style.display = portfolioItems.length ? 'flex' : 'none';
     if (portfolioItems.length) {
-      const krCount = portfolioItems.filter(i => pfIsKorean(i.stock_code)).length;
-      const usCount = portfolioItems.length - krCount;
-      filterBar.querySelector('[data-filter="all"]').textContent = `전체 (${portfolioItems.length})`;
-      filterBar.querySelector('[data-filter="kr"]').textContent = `한국 (${krCount})`;
-      filterBar.querySelector('[data-filter="us"]').textContent = `해외/기타 (${usCount})`;
+      const counts = { kr: 0, foreign: 0, etc: 0 };
+      portfolioItems.forEach(i => counts[pfMarketType(i.stock_code)]++);
+      filterBar.querySelector('[data-filter="kr"]').textContent = `한국 (${counts.kr})`;
+      filterBar.querySelector('[data-filter="foreign"]').textContent = `해외 (${counts.foreign})`;
+      filterBar.querySelector('[data-filter="etc"]').textContent = `기타 (${counts.etc})`;
     }
   }
 
@@ -1770,13 +1777,13 @@ function renderPortfolio() {
   });
 
   // Apply market filter
-  const rows = pfMarketFilter === 'all' ? allRows
-    : allRows.filter(r => pfMarketFilter === 'kr' ? pfIsKorean(r.stock_code) : !pfIsKorean(r.stock_code));
+  const allSelected = pfMarketFilter.size === 3;
+  const rows = allSelected ? allRows : allRows.filter(r => pfMarketFilter.has(pfMarketType(r.stock_code)));
 
   if (!rows.length) {
     table.style.display = 'none';
     empty.style.display = 'block';
-    empty.textContent = pfMarketFilter === 'kr' ? '한국 주식이 없습니다.' : '해외/기타 종목이 없습니다.';
+    empty.textContent = '해당 분류의 종목이 없습니다.';
     summary.innerHTML = '';
     return;
   }
