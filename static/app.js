@@ -2486,6 +2486,13 @@ async function initApp() {
   setInterval(loadMarketSummary, 60_000);
   ensureQuoteRefreshTimer();
   trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
+  // URL param: ?code=058650 → go directly to analysis
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if (code) {
+    switchView('analysis');
+    analyzeStock(code.trim());
+  }
 }
 
 initApp();
