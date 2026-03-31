@@ -2350,11 +2350,29 @@ function _isPreferredStock(code) {
   return /^[0-9]{5}[^0]$/.test(code) || /^[0-9]{5}[A-Z]$/.test(code);
 }
 
-const _HOLDING_CODES = new Set([
+let _HOLDING_CODES = new Set([
   '000670','000880','002790','003380','004360','004700','004800',
   '005810','006120','024800','028260','030530','032830',
   '036710','051910','058650','402340',
 ]);
+
+(function _refreshHoldingCodes() {
+  try {
+    const cached = JSON.parse(localStorage.getItem('holdingCodes') || '{}');
+    if (cached.codes) _HOLDING_CODES = new Set(cached.codes);
+    // Refresh once per day
+    if (cached.ts && Date.now() - cached.ts < 86400000) return;
+  } catch {}
+  fetch('https://ducklove.github.io/holding_value/api/holdings.json')
+    .then(r => r.json())
+    .then(data => {
+      const codes = data.items.map(i => i.holdingCode).filter(Boolean);
+      if (codes.length) {
+        _HOLDING_CODES = new Set(codes);
+        localStorage.setItem('holdingCodes', JSON.stringify({ codes, ts: Date.now() }));
+      }
+    }).catch(() => {});
+})();
 
 function pfGoAnalyze(stockCode, e) {
   // Special assets, cash & foreign stocks: no analysis support
