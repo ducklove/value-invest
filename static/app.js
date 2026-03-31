@@ -1592,7 +1592,6 @@ let pfSortKey = 'marketValue';
 let pfSortAsc = false;
 let pfQuoteTimer = null;
 let pfQuoteRefreshing = false;
-let pfSuppressFlash = false;
 let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 let pfGroupSort = true;   // independent group sort toggle
@@ -1672,18 +1671,17 @@ async function refreshPfQuotes() {
         if (r.status === 'fulfilled' && r.value) {
           kisOk = true;
           portfolioItems[i].quote = r.value;
-          if (!pfEditingCode && !pfSuppressFlash) {
-            renderPortfolio();
-            const row = document.querySelector(`#pfBody tr[data-code="${portfolioItems[i].stock_code}"]`);
-            flashEl(row);
-          }
         }
       });
-      // Also refresh benchmark quotes
+      // Also refresh benchmark quotes (merge, preserve names)
       try {
         const bResp = await apiFetch('/api/portfolio/benchmark-quotes');
-        if (bResp.ok) { pfBenchmarkQuotes = await bResp.json(); renderPortfolio(); }
+        if (bResp.ok) {
+          const fresh = await bResp.json();
+          for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
+        }
       } catch {}
+      if (kisOk && !pfEditingCode) renderPortfolio();
     }
     if (!kisOk) {
       const resp = await apiFetch('/api/portfolio/quotes');
@@ -1702,22 +1700,17 @@ async function refreshPfQuotes() {
             const msg = JSON.parse(line.slice(6));
             if (msg.done) break;
             if (msg.benchmark_code) {
-              pfBenchmarkQuotes[msg.benchmark_code] = msg.benchmark_quote;
-              if (!pfEditingCode) renderPortfolio();
+              // Merge benchmark quote, preserve existing name
+              const prev = pfBenchmarkQuotes[msg.benchmark_code] || {};
+              pfBenchmarkQuotes[msg.benchmark_code] = { ...prev, ...msg.benchmark_quote };
               continue;
             }
             const item = portfolioItems.find(i => i.stock_code === msg.stock_code);
-            if (item) {
-              item.quote = msg.quote;
-              if (!pfEditingCode && !pfSuppressFlash) {
-                renderPortfolio();
-                const row = document.querySelector(`#pfBody tr[data-code="${msg.stock_code}"]`);
-                flashEl(row);
-              }
-            }
+            if (item) item.quote = msg.quote;
           } catch {}
         }
       }
+      if (!pfEditingCode) renderPortfolio();
     }
   } catch {} finally {
     pfQuoteRefreshing = false;
@@ -2033,15 +2026,20 @@ function fmtBenchmarkPct(benchmarkCode) {
 
 function benchmarkName(code) {
   if (!code) return '';
+  let name;
   // Check if benchmark-quotes API returned a name
   const bq = pfBenchmarkQuotes[code];
-  if (bq && bq.name && bq.name !== code) return bq.name;
-  const preset = _BENCHMARK_PRESETS.find(p => p.code === code);
-  if (preset) return preset.name;
-  // For stock codes, find name from portfolio items
-  const item = portfolioItems.find(i => i.stock_code === code);
-  if (item) return item.stock_name;
-  return code;
+  if (bq && bq.name && bq.name !== code) name = bq.name;
+  else {
+    const preset = _BENCHMARK_PRESETS.find(p => p.code === code);
+    if (preset) name = preset.name;
+    else {
+      const item = portfolioItems.find(i => i.stock_code === code);
+      name = item ? item.stock_name : code;
+    }
+  }
+  // Truncate to 5 characters for display
+  return name.length > 5 ? name.slice(0, 5) + '..' : name;
 }
 
 function fmtChangePct(pct, change) {
@@ -2095,7 +2093,6 @@ function pfShowBenchmarkPicker(stockCode, td) {
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
-  pfSuppressFlash = true;
   const picker = document.createElement('div');
   picker.className = 'pf-benchmark-picker';
   const presets = _BENCHMARK_PRESETS.map(p =>
@@ -2115,7 +2112,7 @@ function pfShowBenchmarkPicker(stockCode, td) {
   // Close on outside click
   setTimeout(() => {
     const close = (e) => {
-      if (!picker.contains(e.target)) { picker.remove(); pfSuppressFlash = false; document.removeEventListener('click', close); }
+      if (!picker.contains(e.target)) { picker.remove(); document.removeEventListener('click', close); }
     };
     document.addEventListener('click', close);
   }, 0);
@@ -2123,7 +2120,6 @@ function pfShowBenchmarkPicker(stockCode, td) {
 
 async function pfSetBenchmark(stockCode, benchmarkCode) {
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
-  pfSuppressFlash = false;
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
