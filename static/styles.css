@@ -643,7 +643,7 @@ body {
 /* Benchmark column */
 .pf-col-benchmark { cursor: pointer; min-width: 70px; }
 .pf-benchmark-val { font-size: 12px; opacity: 0.6; }
-.pf-benchmark-name { display: block; font-size: 10px; opacity: 0.45; line-height: 1.2; }
+.pf-benchmark-name { display: block; font-size: 10px; opacity: 0.45; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; }
 .pf-benchmark-picker {
   position: absolute; right: 0; top: 100%; z-index: 100;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;

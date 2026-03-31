@@ -462,6 +462,16 @@ async def _detect_market_type(code: str) -> str:
     return _market_type_cache[code]
 
 
+async def _prefetch_market_types(codes: list[str]):
+    """Bulk-detect market types in parallel for codes not yet cached."""
+    uncached = [c for c in codes if c not in _market_type_cache and _is_korean_stock(c) and not _is_preferred_stock(c)]
+    if not uncached:
+        return
+    async def _detect(code):
+        await _detect_market_type(code)
+    await asyncio.gather(*[_detect(c) for c in uncached])
+
+
 async def _resolve_default_benchmark(code: str) -> str:
     """Return the default benchmark code for a stock."""
     if _is_cash_asset(code):
@@ -667,6 +677,11 @@ async def stream_portfolio_quotes(request: Request):
     user = _require_user(await get_current_user(request))
     items = await cache.get_portfolio(user["google_sub"])
 
+    # Prefetch market types before streaming
+    needs_resolve = [it for it in items if not it.get("benchmark_code")]
+    if needs_resolve:
+        await _prefetch_market_types([it["stock_code"] for it in needs_resolve])
+
     async def generate():
         import json as _json
         now = _time.monotonic()
@@ -708,9 +723,11 @@ async def get_portfolio(request: Request):
     user = _require_user(await get_current_user(request))
     await cache.get_portfolio_groups(user["google_sub"])  # ensure default groups
     items = await cache.get_portfolio(user["google_sub"])
-    # Resolve default benchmarks for items without explicit benchmark
-    for item in items:
-        if not item.get("benchmark_code"):
+    # Prefetch market types in parallel, then resolve default benchmarks
+    needs_resolve = [it for it in items if not it.get("benchmark_code")]
+    if needs_resolve:
+        await _prefetch_market_types([it["stock_code"] for it in needs_resolve])
+        for item in needs_resolve:
             item["benchmark_code"] = await _resolve_default_benchmark(item["stock_code"])
     return await _enrich_with_cached_quotes(items)
 
@@ -774,6 +791,9 @@ async def get_benchmark_quotes(request: Request):
     """Fetch all unique benchmark quotes for the user's portfolio."""
     user = _require_user(await get_current_user(request))
     items = await cache.get_portfolio(user["google_sub"])
+    needs_resolve = [it for it in items if not it.get("benchmark_code")]
+    if needs_resolve:
+        await _prefetch_market_types([it["stock_code"] for it in needs_resolve])
     benchmark_codes = set()
     for item in items:
         bc = item.get("benchmark_code") or await _resolve_default_benchmark(item["stock_code"])
