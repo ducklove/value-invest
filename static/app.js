@@ -2408,6 +2408,74 @@ function closeGroupModal() {
   document.getElementById('pfGroupModal').style.display = 'none';
 }
 
+const _PIE_COLORS = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
+
+function _drawGroupPie(stats, grandMV) {
+  const canvas = document.getElementById('pfGroupPie');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const size = 180;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.scale(dpr, dpr);
+
+  const cx = size / 2, cy = size / 2, r = 70;
+  const slices = pfGroups.map((g, i) => {
+    const s = stats[g.group_name] || { mv: 0 };
+    return { name: g.group_name, value: s.mv, color: _PIE_COLORS[i % _PIE_COLORS.length] };
+  }).filter(s => s.value > 0);
+
+  if (!slices.length || grandMV <= 0) {
+    ctx.fillStyle = 'var(--text-secondary)';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('데이터 없음', cx, cy);
+    return;
+  }
+
+  let angle = -Math.PI / 2;
+  slices.forEach(s => {
+    const sweep = (s.value / grandMV) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, angle, angle + sweep);
+    ctx.closePath();
+    ctx.fillStyle = s.color;
+    ctx.fill();
+    // Label
+    if (sweep > 0.15) {
+      const mid = angle + sweep / 2;
+      const lx = cx + Math.cos(mid) * (r * 0.6);
+      const ly = cy + Math.sin(mid) * (r * 0.6);
+      const pct = (s.value / grandMV * 100).toFixed(0) + '%';
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pct, lx, ly);
+    }
+    angle += sweep;
+  });
+
+  // Legend below
+  const ly = size - 8;
+  let lx = 8;
+  ctx.font = '10px sans-serif';
+  ctx.textBaseline = 'bottom';
+  slices.forEach(s => {
+    ctx.fillStyle = s.color;
+    ctx.fillRect(lx, ly - 8, 8, 8);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#333';
+    ctx.textAlign = 'left';
+    const label = s.name.length > 4 ? s.name.slice(0, 4) + '..' : s.name;
+    ctx.fillText(label, lx + 10, ly);
+    lx += ctx.measureText(label).width + 18;
+  });
+}
+
 function renderGroupModalBody() {
   const body = document.getElementById('pfGroupModalBody');
   // Compute per-group stats
@@ -2450,12 +2518,17 @@ function renderGroupModalBody() {
       <td class="pf-grp-td-act">${delBtn}</td>
     </tr>`;
   }).join('');
-  body.innerHTML = `<table class="pf-grp-table">
-    <thead><tr>
-      <th></th><th>그룹명</th><th>종목</th><th>비중</th><th>평가금액</th><th>수익률</th><th>일간</th><th>일간수익</th><th></th>
-    </tr></thead>
-    <tbody>${rowsHtml}</tbody>
-  </table>`;
+  body.innerHTML = `<div class="pf-grp-layout">
+    <div class="pf-grp-table-wrap"><table class="pf-grp-table">
+      <thead><tr>
+        <th></th><th>그룹명</th><th>종목</th><th>비중</th><th>평가금액</th><th>수익률</th><th>일간</th><th>일간수익</th><th></th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table></div>
+    <div class="pf-grp-pie-wrap"><canvas id="pfGroupPie" width="180" height="180"></canvas></div>
+  </div>`;
+  // Draw pie chart
+  _drawGroupPie(stats, grandMV);
   // Drag-and-drop for group reorder
   body.querySelectorAll('.pf-grp-tr[draggable]').forEach(row => {
     row.addEventListener('dragstart', e => {

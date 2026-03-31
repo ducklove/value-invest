@@ -666,6 +666,10 @@ body {
   background: rgba(0,0,0,0.4); z-index: 1000;
   display: flex; align-items: center; justify-content: center;
 }
+.pf-grp-layout { display: flex; gap: 16px; align-items: flex-start; }
+.pf-grp-table-wrap { flex: 1; overflow-x: auto; }
+.pf-grp-pie-wrap { flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+@media (max-width: 600px) { .pf-grp-layout { flex-direction: column; } .pf-grp-pie-wrap { align-self: center; } }
 .pf-modal {
   background: var(--surface); border-radius: 12px; padding: 0;
   min-width: 340px; max-width: 700px; width: 95%; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
