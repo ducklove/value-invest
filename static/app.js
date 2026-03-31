@@ -1592,6 +1592,7 @@ let pfSortKey = 'marketValue';
 let pfSortAsc = false;
 let pfQuoteTimer = null;
 let pfQuoteRefreshing = false;
+let pfSuppressFlash = false;
 let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 let pfGroupSort = true;   // independent group sort toggle
@@ -1671,7 +1672,7 @@ async function refreshPfQuotes() {
         if (r.status === 'fulfilled' && r.value) {
           kisOk = true;
           portfolioItems[i].quote = r.value;
-          if (!pfEditingCode) {
+          if (!pfEditingCode && !pfSuppressFlash) {
             renderPortfolio();
             const row = document.querySelector(`#pfBody tr[data-code="${portfolioItems[i].stock_code}"]`);
             flashEl(row);
@@ -1708,7 +1709,7 @@ async function refreshPfQuotes() {
             const item = portfolioItems.find(i => i.stock_code === msg.stock_code);
             if (item) {
               item.quote = msg.quote;
-              if (!pfEditingCode) {
+              if (!pfEditingCode && !pfSuppressFlash) {
                 renderPortfolio();
                 const row = document.querySelector(`#pfBody tr[data-code="${msg.stock_code}"]`);
                 flashEl(row);
@@ -2031,6 +2032,10 @@ function fmtBenchmarkPct(benchmarkCode) {
 }
 
 function benchmarkName(code) {
+  if (!code) return '';
+  // Check if benchmark-quotes API returned a name
+  const bq = pfBenchmarkQuotes[code];
+  if (bq && bq.name && bq.name !== code) return bq.name;
   const preset = _BENCHMARK_PRESETS.find(p => p.code === code);
   if (preset) return preset.name;
   // For stock codes, find name from portfolio items
@@ -2090,6 +2095,7 @@ function pfShowBenchmarkPicker(stockCode, td) {
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
+  pfSuppressFlash = true;
   const picker = document.createElement('div');
   picker.className = 'pf-benchmark-picker';
   const presets = _BENCHMARK_PRESETS.map(p =>
@@ -2109,7 +2115,7 @@ function pfShowBenchmarkPicker(stockCode, td) {
   // Close on outside click
   setTimeout(() => {
     const close = (e) => {
-      if (!picker.contains(e.target)) { picker.remove(); document.removeEventListener('click', close); }
+      if (!picker.contains(e.target)) { picker.remove(); pfSuppressFlash = false; document.removeEventListener('click', close); }
     };
     document.addEventListener('click', close);
   }, 0);
@@ -2117,6 +2123,7 @@ function pfShowBenchmarkPicker(stockCode, td) {
 
 async function pfSetBenchmark(stockCode, benchmarkCode) {
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
+  pfSuppressFlash = false;
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
@@ -2128,7 +2135,13 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
     if (!resp.ok) throw new Error('벤치마크 변경 실패');
     const data = await resp.json();
     item.benchmark_code = data.effective_benchmark;
-    if (data.benchmark_quote) pfBenchmarkQuotes[data.effective_benchmark] = data.benchmark_quote;
+    if (data.benchmark_quote || data.benchmark_name) {
+      pfBenchmarkQuotes[data.effective_benchmark] = {
+        ...(pfBenchmarkQuotes[data.effective_benchmark] || {}),
+        ...data.benchmark_quote,
+        name: data.benchmark_name || data.effective_benchmark,
+      };
+    }
     renderPortfolio();
   } catch (e) { alert(e.message); }
 }

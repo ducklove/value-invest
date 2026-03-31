@@ -483,6 +483,26 @@ _BENCHMARK_NAMES = {
     "FX_USDKRW": "USD/KRW",
 }
 
+_benchmark_name_cache: dict[str, str] = {}
+
+
+async def _resolve_benchmark_name(code: str) -> str:
+    """Resolve a benchmark code to a human-readable name."""
+    if code in _BENCHMARK_NAMES:
+        return _BENCHMARK_NAMES[code]
+    if code in _benchmark_name_cache:
+        return _benchmark_name_cache[code]
+    # Try to resolve stock name
+    name = await _resolve_name(code)
+    if not name:
+        # Try dash variant for codes like BRK.A -> BRK-A
+        alt = code.replace(".", "-").replace("/", "-")
+        if alt != code:
+            name = await _resolve_name(alt)
+    result = name or code
+    _benchmark_name_cache[code] = result
+    return result
+
 _benchmark_quote_cache: dict[str, tuple[float, dict]] = {}
 _BENCHMARK_CACHE_TTL = 120  # 2 minutes
 
@@ -571,6 +591,11 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
     else:
         # It's a stock code (e.g., common stock for preferred)
         stock_q = await _fetch_quote(benchmark_code)
+        # If direct lookup failed and code has dots/slashes, try yfinance with dash variant
+        if (not stock_q or not stock_q.get("change_pct")) and not _is_korean_stock(benchmark_code):
+            alt = benchmark_code.replace(".", "-").replace("/", "-")
+            if alt != benchmark_code:
+                stock_q = await _yfinance_fetch_quote(alt) or stock_q
         q = {"change_pct": stock_q.get("change_pct")} if stock_q else {}
 
     _benchmark_quote_cache[benchmark_code] = (now, q)
@@ -740,7 +765,7 @@ async def update_benchmark(stock_code: str, request: Request, payload: dict = Bo
     # Return the effective benchmark and its quote
     effective = benchmark_code or await _resolve_default_benchmark(stock_code)
     bq = await _fetch_benchmark_quote(effective)
-    name = _BENCHMARK_NAMES.get(effective, effective)
+    name = await _resolve_benchmark_name(effective)
     return {"ok": True, "benchmark_code": benchmark_code, "effective_benchmark": effective, "benchmark_name": name, "benchmark_quote": bq}
 
 
@@ -757,7 +782,8 @@ async def get_benchmark_quotes(request: Request):
     for bc in benchmark_codes:
         try:
             bq = await _fetch_benchmark_quote(bc)
-            result[bc] = {**bq, "name": _BENCHMARK_NAMES.get(bc, bc)}
+            name = await _resolve_benchmark_name(bc)
+            result[bc] = {**bq, "name": name}
         except Exception:
             result[bc] = {}
     return result
