@@ -15,16 +15,24 @@ const PER_DISPLAY_MAX = 100;
 const QUOTE_REFRESH_INTERVAL_MS = 10_000;
 const KIS_PROXY_BASE_URL = (APP_CONFIG.kisProxyBaseUrl || '').replace(/\/$/, '');
 
-async function fetchQuoteSnapshot(stockCode) {
+async function fetchQuoteSnapshot(stockCode, timeoutMs = 8000) {
   if (!KIS_PROXY_BASE_URL) return null;
   const today = new Date();
   const start = new Date(today);
   start.setDate(start.getDate() - 14);
   const fmt = d => d.toISOString().slice(0, 10);
-  const [quoteResp, histResp] = await Promise.all([
-    fetch(`${KIS_PROXY_BASE_URL}/v1/stocks/${stockCode}/quote`),
-    fetch(`${KIS_PROXY_BASE_URL}/v1/stocks/${stockCode}/history?start_date=${fmt(start)}&end_date=${fmt(today)}&period=D&adjusted=true`),
-  ]);
+  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ac ? setTimeout(() => ac.abort(), timeoutMs) : null;
+  const opts = ac ? { signal: ac.signal } : {};
+  let quoteResp, histResp;
+  try {
+    [quoteResp, histResp] = await Promise.all([
+      fetch(`${KIS_PROXY_BASE_URL}/v1/stocks/${stockCode}/quote`, opts),
+      fetch(`${KIS_PROXY_BASE_URL}/v1/stocks/${stockCode}/history?start_date=${fmt(start)}&end_date=${fmt(today)}&period=D&adjusted=true`, opts),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!quoteResp.ok && !histResp.ok) return null;
   const quoteData = quoteResp.ok ? await quoteResp.json() : {};
   const histData = histResp.ok ? await histResp.json() : {};
