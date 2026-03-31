@@ -20,6 +20,13 @@ body {
   display: flex; min-height: 100vh;
 }
 
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
 /* Sidebar */
 .sidebar {
   width: 340px; background: var(--sidebar-bg); border-right: 1px solid var(--border);
@@ -412,6 +419,7 @@ body {
 
 .section-heading {
   font-size: 17px; margin: 8px 0 12px; color: var(--text);
+  padding-left: 12px; border-left: 3px solid var(--primary);
 }
 
 /* Charts grid */
@@ -422,6 +430,14 @@ body {
 .chart-card {
   background:var(--surface); border:1px solid var(--border);
   border-radius:12px; padding:16px 20px;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.chart-card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  border-color: var(--primary);
+}
+[data-theme="dark"] .chart-card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
 }
 .chart-card h3 { font-size:15px; margin-bottom:12px; color:var(--text-secondary); }
 .chart-canvas-wrap {
@@ -436,6 +452,7 @@ body {
 /* Loading overlay */
 .loading-overlay {
   position:fixed; inset:0; background:var(--loading-bg);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   display:none; align-items:center; justify-content:center; z-index:999;
   flex-direction: column; gap: 20px;
 }
@@ -500,7 +517,8 @@ body {
   vertical-align: top;
 }
 .reports-table tbody tr:last-child td { border-bottom: none; }
-.reports-table tbody tr:hover { background: var(--sidebar-bg); }
+.reports-table tbody tr { transition: background 0.15s ease; }
+.reports-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
 .report-title a {
   color: var(--primary); text-decoration: none; font-weight: 500;
 }
@@ -548,6 +566,11 @@ body {
 /* Empty state */
 .empty-state {
   text-align:center; margin-top:80px; color:var(--text-secondary);
+}
+.empty-state::before {
+  content: ''; display: block; width: 64px; height: 64px; margin: 0 auto 20px;
+  border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+  opacity: 0.12;
 }
 .empty-state h2 { font-size:20px; margin-bottom:8px; color:var(--text); }
 
@@ -777,7 +800,8 @@ body {
   padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle;
 }
 .pf-table tbody tr:last-child td { border-bottom: none; }
-.pf-table tbody tr:hover { background: var(--sidebar-bg); }
+.pf-table tbody tr { transition: background 0.15s ease; }
+.pf-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
 .pf-table tfoot td { font-weight: 700; background: var(--sidebar-bg); border-top: 2px solid var(--border); }
 .pf-col-num { text-align: right; }
 .pf-col-act { width: 36px; text-align: center; }
@@ -809,6 +833,36 @@ body {
 .pf-empty {
   text-align: center; padding: 40px; color: var(--text-secondary); font-size: 14px;
 }
+
+/* Fade-in animation for view/tab transitions */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.22s ease-out; }
+
+/* Focus-visible for interactive elements */
+.nav-btn:focus-visible, .sidebar-tab:focus-visible, .pf-tab:focus-visible,
+.pf-filter-btn:focus-visible, .theme-toggle:focus-visible,
+.personalization-btn:focus-visible, .pf-row-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Portfolio summary card accent border */
+.pf-summary-card {
+  border-left: 3px solid transparent;
+  transition: border-color 0.2s ease;
+}
+.pf-summary-card:has(.positive) { border-left-color: #b91c1c; }
+.pf-summary-card:has(.negative) { border-left-color: #1d4ed8; }
+
+/* Action button icon styles */
+.pf-row-btn.edit { font-size: 15px; }
+.pf-row-btn.save { color: #059669; font-size: 16px; font-weight: 700; }
+.pf-row-btn.save:hover { color: #047857; }
+.pf-row-btn.cancel { font-size: 15px; }
+.pf-row-btn.cancel:hover { color: #dc2626; }
 
 @media (max-width:900px) {
   body {

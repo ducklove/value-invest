@@ -1601,8 +1601,14 @@ const PF_QUOTE_REFRESH_MS = 60_000;
 function switchView(view) {
   activeView = view;
   document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
-  document.getElementById('analysisView').style.display = view === 'analysis' ? 'block' : 'none';
-  document.getElementById('portfolioView').style.display = view === 'portfolio' ? 'block' : 'none';
+  const analysisView = document.getElementById('analysisView');
+  const portfolioView = document.getElementById('portfolioView');
+  analysisView.style.display = view === 'analysis' ? 'block' : 'none';
+  portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
+  const activeEl = view === 'analysis' ? analysisView : portfolioView;
+  activeEl.classList.remove('fade-in');
+  void activeEl.offsetWidth;
+  activeEl.classList.add('fade-in');
   if (view === 'portfolio') {
     loadPortfolio();
   } else {
@@ -1936,8 +1942,8 @@ function renderPortfolio() {
         <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
         <td class="pf-col-num">${fmtPct(weight)}</td>
         <td class="pf-col-act"><div class="pf-row-actions">
-          <button class="pf-row-btn" onclick="savePortfolioEdit('${r.stock_code}','${escapeHtml(r.stock_name)}')" title="저장">V</button>
-          <button class="pf-row-btn" onclick="cancelPortfolioEdit()" title="취소">X</button>
+          <button class="pf-row-btn save" onclick="savePortfolioEdit('${r.stock_code}','${escapeHtml(r.stock_name)}')" title="저장">✓</button>
+          <button class="pf-row-btn cancel" onclick="cancelPortfolioEdit()" title="취소">✕</button>
         </div></td>
       </tr>`;
     }
@@ -1953,8 +1959,8 @@ function renderPortfolio() {
       <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
       <td class="pf-col-num">${fmtPct(weight)}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
-        <button class="pf-row-btn" onclick="startPortfolioEdit('${r.stock_code}')" title="편집">E</button>
-        <button class="pf-row-btn delete" onclick="deletePortfolioItem('${r.stock_code}')" title="삭제">X</button>
+        <button class="pf-row-btn edit" onclick="startPortfolioEdit('${r.stock_code}')" title="편집">✎</button>
+        <button class="pf-row-btn delete" onclick="deletePortfolioItem('${r.stock_code}')" title="삭제">✕</button>
       </div></td>
     </tr>`;
   }).join('');
@@ -2810,8 +2816,14 @@ let pfActiveTab = 'holdings';
 function pfSwitchTab(tab) {
   pfActiveTab = tab;
   document.querySelectorAll('.pf-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
-  document.getElementById('pfHoldingsTab').style.display = tab === 'holdings' ? '' : 'none';
-  document.getElementById('pfPerformanceTab').style.display = tab === 'performance' ? '' : 'none';
+  const holdingsTab = document.getElementById('pfHoldingsTab');
+  const performanceTab = document.getElementById('pfPerformanceTab');
+  holdingsTab.style.display = tab === 'holdings' ? '' : 'none';
+  performanceTab.style.display = tab === 'performance' ? '' : 'none';
+  const activeEl = tab === 'holdings' ? holdingsTab : performanceTab;
+  activeEl.classList.remove('fade-in');
+  void activeEl.offsetWidth;
+  activeEl.classList.add('fade-in');
   if (tab === 'performance') loadPerformanceData();
 }
 
