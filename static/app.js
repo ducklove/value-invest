@@ -2350,6 +2350,12 @@ function _isPreferredStock(code) {
   return /^[0-9]{5}[^0]$/.test(code) || /^[0-9]{5}[A-Z]$/.test(code);
 }
 
+const _HOLDING_CODES = new Set([
+  '000670','000880','002790','003380','003550','004360','004700','004800',
+  '005810','006120','024800','028260','030530','032830','032940','034730',
+  '036530','036710','051910','058650','383800','402340',
+]);
+
 function pfGoAnalyze(stockCode, e) {
   // Special assets, cash & foreign stocks: no analysis support
   if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(stockCode) || stockCode.startsWith('CASH_')) return;
@@ -2358,8 +2364,11 @@ function pfGoAnalyze(stockCode, e) {
 
   if (_isPreferredStock(stockCode)) {
     const commonCode = stockCode.slice(0, -1) + '0';
-    // Show popup menu near click
     _showPrefMenu(stockCode, commonCode, e);
+    return;
+  }
+  if (_HOLDING_CODES.has(stockCode)) {
+    _showHoldingMenu(stockCode, e);
     return;
   }
   switchView('analysis');
@@ -2391,6 +2400,34 @@ function _showPrefMenu(prefCode, commonCode, e) {
     window.open(`https://ducklove.github.io/common_preferred_spread/?code=${prefCode}`, '_blank');
   });
   // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', function close(ev) {
+      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); }
+    });
+  }, 0);
+}
+
+function _showHoldingMenu(stockCode, e) {
+  document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
+  const menu = document.createElement('div');
+  menu.className = 'pf-pref-menu';
+  menu.innerHTML = `
+    <div class="pf-pref-item" data-action="analysis">본주 분석</div>
+    <div class="pf-pref-item" data-action="holding">자회사 비율 추이</div>
+  `;
+  document.body.appendChild(menu);
+  const rect = e && e.target ? e.target.getBoundingClientRect() : { left: 100, bottom: 100 };
+  menu.style.left = rect.left + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.querySelector('[data-action="analysis"]').addEventListener('click', () => {
+    menu.remove();
+    switchView('analysis');
+    analyzeStock(stockCode);
+  });
+  menu.querySelector('[data-action="holding"]').addEventListener('click', () => {
+    menu.remove();
+    window.open(`https://ducklove.github.io/holding_value/?code=${stockCode}`, '_blank');
+  });
   setTimeout(() => {
     document.addEventListener('click', function close(ev) {
       if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); }
