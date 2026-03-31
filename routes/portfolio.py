@@ -502,13 +502,14 @@ async def _resolve_benchmark_name(code: str) -> str:
         return _BENCHMARK_NAMES[code]
     if code in _benchmark_name_cache:
         return _benchmark_name_cache[code]
-    # Try to resolve stock name
-    name = await _resolve_name(code)
-    if not name:
-        # Try dash variant for codes like BRK.A -> BRK-A
-        alt = code.replace(".", "-").replace("/", "-")
-        if alt != code:
-            name = await _resolve_name(alt)
+    # For codes with dots/slashes, try dash variant first (faster for yfinance)
+    alt = code.replace(".", "-").replace("/", "-") if not _is_korean_stock(code) else None
+    if alt and alt != code:
+        name = await _yfinance_resolve_name(alt)
+        if not name:
+            name = await _resolve_name(code)
+    else:
+        name = await _resolve_name(code)
     result = name or code
     _benchmark_name_cache[code] = result
     return result
@@ -600,12 +601,14 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
         q = await _fetch_fx_usdkrw_quote()
     else:
         # It's a stock code (e.g., common stock for preferred)
-        stock_q = await _fetch_quote(benchmark_code)
-        # If direct lookup failed and code has dots/slashes, try yfinance with dash variant
-        if (not stock_q or not stock_q.get("change_pct")) and not _is_korean_stock(benchmark_code):
-            alt = benchmark_code.replace(".", "-").replace("/", "-")
-            if alt != benchmark_code:
-                stock_q = await _yfinance_fetch_quote(alt) or stock_q
+        # For codes with dots/slashes, try dash variant directly first (faster)
+        alt = benchmark_code.replace(".", "-").replace("/", "-") if not _is_korean_stock(benchmark_code) else None
+        if alt and alt != benchmark_code:
+            stock_q = await _yfinance_fetch_quote(alt)
+            if not stock_q or not stock_q.get("change_pct"):
+                stock_q = await _fetch_quote(benchmark_code)
+        else:
+            stock_q = await _fetch_quote(benchmark_code)
         q = {"change_pct": stock_q.get("change_pct")} if stock_q else {}
 
     _benchmark_quote_cache[benchmark_code] = (now, q)
@@ -798,15 +801,17 @@ async def get_benchmark_quotes(request: Request):
     for item in items:
         bc = item.get("benchmark_code") or await _resolve_default_benchmark(item["stock_code"])
         benchmark_codes.add(bc)
-    result = {}
-    for bc in benchmark_codes:
+    async def _fetch_one(bc):
         try:
-            bq = await _fetch_benchmark_quote(bc)
-            name = await _resolve_benchmark_name(bc)
-            result[bc] = {**bq, "name": name}
+            bq, name = await asyncio.gather(
+                _fetch_benchmark_quote(bc), _resolve_benchmark_name(bc)
+            )
+            return bc, {**bq, "name": name}
         except Exception:
-            result[bc] = {}
-    return result
+            return bc, {}
+
+    pairs = await asyncio.gather(*[_fetch_one(bc) for bc in benchmark_codes])
+    return {bc: data for bc, data in pairs}
 
 
 @router.delete("/api/portfolio/{stock_code}")

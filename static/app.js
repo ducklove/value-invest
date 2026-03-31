@@ -1625,15 +1625,29 @@ async function loadPortfolio() {
       return;
     }
     const freshItems = await resp.json();
-    // Load groups and benchmark quotes
+    // Load groups (fast), restore cached benchmark names from localStorage
     try {
-      const [gResp, bResp] = await Promise.all([
-        apiFetch('/api/portfolio/groups'),
-        apiFetch('/api/portfolio/benchmark-quotes'),
-      ]);
+      const gResp = await apiFetch('/api/portfolio/groups');
       if (gResp.ok) pfGroups = await gResp.json();
-      if (bResp.ok) pfBenchmarkQuotes = await bResp.json();
     } catch {}
+    // Restore benchmark names from localStorage cache for instant display
+    try {
+      const cached = JSON.parse(localStorage.getItem('pfBenchmarkNames') || '{}');
+      for (const [k, v] of Object.entries(cached)) {
+        pfBenchmarkQuotes[k] = { ...(pfBenchmarkQuotes[k] || {}), name: v };
+      }
+    } catch {}
+    // Fetch benchmark quotes in background (don't block initial render)
+    apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
+      if (!r.ok) return;
+      const fresh = await r.json();
+      for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
+      // Save names to localStorage
+      const names = {};
+      for (const [k, v] of Object.entries(pfBenchmarkQuotes)) { if (v.name) names[k] = v.name; }
+      try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch {}
+      renderPortfolio();
+    }).catch(() => {});
     // Preserve existing quotes from previous load
     const prevQuotes = {};
     portfolioItems.forEach(i => { if (i.quote && i.quote.price != null) prevQuotes[i.stock_code] = i.quote; });
@@ -1673,15 +1687,17 @@ async function refreshPfQuotes() {
           portfolioItems[i].quote = r.value;
         }
       });
-      // Also refresh benchmark quotes (merge, preserve names)
-      try {
-        const bResp = await apiFetch('/api/portfolio/benchmark-quotes');
-        if (bResp.ok) {
-          const fresh = await bResp.json();
-          for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
-        }
-      } catch {}
       if (kisOk && !pfEditingCode) renderPortfolio();
+      // Refresh benchmark quotes in background
+      apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
+        if (!r.ok) return;
+        const fresh = await r.json();
+        for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
+        const names = {};
+        for (const [k, v] of Object.entries(pfBenchmarkQuotes)) { if (v.name) names[k] = v.name; }
+        try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch {}
+        if (!pfEditingCode) renderPortfolio();
+      }).catch(() => {});
     }
     if (!kisOk) {
       const resp = await apiFetch('/api/portfolio/quotes');
