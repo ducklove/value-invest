@@ -672,7 +672,7 @@ body {
 @media (max-width: 600px) { .pf-grp-layout { flex-direction: column; } .pf-grp-pie-wrap { align-self: center; } }
 .pf-modal {
   background: var(--surface); border-radius: 12px; padding: 0;
-  min-width: 340px; max-width: 700px; width: 95%; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  min-width: 340px; max-width: 1100px; width: 95%; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
 }
 .pf-modal-header {
   display: flex; align-items: center; justify-content: space-between;
