@@ -2558,6 +2558,7 @@ async function loadMarketSummary() {
       { label: 'KOSPI', ...d.kospi },
       { label: 'KOSDAQ', ...d.kosdaq },
       { label: 'USD/KRW', ...d.usd_krw },
+      ...(d.night_futures && d.night_futures.value ? [{ label: '야간선물', ...d.night_futures }] : []),
     ];
     bar.innerHTML = items.map(i => {
       if (!i.value) return '';

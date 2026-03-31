@@ -65,9 +65,54 @@ async def market_summary():
         except Exception:
             return {}
 
+    async def fetch_night_futures() -> dict:
+        """Fetch KOSPI200 night futures from esignal.co.kr via socket.io polling."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                headers = {
+                    "User-Agent": "Mozilla/5.0",
+                    "Referer": "https://esignal.co.kr/kospi200-futures-night/",
+                    "Origin": "https://esignal.co.kr",
+                }
+                r1 = await c.get(
+                    "https://esignal.co.kr/proxy/8888/socket.io/",
+                    params={"EIO": "3", "transport": "polling"},
+                    headers=headers,
+                )
+                m = re.search(r'"sid":"([^"]+)"', r1.text)
+                if not m:
+                    return {}
+                sid = m.group(1)
+                r2 = await c.get(
+                    "https://esignal.co.kr/proxy/8888/socket.io/",
+                    params={"EIO": "3", "transport": "polling", "sid": sid},
+                    headers=headers,
+                )
+                import json as _json
+                pm = re.search(r'\["populate","(\{.+?\})"\]', r2.text)
+                if not pm:
+                    return {}
+                raw = pm.group(1).replace('\\"', '"')
+                data = _json.loads(raw)
+                val = float(data["value"])
+                diff = float(data["value_diff"])
+                prev = float(data["value_day"])
+                pct = round(diff / prev * 100, 2) if prev else 0
+                direction = "up" if diff > 0 else "down" if diff < 0 else ""
+                return {
+                    "value": f"{val:,.2f}",
+                    "change": f"{abs(diff):.2f}",
+                    "change_pct": f"{'-' if diff < 0 else ''}{abs(pct):.2f}%",
+                    "direction": direction,
+                }
+        except Exception:
+            return {}
+
     import asyncio
-    kospi, kosdaq, fx = await asyncio.gather(fetch_index("KOSPI"), fetch_index("KOSDAQ"), fetch_fx())
-    return {"kospi": kospi, "kosdaq": kosdaq, "usd_krw": fx}
+    kospi, kosdaq, fx, nf = await asyncio.gather(
+        fetch_index("KOSPI"), fetch_index("KOSDAQ"), fetch_fx(), fetch_night_futures()
+    )
+    return {"kospi": kospi, "kosdaq": kosdaq, "usd_krw": fx, "night_futures": nf}
 
 
 @router.get("/api/search")
