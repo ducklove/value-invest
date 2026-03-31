@@ -1595,6 +1595,7 @@ let pfQuoteRefreshing = false;
 let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 let pfGroupSort = true;   // independent group sort toggle
+let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -1624,10 +1625,14 @@ async function loadPortfolio() {
       return;
     }
     const freshItems = await resp.json();
-    // Load groups
+    // Load groups and benchmark quotes
     try {
-      const gResp = await apiFetch('/api/portfolio/groups');
+      const [gResp, bResp] = await Promise.all([
+        apiFetch('/api/portfolio/groups'),
+        apiFetch('/api/portfolio/benchmark-quotes'),
+      ]);
       if (gResp.ok) pfGroups = await gResp.json();
+      if (bResp.ok) pfBenchmarkQuotes = await bResp.json();
     } catch {}
     // Preserve existing quotes from previous load
     const prevQuotes = {};
@@ -1673,6 +1678,11 @@ async function refreshPfQuotes() {
           }
         }
       });
+      // Also refresh benchmark quotes
+      try {
+        const bResp = await apiFetch('/api/portfolio/benchmark-quotes');
+        if (bResp.ok) { pfBenchmarkQuotes = await bResp.json(); renderPortfolio(); }
+      } catch {}
     }
     if (!kisOk) {
       const resp = await apiFetch('/api/portfolio/quotes');
@@ -1690,6 +1700,11 @@ async function refreshPfQuotes() {
           try {
             const msg = JSON.parse(line.slice(6));
             if (msg.done) break;
+            if (msg.benchmark_code) {
+              pfBenchmarkQuotes[msg.benchmark_code] = msg.benchmark_quote;
+              if (!pfEditingCode) renderPortfolio();
+              continue;
+            }
             const item = portfolioItems.find(i => i.stock_code === msg.stock_code);
             if (item) {
               item.quote = msg.quote;
@@ -1903,6 +1918,7 @@ function renderPortfolio() {
         <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
         <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
+        <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
@@ -1919,6 +1935,7 @@ function renderPortfolio() {
       <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
       <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
+      <td class="pf-col-num pf-col-benchmark" onclick="pfShowBenchmarkPicker('${r.stock_code}', this)">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
       <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
       <td class="pf-col-num">${fmtQty(r.qty)}</td>
@@ -1934,7 +1951,7 @@ function renderPortfolio() {
 
   // Footer
   tfoot.innerHTML = `<tr>
-    <td colspan="7">합계</td>
+    <td colspan="8">합계</td>
     <td class="pf-col-num">${fmtNum(totalMarketValue)}</td>
     <td class="pf-col-num">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td></td>
@@ -1986,6 +2003,42 @@ function fmtPct(n) {
   if (n === null || n === undefined) return '-';
   return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
 }
+const _BENCHMARK_PRESETS = [
+  {code: 'IDX_KOSPI', name: '코스피'},
+  {code: 'IDX_KOSDAQ', name: '코스닥'},
+  {code: 'IDX_SP500', name: 'S&P500'},
+  {code: 'FX_USDKRW', name: 'USD/KRW'},
+];
+
+function fmtBenchmarkPct(benchmarkCode) {
+  if (!benchmarkCode) return '<span class="pf-benchmark-val">-</span>';
+  const bq = pfBenchmarkQuotes[benchmarkCode];
+  // For stock benchmarks (e.g., common stock for preferred), check regular quote cache
+  if (!bq && benchmarkCode.length === 6) {
+    const item = portfolioItems.find(i => i.stock_code === benchmarkCode);
+    if (item && item.quote) {
+      const pct = item.quote.change_pct;
+      if (pct !== null && pct !== undefined) {
+        const cls = pct > 0 ? 'positive' : pct < 0 ? 'negative' : '';
+        return `<span class="pf-benchmark-val pf-return ${cls}">${fmtPct(pct)}</span>`;
+      }
+    }
+  }
+  if (!bq || bq.change_pct === null || bq.change_pct === undefined) return '<span class="pf-benchmark-val">-</span>';
+  const pct = bq.change_pct;
+  const cls = pct > 0 ? 'positive' : pct < 0 ? 'negative' : '';
+  return `<span class="pf-benchmark-val pf-return ${cls}">${fmtPct(pct)}</span>`;
+}
+
+function benchmarkName(code) {
+  const preset = _BENCHMARK_PRESETS.find(p => p.code === code);
+  if (preset) return preset.name;
+  // For stock codes, find name from portfolio items
+  const item = portfolioItems.find(i => i.stock_code === code);
+  if (item) return item.stock_name;
+  return code;
+}
+
 function fmtChangePct(pct, change) {
   if (pct === null || pct === undefined) return '-';
   const cls = change > 0 ? 'positive' : change < 0 ? 'negative' : '';
@@ -2028,6 +2081,54 @@ async function pfChangeGroup(stockCode, groupName) {
     });
     if (!resp.ok) throw new Error('그룹 변경 실패');
     item.group_name = groupName;
+    renderPortfolio();
+  } catch (e) { alert(e.message); }
+}
+
+function pfShowBenchmarkPicker(stockCode, td) {
+  // Close any existing picker
+  document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
+  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  if (!item) return;
+  const picker = document.createElement('div');
+  picker.className = 'pf-benchmark-picker';
+  const presets = _BENCHMARK_PRESETS.map(p =>
+    `<div class="pf-bm-option${item.benchmark_code === p.code ? ' selected' : ''}" onclick="pfSetBenchmark('${stockCode}','${p.code}')">${p.name}</div>`
+  ).join('');
+  picker.innerHTML = `
+    ${presets}
+    <div class="pf-bm-custom">
+      <input class="pf-bm-input" placeholder="종목코드" onkeydown="if(event.key==='Enter')pfSetBenchmark('${stockCode}',this.value)">
+    </div>
+    <div class="pf-bm-option pf-bm-reset" onclick="pfSetBenchmark('${stockCode}','')">기본값으로</div>
+  `;
+  td.style.position = 'relative';
+  td.appendChild(picker);
+  const input = picker.querySelector('.pf-bm-input');
+  if (input) input.focus();
+  // Close on outside click
+  setTimeout(() => {
+    const close = (e) => {
+      if (!picker.contains(e.target)) { picker.remove(); document.removeEventListener('click', close); }
+    };
+    document.addEventListener('click', close);
+  }, 0);
+}
+
+async function pfSetBenchmark(stockCode, benchmarkCode) {
+  document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
+  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  if (!item) return;
+  try {
+    const resp = await apiFetch(`/api/portfolio/${stockCode}/benchmark`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ benchmark_code: benchmarkCode || null }),
+    });
+    if (!resp.ok) throw new Error('벤치마크 변경 실패');
+    const data = await resp.json();
+    item.benchmark_code = data.effective_benchmark;
+    if (data.benchmark_quote) pfBenchmarkQuotes[data.effective_benchmark] = data.benchmark_quote;
     renderPortfolio();
   } catch (e) { alert(e.message); }
 }

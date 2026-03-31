@@ -44,6 +44,16 @@ def _is_korean_stock(code: str) -> bool:
     return len(code) == 6 and code[:5].isdigit()
 
 
+def _is_preferred_stock(code: str) -> bool:
+    if len(code) != 6 or not code[:5].isdigit():
+        return False
+    return not code[5].isdigit() or code[5] != '0'
+
+
+def _common_stock_code(code: str) -> str:
+    return code[:5] + '0'
+
+
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
@@ -427,6 +437,146 @@ async def _fx_to_krw(nation: str, amount: float) -> float:
     return amount * rate / unit
 
 
+# --- Benchmark ---
+
+_market_type_cache: dict[str, str] = {}  # stock_code -> "KOSPI" | "KOSDAQ"
+
+
+async def _detect_market_type(code: str) -> str:
+    """Detect if a Korean stock is KOSPI or KOSDAQ via Naver Finance."""
+    if code in _market_type_cache:
+        return _market_type_cache[code]
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"https://finance.naver.com/item/main.naver?code={code}",
+                headers={"User-Agent": "Mozilla/5.0"},
+                follow_redirects=True,
+            )
+            if "코스닥" in resp.text[:5000]:
+                _market_type_cache[code] = "KOSDAQ"
+            else:
+                _market_type_cache[code] = "KOSPI"
+    except Exception:
+        _market_type_cache[code] = "KOSPI"
+    return _market_type_cache[code]
+
+
+async def _resolve_default_benchmark(code: str) -> str:
+    """Return the default benchmark code for a stock."""
+    if _is_cash_asset(code):
+        return "FX_USDKRW"
+    if code in _SPECIAL_ASSETS:
+        return "FX_USDKRW"
+    if _is_korean_stock(code):
+        if _is_preferred_stock(code):
+            return _common_stock_code(code)
+        mtype = await _detect_market_type(code)
+        return "IDX_KOSPI" if mtype == "KOSPI" else "IDX_KOSDAQ"
+    return "IDX_SP500"
+
+
+_BENCHMARK_NAMES = {
+    "IDX_KOSPI": "코스피",
+    "IDX_KOSDAQ": "코스닥",
+    "IDX_SP500": "S&P500",
+    "FX_USDKRW": "USD/KRW",
+}
+
+_benchmark_quote_cache: dict[str, tuple[float, dict]] = {}
+_BENCHMARK_CACHE_TTL = 120  # 2 minutes
+
+
+async def _fetch_index_quote(index_code: str) -> dict:
+    """Fetch KOSPI or KOSDAQ index change_pct from Naver."""
+    naver_code = "KOSPI" if index_code == "IDX_KOSPI" else "KOSDAQ"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                f"https://finance.naver.com/sise/sise_index.naver?code={naver_code}",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            direction = re.search(r'class="quotient\s+(up|dn)"', r.text)
+            d = direction.group(1) if direction else ""
+            change_block = re.search(
+                r'change_value_and_rate"[^>]*><span>([^<]+)</span>\s*([-+]?[0-9.]+%)',
+                r.text,
+            )
+            if change_block:
+                pct_str = change_block.group(2).replace("%", "")
+                pct = float(pct_str)
+                if d == "dn" and pct > 0:
+                    pct = -pct
+                return {"change_pct": pct}
+    except Exception as e:
+        logger.warning("Index quote fetch failed for %s: %s", index_code, e)
+    return {}
+
+
+async def _fetch_sp500_quote() -> dict:
+    """Fetch S&P 500 change_pct via yfinance."""
+    try:
+        import yfinance as yf
+        loop = asyncio.get_event_loop()
+        t = await loop.run_in_executor(None, partial(yf.Ticker, "^GSPC"))
+        fi = await loop.run_in_executor(None, lambda: t.fast_info)
+        price = fi.last_price
+        prev = fi.previous_close
+        if price and prev:
+            pct = round((price - prev) / prev * 100, 2)
+            return {"change_pct": pct}
+    except Exception as e:
+        logger.warning("S&P500 quote fetch failed: %s", e)
+    return {}
+
+
+async def _fetch_fx_usdkrw_quote() -> dict:
+    """Fetch USD/KRW change_pct."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                "https://finance.naver.com/marketindex/",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            value = re.search(r'class="value"[^>]*>([0-9,.]+)', r.text)
+            change = re.search(r'class="change"[^>]*>([0-9,.]+)', r.text)
+            d = re.search(r'class="head_info.*?class="(up|down)"', r.text, re.DOTALL)
+            if value and change:
+                v = float(value.group(1).replace(",", ""))
+                c = float(change.group(1).replace(",", ""))
+                prev = v - c if d and d.group(1) == "up" else v + c
+                if prev:
+                    pct = round(c / prev * 100, 2)
+                    if d and d.group(1) == "down":
+                        pct = -pct
+                    return {"change_pct": pct}
+    except Exception as e:
+        logger.warning("FX USD/KRW quote fetch failed: %s", e)
+    return {}
+
+
+async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
+    """Fetch a benchmark quote (cached)."""
+    now = _time.monotonic()
+    cached = _benchmark_quote_cache.get(benchmark_code)
+    if cached and (now - cached[0]) < _BENCHMARK_CACHE_TTL:
+        return cached[1]
+
+    if benchmark_code == "IDX_KOSPI" or benchmark_code == "IDX_KOSDAQ":
+        q = await _fetch_index_quote(benchmark_code)
+    elif benchmark_code == "IDX_SP500":
+        q = await _fetch_sp500_quote()
+    elif benchmark_code == "FX_USDKRW":
+        q = await _fetch_fx_usdkrw_quote()
+    else:
+        # It's a stock code (e.g., common stock for preferred)
+        stock_q = await _fetch_quote(benchmark_code)
+        q = {"change_pct": stock_q.get("change_pct")} if stock_q else {}
+
+    _benchmark_quote_cache[benchmark_code] = (now, q)
+    return q
+
+
 @router.get("/api/portfolio/groups")
 async def get_groups(request: Request):
     user = _require_user(await get_current_user(request))
@@ -495,6 +645,7 @@ async def stream_portfolio_quotes(request: Request):
     async def generate():
         import json as _json
         now = _time.monotonic()
+        benchmark_codes = set()
         for item in items:
             code = item["stock_code"]
             cached = _quote_cache.get(code)
@@ -506,6 +657,15 @@ async def stream_portfolio_quotes(request: Request):
             yield f"data: {_json.dumps({'stock_code': code, 'quote': quote}, ensure_ascii=False)}\n\n"
             if not was_cached:
                 await asyncio.sleep(QUOTE_RATE_INTERVAL)
+            bc = item.get("benchmark_code") or await _resolve_default_benchmark(code)
+            benchmark_codes.add(bc)
+        # Fetch and stream benchmark quotes
+        for bc in benchmark_codes:
+            try:
+                bq = await _fetch_benchmark_quote(bc)
+                yield f"data: {_json.dumps({'benchmark_code': bc, 'benchmark_quote': bq}, ensure_ascii=False)}\n\n"
+            except Exception:
+                pass
         yield "data: {\"done\": true}\n\n"
 
     from fastapi.responses import StreamingResponse
@@ -523,6 +683,10 @@ async def get_portfolio(request: Request):
     user = _require_user(await get_current_user(request))
     await cache.get_portfolio_groups(user["google_sub"])  # ensure default groups
     items = await cache.get_portfolio(user["google_sub"])
+    # Resolve default benchmarks for items without explicit benchmark
+    for item in items:
+        if not item.get("benchmark_code"):
+            item["benchmark_code"] = await _resolve_default_benchmark(item["stock_code"])
     return await _enrich_with_cached_quotes(items)
 
 
@@ -563,8 +727,40 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         else:
             currency = await _detect_currency(stock_code)
     group_name = str(payload.get("group_name") or "").strip() or None
-    result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price, currency, group_name)
+    benchmark_code = str(payload.get("benchmark_code") or "").strip() or None
+    result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price, currency, group_name, benchmark_code)
     return {"ok": True, **result}
+
+
+@router.put("/api/portfolio/{stock_code}/benchmark")
+async def update_benchmark(stock_code: str, request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    benchmark_code = str(payload.get("benchmark_code") or "").strip() or None
+    await cache.update_portfolio_benchmark(user["google_sub"], stock_code, benchmark_code)
+    # Return the effective benchmark and its quote
+    effective = benchmark_code or await _resolve_default_benchmark(stock_code)
+    bq = await _fetch_benchmark_quote(effective)
+    name = _BENCHMARK_NAMES.get(effective, effective)
+    return {"ok": True, "benchmark_code": benchmark_code, "effective_benchmark": effective, "benchmark_name": name, "benchmark_quote": bq}
+
+
+@router.get("/api/portfolio/benchmark-quotes")
+async def get_benchmark_quotes(request: Request):
+    """Fetch all unique benchmark quotes for the user's portfolio."""
+    user = _require_user(await get_current_user(request))
+    items = await cache.get_portfolio(user["google_sub"])
+    benchmark_codes = set()
+    for item in items:
+        bc = item.get("benchmark_code") or await _resolve_default_benchmark(item["stock_code"])
+        benchmark_codes.add(bc)
+    result = {}
+    for bc in benchmark_codes:
+        try:
+            bq = await _fetch_benchmark_quote(bc)
+            result[bc] = {**bq, "name": _BENCHMARK_NAMES.get(bc, bc)}
+        except Exception:
+            result[bc] = {}
+    return result
 
 
 @router.delete("/api/portfolio/{stock_code}")
