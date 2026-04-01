@@ -66,37 +66,28 @@ const QuoteManager = {
     this.ws.send(JSON.stringify({ action: 'subscribe', requested: this.subscriptions }));
   },
 
+  async _fetchQuotes(codes) {
+    if (!codes.length) return;
+    const results = await Promise.allSettled(codes.map(async code => {
+      const resp = await apiFetch(`/api/quote/${code}`);
+      if (!resp.ok) return;
+      const q = await resp.json();
+      if (this.onQuote) this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
+    }));
+  },
+
   async _fetchInitialQuotes(wsCodes) {
-    // WS 구독 종목 중 아직 시세가 없는 것들을 REST로 1회 fetch
+    // WS 구독 종목 중 아직 시세가 없는 것들을 REST로 1회 병렬 fetch
     const needsFetch = wsCodes.filter(code => {
       const pf = portfolioItems.find(i => i.stock_code === code);
       if (pf && pf.quote && pf.quote.price != null) return false;
-      const sb = recentListItems.find(i => i.stock_code === code);
-      if (sb && sb.quote_snapshot && sb.quote_snapshot.price != null) return false;
       return true;
     });
-    for (const code of needsFetch) {
-      try {
-        const resp = await apiFetch(`/api/quote/${code}`);
-        if (resp.ok) {
-          const q = await resp.json();
-          if (this.onQuote) this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
-        }
-      } catch {}
-    }
+    await this._fetchQuotes(needsFetch);
   },
 
   async _pollOverflow() {
-    if (!this.overflowCodes.length) return;
-    for (const code of this.overflowCodes) {
-      try {
-        const resp = await apiFetch(`/api/quote/${code}`);
-        if (resp.ok) {
-          const q = await resp.json();
-          if (this.onQuote) this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
-        }
-      } catch {}
-    }
+    await this._fetchQuotes(this.overflowCodes);
   },
 
   _startOverflowPolling() {

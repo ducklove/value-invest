@@ -227,19 +227,25 @@ def update_subscriptions(
 
 
 def _compute_subscription_plan() -> dict[str, list[str]]:
-    """Walk priority order, collect unique Korean codes up to MAX_SUBSCRIPTIONS."""
+    """Walk priority order, collect unique Korean codes up to MAX_SUBSCRIPTIONS.
+
+    Non-Korean codes (CASH, GOLD, CRYPTO, foreign) are always placed in *rest*.
+    """
     ws_codes: list[str] = []
+    rest_codes: list[str] = []
     seen: set[str] = set()
 
     for category in PRIORITY_ORDER:
         for code in _requested.get(category, []):
-            if not is_korean_stock(code):
+            if code in seen:
                 continue
-            if code not in seen:
-                seen.add(code)
+            seen.add(code)
+            if is_korean_stock(code):
                 ws_codes.append(code)
+            else:
+                rest_codes.append(code)
 
-    rest_codes = ws_codes[MAX_SUBSCRIPTIONS:]
+    rest_codes = ws_codes[MAX_SUBSCRIPTIONS:] + rest_codes
     ws_codes = ws_codes[:MAX_SUBSCRIPTIONS]
     return {"ws": ws_codes, "rest": rest_codes}
 
