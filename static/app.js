@@ -12,62 +12,76 @@ const CHART_COLORS = [
   '#dc2626','#0891b2','#4f46e5','#c026d3'
 ];
 const PER_DISPLAY_MAX = 100;
-const QUOTE_REFRESH_INTERVAL_MS = 10_000;
-const KIS_PROXY_BASE_URL = (APP_CONFIG.kisProxyBaseUrl || '').replace(/\/$/, '');
 
-async function fetchQuoteSnapshot(stockCode, timeoutMs = 8000) {
-  if (!KIS_PROXY_BASE_URL) return null;
-  const today = new Date();
-  const start = new Date(today);
-  start.setDate(start.getDate() - 14);
-  const fmt = d => d.toISOString().slice(0, 10);
-  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = ac ? setTimeout(() => ac.abort(), timeoutMs) : null;
-  const opts = ac ? { signal: ac.signal } : {};
-  let quoteResp, histResp;
-  try {
-    [quoteResp, histResp] = await Promise.all([
-      fetch(`${KIS_PROXY_BASE_URL}/v1/stocks/${stockCode}/quote`, opts),
-      fetch(`${KIS_PROXY_BASE_URL}/v1/stocks/${stockCode}/history?start_date=${fmt(start)}&end_date=${fmt(today)}&period=D&adjusted=true`, opts),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-  if (!quoteResp.ok && !histResp.ok) return null;
-  const quoteData = quoteResp.ok ? await quoteResp.json() : {};
-  const histData = histResp.ok ? await histResp.json() : {};
-  const s = quoteData.summary || {};
-  const items = (histData.items || []).sort((a, b) =>
-    (a.stck_bsop_date || a.date || '').localeCompare(b.stck_bsop_date || b.date || ''));
-  const lastItem = items[items.length - 1];
-  const histDate = lastItem ? (lastItem.stck_bsop_date || lastItem.date || lastItem.trade_date || lastItem.business_date || '') : '';
+// --- WebSocket Quote Manager ---
+const QuoteManager = {
+  ws: null,
+  connected: false,
+  reconnectTimer: null,
+  subscriptions: {},
+  overflowCodes: [],
+  overflowTimer: null,
+  onQuote: null,
 
-  let price = s.current_price ?? s.price ?? s.stck_prpr ?? null;
-  let change = s.change ?? s.price_change ?? s.prdy_vrss ?? null;
-  let changePct = s.change_rate ?? s.change_pct ?? s.prdy_ctrt ?? null;
-  let prevClose = s.previous_close ?? s.base_price ?? s.stck_sdpr ?? null;
+  connect() {
+    if (this.ws) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${location.host}/ws/quotes`;
+    try { this.ws = new WebSocket(url); } catch { this._scheduleReconnect(); return; }
+    this.ws.onopen = () => { this.connected = true; this._sendSubscriptions(); };
+    this.ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'quote' && msg.code && this.onQuote) this.onQuote(msg.code, msg);
+        else if (msg.type === 'subscriptions') { this.overflowCodes = msg.rest || []; this._startOverflowPolling(); }
+      } catch {}
+    };
+    this.ws.onclose = () => { this.connected = false; this.ws = null; this._scheduleReconnect(); };
+    this.ws.onerror = () => {};
+  },
 
-  if (prevClose == null && price != null && change != null) prevClose = price - change;
-  else if (prevClose == null && items.length >= 2) {
-    const prev = items[items.length - 2];
-    prevClose = parseFloat(prev.stck_clpr ?? prev.close_price ?? prev.close) || null;
-  }
-  if (price == null && lastItem) {
-    price = parseFloat(lastItem.stck_clpr ?? lastItem.close_price ?? lastItem.close) || null;
-  }
-  if (change == null && price != null && prevClose != null) {
-    change = Math.round((price - prevClose) * 100) / 100;
-    changePct = prevClose ? Math.round((price - prevClose) / prevClose * 10000) / 100 : null;
-  }
+  disconnect() {
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.overflowTimer) { clearInterval(this.overflowTimer); this.overflowTimer = null; }
+    if (this.ws) { this.ws.close(); this.ws = null; }
+    this.connected = false;
+  },
 
-  let dateStr = '';
-  if (histDate) {
-    const d = histDate.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
-    dateStr = d.length === 10 ? d : histDate;
-  }
+  _scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, 5000);
+  },
 
-  return { date: dateStr || fmt(today), price, previous_close: prevClose, change, change_pct: changePct };
-}
+  updateSubscriptions(requested) {
+    this.subscriptions = requested;
+    this._sendSubscriptions();
+  },
+
+  _sendSubscriptions() {
+    if (!this.connected || !this.ws) return;
+    this.ws.send(JSON.stringify({ action: 'subscribe', requested: this.subscriptions }));
+  },
+
+  async _pollOverflow() {
+    if (!this.overflowCodes.length) return;
+    for (const code of this.overflowCodes) {
+      try {
+        const resp = await apiFetch(`/api/quote/${code}`);
+        if (resp.ok) {
+          const q = await resp.json();
+          if (this.onQuote) this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
+        }
+      } catch {}
+    }
+  },
+
+  _startOverflowPolling() {
+    if (this.overflowTimer) clearInterval(this.overflowTimer);
+    if (!this.overflowCodes.length) return;
+    this._pollOverflow();
+    this.overflowTimer = setInterval(() => this._pollOverflow(), 30_000);
+  },
+};
 
 const GUEST_RECENT_KEY = 'guest_recent';
 const GUEST_RECENT_MAX = 20;
@@ -103,8 +117,6 @@ let recentListLoading = false;
 let recentListItems = [];
 let activeStockCode = null;
 let activeIndicators = {};
-let quoteRefreshTimer = null;
-let activeQuoteLoading = false;
 let authConfig = null;
 let currentUser = null;
 let googleButtonRetryTimer = null;
@@ -832,33 +844,6 @@ function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
   coverageNote.innerHTML = renderCurrentValuationSummary(indicators || {}, quote);
 }
 
-async function refreshActiveQuote() {
-  if (!activeStockCode || activeQuoteLoading || document.hidden || currentAbortController) return;
-  activeQuoteLoading = true;
-  try {
-    let quote = KIS_PROXY_BASE_URL ? await fetchQuoteSnapshot(activeStockCode) : null;
-    if (!quote) {
-      const resp = await apiFetch(`/api/quote/${activeStockCode}`);
-      if (!resp.ok) return;
-      quote = await resp.json();
-    }
-    renderQuoteSnapshot(quote, activeIndicators);
-    flashEl(document.getElementById('quoteSummary'));
-  } catch (e) {
-  } finally {
-    activeQuoteLoading = false;
-  }
-}
-
-function ensureQuoteRefreshTimer() {
-  if (quoteRefreshTimer !== null) return;
-  quoteRefreshTimer = window.setInterval(() => {
-    if (!document.hidden) {
-      refreshActiveQuote();
-    }
-  }, QUOTE_REFRESH_INTERVAL_MS);
-}
-
 function isPerChart(key) {
   return key === 'PER' || key === '주간 PER';
 }
@@ -1217,6 +1202,7 @@ function renderResult(data) {
     renderChartGrid(weeklyGrid, WEEKLY_CHART_KEYS, data.weekly_indicators || {}, gridColor, tickColor, 'weekly');
   }
   renderChartGrid(grid, ANNUAL_CHART_KEYS, data.indicators || {}, gridColor, tickColor, 'annual');
+  _updateQuoteSubscriptions();
 }
 
 // Recent list
@@ -1240,15 +1226,6 @@ async function loadRecentList() {
       recentListItems = Array.isArray(data) ? data.slice() : [];
     } else {
       recentListItems = getGuestRecent();
-      // Attach quotes from KIS_PROXY directly for guest
-      if (KIS_PROXY_BASE_URL && recentListItems.length > 0) {
-        const quoteResults = await Promise.allSettled(
-          recentListItems.map(item => fetchQuoteSnapshot(item.stock_code))
-        );
-        quoteResults.forEach((r, i) => {
-          if (r.status === 'fulfilled' && r.value) recentListItems[i].quote_snapshot = r.value;
-        });
-      }
     }
     if (recentListItems.length === 0) {
       const emptyMsg = currentUser
@@ -1362,6 +1339,7 @@ async function loadRecentList() {
   } catch (e) {
   } finally {
     recentListLoading = false;
+    _updateQuoteSubscriptions();
   }
 }
 
@@ -1598,8 +1576,6 @@ let pfSearchTimeout = null;
 let pfEditingCode = null;
 let pfSortKey = 'marketValue';
 let pfSortAsc = false;
-let pfQuoteTimer = null;
-let pfQuoteRefreshing = false;
 let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 let pfGroupSort = true;   // independent group sort toggle
@@ -1619,9 +1595,8 @@ function switchView(view) {
   activeEl.classList.add('fade-in');
   if (view === 'portfolio') {
     loadPortfolio();
-  } else {
-    if (pfQuoteTimer) { clearInterval(pfQuoteTimer); pfQuoteTimer = null; }
   }
+  _updateQuoteSubscriptions();
 }
 
 async function loadPortfolio() {
@@ -1670,80 +1645,9 @@ async function loadPortfolio() {
       return item;
     });
     renderPortfolio();
-    schedulePfQuoteRefresh();
-    refreshPfQuotes();
+    _updateQuoteSubscriptions();
   } catch {} finally {
     portfolioLoading = false;
-  }
-}
-
-function schedulePfQuoteRefresh() {
-  if (pfQuoteTimer) clearInterval(pfQuoteTimer);
-  pfQuoteTimer = setInterval(() => {
-    if (activeView === 'portfolio' && portfolioItems.length && !pfQuoteRefreshing) {
-      refreshPfQuotes();
-    }
-  }, PF_QUOTE_REFRESH_MS);
-}
-
-async function refreshPfQuotes() {
-  if (pfQuoteRefreshing || !currentUser) return;
-  pfQuoteRefreshing = true;
-  try {
-    let kisOk = false;
-    if (KIS_PROXY_BASE_URL) {
-      const results = await Promise.allSettled(
-        portfolioItems.map(item => fetchQuoteSnapshot(item.stock_code))
-      );
-      results.forEach((r, i) => {
-        if (r.status === 'fulfilled' && r.value) {
-          kisOk = true;
-          portfolioItems[i].quote = r.value;
-        }
-      });
-      if (kisOk && !pfEditingCode) renderPortfolio();
-      // Refresh benchmark quotes in background
-      apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
-        if (!r.ok) return;
-        const fresh = await r.json();
-        for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
-        const names = {};
-        for (const [k, v] of Object.entries(pfBenchmarkQuotes)) { if (v.name) names[k] = v.name; }
-        try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch {}
-        if (!pfEditingCode) renderPortfolio();
-      }).catch(() => {});
-    }
-    if (!kisOk) {
-      const resp = await apiFetch('/api/portfolio/quotes');
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const msg = JSON.parse(line.slice(6));
-            if (msg.done) break;
-            if (msg.benchmark_code) {
-              // Merge benchmark quote, preserve existing name
-              const prev = pfBenchmarkQuotes[msg.benchmark_code] || {};
-              pfBenchmarkQuotes[msg.benchmark_code] = { ...prev, ...msg.benchmark_quote };
-              continue;
-            }
-            const item = portfolioItems.find(i => i.stock_code === msg.stock_code);
-            if (item) item.quote = msg.quote;
-          } catch {}
-        }
-      }
-      if (!pfEditingCode) renderPortfolio();
-    }
-  } catch {} finally {
-    pfQuoteRefreshing = false;
   }
 }
 
@@ -2785,13 +2689,52 @@ async function submitCsv(mode) {
   }
 }
 
+// --- Quote subscription management ---
+function _updateQuoteSubscriptions() {
+  const requested = { portfolio: [], benchmark: [], sidebar: [], analysis: [] };
+  portfolioItems.forEach(item => {
+    requested.portfolio.push(item.stock_code);
+    if (item.benchmark_code) requested.benchmark.push(item.benchmark_code);
+  });
+  recentListItems.forEach(item => requested.sidebar.push(item.stock_code));
+  if (activeStockCode) requested.analysis.push(activeStockCode);
+  QuoteManager.updateSubscriptions(requested);
+}
+
+let _pfRenderQueued = false;
+QuoteManager.onQuote = function(code, q) {
+  // 1) 분석 뷰 활성 종목
+  if (code === activeStockCode && q.price != null) {
+    renderQuoteSnapshot({
+      date: q.date, price: q.price, previous_close: q.previous_close,
+      change: q.change, change_pct: q.change_pct,
+    }, activeIndicators);
+    flashEl(document.getElementById('quoteSummary'));
+  }
+  // 2) 포트폴리오 종목
+  const pfItem = portfolioItems.find(i => i.stock_code === code);
+  if (pfItem && q.price != null) {
+    pfItem.quote = { price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date };
+    if (!pfEditingCode && activeView === 'portfolio' && !_pfRenderQueued) {
+      _pfRenderQueued = true;
+      requestAnimationFrame(() => { _pfRenderQueued = false; renderPortfolio(); });
+    }
+  }
+  // 3) 사이드바
+  const sbItem = recentListItems.find(i => i.stock_code === code);
+  if (sbItem && q.price != null) {
+    sbItem.quote_snapshot = { price: q.price, change: q.change, change_pct: q.change_pct };
+  }
+};
+
 // Init
 async function initApp() {
   await initAuth();
   await loadRecentList();
   loadMarketSummary();
   setInterval(loadMarketSummary, 60_000);
-  ensureQuoteRefreshTimer();
+  QuoteManager.connect();
+  _updateQuoteSubscriptions();
   trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
   // URL param: ?code=058650 → go directly to analysis
   const params = new URLSearchParams(window.location.search);
