@@ -2629,33 +2629,157 @@ async function deleteGroup(groupName) {
   } catch (e) { alert(e.message); }
 }
 
-let marketBarLoaded = false;
+// --- Market Bar ---
+const MB_DEFAULT_CODES = ['KOSPI', 'KOSDAQ', 'USD_KRW', 'CMDT_GC', 'NIGHT_FUTURES'];
+const MB_MAX = 10;
+const MB_LS_KEY = 'market_bar_codes';
+let mbCodes = [];
+let mbCatalog = {};
+let mbLoaded = false;
+let mbPickerOpen = false;
+let mbDragFrom = -1;
+
+function _mbGetCodes() {
+  try { const v = JSON.parse(localStorage.getItem(MB_LS_KEY)); if (Array.isArray(v)) return v; } catch {}
+  return null;
+}
+function _mbSaveCodes() {
+  localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes));
+  if (currentUser) apiFetch('/api/settings/market-bar', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes: mbCodes }) }).catch(() => {});
+}
+async function _mbLoadCodes() {
+  if (currentUser) {
+    try {
+      const resp = await apiFetch('/api/settings/market-bar');
+      if (resp.ok) { const d = await resp.json(); if (d.codes) { mbCodes = d.codes; localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes)); return; } }
+    } catch {}
+  }
+  mbCodes = _mbGetCodes() || MB_DEFAULT_CODES.slice();
+}
+async function _mbLoadCatalog() {
+  try {
+    const resp = await apiFetch('/api/market-indicators');
+    if (resp.ok) mbCatalog = await resp.json();
+  } catch {}
+}
+
+function _mbRenderItem(code, data) {
+  const cat = mbCatalog[code];
+  const label = cat ? cat.label : code;
+  if (!data || !data.value) return `<span class="mi-label">${escapeHtml(label)}</span><span class="mi-val">-</span><span class="mi-chg"></span>`;
+  const rawPct = (data.change_pct || '').replace(/[-+%]/g, '');
+  const dir = data.direction;
+  const isDown = dir === 'down';
+  const cls = isDown ? 'mi-down' : (dir === 'up' ? 'mi-up' : '');
+  const sign = isDown ? '-' : (dir === 'up' ? '+' : '');
+  const chgVal = data.change ? `${sign}${data.change}` : '';
+  const chgPct = rawPct ? `(${sign}${rawPct}%)` : '';
+  return `<span class="mi-label">${escapeHtml(label)}</span><span class="mi-val">${data.value}</span><span class="mi-chg ${cls}">${chgVal} ${chgPct}</span>`;
+}
+
+function _mbRenderBar(dataMap) {
+  const bar = document.getElementById('marketBar');
+  if (!bar) return;
+  let html = '';
+  mbCodes.forEach((code, idx) => {
+    const data = dataMap ? dataMap[code] : null;
+    html += `<div class="mi-row" draggable="true" data-idx="${idx}" data-code="${code}">${_mbRenderItem(code, data)}<button class="mi-del" title="삭제">&times;</button></div>`;
+  });
+  if (mbCodes.length < MB_MAX) {
+    html += `<div class="mi-add" id="mbAddBtn">+ 항목 추가</div>`;
+  }
+  bar.innerHTML = html;
+
+  // Event: delete
+  bar.querySelectorAll('.mi-del').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const row = btn.closest('.mi-row');
+      const code = row.dataset.code;
+      mbCodes = mbCodes.filter(c => c !== code);
+      _mbSaveCodes();
+      loadMarketSummary();
+    });
+  });
+
+  // Event: drag reorder
+  bar.querySelectorAll('.mi-row[draggable]').forEach(row => {
+    row.addEventListener('dragstart', (e) => { mbDragFrom = parseInt(row.dataset.idx); row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    row.addEventListener('dragend', () => { row.classList.remove('dragging'); bar.querySelectorAll('.mi-drag-over').forEach(el => el.classList.remove('mi-drag-over')); });
+    row.addEventListener('dragover', (e) => { e.preventDefault(); if (!row.classList.contains('dragging')) row.classList.add('mi-drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('mi-drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault(); row.classList.remove('mi-drag-over');
+      const to = parseInt(row.dataset.idx);
+      if (mbDragFrom !== to && mbDragFrom >= 0) {
+        const [item] = mbCodes.splice(mbDragFrom, 1);
+        mbCodes.splice(to, 0, item);
+        _mbSaveCodes();
+        loadMarketSummary();
+      }
+    });
+  });
+
+  // Event: add button
+  const addBtn = document.getElementById('mbAddBtn');
+  if (addBtn) addBtn.addEventListener('click', () => _mbTogglePicker());
+
+  if (mbLoaded) flashEl(bar);
+  mbLoaded = true;
+}
+
+function _mbTogglePicker() {
+  const existing = document.getElementById('mbPicker');
+  if (existing) { existing.remove(); mbPickerOpen = false; return; }
+  mbPickerOpen = true;
+
+  const bar = document.getElementById('marketBar');
+  const picker = document.createElement('div');
+  picker.id = 'mbPicker';
+  picker.className = 'mb-picker';
+
+  const categories = {};
+  for (const [code, info] of Object.entries(mbCatalog)) {
+    const cat = info.category;
+    if (!categories[cat]) categories[cat] = [];
+    categories[cat].push({ code, label: info.label });
+  }
+
+  let html = '';
+  for (const [cat, items] of Object.entries(categories)) {
+    html += `<div class="mb-pick-cat">${escapeHtml(cat)}</div>`;
+    items.forEach(item => {
+      const disabled = mbCodes.includes(item.code);
+      html += `<div class="mb-pick-item${disabled ? ' disabled' : ''}" data-code="${item.code}">${escapeHtml(item.label)}</div>`;
+    });
+  }
+  picker.innerHTML = html;
+  bar.appendChild(picker);
+
+  picker.querySelectorAll('.mb-pick-item:not(.disabled)').forEach(el => {
+    el.addEventListener('click', () => {
+      mbCodes.push(el.dataset.code);
+      _mbSaveCodes();
+      picker.remove();
+      mbPickerOpen = false;
+      loadMarketSummary();
+    });
+  });
+
+  // Close on outside click
+  setTimeout(() => {
+    const closeHandler = (e) => { if (!picker.contains(e.target) && e.target.id !== 'mbAddBtn') { picker.remove(); mbPickerOpen = false; document.removeEventListener('click', closeHandler); } };
+    document.addEventListener('click', closeHandler);
+  }, 0);
+}
+
 async function loadMarketSummary() {
   try {
-    const resp = await apiFetch('/api/market-summary');
+    if (!mbCodes.length) await _mbLoadCodes();
+    const resp = await apiFetch(`/api/market-summary?codes=${mbCodes.join(',')}`);
     if (!resp.ok) return;
-    const d = await resp.json();
-    const bar = document.getElementById('marketBar');
-    if (!bar) return;
-    const items = [
-      { label: 'KOSPI', ...d.kospi },
-      { label: 'KOSDAQ', ...d.kosdaq },
-      { label: 'USD/KRW', ...d.usd_krw },
-      ...(d.gold && d.gold.value ? [{ label: '국제금', ...d.gold }] : []),
-      ...(d.night_futures && d.night_futures.value ? [{ label: '야간선물', ...d.night_futures }] : []),
-    ];
-    bar.innerHTML = items.map(i => {
-      if (!i.value) return '';
-      const rawPct = (i.change_pct || '').replace(/[-+%]/g, '');
-      const isDown = (i.change_pct || '').startsWith('-');
-      const cls = isDown ? 'mi-down' : rawPct ? 'mi-up' : '';
-      const sign = isDown ? '-' : rawPct ? '+' : '';
-      const chgVal = i.change ? `${sign}${i.change}` : '';
-      const chgPct = rawPct ? `(${sign}${rawPct}%)` : '';
-      return `<span class="mi-label">${i.label}</span><span class="mi-val">${i.value}</span><span class="mi-chg ${cls}">${chgVal} ${chgPct}</span>`;
-    }).join('');
-    if (marketBarLoaded) flashEl(bar);
-    marketBarLoaded = true;
+    const dataMap = await resp.json();
+    _mbRenderBar(dataMap);
   } catch {}
 }
 
@@ -2753,6 +2877,8 @@ QuoteManager.onQuote = function(code, q) {
 async function initApp() {
   await initAuth();
   await loadRecentList();
+  await _mbLoadCatalog();
+  await _mbLoadCodes();
   loadMarketSummary();
   setInterval(loadMarketSummary, 60_000);
   QuoteManager.connect();
