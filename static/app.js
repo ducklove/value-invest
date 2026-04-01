@@ -1866,7 +1866,7 @@ function renderPortfolio() {
         <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
         <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-        <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
+        <td class="pf-col-num">${r.marketValue !== null ? fmtNum(Math.round(r.marketValue)) : '-'}</td>
         <td class="pf-col-num">${fmtPct(weight)}</td>
         <td class="pf-col-act"><div class="pf-row-actions">
           <button class="pf-row-btn save" onclick="savePortfolioEdit('${r.stock_code}','${escapeHtml(r.stock_name)}')" title="저장">✓</button>
@@ -1879,11 +1879,11 @@ function renderPortfolio() {
       <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-benchmark" onclick="pfShowBenchmarkPicker('${r.stock_code}', this)">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
-      <td class="pf-col-num">${fmtNum(r.avgPrice)}</td>
+      <td class="pf-col-num">${fmtNum(Math.round(r.avgPrice))}</td>
       <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
       <td class="pf-col-num">${fmtQty(r.qty)}</td>
       <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-      <td class="pf-col-num">${r.marketValue !== null ? fmtNum(r.marketValue) : '-'}</td>
+      <td class="pf-col-num">${r.marketValue !== null ? fmtNum(Math.round(r.marketValue)) : '-'}</td>
       <td class="pf-col-num">${fmtPct(weight)}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
         <button class="pf-row-btn edit" onclick="startPortfolioEdit('${r.stock_code}')" title="편집">✎</button>
@@ -1897,11 +1897,11 @@ function renderPortfolio() {
     <td colspan="2">합계</td>
     <td class="pf-col-num">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
     <td></td>
-    <td class="pf-col-num">${fmtNum(totalInvested)}</td>
+    <td class="pf-col-num">${fmtNum(Math.round(totalInvested))}</td>
     <td></td>
     <td></td>
     <td class="pf-col-num"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
-    <td class="pf-col-num">${fmtNum(totalMarketValue)}</td>
+    <td class="pf-col-num">${fmtNum(Math.round(totalMarketValue))}</td>
     <td class="pf-col-num">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td></td>
   </tr>`;
