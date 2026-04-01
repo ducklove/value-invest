@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -11,7 +12,8 @@ from fastapi.staticfiles import StaticFiles
 import cache
 import dart_client
 import kis_proxy_client
-from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router
+import kis_ws_manager
+from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,8 +23,14 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    env_path = Path(__file__).parent / ".kis.env"
+    if env_path.exists():
+        load_dotenv(env_path, override=True)
+    kis_ws_manager.load_credentials()
+
     await kis_proxy_client.init_client()
     await cache.init_db()
+    await kis_ws_manager.start()
     await cache.delete_expired_sessions()
     needs_corp_refresh = not await cache.is_corp_codes_loaded() or await cache.corp_codes_need_refresh()
     if needs_corp_refresh:
@@ -34,6 +42,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"corp_codes 다운로드 실패: {e}")
     yield
+    await kis_ws_manager.stop()
     await kis_proxy_client.close_client()
 
 
@@ -60,6 +69,7 @@ app.include_router(reports_router)
 app.include_router(stocks_router)
 app.include_router(cache_router)
 app.include_router(portfolio_router)
+app.include_router(ws_quotes_router)
 
 
 @app.get("/")
