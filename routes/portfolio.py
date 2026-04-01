@@ -727,6 +727,20 @@ async def stream_portfolio_quotes(request: Request):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+@router.get("/api/asset-quote/{stock_code}")
+async def asset_quote(stock_code: str):
+    """Fetch quote for any asset type (Korean stock, cash, gold, crypto, foreign)."""
+    try:
+        q = await _fetch_quote(stock_code)
+        if not q:
+            raise HTTPException(status_code=404, detail="시세를 가져올 수 없습니다.")
+        return q
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=404, detail="시세를 가져올 수 없습니다.")
+
+
 def _require_user(user):
     if not user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")

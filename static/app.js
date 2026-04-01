@@ -69,7 +69,7 @@ const QuoteManager = {
   async _fetchQuotes(codes) {
     if (!codes.length) return;
     const results = await Promise.allSettled(codes.map(async code => {
-      const resp = await apiFetch(`/api/quote/${code}`);
+      const resp = await apiFetch(`/api/asset-quote/${code}`);
       if (!resp.ok) return;
       const q = await resp.json();
       if (this.onQuote) this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
