@@ -134,8 +134,8 @@ async def market_summary():
                     except ValueError:
                         pass
                 return {
-                    "value": val.group(1).strip() if val else None,
-                    "change": chg.group(1).strip() if chg else None,
+                    "value": f"{float(val_str):,.2f}" if val_str else None,
+                    "change": f"{float(chg_str):,.2f}" if chg_str else None,
                     "change_pct": change_pct,
                     "direction": direction,
                 }
