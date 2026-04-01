@@ -386,18 +386,27 @@ async def _ws_loop() -> None:
                     if isinstance(raw_msg, bytes):
                         raw_msg = raw_msg.decode("utf-8", errors="replace")
 
-                    # PINGPONG keepalive — echo back exactly
-                    if raw_msg.startswith("PINGPONG"):
-                        await ws.send(raw_msg)
-                        logger.debug("PINGPONG echoed")
+                    # Real-time data starts with '0' or '1'
+                    if raw_msg and raw_msg[0] in ("0", "1"):
+                        quote = _parse_h0stcnt0(raw_msg)
+                        if quote is not None:
+                            _quote_cache[quote["code"]] = quote
+                            await _broadcast(quote)
                         continue
 
-                    # H0STCNT0 data
-                    quote = _parse_h0stcnt0(raw_msg)
-                    if quote is not None:
-                        code = quote["code"]
-                        _quote_cache[code] = quote
-                        await _broadcast(quote)
+                    # JSON control messages (PINGPONG, subscription confirmations)
+                    try:
+                        ctrl = json.loads(raw_msg)
+                        tr_id = ctrl.get("header", {}).get("tr_id", "")
+                        if tr_id == "PINGPONG":
+                            await ws.send(raw_msg)
+                            logger.debug("PINGPONG echoed")
+                        elif tr_id:
+                            rt_cd = ctrl.get("body", {}).get("rt_cd")
+                            msg1 = ctrl.get("body", {}).get("msg1", "")
+                            logger.debug("KIS ctrl: tr_id=%s rt_cd=%s msg=%s", tr_id, rt_cd, msg1)
+                    except (json.JSONDecodeError, KeyError):
+                        pass
 
         except asyncio.CancelledError:
             logger.info("KIS WebSocket task cancelled")
