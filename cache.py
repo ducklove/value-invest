@@ -156,6 +156,15 @@ async def init_db():
                 FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS user_settings (
+                google_sub TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (google_sub, key),
+                FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_sub_date ON portfolio_snapshots(google_sub, date);
             CREATE INDEX IF NOT EXISTS idx_portfolio_cashflows_sub ON portfolio_cashflows(google_sub, date);
 
@@ -1292,5 +1301,36 @@ async def get_report_list(stock_code: str, ttl_minutes: int | None = None) -> di
             "reports": json.loads(row["reports_json"]),
             "fetched_at": row["fetched_at"],
         }
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# User settings (key-value)
+# ---------------------------------------------------------------------------
+
+async def get_user_setting(google_sub: str, key: str) -> str | None:
+    db = await _get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT value FROM user_settings WHERE google_sub = ? AND key = ?",
+            (google_sub, key),
+        )
+        row = await cursor.fetchone()
+        return row["value"] if row else None
+    finally:
+        await db.close()
+
+
+async def set_user_setting(google_sub: str, key: str, value: str):
+    db = await _get_db()
+    try:
+        await db.execute(
+            """INSERT INTO user_settings (google_sub, key, value, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(google_sub, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+            (google_sub, key, value, datetime.now().isoformat()),
+        )
+        await db.commit()
     finally:
         await db.close()

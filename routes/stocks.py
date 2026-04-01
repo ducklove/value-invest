@@ -27,6 +27,29 @@ async def list_indicators():
     return market_indicators.CATALOG
 
 
+@router.get("/api/settings/market-bar")
+async def get_market_bar_setting(request: Request):
+    import json
+    user = await get_current_user(request)
+    if not user:
+        return {"codes": None}  # client uses localStorage
+    raw = await cache.get_user_setting(user["google_sub"], "market_bar_codes")
+    return {"codes": json.loads(raw) if raw else None}
+
+
+@router.put("/api/settings/market-bar")
+async def set_market_bar_setting(request: Request, payload: dict = Body(...)):
+    import json
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    codes = payload.get("codes", [])
+    if not isinstance(codes, list) or len(codes) > 10:
+        raise HTTPException(status_code=400, detail="최대 10개까지 설정할 수 있습니다.")
+    await cache.set_user_setting(user["google_sub"], "market_bar_codes", json.dumps(codes))
+    return {"ok": True}
+
+
 @router.get("/api/search")
 async def search(q: str = Query(..., min_length=1)):
     results = await cache.search_corp(q)
