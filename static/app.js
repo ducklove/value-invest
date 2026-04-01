@@ -1894,7 +1894,13 @@ function renderPortfolio() {
 
   // Footer
   tfoot.innerHTML = `<tr>
-    <td colspan="8">합계</td>
+    <td colspan="2">합계</td>
+    <td class="pf-col-num">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
+    <td></td>
+    <td class="pf-col-num">${fmtNum(totalInvested)}</td>
+    <td></td>
+    <td></td>
+    <td class="pf-col-num"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
     <td class="pf-col-num">${fmtNum(totalMarketValue)}</td>
     <td class="pf-col-num">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td></td>
