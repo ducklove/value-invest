@@ -108,11 +108,45 @@ async def market_summary():
         except Exception:
             return {}
 
+    async def fetch_gold() -> dict:
+        """Fetch COMEX gold futures (국제금) from Naver Finance marketindex page."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                r = await c.get("https://finance.naver.com/marketindex/", headers={"User-Agent": "Mozilla/5.0"})
+                html = r.content.decode("euc-kr", errors="ignore")
+                m = re.search(r'class="head gold_inter".*?</a>', html, re.DOTALL)
+                if not m:
+                    return {}
+                block = m.group(0)
+                val = re.search(r'class="value">([0-9,.]+)', block)
+                chg = re.search(r'class="change">([0-9,.]+)', block)
+                d = re.search(r'class="head_info\s+point_(up|down)"', block)
+                val_str = val.group(1).replace(",", "") if val else None
+                chg_str = chg.group(1).replace(",", "") if chg else None
+                direction = d.group(1) if d else ""
+                change_pct = None
+                if val_str and chg_str:
+                    try:
+                        v, c_ = float(val_str), float(chg_str)
+                        prev = v - c_ if direction == "up" else v + c_
+                        if prev:
+                            change_pct = f"{c_ / prev * 100:.2f}%"
+                    except ValueError:
+                        pass
+                return {
+                    "value": val.group(1).strip() if val else None,
+                    "change": chg.group(1).strip() if chg else None,
+                    "change_pct": change_pct,
+                    "direction": direction,
+                }
+        except Exception:
+            return {}
+
     import asyncio
-    kospi, kosdaq, fx, nf = await asyncio.gather(
-        fetch_index("KOSPI"), fetch_index("KOSDAQ"), fetch_fx(), fetch_night_futures()
+    kospi, kosdaq, fx, gold, nf = await asyncio.gather(
+        fetch_index("KOSPI"), fetch_index("KOSDAQ"), fetch_fx(), fetch_gold(), fetch_night_futures()
     )
-    return {"kospi": kospi, "kosdaq": kosdaq, "usd_krw": fx, "night_futures": nf}
+    return {"kospi": kospi, "kosdaq": kosdaq, "usd_krw": fx, "gold": gold, "night_futures": nf}
 
 
 @router.get("/api/search")
