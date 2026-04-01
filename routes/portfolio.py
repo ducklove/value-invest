@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
+import kis_ws_manager
 import stock_price
 from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
 
@@ -339,13 +340,24 @@ async def _fetch_quote(stock_code: str) -> dict:
 
 
 async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
-    """Attach only already-cached quotes (no network calls)."""
+    """Attach cached quotes — WebSocket cache preferred, then polling cache."""
     now = _time.monotonic()
     result = []
     for item in items:
         enriched = dict(item)
-        cached = _quote_cache.get(item["stock_code"])
-        enriched["quote"] = cached[1] if cached and (now - cached[0]) < _QUOTE_CACHE_TTL else {}
+        code = item["stock_code"]
+        ws_q = kis_ws_manager.get_cached_quote(code)
+        if ws_q and ws_q.get("price") is not None:
+            enriched["quote"] = {
+                "date": ws_q.get("date", ""),
+                "price": ws_q["price"],
+                "previous_close": ws_q.get("previous_close"),
+                "change": ws_q.get("change"),
+                "change_pct": ws_q.get("change_pct"),
+            }
+        else:
+            cached = _quote_cache.get(code)
+            enriched["quote"] = cached[1] if cached and (now - cached[0]) < _QUOTE_CACHE_TTL else {}
         result.append(enriched)
     return result
 

@@ -16,6 +16,7 @@ except ImportError:  # pragma: no cover - optional dependency
     yf = None
 
 import kis_proxy_client
+import kis_ws_manager
 
 
 logger = logging.getLogger(__name__)
@@ -824,6 +825,16 @@ async def fetch_weekly_market_data(
 
 
 async def fetch_quote_snapshot(stock_code: str) -> dict:
+    ws_quote = kis_ws_manager.get_cached_quote(stock_code)
+    if ws_quote and ws_quote.get("price") is not None:
+        return {
+            "date": ws_quote.get("date", date.today().isoformat()),
+            "price": ws_quote["price"],
+            "previous_close": ws_quote.get("previous_close"),
+            "change": ws_quote.get("change"),
+            "change_pct": ws_quote.get("change_pct"),
+        }
+
     end_date = date.today()
     start_date = end_date - timedelta(days=14)
 
