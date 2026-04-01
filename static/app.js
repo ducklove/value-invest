@@ -33,7 +33,11 @@ const QuoteManager = {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'quote' && msg.code && this.onQuote) this.onQuote(msg.code, msg);
-        else if (msg.type === 'subscriptions') { this.overflowCodes = msg.rest || []; this._startOverflowPolling(); }
+        else if (msg.type === 'subscriptions') {
+          this.overflowCodes = msg.rest || [];
+          this._fetchInitialQuotes(msg.ws || []);
+          this._startOverflowPolling();
+        }
       } catch {}
     };
     this.ws.onclose = () => { this.connected = false; this.ws = null; this._scheduleReconnect(); };
@@ -60,6 +64,26 @@ const QuoteManager = {
   _sendSubscriptions() {
     if (!this.connected || !this.ws) return;
     this.ws.send(JSON.stringify({ action: 'subscribe', requested: this.subscriptions }));
+  },
+
+  async _fetchInitialQuotes(wsCodes) {
+    // WS 구독 종목 중 아직 시세가 없는 것들을 REST로 1회 fetch
+    const needsFetch = wsCodes.filter(code => {
+      const pf = portfolioItems.find(i => i.stock_code === code);
+      if (pf && pf.quote && pf.quote.price != null) return false;
+      const sb = recentListItems.find(i => i.stock_code === code);
+      if (sb && sb.quote_snapshot && sb.quote_snapshot.price != null) return false;
+      return true;
+    });
+    for (const code of needsFetch) {
+      try {
+        const resp = await apiFetch(`/api/quote/${code}`);
+        if (resp.ok) {
+          const q = await resp.json();
+          if (this.onQuote) this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
+        }
+      } catch {}
+    }
   },
 
   async _pollOverflow() {
