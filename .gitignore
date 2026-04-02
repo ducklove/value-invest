@@ -2,4 +2,6 @@ __pycache__/
 *.pyc
 cache.db
 keys.txt
+*.env
+.env*
 server.log
