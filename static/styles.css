@@ -898,6 +898,25 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-row-btn.cancel { font-size: 15px; }
 .pf-row-btn.cancel:hover { color: #dc2626; }
 
+/* Mobile auth indicator (hidden by default, shown via JS on mobile+logged-in) */
+.mobile-auth-status {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.mobile-auth-avatar {
+  width: 24px; height: 24px; border-radius: 50%; object-fit: cover;
+}
+.mobile-auth-name {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;
+}
+.mobile-auth-logout {
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-secondary); font-size: 11px; padding: 2px 6px; cursor: pointer;
+}
+
 @media (max-width:900px) {
   body {
     display: block;
@@ -907,6 +926,19 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
+  /* Hide sidebar when logged in on mobile */
+  body.mobile-auth .sidebar { display: none; }
   .pf-table { font-size: 12px; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
+}
+
+/* Portrait phone — hide non-essential columns */
+@media (max-width:600px) {
+  .pf-col-group,
+  .pf-col-benchmark,
+  .pf-col-buyprice,
+  .pf-col-weight,
+  .pf-col-act { display: none !important; }
+  .pf-table { font-size: 11px; }
+  .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 6px 4px; }
 }

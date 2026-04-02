@@ -1,9 +1,9 @@
 """Browser WebSocket endpoint for real-time stock quotes.
 
-Relays quotes from kis_ws_manager to connected browser clients.
-Only one browser session can actively receive real-time WebSocket quotes
-at a time. Other sessions fall back to REST polling. A new session can
-"take over" the active slot from an existing session.
+Supports up to N concurrent active sessions (N = number of KIS API keys).
+Each active session gets its own KIS WebSocket connection with up to 40
+real-time subscriptions.  Sessions beyond N can still take over an existing
+slot (kicking the oldest session).
 """
 
 from __future__ import annotations
@@ -14,43 +14,46 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+import kis_key_manager
 import kis_ws_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 # ---------------------------------------------------------------------------
-# Active subscriber tracking — at most one browser WS drives subscriptions
+# Session tracking
 # ---------------------------------------------------------------------------
 
-_active_ws: WebSocket | None = None
-_active_ws_lock = asyncio.Lock()
+
+class _Session:
+    """Mutable state for one browser WebSocket handler."""
+
+    __slots__ = ("key_slot", "ws_conn", "relay_task", "is_active", "kicked")
+
+    def __init__(self) -> None:
+        self.key_slot: kis_key_manager.KeySlot | None = None
+        self.ws_conn: kis_ws_manager.WsConnection | None = None
+        self.relay_task: asyncio.Task | None = None
+        self.is_active: bool = False
+        self.kicked: bool = False
 
 
-async def _set_active(ws: WebSocket | None) -> WebSocket | None:
-    """Set *ws* as the active subscriber.  Returns the previously active WS."""
-    global _active_ws
-    async with _active_ws_lock:
-        prev = _active_ws
-        _active_ws = ws
-        return prev
+# Ordered dict (insertion order) — oldest session is first
+_sessions: dict[WebSocket, _Session] = {}
+_sessions_lock = asyncio.Lock()
 
 
-async def _clear_if_active(ws: WebSocket) -> None:
-    """Clear the active subscriber only if it matches *ws*."""
-    global _active_ws
-    async with _active_ws_lock:
-        if _active_ws is ws:
-            _active_ws = None
+# ---------------------------------------------------------------------------
+# Endpoint
+# ---------------------------------------------------------------------------
 
 
 @router.websocket("/ws/quotes")
 async def ws_quotes(websocket: WebSocket):
     await websocket.accept()
-    listener: asyncio.Queue | None = None
-    relay_task: asyncio.Task | None = None
-    is_active = False  # whether THIS connection owns the active slot
+    session = _Session()
 
     try:
         # Send all currently cached quotes on connect
@@ -58,12 +61,14 @@ async def ws_quotes(websocket: WebSocket):
         for quote in cached.values():
             await websocket.send_json({"type": "quote", **quote})
 
-        # Check if another session is already active
-        async with _active_ws_lock:
-            occupied = _active_ws is not None
-        await websocket.send_json({"type": "ws_status", "occupied": occupied})
+        # Report slot availability
+        await websocket.send_json({
+            "type": "ws_status",
+            "occupied": kis_key_manager.available_count() == 0,
+            "slots_total": kis_key_manager.total_count(),
+            "slots_available": kis_key_manager.available_count(),
+        })
 
-        # Handle incoming messages from the browser
         while True:
             raw = await websocket.receive_text()
             try:
@@ -77,70 +82,98 @@ async def ws_quotes(websocket: WebSocket):
                 await websocket.send_json({"type": "pong"})
 
             elif action == "takeover":
-                # Kick previous active session (if any)
-                prev = await _set_active(websocket)
-                is_active = True
-                if prev is not None and prev is not websocket:
-                    try:
-                        await prev.send_json({"type": "ws_taken_over"})
-                        await prev.close(code=4001, reason="taken_over")
-                    except Exception:
-                        pass  # already disconnected
+                if session.is_active:
+                    await websocket.send_json(
+                        {"type": "ws_status", "occupied": False, "active": True}
+                    )
+                    continue
 
-                # Set up listener for real-time quote relay
-                if listener is None:
-                    listener = kis_ws_manager.add_listener()
+                # Try to acquire a free key slot
+                key_slot = await kis_key_manager.acquire()
 
-                    async def _relay():
+                # If none available, kick the oldest session to free a slot
+                if key_slot is None:
+                    async with _sessions_lock:
+                        if _sessions:
+                            oldest_ws, old_session = next(iter(_sessions.items()))
+                            old_session.kicked = True
+                            del _sessions[oldest_ws]
+                        else:
+                            oldest_ws, old_session = None, None
+
+                    if old_session is not None:
+                        if old_session.relay_task:
+                            old_session.relay_task.cancel()
+                        if old_session.ws_conn:
+                            await old_session.ws_conn.stop()
+                        if old_session.key_slot:
+                            await kis_key_manager.release(old_session.key_slot)
                         try:
-                            while True:
-                                quote = await listener.get()
-                                await websocket.send_json(
-                                    {"type": "quote", **quote}
-                                )
-                        except asyncio.CancelledError:
-                            pass
+                            await oldest_ws.send_json({"type": "ws_taken_over"})
+                            await oldest_ws.close(code=4001, reason="taken_over")
                         except Exception:
                             pass
 
-                    relay_task = asyncio.create_task(
-                        _relay(), name="ws-quote-relay"
+                    key_slot = await kis_key_manager.acquire()
+
+                if key_slot is None:
+                    await websocket.send_json(
+                        {"type": "ws_status", "occupied": True, "active": False}
                     )
+                    continue
+
+                # Create a new KIS WebSocket connection for this session
+                session.key_slot = key_slot
+                session.ws_conn = kis_ws_manager.WsConnection(key_slot)
+                await session.ws_conn.start()
+                session.is_active = True
+
+                # Relay quotes from the KIS connection to the browser
+                conn = session.ws_conn  # capture for closure
+
+                async def _relay() -> None:
+                    try:
+                        while True:
+                            quote = await conn.listener.get()
+                            await websocket.send_json({"type": "quote", **quote})
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+
+                session.relay_task = asyncio.create_task(
+                    _relay(), name="ws-quote-relay"
+                )
+
+                async with _sessions_lock:
+                    _sessions[websocket] = session
 
                 await websocket.send_json(
                     {"type": "ws_status", "occupied": False, "active": True}
                 )
 
             elif action == "subscribe":
-                if not is_active:
-                    # Not the active subscriber — ignore subscription requests
-                    await websocket.send_json(
-                        {
-                            "type": "subscriptions",
-                            "ws": [],
-                            "rest": list(
-                                {
-                                    c
-                                    for codes in msg.get("requested", {}).values()
-                                    for c in codes
-                                }
-                            ),
-                        }
-                    )
+                if not session.is_active or session.ws_conn is None:
+                    # Not active — all codes fall back to REST
+                    await websocket.send_json({
+                        "type": "subscriptions",
+                        "ws": [],
+                        "rest": list({
+                            c
+                            for codes in msg.get("requested", {}).values()
+                            for c in codes
+                        }),
+                    })
                     continue
 
                 requested = msg.get("requested", {})
-                old_cached = set(kis_ws_manager.get_all_cached_quotes().keys())
-                result = kis_ws_manager.update_subscriptions(requested)
+                result = session.ws_conn.update_subscriptions(requested)
                 await websocket.send_json({"type": "subscriptions", **result})
+                await session.ws_conn.sync_subscriptions()
 
-                # Sync the actual KIS WS subscriptions
-                await kis_ws_manager._sync_subscriptions()
-
-                # Send cached quotes for newly relevant codes
+                # Send cached quotes for newly subscribed codes
                 all_cached = kis_ws_manager.get_all_cached_quotes()
-                new_ws_codes = set(result["ws"])
-                for code in new_ws_codes:
+                for code in result["ws"]:
                     if code in all_cached:
                         await websocket.send_json(
                             {"type": "quote", **all_cached[code]}
@@ -151,13 +184,17 @@ async def ws_quotes(websocket: WebSocket):
     except Exception as exc:
         logger.warning("Browser WebSocket error: %s", exc)
     finally:
-        if relay_task is not None:
-            relay_task.cancel()
-            try:
-                await relay_task
-            except asyncio.CancelledError:
-                pass
-        if listener is not None:
-            await kis_ws_manager.remove_listener(listener)
-        if is_active:
-            await _clear_if_active(websocket)
+        # Clean up only if this session was NOT already kicked
+        if not session.kicked:
+            if session.relay_task is not None:
+                session.relay_task.cancel()
+                try:
+                    await session.relay_task
+                except asyncio.CancelledError:
+                    pass
+            if session.ws_conn is not None:
+                await session.ws_conn.stop()
+            if session.key_slot is not None:
+                await kis_key_manager.release(session.key_slot)
+            async with _sessions_lock:
+                _sessions.pop(websocket, None)

@@ -83,6 +83,11 @@ function trackEvent(name, params = {}) {
       <button class="nav-btn active" data-view="analysis" onclick="switchView('analysis')">분석</button>
       <button class="nav-btn" data-view="portfolio" onclick="switchView('portfolio')">포트폴리오</button>
     </nav>
+    <div class="mobile-auth-status" id="mobileAuthStatus">
+      <img class="mobile-auth-avatar" id="mobileAuthAvatar" alt="">
+      <span class="mobile-auth-name" id="mobileAuthName"></span>
+      <button class="mobile-auth-logout" onclick="logout()">로그아웃</button>
+    </div>
     <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환">🌓</button>
   </div>
 
@@ -179,12 +184,12 @@ function trackEvent(name, params = {}) {
             <th class="pf-col-group pf-sortable" data-sort="group" onclick="pfSort('group')">그룹</th>
             <th class="pf-col-num pf-sortable" data-sort="changePct" onclick="pfSort('changePct')">등락률</th>
             <th class="pf-col-num pf-col-benchmark">벤치마크</th>
-            <th class="pf-col-num">매입가</th>
+            <th class="pf-col-num pf-col-buyprice">매입가</th>
             <th class="pf-col-num">현재가</th>
             <th class="pf-col-num">수량</th>
             <th class="pf-col-num pf-sortable" data-sort="returnPct" onclick="pfSort('returnPct')">수익률</th>
             <th class="pf-col-num pf-sortable" data-sort="marketValue" onclick="pfSort('marketValue')">평가금액</th>
-            <th class="pf-col-num">비중</th>
+            <th class="pf-col-num pf-col-weight">비중</th>
             <th class="pf-col-act"></th>
           </tr>
         </thead>
