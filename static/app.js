@@ -3059,89 +3059,68 @@ async function loadPerformanceData() {
   } catch {}
 }
 
+let _navChartInstance = null;
+
 function renderNavChart(data) {
   const canvas = document.getElementById('pfNavCanvas');
-  if (!canvas || !data.length) {
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('스냅샷 데이터가 없습니다. "스냅샷 저장" 버튼을 눌러 첫 스냅샷을 생성하세요.', canvas.width / 2, canvas.height / 2);
-    }
+  if (!canvas) return;
+  if (_navChartInstance) { _navChartInstance.destroy(); _navChartInstance = null; }
+
+  if (!data.length) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('스냅샷 데이터가 없습니다.', canvas.width / 2, canvas.height / 2);
     return;
   }
-  const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width * dpr;
-  canvas.height = 300 * dpr;
-  canvas.style.width = rect.width + 'px';
-  canvas.style.height = '300px';
-  ctx.scale(dpr, dpr);
-  const W = rect.width, H = 300;
-  ctx.clearRect(0, 0, W, H);
 
-  const pad = { top: 20, right: 20, bottom: 40, left: 60 };
-  const cw = W - pad.left - pad.right;
-  const ch = H - pad.top - pad.bottom;
-
+  const labels = data.map(d => d.date.slice(5)); // MM-DD
   const navs = data.map(d => d.nav);
-  const minNav = Math.min(...navs) * 0.995;
-  const maxNav = Math.max(...navs) * 1.005;
-  const range = maxNav - minNav || 1;
-
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const lineColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
 
-  // Grid
-  ctx.strokeStyle = gridColor;
-  ctx.lineWidth = 0.5;
-  for (let i = 0; i <= 4; i++) {
-    const y = pad.top + (ch / 4) * i;
-    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cw, y); ctx.stroke();
-    const val = maxNav - (range / 4) * i;
-    ctx.fillStyle = textColor; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
-    ctx.fillText(val.toFixed(1), pad.left - 8, y + 4);
-  }
-
-  // Base line at 1000
-  if (minNav <= 1000 && maxNav >= 1000) {
-    const baseY = pad.top + ch * (1 - (1000 - minNav) / range);
-    ctx.strokeStyle = '#888'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.moveTo(pad.left, baseY); ctx.lineTo(pad.left + cw, baseY); ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // NAV line
-  ctx.strokeStyle = lineColor; ctx.lineWidth = 2;
-  ctx.beginPath();
-  data.forEach((d, i) => {
-    const x = pad.left + (cw / Math.max(data.length - 1, 1)) * i;
-    const y = pad.top + ch * (1 - (d.nav - minNav) / range);
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // Fill area
-  const lastX = pad.left + cw;
-  const baseLineY = pad.top + ch;
-  ctx.lineTo(lastX, baseLineY);
-  ctx.lineTo(pad.left, baseLineY);
-  ctx.closePath();
-  ctx.fillStyle = lineColor.replace(')', ', 0.1)').replace('rgb', 'rgba');
-  ctx.fill();
-
-  // X labels
-  ctx.fillStyle = textColor; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-  const step = Math.max(1, Math.floor(data.length / 8));
-  data.forEach((d, i) => {
-    if (i % step === 0 || i === data.length - 1) {
-      const x = pad.left + (cw / Math.max(data.length - 1, 1)) * i;
-      ctx.fillText(d.date.slice(5), x, H - pad.bottom + 16);
-    }
+  _navChartInstance = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: navs,
+        borderColor: lineColor,
+        borderWidth: 2,
+        pointRadius: data.length > 30 ? 0 : 3,
+        pointHoverRadius: 5,
+        pointBackgroundColor: lineColor,
+        tension: 0.3,
+        fill: false,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => data[items[0].dataIndex]?.date || '',
+            label: (item) => `NAV ${item.raw.toFixed(2)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: textColor, maxTicksLimit: 10, font: { size: 10 } },
+          grid: { color: gridColor, lineWidth: 0.5 },
+        },
+        y: {
+          ticks: { color: textColor, font: { size: 11 } },
+          grid: { color: gridColor, lineWidth: 0.5 },
+        },
+      },
+      interaction: { intersect: false, mode: 'index' },
+    },
   });
 }
 
