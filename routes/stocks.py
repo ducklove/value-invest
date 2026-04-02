@@ -12,7 +12,7 @@ async def market_summary(codes: str = ""):
     import market_indicators
 
     code_list = (
-        [c.strip() for c in codes.split(",") if c.strip()]
+        [c.strip()[:30] for c in codes.split(",") if c.strip()][:20]
         if codes
         else ["KOSPI", "KOSDAQ", "USD_KRW", "CMDT_GC", "NIGHT_FUTURES"]
     )
@@ -46,6 +46,7 @@ async def set_market_bar_setting(request: Request, payload: dict = Body(...)):
     codes = payload.get("codes", [])
     if not isinstance(codes, list) or len(codes) > 10:
         raise HTTPException(status_code=400, detail="최대 10개까지 설정할 수 있습니다.")
+    codes = [str(c).strip()[:30] for c in codes if isinstance(c, str) and str(c).strip()]
     await cache.set_user_setting(user["google_sub"], "market_bar_codes", json.dumps(codes))
     return {"ok": True}
 

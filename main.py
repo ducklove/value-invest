@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
     yield
     await kis_ws_manager.stop_all()
     await kis_proxy_client.close_client()
+    await cache.close_db()
 
 
 app = FastAPI(title="한국 주식 가치투자 분석", lifespan=lifespan)
@@ -59,8 +60,8 @@ app.add_middleware(
         "https://cantabile.tplinkdns.com:3691",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 app.include_router(auth_router)
@@ -91,10 +92,6 @@ async def styles():
     return FileResponse(STATIC_DIR / "styles.css", media_type="text/css")
 
 
-@app.get("/app.js")
-async def app_js():
-    return FileResponse(STATIC_DIR / "app.js", media_type="application/javascript")
-
-
-# 정적 파일 서빙 (CSS, JS 등 추가 시 대비)
+# 정적 파일 서빙 (CSS, JS 등)
+app.mount("/js", StaticFiles(directory=str(STATIC_DIR / "js")), name="js")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

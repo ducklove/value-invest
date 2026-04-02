@@ -636,7 +636,7 @@ async def get_groups(request: Request):
 @router.post("/api/portfolio/groups")
 async def add_group(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
-    name = str(payload.get("name") or "").strip()
+    name = str(payload.get("name") or "").strip()[:50]
     if not name:
         raise HTTPException(status_code=400, detail="그룹명을 입력해 주세요.")
     groups = await cache.get_portfolio_groups(user["google_sub"])
@@ -649,7 +649,7 @@ async def add_group(request: Request, payload: dict = Body(...)):
 @router.put("/api/portfolio/groups/{group_name}")
 async def rename_group(group_name: str, request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
-    new_name = str(payload.get("new_name") or "").strip()
+    new_name = str(payload.get("new_name") or "").strip()[:50]
     if not new_name:
         raise HTTPException(status_code=400, detail="새 그룹명을 입력해 주세요.")
     groups = await cache.get_portfolio_groups(user["google_sub"])
@@ -680,8 +680,9 @@ async def delete_group(group_name: str, request: Request):
 async def save_groups_order(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
     names = payload.get("group_names")
-    if not isinstance(names, list) or not names:
+    if not isinstance(names, list) or not names or len(names) > 50:
         raise HTTPException(status_code=400, detail="그룹 목록이 필요합니다.")
+    names = [str(n).strip()[:50] for n in names if str(n).strip()]
     await cache.save_portfolio_groups_order(user["google_sub"], names)
     return {"ok": True}
 
@@ -786,8 +787,12 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
 
     if quantity == 0:
         raise HTTPException(status_code=400, detail="수량은 0이 아닌 값이어야 합니다.")
+    if abs(quantity) > 1_000_000_000:
+        raise HTTPException(status_code=400, detail="수량이 너무 큽니다.")
     if avg_price < 0:
         raise HTTPException(status_code=400, detail="매입가는 0 이상이어야 합니다.")
+    if avg_price > 1_000_000_000_000:
+        raise HTTPException(status_code=400, detail="매입가가 너무 큽니다.")
 
     currency = str(payload.get("currency") or "").upper()
     if not currency:
