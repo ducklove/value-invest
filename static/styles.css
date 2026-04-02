@@ -642,6 +642,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
 /* NAV chart */
 .pf-nav-chart-wrap { margin-bottom: 24px; }
+.pf-nav-chart-container { position: relative; height: 300px; }
 .pf-nav-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .pf-nav-header h3 { margin: 0; font-size: 16px; }
 .pf-snapshot-btn {
@@ -649,7 +650,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
 }
 .pf-snapshot-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
-#pfNavCanvas { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+#pfNavCanvas { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .pf-nav-returns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .pf-nav-ret-card {
   flex: 1; min-width: 80px; padding: 8px 12px; background: var(--surface);
