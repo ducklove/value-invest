@@ -216,7 +216,6 @@ async def _fetch_foreign_index(client: httpx.AsyncClient, symbol: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _MARKETINDEX_COMMODITY_MAP = {
-    "CMDT_GC": "head gold_inter",
     "OIL_CL": "head wti",
 }
 
@@ -442,6 +441,40 @@ async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Gold futures (Yahoo Finance — near-24h coverage)
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_gold_yahoo(client: httpx.AsyncClient) -> dict:
+    """Fetch gold futures (GC=F) from Yahoo Finance for near-24h coverage."""
+    try:
+        r = await client.get(
+            "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
+            params={"interval": "1d", "range": "2d"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+        )
+        if r.status_code != 200:
+            return dict(_EMPTY)
+        data = _json.loads(r.text)
+        meta = data["chart"]["result"][0]["meta"]
+        price = meta["regularMarketPrice"]
+        prev = meta["chartPreviousClose"]
+        diff = price - prev
+        pct = abs(diff) / prev * 100 if prev else 0
+        direction = "up" if diff > 0 else "down" if diff < 0 else ""
+        return {
+            "value": _fmt(price),
+            "change": _fmt(abs(diff)),
+            "change_pct": f"{pct:.2f}%",
+            "direction": direction,
+        }
+    except Exception:
+        return dict(_EMPTY)
+
+
+# ---------------------------------------------------------------------------
 # Night futures (esignal.co.kr socket.io)
 # ---------------------------------------------------------------------------
 
@@ -505,9 +538,12 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     world_daily_items = []  # need individual fetches
     us10y_needed = False
     night_futures_needed = False
+    gold_needed = False
 
     for code in codes:
-        if code in _KR_INDEX_CODES:
+        if code == "CMDT_GC":
+            gold_needed = True
+        elif code in _KR_INDEX_CODES:
             kr_indices.append(code)
         elif code in _FOREIGN_SYMBOLS:
             foreign_indices.append(code)
@@ -554,6 +590,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_us10y(client))
             task_keys.append(("us10y", None))
 
+        # Gold futures (Yahoo Finance)
+        if gold_needed:
+            tasks.append(_fetch_gold_yahoo(client))
+            task_keys.append(("gold", None))
+
         # Night futures
         if night_futures_needed:
             tasks.append(_fetch_night_futures(client))
@@ -576,6 +617,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 marketindex_html = result
             elif kind == "world_daily":
                 results[code] = result
+            elif kind == "gold":
+                results["CMDT_GC"] = result
             elif kind == "us10y":
                 results["US10Y"] = result
             elif kind == "night_futures":
