@@ -1163,6 +1163,22 @@ async def save_snapshot(google_sub: str, date: str, total_value: float, total_in
         await db.close()
 
 
+async def get_month_end_snapshot(google_sub: str) -> dict | None:
+    """Get the portfolio snapshot at the end of the previous month."""
+    from datetime import date, timedelta
+    month_end = date.today().replace(day=1) - timedelta(days=1)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT date, total_value, total_invested, nav, total_units FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+            (google_sub, month_end.isoformat()),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
 async def get_nav_history(google_sub: str) -> list[dict]:
     db = await get_db()
     try:

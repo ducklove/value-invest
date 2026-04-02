@@ -929,6 +929,13 @@ async def resolve_name(code: str = Query(..., min_length=1)):
 
 # --- NAV / Snapshots / Cashflows ---
 
+@router.get("/api/portfolio/month-end-value")
+async def get_month_end_value(request: Request):
+    user = _require_user(await get_current_user(request))
+    snapshot = await cache.get_month_end_snapshot(user["google_sub"])
+    return snapshot or {}
+
+
 @router.get("/api/portfolio/nav-history")
 async def get_nav_history(request: Request):
     user = _require_user(await get_current_user(request))

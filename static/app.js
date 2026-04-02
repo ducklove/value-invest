@@ -1672,6 +1672,7 @@ let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 let pfGroupSort = true;   // independent group sort toggle
 let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
+let pfMonthEndValue = null; // total_value at end of previous month
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -1719,6 +1720,12 @@ async function loadPortfolio() {
       }
     } catch {}
     // Fetch benchmark quotes in background (don't block initial render)
+    apiFetch('/api/portfolio/month-end-value').then(async r => {
+      if (!r.ok) return;
+      const snap = await r.json();
+      pfMonthEndValue = snap.total_value ?? null;
+      renderPortfolio();
+    }).catch(() => {});
     apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
       if (!r.ok) return;
       const fresh = await r.json();
@@ -1902,12 +1909,17 @@ function renderPortfolio() {
   const prevTotalValue = totalMarketValue - totalDailyPnl;
   const dailyReturnPct = prevTotalValue > 0 ? (totalDailyPnl / prevTotalValue * 100) : 0;
 
+  // Monthly return (vs end of previous month)
+  const monthlyReturnPct = pfMonthEndValue && pfMonthEndValue > 0
+    ? ((totalMarketValue - pfMonthEndValue) / pfMonthEndValue * 100) : null;
+  const monthlyPnl = pfMonthEndValue != null ? totalMarketValue - pfMonthEndValue : null;
+
   // Summary cards
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-label">총 평가금액</div>
       <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
-      <div class="pf-summary-sub">투자금액 ${fmtKrw(totalInvested)}</div>
+      <div class="pf-summary-sub">투자 ${fmtKrw(totalInvested)}</div>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-label">총 수익률</div>
@@ -1915,9 +1927,14 @@ function renderPortfolio() {
       <div class="pf-summary-sub ${returnClass(totalMarketValue - totalInvested)}">${fmtSignedKrw(totalMarketValue - totalInvested)}</div>
     </div>
     <div class="pf-summary-card">
-      <div class="pf-summary-label">일간 수익</div>
-      <div class="pf-summary-value ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
-      <div class="pf-summary-sub ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
+      <div class="pf-summary-label">월간 수익률</div>
+      <div class="pf-summary-value ${returnClass(monthlyReturnPct)}">${monthlyReturnPct !== null ? fmtPct(monthlyReturnPct) : '-'}</div>
+      <div class="pf-summary-sub ${returnClass(monthlyPnl)}">${monthlyPnl !== null ? fmtSignedKrw(monthlyPnl) : '-'}</div>
+    </div>
+    <div class="pf-summary-card">
+      <div class="pf-summary-label">일간 수익률</div>
+      <div class="pf-summary-value ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
+      <div class="pf-summary-sub ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
     </div>`;
 
   // Table body
@@ -2020,11 +2037,11 @@ function returnClass(val) {
   return val > 0 ? 'pf-return positive' : val < 0 ? 'pf-return negative' : '';
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
-function fmtKrw(n) { return n !== null ? Number(Math.round(n)).toLocaleString() + '원' : '-'; }
+function fmtKrw(n) { return n !== null ? Number(Math.round(n)).toLocaleString() : '-'; }
 function fmtSignedKrw(n) {
   if (n === null) return '-';
   const r = Math.round(n);
-  return (r > 0 ? '+' : '') + r.toLocaleString() + '원';
+  return (r > 0 ? '+' : '') + r.toLocaleString();
 }
 function fmtPct(n) {
   if (n === null || n === undefined) return '-';
