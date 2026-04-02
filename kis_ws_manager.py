@@ -158,6 +158,11 @@ _listeners: list[asyncio.Queue] = []
 _listeners_lock = asyncio.Lock()
 
 
+def get_listener_count() -> int:
+    """Return the number of active browser WebSocket listeners."""
+    return len(_listeners)
+
+
 def add_listener() -> asyncio.Queue:
     """Create and register a new asyncio.Queue for quote updates."""
     q: asyncio.Queue = asyncio.Queue(maxsize=256)
