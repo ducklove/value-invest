@@ -3093,7 +3093,7 @@ function renderNavChart(data) {
         pointRadius: data.length > 30 ? 0 : 3,
         pointHoverRadius: 5,
         pointBackgroundColor: lineColor,
-        tension: 0.3,
+        tension: 0,
         fill: false,
       }],
     },
