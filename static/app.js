@@ -2663,27 +2663,30 @@ async function _mbLoadCatalog() {
   } catch {}
 }
 
-function _mbRenderItem(code, data) {
-  const cat = mbCatalog[code];
-  const label = cat ? cat.label : code;
-  if (!data || !data.value) return `<span class="mi-label">${escapeHtml(label)}</span><span class="mi-val">-</span><span class="mi-chg"></span>`;
-  const rawPct = (data.change_pct || '').replace(/[-+%]/g, '');
-  const dir = data.direction;
-  const isDown = dir === 'down';
-  const cls = isDown ? 'mi-down' : (dir === 'up' ? 'mi-up' : '');
-  const sign = isDown ? '-' : (dir === 'up' ? '+' : '');
-  const chgVal = data.change ? `${sign}${data.change}` : '';
-  const chgPct = rawPct ? `(${sign}${rawPct}%)` : '';
-  return `<span class="mi-label">${escapeHtml(label)}</span><span class="mi-val">${data.value}</span><span class="mi-chg ${cls}">${chgVal} ${chgPct}</span>`;
-}
-
 function _mbRenderBar(dataMap) {
   const bar = document.getElementById('marketBar');
   if (!bar) return;
   let html = '';
   mbCodes.forEach((code, idx) => {
-    const data = dataMap ? dataMap[code] : null;
-    html += `<div class="mi-row" draggable="true" data-idx="${idx}" data-code="${code}">${_mbRenderItem(code, data)}<button class="mi-del" title="삭제">&times;</button></div>`;
+    const cat = mbCatalog[code];
+    const label = cat ? cat.label : code;
+    const d = dataMap ? dataMap[code] : null;
+    const r = idx;  // row index
+    let valHtml = '-', chgHtml = '';
+    if (d && d.value) {
+      const rawPct = (d.change_pct || '').replace(/[-+%]/g, '');
+      const isDown = d.direction === 'down';
+      const cls = isDown ? 'mi-down' : (d.direction === 'up' ? 'mi-up' : '');
+      const sign = isDown ? '-' : (d.direction === 'up' ? '+' : '');
+      const chgVal = d.change ? `${sign}${d.change}` : '';
+      const chgPct = rawPct ? `(${sign}${rawPct}%)` : '';
+      valHtml = d.value;
+      chgHtml = `<span class="${cls}">${chgVal} ${chgPct}</span>`;
+    }
+    html += `<span class="mi-label" draggable="true" data-idx="${r}">${escapeHtml(label)}</span>`;
+    html += `<span class="mi-val" data-idx="${r}">${valHtml}</span>`;
+    html += `<span class="mi-chg" data-idx="${r}">${chgHtml}</span>`;
+    html += `<button class="mi-del" data-code="${code}" title="삭제">&times;</button>`;
   });
   if (mbCodes.length < MB_MAX) {
     html += `<div class="mi-add" id="mbAddBtn">+ 항목 추가</div>`;
@@ -2694,23 +2697,24 @@ function _mbRenderBar(dataMap) {
   bar.querySelectorAll('.mi-del').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const row = btn.closest('.mi-row');
-      const code = row.dataset.code;
-      mbCodes = mbCodes.filter(c => c !== code);
+      mbCodes = mbCodes.filter(c => c !== btn.dataset.code);
       _mbSaveCodes();
       loadMarketSummary();
     });
   });
 
-  // Event: drag reorder
-  bar.querySelectorAll('.mi-row[draggable]').forEach(row => {
-    row.addEventListener('dragstart', (e) => { mbDragFrom = parseInt(row.dataset.idx); row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-    row.addEventListener('dragend', () => { row.classList.remove('dragging'); bar.querySelectorAll('.mi-drag-over').forEach(el => el.classList.remove('mi-drag-over')); });
-    row.addEventListener('dragover', (e) => { e.preventDefault(); if (!row.classList.contains('dragging')) row.classList.add('mi-drag-over'); });
-    row.addEventListener('dragleave', () => row.classList.remove('mi-drag-over'));
-    row.addEventListener('drop', (e) => {
-      e.preventDefault(); row.classList.remove('mi-drag-over');
-      const to = parseInt(row.dataset.idx);
+  // Event: drag reorder (on label spans)
+  bar.querySelectorAll('.mi-label[draggable]').forEach(lbl => {
+    lbl.addEventListener('dragstart', (e) => { mbDragFrom = parseInt(lbl.dataset.idx); e.dataTransfer.effectAllowed = 'move'; });
+    lbl.addEventListener('dragend', () => { bar.querySelectorAll('.mi-drop-target').forEach(el => el.classList.remove('mi-drop-target')); });
+  });
+  bar.querySelectorAll('[data-idx]').forEach(cell => {
+    cell.addEventListener('dragover', (e) => { e.preventDefault(); const r = parseInt(cell.dataset.idx); bar.querySelectorAll(`[data-idx="${r}"]`).forEach(c => c.classList.add('mi-drop-target')); });
+    cell.addEventListener('dragleave', (e) => { const r = parseInt(cell.dataset.idx); bar.querySelectorAll(`[data-idx="${r}"]`).forEach(c => c.classList.remove('mi-drop-target')); });
+    cell.addEventListener('drop', (e) => {
+      e.preventDefault();
+      bar.querySelectorAll('.mi-drop-target').forEach(el => el.classList.remove('mi-drop-target'));
+      const to = parseInt(cell.dataset.idx);
       if (mbDragFrom !== to && mbDragFrom >= 0) {
         const [item] = mbCodes.splice(mbDragFrom, 1);
         mbCodes.splice(to, 0, item);
@@ -2718,6 +2722,22 @@ function _mbRenderBar(dataMap) {
         loadMarketSummary();
       }
     });
+  });
+
+  // Event: row hover → show delete button
+  bar.querySelectorAll('[data-idx]').forEach(cell => {
+    cell.addEventListener('mouseenter', () => {
+      const r = cell.dataset.idx;
+      const dels = bar.querySelectorAll('.mi-del');
+      dels[parseInt(r)]?.classList.add('visible');
+    });
+    cell.addEventListener('mouseleave', () => {
+      bar.querySelectorAll('.mi-del.visible').forEach(d => d.classList.remove('visible'));
+    });
+  });
+  bar.querySelectorAll('.mi-del').forEach(btn => {
+    btn.addEventListener('mouseenter', () => btn.classList.add('visible'));
+    btn.addEventListener('mouseleave', () => btn.classList.remove('visible'));
   });
 
   // Event: add button
