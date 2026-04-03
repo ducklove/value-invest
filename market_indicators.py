@@ -463,7 +463,7 @@ async def _fetch_gold(client: httpx.AsyncClient) -> dict:
         if not price:
             return dict(_EMPTY)
 
-        # Get previous close from Yahoo (cached)
+        # Get previous close from Yahoo (cached) — last completed daily candle
         if _gold_prev_close is None:
             try:
                 yr = await client.get(
@@ -474,8 +474,8 @@ async def _fetch_gold(client: httpx.AsyncClient) -> dict:
                 if yr.status_code == 200:
                     closes = _json.loads(yr.text)["chart"]["result"][0]["indicators"]["quote"][0]["close"]
                     valid = [c for c in closes if c is not None]
-                    if len(valid) >= 2:
-                        _gold_prev_close = valid[-2]
+                    if valid:
+                        _gold_prev_close = valid[-1]
             except Exception:
                 pass
 
