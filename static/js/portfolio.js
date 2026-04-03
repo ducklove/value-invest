@@ -415,7 +415,7 @@ function returnClass(val) {
 
 function _drawSparkline(canvasId, values, color, maxSlots, align) {
   const canvas = document.getElementById(canvasId);
-  if (!canvas || !values.length) return;
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
@@ -425,17 +425,18 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
 
-  const slots = maxSlots || values.length;
+  const slots = maxSlots || Math.max(values.length, 1);
   const offset = align === 'left' ? 0 : slots - values.length;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
   const pad = 2;
 
-  // Zero line — include 0 in the range so it's always visible
+  // Include 0 in range so zero line is always visible
   const minZ = Math.min(min, 0);
   const maxZ = Math.max(max, 0);
   const rangeZ = maxZ - minZ || 1;
+
+  // Zero line — always draw
   const zeroY = pad + (1 - (0 - minZ) / rangeZ) * (h - pad * 2);
   ctx.beginPath();
   ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
@@ -444,17 +445,20 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   ctx.lineTo(w, zeroY);
   ctx.stroke();
 
-  ctx.beginPath();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = 'round';
-  values.forEach((v, i) => {
-    const x = ((i + offset) / (slots - 1)) * w;
-    const y = pad + (1 - (v - minZ) / rangeZ) * (h - pad * 2);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
+  // Data line
+  if (values.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    values.forEach((v, i) => {
+      const x = ((i + offset) / (slots - 1)) * w;
+      const y = pad + (1 - (v - minZ) / rangeZ) * (h - pad * 2);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
 }
 
 function _renderSummarySparklines() {
@@ -464,6 +468,8 @@ function _renderSummarySparklines() {
     const returnPcts = last365.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
     const lastReturn = returnPcts[returnPcts.length - 1] || 0;
     _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb', 252, 'right');
+  } else {
+    _drawSparkline('sparkTotalReturn', [], '#dc2626', 252, 'right');
   }
 
   // 월간 수익률 — pfMonthEndValue 대비 일별 total_value 변동률 (%)
@@ -475,7 +481,11 @@ function _renderSummarySparklines() {
       const lastPct = monthPcts[monthPcts.length - 1];
       _drawSparkline('sparkMonthly', monthPcts,
         lastPct >= 0 ? '#dc2626' : '#2563eb', 22, 'left');
+    } else {
+      _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
     }
+  } else {
+    _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
   }
 
   // 일간 수익률 — 30분 간격 변동률 (%) 기준
@@ -484,6 +494,8 @@ function _renderSummarySparklines() {
     const dayPcts = pfIntradayData.map(d => ((d.total_value / baseValue) - 1) * 100);
     const lastPct = dayPcts[dayPcts.length - 1];
     _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 27, 'left');
+  } else {
+    _drawSparkline('sparkDaily', [], '#dc2626', 27, 'left');
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
