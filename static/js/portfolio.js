@@ -1105,11 +1105,20 @@ async function _mbLoadCatalog() {
   } catch (e) { console.warn(e); }
 }
 
+function _mbIsHidden(code) {
+  if (code === 'NIGHT_FUTURES') {
+    const h = new Date().getHours();
+    if (h >= 9 && h < 18) return true;
+  }
+  return false;
+}
+
 function _mbRenderBar(dataMap) {
   const bar = document.getElementById('marketBar');
   if (!bar) return;
   let html = '';
   mbCodes.forEach((code, idx) => {
+    if (_mbIsHidden(code)) return;
     const cat = mbCatalog[code];
     const label = cat ? cat.label : code;
     const d = dataMap ? dataMap[code] : null;
