@@ -683,16 +683,19 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-cf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); }
 
 .pf-filter-bar {
-  display: flex; gap: 6px; margin-bottom: 16px;
+  display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 16px;
 }
 .pf-filter-btn {
-  padding: 6px 16px; border: 1px solid var(--border); border-radius: 8px;
-  background: var(--surface); color: var(--text-secondary); font-size: 13px; font-weight: 600;
-  cursor: pointer; transition: background 0.15s, color 0.15s;
+  padding: 7px 14px; border: none; border-bottom: 2px solid transparent;
+  margin-bottom: -2px; background: none; color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
 }
 .pf-filter-btn:hover { color: var(--text); }
-.pf-filter-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
-.pf-group-manage-btn { font-size: 16px !important; padding: 6px 10px !important; }
+.pf-filter-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+.pf-filter-btn .pf-filter-cnt { font-weight: 400; opacity: 0.6; font-size: 11px; }
+.pf-filter-btn.active .pf-filter-cnt { opacity: 0.7; }
+.pf-group-manage-btn { font-size: 14px !important; padding: 7px 8px !important; color: var(--text-secondary) !important; border-bottom-color: transparent !important; }
 .pf-col-group { min-width: 80px; }
 .pf-group-select {
   padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px;

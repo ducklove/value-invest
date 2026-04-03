@@ -143,7 +143,7 @@ function renderPortfolio() {
       });
       filterBar.innerHTML = pfGroups.map(g => {
         const active = pfGroupFilter === null || pfGroupFilter.has(g.group_name);
-        return `<button class="pf-filter-btn${active ? ' active' : ''}" onclick="pfToggleGroupFilter('${escapeHtml(g.group_name)}')">${escapeHtml(g.group_name)} (${counts[g.group_name] || 0})</button>`;
+        return `<button class="pf-filter-btn${active ? ' active' : ''}" onclick="pfToggleGroupFilter('${escapeHtml(g.group_name)}')">${escapeHtml(g.group_name)} <span class="pf-filter-cnt">${counts[g.group_name] || 0}</span></button>`;
       }).join('') + `<button class="pf-filter-btn pf-group-manage-btn" onclick="openGroupModal()" title="그룹 관리">\u2699</button>`;
     }
   }
