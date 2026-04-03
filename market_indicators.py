@@ -450,7 +450,7 @@ async def _fetch_gold_yahoo(client: httpx.AsyncClient) -> dict:
     try:
         r = await client.get(
             "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
-            params={"interval": "1d", "range": "2d"},
+            params={"interval": "1d", "range": "5d"},
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             },
@@ -460,7 +460,10 @@ async def _fetch_gold_yahoo(client: httpx.AsyncClient) -> dict:
         data = _json.loads(r.text)
         meta = data["chart"]["result"][0]["meta"]
         price = meta["regularMarketPrice"]
-        prev = meta["chartPreviousClose"]
+        # Use last OHLC close as prev (chartPreviousClose can be stale with range=2d)
+        closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        valid_closes = [c for c in closes if c is not None]
+        prev = valid_closes[-1] if valid_closes else meta["chartPreviousClose"]
         diff = price - prev
         pct = abs(diff) / prev * 100 if prev else 0
         direction = "up" if diff > 0 else "down" if diff < 0 else ""
