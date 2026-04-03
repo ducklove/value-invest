@@ -615,7 +615,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-summary-card {
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
   padding: 12px 16px; min-width: 140px; flex: 1;
+  display: flex; align-items: center; gap: 10px;
 }
+.pf-summary-text { flex: 1; min-width: 0; }
+.pf-sparkline { width: 64px; height: 32px; flex-shrink: 0; }
 .pf-summary-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
 .pf-summary-value { font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .pf-summary-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-variant-numeric: tabular-nums; }

@@ -12,6 +12,7 @@ let pfGroupSort = true;   // independent group sort toggle
 let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
 let pfMonthEndValue = null; // total_value at end of previous month
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
+let pfNavHistory = []; // [{date, nav, total_value, total_invested, total_units}, ...]
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -64,6 +65,11 @@ async function loadPortfolio() {
       const snap = await r.json();
       pfMonthEndValue = snap.total_value ?? null;
       pfMonthEndStockValues = snap.stock_values || {};
+      renderPortfolio();
+    }).catch(() => {});
+    apiFetch('/api/portfolio/nav-history').then(async r => {
+      if (!r.ok) return;
+      pfNavHistory = await r.json();
       renderPortfolio();
     }).catch(() => {});
     apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
@@ -264,25 +270,38 @@ function renderPortfolio() {
   // Summary cards
   summary.innerHTML = `
     <div class="pf-summary-card">
-      <div class="pf-summary-label">총 평가금액</div>
-      <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
-      <div class="pf-summary-sub">투자 ${fmtKrw(totalInvested)}</div>
+      <div class="pf-summary-text">
+        <div class="pf-summary-label">총 평가금액</div>
+        <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
+        <div class="pf-summary-sub">투자 ${fmtKrw(totalInvested)}</div>
+      </div>
+      <canvas class="pf-sparkline" id="sparkTotalValue"></canvas>
     </div>
     <div class="pf-summary-card">
-      <div class="pf-summary-label">총 수익률</div>
-      <div class="pf-summary-value ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</div>
-      <div class="pf-summary-sub ${returnClass(totalMarketValue - totalInvested)}">${fmtSignedKrw(totalMarketValue - totalInvested)}</div>
+      <div class="pf-summary-text">
+        <div class="pf-summary-label">총 수익률</div>
+        <div class="pf-summary-value ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</div>
+        <div class="pf-summary-sub ${returnClass(totalMarketValue - totalInvested)}">${fmtSignedKrw(totalMarketValue - totalInvested)}</div>
+      </div>
+      <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>
     <div class="pf-summary-card">
-      <div class="pf-summary-label">월간 수익률</div>
-      <div class="pf-summary-value ${returnClass(monthlyReturnPct)}">${monthlyReturnPct !== null ? fmtPct(monthlyReturnPct) : '-'}</div>
-      <div class="pf-summary-sub ${returnClass(monthlyPnl)}">${monthlyPnl !== null ? fmtSignedKrw(monthlyPnl) : '-'}</div>
+      <div class="pf-summary-text">
+        <div class="pf-summary-label">월간 수익률</div>
+        <div class="pf-summary-value ${returnClass(monthlyReturnPct)}">${monthlyReturnPct !== null ? fmtPct(monthlyReturnPct) : '-'}</div>
+        <div class="pf-summary-sub ${returnClass(monthlyPnl)}">${monthlyPnl !== null ? fmtSignedKrw(monthlyPnl) : '-'}</div>
+      </div>
+      <canvas class="pf-sparkline" id="sparkMonthly"></canvas>
     </div>
     <div class="pf-summary-card">
-      <div class="pf-summary-label">일간 수익률</div>
-      <div class="pf-summary-value ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
-      <div class="pf-summary-sub ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
+      <div class="pf-summary-text">
+        <div class="pf-summary-label">일간 수익률</div>
+        <div class="pf-summary-value ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
+        <div class="pf-summary-sub ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
+      </div>
+      <canvas class="pf-sparkline" id="sparkDaily"></canvas>
     </div>`;
+  _renderSummarySparklines();
 
   // Table body
   tbody.innerHTML = rows.map((r, i) => {
@@ -382,6 +401,69 @@ function renderPortfolio() {
 function returnClass(val) {
   if (val === null || val === undefined) return '';
   return val > 0 ? 'pf-return positive' : val < 0 ? 'pf-return negative' : '';
+}
+
+function _drawSparkline(canvasId, values, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !values.length) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const pad = 2;
+
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  values.forEach((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = pad + (1 - (v - min) / range) * (h - pad * 2);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function _renderSummarySparklines() {
+  if (!pfNavHistory.length) return;
+  const last30 = pfNavHistory.slice(-30);
+
+  // 총 평가금액 — total_value 추이
+  _drawSparkline('sparkTotalValue', last30.map(d => d.total_value),
+    getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#2563eb');
+
+  // 총 수익률 — (total_value - total_invested) / total_invested * 100
+  const returnPcts = last30.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
+  const lastReturn = returnPcts[returnPcts.length - 1] || 0;
+  _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb');
+
+  // 월간 수익률 — NAV 추이 (이번 달)
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
+  if (monthData.length > 1) {
+    _drawSparkline('sparkMonthly', monthData.map(d => d.nav),
+      monthData[monthData.length - 1].nav >= monthData[0].nav ? '#dc2626' : '#2563eb');
+  }
+
+  // 일간 수익률 — 최근 10일 일간 변동률
+  const recent = pfNavHistory.slice(-11);
+  if (recent.length > 1) {
+    const dailyReturns = [];
+    for (let i = 1; i < recent.length; i++) {
+      dailyReturns.push(recent[i].nav / recent[i - 1].nav - 1);
+    }
+    const lastDaily = dailyReturns[dailyReturns.length - 1] || 0;
+    _drawSparkline('sparkDaily', dailyReturns, lastDaily >= 0 ? '#dc2626' : '#2563eb');
+  }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
 function fmtKrw(n) { return n !== null ? Number(Math.round(n)).toLocaleString() : '-'; }
