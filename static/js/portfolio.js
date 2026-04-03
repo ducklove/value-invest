@@ -11,6 +11,7 @@ let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 let pfGroupSort = true;   // independent group sort toggle
 let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
 let pfMonthEndValue = null; // total_value at end of previous month
+let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -62,6 +63,7 @@ async function loadPortfolio() {
       if (!r.ok) return;
       const snap = await r.json();
       pfMonthEndValue = snap.total_value ?? null;
+      pfMonthEndStockValues = snap.stock_values || {};
       renderPortfolio();
     }).catch(() => {});
     apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
@@ -247,11 +249,17 @@ function renderPortfolio() {
   const prevTotalValue = totalMarketValue - totalDailyPnl;
   const dailyReturnPct = prevTotalValue > 0 ? (totalDailyPnl / prevTotalValue * 100) : 0;
 
-  // Monthly return (vs end of previous month) — only valid when viewing all groups
+  // Monthly return (vs end of previous month)
   const isFiltered = pfGroupFilter !== null;
-  const monthlyReturnPct = !isFiltered && pfMonthEndValue && pfMonthEndValue > 0
-    ? ((totalMarketValue - pfMonthEndValue) / pfMonthEndValue * 100) : null;
-  const monthlyPnl = !isFiltered && pfMonthEndValue != null ? totalMarketValue - pfMonthEndValue : null;
+  let filteredMonthEndValue = pfMonthEndValue;
+  if (isFiltered && Object.keys(pfMonthEndStockValues).length > 0) {
+    filteredMonthEndValue = 0;
+    rows.forEach(r => { filteredMonthEndValue += (pfMonthEndStockValues[r.stock_code] ?? 0); });
+  }
+  const monthlyReturnPct = filteredMonthEndValue && filteredMonthEndValue > 0
+    ? ((totalMarketValue - filteredMonthEndValue) / filteredMonthEndValue * 100) : null;
+  const monthlyPnl = filteredMonthEndValue != null && filteredMonthEndValue > 0
+    ? totalMarketValue - filteredMonthEndValue : null;
 
   // Summary cards
   summary.innerHTML = `

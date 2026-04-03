@@ -12,13 +12,14 @@ logger = logging.getLogger(__name__)
 BASE_NAV = 1000.0
 
 
-async def _fetch_total_value(google_sub: str) -> tuple[float, float]:
-    """Return (total_market_value, total_invested) for a user's portfolio."""
+async def _fetch_total_value(google_sub: str) -> tuple[float, float, list[dict]]:
+    """Return (total_market_value, total_invested, per_stock_values) for a user's portfolio."""
     from routes.portfolio import _fetch_quote
 
     items = await cache.get_portfolio(google_sub)
     total_value = 0.0
     total_invested = 0.0
+    per_stock = []
     for item in items:
         qty = item["quantity"]
         avg_price = item["avg_price"]
@@ -27,19 +28,21 @@ async def _fetch_total_value(google_sub: str) -> tuple[float, float]:
             quote = await _fetch_quote(item["stock_code"])
             price = quote.get("price") if quote else None
             if price is not None:
-                total_value += qty * price
+                mv = qty * price
             else:
-                total_value += qty * avg_price  # fallback to cost basis
+                mv = qty * avg_price  # fallback to cost basis
         except Exception as e:
             logger.warning("Quote fetch failed for %s: %s", item["stock_code"], e)
-            total_value += qty * avg_price
+            mv = qty * avg_price
+        total_value += mv
+        per_stock.append({"stock_code": item["stock_code"], "market_value": mv})
         await asyncio.sleep(0.25)  # rate limit
-    return total_value, total_invested
+    return total_value, total_invested, per_stock
 
 
 async def take_snapshot(google_sub: str, snap_date: str):
     """Take a daily snapshot and compute NAV for one user."""
-    total_value, total_invested = await _fetch_total_value(google_sub)
+    total_value, total_invested, per_stock = await _fetch_total_value(google_sub)
     if total_value == 0:
         logger.info("Skipping %s: portfolio value is 0", google_sub)
         return
@@ -68,14 +71,11 @@ async def take_snapshot(google_sub: str, snap_date: str):
             total_units += units_delta
             # Update cashflow record with nav and units
             db = await cache.get_db()
-            try:
-                await db.execute(
-                    "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
-                    (nav, units_delta, cf["id"]),
-                )
-                await db.commit()
-            finally:
-                await db.close()
+            await db.execute(
+                "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
+                (nav, units_delta, cf["id"]),
+            )
+            await db.commit()
 
     # Compute new NAV
     if total_units > 0:
@@ -85,7 +85,9 @@ async def take_snapshot(google_sub: str, snap_date: str):
         total_units = total_value / BASE_NAV if total_value > 0 else 0
 
     await cache.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units)
-    logger.info("Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f", google_sub[:8], snap_date, total_value, nav, total_units)
+    if per_stock:
+        await cache.save_stock_snapshots(google_sub, snap_date, per_stock)
+    logger.info("Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f stocks=%d", google_sub[:8], snap_date, total_value, nav, total_units, len(per_stock))
 
 
 async def run_all_snapshots():

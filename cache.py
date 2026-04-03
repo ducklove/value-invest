@@ -167,6 +167,17 @@ async def init_db():
             FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS portfolio_stock_snapshots (
+            google_sub TEXT NOT NULL,
+            date TEXT NOT NULL,
+            stock_code TEXT NOT NULL,
+            market_value REAL NOT NULL DEFAULT 0,
+            PRIMARY KEY (google_sub, date, stock_code),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_date ON portfolio_stock_snapshots(google_sub, date);
+
         CREATE TABLE IF NOT EXISTS user_settings (
             google_sub TEXT NOT NULL,
             key TEXT NOT NULL,
@@ -1111,6 +1122,35 @@ async def get_pending_cashflows(google_sub: str, date: str) -> list[dict]:
         (google_sub, date),
     )
     return [dict(row) for row in await cursor.fetchall()]
+
+
+async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
+    """Save per-stock market values for a date. items: [{stock_code, market_value}, ...]"""
+    db = await get_db()
+    await db.executemany(
+        "INSERT OR REPLACE INTO portfolio_stock_snapshots (google_sub, date, stock_code, market_value) VALUES (?, ?, ?, ?)",
+        [(google_sub, date, it["stock_code"], it["market_value"]) for it in items],
+    )
+    await db.commit()
+
+
+async def get_stock_snapshots_by_date(google_sub: str, date: str) -> list[dict]:
+    """Get per-stock snapshots on or before a given date (latest available)."""
+    db = await get_db()
+    # Find the latest snapshot date on or before the target date
+    cursor = await db.execute(
+        "SELECT MAX(date) AS snap_date FROM portfolio_stock_snapshots WHERE google_sub = ? AND date <= ?",
+        (google_sub, date),
+    )
+    row = await cursor.fetchone()
+    snap_date = row["snap_date"] if row else None
+    if not snap_date:
+        return []
+    cursor = await db.execute(
+        "SELECT stock_code, market_value FROM portfolio_stock_snapshots WHERE google_sub = ? AND date = ?",
+        (google_sub, snap_date),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
 
 
 async def save_latest_report(stock_code: str, report: dict):

@@ -937,8 +937,13 @@ async def resolve_name(code: str = Query(..., min_length=1)):
 @router.get("/api/portfolio/month-end-value")
 async def get_month_end_value(request: Request):
     user = _require_user(await get_current_user(request))
+    from datetime import date, timedelta
+    month_end = (date.today().replace(day=1) - timedelta(days=1)).isoformat()
     snapshot = await cache.get_month_end_snapshot(user["google_sub"])
-    return snapshot or {}
+    stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], month_end)
+    result = dict(snapshot) if snapshot else {}
+    result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
+    return result
 
 
 @router.get("/api/portfolio/nav-history")
