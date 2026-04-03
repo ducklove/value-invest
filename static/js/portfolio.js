@@ -466,13 +466,12 @@ function _renderSummarySparklines() {
     _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb', 252, 'right');
   }
 
-  // 월간 수익률 — 이번 달 NAV 변동률 (%) 기준
-  if (pfNavHistory.length > 1) {
+  // 월간 수익률 — pfMonthEndValue 대비 일별 total_value 변동률 (%)
+  if (pfNavHistory.length > 0 && pfMonthEndValue && pfMonthEndValue > 0) {
     const thisMonth = new Date().toISOString().slice(0, 7);
     const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
-    if (monthData.length > 1) {
-      const baseNav = monthData[0].nav;
-      const monthPcts = monthData.map(d => ((d.nav / baseNav) - 1) * 100);
+    if (monthData.length > 0) {
+      const monthPcts = monthData.map(d => ((d.total_value / pfMonthEndValue) - 1) * 100);
       const lastPct = monthPcts[monthPcts.length - 1];
       _drawSparkline('sparkMonthly', monthPcts,
         lastPct >= 0 ? '#dc2626' : '#2563eb', 22, 'left');
