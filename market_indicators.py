@@ -446,11 +446,12 @@ async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
 
 
 async def _fetch_gold_yahoo(client: httpx.AsyncClient) -> dict:
-    """Fetch gold futures (GC=F) from Yahoo Finance for near-24h coverage."""
+    """Fetch gold futures (GC=F) from Yahoo Finance using 1m candles for live price."""
     try:
+        # 1m interval gives the most current price; regularMarketPrice can be stale
         r = await client.get(
             "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
-            params={"interval": "1d", "range": "2d"},
+            params={"interval": "1m", "range": "2d"},
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             },
@@ -458,9 +459,14 @@ async def _fetch_gold_yahoo(client: httpx.AsyncClient) -> dict:
         if r.status_code != 200:
             return dict(_EMPTY)
         data = _json.loads(r.text)
-        meta = data["chart"]["result"][0]["meta"]
-        price = meta["regularMarketPrice"]
-        prev = meta["chartPreviousClose"]
+        result = data["chart"]["result"][0]
+        closes = result["indicators"]["quote"][0]["close"]
+        valid = [c for c in closes if c is not None]
+        if len(valid) < 2:
+            return dict(_EMPTY)
+        price = valid[-1]
+        # Previous day close from meta (more reliable than finding day boundary in 1m data)
+        prev = result["meta"]["chartPreviousClose"]
         diff = price - prev
         pct = abs(diff) / prev * 100 if prev else 0
         direction = "up" if diff > 0 else "down" if diff < 0 else ""
