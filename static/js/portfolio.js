@@ -247,10 +247,11 @@ function renderPortfolio() {
   const prevTotalValue = totalMarketValue - totalDailyPnl;
   const dailyReturnPct = prevTotalValue > 0 ? (totalDailyPnl / prevTotalValue * 100) : 0;
 
-  // Monthly return (vs end of previous month)
-  const monthlyReturnPct = pfMonthEndValue && pfMonthEndValue > 0
+  // Monthly return (vs end of previous month) — only valid when viewing all groups
+  const isFiltered = pfGroupFilter !== null;
+  const monthlyReturnPct = !isFiltered && pfMonthEndValue && pfMonthEndValue > 0
     ? ((totalMarketValue - pfMonthEndValue) / pfMonthEndValue * 100) : null;
-  const monthlyPnl = pfMonthEndValue != null ? totalMarketValue - pfMonthEndValue : null;
+  const monthlyPnl = !isFiltered && pfMonthEndValue != null ? totalMarketValue - pfMonthEndValue : null;
 
   // Summary cards
   summary.innerHTML = `
