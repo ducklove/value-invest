@@ -264,9 +264,14 @@ function renderPortfolio() {
   // Monthly return (vs end of previous month)
   const isFiltered = pfGroupFilter !== null;
   let filteredMonthEndValue = pfMonthEndValue;
-  if (isFiltered && Object.keys(pfMonthEndStockValues).length > 0) {
-    filteredMonthEndValue = 0;
-    rows.forEach(r => { filteredMonthEndValue += (pfMonthEndStockValues[r.stock_code] ?? 0); });
+  if (isFiltered && pfMonthEndValue && Object.keys(pfMonthEndStockValues).length > 0) {
+    // Normalize: use per-stock ratios against actual month-end total
+    const stockTotal = Object.values(pfMonthEndStockValues).reduce((a, b) => a + b, 0);
+    if (stockTotal > 0) {
+      let filteredStockTotal = 0;
+      rows.forEach(r => { filteredStockTotal += (pfMonthEndStockValues[r.stock_code] ?? 0); });
+      filteredMonthEndValue = pfMonthEndValue * (filteredStockTotal / stockTotal);
+    }
   }
   const monthlyReturnPct = filteredMonthEndValue && filteredMonthEndValue > 0
     ? ((totalMarketValue - filteredMonthEndValue) / filteredMonthEndValue * 100) : null;
