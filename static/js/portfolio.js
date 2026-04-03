@@ -413,7 +413,7 @@ function returnClass(val) {
   return val > 0 ? 'pf-return positive' : val < 0 ? 'pf-return negative' : '';
 }
 
-function _drawSparkline(canvasId, values, color) {
+function _drawSparkline(canvasId, values, color, maxSlots) {
   const canvas = document.getElementById(canvasId);
   if (!canvas || !values.length) return;
   const ctx = canvas.getContext('2d');
@@ -425,6 +425,8 @@ function _drawSparkline(canvasId, values, color) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
 
+  const slots = maxSlots || values.length;
+  const offset = slots - values.length; // empty slots on the left
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
@@ -435,7 +437,7 @@ function _drawSparkline(canvasId, values, color) {
   ctx.lineWidth = 1.5;
   ctx.lineJoin = 'round';
   values.forEach((v, i) => {
-    const x = (i / (values.length - 1)) * w;
+    const x = ((i + offset) / (slots - 1)) * w;
     const y = pad + (1 - (v - min) / range) * (h - pad * 2);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
@@ -444,30 +446,30 @@ function _drawSparkline(canvasId, values, color) {
 }
 
 function _renderSummarySparklines() {
-  // 총 수익률 — 52주 누적 수익률 추이
+  // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
   if (pfNavHistory.length > 1) {
     const last365 = pfNavHistory.slice(-365);
     const returnPcts = last365.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
     const lastReturn = returnPcts[returnPcts.length - 1] || 0;
-    _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb');
+    _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb', 252);
   }
 
-  // 월간 수익률 — 이번 달 NAV 추이
+  // 월간 수익률 — 이번 달 NAV 추이 (최대 ~22 거래일)
   if (pfNavHistory.length > 1) {
     const thisMonth = new Date().toISOString().slice(0, 7);
     const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
     if (monthData.length > 1) {
       _drawSparkline('sparkMonthly', monthData.map(d => d.nav),
-        monthData[monthData.length - 1].nav >= monthData[0].nav ? '#dc2626' : '#2563eb');
+        monthData[monthData.length - 1].nav >= monthData[0].nav ? '#dc2626' : '#2563eb', 22);
     }
   }
 
-  // 일간 수익률 — 오늘 30분 간격 intraday
+  // 일간 수익률 — 9:00~22:00 30분 간격 = 최대 27 슬롯
   if (pfIntradayData.length > 1) {
     const values = pfIntradayData.map(d => d.total_value);
     const last = values[values.length - 1];
     const first = values[0];
-    _drawSparkline('sparkDaily', values, last >= first ? '#dc2626' : '#2563eb');
+    _drawSparkline('sparkDaily', values, last >= first ? '#dc2626' : '#2563eb', 27);
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
