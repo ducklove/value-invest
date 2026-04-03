@@ -432,16 +432,17 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   const range = max - min || 1;
   const pad = 2;
 
-  // Zero line (if 0 is within range)
-  if (min <= 0 && max >= 0) {
-    const zeroY = pad + (1 - (0 - min) / range) * (h - pad * 2);
-    ctx.beginPath();
-    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
-    ctx.lineWidth = 0.5;
-    ctx.moveTo(0, zeroY);
-    ctx.lineTo(w, zeroY);
-    ctx.stroke();
-  }
+  // Zero line — include 0 in the range so it's always visible
+  const minZ = Math.min(min, 0);
+  const maxZ = Math.max(max, 0);
+  const rangeZ = maxZ - minZ || 1;
+  const zeroY = pad + (1 - (0 - minZ) / rangeZ) * (h - pad * 2);
+  ctx.beginPath();
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
+  ctx.lineWidth = 0.5;
+  ctx.moveTo(0, zeroY);
+  ctx.lineTo(w, zeroY);
+  ctx.stroke();
 
   ctx.beginPath();
   ctx.strokeStyle = color;
@@ -449,7 +450,7 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   ctx.lineJoin = 'round';
   values.forEach((v, i) => {
     const x = ((i + offset) / (slots - 1)) * w;
-    const y = pad + (1 - (v - min) / range) * (h - pad * 2);
+    const y = pad + (1 - (v - minZ) / rangeZ) * (h - pad * 2);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
