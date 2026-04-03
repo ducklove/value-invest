@@ -955,9 +955,20 @@ async def get_nav_history(request: Request):
 @router.get("/api/portfolio/intraday")
 async def get_intraday(request: Request):
     user = _require_user(await get_current_user(request))
-    from datetime import date
-    today = date.today().isoformat()
-    return await cache.get_intraday_snapshots(user["google_sub"], today)
+    from datetime import date, timedelta
+    today = date.today()
+    points = await cache.get_intraday_snapshots(user["google_sub"], today.isoformat())
+    # Prepend previous day's closing snapshot as baseline (ts="00:00")
+    yesterday = (today - timedelta(days=1)).isoformat()
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "SELECT total_value FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+        (user["google_sub"], yesterday),
+    )
+    row = await cursor.fetchone()
+    if row and row["total_value"]:
+        points = [{"ts": today.isoformat() + "T00:00", "total_value": row["total_value"]}] + points
+    return points
 
 
 @router.get("/api/portfolio/cashflows")
