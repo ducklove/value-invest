@@ -137,8 +137,11 @@ const QuoteManager = {
   },
 
   async _pollAll() {
-    // WS가 활성이면 WS 코드는 이미 실시간이므로 overflow만 폴링
-    if (this.wsActive) return;
+    // WS 활성 시에도 overflow(REST) 코드는 폴링 필요
+    if (this.wsActive) {
+      if (this.overflowCodes.length) await this._fetchQuotes(this.overflowCodes);
+      return;
+    }
     // WS 비활성 — 모든 구독 코드를 REST로 폴링
     const allCodes = new Set();
     for (const codes of Object.values(this.subscriptions)) {
