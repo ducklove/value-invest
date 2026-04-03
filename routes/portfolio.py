@@ -465,7 +465,7 @@ async def _detect_market_type(code: str) -> str:
                 headers={"User-Agent": "Mozilla/5.0"},
                 follow_redirects=True,
             )
-            if "코스닥" in resp.text[:5000]:
+            if "코스닥" in resp.text[:30000]:
                 _market_type_cache[code] = "KOSDAQ"
             else:
                 _market_type_cache[code] = "KOSPI"
