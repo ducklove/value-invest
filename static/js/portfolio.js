@@ -413,7 +413,7 @@ function returnClass(val) {
   return val > 0 ? 'pf-return positive' : val < 0 ? 'pf-return negative' : '';
 }
 
-function _drawSparkline(canvasId, values, color, maxSlots) {
+function _drawSparkline(canvasId, values, color, maxSlots, align) {
   const canvas = document.getElementById(canvasId);
   if (!canvas || !values.length) return;
   const ctx = canvas.getContext('2d');
@@ -426,7 +426,7 @@ function _drawSparkline(canvasId, values, color, maxSlots) {
   ctx.clearRect(0, 0, w, h);
 
   const slots = maxSlots || values.length;
-  const offset = slots - values.length; // empty slots on the left
+  const offset = align === 'left' ? 0 : slots - values.length;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
@@ -451,7 +451,7 @@ function _renderSummarySparklines() {
     const last365 = pfNavHistory.slice(-365);
     const returnPcts = last365.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
     const lastReturn = returnPcts[returnPcts.length - 1] || 0;
-    _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb', 252);
+    _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb', 252, 'right');
   }
 
   // 월간 수익률 — 이번 달 NAV 추이 (최대 ~22 거래일)
@@ -460,7 +460,7 @@ function _renderSummarySparklines() {
     const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
     if (monthData.length > 1) {
       _drawSparkline('sparkMonthly', monthData.map(d => d.nav),
-        monthData[monthData.length - 1].nav >= monthData[0].nav ? '#dc2626' : '#2563eb', 22);
+        monthData[monthData.length - 1].nav >= monthData[0].nav ? '#dc2626' : '#2563eb', 22, 'left');
     }
   }
 
@@ -469,7 +469,7 @@ function _renderSummarySparklines() {
     const values = pfIntradayData.map(d => d.total_value);
     const last = values[values.length - 1];
     const first = values[0];
-    _drawSparkline('sparkDaily', values, last >= first ? '#dc2626' : '#2563eb', 27);
+    _drawSparkline('sparkDaily', values, last >= first ? '#dc2626' : '#2563eb', 27, 'left');
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
