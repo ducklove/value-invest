@@ -178,6 +178,16 @@ async def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_date ON portfolio_stock_snapshots(google_sub, date);
 
+        CREATE TABLE IF NOT EXISTS portfolio_intraday (
+            google_sub TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            total_value REAL NOT NULL DEFAULT 0,
+            PRIMARY KEY (google_sub, ts),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_intraday_sub_ts ON portfolio_intraday(google_sub, ts);
+
         CREATE TABLE IF NOT EXISTS user_settings (
             google_sub TEXT NOT NULL,
             key TEXT NOT NULL,
@@ -1151,6 +1161,34 @@ async def get_stock_snapshots_by_date(google_sub: str, date: str) -> list[dict]:
         (google_sub, snap_date),
     )
     return [dict(r) for r in await cursor.fetchall()]
+
+
+async def save_intraday_snapshot(google_sub: str, ts: str, total_value: float):
+    db = await get_db()
+    await db.execute(
+        "INSERT OR REPLACE INTO portfolio_intraday (google_sub, ts, total_value) VALUES (?, ?, ?)",
+        (google_sub, ts, total_value),
+    )
+    await db.commit()
+
+
+async def get_intraday_snapshots(google_sub: str, date: str) -> list[dict]:
+    """Get intraday snapshots for a given date (YYYY-MM-DD)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT ts, total_value FROM portfolio_intraday WHERE google_sub = ? AND ts >= ? AND ts < ? ORDER BY ts ASC",
+        (google_sub, date + "T00:00", date + "T99:99"),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def delete_old_intraday(days_to_keep: int = 7):
+    """Remove intraday data older than N days."""
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=days_to_keep)).isoformat()
+    db = await get_db()
+    await db.execute("DELETE FROM portfolio_intraday WHERE ts < ?", (cutoff + "T00:00",))
+    await db.commit()
 
 
 async def save_latest_report(stock_code: str, report: dict):

@@ -1,0 +1,10 @@
+[Unit]
+Description=Portfolio intraday snapshot (30-min)
+After=network.target
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+WorkingDirectory=/home/cantabile/Works/value_invest
+ExecStart=/usr/bin/python3 snapshot_intraday.py

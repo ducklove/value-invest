@@ -13,6 +13,7 @@ let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
 let pfMonthEndValue = null; // total_value at end of previous month
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 let pfNavHistory = []; // [{date, nav, total_value, total_invested, total_units}, ...]
+let pfIntradayData = []; // [{ts, total_value}, ...]
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -70,6 +71,11 @@ async function loadPortfolio() {
     apiFetch('/api/portfolio/nav-history').then(async r => {
       if (!r.ok) return;
       pfNavHistory = await r.json();
+      renderPortfolio();
+    }).catch(() => {});
+    apiFetch('/api/portfolio/intraday').then(async r => {
+      if (!r.ok) return;
+      pfIntradayData = await r.json();
       renderPortfolio();
     }).catch(() => {});
     apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
@@ -275,7 +281,6 @@ function renderPortfolio() {
         <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
         <div class="pf-summary-sub">투자 ${fmtKrw(totalInvested)}</div>
       </div>
-      <canvas class="pf-sparkline" id="sparkTotalValue"></canvas>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
@@ -434,35 +439,30 @@ function _drawSparkline(canvasId, values, color) {
 }
 
 function _renderSummarySparklines() {
-  if (!pfNavHistory.length) return;
-  const last30 = pfNavHistory.slice(-30);
-
-  // 총 평가금액 — total_value 추이
-  _drawSparkline('sparkTotalValue', last30.map(d => d.total_value),
-    getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#2563eb');
-
-  // 총 수익률 — (total_value - total_invested) / total_invested * 100
-  const returnPcts = last30.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
-  const lastReturn = returnPcts[returnPcts.length - 1] || 0;
-  _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb');
-
-  // 월간 수익률 — NAV 추이 (이번 달)
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
-  if (monthData.length > 1) {
-    _drawSparkline('sparkMonthly', monthData.map(d => d.nav),
-      monthData[monthData.length - 1].nav >= monthData[0].nav ? '#dc2626' : '#2563eb');
+  // 총 수익률 — 52주 누적 수익률 추이
+  if (pfNavHistory.length > 1) {
+    const last365 = pfNavHistory.slice(-365);
+    const returnPcts = last365.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
+    const lastReturn = returnPcts[returnPcts.length - 1] || 0;
+    _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb');
   }
 
-  // 일간 수익률 — 최근 10일 일간 변동률
-  const recent = pfNavHistory.slice(-11);
-  if (recent.length > 1) {
-    const dailyReturns = [];
-    for (let i = 1; i < recent.length; i++) {
-      dailyReturns.push(recent[i].nav / recent[i - 1].nav - 1);
+  // 월간 수익률 — 이번 달 NAV 추이
+  if (pfNavHistory.length > 1) {
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
+    if (monthData.length > 1) {
+      _drawSparkline('sparkMonthly', monthData.map(d => d.nav),
+        monthData[monthData.length - 1].nav >= monthData[0].nav ? '#dc2626' : '#2563eb');
     }
-    const lastDaily = dailyReturns[dailyReturns.length - 1] || 0;
-    _drawSparkline('sparkDaily', dailyReturns, lastDaily >= 0 ? '#dc2626' : '#2563eb');
+  }
+
+  // 일간 수익률 — 오늘 30분 간격 intraday
+  if (pfIntradayData.length > 1) {
+    const values = pfIntradayData.map(d => d.total_value);
+    const last = values[values.length - 1];
+    const first = values[0];
+    _drawSparkline('sparkDaily', values, last >= first ? '#dc2626' : '#2563eb');
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }

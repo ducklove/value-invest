@@ -1,0 +1,9 @@
+[Unit]
+Description=Run portfolio intraday snapshot every 30 minutes (9:00-22:00)
+
+[Timer]
+OnCalendar=*-*-* 09..21:00,30:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

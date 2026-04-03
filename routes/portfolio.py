@@ -952,6 +952,14 @@ async def get_nav_history(request: Request):
     return await cache.get_nav_history(user["google_sub"])
 
 
+@router.get("/api/portfolio/intraday")
+async def get_intraday(request: Request):
+    user = _require_user(await get_current_user(request))
+    from datetime import date
+    today = date.today().isoformat()
+    return await cache.get_intraday_snapshots(user["google_sub"], today)
+
+
 @router.get("/api/portfolio/cashflows")
 async def get_cashflows(request: Request):
     user = _require_user(await get_current_user(request))
