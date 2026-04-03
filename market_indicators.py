@@ -445,41 +445,22 @@ async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
 # ---------------------------------------------------------------------------
 
 
-_gold_prev_close: float | None = None
-
-
-async def _fetch_gold(client: httpx.AsyncClient) -> dict:
-    """Fetch live gold price from gold-api.com, prev close from Yahoo."""
-    global _gold_prev_close
+async def _fetch_gold_yahoo(client: httpx.AsyncClient) -> dict:
+    """Fetch gold futures (GC=F) from Yahoo Finance for near-24h coverage."""
     try:
         r = await client.get(
-            "https://api.gold-api.com/price/XAU/USD",
-            headers={"User-Agent": "Mozilla/5.0"},
+            "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
+            params={"interval": "1d", "range": "2d"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
         )
         if r.status_code != 200:
             return dict(_EMPTY)
         data = _json.loads(r.text)
-        price = data.get("price")
-        if not price:
-            return dict(_EMPTY)
-
-        # Get previous close from Yahoo (cached) — last completed daily candle
-        if _gold_prev_close is None:
-            try:
-                yr = await client.get(
-                    "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
-                    params={"interval": "1d", "range": "5d"},
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-                )
-                if yr.status_code == 200:
-                    closes = _json.loads(yr.text)["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-                    valid = [c for c in closes if c is not None]
-                    if valid:
-                        _gold_prev_close = valid[-1]
-            except Exception:
-                pass
-
-        prev = _gold_prev_close or price
+        meta = data["chart"]["result"][0]["meta"]
+        price = meta["regularMarketPrice"]
+        prev = meta["chartPreviousClose"]
         diff = price - prev
         pct = abs(diff) / prev * 100 if prev else 0
         direction = "up" if diff > 0 else "down" if diff < 0 else ""
@@ -611,7 +592,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
 
         # Gold futures (Yahoo Finance)
         if gold_needed:
-            tasks.append(_fetch_gold(client))
+            tasks.append(_fetch_gold_yahoo(client))
             task_keys.append(("gold", None))
 
         # Night futures
