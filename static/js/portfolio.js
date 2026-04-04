@@ -1689,19 +1689,7 @@ async function renderTreemap() {
         borderColor: isDark ? '#334155' : '#e5e7eb',
         borderWidth: 1,
       },
-      upperLabel: {
-        show: true,
-        height: 22,
-        color: isDark ? '#e2e8f0' : '#374151',
-        fontSize: 11,
-        fontWeight: 600,
-        padding: [2, 8],
-        formatter(params) {
-          const d = params.data;
-          if (d.changePct === null || d.changePct === undefined) return params.name;
-          return `${params.name}  ${_fmtPct(d.changePct)}`;
-        },
-      },
+      upperLabel: { show: false },
       levels: [
         {
           // Group level
@@ -1711,7 +1699,17 @@ async function renderTreemap() {
           },
           upperLabel: {
             show: true,
+            height: 22,
+            color: isDark ? '#e2e8f0' : '#374151',
+            fontSize: 11,
+            fontWeight: 600,
+            padding: [2, 8],
             backgroundColor: isDark ? '#1e293b' : '#f3f4f6',
+            formatter(params) {
+              const d = params.data;
+              if (d.changePct === null || d.changePct === undefined) return params.name;
+              return `${params.name}  ${_fmtPct(d.changePct)}`;
+            },
           },
         },
         {
