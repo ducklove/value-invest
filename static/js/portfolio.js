@@ -1692,7 +1692,12 @@ async function renderTreemap() {
       upperLabel: { show: false },
       levels: [
         {
-          // Group level
+          // Level 0: root — hide upperLabel
+          upperLabel: { show: false },
+          itemStyle: { borderWidth: 0 },
+        },
+        {
+          // Level 1: group — show header with daily change
           itemStyle: {
             borderColor: isDark ? '#475569' : '#9ca3af',
             borderWidth: 2,
