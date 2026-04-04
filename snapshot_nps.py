@@ -587,8 +587,11 @@ async def run_nps_snapshot(snap_date: str | None = None):
     # 6. Prepare items for DB save
     db_items = []
     for h in holdings:
+        code = h.get("stock_code")
+        if not code or not (len(code) == 6 and code[:5].isdigit()):
+            continue  # Skip unmatched (non-KOSPI/KOSDAQ) stocks
         db_items.append({
-            "stock_code": h.get("stock_code") or f"__NPS_{h.get('name', '')}__",
+            "stock_code": code,
             "stock_name": h.get("name", ""),
             "shares": h.get("shares", 0),
             "ownership_pct": h.get("ownership_pct", 0.0),
@@ -600,10 +603,10 @@ async def run_nps_snapshot(snap_date: str | None = None):
     await cache.save_nps_holdings(snap_date, db_items)
     logger.info("NPS: holdings saved (%d rows)", len(db_items))
 
-    # 7. Generate HTML
+    # 7. Generate HTML (use filtered db_items which have valid stock codes)
     generated_html = _build_html(
         snap_date=snap_date,
-        holdings=holdings,
+        holdings=db_items,
         total_value=total_value,
         nav=nav,
         today_pct=today_pct,
