@@ -285,13 +285,19 @@ function renderPortfolio() {
   const ytdReturnPct = ytdBase && ytdBase > 0 ? ((totalMarketValue - ytdBase) / ytdBase * 100) : null;
   const ytdPnl = ytdBase != null && ytdBase > 0 ? totalMarketValue - ytdBase : null;
 
+  // Date labels for summary cards
+  const _now = new Date();
+  const _todayLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}/${String(_now.getDate()).padStart(2,'0')}`;
+  const _mtdLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}`;
+  const _ytdLabel = `${_now.getFullYear()}`;
+
   // Summary cards: Total, Today, MTD, YTD
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">Total</div>
+        <div class="pf-summary-label">Total <span class="pf-summary-date">${_todayLabel}</span></div>
         <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
-        <div class="pf-summary-sub">투자 ${fmtKrw(totalInvested)}</div>
+        <div class="pf-summary-sub">투자금액 ${fmtKrw(totalInvested)}</div>
       </div>
     </div>
     <div class="pf-summary-card">
@@ -304,7 +310,7 @@ function renderPortfolio() {
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">MTD</div>
+        <div class="pf-summary-label">MTD <span class="pf-summary-date">${_mtdLabel}</span></div>
         <div class="pf-summary-value ${returnClass(monthlyReturnPct)}">${monthlyReturnPct !== null ? fmtPct(monthlyReturnPct) : '-'}</div>
         <div class="pf-summary-sub ${returnClass(monthlyPnl)}">${monthlyPnl !== null ? fmtSignedKrw(monthlyPnl) : '-'}</div>
       </div>
@@ -312,7 +318,7 @@ function renderPortfolio() {
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">YTD</div>
+        <div class="pf-summary-label">YTD <span class="pf-summary-date">${_ytdLabel}</span></div>
         <div class="pf-summary-value ${returnClass(ytdReturnPct)}">${ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-'}</div>
         <div class="pf-summary-sub ${returnClass(ytdPnl)}">${ytdPnl !== null ? fmtSignedKrw(ytdPnl) : '-'}</div>
       </div>
@@ -1636,10 +1642,11 @@ function renderNavReturns(data) {
   const oneYearAgo = last365.length >= 252 ? last365[0] : (last365.length > 0 ? last365[0] : null);
   const yoyPct = oneYearAgo ? ((latest.nav / oneYearAgo.nav) - 1) * 100 : null;
 
-  // Annualized return: (latest_nav / base_nav)^(365/days) - 1
+  // Annualized return: (NAV최종 - NAV최초) / 기간(years)
   const totalDays = data.length > 1 ? (new Date(latest.date) - new Date(data[0].date)) / 86400000 : 0;
-  const annualizedPct = totalDays > 30
-    ? (Math.pow(latest.nav / baseNav, 365 / totalDays) - 1) * 100 : null;
+  const totalYears = totalDays / 365;
+  const annualizedPct = totalYears > 0
+    ? ((latest.nav - data[0].nav) / data[0].nav * 100) / totalYears : null;
 
   const items = [
     { label: '52주 최저', val: min52.toFixed(2) },
