@@ -1559,11 +1559,166 @@ async function loadPerformanceData() {
     ]);
     const navData = navResp.ok ? await navResp.json() : [];
     const cfData = cfResp.ok ? await cfResp.json() : [];
+    renderTreemap();
     renderNavChart(navData);
     renderValueChart(navData);
     renderNavReturns(navData);
     renderCashflows(cfData);
   } catch (e) { console.warn(e); }
+}
+
+let _treemapInstance = null;
+
+async function renderTreemap() {
+  const container = document.getElementById('pfTreemap');
+  if (!container) return;
+  if (_treemapInstance) { _treemapInstance.dispose(); _treemapInstance = null; }
+
+  // Need ECharts for treemap (uPlot doesn't support it)
+  if (USE_UPLOT) {
+    // On mobile, load ECharts just for treemap
+    if (typeof echarts === 'undefined') {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+  } else {
+    await loadChartLib();
+  }
+
+  if (!portfolioItems.length) {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">포트폴리오가 비어 있습니다.</div>';
+    return;
+  }
+
+  // Build treemap data grouped by pfGetGroup
+  const groups = {};
+  portfolioItems.forEach(item => {
+    const gn = pfGetGroup(item);
+    if (!groups[gn]) groups[gn] = [];
+    const q = item.quote || {};
+    const price = q.price ?? null;
+    const qty = item.quantity;
+    const mv = price !== null ? qty * price : qty * item.avg_price;
+    const changePct = q.change_pct ?? null;
+    groups[gn].push({
+      name: item.stock_name,
+      value: Math.abs(mv),
+      changePct,
+      code: item.stock_code,
+    });
+  });
+
+  // Map changePct to color: blue(-) → gray(0) → red(+)
+  function _pctToColor(pct) {
+    if (pct === null || pct === undefined) return isDark ? '#475569' : '#9ca3af';
+    const clamped = Math.max(-5, Math.min(5, pct));
+    const t = (clamped + 5) / 10; // 0~1
+    // blue(37,99,235) → gray(148,163,184) → red(220,38,38)
+    let r, g, b;
+    if (t < 0.5) {
+      const s = t / 0.5;
+      r = Math.round(37 + (148 - 37) * s);
+      g = Math.round(99 + (163 - 99) * s);
+      b = Math.round(235 + (184 - 235) * s);
+    } else {
+      const s = (t - 0.5) / 0.5;
+      r = Math.round(148 + (220 - 148) * s);
+      g = Math.round(163 + (38 - 163) * s);
+      b = Math.round(184 + (38 - 184) * s);
+    }
+    return `rgb(${r},${g},${b})`;
+  }
+
+  const treeData = Object.entries(groups).map(([gn, items]) => ({
+    name: gn,
+    children: items.map(it => ({
+      name: it.name,
+      value: it.value,
+      changePct: it.changePct,
+      code: it.code,
+      itemStyle: { color: _pctToColor(it.changePct) },
+    })),
+  }));
+
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1a1a1a';
+  const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+  const ec = echarts.init(container);
+  _treemapInstance = ec;
+
+  ec.setOption({
+    tooltip: {
+      formatter(info) {
+        const cp = info.data.changePct;
+        const cpStr = cp !== null && cp !== undefined ? (cp > 0 ? '+' : '') + cp.toFixed(2) + '%' : '-';
+        const val = Number(info.value).toLocaleString();
+        return `<strong>${escapeHtml(info.name)}</strong><br/>평가: ${val}<br/>일간: ${cpStr}`;
+      },
+    },
+    series: [{
+      type: 'treemap',
+      width: '100%',
+      height: '100%',
+      roam: false,
+      nodeClick: false,
+      breadcrumb: { show: false },
+      itemStyle: {
+        borderColor: isDark ? '#334155' : '#fff',
+        borderWidth: 2,
+        gapWidth: 1,
+      },
+      upperLabel: {
+        show: true,
+        height: 20,
+        color: isDark ? '#94a3b8' : '#666',
+        fontSize: 11,
+        fontWeight: 600,
+        backgroundColor: isDark ? '#1e293b' : '#f5f5f5',
+        borderColor: isDark ? '#334155' : '#e0e0e0',
+        borderWidth: 1,
+        padding: [2, 6],
+      },
+      levels: [
+        {
+          // Group level
+          itemStyle: {
+            borderColor: isDark ? '#475569' : '#ccc',
+            borderWidth: 3,
+            gapWidth: 3,
+          },
+          upperLabel: { show: true },
+        },
+        {
+          // Stock level
+          colorMappingBy: 'value',
+          itemStyle: {
+            borderColor: isDark ? '#334155' : '#fff',
+            borderWidth: 1,
+            gapWidth: 1,
+          },
+          label: {
+            show: true,
+            formatter(params) {
+              const cp = params.data.changePct;
+              const cpStr = cp !== null && cp !== undefined ? (cp > 0 ? '+' : '') + cp.toFixed(2) + '%' : '';
+              return `{name|${params.name}}\n{pct|${cpStr}}`;
+            },
+            rich: {
+              name: { fontSize: 11, fontWeight: 600, color: '#fff', lineHeight: 16 },
+              pct: { fontSize: 10, color: 'rgba(255,255,255,0.8)', lineHeight: 14 },
+            },
+          },
+        },
+      ],
+      data: treeData,
+    }],
+  });
 }
 
 let _navChartInstance = null;
