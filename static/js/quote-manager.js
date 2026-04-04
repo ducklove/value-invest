@@ -100,6 +100,8 @@ const QuoteManager = {
     this.ws.send(JSON.stringify({ action: 'subscribe', requested: this.subscriptions }));
   },
 
+  _retryTimer: null,
+
   async _fetchQuotes(codes) {
     if (!codes.length) return;
     try {
@@ -116,6 +118,33 @@ const QuoteManager = {
         }
       }
     } catch (e) { console.warn(e); }
+    // Schedule fast retry for any still-missing quotes
+    this._scheduleRetry();
+  },
+
+  _getMissingCodes() {
+    const missing = [];
+    const allCodes = new Set();
+    for (const codes of Object.values(this.subscriptions)) {
+      for (const c of codes) allCodes.add(c);
+    }
+    for (const code of allCodes) {
+      const pf = portfolioItems.find(i => i.stock_code === code);
+      if (pf && (!pf.quote || pf.quote.price == null)) missing.push(code);
+    }
+    return missing;
+  },
+
+  _scheduleRetry() {
+    if (this._retryTimer) return;
+    const missing = this._getMissingCodes();
+    if (!missing.length) return;
+    // Retry missing codes in 5 seconds
+    this._retryTimer = setTimeout(async () => {
+      this._retryTimer = null;
+      const still = this._getMissingCodes();
+      if (still.length) await this._fetchQuotes(still);
+    }, 5000);
   },
 
   async _fetchInitialQuotes(wsCodes) {
