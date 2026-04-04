@@ -301,8 +301,15 @@ function renderPortfolio() {
   const _l = allQuotesLoaded;
   const _loadingCount = allRows.filter(r => r.price === null).length;
   const _loadingSub = !_l ? `<span style="opacity:0.5">시세 로딩 중 (${allRows.length - _loadingCount}/${allRows.length})</span>` : '';
-  const _fv = v => pfCurrency === 'USD' ? '$' + fmtKrw(pfFx(v)) : fmtKrw(v);
-  const _fsv = v => pfCurrency === 'USD' ? (v >= 0 ? '+$' : '-$') + fmtKrw(Math.abs(pfFx(v))) : fmtSignedKrw(v);
+  const _fmtUsd = v => '$' + Number(pfFx(v)).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3});
+  const _fv = v => pfCurrency === 'USD' ? _fmtUsd(v) : fmtKrw(v);
+  const _fsv = v => {
+    if (pfCurrency === 'USD') {
+      const usd = pfFx(v);
+      return (usd >= 0 ? '+' : '') + '$' + Number(usd).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3});
+    }
+    return fmtSignedKrw(v);
+  };
 
   summary.innerHTML = `
     <div class="pf-summary-card">
@@ -339,7 +346,12 @@ function renderPortfolio() {
   _renderSummarySparklines(_l ? totalMarketValue : null);
 
   // Table body — apply FX conversion to price columns
-  const _fp = v => fmtNum(Math.round(pfFx(v)));  // format price with FX
+  const _fp = v => {
+    const cv = pfFx(v);
+    return pfCurrency === 'USD'
+      ? '$' + Number(cv).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3})
+      : fmtNum(Math.round(cv));
+  };
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
@@ -1566,11 +1578,18 @@ async function renderValueChart(data) {
     return;
   }
 
+  // Convert values using per-day FX rate when available
+  const fxValues = data.map(d => {
+    if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.total_value / d.fx_usdkrw;
+    if (pfCurrency === 'USD') return pfFx(d.total_value); // fallback to current rate
+    return d.total_value;
+  });
+
   // Color based on MoM
-  const last30 = data.slice(-30);
+  const last30 = fxValues.slice(-30);
   const momPct = last30.length > 1
-    ? ((data[data.length - 1].total_value / last30[0].total_value) - 1) * 100 : 0;
-  const valColor = returnToColor(momPct, 10); // tighter range for monthly
+    ? ((fxValues[fxValues.length - 1] / last30[0]) - 1) * 100 : 0;
+  const valColor = returnToColor(momPct, 10);
 
   const div = pfFxDivisor();
   const unit = pfFxUnit();
@@ -1578,31 +1597,30 @@ async function renderValueChart(data) {
 
   _valueChartInstance = createLineChart(container, {
     labels: data.map(d => d.date.slice(5)),
-    values: data.map(d => Math.round(pfFx(d.total_value))),
+    values: fxValues.map(v => Math.round(v)),
     color: valColor,
     yFormatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit,
   });
 
-  // Value stats cards
+  // Value stats cards — use FX-converted values
   if (statsEl) {
-    const latest = data[data.length - 1];
-    const last365 = data.slice(-365);
-    const valuesSlice = last365.map(d => pfFx(d.total_value));
-    const min52 = Math.min(...valuesSlice);
-    const max52 = Math.max(...valuesSlice);
+    const fxLast365 = fxValues.slice(-365);
+    const min52 = Math.min(...fxLast365);
+    const max52 = Math.max(...fxLast365);
 
-    // YoY
-    const oneYearAgo = last365.length >= 252 ? last365[0] : (last365.length > 0 ? last365[0] : null);
-    const yoyPct = oneYearAgo && oneYearAgo.total_value > 0
-      ? ((latest.total_value - oneYearAgo.total_value) / oneYearAgo.total_value * 100) : null;
+    // YoY (using FX-adjusted values)
+    const yoyPct = fxLast365.length > 1
+      ? ((fxValues[fxValues.length - 1] / fxLast365[0]) - 1) * 100 : null;
 
-    // CAGR: same formula as NAV — annualized return over recording period
-    const valTotalDays = data.length > 1 ? (new Date(latest.date) - new Date(data[0].date)) / 86400000 : 0;
+    // CAGR using FX-adjusted values
+    const valTotalDays = data.length > 1 ? (new Date(data[data.length - 1].date) - new Date(data[0].date)) / 86400000 : 0;
     const valTotalYears = valTotalDays / 365;
-    const acctReturn = valTotalYears > 0 && data[0].total_value > 0
-      ? ((latest.total_value - data[0].total_value) / data[0].total_value * 100) / valTotalYears : null;
+    const _latestFxVal = fxValues[fxValues.length - 1];
+    const _firstFxVal = fxValues[0];
+    const acctReturn = valTotalYears > 0 && _firstFxVal > 0
+      ? ((_latestFxVal - _firstFxVal) / _firstFxVal * 100) / valTotalYears : null;
 
-    const fmtVal = v => pfCurrency === 'USD' ? '$' + Number(Math.round(v)).toLocaleString() : fmtKrw(Math.round(v));
+    const fmtVal = v => pfCurrency === 'USD' ? '$' + Number(v.toFixed(0)).toLocaleString() : fmtKrw(Math.round(v));
     const items = [
       { label: '52주 최저', val: fmtVal(min52) },
       { label: '52주 최고', val: fmtVal(max52) },

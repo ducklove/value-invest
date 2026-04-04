@@ -214,6 +214,7 @@ async def init_db():
     await _ensure_column(db, "user_portfolio", "currency", "TEXT DEFAULT 'KRW'")
     await _ensure_column(db, "user_portfolio", "group_name", "TEXT")
     await _ensure_column(db, "user_portfolio", "benchmark_code", "TEXT")
+    await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_groups", "default_type", "TEXT")
     # Backfill default_type for existing default groups by sort_order
     _type_by_order = {0: "kr", 1: "foreign", 2: "etc"}
@@ -1060,12 +1061,12 @@ async def get_latest_snapshot(google_sub: str) -> dict | None:
     return dict(row) if row else None
 
 
-async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float):
+async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float, fx_usdkrw: float | None = None):
     db = await get_db()
     await db.execute(
-        """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (google_sub, date, total_value, total_invested, nav, total_units),
+        """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw),
     )
     await db.commit()
 
@@ -1086,7 +1087,7 @@ async def get_month_end_snapshot(google_sub: str) -> dict | None:
 async def get_nav_history(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, nav, total_value, total_invested, total_units FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date ASC",
+        "SELECT date, nav, total_value, total_invested, total_units, fx_usdkrw FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date ASC",
         (google_sub,),
     )
     return [dict(row) for row in await cursor.fetchall()]

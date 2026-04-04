@@ -84,10 +84,10 @@ async def take_snapshot(google_sub: str, snap_date: str):
         nav = BASE_NAV
         total_units = total_value / BASE_NAV if total_value > 0 else 0
 
-    await cache.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units)
+    await cache.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
     if per_stock:
         await cache.save_stock_snapshots(google_sub, snap_date, per_stock)
-    logger.info("Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f stocks=%d", google_sub[:8], snap_date, total_value, nav, total_units, len(per_stock))
+    logger.info("Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f stocks=%d fx=%.1f", google_sub[:8], snap_date, total_value, nav, total_units, len(per_stock), _fx_usdkrw or 0)
 
 
 async def _save_gold_close():
@@ -105,9 +105,26 @@ async def _save_gold_close():
         logger.warning("Failed to save gold close: %s", e)
 
 
+_fx_usdkrw: float | None = None
+
+
+async def _fetch_fx_usdkrw():
+    """Fetch current USD/KRW rate."""
+    global _fx_usdkrw
+    try:
+        from routes.portfolio import _fetch_cash_quote
+        q = await _fetch_cash_quote("CASH_USD")
+        if q and q.get("price"):
+            _fx_usdkrw = q["price"]
+            logger.info("FX USD/KRW: %.2f", _fx_usdkrw)
+    except Exception as e:
+        logger.warning("Failed to fetch FX rate: %s", e)
+
+
 async def run_all_snapshots():
     """Take snapshots for all users with portfolio items."""
     await cache.init_db()
+    await _fetch_fx_usdkrw()
     snap_date = date.today().isoformat()
     users = await cache.get_all_users_with_portfolio()
     logger.info("Taking snapshots for %d users on %s", len(users), snap_date)
