@@ -1481,11 +1481,16 @@ async function renderNavChart(data) {
     return;
   }
 
-  const lc = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
+  // Color based on YoY
+  const last365 = data.slice(-365);
+  const yoyPct = last365.length > 1
+    ? ((data[data.length - 1].nav / last365[0].nav) - 1) * 100 : 0;
+  const navColor = returnToColor(yoyPct);
+
   _navChartInstance = createLineChart(container, {
     labels: data.map(d => d.date.slice(5)),
     values: data.map(d => d.nav),
-    color: lc.startsWith('#') ? lc : '#3b82f6',
+    color: navColor,
     tooltipPrefix: 'NAV ',
   });
 }
@@ -1507,11 +1512,16 @@ async function renderValueChart(data) {
     return;
   }
 
-  const lc = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
+  // Color based on MoM
+  const last30 = data.slice(-30);
+  const momPct = last30.length > 1
+    ? ((data[data.length - 1].total_value / last30[0].total_value) - 1) * 100 : 0;
+  const valColor = returnToColor(momPct, 10); // tighter range for monthly
+
   _valueChartInstance = createLineChart(container, {
     labels: data.map(d => d.date.slice(5)),
     values: data.map(d => Math.round(d.total_value)),
-    color: lc.startsWith('#') ? lc : '#3b82f6',
+    color: valColor,
     yFormatter: v => (v / 1e8).toFixed(0) + '억',
   });
 

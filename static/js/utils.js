@@ -191,6 +191,26 @@ function loadChartLib() {
 // Backwards compat alias
 const loadECharts = loadChartLib;
 
+/**
+ * Map a return % to a blue-red color.
+ * Negative → blue (#2563eb), zero → gray (#9ca3af), positive → red (#dc2626)
+ * Clamped to [-range, +range] for full saturation.
+ */
+function returnToColor(pct, range = 20) {
+  if (pct == null) return '#9ca3af';
+  const t = Math.max(-1, Math.min(1, pct / range)); // -1 ~ +1
+  const abs = Math.abs(t);
+  // gray(156,163,175) → blue(37,99,235) or red(220,38,38)
+  const gray = [156, 163, 175];
+  const blue = [37, 99, 235];
+  const red = [220, 38, 38];
+  const target = t < 0 ? blue : red;
+  const r = Math.round(gray[0] + (target[0] - gray[0]) * abs);
+  const g = Math.round(gray[1] + (target[1] - gray[1]) * abs);
+  const b = Math.round(gray[2] + (target[2] - gray[2]) * abs);
+  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+}
+
 function _hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
