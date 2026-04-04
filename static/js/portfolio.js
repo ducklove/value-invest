@@ -262,7 +262,16 @@ function renderPortfolio() {
     }
   });
 
-  const totalReturnPct = totalInvested > 0 ? ((totalMarketValue - totalInvested) / totalInvested * 100) : 0;
+  // FX helper: convert KRW value using a specific snapshot's FX rate, or current rate
+  const _fxConv = (krwVal, snap) => {
+    if (pfCurrency !== 'USD') return krwVal;
+    const rate = snap && snap.fx_usdkrw ? snap.fx_usdkrw : pfFxRate;
+    return rate && rate > 0 ? krwVal / rate : pfFx(krwVal);
+  };
+  const _currentFxVal = _fxConv(totalMarketValue, null); // today uses current rate
+  const _currentFxInvested = _fxConv(totalInvested, null);
+
+  const totalReturnPct = _currentFxInvested > 0 ? ((_currentFxVal - _currentFxInvested) / _currentFxInvested * 100) : 0;
   const prevTotalValue = totalMarketValue - totalDailyPnl;
   const dailyReturnPct = prevTotalValue > 0 ? (totalDailyPnl / prevTotalValue * 100) : 0;
 
@@ -270,7 +279,6 @@ function renderPortfolio() {
   const isFiltered = pfGroupFilter !== null;
   let filteredMonthEndValue = pfMonthEndValue;
   if (isFiltered && pfMonthEndValue && Object.keys(pfMonthEndStockValues).length > 0) {
-    // Normalize: use per-stock ratios against actual month-end total
     const stockTotal = Object.values(pfMonthEndStockValues).reduce((a, b) => a + b, 0);
     if (stockTotal > 0) {
       let filteredStockTotal = 0;
@@ -278,17 +286,26 @@ function renderPortfolio() {
       filteredMonthEndValue = pfMonthEndValue * (filteredStockTotal / stockTotal);
     }
   }
-  const monthlyReturnPct = filteredMonthEndValue && filteredMonthEndValue > 0
-    ? ((totalMarketValue - filteredMonthEndValue) / filteredMonthEndValue * 100) : null;
-  const monthlyPnl = filteredMonthEndValue != null && filteredMonthEndValue > 0
-    ? totalMarketValue - filteredMonthEndValue : null;
+  // Find month-end snapshot for its FX rate
+  const _monthEndSnap = pfNavHistory.length > 0 ? (() => {
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    for (let i = pfNavHistory.length - 1; i >= 0; i--) {
+      if (pfNavHistory[i].date < thisMonth) return pfNavHistory[i];
+    }
+    return null;
+  })() : null;
+  const _fxMonthEnd = _fxConv(filteredMonthEndValue, _monthEndSnap);
+  const monthlyReturnPct = _fxMonthEnd && _fxMonthEnd > 0
+    ? ((_currentFxVal - _fxMonthEnd) / _fxMonthEnd * 100) : null;
+  const monthlyPnl = _fxMonthEnd != null && _fxMonthEnd > 0
+    ? _currentFxVal - _fxMonthEnd : null;
 
-  // YTD return — find year-start total_value from NAV history
+  // YTD return — find year-start snapshot with its FX rate
   const thisYear = new Date().getFullYear().toString();
   const yearStartSnap = pfNavHistory.find(d => d.date >= thisYear);
-  const ytdBase = yearStartSnap ? yearStartSnap.total_value : null;
-  const ytdReturnPct = ytdBase && ytdBase > 0 ? ((totalMarketValue - ytdBase) / ytdBase * 100) : null;
-  const ytdPnl = ytdBase != null && ytdBase > 0 ? totalMarketValue - ytdBase : null;
+  const _fxYtdBase = yearStartSnap ? _fxConv(yearStartSnap.total_value, yearStartSnap) : null;
+  const ytdReturnPct = _fxYtdBase && _fxYtdBase > 0 ? ((_currentFxVal - _fxYtdBase) / _fxYtdBase * 100) : null;
+  const ytdPnl = _fxYtdBase != null && _fxYtdBase > 0 ? _currentFxVal - _fxYtdBase : null;
 
   // Date labels for summary cards
   const _now = new Date();
@@ -301,29 +318,29 @@ function renderPortfolio() {
   const _l = allQuotesLoaded;
   const _loadingCount = allRows.filter(r => r.price === null).length;
   const _loadingSub = !_l ? `<span style="opacity:0.5">시세 로딩 중 (${allRows.length - _loadingCount}/${allRows.length})</span>` : '';
-  const _fmtUsd = v => '$' + Number(pfFx(v)).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3});
-  const _fv = v => pfCurrency === 'USD' ? _fmtUsd(v) : fmtKrw(v);
+  // Format helpers — values passed here are already FX-converted
+  const _fmtUsdVal = v => '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3});
+  const _fv = v => pfCurrency === 'USD' ? _fmtUsdVal(v) : fmtKrw(v);
   const _fsv = v => {
-    if (pfCurrency === 'USD') {
-      const usd = pfFx(v);
-      return (usd >= 0 ? '+' : '') + '$' + Number(usd).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3});
-    }
+    if (pfCurrency === 'USD') return (v >= 0 ? '+' : '') + _fmtUsdVal(v);
     return fmtSignedKrw(v);
   };
+  // Today's daily PnL in selected currency
+  const _dailyPnlFx = pfCurrency === 'USD' ? pfFx(totalDailyPnl) : totalDailyPnl;
 
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Total <span class="pf-summary-date">${_timeLabel}</span></div>
-        <div class="pf-summary-value">${_l ? _fv(totalMarketValue) : '-'}</div>
-        <div class="pf-summary-sub">${_l ? '투자금액 ' + _fv(totalInvested) : _loadingSub}</div>
+        <div class="pf-summary-value">${_l ? _fv(_currentFxVal) : '-'}</div>
+        <div class="pf-summary-sub">${_l ? '투자금액 ' + _fv(_currentFxInvested) : _loadingSub}</div>
       </div>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(dailyReturnPct) : ''}">${_l ? fmtPct(dailyReturnPct) : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(totalDailyPnl) : ''}">${_l ? _fsv(totalDailyPnl) : ''}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(_dailyPnlFx) : ''}">${_l ? _fsv(_dailyPnlFx) : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkDaily"></canvas>
     </div>
