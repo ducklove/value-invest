@@ -704,7 +704,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-group-select {
   padding: 3px 6px; border: none; border-radius: 6px;
   background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer;
-  text-align: right; direction: rtl;
+  text-align-last: right;
 }
 .pf-group-select:hover { color: var(--text); }
 .pf-group-select:focus { outline: none; color: var(--text); }
