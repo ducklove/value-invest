@@ -822,6 +822,10 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         else:
             currency = await _detect_currency(stock_code)
     group_name = str(payload.get("group_name") or "").strip() or None
+    if group_name:
+        groups = await cache.get_portfolio_groups(user["google_sub"])
+        if not any(g["group_name"] == group_name for g in groups):
+            raise HTTPException(status_code=400, detail=f"존재하지 않는 그룹명입니다: {group_name}")
     benchmark_code = str(payload.get("benchmark_code") or "").strip() or None
     result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price, currency, group_name, benchmark_code)
     return {"ok": True, **result}
@@ -919,15 +923,18 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
 
     resolved = await asyncio.gather(*(resolve(p) for p in parsed))
 
-    if mode == "replace":
-        await cache.clear_portfolio(user["google_sub"])
-
+    # Resolve currencies
     for item in resolved:
         code = item["stock_code"]
-        currency = "KRW" if _is_korean_stock(code) or _is_special_asset(code) else await _detect_currency(code)
-        await cache.save_portfolio_item(
-            user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], currency,
-        )
+        item["currency"] = "KRW" if _is_korean_stock(code) or _is_special_asset(code) else await _detect_currency(code)
+
+    if mode == "replace":
+        await cache.replace_portfolio(user["google_sub"], resolved)
+    else:
+        for item in resolved:
+            await cache.save_portfolio_item(
+                user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], item["currency"],
+            )
 
     return {"ok": True, "imported": len(resolved), "mode": mode}
 

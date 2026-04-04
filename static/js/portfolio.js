@@ -157,10 +157,25 @@ function renderPortfolio() {
         if (counts[gn] !== undefined) counts[gn]++;
         else counts[gn] = 1;
       });
-      filterBar.innerHTML = pfGroups.map(g => {
+      filterBar.innerHTML = '';
+      pfGroups.forEach(g => {
         const active = pfGroupFilter === null || pfGroupFilter.has(g.group_name);
-        return `<button class="pf-filter-btn${active ? ' active' : ''}" onclick="pfToggleGroupFilter('${escapeHtml(g.group_name)}')">${escapeHtml(g.group_name)} <span class="pf-filter-cnt">${counts[g.group_name] || 0}</span></button>`;
-      }).join('') + `<button class="pf-filter-btn pf-group-manage-btn" onclick="openGroupModal()" title="그룹 관리">\u2699</button>`;
+        const btn = document.createElement('button');
+        btn.className = 'pf-filter-btn' + (active ? ' active' : '');
+        btn.textContent = g.group_name + ' ';
+        const cnt = document.createElement('span');
+        cnt.className = 'pf-filter-cnt';
+        cnt.textContent = counts[g.group_name] || 0;
+        btn.appendChild(cnt);
+        btn.addEventListener('click', () => pfToggleGroupFilter(g.group_name));
+        filterBar.appendChild(btn);
+      });
+      const gearBtn = document.createElement('button');
+      gearBtn.className = 'pf-filter-btn pf-group-manage-btn';
+      gearBtn.title = '그룹 관리';
+      gearBtn.textContent = '\u2699';
+      gearBtn.addEventListener('click', () => openGroupModal());
+      filterBar.appendChild(gearBtn);
     }
   }
 
@@ -1113,7 +1128,7 @@ function renderGroupModalBody() {
     const dailyPct = prevMV > 0 ? (s.dailyPnl / prevMV * 100) : 0;
     const canDelete = !g.is_default || defaultCount > 3;
     const delBtn = canDelete
-      ? `<button class="pf-grp-del" onclick="deleteGroup('${escapeHtml(g.group_name)}')" title="삭제">&times;</button>`
+      ? `<button class="pf-grp-del" data-grp-name="${escapeHtml(g.group_name)}" title="삭제">&times;</button>`
       : '';
     return `<tr class="pf-grp-tr" draggable="true" data-grp-idx="${i}">
       <td class="pf-grp-td-drag"><span class="pf-grp-drag" title="드래그하여 순서 변경">&#x2630;</span></td>
@@ -1166,6 +1181,10 @@ function renderGroupModalBody() {
         });
       } catch (e) { console.warn(e); }
     });
+  });
+  // Delete buttons — read group name from data attribute
+  body.querySelectorAll('.pf-grp-del[data-grp-name]').forEach(btn => {
+    btn.addEventListener('click', () => deleteGroup(btn.dataset.grpName));
   });
 }
 
