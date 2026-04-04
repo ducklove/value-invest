@@ -123,16 +123,10 @@ const QuoteManager = {
   },
 
   _getMissingCodes() {
-    const missing = [];
-    const allCodes = new Set();
-    for (const codes of Object.values(this.subscriptions)) {
-      for (const c of codes) allCodes.add(c);
-    }
-    for (const code of allCodes) {
-      const pf = portfolioItems.find(i => i.stock_code === code);
-      if (pf && (!pf.quote || pf.quote.price == null)) missing.push(code);
-    }
-    return missing;
+    // Only check portfolio items, not benchmark/index codes
+    return portfolioItems
+      .filter(i => !i.quote || i.quote.price == null)
+      .map(i => i.stock_code);
   },
 
   _scheduleRetry() {
@@ -179,8 +173,9 @@ const QuoteManager = {
       // WS 활성: overflow 코드만
       this.overflowCodes.forEach(c => allCodes.add(c));
     } else {
-      // WS 비활성: 모든 구독 코드
-      for (const codes of Object.values(this.subscriptions)) {
+      // WS 비활성: portfolio + sidebar + analysis 코드 (benchmark 제외)
+      for (const [key, codes] of Object.entries(this.subscriptions)) {
+        if (key === 'benchmark') continue;
         for (const c of codes) allCodes.add(c);
       }
     }
