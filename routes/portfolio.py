@@ -742,6 +742,25 @@ async def asset_quote(stock_code: str):
         raise HTTPException(status_code=404, detail="시세를 가져올 수 없습니다.")
 
 
+@router.post("/api/asset-quotes")
+async def asset_quotes_batch(payload: dict = Body(...)):
+    """Fetch quotes for multiple codes in one request."""
+    codes = payload.get("codes", [])
+    if not isinstance(codes, list) or len(codes) > 100:
+        raise HTTPException(status_code=400, detail="최대 100개까지 조회 가능합니다.")
+    codes = list({str(c).strip() for c in codes if str(c).strip()})
+
+    async def _fetch_one(code):
+        try:
+            q = await _fetch_quote(code)
+            return code, q or {}
+        except Exception:
+            return code, {}
+
+    results = await asyncio.gather(*[_fetch_one(c) for c in codes])
+    return {code: quote for code, quote in results}
+
+
 def _require_user(user):
     if not user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")

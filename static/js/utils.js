@@ -158,6 +158,22 @@ function showToast(message, type = 'error', duration = 4000) {
   setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 200); }, duration);
 }
 
+// --- ECharts lazy loader ---
+let _echartsLoaded = typeof echarts !== 'undefined';
+let _echartsLoading = null;
+function loadECharts() {
+  if (_echartsLoaded) return Promise.resolve();
+  if (_echartsLoading) return _echartsLoading;
+  _echartsLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
+    s.onload = () => { _echartsLoaded = true; resolve(); };
+    s.onerror = () => reject(new Error('ECharts load failed'));
+    document.head.appendChild(s);
+  });
+  return _echartsLoading;
+}
+
 function updateAnalyticsAuthState() {
   if (IS_LOCALHOST || typeof gtag !== 'function') return;
   gtag('set', 'user_properties', {

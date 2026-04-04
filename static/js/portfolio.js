@@ -1470,10 +1470,11 @@ async function loadPerformanceData() {
 
 let _navChartInstance = null;
 
-function renderNavChart(data) {
+async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
   if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
+  await loadECharts();
 
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
@@ -1533,10 +1534,11 @@ function renderNavChart(data) {
 
 let _valueChartInstance = null;
 
-function renderValueChart(data) {
+async function renderValueChart(data) {
   const container = document.getElementById('pfValueChart');
   if (!container) return;
   if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
+  await loadECharts();
 
   // Stats cards
   const statsEl = document.getElementById('pfValueStats');

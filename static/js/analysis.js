@@ -173,8 +173,9 @@ function _hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
+async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
   container.innerHTML = '';
+  await loadECharts();
 
   chartKeys.forEach((key, i) => {
     const series = indicatorMap[key] || [];

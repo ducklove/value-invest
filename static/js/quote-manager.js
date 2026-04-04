@@ -102,12 +102,20 @@ const QuoteManager = {
 
   async _fetchQuotes(codes) {
     if (!codes.length) return;
-    await Promise.allSettled(codes.map(async code => {
-      const resp = await apiFetch(`/api/asset-quote/${code}`);
+    try {
+      const resp = await apiFetch('/api/asset-quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codes }),
+      });
       if (!resp.ok) return;
-      const q = await resp.json();
-      if (this.onQuote) this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
-    }));
+      const results = await resp.json();
+      for (const [code, q] of Object.entries(results)) {
+        if (q && q.price != null && this.onQuote) {
+          this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
+        }
+      }
+    } catch (e) { console.warn(e); }
   },
 
   async _fetchInitialQuotes(wsCodes) {
@@ -137,15 +145,15 @@ const QuoteManager = {
   },
 
   async _pollAll() {
-    // WS 활성 시에도 overflow(REST) 코드는 폴링 필요
-    if (this.wsActive) {
-      if (this.overflowCodes.length) await this._fetchQuotes(this.overflowCodes);
-      return;
-    }
-    // WS 비활성 — 모든 구독 코드를 REST로 폴링
     const allCodes = new Set();
-    for (const codes of Object.values(this.subscriptions)) {
-      for (const c of codes) allCodes.add(c);
+    if (this.wsActive) {
+      // WS 활성: overflow 코드만
+      this.overflowCodes.forEach(c => allCodes.add(c));
+    } else {
+      // WS 비활성: 모든 구독 코드
+      for (const codes of Object.values(this.subscriptions)) {
+        for (const c of codes) allCodes.add(c);
+      }
     }
     if (allCodes.size) await this._fetchQuotes([...allCodes]);
   },
