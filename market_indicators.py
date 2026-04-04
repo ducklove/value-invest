@@ -476,16 +476,19 @@ async def _fetch_yahoo_commodity(client: httpx.AsyncClient, symbol: str) -> dict
         return dict(_EMPTY)
 
 
+_gold_prev_cache: float | None = None
+
+
 async def _fetch_gold_live(client: httpx.AsyncClient) -> dict:
     """Fetch live XAU spot from gold-api.com, prev close from DB."""
-    import cache as _cache
-    from datetime import date as _date
+    global _gold_prev_cache
 
     try:
-        r = await client.get(
-            "https://api.gold-api.com/price/XAU/USD",
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
+        async with httpx.AsyncClient(timeout=10) as gc:
+            r = await gc.get(
+                "https://api.gold-api.com/price/XAU/USD",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
         if r.status_code != 200:
             return dict(_EMPTY)
         data = _json.loads(r.text)
@@ -493,17 +496,18 @@ async def _fetch_gold_live(client: httpx.AsyncClient) -> dict:
         if not price:
             return dict(_EMPTY)
 
-        # Load prev close from DB (written by snapshot_gold_close.py at 22:00)
-        prev = None
-        try:
-            stored = await _cache.get_user_setting("__system__", "gold_prev_close")
-            if stored:
-                prev = float(stored)
-        except Exception:
-            pass
+        # Load prev close from DB (cached in memory after first load)
+        if _gold_prev_cache is None:
+            try:
+                import cache as _cache
+                stored = await _cache.get_user_setting("__system__", "gold_prev_close")
+                if stored:
+                    _gold_prev_cache = float(stored)
+            except Exception:
+                pass
+        prev = _gold_prev_cache
 
         if not prev:
-            # No stored prev close — show price only, no change
             return {"value": _fmt(price), "change": "", "change_pct": "", "direction": ""}
 
         diff = price - prev
