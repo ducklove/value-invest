@@ -590,6 +590,8 @@ async def run_nps_snapshot(snap_date: str | None = None):
         code = h.get("stock_code")
         if not code or not (len(code) == 6 and code[:5].isdigit()):
             continue  # Skip unmatched (non-KOSPI/KOSDAQ) stocks
+        if not h.get("price"):
+            continue  # Skip stocks without price data
         db_items.append({
             "stock_code": code,
             "stock_name": h.get("name", ""),
