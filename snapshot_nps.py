@@ -263,31 +263,29 @@ def _build_html(
         own_pct = h.get("ownership_pct")
 
         cp_cls = _pct_color_class(cp)
-        row_bg = " style=\"background:var(--bg)\"" if i % 2 == 1 else ""
-
-        rows_html += f"""<tr{row_bg}>
-  <td style="text-align:left;padding:8px 6px;">{_esc(name)}</td>
-  <td style="text-align:right;padding:8px 6px;" class="{cp_cls}">{_esc(_fmt_pct(cp))}</td>
-  <td style="text-align:right;padding:8px 6px;">{_esc(f"{round(price):,}") if price else "-"}</td>
-  <td style="text-align:right;padding:8px 6px;">{_esc(f"{shares:,}")}</td>
-  <td style="text-align:right;padding:8px 6px;">{_esc(_fmt_krw(mv)) if mv else "-"}</td>
-  <td style="text-align:right;padding:8px 6px;">{_esc(f"{weight:.1f}%") if weight is not None else "-"}</td>
-  <td style="text-align:right;padding:8px 6px;">{_esc(f"{own_pct:.2f}%") if own_pct is not None else "-"}</td>
+        rows_html += f"""<tr>
+  <td class="pf-col-name">{_esc(name)}</td>
+  <td class="pf-col-num {cp_cls}">{_esc(_fmt_pct(cp))}</td>
+  <td class="pf-col-num">{_esc(f"{round(price):,}") if price else "-"}</td>
+  <td class="pf-col-num">{_esc(f"{shares:,}")}</td>
+  <td class="pf-col-num">{_esc(_fmt_krw(mv)) if mv else "-"}</td>
+  <td class="pf-col-num">{_esc(f"{weight:.1f}%") if weight is not None else "-"}</td>
+  <td class="pf-col-num">{_esc(f"{own_pct:.2f}%") if own_pct is not None else "-"}</td>
 </tr>
 """
 
     table_html = f"""
-<div style="overflow-x:auto;margin-bottom:24px;">
-  <table class="pf-cf-table" style="width:100%;font-size:13px;">
+<div class="pf-table-wrap" style="margin-bottom:24px;">
+  <table class="pf-table">
     <thead>
       <tr>
-        <th style="text-align:center;padding:8px 6px;">종목명</th>
-        <th style="text-align:center;padding:8px 6px;">등락률</th>
-        <th style="text-align:center;padding:8px 6px;">현재가</th>
-        <th style="text-align:center;padding:8px 6px;">수량</th>
-        <th style="text-align:center;padding:8px 6px;">평가금액</th>
-        <th style="text-align:center;padding:8px 6px;">비중</th>
-        <th style="text-align:center;padding:8px 6px;">지분율</th>
+        <th class="pf-col-name">종목명</th>
+        <th class="pf-col-num">등락률</th>
+        <th class="pf-col-num">현재가</th>
+        <th class="pf-col-num">수량</th>
+        <th class="pf-col-num">평가금액</th>
+        <th class="pf-col-num">비중</th>
+        <th class="pf-col-num">지분율</th>
       </tr>
     </thead>
     <tbody>
