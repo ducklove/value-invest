@@ -168,6 +168,25 @@ def _pct_to_treemap_color(pct: float | None, is_dark: bool = False) -> str:
     return f"rgb({r},{g},{b})"
 
 
+def _fetch_kospi_history(dates: list[str]) -> list[dict]:
+    """Fetch KOSPI index values for given dates using yfinance."""
+    try:
+        import yfinance as yf
+        if not dates:
+            return []
+        ticker = yf.Ticker("^KS11")
+        hist = ticker.history(start=dates[0], end="2099-12-31", interval="1d")
+        by_date = {d.strftime("%Y-%m-%d"): row["Close"] for d, row in hist.iterrows()}
+        result = []
+        for d in dates:
+            val = by_date.get(d)
+            if val:
+                result.append({"date": d, "value": round(val, 2)})
+        return result
+    except Exception:
+        return []
+
+
 def _build_treemap_data(holdings: list[dict]) -> list[dict]:
     """Build ECharts treemap series data (flat, one level)."""
     items = []
@@ -211,6 +230,7 @@ def _build_html(
     ytd: float | None,
     nav_history: list[dict],
     value_history: list[dict],
+    kospi_history: list[dict] | None = None,
 ) -> str:
     today_cls = _pct_color_class(today_pct)
     mtd_cls = _pct_color_class(mtd)
@@ -362,6 +382,7 @@ def _build_html(
 (function() {{
   const NPS_TREEMAP_DATA = {json.dumps(treemap_data, ensure_ascii=False)};
   const NPS_NAV_DATA     = {json.dumps(nav_chart_data, ensure_ascii=False)};
+  const NPS_KOSPI_DATA   = {json.dumps(kospi_history or [], ensure_ascii=False)};
   const NPS_VALUE_DATA   = {json.dumps(value_chart_data, ensure_ascii=False)};
   const NPS_NAV_COLOR    = {json.dumps(nav_color)};
   const NPS_VAL_COLOR    = {json.dumps(val_color)};
@@ -489,10 +510,105 @@ def _build_html(
     }});
   }}
 
+  function _renderNavWithKospi() {{
+    const container = document.getElementById('npsNavChart');
+    if (!container || !NPS_NAV_DATA.length) return;
+    const labels = NPS_NAV_DATA.map(d => d.date.slice(5));
+    const navValues = NPS_NAV_DATA.map(d => d.nav);
+    const textColor = _textColor();
+    const gridColor = _gridColor();
+    const navColor = NPS_NAV_COLOR;
+
+    // Normalize KOSPI to start at same value as NAV
+    const kospiRaw = NPS_KOSPI_DATA.map(d => d.value);
+    let kospiNorm = [];
+    if (kospiRaw.length > 0 && kospiRaw[0] > 0) {{
+      const base = kospiRaw[0];
+      const navBase = navValues[0] || 1000;
+      kospiNorm = kospiRaw.map(v => v / base * navBase);
+    }}
+
+    const series = [{{
+      name: '국민연금 NAV',
+      type: 'line',
+      data: navValues,
+      lineStyle: {{ color: navColor, width: 2 }},
+      itemStyle: {{ color: navColor }},
+      symbol: 'none',
+      smooth: false,
+      areaStyle: {{
+        color: {{
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            {{ offset: 0, color: navColor + '33' }},
+            {{ offset: 1, color: navColor + '00' }},
+          ],
+        }},
+      }},
+    }}];
+
+    const yAxes = [{{
+      type: 'value',
+      axisLine: {{ show: false }},
+      axisLabel: {{ color: textColor, fontSize: 10 }},
+      splitLine: {{ lineStyle: {{ color: gridColor, width: 0.5 }} }},
+    }}];
+
+    if (kospiNorm.length > 0) {{
+      series.push({{
+        name: 'KOSPI',
+        type: 'line',
+        yAxisIndex: 1,
+        data: kospiRaw,
+        lineStyle: {{ color: '#94a3b8', width: 1.5, type: 'dashed' }},
+        itemStyle: {{ color: '#94a3b8' }},
+        symbol: 'none',
+        smooth: false,
+      }});
+      yAxes.push({{
+        type: 'value',
+        position: 'right',
+        axisLine: {{ show: false }},
+        axisLabel: {{ color: '#94a3b8', fontSize: 10 }},
+        splitLine: {{ show: false }},
+      }});
+    }}
+
+    const ec = echarts.init(container);
+    ec.setOption({{
+      grid: {{ left: 60, right: kospiNorm.length > 0 ? 60 : 12, top: 24, bottom: 24 }},
+      legend: {{
+        show: kospiNorm.length > 0,
+        top: 0,
+        right: 0,
+        textStyle: {{ color: textColor, fontSize: 11 }},
+      }},
+      xAxis: {{
+        type: 'category',
+        data: labels,
+        axisLine: {{ lineStyle: {{ color: gridColor }} }},
+        axisLabel: {{ color: textColor, fontSize: 10 }},
+        splitLine: {{ show: false }},
+      }},
+      yAxis: yAxes,
+      tooltip: {{
+        trigger: 'axis',
+        formatter(params) {{
+          let s = params[0].axisValue;
+          params.forEach(p => {{
+            s += '<br/>' + p.marker + ' ' + p.seriesName + ': ' + Number(p.value).toLocaleString(undefined, {{maximumFractionDigits: 2}});
+          }});
+          return s;
+        }},
+      }},
+      series: series,
+    }});
+  }}
+
   async function _init() {{
     await _ensureECharts();
     _renderTreemap();
-    _renderLineChart('npsNavChart', NPS_NAV_DATA, 'nav', NPS_NAV_COLOR, 'NAV ', null);
+    _renderNavWithKospi();
     _renderLineChart('npsValueChart', NPS_VALUE_DATA, 'total_value', NPS_VAL_COLOR, '', function(v) {{
       return (v / 1e12).toFixed(0) + '조';
     }});
