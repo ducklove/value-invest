@@ -1536,7 +1536,7 @@ async function renderValueChart(data) {
       { label: '52주 최저', val: fmtKrw(Math.round(min52)) },
       { label: '52주 최고', val: fmtKrw(Math.round(max52)) },
       { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },
-      { label: '계좌 수익률', val: acctReturn !== null ? fmtPct(acctReturn) : '-', cls: returnClass(acctReturn) },
+      { label: 'CAGR', val: acctReturn !== null ? fmtPct(acctReturn) : '-', cls: returnClass(acctReturn) },
     ];
     statsEl.innerHTML = items.map(p =>
       `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`
@@ -1570,7 +1570,7 @@ function renderNavReturns(data) {
     { label: '52주 최저', val: min52.toFixed(2) },
     { label: '52주 최고', val: max52.toFixed(2) },
     { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },
-    { label: '연평균', val: annualizedPct !== null ? fmtPct(annualizedPct) : '-', cls: returnClass(annualizedPct) },
+    { label: 'CAGR', val: annualizedPct !== null ? fmtPct(annualizedPct) : '-', cls: returnClass(annualizedPct) },
   ];
   el.innerHTML = items.map(p =>
     `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`
