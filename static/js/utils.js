@@ -158,20 +158,169 @@ function showToast(message, type = 'error', duration = 4000) {
   setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 200); }, duration);
 }
 
-// --- ECharts lazy loader ---
-let _echartsLoaded = typeof echarts !== 'undefined';
-let _echartsLoading = null;
-function loadECharts() {
-  if (_echartsLoaded) return Promise.resolve();
-  if (_echartsLoading) return _echartsLoading;
-  _echartsLoading = new Promise((resolve, reject) => {
+// --- Chart library lazy loader (ECharts for tablet+, uPlot for mobile) ---
+const USE_UPLOT = window.innerWidth < 768;
+let _chartLibLoaded = false;
+let _chartLibLoading = null;
+function loadChartLib() {
+  if (_chartLibLoaded) return Promise.resolve();
+  if (_chartLibLoading) return _chartLibLoading;
+  const src = USE_UPLOT
+    ? 'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js'
+    : 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
+  const promises = [new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
-    s.onload = () => { _echartsLoaded = true; resolve(); };
-    s.onerror = () => reject(new Error('ECharts load failed'));
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Chart lib load failed'));
     document.head.appendChild(s);
+  })];
+  if (USE_UPLOT) {
+    promises.push(new Promise((resolve, reject) => {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css';
+      link.onload = () => resolve();
+      link.onerror = () => reject();
+      document.head.appendChild(link);
+    }));
+  }
+  _chartLibLoading = Promise.all(promises).then(() => { _chartLibLoaded = true; });
+  return _chartLibLoading;
+}
+// Backwards compat alias
+const loadECharts = loadChartLib;
+
+function _hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/**
+ * Unified chart creation — ECharts on tablet+, uPlot on mobile.
+ * Returns an object with .dispose() and .resize() methods.
+ * @param {HTMLElement} container - div element
+ * @param {Object} opts - { labels, values, color, smooth, fill, yMin, tooltipPrefix, yFormatter, connectNulls }
+ */
+function createLineChart(container, opts) {
+  const { labels, values, color = '#3b82f6', smooth = 0.3, fill = true,
+          yMin, tooltipPrefix = '', yFormatter, connectNulls = false } = opts;
+
+  if (USE_UPLOT) {
+    return _createUPlotChart(container, opts);
+  } else {
+    return _createEChartsChart(container, opts);
+  }
+}
+
+function _createEChartsChart(container, opts) {
+  const { labels, values, color = '#3b82f6', smooth = 0.3, fill = true,
+          yMin, tooltipPrefix = '', yFormatter, connectNulls = false } = opts;
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+
+  const ec = echarts.init(container);
+  ec.setOption({
+    grid: { left: 50, right: 12, top: 10, bottom: 24 },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisLine: { lineStyle: { color: gridColor } },
+      axisLabel: { color: textColor, fontSize: 10 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      min: yMin,
+      axisLine: { show: false },
+      axisLabel: { color: textColor, fontSize: 10, formatter: yFormatter },
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter(params) {
+        const p = params[0];
+        const val = p.value == null || p.value === '-' ? 'N/A' : (tooltipPrefix + Number(p.value).toLocaleString());
+        return `${labels[p.dataIndex]}<br/>${val}`;
+      },
+    },
+    series: [{
+      type: 'line',
+      data: values.map(v => v === null ? '-' : v),
+      smooth,
+      symbol: values.length > 30 ? 'none' : 'circle',
+      symbolSize: values.length > 60 ? 0 : 4,
+      lineStyle: { color, width: 2 },
+      itemStyle: { color },
+      areaStyle: fill ? {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: _hexToRgba(color, 0.25) },
+          { offset: 1, color: _hexToRgba(color, 0.0) },
+        ]),
+      } : undefined,
+      connectNulls,
+    }],
   });
-  return _echartsLoading;
+  return ec;
+}
+
+function _createUPlotChart(container, opts) {
+  const { labels, values, color = '#3b82f6', fill = true, yMin, yFormatter } = opts;
+  container.innerHTML = '';
+  const w = container.clientWidth;
+  const h = container.clientHeight || 220;
+
+  // uPlot needs numeric x-axis — use index
+  const xData = labels.map((_, i) => i);
+  const yData = values.map(v => v === null ? null : v);
+  const data = [xData, yData];
+
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
+
+  const uOpts = {
+    width: w,
+    height: h,
+    cursor: { show: true, drag: { x: false, y: false } },
+    select: { show: false },
+    legend: { show: false },
+    axes: [
+      {
+        stroke: textColor,
+        grid: { stroke: gridColor, width: 0.5 },
+        values: (_, splits) => splits.map(i => labels[Math.round(i)] || ''),
+        font: '10px sans-serif',
+        ticks: { stroke: gridColor, width: 0.5 },
+      },
+      {
+        stroke: textColor,
+        grid: { stroke: gridColor, width: 0.5 },
+        values: yFormatter ? (_, splits) => splits.map(v => yFormatter(v)) : undefined,
+        font: '10px sans-serif',
+        ticks: { stroke: gridColor, width: 0.5 },
+      },
+    ],
+    scales: {
+      y: { min: yMin },
+    },
+    series: [
+      {},
+      {
+        stroke: color,
+        width: 2,
+        fill: fill ? _hexToRgba(color, 0.12) : undefined,
+        points: { show: values.length <= 30, size: 4, stroke: color, fill: color },
+      },
+    ],
+  };
+
+  const chart = new uPlot(uOpts, data, container);
+  // Return ECharts-compatible interface
+  return {
+    dispose() { chart.destroy(); },
+    resize() { chart.setSize({ width: container.clientWidth, height: container.clientHeight || h }); },
+    _uplot: chart,
+  };
 }
 
 function updateAnalyticsAuthState() {

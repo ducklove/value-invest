@@ -1474,61 +1474,19 @@ async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
   if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
-  await loadECharts();
+  await loadChartLib();
 
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
     return;
   }
 
-  const labels = data.map(d => d.date.slice(5)); // MM-DD
-  const navs = data.map(d => d.nav);
-  const lineColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
-  const lc = lineColor.startsWith('#') ? lineColor : '#3b82f6';
-  const hexToRgba = (hex, a) => { const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; };
-
-  const ec = echarts.init(container);
-  _navChartInstance = ec;
-
-  ec.setOption({
-    grid: { left: 50, right: 16, top: 12, bottom: 28 },
-    xAxis: {
-      type: 'category',
-      data: labels,
-      axisLine: { lineStyle: { color: gridColor } },
-      axisLabel: { color: textColor, fontSize: 10 },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      axisLabel: { color: textColor, fontSize: 11 },
-      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
-    },
-    tooltip: {
-      trigger: 'axis',
-      formatter(params) {
-        const p = params[0];
-        return `${data[p.dataIndex]?.date || ''}<br/>NAV ${Number(p.value).toFixed(2)}`;
-      },
-    },
-    series: [{
-      type: 'line',
-      data: navs,
-      smooth: 0.3,
-      symbol: data.length > 30 ? 'none' : 'circle',
-      symbolSize: 4,
-      lineStyle: { color: lc, width: 2 },
-      itemStyle: { color: lc },
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: hexToRgba(lc, 0.3) },
-          { offset: 1, color: hexToRgba(lc, 0.0) },
-        ]),
-      },
-    }],
+  const lc = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
+  _navChartInstance = createLineChart(container, {
+    labels: data.map(d => d.date.slice(5)),
+    values: data.map(d => d.nav),
+    color: lc.startsWith('#') ? lc : '#3b82f6',
+    tooltipPrefix: 'NAV ',
   });
 }
 
@@ -1538,7 +1496,7 @@ async function renderValueChart(data) {
   const container = document.getElementById('pfValueChart');
   if (!container) return;
   if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
-  await loadECharts();
+  await loadChartLib();
 
   // Stats cards
   const statsEl = document.getElementById('pfValueStats');
@@ -1549,54 +1507,12 @@ async function renderValueChart(data) {
     return;
   }
 
-  const labels = data.map(d => d.date.slice(5));
-  const values = data.map(d => Math.round(d.total_value));
-  const lineColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
-  const lc = lineColor.startsWith('#') ? lineColor : '#3b82f6';
-  const hexToRgba = (hex, a) => { const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; };
-
-  const ec = echarts.init(container);
-  _valueChartInstance = ec;
-
-  ec.setOption({
-    grid: { left: 65, right: 16, top: 12, bottom: 28 },
-    xAxis: {
-      type: 'category',
-      data: labels,
-      axisLine: { lineStyle: { color: gridColor } },
-      axisLabel: { color: textColor, fontSize: 10 },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      axisLabel: { color: textColor, fontSize: 10, formatter: v => (v / 1e8).toFixed(0) + '억' },
-      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
-    },
-    tooltip: {
-      trigger: 'axis',
-      formatter(params) {
-        const p = params[0];
-        return `${data[p.dataIndex]?.date || ''}<br/>${Number(p.value).toLocaleString()}`;
-      },
-    },
-    series: [{
-      type: 'line',
-      data: values,
-      smooth: 0.3,
-      symbol: data.length > 30 ? 'none' : 'circle',
-      symbolSize: 4,
-      lineStyle: { color: lc, width: 2 },
-      itemStyle: { color: lc },
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: hexToRgba(lc, 0.3) },
-          { offset: 1, color: hexToRgba(lc, 0.0) },
-        ]),
-      },
-    }],
+  const lc = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
+  _valueChartInstance = createLineChart(container, {
+    labels: data.map(d => d.date.slice(5)),
+    values: data.map(d => Math.round(d.total_value)),
+    color: lc.startsWith('#') ? lc : '#3b82f6',
+    yFormatter: v => (v / 1e8).toFixed(0) + '억',
   });
 
   // Value stats cards
