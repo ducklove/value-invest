@@ -1639,6 +1639,31 @@ async function renderTreemap() {
   let grandTotal = 0;
   Object.values(groups).forEach(items => items.forEach(it => { grandTotal += it.value; }));
 
+  // Muted color for group header based on changePct
+  function _pctToHeaderColor(pct) {
+    if (pct === null || pct === undefined) return isDark ? '#1e293b' : '#f3f4f6';
+    const clamped = Math.max(-3, Math.min(3, pct));
+    const abs = Math.abs(clamped) / 3; // 0~1
+    if (clamped < 0) {
+      // Blue tint
+      return isDark
+        ? `rgba(37,99,235,${0.08 + abs * 0.2})`
+        : `rgba(37,99,235,${0.04 + abs * 0.12})`;
+    } else {
+      // Red tint
+      return isDark
+        ? `rgba(220,38,38,${0.08 + abs * 0.2})`
+        : `rgba(220,38,38,${0.04 + abs * 0.12})`;
+    }
+  }
+
+  function _pctToHeaderTextColor(pct) {
+    if (pct === null || pct === undefined) return isDark ? '#94a3b8' : '#6b7280';
+    if (pct < 0) return isDark ? '#93c5fd' : '#2563eb';
+    if (pct > 0) return isDark ? '#fca5a5' : '#dc2626';
+    return isDark ? '#94a3b8' : '#6b7280';
+  }
+
   const treeData = Object.entries(groups).map(([gn, items]) => {
     // Group-level weighted daily change
     const grpTotal = items.reduce((s, it) => s + it.value, 0);
@@ -1653,6 +1678,8 @@ async function renderTreemap() {
       name: gn,
       changePct: grpChangePct,
       weight: grpWeight,
+      itemStyle: { color: _pctToHeaderColor(grpChangePct) },
+      upperLabel: { color: _pctToHeaderTextColor(grpChangePct) },
       children: items.map(it => ({
         name: it.name,
         value: it.value,
@@ -1697,19 +1724,17 @@ async function renderTreemap() {
           itemStyle: { borderWidth: 0 },
         },
         {
-          // Level 1: group — show header with daily change
+          // Level 1: group — header tinted by performance
           itemStyle: {
-            borderColor: isDark ? '#475569' : '#9ca3af',
+            borderColor: isDark ? '#475569' : '#d1d5db',
             borderWidth: 2,
           },
           upperLabel: {
             show: true,
             height: 22,
-            color: isDark ? '#e2e8f0' : '#374151',
             fontSize: 11,
             fontWeight: 600,
             padding: [2, 8],
-            backgroundColor: isDark ? '#1e293b' : '#f3f4f6',
             formatter(params) {
               const d = params.data;
               if (d.changePct === null || d.changePct === undefined) return params.name;
