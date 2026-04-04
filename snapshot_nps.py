@@ -519,17 +519,16 @@ def _build_html(
     const gridColor = _gridColor();
     const navColor = NPS_NAV_COLOR;
 
-    // Normalize KOSPI to start at same value as NAV
+    // Normalize KOSPI to start at 1000 (same as NAV base)
     const kospiRaw = NPS_KOSPI_DATA.map(d => d.value);
     let kospiNorm = [];
     if (kospiRaw.length > 0 && kospiRaw[0] > 0) {{
       const base = kospiRaw[0];
-      const navBase = navValues[0] || 1000;
-      kospiNorm = kospiRaw.map(v => v / base * navBase);
+      kospiNorm = kospiRaw.map(v => +(v / base * 1000).toFixed(2));
     }}
 
     const series = [{{
-      name: '국민연금 NAV',
+      name: '국민연금',
       type: 'line',
       data: navValues,
       lineStyle: {{ color: navColor, width: 2 }},
@@ -547,36 +546,21 @@ def _build_html(
       }},
     }}];
 
-    const yAxes = [{{
-      type: 'value',
-      axisLine: {{ show: false }},
-      axisLabel: {{ color: textColor, fontSize: 10 }},
-      splitLine: {{ lineStyle: {{ color: gridColor, width: 0.5 }} }},
-    }}];
-
     if (kospiNorm.length > 0) {{
       series.push({{
         name: 'KOSPI',
         type: 'line',
-        yAxisIndex: 1,
-        data: kospiRaw,
+        data: kospiNorm,
         lineStyle: {{ color: '#94a3b8', width: 1.5, type: 'dashed' }},
         itemStyle: {{ color: '#94a3b8' }},
         symbol: 'none',
         smooth: false,
       }});
-      yAxes.push({{
-        type: 'value',
-        position: 'right',
-        axisLine: {{ show: false }},
-        axisLabel: {{ color: '#94a3b8', fontSize: 10 }},
-        splitLine: {{ show: false }},
-      }});
     }}
 
     const ec = echarts.init(container);
     ec.setOption({{
-      grid: {{ left: 60, right: kospiNorm.length > 0 ? 60 : 12, top: 24, bottom: 24 }},
+      grid: {{ left: 60, right: 12, top: 24, bottom: 24 }},
       legend: {{
         show: kospiNorm.length > 0,
         top: 0,
@@ -590,13 +574,19 @@ def _build_html(
         axisLabel: {{ color: textColor, fontSize: 10 }},
         splitLine: {{ show: false }},
       }},
-      yAxis: yAxes,
+      yAxis: {{
+        type: 'value',
+        axisLine: {{ show: false }},
+        axisLabel: {{ color: textColor, fontSize: 10 }},
+        splitLine: {{ lineStyle: {{ color: gridColor, width: 0.5 }} }},
+      }},
       tooltip: {{
         trigger: 'axis',
         formatter(params) {{
           let s = params[0].axisValue;
           params.forEach(p => {{
-            s += '<br/>' + p.marker + ' ' + p.seriesName + ': ' + Number(p.value).toLocaleString(undefined, {{maximumFractionDigits: 2}});
+            const pct = ((p.value / 1000 - 1) * 100).toFixed(2);
+            s += '<br/>' + p.marker + ' ' + p.seriesName + ': ' + p.value.toLocaleString() + ' (' + (pct > 0 ? '+' : '') + pct + '%)';
           }});
           return s;
         }},
