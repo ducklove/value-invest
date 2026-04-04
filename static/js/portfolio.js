@@ -1457,17 +1457,12 @@ async function loadPerformanceData() {
 let _navChartInstance = null;
 
 function renderNavChart(data) {
-  const canvas = document.getElementById('pfNavCanvas');
-  if (!canvas) return;
-  if (_navChartInstance) { _navChartInstance.destroy(); _navChartInstance = null; }
+  const container = document.getElementById('pfNavChart');
+  if (!container) return;
+  if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
 
   if (!data.length) {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
-    ctx.font = '14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('스냅샷 데이터가 없습니다.', canvas.width / 2, canvas.height / 2);
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
     return;
   }
 
@@ -1476,62 +1471,49 @@ function renderNavChart(data) {
   const lineColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
-
-  const ctx = canvas.getContext('2d');
-  const hexToRgba = (hex, alpha) => {
-    const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
-    return `rgba(${r},${g},${b},${alpha})`;
-  };
   const lc = lineColor.startsWith('#') ? lineColor : '#3b82f6';
+  const hexToRgba = (hex, a) => { const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; };
 
-  _navChartInstance = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        data: navs,
-        borderColor: lineColor,
-        borderWidth: 2,
-        pointRadius: data.length > 30 ? 0 : 2,
-        pointHoverRadius: 5,
-        pointBackgroundColor: lineColor,
-        tension: 0.3,
-        fill: 'origin',
-        backgroundColor(context) {
-          const chart = context.chart;
-          const { ctx: c, chartArea } = chart;
-          if (!chartArea) return 'transparent';
-          const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-          g.addColorStop(0, hexToRgba(lc, 0.3));
-          g.addColorStop(1, hexToRgba(lc, 0.0));
-          return g;
-        },
-      }],
+  const ec = echarts.init(container);
+  _navChartInstance = ec;
+
+  ec.setOption({
+    grid: { left: 50, right: 16, top: 12, bottom: 28 },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisLine: { lineStyle: { color: gridColor } },
+      axisLabel: { color: textColor, fontSize: 10 },
+      splitLine: { show: false },
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            title: (items) => data[items[0].dataIndex]?.date || '',
-            label: (item) => `NAV ${item.raw.toFixed(2)}`,
-          },
-        },
-      },
-      scales: {
-        x: {
-          ticks: { color: textColor, maxTicksLimit: 10, font: { size: 10 } },
-          grid: { color: gridColor, lineWidth: 0.5 },
-        },
-        y: {
-          ticks: { color: textColor, font: { size: 11 } },
-          grid: { color: gridColor, lineWidth: 0.5 },
-        },
-      },
-      interaction: { intersect: false, mode: 'index' },
+    yAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      axisLabel: { color: textColor, fontSize: 11 },
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
     },
+    tooltip: {
+      trigger: 'axis',
+      formatter(params) {
+        const p = params[0];
+        return `${data[p.dataIndex]?.date || ''}<br/>NAV ${Number(p.value).toFixed(2)}`;
+      },
+    },
+    series: [{
+      type: 'line',
+      data: navs,
+      smooth: 0.3,
+      symbol: data.length > 30 ? 'none' : 'circle',
+      symbolSize: 4,
+      lineStyle: { color: lc, width: 2 },
+      itemStyle: { color: lc },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: hexToRgba(lc, 0.3) },
+          { offset: 1, color: hexToRgba(lc, 0.0) },
+        ]),
+      },
+    }],
   });
 }
 

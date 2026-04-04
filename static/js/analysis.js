@@ -168,6 +168,11 @@ function formatWeeklyTickLabel(value) {
   return `${match[1].slice(-2)}.${match[2]}`;
 }
 
+function _hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
   container.innerHTML = '';
 
@@ -178,10 +183,18 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
     const { labelField, labels, values, rawValues, note, spanGaps } = buildChartSeries(key, series);
     const isWeeklyChart = labelField === 'date';
     const zeroBaseline = shouldUseZeroBaseline(values);
+    const color = CHART_COLORS[i % CHART_COLORS.length];
 
     const card = document.createElement('div');
     card.className = 'chart-card';
-    card.innerHTML = `<h3>${key}</h3><div class="chart-canvas-wrap"><canvas id="${prefix}-chart-${i}"></canvas></div>`;
+    const chartDiv = document.createElement('div');
+    chartDiv.className = 'chart-canvas-wrap';
+    const echartsDiv = document.createElement('div');
+    echartsDiv.id = `${prefix}-chart-${i}`;
+    echartsDiv.style.cssText = 'width:100%;height:100%;';
+    chartDiv.appendChild(echartsDiv);
+    card.innerHTML = `<h3>${key}</h3>`;
+    card.appendChild(chartDiv);
     if (note) {
       const noteEl = document.createElement('div');
       noteEl.className = 'chart-note';
@@ -190,67 +203,59 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
     }
     container.appendChild(card);
 
-    const ctx = document.getElementById(`${prefix}-chart-${i}`).getContext('2d');
-    charts[key] = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: key,
-          data: values,
-          borderColor: CHART_COLORS[i % CHART_COLORS.length],
-          backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '22',
-          borderWidth: 2.5,
-          pointRadius: isWeeklyChart ? 0 : 4,
-          pointHoverRadius: isWeeklyChart ? 4 : 6,
-          pointHitRadius: isWeeklyChart ? 12 : 8,
-          pointBackgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-          fill: !isWeeklyChart,
-          tension: 0.3,
-          spanGaps,
-        }]
+    const ec = echarts.init(echartsDiv);
+    charts[key] = ec;
+
+    const displayLabels = isWeeklyChart ? labels.map(formatWeeklyTickLabel) : labels;
+
+    ec.setOption({
+      grid: { left: 45, right: 12, top: 10, bottom: 24 },
+      xAxis: {
+        type: 'category',
+        data: displayLabels,
+        axisLine: { lineStyle: { color: gridColor } },
+        axisLabel: { color: tickColor, fontSize: 10, interval: isWeeklyChart ? 'auto' : 0, rotate: labels.length > 8 ? 30 : 0 },
+        splitLine: { show: false },
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {
-          mode: 'nearest',
-          axis: 'xy',
-          intersect: true,
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const rawValue = rawValues[ctx.dataIndex];
-                if (ctx.parsed.y === null) {
-                  if (isPerChart(key) && rawValue !== null && Number.isFinite(rawValue)) {
-                    return `${key}: 표시 제외 (${rawValue.toLocaleString()})`;
-                  }
-                  return 'N/A';
-                }
-                return `${key}: ${ctx.parsed.y.toLocaleString()}`;
-              }
+      yAxis: {
+        type: 'value',
+        min: zeroBaseline ? 0 : undefined,
+        axisLine: { show: false },
+        axisLabel: { color: tickColor, fontSize: 10 },
+        splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+      },
+      tooltip: {
+        trigger: 'axis',
+        formatter(params) {
+          const p = params[0];
+          const idx = p.dataIndex;
+          const raw = rawValues[idx];
+          const label = labels[idx];
+          if (p.value == null || p.value === '-') {
+            if (isPerChart(key) && raw !== null && Number.isFinite(raw)) {
+              return `${label}<br/>${key}: 표시 제외 (${raw.toLocaleString()})`;
             }
+            return `${label}<br/>N/A`;
           }
+          return `${label}<br/>${key}: ${Number(p.value).toLocaleString()}`;
         },
-        scales: {
-          x: {
-            grid: { color: gridColor },
-            ticks: {
-              color: tickColor,
-              maxTicksLimit: labelField === 'date' ? 8 : 12,
-              callback: (_, index) => labelField === 'date' ? formatWeeklyTickLabel(labels[index]) : labels[index],
-            }
-          },
-          y: {
-            min: zeroBaseline ? 0 : undefined,
-            grid: { color: gridColor },
-            ticks: { color: tickColor }
-          }
-        }
-      }
+      },
+      series: [{
+        type: 'line',
+        data: values.map(v => v === null ? '-' : v),
+        smooth: 0.3,
+        symbol: isWeeklyChart ? 'none' : 'circle',
+        symbolSize: isWeeklyChart ? 0 : 6,
+        lineStyle: { color, width: 2.5 },
+        itemStyle: { color },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: _hexToRgba(color, 0.25) },
+            { offset: 1, color: _hexToRgba(color, 0.0) },
+          ]),
+        },
+        connectNulls: spanGaps,
+      }],
     });
   });
 }
@@ -474,7 +479,7 @@ function renderResult(data) {
   grid.innerHTML = '';
 
   // Destroy existing charts
-  Object.values(charts).forEach(c => c.destroy());
+  Object.values(charts).forEach(c => c.dispose());
   charts = {};
 
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';

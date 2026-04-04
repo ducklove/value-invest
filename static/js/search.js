@@ -4,7 +4,7 @@ function toggleTheme() {
   const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   html.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
-  Object.values(charts).forEach(c => c.update());
+  Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });
   trackEvent('theme_toggle', { theme: next });
 }
 (function initTheme() {

@@ -481,7 +481,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .chart-note {
   margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.4;
 }
-.chart-card canvas { display:block; width:100%!important; height:100%!important; }
+.chart-card canvas, .chart-card > div > div { display:block; width:100%!important; height:100%!important; }
 
 /* Loading overlay */
 .loading-overlay {
@@ -653,7 +653,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
 }
 .pf-snapshot-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
-#pfNavCanvas { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+#pfNavChart { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .pf-nav-returns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .pf-nav-ret-card {
   flex: 1; min-width: 80px; padding: 8px 12px; background: var(--surface);
