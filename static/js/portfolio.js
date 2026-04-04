@@ -1574,21 +1574,19 @@ async function renderTreemap() {
   if (!container) return;
   if (_treemapInstance) { _treemapInstance.dispose(); _treemapInstance = null; }
 
-  // Need ECharts for treemap (uPlot doesn't support it)
-  if (USE_UPLOT) {
-    // On mobile, load ECharts just for treemap
-    if (typeof echarts === 'undefined') {
-      await new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
-        s.onload = resolve;
-        s.onerror = reject;
-        document.head.appendChild(s);
-      });
-    }
-  } else {
-    await loadChartLib();
+  // ECharts required for treemap
+  if (typeof echarts === 'undefined') {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
   }
+
+  // Wait one frame for container layout
+  await new Promise(r => requestAnimationFrame(r));
 
   if (!portfolioItems.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">포트폴리오가 비어 있습니다.</div>';
