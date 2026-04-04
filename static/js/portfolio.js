@@ -1678,8 +1678,11 @@ async function renderTreemap() {
       name: gn,
       changePct: grpChangePct,
       weight: grpWeight,
-      itemStyle: { color: _pctToHeaderColor(grpChangePct) },
-      upperLabel: { color: _pctToHeaderTextColor(grpChangePct) },
+      itemStyle: { color: _pctToHeaderColor(grpChangePct), borderColor: 'transparent' },
+      upperLabel: {
+        color: _pctToHeaderTextColor(grpChangePct),
+        backgroundColor: _pctToHeaderColor(grpChangePct),
+      },
       children: items.map(it => ({
         name: it.name,
         value: it.value,
