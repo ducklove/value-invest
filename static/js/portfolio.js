@@ -1478,21 +1478,11 @@ function renderNavChart(data) {
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
 
   const ctx = canvas.getContext('2d');
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.clientHeight || 300);
-  gradient.addColorStop(0, lineColor.replace(')', ',0.25)').replace('rgb', 'rgba'));
-  gradient.addColorStop(1, lineColor.replace(')', ',0.0)').replace('rgb', 'rgba'));
-  // Fallback for hex colors
   const hexToRgba = (hex, alpha) => {
     const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
     return `rgba(${r},${g},${b},${alpha})`;
   };
-  let gradientFill = gradient;
-  if (lineColor.startsWith('#')) {
-    const gf = ctx.createLinearGradient(0, 0, 0, canvas.clientHeight || 300);
-    gf.addColorStop(0, hexToRgba(lineColor, 0.25));
-    gf.addColorStop(1, hexToRgba(lineColor, 0.0));
-    gradientFill = gf;
-  }
+  const lc = lineColor.startsWith('#') ? lineColor : '#3b82f6';
 
   _navChartInstance = new Chart(ctx, {
     type: 'line',
@@ -1506,8 +1496,16 @@ function renderNavChart(data) {
         pointHoverRadius: 5,
         pointBackgroundColor: lineColor,
         tension: 0.3,
-        fill: true,
-        backgroundColor: gradientFill,
+        fill: 'origin',
+        backgroundColor(context) {
+          const chart = context.chart;
+          const { ctx: c, chartArea } = chart;
+          if (!chartArea) return 'transparent';
+          const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+          g.addColorStop(0, hexToRgba(lc, 0.3));
+          g.addColorStop(1, hexToRgba(lc, 0.0));
+          return g;
+        },
       }],
     },
     options: {
