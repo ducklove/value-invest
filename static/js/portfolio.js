@@ -1595,19 +1595,21 @@ async function renderTreemap() {
 
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
-  // Build treemap data grouped by pfGetGroup
+  // Build treemap data grouped by pfGetGroup (exclude negative qty)
   const groups = {};
   portfolioItems.forEach(item => {
+    if (item.quantity <= 0) return;
     const gn = pfGetGroup(item);
     if (!groups[gn]) groups[gn] = [];
     const q = item.quote || {};
     const price = q.price ?? null;
     const qty = item.quantity;
     const mv = price !== null ? qty * price : qty * item.avg_price;
+    if (mv <= 0) return;
     const changePct = q.change_pct ?? null;
     groups[gn].push({
       name: item.stock_name,
-      value: Math.abs(mv),
+      value: mv,
       changePct,
       code: item.stock_code,
     });
@@ -1696,8 +1698,8 @@ async function renderTreemap() {
         padding: [2, 8],
         formatter(params) {
           const d = params.data;
-          const cpStr = _fmtPct(d.changePct);
-          return `${params.name}  ${cpStr}`;
+          if (d.changePct === null || d.changePct === undefined) return params.name;
+          return `${params.name}  ${_fmtPct(d.changePct)}`;
         },
       },
       levels: [
