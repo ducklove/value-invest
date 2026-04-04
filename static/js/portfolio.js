@@ -186,6 +186,9 @@ function renderPortfolio() {
     return { ...item, cur, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
   });
 
+  // Check if all quotes are loaded
+  const allQuotesLoaded = allRows.every(r => r.price !== null);
+
   // Total market value across ALL items (for weight calculation)
   let grandTotalMarketValue = 0;
   allRows.forEach(r => { if (r.marketValue !== null) grandTotalMarketValue += r.marketValue; });
@@ -292,36 +295,40 @@ function renderPortfolio() {
   const _mtdLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}`;
   const _ytdLabel = `${_now.getFullYear()}`;
 
-  // Summary cards: Total, Today, MTD, YTD
+  // Summary cards: Total, Today, MTD, YTD — show '-' until all quotes loaded
+  const _l = allQuotesLoaded;
+  const _loadingCount = allRows.filter(r => r.price === null).length;
+  const _loadingSub = !_l ? `<span style="opacity:0.5">시세 로딩 중 (${allRows.length - _loadingCount}/${allRows.length})</span>` : '';
+
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Total <span class="pf-summary-date">${_timeLabel}</span></div>
-        <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
-        <div class="pf-summary-sub">투자금액 ${fmtKrw(totalInvested)}</div>
+        <div class="pf-summary-value">${_l ? fmtKrw(totalMarketValue) : '-'}</div>
+        <div class="pf-summary-sub">${_l ? '투자금액 ' + fmtKrw(totalInvested) : _loadingSub}</div>
       </div>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
-        <div class="pf-summary-value ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
-        <div class="pf-summary-sub ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
+        <div class="pf-summary-value ${_l ? returnClass(dailyReturnPct) : ''}">${_l ? fmtPct(dailyReturnPct) : '-'}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(totalDailyPnl) : ''}">${_l ? fmtSignedKrw(totalDailyPnl) : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkDaily"></canvas>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">MTD <span class="pf-summary-date">${_mtdLabel}</span></div>
-        <div class="pf-summary-value ${returnClass(monthlyReturnPct)}">${monthlyReturnPct !== null ? fmtPct(monthlyReturnPct) : '-'}</div>
-        <div class="pf-summary-sub ${returnClass(monthlyPnl)}">${monthlyPnl !== null ? fmtSignedKrw(monthlyPnl) : '-'}</div>
+        <div class="pf-summary-value ${_l ? returnClass(monthlyReturnPct) : ''}">${_l ? (monthlyReturnPct !== null ? fmtPct(monthlyReturnPct) : '-') : '-'}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(monthlyPnl) : ''}">${_l ? (monthlyPnl !== null ? fmtSignedKrw(monthlyPnl) : '-') : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkMonthly"></canvas>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">YTD <span class="pf-summary-date">${_ytdLabel}</span></div>
-        <div class="pf-summary-value ${returnClass(ytdReturnPct)}">${ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-'}</div>
-        <div class="pf-summary-sub ${returnClass(ytdPnl)}">${ytdPnl !== null ? fmtSignedKrw(ytdPnl) : '-'}</div>
+        <div class="pf-summary-value ${_l ? returnClass(ytdReturnPct) : ''}">${_l ? (ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-') : '-'}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(ytdPnl) : ''}">${_l ? (ytdPnl !== null ? fmtSignedKrw(ytdPnl) : '-') : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
