@@ -161,6 +161,21 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .mb-pick-item:hover { background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
 .mb-pick-item.disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+/* Chart loading animation */
+.chart-loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; z-index: 5;
+}
+.chart-loading-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); opacity: 0.3;
+  animation: chartDotPulse 1s ease-in-out infinite;
+}
+.chart-loading-dot:nth-child(2) { animation-delay: 0.15s; }
+.chart-loading-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes chartDotPulse {
+  0%, 100% { opacity: 0.2; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.4); }
+}
+
 @keyframes flash-update {
   0% { background-color: rgba(250, 204, 21, 0.25); }
   100% { background-color: transparent; }

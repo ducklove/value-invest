@@ -162,9 +162,24 @@ function showToast(message, type = 'error', duration = 4000) {
 const USE_UPLOT = window.innerWidth < 768;
 let _chartLibLoaded = false;
 let _chartLibLoading = null;
+
+function _showChartLoading() {
+  document.querySelectorAll('.chart-canvas-wrap, .pf-nav-chart-container').forEach(el => {
+    if (el.querySelector('.chart-loading')) return;
+    const loader = document.createElement('div');
+    loader.className = 'chart-loading';
+    loader.innerHTML = '<div class="chart-loading-dot"></div><div class="chart-loading-dot"></div><div class="chart-loading-dot"></div>';
+    el.appendChild(loader);
+  });
+}
+function _hideChartLoading() {
+  document.querySelectorAll('.chart-loading').forEach(el => el.remove());
+}
+
 function loadChartLib() {
   if (_chartLibLoaded) return Promise.resolve();
   if (_chartLibLoading) return _chartLibLoading;
+  _showChartLoading();
   const src = USE_UPLOT
     ? 'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js'
     : 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
@@ -185,7 +200,7 @@ function loadChartLib() {
       document.head.appendChild(link);
     }));
   }
-  _chartLibLoading = Promise.all(promises).then(() => { _chartLibLoaded = true; });
+  _chartLibLoading = Promise.all(promises).then(() => { _chartLibLoaded = true; _hideChartLoading(); });
   return _chartLibLoading;
 }
 // Backwards compat alias
