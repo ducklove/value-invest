@@ -1528,9 +1528,11 @@ async function renderValueChart(data) {
     const yoyPct = oneYearAgo && oneYearAgo.total_value > 0
       ? ((latest.total_value - oneYearAgo.total_value) / oneYearAgo.total_value * 100) : null;
 
-    // Account return: (total_value - total_invested) / total_invested
-    const acctReturn = latest.total_invested > 0
-      ? ((latest.total_value - latest.total_invested) / latest.total_invested * 100) : null;
+    // CAGR: same formula as NAV — annualized return over recording period
+    const valTotalDays = data.length > 1 ? (new Date(latest.date) - new Date(data[0].date)) / 86400000 : 0;
+    const valTotalYears = valTotalDays / 365;
+    const acctReturn = valTotalYears > 0 && data[0].total_value > 0
+      ? ((latest.total_value - data[0].total_value) / data[0].total_value * 100) / valTotalYears : null;
 
     const items = [
       { label: '52주 최저', val: fmtKrw(Math.round(min52)) },
