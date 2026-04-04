@@ -188,6 +188,28 @@ async def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_intraday_sub_ts ON portfolio_intraday(google_sub, ts);
 
+        CREATE TABLE IF NOT EXISTS nps_holdings (
+            date TEXT NOT NULL,
+            stock_code TEXT NOT NULL,
+            stock_name TEXT NOT NULL,
+            shares INTEGER NOT NULL,
+            ownership_pct REAL NOT NULL DEFAULT 0,
+            price REAL,
+            market_value REAL,
+            change_pct REAL,
+            PRIMARY KEY (date, stock_code)
+        );
+
+        CREATE TABLE IF NOT EXISTS nps_snapshots (
+            date TEXT NOT NULL PRIMARY KEY,
+            total_value REAL NOT NULL DEFAULT 0,
+            nav REAL NOT NULL DEFAULT 1000,
+            total_count INTEGER NOT NULL DEFAULT 0,
+            generated_html TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_nps_holdings_date ON nps_holdings(date);
+
         CREATE TABLE IF NOT EXISTS user_settings (
             google_sub TEXT NOT NULL,
             key TEXT NOT NULL,
@@ -1205,6 +1227,68 @@ async def delete_old_intraday(days_to_keep: int = 7):
     db = await get_db()
     await db.execute("DELETE FROM portfolio_intraday WHERE ts < ?", (cutoff + "T00:00",))
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# NPS (국민연금공단) holdings + snapshots
+# ---------------------------------------------------------------------------
+
+async def save_nps_holdings(date: str, items: list[dict]):
+    db = await get_db()
+    await db.executemany(
+        """INSERT OR REPLACE INTO nps_holdings
+        (date, stock_code, stock_name, shares, ownership_pct, price, market_value, change_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [(date, it["stock_code"], it["stock_name"], it["shares"],
+          it.get("ownership_pct", 0), it.get("price"), it.get("market_value"), it.get("change_pct"))
+         for it in items],
+    )
+    await db.commit()
+
+
+async def get_nps_holdings(date: str) -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM nps_holdings WHERE date = ? ORDER BY market_value DESC",
+        (date,),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def save_nps_snapshot(date: str, total_value: float, nav: float, count: int, html: str | None = None):
+    db = await get_db()
+    await db.execute(
+        """INSERT OR REPLACE INTO nps_snapshots (date, total_value, nav, total_count, generated_html)
+           VALUES (?, ?, ?, ?, ?)""",
+        (date, total_value, nav, count, html),
+    )
+    await db.commit()
+
+
+async def get_nps_snapshots() -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT date, total_value, nav, total_count FROM nps_snapshots ORDER BY date ASC"
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_latest_nps_snapshot() -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT date, total_value, nav, total_count FROM nps_snapshots ORDER BY date DESC LIMIT 1"
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def get_latest_nps_html() -> str | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT generated_html FROM nps_snapshots WHERE generated_html IS NOT NULL ORDER BY date DESC LIMIT 1"
+    )
+    row = await cursor.fetchone()
+    return row["generated_html"] if row else None
 
 
 async def save_latest_report(stock_code: str, report: dict):
