@@ -216,7 +216,6 @@ async def _fetch_foreign_index(client: httpx.AsyncClient, symbol: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _MARKETINDEX_COMMODITY_MAP = {
-    "OIL_CL": "head wti",
 }
 
 _MARKETINDEX_FX_MAP = {
@@ -445,11 +444,11 @@ async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def _fetch_gold_yahoo(client: httpx.AsyncClient) -> dict:
-    """Fetch gold futures (GC=F) from Yahoo Finance for near-24h coverage."""
+async def _fetch_yahoo_commodity(client: httpx.AsyncClient, symbol: str) -> dict:
+    """Fetch commodity futures from Yahoo Finance (e.g., GC=F, CL=F)."""
     try:
         r = await client.get(
-            "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
             params={"interval": "1d", "range": "5d"},
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -460,7 +459,7 @@ async def _fetch_gold_yahoo(client: httpx.AsyncClient) -> dict:
         data = _json.loads(r.text)
         meta = data["chart"]["result"][0]["meta"]
         price = meta["regularMarketPrice"]
-        # Use last OHLC close as prev (chartPreviousClose can be stale with range=2d)
+        # Use last OHLC close as prev (chartPreviousClose can be stale)
         closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
         valid_closes = [c for c in closes if c is not None]
         prev = valid_closes[-1] if valid_closes else meta["chartPreviousClose"]
@@ -542,10 +541,13 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     us10y_needed = False
     night_futures_needed = False
     gold_needed = False
+    wti_needed = False
 
     for code in codes:
         if code == "CMDT_GC":
             gold_needed = True
+        elif code == "OIL_CL":
+            wti_needed = True
         elif code in _KR_INDEX_CODES:
             kr_indices.append(code)
         elif code in _FOREIGN_SYMBOLS:
@@ -593,10 +595,13 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_us10y(client))
             task_keys.append(("us10y", None))
 
-        # Gold futures (Yahoo Finance)
+        # Commodities (Yahoo Finance)
         if gold_needed:
-            tasks.append(_fetch_gold_yahoo(client))
+            tasks.append(_fetch_yahoo_commodity(client, "GC=F"))
             task_keys.append(("gold", None))
+        if wti_needed:
+            tasks.append(_fetch_yahoo_commodity(client, "CL=F"))
+            task_keys.append(("wti", None))
 
         # Night futures
         if night_futures_needed:
@@ -622,6 +627,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 results[code] = result
             elif kind == "gold":
                 results["CMDT_GC"] = result
+            elif kind == "wti":
+                results["OIL_CL"] = result
             elif kind == "us10y":
                 results["US10Y"] = result
             elif kind == "night_futures":
