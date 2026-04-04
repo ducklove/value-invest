@@ -863,7 +863,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   font-weight: 600; color: var(--text-secondary); font-size: 12px;
   border-bottom: 1px solid var(--border); white-space: nowrap;
 }
-.pf-table thead th.pf-col-name { text-align: left; }
+.pf-table thead th.pf-col-name, .pf-table tbody td.pf-col-name { text-align: left; }
 .pf-table thead th.pf-col-num { text-align: right; }
 .pf-table thead th.pf-col-act { text-align: center; }
 .pf-table tbody td, .pf-table tfoot td {
