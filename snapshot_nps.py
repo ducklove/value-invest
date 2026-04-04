@@ -177,7 +177,7 @@ def _build_treemap_data(holdings: list[dict]) -> list[dict]:
             continue
         cp = h.get("change_pct")
         items.append({
-            "name": h.get("stock_name", ""),
+            "name": h.get("stock_name") or h.get("name", ""),
             "value": mv,
             "changePct": cp,
             "itemStyle": {"color": _pct_to_treemap_color(cp)},
@@ -254,7 +254,7 @@ def _build_html(
     rows_html = ""
     total_displayed = sum(h.get("market_value") or 0 for h in holdings if h.get("market_value"))
     for i, h in enumerate(holdings):
-        name = h.get("stock_name", "")
+        name = h.get("stock_name") or h.get("name", "")
         cp = h.get("change_pct")
         price = h.get("price")
         shares = h.get("shares", 0)
@@ -303,7 +303,7 @@ def _build_html(
   <div class="pf-nav-header">
     <h3 style="font-size:16px;margin:0;">포트폴리오 구성</h3>
   </div>
-  <div id="npsTreemap" style="height:320px;border:1px solid var(--border);border-radius:8px;background:var(--surface);"></div>
+  <div id="npsTreemap" style="height:640px;border:1px solid var(--border);border-radius:8px;background:var(--surface);"></div>
 </div>
 """
 
@@ -496,7 +496,7 @@ def _build_html(
     _renderTreemap();
     _renderLineChart('npsNavChart', NPS_NAV_DATA, 'nav', NPS_NAV_COLOR, 'NAV ', null);
     _renderLineChart('npsValueChart', NPS_VALUE_DATA, 'total_value', NPS_VAL_COLOR, '', function(v) {{
-      return Number(Math.round(v)).toLocaleString();
+      return (v / 1e12).toFixed(0) + '조';
     }});
   }}
 
