@@ -295,14 +295,14 @@ function renderPortfolio() {
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">Total <span class="pf-summary-date">${_todayLabel}</span></div>
+        <div class="pf-summary-label">Total</div>
         <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
         <div class="pf-summary-sub">투자금액 ${fmtKrw(totalInvested)}</div>
       </div>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">Today</div>
+        <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
         <div class="pf-summary-value ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
         <div class="pf-summary-sub ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
       </div>
