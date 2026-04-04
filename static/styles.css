@@ -644,6 +644,16 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-tab:hover { color: var(--text); }
 .pf-tab.active { background: var(--primary); border-color: var(--primary); color: white; }
 
+/* Currency toggle */
+.pf-currency-toggle { display: flex; gap: 0; margin-left: auto; }
+.pf-currency-btn {
+  padding: 5px 10px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.pf-currency-btn:first-child { border-radius: 6px 0 0 6px; }
+.pf-currency-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+.pf-currency-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
+
 /* NAV chart */
 .pf-nav-chart-wrap { margin-bottom: 24px; }
 .pf-nav-chart-container { position: relative; height: 300px; }

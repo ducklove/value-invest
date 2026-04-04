@@ -14,6 +14,8 @@ let pfMonthEndValue = null; // total_value at end of previous month
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 let pfNavHistory = []; // [{date, nav, total_value, total_invested, total_units}, ...]
 let pfIntradayData = []; // [{ts, total_value}, ...]
+let pfCurrency = 'KRW'; // 'KRW' or 'USD'
+let pfFxRate = null; // USD/KRW rate
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 function switchView(view) {
@@ -299,20 +301,22 @@ function renderPortfolio() {
   const _l = allQuotesLoaded;
   const _loadingCount = allRows.filter(r => r.price === null).length;
   const _loadingSub = !_l ? `<span style="opacity:0.5">시세 로딩 중 (${allRows.length - _loadingCount}/${allRows.length})</span>` : '';
+  const _fv = v => pfCurrency === 'USD' ? '$' + fmtKrw(pfFx(v)) : fmtKrw(v);
+  const _fsv = v => pfCurrency === 'USD' ? (v >= 0 ? '+$' : '-$') + fmtKrw(Math.abs(pfFx(v))) : fmtSignedKrw(v);
 
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Total <span class="pf-summary-date">${_timeLabel}</span></div>
-        <div class="pf-summary-value">${_l ? fmtKrw(totalMarketValue) : '-'}</div>
-        <div class="pf-summary-sub">${_l ? '투자금액 ' + fmtKrw(totalInvested) : _loadingSub}</div>
+        <div class="pf-summary-value">${_l ? _fv(totalMarketValue) : '-'}</div>
+        <div class="pf-summary-sub">${_l ? '투자금액 ' + _fv(totalInvested) : _loadingSub}</div>
       </div>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(dailyReturnPct) : ''}">${_l ? fmtPct(dailyReturnPct) : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(totalDailyPnl) : ''}">${_l ? fmtSignedKrw(totalDailyPnl) : ''}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(totalDailyPnl) : ''}">${_l ? _fsv(totalDailyPnl) : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkDaily"></canvas>
     </div>
@@ -320,7 +324,7 @@ function renderPortfolio() {
       <div class="pf-summary-text">
         <div class="pf-summary-label">MTD <span class="pf-summary-date">${_mtdLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(monthlyReturnPct) : ''}">${_l ? (monthlyReturnPct !== null ? fmtPct(monthlyReturnPct) : '-') : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(monthlyPnl) : ''}">${_l ? (monthlyPnl !== null ? fmtSignedKrw(monthlyPnl) : '-') : ''}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(monthlyPnl) : ''}">${_l ? (monthlyPnl !== null ? _fsv(monthlyPnl) : '-') : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkMonthly"></canvas>
     </div>
@@ -328,13 +332,14 @@ function renderPortfolio() {
       <div class="pf-summary-text">
         <div class="pf-summary-label">YTD <span class="pf-summary-date">${_ytdLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(ytdReturnPct) : ''}">${_l ? (ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-') : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(ytdPnl) : ''}">${_l ? (ytdPnl !== null ? fmtSignedKrw(ytdPnl) : '-') : ''}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(ytdPnl) : ''}">${_l ? (ytdPnl !== null ? _fsv(ytdPnl) : '-') : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
   _renderSummarySparklines(_l ? totalMarketValue : null);
 
-  // Table body
+  // Table body — apply FX conversion to price columns
+  const _fp = v => fmtNum(Math.round(pfFx(v)));  // format price with FX
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
@@ -354,10 +359,10 @@ function renderPortfolio() {
         <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
-        <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
+        <td class="pf-col-num">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
         <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-        <td class="pf-col-num">${r.marketValue !== null ? fmtNum(Math.round(r.marketValue)) : '-'}</td>
+        <td class="pf-col-num">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
         <td class="pf-col-act"><div class="pf-row-actions">
           <button class="pf-row-btn save" onclick="savePortfolioEdit('${r.stock_code}','${escapeHtml(r.stock_name)}')" title="저장">✓</button>
@@ -370,11 +375,11 @@ function renderPortfolio() {
       <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
       <td class="pf-col-num">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-benchmark" onclick="pfShowBenchmarkPicker('${r.stock_code}', this)">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
-      <td class="pf-col-num pf-col-buyprice">${fmtNum(r.avgPrice)}</td>
-      <td class="pf-col-num">${r.price !== null ? fmtNum(r.price) : '-'}</td>
+      <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
+      <td class="pf-col-num">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num">${fmtQty(r.qty)}</td>
       <td class="pf-col-num"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-      <td class="pf-col-num">${r.marketValue !== null ? fmtNum(Math.round(r.marketValue)) : '-'}</td>
+      <td class="pf-col-num">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
         <button class="pf-row-btn edit" onclick="startPortfolioEdit('${r.stock_code}')" title="편집">✎</button>
@@ -389,11 +394,11 @@ function renderPortfolio() {
     <td class="pf-col-group"></td>
     <td class="pf-col-num">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
     <td class="pf-col-benchmark"></td>
-    <td class="pf-col-num pf-col-buyprice">${fmtNum(Math.round(totalInvested))}</td>
+    <td class="pf-col-num pf-col-buyprice">${_fp(totalInvested)}</td>
     <td></td>
     <td></td>
     <td class="pf-col-num"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
-    <td class="pf-col-num">${fmtNum(Math.round(totalMarketValue))}</td>
+    <td class="pf-col-num">${_fp(totalMarketValue)}</td>
     <td class="pf-col-num pf-col-weight">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td class="pf-col-act"></td>
   </tr>`;
@@ -1445,6 +1450,40 @@ async function submitCsv(mode) {
   }
 }
 
+// --- Currency conversion ---
+function pfFx(krwValue) {
+  if (pfCurrency === 'USD' && pfFxRate && pfFxRate > 0) return krwValue / pfFxRate;
+  return krwValue;
+}
+function pfFxSymbol() { return pfCurrency === 'USD' ? '$' : ''; }
+function pfFxUnit() { return pfCurrency === 'USD' ? 'M' : '억'; }
+function pfFxDivisor() { return pfCurrency === 'USD' ? 1e6 : 1e8; }
+
+async function _ensureFxRate() {
+  if (pfFxRate) return;
+  try {
+    const resp = await apiFetch('/api/asset-quote/CASH_USD');
+    if (resp.ok) {
+      const d = await resp.json();
+      if (d.price) pfFxRate = d.price; // KRW per 1 USD
+    }
+  } catch (e) { console.warn(e); }
+}
+
+function pfSetCurrency(currency) {
+  pfCurrency = currency;
+  document.querySelectorAll('.pf-currency-btn').forEach(b => b.classList.toggle('active', b.dataset.currency === currency));
+  const refresh = () => {
+    renderPortfolio();
+    if (pfActiveTab === 'performance') loadPerformanceData();
+  };
+  if (currency === 'USD') {
+    _ensureFxRate().then(refresh);
+  } else {
+    refresh();
+  }
+}
+
 // --- Portfolio Performance Tab ---
 let pfActiveTab = 'holdings';
 
@@ -1492,15 +1531,19 @@ async function renderNavChart(data) {
     return;
   }
 
+  // NAV doesn't need FX conversion (it's a unitless index)
+  // But if USD mode, show NAV adjusted by relative FX change (approximate)
+  const navValues = data.map(d => d.nav);
+
   // Color based on YoY
   const last365 = data.slice(-365);
   const yoyPct = last365.length > 1
-    ? ((data[data.length - 1].nav / last365[0].nav) - 1) * 100 : 0;
+    ? ((navValues[navValues.length - 1] / navValues[navValues.length - last365.length]) - 1) * 100 : 0;
   const navColor = returnToColor(yoyPct);
 
   _navChartInstance = createLineChart(container, {
     labels: data.map(d => d.date.slice(5)),
-    values: data.map(d => d.nav),
+    values: navValues,
     color: navColor,
     tooltipPrefix: 'NAV ',
   });
@@ -1529,18 +1572,22 @@ async function renderValueChart(data) {
     ? ((data[data.length - 1].total_value / last30[0].total_value) - 1) * 100 : 0;
   const valColor = returnToColor(momPct, 10); // tighter range for monthly
 
+  const div = pfFxDivisor();
+  const unit = pfFxUnit();
+  const sym = pfFxSymbol();
+
   _valueChartInstance = createLineChart(container, {
     labels: data.map(d => d.date.slice(5)),
-    values: data.map(d => Math.round(d.total_value)),
+    values: data.map(d => Math.round(pfFx(d.total_value))),
     color: valColor,
-    yFormatter: v => (v / 1e8).toFixed(0) + '억',
+    yFormatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit,
   });
 
   // Value stats cards
   if (statsEl) {
     const latest = data[data.length - 1];
     const last365 = data.slice(-365);
-    const valuesSlice = last365.map(d => d.total_value);
+    const valuesSlice = last365.map(d => pfFx(d.total_value));
     const min52 = Math.min(...valuesSlice);
     const max52 = Math.max(...valuesSlice);
 
@@ -1555,9 +1602,10 @@ async function renderValueChart(data) {
     const acctReturn = valTotalYears > 0 && data[0].total_value > 0
       ? ((latest.total_value - data[0].total_value) / data[0].total_value * 100) / valTotalYears : null;
 
+    const fmtVal = v => pfCurrency === 'USD' ? '$' + Number(Math.round(v)).toLocaleString() : fmtKrw(Math.round(v));
     const items = [
-      { label: '52주 최저', val: fmtKrw(Math.round(min52)) },
-      { label: '52주 최고', val: fmtKrw(Math.round(max52)) },
+      { label: '52주 최저', val: fmtVal(min52) },
+      { label: '52주 최고', val: fmtVal(max52) },
       { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },
       { label: 'CAGR', val: acctReturn !== null ? fmtPct(acctReturn) : '-', cls: returnClass(acctReturn) },
     ];
