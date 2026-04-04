@@ -1633,69 +1633,90 @@ async function renderTreemap() {
     return `rgb(${r},${g},${b})`;
   }
 
-  const treeData = Object.entries(groups).map(([gn, items]) => ({
-    name: gn,
-    children: items.map(it => ({
-      name: it.name,
-      value: it.value,
-      changePct: it.changePct,
-      code: it.code,
-      itemStyle: { color: _pctToColor(it.changePct) },
-    })),
-  }));
+  // Compute grand total for weight %
+  let grandTotal = 0;
+  Object.values(groups).forEach(items => items.forEach(it => { grandTotal += it.value; }));
+
+  const treeData = Object.entries(groups).map(([gn, items]) => {
+    // Group-level weighted daily change
+    const grpTotal = items.reduce((s, it) => s + it.value, 0);
+    let grpChangePct = null;
+    const withPct = items.filter(it => it.changePct !== null);
+    if (withPct.length > 0 && grpTotal > 0) {
+      grpChangePct = withPct.reduce((s, it) => s + (it.changePct * it.value), 0) / grpTotal;
+    }
+    const grpWeight = grandTotal > 0 ? (grpTotal / grandTotal * 100) : 0;
+
+    return {
+      name: gn,
+      changePct: grpChangePct,
+      weight: grpWeight,
+      children: items.map(it => ({
+        name: it.name,
+        value: it.value,
+        changePct: it.changePct,
+        weight: grandTotal > 0 ? (it.value / grandTotal * 100) : 0,
+        code: it.code,
+        itemStyle: { color: _pctToColor(it.changePct) },
+      })),
+    };
+  });
 
   const ec = echarts.init(container);
   _treemapInstance = ec;
 
+  const _fmtPct = v => v !== null && v !== undefined ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '-';
+
   ec.setOption({
     tooltip: {
       formatter(info) {
-        const cp = info.data.changePct;
-        const cpStr = cp !== null && cp !== undefined ? (cp > 0 ? '+' : '') + cp.toFixed(2) + '%' : '-';
+        const d = info.data;
+        const cpStr = _fmtPct(d.changePct);
+        const wStr = d.weight !== undefined ? d.weight.toFixed(1) + '%' : '';
         const val = Number(info.value).toLocaleString();
-        return `<strong>${escapeHtml(info.name)}</strong><br/>평가: ${val}<br/>일간: ${cpStr}`;
+        return `<strong>${escapeHtml(info.name)}</strong><br/>평가: ${val}<br/>비중: ${wStr}<br/>일간: ${cpStr}`;
       },
     },
     series: [{
       type: 'treemap',
-      width: '100%',
-      height: '100%',
+      left: 0, right: 0, top: 0, bottom: 0,
       roam: false,
       nodeClick: false,
       breadcrumb: { show: false },
       itemStyle: {
-        borderColor: isDark ? '#334155' : '#fff',
-        borderWidth: 2,
-        gapWidth: 1,
+        borderColor: isDark ? '#334155' : '#e5e7eb',
+        borderWidth: 1,
       },
       upperLabel: {
         show: true,
-        height: 20,
-        color: isDark ? '#94a3b8' : '#666',
+        height: 22,
+        color: isDark ? '#e2e8f0' : '#374151',
         fontSize: 11,
         fontWeight: 600,
-        backgroundColor: isDark ? '#1e293b' : '#f5f5f5',
-        borderColor: isDark ? '#334155' : '#e0e0e0',
-        borderWidth: 1,
-        padding: [2, 6],
+        padding: [2, 8],
+        formatter(params) {
+          const d = params.data;
+          const cpStr = _fmtPct(d.changePct);
+          return `${params.name}  ${cpStr}`;
+        },
       },
       levels: [
         {
           // Group level
           itemStyle: {
-            borderColor: isDark ? '#475569' : '#ccc',
-            borderWidth: 3,
-            gapWidth: 3,
+            borderColor: isDark ? '#475569' : '#9ca3af',
+            borderWidth: 2,
           },
-          upperLabel: { show: true },
+          upperLabel: {
+            show: true,
+            backgroundColor: isDark ? '#1e293b' : '#f3f4f6',
+          },
         },
         {
           // Stock level
-          colorMappingBy: 'value',
           itemStyle: {
-            borderColor: isDark ? '#334155' : '#fff',
+            borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)',
             borderWidth: 1,
-            gapWidth: 1,
           },
           label: {
             show: true,
