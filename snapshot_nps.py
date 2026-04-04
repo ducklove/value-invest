@@ -266,13 +266,13 @@ def _build_html(
         row_bg = " style=\"background:var(--bg)\"" if i % 2 == 1 else ""
 
         rows_html += f"""<tr{row_bg}>
-  <td>{_esc(name)}</td>
-  <td class="{cp_cls}">{_esc(_fmt_pct(cp))}</td>
-  <td>{_esc(f"{round(price):,}") if price else "-"}</td>
-  <td>{_esc(f"{shares:,}")}</td>
-  <td>{_esc(_fmt_krw(mv)) if mv else "-"}</td>
-  <td>{_esc(f"{weight:.1f}%") if weight is not None else "-"}</td>
-  <td>{_esc(f"{own_pct:.2f}%") if own_pct is not None else "-"}</td>
+  <td style="text-align:left;padding:8px 6px;">{_esc(name)}</td>
+  <td style="text-align:right;padding:8px 6px;" class="{cp_cls}">{_esc(_fmt_pct(cp))}</td>
+  <td style="text-align:right;padding:8px 6px;">{_esc(f"{round(price):,}") if price else "-"}</td>
+  <td style="text-align:right;padding:8px 6px;">{_esc(f"{shares:,}")}</td>
+  <td style="text-align:right;padding:8px 6px;">{_esc(_fmt_krw(mv)) if mv else "-"}</td>
+  <td style="text-align:right;padding:8px 6px;">{_esc(f"{weight:.1f}%") if weight is not None else "-"}</td>
+  <td style="text-align:right;padding:8px 6px;">{_esc(f"{own_pct:.2f}%") if own_pct is not None else "-"}</td>
 </tr>
 """
 
@@ -281,13 +281,13 @@ def _build_html(
   <table class="pf-cf-table" style="width:100%;font-size:13px;">
     <thead>
       <tr>
-        <th style="text-align:left;padding:8px 6px;">종목명</th>
-        <th style="text-align:right;padding:8px 6px;">등락률</th>
-        <th style="text-align:right;padding:8px 6px;">현재가</th>
-        <th style="text-align:right;padding:8px 6px;">수량</th>
-        <th style="text-align:right;padding:8px 6px;">평가금액</th>
-        <th style="text-align:right;padding:8px 6px;">비중</th>
-        <th style="text-align:right;padding:8px 6px;">지분율</th>
+        <th style="text-align:center;padding:8px 6px;">종목명</th>
+        <th style="text-align:center;padding:8px 6px;">등락률</th>
+        <th style="text-align:center;padding:8px 6px;">현재가</th>
+        <th style="text-align:center;padding:8px 6px;">수량</th>
+        <th style="text-align:center;padding:8px 6px;">평가금액</th>
+        <th style="text-align:center;padding:8px 6px;">비중</th>
+        <th style="text-align:center;padding:8px 6px;">지분율</th>
       </tr>
     </thead>
     <tbody>
