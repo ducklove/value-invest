@@ -742,6 +742,8 @@ async def asset_quote(stock_code: str):
         raise HTTPException(status_code=404, detail="시세를 가져올 수 없습니다.")
 
 
+_NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
+
 @router.post("/api/asset-quotes")
 async def asset_quotes_batch(payload: dict = Body(...)):
     """Fetch quotes for multiple codes in one request."""
@@ -751,6 +753,8 @@ async def asset_quotes_batch(payload: dict = Body(...)):
     codes = list({str(c).strip() for c in codes if str(c).strip()})
 
     async def _fetch_one(code):
+        if code.startswith(_NON_QUOTABLE_PREFIXES):
+            return code, {}
         try:
             q = await _fetch_quote(code)
             return code, q or {}
