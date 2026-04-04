@@ -332,7 +332,7 @@ function renderPortfolio() {
       </div>
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
-  _renderSummarySparklines();
+  _renderSummarySparklines(_l ? totalMarketValue : null);
 
   // Table body
   tbody.innerHTML = rows.map((r, i) => {
@@ -482,7 +482,7 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   }
 }
 
-function _renderSummarySparklines() {
+function _renderSummarySparklines(currentTotalValue) {
   // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
   if (pfNavHistory.length > 1) {
     const last365 = pfNavHistory.slice(-365);
@@ -509,14 +509,17 @@ function _renderSummarySparklines() {
     _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
   }
 
-  // 일간 수익률 — 30분 간격 변동률 (%) 기준
+  // 일간 수익률 — 30분 간격 변동률 (%) + 현재 실시간 값 append
   if (pfIntradayData.length > 1) {
     const baseValue = pfIntradayData[0].total_value;
     const dayPcts = pfIntradayData.map(d => ((d.total_value / baseValue) - 1) * 100);
+    if (currentTotalValue && baseValue > 0) {
+      dayPcts.push(((currentTotalValue / baseValue) - 1) * 100);
+    }
     const lastPct = dayPcts[dayPcts.length - 1];
-    _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 27, 'left');
+    _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 28, 'left');
   } else {
-    _drawSparkline('sparkDaily', [], '#dc2626', 27, 'left');
+    _drawSparkline('sparkDaily', [], '#dc2626', 28, 'left');
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
