@@ -702,9 +702,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-group-manage-btn { font-size: 14px !important; padding: 7px 8px !important; color: var(--text-secondary) !important; border-bottom-color: transparent !important; }
 .pf-col-group { min-width: 80px; }
 .pf-group-select {
-  padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--surface); color: var(--text); font-size: 12px; cursor: pointer;
+  padding: 3px 6px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer;
 }
+.pf-group-select:hover { color: var(--text); }
+.pf-group-select:focus { outline: none; color: var(--text); }
 /* Benchmark column */
 .pf-col-benchmark { cursor: pointer; min-width: 70px; }
 .pf-benchmark-val { font-size: 12px; opacity: 0.6; }
