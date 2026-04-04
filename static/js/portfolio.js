@@ -1449,6 +1449,7 @@ async function loadPerformanceData() {
     const navData = navResp.ok ? await navResp.json() : [];
     const cfData = cfResp.ok ? await cfResp.json() : [];
     renderNavChart(navData);
+    renderValueChart(navData);
     renderNavReturns(navData);
     renderCashflows(cfData);
   } catch (e) { console.warn(e); }
@@ -1514,6 +1515,85 @@ function renderNavChart(data) {
         ]),
       },
     }],
+  });
+}
+
+let _valueChartInstance = null;
+
+function renderValueChart(data) {
+  const container = document.getElementById('pfValueChart');
+  if (!container) return;
+  if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
+
+  if (!data.length) {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
+    return;
+  }
+
+  const labels = data.map(d => d.date.slice(5));
+  const values = data.map(d => Math.round(d.total_value));
+  const invested = data.map(d => Math.round(d.total_invested));
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+  const hexToRgba = (hex, a) => { const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; };
+
+  const ec = echarts.init(container);
+  _valueChartInstance = ec;
+
+  ec.setOption({
+    grid: { left: 65, right: 16, top: 12, bottom: 28 },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisLine: { lineStyle: { color: gridColor } },
+      axisLabel: { color: textColor, fontSize: 10 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      axisLabel: { color: textColor, fontSize: 10, formatter: v => (v / 1e8).toFixed(0) + '억' },
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter(params) {
+        const date = data[params[0].dataIndex]?.date || '';
+        return params.map(p => `${p.seriesName}: ${Number(p.value).toLocaleString()}`).join('<br/>');
+      },
+    },
+    legend: {
+      data: ['평가금액', '투자금액'],
+      top: 0, right: 0,
+      textStyle: { color: textColor, fontSize: 11 },
+    },
+    series: [
+      {
+        name: '평가금액',
+        type: 'line',
+        data: values,
+        smooth: 0.3,
+        symbol: data.length > 30 ? 'none' : 'circle',
+        symbolSize: 4,
+        lineStyle: { color: '#3b82f6', width: 2 },
+        itemStyle: { color: '#3b82f6' },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: hexToRgba('#3b82f6', 0.2) },
+            { offset: 1, color: hexToRgba('#3b82f6', 0.0) },
+          ]),
+        },
+      },
+      {
+        name: '투자금액',
+        type: 'line',
+        data: invested,
+        smooth: 0.3,
+        symbol: 'none',
+        lineStyle: { color: '#94a3b8', width: 1.5, type: 'dashed' },
+        itemStyle: { color: '#94a3b8' },
+      },
+    ],
   });
 }
 

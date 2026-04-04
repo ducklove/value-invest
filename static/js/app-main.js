@@ -77,4 +77,5 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('resize', () => {
   Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });
   if (_navChartInstance && _navChartInstance.resize) _navChartInstance.resize();
+  if (_valueChartInstance && _valueChartInstance.resize) _valueChartInstance.resize();
 });
