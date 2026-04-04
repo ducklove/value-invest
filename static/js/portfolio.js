@@ -287,6 +287,7 @@ function renderPortfolio() {
 
   // Date labels for summary cards
   const _now = new Date();
+  const _timeLabel = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
   const _todayLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}/${String(_now.getDate()).padStart(2,'0')}`;
   const _mtdLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}`;
   const _ytdLabel = `${_now.getFullYear()}`;
@@ -295,7 +296,7 @@ function renderPortfolio() {
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">Total</div>
+        <div class="pf-summary-label">Total <span class="pf-summary-date">${_timeLabel}</span></div>
         <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
         <div class="pf-summary-sub">투자금액 ${fmtKrw(totalInvested)}</div>
       </div>
