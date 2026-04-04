@@ -445,7 +445,7 @@ async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
 
 
 async def _fetch_yahoo_commodity(client: httpx.AsyncClient, symbol: str) -> dict:
-    """Fetch commodity futures from Yahoo Finance (e.g., GC=F, CL=F)."""
+    """Fetch commodity futures from Yahoo Finance (e.g., CL=F)."""
     try:
         r = await client.get(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
@@ -463,6 +463,49 @@ async def _fetch_yahoo_commodity(client: httpx.AsyncClient, symbol: str) -> dict
         closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
         valid_closes = [c for c in closes if c is not None]
         prev = valid_closes[-1] if valid_closes else meta["chartPreviousClose"]
+        diff = price - prev
+        pct = abs(diff) / prev * 100 if prev else 0
+        direction = "up" if diff > 0 else "down" if diff < 0 else ""
+        return {
+            "value": _fmt(price),
+            "change": _fmt(abs(diff)),
+            "change_pct": f"{pct:.2f}%",
+            "direction": direction,
+        }
+    except Exception:
+        return dict(_EMPTY)
+
+
+async def _fetch_gold_live(client: httpx.AsyncClient) -> dict:
+    """Fetch live XAU spot from gold-api.com, prev close from DB."""
+    import cache as _cache
+    from datetime import date as _date
+
+    try:
+        r = await client.get(
+            "https://api.gold-api.com/price/XAU/USD",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code != 200:
+            return dict(_EMPTY)
+        data = _json.loads(r.text)
+        price = data.get("price")
+        if not price:
+            return dict(_EMPTY)
+
+        # Load prev close from DB (written by snapshot_gold_close.py at 22:00)
+        prev = None
+        try:
+            stored = await _cache.get_user_setting("__system__", "gold_prev_close")
+            if stored:
+                prev = float(stored)
+        except Exception:
+            pass
+
+        if not prev:
+            # No stored prev close — show price only, no change
+            return {"value": _fmt(price), "change": "", "change_pct": "", "direction": ""}
+
         diff = price - prev
         pct = abs(diff) / prev * 100 if prev else 0
         direction = "up" if diff > 0 else "down" if diff < 0 else ""
@@ -595,9 +638,9 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_us10y(client))
             task_keys.append(("us10y", None))
 
-        # Commodities (Yahoo Finance)
+        # Commodities
         if gold_needed:
-            tasks.append(_fetch_yahoo_commodity(client, "GC=F"))
+            tasks.append(_fetch_gold_live(client))
             task_keys.append(("gold", None))
         if wti_needed:
             tasks.append(_fetch_yahoo_commodity(client, "CL=F"))

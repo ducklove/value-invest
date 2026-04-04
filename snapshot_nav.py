@@ -90,6 +90,21 @@ async def take_snapshot(google_sub: str, snap_date: str):
     logger.info("Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f stocks=%d", google_sub[:8], snap_date, total_value, nav, total_units, len(per_stock))
 
 
+async def _save_gold_close():
+    """Save current XAU spot price as prev close for tomorrow's market bar."""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://api.gold-api.com/price/XAU/USD", headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code == 200:
+                price = r.json().get("price")
+                if price:
+                    await cache.set_user_setting("__system__", "gold_prev_close", str(price))
+                    logger.info("Gold prev close saved: %.2f", price)
+    except Exception as e:
+        logger.warning("Failed to save gold close: %s", e)
+
+
 async def run_all_snapshots():
     """Take snapshots for all users with portfolio items."""
     await cache.init_db()
@@ -101,6 +116,7 @@ async def run_all_snapshots():
             await take_snapshot(google_sub, snap_date)
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", google_sub[:8], e)
+    await _save_gold_close()
 
 
 if __name__ == "__main__":
