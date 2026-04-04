@@ -14,7 +14,7 @@ import dart_client
 import kis_key_manager
 import kis_proxy_client
 import kis_ws_manager
-from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router
+from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router, nps_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,6 +71,7 @@ app.include_router(stocks_router)
 app.include_router(cache_router)
 app.include_router(portfolio_router)
 app.include_router(ws_quotes_router)
+app.include_router(nps_router)
 
 
 @app.get("/")

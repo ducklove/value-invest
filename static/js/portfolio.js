@@ -23,16 +23,44 @@ function switchView(view) {
   document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   const analysisView = document.getElementById('analysisView');
   const portfolioView = document.getElementById('portfolioView');
+  const npsView = document.getElementById('npsView');
   analysisView.style.display = view === 'analysis' ? 'block' : 'none';
   portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
-  const activeEl = view === 'analysis' ? analysisView : portfolioView;
-  activeEl.classList.remove('fade-in');
-  void activeEl.offsetWidth;
-  activeEl.classList.add('fade-in');
+  if (npsView) npsView.style.display = view === 'nps' ? 'block' : 'none';
+  const activeEl = view === 'analysis' ? analysisView : view === 'portfolio' ? portfolioView : npsView;
+  if (activeEl) {
+    activeEl.classList.remove('fade-in');
+    void activeEl.offsetWidth;
+    activeEl.classList.add('fade-in');
+  }
   if (view === 'portfolio') {
     loadPortfolio();
+  } else if (view === 'nps') {
+    loadNpsView();
   }
   _updateQuoteSubscriptions();
+}
+
+let _npsLoaded = false;
+async function loadNpsView() {
+  const container = document.getElementById('npsContent');
+  if (!container) return;
+  if (_npsLoaded) return;
+  try {
+    const resp = await apiFetch('/api/nps/html');
+    if (!resp.ok) throw new Error('NPS 데이터를 불러올 수 없습니다.');
+    container.innerHTML = await resp.text();
+    _npsLoaded = true;
+    // Execute inline scripts in the inserted HTML
+    container.querySelectorAll('script').forEach(oldScript => {
+      const newScript = document.createElement('script');
+      newScript.textContent = oldScript.textContent;
+      oldScript.replaceWith(newScript);
+    });
+  } catch (e) {
+    container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-secondary);">${escapeHtml(e.message)}</div>`;
+    console.warn(e);
+  }
 }
 
 async function loadPortfolio() {
