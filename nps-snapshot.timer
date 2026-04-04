@@ -1,0 +1,9 @@
+[Unit]
+Description=Run NPS snapshot daily at 22:05 KST
+
+[Timer]
+OnCalendar=*-*-* 22:05:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
