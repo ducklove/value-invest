@@ -964,6 +964,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   }
   /* Hide sidebar when logged in on mobile */
   body.mobile-auth .sidebar { display: none; }
+  .pf-treemap-wrap { display: none; }
   .pf-table { font-size: 12px; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
 }

@@ -1559,7 +1559,7 @@ async function loadPerformanceData() {
     ]);
     const navData = navResp.ok ? await navResp.json() : [];
     const cfData = cfResp.ok ? await cfResp.json() : [];
-    renderTreemap();
+    if (!USE_UPLOT) renderTreemap();
     renderNavChart(navData);
     renderValueChart(navData);
     renderNavReturns(navData);
@@ -1593,6 +1593,8 @@ async function renderTreemap() {
     return;
   }
 
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
   // Build treemap data grouped by pfGetGroup
   const groups = {};
   portfolioItems.forEach(item => {
@@ -1616,7 +1618,6 @@ async function renderTreemap() {
     if (pct === null || pct === undefined) return isDark ? '#475569' : '#9ca3af';
     const clamped = Math.max(-5, Math.min(5, pct));
     const t = (clamped + 5) / 10; // 0~1
-    // blue(37,99,235) → gray(148,163,184) → red(220,38,38)
     let r, g, b;
     if (t < 0.5) {
       const s = t / 0.5;
@@ -1642,10 +1643,6 @@ async function renderTreemap() {
       itemStyle: { color: _pctToColor(it.changePct) },
     })),
   }));
-
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1a1a1a';
-  const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
   const ec = echarts.init(container);
   _treemapInstance = ec;
