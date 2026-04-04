@@ -839,10 +839,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-table thead th.pf-col-num { text-align: right; }
 .pf-table thead th.pf-col-act { text-align: center; }
 .pf-table tbody td, .pf-table tfoot td {
-  padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle;
+  padding: 10px 12px; vertical-align: middle;
 }
-.pf-table tbody tr:last-child td { border-bottom: none; }
 .pf-table tbody tr { transition: background 0.15s ease; }
+.pf-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--border) 15%, var(--surface)); }
 .pf-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
 .pf-table tfoot td { font-weight: 700; background: var(--sidebar-bg); border-top: 2px solid var(--border); }
 .pf-col-num { text-align: right; }
