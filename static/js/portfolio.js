@@ -278,26 +278,33 @@ function renderPortfolio() {
   const monthlyPnl = filteredMonthEndValue != null && filteredMonthEndValue > 0
     ? totalMarketValue - filteredMonthEndValue : null;
 
-  // Summary cards
+  // YTD return — find year-start total_value from NAV history
+  const thisYear = new Date().getFullYear().toString();
+  const yearStartSnap = pfNavHistory.find(d => d.date >= thisYear);
+  const ytdBase = yearStartSnap ? yearStartSnap.total_value : null;
+  const ytdReturnPct = ytdBase && ytdBase > 0 ? ((totalMarketValue - ytdBase) / ytdBase * 100) : null;
+  const ytdPnl = ytdBase != null && ytdBase > 0 ? totalMarketValue - ytdBase : null;
+
+  // Summary cards: Total, Today, MTD, YTD
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">총 평가금액</div>
+        <div class="pf-summary-label">Total</div>
         <div class="pf-summary-value">${fmtKrw(totalMarketValue)}</div>
         <div class="pf-summary-sub">투자 ${fmtKrw(totalInvested)}</div>
       </div>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">총 수익률</div>
-        <div class="pf-summary-value ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</div>
-        <div class="pf-summary-sub ${returnClass(totalMarketValue - totalInvested)}">${fmtSignedKrw(totalMarketValue - totalInvested)}</div>
+        <div class="pf-summary-label">Today</div>
+        <div class="pf-summary-value ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
+        <div class="pf-summary-sub ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
       </div>
-      <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
+      <canvas class="pf-sparkline" id="sparkDaily"></canvas>
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">월간 수익률</div>
+        <div class="pf-summary-label">MTD</div>
         <div class="pf-summary-value ${returnClass(monthlyReturnPct)}">${monthlyReturnPct !== null ? fmtPct(monthlyReturnPct) : '-'}</div>
         <div class="pf-summary-sub ${returnClass(monthlyPnl)}">${monthlyPnl !== null ? fmtSignedKrw(monthlyPnl) : '-'}</div>
       </div>
@@ -305,11 +312,11 @@ function renderPortfolio() {
     </div>
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">일간 수익률</div>
-        <div class="pf-summary-value ${returnClass(dailyReturnPct)}">${fmtPct(dailyReturnPct)}</div>
-        <div class="pf-summary-sub ${returnClass(totalDailyPnl)}">${fmtSignedKrw(totalDailyPnl)}</div>
+        <div class="pf-summary-label">YTD</div>
+        <div class="pf-summary-value ${returnClass(ytdReturnPct)}">${ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-'}</div>
+        <div class="pf-summary-sub ${returnClass(ytdPnl)}">${ytdPnl !== null ? fmtSignedKrw(ytdPnl) : '-'}</div>
       </div>
-      <canvas class="pf-sparkline" id="sparkDaily"></canvas>
+      <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
   _renderSummarySparklines();
 
@@ -1525,6 +1532,10 @@ function renderValueChart(data) {
   if (!container) return;
   if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
 
+  // Stats cards
+  const statsEl = document.getElementById('pfValueStats');
+  if (statsEl) statsEl.innerHTML = '';
+
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
     return;
@@ -1532,9 +1543,10 @@ function renderValueChart(data) {
 
   const labels = data.map(d => d.date.slice(5));
   const values = data.map(d => Math.round(d.total_value));
-  const invested = data.map(d => Math.round(d.total_invested));
+  const lineColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+  const lc = lineColor.startsWith('#') ? lineColor : '#3b82f6';
   const hexToRgba = (hex, a) => { const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; };
 
   const ec = echarts.init(container);
@@ -1558,43 +1570,54 @@ function renderValueChart(data) {
     tooltip: {
       trigger: 'axis',
       formatter(params) {
-        const date = data[params[0].dataIndex]?.date || '';
-        return params.map(p => `${p.seriesName}: ${Number(p.value).toLocaleString()}`).join('<br/>');
+        const p = params[0];
+        return `${data[p.dataIndex]?.date || ''}<br/>${Number(p.value).toLocaleString()}`;
       },
     },
-    legend: {
-      data: ['평가금액', '투자금액'],
-      top: 0, right: 0,
-      textStyle: { color: textColor, fontSize: 11 },
-    },
-    series: [
-      {
-        name: '평가금액',
-        type: 'line',
-        data: values,
-        smooth: 0.3,
-        symbol: data.length > 30 ? 'none' : 'circle',
-        symbolSize: 4,
-        lineStyle: { color: '#3b82f6', width: 2 },
-        itemStyle: { color: '#3b82f6' },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: hexToRgba('#3b82f6', 0.2) },
-            { offset: 1, color: hexToRgba('#3b82f6', 0.0) },
-          ]),
-        },
+    series: [{
+      type: 'line',
+      data: values,
+      smooth: 0.3,
+      symbol: data.length > 30 ? 'none' : 'circle',
+      symbolSize: 4,
+      lineStyle: { color: lc, width: 2 },
+      itemStyle: { color: lc },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: hexToRgba(lc, 0.3) },
+          { offset: 1, color: hexToRgba(lc, 0.0) },
+        ]),
       },
-      {
-        name: '투자금액',
-        type: 'line',
-        data: invested,
-        smooth: 0.3,
-        symbol: 'none',
-        lineStyle: { color: '#94a3b8', width: 1.5, type: 'dashed' },
-        itemStyle: { color: '#94a3b8' },
-      },
-    ],
+    }],
   });
+
+  // Value stats cards
+  if (statsEl) {
+    const latest = data[data.length - 1];
+    const last365 = data.slice(-365);
+    const valuesSlice = last365.map(d => d.total_value);
+    const min52 = Math.min(...valuesSlice);
+    const max52 = Math.max(...valuesSlice);
+
+    // YoY
+    const oneYearAgo = last365.length >= 252 ? last365[0] : (last365.length > 0 ? last365[0] : null);
+    const yoyPct = oneYearAgo && oneYearAgo.total_value > 0
+      ? ((latest.total_value - oneYearAgo.total_value) / oneYearAgo.total_value * 100) : null;
+
+    // Account return: (total_value - total_invested) / total_invested
+    const acctReturn = latest.total_invested > 0
+      ? ((latest.total_value - latest.total_invested) / latest.total_invested * 100) : null;
+
+    const items = [
+      { label: '52주 최저', val: fmtKrw(Math.round(min52)) },
+      { label: '52주 최고', val: fmtKrw(Math.round(max52)) },
+      { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },
+      { label: '계좌 수익률', val: acctReturn !== null ? fmtPct(acctReturn) : '-', cls: returnClass(acctReturn) },
+    ];
+    statsEl.innerHTML = items.map(p =>
+      `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`
+    ).join('');
+  }
 }
 
 function renderNavReturns(data) {
@@ -1602,30 +1625,31 @@ function renderNavReturns(data) {
   if (!el || !data.length) { if (el) el.innerHTML = ''; return; }
   const latest = data[data.length - 1];
   const baseNav = 1000;
-  const totalReturn = ((latest.nav / baseNav) - 1) * 100;
 
-  function retSince(daysAgo) {
-    if (data.length < 2) return null;
-    const target = new Date();
-    target.setDate(target.getDate() - daysAgo);
-    const targetStr = target.toISOString().slice(0, 10);
-    let prev = data[0];
-    for (const d of data) { if (d.date <= targetStr) prev = d; else break; }
-    return ((latest.nav / prev.nav) - 1) * 100;
-  }
+  // 52-week range
+  const last365 = data.slice(-365);
+  const navs52 = last365.map(d => d.nav);
+  const min52 = Math.min(...navs52);
+  const max52 = Math.max(...navs52);
 
-  const periods = [
-    { label: '전일', val: data.length >= 2 ? ((latest.nav / data[data.length - 2].nav) - 1) * 100 : null },
-    { label: '1주', val: retSince(7) },
-    { label: '1개월', val: retSince(30) },
-    { label: '3개월', val: retSince(90) },
-    { label: '전체', val: totalReturn },
+  // YoY
+  const oneYearAgo = last365.length >= 252 ? last365[0] : (last365.length > 0 ? last365[0] : null);
+  const yoyPct = oneYearAgo ? ((latest.nav / oneYearAgo.nav) - 1) * 100 : null;
+
+  // Annualized return: (latest_nav / base_nav)^(365/days) - 1
+  const totalDays = data.length > 1 ? (new Date(latest.date) - new Date(data[0].date)) / 86400000 : 0;
+  const annualizedPct = totalDays > 30
+    ? (Math.pow(latest.nav / baseNav, 365 / totalDays) - 1) * 100 : null;
+
+  const items = [
+    { label: '52주 최저', val: min52.toFixed(2) },
+    { label: '52주 최고', val: max52.toFixed(2) },
+    { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },
+    { label: '연평균', val: annualizedPct !== null ? fmtPct(annualizedPct) : '-', cls: returnClass(annualizedPct) },
   ];
-  el.innerHTML = periods.map(p => {
-    if (p.val === null) return '';
-    const cls = p.val > 0 ? 'pf-return positive' : p.val < 0 ? 'pf-return negative' : '';
-    return `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${cls}">${p.val > 0 ? '+' : ''}${p.val.toFixed(2)}%</div></div>`;
-  }).join('');
+  el.innerHTML = items.map(p =>
+    `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`
+  ).join('');
 }
 
 function renderCashflows(data) {
