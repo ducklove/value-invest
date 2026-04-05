@@ -395,44 +395,30 @@ async def _fetch_world_daily_quote(client: httpx.AsyncClient, market_code: str) 
 
 
 async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
+    """Fetch US 10Y Treasury yield from Yahoo Finance (^TNX)."""
     try:
         r = await client.get(
-            "https://finance.naver.com/marketindex/interestDailyQuote.naver?marketindexCd=IRR_US10Y",
-            headers=_HEADERS,
+            "https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX",
+            params={"interval": "1d", "range": "5d"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
         )
-        html = r.content.decode("euc-kr", errors="ignore")
-        row_m = re.search(r'<tr\s+class="(up|down|same)"[^>]*>(.*?)</tr>', html, re.DOTALL)
-        if not row_m:
+        if r.status_code != 200:
             return dict(_EMPTY)
-        direction = row_m.group(1)
-        if direction == "same":
-            direction = ""
-        row_html = row_m.group(2)
-        tds = re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL)
-        if len(tds) < 4:
-            return dict(_EMPTY)
-        value_str = re.sub(r'<[^>]+>', '', tds[1]).strip()
-        change_str = re.sub(r'<[^>]+>', '', tds[2]).strip()
-        pct_str = re.sub(r'<[^>]+>', '', tds[3]).strip()
-        pct_str = pct_str.lstrip("+-")
-
-        # Bond rates: format with 2 decimals, no commas
-        try:
-            val_num = float(value_str.replace(",", ""))
-            value_str = f"{val_num:.2f}"
-        except (ValueError, AttributeError):
-            pass
-
-        try:
-            chg_num = float(change_str.replace(",", ""))
-            change_str = f"{chg_num:.2f}"
-        except (ValueError, AttributeError):
-            pass
-
+        data = _json.loads(r.text)
+        meta = data["chart"]["result"][0]["meta"]
+        price = meta["regularMarketPrice"]
+        closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        valid_closes = [c for c in closes if c is not None]
+        prev = valid_closes[-1] if valid_closes else meta["chartPreviousClose"]
+        diff = price - prev
+        pct = abs(diff) / prev * 100 if prev else 0
+        direction = "up" if diff > 0 else "down" if diff < 0 else ""
         return {
-            "value": value_str,
-            "change": change_str,
-            "change_pct": pct_str,
+            "value": f"{price:.2f}",
+            "change": f"{abs(diff):.2f}",
+            "change_pct": f"{pct:.2f}%",
             "direction": direction,
         }
     except Exception:
