@@ -528,13 +528,19 @@ def market_data_needs_refresh(data: list[dict]) -> bool:
     if not data:
         return True
     keys = ("per", "pbr", "eps", "bps", "dividend_per_share", "dividend_yield", "market_cap")
-    return not any(row.get(key) is not None for row in data for key in keys)
+    if not any(row.get(key) is not None for row in data for key in keys):
+        return True
+    # Refresh if cached data doesn't cover the full historical range
+    earliest = min((row["year"] for row in data if row.get("year")), default=2000)
+    if earliest > 1990:
+        return True
+    return False
 
 
 async def fetch_market_data(
     stock_code: str,
     financial_data: list[dict] | None = None,
-    start_year: int = 2000,
+    start_year: int = 1985,
     end_year: int | None = None,
 ) -> list[dict]:
     if end_year is None:
@@ -610,6 +616,11 @@ async def fetch_market_data(
 
     if not close_by_year:
         close_by_year = kis_close_by_year
+    else:
+        # Fill years that yfinance doesn't cover with KIS data
+        for year, price in kis_close_by_year.items():
+            if year not in close_by_year:
+                close_by_year[year] = price
 
     dividends_by_year = {
         year: yfinance_dividends_by_year.get(year, kis_dividends_by_year.get(year))
