@@ -167,6 +167,94 @@ function formatWeeklyTickLabel(value) {
   return `${match[1].slice(-2)}.${match[2]}`;
 }
 
+function _overlayTargetPrices(reports) {
+  const chart = charts['주가'];
+  if (!chart || typeof chart.getOption !== 'function') return;
+
+  // Extract target prices with dates from reports
+  const points = [];
+  for (const r of (reports || [])) {
+    const tp = r.target_price ? Number(String(r.target_price).replace(/,/g, '')) : null;
+    const d = r.date;
+    if (tp && tp > 0 && d) {
+      // Convert report date (YYYY-MM-DD) to chart label format (YY.MM)
+      points.push({ date: d, label: formatWeeklyTickLabel(d), price: tp, firm: r.firm_short || r.firm || '' });
+    }
+  }
+  if (points.length === 0) return;
+
+  // Get chart x-axis labels
+  const opt = chart.getOption();
+  const xLabels = opt.xAxis[0].data || [];
+
+  // Map target prices to chart x-axis indices
+  const scatterData = [];
+  for (const p of points) {
+    // Find closest label match (chart labels are "YY.MM" format)
+    let idx = xLabels.indexOf(p.label);
+    if (idx < 0) {
+      // Try exact date match
+      idx = xLabels.indexOf(p.date);
+    }
+    if (idx < 0) {
+      // Find nearest date
+      const pDate = p.date;
+      let bestIdx = -1, bestDiff = Infinity;
+      for (let i = 0; i < xLabels.length; i++) {
+        // xLabels are "YY.MM" — reconstruct approximate date
+        const m = String(xLabels[i]).match(/^(\d{2})\.(\d{2})$/);
+        if (m) {
+          const approxDate = `20${m[1]}-${m[2]}-01`;
+          const diff = Math.abs(new Date(pDate) - new Date(approxDate));
+          if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+        }
+      }
+      if (bestIdx >= 0 && bestDiff < 45 * 86400000) idx = bestIdx; // within ~45 days
+    }
+    if (idx >= 0) {
+      scatterData.push({ value: [idx, p.price], firm: p.firm, date: p.date });
+    }
+  }
+  if (scatterData.length === 0) return;
+
+  // Update chart with additional scatter series
+  const existingSeries = opt.series || [];
+  // Remove any previous target price series
+  const baseSeries = existingSeries.filter(s => s._isTargetPrice !== true);
+
+  chart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      formatter(params) {
+        let html = params[0] ? xLabels[params[0].dataIndex] : '';
+        for (const p of params) {
+          if (p.seriesName === '목표가') {
+            const d = scatterData[p.dataIndex] || {};
+            html += `<br/><span style="color:#f59e0b">● 목표가: ${Number(p.value[1]).toLocaleString()}원</span><span style="font-size:11px;color:#999"> (${d.firm || ''})</span>`;
+          } else {
+            const val = p.value == null || p.value === '-' ? 'N/A' : '주가: ' + Number(p.value).toLocaleString();
+            html += `<br/>${val}`;
+          }
+        }
+        return html;
+      },
+    },
+    series: [
+      ...baseSeries,
+      {
+        name: '목표가',
+        type: 'scatter',
+        data: scatterData,
+        symbol: 'diamond',
+        symbolSize: 7,
+        itemStyle: { color: '#f59e0b', borderColor: '#d97706', borderWidth: 1 },
+        z: 10,
+        _isTargetPrice: true,
+      },
+    ],
+  });
+}
+
 async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
   container.innerHTML = '';
   await loadChartLib();
@@ -718,6 +806,7 @@ async function loadReports(stockCode) {
     table.style.display = 'table';
     loading.style.display = 'none';
     renderReportsTable(allReports, reportDisplayCount);
+    _overlayTargetPrices(allReports);
     renderedFromCache = true;
   } else if (latestReport) {
     allReports = [latestReport];
@@ -785,6 +874,7 @@ async function loadReports(stockCode) {
     table.style.display = 'table';
     renderReportsTable(allReports, reportDisplayCount);
     saveReportCache(stockCode, { latestReport: allReports[0] || latestReport, reports: allReports });
+    _overlayTargetPrices(allReports);
   } catch (e) {
     if (requestId !== reportsRequestId) return;
     if (latestReport) {
