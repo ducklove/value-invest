@@ -650,12 +650,22 @@ def _build_html(
     return header_html + cards_html + treemap_html + nav_chart_html + value_chart_html + table_html + script_html
 
 
+def _is_trading_day(d: date) -> bool:
+    """Check if a date is a weekday (rough trading day check)."""
+    return d.weekday() < 5  # Mon=0 .. Fri=4
+
+
 async def run_nps_snapshot(snap_date: str | None = None):
     """Main entry point: scrape → enrich → compute NAV → save → generate HTML."""
     await cache.init_db()
 
     if snap_date is None:
         snap_date = date.today().isoformat()
+
+    if not _is_trading_day(date.fromisoformat(snap_date)):
+        logger.info("NPS snapshot skipped: %s is not a trading day", snap_date)
+        await cache.close_db()
+        return
 
     logger.info("NPS snapshot starting for date=%s", snap_date)
 

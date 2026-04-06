@@ -124,9 +124,13 @@ async def _fetch_fx_usdkrw():
 async def run_all_snapshots(snap_date: str | None = None):
     """Take snapshots for all users with portfolio items."""
     await cache.init_db()
-    await _fetch_fx_usdkrw()
     if snap_date is None:
         snap_date = date.today().isoformat()
+    if date.fromisoformat(snap_date).weekday() >= 5:
+        logger.info("Snapshot skipped: %s is a weekend", snap_date)
+        await cache.close_db()
+        return
+    await _fetch_fx_usdkrw()
     users = await cache.get_all_users_with_portfolio()
     logger.info("Taking snapshots for %d users on %s", len(users), snap_date)
     for google_sub in users:
