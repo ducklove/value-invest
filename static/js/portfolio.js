@@ -14,6 +14,7 @@ let pfMonthEndValue = null; // total_value at end of previous month
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 let pfNavHistory = []; // [{date, nav, total_value, total_invested, total_units}, ...]
 let pfIntradayData = []; // [{ts, total_value}, ...]
+let pfPrevDaySnapshot = null; // {total_value, fx_usdkrw, stock_values, today_net_cashflow}
 let pfCurrency = 'KRW'; // 'KRW' or 'USD'
 let pfFxRate = null; // USD/KRW rate
 const PF_QUOTE_REFRESH_MS = 60_000;
@@ -91,6 +92,11 @@ async function loadPortfolio() {
       }
     } catch (e) { console.warn(e); }
     // Fetch benchmark quotes in background (don't block initial render)
+    apiFetch('/api/portfolio/prev-day-snapshot').then(async r => {
+      if (!r.ok) return;
+      pfPrevDaySnapshot = await r.json();
+      renderPortfolio();
+    }).catch(() => {});
     apiFetch('/api/portfolio/month-end-value').then(async r => {
       if (!r.ok) return;
       const snap = await r.json();
@@ -315,11 +321,33 @@ function renderPortfolio() {
   const _currentFxInvested = _fxConv(totalInvested, null);
 
   const totalReturnPct = _currentFxInvested > 0 ? ((_currentFxVal - _currentFxInvested) / _currentFxInvested * 100) : 0;
-  const prevTotalValue = totalMarketValue - totalDailyPnl;
-  const dailyReturnPct = prevTotalValue > 0 ? (totalDailyPnl / prevTotalValue * 100) : 0;
+
+  // Daily return: vs previous day's closing settlement (snapshot-based)
+  let dailyReturnPct = 0;
+  const isFiltered = pfGroupFilter !== null;
+  if (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value) {
+    const prevSnap = pfPrevDaySnapshot;
+    let prevTotal = prevSnap.total_value;
+    // When group-filtered, use only the filtered stocks' previous values
+    if (isFiltered && Object.keys(prevSnap.stock_values || {}).length > 0) {
+      const stockTotal = Object.values(prevSnap.stock_values).reduce((a, b) => a + b, 0);
+      if (stockTotal > 0) {
+        let filteredStockTotal = 0;
+        rows.forEach(r => { filteredStockTotal += (prevSnap.stock_values[r.stock_code] ?? 0); });
+        prevTotal = prevSnap.total_value * (filteredStockTotal / stockTotal);
+      }
+    }
+    const _fxPrev = _fxConv(prevTotal, prevSnap);
+    const _fxCashflow = isFiltered ? 0 : _fxConv(prevSnap.today_net_cashflow || 0, null);
+    totalDailyPnl = _currentFxVal - _fxPrev - _fxCashflow;
+    dailyReturnPct = _fxPrev > 0 ? (totalDailyPnl / _fxPrev * 100) : 0;
+  } else {
+    // Fallback: quote.change-based (no snapshot yet)
+    const prevTotalValue = totalMarketValue - totalDailyPnl;
+    dailyReturnPct = prevTotalValue > 0 ? (totalDailyPnl / prevTotalValue * 100) : 0;
+  }
 
   // Monthly return (vs end of previous month)
-  const isFiltered = pfGroupFilter !== null;
   let filteredMonthEndValue = pfMonthEndValue;
   if (isFiltered && pfMonthEndValue && Object.keys(pfMonthEndStockValues).length > 0) {
     const stockTotal = Object.values(pfMonthEndStockValues).reduce((a, b) => a + b, 0);
@@ -1133,27 +1161,27 @@ function renderGroupModalBody() {
   // Compute per-group stats
   const stats = {};
   let grandMV = 0;
+  const prevStockVals = (pfPrevDaySnapshot && pfPrevDaySnapshot.stock_values) || {};
   portfolioItems.forEach(i => {
     const gn = pfGetGroup(i);
-    if (!stats[gn]) stats[gn] = { cnt: 0, invested: 0, mv: 0, dailyPnl: 0 };
+    if (!stats[gn]) stats[gn] = { cnt: 0, invested: 0, mv: 0, prevMV: 0 };
     const s = stats[gn];
     const q = i.quote || {};
     const price = q.price ?? null;
-    const change = q.change ?? 0;
     const qty = i.quantity;
     const avgPrice = i.avg_price;
     s.cnt++;
     s.invested += qty * avgPrice;
     if (price !== null) { s.mv += qty * price; grandMV += qty * price; }
-    if (price !== null) s.dailyPnl += qty * change;
+    s.prevMV += (prevStockVals[i.stock_code] ?? 0);
   });
   const defaultCount = pfGroups.filter(x => x.is_default).length;
   const rowsHtml = pfGroups.map((g, i) => {
-    const s = stats[g.group_name] || { cnt: 0, invested: 0, mv: 0, dailyPnl: 0 };
+    const s = stats[g.group_name] || { cnt: 0, invested: 0, mv: 0, prevMV: 0 };
     const weight = grandMV > 0 ? (s.mv / grandMV * 100) : 0;
     const returnPct = s.invested > 0 ? ((s.mv - s.invested) / s.invested * 100) : 0;
-    const prevMV = s.mv - s.dailyPnl;
-    const dailyPct = prevMV > 0 ? (s.dailyPnl / prevMV * 100) : 0;
+    const dailyPnl = s.prevMV > 0 ? (s.mv - s.prevMV) : 0;
+    const dailyPct = s.prevMV > 0 ? (dailyPnl / s.prevMV * 100) : 0;
     const canDelete = !g.is_default || defaultCount > 3;
     const delBtn = canDelete
       ? `<button class="pf-grp-del" data-grp-name="${escapeHtml(g.group_name)}" title="삭제">&times;</button>`
@@ -1166,7 +1194,7 @@ function renderGroupModalBody() {
       <td class="pf-grp-td-num">${fmtNum(Math.round(s.mv))}</td>
       <td class="pf-grp-td-num"><span class="${returnClass(returnPct)}">${fmtPct(returnPct)}</span></td>
       <td class="pf-grp-td-num"><span class="${returnClass(dailyPct)}">${fmtPct(dailyPct)}</span></td>
-      <td class="pf-grp-td-num"><span class="${returnClass(s.dailyPnl)}">${fmtSignedKrw(s.dailyPnl)}</span></td>
+      <td class="pf-grp-td-num"><span class="${returnClass(dailyPnl)}">${fmtSignedKrw(dailyPnl)}</span></td>
       <td class="pf-grp-td-act">${delBtn}</td>
     </tr>`;
   }).join('');
