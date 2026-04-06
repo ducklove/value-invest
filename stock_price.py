@@ -266,21 +266,62 @@ def _group_close_by_year(items: list[dict] | None) -> dict[int, float]:
 
 
 def _group_dividends_by_year(items: list[dict] | None) -> dict[int, float]:
+    """Group dividends by year with stock-split adjustment."""
+    if not items:
+        return {}
+    # Detect latest face value for split adjustment
+    face_values = []
+    for item in items:
+        fv = _safe_float(_get_first(item, "face_val"), zero_as_none=False)
+        rd = _parse_date(_get_first(item, "record_date", "dividend_date", "date"))
+        if fv is not None and fv > 0 and rd:
+            face_values.append((rd, fv))
+    face_values.sort(key=lambda x: x[0])
+    latest_face = face_values[-1][1] if face_values else None
+
     grouped: dict[int, float] = {}
-    for item in items or []:
+    for item in items:
         record_date = _parse_date(_get_first(item, "record_date", "dividend_date", "date"))
         dividend = _safe_float(_get_first(item, "per_sto_divi_amt", "dividend_per_share", "cash_dividend_per_share"))
         if record_date and dividend is not None:
+            if latest_face:
+                item_face = _safe_float(_get_first(item, "face_val"), zero_as_none=False)
+                if item_face and item_face > latest_face:
+                    dividend = round(dividend * latest_face / item_face, 2)
             grouped[record_date.year] = round(grouped.get(record_date.year, 0.0) + dividend, 2)
     return grouped
 
 
 def _build_dividend_events(items: list[dict] | None) -> list[tuple[date, float]]:
+    """Build sorted list of (date, dividend_per_share) with stock-split adjustment.
+
+    Detects splits by comparing face_val across records. If the latest face_val
+    is smaller than an earlier one, pre-split dividends are scaled down by the
+    ratio (latest_face / old_face), e.g. 5000→100 means divide by 50.
+    """
+    if not items:
+        return []
+
+    # Determine current (latest) face value
+    face_values = []
+    for item in items:
+        fv = _safe_float(_get_first(item, "face_val"), zero_as_none=False)
+        rd = _parse_date(_get_first(item, "record_date", "dividend_date", "date"))
+        if fv is not None and fv > 0 and rd:
+            face_values.append((rd, fv))
+    face_values.sort(key=lambda x: x[0])
+    latest_face = face_values[-1][1] if face_values else None
+
     events = []
-    for item in items or []:
+    for item in items:
         record_date = _parse_date(_get_first(item, "record_date", "dividend_date", "date"))
         dividend = _safe_float(_get_first(item, "per_sto_divi_amt", "dividend_per_share", "cash_dividend_per_share"))
         if record_date and dividend is not None:
+            # Adjust pre-split dividends
+            if latest_face:
+                item_face = _safe_float(_get_first(item, "face_val"), zero_as_none=False)
+                if item_face and item_face > latest_face:
+                    dividend = round(dividend * latest_face / item_face, 2)
             events.append((record_date, dividend))
     return sorted(events, key=lambda item: item[0])
 
