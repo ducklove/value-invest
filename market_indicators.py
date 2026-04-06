@@ -521,21 +521,30 @@ async def _fetch_night_futures(client: httpx.AsyncClient) -> dict:
             "Referer": "https://esignal.co.kr/kospi200-futures-night/",
             "Origin": "https://esignal.co.kr",
         }
+        # EIO=4 (Socket.IO v4) handshake
         r1 = await client.get(
             "https://esignal.co.kr/proxy/8888/socket.io/",
-            params={"EIO": "3", "transport": "polling"},
+            params={"EIO": "4", "transport": "polling"},
             headers=headers,
         )
         m = re.search(r'"sid":"([^"]+)"', r1.text)
         if not m:
             return dict(_EMPTY)
         sid = m.group(1)
-        r2 = await client.get(
+        # Send namespace connect packet
+        await client.post(
             "https://esignal.co.kr/proxy/8888/socket.io/",
-            params={"EIO": "3", "transport": "polling", "sid": sid},
+            params={"EIO": "4", "transport": "polling", "sid": sid},
+            headers=headers,
+            content="40",
+        )
+        # Poll for data
+        r3 = await client.get(
+            "https://esignal.co.kr/proxy/8888/socket.io/",
+            params={"EIO": "4", "transport": "polling", "sid": sid},
             headers=headers,
         )
-        pm = re.search(r'\["populate","(\{.+?\})"\]', r2.text)
+        pm = re.search(r'\["populate","(\{.+?\})"\]', r3.text)
         if not pm:
             return dict(_EMPTY)
         raw = pm.group(1).replace('\\"', '"')
