@@ -1060,21 +1060,55 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
         cf_date = date.today().isoformat()
     memo = str(payload.get("memo") or "").strip() or None
 
+    # For withdrawals, check CASH_KRW balance
+    google_sub = user["google_sub"]
+    if cf_type == "withdrawal":
+        cash_item = await cache.get_portfolio_item(google_sub, "CASH_KRW")
+        cash_balance = (cash_item["quantity"] * cash_item["avg_price"]) if cash_item else 0
+        if cash_balance < amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"원화 잔액이 부족합니다. (잔액: {cash_balance:,.0f}원, 출금액: {amount:,.0f}원)",
+            )
+
     # Get latest NAV for units calculation
-    latest = await cache.get_latest_snapshot(user["google_sub"])
+    latest = await cache.get_latest_snapshot(google_sub)
     nav_at_time = latest["nav"] if latest else 1000.0
     units_change = amount / nav_at_time
     if cf_type == "withdrawal":
         units_change = -units_change
 
-    result = await cache.add_cashflow(user["google_sub"], cf_date, cf_type, amount, memo, nav_at_time, units_change)
+    result = await cache.add_cashflow(google_sub, cf_date, cf_type, amount, memo, nav_at_time, units_change)
+
+    # Sync CASH_KRW in portfolio
+    cash_item = await cache.get_portfolio_item(google_sub, "CASH_KRW")
+    if cash_item:
+        delta = amount if cf_type == "deposit" else -amount
+        new_qty = max(0, cash_item["quantity"] + int(delta))
+        await cache.update_portfolio_quantity(google_sub, "CASH_KRW", new_qty)
+    elif cf_type == "deposit":
+        await cache.add_portfolio_item(google_sub, "CASH_KRW", "원화", 1.0, int(amount), "KRW")
+
     return {"ok": True, **result}
 
 
 @router.delete("/api/portfolio/cashflows/{cf_id}")
 async def delete_cashflow(cf_id: int, request: Request):
     user = _require_user(await get_current_user(request))
-    await cache.delete_cashflow(user["google_sub"], cf_id)
+    google_sub = user["google_sub"]
+
+    # Get cashflow info before deleting to reverse CASH_KRW
+    cf = await cache.get_cashflow(google_sub, cf_id)
+    await cache.delete_cashflow(google_sub, cf_id)
+
+    if cf:
+        cash_item = await cache.get_portfolio_item(google_sub, "CASH_KRW")
+        if cash_item:
+            # Reverse: deposit was +, so undo is -; withdrawal was -, so undo is +
+            reverse_delta = -cf["amount"] if cf["type"] == "deposit" else cf["amount"]
+            new_qty = max(0, cash_item["quantity"] + int(reverse_delta))
+            await cache.update_portfolio_quantity(google_sub, "CASH_KRW", new_qty)
+
     return {"ok": True}
 
 

@@ -941,6 +941,37 @@ async def get_portfolio(google_sub: str) -> list[dict]:
     return [dict(row) for row in await cursor.fetchall()]
 
 
+async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT stock_code, stock_name, quantity, avg_price, COALESCE(currency, 'KRW') AS currency, group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+        (google_sub, stock_code),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def update_portfolio_quantity(google_sub: str, stock_code: str, new_quantity: int):
+    db = await get_db()
+    await db.execute(
+        "UPDATE user_portfolio SET quantity = ? WHERE google_sub = ? AND stock_code = ?",
+        (new_quantity, google_sub, stock_code),
+    )
+    await db.commit()
+
+
+async def add_portfolio_item(
+    google_sub: str, stock_code: str, stock_name: str, avg_price: float, quantity: int, currency: str = "KRW",
+):
+    db = await get_db()
+    now = datetime.now().isoformat()
+    await db.execute(
+        "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, currency, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (google_sub, stock_code, stock_name, avg_price, quantity, currency, now),
+    )
+    await db.commit()
+
+
 async def save_portfolio_item(
     google_sub: str, stock_code: str, stock_name: str, quantity: float, avg_price: float,
     currency: str = "KRW", group_name: str | None = None, benchmark_code: str | None = None,
@@ -1171,6 +1202,16 @@ async def add_cashflow(google_sub: str, date: str, cf_type: str, amount: float, 
     )
     await db.commit()
     return {"id": cursor.lastrowid, "date": date, "type": cf_type, "amount": amount, "nav_at_time": nav_at_time, "units_change": units_change, "memo": memo, "created_at": now}
+
+
+async def get_cashflow(google_sub: str, cf_id: int) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT id, type, amount FROM portfolio_cashflows WHERE id = ? AND google_sub = ?",
+        (cf_id, google_sub),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
 
 
 async def delete_cashflow(google_sub: str, cf_id: int):
