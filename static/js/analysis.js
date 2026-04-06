@@ -169,7 +169,7 @@ function formatWeeklyTickLabel(value) {
 
 let _lastWeeklyIndicators = null;
 
-function _overlayTargetPrices(reports) {
+async function _overlayTargetPrices(reports) {
   if (!_lastWeeklyIndicators) return;
   const priceSeries = _lastWeeklyIndicators['주가'] || [];
   if (priceSeries.length === 0) return;
@@ -228,9 +228,11 @@ function _overlayTargetPrices(reports) {
   if (existingCard) { existingCard.remove(); }
   if (charts['_targetPrice']) { charts['_targetPrice'].dispose(); delete charts['_targetPrice']; }
 
-  // Create new chart card in the weekly grid
+  // Create new chart card at end of weekly grid
   const grid = document.getElementById('weeklyChartsGrid');
   if (!grid) return;
+  // Ensure grid is visible
+  if (grid.style.display === 'none') grid.style.display = 'grid';
 
   const card = document.createElement('div');
   card.className = 'chart-card';
@@ -238,12 +240,14 @@ function _overlayTargetPrices(reports) {
   const chartDiv = document.createElement('div');
   chartDiv.className = 'chart-canvas-wrap';
   const innerDiv = document.createElement('div');
+  innerDiv.id = 'targetPriceChartInner';
   innerDiv.style.cssText = 'width:100%;height:100%;';
   chartDiv.appendChild(innerDiv);
   card.innerHTML = `<h3>증권사 목표가</h3>`;
   card.appendChild(chartDiv);
-  // Insert as first chart
-  grid.insertBefore(card, grid.firstChild);
+  grid.appendChild(card);
+
+  await loadChartLib();
 
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';
