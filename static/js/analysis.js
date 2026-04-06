@@ -540,7 +540,7 @@ async function analyzeStock(stockCode) {
   }
 }
 
-function renderResult(data) {
+async function renderResult(data) {
   // Company info
   const infoEl = document.getElementById('companyInfo');
   infoEl.style.display = 'block';
