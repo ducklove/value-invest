@@ -554,9 +554,6 @@ function renderResult(data) {
   renderQuoteSnapshot(data.quote_snapshot || {}, activeIndicators);
   trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
 
-  // Load reports asynchronously
-  loadReports(data.stock_code);
-
   // Hide empty state, show charts
   document.getElementById('emptyState').style.display = 'none';
   const weeklyTitle = document.getElementById('weeklySectionTitle');
@@ -582,10 +579,13 @@ function renderResult(data) {
   const tickColor = isDark ? '#94a3b8' : '#666';
 
   if (hasWeeklyCharts) {
-    renderChartGrid(weeklyGrid, WEEKLY_CHART_KEYS, data.weekly_indicators || {}, gridColor, tickColor, 'weekly');
+    await renderChartGrid(weeklyGrid, WEEKLY_CHART_KEYS, data.weekly_indicators || {}, gridColor, tickColor, 'weekly');
   } else {
-    renderChartGrid(grid, ANNUAL_CHART_KEYS, data.indicators || {}, gridColor, tickColor, 'annual');
+    await renderChartGrid(grid, ANNUAL_CHART_KEYS, data.indicators || {}, gridColor, tickColor, 'annual');
   }
+
+  // Load reports after charts are rendered (needs grid visible for target price chart)
+  loadReports(data.stock_code);
   _updateQuoteSubscriptions();
 }
 
