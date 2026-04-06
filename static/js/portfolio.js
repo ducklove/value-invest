@@ -1607,7 +1607,10 @@ function pfSwitchTab(tab) {
 
 async function loadPerformanceData() {
   const dateInput = document.getElementById('pfCfDate');
-  if (dateInput && !dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+  if (dateInput && !dateInput.value) {
+    const now = new Date();
+    dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  }
   try {
     const [navResp, cfResp] = await Promise.all([
       apiFetch('/api/portfolio/nav-history'),
