@@ -325,6 +325,92 @@ async function _overlayTargetPrices(reports) {
     ],
   });
   charts['_targetPrice'] = ec;
+
+  // Click to open in modal
+  card.addEventListener('click', () => _openTargetPriceModal(dates, prices, targetLine, scatterData, labels));
+}
+
+function _openTargetPriceModal(dates, prices, targetLine, scatterData, labels) {
+  const modal = document.getElementById('chartModal');
+  const titleEl = document.getElementById('chartModalTitle');
+  const canvas = document.getElementById('chartModalCanvas');
+  titleEl.textContent = '증권사 목표가';
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  if (_modalChart) { _modalChart.dispose(); _modalChart = null; }
+
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';
+
+  const ec = echarts.init(canvas);
+  ec.setOption({
+    grid: { left: 60, right: 20, top: 28, bottom: 60 },
+    legend: { show: true, top: 0, right: 0, textStyle: { color: textColor, fontSize: 11 } },
+    xAxis: {
+      type: 'category', data: labels,
+      axisLine: { lineStyle: { color: gridColor } },
+      axisLabel: { color: textColor, fontSize: 11 },
+    },
+    yAxis: {
+      type: 'value', min: 0,
+      axisLine: { show: false },
+      axisLabel: { color: textColor, fontSize: 11 },
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    },
+    dataZoom: [
+      { type: 'slider', start: 0, end: 100, bottom: 8, height: 20, textStyle: { color: textColor, fontSize: 10 } },
+      { type: 'inside' },
+    ],
+    tooltip: {
+      trigger: 'axis',
+      formatter(params) {
+        const idx = params[0]?.dataIndex;
+        let html = dates[idx] || '';
+        for (const p of params) {
+          if (p.seriesName === '주가') {
+            html += `<br/><span style="color:${p.color}">● 주가: ${Number(p.value).toLocaleString()}원</span>`;
+          } else if (p.seriesName === '목표가') {
+            html += `<br/><span style="color:${p.color}">● 목표가: ${p.value == null || p.value === '-' ? '-' : Number(p.value).toLocaleString() + '원'}</span>`;
+          } else if (p.seriesName === '리포트') {
+            const d = p.data;
+            const label = d.buy ? 'Buy' : 'Hold';
+            const c = d.buy ? '#dc2626' : '#6b7280';
+            html += `<br/><span style="color:${c}">◆ ${Number(d.value[1]).toLocaleString()}원 [${label}]</span> <span style="font-size:11px;color:#999">(${d.firm})</span>`;
+          }
+        }
+        return html;
+      },
+    },
+    series: [
+      {
+        name: '주가', type: 'line', data: prices,
+        lineStyle: { color: '#3b82f6', width: 2 }, itemStyle: { color: '#3b82f6' },
+        symbol: 'none', smooth: 0.3,
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(59,130,246,0.15)' }, { offset: 1, color: 'rgba(59,130,246,0.0)' },
+        ]) },
+      },
+      {
+        name: '목표가', type: 'line',
+        data: targetLine.map(v => v === null ? '-' : v),
+        lineStyle: { color: '#f59e0b', width: 2, type: 'dashed' },
+        itemStyle: { color: '#f59e0b' },
+        symbol: 'none', step: 'end', connectNulls: false,
+      },
+      {
+        name: '리포트', type: 'scatter',
+        data: scatterData, symbol: 'diamond', symbolSize: 10,
+        itemStyle: {
+          color: (params) => params.data.buy ? '#dc2626' : '#6b7280',
+          borderColor: (params) => params.data.buy ? '#b91c1c' : '#4b5563',
+          borderWidth: 1,
+        },
+        z: 10,
+      },
+    ],
+  });
+  _modalChart = ec;
 }
 
 async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {

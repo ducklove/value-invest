@@ -969,17 +969,20 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
 }
 
-/* Valuation period buttons */
+/* Valuation period buttons — segmented control */
 .section-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .section-heading-row .section-heading { margin: 0; }
-.valuation-period-btns { display: flex; gap: 4px; }
-.vp-btn {
-  padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border);
-  background: var(--card-bg, #fff); color: var(--text-secondary); font-size: 12px;
-  cursor: pointer; transition: all 0.15s;
+.valuation-period-btns {
+  display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
 }
+.vp-btn {
+  padding: 4px 14px; border: none; border-right: 1px solid var(--border);
+  background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s; line-height: 1.4;
+}
+.vp-btn:last-child { border-right: none; }
 .vp-btn:hover { background: var(--hover-bg, #f3f4f6); }
-.vp-btn.active { background: var(--text-primary); color: var(--bg); border-color: var(--text-primary); }
+.vp-btn.active { background: var(--text-primary); color: var(--bg); }
 
 /* Chart modal */
 .chart-modal-overlay {
