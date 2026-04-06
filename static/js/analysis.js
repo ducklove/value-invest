@@ -180,7 +180,9 @@ async function _overlayTargetPrices(reports) {
     const tp = r.target_price ? Number(String(r.target_price).replace(/,/g, '')) : null;
     const d = r.date;
     if (tp && tp > 0 && d) {
-      targets.push({ date: d, price: tp, firm: r.firm_short || r.firm || '' });
+      const rec = (r.recommendation || '').toLowerCase();
+      const isBuy = rec.includes('buy') || rec.includes('매수') || rec.includes('outperform');
+      targets.push({ date: d, price: tp, firm: r.firm_short || r.firm || '', buy: isBuy });
     }
   }
   if (targets.length === 0) return;
@@ -219,7 +221,7 @@ async function _overlayTargetPrices(reports) {
       if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     }
     if (bestIdx >= 0 && bestDiff < 14 * 86400000) {
-      scatterData.push([bestIdx, t.price, t.firm, t.date]);
+      scatterData.push({ value: [bestIdx, t.price], firm: t.firm, date: t.date, buy: t.buy });
     }
   }
 
@@ -281,7 +283,9 @@ async function _overlayTargetPrices(reports) {
             html += `<br/><span style="color:${p.color}">● 목표가: ${p.value == null || p.value === '-' ? '-' : Number(p.value).toLocaleString() + '원'}</span>`;
           } else if (p.seriesName === '리포트') {
             const d = p.data;
-            html += `<br/><span style="color:#f59e0b">◆ ${Number(d[1]).toLocaleString()}원</span> <span style="font-size:11px;color:#999">(${d[2]})</span>`;
+            const label = d.buy ? 'Buy' : 'Hold';
+            const c = d.buy ? '#dc2626' : '#6b7280';
+            html += `<br/><span style="color:${c}">◆ ${Number(d.value[1]).toLocaleString()}원 [${label}]</span> <span style="font-size:11px;color:#999">(${d.firm})</span>`;
           }
         }
         return html;
@@ -311,7 +315,11 @@ async function _overlayTargetPrices(reports) {
         name: '리포트', type: 'scatter',
         data: scatterData,
         symbol: 'diamond', symbolSize: 8,
-        itemStyle: { color: '#f59e0b', borderColor: '#d97706', borderWidth: 1 },
+        itemStyle: {
+          color: (params) => params.data.buy ? '#dc2626' : '#6b7280',
+          borderColor: (params) => params.data.buy ? '#b91c1c' : '#4b5563',
+          borderWidth: 1,
+        },
         z: 10,
       },
     ],
