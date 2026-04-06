@@ -982,10 +982,17 @@ async def get_prev_day_snapshot(request: Request):
     # Per-stock snapshots
     stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], yesterday)
     stock_values = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
-    # Today's net cashflow (deposits - withdrawals)
+    # Net cashflow not yet reflected in snapshot. Use created_at > snapshot
+    # date 22:00 (snapshot runs at 22:00) to catch cashflows entered after
+    # the snapshot was taken, regardless of their nominal date.
+    snap_date = snap_row["date"] if snap_row else None
+    if snap_date:
+        created_after = f"{snap_date}T22:00:00"
+    else:
+        created_after = today.isoformat()
     cursor2 = await db.execute(
-        "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? AND date = ?",
-        (user["google_sub"], today.isoformat()),
+        "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ?",
+        (user["google_sub"], created_after),
     )
     today_net_cashflow = 0.0
     for row in await cursor2.fetchall():
