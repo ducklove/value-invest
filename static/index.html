@@ -124,7 +124,14 @@ function trackEvent(name, params = {}) {
     <p>종목코드 또는 회사명으로 검색하면 가치투자 지표를 분석합니다.</p>
   </div>
 
-  <h2 class="section-heading" id="weeklySectionTitle" style="display:none;">밸류에이션</h2>
+  <div class="section-heading-row" id="weeklySectionRow" style="display:none;">
+    <h2 class="section-heading" id="weeklySectionTitle">밸류에이션</h2>
+    <div class="valuation-period-btns" id="valuationPeriodBtns">
+      <button class="vp-btn" data-period="1y" onclick="switchValuationPeriod('1y')">1년</button>
+      <button class="vp-btn" data-period="3y" onclick="switchValuationPeriod('3y')">3년</button>
+      <button class="vp-btn active" data-period="all" onclick="switchValuationPeriod('all')">전체</button>
+    </div>
+  </div>
   <div class="charts-grid" id="weeklyChartsGrid" style="display:none;"></div>
 
   <h2 class="section-heading" id="annualSectionTitle" style="display:none;">연간 지표</h2>
@@ -261,6 +268,18 @@ function trackEvent(name, params = {}) {
     <div id="npsContent" style="color:var(--text-secondary);text-align:center;padding:40px;">로딩 중...</div>
   </div>
 
+</div>
+
+<div class="chart-modal-overlay" id="chartModal" style="display:none;" onclick="if(event.target===this)closeChartModal()">
+  <div class="chart-modal">
+    <div class="chart-modal-header">
+      <h3 id="chartModalTitle"></h3>
+      <button class="chart-modal-close" onclick="closeChartModal()">&times;</button>
+    </div>
+    <div class="chart-modal-body">
+      <div id="chartModalCanvas" style="width:100%;height:100%;"></div>
+    </div>
+  </div>
 </div>
 
 <div class="loading-overlay" id="loadingOverlay">

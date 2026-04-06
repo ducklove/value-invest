@@ -152,6 +152,67 @@ async def _load_cached_analysis_payload(
     return payload
 
 
+@router.get("/api/analyze/{stock_code}/daily")
+async def get_daily_data(stock_code: str):
+    """Return 1-year daily price + valuation data for a stock."""
+    from datetime import date, timedelta
+    end_date = date.today()
+    start_date = end_date - timedelta(days=365)
+
+    financials_payload, dividends_payload, history_payload = await asyncio.gather(
+        stock_price.kis_proxy_client.get_financials(stock_code),
+        stock_price.kis_proxy_client.get_dividends(stock_code, start_date=start_date, end_date=end_date),
+        stock_price.kis_proxy_client.get_history(stock_code, start_date=start_date, end_date=end_date, period="D", adjusted=True),
+        return_exceptions=True,
+    )
+    if isinstance(financials_payload, Exception):
+        financials_payload = {}
+    if isinstance(dividends_payload, Exception):
+        dividends_payload = {}
+    if isinstance(history_payload, Exception):
+        raise HTTPException(status_code=500, detail="일봉 데이터 조회 실패")
+
+    normalized = stock_price._normalize_financial_rows(financials_payload, None)
+    financial_timeline = stock_price._financial_timeline(None, normalized)
+    kis_dividend_events = stock_price._build_dividend_events(dividends_payload.get("items"))
+
+    results = []
+    active_financial = None
+    timeline_index = 0
+
+    for item in stock_price._sorted_history_items(history_payload.get("items")):
+        trade_date = stock_price._parse_date(stock_price._get_first(item, "stck_bsop_date", "date", "trade_date"))
+        if trade_date is None:
+            continue
+        from datetime import datetime
+        trade_dt = datetime.combine(trade_date, datetime.min.time())
+        while timeline_index < len(financial_timeline) and financial_timeline[timeline_index][0] <= trade_dt:
+            active_financial = financial_timeline[timeline_index][1]
+            timeline_index += 1
+
+        close = stock_price._safe_float(stock_price._get_first(item, "stck_clpr", "close_price", "close"))
+        eps = active_financial.get("eps") if active_financial else None
+        bps = active_financial.get("bps") if active_financial else None
+        shares = active_financial.get("shares_outstanding") if active_financial else None
+        trailing_div = stock_price._sum_trailing_dividends(kis_dividend_events, trade_date)
+        if trailing_div is None and kis_dividend_events and close is not None:
+            trailing_div = 0.0
+
+        results.append({
+            "date": trade_date.isoformat(),
+            "close_price": close,
+            "per": stock_price._safe_div(close, eps) if close else None,
+            "pbr": stock_price._safe_div(close, bps) if close else None,
+            "eps": eps,
+            "dividend_yield": stock_price._safe_div(trailing_div, close, 100) if trailing_div is not None and close else None,
+            "market_cap": round(close * shares, 2) if close and shares else None,
+            "roe": active_financial.get("roe") if active_financial else None,
+            "debt_ratio": active_financial.get("debt_ratio") if active_financial else None,
+            "operating_margin": active_financial.get("operating_margin") if active_financial else None,
+        })
+    return results
+
+
 @router.get("/api/analyze/{stock_code}")
 async def analyze_stock(stock_code: str, request: Request):
     current_user = await get_current_user(request)

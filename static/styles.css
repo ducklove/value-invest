@@ -969,6 +969,39 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
 }
 
+/* Valuation period buttons */
+.section-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-heading-row .section-heading { margin: 0; }
+.valuation-period-btns { display: flex; gap: 4px; }
+.vp-btn {
+  padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--card-bg, #fff); color: var(--text-secondary); font-size: 12px;
+  cursor: pointer; transition: all 0.15s;
+}
+.vp-btn:hover { background: var(--hover-bg, #f3f4f6); }
+.vp-btn.active { background: var(--text-primary); color: var(--bg); border-color: var(--text-primary); }
+
+/* Chart modal */
+.chart-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.chart-modal {
+  background: var(--card-bg, #fff); border-radius: 12px; width: 90vw; max-width: 1100px;
+  height: 70vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.chart-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.chart-modal-header h3 { margin: 0; font-size: 16px; color: var(--text-primary); }
+.chart-modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); padding: 0 4px; }
+.chart-modal-body { flex: 1; padding: 12px; min-height: 0; }
+
+/* Make chart cards clickable */
+.charts-grid .chart-card { cursor: pointer; transition: box-shadow 0.15s; }
+.charts-grid .chart-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+
 /* Portrait phone — hide non-essential columns */
 @media (max-width:600px) {
   .pf-col-group,

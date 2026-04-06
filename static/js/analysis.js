@@ -358,15 +358,176 @@ async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, ti
     }
     container.appendChild(card);
 
-    charts[key] = createLineChart(innerDiv, {
+    const chartOpts = {
       labels: displayLabels,
+      rawLabels: labels,
       values,
       color,
       yMin: zeroBaseline ? 0 : undefined,
       tooltipPrefix: `${key}: `,
       connectNulls: spanGaps,
-    });
+    };
+    charts[key] = createLineChart(innerDiv, chartOpts);
+
+    // Click to open modal
+    card.addEventListener('click', () => openChartModal(key, chartOpts));
   });
+}
+
+// --- Chart Modal ---
+let _modalChart = null;
+
+function openChartModal(title, opts) {
+  const modal = document.getElementById('chartModal');
+  const titleEl = document.getElementById('chartModalTitle');
+  const canvas = document.getElementById('chartModalCanvas');
+  titleEl.textContent = title;
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  if (_modalChart) { _modalChart.dispose(); _modalChart = null; }
+
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';
+  const color = opts.color || '#3b82f6';
+  const labels = opts.labels || [];
+  const rawLabels = opts.rawLabels || labels;
+  const values = opts.values || [];
+
+  const ec = echarts.init(canvas);
+  ec.setOption({
+    grid: { left: 60, right: 20, top: 20, bottom: 60 },
+    xAxis: {
+      type: 'category', data: labels,
+      axisLine: { lineStyle: { color: gridColor } },
+      axisLabel: { color: textColor, fontSize: 11 },
+    },
+    yAxis: {
+      type: 'value', min: opts.yMin,
+      axisLine: { show: false },
+      axisLabel: { color: textColor, fontSize: 11 },
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter(params) {
+        const p = params[0];
+        const idx = p.dataIndex;
+        const dateLabel = rawLabels[idx] || labels[idx] || '';
+        const val = p.value == null || p.value === '-' ? 'N/A' : `${opts.tooltipPrefix || ''}${Number(p.value).toLocaleString()}`;
+        return `${dateLabel}<br/>${val}`;
+      },
+    },
+    dataZoom: [
+      { type: 'slider', start: 0, end: 100, bottom: 8, height: 20,
+        textStyle: { color: textColor, fontSize: 10 } },
+      { type: 'inside' },
+    ],
+    series: [{
+      type: 'line',
+      data: values.map(v => v === null ? '-' : v),
+      smooth: 0.3, symbol: 'none',
+      lineStyle: { color, width: 2 },
+      itemStyle: { color },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: _hexToRgba(color, 0.25) },
+          { offset: 1, color: _hexToRgba(color, 0.0) },
+        ]),
+      },
+      connectNulls: opts.connectNulls || false,
+    }],
+  });
+  _modalChart = ec;
+}
+
+function closeChartModal() {
+  document.getElementById('chartModal').style.display = 'none';
+  document.body.style.overflow = '';
+  if (_modalChart) { _modalChart.dispose(); _modalChart = null; }
+}
+
+// --- Period Switching (1Y / 3Y / ALL) ---
+let _currentPeriod = 'all';
+let _lastAnalysisData = null;
+let _dailyCache = {}; // stock_code -> daily data
+
+async function switchValuationPeriod(period) {
+  _currentPeriod = period;
+  document.querySelectorAll('.vp-btn').forEach(b => b.classList.toggle('active', b.dataset.period === period));
+
+  if (!_lastAnalysisData) return;
+  const stockCode = _lastAnalysisData.stock_code;
+  const weeklyIndicators = _lastAnalysisData.weekly_indicators || {};
+
+  if (period === '1y') {
+    // Fetch daily data
+    let daily = _dailyCache[stockCode];
+    if (!daily) {
+      try {
+        const resp = await apiFetch(`/api/analyze/${stockCode}/daily`);
+        daily = await resp.json();
+        _dailyCache[stockCode] = daily;
+      } catch (e) {
+        console.error('Daily fetch failed', e);
+        return;
+      }
+    }
+    // Convert daily to weekly_indicators format
+    const dailyIndicators = {};
+    for (const key of WEEKLY_CHART_KEYS) {
+      const fieldMap = { '주가': 'close_price', 'PER': 'per', 'PBR': 'pbr', '배당수익률 (%)': 'dividend_yield',
+        '시가총액 (억원)': 'market_cap', 'EPS (원)': 'eps', 'ROE (%)': 'roe', '부채비율 (%)': 'debt_ratio', '영업이익률 (%)': 'operating_margin' };
+      const field = fieldMap[key];
+      if (field) {
+        dailyIndicators[key] = daily.map(d => ({
+          date: d.date,
+          value: key === '시가총액 (억원)' && d[field] != null ? Math.round(d[field] / 100000000 * 100) / 100 : d[field],
+        }));
+      }
+    }
+    _renderValuationCharts(dailyIndicators);
+  } else {
+    // Filter weekly data by period
+    let filtered = {};
+    const cutoff = period === '3y' ? _dateDaysAgo(3 * 365) : null;
+    for (const [key, series] of Object.entries(weeklyIndicators)) {
+      filtered[key] = cutoff ? series.filter(d => d.date >= cutoff) : series;
+    }
+    _renderValuationCharts(filtered);
+  }
+}
+
+function _dateDaysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function _renderValuationCharts(indicators) {
+  const grid = document.getElementById('weeklyChartsGrid');
+  if (!grid) return;
+
+  // Destroy existing
+  Object.entries(charts).forEach(([k, c]) => { if (k !== '_targetPrice') c.dispose(); });
+  Object.keys(charts).forEach(k => { if (k !== '_targetPrice') delete charts[k]; });
+  // Remove all cards except target price
+  Array.from(grid.children).forEach(c => { if (c.id !== 'targetPriceChartCard') c.remove(); });
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)';
+  const tickColor = isDark ? '#94a3b8' : '#666';
+
+  const targetCard = document.getElementById('targetPriceChartCard');
+  await renderChartGrid(grid, WEEKLY_CHART_KEYS, indicators, gridColor, tickColor, 'weekly');
+  // Move target price chart to end
+  if (targetCard) grid.appendChild(targetCard);
+
+  // Re-overlay target prices
+  if (allReports && allReports.length > 0) {
+    _lastWeeklyIndicators = indicators;
+    _overlayTargetPrices(allReports);
+  }
 }
 
 function resetProgress() {
@@ -549,6 +710,11 @@ async function analyzeStock(stockCode) {
 }
 
 async function renderResult(data) {
+  _lastAnalysisData = data;
+  _currentPeriod = 'all';
+  _dailyCache = {};
+  document.querySelectorAll('.vp-btn').forEach(b => b.classList.toggle('active', b.dataset.period === 'all'));
+
   // Company info
   const infoEl = document.getElementById('companyInfo');
   infoEl.style.display = 'block';
@@ -571,7 +737,8 @@ async function renderResult(data) {
   const hasWeeklyCharts = WEEKLY_CHART_KEYS.some(key => (data.weekly_indicators?.[key] || []).length > 0);
   _lastWeeklyIndicators = data.weekly_indicators || null;
   weeklyTitle.textContent = formatWeeklySectionTitle(data.weekly_indicators || {});
-  weeklyTitle.style.display = hasWeeklyCharts ? 'block' : 'none';
+  const sectionRow = document.getElementById('weeklySectionRow');
+  if (sectionRow) sectionRow.style.display = hasWeeklyCharts ? 'flex' : 'none';
   weeklyGrid.style.display = hasWeeklyCharts ? 'grid' : 'none';
   annualTitle.style.display = hasWeeklyCharts ? 'none' : 'block';
   grid.style.display = hasWeeklyCharts ? 'none' : 'grid';
