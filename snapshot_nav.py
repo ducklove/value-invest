@@ -121,11 +121,12 @@ async def _fetch_fx_usdkrw():
         logger.warning("Failed to fetch FX rate: %s", e)
 
 
-async def run_all_snapshots():
+async def run_all_snapshots(snap_date: str | None = None):
     """Take snapshots for all users with portfolio items."""
     await cache.init_db()
     await _fetch_fx_usdkrw()
-    snap_date = date.today().isoformat()
+    if snap_date is None:
+        snap_date = date.today().isoformat()
     users = await cache.get_all_users_with_portfolio()
     logger.info("Taking snapshots for %d users on %s", len(users), snap_date)
     for google_sub in users:
@@ -138,4 +139,6 @@ async def run_all_snapshots():
 
 
 if __name__ == "__main__":
-    asyncio.run(run_all_snapshots())
+    import sys
+    target_date = sys.argv[1] if len(sys.argv) > 1 else None
+    asyncio.run(run_all_snapshots(target_date))

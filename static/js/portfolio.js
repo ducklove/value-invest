@@ -25,10 +25,12 @@ function switchView(view) {
   const analysisView = document.getElementById('analysisView');
   const portfolioView = document.getElementById('portfolioView');
   const npsView = document.getElementById('npsView');
+  const adminView = document.getElementById('adminView');
   analysisView.style.display = view === 'analysis' ? 'block' : 'none';
   portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
   if (npsView) npsView.style.display = view === 'nps' ? 'block' : 'none';
-  const activeEl = view === 'analysis' ? analysisView : view === 'portfolio' ? portfolioView : npsView;
+  if (adminView) adminView.style.display = view === 'admin' ? 'block' : 'none';
+  const activeEl = view === 'analysis' ? analysisView : view === 'portfolio' ? portfolioView : view === 'admin' ? adminView : npsView;
   if (activeEl) {
     activeEl.classList.remove('fade-in');
     void activeEl.offsetWidth;
@@ -38,6 +40,8 @@ function switchView(view) {
     loadPortfolio();
   } else if (view === 'nps') {
     loadNpsView();
+  } else if (view === 'admin') {
+    loadAdminView();
   }
   _updateQuoteSubscriptions();
 }

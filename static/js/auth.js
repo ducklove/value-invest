@@ -315,6 +315,7 @@ function renderAuthState() {
     avatar.src = currentUser.picture || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
     name.textContent = currentUser.name || currentUser.email;
     email.textContent = currentUser.email || '';
+    if (currentUser.is_admin) showAdminNav();
   } else if (authConfig?.enabled) {
     statusTitle.textContent = '로그인해 최근 분석을 저장하세요';
     statusDetail.textContent = IS_GITHUB_PAGES_SITE

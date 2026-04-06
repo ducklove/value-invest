@@ -6,5 +6,6 @@ from .cache_mgmt import router as cache_router
 from .portfolio import router as portfolio_router
 from .ws_quotes import router as ws_quotes_router
 from .nps import router as nps_router
+from .admin import router as admin_router
 
-__all__ = ["auth_router", "analysis_router", "reports_router", "stocks_router", "cache_router", "portfolio_router", "ws_quotes_router", "nps_router"]
+__all__ = ["auth_router", "analysis_router", "reports_router", "stocks_router", "cache_router", "portfolio_router", "ws_quotes_router", "nps_router", "admin_router"]

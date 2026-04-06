@@ -44,13 +44,16 @@ def session_cookie_samesite(request: Request) -> str:
 def serialize_user(user: dict | None) -> dict | None:
     if not user:
         return None
-    return {
+    result = {
         "google_sub": user["google_sub"],
         "email": user["email"],
         "name": user["name"],
         "picture": user.get("picture") or "",
         "email_verified": bool(user.get("email_verified")),
     }
+    if user.get("is_admin"):
+        result["is_admin"] = True
+    return result
 
 
 async def get_current_user(request: Request) -> dict | None:

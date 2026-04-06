@@ -236,6 +236,7 @@ async def init_db():
     await _ensure_column(db, "user_portfolio", "currency", "TEXT DEFAULT 'KRW'")
     await _ensure_column(db, "user_portfolio", "group_name", "TEXT")
     await _ensure_column(db, "user_portfolio", "benchmark_code", "TEXT")
+    await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_groups", "default_type", "TEXT")
     # Backfill default_type for existing default groups by sort_order
@@ -597,7 +598,7 @@ async def get_user_by_session(session_token_hash: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
         """
-        SELECT u.google_sub, u.email, u.name, u.picture, u.email_verified
+        SELECT u.google_sub, u.email, u.name, u.picture, u.email_verified, u.is_admin
         FROM user_sessions s
         JOIN users u ON u.google_sub = s.google_sub
         WHERE s.session_token_hash = ? AND s.expires_at > ?
@@ -624,6 +625,28 @@ async def delete_expired_sessions():
         (datetime.now().isoformat(),),
     )
     await db.commit()
+
+
+async def get_all_users() -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT google_sub, email, name, picture, is_admin, created_at, last_login_at FROM users ORDER BY last_login_at DESC"
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_db_stats() -> dict:
+    db = await get_db()
+    tables = {}
+    cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    for row in await cursor.fetchall():
+        tname = row["name"]
+        cnt = await db.execute(f"SELECT COUNT(*) as c FROM [{tname}]")
+        tables[tname] = (await cnt.fetchone())["c"]
+    # DB file size
+    import os
+    db_size = os.path.getsize(DB_PATH) if DB_PATH.exists() else 0
+    return {"tables": tables, "db_size_bytes": db_size}
 
 
 USER_RECENT_MAX = 20

@@ -979,3 +979,40 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-table { font-size: 11px; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 6px 4px; }
 }
+
+/* === Admin Dashboard === */
+.admin-dashboard { max-width: 960px; margin: 0 auto; }
+.admin-title { font-size: 20px; font-weight: 700; margin-bottom: 24px; color: var(--text-primary); }
+.admin-section { margin-bottom: 32px; }
+.admin-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary); }
+.admin-sub { font-size: 12px; font-weight: 400; color: var(--text-secondary); margin-left: 4px; }
+
+.admin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.admin-card {
+  background: var(--card-bg, #fff); border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px; padding: 14px 16px;
+}
+.admin-card-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.admin-card-value { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+
+.admin-progress { height: 4px; background: var(--border, #e5e7eb); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.admin-progress-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+
+.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.admin-table th { text-align: left; font-weight: 600; color: var(--text-secondary); padding: 8px 12px; border-bottom: 2px solid var(--border, #e5e7eb); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.admin-table td { padding: 10px 12px; border-bottom: 1px solid var(--border, #e5e7eb); color: var(--text-primary); }
+.admin-table-compact td { padding: 6px 12px; }
+.admin-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.admin-status-ok { color: var(--color-success, #27ae60); font-weight: 600; }
+.admin-status-fail { color: var(--color-danger, #e74c3c); font-weight: 600; }
+.admin-status-run { color: var(--color-warning, #f39c12); font-weight: 600; }
+
+.admin-btn {
+  padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border, #e5e7eb);
+  background: var(--card-bg, #fff); color: var(--text-primary); font-size: 12px;
+  cursor: pointer; transition: background 0.15s;
+}
+.admin-btn:hover { background: var(--hover-bg, #f3f4f6); }
+.admin-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.admin-btn-secondary { margin-left: 4px; font-size: 11px; color: var(--text-secondary); }

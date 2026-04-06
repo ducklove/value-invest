@@ -738,4 +738,6 @@ async def run_nps_snapshot(snap_date: str | None = None):
 
 
 if __name__ == "__main__":
-    asyncio.run(run_nps_snapshot())
+    import sys
+    target_date = sys.argv[1] if len(sys.argv) > 1 else None
+    asyncio.run(run_nps_snapshot(target_date))
