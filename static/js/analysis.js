@@ -167,92 +167,152 @@ function formatWeeklyTickLabel(value) {
   return `${match[1].slice(-2)}.${match[2]}`;
 }
 
-function _overlayTargetPrices(reports) {
-  const chart = charts['주가'];
-  if (!chart || typeof chart.getOption !== 'function') return;
+let _lastWeeklyIndicators = null;
 
-  // Extract target prices with dates from reports
-  const points = [];
+function _overlayTargetPrices(reports) {
+  if (!_lastWeeklyIndicators) return;
+  const priceSeries = _lastWeeklyIndicators['주가'] || [];
+  if (priceSeries.length === 0) return;
+
+  // Extract target prices with dates
+  const targets = [];
   for (const r of (reports || [])) {
     const tp = r.target_price ? Number(String(r.target_price).replace(/,/g, '')) : null;
     const d = r.date;
     if (tp && tp > 0 && d) {
-      // Convert report date (YYYY-MM-DD) to chart label format (YY.MM)
-      points.push({ date: d, label: formatWeeklyTickLabel(d), price: tp, firm: r.firm_short || r.firm || '' });
+      targets.push({ date: d, price: tp, firm: r.firm_short || r.firm || '' });
     }
   }
-  if (points.length === 0) return;
+  if (targets.length === 0) return;
+  targets.sort((a, b) => a.date.localeCompare(b.date));
 
-  // Get chart x-axis labels
-  const opt = chart.getOption();
-  const xLabels = opt.xAxis[0].data || [];
+  // Determine date range from reports
+  const minDate = targets[0].date;
+  const maxDate = priceSeries[priceSeries.length - 1].date;
 
-  // Map target prices to chart x-axis indices
+  // Filter price data to report date range
+  const priceInRange = priceSeries.filter(p => p.date >= minDate && p.value != null);
+  if (priceInRange.length === 0) return;
+
+  const dates = priceInRange.map(p => p.date);
+  const prices = priceInRange.map(p => p.value);
+
+  // Build target price line (step-forward: hold last target until next)
+  const targetLine = new Array(dates.length).fill(null);
+  let tIdx = 0;
+  let lastTarget = null;
+  for (let i = 0; i < dates.length; i++) {
+    while (tIdx < targets.length && targets[tIdx].date <= dates[i]) {
+      lastTarget = targets[tIdx].price;
+      tIdx++;
+    }
+    targetLine[i] = lastTarget;
+  }
+
+  // Build scatter data for individual report points
   const scatterData = [];
-  for (const p of points) {
-    // Find closest label match (chart labels are "YY.MM" format)
-    let idx = xLabels.indexOf(p.label);
-    if (idx < 0) {
-      // Try exact date match
-      idx = xLabels.indexOf(p.date);
+  for (const t of targets) {
+    // Find nearest date in chart
+    let bestIdx = -1, bestDiff = Infinity;
+    for (let i = 0; i < dates.length; i++) {
+      const diff = Math.abs(new Date(dates[i]) - new Date(t.date));
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     }
-    if (idx < 0) {
-      // Find nearest date
-      const pDate = p.date;
-      let bestIdx = -1, bestDiff = Infinity;
-      for (let i = 0; i < xLabels.length; i++) {
-        // xLabels are "YY.MM" — reconstruct approximate date
-        const m = String(xLabels[i]).match(/^(\d{2})\.(\d{2})$/);
-        if (m) {
-          const approxDate = `20${m[1]}-${m[2]}-01`;
-          const diff = Math.abs(new Date(pDate) - new Date(approxDate));
-          if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-        }
-      }
-      if (bestIdx >= 0 && bestDiff < 45 * 86400000) idx = bestIdx; // within ~45 days
-    }
-    if (idx >= 0) {
-      scatterData.push({ value: [idx, p.price], firm: p.firm, date: p.date });
+    if (bestIdx >= 0 && bestDiff < 14 * 86400000) {
+      scatterData.push([bestIdx, t.price, t.firm, t.date]);
     }
   }
-  if (scatterData.length === 0) return;
 
-  // Update chart with additional scatter series
-  const existingSeries = opt.series || [];
-  // Remove any previous target price series
-  const baseSeries = existingSeries.filter(s => s._isTargetPrice !== true);
+  // Remove previous target chart
+  const existingCard = document.getElementById('targetPriceChartCard');
+  if (existingCard) { existingCard.remove(); }
+  if (charts['_targetPrice']) { charts['_targetPrice'].dispose(); delete charts['_targetPrice']; }
 
-  chart.setOption({
+  // Create new chart card in the weekly grid
+  const grid = document.getElementById('weeklyChartsGrid');
+  if (!grid) return;
+
+  const card = document.createElement('div');
+  card.className = 'chart-card';
+  card.id = 'targetPriceChartCard';
+  const chartDiv = document.createElement('div');
+  chartDiv.className = 'chart-canvas-wrap';
+  const innerDiv = document.createElement('div');
+  innerDiv.style.cssText = 'width:100%;height:100%;';
+  chartDiv.appendChild(innerDiv);
+  card.innerHTML = `<h3>증권사 목표가</h3>`;
+  card.appendChild(chartDiv);
+  // Insert as first chart
+  grid.insertBefore(card, grid.firstChild);
+
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';
+  const labels = dates.map(formatWeeklyTickLabel);
+
+  const ec = echarts.init(innerDiv);
+  ec.setOption({
+    grid: { left: 55, right: 12, top: 28, bottom: 24 },
+    legend: { show: true, top: 0, right: 0, textStyle: { color: textColor, fontSize: 11 } },
+    xAxis: {
+      type: 'category', data: labels,
+      axisLine: { lineStyle: { color: gridColor } },
+      axisLabel: { color: textColor, fontSize: 10 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value', min: 0,
+      axisLine: { show: false },
+      axisLabel: { color: textColor, fontSize: 10 },
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    },
     tooltip: {
       trigger: 'axis',
       formatter(params) {
-        let html = params[0] ? xLabels[params[0].dataIndex] : '';
+        const idx = params[0]?.dataIndex;
+        let html = dates[idx] || '';
         for (const p of params) {
-          if (p.seriesName === '목표가') {
-            const d = scatterData[p.dataIndex] || {};
-            html += `<br/><span style="color:#f59e0b">● 목표가: ${Number(p.value[1]).toLocaleString()}원</span><span style="font-size:11px;color:#999"> (${d.firm || ''})</span>`;
-          } else {
-            const val = p.value == null || p.value === '-' ? 'N/A' : '주가: ' + Number(p.value).toLocaleString();
-            html += `<br/>${val}`;
+          if (p.seriesName === '주가') {
+            html += `<br/><span style="color:${p.color}">● 주가: ${Number(p.value).toLocaleString()}원</span>`;
+          } else if (p.seriesName === '목표가') {
+            html += `<br/><span style="color:${p.color}">● 목표가: ${p.value == null || p.value === '-' ? '-' : Number(p.value).toLocaleString() + '원'}</span>`;
+          } else if (p.seriesName === '리포트') {
+            const d = p.data;
+            html += `<br/><span style="color:#f59e0b">◆ ${Number(d[1]).toLocaleString()}원</span> <span style="font-size:11px;color:#999">(${d[2]})</span>`;
           }
         }
         return html;
       },
     },
     series: [
-      ...baseSeries,
       {
-        name: '목표가',
-        type: 'scatter',
+        name: '주가', type: 'line', data: prices,
+        lineStyle: { color: '#3b82f6', width: 2 },
+        itemStyle: { color: '#3b82f6' },
+        symbol: 'none', smooth: 0.3,
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(59,130,246,0.15)' },
+            { offset: 1, color: 'rgba(59,130,246,0.0)' },
+          ]),
+        },
+      },
+      {
+        name: '목표가', type: 'line',
+        data: targetLine.map(v => v === null ? '-' : v),
+        lineStyle: { color: '#f59e0b', width: 2, type: 'dashed' },
+        itemStyle: { color: '#f59e0b' },
+        symbol: 'none', step: 'end', connectNulls: false,
+      },
+      {
+        name: '리포트', type: 'scatter',
         data: scatterData,
-        symbol: 'diamond',
-        symbolSize: 7,
+        symbol: 'diamond', symbolSize: 8,
         itemStyle: { color: '#f59e0b', borderColor: '#d97706', borderWidth: 1 },
         z: 10,
-        _isTargetPrice: true,
       },
     ],
   });
+  charts['_targetPrice'] = ec;
 }
 
 async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColor, prefix) {
@@ -500,6 +560,7 @@ function renderResult(data) {
   const annualTitle = document.getElementById('annualSectionTitle');
   const grid = document.getElementById('chartsGrid');
   const hasWeeklyCharts = WEEKLY_CHART_KEYS.some(key => (data.weekly_indicators?.[key] || []).length > 0);
+  _lastWeeklyIndicators = data.weekly_indicators || null;
   weeklyTitle.textContent = formatWeeklySectionTitle(data.weekly_indicators || {});
   weeklyTitle.style.display = hasWeeklyCharts ? 'block' : 'none';
   weeklyGrid.style.display = hasWeeklyCharts ? 'grid' : 'none';
