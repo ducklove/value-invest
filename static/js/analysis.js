@@ -182,7 +182,8 @@ async function _overlayTargetPrices(reports) {
     if (tp && tp > 0 && d) {
       const rec = (r.recommendation || '').toLowerCase();
       const isBuy = rec.includes('buy') || rec.includes('매수') || rec.includes('outperform');
-      targets.push({ date: d, price: tp, firm: r.firm_short || r.firm || '', buy: isBuy });
+      const url = r.pdf_url ? buildReportPdfUrl(r.pdf_url) : r.source_url;
+      targets.push({ date: d, price: tp, firm: r.firm_short || r.firm || '', buy: isBuy, url });
     }
   }
   if (targets.length === 0) return;
@@ -221,7 +222,7 @@ async function _overlayTargetPrices(reports) {
       if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     }
     if (bestIdx >= 0 && bestDiff < 14 * 86400000) {
-      scatterData.push({ value: [bestIdx, t.price], firm: t.firm, date: t.date, buy: t.buy });
+      scatterData.push({ value: [bestIdx, t.price], firm: t.firm, date: t.date, buy: t.buy, url: t.url });
     }
   }
 
@@ -326,8 +327,17 @@ async function _overlayTargetPrices(reports) {
   });
   charts['_targetPrice'] = ec;
 
-  // Click to open in modal
-  card.addEventListener('click', () => _openTargetPriceModal(dates, prices, targetLine, scatterData, labels));
+  // Click scatter → open report URL, block modal
+  let _scatterClicked = false;
+  ec.on('click', 'series.scatter', (params) => {
+    _scatterClicked = true;
+    const url = params.data?.url;
+    if (url) window.open(url, '_blank', 'noopener');
+  });
+  card.addEventListener('click', () => {
+    if (_scatterClicked) { _scatterClicked = false; return; }
+    _openTargetPriceModal(dates, prices, targetLine, scatterData, labels);
+  });
 }
 
 function _openTargetPriceModal(dates, prices, targetLine, scatterData, labels) {
@@ -409,6 +419,10 @@ function _openTargetPriceModal(dates, prices, targetLine, scatterData, labels) {
         z: 10,
       },
     ],
+  });
+  ec.on('click', 'series.scatter', (params) => {
+    const url = params.data?.url;
+    if (url) window.open(url, '_blank', 'noopener');
   });
   _modalChart = ec;
 }
