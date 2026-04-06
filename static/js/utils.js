@@ -4,7 +4,8 @@ const ANNUAL_CHART_KEYS = [
 ];
 
 const WEEKLY_CHART_KEYS = [
-  '주간 주가', '주간 PER', '주간 PBR', '주간 배당수익률'
+  '주가', 'PER', 'PBR', '배당수익률 (%)',
+  '시가총액 (억원)', 'EPS (원)', 'ROE (%)', '부채비율 (%)', '영업이익률 (%)'
 ];
 
 const CHART_COLORS = [

@@ -1,11 +1,10 @@
 // Analyze
 const STEP_LABELS = {
   start: '분석 시작',
-  dart_start: 'DART 재무제표 수집',
-  dart_fetch: 'DART 재무제표 조회',
-  dart_done: 'DART 수집 완료',
-  dart_error: 'DART 조회 실패',
-  market_start: '시장 데이터 및 파생 지표 계산',
+  financial_start: '재무제표 수집',
+  financial_done: '재무제표 수집 완료',
+  financial_error: '재무제표 조회 실패',
+  market_start: '시장 데이터 계산',
   market_done: '시장 데이터 수집 완료',
   market_error: '시장 데이터 조회 실패',
   saving: '캐시 저장',
@@ -36,9 +35,9 @@ function getWeeklyDateCoverage(series) {
 }
 
 function formatWeeklySectionTitle(weeklyIndicators) {
-  const coverage = getWeeklyDateCoverage(weeklyIndicators?.['주간 주가'] || weeklyIndicators?.['주간 PER'] || []);
-  if (!coverage) return '주간 밸류에이션';
-  return `주간 밸류에이션 (${coverage.startDate} ~ ${coverage.endDate})`;
+  const coverage = getWeeklyDateCoverage(weeklyIndicators?.['주가'] || weeklyIndicators?.['PER'] || []);
+  if (!coverage) return '밸류에이션';
+  return `밸류에이션 (${coverage.startDate} ~ ${coverage.endDate})`;
 }
 
 function getLatestIndicatorValue(series) {
@@ -128,7 +127,7 @@ function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
 }
 
 function isPerChart(key) {
-  return key === 'PER' || key === '주간 PER';
+  return key === 'PER';
 }
 
 function normalizeChartValue(value) {
@@ -313,21 +312,14 @@ async function analyzeStock(stockCode) {
             const step = payload.step;
             loadingText.textContent = payload.message;
 
-            if (step === 'dart_fetch') {
-              const pct = Math.round((payload.current / payload.total) * 60);
-              progressBar.style.width = pct + '%';
-              loadingDetail.textContent = `${payload.current} / ${payload.total}`;
-              if (lastDartStep !== 'dart_fetch') {
-                markLastStepDone();
-                addStep('DART 재무제표 연도별 조회 중...', 'active');
-              }
-              lastDartStep = 'dart_fetch';
-            } else if (step === 'dart_done' || step === 'dart_error') {
+            if (step === 'financial_start') {
+              markLastStepDone();
+              progressBar.style.width = '30%';
+              addStep(payload.message, 'active');
+            } else if (step === 'financial_done' || step === 'financial_error') {
               markLastStepDone();
               progressBar.style.width = '60%';
-              loadingDetail.textContent = '';
-              addStep(payload.message, step === 'dart_done' ? 'done' : '');
-              lastDartStep = step;
+              addStep(payload.message, step === 'financial_done' ? 'done' : '');
             } else if (step === 'market_start') {
               markLastStepDone();
               progressBar.style.width = '65%';
@@ -423,8 +415,8 @@ function renderResult(data) {
   weeklyTitle.textContent = formatWeeklySectionTitle(data.weekly_indicators || {});
   weeklyTitle.style.display = hasWeeklyCharts ? 'block' : 'none';
   weeklyGrid.style.display = hasWeeklyCharts ? 'grid' : 'none';
-  annualTitle.style.display = 'block';
-  grid.style.display = 'grid';
+  annualTitle.style.display = hasWeeklyCharts ? 'none' : 'block';
+  grid.style.display = hasWeeklyCharts ? 'none' : 'grid';
   weeklyGrid.innerHTML = '';
   grid.innerHTML = '';
 
@@ -438,8 +430,9 @@ function renderResult(data) {
 
   if (hasWeeklyCharts) {
     renderChartGrid(weeklyGrid, WEEKLY_CHART_KEYS, data.weekly_indicators || {}, gridColor, tickColor, 'weekly');
+  } else {
+    renderChartGrid(grid, ANNUAL_CHART_KEYS, data.indicators || {}, gridColor, tickColor, 'annual');
   }
-  renderChartGrid(grid, ANNUAL_CHART_KEYS, data.indicators || {}, gridColor, tickColor, 'annual');
   _updateQuoteSubscriptions();
 }
 

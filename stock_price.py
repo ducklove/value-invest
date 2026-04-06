@@ -369,12 +369,35 @@ def _normalize_financial_rows(
     else:
         shares_by_year = implied_shares_by_year
 
+    income_by_year: dict[int, dict] = {}
+    for row in financials_payload.get("income_statement", []):
+        year = _parse_year(_get_first(row, "stac_yymm", "year"))
+        if year is not None:
+            income_by_year[year] = row
+
     normalized = {}
-    for year in sorted(set(balance_by_year) | set(ratio_by_year)):
+    all_years = sorted(set(balance_by_year) | set(ratio_by_year) | set(income_by_year))
+    for year in all_years:
+        bal = balance_by_year.get(year, {})
+        inc = income_by_year.get(year, {})
+        total_equity = _safe_float(_get_first(bal, "total_cptl", "total_equity"))
+        total_liabilities = _safe_float(_get_first(bal, "total_lblt", "total_liabilities"))
+        net_income = _safe_float(_get_first(inc, "thtr_ntin", "net_income"))
+        revenue = _safe_float(_get_first(inc, "sale_account", "revenue"))
+        operating_profit = _safe_float(_get_first(inc, "op_prfi", "operating_profit"))
+        equity_krw = total_equity * KRW_PER_EOK if total_equity else None
+        liabilities_krw = total_liabilities * KRW_PER_EOK if total_liabilities else None
+        net_income_krw = net_income * KRW_PER_EOK if net_income else None
+        revenue_krw = revenue * KRW_PER_EOK if revenue else None
+        op_krw = operating_profit * KRW_PER_EOK if operating_profit else None
+
         normalized[year] = {
             "eps": _safe_float(_get_first(ratio_by_year.get(year, {}), "eps")),
             "bps": _safe_float(_get_first(ratio_by_year.get(year, {}), "bps")),
             "shares_outstanding": shares_by_year.get(year),
+            "roe": _safe_div(net_income_krw, equity_krw, 100) if net_income_krw and equity_krw else None,
+            "debt_ratio": _safe_div(liabilities_krw, equity_krw, 100) if liabilities_krw and equity_krw else None,
+            "operating_margin": _safe_div(op_krw, revenue_krw, 100) if op_krw and revenue_krw else None,
         }
     return normalized
 
@@ -681,21 +704,51 @@ async def fetch_market_data(
     return results
 
 
+async def _fetch_kis_weekly_history_paged(
+    stock_code: str,
+    start_date: date,
+    end_date: date,
+) -> list[dict]:
+    """Fetch weekly history from KIS with pagination (100 items per call)."""
+    all_items = []
+    cursor = start_date
+    while cursor < end_date:
+        chunk_end = min(cursor + timedelta(days=730), end_date)  # ~2 years per call
+        payload = await kis_proxy_client.get_history(
+            stock_code,
+            start_date=cursor,
+            end_date=chunk_end,
+            period="W",
+            adjusted=True,
+        )
+        items = payload.get("items") or []
+        # Find list in payload if items key doesn't exist
+        if not items:
+            for v in payload.values():
+                if isinstance(v, list) and v:
+                    items = v
+                    break
+        all_items.extend(items)
+        cursor = chunk_end + timedelta(days=1)
+    # Deduplicate by date and sort
+    seen = set()
+    deduped = []
+    for item in all_items:
+        d = _get_first(item, "stck_bsop_date", "date", "trade_date", "business_date")
+        if d and d not in seen:
+            seen.add(d)
+            deduped.append(item)
+    return _sorted_history_items(deduped)
+
+
 async def fetch_weekly_market_data(
     stock_code: str,
     financial_data: list[dict] | None = None,
-    years: int = 10,
+    years: int = 23,
 ) -> list[dict]:
     end_date = date.today()
-    start_date = end_date - timedelta(days=years * 370)
-    loop = asyncio.get_event_loop()
-    yf_future = loop.run_in_executor(
-        None,
-        _get_weekly_yfinance_aux,
-        stock_code,
-        datetime.combine(start_date, datetime.min.time()),
-        datetime.combine(end_date, datetime.min.time()),
-    )
+    start_date = end_date - timedelta(days=years * 365)
+
     financials_payload, dividends_payload = await asyncio.gather(
         kis_proxy_client.get_financials(stock_code),
         kis_proxy_client.get_dividends(
@@ -718,117 +771,45 @@ async def fetch_weekly_market_data(
     financial_timeline = _financial_timeline(financial_data, normalized_financials)
     kis_dividend_events = _build_dividend_events(dividends_payload.get("items"))
 
-    try:
-        close_series, shares_series, dividends_series, splits_series = await yf_future
-    except Exception as exc:
-        logger.warning("yfinance 주간 시계열 조회 실패(%s): %s", stock_code, exc)
-        close_series = _empty_series()
-        shares_series = _empty_series()
-        dividends_series = _empty_series()
-        splits_series = _empty_series()
-
-    close_series = _normalize_datetime_index(close_series)
-    shares_series = _normalize_datetime_index(shares_series)
-    dividends_series = _normalize_datetime_index(dividends_series)
-
-    if close_series is None or close_series.empty:
-        history_payload = await kis_proxy_client.get_history(
-            stock_code,
-            start_date=start_date,
-            end_date=end_date,
-            period="W",
-            adjusted=True,
-        )
-        results = []
-        active_financial = None
-        timeline_index = 0
-
-        for item in _sorted_history_items(history_payload.get("items")):
-            trade_date = _parse_date(_get_first(item, "stck_bsop_date", "date", "trade_date", "business_date"))
-            if trade_date is None:
-                continue
-
-            trade_datetime = datetime.combine(trade_date, datetime.min.time())
-            while timeline_index < len(financial_timeline) and financial_timeline[timeline_index][0] <= trade_datetime:
-                active_financial = financial_timeline[timeline_index][1]
-                timeline_index += 1
-
-            close_price = _safe_float(_get_first(item, "stck_clpr", "close_price", "close"))
-            eps = active_financial.get("eps") if active_financial else None
-            bps = active_financial.get("bps") if active_financial else None
-            shares = active_financial.get("shares_outstanding") if active_financial else None
-            trailing_dividends = _sum_trailing_dividends(kis_dividend_events, trade_date)
-            if trailing_dividends is None and kis_dividend_events and close_price is not None:
-                trailing_dividends = 0.0
-
-            results.append(
-                {
-                    "date": trade_date.isoformat(),
-                    "close_price": close_price,
-                    "per": _safe_div(close_price, eps) if close_price else None,
-                    "pbr": _safe_div(close_price, bps) if close_price else None,
-                    "eps": eps,
-                    "bps": bps,
-                    "dividend_yield": _safe_div(trailing_dividends, close_price, 100)
-                    if trailing_dividends is not None and close_price
-                    else None,
-                    "market_cap": round(close_price * shares, 2) if close_price and shares else None,
-                }
-            )
-
-        return results
-
-    week_dates = pd.DatetimeIndex(close_series.index) if pd is not None else []
-    if pd is not None and shares_series is not None and not shares_series.empty:
-        shares_by_week = shares_series.reindex(week_dates, method="ffill")
-    elif pd is not None:
-        shares_by_week = pd.Series(index=week_dates, dtype="float64")
-    else:
-        shares_by_week = None
+    history_items = await _fetch_kis_weekly_history_paged(stock_code, start_date, end_date)
 
     results = []
     active_financial = None
     timeline_index = 0
-    has_yfinance_dividend_source = pd is not None and dividends_series is not None and not dividends_series.empty
-    has_kis_dividend_source = bool(kis_dividend_events)
 
-    for week_date, close_price in close_series.items():
-        trade_datetime = week_date.to_pydatetime() if hasattr(week_date, "to_pydatetime") else week_date
+    for item in history_items:
+        trade_date = _parse_date(_get_first(item, "stck_bsop_date", "date", "trade_date", "business_date"))
+        if trade_date is None:
+            continue
+
+        trade_datetime = datetime.combine(trade_date, datetime.min.time())
         while timeline_index < len(financial_timeline) and financial_timeline[timeline_index][0] <= trade_datetime:
             active_financial = financial_timeline[timeline_index][1]
             timeline_index += 1
 
-        close_value = _safe_float(close_price, zero_as_none=False)
+        close_price = _safe_float(_get_first(item, "stck_clpr", "close_price", "close"))
         eps = active_financial.get("eps") if active_financial else None
         bps = active_financial.get("bps") if active_financial else None
-        active_shares = active_financial.get("shares_outstanding") if active_financial else None
-        shares = _safe_float(shares_by_week.get(week_date), zero_as_none=False) if shares_by_week is not None else active_shares
-        if shares is None:
-            shares = active_shares
-
-        trailing_dividends = None
-        if has_yfinance_dividend_source:
-            trailing_start = week_date - pd.Timedelta(days=365)
-            trailing_value = dividends_series[(dividends_series.index > trailing_start) & (dividends_series.index <= week_date)].sum()
-            trailing_dividends = _safe_float(trailing_value, zero_as_none=False)
-        elif has_kis_dividend_source:
-            trailing_dividends = _sum_trailing_dividends(kis_dividend_events, trade_datetime.date())
-
-        if trailing_dividends is None and close_value is not None and (has_yfinance_dividend_source or has_kis_dividend_source):
+        shares = active_financial.get("shares_outstanding") if active_financial else None
+        trailing_dividends = _sum_trailing_dividends(kis_dividend_events, trade_date)
+        if trailing_dividends is None and kis_dividend_events and close_price is not None:
             trailing_dividends = 0.0
 
         results.append(
             {
-                "date": week_date.strftime("%Y-%m-%d"),
-                "close_price": close_value,
-                "per": _safe_div(close_value, eps) if close_value else None,
-                "pbr": _safe_div(close_value, bps) if close_value else None,
+                "date": trade_date.isoformat(),
+                "close_price": close_price,
+                "per": _safe_div(close_price, eps) if close_price else None,
+                "pbr": _safe_div(close_price, bps) if close_price else None,
                 "eps": eps,
                 "bps": bps,
-                "dividend_yield": _safe_div(trailing_dividends, close_value, 100)
-                if trailing_dividends is not None and close_value
+                "dividend_yield": _safe_div(trailing_dividends, close_price, 100)
+                if trailing_dividends is not None and close_price
                 else None,
-                "market_cap": round(close_value * shares, 2) if close_value and shares else None,
+                "market_cap": round(close_price * shares, 2) if close_price and shares else None,
+                "roe": active_financial.get("roe") if active_financial else None,
+                "debt_ratio": active_financial.get("debt_ratio") if active_financial else None,
+                "operating_margin": active_financial.get("operating_margin") if active_financial else None,
             }
         )
 

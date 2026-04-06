@@ -16,9 +16,9 @@ def analyze(
     market_data: list[dict],
     weekly_market_data: list[dict] | None = None,
 ) -> dict:
-    """재무 + 시장 데이터를 병합하여 연간/주간 지표 시계열 계산."""
+    """재무 + 시장 데이터를 병합하여 주간 지표 시계열 계산."""
 
-    # 연도별 인덱싱
+    # 연도별 인덱싱 (legacy, kept for cached data compatibility)
     fin_by_year = {d["year"]: d for d in financial_data}
     mkt_by_year = {d["year"]: d for d in market_data}
 
@@ -26,6 +26,7 @@ def analyze(
     market_years = sorted(mkt_by_year.keys())
     all_years = sorted(set(financial_years) | set(market_years))
 
+    # Build annual indicators (kept for backward compat but secondary)
     price_series = []
     market_cap_series = []
     per_series = []
@@ -39,60 +40,32 @@ def analyze(
 
     for year in market_years:
         mkt = mkt_by_year.get(year, {})
-        close_price = mkt.get("close_price")
-        price_series.append({"year": year, "value": close_price})
-
-        market_cap = mkt.get("market_cap")
-        market_cap_series.append({"year": year, "value": _to_eok_won(market_cap)})
-
-        per = mkt.get("per")
-        per_series.append({"year": year, "value": per})
-
-        pbr = mkt.get("pbr")
-        pbr_series.append({"year": year, "value": pbr})
-
-        div_yield = mkt.get("dividend_yield")
-        dividend_series.append({"year": year, "value": div_yield})
-
-        dps = mkt.get("dividend_per_share")
-        dividend_per_share_series.append({"year": year, "value": dps})
-
-        eps = mkt.get("eps")
-        eps_series.append({"year": year, "value": eps})
+        price_series.append({"year": year, "value": mkt.get("close_price")})
+        market_cap_series.append({"year": year, "value": _to_eok_won(mkt.get("market_cap"))})
+        per_series.append({"year": year, "value": mkt.get("per")})
+        pbr_series.append({"year": year, "value": mkt.get("pbr")})
+        dividend_series.append({"year": year, "value": mkt.get("dividend_yield")})
+        dividend_per_share_series.append({"year": year, "value": mkt.get("dividend_per_share")})
+        eps_series.append({"year": year, "value": mkt.get("eps")})
 
     for year in financial_years:
         fin = fin_by_year.get(year, {})
+        roe_series.append({"year": year, "value": _safe_div(fin.get("net_income"), fin.get("total_equity"), 100)})
+        debt_ratio_series.append({"year": year, "value": _safe_div(fin.get("total_liabilities"), fin.get("total_equity"), 100)})
+        operating_margin_series.append({"year": year, "value": _safe_div(fin.get("operating_profit"), fin.get("revenue"), 100)})
 
-        roe = _safe_div(fin.get("net_income"), fin.get("total_equity"), 100)
-        roe_series.append({"year": year, "value": roe})
-
-        debt_ratio = _safe_div(
-            fin.get("total_liabilities"), fin.get("total_equity"), 100
-        )
-        debt_ratio_series.append({"year": year, "value": debt_ratio})
-
-        op_margin = _safe_div(
-            fin.get("operating_profit"), fin.get("revenue"), 100
-        )
-        operating_margin_series.append({"year": year, "value": op_margin})
-
+    # Weekly indicators — all from weekly_market_data
+    wmd = weekly_market_data or []
     weekly_indicators = {
-        "주간 주가": [
-            {"date": item["date"], "value": item.get("close_price")}
-            for item in (weekly_market_data or [])
-        ],
-        "주간 PER": [
-            {"date": item["date"], "value": item.get("per")}
-            for item in (weekly_market_data or [])
-        ],
-        "주간 PBR": [
-            {"date": item["date"], "value": item.get("pbr")}
-            for item in (weekly_market_data or [])
-        ],
-        "주간 배당수익률": [
-            {"date": item["date"], "value": item.get("dividend_yield")}
-            for item in (weekly_market_data or [])
-        ],
+        "주가": [{"date": item["date"], "value": item.get("close_price")} for item in wmd],
+        "PER": [{"date": item["date"], "value": item.get("per")} for item in wmd],
+        "PBR": [{"date": item["date"], "value": item.get("pbr")} for item in wmd],
+        "배당수익률 (%)": [{"date": item["date"], "value": item.get("dividend_yield")} for item in wmd],
+        "시가총액 (억원)": [{"date": item["date"], "value": _to_eok_won(item.get("market_cap"))} for item in wmd],
+        "EPS (원)": [{"date": item["date"], "value": item.get("eps")} for item in wmd],
+        "ROE (%)": [{"date": item["date"], "value": item.get("roe")} for item in wmd],
+        "부채비율 (%)": [{"date": item["date"], "value": item.get("debt_ratio")} for item in wmd],
+        "영업이익률 (%)": [{"date": item["date"], "value": item.get("operating_margin")} for item in wmd],
     }
 
     return {

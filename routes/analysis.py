@@ -207,50 +207,21 @@ async def analyze_stock(stock_code: str, request: Request):
 
             async with ANALYSIS_SEMAPHORE:
                 yield sse_event("progress", {"step": "start", "message": f"{corp_name} 분석을 시작합니다..."})
-                report_dates = {}
 
-                # DART 재무제표 수집
-                yield sse_event("progress", {"step": "dart_start", "message": "DART 재무제표를 수집합니다..."})
+                # KIS 재무제표 수집 (1회 호출)
+                yield sse_event("progress", {"step": "financial_start", "message": "재무제표를 수집합니다..."})
                 fin_data = []
                 try:
-                    from datetime import datetime as dt
-                    end_year = dt.now().year - 1
-                    start_year = dart_client.DART_ANNUAL_DATA_START_YEAR
-                    total_years = end_year - start_year + 1
-                    report_dates = await dart_client.fetch_annual_report_dates(corp_code, start_year, end_year)
-
-                    for i, year in enumerate(range(start_year, end_year + 1)):
-                        yield sse_event("progress", {
-                            "step": "dart_fetch",
-                            "message": f"DART 재무제표 조회 중... ({i+1}/{total_years}) - {year}년",
-                            "current": i + 1, "total": total_years,
-                        })
-                        stmt = await dart_client.fetch_financial_statement(corp_code, year)
-                        if stmt:
-                            report_date = report_dates.get(year)
-                            if report_date:
-                                stmt["report_date"] = report_date
-                            fin_data.append(stmt)
-                        await asyncio.sleep(0.5)
-
+                    fin_data = await _ensure_financial_coverage(stock_code, corp_code, [])
                     yield sse_event("progress", {
-                        "step": "dart_done",
-                        "message": f"DART 재무제표 수집 완료 ({len(fin_data)}개년 데이터)",
+                        "step": "financial_done",
+                        "message": f"재무제표 수집 완료 ({len(fin_data)}개년 데이터)",
                     })
                 except Exception as e:
-                    logger.error(f"DART 재무제표 조회 실패: {e}")
-                    yield sse_event("progress", {"step": "dart_error", "message": f"DART 조회 실패: {e}"})
+                    logger.error(f"재무제표 조회 실패: {e}")
+                    yield sse_event("progress", {"step": "financial_error", "message": f"재무제표 조회 실패: {e}"})
 
-                try:
-                    fin_data = await _ensure_financial_coverage(stock_code, corp_code, fin_data)
-                    yield sse_event("progress", {
-                        "step": "dart_done",
-                        "message": f"연간 재무 범위 보강 완료 ({len(fin_data)}개년 데이터)",
-                    })
-                except Exception as e:
-                    logger.warning(f"재무 범위 보강 실패({stock_code}): {e}")
-
-                yield sse_event("progress", {"step": "market_start", "message": "시장 데이터와 파생 지표를 계산합니다..."})
+                yield sse_event("progress", {"step": "market_start", "message": "시장 데이터를 계산합니다..."})
                 mkt_data = []
                 try:
                     mkt_data = await stock_price.fetch_market_data(stock_code, fin_data)
