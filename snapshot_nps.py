@@ -270,10 +270,11 @@ def _build_html(
 </div>
 """
 
-    # Holdings table
-    rows_html = ""
+    # Holdings table — sort by market_value descending by default
     total_displayed = sum(h.get("market_value") or 0 for h in holdings if h.get("market_value"))
-    for i, h in enumerate(holdings):
+    sorted_holdings = sorted(holdings, key=lambda h: h.get("market_value") or 0, reverse=True)
+    rows_html = ""
+    for i, h in enumerate(sorted_holdings):
         name = h.get("stock_name") or h.get("name", "")
         cp = h.get("change_pct")
         price = h.get("price")
@@ -283,7 +284,7 @@ def _build_html(
         own_pct = h.get("ownership_pct")
 
         cp_cls = _pct_color_class(cp)
-        rows_html += f"""<tr>
+        rows_html += f"""<tr data-name="{_esc(name)}" data-change="{cp if cp is not None else ''}" data-mv="{mv or 0}" data-own="{own_pct or 0}">
   <td class="pf-col-name">{_esc(name)}</td>
   <td class="pf-col-num {cp_cls}">{_esc(_fmt_pct(cp))}</td>
   <td class="pf-col-num">{_esc(f"{round(price):,}") if price else "-"}</td>
@@ -296,16 +297,16 @@ def _build_html(
 
     table_html = f"""
 <div class="pf-table-wrap" style="margin-bottom:24px;">
-  <table class="pf-table">
+  <table class="pf-table" id="npsTable">
     <thead>
       <tr>
-        <th class="pf-col-name">종목명</th>
-        <th class="pf-col-num">등락률</th>
+        <th class="pf-col-name pf-sortable" data-sort="name" onclick="npsSort('name')" style="cursor:pointer">종목명</th>
+        <th class="pf-col-num pf-sortable" data-sort="change" onclick="npsSort('change')" style="cursor:pointer">등락률</th>
         <th class="pf-col-num">현재가</th>
         <th class="pf-col-num">수량</th>
-        <th class="pf-col-num">평가금액</th>
+        <th class="pf-col-num pf-sortable" data-sort="mv" onclick="npsSort('mv')" style="cursor:pointer">평가금액 ▼</th>
         <th class="pf-col-num">비중</th>
-        <th class="pf-col-num">지분율</th>
+        <th class="pf-col-num pf-sortable" data-sort="own" onclick="npsSort('own')" style="cursor:pointer">지분율</th>
       </tr>
     </thead>
     <tbody>
@@ -609,6 +610,33 @@ def _build_html(
   }} else {{
     _init();
   }}
+
+  // Table sort
+  let _npsSortKey = 'mv';
+  let _npsSortAsc = false;
+  window.npsSort = function(key) {{
+    const table = document.getElementById('npsTable');
+    if (!table) return;
+    if (_npsSortKey === key) {{ _npsSortAsc = !_npsSortAsc; }}
+    else {{ _npsSortKey = key; _npsSortAsc = key === 'name'; }}
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a, b) => {{
+      let va, vb;
+      if (key === 'name') {{
+        va = a.dataset.name || ''; vb = b.dataset.name || '';
+        return _npsSortAsc ? va.localeCompare(vb, 'ko') : vb.localeCompare(va, 'ko');
+      }}
+      va = parseFloat(a.dataset[key]) || 0;
+      vb = parseFloat(b.dataset[key]) || 0;
+      return _npsSortAsc ? va - vb : vb - va;
+    }});
+    rows.forEach(r => tbody.appendChild(r));
+    table.querySelectorAll('th.pf-sortable').forEach(th => {{
+      const base = th.textContent.replace(/[▲▼]/g, '').trim();
+      th.textContent = th.dataset.sort === key ? base + (_npsSortAsc ? ' ▲' : ' ▼') : base;
+    }});
+  }};
 }})();
 </script>
 """
@@ -709,7 +737,11 @@ async def run_nps_snapshot(snap_date: str | None = None):
     await cache.save_nps_holdings(snap_date, db_items)
     logger.info("NPS: holdings saved (%d rows)", len(db_items))
 
-    # 7. Generate HTML (use filtered db_items which have valid stock codes)
+    # 7. Fetch KOSPI history for NAV overlay
+    nav_dates = [s["date"] for s in nav_history]
+    kospi_history = _fetch_kospi_history(nav_dates)
+
+    # 8. Generate HTML (use filtered db_items which have valid stock codes)
     generated_html = _build_html(
         snap_date=snap_date,
         holdings=db_items,
@@ -720,6 +752,7 @@ async def run_nps_snapshot(snap_date: str | None = None):
         ytd=ytd,
         nav_history=nav_history,
         value_history=value_history,
+        kospi_history=kospi_history,
     )
 
     # 8. Save snapshot

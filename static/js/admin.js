@@ -1,11 +1,7 @@
 /* Admin dashboard */
 
 let _adminLoaded = false;
-
-function showAdminNav() {
-  const btn = document.getElementById('adminNavBtn');
-  if (btn) btn.style.display = '';
-}
+let _liveInterval = null;
 
 async function loadAdminView() {
   const container = document.getElementById('adminContent');
@@ -26,6 +22,7 @@ async function loadAdminView() {
     const users = await usersRes.json();
     container.innerHTML = _renderAdmin(batch, server, db, users);
     _adminLoaded = true;
+    _startLiveUpdates();
   } catch (e) {
     container.innerHTML = `<div style="color:var(--text-secondary);padding:40px;">어드민 데이터를 불러오지 못했습니다.</div>`;
   }
@@ -35,10 +32,10 @@ function _renderAdmin(batch, server, db, users) {
   return `
     <div class="admin-dashboard">
       <h2 class="admin-title">시스템 관리</h2>
-      ${_renderServerCard(server)}
+      <div id="adminLiveSection">${_renderServerCard(server)}</div>
       ${_renderBatchSection(batch)}
-      ${_renderDbSection(db)}
       ${_renderUsersSection(users)}
+      ${_renderDbSection(db)}
     </div>
   `;
 }
@@ -52,6 +49,11 @@ function _renderServerCard(s) {
   const diskUsed = s.disk?.used || 0;
   const diskPct = diskTotal ? Math.round(diskUsed / diskTotal * 100) : 0;
 
+  // CPU load: first number / 4 cores * 100
+  const loadParts = (s.load_avg || '').split(' ');
+  const load1m = parseFloat(loadParts[0]) || 0;
+  const loadPct = Math.round(load1m / 4 * 100);
+
   return `
     <div class="admin-section">
       <h3>서버 상태</h3>
@@ -60,17 +62,19 @@ function _renderServerCard(s) {
           <div class="admin-card-label">가동 시간</div>
           <div class="admin-card-value">${s.uptime || '-'}</div>
         </div>
-        <div class="admin-card">
-          <div class="admin-card-label">CPU 온도</div>
+        <div class="admin-card" id="adminCpuTemp">
+          <div class="admin-card-label">CPU Temp</div>
           <div class="admin-card-value">${s.cpu_temp != null ? s.cpu_temp.toFixed(1) + '°C' : '-'}</div>
+          ${s.cpu_temp != null ? _progressBar(Math.round(s.cpu_temp / 85 * 100)) : ''}
         </div>
-        <div class="admin-card">
-          <div class="admin-card-label">부하</div>
-          <div class="admin-card-value">${s.load_avg || '-'}</div>
+        <div class="admin-card" id="adminCpuLoad">
+          <div class="admin-card-label">CPU Load (1 min)</div>
+          <div class="admin-card-value">${loadPct}%</div>
+          ${_progressBar(loadPct)}
         </div>
-        <div class="admin-card">
+        <div class="admin-card" id="adminMemory">
           <div class="admin-card-label">메모리</div>
-          <div class="admin-card-value">${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)}</div>
+          <div class="admin-card-value">${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)} (${memPct}%)</div>
           ${_progressBar(memPct)}
         </div>
         <div class="admin-card">
@@ -82,6 +86,60 @@ function _renderServerCard(s) {
     </div>
   `;
 }
+
+// --- Live updates every 5s for CPU temp, load, memory ---
+
+function _startLiveUpdates() {
+  if (_liveInterval) clearInterval(_liveInterval);
+  _liveInterval = setInterval(_updateLiveStats, 5000);
+}
+
+async function _updateLiveStats() {
+  try {
+    const res = await apiFetch('/api/admin/server-stats');
+    const s = await res.json();
+
+    // CPU Temp
+    const tempEl = document.getElementById('adminCpuTemp');
+    if (tempEl && s.cpu_temp != null) {
+      const tempPct = Math.round(s.cpu_temp / 85 * 100);
+      tempEl.querySelector('.admin-card-value').textContent = s.cpu_temp.toFixed(1) + '°C';
+      tempEl.querySelector('.admin-progress-fill').style.width = tempPct + '%';
+      tempEl.querySelector('.admin-progress-fill').style.background = _progressColor(tempPct);
+    }
+
+    // CPU Load
+    const loadEl = document.getElementById('adminCpuLoad');
+    if (loadEl) {
+      const loadParts = (s.load_avg || '').split(' ');
+      const load1m = parseFloat(loadParts[0]) || 0;
+      const loadPct = Math.round(load1m / 4 * 100);
+      loadEl.querySelector('.admin-card-value').textContent = loadPct + '%';
+      loadEl.querySelector('.admin-progress-fill').style.width = loadPct + '%';
+      loadEl.querySelector('.admin-progress-fill').style.background = _progressColor(loadPct);
+    }
+
+    // Memory
+    const memEl = document.getElementById('adminMemory');
+    if (memEl) {
+      const memTotal = s.memory?.MemTotal || 0;
+      const memAvail = s.memory?.MemAvailable || 0;
+      const memUsed = memTotal - memAvail;
+      const memPct = memTotal ? Math.round(memUsed / memTotal * 100) : 0;
+      memEl.querySelector('.admin-card-value').textContent = `${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)} (${memPct}%)`;
+      memEl.querySelector('.admin-progress-fill').style.width = memPct + '%';
+      memEl.querySelector('.admin-progress-fill').style.background = _progressColor(memPct);
+    }
+  } catch (e) {
+    // Silently ignore live update failures
+  }
+}
+
+function _progressColor(pct) {
+  return pct > 85 ? 'var(--color-danger, #e74c3c)' : pct > 60 ? 'var(--color-warning, #f39c12)' : 'var(--color-success, #27ae60)';
+}
+
+// --- Batch section ---
 
 function _renderBatchSection(jobs) {
   const rows = jobs.map(j => {
@@ -114,19 +172,7 @@ function _renderBatchSection(jobs) {
   `;
 }
 
-function _renderDbSection(db) {
-  const tables = Object.entries(db.tables || {}).sort((a, b) => b[1] - a[1]);
-  const rows = tables.map(([name, count]) => `<tr><td>${name}</td><td class="admin-num">${count.toLocaleString()}</td></tr>`).join('');
-  return `
-    <div class="admin-section">
-      <h3>데이터베이스 <span class="admin-sub">${_fmtBytes(db.db_size_bytes || 0)}</span></h3>
-      <table class="admin-table admin-table-compact">
-        <thead><tr><th>테이블</th><th>행 수</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `;
-}
+// --- Users section ---
 
 function _renderUsersSection(users) {
   const rows = users.map(u => `
@@ -143,6 +189,22 @@ function _renderUsersSection(users) {
       <h3>사용자 <span class="admin-sub">${users.length}명</span></h3>
       <table class="admin-table">
         <thead><tr><th>이름</th><th>이메일</th><th>역할</th><th>최근 로그인</th><th>가입일</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// --- DB section ---
+
+function _renderDbSection(db) {
+  const tables = Object.entries(db.tables || {}).sort((a, b) => b[1] - a[1]);
+  const rows = tables.map(([name, count]) => `<tr><td>${name}</td><td class="admin-num">${count.toLocaleString()}</td></tr>`).join('');
+  return `
+    <div class="admin-section">
+      <h3>데이터베이스 <span class="admin-sub">${_fmtBytes(db.db_size_bytes || 0)}</span></h3>
+      <table class="admin-table admin-table-compact">
+        <thead><tr><th>테이블</th><th>행 수</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
@@ -206,7 +268,6 @@ function _fmtBytes(bytes) {
 
 function _fmtTimestamp(ts) {
   if (!ts || ts === 'n/a') return '-';
-  // systemd timestamp format: "Thu 2026-04-03 22:00:02 KST"
   const m = ts.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/);
   if (m) return `${m[1]} ${m[2]}`;
   return ts.slice(0, 16);
@@ -218,7 +279,7 @@ function _statusLabel(s) {
 }
 
 function _progressBar(pct) {
-  const color = pct > 85 ? 'var(--color-danger, #e74c3c)' : pct > 60 ? 'var(--color-warning, #f39c12)' : 'var(--color-success, #27ae60)';
+  const color = _progressColor(pct);
   return `<div class="admin-progress"><div class="admin-progress-fill" style="width:${pct}%;background:${color}"></div></div>`;
 }
 

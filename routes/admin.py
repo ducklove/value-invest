@@ -16,7 +16,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
+_STANDALONE_MODE = False  # Set True when running as separate admin server
+
+
 async def _require_admin(request: Request) -> dict:
+    if _STANDALONE_MODE:
+        return {"google_sub": "admin", "is_admin": True}
     user = await get_current_user(request)
     if not user or not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
