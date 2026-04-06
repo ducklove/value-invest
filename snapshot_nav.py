@@ -134,6 +134,7 @@ async def run_all_snapshots():
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", google_sub[:8], e)
     await _save_gold_close()
+    await cache.close_db()
 
 
 if __name__ == "__main__":

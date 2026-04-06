@@ -734,6 +734,7 @@ async def run_nps_snapshot(snap_date: str | None = None):
         "NPS snapshot saved: date=%s total_value=%.0f nav=%.2f count=%d",
         snap_date, total_value, nav, len(holdings),
     )
+    await cache.close_db()
 
 
 if __name__ == "__main__":
