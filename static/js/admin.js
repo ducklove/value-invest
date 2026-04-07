@@ -74,7 +74,7 @@ function _renderServerCard(s) {
           ${s.cpu_temp != null ? _progressBar(Math.round(s.cpu_temp / 85 * 100)) : ''}
         </div>
         <div class="admin-card" id="adminCpuLoad">
-          <div class="admin-card-label">CPU Load (1 min)</div>
+          <div class="admin-card-label">CPU 사용률</div>
           <div class="admin-card-value">${loadPct}%</div>
           ${_progressBar(loadPct)}
         </div>
