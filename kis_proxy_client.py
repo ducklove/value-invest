@@ -12,17 +12,37 @@ BASE_URL = os.getenv("KIS_PROXY_BASE_URL", "http://cantabile.tplinkdns.com:3288"
 TIMEOUT_SECONDS = float(os.getenv("KIS_PROXY_TIMEOUT_SECONDS", "20"))
 _client: httpx.AsyncClient | None = None
 _client_lock: asyncio.Lock | None = None
-# Cap concurrent in-flight requests to the upstream KIS proxy so a slow
-# upstream cannot exhaust this server's connection pool / event loop.
-_MAX_CONCURRENT = int(os.getenv("KIS_PROXY_MAX_CONCURRENT", "8"))
-_request_sem: asyncio.Semaphore | None = None
+
+# Hard rate limit: KIS Open API caps at 5 transactions / second per app key
+# and returns EGW00201 ("초당 거래건수를 초과하였습니다.") on overshoot. We
+# stay safely below by serializing every outgoing request through an async
+# interval limiter at ~4 req/s. A semaphore alone is NOT enough — concurrent
+# requests that each take <250ms still blow the per-second budget.
+_RATE_PER_SEC = float(os.getenv("KIS_PROXY_RATE_PER_SEC", "4"))
+_MIN_INTERVAL = 1.0 / _RATE_PER_SEC
+_rate_lock: asyncio.Lock | None = None
+_last_send_ts: float = 0.0
 
 
-def _get_request_sem() -> asyncio.Semaphore:
-    global _request_sem
-    if _request_sem is None:
-        _request_sem = asyncio.Semaphore(_MAX_CONCURRENT)
-    return _request_sem
+def _get_rate_lock() -> asyncio.Lock:
+    global _rate_lock
+    if _rate_lock is None:
+        _rate_lock = asyncio.Lock()
+    return _rate_lock
+
+
+async def _acquire_rate_slot() -> None:
+    """Block until the next outgoing request slot is available.
+    Strict serial spacing of _MIN_INTERVAL between request *starts*."""
+    global _last_send_ts
+    async with _get_rate_lock():
+        loop = asyncio.get_event_loop()
+        now = loop.time()
+        wait = _last_send_ts + _MIN_INTERVAL - now
+        if wait > 0:
+            await asyncio.sleep(wait)
+            now = loop.time()
+        _last_send_ts = now
 
 
 class KISProxyError(RuntimeError):
@@ -66,12 +86,11 @@ async def _get_client() -> httpx.AsyncClient:
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     url = f"{BASE_URL}{path}"
     last_exc = None
-    sem = _get_request_sem()
     for attempt in range(3):
         try:
             client = await _get_client()
-            async with sem:
-                response = await client.get(url, params=params)
+            await _acquire_rate_slot()
+            response = await client.get(url, params=params)
             response.raise_for_status()
             payload = response.json()
             return payload if isinstance(payload, dict) else {}
