@@ -213,7 +213,7 @@ def _get_server_stats() -> dict:
     except Exception:
         pass
 
-    # Load average
+    # Load average (kept for reference / debug)
     load_avg = ""
     try:
         with open("/proc/loadavg") as f:
@@ -231,10 +231,49 @@ def _get_server_stats() -> dict:
     }
 
 
+def _read_cpu_times() -> tuple[int, int] | None:
+    """Return (total_jiffies, idle_jiffies) for the aggregate 'cpu' line in
+    /proc/stat. The aggregate already sums every core, so a fully loaded
+    quad-core box reaches the 100% scale naturally."""
+    try:
+        with open("/proc/stat") as f:
+            line = f.readline()
+        parts = line.split()
+        if not parts or parts[0] != "cpu":
+            return None
+        nums = [int(x) for x in parts[1:]]
+        # fields: user, nice, system, idle, iowait, irq, softirq, steal, ...
+        idle = nums[3] + (nums[4] if len(nums) > 4 else 0)  # idle + iowait
+        total = sum(nums)
+        return total, idle
+    except Exception:
+        return None
+
+
+async def _measure_cpu_pct(interval: float = 0.2) -> float | None:
+    """True CPU utilization percent (0–100) over a short sampling window,
+    summed across all cores: 4 fully-pegged cores on this quad-core Pi → 100%."""
+    a = _read_cpu_times()
+    if a is None:
+        return None
+    await asyncio.sleep(interval)
+    b = _read_cpu_times()
+    if b is None:
+        return None
+    total_delta = b[0] - a[0]
+    idle_delta = b[1] - a[1]
+    if total_delta <= 0:
+        return None
+    pct = (1.0 - idle_delta / total_delta) * 100.0
+    return max(0.0, min(100.0, pct))
+
+
 @router.get("/server-stats")
 async def server_stats(request: Request):
     await _require_admin(request)
-    return _get_server_stats()
+    stats = _get_server_stats()
+    stats["cpu_pct"] = await _measure_cpu_pct()
+    return stats
 
 
 # ---------------------------------------------------------------------------

@@ -49,10 +49,16 @@ function _renderServerCard(s) {
   const diskUsed = s.disk?.used || 0;
   const diskPct = diskTotal ? Math.round(diskUsed / diskTotal * 100) : 0;
 
-  // CPU load: first number / 4 cores * 100
-  const loadParts = (s.load_avg || '').split(' ');
-  const load1m = parseFloat(loadParts[0]) || 0;
-  const loadPct = Math.round(load1m / 4 * 100);
+  // True CPU utilization (server samples /proc/stat); fall back to loadavg
+  // estimate only if cpu_pct is missing.
+  let loadPct;
+  if (typeof s.cpu_pct === 'number') {
+    loadPct = Math.round(s.cpu_pct);
+  } else {
+    const loadParts = (s.load_avg || '').split(' ');
+    const load1m = parseFloat(loadParts[0]) || 0;
+    loadPct = Math.round(load1m / 4 * 100);
+  }
 
   return `
     <div class="admin-section">
@@ -108,12 +114,17 @@ async function _updateLiveStats() {
       tempEl.querySelector('.admin-progress-fill').style.background = _progressColor(tempPct);
     }
 
-    // CPU Load
+    // CPU Load (true utilization from /proc/stat)
     const loadEl = document.getElementById('adminCpuLoad');
     if (loadEl) {
-      const loadParts = (s.load_avg || '').split(' ');
-      const load1m = parseFloat(loadParts[0]) || 0;
-      const loadPct = Math.round(load1m / 4 * 100);
+      let loadPct;
+      if (typeof s.cpu_pct === 'number') {
+        loadPct = Math.round(s.cpu_pct);
+      } else {
+        const loadParts = (s.load_avg || '').split(' ');
+        const load1m = parseFloat(loadParts[0]) || 0;
+        loadPct = Math.round(load1m / 4 * 100);
+      }
       loadEl.querySelector('.admin-card-value').textContent = loadPct + '%';
       loadEl.querySelector('.admin-progress-fill').style.width = loadPct + '%';
       loadEl.querySelector('.admin-progress-fill').style.background = _progressColor(loadPct);
