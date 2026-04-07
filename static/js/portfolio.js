@@ -191,25 +191,43 @@ function renderPortfolio() {
         if (counts[gn] !== undefined) counts[gn]++;
         else counts[gn] = 1;
       });
-      filterBar.innerHTML = '';
-      pfGroups.forEach(g => {
+      // Build a fingerprint to avoid unnecessary DOM rebuilds (prevents click loss during rAF re-renders)
+      const fingerprint = pfGroups.map(g => {
         const active = pfGroupFilter === null || pfGroupFilter.has(g.group_name);
-        const btn = document.createElement('button');
-        btn.className = 'pf-filter-btn' + (active ? ' active' : '');
-        btn.textContent = g.group_name + ' ';
-        const cnt = document.createElement('span');
-        cnt.className = 'pf-filter-cnt';
-        cnt.textContent = counts[g.group_name] || 0;
-        btn.appendChild(cnt);
-        btn.addEventListener('click', () => pfToggleGroupFilter(g.group_name));
-        filterBar.appendChild(btn);
-      });
-      const gearBtn = document.createElement('button');
-      gearBtn.className = 'pf-filter-btn pf-group-manage-btn';
-      gearBtn.title = '그룹 관리';
-      gearBtn.textContent = '\u2699';
-      gearBtn.addEventListener('click', () => openGroupModal());
-      filterBar.appendChild(gearBtn);
+        return `${g.group_name}:${counts[g.group_name] || 0}:${active ? 1 : 0}`;
+      }).join('|');
+      if (filterBar.dataset.fingerprint !== fingerprint) {
+        filterBar.dataset.fingerprint = fingerprint;
+        filterBar.innerHTML = '';
+        // Set up delegated click handler once
+        if (!filterBar.dataset.delegated) {
+          filterBar.dataset.delegated = '1';
+          filterBar.addEventListener('click', (e) => {
+            const btn = e.target.closest('.pf-filter-btn');
+            if (!btn) return;
+            if (btn.classList.contains('pf-group-manage-btn')) { openGroupModal(); return; }
+            const gn = btn.dataset.groupName;
+            if (gn) pfToggleGroupFilter(gn);
+          });
+        }
+        pfGroups.forEach(g => {
+          const active = pfGroupFilter === null || pfGroupFilter.has(g.group_name);
+          const btn = document.createElement('button');
+          btn.className = 'pf-filter-btn' + (active ? ' active' : '');
+          btn.dataset.groupName = g.group_name;
+          btn.textContent = g.group_name + ' ';
+          const cnt = document.createElement('span');
+          cnt.className = 'pf-filter-cnt';
+          cnt.textContent = counts[g.group_name] || 0;
+          btn.appendChild(cnt);
+          filterBar.appendChild(btn);
+        });
+        const gearBtn = document.createElement('button');
+        gearBtn.className = 'pf-filter-btn pf-group-manage-btn';
+        gearBtn.title = '그룹 관리';
+        gearBtn.textContent = '\u2699';
+        filterBar.appendChild(gearBtn);
+      }
     }
   }
 
@@ -431,7 +449,7 @@ function renderPortfolio() {
       </div>
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
-  _renderSummarySparklines(_l ? totalMarketValue : null);
+  _renderSummarySparklines(_l ? grandTotalMarketValue : null);
 
   // Table body — apply FX conversion to price columns
   const _fp = v => {
