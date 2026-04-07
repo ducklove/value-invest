@@ -894,24 +894,12 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
                 return await kis_proxy_client.get_quote(stock_code, market=None)
             raise
 
-    quote_payload, history_payload = await asyncio.gather(
-        _get_quote_with_nxt_fallback(),
-        kis_proxy_client.get_history(
-            stock_code,
-            start_date=start_date,
-            end_date=end_date,
-            period="D",
-            adjusted=True,
-        ),
-    )
-
+    # Issue the quote call first; only fall back to /history if the quote
+    # response is missing fields we need (price / previous_close). This
+    # halves KIS proxy traffic for the common case and lets the per-call
+    # rate limiter serve twice as many distinct stocks per second.
+    quote_payload = await _get_quote_with_nxt_fallback()
     summary = _quote_summary(quote_payload)
-    history_items = _sorted_history_items(history_payload.get("items"))
-    latest_history_date = (
-        _parse_date(_get_first(history_items[-1], "stck_bsop_date", "date", "trade_date", "business_date"))
-        if history_items
-        else None
-    )
 
     latest_price = _safe_float(
         _get_first(summary, "current_price", "price", "stck_prpr"),
@@ -930,20 +918,42 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
         zero_as_none=False,
     )
 
-    if previous_close is None:
-        if latest_price is not None and change is not None:
-            previous_close = round(latest_price - change, 2)
-        elif len(history_items) >= 2:
+    if previous_close is None and latest_price is not None and change is not None:
+        previous_close = round(latest_price - change, 2)
+
+    history_items: list = []
+    latest_history_date = None
+    need_history = latest_price is None or previous_close is None
+    if need_history:
+        try:
+            history_payload = await kis_proxy_client.get_history(
+                stock_code,
+                start_date=start_date,
+                end_date=end_date,
+                period="D",
+                adjusted=True,
+            )
+        except Exception as exc:
+            logger.warning("history fallback 실패(%s): %s", stock_code, exc)
+            history_payload = {}
+        history_items = _sorted_history_items(history_payload.get("items"))
+        latest_history_date = (
+            _parse_date(_get_first(history_items[-1], "stck_bsop_date", "date", "trade_date", "business_date"))
+            if history_items
+            else None
+        )
+
+        if previous_close is None and len(history_items) >= 2:
             previous_close = _safe_float(
                 _get_first(history_items[-2], "stck_clpr", "close_price", "close"),
                 zero_as_none=False,
             )
 
-    if latest_price is None and history_items:
-        latest_price = _safe_float(
-            _get_first(history_items[-1], "stck_clpr", "close_price", "close"),
-            zero_as_none=False,
-        )
+        if latest_price is None and history_items:
+            latest_price = _safe_float(
+                _get_first(history_items[-1], "stck_clpr", "close_price", "close"),
+                zero_as_none=False,
+            )
 
     if change is None and latest_price is not None and previous_close is not None:
         change = round(latest_price - previous_close, 2)
