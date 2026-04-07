@@ -325,7 +325,17 @@ async def _fetch_quote(stock_code: str) -> dict:
     elif stock_code in _CRYPTO_UPBIT_MAP:
         q = await _fetch_crypto_quote(stock_code)
     elif _is_korean_stock(stock_code):
-        q = await stock_price.fetch_quote_snapshot(stock_code)
+        ws_q = kis_ws_manager.get_cached_quote(stock_code)
+        if ws_q and ws_q.get("price") is not None:
+            q = {
+                "date": ws_q.get("date", ""),
+                "price": ws_q["price"],
+                "previous_close": ws_q.get("previous_close"),
+                "change": ws_q.get("change"),
+                "change_pct": ws_q.get("change_pct"),
+            }
+        else:
+            q = await stock_price.fetch_quote_snapshot(stock_code)
     else:
         # Use resolved ticker if available, otherwise try to resolve
         ticker = _ticker_map.get(stock_code, stock_code)
