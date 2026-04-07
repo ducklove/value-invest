@@ -12,6 +12,17 @@ BASE_URL = os.getenv("KIS_PROXY_BASE_URL", "http://cantabile.tplinkdns.com:3288"
 TIMEOUT_SECONDS = float(os.getenv("KIS_PROXY_TIMEOUT_SECONDS", "20"))
 _client: httpx.AsyncClient | None = None
 _client_lock: asyncio.Lock | None = None
+# Cap concurrent in-flight requests to the upstream KIS proxy so a slow
+# upstream cannot exhaust this server's connection pool / event loop.
+_MAX_CONCURRENT = int(os.getenv("KIS_PROXY_MAX_CONCURRENT", "8"))
+_request_sem: asyncio.Semaphore | None = None
+
+
+def _get_request_sem() -> asyncio.Semaphore:
+    global _request_sem
+    if _request_sem is None:
+        _request_sem = asyncio.Semaphore(_MAX_CONCURRENT)
+    return _request_sem
 
 
 class KISProxyError(RuntimeError):
@@ -55,10 +66,12 @@ async def _get_client() -> httpx.AsyncClient:
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     url = f"{BASE_URL}{path}"
     last_exc = None
+    sem = _get_request_sem()
     for attempt in range(3):
         try:
             client = await _get_client()
-            response = await client.get(url, params=params)
+            async with sem:
+                response = await client.get(url, params=params)
             response.raise_for_status()
             payload = response.json()
             return payload if isinstance(payload, dict) else {}

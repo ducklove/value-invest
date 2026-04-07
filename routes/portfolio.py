@@ -57,13 +57,14 @@ def _common_stock_code(code: str) -> str:
 
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(
-                f"https://finance.naver.com/item/main.naver?code={stock_code}",
-                follow_redirects=True,
-            )
-            m = re.search(r"<title>\s*(.+?)\s*:\s*N", resp.text)
-            return m.group(1).strip() if m else None
+        async with _NAVER_SEM:
+            async with httpx.AsyncClient(timeout=_NAVER_HTTP_TIMEOUT) as client:
+                resp = await client.get(
+                    f"https://finance.naver.com/item/main.naver?code={stock_code}",
+                    follow_redirects=True,
+                )
+        m = re.search(r"<title>\s*(.+?)\s*:\s*N", resp.text)
+        return m.group(1).strip() if m else None
     except Exception:
         return None
 
@@ -87,17 +88,18 @@ async def _resolve_name(stock_code: str) -> str | None:
 async def _fetch_naver_world_stock(reuters_code: str) -> dict | None:
     """Fetch foreign stock info from Naver world stock API."""
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(
-                f"https://api.stock.naver.com/stock/{reuters_code}/basic",
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            if resp.status_code != 200:
-                return None
-            d = resp.json()
-            if not d.get("stockName"):
-                return None
-            return d
+        async with _NAVER_SEM:
+            async with httpx.AsyncClient(timeout=_NAVER_HTTP_TIMEOUT) as client:
+                resp = await client.get(
+                    f"https://api.stock.naver.com/stock/{reuters_code}/basic",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+        if resp.status_code != 200:
+            return None
+        d = resp.json()
+        if not d.get("stockName"):
+            return None
+        return d
     except Exception:
         return None
 
@@ -119,6 +121,28 @@ _CURRENCY_MAP = {
     "TWD": "TWN", "VND": "VNM",
 }
 
+# --- Concurrency bounds & deadlines for external calls ---
+# Limits how many in-flight calls can hit each external dependency at once,
+# so a slow upstream cannot pin every uvicorn worker thread.
+_NAVER_SEM = asyncio.Semaphore(6)
+_YF_SEM = asyncio.Semaphore(3)
+_YF_CALL_TIMEOUT = 8.0
+_NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
+
+# Negative cache: tickers we already failed to resolve via yfinance — avoids
+# re-running the 16-suffix loop on every quote refresh.
+_failed_yf_tickers: set[str] = set()
+
+
+async def _yf_run(fn):
+    """Run a synchronous yfinance call in the executor, bounded by a
+    semaphore and a hard wall-clock deadline. Raises on timeout."""
+    loop = asyncio.get_event_loop()
+    async with _YF_SEM:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, fn), timeout=_YF_CALL_TIMEOUT
+        )
+
 
 async def _resolve_foreign_name(ticker: str) -> str | None:
     """Try Naver first, then yfinance as fallback."""
@@ -137,21 +161,35 @@ async def _resolve_foreign_name(ticker: str) -> str | None:
 
 
 async def _yfinance_find_ticker(ticker: str) -> str | None:
-    """Find a working yfinance ticker, trying various exchange suffixes."""
+    """Find a working yfinance ticker, trying various exchange suffixes.
+    Bounded by _YF_SEM and a per-call timeout; results (positive and negative)
+    are cached to avoid re-running the suffix loop on every quote refresh."""
+    if ticker in _ticker_map:
+        return _ticker_map[ticker]
+    if ticker in _failed_yf_tickers:
+        return None
     try:
         import yfinance as yf
-        loop = asyncio.get_event_loop()
         candidates = [ticker] if "." in ticker else [ticker + s for s in _YFINANCE_SUFFIXES]
+
+        def _probe(cand):
+            t = yf.Ticker(cand)
+            info = t.info
+            if info.get("shortName") or info.get("longName"):
+                return cand
+            return None
+
         for candidate in candidates:
             try:
-                t = await loop.run_in_executor(None, partial(yf.Ticker, candidate))
-                info = await loop.run_in_executor(None, lambda: t.info)
-                if info.get("shortName") or info.get("longName"):
-                    return candidate
-            except Exception:
+                hit = await _yf_run(partial(_probe, candidate))
+                if hit:
+                    _ticker_map[ticker] = hit
+                    return hit
+            except (asyncio.TimeoutError, Exception):
                 continue
     except Exception:
         pass
+    _failed_yf_tickers.add(ticker)
     return None
 
 
@@ -161,11 +199,13 @@ async def _yfinance_resolve_name(ticker: str) -> str | None:
         found = await _yfinance_find_ticker(ticker)
         if not found:
             return None
-        loop = asyncio.get_event_loop()
-        t = await loop.run_in_executor(None, partial(yf.Ticker, found))
-        info = await loop.run_in_executor(None, lambda: t.info)
-        return info.get("shortName") or info.get("longName")
-    except Exception:
+
+        def _name(c):
+            info = yf.Ticker(c).info
+            return info.get("shortName") or info.get("longName")
+
+        return await _yf_run(partial(_name, found))
+    except (asyncio.TimeoutError, Exception):
         return None
 
 
@@ -212,14 +252,21 @@ async def _fetch_foreign_quote(reuters_code: str) -> dict:
 
 
 async def _yfinance_fetch_quote(ticker: str) -> dict:
+    if ticker in _failed_yf_tickers:
+        return {}
     try:
         import yfinance as yf
-        loop = asyncio.get_event_loop()
-        t = await loop.run_in_executor(None, partial(yf.Ticker, ticker))
-        fi = await loop.run_in_executor(None, lambda: t.fast_info)
-        price = fi.last_price
-        prev = fi.previous_close
-        currency = (fi.currency or "USD").upper()
+
+        def _snap(c):
+            t = yf.Ticker(c)
+            fi = t.fast_info
+            return fi.last_price, fi.previous_close, (fi.currency or "USD").upper()
+
+        try:
+            price, prev, currency = await _yf_run(partial(_snap, ticker))
+        except asyncio.TimeoutError:
+            logger.warning("yfinance 시세 타임아웃(%s)", ticker)
+            return {}
         change = round(price - prev, 4) if price and prev else 0
         change_pct = round(change / prev * 100, 2) if prev else None
         nation = _CURRENCY_MAP.get(currency, "USA")
@@ -345,7 +392,8 @@ async def _fetch_quote(stock_code: str) -> dict:
             if resolved and resolved != stock_code:
                 _ticker_map[stock_code] = resolved
                 q = await _fetch_foreign_quote(resolved)
-    _quote_cache[stock_code] = (now, q)
+    if q and q.get("price") is not None:
+        _quote_cache[stock_code] = (now, q)
     return q
 
 
@@ -435,13 +483,12 @@ async def _detect_currency(stock_code: str) -> str:
     # yfinance fallback
     try:
         import yfinance as yf
-        loop = asyncio.get_event_loop()
         found = await _yfinance_find_ticker(stock_code)
         if found:
-            t = await loop.run_in_executor(None, partial(yf.Ticker, found))
-            fi = await loop.run_in_executor(None, lambda: t.fast_info)
-            return (fi.currency or "USD").upper()
-    except Exception:
+            def _curr(c):
+                return (yf.Ticker(c).fast_info.currency or "USD").upper()
+            return await _yf_run(partial(_curr, found))
+    except (asyncio.TimeoutError, Exception):
         pass
     return "USD"
 
@@ -469,16 +516,17 @@ async def _detect_market_type(code: str) -> str:
     if code in _market_type_cache:
         return _market_type_cache[code]
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(
-                f"https://finance.naver.com/item/main.naver?code={code}",
-                headers={"User-Agent": "Mozilla/5.0"},
-                follow_redirects=True,
-            )
-            if "코스닥" in resp.text[:30000]:
-                _market_type_cache[code] = "KOSDAQ"
-            else:
-                _market_type_cache[code] = "KOSPI"
+        async with _NAVER_SEM:
+            async with httpx.AsyncClient(timeout=_NAVER_HTTP_TIMEOUT) as client:
+                resp = await client.get(
+                    f"https://finance.naver.com/item/main.naver?code={code}",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    follow_redirects=True,
+                )
+        if "코스닥" in resp.text[:30000]:
+            _market_type_cache[code] = "KOSDAQ"
+        else:
+            _market_type_cache[code] = "KOSPI"
     except Exception:
         _market_type_cache[code] = "KOSPI"
     return _market_type_cache[code]
@@ -570,15 +618,16 @@ async def _fetch_sp500_quote() -> dict:
     """Fetch S&P 500 change_pct via yfinance."""
     try:
         import yfinance as yf
-        loop = asyncio.get_event_loop()
-        t = await loop.run_in_executor(None, partial(yf.Ticker, "^GSPC"))
-        fi = await loop.run_in_executor(None, lambda: t.fast_info)
-        price = fi.last_price
-        prev = fi.previous_close
+
+        def _gspc():
+            fi = yf.Ticker("^GSPC").fast_info
+            return fi.last_price, fi.previous_close
+
+        price, prev = await _yf_run(_gspc)
         if price and prev:
             pct = round((price - prev) / prev * 100, 2)
             return {"change_pct": pct}
-    except Exception as e:
+    except (asyncio.TimeoutError, Exception) as e:
         logger.warning("S&P500 quote fetch failed: %s", e)
     return {}
 

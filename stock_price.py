@@ -614,7 +614,12 @@ async def fetch_market_data(
     end_date = date(end_year, 12, 31)
 
     loop = asyncio.get_event_loop()
-    yf_future = loop.run_in_executor(None, _get_yfinance_aux, stock_code, start_year, end_year)
+    # Bound yfinance to a hard wall-clock deadline so a stuck Yahoo response
+    # cannot pin a thread-pool worker indefinitely.
+    yf_future = asyncio.wait_for(
+        loop.run_in_executor(None, _get_yfinance_aux, stock_code, start_year, end_year),
+        timeout=15.0,
+    )
     adjusted_history_payload, raw_history_payload, dividends_payload, financials_payload, quote_payload = await asyncio.gather(
         kis_proxy_client.get_history(
             stock_code,

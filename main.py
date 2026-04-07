@@ -1,12 +1,16 @@
+import asyncio
 import json
 import logging
+import os
+import socket
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import cache
@@ -21,6 +25,36 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# --- systemd sd_notify (self-contained, no extra deps) ---
+def _sd_notify(msg: str) -> None:
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    try:
+        if addr[0] == "@":
+            addr = "\0" + addr[1:]
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+            s.connect(addr)
+            s.sendall(msg.encode("utf-8"))
+    except Exception:
+        pass
+
+
+# Updated by the watchdog/healthz loop; if this stalls, the loop is blocked.
+_last_loop_tick: float = 0.0
+
+
+async def _watchdog_loop():
+    global _last_loop_tick
+    interval = 10
+    while True:
+        _last_loop_tick = time.monotonic()
+        _sd_notify("WATCHDOG=1")
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            break
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,19 +66,36 @@ async def lifespan(app: FastAPI):
     await kis_proxy_client.init_client()
     await cache.init_db()
     await cache.delete_expired_sessions()
-    needs_corp_refresh = not await cache.is_corp_codes_loaded() or await cache.corp_codes_need_refresh()
+    try:
+        needs_corp_refresh = not await cache.is_corp_codes_loaded() or await cache.corp_codes_need_refresh()
+    except Exception as e:
+        logger.error(f"corp_codes 상태 확인 실패: {e}")
+        needs_corp_refresh = False
     if needs_corp_refresh:
         logger.info("corp_codes 테이블을 DART 기준으로 갱신합니다...")
         try:
-            codes = await dart_client.fetch_corp_codes()
+            codes = await asyncio.wait_for(dart_client.fetch_corp_codes(), timeout=45)
             await cache.save_corp_codes(codes)
             logger.info(f"{len(codes)}개 상장사 코드를 저장했습니다.")
+        except asyncio.TimeoutError:
+            logger.error("corp_codes 다운로드 타임아웃 — 기존 캐시로 계속 진행합니다.")
         except Exception as e:
             logger.error(f"corp_codes 다운로드 실패: {e}")
-    yield
-    await kis_ws_manager.stop_all()
-    await kis_proxy_client.close_client()
-    await cache.close_db()
+
+    _sd_notify("READY=1")
+    watchdog_task = asyncio.create_task(_watchdog_loop())
+    try:
+        yield
+    finally:
+        _sd_notify("STOPPING=1")
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        await kis_ws_manager.stop_all()
+        await kis_proxy_client.close_client()
+        await cache.close_db()
 
 
 app = FastAPI(title="한국 주식 가치투자 분석", lifespan=lifespan)
@@ -72,6 +123,15 @@ app.include_router(cache_router)
 app.include_router(portfolio_router)
 app.include_router(ws_quotes_router)
 app.include_router(nps_router)
+
+
+@app.get("/healthz")
+async def healthz():
+    # Liveness: this handler runs on the event loop, so a 200 response
+    # implies the loop is responsive. Also expose loop tick lag for debugging.
+    now = time.monotonic()
+    lag = max(0.0, now - _last_loop_tick) if _last_loop_tick else None
+    return JSONResponse({"status": "ok", "loop_lag_s": lag})
 
 
 @app.get("/")
