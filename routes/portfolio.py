@@ -759,28 +759,45 @@ async def stream_portfolio_quotes(request: Request):
 
     async def generate():
         import json as _json
-        now = _time.monotonic()
-        benchmark_codes = set()
-        for item in items:
-            code = item["stock_code"]
-            cached = _quote_cache.get(code)
-            was_cached = cached and (now - cached[0]) < _QUOTE_CACHE_TTL
+
+        # Fire every quote fetch in parallel — backpressure is enforced by
+        # the per-upstream semaphores (_NAVER_SEM, _YF_SEM, KIS proxy sem),
+        # so we don't serialize here. Stream results as they arrive.
+        async def _one_quote(code: str) -> tuple[str, dict]:
             try:
-                quote = await _fetch_quote(code)
+                return code, await _fetch_quote(code)
             except Exception:
-                quote = {}
+                return code, {}
+
+        quote_tasks = [asyncio.create_task(_one_quote(it["stock_code"])) for it in items]
+
+        # Resolve benchmark codes in parallel too (some need _detect_market_type).
+        async def _resolve_bc(item: dict) -> str:
+            return item.get("benchmark_code") or await _resolve_default_benchmark(item["stock_code"])
+
+        bc_task = asyncio.create_task(asyncio.gather(*[_resolve_bc(it) for it in items]))
+
+        for fut in asyncio.as_completed(quote_tasks):
+            code, quote = await fut
             yield f"data: {_json.dumps({'stock_code': code, 'quote': quote}, ensure_ascii=False)}\n\n"
-            if not was_cached:
-                await asyncio.sleep(QUOTE_RATE_INTERVAL)
-            bc = item.get("benchmark_code") or await _resolve_default_benchmark(code)
-            benchmark_codes.add(bc)
-        # Fetch and stream benchmark quotes
-        for bc in benchmark_codes:
+
+        try:
+            benchmark_codes = set(await bc_task)
+        except Exception:
+            benchmark_codes = set()
+
+        # Benchmark quotes in parallel as well.
+        async def _one_bench(bc: str) -> tuple[str, dict]:
             try:
-                bq = await _fetch_benchmark_quote(bc)
-                yield f"data: {_json.dumps({'benchmark_code': bc, 'benchmark_quote': bq}, ensure_ascii=False)}\n\n"
+                return bc, await _fetch_benchmark_quote(bc)
             except Exception:
-                pass
+                return bc, {}
+
+        bench_tasks = [asyncio.create_task(_one_bench(bc)) for bc in benchmark_codes]
+        for fut in asyncio.as_completed(bench_tasks):
+            bc, bq = await fut
+            yield f"data: {_json.dumps({'benchmark_code': bc, 'benchmark_quote': bq}, ensure_ascii=False)}\n\n"
+
         yield "data: {\"done\": true}\n\n"
 
     from fastapi.responses import StreamingResponse
