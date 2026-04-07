@@ -32,7 +32,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 WS_URI = "ws://ops.koreainvestment.com:21000"
-TR_ID = "H0STCNT0"
+# H0UNCNT0 = KRX+NXT 통합 실시간 체결가 (NXT 운영시간 08:00~20:00 동안 NXT 체결도 포함)
+TR_ID = "H0UNCNT0"
+_ACCEPTED_TR_IDS = {"H0UNCNT0", "H0STCNT0"}
 MAX_SUBSCRIPTIONS = 40  # 41 hard limit, keep 1 buffer
 
 # Priority order — lower index = higher priority
@@ -86,12 +88,12 @@ def _parse_h0stcnt0(raw: str) -> dict[str, Any] | None:
         return None
 
     _enc_flag, tr_id, _count, payload_str = parts
-    if tr_id != TR_ID:
+    if tr_id not in _ACCEPTED_TR_IDS:
         return None
 
     fields = payload_str.split("^")
     if len(fields) < 34:
-        logger.warning("H0STCNT0: expected >=34 fields, got %d", len(fields))
+        logger.warning("%s: expected >=34 fields, got %d", tr_id, len(fields))
         return None
 
     try:
