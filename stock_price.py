@@ -885,7 +885,7 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
 
     async def _get_quote_with_nxt_fallback():
         try:
-            return await kis_proxy_client.get_quote(stock_code, market=market)
+            payload = await kis_proxy_client.get_quote(stock_code, market=market)
         except kis_proxy_client.KISProxyError as exc:
             if market == "NX":
                 # NXT call failed — remember this and retry on the default market.
@@ -893,6 +893,20 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
                 logger.info("NXT 미지원 종목으로 표시 후 KRX로 재시도: %s (%s)", stock_code, exc)
                 return await kis_proxy_client.get_quote(stock_code, market=None)
             raise
+
+        # Proxy now returns HTTP 200 with current_price=0 for NXT-unlisted
+        # stocks instead of a 5xx. Detect that and fall back to KRX.
+        if market == "NX":
+            summary = _quote_summary(payload)
+            price = _safe_float(
+                _get_first(summary, "current_price", "price", "stck_prpr"),
+                zero_as_none=True,
+            )
+            if price is None:
+                kis_ws_manager.mark_nxt_unsupported(stock_code)
+                logger.info("NXT 0가 응답 → NXT 미지원으로 표시 후 KRX 재시도: %s", stock_code)
+                return await kis_proxy_client.get_quote(stock_code, market=None)
+        return payload
 
     # Issue the quote call first; only fall back to /history if the quote
     # response is missing fields we need (price / previous_close). This
