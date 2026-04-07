@@ -18,7 +18,7 @@ _client_lock: asyncio.Lock | None = None
 # stay safely below by serializing every outgoing request through an async
 # interval limiter at ~4 req/s. A semaphore alone is NOT enough — concurrent
 # requests that each take <250ms still blow the per-second budget.
-_RATE_PER_SEC = float(os.getenv("KIS_PROXY_RATE_PER_SEC", "4"))
+_RATE_PER_SEC = float(os.getenv("KIS_PROXY_RATE_PER_SEC", "8"))
 _MIN_INTERVAL = 1.0 / _RATE_PER_SEC
 _rate_lock: asyncio.Lock | None = None
 _last_send_ts: float = 0.0
