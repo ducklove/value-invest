@@ -61,9 +61,9 @@ def _active_tr_id(now: datetime | None = None) -> str:
     cur = (now or datetime.now(KST)).timetz().replace(tzinfo=None)
     if _KRX_OPEN <= cur < _KRX_CLOSE:
         return "H0STCNT0"
-    if cur < _NXT_AFTER_CLOSE:  # 00:00~09:00 또는 15:30~20:00 → NXT
+    if cur < _NXT_AFTER_CLOSE:  # 00:00~09:00 또는 15:30~21:00 → NXT
         return "H0NXCNT0"
-    return "H0STCNT0"  # 20:00 이후는 어차피 데이터 없음 — 기본값
+    return "H0STCNT0"  # 21:00 이후는 어차피 데이터 없음 — 기본값
 
 
 def _seconds_until_next_boundary(now: datetime | None = None) -> float:
@@ -107,6 +107,20 @@ def is_korean_stock(code: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _quote_cache: dict[str, dict[str, Any]] = {}
+
+# Set of KRX stock codes that have been observed to NOT trade on the NXT
+# after-hours market (KIS proxy returned a 5xx for `?market=NX`). Subsequent
+# REST quote calls during NXT hours skip the NX attempt and go straight to
+# KRX. Persistent for the process lifetime — clears on restart.
+_nxt_unsupported: set[str] = set()
+
+
+def is_nxt_unsupported(code: str) -> bool:
+    return code in _nxt_unsupported
+
+
+def mark_nxt_unsupported(code: str) -> None:
+    _nxt_unsupported.add(code)
 
 
 def get_cached_quote(code: str) -> dict[str, Any] | None:

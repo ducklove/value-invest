@@ -877,8 +877,25 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
     start_date = end_date - timedelta(days=14)
 
     market = kis_ws_manager.active_market_code()
+    # Some KRX-listed stocks are not available on the NXT after-hours market.
+    # If we previously saw a 5xx for this code on NXT, skip straight to the
+    # default (KRX) market to avoid retrying a doomed call every poll.
+    if market == "NX" and kis_ws_manager.is_nxt_unsupported(stock_code):
+        market = None
+
+    async def _get_quote_with_nxt_fallback():
+        try:
+            return await kis_proxy_client.get_quote(stock_code, market=market)
+        except kis_proxy_client.KISProxyError as exc:
+            if market == "NX":
+                # NXT call failed — remember this and retry on the default market.
+                kis_ws_manager.mark_nxt_unsupported(stock_code)
+                logger.info("NXT 미지원 종목으로 표시 후 KRX로 재시도: %s (%s)", stock_code, exc)
+                return await kis_proxy_client.get_quote(stock_code, market=None)
+            raise
+
     quote_payload, history_payload = await asyncio.gather(
-        kis_proxy_client.get_quote(stock_code, market=market),
+        _get_quote_with_nxt_fallback(),
         kis_proxy_client.get_history(
             stock_code,
             start_date=start_date,
