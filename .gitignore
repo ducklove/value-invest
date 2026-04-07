@@ -5,3 +5,4 @@ keys.txt
 *.env
 .env*
 server.log
+.superpowers/

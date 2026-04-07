@@ -32,10 +32,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 WS_URI = "ws://ops.koreainvestment.com:21000"
-# H0UNCNT0 = KRX+NXT 통합 실시간 체결가 (NXT 운영시간 08:00~20:00 동안 NXT 체결도 포함)
-TR_ID = "H0UNCNT0"
-_ACCEPTED_TR_IDS = {"H0UNCNT0", "H0STCNT0"}
-MAX_SUBSCRIPTIONS = 40  # 41 hard limit, keep 1 buffer
+# H0STCNT0 = KRX 정규시장 실시간 체결가
+# H0NXCNT0 = NXT(넥스트레이드) 실시간 체결가 (08:00~20:00)
+# H0UNCNT0(통합)은 권한 이슈로 데이터가 푸시되지 않아 두 TR을 병렬 구독한다.
+TR_IDS = ("H0STCNT0", "H0NXCNT0")
+_ACCEPTED_TR_IDS = {"H0STCNT0", "H0NXCNT0", "H0UNCNT0"}
+MAX_SUBSCRIPTIONS = 40  # KIS hard limit ~41; 종목당 2슬롯(KRX+NXT)이므로 사실상 20종목
 
 # Priority order — lower index = higher priority
 PRIORITY_ORDER: list[str] = ["portfolio", "benchmark", "sidebar", "analysis"]
@@ -143,7 +145,8 @@ class WsConnection:
         self._ws: Any = None
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
-        self._current_subs: set[str] = set()
+        # 구독 단위는 (code, tr_id) 튜플 — KRX와 NXT를 각각 구독한다.
+        self._current_subs: set[tuple[str, str]] = set()
         self._requested: dict[str, list[str]] = {}
         self.listener: asyncio.Queue = asyncio.Queue(maxsize=256)
 
@@ -169,8 +172,10 @@ class WsConnection:
                     ws_codes.append(code)
                 else:
                     rest_codes.append(code)
-        rest_codes = ws_codes[MAX_SUBSCRIPTIONS:] + rest_codes
-        ws_codes = ws_codes[:MAX_SUBSCRIPTIONS]
+        # 종목당 (KRX + NXT) 2개 구독 슬롯을 차지한다.
+        max_codes = MAX_SUBSCRIPTIONS // len(TR_IDS)
+        rest_codes = ws_codes[max_codes:] + rest_codes
+        ws_codes = ws_codes[:max_codes]
         return {"ws": ws_codes, "rest": rest_codes}
 
     async def sync_subscriptions(self) -> None:
@@ -178,25 +183,33 @@ class WsConnection:
         if self._ws is None:
             return
         plan = self._compute_plan()
-        desired = set(plan["ws"])
+        desired: set[tuple[str, str]] = {
+            (code, tr_id) for code in plan["ws"] for tr_id in TR_IDS
+        }
 
-        for code in (self._current_subs - desired):
+        for code, tr_id in (self._current_subs - desired):
             try:
-                await self._ws.send(self._make_msg(code, subscribe=False))
-                self._current_subs.discard(code)
-                logger.debug("Unsubscribed %s (slot %d)", code, self.key_slot.slot_id)
+                await self._ws.send(self._make_msg(code, tr_id, subscribe=False))
+                self._current_subs.discard((code, tr_id))
+                logger.debug(
+                    "Unsubscribed %s/%s (slot %d)",
+                    code, tr_id, self.key_slot.slot_id,
+                )
             except Exception as exc:
-                logger.warning("Unsub %s failed: %s", code, exc)
+                logger.warning("Unsub %s/%s failed: %s", code, tr_id, exc)
 
-        for code in (desired - self._current_subs):
+        for code, tr_id in (desired - self._current_subs):
             try:
-                await self._ws.send(self._make_msg(code, subscribe=True))
-                self._current_subs.add(code)
-                logger.debug("Subscribed %s (slot %d)", code, self.key_slot.slot_id)
+                await self._ws.send(self._make_msg(code, tr_id, subscribe=True))
+                self._current_subs.add((code, tr_id))
+                logger.debug(
+                    "Subscribed %s/%s (slot %d)",
+                    code, tr_id, self.key_slot.slot_id,
+                )
             except Exception as exc:
-                logger.warning("Sub %s failed: %s", code, exc)
+                logger.warning("Sub %s/%s failed: %s", code, tr_id, exc)
 
-    def _make_msg(self, code: str, *, subscribe: bool = True) -> str:
+    def _make_msg(self, code: str, tr_id: str, *, subscribe: bool = True) -> str:
         return json.dumps({
             "header": {
                 "approval_key": self.key_slot._approval_key,
@@ -206,7 +219,7 @@ class WsConnection:
             },
             "body": {
                 "input": {
-                    "tr_id": TR_ID,
+                    "tr_id": tr_id,
                     "tr_key": code,
                 }
             },
@@ -274,6 +287,11 @@ class WsConnection:
                         if raw_msg and raw_msg[0] in ("0", "1"):
                             quote = _parse_h0stcnt0(raw_msg)
                             if quote is not None:
+                                if quote["code"] not in _quote_cache:
+                                    logger.info(
+                                        "First quote: %s @ %s",
+                                        quote["code"], quote["price"],
+                                    )
                                 _quote_cache[quote["code"]] = quote
                                 try:
                                     self.listener.put_nowait(quote)
@@ -295,7 +313,7 @@ class WsConnection:
                             elif tr_id:
                                 rt_cd = ctrl.get("body", {}).get("rt_cd")
                                 msg1 = ctrl.get("body", {}).get("msg1", "")
-                                logger.debug(
+                                logger.info(
                                     "KIS ctrl (slot %d): tr_id=%s rt_cd=%s msg=%s",
                                     self.key_slot.slot_id, tr_id, rt_cd, msg1,
                                 )
