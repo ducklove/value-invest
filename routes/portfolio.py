@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from functools import partial
 
 import httpx
@@ -132,6 +133,27 @@ _NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 # Negative cache: tickers we already failed to resolve via yfinance — avoids
 # re-running the 16-suffix loop on every quote refresh.
 _failed_yf_tickers: set[str] = set()
+
+# Negative cache for any code whose last quote fetch returned empty.
+# Stops the per-poll storm against KIS proxy / Naver / yfinance for codes
+# that are temporarily (or permanently) broken upstream. TTL-based so a
+# stock that recovers will be retried after the window expires.
+_DEAD_QUOTE_TTL = 300  # seconds
+_dead_quote_cache: dict[str, float] = {}
+
+
+def _is_dead(code: str) -> bool:
+    ts = _dead_quote_cache.get(code)
+    if not ts:
+        return False
+    if (time.monotonic() - ts) < _DEAD_QUOTE_TTL:
+        return True
+    _dead_quote_cache.pop(code, None)
+    return False
+
+
+def _mark_dead(code: str) -> None:
+    _dead_quote_cache[code] = time.monotonic()
 
 
 async def _yf_run(fn):
@@ -279,6 +301,7 @@ async def _yfinance_fetch_quote(ticker: str) -> dict:
         }
     except Exception as exc:
         logger.warning("yfinance 시세 조회 실패(%s): %s", ticker, exc)
+        _failed_yf_tickers.add(ticker)
         return {}
 
 
@@ -365,6 +388,8 @@ async def _fetch_quote(stock_code: str) -> dict:
     cached = _quote_cache.get(stock_code)
     if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
         return cached[1]
+    if _is_dead(stock_code):
+        return {}
     if _is_cash_asset(stock_code):
         q = await _fetch_cash_quote(stock_code)
     elif stock_code == "KRX_GOLD":
@@ -394,6 +419,8 @@ async def _fetch_quote(stock_code: str) -> dict:
                 q = await _fetch_foreign_quote(resolved)
     if q and q.get("price") is not None:
         _quote_cache[stock_code] = (now, q)
+    else:
+        _mark_dead(stock_code)
     return q
 
 
