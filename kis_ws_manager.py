@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 WS_URI = "ws://ops.koreainvestment.com:21000"
 # H0STCNT0 = KRX 정규시장 실시간 체결가 (09:00~15:30)
-# H0NXCNT0 = NXT(넥스트레이드) 실시간 체결가 (08:00~09:00 프리, 15:30~20:00 애프터)
+# H0NXCNT0 = NXT(넥스트레이드) 실시간 체결가 (08:00~09:00 프리, 15:30~21:00 애프터)
 # 두 TR은 동일 와이어 포맷이며, 한 시점에는 둘 중 하나만 활성이므로 시간대별로
 # 단일 TR을 구독하여 종목당 1슬롯만 사용한다(통합 H0UNCNT0는 권한 이슈로 미사용).
 _ACCEPTED_TR_IDS = {"H0STCNT0", "H0NXCNT0", "H0UNCNT0"}
@@ -43,7 +43,7 @@ MAX_SUBSCRIPTIONS = 40  # KIS hard limit ~41
 KST = timezone(timedelta(hours=9))
 _KRX_OPEN = dtime(9, 0)
 _KRX_CLOSE = dtime(15, 30)
-_NXT_AFTER_CLOSE = dtime(20, 0)
+_NXT_AFTER_CLOSE = dtime(21, 0)
 
 
 def active_market_code(now: datetime | None = None) -> str:
