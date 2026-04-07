@@ -21,6 +21,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Any
 
 import websockets
@@ -32,12 +33,44 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 WS_URI = "ws://ops.koreainvestment.com:21000"
-# H0STCNT0 = KRX 정규시장 실시간 체결가
-# H0NXCNT0 = NXT(넥스트레이드) 실시간 체결가 (08:00~20:00)
-# H0UNCNT0(통합)은 권한 이슈로 데이터가 푸시되지 않아 두 TR을 병렬 구독한다.
-TR_IDS = ("H0STCNT0", "H0NXCNT0")
+# H0STCNT0 = KRX 정규시장 실시간 체결가 (09:00~15:30)
+# H0NXCNT0 = NXT(넥스트레이드) 실시간 체결가 (08:00~09:00 프리, 15:30~20:00 애프터)
+# 두 TR은 동일 와이어 포맷이며, 한 시점에는 둘 중 하나만 활성이므로 시간대별로
+# 단일 TR을 구독하여 종목당 1슬롯만 사용한다(통합 H0UNCNT0는 권한 이슈로 미사용).
 _ACCEPTED_TR_IDS = {"H0STCNT0", "H0NXCNT0", "H0UNCNT0"}
-MAX_SUBSCRIPTIONS = 40  # KIS hard limit ~41; 종목당 2슬롯(KRX+NXT)이므로 사실상 20종목
+MAX_SUBSCRIPTIONS = 40  # KIS hard limit ~41
+
+KST = timezone(timedelta(hours=9))
+_KRX_OPEN = dtime(9, 0)
+_KRX_CLOSE = dtime(15, 30)
+_NXT_AFTER_CLOSE = dtime(20, 0)
+
+
+def _active_tr_id(now: datetime | None = None) -> str:
+    """Return the TR_ID that should be subscribed at *now* (KST)."""
+    cur = (now or datetime.now(KST)).timetz().replace(tzinfo=None)
+    if _KRX_OPEN <= cur < _KRX_CLOSE:
+        return "H0STCNT0"
+    if cur < _NXT_AFTER_CLOSE:  # 00:00~09:00 또는 15:30~20:00 → NXT
+        return "H0NXCNT0"
+    return "H0STCNT0"  # 20:00 이후는 어차피 데이터 없음 — 기본값
+
+
+def _seconds_until_next_boundary(now: datetime | None = None) -> float:
+    """Seconds until the next TR_ID switch boundary in KST."""
+    cur = now or datetime.now(KST)
+    today = cur.date()
+    boundaries = [
+        datetime.combine(today, _KRX_OPEN, tzinfo=KST),
+        datetime.combine(today, _KRX_CLOSE, tzinfo=KST),
+        datetime.combine(today, _NXT_AFTER_CLOSE, tzinfo=KST),
+    ]
+    for b in boundaries:
+        if b > cur:
+            return (b - cur).total_seconds()
+    # 다음 날 09:00
+    next_open = datetime.combine(today + timedelta(days=1), _KRX_OPEN, tzinfo=KST)
+    return (next_open - cur).total_seconds()
 
 # Priority order — lower index = higher priority
 PRIORITY_ORDER: list[str] = ["portfolio", "benchmark", "sidebar", "analysis"]
@@ -145,9 +178,10 @@ class WsConnection:
         self._ws: Any = None
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
-        # 구독 단위는 (code, tr_id) 튜플 — KRX와 NXT를 각각 구독한다.
+        # 구독 단위는 (code, tr_id) — 시간대 전환 시 (code, KRX) → (code, NXT)로 교체.
         self._current_subs: set[tuple[str, str]] = set()
         self._requested: dict[str, list[str]] = {}
+        self._boundary_task: asyncio.Task | None = None
         self.listener: asyncio.Queue = asyncio.Queue(maxsize=256)
 
     # -- Subscription management ------------------------------------------
@@ -172,10 +206,8 @@ class WsConnection:
                     ws_codes.append(code)
                 else:
                     rest_codes.append(code)
-        # 종목당 (KRX + NXT) 2개 구독 슬롯을 차지한다.
-        max_codes = MAX_SUBSCRIPTIONS // len(TR_IDS)
-        rest_codes = ws_codes[max_codes:] + rest_codes
-        ws_codes = ws_codes[:max_codes]
+        rest_codes = ws_codes[MAX_SUBSCRIPTIONS:] + rest_codes
+        ws_codes = ws_codes[:MAX_SUBSCRIPTIONS]
         return {"ws": ws_codes, "rest": rest_codes}
 
     async def sync_subscriptions(self) -> None:
@@ -183,9 +215,8 @@ class WsConnection:
         if self._ws is None:
             return
         plan = self._compute_plan()
-        desired: set[tuple[str, str]] = {
-            (code, tr_id) for code in plan["ws"] for tr_id in TR_IDS
-        }
+        active_tr = _active_tr_id()
+        desired: set[tuple[str, str]] = {(code, active_tr) for code in plan["ws"]}
 
         for code, tr_id in (self._current_subs - desired):
             try:
@@ -234,7 +265,29 @@ class WsConnection:
             self._ws_loop(),
             name=f"kis-ws-slot-{self.key_slot.slot_id}",
         )
+        self._boundary_task = asyncio.create_task(
+            self._boundary_loop(),
+            name=f"kis-ws-boundary-{self.key_slot.slot_id}",
+        )
         _active_connections.add(self)
+
+    async def _boundary_loop(self) -> None:
+        """Re-sync subscriptions whenever the active TR_ID window switches."""
+        while not self._stop_event.is_set():
+            delay = _seconds_until_next_boundary() + 1.0  # 1초 버퍼
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
+                return  # stop requested
+            except asyncio.TimeoutError:
+                pass
+            try:
+                logger.info(
+                    "TR boundary reached → switching to %s (slot %d)",
+                    _active_tr_id(), self.key_slot.slot_id,
+                )
+                await self.sync_subscriptions()
+            except Exception as exc:
+                logger.warning("Boundary re-sync failed: %s", exc)
 
     async def stop(self) -> None:
         """Stop the WebSocket connection and background task."""
@@ -251,6 +304,13 @@ class WsConnection:
             except asyncio.CancelledError:
                 pass
             self._task = None
+        if self._boundary_task is not None:
+            self._boundary_task.cancel()
+            try:
+                await self._boundary_task
+            except asyncio.CancelledError:
+                pass
+            self._boundary_task = None
         _active_connections.discard(self)
 
     # -- Event loop -------------------------------------------------------
