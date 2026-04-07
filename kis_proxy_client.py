@@ -13,37 +13,6 @@ TIMEOUT_SECONDS = float(os.getenv("KIS_PROXY_TIMEOUT_SECONDS", "20"))
 _client: httpx.AsyncClient | None = None
 _client_lock: asyncio.Lock | None = None
 
-# Hard rate limit: KIS Open API caps at 5 transactions / second per app key
-# and returns EGW00201 ("초당 거래건수를 초과하였습니다.") on overshoot. We
-# stay safely below by serializing every outgoing request through an async
-# interval limiter at ~4 req/s. A semaphore alone is NOT enough — concurrent
-# requests that each take <250ms still blow the per-second budget.
-_RATE_PER_SEC = float(os.getenv("KIS_PROXY_RATE_PER_SEC", "4"))
-_MIN_INTERVAL = 1.0 / _RATE_PER_SEC
-_rate_lock: asyncio.Lock | None = None
-_last_send_ts: float = 0.0
-
-
-def _get_rate_lock() -> asyncio.Lock:
-    global _rate_lock
-    if _rate_lock is None:
-        _rate_lock = asyncio.Lock()
-    return _rate_lock
-
-
-async def _acquire_rate_slot() -> None:
-    """Block until the next outgoing request slot is available.
-    Strict serial spacing of _MIN_INTERVAL between request *starts*."""
-    global _last_send_ts
-    async with _get_rate_lock():
-        loop = asyncio.get_event_loop()
-        now = loop.time()
-        wait = _last_send_ts + _MIN_INTERVAL - now
-        if wait > 0:
-            await asyncio.sleep(wait)
-            now = loop.time()
-        _last_send_ts = now
-
 
 class KISProxyError(RuntimeError):
     pass
@@ -89,7 +58,6 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
     for attempt in range(3):
         try:
             client = await _get_client()
-            await _acquire_rate_slot()
             response = await client.get(url, params=params)
             response.raise_for_status()
             payload = response.json()
