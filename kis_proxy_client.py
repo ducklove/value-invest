@@ -90,8 +90,9 @@ def _iso(value: date | None) -> str | None:
     return value.isoformat() if value else None
 
 
-async def get_quote(symbol: str) -> dict[str, Any]:
-    return await _get(f"/v1/stocks/{symbol}/quote")
+async def get_quote(symbol: str, *, market: str | None = None) -> dict[str, Any]:
+    params = {"market": market} if market else None
+    return await _get(f"/v1/stocks/{symbol}/quote", params=params)
 
 
 async def get_history(

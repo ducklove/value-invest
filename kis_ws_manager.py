@@ -46,6 +46,16 @@ _KRX_CLOSE = dtime(15, 30)
 _NXT_AFTER_CLOSE = dtime(20, 0)
 
 
+def active_market_code(now: datetime | None = None) -> str:
+    """KIS REST FID_COND_MRKT_DIV_CODE matching the active session window.
+
+    Returns ``"J"`` for KRX 정규시간, ``"NX"`` for NXT 운영시간.
+    Mirrors :func:`_active_tr_id` so REST fallback queries the same venue
+    as the WebSocket subscription.
+    """
+    return "J" if _active_tr_id(now) == "H0STCNT0" else "NX"
+
+
 def _active_tr_id(now: datetime | None = None) -> str:
     """Return the TR_ID that should be subscribed at *now* (KST)."""
     cur = (now or datetime.now(KST)).timetz().replace(tzinfo=None)

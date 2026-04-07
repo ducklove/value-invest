@@ -871,8 +871,9 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
     end_date = date.today()
     start_date = end_date - timedelta(days=14)
 
+    market = kis_ws_manager.active_market_code()
     quote_payload, history_payload = await asyncio.gather(
-        kis_proxy_client.get_quote(stock_code),
+        kis_proxy_client.get_quote(stock_code, market=market),
         kis_proxy_client.get_history(
             stock_code,
             start_date=start_date,
