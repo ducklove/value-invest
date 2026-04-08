@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
 import kis_ws_manager
+import market_indicators
 import stock_price
 from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
 
@@ -615,88 +616,46 @@ _benchmark_quote_cache: dict[str, tuple[float, dict]] = {}
 _BENCHMARK_CACHE_TTL = 120  # 2 minutes
 
 
-async def _fetch_index_quote(index_code: str) -> dict:
-    """Fetch KOSPI or KOSDAQ index change_pct from Naver."""
-    naver_code = "KOSPI" if index_code == "IDX_KOSPI" else "KOSDAQ"
+_BENCHMARK_TO_INDICATOR = {
+    "IDX_KOSPI": "KOSPI",
+    "IDX_KOSDAQ": "KOSDAQ",
+    "IDX_SP500": "SPX",
+    "FX_USDKRW": "USD_KRW",
+}
+
+
+def _indicator_to_change_pct(data: dict) -> float | None:
+    """Convert market_indicators result {change_pct: '0.45%', direction: 'up'} → signed float."""
+    if not data:
+        return None
+    raw = (data.get("change_pct") or "").strip().rstrip("%").replace(",", "")
+    if not raw:
+        return None
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(
-                f"https://finance.naver.com/sise/sise_index.naver?code={naver_code}",
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            direction = re.search(r'class="quotient\s+(up|dn)"', r.text)
-            d = direction.group(1) if direction else ""
-            change_block = re.search(
-                r'change_value_and_rate"[^>]*><span>([^<]+)</span>\s*([-+]?[0-9.]+%)',
-                r.text,
-            )
-            if change_block:
-                pct_str = change_block.group(2).replace("%", "")
-                pct = float(pct_str)
-                if d == "dn" and pct > 0:
-                    pct = -pct
-                return {"change_pct": pct}
-    except Exception as e:
-        logger.warning("Index quote fetch failed for %s: %s", index_code, e)
-    return {}
-
-
-async def _fetch_sp500_quote() -> dict:
-    """Fetch S&P 500 change_pct via yfinance."""
-    try:
-        import yfinance as yf
-
-        def _gspc():
-            fi = yf.Ticker("^GSPC").fast_info
-            return fi.last_price, fi.previous_close
-
-        price, prev = await _yf_run(_gspc)
-        if price and prev:
-            pct = round((price - prev) / prev * 100, 2)
-            return {"change_pct": pct}
-    except (asyncio.TimeoutError, Exception) as e:
-        logger.warning("S&P500 quote fetch failed: %s", e)
-    return {}
-
-
-async def _fetch_fx_usdkrw_quote() -> dict:
-    """Fetch USD/KRW change_pct."""
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(
-                "https://finance.naver.com/marketindex/",
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            value = re.search(r'class="value"[^>]*>([0-9,.]+)', r.text)
-            change = re.search(r'class="change"[^>]*>([0-9,.]+)', r.text)
-            d = re.search(r'class="head_info.*?class="(up|down)"', r.text, re.DOTALL)
-            if value and change:
-                v = float(value.group(1).replace(",", ""))
-                c = float(change.group(1).replace(",", ""))
-                prev = v - c if d and d.group(1) == "up" else v + c
-                if prev:
-                    pct = round(c / prev * 100, 2)
-                    if d and d.group(1) == "down":
-                        pct = -pct
-                    return {"change_pct": pct}
-    except Exception as e:
-        logger.warning("FX USD/KRW quote fetch failed: %s", e)
-    return {}
+        pct = float(raw)
+    except ValueError:
+        return None
+    if data.get("direction") == "down" and pct > 0:
+        pct = -pct
+    return pct
 
 
 async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
-    """Fetch a benchmark quote (cached)."""
+    """Fetch a benchmark quote (cached). Reuses market_indicators for shared sources."""
     now = _time.monotonic()
     cached = _benchmark_quote_cache.get(benchmark_code)
     if cached and (now - cached[0]) < _BENCHMARK_CACHE_TTL:
         return cached[1]
 
-    if benchmark_code == "IDX_KOSPI" or benchmark_code == "IDX_KOSDAQ":
-        q = await _fetch_index_quote(benchmark_code)
-    elif benchmark_code == "IDX_SP500":
-        q = await _fetch_sp500_quote()
-    elif benchmark_code == "FX_USDKRW":
-        q = await _fetch_fx_usdkrw_quote()
+    indicator_code = _BENCHMARK_TO_INDICATOR.get(benchmark_code)
+    if indicator_code:
+        try:
+            data = await market_indicators.fetch_indicators([indicator_code])
+            pct = _indicator_to_change_pct(data.get(indicator_code) or {})
+            q = {"change_pct": pct} if pct is not None else {}
+        except Exception as e:
+            logger.warning("Indicator-based benchmark fetch failed for %s: %s", benchmark_code, e)
+            q = {}
     else:
         # It's a stock code (e.g., common stock for preferred)
         # For codes with dots/slashes, try dash variant directly first (faster)
