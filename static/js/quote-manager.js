@@ -123,10 +123,17 @@ const QuoteManager = {
   },
 
   _getMissingCodes() {
-    // Only check portfolio items, not benchmark/index codes
-    return portfolioItems
-      .filter(i => !i.quote || i.quote.price == null)
-      .map(i => i.stock_code);
+    // Check portfolio + sidebar (recent search) items, not benchmark/index codes
+    const missing = new Set();
+    for (const i of portfolioItems) {
+      if (!i.quote || i.quote.price == null) missing.add(i.stock_code);
+    }
+    if (typeof recentListItems !== 'undefined' && Array.isArray(recentListItems)) {
+      for (const i of recentListItems) {
+        if (!i.quote || i.quote.price == null) missing.add(i.stock_code);
+      }
+    }
+    return [...missing];
   },
 
   _scheduleRetry() {

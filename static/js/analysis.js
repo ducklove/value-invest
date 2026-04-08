@@ -898,6 +898,7 @@ async function loadRecentList() {
       const wrapper = document.createElement('div');
       wrapper.className = 'sidebar-item';
       wrapper.dataset.index = index;
+      wrapper.dataset.code = item.stock_code;
 
       if (currentUser) {
         wrapper.draggable = true;

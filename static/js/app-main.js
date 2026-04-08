@@ -33,6 +33,20 @@ QuoteManager.onQuote = function(code, q) {
   const sbItem = recentListItems.find(i => i.stock_code === code);
   if (sbItem && q.price != null) {
     sbItem.quote_snapshot = { price: q.price, change: q.change, change_pct: q.change_pct };
+    const wrapper = document.querySelector(`#recentList .sidebar-item[data-code="${code}"]`);
+    if (wrapper) {
+      const priceEl = wrapper.querySelector('.quote-price');
+      const changeEl = wrapper.querySelector('.quote-change');
+      if (priceEl) priceEl.textContent = Number(q.price).toLocaleString();
+      if (changeEl) {
+        const change = Number(q.change || 0);
+        changeEl.classList.remove('up', 'down', 'flat');
+        changeEl.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
+        if (q.change_pct != null) {
+          changeEl.textContent = `${change > 0 ? '+' : ''}${Number(q.change_pct).toLocaleString()}%`;
+        }
+      }
+    }
   }
 };
 
