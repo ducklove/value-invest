@@ -12,6 +12,8 @@ let pfGroupSort = true;   // independent group sort toggle
 let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
 let pfMonthEndValue = null; // total_value at end of previous month
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
+let pfYearStartSnap = null; // {date, total_value, fx_usdkrw, ...} for first snapshot of this year
+let pfYearStartStockValues = {}; // stock_code -> market_value at year start
 let pfNavHistory = []; // [{date, nav, total_value, total_invested, total_units}, ...]
 let pfIntradayData = []; // [{ts, total_value}, ...]
 let pfPrevDaySnapshot = null; // {total_value, fx_usdkrw, stock_values, today_net_cashflow}
@@ -102,6 +104,13 @@ async function loadPortfolio() {
       const snap = await r.json();
       pfMonthEndValue = snap.total_value ?? null;
       pfMonthEndStockValues = snap.stock_values || {};
+      renderPortfolio();
+    }).catch(() => {});
+    apiFetch('/api/portfolio/year-start-value').then(async r => {
+      if (!r.ok) return;
+      const snap = await r.json();
+      pfYearStartSnap = snap && snap.total_value ? snap : null;
+      pfYearStartStockValues = (snap && snap.stock_values) || {};
       renderPortfolio();
     }).catch(() => {});
     apiFetch('/api/portfolio/nav-history').then(async r => {
@@ -389,10 +398,19 @@ function renderPortfolio() {
   const monthlyPnl = _fxMonthEnd != null && _fxMonthEnd > 0
     ? _currentFxVal - _fxMonthEnd : null;
 
-  // YTD return — find year-start snapshot with its FX rate
+  // YTD return — first snapshot of this year, with group-filter scaling
   const thisYear = new Date().getFullYear().toString();
-  const yearStartSnap = pfNavHistory.find(d => d.date >= thisYear);
-  const _fxYtdBase = yearStartSnap ? _fxConv(yearStartSnap.total_value, yearStartSnap) : null;
+  const yearStartSnap = pfYearStartSnap || pfNavHistory.find(d => d.date >= thisYear) || null;
+  let filteredYearStartValue = yearStartSnap ? yearStartSnap.total_value : null;
+  if (isFiltered && filteredYearStartValue && Object.keys(pfYearStartStockValues).length > 0) {
+    const stockTotal = Object.values(pfYearStartStockValues).reduce((a, b) => a + b, 0);
+    if (stockTotal > 0) {
+      let filteredStockTotal = 0;
+      rows.forEach(r => { filteredStockTotal += (pfYearStartStockValues[r.stock_code] ?? 0); });
+      filteredYearStartValue = yearStartSnap.total_value * (filteredStockTotal / stockTotal);
+    }
+  }
+  const _fxYtdBase = yearStartSnap && filteredYearStartValue != null ? _fxConv(filteredYearStartValue, yearStartSnap) : null;
   const ytdReturnPct = _fxYtdBase && _fxYtdBase > 0 ? ((_currentFxVal - _fxYtdBase) / _fxYtdBase * 100) : null;
   const ytdPnl = _fxYtdBase != null && _fxYtdBase > 0 ? _currentFxVal - _fxYtdBase : null;
 

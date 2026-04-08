@@ -1175,6 +1175,19 @@ async def get_month_end_snapshot(google_sub: str) -> dict | None:
     return dict(row) if row else None
 
 
+async def get_year_start_snapshot(google_sub: str) -> dict | None:
+    """Get the first portfolio snapshot on/after Jan 1 of the current year."""
+    from datetime import date
+    year_start = date(date.today().year, 1, 1).isoformat()
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw FROM portfolio_snapshots WHERE google_sub = ? AND date >= ? ORDER BY date ASC LIMIT 1",
+        (google_sub, year_start),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
 async def get_nav_history(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(

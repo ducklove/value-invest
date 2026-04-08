@@ -1123,6 +1123,19 @@ async def get_month_end_value(request: Request):
     return result
 
 
+@router.get("/api/portfolio/year-start-value")
+async def get_year_start_value(request: Request):
+    user = _require_user(await get_current_user(request))
+    snapshot = await cache.get_year_start_snapshot(user["google_sub"])
+    result = dict(snapshot) if snapshot else {}
+    if snapshot and snapshot.get("date"):
+        stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], snapshot["date"])
+        result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
+    else:
+        result["stock_values"] = {}
+    return result
+
+
 @router.get("/api/portfolio/nav-history")
 async def get_nav_history(request: Request):
     user = _require_user(await get_current_user(request))
