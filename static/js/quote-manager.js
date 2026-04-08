@@ -104,20 +104,25 @@ const QuoteManager = {
 
   async _fetchQuotes(codes) {
     if (!codes.length) return;
-    try {
-      const resp = await apiFetch('/api/asset-quotes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codes }),
-      });
-      if (!resp.ok) return;
-      const results = await resp.json();
-      for (const [code, q] of Object.entries(results)) {
-        if (q && q.price != null && this.onQuote) {
-          this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
+    // Server caps at 100 codes per request — chunk to stay under the limit.
+    const CHUNK = 100;
+    for (let i = 0; i < codes.length; i += CHUNK) {
+      const slice = codes.slice(i, i + CHUNK);
+      try {
+        const resp = await apiFetch('/api/asset-quotes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ codes: slice }),
+        });
+        if (!resp.ok) continue;
+        const results = await resp.json();
+        for (const [code, q] of Object.entries(results)) {
+          if (q && q.price != null && this.onQuote) {
+            this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
+          }
         }
-      }
-    } catch (e) { console.warn(e); }
+      } catch (e) { console.warn(e); }
+    }
     // Schedule fast retry for any still-missing quotes
     this._scheduleRetry();
   },
