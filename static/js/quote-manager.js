@@ -30,13 +30,15 @@ const QuoteManager = {
           this._startOverflowPolling();
         }
         else if (msg.type === 'ws_status') {
-          if (msg.occupied && !msg.active) {
-            // Another session has the WS — ask user
-            this._promptTakeover();
-          } else if (msg.active) {
+          if (msg.active) {
             // We are now the active subscriber
             this.wsActive = true;
             this._sendSubscriptions();
+          } else if (msg.occupied) {
+            // Slot busy — request takeover unconditionally; server kicks the oldest session
+            if (this.connected && this.ws) {
+              this.ws.send(JSON.stringify({ action: 'takeover' }));
+            }
           }
         }
         else if (msg.type === 'ws_taken_over') {
@@ -70,15 +72,6 @@ const QuoteManager = {
   _scheduleReconnect() {
     if (this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, 5000);
-  },
-
-  _promptTakeover() {
-    if (confirm('다른 세션에서 실시간 시세를 사용 중입니다.\n이 세션에서 실시간 시세를 사용하시겠습니까?\n\n(취소 시 1분 간격 폴링으로 동작합니다)')) {
-      if (this.connected && this.ws) {
-        this.ws.send(JSON.stringify({ action: 'takeover' }));
-      }
-    }
-    // If cancelled, keep polling-only mode (generalPollTimer handles it)
   },
 
   _showTakenOverBanner() {

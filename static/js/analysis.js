@@ -973,7 +973,7 @@ async function loadRecentList() {
         const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
         quoteChange.classList.add(changeClass);
         if (changePct !== null && changePct !== undefined) {
-          quoteChange.textContent = `${change > 0 ? '+' : ''}${Number(changePct).toLocaleString()}%`;
+          quoteChange.textContent = `${change > 0 ? '+' : ''}${Number(changePct).toFixed(2)}%`;
         }
       }
 

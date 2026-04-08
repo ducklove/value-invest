@@ -43,7 +43,7 @@ QuoteManager.onQuote = function(code, q) {
         changeEl.classList.remove('up', 'down', 'flat');
         changeEl.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
         if (q.change_pct != null) {
-          changeEl.textContent = `${change > 0 ? '+' : ''}${Number(q.change_pct).toLocaleString()}%`;
+          changeEl.textContent = `${change > 0 ? '+' : ''}${Number(q.change_pct).toFixed(2)}%`;
         }
       }
     }
