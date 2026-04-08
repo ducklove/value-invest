@@ -180,9 +180,8 @@ const QuoteManager = {
       // WS 활성: overflow 코드만
       this.overflowCodes.forEach(c => allCodes.add(c));
     } else {
-      // WS 비활성: portfolio + sidebar + analysis 코드 (benchmark 제외)
-      for (const [key, codes] of Object.entries(this.subscriptions)) {
-        if (key === 'benchmark') continue;
+      // WS 비활성: 모든 구독 코드 (benchmark 포함)
+      for (const codes of Object.values(this.subscriptions)) {
         for (const c of codes) allCodes.add(c);
       }
     }
