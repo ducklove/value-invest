@@ -107,6 +107,7 @@ def is_korean_stock(code: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _quote_cache: dict[str, dict[str, Any]] = {}
+_quote_cache_date: str = ""  # KST YYYYMMDD when the cache was last valid
 
 # Set of KRX stock codes that have been observed to NOT trade on the NXT
 # after-hours market (KIS proxy returned a 5xx for `?market=NX`). Subsequent
@@ -123,34 +124,28 @@ def mark_nxt_unsupported(code: str) -> None:
     _nxt_unsupported.add(code)
 
 
-def _is_quote_fresh(q: dict[str, Any]) -> bool:
-    """Return True if the cached quote is from today (KST)."""
+def _flush_stale_cache() -> None:
+    """Clear the entire WS quote cache when the KST date rolls over."""
+    global _quote_cache_date
     from datetime import datetime, timezone, timedelta
     kst = timezone(timedelta(hours=9))
-    today_str = datetime.now(kst).strftime("%Y%m%d")
-    bd = q.get("business_date", "")
-    if bd and bd != today_str:
-        return False
-    # Also check ts — reject if older than 18 hours (covers overnight)
-    ts = q.get("ts")
-    if ts is not None and (time.time() - ts) > 18 * 3600:
-        return False
-    return True
+    today = datetime.now(kst).strftime("%Y%m%d")
+    if _quote_cache_date and _quote_cache_date != today:
+        _quote_cache.clear()
+        logger.info("WS quote cache cleared (date rolled %s → %s)", _quote_cache_date, today)
+    _quote_cache_date = today
 
 
 def get_cached_quote(code: str) -> dict[str, Any] | None:
-    """Return the latest cached quote for *code*, or None if stale."""
-    q = _quote_cache.get(code)
-    if q is None:
-        return None
-    if not _is_quote_fresh(q):
-        return None
-    return q
+    """Return the latest cached quote for *code*, or None."""
+    _flush_stale_cache()
+    return _quote_cache.get(code)
 
 
 def get_all_cached_quotes() -> dict[str, dict[str, Any]]:
-    """Return a shallow copy of the full quote cache (fresh entries only)."""
-    return {code: q for code, q in _quote_cache.items() if _is_quote_fresh(q)}
+    """Return a shallow copy of the full quote cache."""
+    _flush_stale_cache()
+    return dict(_quote_cache)
 
 
 # ---------------------------------------------------------------------------
