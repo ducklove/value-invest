@@ -655,6 +655,41 @@ def _is_trading_day(d: date) -> bool:
     return d.weekday() < 5  # Mon=0 .. Fri=4
 
 
+async def _load_prev_holdings(snap_date: str, days: int = 2) -> tuple[list[dict], set[str]]:
+    """Load previous holdings and determine which codes appeared consistently.
+
+    Returns (prev_day_holdings, stale_codes).
+    stale_codes = codes missing from the scrape for *days* consecutive snapshots
+    (i.e. likely genuinely removed, should NOT be carried forward).
+    """
+    try:
+        db = await cache.get_db()
+        cursor = await db.execute(
+            "SELECT DISTINCT date FROM nps_holdings WHERE date < ? ORDER BY date DESC LIMIT ?",
+            (snap_date, days),
+        )
+        dates = [r[0] for r in await cursor.fetchall()]
+        if not dates:
+            return [], set()
+        prev = await cache.get_nps_holdings(dates[0])
+        if len(dates) < days:
+            return prev, set()
+        # Codes present in the oldest of the N lookback days
+        cursor2 = await db.execute(
+            "SELECT stock_code FROM nps_holdings WHERE date = ?", (dates[-1],),
+        )
+        older_codes = {r[0] for r in await cursor2.fetchall()}
+        # Codes present in the most recent previous day
+        prev_codes = {h["stock_code"] for h in prev}
+        # "stale" = was in the older snapshot but already gone from yesterday
+        # → has been missing for ≥(days-1) consecutive days already
+        stale_codes = older_codes - prev_codes
+        return prev, stale_codes
+    except Exception as exc:
+        logger.warning("NPS: 전일 holdings 로드 실패: %s", exc)
+        return [], set()
+
+
 async def run_nps_snapshot(snap_date: str | None = None):
     """Main entry point: scrape → enrich → compute NAV → save → generate HTML."""
     await cache.init_db()
@@ -669,18 +704,73 @@ async def run_nps_snapshot(snap_date: str | None = None):
 
     logger.info("NPS snapshot starting for date=%s", snap_date)
 
-    # 1. Scrape holdings from FnGuide
-    raw_holdings = fetch_nps_holdings()
-    if not raw_holdings:
-        logger.error("NPS: no holdings scraped from FnGuide")
-        return
-    logger.info("NPS: scraped %d holdings", len(raw_holdings))
+    # 0. Load previous day's holdings for cross-check
+    prev_holdings, stale_codes = await _load_prev_holdings(snap_date)
+
+    # 1. Scrape holdings from FnGuide (with retry if major holdings missing)
+    MAX_SCRAPE_RETRIES = 3
+    for attempt in range(1, MAX_SCRAPE_RETRIES + 1):
+        raw_holdings = fetch_nps_holdings()
+        if not raw_holdings:
+            logger.error("NPS: no holdings scraped from FnGuide")
+            return
+        logger.info("NPS: scraped %d holdings (attempt %d)", len(raw_holdings), attempt)
+        scraped_names = {h["name"] for h in raw_holdings}
+        # Check if top holdings from previous day are present
+        if prev_holdings:
+            top_prev = prev_holdings[:10]
+            missing_top = [h for h in top_prev if h["stock_name"] not in scraped_names]
+            if missing_top:
+                names = ", ".join(h["stock_name"] for h in missing_top)
+                logger.warning("NPS: top-10 종목 %d개 누락 (%s) — attempt %d/%d",
+                               len(missing_top), names, attempt, MAX_SCRAPE_RETRIES)
+                if attempt < MAX_SCRAPE_RETRIES:
+                    import asyncio
+                    await asyncio.sleep(30)
+                    continue
+                logger.warning("NPS: 재시도 소진, 전일 데이터로 보충 진행")
+            else:
+                break
+        else:
+            break
 
     # 2. Resolve stock codes
     holdings = await resolve_stock_codes(raw_holdings)
 
     # 3. Fetch closing prices
     holdings = await _fetch_quotes_for_holdings(holdings)
+
+    # 3-1. Cross-check: carry forward previous-day holdings missing from scrape
+    #       Skip if the code was already missing for 2+ consecutive days (likely sold)
+    today_codes = {h.get("stock_code") for h in holdings if h.get("stock_code")}
+    if prev_holdings:
+        carried = 0
+        dropped = 0
+        for ph in prev_holdings:
+            code = ph["stock_code"]
+            if code in today_codes:
+                continue
+            if code in stale_codes:
+                dropped += 1
+                logger.info("NPS: %s (%s) 2일 이상 연속 누락 → carry-forward 제외",
+                            code, ph["stock_name"])
+                continue
+            holdings.append({
+                "stock_code": code,
+                "name": ph["stock_name"],
+                "shares": ph["shares"],
+                "ownership_pct": ph.get("ownership_pct", 0),
+                "price": ph.get("price"),
+                "market_value": ph.get("market_value"),
+                "change_pct": None,
+                "_carried_forward": True,
+            })
+            today_codes.add(code)
+            carried += 1
+        if carried:
+            logger.warning("NPS: 전일 대비 %d개 종목 carry-forward 보충", carried)
+        if dropped:
+            logger.info("NPS: %d개 종목 2일+ 연속 누락으로 제거 확정", dropped)
 
     # Filter to those with valid market values; keep unknowns too but mark them
     valid = [h for h in holdings if h.get("market_value") is not None]
