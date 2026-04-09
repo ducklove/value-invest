@@ -24,8 +24,9 @@ MAX_UNIVERSE = 30
 MCAP_POOL_SIZE = 100
 FETCH_CONCURRENCY = 8
 
-# Cache for market-cap pool weekly series: years -> (series, name_by_code, fetched_date)
-_mcap_cache: dict[int, tuple[dict, dict, str]] = {}
+# Cache for market-cap pool weekly series: years -> (series, name_by_code)
+# Persists for the process lifetime — historical weekly data is immutable.
+_mcap_cache: dict[int, tuple[dict, dict]] = {}
 
 SCORE_KEYS = {
     "per_low": ("per", False),       # lower is better, must be > 0
@@ -155,15 +156,14 @@ async def backtest_watchlist(request: Request, payload: dict = Body(default={}))
 
     # --- Load universe & fetch weekly data ---
     if is_mcap:
-        today = date.today().isoformat()
         cached = _mcap_cache.get(years)
-        if cached and cached[2] == today:
-            series, name_by_code = cached[0], cached[1]
+        if cached:
+            series, name_by_code = cached
             universe_items = [{"stock_code": c, "name": name_by_code.get(c, c)} for c in series]
         else:
             universe_items, name_by_code = await _load_mcap_pool()
             series = await _fetch_series(universe_items, years)
-            _mcap_cache[years] = (series, name_by_code, today)
+            _mcap_cache[years] = (series, name_by_code)
     else:
         universe_items = await _load_static_universe(user, source)
         name_by_code = {s["stock_code"]: s["name"] for s in universe_items}
