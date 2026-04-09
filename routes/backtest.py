@@ -30,6 +30,45 @@ SCORE_KEYS = {
 }
 
 
+async def _load_universe(user: dict, source: str) -> list[dict]:
+    """Load universe stocks from the given source.
+
+    Returns list of {"stock_code": ..., "name": ...}.
+    """
+    if source == "watchlist":
+        starred = await cache.get_cached_analyses(google_sub=user["google_sub"], tab="starred")
+        if not starred:
+            raise HTTPException(status_code=400, detail="관심종목이 비어 있습니다.")
+        return [{"stock_code": s["stock_code"], "name": s.get("corp_name") or s["stock_code"]}
+                for s in starred[:MAX_UNIVERSE]]
+    elif source == "portfolio":
+        items = await cache.get_portfolio(google_sub=user["google_sub"])
+        if not items:
+            raise HTTPException(status_code=400, detail="포트폴리오가 비어 있습니다.")
+        kr = [i for i in items if i["stock_code"].isdigit() and len(i["stock_code"]) == 6]
+        if not kr:
+            raise HTTPException(status_code=400, detail="포트폴리오에 국내 주식이 없습니다.")
+        return [{"stock_code": i["stock_code"], "name": i.get("stock_name") or i["stock_code"]}
+                for i in kr[:MAX_UNIVERSE]]
+    elif source == "nps":
+        from datetime import date as _date
+        db = await cache.get_db()
+        cursor = await db.execute(
+            "SELECT DISTINCT date FROM nps_holdings ORDER BY date DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=400, detail="국민연금 데이터가 없습니다.")
+        holdings = await cache.get_nps_holdings(row[0])
+        if not holdings:
+            raise HTTPException(status_code=400, detail="국민연금 보유 종목이 없습니다.")
+        top = holdings[:MAX_UNIVERSE]
+        return [{"stock_code": h["stock_code"], "name": h.get("stock_name") or h["stock_code"]}
+                for h in top]
+    else:
+        raise HTTPException(status_code=400, detail="알 수 없는 universe 소스입니다.")
+
+
 @router.post("/api/backtest/watchlist")
 async def backtest_watchlist(request: Request, payload: dict = Body(default={})):
     user = await get_current_user(request)
@@ -52,11 +91,9 @@ async def backtest_watchlist(request: Request, payload: dict = Body(default={}))
         years = 5
     years = max(1, min(years, 15))
 
-    starred = await cache.get_cached_analyses(google_sub=user["google_sub"], tab="starred")
-    if not starred:
-        raise HTTPException(status_code=400, detail="관심종목이 비어 있습니다.")
-    universe = starred[:MAX_UNIVERSE]
-    name_by_code = {s["stock_code"]: s.get("corp_name") or s["stock_code"] for s in universe}
+    source = str(payload.get("universe") or "watchlist")
+    universe_items = await _load_universe(user, source)
+    name_by_code = {s["stock_code"]: s["name"] for s in universe_items}
 
     # 병렬 fetch (동시성 제한)
     sem = asyncio.Semaphore(FETCH_CONCURRENCY)
@@ -70,7 +107,7 @@ async def backtest_watchlist(request: Request, payload: dict = Body(default={}))
                 return code, []
             return code, [b for b in bars if b.get("close_price")]
 
-    fetched = await asyncio.gather(*(_fetch(s["stock_code"]) for s in universe))
+    fetched = await asyncio.gather(*(_fetch(s["stock_code"]) for s in universe_items))
     series = {code: bars for code, bars in fetched if bars}
     if len(series) < 2:
         raise HTTPException(status_code=400, detail="시세 데이터를 불러올 수 있는 종목이 부족합니다.")
@@ -228,9 +265,10 @@ async def backtest_watchlist(request: Request, payload: dict = Body(default={}))
         "universe": [
             {"stock_code": c, "corp_name": name_by_code.get(c, c)} for c in series.keys()
         ],
+        "universe_source": source,
         "missing": [
             {"stock_code": c, "corp_name": name_by_code.get(c, c)}
-            for c in (s["stock_code"] for s in universe)
+            for c in (s["stock_code"] for s in universe_items)
             if c not in series
         ],
         "dates": all_dates,

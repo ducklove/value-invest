@@ -271,9 +271,16 @@ function trackEvent(name, params = {}) {
 
   <div id="backtestView" style="display:none;">
     <div class="bt-page">
-      <h2>관심종목 가치투자 백테스트</h2>
-      <div class="bt-note">관심종목(별표) universe에서 매 리밸런싱마다 value score 상위 K개를 동일가중으로 보유. 벤치마크는 관심종목 전체 동일가중 리밸런싱.</div>
+      <h2>가치투자 백테스트</h2>
+      <div class="bt-note">선택한 universe에서 매 리밸런싱마다 value score 상위 K개를 동일가중으로 보유. 벤치마크는 universe 전체 동일가중 리밸런싱.</div>
       <div class="bt-form">
+        <label>대상
+          <select id="btUniverse">
+            <option value="watchlist">관심종목</option>
+            <option value="portfolio">포트폴리오</option>
+            <option value="nps">국민연금</option>
+          </select>
+        </label>
         <label>스코어
           <select id="btScore">
             <option value="pbr_low">PBR 낮은 순</option>
@@ -306,7 +313,7 @@ function trackEvent(name, params = {}) {
       <div class="bt-stats" id="btStats"></div>
       <div id="btChart" style="width:100%;height:380px;display:none;"></div>
       <div class="bt-picks" id="btPicks"></div>
-      <div class="bt-universe" id="btUniverse"></div>
+      <div class="bt-universe" id="btUniverseInfo"></div>
     </div>
   </div>
 
