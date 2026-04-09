@@ -21,8 +21,11 @@ router = APIRouter()
 
 MAX_UNIVERSE = 30
 # NPS pool: fetch top-N by market value to cover dynamic top-30 over time
-NPS_POOL_SIZE = 50
-FETCH_CONCURRENCY = 4
+NPS_POOL_SIZE = 100
+FETCH_CONCURRENCY = 8
+
+# Cache for NPS pool weekly series: (years) -> (series, name_by_code, fetched_date)
+_nps_cache: dict[int, tuple[dict, dict, str]] = {}
 
 SCORE_KEYS = {
     "per_low": ("per", False),       # lower is better, must be > 0
@@ -78,6 +81,23 @@ async def _load_nps_pool() -> tuple[list[dict], dict[str, str]]:
     return items, name_map
 
 
+async def _fetch_series(universe_items: list[dict], years: int) -> dict[str, list[dict]]:
+    """Fetch weekly market data for all universe items in parallel."""
+    sem = asyncio.Semaphore(FETCH_CONCURRENCY)
+
+    async def _fetch(code: str):
+        async with sem:
+            try:
+                bars = await stock_price.fetch_weekly_market_data(code, years=years)
+            except Exception as e:
+                logger.warning("backtest fetch failed (%s): %s", code, e)
+                return code, []
+            return code, [b for b in bars if b.get("close_price")]
+
+    fetched = await asyncio.gather(*(_fetch(s["stock_code"]) for s in universe_items))
+    return {code: bars for code, bars in fetched if bars}
+
+
 # ---------------------------------------------------------------------------
 # Backtest endpoint
 # ---------------------------------------------------------------------------
@@ -107,27 +127,22 @@ async def backtest_watchlist(request: Request, payload: dict = Body(default={}))
     source = str(payload.get("universe") or "watchlist")
     is_mcap = source == "nps"
 
-    # --- Load universe ---
+    # --- Load universe & fetch weekly data ---
     if is_mcap:
-        universe_items, name_by_code = await _load_nps_pool()
+        today = date.today().isoformat()
+        cached = _nps_cache.get(years)
+        if cached and cached[2] == today:
+            series, name_by_code = cached[0], cached[1]
+            universe_items = [{"stock_code": c, "name": name_by_code.get(c, c)} for c in series]
+        else:
+            universe_items, name_by_code = await _load_nps_pool()
+            series = await _fetch_series(universe_items, years)
+            _nps_cache[years] = (series, name_by_code, today)
     else:
         universe_items = await _load_static_universe(user, source)
         name_by_code = {s["stock_code"]: s["name"] for s in universe_items}
+        series = await _fetch_series(universe_items, years)
 
-    # --- Fetch weekly price data ---
-    sem = asyncio.Semaphore(FETCH_CONCURRENCY)
-
-    async def _fetch(code: str):
-        async with sem:
-            try:
-                bars = await stock_price.fetch_weekly_market_data(code, years=years)
-            except Exception as e:
-                logger.warning("backtest fetch failed (%s): %s", code, e)
-                return code, []
-            return code, [b for b in bars if b.get("close_price")]
-
-    fetched = await asyncio.gather(*(_fetch(s["stock_code"]) for s in universe_items))
-    series = {code: bars for code, bars in fetched if bars}
     if len(series) < 2:
         raise HTTPException(status_code=400, detail="시세 데이터를 불러올 수 있는 종목이 부족합니다.")
 
