@@ -21,11 +21,11 @@ router = APIRouter()
 
 MAX_UNIVERSE = 30
 # NPS pool: fetch top-N by market value to cover dynamic top-30 over time
-NPS_POOL_SIZE = 100
+MCAP_POOL_SIZE = 100
 FETCH_CONCURRENCY = 8
 
-# Cache for NPS pool weekly series: (years) -> (series, name_by_code, fetched_date)
-_nps_cache: dict[int, tuple[dict, dict, str]] = {}
+# Cache for market-cap pool weekly series: years -> (series, name_by_code, fetched_date)
+_mcap_cache: dict[int, tuple[dict, dict, str]] = {}
 
 SCORE_KEYS = {
     "per_low": ("per", False),       # lower is better, must be > 0
@@ -59,25 +59,51 @@ async def _load_static_universe(user: dict, source: str) -> list[dict]:
     raise HTTPException(status_code=400, detail="알 수 없는 universe 소스입니다.")
 
 
-async def _load_nps_pool() -> tuple[list[dict], dict[str, str]]:
-    """Load the NPS pool — top stocks by latest market value.
+def _scrape_mcap_ranking() -> list[dict]:
+    """Scrape current market-cap ranking from Naver (KOSPI + KOSDAQ)."""
+    import subprocess
+    from bs4 import BeautifulSoup
+
+    results: list[dict] = []
+    seen: set[str] = set()
+    # sosok=0: KOSPI, sosok=1: KOSDAQ
+    for sosok in (0, 1):
+        for page in range(1, 5):  # 4 pages × ~50 rows ≈ 200 per market
+            if len(results) >= MCAP_POOL_SIZE:
+                break
+            url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
+            try:
+                proc = subprocess.run(["curl", "-s", url], capture_output=True, timeout=10)
+                soup = BeautifulSoup(proc.stdout, "html.parser", from_encoding="euc-kr")
+            except Exception:
+                continue
+            for tr in soup.select("table.type_2 tbody tr"):
+                tds = tr.find_all("td")
+                if len(tds) < 7:
+                    continue
+                name_a = tds[1].find("a")
+                if not name_a or "code=" not in (name_a.get("href") or ""):
+                    continue
+                code = name_a["href"].split("code=")[-1]
+                if code in seen or not code.isdigit() or len(code) != 6:
+                    continue
+                seen.add(code)
+                results.append({"stock_code": code, "name": name_a.get_text(strip=True)})
+                if len(results) >= MCAP_POOL_SIZE:
+                    break
+    return results
+
+
+async def _load_mcap_pool() -> tuple[list[dict], dict[str, str]]:
+    """Load market-cap pool — top stocks by current market cap.
 
     Returns (universe_items, name_by_code).
     """
-    db = await cache.get_db()
-    cursor = await db.execute(
-        "SELECT DISTINCT date FROM nps_holdings ORDER BY date DESC LIMIT 1"
-    )
-    row = await cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=400, detail="국민연금 데이터가 없습니다.")
-    holdings = await cache.get_nps_holdings(row[0])  # sorted by market_value desc
-    if not holdings:
-        raise HTTPException(status_code=400, detail="국민연금 보유 종목이 없습니다.")
-    pool = holdings[:NPS_POOL_SIZE]
-    items = [{"stock_code": h["stock_code"], "name": h.get("stock_name") or h["stock_code"]}
-             for h in pool]
-    name_map = {h["stock_code"]: h.get("stock_name") or h["stock_code"] for h in pool}
+    items = await asyncio.get_event_loop().run_in_executor(None, _scrape_mcap_ranking)
+    if not items:
+        raise HTTPException(status_code=500, detail="시가총액 순위를 가져올 수 없습니다.")
+    name_map = {it["stock_code"]: it["name"] for it in items}
+    logger.info("Market-cap pool loaded: %d stocks", len(items))
     return items, name_map
 
 
@@ -130,14 +156,14 @@ async def backtest_watchlist(request: Request, payload: dict = Body(default={}))
     # --- Load universe & fetch weekly data ---
     if is_mcap:
         today = date.today().isoformat()
-        cached = _nps_cache.get(years)
+        cached = _mcap_cache.get(years)
         if cached and cached[2] == today:
             series, name_by_code = cached[0], cached[1]
             universe_items = [{"stock_code": c, "name": name_by_code.get(c, c)} for c in series]
         else:
-            universe_items, name_by_code = await _load_nps_pool()
+            universe_items, name_by_code = await _load_mcap_pool()
             series = await _fetch_series(universe_items, years)
-            _nps_cache[years] = (series, name_by_code, today)
+            _mcap_cache[years] = (series, name_by_code, today)
     else:
         universe_items = await _load_static_universe(user, source)
         name_by_code = {s["stock_code"]: s["name"] for s in universe_items}
