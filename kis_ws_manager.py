@@ -123,14 +123,34 @@ def mark_nxt_unsupported(code: str) -> None:
     _nxt_unsupported.add(code)
 
 
+def _is_quote_fresh(q: dict[str, Any]) -> bool:
+    """Return True if the cached quote is from today (KST)."""
+    from datetime import datetime, timezone, timedelta
+    kst = timezone(timedelta(hours=9))
+    today_str = datetime.now(kst).strftime("%Y%m%d")
+    bd = q.get("business_date", "")
+    if bd and bd != today_str:
+        return False
+    # Also check ts — reject if older than 18 hours (covers overnight)
+    ts = q.get("ts")
+    if ts is not None and (time.time() - ts) > 18 * 3600:
+        return False
+    return True
+
+
 def get_cached_quote(code: str) -> dict[str, Any] | None:
-    """Return the latest cached quote for *code*, or None."""
-    return _quote_cache.get(code)
+    """Return the latest cached quote for *code*, or None if stale."""
+    q = _quote_cache.get(code)
+    if q is None:
+        return None
+    if not _is_quote_fresh(q):
+        return None
+    return q
 
 
 def get_all_cached_quotes() -> dict[str, dict[str, Any]]:
-    """Return a shallow copy of the full quote cache."""
-    return dict(_quote_cache)
+    """Return a shallow copy of the full quote cache (fresh entries only)."""
+    return {code: q for code, q in _quote_cache.items() if _is_quote_fresh(q)}
 
 
 # ---------------------------------------------------------------------------
