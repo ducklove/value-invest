@@ -28,7 +28,7 @@ async function runBacktest() {
     rebalance: document.getElementById('btRebalance').value,
     years: Number(document.getElementById('btYears').value) || 5,
   };
-  const univLabel = {watchlist:'관심종목',portfolio:'포트폴리오',nps:'국민연금'}[body.universe] || body.universe;
+  const univLabel = {watchlist:'관심종목',portfolio:'포트폴리오',nps:'시총 Top 30'}[body.universe] || body.universe;
   statsEl.innerHTML = `<span class="bt-loading">백테스트 실행 중... (${univLabel} 데이터를 가져오는 데 시간이 걸릴 수 있습니다)</span>`;
 
   try {
