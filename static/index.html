@@ -83,6 +83,7 @@ function trackEvent(name, params = {}) {
       <button class="nav-btn active" data-view="analysis" onclick="switchView('analysis')">분석</button>
       <button class="nav-btn" data-view="portfolio" onclick="switchView('portfolio')">포트폴리오</button>
       <button class="nav-btn" data-view="nps" onclick="switchView('nps')">국민연금</button>
+      <button class="nav-btn" data-view="backtest" onclick="switchView('backtest')">백테스트</button>
     </nav>
     <div class="mobile-auth-status" id="mobileAuthStatus">
       <img class="mobile-auth-avatar" id="mobileAuthAvatar" alt="">
@@ -268,6 +269,47 @@ function trackEvent(name, params = {}) {
     <div id="npsContent" style="color:var(--text-secondary);text-align:center;padding:40px;">로딩 중...</div>
   </div>
 
+  <div id="backtestView" style="display:none;">
+    <div class="bt-page">
+      <h2>관심종목 가치투자 백테스트</h2>
+      <div class="bt-note">관심종목(별표) universe에서 매 리밸런싱마다 value score 상위 K개를 동일가중으로 보유. 벤치마크는 관심종목 전체 동일가중 리밸런싱.</div>
+      <div class="bt-form">
+        <label>스코어
+          <select id="btScore">
+            <option value="pbr_low">PBR 낮은 순</option>
+            <option value="per_low">PER 낮은 순</option>
+            <option value="dy_high">배당수익률 높은 순</option>
+            <option value="roe_high">ROE 높은 순</option>
+            <option value="blend">PBR↓ × ROE↑ (blend)</option>
+          </select>
+        </label>
+        <label>상위 K
+          <input type="number" id="btTopK" min="1" max="30" value="5">
+        </label>
+        <label>리밸런싱
+          <select id="btRebalance">
+            <option value="monthly">월간</option>
+            <option value="quarterly">분기</option>
+          </select>
+        </label>
+        <label>기간
+          <select id="btYears">
+            <option value="3">3년</option>
+            <option value="5" selected>5년</option>
+            <option value="10">10년</option>
+            <option value="15">15년</option>
+          </select>
+        </label>
+        <button class="bt-run" type="button" onclick="runBacktest()">실행</button>
+      </div>
+      <div class="bt-error" id="btError"></div>
+      <div class="bt-stats" id="btStats"></div>
+      <div id="btChart" style="width:100%;height:380px;display:none;"></div>
+      <div class="bt-picks" id="btPicks"></div>
+      <div class="bt-universe" id="btUniverse"></div>
+    </div>
+  </div>
+
 </div>
 
 <div class="chart-modal-overlay" id="chartModal" style="display:none;" onclick="if(event.target===this)closeChartModal()">
@@ -313,6 +355,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/search.js" defer></script>
 <script src="./js/analysis.js" defer></script>
 <script src="./js/portfolio.js" defer></script>
+<script src="./js/backtest.js" defer></script>
 <script src="./js/app-main.js" defer></script>
 </body>
 </html>

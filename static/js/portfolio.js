@@ -27,10 +27,15 @@ function switchView(view) {
   const analysisView = document.getElementById('analysisView');
   const portfolioView = document.getElementById('portfolioView');
   const npsView = document.getElementById('npsView');
+  const backtestView = document.getElementById('backtestView');
   analysisView.style.display = view === 'analysis' ? 'block' : 'none';
   portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
   if (npsView) npsView.style.display = view === 'nps' ? 'block' : 'none';
-  const activeEl = view === 'analysis' ? analysisView : view === 'portfolio' ? portfolioView : npsView;
+  if (backtestView) backtestView.style.display = view === 'backtest' ? 'block' : 'none';
+  const activeEl = view === 'analysis' ? analysisView
+                  : view === 'portfolio' ? portfolioView
+                  : view === 'backtest' ? backtestView
+                  : npsView;
   if (activeEl) {
     activeEl.classList.remove('fade-in');
     void activeEl.offsetWidth;
