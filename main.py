@@ -25,6 +25,19 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Asset version for cache busting — use short git hash, fall back to timestamp
+def _get_asset_version() -> str:
+    import subprocess
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).parent, stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        return str(int(time.time()))
+
+ASSET_VERSION = _get_asset_version()
+
 # --- systemd sd_notify (self-contained, no extra deps) ---
 def _sd_notify(msg: str) -> None:
     addr = os.environ.get("NOTIFY_SOCKET")
@@ -137,7 +150,15 @@ async def healthz():
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    import re
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    # Append ?v=<hash> to .css and .js references for cache busting
+    html = re.sub(
+        r'((?:href|src)=["\'])(\./(?:styles\.css|js/[^"\']+\.js))',
+        rf'\1\2?v={ASSET_VERSION}',
+        html,
+    )
+    return Response(content=html, media_type="text/html")
 
 
 @app.get("/app-config.js")
