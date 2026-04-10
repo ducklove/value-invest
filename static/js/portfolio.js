@@ -1959,10 +1959,11 @@ async function renderNavChart(data) {
   const navColor = returnToColor(yoyPct);
 
   _navChartInstance = createLineChart(container, {
-    labels: data.map(d => d.date.slice(5)),
+    labels: data.map(d => d.date),
     values: navValues,
     color: navColor,
     tooltipPrefix: 'NAV ',
+    dataZoom: true,
   });
 }
 
@@ -2001,10 +2002,11 @@ async function renderValueChart(data) {
   const sym = pfFxSymbol();
 
   _valueChartInstance = createLineChart(container, {
-    labels: data.map(d => d.date.slice(5)),
+    labels: data.map(d => d.date),
     values: fxValues.map(v => Math.round(v)),
     color: valColor,
     yFormatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit,
+    dataZoom: true,
   });
 
   // Value stats cards — use FX-converted values

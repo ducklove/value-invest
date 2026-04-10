@@ -240,7 +240,7 @@ function _hexToRgba(hex, alpha) {
  */
 function createLineChart(container, opts) {
   const { labels, values, color = '#3b82f6', smooth = 0.3, fill = true,
-          yMin, tooltipPrefix = '', yFormatter, connectNulls = false } = opts;
+          yMin, tooltipPrefix = '', yFormatter, connectNulls = false, dataZoom = false } = opts;
 
   if (USE_UPLOT) {
     return _createUPlotChart(container, opts);
@@ -251,13 +251,21 @@ function createLineChart(container, opts) {
 
 function _createEChartsChart(container, opts) {
   const { labels, values, color = '#3b82f6', smooth = 0.3, fill = true,
-          yMin, tooltipPrefix = '', yFormatter, connectNulls = false } = opts;
+          yMin, tooltipPrefix = '', yFormatter, connectNulls = false, dataZoom = false } = opts;
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
 
   const ec = echarts.init(container);
+  const zoomComponents = dataZoom ? [
+    { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(color, 0.12),
+      handleStyle: { color }, textStyle: { color: textColor, fontSize: 10 },
+      labelFormatter: (_, val) => labels[Math.round(val)] || '' },
+    { type: 'inside' },
+  ] : [];
+  const bottomPad = dataZoom ? 56 : 24;
   ec.setOption({
-    grid: { left: 50, right: 12, top: 10, bottom: 24 },
+    grid: { left: 50, right: 12, top: 10, bottom: bottomPad },
+    dataZoom: zoomComponents,
     xAxis: {
       type: 'category',
       data: labels,
