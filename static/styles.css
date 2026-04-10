@@ -933,6 +933,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   font-variant-numeric: tabular-nums;
 }
 .pf-edit-input:focus { border-color: var(--primary); outline: none; }
+
+/* Responsive: hide less-important portfolio columns on narrower screens */
+@media (max-width: 1100px) { .pf-col-buyprice { display: none; } }
+@media (max-width: 960px)  { .pf-col-weight   { display: none; } }
+@media (max-width: 840px)  { .pf-col-return   { display: none; } }
 .pf-row-actions { display: flex; gap: 4px; justify-content: center; }
 .pf-row-btn {
   border: none; background: none; cursor: pointer; color: var(--text-secondary);
