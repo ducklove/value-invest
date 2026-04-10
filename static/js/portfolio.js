@@ -415,10 +415,14 @@ function renderPortfolio() {
 
   const totalReturnPct = _currentFxInvested > 0 ? ((_currentFxVal - _currentFxInvested) / _currentFxInvested * 100) : 0;
 
-  // Latest NAV from nav history
+  // Latest NAV — use live total_value / total_units if snapshot is stale
   const isFiltered = pfGroupFilter !== null;
   const latestSnap = pfNavHistory.length ? pfNavHistory[pfNavHistory.length - 1] : null;
-  const curNav = latestSnap ? latestSnap.nav : null;
+  const _today = new Date().toISOString().slice(0, 10);
+  const _snapIsStale = latestSnap && latestSnap.date < _today;
+  const curNav = (_snapIsStale && latestSnap.total_units && totalMarketValue > 0)
+    ? totalMarketValue / latestSnap.total_units
+    : (latestSnap ? latestSnap.nav : null);
 
   // --- Daily return ---
   // NAV-based (big text)
