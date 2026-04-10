@@ -411,7 +411,7 @@ async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
         price = meta["regularMarketPrice"]
         closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
         valid_closes = [c for c in closes if c is not None]
-        prev = valid_closes[-1] if valid_closes else meta["chartPreviousClose"]
+        prev = valid_closes[-2] if len(valid_closes) >= 2 else meta.get("chartPreviousClose", price)
         diff = price - prev
         pct = abs(diff) / prev * 100 if prev else 0
         direction = "up" if diff > 0 else "down" if diff < 0 else ""
@@ -445,10 +445,9 @@ async def _fetch_yahoo_commodity(client: httpx.AsyncClient, symbol: str) -> dict
         data = _json.loads(r.text)
         meta = data["chart"]["result"][0]["meta"]
         price = meta["regularMarketPrice"]
-        # Use last OHLC close as prev (chartPreviousClose can be stale)
         closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
         valid_closes = [c for c in closes if c is not None]
-        prev = valid_closes[-1] if valid_closes else meta["chartPreviousClose"]
+        prev = valid_closes[-2] if len(valid_closes) >= 2 else meta.get("chartPreviousClose", price)
         diff = price - prev
         pct = abs(diff) / prev * 100 if prev else 0
         direction = "up" if diff > 0 else "down" if diff < 0 else ""
