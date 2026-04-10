@@ -471,7 +471,7 @@ function renderPortfolio() {
   const curNav = latestSnap ? latestSnap.nav : null;
   const ytdReturnPct = baseNav && curNav ? ((curNav / baseNav - 1) * 100) : null;
   const _fxYtdBase = yearStartSnap ? _fxConv(yearStartSnap.total_value, yearStartSnap) : null;
-  const ytdPnl = _fxYtdBase != null && _fxYtdBase > 0 ? _currentFxVal - _fxYtdBase : null;
+  const ytdValuePct = _fxYtdBase && _fxYtdBase > 0 ? ((_currentFxVal - _fxYtdBase) / _fxYtdBase * 100) : null;
 
   // Date labels for summary cards
   const _now = new Date();
@@ -522,7 +522,7 @@ function renderPortfolio() {
       <div class="pf-summary-text">
         <div class="pf-summary-label">YTD <span class="pf-summary-date">${_ytdLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(ytdReturnPct) : ''}">${_l ? (ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-') : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(ytdPnl) : ''}">${_l ? (ytdPnl !== null ? _fsv(ytdPnl) : '-') : ''}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(ytdValuePct) : ''}">${_l ? (ytdValuePct !== null ? '총액 ' + fmtPct(ytdValuePct) : '-') : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
