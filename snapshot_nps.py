@@ -24,6 +24,12 @@ def _fmt_krw(val: float) -> str:
     return f"{round(val):,}"
 
 
+def _fmt_krw_jo(val: float) -> str:
+    """Format KRW value in 조 (trillion) units, e.g. 327.68조."""
+    jo = val / 1_000_000_000_000
+    return f"{jo:,.2f}조"
+
+
 def _fmt_pct(val: float | None) -> str:
     if val is None:
         return "-"
@@ -242,7 +248,7 @@ def _build_html(
   <div class="pf-summary-card">
     <div class="pf-summary-text">
       <div class="pf-summary-label">총 평가금액</div>
-      <div class="pf-summary-value">{_esc(_fmt_krw(total_value))}</div>
+      <div class="pf-summary-value">{_esc(_fmt_krw_jo(total_value))}</div>
       <div class="pf-summary-sub">NAV {nav:.2f}</div>
     </div>
   </div>
