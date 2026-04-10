@@ -934,10 +934,12 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-edit-input:focus { border-color: var(--primary); outline: none; }
 
-/* Responsive: hide less-important portfolio columns on narrower screens */
-@media (max-width: 1100px) { .pf-col-buyprice { display: none; } }
-@media (max-width: 960px)  { .pf-col-weight   { display: none; } }
-@media (max-width: 840px)  { .pf-col-return   { display: none; } }
+/* Responsive: hide less-important portfolio columns on narrower screens.
+   Sidebar is 340px, so viewport 1400px ≈ table area 1020px. */
+@media (max-width: 1500px) { .pf-col-buyprice { display: none; } }
+@media (max-width: 1400px) { .pf-col-weight   { display: none; } }
+@media (max-width: 1300px) { .pf-col-return   { display: none; } }
+@media (max-width: 1100px) { .pf-col-benchmark { display: none; } }
 .pf-row-actions { display: flex; gap: 4px; justify-content: center; }
 .pf-row-btn {
   border: none; background: none; cursor: pointer; color: var(--text-secondary);
