@@ -222,6 +222,12 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_sub_date ON portfolio_snapshots(google_sub, date);
         CREATE INDEX IF NOT EXISTS idx_portfolio_cashflows_sub ON portfolio_cashflows(google_sub, date);
 
+        CREATE TABLE IF NOT EXISTS ticker_map (
+            stock_code TEXT PRIMARY KEY,
+            resolved_ticker TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_corp_name ON corp_codes(corp_name);
         CREATE INDEX IF NOT EXISTS idx_user_sessions_google_sub ON user_sessions(google_sub);
         CREATE INDEX IF NOT EXISTS idx_user_recent_viewed_at ON user_recent_analyses(google_sub, viewed_at DESC);
@@ -1450,5 +1456,26 @@ async def set_user_setting(google_sub: str, key: str, value: str):
            VALUES (?, ?, ?, ?)
            ON CONFLICT(google_sub, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
         (google_sub, key, value, datetime.now().isoformat()),
+    )
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Ticker map (foreign stock code → resolved ticker)
+# ---------------------------------------------------------------------------
+
+async def load_ticker_map() -> dict[str, str]:
+    db = await get_db()
+    cursor = await db.execute("SELECT stock_code, resolved_ticker FROM ticker_map")
+    return {r["stock_code"]: r["resolved_ticker"] for r in await cursor.fetchall()}
+
+
+async def save_ticker(stock_code: str, resolved_ticker: str):
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO ticker_map (stock_code, resolved_ticker, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(stock_code) DO UPDATE SET resolved_ticker = excluded.resolved_ticker, updated_at = excluded.updated_at""",
+        (stock_code, resolved_ticker, datetime.now().isoformat()),
     )
     await db.commit()

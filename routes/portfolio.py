@@ -206,7 +206,7 @@ async def _yfinance_find_ticker(ticker: str) -> str | None:
             try:
                 hit = await _yf_run(partial(_probe, candidate))
                 if hit:
-                    _ticker_map[ticker] = hit
+                    await _save_ticker(ticker, hit)
                     return hit
             except (asyncio.TimeoutError, Exception):
                 continue
@@ -382,6 +382,30 @@ _QUOTE_CACHE_TTL = 60
 
 
 _ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 -> A200.AX)
+_ticker_map_loaded = False
+
+
+async def _ensure_ticker_map():
+    """Load ticker_map from DB on first access."""
+    global _ticker_map_loaded
+    if _ticker_map_loaded:
+        return
+    try:
+        saved = await cache.load_ticker_map()
+        _ticker_map.update(saved)
+        logger.info("Ticker map loaded: %d entries from DB", len(saved))
+    except Exception as exc:
+        logger.warning("Ticker map load failed: %s", exc)
+    _ticker_map_loaded = True
+
+
+async def _save_ticker(stock_code: str, resolved: str):
+    """Save a resolved ticker to both memory and DB."""
+    _ticker_map[stock_code] = resolved
+    try:
+        await cache.save_ticker(stock_code, resolved)
+    except Exception as exc:
+        logger.warning("Ticker map save failed (%s -> %s): %s", stock_code, resolved, exc)
 
 
 async def _fetch_quote(stock_code: str) -> dict:
@@ -411,12 +435,13 @@ async def _fetch_quote(stock_code: str) -> dict:
             q = await stock_price.fetch_quote_snapshot(stock_code)
     else:
         # Use resolved ticker if available, otherwise try to resolve
+        await _ensure_ticker_map()
         ticker = _ticker_map.get(stock_code, stock_code)
         q = await _fetch_foreign_quote(ticker)
         if not q and ticker == stock_code and "." not in stock_code:
             resolved = await _resolve_foreign_reuters(stock_code)
             if resolved and resolved != stock_code:
-                _ticker_map[stock_code] = resolved
+                await _save_ticker(stock_code, resolved)
                 q = await _fetch_foreign_quote(resolved)
     if q and q.get("price") is not None:
         _quote_cache[stock_code] = (now, q)
