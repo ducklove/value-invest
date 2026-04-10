@@ -1070,12 +1070,13 @@ async def get_prev_day_snapshot(request: Request):
     db = await cache.get_db()
     # Previous day's closing snapshot
     cursor = await db.execute(
-        "SELECT total_value, fx_usdkrw FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+        "SELECT total_value, fx_usdkrw, nav FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (user["google_sub"], yesterday),
     )
     snap_row = await cursor.fetchone()
     total_value = snap_row["total_value"] if snap_row else None
     fx_usdkrw = snap_row["fx_usdkrw"] if snap_row else None
+    prev_nav = snap_row["nav"] if snap_row else None
     # Per-stock snapshots
     stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], yesterday)
     stock_values = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
@@ -1100,6 +1101,7 @@ async def get_prev_day_snapshot(request: Request):
     return {
         "total_value": total_value,
         "fx_usdkrw": fx_usdkrw,
+        "nav": prev_nav,
         "stock_values": stock_values,
         "today_net_cashflow": today_net_cashflow,
     }
