@@ -21,6 +21,63 @@ let pfCurrency = 'KRW'; // 'KRW' or 'USD'
 let pfFxRate = null; // USD/KRW rate
 const PF_QUOTE_REFRESH_MS = 60_000;
 
+// --- Column visibility ---
+const PF_COL_DEFS = [
+  { key: 'group',     cls: 'pf-col-group',     label: '그룹' },
+  { key: 'benchmark', cls: 'pf-col-benchmark',  label: '벤치마크' },
+  { key: 'buyprice',  cls: 'pf-col-buyprice',   label: '매입가' },
+  { key: 'return',    cls: 'pf-col-return',      label: '수익률' },
+  { key: 'weight',    cls: 'pf-col-weight',      label: '비중' },
+];
+let _pfColStyleEl = null;
+
+function _pfLoadColVisibility() {
+  try { return JSON.parse(localStorage.getItem('pf_col_vis') || 'null'); } catch { return null; }
+}
+function _pfSaveColVisibility(vis) {
+  localStorage.setItem('pf_col_vis', JSON.stringify(vis));
+}
+function _pfGetColVisibility() {
+  return _pfLoadColVisibility() || Object.fromEntries(PF_COL_DEFS.map(c => [c.key, true]));
+}
+function _pfApplyColVisibility(vis) {
+  if (!_pfColStyleEl) {
+    _pfColStyleEl = document.createElement('style');
+    document.head.appendChild(_pfColStyleEl);
+  }
+  const rules = PF_COL_DEFS
+    .filter(c => !vis[c.key])
+    .map(c => `.${c.cls} { display: none !important; }`)
+    .join('\n');
+  _pfColStyleEl.textContent = rules;
+}
+function pfToggleCol(key, checked) {
+  const vis = _pfGetColVisibility();
+  vis[key] = checked;
+  _pfSaveColVisibility(vis);
+  _pfApplyColVisibility(vis);
+  // Sync checkbox UI
+  const wrap = document.getElementById('pfColToggles');
+  if (wrap) {
+    wrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      const k = PF_COL_DEFS.find(c => c.label === cb.parentElement.textContent.trim());
+      if (k) cb.checked = vis[k.key];
+    });
+  }
+}
+let _pfColTogglesRendered = false;
+function _pfRenderColToggles() {
+  const vis = _pfGetColVisibility();
+  _pfApplyColVisibility(vis);
+  if (_pfColTogglesRendered) return;
+  const wrap = document.getElementById('pfColToggles');
+  if (!wrap) return;
+  wrap.innerHTML = PF_COL_DEFS.map(c =>
+    `<label><input type="checkbox" ${vis[c.key] ? 'checked' : ''} onchange="pfToggleCol('${c.key}', this.checked)"> ${c.label}</label>`
+  ).join('');
+  _pfColTogglesRendered = true;
+}
+
 function switchView(view) {
   activeView = view;
   document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
@@ -187,6 +244,7 @@ function pfToggleGroupFilter(groupName) {
 }
 
 function renderPortfolio() {
+  _pfRenderColToggles();
   const tbody = document.getElementById('pfBody');
   const tfoot = document.getElementById('pfFoot');
   const summary = document.getElementById('pfSummary');
