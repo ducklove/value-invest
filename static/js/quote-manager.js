@@ -26,7 +26,9 @@ const QuoteManager = {
         if (msg.type === 'quote' && msg.code && this.onQuote) this.onQuote(msg.code, msg);
         else if (msg.type === 'subscriptions') {
           this.overflowCodes = msg.rest || [];
-          this._fetchInitialQuotes(msg.ws || []);
+          // Refresh ALL codes immediately (ws + overflow)
+          const allCodes = [...(msg.ws || []), ...(msg.rest || [])];
+          this._fetchInitialQuotes(allCodes);
           this._startOverflowPolling();
         }
         else if (msg.type === 'ws_status') {
@@ -147,12 +149,9 @@ const QuoteManager = {
   },
 
   async _fetchInitialQuotes(wsCodes) {
-    const needsFetch = wsCodes.filter(code => {
-      const pf = portfolioItems.find(i => i.stock_code === code);
-      if (pf && pf.quote && pf.quote.price != null) return false;
-      return true;
-    });
-    await this._fetchQuotes(needsFetch);
+    // Always refresh ALL codes in the background — initial load may
+    // have stale last-known prices that need updating.
+    await this._fetchQuotes(wsCodes);
   },
 
   async _pollOverflow() {

@@ -380,6 +380,10 @@ async def _fetch_cash_quote(stock_code: str) -> dict:
 _quote_cache: dict[str, tuple[float, dict]] = {}
 _QUOTE_CACHE_TTL = 60
 
+# Last-known quotes — never expires, survives cache TTL expiry.
+# Used as a fallback so the UI can show *something* immediately after restart.
+_last_known_quotes: dict[str, dict] = {}
+
 
 _ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 -> A200.AX)
 _ticker_map_loaded = False
@@ -445,6 +449,7 @@ async def _fetch_quote(stock_code: str) -> dict:
                 q = await _fetch_foreign_quote(resolved)
     if q and q.get("price") is not None:
         _quote_cache[stock_code] = (now, q)
+        _last_known_quotes[stock_code] = q
     else:
         _mark_dead(stock_code)
     return q
@@ -468,7 +473,12 @@ async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
             }
         else:
             cached = _quote_cache.get(code)
-            enriched["quote"] = cached[1] if cached and (now - cached[0]) < _QUOTE_CACHE_TTL else {}
+            if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
+                enriched["quote"] = cached[1]
+            else:
+                # Fallback: last-known quote (stale but better than nothing)
+                lk = _last_known_quotes.get(code)
+                enriched["quote"] = dict(lk, _stale=True) if lk else {}
         result.append(enriched)
     return result
 
