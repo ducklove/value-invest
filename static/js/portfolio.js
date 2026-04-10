@@ -464,20 +464,13 @@ function renderPortfolio() {
   const monthlyPnl = _fxMonthEnd != null && _fxMonthEnd > 0
     ? _currentFxVal - _fxMonthEnd : null;
 
-  // YTD return — first snapshot of this year, with group-filter scaling
-  const thisYear = new Date().getFullYear().toString();
-  const yearStartSnap = pfYearStartSnap || pfNavHistory.find(d => d.date >= thisYear) || null;
-  let filteredYearStartValue = yearStartSnap ? yearStartSnap.total_value : null;
-  if (isFiltered && filteredYearStartValue && Object.keys(pfYearStartStockValues).length > 0) {
-    const stockTotal = Object.values(pfYearStartStockValues).reduce((a, b) => a + b, 0);
-    if (stockTotal > 0) {
-      let filteredStockTotal = 0;
-      rows.forEach(r => { filteredStockTotal += (pfYearStartStockValues[r.stock_code] ?? 0); });
-      filteredYearStartValue = yearStartSnap.total_value * (filteredStockTotal / stockTotal);
-    }
-  }
-  const _fxYtdBase = yearStartSnap && filteredYearStartValue != null ? _fxConv(filteredYearStartValue, yearStartSnap) : null;
-  const ytdReturnPct = _fxYtdBase && _fxYtdBase > 0 ? ((_currentFxVal - _fxYtdBase) / _fxYtdBase * 100) : null;
+  // YTD return — NAV-based (cashflow-adjusted)
+  const yearStartSnap = pfYearStartSnap || null;
+  const baseNav = yearStartSnap ? yearStartSnap.nav : null;
+  const latestSnap = pfNavHistory.length ? pfNavHistory[pfNavHistory.length - 1] : null;
+  const curNav = latestSnap ? latestSnap.nav : null;
+  const ytdReturnPct = baseNav && curNav ? ((curNav / baseNav - 1) * 100) : null;
+  const _fxYtdBase = yearStartSnap ? _fxConv(yearStartSnap.total_value, yearStartSnap) : null;
   const ytdPnl = _fxYtdBase != null && _fxYtdBase > 0 ? _currentFxVal - _fxYtdBase : null;
 
   // Date labels for summary cards
