@@ -1245,7 +1245,7 @@ async def delete_cashflow(cf_id: int, request: Request):
 # AI Portfolio Analysis (OpenRouter)
 # ---------------------------------------------------------------------------
 
-_AI_DEFAULT_MODEL = "google/gemma-4-31b-it"
+_AI_DEFAULT_MODEL = "qwen/qwen3.6-plus"
 
 
 @router.get("/api/portfolio/ai-models")
