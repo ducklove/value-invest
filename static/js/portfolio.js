@@ -494,9 +494,12 @@ function renderPortfolio() {
   // Format helpers — values passed here are already FX-converted
   const _fmtUsdVal = v => '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3});
   const _fv = v => pfCurrency === 'USD' ? _fmtUsdVal(v) : fmtKrw(v);
-  const _fmtUsdInt = v => '$' + Number(Math.round(v)).toLocaleString();
   const _fsv = v => {
-    if (pfCurrency === 'USD') return (v >= 0 ? '+' : '') + _fmtUsdInt(v);
+    if (pfCurrency === 'USD') {
+      const abs = Math.round(Math.abs(v));
+      const sign = v > 0 ? '+' : v < 0 ? '-' : '';
+      return sign + '$' + abs.toLocaleString();
+    }
     return fmtSignedKrw(v);
   };
   // Today's daily PnL in selected currency
