@@ -1719,6 +1719,7 @@ async function _loadAiModels() {
 
 async function runAiAnalysis() {
   _loadAiModels();
+  _ensureFxRate();
   const btn = document.getElementById('pfAiBtn');
   const result = document.getElementById('pfAiResult');
   const tokens = document.getElementById('pfAiTokens');
@@ -1757,7 +1758,9 @@ async function runAiAnalysis() {
           if (d.content) result.textContent += d.content;
           if (d.done) {
             const model = d.model ? ` · ${d.model}` : '';
-            const cost = d.cost ? ` · $${Number(d.cost).toFixed(6)}` : '';
+            const costUsd = Number(d.cost || 0);
+            const costKrw = costUsd && pfFxRate ? Math.round(costUsd * pfFxRate) : null;
+            const cost = costUsd ? ` · ${costKrw !== null ? costKrw.toLocaleString() + '원' : '$' + costUsd.toFixed(6)}` : '';
             tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}`;
           }
         } catch {}
