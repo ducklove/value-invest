@@ -1248,6 +1248,34 @@ async def delete_cashflow(cf_id: int, request: Request):
 _AI_DEFAULT_MODEL = "qwen/qwen3.6-plus"
 
 
+def _fmt_krw_ai(v: float) -> str:
+    """Format KRW for AI prompt: 조/억 units with 4 significant digits."""
+    av = abs(v)
+    if av >= 1e12:  # 조
+        jo = v / 1e12
+        # 4 sig figs: e.g. 93.56조, 1.234조, 123.4조
+        if av >= 1e15:
+            return f"{jo:,.0f}조"
+        elif av >= 1e14:
+            return f"{jo:,.1f}조"
+        elif av >= 1e13:
+            return f"{jo:,.2f}조"
+        else:
+            return f"{jo:,.3f}조"
+    elif av >= 1e8:  # 억
+        eok = v / 1e8
+        if av >= 1e11:
+            return f"{eok:,.0f}억"
+        elif av >= 1e10:
+            return f"{eok:,.1f}억"
+        elif av >= 1e9:
+            return f"{eok:,.2f}억"
+        else:
+            return f"{eok:,.3f}억"
+    else:
+        return f"{v:,.0f}원"
+
+
 @router.get("/api/portfolio/ai-models")
 async def ai_model_list(request: Request):
     """Return available OpenRouter models (for admin model picker)."""
@@ -1306,15 +1334,15 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
         ret = ((price - avg) / avg * 100) if price and avg and avg > 0 else None
         chg = q.get("change_pct")
         name = item.get("stock_name", item["stock_code"])
-        line = f"- {name} ({item['stock_code']}): 수량={qty}, 매입가={avg:,.0f}"
+        line = f"- {name} ({item['stock_code']}): 수량={qty}, 매입가={_fmt_krw_ai(avg)}"
         if price:
-            line += f", 현재가={price:,.0f}"
+            line += f", 현재가={_fmt_krw_ai(price)}"
         if ret is not None:
             line += f", 수익률={ret:+.1f}%"
         if chg is not None:
             line += f", 일간={chg:+.2f}%"
         if mv:
-            line += f", 평가={mv:,.0f}원"
+            line += f", 평가={_fmt_krw_ai(mv)}"
             total_value += mv
         holdings_lines.append(line)
 
@@ -1343,7 +1371,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
 
     prompt = f"""당신은 한국 주식 시장 전문 투자 자문가입니다. 아래 포트폴리오를 분석해 주세요.
 
-## 보유 종목 (총 평가: {total_value:,.0f}원)
+## 보유 종목 (총 평가: {_fmt_krw_ai(total_value)})
 {chr(10).join(holdings_lines)}
 
 ## 성과
