@@ -1358,7 +1358,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
 3. 시장 상황 고려 단기 전망
 4. 리밸런싱/비중 조절 제안
 
-한국어로 간결하게 답변해 주세요."""
+한국어로 간결하게 마크다운 형식으로 답변해 주세요."""
 
     import json as _json
 

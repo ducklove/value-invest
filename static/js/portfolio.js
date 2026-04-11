@@ -1732,6 +1732,7 @@ async function runAiAnalysis() {
   const selectedModel = modelInput ? modelInput.value.trim() : '';
   const body = selectedModel ? JSON.stringify({ model: selectedModel }) : '{}';
 
+  let mdText = '';
   try {
     const resp = await apiFetch('/api/portfolio/ai-analysis', {
       method: 'POST',
@@ -1755,7 +1756,15 @@ async function runAiAnalysis() {
         if (!line.startsWith('data: ')) continue;
         try {
           const d = JSON.parse(line.slice(6));
-          if (d.content) result.textContent += d.content;
+          if (d.content) {
+            mdText += d.content;
+            // Live preview: render markdown as it streams
+            if (typeof marked !== 'undefined') {
+              result.innerHTML = marked.parse(mdText);
+            } else {
+              result.textContent = mdText;
+            }
+          }
           if (d.done) {
             const model = d.model ? ` · ${d.model}` : '';
             const costUsd = Number(d.cost || 0);
@@ -1766,6 +1775,8 @@ async function runAiAnalysis() {
         } catch {}
       }
     }
+    // Final render
+    if (typeof marked !== 'undefined' && mdText) result.innerHTML = marked.parse(mdText);
   } catch (e) {
     result.textContent = '분석 실패: ' + e.message;
   }

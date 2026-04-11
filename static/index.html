@@ -226,7 +226,7 @@ function trackEvent(name, params = {}) {
           </div>
           <button class="bt-run" onclick="runAiAnalysis()" id="pfAiBtn" style="margin-left:auto;padding:6px 14px;font-size:12px;">분석 실행</button>
         </div>
-        <div id="pfAiResult" style="font-size:13px;line-height:1.7;white-space:pre-wrap;color:var(--text);padding:0 4px;"></div>
+        <div id="pfAiResult" class="pf-ai-result"></div>
         <div id="pfAiTokens" style="font-size:11px;color:var(--text-secondary);margin-top:8px;"></div>
       </div>
 
@@ -370,6 +370,7 @@ function trackEvent(name, params = {}) {
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="./js/utils.js" defer></script>
 <script src="./js/quote-manager.js" defer></script>
 <script src="./js/auth.js" defer></script>
