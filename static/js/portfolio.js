@@ -467,7 +467,6 @@ function renderPortfolio() {
   const _mtdBaseVal = _snapToFxVal(pfMonthEndSnap);
   const _mtdPnl = _mtdBaseVal != null ? _currentFxVal - _mtdBaseVal : null;
   const monthlyReturnPct = monthlyNavPct;
-  if (_isUsd && pfMonthEndSnap) console.log('[DBG MTD]', {snap_fx: pfMonthEndSnap.fx_usdkrw, snap_tv: pfMonthEndSnap.total_value, _mtdBaseVal, _currentFxVal, _mtdPnl});
 
   // --- YTD return ---
   // NAV-based (big text)
@@ -480,7 +479,6 @@ function renderPortfolio() {
   // Value-based PnL (small text)
   const _ytdBaseVal = _snapToFxVal(yearStartSnap);
   const _ytdPnl = _ytdBaseVal != null ? _currentFxVal - _ytdBaseVal : null;
-  if (_isUsd && yearStartSnap) console.log('[DBG YTD]', {snap_fx: yearStartSnap.fx_usdkrw, snap_tv: yearStartSnap.total_value, _ytdBaseVal, _currentFxVal, _ytdPnl});
 
   // Date labels for summary cards
   const _now = new Date();
