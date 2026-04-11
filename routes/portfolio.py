@@ -1070,7 +1070,7 @@ async def get_prev_day_snapshot(request: Request):
     db = await cache.get_db()
     # Previous day's closing snapshot
     cursor = await db.execute(
-        "SELECT total_value, fx_usdkrw, nav FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+        "SELECT date, total_value, fx_usdkrw, nav FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (user["google_sub"], yesterday),
     )
     snap_row = await cursor.fetchone()
