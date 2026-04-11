@@ -757,12 +757,19 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   padding: 8px 16px; border: none; border-radius: 8px;
   background: var(--primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.pf-cf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pf-cf-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .pf-cf-table th {
   text-align: left; padding: 8px 6px; border-bottom: 2px solid var(--border);
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap;
 }
-.pf-cf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); }
+.pf-cf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.pf-cf-table th:nth-child(1), .pf-cf-table td:nth-child(1) { width: 90px; }
+.pf-cf-table th:nth-child(2), .pf-cf-table td:nth-child(2) { width: 50px; }
+.pf-cf-table th:nth-child(3), .pf-cf-table td:nth-child(3) { width: 100px; text-align: right; }
+.pf-cf-table th:nth-child(4), .pf-cf-table td:nth-child(4) { width: 70px; text-align: right; }
+.pf-cf-table th:nth-child(5), .pf-cf-table td:nth-child(5) { width: 80px; text-align: right; }
+.pf-cf-table th:nth-child(6), .pf-cf-table td:nth-child(6) { width: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-cf-table th:nth-child(7), .pf-cf-table td:nth-child(7) { width: 30px; text-align: center; }
 
 .pf-filter-bar {
   display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 16px;
