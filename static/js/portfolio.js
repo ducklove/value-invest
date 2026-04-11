@@ -446,6 +446,7 @@ function renderPortfolio() {
     const _prevFxVal = _fxConv(pfPrevDaySnapshot.total_value, pfPrevDaySnapshot);
     const _fxCashflow = _fxConv(pfPrevDaySnapshot.today_net_cashflow || 0, null);
     totalDailyPnlDisplay = _currentFxVal - _prevFxVal - _fxCashflow;
+    if (pfCurrency === 'USD') console.log('[DBG Today PnL]', {_isUsd, pfFxRate, prevFx: pfPrevDaySnapshot.fx_usdkrw, _currentFxVal, _prevFxVal, _fxCashflow, totalDailyPnlDisplay});
   }
   // For table footer daily column, use NAV-based if available
   let dailyReturnPct = dailyNavPct ?? 0;
