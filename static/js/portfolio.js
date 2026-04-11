@@ -405,10 +405,11 @@ function renderPortfolio() {
   });
 
   // FX helper: convert KRW value using a specific snapshot's FX rate, or current rate
+  const _isUsd = pfCurrency === 'USD' && pfFxRate && pfFxRate > 0;
   const _fxConv = (krwVal, snap) => {
-    if (pfCurrency !== 'USD') return krwVal;
+    if (!_isUsd) return krwVal;
     const rate = snap && snap.fx_usdkrw ? snap.fx_usdkrw : pfFxRate;
-    return rate && rate > 0 ? krwVal / rate : pfFx(krwVal);
+    return rate && rate > 0 ? krwVal / rate : krwVal;
   };
   const _currentFxVal = _fxConv(totalMarketValue, null); // today uses current rate
   const _currentFxInvested = _fxConv(totalInvested, null);
@@ -418,7 +419,7 @@ function renderPortfolio() {
   // NAV adjusted for currency mode: USD NAV = KRW NAV / FX
   const isFiltered = pfGroupFilter !== null;
   const _navAdj = (nav, fx) => {
-    if (pfCurrency !== 'USD' || !nav) return nav;
+    if (!_isUsd || !nav) return nav;
     const rate = fx && fx > 0 ? fx : pfFxRate;
     return rate && rate > 0 ? nav / rate : nav;
   };
@@ -442,12 +443,8 @@ function renderPortfolio() {
   // Value-based PnL (small text)
   let totalDailyPnlDisplay = 0;
   if (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value) {
-    const _prevFxVal = pfCurrency === 'USD' && pfPrevDaySnapshot.fx_usdkrw && pfPrevDaySnapshot.fx_usdkrw > 0
-      ? pfPrevDaySnapshot.total_value / pfPrevDaySnapshot.fx_usdkrw
-      : pfPrevDaySnapshot.total_value;
-    const _fxCashflow = pfCurrency === 'USD'
-      ? (pfPrevDaySnapshot.today_net_cashflow || 0) / (pfFxRate || 1)
-      : (pfPrevDaySnapshot.today_net_cashflow || 0);
+    const _prevFxVal = _fxConv(pfPrevDaySnapshot.total_value, pfPrevDaySnapshot);
+    const _fxCashflow = _fxConv(pfPrevDaySnapshot.today_net_cashflow || 0, null);
     totalDailyPnlDisplay = _currentFxVal - _prevFxVal - _fxCashflow;
   }
   // For table footer daily column, use NAV-based if available
@@ -457,7 +454,7 @@ function renderPortfolio() {
   // FX-adjusted snap value helper
   const _snapToFxVal = snap => {
     if (!snap || !snap.total_value) return null;
-    if (pfCurrency === 'USD' && snap.fx_usdkrw && snap.fx_usdkrw > 0) return snap.total_value / snap.fx_usdkrw;
+    if (_isUsd && snap.fx_usdkrw && snap.fx_usdkrw > 0) return snap.total_value / snap.fx_usdkrw;
     return snap.total_value;
   };
   // NAV-based (big text)
