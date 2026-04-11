@@ -41,7 +41,7 @@ def analyze(
     for year in market_years:
         mkt = mkt_by_year.get(year, {})
         price_series.append({"year": year, "value": mkt.get("close_price")})
-        market_cap_series.append({"year": year, "value": _to_eok_won(mkt.get("market_cap"))})
+        market_cap_series.append({"year": year, "value": mkt.get("market_cap")})
         per_series.append({"year": year, "value": mkt.get("per")})
         pbr_series.append({"year": year, "value": mkt.get("pbr")})
         dividend_series.append({"year": year, "value": mkt.get("dividend_yield")})
@@ -61,7 +61,7 @@ def analyze(
         "PER": [{"date": item["date"], "value": item.get("per")} for item in wmd],
         "PBR": [{"date": item["date"], "value": item.get("pbr")} for item in wmd],
         "배당수익률 (%)": [{"date": item["date"], "value": item.get("dividend_yield")} for item in wmd],
-        "시가총액 (억원)": [{"date": item["date"], "value": _to_eok_won(item.get("market_cap"))} for item in wmd],
+        "시가총액": [{"date": item["date"], "value": item.get("market_cap")} for item in wmd],
         "EPS (원)": [{"date": item["date"], "value": item.get("eps")} for item in wmd],
         "ROE (%)": [{"date": item["date"], "value": item.get("roe")} for item in wmd],
         "부채비율 (%)": [{"date": item["date"], "value": item.get("debt_ratio")} for item in wmd],
@@ -72,7 +72,7 @@ def analyze(
         "years": all_years,
         "indicators": {
             "주가 (원)": price_series,
-            "시가총액 (억원)": market_cap_series,
+            "시가총액": market_cap_series,
             "PER": per_series,
             "PBR": pbr_series,
             "ROE (%)": roe_series,
