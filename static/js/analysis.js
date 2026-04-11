@@ -577,12 +577,12 @@ async function switchValuationPeriod(period) {
     const dailyIndicators = {};
     for (const key of WEEKLY_CHART_KEYS) {
       const fieldMap = { '주가': 'close_price', 'PER': 'per', 'PBR': 'pbr', '배당수익률 (%)': 'dividend_yield',
-        '시가총액 (억원)': 'market_cap', 'EPS (원)': 'eps', 'ROE (%)': 'roe', '부채비율 (%)': 'debt_ratio', '영업이익률 (%)': 'operating_margin' };
+        '시가총액': 'market_cap', 'EPS (원)': 'eps', 'ROE (%)': 'roe', '부채비율 (%)': 'debt_ratio', '영업이익률 (%)': 'operating_margin' };
       const field = fieldMap[key];
       if (field) {
         dailyIndicators[key] = daily.map(d => ({
           date: d.date,
-          value: key === '시가총액 (억원)' && d[field] != null ? Math.round(d[field] / 100000000 * 100) / 100 : d[field],
+          value: d[field],
         }));
       }
     }

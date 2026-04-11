@@ -1,5 +1,5 @@
 const ANNUAL_CHART_KEYS = [
-  '주가 (원)', '시가총액 (억원)', 'PER', 'PBR', 'ROE (%)', 'EPS (원)',
+  '주가 (원)', '시가총액', 'PER', 'PBR', 'ROE (%)', 'EPS (원)',
   '부채비율 (%)', '영업이익률 (%)', '배당수익률 (%)', '주당배당금 (원)'
 ];
 
@@ -1032,14 +1032,16 @@ function renderChartGrid(container, chartKeys, indicatorMap, gridColor, tickColo
           tooltip: {
             callbacks: {
               label: (ctx) => {
+                const isKrwKey = /주가|시가총액|EPS|배당금/.test(key);
+                const _fmt = v => isKrwKey ? fmtKrw(v) : v.toLocaleString();
                 const rawValue = rawValues[ctx.dataIndex];
                 if (ctx.parsed.y === null) {
                   if (isPerChart(key) && rawValue !== null && Number.isFinite(rawValue)) {
-                    return `${key}: 표시 제외 (${rawValue.toLocaleString()})`;
+                    return `${key}: 표시 제외 (${_fmt(rawValue)})`;
                   }
                   return 'N/A';
                 }
-                return `${key}: ${ctx.parsed.y.toLocaleString()}`;
+                return `${key}: ${_fmt(ctx.parsed.y)}`;
               }
             }
           }
@@ -2037,11 +2039,16 @@ function returnClass(val) {
   return val > 0 ? 'pf-return positive' : val < 0 ? 'pf-return negative' : '';
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
-function fmtKrw(n) { return n !== null ? Number(Math.round(n)).toLocaleString() : '-'; }
+function fmtKrw(n) {
+  if (n === null || n === undefined) return '-';
+  const a = Math.abs(n);
+  if (a >= 1e12) { const v = n / 1e12; const d = a >= 1e15 ? 0 : a >= 1e14 ? 1 : a >= 1e13 ? 2 : a >= 1e12 ? 3 : 0; return v.toFixed(d) + '조'; }
+  if (a >= 1e8)  { const v = n / 1e8;  const d = a >= 1e11 ? 0 : a >= 1e10 ? 1 : a >= 1e9 ? 2 : 3;  return v.toFixed(d) + '억'; }
+  return Number(Math.round(n)).toLocaleString();
+}
 function fmtSignedKrw(n) {
   if (n === null) return '-';
-  const r = Math.round(n);
-  return (r > 0 ? '+' : '') + r.toLocaleString();
+  return (n > 0 ? '+' : '') + fmtKrw(n);
 }
 function fmtPct(n) {
   if (n === null || n === undefined) return '-';
