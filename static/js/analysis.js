@@ -431,8 +431,15 @@ async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, ti
   container.innerHTML = '';
   await loadChartLib();
 
+  const _LEGACY_KEYS = { '시가총액': '시가총액 (억원)' };
   chartKeys.forEach((key, i) => {
-    const series = indicatorMap[key] || [];
+    let series = indicatorMap[key] || [];
+    if (series.length === 0 && _LEGACY_KEYS[key]) {
+      const legacy = indicatorMap[_LEGACY_KEYS[key]] || [];
+      if (legacy.length > 0) {
+        series = legacy.map(d => ({ ...d, value: d.value != null ? d.value * 1e8 : null }));
+      }
+    }
     if (series.length === 0) return;
 
     const { labelField, labels, values, rawValues, note, spanGaps } = buildChartSeries(key, series);
