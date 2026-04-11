@@ -25,9 +25,17 @@ def _fmt_krw(val: float) -> str:
 
 
 def _fmt_krw_jo(val: float) -> str:
-    """Format KRW value in 조 (trillion) units, e.g. 327.68조."""
-    jo = val / 1_000_000_000_000
-    return f"{jo:,.2f}조"
+    """Format KRW value in 조/억 with 4 significant digits."""
+    av = abs(val)
+    if av >= 1e12:
+        v = val / 1e12
+        d = 0 if av >= 1e15 else 1 if av >= 1e14 else 2 if av >= 1e13 else 3
+        return f"{v:,.{d}f}조"
+    if av >= 1e8:
+        v = val / 1e8
+        d = 0 if av >= 1e11 else 1 if av >= 1e10 else 2 if av >= 1e9 else 3
+        return f"{v:,.{d}f}억"
+    return f"{round(val):,}원"
 
 
 def _fmt_pct(val: float | None) -> str:
