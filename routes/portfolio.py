@@ -1245,14 +1245,47 @@ async def delete_cashflow(cf_id: int, request: Request):
 # AI Portfolio Analysis (OpenRouter)
 # ---------------------------------------------------------------------------
 
-_AI_MODELS = ["google/gemma-4-26b-a4b-it"]
+_AI_DEFAULT_MODEL = "google/gemma-4-31b-it"
+
+
+@router.get("/api/portfolio/ai-models")
+async def ai_model_list(request: Request):
+    """Return available OpenRouter models (for admin model picker)."""
+    user = _require_user(await get_current_user(request))
+    if not _OPENROUTER_KEY:
+        return {"models": [], "default": _AI_DEFAULT_MODEL}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get("https://openrouter.ai/api/v1/models")
+            data = resp.json().get("data", [])
+            models = []
+            for m in data:
+                p = m.get("pricing", {})
+                models.append({
+                    "id": m["id"],
+                    "name": m.get("name", m["id"]),
+                    "prompt_price": float(p.get("prompt", 0)) * 1e6,
+                    "completion_price": float(p.get("completion", 0)) * 1e6,
+                    "context": m.get("context_length", 0),
+                })
+            models.sort(key=lambda x: x["id"])
+            return {"models": models, "default": _AI_DEFAULT_MODEL}
+    except Exception as exc:
+        logger.warning("Failed to fetch OpenRouter models: %s", exc)
+        return {"models": [], "default": _AI_DEFAULT_MODEL}
 
 
 @router.post("/api/portfolio/ai-analysis")
-async def ai_portfolio_analysis(request: Request):
+async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={})):
     user = _require_user(await get_current_user(request))
     if not _OPENROUTER_KEY:
         raise HTTPException(status_code=500, detail="AI API 키가 설정되지 않았습니다.")
+
+    # Admin can override model
+    model = _AI_DEFAULT_MODEL
+    req_model = payload.get("model")
+    if req_model and user.get("is_admin"):
+        model = req_model
 
     google_sub = user["google_sub"]
     items = await cache.get_portfolio(google_sub=google_sub)
@@ -1331,42 +1364,34 @@ async def ai_portfolio_analysis(request: Request):
 
     async def _stream():
         async with httpx.AsyncClient(timeout=60.0) as client:
-            used_model = None
-            resp = None
-            for model in _AI_MODELS:
-                resp = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {_OPENROUTER_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 2000,
-                        "stream": True,
-                    },
-                    timeout=60.0,
-                )
-                if resp.status_code == 429:
-                    logger.warning("AI model %s rate-limited, trying next", model)
-                    continue
-                used_model = model
-                break
-
-            if resp is None or resp.status_code == 429:
-                yield f"data: {_json.dumps({'content': '현재 모든 AI 모델이 사용량 제한 상태입니다. 잠시 후 다시 시도해 주세요.'})}\n\n"
-                yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': ''})}\n\n"
-                return
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {_OPENROUTER_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 2000,
+                    "stream": True,
+                },
+                timeout=60.0,
+            )
 
             if resp.status_code != 200:
-                body = resp.text
-                yield f"data: {_json.dumps({'content': f'API 오류: {resp.status_code}'})}\n\n"
-                yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': used_model or ''})}\n\n"
+                try:
+                    err = resp.json()
+                    msg = err.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                except Exception:
+                    msg = f"HTTP {resp.status_code}"
+                yield f"data: {_json.dumps({'content': f'API 오류: {msg}'})}\n\n"
+                yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'cost': 0})}\n\n"
                 return
 
             input_tokens = 0
             output_tokens = 0
+            cost = 0
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -1375,7 +1400,6 @@ async def ai_portfolio_analysis(request: Request):
                     break
                 try:
                     chunk = _json.loads(payload)
-                    # Check for error in stream
                     if "error" in chunk:
                         yield f"data: {_json.dumps({'content': chunk['error'].get('message', 'Unknown error')})}\n\n"
                         break
@@ -1388,8 +1412,9 @@ async def ai_portfolio_analysis(request: Request):
                     if usage:
                         input_tokens = usage.get("prompt_tokens", input_tokens)
                         output_tokens = usage.get("completion_tokens", output_tokens)
+                        cost = usage.get("cost", cost) or cost
                 except Exception:
                     continue
-            yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': used_model or ''})}\n\n"
+            yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'cost': cost})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

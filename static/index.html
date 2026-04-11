@@ -218,8 +218,12 @@ function trackEvent(name, params = {}) {
 
     <div id="pfPerformanceTab" style="display:none;">
       <div class="pf-nav-chart-wrap" id="pfAiWrap">
-        <div class="pf-nav-header" style="display:flex;align-items:center;gap:8px;">
+        <div class="pf-nav-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <h3>AI 포트폴리오 분석</h3>
+          <div id="pfAiModelPicker" style="display:none;margin-left:8px;">
+            <input list="pfAiModelList" id="pfAiModelInput" placeholder="모델 선택/입력" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);width:260px;">
+            <datalist id="pfAiModelList"></datalist>
+          </div>
           <button class="bt-run" onclick="runAiAnalysis()" id="pfAiBtn" style="margin-left:auto;padding:6px 14px;font-size:12px;">분석 실행</button>
         </div>
         <div id="pfAiResult" style="font-size:13px;line-height:1.7;white-space:pre-wrap;color:var(--text);padding:0 4px;"></div>

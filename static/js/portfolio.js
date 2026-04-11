@@ -1695,7 +1695,30 @@ function pfSetCurrency(currency) {
 }
 
 // --- AI Analysis ---
+let _aiModelsLoaded = false;
+async function _loadAiModels() {
+  if (_aiModelsLoaded) return;
+  // Show model picker only for admin
+  if (typeof currentUser === 'undefined' || !currentUser || !currentUser.is_admin) return;
+  const picker = document.getElementById('pfAiModelPicker');
+  if (!picker) return;
+  picker.style.display = '';
+  try {
+    const resp = await apiFetch('/api/portfolio/ai-models');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const input = document.getElementById('pfAiModelInput');
+    const datalist = document.getElementById('pfAiModelList');
+    input.value = data.default || '';
+    datalist.innerHTML = data.models.map(m =>
+      `<option value="${m.id}">${m.name} ($${m.prompt_price.toFixed(2)}/$${m.completion_price.toFixed(2)} per 1M)</option>`
+    ).join('');
+    _aiModelsLoaded = true;
+  } catch {}
+}
+
 async function runAiAnalysis() {
+  _loadAiModels();
   const btn = document.getElementById('pfAiBtn');
   const result = document.getElementById('pfAiResult');
   const tokens = document.getElementById('pfAiTokens');
@@ -1704,8 +1727,16 @@ async function runAiAnalysis() {
   result.textContent = '';
   tokens.textContent = '';
 
+  const modelInput = document.getElementById('pfAiModelInput');
+  const selectedModel = modelInput ? modelInput.value.trim() : '';
+  const body = selectedModel ? JSON.stringify({ model: selectedModel }) : '{}';
+
   try {
-    const resp = await apiFetch('/api/portfolio/ai-analysis', { method: 'POST' });
+    const resp = await apiFetch('/api/portfolio/ai-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${resp.status}`);
@@ -1726,7 +1757,8 @@ async function runAiAnalysis() {
           if (d.content) result.textContent += d.content;
           if (d.done) {
             const model = d.model ? ` · ${d.model}` : '';
-            tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${model}`;
+            const cost = d.cost ? ` · $${Number(d.cost).toFixed(6)}` : '';
+            tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}`;
           }
         } catch {}
       }
@@ -1752,7 +1784,7 @@ function pfSwitchTab(tab) {
   activeEl.classList.remove('fade-in');
   void activeEl.offsetWidth;
   activeEl.classList.add('fade-in');
-  if (tab === 'performance') loadPerformanceData();
+  if (tab === 'performance') { loadPerformanceData(); _loadAiModels(); }
 }
 
 async function loadPerformanceData() {
