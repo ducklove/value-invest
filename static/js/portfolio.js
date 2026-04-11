@@ -1694,6 +1694,49 @@ function pfSetCurrency(currency) {
   }
 }
 
+// --- AI Analysis ---
+async function runAiAnalysis() {
+  const btn = document.getElementById('pfAiBtn');
+  const result = document.getElementById('pfAiResult');
+  const tokens = document.getElementById('pfAiTokens');
+  btn.disabled = true;
+  btn.textContent = '분석 중...';
+  result.textContent = '';
+  tokens.textContent = '';
+
+  try {
+    const resp = await apiFetch('/api/portfolio/ai-analysis', { method: 'POST' });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const d = JSON.parse(line.slice(6));
+          if (d.content) result.textContent += d.content;
+          if (d.done) {
+            tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} 토큰 / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰`;
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    result.textContent = '분석 실패: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = '분석 실행';
+}
+
 // --- Portfolio Performance Tab ---
 let pfActiveTab = 'holdings';
 

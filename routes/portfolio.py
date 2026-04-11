@@ -1,17 +1,27 @@
 import asyncio
 import logging
+import os
 import re
 import time
 from functools import partial
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 import cache
 import kis_ws_manager
 import market_indicators
 import stock_price
 from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
+
+_OPENROUTER_KEY = ""
+_keys_file = Path(__file__).parent.parent / "keys.txt"
+if _keys_file.exists():
+    for line in _keys_file.read_text().splitlines():
+        if line.startswith("OPENROUTER_API_KEY="):
+            _OPENROUTER_KEY = line.split("=", 1)[1].strip()
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1231,3 +1241,131 @@ async def delete_cashflow(cf_id: int, request: Request):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------------------
+# AI Portfolio Analysis (OpenRouter)
+# ---------------------------------------------------------------------------
+
+_AI_MODEL = "google/gemma-4-26b-a4b-it:free"
+
+
+@router.post("/api/portfolio/ai-analysis")
+async def ai_portfolio_analysis(request: Request):
+    user = _require_user(await get_current_user(request))
+    if not _OPENROUTER_KEY:
+        raise HTTPException(status_code=500, detail="AI API 키가 설정되지 않았습니다.")
+
+    google_sub = user["google_sub"]
+    items = await cache.get_portfolio(google_sub=google_sub)
+    if not items:
+        raise HTTPException(status_code=400, detail="포트폴리오가 비어 있습니다.")
+
+    enriched = await _enrich_with_cached_quotes(items)
+
+    # Build holdings summary
+    holdings_lines = []
+    total_value = 0
+    for item in enriched:
+        q = item.get("quote", {})
+        price = q.get("price")
+        qty = item.get("quantity", 0)
+        avg = item.get("avg_price", 0)
+        mv = price * qty if price and qty else None
+        ret = ((price - avg) / avg * 100) if price and avg and avg > 0 else None
+        chg = q.get("change_pct")
+        name = item.get("stock_name", item["stock_code"])
+        line = f"- {name} ({item['stock_code']}): 수량={qty}, 매입가={avg:,.0f}"
+        if price:
+            line += f", 현재가={price:,.0f}"
+        if ret is not None:
+            line += f", 수익률={ret:+.1f}%"
+        if chg is not None:
+            line += f", 일간={chg:+.2f}%"
+        if mv:
+            line += f", 평가={mv:,.0f}원"
+            total_value += mv
+        holdings_lines.append(line)
+
+    # NAV / performance
+    from datetime import date as _date
+    nav_history = await cache.get_nav_history(google_sub)
+    perf_lines = []
+    if nav_history:
+        latest = nav_history[-1]
+        first = nav_history[0]
+        perf_lines.append(f"NAV: {latest['nav']:.2f} ({first['date']}~{latest['date']})")
+        if len(nav_history) > 252:
+            yoy = (latest['nav'] / nav_history[-252]['nav'] - 1) * 100
+            perf_lines.append(f"YoY: {yoy:+.2f}%")
+        days = (_date.fromisoformat(latest['date']) - _date.fromisoformat(first['date'])).days
+        if days > 365:
+            cagr = ((latest['nav'] / first['nav']) ** (365 / days) - 1) * 100
+            perf_lines.append(f"CAGR: {cagr:+.2f}%")
+
+    # Market summary
+    try:
+        market = await market_indicators.fetch_indicators(["KOSPI", "KOSDAQ", "USD_KRW", "SPX", "US10Y", "OIL_CL"])
+        market_lines = [f"- {k}: {v.get('value','')} ({v.get('direction','')}{v.get('change_pct','')})" for k, v in market.items()]
+    except Exception:
+        market_lines = ["시장 데이터를 가져올 수 없습니다."]
+
+    prompt = f"""당신은 한국 주식 시장 전문 투자 자문가입니다. 아래 포트폴리오를 분석해 주세요.
+
+## 보유 종목 (총 평가: {total_value:,.0f}원)
+{chr(10).join(holdings_lines)}
+
+## 성과
+{chr(10).join(perf_lines) if perf_lines else "N/A"}
+
+## 시장 현황
+{chr(10).join(market_lines)}
+
+분석 항목:
+1. 포트폴리오 구성 평가 (분산도, 섹터 편중)
+2. 주요 종목 밸류에이션과 리스크
+3. 시장 상황 고려 단기 전망
+4. 리밸런싱/비중 조절 제안
+
+한국어로 간결하게 답변해 주세요."""
+
+    import json as _json
+
+    async def _stream():
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {_OPENROUTER_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": _AI_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 2000,
+                    "stream": True,
+                },
+                timeout=60.0,
+            )
+            input_tokens = 0
+            output_tokens = 0
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = _json.loads(payload)
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        output_tokens += 1
+                        yield f"data: {_json.dumps({'content': content})}\n\n"
+                    usage = chunk.get("usage")
+                    if usage:
+                        input_tokens = usage.get("prompt_tokens", input_tokens)
+                        output_tokens = usage.get("completion_tokens", output_tokens)
+                except Exception:
+                    continue
+            yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens})}\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
