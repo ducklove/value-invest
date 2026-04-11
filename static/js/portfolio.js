@@ -10,7 +10,7 @@ let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 let pfGroupSort = true;   // independent group sort toggle
 let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
-let pfMonthEndValue = null; // total_value at end of previous month
+let pfMonthEndSnap = null; // {total_value, nav, fx_usdkrw, ...} at end of previous month
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 let pfYearStartSnap = null; // {date, total_value, fx_usdkrw, ...} for first snapshot of this year
 let pfYearStartStockValues = {}; // stock_code -> market_value at year start
@@ -167,7 +167,7 @@ async function loadPortfolio() {
     apiFetch('/api/portfolio/month-end-value').then(async r => {
       if (!r.ok) return;
       const snap = await r.json();
-      pfMonthEndValue = snap.total_value ?? null;
+      pfMonthEndSnap = snap && snap.total_value ? snap : null;
       pfMonthEndStockValues = snap.stock_values || {};
       renderPortfolio();
     }).catch(() => {});
@@ -454,26 +454,20 @@ function renderPortfolio() {
   let dailyReturnPct = dailyNavPct ?? 0;
 
   // --- Monthly return (MTD) ---
-  // NAV-based (big text)
-  const _monthEndSnap = pfNavHistory.length > 0 ? (() => {
-    const thisMonth = new Date().toISOString().slice(0, 7);
-    for (let i = pfNavHistory.length - 1; i >= 0; i--) {
-      if (pfNavHistory[i].date < thisMonth) return pfNavHistory[i];
-    }
-    return null;
-  })() : null;
-  const monthEndNav = _navAdj(
-    _monthEndSnap ? _monthEndSnap.nav : null,
-    _monthEndSnap ? _monthEndSnap.fx_usdkrw : null
-  );
-  const monthlyNavPct = monthEndNav && curNav ? ((curNav / monthEndNav - 1) * 100) : null;
-  // Value-based PnL (small text) — use nav history snaps for consistent FX
+  // FX-adjusted snap value helper
   const _snapToFxVal = snap => {
-    if (!snap) return null;
+    if (!snap || !snap.total_value) return null;
     if (pfCurrency === 'USD' && snap.fx_usdkrw && snap.fx_usdkrw > 0) return snap.total_value / snap.fx_usdkrw;
     return snap.total_value;
   };
-  const _mtdBaseVal = _snapToFxVal(_monthEndSnap);
+  // NAV-based (big text)
+  const monthEndNav = _navAdj(
+    pfMonthEndSnap ? pfMonthEndSnap.nav : null,
+    pfMonthEndSnap ? pfMonthEndSnap.fx_usdkrw : null
+  );
+  const monthlyNavPct = monthEndNav && curNav ? ((curNav / monthEndNav - 1) * 100) : null;
+  // Value-based PnL (small text)
+  const _mtdBaseVal = _snapToFxVal(pfMonthEndSnap);
   const _mtdPnl = _mtdBaseVal != null ? _currentFxVal - _mtdBaseVal : null;
   const monthlyReturnPct = monthlyNavPct;
 
@@ -709,12 +703,12 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparkline('sparkTotalReturn', [], '#dc2626', 252, 'right');
   }
 
-  // 월간 수익률 — pfMonthEndValue 대비 일별 total_value 변동률 (%)
-  if (pfNavHistory.length > 0 && pfMonthEndValue && pfMonthEndValue > 0) {
+  // 월간 수익률 — pfMonthEndSnap?.total_value 대비 일별 total_value 변동률 (%)
+  if (pfNavHistory.length > 0 && pfMonthEndSnap?.total_value && pfMonthEndSnap?.total_value > 0) {
     const thisMonth = new Date().toISOString().slice(0, 7);
     const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
     if (monthData.length > 0) {
-      const monthPcts = monthData.map(d => ((d.total_value / pfMonthEndValue) - 1) * 100);
+      const monthPcts = monthData.map(d => ((d.total_value / pfMonthEndSnap?.total_value) - 1) * 100);
       const lastPct = monthPcts[monthPcts.length - 1];
       _drawSparkline('sparkMonthly', monthPcts,
         lastPct >= 0 ? '#dc2626' : '#2563eb', 22, 'left');
