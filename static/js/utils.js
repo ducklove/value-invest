@@ -251,7 +251,7 @@ function createLineChart(container, opts) {
 
 function _createEChartsChart(container, opts) {
   const { labels, values, color = '#3b82f6', smooth = 0.3, fill = true,
-          yMin, tooltipPrefix = '', yFormatter, connectNulls = false, dataZoom = false } = opts;
+          yMin, tooltipPrefix = '', yFormatter, tooltipFormatter, connectNulls = false, dataZoom = false } = opts;
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
 
@@ -264,7 +264,7 @@ function _createEChartsChart(container, opts) {
   ] : [];
   const bottomPad = dataZoom ? 56 : 24;
   ec.setOption({
-    grid: { left: 50, right: 12, top: 10, bottom: bottomPad },
+    grid: { left: yFormatter ? 65 : 50, right: 12, top: 10, bottom: bottomPad },
     dataZoom: zoomComponents,
     xAxis: {
       type: 'category',
@@ -284,7 +284,7 @@ function _createEChartsChart(container, opts) {
       trigger: 'axis',
       formatter(params) {
         const p = params[0];
-        const val = p.value == null || p.value === '-' ? 'N/A' : (tooltipPrefix + Number(p.value).toLocaleString());
+        const val = p.value == null || p.value === '-' ? 'N/A' : (tooltipPrefix + (tooltipFormatter ? tooltipFormatter(p.value) : Number(p.value).toLocaleString()));
         return `${labels[p.dataIndex]}<br/>${val}`;
       },
     },

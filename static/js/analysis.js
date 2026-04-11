@@ -465,6 +465,7 @@ async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, ti
     }
     container.appendChild(card);
 
+    const isKrwKey = /주가|시가총액|EPS|배당금/.test(key);
     const chartOpts = {
       labels: displayLabels,
       rawLabels: labels,
@@ -473,6 +474,8 @@ async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, ti
       yMin: zeroBaseline ? 0 : undefined,
       tooltipPrefix: `${key}: `,
       connectNulls: spanGaps,
+      yFormatter: isKrwKey ? (v => fmtKrw(v)) : undefined,
+      tooltipFormatter: isKrwKey ? (v => fmtKrw(v)) : undefined,
     };
     charts[key] = createLineChart(innerDiv, chartOpts);
 
