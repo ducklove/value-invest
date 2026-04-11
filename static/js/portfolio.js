@@ -415,18 +415,29 @@ function renderPortfolio() {
 
   const totalReturnPct = _currentFxInvested > 0 ? ((_currentFxVal - _currentFxInvested) / _currentFxInvested * 100) : 0;
 
-  // Latest NAV — use live total_value / total_units if snapshot is stale
+  // NAV adjusted for currency mode: USD NAV = KRW NAV / FX
   const isFiltered = pfGroupFilter !== null;
+  const _navAdj = (nav, fx) => {
+    if (pfCurrency !== 'USD' || !nav) return nav;
+    const rate = fx && fx > 0 ? fx : pfFxRate;
+    return rate && rate > 0 ? nav / rate : nav;
+  };
+
+  // Latest NAV — use live total_value / total_units if snapshot is stale
   const latestSnap = pfNavHistory.length ? pfNavHistory[pfNavHistory.length - 1] : null;
   const _today = new Date().toISOString().slice(0, 10);
   const _snapIsStale = latestSnap && latestSnap.date < _today;
-  const curNav = (_snapIsStale && latestSnap.total_units && totalMarketValue > 0)
+  const _curNavKrw = (_snapIsStale && latestSnap.total_units && totalMarketValue > 0)
     ? totalMarketValue / latestSnap.total_units
     : (latestSnap ? latestSnap.nav : null);
+  const curNav = _navAdj(_curNavKrw, pfFxRate);
 
   // --- Daily return ---
   // NAV-based (big text)
-  const prevDayNav = pfPrevDaySnapshot ? pfPrevDaySnapshot.nav : null;
+  const prevDayNav = _navAdj(
+    pfPrevDaySnapshot ? pfPrevDaySnapshot.nav : null,
+    pfPrevDaySnapshot ? pfPrevDaySnapshot.fx_usdkrw : null
+  );
   const dailyNavPct = prevDayNav && curNav ? ((curNav / prevDayNav - 1) * 100) : null;
   // Value-based (small text)
   let dailyValuePct = null;
@@ -459,7 +470,10 @@ function renderPortfolio() {
     }
     return null;
   })() : null;
-  const monthEndNav = _monthEndSnap ? _monthEndSnap.nav : null;
+  const monthEndNav = _navAdj(
+    _monthEndSnap ? _monthEndSnap.nav : null,
+    _monthEndSnap ? _monthEndSnap.fx_usdkrw : null
+  );
   const monthlyNavPct = monthEndNav && curNav ? ((curNav / monthEndNav - 1) * 100) : null;
   // Value-based (small text)
   let filteredMonthEndValue = pfMonthEndValue;
@@ -478,7 +492,10 @@ function renderPortfolio() {
   // --- YTD return ---
   // NAV-based (big text)
   const yearStartSnap = pfYearStartSnap || null;
-  const baseNav = yearStartSnap ? yearStartSnap.nav : null;
+  const baseNav = _navAdj(
+    yearStartSnap ? yearStartSnap.nav : null,
+    yearStartSnap ? yearStartSnap.fx_usdkrw : null
+  );
   const ytdReturnPct = baseNav && curNav ? ((curNav / baseNav - 1) * 100) : null;
   // Value-based PnL (small text)
   const _fxYtdBase = yearStartSnap ? _fxConv(yearStartSnap.total_value, yearStartSnap) : null;
@@ -1948,9 +1965,11 @@ async function renderNavChart(data) {
     return;
   }
 
-  // NAV doesn't need FX conversion (it's a unitless index)
-  // But if USD mode, show NAV adjusted by relative FX change (approximate)
-  const navValues = data.map(d => d.nav);
+  // In USD mode, NAV_USD = NAV_KRW / FX so it reflects both portfolio and currency performance
+  const navValues = data.map(d => {
+    if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
+    return d.nav;
+  });
 
   // Color based on YoY
   const last365 = data.slice(-365);
@@ -2043,24 +2062,32 @@ async function renderValueChart(data) {
 function renderNavReturns(data) {
   const el = document.getElementById('pfNavReturns');
   if (!el || !data.length) { if (el) el.innerHTML = ''; return; }
+
+  // FX-adjusted NAV values
+  const _nav = d => {
+    if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
+    return d.nav;
+  };
+
   const latest = data[data.length - 1];
-  const baseNav = 1000;
+  const latestNav = _nav(latest);
+  const firstNav = _nav(data[0]);
 
   // 52-week range
   const last365 = data.slice(-365);
-  const navs52 = last365.map(d => d.nav);
+  const navs52 = last365.map(d => _nav(d));
   const min52 = Math.min(...navs52);
   const max52 = Math.max(...navs52);
 
   // YoY
   const oneYearAgo = last365.length >= 252 ? last365[0] : (last365.length > 0 ? last365[0] : null);
-  const yoyPct = oneYearAgo ? ((latest.nav / oneYearAgo.nav) - 1) * 100 : null;
+  const yoyPct = oneYearAgo ? ((latestNav / _nav(oneYearAgo)) - 1) * 100 : null;
 
-  // Annualized return: (NAV최종 - NAV최초) / 기간(years)
+  // Annualized return
   const totalDays = data.length > 1 ? (new Date(latest.date) - new Date(data[0].date)) / 86400000 : 0;
   const totalYears = totalDays / 365;
   const annualizedPct = totalYears > 0
-    ? ((latest.nav - data[0].nav) / data[0].nav * 100) / totalYears : null;
+    ? ((latestNav - firstNav) / firstNav * 100) / totalYears : null;
 
   const items = [
     { label: '52주 최저', val: min52.toFixed(2) },

@@ -1174,7 +1174,7 @@ async def get_month_end_snapshot(google_sub: str) -> dict | None:
     month_end = date.today().replace(day=1) - timedelta(days=1)
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, total_value, total_invested, nav, total_units FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (google_sub, month_end.isoformat()),
     )
     row = await cursor.fetchone()
