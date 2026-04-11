@@ -439,27 +439,19 @@ function renderPortfolio() {
     pfPrevDaySnapshot ? pfPrevDaySnapshot.fx_usdkrw : null
   );
   const dailyNavPct = prevDayNav && curNav ? ((curNav / prevDayNav - 1) * 100) : null;
-  // Value-based (small text)
-  let dailyValuePct = null;
-  let totalDailyPnlDisplay = totalDailyPnl;
+  // Value-based PnL (small text)
+  let totalDailyPnlDisplay = 0;
   if (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value) {
-    const prevSnap = pfPrevDaySnapshot;
-    let prevTotal = prevSnap.total_value;
-    if (isFiltered && Object.keys(prevSnap.stock_values || {}).length > 0) {
-      const stockTotal = Object.values(prevSnap.stock_values).reduce((a, b) => a + b, 0);
-      if (stockTotal > 0) {
-        let filteredStockTotal = 0;
-        rows.forEach(r => { filteredStockTotal += (prevSnap.stock_values[r.stock_code] ?? 0); });
-        prevTotal = prevSnap.total_value * (filteredStockTotal / stockTotal);
-      }
-    }
-    const _fxPrev = _fxConv(prevTotal, prevSnap);
-    const _fxCashflow = isFiltered ? 0 : _fxConv(prevSnap.today_net_cashflow || 0, null);
-    totalDailyPnlDisplay = _currentFxVal - _fxPrev - _fxCashflow;
-    dailyValuePct = _fxPrev > 0 ? (totalDailyPnlDisplay / _fxPrev * 100) : 0;
+    const _prevFxVal = pfCurrency === 'USD' && pfPrevDaySnapshot.fx_usdkrw && pfPrevDaySnapshot.fx_usdkrw > 0
+      ? pfPrevDaySnapshot.total_value / pfPrevDaySnapshot.fx_usdkrw
+      : pfPrevDaySnapshot.total_value;
+    const _fxCashflow = pfCurrency === 'USD'
+      ? (pfPrevDaySnapshot.today_net_cashflow || 0) / (pfFxRate || 1)
+      : (pfPrevDaySnapshot.today_net_cashflow || 0);
+    totalDailyPnlDisplay = _currentFxVal - _prevFxVal - _fxCashflow;
   }
   // For table footer daily column, use NAV-based if available
-  let dailyReturnPct = dailyNavPct ?? dailyValuePct ?? 0;
+  let dailyReturnPct = dailyNavPct ?? 0;
 
   // --- Monthly return (MTD) ---
   // NAV-based (big text)
@@ -475,18 +467,14 @@ function renderPortfolio() {
     _monthEndSnap ? _monthEndSnap.fx_usdkrw : null
   );
   const monthlyNavPct = monthEndNav && curNav ? ((curNav / monthEndNav - 1) * 100) : null;
-  // Value-based (small text)
-  let filteredMonthEndValue = pfMonthEndValue;
-  if (isFiltered && pfMonthEndValue && Object.keys(pfMonthEndStockValues).length > 0) {
-    const stockTotal = Object.values(pfMonthEndStockValues).reduce((a, b) => a + b, 0);
-    if (stockTotal > 0) {
-      let filteredStockTotal = 0;
-      rows.forEach(r => { filteredStockTotal += (pfMonthEndStockValues[r.stock_code] ?? 0); });
-      filteredMonthEndValue = pfMonthEndValue * (filteredStockTotal / stockTotal);
-    }
-  }
-  const _fxMonthEnd = _fxConv(filteredMonthEndValue, _monthEndSnap);
-  const _mtdPnl = _fxMonthEnd != null && _fxMonthEnd > 0 ? _currentFxVal - _fxMonthEnd : null;
+  // Value-based PnL (small text) — use nav history snaps for consistent FX
+  const _snapToFxVal = snap => {
+    if (!snap) return null;
+    if (pfCurrency === 'USD' && snap.fx_usdkrw && snap.fx_usdkrw > 0) return snap.total_value / snap.fx_usdkrw;
+    return snap.total_value;
+  };
+  const _mtdBaseVal = _snapToFxVal(_monthEndSnap);
+  const _mtdPnl = _mtdBaseVal != null ? _currentFxVal - _mtdBaseVal : null;
   const monthlyReturnPct = monthlyNavPct;
 
   // --- YTD return ---
@@ -498,8 +486,8 @@ function renderPortfolio() {
   );
   const ytdReturnPct = baseNav && curNav ? ((curNav / baseNav - 1) * 100) : null;
   // Value-based PnL (small text)
-  const _fxYtdBase = yearStartSnap ? _fxConv(yearStartSnap.total_value, yearStartSnap) : null;
-  const _ytdPnl = _fxYtdBase != null && _fxYtdBase > 0 ? _currentFxVal - _fxYtdBase : null;
+  const _ytdBaseVal = _snapToFxVal(yearStartSnap);
+  const _ytdPnl = _ytdBaseVal != null ? _currentFxVal - _ytdBaseVal : null;
 
   // Date labels for summary cards
   const _now = new Date();
@@ -533,7 +521,7 @@ function renderPortfolio() {
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
-        <div class="pf-summary-value ${_l ? returnClass(dailyNavPct) : ''}">${_l ? (dailyNavPct !== null ? fmtPct(dailyNavPct) : fmtPct(dailyValuePct ?? 0)) : '-'}</div>
+        <div class="pf-summary-value ${_l ? returnClass(dailyNavPct) : ''}">${_l ? fmtPct(dailyNavPct ?? 0) : '-'}</div>
         <div class="pf-summary-sub ${_l ? returnClass(totalDailyPnlDisplay) : ''}">${_l ? _fsv(totalDailyPnlDisplay) : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkDaily"></canvas>
