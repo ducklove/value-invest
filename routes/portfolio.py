@@ -1245,7 +1245,12 @@ async def delete_cashflow(cf_id: int, request: Request):
 # AI Portfolio Analysis (OpenRouter)
 # ---------------------------------------------------------------------------
 
-_AI_MODEL = "google/gemma-4-26b-a4b-it:free"
+_AI_MODELS = [
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openrouter/free",
+]
 
 
 @router.post("/api/portfolio/ai-analysis")
@@ -1331,20 +1336,40 @@ async def ai_portfolio_analysis(request: Request):
 
     async def _stream():
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {_OPENROUTER_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _AI_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 2000,
-                    "stream": True,
-                },
-                timeout=60.0,
-            )
+            used_model = None
+            resp = None
+            for model in _AI_MODELS:
+                resp = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {_OPENROUTER_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 2000,
+                        "stream": True,
+                    },
+                    timeout=60.0,
+                )
+                if resp.status_code == 429:
+                    logger.warning("AI model %s rate-limited, trying next", model)
+                    continue
+                used_model = model
+                break
+
+            if resp is None or resp.status_code == 429:
+                yield f"data: {_json.dumps({'content': '현재 모든 AI 모델이 사용량 제한 상태입니다. 잠시 후 다시 시도해 주세요.'})}\n\n"
+                yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': ''})}\n\n"
+                return
+
+            if resp.status_code != 200:
+                body = resp.text
+                yield f"data: {_json.dumps({'content': f'API 오류: {resp.status_code}'})}\n\n"
+                yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': used_model or ''})}\n\n"
+                return
+
             input_tokens = 0
             output_tokens = 0
             async for line in resp.aiter_lines():
@@ -1355,6 +1380,10 @@ async def ai_portfolio_analysis(request: Request):
                     break
                 try:
                     chunk = _json.loads(payload)
+                    # Check for error in stream
+                    if "error" in chunk:
+                        yield f"data: {_json.dumps({'content': chunk['error'].get('message', 'Unknown error')})}\n\n"
+                        break
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
                     content = delta.get("content", "")
                     if content:
@@ -1366,6 +1395,6 @@ async def ai_portfolio_analysis(request: Request):
                         output_tokens = usage.get("completion_tokens", output_tokens)
                 except Exception:
                     continue
-            yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens})}\n\n"
+            yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': used_model or ''})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

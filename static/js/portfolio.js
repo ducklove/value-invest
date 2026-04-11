@@ -1725,7 +1725,8 @@ async function runAiAnalysis() {
           const d = JSON.parse(line.slice(6));
           if (d.content) result.textContent += d.content;
           if (d.done) {
-            tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} 토큰 / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰`;
+            const model = d.model ? ` · ${d.model}` : '';
+            tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${model}`;
           }
         } catch {}
       }
