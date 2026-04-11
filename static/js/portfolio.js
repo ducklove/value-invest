@@ -566,8 +566,8 @@ function renderPortfolio() {
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
-        <td class="pf-col-num pf-col-qty"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
+        <td class="pf-col-num pf-col-qty"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
         <td class="pf-col-act"><div class="pf-row-actions">
@@ -583,8 +583,8 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-benchmark" onclick="pfShowBenchmarkPicker('${r.stock_code}', this)">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
-      <td class="pf-col-num pf-col-qty">${fmtQty(r.qty)}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
+      <td class="pf-col-num pf-col-qty">${fmtQty(r.qty)}</td>
       <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
@@ -602,8 +602,8 @@ function renderPortfolio() {
     <td class="pf-col-benchmark"></td>
     <td class="pf-col-num pf-col-buyprice">${_fp(totalInvested)}</td>
     <td class="pf-col-curprice"></td>
-    <td class="pf-col-qty"></td>
     <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
+    <td class="pf-col-qty"></td>
     <td class="pf-col-num pf-col-mktval">${_fp(totalMarketValue)}</td>
     <td class="pf-col-num pf-col-weight">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td class="pf-col-act"></td>
