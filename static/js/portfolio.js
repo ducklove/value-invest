@@ -424,7 +424,26 @@ function renderPortfolio() {
     return rate && rate > 0 ? nav / rate : nav;
   };
 
-  // Latest NAV — use live total_value / total_units if snapshot is stale
+  // FX-adjusted snap value helper
+  const _snapToFxVal = (snap, field = 'total_value') => {
+    if (!snap || !snap[field]) return null;
+    if (_isUsd && snap.fx_usdkrw && snap.fx_usdkrw > 0) return snap[field] / snap.fx_usdkrw;
+    return snap[field];
+  };
+
+  // --- Group-filtered ratio: what fraction of total does the filtered group represent ---
+  // Used to scale snapshot-level total_value to the filtered group's portion
+  const _groupRatio = (snap) => {
+    if (!isFiltered || !snap) return 1;
+    const sv = snap.stock_values || {};
+    const allTotal = Object.values(sv).reduce((a, b) => a + b, 0);
+    if (!allTotal || allTotal <= 0) return 1;
+    let filteredTotal = 0;
+    rows.forEach(r => { filteredTotal += (sv[r.stock_code] ?? 0); });
+    return filteredTotal / allTotal;
+  };
+
+  // --- Compute current NAV (whole portfolio, or value-based for filtered) ---
   const latestSnap = pfNavHistory.length ? pfNavHistory[pfNavHistory.length - 1] : null;
   const _today = new Date().toISOString().slice(0, 10);
   const _snapIsStale = latestSnap && latestSnap.date < _today;
@@ -434,51 +453,73 @@ function renderPortfolio() {
   const curNav = _navAdj(_curNavKrw, pfFxRate);
 
   // --- Daily return ---
-  // NAV-based (big text)
-  const prevDayNav = _navAdj(
-    pfPrevDaySnapshot ? pfPrevDaySnapshot.nav : null,
-    pfPrevDaySnapshot ? pfPrevDaySnapshot.fx_usdkrw : null
-  );
-  const dailyNavPct = prevDayNav && curNav ? ((curNav / prevDayNav - 1) * 100) : null;
-  // Value-based PnL (small text)
+  let dailyNavPct = null;
   let totalDailyPnlDisplay = 0;
-  if (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value) {
-    const _prevFxVal = _fxConv(pfPrevDaySnapshot.total_value, pfPrevDaySnapshot);
-    const _fxCashflow = _fxConv(pfPrevDaySnapshot.today_net_cashflow || 0, null);
-    totalDailyPnlDisplay = _currentFxVal - _prevFxVal - _fxCashflow;
+  if (isFiltered) {
+    // Group filtered: value-based return using stock_values ratio
+    if (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value) {
+      const ratio = _groupRatio(pfPrevDaySnapshot);
+      const prevGroupVal = _fxConv(pfPrevDaySnapshot.total_value * ratio, pfPrevDaySnapshot);
+      totalDailyPnlDisplay = _currentFxVal - prevGroupVal;
+      dailyNavPct = prevGroupVal > 0 ? (totalDailyPnlDisplay / prevGroupVal * 100) : null;
+    }
+  } else {
+    // NAV-based (big text)
+    const prevDayNav = _navAdj(
+      pfPrevDaySnapshot ? pfPrevDaySnapshot.nav : null,
+      pfPrevDaySnapshot ? pfPrevDaySnapshot.fx_usdkrw : null
+    );
+    dailyNavPct = prevDayNav && curNav ? ((curNav / prevDayNav - 1) * 100) : null;
+    // Value-based PnL (small text)
+    if (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value) {
+      const _prevFxVal = _fxConv(pfPrevDaySnapshot.total_value, pfPrevDaySnapshot);
+      const _fxCashflow = _fxConv(pfPrevDaySnapshot.today_net_cashflow || 0, null);
+      totalDailyPnlDisplay = _currentFxVal - _prevFxVal - _fxCashflow;
+    }
   }
-  // For table footer daily column, use NAV-based if available
   let dailyReturnPct = dailyNavPct ?? 0;
 
   // --- Monthly return (MTD) ---
-  // FX-adjusted snap value helper
-  const _snapToFxVal = snap => {
-    if (!snap || !snap.total_value) return null;
-    if (_isUsd && snap.fx_usdkrw && snap.fx_usdkrw > 0) return snap.total_value / snap.fx_usdkrw;
-    return snap.total_value;
-  };
-  // NAV-based (big text)
-  const monthEndNav = _navAdj(
-    pfMonthEndSnap ? pfMonthEndSnap.nav : null,
-    pfMonthEndSnap ? pfMonthEndSnap.fx_usdkrw : null
-  );
-  const monthlyNavPct = monthEndNav && curNav ? ((curNav / monthEndNav - 1) * 100) : null;
-  // Value-based PnL (small text)
-  const _mtdBaseVal = _snapToFxVal(pfMonthEndSnap);
-  const _mtdPnl = _mtdBaseVal != null ? _currentFxVal - _mtdBaseVal : null;
+  let monthlyNavPct = null;
+  let _mtdPnl = null;
+  if (isFiltered) {
+    if (pfMonthEndSnap && pfMonthEndSnap.total_value) {
+      const ratio = _groupRatio(pfMonthEndSnap);
+      const baseVal = _fxConv(pfMonthEndSnap.total_value * ratio, pfMonthEndSnap);
+      _mtdPnl = _currentFxVal - baseVal;
+      monthlyNavPct = baseVal > 0 ? (_mtdPnl / baseVal * 100) : null;
+    }
+  } else {
+    const monthEndNav = _navAdj(
+      pfMonthEndSnap ? pfMonthEndSnap.nav : null,
+      pfMonthEndSnap ? pfMonthEndSnap.fx_usdkrw : null
+    );
+    monthlyNavPct = monthEndNav && curNav ? ((curNav / monthEndNav - 1) * 100) : null;
+    const _mtdBaseVal = _snapToFxVal(pfMonthEndSnap);
+    _mtdPnl = _mtdBaseVal != null ? _currentFxVal - _mtdBaseVal : null;
+  }
   const monthlyReturnPct = monthlyNavPct;
 
   // --- YTD return ---
-  // NAV-based (big text)
+  let ytdReturnPct = null;
+  let _ytdPnl = null;
   const yearStartSnap = pfYearStartSnap || null;
-  const baseNav = _navAdj(
-    yearStartSnap ? yearStartSnap.nav : null,
-    yearStartSnap ? yearStartSnap.fx_usdkrw : null
-  );
-  const ytdReturnPct = baseNav && curNav ? ((curNav / baseNav - 1) * 100) : null;
-  // Value-based PnL (small text)
-  const _ytdBaseVal = _snapToFxVal(yearStartSnap);
-  const _ytdPnl = _ytdBaseVal != null ? _currentFxVal - _ytdBaseVal : null;
+  if (isFiltered) {
+    if (yearStartSnap && yearStartSnap.total_value) {
+      const ratio = _groupRatio(yearStartSnap);
+      const baseVal = _fxConv(yearStartSnap.total_value * ratio, yearStartSnap);
+      _ytdPnl = _currentFxVal - baseVal;
+      ytdReturnPct = baseVal > 0 ? (_ytdPnl / baseVal * 100) : null;
+    }
+  } else {
+    const baseNav = _navAdj(
+      yearStartSnap ? yearStartSnap.nav : null,
+      yearStartSnap ? yearStartSnap.fx_usdkrw : null
+    );
+    ytdReturnPct = baseNav && curNav ? ((curNav / baseNav - 1) * 100) : null;
+    const _ytdBaseVal = _snapToFxVal(yearStartSnap);
+    _ytdPnl = _ytdBaseVal != null ? _currentFxVal - _ytdBaseVal : null;
+  }
 
   // Date labels for summary cards
   const _now = new Date();
