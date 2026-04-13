@@ -809,7 +809,7 @@ function benchmarkName(code) {
 
 function fmtChangePct(pct, change) {
   if (pct === null || pct === undefined) return '-';
-  const cls = change > 0 ? 'positive' : change < 0 ? 'negative' : '';
+  const cls = pct > 0 ? 'positive' : pct < 0 ? 'negative' : '';
   return `<span class="pf-return ${cls}">${fmtPct(pct)}</span>`;
 }
 
