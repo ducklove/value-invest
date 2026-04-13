@@ -177,8 +177,8 @@ def _parse_h0stcnt0(raw: str) -> dict[str, Any] | None:
         sign = fields[3]  # 1~5
         change = int(fields[4])
         change_pct = float(fields[5])
-        if code == '005930':
-            logger.info("DBG 005930: sign=%r change_raw=%d pct_raw=%.2f price=%d", sign, change, change_pct, price)
+        if code in ('005930', '000660', '005380'):
+            logger.info("DBG %s [%s]: sign=%r change_raw=%d pct_raw=%.2f price=%d", code, tr_id, sign, change, change_pct, price)
         volume = int(fields[13])
         business_date = fields[33] if len(fields) > 33 else ""
 
