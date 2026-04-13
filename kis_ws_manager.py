@@ -180,12 +180,9 @@ def _parse_h0stcnt0(raw: str) -> dict[str, Any] | None:
         volume = int(fields[13])
         business_date = fields[33] if len(fields) > 33 else ""
 
-        logger.info("WS_RAW %s sign=%s change_raw=%d pct_raw=%.2f price=%d", code, sign, change, change_pct, price)
-        if sign in _SIGN_NEGATIVE:
-            change = -change
-            change_pct = -change_pct
-        elif sign not in ("1", "2", "3"):
-            logger.warning("Unknown change_sign=%r for %s (price=%s change=%s)", sign, code, price, change)
+        # KIS WS sends change/change_pct with sign already applied
+        # (negative values for sign 4/5), so do NOT flip again.
+        # Only use sign field for the change_sign metadata.
 
         return {
             "code": code,
