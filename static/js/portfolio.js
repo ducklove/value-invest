@@ -329,8 +329,6 @@ function renderPortfolio() {
     const dailyPnl = price !== null ? qty * change : 0;
     return { ...item, cur, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
   });
-  // Debug: log first 3 rows' changePct
-  console.log('[DBG changePct]', allRows.slice(0, 5).map(r => `${r.stock_code}: pct=${r.changePct} change=${r.change}`));
 
   // Check if all quotes are loaded
   const allQuotesLoaded = allRows.every(r => r.price !== null);
