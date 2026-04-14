@@ -24,6 +24,13 @@ QuoteManager.onQuote = function(code, q) {
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
     pfItem.quote = { price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date };
+  }
+  // 2-1) 벤치마크 실시간 갱신
+  const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
+  if (isBenchmark && q.change_pct != null) {
+    pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
+  }
+  if ((pfItem || isBenchmark) && q.price != null) {
     if (!pfEditingCode && activeView === 'portfolio' && !_pfRenderQueued) {
       _pfRenderQueued = true;
       requestAnimationFrame(() => { _pfRenderQueued = false; renderPortfolio(); });
