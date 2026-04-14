@@ -414,7 +414,7 @@ function renderPortfolio() {
   const _currentFxVal = _fxConv(totalMarketValue, null); // today uses current rate
   const _currentFxInvested = _fxConv(totalInvested, null);
 
-  const totalReturnPct = _currentFxInvested > 0 ? ((_currentFxVal - _currentFxInvested) / _currentFxInvested * 100) : 0;
+  const totalReturnPct = _currentFxInvested !== 0 ? ((_currentFxVal - _currentFxInvested) / Math.abs(_currentFxInvested) * 100) : 0;
 
   // NAV adjusted for currency mode: USD NAV = KRW NAV / FX
   const isFiltered = pfGroupFilter !== null;
@@ -1303,9 +1303,9 @@ function renderGroupModalBody() {
   const rowsHtml = pfGroups.map((g, i) => {
     const s = stats[g.group_name] || { cnt: 0, invested: 0, mv: 0, prevMV: 0 };
     const weight = grandMV > 0 ? (s.mv / grandMV * 100) : 0;
-    const returnPct = s.invested > 0 ? ((s.mv - s.invested) / s.invested * 100) : 0;
-    const dailyPnl = s.prevMV > 0 ? (s.mv - s.prevMV) : 0;
-    const dailyPct = s.prevMV > 0 ? (dailyPnl / s.prevMV * 100) : 0;
+    const returnPct = s.invested !== 0 ? ((s.mv - s.invested) / Math.abs(s.invested) * 100) : 0;
+    const dailyPnl = s.prevMV !== 0 ? (s.mv - s.prevMV) : 0;
+    const dailyPct = s.prevMV !== 0 ? (dailyPnl / Math.abs(s.prevMV) * 100) : 0;
     const canDelete = !g.is_default || defaultCount > 3;
     const delBtn = canDelete
       ? `<button class="pf-grp-del" data-grp-name="${escapeHtml(g.group_name)}" title="삭제">&times;</button>`
