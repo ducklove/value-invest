@@ -46,6 +46,16 @@ QuoteManager.onQuote = function(code, q) {
           changeEl.textContent = `${change > 0 ? '+' : ''}${Number(q.change_pct).toFixed(2)}%`;
         }
       }
+      // live dot
+      const nameEl = wrapper.querySelector('.name');
+      if (nameEl) {
+        const dot = nameEl.querySelector('.ws-live-dot');
+        if (QuoteManager.isLive(code) && !dot) {
+          const d = document.createElement('span');
+          d.className = 'ws-live-dot'; d.title = '실시간';
+          nameEl.appendChild(d);
+        } else if (!QuoteManager.isLive(code) && dot) { dot.remove(); }
+      }
     }
   }
 };
