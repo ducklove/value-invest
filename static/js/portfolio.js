@@ -1627,6 +1627,16 @@ async function loadMarketSummary() {
   } catch (e) { console.warn(e); }
 }
 
+async function _pollBenchmarkQuotes() {
+  try {
+    const r = await apiFetch('/api/portfolio/benchmark-quotes');
+    if (!r.ok) return;
+    const fresh = await r.json();
+    for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
+    if (activeView === 'portfolio') renderPortfolio();
+  } catch (e) { console.warn(e); }
+}
+
 function toggleCsvPanel() {
   const panel = document.getElementById('pfCsvPanel');
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';

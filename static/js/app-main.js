@@ -75,6 +75,7 @@ async function initApp() {
   await _mbLoadCodes();
   loadMarketSummary();
   setInterval(loadMarketSummary, 60_000);
+  setInterval(_pollBenchmarkQuotes, 60_000);
   QuoteManager.connect();
   _updateQuoteSubscriptions();
   trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
