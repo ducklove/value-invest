@@ -4,6 +4,7 @@ const QuoteManager = {
   connected: false,
   reconnectTimer: null,
   subscriptions: {},
+  wsCodes: new Set(),
   overflowCodes: [],
   overflowTimer: null,
   generalPollTimer: null,
@@ -25,6 +26,7 @@ const QuoteManager = {
         const msg = JSON.parse(event.data);
         if (msg.type === 'quote' && msg.code && this.onQuote) this.onQuote(msg.code, msg);
         else if (msg.type === 'subscriptions') {
+          this.wsCodes = new Set(msg.ws || []);
           this.overflowCodes = msg.rest || [];
           // Refresh ALL codes immediately (ws + overflow)
           const allCodes = [...(msg.ws || []), ...(msg.rest || [])];
@@ -84,6 +86,8 @@ const QuoteManager = {
     document.body.appendChild(banner);
     setTimeout(() => banner.remove(), 5000);
   },
+
+  isLive(code) { return this.wsActive && this.wsCodes.has(code); },
 
   updateSubscriptions(requested) {
     this.subscriptions = requested;

@@ -116,6 +116,11 @@ function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
     quoteChange.className = 'quote-change';
     quoteChange.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
     quoteDate.textContent = quote.date ? `${quote.date} 기준` : '';
+    // WS live dot next to date
+    let dateDot = quoteDate.querySelector('.ws-live-dot');
+    if (activeStockCode && QuoteManager.isLive(activeStockCode)) {
+      if (!dateDot) { dateDot = document.createElement('span'); dateDot.className = 'ws-live-dot'; dateDot.title = '실시간'; quoteDate.appendChild(dateDot); }
+    } else if (dateDot) { dateDot.remove(); }
   } else {
     quoteSummary.style.display = 'none';
     quotePrice.textContent = '';
@@ -948,6 +953,12 @@ async function loadRecentList() {
       const name = document.createElement('div');
       name.className = 'name';
       name.textContent = item.corp_name;
+      if (QuoteManager.isLive(item.stock_code)) {
+        const dot = document.createElement('span');
+        dot.className = 'ws-live-dot';
+        dot.title = '실시간';
+        name.appendChild(dot);
+      }
       const nameRow = document.createElement('div');
       nameRow.className = 'name-row';
       nameRow.appendChild(name);

@@ -571,9 +571,10 @@ function renderPortfolio() {
 
     const groupOpts = pfGroups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
 
+    const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     if (isEditing) {
       return `<tr data-code="${r.stock_code}">
-        <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
+        <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}${liveDotE}</td>
         <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
@@ -590,7 +591,7 @@ function renderPortfolio() {
       </tr>`;
     }
     return `<tr draggable="true" data-code="${r.stock_code}">
-      <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}</td>
+      <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}${liveDotE}</td>
       <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-benchmark" onclick="pfShowBenchmarkPicker('${r.stock_code}', this)">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
