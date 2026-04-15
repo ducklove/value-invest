@@ -265,13 +265,63 @@ async def _resolve_foreign_reuters(ticker: str) -> str | None:
     return ticker
 
 
+def _guess_kis_exchanges(ticker: str) -> list[str]:
+    """Guess KIS exchange codes from ticker suffix."""
+    upper = ticker.upper()
+    if upper.endswith(".HK"):
+        return ["HKS"]
+    if upper.endswith((".T",)):
+        return ["TSE"]
+    if upper.endswith((".SS",)):
+        return ["SHS"]
+    if upper.endswith((".SZ",)):
+        return ["SZS"]
+    # Suffixes that indicate non-KIS markets (AUS, Germany, etc.)
+    if upper.endswith((".AX", ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".SW", ".ST", ".CO", ".HE", ".L", ".HM")):
+        return []
+    # US-listed: try AMS (NYSE Arca), NAS, NYS
+    return ["AMS", "NAS", "NYS"]
+
+
+async def _kis_fetch_foreign_quote(ticker: str) -> dict:
+    """Try fetching quote from KIS overseas API. Returns {} on failure."""
+    exchanges = _guess_kis_exchanges(ticker)
+    if not exchanges:
+        return {}
+    # Strip exchange suffix for KIS symbol
+    symbol = ticker.split(".")[0].upper()
+    for excd in exchanges:
+        try:
+            data = await kis_proxy_client.get_overseas_quote(symbol, excd)
+            s = data.get("summary", {})
+            price = s.get("price")
+            if price is not None:
+                nation = {"NAS": "USA", "NYS": "USA", "AMS": "USA", "HKS": "HKG", "TSE": "JPN", "SHS": "CHN", "SZS": "CHN"}.get(excd, "USA")
+                price_krw = await _fx_to_krw(nation, price)
+                change = s.get("change") or 0
+                change_krw = await _fx_to_krw(nation, change)
+                return {
+                    "price": round(price_krw),
+                    "change": round(change_krw),
+                    "change_pct": s.get("change_pct"),
+                }
+        except Exception as exc:
+            logger.debug("KIS overseas quote failed (%s/%s): %s", excd, symbol, exc)
+    return {}
+
+
 async def _fetch_foreign_quote(reuters_code: str) -> dict:
-    # Try yfinance first (more reliable for foreign stocks)
+    # 1. KIS proxy — fastest and most reliable for US/HK stocks
+    q = await _kis_fetch_foreign_quote(reuters_code)
+    if q and q.get("price") is not None:
+        return q
+
+    # 2. yfinance fallback
     q = await _yfinance_fetch_quote(reuters_code)
     if q and q.get("price") is not None:
         return q
 
-    # Naver fallback
+    # 3. Naver fallback
     upper_code = reuters_code.upper()
     d = await _fetch_naver_world_stock(upper_code)
     if d and d.get("closePrice"):

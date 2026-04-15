@@ -127,6 +127,10 @@ async def get_quote(symbol: str, *, market: str | None = None) -> dict[str, Any]
     return await _get(f"/v1/stocks/{symbol}/quote", params=params)
 
 
+async def get_overseas_quote(symbol: str, exchange: str) -> dict[str, Any]:
+    return await _get(f"/v1/overseas/{exchange}/{symbol}/quote")
+
+
 async def get_history(
     symbol: str,
     *,
