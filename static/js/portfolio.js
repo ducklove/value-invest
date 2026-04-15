@@ -2062,7 +2062,7 @@ const _BENCH_COLORS = { KOSPI: '#e74c3c', SP500: '#2563eb', GOLD: '#f59e0b' };
 const _BENCH_LABELS = { KOSPI: '코스피', SP500: 'S&P 500', GOLD: '금' };
 
 function _getSelectedBenchmarks() {
-  return Array.from(document.querySelectorAll('#pfBenchmarkSelector input:checked')).map(el => el.value);
+  return Array.from(document.querySelectorAll('.pf-bench-chip input[value]:checked')).map(el => el.value);
 }
 
 async function onBenchToggle() {
@@ -2156,6 +2156,7 @@ async function renderNavChart(data) {
   const legendData = ['NAV', ...benchCodes.filter(c => _benchRatios[c]).map(c => _BENCH_LABELS[c] || c)];
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+  const yZero = document.getElementById('pfNavYZero')?.checked;
 
   const ec = echarts.init(container);
 
@@ -2183,6 +2184,7 @@ async function renderNavChart(data) {
     },
     yAxis: {
       type: 'value',
+      min: yZero ? 0 : undefined,
       axisLine: { show: false },
       axisLabel: { color: textColor, fontSize: 10 },
       splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
@@ -2240,6 +2242,27 @@ async function renderNavChart(data) {
   _navChartInstance = ec;
 }
 
+function onNavYZeroToggle() {
+  if (_navChartInstance) {
+    const yZero = document.getElementById('pfNavYZero')?.checked;
+    _navChartInstance.setOption({ yAxis: { min: yZero ? 0 : undefined } });
+  }
+}
+
+function onValueYZeroToggle() {
+  if (_valueChartInstance) {
+    const yZero = document.getElementById('pfValueYZero')?.checked;
+    _valueChartInstance.setOption({ yAxis: { min: yZero ? 0 : undefined } });
+  }
+}
+
+function _navZoomToDays(days) {
+  if (!_navChartInstance || !_navChartData.length) return;
+  const total = _navChartData.length;
+  const startPct = Math.max(0, (1 - days / total) * 100);
+  _navChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
+}
+
 let _valueChartInstance = null;
 
 async function renderValueChart(data) {
@@ -2274,10 +2297,12 @@ async function renderValueChart(data) {
   const unit = pfFxUnit();
   const sym = pfFxSymbol();
 
+  const valYZero = document.getElementById('pfValueYZero')?.checked;
   _valueChartInstance = createLineChart(container, {
     labels: data.map(d => d.date),
     values: fxValues.map(v => Math.round(v)),
     color: valColor,
+    yMin: valYZero ? 0 : undefined,
     yFormatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit,
     dataZoom: true,
   });
@@ -2357,17 +2382,18 @@ function renderNavReturns(data) {
 
   const items = [
     { label: '현재 NAV', val: latestNav.toFixed(2) },
-    { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7) },
-    { label: '최근 30일', val: pct30 !== null ? fmtPct(pct30) : '-', cls: returnClass(pct30) },
-    { label: '최근 90일', val: pct90 !== null ? fmtPct(pct90) : '-', cls: returnClass(pct90) },
-    { label: '52주 최저', val: min52.toFixed(2) },
-    { label: '52주 최고', val: max52.toFixed(2) },
-    { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },
+    { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7), days: 7 },
+    { label: '최근 30일', val: pct30 !== null ? fmtPct(pct30) : '-', cls: returnClass(pct30), days: 30 },
+    { label: '최근 90일', val: pct90 !== null ? fmtPct(pct90) : '-', cls: returnClass(pct90), days: 90 },
+    { label: '52주 최저', val: min52.toFixed(2), days: 365 },
+    { label: '52주 최고', val: max52.toFixed(2), days: 365 },
+    { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct), days: 365 },
     { label: 'CAGR', val: annualizedPct !== null ? fmtPct(annualizedPct) : '-', cls: returnClass(annualizedPct) },
   ];
-  el.innerHTML = items.map(p =>
-    `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`
-  ).join('');
+  el.innerHTML = items.map(p => {
+    const click = p.days ? ` onclick="_navZoomToDays(${p.days})" style="cursor:pointer;"` : '';
+    return `<div class="pf-nav-ret-card"${click}><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
+  }).join('');
 }
 
 function renderCashflows(data) {

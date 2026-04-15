@@ -755,6 +755,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-nav-ret-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
 .pf-nav-ret-value { font-size: 16px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pf-nav-ret-card[onclick]:hover { border-color: var(--primary); background: var(--hover); }
 
 /* Cashflow section */
 .pf-cashflow-section { margin-top: 24px; }
