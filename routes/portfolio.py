@@ -178,19 +178,22 @@ async def _yf_run(fn):
 
 
 async def _resolve_foreign_name(ticker: str) -> str | None:
-    """Try Naver first, then yfinance as fallback."""
-    # If ticker already has a dot (e.g., EUN2.DE), try as-is first
-    if "." in ticker:
-        d = await _fetch_naver_world_stock(ticker)
+    """Try yfinance first, then Naver as fallback."""
+    name = await _yfinance_resolve_name(ticker)
+    if name:
+        return name
+    # Naver fallback
+    upper = ticker.upper()
+    if "." in upper:
+        d = await _fetch_naver_world_stock(upper)
         if d:
             return d.get("stockName") or d.get("stockNameEng")
     for suffix in _EXCHANGE_SUFFIXES:
-        code = ticker + suffix if suffix else ticker
+        code = upper + suffix if suffix else upper
         d = await _fetch_naver_world_stock(code)
         if d:
             return d.get("stockName") or d.get("stockNameEng")
-    # yfinance fallback
-    return await _yfinance_resolve_name(ticker)
+    return None
 
 
 async def _yfinance_find_ticker(ticker: str) -> str | None:
@@ -243,24 +246,34 @@ async def _yfinance_resolve_name(ticker: str) -> str | None:
 
 
 async def _resolve_foreign_reuters(ticker: str) -> str | None:
-    """Find the full reuters code on Naver, or a working yfinance ticker."""
-    if "." in ticker:
-        d = await _fetch_naver_world_stock(ticker)
+    """Find a working yfinance ticker, or fall back to Naver reuters code."""
+    # yfinance first — more reliable for foreign stocks
+    found = await _yfinance_find_ticker(ticker)
+    if found:
+        return found
+    # Naver fallback
+    upper = ticker.upper()
+    if "." in upper:
+        d = await _fetch_naver_world_stock(upper)
         if d:
-            return d.get("reutersCode") or ticker
+            return d.get("reutersCode") or upper
     for suffix in _EXCHANGE_SUFFIXES:
-        code = ticker + suffix if suffix else ticker
+        code = upper + suffix if suffix else upper
         d = await _fetch_naver_world_stock(code)
         if d:
             return d.get("reutersCode") or code
-    # yfinance fallback — find a working ticker with suffix
-    found = await _yfinance_find_ticker(ticker)
-    return found or ticker
+    return ticker
 
 
 async def _fetch_foreign_quote(reuters_code: str) -> dict:
-    # Try Naver first
-    d = await _fetch_naver_world_stock(reuters_code)
+    # Try yfinance first (more reliable for foreign stocks)
+    q = await _yfinance_fetch_quote(reuters_code)
+    if q and q.get("price") is not None:
+        return q
+
+    # Naver fallback
+    upper_code = reuters_code.upper()
+    d = await _fetch_naver_world_stock(upper_code)
     if d and d.get("closePrice"):
         try:
             price_str = str(d["closePrice"]).replace(",", "")
@@ -280,8 +293,7 @@ async def _fetch_foreign_quote(reuters_code: str) -> dict:
         except Exception as exc:
             logger.warning("해외주식 시세 파싱 실패(%s): %s", reuters_code, exc)
 
-    # yfinance fallback
-    return await _yfinance_fetch_quote(reuters_code)
+    return {}
 
 
 async def _yfinance_fetch_quote(ticker: str) -> dict:
@@ -549,11 +561,7 @@ async def _get_fx_rates() -> dict[str, float]:
 
 
 async def _detect_currency(stock_code: str) -> str:
-    d = await _fetch_naver_world_stock(stock_code)
-    if d:
-        nation = d.get("nationType", "")
-        return _NATION_TO_CURRENCY.get(nation, "USD")
-    # yfinance fallback
+    # yfinance first
     try:
         import yfinance as yf
         found = await _yfinance_find_ticker(stock_code)
@@ -563,6 +571,11 @@ async def _detect_currency(stock_code: str) -> str:
             return await _yf_run(partial(_curr, found))
     except (asyncio.TimeoutError, Exception):
         pass
+    # Naver fallback
+    d = await _fetch_naver_world_stock(stock_code.upper())
+    if d:
+        nation = d.get("nationType", "")
+        return _NATION_TO_CURRENCY.get(nation, "USD")
     return "USD"
 
 
