@@ -614,9 +614,12 @@ async function switchValuationPeriod(period) {
 }
 
 function _dateDaysAgo(days) {
+  // Use local date, not UTC: cutoff is compared against server-provided
+  // dates in local calendar terms, so toISOString() would shift by a day
+  // during early-morning hours in positive UTC offsets (e.g. KST 00–09).
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 async function _renderValuationCharts(indicators) {
