@@ -1,0 +1,26 @@
+name: Deploy to home server
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: home-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, home-server]
+    timeout-minutes: 10
+    steps:
+      - name: Run deploy script
+        run: |
+          cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
+          # Pull only the deploy script early so workflow changes apply the
+          # same run; the script itself handles the full deploy.
+          git fetch --quiet origin master
+          git checkout origin/master -- deploy/deploy.sh
+          chmod +x deploy/deploy.sh
+          ./deploy/deploy.sh
