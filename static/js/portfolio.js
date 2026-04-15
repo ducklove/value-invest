@@ -483,6 +483,18 @@ function renderPortfolio() {
   if (!isFiltered && pfPrevDaySnapshot && pfPrevDaySnapshot.today_net_cashflow) {
     totalDailyPnlDisplay -= _fxConv(pfPrevDaySnapshot.today_net_cashflow, null);
   }
+  // For filtered views, derive daily from live quotes instead of the
+  // snapshot so the total row matches the weighted average of visible
+  // rows exactly. Snapshot-based ratio can drift from the quote's
+  // "prev close" due to 22:00 vs market-close timing, causing the
+  // filtered total to fall outside the constituent row range.
+  if (isFiltered && totalMarketValue > 0) {
+    const prevMV = totalMarketValue - totalDailyPnl;
+    if (prevMV > 0) {
+      dailyNavPct = (totalDailyPnl / prevMV) * 100;
+      totalDailyPnlDisplay = _fxConv(totalDailyPnl, null);
+    }
+  }
   let dailyReturnPct = dailyNavPct ?? 0;
 
   // --- Monthly return (MTD) ---
