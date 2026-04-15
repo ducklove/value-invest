@@ -52,15 +52,20 @@ rollback() {
 }
 trap rollback ERR
 
+# pip flags — Raspberry Pi OS Bookworm enforces PEP 668, so we need
+# --break-system-packages to install into the user site where the running
+# service (system python3) already picks deps up from.
+PIP_FLAGS=(--user --break-system-packages)
+
 # --- Python deps (only if requirements changed) -----------------------------
 if grep -qE '^requirements(-dev)?\.txt$' <<<"$CHANGED_FILES"; then
   log "requirements changed — installing"
-  python3 -m pip install --user --upgrade -r requirements.txt
+  python3 -m pip install "${PIP_FLAGS[@]}" --upgrade -r requirements.txt
 fi
 
 # --- Tests ------------------------------------------------------------------
 log "Running tests"
-python3 -m pip install --user --quiet -r requirements-dev.txt
+python3 -m pip install "${PIP_FLAGS[@]}" --quiet -r requirements-dev.txt
 python3 -m pytest -q
 
 # Past this point, rolling the checkout back would desync from a restarted
