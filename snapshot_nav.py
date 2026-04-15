@@ -17,6 +17,12 @@ async def _fetch_total_value(google_sub: str) -> tuple[float, float, list[dict]]
     from routes.portfolio import _fetch_quote
 
     items = await cache.get_portfolio(google_sub)
+    # Load previous per-stock snapshot for fallback (avoids avg_price distortion)
+    prev_stock_map = {}
+    prev_stocks = await cache.get_stock_snapshots_by_date(google_sub, date.today().isoformat())
+    for ps in prev_stocks:
+        prev_stock_map[ps["stock_code"]] = ps["market_value"]
+
     total_value = 0.0
     total_invested = 0.0
     per_stock = []
@@ -30,10 +36,12 @@ async def _fetch_total_value(google_sub: str) -> tuple[float, float, list[dict]]
             if price is not None:
                 mv = qty * price
             else:
-                mv = qty * avg_price  # fallback to cost basis
+                # Fallback: use previous snapshot value, then avg_price as last resort
+                mv = prev_stock_map.get(item["stock_code"], qty * avg_price)
+                logger.warning("Quote unavailable for %s, using fallback value %.0f", item["stock_code"], mv)
         except Exception as e:
             logger.warning("Quote fetch failed for %s: %s", item["stock_code"], e)
-            mv = qty * avg_price
+            mv = prev_stock_map.get(item["stock_code"], qty * avg_price)
         total_value += mv
         per_stock.append({"stock_code": item["stock_code"], "market_value": mv})
         await asyncio.sleep(0.25)  # rate limit

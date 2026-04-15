@@ -2184,7 +2184,7 @@ async function renderNavChart(data) {
     },
     yAxis: {
       type: 'value',
-      min: yZero ? 0 : undefined,
+      min: yZero ? 0 : 'dataMin',
       axisLine: { show: false },
       axisLabel: { color: textColor, fontSize: 10 },
       splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
@@ -2245,14 +2245,14 @@ async function renderNavChart(data) {
 function onNavYZeroToggle() {
   if (_navChartInstance) {
     const yZero = document.getElementById('pfNavYZero')?.checked;
-    _navChartInstance.setOption({ yAxis: { min: yZero ? 0 : undefined } });
+    _navChartInstance.setOption({ yAxis: { min: yZero ? 0 : 'dataMin' } });
   }
 }
 
 function onValueYZeroToggle() {
   if (_valueChartInstance) {
     const yZero = document.getElementById('pfValueYZero')?.checked;
-    _valueChartInstance.setOption({ yAxis: { min: yZero ? 0 : undefined } });
+    _valueChartInstance.setOption({ yAxis: { min: yZero ? 0 : 'dataMin' } });
   }
 }
 
