@@ -464,7 +464,11 @@ function renderPortfolio() {
 
   // --- Compute current NAV ---
   const latestSnap = pfNavHistory.length ? pfNavHistory[pfNavHistory.length - 1] : null;
-  const _today = new Date().toISOString().slice(0, 10);
+  // Snapshots are dated in server local time (KST). Use browser LOCAL date
+  // so the comparison isn't off by a day between 00:00–09:00 KST (when UTC
+  // date is still the previous day and toISOString() would mis-stale-check).
+  const _d = new Date();
+  const _today = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
   const _snapIsStale = latestSnap && latestSnap.date < _today;
   const _curNavKrw = (_snapIsStale && latestSnap.total_units && totalMarketValue > 0)
     ? totalMarketValue / latestSnap.total_units
