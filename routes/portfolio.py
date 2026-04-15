@@ -433,20 +433,74 @@ async def _fetch_crypto_quote(stock_code: str) -> dict:
     return {}
 
 
+_fx_daily_cache: dict[str, tuple[float, dict]] = {}  # fx_code -> (ts, {price, change, change_pct})
+_FX_DAILY_CACHE_TTL = 300
+
+
+async def _fetch_fx_daily_change(fx_code: str) -> dict:
+    """Fetch today's FX rate + change vs. previous business day from Naver.
+
+    Uses the per-currency daily-quote page, same pattern as KRX gold.
+    Returns {} on failure; caller can fall back to a plain rate lookup.
+    """
+    import time
+    cached = _fx_daily_cache.get(fx_code)
+    if cached and (time.time() - cached[0]) < _FX_DAILY_CACHE_TTL:
+        return cached[1]
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"https://finance.naver.com/marketindex/exchangeDailyQuote.naver?marketindexCd={fx_code}",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            html = resp.content.decode("euc-kr", errors="ignore")
+            rows = re.findall(
+                r'<tr class="(?:up|down)">\s*<td class="date">[^<]+</td>\s*<td class="num">([\d,\.]+)</td>',
+                html,
+            )
+            if len(rows) >= 2:
+                price = float(rows[0].replace(",", ""))
+                prev = float(rows[1].replace(",", ""))
+                change = price - prev
+                change_pct = round(change / prev * 100, 2) if prev else 0.0
+                result = {"price": price, "change": change, "change_pct": change_pct}
+                _fx_daily_cache[fx_code] = (time.time(), result)
+                return result
+            if rows:
+                # Only one row available (first listing day?) — no delta.
+                price = float(rows[0].replace(",", ""))
+                result = {"price": price, "change": 0.0, "change_pct": 0.0}
+                _fx_daily_cache[fx_code] = (time.time(), result)
+                return result
+    except Exception as e:
+        logger.warning("FX daily fetch failed for %s: %s", fx_code, e)
+    return {}
+
+
 async def _fetch_cash_quote(stock_code: str) -> dict:
-    """Fetch cash quote: KRW=1, others=FX rate to KRW."""
+    """Fetch cash quote: KRW=1, others=FX rate to KRW with daily change."""
     if stock_code == "CASH_KRW":
         return {"price": 1, "change": 0, "change_pct": 0}
     fx_code = _CASH_FX_CODE.get(stock_code)
     if not fx_code:
         return {}
+    unit = _FX_UNIT.get(fx_code, 1)
+    # Prefer the per-currency daily-quote scrape — gives us change vs prev close.
+    daily = await _fetch_fx_daily_change(fx_code)
+    if daily.get("price"):
+        price = daily["price"] / unit
+        change = daily["change"] / unit
+        return {
+            "price": round(price, 2),
+            "change": round(change, 4),
+            "change_pct": daily["change_pct"],
+        }
+    # Fallback: exchangeList scrape — current rate only, no change.
     rates = await _get_fx_rates()
     rate = rates.get(fx_code)
     if not rate:
         return {}
-    unit = _FX_UNIT.get(fx_code, 1)
-    price = rate / unit
-    return {"price": round(price, 2), "change": 0, "change_pct": 0}
+    return {"price": round(rate / unit, 2), "change": 0, "change_pct": 0}
 
 
 _quote_cache: dict[str, tuple[float, dict]] = {}
