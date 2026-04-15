@@ -2080,6 +2080,10 @@ async function onBenchToggle() {
   renderNavChart(_navChartData);
 }
 
+// Per-benchmark raw ratio arrays (bench_close / bench_close[0]), computed once.
+// On zoom, we multiply by navValues[zoomStartIdx] to scale into NAV space.
+let _benchRatios = {};  // code -> { ratioByLabel: {date: ratio}, labels }
+
 async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
@@ -2098,52 +2102,65 @@ async function renderNavChart(data) {
   });
   const labels = data.map(d => d.date);
 
-  // Normalize NAV: start at 100
-  const navBase = navValues[0];
-  const navNorm = navValues.map(v => v / navBase * 100);
-
   const last365 = data.slice(-365);
   const yoyPct = last365.length > 1
     ? ((navValues[navValues.length - 1] / navValues[navValues.length - last365.length]) - 1) * 100 : 0;
   const navColor = returnToColor(yoyPct);
 
-  // Build benchmark series
+  // Precompute benchmark ratio maps (close / first_close for each date)
   const benchCodes = _getSelectedBenchmarks();
-  const benchSeries = [];
-  const legendData = ['NAV'];
-
+  _benchRatios = {};
   for (const code of benchCodes) {
     const raw = _benchCache[code] || [];
     if (!raw.length) continue;
-    // Build date->close map
-    const map = {};
-    raw.forEach(d => { map[d.date] = d.close; });
-    // Find the first date that overlaps with NAV labels
-    let baseClose = null;
-    for (const lbl of labels) {
-      if (map[lbl] != null) { baseClose = map[lbl]; break; }
-    }
-    if (!baseClose) continue;
-    // Normalize to 100 aligned at first overlapping date
-    const vals = labels.map(lbl => map[lbl] != null ? map[lbl] / baseClose * 100 : null);
-    legendData.push(_BENCH_LABELS[code] || code);
-    benchSeries.push({
-      name: _BENCH_LABELS[code] || code,
-      type: 'line',
-      data: vals.map(v => v === null ? '-' : v),
-      smooth: 0.3,
-      symbol: 'none',
-      lineStyle: { color: _BENCH_COLORS[code], width: 1.5, type: 'dashed' },
-      itemStyle: { color: _BENCH_COLORS[code] },
-      connectNulls: true,
-    });
+    const firstClose = raw[0].close;
+    if (!firstClose) continue;
+    const ratioByLabel = {};
+    raw.forEach(d => { ratioByLabel[d.date] = d.close / firstClose; });
+    _benchRatios[code] = ratioByLabel;
   }
 
-  const hasBench = benchSeries.length > 0;
+  // Build benchmark series scaled to NAV at index 0
+  function buildBenchSeries(startIdx) {
+    const series = [];
+    const navAtStart = navValues[startIdx];
+    for (const code of benchCodes) {
+      const ratioMap = _benchRatios[code];
+      if (!ratioMap) continue;
+      // Find the ratio at the start index (first overlapping date from startIdx onward)
+      let baseRatio = null;
+      for (let i = startIdx; i < labels.length; i++) {
+        if (ratioMap[labels[i]] != null) { baseRatio = ratioMap[labels[i]]; break; }
+      }
+      if (!baseRatio) continue;
+      // Scale: benchNAV = navAtStart * (ratio / baseRatio)
+      const vals = labels.map(lbl => {
+        const r = ratioMap[lbl];
+        return r != null ? navAtStart * (r / baseRatio) : null;
+      });
+      series.push({
+        name: _BENCH_LABELS[code] || code,
+        type: 'line',
+        data: vals.map(v => v === null ? '-' : v),
+        smooth: 0.3,
+        symbol: 'none',
+        lineStyle: { color: _BENCH_COLORS[code], width: 1.5, type: 'dashed' },
+        itemStyle: { color: _BENCH_COLORS[code] },
+        connectNulls: true,
+      });
+    }
+    return series;
+  }
+
+  const hasBench = Object.keys(_benchRatios).length > 0;
+  const legendData = ['NAV', ...benchCodes.filter(c => _benchRatios[c]).map(c => _BENCH_LABELS[c] || c)];
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
 
   const ec = echarts.init(container);
+
+  const initBenchSeries = buildBenchSeries(0);
+
   ec.setOption({
     legend: hasBench ? {
       data: legendData,
@@ -2151,7 +2168,7 @@ async function renderNavChart(data) {
       textStyle: { color: textColor, fontSize: 11 },
       itemWidth: 18, itemHeight: 2,
     } : undefined,
-    grid: { left: 50, right: 12, top: hasBench ? 28 : 10, bottom: 56 },
+    grid: { left: 55, right: 12, top: hasBench ? 28 : 10, bottom: 56 },
     dataZoom: [
       { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(navColor, 0.12),
         handleStyle: { color: navColor }, textStyle: { color: textColor, fontSize: 10 },
@@ -2185,10 +2202,10 @@ async function renderNavChart(data) {
       {
         name: 'NAV',
         type: 'line',
-        data: navNorm.map(v => v === null ? '-' : v),
+        data: navValues.map(v => v === null ? '-' : v),
         smooth: 0.3,
-        symbol: navNorm.length > 30 ? 'none' : 'circle',
-        symbolSize: navNorm.length > 60 ? 0 : 4,
+        symbol: navValues.length > 30 ? 'none' : 'circle',
+        symbolSize: navValues.length > 60 ? 0 : 4,
         lineStyle: { color: navColor, width: 2 },
         itemStyle: { color: navColor },
         areaStyle: !hasBench ? {
@@ -2198,9 +2215,28 @@ async function renderNavChart(data) {
           ]),
         } : undefined,
       },
-      ...benchSeries,
+      ...initBenchSeries,
     ],
   });
+
+  // On dataZoom change, re-scale benchmarks so start point aligns with NAV
+  if (hasBench) {
+    let _zoomTimer = null;
+    ec.on('datazoom', () => {
+      clearTimeout(_zoomTimer);
+      _zoomTimer = setTimeout(() => {
+        const opt = ec.getOption();
+        const dz = opt.dataZoom[0];
+        const startPct = dz.start ?? 0;
+        const startIdx = Math.round(startPct / 100 * (labels.length - 1));
+        const newBench = buildBenchSeries(startIdx);
+        // Update only benchmark series (index 1+)
+        const seriesUpdate = [{ data: navValues.map(v => v === null ? '-' : v) }, ...newBench];
+        ec.setOption({ series: seriesUpdate });
+      }, 80);
+    });
+  }
+
   _navChartInstance = ec;
 }
 

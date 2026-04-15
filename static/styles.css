@@ -736,6 +736,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 /* NAV chart */
 .pf-nav-chart-wrap { margin-bottom: 24px; }
 .pf-nav-chart-container { position: relative; height: 300px; }
+#pfNavChart { min-height: 600px !important; }
 .pf-nav-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .pf-nav-header h3 { margin: 0; font-size: 16px; }
 .pf-snapshot-btn {
