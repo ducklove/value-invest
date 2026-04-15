@@ -2055,37 +2055,153 @@ async function renderTreemap() {
 }
 
 let _navChartInstance = null;
+let _navChartData = [];  // cached for benchmark overlay
+let _benchCache = {};    // code -> [{date, close}]
+
+const _BENCH_COLORS = { KOSPI: '#e74c3c', SP500: '#2563eb', GOLD: '#f59e0b' };
+const _BENCH_LABELS = { KOSPI: '코스피', SP500: 'S&P 500', GOLD: '금' };
+
+function _getSelectedBenchmarks() {
+  return Array.from(document.querySelectorAll('#pfBenchmarkSelector input:checked')).map(el => el.value);
+}
+
+async function onBenchToggle() {
+  const codes = _getSelectedBenchmarks();
+  if (!_navChartData.length) return;
+  // Fetch any uncached benchmarks
+  const startDate = _navChartData[0].date;
+  const toFetch = codes.filter(c => !_benchCache[c]);
+  if (toFetch.length) {
+    const results = await Promise.all(toFetch.map(c =>
+      apiFetch(`/api/portfolio/benchmark-history?code=${c}&start=${startDate}`).then(r => r.ok ? r.json() : []).catch(() => [])
+    ));
+    toFetch.forEach((c, i) => { _benchCache[c] = results[i]; });
+  }
+  renderNavChart(_navChartData);
+}
 
 async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
   if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
   await loadChartLib();
+  _navChartData = data;
 
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
     return;
   }
 
-  // In USD mode, NAV_USD = NAV_KRW / FX so it reflects both portfolio and currency performance
   const navValues = data.map(d => {
     if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
     return d.nav;
   });
+  const labels = data.map(d => d.date);
 
-  // Color based on YoY
+  // Normalize NAV: start at 100
+  const navBase = navValues[0];
+  const navNorm = navValues.map(v => v / navBase * 100);
+
   const last365 = data.slice(-365);
   const yoyPct = last365.length > 1
     ? ((navValues[navValues.length - 1] / navValues[navValues.length - last365.length]) - 1) * 100 : 0;
   const navColor = returnToColor(yoyPct);
 
-  _navChartInstance = createLineChart(container, {
-    labels: data.map(d => d.date),
-    values: navValues,
-    color: navColor,
-    tooltipPrefix: 'NAV ',
-    dataZoom: true,
+  // Build benchmark series
+  const benchCodes = _getSelectedBenchmarks();
+  const benchSeries = [];
+  const legendData = ['NAV'];
+
+  for (const code of benchCodes) {
+    const raw = _benchCache[code] || [];
+    if (!raw.length) continue;
+    // Build date->close map
+    const map = {};
+    raw.forEach(d => { map[d.date] = d.close; });
+    // Find the first date that overlaps with NAV labels
+    let baseClose = null;
+    for (const lbl of labels) {
+      if (map[lbl] != null) { baseClose = map[lbl]; break; }
+    }
+    if (!baseClose) continue;
+    // Normalize to 100 aligned at first overlapping date
+    const vals = labels.map(lbl => map[lbl] != null ? map[lbl] / baseClose * 100 : null);
+    legendData.push(_BENCH_LABELS[code] || code);
+    benchSeries.push({
+      name: _BENCH_LABELS[code] || code,
+      type: 'line',
+      data: vals.map(v => v === null ? '-' : v),
+      smooth: 0.3,
+      symbol: 'none',
+      lineStyle: { color: _BENCH_COLORS[code], width: 1.5, type: 'dashed' },
+      itemStyle: { color: _BENCH_COLORS[code] },
+      connectNulls: true,
+    });
+  }
+
+  const hasBench = benchSeries.length > 0;
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+
+  const ec = echarts.init(container);
+  ec.setOption({
+    legend: hasBench ? {
+      data: legendData,
+      top: 0, right: 0,
+      textStyle: { color: textColor, fontSize: 11 },
+      itemWidth: 18, itemHeight: 2,
+    } : undefined,
+    grid: { left: 50, right: 12, top: hasBench ? 28 : 10, bottom: 56 },
+    dataZoom: [
+      { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(navColor, 0.12),
+        handleStyle: { color: navColor }, textStyle: { color: textColor, fontSize: 10 },
+        labelFormatter: (_, val) => labels[Math.round(val)] || '' },
+      { type: 'inside' },
+    ],
+    xAxis: {
+      type: 'category', data: labels,
+      axisLine: { lineStyle: { color: gridColor } },
+      axisLabel: { color: textColor, fontSize: 10 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      axisLabel: { color: textColor, fontSize: 10 },
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter(params) {
+        let html = params[0] ? params[0].axisValueLabel : '';
+        for (const p of params) {
+          if (p.value == null || p.value === '-') continue;
+          html += `<br/><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:4px;"></span>${p.seriesName}: ${Number(p.value).toFixed(2)}`;
+        }
+        return html;
+      },
+    },
+    series: [
+      {
+        name: 'NAV',
+        type: 'line',
+        data: navNorm.map(v => v === null ? '-' : v),
+        smooth: 0.3,
+        symbol: navNorm.length > 30 ? 'none' : 'circle',
+        symbolSize: navNorm.length > 60 ? 0 : 4,
+        lineStyle: { color: navColor, width: 2 },
+        itemStyle: { color: navColor },
+        areaStyle: !hasBench ? {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: _hexToRgba(navColor, 0.25) },
+            { offset: 1, color: _hexToRgba(navColor, 0.0) },
+          ]),
+        } : undefined,
+      },
+      ...benchSeries,
+    ],
   });
+  _navChartInstance = ec;
 }
 
 let _valueChartInstance = null;
@@ -2165,7 +2281,6 @@ function renderNavReturns(data) {
   const el = document.getElementById('pfNavReturns');
   if (!el || !data.length) { if (el) el.innerHTML = ''; return; }
 
-  // FX-adjusted NAV values
   const _nav = d => {
     if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
     return d.nav;
@@ -2174,6 +2289,19 @@ function renderNavReturns(data) {
   const latest = data[data.length - 1];
   const latestNav = _nav(latest);
   const firstNav = _nav(data[0]);
+
+  // Period returns helper
+  const _periodPct = (days) => {
+    if (data.length < 2) return null;
+    const slice = data.slice(-days);
+    if (!slice.length) return null;
+    const base = _nav(slice[0]);
+    return base > 0 ? ((latestNav / base) - 1) * 100 : null;
+  };
+
+  const pct7 = _periodPct(7);
+  const pct30 = _periodPct(30);
+  const pct90 = _periodPct(90);
 
   // 52-week range
   const last365 = data.slice(-365);
@@ -2185,13 +2313,17 @@ function renderNavReturns(data) {
   const oneYearAgo = last365.length >= 252 ? last365[0] : (last365.length > 0 ? last365[0] : null);
   const yoyPct = oneYearAgo ? ((latestNav / _nav(oneYearAgo)) - 1) * 100 : null;
 
-  // Annualized return
+  // CAGR
   const totalDays = data.length > 1 ? (new Date(latest.date) - new Date(data[0].date)) / 86400000 : 0;
   const totalYears = totalDays / 365;
   const annualizedPct = totalYears > 0
     ? ((latestNav - firstNav) / firstNav * 100) / totalYears : null;
 
   const items = [
+    { label: '현재 NAV', val: latestNav.toFixed(2) },
+    { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7) },
+    { label: '최근 30일', val: pct30 !== null ? fmtPct(pct30) : '-', cls: returnClass(pct30) },
+    { label: '최근 90일', val: pct90 !== null ? fmtPct(pct90) : '-', cls: returnClass(pct90) },
     { label: '52주 최저', val: min52.toFixed(2) },
     { label: '52주 최고', val: max52.toFixed(2) },
     { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },

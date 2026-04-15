@@ -744,6 +744,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-snapshot-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
 #pfNavChart, #pfValueChart { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.pf-bench-chip { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; padding: 3px 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; color: var(--text-secondary); user-select: none; transition: all .15s; }
+.pf-bench-chip input { display: none; }
+.pf-bench-chip:has(input:checked) { background: var(--primary); color: #fff; border-color: var(--primary); }
 .pf-nav-returns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .pf-nav-ret-card {
   flex: 1; min-width: 80px; padding: 8px 12px; background: var(--surface);

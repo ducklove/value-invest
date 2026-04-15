@@ -1161,6 +1161,35 @@ async def get_nav_history(request: Request):
     return await cache.get_nav_history(user["google_sub"])
 
 
+@router.get("/api/portfolio/benchmark-history")
+async def get_benchmark_history(code: str = Query(...), start: str = Query(...)):
+    """Return daily close prices for a benchmark index from yfinance."""
+    import yfinance as yf
+    from datetime import date
+
+    _YF_TICKER = {"KOSPI": "^KS11", "SP500": "^GSPC", "GOLD": "GC=F"}
+    ticker = _YF_TICKER.get(code.upper())
+    if not ticker:
+        raise HTTPException(status_code=400, detail=f"Unknown benchmark: {code}")
+
+    try:
+        def _download():
+            df = yf.download(ticker, start=start, end=date.today().isoformat(), progress=False, auto_adjust=True)
+            if df.empty:
+                return []
+            # Handle MultiIndex columns from yfinance
+            close = df["Close"]
+            if hasattr(close, "columns"):
+                close = close.iloc[:, 0]
+            return [{"date": d.strftime("%Y-%m-%d"), "close": round(float(v), 2)} for d, v in close.items() if not (v != v)]
+
+        result = await asyncio.get_event_loop().run_in_executor(None, _download)
+        return result
+    except Exception as exc:
+        logger.warning("Benchmark history fetch failed (%s): %s", code, exc)
+        raise HTTPException(status_code=502, detail="벤치마크 데이터를 가져올 수 없습니다.")
+
+
 @router.get("/api/portfolio/intraday")
 async def get_intraday(request: Request):
     user = _require_user(await get_current_user(request))

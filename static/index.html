@@ -242,6 +242,11 @@ function trackEvent(name, params = {}) {
       <div class="pf-nav-chart-wrap">
         <div class="pf-nav-header">
           <h3>NAV 기준가 추이</h3>
+          <div id="pfBenchmarkSelector" style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;">
+            <label class="pf-bench-chip"><input type="checkbox" value="KOSPI" onchange="onBenchToggle()"><span>코스피</span></label>
+            <label class="pf-bench-chip"><input type="checkbox" value="SP500" onchange="onBenchToggle()"><span>S&P 500</span></label>
+            <label class="pf-bench-chip"><input type="checkbox" value="GOLD" onchange="onBenchToggle()"><span>금</span></label>
+          </div>
         </div>
         <div class="pf-nav-chart-container">
           <div id="pfNavChart" style="width:100%;height:100%;"></div>
