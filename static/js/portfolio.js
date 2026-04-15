@@ -432,12 +432,19 @@ function renderPortfolio() {
   };
 
   // --- Group-filtered ratio: what fraction of total does the filtered group represent ---
-  // Returns null if stock_values data is unavailable for this snapshot
+  // Prefers per-stock snapshot values at the reference date. Falls back to
+  // the current composition ratio when historical per-stock data is
+  // missing (e.g. YTD base predates portfolio_stock_snapshots). This is
+  // only an approximation — if the group's weight has shifted since the
+  // base date, the filtered %/PnL will be biased — but it's far closer
+  // than dropping to whole-portfolio totals.
   const _groupRatio = (snap) => {
     if (!isFiltered || !snap) return 1;
     const sv = snap.stock_values || {};
     const allTotal = Object.values(sv).reduce((a, b) => a + b, 0);
-    if (!allTotal || allTotal <= 0) return null; // no data → fall back to whole portfolio
+    if (!allTotal || allTotal <= 0) {
+      return grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue : null;
+    }
     let filteredTotal = 0;
     rows.forEach(r => { filteredTotal += (sv[r.stock_code] ?? 0); });
     return filteredTotal / allTotal;
