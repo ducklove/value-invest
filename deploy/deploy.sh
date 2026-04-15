@@ -109,9 +109,10 @@ log "Restarting $SERVICE"
 sudo /bin/systemctl restart "$SERVICE"
 
 # --- Health check -----------------------------------------------------------
+# -k: cert is for cantabile.tplinkdns.com; localhost check skips name match.
 log "Waiting for healthz"
 for i in {1..20}; do
-  if curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
+  if curl -fsSk --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
     log "Healthz OK (attempt $i)"
     exit 0
   fi
