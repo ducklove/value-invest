@@ -1287,22 +1287,30 @@ function _drawGroupPie(stats, grandMV) {
 
 function renderGroupModalBody() {
   const body = document.getElementById('pfGroupModalBody');
-  // Compute per-group stats
+  // Compute per-group stats.
+  // prevMV is derived from the LIVE quote (qty × (price - change)) rather
+  // than from yesterday's snapshot, so composition drift (qty changes,
+  // items added since the snapshot) cannot push group% outside the range
+  // of its constituents. Missing-quote items are excluded from both sides.
   const stats = {};
   let grandMV = 0;
-  const prevStockVals = (pfPrevDaySnapshot && pfPrevDaySnapshot.stock_values) || {};
   portfolioItems.forEach(i => {
     const gn = pfGetGroup(i);
     if (!stats[gn]) stats[gn] = { cnt: 0, invested: 0, mv: 0, prevMV: 0 };
     const s = stats[gn];
     const q = i.quote || {};
     const price = q.price ?? null;
+    const change = q.change ?? 0;
     const qty = i.quantity;
     const avgPrice = i.avg_price;
     s.cnt++;
     s.invested += qty * avgPrice;
-    if (price !== null) { s.mv += qty * price; grandMV += qty * price; }
-    s.prevMV += (prevStockVals[i.stock_code] ?? 0);
+    if (price !== null) {
+      const mv = qty * price;
+      s.mv += mv;
+      s.prevMV += qty * (price - change);
+      grandMV += mv;
+    }
   });
   const defaultCount = pfGroups.filter(x => x.is_default).length;
   const rowsHtml = pfGroups.map((g, i) => {
