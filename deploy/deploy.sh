@@ -21,6 +21,8 @@ REPO_UNITS=(
   "portfolio-intraday.timer"
   "portfolio-snapshot.service"
   "portfolio-snapshot.timer"
+  "value-invest-backup.service"
+  "value-invest-backup.timer"
   "deploy/value-invest.service"
 )
 

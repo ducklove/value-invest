@@ -1,0 +1,12 @@
+[Unit]
+Description=Value Invest — run daily SQLite backup at 03:30 KST
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# Catch up if the Pi was off at 03:30.
+Persistent=true
+# Spread a few minutes if multiple timers fire together.
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

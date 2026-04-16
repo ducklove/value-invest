@@ -1,0 +1,20 @@
+[Unit]
+Description=Value Invest — daily SQLite backup
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+WorkingDirectory=/home/cantabile/Works/value_invest
+ExecStart=/bin/bash /home/cantabile/Works/value_invest/scripts/backup_cache_db.sh
+Nice=10
+IOSchedulingClass=idle
+# Harden a little — the script only needs to read cache.db and write to backups.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/cantabile/backups
+
+[Install]
+WantedBy=multi-user.target
