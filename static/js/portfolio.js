@@ -76,7 +76,7 @@ function _pfRenderColToggles() {
   const wrap = document.getElementById('pfColToggles');
   if (!wrap) return;
   wrap.innerHTML = PF_COL_DEFS.map(c =>
-    `<label><input type="checkbox" ${vis[c.key] ? 'checked' : ''} onchange="pfToggleCol('${c.key}', this.checked)"> ${c.label}</label>`
+    `<label><input type="checkbox" class="js-pf-col-toggle" data-col-key="${escapeHtml(c.key)}" ${vis[c.key] ? 'checked' : ''}> ${c.label}</label>`
   ).join('');
   _pfColTogglesRendered = true;
 }
@@ -594,10 +594,11 @@ function renderPortfolio() {
     const groupOpts = pfGroups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
 
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
+    const safeCode = escapeHtml(r.stock_code);
     if (isEditing) {
-      return `<tr data-code="${r.stock_code}">
-        <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}${liveDotE}</td>
-        <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
+      return `<tr data-code="${safeCode}">
+        <td><a href="#" class="pf-stock-link js-pf-analyze"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</td>
+        <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
@@ -607,16 +608,16 @@ function renderPortfolio() {
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
         <td class="pf-col-act"><div class="pf-row-actions">
-          <button class="pf-row-btn save" onclick="savePortfolioEdit('${r.stock_code}','${escapeHtml(r.stock_name)}')" title="저장">✓</button>
-          <button class="pf-row-btn cancel" onclick="cancelPortfolioEdit()" title="취소">✕</button>
+          <button class="pf-row-btn save js-pf-save" title="저장">✓</button>
+          <button class="pf-row-btn cancel js-pf-cancel" title="취소">✕</button>
         </div></td>
       </tr>`;
     }
-    return `<tr draggable="true" data-code="${r.stock_code}">
-      <td><a href="#" class="pf-stock-link" onclick="pfGoAnalyze('${r.stock_code}',event);return false;"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${r.stock_code}</span>${curTag}${liveDotE}</td>
-      <td class="pf-col-group"><select class="pf-group-select" onchange="pfChangeGroup('${r.stock_code}', this.value)">${groupOpts}</select></td>
+    return `<tr draggable="true" data-code="${safeCode}">
+      <td><a href="#" class="pf-stock-link js-pf-analyze"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</td>
+      <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
-      <td class="pf-col-num pf-col-benchmark" onclick="pfShowBenchmarkPicker('${r.stock_code}', this)">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
+      <td class="pf-col-num pf-col-benchmark js-pf-bench-picker">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
@@ -624,8 +625,8 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
-        <button class="pf-row-btn edit" onclick="startPortfolioEdit('${r.stock_code}')" title="편집">✎</button>
-        <button class="pf-row-btn delete" onclick="deletePortfolioItem('${r.stock_code}')" title="삭제">✕</button>
+        <button class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
+        <button class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
       </div></td>
     </tr>`;
   }).join('');
@@ -883,21 +884,30 @@ function pfShowBenchmarkPicker(stockCode, td) {
   if (!item) return;
   const picker = document.createElement('div');
   picker.className = 'pf-benchmark-picker';
+  picker.dataset.code = stockCode;
   const presets = _BENCHMARK_PRESETS.map(p =>
-    `<div class="pf-bm-option${item.benchmark_code === p.code ? ' selected' : ''}" onclick="pfSetBenchmark('${stockCode}','${p.code}')">${p.name}</div>`
+    `<div class="pf-bm-option js-pf-bench-set${item.benchmark_code === p.code ? ' selected' : ''}" data-bench="${escapeHtml(p.code)}">${escapeHtml(p.name)}</div>`
   ).join('');
   picker.innerHTML = `
     ${presets}
     <div class="pf-bm-custom">
-      <input class="pf-bm-input" placeholder="종목코드" onkeydown="if(event.key==='Enter')pfSetBenchmark('${stockCode}',this.value)">
+      <input class="pf-bm-input" placeholder="종목코드">
     </div>
-    <div class="pf-bm-option pf-bm-reset" onclick="pfSetBenchmark('${stockCode}','')">기본값으로</div>
+    <div class="pf-bm-option pf-bm-reset js-pf-bench-set" data-bench="">기본값으로</div>
   `;
   td.style.position = 'relative';
   td.appendChild(picker);
   const input = picker.querySelector('.pf-bm-input');
-  if (input) input.focus();
-  // Close on outside click
+  if (input) {
+    input.focus();
+    // Listener scoped to this picker instance — removed with the node when
+    // picker is closed, so no global accumulation.
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') pfSetBenchmark(stockCode, input.value);
+    });
+  }
+  // Close on outside click. Use { once: true } isn't safe because the
+  // first click may be inside; instead remove explicitly when closed.
   setTimeout(() => {
     const close = (e) => {
       if (!picker.contains(e.target)) { picker.remove(); document.removeEventListener('click', close); }
@@ -948,6 +958,12 @@ async function savePortfolioEdit(stockCode, stockName) {
   if (isNaN(qty) || qty === 0 || isNaN(price) || price < 0) {
     showToast('수량과 매입가를 올바르게 입력해 주세요.');
     return;
+  }
+  // When called from the delegated handler the name is looked up locally
+  // rather than smuggled through the DOM as a JS-string literal.
+  if (stockName === undefined) {
+    const existing = portfolioItems.find(i => i.stock_code === stockCode);
+    stockName = existing ? existing.stock_name : '';
   }
   try {
     const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
@@ -2433,8 +2449,8 @@ function renderNavReturns(data) {
     { label: 'CAGR', val: annualizedPct !== null ? fmtPct(annualizedPct) : '-', cls: returnClass(annualizedPct) },
   ];
   el.innerHTML = items.map(p => {
-    const click = p.days ? ` onclick="_navZoomToDays(${p.days})" style="cursor:pointer;"` : '';
-    return `<div class="pf-nav-ret-card"${click}><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
+    const zoomable = p.days ? ` js-pf-nav-zoom" data-zoom-days="${p.days}" style="cursor:pointer;` : '';
+    return `<div class="pf-nav-ret-card${zoomable}"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
   }).join('');
 }
 
@@ -2452,7 +2468,7 @@ function renderCashflows(data) {
     <td class="pf-col-num">${cf.nav_at_time ? cf.nav_at_time.toFixed(2) : '-'}</td>
     <td class="pf-col-num">${cf.units_change ? (cf.units_change > 0 ? '+' : '') + cf.units_change.toFixed(2) : '-'}</td>
     <td>${cf.memo || ''}</td>
-    <td><button class="pf-row-btn delete" onclick="deleteCashflow(${cf.id})">X</button></td>
+    <td><button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}">X</button></td>
   </tr>`).join('');
 }
 
@@ -2482,3 +2498,67 @@ async function deleteCashflow(id) {
     loadPerformanceData();
   } catch (e) { showToast(e.message); }
 }
+
+// --- Delegated event handlers ---------------------------------------------
+// All row-level actions used to live in inline `onclick="fn('${code}')"`,
+// which interpolates user-controlled strings (stock codes/names) into a JS
+// string context. escapeHtml is not safe there — `'` becomes `&#39;` which
+// the HTML parser decodes back to `'` before the JS evaluates, allowing
+// break-out. We replace those with CSS classes + data attributes and a
+// single document-level delegated handler, which also removes the per-render
+// listener churn and prevents accumulated `document.click` listeners from
+// menu/picker code.
+(function initPfDelegation() {
+  const onReady = () => {
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      const codeFromTr = (el) => {
+        const host = el.closest('[data-code]');
+        return host ? host.dataset.code : null;
+      };
+      let el;
+      if ((el = t.closest('.js-pf-analyze'))) {
+        const code = codeFromTr(el);
+        if (code) { e.preventDefault(); pfGoAnalyze(code, e); }
+      } else if ((el = t.closest('.js-pf-save'))) {
+        const code = codeFromTr(el);
+        if (code) savePortfolioEdit(code);
+      } else if (t.closest('.js-pf-cancel')) {
+        cancelPortfolioEdit();
+      } else if ((el = t.closest('.js-pf-edit'))) {
+        const code = codeFromTr(el);
+        if (code) startPortfolioEdit(code);
+      } else if ((el = t.closest('.js-pf-delete'))) {
+        const code = codeFromTr(el);
+        if (code) deletePortfolioItem(code);
+      } else if ((el = t.closest('.js-pf-bench-picker'))) {
+        const code = codeFromTr(el);
+        if (code) pfShowBenchmarkPicker(code, el);
+      } else if ((el = t.closest('.js-pf-bench-set'))) {
+        const code = codeFromTr(el);
+        if (code) pfSetBenchmark(code, el.dataset.bench || '');
+      } else if ((el = t.closest('.js-pf-cf-delete'))) {
+        const id = Number(el.dataset.cfId);
+        if (!isNaN(id)) deleteCashflow(id);
+      } else if ((el = t.closest('.js-pf-nav-zoom'))) {
+        const days = Number(el.dataset.zoomDays);
+        if (!isNaN(days)) _navZoomToDays(days);
+      }
+    });
+    document.addEventListener('change', (e) => {
+      const t = e.target;
+      let el;
+      if ((el = t.closest('.js-pf-group'))) {
+        const host = el.closest('[data-code]');
+        if (host) pfChangeGroup(host.dataset.code, el.value);
+      } else if ((el = t.closest('.js-pf-col-toggle'))) {
+        pfToggleCol(el.dataset.colKey, el.checked);
+      }
+    });
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onReady);
+  } else {
+    onReady();
+  }
+})();
