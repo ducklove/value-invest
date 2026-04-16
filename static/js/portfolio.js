@@ -432,19 +432,14 @@ function renderPortfolio() {
   };
 
   // --- Group-filtered ratio: what fraction of total does the filtered group represent ---
-  // Prefers per-stock snapshot values at the reference date. Falls back to
-  // the current composition ratio when historical per-stock data is
-  // missing (e.g. YTD base predates portfolio_stock_snapshots). This is
-  // only an approximation — if the group's weight has shifted since the
-  // base date, the filtered %/PnL will be biased — but it's far closer
-  // than dropping to whole-portfolio totals.
+  // Returns null when historical per-stock data is unavailable — callers
+  // should display "-" rather than approximate with current composition,
+  // which would be biased if the group's weight has shifted.
   const _groupRatio = (snap) => {
     if (!isFiltered || !snap) return 1;
     const sv = snap.stock_values || {};
     const allTotal = Object.values(sv).reduce((a, b) => a + b, 0);
-    if (!allTotal || allTotal <= 0) {
-      return grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue : null;
-    }
+    if (!allTotal || allTotal <= 0) return null;
     let filteredTotal = 0;
     rows.forEach(r => { filteredTotal += (sv[r.stock_code] ?? 0); });
     return filteredTotal / allTotal;
@@ -454,8 +449,12 @@ function renderPortfolio() {
   const _periodReturn = (snap, navField) => {
     if (!snap) return { pct: null, pnl: null };
     const ratio = _groupRatio(snap);
-    if (isFiltered && ratio !== null) {
-      // Group filtered with stock_values available
+    if (isFiltered) {
+      // Under a filter, if no historical per-stock data is available for
+      // this reference date, return null so the card renders "-" instead
+      // of falling through to whole-portfolio NAV (which would misleadingly
+      // show the entire portfolio's return for the filtered view).
+      if (ratio === null) return { pct: null, pnl: null };
       const baseVal = _fxConv(snap.total_value * ratio, snap);
       const pnl = _currentFxVal - baseVal;
       const pct = baseVal > 0 ? (pnl / baseVal * 100) : null;
@@ -1790,7 +1789,12 @@ async function runAiAnalysis() {
 
   const modelInput = document.getElementById('pfAiModelInput');
   const selectedModel = modelInput ? modelInput.value.trim() : '';
-  const body = selectedModel ? JSON.stringify({ model: selectedModel }) : '{}';
+  const queryInput = document.getElementById('pfAiQuery');
+  const userQuery = queryInput ? queryInput.value.trim() : '';
+  const payload = {};
+  if (selectedModel) payload.model = selectedModel;
+  if (userQuery) payload.query = userQuery;
+  const body = JSON.stringify(payload);
 
   let mdText = '';
   try {
@@ -2217,7 +2221,11 @@ async function renderNavChart(data) {
       type: 'value',
       min: yZero ? 0 : 'dataMin',
       axisLine: { show: false },
-      axisLabel: { color: textColor, fontSize: 10 },
+      axisLabel: {
+        color: textColor,
+        fontSize: 10,
+        formatter: v => Math.round(v).toLocaleString(),
+      },
       splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
     },
     tooltip: {

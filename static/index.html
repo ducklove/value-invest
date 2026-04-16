@@ -226,6 +226,7 @@ function trackEvent(name, params = {}) {
           </div>
           <button class="bt-run" onclick="runAiAnalysis()" id="pfAiBtn" style="margin-left:auto;padding:6px 14px;font-size:12px;">분석 실행</button>
         </div>
+        <textarea id="pfAiQuery" placeholder="AI에게 추가로 묻고 싶은 내용이 있으면 입력하세요 (선택). 예: 금리 인상 가능성을 고려해 포트폴리오를 평가해줘." rows="2" style="width:100%;margin:8px 0 4px;padding:8px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);resize:vertical;font-family:inherit;"></textarea>
         <div id="pfAiResult" class="pf-ai-result"></div>
         <div id="pfAiTokens" style="font-size:11px;color:var(--text-secondary);margin-top:8px;"></div>
       </div>

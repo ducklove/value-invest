@@ -1461,6 +1461,12 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
     if req_model and user.get("is_admin"):
         model = req_model
 
+    # Optional user inquiry/question to include in the prompt
+    user_query = (payload.get("query") or "").strip()
+    # Hard cap to avoid runaway prompt growth; anything sensible fits easily.
+    if len(user_query) > 2000:
+        user_query = user_query[:2000]
+
     google_sub = user["google_sub"]
     items = await cache.get_portfolio(google_sub=google_sub)
     if not items:
@@ -1515,6 +1521,13 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
     except Exception:
         market_lines = ["시장 데이터를 가져올 수 없습니다."]
 
+    query_section = f"""
+
+## 사용자 질문/요청
+{user_query}
+
+위 질문/요청을 우선적으로 고려하여 답변해 주세요.""" if user_query else ""
+
     prompt = f"""당신은 한국 주식 시장 전문 투자 자문가입니다. 아래 포트폴리오를 분석해 주세요.
 
 ## 보유 종목 (총 평가: {_fmt_krw_ai(total_value)})
@@ -1524,7 +1537,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
 {chr(10).join(perf_lines) if perf_lines else "N/A"}
 
 ## 시장 현황
-{chr(10).join(market_lines)}
+{chr(10).join(market_lines)}{query_section}
 
 분석 항목:
 1. 포트폴리오 구성 평가 (분산도, 섹터 편중)
