@@ -2059,8 +2059,9 @@ async function renderTreemap() {
             padding: [2, 8],
             formatter(params) {
               const d = params.data;
-              if (d.changePct === null || d.changePct === undefined) return params.name;
-              return `${params.name}  ${_fmtPct(d.changePct)}`;
+              const wStr = d.weight !== undefined ? ` (${d.weight.toFixed(1)}%)` : '';
+              if (d.changePct === null || d.changePct === undefined) return params.name + wStr;
+              return `${params.name}  ${_fmtPct(d.changePct)}${wStr}`;
             },
           },
         },
