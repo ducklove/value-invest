@@ -17,6 +17,21 @@ const PER_DISPLAY_MAX = 100;
 const GUEST_RECENT_KEY = 'guest_recent';
 const GUEST_RECENT_MAX = 20;
 
+// Render markdown to sanitized HTML. Uses DOMPurify when loaded; falls
+// back to escaped plain text if either lib is missing. Callers must use
+// this instead of `marked.parse(...)` directly because AI / user inputs
+// can inject raw HTML otherwise.
+function _renderSafeMarkdown(mdText) {
+  if (typeof marked === 'undefined') return '';
+  const html = marked.parse(mdText);
+  if (typeof DOMPurify !== 'undefined') return DOMPurify.sanitize(html);
+  // DOMPurify failed to load (offline?) — strip all tags as the safe
+  // fallback; users see plain text instead of rendered markdown.
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  return (tmp.textContent || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function getGuestRecent() {
   try { return JSON.parse(localStorage.getItem(GUEST_RECENT_KEY)) || []; } catch { return []; }
 }

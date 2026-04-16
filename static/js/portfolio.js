@@ -1822,9 +1822,11 @@ async function runAiAnalysis() {
           const d = JSON.parse(line.slice(6));
           if (d.content) {
             mdText += d.content;
-            // Live preview: render markdown as it streams
+            // Live preview: render markdown as it streams.
+            // Sanitize with DOMPurify — prompt injection via portfolio
+            // names could otherwise cause the model to echo raw HTML.
             if (typeof marked !== 'undefined') {
-              result.innerHTML = marked.parse(mdText);
+              result.innerHTML = _renderSafeMarkdown(mdText);
             } else {
               result.textContent = mdText;
             }
@@ -1840,7 +1842,7 @@ async function runAiAnalysis() {
       }
     }
     // Final render
-    if (typeof marked !== 'undefined' && mdText) result.innerHTML = marked.parse(mdText);
+    if (typeof marked !== 'undefined' && mdText) result.innerHTML = _renderSafeMarkdown(mdText);
   } catch (e) {
     result.textContent = '분석 실패: ' + e.message;
   }

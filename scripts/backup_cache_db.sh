@@ -12,6 +12,14 @@ DB="$APP_DIR/cache.db"
 BACKUP_DIR="${BACKUP_DIR:-/home/cantabile/backups/value-invest}"
 DAILY_KEEP="${DAILY_KEEP:-14}"
 WEEKLY_KEEP_DAYS="${WEEKLY_KEEP_DAYS:-60}"
+# Optional off-site sync via rclone. Leave empty to skip. Example:
+#   BACKUP_RCLONE_REMOTE=gdrive:value-invest-backup
+# To enable, set this in /etc/systemd/system/value-invest-backup.service.d/
+# override.conf via `systemctl edit value-invest-backup.service`, add:
+#   [Service]
+#   Environment="BACKUP_RCLONE_REMOTE=gdrive:value-invest-backup"
+BACKUP_RCLONE_REMOTE="${BACKUP_RCLONE_REMOTE:-}"
+RCLONE_CONFIG="${RCLONE_CONFIG:-/home/cantabile/.config/rclone/rclone.conf}"
 
 mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly"
 
@@ -55,6 +63,22 @@ rm -f "$check_copy"
 if [[ $rc -ne 0 || "$out" != "ok" ]]; then
   echo "ERROR: backup integrity check failed: $out" >&2
   exit 2
+fi
+
+# Off-site sync (if configured). Fails loudly if rclone is missing or
+# remote is misconfigured; local backup still succeeded by this point.
+if [[ -n "$BACKUP_RCLONE_REMOTE" ]]; then
+  if ! command -v rclone >/dev/null; then
+    echo "ERROR: BACKUP_RCLONE_REMOTE set but rclone not installed" >&2
+    exit 3
+  fi
+  # One-way mirror local tree → remote. --fast-list keeps API calls low;
+  # --bwlimit caps upload rate so home bandwidth isn't saturated.
+  rclone sync "$BACKUP_DIR/" "$BACKUP_RCLONE_REMOTE/" \
+    --config "$RCLONE_CONFIG" \
+    --fast-list --bwlimit 2M --log-level NOTICE \
+    --exclude '*.tmp'
+  echo "OK rclone_synced remote=$BACKUP_RCLONE_REMOTE"
 fi
 
 # Summary to journald.

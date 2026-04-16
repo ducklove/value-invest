@@ -14,7 +14,10 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/cantabile/backups
+# Backup dir must be writable. rclone (when configured) may refresh
+# tokens in its config dir; '-' prefix makes systemd not fail if it
+# doesn't exist yet (first deploy before the user runs `rclone config`).
+ReadWritePaths=/home/cantabile/backups -/home/cantabile/.config/rclone
 
 [Install]
 WantedBy=multi-user.target
