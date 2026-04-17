@@ -1,0 +1,21 @@
+[Unit]
+Description=Value Invest — wiki ingestion (broker report PDF → LLM summary)
+After=network.target
+OnFailure=value-invest-notify@%n.service
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+# Delegates to the running web process so the LLM + quote + cache state
+# stays warm. The pipeline can run for several minutes when many new
+# reports have accumulated, so the curl timeout is generous.
+ExecStart=/usr/bin/curl -fsSk --max-time 3600 -X POST https://127.0.0.1:3691/api/internal/wiki/ingest
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+MemoryMax=100M
+CPUQuota=30%
+TasksMax=20

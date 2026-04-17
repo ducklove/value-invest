@@ -20,6 +20,7 @@ import kis_proxy_client
 import kis_ws_manager
 from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router, nps_router, backtest_router
 from routes.internal import router as internal_router
+from routes.wiki import router as wiki_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -80,6 +81,11 @@ async def lifespan(app: FastAPI):
     await kis_proxy_client.init_client()
     await cache.init_db()
     await cache.delete_expired_sessions()
+
+    # Ensure the wiki PDF cache directory exists. Creating it at startup
+    # avoids a systemd ReadWritePaths chicken-and-egg (the namespace is
+    # set up before the script runs).
+    (Path(__file__).parent / "data" / "pdf_cache").mkdir(parents=True, exist_ok=True)
     try:
         needs_corp_refresh = not await cache.is_corp_codes_loaded() or await cache.corp_codes_need_refresh()
     except Exception as e:
@@ -139,6 +145,7 @@ app.include_router(ws_quotes_router)
 app.include_router(nps_router)
 app.include_router(backtest_router)
 app.include_router(internal_router)
+app.include_router(wiki_router)
 
 
 @app.get("/healthz")

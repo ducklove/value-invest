@@ -1,0 +1,14 @@
+[Unit]
+Description=Value Invest — run wiki ingestion daily at 04:30 KST
+
+[Timer]
+# 04:30 KST — after the 03:30 backup and before the 09:00 market open
+# so any new reports published overnight are summarized by the time the
+# user opens the app.
+OnCalendar=*-*-* 04:30:00
+# If the Pi was off at 04:30, catch up on next boot.
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

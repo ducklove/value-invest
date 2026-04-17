@@ -232,6 +232,91 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_user_sessions_google_sub ON user_sessions(google_sub);
         CREATE INDEX IF NOT EXISTS idx_user_recent_viewed_at ON user_recent_analyses(google_sub, viewed_at DESC);
         CREATE INDEX IF NOT EXISTS idx_user_stock_prefs_rank ON user_stock_preferences(google_sub, is_pinned DESC, is_starred DESC, updated_at DESC);
+
+        -- Wiki / research-report pipeline.
+        -- PDFs are downloaded and parsed in the background. Keyed by content
+        -- hash so two URLs pointing at the same file share one row.
+        CREATE TABLE IF NOT EXISTS report_pdf_cache (
+            pdf_sha1 TEXT PRIMARY KEY,
+            stock_code TEXT NOT NULL,
+            pdf_url TEXT NOT NULL,
+            file_path TEXT,
+            file_bytes INTEGER,
+            parsed_text TEXT,
+            parse_status TEXT NOT NULL,
+            parse_error TEXT,
+            downloaded_at TEXT,
+            parsed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_pdf_cache_stock ON report_pdf_cache(stock_code);
+        CREATE INDEX IF NOT EXISTS idx_pdf_cache_status ON report_pdf_cache(parse_status);
+
+        -- One LLM-generated wiki entry per summarized report.
+        CREATE TABLE IF NOT EXISTS stock_wiki_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stock_code TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_ref TEXT NOT NULL,
+            report_date TEXT,
+            firm TEXT,
+            title TEXT,
+            recommendation TEXT,
+            target_price REAL,
+            summary_md TEXT NOT NULL,
+            key_points_md TEXT,
+            model TEXT,
+            tokens_in INTEGER,
+            tokens_out INTEGER,
+            created_at TEXT NOT NULL,
+            UNIQUE(stock_code, source_type, source_ref)
+        );
+        CREATE INDEX IF NOT EXISTS idx_wiki_stock_date ON stock_wiki_entries(stock_code, report_date DESC);
+
+        -- FTS5 over wiki entries for retrieval. contentless=yes would work
+        -- too but keeping it synced to the content table gives us UPDATE
+        -- support. Triggers below sync INSERT/UPDATE/DELETE.
+        CREATE VIRTUAL TABLE IF NOT EXISTS stock_wiki_fts USING fts5(
+            stock_code UNINDEXED,
+            title,
+            summary_md,
+            key_points_md,
+            content='stock_wiki_entries',
+            content_rowid='id'
+        );
+        CREATE TRIGGER IF NOT EXISTS stock_wiki_fts_insert
+            AFTER INSERT ON stock_wiki_entries BEGIN
+            INSERT INTO stock_wiki_fts(rowid, stock_code, title, summary_md, key_points_md)
+            VALUES (new.id, new.stock_code, new.title, new.summary_md, new.key_points_md);
+        END;
+        CREATE TRIGGER IF NOT EXISTS stock_wiki_fts_delete
+            AFTER DELETE ON stock_wiki_entries BEGIN
+            INSERT INTO stock_wiki_fts(stock_wiki_fts, rowid, stock_code, title, summary_md, key_points_md)
+            VALUES ('delete', old.id, old.stock_code, old.title, old.summary_md, old.key_points_md);
+        END;
+        CREATE TRIGGER IF NOT EXISTS stock_wiki_fts_update
+            AFTER UPDATE ON stock_wiki_entries BEGIN
+            INSERT INTO stock_wiki_fts(stock_wiki_fts, rowid, stock_code, title, summary_md, key_points_md)
+            VALUES ('delete', old.id, old.stock_code, old.title, old.summary_md, old.key_points_md);
+            INSERT INTO stock_wiki_fts(rowid, stock_code, title, summary_md, key_points_md)
+            VALUES (new.id, new.stock_code, new.title, new.summary_md, new.key_points_md);
+        END;
+
+        -- Q&A history: audit log + per-user rate limit source.
+        CREATE TABLE IF NOT EXISTS stock_qa_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            google_sub TEXT NOT NULL,
+            stock_code TEXT NOT NULL,
+            question TEXT NOT NULL,
+            answer_md TEXT,
+            source_ids TEXT,
+            model TEXT,
+            tokens_in INTEGER,
+            tokens_out INTEGER,
+            cost_usd REAL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_qa_user_time ON stock_qa_history(google_sub, created_at DESC);
     """)
     await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
     await _ensure_column(db, "financial_data", "report_date", "TEXT")
@@ -1479,3 +1564,171 @@ async def save_ticker(stock_code: str, resolved_ticker: str):
         (stock_code, resolved_ticker, datetime.now().isoformat()),
     )
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Wiki / research-report pipeline
+# ---------------------------------------------------------------------------
+
+async def get_pdf_cache_by_sha1(pdf_sha1: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM report_pdf_cache WHERE pdf_sha1 = ?", (pdf_sha1,),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def save_pdf_cache_row(row: dict) -> None:
+    """Upsert a row into report_pdf_cache. `row` must contain pdf_sha1."""
+    db = await get_db()
+    cols = [
+        "pdf_sha1", "stock_code", "pdf_url", "file_path", "file_bytes",
+        "parsed_text", "parse_status", "parse_error", "downloaded_at", "parsed_at",
+    ]
+    vals = [row.get(c) for c in cols]
+    placeholders = ",".join("?" for _ in cols)
+    set_clause = ",".join(f"{c}=excluded.{c}" for c in cols if c != "pdf_sha1")
+    await db.execute(
+        f"INSERT INTO report_pdf_cache ({','.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(pdf_sha1) DO UPDATE SET {set_clause}",
+        vals,
+    )
+    await db.commit()
+
+
+async def pdf_is_already_summarized(stock_code: str, pdf_sha1: str) -> bool:
+    """Returns True if a wiki entry for this PDF already exists."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT 1 FROM stock_wiki_entries WHERE stock_code = ? AND source_type = 'broker_report' AND source_ref = ? LIMIT 1",
+        (stock_code, pdf_sha1),
+    )
+    return (await cursor.fetchone()) is not None
+
+
+async def save_wiki_entry(entry: dict) -> int:
+    """Insert a wiki entry. Returns the new row id. Enforces UNIQUE via
+    ON CONFLICT — duplicate (stock, source_type, source_ref) replaces
+    the prior summary so re-summarizing with a better model overwrites."""
+    db = await get_db()
+    cols = [
+        "stock_code", "source_type", "source_ref", "report_date", "firm",
+        "title", "recommendation", "target_price", "summary_md", "key_points_md",
+        "model", "tokens_in", "tokens_out", "created_at",
+    ]
+    vals = [entry.get(c) for c in cols]
+    placeholders = ",".join("?" for _ in cols)
+    set_clause = ",".join(f"{c}=excluded.{c}" for c in cols if c not in ("stock_code", "source_type", "source_ref"))
+    cursor = await db.execute(
+        f"INSERT INTO stock_wiki_entries ({','.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(stock_code, source_type, source_ref) DO UPDATE SET {set_clause}",
+        vals,
+    )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def get_wiki_entries(stock_code: str, limit: int = 20) -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT id, stock_code, source_type, source_ref, report_date, firm,
+                  title, recommendation, target_price, summary_md, key_points_md,
+                  model, created_at
+           FROM stock_wiki_entries
+           WHERE stock_code = ?
+           ORDER BY COALESCE(report_date, created_at) DESC
+           LIMIT ?""",
+        (stock_code, limit),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def search_wiki(stock_code: str, query: str, limit: int = 5) -> list[dict]:
+    """FTS search scoped to one stock. Falls back to recency if FTS returns
+    fewer than `limit` matches (e.g. question is too short for meaningful
+    tokens, or FTS index is empty). Returned rows are the same shape as
+    get_wiki_entries()."""
+    db = await get_db()
+    # FTS MATCH expects a sanitized query — strip characters FTS treats as
+    # operators to avoid "fts5: syntax error near ..." on user input.
+    sanitized = _sanitize_fts_query(query)
+    rows: list[dict] = []
+    if sanitized:
+        cursor = await db.execute(
+            """SELECT e.id, e.stock_code, e.source_type, e.source_ref, e.report_date,
+                      e.firm, e.title, e.recommendation, e.target_price,
+                      e.summary_md, e.key_points_md, e.model, e.created_at
+               FROM stock_wiki_fts f
+               JOIN stock_wiki_entries e ON e.id = f.rowid
+               WHERE f.stock_wiki_fts MATCH ? AND e.stock_code = ?
+               ORDER BY bm25(stock_wiki_fts) ASC
+               LIMIT ?""",
+            (sanitized, stock_code, limit),
+        )
+        rows = [dict(r) for r in await cursor.fetchall()]
+    if len(rows) < limit:
+        seen = {r["id"] for r in rows}
+        extra = await get_wiki_entries(stock_code, limit * 2)
+        for e in extra:
+            if e["id"] in seen:
+                continue
+            rows.append(e)
+            if len(rows) >= limit:
+                break
+    return rows[:limit]
+
+
+def _sanitize_fts_query(q: str) -> str:
+    """Strip FTS5 special chars so arbitrary user input doesn't raise.
+    Kept simple: keep CJK, ASCII letters/digits, spaces; drop everything
+    else. Collapse whitespace."""
+    import re
+    cleaned = re.sub(r"[^\w\s\uAC00-\uD7AF\u4E00-\u9FFF]+", " ", q)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+async def qa_count_since(google_sub: str, since_iso: str) -> int:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT COUNT(*) AS n FROM stock_qa_history WHERE google_sub = ? AND created_at >= ?",
+        (google_sub, since_iso),
+    )
+    row = await cursor.fetchone()
+    return int(row["n"]) if row else 0
+
+
+async def save_qa_entry(entry: dict) -> int:
+    db = await get_db()
+    cols = [
+        "google_sub", "stock_code", "question", "answer_md", "source_ids",
+        "model", "tokens_in", "tokens_out", "cost_usd", "created_at",
+    ]
+    vals = [entry.get(c) for c in cols]
+    placeholders = ",".join("?" for _ in cols)
+    cursor = await db.execute(
+        f"INSERT INTO stock_qa_history ({','.join(cols)}) VALUES ({placeholders})",
+        vals,
+    )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:
+    """Union of (a) any stock in a user portfolio, (b) starred stocks,
+    (c) recently-viewed-within-N-days stocks. Used by the ingestion
+    pipeline to avoid processing stocks nobody cares about."""
+    db = await get_db()
+    cursor = await db.execute(
+        f"""SELECT DISTINCT stock_code FROM (
+            SELECT stock_code FROM user_portfolio
+            UNION
+            SELECT stock_code FROM user_stock_preferences WHERE is_starred = 1
+            UNION
+            SELECT stock_code FROM user_recent_analyses
+              WHERE viewed_at >= datetime('now', '-{int(recent_days)} days')
+        )
+        WHERE stock_code IS NOT NULL""",
+    )
+    return [r["stock_code"] for r in await cursor.fetchall()]

@@ -8,3 +8,4 @@ keys.txt
 .env*
 server.log
 .superpowers/
+data/pdf_cache/

@@ -24,6 +24,8 @@ REPO_UNITS=(
   "portfolio-snapshot.timer"
   "value-invest-backup.service"
   "value-invest-backup.timer"
+  "wiki-ingestion.service"
+  "wiki-ingestion.timer"
   "deploy/value-invest.service"
 )
 

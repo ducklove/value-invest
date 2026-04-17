@@ -11,3 +11,6 @@ python-dotenv>=1.0.0,<2.0
 # websockets is pulled in by uvicorn[standard], but kis_ws_manager.py
 # imports it directly, so pin it explicitly against accidental removal.
 websockets>=12.0,<16.0
+# PDF text extraction for the wiki / research-report ingestion pipeline.
+# Pure-Python, no system deps, wheel on ARM + Linux. OCR is out of scope.
+pypdf>=5.0,<6.0

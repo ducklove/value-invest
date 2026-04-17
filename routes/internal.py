@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 
 router = APIRouter(prefix="/api/internal", include_in_schema=False)
 logger = logging.getLogger(__name__)
@@ -65,4 +65,33 @@ async def run_nps_snapshot_ep(request: Request):
         return {"ok": True, "kind": "nps"}
     except Exception as exc:
         logger.exception("nps snapshot failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/wiki/ingest")
+async def run_wiki_ingest(request: Request, payload: dict = Body(default={})):
+    """Drive the wiki ingestion pipeline. Loopback-only.
+
+    Body is optional JSON of the shape:
+        {
+          "stock_codes": ["005930", ...],   # optional, defaults to pipeline selector
+          "per_stock_limit": 10,             # optional
+          "model": "..."                     # optional override
+        }
+    """
+    _require_loopback(request)
+    import wiki_ingestion
+    body = payload or {}
+    codes = body.get("stock_codes") if isinstance(body, dict) else None
+    per_stock = body.get("per_stock_limit") if isinstance(body, dict) else None
+    model = body.get("model") if isinstance(body, dict) else None
+    try:
+        result = await wiki_ingestion.run_pipeline(
+            stock_codes=codes,
+            per_stock_limit=per_stock or wiki_ingestion.DEFAULT_PER_STOCK_LIMIT,
+            model=model,
+        )
+        return {"ok": True, **result}
+    except Exception as exc:
+        logger.exception("wiki ingest failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
