@@ -2234,7 +2234,10 @@ async function renderNavChart(data) {
       { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(navColor, 0.12),
         handleStyle: { color: navColor }, textStyle: { color: textColor, fontSize: 10 },
         labelFormatter: (_, val) => labels[Math.round(val)] || '' },
-      { type: 'inside' },
+      // inside zoom kept for click-drag panning, but wheel is disabled —
+      // hovering over the NAV chart while scrolling the page was hijacking
+      // the scroll and unexpectedly zooming the timeline.
+      { type: 'inside', zoomOnMouseWheel: false, moveOnMouseWheel: false },
     ],
     xAxis: {
       type: 'category', data: labels,

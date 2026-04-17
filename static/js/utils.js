@@ -275,7 +275,10 @@ function _createEChartsChart(container, opts) {
     { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(color, 0.12),
       handleStyle: { color }, textStyle: { color: textColor, fontSize: 10 },
       labelFormatter: (_, val) => labels[Math.round(val)] || '' },
-    { type: 'inside' },
+    // Wheel-zoom disabled — page scroll kept getting hijacked when the
+    // cursor happened to be over the chart. Slider drag + click-drag pan
+    // still work.
+    { type: 'inside', zoomOnMouseWheel: false, moveOnMouseWheel: false },
   ] : [];
   const bottomPad = dataZoom ? 56 : 24;
   ec.setOption({
