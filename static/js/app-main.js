@@ -112,3 +112,19 @@ window.addEventListener('resize', () => {
   if (_navChartInstance && _navChartInstance.resize) _navChartInstance.resize();
   if (_valueChartInstance && _valueChartInstance.resize) _valueChartInstance.resize();
 });
+
+// Esc closes any visible modal. Iterates in display order so the top-most
+// one closes first; after that a second Esc press can close the one behind.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const chartModal = document.getElementById('chartModal');
+  if (chartModal && chartModal.style.display !== 'none') {
+    if (typeof closeChartModal === 'function') closeChartModal();
+    return;
+  }
+  const groupModal = document.getElementById('pfGroupModal');
+  if (groupModal && groupModal.style.display !== 'none') {
+    if (typeof closeGroupModal === 'function') closeGroupModal();
+    return;
+  }
+});

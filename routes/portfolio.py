@@ -1550,8 +1550,14 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
     import json as _json
 
     async def _stream():
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
+        # Use client.stream() (context manager) rather than client.post() —
+        # the latter buffers the entire response body even with stream=True
+        # in the JSON payload, defeating the purpose and inflating latency
+        # until the model finishes. With stream() the first token reaches
+        # the browser as soon as OpenRouter emits it.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
+            async with client.stream(
+                "POST",
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {_OPENROUTER_KEY}",
@@ -1563,45 +1569,51 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                     "max_tokens": 2000,
                     "stream": True,
                 },
-                timeout=60.0,
-            )
+            ) as resp:
+                if resp.status_code != 200:
+                    # Need to consume body before httpx exposes it.
+                    body = await resp.aread()
+                    try:
+                        err = _json.loads(body)
+                        msg = err.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                    except Exception:
+                        msg = f"HTTP {resp.status_code}"
+                    yield f"data: {_json.dumps({'content': f'API 오류: {msg}'})}\n\n"
+                    yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'cost': 0})}\n\n"
+                    return
 
-            if resp.status_code != 200:
-                try:
-                    err = resp.json()
-                    msg = err.get("error", {}).get("message", f"HTTP {resp.status_code}")
-                except Exception:
-                    msg = f"HTTP {resp.status_code}"
-                yield f"data: {_json.dumps({'content': f'API 오류: {msg}'})}\n\n"
-                yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'cost': 0})}\n\n"
-                return
-
-            input_tokens = 0
-            output_tokens = 0
-            cost = 0
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                payload = line[6:]
-                if payload.strip() == "[DONE]":
-                    break
-                try:
-                    chunk = _json.loads(payload)
-                    if "error" in chunk:
-                        yield f"data: {_json.dumps({'content': chunk['error'].get('message', 'Unknown error')})}\n\n"
+                input_tokens = 0
+                output_tokens = 0
+                cost = 0
+                async for line in resp.aiter_lines():
+                    # If the browser closed the tab, stop consuming upstream
+                    # tokens — OpenRouter bills per-token and a forgotten
+                    # request could run to the full max_tokens budget.
+                    if await request.is_disconnected():
+                        logger.info("AI analysis: client disconnected, aborting upstream")
+                        return
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload.strip() == "[DONE]":
                         break
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    content = delta.get("content", "")
-                    if content:
-                        output_tokens += 1
-                        yield f"data: {_json.dumps({'content': content})}\n\n"
-                    usage = chunk.get("usage")
-                    if usage:
-                        input_tokens = usage.get("prompt_tokens", input_tokens)
-                        output_tokens = usage.get("completion_tokens", output_tokens)
-                        cost = usage.get("cost", cost) or cost
-                except Exception:
-                    continue
-            yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'cost': cost})}\n\n"
+                    try:
+                        chunk = _json.loads(payload)
+                        if "error" in chunk:
+                            yield f"data: {_json.dumps({'content': chunk['error'].get('message', 'Unknown error')})}\n\n"
+                            break
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            output_tokens += 1
+                            yield f"data: {_json.dumps({'content': content})}\n\n"
+                        usage = chunk.get("usage")
+                        if usage:
+                            input_tokens = usage.get("prompt_tokens", input_tokens)
+                            output_tokens = usage.get("completion_tokens", output_tokens)
+                            cost = usage.get("cost", cost) or cost
+                    except Exception:
+                        continue
+                yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'cost': cost})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

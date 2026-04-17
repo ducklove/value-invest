@@ -743,7 +743,11 @@ function _renderSummarySparklines(currentTotalValue) {
 
   // 월간 수익률 — pfMonthEndSnap?.total_value 대비 일별 total_value 변동률 (%)
   if (pfNavHistory.length > 0 && pfMonthEndSnap?.total_value && pfMonthEndSnap?.total_value > 0) {
-    const thisMonth = new Date().toISOString().slice(0, 7);
+    // Local date, not UTC — between 00:00 and 09:00 KST toISOString()
+    // returns the previous day, so the 1st-2nd of a month would drop
+    // the whole sparkline to last month.
+    const _d = new Date();
+    const thisMonth = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}`;
     const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
     if (monthData.length > 0) {
       const monthPcts = monthData.map(d => ((d.total_value / pfMonthEndSnap?.total_value) - 1) * 100);

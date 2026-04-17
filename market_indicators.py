@@ -568,11 +568,24 @@ async def _fetch_night_futures(client: httpx.AsyncClient) -> dict:
 # ---------------------------------------------------------------------------
 
 
+# Module-level cache so AI analysis / market-bar polling / admin page
+# don't each re-scrape Naver on every call. Keyed by the sorted codes tuple
+# so different code sets don't collide.
+_indicators_cache: dict[tuple, tuple[float, dict[str, dict]]] = {}
+_INDICATORS_TTL = 60  # seconds — market bar ticks every 60s anyway
+
+
 async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     """Fetch multiple indicators in parallel. Returns {code: result_dict}."""
     results: dict[str, dict] = {}
     if not codes:
         return results
+    import time as _time
+    key = tuple(sorted(codes))
+    cached = _indicators_cache.get(key)
+    if cached and (_time.monotonic() - cached[0]) < _INDICATORS_TTL:
+        # Return a shallow copy so caller mutations don't poison the cache.
+        return dict(cached[1])
 
     # Group codes by source to minimize HTTP requests
     kr_indices = []       # need individual fetches
@@ -697,4 +710,5 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
         if code not in results:
             results[code] = dict(_EMPTY)
 
+    _indicators_cache[key] = (_time.monotonic(), dict(results))
     return results
