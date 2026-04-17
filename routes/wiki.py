@@ -91,16 +91,51 @@ def _build_qa_context(entries: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
+def _fmt_krw(v) -> str:
+    """Format KRW with 조/억 when large. None-safe."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "N/A"
+    av = abs(v)
+    if av >= 1e12:
+        return f"{v / 1e12:,.2f}조"
+    if av >= 1e8:
+        return f"{v / 1e8:,.1f}억"
+    return f"{v:,.0f}"
+
+
+def _yoy_pct(series: list[dict], key: str) -> str:
+    """Given rows sorted DESC by year, compute the most recent YoY %."""
+    if len(series) < 2:
+        return ""
+    latest, prev = series[0], series[1]
+    try:
+        a = float(latest.get(key))
+        b = float(prev.get(key))
+        if b == 0:
+            return ""
+        pct = (a - b) / abs(b) * 100
+        return f" (YoY {pct:+.1f}%)"
+    except (TypeError, ValueError):
+        return ""
+
+
 async def _load_stock_summary(stock_code: str) -> str:
-    """Pull the last 3 years of finance + market rows to give the model
-    baseline numbers. Keeps the prompt grounded when wiki is thin."""
-    from analyzer import analyze as _analyze
+    """Pull a comprehensive, current snapshot for prompt grounding.
+
+    Uses the analysis DB rows plus a live quote fetch. Kept small enough
+    (~600 tokens for a typical stock) so it plays nicely with the wiki
+    context block."""
     db = await cache.get_db()
+
+    # 5-year history (was 3 — extra two years help the model reason about
+    # trends and cyclicality without exploding prompt size).
     fin_cur = await db.execute(
         """SELECT year, revenue, operating_profit, net_income,
-                  total_equity, total_assets, total_liabilities, report_date
+                  total_equity, total_assets, total_liabilities
            FROM financial_data WHERE stock_code = ?
-           ORDER BY year DESC LIMIT 3""",
+           ORDER BY year DESC LIMIT 5""",
         (stock_code,),
     )
     fin_rows = [dict(r) for r in await fin_cur.fetchall()]
@@ -108,28 +143,165 @@ async def _load_stock_summary(stock_code: str) -> str:
         """SELECT year, close_price, per, pbr, eps, bps,
                   dividend_per_share, dividend_yield, market_cap
            FROM market_data WHERE stock_code = ?
-           ORDER BY year DESC LIMIT 3""",
+           ORDER BY year DESC LIMIT 5""",
         (stock_code,),
     )
     mkt_rows = [dict(r) for r in await mkt_cur.fetchall()]
     corp_name = await cache.get_corp_name(stock_code) or ""
+
+    # Live quote — uses the warm quote cache populated by portfolio/WS.
+    live_line = ""
+    try:
+        from routes.portfolio import _fetch_quote
+        q = await _fetch_quote(stock_code)
+        if q and q.get("price"):
+            price = q.get("price")
+            chg_pct = q.get("change_pct")
+            chg = q.get("change")
+            bits = [f"현재가 {price:,.0f}원"]
+            if chg_pct is not None:
+                bits.append(f"일간 {chg_pct:+.2f}%")
+            if chg is not None:
+                bits.append(f"{chg:+,.0f}원")
+            live_line = " / ".join(bits)
+    except Exception:
+        pass
+
     lines: list[str] = [f"{corp_name} ({stock_code})"]
+    if live_line:
+        lines.append(f"실시간: {live_line}")
+
     if fin_rows:
-        lines.append("재무 (최근 3년, 단위=원):")
-        for r in fin_rows:
+        lines.append(f"재무 (최근 {len(fin_rows)}년, 매출/영업이익/순이익, ROE):")
+        for i, r in enumerate(fin_rows):
+            # Basic derived metrics.
+            rev = r.get("revenue")
+            op = r.get("operating_profit")
+            ni = r.get("net_income")
+            eq = r.get("total_equity")
+            roe = (ni / eq * 100) if ni and eq and eq > 0 else None
+            op_margin = (op / rev * 100) if op is not None and rev and rev > 0 else None
+            yoy = _yoy_pct(fin_rows, "revenue") if i == 0 else ""
             lines.append(
-                f"- {r.get('year')}: 매출 {r.get('revenue')} / 영업 {r.get('operating_profit')} / 순이익 {r.get('net_income')}"
+                f"- {r.get('year')}: 매출 {_fmt_krw(rev)}{yoy} / "
+                f"영업 {_fmt_krw(op)} (영업이익률 {op_margin:.1f}%)" if op_margin is not None
+                else f"- {r.get('year')}: 매출 {_fmt_krw(rev)}{yoy} / 영업 {_fmt_krw(op)}"
             )
+            tail = f"  순이익 {_fmt_krw(ni)}"
+            if roe is not None:
+                tail += f" / ROE {roe:.1f}%"
+            lines.append(tail)
+
     if mkt_rows:
-        lines.append("밸류에이션 (최근 3년):")
+        lines.append(f"밸류에이션 (최근 {len(mkt_rows)}년, 연말 기준):")
         for r in mkt_rows:
-            lines.append(
-                f"- {r.get('year')}: PER {r.get('per')} / PBR {r.get('pbr')} / EPS {r.get('eps')} / 시총 {r.get('market_cap')}"
-            )
+            per = r.get("per")
+            pbr = r.get("pbr")
+            eps = r.get("eps")
+            dy = r.get("dividend_yield")
+            mc = r.get("market_cap")
+            parts = [f"{r.get('year')}:"]
+            if per is not None: parts.append(f"PER {per:.1f}")
+            if pbr is not None: parts.append(f"PBR {pbr:.2f}")
+            if eps is not None: parts.append(f"EPS {eps:,.0f}")
+            if dy is not None: parts.append(f"배당수익률 {dy:.2f}%")
+            if mc: parts.append(f"시총 {_fmt_krw(mc)}")
+            lines.append("- " + " / ".join(parts))
+
     return "\n".join(lines)
 
 
-QA_SYSTEM = "당신은 한국 주식 애널리스트입니다. 아래 맥락만으로 답하고, 근거가 부족하면 모른다고 답하세요. 각 주장 뒤 괄호로 (증권사, 발행일) 인용하세요."
+async def _load_macro_context() -> str:
+    """Current market backdrop. Uses market_indicators which already has
+    a 60s module-level cache so this is cheap."""
+    try:
+        import market_indicators
+        data = await market_indicators.fetch_indicators([
+            "KOSPI", "KOSDAQ", "USD_KRW", "US10Y", "SPX",
+        ])
+    except Exception:
+        return ""
+    if not data:
+        return ""
+    lines: list[str] = ["시장 지표 (현재):"]
+    for code, v in data.items():
+        if not v:
+            continue
+        val = v.get("value")
+        direction = v.get("direction", "")
+        chg = v.get("change_pct")
+        tail = f" ({direction}{chg})" if chg else ""
+        lines.append(f"- {code}: {val}{tail}")
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+# Naver news scrape for recent headlines. Cheap fallback for "뉴스에
+# 뭐 나왔어?" / "최근 어떻게 움직였어?" type questions.
+_news_cache: dict[str, tuple[float, list[dict]]] = {}
+_NEWS_CACHE_TTL = 600  # 10 min
+
+
+async def _fetch_recent_news(stock_code: str, limit: int = 6) -> list[dict]:
+    """Scrape Naver finance news list for the stock code.
+    Returns list of {date, title, outlet}. Best-effort; returns [] on
+    any failure."""
+    import time as _time
+    cached = _news_cache.get(stock_code)
+    if cached and (_time.monotonic() - cached[0]) < _NEWS_CACHE_TTL:
+        return cached[1][:limit]
+    try:
+        import httpx
+        import re as _re
+        url = f"https://finance.naver.com/item/news_news.naver?code={stock_code}&page=1"
+        async with httpx.AsyncClient(timeout=8.0, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://finance.naver.com/",
+        }) as client:
+            resp = await client.get(url)
+        html = resp.content.decode("euc-kr", errors="ignore")
+        # Rows look like: <td class="title"><a ...>제목</a></td>
+        # <td class="info">언론사</td><td class="date">2026.04.17 09:30</td>
+        # Naver changes layouts occasionally; fall back to empty on mismatch.
+        rows = _re.findall(
+            r'<td class="title">.*?<a[^>]*>(.+?)</a>.*?'
+            r'<td class="info">(.+?)</td>.*?<td class="date">([^<]+)</td>',
+            html, _re.DOTALL,
+        )
+        news = []
+        for title, outlet, date in rows[:limit]:
+            # Strip remaining tags/entities.
+            clean = lambda s: _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", "", s)).strip()
+            news.append({
+                "title": clean(title),
+                "outlet": clean(outlet),
+                "date": clean(date),
+            })
+        _news_cache[stock_code] = (_time.monotonic(), news)
+        return news
+    except Exception:
+        return []
+
+
+def _format_news_block(news: list[dict]) -> str:
+    if not news:
+        return ""
+    lines = ["최근 뉴스 제목 (네이버 금융, 최신순):"]
+    for n in news:
+        lines.append(f"- [{n.get('date','')}, {n.get('outlet','')}] {n.get('title','')}")
+    return "\n".join(lines)
+
+
+QA_SYSTEM = """당신은 한국 주식 애널리스트입니다. 아래 제공된 맥락을 우선 근거로 사용하되,
+필요하면 일반적인 금융 지식과 시장 상식을 활용해 유연하게 답하세요.
+
+답변 가이드:
+- 증권사 리포트 요약에 근거가 있으면 (증권사, 발행일) 형식으로 인용하세요.
+- 재무·밸류에이션 숫자는 표로 제공된 값을 그대로 인용하세요.
+- 일반 지식이나 시장 상식은 "일반적으로…" 같은 표현으로 명시하고 과도한 단정은 피하세요.
+- 최근 뉴스 제목은 방향만 참고하되, 제목만으로 단정 지어 판단하지 마세요.
+- 맥락과 일반 지식을 결합할 때는 두 관점을 구분해서 보여주세요.
+- 근거가 충분하지 않은 예측이나 가격 타겟은 제시하지 마세요.
+"""
 
 
 @router.post("/api/analysis/{stock_code}/ask")
@@ -177,12 +349,26 @@ async def ask_stock(
     wiki_block = _build_qa_context(entries) if entries else "(요약된 리포트 없음)"
     stock_block = await _load_stock_summary(stock_code)
 
-    prompt = (
-        f"## 종목\n{stock_block}\n\n"
-        f"## 최근 리포트 요약\n{wiki_block}\n\n"
+    # Best-effort enrichment. All three are bounded and cached; failures
+    # degrade gracefully to the prior behavior.
+    macro_block = await _load_macro_context()
+    news_items = await _fetch_recent_news(stock_code, limit=6)
+    news_block = _format_news_block(news_items)
+
+    prompt_sections = [f"## 종목\n{stock_block}"]
+    if macro_block:
+        prompt_sections.append(f"## 시장 상황\n{macro_block}")
+    if news_block:
+        prompt_sections.append(f"## 최근 뉴스\n{news_block}")
+    prompt_sections.append(f"## 증권사 리포트 요약\n{wiki_block}")
+    prompt_sections.append(
         f"## 질문\n{question}\n\n"
-        "답변은 한국어 마크다운. 3-6문단. 각 주장 뒤 괄호로 (증권사, 발행일) 형식으로 인용."
+        "답변은 한국어 마크다운, 3-6문단. 섹션 헤더 없이 자연스럽게 서술하세요. "
+        "숫자를 인용할 때는 단위(원·%·배)를 명확히 쓰고, 증권사 리포트를 인용할 때는 "
+        "(증권사, 발행일) 형식으로 표기하세요. 일반적인 금융 지식도 필요하면 활용하되, "
+        "그때는 '일반적으로' 같은 표현으로 구분해 주세요."
     )
+    prompt = "\n\n".join(prompt_sections)
 
     async def _stream():
         import json as _json

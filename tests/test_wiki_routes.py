@@ -167,6 +167,26 @@ class WikiAskRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Buy", block)
         self.assertIn("90,000", block)
 
+    def test_fmt_krw_scales_by_magnitude(self):
+        f = wiki_route._fmt_krw
+        self.assertEqual(f(None), "N/A")
+        self.assertEqual(f(""), "N/A")
+        self.assertEqual(f(5_000), "5,000")
+        self.assertTrue(f(1_230_000_000).endswith("억"))
+        self.assertTrue(f(1_230_000_000_000).endswith("조"))
+
+    def test_yoy_pct_handles_edges(self):
+        y = wiki_route._yoy_pct
+        # Not enough rows.
+        self.assertEqual(y([{"revenue": 100}], "revenue"), "")
+        # Normal growth.
+        rows = [{"revenue": 110}, {"revenue": 100}]
+        self.assertIn("YoY +10.0%", y(rows, "revenue"))
+        # Missing prior year.
+        self.assertEqual(y([{"revenue": 100}, {"revenue": None}], "revenue"), "")
+        # Division by zero guard.
+        self.assertEqual(y([{"revenue": 100}, {"revenue": 0}], "revenue"), "")
+
 
 if __name__ == "__main__":
     unittest.main()
