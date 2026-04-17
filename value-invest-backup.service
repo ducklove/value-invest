@@ -15,9 +15,10 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
 # Backup dir must be writable. rclone (when configured) may refresh
-# tokens in its config dir; '-' prefix makes systemd not fail if it
-# doesn't exist yet (first deploy before the user runs `rclone config`).
-ReadWritePaths=/home/cantabile/backups -/home/cantabile/.config/rclone
+# tokens in its config dir; '-' prefix makes systemd skip the path if
+# it doesn't exist yet — script does `mkdir -p` once the namespace is
+# set up, so first run creates both.
+ReadWritePaths=-/home/cantabile/backups -/home/cantabile/.config/rclone
 
 [Install]
 WantedBy=multi-user.target
