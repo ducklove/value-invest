@@ -1856,7 +1856,9 @@ async function runAiAnalysis() {
             const costUsd = Number(d.cost || 0);
             const costKrw = costUsd && pfFxRate ? Math.round(costUsd * pfFxRate) : null;
             const cost = costUsd ? ` · ${costKrw !== null ? costKrw.toLocaleString() + '원' : '$' + costUsd.toFixed(6)}` : '';
-            tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}`;
+            const wikiN = Number(d.wiki_used || 0);
+            const wikiTag = wikiN > 0 ? ` · 리포트 ${wikiN}건 참조` : '';
+            tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}${wikiTag}`;
           }
         } catch {}
       }

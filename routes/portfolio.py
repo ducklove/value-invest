@@ -1521,12 +1521,56 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
     except Exception:
         market_lines = ["시장 데이터를 가져올 수 없습니다."]
 
+    # Per-holding wiki snippets. Cap at the 10 largest positions so the
+    # prompt stays bounded; each stock gets at most 2 recent wiki entries
+    # with just the key_points (not the full summary).
+    wiki_lines: list[str] = []
+    wiki_used_count = 0
+    try:
+        ranked = sorted(
+            (i for i in enriched if (i.get("quote", {}) or {}).get("price") and i.get("quantity")),
+            key=lambda i: (i["quote"]["price"] or 0) * (i.get("quantity") or 0),
+            reverse=True,
+        )[:10]
+        for item in ranked:
+            code = item["stock_code"]
+            name = item.get("stock_name") or code
+            entries = await cache.get_wiki_entries(code, limit=2)
+            if not entries:
+                continue
+            wiki_lines.append(f"### {name} ({code})")
+            for e in entries:
+                date_s = e.get("report_date") or (e.get("created_at") or "")[:10]
+                firm = e.get("firm") or ""
+                rec = (e.get("recommendation") or "").strip()
+                tp = e.get("target_price")
+                tp_s = f"TP={int(tp):,}" if tp else ""
+                head = f"- [{firm}, {date_s}"
+                if rec: head += f", {rec}"
+                if tp_s: head += f", {tp_s}"
+                head += "]"
+                key = (e.get("key_points_md") or "").strip()
+                # Fold bullets into one line (< 300 chars) so the full
+                # prompt stays readable and compact.
+                flat = " ".join(line.lstrip("- \t") for line in key.splitlines() if line.strip())
+                if flat:
+                    head += f" {flat[:300]}"
+                wiki_lines.append(head)
+                wiki_used_count += 1
+    except Exception as _wiki_exc:
+        logger.warning("portfolio AI wiki injection failed: %s", _wiki_exc)
+
     query_section = f"""
 
 ## 사용자 질문/요청
 {user_query}
 
 위 질문/요청을 우선적으로 고려하여 답변해 주세요.""" if user_query else ""
+
+    wiki_section = (
+        f"\n\n## 종목별 리서치 요약 (최근 증권사 리포트)\n{chr(10).join(wiki_lines)}"
+        if wiki_lines else ""
+    )
 
     prompt = f"""당신은 한국 주식 시장 전문 투자 자문가입니다. 아래 포트폴리오를 분석해 주세요.
 
@@ -1537,11 +1581,11 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
 {chr(10).join(perf_lines) if perf_lines else "N/A"}
 
 ## 시장 현황
-{chr(10).join(market_lines)}{query_section}
+{chr(10).join(market_lines)}{wiki_section}{query_section}
 
 분석 항목:
 1. 포트폴리오 구성 평가 (분산도, 섹터 편중)
-2. 주요 종목 밸류에이션과 리스크
+2. 주요 종목 밸류에이션과 리스크 — 증권사 의견을 근거로 인용 가능하면 인용
 3. 시장 상황 고려 단기 전망
 4. 리밸런싱/비중 조절 제안
 
@@ -1579,7 +1623,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                     except Exception:
                         msg = f"HTTP {resp.status_code}"
                     yield f"data: {_json.dumps({'content': f'API 오류: {msg}'})}\n\n"
-                    yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'cost': 0})}\n\n"
+                    yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'cost': 0, 'wiki_used': wiki_used_count})}\n\n"
                     return
 
                 input_tokens = 0
@@ -1614,6 +1658,6 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                             cost = usage.get("cost", cost) or cost
                     except Exception:
                         continue
-                yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'cost': cost})}\n\n"
+                yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'cost': cost, 'wiki_used': wiki_used_count})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

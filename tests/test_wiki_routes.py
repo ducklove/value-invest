@@ -1,9 +1,12 @@
-"""Tests for /api/analysis/{code}/wiki route — list endpoint only. Q&A
-endpoint tests are added in Phase 3."""
+"""Tests for /api/analysis/{code}/wiki and .../ask routes."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+from fastapi import HTTPException
+from starlette.requests import Request
 
 import cache
 from routes import wiki as wiki_route
@@ -69,6 +72,88 @@ class WikiListRouteTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(e["stock_code"], "005930")
         resp2 = await wiki_route.get_stock_wiki("000660", limit=10)
         self.assertEqual(resp2["count"], 1)
+
+
+def _mk_request() -> Request:
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/analysis/005930/ask",
+        "headers": [],
+        "query_string": b"",
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+    return Request(scope)
+
+
+class WikiAskRouteTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / "cache.db"
+        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch.start()
+        await cache.close_db()
+        await cache.init_db()
+        # Seed a user; Q&A gate needs authenticated.
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("u1", "u1@e.com", "U", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+        )
+        await db.commit()
+
+    async def asyncTearDown(self):
+        await cache.close_db()
+        self.db_patch.stop()
+        self.temp_dir.cleanup()
+
+    async def test_ask_requires_login(self):
+        with patch("routes.wiki.get_current_user", new=AsyncMock(return_value=None)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await wiki_route.ask_stock("005930", _mk_request(), {"question": "hi"})
+        self.assertEqual(exc_info.exception.status_code, 401)
+
+    async def test_ask_rejects_empty_question(self):
+        user = {"google_sub": "u1", "is_admin": False}
+        with patch("routes.wiki.get_current_user", new=AsyncMock(return_value=user)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await wiki_route.ask_stock("005930", _mk_request(), {"question": "   "})
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+    async def test_ask_enforces_daily_rate_limit(self):
+        user = {"google_sub": "u1", "is_admin": False}
+        # Pre-seed 20 Q&A rows from today to hit the default cap.
+        for i in range(20):
+            await cache.save_qa_entry({
+                "google_sub": "u1", "stock_code": "005930",
+                "question": f"q{i}", "answer_md": "a",
+                "source_ids": "[]", "model": "m",
+                "tokens_in": 1, "tokens_out": 1, "cost_usd": 0.0,
+                "created_at": "2099-01-01T10:00:00",  # anchor to a future-today
+            })
+        # Monkeypatch _today_kst_iso so the existing rows count as "today".
+        with patch("routes.wiki.get_current_user", new=AsyncMock(return_value=user)), \
+             patch.object(wiki_route, "_today_kst_iso", return_value="2099-01-01T00:00:00"):
+            with self.assertRaises(HTTPException) as exc_info:
+                await wiki_route.ask_stock("005930", _mk_request(), {"question": "hi"})
+        self.assertEqual(exc_info.exception.status_code, 429)
+
+    def test_build_qa_context_formats_entries(self):
+        entries = [
+            {
+                "id": 1, "firm": "삼성증권", "report_date": "2026-03-10",
+                "recommendation": "Buy", "target_price": 90000,
+                "title": "HBM 수혜", "key_points_md": "- HBM 출하 증가\n- 업황 반등",
+            },
+        ]
+        block = wiki_route._build_qa_context(entries)
+        self.assertIn("2026-03-10", block)
+        self.assertIn("삼성증권", block)
+        self.assertIn("HBM 수혜", block)
+        self.assertIn("Buy", block)
+        self.assertIn("90,000", block)
 
 
 if __name__ == "__main__":

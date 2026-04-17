@@ -879,6 +879,8 @@ async function renderResult(data) {
 
   // Load reports after charts are rendered (needs grid visible for target price chart)
   loadReports(data.stock_code);
+  // Wiki is lazy — fire-and-forget, renders under the report table.
+  loadWiki(data.stock_code);
   _updateQuoteSubscriptions();
 }
 
@@ -1251,4 +1253,199 @@ async function loadReports(stockCode) {
       loading.textContent = '리포트를 불러오지 못했습니다.';
     }
   }
+}
+
+// --- LLM wiki (per-stock report summaries) --------------------------------
+
+let _wikiLoadId = 0;
+
+async function loadWiki(stockCode) {
+  const section = document.getElementById('wikiSection');
+  const loading = document.getElementById('wikiLoading');
+  const empty = document.getElementById('wikiEmpty');
+  const list = document.getElementById('wikiEntries');
+  const countEl = document.getElementById('wikiCount');
+  if (!section) return;
+
+  // Tag each in-flight load; a newer analyzeStock() call invalidates older
+  // ones so we don't flicker stale wiki into a different stock's view.
+  const myId = ++_wikiLoadId;
+
+  section.style.display = 'block';
+  empty.style.display = 'none';
+  list.innerHTML = '';
+  loading.style.display = 'block';
+  loading.textContent = '요약을 불러오는 중...';
+  countEl.textContent = '';
+  // Set up Q&A binding for this stock; safe to call repeatedly.
+  _setupWikiQa(stockCode);
+  // Clear previous answer.
+  const prevAns = document.getElementById('wikiQaAnswer');
+  const prevMeta = document.getElementById('wikiQaMeta');
+  if (prevAns) { prevAns.style.display = 'none'; prevAns.innerHTML = ''; }
+  if (prevMeta) prevMeta.textContent = '';
+
+  try {
+    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/wiki?limit=30`);
+    if (myId !== _wikiLoadId) return;
+    if (!resp.ok) {
+      loading.textContent = '요약을 불러오지 못했습니다.';
+      return;
+    }
+    const data = await resp.json();
+    if (myId !== _wikiLoadId) return;
+    loading.style.display = 'none';
+    const entries = data.entries || [];
+    countEl.textContent = entries.length ? `(${entries.length}건)` : '';
+    if (!entries.length) {
+      empty.style.display = 'block';
+      return;
+    }
+    list.innerHTML = entries.map(renderWikiEntry).join('');
+    // Bind card toggles after innerHTML.
+    list.querySelectorAll('.wiki-entry-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const card = btn.closest('.wiki-entry');
+        if (!card) return;
+        card.classList.toggle('expanded');
+        btn.textContent = card.classList.contains('expanded') ? '접기' : '더 보기';
+      });
+    });
+  } catch (err) {
+    if (myId !== _wikiLoadId) return;
+    console.warn('wiki load failed', err);
+    loading.textContent = '요약을 불러오지 못했습니다.';
+  }
+}
+
+let _wikiQaStockCode = null;
+
+function _setupWikiQa(stockCode) {
+  _wikiQaStockCode = stockCode;
+  const btn = document.getElementById('wikiQaSubmit');
+  if (btn && !btn.dataset.bound) {
+    btn.addEventListener('click', () => askWikiQuestion());
+    btn.dataset.bound = '1';
+  }
+  const input = document.getElementById('wikiQaInput');
+  if (input && !input.dataset.bound) {
+    input.addEventListener('keydown', e => {
+      // Ctrl+Enter submits; plain Enter inserts newline.
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        askWikiQuestion();
+      }
+    });
+    input.dataset.bound = '1';
+  }
+  // Gate input on auth state.
+  const hint = document.getElementById('wikiQaHint');
+  const isLoggedIn = !!(typeof currentUser !== 'undefined' && currentUser);
+  if (input) input.disabled = !isLoggedIn;
+  if (btn) btn.disabled = !isLoggedIn;
+  if (hint) hint.style.display = isLoggedIn ? 'none' : '';
+}
+
+async function askWikiQuestion() {
+  const stockCode = _wikiQaStockCode;
+  if (!stockCode) return;
+  const input = document.getElementById('wikiQaInput');
+  const btn = document.getElementById('wikiQaSubmit');
+  const status = document.getElementById('wikiQaStatus');
+  const answerEl = document.getElementById('wikiQaAnswer');
+  const metaEl = document.getElementById('wikiQaMeta');
+  if (!input || !btn) return;
+  const q = (input.value || '').trim();
+  if (!q) { showToast && showToast('질문을 입력해 주세요.'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '생성 중...';
+  status.textContent = '';
+  answerEl.style.display = 'block';
+  answerEl.textContent = '';
+  metaEl.textContent = '';
+
+  let mdText = '';
+  try {
+    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split(/\r?\n/);
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const d = JSON.parse(line.slice(6));
+          if (d.content) {
+            mdText += d.content;
+            if (typeof _renderSafeMarkdown === 'function') {
+              answerEl.innerHTML = _renderSafeMarkdown(mdText);
+            } else {
+              answerEl.textContent = mdText;
+            }
+          }
+          if (d.done) {
+            const srcN = (d.sources || []).length;
+            const modelS = d.model ? ` · ${d.model}` : '';
+            const costUsd = Number(d.cost || 0);
+            const costS = costUsd ? ` · $${costUsd.toFixed(6)}` : '';
+            metaEl.textContent = `참조 요약 ${srcN}건 · 입력 ${d.input_tokens || '?'} / 출력 ${d.output_tokens || '?'} 토큰${costS}${modelS}`;
+          }
+        } catch {}
+      }
+    }
+    if (typeof _renderSafeMarkdown === 'function' && mdText) {
+      answerEl.innerHTML = _renderSafeMarkdown(mdText);
+    }
+  } catch (e) {
+    answerEl.textContent = '질문 처리 실패: ' + (e.message || e);
+  }
+  btn.disabled = false;
+  btn.textContent = '질문';
+}
+
+function renderWikiEntry(e) {
+  const date = e.report_date || '';
+  const firm = e.firm || '';
+  const title = e.title || '(제목 없음)';
+  const rec = (e.recommendation || '').trim();
+  const tp = e.target_price
+    ? Number(e.target_price).toLocaleString(undefined, { maximumFractionDigits: 0 })
+    : '';
+  const recClass = rec.toUpperCase().includes('BUY')
+    ? 'rec-buy'
+    : rec.toUpperCase().includes('SELL')
+    ? 'rec-sell'
+    : 'rec-hold';
+  const summaryHtml = e.summary_md && typeof _renderSafeMarkdown === 'function'
+    ? _renderSafeMarkdown(e.summary_md)
+    : escapeHtml(e.summary_md || '');
+  const hasBody = !!(e.summary_md && e.summary_md.trim());
+  return `
+    <div class="wiki-entry">
+      <div class="wiki-entry-head">
+        <div class="wiki-entry-meta">
+          <span class="wiki-entry-date">${escapeHtml(date)}</span>
+          <span class="wiki-entry-firm">${escapeHtml(firm)}</span>
+          ${rec ? `<span class="wiki-entry-rec ${recClass}">${escapeHtml(rec)}</span>` : ''}
+          ${tp ? `<span class="wiki-entry-tp">TP ${escapeHtml(tp)}</span>` : ''}
+        </div>
+        <div class="wiki-entry-title">${escapeHtml(title)}</div>
+      </div>
+      ${hasBody ? `<div class="wiki-entry-body">${summaryHtml}</div>` : ''}
+      ${hasBody ? `<button class="wiki-entry-toggle" type="button">더 보기</button>` : ''}
+    </div>`;
 }
