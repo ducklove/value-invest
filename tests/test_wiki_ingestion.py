@@ -278,6 +278,58 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
         rows = await cache.search_wiki(stock, "nonexistentgibberishzzz", limit=3)
         self.assertGreaterEqual(len(rows), 1)
 
+    # -- background loop --
+
+    async def test_background_loop_stops_on_event(self):
+        """Loop must exit promptly when stop_event fires — verifies the
+        timeout-sleep pattern doesn't swallow the signal."""
+        import asyncio
+        stop = asyncio.Event()
+        call_count = {"n": 0}
+
+        async def fake_pipeline(**kw):
+            call_count["n"] += 1
+            return {"stocks_processed": 0, "summarized": 0, "skipped": 0, "failed": 0}
+
+        with patch.object(wiki_ingestion, "run_pipeline", new=fake_pipeline):
+            task = asyncio.create_task(
+                wiki_ingestion.run_background_loop(
+                    stop,
+                    interval_seconds=30.0,
+                    initial_delay_seconds=0.01,
+                )
+            )
+            # Let initial delay elapse and first iteration run.
+            await asyncio.sleep(0.1)
+            stop.set()
+            # Loop should notice stop within its interval-sleep and exit.
+            await asyncio.wait_for(task, timeout=2.0)
+
+        self.assertGreaterEqual(call_count["n"], 1)
+
+    async def test_background_loop_stops_during_initial_delay(self):
+        import asyncio
+        stop = asyncio.Event()
+        call_count = {"n": 0}
+
+        async def fake_pipeline(**kw):
+            call_count["n"] += 1
+            return {"stocks_processed": 0, "summarized": 0, "skipped": 0, "failed": 0}
+
+        with patch.object(wiki_ingestion, "run_pipeline", new=fake_pipeline):
+            task = asyncio.create_task(
+                wiki_ingestion.run_background_loop(
+                    stop,
+                    interval_seconds=30.0,
+                    initial_delay_seconds=5.0,
+                )
+            )
+            await asyncio.sleep(0.05)
+            stop.set()
+            await asyncio.wait_for(task, timeout=1.0)
+
+        self.assertEqual(call_count["n"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

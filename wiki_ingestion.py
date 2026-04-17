@@ -434,6 +434,44 @@ async def ingest_stock(
     return stats
 
 
+async def run_background_loop(
+    stop_event: asyncio.Event,
+    interval_seconds: float,
+    per_stock_limit: int = DEFAULT_PER_STOCK_LIMIT,
+    initial_delay_seconds: float = 60.0,
+) -> None:
+    """Continuous ingestion loop. Sleeps `interval_seconds` between runs
+    and exits cleanly when `stop_event` fires.
+
+    Designed to be spawned from FastAPI's lifespan so it shuts down with
+    the process. Every iteration is independent: the dedup in
+    `ingest_pdf_for_report` (sha1 + wiki row exists) makes overlapping
+    or repeated runs cheap — upstream scrape is the only work on a
+    quiet day."""
+    if initial_delay_seconds > 0:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=initial_delay_seconds)
+            return
+        except asyncio.TimeoutError:
+            pass
+    while not stop_event.is_set():
+        try:
+            stats = await run_pipeline(per_stock_limit=per_stock_limit)
+            logger.info(
+                "wiki ingest tick: stocks=%d summarized=%d skipped=%d failed=%d",
+                stats.get("stocks_processed", 0), stats.get("summarized", 0),
+                stats.get("skipped", 0), stats.get("failed", 0),
+            )
+        except Exception as exc:
+            logger.exception("wiki background loop iteration crashed: %s", exc)
+        # Wait interval OR exit early if stop requested.
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            return  # stop_event fired
+        except asyncio.TimeoutError:
+            continue  # keep looping
+
+
 async def run_pipeline(
     stock_codes: list[str] | None = None,
     per_stock_limit: int = DEFAULT_PER_STOCK_LIMIT,

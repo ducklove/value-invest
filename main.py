@@ -104,6 +104,22 @@ async def lifespan(app: FastAPI):
 
     _sd_notify("READY=1")
     watchdog_task = asyncio.create_task(_watchdog_loop())
+
+    # Continuous wiki ingestion. Interval is configurable via env (default
+    # 30 min) and can be set to 0 to disable entirely (useful in tests /
+    # during dev). A short initial delay keeps startup snappy.
+    import wiki_ingestion
+    wiki_stop = asyncio.Event()
+    wiki_interval = float(os.environ.get("WIKI_INGEST_INTERVAL_S", "1800"))
+    wiki_task: asyncio.Task | None = None
+    if wiki_interval > 0:
+        wiki_task = asyncio.create_task(
+            wiki_ingestion.run_background_loop(
+                wiki_stop,
+                interval_seconds=wiki_interval,
+                initial_delay_seconds=float(os.environ.get("WIKI_INGEST_INITIAL_DELAY_S", "60")),
+            )
+        )
     try:
         yield
     finally:
@@ -113,6 +129,13 @@ async def lifespan(app: FastAPI):
             await watchdog_task
         except (asyncio.CancelledError, Exception):
             pass
+        # Stop wiki loop cleanly so an in-flight LLM call can finish.
+        wiki_stop.set()
+        if wiki_task is not None:
+            try:
+                await asyncio.wait_for(wiki_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                wiki_task.cancel()
         await kis_ws_manager.stop_all()
         await kis_proxy_client.close_client()
         await cache.close_db()
