@@ -725,11 +725,26 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
 
     # 1. Scrape holdings from FnGuide (with retry if major holdings missing)
     MAX_SCRAPE_RETRIES = 3
+    raw_holdings: list[dict] = []
     for attempt in range(1, MAX_SCRAPE_RETRIES + 1):
         raw_holdings = fetch_nps_holdings()
         if not raw_holdings:
-            logger.error("NPS: no holdings scraped from FnGuide")
-            return
+            # Previously we silently returned here, which meant the
+            # systemd OnFailure hook never fired and missing-day issues
+            # went unnoticed until a human checked the table. Retry a
+            # few times; if still empty, raise so the ntfy alert fires.
+            logger.warning(
+                "NPS: scrape returned 0 holdings (attempt %d/%d)",
+                attempt, MAX_SCRAPE_RETRIES,
+            )
+            if attempt < MAX_SCRAPE_RETRIES:
+                import asyncio
+                await asyncio.sleep(30)
+                continue
+            raise RuntimeError(
+                "NPS scrape returned no holdings after "
+                f"{MAX_SCRAPE_RETRIES} attempts — FnGuide 접근 실패 또는 레이아웃 변경 의심"
+            )
         logger.info("NPS: scraped %d holdings (attempt %d)", len(raw_holdings), attempt)
         scraped_names = {h["name"] for h in raw_holdings}
         # Check if top holdings from previous day are present
