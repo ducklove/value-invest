@@ -64,6 +64,9 @@ PIP_FLAGS=(--user --break-system-packages)
 if grep -qE '^requirements(-dev)?\.txt$' <<<"$CHANGED_FILES"; then
   log "requirements changed — installing"
   python3 -m pip install "${PIP_FLAGS[@]}" --upgrade -r requirements.txt
+  # Log resolved versions so drift between machines/days is visible in CI.
+  log "installed versions:"
+  python3 -m pip list 2>/dev/null | grep -iE '^(fastapi|uvicorn|aiosqlite|httpx|beautifulsoup4|yfinance|google-auth|python-dotenv|websockets)\b' || true
 fi
 
 # --- Tests ------------------------------------------------------------------
