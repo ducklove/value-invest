@@ -1,0 +1,68 @@
+# Value Invest — example Caddy config.
+#
+# Optional upgrade from uvicorn-terminates-TLS to Caddy-terminates-TLS.
+# Advantages: standard port 443 (no :3691 in URLs), automatic cert
+# renewal, rate-limit / security-header plugins available.
+#
+# Install on Pi:
+#   sudo apt install -y caddy
+#   sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
+#   # review/edit /etc/caddy/Caddyfile
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl enable --now caddy
+#
+# THEN change deploy/value-invest.service ExecStart to:
+#   ExecStart=/usr/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 3691
+# (drop --ssl-keyfile / --ssl-certfile — Caddy terminates TLS now)
+# and open port 443 on the home router, point DDNS there.
+#
+# Keep the old uvicorn-with-TLS setup running in parallel until you've
+# verified Caddy works, then switch. `cantabile.tplinkdns.com:3691`
+# will keep working during migration; the new entry point is just
+# `cantabile.tplinkdns.com` (port 443 implicit).
+
+# --- Main site ---
+cantabile.tplinkdns.com {
+    # Use existing LE certs so certbot's renewal cron keeps working.
+    tls /etc/letsencrypt/live/cantabile.tplinkdns.com/fullchain.pem \
+        /etc/letsencrypt/live/cantabile.tplinkdns.com/privkey.pem
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Gzip / zstd compression
+    encode gzip zstd
+
+    # Access log
+    log {
+        output file /var/log/caddy/value-invest.access.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+        format json
+    }
+
+    # Rate-limit the AI endpoint (simple in-memory limiter — fine for
+    # solo-user scale). For multi-user, swap for a module like
+    # mholt/caddy-ratelimit.
+    # Skipping for now; add if it becomes an issue.
+
+    # Proxy everything to the uvicorn app on loopback.
+    reverse_proxy 127.0.0.1:3691 {
+        # WebSocket support for /ws/* endpoints.
+        header_up Host {upstream_hostport}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# --- Optional: redirect :3691 to :443 during migration ---
+# cantabile.tplinkdns.com:3691 {
+#     redir https://cantabile.tplinkdns.com{uri} permanent
+# }

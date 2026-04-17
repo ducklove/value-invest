@@ -1,0 +1,41 @@
+# Value Invest — tight sudoers for the self-hosted runner user.
+#
+# Install:
+#   sudo visudo -f /etc/sudoers.d/value-invest-deploy
+# then paste the content BELOW THIS HEADER. Remove the old catch-all
+# rule (cantabile ALL=(root) NOPASSWD: /bin/systemctl, /usr/bin/cp, ...)
+# that the initial setup used.
+#
+# Rationale: the previous catch-all let anyone who pushes to master
+# install arbitrary systemd units or cp over any root-owned file.
+# These rules restrict to exactly what deploy.sh and the install path
+# actually need.
+#
+# ---8<---
+cantabile ALL=(root) NOPASSWD: /bin/systemctl daemon-reload
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart value-invest.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl status value-invest.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl --no-pager status value-invest.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now nps-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now portfolio-intraday.timer
+# Systemd timers and services must be copied to /etc/systemd/system/.
+# Wildcard on source (our repo path), fixed dst prefix. An attacker
+# can't reach any path outside /etc/systemd/system/ via these rules,
+# and the service files themselves are rendered by deploy.sh from
+# master-controlled content (which is a separate trust boundary).
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/*.service /etc/systemd/system/*
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/*.timer /etc/systemd/system/*
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/deploy/*.service /etc/systemd/system/*
+# cmp -s is a read-only compare used by deploy.sh to detect unit drift.
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/*.service /etc/systemd/system/*
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/*.timer /etc/systemd/system/*
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/deploy/*.service /etc/systemd/system/*
+# ---8<---
+#
+# After saving, run:
+#   sudo visudo -c   # syntax check
+# and test with:
+#   sudo -n systemctl daemon-reload   # must succeed without password
+#   sudo -n ls /                       # must FAIL (no longer granted)
