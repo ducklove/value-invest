@@ -129,14 +129,21 @@ async def _fetch_fx_usdkrw():
         logger.warning("Failed to fetch FX rate: %s", e)
 
 
-async def run_all_snapshots(snap_date: str | None = None):
-    """Take snapshots for all users with portfolio items."""
-    await cache.init_db()
+async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True):
+    """Take snapshots for all users with portfolio items.
+
+    When invoked inside the web process (via /api/internal/snapshot/nav)
+    the caller already owns cache's DB lifecycle — pass manage_db=False
+    so we don't close the shared aiosqlite connection out from under it.
+    """
+    if manage_db:
+        await cache.init_db()
     if snap_date is None:
         snap_date = date.today().isoformat()
     if date.fromisoformat(snap_date).weekday() >= 5:
         logger.info("Snapshot skipped: %s is a weekend", snap_date)
-        await cache.close_db()
+        if manage_db:
+            await cache.close_db()
         return
     await _fetch_fx_usdkrw()
     users = await cache.get_all_users_with_portfolio()
@@ -147,7 +154,8 @@ async def run_all_snapshots(snap_date: str | None = None):
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", google_sub[:8], e)
     await _save_gold_close()
-    await cache.close_db()
+    if manage_db:
+        await cache.close_db()
 
 
 if __name__ == "__main__":

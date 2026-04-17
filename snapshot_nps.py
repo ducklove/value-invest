@@ -704,16 +704,18 @@ async def _load_prev_holdings(snap_date: str, days: int = 2) -> tuple[list[dict]
         return [], set()
 
 
-async def run_nps_snapshot(snap_date: str | None = None):
+async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True):
     """Main entry point: scrape → enrich → compute NAV → save → generate HTML."""
-    await cache.init_db()
+    if manage_db:
+        await cache.init_db()
 
     if snap_date is None:
         snap_date = date.today().isoformat()
 
     if not _is_trading_day(date.fromisoformat(snap_date)):
         logger.info("NPS snapshot skipped: %s is not a trading day", snap_date)
-        await cache.close_db()
+        if manage_db:
+            await cache.close_db()
         return
 
     logger.info("NPS snapshot starting for date=%s", snap_date)
@@ -881,7 +883,8 @@ async def run_nps_snapshot(snap_date: str | None = None):
         "NPS snapshot saved: date=%s total_value=%.0f nav=%.2f count=%d",
         snap_date, total_value, nav, len(holdings),
     )
-    await cache.close_db()
+    if manage_db:
+        await cache.close_db()
 
 
 if __name__ == "__main__":

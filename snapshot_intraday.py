@@ -28,8 +28,9 @@ async def _fetch_total_value(google_sub: str) -> float:
     return total
 
 
-async def run():
-    await cache.init_db()
+async def run(manage_db: bool = True):
+    if manage_db:
+        await cache.init_db()
     await cache.delete_old_intraday(days_to_keep=7)
     ts = datetime.now().strftime("%Y-%m-%dT%H:%M")
     users = await cache.get_all_users_with_portfolio()
@@ -42,7 +43,8 @@ async def run():
                 logger.info("  %s: %.0f", google_sub[:8], total_value)
         except Exception as e:
             logger.error("  %s failed: %s", google_sub[:8], e)
-    await cache.close_db()
+    if manage_db:
+        await cache.close_db()
 
 
 if __name__ == "__main__":

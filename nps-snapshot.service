@@ -7,17 +7,15 @@ OnFailure=value-invest-notify@%n.service
 Type=oneshot
 User=cantabile
 Group=cantabile
-WorkingDirectory=/home/cantabile/Works/value_invest
-ExecStart=/usr/bin/python3 snapshot_nps.py
-# Same sandbox as main service — read config, write cache.db.
+# Delegate to the running web process so the scrape benefits from its
+# warm quote/FX/ticker caches. -k: cert is for cantabile.tplinkdns.com,
+# local probe uses 127.0.0.1; fail hard so systemd OnFailure fires.
+ExecStart=/usr/bin/curl -fsSk --max-time 1800 -X POST https://127.0.0.1:3691/api/internal/snapshot/nps
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ProtectHome=read-only
-ProtectControlGroups=yes
-ProtectKernelModules=yes
+ProtectHome=yes
 RestrictSUIDSGID=yes
-ReadWritePaths=/home/cantabile/Works/value_invest
-MemoryMax=600M
-CPUQuota=80%
-TasksMax=100
+MemoryMax=100M
+CPUQuota=30%
+TasksMax=20
