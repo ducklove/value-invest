@@ -2137,7 +2137,30 @@ async function onBenchToggle() {
     ));
     toFetch.forEach((c, i) => { _benchCache[c] = results[i]; });
   }
-  renderNavChart(_navChartData);
+  // Preserve the current zoom window across re-render. renderNavChart()
+  // disposes the chart instance and recreates it from scratch, which would
+  // otherwise reset dataZoom to 0~100 — i.e. the user loses their 3M/6M/1Y
+  // selection just for checking a benchmark box.
+  let preservedZoom = null;
+  if (_navChartInstance) {
+    try {
+      const opt = _navChartInstance.getOption();
+      const dz = opt?.dataZoom?.[0];
+      if (dz && (dz.start != null || dz.end != null)) {
+        preservedZoom = { start: dz.start ?? 0, end: dz.end ?? 100 };
+      }
+    } catch (_) { /* getOption can throw if chart is mid-dispose */ }
+  }
+  await renderNavChart(_navChartData);
+  if (preservedZoom && _navChartInstance) {
+    // dispatchAction fires the datazoom listener inside renderNavChart,
+    // which re-scales benchmark series to match the restored window.
+    _navChartInstance.dispatchAction({
+      type: 'dataZoom',
+      start: preservedZoom.start,
+      end: preservedZoom.end,
+    });
+  }
 }
 
 // Per-benchmark raw ratio arrays (bench_close / bench_close[0]), computed once.
