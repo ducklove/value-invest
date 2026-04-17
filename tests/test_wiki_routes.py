@@ -187,6 +187,100 @@ class WikiAskRouteTests(unittest.IsolatedAsyncioTestCase):
         # Division by zero guard.
         self.assertEqual(y([{"revenue": 100}, {"revenue": 0}], "revenue"), "")
 
+    def test_classify_question_routes(self):
+        c = wiki_route._classify_question
+        # Simple short question → shallow
+        p = c("PER 몇이야?")
+        self.assertFalse(p["is_deep"])
+        self.assertEqual(p["wiki_limit"], 3)
+        self.assertFalse(p["include_macro"])
+        self.assertFalse(p["include_news"])
+        # Deep keyword → deep
+        p = c("이 종목 밸류에이션 어떻게 봐?")
+        self.assertTrue(p["is_deep"])
+        self.assertGreater(p["wiki_limit"], 3)
+        self.assertTrue(p["include_news"])
+        self.assertTrue(p["include_macro"])
+        # Long question → deep regardless of keywords
+        p = c("이 종목의 최근 3년간 실적 추이와 경쟁사 대비 상황, 그리고 향후 성장 드라이버와 리스크 요인을 종합적으로 정리해줘")
+        self.assertTrue(p["is_deep"])
+        # News keyword → news on but macro off (shallow otherwise)
+        p = c("최근 뉴스 있어?")
+        self.assertTrue(p["include_news"])
+        # Macro keyword only
+        p = c("환율 영향 어떨까?")
+        self.assertTrue(p["include_macro"])
+
+
+class ShortcutTests(unittest.IsolatedAsyncioTestCase):
+    """Exercise Tier-0 rule-based shortcuts directly — no HTTP stack."""
+
+    async def asyncSetUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / "cache.db"
+        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch.start()
+        await cache.close_db()
+        await cache.init_db()
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT INTO corp_codes (stock_code, corp_code, corp_name, updated_at) VALUES (?, ?, ?, ?)",
+            ("005930", "00126380", "삼성전자", "2026-01-01"),
+        )
+        await db.execute(
+            """INSERT INTO market_data (stock_code, year, close_price, per, pbr, eps, bps,
+                dividend_per_share, dividend_yield, market_cap)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("005930", 2025, 75000, 13.5, 1.25, 5500, 60000, 361.0, 0.48, 460_000_000_000_000),
+        )
+        await db.commit()
+
+    async def asyncTearDown(self):
+        await cache.close_db()
+        self.db_patch.stop()
+        self.temp_dir.cleanup()
+
+    async def test_shortcut_per_question(self):
+        # _fetch_quote returns empty dict via mock so shortcut relies on
+        # market_data only.
+        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={})):
+            ans = await wiki_route._try_shortcut("005930", "PER 몇이야?")
+        self.assertIsNotNone(ans)
+        self.assertIn("13.5", ans)
+        self.assertIn("삼성전자", ans)
+
+    async def test_shortcut_market_cap(self):
+        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={})):
+            ans = await wiki_route._try_shortcut("005930", "시가총액은?")
+        self.assertIsNotNone(ans)
+        self.assertIn("조", ans)  # 460조 formatted
+
+    async def test_shortcut_dividend_yield(self):
+        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={})):
+            ans = await wiki_route._try_shortcut("005930", "배당수익률 얼마?")
+        self.assertIsNotNone(ans)
+        self.assertIn("0.48", ans)
+
+    async def test_shortcut_current_price_needs_live_quote(self):
+        # Without live quote, the 현재가 shortcut can't answer and falls through.
+        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={})):
+            ans = await wiki_route._try_shortcut("005930", "현재가 얼마?")
+        self.assertIsNone(ans)
+        # With a live quote it should answer.
+        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={
+            "price": 80000, "change": 500, "change_pct": 0.63,
+        })):
+            ans = await wiki_route._try_shortcut("005930", "현재가 얼마?")
+        self.assertIsNotNone(ans)
+        self.assertIn("80,000", ans)
+        self.assertIn("+0.63%", ans)
+
+    async def test_shortcut_misses_complex_question(self):
+        # A deep question must fall through to LLM.
+        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={"price": 80000})):
+            ans = await wiki_route._try_shortcut("005930", "이 종목 앞으로 전망 어때?")
+        self.assertIsNone(ans)
+
 
 if __name__ == "__main__":
     unittest.main()

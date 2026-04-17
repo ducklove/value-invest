@@ -26,10 +26,9 @@ router = APIRouter()
 QA_DAILY_LIMIT = int(os.environ.get("WIKI_QA_DAILY_LIMIT", "20"))
 # Max question length; reasonable investor questions fit easily in 1k chars.
 QA_MAX_QUESTION_CHARS = 1000
-# Number of wiki entries retrieved as context for each question.
-QA_CONTEXT_ENTRIES = 5
 # Hard cap on key_points length per entry in the prompt — keeps total
-# prompt bounded regardless of how verbose any single summary is.
+# prompt bounded regardless of how verbose any single summary is. The
+# actual number of entries retrieved is sized by _classify_question().
 QA_CTX_PER_ENTRY_CHARS = 800
 
 
@@ -291,6 +290,142 @@ def _format_news_block(news: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Tier 0: rule-based shortcuts — answer simple factual questions directly
+# from the DB / live quote, skipping the LLM entirely.
+#
+# Why: "현재가 얼마?" doesn't need retrieval, doesn't need reasoning, and
+# doesn't need to count toward the daily LLM budget. Zero-latency
+# deterministic answers beat a 2-second LLM round-trip for the subset of
+# questions that reduce to a single number in our DB.
+# ---------------------------------------------------------------------------
+
+
+async def _try_shortcut(stock_code: str, question: str) -> str | None:
+    """Return a formatted answer string if the question maps to a known
+    single-field lookup; otherwise None so the caller falls through to
+    the LLM path."""
+    import re as _re
+    q = question.strip().lower()
+    # Strip punctuation / whitespace to make matching resilient to "PER은?"
+    # vs "PER 몇 배?" etc.
+    q_norm = _re.sub(r"[\s\?\!\.\,\~]+", "", q)
+
+    def matches(*needles: str) -> bool:
+        return any(n in q_norm for n in needles)
+
+    # Pre-fetch common data lazily (only when we're about to match).
+    corp_name = await cache.get_corp_name(stock_code) or stock_code
+    db = await cache.get_db()
+    mkt_cur = await db.execute(
+        """SELECT year, close_price, per, pbr, eps, bps,
+                  dividend_per_share, dividend_yield, market_cap
+           FROM market_data WHERE stock_code = ?
+           ORDER BY year DESC LIMIT 1""",
+        (stock_code,),
+    )
+    mkt_row = await mkt_cur.fetchone()
+    mkt = dict(mkt_row) if mkt_row else {}
+
+    # Live quote via warm cache; may be None if market isn't trading yet
+    # or the quote provider failed — in that case skip quote-dependent
+    # shortcuts and let the LLM handle it with whatever context we have.
+    quote = {}
+    try:
+        from routes.portfolio import _fetch_quote
+        quote = await _fetch_quote(stock_code) or {}
+    except Exception:
+        pass
+
+    price = quote.get("price")
+    chg_pct = quote.get("change_pct")
+    chg = quote.get("change")
+
+    # --- Current price / quote ---
+    if matches("현재가", "주가얼마", "주가는", "시세", "지금얼마") and price is not None:
+        bits = [f"**{corp_name}** 현재가는 **{price:,.0f}원**입니다."]
+        if chg_pct is not None:
+            sign = "상승" if chg_pct > 0 else ("하락" if chg_pct < 0 else "보합")
+            delta = f" ({chg:+,.0f}원)" if chg is not None else ""
+            bits.append(f"오늘 {chg_pct:+.2f}%{delta} {sign} 중이에요.")
+        return " ".join(bits)
+
+    # --- Market cap ---
+    if matches("시가총액", "시총"):
+        mc = mkt.get("market_cap")
+        if mc:
+            return f"**{corp_name}**의 최근 연말 기준 시가총액은 **{_fmt_krw(mc)}원**이에요. (가장 최근 연간 마감 기준)"
+
+    # --- PER / PBR / EPS / BPS ---
+    if matches("per몇", "per은", "per이"):
+        per = mkt.get("per")
+        if per is not None:
+            return f"**{corp_name}**의 최근 연말 기준 **PER**은 **{per:.1f}배**입니다."
+
+    if matches("pbr몇", "pbr은", "pbr이"):
+        pbr = mkt.get("pbr")
+        if pbr is not None:
+            return f"**{corp_name}**의 최근 연말 기준 **PBR**은 **{pbr:.2f}배**입니다."
+
+    if matches("eps얼마", "eps는", "주당순이익"):
+        eps = mkt.get("eps")
+        if eps is not None:
+            return f"**{corp_name}**의 최근 **EPS(주당순이익)**는 **{eps:,.0f}원**입니다."
+
+    if matches("bps얼마", "bps는", "주당순자산"):
+        bps = mkt.get("bps")
+        if bps is not None:
+            return f"**{corp_name}**의 최근 **BPS(주당순자산)**는 **{bps:,.0f}원**입니다."
+
+    # --- Dividend ---
+    if matches("배당수익률", "배당률"):
+        dy = mkt.get("dividend_yield")
+        if dy is not None:
+            return f"**{corp_name}**의 최근 **배당수익률**은 **{dy:.2f}%**입니다. (연말 기준)"
+    if matches("주당배당금", "배당금얼마"):
+        dps = mkt.get("dividend_per_share")
+        if dps is not None:
+            return f"**{corp_name}**의 최근 **주당배당금**은 **{dps:,.0f}원**입니다."
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Tier 1: adaptive context — sizing data blocks by question complexity.
+# ---------------------------------------------------------------------------
+
+# Words that signal the user wants deep analysis. Presence of any of these
+# (or a long question body) → give the model full context.
+_DEEP_KEYWORDS = (
+    "분석", "전망", "전망은", "밸류에이션", "dcf", "리스크", "평가",
+    "추천", "의견", "어때", "어떻게봐", "매수", "매도", "투자",
+    "왜", "이유", "비교",
+)
+# Words that signal a news-centric question. If absent and question is
+# shallow, we skip the news scrape.
+_NEWS_KEYWORDS = ("뉴스", "이슈", "소식", "최근", "발표")
+# Words that signal broader market context matters.
+_MACRO_KEYWORDS = ("시장", "증시", "금리", "환율", "매크로", "경기", "업황")
+
+
+def _classify_question(question: str) -> dict:
+    """Return a small dict describing the retrieval budget for a question.
+
+    {wiki_limit: int, include_macro: bool, include_news: bool, is_deep: bool}.
+    """
+    q = question.lower()
+    length = len(question)
+    is_deep = length > 100 or any(kw in q for kw in _DEEP_KEYWORDS)
+    wants_news = any(kw in q for kw in _NEWS_KEYWORDS)
+    wants_macro = any(kw in q for kw in _MACRO_KEYWORDS)
+    return {
+        "is_deep": is_deep,
+        "wiki_limit": 8 if is_deep else 3,
+        "include_news": wants_news or is_deep,
+        "include_macro": wants_macro or is_deep,
+    }
+
+
 QA_SYSTEM = """당신은 한국 주식 애널리스트입니다. 아래 제공된 맥락을 우선 근거로 사용하되,
 필요하면 일반적인 금융 지식과 시장 상식을 활용해 유연하게 답하세요.
 
@@ -321,7 +456,30 @@ async def ask_stock(
     if len(question) > QA_MAX_QUESTION_CHARS:
         question = question[:QA_MAX_QUESTION_CHARS]
 
-    # Rate limit: 20/day per user (ENV-overridable).
+    # --- Tier 0: rule-based shortcut ---
+    # Try to answer trivially factual questions (current price, PER, etc.)
+    # directly from the DB / warm quote cache. Shortcuts don't count
+    # toward the daily LLM budget and return immediately without a
+    # round-trip. If no pattern matches we fall through to the full
+    # LLM path below.
+    shortcut_answer = await _try_shortcut(stock_code, question)
+    if shortcut_answer is not None:
+        import json as _json
+
+        async def _stream_shortcut():
+            # Deliver the answer in a single SSE chunk so the existing
+            # frontend (which expects data: {content:...} + data: {done:true})
+            # doesn't need any changes.
+            yield f"data: {_json.dumps({'content': shortcut_answer})}\n\n"
+            yield f"data: {_json.dumps({'done': True, 'sources': [], 'model': 'shortcut', 'input_tokens': 0, 'output_tokens': 0, 'cost': 0})}\n\n"
+
+        return StreamingResponse(_stream_shortcut(), media_type="text/event-stream")
+
+    # --- Tier 1: classify question to size down context for simple asks ---
+    plan = _classify_question(question)
+
+    # Rate limit: 20/day per user (ENV-overridable). Only applies to
+    # actual LLM calls; shortcuts are free.
     used = await cache.qa_count_since(google_sub, _today_kst_iso())
     if used >= QA_DAILY_LIMIT:
         raise HTTPException(
@@ -343,17 +501,22 @@ async def ask_stock(
     if req_model and user.get("is_admin"):
         model = req_model
 
-    # Retrieval: top-K by FTS, fall back to recency.
-    entries = await cache.search_wiki(stock_code, question, limit=QA_CONTEXT_ENTRIES)
+    # Retrieval sized by question complexity. Shallow questions skip
+    # big wiki chunks; deep ones get TOP-8 with FTS + recency fallback.
+    entries = await cache.search_wiki(stock_code, question, limit=plan["wiki_limit"])
     source_ids = [e["id"] for e in entries]
     wiki_block = _build_qa_context(entries) if entries else "(요약된 리포트 없음)"
     stock_block = await _load_stock_summary(stock_code)
 
-    # Best-effort enrichment. All three are bounded and cached; failures
-    # degrade gracefully to the prior behavior.
-    macro_block = await _load_macro_context()
-    news_items = await _fetch_recent_news(stock_code, limit=6)
-    news_block = _format_news_block(news_items)
+    # Macro / news only when the question signals they're relevant, or
+    # on deep questions. Saves ~600-1200 tokens for the common shallow
+    # query and avoids a Naver HTTP round-trip on the hot path.
+    macro_block = await _load_macro_context() if plan["include_macro"] else ""
+    if plan["include_news"]:
+        news_items = await _fetch_recent_news(stock_code, limit=6)
+        news_block = _format_news_block(news_items)
+    else:
+        news_block = ""
 
     prompt_sections = [f"## 종목\n{stock_block}"]
     if macro_block:
