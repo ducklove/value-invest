@@ -27,9 +27,15 @@ TimeoutStartSec=90s
 # default _AI_DEFAULT_MODEL (Qwen 3.6 Plus) has always-on chain-of-thought,
 # which is wasted on "read this report and emit bullets". Gemma 4 31B
 # instruct: 140+ language support, 256K context, ~70% cheaper, dense
-# (predictable) architecture. Q&A and portfolio AI still use the default
-# reasoning-capable model.
+# (predictable) architecture.
 Environment="WIKI_MODEL=google/gemma-4-31b-it"
+# Per-stock Q&A is latency-sensitive — the user stares at a blank
+# answer box while the model thinks. Always-on reasoning models add
+# visible overhead for little quality gain once retrieval context is
+# already provided. Use Gemma 4 31B here too. Portfolio AI analysis
+# stays on the reasoning model since that task benefits from
+# chain-of-thought over cross-holding data.
+Environment="WIKI_QA_MODEL=google/gemma-4-31b-it"
 
 # --- Security hardening ---------------------------------------------------
 # A runaway WebSocket loop or yfinance retry storm must not OOM the Pi and

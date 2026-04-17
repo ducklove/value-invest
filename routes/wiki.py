@@ -163,7 +163,11 @@ async def ask_stock(
     from routes import portfolio as pf_mod
     if not pf_mod._OPENROUTER_KEY:
         raise HTTPException(status_code=500, detail="AI API 키가 설정되지 않았습니다.")
-    model = pf_mod._AI_DEFAULT_MODEL
+    # Resolution order: admin payload override → WIKI_QA_MODEL env →
+    # _AI_DEFAULT_MODEL (the reasoning model used by portfolio analysis).
+    # Q&A is latency-sensitive for users, so a non-reasoning instruct
+    # model (e.g. Gemma 4 31B) usually fits better than a thinking model.
+    model = os.environ.get("WIKI_QA_MODEL") or pf_mod._AI_DEFAULT_MODEL
     if req_model and user.get("is_admin"):
         model = req_model
 
