@@ -722,6 +722,8 @@ async def fetch_market_data(
         target_years,
     )
 
+    from datetime import date as _date
+    _current_year = _date.today().year
     results = []
     for year in target_years:
         close_price = close_by_year.get(year)
@@ -729,7 +731,12 @@ async def fetch_market_data(
         bps = normalized_financials.get(year, {}).get("bps")
         shares = shares_by_year.get(year)
         dps = dividends_by_year.get(year)
-        if dps is None and close_price is not None:
+        # For past years where upstream reported no dividend events, treat
+        # as explicit zero dividend. For the current / future year we
+        # genuinely don't know yet — keep None so the frontend falls back
+        # to the latest year that DOES have data (otherwise the "배당수익률"
+        # card reads 0.00% every year until the first payout is recorded).
+        if dps is None and close_price is not None and year < _current_year:
             dps = 0.0
         results.append(
             {
