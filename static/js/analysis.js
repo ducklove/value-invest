@@ -1108,7 +1108,7 @@ function getRecommBadge(recomm) {
 function renderReportsTable(reports, limit) {
   const tbody = document.getElementById('reportsBody');
   const slice = reports.slice(0, limit);
-  tbody.innerHTML = slice.map(r => {
+  tbody.innerHTML = slice.map((r, idx) => {
     const safeTitle = escapeHtml(r.title);
     const safeSummary = r.summary ? `<div class="report-summary">${escapeHtml(r.summary)}</div>` : '';
     const safeAnalyst = escapeHtml(r.analyst);
@@ -1119,18 +1119,65 @@ function renderReportsTable(reports, limit) {
       ? `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>`
       : safeTitle;
     const safeReadHref = safeExternalUrl(r.source_url);
-    const linkNote = safeReadHref
-      ? `<div class="report-link-note"><a href="${safeReadHref}" target="_blank" rel="noopener noreferrer">네이버 리서치 본문 페이지</a></div>`
+    // If we have an LLM summary for this exact PDF, offer a toggle just
+    // before the 본문 페이지 link. Match is by pdf_url so the frontend
+    // doesn't need to know about sha1.
+    const wikiEntry = r.pdf_url ? _wikiByPdfUrl.get(r.pdf_url) : null;
+    const summaryToggle = wikiEntry
+      ? `<a href="#" class="report-summary-toggle" data-report-idx="${idx}">요약 내용 보기</a>`
+      : '';
+    const linkParts = [];
+    if (summaryToggle) linkParts.push(summaryToggle);
+    if (safeReadHref) linkParts.push(`<a href="${safeReadHref}" target="_blank" rel="noopener noreferrer">네이버 리서치 본문 페이지</a>`);
+    const linkNote = linkParts.length
+      ? `<div class="report-link-note">${linkParts.join('<span class="report-link-sep"> · </span>')}</div>`
       : '';
     const targetPrc = r.target_price ? Number(r.target_price.replace(/,/g, '')).toLocaleString() + '원' : '-';
-    return `<tr>
+    const mainRow = `<tr class="report-row" data-report-idx="${idx}">
       <td class="report-date">${safeDate}</td>
       <td class="report-firm">${safeFirm}</td>
       <td class="report-title">${titleLink}${safeSummary}${linkNote}<div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${safeAnalyst}</div></td>
       <td>${getRecommBadge(escapeHtml(r.recommendation))}</td>
       <td class="report-target">${escapeHtml(targetPrc)}</td>
     </tr>`;
+    // Hidden companion row — populated on first click. Span all 5 cols.
+    const summaryRow = wikiEntry
+      ? `<tr class="report-summary-row" data-report-idx="${idx}" style="display:none;"><td colspan="5"><div class="report-summary-body" data-report-idx="${idx}"></div></td></tr>`
+      : '';
+    return mainRow + summaryRow;
   }).join('');
+
+  // Wire up the toggles (event delegation would also work; direct binding
+  // here is scoped to the rows we just rendered).
+  tbody.querySelectorAll('.report-summary-toggle').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const idx = a.dataset.reportIdx;
+      const row = tbody.querySelector(`tr.report-summary-row[data-report-idx="${idx}"]`);
+      if (!row) return;
+      const body = row.querySelector('.report-summary-body');
+      const report = slice[Number(idx)];
+      const entry = report && report.pdf_url ? _wikiByPdfUrl.get(report.pdf_url) : null;
+      if (!entry) return;
+      const visible = row.style.display !== 'none';
+      if (visible) {
+        row.style.display = 'none';
+        a.textContent = '요약 내용 보기';
+      } else {
+        // Render markdown lazily on first open; re-renders are cheap
+        // but skipping avoids an allocation spike on bulk expand.
+        if (!body.dataset.rendered) {
+          const md = entry.summary_md || '';
+          body.innerHTML = typeof _renderSafeMarkdown === 'function'
+            ? _renderSafeMarkdown(md)
+            : escapeHtml(md);
+          body.dataset.rendered = '1';
+        }
+        row.style.display = '';
+        a.textContent = '요약 접기';
+      }
+    });
+  });
 
   const moreBtn = document.getElementById('reportsMore');
   moreBtn.style.display = reports.length > limit ? 'block' : 'none';
@@ -1258,25 +1305,19 @@ async function loadReports(stockCode) {
 // --- LLM wiki (per-stock report summaries) --------------------------------
 
 let _wikiLoadId = 0;
+// pdf_url → wiki entry, populated by loadWiki so renderReportsTable can
+// attach '요약 내용 보기' inline to matching rows.
+let _wikiByPdfUrl = new Map();
 
 async function loadWiki(stockCode) {
-  const section = document.getElementById('wikiSection');
-  const loading = document.getElementById('wikiLoading');
-  const empty = document.getElementById('wikiEmpty');
-  const list = document.getElementById('wikiEntries');
   const countEl = document.getElementById('wikiCount');
-  if (!section) return;
 
   // Tag each in-flight load; a newer analyzeStock() call invalidates older
   // ones so we don't flicker stale wiki into a different stock's view.
   const myId = ++_wikiLoadId;
 
-  section.style.display = 'block';
-  empty.style.display = 'none';
-  list.innerHTML = '';
-  loading.style.display = 'block';
-  loading.textContent = '요약을 불러오는 중...';
-  countEl.textContent = '';
+  _wikiByPdfUrl = new Map();
+  if (countEl) countEl.textContent = '';
   // Set up Q&A binding for this stock; safe to call repeatedly.
   _setupWikiQa(stockCode);
   // Clear previous answer.
@@ -1286,35 +1327,24 @@ async function loadWiki(stockCode) {
   if (prevMeta) prevMeta.textContent = '';
 
   try {
-    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/wiki?limit=30`);
+    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/wiki?limit=100`);
     if (myId !== _wikiLoadId) return;
-    if (!resp.ok) {
-      loading.textContent = '요약을 불러오지 못했습니다.';
-      return;
-    }
+    if (!resp.ok) return;
     const data = await resp.json();
     if (myId !== _wikiLoadId) return;
-    loading.style.display = 'none';
     const entries = data.entries || [];
-    countEl.textContent = entries.length ? `(${entries.length}건)` : '';
-    if (!entries.length) {
-      empty.style.display = 'block';
-      return;
-    }
-    list.innerHTML = entries.map(renderWikiEntry).join('');
-    // Bind card toggles after innerHTML.
-    list.querySelectorAll('.wiki-entry-toggle').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const card = btn.closest('.wiki-entry');
-        if (!card) return;
-        card.classList.toggle('expanded');
-        btn.textContent = card.classList.contains('expanded') ? '접기' : '더 보기';
-      });
+    entries.forEach(e => {
+      if (e.pdf_url) _wikiByPdfUrl.set(e.pdf_url, e);
     });
+    if (countEl) countEl.textContent = entries.length ? `· 요약 ${entries.length}건` : '';
+    // If the reports table is already rendered, re-render so the toggles
+    // attach to rows that just got summaries.
+    if (typeof allReports !== 'undefined' && allReports.length) {
+      renderReportsTable(allReports, reportDisplayCount);
+    }
   } catch (err) {
     if (myId !== _wikiLoadId) return;
     console.warn('wiki load failed', err);
-    loading.textContent = '요약을 불러오지 못했습니다.';
   }
 }
 
@@ -1417,35 +1447,3 @@ async function askWikiQuestion() {
   btn.textContent = '질문';
 }
 
-function renderWikiEntry(e) {
-  const date = e.report_date || '';
-  const firm = e.firm || '';
-  const title = e.title || '(제목 없음)';
-  const rec = (e.recommendation || '').trim();
-  const tp = e.target_price
-    ? Number(e.target_price).toLocaleString(undefined, { maximumFractionDigits: 0 })
-    : '';
-  const recClass = rec.toUpperCase().includes('BUY')
-    ? 'rec-buy'
-    : rec.toUpperCase().includes('SELL')
-    ? 'rec-sell'
-    : 'rec-hold';
-  const summaryHtml = e.summary_md && typeof _renderSafeMarkdown === 'function'
-    ? _renderSafeMarkdown(e.summary_md)
-    : escapeHtml(e.summary_md || '');
-  const hasBody = !!(e.summary_md && e.summary_md.trim());
-  return `
-    <div class="wiki-entry">
-      <div class="wiki-entry-head">
-        <div class="wiki-entry-meta">
-          <span class="wiki-entry-date">${escapeHtml(date)}</span>
-          <span class="wiki-entry-firm">${escapeHtml(firm)}</span>
-          ${rec ? `<span class="wiki-entry-rec ${recClass}">${escapeHtml(rec)}</span>` : ''}
-          ${tp ? `<span class="wiki-entry-tp">TP ${escapeHtml(tp)}</span>` : ''}
-        </div>
-        <div class="wiki-entry-title">${escapeHtml(title)}</div>
-      </div>
-      ${hasBody ? `<div class="wiki-entry-body">${summaryHtml}</div>` : ''}
-      ${hasBody ? `<button class="wiki-entry-toggle" type="button">더 보기</button>` : ''}
-    </div>`;
-}

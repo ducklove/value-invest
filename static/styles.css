@@ -1151,62 +1151,33 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .wiki-stats .ws-num { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .wiki-stats { display: none; } }
 
-/* === LLM wiki section (analysis page) === */
-.wiki-section {
-  margin-top: 32px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
+/* === Wiki count chip shown inside reports section header === */
+.wiki-count {
+  font-size: 12px; color: var(--text-secondary); font-weight: normal;
+  margin-left: 4px;
 }
-.wiki-header h2 { margin: 0 0 4px 0; font-size: 18px; }
-.wiki-count { font-size: 13px; color: var(--text-secondary); font-weight: normal; margin-left: 6px; }
-.wiki-note { font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
-.wiki-loading, .wiki-empty {
-  padding: 18px 8px; text-align: center; color: var(--text-secondary); font-size: 13px;
+
+/* === Inline LLM summary (expanded under a broker-report row) === */
+.report-link-sep { opacity: 0.5; }
+.report-summary-toggle {
+  color: var(--accent, #2563eb); text-decoration: none; font-weight: 500;
 }
-.wiki-entries { display: flex; flex-direction: column; gap: 10px; }
-.wiki-entry {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
-  background: var(--card-bg, transparent);
+.report-summary-toggle:hover { text-decoration: underline; }
+.report-summary-row > td {
+  padding: 14px 18px;
+  background: rgba(148, 163, 184, 0.08);
+  border-top: 1px dashed var(--border);
 }
-.wiki-entry-head { display: flex; flex-direction: column; gap: 4px; }
-.wiki-entry-meta {
-  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-  font-size: 11px; color: var(--text-secondary);
+.report-summary-body { font-size: 13px; line-height: 1.6; }
+.report-summary-body h1, .report-summary-body h2 { font-size: 14px; margin: 10px 0 4px; }
+.report-summary-body h3 {
+  font-size: 13px; margin: 10px 0 4px; color: var(--text-secondary);
+  font-weight: 700;
 }
-.wiki-entry-date { font-variant-numeric: tabular-nums; }
-.wiki-entry-firm { font-weight: 600; color: var(--text); }
-.wiki-entry-rec {
-  padding: 1px 6px; border-radius: 4px; font-weight: 600; font-size: 10px;
-}
-.wiki-entry-rec.rec-buy { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
-.wiki-entry-rec.rec-sell { background: rgba(37, 99, 235, 0.12); color: #2563eb; }
-.wiki-entry-rec.rec-hold { background: rgba(148, 163, 184, 0.18); color: #64748b; }
-[data-theme="dark"] .wiki-entry-rec.rec-buy { background: rgba(252, 165, 165, 0.12); color: #fca5a5; }
-[data-theme="dark"] .wiki-entry-rec.rec-sell { background: rgba(147, 197, 253, 0.12); color: #93c5fd; }
-.wiki-entry-tp { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
-.wiki-entry-title { font-size: 14px; font-weight: 600; margin-top: 2px; }
-.wiki-entry-body {
-  margin-top: 10px; font-size: 13px; line-height: 1.55;
-  max-height: 160px; overflow: hidden; position: relative;
-}
-.wiki-entry-body::after {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 28px;
-  background: linear-gradient(transparent, var(--card-bg, var(--bg, #fff)));
-}
-.wiki-entry.expanded .wiki-entry-body { max-height: none; }
-.wiki-entry.expanded .wiki-entry-body::after { display: none; }
-.wiki-entry-body h1, .wiki-entry-body h2 { font-size: 14px; margin: 10px 0 4px; }
-.wiki-entry-body h3 { font-size: 13px; margin: 8px 0 4px; color: var(--text-secondary); }
-.wiki-entry-body ul { margin: 6px 0 6px 18px; padding: 0; }
-.wiki-entry-body li { margin: 2px 0; }
-.wiki-entry-body p { margin: 4px 0; }
-.wiki-entry-toggle {
-  margin-top: 6px; background: transparent; border: none;
-  color: var(--accent, #2563eb); font-size: 12px; padding: 2px 0; cursor: pointer;
-}
-.wiki-entry-toggle:hover { text-decoration: underline; }
+.report-summary-body ul { margin: 6px 0 6px 18px; padding: 0; }
+.report-summary-body li { margin: 3px 0; }
+.report-summary-body p { margin: 6px 0; }
+.report-summary-body strong { color: var(--text); }
 
 .wiki-qa {
   margin: 8px 0 20px;

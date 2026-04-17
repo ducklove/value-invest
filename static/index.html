@@ -126,34 +126,6 @@ function trackEvent(name, params = {}) {
     <p>종목코드 또는 회사명으로 검색하면 가치투자 지표를 분석합니다.</p>
   </div>
 
-  <div class="wiki-section" id="wikiSection" style="display:none;">
-    <div class="wiki-header">
-      <h2>LLM 요약 위키 <span class="wiki-count" id="wikiCount"></span></h2>
-      <div class="wiki-note">증권사 리포트 PDF를 LLM으로 요약한 내용입니다. 배경에서 자동으로 계속 수집됩니다.</div>
-    </div>
-
-    <div class="wiki-qa" id="wikiQa">
-      <div class="wiki-qa-head">
-        <label for="wikiQaInput" class="wiki-qa-label">이 종목에 대해 질문하기</label>
-        <div class="wiki-qa-hint" id="wikiQaHint">로그인하면 LLM에게 직접 질문할 수 있습니다.</div>
-      </div>
-      <textarea id="wikiQaInput" class="wiki-qa-input" rows="2"
-        placeholder="예: 최근 HBM 매출 전망과 주요 리스크는 무엇인가요?"></textarea>
-      <div class="wiki-qa-actions">
-        <button id="wikiQaSubmit" class="wiki-qa-btn" type="button">질문</button>
-        <span class="wiki-qa-status" id="wikiQaStatus"></span>
-      </div>
-      <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
-      <div class="wiki-qa-meta" id="wikiQaMeta"></div>
-    </div>
-
-    <div class="wiki-loading" id="wikiLoading" style="display:none;">요약을 불러오는 중...</div>
-    <div class="wiki-entries" id="wikiEntries"></div>
-    <div class="wiki-empty" id="wikiEmpty" style="display:none;">
-      아직 요약된 리포트가 없습니다. 잠시 후 자동으로 수집됩니다.
-    </div>
-  </div>
-
   <div class="section-heading-row" id="weeklySectionRow" style="display:none;">
     <h2 class="section-heading" id="weeklySectionTitle">밸류에이션</h2>
     <div class="valuation-period-btns" id="valuationPeriodBtns">
@@ -168,8 +140,24 @@ function trackEvent(name, params = {}) {
   <div class="charts-grid" id="chartsGrid" style="display:none;"></div>
 
   <div class="reports-section" id="reportsSection">
-    <h2>증권사 리포트 <span class="report-count" id="reportCount"></span></h2>
-    <div class="report-note">제목을 누르면 네이버 금융 리서치의 공개 PDF 원문이 열립니다. 아래 작은 링크는 본문 페이지입니다.</div>
+    <h2>증권사 리포트 <span class="report-count" id="reportCount"></span> <span class="wiki-count" id="wikiCount" title="LLM 요약이 완료된 리포트 수"></span></h2>
+    <div class="report-note">제목을 누르면 네이버 금융 리서치의 공개 PDF 원문이 열립니다. 각 행의 <strong>요약 내용 보기</strong>를 누르면 LLM이 생성한 한국어 요약이 펼쳐집니다.</div>
+
+    <div class="wiki-qa" id="wikiQa">
+      <div class="wiki-qa-head">
+        <label for="wikiQaInput" class="wiki-qa-label">이 종목에 대해 질문하기</label>
+        <div class="wiki-qa-hint" id="wikiQaHint">로그인하면 수집된 요약 리포트를 근거로 LLM이 답변합니다.</div>
+      </div>
+      <textarea id="wikiQaInput" class="wiki-qa-input" rows="2"
+        placeholder="예: 최근 HBM 매출 전망과 주요 리스크는 무엇인가요?"></textarea>
+      <div class="wiki-qa-actions">
+        <button id="wikiQaSubmit" class="wiki-qa-btn" type="button">질문</button>
+        <span class="wiki-qa-status" id="wikiQaStatus"></span>
+      </div>
+      <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
+      <div class="wiki-qa-meta" id="wikiQaMeta"></div>
+    </div>
+
     <div class="reports-table-wrap">
       <div class="reports-loading" id="reportsLoading">리포트를 불러오는 중...</div>
       <table class="reports-table" id="reportsTable" style="display:none;">

@@ -1631,13 +1631,19 @@ async def save_wiki_entry(entry: dict) -> int:
 
 async def get_wiki_entries(stock_code: str, limit: int = 20) -> list[dict]:
     db = await get_db()
+    # LEFT JOIN report_pdf_cache so each entry carries the PDF URL it was
+    # summarized from. Frontend uses this to attach summaries to matching
+    # rows in the broker-report table (and keep the Q&A Retrieval layer
+    # unaffected — only an extra string per row).
     cursor = await db.execute(
-        """SELECT id, stock_code, source_type, source_ref, report_date, firm,
-                  title, recommendation, target_price, summary_md, key_points_md,
-                  model, created_at
-           FROM stock_wiki_entries
-           WHERE stock_code = ?
-           ORDER BY COALESCE(report_date, created_at) DESC
+        """SELECT w.id, w.stock_code, w.source_type, w.source_ref, w.report_date,
+                  w.firm, w.title, w.recommendation, w.target_price,
+                  w.summary_md, w.key_points_md, w.model, w.created_at,
+                  p.pdf_url AS pdf_url
+           FROM stock_wiki_entries w
+           LEFT JOIN report_pdf_cache p ON p.pdf_sha1 = w.source_ref
+           WHERE w.stock_code = ?
+           ORDER BY COALESCE(w.report_date, w.created_at) DESC
            LIMIT ?""",
         (stock_code, limit),
     )
