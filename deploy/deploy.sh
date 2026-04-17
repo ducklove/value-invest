@@ -65,18 +65,14 @@ if grep -qE '^requirements(-dev)?\.txt$' <<<"$CHANGED_FILES"; then
   python3 -m pip install "${PIP_FLAGS[@]}" --upgrade -r requirements.txt
 fi
 
-# --- Tests (non-blocking) ---------------------------------------------------
-# Failures are logged but do not abort the deploy: the running service is the
-# ultimate signal, and healthz below catches real regressions. Re-enable
-# gating by removing the `|| TEST_RC=$?` pattern once tests are stable in
-# the server env.
-log "Running tests (warnings only)"
+# --- Tests ------------------------------------------------------------------
+# Blocking: a test failure aborts the deploy via the ERR trap, which rolls
+# the checkout back to OLD_SHA. The previous non-blocking behaviour was a
+# stopgap while the `_conn` singleton leak in the test fixtures made 32
+# tests spuriously fail; that's been fixed.
+log "Running tests"
 python3 -m pip install "${PIP_FLAGS[@]}" --quiet -r requirements-dev.txt
-TEST_RC=0
-python3 -m pytest -q || TEST_RC=$?
-if (( TEST_RC != 0 )); then
-  log "WARNING: pytest exited $TEST_RC — continuing deploy, inspect logs above"
-fi
+python3 -m pytest -q
 
 # Past this point, rolling the checkout back would desync from a restarted
 # service, so clear the trap. Health-check failure is reported but the new

@@ -80,7 +80,7 @@ class AnalyzeTests(unittest.TestCase):
         weekly = [{"date": "2023-12-29", "close_price": 10000, "per": 20.0, "pbr": 3.33, "dividend_yield": 1.0}]
         result = analyze(fin, mkt, weekly)
         self.assertIn("weekly_indicators", result)
-        weekly_price = result["weekly_indicators"]["주간 주가"]
+        weekly_price = result["weekly_indicators"]["주가"]
         self.assertEqual(len(weekly_price), 1)
         self.assertEqual(weekly_price[0]["value"], 10000)
 

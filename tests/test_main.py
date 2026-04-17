@@ -39,7 +39,8 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_login_page_redirects_authenticated_user(self):
         request = _request("/login")
-        with patch("routes.auth.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):
+        with patch("routes.auth.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("routes.auth.auth_service.is_enabled", return_value=True):
             response = await auth.login_page(request)
         self.assertEqual(response.status_code, 303)
 

@@ -65,15 +65,20 @@ if [[ $rc -ne 0 || "$out" != "ok" ]]; then
   exit 2
 fi
 
-# Off-site sync (if configured). Fails loudly if rclone is missing or
-# remote is misconfigured; local backup still succeeded by this point.
+# Off-site sync option A: email attachment (simplest for DBs < ~20MB).
+# Set BACKUP_EMAIL_TO / BACKUP_EMAIL_USER / BACKUP_EMAIL_APP_PW in the
+# systemd override to enable. Sends today's backup only.
+if [[ -n "${BACKUP_EMAIL_TO:-}" ]]; then
+  python3 "$APP_DIR/scripts/email_backup.py" "$daily_out"
+fi
+
+# Off-site sync option B: rclone (any cloud provider rclone supports).
+# Set BACKUP_RCLONE_REMOTE to a configured remote like "gdrive:path".
 if [[ -n "$BACKUP_RCLONE_REMOTE" ]]; then
   if ! command -v rclone >/dev/null; then
     echo "ERROR: BACKUP_RCLONE_REMOTE set but rclone not installed" >&2
     exit 3
   fi
-  # One-way mirror local tree → remote. --fast-list keeps API calls low;
-  # --bwlimit caps upload rate so home bandwidth isn't saturated.
   rclone sync "$BACKUP_DIR/" "$BACKUP_RCLONE_REMOTE/" \
     --config "$RCLONE_CONFIG" \
     --fast-list --bwlimit 2M --log-level NOTICE \
