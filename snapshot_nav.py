@@ -113,6 +113,18 @@ async def _save_gold_close():
         logger.warning("Failed to save gold close: %s", e)
 
 
+async def _update_benchmark_history():
+    """Append yesterday/today closes to benchmark_daily for the NAV chart
+    overlays (KOSPI / SP500 / GOLD). Best-effort — a yfinance outage just
+    delays one row; must not block the snapshot itself."""
+    try:
+        import benchmark_history
+        written = await benchmark_history.update_benchmark_today()
+        logger.info("Benchmark history increment: %s", written)
+    except Exception as e:
+        logger.warning("Benchmark history increment failed: %s", e)
+
+
 _fx_usdkrw: float | None = None
 
 
@@ -154,6 +166,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", google_sub[:8], e)
     await _save_gold_close()
+    await _update_benchmark_history()
     if manage_db:
         await cache.close_db()
 

@@ -301,6 +301,21 @@ async def init_db():
             VALUES (new.id, new.stock_code, new.title, new.summary_md, new.key_points_md);
         END;
 
+        -- Daily closing prices for market benchmarks we overlay on the NAV
+        -- chart (KOSPI / SP500 / GOLD / ...). Keyed by (code, date) so a
+        -- re-download is a no-op upsert. Populated by benchmark_history —
+        -- lazy backfill on first query + nightly increment from snapshot_nav.
+        CREATE TABLE IF NOT EXISTS benchmark_daily (
+            code        TEXT NOT NULL,
+            date        TEXT NOT NULL,
+            close       REAL NOT NULL,
+            source      TEXT NOT NULL,
+            fetched_at  TEXT NOT NULL,
+            PRIMARY KEY (code, date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_benchmark_daily_code_date
+            ON benchmark_daily(code, date);
+
         -- Q&A history: audit log + per-user rate limit source.
         CREATE TABLE IF NOT EXISTS stock_qa_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1740,6 +1755,76 @@ async def get_wiki_stats() -> dict:
         "pdfs_cached": int(pdf_row["n"] or 0) if pdf_row else 0,
         "latest_entry_date": (row["latest"] if row else None) or None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Benchmark daily series (KOSPI / SP500 / GOLD / ...)
+# ---------------------------------------------------------------------------
+
+async def save_benchmark_rows(code: str, rows: list[dict], source: str = "yfinance") -> int:
+    """Upsert daily rows for a benchmark code.
+
+    rows: [{"date": "YYYY-MM-DD", "close": float}, ...]
+    Returns number of rows written. Safe to call with overlapping ranges —
+    the (code, date) PK makes each call idempotent.
+    """
+    if not rows:
+        return 0
+    # Match the rest of this module — plain local-time ISO (no TZ suffix).
+    fetched_at = datetime.now().isoformat(timespec="seconds")
+    db = await get_db()
+    await db.executemany(
+        """INSERT INTO benchmark_daily (code, date, close, source, fetched_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(code, date) DO UPDATE SET
+               close=excluded.close,
+               source=excluded.source,
+               fetched_at=excluded.fetched_at""",
+        [(code, r["date"], float(r["close"]), source, fetched_at) for r in rows if r.get("close") is not None],
+    )
+    await db.commit()
+    return len(rows)
+
+
+async def get_benchmark_rows(code: str, start: str | None = None, end: str | None = None) -> list[dict]:
+    """Read {date, close} rows for a benchmark code, optionally bounded by
+    inclusive [start, end] (YYYY-MM-DD). Ordered by date ascending."""
+    db = await get_db()
+    clauses = ["code = ?"]
+    params: list = [code]
+    if start:
+        clauses.append("date >= ?")
+        params.append(start)
+    if end:
+        clauses.append("date <= ?")
+        params.append(end)
+    sql = f"SELECT date, close FROM benchmark_daily WHERE {' AND '.join(clauses)} ORDER BY date ASC"
+    cursor = await db.execute(sql, params)
+    return [{"date": r["date"], "close": r["close"]} for r in await cursor.fetchall()]
+
+
+async def get_benchmark_last_date(code: str) -> str | None:
+    """Return the latest stored date for a code, or None if table is empty
+    for that code. Used to compute the incremental fetch window."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT MAX(date) AS d FROM benchmark_daily WHERE code = ?",
+        (code,),
+    )
+    row = await cursor.fetchone()
+    return row["d"] if row and row["d"] else None
+
+
+async def get_benchmark_earliest_date(code: str) -> str | None:
+    """Return the earliest stored date for a code. Used by lazy backfill to
+    decide whether the request's `start` predates what we have on disk."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT MIN(date) AS d FROM benchmark_daily WHERE code = ?",
+        (code,),
+    )
+    row = await cursor.fetchone()
+    return row["d"] if row and row["d"] else None
 
 
 async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:

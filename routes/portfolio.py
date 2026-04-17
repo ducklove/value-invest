@@ -1267,31 +1267,28 @@ async def get_nav_history(request: Request):
 
 @router.get("/api/portfolio/benchmark-history")
 async def get_benchmark_history(code: str = Query(...), start: str = Query(...)):
-    """Return daily close prices for a benchmark index from yfinance."""
-    import yfinance as yf
-    from datetime import date
+    """Return daily close prices for a benchmark index, served from the
+    local `benchmark_daily` table. Performs a one-shot lazy backfill
+    against yfinance the first time a code is requested, or when the
+    requested `start` predates what we currently have.
 
-    _YF_TICKER = {"KOSPI": "^KS11", "SP500": "^GSPC", "GOLD": "GC=F"}
-    ticker = _YF_TICKER.get(code.upper())
-    if not ticker:
+    After that, the nightly `snapshot_nav.update_benchmark_today()` hook
+    keeps the table fresh so normal requests hit SQLite only (~ms) and
+    are immune to yfinance outages.
+    """
+    import benchmark_history
+
+    code_up = code.upper()
+    if code_up not in benchmark_history.YF_TICKER:
         raise HTTPException(status_code=400, detail=f"Unknown benchmark: {code}")
 
-    try:
-        def _download():
-            df = yf.download(ticker, start=start, end=date.today().isoformat(), progress=False, auto_adjust=True)
-            if df.empty:
-                return []
-            # Handle MultiIndex columns from yfinance
-            close = df["Close"]
-            if hasattr(close, "columns"):
-                close = close.iloc[:, 0]
-            return [{"date": d.strftime("%Y-%m-%d"), "close": round(float(v), 2)} for d, v in close.items() if not (v != v)]
+    # Lazy backfill — no-op if DB already covers `start` or further back.
+    # Failures here are swallowed (logged) inside backfill_benchmark; we
+    # still try to serve whatever rows we have rather than 502-ing.
+    await benchmark_history.backfill_benchmark(code_up, start)
 
-        result = await asyncio.get_event_loop().run_in_executor(None, _download)
-        return result
-    except Exception as exc:
-        logger.warning("Benchmark history fetch failed (%s): %s", code, exc)
-        raise HTTPException(status_code=502, detail="벤치마크 데이터를 가져올 수 없습니다.")
+    rows = await cache.get_benchmark_rows(code_up, start=start)
+    return rows
 
 
 @router.get("/api/portfolio/intraday")
