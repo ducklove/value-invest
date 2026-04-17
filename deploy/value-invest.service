@@ -22,6 +22,15 @@ RestartSec=3
 # take ~45s before the first ready/ping arrives).
 TimeoutStartSec=90s
 
+# --- App configuration ---------------------------------------------------
+# Bulk wiki PDF summarization uses a non-reasoning instruct model — the
+# default _AI_DEFAULT_MODEL (Qwen 3.6 Plus) has always-on chain-of-thought,
+# which is wasted on "read this report and emit bullets". Gemma 4 31B
+# instruct: 140+ language support, 256K context, ~70% cheaper, dense
+# (predictable) architecture. Q&A and portfolio AI still use the default
+# reasoning-capable model.
+Environment="WIKI_MODEL=google/gemma-4-31b-it"
+
 # --- Security hardening ---------------------------------------------------
 # A runaway WebSocket loop or yfinance retry storm must not OOM the Pi and
 # take sshd down with it. Most of these are cheap sandbox tweaks; the
