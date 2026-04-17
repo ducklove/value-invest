@@ -1,0 +1,15 @@
+[Unit]
+Description=Value Invest — failure notifier for %i
+# Not tied to network target etc. — this runs when a failure already happened.
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+# Read NTFY_TOPIC from a user-provided drop-in override:
+#   systemctl edit value-invest-notify@.service
+#   [Service]
+#   Environment="NTFY_TOPIC=your-private-topic-name"
+ExecStart=/bin/bash /home/cantabile/Works/value_invest/scripts/notify_failure.sh %i
+# Keep the process from lingering.
+TimeoutStartSec=30s

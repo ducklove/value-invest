@@ -15,6 +15,7 @@ UNIT_DST="${UNIT_DST:-/etc/systemd/system}"
 # Units maintained in-repo. Keep value-invest.service last so the main app
 # restart picks up any dependency timer changes first.
 REPO_UNITS=(
+  "value-invest-notify@.service"
   "nps-snapshot.service"
   "nps-snapshot.timer"
   "portfolio-intraday.service"

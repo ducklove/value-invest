@@ -1,5 +1,6 @@
 [Unit]
 Description=Value Invest — daily SQLite backup
+OnFailure=value-invest-notify@%n.service
 
 [Service]
 Type=oneshot

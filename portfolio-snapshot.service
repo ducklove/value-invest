@@ -1,6 +1,7 @@
 [Unit]
 Description=Portfolio daily NAV snapshot
 After=network.target
+OnFailure=value-invest-notify@%n.service
 
 [Service]
 Type=oneshot

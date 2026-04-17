@@ -1,6 +1,7 @@
 [Unit]
 Description=Value Invest FastAPI over HTTPS
 After=network.target
+OnFailure=value-invest-notify@%n.service
 
 [Service]
 # notify: main.py calls sd_notify("READY=1") after init finishes and
