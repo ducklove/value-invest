@@ -46,6 +46,20 @@ function getLatestIndicatorValue(series) {
   return Number(entries[entries.length - 1].value);
 }
 
+// Walks backward through a series and returns the latest entry whose
+// value is strictly positive. Used for trailing dividend so the card
+// doesn't read 0% just because the current year hasn't had a payout
+// recorded yet (e.g., it's January and last year's dividend was
+// declared but no distribution yet).
+function getLatestPositiveValue(series) {
+  const arr = series || [];
+  for (let i = arr.length - 1; i >= 0; i -= 1) {
+    const v = Number(arr[i]?.value);
+    if (Number.isFinite(v) && v > 0) return v;
+  }
+  return null;
+}
+
 function formatMetricNumber(value, suffix = '') {
   return value === null || value === undefined || !Number.isFinite(value)
     ? 'N/A'
@@ -75,13 +89,17 @@ function getCurrentValuationMetrics(indicators, quoteSnapshot) {
   }
 
   const latestEps = getLatestIndicatorValue(indicators['EPS (원)']);
-  const latestDps = getLatestIndicatorValue(indicators['주당배당금 (원)']);
+  // Use the most recent *positive* DPS so companies that pay dividends
+  // don't read as 0% when the current year's payout hasn't been
+  // recorded yet. Legitimate non-dividend-payers return null here
+  // (all-zero series) and the card renders 'N/A'.
+  const trailingDps = getLatestPositiveValue(indicators['주당배당금 (원)']);
   const latestBps = getLatestDerivedBps(indicators);
 
   return {
     per: latestEps && latestEps > 0 ? currentPrice / latestEps : null,
     pbr: latestBps && latestBps > 0 ? currentPrice / latestBps : null,
-    dividendYield: latestDps !== null ? (latestDps / currentPrice) * 100 : null,
+    dividendYield: trailingDps !== null ? (trailingDps / currentPrice) * 100 : null,
   };
 }
 

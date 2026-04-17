@@ -317,15 +317,40 @@ async def _try_shortcut(stock_code: str, question: str) -> str | None:
     # Pre-fetch common data lazily (only when we're about to match).
     corp_name = await cache.get_corp_name(stock_code) or stock_code
     db = await cache.get_db()
+    # Pull last 5 rows so we can look past the current (partial / empty)
+    # year for each field independently. A 2026 row typically has
+    # close_price + market_cap but nulls for EPS / PER / dividend until
+    # the fiscal year closes.
     mkt_cur = await db.execute(
         """SELECT year, close_price, per, pbr, eps, bps,
                   dividend_per_share, dividend_yield, market_cap
            FROM market_data WHERE stock_code = ?
-           ORDER BY year DESC LIMIT 1""",
+           ORDER BY year DESC LIMIT 5""",
         (stock_code,),
     )
-    mkt_row = await mkt_cur.fetchone()
-    mkt = dict(mkt_row) if mkt_row else {}
+    mkt_rows = [dict(r) for r in await mkt_cur.fetchall()]
+
+    def _latest(field: str, *, positive_only: bool = False):
+        """Return the most recent row's value for a field, skipping rows
+        where the value is missing (and optionally, zero)."""
+        for r in mkt_rows:
+            v = r.get(field)
+            if v is None:
+                continue
+            if positive_only and (not isinstance(v, (int, float)) or v <= 0):
+                continue
+            return v
+        return None
+
+    def _latest_year(field: str, *, positive_only: bool = False):
+        for r in mkt_rows:
+            v = r.get(field)
+            if v is None:
+                continue
+            if positive_only and (not isinstance(v, (int, float)) or v <= 0):
+                continue
+            return r.get("year")
+        return None
 
     # Live quote via warm cache; may be None if market isn't trading yet
     # or the quote provider failed — in that case skip quote-dependent
@@ -352,40 +377,48 @@ async def _try_shortcut(stock_code: str, question: str) -> str | None:
 
     # --- Market cap ---
     if matches("시가총액", "시총"):
-        mc = mkt.get("market_cap")
+        mc = _latest("market_cap", positive_only=True)
         if mc:
-            return f"**{corp_name}**의 최근 연말 기준 시가총액은 **{_fmt_krw(mc)}원**이에요. (가장 최근 연간 마감 기준)"
+            return f"**{corp_name}**의 최근 시가총액은 **{_fmt_krw(mc)}원**이에요."
 
     # --- PER / PBR / EPS / BPS ---
     if matches("per몇", "per은", "per이"):
-        per = mkt.get("per")
+        per = _latest("per", positive_only=True)
+        year = _latest_year("per", positive_only=True)
         if per is not None:
-            return f"**{corp_name}**의 최근 연말 기준 **PER**은 **{per:.1f}배**입니다."
+            return f"**{corp_name}**의 {year}년 기준 **PER**은 **{per:.1f}배**입니다."
 
     if matches("pbr몇", "pbr은", "pbr이"):
-        pbr = mkt.get("pbr")
+        pbr = _latest("pbr", positive_only=True)
+        year = _latest_year("pbr", positive_only=True)
         if pbr is not None:
-            return f"**{corp_name}**의 최근 연말 기준 **PBR**은 **{pbr:.2f}배**입니다."
+            return f"**{corp_name}**의 {year}년 기준 **PBR**은 **{pbr:.2f}배**입니다."
 
     if matches("eps얼마", "eps는", "주당순이익"):
-        eps = mkt.get("eps")
+        eps = _latest("eps", positive_only=True)
+        year = _latest_year("eps", positive_only=True)
         if eps is not None:
-            return f"**{corp_name}**의 최근 **EPS(주당순이익)**는 **{eps:,.0f}원**입니다."
+            return f"**{corp_name}**의 {year}년 **EPS(주당순이익)**는 **{eps:,.0f}원**입니다."
 
     if matches("bps얼마", "bps는", "주당순자산"):
-        bps = mkt.get("bps")
+        bps = _latest("bps", positive_only=True)
+        year = _latest_year("bps", positive_only=True)
         if bps is not None:
-            return f"**{corp_name}**의 최근 **BPS(주당순자산)**는 **{bps:,.0f}원**입니다."
+            return f"**{corp_name}**의 {year}년 **BPS(주당순자산)**는 **{bps:,.0f}원**입니다."
 
     # --- Dividend ---
+    # positive_only=True so a partial current-year row with 0 dividend
+    # (upstream data not yet available) doesn't shadow last year's yield.
     if matches("배당수익률", "배당률"):
-        dy = mkt.get("dividend_yield")
+        dy = _latest("dividend_yield", positive_only=True)
+        year = _latest_year("dividend_yield", positive_only=True)
         if dy is not None:
-            return f"**{corp_name}**의 최근 **배당수익률**은 **{dy:.2f}%**입니다. (연말 기준)"
+            return f"**{corp_name}**의 {year}년 **배당수익률**은 **{dy:.2f}%**입니다."
     if matches("주당배당금", "배당금얼마"):
-        dps = mkt.get("dividend_per_share")
+        dps = _latest("dividend_per_share", positive_only=True)
+        year = _latest_year("dividend_per_share", positive_only=True)
         if dps is not None:
-            return f"**{corp_name}**의 최근 **주당배당금**은 **{dps:,.0f}원**입니다."
+            return f"**{corp_name}**의 {year}년 **주당배당금**은 **{dps:,.0f}원**입니다."
 
     return None
 
