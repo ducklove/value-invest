@@ -3,13 +3,23 @@ Description=Value Invest FastAPI over HTTPS
 After=network.target
 
 [Service]
-Type=simple
+# notify: main.py calls sd_notify("READY=1") after init finishes and
+# sd_notify("WATCHDOG=1") every 10s from _watchdog_loop. With Type=simple
+# none of that had any effect; now systemd waits for READY= before
+# reporting started, and restarts the service if WATCHDOG= pings stop
+# arriving within WatchdogSec (= event-loop hang or process freeze).
+Type=notify
+NotifyAccess=main
+WatchdogSec=30s
 User=cantabile
 Group=cantabile
 WorkingDirectory=/home/cantabile/Works/value_invest
 ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 3691 --ssl-keyfile /etc/letsencrypt/live/cantabile.tplinkdns.com/privkey.pem --ssl-certfile /etc/letsencrypt/live/cantabile.tplinkdns.com/fullchain.pem
 Restart=always
 RestartSec=3
+# Give the watchdog a grace window during startup (corp_codes refresh can
+# take ~45s before the first ready/ping arrives).
+TimeoutStartSec=90s
 
 [Install]
 WantedBy=multi-user.target
