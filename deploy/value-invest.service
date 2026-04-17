@@ -22,5 +22,27 @@ RestartSec=3
 # take ~45s before the first ready/ping arrives).
 TimeoutStartSec=90s
 
+# --- Security hardening ---------------------------------------------------
+# A runaway WebSocket loop or yfinance retry storm must not OOM the Pi and
+# take sshd down with it. Most of these are cheap sandbox tweaks; the
+# memory/CPU caps are the load-shedding insurance.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# App reads LE certs + writes cache.db, cache.db-wal, server logs.
+ReadOnlyPaths=/etc/letsencrypt
+ReadWritePaths=/home/cantabile/Works/value_invest
+# Resource caps. Pi 5 has 8GB; leave >6GB for everything else.
+MemoryMax=1500M
+CPUQuota=180%
+TasksMax=200
+LimitNOFILE=4096
+
 [Install]
 WantedBy=multi-user.target
