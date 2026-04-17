@@ -1136,6 +1136,21 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .admin-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .admin-btn-secondary { margin-left: 4px; font-size: 11px; color: var(--text-secondary); }
 
+/* Wiki stats chip in the top header */
+.wiki-stats {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  white-space: nowrap;
+  margin-left: auto;
+}
+.wiki-stats:empty { display: none; }
+.wiki-stats .ws-sep { opacity: 0.5; margin: 0 4px; }
+.wiki-stats .ws-num { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .wiki-stats { display: none; } }
+
 /* === LLM wiki section (analysis page) === */
 .wiki-section {
   margin-top: 32px;

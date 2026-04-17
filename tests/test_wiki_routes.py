@@ -73,6 +73,18 @@ class WikiListRouteTests(unittest.IsolatedAsyncioTestCase):
         resp2 = await wiki_route.get_stock_wiki("000660", limit=10)
         self.assertEqual(resp2["count"], 1)
 
+    async def test_stats_endpoint_aggregates(self):
+        # Empty state.
+        stats = await wiki_route.get_wiki_stats()
+        self.assertEqual(stats["stocks_covered"], 0)
+        self.assertEqual(stats["total_entries"], 0)
+        # Seed two stocks.
+        await self._seed("005930", n=3)
+        await self._seed("000660", n=2)
+        stats = await wiki_route.get_wiki_stats()
+        self.assertEqual(stats["stocks_covered"], 2)
+        self.assertEqual(stats["total_entries"], 5)
+
 
 def _mk_request() -> Request:
     scope = {

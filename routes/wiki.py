@@ -59,6 +59,13 @@ async def get_stock_wiki(stock_code: str, limit: int = Query(20, ge=1, le=100)):
     }
 
 
+@router.get("/api/wiki/stats")
+async def get_wiki_stats():
+    """Cheap aggregate — how many stocks / reports the wiki covers.
+    Public read, safe to call from the page header on every load."""
+    return await cache.get_wiki_stats()
+
+
 def _build_qa_context(entries: list[dict]) -> str:
     """Render retrieved wiki entries into a compact markdown block for
     inclusion in the prompt. Each entry is tagged with its id so the

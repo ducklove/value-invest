@@ -1715,6 +1715,27 @@ async def save_qa_entry(entry: dict) -> int:
     return cursor.lastrowid
 
 
+async def get_wiki_stats() -> dict:
+    """Aggregate counts for the wiki pipeline — cheap queries, safe to
+    call on every page load. Returns {stocks_covered, total_entries,
+    pdfs_cached, latest_entry_date}."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT COUNT(DISTINCT stock_code) AS stocks, COUNT(*) AS entries, MAX(COALESCE(report_date, created_at)) AS latest FROM stock_wiki_entries",
+    )
+    row = await cursor.fetchone()
+    cursor2 = await db.execute(
+        "SELECT COUNT(*) AS n FROM report_pdf_cache WHERE parse_status = 'parsed'",
+    )
+    pdf_row = await cursor2.fetchone()
+    return {
+        "stocks_covered": int(row["stocks"] or 0) if row else 0,
+        "total_entries": int(row["entries"] or 0) if row else 0,
+        "pdfs_cached": int(pdf_row["n"] or 0) if pdf_row else 0,
+        "latest_entry_date": (row["latest"] if row else None) or None,
+    }
+
+
 async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:
     """Union of (a) any stock in a user portfolio, (b) starred stocks,
     (c) recently-viewed-within-N-days stocks. Used by the ingestion

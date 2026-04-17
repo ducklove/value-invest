@@ -74,8 +74,12 @@ async function initApp() {
   await _mbLoadCatalog();
   await _mbLoadCodes();
   loadMarketSummary();
+  loadWikiStats();
   setInterval(loadMarketSummary, 60_000);
   setInterval(_pollBenchmarkQuotes, 60_000);
+  // Refresh wiki stats every 5 minutes so the badge reflects ongoing
+  // background ingestion without needing a reload.
+  setInterval(loadWikiStats, 5 * 60_000);
   QuoteManager.connect();
   _updateQuoteSubscriptions();
   trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
@@ -128,3 +132,26 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 });
+
+// --- Wiki stats badge in the top header --------------------------------
+async function loadWikiStats() {
+  const el = document.getElementById('wikiStats');
+  if (!el) return;
+  try {
+    const resp = await apiFetch('/api/wiki/stats');
+    if (!resp.ok) return;
+    const d = await resp.json();
+    const stocks = Number(d.stocks_covered || 0);
+    const entries = Number(d.total_entries || 0);
+    if (stocks === 0 && entries === 0) {
+      el.innerHTML = '';
+      return;
+    }
+    // Keep it compact — `<num> 리포트 · <num> 종목`.
+    el.innerHTML = `<span class="ws-num">${entries.toLocaleString()}</span> 리포트`
+      + `<span class="ws-sep">·</span>`
+      + `<span class="ws-num">${stocks.toLocaleString()}</span> 종목`;
+  } catch {
+    // Silent — the badge is optional UX; no error toast.
+  }
+}
