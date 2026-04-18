@@ -741,6 +741,23 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
                 import asyncio
                 await asyncio.sleep(30)
                 continue
+            # Record failure before raising — the process will exit 1 and
+            # systemd's OnFailure hook fires ntfy, but the dashboard also
+            # needs this row to show the failure timeline.
+            try:
+                import observability
+                await observability.record_event(
+                    "snapshot_nps", "scrape_failed",
+                    level="error",
+                    details={
+                        "date": snap_date,
+                        "attempts": MAX_SCRAPE_RETRIES,
+                        "reason": "FnGuide 접근 실패 또는 레이아웃 변경 의심",
+                    },
+                    wait=True,
+                )
+            except Exception:
+                pass
             raise RuntimeError(
                 "NPS scrape returned no holdings after "
                 f"{MAX_SCRAPE_RETRIES} attempts — FnGuide 접근 실패 또는 레이아웃 변경 의심"
@@ -898,6 +915,24 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
         "NPS snapshot saved: date=%s total_value=%.0f nav=%.2f count=%d",
         snap_date, total_value, nav, len(holdings),
     )
+    # Record success so the dashboard shows "last successful NPS tick".
+    # Deliberately runs before close_db() so the detached write — if any —
+    # doesn't race the shutdown.
+    try:
+        import observability
+        await observability.record_event(
+            "snapshot_nps", "tick_ok",
+            level="info",
+            details={
+                "date": snap_date,
+                "total_value": total_value,
+                "nav": round(nav, 4),
+                "holdings_count": len(holdings),
+            },
+            wait=True,
+        )
+    except Exception:
+        pass
     if manage_db:
         await cache.close_db()
 

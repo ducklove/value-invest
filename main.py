@@ -120,6 +120,21 @@ async def lifespan(app: FastAPI):
                 initial_delay_seconds=float(os.environ.get("WIKI_INGEST_INITIAL_DELAY_S", "60")),
             )
         )
+
+    # Observability event-log pruner. system_events is append-only during
+    # normal operation; this loop trims rows older than 30 days every 6
+    # hours plus a row-count safety cap. Cheap — most iterations are a
+    # no-op DELETE.
+    import observability
+    obs_stop = asyncio.Event()
+    obs_task = asyncio.create_task(
+        observability.run_prune_loop(
+            obs_stop,
+            interval_seconds=float(os.environ.get("OBS_PRUNE_INTERVAL_S", str(6 * 3600))),
+            max_age_days=int(os.environ.get("OBS_MAX_AGE_DAYS", "30")),
+            max_rows=int(os.environ.get("OBS_MAX_ROWS", "100000")),
+        )
+    )
     try:
         yield
     finally:
@@ -136,6 +151,11 @@ async def lifespan(app: FastAPI):
                 await asyncio.wait_for(wiki_task, timeout=5.0)
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 wiki_task.cancel()
+        obs_stop.set()
+        try:
+            await asyncio.wait_for(obs_task, timeout=2.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+            obs_task.cancel()
         await kis_ws_manager.stop_all()
         await kis_proxy_client.close_client()
         await cache.close_db()

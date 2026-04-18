@@ -10,6 +10,10 @@
   :root { --bg: #f9fafb; --text-primary: #111827; --text-secondary: #6b7280; --card-bg: #fff; --border: #e5e7eb; --surface: #fff; --hover-bg: #f3f4f6; --color-success: #27ae60; --color-warning: #f39c12; --color-danger: #e74c3c; }
   [data-theme="dark"] { --bg: #111827; --text-primary: #f9fafb; --text-secondary: #9ca3af; --card-bg: #1f2937; --border: #374151; --surface: #1f2937; --hover-bg: #374151; }
   .theme-toggle { position: fixed; top: 12px; right: 16px; background: none; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 16px; }
+  /* Observability — subsystem tiles + event feed + diag form */
+  .admin-event-kv { display: inline-block; padding: 2px 6px; margin-right: 4px; font-size: 11px; font-family: monospace; background: var(--hover-bg); border-radius: 3px; color: var(--text-secondary); }
+  .admin-event-details { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .admin-diag-verdict { padding: 12px; border-left: 3px solid var(--color-success); background: var(--hover-bg); border-radius: 4px; }
 </style>
 </head>
 <body>

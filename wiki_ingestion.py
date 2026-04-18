@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 import httpx
 
 import cache
+import observability
 import report_client
 from routes.reports import _is_allowed_report_pdf_url
 
@@ -475,8 +476,28 @@ async def run_background_loop(
                 stats.get("stocks_processed", 0), stats.get("summarized", 0),
                 stats.get("skipped", 0), stats.get("failed", 0),
             )
+            # Record tick so the admin dashboard can see "last ingest
+            # finished at X, summarized Y new reports". `failed>0` bumps
+            # the level so error filters surface it.
+            await observability.record_event(
+                "wiki_ingestion",
+                "tick_ok" if stats.get("failed", 0) == 0 else "tick_partial",
+                level="info" if stats.get("failed", 0) == 0 else "warning",
+                details={
+                    "stocks_processed": stats.get("stocks_processed", 0),
+                    "summarized": stats.get("summarized", 0),
+                    "skipped": stats.get("skipped", 0),
+                    "failed": stats.get("failed", 0),
+                    "per_stock_limit": per_stock_limit,
+                },
+            )
         except Exception as exc:
             logger.exception("wiki background loop iteration crashed: %s", exc)
+            await observability.record_event(
+                "wiki_ingestion", "tick_crashed",
+                level="error",
+                details={"error": str(exc)[:500]},
+            )
         # Wait interval OR exit early if stop requested.
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)

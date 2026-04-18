@@ -35,14 +35,31 @@ async def run(manage_db: bool = True):
     ts = datetime.now().strftime("%Y-%m-%dT%H:%M")
     users = await cache.get_all_users_with_portfolio()
     logger.info("Intraday snapshot for %d users at %s", len(users), ts)
+    ok = 0
+    failed: list[str] = []
     for google_sub in users:
         try:
             total_value = await _fetch_total_value(google_sub)
             if total_value > 0:
                 await cache.save_intraday_snapshot(google_sub, ts, total_value)
                 logger.info("  %s: %.0f", google_sub[:8], total_value)
+                ok += 1
         except Exception as e:
             logger.error("  %s failed: %s", google_sub[:8], e)
+            failed.append(google_sub[:8])
+    # Dashboard signal — "last intraday tick" with user counts. wait=True
+    # because this script closes its own DB handle right after.
+    try:
+        import observability
+        await observability.record_event(
+            "snapshot_intraday",
+            "tick_ok" if not failed else "tick_partial",
+            level="info" if not failed else "warning",
+            details={"ts": ts, "users_total": len(users), "users_ok": ok, "users_failed": failed},
+            wait=True,
+        )
+    except Exception:
+        pass
     if manage_db:
         await cache.close_db()
 

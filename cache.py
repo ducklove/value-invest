@@ -301,6 +301,24 @@ async def init_db():
             VALUES (new.id, new.stock_code, new.title, new.summary_md, new.key_points_md);
         END;
 
+        -- Structured event log for in-app observability. Each subsystem
+        -- writes short status rows here (snapshot ticks, wiki ingest
+        -- results, external API failures, LLM calls, etc.) so the admin
+        -- dashboard can show what actually happened without parsing
+        -- systemd journal. Capped by TTL + row-count to stay tiny.
+        CREATE TABLE IF NOT EXISTS system_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts          TEXT NOT NULL,
+            level       TEXT NOT NULL,        -- 'info' | 'warning' | 'error'
+            source      TEXT NOT NULL,        -- 'snapshot_nav' | 'wiki_ingestion' | 'openrouter' | ...
+            kind        TEXT NOT NULL,        -- 'tick_ok' | 'api_failure' | 'ingest_summary' | ...
+            stock_code  TEXT,                 -- nullable — only for stock-scoped events
+            details     TEXT                  -- JSON blob, schema per (source, kind)
+        );
+        CREATE INDEX IF NOT EXISTS idx_system_events_ts ON system_events(ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_system_events_source_ts ON system_events(source, ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_system_events_level_ts ON system_events(level, ts DESC);
+
         -- Daily closing prices for market benchmarks we overlay on the NAV
         -- chart (KOSPI / SP500 / GOLD / ...). Keyed by (code, date) so a
         -- re-download is a no-op upsert. Populated by benchmark_history —
@@ -1755,6 +1773,139 @@ async def get_wiki_stats() -> dict:
         "pdfs_cached": int(pdf_row["n"] or 0) if pdf_row else 0,
         "latest_entry_date": (row["latest"] if row else None) or None,
     }
+
+
+# ---------------------------------------------------------------------------
+# System events (observability)
+# ---------------------------------------------------------------------------
+
+async def insert_system_event(
+    level: str,
+    source: str,
+    kind: str,
+    *,
+    stock_code: str | None = None,
+    details: str | None = None,
+    ts: str | None = None,
+) -> int:
+    """Append a structured event row. `details` should be a JSON string —
+    callers (via observability.record_event) serialize their payload once
+    to avoid a redundant json.loads at read time."""
+    db = await get_db()
+    if ts is None:
+        ts = datetime.now().isoformat(timespec="seconds")
+    cursor = await db.execute(
+        """INSERT INTO system_events (ts, level, source, kind, stock_code, details)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (ts, level, source, kind, stock_code, details),
+    )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def get_system_events(
+    *,
+    source: str | None = None,
+    level: str | None = None,
+    stock_code: str | None = None,
+    since: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Filtered newest-first fetch for the admin dashboard."""
+    clauses: list[str] = []
+    params: list = []
+    if source:
+        clauses.append("source = ?")
+        params.append(source)
+    if level:
+        clauses.append("level = ?")
+        params.append(level)
+    if stock_code:
+        clauses.append("stock_code = ?")
+        params.append(stock_code)
+    if since:
+        clauses.append("ts >= ?")
+        params.append(since)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    # Hard cap — prevent a frontend bug or curl typo from slurping the
+    # whole table.
+    limit = max(1, min(int(limit), 1000))
+    params.append(limit)
+    db = await get_db()
+    cursor = await db.execute(
+        f"SELECT id, ts, level, source, kind, stock_code, details "
+        f"FROM system_events {where} ORDER BY ts DESC, id DESC LIMIT ?",
+        params,
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def summarize_system_events(since_iso: str) -> dict:
+    """Aggregate counts by (source, level) since `since_iso`. Used by the
+    top-of-dashboard status card so the admin sees failure spikes without
+    scrolling through events."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT source, level, COUNT(*) AS n
+           FROM system_events WHERE ts >= ?
+           GROUP BY source, level""",
+        (since_iso,),
+    )
+    out: dict[str, dict[str, int]] = {}
+    for row in await cursor.fetchall():
+        out.setdefault(row["source"], {})[row["level"]] = int(row["n"])
+    return out
+
+
+async def prune_system_events(max_age_days: int = 30, max_rows: int = 100_000) -> int:
+    """Best-effort cleanup: drop events older than `max_age_days`, then if
+    still above `max_rows` trim the oldest until under the cap. Returns
+    rows deleted (0 if table was already small)."""
+    db = await get_db()
+    # Age-based trim.
+    cursor = await db.execute(
+        "DELETE FROM system_events WHERE ts < datetime('now', ?)",
+        (f"-{int(max_age_days)} days",),
+    )
+    age_deleted = cursor.rowcount or 0
+    # Row-count trim as a safety net. Count only if there's risk of being
+    # over — skip when obviously fine.
+    cursor = await db.execute("SELECT COUNT(*) AS n FROM system_events")
+    row = await cursor.fetchone()
+    total = int(row["n"]) if row else 0
+    overflow_deleted = 0
+    if total > max_rows:
+        excess = total - max_rows
+        cursor = await db.execute(
+            "DELETE FROM system_events WHERE id IN "
+            "(SELECT id FROM system_events ORDER BY ts ASC, id ASC LIMIT ?)",
+            (excess,),
+        )
+        overflow_deleted = cursor.rowcount or 0
+    await db.commit()
+    return age_deleted + overflow_deleted
+
+
+async def get_latest_event(source: str, kind: str | None = None) -> dict | None:
+    """Return the most recent matching event. Dashboard uses this to show
+    'last successful tick' per subsystem."""
+    db = await get_db()
+    if kind:
+        cursor = await db.execute(
+            "SELECT id, ts, level, source, kind, stock_code, details "
+            "FROM system_events WHERE source = ? AND kind = ? "
+            "ORDER BY ts DESC, id DESC LIMIT 1",
+            (source, kind),
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT id, ts, level, source, kind, stock_code, details "
+            "FROM system_events WHERE source = ? "
+            "ORDER BY ts DESC, id DESC LIMIT 1",
+            (source,),
+        )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
 
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,14 @@
 """Admin API endpoints — batch job monitoring, manual triggers, system stats."""
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 import cache
 from deps import get_current_user
@@ -284,3 +285,198 @@ async def server_stats(request: Request):
 async def db_stats(request: Request):
     await _require_admin(request)
     return await cache.get_db_stats()
+
+
+# ---------------------------------------------------------------------------
+# Observability: event feed + per-subsystem diagnostics
+# ---------------------------------------------------------------------------
+
+def _parse_event_row(row: dict) -> dict:
+    """Attach parsed `details_obj` so the frontend doesn't have to JSON-
+    decode per row. Keep the raw string too for debugging."""
+    out = dict(row)
+    raw = out.get("details")
+    if raw:
+        try:
+            out["details_obj"] = json.loads(raw)
+        except Exception:
+            out["details_obj"] = None
+    else:
+        out["details_obj"] = None
+    return out
+
+
+@router.get("/events")
+async def list_events(
+    request: Request,
+    source: str | None = None,
+    level: str | None = None,
+    stock_code: str | None = None,
+    hours: float | None = None,
+    limit: int = 100,
+):
+    """Unified event feed. All filters optional; defaults to newest 100.
+
+    Note: query parameters are typed as plain Python defaults (not
+    fastapi.Query) so unit tests can call this function directly. FastAPI
+    still parses strings via annotations; the hard bounds (limit ≤1000)
+    are enforced inside cache.get_system_events.
+    """
+    await _require_admin(request)
+    since = None
+    if hours is not None and hours > 0:
+        since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    rows = await cache.get_system_events(
+        source=source,
+        level=level,
+        stock_code=stock_code,
+        since=since,
+        limit=limit,
+    )
+    return [_parse_event_row(r) for r in rows]
+
+
+@router.get("/event-summary")
+async def event_summary(request: Request, hours: float = 24):
+    """Counts grouped by (source, level) over the last `hours`. Small payload
+    for the dashboard top strip — one row per subsystem, failure counts
+    highlighted."""
+    await _require_admin(request)
+    since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    summary = await cache.summarize_system_events(since)
+    # Attach "latest tick" per known subsystem so the card can show "15 min
+    # ago" vs a cold "no tick in 3 days" state at a glance.
+    known_sources = [
+        "snapshot_nav", "snapshot_intraday", "snapshot_nps",
+        "wiki_ingestion", "benchmark_history",
+    ]
+    latest: dict[str, dict | None] = {}
+    for src in known_sources:
+        row = await cache.get_latest_event(src)
+        latest[src] = _parse_event_row(row) if row else None
+    return {"hours": hours, "by_source": summary, "latest": latest}
+
+
+# ---------------------------------------------------------------------------
+# Subsystem diagnostics — /diag/<subsystem>
+# ---------------------------------------------------------------------------
+
+@router.get("/diag/wiki")
+async def diag_wiki(request: Request, code: str = ""):
+    """Why isn't this stock's wiki growing? — end-to-end probe that
+    answers the question in one call instead of three manual SSH queries.
+
+    Exposes every funnel stage so the operator can pinpoint whether the
+    loss is upstream (Naver has no PDF), in our whitelist (PDF exists
+    but we reject the host), or downstream (PDF parsed but LLM summary
+    failed).
+    """
+    await _require_admin(request)
+    code = code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="code is required")
+
+    import report_client
+    from routes.reports import _is_allowed_report_pdf_url
+
+    # --- Naver funnel -----------------------------------------------------
+    naver_err: str | None = None
+    reports: list[dict] = []
+    try:
+        reports = await report_client.fetch_reports(code)
+    except Exception as exc:
+        naver_err = str(exc)[:300]
+
+    with_pdf = [r for r in reports if r.get("pdf_url")]
+    allowed = [r for r in with_pdf if _is_allowed_report_pdf_url(r["pdf_url"])]
+
+    sample_limit = 10
+    samples = []
+    for r in reports[:sample_limit]:
+        pdf = r.get("pdf_url")
+        if not pdf:
+            reason = "no_pdf_url"
+        elif not _is_allowed_report_pdf_url(pdf):
+            reason = "rejected_by_whitelist"
+        else:
+            reason = "ok"
+        samples.append({
+            "date": r.get("date"),
+            "firm": r.get("firm"),
+            "title": r.get("title"),
+            "pdf_url": (pdf or "")[:200] if pdf else None,
+            "status": reason,
+        })
+
+    # --- DB state ---------------------------------------------------------
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "SELECT COUNT(*) AS n FROM stock_wiki_entries WHERE stock_code = ?",
+        (code,),
+    )
+    wiki_count = int((await cursor.fetchone())["n"])
+
+    cursor = await db.execute(
+        "SELECT parse_status, COUNT(*) AS n FROM report_pdf_cache WHERE stock_code = ? GROUP BY parse_status",
+        (code,),
+    )
+    pdf_by_status = {r["parse_status"]: int(r["n"]) for r in await cursor.fetchall()}
+
+    # Latest 5 failure messages (if any) — truncated for UI readability.
+    cursor = await db.execute(
+        """SELECT parse_status, parse_error, pdf_url FROM report_pdf_cache
+           WHERE stock_code = ? AND parse_status IN ('download_failed', 'parse_failed')
+           ORDER BY downloaded_at DESC LIMIT 5""",
+        (code,),
+    )
+    recent_failures = [
+        {"status": r["parse_status"], "error": (r["parse_error"] or "")[:200], "pdf_url": r["pdf_url"]}
+        for r in await cursor.fetchall()
+    ]
+
+    # --- Verdict ----------------------------------------------------------
+    # Plain-language summary so the operator doesn't have to interpret
+    # numbers. Prioritize the most common failure mode first.
+    if naver_err:
+        verdict = f"Naver 응답 실패: {naver_err}"
+    elif len(reports) == 0:
+        verdict = "Naver 에서 리포트 0건 반환. 종목 코드가 맞는지, 또는 커버리지가 없는 종목인지 확인 필요."
+    elif len(with_pdf) == 0:
+        verdict = (
+            f"Naver 는 {len(reports)}건 주지만 **pdf_url 이 전부 비어있음**. "
+            "증권사가 PDF 를 자사 사이트에서만 제공하는 케이스 — 우리 쪽에서 긁을 방법 없음."
+        )
+    elif len(allowed) == 0:
+        verdict = (
+            f"{len(with_pdf)}건에 pdf_url 있지만 **화이트리스트에서 모두 탈락** "
+            "(stock.pstatic.net/stock-research/*.pdf 만 허용). 화이트리스트 확장 필요."
+        )
+    elif wiki_count == 0 and pdf_by_status:
+        verdict = (
+            f"{len(allowed)}건 통과·{sum(pdf_by_status.values())}건 다운로드 시도, "
+            f"요약 0건. 실패 원인: {pdf_by_status}"
+        )
+    elif wiki_count >= len(allowed):
+        verdict = f"정상. {wiki_count}건 요약됨 (Naver 가 주는 유효 PDF 수에 도달)."
+    else:
+        verdict = (
+            f"진행 중. Naver 유효 {len(allowed)}건, 요약 {wiki_count}건. "
+            "다음 wiki_ingestion tick 에서 차이분이 채워집니다."
+        )
+
+    return {
+        "stock_code": code,
+        "naver": {
+            "total": len(reports),
+            "has_pdf": len(with_pdf),
+            "passes_whitelist": len(allowed),
+            "error": naver_err,
+            "samples": samples,
+        },
+        "db": {
+            "wiki_entries": wiki_count,
+            "pdf_cache_by_status": pdf_by_status,
+            "recent_failures": recent_failures,
+        },
+        "verdict": verdict,
+    }

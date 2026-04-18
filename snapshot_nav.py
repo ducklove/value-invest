@@ -154,19 +154,44 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
         snap_date = date.today().isoformat()
     if date.fromisoformat(snap_date).weekday() >= 5:
         logger.info("Snapshot skipped: %s is a weekend", snap_date)
+        import observability
+        await observability.record_event(
+            "snapshot_nav", "skipped_weekend",
+            level="info", details={"date": snap_date}, wait=True,
+        )
         if manage_db:
             await cache.close_db()
         return
     await _fetch_fx_usdkrw()
     users = await cache.get_all_users_with_portfolio()
     logger.info("Taking snapshots for %d users on %s", len(users), snap_date)
+    success_count = 0
+    failed_users: list[str] = []
     for google_sub in users:
         try:
             await take_snapshot(google_sub, snap_date)
+            success_count += 1
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", google_sub[:8], e)
+            failed_users.append(google_sub[:8])
     await _save_gold_close()
     await _update_benchmark_history()
+    # Record tick outcome for the dashboard. `wait=True` because this is
+    # a batch script that's about to close the DB handle — can't detach.
+    import observability
+    await observability.record_event(
+        "snapshot_nav",
+        "tick_ok" if not failed_users else "tick_partial",
+        level="info" if not failed_users else "warning",
+        details={
+            "date": snap_date,
+            "users_total": len(users),
+            "users_ok": success_count,
+            "users_failed": failed_users,
+            "fx_usdkrw": _fx_usdkrw,
+        },
+        wait=True,
+    )
     if manage_db:
         await cache.close_db()
 
