@@ -2311,20 +2311,34 @@ async function renderNavChart(data) {
     ],
   });
 
-  // On dataZoom change, re-scale benchmarks so start point aligns with NAV
-  if (hasBench) {
+  // On dataZoom change: (a) re-scale benchmark series to the new window,
+  // (b) refresh the CAGR card so it reflects the visible period.
+  //
+  // Previously this listener only ran when hasBench was true — but the CAGR
+  // card should react to zoom regardless of whether benchmarks are on, so
+  // the listener is now installed unconditionally and internally guards the
+  // benchmark-rescale path.
+  {
     let _zoomTimer = null;
     ec.on('datazoom', () => {
       clearTimeout(_zoomTimer);
       _zoomTimer = setTimeout(() => {
         const opt = ec.getOption();
-        const dz = opt.dataZoom[0];
-        const startPct = dz.start ?? 0;
-        const startIdx = Math.round(startPct / 100 * (labels.length - 1));
-        const newBench = buildBenchSeries(startIdx);
-        // Update only benchmark series (index 1+)
-        const seriesUpdate = [{ data: navValues.map(v => v === null ? '-' : v) }, ...newBench];
-        ec.setOption({ series: seriesUpdate });
+        const dz = opt?.dataZoom?.[0];
+        const startPct = dz?.start ?? 0;
+        const endPct = dz?.end ?? 100;
+        const last = Math.max(0, labels.length - 1);
+        const startIdx = Math.max(0, Math.min(last, Math.round(startPct / 100 * last)));
+        const endIdx = Math.max(0, Math.min(last, Math.round(endPct / 100 * last)));
+
+        if (hasBench) {
+          const newBench = buildBenchSeries(startIdx);
+          // Update only benchmark series (index 1+)
+          const seriesUpdate = [{ data: navValues.map(v => v === null ? '-' : v) }, ...newBench];
+          ec.setOption({ series: seriesUpdate });
+        }
+
+        _updateNavCagrCard(data, startIdx, endIdx);
       }, 80);
     });
   }
@@ -2420,12 +2434,69 @@ async function renderValueChart(data) {
       { label: '52주 최저', val: fmtVal(min52) },
       { label: '52주 최고', val: fmtVal(max52) },
       { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },
-      { label: 'CAGR', val: acctReturn !== null ? fmtPct(acctReturn) : '-', cls: returnClass(acctReturn) },
+      // role='cagr' is the hook _updateValueCagrCard() latches onto when
+      // the 평가금액 chart dataZoom moves.
+      { label: 'CAGR', val: acctReturn !== null ? fmtPct(acctReturn) : '-', cls: returnClass(acctReturn), role: 'cagr' },
     ];
-    statsEl.innerHTML = items.map(p =>
-      `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`
-    ).join('');
+    statsEl.innerHTML = items.map(p => {
+      const role = p.role ? ` data-role="${p.role}"` : '';
+      return `<div class="pf-nav-ret-card"${role}><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
+    }).join('');
   }
+
+  // On dataZoom change, refresh the CAGR card for the visible window. The
+  // uPlot mobile path doesn't expose `on` — skip there (no dataZoom UI).
+  if (_valueChartInstance && typeof _valueChartInstance.on === 'function') {
+    let _zoomTimer = null;
+    _valueChartInstance.on('datazoom', () => {
+      clearTimeout(_zoomTimer);
+      _zoomTimer = setTimeout(() => {
+        const opt = _valueChartInstance.getOption();
+        const dz = opt?.dataZoom?.[0];
+        const startPct = dz?.start ?? 0;
+        const endPct = dz?.end ?? 100;
+        const last = Math.max(0, data.length - 1);
+        const startIdx = Math.max(0, Math.min(last, Math.round(startPct / 100 * last)));
+        const endIdx = Math.max(0, Math.min(last, Math.round(endPct / 100 * last)));
+        _updateValueCagrCard(data, fxValues, startIdx, endIdx);
+      }, 80);
+    });
+  }
+}
+
+// Update ONLY the CAGR card in #pfValueStats for the visible window
+// [startIdx..endIdx]. Uses the closure-captured fxValues so the FX-adjusted
+// math stays consistent with the snapshot renderValueChart computed at the
+// top of the function.
+function _updateValueCagrCard(data, fxValues, startIdx, endIdx) {
+  const root = document.getElementById('pfValueStats');
+  if (!root) return;
+  const card = root.querySelector('[data-role="cagr"]');
+  if (!card) return;
+  const labelEl = card.querySelector('.pf-nav-ret-label');
+  const valEl = card.querySelector('.pf-nav-ret-value');
+  if (!labelEl || !valEl) return;
+
+  const isFull = startIdx === 0 && endIdx === data.length - 1;
+  labelEl.textContent = isFull ? 'CAGR' : 'CAGR (구간)';
+
+  const first = fxValues[startIdx];
+  const last = fxValues[endIdx];
+  if (endIdx <= startIdx || first == null || last == null || !(first > 0)) {
+    valEl.textContent = '-';
+    valEl.className = 'pf-nav-ret-value';
+    return;
+  }
+  const days = (new Date(data[endIdx].date) - new Date(data[startIdx].date)) / 86400000;
+  const years = days / 365;
+  if (!(years > 0)) {
+    valEl.textContent = '-';
+    valEl.className = 'pf-nav-ret-value';
+    return;
+  }
+  const cagr = ((last - first) / first * 100) / years;
+  valEl.textContent = fmtPct(cagr);
+  valEl.className = 'pf-nav-ret-value ' + (returnClass(cagr) || '');
 }
 
 function renderNavReturns(data) {
@@ -2478,12 +2549,58 @@ function renderNavReturns(data) {
     { label: '52주 최저', val: min52.toFixed(2), days: 365 },
     { label: '52주 최고', val: max52.toFixed(2), days: 365 },
     { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct), days: 365 },
-    { label: 'CAGR', val: annualizedPct !== null ? fmtPct(annualizedPct) : '-', cls: returnClass(annualizedPct) },
+    // role='cagr' lets _updateNavCagrCard() find this specific card when
+    // the NAV chart's dataZoom changes, so the value reflects the visible
+    // window instead of the full-history snapshot.
+    { label: 'CAGR', val: annualizedPct !== null ? fmtPct(annualizedPct) : '-', cls: returnClass(annualizedPct), role: 'cagr' },
   ];
   el.innerHTML = items.map(p => {
     const zoomable = p.days ? ` js-pf-nav-zoom" data-zoom-days="${p.days}" style="cursor:pointer;` : '';
-    return `<div class="pf-nav-ret-card${zoomable}"><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
+    const role = p.role ? ` data-role="${p.role}"` : '';
+    return `<div class="pf-nav-ret-card${zoomable}"${role}><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
   }).join('');
+}
+
+// Update ONLY the CAGR card in #pfNavReturns to reflect the visible window
+// [startIdx..endIdx] on the NAV chart. Called on every debounced dataZoom
+// event. When the full range is selected the label stays plain "CAGR";
+// when zoomed in it becomes "CAGR (구간)" so the user knows the value is
+// no longer full-history.
+function _updateNavCagrCard(data, startIdx, endIdx) {
+  const root = document.getElementById('pfNavReturns');
+  if (!root) return;
+  const card = root.querySelector('[data-role="cagr"]');
+  if (!card) return;
+  const labelEl = card.querySelector('.pf-nav-ret-label');
+  const valEl = card.querySelector('.pf-nav-ret-value');
+  if (!labelEl || !valEl) return;
+
+  const isFull = startIdx === 0 && endIdx === data.length - 1;
+  labelEl.textContent = isFull ? 'CAGR' : 'CAGR (구간)';
+
+  if (endIdx <= startIdx || !data[startIdx] || !data[endIdx]) {
+    valEl.textContent = '-';
+    valEl.className = 'pf-nav-ret-value';
+    return;
+  }
+  // Same FX-aware accessor renderNavReturns uses — keep the two in sync so
+  // switching the display currency is reflected in the zoomed CAGR too.
+  const _nav = d => (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) ? d.nav / d.fx_usdkrw : d.nav;
+  const firstNav = _nav(data[startIdx]);
+  const lastNav = _nav(data[endIdx]);
+  const days = (new Date(data[endIdx].date) - new Date(data[startIdx].date)) / 86400000;
+  const years = days / 365;
+  if (!(years > 0) || !(firstNav > 0)) {
+    valEl.textContent = '-';
+    valEl.className = 'pf-nav-ret-value';
+    return;
+  }
+  // Matches renderNavReturns' "simple annualized" formula (not compound
+  // CAGR) — keeps the zoomed value numerically comparable to the initial
+  // full-range value on the same card.
+  const cagr = ((lastNav - firstNav) / firstNav * 100) / years;
+  valEl.textContent = fmtPct(cagr);
+  valEl.className = 'pf-nav-ret-value ' + (returnClass(cagr) || '');
 }
 
 function renderCashflows(data) {
