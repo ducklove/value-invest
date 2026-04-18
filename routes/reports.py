@@ -14,13 +14,26 @@ router = APIRouter()
 
 
 def _is_allowed_report_pdf_url(url: str) -> bool:
+    """Naver hosts broker-research PDFs across TWO CDN paths that both
+    resolve to pstatic.net — either one is safe to proxy/download.
+
+    This function previously allowed only the first path, which silently
+    dropped ~50% of large-cap reports (LG화학 was the trigger: 120
+    reports, 106 with pdf_url, only 55 passing — the missing 51 were
+    all on ssl.pstatic.net/imgstock/upload/research/…). Both hosts are
+    *.pstatic.net (Naver's CDN) so the security posture is unchanged.
+    """
     parsed = urlparse(url)
-    return (
-        parsed.scheme == "https"
-        and parsed.netloc == "stock.pstatic.net"
-        and parsed.path.startswith("/stock-research/")
-        and parsed.path.endswith(".pdf")
-    )
+    if parsed.scheme != "https" or not parsed.path.endswith(".pdf"):
+        return False
+    # CDN #1 — research portal PDFs.
+    if parsed.netloc == "stock.pstatic.net" and parsed.path.startswith("/stock-research/"):
+        return True
+    # CDN #2 — image/research upload bucket where many firms that publish
+    # through Naver Research actually land.
+    if parsed.netloc == "ssl.pstatic.net" and parsed.path.startswith("/imgstock/upload/research/"):
+        return True
+    return False
 
 
 def _report_signature(report: dict | None) -> tuple:

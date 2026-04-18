@@ -265,13 +265,49 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["parse_status"], "download_failed")
 
     async def test_ingest_rejects_non_whitelisted_url(self):
+        # A PDF on an unknown host must be reported as rejected_by_whitelist
+        # (not the generic "no_pdf_url") so the dashboard can distinguish
+        # "Naver didn't give us a URL" from "URL exists but our allowlist
+        # refused the host". The difference mattered for the LG화학 case
+        # where 51 large-cap reports were silently lost to this branch.
         result = await wiki_ingestion.ingest_pdf_for_report(
             "005930",
             {"pdf_url": "https://evil.example.com/x.pdf"},
         )
-        # Either skipped (wrong host → no_pdf_url via whitelist) or
-        # failed, but must not have summarized anything.
+        self.assertEqual(result.get("skipped"), "rejected_by_whitelist")
+        self.assertIn("pdf_url", result)
         self.assertNotIn("ok", result)
+
+    async def test_ingest_distinguishes_missing_pdf_from_rejected(self):
+        # No pdf_url at all → different reason than "host not allowed".
+        result = await wiki_ingestion.ingest_pdf_for_report(
+            "005930", {"pdf_url": ""},
+        )
+        self.assertEqual(result.get("skipped"), "no_pdf_url")
+
+    async def test_whitelist_accepts_ssl_pstatic_path(self):
+        # The second Naver CDN path — previously silently rejected.
+        # Don't call through ingest_pdf_for_report (would try to download
+        # a real URL); just probe the whitelist directly.
+        from routes.reports import _is_allowed_report_pdf_url
+        self.assertTrue(_is_allowed_report_pdf_url(
+            "https://ssl.pstatic.net/imgstock/upload/research/company/1714620534417.pdf"
+        ))
+        self.assertTrue(_is_allowed_report_pdf_url(
+            "https://stock.pstatic.net/stock-research/company/16/20260130_company_915186000.pdf"
+        ))
+        # Non-Naver host still rejected.
+        self.assertFalse(_is_allowed_report_pdf_url(
+            "https://evil.example.com/research/x.pdf"
+        ))
+        # Wrong path prefix on the allowed host still rejected.
+        self.assertFalse(_is_allowed_report_pdf_url(
+            "https://ssl.pstatic.net/some-other-path/x.pdf"
+        ))
+        # Missing .pdf extension rejected even on allowed host/path.
+        self.assertFalse(_is_allowed_report_pdf_url(
+            "https://stock.pstatic.net/stock-research/company/x.html"
+        ))
 
     # -- FTS search --
 
@@ -357,6 +393,138 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(task, timeout=1.0)
 
         self.assertEqual(call_count["n"], 0)
+
+
+class SkipReasonAggregationTests(unittest.IsolatedAsyncioTestCase):
+    """Verify the per-reason breakdown survives from ingest_pdf_for_report
+    all the way up through ingest_stock, run_pipeline, and into the
+    background-loop's tick event. The LG화학 bug was hidden precisely
+    because this chain used to lose the "why" and only kept the "how many"."""
+
+    async def asyncSetUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_patch = patch.object(cache, "DB_PATH", Path(self.temp_dir.name) / "cache.db")
+        self.db_patch.start()
+        await cache.close_db()
+        await cache.init_db()
+
+    async def asyncTearDown(self):
+        await cache.close_db()
+        self.db_patch.stop()
+        self.temp_dir.cleanup()
+
+    async def test_ingest_stock_aggregates_skipped_by_reason(self):
+        # Simulate three reports with three distinct fates by patching
+        # the underlying fetcher AND the inner per-PDF handler.
+        reports = [
+            {"pdf_url": "", "date": "2026-04-01"},  # no_pdf_url
+            {"pdf_url": "https://evil.example.com/x.pdf", "date": "2026-04-02"},  # rejected_by_whitelist
+            {"pdf_url": "https://stock.pstatic.net/stock-research/company/x.pdf",
+             "date": "2026-04-03"},  # real path — we'll mock ingest_pdf_for_report response
+        ]
+
+        async def fake_fetch(code):
+            return reports
+
+        # Let the first two go through the real ingest_pdf_for_report (they
+        # hit the early-exit branches synchronously with no I/O). Stub the
+        # third to return already_summarized so we don't need network.
+        real_ingest = wiki_ingestion.ingest_pdf_for_report
+
+        async def routing_ingest(stock_code, meta, **kw):
+            url = meta.get("pdf_url", "")
+            if url.startswith("https://stock.pstatic.net/"):
+                return {"skipped": "already_summarized", "pdf_sha1": "x"}
+            return await real_ingest(stock_code, meta, **kw)
+
+        with patch.object(wiki_ingestion, "report_client") as rc, \
+             patch.object(wiki_ingestion, "ingest_pdf_for_report", new=routing_ingest):
+            rc.fetch_reports = AsyncMock(return_value=reports)
+            stats = await wiki_ingestion.ingest_stock("005930", limit=10)
+
+        self.assertEqual(stats["processed"], 3)
+        self.assertEqual(stats["summarized"], 0)
+        self.assertEqual(stats["skipped"], 3)
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(stats["skipped_by_reason"], {
+            "no_pdf_url": 1,
+            "rejected_by_whitelist": 1,
+            "already_summarized": 1,
+        })
+
+    async def test_run_pipeline_merges_reasons_across_stocks(self):
+        # Two stocks, each producing a different mix. Pipeline aggregate
+        # must sum them without losing the reason keys.
+        async def fake_ingest_stock(code, **kw):
+            if code == "A":
+                return {
+                    "stock_code": code, "processed": 2, "summarized": 1,
+                    "skipped": 1, "failed": 0,
+                    "skipped_by_reason": {"already_summarized": 1},
+                    "failed_by_reason": {},
+                }
+            return {
+                "stock_code": code, "processed": 3, "summarized": 0,
+                "skipped": 2, "failed": 1,
+                "skipped_by_reason": {"rejected_by_whitelist": 2},
+                "failed_by_reason": {"download": 1},
+            }
+
+        with patch.object(wiki_ingestion, "ingest_stock", new=fake_ingest_stock):
+            overall = await wiki_ingestion.run_pipeline(stock_codes=["A", "B"])
+
+        self.assertEqual(overall["summarized"], 1)
+        self.assertEqual(overall["skipped"], 3)
+        self.assertEqual(overall["failed"], 1)
+        self.assertEqual(overall["skipped_by_reason"], {
+            "already_summarized": 1,
+            "rejected_by_whitelist": 2,
+        })
+        self.assertEqual(overall["failed_by_reason"], {"download": 1})
+
+    async def test_background_loop_writes_breakdown_to_tick_event(self):
+        """The tick event's `details_obj` must carry the per-reason dicts
+        — otherwise the admin dashboard can't flag rejected_by_whitelist
+        as an anomaly.
+        """
+        import asyncio
+        import observability
+
+        stop = asyncio.Event()
+
+        async def fake_pipeline(**kw):
+            return {
+                "stocks_processed": 1, "summarized": 0,
+                "skipped": 51, "failed": 0,
+                "skipped_by_reason": {"rejected_by_whitelist": 51},
+                "failed_by_reason": {},
+            }
+
+        with patch.object(wiki_ingestion, "run_pipeline", new=fake_pipeline):
+            task = asyncio.create_task(
+                wiki_ingestion.run_background_loop(
+                    stop,
+                    interval_seconds=30.0,
+                    initial_delay_seconds=0.01,
+                )
+            )
+            await asyncio.sleep(0.15)
+            stop.set()
+            await asyncio.wait_for(task, timeout=2.0)
+            # Flush any fire-and-forget event writes that record_event
+            # detached. Give the loop one more scheduling cycle.
+            await asyncio.sleep(0.05)
+
+        rows = await cache.get_system_events(source="wiki_ingestion")
+        self.assertGreaterEqual(len(rows), 1)
+        import json as _json
+        last = rows[0]  # newest first
+        details = _json.loads(last["details"])
+        self.assertEqual(details["skipped_by_reason"]["rejected_by_whitelist"], 51)
+        # Whitelist rejections must bump the level — info would mean the
+        # dashboard paints it green, which was precisely the bug.
+        self.assertEqual(last["level"], "warning")
+        self.assertEqual(last["kind"], "tick_partial")
 
 
 if __name__ == "__main__":

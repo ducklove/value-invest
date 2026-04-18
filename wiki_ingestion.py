@@ -279,8 +279,17 @@ async def ingest_pdf_for_report(
     must contain pdf_url, date, firm, title, etc. stock_name is optional
     and filled via corp_codes lookup if absent."""
     pdf_url = (report_meta.get("pdf_url") or "").strip()
-    if not pdf_url or not _is_allowed_report_pdf_url(pdf_url):
+    # Distinguish the two drop reasons — they look identical to the caller
+    # (both are "skipped") but mean very different things for operations:
+    #   * no_pdf_url        — Naver didn't give us a PDF link at all.
+    #                         Nothing we can do; expected for some firms.
+    #   * rejected_by_whitelist — PDF exists but our allowlist rejected
+    #                         the host. If this count is ever >0 it's a
+    #                         bug we should fix, not a dataset limit.
+    if not pdf_url:
         return {"skipped": "no_pdf_url"}
+    if not _is_allowed_report_pdf_url(pdf_url):
+        return {"skipped": "rejected_by_whitelist", "pdf_url": pdf_url}
 
     _ensure_cache_dir()
 
@@ -412,6 +421,15 @@ async def ingest_stock(
             logger.warning("fetch_reports failed for %s: %s", stock_code, exc)
             reports = []
 
+    # Count reports Naver returned without a pdf_url before we pre-filter.
+    # Previously this branch was invisible to the pipeline stats — any
+    # report without a PDF just didn't show up in "processed", which made
+    # it impossible to distinguish "Naver is stingy with this stock" from
+    # "pipeline is silently dropping work". Now we count them separately
+    # and add to skipped_by_reason.no_pdf_url so the dashboard shows the
+    # true funnel width.
+    fetched_total = len(reports)
+    missing_pdf_count = sum(1 for r in reports if not r.get("pdf_url"))
     reports = [r for r in reports if r.get("pdf_url")][:limit]
     # Attach corp_name so the summary prompt can include it.
     try:
@@ -425,12 +443,26 @@ async def ingest_stock(
 
     stats = {
         "stock_code": stock_code,
+        "fetched_total": fetched_total,
         "processed": 0,
         "summarized": 0,
         "skipped": 0,
         "failed": 0,
+        # Per-reason breakdowns. The aggregate skipped/failed counters above
+        # are kept for backwards compatibility with existing logs; these
+        # dicts are what actually enable the admin dashboard to spot e.g.
+        # "rejected_by_whitelist = 51" as an anomaly.
+        "skipped_by_reason": {},
+        "failed_by_reason": {},
         "details": [],
     }
+    # Surface the pre-filter drops. These count as both processed and
+    # skipped so the dashboard math still adds up (processed == summarized
+    # + skipped + failed).
+    if missing_pdf_count:
+        stats["processed"] += missing_pdf_count
+        stats["skipped"] += missing_pdf_count
+        stats["skipped_by_reason"]["no_pdf_url"] = missing_pdf_count
     for r in reports:
         stats["processed"] += 1
         try:
@@ -442,8 +474,12 @@ async def ingest_stock(
             stats["summarized"] += 1
         elif result.get("skipped"):
             stats["skipped"] += 1
+            reason = str(result["skipped"])
+            stats["skipped_by_reason"][reason] = stats["skipped_by_reason"].get(reason, 0) + 1
         else:
             stats["failed"] += 1
+            reason = str(result.get("failed") or "unknown")
+            stats["failed_by_reason"][reason] = stats["failed_by_reason"].get(reason, 0) + 1
         stats["details"].append(result)
     return stats
 
@@ -476,18 +512,28 @@ async def run_background_loop(
                 stats.get("stocks_processed", 0), stats.get("summarized", 0),
                 stats.get("skipped", 0), stats.get("failed", 0),
             )
-            # Record tick so the admin dashboard can see "last ingest
-            # finished at X, summarized Y new reports". `failed>0` bumps
-            # the level so error filters surface it.
+            # Record tick for the admin dashboard. Beyond the raw
+            # success/skip/fail totals, we include per-reason breakdowns
+            # because the aggregate "skipped" number alone has hidden
+            # real bugs (see the whitelist-rejection regression where 51
+            # large-cap reports were silently dropped).
+            #
+            # Level bumps to "warning" if ANY non-benign condition shows
+            # up — either a hard failure or a whitelist-rejection, which
+            # signals a config bug rather than a dataset limit.
+            failed = stats.get("failed", 0)
+            rejected = (stats.get("skipped_by_reason") or {}).get("rejected_by_whitelist", 0)
+            level = "info" if failed == 0 and rejected == 0 else "warning"
+            kind = "tick_ok" if level == "info" else "tick_partial"
             await observability.record_event(
-                "wiki_ingestion",
-                "tick_ok" if stats.get("failed", 0) == 0 else "tick_partial",
-                level="info" if stats.get("failed", 0) == 0 else "warning",
+                "wiki_ingestion", kind, level=level,
                 details={
                     "stocks_processed": stats.get("stocks_processed", 0),
                     "summarized": stats.get("summarized", 0),
                     "skipped": stats.get("skipped", 0),
                     "failed": stats.get("failed", 0),
+                    "skipped_by_reason": stats.get("skipped_by_reason", {}),
+                    "failed_by_reason": stats.get("failed_by_reason", {}),
                     "per_stock_limit": per_stock_limit,
                 },
             )
@@ -525,6 +571,11 @@ async def run_pipeline(
         "summarized": 0,
         "skipped": 0,
         "failed": 0,
+        # Merged-across-stocks breakdowns. Surfaced in the tick event so
+        # the dashboard can show "rejected_by_whitelist = 51" as a red flag
+        # distinct from the benign "already_summarized" skips.
+        "skipped_by_reason": {},
+        "failed_by_reason": {},
         "per_stock": [],
     }
     for code in stock_codes:
@@ -537,6 +588,10 @@ async def run_pipeline(
         overall["summarized"] += s.get("summarized", 0)
         overall["skipped"] += s.get("skipped", 0)
         overall["failed"] += s.get("failed", 0)
+        for reason, n in (s.get("skipped_by_reason") or {}).items():
+            overall["skipped_by_reason"][reason] = overall["skipped_by_reason"].get(reason, 0) + n
+        for reason, n in (s.get("failed_by_reason") or {}).items():
+            overall["failed_by_reason"][reason] = overall["failed_by_reason"].get(reason, 0) + n
         overall["per_stock"].append({
             "stock_code": code,
             "summarized": s.get("summarized", 0),

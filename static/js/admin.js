@@ -315,6 +315,36 @@ function _esc(str) {
 // over the last 24h". Catches the "nothing has happened for 3 days" case
 // without having to scroll the event list.
 
+// Anomaly detector for subsystem details payloads. Returns an array of
+// short strings describing things that should NEVER be >0 in a healthy
+// run. These surface as warning chips on the tile so the operator spots
+// them without opening the raw JSON.
+//
+// Add rules here per subsystem as new silent-failure modes are found.
+function _detectAnomalies(source, detailsObj) {
+  if (!detailsObj || typeof detailsObj !== 'object') return [];
+  const flags = [];
+  if (source === 'wiki_ingestion') {
+    const sbr = detailsObj.skipped_by_reason || {};
+    // Whitelist rejection means we found a PDF we COULD have summarized
+    // but refused the host — config bug, not a dataset limit. Always 0
+    // in a healthy state.
+    if ((sbr.rejected_by_whitelist || 0) > 0) {
+      flags.push(`화이트리스트 탈락 ${sbr.rejected_by_whitelist}건`);
+    }
+    if ((detailsObj.failed || 0) > 0) {
+      flags.push(`실패 ${detailsObj.failed}건`);
+    }
+  }
+  if (source === 'snapshot_nav' || source === 'snapshot_intraday') {
+    const failed = detailsObj.users_failed;
+    if (Array.isArray(failed) && failed.length > 0) {
+      flags.push(`사용자 ${failed.length}명 실패`);
+    }
+  }
+  return flags;
+}
+
 function _renderSubsystemSummary(summary) {
   const bySource = summary.by_source || {};
   const latest = summary.latest || {};
@@ -331,14 +361,24 @@ function _renderSubsystemSummary(summary) {
     const info = counts.info || 0;
     const warn = counts.warning || 0;
     const err = counts.error || 0;
-    const barCls = err ? 'admin-status-fail' : warn ? 'admin-status-run' : 'admin-status-ok';
-    const icon = err ? '✗' : warn ? '⚠' : '✓';
+    const anomalies = row ? _detectAnomalies(src, row.details_obj) : [];
+    // Anomalies force a visible warning even when level='info' —
+    // because wiki_ingestion tick WAS logged as info while silently
+    // dropping 51 reports to whitelist rejection.
+    const hasIssue = err > 0 || anomalies.length > 0;
+    const hasWarn = warn > 0;
+    const barCls = err > 0 ? 'admin-status-fail' : (hasIssue || hasWarn) ? 'admin-status-run' : 'admin-status-ok';
+    const icon = err > 0 ? '✗' : (hasIssue || hasWarn) ? '⚠' : '✓';
     const lastLabel = row ? `${_esc(row.kind)} · ${_fmtRelTime(row.ts)}` : '<span style="color:var(--text-secondary)">이벤트 없음</span>';
+    const anomalyChips = anomalies.length
+      ? `<div class="admin-anomaly-chips">${anomalies.map(f => `<span class="admin-event-kv admin-status-fail">${_esc(f)}</span>`).join(' ')}</div>`
+      : '';
     return `
       <div class="admin-card">
         <div class="admin-card-label">${_esc(label)}</div>
         <div class="admin-card-value ${barCls}">${icon} ${lastLabel}</div>
         <div class="admin-sub">24h: info ${info} · warn ${warn} · error ${err}</div>
+        ${anomalyChips}
       </div>
     `;
   }).join('');
@@ -354,8 +394,18 @@ function _renderSubsystemSummary(summary) {
 
 function _renderEventsSection(events) {
   const rows = events.map(e => {
-    const lvlCls = e.level === 'error' ? 'admin-status-fail' : e.level === 'warning' ? 'admin-status-run' : 'admin-status-ok';
-    const icon = e.level === 'error' ? '✗' : e.level === 'warning' ? '⚠' : '·';
+    const anomalies = _detectAnomalies(e.source, e.details_obj);
+    // Level taxonomy (error/warning/info) comes from the writer, but the
+    // event table also amplifies anomalies so that e.g. a wiki_ingestion
+    // tick with rejected_by_whitelist>0 shows up red even if the writer
+    // tagged it info for backwards compat. Anomalies trump level.
+    const effectiveLevel = anomalies.length > 0
+      ? 'warning'
+      : e.level;
+    const lvlCls = effectiveLevel === 'error' ? 'admin-status-fail'
+                 : effectiveLevel === 'warning' ? 'admin-status-run'
+                 : 'admin-status-ok';
+    const icon = effectiveLevel === 'error' ? '✗' : effectiveLevel === 'warning' ? '⚠' : '·';
     let detailsPreview = '';
     if (e.details_obj) {
       try {
@@ -364,14 +414,19 @@ function _renderEventsSection(events) {
           let v = e.details_obj[k];
           if (typeof v === 'object' && v !== null) v = JSON.stringify(v);
           const s = String(v);
-          return `<span class="admin-event-kv">${_esc(k)}=${_esc(s.length > 40 ? s.slice(0,40)+'…' : s)}</span>`;
+          // Highlight key-value pairs that pattern-match an anomaly —
+          // e.g. {rejected_by_whitelist: 51} should pop even inside the
+          // condensed preview row.
+          const isAnomaly = k === 'skipped_by_reason' && /rejected_by_whitelist"?\s*:\s*[1-9]/.test(s);
+          const extraCls = isAnomaly ? ' admin-status-fail' : '';
+          return `<span class="admin-event-kv${extraCls}">${_esc(k)}=${_esc(s.length > 40 ? s.slice(0,40)+'…' : s)}</span>`;
         }).join(' ');
       } catch (_) { detailsPreview = ''; }
     }
     return `
       <tr>
         <td><span class="admin-sub">${_fmtEventTs(e.ts)}</span></td>
-        <td class="${lvlCls}">${icon} ${_esc(e.level)}</td>
+        <td class="${lvlCls}">${icon} ${_esc(effectiveLevel)}</td>
         <td><strong>${_esc(e.source)}</strong></td>
         <td>${_esc(e.kind)}</td>
         <td>${e.stock_code ? `<code>${_esc(e.stock_code)}</code>` : ''}</td>
