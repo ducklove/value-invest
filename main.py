@@ -18,7 +18,7 @@ import dart_client
 import kis_key_manager
 import kis_proxy_client
 import kis_ws_manager
-from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router, nps_router, backtest_router
+from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router, nps_router, backtest_router, admin_router
 from routes.internal import router as internal_router
 from routes.wiki import router as wiki_router
 
@@ -189,6 +189,20 @@ app.include_router(nps_router)
 app.include_router(backtest_router)
 app.include_router(internal_router)
 app.include_router(wiki_router)
+# Admin dashboard used to live on a separate port (admin_app.py :3692) so
+# it could stay localhost-only without auth. That setup had a crucial
+# flaw: deploy.sh only restarts value-invest.service, so the admin server
+# was silently running stale code on every push — /api/admin/diag/wiki
+# returned 404 on a fresh deploy because the standalone process never
+# picked up the new route.
+#
+# Security posture is maintained through _require_admin() (Google OAuth +
+# is_admin=1 in the users table), which is strictly stronger than
+# "localhost only" anyway once the user hits the box via the public
+# hostname. Keep admin_app.py around as an alternate entry point for
+# strict-localhost deployments, but fold the router into the main app so
+# regular deploys always ship a consistent admin surface.
+app.include_router(admin_router)
 
 
 @app.get("/healthz")

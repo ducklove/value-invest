@@ -252,6 +252,53 @@ class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(summary["latest"]["snapshot_nps"])
 
 
+class DeployStatusRouteTests(unittest.IsolatedAsyncioTestCase):
+    """Guard the 'did my push land' endpoint. If this ever breaks, the
+    admin dashboard's only non-SSH way to tell which commit is live
+    goes with it."""
+
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch.start()
+        await cache.close_db()
+        await cache.init_db()
+
+    async def asyncTearDown(self):
+        await cache.close_db()
+        self.db_patch.stop()
+        self.tmp.cleanup()
+
+    async def _mk_admin(self) -> dict:
+        return {"google_sub": "u1", "email": "a@b.c", "is_admin": True}
+
+    async def test_requires_admin(self):
+        with patch("routes.admin.get_current_user", AsyncMock(return_value={"is_admin": False})):
+            with self.assertRaises(HTTPException) as exc_info:
+                await admin_route.deploy_status(_admin_request())
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+    async def test_returns_build_info(self):
+        # The module-level _BUILD_INFO captured the SHA at import time;
+        # we verify the endpoint surfaces it without corrupting shape.
+        with patch("routes.admin.get_current_user", AsyncMock(return_value=await self._mk_admin())):
+            out = await admin_route.deploy_status(_admin_request())
+        self.assertIn("build", out)
+        self.assertIn("service_started", out)
+        self.assertIn("actions_runner", out)
+        # build dict always has the four keys even if git call failed —
+        # empty string is fine, None/missing is not.
+        for key in ("sha", "short_sha", "subject", "committed_at"):
+            self.assertIn(key, out["build"])
+
+    async def test_runner_status_handles_missing_systemctl(self):
+        # Environment without systemd — the helper must degrade to
+        # {active: False} rather than raising.
+        with patch("subprocess.run", side_effect=FileNotFoundError()):
+            result = admin_route._runner_status()
+        self.assertFalse(result["active"])
+
+
 class WikiDiagRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()

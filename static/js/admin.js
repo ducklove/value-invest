@@ -10,9 +10,11 @@ async function loadAdminView() {
     container.innerHTML = '<div style="color:var(--text-secondary);text-align:center;padding:40px;">로딩 중...</div>';
   }
   try {
-    // Fetch the usual cards + the new observability cards in one round.
-    // event-summary is a tiny aggregate; events is the newest 50 rows.
-    const [batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes] = await Promise.all([
+    // deploy-status answers the "did my push land" question at a glance,
+    // so it sits right next to the other meta-status calls and renders
+    // at the top of the page.
+    const [deployRes, batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes] = await Promise.all([
+      apiFetch('/api/admin/deploy-status'),
       apiFetch('/api/admin/batch-status'),
       apiFetch('/api/admin/server-stats'),
       apiFetch('/api/admin/db-stats'),
@@ -20,13 +22,18 @@ async function loadAdminView() {
       apiFetch('/api/admin/event-summary?hours=24'),
       apiFetch('/api/admin/events?limit=50'),
     ]);
+    // deploy-status may 404 on servers that haven't picked up this build
+    // yet — which is, ironically, exactly the state this card is built
+    // to warn about. Fall back to an empty object so the rest of the
+    // dashboard still renders.
+    const deploy = deployRes.ok ? await deployRes.json() : null;
     const batch = await batchRes.json();
     const server = await serverRes.json();
     const db = await dbRes.json();
     const users = await usersRes.json();
     const summary = summaryRes.ok ? await summaryRes.json() : {by_source: {}, latest: {}};
     const events = eventsRes.ok ? await eventsRes.json() : [];
-    container.innerHTML = _renderAdmin(batch, server, db, users, summary, events);
+    container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events);
     _adminLoaded = true;
     _startLiveUpdates();
   } catch (e) {
@@ -34,10 +41,11 @@ async function loadAdminView() {
   }
 }
 
-function _renderAdmin(batch, server, db, users, summary, events) {
+function _renderAdmin(deploy, batch, server, db, users, summary, events) {
   return `
     <div class="admin-dashboard">
       <h2 class="admin-title">시스템 관리</h2>
+      ${_renderDeployCard(deploy)}
       <div id="adminLiveSection">${_renderServerCard(server)}</div>
       ${_renderBatchSection(batch)}
       ${_renderSubsystemSummary(summary)}
@@ -47,6 +55,73 @@ function _renderAdmin(batch, server, db, users, summary, events) {
       ${_renderDbSection(db)}
     </div>
   `;
+}
+
+// --- Deploy status ------------------------------------------------------
+//
+// Shows the commit SHA currently running in this process, when the
+// service started, and whether the auto-deploy runner is alive. The
+// whole reason this exists is so that "did my push reach prod?" is
+// answerable without SSH'ing in.
+
+function _renderDeployCard(d) {
+  if (!d) {
+    // Endpoint 404 — either the deploy hasn't reached this release yet
+    // (old binary), or the route is genuinely missing. Either way the
+    // operator learns something useful: this card IS the canary.
+    return `
+      <div class="admin-section">
+        <h3>배포 상태 <span class="admin-sub admin-status-fail">엔드포인트 없음 — 자동 배포 미반영 또는 브라우저 캐시</span></h3>
+        <div class="admin-sub" style="padding:8px 0;">
+          최신 배포가 반영됐다면 이 카드에 커밋 SHA 가 보여야 합니다.
+          Ctrl+Shift+R 로 강제 새로고침 후에도 안 보이면 자동 배포 파이프라인 점검이 필요합니다.
+        </div>
+      </div>
+    `;
+  }
+  const b = d.build || {};
+  const runner = d.actions_runner || {};
+  const runnerCls = runner.active ? 'admin-status-ok' : 'admin-status-fail';
+  const runnerIcon = runner.active ? '✓' : '✗';
+  return `
+    <div class="admin-section">
+      <h3>배포 상태</h3>
+      <div class="admin-cards">
+        <div class="admin-card">
+          <div class="admin-card-label">현재 커밋</div>
+          <div class="admin-card-value"><code>${_esc(b.short_sha || '-')}</code></div>
+          <div class="admin-sub" title="${_esc(b.sha || '')}">${_esc(b.subject || '')}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">커밋 시각</div>
+          <div class="admin-card-value">${_esc(_fmtBuildTime(b.committed_at))}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">서비스 시작</div>
+          <div class="admin-card-value">${_esc(_fmtBuildTime(d.service_started))}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">자동 배포 러너</div>
+          <div class="admin-card-value ${runnerCls}">${runnerIcon} ${runner.active ? '동작 중' : '중지됨'}</div>
+          <div class="admin-sub">${_esc(runner.name || '')}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function _fmtBuildTime(s) {
+  if (!s) return '-';
+  try {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;  // raw pass-through if not ISO
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mn = String(d.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${mn}`;
+  } catch (_) { return s; }
 }
 
 function _renderServerCard(s) {

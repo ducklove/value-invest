@@ -288,6 +288,89 @@ async def db_stats(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Deploy status — what commit is this process actually running, and is
+# the auto-deploy pipeline healthy? Without this, verifying "did my push
+# reach prod" required SSH'ing in. That defeats the whole point of an
+# admin dashboard.
+# ---------------------------------------------------------------------------
+
+def _load_build_info() -> dict:
+    """Read the git commit that was checked out when this module was
+    imported. Captures the version actually running in THIS process —
+    a later `git pull` won't mutate it, so the dashboard reflects the
+    binary's reality, not the filesystem's."""
+    info = {"sha": "", "short_sha": "", "subject": "", "committed_at": ""}
+    try:
+        root = Path(__file__).parent.parent
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%H%n%h%n%s%n%cI"],
+            cwd=str(root), capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            lines = result.stdout.strip().split("\n")
+            if len(lines) >= 4:
+                info["sha"] = lines[0]
+                info["short_sha"] = lines[1]
+                info["subject"] = lines[2]
+                info["committed_at"] = lines[3]
+    except Exception:
+        pass
+    return info
+
+
+_BUILD_INFO = _load_build_info()
+
+
+def _runner_status() -> dict:
+    """Poll systemd for any active `actions.runner.*` service — the
+    self-hosted GitHub Actions runner that drives auto-deploy. If this
+    is down, no push will actually land on the Pi until it's restarted."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "list-units", "--type=service", "--state=active",
+             "actions.runner.*", "--no-legend", "--plain"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().split("\n"):
+            parts = line.split()
+            if parts and parts[0].startswith("actions.runner."):
+                return {"active": True, "name": parts[0]}
+    except Exception as exc:
+        return {"active": False, "name": "", "error": str(exc)[:200]}
+    return {"active": False, "name": ""}
+
+
+def _service_start_timestamp() -> str:
+    """Raw ActiveEnterTimestamp for value-invest.service. Same format
+    systemctl prints — the frontend parses it as a plain Date string."""
+    try:
+        r = subprocess.run(
+            ["systemctl", "show", "value-invest.service",
+             "--property=ActiveEnterTimestamp"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in r.stdout.strip().split("\n"):
+            if line.startswith("ActiveEnterTimestamp="):
+                return line.split("=", 1)[1]
+    except Exception:
+        pass
+    return ""
+
+
+@router.get("/deploy-status")
+async def deploy_status(request: Request):
+    """What commit is running, when did the process start, is the
+    auto-deploy runner alive. Serves as the 'is my push live yet'
+    signal so the operator doesn't need to SSH."""
+    await _require_admin(request)
+    return {
+        "build": _BUILD_INFO,
+        "service_started": _service_start_timestamp(),
+        "actions_runner": _runner_status(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Observability: event feed + per-subsystem diagnostics
 # ---------------------------------------------------------------------------
 
