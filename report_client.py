@@ -124,6 +124,34 @@ async def fetch_latest_report(stock_code: str) -> dict | None:
     return None
 
 
+def _dedupe_reports(reports: list[dict]) -> list[dict]:
+    """Drop duplicates produced by Naver's pagination.
+
+    Naver's research list occasionally returns the same report row on
+    multiple pages — 058650 was coming back as 25 rows for ~13 unique
+    reports, inflating the count on the analysis page and confusing the
+    "왜 위키가 1건뿐이냐" question (sha1-based dedup in the wiki layer
+    was hiding upstream duplication).
+
+    Key: (date, firm, title). pdf_url isn't used because rows without a
+    PDF link still collide legitimately on that tuple. First occurrence
+    wins so enriched-earlier rows (with pdf_url set) are preferred.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    out: list[dict] = []
+    for r in reports:
+        key = (
+            (r.get("date") or "").strip(),
+            (r.get("firm") or "").strip(),
+            (r.get("title") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
 async def fetch_reports(stock_code: str, max_pages: int = 5, per_page: int = 20) -> list[dict]:
     cutoff_year = datetime.now().year - 3
     reports = []
@@ -171,4 +199,4 @@ async def fetch_reports(stock_code: str, max_pages: int = 5, per_page: int = 20)
 
             reports.extend(await asyncio.gather(*(enrich(report) for report in page_reports)))
 
-    return reports
+    return _dedupe_reports(reports)
