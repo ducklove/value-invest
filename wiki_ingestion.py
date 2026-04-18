@@ -44,9 +44,22 @@ PDF_CACHE_DIR = APP_DIR / "data" / "pdf_cache"
 # are 5-15 pages; 12k chars ≈ 3k tokens for Korean — fits every model with
 # room for the prompt scaffolding.
 MAX_PDF_CHARS = 12000
-# Maximum reports to summarize per stock per ingestion run. Prevents a
-# backfill from hammering OpenRouter in one go.
-DEFAULT_PER_STOCK_LIMIT = 10
+# Maximum reports to summarize per stock per ingestion run. Controls how
+# much historical depth the wiki accumulates — bump up to backfill past
+# reports, down to rate-limit a fresh deploy.
+#
+# Override at runtime via Environment="WIKI_PER_STOCK_LIMIT=N" in the
+# systemd unit. Invalid values fall back to 50.
+def _default_per_stock_limit() -> int:
+    raw = os.environ.get("WIKI_PER_STOCK_LIMIT", "")
+    try:
+        v = int(raw)
+        return v if v > 0 else 50
+    except (TypeError, ValueError):
+        return 50
+
+
+DEFAULT_PER_STOCK_LIMIT = _default_per_stock_limit()
 # Parallelism for LLM calls — OpenRouter defaults can handle a few at once
 # and each call is a few seconds. Keep modest so a pipeline run doesn't
 # starve user-facing AI analysis.

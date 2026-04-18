@@ -37,6 +37,12 @@ Environment="WIKI_MODEL=google/gemma-4-31b-it"
 # chain-of-thought over cross-holding data.
 Environment="WIKI_QA_MODEL=google/gemma-4-31b-it"
 
+# How many reports per stock the wiki pipeline tries to backfill on each
+# tick. Default in code is 50 — set here explicitly so the knob is visible
+# alongside the other WIKI_* settings. Raise to widen history, lower to
+# throttle OpenRouter spend during the first-deploy catch-up pass.
+Environment="WIKI_PER_STOCK_LIMIT=50"
+
 # --- Security hardening ---------------------------------------------------
 # A runaway WebSocket loop or yfinance retry storm must not OOM the Pi and
 # take sshd down with it. Most of these are cheap sandbox tweaks; the

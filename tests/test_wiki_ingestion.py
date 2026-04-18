@@ -2,6 +2,7 @@
 
 Uses the same isolated-DB fixture pattern as test_portfolio.py. All LLM
 and HTTP calls are monkeypatched — no network."""
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,33 @@ from unittest.mock import AsyncMock, patch
 
 import cache
 import wiki_ingestion
+
+
+class PerStockLimitEnvTests(unittest.TestCase):
+    """Guard WIKI_PER_STOCK_LIMIT parsing — this knob controls how much
+    history the pipeline backfills per tick, so a silently-dropped env
+    would quietly cap the wiki at 10 reports per stock again."""
+
+    def test_default_when_env_unset(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WIKI_PER_STOCK_LIMIT", None)
+            self.assertEqual(wiki_ingestion._default_per_stock_limit(), 50)
+
+    def test_parses_valid_integer(self):
+        with patch.dict(os.environ, {"WIKI_PER_STOCK_LIMIT": "123"}):
+            self.assertEqual(wiki_ingestion._default_per_stock_limit(), 123)
+
+    def test_rejects_non_positive(self):
+        with patch.dict(os.environ, {"WIKI_PER_STOCK_LIMIT": "0"}):
+            self.assertEqual(wiki_ingestion._default_per_stock_limit(), 50)
+        with patch.dict(os.environ, {"WIKI_PER_STOCK_LIMIT": "-5"}):
+            self.assertEqual(wiki_ingestion._default_per_stock_limit(), 50)
+
+    def test_rejects_garbage(self):
+        with patch.dict(os.environ, {"WIKI_PER_STOCK_LIMIT": "abc"}):
+            self.assertEqual(wiki_ingestion._default_per_stock_limit(), 50)
+        with patch.dict(os.environ, {"WIKI_PER_STOCK_LIMIT": ""}):
+            self.assertEqual(wiki_ingestion._default_per_stock_limit(), 50)
 
 
 SAMPLE_PDF_BYTES = b"%PDF-1.4\n%stub\n1 0 obj <<>> endobj\n%%EOF\n"
