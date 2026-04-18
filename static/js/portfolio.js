@@ -563,8 +563,8 @@ function renderPortfolio() {
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
-        <div class="pf-summary-value ${_l ? returnClass(dailyNavPct) : ''}">${_l ? fmtPct(dailyNavPct ?? 0) : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(totalDailyPnlDisplay) : ''}">${_l ? _fsv(totalDailyPnlDisplay) : ''}</div>
+        <div class="pf-summary-value ${_l ? returnClass(dailyNavPct) : ''}">${_l ? (dailyNavPct !== null ? fmtPct(dailyNavPct) : '-') : '-'}</div>
+        <div class="pf-summary-sub ${_l ? returnClass(totalDailyPnlDisplay) : ''}">${_l && dailyNavPct !== null ? _fsv(totalDailyPnlDisplay) : ''}</div>
       </div>
       <canvas class="pf-sparkline" id="sparkDaily"></canvas>
     </div>

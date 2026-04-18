@@ -1226,6 +1226,12 @@ async def get_prev_day_snapshot(request: Request):
         elif row["type"] == "withdrawal":
             today_net_cashflow -= row["amount"]
     return {
+        # date is the baseline the UI's Today card compares against. Was
+        # missing from the response, which made the frontend's baseline
+        # label silently fall back to "기준 없음" while the numerical
+        # value was being computed against nav/total_value anyway —
+        # label and value disagreed.
+        "date": snap_date,
         "total_value": total_value,
         "fx_usdkrw": fx_usdkrw,
         "nav": prev_nav,
