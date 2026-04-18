@@ -1979,9 +1979,23 @@ async def get_benchmark_earliest_date(code: str) -> str | None:
 
 
 async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:
-    """Union of (a) any stock in a user portfolio, (b) starred stocks,
-    (c) recently-viewed-within-N-days stocks. Used by the ingestion
-    pipeline to avoid processing stocks nobody cares about."""
+    """Pick which stocks the wiki ingestion pipeline should process.
+
+    Union of four signals:
+      (a) currently held in any user portfolio
+      (b) starred by any user
+      (c) per-user recent analysis (user_recent_analyses) within N days
+      (d) any stock whose analysis snapshot (analysis_meta) was touched
+          within N days
+
+    (d) was added after a concrete miss: LG화학 had an analysis snapshot
+    but no wiki entries, because user_recent_analyses bookkeeping had
+    gone missing for that stock (the per-user path depends on a logged-in
+    session being correctly threaded through /api/analyze — brittle).
+    analysis_meta.analyzed_at is updated on every successful analysis run
+    regardless of session state, so folding it in makes "user searched
+    for this stock" the robust trigger the pipeline needed.
+    """
     db = await get_db()
     cursor = await db.execute(
         f"""SELECT DISTINCT stock_code FROM (
@@ -1991,6 +2005,9 @@ async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:
             UNION
             SELECT stock_code FROM user_recent_analyses
               WHERE viewed_at >= datetime('now', '-{int(recent_days)} days')
+            UNION
+            SELECT stock_code FROM analysis_meta
+              WHERE analyzed_at >= datetime('now', '-{int(recent_days)} days')
         )
         WHERE stock_code IS NOT NULL""",
     )

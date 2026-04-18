@@ -158,6 +158,62 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("035420", codes)
         self.assertNotIn("999999", codes)
 
+    async def test_select_target_stocks_via_analysis_meta(self):
+        """Regression: a stock that was merely *analyzed* recently (no
+        portfolio, no star, no user_recent_analyses row) must still land
+        in the wiki target set. This was the LG화학 failure mode —
+        analysis_meta had the stock, per-user bookkeeping did not, and
+        the pipeline skipped it entirely."""
+        from datetime import datetime, timedelta
+        db = await cache.get_db()
+        # Fresh analysis, no per-user signal anywhere.
+        recent_ts = datetime.now().isoformat()
+        await db.execute(
+            "INSERT INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+            ("051910", "LG화학", recent_ts, "{}"),
+        )
+        # Stale analysis that should NOT count.
+        old_ts = (datetime.now() - timedelta(days=60)).isoformat()
+        await db.execute(
+            "INSERT INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+            ("042660", "한화오션", old_ts, "{}"),
+        )
+        await db.commit()
+        codes = await cache.select_wiki_target_stocks(recent_days=30)
+        self.assertIn("051910", codes)
+        self.assertNotIn("042660", codes)
+
+    async def test_select_target_stocks_dedupes_across_signals(self):
+        """A stock appearing in multiple signals (portfolio + analyzed
+        + recent_view) must appear only once in the result — the
+        DISTINCT is load-bearing because run_pipeline iterates the list
+        and a duplicate would double the LLM calls for that stock."""
+        from datetime import datetime
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("u2", "u2@e.com", "U", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+        )
+        await db.execute(
+            "INSERT INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+            ("005930", "삼성전자", datetime.now().isoformat(), "{}"),
+        )
+        await db.execute(
+            "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("u2", "005930", "삼성전자", 5, 60000, "2026-01-01", "2026-01-01"),
+        )
+        await db.execute(
+            "INSERT INTO user_stock_preferences (google_sub, stock_code, is_starred, is_pinned, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("u2", "005930", 1, 0, "2026-01-01"),
+        )
+        await db.execute(
+            "INSERT INTO user_recent_analyses (google_sub, stock_code, viewed_at) VALUES (?, ?, ?)",
+            ("u2", "005930", datetime.now().isoformat()),
+        )
+        await db.commit()
+        codes = await cache.select_wiki_target_stocks(recent_days=30)
+        self.assertEqual(codes.count("005930"), 1)
+
     # -- dedup by sha1 --
 
     async def test_pdf_cache_keyed_by_sha1(self):
