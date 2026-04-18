@@ -238,14 +238,32 @@ function _progressColor(pct) {
 
 function _renderBatchSection(jobs) {
   const rows = jobs.map(j => {
+    // Execution status = "did systemd exit 0". Kept for visibility into
+    // the process layer (did the script even run?), but it no longer
+    // stands alone — see the 최신 데이터 column below for "did the
+    // script actually write anything useful?".
     const statusIcon = j.status === 'success' ? '✓' : j.status === 'failed' ? '✗' : j.status === 'running' ? '⟳' : '—';
     const statusClass = j.status === 'success' ? 'admin-status-ok' : j.status === 'failed' ? 'admin-status-fail' : j.status === 'running' ? 'admin-status-run' : '';
     const lastRun = j.last_start ? _fmtTimestamp(j.last_start) : '-';
     const nextRun = j.next_run ? _fmtTimestamp(j.next_run) : '-';
+
+    // 최신 데이터 — the column that would have made 4/17 NPS miss
+    // obvious from the dashboard instead of a "success" check mark.
+    const stale = j.staleness || {};
+    let dataCell;
+    if (stale.level === 'missing') {
+      dataCell = `<span class="admin-status-fail">✗ ${_esc(stale.note || '데이터 없음')}</span>`;
+    } else if (stale.level === 'stale') {
+      dataCell = `<span class="admin-status-fail">⚠ ${_esc(stale.note || '지연')}</span>`;
+    } else {
+      dataCell = `<span class="admin-status-ok">${_esc(stale.note || j.latest_data_date || '-')}</span>`;
+    }
+
     return `
       <tr>
         <td><strong>${j.label}</strong><div class="admin-sub">${j.schedule}</div></td>
         <td class="${statusClass}">${statusIcon} ${_statusLabel(j.status)}</td>
+        <td>${dataCell}</td>
         <td>${lastRun}</td>
         <td>${nextRun}</td>
         <td>
@@ -258,9 +276,16 @@ function _renderBatchSection(jobs) {
 
   return `
     <div class="admin-section">
-      <h3>배치 작업</h3>
+      <h3>배치 작업 <span class="admin-sub">실행 상태 ≠ 데이터 상태 — 둘 다 확인</span></h3>
       <table class="admin-table">
-        <thead><tr><th>작업</th><th>상태</th><th>최근 실행</th><th>다음 실행</th><th>수동 실행</th></tr></thead>
+        <thead><tr>
+          <th>작업</th>
+          <th>실행 상태</th>
+          <th>최신 데이터</th>
+          <th>최근 실행</th>
+          <th>다음 실행</th>
+          <th>수동 실행</th>
+        </tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>

@@ -8,7 +8,7 @@ something and sees the right rows".
 import json
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -250,6 +250,118 @@ class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
         # Known sources always appear in `latest` (value None if no row yet).
         self.assertIn("snapshot_nps", summary["latest"])
         self.assertIsNone(summary["latest"]["snapshot_nps"])
+
+
+class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
+    """Guards the "exit 0 ≠ success" distinction. Before this, the
+    dashboard painted snapshot_nps green on days when the job exited
+    cleanly without writing (weekend skip / silent-retry give-up /
+    4/17 miss). Staleness needs to be derived from the DOWNSTREAM
+    table, not from systemd state."""
+
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch.start()
+        await cache.close_db()
+        await cache.init_db()
+
+    async def asyncTearDown(self):
+        await cache.close_db()
+        self.db_patch.stop()
+        self.tmp.cleanup()
+
+    async def test_latest_data_date_for_nps_reads_from_table(self):
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT INTO nps_snapshots (date, total_value, nav, total_count, generated_html) VALUES (?, ?, ?, ?, ?)",
+            ("2026-04-16", 1_000_000, 1000.0, 100, ""),
+        )
+        await db.execute(
+            "INSERT INTO nps_snapshots (date, total_value, nav, total_count, generated_html) VALUES (?, ?, ?, ?, ?)",
+            ("2026-04-14", 1_000_000, 1000.0, 100, ""),
+        )
+        await db.commit()
+        latest = await admin_route._latest_data_date_for("nps-snapshot")
+        self.assertEqual(latest, "2026-04-16")
+
+    async def test_latest_data_date_none_when_empty(self):
+        self.assertIsNone(await admin_route._latest_data_date_for("nps-snapshot"))
+        self.assertIsNone(await admin_route._latest_data_date_for("portfolio-snapshot"))
+
+    def test_staleness_flags_missing_when_no_data(self):
+        result = admin_route._compute_staleness("nps-snapshot", None)
+        self.assertEqual(result["level"], "missing")
+        self.assertIn("데이터 없음", result["note"])
+
+    def test_staleness_ok_when_latest_matches_expected(self):
+        # expected_latest is always the most recent weekday <= today-1
+        # (or today if it's a weekend). Pass that same date as latest
+        # and we should land on level=ok.
+        today = date.today()
+        probe = today - timedelta(days=1) if today.weekday() < 5 else today
+        while probe.weekday() >= 5:
+            probe -= timedelta(days=1)
+        latest = probe.isoformat()
+        result = admin_route._compute_staleness("nps-snapshot", latest)
+        self.assertEqual(result["level"], "ok")
+        self.assertEqual(result["trading_days_behind"], 0)
+
+    def test_staleness_counts_trading_days_only(self):
+        # Pretend today is a Wednesday and the latest data is from the
+        # previous Friday → stale by 2 trading days (Mon, Tue). Weekend
+        # days don't count.
+        #
+        # We can't actually control `today`, so fabricate a scenario
+        # where expected_latest is N weekdays ahead of `latest` by
+        # seeding a date N trading days in the past.
+        today = date.today()
+        probe = today - timedelta(days=1) if today.weekday() < 5 else today
+        while probe.weekday() >= 5:
+            probe -= timedelta(days=1)
+        # Walk back 3 trading days from expected.
+        cursor = probe
+        steps = 3
+        while steps > 0:
+            cursor -= timedelta(days=1)
+            if cursor.weekday() < 5:
+                steps -= 1
+        stale_latest = cursor.isoformat()
+        result = admin_route._compute_staleness("nps-snapshot", stale_latest)
+        self.assertEqual(result["level"], "stale")
+        self.assertEqual(result["trading_days_behind"], 3)
+
+    def test_staleness_handles_malformed_date(self):
+        # Defensive: a corrupted DB value shouldn't crash the dashboard.
+        result = admin_route._compute_staleness("nps-snapshot", "not-a-date")
+        self.assertEqual(result["level"], "stale")
+        self.assertIsNone(result["trading_days_behind"])
+
+    async def test_batch_status_attaches_staleness_per_job(self):
+        admin_user = {"google_sub": "u1", "email": "a@b.c", "is_admin": True}
+        db = await cache.get_db()
+        # Seed stale NPS data (10 days old on any day of the week).
+        stale_date = (date.today() - timedelta(days=10)).isoformat()
+        await db.execute(
+            "INSERT INTO nps_snapshots (date, total_value, nav, total_count, generated_html) VALUES (?, ?, ?, ?, ?)",
+            (stale_date, 1_000_000, 1000.0, 100, ""),
+        )
+        await db.commit()
+        with patch("routes.admin.get_current_user", AsyncMock(return_value=admin_user)), \
+             patch.object(admin_route, "_get_timer_status", return_value={
+                 "status": "success", "last_start": "", "next_run": "",
+                 "service_state": "active", "sub_state": "exited",
+                 "exit_code": "0", "pid": "0",
+                 "timer_active": "active", "last_trigger": "",
+             }):
+            jobs = await admin_route.batch_status(_admin_request())
+        nps_row = next(j for j in jobs if j["name"] == "nps-snapshot")
+        self.assertEqual(nps_row["latest_data_date"], stale_date)
+        self.assertEqual(nps_row["staleness"]["level"], "stale")
+        # Crucial invariant: systemd says success, data says stale.
+        # The dashboard now shows both so the operator can spot the
+        # mismatch instead of trusting the green check alone.
+        self.assertEqual(nps_row["status"], "success")
 
 
 class DeployStatusRouteTests(unittest.IsolatedAsyncioTestCase):

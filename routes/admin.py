@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import subprocess
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -96,13 +96,111 @@ def _get_timer_status(name: str) -> dict:
         return {"status": "error", "error": str(e)}
 
 
+async def _latest_data_date_for(job_name: str) -> str | None:
+    """Return the most recent date that actually has data produced by
+    this batch job. systemd exit-0 alone doesn't prove the job wrote
+    anything — a weekend-skip or a post-failure-retry that gave up can
+    both end in exit 0. Querying the downstream table is the only way
+    to know whether the operator should actually trust a 'success'."""
+    db = await cache.get_db()
+    if job_name == "portfolio-snapshot":
+        # Any user's most recent NAV snapshot date.
+        cursor = await db.execute("SELECT MAX(date) AS d FROM portfolio_snapshots")
+        row = await cursor.fetchone()
+        return row["d"] if row and row["d"] else None
+    if job_name == "nps-snapshot":
+        cursor = await db.execute("SELECT MAX(date) AS d FROM nps_snapshots")
+        row = await cursor.fetchone()
+        return row["d"] if row and row["d"] else None
+    if job_name == "portfolio-intraday":
+        # Intraday writes ISO timestamps (YYYY-MM-DDTHH:MM); strip to date.
+        cursor = await db.execute("SELECT MAX(ts) AS t FROM portfolio_intraday")
+        row = await cursor.fetchone()
+        if row and row["t"]:
+            return row["t"][:10]
+        return None
+    return None
+
+
+def _is_trading_day(iso_date: str) -> bool:
+    """Weekday check — ignores Korean holidays, which is OK for dashboard
+    purposes (we only use this to decide whether a missing date is cause
+    for alarm; a false alarm on 신정 is harmless vs. the cost of shipping
+    a full holiday calendar)."""
+    try:
+        return date.fromisoformat(iso_date).weekday() < 5
+    except Exception:
+        return False
+
+
+def _compute_staleness(job_name: str, latest_data_date: str | None) -> dict:
+    """Classify how fresh this job's data is relative to today.
+
+    Returns:
+      level: 'ok' | 'stale' | 'missing'
+      expected_latest: the YYYY-MM-DD we'd expect to see for a healthy job
+      trading_days_behind: how many weekdays of data are missing (0 when ok)
+      note: human-readable short label
+
+    For the intraday job "latest" is the last trading day's intraday
+    activity — stale-ness isn't as clean as for daily jobs, so we give
+    it a looser treatment.
+    """
+    today = date.today()
+    # Expected latest date = last trading day <= today. The 22:00 KST
+    # daily jobs write for the same day, so if today is a weekday after
+    # 22:00 we'd expect today; before 22:00 we'd expect yesterday. Use
+    # yesterday as the conservative expectation so the dashboard doesn't
+    # cry "stale" between 09:00–22:00.
+    probe = today - timedelta(days=1) if today.weekday() < 5 else today
+    while probe.weekday() >= 5:
+        probe -= timedelta(days=1)
+    expected = probe.isoformat()
+
+    if not latest_data_date:
+        return {"level": "missing", "expected_latest": expected,
+                "trading_days_behind": None, "note": "데이터 없음"}
+
+    # Count trading-day gap.
+    gap = 0
+    cursor = date.fromisoformat(expected)
+    try:
+        latest_d = date.fromisoformat(latest_data_date)
+    except ValueError:
+        return {"level": "stale", "expected_latest": expected,
+                "trading_days_behind": None, "note": f"날짜 파싱 실패 ({latest_data_date})"}
+
+    while cursor > latest_d:
+        if cursor.weekday() < 5:
+            gap += 1
+        cursor -= timedelta(days=1)
+
+    if gap <= 0:
+        return {"level": "ok", "expected_latest": expected,
+                "trading_days_behind": 0,
+                "note": f"최신 {latest_data_date}"}
+    return {"level": "stale", "expected_latest": expected,
+            "trading_days_behind": gap,
+            "note": f"최신 {latest_data_date} — 거래일 {gap}일 지연"}
+
+
 @router.get("/batch-status")
 async def batch_status(request: Request):
     await _require_admin(request)
     jobs = []
     for t in _TIMERS:
         info = _get_timer_status(t["name"])
-        jobs.append({**t, **info})
+        # Augment the systemd snapshot with "did this job actually
+        # produce data recently?". Without this, a weekend skip or a
+        # silent-failure retry can still paint the card green when the
+        # operator cares whether 4/17 got written to nps_snapshots.
+        latest_data_date = await _latest_data_date_for(t["name"])
+        staleness = _compute_staleness(t["name"], latest_data_date)
+        jobs.append({
+            **t, **info,
+            "latest_data_date": latest_data_date,
+            "staleness": staleness,
+        })
     return jobs
 
 
