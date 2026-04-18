@@ -518,7 +518,19 @@ function renderPortfolio() {
   // Date labels for summary cards
   const _now = new Date();
   const _timeLabel = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
-  const _todayLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}/${String(_now.getDate()).padStart(2,'0')}`;
+  // Today card: the baseline is the previous-day 22:00 KST snapshot,
+  // not "today". Showing today's date here was misleading — the value
+  // actually describes change vs that prior snapshot. We surface the
+  // snapshot's real timestamp so "Today" is unambiguous.
+  //
+  // 22:00 is the snapshot_nav cron cadence; portfolio_snapshots stores
+  // only a date column, but the time is a hard contract of that job.
+  // For filtered views we fall back to live-quote previous_close math
+  // which conceptually shares the same baseline date.
+  const _todayBaseDate = pfPrevDaySnapshot && pfPrevDaySnapshot.date;
+  const _todayLabel = _todayBaseDate
+    ? `기준 ${_todayBaseDate} 22:00`
+    : '기준 없음';
   const _mtdLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}`;
   const _ytdLabel = `${_now.getFullYear()}`;
 
