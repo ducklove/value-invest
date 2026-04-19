@@ -1111,6 +1111,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
      종목명 · 등락률 · 수익률 · 평가금액. */
   .pf-col-invested,
   .pf-col-dividend,
+  .pf-col-divyield,
   .pf-col-date,
   .pf-col-act { display: none !important; }
   .pf-table { font-size: 11px; }

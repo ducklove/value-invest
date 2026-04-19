@@ -1069,6 +1069,23 @@ async def get_portfolio(google_sub: str) -> list[dict]:
     return [dict(row) for row in await cursor.fetchall()]
 
 
+# Korean preferred-stock codes end with a suffix other than '0'. The
+# market_data table typically only stores the common stock's dividend
+# record, so the preferred stock gets no hit on an exact code match —
+# hence the fallback to the common-stock row via _pref_to_common().
+_KR_PREF_SUFFIXES = ("5", "7", "8", "9", "K", "L")
+
+
+def _pref_to_common(code: str) -> str | None:
+    """우선주 코드 → 해당 보통주 코드 (e.g. 005935 → 005930, 00088K → 000880).
+    우선주가 아니면 None."""
+    if len(code) != 6:
+        return None
+    if code[-1] in _KR_PREF_SUFFIXES:
+        return code[:-1] + "0"
+    return None
+
+
 async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
     """Latest positive `dividend_per_share` per stock across market_data.
 
@@ -1080,11 +1097,27 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
 
     Excluded: the current calendar year, to avoid the "0 until announced"
     trap the analysis page had (see stock_price.py dividend fallback).
+
+    Preferred-stock fallback: the market_data pipeline (stock_price.py)
+    indexes by common-stock code, so a 005935 holding will miss unless
+    we also look up its common counterpart 005930. The actual dividend
+    paid to preferred holders is usually slightly higher (typical 1%p
+    dividend premium) than the common, but the common figure is the
+    best automated approximation available until preferred-specific
+    data is harvested separately. Without this fallback preferred-stock
+    배당액 is silently 0 across the whole table.
     """
     if not stock_codes:
         return {}
+    # Build expanded query set = user's codes ∪ their common-stock fallbacks.
+    pref_to_common_map: dict[str, str] = {}
+    for code in stock_codes:
+        common = _pref_to_common(code)
+        if common and common != code:
+            pref_to_common_map[code] = common
+    all_codes = list(set(stock_codes) | set(pref_to_common_map.values()))
     current_year = datetime.now().year
-    placeholders = ",".join("?" for _ in stock_codes)
+    placeholders = ",".join("?" for _ in all_codes)
     db = await get_db()
     cursor = await db.execute(
         f"""SELECT stock_code, dividend_per_share, year
@@ -1102,9 +1135,20 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
                   AND year < ?
                 GROUP BY stock_code
               )""",
-        (*stock_codes, current_year, *stock_codes, current_year),
+        (*all_codes, current_year, *all_codes, current_year),
     )
-    return {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
+    direct_dps = {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
+
+    # Return only entries for the originally-requested codes. Preferred
+    # codes resolve through the common fallback; exact-match codes pass
+    # through unchanged.
+    out: dict[str, float] = {}
+    for code in stock_codes:
+        if code in direct_dps:
+            out[code] = direct_dps[code]
+        elif code in pref_to_common_map and pref_to_common_map[code] in direct_dps:
+            out[code] = direct_dps[pref_to_common_map[code]]
+    return out
 
 
 async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:

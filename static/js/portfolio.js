@@ -22,18 +22,22 @@ let pfFxRate = null; // USD/KRW rate
 const PF_QUOTE_REFRESH_MS = 60_000;
 
 // --- Column visibility ---
+// `defaultVisible: false` 는 "처음 방문하는 사용자에게 기본 숨김".
+// 기존 사용자가 이미 localStorage 에 visibility 선택을 저장해둔 경우엔
+// 그 선택이 우선 (_pfGetColVisibility 로직 참조).
 const PF_COL_DEFS = [
   { key: 'group',     cls: 'pf-col-group',     label: '그룹' },
   { key: 'benchmark', cls: 'pf-col-benchmark',  label: '벤치마크' },
-  { key: 'invested',  cls: 'pf-col-invested',   label: '거래액' },
+  { key: 'invested',  cls: 'pf-col-invested',   label: '거래액',  defaultVisible: false },
   { key: 'buyprice',  cls: 'pf-col-buyprice',   label: '매입가' },
   { key: 'curprice',  cls: 'pf-col-curprice',   label: '현재가' },
   { key: 'qty',       cls: 'pf-col-qty',        label: '수량' },
   { key: 'return',    cls: 'pf-col-return',      label: '수익률' },
   { key: 'mktval',    cls: 'pf-col-mktval',     label: '평가금액' },
   { key: 'dividend',  cls: 'pf-col-dividend',   label: '배당액' },
+  { key: 'divyield',  cls: 'pf-col-divyield',   label: '배당수익률' },
   { key: 'weight',    cls: 'pf-col-weight',      label: '비중' },
-  { key: 'date',      cls: 'pf-col-date',       label: '등록일자' },
+  { key: 'date',      cls: 'pf-col-date',       label: '등록일자',  defaultVisible: false },
 ];
 let _pfColStyleEl = null;
 
@@ -44,7 +48,21 @@ function _pfSaveColVisibility(vis) {
   localStorage.setItem('pf_col_vis', JSON.stringify(vis));
 }
 function _pfGetColVisibility() {
-  return _pfLoadColVisibility() || Object.fromEntries(PF_COL_DEFS.map(c => [c.key, true]));
+  // Stored per-user overrides take priority; columns not yet known to
+  // the stored map (newly added) fall back to their defaultVisible
+  // setting. This lets us ship a new column hidden-by-default without
+  // wiping existing users' customizations. defaultVisible defaults to
+  // true when unspecified so bulk of the columns don't need the flag.
+  const stored = _pfLoadColVisibility() || {};
+  const result = {};
+  for (const c of PF_COL_DEFS) {
+    if (stored[c.key] !== undefined) {
+      result[c.key] = !!stored[c.key];
+    } else {
+      result[c.key] = c.defaultVisible !== false;
+    }
+  }
+  return result;
 }
 function _pfApplyColVisibility(vis) {
   if (!_pfColStyleEl) {
@@ -339,12 +357,22 @@ function renderPortfolio() {
     //   createdAtSort — created_at as YYYY-MM-DD for lexicographic
     //                    ascending = oldest first, matching user intent.
     const trailingDps = item.trailing_dps ?? null;
-    const dividendAmount = trailingDps !== null ? trailingDps * qty : null;
+    // Short / 선물매도 포지션 (qty < 0) 은 실제로는 배당락 만큼 현금
+    // 지급 의무가 있어 금융 수학적으로는 음수 배당이 맞지만, 포트폴리오
+    // 대시보드에서는 "내가 수취할 연간 배당" 이라는 단순한 의미로 쓰이는
+    // 편이 일반적. 따라서 음수·0 수량에는 배당 적용 없음으로 '-' 표시.
+    const dividendAmount = (trailingDps !== null && qty > 0) ? trailingDps * qty : null;
+    // 시가배당률 = 직전 연간 배당 ÷ 현재가. price 도 quote 에서 이미 KRW
+    // 환산된 값이라 trailingDps(KRW) 와 단위가 맞음. 현재가 누락이거나
+    // 음수·0 포지션은 계산 의미 없음.
+    const dividendYield = (trailingDps !== null && price !== null && price > 0 && qty > 0)
+      ? (trailingDps / price * 100)
+      : null;
     const createdAtSort = item.created_at ? item.created_at.slice(0, 10) : '';
     return {
       ...item, cur, price, change, changePct, qty, avgPrice,
       invested, marketValue, returnPct, dailyPnl,
-      trailingDps, dividendAmount, createdAtSort,
+      trailingDps, dividendAmount, dividendYield, createdAtSort,
     };
   });
 
@@ -652,6 +680,7 @@ function renderPortfolio() {
         <td class="pf-col-num pf-col-qty"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
         <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
+        <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
         <td class="pf-col-date"><input class="pf-edit-input" id="pfEditCreatedAt" value="${r.createdAtSort || ''}" type="date"></td>
         <td class="pf-col-act"><div class="pf-row-actions">
@@ -672,6 +701,7 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-qty">${fmtQty(r.qty)}</td>
       <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
       <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
+      <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield) : '-'}</td>
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
@@ -694,6 +724,7 @@ function renderPortfolio() {
     <td class="pf-col-qty"></td>
     <td class="pf-col-num pf-col-mktval">${_fp(totalMarketValue)}</td>
     <td class="pf-col-num pf-col-dividend">${totalDividend > 0 ? _fp(totalDividend) : '-'}</td>
+    <td class="pf-col-num pf-col-divyield">${totalDividend > 0 && totalMarketValue > 0 ? fmtPct(totalDividend / totalMarketValue * 100) : '-'}</td>
     <td class="pf-col-num pf-col-weight">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td class="pf-col-date"></td>
     <td class="pf-col-act"></td>

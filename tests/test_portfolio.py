@@ -127,6 +127,53 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_trailing_dividends_empty_list(self):
         self.assertEqual(await cache.get_trailing_dividends([]), {})
 
+    async def test_get_trailing_dividends_preferred_falls_back_to_common(self):
+        """우선주 (005935, 00088K 같은 코드) 는 market_data 에 자체 row 가
+        없는 경우가 대부분이므로 해당 보통주 (005930, 000880) 의 값으로
+        근사하도록 fallback. 이게 없으면 우선주는 배당액이 전부 0 으로 표시됨."""
+        from datetime import datetime
+        db = await cache.get_db()
+        current_year = datetime.now().year
+        await db.executemany(
+            """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
+               VALUES (?, ?, ?, ?)""",
+            [
+                # 보통주만 등록 — 우선주 직접 row 는 없음.
+                ("005930", current_year - 1, 72000, 1444.0),
+                ("000880", current_year - 1, 9000, 800.0),
+            ],
+        )
+        await db.commit()
+        dps = await cache.get_trailing_dividends([
+            "005935",   # 삼성전자 우선주 → 005930 fallback
+            "00088K",   # 한화 종류우선주 → 000880 fallback (6자리, K suffix)
+            "005930",   # 직접 매치
+            "999999",   # 매치 없음
+        ])
+        self.assertEqual(dps.get("005935"), 1444.0)
+        self.assertEqual(dps.get("00088K"), 800.0)
+        self.assertEqual(dps.get("005930"), 1444.0)
+        self.assertNotIn("999999", dps)
+
+    async def test_get_trailing_dividends_preferred_prefers_direct_match(self):
+        """우선주 자체 row 가 DB 에 있으면 그 값이 우선. 즉 실제 우선주
+        배당 프리미엄이 정확히 기록된 경우 fallback 을 건너뛴다."""
+        from datetime import datetime
+        db = await cache.get_db()
+        current_year = datetime.now().year
+        await db.executemany(
+            """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
+               VALUES (?, ?, ?, ?)""",
+            [
+                ("005930", current_year - 1, 72000, 1444.0),
+                # 우선주는 보통주보다 배당이 약간 많게 실제 기록되었다고 가정
+                ("005935", current_year - 1, 58000, 1445.0),
+            ],
+        )
+        await db.commit()
+        dps = await cache.get_trailing_dividends(["005935"])
+        self.assertEqual(dps.get("005935"), 1445.0)
+
     async def test_delete_nonexistent(self):
         await cache.delete_portfolio_item("u1", "999999")
         items = await cache.get_portfolio("u1")
