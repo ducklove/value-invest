@@ -28,7 +28,7 @@ const PF_QUOTE_REFRESH_MS = 60_000;
 const PF_COL_DEFS = [
   { key: 'group',     cls: 'pf-col-group',     label: '그룹' },
   { key: 'benchmark', cls: 'pf-col-benchmark',  label: '벤치마크' },
-  { key: 'invested',  cls: 'pf-col-invested',   label: '거래액',  defaultVisible: false },
+  { key: 'invested',  cls: 'pf-col-invested',   label: '거래대금',  defaultVisible: false },
   { key: 'buyprice',  cls: 'pf-col-buyprice',   label: '매입가' },
   { key: 'curprice',  cls: 'pf-col-curprice',   label: '현재가' },
   { key: 'qty',       cls: 'pf-col-qty',        label: '수량' },
@@ -356,7 +356,7 @@ function renderPortfolio() {
     //                    fallback (no extra sort plumbing needed).
     //   createdAtSort — created_at as YYYY-MM-DD for lexicographic
     //                    ascending = oldest first, matching user intent.
-    // 거래액 = 시장 누적 거래대금 (원). quote.trade_value 는 현재 한국
+    // 거래대금 = 시장 누적 거래대금 (원). quote.trade_value 는 현재 한국
     // 주식 경로 (KIS WS + HTTP) 에서만 전달. 해외/현금/금/크립토는
     // null → UI 에서 '-' 로 렌더. 추후 yfinance / Naver world / KIS
     // 해외 경로에서도 채우면 자동 적용됨.
