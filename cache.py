@@ -301,6 +301,20 @@ async def init_db():
             VALUES (new.id, new.stock_code, new.title, new.summary_md, new.key_points_md);
         END;
 
+        -- 우선주 배당금 — 공유 Google Sheet 의 Data!AI 컬럼 (연간 주당
+        -- 배당 원화). market_data 파이프라인은 보통주 코드만 인덱싱하므로
+        -- 우선주는 기존엔 보통주 값으로 근사할 수밖에 없었는데, 실제
+        -- 우선주 배당은 보통주 + 프리미엄이라 정확한 값이 시트에 들어있음.
+        -- preferred_dividends.py 가 주기적으로 fetch 해서 upsert.
+        CREATE TABLE IF NOT EXISTS preferred_dividends (
+            stock_code          TEXT PRIMARY KEY,
+            dividend_per_share  REAL,
+            source_name         TEXT,
+            common_code         TEXT,
+            sheet_year          INTEGER,
+            fetched_at          TEXT NOT NULL
+        );
+
         -- Structured event log for in-app observability. Each subsystem
         -- writes short status rows here (snapshot ticks, wiki ingest
         -- results, external API failures, LLM calls, etc.) so the admin
@@ -1139,16 +1153,94 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
     )
     direct_dps = {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
 
-    # Return only entries for the originally-requested codes. Preferred
-    # codes resolve through the common fallback; exact-match codes pass
-    # through unchanged.
+    # Preferred-stock override — a separately-curated Google Sheet carries
+    # accurate per-year dividends for preferreds (Data!AI = most recent
+    # year). When we have that value for a preferred code, it wins over
+    # the common-stock fallback because the real payout is usually a
+    # premium above common.
+    pref_codes = list(pref_to_common_map.keys())
+    pref_overrides: dict[str, float] = {}
+    if pref_codes:
+        pref_placeholders = ",".join("?" for _ in pref_codes)
+        cursor = await db.execute(
+            f"""SELECT stock_code, dividend_per_share
+                FROM preferred_dividends
+                WHERE stock_code IN ({pref_placeholders})
+                  AND dividend_per_share IS NOT NULL
+                  AND dividend_per_share > 0""",
+            pref_codes,
+        )
+        pref_overrides = {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
+
+    # Resolution order for preferred-stock codes:
+    #   (a) exact match in market_data — rare but authoritative
+    #   (b) preferred_dividends override (curated sheet)
+    #   (c) common-stock market_data fallback (approximation)
     out: dict[str, float] = {}
     for code in stock_codes:
         if code in direct_dps:
             out[code] = direct_dps[code]
+        elif code in pref_overrides:
+            out[code] = pref_overrides[code]
         elif code in pref_to_common_map and pref_to_common_map[code] in direct_dps:
             out[code] = direct_dps[pref_to_common_map[code]]
     return out
+
+
+async def upsert_preferred_dividends(rows: list[dict]) -> int:
+    """Bulk upsert from the Google Sheet fetcher.
+
+    rows: [{
+        "stock_code": "012205",
+        "dividend_per_share": 0.0 | None,
+        "source_name": "계양전기우",
+        "common_code": "012200",
+        "sheet_year": 2025,
+    }, ...]
+
+    Returns number of rows written. PK is stock_code so re-imports are
+    idempotent — caller doesn't need to clear the table first. Rows with
+    missing stock_code are skipped silently.
+    """
+    if not rows:
+        return 0
+    now = datetime.now().isoformat(timespec="seconds")
+    db = await get_db()
+    written = 0
+    for r in rows:
+        code = (r.get("stock_code") or "").strip()
+        if not code:
+            continue
+        await db.execute(
+            """INSERT INTO preferred_dividends
+               (stock_code, dividend_per_share, source_name, common_code, sheet_year, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(stock_code) DO UPDATE SET
+                   dividend_per_share = excluded.dividend_per_share,
+                   source_name = excluded.source_name,
+                   common_code = excluded.common_code,
+                   sheet_year = excluded.sheet_year,
+                   fetched_at = excluded.fetched_at""",
+            (
+                code,
+                r.get("dividend_per_share"),
+                r.get("source_name"),
+                r.get("common_code"),
+                r.get("sheet_year"),
+                now,
+            ),
+        )
+        written += 1
+    await db.commit()
+    return written
+
+
+async def get_preferred_dividends_count() -> int:
+    """Used by admin dashboard — how many preferred rows we have cached."""
+    db = await get_db()
+    cursor = await db.execute("SELECT COUNT(*) AS n FROM preferred_dividends")
+    row = await cursor.fetchone()
+    return int(row["n"]) if row else 0
 
 
 async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:

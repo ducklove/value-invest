@@ -542,6 +542,19 @@ async def event_summary(request: Request, hours: float = 24):
 # Subsystem diagnostics — /diag/<subsystem>
 # ---------------------------------------------------------------------------
 
+@router.post("/refresh-preferred-dividends")
+async def refresh_preferred_dividends_endpoint(request: Request):
+    """수동 트리거 — Google Sheet Data!AI 컬럼을 즉시 재동기화. 주기
+    루프(12h)가 알아서 돌지만, 시트 관리자가 방금 값을 바꾼 직후에는
+    기다리지 않고 바로 반영하고 싶을 때 쓰기 위함."""
+    await _require_admin(request)
+    import preferred_dividends
+    result = await preferred_dividends.refresh_preferred_dividends()
+    # Attach current cached row count so the dashboard can show before/after.
+    result["total_cached"] = await cache.get_preferred_dividends_count()
+    return result
+
+
 @router.get("/diag/wiki")
 async def diag_wiki(request: Request, code: str = ""):
     """Why isn't this stock's wiki growing? — end-to-end probe that
