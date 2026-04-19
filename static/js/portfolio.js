@@ -25,11 +25,11 @@ const PF_QUOTE_REFRESH_MS = 60_000;
 const PF_COL_DEFS = [
   { key: 'group',     cls: 'pf-col-group',     label: '그룹' },
   { key: 'benchmark', cls: 'pf-col-benchmark',  label: '벤치마크' },
+  { key: 'invested',  cls: 'pf-col-invested',   label: '거래액' },
   { key: 'buyprice',  cls: 'pf-col-buyprice',   label: '매입가' },
   { key: 'curprice',  cls: 'pf-col-curprice',   label: '현재가' },
   { key: 'qty',       cls: 'pf-col-qty',        label: '수량' },
   { key: 'return',    cls: 'pf-col-return',      label: '수익률' },
-  { key: 'invested',  cls: 'pf-col-invested',   label: '거래액' },
   { key: 'mktval',    cls: 'pf-col-mktval',     label: '평가금액' },
   { key: 'dividend',  cls: 'pf-col-dividend',   label: '배당액' },
   { key: 'weight',    cls: 'pf-col-weight',      label: '비중' },
@@ -645,11 +645,11 @@ function renderPortfolio() {
         <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
+        <td class="pf-col-num pf-col-invested">${_fp(r.invested)}</td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
         <td class="pf-col-num pf-col-qty"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
-        <td class="pf-col-num pf-col-invested">${_fp(r.invested)}</td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
         <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
@@ -665,11 +665,11 @@ function renderPortfolio() {
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-benchmark js-pf-bench-picker">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
+      <td class="pf-col-num pf-col-invested">${_fp(r.invested)}</td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
       <td class="pf-col-num pf-col-qty">${fmtQty(r.qty)}</td>
-      <td class="pf-col-num pf-col-invested">${_fp(r.invested)}</td>
       <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
       <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
@@ -687,11 +687,11 @@ function renderPortfolio() {
     <td class="pf-col-group"></td>
     <td class="pf-col-num pf-col-changepct">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
     <td class="pf-col-benchmark"></td>
+    <td class="pf-col-num pf-col-invested">${_fp(totalInvested)}</td>
     <td class="pf-col-num pf-col-buyprice"></td>
     <td class="pf-col-curprice"></td>
     <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
     <td class="pf-col-qty"></td>
-    <td class="pf-col-num pf-col-invested">${_fp(totalInvested)}</td>
     <td class="pf-col-num pf-col-mktval">${_fp(totalMarketValue)}</td>
     <td class="pf-col-num pf-col-dividend">${totalDividend > 0 ? _fp(totalDividend) : '-'}</td>
     <td class="pf-col-num pf-col-weight">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
