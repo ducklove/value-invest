@@ -241,6 +241,29 @@ async def styles():
     return FileResponse(STATIC_DIR / "styles.css", media_type="text/css")
 
 
+@app.get("/admin.html")
+async def admin_page():
+    """Serve the admin dashboard from the main app explicitly.
+
+    Previously admin lived only under /static/admin.html (and the legacy
+    admin_app.py :3692 standalone). Whichever path a reverse proxy /
+    bookmark / Caddy config pointed at, the moving pieces caused /api/
+    admin/diag/wiki to 404 inconsistently. Pinning a canonical
+    /admin.html served by the same process that owns /api/admin/*
+    guarantees the admin JS and its endpoints always ship together.
+    """
+    html = (STATIC_DIR / "admin.html").read_text(encoding="utf-8")
+    # Same cache-busting pattern as the main index — prevents stale JS
+    # from being used after a deploy bumps endpoint contracts.
+    import re
+    html = re.sub(
+        r'((?:href|src)=["\'])(/(?:styles\.css|js/[^"\']+\.js))',
+        rf'\1\2?v={ASSET_VERSION}',
+        html,
+    )
+    return Response(content=html, media_type="text/html")
+
+
 # 정적 파일 서빙 (CSS, JS 등)
 app.mount("/js", StaticFiles(directory=str(STATIC_DIR / "js")), name="js")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
