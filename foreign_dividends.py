@@ -59,13 +59,17 @@ async def select_foreign_target_codes() -> list[str]:
 
 def _fetch_one_sync(ticker: str) -> dict | None:
     """Blocking yfinance call. Returns {dps_native, currency} or None
-    if the ticker doesn't resolve or has no dividend field.
+    if the ticker doesn't resolve.
 
-    We try `info["trailingAnnualDividendRate"]` first (trailing 12 months,
-    typically the most meaningful figure). `dividendRate` (forward) is
-    a reasonable fallback for some tickers. Missing / zero both map to
-    0.0 — yfinance does not distinguish "no payout this year" from
-    "no dividend program", and neither does a portfolio dashboard user.
+    Resolution order for the per-share dividend figure:
+      (1) trailingAnnualDividendRate > 0  — 가장 신뢰. 실측 지난 12개월.
+      (2) dividendRate                    — forward 추정치.
+      (3) yield × regularMarketPrice      — 채권 ETF 등 trailing 이 0 이나
+          미제공인 케이스. 83199.HK (CSOP China 5-Year Treasury Bond ETF)
+          같은 종목은 trailing=0 인데 yield=3.45% 로 실제 분배금 ~3.6 CNY
+          을 정확히 표현. yield × price 가 trailing 실측과 거의 일치한다
+          는 걸 샘플로 확인.
+      (4) 그래도 없으면 0.0 — '배당 없음' 확정으로 저장.
     """
     import yfinance as yf
     try:
@@ -73,17 +77,33 @@ def _fetch_one_sync(ticker: str) -> dict | None:
     except Exception as exc:
         logger.warning("yfinance info failed (%s): %s", ticker, exc)
         return None
-    # Try trailing first, fall back to forward, then zero.
-    dps_raw = info.get("trailingAnnualDividendRate")
-    if dps_raw is None:
-        dps_raw = info.get("dividendRate")
-    if dps_raw is None:
-        dps = 0.0
-    else:
+
+    dps: float = 0.0
+
+    def _to_float(v) -> float | None:
+        if v is None:
+            return None
         try:
-            dps = float(dps_raw)
+            return float(v)
         except (TypeError, ValueError):
-            dps = 0.0
+            return None
+
+    trailing = _to_float(info.get("trailingAnnualDividendRate"))
+    if trailing is not None and trailing > 0:
+        dps = trailing
+    else:
+        forward = _to_float(info.get("dividendRate"))
+        if forward is not None and forward > 0:
+            dps = forward
+        else:
+            # 채권 ETF 등 ── yield × price 로 역산.
+            y = _to_float(info.get("yield"))
+            price = (_to_float(info.get("regularMarketPrice"))
+                     or _to_float(info.get("currentPrice"))
+                     or _to_float(info.get("previousClose")))
+            if y is not None and y > 0 and price is not None and price > 0:
+                dps = round(y * price, 4)
+
     currency = (info.get("currency") or "USD").upper()
     return {"dps_native": dps, "currency": currency}
 

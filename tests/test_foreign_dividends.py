@@ -27,6 +27,85 @@ def _admin_request() -> Request:
     return Request(scope)
 
 
+class FetchOneResolutionOrderTests(unittest.TestCase):
+    """_fetch_one_sync 의 배당 필드 우선순위 검증.
+    yfinance 자체를 모킹해서 각 시나리오 직접 재현.
+    """
+
+    def _patch_yf(self, info: dict):
+        """yf.Ticker(...).info 가 주어진 dict 를 반환하도록 패치하는 헬퍼."""
+        from unittest.mock import MagicMock, patch as _patch
+        fake_ticker = MagicMock()
+        fake_ticker.info = info
+        fake_yf = MagicMock()
+        fake_yf.Ticker.return_value = fake_ticker
+        return _patch.dict("sys.modules", {"yfinance": fake_yf})
+
+    def test_trailing_preferred_when_positive(self):
+        import foreign_dividends as fd
+        with self._patch_yf({
+            "trailingAnnualDividendRate": 1.03, "dividendRate": 1.04,
+            "yield": 0.004, "regularMarketPrice": 270.0, "currency": "USD",
+        }):
+            r = fd._fetch_one_sync("AAPL")
+        self.assertEqual(r["dps_native"], 1.03)
+        self.assertEqual(r["currency"], "USD")
+
+    def test_forward_used_when_trailing_zero(self):
+        import foreign_dividends as fd
+        with self._patch_yf({
+            "trailingAnnualDividendRate": 0.0, "dividendRate": 2264.0,
+            "currency": "KRW",
+        }):
+            r = fd._fetch_one_sync("005930.KS")
+        self.assertEqual(r["dps_native"], 2264.0)
+
+    def test_yield_times_price_used_when_trailing_and_forward_missing(self):
+        """핵심 회귀: 83199.HK 처럼 trailing=0, forward 없음, yield 만
+        있는 채권 ETF. yield × price 로 역산해야 함."""
+        import foreign_dividends as fd
+        with self._patch_yf({
+            "trailingAnnualDividendRate": 0.0,
+            "yield": 0.0345, "regularMarketPrice": 104.75,
+            "currency": "CNY", "longName": "CSOP China 5yr Bond",
+        }):
+            r = fd._fetch_one_sync("83199.HK")
+        # 0.0345 * 104.75 = 3.6139
+        self.assertAlmostEqual(r["dps_native"], 3.6139, places=4)
+        self.assertEqual(r["currency"], "CNY")
+
+    def test_yield_fallback_uses_current_price_or_previous_close(self):
+        """regularMarketPrice 가 없으면 currentPrice / previousClose 순으로 fallback."""
+        import foreign_dividends as fd
+        with self._patch_yf({
+            "trailingAnnualDividendRate": None,
+            "yield": 0.04, "previousClose": 100.0,
+            "currency": "USD",
+        }):
+            r = fd._fetch_one_sync("X")
+        self.assertEqual(r["dps_native"], 4.0)
+
+    def test_all_zero_stays_zero(self):
+        """trailing=0 forward 없음 yield=0 → 0.0 ('확정 배당 없음')."""
+        import foreign_dividends as fd
+        with self._patch_yf({
+            "trailingAnnualDividendRate": 0.0,
+            "yield": 0.0, "regularMarketPrice": 100.0,
+            "currency": "USD",
+        }):
+            r = fd._fetch_one_sync("GROWTH")
+        self.assertEqual(r["dps_native"], 0.0)
+
+    def test_currency_defaults_to_usd(self):
+        import foreign_dividends as fd
+        with self._patch_yf({
+            "trailingAnnualDividendRate": 1.0,
+            # currency 필드 자체 누락
+        }):
+            r = fd._fetch_one_sync("WEIRD")
+        self.assertEqual(r["currency"], "USD")
+
+
 class CacheHelpersTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
