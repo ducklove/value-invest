@@ -65,6 +65,68 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         items = await cache.get_portfolio("u1")
         self.assertEqual(len(items), 0)
 
+    async def test_get_portfolio_exposes_created_at(self):
+        """UI 의 '등록일자' 컬럼이 비어있지 않도록, get_portfolio SELECT 에
+        created_at 이 반드시 포함돼야 한다는 계약 고정."""
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(len(items), 1)
+        self.assertIn("created_at", items[0])
+        self.assertTrue(items[0]["created_at"])  # non-empty ISO string
+
+    async def test_save_portfolio_preserves_created_at_on_edit(self):
+        """수량/매입가만 편집할 때 등록일자가 리셋되면 안 된다."""
+        import asyncio
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        original = (await cache.get_portfolio("u1"))[0]["created_at"]
+        # Wait a beat so the timestamp would differ if we accidentally reset
+        # created_at to now() during the second save.
+        await asyncio.sleep(0.01)
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 200, 70000)
+        updated = (await cache.get_portfolio("u1"))[0]["created_at"]
+        self.assertEqual(updated, original)
+
+    async def test_save_portfolio_accepts_explicit_created_at(self):
+        """등록일자 edit form 에서 넘어온 명시적 값은 존중되어야 함."""
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        explicit = "2025-01-15T00:00:00"
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 100, 65000, created_at=explicit,
+        )
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(items[0]["created_at"], explicit)
+
+    async def test_get_trailing_dividends(self):
+        """market_data 의 가장 최근 positive 배당금을 종목별로 반환.
+        0 또는 NULL 인 해는 건너뛰고, 올해는 아직 공시 전일 수 있으므로
+        제외 (stock_price.py 의 dividend fallback 과 동일한 원칙)."""
+        from datetime import datetime
+        db = await cache.get_db()
+        current_year = datetime.now().year
+        await db.executemany(
+            """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
+               VALUES (?, ?, ?, ?)""",
+            [
+                # 삼성전자: 3년치 중 최근 (current_year - 1) 은 0 → 그 전 해로 fallback
+                ("005930", current_year - 2, 70000, 1444.0),
+                ("005930", current_year - 1, 72000, 0.0),
+                ("005930", current_year, 75000, None),
+                # SK하이닉스: 단일 positive 연도
+                ("000660", current_year - 1, 100000, 1200.0),
+                # 네이버: 전부 0 → None 반환 (dict 에 미포함)
+                ("035420", current_year - 1, 200000, 0.0),
+            ],
+        )
+        await db.commit()
+        dps = await cache.get_trailing_dividends(["005930", "000660", "035420", "999999"])
+        self.assertEqual(dps.get("005930"), 1444.0)
+        self.assertEqual(dps.get("000660"), 1200.0)
+        self.assertNotIn("035420", dps)  # only zeros → excluded
+        self.assertNotIn("999999", dps)  # no rows → excluded
+
+    async def test_get_trailing_dividends_empty_list(self):
+        self.assertEqual(await cache.get_trailing_dividends([]), {})
+
     async def test_delete_nonexistent(self):
         await cache.delete_portfolio_item("u1", "999999")
         items = await cache.get_portfolio("u1")

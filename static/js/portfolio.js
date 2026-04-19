@@ -29,8 +29,11 @@ const PF_COL_DEFS = [
   { key: 'curprice',  cls: 'pf-col-curprice',   label: '현재가' },
   { key: 'qty',       cls: 'pf-col-qty',        label: '수량' },
   { key: 'return',    cls: 'pf-col-return',      label: '수익률' },
+  { key: 'invested',  cls: 'pf-col-invested',   label: '거래액' },
   { key: 'mktval',    cls: 'pf-col-mktval',     label: '평가금액' },
+  { key: 'dividend',  cls: 'pf-col-dividend',   label: '배당액' },
   { key: 'weight',    cls: 'pf-col-weight',      label: '비중' },
+  { key: 'date',      cls: 'pf-col-date',       label: '등록일자' },
 ];
 let _pfColStyleEl = null;
 
@@ -327,7 +330,22 @@ function renderPortfolio() {
     const rawReturn = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
     const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;
     const dailyPnl = price !== null ? qty * change : 0;
-    return { ...item, cur, price, change, changePct, qty, avgPrice, invested, marketValue, returnPct, dailyPnl };
+    // Derived columns added on the client so sorting and live edits use
+    // the same values the row cells render:
+    //   dividendAmount — trailing dividend per share × quantity.
+    //                    pfSort() compares numbers directly, so null
+    //                    sinks to the bottom via the shared -Infinity
+    //                    fallback (no extra sort plumbing needed).
+    //   createdAtSort — created_at as YYYY-MM-DD for lexicographic
+    //                    ascending = oldest first, matching user intent.
+    const trailingDps = item.trailing_dps ?? null;
+    const dividendAmount = trailingDps !== null ? trailingDps * qty : null;
+    const createdAtSort = item.created_at ? item.created_at.slice(0, 10) : '';
+    return {
+      ...item, cur, price, change, changePct, qty, avgPrice,
+      invested, marketValue, returnPct, dailyPnl,
+      trailingDps, dividendAmount, createdAtSort,
+    };
   });
 
   // Check if all quotes are loaded
@@ -350,11 +368,12 @@ function renderPortfolio() {
   table.style.display = 'table';
   empty.style.display = 'none';
 
-  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0;
+  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0, totalDividend = 0;
   rows.forEach(r => {
     totalInvested += r.invested;
     if (r.marketValue !== null) totalMarketValue += r.marketValue;
     totalDailyPnl += r.dailyPnl;
+    if (r.dividendAmount !== null) totalDividend += r.dividendAmount;
   });
 
   // Sort rows: group sort (primary, if on) + column sort (secondary)
@@ -373,6 +392,14 @@ function renderPortfolio() {
         let va, vb;
         if (pfSortKey === 'name') {
           va = a.stock_name; vb = b.stock_name;
+          return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+        }
+        // 등록일자는 YYYY-MM-DD 문자열 비교 (lexicographic == chronological).
+        // 빈 값은 '' 로 오면 asc 에선 맨 앞, desc 에선 맨 뒤로 떨어지는데
+        // 이게 자연스러운 sort — 등록일 없는 cash/legacy row 를 최하단으로.
+        if (pfSortKey === 'createdAtSort') {
+          va = a.createdAtSort || '';
+          vb = b.createdAtSort || '';
           return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
         }
         va = a[pfSortKey] ?? -Infinity;
@@ -622,8 +649,11 @@ function renderPortfolio() {
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
         <td class="pf-col-num pf-col-qty"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
+        <td class="pf-col-num pf-col-invested">${_fp(r.invested)}</td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
+        <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
+        <td class="pf-col-date"><input class="pf-edit-input" id="pfEditCreatedAt" value="${r.createdAtSort || ''}" type="date"></td>
         <td class="pf-col-act"><div class="pf-row-actions">
           <button class="pf-row-btn save js-pf-save" title="저장">✓</button>
           <button class="pf-row-btn cancel js-pf-cancel" title="취소">✕</button>
@@ -639,8 +669,11 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
       <td class="pf-col-num pf-col-qty">${fmtQty(r.qty)}</td>
+      <td class="pf-col-num pf-col-invested">${_fp(r.invested)}</td>
       <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
+      <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
+      <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
         <button class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
         <button class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
@@ -654,12 +687,15 @@ function renderPortfolio() {
     <td class="pf-col-group"></td>
     <td class="pf-col-num pf-col-changepct">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
     <td class="pf-col-benchmark"></td>
-    <td class="pf-col-num pf-col-buyprice">${_fp(totalInvested)}</td>
+    <td class="pf-col-num pf-col-buyprice"></td>
     <td class="pf-col-curprice"></td>
     <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
     <td class="pf-col-qty"></td>
+    <td class="pf-col-num pf-col-invested">${_fp(totalInvested)}</td>
     <td class="pf-col-num pf-col-mktval">${_fp(totalMarketValue)}</td>
+    <td class="pf-col-num pf-col-dividend">${totalDividend > 0 ? _fp(totalDividend) : '-'}</td>
     <td class="pf-col-num pf-col-weight">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
+    <td class="pf-col-date"></td>
     <td class="pf-col-act"></td>
   </tr>`;
 
@@ -986,22 +1022,31 @@ async function savePortfolioEdit(stockCode, stockName) {
     const existing = portfolioItems.find(i => i.stock_code === stockCode);
     stockName = existing ? existing.stock_name : '';
   }
+  // 등록일자는 optional — 비워두면 서버가 기존 값 유지. Input[type=date]
+  // 는 YYYY-MM-DD 또는 빈 문자열을 돌려주므로 그대로 전달.
+  const createdAtEl = document.getElementById('pfEditCreatedAt');
+  const createdAt = createdAtEl ? createdAtEl.value.trim() : '';
+  const body = { stock_name: stockName, quantity: qty, avg_price: price };
+  if (createdAt) body.created_at = createdAt;
   try {
     const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stock_name: stockName, quantity: qty, avg_price: price }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
       throw new Error(d.detail || '저장 실패');
     }
+    const data = await resp.json().catch(() => ({}));
     // Update local item without full reload
     const item = portfolioItems.find(i => i.stock_code === stockCode);
     if (item) {
       item.quantity = qty;
       item.avg_price = price;
       item.stock_name = stockName;
+      // Server may have normalized or kept created_at — trust its echo.
+      if (data.created_at) item.created_at = data.created_at;
     }
     pfEditingCode = null;
     renderPortfolio();

@@ -1106,6 +1106,12 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-col-benchmark,
   .pf-col-buyprice,
   .pf-col-weight,
+  /* New secondary columns also drop on mobile — they were added for
+     desktop analysis workflows, so the phone layout stays focused on
+     종목명 · 등락률 · 수익률 · 평가금액. */
+  .pf-col-invested,
+  .pf-col-dividend,
+  .pf-col-date,
   .pf-col-act { display: none !important; }
   .pf-table { font-size: 11px; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 6px 4px; }

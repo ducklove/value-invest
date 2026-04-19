@@ -1052,10 +1052,14 @@ async def resolve_stock_name(stock_code: str) -> str | None:
 
 async def get_portfolio(google_sub: str) -> list[dict]:
     db = await get_db()
+    # created_at is surfaced so the UI can show '등록일자' and let the
+    # user edit it. It was already stored on every insert but wasn't in
+    # the SELECT list — the column existed server-side but was invisible.
     cursor = await db.execute(
         """
         SELECT stock_code, stock_name, quantity, avg_price, sort_order,
-               COALESCE(currency, 'KRW') AS currency, group_name, benchmark_code
+               COALESCE(currency, 'KRW') AS currency, group_name, benchmark_code,
+               created_at
         FROM user_portfolio
         WHERE google_sub = ?
         ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, created_at ASC
@@ -1063,6 +1067,44 @@ async def get_portfolio(google_sub: str) -> list[dict]:
         (google_sub,),
     )
     return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
+    """Latest positive `dividend_per_share` per stock across market_data.
+
+    Used for the 배당액 column — the UI multiplies this by the user's
+    quantity client-side so edits to quantity reflect instantly. We pull
+    the most recent non-zero value because dividend_per_share occasionally
+    arrives as 0 for the current year (pre-announcement) and that would
+    hide the true trailing yield.
+
+    Excluded: the current calendar year, to avoid the "0 until announced"
+    trap the analysis page had (see stock_price.py dividend fallback).
+    """
+    if not stock_codes:
+        return {}
+    current_year = datetime.now().year
+    placeholders = ",".join("?" for _ in stock_codes)
+    db = await get_db()
+    cursor = await db.execute(
+        f"""SELECT stock_code, dividend_per_share, year
+            FROM market_data
+            WHERE stock_code IN ({placeholders})
+              AND dividend_per_share IS NOT NULL
+              AND dividend_per_share > 0
+              AND year < ?
+              AND (stock_code, year) IN (
+                SELECT stock_code, MAX(year)
+                FROM market_data
+                WHERE stock_code IN ({placeholders})
+                  AND dividend_per_share IS NOT NULL
+                  AND dividend_per_share > 0
+                  AND year < ?
+                GROUP BY stock_code
+              )""",
+        (*stock_codes, current_year, *stock_codes, current_year),
+    )
+    return {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
 
 
 async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
@@ -1099,11 +1141,16 @@ async def add_portfolio_item(
 async def save_portfolio_item(
     google_sub: str, stock_code: str, stock_name: str, quantity: float, avg_price: float,
     currency: str = "KRW", group_name: str | None = None, benchmark_code: str | None = None,
+    created_at: str | None = None,
 ) -> dict:
     db = await get_db()
     now = datetime.now().isoformat()
+    # Re-read existing row so we can preserve created_at on simple edits
+    # (quantity / avg_price updates shouldn't reset the registration
+    # date). Only overwrite created_at when the caller explicitly passes
+    # one — that's how the UI's 등록일자 edit gets through.
     cursor = await db.execute(
-        "SELECT sort_order, group_name, benchmark_code FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+        "SELECT sort_order, group_name, benchmark_code, created_at FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
         (google_sub, stock_code),
     )
     existing = await cursor.fetchone()
@@ -1115,6 +1162,13 @@ async def save_portfolio_item(
             group_name = await _resolve_default_group_name(db, google_sub, stock_code)
     if benchmark_code is None and existing:
         benchmark_code = existing["benchmark_code"]
+
+    # Preserve existing created_at unless overridden; for brand-new rows
+    # use `now`. This ordering means an explicit `created_at=None` on an
+    # edit leaves the original date untouched, which matches the edit-
+    # form contract (leaving the 등록일자 field blank = "no change").
+    if created_at is None:
+        created_at = existing["created_at"] if existing else now
 
     if sort_order is None and not existing:
         cursor = await db.execute(
@@ -1136,12 +1190,18 @@ async def save_portfolio_item(
             currency = excluded.currency,
             group_name = excluded.group_name,
             benchmark_code = excluded.benchmark_code,
+            created_at = excluded.created_at,
             updated_at = excluded.updated_at
         """,
-        (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, now, now),
+        (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, now),
     )
     await db.commit()
-    return {"stock_code": stock_code, "stock_name": stock_name, "quantity": quantity, "avg_price": avg_price, "currency": currency, "group_name": group_name, "benchmark_code": benchmark_code}
+    return {
+        "stock_code": stock_code, "stock_name": stock_name,
+        "quantity": quantity, "avg_price": avg_price, "currency": currency,
+        "group_name": group_name, "benchmark_code": benchmark_code,
+        "created_at": created_at,
+    }
 
 
 async def clear_portfolio(google_sub: str):

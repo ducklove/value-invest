@@ -1006,6 +1006,14 @@ async def get_portfolio(request: Request):
         await _prefetch_market_types([it["stock_code"] for it in needs_resolve])
         for item in needs_resolve:
             item["benchmark_code"] = await _resolve_default_benchmark(item["stock_code"])
+    # Annotate with trailing dividend per share so the UI can show a
+    # "배당액" column (= trailing_dps × quantity). Multiplying on the
+    # client keeps the number fresh while the user edits quantity in
+    # the inline edit row.
+    codes = [it["stock_code"] for it in items]
+    dps_map = await cache.get_trailing_dividends(codes)
+    for it in items:
+        it["trailing_dps"] = dps_map.get(it["stock_code"])
     return await _enrich_with_cached_quotes(items)
 
 
@@ -1055,7 +1063,27 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         if not any(g["group_name"] == group_name for g in groups):
             raise HTTPException(status_code=400, detail=f"존재하지 않는 그룹명입니다: {group_name}")
     benchmark_code = str(payload.get("benchmark_code") or "").strip() or None
-    result = await cache.save_portfolio_item(user["google_sub"], stock_code, stock_name, quantity, avg_price, currency, group_name, benchmark_code)
+    # 등록일자 — accept "YYYY-MM-DD" from the UI edit form. Store as full
+    # ISO so other columns (created_at DESC ordering) keep working, but
+    # parse strictly so a malformed string can't overwrite the field
+    # with garbage. None / empty string → leave existing value alone
+    # (handled by cache.save_portfolio_item default semantics).
+    created_at_raw = str(payload.get("created_at") or "").strip()
+    created_at: str | None = None
+    if created_at_raw:
+        try:
+            from datetime import date as _date
+            parsed = _date.fromisoformat(created_at_raw[:10])
+            # Reconstruct as ISO datetime at 00:00 so downstream code that
+            # expects datetime.fromisoformat still works.
+            created_at = parsed.isoformat() + "T00:00:00"
+        except ValueError:
+            raise HTTPException(status_code=400, detail="등록일자는 YYYY-MM-DD 형식이어야 합니다.")
+
+    result = await cache.save_portfolio_item(
+        user["google_sub"], stock_code, stock_name, quantity, avg_price,
+        currency, group_name, benchmark_code, created_at,
+    )
     return {"ok": True, **result}
 
 
