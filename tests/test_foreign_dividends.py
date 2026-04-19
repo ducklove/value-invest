@@ -56,6 +56,9 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
         with self._patch_yf({
             "trailingAnnualDividendRate": 0.0, "dividendRate": 2264.0,
             "currency": "KRW",
+            # 유효 응답 시그널 (name / price 둘 중 하나는 있어야 _looks_like_empty_info 통과)
+            "longName": "Samsung Electronics",
+            "regularMarketPrice": 216000.0,
         }):
             r = fd._fetch_one_sync("005930.KS")
         self.assertEqual(r["dps_native"], 2264.0)
@@ -96,10 +99,102 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
             r = fd._fetch_one_sync("GROWTH")
         self.assertEqual(r["dps_native"], 0.0)
 
+    def test_reuters_suffix_stripped_on_retry(self):
+        """`.O`, `.K` 같은 Reuters 접미사는 yfinance 에서 404. 파이프라인이
+        접미사 제거 후 재시도해서 DAX.O → DAX 로 resolve 해야 함 (회귀
+        가드)."""
+        import foreign_dividends as fd
+        from unittest.mock import MagicMock, patch as _patch
+
+        def make_ticker_factory():
+            call_log = []
+            def fake_ticker(sym):
+                call_log.append(sym)
+                m = MagicMock()
+                if sym == "DAX.O":
+                    # 빈 info (404 흉내)
+                    m.info = {}
+                elif sym == "DAX":
+                    # stripped 로 재시도했을 때 유효
+                    m.info = {
+                        "longName": "Global X DAX Germany ETF",
+                        "yield": 0.0162, "regularMarketPrice": 45.97,
+                        "currency": "USD",
+                    }
+                    m.dividends = None  # 이 경로로 안 떨어져야
+                else:
+                    m.info = {}
+                return m
+            return fake_ticker, call_log
+
+        factory, call_log = make_ticker_factory()
+        fake_yf = MagicMock()
+        fake_yf.Ticker.side_effect = factory
+        with _patch.dict("sys.modules", {"yfinance": fake_yf}):
+            r = fd._fetch_one_sync("DAX.O")
+        # 두 번 호출: 원본 + stripped
+        self.assertEqual(call_log, ["DAX.O", "DAX"])
+        self.assertAlmostEqual(r["dps_native"], 0.0162 * 45.97, places=2)
+        self.assertEqual(r["currency"], "USD")
+
+    def test_dividends_series_fallback_when_info_fields_missing(self):
+        """EUN2.DE 처럼 info 는 정상이지만 배당 관련 필드 전부 None 인
+        경우 ticker.dividends Series 최근 365일 합을 사용."""
+        import foreign_dividends as fd
+        import pandas as pd
+        from unittest.mock import MagicMock, patch as _patch
+
+        # 최근 1년 내 4회 지급 (총 1.4874)
+        now = pd.Timestamp.now(tz="UTC")
+        series = pd.Series(
+            [0.4999, 0.7519, 0.1338, 0.1018],
+            index=[
+                now - pd.Timedelta(days=300),
+                now - pd.Timedelta(days=200),
+                now - pd.Timedelta(days=100),
+                now - pd.Timedelta(days=30),
+            ],
+        )
+        # 366일 넘긴 오래된 지급 — 합산에서 제외되어야
+        stale = pd.Series([9.99], index=[now - pd.Timedelta(days=400)])
+        full = pd.concat([stale, series])
+
+        fake_ticker = MagicMock()
+        fake_ticker.info = {
+            "longName": "iShares Core EURO STOXX 50 UCITS ETF EUR",
+            "regularMarketPrice": 61.86, "currency": "EUR",
+            # 모든 배당 필드 None
+            "trailingAnnualDividendRate": None,
+            "dividendRate": None,
+            "yield": None,
+        }
+        fake_ticker.dividends = full
+        fake_yf = MagicMock()
+        fake_yf.Ticker.return_value = fake_ticker
+        with _patch.dict("sys.modules", {"yfinance": fake_yf}):
+            r = fd._fetch_one_sync("EUN2.DE")
+        # 최근 365일 4회 합 = 1.4874, stale 9.99 는 제외
+        self.assertAlmostEqual(r["dps_native"], 1.4874, places=3)
+        self.assertEqual(r["currency"], "EUR")
+
+    def test_invalid_ticker_returns_none(self):
+        """접미사 strip 후에도 여전히 빈 info 면 None. auto-refresh 가
+        이 ticker 를 DB 에 0 으로 쓰는 것 대신 failures 리스트에 넣음."""
+        import foreign_dividends as fd
+        from unittest.mock import MagicMock, patch as _patch
+        fake_ticker = MagicMock()
+        fake_ticker.info = {}
+        fake_yf = MagicMock()
+        fake_yf.Ticker.return_value = fake_ticker
+        with _patch.dict("sys.modules", {"yfinance": fake_yf}):
+            r = fd._fetch_one_sync("TOTALLY_BOGUS")
+        self.assertIsNone(r)
+
     def test_currency_defaults_to_usd(self):
         import foreign_dividends as fd
         with self._patch_yf({
             "trailingAnnualDividendRate": 1.0,
+            "longName": "Weird Inc", "regularMarketPrice": 10.0,
             # currency 필드 자체 누락
         }):
             r = fd._fetch_one_sync("WEIRD")

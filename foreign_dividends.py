@@ -57,25 +57,58 @@ async def select_foreign_target_codes() -> list[str]:
     ]
 
 
+def _looks_like_empty_info(info: dict) -> bool:
+    """yfinance 는 404 인 ticker 에도 None 대신 빈 dict 나 매우 부분적인
+    dict 를 돌려줄 때가 있다. 의미 있는 응답인지 빠르게 판단하기 위해
+    name + price 조합으로 본다. 둘 다 없으면 '사실상 invalid'."""
+    if not info:
+        return True
+    has_name = info.get("longName") or info.get("shortName")
+    has_price = (info.get("regularMarketPrice") or info.get("currentPrice")
+                 or info.get("previousClose"))
+    return not (has_name or has_price)
+
+
 def _fetch_one_sync(ticker: str) -> dict | None:
-    """Blocking yfinance call. Returns {dps_native, currency} or None
-    if the ticker doesn't resolve.
+    """Blocking yfinance call. Returns {dps_native, currency} or None if
+    the ticker is invalid even after suffix-strip retry.
 
     Resolution order for the per-share dividend figure:
-      (1) trailingAnnualDividendRate > 0  — 가장 신뢰. 실측 지난 12개월.
-      (2) dividendRate                    — forward 추정치.
-      (3) yield × regularMarketPrice      — 채권 ETF 등 trailing 이 0 이나
-          미제공인 케이스. 83199.HK (CSOP China 5-Year Treasury Bond ETF)
-          같은 종목은 trailing=0 인데 yield=3.45% 로 실제 분배금 ~3.6 CNY
-          을 정확히 표현. yield × price 가 trailing 실측과 거의 일치한다
-          는 걸 샘플로 확인.
-      (4) 그래도 없으면 0.0 — '배당 없음' 확정으로 저장.
+      (1) trailingAnnualDividendRate > 0  — 지난 12개월 실측. 가장 신뢰.
+      (2) dividendRate > 0                — forward 추정치.
+      (3) yield × regularMarketPrice      — 채권 ETF 등 trailing 이 0 이거나
+          미제공인 케이스 (83199.HK, SCHP, QTUM, DAX 등 샘플 검증).
+      (4) dividends Series 최근 365일 합산 — info 에 배당 필드가 전부
+          None 이지만 실제 지급 이력이 있는 경우. EUN2.DE (iShares EURO
+          STOXX 50 UCITS) 같은 UCITS ETF 가 대표 케이스.
+      (5) 0.0 — '배당 없음' 확정으로 저장.
+
+    Ticker 본체가 invalid 하면 (`.O`, `.K` 같은 Reuters 접미사 → 404)
+    자동으로 접미사 제거 후 재시도. 영구 resolve 는 calling 쪽에서
+    _save_ticker 로 ticker_map 에 넣어두면 이후로는 바로 정답으로 접근.
     """
     import yfinance as yf
-    try:
-        info = yf.Ticker(ticker).info or {}
-    except Exception as exc:
-        logger.warning("yfinance info failed (%s): %s", ticker, exc)
+
+    def _try(sym: str) -> tuple[dict, "yf.Ticker | None"]:
+        try:
+            t = yf.Ticker(sym)
+            info = t.info or {}
+            return info, t
+        except Exception as exc:
+            logger.warning("yfinance info failed (%s): %s", sym, exc)
+            return {}, None
+
+    info, t_obj = _try(ticker)
+    # Reuters 접미사 (.O Nasdaq, .K Nasdaq Global Select, .OQ, .PK) 를 떨궈
+    # 재시도. 한 번만 스트립 — 여러 번 해도 이득 없음.
+    if _looks_like_empty_info(info):
+        for suffix in (".O", ".K", ".OQ", ".PK"):
+            if ticker.endswith(suffix):
+                stripped = ticker[: -len(suffix)]
+                logger.info("yfinance retry with suffix-stripped ticker: %s → %s", ticker, stripped)
+                info, t_obj = _try(stripped)
+                break
+    if _looks_like_empty_info(info) or t_obj is None:
         return None
 
     dps: float = 0.0
@@ -96,13 +129,28 @@ def _fetch_one_sync(ticker: str) -> dict | None:
         if forward is not None and forward > 0:
             dps = forward
         else:
-            # 채권 ETF 등 ── yield × price 로 역산.
+            # 채권 ETF 등 — yield × price 역산.
             y = _to_float(info.get("yield"))
             price = (_to_float(info.get("regularMarketPrice"))
                      or _to_float(info.get("currentPrice"))
                      or _to_float(info.get("previousClose")))
             if y is not None and y > 0 and price is not None and price > 0:
                 dps = round(y * price, 4)
+
+    # 마지막 fallback: info 가 배당 필드를 숨기는 경우에도 dividends
+    # Series 에는 실제 지급 이력이 있는 경우가 있다. 최근 365일 합.
+    if dps == 0.0:
+        try:
+            divs = t_obj.dividends
+            if divs is not None and len(divs):
+                import pandas as pd
+                tz = divs.index[0].tz
+                cutoff = pd.Timestamp.now(tz=tz) - pd.Timedelta(days=365)
+                recent = divs[divs.index >= cutoff]
+                if len(recent):
+                    dps = round(float(recent.sum()), 4)
+        except Exception as exc:
+            logger.debug("dividends Series fallback failed (%s): %s", ticker, exc)
 
     currency = (info.get("currency") or "USD").upper()
     return {"dps_native": dps, "currency": currency}
