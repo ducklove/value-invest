@@ -561,10 +561,17 @@ async def diag_wiki(request: Request, code: str = ""):
     from routes.reports import _is_allowed_report_pdf_url
 
     # --- Naver funnel -----------------------------------------------------
+    # Naver can be slow or unreliable from the Pi; the endpoint used to
+    # just await fetch_reports() and would hang until an upstream proxy
+    # (or the browser) timed out — the user saw a generic "진단 실패"
+    # without any clue that the slowness was upstream. Cap at 12s so we
+    # always return a well-formed JSON payload within 15s regardless.
     naver_err: str | None = None
     reports: list[dict] = []
     try:
-        reports = await report_client.fetch_reports(code)
+        reports = await asyncio.wait_for(report_client.fetch_reports(code), timeout=12.0)
+    except asyncio.TimeoutError:
+        naver_err = "Naver 스크랩 타임아웃 (>12초) — 네트워크 또는 Naver 쪽 지연"
     except Exception as exc:
         naver_err = str(exc)[:300]
 

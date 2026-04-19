@@ -22,7 +22,14 @@
 <div id="adminContent"><div style="color:var(--text-secondary);text-align:center;padding:40px;">로딩 중...</div></div>
 
 <script>
-async function apiFetch(url, opts) { return fetch(url, opts); }
+// credentials:'include' is a defense in depth against the admin page ever
+// being served cross-origin (e.g. legacy :3692 setup). Same-origin calls
+// already send cookies by default, so this doesn't change behavior on
+// the main deploy path — it just guarantees auth survives if the admin
+// UI moves.
+async function apiFetch(url, opts) {
+  return fetch(url, { credentials: 'include', ...(opts || {}) });
+}
 </script>
 <script src="/js/admin.js"></script>
 <script>

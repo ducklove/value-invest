@@ -574,18 +574,22 @@ async function runWikiDiag() {
     result.innerHTML = '<div style="color:var(--color-danger)">종목 코드를 입력하세요.</div>';
     return;
   }
-  result.innerHTML = '<div style="color:var(--text-secondary);padding:8px;">진단 중... (Naver 스크랩 포함하여 최대 10초 정도 소요)</div>';
+  result.innerHTML = '<div style="color:var(--text-secondary);padding:8px;">진단 중... (Naver 스크랩 포함하여 최대 15초 정도 소요)</div>';
   try {
     const res = await apiFetch(`/api/admin/diag/wiki?code=${encodeURIComponent(code)}`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      result.innerHTML = `<div style="color:var(--color-danger)">진단 실패: ${_esc(data.detail || res.statusText)}</div>`;
+      const detail = data.detail || res.statusText || '';
+      // Surface the HTTP status too — "진단 실패" 단독으론 원인 파악이
+      // 어려웠음. 401/403 = 세션 문제, 404 = 엔드포인트 누락 (옛 배포),
+      // 500/502/504 = 서버 내부/프록시 문제 등 상태코드 하나로 분류 가능.
+      result.innerHTML = `<div style="color:var(--color-danger)">진단 실패 (HTTP ${res.status}): ${_esc(detail)}</div>`;
       return;
     }
     const data = await res.json();
     result.innerHTML = _renderWikiDiagResult(data);
   } catch (e) {
-    result.innerHTML = `<div style="color:var(--color-danger)">진단 요청 실패: ${_esc(e.message)}</div>`;
+    result.innerHTML = `<div style="color:var(--color-danger)">진단 요청 실패: ${_esc(e.name + ': ' + e.message)}</div>`;
   }
 }
 

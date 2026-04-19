@@ -1009,6 +1009,16 @@ async function savePortfolioEdit(stockCode, stockName) {
 }
 
 async function deletePortfolioItem(stockCode) {
+  // Other destructive actions in this file (group delete, cashflow delete,
+  // CSV replace) all confirm first; this one was the outlier, so a
+  // misclick on the ✕ in a dense table silently wiped a holding. Look up
+  // the display name so the operator sees which stock they're about to
+  // remove, not just an opaque code.
+  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  const displayName = item && item.stock_name
+    ? `${item.stock_name} (${stockCode})`
+    : stockCode;
+  if (!confirm(`"${displayName}" 를 포트폴리오에서 삭제할까요?`)) return;
   try {
     const resp = await apiFetch(`/api/portfolio/${stockCode}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error('삭제 실패');
