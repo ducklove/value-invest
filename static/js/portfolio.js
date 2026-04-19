@@ -528,8 +528,13 @@ function renderPortfolio() {
   // For filtered views we fall back to live-quote previous_close math
   // which conceptually shares the same baseline date.
   const _todayBaseDate = pfPrevDaySnapshot && pfPrevDaySnapshot.date;
+  // Compact "MM/DD HH시 기준" — year omitted (always current or just-passed
+  // year), snapshot_nav cron is 22:00 KST so the hour is a hard contract.
+  // pfPrevDaySnapshot.date is YYYY-MM-DD from the server; slice instead
+  // of Date() parsing to avoid timezone-off-by-one when the browser
+  // timezone doesn't match KST.
   const _todayLabel = _todayBaseDate
-    ? `기준 ${_todayBaseDate} 22:00`
+    ? `${_todayBaseDate.slice(5, 7)}/${_todayBaseDate.slice(8, 10)} 22시 기준`
     : '기준 없음';
   const _mtdLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}`;
   const _ytdLabel = `${_now.getFullYear()}`;
@@ -1107,18 +1112,31 @@ async function deletePortfolioItem(stockCode) {
       }, 200);
     });
 
-    input.addEventListener('keydown', async (e) => {
+    // Submit the current input — shared by the Enter key and the
+    // explicit "등록" button. Resolves the typed text to a canonical
+    // stock_code via the backend (so typing "삼성전자" works just as
+    // well as "005930") and then falls through to pfAddFromSearch.
+    const submitAdd = async () => {
+      dropdown.classList.remove('show');
+      const q = input.value.trim();
+      if (!q) return;
+      const resp = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(q)}`);
+      const data = await resp.json();
+      const resolvedCode = data.stock_code || q;
+      pfAddFromSearch(resolvedCode, data.stock_name || q);
+    };
+
+    input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        dropdown.classList.remove('show');
-        const q = input.value.trim();
-        if (!q) return;
-        const resp = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(q)}`);
-        const data = await resp.json();
-        const resolvedCode = data.stock_code || q;
-        pfAddFromSearch(resolvedCode, data.stock_name || q);
+        submitAdd();
       }
     });
+
+    const addBtn = document.getElementById('pfAddBtn');
+    if (addBtn) {
+      addBtn.addEventListener('click', submitAdd);
+    }
 
     document.addEventListener('click', (e) => {
       if (!input.contains(e.target) && !dropdown.contains(e.target)) dropdown.classList.remove('show');

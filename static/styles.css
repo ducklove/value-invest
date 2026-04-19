@@ -906,6 +906,18 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   cursor: pointer; transition: color 0.15s; white-space: nowrap; flex-shrink: 0;
 }
 .pf-csv-toggle:hover { color: var(--text); }
+/* Primary "등록" button — sits right after the add-input so users don't
+   have to rely on Enter or clicking a dropdown item. margin-left auto is
+   NOT applied here so this button stays adjacent to the input; csv
+   toggle still floats right via its own margin-left:auto. */
+.pf-add-btn {
+  padding: 8px 16px; border: 1px solid var(--primary); border-radius: 8px;
+  background: var(--primary); color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.pf-add-btn:hover { opacity: 0.88; }
+.pf-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .pf-csv-panel {
   margin-top: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 10px;
   background: var(--surface); max-width: 500px;
