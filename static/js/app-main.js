@@ -23,7 +23,12 @@ QuoteManager.onQuote = function(code, q) {
   // 2) 포트폴리오 종목
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
-    pfItem.quote = { price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date };
+    // 기존 quote 위에 새 값만 덮어쓴다. subset 명시 방식은 quote-manager
+    // 에서 빠뜨린 필드를 항상 null 로 재설정해 버려서 trade_value 등 초기
+    // 로드 때 받은 값이 다음 polling 에 사라지던 버그의 원인. spread
+    // merge 면 q 가 `code` 필드를 갖고 들어와도 quote.code 하나 더 생기는
+    // 정도라 악영향 없음.
+    pfItem.quote = { ...(pfItem.quote || {}), ...q };
   }
   // 2-1) 벤치마크 실시간 갱신
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);

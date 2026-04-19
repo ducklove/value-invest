@@ -117,7 +117,13 @@ const QuoteManager = {
         const results = await resp.json();
         for (const [code, q] of Object.entries(results)) {
           if (q && q.price != null && this.onQuote) {
-            this.onQuote(code, { code, price: q.price, change: q.change, change_pct: q.change_pct, previous_close: q.previous_close, date: q.date });
+            // 서버가 내려주는 quote dict 를 **통째로** 전달한다. 이전엔
+            // price/change/previous_close/date 만 추려냈는데 서버가 돌려
+            // 주는 trade_value / volume / 기타 필드가 모두 잘림.
+            // 결과: 초기 로드엔 제대로 떴던 '거래대금' 같은 값이 이 polling
+            // 이 덮어쓰면서 '-' 로 바뀌는 증상. onQuote 핸들러가 spread
+            // merge 를 쓰도록 app-main.js 쪽도 함께 고쳤다.
+            this.onQuote(code, { code, ...q });
           }
         }
       } catch (e) { console.warn(e); }
