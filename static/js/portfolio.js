@@ -703,7 +703,7 @@ function renderPortfolio() {
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-benchmark js-pf-bench-picker">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
-      <td class="pf-col-num pf-col-invested">${_fp(r.invested)}</td>
+      <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? _fp(r.tradingValue) : '-'}</td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
