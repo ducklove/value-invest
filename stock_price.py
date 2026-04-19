@@ -878,6 +878,9 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
             "previous_close": ws_quote.get("previous_close"),
             "change": ws_quote.get("change"),
             "change_pct": ws_quote.get("change_pct"),
+            # 시장 누적 거래대금 (원). WS 가 전달하는 값 그대로 — 파싱
+            # 실패 시 None 이며 UI 는 '-' 로 렌더.
+            "trade_value": ws_quote.get("trade_value"),
         }
 
     end_date = date.today()
@@ -938,6 +941,14 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
         _get_first(summary, "previous_close", "base_price", "stck_sdpr"),
         zero_as_none=False,
     )
+    # 누적 거래대금 — KIS 국내 주식시세 API 에선 acml_tr_pbmn 키. 다른
+    # 이름(trade_amount 등)으로 리매핑돼 summary 에 들어올 가능성까지
+    # 고려해 복수 키 시도. 0 은 장 시작 전일 수 있으므로 zero_as_none
+    # 은 False (명시적 0 전달).
+    trade_value = _safe_float(
+        _get_first(summary, "acml_tr_pbmn", "trade_amount", "trading_value"),
+        zero_as_none=False,
+    )
 
     if previous_close is None and latest_price is not None and change is not None:
         previous_close = round(latest_price - change, 2)
@@ -986,4 +997,5 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
         "previous_close": previous_close,
         "change": change,
         "change_pct": change_pct,
+        "trade_value": trade_value,
     }

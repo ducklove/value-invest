@@ -178,6 +178,13 @@ def _parse_h0stcnt0(raw: str) -> dict[str, Any] | None:
         change = int(fields[4])
         change_pct = float(fields[5])
         volume = int(fields[13])
+        # fields[14] = ACML_TR_PBMN, 누적 거래대금(원) — 시장 거래대금 표시용.
+        # 장 초반엔 수백만, 대형주는 장중 수천억~수조. 음수나 이상치는 int
+        # 파싱 실패 시 None 으로 떨어뜨려 UI 에서 '-' 처리.
+        try:
+            trade_value = int(fields[14]) if len(fields) > 14 else None
+        except (ValueError, IndexError):
+            trade_value = None
         business_date = fields[33] if len(fields) > 33 else ""
 
         # KIS WS sends change/change_pct with sign already applied
@@ -192,6 +199,7 @@ def _parse_h0stcnt0(raw: str) -> dict[str, Any] | None:
             "change": change,
             "change_pct": change_pct,
             "volume": volume,
+            "trade_value": trade_value,
             "business_date": business_date,
             "ts": time.time(),
         }

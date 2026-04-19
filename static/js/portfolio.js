@@ -356,6 +356,13 @@ function renderPortfolio() {
     //                    fallback (no extra sort plumbing needed).
     //   createdAtSort — created_at as YYYY-MM-DD for lexicographic
     //                    ascending = oldest first, matching user intent.
+    // 거래액 = 시장 누적 거래대금 (원). quote.trade_value 는 현재 한국
+    // 주식 경로 (KIS WS + HTTP) 에서만 전달. 해외/현금/금/크립토는
+    // null → UI 에서 '-' 로 렌더. 추후 yfinance / Naver world / KIS
+    // 해외 경로에서도 채우면 자동 적용됨.
+    const tradingValue = (q.trade_value !== undefined && q.trade_value !== null)
+      ? Number(q.trade_value)
+      : null;
     const trailingDps = item.trailing_dps ?? null;
     // Short / 선물매도 포지션 (qty < 0) 은 실제로는 배당락 만큼 현금
     // 지급 의무가 있어 금융 수학적으로는 음수 배당이 맞지만, 포트폴리오
@@ -372,6 +379,7 @@ function renderPortfolio() {
     return {
       ...item, cur, price, change, changePct, qty, avgPrice,
       invested, marketValue, returnPct, dailyPnl,
+      tradingValue,
       trailingDps, dividendAmount, dividendYield, createdAtSort,
     };
   });
@@ -396,12 +404,13 @@ function renderPortfolio() {
   table.style.display = 'table';
   empty.style.display = 'none';
 
-  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0, totalDividend = 0;
+  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0, totalDividend = 0, totalTradingValue = 0;
   rows.forEach(r => {
     totalInvested += r.invested;
     if (r.marketValue !== null) totalMarketValue += r.marketValue;
     totalDailyPnl += r.dailyPnl;
     if (r.dividendAmount !== null) totalDividend += r.dividendAmount;
+    if (r.tradingValue !== null) totalTradingValue += r.tradingValue;
   });
 
   // Sort rows: group sort (primary, if on) + column sort (secondary)
@@ -673,7 +682,7 @@ function renderPortfolio() {
         <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
-        <td class="pf-col-num pf-col-invested">${_fp(r.invested)}</td>
+        <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? _fp(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
@@ -717,7 +726,7 @@ function renderPortfolio() {
     <td class="pf-col-group"></td>
     <td class="pf-col-num pf-col-changepct">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
     <td class="pf-col-benchmark"></td>
-    <td class="pf-col-num pf-col-invested">${_fp(totalInvested)}</td>
+    <td class="pf-col-num pf-col-invested">${totalTradingValue > 0 ? _fp(totalTradingValue) : '-'}</td>
     <td class="pf-col-num pf-col-buyprice"></td>
     <td class="pf-col-curprice"></td>
     <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>

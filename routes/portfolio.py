@@ -560,6 +560,9 @@ async def _fetch_quote(stock_code: str) -> dict:
                 "previous_close": ws_q.get("previous_close"),
                 "change": ws_q.get("change"),
                 "change_pct": ws_q.get("change_pct"),
+                # 시장 누적 거래대금 (원). WS 가 전달. 외국 종목 경로는
+                # 아직 지원 없어 None 으로 떨어지며 UI 에서 '-' 표시.
+                "trade_value": ws_q.get("trade_value"),
             }
         else:
             q = await stock_price.fetch_quote_snapshot(stock_code)
@@ -596,6 +599,7 @@ async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
                 "previous_close": ws_q.get("previous_close"),
                 "change": ws_q.get("change"),
                 "change_pct": ws_q.get("change_pct"),
+                "trade_value": ws_q.get("trade_value"),
             }
         else:
             cached = _quote_cache.get(code)
