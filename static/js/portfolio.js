@@ -404,13 +404,12 @@ function renderPortfolio() {
   table.style.display = 'table';
   empty.style.display = 'none';
 
-  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0, totalDividend = 0, totalTradingValue = 0;
+  let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0, totalDividend = 0;
   rows.forEach(r => {
     totalInvested += r.invested;
     if (r.marketValue !== null) totalMarketValue += r.marketValue;
     totalDailyPnl += r.dailyPnl;
     if (r.dividendAmount !== null) totalDividend += r.dividendAmount;
-    if (r.tradingValue !== null) totalTradingValue += r.tradingValue;
   });
 
   // Sort rows: group sort (primary, if on) + column sort (secondary)
@@ -682,7 +681,7 @@ function renderPortfolio() {
         <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
-        <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? _fp(r.tradingValue) : '-'}</td>
+        <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
@@ -703,7 +702,7 @@ function renderPortfolio() {
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-benchmark js-pf-bench-picker">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
-      <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? _fp(r.tradingValue) : '-'}</td>
+      <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
@@ -726,7 +725,7 @@ function renderPortfolio() {
     <td class="pf-col-group"></td>
     <td class="pf-col-num pf-col-changepct">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
     <td class="pf-col-benchmark"></td>
-    <td class="pf-col-num pf-col-invested">${totalTradingValue > 0 ? _fp(totalTradingValue) : '-'}</td>
+    <td class="pf-col-invested"></td>
     <td class="pf-col-num pf-col-buyprice"></td>
     <td class="pf-col-curprice"></td>
     <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
