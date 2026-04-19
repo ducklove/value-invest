@@ -13,19 +13,22 @@ CSV export, parse the rows, and upsert into the `preferred_dividends`
 table. `cache.get_trailing_dividends` prefers this data over the
 common-stock fallback when available.
 
-Refresh is cheap (~100 KB download, ~1 second total). We run it once
-at startup and every 12 hours thereafter.
+Sync cadence: **manual only** via the admin dashboard. Preferred
+dividends are announced once per year per stock, and the sheet is
+human-edited — an automatic 12h loop was overkill and gets in the way
+when the sheet is mid-edit. parse_sheet_csv dynamically picks the
+newest year column present (regex `^(\\d{4})우$`, max-year wins), so
+when 2026 rolls around and the sheet grows a `2026우` column the
+admin refresh will pick it up automatically without code changes.
 """
 from __future__ import annotations
 
-import asyncio
 import csv
 import io
 import logging
 import os
 import re
 from datetime import datetime
-from typing import Iterable
 
 import httpx
 
@@ -195,40 +198,10 @@ async def refresh_preferred_dividends() -> dict:
     }
 
 
-async def run_refresh_loop(
-    stop_event: asyncio.Event,
-    *,
-    interval_seconds: float = 12 * 3600.0,
-    initial_delay_seconds: float = 5.0,
-) -> None:
-    """Background refresh. Cadence is 12h because the sheet is human-
-    edited and updates infrequently (once or twice a year per stock at
-    dividend announcement). Every iteration is a thin idempotent upsert
-    so loss of a few ticks doesn't matter.
-    """
-    if initial_delay_seconds > 0:
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=initial_delay_seconds)
-            return
-        except asyncio.TimeoutError:
-            pass
-    while not stop_event.is_set():
-        try:
-            await refresh_preferred_dividends()
-        except Exception as exc:
-            logger.warning("preferred_dividends: loop iteration failed: %s", exc)
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
-            return
-        except asyncio.TimeoutError:
-            continue
-
-
 __all__ = [
     "DEFAULT_SHEET_ID",
     "DEFAULT_GID",
     "fetch_csv",
     "parse_sheet_csv",
     "refresh_preferred_dividends",
-    "run_refresh_loop",
 ]

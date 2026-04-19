@@ -121,23 +121,10 @@ async def lifespan(app: FastAPI):
             )
         )
 
-    # 우선주 배당 Google Sheet 동기화. 최초 한 번 즉시 실행해서 방금 배포된
-    # 인스턴스가 stale 데이터로 뜨지 않도록 하고, 이후 12시간 간격 루프.
-    # Best-effort — 실패 시 로그만 남기고 기존 캐시 계속 사용 (refresh_
-    # preferred_dividends 안에서 swallow).
-    import preferred_dividends
-    try:
-        await preferred_dividends.refresh_preferred_dividends()
-    except Exception as exc:
-        logger.warning("preferred_dividends: startup refresh failed: %s", exc)
-    pref_stop = asyncio.Event()
-    pref_task = asyncio.create_task(
-        preferred_dividends.run_refresh_loop(
-            pref_stop,
-            interval_seconds=float(os.environ.get("PREF_DIV_REFRESH_S", str(12 * 3600))),
-            initial_delay_seconds=float(os.environ.get("PREF_DIV_INITIAL_DELAY_S", "5")),
-        )
-    )
+    # 우선주 배당 Google Sheet 는 연 1회 공시 기반 + 시트 수동 관리라서
+    # 자동 refresh 주기를 돌리지 않는다. /api/admin/refresh-preferred-
+    # dividends 수동 엔드포인트로만 동기화 — DB 의 preferred_dividends
+    # 테이블은 persist 되므로 한 번 채워두면 계속 유효.
 
     # Observability event-log pruner. system_events is append-only during
     # normal operation; this loop trims rows older than 30 days every 6
@@ -174,11 +161,6 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(obs_task, timeout=2.0)
         except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
             obs_task.cancel()
-        pref_stop.set()
-        try:
-            await asyncio.wait_for(pref_task, timeout=2.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
-            pref_task.cancel()
         await kis_ws_manager.stop_all()
         await kis_proxy_client.close_client()
         await cache.close_db()
