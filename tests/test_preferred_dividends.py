@@ -193,11 +193,10 @@ class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
         dps_direct = await cache.get_trailing_dividends(["005935"])
         self.assertEqual(dps_direct.get("005935"), 1450.0)
 
-    async def test_sheet_zero_does_not_override_common_fallback(self):
-        """시트에 '올해 배당 0' 으로 기록된 우선주는 보통주 fallback 을
-        막지 않아야 한다. 0 은 '시트에서 공식적으로 지정된 값' 이 아니라
-        '미공시' 의미인 경우가 많아, 보통주 값이라도 표시하는 편이 더
-        정직하다."""
+    async def test_sheet_zero_is_authoritative(self):
+        """시트에 '올해 배당 0' 으로 기록된 우선주는 **그대로 0 을 사용**
+        해야 한다. 시트 관리자의 확정 값이므로 보통주 fallback 으로
+        가로채면 안 됨 ('이미 공시 다 끝났는데 0 원으로 결정됐다' 는 경우)."""
         from datetime import datetime
         db = await cache.get_db()
         current_year = datetime.now().year
@@ -209,12 +208,28 @@ class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
         await db.commit()
 
         await cache.upsert_preferred_dividends([{
-            "stock_code": "005935", "dividend_per_share": 0.0,  # 시트 0
+            "stock_code": "005935", "dividend_per_share": 0.0,  # 시트 0 = 확정 '배당 없음'
             "source_name": "삼성전자우", "common_code": "005930",
             "sheet_year": 2025,
         }])
         dps = await cache.get_trailing_dividends(["005935"])
-        self.assertEqual(dps.get("005935"), 1444.0)  # 보통주 fallback 이김
+        self.assertEqual(dps.get("005935"), 0.0)  # 시트 값 그대로
+
+    async def test_missing_sheet_row_falls_back_to_common(self):
+        """시트에 row 자체가 없는 우선주는 기존처럼 보통주 fallback.
+        (sheet NULL vs sheet 0 구분 — 전자만 fallback)"""
+        from datetime import datetime
+        db = await cache.get_db()
+        current_year = datetime.now().year
+        await db.execute(
+            """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
+               VALUES (?, ?, ?, ?)""",
+            ("005930", current_year - 1, 72000, 1444.0),
+        )
+        await db.commit()
+        # 시트에 005935 row 없음 (upsert 안 함) → 보통주 fallback.
+        dps = await cache.get_trailing_dividends(["005935"])
+        self.assertEqual(dps.get("005935"), 1444.0)
 
     async def test_non_preferred_code_unaffected(self):
         """보통주(끝자리 0) 에는 시트 우선 조회 자체가 적용되지 않음.

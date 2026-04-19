@@ -1154,10 +1154,12 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
     direct_dps = {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
 
     # Preferred-stock override — a separately-curated Google Sheet carries
-    # accurate per-year dividends for preferreds (Data!AI = most recent
-    # year). When we have that value for a preferred code, it wins over
-    # the common-stock fallback because the real payout is usually a
-    # premium above common.
+    # the authoritative per-year dividend for each preferred (Data!AI =
+    # most recent year). When the sheet has an entry — ZERO INCLUDED —
+    # that value wins over the common-stock fallback. The curator has
+    # explicitly said "sheet 0 means dividend-of-zero, not unknown", so
+    # we must not silently substitute the common stock's non-zero number.
+    # Only NULL rows (missing) fall through to the common fallback.
     pref_codes = list(pref_to_common_map.keys())
     pref_overrides: dict[str, float] = {}
     if pref_codes:
@@ -1166,16 +1168,16 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
             f"""SELECT stock_code, dividend_per_share
                 FROM preferred_dividends
                 WHERE stock_code IN ({pref_placeholders})
-                  AND dividend_per_share IS NOT NULL
-                  AND dividend_per_share > 0""",
+                  AND dividend_per_share IS NOT NULL""",
             pref_codes,
         )
         pref_overrides = {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
 
     # Resolution order for preferred-stock codes:
     #   (a) exact match in market_data — rare but authoritative
-    #   (b) preferred_dividends override (curated sheet)
-    #   (c) common-stock market_data fallback (approximation)
+    #   (b) preferred_dividends override (curated sheet, 0 is valid)
+    #   (c) common-stock market_data fallback (approximation) — only
+    #       when the sheet has no row for this code at all
     out: dict[str, float] = {}
     for code in stock_codes:
         if code in direct_dps:
