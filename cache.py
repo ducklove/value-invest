@@ -1148,19 +1148,22 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
     current_year = datetime.now().year
     placeholders = ",".join("?" for _ in all_codes)
     db = await get_db()
+    # 0 도 유효한 '무배당 확정' 값으로 취급 — 이전엔 `> 0` 필터로 제외
+    # 되어 UI 에서 '-' 로 표시됐는데, 사용자 요청대로 국내 배당 없는 종목
+    # 은 '0' 이라 찍어야 정직함. 가장 최근 NOT NULL 연도를 고르므로
+    # 과거에 배당이 있었더라도 최신 해에 정책이 바뀌어 0 이 됐으면 그
+    # 값이 반영됨 (= 배당 중단 상태 정직 표시).
     cursor = await db.execute(
         f"""SELECT stock_code, dividend_per_share, year
             FROM market_data
             WHERE stock_code IN ({placeholders})
               AND dividend_per_share IS NOT NULL
-              AND dividend_per_share > 0
               AND year < ?
               AND (stock_code, year) IN (
                 SELECT stock_code, MAX(year)
                 FROM market_data
                 WHERE stock_code IN ({placeholders})
                   AND dividend_per_share IS NOT NULL
-                  AND dividend_per_share > 0
                   AND year < ?
                 GROUP BY stock_code
               )""",
@@ -1206,16 +1209,28 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
     foreign_overrides = {row["stock_code"]: float(row["dps_krw"]) for row in await cursor.fetchall()}
 
     # Resolution order (most-specific first):
-    #   (a) exact market_data match — authoritative for KR commons
-    #   (b) foreign_dividends — yfinance for overseas / admin overrides
-    #   (c) preferred_dividends (curated sheet, 0 is valid)
-    #   (d) common-stock market_data fallback — only for preferreds
+    #   (a) market_data 에 양수 dps — 한국 보통주의 authoritative 값
+    #   (b) foreign_dividends — yfinance 해외 주식 / 관리자 manual override
+    #       이 계층이 (a) 의 '0' 값보다 먼저 체크되는 것이 핵심: 채권
+    #       ETF 같은 종목은 market_data 에 dps=0 으로 저장되지만 실제로
+    #       분배금이 있으므로 관리자가 override 한 값이 있으면 그걸
+    #       사용해야 함. market_data 양수 (a) 는 여전히 최상위라서 일반
+    #       한국 주식의 자동 수집 값은 override 에 덮이지 않음.
+    #   (c) market_data 의 0 값 — 배당 없는 종목 (ETF 등 포함, override
+    #       미등록 시). '-' 가 아니라 '0' 으로 표시됨.
+    #   (d) preferred_dividends (curated sheet, 0 은 유효 확정값)
+    #   (e) 보통주 market_data fallback — 우선주에만 적용. 보통주가 0
+    #       이라도 허용해서 '배당 중단' 상태 반영.
     out: dict[str, float] = {}
     for code in stock_codes:
-        if code in direct_dps:
-            out[code] = direct_dps[code]
+        direct = direct_dps.get(code)
+        if direct is not None and direct > 0:
+            out[code] = direct
         elif code in foreign_overrides:
             out[code] = foreign_overrides[code]
+        elif direct is not None:
+            # market_data dps == 0 and no override
+            out[code] = direct
         elif code in pref_overrides:
             out[code] = pref_overrides[code]
         elif code in pref_to_common_map and pref_to_common_map[code] in direct_dps:

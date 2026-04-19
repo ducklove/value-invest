@@ -107,22 +107,26 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
                VALUES (?, ?, ?, ?)""",
             [
-                # 삼성전자: 3년치 중 최근 (current_year - 1) 은 0 → 그 전 해로 fallback
+                # 삼성전자: current_year-1 은 0 이지만 MAX(year) 가 그 해.
+                # 새 로직은 0 도 유효값으로 돌려주므로 0 반환 (배당 중단
+                # 상태 정직 표시).
                 ("005930", current_year - 2, 70000, 1444.0),
                 ("005930", current_year - 1, 72000, 0.0),
                 ("005930", current_year, 75000, None),
                 # SK하이닉스: 단일 positive 연도
                 ("000660", current_year - 1, 100000, 1200.0),
-                # 네이버: 전부 0 → None 반환 (dict 에 미포함)
+                # 네이버: 최근 해 0 → 0 반환 ('-' 아님).
                 ("035420", current_year - 1, 200000, 0.0),
             ],
         )
         await db.commit()
         dps = await cache.get_trailing_dividends(["005930", "000660", "035420", "999999"])
-        self.assertEqual(dps.get("005930"), 1444.0)
+        # 005930 은 current_year-1 = 0 이므로 그 값 반환.
+        self.assertEqual(dps.get("005930"), 0.0)
         self.assertEqual(dps.get("000660"), 1200.0)
-        self.assertNotIn("035420", dps)  # only zeros → excluded
-        self.assertNotIn("999999", dps)  # no rows → excluded
+        # 035420 도 0 그대로 (이전엔 dict 에서 제외됐지만 이제 포함).
+        self.assertEqual(dps.get("035420"), 0.0)
+        self.assertNotIn("999999", dps)  # no rows → 여전히 제외
 
     async def test_get_trailing_dividends_empty_list(self):
         self.assertEqual(await cache.get_trailing_dividends([]), {})

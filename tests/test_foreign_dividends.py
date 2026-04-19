@@ -168,6 +168,34 @@ class GetTrailingDividendsResolutionTests(unittest.IsolatedAsyncioTestCase):
         dps = await cache.get_trailing_dividends(["005935"])
         self.assertEqual(dps.get("005935"), 9999.0)
 
+    async def test_etf_override_beats_zero_market_data(self):
+        """채권 ETF 시나리오. market_data 수집 파이프라인이 ETF 분배금을
+        커버하지 못해 dps=0 으로 저장되는데, 실제 분배금은 있음.
+        관리자가 foreign_dividends 수동 override 로 정확한 값을 넣으면
+        그것이 market_data 의 0 보다 우선돼야 한다 ('-' → 실제값).
+
+        반면 양수가 저장된 일반 종목 (삼성전자 등) 은 market_data 가
+        여전히 최상위라 override 가 덮어쓰지 못함 — 별도 테스트에서 보장.
+        """
+        from datetime import datetime
+        db = await cache.get_db()
+        current_year = datetime.now().year
+        # 채권 ETF (273130 = KODEX 종합채권) — 파이프라인이 0 으로 저장.
+        await db.execute(
+            """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
+               VALUES (?, ?, ?, ?)""",
+            ("273130", current_year - 1, 100000, 0.0),
+        )
+        await db.commit()
+        # override 없을 때: 0 반환 (배당 없음이 아니라 '수집 실패' 지만
+        # 동일하게 0 표시).
+        dps1 = await cache.get_trailing_dividends(["273130"])
+        self.assertEqual(dps1.get("273130"), 0.0)
+        # 관리자가 실제 분배금 입력:
+        await cache.upsert_foreign_dividend_manual("273130", 3500.0, note="채권 ETF 수동")
+        dps2 = await cache.get_trailing_dividends(["273130"])
+        self.assertEqual(dps2.get("273130"), 3500.0)
+
     async def test_market_data_still_wins_over_foreign(self):
         """direct market_data 매치는 여전히 최상위 — '해외' 테이블 이름
         과 달리 혹시 한국 보통주가 들어가도 authoritative 한 DART/KRX
