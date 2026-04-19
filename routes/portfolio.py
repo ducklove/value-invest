@@ -1088,6 +1088,31 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         user["google_sub"], stock_code, stock_name, quantity, avg_price,
         currency, group_name, benchmark_code, created_at,
     )
+
+    # 신규 해외 종목이면 yfinance 배당을 백그라운드로 fetch. 기존 동일
+    # 코드에 대해 이미 foreign_dividends row 가 있으면 (auto/manual 무관)
+    # 재 fetch 안 함 — 관리자 수동 override 보호 + 불필요한 yfinance 호출
+    # 방지. fire-and-forget 이므로 PUT 응답 지연에 영향 없음. 실패 시
+    # 로그만 남기고 포트폴리오 저장 자체는 성공 유지.
+    try:
+        if (not _is_korean_stock(stock_code)
+                and not _is_cash_asset(stock_code)
+                and stock_code not in _SPECIAL_ASSETS):
+            existing_div = await cache.get_foreign_dividend(stock_code)
+            if existing_div is None:
+                async def _bg_fetch_dividend(code: str):
+                    try:
+                        import foreign_dividends
+                        await foreign_dividends.refresh_foreign_dividends([code])
+                    except Exception as exc:
+                        logger.warning("auto foreign dividend fetch failed (%s): %s", code, exc)
+                task = asyncio.create_task(_bg_fetch_dividend(stock_code))
+                # Attach done callback so "Task exception was never retrieved"
+                # doesn't pollute logs — the inner try/except already swallows.
+                task.add_done_callback(lambda t: t.exception())
+    except Exception as exc:
+        logger.warning("foreign dividend dispatch guard failed (%s): %s", stock_code, exc)
+
     return {"ok": True, **result}
 
 

@@ -100,6 +100,27 @@ class CacheHelpersTests(unittest.IsolatedAsyncioTestCase):
         # Removing a non-existent code is a no-op (returns False, doesn't raise).
         self.assertFalse(await cache.delete_foreign_dividend("AAPL"))
 
+    async def test_get_single_row(self):
+        """포트폴리오 PUT 후 dispatch 로직이 '이미 값 있으면 skip' 판단에
+        사용. row 존재 / 부재 / 빈 코드 모두 no-raise."""
+        self.assertIsNone(await cache.get_foreign_dividend("AAPL"))
+        self.assertIsNone(await cache.get_foreign_dividend(""))
+        self.assertIsNone(await cache.get_foreign_dividend(None))
+        await cache.upsert_foreign_dividends_auto([
+            {"stock_code": "AAPL", "dps_native": 0.96, "currency": "USD", "dps_krw": 1320.0},
+        ])
+        got = await cache.get_foreign_dividend("AAPL")
+        self.assertIsNotNone(got)
+        self.assertEqual(got["stock_code"], "AAPL")
+        self.assertEqual(got["source"], "yfinance")
+        self.assertEqual(got["dps_krw"], 1320.0)
+        # 수동 override 후엔 source 값이 전환되어야 — dispatch 가 '이미
+        # 있다' 판정하는 데 값 있음만 보면 됨 (source 무관).
+        await cache.upsert_foreign_dividend_manual("AAPL", 9999.0, "override")
+        got2 = await cache.get_foreign_dividend("AAPL")
+        self.assertEqual(got2["source"], "manual")
+        self.assertEqual(got2["dps_krw"], 9999.0)
+
     async def test_manual_order_first_in_list(self):
         """관리자 UI 가 수동 엔트리를 먼저 보여줄 수 있도록 정렬 회귀 가드."""
         await cache.upsert_foreign_dividends_auto([

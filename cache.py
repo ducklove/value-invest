@@ -1389,6 +1389,22 @@ async def get_foreign_dividends_count() -> int:
     return int(row["n"]) if row else 0
 
 
+async def get_foreign_dividend(stock_code: str) -> dict | None:
+    """Single-row lookup — used by the portfolio PUT dispatch to avoid
+    firing a fresh yfinance call when we already have data (auto OR
+    manual) for this code."""
+    code = (stock_code or "").strip()
+    if not code:
+        return None
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT stock_code, dps_krw, source FROM foreign_dividends WHERE stock_code = ?",
+        (code,),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
 async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
