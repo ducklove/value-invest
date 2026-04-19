@@ -941,14 +941,22 @@ async def fetch_quote_snapshot(stock_code: str) -> dict:
         _get_first(summary, "previous_close", "base_price", "stck_sdpr"),
         zero_as_none=False,
     )
-    # 누적 거래대금 — KIS 국내 주식시세 API 에선 acml_tr_pbmn 키. 다른
-    # 이름(trade_amount 등)으로 리매핑돼 summary 에 들어올 가능성까지
-    # 고려해 복수 키 시도. 0 은 장 시작 전일 수 있으므로 zero_as_none
-    # 은 False (명시적 0 전달).
+    # 누적 거래대금 — KIS 원본 응답의 `acml_tr_pbmn` 키 (예: 삼성전자
+    # ≈ 3.9조). kis_proxy_client 가 이 필드를 summary 로 승격하지 않고
+    # payload["raw"] 에 원본 그대로만 보내므로 summary + raw 둘 다 뒤져
+    # 집어온다. 0 은 장 시작 전 잠깐 나타날 수 있으니 zero_as_none=False
+    # (명시적 0 이 UI 에 그대로 전달되도록).
     trade_value = _safe_float(
         _get_first(summary, "acml_tr_pbmn", "trade_amount", "trading_value"),
         zero_as_none=False,
     )
+    if trade_value is None and isinstance(quote_payload, dict):
+        raw = quote_payload.get("raw")
+        if isinstance(raw, dict):
+            trade_value = _safe_float(
+                _get_first(raw, "acml_tr_pbmn", "trade_amount", "trading_value"),
+                zero_as_none=False,
+            )
 
     if previous_close is None and latest_price is not None and change is not None:
         previous_close = round(latest_price - change, 2)
