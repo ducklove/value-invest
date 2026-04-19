@@ -8,7 +8,7 @@ import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
 from deps import get_current_user
@@ -541,6 +541,59 @@ async def event_summary(request: Request, hours: float = 24):
 # ---------------------------------------------------------------------------
 # Subsystem diagnostics — /diag/<subsystem>
 # ---------------------------------------------------------------------------
+
+@router.post("/refresh-foreign-dividends")
+async def refresh_foreign_dividends_endpoint(request: Request):
+    """yfinance 로부터 포트폴리오 내 해외 종목들의 trailing annual
+    dividend 를 일괄 fetch + KRW 환산 + upsert. source='manual' 인
+    수동 override 는 건드리지 않음."""
+    await _require_admin(request)
+    import foreign_dividends
+    result = await foreign_dividends.refresh_foreign_dividends()
+    result["total_cached"] = await cache.get_foreign_dividends_count()
+    return result
+
+
+@router.get("/foreign-dividends")
+async def list_foreign_dividends_endpoint(request: Request):
+    """관리자 UI 의 목록 뷰용. 수동 override row 가 먼저 오도록 정렬."""
+    await _require_admin(request)
+    return await cache.list_foreign_dividends()
+
+
+@router.post("/foreign-dividend")
+async def upsert_foreign_dividend_endpoint(request: Request, payload: dict = Body(...)):
+    """관리자 수동 배당 입력. body: {stock_code, dps_krw, note?}.
+    source='manual' 로 저장되어 이후 auto refresh 에서 덮어쓰지 않음.
+    dps_krw 0 허용 (의도적으로 '배당 없음' 명시)."""
+    await _require_admin(request)
+    code = str(payload.get("stock_code") or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="stock_code 는 필수입니다.")
+    dps_raw = payload.get("dps_krw")
+    if dps_raw is None or dps_raw == "":
+        raise HTTPException(status_code=400, detail="dps_krw 는 필수입니다.")
+    try:
+        dps = float(dps_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="dps_krw 는 숫자여야 합니다.")
+    if dps < 0:
+        raise HTTPException(status_code=400, detail="dps_krw 는 0 이상이어야 합니다.")
+    note = payload.get("note")
+    note = str(note).strip() if note else None
+    await cache.upsert_foreign_dividend_manual(code, dps, note)
+    return {"ok": True, "stock_code": code, "dps_krw": dps, "note": note, "source": "manual"}
+
+
+@router.delete("/foreign-dividend/{stock_code}")
+async def delete_foreign_dividend_endpoint(request: Request, stock_code: str):
+    """수동/자동 entry 제거. 이후 auto refresh 에서 다시 채워질 수 있음."""
+    await _require_admin(request)
+    deleted = await cache.delete_foreign_dividend(stock_code.strip().upper())
+    if not deleted:
+        raise HTTPException(status_code=404, detail="해당 종목의 배당 entry 가 없습니다.")
+    return {"ok": True, "stock_code": stock_code}
+
 
 @router.post("/refresh-preferred-dividends")
 async def refresh_preferred_dividends_endpoint(request: Request):

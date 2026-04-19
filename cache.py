@@ -301,6 +301,21 @@ async def init_db():
             VALUES (new.id, new.stock_code, new.title, new.summary_md, new.key_points_md);
         END;
 
+        -- 해외 종목 + 수동 override 배당. 한국 market_data 파이프라인은
+        -- 해외 티커를 커버하지 않으므로 yfinance 의 trailingAnnualDividendRate
+        -- 를 긁어와 KRW 환산 후 저장. source='manual' 인 row 는 관리자가
+        -- 직접 입력한 값이라 auto refresh 가 덮어쓰지 않는다 (ON CONFLICT
+        -- ... WHERE source != 'manual' 로 강제).
+        CREATE TABLE IF NOT EXISTS foreign_dividends (
+            stock_code   TEXT PRIMARY KEY,
+            dps_native   REAL,
+            currency     TEXT,
+            dps_krw      REAL,
+            source       TEXT NOT NULL,
+            manual_note  TEXT,
+            fetched_at   TEXT NOT NULL
+        );
+
         -- 우선주 배당금 — 공유 Google Sheet 의 Data!AI 컬럼 (연간 주당
         -- 배당 원화). market_data 파이프라인은 보통주 코드만 인덱싱하므로
         -- 우선주는 기존엔 보통주 값으로 근사할 수밖에 없었는데, 실제
@@ -1173,15 +1188,34 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
         )
         pref_overrides = {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
 
-    # Resolution order for preferred-stock codes:
-    #   (a) exact match in market_data — rare but authoritative
-    #   (b) preferred_dividends override (curated sheet, 0 is valid)
-    #   (c) common-stock market_data fallback (approximation) — only
-    #       when the sheet has no row for this code at all
+    # foreign_dividends — yfinance-sourced + admin manual overrides.
+    # Single lookup handles everything outside the KR market_data pipeline.
+    # We query for all requested codes (not just preferred) because:
+    #   - Overseas tickers (AAPL, GOOGL, ...) live here exclusively.
+    #   - Admin may occasionally override any code via the manual API
+    #     (naming calls this table 'foreign' but practically it's a
+    #     generic override lane — market_data still wins when present).
+    foreign_placeholders = ",".join("?" for _ in stock_codes)
+    cursor = await db.execute(
+        f"""SELECT stock_code, dps_krw
+            FROM foreign_dividends
+            WHERE stock_code IN ({foreign_placeholders})
+              AND dps_krw IS NOT NULL""",
+        stock_codes,
+    )
+    foreign_overrides = {row["stock_code"]: float(row["dps_krw"]) for row in await cursor.fetchall()}
+
+    # Resolution order (most-specific first):
+    #   (a) exact market_data match — authoritative for KR commons
+    #   (b) foreign_dividends — yfinance for overseas / admin overrides
+    #   (c) preferred_dividends (curated sheet, 0 is valid)
+    #   (d) common-stock market_data fallback — only for preferreds
     out: dict[str, float] = {}
     for code in stock_codes:
         if code in direct_dps:
             out[code] = direct_dps[code]
+        elif code in foreign_overrides:
+            out[code] = foreign_overrides[code]
         elif code in pref_overrides:
             out[code] = pref_overrides[code]
         elif code in pref_to_common_map and pref_to_common_map[code] in direct_dps:
@@ -1241,6 +1275,116 @@ async def get_preferred_dividends_count() -> int:
     """Used by admin dashboard — how many preferred rows we have cached."""
     db = await get_db()
     cursor = await db.execute("SELECT COUNT(*) AS n FROM preferred_dividends")
+    row = await cursor.fetchone()
+    return int(row["n"]) if row else 0
+
+
+# ---------------------------------------------------------------------------
+# foreign_dividends — yfinance-sourced + admin-manual overrides
+# ---------------------------------------------------------------------------
+
+async def upsert_foreign_dividends_auto(rows: list[dict]) -> int:
+    """Upsert yfinance-fetched rows. PRESERVES existing source='manual'
+    rows — admin's explicit override must not be clobbered by the next
+    refresh. SQLite's ON CONFLICT ... WHERE clause does the guard.
+
+    rows: [{
+        "stock_code": "AAPL",
+        "dps_native": 0.96,
+        "currency": "USD",
+        "dps_krw": 1320.0,
+    }, ...]
+    """
+    if not rows:
+        return 0
+    now = datetime.now().isoformat(timespec="seconds")
+    db = await get_db()
+    written = 0
+    for r in rows:
+        code = (r.get("stock_code") or "").strip()
+        if not code:
+            continue
+        await db.execute(
+            """INSERT INTO foreign_dividends
+               (stock_code, dps_native, currency, dps_krw, source, manual_note, fetched_at)
+               VALUES (?, ?, ?, ?, 'yfinance', NULL, ?)
+               ON CONFLICT(stock_code) DO UPDATE SET
+                   dps_native = excluded.dps_native,
+                   currency   = excluded.currency,
+                   dps_krw    = excluded.dps_krw,
+                   source     = 'yfinance',
+                   fetched_at = excluded.fetched_at
+               WHERE foreign_dividends.source != 'manual'""",
+            (code, r.get("dps_native"), r.get("currency"), r.get("dps_krw"), now),
+        )
+        written += 1
+    await db.commit()
+    return written
+
+
+async def upsert_foreign_dividend_manual(
+    stock_code: str,
+    dps_krw: float,
+    note: str | None = None,
+) -> None:
+    """Admin-entered override. Unconditionally overwrites whatever's there
+    (yfinance value or previous manual). Doesn't track native currency
+    because the admin enters the KRW-equivalent directly — simpler UI."""
+    code = (stock_code or "").strip()
+    if not code:
+        raise ValueError("stock_code is required")
+    now = datetime.now().isoformat(timespec="seconds")
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO foreign_dividends
+           (stock_code, dps_native, currency, dps_krw, source, manual_note, fetched_at)
+           VALUES (?, NULL, 'KRW', ?, 'manual', ?, ?)
+           ON CONFLICT(stock_code) DO UPDATE SET
+               dps_native  = NULL,
+               currency    = 'KRW',
+               dps_krw     = excluded.dps_krw,
+               source      = 'manual',
+               manual_note = excluded.manual_note,
+               fetched_at  = excluded.fetched_at""",
+        (code, float(dps_krw), note, now),
+    )
+    await db.commit()
+
+
+async def delete_foreign_dividend(stock_code: str) -> bool:
+    """Remove a row entirely — used both for "clear this override" (so
+    the next auto refresh can repopulate) and for cleanup of stocks no
+    longer in any portfolio. Returns True if a row was removed."""
+    code = (stock_code or "").strip()
+    if not code:
+        return False
+    db = await get_db()
+    cursor = await db.execute(
+        "DELETE FROM foreign_dividends WHERE stock_code = ?",
+        (code,),
+    )
+    await db.commit()
+    return (cursor.rowcount or 0) > 0
+
+
+async def list_foreign_dividends() -> list[dict]:
+    """Return all foreign_dividends rows for the admin dashboard, with
+    source surfaced so the UI can badge manual vs. auto. Sorted by
+    source (manual first — those are the ones the admin is curating)
+    then by stock_code."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT stock_code, dps_native, currency, dps_krw, source,
+                  manual_note, fetched_at
+           FROM foreign_dividends
+           ORDER BY CASE source WHEN 'manual' THEN 0 ELSE 1 END, stock_code ASC"""
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_foreign_dividends_count() -> int:
+    db = await get_db()
+    cursor = await db.execute("SELECT COUNT(*) AS n FROM foreign_dividends")
     row = await cursor.fetchone()
     return int(row["n"]) if row else 0
 

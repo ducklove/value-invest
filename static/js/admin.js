@@ -36,6 +36,9 @@ async function loadAdminView() {
     container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events);
     _adminLoaded = true;
     _startLiveUpdates();
+    // 해외 배당 목록은 섹션 HTML 삽입 후에만 컨테이너가 존재 — 별도
+    // 비동기 로드로 가져와 표시. 실패해도 페이지 나머지엔 영향 없음.
+    loadForeignDividendsList();
   } catch (e) {
     container.innerHTML = `<div style="color:var(--text-secondary);padding:40px;">어드민 데이터를 불러오지 못했습니다.</div>`;
   }
@@ -67,14 +70,182 @@ function _renderAdmin(deploy, batch, server, db, users, summary, events) {
 function _renderDataSyncSection() {
   return `
     <div class="admin-section">
-      <h3>외부 데이터 동기화 <span class="admin-sub">시트 업데이트 직후 수동 반영</span></h3>
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">
+      <h3>외부 데이터 동기화 <span class="admin-sub">관리자 수동 반영</span></h3>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
         <button class="admin-btn" id="refreshPrefDivBtn" onclick="refreshPreferredDividends()">우선주 배당 시트 새로고침</button>
-        <span class="admin-sub">Google Sheet Data!AI — 12시간마다 자동 refresh</span>
+        <span class="admin-sub">Google Sheet Data!AI 컬럼</span>
       </div>
       <div id="prefDivResult"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin:16px 0 8px;flex-wrap:wrap;">
+        <button class="admin-btn" id="refreshFgnDivBtn" onclick="refreshForeignDividends()">해외 배당 yfinance 새로고침</button>
+        <span class="admin-sub">trailingAnnualDividendRate → KRW 환산. 수동 입력(아래) 은 덮어쓰지 않음.</span>
+      </div>
+      <div id="fgnDivResult"></div>
+      <div id="fgnDivManualSection" style="margin-top:16px;"></div>
     </div>
   `;
+}
+
+// --- 해외 배당 yfinance 새로고침 버튼 --------------------------------
+
+async function refreshForeignDividends() {
+  const btn = document.getElementById('refreshFgnDivBtn');
+  const result = document.getElementById('fgnDivResult');
+  if (!result) return;
+  if (btn) btn.disabled = true;
+  result.innerHTML = '<div style="color:var(--text-secondary);padding:6px 0;">yfinance 호출 중... (종목당 ~1초)</div>';
+  try {
+    const res = await apiFetch('/api/admin/refresh-foreign-dividends', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      result.innerHTML = `<div style="color:var(--color-danger)">실패 (HTTP ${res.status}): ${_esc(data.detail || res.statusText)}</div>`;
+      return;
+    }
+    const data = await res.json();
+    if (!data.ok) {
+      result.innerHTML = `<div style="color:var(--color-danger)">실패: ${_esc(data.error || '알 수 없음')}</div>`;
+      return;
+    }
+    const failCount = (data.failures || []).length;
+    const failNote = failCount ? ` · 실패 ${failCount}건` : '';
+    result.innerHTML = `
+      <div class="admin-cards" style="margin-top:4px;">
+        <div class="admin-card">
+          <div class="admin-card-label">쓰여진 행</div>
+          <div class="admin-card-value">${data.rows_written}${failNote}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">시도한 종목</div>
+          <div class="admin-card-value">${data.total_attempted}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">DB 총 캐시</div>
+          <div class="admin-card-value">${data.total_cached ?? '-'}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">소요 시간</div>
+          <div class="admin-card-value">${data.elapsed_seconds ?? '-'}s</div>
+        </div>
+      </div>
+    `;
+    // 새 값 반영된 목록 다시 로드
+    await loadForeignDividendsList();
+  } catch (e) {
+    result.innerHTML = `<div style="color:var(--color-danger)">요청 실패: ${_esc(e.name + ': ' + e.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// --- 해외 배당 수동 CRUD ---------------------------------------------
+
+async function loadForeignDividendsList() {
+  const root = document.getElementById('fgnDivManualSection');
+  if (!root) return;
+  try {
+    const res = await apiFetch('/api/admin/foreign-dividends');
+    if (!res.ok) {
+      root.innerHTML = `<div class="admin-sub" style="color:var(--color-danger)">목록 조회 실패 (HTTP ${res.status})</div>`;
+      return;
+    }
+    const rows = await res.json();
+    root.innerHTML = _renderForeignDivTable(rows);
+  } catch (e) {
+    root.innerHTML = `<div class="admin-sub" style="color:var(--color-danger)">목록 조회 에러: ${_esc(e.message)}</div>`;
+  }
+}
+
+function _renderForeignDivTable(rows) {
+  const manualRows = rows.filter(r => r.source === 'manual');
+  const autoRows = rows.filter(r => r.source !== 'manual');
+  const rowHtml = (r) => {
+    const badge = r.source === 'manual'
+      ? '<span class="admin-event-kv admin-status-fail">수동</span>'
+      : '<span class="admin-event-kv">yfinance</span>';
+    const native = r.dps_native !== null && r.dps_native !== undefined
+      ? `${Number(r.dps_native).toFixed(4)} ${_esc(r.currency || '')}`
+      : '-';
+    const note = r.manual_note ? _esc(r.manual_note) : '';
+    return `
+      <tr>
+        <td><code>${_esc(r.stock_code)}</code> ${badge}</td>
+        <td class="admin-num">${r.dps_krw !== null && r.dps_krw !== undefined ? Number(r.dps_krw).toLocaleString() : '-'}</td>
+        <td class="admin-sub">${native}</td>
+        <td class="admin-sub">${note}</td>
+        <td class="admin-sub">${_esc((r.fetched_at || '').slice(0, 16).replace('T', ' '))}</td>
+        <td><button class="admin-btn admin-btn-secondary" onclick="deleteForeignDividend('${_esc(r.stock_code)}')">삭제</button></td>
+      </tr>
+    `;
+  };
+  const body = [...manualRows, ...autoRows].map(rowHtml).join('')
+    || '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary);padding:12px;">등록된 항목이 없습니다. 위 yfinance 새로고침을 실행하거나 아래에서 수동 입력하세요.</td></tr>';
+  return `
+    <h4 style="margin:0 0 8px;font-size:14px;">해외 배당 수동 입력 / 조회</h4>
+    <form id="fgnDivManualForm" onsubmit="event.preventDefault(); submitForeignDividend();"
+          style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <input type="text" id="fgnDivCode" placeholder="종목코드 (예: AAPL)"
+             style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text-primary);font-family:monospace;width:140px;">
+      <input type="number" id="fgnDivDps" placeholder="연 배당 (원)" step="0.01" min="0"
+             style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text-primary);width:140px;">
+      <input type="text" id="fgnDivNote" placeholder="메모 (선택)"
+             style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text-primary);width:240px;">
+      <button class="admin-btn" type="submit">저장 (수동)</button>
+      <span class="admin-sub">수동 저장은 yfinance 새로고침이 덮어쓰지 않습니다.</span>
+    </form>
+    <div id="fgnDivManualResult" class="admin-sub" style="margin-bottom:6px;"></div>
+    <table class="admin-table admin-table-compact">
+      <thead><tr><th>종목</th><th>KRW 주당배당</th><th>원본</th><th>메모</th><th>갱신</th><th></th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  `;
+}
+
+async function submitForeignDividend() {
+  const code = (document.getElementById('fgnDivCode')?.value || '').trim();
+  const dpsStr = (document.getElementById('fgnDivDps')?.value || '').trim();
+  const note = (document.getElementById('fgnDivNote')?.value || '').trim();
+  const result = document.getElementById('fgnDivManualResult');
+  if (!code || !dpsStr) {
+    if (result) result.innerHTML = '<span style="color:var(--color-danger)">종목코드 + 배당 모두 필수</span>';
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/foreign-dividend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_code: code, dps_krw: parseFloat(dpsStr), note: note || null }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (result) result.innerHTML = `<span style="color:var(--color-danger)">실패 (HTTP ${res.status}): ${_esc(data.detail || res.statusText)}</span>`;
+      return;
+    }
+    if (result) result.innerHTML = `<span style="color:var(--color-success)">${_esc(data.stock_code)} 저장됨 (${data.dps_krw} 원)</span>`;
+    document.getElementById('fgnDivCode').value = '';
+    document.getElementById('fgnDivDps').value = '';
+    document.getElementById('fgnDivNote').value = '';
+    await loadForeignDividendsList();
+  } catch (e) {
+    if (result) result.innerHTML = `<span style="color:var(--color-danger)">에러: ${_esc(e.message)}</span>`;
+  }
+}
+
+async function deleteForeignDividend(code) {
+  if (!confirm(`"${code}" 배당 항목을 삭제할까요?\n(자동 refresh 가 다시 채울 수 있음)`)) return;
+  try {
+    const res = await apiFetch(`/api/admin/foreign-dividend/${encodeURIComponent(code)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(`삭제 실패: ${data.detail || res.statusText}`);
+      return;
+    }
+    await loadForeignDividendsList();
+  } catch (e) {
+    alert(`삭제 에러: ${e.message}`);
+  }
 }
 
 async function refreshPreferredDividends() {
