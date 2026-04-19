@@ -49,12 +49,80 @@ function _renderAdmin(deploy, batch, server, db, users, summary, events) {
       <div id="adminLiveSection">${_renderServerCard(server)}</div>
       ${_renderBatchSection(batch)}
       ${_renderSubsystemSummary(summary)}
+      ${_renderDataSyncSection()}
       ${_renderDiagSection()}
       ${_renderEventsSection(events)}
       ${_renderUsersSection(users)}
       ${_renderDbSection(db)}
     </div>
   `;
+}
+
+// --- Data sync (manual refresh triggers) --------------------------------
+//
+// 시트 관리자가 Google Sheet 값을 방금 고쳤을 때 12시간 자동 루프를
+// 기다리지 않고 즉시 반영할 수 있는 버튼. POST /api/admin/refresh-
+// preferred-dividends 엔드포인트를 호출하고 응답 요약을 보여준다.
+
+function _renderDataSyncSection() {
+  return `
+    <div class="admin-section">
+      <h3>외부 데이터 동기화 <span class="admin-sub">시트 업데이트 직후 수동 반영</span></h3>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">
+        <button class="admin-btn" id="refreshPrefDivBtn" onclick="refreshPreferredDividends()">우선주 배당 시트 새로고침</button>
+        <span class="admin-sub">Google Sheet Data!AI — 12시간마다 자동 refresh</span>
+      </div>
+      <div id="prefDivResult"></div>
+    </div>
+  `;
+}
+
+async function refreshPreferredDividends() {
+  const btn = document.getElementById('refreshPrefDivBtn');
+  const result = document.getElementById('prefDivResult');
+  if (!result) return;
+  if (btn) btn.disabled = true;
+  result.innerHTML = '<div style="color:var(--text-secondary);padding:6px 0;">새로고침 중... (시트 다운로드 + 파싱 + upsert)</div>';
+  try {
+    const res = await apiFetch('/api/admin/refresh-preferred-dividends', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      result.innerHTML = `<div style="color:var(--color-danger)">실패 (HTTP ${res.status}): ${_esc(data.detail || res.statusText)}</div>`;
+      return;
+    }
+    const data = await res.json();
+    if (!data.ok) {
+      result.innerHTML = `<div style="color:var(--color-danger)">실패: ${_esc(data.error || '알 수 없음')}</div>`;
+      return;
+    }
+    result.innerHTML = `
+      <div class="admin-cards" style="margin-top:4px;">
+        <div class="admin-card">
+          <div class="admin-card-label">쓰여진 행</div>
+          <div class="admin-card-value">${data.rows_written}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">시트 연도</div>
+          <div class="admin-card-value">${data.sheet_year ?? '-'}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">DB 총 캐시</div>
+          <div class="admin-card-value">${data.total_cached ?? '-'}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">소요 시간</div>
+          <div class="admin-card-value">${data.elapsed_seconds ?? '-'}s</div>
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    result.innerHTML = `<div style="color:var(--color-danger)">요청 실패: ${_esc(e.name + ': ' + e.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // --- Deploy status ------------------------------------------------------
