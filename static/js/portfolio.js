@@ -707,6 +707,29 @@ function renderPortfolio() {
       ? '$' + Number(cv).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3})
       : fmtNum(Math.round(cv));
   };
+  // 편집 중 input 의 사용자 입력(값/포커스/커서)을 re-render 전후로 보존.
+  // tbody.innerHTML 재할당은 모든 <input> 을 재생성하므로, QuoteManager
+  // WebSocket tick 이나 benchmark polling 이 돌 때마다 편집 중인 값이
+  // DB 값으로 덮어써지는 문제가 있었다. 목표가 × 버튼으로 input 을
+  // 비워도 즉시 '자동 계산 값' 으로 복원되던 증상이 대표적.
+  // 따라서 DOM 교체 전에 현재 값을 snapshot 하고, 교체 후에 복원한다.
+  const _editInputIds = ['pfEditPrice', 'pfEditTarget', 'pfEditQty', 'pfEditCreatedAt'];
+  const _preservedEdit = pfEditingCode ? {} : null;
+  if (_preservedEdit) {
+    for (const id of _editInputIds) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      let selStart = null, selEnd = null;
+      // type=number 는 selectionStart 접근 시 DOMException 발생할 수 있음
+      try { selStart = el.selectionStart; selEnd = el.selectionEnd; } catch (e) {}
+      _preservedEdit[id] = {
+        value: el.value,
+        focused: el === document.activeElement,
+        selStart, selEnd,
+      };
+    }
+  }
+
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
@@ -768,6 +791,23 @@ function renderPortfolio() {
       </div></td>
     </tr>`;
   }).join('');
+
+  // snapshot 복원 — DOM 교체 직후 편집 input 의 값/포커스/커서 복귀.
+  if (_preservedEdit) {
+    for (const [id, snap] of Object.entries(_preservedEdit)) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.value = snap.value;
+      if (snap.focused) {
+        el.focus();
+        try {
+          if (snap.selStart !== null && snap.selEnd !== null) {
+            el.setSelectionRange(snap.selStart, snap.selEnd);
+          }
+        } catch (e) {}
+      }
+    }
+  }
 
   // Footer
   tfoot.innerHTML = `<tr>
