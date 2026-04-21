@@ -236,18 +236,23 @@ async function loadPortfolio() {
 }
 
 function pfSort(key) {
+  // 클릭 순환: 없음 → 내림차순 → 올림차순 → 없음. 모든 컬럼 동일.
+  // 이전 구현은 첫 클릭 후 desc → none 을 반복하며 asc 단계로 아예
+  // 넘어가지 않는 버그가 있었다.
   if (key === 'group') {
     pfGroupSort = !pfGroupSort;
   } else if (pfSortKey === key) {
     if (!pfSortAsc) {
-      pfSortKey = null;
+      // 현재 내림차순 → 올림차순
       pfSortAsc = true;
     } else {
-      pfSortAsc = false;
+      // 현재 올림차순 → 해제
+      pfSortKey = null;
+      pfSortAsc = true;
     }
   } else {
     pfSortKey = key;
-    pfSortAsc = key === 'name';
+    pfSortAsc = false;   // 첫 클릭은 내림차순 (이름 포함 통일)
   }
   renderPortfolio();
 }
@@ -456,24 +461,32 @@ function renderPortfolio() {
         const gb = grpOrder[pfGetGroup(b)] ?? 999;
         if (ga !== gb) return ga - gb;
       }
-      // Secondary: column sort
+      // Secondary: column sort. null/NaN/빈값은 방향 무관 항상 맨 아래.
+      // 이전엔 `?? -Infinity` 로 치환해서 desc 에선 적절히 뒤로 갔지만
+      // asc 에선 맨 앞에 몰려 "정렬 안된 것처럼" 보이는 버그가 있었다.
       if (pfSortKey) {
-        let va, vb;
         if (pfSortKey === 'name') {
-          va = a.stock_name; vb = b.stock_name;
+          const va = a.stock_name || '';
+          const vb = b.stock_name || '';
+          if (!va && vb) return 1;
+          if (va && !vb) return -1;
           return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
         }
-        // 등록일자는 YYYY-MM-DD 문자열 비교 (lexicographic == chronological).
-        // 빈 값은 '' 로 오면 asc 에선 맨 앞, desc 에선 맨 뒤로 떨어지는데
-        // 이게 자연스러운 sort — 등록일 없는 cash/legacy row 를 최하단으로.
         if (pfSortKey === 'createdAtSort') {
-          va = a.createdAtSort || '';
-          vb = b.createdAtSort || '';
+          const va = a.createdAtSort || '';
+          const vb = b.createdAtSort || '';
+          if (!va && vb) return 1;
+          if (va && !vb) return -1;
           return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
         }
-        va = a[pfSortKey] ?? -Infinity;
-        vb = b[pfSortKey] ?? -Infinity;
-        return pfSortAsc ? va - vb : vb - va;
+        const aVal = a[pfSortKey];
+        const bVal = b[pfSortKey];
+        const aMissing = aVal == null || Number.isNaN(aVal);
+        const bMissing = bVal == null || Number.isNaN(bVal);
+        if (aMissing && bMissing) return 0;
+        if (aMissing) return 1;
+        if (bMissing) return -1;
+        return pfSortAsc ? aVal - bVal : bVal - aVal;
       }
       return 0;
     });
