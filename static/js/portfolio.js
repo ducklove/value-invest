@@ -753,7 +753,7 @@ function renderPortfolio() {
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
-        <td class="pf-col-num pf-col-target"><span class="pf-target-edit-wrap"><input class="pf-edit-input" id="pfEditTarget" value="${r.target_price ?? ''}" type="number" step="any" placeholder="자동"><button type="button" class="pf-target-clear" title="비우기 (자동 계산으로 복귀)" onclick="document.getElementById('pfEditTarget').value=''">×</button></span></td>
+        <td class="pf-col-num pf-col-target"><span class="pf-target-edit-wrap"><input class="pf-edit-input" id="pfEditTarget" value="${r.target_price ?? ''}" type="number" step="any" placeholder="자동"><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 즉시 비우기 (자동 계산 복귀)">×</button></span></td>
         <td class="pf-col-num pf-col-achiev">${r.achievementPct !== null ? fmtPct(r.achievementPct) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
         <td class="pf-col-num pf-col-qty"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
@@ -1192,6 +1192,49 @@ async function savePortfolioEdit(stockCode, stockName) {
     pfEditingCode = null;
     renderPortfolio();
   } catch (e) { showToast(e.message); }
+}
+
+// × 버튼 핸들러 — edit input value 를 비우는 것만으로는 quote polling
+// 등으로 인한 re-render 에 의해 즉시 원복되는 증상이 있어, 즉시 서버에
+// target_price: null 을 PUT 해서 DB 의 수동 override 를 삭제한다.
+// 이후 어떤 render 가 돌아도 r.target_price === null 이므로 input 은
+// 빈 채로 그려지고, 표시 value 는 자동 계산된 값이 된다.
+async function clearPortfolioTargetPrice(stockCode) {
+  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  if (!item) return;
+  // 이미 null 이면 API 호출 생략 (예: 자동 계산 중인 걸 또 × 누른 경우).
+  if (item.target_price == null) {
+    const tgtEl = document.getElementById('pfEditTarget');
+    if (tgtEl) tgtEl.value = '';
+    return;
+  }
+  try {
+    const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stock_name: item.stock_name,
+        quantity: item.quantity,
+        avg_price: item.avg_price,
+        target_price: null,
+      }),
+    });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || '목표가 초기화 실패');
+    }
+    const data = await resp.json().catch(() => ({}));
+    if ('target_price' in data) item.target_price = data.target_price;
+    else item.target_price = null;
+    // 편집 모드면 input 도 즉시 비우기 — 다음 render 까지 기다리지 않고
+    // 시각적 피드백 제공.
+    const tgtEl = document.getElementById('pfEditTarget');
+    if (tgtEl) tgtEl.value = '';
+    renderPortfolio();
+    showToast('목표가를 자동 계산으로 되돌렸습니다.', 'success');
+  } catch (e) {
+    showToast(e.message);
+  }
 }
 
 async function deletePortfolioItem(stockCode) {
@@ -3072,6 +3115,13 @@ async function deleteCashflow(id) {
       } else if ((el = t.closest('.js-pf-nav-zoom'))) {
         const days = Number(el.dataset.zoomDays);
         if (!isNaN(days)) _navZoomToDays(days);
+      } else if ((el = t.closest('.js-pf-target-clear'))) {
+        const code = codeFromTr(el);
+        if (code) {
+          e.preventDefault();
+          e.stopPropagation();
+          clearPortfolioTargetPrice(code);
+        }
       }
     });
     document.addEventListener('change', (e) => {
