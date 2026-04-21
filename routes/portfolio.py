@@ -1084,9 +1084,26 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         except ValueError:
             raise HTTPException(status_code=400, detail="등록일자는 YYYY-MM-DD 형식이어야 합니다.")
 
+    # 목표가 (수동 override). 명시 안 하면 기존 값 유지 (cache 의 sentinel
+    # 처리). "" 또는 null 명시는 자동계산으로 되돌리는 신호.
+    target_price_kwarg: dict = {}
+    if "target_price" in payload:
+        raw_tp = payload.get("target_price")
+        if raw_tp is None or (isinstance(raw_tp, str) and raw_tp.strip() == ""):
+            target_price_kwarg["target_price"] = None
+        else:
+            try:
+                tp_val = float(raw_tp)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="목표가는 숫자여야 합니다.")
+            if tp_val < 0:
+                raise HTTPException(status_code=400, detail="목표가는 0 이상이어야 합니다.")
+            target_price_kwarg["target_price"] = tp_val
+
     result = await cache.save_portfolio_item(
         user["google_sub"], stock_code, stock_name, quantity, avg_price,
         currency, group_name, benchmark_code, created_at,
+        **target_price_kwarg,
     )
 
     # 신규 해외 종목이면 yfinance 배당을 백그라운드로 fetch. 기존 동일

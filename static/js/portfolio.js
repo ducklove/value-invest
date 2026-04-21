@@ -31,6 +31,8 @@ const PF_COL_DEFS = [
   { key: 'invested',  cls: 'pf-col-invested',   label: '거래대금',  defaultVisible: false },
   { key: 'buyprice',  cls: 'pf-col-buyprice',   label: '매입가' },
   { key: 'curprice',  cls: 'pf-col-curprice',   label: '현재가' },
+  { key: 'target',    cls: 'pf-col-target',     label: '목표가',     defaultVisible: false },
+  { key: 'achiev',    cls: 'pf-col-achiev',     label: '달성률',     defaultVisible: false },
   { key: 'qty',       cls: 'pf-col-qty',        label: '수량' },
   { key: 'return',    cls: 'pf-col-return',      label: '수익률' },
   { key: 'mktval',    cls: 'pf-col-mktval',     label: '평가금액' },
@@ -384,6 +386,22 @@ function renderPortfolio() {
     };
   });
 
+  // 목표가 / 달성률 — _computeTargetPrice 가 portfolio 전체를 본다
+  // (우선주의 보통주 lookup, 지주사 자회사 lookup) 라 row build 후 두
+  // 번째 패스에서 일괄 부여. 자회사 quote 가 캐시에 없으면 배경 fetch
+  // 트리거 (응답 도착 시 renderPortfolio 재호출).
+  const _holdingsInPort = portfolioItems
+    .map(i => i.stock_code)
+    .filter(c => _HOLDING_CODES.has(c));
+  if (_holdingsInPort.length) _ensureSubsidiaryQuotes(_holdingsInPort);
+  for (const r of allRows) {
+    r.targetPrice = _computeTargetPrice(r, allRows);
+    r.targetSource = _targetPriceSource(r);
+    r.achievementPct = (r.targetPrice != null && r.targetPrice > 0 && r.price != null)
+      ? (r.price / r.targetPrice * 100)
+      : null;
+  }
+
   // Check if all quotes are loaded
   const allQuotesLoaded = allRows.every(r => r.price !== null);
 
@@ -684,6 +702,8 @@ function renderPortfolio() {
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
+        <td class="pf-col-num pf-col-target"><input class="pf-edit-input" id="pfEditTarget" value="${r.target_price ?? ''}" type="number" step="any" placeholder="자동"></td>
+        <td class="pf-col-num pf-col-achiev">${r.achievementPct !== null ? fmtPct(r.achievementPct) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
         <td class="pf-col-num pf-col-qty"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
@@ -705,6 +725,8 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
+      <td class="pf-col-num pf-col-target">${r.targetPrice !== null ? _fp(r.targetPrice) : '-'}</td>
+      <td class="pf-col-num pf-col-achiev">${r.achievementPct !== null ? fmtPct(r.achievementPct) : '-'}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
       <td class="pf-col-num pf-col-qty">${fmtQty(r.qty)}</td>
       <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
@@ -728,6 +750,8 @@ function renderPortfolio() {
     <td class="pf-col-invested"></td>
     <td class="pf-col-num pf-col-buyprice"></td>
     <td class="pf-col-curprice"></td>
+    <td class="pf-col-target"></td>
+    <td class="pf-col-achiev"></td>
     <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
     <td class="pf-col-qty"></td>
     <td class="pf-col-num pf-col-mktval">${_fp(totalMarketValue)}</td>
@@ -1067,6 +1091,14 @@ async function savePortfolioEdit(stockCode, stockName) {
   const createdAt = createdAtEl ? createdAtEl.value.trim() : '';
   const body = { stock_name: stockName, quantity: qty, avg_price: price };
   if (createdAt) body.created_at = createdAt;
+  // 목표가 input — 비워두면 명시 null 로 보내 자동 계산으로 되돌리고,
+  // 숫자 있으면 수동 override 로 저장. PUT 에 'target_price' 키가
+  // 있으면 서버는 항상 처리 (sentinel preserve 는 키 미전달 시).
+  const tgtEl = document.getElementById('pfEditTarget');
+  if (tgtEl) {
+    const tgtRaw = tgtEl.value.trim();
+    body.target_price = tgtRaw === '' ? null : parseFloat(tgtRaw);
+  }
   try {
     const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
       method: 'PUT',
@@ -1086,6 +1118,8 @@ async function savePortfolioEdit(stockCode, stockName) {
       item.stock_name = stockName;
       // Server may have normalized or kept created_at — trust its echo.
       if (data.created_at) item.created_at = data.created_at;
+      // target_price 도 server 응답을 trust — null/숫자 그대로.
+      if ('target_price' in data) item.target_price = data.target_price;
     }
     pfEditingCode = null;
     renderPortfolio();
@@ -1266,26 +1300,150 @@ function _isPreferredStock(code) {
   return /^[0-9]{5}[^0]$/.test(code) || /^[0-9]{5}[A-Z]$/.test(code);
 }
 
+// 자회사 quote 캐시 — 지주사 NAV per share 계산용. 자회사가 포트폴리오
+// 에 없을 가능성이 높아 별도 quote 호출이 필요. price (KRW 환산) 만
+// 저장. 해당 ticker 가 한국주식이면 /api/asset-quotes 가 quote 도 KRW
+// 로 돌려주므로 단위 일치.
+let _SUBSIDIARY_QUOTE_CACHE = {};   // code → { price, ts }
+const _SUBSIDIARY_QUOTE_TTL = 60 * 1000;
+let _subsidiaryFetchInflight = false;
+
+async function _ensureSubsidiaryQuotes(holdingCodes) {
+  // 인자: 포트폴리오에 있는 지주사 코드들. 그 자회사 코드를 모아 quote
+  // 을 한 번에 받아 캐시에 저장. inflight guard 로 중복 호출 방지.
+  if (_subsidiaryFetchInflight) return;
+  const needed = new Set();
+  const now = Date.now();
+  for (const code of holdingCodes) {
+    const meta = _HOLDING_META[code];
+    if (!meta) continue;
+    for (const sub of meta.subsidiaries || []) {
+      const cached = _SUBSIDIARY_QUOTE_CACHE[sub.code];
+      if (!cached || (now - cached.ts) > _SUBSIDIARY_QUOTE_TTL) {
+        needed.add(sub.code);
+      }
+    }
+  }
+  if (!needed.size) return;
+  _subsidiaryFetchInflight = true;
+  try {
+    const resp = await apiFetch('/api/asset-quotes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codes: [...needed] }),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    for (const [code, q] of Object.entries(data)) {
+      if (q && q.price != null) {
+        _SUBSIDIARY_QUOTE_CACHE[code] = { price: Number(q.price), ts: Date.now() };
+      }
+    }
+    // 새 자회사 quote 도착 → 지주사 목표가 다시 그리기
+    if (typeof renderPortfolio === 'function') renderPortfolio();
+  } catch (e) {
+    console.warn('subsidiary quote fetch failed', e);
+  } finally {
+    _subsidiaryFetchInflight = false;
+  }
+}
+
+// 목표가 계산. 반환:
+//   - null  → '-' 표시 (CASH_ 등 의미 없음)
+//   - 숫자 → 그 값. 계산 출처는 _targetPriceSource 가 별도 알려줌.
+function _computeTargetPrice(item, allItems) {
+  const code = item.stock_code;
+  // 현금/통화: 목표가 개념 없음
+  if (code.startsWith('CASH_')) return null;
+  // 사용자 수동 override 우선
+  if (item.target_price != null) return Number(item.target_price);
+
+  // 우선주 → 보통주 현재가
+  if (_isPreferredStock(code)) {
+    const commonCode = code.slice(0, -1) + '0';
+    const commonItem = allItems.find(i => i.stock_code === commonCode);
+    const commonPrice = commonItem?.quote?.price;
+    if (commonPrice != null) return Number(commonPrice);
+    // 보통주가 포트폴리오에 없으면 _SUBSIDIARY_QUOTE_CACHE 에서 시도
+    // (편의상 같은 캐시 재활용 — 다른 데서도 fetch 가능).
+    const cached = _SUBSIDIARY_QUOTE_CACHE[commonCode];
+    if (cached && cached.price != null) return cached.price;
+    // 보통주 가격 모름 → fallback 으로 매입가 × 1.3
+    return item.avg_price * 1.3;
+  }
+
+  // 지주사 → NAV per share = Σ(자회사 price × sharesHeld) / (total - treasury)
+  const meta = _HOLDING_META[code];
+  if (meta && meta.totalShares > 0) {
+    let subTotal = 0;
+    let allHave = true;
+    for (const sub of meta.subsidiaries || []) {
+      const cached = _SUBSIDIARY_QUOTE_CACHE[sub.code];
+      const inPort = allItems.find(i => i.stock_code === sub.code);
+      const subPrice = inPort?.quote?.price ?? cached?.price;
+      if (subPrice == null) { allHave = false; break; }
+      subTotal += Number(subPrice) * (sub.sharesHeld || 0);
+    }
+    if (allHave && subTotal > 0) {
+      const free = meta.totalShares - (meta.treasuryShares || 0);
+      if (free > 0) return subTotal / free;
+    }
+    // 자회사 quote 미로딩 → 일단 매입가 × 1.3 (다음 렌더에 자연 갱신)
+    return item.avg_price * 1.3;
+  }
+
+  // 그 외 일반 종목 → 매입가 × 1.3
+  return item.avg_price * 1.3;
+}
+
+function _targetPriceSource(item) {
+  const code = item.stock_code;
+  if (code.startsWith('CASH_')) return 'cash';
+  if (item.target_price != null) return 'manual';
+  if (_isPreferredStock(code)) return 'preferred';
+  if (_HOLDING_META[code]) return 'holding';
+  return 'default';
+}
+
 let _HOLDING_CODES = new Set([
   '000670','000880','002790','003380','004360','004700','004800',
   '005810','006120','024800','028260','030530','032830',
   '036710','051910','058650','402340',
 ]);
+// 지주사 코드 → 메타 (자회사 + 발행주식수). NAV per share 계산에 사용.
+// holdings.json 의 단순 코드 Set 외에 subsidiaries / totalShares /
+// treasuryShares 도 캐시. localStorage 키도 holdingCodes (Set 호환) 와
+// 새 holdingMeta 두 가지 병행 — 옛 키만 있는 사용자도 호환되도록 폴백.
+let _HOLDING_META = {};
 
 (function _refreshHoldingCodes() {
   try {
-    const cached = JSON.parse(localStorage.getItem('holdingCodes') || '{}');
-    if (cached.codes) _HOLDING_CODES = new Set(cached.codes);
-    // Refresh once per day
-    if (cached.ts && Date.now() - cached.ts < 86400000) return;
+    const codeCache = JSON.parse(localStorage.getItem('holdingCodes') || '{}');
+    if (codeCache.codes) _HOLDING_CODES = new Set(codeCache.codes);
+    const metaCache = JSON.parse(localStorage.getItem('holdingMeta') || '{}');
+    if (metaCache.meta) _HOLDING_META = metaCache.meta;
+    if (codeCache.ts && metaCache.ts && Date.now() - Math.min(codeCache.ts, metaCache.ts) < 86400000) return;
   } catch (e) { console.warn(e); }
   fetch('https://ducklove.github.io/holding_value/api/holdings.json')
     .then(r => r.json())
     .then(data => {
-      const codes = data.items.map(i => i.holdingCode).filter(Boolean);
+      const codes = (data.items || []).map(i => i.holdingCode).filter(Boolean);
+      const meta = {};
+      for (const it of (data.items || [])) {
+        if (!it.holdingCode) continue;
+        meta[it.holdingCode] = {
+          totalShares: it.holdingTotalShares || 0,
+          treasuryShares: it.holdingTreasuryShares || 0,
+          subsidiaries: (it.subsidiaries || [])
+            .filter(s => s.code && s.sharesHeld != null)
+            .map(s => ({ code: s.code, sharesHeld: s.sharesHeld })),
+        };
+      }
       if (codes.length) {
         _HOLDING_CODES = new Set(codes);
+        _HOLDING_META = meta;
         localStorage.setItem('holdingCodes', JSON.stringify({ codes, ts: Date.now() }));
+        localStorage.setItem('holdingMeta', JSON.stringify({ meta, ts: Date.now() }));
       }
     }).catch(() => {});
 })();

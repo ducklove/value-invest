@@ -1124,6 +1124,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-col-invested,
   .pf-col-dividend,
   .pf-col-divyield,
+  .pf-col-target,
+  .pf-col-achiev,
   .pf-col-date,
   .pf-col-act { display: none !important; }
   .pf-table { font-size: 11px; }

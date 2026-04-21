@@ -96,6 +96,47 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         items = await cache.get_portfolio("u1")
         self.assertEqual(items[0]["created_at"], explicit)
 
+    async def test_target_price_default_null(self):
+        """신규 등록 시 target_price 미전달이면 NULL → 프론트에서 자동 계산 경로."""
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        items = await cache.get_portfolio("u1")
+        self.assertIn("target_price", items[0])
+        self.assertIsNone(items[0]["target_price"])
+
+    async def test_target_price_explicit_value_persists(self):
+        """수동 override 값은 그대로 저장."""
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 100, 65000, target_price=85000.0,
+        )
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(items[0]["target_price"], 85000.0)
+
+    async def test_target_price_unchanged_sentinel_preserves(self):
+        """수량/매입가만 편집할 때 (target_price 인자 미전달) 기존 override 유지.
+        sentinel 처리가 깨지면 자동 계산으로 reset 되어 사용자 의도 위반."""
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 100, 65000, target_price=85000.0,
+        )
+        # target_price 인자 안 넘김 → 기존 85000 유지되어야
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 200, 70000,
+        )
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(items[0]["target_price"], 85000.0)
+        self.assertEqual(items[0]["quantity"], 200)
+        self.assertEqual(items[0]["avg_price"], 70000)
+
+    async def test_target_price_explicit_none_clears(self):
+        """target_price=None 명시는 자동 계산으로 되돌림 (override 해제)."""
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 100, 65000, target_price=85000.0,
+        )
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 100, 65000, target_price=None,
+        )
+        items = await cache.get_portfolio("u1")
+        self.assertIsNone(items[0]["target_price"])
+
     async def test_get_trailing_dividends(self):
         """market_data 의 가장 최근 positive 배당금을 종목별로 반환.
         0 또는 NULL 인 해는 건너뛰고, 올해는 아직 공시 전일 수 있으므로
