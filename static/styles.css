@@ -758,10 +758,16 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 /* 영역지도 전용 모달 — 기존 .pf-modal-overlay/.pf-modal 구조를 그대로
    사용하되, 크기와 body 레이아웃만 override. 그룹 관리 모달 등 다른
    모달과 CSS 이름 충돌 없음. ECharts treemap 은 내부 #pfTreemap 이
-   height 100% 를 요구하므로 body 를 flex 컨테이너로 만들어 공간 확보. */
+   height 100% 를 요구하므로 body 를 flex 컨테이너로 만들어 공간 확보.
+
+   크기는 viewport 기준 95vw × 95vh 로 거의 전체 화면. 창을 늘리면
+   자동으로 같이 커지고 작은 창에서도 적절히 줄어듦 (브라우저 resize
+   이벤트 → ECharts _treemapInstance.resize() 로 자동 rescale). max
+   제한을 두지 않은 이유 — 사용자가 큰 모니터에서 수십 종목을 한눈에
+   보려는 용도라 캡이 오히려 방해. */
 .pf-treemap-modal {
-  width: 90vw; max-width: 1400px;
-  height: 85vh;
+  width: 95vw; height: 95vh;
+  max-width: none; max-height: none;
   display: flex; flex-direction: column;
 }
 .pf-treemap-body {
