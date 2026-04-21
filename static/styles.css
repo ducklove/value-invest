@@ -733,6 +733,20 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-currency-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
 .pf-currency-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
 
+/* 편집 모드의 목표가 input + clear 버튼 — 사용자가 '빈값 = 자동
+   계산으로 복귀' 를 직관적으로 알 수 있도록 input 우측에 작은 × 버튼
+   을 둔다. 버튼 클릭만으로는 저장 안 되고 (✓ 클릭 필요) 그냥 input 값
+   을 '' 로 비운다. */
+.pf-target-edit-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.pf-target-edit-wrap .pf-edit-input { width: 80px; }
+.pf-target-clear {
+  width: 18px; height: 18px; padding: 0; line-height: 1;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; font-size: 11px;
+}
+.pf-target-clear:hover { background: var(--hover-bg); color: var(--text); }
+
 /* 보유종목 내부 뷰 전환 (테이블 / 영역지도) — currency 토글과 유사한
    segmented 버튼 UI. 필터 바 위쪽에 위치해 '같은 보유종목 데이터를
    다른 시각화로 본다' 는 의미를 시각적으로 전달. */
