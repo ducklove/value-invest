@@ -232,6 +232,19 @@ async def index():
     return Response(content=html, media_type="text/html")
 
 
+# Shareable deep links: `/analysis?code=005930` 같은 URL 을 다른 사이트에
+# 서 직접 연결할 수 있도록 path-based 라우트 제공. SPA 이므로 실제 컨텐츠
+# 는 동일한 index.html 이고, 클라이언트 (app-main.js::initApp) 가
+# window.location.pathname 을 보고 알맞은 뷰를 활성화한다. 화이트리스트
+# 방식 — 정확한 path 만 매칭해 /api/* 나 /js/* 와의 충돌을 원천 차단.
+@app.get("/analysis")
+@app.get("/portfolio")
+@app.get("/nps")
+@app.get("/backtest")
+async def spa_pages():
+    return await index()
+
+
 @app.get("/app-config.js")
 async def app_config():
     payload = {"apiBaseUrl": ""}

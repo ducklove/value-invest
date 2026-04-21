@@ -47,3 +47,26 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
     def test_analysis_snapshot_staleness(self):
         self.assertTrue(deps.analysis_snapshot_is_stale(None))
         self.assertFalse(deps.analysis_snapshot_is_stale("2999-01-01T00:00:00"))
+
+    async def test_spa_pages_serve_index_html(self):
+        """Deep-link paths (/analysis, /portfolio, /nps, /backtest) must serve
+        the same index.html the SPA uses so bookmarks and external links
+        resolve correctly. Otherwise they'd 404 before the JS can read
+        window.location.pathname and pick a tab."""
+        import main
+        # index() does file IO + regex — call spa_pages which delegates.
+        response = await main.spa_pages()
+        self.assertEqual(response.media_type, "text/html")
+        body = response.body.decode("utf-8") if isinstance(response.body, bytes) else str(response.body)
+        # The page shell always contains these anchor IDs.
+        self.assertIn("id=\"analysisView\"", body)
+        self.assertIn("switchView", body)
+
+    async def test_spa_routes_registered(self):
+        """Belt-and-suspenders: confirm the four path-routes are actually
+        wired into the FastAPI app. If someone drops a decorator by accident,
+        we catch it here before deploy."""
+        import main
+        registered = {route.path for route in main.app.routes if hasattr(route, "path")}
+        for p in ("/analysis", "/portfolio", "/nps", "/backtest"):
+            self.assertIn(p, registered, f"deep-link route {p} missing")

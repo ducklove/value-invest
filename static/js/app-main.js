@@ -88,13 +88,36 @@ async function initApp() {
   QuoteManager.connect();
   _updateQuoteSubscriptions();
   trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
-  // Mobile + logged in → default to portfolio view
+
+  // 외부 사이트에서 특정 탭·종목으로 바로 연결 가능하도록 URL 을 해석.
+  //   /analysis?code=005930  → 분석 탭 + 005930 자동 분석
+  //   /portfolio             → 포트폴리오 탭
+  //   /nps                   → 국민연금 탭
+  //   /backtest              → 백테스트 탭
+  //   /?code=005930          → (기존 호환) 분석 탭 + 자동 분석
+  // 서버가 이 네 개 path 를 모두 index.html 로 서빙하므로 SPA 진입 후
+  // pathname 만 보고 탭을 정하면 됨.
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  const PATH_TO_VIEW = {
+    '/analysis': 'analysis',
+    '/portfolio': 'portfolio',
+    '/nps': 'nps',
+    '/backtest': 'backtest',
+  };
+  const viewFromPath = PATH_TO_VIEW[path];
+  if (viewFromPath) {
+    switchView(viewFromPath);
+  }
   if (code) {
+    // code 가 있으면 분석 대상. path 와 무관하게 분석 탭으로 이동해
+    // 종목을 로드 — '/portfolio?code=...' 같은 조합도 자연스럽게 동작.
     switchView('analysis');
     analyzeStock(code.trim());
-  } else if (currentUser && window.innerWidth <= 900) {
+  } else if (!viewFromPath && currentUser && window.innerWidth <= 900) {
+    // Mobile + logged in → default to portfolio (경로가 명시된 경우
+    // 이 기본값은 덮지 않음).
     switchView('portfolio');
   }
 }
