@@ -1188,22 +1188,22 @@ async function savePortfolioEdit(stockCode, stockName) {
       if (data.created_at) item.created_at = data.created_at;
       // target_price 도 server 응답을 trust — null/숫자 그대로.
       if ('target_price' in data) item.target_price = data.target_price;
+      if ('target_price_disabled' in data) item.target_price_disabled = !!data.target_price_disabled;
     }
     pfEditingCode = null;
     renderPortfolio();
   } catch (e) { showToast(e.message); }
 }
 
-// × 버튼 핸들러 — edit input value 를 비우는 것만으로는 quote polling
-// 등으로 인한 re-render 에 의해 즉시 원복되는 증상이 있어, 즉시 서버에
-// target_price: null 을 PUT 해서 DB 의 수동 override 를 삭제한다.
-// 이후 어떤 render 가 돌아도 r.target_price === null 이므로 input 은
-// 빈 채로 그려지고, 표시 value 는 자동 계산된 값이 된다.
+// × 버튼 핸들러 — 목표가를 '명시적으로 비움' 상태로 만든다. DB 에
+// target_price_disabled=1, target_price=NULL 을 저장. 자동 계산도
+// bypass 되어 UI 는 '-' 로 고정. 다시 표시하려면 사용자가 직접 숫자를
+// 입력하면 disabled 플래그가 자동 해제된다.
 async function clearPortfolioTargetPrice(stockCode) {
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
-  // 이미 null 이면 API 호출 생략 (예: 자동 계산 중인 걸 또 × 누른 경우).
-  if (item.target_price == null) {
+  // 이미 disabled 면 중복 요청 불필요.
+  if (item.target_price_disabled) {
     const tgtEl = document.getElementById('pfEditTarget');
     if (tgtEl) tgtEl.value = '';
     return;
@@ -1217,6 +1217,7 @@ async function clearPortfolioTargetPrice(stockCode) {
         quantity: item.quantity,
         avg_price: item.avg_price,
         target_price: null,
+        target_price_disabled: true,
       }),
     });
     if (!resp.ok) {
@@ -1226,12 +1227,13 @@ async function clearPortfolioTargetPrice(stockCode) {
     const data = await resp.json().catch(() => ({}));
     if ('target_price' in data) item.target_price = data.target_price;
     else item.target_price = null;
-    // 편집 모드면 input 도 즉시 비우기 — 다음 render 까지 기다리지 않고
-    // 시각적 피드백 제공.
+    if ('target_price_disabled' in data) item.target_price_disabled = !!data.target_price_disabled;
+    else item.target_price_disabled = 1;
+    // 편집 모드면 input 도 즉시 비우기.
     const tgtEl = document.getElementById('pfEditTarget');
     if (tgtEl) tgtEl.value = '';
     renderPortfolio();
-    showToast('목표가를 자동 계산으로 되돌렸습니다.', 'success');
+    showToast('목표가를 비웠습니다. (- 로 표시)', 'success');
   } catch (e) {
     showToast(e.message);
   }
@@ -1456,12 +1458,14 @@ async function _ensureExternalQuotes(codes) {
 }
 
 // 목표가 계산. 반환:
-//   - null  → '-' 표시 (CASH_ 등 의미 없음)
+//   - null  → '-' 표시 (CASH_ 등 의미 없음, 또는 명시적 비움)
 //   - 숫자 → 그 값. 계산 출처는 _targetPriceSource 가 별도 알려줌.
 function _computeTargetPrice(item, allItems) {
   const code = item.stock_code;
   // 현금/통화: 목표가 개념 없음
   if (code.startsWith('CASH_')) return null;
+  // 사용자가 × 로 명시적 비움 → 자동 계산도 하지 않고 '-' 로 표시
+  if (item.target_price_disabled) return null;
   // 사용자 수동 override 우선
   if (item.target_price != null) return Number(item.target_price);
 
@@ -1506,6 +1510,7 @@ function _computeTargetPrice(item, allItems) {
 function _targetPriceSource(item) {
   const code = item.stock_code;
   if (code.startsWith('CASH_')) return 'cash';
+  if (item.target_price_disabled) return 'disabled';
   if (item.target_price != null) return 'manual';
   if (_isPreferredStock(code)) return 'preferred';
   if (_HOLDING_META[code]) return 'holding';

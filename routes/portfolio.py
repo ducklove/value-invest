@@ -1099,6 +1099,10 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
             if tp_val < 0:
                 raise HTTPException(status_code=400, detail="목표가는 0 이상이어야 합니다.")
             target_price_kwarg["target_price"] = tp_val
+    # target_price_disabled — True 면 자동 계산도 bypass, UI 는 '-'.
+    if "target_price_disabled" in payload:
+        raw_d = payload.get("target_price_disabled")
+        target_price_kwarg["target_price_disabled"] = bool(raw_d)
 
     result = await cache.save_portfolio_item(
         user["google_sub"], stock_code, stock_name, quantity, avg_price,
