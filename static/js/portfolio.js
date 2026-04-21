@@ -388,12 +388,27 @@ function renderPortfolio() {
 
   // 목표가 / 달성률 — _computeTargetPrice 가 portfolio 전체를 본다
   // (우선주의 보통주 lookup, 지주사 자회사 lookup) 라 row build 후 두
-  // 번째 패스에서 일괄 부여. 자회사 quote 가 캐시에 없으면 배경 fetch
-  // 트리거 (응답 도착 시 renderPortfolio 재호출).
-  const _holdingsInPort = portfolioItems
-    .map(i => i.stock_code)
-    .filter(c => _HOLDING_CODES.has(c));
-  if (_holdingsInPort.length) _ensureSubsidiaryQuotes(_holdingsInPort);
+  // 번째 패스에서 일괄 부여. 외부 quote (포트폴리오에 없는 보통주 /
+  // 자회사) 가 필요한 종목들의 코드를 한 번에 모아 백그라운드 fetch.
+  // 응답 도착 시 renderPortfolio 재호출되어 자동 갱신.
+  const _externalCodesNeeded = new Set();
+  const _portCodes = new Set(allRows.map(r => r.stock_code));
+  for (const r of allRows) {
+    // 우선주: 보통주 quote 가 포트폴리오에 없으면 외부 fetch 필요
+    if (r.target_price == null && _isPreferredStock(r.stock_code)) {
+      const commonCode = r.stock_code.slice(0, -1) + '0';
+      if (!_portCodes.has(commonCode)) _externalCodesNeeded.add(commonCode);
+    }
+    // 지주사: 자회사 quote 들
+    const meta = _HOLDING_META[r.stock_code];
+    if (meta && r.target_price == null) {
+      for (const sub of meta.subsidiaries || []) {
+        if (sub.code && !_portCodes.has(sub.code)) _externalCodesNeeded.add(sub.code);
+      }
+    }
+  }
+  if (_externalCodesNeeded.size) _ensureExternalQuotes([..._externalCodesNeeded]);
+
   for (const r of allRows) {
     r.targetPrice = _computeTargetPrice(r, allRows);
     r.targetSource = _targetPriceSource(r);
@@ -1300,32 +1315,28 @@ function _isPreferredStock(code) {
   return /^[0-9]{5}[^0]$/.test(code) || /^[0-9]{5}[A-Z]$/.test(code);
 }
 
-// 자회사 quote 캐시 — 지주사 NAV per share 계산용. 자회사가 포트폴리오
-// 에 없을 가능성이 높아 별도 quote 호출이 필요. price (KRW 환산) 만
-// 저장. 해당 ticker 가 한국주식이면 /api/asset-quotes 가 quote 도 KRW
-// 로 돌려주므로 단위 일치.
-let _SUBSIDIARY_QUOTE_CACHE = {};   // code → { price, ts }
-const _SUBSIDIARY_QUOTE_TTL = 60 * 1000;
-let _subsidiaryFetchInflight = false;
+// 외부 quote 캐시 — 포트폴리오에 없지만 목표가 계산에 필요한 종목들
+// (우선주의 보통주, 지주사의 자회사) quote 를 별도로 받아 보관. price
+// 는 /api/asset-quotes 가 KRW 환산해서 돌려주므로 단위 일치.
+let _EXTERNAL_QUOTE_CACHE = {};   // code → { price, ts }
+const _EXTERNAL_QUOTE_TTL = 60 * 1000;
+let _externalFetchInflight = false;
 
-async function _ensureSubsidiaryQuotes(holdingCodes) {
-  // 인자: 포트폴리오에 있는 지주사 코드들. 그 자회사 코드를 모아 quote
-  // 을 한 번에 받아 캐시에 저장. inflight guard 로 중복 호출 방지.
-  if (_subsidiaryFetchInflight) return;
+async function _ensureExternalQuotes(codes) {
+  // 인자: 임의 종목 코드 리스트. 캐시에 없거나 stale 한 것만 fetch.
+  // inflight guard 로 같은 렌더 사이클의 중복 호출 방지.
+  if (_externalFetchInflight) return;
   const needed = new Set();
   const now = Date.now();
-  for (const code of holdingCodes) {
-    const meta = _HOLDING_META[code];
-    if (!meta) continue;
-    for (const sub of meta.subsidiaries || []) {
-      const cached = _SUBSIDIARY_QUOTE_CACHE[sub.code];
-      if (!cached || (now - cached.ts) > _SUBSIDIARY_QUOTE_TTL) {
-        needed.add(sub.code);
-      }
+  for (const code of codes) {
+    if (!code) continue;
+    const cached = _EXTERNAL_QUOTE_CACHE[code];
+    if (!cached || (now - cached.ts) > _EXTERNAL_QUOTE_TTL) {
+      needed.add(code);
     }
   }
   if (!needed.size) return;
-  _subsidiaryFetchInflight = true;
+  _externalFetchInflight = true;
   try {
     const resp = await apiFetch('/api/asset-quotes', {
       method: 'POST',
@@ -1336,15 +1347,15 @@ async function _ensureSubsidiaryQuotes(holdingCodes) {
     const data = await resp.json();
     for (const [code, q] of Object.entries(data)) {
       if (q && q.price != null) {
-        _SUBSIDIARY_QUOTE_CACHE[code] = { price: Number(q.price), ts: Date.now() };
+        _EXTERNAL_QUOTE_CACHE[code] = { price: Number(q.price), ts: Date.now() };
       }
     }
-    // 새 자회사 quote 도착 → 지주사 목표가 다시 그리기
+    // 새 quote 도착 → 의존 row (우선주 / 지주사) 의 목표가 다시 그리기
     if (typeof renderPortfolio === 'function') renderPortfolio();
   } catch (e) {
-    console.warn('subsidiary quote fetch failed', e);
+    console.warn('external quote fetch failed', e);
   } finally {
-    _subsidiaryFetchInflight = false;
+    _externalFetchInflight = false;
   }
 }
 
@@ -1364,9 +1375,9 @@ function _computeTargetPrice(item, allItems) {
     const commonItem = allItems.find(i => i.stock_code === commonCode);
     const commonPrice = commonItem?.quote?.price;
     if (commonPrice != null) return Number(commonPrice);
-    // 보통주가 포트폴리오에 없으면 _SUBSIDIARY_QUOTE_CACHE 에서 시도
+    // 보통주가 포트폴리오에 없으면 _EXTERNAL_QUOTE_CACHE 에서 시도
     // (편의상 같은 캐시 재활용 — 다른 데서도 fetch 가능).
-    const cached = _SUBSIDIARY_QUOTE_CACHE[commonCode];
+    const cached = _EXTERNAL_QUOTE_CACHE[commonCode];
     if (cached && cached.price != null) return cached.price;
     // 보통주 가격 모름 → fallback 으로 매입가 × 1.3
     return item.avg_price * 1.3;
@@ -1378,7 +1389,7 @@ function _computeTargetPrice(item, allItems) {
     let subTotal = 0;
     let allHave = true;
     for (const sub of meta.subsidiaries || []) {
-      const cached = _SUBSIDIARY_QUOTE_CACHE[sub.code];
+      const cached = _EXTERNAL_QUOTE_CACHE[sub.code];
       const inPort = allItems.find(i => i.stock_code === sub.code);
       const subPrice = inPort?.quote?.price ?? cached?.price;
       if (subPrice == null) { allHave = false; break; }
