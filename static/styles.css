@@ -755,43 +755,25 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-treemap-btn:hover { background: var(--hover-bg); color: var(--text); }
 
-/* 공용 모달 — backdrop + centered content. 영역지도를 전체 화면 가까이
-   크게 보여주기 위해 도입. 추후 다른 팝업 용도에도 재사용 가능. */
-.pf-modal {
-  position: fixed; inset: 0; z-index: 1000;
-  display: none; align-items: center; justify-content: center;
-}
-.pf-modal.open { display: flex; }
-.pf-modal-backdrop {
-  position: absolute; inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
-}
-.pf-modal-content {
-  position: relative; z-index: 1;
-  background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: 12px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+/* 영역지도 전용 모달 — 기존 .pf-modal-overlay/.pf-modal 구조를 그대로
+   사용하되, 크기와 body 레이아웃만 override. 그룹 관리 모달 등 다른
+   모달과 CSS 이름 충돌 없음. ECharts treemap 은 내부 #pfTreemap 이
+   height 100% 를 요구하므로 body 를 flex 컨테이너로 만들어 공간 확보. */
+.pf-treemap-modal {
+  width: 90vw; max-width: 1400px;
+  height: 85vh;
   display: flex; flex-direction: column;
-  max-width: 95vw; max-height: 92vh;
 }
-.pf-modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 20px; border-bottom: 1px solid var(--border);
+.pf-treemap-body {
+  flex: 1;
+  max-height: none;        /* .pf-modal-body 의 480px cap 제거 */
+  padding: 8px;
+  overflow: hidden;        /* treemap 자체가 내부 스크롤 관리 */
+  min-height: 0;           /* flex child 가 실제로 shrink 되도록 */
 }
-.pf-modal-header h3 { margin: 0; font-size: 16px; }
-.pf-modal-close {
-  background: transparent; border: none;
-  color: var(--text-secondary); font-size: 18px;
-  width: 28px; height: 28px; line-height: 1;
-  cursor: pointer; border-radius: 6px;
+.pf-treemap-body #pfTreemap {
+  width: 100%; height: 100%;
 }
-.pf-modal-close:hover { background: var(--hover-bg); color: var(--text); }
-.pf-modal-body { flex: 1; padding: 16px; overflow: auto; min-height: 0; }
-/* 영역지도 전용 크기 — treemap 은 ECharts 가 내부 height:100% 를 쓰므로
-   content 자체에 높이를 줘야 렌더됨. */
-.pf-treemap-modal-content { width: 90vw; height: 85vh; }
-.pf-treemap-modal-content .pf-modal-body { padding: 8px; }
 
 /* NAV chart */
 .pf-nav-chart-wrap { margin-bottom: 24px; }

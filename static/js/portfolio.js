@@ -2293,12 +2293,14 @@ function pfSwitchTab(tab) {
 function pfOpenTreemap() {
   const modal = document.getElementById('pfTreemapModal');
   if (!modal) return;
-  modal.classList.add('open');
   modal.style.display = 'flex';
   // ECharts 는 컨테이너가 화면에 보여진 뒤 init/resize 해야 크기를 맞게
-  // 측정함. display 바꾼 직후 한 tick 쉬고 render.
+  // 측정함. display 전환 → 레이아웃 확정 → 측정 순서 보장 위해 두 번째
+  // rAF 에서 렌더 (첫 rAF 는 style flush, 두 번째에 실제 크기가 확정).
   requestAnimationFrame(() => {
-    if (!USE_UPLOT) renderTreemap();
+    requestAnimationFrame(() => {
+      if (!USE_UPLOT) renderTreemap();
+    });
   });
   document.addEventListener('keydown', _pfTreemapEscHandler);
 }
@@ -2306,7 +2308,6 @@ function pfOpenTreemap() {
 function pfCloseTreemap() {
   const modal = document.getElementById('pfTreemapModal');
   if (!modal) return;
-  modal.classList.remove('open');
   modal.style.display = 'none';
   document.removeEventListener('keydown', _pfTreemapEscHandler);
   // ECharts 인스턴스 해제 — 다음 open 에서 다시 그림. 메모리 관리 겸

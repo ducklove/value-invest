@@ -242,17 +242,17 @@ function trackEvent(name, params = {}) {
       포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.
     </div>
 
-    <!-- 영역지도 모달. add-bar 의 '🗺️ 영역지도' 버튼이 display 를 flex
-         로 바꿔 띄운다. backdrop 클릭 / ✕ 버튼 / ESC 키로 닫힘. -->
-    <div class="pf-modal" id="pfTreemapModal" style="display:none;">
-      <div class="pf-modal-backdrop" onclick="pfCloseTreemap()"></div>
-      <div class="pf-modal-content pf-treemap-modal-content">
+    <!-- 영역지도 모달. 기존 그룹 모달과 동일한 .pf-modal-overlay + .pf-modal
+         구조를 재사용해 CSS 충돌 없도록. add-bar 의 '🗺️ 영역지도' 버튼이
+         display 를 flex 로 바꿔 띄운다. backdrop / ✕ / ESC 로 닫힘. -->
+    <div class="pf-modal-overlay" id="pfTreemapModal" style="display:none;" onclick="if(event.target===this)pfCloseTreemap()">
+      <div class="pf-modal pf-treemap-modal">
         <div class="pf-modal-header">
           <h3>포트폴리오 구성</h3>
-          <button class="pf-modal-close" type="button" onclick="pfCloseTreemap()" aria-label="닫기">✕</button>
+          <button class="pf-modal-close" type="button" onclick="pfCloseTreemap()" aria-label="닫기">&times;</button>
         </div>
-        <div class="pf-modal-body">
-          <div id="pfTreemap" style="width:100%;height:100%;"></div>
+        <div class="pf-modal-body pf-treemap-body">
+          <div id="pfTreemap"></div>
         </div>
       </div>
     </div>
