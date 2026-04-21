@@ -733,6 +733,18 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-currency-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
 .pf-currency-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
 
+/* 보유종목 내부 뷰 전환 (테이블 / 영역지도) — currency 토글과 유사한
+   segmented 버튼 UI. 필터 바 위쪽에 위치해 '같은 보유종목 데이터를
+   다른 시각화로 본다' 는 의미를 시각적으로 전달. */
+.pf-view-toggle { display: flex; gap: 0; margin: 0 0 12px 0; }
+.pf-view-btn {
+  padding: 6px 14px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.pf-view-btn:first-child { border-radius: 6px 0 0 6px; }
+.pf-view-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+.pf-view-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
+
 /* NAV chart */
 .pf-nav-chart-wrap { margin-bottom: 24px; }
 .pf-nav-chart-container { position: relative; height: 300px; }

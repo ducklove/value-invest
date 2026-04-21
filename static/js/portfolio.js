@@ -1998,6 +1998,10 @@ async function runAiAnalysis() {
 
 // --- Portfolio Performance Tab ---
 let pfActiveTab = 'holdings';
+// 보유종목 탭 내부 뷰 전환 — 'table' (기본) | 'treemap' (영역지도).
+// 탭 전환 시점에도 현재 모드가 유지됨 (testing: 영역지도로 놓고 다른 탭
+// 갔다 돌아와도 영역지도).
+let pfActiveHoldingsMode = 'table';
 
 function pfSwitchTab(tab) {
   pfActiveTab = tab;
@@ -2011,6 +2015,36 @@ function pfSwitchTab(tab) {
   void activeEl.offsetWidth;
   activeEl.classList.add('fade-in');
   if (tab === 'performance') { loadPerformanceData(); _loadAiModels(); }
+  // 보유종목 탭으로 돌아온 경우 — 현재 모드가 treemap 이면 DOM 이 다시
+  // 보여진 타이밍에 ECharts 가 컨테이너 크기를 재측정하도록 re-render.
+  if (tab === 'holdings' && pfActiveHoldingsMode === 'treemap' && !USE_UPLOT) {
+    renderTreemap();
+  }
+}
+
+function pfSetHoldingsMode(mode) {
+  if (mode !== 'table' && mode !== 'treemap') return;
+  pfActiveHoldingsMode = mode;
+  document.getElementById('pfViewTableBtn')?.classList.toggle('active', mode === 'table');
+  document.getElementById('pfViewTreemapBtn')?.classList.toggle('active', mode === 'treemap');
+  const tableWrap = document.getElementById('pfTableWrap');
+  const colToggles = document.getElementById('pfColToggles');
+  const empty = document.getElementById('pfEmpty');
+  const treemapWrap = document.getElementById('pfTreemapWrap');
+  if (mode === 'table') {
+    if (tableWrap) tableWrap.style.display = '';
+    if (colToggles) colToggles.style.display = '';
+    // pfEmpty 는 데이터 0건일 때만 렌더 함수가 보여주므로 여기서 강제
+    // 복구 안 함 — display 속성을 지워 renderPortfolio 의 판단에 맡김.
+    if (empty) empty.style.display = '';
+    if (treemapWrap) treemapWrap.style.display = 'none';
+  } else {
+    if (tableWrap) tableWrap.style.display = 'none';
+    if (colToggles) colToggles.style.display = 'none';
+    if (empty) empty.style.display = 'none';
+    if (treemapWrap) treemapWrap.style.display = '';
+    if (!USE_UPLOT) renderTreemap();
+  }
 }
 
 async function loadPerformanceData() {
@@ -2026,7 +2060,7 @@ async function loadPerformanceData() {
     ]);
     const navData = navResp.ok ? await navResp.json() : [];
     const cfData = cfResp.ok ? await cfResp.json() : [];
-    if (!USE_UPLOT) renderTreemap();
+    // treemap 은 이제 보유종목 탭 소관 — 여기서 호출 안 함
     renderNavChart(navData);
     renderValueChart(navData);
     renderNavReturns(navData);
