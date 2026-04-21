@@ -2312,8 +2312,9 @@ function pfCloseTreemap() {
   document.removeEventListener('keydown', _pfTreemapEscHandler);
   // ECharts 인스턴스 해제 — 다음 open 에서 다시 그림. 메모리 관리 겸
   // 닫은 뒤 브라우저 창 리사이즈 때 hidden 컨테이너에 대고 resize 가
-  // 호출되지 않도록.
+  // 호출되지 않도록. ResizeObserver 도 함께 해제.
   if (_treemapInstance) { _treemapInstance.dispose(); _treemapInstance = null; }
+  if (_treemapResizeObserver) { _treemapResizeObserver.disconnect(); _treemapResizeObserver = null; }
 }
 
 function _pfTreemapEscHandler(e) {
@@ -2342,11 +2343,17 @@ async function loadPerformanceData() {
 }
 
 let _treemapInstance = null;
+// 모달 open 시점에 flex 레이아웃이 아직 확정 안 돼 container height 가
+// 0 에 가까운 상태로 echarts.init 이 불리면 treemap 이 상단 일부에만
+// 그려지는 증상이 있음. ResizeObserver 로 container 크기 변화를 잡아
+// 자동 ec.resize() 해주면 레이아웃 확정 순간 바로 교정된다.
+let _treemapResizeObserver = null;
 
 async function renderTreemap() {
   const container = document.getElementById('pfTreemap');
   if (!container) return;
   if (_treemapInstance) { _treemapInstance.dispose(); _treemapInstance = null; }
+  if (_treemapResizeObserver) { _treemapResizeObserver.disconnect(); _treemapResizeObserver = null; }
 
   // ECharts required for treemap
   if (typeof echarts === 'undefined') {
@@ -2470,6 +2477,17 @@ async function renderTreemap() {
 
   const ec = echarts.init(container);
   _treemapInstance = ec;
+
+  // Container 가 flex 레이아웃 완료 전이라 처음 init 크기가 잘못
+  // 잡혔더라도, ResizeObserver 가 실제 확정 크기를 감지해 즉시 resize.
+  // 모달 open 시 '위쪽 반만 그려지는' 증상의 근본 대책.
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (_treemapInstance) _treemapInstance.resize();
+    });
+    ro.observe(container);
+    _treemapResizeObserver = ro;
+  }
 
   const _fmtPct = v => v !== null && v !== undefined ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '-';
 

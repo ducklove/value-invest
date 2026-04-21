@@ -760,13 +760,12 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
    모달과 CSS 이름 충돌 없음. ECharts treemap 은 내부 #pfTreemap 이
    height 100% 를 요구하므로 body 를 flex 컨테이너로 만들어 공간 확보.
 
-   크기는 viewport 기준 95vw × 95vh 로 거의 전체 화면. 창을 늘리면
-   자동으로 같이 커지고 작은 창에서도 적절히 줄어듦 (브라우저 resize
-   이벤트 → ECharts _treemapInstance.resize() 로 자동 rescale). max
-   제한을 두지 않은 이유 — 사용자가 큰 모니터에서 수십 종목을 한눈에
-   보려는 용도라 캡이 오히려 방해. */
+   크기는 viewport 기준 90vw × 88vh — 화면을 가득 채우지 않되 충분히
+   크게. 창 사이즈에 따라 자동 비례하고, ResizeObserver 가 container
+   크기 변화를 감지해 ECharts 가 즉시 resize 하므로 flex 레이아웃이
+   확정되는 순간 자동으로 올바른 크기로 그려짐. */
 .pf-treemap-modal {
-  width: 95vw; height: 95vh;
+  width: 90vw; height: 88vh;
   max-width: none; max-height: none;
   display: flex; flex-direction: column;
 }
