@@ -755,31 +755,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-treemap-btn:hover { background: var(--hover-bg); color: var(--text); }
 
-/* 영역지도 전용 모달 — 기존 .pf-modal-overlay/.pf-modal 구조를 그대로
-   사용하되, 크기와 body 레이아웃만 override. 그룹 관리 모달 등 다른
-   모달과 CSS 이름 충돌 없음. ECharts treemap 은 내부 #pfTreemap 이
-   height 100% 를 요구하므로 body 를 flex 컨테이너로 만들어 공간 확보.
-
-   크기는 viewport 기준 90vw × 88vh — 화면을 가득 채우지 않되 충분히
-   크게. 창 사이즈에 따라 자동 비례하고, ResizeObserver 가 container
-   크기 변화를 감지해 ECharts 가 즉시 resize 하므로 flex 레이아웃이
-   확정되는 순간 자동으로 올바른 크기로 그려짐. */
-.pf-treemap-modal {
-  width: 90vw; height: 88vh;
-  max-width: none; max-height: none;
-  display: flex; flex-direction: column;
-}
-.pf-treemap-body {
-  flex: 1;
-  max-height: none;        /* .pf-modal-body 의 480px cap 제거 */
-  padding: 8px;
-  overflow: hidden;        /* treemap 자체가 내부 스크롤 관리 */
-  min-height: 0;           /* flex child 가 실제로 shrink 되도록 */
-}
-.pf-treemap-body #pfTreemap {
-  width: 100%; height: 100%;
-}
-
 /* NAV chart */
 .pf-nav-chart-wrap { margin-bottom: 24px; }
 .pf-nav-chart-container { position: relative; height: 300px; }
@@ -910,6 +885,33 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-modal-add-btn {
   padding: 8px 16px; border: none; border-radius: 8px;
   background: var(--primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+
+/* 영역지도 전용 모달 — 반드시 위의 .pf-modal / .pf-modal-body 정의들
+   뒤에 위치해야 함. CSS 는 같은 specificity 일 때 뒤에 선언된 규칙이
+   이기므로, 여기가 앞에 있으면 기존 모달 규칙 (width:95%, max-width:
+   1100px, max-height:480px 등) 이 덮어써 treemap 영역이 축소되는
+   버그가 생긴다 (실제로 한 번 발생했음).
+
+   크기: viewport 90vw × 88vh 로 화면을 가득 채우지 않되 충분히 크게.
+   ECharts treemap 은 내부 #pfTreemap 이 height 100% 를 요구하므로
+   body 를 flex 컨테이너로 만들어 공간 확보. ResizeObserver 가
+   container 크기 변화를 감지해 즉시 ec.resize() 호출. */
+.pf-treemap-modal {
+  width: 90vw; height: 88vh;
+  max-width: none; max-height: none;
+  display: flex; flex-direction: column;
+  padding: 0;
+}
+.pf-treemap-body {
+  flex: 1;
+  max-height: none;        /* .pf-modal-body 의 480px cap 제거 */
+  padding: 8px;
+  overflow: hidden;        /* treemap 이 자체 스크롤 관리 */
+  min-height: 0;           /* flex child 가 실제로 shrink 되도록 */
+}
+.pf-treemap-body #pfTreemap {
+  width: 100%; height: 100%;
 }
 .pf-grp-name {
   flex: 1; padding: 6px 8px; border: 1px solid transparent; border-radius: 6px;
