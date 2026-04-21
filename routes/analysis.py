@@ -213,6 +213,97 @@ async def get_daily_data(stock_code: str):
     return results
 
 
+def _compute_beta_from_pairs(pairs: list[tuple[float, float]]) -> float | None:
+    """pairs = [(stock_close, market_close), ...] 날짜 오름차순.
+    수익률 (r_t = P_t / P_{t-1} - 1) 로 Cov / Var 계산.
+    표본 < 20 이면 None.
+    """
+    if len(pairs) < 21:
+        return None
+    stock_rets: list[float] = []
+    market_rets: list[float] = []
+    for i in range(1, len(pairs)):
+        s0, m0 = pairs[i - 1]
+        s1, m1 = pairs[i]
+        if not (s0 and m0 and s1 and m1):
+            continue
+        stock_rets.append(s1 / s0 - 1.0)
+        market_rets.append(m1 / m0 - 1.0)
+    n = len(stock_rets)
+    if n < 20:
+        return None
+    mean_s = sum(stock_rets) / n
+    mean_m = sum(market_rets) / n
+    cov = sum((stock_rets[i] - mean_s) * (market_rets[i] - mean_m) for i in range(n)) / (n - 1)
+    var_m = sum((market_rets[i] - mean_m) ** 2 for i in range(n)) / (n - 1)
+    if var_m <= 0:
+        return None
+    return round(cov / var_m, 3)
+
+
+@router.get("/api/analyze/{stock_code}/beta")
+async def get_stock_beta(stock_code: str):
+    """최근 1년 일별 수익률 기준 코스피 대비 베타.
+
+    KIS 일봉 1년치 + benchmark_daily 테이블의 KOSPI 일별 close 를
+    날짜로 inner-join 한 뒤 일별 수익률 (simple return) 로 β = Cov/Var
+    계산. 반환 포맷: {beta: float|null, sample_size: int, start: iso,
+    end: iso}. 데이터가 부족하거나 해외 종목 등으로 매칭 불가하면
+    beta=null (UI 는 'N/A' 표기).
+    """
+    from datetime import date, timedelta
+    import benchmark_history
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=400)  # ~1y 여유 (주말/휴장 포함)
+    start_iso = start_date.isoformat()
+
+    # KOSPI benchmark lazy backfill + load. 실패는 조용히 — beta=null 반환.
+    try:
+        await benchmark_history.backfill_benchmark("KOSPI", start_iso)
+        kospi_rows = await cache.get_benchmark_rows("KOSPI", start=start_iso)
+    except Exception as e:
+        logger.warning(f"KOSPI 벤치마크 로드 실패({stock_code}): {e}")
+        kospi_rows = []
+    kospi_map = {r["date"]: r["close"] for r in kospi_rows if r.get("close") is not None}
+
+    # 종목 일봉 — KIS Proxy. 실패 시 beta=null.
+    try:
+        history_payload = await stock_price.kis_proxy_client.get_history(
+            stock_code, start_date=start_date, end_date=end_date, period="D", adjusted=True,
+        )
+    except Exception as e:
+        logger.warning(f"종목 일봉 로드 실패({stock_code}): {e}")
+        return {"beta": None, "sample_size": 0, "start": None, "end": None, "benchmark": "KOSPI"}
+
+    pairs: list[tuple[float, float]] = []
+    matched_dates: list[str] = []
+    for item in stock_price._sorted_history_items(history_payload.get("items") if isinstance(history_payload, dict) else []):
+        trade_date = stock_price._parse_date(stock_price._get_first(item, "stck_bsop_date", "date", "trade_date"))
+        if trade_date is None:
+            continue
+        iso = trade_date.isoformat()
+        close = stock_price._safe_float(stock_price._get_first(item, "stck_clpr", "close_price", "close"))
+        market_close = kospi_map.get(iso)
+        if close is None or market_close is None:
+            continue
+        pairs.append((close, market_close))
+        matched_dates.append(iso)
+
+    # 최근 252 거래일만 (1년).
+    pairs = pairs[-253:]
+    matched_dates = matched_dates[-253:]
+
+    beta = _compute_beta_from_pairs(pairs)
+    return {
+        "beta": beta,
+        "sample_size": max(0, len(pairs) - 1),
+        "start": matched_dates[0] if matched_dates else None,
+        "end": matched_dates[-1] if matched_dates else None,
+        "benchmark": "KOSPI",
+    }
+
+
 @router.get("/api/analyze/{stock_code}")
 async def analyze_stock(stock_code: str, request: Request):
     current_user = await get_current_user(request)

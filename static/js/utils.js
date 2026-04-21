@@ -63,6 +63,7 @@ let recentListLoading = false;
 let recentListItems = [];
 let activeStockCode = null;
 let activeIndicators = {};
+let activeQuoteSnapshot = {};
 let authConfig = null;
 let currentUser = null;
 let googleButtonRetryTimer = null;

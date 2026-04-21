@@ -103,15 +103,45 @@ function getCurrentValuationMetrics(indicators, quoteSnapshot) {
   };
 }
 
+// 베타는 별도 엔드포인트에서 비동기로 받아오며, 처음 렌더 시에는 '…' 로
+// 플레이스홀더를 그렸다가 loadBeta 가 완료되면 해당 카드만 덮어쓴다.
+let _currentBeta = null;   // {beta, sample_size, benchmark} 또는 null
+
 function renderCurrentValuationSummary(indicators, quoteSnapshot) {
   const metrics = getCurrentValuationMetrics(indicators, quoteSnapshot);
+  const betaVal = _currentBeta && _currentBeta.beta !== null && _currentBeta.beta !== undefined
+    ? Number(_currentBeta.beta).toFixed(2)
+    : (_currentBeta === null ? '…' : 'N/A');
   return [
     { label: 'PER', value: formatMetricNumber(metrics.per) },
     { label: 'PBR', value: formatMetricNumber(metrics.pbr) },
     { label: '배당수익률', value: formatMetricNumber(metrics.dividendYield, '%') },
+    { label: '베타 (1Y)', value: betaVal, attr: 'data-beta="1"' },
   ].map(item => (
-    `<div class="valuation-card"><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span></div>`
+    `<div class="valuation-card" ${item.attr || ''}><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span></div>`
   )).join('');
+}
+
+async function loadBeta(stockCode) {
+  // 새 분석이 시작되면 이전 베타는 날려 플레이스홀더 '…' 로 표시되게.
+  _currentBeta = null;
+  try {
+    const resp = await apiFetch(`/api/analyze/${encodeURIComponent(stockCode)}/beta`);
+    if (!resp.ok) throw new Error('beta fetch failed');
+    _currentBeta = await resp.json();
+  } catch (e) {
+    _currentBeta = { beta: null, sample_size: 0, benchmark: 'KOSPI' };
+  }
+  // 분석 종목이 바뀌지 않았다면 valuation card 만 재렌더.
+  if (activeStockCode === stockCode) {
+    const coverageNote = document.getElementById('coverageNote');
+    if (coverageNote) {
+      coverageNote.innerHTML = renderCurrentValuationSummary(
+        activeIndicators || {},
+        activeQuoteSnapshot || {},
+      );
+    }
+  }
 }
 
 function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
@@ -856,6 +886,7 @@ async function renderResult(data) {
   infoEl.style.display = 'block';
   activeStockCode = data.stock_code;
   activeIndicators = data.indicators || {};
+  activeQuoteSnapshot = data.quote_snapshot || {};
   currentUserPreference = normalizeUserPreference(data.user_preference);
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';
@@ -899,6 +930,8 @@ async function renderResult(data) {
   loadReports(data.stock_code);
   // Wiki is lazy — fire-and-forget, renders under the report table.
   loadWiki(data.stock_code);
+  // 베타 — 1Y 일별 수익률 vs KOSPI. 비동기로 받아 valuation card 갱신.
+  loadBeta(data.stock_code);
   _updateQuoteSubscriptions();
 }
 
