@@ -192,18 +192,14 @@ function trackEvent(name, params = {}) {
     <div id="pfHoldingsTab">
     <div class="pf-filter-bar" id="pfFilterBar"></div>
 
-    <!-- 보유종목 뷰 전환: 테이블 / 영역지도. 기본은 테이블.
-         pfSetHoldingsMode() 가 두 컨테이너 display 토글. -->
-    <div class="pf-view-toggle">
-      <button class="pf-view-btn active" id="pfViewTableBtn" onclick="pfSetHoldingsMode('table')">테이블</button>
-      <button class="pf-view-btn" id="pfViewTreemapBtn" onclick="pfSetHoldingsMode('treemap')">영역지도</button>
-    </div>
-
     <div class="pf-add-bar">
       <input class="pf-add-input" id="pfAddInput" placeholder="종목코드 또는 종목명 (예: 005930, 삼성전자)" autocomplete="off">
       <div class="dropdown pf-dropdown" id="pfDropdown"></div>
       <button class="pf-add-btn" id="pfAddBtn" type="button">등록</button>
       <button class="pf-csv-toggle" id="pfCsvToggle" type="button" onclick="toggleCsvPanel()">일괄 등록</button>
+      <!-- 영역지도는 메인 뷰에서 상시 띄우기엔 공간만 먹어 팝업으로.
+           클릭 시 pfOpenTreemap() 이 모달을 띄우고 ECharts 렌더. -->
+      <button class="pf-treemap-btn" type="button" onclick="pfOpenTreemap()" title="영역지도로 보기">🗺️ 영역지도</button>
     </div>
     <div class="pf-csv-panel" id="pfCsvPanel" style="display:none;">
       <textarea class="pf-csv-input" id="pfCsvInput" rows="6" placeholder="종목코드,매입가,수량 (한 줄에 하나씩)&#10;005930,65000,100&#10;00088K,7000,200"></textarea>
@@ -246,14 +242,18 @@ function trackEvent(name, params = {}) {
       포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.
     </div>
 
-    <!-- 영역지도 뷰: 보유종목 탭 안에서 테이블과 토글. 분석 탭에서
-         여기로 옮긴 것이라 컨테이너 id (pfTreemap) 는 그대로 재사용. -->
-    <div class="pf-nav-chart-wrap pf-treemap-wrap" id="pfTreemapWrap" style="display:none;">
-      <div class="pf-nav-header">
-        <h3>포트폴리오 구성</h3>
-      </div>
-      <div style="position:relative;height:720px;">
-        <div id="pfTreemap" style="width:100%;height:100%;"></div>
+    <!-- 영역지도 모달. add-bar 의 '🗺️ 영역지도' 버튼이 display 를 flex
+         로 바꿔 띄운다. backdrop 클릭 / ✕ 버튼 / ESC 키로 닫힘. -->
+    <div class="pf-modal" id="pfTreemapModal" style="display:none;">
+      <div class="pf-modal-backdrop" onclick="pfCloseTreemap()"></div>
+      <div class="pf-modal-content pf-treemap-modal-content">
+        <div class="pf-modal-header">
+          <h3>포트폴리오 구성</h3>
+          <button class="pf-modal-close" type="button" onclick="pfCloseTreemap()" aria-label="닫기">✕</button>
+        </div>
+        <div class="pf-modal-body">
+          <div id="pfTreemap" style="width:100%;height:100%;"></div>
+        </div>
       </div>
     </div>
     </div><!-- /pfHoldingsTab -->

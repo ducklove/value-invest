@@ -747,17 +747,51 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-target-clear:hover { background: var(--hover-bg); color: var(--text); }
 
-/* 보유종목 내부 뷰 전환 (테이블 / 영역지도) — currency 토글과 유사한
-   segmented 버튼 UI. 필터 바 위쪽에 위치해 '같은 보유종목 데이터를
-   다른 시각화로 본다' 는 의미를 시각적으로 전달. */
-.pf-view-toggle { display: flex; gap: 0; margin: 0 0 12px 0; }
-.pf-view-btn {
-  padding: 6px 14px; border: 1px solid var(--border); background: var(--surface);
-  color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;
+/* 영역지도 진입 버튼 — add-bar 오른쪽 끝. 평범한 보조 액션 톤. */
+.pf-treemap-btn {
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text-secondary);
+  font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
 }
-.pf-view-btn:first-child { border-radius: 6px 0 0 6px; }
-.pf-view-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
-.pf-view-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
+.pf-treemap-btn:hover { background: var(--hover-bg); color: var(--text); }
+
+/* 공용 모달 — backdrop + centered content. 영역지도를 전체 화면 가까이
+   크게 보여주기 위해 도입. 추후 다른 팝업 용도에도 재사용 가능. */
+.pf-modal {
+  position: fixed; inset: 0; z-index: 1000;
+  display: none; align-items: center; justify-content: center;
+}
+.pf-modal.open { display: flex; }
+.pf-modal-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+.pf-modal-content {
+  position: relative; z-index: 1;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  display: flex; flex-direction: column;
+  max-width: 95vw; max-height: 92vh;
+}
+.pf-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
+}
+.pf-modal-header h3 { margin: 0; font-size: 16px; }
+.pf-modal-close {
+  background: transparent; border: none;
+  color: var(--text-secondary); font-size: 18px;
+  width: 28px; height: 28px; line-height: 1;
+  cursor: pointer; border-radius: 6px;
+}
+.pf-modal-close:hover { background: var(--hover-bg); color: var(--text); }
+.pf-modal-body { flex: 1; padding: 16px; overflow: auto; min-height: 0; }
+/* 영역지도 전용 크기 — treemap 은 ECharts 가 내부 height:100% 를 쓰므로
+   content 자체에 높이를 줘야 렌더됨. */
+.pf-treemap-modal-content { width: 90vw; height: 85vh; }
+.pf-treemap-modal-content .pf-modal-body { padding: 8px; }
 
 /* NAV chart */
 .pf-nav-chart-wrap { margin-bottom: 24px; }
@@ -1087,7 +1121,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   }
   /* Hide sidebar when logged in on mobile */
   body.mobile-auth .sidebar { display: none; }
-  .pf-treemap-wrap { display: none; }
+  /* 모바일에선 영역지도 버튼 숨김 — 작은 화면에서 treemap 은 가독성이
+     떨어지고, add-bar 가 한 줄에 들어가는 것도 방해. */
+  .pf-treemap-btn { display: none; }
   .pf-table { font-size: 12px; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
 }

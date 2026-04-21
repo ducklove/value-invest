@@ -2272,10 +2272,6 @@ async function runAiAnalysis() {
 
 // --- Portfolio Performance Tab ---
 let pfActiveTab = 'holdings';
-// 보유종목 탭 내부 뷰 전환 — 'table' (기본) | 'treemap' (영역지도).
-// 탭 전환 시점에도 현재 모드가 유지됨 (testing: 영역지도로 놓고 다른 탭
-// 갔다 돌아와도 영역지도).
-let pfActiveHoldingsMode = 'table';
 
 function pfSwitchTab(tab) {
   pfActiveTab = tab;
@@ -2289,36 +2285,38 @@ function pfSwitchTab(tab) {
   void activeEl.offsetWidth;
   activeEl.classList.add('fade-in');
   if (tab === 'performance') { loadPerformanceData(); _loadAiModels(); }
-  // 보유종목 탭으로 돌아온 경우 — 현재 모드가 treemap 이면 DOM 이 다시
-  // 보여진 타이밍에 ECharts 가 컨테이너 크기를 재측정하도록 re-render.
-  if (tab === 'holdings' && pfActiveHoldingsMode === 'treemap' && !USE_UPLOT) {
-    renderTreemap();
-  }
 }
 
-function pfSetHoldingsMode(mode) {
-  if (mode !== 'table' && mode !== 'treemap') return;
-  pfActiveHoldingsMode = mode;
-  document.getElementById('pfViewTableBtn')?.classList.toggle('active', mode === 'table');
-  document.getElementById('pfViewTreemapBtn')?.classList.toggle('active', mode === 'treemap');
-  const tableWrap = document.getElementById('pfTableWrap');
-  const colToggles = document.getElementById('pfColToggles');
-  const empty = document.getElementById('pfEmpty');
-  const treemapWrap = document.getElementById('pfTreemapWrap');
-  if (mode === 'table') {
-    if (tableWrap) tableWrap.style.display = '';
-    if (colToggles) colToggles.style.display = '';
-    // pfEmpty 는 데이터 0건일 때만 렌더 함수가 보여주므로 여기서 강제
-    // 복구 안 함 — display 속성을 지워 renderPortfolio 의 판단에 맡김.
-    if (empty) empty.style.display = '';
-    if (treemapWrap) treemapWrap.style.display = 'none';
-  } else {
-    if (tableWrap) tableWrap.style.display = 'none';
-    if (colToggles) colToggles.style.display = 'none';
-    if (empty) empty.style.display = 'none';
-    if (treemapWrap) treemapWrap.style.display = '';
+// 영역지도 팝업 — 기존에는 보유종목 탭 안에서 테이블/영역지도 토글 뷰로
+// 존재했으나, 영역지도만 단독으로 보면 썰렁해 보이고 테이블과 전환하며
+// 보는 니즈도 낮아 모달로 전환. ESC / backdrop / ✕ 모두 닫기 지원.
+function pfOpenTreemap() {
+  const modal = document.getElementById('pfTreemapModal');
+  if (!modal) return;
+  modal.classList.add('open');
+  modal.style.display = 'flex';
+  // ECharts 는 컨테이너가 화면에 보여진 뒤 init/resize 해야 크기를 맞게
+  // 측정함. display 바꾼 직후 한 tick 쉬고 render.
+  requestAnimationFrame(() => {
     if (!USE_UPLOT) renderTreemap();
-  }
+  });
+  document.addEventListener('keydown', _pfTreemapEscHandler);
+}
+
+function pfCloseTreemap() {
+  const modal = document.getElementById('pfTreemapModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.style.display = 'none';
+  document.removeEventListener('keydown', _pfTreemapEscHandler);
+  // ECharts 인스턴스 해제 — 다음 open 에서 다시 그림. 메모리 관리 겸
+  // 닫은 뒤 브라우저 창 리사이즈 때 hidden 컨테이너에 대고 resize 가
+  // 호출되지 않도록.
+  if (_treemapInstance) { _treemapInstance.dispose(); _treemapInstance = null; }
+}
+
+function _pfTreemapEscHandler(e) {
+  if (e.key === 'Escape') pfCloseTreemap();
 }
 
 async function loadPerformanceData() {
