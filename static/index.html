@@ -283,7 +283,7 @@ function trackEvent(name, params = {}) {
             <label class="pf-bench-chip"><input type="checkbox" id="pfNavYZero" onchange="onNavYZeroToggle()"><span>Y축 0부터</span></label>
           </div>
         </div>
-        <div class="pf-nav-chart-container" style="height:600px;">
+        <div class="pf-nav-chart-container pf-nav-tall">
           <div id="pfNavChart" style="width:100%;height:100%;"></div>
         </div>
         <div class="pf-nav-returns" id="pfNavReturns"></div>
@@ -294,7 +294,7 @@ function trackEvent(name, params = {}) {
           <h3>평가금액 추이</h3>
           <label class="pf-bench-chip" style="margin-left:auto;"><input type="checkbox" id="pfValueYZero" onchange="onValueYZeroToggle()"><span>Y축 0부터</span></label>
         </div>
-        <div class="pf-nav-chart-container">
+        <div class="pf-nav-chart-container pf-nav-short">
           <div id="pfValueChart" style="width:100%;height:100%;"></div>
         </div>
         <div class="pf-nav-returns" id="pfValueStats"></div>

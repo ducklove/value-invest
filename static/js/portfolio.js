@@ -2564,6 +2564,10 @@ async function renderTreemap() {
 }
 
 let _navChartInstance = null;
+// 탭 전환 등으로 container 크기가 늦게 확정될 때 ECharts 가 0 크기로
+// init 되어 차트가 아예 안 보이는 증상 대응. treemap 과 동일 패턴.
+let _navChartResizeObserver = null;
+let _valueChartResizeObserver = null;
 let _navChartData = [];  // cached for benchmark overlay
 let _benchCache = {};    // code -> [{date, close}]
 
@@ -2620,6 +2624,7 @@ async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
   if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
+  if (_navChartResizeObserver) { _navChartResizeObserver.disconnect(); _navChartResizeObserver = null; }
   await loadChartLib();
   _navChartData = data;
 
@@ -2793,6 +2798,17 @@ async function renderNavChart(data) {
   }
 
   _navChartInstance = ec;
+
+  // 폰에서 탭 전환 직후 container 높이가 늦게 확정되면 ECharts 가 0 으로
+  // init 되어 차트가 보이지 않음. ResizeObserver 가 크기 확정 시점에
+  // 발화해 자동 resize.
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (_navChartInstance) _navChartInstance.resize();
+    });
+    ro.observe(container);
+    _navChartResizeObserver = ro;
+  }
 }
 
 function onNavYZeroToggle() {
@@ -2822,6 +2838,7 @@ async function renderValueChart(data) {
   const container = document.getElementById('pfValueChart');
   if (!container) return;
   if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
+  if (_valueChartResizeObserver) { _valueChartResizeObserver.disconnect(); _valueChartResizeObserver = null; }
   await loadChartLib();
 
   // Stats cards
@@ -2859,6 +2876,15 @@ async function renderValueChart(data) {
     yFormatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit,
     dataZoom: true,
   });
+
+  // NAV 차트와 동일한 ResizeObserver — 폰 탭 전환 시 init 타이밍 보정.
+  if (typeof ResizeObserver !== 'undefined' && _valueChartInstance) {
+    const ro = new ResizeObserver(() => {
+      if (_valueChartInstance && _valueChartInstance.resize) _valueChartInstance.resize();
+    });
+    ro.observe(container);
+    _valueChartResizeObserver = ro;
+  }
 
   // Value stats cards — use FX-converted values
   if (statsEl) {
