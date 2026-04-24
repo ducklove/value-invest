@@ -177,10 +177,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 
 @keyframes flash-update {
-  0% { background-color: rgba(250, 204, 21, 0.25); }
+  0% { background-color: rgba(250, 204, 21, 0.55); }
   100% { background-color: transparent; }
 }
 .flash-update { animation: flash-update 0.8s ease-out; }
+/* stale 행이 WS tick 을 받으면 flash 가 와야 하는데, 모 행에 걸린
+   opacity:0.55 가 flash 배경까지 먹어 거의 안 보이던 문제. flash 중엔
+   opacity 해제 — '이 행이 방금 갱신됐다' 를 시각적으로 확실하게. */
+.pf-table tbody tr.pf-stale.flash-update { opacity: 1; }
 
 /* stale (캐시된 과거값) 행 — 서버가 last_known_quotes 로 즉시 응답한
    상태. 행을 약간 흐리게 + 현재가 뒤에 로딩 도트 '⋯' 를 붙여 '지금
