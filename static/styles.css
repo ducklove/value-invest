@@ -1013,7 +1013,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-table tbody td, .pf-table tfoot td {
   padding: 10px 12px; vertical-align: middle;
 }
-.pf-table tbody tr { transition: background 0.15s ease; }
+/* transition 제거 — renderPortfolio() 가 tbody 를 재생성할 때 새 tr 에
+   :hover 가 즉시 적용되는데, background transition 이 있으면 그 0.15s
+   이 '깜빡임' 으로 보임. transition 없으면 hover 배경 즉시 적용 →
+   시각적 깜빡임 없음. (WS tick 마다 전체 재렌더 유지해도 문제 안 됨.) */
+/* .pf-table tbody tr { transition: background 0.15s ease; } */
 .pf-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--border) 15%, var(--surface)); }
 .pf-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
 .pf-table tfoot td { font-weight: 700; background: var(--sidebar-bg); border-top: 2px solid var(--border); }

@@ -10,6 +10,8 @@ function _updateQuoteSubscriptions() {
   QuoteManager.updateSubscriptions(requested);
 }
 
+let _pfRenderQueued = false;
+const _pfFlashQueuedCodes = new Set();
 QuoteManager.onQuote = function(code, q) {
   // 1) 분석 뷰 활성 종목
   if (code === activeStockCode && q.price != null) {
@@ -19,19 +21,39 @@ QuoteManager.onQuote = function(code, q) {
     }, activeIndicators);
     flashEl(document.getElementById('quoteSummary'));
   }
-  // 2) 포트폴리오 종목 — 셀 단위 in-place 업데이트. 전체 재렌더 안 해서
-  //    커서 아래 행이 재생성되지 않음 → hover 깜빡임 해결. 갱신된 행에만
-  //    flash (노란 번쩍임).
+  // 2) 포트폴리오 종목 — renderPortfolio 전체 재렌더 방식 유지 (셀 단위
+  //    in-place 는 원인 불명으로 UI 반영이 끊기던 이력). hover 깜빡임은
+  //    CSS transition 제거로 해결. 가격 바뀐 행에만 flash 는 rAF 뒤
+  //    새 tr 찾아 붙여 준다 (renderPortfolio 가 tr 을 재생성하므로
+  //    render 전에 flash 를 붙이면 날아감).
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
-    if (!pfEditingCode) updatePortfolioRowQuote(code);
+    _pfFlashQueuedCodes.add(code);
   }
-  // 2-1) 벤치마크 실시간 갱신 — 벤치마크 셀만 in-place.
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null) {
     pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
-    if (!pfEditingCode) updatePortfolioBenchmarkCells(code);
+  }
+  if ((pfItem || isBenchmark) && q.price != null) {
+    if (!pfEditingCode && !_pfRenderQueued) {
+      _pfRenderQueued = true;
+      requestAnimationFrame(() => {
+        _pfRenderQueued = false;
+        renderPortfolio();
+        // 이번 rAF 창에 쌓인 pf code 들에 대해 flash. renderPortfolio 가
+        // tr 을 재생성한 직후라 새 tr 에 class 를 붙여야 보임.
+        if (_pfFlashQueuedCodes.size) {
+          const tbody = document.getElementById('pfBody');
+          if (tbody) {
+            tbody.querySelectorAll('tr[data-code]').forEach(t => {
+              if (_pfFlashQueuedCodes.has(t.dataset.code)) flashEl(t);
+            });
+          }
+          _pfFlashQueuedCodes.clear();
+        }
+      });
+    }
   }
   // 3) 사이드바
   const sbItem = recentListItems.find(i => i.stock_code === code);
