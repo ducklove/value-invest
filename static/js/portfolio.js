@@ -1021,25 +1021,28 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
   }
 
-  // 일간 수익률 sparkline 의 기준값(0%) = 전날 22:00 결산 시점. Today
-  // 카드의 dailyNavPct 가 동일 기준이라 sparkline 끝점과 숫자가 일치해야
-  // 자연스러움. 서버 /api/portfolio/intraday 가 prev-day snapshot 을
-  // ts="00:00" 으로 prepend 해 주긴 하는데 실패 시 intraday 첫 점이 오늘
-  // 장 시작가가 되어 기준 어긋남. pfPrevDaySnapshot 우선 사용으로 이 불
-  // 일치 제거.
+  // 일간 sparkline 기준(0%) = 전날 22:00 결산 시점. 이 값이 없으면
+  // sparkline 자체를 그리지 않는다 (엉뚱한 기준으로 그릴 바엔 공백).
+  // 전날 종가를 **dayPcts 첫 점(=0)** 으로 강제 prepend 해서 sparkline
+  // 그래프가 반드시 0% 에서 출발 → 기준선과 정확히 일치.
   const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
     ? pfPrevDaySnapshot.total_value
     : null;
-  if (pfIntradayData.length > 1 || _prevClose) {
-    const baseValue = _prevClose || pfIntradayData[0].total_value;
-    const dayPcts = pfIntradayData.map(d => ((d.total_value / baseValue) - 1) * 100);
-    if (currentTotalValue && baseValue > 0) {
-      dayPcts.push(((currentTotalValue / baseValue) - 1) * 100);
+  if (!_prevClose) {
+    _drawSparkline('sparkDaily', [], '#dc2626', 28, 'left');
+  } else {
+    // intraday 첫 점이 이미 prev_close 면 중복 prepend 방지.
+    const firstIsPrev = pfIntradayData.length > 0
+      && pfIntradayData[0].total_value === _prevClose;
+    const series = firstIsPrev
+      ? pfIntradayData
+      : [{ ts: 'prev_close', total_value: _prevClose }, ...pfIntradayData];
+    const dayPcts = series.map(d => ((d.total_value / _prevClose) - 1) * 100);
+    if (currentTotalValue) {
+      dayPcts.push(((currentTotalValue / _prevClose) - 1) * 100);
     }
     const lastPct = dayPcts[dayPcts.length - 1];
     _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 28, 'left');
-  } else {
-    _drawSparkline('sparkDaily', [], '#dc2626', 28, 'left');
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
