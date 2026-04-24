@@ -980,21 +980,18 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="최대 100개까지 조회 가능합니다.")
     codes = list({str(c).strip() for c in codes if str(c).strip()})
 
-    # upstream API (KIS/yfinance/Naver) 동시 부하 억제용 세마포어. 완전
-    # 순차는 63 종목 × fetch 시간 = 수십 초 로 너무 느림. 한 번에 최대
-    # 8 개만 병렬로 나가게 제한해 rate limit 과 친해지면서도 전체 시간
-    # 은 짧게.
-    sem = asyncio.Semaphore(8)
-
+    # 초기 로딩은 속도가 최우선. 전 종목 완전 병렬로 fetch.
+    # upstream (KIS/yfinance/Naver) 내부에 각각 자체 세마포어 (_YF_SEM,
+    # _NAVER_SEM) 가 있어 downstream 동시성은 거기서 제어되고, 여기선
+    # 전체 목록을 한꺼번에 발사해 가장 빠른 경로로 응답.
     async def _fetch_one(code):
         if code.startswith(_NON_QUOTABLE_PREFIXES):
             return code, {}
-        async with sem:
-            try:
-                q = await _fetch_quote(code)
-                return code, q or {}
-            except Exception:
-                return code, {}
+        try:
+            q = await _fetch_quote(code)
+            return code, q or {}
+        except Exception:
+            return code, {}
 
     results = await asyncio.gather(*[_fetch_one(c) for c in codes])
     return {code: quote for code, quote in results}
