@@ -68,7 +68,22 @@ QuoteManager.onQuote = function(code, q) {
   // 없앤다 (이전에는 'portfolio' 일 때만 호출했는데, 그 조건이 엣지
   // 케이스에서 false 로 떨어지면 UI 가 영원히 stale. 함수 내부에서
   // pfBody 유무 / tr 매칭 / 편집행 여부를 이미 체크하므로 무해.)
-  const pfItem = portfolioItems.find(i => i.stock_code === code);
+  // code / stock_code 가 타입 (string vs number) 또는 공백 차이로 불일치
+  // 할 경우 strict === 로 매칭 실패 → UI 미갱신. String() 정규화 후 비교.
+  const _codeStr = String(code).trim();
+  const pfItem = portfolioItems.find(i => String(i.stock_code).trim() === _codeStr);
+  const isBenchmarkCode = portfolioItems.some(i => i.benchmark_code && String(i.benchmark_code).trim() === _codeStr);
+  // 진단: pfItem 매칭 실패했는데 benchmark 매칭은 됐다면 '벤치마크는 실시간
+  // 인데 본 종목은 안 되는' 사용자 증상과 정확히 맞음. 한 code 당 한 번
+  // 만 경고해 콘솔 스팸 방지.
+  if (!pfItem && isBenchmarkCode) {
+    QuoteManager._unmatchedPf = QuoteManager._unmatchedPf || new Set();
+    if (!QuoteManager._unmatchedPf.has(code)) {
+      QuoteManager._unmatchedPf.add(code);
+      console.warn('[WS] portfolio match FAIL but benchmark match OK for code=', code,
+        '| portfolio codes=', portfolioItems.map(i => i.stock_code));
+    }
+  }
   if (pfItem && q.price != null) {
     const wasFresh = pfItem.quote && pfItem.quote.price != null && !pfItem.quote.stale;
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
