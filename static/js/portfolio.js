@@ -963,14 +963,19 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   const maxZ = r;
   const rangeZ = maxZ - minZ;
 
-  // Zero line — 항상 세로 중앙.
+  // Zero line — 항상 세로 중앙. 점선 + 진한 회색으로 기준선이 명확히
+  // 보이게 (이전 0.5px + --border 는 배경에 섞여 거의 안 보였음).
   const zeroY = pad + (1 - (0 - minZ) / rangeZ) * (h - pad * 2);
+  ctx.save();
   ctx.beginPath();
-  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
-  ctx.lineWidth = 0.5;
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#94a3b8';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.globalAlpha = 0.6;
   ctx.moveTo(0, zeroY);
   ctx.lineTo(w, zeroY);
   ctx.stroke();
+  ctx.restore();
 
   // Data line
   if (values.length > 1) {

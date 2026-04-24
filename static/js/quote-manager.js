@@ -103,20 +103,21 @@ const QuoteManager = {
 
   async _fetchQuotes(codes) {
     if (!codes.length) return;
-    // 한 종목씩 순차로 요청해 받는 즉시 UI 반영 (progressive loading).
-    // 화면은 localStorage snapshot + 서버 cache 로 이미 떠 있고, 여기서
-    // fresh 응답을 종목 단위로 scatter in — 사용자는 한 줄씩 갱신되는
-    // 자연스러운 체감. upstream API 에 동시 부하도 없음.
-    for (const code of codes) {
-      try {
-        const resp = await apiFetch(`/api/asset-quote/${encodeURIComponent(code)}`);
-        if (!resp.ok) continue;
-        const q = await resp.json();
-        if (q && q.price != null && this.onQuote) {
-          this.onQuote(code, { code, ...q });
-        }
-      } catch (e) { /* swallow per-code — 다음 종목 계속 */ }
-    }
+    // 전 종목 병렬 요청. 각 요청은 개별 HTTP 로 독립적이라 응답 도착
+    // 순서대로 onQuote → 해당 행만 즉시 UI 반영 (progressive loading).
+    // 한꺼번에 발사하지만 upstream 자체 세마포어 (_YF_SEM, _NAVER_SEM
+    // 등) 가 안쪽에서 동시성 제어.
+    await Promise.all(codes.map(code =>
+      apiFetch(`/api/asset-quote/${encodeURIComponent(code)}`)
+        .then(async resp => {
+          if (!resp.ok) return;
+          const q = await resp.json();
+          if (q && q.price != null && this.onQuote) {
+            this.onQuote(code, { code, ...q });
+          }
+        })
+        .catch(() => { /* per-code 실패 무시, 다른 종목 영향 없음 */ })
+    ));
     // Schedule fast retry for any still-missing quotes
     this._scheduleRetry();
   },
