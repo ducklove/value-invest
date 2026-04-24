@@ -1032,19 +1032,23 @@ function _renderSummarySparklines(currentTotalValue) {
   if (!_prevClose) {
     _drawSparkline('sparkDaily', [], '#dc2626', 28, 'left');
   } else {
-    // 첫 점을 하드코딩으로 0 으로 박는다 — 계산 중 어떤 엣지케이스
-    // (float 오차, 필드 누락 등) 가 있어도 맨 왼쪽이 반드시 0%.
-    // 그 뒤에 intraday 포인트들과 현재값 push.
-    const dayPcts = [0];
+    // sparkline 은 **오늘 장중 움직임** 을 보여준다. 첫 점 = 오늘 첫
+    // intraday (장 시작가) = 전날 22:00 대비 어느 정도 변동된 값이라
+    // 보통 0% 이 아님. 기준선(0%) 은 수평선으로 따로 그려지고, 데이터
+    // 라인이 그 위/아래로 움직이는 모양.
+    // 서버 /api/portfolio/intraday 가 baseline 목적으로 prepend 하는
+    // ts "...T00:00" 포인트는 sparkline 표시에서 제외 (이걸 넣으면
+    // 첫 점이 인위적으로 0% 에 찍혀 오늘 장 시작 변동이 가려짐).
+    const dayPcts = [];
     for (const d of pfIntradayData) {
-      if (d && d.total_value) {
-        dayPcts.push((d.total_value / _prevClose - 1) * 100);
-      }
+      if (!d || !d.total_value) continue;
+      if (d.ts && d.ts.endsWith('T00:00')) continue;   // baseline 제외
+      dayPcts.push((d.total_value / _prevClose - 1) * 100);
     }
     if (currentTotalValue) {
       dayPcts.push((currentTotalValue / _prevClose - 1) * 100);
     }
-    const lastPct = dayPcts[dayPcts.length - 1];
+    const lastPct = dayPcts.length ? dayPcts[dayPcts.length - 1] : 0;
     _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 28, 'left');
   }
 }
