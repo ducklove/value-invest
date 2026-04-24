@@ -154,48 +154,9 @@ async function loadNpsView() {
   }
 }
 
-// 포트폴리오 전체 스냅샷 localStorage 키 — 아이템 + 그룹 + 마지막 quote.
-// 이게 있으면 loadPortfolio 가 서버 응답을 기다리지 않고 즉시 이전 상태
-// 를 렌더한다. 서버 응답이 도착하면 덮어씀.
-const _PF_SNAPSHOT_KEY = 'pfSnapshot';
-
-function _pfRestoreSnapshot() {
-  try {
-    const raw = localStorage.getItem(_PF_SNAPSHOT_KEY);
-    if (!raw) return false;
-    const snap = JSON.parse(raw);
-    if (!snap || !Array.isArray(snap.items)) return false;
-    portfolioItems = snap.items.map(it => {
-      // quote 가 있으면 stale 로 표시 (서버 응답 오기 전까지 로딩 중 힌트).
-      if (it.quote && it.quote.price != null) {
-        it.quote = { ...it.quote, stale: true };
-      }
-      return it;
-    });
-    if (Array.isArray(snap.groups)) pfGroups = snap.groups;
-    return true;
-  } catch (e) { return false; }
-}
-
-function _pfSaveSnapshot() {
-  try {
-    localStorage.setItem(_PF_SNAPSHOT_KEY, JSON.stringify({
-      items: portfolioItems,
-      groups: pfGroups,
-      _ts: Date.now(),
-    }));
-  } catch (e) {}
-}
-
 async function loadPortfolio() {
   if (portfolioLoading) return;
   portfolioLoading = true;
-  // 0. 서버 응답 기다리기 전에 localStorage 에서 즉시 복원 + 렌더.
-  //    사용자 체감 '시세 로딩이 즉시 안 된다' 의 근본 원인은 이 대기
-  //    구간. 캐시가 있으면 이전 포트폴리오 + stale 가격으로 바로 채운다.
-  if (_pfRestoreSnapshot()) {
-    try { renderPortfolio(); } catch (e) {}
-  }
   try {
     const resp = await apiFetch('/api/portfolio');
     if (!resp.ok) {
@@ -260,26 +221,15 @@ async function loadPortfolio() {
       try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch (e) { console.warn(e); }
       renderPortfolio();
     }).catch(() => {});
-    // Preserve existing quotes from previous load + localStorage 영구 캐시
-    // (서버 재시작 직후엔 서버의 _last_known_quotes 가 비어 있어 응답에
-    // 도 quote 가 없음 → 화면에 '-' 가 수 초~수 분 보이던 증상의 근본.
-    // 브라우저 측에 남아있는 예전 quote 를 stale 로 즉시 채워 넣고, fresh
-    // 응답이 WS/polling 으로 도착하면 교체.)
+    // Preserve existing quotes from previous load
     const prevQuotes = {};
     portfolioItems.forEach(i => { if (i.quote && i.quote.price != null) prevQuotes[i.stock_code] = i.quote; });
-    const persistedQuotes = (typeof _pfLoadQuoteCache === 'function') ? _pfLoadQuoteCache() : {};
     portfolioItems = freshItems.map(item => {
-      if (!item.quote || item.quote.price == null) {
-        const prev = prevQuotes[item.stock_code] || persistedQuotes[item.stock_code];
-        if (prev) item.quote = { ...prev, stale: true };
-      }
+      if (!item.quote || item.quote.price == null) item.quote = prevQuotes[item.stock_code] || item.quote;
       return item;
     });
     renderPortfolio();
     _updateQuoteSubscriptions();
-    // 서버 응답으로 덮어쓴 최신 상태를 localStorage 에 저장 — 다음 진입
-    // 때 _pfRestoreSnapshot 가 즉시 복원.
-    _pfSaveSnapshot();
   } catch (e) { console.warn(e); } finally {
     portfolioLoading = false;
   }
@@ -333,22 +283,13 @@ function pfToggleGroupFilter(groupName) {
 function updatePortfolioRowQuote(code) {
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
-  // CSS.escape 를 쓰면 숫자로 시작하는 문자열을 '\30 05930' 같이 CSS
-  // 식별자 이스케이프로 바꿔 버린다. attribute selector 의 string
-  // literal 안에서는 그대로 쓰면 돼서 CSS.escape 가 오히려 매칭을
-  // 깨뜨렸다. 실제 영향: stock_code 가 숫자로 시작하는 한국 주식
-  // 전부 (=포트폴리오 대부분) 가 tr 매칭 실패 → UI 갱신 스킵.
-  // 안전하게 dataset.code 로 직접 비교해 찾는다.
-  const codeStr = String(code).trim();
-  let tr = null;
-  const rows = tbody.querySelectorAll('tr[data-code]');
-  for (const t of rows) {
-    if (String(t.dataset.code).trim() === codeStr) { tr = t; break; }
-  }
+  let tr;
+  try { tr = tbody.querySelector(`tr[data-code="${CSS.escape(code)}"]`); }
+  catch (e) { return; }
   if (!tr) return;
   // 편집 중인 행(인풋 포함)에는 손대지 않음 — 사용자의 입력이 날아갈 수 있음.
   if (tr.querySelector('input.pf-edit-input')) return;
-  const item = portfolioItems.find(i => String(i.stock_code).trim() === codeStr);
+  const item = portfolioItems.find(i => i.stock_code === code);
   if (!item) return;
 
   const q = item.quote || {};
@@ -380,16 +321,9 @@ function updatePortfolioRowQuote(code) {
   setText('.pf-col-target', targetPrice !== null ? _fp(targetPrice) : '-');
   setText('.pf-col-achiev', achievementPct !== null ? fmtPct(achievementPct, false) : '-');
 
-  // stale 플래그 — 서버가 last_known 으로 즉시 응답한 상태면 '로딩 중'
-  // 표시 (CSS .pf-stale 로 행 opacity 낮추고 현재가 뒤 '⋯' 붙임).
-  // fresh 응답이 도착하면 이 클래스가 제거되면서 flash 로 알림.
-  tr.classList.toggle('pf-stale', !!(q && q.stale));
-
   // 행 전체에 노란 flash — flashEl 이 transitions 트리거.
   flashEl(tr);
 }
-
-// 벤치마크 tick — 해당 benchmark_code 를 쓰는 모든 행의 벤치마크 셀만 갱신.
 
 // 벤치마크 tick — 해당 benchmark_code 를 쓰는 모든 행의 벤치마크 셀만 갱신.
 function updatePortfolioBenchmarkCells(code) {
@@ -899,8 +833,7 @@ function renderPortfolio() {
         </div></td>
       </tr>`;
     }
-    const staleCls = (r.quote && r.quote.stale) ? ' pf-stale' : '';
-    return `<tr draggable="true" data-code="${safeCode}" class="${staleCls.trim()}">
+    return `<tr draggable="true" data-code="${safeCode}">
       <td><a href="#" class="pf-stock-link js-pf-analyze"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
@@ -2213,13 +2146,7 @@ async function _pollBenchmarkQuotes() {
     if (!r.ok) return;
     const fresh = await r.json();
     for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
-    // 이전에는 renderPortfolio() 로 테이블 전체를 재렌더했는데, 이 과정
-    // 에서 본 종목 행도 함께 refresh 되어 "벤치마크 polling 순간에만
-    // 본 종목도 갱신되는 것처럼" 체감됐다. 이제 벤치마크 셀만 in-place
-    // 로 갱신해 본 종목 WS tick 과 완전히 독립적으로 동작.
-    if (activeView === 'portfolio' && typeof updatePortfolioBenchmarkCells === 'function') {
-      for (const k of Object.keys(fresh)) updatePortfolioBenchmarkCells(k);
-    }
+    if (activeView === 'portfolio') renderPortfolio();
   } catch (e) { console.warn(e); }
 }
 

@@ -1,37 +1,3 @@
-// 포트폴리오 quote localStorage 캐시 — 서버 재시작 후에도 즉시 화면에
-// 이전 값을 stale 로 표시하기 위한 브라우저 측 영구 저장소. tick 이 올
-// 때마다 쓰기가 발생하므로 100ms throttle 로 묶어서 한 번에 flush.
-const _PF_QUOTE_CACHE_KEY = 'pfQuotes';
-let _pfQuoteWriteTimer = null;
-let _pfQuoteWritePending = null;
-function _pfSaveQuoteCache(code, q) {
-  try {
-    const store = _pfQuoteWritePending || JSON.parse(localStorage.getItem(_PF_QUOTE_CACHE_KEY) || '{}');
-    store[code] = {
-      price: q.price,
-      change: q.change,
-      change_pct: q.change_pct,
-      previous_close: q.previous_close,
-      date: q.date,
-      trade_value: q.trade_value,
-      _savedAt: Date.now(),
-    };
-    _pfQuoteWritePending = store;
-    if (!_pfQuoteWriteTimer) {
-      _pfQuoteWriteTimer = setTimeout(() => {
-        try { localStorage.setItem(_PF_QUOTE_CACHE_KEY, JSON.stringify(_pfQuoteWritePending)); }
-        catch (e) {}
-        _pfQuoteWriteTimer = null;
-        _pfQuoteWritePending = null;
-      }, 100);
-    }
-  } catch (e) {}
-}
-function _pfLoadQuoteCache() {
-  try { return JSON.parse(localStorage.getItem(_PF_QUOTE_CACHE_KEY) || '{}'); }
-  catch (e) { return {}; }
-}
-
 // --- Quote subscription management ---
 function _updateQuoteSubscriptions() {
   const requested = { portfolio: [], benchmark: [], sidebar: [], analysis: [] };
@@ -45,17 +11,6 @@ function _updateQuoteSubscriptions() {
 }
 
 QuoteManager.onQuote = function(code, q) {
-  // 'WS tick 왔는데 UI 가 갱신 안 되는 것' 을 확인하기 위한 debug 로그.
-  // 기본 off. 브라우저 콘솔에서 `QuoteManager.debug = true` 로 켠 뒤
-  // 수 초 관찰하면 tick 수신/매칭/UI 업데이트 호출 여부가 모두 찍힘.
-  if (QuoteManager.debug) {
-    const pfMatched = portfolioItems.find(i => i.stock_code === code);
-    const benchMatched = portfolioItems.some(i => i.benchmark_code === code);
-    console.log(
-      `[WS] tick code=${code} price=${q.price} change_pct=${q.change_pct}`,
-      { pfMatch: !!pfMatched, benchMatch: benchMatched, activeView, editing: pfEditingCode }
-    );
-  }
   // 1) 분석 뷰 활성 종목
   if (code === activeStockCode && q.price != null) {
     renderQuoteSnapshot({
@@ -64,46 +19,24 @@ QuoteManager.onQuote = function(code, q) {
     }, activeIndicators);
     flashEl(document.getElementById('quoteSummary'));
   }
-  // 2) 포트폴리오 종목 — 셀 단위 in-place 업데이트. activeView 조건은
-  // 없앤다 (이전에는 'portfolio' 일 때만 호출했는데, 그 조건이 엣지
-  // 케이스에서 false 로 떨어지면 UI 가 영원히 stale. 함수 내부에서
-  // pfBody 유무 / tr 매칭 / 편집행 여부를 이미 체크하므로 무해.)
-  // code / stock_code 가 타입 (string vs number) 또는 공백 차이로 불일치
-  // 할 경우 strict === 로 매칭 실패 → UI 미갱신. String() 정규화 후 비교.
-  const _codeStr = String(code).trim();
-  const pfItem = portfolioItems.find(i => String(i.stock_code).trim() === _codeStr);
-  const isBenchmarkCode = portfolioItems.some(i => i.benchmark_code && String(i.benchmark_code).trim() === _codeStr);
-  // 진단: pfItem 매칭 실패했는데 benchmark 매칭은 됐다면 '벤치마크는 실시간
-  // 인데 본 종목은 안 되는' 사용자 증상과 정확히 맞음. 한 code 당 한 번
-  // 만 경고해 콘솔 스팸 방지.
-  if (!pfItem && isBenchmarkCode) {
-    QuoteManager._unmatchedPf = QuoteManager._unmatchedPf || new Set();
-    if (!QuoteManager._unmatchedPf.has(code)) {
-      QuoteManager._unmatchedPf.add(code);
-      console.warn('[WS] portfolio match FAIL but benchmark match OK for code=', code,
-        '| portfolio codes=', portfolioItems.map(i => i.stock_code));
-    }
-  }
+  // 2) 포트폴리오 종목 — 이전에는 tbody.innerHTML 를 통째로 재생성해서
+  // 마우스 아래 tr 이 매 tick 마다 재생성 → hover 깜빡임 + 갱신된 행에
+  // flash 효과가 안 붙는 문제가 있었다. 이제 영향 받는 셀만 in-place
+  // 업데이트하고, 해당 행에 flash-update 클래스를 붙여 번쩍인다.
+  const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
-    const wasFresh = pfItem.quote && pfItem.quote.price != null && !pfItem.quote.stale;
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
-    // stale 해제 규칙:
-    //  - 새 응답이 fresh (stale 플래그 없음) → 해제 (성도이엔지처럼 첫
-    //    로드가 stale 로 시작한 종목이 영구 stale 에 갇히던 버그 수정)
-    //  - 이전에 fresh 였던 종목 → 서버가 stale 로 내려줘도 해제 유지
-    //    (진동 방지)
-    if (!q.stale || wasFresh) delete pfItem.quote.stale;
-    _pfSaveQuoteCache(code, pfItem.quote);
-    if (typeof updatePortfolioRowQuote === 'function') {
+    if (!pfEditingCode && activeView === 'portfolio'
+        && typeof updatePortfolioRowQuote === 'function') {
       updatePortfolioRowQuote(code);
-      if (QuoteManager.debug) console.log(`[WS] → updatePortfolioRowQuote(${code})`);
     }
   }
   // 2-1) 벤치마크 실시간 갱신 — 벤치마크 셀들만 in-place 업데이트.
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null) {
     pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
-    if (typeof updatePortfolioBenchmarkCells === 'function') {
+    if (!pfEditingCode && activeView === 'portfolio'
+        && typeof updatePortfolioBenchmarkCells === 'function') {
       updatePortfolioBenchmarkCells(code);
     }
   }

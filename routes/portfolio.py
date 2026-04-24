@@ -137,41 +137,19 @@ _CURRENCY_MAP = {
 # Limits how many in-flight calls can hit each external dependency at once,
 # so a slow upstream cannot pin every uvicorn worker thread.
 _NAVER_SEM = asyncio.Semaphore(6)
-# yfinance concurrency / timeout 완화. 호주(.AX)·독일(.DE)·프랑스(.PA)
-# 등 KIS 미지원 지역은 yfinance/Naver 만 남는데, Pi 환경에서 yfinance
-# 응답이 8 초 안에 안 떨어져 실패하던 종목들이 있었음. 15초로 늘리고
-# 동시성도 6 으로 확장.
-_YF_SEM = asyncio.Semaphore(6)
-_YF_CALL_TIMEOUT = 15.0
+_YF_SEM = asyncio.Semaphore(3)
+_YF_CALL_TIMEOUT = 8.0
 _NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 
 # Negative cache: tickers we already failed to resolve via yfinance — avoids
-# re-running the 16-suffix loop on every quote refresh. **TTL-based** — 영구
-# 블랙리스트였던 이전 동작은 '한 번 실패하면 서비스 재시작 전까지 영구 fail'
-# 이라 해외 시세가 완전히 안 뜨는 상황을 악화시켰음. 30분 후 자동 재시도.
-_FAILED_YF_TTL = 1800  # 30분
-_failed_yf_tickers: dict[str, float] = {}
-
-
-def _yf_is_failed(ticker: str) -> bool:
-    ts = _failed_yf_tickers.get(ticker)
-    if not ts:
-        return False
-    if (time.monotonic() - ts) < _FAILED_YF_TTL:
-        return True
-    _failed_yf_tickers.pop(ticker, None)
-    return False
-
-
-def _yf_mark_failed(ticker: str) -> None:
-    _failed_yf_tickers[ticker] = time.monotonic()
+# re-running the 16-suffix loop on every quote refresh.
+_failed_yf_tickers: set[str] = set()
 
 # Negative cache for any code whose last quote fetch returned empty.
 # Stops the per-poll storm against KIS proxy / Naver / yfinance for codes
 # that are temporarily (or permanently) broken upstream. TTL-based so a
 # stock that recovers will be retried after the window expires.
-_DEAD_QUOTE_TTL = 60  # seconds — 300 이던 것을 60 으로. 5분 skip 이
-                      # '한 번 실패하면 한참 안 뜸' 을 유발
+_DEAD_QUOTE_TTL = 300  # seconds
 _dead_quote_cache: dict[str, float] = {}
 
 
@@ -221,28 +199,22 @@ async def _resolve_foreign_name(ticker: str) -> str | None:
 async def _yfinance_find_ticker(ticker: str) -> str | None:
     """Find a working yfinance ticker, trying various exchange suffixes.
     Bounded by _YF_SEM and a per-call timeout; results (positive and negative)
-    are cached to avoid re-running the suffix loop on every quote refresh.
-
-    Suffix 루프 자체에 **전체 wall-clock 데드라인** 이 없으면 모든
-    suffix 가 각각 _YF_CALL_TIMEOUT (8s) 까지 기다렸다 실패 시 총
-    8 × len(suffixes) ≈ 128s 가 가능. 이게 /api/asset-quotes batch 를
-    몇 분 잡아먹던 주요 원인이라 루프 전체를 10s 로 capping.
-    """
+    are cached to avoid re-running the suffix loop on every quote refresh."""
     if ticker in _ticker_map:
         return _ticker_map[ticker]
-    if _yf_is_failed(ticker):
+    if ticker in _failed_yf_tickers:
         return None
-    import yfinance as yf
-    candidates = [ticker] if "." in ticker else [ticker + s for s in _YFINANCE_SUFFIXES]
+    try:
+        import yfinance as yf
+        candidates = [ticker] if "." in ticker else [ticker + s for s in _YFINANCE_SUFFIXES]
 
-    def _probe(cand):
-        t = yf.Ticker(cand)
-        info = t.info
-        if info.get("shortName") or info.get("longName"):
-            return cand
-        return None
+        def _probe(cand):
+            t = yf.Ticker(cand)
+            info = t.info
+            if info.get("shortName") or info.get("longName"):
+                return cand
+            return None
 
-    async def _loop():
         for candidate in candidates:
             try:
                 hit = await _yf_run(partial(_probe, candidate))
@@ -251,17 +223,9 @@ async def _yfinance_find_ticker(ticker: str) -> str | None:
                     return hit
             except (asyncio.TimeoutError, Exception):
                 continue
-        return None
-
-    try:
-        hit = await asyncio.wait_for(_loop(), timeout=10.0)
-        if hit:
-            return hit
-    except asyncio.TimeoutError:
-        logger.warning("yfinance ticker resolve timeout: %s", ticker)
     except Exception:
         pass
-    _yf_mark_failed(ticker)
+    _failed_yf_tickers.add(ticker)
     return None
 
 
@@ -346,64 +310,44 @@ async def _kis_fetch_foreign_quote(ticker: str) -> dict:
     return {}
 
 
-async def _naver_foreign_quote(reuters_code: str) -> dict:
-    """Naver 경로 파싱 — 기존 _fetch_foreign_quote 에 인라인돼 있던 것을
-    재사용 가능한 함수로 분리 (병렬 gather 에 넣기 위해)."""
-    try:
-        d = await _fetch_naver_world_stock(reuters_code.upper())
-        if not (d and d.get("closePrice")):
-            return {}
-        price_str = str(d["closePrice"]).replace(",", "")
-        price = float(price_str)
-        change_str = str(d.get("compareToPreviousClosePrice", "0")).replace(",", "")
-        change = float(change_str)
-        change_pct = float(d.get("fluctuationsRatio", 0))
-        nation = d.get("nationType", "")
-        price_krw = await _fx_to_krw(nation, price)
-        change_krw = await _fx_to_krw(nation, change)
-        return {
-            "price": round(price_krw),
-            "change": round(change_krw),
-            "change_pct": change_pct,
-            "nation": d.get("nationName", ""),
-        }
-    except Exception as exc:
-        logger.debug("naver foreign quote parse fail (%s): %s", reuters_code, exc)
-        return {}
-
-
 async def _fetch_foreign_quote(reuters_code: str) -> dict:
-    """해외 종목 시세 — KIS / yfinance / Naver 세 경로를 **병렬** 로
-    호출하고 먼저 성공한 결과를 채택. 이전엔 순차 fallback 이어서 앞
-    경로가 slow fail 하면 뒤 경로가 기다려야 했고, 그 사이 상위 레벨의
-    10s deadline 이 터져 빈 dict → _mark_dead 로 5분간 skip → 해외
-    종목이 '전혀 안 뜨는' 증상으로 연결됐음. 병렬화로 한 경로가 느려도
-    다른 경로가 동시에 돌아가 실패 확률 대폭 감소."""
-    tasks = [
-        asyncio.create_task(_kis_fetch_foreign_quote(reuters_code)),
-        asyncio.create_task(_yfinance_fetch_quote(reuters_code)),
-        asyncio.create_task(_naver_foreign_quote(reuters_code)),
-    ]
-    try:
-        result: dict = {}
-        for fut in asyncio.as_completed(tasks):
-            try:
-                q = await fut
-            except Exception:
-                q = {}
-            if q and q.get("price") is not None:
-                result = q
-                break
-        return result
-    finally:
-        # 아직 미완료 task 는 정리 — 첫 성공 후 낭비되는 리소스 회수.
-        for t in tasks:
-            if not t.done():
-                t.cancel()
+    # 1. KIS proxy — fastest and most reliable for US/HK stocks
+    q = await _kis_fetch_foreign_quote(reuters_code)
+    if q and q.get("price") is not None:
+        return q
+
+    # 2. yfinance fallback
+    q = await _yfinance_fetch_quote(reuters_code)
+    if q and q.get("price") is not None:
+        return q
+
+    # 3. Naver fallback
+    upper_code = reuters_code.upper()
+    d = await _fetch_naver_world_stock(upper_code)
+    if d and d.get("closePrice"):
+        try:
+            price_str = str(d["closePrice"]).replace(",", "")
+            price = float(price_str)
+            change_str = str(d.get("compareToPreviousClosePrice", "0")).replace(",", "")
+            change = float(change_str)
+            change_pct = float(d.get("fluctuationsRatio", 0))
+            nation = d.get("nationType", "")
+            price_krw = await _fx_to_krw(nation, price)
+            change_krw = await _fx_to_krw(nation, change)
+            return {
+                "price": round(price_krw),
+                "change": round(change_krw),
+                "change_pct": change_pct,
+                "nation": d.get("nationName", ""),
+            }
+        except Exception as exc:
+            logger.warning("해외주식 시세 파싱 실패(%s): %s", reuters_code, exc)
+
+    return {}
 
 
 async def _yfinance_fetch_quote(ticker: str) -> dict:
-    if _yf_is_failed(ticker):
+    if ticker in _failed_yf_tickers:
         return {}
     try:
         import yfinance as yf
@@ -430,7 +374,7 @@ async def _yfinance_fetch_quote(ticker: str) -> dict:
         }
     except Exception as exc:
         logger.warning("yfinance 시세 조회 실패(%s): %s", ticker, exc)
-        _yf_mark_failed(ticker)
+        _failed_yf_tickers.add(ticker)
         return {}
 
 
@@ -594,112 +538,23 @@ async def _save_ticker(stock_code: str, resolved: str):
         logger.warning("Ticker map save failed (%s -> %s): %s", stock_code, resolved, exc)
 
 
-# 한 종목당 시세 조회 최대 대기 시간. 해외 종목의 순차 fallback
-# (KIS → yfinance → Naver) + yfinance suffix 루프 (16개 × 8초) 조합이
-# 누적되면 한 종목에 분 단위 소요가 가능했음. /api/asset-quotes 는
-# asyncio.gather 로 병렬이라 가장 느린 한 종목이 전체 응답을 잡아먹음
-# → 배치 지연의 범인. hard deadline 을 걸고 초과 시 dead cache 에
-# 올려 이후 5분간 즉시 스킵.
-_QUOTE_FETCH_DEADLINE_S = 10.0
-
-# 백그라운드 refresh 중복 방지. 같은 종목에 대해 이미 refresh task 가
-# in-flight 면 새로 띄우지 않음 (asyncio.create_task 남용으로 upstream
-# rate limit 찍히는 것 예방).
-_inflight_refresh: set[str] = set()
-
-
-async def _refresh_quote_bg(stock_code: str) -> None:
-    """Fire-and-forget refresh — stale 로 즉시 응답한 뒤 진짜 값을 받아
-    _quote_cache / _last_known_quotes 에 채워 둔다. 클라이언트는 다음
-    polling 또는 WS tick 에서 최신 값을 자연스럽게 받음."""
-    if stock_code in _inflight_refresh:
-        return
-    _inflight_refresh.add(stock_code)
-    try:
-        q = await asyncio.wait_for(
-            _fetch_quote_uncached(stock_code),
-            timeout=_QUOTE_FETCH_DEADLINE_S,
-        )
-    except (asyncio.TimeoutError, Exception) as exc:
-        logger.debug("bg refresh failed (%s): %s", stock_code, exc)
-        q = None
-    finally:
-        _inflight_refresh.discard(stock_code)
-    if q and q.get("price") is not None:
-        _quote_cache[stock_code] = (_time.monotonic(), q)
-        _last_known_quotes[stock_code] = q
-    else:
-        _mark_dead(stock_code)
-
-
 async def _fetch_quote(stock_code: str) -> dict:
-    """시세 조회. 사용자 제안대로 **즉시 응답 + 백그라운드 갱신** 방식:
-
-      1) fresh cache hit (TTL 내)         → 바로 반환
-      2) last_known (stale) 있음          → stale 플래그 달아 즉시 반환
-                                            + asyncio.create_task 로 bg 갱신
-      3) last_known 도 없는 신규 종목     → deadline 10s 동기 fetch
-                                            (실패 시 _mark_dead 로 5분 스킵)
-
-    이 구조 덕분에 포트폴리오가 처음 로드될 때 해외 종목 한두 개가
-    느리더라도 **화면은 이전에 본 가격으로 즉시 채워지고** 로딩 중
-    표시가 붙음. fresh 값이 도착하면 다음 polling 에서 자연 갱신.
-    """
     now = _time.monotonic()
     cached = _quote_cache.get(stock_code)
     if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
         return cached[1]
-    last = _last_known_quotes.get(stock_code)
-    if last:
-        # 백그라운드에서 fresh 가져오게 하되, 요청 자체는 즉시 완료.
-        try:
-            asyncio.create_task(_refresh_quote_bg(stock_code))
-        except RuntimeError:
-            # 이벤트 루프가 없는 테스트 컨텍스트 등 — 무시
-            pass
-        return {**last, "stale": True}
     if _is_dead(stock_code):
-        # 사망 cache 여도 last_known 있으면 stale 반환 (화면 비워두느니 예전값)
-        lk = _last_known_quotes.get(stock_code)
-        return {**lk, "stale": True} if lk else {}
-    try:
-        q = await asyncio.wait_for(
-            _fetch_quote_uncached(stock_code),
-            timeout=_QUOTE_FETCH_DEADLINE_S,
-        )
-    except asyncio.TimeoutError:
-        # deadline 초과는 '종목이 죽었다' 가 아니라 '일시적 네트워크 지연'
-        # 일 뿐. _mark_dead 걸면 5분간 skip 되어 정상 종목까지 차단됨.
-        logger.warning("Quote fetch timeout (%ss): %s", _QUOTE_FETCH_DEADLINE_S, stock_code)
-        lk = _last_known_quotes.get(stock_code)
-        return {**lk, "stale": True} if lk else {}
-    if q and q.get("price") is not None:
-        _quote_cache[stock_code] = (now, q)
-        _last_known_quotes[stock_code] = q
-        # DB 에 영구 저장 — 서버 재시작 후에도 즉시 stale 로 제공 가능.
-        # fire-and-forget 으로 응답 지연 없음.
-        try:
-            asyncio.create_task(cache.save_quote_snapshot(stock_code, q))
-        except RuntimeError:
-            pass
-        return q
-    # 진짜 '값 못 받음' 인 경우에만 dead 마킹. last_known 있으면 stale.
-    _mark_dead(stock_code)
-    lk = _last_known_quotes.get(stock_code)
-    return {**lk, "stale": True} if lk else {}
-
-
-async def _fetch_quote_uncached(stock_code: str) -> dict:
+        return {}
     if _is_cash_asset(stock_code):
-        return await _fetch_cash_quote(stock_code)
-    if stock_code == "KRX_GOLD":
-        return await _fetch_krx_gold_quote()
-    if stock_code in _CRYPTO_UPBIT_MAP:
-        return await _fetch_crypto_quote(stock_code)
-    if _is_korean_stock(stock_code):
+        q = await _fetch_cash_quote(stock_code)
+    elif stock_code == "KRX_GOLD":
+        q = await _fetch_krx_gold_quote()
+    elif stock_code in _CRYPTO_UPBIT_MAP:
+        q = await _fetch_crypto_quote(stock_code)
+    elif _is_korean_stock(stock_code):
         ws_q = kis_ws_manager.get_cached_quote(stock_code)
         if ws_q and ws_q.get("price") is not None:
-            return {
+            q = {
                 "date": ws_q.get("date", ""),
                 "price": ws_q["price"],
                 "previous_close": ws_q.get("previous_close"),
@@ -709,16 +564,23 @@ async def _fetch_quote_uncached(stock_code: str) -> dict:
                 # 아직 지원 없어 None 으로 떨어지며 UI 에서 '-' 표시.
                 "trade_value": ws_q.get("trade_value"),
             }
-        return await stock_price.fetch_quote_snapshot(stock_code)
-    # 해외 종목 — resolved ticker 우선, 없으면 resolve 후 재시도
-    await _ensure_ticker_map()
-    ticker = _ticker_map.get(stock_code, stock_code)
-    q = await _fetch_foreign_quote(ticker)
-    if not q and ticker == stock_code and "." not in stock_code:
-        resolved = await _resolve_foreign_reuters(stock_code)
-        if resolved and resolved != stock_code:
-            await _save_ticker(stock_code, resolved)
-            q = await _fetch_foreign_quote(resolved)
+        else:
+            q = await stock_price.fetch_quote_snapshot(stock_code)
+    else:
+        # Use resolved ticker if available, otherwise try to resolve
+        await _ensure_ticker_map()
+        ticker = _ticker_map.get(stock_code, stock_code)
+        q = await _fetch_foreign_quote(ticker)
+        if not q and ticker == stock_code and "." not in stock_code:
+            resolved = await _resolve_foreign_reuters(stock_code)
+            if resolved and resolved != stock_code:
+                await _save_ticker(stock_code, resolved)
+                q = await _fetch_foreign_quote(resolved)
+    if q and q.get("price") is not None:
+        _quote_cache[stock_code] = (now, q)
+        _last_known_quotes[stock_code] = q
+    else:
+        _mark_dead(stock_code)
     return q
 
 
@@ -744,11 +606,9 @@ async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
             if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
                 enriched["quote"] = cached[1]
             else:
-                # Fallback: last-known quote (stale but better than nothing).
-                # `stale` 플래그는 클라이언트 _getMissingCodes / renderPortfolio
-                # 가 로딩 인디케이터 표시 + 짧은 retry 에 사용.
+                # Fallback: last-known quote (stale but better than nothing)
                 lk = _last_known_quotes.get(code)
-                enriched["quote"] = dict(lk, stale=True) if lk else {}
+                enriched["quote"] = dict(lk, _stale=True) if lk else {}
         result.append(enriched)
     return result
 
@@ -1124,12 +984,9 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         if code.startswith(_NON_QUOTABLE_PREFIXES):
             return code, {}
         try:
-            # 종목당 5s 상한 — 한 종목의 느린 경로가 배치 전체 응답을
-            # 잡아먹지 않도록. 못 받은 종목은 클라이언트가 _scheduleRetry
-            # (5초 뒤) 로 다시 시도.
-            q = await asyncio.wait_for(_fetch_quote(code), timeout=5.0)
+            q = await _fetch_quote(code)
             return code, q or {}
-        except (asyncio.TimeoutError, Exception):
+        except Exception:
             return code, {}
 
     results = await asyncio.gather(*[_fetch_one(c) for c in codes])
