@@ -11,6 +11,17 @@ function _updateQuoteSubscriptions() {
 }
 
 QuoteManager.onQuote = function(code, q) {
+  // 'WS tick 왔는데 UI 가 갱신 안 되는 것' 을 확인하기 위한 debug 로그.
+  // 기본 off. 브라우저 콘솔에서 `QuoteManager.debug = true` 로 켠 뒤
+  // 수 초 관찰하면 tick 수신/매칭/UI 업데이트 호출 여부가 모두 찍힘.
+  if (QuoteManager.debug) {
+    const pfMatched = portfolioItems.find(i => i.stock_code === code);
+    const benchMatched = portfolioItems.some(i => i.benchmark_code === code);
+    console.log(
+      `[WS] tick code=${code} price=${q.price} change_pct=${q.change_pct}`,
+      { pfMatch: !!pfMatched, benchMatch: benchMatched, activeView, editing: pfEditingCode }
+    );
+  }
   // 1) 분석 뷰 활성 종목
   if (code === activeStockCode && q.price != null) {
     renderQuoteSnapshot({
@@ -29,6 +40,11 @@ QuoteManager.onQuote = function(code, q) {
     if (!pfEditingCode && activeView === 'portfolio'
         && typeof updatePortfolioRowQuote === 'function') {
       updatePortfolioRowQuote(code);
+      if (QuoteManager.debug) console.log(`[WS] → updatePortfolioRowQuote(${code}) called`);
+    } else if (QuoteManager.debug) {
+      console.log(`[WS] SKIP UI update code=${code} reason=`,
+        { editing: pfEditingCode, view: activeView,
+          fnAvail: typeof updatePortfolioRowQuote === 'function' });
     }
   }
   // 2-1) 벤치마크 실시간 갱신 — 벤치마크 셀들만 in-place 업데이트.

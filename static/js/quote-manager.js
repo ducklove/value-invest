@@ -10,6 +10,10 @@ const QuoteManager = {
   generalPollTimer: null,
   wsActive: false,      // true when this session owns the active WS slot
   onQuote: null,
+  // 브라우저 콘솔에서 `QuoteManager.debug = true` 로 켜면 tick 수신과
+  // 포트폴리오 UI 업데이트 경로가 상세히 찍힘. 'WS tick 오는데 UI
+  // 갱신 안 되는 것 아닌가' 의심 진단용.
+  debug: false,
 
   connect() {
     if (this.ws) return;

@@ -326,6 +326,8 @@ function updatePortfolioRowQuote(code) {
 }
 
 // 벤치마크 tick — 해당 benchmark_code 를 쓰는 모든 행의 벤치마크 셀만 갱신.
+
+// 벤치마크 tick — 해당 benchmark_code 를 쓰는 모든 행의 벤치마크 셀만 갱신.
 function updatePortfolioBenchmarkCells(code) {
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
@@ -2146,7 +2148,13 @@ async function _pollBenchmarkQuotes() {
     if (!r.ok) return;
     const fresh = await r.json();
     for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
-    if (activeView === 'portfolio') renderPortfolio();
+    // 이전에는 renderPortfolio() 로 테이블 전체를 재렌더했는데, 이 과정
+    // 에서 본 종목 행도 함께 refresh 되어 "벤치마크 polling 순간에만
+    // 본 종목도 갱신되는 것처럼" 체감됐다. 이제 벤치마크 셀만 in-place
+    // 로 갱신해 본 종목 WS tick 과 완전히 독립적으로 동작.
+    if (activeView === 'portfolio' && typeof updatePortfolioBenchmarkCells === 'function') {
+      for (const k of Object.keys(fresh)) updatePortfolioBenchmarkCells(k);
+    }
   } catch (e) { console.warn(e); }
 }
 
