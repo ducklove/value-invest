@@ -137,14 +137,16 @@ const QuoteManager = {
   },
 
   _getMissingCodes() {
-    // Check portfolio + sidebar (recent search) items, not benchmark/index codes
+    // Check portfolio + sidebar (recent search) items, not benchmark/index codes.
+    // stale:true 도 missing 으로 취급 — 서버가 last_known 으로 즉시 응답한
+    // 경우 fresh 받을 때까지 5초 retry 로 빠르게 교체.
     const missing = new Set();
     for (const i of portfolioItems) {
-      if (!i.quote || i.quote.price == null) missing.add(i.stock_code);
+      if (!i.quote || i.quote.price == null || i.quote.stale) missing.add(i.stock_code);
     }
     if (typeof recentListItems !== 'undefined' && Array.isArray(recentListItems)) {
       for (const i of recentListItems) {
-        if (!i.quote || i.quote.price == null) missing.add(i.stock_code);
+        if (!i.quote || i.quote.price == null || i.quote.stale) missing.add(i.stock_code);
       }
     }
     return [...missing];

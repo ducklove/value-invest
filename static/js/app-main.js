@@ -30,29 +30,23 @@ QuoteManager.onQuote = function(code, q) {
     }, activeIndicators);
     flashEl(document.getElementById('quoteSummary'));
   }
-  // 2) 포트폴리오 종목 — 이전에는 tbody.innerHTML 를 통째로 재생성해서
-  // 마우스 아래 tr 이 매 tick 마다 재생성 → hover 깜빡임 + 갱신된 행에
-  // flash 효과가 안 붙는 문제가 있었다. 이제 영향 받는 셀만 in-place
-  // 업데이트하고, 해당 행에 flash-update 클래스를 붙여 번쩍인다.
+  // 2) 포트폴리오 종목 — 셀 단위 in-place 업데이트. activeView 조건은
+  // 없앤다 (이전에는 'portfolio' 일 때만 호출했는데, 그 조건이 엣지
+  // 케이스에서 false 로 떨어지면 UI 가 영원히 stale. 함수 내부에서
+  // pfBody 유무 / tr 매칭 / 편집행 여부를 이미 체크하므로 무해.)
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
-    if (!pfEditingCode && activeView === 'portfolio'
-        && typeof updatePortfolioRowQuote === 'function') {
+    if (typeof updatePortfolioRowQuote === 'function') {
       updatePortfolioRowQuote(code);
-      if (QuoteManager.debug) console.log(`[WS] → updatePortfolioRowQuote(${code}) called`);
-    } else if (QuoteManager.debug) {
-      console.log(`[WS] SKIP UI update code=${code} reason=`,
-        { editing: pfEditingCode, view: activeView,
-          fnAvail: typeof updatePortfolioRowQuote === 'function' });
+      if (QuoteManager.debug) console.log(`[WS] → updatePortfolioRowQuote(${code})`);
     }
   }
   // 2-1) 벤치마크 실시간 갱신 — 벤치마크 셀들만 in-place 업데이트.
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null) {
     pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
-    if (!pfEditingCode && activeView === 'portfolio'
-        && typeof updatePortfolioBenchmarkCells === 'function') {
+    if (typeof updatePortfolioBenchmarkCells === 'function') {
       updatePortfolioBenchmarkCells(code);
     }
   }

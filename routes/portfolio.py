@@ -560,12 +560,62 @@ async def _save_ticker(stock_code: str, resolved: str):
 # 올려 이후 5분간 즉시 스킵.
 _QUOTE_FETCH_DEADLINE_S = 10.0
 
+# 백그라운드 refresh 중복 방지. 같은 종목에 대해 이미 refresh task 가
+# in-flight 면 새로 띄우지 않음 (asyncio.create_task 남용으로 upstream
+# rate limit 찍히는 것 예방).
+_inflight_refresh: set[str] = set()
+
+
+async def _refresh_quote_bg(stock_code: str) -> None:
+    """Fire-and-forget refresh — stale 로 즉시 응답한 뒤 진짜 값을 받아
+    _quote_cache / _last_known_quotes 에 채워 둔다. 클라이언트는 다음
+    polling 또는 WS tick 에서 최신 값을 자연스럽게 받음."""
+    if stock_code in _inflight_refresh:
+        return
+    _inflight_refresh.add(stock_code)
+    try:
+        q = await asyncio.wait_for(
+            _fetch_quote_uncached(stock_code),
+            timeout=_QUOTE_FETCH_DEADLINE_S,
+        )
+    except (asyncio.TimeoutError, Exception) as exc:
+        logger.debug("bg refresh failed (%s): %s", stock_code, exc)
+        q = None
+    finally:
+        _inflight_refresh.discard(stock_code)
+    if q and q.get("price") is not None:
+        _quote_cache[stock_code] = (_time.monotonic(), q)
+        _last_known_quotes[stock_code] = q
+    else:
+        _mark_dead(stock_code)
+
 
 async def _fetch_quote(stock_code: str) -> dict:
+    """시세 조회. 사용자 제안대로 **즉시 응답 + 백그라운드 갱신** 방식:
+
+      1) fresh cache hit (TTL 내)         → 바로 반환
+      2) last_known (stale) 있음          → stale 플래그 달아 즉시 반환
+                                            + asyncio.create_task 로 bg 갱신
+      3) last_known 도 없는 신규 종목     → deadline 10s 동기 fetch
+                                            (실패 시 _mark_dead 로 5분 스킵)
+
+    이 구조 덕분에 포트폴리오가 처음 로드될 때 해외 종목 한두 개가
+    느리더라도 **화면은 이전에 본 가격으로 즉시 채워지고** 로딩 중
+    표시가 붙음. fresh 값이 도착하면 다음 polling 에서 자연 갱신.
+    """
     now = _time.monotonic()
     cached = _quote_cache.get(stock_code)
     if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
         return cached[1]
+    last = _last_known_quotes.get(stock_code)
+    if last:
+        # 백그라운드에서 fresh 가져오게 하되, 요청 자체는 즉시 완료.
+        try:
+            asyncio.create_task(_refresh_quote_bg(stock_code))
+        except RuntimeError:
+            # 이벤트 루프가 없는 테스트 컨텍스트 등 — 무시
+            pass
+        return {**last, "stale": True}
     if _is_dead(stock_code):
         return {}
     try:
@@ -640,9 +690,11 @@ async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
             if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
                 enriched["quote"] = cached[1]
             else:
-                # Fallback: last-known quote (stale but better than nothing)
+                # Fallback: last-known quote (stale but better than nothing).
+                # `stale` 플래그는 클라이언트 _getMissingCodes / renderPortfolio
+                # 가 로딩 인디케이터 표시 + 짧은 retry 에 사용.
                 lk = _last_known_quotes.get(code)
-                enriched["quote"] = dict(lk, _stale=True) if lk else {}
+                enriched["quote"] = dict(lk, stale=True) if lk else {}
         result.append(enriched)
     return result
 

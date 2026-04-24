@@ -329,6 +329,11 @@ function updatePortfolioRowQuote(code) {
   setText('.pf-col-target', targetPrice !== null ? _fp(targetPrice) : '-');
   setText('.pf-col-achiev', achievementPct !== null ? fmtPct(achievementPct, false) : '-');
 
+  // stale 플래그 — 서버가 last_known 으로 즉시 응답한 상태면 '로딩 중'
+  // 표시 (CSS .pf-stale 로 행 opacity 낮추고 현재가 뒤 '⋯' 붙임).
+  // fresh 응답이 도착하면 이 클래스가 제거되면서 flash 로 알림.
+  tr.classList.toggle('pf-stale', !!(q && q.stale));
+
   // 행 전체에 노란 flash — flashEl 이 transitions 트리거.
   flashEl(tr);
 }
@@ -843,7 +848,8 @@ function renderPortfolio() {
         </div></td>
       </tr>`;
     }
-    return `<tr draggable="true" data-code="${safeCode}">
+    const staleCls = (r.quote && r.quote.stale) ? ' pf-stale' : '';
+    return `<tr draggable="true" data-code="${safeCode}" class="${staleCls.trim()}">
       <td><a href="#" class="pf-stock-link js-pf-analyze"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>

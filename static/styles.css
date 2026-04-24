@@ -182,6 +182,17 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .flash-update { animation: flash-update 0.8s ease-out; }
 
+/* stale (캐시된 과거값) 행 — 서버가 last_known_quotes 로 즉시 응답한
+   상태. 행을 약간 흐리게 + 현재가 뒤에 로딩 도트 '⋯' 를 붙여 '지금
+   fresh 값 받는 중' 을 표시. fresh 도착하면 .pf-stale 이 제거되면서
+   자연스럽게 원래 톤으로 돌아옴. */
+.pf-table tbody tr.pf-stale { opacity: 0.55; }
+.pf-table tbody tr.pf-stale .pf-col-curprice::after {
+  content: " ⋯";
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
 /* WS live indicator */
 .ws-live-dot {
   display: inline-block;
