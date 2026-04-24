@@ -962,22 +962,16 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   const yFor = (v) => pad + (1 - (v - minZ) / rangeZ) * (h - pad * 2);
   const zeroY = yFor(0);
 
-  // 0% 기준선 — 눈에 확실히 띄도록 진한 회색 점선 + '0%' 레이블.
+  // 0% 기준선 — 연한 점선.
   ctx.save();
   ctx.beginPath();
   ctx.strokeStyle = '#64748b';
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 3]);
-  ctx.globalAlpha = 0.85;
+  ctx.globalAlpha = 0.5;
   ctx.moveTo(0, zeroY);
   ctx.lineTo(w, zeroY);
   ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.font = '9px sans-serif';
-  ctx.fillStyle = '#64748b';
-  ctx.globalAlpha = 0.9;
-  const labelY = zeroY < h - 10 ? zeroY - 2 : zeroY - 2;
-  ctx.fillText('0%', 2, labelY);
   ctx.restore();
 
   if (values.length > 1) {
