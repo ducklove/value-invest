@@ -221,11 +221,19 @@ async function loadPortfolio() {
       try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch (e) { console.warn(e); }
       renderPortfolio();
     }).catch(() => {});
-    // Preserve existing quotes from previous load
+    // Preserve existing quotes from previous load + localStorage 영구 캐시
+    // (서버 재시작 직후엔 서버의 _last_known_quotes 가 비어 있어 응답에
+    // 도 quote 가 없음 → 화면에 '-' 가 수 초~수 분 보이던 증상의 근본.
+    // 브라우저 측에 남아있는 예전 quote 를 stale 로 즉시 채워 넣고, fresh
+    // 응답이 WS/polling 으로 도착하면 교체.)
     const prevQuotes = {};
     portfolioItems.forEach(i => { if (i.quote && i.quote.price != null) prevQuotes[i.stock_code] = i.quote; });
+    const persistedQuotes = (typeof _pfLoadQuoteCache === 'function') ? _pfLoadQuoteCache() : {};
     portfolioItems = freshItems.map(item => {
-      if (!item.quote || item.quote.price == null) item.quote = prevQuotes[item.stock_code] || item.quote;
+      if (!item.quote || item.quote.price == null) {
+        const prev = prevQuotes[item.stock_code] || persistedQuotes[item.stock_code];
+        if (prev) item.quote = { ...prev, stale: true };
+      }
       return item;
     });
     renderPortfolio();

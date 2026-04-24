@@ -1,3 +1,37 @@
+// 포트폴리오 quote localStorage 캐시 — 서버 재시작 후에도 즉시 화면에
+// 이전 값을 stale 로 표시하기 위한 브라우저 측 영구 저장소. tick 이 올
+// 때마다 쓰기가 발생하므로 100ms throttle 로 묶어서 한 번에 flush.
+const _PF_QUOTE_CACHE_KEY = 'pfQuotes';
+let _pfQuoteWriteTimer = null;
+let _pfQuoteWritePending = null;
+function _pfSaveQuoteCache(code, q) {
+  try {
+    const store = _pfQuoteWritePending || JSON.parse(localStorage.getItem(_PF_QUOTE_CACHE_KEY) || '{}');
+    store[code] = {
+      price: q.price,
+      change: q.change,
+      change_pct: q.change_pct,
+      previous_close: q.previous_close,
+      date: q.date,
+      trade_value: q.trade_value,
+      _savedAt: Date.now(),
+    };
+    _pfQuoteWritePending = store;
+    if (!_pfQuoteWriteTimer) {
+      _pfQuoteWriteTimer = setTimeout(() => {
+        try { localStorage.setItem(_PF_QUOTE_CACHE_KEY, JSON.stringify(_pfQuoteWritePending)); }
+        catch (e) {}
+        _pfQuoteWriteTimer = null;
+        _pfQuoteWritePending = null;
+      }, 100);
+    }
+  } catch (e) {}
+}
+function _pfLoadQuoteCache() {
+  try { return JSON.parse(localStorage.getItem(_PF_QUOTE_CACHE_KEY) || '{}'); }
+  catch (e) { return {}; }
+}
+
 // --- Quote subscription management ---
 function _updateQuoteSubscriptions() {
   const requested = { portfolio: [], benchmark: [], sidebar: [], analysis: [] };
@@ -37,6 +71,12 @@ QuoteManager.onQuote = function(code, q) {
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
+    // 최신 quote 를 localStorage 에 영구 캐시 — 다음 페이지 로드 때
+    // 서버 응답 기다리지 않고 즉시 stale 로 표시. 서버의 _last_known_
+    // quotes 는 메모리 dict 라 재시작 시 사라지는데, 이게 '재시작 직후
+    // 포트폴리오 탭 진입하면 몇 종목이 한참 '-' 로 떠 있는' 증상의
+    // 원인. 브라우저 쪽 캐시로 우회.
+    _pfSaveQuoteCache(code, q);
     if (typeof updatePortfolioRowQuote === 'function') {
       updatePortfolioRowQuote(code);
       if (QuoteManager.debug) console.log(`[WS] → updatePortfolioRowQuote(${code})`);
