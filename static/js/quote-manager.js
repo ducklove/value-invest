@@ -181,19 +181,25 @@ const QuoteManager = {
     this.overflowTimer = setInterval(() => this._pollOverflow(), 30_000);
   },
 
-  // 60초 간격 전체 폴링 — WS 활성 여부와 무관하게 항상 동작
+  // 15초 간격 폴링 — WS 활성 여부와 무관하게 항상 동작. KIS WS 는 40
+  // 슬롯 제한이라 포트폴리오 종목 수가 40을 넘으면 나머지는 아예 tick
+  // 을 받지 못함 (사용자 관찰: 삼성전자우 같은 대형주가 1 분 동안 변동
+  // 없음 = WS 미도달, polling 대기). WS 종목도 포함해 15초마다 한 번
+  // REST 로 확인 → tick 이 온 종목은 서버 cache hit 으로 즉응답, tick
+  // 못 받은 종목만 실제 KIS REST 경유. 체감 실시간성 크게 개선.
   _startGeneralPolling() {
     if (this.generalPollTimer) clearInterval(this.generalPollTimer);
-    this.generalPollTimer = setInterval(() => this._pollAll(), 60_000);
+    this.generalPollTimer = setInterval(() => this._pollAll(), 15_000);
   },
 
   async _pollAll() {
     const allCodes = new Set();
     if (this.wsActive) {
-      // WS 활성: overflow 코드만
       this.overflowCodes.forEach(c => allCodes.add(c));
+      // WS 활성이어도 portfolio 전체는 15초마다 REST 보강. 40 슬롯
+      // 초과로 WS 못 받는 종목 + WS 슬롯에 있지만 tick 이 드문 종목 전부.
+      (this.subscriptions.portfolio || []).forEach(c => allCodes.add(c));
     } else {
-      // WS 비활성: 모든 구독 코드 (benchmark 포함)
       for (const codes of Object.values(this.subscriptions)) {
         for (const c of codes) allCodes.add(c);
       }
