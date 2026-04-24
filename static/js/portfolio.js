@@ -154,9 +154,48 @@ async function loadNpsView() {
   }
 }
 
+// 포트폴리오 전체 스냅샷 localStorage 키 — 아이템 + 그룹 + 마지막 quote.
+// 이게 있으면 loadPortfolio 가 서버 응답을 기다리지 않고 즉시 이전 상태
+// 를 렌더한다. 서버 응답이 도착하면 덮어씀.
+const _PF_SNAPSHOT_KEY = 'pfSnapshot';
+
+function _pfRestoreSnapshot() {
+  try {
+    const raw = localStorage.getItem(_PF_SNAPSHOT_KEY);
+    if (!raw) return false;
+    const snap = JSON.parse(raw);
+    if (!snap || !Array.isArray(snap.items)) return false;
+    portfolioItems = snap.items.map(it => {
+      // quote 가 있으면 stale 로 표시 (서버 응답 오기 전까지 로딩 중 힌트).
+      if (it.quote && it.quote.price != null) {
+        it.quote = { ...it.quote, stale: true };
+      }
+      return it;
+    });
+    if (Array.isArray(snap.groups)) pfGroups = snap.groups;
+    return true;
+  } catch (e) { return false; }
+}
+
+function _pfSaveSnapshot() {
+  try {
+    localStorage.setItem(_PF_SNAPSHOT_KEY, JSON.stringify({
+      items: portfolioItems,
+      groups: pfGroups,
+      _ts: Date.now(),
+    }));
+  } catch (e) {}
+}
+
 async function loadPortfolio() {
   if (portfolioLoading) return;
   portfolioLoading = true;
+  // 0. 서버 응답 기다리기 전에 localStorage 에서 즉시 복원 + 렌더.
+  //    사용자 체감 '시세 로딩이 즉시 안 된다' 의 근본 원인은 이 대기
+  //    구간. 캐시가 있으면 이전 포트폴리오 + stale 가격으로 바로 채운다.
+  if (_pfRestoreSnapshot()) {
+    try { renderPortfolio(); } catch (e) {}
+  }
   try {
     const resp = await apiFetch('/api/portfolio');
     if (!resp.ok) {
@@ -238,6 +277,9 @@ async function loadPortfolio() {
     });
     renderPortfolio();
     _updateQuoteSubscriptions();
+    // 서버 응답으로 덮어쓴 최신 상태를 localStorage 에 저장 — 다음 진입
+    // 때 _pfRestoreSnapshot 가 즉시 복원.
+    _pfSaveSnapshot();
   } catch (e) { console.warn(e); } finally {
     portfolioLoading = false;
   }
