@@ -27,6 +27,24 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+PUBLIC_INTEGRATIONS = {
+    "holdingValue": {
+        "baseUrl": "https://ducklove.github.io/holding_value",
+        "holdingsUrl": "https://ducklove.github.io/holding_value/api/holdings.json",
+    },
+    "preferredSpread": {
+        "baseUrl": "https://ducklove.github.io/common_preferred_spread",
+    },
+    "goldGap": {
+        "baseUrl": "https://ducklove.github.io/gold_gap",
+        "dataUrl": "https://ducklove.github.io/gold_gap/data.json",
+    },
+    "kisProxy": {
+        "baseUrl": "http://cantabile.tplinkdns.com:3288",
+        "role": "server-side",
+    },
+}
+
 # Asset version for cache busting — use short git hash, fall back to timestamp
 def _get_asset_version() -> str:
     import subprocess
@@ -247,7 +265,7 @@ async def spa_pages():
 
 @app.get("/app-config.js")
 async def app_config():
-    payload = {"apiBaseUrl": ""}
+    payload = {"apiBaseUrl": "", "integrations": PUBLIC_INTEGRATIONS}
     return Response(
         content=f"window.APP_CONFIG = {json.dumps(payload, ensure_ascii=False)};",
         media_type="application/javascript",

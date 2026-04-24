@@ -72,12 +72,54 @@ let googleButtonRetryCount = 0;
 let currentUserPreference = null;
 let preferenceSaving = false;
 let activeTab = 'recent';
-const API_BASE_URL = (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, '');
+const APP_CONFIG_DATA = window.APP_CONFIG || {};
+const API_BASE_URL = (APP_CONFIG_DATA.apiBaseUrl || '').replace(/\/$/, '');
+const APP_INTEGRATIONS = APP_CONFIG_DATA.integrations || {};
 const IS_GITHUB_PAGES_SITE = window.location.hostname.endsWith('github.io');
 const REPORT_LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function buildApiUrl(path) {
   return `${API_BASE_URL}${path}`;
+}
+
+function getIntegrationConfig(key) {
+  return APP_INTEGRATIONS[key] || {};
+}
+
+function getIntegrationEndpoint(key, endpointKey, pathFallback = '') {
+  const config = getIntegrationConfig(key);
+  if (config[endpointKey]) return config[endpointKey];
+  return pathFallback ? buildIntegrationUrl(key, pathFallback) : '';
+}
+
+function buildIntegrationUrl(key, path = '', query = {}) {
+  const baseUrl = getIntegrationConfig(key).baseUrl || '';
+  if (!baseUrl) return '';
+  try {
+    const url = new URL(baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
+    const cleanPath = String(path || '').replace(/^\/+/, '');
+    if (cleanPath) {
+      url.pathname = `${url.pathname.replace(/\/+$/, '')}/${cleanPath}`;
+    }
+    Object.entries(query || {}).forEach(([name, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(name, value);
+      }
+    });
+    return url.toString();
+  } catch (e) {
+    console.warn(e);
+    return '';
+  }
+}
+
+function openIntegration(key, path = '', query = {}) {
+  const url = buildIntegrationUrl(key, path, query);
+  if (!url) {
+    showToast('Integration URL is not configured.', 'warning');
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
 }
 
 function apiFetch(path, options = {}) {

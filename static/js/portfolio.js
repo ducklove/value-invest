@@ -807,6 +807,8 @@ function renderPortfolio() {
     const qtyStep = isSpecialFloat ? 'any' : '1';
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : isCash ? 2 : 8;
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
+    const goldGapAsset = _goldGapAssetForCode(r.stock_code);
+    const goldGapBtn = goldGapAsset ? `<button class="pf-row-btn js-pf-gold-gap" data-gap-asset="${escapeHtml(goldGapAsset)}" title="Gold gap dashboard">Gap</button>` : '';
 
     const groupOpts = pfGroups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
 
@@ -854,6 +856,7 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
+        ${goldGapBtn}
         <button class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
         <button class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
       </div></td>
@@ -1618,6 +1621,17 @@ function _targetPriceSource(item) {
   return 'default';
 }
 
+function _goldGapAssetForCode(code) {
+  return {
+    KRX_GOLD: 'gold',
+    CRYPTO_BTC: 'bitcoin',
+  }[code] || '';
+}
+
+function _openGoldGapDashboard(asset) {
+  openIntegration('goldGap', '', { asset });
+}
+
 let _HOLDING_CODES = new Set([
   '000670','000880','002790','003380','004360','004700','004800',
   '005810','006120','024800','028260','030530','032830',
@@ -1637,7 +1651,9 @@ let _HOLDING_META = {};
     if (metaCache.meta) _HOLDING_META = metaCache.meta;
     if (codeCache.ts && metaCache.ts && Date.now() - Math.min(codeCache.ts, metaCache.ts) < 86400000) return;
   } catch (e) { console.warn(e); }
-  fetch('https://ducklove.github.io/holding_value/api/holdings.json')
+  const holdingsUrl = getIntegrationEndpoint('holdingValue', 'holdingsUrl', 'api/holdings.json');
+  if (!holdingsUrl) return;
+  fetch(holdingsUrl)
     .then(r => r.json())
     .then(data => {
       const codes = (data.items || []).map(i => i.holdingCode).filter(Boolean);
@@ -1662,8 +1678,13 @@ let _HOLDING_META = {};
 })();
 
 function pfGoAnalyze(stockCode, e) {
+  const goldGapAsset = _goldGapAssetForCode(stockCode);
+  if (goldGapAsset) {
+    _openGoldGapDashboard(goldGapAsset);
+    return;
+  }
   // Special assets, cash & foreign stocks: no analysis support
-  if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(stockCode) || stockCode.startsWith('CASH_')) return;
+  if (stockCode === 'CRYPTO_ETH' || stockCode.startsWith('CASH_')) return;
   const isKorean = stockCode.length === 6 && /^\d{5}/.test(stockCode);
   if (!isKorean) return;
 
@@ -1702,7 +1723,7 @@ function _showPrefMenu(prefCode, commonCode, e) {
   });
   menu.querySelector('[data-action="spread"]').addEventListener('click', () => {
     menu.remove();
-    window.open(`https://ducklove.github.io/common_preferred_spread/?code=${prefCode}`, '_blank');
+    openIntegration('preferredSpread', '', { code: prefCode });
   });
   // Close on outside click
   setTimeout(() => {
@@ -1731,7 +1752,7 @@ function _showHoldingMenu(stockCode, e) {
   });
   menu.querySelector('[data-action="holding"]').addEventListener('click', () => {
     menu.remove();
-    window.open(`https://ducklove.github.io/holding_value/?code=${stockCode}`, '_blank');
+    openIntegration('holdingValue', '', { code: stockCode });
   });
   setTimeout(() => {
     document.addEventListener('click', function close(ev) {
@@ -3270,6 +3291,9 @@ async function deleteCashflow(id) {
       } else if ((el = t.closest('.js-pf-bench-set'))) {
         const code = codeFromTr(el);
         if (code) pfSetBenchmark(code, el.dataset.bench || '');
+      } else if ((el = t.closest('.js-pf-gold-gap'))) {
+        const asset = el.dataset.gapAsset || _goldGapAssetForCode(codeFromTr(el));
+        if (asset) _openGoldGapDashboard(asset);
       } else if ((el = t.closest('.js-pf-cf-delete'))) {
         const id = Number(el.dataset.cfId);
         if (!isNaN(id)) deleteCashflow(id);
