@@ -82,6 +82,17 @@ async def lifespan(app: FastAPI):
     await cache.init_db()
     await cache.delete_expired_sessions()
 
+    # quote_snapshot_cache 에서 이전에 성공한 시세를 메모리로 로드 →
+    # 서버 재시작 직후에도 호주/독일 등 느린 해외 종목이 즉시 stale 로
+    # 표시되어 '안 채워지는' 증상을 방지.
+    try:
+        from routes import portfolio as _pf_module
+        snapshots = await cache.load_all_quote_snapshots()
+        _pf_module._last_known_quotes.update(snapshots)
+        logger.info("loaded %d persisted quote snapshots", len(snapshots))
+    except Exception as e:
+        logger.warning("quote snapshot warm-up failed: %s", e)
+
     # Ensure the wiki PDF cache directory exists. Creating it at startup
     # avoids a systemd ReadWritePaths chicken-and-egg (the namespace is
     # set up before the script runs).

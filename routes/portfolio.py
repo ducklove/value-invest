@@ -137,8 +137,12 @@ _CURRENCY_MAP = {
 # Limits how many in-flight calls can hit each external dependency at once,
 # so a slow upstream cannot pin every uvicorn worker thread.
 _NAVER_SEM = asyncio.Semaphore(6)
-_YF_SEM = asyncio.Semaphore(3)
-_YF_CALL_TIMEOUT = 8.0
+# yfinance concurrency / timeout 완화. 호주(.AX)·독일(.DE)·프랑스(.PA)
+# 등 KIS 미지원 지역은 yfinance/Naver 만 남는데, Pi 환경에서 yfinance
+# 응답이 8 초 안에 안 떨어져 실패하던 종목들이 있었음. 15초로 늘리고
+# 동시성도 6 으로 확장.
+_YF_SEM = asyncio.Semaphore(6)
+_YF_CALL_TIMEOUT = 15.0
 _NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 
 # Negative cache: tickers we already failed to resolve via yfinance — avoids
@@ -672,6 +676,12 @@ async def _fetch_quote(stock_code: str) -> dict:
     if q and q.get("price") is not None:
         _quote_cache[stock_code] = (now, q)
         _last_known_quotes[stock_code] = q
+        # DB 에 영구 저장 — 서버 재시작 후에도 즉시 stale 로 제공 가능.
+        # fire-and-forget 으로 응답 지연 없음.
+        try:
+            asyncio.create_task(cache.save_quote_snapshot(stock_code, q))
+        except RuntimeError:
+            pass
         return q
     # 진짜 '값 못 받음' 인 경우에만 dead 마킹. last_known 있으면 stale.
     _mark_dead(stock_code)

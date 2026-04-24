@@ -363,6 +363,21 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_benchmark_daily_code_date
             ON benchmark_daily(code, date);
 
+        -- 마지막으로 성공한 시세 스냅샷. 메모리 _last_known_quotes 는
+        -- 프로세스 재시작 시 사라져 해외 종목이 다시 fetch 되는 동안
+        -- 사용자가 '-' 를 보게 됨. DB 에 영속화해 재시작 이후에도 즉시
+        -- stale 값으로 UI 를 채울 수 있게 함.
+        CREATE TABLE IF NOT EXISTS quote_snapshot_cache (
+            stock_code      TEXT PRIMARY KEY,
+            price           REAL,
+            change          REAL,
+            change_pct      REAL,
+            previous_close  REAL,
+            trade_value     REAL,
+            date            TEXT,
+            updated_at      TEXT NOT NULL
+        );
+
         -- Q&A history: audit log + per-user rate limit source.
         CREATE TABLE IF NOT EXISTS stock_qa_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2391,6 +2406,48 @@ async def get_benchmark_earliest_date(code: str) -> str | None:
     )
     row = await cursor.fetchone()
     return row["d"] if row and row["d"] else None
+
+
+async def load_all_quote_snapshots() -> dict[str, dict]:
+    """서버 시작 시 메모리 캐시 워밍업용. 전체 스냅샷을 dict 로 반환."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT stock_code, price, change, change_pct, previous_close, "
+        "trade_value, date FROM quote_snapshot_cache"
+    )
+    rows = await cursor.fetchall()
+    out: dict[str, dict] = {}
+    for r in rows:
+        code = r["stock_code"]
+        q = {k: r[k] for k in ("price", "change", "change_pct", "previous_close", "trade_value", "date") if r[k] is not None}
+        if q.get("price") is not None:
+            out[code] = q
+    return out
+
+
+async def save_quote_snapshot(stock_code: str, q: dict) -> None:
+    """최신 시세 성공 값을 DB 에 upsert — 서버 재시작 후에도 즉시 stale
+    로 표시 가능. q 는 price/change/change_pct/... 를 포함한 dict."""
+    db = await get_db()
+    now_iso = datetime.now().isoformat()
+    await db.execute(
+        """
+        INSERT INTO quote_snapshot_cache (stock_code, price, change, change_pct,
+            previous_close, trade_value, date, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(stock_code) DO UPDATE SET
+            price = excluded.price,
+            change = excluded.change,
+            change_pct = excluded.change_pct,
+            previous_close = excluded.previous_close,
+            trade_value = excluded.trade_value,
+            date = excluded.date,
+            updated_at = excluded.updated_at
+        """,
+        (stock_code, q.get("price"), q.get("change"), q.get("change_pct"),
+         q.get("previous_close"), q.get("trade_value"), q.get("date"), now_iso),
+    )
+    await db.commit()
 
 
 async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:
