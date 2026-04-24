@@ -952,12 +952,18 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   const max = values.length ? Math.max(...values) : 0;
   const pad = 2;
 
-  // Include 0 in range so zero line is always visible
-  const minZ = Math.min(min, 0);
-  const maxZ = Math.max(max, 0);
-  const rangeZ = maxZ - minZ || 1;
+  // 0% 을 세로 중앙에 고정하기 위해 대칭 범위 사용. 데이터가 모두 양수
+  // (또는 음수) 이면 min/max 포함 방식은 0% 선이 맨 아래(위) 극단에 붙어
+  // '기준선처럼 안 보임'. 대칭 범위로 0% 이 항상 중앙 → 위아래 편향을
+  // 즉시 파악 가능. 변동이 너무 작을 땐 최소 ±1% 범위 보장해 평평한
+  // 선이 중앙에 뭉쳐 안 보이는 것 방지.
+  const absMax = values.length ? Math.max(Math.abs(min), Math.abs(max)) : 0;
+  const r = Math.max(absMax, 1.0);
+  const minZ = -r;
+  const maxZ = r;
+  const rangeZ = maxZ - minZ;
 
-  // Zero line — always draw
+  // Zero line — 항상 세로 중앙.
   const zeroY = pad + (1 - (0 - minZ) / rangeZ) * (h - pad * 2);
   ctx.beginPath();
   ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
