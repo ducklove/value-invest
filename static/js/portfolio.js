@@ -2767,6 +2767,11 @@ async function renderNavChart(data) {
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
   const yZero = document.getElementById('pfNavYZero')?.checked;
 
+  // 모바일: 탭 전환 직후 container height 가 layout 확정 전이라 echarts
+  // 가 0-크기로 init 되어 차트 안 보임. rAF 두 번으로 layout 확실히
+  // 끝난 뒤 init 하고, 그래도 혹시 늦으면 ResizeObserver 가 추가 보완.
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
   const ec = echarts.init(container);
 
   const initBenchSeries = buildBenchSeries(0);
@@ -2912,6 +2917,9 @@ async function renderValueChart(data) {
   if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
   if (_valueChartResizeObserver) { _valueChartResizeObserver.disconnect(); _valueChartResizeObserver = null; }
   await loadChartLib();
+
+  // 모바일 layout 확정 대기 — renderNavChart 와 동일 이유.
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   // Stats cards
   const statsEl = document.getElementById('pfValueStats');
