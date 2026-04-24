@@ -142,8 +142,25 @@ _YF_CALL_TIMEOUT = 8.0
 _NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 
 # Negative cache: tickers we already failed to resolve via yfinance — avoids
-# re-running the 16-suffix loop on every quote refresh.
-_failed_yf_tickers: set[str] = set()
+# re-running the 16-suffix loop on every quote refresh. **TTL-based** — 영구
+# 블랙리스트였던 이전 동작은 '한 번 실패하면 서비스 재시작 전까지 영구 fail'
+# 이라 해외 시세가 완전히 안 뜨는 상황을 악화시켰음. 30분 후 자동 재시도.
+_FAILED_YF_TTL = 1800  # 30분
+_failed_yf_tickers: dict[str, float] = {}
+
+
+def _yf_is_failed(ticker: str) -> bool:
+    ts = _failed_yf_tickers.get(ticker)
+    if not ts:
+        return False
+    if (time.monotonic() - ts) < _FAILED_YF_TTL:
+        return True
+    _failed_yf_tickers.pop(ticker, None)
+    return False
+
+
+def _yf_mark_failed(ticker: str) -> None:
+    _failed_yf_tickers[ticker] = time.monotonic()
 
 # Negative cache for any code whose last quote fetch returned empty.
 # Stops the per-poll storm against KIS proxy / Naver / yfinance for codes
@@ -208,7 +225,7 @@ async def _yfinance_find_ticker(ticker: str) -> str | None:
     """
     if ticker in _ticker_map:
         return _ticker_map[ticker]
-    if ticker in _failed_yf_tickers:
+    if _yf_is_failed(ticker):
         return None
     import yfinance as yf
     candidates = [ticker] if "." in ticker else [ticker + s for s in _YFINANCE_SUFFIXES]
@@ -239,7 +256,7 @@ async def _yfinance_find_ticker(ticker: str) -> str | None:
         logger.warning("yfinance ticker resolve timeout: %s", ticker)
     except Exception:
         pass
-    _failed_yf_tickers.add(ticker)
+    _yf_mark_failed(ticker)
     return None
 
 
@@ -324,44 +341,64 @@ async def _kis_fetch_foreign_quote(ticker: str) -> dict:
     return {}
 
 
+async def _naver_foreign_quote(reuters_code: str) -> dict:
+    """Naver 경로 파싱 — 기존 _fetch_foreign_quote 에 인라인돼 있던 것을
+    재사용 가능한 함수로 분리 (병렬 gather 에 넣기 위해)."""
+    try:
+        d = await _fetch_naver_world_stock(reuters_code.upper())
+        if not (d and d.get("closePrice")):
+            return {}
+        price_str = str(d["closePrice"]).replace(",", "")
+        price = float(price_str)
+        change_str = str(d.get("compareToPreviousClosePrice", "0")).replace(",", "")
+        change = float(change_str)
+        change_pct = float(d.get("fluctuationsRatio", 0))
+        nation = d.get("nationType", "")
+        price_krw = await _fx_to_krw(nation, price)
+        change_krw = await _fx_to_krw(nation, change)
+        return {
+            "price": round(price_krw),
+            "change": round(change_krw),
+            "change_pct": change_pct,
+            "nation": d.get("nationName", ""),
+        }
+    except Exception as exc:
+        logger.debug("naver foreign quote parse fail (%s): %s", reuters_code, exc)
+        return {}
+
+
 async def _fetch_foreign_quote(reuters_code: str) -> dict:
-    # 1. KIS proxy — fastest and most reliable for US/HK stocks
-    q = await _kis_fetch_foreign_quote(reuters_code)
-    if q and q.get("price") is not None:
-        return q
-
-    # 2. yfinance fallback
-    q = await _yfinance_fetch_quote(reuters_code)
-    if q and q.get("price") is not None:
-        return q
-
-    # 3. Naver fallback
-    upper_code = reuters_code.upper()
-    d = await _fetch_naver_world_stock(upper_code)
-    if d and d.get("closePrice"):
-        try:
-            price_str = str(d["closePrice"]).replace(",", "")
-            price = float(price_str)
-            change_str = str(d.get("compareToPreviousClosePrice", "0")).replace(",", "")
-            change = float(change_str)
-            change_pct = float(d.get("fluctuationsRatio", 0))
-            nation = d.get("nationType", "")
-            price_krw = await _fx_to_krw(nation, price)
-            change_krw = await _fx_to_krw(nation, change)
-            return {
-                "price": round(price_krw),
-                "change": round(change_krw),
-                "change_pct": change_pct,
-                "nation": d.get("nationName", ""),
-            }
-        except Exception as exc:
-            logger.warning("해외주식 시세 파싱 실패(%s): %s", reuters_code, exc)
-
-    return {}
+    """해외 종목 시세 — KIS / yfinance / Naver 세 경로를 **병렬** 로
+    호출하고 먼저 성공한 결과를 채택. 이전엔 순차 fallback 이어서 앞
+    경로가 slow fail 하면 뒤 경로가 기다려야 했고, 그 사이 상위 레벨의
+    10s deadline 이 터져 빈 dict → _mark_dead 로 5분간 skip → 해외
+    종목이 '전혀 안 뜨는' 증상으로 연결됐음. 병렬화로 한 경로가 느려도
+    다른 경로가 동시에 돌아가 실패 확률 대폭 감소."""
+    tasks = [
+        asyncio.create_task(_kis_fetch_foreign_quote(reuters_code)),
+        asyncio.create_task(_yfinance_fetch_quote(reuters_code)),
+        asyncio.create_task(_naver_foreign_quote(reuters_code)),
+    ]
+    try:
+        result: dict = {}
+        for fut in asyncio.as_completed(tasks):
+            try:
+                q = await fut
+            except Exception:
+                q = {}
+            if q and q.get("price") is not None:
+                result = q
+                break
+        return result
+    finally:
+        # 아직 미완료 task 는 정리 — 첫 성공 후 낭비되는 리소스 회수.
+        for t in tasks:
+            if not t.done():
+                t.cancel()
 
 
 async def _yfinance_fetch_quote(ticker: str) -> dict:
-    if ticker in _failed_yf_tickers:
+    if _yf_is_failed(ticker):
         return {}
     try:
         import yfinance as yf
@@ -388,7 +425,7 @@ async def _yfinance_fetch_quote(ticker: str) -> dict:
         }
     except Exception as exc:
         logger.warning("yfinance 시세 조회 실패(%s): %s", ticker, exc)
-        _failed_yf_tickers.add(ticker)
+        _yf_mark_failed(ticker)
         return {}
 
 
