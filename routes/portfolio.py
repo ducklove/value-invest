@@ -989,7 +989,13 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         except Exception:
             return code, {}
 
-    results = await asyncio.gather(*[_fetch_one(c) for c in codes])
+    # 순차 호출 — 이전에 asyncio.gather 로 한꺼번에 fetch 했더니 KIS/
+    # yfinance/Naver 등 외부 API 가 동시 부하를 받아 일부 종목이 내리
+    # 말리는 현상이 있었음. 한 종목씩 순차로 돌리면 upstream rate limit
+    # 과 친해지고, 전체 대기 시간은 늘어나도 최종 성공률이 높아짐.
+    results = []
+    for c in codes:
+        results.append(await _fetch_one(c))
     return {code: quote for code, quote in results}
 
 

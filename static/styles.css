@@ -176,11 +176,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   50% { opacity: 0.7; transform: scale(1.4); }
 }
 
+/* 가격 갱신 알림 flash — 너무 튀지 않게 연한 알파 + 긴 duration + 천천히
+   사라지는 곡선. 눈에 살짝 스치듯 보이게. */
 @keyframes flash-update {
-  0% { background-color: rgba(250, 204, 21, 0.25); }
+  0%   { background-color: rgba(250, 204, 21, 0.00); }
+  20%  { background-color: rgba(250, 204, 21, 0.18); }
   100% { background-color: transparent; }
 }
-.flash-update { animation: flash-update 0.8s ease-out; }
+.flash-update { animation: flash-update 1.6s cubic-bezier(0.22, 0.61, 0.36, 1); }
 
 /* WS live indicator */
 .ws-live-dot {

@@ -21,15 +21,13 @@ QuoteManager.onQuote = function(code, q) {
     }, activeIndicators);
     flashEl(document.getElementById('quoteSummary'));
   }
-  // 2) 포트폴리오 종목 — renderPortfolio 전체 재렌더 방식 유지 (셀 단위
-  //    in-place 는 원인 불명으로 UI 반영이 끊기던 이력). hover 깜빡임은
-  //    CSS transition 제거로 해결. 가격 바뀐 행에만 flash 는 rAF 뒤
-  //    새 tr 찾아 붙여 준다 (renderPortfolio 가 tr 을 재생성하므로
-  //    render 전에 flash 를 붙이면 날아감).
+  // 2) 포트폴리오 종목. 가격이 실제 변경된 경우에만 flash 대상에 추가 —
+  //    tick 수신 자체로 flash 하면 거래 활발한 종목이 계속 번쩍거려 거슬림.
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
+    const prevPrice = pfItem.quote ? pfItem.quote.price : null;
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
-    _pfFlashQueuedCodes.add(code);
+    if (prevPrice !== q.price) _pfFlashQueuedCodes.add(code);
   }
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null) {
@@ -41,8 +39,6 @@ QuoteManager.onQuote = function(code, q) {
       requestAnimationFrame(() => {
         _pfRenderQueued = false;
         renderPortfolio();
-        // 이번 rAF 창에 쌓인 pf code 들에 대해 flash. renderPortfolio 가
-        // tr 을 재생성한 직후라 새 tr 에 class 를 붙여야 보임.
         if (_pfFlashQueuedCodes.size) {
           const tbody = document.getElementById('pfBody');
           if (tbody) {
