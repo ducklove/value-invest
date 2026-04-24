@@ -1032,10 +1032,17 @@ function _renderSummarySparklines(currentTotalValue) {
   if (!_prevClose) {
     _drawSparkline('sparkDaily', [], '#dc2626', 28, 'left');
   } else {
-    const series = [{ ts: 'prev_close', total_value: _prevClose }, ...pfIntradayData];
-    const dayPcts = series.map(d => ((d.total_value / _prevClose) - 1) * 100);
+    // 첫 점을 하드코딩으로 0 으로 박는다 — 계산 중 어떤 엣지케이스
+    // (float 오차, 필드 누락 등) 가 있어도 맨 왼쪽이 반드시 0%.
+    // 그 뒤에 intraday 포인트들과 현재값 push.
+    const dayPcts = [0];
+    for (const d of pfIntradayData) {
+      if (d && d.total_value) {
+        dayPcts.push((d.total_value / _prevClose - 1) * 100);
+      }
+    }
     if (currentTotalValue) {
-      dayPcts.push(((currentTotalValue / _prevClose) - 1) * 100);
+      dayPcts.push((currentTotalValue / _prevClose - 1) * 100);
     }
     const lastPct = dayPcts[dayPcts.length - 1];
     _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 28, 'left');
