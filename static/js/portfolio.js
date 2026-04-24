@@ -1021,22 +1021,18 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
   }
 
-  // 일간 sparkline 기준(0%) = 전날 22:00 결산 시점. 이 값이 없으면
-  // sparkline 자체를 그리지 않는다 (엉뚱한 기준으로 그릴 바엔 공백).
-  // 전날 종가를 **dayPcts 첫 점(=0)** 으로 강제 prepend 해서 sparkline
-  // 그래프가 반드시 0% 에서 출발 → 기준선과 정확히 일치.
+  // 일간 sparkline 기준(0%) = 전날 22:00 결산 시점. _prevClose 없으면
+  // 빈 sparkline. 있으면 **무조건 첫 점에 _prevClose prepend** — server
+  // 가 이미 prepend 했는지 여부 체크 없이 그냥 먼저 박음. 중복돼도
+  // 두 점이 동일 y 에 그려져 시각상 문제 없고, 빠진 경우 첫 점이 0% 가
+  // 아닌 채 그려지는 버그가 확실히 사라짐.
   const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
     ? pfPrevDaySnapshot.total_value
     : null;
   if (!_prevClose) {
     _drawSparkline('sparkDaily', [], '#dc2626', 28, 'left');
   } else {
-    // intraday 첫 점이 이미 prev_close 면 중복 prepend 방지.
-    const firstIsPrev = pfIntradayData.length > 0
-      && pfIntradayData[0].total_value === _prevClose;
-    const series = firstIsPrev
-      ? pfIntradayData
-      : [{ ts: 'prev_close', total_value: _prevClose }, ...pfIntradayData];
+    const series = [{ ts: 'prev_close', total_value: _prevClose }, ...pfIntradayData];
     const dayPcts = series.map(d => ((d.total_value / _prevClose) - 1) * 100);
     if (currentTotalValue) {
       dayPcts.push(((currentTotalValue / _prevClose) - 1) * 100);
