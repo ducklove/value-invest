@@ -952,20 +952,18 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   const max = values.length ? Math.max(...values) : 0;
   const pad = 2;
 
-  // 0% 을 세로 중앙에 고정하기 위해 대칭 범위 사용. 데이터가 모두 양수
-  // (또는 음수) 이면 min/max 포함 방식은 0% 선이 맨 아래(위) 극단에 붙어
-  // '기준선처럼 안 보임'. 대칭 범위로 0% 이 항상 중앙 → 위아래 편향을
-  // 즉시 파악 가능. 변동이 너무 작을 땐 최소 ±1% 범위 보장해 평평한
-  // 선이 중앙에 뭉쳐 안 보이는 것 방지.
-  const absMax = values.length ? Math.max(Math.abs(min), Math.abs(max)) : 0;
-  const r = Math.max(absMax, 1.0);
-  const minZ = -r;
-  const maxZ = r;
-  const rangeZ = maxZ - minZ;
+  // 0% 을 데이터 범위의 경계에 자연스럽게 배치. 전부 양수면 0% 이 맨
+  // 아래, 전부 음수면 맨 위.
+  const minZ = Math.min(min, 0);
+  const maxZ = Math.max(max, 0);
+  const rangeZ = maxZ - minZ || 1;
 
-  // Zero line — 항상 세로 중앙. 점선 + 진한 회색으로 기준선이 명확히
-  // 보이게 (이전 0.5px + --border 는 배경에 섞여 거의 안 보였음).
-  const zeroY = pad + (1 - (0 - minZ) / rangeZ) * (h - pad * 2);
+  // v → y 좌표 변환 함수. 기준선과 데이터 라인이 **정확히 동일한** 수식
+  // 을 쓰도록 함수로 통일 — 이전엔 각자 인라인으로 계산해서 미묘하게
+  // 어긋날 가능성이 있었음. yFor(0) 이 반드시 dayPcts 의 0 점과 일치.
+  const yFor = (v) => pad + (1 - (v - minZ) / rangeZ) * (h - pad * 2);
+  const zeroY = yFor(0);
+
   ctx.save();
   ctx.beginPath();
   ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#94a3b8';
@@ -977,7 +975,6 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   ctx.stroke();
   ctx.restore();
 
-  // Data line
   if (values.length > 1) {
     ctx.beginPath();
     ctx.strokeStyle = color;
@@ -985,7 +982,7 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
     ctx.lineJoin = 'round';
     values.forEach((v, i) => {
       const x = ((i + offset) / (slots - 1)) * w;
-      const y = pad + (1 - (v - minZ) / rangeZ) * (h - pad * 2);
+      const y = yFor(v);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
