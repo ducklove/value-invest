@@ -193,8 +193,13 @@ async function loadPortfolio() {
   // 0. 서버 응답 기다리기 전에 localStorage 에서 즉시 복원 + 렌더.
   //    사용자 체감 '시세 로딩이 즉시 안 된다' 의 근본 원인은 이 대기
   //    구간. 캐시가 있으면 이전 포트폴리오 + stale 가격으로 바로 채운다.
+  //    + snapshot 기반으로 WS subscribe 도 즉시 재요청 (이전에는 /api/
+  //    portfolio 응답 성공 경로에서만 subscribe 해서, 초기 init 시
+  //    portfolioItems 가 비어있던 상태로 구독된 뒤 서버 응답 실패/지연
+  //    시 pf 종목이 영원히 WS 구독 밖에 머물러 '벤치마크만 실시간' 증상).
   if (_pfRestoreSnapshot()) {
     try { renderPortfolio(); } catch (e) {}
+    try { _updateQuoteSubscriptions(); } catch (e) {}
   }
   try {
     const resp = await apiFetch('/api/portfolio');
