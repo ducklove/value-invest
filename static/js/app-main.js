@@ -70,14 +70,14 @@ QuoteManager.onQuote = function(code, q) {
   // pfBody 유무 / tr 매칭 / 편집행 여부를 이미 체크하므로 무해.)
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
-    // '이미 한 번 fresh 였으면 다시 stale 로 강등하지 않는다' 규칙.
-    // 서버가 일시 타임아웃 시 stale 로 대체 응답을 줘도 UI 가 깜빡이지
-    // 않도록 — '되다가 안되다가' 의 근본.
     const wasFresh = pfItem.quote && pfItem.quote.price != null && !pfItem.quote.stale;
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
-    if (wasFresh && pfItem.quote.stale) delete pfItem.quote.stale;
-    // 최신 quote 를 localStorage 에 영구 캐시 — 다음 페이지 로드 때
-    // 서버 응답 기다리지 않고 즉시 stale 로 표시.
+    // stale 해제 규칙:
+    //  - 새 응답이 fresh (stale 플래그 없음) → 해제 (성도이엔지처럼 첫
+    //    로드가 stale 로 시작한 종목이 영구 stale 에 갇히던 버그 수정)
+    //  - 이전에 fresh 였던 종목 → 서버가 stale 로 내려줘도 해제 유지
+    //    (진동 방지)
+    if (!q.stale || wasFresh) delete pfItem.quote.stale;
     _pfSaveQuoteCache(code, pfItem.quote);
     if (typeof updatePortfolioRowQuote === 'function') {
       updatePortfolioRowQuote(code);
