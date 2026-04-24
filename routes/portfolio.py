@@ -980,10 +980,11 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="최대 100개까지 조회 가능합니다.")
     codes = list({str(c).strip() for c in codes if str(c).strip()})
 
-    # 초기 로딩은 속도가 최우선. 전 종목 완전 병렬로 fetch.
-    # upstream (KIS/yfinance/Naver) 내부에 각각 자체 세마포어 (_YF_SEM,
-    # _NAVER_SEM) 가 있어 downstream 동시성은 거기서 제어되고, 여기선
-    # 전체 목록을 한꺼번에 발사해 가장 빠른 경로로 응답.
+    # 순차 호출 — 화면은 이미 localStorage snapshot + 서버 cache 로
+    # 즉시 떠 있으므로 (loadPortfolio 의 _pfRestoreSnapshot + GET /api/
+    # portfolio 의 _enrich_with_cached_quotes), 여기서 하는 건 '뒤에서
+    # 조용히 fresh 로 교체' 에 해당. upstream API 에 동시에 때리지 않고
+    # 한 종목씩 순차로 처리해 rate limit·외부 서버 부하에 친화적.
     async def _fetch_one(code):
         if code.startswith(_NON_QUOTABLE_PREFIXES):
             return code, {}
@@ -993,7 +994,9 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         except Exception:
             return code, {}
 
-    results = await asyncio.gather(*[_fetch_one(c) for c in codes])
+    results = []
+    for c in codes:
+        results.append(await _fetch_one(c))
     return {code: quote for code, quote in results}
 
 

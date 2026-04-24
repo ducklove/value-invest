@@ -103,30 +103,19 @@ const QuoteManager = {
 
   async _fetchQuotes(codes) {
     if (!codes.length) return;
-    // Server caps at 100 codes per request — chunk to stay under the limit.
-    const CHUNK = 100;
-    for (let i = 0; i < codes.length; i += CHUNK) {
-      const slice = codes.slice(i, i + CHUNK);
+    // 한 종목씩 순차로 요청해 받는 즉시 UI 반영 (progressive loading).
+    // 화면은 localStorage snapshot + 서버 cache 로 이미 떠 있고, 여기서
+    // fresh 응답을 종목 단위로 scatter in — 사용자는 한 줄씩 갱신되는
+    // 자연스러운 체감. upstream API 에 동시 부하도 없음.
+    for (const code of codes) {
       try {
-        const resp = await apiFetch('/api/asset-quotes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ codes: slice }),
-        });
+        const resp = await apiFetch(`/api/asset-quote/${encodeURIComponent(code)}`);
         if (!resp.ok) continue;
-        const results = await resp.json();
-        for (const [code, q] of Object.entries(results)) {
-          if (q && q.price != null && this.onQuote) {
-            // 서버가 내려주는 quote dict 를 **통째로** 전달한다. 이전엔
-            // price/change/previous_close/date 만 추려냈는데 서버가 돌려
-            // 주는 trade_value / volume / 기타 필드가 모두 잘림.
-            // 결과: 초기 로드엔 제대로 떴던 '거래대금' 같은 값이 이 polling
-            // 이 덮어쓰면서 '-' 로 바뀌는 증상. onQuote 핸들러가 spread
-            // merge 를 쓰도록 app-main.js 쪽도 함께 고쳤다.
-            this.onQuote(code, { code, ...q });
-          }
+        const q = await resp.json();
+        if (q && q.price != null && this.onQuote) {
+          this.onQuote(code, { code, ...q });
         }
-      } catch (e) { console.warn(e); }
+      } catch (e) { /* swallow per-code — 다음 종목 계속 */ }
     }
     // Schedule fast retry for any still-missing quotes
     this._scheduleRetry();
