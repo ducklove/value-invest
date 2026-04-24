@@ -958,21 +958,26 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   const maxZ = Math.max(max, 0);
   const rangeZ = maxZ - minZ || 1;
 
-  // v → y 좌표 변환 함수. 기준선과 데이터 라인이 **정확히 동일한** 수식
-  // 을 쓰도록 함수로 통일 — 이전엔 각자 인라인으로 계산해서 미묘하게
-  // 어긋날 가능성이 있었음. yFor(0) 이 반드시 dayPcts 의 0 점과 일치.
+  // v → y 좌표 변환. 기준선·데이터 라인이 동일 수식 사용.
   const yFor = (v) => pad + (1 - (v - minZ) / rangeZ) * (h - pad * 2);
   const zeroY = yFor(0);
 
+  // 0% 기준선 — 눈에 확실히 띄도록 진한 회색 점선 + '0%' 레이블.
   ctx.save();
   ctx.beginPath();
-  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#94a3b8';
+  ctx.strokeStyle = '#64748b';
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 3]);
-  ctx.globalAlpha = 0.6;
+  ctx.globalAlpha = 0.85;
   ctx.moveTo(0, zeroY);
   ctx.lineTo(w, zeroY);
   ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = '9px sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.globalAlpha = 0.9;
+  const labelY = zeroY < h - 10 ? zeroY - 2 : zeroY - 2;
+  ctx.fillText('0%', 2, labelY);
   ctx.restore();
 
   if (values.length > 1) {
