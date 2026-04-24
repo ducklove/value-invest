@@ -274,6 +274,74 @@ function pfToggleGroupFilter(groupName) {
   renderPortfolio();
 }
 
+// WS tick 마다 renderPortfolio() 로 tbody 전체를 교체하면 마우스 커서
+// 아래 tr 이 매 tick 재생성되면서 :hover transition 이 fresh 시작 →
+// '커서 있는 행이 깜빡임' 문제. 영향 받는 셀만 in-place 로 덮어 쓰고
+// flash 클래스를 그 행에만 붙여 갱신된 행만 번쩍이게 한다.
+function updatePortfolioRowQuote(code) {
+  const tbody = document.getElementById('pfBody');
+  if (!tbody) return;
+  let tr = null;
+  const rows = tbody.querySelectorAll('tr[data-code]');
+  for (const t of rows) {
+    if (t.dataset.code === code) { tr = t; break; }
+  }
+  if (!tr) return;
+  if (tr.querySelector('input.pf-edit-input')) return;
+  const item = portfolioItems.find(i => i.stock_code === code);
+  if (!item) return;
+
+  const q = item.quote || {};
+  const price = q.price ?? null;
+  const change = q.change ?? 0;
+  const changePct = q.change_pct ?? null;
+  const qty = item.quantity;
+  const avgPrice = item.avg_price;
+  const marketValue = price !== null ? qty * price : null;
+  const rawReturn = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
+  const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;
+  const tradingValue = (q.trade_value !== undefined && q.trade_value !== null) ? Number(q.trade_value) : null;
+  const trailingDps = item.trailing_dps ?? null;
+  const dividendYield = (trailingDps !== null && price !== null && price > 0 && qty > 0)
+    ? (trailingDps / price * 100) : null;
+  // _computeTargetPrice 호출 — renderPortfolio 경로와 동일 모양의 첫 인자
+  // + portfolioItems (각 item 의 quote.price 로 조회). pfItem.quote 는
+  // 이미 onQuote 에서 최신값으로 업데이트된 상태.
+  const rowLike = { ...item, price };
+  const targetPrice = _computeTargetPrice(rowLike, portfolioItems);
+  const achievementPct = (targetPrice != null && targetPrice > 0 && price != null)
+    ? (price / targetPrice * 100) : null;
+
+  const setText = (sel, txt) => { const el = tr.querySelector(sel); if (el) el.textContent = txt; };
+  const setHtml = (sel, html) => { const el = tr.querySelector(sel); if (el) el.innerHTML = html; };
+
+  setText('.pf-col-curprice', price !== null ? _fp(price) : '-');
+  setHtml('.pf-col-changepct', fmtChangePct(changePct, change));
+  setHtml('.pf-col-return', `<span class="pf-return ${returnClass(returnPct)}">${returnPct !== null ? fmtPct(returnPct) : '-'}</span>`);
+  setText('.pf-col-mktval', marketValue !== null ? _fp(marketValue) : '-');
+  setText('.pf-col-invested', tradingValue !== null ? fmtKrw(tradingValue) : '-');
+  setText('.pf-col-divyield', dividendYield !== null ? fmtPct(dividendYield, false) : '-');
+  setText('.pf-col-target', targetPrice !== null ? _fp(targetPrice) : '-');
+  setText('.pf-col-achiev', achievementPct !== null ? fmtPct(achievementPct, false) : '-');
+
+  flashEl(tr);
+}
+
+// 벤치마크 tick 전용: 같은 benchmark_code 를 쓰는 모든 행의 벤치마크
+// 셀만 갱신. renderPortfolio 전체 재호출 없이.
+function updatePortfolioBenchmarkCells(code) {
+  const tbody = document.getElementById('pfBody');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr[data-code]').forEach(tr => {
+    if (tr.querySelector('input.pf-edit-input')) return;
+    const pfCode = tr.dataset.code;
+    const item = portfolioItems.find(i => i.stock_code === pfCode);
+    if (!item || item.benchmark_code !== code) return;
+    const cell = tr.querySelector('.pf-col-benchmark');
+    if (cell) cell.innerHTML = fmtBenchmarkPct(code) + `<span class="pf-benchmark-name">${escapeHtml(benchmarkName(code || ''))}</span>`;
+  });
+}
+
 function renderPortfolio() {
   _pfRenderColToggles();
   const tbody = document.getElementById('pfBody');
@@ -2081,7 +2149,11 @@ async function _pollBenchmarkQuotes() {
     if (!r.ok) return;
     const fresh = await r.json();
     for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
-    if (activeView === 'portfolio') renderPortfolio();
+    // 전체 재렌더 대신 벤치마크 셀만 업데이트 — 이래야 WS tick 으로 in-
+    // place 갱신된 다른 셀들이 60초 polling 때마다 뒤집히지 않음.
+    if (activeView === 'portfolio') {
+      for (const k of Object.keys(fresh)) updatePortfolioBenchmarkCells(k);
+    }
   } catch (e) { console.warn(e); }
 }
 

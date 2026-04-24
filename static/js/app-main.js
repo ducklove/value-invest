@@ -10,7 +10,6 @@ function _updateQuoteSubscriptions() {
   QuoteManager.updateSubscriptions(requested);
 }
 
-let _pfRenderQueued = false;
 QuoteManager.onQuote = function(code, q) {
   // 1) 분석 뷰 활성 종목
   if (code === activeStockCode && q.price != null) {
@@ -20,26 +19,19 @@ QuoteManager.onQuote = function(code, q) {
     }, activeIndicators);
     flashEl(document.getElementById('quoteSummary'));
   }
-  // 2) 포트폴리오 종목
+  // 2) 포트폴리오 종목 — 셀 단위 in-place 업데이트. 전체 재렌더 안 해서
+  //    커서 아래 행이 재생성되지 않음 → hover 깜빡임 해결. 갱신된 행에만
+  //    flash (노란 번쩍임).
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   if (pfItem && q.price != null) {
-    // 기존 quote 위에 새 값만 덮어쓴다. subset 명시 방식은 quote-manager
-    // 에서 빠뜨린 필드를 항상 null 로 재설정해 버려서 trade_value 등 초기
-    // 로드 때 받은 값이 다음 polling 에 사라지던 버그의 원인. spread
-    // merge 면 q 가 `code` 필드를 갖고 들어와도 quote.code 하나 더 생기는
-    // 정도라 악영향 없음.
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
+    if (!pfEditingCode) updatePortfolioRowQuote(code);
   }
-  // 2-1) 벤치마크 실시간 갱신
+  // 2-1) 벤치마크 실시간 갱신 — 벤치마크 셀만 in-place.
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null) {
     pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
-  }
-  if ((pfItem || isBenchmark) && q.price != null) {
-    if (!pfEditingCode && activeView === 'portfolio' && !_pfRenderQueued) {
-      _pfRenderQueued = true;
-      requestAnimationFrame(() => { _pfRenderQueued = false; renderPortfolio(); });
-    }
+    if (!pfEditingCode) updatePortfolioBenchmarkCells(code);
   }
   // 3) 사이드바
   const sbItem = recentListItems.find(i => i.stock_code === code);
