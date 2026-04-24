@@ -1026,32 +1026,38 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
   }
 
-  // 일간 sparkline 기준(0%) = 전날 22:00 결산 시점. _prevClose 없으면
-  // 빈 sparkline. 있으면 **무조건 첫 점에 _prevClose prepend** — server
-  // 가 이미 prepend 했는지 여부 체크 없이 그냥 먼저 박음. 중복돼도
-  // 두 점이 동일 y 에 그려져 시각상 문제 없고, 빠진 경우 첫 점이 0% 가
-  // 아닌 채 그려지는 버그가 확실히 사라짐.
+  // 기준값 = 전일 22:00 결산값 (pfPrevDaySnapshot.total_value). sparkline
+  // 각 점 = (value / prev22 - 1) × 100. 기준선(0%) 은 _drawSparkline 이
+  // 자동으로 그림.
+  //
+  // server snapshot_intraday 가 한 틱에서 일부 종목 가격 fetch 에 실패
+  // 하면 그 종목만 avg_price 로 fallback 되어 total_value 가 비정상적
+  // 으로 한참 낮게 저장되는 케이스 있음 → sparkline 에 실제로는 없던
+  // 급락 dip 이 찍혀 사용자 체감 "잘못된 곳에 뭐가 있다". 인접 포인트
+  // 대비 ±3% 이상 튀는 점은 outlier 로 간주해 제외.
   const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
     ? pfPrevDaySnapshot.total_value
     : null;
   if (!_prevClose) {
     _drawSparkline('sparkDaily', [], '#dc2626', 28, 'left');
   } else {
-    // sparkline 은 **오늘 장중 움직임** 을 보여준다. 첫 점 = 오늘 첫
-    // intraday (장 시작가) = 전날 22:00 대비 어느 정도 변동된 값이라
-    // 보통 0% 이 아님. 기준선(0%) 은 수평선으로 따로 그려지고, 데이터
-    // 라인이 그 위/아래로 움직이는 모양.
-    // 서버 /api/portfolio/intraday 가 baseline 목적으로 prepend 하는
-    // ts "...T00:00" 포인트는 sparkline 표시에서 제외 (이걸 넣으면
-    // 첫 점이 인위적으로 0% 에 찍혀 오늘 장 시작 변동이 가려짐).
-    const dayPcts = [];
+    const raw = [];
     for (const d of pfIntradayData) {
       if (!d || !d.total_value) continue;
       if (d.ts && d.ts.endsWith('T00:00')) continue;   // baseline 제외
-      dayPcts.push((d.total_value / _prevClose - 1) * 100);
+      raw.push((d.total_value / _prevClose - 1) * 100);
     }
-    if (currentTotalValue) {
-      dayPcts.push((currentTotalValue / _prevClose - 1) * 100);
+    if (currentTotalValue) raw.push((currentTotalValue / _prevClose - 1) * 100);
+    // Outlier 필터: 인접 포인트 대비 3% 이상 급변하는 틱은 데이터 오류
+    // 로 간주해 건너뜀. (실제 장중 30 분 사이에 포트폴리오 전체 가치가
+    // 3% 이상 튀는 경우는 거의 없음.)
+    const dayPcts = [];
+    let prev = null;
+    for (const p of raw) {
+      if (prev === null || Math.abs(p - prev) < 3) {
+        dayPcts.push(p);
+        prev = p;
+      }
     }
     const lastPct = dayPcts.length ? dayPcts[dayPcts.length - 1] : 0;
     _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 28, 'left');
