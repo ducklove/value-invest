@@ -283,9 +283,17 @@ function pfToggleGroupFilter(groupName) {
 function updatePortfolioRowQuote(code) {
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
-  let tr;
-  try { tr = tbody.querySelector(`tr[data-code="${CSS.escape(code)}"]`); }
-  catch (e) { return; }
+  // CSS.escape 를 쓰면 숫자로 시작하는 문자열을 '\30 05930' 같이 CSS
+  // 식별자 이스케이프로 바꿔 버린다. attribute selector 의 string
+  // literal 안에서는 그대로 쓰면 돼서 CSS.escape 가 오히려 매칭을
+  // 깨뜨렸다. 실제 영향: stock_code 가 숫자로 시작하는 한국 주식
+  // 전부 (=포트폴리오 대부분) 가 tr 매칭 실패 → UI 갱신 스킵.
+  // 안전하게 dataset.code 로 직접 비교해 찾는다.
+  let tr = null;
+  const rows = tbody.querySelectorAll('tr[data-code]');
+  for (const t of rows) {
+    if (t.dataset.code === code) { tr = t; break; }
+  }
   if (!tr) return;
   // 편집 중인 행(인풋 포함)에는 손대지 않음 — 사용자의 입력이 날아갈 수 있음.
   if (tr.querySelector('input.pf-edit-input')) return;
