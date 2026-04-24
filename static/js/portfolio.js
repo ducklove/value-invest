@@ -1019,9 +1019,17 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
   }
 
-  // 일간 수익률 — 30분 간격 변동률 (%) + 현재 실시간 값 append
-  if (pfIntradayData.length > 1) {
-    const baseValue = pfIntradayData[0].total_value;
+  // 일간 수익률 sparkline 의 기준값(0%) = 전날 22:00 결산 시점. Today
+  // 카드의 dailyNavPct 가 동일 기준이라 sparkline 끝점과 숫자가 일치해야
+  // 자연스러움. 서버 /api/portfolio/intraday 가 prev-day snapshot 을
+  // ts="00:00" 으로 prepend 해 주긴 하는데 실패 시 intraday 첫 점이 오늘
+  // 장 시작가가 되어 기준 어긋남. pfPrevDaySnapshot 우선 사용으로 이 불
+  // 일치 제거.
+  const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
+    ? pfPrevDaySnapshot.total_value
+    : null;
+  if (pfIntradayData.length > 1 || _prevClose) {
+    const baseValue = _prevClose || pfIntradayData[0].total_value;
     const dayPcts = pfIntradayData.map(d => ((d.total_value / baseValue) - 1) * 100);
     if (currentTotalValue && baseValue > 0) {
       dayPcts.push(((currentTotalValue / baseValue) - 1) * 100);
