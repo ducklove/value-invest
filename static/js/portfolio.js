@@ -1048,17 +1048,15 @@ function _renderSummarySparklines(currentTotalValue) {
       raw.push((d.total_value / _prevClose - 1) * 100);
     }
     if (currentTotalValue) raw.push((currentTotalValue / _prevClose - 1) * 100);
-    // Outlier 필터: 인접 포인트 대비 3% 이상 급변하는 틱은 데이터 오류
-    // 로 간주해 건너뜀. (실제 장중 30 분 사이에 포트폴리오 전체 가치가
-    // 3% 이상 튀는 경우는 거의 없음.)
-    const dayPcts = [];
-    let prev = null;
-    for (const p of raw) {
-      if (prev === null || Math.abs(p - prev) < 3) {
-        dayPcts.push(p);
-        prev = p;
-      }
-    }
+    // Outlier 필터: 현재값 부호와 반대 부호인 점은 일시적 데이터 오류
+    // (일부 종목 가격 fetch 실패로 total_value 잘못 저장) 로 간주해 제외.
+    // 포트폴리오 전체가 30 분 사이 부호를 뒤집을 정도로 움직이는 건
+    // 극히 드묾 — 반대 부호 점 하나가 있다면 데이터 문제일 가능성이
+    // 훨씬 큼. 사용자가 '오늘 항상 + 였다' 고 확신하는 케이스와 일치.
+    const lastRaw = raw.length ? raw[raw.length - 1] : 0;
+    const dayPcts = lastRaw >= 0
+      ? raw.filter(p => p >= 0)
+      : raw.filter(p => p <= 0);
     const lastPct = dayPcts.length ? dayPcts[dayPcts.length - 1] : 0;
     _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 28, 'left');
   }
