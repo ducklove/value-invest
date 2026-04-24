@@ -166,7 +166,8 @@ def _yf_mark_failed(ticker: str) -> None:
 # Stops the per-poll storm against KIS proxy / Naver / yfinance for codes
 # that are temporarily (or permanently) broken upstream. TTL-based so a
 # stock that recovers will be retried after the window expires.
-_DEAD_QUOTE_TTL = 300  # seconds
+_DEAD_QUOTE_TTL = 60  # seconds — 300 이던 것을 60 으로. 5분 skip 이
+                      # '한 번 실패하면 한참 안 뜸' 을 유발
 _dead_quote_cache: dict[str, float] = {}
 
 
@@ -654,22 +655,28 @@ async def _fetch_quote(stock_code: str) -> dict:
             pass
         return {**last, "stale": True}
     if _is_dead(stock_code):
-        return {}
+        # 사망 cache 여도 last_known 있으면 stale 반환 (화면 비워두느니 예전값)
+        lk = _last_known_quotes.get(stock_code)
+        return {**lk, "stale": True} if lk else {}
     try:
         q = await asyncio.wait_for(
             _fetch_quote_uncached(stock_code),
             timeout=_QUOTE_FETCH_DEADLINE_S,
         )
     except asyncio.TimeoutError:
+        # deadline 초과는 '종목이 죽었다' 가 아니라 '일시적 네트워크 지연'
+        # 일 뿐. _mark_dead 걸면 5분간 skip 되어 정상 종목까지 차단됨.
         logger.warning("Quote fetch timeout (%ss): %s", _QUOTE_FETCH_DEADLINE_S, stock_code)
-        _mark_dead(stock_code)
-        return {}
+        lk = _last_known_quotes.get(stock_code)
+        return {**lk, "stale": True} if lk else {}
     if q and q.get("price") is not None:
         _quote_cache[stock_code] = (now, q)
         _last_known_quotes[stock_code] = q
-    else:
-        _mark_dead(stock_code)
-    return q
+        return q
+    # 진짜 '값 못 받음' 인 경우에만 dead 마킹. last_known 있으면 stale.
+    _mark_dead(stock_code)
+    lk = _last_known_quotes.get(stock_code)
+    return {**lk, "stale": True} if lk else {}
 
 
 async def _fetch_quote_uncached(stock_code: str) -> dict:
@@ -1107,9 +1114,12 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         if code.startswith(_NON_QUOTABLE_PREFIXES):
             return code, {}
         try:
-            q = await _fetch_quote(code)
+            # 종목당 5s 상한 — 한 종목의 느린 경로가 배치 전체 응답을
+            # 잡아먹지 않도록. 못 받은 종목은 클라이언트가 _scheduleRetry
+            # (5초 뒤) 로 다시 시도.
+            q = await asyncio.wait_for(_fetch_quote(code), timeout=5.0)
             return code, q or {}
-        except Exception:
+        except (asyncio.TimeoutError, Exception):
             return code, {}
 
     results = await asyncio.gather(*[_fetch_one(c) for c in codes])
