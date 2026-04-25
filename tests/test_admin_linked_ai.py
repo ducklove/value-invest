@@ -61,6 +61,43 @@ class LinkedProjectAdminTests(unittest.TestCase):
         with self.assertRaises(linked_project_admin.LinkedProjectConfigError):
             linked_project_admin.validate_config("preferred", payload)
 
+    def test_preferred_config_merges_public_rows_missing_from_local(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "common_preferred_spread"
+            project_dir.mkdir()
+            local_payload = [
+                {
+                    "id": "samsung",
+                    "name": "삼성전자",
+                    "commonTicker": "005930.KS",
+                    "preferredTicker": "005935.KS",
+                    "commonName": "삼성전자",
+                    "preferredName": "삼성전자우",
+                }
+            ]
+            public_payload = [
+                *local_payload,
+                {
+                    "id": "daeduck_electronics",
+                    "name": "대덕전자",
+                    "commonTicker": "353200.KS",
+                    "preferredTicker": "35320K.KS",
+                    "commonName": "대덕전자",
+                    "preferredName": "대덕전자1우",
+                },
+            ]
+            (project_dir / "config.json").write_text(json.dumps(local_payload), encoding="utf-8")
+
+            with patch.object(linked_project_admin, "_read_remote_json", return_value=(public_payload, None)):
+                config = linked_project_admin.get_project_config("preferredSpread", workspace_root=root)
+
+            self.assertEqual(config["source"], "merged")
+            self.assertEqual(config["summary"]["count"], 2)
+            self.assertEqual(config["diagnostics"]["missingLocallyCount"], 1)
+            self.assertEqual(config["config"][1]["preferredTicker"], "35320K.KS")
+            self.assertEqual(config["config"][1]["_configSource"], "public-only")
+
 
 class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -105,6 +142,23 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["model"], "openai/gpt-5.5")
         self.assertEqual(row["calls"], 1)
         self.assertAlmostEqual(row["cost_usd"], 0.12)
+
+    async def test_preferred_dividend_rows_are_listed_for_admin_coverage(self):
+        await cache.upsert_preferred_dividends([
+            {
+                "stock_code": "35320K",
+                "dividend_per_share": 450.0,
+                "source_name": "대덕전자1우",
+                "common_code": "353200",
+                "sheet_year": 2025,
+            }
+        ])
+
+        rows = await cache.list_preferred_dividends()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["stock_code"], "35320K")
+        self.assertEqual(rows[0]["source_name"], "대덕전자1우")
 
 
 if __name__ == "__main__":

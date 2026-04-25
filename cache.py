@@ -1584,6 +1584,18 @@ async def get_preferred_dividends_count() -> int:
     return int(row["n"]) if row else 0
 
 
+async def list_preferred_dividends() -> list[dict]:
+    """Return preferred-dividend sheet cache rows for admin coverage checks."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT stock_code, dividend_per_share, source_name, common_code,
+                  sheet_year, fetched_at
+           FROM preferred_dividends
+           ORDER BY source_name COLLATE NOCASE, stock_code ASC"""
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
 # ---------------------------------------------------------------------------
 # foreign_dividends — yfinance-sourced + admin-manual overrides
 # ---------------------------------------------------------------------------

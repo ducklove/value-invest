@@ -4,6 +4,9 @@ let _adminLoaded = false;
 let _liveInterval = null;
 let _linkedProjectConfigs = [];
 let _aiAdminConfig = null;
+let _preferredConfigFilter = '';
+let _preferredDividendFilter = '';
+let _preferredDividendRows = [];
 
 async function loadAdminView() {
   const container = document.getElementById('adminContent');
@@ -44,6 +47,7 @@ async function loadAdminView() {
     _startLiveUpdates();
     // 해외 배당 목록은 섹션 HTML 삽입 후에만 컨테이너가 존재 — 별도
     // 비동기 로드로 가져와 표시. 실패해도 페이지 나머지엔 영향 없음.
+    loadPreferredDividendsList();
     loadForeignDividendsList();
   } catch (e) {
     container.innerHTML = `<div style="color:var(--text-secondary);padding:40px;">어드민 데이터를 불러오지 못했습니다.</div>`;
@@ -84,6 +88,7 @@ function _renderDataSyncSection() {
         <span class="admin-sub">Google Sheet Data!AI 컬럼</span>
       </div>
       <div id="prefDivResult"></div>
+      <div id="prefDivCoverageSection" style="margin-top:16px;"></div>
       <div style="display:flex;gap:10px;align-items:center;margin:16px 0 8px;flex-wrap:wrap;">
         <button class="admin-btn" id="refreshFgnDivBtn" onclick="refreshForeignDividends()">해외 배당 yfinance 새로고침</button>
         <span class="admin-sub">trailingAnnualDividendRate → KRW 환산. 수동 입력(아래) 은 덮어쓰지 않음.</span>
@@ -297,11 +302,179 @@ async function refreshPreferredDividends() {
         </div>
       </div>
     `;
+    await loadPreferredDividendsList();
   } catch (e) {
     result.innerHTML = `<div style="color:var(--color-danger)">요청 실패: ${_esc(e.name + ': ' + e.message)}</div>`;
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+async function loadPreferredDividendsList() {
+  const root = document.getElementById('prefDivCoverageSection');
+  if (!root) return;
+  try {
+    const res = await apiFetch('/api/admin/preferred-dividends');
+    if (!res.ok) {
+      root.innerHTML = `<div class="admin-sub" style="color:var(--color-danger)">우선주 배당 목록 조회 실패 (HTTP ${res.status})</div>`;
+      return;
+    }
+    _preferredDividendRows = await res.json();
+    root.innerHTML = _renderPreferredDividendCoverage(_preferredDividendRows);
+  } catch (e) {
+    root.innerHTML = `<div class="admin-sub" style="color:var(--color-danger)">우선주 배당 목록 조회 에러: ${_esc(e.message)}</div>`;
+  }
+}
+
+function _renderPreferredDividendCoverage(rows) {
+  const pairMap = _preferredPairMap();
+  const mappedCount = rows.filter(r => pairMap[_tickerCode(r.stock_code)]).length;
+  const missingCount = Math.max(0, rows.length - mappedCount);
+  const rendered = _preferredDividendTableRows(rows);
+  return `
+    <h4 style="margin:0 0 8px;font-size:14px;">우선주 배당 시트 / pair 연결 상태</h4>
+    <div class="admin-cards" style="margin-top:4px;">
+      <div class="admin-card">
+        <div class="admin-card-label">시트 캐시</div>
+        <div class="admin-card-value">${rows.length}</div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-label">pair 연결됨</div>
+        <div class="admin-card-value">${mappedCount}</div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-label">pair 누락 후보</div>
+        <div class="admin-card-value">${missingCount}</div>
+      </div>
+    </div>
+    <div class="admin-sub" style="margin:8px 0;">
+      배당 시트에는 있는데 pair config 에 없으면 배당액은 알 수 있어도 본주 연결·스프레드 분석 메뉴가 비게 됩니다.
+      누락 후보는 아래 버튼으로 pair 입력 폼에 바로 채울 수 있습니다.
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
+      <input id="prefDivSearch" placeholder="시트 우선주 검색: 대덕전자우, 35320K, 본주코드"
+             value="${_esc(_preferredDividendFilter)}"
+             oninput="filterPreferredDividendList(this.value)"
+             style="${_adminInputStyle()}min-width:280px;">
+      <span class="admin-sub" id="prefDivVisibleCount">${rendered.visibleCount}/${rows.length}개 표시</span>
+    </div>
+    <table class="admin-table admin-table-compact">
+      <thead><tr><th>우선주</th><th>보통주</th><th>배당</th><th>pair 상태</th><th>갱신</th><th></th></tr></thead>
+      <tbody id="prefDivTableBody">${rendered.body}</tbody>
+    </table>
+  `;
+}
+
+function _preferredDividendTableRows(rows) {
+  const pairMap = _preferredPairMap();
+  const visible = rows.filter(_preferredDividendMatches);
+  const body = visible.map(row => {
+    const code = _tickerCode(row.stock_code);
+    const commonCode = _tickerCode(row.common_code);
+    const pair = pairMap[code];
+    const status = pair
+      ? `<span class="admin-status-ok">연결됨</span><div class="admin-sub">${_esc(pair.commonName || pair.commonTicker || '')}</div>`
+      : '<span class="admin-status-fail">pair 누락</span>';
+    const action = pair
+      ? ''
+      : `<button class="admin-btn admin-btn-secondary" onclick="prefillPreferredConfigFromDividend('${_urlArg(code)}','${_urlArg(row.source_name)}','${_urlArg(commonCode)}')">pair 폼에 채우기</button>`;
+    const dps = row.dividend_per_share === null || row.dividend_per_share === undefined
+      ? '-'
+      : Number(row.dividend_per_share).toLocaleString();
+    return `
+      <tr>
+        <td><code>${_esc(code)}</code><div class="admin-sub">${_esc(row.source_name || '')}</div></td>
+        <td><code>${_esc(commonCode || '-')}</code></td>
+        <td>${dps}<div class="admin-sub">${row.sheet_year ? _esc(String(row.sheet_year)) : ''}</div></td>
+        <td>${status}</td>
+        <td class="admin-sub">${_esc((row.fetched_at || '').slice(0, 16).replace('T', ' '))}</td>
+        <td>${action}</td>
+      </tr>
+    `;
+  }).join('');
+  return {
+    visibleCount: visible.length,
+    body: body || '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary);padding:12px;">표시할 우선주 배당 시트 행이 없습니다.</td></tr>',
+  };
+}
+
+function filterPreferredDividendList(value) {
+  _preferredDividendFilter = value || '';
+  const rendered = _preferredDividendTableRows(_preferredDividendRows || []);
+  const body = document.getElementById('prefDivTableBody');
+  const count = document.getElementById('prefDivVisibleCount');
+  if (body) body.innerHTML = rendered.body;
+  if (count) count.textContent = `${rendered.visibleCount}/${(_preferredDividendRows || []).length}개 표시`;
+}
+
+function _preferredDividendMatches(row) {
+  const filter = _normalizePreferredSearch(_preferredDividendFilter);
+  if (!filter) return true;
+  return _normalizePreferredSearch([
+    row.stock_code,
+    row.source_name,
+    row.common_code,
+    _preferredPairMap()[_tickerCode(row.stock_code)] ? '연결됨' : '누락',
+  ].join(' ')).includes(filter);
+}
+
+function _preferredPairMap() {
+  const map = {};
+  _currentPreferredRows().forEach(row => {
+    const code = _tickerCode(row.preferredTicker || row.preferredCode);
+    if (code) map[code] = row;
+  });
+  return map;
+}
+
+function prefillPreferredConfigFromDividend(encodedCode, encodedName, encodedCommonCode) {
+  const code = decodeURIComponent(encodedCode || '');
+  const preferredName = decodeURIComponent(encodedName || '');
+  const commonCode = decodeURIComponent(encodedCommonCode || '');
+  const commonName = _guessCommonNameFromPreferredName(preferredName) || commonCode;
+  const id = `pref_${code}`.toLowerCase();
+  const values = {
+    prefCfgIndex: '',
+    prefCfgId: id,
+    prefCfgName: commonName,
+    prefCfgCommonTicker: _ksTicker(commonCode),
+    prefCfgPreferredTicker: _ksTicker(code),
+    prefCfgCommonName: commonName,
+    prefCfgPreferredName: preferredName || code,
+  };
+  if (_preferredConfigFilter) {
+    _preferredConfigFilter = '';
+    const search = document.getElementById('prefCfgSearch');
+    if (search) search.value = '';
+    filterPreferredConfigList('');
+  }
+  Object.entries(values).forEach(([id, value]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+  });
+  document.getElementById('prefCfgId')?.scrollIntoView({behavior: 'smooth', block: 'center'});
+  _showLinkedConfigMessage(`${preferredName || code} pair 입력값을 채웠습니다. 본주명을 확인한 뒤 추가/수정을 누르세요.`, false);
+}
+
+function _guessCommonNameFromPreferredName(name) {
+  return String(name || '')
+    .replace(/\s+/g, '')
+    .replace(/[0-9]*우$/, '')
+    .replace(/우선주$/, '')
+    .trim();
+}
+
+function _ksTicker(code) {
+  const normalized = _tickerCode(code);
+  return normalized ? `${normalized}.KS` : '';
+}
+
+function _tickerCode(value) {
+  return String(value || '').split('.', 1)[0].trim().toUpperCase();
+}
+
+function _urlArg(value) {
+  return encodeURIComponent(String(value || ''));
 }
 
 // --- AI operations ------------------------------------------------------
@@ -467,22 +640,51 @@ function _projectConfigRows(project) {
   return Array.isArray(project?.config) ? project.config : [];
 }
 
+function _projectConfigSourceLabel(project) {
+  if (!project?.configLoaded) return '<span class="admin-status-fail">config 없음</span>';
+  if (project.source === 'public') return '<span class="admin-status-ok">공개 config fallback</span>';
+  if (project.source === 'merged') return '<span class="admin-status-ok">로컬+공개 병합</span>';
+  return '<span class="admin-status-ok">로컬 config 로드됨</span>';
+}
+
 function _renderProjectConfigBanner(project) {
   if (!project) {
     return '<div class="admin-sub admin-status-fail">설정을 불러오지 못했습니다.</div>';
   }
-  const status = project.configLoaded
-    ? `<span class="admin-status-ok">로컬 config 로드됨</span>`
-    : `<span class="admin-status-fail">config 없음</span>`;
+  const status = _projectConfigSourceLabel(project);
   const writable = project.writable
     ? '<span class="admin-status-ok">저장 가능</span>'
     : '<span class="admin-status-fail">저장 불가</span>';
+  const diag = project.diagnostics || {};
+  const countNote = project.publicConfigUrl
+    ? `<br>로컬 ${diag.localCount ?? 0}개 · 공개 ${diag.publicCount ?? 0}개 · 표시 ${diag.effectiveCount ?? project.summary?.count ?? 0}개`
+    : '';
+  const driftNote = _renderProjectConfigDrift(project);
+  const remoteNote = diag.remoteError
+    ? `<br><span class="admin-status-fail">공개 config 확인 실패: ${_esc(diag.remoteError)}</span>`
+    : '';
   return `
     <div class="admin-sub" style="margin:4px 0 10px;">
       ${status} · ${writable} · ${_esc(project.repo || '')}
       ${project.configPath ? `<br><code>${_esc(project.configPath)}</code>` : ''}
+      ${project.publicConfigUrl ? `<br><code>${_esc(project.publicConfigUrl)}</code>` : ''}
+      ${countNote}
+      ${remoteNote}
+      ${driftNote}
     </div>
   `;
+}
+
+function _renderProjectConfigDrift(project) {
+  const diag = project?.diagnostics || {};
+  const missingLocal = Number(diag.missingLocallyCount || 0);
+  const missingPublic = Number(diag.missingPubliclyCount || 0);
+  const notes = [];
+  if (missingLocal) notes.push(`공개에는 있고 로컬에는 없는 항목 ${missingLocal}개`);
+  if (missingPublic) notes.push(`로컬에는 있고 공개에는 없는 항목 ${missingPublic}개`);
+  return notes.length
+    ? `<br><span class="admin-status-fail">${_esc(notes.join(' · '))}</span>`
+    : '';
 }
 
 function _renderLinkedProjectConfigSection(configs) {
@@ -500,21 +702,18 @@ function _renderLinkedProjectConfigSection(configs) {
 
 function _renderPreferredConfigManager(project) {
   const rows = _projectConfigRows(project);
-  const body = rows.map((row, idx) => `
-    <tr>
-      <td><code>${_esc(row.preferredTicker)}</code><div class="admin-sub">${_esc(row.preferredName)}</div></td>
-      <td><code>${_esc(row.commonTicker)}</code><div class="admin-sub">${_esc(row.commonName)}</div></td>
-      <td>${_esc(row.name)}</td>
-      <td>
-        <button class="admin-btn admin-btn-secondary" onclick="editPreferredConfigItem(${idx})">수정</button>
-        <button class="admin-btn admin-btn-secondary" onclick="deletePreferredConfigItem(${idx})">삭제</button>
-      </td>
-    </tr>
-  `).join('');
+  const rendered = _preferredConfigTableRows(rows);
   return `
     <details open style="margin-top:12px;">
-      <summary style="cursor:pointer;font-weight:600;">우선주 pair 목록 <span class="admin-sub">${rows.length}개</span></summary>
+      <summary style="cursor:pointer;font-weight:600;">우선주 pair 목록 <span class="admin-sub" id="prefCfgVisibleCount">${rendered.visibleCount}/${rows.length}개</span></summary>
       ${_renderProjectConfigBanner(project)}
+      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
+        <input id="prefCfgSearch" placeholder="pair 검색: 대덕전자우, 대덕전자1우, 35320K"
+               value="${_esc(_preferredConfigFilter)}"
+               oninput="filterPreferredConfigList(this.value)"
+               style="${_adminInputStyle()}min-width:300px;">
+        <span class="admin-sub">대덕전자우처럼 1우 표기를 빼고 검색해도 찾습니다.</span>
+      </div>
       <form onsubmit="event.preventDefault(); savePreferredConfigItem();" style="display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:8px;margin:10px 0;">
         <input type="hidden" id="prefCfgIndex">
         <input id="prefCfgId" placeholder="id" style="${_adminInputStyle()}">
@@ -528,10 +727,73 @@ function _renderPreferredConfigManager(project) {
       </form>
       <table class="admin-table admin-table-compact">
         <thead><tr><th>우선주</th><th>본주</th><th>이름</th><th>작업</th></tr></thead>
-        <tbody>${body || '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary)">목록 없음</td></tr>'}</tbody>
+        <tbody id="prefCfgTableBody">${rendered.body}</tbody>
       </table>
     </details>
   `;
+}
+
+function _preferredConfigTableRows(rows) {
+  const visible = rows
+    .map((row, idx) => ({row, idx}))
+    .filter(({row}) => _preferredConfigMatches(row));
+  const body = visible.map(({row, idx}) => `
+    <tr>
+      <td>
+        <code>${_esc(row.preferredTicker)}</code> ${_preferredSourceBadge(row)}
+        <div class="admin-sub">${_esc(row.preferredName)}</div>
+      </td>
+      <td><code>${_esc(row.commonTicker)}</code><div class="admin-sub">${_esc(row.commonName)}</div></td>
+      <td>${_esc(row.name)}</td>
+      <td>
+        <button class="admin-btn admin-btn-secondary" onclick="editPreferredConfigItem(${idx})">수정</button>
+        <button class="admin-btn admin-btn-secondary" onclick="deletePreferredConfigItem(${idx})">삭제</button>
+      </td>
+    </tr>
+  `).join('');
+  return {
+    visibleCount: visible.length,
+    body: body || '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary)">목록 없음</td></tr>',
+  };
+}
+
+function filterPreferredConfigList(value) {
+  _preferredConfigFilter = value || '';
+  const rows = _currentPreferredRows();
+  const rendered = _preferredConfigTableRows(rows);
+  const body = document.getElementById('prefCfgTableBody');
+  const count = document.getElementById('prefCfgVisibleCount');
+  if (body) body.innerHTML = rendered.body;
+  if (count) count.textContent = `${rendered.visibleCount}/${rows.length}개`;
+}
+
+function _preferredConfigMatches(row) {
+  const filter = _normalizePreferredSearch(_preferredConfigFilter);
+  if (!filter) return true;
+  return _normalizePreferredSearch([
+    row.id,
+    row.name,
+    row.commonTicker,
+    row.preferredTicker,
+    row.commonName,
+    row.preferredName,
+  ].join(' ')).includes(filter);
+}
+
+function _preferredSourceBadge(row) {
+  if (row._configSource === 'public-only') return '<span class="admin-event-kv admin-status-fail">공개만</span>';
+  if (row._configSource === 'local-only') return '<span class="admin-event-kv">로컬만</span>';
+  if (row._configSource === 'public') return '<span class="admin-event-kv">공개</span>';
+  return '';
+}
+
+function _normalizePreferredSearch(value) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/\.KS/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[._-]/g, '')
+    .replace(/[0-9]+우/g, '우');
 }
 
 function _renderHoldingConfigManager(project) {
@@ -608,6 +870,10 @@ async function saveLinkedProjectConfig(projectKey, config) {
   else _linkedProjectConfigs.push(data);
   const section = document.getElementById('linkedProjectConfigSection');
   if (section) section.outerHTML = _renderLinkedProjectConfigSection(_linkedProjectConfigs);
+  if (projectKey === 'preferredSpread') {
+    const prefDivRoot = document.getElementById('prefDivCoverageSection');
+    if (prefDivRoot) prefDivRoot.innerHTML = _renderPreferredDividendCoverage(_preferredDividendRows || []);
+  }
   return data;
 }
 

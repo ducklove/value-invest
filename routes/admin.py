@@ -278,14 +278,14 @@ async def list_users(request: Request):
 @router.get("/linked-project-configs")
 async def linked_project_configs(request: Request):
     await _require_admin(request)
-    return linked_project_admin.list_project_configs()
+    return await asyncio.to_thread(linked_project_admin.list_project_configs)
 
 
 @router.get("/linked-project-configs/{project_key}")
 async def linked_project_config(project_key: str, request: Request):
     await _require_admin(request)
     try:
-        return linked_project_admin.get_project_config(project_key)
+        return await asyncio.to_thread(linked_project_admin.get_project_config, project_key)
     except linked_project_admin.LinkedProjectConfigError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -672,6 +672,18 @@ async def list_foreign_dividends_endpoint(request: Request):
     """관리자 UI 의 목록 뷰용. 수동 override row 가 먼저 오도록 정렬."""
     await _require_admin(request)
     return await cache.list_foreign_dividends()
+
+
+@router.get("/preferred-dividends")
+async def list_preferred_dividends_endpoint(request: Request):
+    """관리자 UI 의 우선주 배당 시트 캐시 조회용.
+
+    This is intentionally separate from preferredSpread's pair config:
+    the dividend sheet can know about a preferred stock before the pair
+    config is updated. Showing both lets the admin spot drift immediately.
+    """
+    await _require_admin(request)
+    return await cache.list_preferred_dividends()
 
 
 @router.post("/foreign-dividend")

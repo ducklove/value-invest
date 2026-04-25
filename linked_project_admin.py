@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import integrations
 
@@ -23,6 +26,8 @@ PROJECT_SPECS: dict[str, dict[str, Any]] = {
         "env_dir": "HOLDING_VALUE_DIR",
         "candidates": ["hodling-value", "holding_value"],
         "config_kind": "holding",
+        "base_url_key": "holdingValue",
+        "base_url_env": "HOLDING_VALUE_BASE_URL",
     },
     "preferredSpread": {
         "label": "우선주 pair 목록",
@@ -30,6 +35,8 @@ PROJECT_SPECS: dict[str, dict[str, Any]] = {
         "env_dir": "PREFERRED_SPREAD_DIR",
         "candidates": ["common_preferred_spread"],
         "config_kind": "preferred",
+        "base_url_key": "preferredSpread",
+        "base_url_env": "PREFERRED_SPREAD_BASE_URL",
     },
     "goldGap": {
         "label": "금/비트코인 gap 설정",
@@ -37,6 +44,8 @@ PROJECT_SPECS: dict[str, dict[str, Any]] = {
         "env_dir": "GOLD_GAP_DIR",
         "candidates": ["gold_gap"],
         "config_kind": "gold",
+        "base_url_key": "goldGap",
+        "base_url_env": "GOLD_GAP_BASE_URL",
     },
 }
 
@@ -49,29 +58,65 @@ def project_keys() -> list[str]:
     return list(PROJECT_SPECS)
 
 
-def list_project_configs(workspace_root: Path | None = None) -> list[dict[str, Any]]:
-    return [get_project_config(key, workspace_root=workspace_root) for key in project_keys()]
+def list_project_configs(workspace_root: Path | None = None, include_remote: bool = True) -> list[dict[str, Any]]:
+    keys = project_keys()
+    if not include_remote:
+        return [
+            get_project_config(key, workspace_root=workspace_root, include_remote=False)
+            for key in keys
+        ]
+    with ThreadPoolExecutor(max_workers=len(keys)) as executor:
+        return list(executor.map(
+            lambda key: get_project_config(key, workspace_root=workspace_root, include_remote=True),
+            keys,
+        ))
 
 
-def get_project_config(project_key: str, workspace_root: Path | None = None) -> dict[str, Any]:
+def get_project_config(
+    project_key: str,
+    workspace_root: Path | None = None,
+    include_remote: bool = True,
+) -> dict[str, Any]:
     spec = _spec(project_key)
     project_dir = _project_dir(spec, workspace_root)
     config_path = project_dir / "config.json" if project_dir else None
-    raw_config = _read_json(config_path)
-    config_loaded = raw_config is not None
-    summary = _summarize_config(spec["config_kind"], raw_config)
+    local_config = _read_json(config_path)
+    remote_url = _remote_config_url(spec)
+    remote_config = None
+    remote_error = None
+    if include_remote and remote_url:
+        remote_config, remote_error = _read_remote_json(remote_url)
+    config, source, diagnostics = _resolve_effective_config(
+        spec["config_kind"],
+        local_config,
+        remote_config,
+    )
+    config_loaded = config is not None
+    summary = _summarize_config(spec["config_kind"], config)
+    local_loaded = local_config is not None
+    remote_loaded = remote_config is not None
     return {
         "key": project_key,
         "label": spec["label"],
         "repo": spec["repo"],
         "configKind": spec["config_kind"],
         "localAvailable": bool(project_dir),
+        "localConfigLoaded": local_loaded,
+        "publicConfigLoaded": remote_loaded,
         "configLoaded": config_loaded,
         "writable": bool(config_path and (config_path.exists() or config_path.parent.exists())),
-        "source": "local" if config_loaded else "missing",
+        "source": source,
         "configPath": str(config_path) if config_path else "",
+        "publicConfigUrl": remote_url,
         "summary": summary,
-        "config": raw_config,
+        "diagnostics": {
+            **diagnostics,
+            "localCount": _config_count(spec["config_kind"], local_config),
+            "publicCount": _config_count(spec["config_kind"], remote_config),
+            "effectiveCount": summary.get("count", 0),
+            "remoteError": remote_error,
+        },
+        "config": config,
     }
 
 
@@ -83,7 +128,7 @@ def save_project_config(project_key: str, config: Any, workspace_root: Path | No
     config_path = project_dir / "config.json"
     normalized = validate_config(spec["config_kind"], config)
     _atomic_write_json(config_path, normalized)
-    result = get_project_config(project_key, workspace_root=workspace_root)
+    result = get_project_config(project_key, workspace_root=workspace_root, include_remote=False)
     result["saved"] = True
     return result
 
@@ -131,6 +176,153 @@ def _read_json(path: Path | None) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _remote_config_url(spec: dict[str, Any]) -> str:
+    base_key = spec.get("base_url_key")
+    if not base_key:
+        return ""
+    base_url = os.getenv(spec.get("base_url_env", ""), integrations.DEFAULT_BASE_URLS.get(base_key, ""))
+    base_url = str(base_url or "").rstrip("/")
+    return f"{base_url}/config.json" if base_url else ""
+
+
+def _read_remote_json(url: str, timeout: float = 5.0) -> tuple[Any, str | None]:
+    try:
+        req = Request(url, headers={"User-Agent": "value-invest-admin/1.0"})
+        with urlopen(req, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+        return json.loads(raw), None
+    except HTTPError as exc:
+        return None, f"HTTP {exc.code}"
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        return None, str(exc)[:240]
+
+
+def _resolve_effective_config(config_kind: str, local_config: Any, public_config: Any) -> tuple[Any, str, dict[str, Any]]:
+    if config_kind in {"preferred", "holding"}:
+        local_rows = local_config if isinstance(local_config, list) else None
+        public_rows = public_config if isinstance(public_config, list) else None
+        if local_rows is not None and public_rows is not None:
+            merged, diagnostics = _merge_list_configs(config_kind, local_rows, public_rows)
+            source = "merged" if diagnostics["missingLocally"] else "local"
+            return merged, source, diagnostics
+        if local_rows is not None:
+            return _tag_rows(local_rows, "local"), "local", _empty_list_diagnostics()
+        if public_rows is not None:
+            return _tag_rows(public_rows, "public"), "public", _empty_list_diagnostics()
+        return None, "missing", _empty_list_diagnostics()
+
+    diagnostics = {
+        "missingLocally": [],
+        "missingPublicly": [],
+        "missingLocallyCount": 0,
+        "missingPubliclyCount": 0,
+    }
+    if local_config is not None:
+        return local_config, "local", diagnostics
+    if public_config is not None:
+        return public_config, "public", diagnostics
+    return None, "missing", diagnostics
+
+
+def _merge_list_configs(config_kind: str, local_rows: list[Any], public_rows: list[Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    public_by_key = {
+        key: row
+        for row in public_rows
+        if isinstance(row, dict) and (key := _row_key(config_kind, row))
+    }
+    local_by_key = {
+        key: row
+        for row in local_rows
+        if isinstance(row, dict) and (key := _row_key(config_kind, row))
+    }
+    merged: list[dict[str, Any]] = []
+    for raw in local_rows:
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        key = _row_key(config_kind, row)
+        row["_configSource"] = "local+public" if key in public_by_key else "local-only"
+        merged.append(row)
+    for key, raw in public_by_key.items():
+        if key in local_by_key:
+            continue
+        row = dict(raw)
+        row["_configSource"] = "public-only"
+        merged.append(row)
+
+    missing_locally = [
+        _diff_row(config_kind, row)
+        for key, row in public_by_key.items()
+        if key not in local_by_key
+    ]
+    missing_publicly = [
+        _diff_row(config_kind, row)
+        for key, row in local_by_key.items()
+        if key not in public_by_key
+    ]
+    return merged, {
+        "missingLocally": missing_locally[:50],
+        "missingPublicly": missing_publicly[:50],
+        "missingLocallyCount": len(missing_locally),
+        "missingPubliclyCount": len(missing_publicly),
+    }
+
+
+def _tag_rows(rows: list[Any], source: str) -> list[dict[str, Any]]:
+    tagged = []
+    for raw in rows:
+        if isinstance(raw, dict):
+            row = dict(raw)
+            row["_configSource"] = source
+            tagged.append(row)
+    return tagged
+
+
+def _empty_list_diagnostics() -> dict[str, Any]:
+    return {
+        "missingLocally": [],
+        "missingPublicly": [],
+        "missingLocallyCount": 0,
+        "missingPubliclyCount": 0,
+    }
+
+
+def _row_key(config_kind: str, row: dict[str, Any]) -> str:
+    if config_kind == "preferred":
+        return _ticker_code(row.get("preferredTicker") or row.get("preferredCode"))
+    if config_kind == "holding":
+        return _ticker_code(row.get("holdingTicker") or row.get("holdingCode"))
+    return str(row.get("id") or "").strip().upper()
+
+
+def _ticker_code(value: Any) -> str:
+    return str(value or "").split(".", 1)[0].strip().upper()
+
+
+def _diff_row(config_kind: str, row: dict[str, Any]) -> dict[str, Any]:
+    if config_kind == "preferred":
+        return {
+            "id": row.get("id"),
+            "name": row.get("name"),
+            "commonTicker": row.get("commonTicker"),
+            "preferredTicker": row.get("preferredTicker"),
+            "commonName": row.get("commonName"),
+            "preferredName": row.get("preferredName"),
+        }
+    if config_kind == "holding":
+        return {
+            "id": row.get("id"),
+            "name": row.get("name"),
+            "holdingTicker": row.get("holdingTicker"),
+            "holdingName": row.get("holdingName"),
+        }
+    return dict(row)
+
+
+def _config_count(config_kind: str, config: Any) -> int:
+    return int(_summarize_config(config_kind, config).get("count", 0))
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
