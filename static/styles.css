@@ -711,10 +711,22 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2);
   min-width: 200px; overflow: hidden;
 }
+.pf-link-menu { min-width: 240px; }
 .pf-pref-item {
   padding: 10px 16px; cursor: pointer; font-size: 13px; color: var(--text);
 }
 .pf-pref-item:hover { background: var(--primary); color: white; }
+.pf-link-menu .pf-pref-item strong,
+.pf-link-menu .pf-pref-item span {
+  display: block;
+}
+.pf-link-menu .pf-pref-item span {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.pf-link-menu .pf-pref-item:hover span { color: rgba(255,255,255,0.82); }
 
 /* Portfolio tab bar */
 .pf-tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
@@ -1277,12 +1289,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-row-btn:hover { color: var(--primary); }
 .pf-row-btn.delete:hover { color: #dc2626; }
-.pf-row-btn.insight {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.pf-row-btn.insight:hover { color: #2563eb; }
 .pf-empty {
   text-align: center; padding: 40px; color: var(--text-secondary); font-size: 14px;
 }

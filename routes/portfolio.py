@@ -5,6 +5,8 @@ import re
 import time
 from functools import partial
 from pathlib import Path
+from datetime import datetime, timezone
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
@@ -142,6 +144,9 @@ _NAVER_SEM = asyncio.Semaphore(6)
 _YF_SEM = asyncio.Semaphore(3)
 _YF_CALL_TIMEOUT = 8.0
 _NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
+_YAHOO_HTTP_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
+_YAHOO_SEM = asyncio.Semaphore(4)
+_INSIGHT_QUOTE_TIMEOUT = 8.5
 
 # Negative cache: tickers we already failed to resolve via yfinance — avoids
 # re-running the 16-suffix loop on every quote refresh.
@@ -377,6 +382,97 @@ async def _yfinance_fetch_quote(ticker: str) -> dict:
     except Exception as exc:
         logger.warning("yfinance 시세 조회 실패(%s): %s", ticker, exc)
         _failed_yf_tickers.add(ticker)
+        return {}
+
+
+def _infer_yf_currency(ticker: str) -> str:
+    ticker = (ticker or "").upper()
+    if ticker.endswith(".T"):
+        return "JPY"
+    if ticker.endswith(".HK"):
+        return "HKD"
+    if ticker.endswith(".SS") or ticker.endswith(".SZ"):
+        return "CNY"
+    if ticker.endswith(".L"):
+        return "GBP"
+    if ticker.endswith(".AX"):
+        return "AUD"
+    if ticker.endswith(".TO"):
+        return "CAD"
+    if ticker.endswith((".DE", ".F", ".PA", ".AS", ".MI", ".MC")):
+        return "EUR"
+    return "USD"
+
+
+async def _fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = "1d") -> dict:
+    ticker = (ticker or "").strip()
+    if not ticker:
+        return {"rows": [], "currency": None, "meta": {}}
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(ticker, safe='')}"
+    try:
+        async with _YAHOO_SEM:
+            async with httpx.AsyncClient(timeout=_YAHOO_HTTP_TIMEOUT, follow_redirects=True) as client:
+                resp = await client.get(
+                    url,
+                    params={"range": range_, "interval": interval, "includePrePost": "false"},
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                resp.raise_for_status()
+        result = (((resp.json() or {}).get("chart") or {}).get("result") or [None])[0]
+        if not result:
+            return {"rows": [], "currency": None, "meta": {}}
+        meta = result.get("meta") or {}
+        timestamps = result.get("timestamp") or []
+        quote_data = (((result.get("indicators") or {}).get("quote") or [{}])[0] or {})
+        closes = quote_data.get("close") or []
+        rows = []
+        for ts, close in zip(timestamps, closes):
+            try:
+                if close is None:
+                    continue
+                rows.append({
+                    "date": datetime.fromtimestamp(int(ts), tz=timezone.utc).date().isoformat(),
+                    "close": round(float(close), 6),
+                })
+            except Exception:
+                continue
+        return {
+            "rows": rows,
+            "currency": (meta.get("currency") or _infer_yf_currency(ticker)).upper(),
+            "meta": meta,
+        }
+    except Exception as exc:
+        logger.warning("Yahoo chart fetch failed (%s): %s", ticker, exc)
+        return {"rows": [], "currency": None, "meta": {}}
+
+
+async def _yfinance_fetch_quote_fast(ticker: str) -> dict:
+    if ticker in _failed_yf_tickers:
+        return {}
+
+    try:
+        payload = await asyncio.wait_for(_fetch_yahoo_chart(ticker, range_="5d"), timeout=7.0)
+        values = [row["close"] for row in payload.get("rows") or [] if row.get("close") is not None]
+        if not values:
+            return {}
+        meta = payload.get("meta") or {}
+        price = float(meta.get("regularMarketPrice") or values[-1])
+        prev = float(meta.get("chartPreviousClose") or (values[-2] if len(values) >= 2 else values[-1]))
+        if price is None:
+            return {}
+        change = round(price - prev, 4) if prev else 0
+        change_pct = round(change / prev * 100, 2) if prev else None
+        currency = (payload.get("currency") or _infer_yf_currency(ticker)).upper()
+        fx_rate = await _insight_fx_rate(currency)
+        price_krw = price * fx_rate
+        change_krw = change * fx_rate
+        return {
+            "price": round(price_krw),
+            "change": round(change_krw),
+            "change_pct": change_pct,
+        }
+    except Exception as exc:
+        logger.warning("fast yfinance quote failed (%s): %s", ticker, exc)
         return {}
 
 
@@ -839,12 +935,17 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
     else:
         # It's a stock code (e.g., common stock for preferred)
         # For codes with dots/slashes, try dash variant directly first (faster)
-        alt = benchmark_code.replace(".", "-").replace("/", "-") if not _is_korean_stock(benchmark_code) else None
-        if alt and alt != benchmark_code:
-            stock_q = await _yfinance_fetch_quote(alt)
+        preset_ticker = _BENCHMARK_YF_TICKER.get(benchmark_code)
+        if preset_ticker:
+            stock_q = await _yfinance_fetch_quote_fast(preset_ticker)
+        else:
+            alt = _yfinance_direct_ticker(benchmark_code) if not _is_korean_stock(benchmark_code) else None
+            stock_q = None
+        if not preset_ticker and alt and alt != benchmark_code:
+            stock_q = await _yfinance_fetch_quote_fast(alt)
             if not stock_q or not stock_q.get("change_pct"):
                 stock_q = await _fetch_quote(benchmark_code)
-        else:
+        elif not preset_ticker:
             stock_q = await _fetch_quote(benchmark_code)
         q = {"change_pct": stock_q.get("change_pct")} if stock_q else {}
 
@@ -854,22 +955,67 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
 
 _ASSET_HISTORY_CACHE_TTL = 15 * 60
 _asset_history_cache: dict[str, tuple[float, dict]] = {}
+_insight_fx_cache: dict[str, tuple[float, float]] = {}
 
-_BENCHMARK_HISTORY_CODE = {
-    "IDX_KOSPI": "KOSPI",
-    "IDX_SP500": "SP500",
-    "GOLD": "GOLD",
+_INSIGHT_FX_TICKER = {
+    "USD": "KRW=X",
+    "EUR": "EURKRW=X",
+    "JPY": "JPYKRW=X",
+    "CNY": "CNYKRW=X",
+    "HKD": "HKDKRW=X",
+    "GBP": "GBPKRW=X",
+    "AUD": "AUDKRW=X",
+    "CAD": "CADKRW=X",
+    "CHF": "CHFKRW=X",
 }
 
 _BENCHMARK_YF_TICKER = {
     "IDX_KOSPI": "^KS11",
     "IDX_KOSDAQ": "^KQ11",
     "IDX_SP500": "^GSPC",
+    "GOLD": "GC=F",
+    "AGG": "AGG",
     "FX_USDKRW": "KRW=X",
     "FX_EURKRW": "EURKRW=X",
     "FX_JPYKRW": "JPYKRW=X",
     "FX_CNYKRW": "CNYKRW=X",
 }
+
+
+def _yfinance_direct_ticker(code: str) -> str:
+    ticker = (code or "").strip()
+    if "/" in ticker:
+        ticker = ticker.replace("/", "-")
+    if "." in ticker:
+        prefix, suffix = ticker.rsplit(".", 1)
+        # Yahoo uses BRK-B/BF-B for US class shares, but keeps exchange
+        # suffixes such as 7203.T unchanged.
+        if len(suffix) == 1 and prefix.replace(".", "").isalpha():
+            ticker = f"{prefix}-{suffix}"
+    return ticker
+
+
+async def _insight_fx_rate(currency: str | None) -> float:
+    currency = (currency or "KRW").upper()
+    if currency == "KRW":
+        return 1.0
+    now = _time.monotonic()
+    cached = _insight_fx_cache.get(currency)
+    if cached and (now - cached[0]) < 300:
+        return cached[1]
+    ticker = _INSIGHT_FX_TICKER.get(currency)
+    if not ticker:
+        return 1.0
+    payload = await asyncio.wait_for(_fetch_yahoo_chart(ticker, range_="5d"), timeout=7.0)
+    rows = payload.get("rows") or []
+    meta = payload.get("meta") or {}
+    rate = asset_insights.safe_float(meta.get("regularMarketPrice"))
+    if rate is None and rows:
+        rate = asset_insights.safe_float(rows[-1].get("close"))
+    if rate is None or rate <= 0:
+        return 1.0
+    _insight_fx_cache[currency] = (now, rate)
+    return rate
 
 
 async def _resolve_insight_benchmark(item: dict) -> str:
@@ -899,36 +1045,15 @@ async def _download_yfinance_history(ticker: str, period: str = "1y") -> dict:
     if cached and (now - cached[0]) < _ASSET_HISTORY_CACHE_TTL:
         return cached[1]
 
-    def _download():
-        import yfinance as yf
-
-        t = yf.Ticker(ticker)
-        df = t.history(period=period, auto_adjust=True)
-        currency = None
-        try:
-            currency = (t.fast_info.currency or "").upper() or None
-        except Exception:
-            currency = None
-        if df is None or df.empty or "Close" not in df:
-            return {"rows": [], "currency": currency}
-        close = df["Close"]
-        if hasattr(close, "columns"):
-            close = close.iloc[:, 0]
-        rows = []
-        for d, v in close.items():
-            try:
-                if v != v:
-                    continue
-                rows.append({"date": d.strftime("%Y-%m-%d"), "close": round(float(v), 6)})
-            except Exception:
-                continue
-        return {"rows": rows, "currency": currency}
-
     try:
-        result = await _yf_run(_download)
+        payload = await asyncio.wait_for(_fetch_yahoo_chart(ticker, range_=period), timeout=7.0)
     except Exception as exc:
         logger.warning("asset insight history fetch failed (%s): %s", ticker, exc)
-        result = {"rows": [], "currency": None}
+        payload = {"rows": [], "currency": None}
+    result = {
+        "rows": payload.get("rows") or [],
+        "currency": payload.get("currency") or _infer_yf_currency(ticker),
+    }
     _asset_history_cache[key] = (now, result)
     return result
 
@@ -941,34 +1066,48 @@ async def _asset_history_for_insight(code: str, item: dict) -> dict:
         return {"rows": [], "currency": code.replace("CASH_", "")}
     if _is_korean_stock(code):
         return {"rows": [], "currency": item.get("currency") or "KRW"}
-    ticker = _ticker_map.get(code) or await _yfinance_find_ticker(code) or code
+    await _ensure_ticker_map()
+    ticker = _ticker_map.get(code) or _yfinance_direct_ticker(code)
     return await _download_yfinance_history(ticker)
 
 
 async def _benchmark_history_for_insight(benchmark_code: str | None) -> list[dict]:
     if not benchmark_code:
         return []
-    from datetime import date, timedelta
-
-    start = (date.today() - timedelta(days=370)).isoformat()
-    history_code = _BENCHMARK_HISTORY_CODE.get(benchmark_code)
-    if history_code:
-        try:
-            import benchmark_history
-
-            await benchmark_history.backfill_benchmark(history_code, start)
-            return await cache.get_benchmark_rows(history_code, start=start)
-        except Exception as exc:
-            logger.warning("benchmark insight history failed (%s): %s", benchmark_code, exc)
-            return []
-
     ticker = _BENCHMARK_YF_TICKER.get(benchmark_code)
     if not ticker and not _is_korean_stock(benchmark_code):
-        ticker = benchmark_code.replace(".", "-").replace("/", "-")
+        ticker = _yfinance_direct_ticker(benchmark_code)
     if not ticker:
         return []
     payload = await _download_yfinance_history(ticker)
     return payload.get("rows") or []
+
+
+async def _fetch_quote_for_insight(stock_code: str) -> dict:
+    if _is_cash_asset(stock_code) or stock_code == "KRX_GOLD" or stock_code in _CRYPTO_UPBIT_MAP or _is_korean_stock(stock_code):
+        return await _fetch_quote(stock_code)
+
+    cached = _quote_cache.get(stock_code)
+    now = _time.monotonic()
+    if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
+        return cached[1]
+    if stock_code in _last_known_quotes:
+        stale = _last_known_quotes[stock_code]
+    else:
+        stale = {}
+
+    await _ensure_ticker_map()
+    ticker = _ticker_map.get(stock_code) or _yfinance_direct_ticker(stock_code)
+    try:
+        q = await asyncio.wait_for(_yfinance_fetch_quote_fast(ticker), timeout=_INSIGHT_QUOTE_TIMEOUT)
+    except Exception as exc:
+        logger.warning("asset insight quote fetch failed (%s): %s", stock_code, exc)
+        return stale
+    if q and q.get("price") is not None:
+        _quote_cache[stock_code] = (now, q)
+        _last_known_quotes[stock_code] = q
+        return q
+    return stale
 
 
 def _macro_codes_for_asset(profile: dict, currency: str | None) -> list[str]:
@@ -1012,6 +1151,14 @@ def _format_macro(indicators: dict) -> list[dict]:
     return result
 
 
+async def _fetch_insight_indicators(codes: list[str]) -> dict:
+    try:
+        return await asyncio.wait_for(market_indicators.fetch_indicators(codes), timeout=5.0)
+    except Exception as exc:
+        logger.warning("asset insight indicator fetch failed: %s", exc)
+        return {}
+
+
 def _gold_gap_for_asset(code: str) -> dict | None:
     config = integrations.build_public_integrations().get("goldGap", {})
     asset_key = (config.get("assetByPortfolioCode") or {}).get(code)
@@ -1038,29 +1185,28 @@ async def asset_insight(stock_code: str, request: Request):
     if not item:
         raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
 
-    quote, effective_benchmark = await asyncio.gather(
-        _fetch_quote(stock_code),
-        _resolve_insight_benchmark(item),
-    )
-    benchmark_quote, benchmark_name = await asyncio.gather(
-        _fetch_benchmark_quote(effective_benchmark),
-        _resolve_benchmark_name(effective_benchmark),
-    )
+    quote_task = asyncio.create_task(_fetch_quote_for_insight(stock_code))
+    asset_history_task = asyncio.create_task(_asset_history_for_insight(stock_code, item))
+    effective_benchmark = await _resolve_insight_benchmark(item)
 
     profile = {
         "code": stock_code,
         "name": item.get("stock_name") or stock_code,
         "currency": item.get("currency") or "",
         "benchmarkCode": effective_benchmark,
-        "benchmarkName": benchmark_name,
         **asset_insights.classify_asset(stock_code, item.get("stock_name") or "", item.get("currency") or ""),
     }
+    indicator_task = asyncio.create_task(_fetch_insight_indicators(_macro_codes_for_asset(profile, item.get("currency"))))
 
-    history_payload, benchmark_rows, indicators = await asyncio.gather(
-        _asset_history_for_insight(stock_code, item),
+    quote, history_payload, benchmark_quote, benchmark_name, benchmark_rows, indicators = await asyncio.gather(
+        quote_task,
+        asset_history_task,
+        _fetch_benchmark_quote(effective_benchmark),
+        _resolve_benchmark_name(effective_benchmark),
         _benchmark_history_for_insight(effective_benchmark),
-        market_indicators.fetch_indicators(_macro_codes_for_asset(profile, item.get("currency"))),
+        indicator_task,
     )
+    profile["benchmarkName"] = benchmark_name
 
     metrics = asset_insights.calculate_history_metrics(history_payload.get("rows") or [])
     benchmark_metrics = asset_insights.calculate_history_metrics(benchmark_rows)
