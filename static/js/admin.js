@@ -659,6 +659,7 @@ function _renderProjectConfigBanner(project) {
   const countNote = project.publicConfigUrl
     ? `<br>로컬 ${diag.localCount ?? 0}개 · 공개 ${diag.publicCount ?? 0}개 · 표시 ${diag.effectiveCount ?? project.summary?.count ?? 0}개`
     : '';
+  const syncNote = _renderProjectConfigSync(project);
   const driftNote = _renderProjectConfigDrift(project);
   const remoteNote = diag.remoteError
     ? `<br><span class="admin-status-fail">공개 config 확인 실패: ${_esc(diag.remoteError)}</span>`
@@ -669,10 +670,22 @@ function _renderProjectConfigBanner(project) {
       ${project.configPath ? `<br><code>${_esc(project.configPath)}</code>` : ''}
       ${project.publicConfigUrl ? `<br><code>${_esc(project.publicConfigUrl)}</code>` : ''}
       ${countNote}
+      ${syncNote}
       ${remoteNote}
       ${driftNote}
     </div>
   `;
+}
+
+function _renderProjectConfigSync(project) {
+  const sync = project?.diagnostics?.sync || {};
+  if (sync.updated) {
+    return `<br><span class="admin-status-ok">공개 config 기준으로 로컬 파일 갱신: ${Number(sync.addedFromPublicCount || 0)}개 추가</span>`;
+  }
+  if (sync.error) {
+    return `<br><span class="admin-status-fail">로컬 config 자동 갱신 실패: ${_esc(sync.error)}</span>`;
+  }
+  return '';
 }
 
 function _renderProjectConfigDrift(project) {
@@ -680,8 +693,8 @@ function _renderProjectConfigDrift(project) {
   const missingLocal = Number(diag.missingLocallyCount || 0);
   const missingPublic = Number(diag.missingPubliclyCount || 0);
   const notes = [];
-  if (missingLocal) notes.push(`공개에는 있고 로컬에는 없는 항목 ${missingLocal}개`);
-  if (missingPublic) notes.push(`로컬에는 있고 공개에는 없는 항목 ${missingPublic}개`);
+  if (missingLocal) notes.push(`로컬 config 갱신 필요 ${missingLocal}개`);
+  if (missingPublic) notes.push(`공개 배포 대기 ${missingPublic}개`);
   return notes.length
     ? `<br><span class="admin-status-fail">${_esc(notes.join(' · '))}</span>`
     : '';
@@ -740,7 +753,7 @@ function _preferredConfigTableRows(rows) {
   const body = visible.map(({row, idx}) => `
     <tr>
       <td>
-        <code>${_esc(row.preferredTicker)}</code> ${_preferredSourceBadge(row)}
+        <code>${_esc(row.preferredTicker)}</code>
         <div class="admin-sub">${_esc(row.preferredName)}</div>
       </td>
       <td><code>${_esc(row.commonTicker)}</code><div class="admin-sub">${_esc(row.commonName)}</div></td>
@@ -778,13 +791,6 @@ function _preferredConfigMatches(row) {
     row.commonName,
     row.preferredName,
   ].join(' ')).includes(filter);
-}
-
-function _preferredSourceBadge(row) {
-  if (row._configSource === 'public-only') return '<span class="admin-event-kv admin-status-fail">공개만</span>';
-  if (row._configSource === 'local-only') return '<span class="admin-event-kv">로컬만</span>';
-  if (row._configSource === 'public') return '<span class="admin-event-kv">공개</span>';
-  return '';
 }
 
 function _normalizePreferredSearch(value) {

@@ -86,6 +86,14 @@ def get_project_config(
     remote_error = None
     if include_remote and remote_url:
         remote_config, remote_error = _read_remote_json(remote_url)
+    sync_result = _empty_sync_result()
+    if include_remote and remote_config is not None:
+        local_config, sync_result = _sync_local_config_from_public(
+            spec["config_kind"],
+            config_path,
+            local_config,
+            remote_config,
+        )
     config, source, diagnostics = _resolve_effective_config(
         spec["config_kind"],
         local_config,
@@ -115,6 +123,7 @@ def get_project_config(
             "publicCount": _config_count(spec["config_kind"], remote_config),
             "effectiveCount": summary.get("count", 0),
             "remoteError": remote_error,
+            "sync": sync_result,
         },
         "config": config,
     }
@@ -208,9 +217,9 @@ def _resolve_effective_config(config_kind: str, local_config: Any, public_config
             source = "merged" if diagnostics["missingLocally"] else "local"
             return merged, source, diagnostics
         if local_rows is not None:
-            return _tag_rows(local_rows, "local"), "local", _empty_list_diagnostics()
+            return _copy_rows(local_rows), "local", _empty_list_diagnostics()
         if public_rows is not None:
-            return _tag_rows(public_rows, "public"), "public", _empty_list_diagnostics()
+            return _copy_rows(public_rows), "public", _empty_list_diagnostics()
         return None, "missing", _empty_list_diagnostics()
 
     diagnostics = {
@@ -241,16 +250,11 @@ def _merge_list_configs(config_kind: str, local_rows: list[Any], public_rows: li
     for raw in local_rows:
         if not isinstance(raw, dict):
             continue
-        row = dict(raw)
-        key = _row_key(config_kind, row)
-        row["_configSource"] = "local+public" if key in public_by_key else "local-only"
-        merged.append(row)
+        merged.append(dict(raw))
     for key, raw in public_by_key.items():
         if key in local_by_key:
             continue
-        row = dict(raw)
-        row["_configSource"] = "public-only"
-        merged.append(row)
+        merged.append(dict(raw))
 
     missing_locally = [
         _diff_row(config_kind, row)
@@ -270,14 +274,63 @@ def _merge_list_configs(config_kind: str, local_rows: list[Any], public_rows: li
     }
 
 
-def _tag_rows(rows: list[Any], source: str) -> list[dict[str, Any]]:
-    tagged = []
+def _copy_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    copied = []
     for raw in rows:
         if isinstance(raw, dict):
-            row = dict(raw)
-            row["_configSource"] = source
-            tagged.append(row)
-    return tagged
+            copied.append(dict(raw))
+    return copied
+
+
+def _sync_local_config_from_public(
+    config_kind: str,
+    config_path: Path | None,
+    local_config: Any,
+    public_config: Any,
+) -> tuple[Any, dict[str, Any]]:
+    result = _empty_sync_result()
+    if config_kind not in {"preferred", "holding"}:
+        return local_config, result
+    if not config_path or not (config_path.exists() or config_path.parent.exists()):
+        return local_config, result
+    public_rows = public_config if isinstance(public_config, list) else None
+    if public_rows is None:
+        return local_config, result
+    if local_config is not None and not isinstance(local_config, list):
+        result["error"] = "local config is not a list"
+        return local_config, result
+
+    local_rows = local_config if isinstance(local_config, list) else []
+    local_keys = {
+        key
+        for row in local_rows
+        if isinstance(row, dict) and (key := _row_key(config_kind, row))
+    }
+    additions = [
+        dict(row)
+        for row in public_rows
+        if isinstance(row, dict)
+        and (key := _row_key(config_kind, row))
+        and key not in local_keys
+    ]
+    if not additions:
+        return local_config, result
+
+    merged = [dict(row) for row in local_rows if isinstance(row, dict)] + additions
+    try:
+        normalized = validate_config(config_kind, merged)
+        _atomic_write_json(config_path, normalized)
+    except (OSError, LinkedProjectConfigError) as exc:
+        result["error"] = str(exc)[:240]
+        return local_config, result
+
+    result["updated"] = True
+    result["addedFromPublicCount"] = len(additions)
+    return normalized, result
+
+
+def _empty_sync_result() -> dict[str, Any]:
+    return {"updated": False, "addedFromPublicCount": 0, "error": None}
 
 
 def _empty_list_diagnostics() -> dict[str, Any]:

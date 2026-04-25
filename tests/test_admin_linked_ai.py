@@ -61,7 +61,7 @@ class LinkedProjectAdminTests(unittest.TestCase):
         with self.assertRaises(linked_project_admin.LinkedProjectConfigError):
             linked_project_admin.validate_config("preferred", payload)
 
-    def test_preferred_config_merges_public_rows_missing_from_local(self):
+    def test_preferred_config_syncs_public_rows_into_local_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             project_dir = root / "common_preferred_spread"
@@ -92,11 +92,15 @@ class LinkedProjectAdminTests(unittest.TestCase):
             with patch.object(linked_project_admin, "_read_remote_json", return_value=(public_payload, None)):
                 config = linked_project_admin.get_project_config("preferredSpread", workspace_root=root)
 
-            self.assertEqual(config["source"], "merged")
+            self.assertEqual(config["source"], "local")
             self.assertEqual(config["summary"]["count"], 2)
-            self.assertEqual(config["diagnostics"]["missingLocallyCount"], 1)
+            self.assertEqual(config["diagnostics"]["missingLocallyCount"], 0)
+            self.assertTrue(config["diagnostics"]["sync"]["updated"])
+            self.assertEqual(config["diagnostics"]["sync"]["addedFromPublicCount"], 1)
             self.assertEqual(config["config"][1]["preferredTicker"], "35320K.KS")
-            self.assertEqual(config["config"][1]["_configSource"], "public-only")
+            self.assertNotIn("_configSource", config["config"][1])
+            written = json.loads((project_dir / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(written[1]["preferredTicker"], "35320K.KS")
 
 
 class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
