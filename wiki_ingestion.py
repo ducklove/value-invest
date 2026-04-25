@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+import ai_config
 import cache
 import observability
 import report_client
@@ -67,23 +68,7 @@ DEFAULT_PER_STOCK_LIMIT = _default_per_stock_limit()
 _LLM_SEMAPHORE = asyncio.Semaphore(2)
 _DOWNLOAD_SEMAPHORE = asyncio.Semaphore(4)
 
-# Pull OpenRouter config lazily from routes.portfolio so admin overrides
-# and env-based keys stay the single source of truth.
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-
-def _get_openrouter_key() -> str:
-    """Read the OpenRouter key the same way routes.portfolio does — via
-    module-level global set from keys.txt at startup. Import is local to
-    avoid a circular dep at module load."""
-    from routes import portfolio as pf_mod
-    return pf_mod._OPENROUTER_KEY or os.environ.get("OPENROUTER_API_KEY", "")
-
-
-def _get_default_model() -> str:
-    from routes import portfolio as pf_mod
-    # Allow admins to pin a cheaper model for bulk summarization via env.
-    return os.environ.get("WIKI_MODEL") or pf_mod._AI_DEFAULT_MODEL
 
 
 # ---------------------------------------------------------------------------
@@ -205,10 +190,11 @@ async def summarize_report(meta: dict, text: str, model: str | None = None) -> d
 
     Returns {summary_md, key_points_md, tokens_in, tokens_out, model}.
     Raises on upstream failure — callers catch and mark parse_failed."""
-    key = _get_openrouter_key()
+    key = await ai_config.get_openrouter_key()
     if not key:
         raise RuntimeError("OpenRouter key not configured")
-    model = model or _get_default_model()
+    model = model or await ai_config.get_model_for_feature("wiki_ingestion")
+    started_at = datetime.now()
 
     prompt = build_summary_prompt(meta, text)
     payload = {
@@ -232,7 +218,17 @@ async def summarize_report(meta: dict, text: str, model: str | None = None) -> d
                 json=payload,
             )
     if resp.status_code != 200:
-        raise RuntimeError(f"OpenRouter {resp.status_code}: {resp.text[:300]}")
+        error = f"OpenRouter {resp.status_code}: {resp.text[:300]}"
+        await ai_config.record_usage(
+            google_sub=None,
+            feature="wiki_ingestion",
+            model=model,
+            model_profile="wiki_ingestion",
+            ok=False,
+            error=error,
+            latency_ms=int((datetime.now() - started_at).total_seconds() * 1000),
+        )
+        raise RuntimeError(error)
     data = resp.json()
     try:
         content = data["choices"][0]["message"]["content"]
@@ -240,12 +236,24 @@ async def summarize_report(meta: dict, text: str, model: str | None = None) -> d
         raise RuntimeError(f"OpenRouter response malformed: {data}") from exc
     usage = data.get("usage") or {}
     summary_md, key_points_md = _split_summary_sections(content)
+    used_model = data.get("model") or model
+    await ai_config.record_usage(
+        google_sub=None,
+        feature="wiki_ingestion",
+        model=used_model,
+        model_profile="wiki_ingestion",
+        input_tokens=usage.get("prompt_tokens") or 0,
+        output_tokens=usage.get("completion_tokens") or 0,
+        cost_usd=float(usage.get("cost") or 0),
+        latency_ms=int((datetime.now() - started_at).total_seconds() * 1000),
+        ok=True,
+    )
     return {
         "summary_md": summary_md,
         "key_points_md": key_points_md,
         "tokens_in": usage.get("prompt_tokens"),
         "tokens_out": usage.get("completion_tokens"),
-        "model": data.get("model") or model,
+        "model": used_model,
     }
 
 

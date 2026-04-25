@@ -17,6 +17,12 @@ URLs or server-side environment variables instead of copying their code.
 
 - Keep each project deployable on its own. `value-invest` should compose data and
   navigation, not vendor sibling project code.
+- Use `value-invest` `/admin.html` as the central operating console for linked
+  project config files. The admin API validates and writes each sibling
+  project's `config.json` locally:
+  - `holdingValue`: holding-company list and subsidiary share counts.
+  - `preferredSpread`: common/preferred pair list.
+  - `goldGap`: asset labels, portfolio code mapping, and gap thresholds.
 - Keep browser-facing integration URLs and public metadata in
   `window.APP_CONFIG.integrations`. The FastAPI `/app-config.js` route reads
   sibling project settings when they are present locally, then falls back to
@@ -53,3 +59,19 @@ Public base URLs can be overridden with:
 - `KIS_PROXY_BASE_URL`
 - `KIS_PROXY_TOKEN` (optional, sent as `X-KIS-Proxy-Token` when the proxy is
   configured with `KIS_PROXY_PUBLIC_TOKENS`)
+
+## AI Admin Operations
+
+The main admin console also owns runtime AI configuration:
+
+- OpenRouter key: stored server-side only when saved from admin, shown masked in
+  the UI. If no DB value exists, the app falls back to `OPENROUTER_API_KEY` from
+  process env or `keys.txt`.
+- Feature model registry:
+  - `portfolio_fast`
+  - `portfolio_balanced`
+  - `portfolio_premium`
+  - `wiki_qa`
+  - `wiki_ingestion`
+- Usage ledger: portfolio insight, wiki Q&A, and wiki ingestion calls write
+  token/cost/latency rows to `ai_usage_events`, summarized in admin.

@@ -15,6 +15,7 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+import ai_config
 import cache
 from deps import get_current_user
 
@@ -522,17 +523,13 @@ async def ask_stock(
 
     # Optional admin model override via payload.
     req_model = payload.get("model") if isinstance(payload, dict) else None
-    # Lazy import to keep wiki route import-light and avoid cycles.
-    from routes import portfolio as pf_mod
-    if not pf_mod._OPENROUTER_KEY:
+    openrouter_key = await ai_config.get_openrouter_key()
+    if not openrouter_key:
         raise HTTPException(status_code=500, detail="AI API 키가 설정되지 않았습니다.")
-    # Resolution order: admin payload override → WIKI_QA_MODEL env →
-    # _AI_DEFAULT_MODEL (the reasoning model used by portfolio analysis).
-    # Q&A is latency-sensitive for users, so a non-reasoning instruct
-    # model (e.g. Gemma 4 31B) usually fits better than a thinking model.
-    model = os.environ.get("WIKI_QA_MODEL") or pf_mod._AI_DEFAULT_MODEL
+    model = await ai_config.get_model_for_feature("wiki_qa")
     if req_model and user.get("is_admin"):
         model = req_model
+    started_at = datetime.now()
 
     # Retrieval sized by question complexity. Shallow questions skip
     # big wiki chunks; deep ones get TOP-8 with FTS + recency fallback.
@@ -579,7 +576,7 @@ async def ask_stock(
                     "POST",
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers={
-                        "Authorization": f"Bearer {pf_mod._OPENROUTER_KEY}",
+                        "Authorization": f"Bearer {openrouter_key}",
                         "Content-Type": "application/json",
                     },
                     json={
@@ -600,6 +597,15 @@ async def ask_stock(
                         except Exception:
                             msg = f"HTTP {resp.status_code}"
                         yield f"data: {_json.dumps({'content': f'API 오류: {msg}'})}\n\n"
+                        await ai_config.record_usage(
+                            google_sub=google_sub,
+                            feature="wiki_qa",
+                            model=model,
+                            model_profile="wiki_qa",
+                            ok=False,
+                            error=msg,
+                            latency_ms=int((datetime.now() - started_at).total_seconds() * 1000),
+                        )
                         yield f"data: {_json.dumps({'done': True, 'sources': source_ids, 'model': model, 'input_tokens': 0, 'output_tokens': 0, 'cost': 0})}\n\n"
                         return
 
@@ -634,6 +640,15 @@ async def ask_stock(
             except Exception as exc:
                 logger.exception("ask_stock stream error")
                 yield f"data: {_json.dumps({'content': f'오류: {exc}'})}\n\n"
+                await ai_config.record_usage(
+                    google_sub=google_sub,
+                    feature="wiki_qa",
+                    model=used_model,
+                    model_profile="wiki_qa",
+                    ok=False,
+                    error=str(exc),
+                    latency_ms=int((datetime.now() - started_at).total_seconds() * 1000),
+                )
                 yield f"data: {_json.dumps({'done': True, 'sources': source_ids, 'model': used_model, 'input_tokens': 0, 'output_tokens': 0, 'cost': 0})}\n\n"
                 return
 
@@ -654,6 +669,17 @@ async def ask_stock(
             })
         except Exception:
             logger.exception("qa history save failed")
+        await ai_config.record_usage(
+            google_sub=google_sub,
+            feature="wiki_qa",
+            model=used_model,
+            model_profile="wiki_qa",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=float(cost or 0),
+            latency_ms=int((datetime.now() - started_at).total_seconds() * 1000),
+            ok=True,
+        )
         yield f"data: {_json.dumps({'done': True, 'sources': source_ids, 'model': used_model, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

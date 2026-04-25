@@ -11,6 +11,9 @@ from pathlib import Path
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
+import ai_config
+import linked_project_admin
+import observability
 from deps import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -266,6 +269,116 @@ async def trigger_job(job_name: str, request: Request):
 async def list_users(request: Request):
     await _require_admin(request)
     return await cache.get_all_users()
+
+
+# ---------------------------------------------------------------------------
+# Linked project config management
+# ---------------------------------------------------------------------------
+
+@router.get("/linked-project-configs")
+async def linked_project_configs(request: Request):
+    await _require_admin(request)
+    return linked_project_admin.list_project_configs()
+
+
+@router.get("/linked-project-configs/{project_key}")
+async def linked_project_config(project_key: str, request: Request):
+    await _require_admin(request)
+    try:
+        return linked_project_admin.get_project_config(project_key)
+    except linked_project_admin.LinkedProjectConfigError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/linked-project-configs/{project_key}")
+async def save_linked_project_config(project_key: str, request: Request, payload: dict = Body(...)):
+    user = await _require_admin(request)
+    config = payload.get("config") if isinstance(payload, dict) else None
+    if config is None:
+        raise HTTPException(status_code=400, detail="config payload is required.")
+    try:
+        saved = linked_project_admin.save_project_config(project_key, config)
+    except linked_project_admin.LinkedProjectConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await observability.record_event(
+        "admin",
+        "linked_project_config_saved",
+        level="info",
+        details={
+            "actor": user.get("email") or user.get("google_sub"),
+            "project_key": project_key,
+            "count": saved.get("summary", {}).get("count"),
+            "config_path": saved.get("configPath"),
+        },
+        wait=True,
+    )
+    return saved
+
+
+# ---------------------------------------------------------------------------
+# AI operations: key status, model registry, usage
+# ---------------------------------------------------------------------------
+
+@router.get("/ai-config")
+async def ai_admin_config(request: Request, days: int = Query(30, ge=1, le=365)):
+    await _require_admin(request)
+    return await ai_config.ai_admin_config(days=days)
+
+
+@router.put("/ai-config/key")
+async def save_ai_key(request: Request, payload: dict = Body(...)):
+    user = await _require_admin(request)
+    key = str((payload or {}).get("openrouter_api_key") or "").strip()
+    try:
+        await ai_config.set_openrouter_key(key, user.get("email") or user.get("google_sub"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await observability.record_event(
+        "admin",
+        "ai_key_saved",
+        level="info",
+        details={"actor": user.get("email") or user.get("google_sub"), "provider": "openrouter"},
+        wait=True,
+    )
+    return await ai_config.ai_admin_config()
+
+
+@router.delete("/ai-config/key")
+async def delete_ai_key(request: Request):
+    user = await _require_admin(request)
+    await ai_config.delete_openrouter_key()
+    await observability.record_event(
+        "admin",
+        "ai_key_deleted",
+        level="warning",
+        details={"actor": user.get("email") or user.get("google_sub"), "provider": "openrouter"},
+        wait=True,
+    )
+    return await ai_config.ai_admin_config()
+
+
+@router.put("/ai-config/models")
+async def save_ai_models(request: Request, payload: dict = Body(...)):
+    user = await _require_admin(request)
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, dict):
+        raise HTTPException(status_code=400, detail="models object is required.")
+    try:
+        await ai_config.save_feature_models(models, user.get("email") or user.get("google_sub"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await observability.record_event(
+        "admin",
+        "ai_models_saved",
+        level="info",
+        details={
+            "actor": user.get("email") or user.get("google_sub"),
+            "features": sorted(models),
+        },
+        wait=True,
+    )
+    return await ai_config.ai_admin_config()
 
 
 # ---------------------------------------------------------------------------

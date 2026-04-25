@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+import ai_config
 import asset_insights
 import cache
 import integrations
@@ -2047,9 +2048,13 @@ def _ai_model_profiles() -> dict[str, str]:
     }
 
 
-def _resolve_ai_model(payload: dict, user: dict) -> tuple[str, str]:
+async def _ai_model_profiles_async() -> dict[str, str]:
+    return await ai_config.model_profiles()
+
+
+async def _resolve_ai_model(payload: dict, user: dict) -> tuple[str, str]:
     profile = str(payload.get("profile") or payload.get("mode") or "balanced").strip().lower()
-    profiles = _ai_model_profiles()
+    profiles = await _ai_model_profiles_async()
     if profile not in profiles:
         profile = "balanced"
     model = profiles[profile]
@@ -2092,8 +2097,10 @@ def _fmt_krw_ai(v: float) -> str:
 async def ai_model_list(request: Request):
     """Return available OpenRouter models (for admin model picker)."""
     user = _require_user(await get_current_user(request))
-    if not _OPENROUTER_KEY:
-        return {"models": [], "default": _AI_DEFAULT_MODEL, "profiles": _ai_model_profiles()}
+    profiles = await _ai_model_profiles_async()
+    openrouter_key = await ai_config.get_openrouter_key()
+    if not openrouter_key:
+        return {"models": [], "default": profiles["balanced"], "profiles": profiles}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get("https://openrouter.ai/api/v1/models")
@@ -2109,19 +2116,21 @@ async def ai_model_list(request: Request):
                     "context": m.get("context_length", 0),
                 })
             models.sort(key=lambda x: x["id"])
-            return {"models": models, "default": _AI_DEFAULT_MODEL, "profiles": _ai_model_profiles()}
+            return {"models": models, "default": profiles["balanced"], "profiles": profiles}
     except Exception as exc:
         logger.warning("Failed to fetch OpenRouter models: %s", exc)
-        return {"models": [], "default": _AI_DEFAULT_MODEL, "profiles": _ai_model_profiles()}
+        return {"models": [], "default": profiles["balanced"], "profiles": profiles}
 
 
 @router.post("/api/portfolio/ai-analysis")
 async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={})):
     user = _require_user(await get_current_user(request))
-    if not _OPENROUTER_KEY:
+    openrouter_key = await ai_config.get_openrouter_key()
+    if not openrouter_key:
         raise HTTPException(status_code=500, detail="AI API 키가 설정되지 않았습니다.")
 
-    model, model_profile = _resolve_ai_model(payload, user)
+    model, model_profile = await _resolve_ai_model(payload, user)
+    started_at = time.perf_counter()
 
     # Optional user inquiry/question to include in the prompt
     user_query = (payload.get("query") or "").strip()
@@ -2267,7 +2276,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                 "POST",
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {_OPENROUTER_KEY}",
+                    "Authorization": f"Bearer {openrouter_key}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -2289,6 +2298,15 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                     except Exception:
                         msg = f"HTTP {resp.status_code}"
                     yield f"data: {_json.dumps({'content': f'API 오류: {msg}'})}\n\n"
+                    await ai_config.record_usage(
+                        google_sub=google_sub,
+                        feature="portfolio_analysis",
+                        model=model,
+                        model_profile=model_profile,
+                        ok=False,
+                        error=msg,
+                        latency_ms=int((time.perf_counter() - started_at) * 1000),
+                    )
                     yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'model_profile': model_profile, 'cost': 0, 'wiki_used': wiki_used_count})}\n\n"
                     return
 
@@ -2324,6 +2342,17 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                             cost = usage.get("cost", cost) or cost
                     except Exception:
                         continue
+                await ai_config.record_usage(
+                    google_sub=google_sub,
+                    feature="portfolio_analysis",
+                    model=model,
+                    model_profile=model_profile,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_usd=float(cost or 0),
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                    ok=True,
+                )
                 yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'model_profile': model_profile, 'cost': cost, 'wiki_used': wiki_used_count})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

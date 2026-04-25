@@ -2,6 +2,8 @@
 
 let _adminLoaded = false;
 let _liveInterval = null;
+let _linkedProjectConfigs = [];
+let _aiAdminConfig = null;
 
 async function loadAdminView() {
   const container = document.getElementById('adminContent');
@@ -13,7 +15,7 @@ async function loadAdminView() {
     // deploy-status answers the "did my push land" question at a glance,
     // so it sits right next to the other meta-status calls and renders
     // at the top of the page.
-    const [deployRes, batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes] = await Promise.all([
+    const [deployRes, batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes, linkedConfigsRes, aiConfigRes] = await Promise.all([
       apiFetch('/api/admin/deploy-status'),
       apiFetch('/api/admin/batch-status'),
       apiFetch('/api/admin/server-stats'),
@@ -21,6 +23,8 @@ async function loadAdminView() {
       apiFetch('/api/admin/users'),
       apiFetch('/api/admin/event-summary?hours=24'),
       apiFetch('/api/admin/events?limit=50'),
+      apiFetch('/api/admin/linked-project-configs'),
+      apiFetch('/api/admin/ai-config'),
     ]);
     // deploy-status may 404 on servers that haven't picked up this build
     // yet — which is, ironically, exactly the state this card is built
@@ -33,7 +37,9 @@ async function loadAdminView() {
     const users = await usersRes.json();
     const summary = summaryRes.ok ? await summaryRes.json() : {by_source: {}, latest: {}};
     const events = eventsRes.ok ? await eventsRes.json() : [];
-    container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events);
+    _linkedProjectConfigs = linkedConfigsRes.ok ? await linkedConfigsRes.json() : [];
+    _aiAdminConfig = aiConfigRes.ok ? await aiConfigRes.json() : null;
+    container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events, _linkedProjectConfigs, _aiAdminConfig);
     _adminLoaded = true;
     _startLiveUpdates();
     // 해외 배당 목록은 섹션 HTML 삽입 후에만 컨테이너가 존재 — 별도
@@ -44,7 +50,7 @@ async function loadAdminView() {
   }
 }
 
-function _renderAdmin(deploy, batch, server, db, users, summary, events) {
+function _renderAdmin(deploy, batch, server, db, users, summary, events, linkedConfigs, aiConfig) {
   return `
     <div class="admin-dashboard">
       <h2 class="admin-title">시스템 관리</h2>
@@ -53,6 +59,8 @@ function _renderAdmin(deploy, batch, server, db, users, summary, events) {
       ${_renderBatchSection(batch)}
       ${_renderSubsystemSummary(summary)}
       ${_renderDataSyncSection()}
+      ${_renderAiConfigSection(aiConfig)}
+      ${_renderLinkedProjectConfigSection(linkedConfigs)}
       ${_renderDiagSection()}
       ${_renderEventsSection(events)}
       ${_renderUsersSection(users)}
@@ -293,6 +301,463 @@ async function refreshPreferredDividends() {
     result.innerHTML = `<div style="color:var(--color-danger)">요청 실패: ${_esc(e.name + ': ' + e.message)}</div>`;
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+// --- AI operations ------------------------------------------------------
+
+function _renderAiConfigSection(config) {
+  if (!config) {
+    return `
+      <div class="admin-section">
+        <h3>AI 운영 관리</h3>
+        <div class="admin-sub admin-status-fail">AI 설정을 불러오지 못했습니다.</div>
+      </div>
+    `;
+  }
+  const key = config.openrouter || {};
+  const keyStatus = key.configured
+    ? `<span class="admin-status-ok">설정됨</span> <code>${_esc(key.masked || '')}</code> <span class="admin-sub">${_esc(key.source || '')}</span>`
+    : '<span class="admin-status-fail">미설정</span>';
+  const featureRows = (config.features || []).map(f => `
+    <tr>
+      <td>${_esc(f.label)}<div class="admin-sub"><code>${_esc(f.key)}</code> · ${_esc(f.source)}</div></td>
+      <td>
+        <input data-ai-feature="${_esc(f.key)}" value="${_esc(f.model)}" style="${_adminInputStyle()}width:100%;font-family:monospace;">
+      </td>
+    </tr>
+  `).join('');
+  const usageRows = (config.usage?.by_feature || []).map(row => `
+    <tr>
+      <td>${_esc(row.feature)}<div class="admin-sub">${_esc(row.model_profile || '')}</div></td>
+      <td><code>${_esc(row.model)}</code></td>
+      <td class="admin-num">${Number(row.calls || 0).toLocaleString()}</td>
+      <td class="admin-num">${Number(row.input_tokens || 0).toLocaleString()} / ${Number(row.output_tokens || 0).toLocaleString()}</td>
+      <td class="admin-num">$${Number(row.cost_usd || 0).toFixed(4)}</td>
+      <td class="admin-num">${row.avg_latency_ms ? Math.round(row.avg_latency_ms).toLocaleString() + 'ms' : '-'}</td>
+      <td class="${Number(row.errors || 0) > 0 ? 'admin-status-fail' : 'admin-status-ok'}">${Number(row.errors || 0)}</td>
+    </tr>
+  `).join('');
+  return `
+    <div class="admin-section" id="aiConfigSection">
+      <h3>AI 운영 관리 <span class="admin-sub">키·기능별 모델·사용량</span></h3>
+      <div id="aiConfigResult" class="admin-sub" style="margin-bottom:8px;"></div>
+      <div class="admin-cards">
+        <div class="admin-card">
+          <div class="admin-card-label">OpenRouter API Key</div>
+          <div class="admin-card-value">${keyStatus}</div>
+          <div class="admin-sub">${_esc(key.updated_at || '')} ${_esc(key.updated_by || '')}</div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-label">최근 ${config.usage?.days || 30}일 AI 비용</div>
+          <div class="admin-card-value">$${_sumAiCost(config).toFixed(4)}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin:12px 0;flex-wrap:wrap;">
+        <input id="aiOpenRouterKey" type="password" placeholder="새 OpenRouter API key"
+               style="${_adminInputStyle()}min-width:320px;">
+        <button class="admin-btn" onclick="saveAiKey()">키 저장/교체</button>
+        <button class="admin-btn admin-btn-secondary" onclick="deleteAiKey()">DB 저장 키 삭제</button>
+        <span class="admin-sub">화면에는 마스킹만 표시됩니다. env/keys.txt 키는 삭제하지 않습니다.</span>
+      </div>
+      <table class="admin-table admin-table-compact">
+        <thead><tr><th>기능</th><th>사용 모델</th></tr></thead>
+        <tbody>${featureRows}</tbody>
+      </table>
+      <div style="margin-top:8px;">
+        <button class="admin-btn" onclick="saveAiModels()">기능별 모델 저장</button>
+      </div>
+      <div style="margin-top:16px;">
+        <strong>사용량</strong>
+        <table class="admin-table admin-table-compact" style="margin-top:4px;">
+          <thead><tr><th>기능</th><th>모델</th><th>호출</th><th>입력/출력 토큰</th><th>비용</th><th>평균 지연</th><th>오류</th></tr></thead>
+          <tbody>${usageRows || '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">아직 기록된 AI 사용량이 없습니다.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _sumAiCost(config) {
+  return (config?.usage?.by_feature || []).reduce((sum, row) => sum + Number(row.cost_usd || 0), 0);
+}
+
+function _showAiConfigMessage(message, isError) {
+  const el = document.getElementById('aiConfigResult');
+  if (el) {
+    el.innerHTML = `<span class="${isError ? 'admin-status-fail' : 'admin-status-ok'}">${_esc(message)}</span>`;
+  }
+}
+
+async function _refreshAiConfigSection() {
+  const res = await apiFetch('/api/admin/ai-config');
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data) throw new Error(data?.detail || res.statusText || 'AI 설정 갱신 실패');
+  _aiAdminConfig = data;
+  const section = document.getElementById('aiConfigSection');
+  if (section) section.outerHTML = _renderAiConfigSection(_aiAdminConfig);
+}
+
+async function saveAiKey() {
+  const key = (document.getElementById('aiOpenRouterKey')?.value || '').trim();
+  if (!key) {
+    _showAiConfigMessage('새 API key를 입력하세요.', true);
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/ai-config/key', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ openrouter_api_key: key }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.detail || res.statusText || '키 저장 실패');
+    _aiAdminConfig = data;
+    document.getElementById('aiConfigSection').outerHTML = _renderAiConfigSection(_aiAdminConfig);
+    _showAiConfigMessage('AI API key를 저장했습니다.', false);
+  } catch (e) {
+    _showAiConfigMessage(e.message, true);
+  }
+}
+
+async function deleteAiKey() {
+  if (!confirm('DB에 저장된 OpenRouter key를 삭제할까요? env/keys.txt 값은 그대로 둡니다.')) return;
+  try {
+    const res = await apiFetch('/api/admin/ai-config/key', { method: 'DELETE' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.detail || res.statusText || '키 삭제 실패');
+    _aiAdminConfig = data;
+    document.getElementById('aiConfigSection').outerHTML = _renderAiConfigSection(_aiAdminConfig);
+    _showAiConfigMessage('DB 저장 key를 삭제했습니다.', false);
+  } catch (e) {
+    _showAiConfigMessage(e.message, true);
+  }
+}
+
+async function saveAiModels() {
+  const models = {};
+  document.querySelectorAll('[data-ai-feature]').forEach(input => {
+    models[input.getAttribute('data-ai-feature')] = input.value.trim();
+  });
+  try {
+    const res = await apiFetch('/api/admin/ai-config/models', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.detail || res.statusText || '모델 저장 실패');
+    _aiAdminConfig = data;
+    document.getElementById('aiConfigSection').outerHTML = _renderAiConfigSection(_aiAdminConfig);
+    _showAiConfigMessage('기능별 모델을 저장했습니다.', false);
+  } catch (e) {
+    _showAiConfigMessage(e.message, true);
+  }
+}
+
+// --- Linked project config management ----------------------------------
+
+function _linkedProjectConfigMap(configs) {
+  const map = {};
+  (configs || []).forEach(p => { map[p.key] = p; });
+  return map;
+}
+
+function _projectConfigRows(project) {
+  return Array.isArray(project?.config) ? project.config : [];
+}
+
+function _renderProjectConfigBanner(project) {
+  if (!project) {
+    return '<div class="admin-sub admin-status-fail">설정을 불러오지 못했습니다.</div>';
+  }
+  const status = project.configLoaded
+    ? `<span class="admin-status-ok">로컬 config 로드됨</span>`
+    : `<span class="admin-status-fail">config 없음</span>`;
+  const writable = project.writable
+    ? '<span class="admin-status-ok">저장 가능</span>'
+    : '<span class="admin-status-fail">저장 불가</span>';
+  return `
+    <div class="admin-sub" style="margin:4px 0 10px;">
+      ${status} · ${writable} · ${_esc(project.repo || '')}
+      ${project.configPath ? `<br><code>${_esc(project.configPath)}</code>` : ''}
+    </div>
+  `;
+}
+
+function _renderLinkedProjectConfigSection(configs) {
+  const map = _linkedProjectConfigMap(configs);
+  return `
+    <div class="admin-section" id="linkedProjectConfigSection">
+      <h3>서브프로젝트 설정 관리 <span class="admin-sub">config.json 원천 목록 편집</span></h3>
+      <div id="linkedConfigResult" class="admin-sub" style="margin-bottom:8px;"></div>
+      ${_renderPreferredConfigManager(map.preferredSpread)}
+      ${_renderHoldingConfigManager(map.holdingValue)}
+      ${_renderGoldConfigManager(map.goldGap)}
+    </div>
+  `;
+}
+
+function _renderPreferredConfigManager(project) {
+  const rows = _projectConfigRows(project);
+  const body = rows.map((row, idx) => `
+    <tr>
+      <td><code>${_esc(row.preferredTicker)}</code><div class="admin-sub">${_esc(row.preferredName)}</div></td>
+      <td><code>${_esc(row.commonTicker)}</code><div class="admin-sub">${_esc(row.commonName)}</div></td>
+      <td>${_esc(row.name)}</td>
+      <td>
+        <button class="admin-btn admin-btn-secondary" onclick="editPreferredConfigItem(${idx})">수정</button>
+        <button class="admin-btn admin-btn-secondary" onclick="deletePreferredConfigItem(${idx})">삭제</button>
+      </td>
+    </tr>
+  `).join('');
+  return `
+    <details open style="margin-top:12px;">
+      <summary style="cursor:pointer;font-weight:600;">우선주 pair 목록 <span class="admin-sub">${rows.length}개</span></summary>
+      ${_renderProjectConfigBanner(project)}
+      <form onsubmit="event.preventDefault(); savePreferredConfigItem();" style="display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:8px;margin:10px 0;">
+        <input type="hidden" id="prefCfgIndex">
+        <input id="prefCfgId" placeholder="id" style="${_adminInputStyle()}">
+        <input id="prefCfgName" placeholder="표시명" style="${_adminInputStyle()}">
+        <input id="prefCfgCommonTicker" placeholder="본주 ticker" style="${_adminInputStyle()}">
+        <input id="prefCfgPreferredTicker" placeholder="우선주 ticker" style="${_adminInputStyle()}">
+        <input id="prefCfgCommonName" placeholder="본주명" style="${_adminInputStyle()}">
+        <input id="prefCfgPreferredName" placeholder="우선주명" style="${_adminInputStyle()}">
+        <button class="admin-btn" type="submit">추가/수정</button>
+        <button class="admin-btn admin-btn-secondary" type="button" onclick="resetPreferredConfigForm()">초기화</button>
+      </form>
+      <table class="admin-table admin-table-compact">
+        <thead><tr><th>우선주</th><th>본주</th><th>이름</th><th>작업</th></tr></thead>
+        <tbody>${body || '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary)">목록 없음</td></tr>'}</tbody>
+      </table>
+    </details>
+  `;
+}
+
+function _renderHoldingConfigManager(project) {
+  const rows = _projectConfigRows(project);
+  const body = rows.map((row, idx) => {
+    const subs = (row.subsidiaries || []).map(s => `${s.name || s.ticker} ${Number(s.sharesHeld || 0).toLocaleString()}주`).join(', ');
+    return `
+      <tr>
+        <td><code>${_esc(row.holdingTicker)}</code><div class="admin-sub">${_esc(row.holdingName)}</div></td>
+        <td>${Number(row.holdingTotalShares || 0).toLocaleString()}</td>
+        <td>${Number(row.holdingTreasuryShares || 0).toLocaleString()}</td>
+        <td class="admin-sub">${_esc(subs)}</td>
+        <td>
+          <button class="admin-btn admin-btn-secondary" onclick="editHoldingConfigItem(${idx})">수정</button>
+          <button class="admin-btn admin-btn-secondary" onclick="deleteHoldingConfigItem(${idx})">삭제</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <details style="margin-top:18px;">
+      <summary style="cursor:pointer;font-weight:600;">지주사 목록 <span class="admin-sub">${rows.length}개</span></summary>
+      ${_renderProjectConfigBanner(project)}
+      <form onsubmit="event.preventDefault(); saveHoldingConfigItem();" style="display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:8px;margin:10px 0;">
+        <input type="hidden" id="holdingCfgIndex">
+        <input id="holdingCfgId" placeholder="id" style="${_adminInputStyle()}">
+        <input id="holdingCfgName" placeholder="표시명" style="${_adminInputStyle()}">
+        <input id="holdingCfgHoldingName" placeholder="지주사명" style="${_adminInputStyle()}">
+        <input id="holdingCfgTicker" placeholder="지주사 ticker" style="${_adminInputStyle()}">
+        <input id="holdingCfgTotalShares" type="number" min="0" placeholder="총 발행주식" style="${_adminInputStyle()}">
+        <input id="holdingCfgTreasuryShares" type="number" min="0" placeholder="자사주" style="${_adminInputStyle()}">
+        <textarea id="holdingCfgSubsidiaries" placeholder='[{"name":"자회사","ticker":"005930.KS","sharesHeld":1000}]' style="${_adminInputStyle()}grid-column:1/-1;min-height:72px;font-family:monospace;"></textarea>
+        <button class="admin-btn" type="submit">추가/수정</button>
+        <button class="admin-btn admin-btn-secondary" type="button" onclick="resetHoldingConfigForm()">초기화</button>
+      </form>
+      <table class="admin-table admin-table-compact">
+        <thead><tr><th>지주사</th><th>총 발행주식</th><th>자사주</th><th>자회사</th><th>작업</th></tr></thead>
+        <tbody>${body || '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">목록 없음</td></tr>'}</tbody>
+      </table>
+    </details>
+  `;
+}
+
+function _renderGoldConfigManager(project) {
+  const jsonText = JSON.stringify(project?.config || {}, null, 2);
+  return `
+    <details style="margin-top:18px;">
+      <summary style="cursor:pointer;font-weight:600;">Gold Gap asset 설정 <span class="admin-sub">${project?.summary?.count || 0}개</span></summary>
+      ${_renderProjectConfigBanner(project)}
+      <textarea id="goldGapConfigJson" style="${_adminInputStyle()}width:100%;min-height:210px;font-family:monospace;">${_esc(jsonText)}</textarea>
+      <div style="margin-top:8px;">
+        <button class="admin-btn" onclick="saveGoldGapConfig()">저장</button>
+      </div>
+    </details>
+  `;
+}
+
+function _adminInputStyle() {
+  return 'padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text-primary);';
+}
+
+async function saveLinkedProjectConfig(projectKey, config) {
+  const res = await apiFetch(`/api/admin/linked-project-configs/${encodeURIComponent(projectKey)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || res.statusText || '저장 실패');
+  }
+  const idx = _linkedProjectConfigs.findIndex(p => p.key === projectKey);
+  if (idx >= 0) _linkedProjectConfigs[idx] = data;
+  else _linkedProjectConfigs.push(data);
+  const section = document.getElementById('linkedProjectConfigSection');
+  if (section) section.outerHTML = _renderLinkedProjectConfigSection(_linkedProjectConfigs);
+  return data;
+}
+
+function _showLinkedConfigMessage(message, isError) {
+  const el = document.getElementById('linkedConfigResult');
+  if (el) {
+    el.innerHTML = `<span class="${isError ? 'admin-status-fail' : 'admin-status-ok'}">${_esc(message)}</span>`;
+  }
+}
+
+function _currentPreferredRows() {
+  return _projectConfigRows(_linkedProjectConfigMap(_linkedProjectConfigs).preferredSpread);
+}
+
+function editPreferredConfigItem(index) {
+  const row = _currentPreferredRows()[index];
+  if (!row) return;
+  document.getElementById('prefCfgIndex').value = String(index);
+  document.getElementById('prefCfgId').value = row.id || '';
+  document.getElementById('prefCfgName').value = row.name || '';
+  document.getElementById('prefCfgCommonTicker').value = row.commonTicker || '';
+  document.getElementById('prefCfgPreferredTicker').value = row.preferredTicker || '';
+  document.getElementById('prefCfgCommonName').value = row.commonName || '';
+  document.getElementById('prefCfgPreferredName').value = row.preferredName || '';
+}
+
+function resetPreferredConfigForm() {
+  ['prefCfgIndex', 'prefCfgId', 'prefCfgName', 'prefCfgCommonTicker', 'prefCfgPreferredTicker', 'prefCfgCommonName', 'prefCfgPreferredName']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+}
+
+async function savePreferredConfigItem() {
+  const rows = [..._currentPreferredRows()];
+  const row = {
+    id: document.getElementById('prefCfgId')?.value.trim(),
+    name: document.getElementById('prefCfgName')?.value.trim(),
+    commonTicker: document.getElementById('prefCfgCommonTicker')?.value.trim(),
+    preferredTicker: document.getElementById('prefCfgPreferredTicker')?.value.trim(),
+    commonName: document.getElementById('prefCfgCommonName')?.value.trim(),
+    preferredName: document.getElementById('prefCfgPreferredName')?.value.trim(),
+  };
+  const index = parseInt(document.getElementById('prefCfgIndex')?.value || '-1', 10);
+  if (Object.values(row).some(v => !v)) {
+    _showLinkedConfigMessage('우선주 항목의 모든 필드를 입력하세요.', true);
+    return;
+  }
+  if (index >= 0 && index < rows.length) rows[index] = row;
+  else rows.push(row);
+  try {
+    await saveLinkedProjectConfig('preferredSpread', rows);
+    _showLinkedConfigMessage('우선주 목록을 저장했습니다.', false);
+  } catch (e) {
+    _showLinkedConfigMessage(e.message, true);
+  }
+}
+
+async function deletePreferredConfigItem(index) {
+  const rows = [..._currentPreferredRows()];
+  const row = rows[index];
+  if (!row || !confirm(`${row.preferredName || row.preferredTicker} 항목을 삭제할까요?`)) return;
+  rows.splice(index, 1);
+  try {
+    await saveLinkedProjectConfig('preferredSpread', rows);
+    _showLinkedConfigMessage('우선주 항목을 삭제했습니다.', false);
+  } catch (e) {
+    _showLinkedConfigMessage(e.message, true);
+  }
+}
+
+function _currentHoldingRows() {
+  return _projectConfigRows(_linkedProjectConfigMap(_linkedProjectConfigs).holdingValue);
+}
+
+function editHoldingConfigItem(index) {
+  const row = _currentHoldingRows()[index];
+  if (!row) return;
+  document.getElementById('holdingCfgIndex').value = String(index);
+  document.getElementById('holdingCfgId').value = row.id || '';
+  document.getElementById('holdingCfgName').value = row.name || '';
+  document.getElementById('holdingCfgHoldingName').value = row.holdingName || '';
+  document.getElementById('holdingCfgTicker').value = row.holdingTicker || '';
+  document.getElementById('holdingCfgTotalShares').value = row.holdingTotalShares || 0;
+  document.getElementById('holdingCfgTreasuryShares').value = row.holdingTreasuryShares || 0;
+  document.getElementById('holdingCfgSubsidiaries').value = JSON.stringify(row.subsidiaries || [], null, 2);
+}
+
+function resetHoldingConfigForm() {
+  ['holdingCfgIndex', 'holdingCfgId', 'holdingCfgName', 'holdingCfgHoldingName', 'holdingCfgTicker', 'holdingCfgTotalShares', 'holdingCfgTreasuryShares', 'holdingCfgSubsidiaries']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+}
+
+async function saveHoldingConfigItem() {
+  const rows = [..._currentHoldingRows()];
+  let subsidiaries;
+  try {
+    subsidiaries = JSON.parse(document.getElementById('holdingCfgSubsidiaries')?.value || '[]');
+  } catch (e) {
+    _showLinkedConfigMessage('자회사 JSON 형식이 올바르지 않습니다.', true);
+    return;
+  }
+  const row = {
+    id: document.getElementById('holdingCfgId')?.value.trim(),
+    name: document.getElementById('holdingCfgName')?.value.trim(),
+    holdingName: document.getElementById('holdingCfgHoldingName')?.value.trim(),
+    holdingTicker: document.getElementById('holdingCfgTicker')?.value.trim(),
+    holdingTotalShares: Number(document.getElementById('holdingCfgTotalShares')?.value || 0),
+    holdingTreasuryShares: Number(document.getElementById('holdingCfgTreasuryShares')?.value || 0),
+    subsidiaries,
+  };
+  const index = parseInt(document.getElementById('holdingCfgIndex')?.value || '-1', 10);
+  if (!row.id || !row.name || !row.holdingName || !row.holdingTicker) {
+    _showLinkedConfigMessage('지주사 항목의 기본 필드를 입력하세요.', true);
+    return;
+  }
+  if (index >= 0 && index < rows.length) rows[index] = row;
+  else rows.push(row);
+  try {
+    await saveLinkedProjectConfig('holdingValue', rows);
+    _showLinkedConfigMessage('지주사 목록을 저장했습니다.', false);
+  } catch (e) {
+    _showLinkedConfigMessage(e.message, true);
+  }
+}
+
+async function deleteHoldingConfigItem(index) {
+  const rows = [..._currentHoldingRows()];
+  const row = rows[index];
+  if (!row || !confirm(`${row.holdingName || row.holdingTicker} 항목을 삭제할까요?`)) return;
+  rows.splice(index, 1);
+  try {
+    await saveLinkedProjectConfig('holdingValue', rows);
+    _showLinkedConfigMessage('지주사 항목을 삭제했습니다.', false);
+  } catch (e) {
+    _showLinkedConfigMessage(e.message, true);
+  }
+}
+
+async function saveGoldGapConfig() {
+  let config;
+  try {
+    config = JSON.parse(document.getElementById('goldGapConfigJson')?.value || '{}');
+  } catch (e) {
+    _showLinkedConfigMessage('Gold Gap JSON 형식이 올바르지 않습니다.', true);
+    return;
+  }
+  try {
+    await saveLinkedProjectConfig('goldGap', config);
+    _showLinkedConfigMessage('Gold Gap 설정을 저장했습니다.', false);
+  } catch (e) {
+    _showLinkedConfigMessage(e.message, true);
   }
 }
 

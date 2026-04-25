@@ -348,6 +348,35 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_system_events_source_ts ON system_events(source, ts DESC);
         CREATE INDEX IF NOT EXISTS idx_system_events_level_ts ON system_events(level, ts DESC);
 
+        -- Runtime admin settings. Secret values are still stored locally, but
+        -- API responses must only expose masked metadata. This lets the admin
+        -- rotate OpenRouter keys and model profiles without redeploying.
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key         TEXT PRIMARY KEY,
+            value       TEXT NOT NULL,
+            is_secret   INTEGER NOT NULL DEFAULT 0,
+            updated_by  TEXT,
+            updated_at  TEXT NOT NULL
+        );
+
+        -- AI usage ledger for cost and latency visibility by feature/model.
+        CREATE TABLE IF NOT EXISTS ai_usage_events (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts            TEXT NOT NULL,
+            google_sub    TEXT,
+            feature       TEXT NOT NULL,
+            model         TEXT NOT NULL,
+            model_profile TEXT,
+            input_tokens  INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_usd      REAL NOT NULL DEFAULT 0,
+            latency_ms    INTEGER,
+            ok            INTEGER NOT NULL DEFAULT 1,
+            error         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_usage_ts ON ai_usage_events(ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_ai_usage_feature_ts ON ai_usage_events(feature, ts DESC);
+
         -- Daily closing prices for market benchmarks we overlay on the NAV
         -- chart (KOSPI / SP500 / GOLD / ...). Keyed by (code, date) so a
         -- re-download is a no-op upsert. Populated by benchmark_history —
@@ -806,6 +835,108 @@ async def get_db_stats() -> dict:
     import os
     db_size = os.path.getsize(DB_PATH) if DB_PATH.exists() else 0
     return {"tables": tables, "db_size_bytes": db_size}
+
+
+async def get_app_setting(key: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT key, value, is_secret, updated_by, updated_at FROM app_settings WHERE key = ?",
+        (key,),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def set_app_setting(key: str, value: str, *, is_secret: bool = False, updated_by: str | None = None):
+    db = await get_db()
+    await db.execute(
+        """
+        INSERT INTO app_settings (key, value, is_secret, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            is_secret = excluded.is_secret,
+            updated_by = excluded.updated_by,
+            updated_at = excluded.updated_at
+        """,
+        (key, value, 1 if is_secret else 0, updated_by, datetime.now().isoformat()),
+    )
+    await db.commit()
+
+
+async def delete_app_setting(key: str):
+    db = await get_db()
+    await db.execute("DELETE FROM app_settings WHERE key = ?", (key,))
+    await db.commit()
+
+
+async def insert_ai_usage_event(
+    *,
+    google_sub: str | None,
+    feature: str,
+    model: str,
+    model_profile: str | None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cost_usd: float = 0.0,
+    latency_ms: int | None = None,
+    ok: bool = True,
+    error: str | None = None,
+):
+    db = await get_db()
+    await db.execute(
+        """
+        INSERT INTO ai_usage_events
+            (ts, google_sub, feature, model, model_profile, input_tokens, output_tokens, cost_usd, latency_ms, ok, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            datetime.now().isoformat(),
+            google_sub,
+            feature,
+            model,
+            model_profile,
+            int(input_tokens or 0),
+            int(output_tokens or 0),
+            float(cost_usd or 0),
+            latency_ms,
+            1 if ok else 0,
+            (error or "")[:500] if error else None,
+        ),
+    )
+    await db.commit()
+
+
+async def summarize_ai_usage(days: int = 30) -> dict:
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT feature, model, model_profile,
+               COUNT(*) AS calls,
+               SUM(input_tokens) AS input_tokens,
+               SUM(output_tokens) AS output_tokens,
+               SUM(cost_usd) AS cost_usd,
+               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS errors,
+               AVG(latency_ms) AS avg_latency_ms,
+               MAX(ts) AS latest_at
+        FROM ai_usage_events
+        WHERE ts >= datetime('now', ?)
+        GROUP BY feature, model, model_profile
+        ORDER BY cost_usd DESC, calls DESC
+        """,
+        (f"-{int(days)} days",),
+    )
+    by_feature = [dict(row) for row in await cursor.fetchall()]
+    cursor = await db.execute(
+        """
+        SELECT ts, feature, model, model_profile, input_tokens, output_tokens, cost_usd, latency_ms, ok, error
+        FROM ai_usage_events
+        ORDER BY ts DESC, id DESC
+        LIMIT 50
+        """,
+    )
+    recent = [dict(row) for row in await cursor.fetchall()]
+    return {"days": days, "by_feature": by_feature, "recent": recent}
 
 
 USER_RECENT_MAX = 20
