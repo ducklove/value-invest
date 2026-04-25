@@ -20,6 +20,7 @@ import kis_key_manager
 import kis_proxy_client
 import kis_ws_manager
 from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router, nps_router, backtest_router, admin_router
+from routes import portfolio as portfolio_routes
 from routes.internal import router as internal_router
 from routes.wiki import router as wiki_router
 
@@ -105,6 +106,13 @@ async def lifespan(app: FastAPI):
 
     _sd_notify("READY=1")
     watchdog_task = asyncio.create_task(_watchdog_loop())
+    insight_warmup_task = None
+    if os.environ.get("PORTFOLIO_INSIGHT_STARTUP_WARMUP", "1") != "0":
+        insight_warmup_task = asyncio.create_task(
+            portfolio_routes.warm_asset_insight_common(
+                initial_delay_seconds=float(os.environ.get("PORTFOLIO_INSIGHT_WARMUP_DELAY_S", "5"))
+            )
+        )
 
     # Continuous wiki ingestion. Interval is configurable via env (default
     # 30 min) and can be set to 0 to disable entirely (useful in tests /
@@ -146,6 +154,12 @@ async def lifespan(app: FastAPI):
     finally:
         _sd_notify("STOPPING=1")
         watchdog_task.cancel()
+        if insight_warmup_task:
+            insight_warmup_task.cancel()
+            try:
+                await insight_warmup_task
+            except (asyncio.CancelledError, Exception):
+                pass
         try:
             await watchdog_task
         except (asyncio.CancelledError, Exception):

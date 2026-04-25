@@ -1662,14 +1662,45 @@ function _isKoreanAnalysisCode(code) {
 }
 
 function _hasAssetInsight(code) {
-  if (!code) return false;
-  if (code.startsWith('CASH_')) return true;
-  if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(code)) return true;
-  return !_isKoreanAnalysisCode(code);
+  return Boolean(code);
+}
+
+function _analysisAction(stockCode, label = '분석 화면', hint = '재무/밸류에이션 분석') {
+  return {
+    id: `analysis-${stockCode}`,
+    label,
+    hint,
+    run: () => {
+      switchView('analysis');
+      analyzeStock(stockCode);
+    },
+  };
 }
 
 function _portfolioLinkActions(stockCode) {
   const actions = [];
+  if (_isKoreanAnalysisCode(stockCode)) {
+    if (_isPreferredStock(stockCode)) {
+      const commonCode = _preferredCommonCodeFor(stockCode);
+      actions.push(_analysisAction(commonCode, `본주 분석 (${commonCode})`));
+      actions.push({
+        id: 'preferred-spread',
+        label: '우선주 괴리율',
+        hint: '보통주 대비 스프레드',
+        run: () => openIntegration('preferredSpread', '', { code: stockCode }),
+      });
+    } else {
+      actions.push(_analysisAction(stockCode));
+      if (_HOLDING_CODES.has(stockCode)) {
+        actions.push({
+          id: 'holding-value',
+          label: '자회사 비율 추이',
+          hint: 'Holding Value 대시보드',
+          run: () => openIntegration('holdingValue', '', { code: stockCode }),
+        });
+      }
+    }
+  }
   if (_hasAssetInsight(stockCode)) {
     actions.push({
       id: 'insight',
@@ -2009,20 +2040,6 @@ function pfGoAnalyze(stockCode, e) {
   if (_runOrShowPortfolioLinks(stockCode, e)) {
     return;
   }
-  const isKorean = _isKoreanAnalysisCode(stockCode);
-  if (!isKorean) return;
-
-  if (_isPreferredStock(stockCode)) {
-    const commonCode = _preferredCommonCodeFor(stockCode);
-    _showPrefMenu(stockCode, commonCode, e);
-    return;
-  }
-  if (_HOLDING_CODES.has(stockCode)) {
-    _showHoldingMenu(stockCode, e);
-    return;
-  }
-  switchView('analysis');
-  analyzeStock(stockCode);
 }
 
 function _showPrefMenu(prefCode, commonCode, e) {

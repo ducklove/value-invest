@@ -3,9 +3,9 @@ import logging
 import os
 import re
 import time
+from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
-from datetime import datetime, timezone
 from urllib.parse import quote
 
 import httpx
@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 import asset_insights
 import cache
 import integrations
+import kis_proxy_client
 import kis_ws_manager
 import market_indicators
 import stock_price
@@ -956,6 +957,10 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
 _ASSET_HISTORY_CACHE_TTL = 15 * 60
 _asset_history_cache: dict[str, tuple[float, dict]] = {}
 _insight_fx_cache: dict[str, tuple[float, float]] = {}
+_insight_item_warm_cache: dict[str, float] = {}
+_insight_common_warm_ts: float = 0.0
+_insight_warmup_task: asyncio.Task | None = None
+_INSIGHT_WARMUP_TTL = 15 * 60
 
 _INSIGHT_FX_TICKER = {
     "USD": "KRW=X",
@@ -1058,6 +1063,56 @@ async def _download_yfinance_history(ticker: str, period: str = "1y") -> dict:
     return result
 
 
+async def _download_korean_history(code: str, period_days: int = 370) -> dict:
+    code = (code or "").strip()
+    if not _is_korean_stock(code):
+        return {"rows": [], "currency": None}
+    key = f"KIS:{code}:{period_days}"
+    now = _time.monotonic()
+    cached = _asset_history_cache.get(key)
+    if cached and (now - cached[0]) < _ASSET_HISTORY_CACHE_TTL:
+        return cached[1]
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=period_days)
+    try:
+        payload = await asyncio.wait_for(
+            kis_proxy_client.get_history(
+                code,
+                start_date=start_date,
+                end_date=end_date,
+                period="D",
+                adjusted=True,
+            ),
+            timeout=8.0,
+        )
+    except Exception as exc:
+        logger.warning("Korean asset insight history fetch failed (%s): %s", code, exc)
+        return {"rows": [], "currency": "KRW"}
+
+    items = payload.get("items") if isinstance(payload, dict) else []
+    if not items and isinstance(payload, dict):
+        for value in payload.values():
+            if isinstance(value, list) and value:
+                items = value
+                break
+    rows = []
+    for item in stock_price._sorted_history_items(items):
+        trade_date = stock_price._parse_date(
+            stock_price._get_first(item, "stck_bsop_date", "date", "trade_date", "business_date")
+        )
+        close = stock_price._safe_float(
+            stock_price._get_first(item, "stck_clpr", "close_price", "close"),
+            zero_as_none=False,
+        )
+        if trade_date and close is not None:
+            rows.append({"date": trade_date.isoformat(), "close": round(float(close), 6)})
+
+    result = {"rows": rows, "currency": "KRW"}
+    _asset_history_cache[key] = (now, result)
+    return result
+
+
 async def _asset_history_for_insight(code: str, item: dict) -> dict:
     special = asset_insights.yfinance_ticker_for_special_asset(code)
     if special:
@@ -1065,7 +1120,7 @@ async def _asset_history_for_insight(code: str, item: dict) -> dict:
     if _is_cash_asset(code):
         return {"rows": [], "currency": code.replace("CASH_", "")}
     if _is_korean_stock(code):
-        return {"rows": [], "currency": item.get("currency") or "KRW"}
+        return await _download_korean_history(code)
     await _ensure_ticker_map()
     ticker = _ticker_map.get(code) or _yfinance_direct_ticker(code)
     return await _download_yfinance_history(ticker)
@@ -1074,8 +1129,11 @@ async def _asset_history_for_insight(code: str, item: dict) -> dict:
 async def _benchmark_history_for_insight(benchmark_code: str | None) -> list[dict]:
     if not benchmark_code:
         return []
+    if _is_korean_stock(benchmark_code):
+        payload = await _download_korean_history(benchmark_code)
+        return payload.get("rows") or []
     ticker = _BENCHMARK_YF_TICKER.get(benchmark_code)
-    if not ticker and not _is_korean_stock(benchmark_code):
+    if not ticker:
         ticker = _yfinance_direct_ticker(benchmark_code)
     if not ticker:
         return []
@@ -1116,6 +1174,8 @@ def _macro_codes_for_asset(profile: dict, currency: str | None) -> list[str]:
     codes = ["USD_KRW"]
     if asset_class in {"foreign_stock", "foreign_etf"}:
         codes.extend(["SPX", "IXIC", "US10Y"])
+    elif asset_class == "korean_stock":
+        codes.extend(["KOSPI", "KOSDAQ", "KR3Y"])
     elif asset_class == "bond_etf":
         codes.extend(["US10Y", "KR3Y"])
     elif asset_class == "gold":
@@ -1157,6 +1217,88 @@ async def _fetch_insight_indicators(codes: list[str]) -> dict:
     except Exception as exc:
         logger.warning("asset insight indicator fetch failed: %s", exc)
         return {}
+
+
+async def warm_asset_insight_common(initial_delay_seconds: float = 0.0) -> None:
+    """Warm shared dependencies that made the first asset-insight click slow."""
+    global _insight_common_warm_ts
+    if initial_delay_seconds > 0:
+        await asyncio.sleep(initial_delay_seconds)
+    now = _time.monotonic()
+    if _insight_common_warm_ts and (now - _insight_common_warm_ts) < _INSIGHT_WARMUP_TTL:
+        return
+    try:
+        await asyncio.gather(
+            _insight_fx_rate("USD"),
+            _download_yfinance_history("^KS11"),
+            _download_yfinance_history("^KQ11"),
+            _download_yfinance_history("^GSPC"),
+            _download_yfinance_history("AGG"),
+            _download_yfinance_history("GC=F"),
+            _fetch_benchmark_quote("IDX_SP500"),
+            _fetch_benchmark_quote("IDX_KOSPI"),
+            _fetch_benchmark_quote("IDX_KOSDAQ"),
+            _fetch_insight_indicators(["USD_KRW", "KOSPI", "KOSDAQ", "SPX", "IXIC", "US10Y", "KR3Y", "CMDT_GC"]),
+            return_exceptions=True,
+        )
+        _insight_common_warm_ts = _time.monotonic()
+        logger.info("Portfolio asset insight common warmup completed")
+    except Exception as exc:
+        logger.warning("Portfolio asset insight common warmup failed: %s", exc)
+
+
+def _is_asset_insight_candidate(code: str) -> bool:
+    return bool((code or "").strip())
+
+
+async def _warm_asset_insight_item(item: dict) -> None:
+    code = item.get("stock_code") or ""
+    if not _is_asset_insight_candidate(code):
+        return
+    now = _time.monotonic()
+    last = _insight_item_warm_cache.get(code)
+    if last and (now - last) < _INSIGHT_WARMUP_TTL:
+        return
+
+    effective_benchmark = await _resolve_insight_benchmark(item)
+    profile = {
+        "code": code,
+        "name": item.get("stock_name") or code,
+        "currency": item.get("currency") or "",
+        **asset_insights.classify_asset(code, item.get("stock_name") or "", item.get("currency") or ""),
+    }
+    await asyncio.gather(
+        _fetch_quote_for_insight(code),
+        _asset_history_for_insight(code, item),
+        _benchmark_history_for_insight(effective_benchmark),
+        _fetch_insight_indicators(_macro_codes_for_asset(profile, item.get("currency"))),
+        return_exceptions=True,
+    )
+    _insight_item_warm_cache[code] = _time.monotonic()
+
+
+async def warm_asset_insights_for_items(items: list[dict]) -> None:
+    await warm_asset_insight_common()
+    limit = int(os.environ.get("PORTFOLIO_INSIGHT_WARMUP_LIMIT", "4"))
+    candidates = [it for it in items if _is_asset_insight_candidate(it.get("stock_code") or "")]
+    if limit > 0:
+        candidates = candidates[:limit]
+    if not candidates:
+        return
+    await asyncio.gather(*[_warm_asset_insight_item(it) for it in candidates], return_exceptions=True)
+
+
+def _schedule_asset_insight_warmup(items: list[dict]) -> None:
+    global _insight_warmup_task
+    if os.environ.get("PORTFOLIO_INSIGHT_WARMUP", "1") == "0":
+        return
+    if _insight_warmup_task and not _insight_warmup_task.done():
+        return
+    try:
+        _insight_warmup_task = asyncio.create_task(warm_asset_insights_for_items(items))
+        _insight_warmup_task.add_done_callback(lambda task: task.exception())
+    except RuntimeError:
+        return
 
 
 def _gold_gap_for_asset(code: str) -> dict | None:
@@ -1427,7 +1569,9 @@ async def get_portfolio(request: Request):
     dps_map = await cache.get_trailing_dividends(codes)
     for it in items:
         it["trailing_dps"] = dps_map.get(it["stock_code"])
-    return await _enrich_with_cached_quotes(items)
+    enriched = await _enrich_with_cached_quotes(items)
+    _schedule_asset_insight_warmup(enriched)
+    return enriched
 
 
 @router.put("/api/portfolio/{stock_code}")
