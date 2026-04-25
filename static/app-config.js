@@ -4,14 +4,28 @@ window.APP_CONFIG = {
   integrations: {
     holdingValue: {
       baseUrl: "https://ducklove.github.io/holding_value",
+      configUrl: "https://ducklove.github.io/holding_value/config.json",
       holdingsUrl: "https://ducklove.github.io/holding_value/api/holdings.json"
     },
     preferredSpread: {
-      baseUrl: "https://ducklove.github.io/common_preferred_spread"
+      baseUrl: "https://ducklove.github.io/common_preferred_spread",
+      configUrl: "https://ducklove.github.io/common_preferred_spread/config.json",
+      dataUrl: "https://ducklove.github.io/common_preferred_spread/data.js",
+      currentUrl: "https://ducklove.github.io/common_preferred_spread/current.json"
     },
     goldGap: {
       baseUrl: "https://ducklove.github.io/gold_gap",
-      dataUrl: "https://ducklove.github.io/gold_gap/data.json"
+      configUrl: "https://ducklove.github.io/gold_gap/config.json",
+      dataUrl: "https://ducklove.github.io/gold_gap/data.json",
+      assets: {
+        gold: { label: "Gold", portfolioCodes: ["KRX_GOLD"], thresholdPct: 5 },
+        bitcoin: { label: "Bitcoin", portfolioCodes: ["CRYPTO_BTC"], thresholdPct: 5 },
+        usdt: { label: "USDT", portfolioCodes: [], thresholdPct: 3 }
+      },
+      assetByPortfolioCode: {
+        KRX_GOLD: "gold",
+        CRYPTO_BTC: "bitcoin"
+      }
     },
     kisProxy: {
       baseUrl: "http://cantabile.tplinkdns.com:3288",

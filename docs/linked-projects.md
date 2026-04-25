@@ -17,9 +17,12 @@ URLs or server-side environment variables instead of copying their code.
 
 - Keep each project deployable on its own. `value-invest` should compose data and
   navigation, not vendor sibling project code.
-- Keep browser-facing integration URLs in `window.APP_CONFIG.integrations`.
-  The FastAPI `/app-config.js` route mirrors the same keys for the server-hosted
-  app.
+- Keep browser-facing integration URLs and public metadata in
+  `window.APP_CONFIG.integrations`. The FastAPI `/app-config.js` route reads
+  sibling project settings when they are present locally, then falls back to
+  public GitHub Pages URLs.
+- Use `/api/integrations` to inspect the normalized integration config that the
+  running `value-invest` server is currently exposing.
 - Keep KIS proxy access server-side. The proxy is public, but browser calls from
   the HTTPS app can hit mixed-content/CORS constraints and should not become the
   default path.
@@ -32,3 +35,19 @@ URLs or server-side environment variables instead of copying their code.
 - Holding-company stocks open `holdingValue` with `?code=<stock-code>`.
 - `KRX_GOLD` opens `goldGap` with `?asset=gold`.
 - `CRYPTO_BTC` opens `goldGap` with `?asset=bitcoin`.
+
+## Local Config Discovery
+
+By default `value-invest` looks one directory above the repo root for sibling
+projects. Override this with `LINKED_PROJECTS_ROOT` or per-project directories:
+
+- `HOLDING_VALUE_DIR`
+- `PREFERRED_SPREAD_DIR`
+- `GOLD_GAP_DIR`
+
+Public base URLs can be overridden with:
+
+- `HOLDING_VALUE_BASE_URL`
+- `PREFERRED_SPREAD_BASE_URL`
+- `GOLD_GAP_BASE_URL`
+- `KIS_PROXY_BASE_URL`

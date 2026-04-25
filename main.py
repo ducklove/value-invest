@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 import cache
 import dart_client
+import integrations
 import kis_key_manager
 import kis_proxy_client
 import kis_ws_manager
@@ -26,24 +27,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
-
-PUBLIC_INTEGRATIONS = {
-    "holdingValue": {
-        "baseUrl": "https://ducklove.github.io/holding_value",
-        "holdingsUrl": "https://ducklove.github.io/holding_value/api/holdings.json",
-    },
-    "preferredSpread": {
-        "baseUrl": "https://ducklove.github.io/common_preferred_spread",
-    },
-    "goldGap": {
-        "baseUrl": "https://ducklove.github.io/gold_gap",
-        "dataUrl": "https://ducklove.github.io/gold_gap/data.json",
-    },
-    "kisProxy": {
-        "baseUrl": "http://cantabile.tplinkdns.com:3288",
-        "role": "server-side",
-    },
-}
 
 # Asset version for cache busting — use short git hash, fall back to timestamp
 def _get_asset_version() -> str:
@@ -265,11 +248,16 @@ async def spa_pages():
 
 @app.get("/app-config.js")
 async def app_config():
-    payload = {"apiBaseUrl": "", "integrations": PUBLIC_INTEGRATIONS}
+    payload = integrations.build_app_config(api_base_url="")
     return Response(
         content=f"window.APP_CONFIG = {json.dumps(payload, ensure_ascii=False)};",
         media_type="application/javascript",
     )
+
+
+@app.get("/api/integrations")
+async def integrations_status():
+    return JSONResponse(integrations.build_public_integrations())
 
 
 @app.get("/styles.css")

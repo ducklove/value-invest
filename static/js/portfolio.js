@@ -807,8 +807,8 @@ function renderPortfolio() {
     const qtyStep = isSpecialFloat ? 'any' : '1';
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : isCash ? 2 : 8;
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
-    const goldGapAsset = _goldGapAssetForCode(r.stock_code);
-    const goldGapBtn = goldGapAsset ? `<button class="pf-row-btn js-pf-gold-gap" data-gap-asset="${escapeHtml(goldGapAsset)}" title="Gold gap dashboard">Gap</button>` : '';
+    const goldGapInfo = _goldGapInfoForCode(r.stock_code);
+    const goldGapBtn = goldGapInfo.asset ? `<button class="pf-row-btn js-pf-gold-gap" data-gap-asset="${escapeHtml(goldGapInfo.asset)}" title="${escapeHtml(goldGapInfo.title)}">${escapeHtml(goldGapInfo.label)}</button>` : '';
 
     const groupOpts = pfGroups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
 
@@ -1513,8 +1513,10 @@ async function pfAddFromSearch(code, name) {
   } catch (e) { showToast(e.message); }
 }
 
+let _PREFERRED_PAIR_BY_CODE = {};
+
 function _isPreferredStock(code) {
-  return /^[0-9]{5}[^0]$/.test(code) || /^[0-9]{5}[A-Z]$/.test(code);
+  return Boolean(_PREFERRED_PAIR_BY_CODE[code]) || /^[0-9]{5}[^0]$/.test(code) || /^[0-9]{5}[A-Z]$/.test(code);
 }
 
 // 외부 quote 캐시 — 포트폴리오에 없지만 목표가 계산에 필요한 종목들
@@ -1621,11 +1623,36 @@ function _targetPriceSource(item) {
   return 'default';
 }
 
-function _goldGapAssetForCode(code) {
-  return {
+function _initPreferredPairsFromConfig() {
+  const pairsByCode = getIntegrationConfig('preferredSpread').pairsByPreferredCode || {};
+  _PREFERRED_PAIR_BY_CODE = pairsByCode && typeof pairsByCode === 'object' ? pairsByCode : {};
+}
+
+_initPreferredPairsFromConfig();
+
+function _preferredCommonCodeFor(code) {
+  const pair = _PREFERRED_PAIR_BY_CODE[code];
+  if (pair && pair.commonCode) return pair.commonCode;
+  return code.slice(0, -1) + '0';
+}
+
+function _goldGapInfoForCode(code) {
+  const config = getIntegrationConfig('goldGap');
+  const assetByCode = config.assetByPortfolioCode || {};
+  const fallbackAsset = {
     KRX_GOLD: 'gold',
     CRYPTO_BTC: 'bitcoin',
   }[code] || '';
+  const asset = assetByCode[code] || fallbackAsset;
+  if (!asset) return { asset: '', label: '', title: '' };
+  const assetConfig = (config.assets && config.assets[asset]) || {};
+  const latestGap = Number(assetConfig.latestGapPct);
+  const hasLatestGap = Number.isFinite(latestGap);
+  const label = hasLatestGap ? `Gap ${latestGap >= 0 ? '+' : ''}${latestGap.toFixed(1)}%` : 'Gap';
+  const titleParts = [assetConfig.label || asset, 'gap dashboard'];
+  if (hasLatestGap) titleParts.push(`latest ${latestGap.toFixed(2)}%`);
+  if (assetConfig.latestDate) titleParts.push(assetConfig.latestDate);
+  return { asset, label, title: titleParts.join(' · ') };
 }
 
 function _openGoldGapDashboard(asset) {
@@ -1643,44 +1670,67 @@ let _HOLDING_CODES = new Set([
 // 새 holdingMeta 두 가지 병행 — 옛 키만 있는 사용자도 호환되도록 폴백.
 let _HOLDING_META = {};
 
+function _applyHoldingPayload(data, persist) {
+  const codes = (data.items || []).map(i => i.holdingCode).filter(Boolean);
+  const meta = {};
+  for (const it of (data.items || [])) {
+    if (!it.holdingCode) continue;
+    meta[it.holdingCode] = {
+      totalShares: it.holdingTotalShares || 0,
+      treasuryShares: it.holdingTreasuryShares || 0,
+      subsidiaries: (it.subsidiaries || [])
+        .filter(s => s.code && s.sharesHeld != null)
+        .map(s => ({ code: s.code, sharesHeld: s.sharesHeld })),
+    };
+  }
+  if (!codes.length) return false;
+  _HOLDING_CODES = new Set(codes);
+  _HOLDING_META = meta;
+  if (persist) {
+    localStorage.setItem('holdingCodes', JSON.stringify({ codes, ts: Date.now() }));
+    localStorage.setItem('holdingMeta', JSON.stringify({ meta, ts: Date.now() }));
+  }
+  return true;
+}
+
+function _applyHoldingIntegrationConfig() {
+  const config = getIntegrationConfig('holdingValue');
+  if (Array.isArray(config.items) && _applyHoldingPayload({ items: config.items }, false)) return true;
+  let applied = false;
+  if (Array.isArray(config.codes) && config.codes.length) {
+    _HOLDING_CODES = new Set(config.codes);
+    applied = true;
+  }
+  if (config.meta && typeof config.meta === 'object') {
+    _HOLDING_META = config.meta;
+    applied = true;
+  }
+  return applied;
+}
+
 (function _refreshHoldingCodes() {
+  const hasConfig = _applyHoldingIntegrationConfig();
   try {
     const codeCache = JSON.parse(localStorage.getItem('holdingCodes') || '{}');
-    if (codeCache.codes) _HOLDING_CODES = new Set(codeCache.codes);
     const metaCache = JSON.parse(localStorage.getItem('holdingMeta') || '{}');
-    if (metaCache.meta) _HOLDING_META = metaCache.meta;
-    if (codeCache.ts && metaCache.ts && Date.now() - Math.min(codeCache.ts, metaCache.ts) < 86400000) return;
+    if (!hasConfig) {
+      if (codeCache.codes) _HOLDING_CODES = new Set(codeCache.codes);
+      if (metaCache.meta) _HOLDING_META = metaCache.meta;
+    }
+    if (hasConfig || (codeCache.ts && metaCache.ts && Date.now() - Math.min(codeCache.ts, metaCache.ts) < 86400000)) return;
   } catch (e) { console.warn(e); }
   const holdingsUrl = getIntegrationEndpoint('holdingValue', 'holdingsUrl', 'api/holdings.json');
   if (!holdingsUrl) return;
   fetch(holdingsUrl)
     .then(r => r.json())
-    .then(data => {
-      const codes = (data.items || []).map(i => i.holdingCode).filter(Boolean);
-      const meta = {};
-      for (const it of (data.items || [])) {
-        if (!it.holdingCode) continue;
-        meta[it.holdingCode] = {
-          totalShares: it.holdingTotalShares || 0,
-          treasuryShares: it.holdingTreasuryShares || 0,
-          subsidiaries: (it.subsidiaries || [])
-            .filter(s => s.code && s.sharesHeld != null)
-            .map(s => ({ code: s.code, sharesHeld: s.sharesHeld })),
-        };
-      }
-      if (codes.length) {
-        _HOLDING_CODES = new Set(codes);
-        _HOLDING_META = meta;
-        localStorage.setItem('holdingCodes', JSON.stringify({ codes, ts: Date.now() }));
-        localStorage.setItem('holdingMeta', JSON.stringify({ meta, ts: Date.now() }));
-      }
-    }).catch(() => {});
+    .then(data => { _applyHoldingPayload(data, true); })
+    .catch(() => {});
 })();
 
 function pfGoAnalyze(stockCode, e) {
-  const goldGapAsset = _goldGapAssetForCode(stockCode);
-  if (goldGapAsset) {
-    _openGoldGapDashboard(goldGapAsset);
+  const goldGapInfo = _goldGapInfoForCode(stockCode);
+  if (goldGapInfo.asset) {
+    _openGoldGapDashboard(goldGapInfo.asset);
     return;
   }
   // Special assets, cash & foreign stocks: no analysis support
@@ -1689,7 +1739,7 @@ function pfGoAnalyze(stockCode, e) {
   if (!isKorean) return;
 
   if (_isPreferredStock(stockCode)) {
-    const commonCode = stockCode.slice(0, -1) + '0';
+    const commonCode = _preferredCommonCodeFor(stockCode);
     _showPrefMenu(stockCode, commonCode, e);
     return;
   }
@@ -3292,7 +3342,7 @@ async function deleteCashflow(id) {
         const code = codeFromTr(el);
         if (code) pfSetBenchmark(code, el.dataset.bench || '');
       } else if ((el = t.closest('.js-pf-gold-gap'))) {
-        const asset = el.dataset.gapAsset || _goldGapAssetForCode(codeFromTr(el));
+        const asset = el.dataset.gapAsset || _goldGapInfoForCode(codeFromTr(el)).asset;
         if (asset) _openGoldGapDashboard(asset);
       } else if ((el = t.closest('.js-pf-cf-delete'))) {
         const id = Number(el.dataset.cfId);
