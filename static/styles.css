@@ -554,6 +554,46 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .reports-section {
   margin-top: 32px; display: none;
 }
+.lab-page { max-width: 1040px; margin: 0 auto; padding: 12px 0 40px; }
+.lab-hero {
+  position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 22px;
+  padding: 28px; margin-bottom: 18px; background:
+    radial-gradient(circle at 12% 20%, rgba(37,99,235,0.16), transparent 32%),
+    linear-gradient(135deg, var(--surface), var(--sidebar-bg, var(--bg)));
+}
+.lab-hero h2 { font-size: 24px; margin: 8px 0; }
+.lab-hero p { max-width: 720px; color: var(--text-secondary); line-height: 1.7; margin: 0; font-size: 14px; }
+.lab-eyebrow, .lab-pill {
+  display: inline-flex; align-items: center; width: fit-content; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; font-weight: 800;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.lab-eyebrow { padding: 5px 9px; background: var(--bg); }
+.lab-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.lab-card {
+  display: grid; gap: 8px; text-decoration: none; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 18px; padding: 20px;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.lab-card:hover {
+  transform: translateY(-2px); border-color: var(--primary);
+  box-shadow: 0 14px 30px rgba(15,23,42,0.08);
+}
+.lab-card h3 { margin: 0; font-size: 18px; }
+.lab-card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
+.lab-card strong { color: var(--primary); font-size: 13px; }
+.lab-pill { padding: 4px 8px; background: var(--sidebar-bg, var(--bg)); }
+.lab-inline-banner {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px;
+  padding: 10px 12px; border: 1px dashed var(--border); border-radius: 12px;
+  background: var(--surface); color: var(--text-secondary); font-size: 12px;
+}
+.lab-inline-banner span {
+  padding: 3px 7px; border-radius: 999px; background: var(--sidebar-bg, var(--bg));
+  border: 1px solid var(--border); font-weight: 800; color: var(--text);
+}
+.lab-inline-banner strong { color: var(--text); }
+.lab-inline-banner a { margin-left: auto; color: var(--primary); text-decoration: none; font-weight: 700; }
 .bt-page { max-width: 1100px; margin: 0 auto; padding: 8px 0 32px; }
 .bt-page h2 { font-size: 20px; margin-bottom: 8px; }
 .bt-page h3 { font-size: 15px; margin: 24px 0 10px; }
@@ -656,6 +696,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .insight-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
 @media (max-width: 780px) {
+  .lab-grid { grid-template-columns: 1fr; }
+  .lab-inline-banner a { margin-left: 0; }
   .insight-form-row, .insight-form-row.bottom, .insight-result-grid { grid-template-columns: 1fr; }
 }
 .reports-section h2 {

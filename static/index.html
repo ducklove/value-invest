@@ -83,8 +83,6 @@ function trackEvent(name, params = {}) {
       <button class="nav-btn active" data-view="analysis" onclick="switchView('analysis')">분석</button>
       <button class="nav-btn" data-view="portfolio" onclick="switchView('portfolio')">포트폴리오</button>
       <button class="nav-btn" data-view="nps" onclick="switchView('nps')">국민연금</button>
-      <button class="nav-btn" data-view="backtest" onclick="switchView('backtest')">백테스트</button>
-      <button class="nav-btn" data-view="insights" onclick="switchView('insights')">인사이트</button>
     </nav>
     <div class="wiki-stats" id="wikiStats" title="LLM 위키 누적 수집량"></div>
     <div class="mobile-auth-status" id="mobileAuthStatus">
@@ -335,10 +333,45 @@ function trackEvent(name, params = {}) {
     <div id="npsContent" style="color:var(--text-secondary);text-align:center;padding:40px;">로딩 중...</div>
   </div>
 
+  <div id="labsView" style="display:none;">
+    <div class="lab-page">
+      <div class="lab-hero">
+        <span class="lab-eyebrow">Experimental</span>
+        <h2>투자 실험실</h2>
+        <p>
+          아직 핵심 투자 화면만큼 검증되지 않은 기능을 모아둔 공간입니다.
+          결과는 참고용으로만 보고, 실제 판단은 분석/포트폴리오 화면의 검증된 데이터와 함께 확인하세요.
+        </p>
+      </div>
+      <div class="lab-grid">
+        <a class="lab-card" href="/backtest">
+          <span class="lab-pill">실험 단계</span>
+          <h3>가치투자 백테스트</h3>
+          <p>간단한 value score 리밸런싱 실험입니다. 거래비용, 세금, 슬리피지, 생존편향 보정은 아직 제한적입니다.</p>
+          <strong>열기 →</strong>
+        </a>
+        <a class="lab-card" href="/insights">
+          <span class="lab-pill">기록 보존</span>
+          <h3>인사이트 보드</h3>
+          <p>외부 실험 결과와 수동 메모를 남기는 기록장입니다. 향후 포트폴리오/종목 분석 맥락으로 흡수할 예정입니다.</p>
+          <strong>열기 →</strong>
+        </a>
+      </div>
+    </div>
+  </div>
+
   <div id="backtestView" style="display:none;">
     <div class="bt-page">
+      <div class="lab-inline-banner">
+        <span>실험 기능</span>
+        <strong>메인 탭에서 제외된 참고용 백테스트입니다.</strong>
+        <a href="/labs">실험실로 돌아가기</a>
+      </div>
       <h2>가치투자 백테스트</h2>
-      <div class="bt-note">선택한 universe에서 매 리밸런싱마다 value score 상위 K개를 동일가중으로 보유. 벤치마크는 universe 전체 동일가중 리밸런싱.</div>
+      <div class="bt-note">
+        선택한 universe에서 매 리밸런싱마다 value score 상위 K개를 동일가중으로 보유합니다.
+        거래비용, 세금, 슬리피지, 생존편향 보정이 제한적이므로 실제 투자 판단용 성과로 해석하지 마세요.
+      </div>
       <div class="bt-form">
         <label>대상
           <select id="btUniverse">
@@ -385,9 +418,15 @@ function trackEvent(name, params = {}) {
 
   <div id="insightsView" style="display:none;">
     <div class="insight-board-page">
+      <div class="lab-inline-banner">
+        <span>실험 기능</span>
+        <strong>메인 탭에서 제외된 연구 노트입니다.</strong>
+        <a href="/labs">실험실로 돌아가기</a>
+      </div>
       <h2>인사이트 보드</h2>
       <div class="insight-board-note">
-        외부 백테스트, 전략 실험, 수동 검증 결과를 짧은 해석과 함께 기록합니다. 현재 메뉴의 백테스트와 별개로 운영되는 투자 실험 노트입니다.
+        외부 백테스트, 전략 실험, 수동 검증 결과를 짧은 해석과 함께 기록합니다.
+        아직 포트폴리오/종목 분석과 깊게 연결된 기능은 아니므로, 보조 기록장으로만 사용하세요.
       </div>
       <div class="insight-board-compose" id="insightCompose"></div>
       <div class="insight-board-list" id="insightPostList">

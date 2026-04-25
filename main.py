@@ -262,6 +262,7 @@ async def index():
 @app.get("/analysis")
 @app.get("/portfolio")
 @app.get("/nps")
+@app.get("/labs")
 @app.get("/backtest")
 @app.get("/insights")
 async def spa_pages():

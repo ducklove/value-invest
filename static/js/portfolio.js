@@ -110,15 +110,18 @@ function switchView(view) {
   const analysisView = document.getElementById('analysisView');
   const portfolioView = document.getElementById('portfolioView');
   const npsView = document.getElementById('npsView');
+  const labsView = document.getElementById('labsView');
   const backtestView = document.getElementById('backtestView');
   const insightsView = document.getElementById('insightsView');
   analysisView.style.display = view === 'analysis' ? 'block' : 'none';
   portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
   if (npsView) npsView.style.display = view === 'nps' ? 'block' : 'none';
+  if (labsView) labsView.style.display = view === 'labs' ? 'block' : 'none';
   if (backtestView) backtestView.style.display = view === 'backtest' ? 'block' : 'none';
   if (insightsView) insightsView.style.display = view === 'insights' ? 'block' : 'none';
   const activeEl = view === 'analysis' ? analysisView
                   : view === 'portfolio' ? portfolioView
+                  : view === 'labs' ? labsView
                   : view === 'backtest' ? backtestView
                   : view === 'insights' ? insightsView
                   : npsView;
