@@ -84,6 +84,7 @@ function trackEvent(name, params = {}) {
       <button class="nav-btn" data-view="portfolio" onclick="switchView('portfolio')">포트폴리오</button>
       <button class="nav-btn" data-view="nps" onclick="switchView('nps')">국민연금</button>
       <button class="nav-btn" data-view="backtest" onclick="switchView('backtest')">백테스트</button>
+      <button class="nav-btn" data-view="insights" onclick="switchView('insights')">인사이트</button>
     </nav>
     <div class="wiki-stats" id="wikiStats" title="LLM 위키 누적 수집량"></div>
     <div class="mobile-auth-status" id="mobileAuthStatus">
@@ -382,6 +383,19 @@ function trackEvent(name, params = {}) {
     </div>
   </div>
 
+  <div id="insightsView" style="display:none;">
+    <div class="insight-board-page">
+      <h2>인사이트 보드</h2>
+      <div class="insight-board-note">
+        외부 백테스트, 전략 실험, 수동 검증 결과를 짧은 해석과 함께 기록합니다. 현재 메뉴의 백테스트와 별개로 운영되는 투자 실험 노트입니다.
+      </div>
+      <div class="insight-board-compose" id="insightCompose"></div>
+      <div class="insight-board-list" id="insightPostList">
+        <div class="insight-board-empty">불러오는 중...</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div class="chart-modal-overlay" id="chartModal" style="display:none;" onclick="if(event.target===this)closeChartModal()" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
@@ -430,6 +444,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/analysis.js" defer></script>
 <script src="./js/portfolio.js" defer></script>
 <script src="./js/backtest.js" defer></script>
+<script src="./js/insights.js" defer></script>
 <script src="./js/app-main.js" defer></script>
 </body>
 </html>

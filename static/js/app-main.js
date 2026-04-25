@@ -104,8 +104,9 @@ async function initApp() {
   //   /portfolio             → 포트폴리오 탭
   //   /nps                   → 국민연금 탭
   //   /backtest              → 백테스트 탭
+  //   /insights              → 인사이트 보드 탭
   //   /?code=005930          → (기존 호환) 분석 탭 + 자동 분석
-  // 서버가 이 네 개 path 를 모두 index.html 로 서빙하므로 SPA 진입 후
+  // 서버가 이 path 들을 모두 index.html 로 서빙하므로 SPA 진입 후
   // pathname 만 보고 탭을 정하면 됨.
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
@@ -115,6 +116,7 @@ async function initApp() {
     '/portfolio': 'portfolio',
     '/nps': 'nps',
     '/backtest': 'backtest',
+    '/insights': 'insights',
   };
   const viewFromPath = PATH_TO_VIEW[path];
   if (viewFromPath) {
