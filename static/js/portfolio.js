@@ -809,6 +809,7 @@ function renderPortfolio() {
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
     const goldGapInfo = _goldGapInfoForCode(r.stock_code);
     const goldGapBtn = goldGapInfo.asset ? `<button class="pf-row-btn js-pf-gold-gap" data-gap-asset="${escapeHtml(goldGapInfo.asset)}" title="${escapeHtml(goldGapInfo.title)}">${escapeHtml(goldGapInfo.label)}</button>` : '';
+    const insightBtn = _hasAssetInsight(r.stock_code) ? '<button class="pf-row-btn insight js-pf-insight" title="투자 인사이트">Insight</button>' : '';
 
     const groupOpts = pfGroups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
 
@@ -856,6 +857,7 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
+        ${insightBtn}
         ${goldGapBtn}
         <button class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
         <button class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
@@ -1082,6 +1084,8 @@ const _BENCHMARK_PRESETS = [
   {code: 'IDX_KOSPI', name: '코스피'},
   {code: 'IDX_KOSDAQ', name: '코스닥'},
   {code: 'IDX_SP500', name: 'S&P500'},
+  {code: 'GOLD', name: '금'},
+  {code: 'AGG', name: '미국 종합채권'},
   {code: 'FX_USDKRW', name: 'USD/KRW'},
 ];
 
@@ -1659,6 +1663,217 @@ function _openGoldGapDashboard(asset) {
   openIntegration('goldGap', '', { asset });
 }
 
+function _isKoreanAnalysisCode(code) {
+  return typeof code === 'string' && code.length === 6 && /^\d{5}/.test(code);
+}
+
+function _hasAssetInsight(code) {
+  if (!code) return false;
+  if (code.startsWith('CASH_')) return true;
+  if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(code)) return true;
+  return !_isKoreanAnalysisCode(code);
+}
+
+let pfAssetInsightCode = null;
+
+function pfCloseAssetInsight() {
+  const modal = document.getElementById('pfAssetInsightModal');
+  if (modal) modal.style.display = 'none';
+  pfAssetInsightCode = null;
+}
+
+async function pfOpenAssetInsight(stockCode) {
+  const modal = document.getElementById('pfAssetInsightModal');
+  const title = document.getElementById('pfAssetInsightTitle');
+  const body = document.getElementById('pfAssetInsightBody');
+  if (!modal || !body || !stockCode) return;
+  pfAssetInsightCode = stockCode;
+  modal.style.display = 'flex';
+  if (title) title.textContent = '투자 인사이트';
+  body.innerHTML = '<div class="pf-insight-loading">자산 데이터를 불러오는 중입니다...</div>';
+
+  try {
+    const resp = await apiFetch(`/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}`);
+    if (!resp.ok) {
+      let detail = '';
+      try {
+        const err = await resp.json();
+        detail = err.detail || err.message || '';
+      } catch (e) {}
+      throw new Error(detail || `인사이트 로드 실패 (${resp.status})`);
+    }
+    const data = await resp.json();
+    if (pfAssetInsightCode !== stockCode) return;
+    const profile = data.profile || {};
+    if (title) title.textContent = `${profile.name || stockCode} 투자 인사이트`;
+    body.innerHTML = _renderAssetInsight(data);
+  } catch (e) {
+    if (pfAssetInsightCode !== stockCode) return;
+    body.innerHTML = `<div class="pf-insight-error">${escapeHtml(e.message || '인사이트를 불러오지 못했습니다.')}</div>`;
+  }
+}
+
+function _insightNum(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function _fmtInsightPct(value, signed = true) {
+  const n = _insightNum(value);
+  return n === null ? '-' : fmtPct(n, signed);
+}
+
+function _fmtInsightSignedAmount(value, currency = '') {
+  const n = _insightNum(value);
+  if (n === null) return '-';
+  const prefix = n > 0 ? '+' : '';
+  return `${prefix}${_fmtInsightAmount(n, currency)}`;
+}
+
+function _fmtInsightAmount(value, currency = '') {
+  const n = _insightNum(value);
+  if (n === null) return '-';
+  const cur = String(currency || '').toUpperCase();
+  if (!cur || cur === 'KRW') return fmtKrw(Math.round(n));
+  const digits = Math.abs(n) >= 100 ? 2 : 4;
+  return `${cur} ${n.toLocaleString(undefined, { maximumFractionDigits: digits })}`;
+}
+
+function _fmtInsightPrice(value, currency = '') {
+  const n = _insightNum(value);
+  if (n === null) return '-';
+  const cur = String(currency || '').toUpperCase();
+  if (!cur || cur === 'KRW') return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return `${cur} ${n.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+}
+
+function _insightClass(value) {
+  const n = _insightNum(value);
+  if (n === null) return '';
+  return n > 0 ? 'positive' : n < 0 ? 'negative' : '';
+}
+
+function _renderInsightCard(label, value, sub = '', cls = '') {
+  return `<div class="pf-insight-card">
+    <div class="pf-insight-card-label">${escapeHtml(label)}</div>
+    <div class="pf-insight-card-value ${cls}">${escapeHtml(value)}</div>
+    ${sub ? `<div class="pf-insight-card-sub">${escapeHtml(sub)}</div>` : ''}
+  </div>`;
+}
+
+function _renderAssetInsight(data) {
+  const profile = data.profile || {};
+  const position = data.position || {};
+  const metrics = data.metrics || {};
+  const returns = metrics.returns || {};
+  const volatility = metrics.volatility || {};
+  const benchmark = data.benchmark || {};
+  const benchmarkReturns = benchmark.returns || {};
+  const relativeReturns = benchmark.relativeReturns || {};
+  const quality = data.dataQuality || {};
+  const code = profile.code || '';
+  const displayCurrency = (
+    profile.currency ||
+    quality.historyCurrency ||
+    (code === 'KRX_GOLD' || String(code).startsWith('CASH_') ? 'KRW' : '')
+  );
+
+  const cards = [
+    _renderInsightCard('현재가', _fmtInsightPrice(position.currentPrice, displayCurrency), benchmark.dayChangePct !== null && benchmark.dayChangePct !== undefined ? `벤치마크 오늘 ${_fmtInsightPct(benchmark.dayChangePct)}` : ''),
+    _renderInsightCard('평가금액', _fmtInsightAmount(position.marketValue, displayCurrency), `투입 ${_fmtInsightAmount(position.invested, displayCurrency)}`),
+    _renderInsightCard('보유 수익률', _fmtInsightPct(position.returnPct), _fmtInsightSignedAmount(position.pnl, displayCurrency), _insightClass(position.returnPct)),
+    _renderInsightCard('오늘 손익', _fmtInsightPct(position.dailyChangePct), _fmtInsightSignedAmount(position.dailyPnl, displayCurrency), _insightClass(position.dailyPnl)),
+    _renderInsightCard('최근 3개월', _fmtInsightPct(returns['3m']), `벤치마크 대비 ${_fmtInsightPct(relativeReturns['3m'])}`, _insightClass(returns['3m'])),
+    _renderInsightCard('60일 변동성', _fmtInsightPct(volatility['60d'], false), '연율화 기준'),
+    _renderInsightCard('최대 낙폭', _fmtInsightPct(metrics.maxDrawdownPct), '최근 1년 가격 기준', _insightClass(metrics.maxDrawdownPct)),
+    _renderInsightCard('52주 고점 대비', _fmtInsightPct(metrics.fromHigh52Pct), `저점 대비 ${_fmtInsightPct(metrics.fromLow52Pct)}`, _insightClass(metrics.fromHigh52Pct)),
+  ].join('');
+
+  const windows = [
+    ['1m', '1개월'],
+    ['3m', '3개월'],
+    ['6m', '6개월'],
+    ['1y', '1년'],
+  ];
+  const returnRows = windows.map(([key, label]) => `
+    <tr>
+      <td>${label}</td>
+      <td class="${_insightClass(returns[key])}">${_fmtInsightPct(returns[key])}</td>
+      <td class="${_insightClass(benchmarkReturns[key])}">${_fmtInsightPct(benchmarkReturns[key])}</td>
+      <td class="${_insightClass(relativeReturns[key])}">${_fmtInsightPct(relativeReturns[key])}</td>
+    </tr>
+  `).join('');
+
+  const signals = Array.isArray(data.signals) && data.signals.length ? data.signals : [{
+    level: 'neutral',
+    title: '추가 경고 신호 없음',
+    body: '현재 확보된 가격/벤치마크 데이터 기준으로는 큰 이상 신호가 보이지 않습니다.',
+  }];
+  const signalHtml = signals.map(s => `
+    <div class="pf-insight-signal ${escapeHtml(s.level || 'neutral')}">
+      <strong>${escapeHtml(s.title || '')}</strong>
+      <span>${escapeHtml(s.body || '')}</span>
+    </div>
+  `).join('');
+
+  const macro = Array.isArray(data.macro) ? data.macro : [];
+  const macroHtml = macro.length ? macro.map(m => `
+    <div class="pf-insight-macro-item">
+      <span>${escapeHtml(m.label || m.code || '')}</span>
+      <strong>${escapeHtml(m.value || '-')}</strong>
+      <em class="${m.direction === 'up' ? 'positive' : m.direction === 'down' ? 'negative' : ''}">${escapeHtml(m.changePct || m.change || '')}</em>
+    </div>
+  `).join('') : '<div class="pf-insight-empty">연동된 시장 지표가 없습니다.</div>';
+
+  const goldGap = data.goldGap;
+  const goldGapHtml = goldGap ? `
+    <div class="pf-insight-gold-gap">
+      <div>
+        <span class="pf-insight-section-kicker">Gold Gap</span>
+        <strong>${escapeHtml(goldGap.label || goldGap.asset || '')}</strong>
+        <p>최근 괴리율 ${_fmtInsightPct(goldGap.latestGapPct)}${goldGap.latestDate ? ` · ${escapeHtml(goldGap.latestDate)}` : ''}</p>
+      </div>
+      <button class="pf-insight-link js-pf-gold-gap" data-gap-asset="${escapeHtml(goldGap.asset || '')}">대시보드 열기</button>
+    </div>
+  ` : '';
+
+  return `
+    <div class="pf-insight-hero">
+      <div>
+        <div class="pf-insight-kicker">${escapeHtml(code)}</div>
+        <h4>${escapeHtml(profile.name || code)}</h4>
+        <p>${escapeHtml(profile.assetClassLabel || '기타 자산')} 자산을 가격 추세, 벤치마크, 매크로 지표 기준으로 빠르게 점검합니다.</p>
+      </div>
+      <div class="pf-insight-chips">
+        <span>${escapeHtml(profile.assetClassLabel || '자산')}</span>
+        <span>${escapeHtml(displayCurrency || '통화 미확인')}</span>
+        <span>BM ${escapeHtml(benchmark.name || profile.benchmarkName || '-')}</span>
+        <span>${Number(quality.historyPoints || 0).toLocaleString()} pts</span>
+      </div>
+    </div>
+    <div class="pf-insight-grid">${cards}</div>
+    <div class="pf-insight-two-col">
+      <section class="pf-insight-section">
+        <div class="pf-insight-section-title">수익률 비교</div>
+        <table class="pf-insight-table">
+          <thead><tr><th>기간</th><th>자산</th><th>벤치마크</th><th>초과</th></tr></thead>
+          <tbody>${returnRows}</tbody>
+        </table>
+      </section>
+      <section class="pf-insight-section">
+        <div class="pf-insight-section-title">체크 포인트</div>
+        <div class="pf-insight-signals">${signalHtml}</div>
+      </section>
+    </div>
+    <section class="pf-insight-section">
+      <div class="pf-insight-section-title">시장 배경</div>
+      <div class="pf-insight-macro">${macroHtml}</div>
+    </section>
+    ${goldGapHtml}
+  `;
+}
+
 let _HOLDING_CODES = new Set([
   '000670','000880','002790','003380','004360','004700','004800',
   '005810','006120','024800','028260','030530','032830',
@@ -1728,14 +1943,11 @@ function _applyHoldingIntegrationConfig() {
 })();
 
 function pfGoAnalyze(stockCode, e) {
-  const goldGapInfo = _goldGapInfoForCode(stockCode);
-  if (goldGapInfo.asset) {
-    _openGoldGapDashboard(goldGapInfo.asset);
+  if (_hasAssetInsight(stockCode)) {
+    pfOpenAssetInsight(stockCode);
     return;
   }
-  // Special assets, cash & foreign stocks: no analysis support
-  if (stockCode === 'CRYPTO_ETH' || stockCode.startsWith('CASH_')) return;
-  const isKorean = stockCode.length === 6 && /^\d{5}/.test(stockCode);
+  const isKorean = _isKoreanAnalysisCode(stockCode);
   if (!isKorean) return;
 
   if (_isPreferredStock(stockCode)) {
@@ -3341,6 +3553,12 @@ async function deleteCashflow(id) {
       } else if ((el = t.closest('.js-pf-bench-set'))) {
         const code = codeFromTr(el);
         if (code) pfSetBenchmark(code, el.dataset.bench || '');
+      } else if ((el = t.closest('.js-pf-insight'))) {
+        const code = codeFromTr(el);
+        if (code) {
+          e.preventDefault();
+          pfOpenAssetInsight(code);
+        }
       } else if ((el = t.closest('.js-pf-gold-gap'))) {
         const asset = el.dataset.gapAsset || _goldGapInfoForCode(codeFromTr(el)).asset;
         if (asset) _openGoldGapDashboard(asset);

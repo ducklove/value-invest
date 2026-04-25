@@ -256,6 +256,16 @@ function trackEvent(name, params = {}) {
         </div>
       </div>
     </div>
+
+    <div class="pf-modal-overlay" id="pfAssetInsightModal" style="display:none;" onclick="if(event.target===this)pfCloseAssetInsight()">
+      <div class="pf-modal pf-insight-modal">
+        <div class="pf-modal-header">
+          <h3 id="pfAssetInsightTitle">투자 인사이트</h3>
+          <button class="pf-modal-close" type="button" onclick="pfCloseAssetInsight()" aria-label="닫기">&times;</button>
+        </div>
+        <div class="pf-modal-body pf-insight-body" id="pfAssetInsightBody"></div>
+      </div>
+    </div>
     </div><!-- /pfHoldingsTab -->
 
     <div id="pfPerformanceTab" style="display:none;">

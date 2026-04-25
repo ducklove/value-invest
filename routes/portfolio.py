@@ -10,7 +10,9 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+import asset_insights
 import cache
+import integrations
 import kis_ws_manager
 import market_indicators
 import stock_price
@@ -739,7 +741,7 @@ async def _prefetch_market_types(codes: list[str]):
 async def _resolve_default_benchmark(code: str) -> str:
     """Return the default benchmark code for a stock."""
     if _is_cash_asset(code):
-        return "FX_USDKRW"
+        return _CASH_FX_CODE.get(code, "FX_USDKRW")
     if code in _SPECIAL_ASSETS:
         return "FX_USDKRW"
     if _is_korean_stock(code):
@@ -754,7 +756,12 @@ _BENCHMARK_NAMES = {
     "IDX_KOSPI": "코스피",
     "IDX_KOSDAQ": "코스닥",
     "IDX_SP500": "S&P500",
+    "GOLD": "금",
+    "AGG": "미국 종합채권",
     "FX_USDKRW": "USD/KRW",
+    "FX_EURKRW": "EUR/KRW",
+    "FX_JPYKRW": "JPY/KRW",
+    "FX_CNYKRW": "CNY/KRW",
 }
 
 _benchmark_name_cache: dict[str, str] = {}
@@ -786,7 +793,11 @@ _BENCHMARK_TO_INDICATOR = {
     "IDX_KOSPI": "KOSPI",
     "IDX_KOSDAQ": "KOSDAQ",
     "IDX_SP500": "SPX",
+    "GOLD": "CMDT_GC",
     "FX_USDKRW": "USD_KRW",
+    "FX_EURKRW": "EUR_KRW",
+    "FX_JPYKRW": "JPY_KRW",
+    "FX_CNYKRW": "CNY_KRW",
 }
 
 
@@ -822,6 +833,9 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
         except Exception as e:
             logger.warning("Indicator-based benchmark fetch failed for %s: %s", benchmark_code, e)
             q = {}
+    elif benchmark_code.startswith("FX_"):
+        daily = await _fetch_fx_daily_change(benchmark_code)
+        q = {"change_pct": daily.get("change_pct")} if daily and daily.get("change_pct") is not None else {}
     else:
         # It's a stock code (e.g., common stock for preferred)
         # For codes with dots/slashes, try dash variant directly first (faster)
@@ -836,6 +850,248 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
 
     _benchmark_quote_cache[benchmark_code] = (now, q)
     return q
+
+
+_ASSET_HISTORY_CACHE_TTL = 15 * 60
+_asset_history_cache: dict[str, tuple[float, dict]] = {}
+
+_BENCHMARK_HISTORY_CODE = {
+    "IDX_KOSPI": "KOSPI",
+    "IDX_SP500": "SP500",
+    "GOLD": "GOLD",
+}
+
+_BENCHMARK_YF_TICKER = {
+    "IDX_KOSPI": "^KS11",
+    "IDX_KOSDAQ": "^KQ11",
+    "IDX_SP500": "^GSPC",
+    "FX_USDKRW": "KRW=X",
+    "FX_EURKRW": "EURKRW=X",
+    "FX_JPYKRW": "JPYKRW=X",
+    "FX_CNYKRW": "CNYKRW=X",
+}
+
+
+async def _resolve_insight_benchmark(item: dict) -> str:
+    code = item["stock_code"]
+    manual = item.get("benchmark_code")
+    if manual:
+        return manual
+    if code == "KRX_GOLD":
+        return "GOLD"
+    if code in {"CRYPTO_BTC", "CRYPTO_ETH"}:
+        return "IDX_SP500"
+    if _is_cash_asset(code):
+        return _CASH_FX_CODE.get(code, "FX_USDKRW")
+    profile = asset_insights.classify_asset(code, item.get("stock_name") or "", item.get("currency") or "")
+    if profile.get("assetClass") == "bond_etf":
+        return "AGG"
+    return await _resolve_default_benchmark(code)
+
+
+async def _download_yfinance_history(ticker: str, period: str = "1y") -> dict:
+    ticker = (ticker or "").strip()
+    if not ticker:
+        return {"rows": [], "currency": None}
+    key = f"{ticker}:{period}"
+    now = _time.monotonic()
+    cached = _asset_history_cache.get(key)
+    if cached and (now - cached[0]) < _ASSET_HISTORY_CACHE_TTL:
+        return cached[1]
+
+    def _download():
+        import yfinance as yf
+
+        t = yf.Ticker(ticker)
+        df = t.history(period=period, auto_adjust=True)
+        currency = None
+        try:
+            currency = (t.fast_info.currency or "").upper() or None
+        except Exception:
+            currency = None
+        if df is None or df.empty or "Close" not in df:
+            return {"rows": [], "currency": currency}
+        close = df["Close"]
+        if hasattr(close, "columns"):
+            close = close.iloc[:, 0]
+        rows = []
+        for d, v in close.items():
+            try:
+                if v != v:
+                    continue
+                rows.append({"date": d.strftime("%Y-%m-%d"), "close": round(float(v), 6)})
+            except Exception:
+                continue
+        return {"rows": rows, "currency": currency}
+
+    try:
+        result = await _yf_run(_download)
+    except Exception as exc:
+        logger.warning("asset insight history fetch failed (%s): %s", ticker, exc)
+        result = {"rows": [], "currency": None}
+    _asset_history_cache[key] = (now, result)
+    return result
+
+
+async def _asset_history_for_insight(code: str, item: dict) -> dict:
+    special = asset_insights.yfinance_ticker_for_special_asset(code)
+    if special:
+        return await _download_yfinance_history(special)
+    if _is_cash_asset(code):
+        return {"rows": [], "currency": code.replace("CASH_", "")}
+    if _is_korean_stock(code):
+        return {"rows": [], "currency": item.get("currency") or "KRW"}
+    ticker = _ticker_map.get(code) or await _yfinance_find_ticker(code) or code
+    return await _download_yfinance_history(ticker)
+
+
+async def _benchmark_history_for_insight(benchmark_code: str | None) -> list[dict]:
+    if not benchmark_code:
+        return []
+    from datetime import date, timedelta
+
+    start = (date.today() - timedelta(days=370)).isoformat()
+    history_code = _BENCHMARK_HISTORY_CODE.get(benchmark_code)
+    if history_code:
+        try:
+            import benchmark_history
+
+            await benchmark_history.backfill_benchmark(history_code, start)
+            return await cache.get_benchmark_rows(history_code, start=start)
+        except Exception as exc:
+            logger.warning("benchmark insight history failed (%s): %s", benchmark_code, exc)
+            return []
+
+    ticker = _BENCHMARK_YF_TICKER.get(benchmark_code)
+    if not ticker and not _is_korean_stock(benchmark_code):
+        ticker = benchmark_code.replace(".", "-").replace("/", "-")
+    if not ticker:
+        return []
+    payload = await _download_yfinance_history(ticker)
+    return payload.get("rows") or []
+
+
+def _macro_codes_for_asset(profile: dict, currency: str | None) -> list[str]:
+    asset_class = profile.get("assetClass")
+    currency = (currency or "").upper()
+    codes = ["USD_KRW"]
+    if asset_class in {"foreign_stock", "foreign_etf"}:
+        codes.extend(["SPX", "IXIC", "US10Y"])
+    elif asset_class == "bond_etf":
+        codes.extend(["US10Y", "KR3Y"])
+    elif asset_class == "gold":
+        codes.extend(["CMDT_GC", "US10Y"])
+    elif asset_class == "crypto":
+        codes.extend(["SPX", "US10Y"])
+    elif asset_class == "cash":
+        codes.extend(["US10Y", "KR3Y"])
+    if currency == "EUR":
+        codes.append("EUR_KRW")
+    elif currency == "JPY":
+        codes.append("JPY_KRW")
+    elif currency == "CNY":
+        codes.append("CNY_KRW")
+    return list(dict.fromkeys(codes))
+
+
+def _format_macro(indicators: dict) -> list[dict]:
+    result = []
+    for code, data in indicators.items():
+        if not data:
+            continue
+        catalog = market_indicators.CATALOG.get(code, {})
+        result.append({
+            "code": code,
+            "label": catalog.get("label", code),
+            "category": catalog.get("category", ""),
+            "value": data.get("value") or "",
+            "change": data.get("change") or "",
+            "changePct": data.get("change_pct") or "",
+            "direction": data.get("direction") or "",
+        })
+    return result
+
+
+def _gold_gap_for_asset(code: str) -> dict | None:
+    config = integrations.build_public_integrations().get("goldGap", {})
+    asset_key = (config.get("assetByPortfolioCode") or {}).get(code)
+    if not asset_key:
+        return None
+    asset = (config.get("assets") or {}).get(asset_key) or {}
+    return {
+        "asset": asset_key,
+        "label": asset.get("label") or asset_key,
+        "latestGapPct": asset.get("latestGapPct"),
+        "latestDate": asset.get("latestDate"),
+        "thresholdPct": asset.get("thresholdPct"),
+        "updatedAt": config.get("updatedAt"),
+        "url": f"{config.get('baseUrl', '').rstrip('/')}/?asset={asset_key}" if config.get("baseUrl") else "",
+    }
+
+
+@router.get("/api/portfolio/asset-insight/{stock_code}")
+async def asset_insight(stock_code: str, request: Request):
+    user = _require_user(await get_current_user(request))
+    stock_code = stock_code.strip()
+    items = await cache.get_portfolio(user["google_sub"])
+    item = next((it for it in items if it["stock_code"] == stock_code), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
+
+    quote, effective_benchmark = await asyncio.gather(
+        _fetch_quote(stock_code),
+        _resolve_insight_benchmark(item),
+    )
+    benchmark_quote, benchmark_name = await asyncio.gather(
+        _fetch_benchmark_quote(effective_benchmark),
+        _resolve_benchmark_name(effective_benchmark),
+    )
+
+    profile = {
+        "code": stock_code,
+        "name": item.get("stock_name") or stock_code,
+        "currency": item.get("currency") or "",
+        "benchmarkCode": effective_benchmark,
+        "benchmarkName": benchmark_name,
+        **asset_insights.classify_asset(stock_code, item.get("stock_name") or "", item.get("currency") or ""),
+    }
+
+    history_payload, benchmark_rows, indicators = await asyncio.gather(
+        _asset_history_for_insight(stock_code, item),
+        _benchmark_history_for_insight(effective_benchmark),
+        market_indicators.fetch_indicators(_macro_codes_for_asset(profile, item.get("currency"))),
+    )
+
+    metrics = asset_insights.calculate_history_metrics(history_payload.get("rows") or [])
+    benchmark_metrics = asset_insights.calculate_history_metrics(benchmark_rows)
+    benchmark_returns = benchmark_metrics.get("returns") or {}
+    relative = asset_insights.relative_returns(metrics.get("returns") or {}, benchmark_returns)
+    position = asset_insights.calculate_position(item, quote)
+    gold_gap = _gold_gap_for_asset(stock_code)
+
+    benchmark = {
+        "code": effective_benchmark,
+        "name": benchmark_name,
+        "dayChangePct": benchmark_quote.get("change_pct") if benchmark_quote else None,
+        "returns": benchmark_returns,
+        "relativeReturns": relative,
+    }
+    return {
+        "profile": profile,
+        "position": position,
+        "quote": quote or {},
+        "metrics": metrics,
+        "benchmark": benchmark,
+        "macro": _format_macro(indicators),
+        "goldGap": gold_gap,
+        "history": (history_payload.get("rows") or [])[-80:],
+        "dataQuality": {
+            "historyCurrency": history_payload.get("currency"),
+            "historyPoints": metrics.get("historyPoints", 0),
+            "benchmarkPoints": benchmark_metrics.get("historyPoints", 0),
+        },
+        "signals": asset_insights.build_signals(profile, position, metrics, benchmark, gold_gap),
+    }
 
 
 @router.get("/api/portfolio/groups")
