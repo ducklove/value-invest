@@ -1677,12 +1677,29 @@ function _analysisAction(stockCode, label = '분석 화면', hint = '재무/밸�
   };
 }
 
+function _naverFinanceAction(stockCode, label = '네이버 파이낸스') {
+  const targetCode = _isPreferredStock(stockCode) ? _preferredCommonCodeFor(stockCode) : stockCode;
+  return {
+    id: `naver-finance-${targetCode}`,
+    label,
+    hint: `${targetCode} 네이버 금융`,
+    run: () => {
+      window.open(
+        `https://finance.naver.com/item/main.naver?code=${encodeURIComponent(targetCode)}`,
+        '_blank',
+        'noopener,noreferrer',
+      );
+    },
+  };
+}
+
 function _portfolioLinkActions(stockCode) {
   const actions = [];
   if (_isKoreanAnalysisCode(stockCode)) {
     if (_isPreferredStock(stockCode)) {
       const commonCode = _preferredCommonCodeFor(stockCode);
       actions.push(_analysisAction(commonCode, `본주 분석 (${commonCode})`));
+      actions.push(_naverFinanceAction(stockCode, '네이버 파이낸스 (본주)'));
       actions.push({
         id: 'preferred-spread',
         label: '우선주 괴리율',
@@ -1691,6 +1708,7 @@ function _portfolioLinkActions(stockCode) {
       });
     } else {
       actions.push(_analysisAction(stockCode));
+      actions.push(_naverFinanceAction(stockCode));
       if (_HOLDING_CODES.has(stockCode)) {
         actions.push({
           id: 'holding-value',
