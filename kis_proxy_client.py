@@ -10,6 +10,7 @@ import httpx
 
 BASE_URL = os.getenv("KIS_PROXY_BASE_URL", "http://cantabile.tplinkdns.com:3288").rstrip("/")
 TIMEOUT_SECONDS = float(os.getenv("KIS_PROXY_TIMEOUT_SECONDS", "20"))
+PROXY_TOKEN = os.getenv("KIS_PROXY_TOKEN", os.getenv("KIS_PROXY_PUBLIC_TOKEN", "")).strip()
 _client: httpx.AsyncClient | None = None
 _client_lock: asyncio.Lock | None = None
 
@@ -85,12 +86,13 @@ async def _get_client() -> httpx.AsyncClient:
 
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     url = f"{BASE_URL}{path}"
+    headers = {"X-KIS-Proxy-Token": PROXY_TOKEN} if PROXY_TOKEN else None
     last_exc = None
     for attempt in range(3):
         try:
             client = await _get_client()
             await _acquire_rate_slot()
-            response = await client.get(url, params=params)
+            response = await client.get(url, params=params, headers=headers)
             response.raise_for_status()
             payload = response.json()
             return payload if isinstance(payload, dict) else {}

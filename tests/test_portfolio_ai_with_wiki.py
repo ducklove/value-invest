@@ -134,7 +134,9 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_prompt_skips_wiki_when_empty(self):
         payload, done = await self._run_and_capture_prompt()
-        prompt = payload.get("messages", [{}])[0].get("content", "")
+        messages = payload.get("messages", [])
+        prompt = messages[-1].get("content", "") if messages else ""
+        self.assertEqual(messages[0].get("role"), "system")
         self.assertNotIn("종목별 리서치 요약", prompt)
         self.assertEqual(done.get("wiki_used"), 0)
 
@@ -148,7 +150,8 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
             "created_at": "2026-04-17T00:00:00",
         })
         payload, done = await self._run_and_capture_prompt()
-        prompt = payload.get("messages", [{}])[0].get("content", "") if payload else ""
+        messages = payload.get("messages", []) if payload else []
+        prompt = messages[-1].get("content", "") if messages else ""
         # Debug: if prompt is empty, something broke before the LLM call.
         # Prompt must exist; if empty that means the HTTP mock wasn't
         # exercised (would indicate a regression in the patch target).

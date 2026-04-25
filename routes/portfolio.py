@@ -21,7 +21,7 @@ import market_indicators
 import stock_price
 from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
 
-_OPENROUTER_KEY = ""
+_OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
 _keys_file = Path(__file__).parent.parent / "keys.txt"
 if _keys_file.exists():
     for line in _keys_file.read_text().splitlines():
@@ -1959,10 +1959,12 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
     cf_type = str(payload.get("type") or "").strip()
     if cf_type not in ("deposit", "withdrawal"):
         raise HTTPException(status_code=400, detail="type은 deposit 또는 withdrawal이어야 합니다.")
-    amount = payload.get("amount")
-    if amount is None or float(amount) <= 0:
+    try:
+        amount = float(payload.get("amount"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="금액은 숫자여야 합니다.")
+    if amount <= 0:
         raise HTTPException(status_code=400, detail="금액은 0보다 커야 합니다.")
-    amount = float(amount)
     cf_date = str(payload.get("date") or "").strip()
     if not cf_date:
         from datetime import date
@@ -2025,7 +2027,37 @@ async def delete_cashflow(cf_id: int, request: Request):
 # AI Portfolio Analysis (OpenRouter)
 # ---------------------------------------------------------------------------
 
-_AI_DEFAULT_MODEL = "qwen/qwen3.6-plus"
+_AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", "qwen/qwen3.6-plus")
+_AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", os.getenv("WIKI_QA_MODEL", "google/gemma-4-31b-it"))
+_AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", _AI_DEFAULT_MODEL)
+
+_AI_SYSTEM_PROMPT = """당신은 한국/해외 자산을 함께 보는 투자 리서치 어시스턴트입니다.
+규칙:
+- 제공된 포트폴리오, 시장지표, 리서치 요약에 근거해 답하세요.
+- 알 수 없는 사실은 추정이라고 분명히 말하고, 없는 데이터를 꾸며내지 마세요.
+- 투자 조언은 단정 대신 조건부 시나리오와 리스크로 표현하세요.
+- 결론에는 실행 우선순위와 확인해야 할 데이터 공백을 포함하세요."""
+
+
+def _ai_model_profiles() -> dict[str, str]:
+    return {
+        "fast": _AI_FAST_MODEL,
+        "balanced": _AI_DEFAULT_MODEL,
+        "premium": _AI_PREMIUM_MODEL,
+    }
+
+
+def _resolve_ai_model(payload: dict, user: dict) -> tuple[str, str]:
+    profile = str(payload.get("profile") or payload.get("mode") or "balanced").strip().lower()
+    profiles = _ai_model_profiles()
+    if profile not in profiles:
+        profile = "balanced"
+    model = profiles[profile]
+    req_model = str(payload.get("model") or "").strip()
+    if req_model and user.get("is_admin"):
+        model = req_model
+        profile = "custom"
+    return model, profile
 
 
 def _fmt_krw_ai(v: float) -> str:
@@ -2061,7 +2093,7 @@ async def ai_model_list(request: Request):
     """Return available OpenRouter models (for admin model picker)."""
     user = _require_user(await get_current_user(request))
     if not _OPENROUTER_KEY:
-        return {"models": [], "default": _AI_DEFAULT_MODEL}
+        return {"models": [], "default": _AI_DEFAULT_MODEL, "profiles": _ai_model_profiles()}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get("https://openrouter.ai/api/v1/models")
@@ -2077,10 +2109,10 @@ async def ai_model_list(request: Request):
                     "context": m.get("context_length", 0),
                 })
             models.sort(key=lambda x: x["id"])
-            return {"models": models, "default": _AI_DEFAULT_MODEL}
+            return {"models": models, "default": _AI_DEFAULT_MODEL, "profiles": _ai_model_profiles()}
     except Exception as exc:
         logger.warning("Failed to fetch OpenRouter models: %s", exc)
-        return {"models": [], "default": _AI_DEFAULT_MODEL}
+        return {"models": [], "default": _AI_DEFAULT_MODEL, "profiles": _ai_model_profiles()}
 
 
 @router.post("/api/portfolio/ai-analysis")
@@ -2089,11 +2121,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
     if not _OPENROUTER_KEY:
         raise HTTPException(status_code=500, detail="AI API 키가 설정되지 않았습니다.")
 
-    # Admin can override model
-    model = _AI_DEFAULT_MODEL
-    req_model = payload.get("model")
-    if req_model and user.get("is_admin"):
-        model = req_model
+    model, model_profile = _resolve_ai_model(payload, user)
 
     # Optional user inquiry/question to include in the prompt
     user_query = (payload.get("query") or "").strip()
@@ -2206,7 +2234,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
         if wiki_lines else ""
     )
 
-    prompt = f"""당신은 한국 주식 시장 전문 투자 자문가입니다. 아래 포트폴리오를 분석해 주세요.
+    prompt = f"""아래 포트폴리오를 분석해 주세요.
 
 ## 보유 종목 (총 평가: {_fmt_krw_ai(total_value)})
 {chr(10).join(holdings_lines)}
@@ -2220,8 +2248,9 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
 분석 항목:
 1. 포트폴리오 구성 평가 (분산도, 섹터 편중)
 2. 주요 종목 밸류에이션과 리스크 — 증권사 의견을 근거로 인용 가능하면 인용
-3. 시장 상황 고려 단기 전망
-4. 리밸런싱/비중 조절 제안
+3. 시장 상황 고려 단기/중기 시나리오
+4. 리밸런싱/비중 조절 제안과 우선순위
+5. 추가로 확인해야 할 데이터 공백
 
 한국어로 간결하게 마크다운 형식으로 답변해 주세요."""
 
@@ -2243,7 +2272,10 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                 },
                 json={
                     "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [
+                        {"role": "system", "content": _AI_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
                     "max_tokens": 2000,
                     "stream": True,
                 },
@@ -2257,7 +2289,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                     except Exception:
                         msg = f"HTTP {resp.status_code}"
                     yield f"data: {_json.dumps({'content': f'API 오류: {msg}'})}\n\n"
-                    yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'cost': 0, 'wiki_used': wiki_used_count})}\n\n"
+                    yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'model_profile': model_profile, 'cost': 0, 'wiki_used': wiki_used_count})}\n\n"
                     return
 
                 input_tokens = 0
@@ -2292,6 +2324,6 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                             cost = usage.get("cost", cost) or cost
                     except Exception:
                         continue
-                yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'cost': cost, 'wiki_used': wiki_used_count})}\n\n"
+                yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'model_profile': model_profile, 'cost': cost, 'wiki_used': wiki_used_count})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

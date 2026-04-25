@@ -13,6 +13,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+ENV_PATH = Path(__file__).parent / ".kis.env"
+
+# Load deployment env before importing modules that freeze config at import
+# time. Lifespan reload is left in place as an idempotent safety net.
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH, override=True)
+
 import cache
 import dart_client
 import integrations
@@ -75,9 +82,8 @@ async def _watchdog_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    env_path = Path(__file__).parent / ".kis.env"
-    if env_path.exists():
-        load_dotenv(env_path, override=True)
+    if ENV_PATH.exists():
+        load_dotenv(ENV_PATH, override=True)
     kis_key_manager.load_keys()
 
     await kis_proxy_client.init_client()
@@ -119,7 +125,7 @@ async def lifespan(app: FastAPI):
     # during dev). A short initial delay keeps startup snappy.
     import wiki_ingestion
     wiki_stop = asyncio.Event()
-    wiki_interval = float(os.environ.get("WIKI_INGEST_INTERVAL_S", "1800"))
+    wiki_interval = float(os.environ.get("WIKI_INGEST_INTERVAL_S", "0"))
     wiki_task: asyncio.Task | None = None
     if wiki_interval > 0:
         wiki_task = asyncio.create_task(

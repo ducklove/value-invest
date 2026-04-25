@@ -1567,17 +1567,24 @@ async def clear_portfolio(google_sub: str):
 
 async def replace_portfolio(google_sub: str, items: list[dict]):
     """Atomic replace: delete all + insert new in one transaction."""
-    db = await get_db()
-    now = datetime.now().isoformat()
-    await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
-    for i, it in enumerate(items):
-        group_name = await _resolve_default_group_name(db, google_sub, it["stock_code"])
-        await db.execute(
-            """INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (google_sub, it["stock_code"], it["stock_name"], it["quantity"], it["avg_price"], i, it.get("currency", "KRW"), group_name, now, now),
-        )
-    await db.commit()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            now = datetime.now().isoformat()
+            await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
+            for i, it in enumerate(items):
+                group_name = await _resolve_default_group_name(db, google_sub, it["stock_code"])
+                await db.execute(
+                    """INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (google_sub, it["stock_code"], it["stock_name"], it["quantity"], it["avg_price"], i, it.get("currency", "KRW"), group_name, now, now),
+                )
+        except Exception:
+            await db.rollback()
+            raise
+        await db.commit()
 
 
 async def delete_portfolio_item(google_sub: str, stock_code: str):

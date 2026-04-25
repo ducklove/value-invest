@@ -12,7 +12,9 @@ external attack surface.
 """
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
@@ -24,12 +26,37 @@ _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _require_loopback(request: Request) -> None:
-    """Reject anything that's not a loopback connection."""
+    """Protect internal jobs from public reverse-proxy traffic.
+
+    Direct loopback calls remain supported for systemd timers. If
+    INTERNAL_API_TOKEN is configured, callers must send X-Internal-Token.
+    """
+    expected_token = os.getenv("INTERNAL_API_TOKEN", "").strip()
+    provided_token = (
+        request.headers.get("x-internal-token")
+        or request.headers.get("x-value-invest-internal-token")
+        or ""
+    ).strip()
+    if expected_token:
+        if hmac.compare_digest(provided_token, expected_token):
+            return
+        logger.warning("internal endpoint rejected missing/invalid token")
+        raise HTTPException(status_code=403, detail="internal token required")
+
     client = request.client
     host = client.host if client else ""
-    if host not in _LOOPBACK_HOSTS:
-        logger.warning("internal endpoint rejected non-loopback host=%s", host)
-        raise HTTPException(status_code=403, detail="loopback only")
+    forwarded_for = request.headers.get("x-forwarded-for")
+    real_ip = request.headers.get("x-real-ip")
+    if host in _LOOPBACK_HOSTS and not forwarded_for and not real_ip:
+        return
+
+    logger.warning(
+        "internal endpoint rejected host=%s forwarded_for=%s real_ip=%s",
+        host,
+        forwarded_for,
+        real_ip,
+    )
+    raise HTTPException(status_code=403, detail="internal only")
 
 
 @router.post("/snapshot/nav")

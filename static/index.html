@@ -245,10 +245,10 @@ function trackEvent(name, params = {}) {
     <!-- 영역지도 모달. 기존 그룹 모달과 동일한 .pf-modal-overlay + .pf-modal
          구조를 재사용해 CSS 충돌 없도록. add-bar 의 '🗺️ 영역지도' 버튼이
          display 를 flex 로 바꿔 띄운다. backdrop / ✕ / ESC 로 닫힘. -->
-    <div class="pf-modal-overlay" id="pfTreemapModal" style="display:none;" onclick="if(event.target===this)pfCloseTreemap()">
+    <div class="pf-modal-overlay" id="pfTreemapModal" style="display:none;" onclick="if(event.target===this)pfCloseTreemap()" role="dialog" aria-modal="true" aria-labelledby="pfTreemapTitle">
       <div class="pf-modal pf-treemap-modal">
         <div class="pf-modal-header">
-          <h3>포트폴리오 구성</h3>
+          <h3 id="pfTreemapTitle">포트폴리오 구성</h3>
           <button class="pf-modal-close" type="button" onclick="pfCloseTreemap()" aria-label="닫기">&times;</button>
         </div>
         <div class="pf-modal-body pf-treemap-body">
@@ -257,7 +257,7 @@ function trackEvent(name, params = {}) {
       </div>
     </div>
 
-    <div class="pf-modal-overlay" id="pfAssetInsightModal" style="display:none;" onclick="if(event.target===this)pfCloseAssetInsight()">
+    <div class="pf-modal-overlay" id="pfAssetInsightModal" style="display:none;" onclick="if(event.target===this)pfCloseAssetInsight()" role="dialog" aria-modal="true" aria-labelledby="pfAssetInsightTitle">
       <div class="pf-modal pf-insight-modal">
         <div class="pf-modal-header">
           <h3 id="pfAssetInsightTitle">투자 인사이트</h3>
@@ -384,11 +384,11 @@ function trackEvent(name, params = {}) {
 
 </div>
 
-<div class="chart-modal-overlay" id="chartModal" style="display:none;" onclick="if(event.target===this)closeChartModal()">
+<div class="chart-modal-overlay" id="chartModal" style="display:none;" onclick="if(event.target===this)closeChartModal()" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
   <div class="chart-modal">
     <div class="chart-modal-header">
       <h3 id="chartModalTitle"></h3>
-      <button class="chart-modal-close" onclick="closeChartModal()">&times;</button>
+      <button class="chart-modal-close" onclick="closeChartModal()" type="button" aria-label="닫기">&times;</button>
     </div>
     <div class="chart-modal-body">
       <div id="chartModalCanvas" style="width:100%;height:100%;"></div>
@@ -407,11 +407,11 @@ function trackEvent(name, params = {}) {
   </div>
 </div>
 
-<div class="pf-modal-overlay" id="pfGroupModal" style="display:none;" onclick="if(event.target===this)closeGroupModal()">
+<div class="pf-modal-overlay" id="pfGroupModal" style="display:none;" onclick="if(event.target===this)closeGroupModal()" role="dialog" aria-modal="true" aria-labelledby="pfGroupModalTitle">
   <div class="pf-modal">
     <div class="pf-modal-header">
-      <h3>그룹 관리</h3>
-      <button class="pf-modal-close" onclick="closeGroupModal()">&times;</button>
+      <h3 id="pfGroupModalTitle">그룹 관리</h3>
+      <button class="pf-modal-close" onclick="closeGroupModal()" type="button" aria-label="닫기">&times;</button>
     </div>
     <div class="pf-modal-body" id="pfGroupModalBody"></div>
     <div class="pf-modal-footer">

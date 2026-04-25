@@ -51,3 +51,5 @@ Public base URLs can be overridden with:
 - `PREFERRED_SPREAD_BASE_URL`
 - `GOLD_GAP_BASE_URL`
 - `KIS_PROXY_BASE_URL`
+- `KIS_PROXY_TOKEN` (optional, sent as `X-KIS-Proxy-Token` when the proxy is
+  configured with `KIS_PROXY_PUBLIC_TOKENS`)

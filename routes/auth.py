@@ -24,7 +24,7 @@ def _normalize_return_to(value: str | None) -> str:
     if not value:
         return "/"
     parsed = urlparse(value)
-    if not parsed.scheme and value.startswith("/"):
+    if not parsed.scheme and not parsed.netloc and value.startswith("/"):
         return value
     origin = f"{parsed.scheme}://{parsed.netloc}"
     if origin in TRUSTED_RETURN_ORIGINS:

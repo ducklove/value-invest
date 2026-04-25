@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import deps
-from routes import cache_mgmt, auth
+from routes import cache_mgmt, auth, internal, portfolio
 
 
 def _request(path: str = "/") -> Request:
@@ -16,6 +16,24 @@ def _request(path: str = "/") -> Request:
         "headers": [],
         "query_string": b"",
         "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+    return Request(scope)
+
+
+def _request_with_headers(path: str = "/", headers: dict[str, str] | None = None, client_host: str = "127.0.0.1") -> Request:
+    encoded_headers = [
+        (key.lower().encode("latin-1"), value.encode("latin-1"))
+        for key, value in (headers or {}).items()
+    ]
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": path,
+        "headers": encoded_headers,
+        "query_string": b"",
+        "client": (client_host, 12345),
         "server": ("testserver", 80),
         "scheme": "http",
     }
@@ -43,6 +61,37 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
              patch("routes.auth.auth_service.is_enabled", return_value=True):
             response = await auth.login_page(request)
         self.assertEqual(response.status_code, 303)
+
+    def test_return_to_rejects_scheme_relative_url(self):
+        self.assertEqual(auth._normalize_return_to("//evil.example/path"), "/")
+        self.assertEqual(auth._normalize_return_to("/portfolio"), "/portfolio")
+
+    def test_internal_rejects_forwarded_loopback_without_token(self):
+        request = _request_with_headers(
+            "/api/internal/snapshot/nav",
+            headers={"X-Forwarded-For": "203.0.113.10"},
+            client_host="127.0.0.1",
+        )
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(HTTPException) as exc_info:
+                internal._require_loopback(request)
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+    def test_internal_accepts_configured_token_behind_proxy(self):
+        request = _request_with_headers(
+            "/api/internal/snapshot/nav",
+            headers={"X-Forwarded-For": "203.0.113.10", "X-Internal-Token": "secret"},
+            client_host="127.0.0.1",
+        )
+        with patch.dict("os.environ", {"INTERNAL_API_TOKEN": "secret"}, clear=True):
+            internal._require_loopback(request)
+
+    async def test_cashflow_invalid_amount_returns_400(self):
+        request = _request_with_headers("/api/portfolio/cashflows")
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):
+            with self.assertRaises(HTTPException) as exc_info:
+                await portfolio.add_cashflow(request, {"type": "deposit", "amount": "not-a-number"})
+        self.assertEqual(exc_info.exception.status_code, 400)
 
     def test_analysis_snapshot_staleness(self):
         self.assertTrue(deps.analysis_snapshot_is_stale(None))
