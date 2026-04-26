@@ -27,10 +27,10 @@ const PF_QUOTE_REFRESH_MS = 60_000;
 // 그 선택이 우선 (_pfGetColVisibility 로직 참조).
 const PF_COL_DEFS = [
   { key: 'group',     cls: 'pf-col-group',     label: '그룹' },
+  { key: 'curprice',  cls: 'pf-col-curprice',   label: '현재가' },
   { key: 'benchmark', cls: 'pf-col-benchmark',  label: '벤치마크' },
   { key: 'invested',  cls: 'pf-col-invested',   label: '거래대금',  defaultVisible: false },
   { key: 'buyprice',  cls: 'pf-col-buyprice',   label: '매입가' },
-  { key: 'curprice',  cls: 'pf-col-curprice',   label: '현재가' },
   { key: 'target',    cls: 'pf-col-target',     label: '목표가',     defaultVisible: false },
   { key: 'achiev',    cls: 'pf-col-achiev',     label: '달성률',     defaultVisible: false },
   { key: 'qty',       cls: 'pf-col-qty',        label: '수량' },
@@ -824,10 +824,10 @@ function renderPortfolio() {
         <td><a href="#" class="pf-stock-link js-pf-analyze"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</td>
         <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
+        <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
-        <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-target"><span class="pf-target-edit-wrap"><input class="pf-edit-input" id="pfEditTarget" value="${r.target_price ?? ''}" type="number" step="any" placeholder="자동"><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 즉시 비우기 (자동 계산 복귀)">×</button></span></td>
         <td class="pf-col-num pf-col-achiev">${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
@@ -847,10 +847,10 @@ function renderPortfolio() {
       <td><a href="#" class="pf-stock-link js-pf-analyze"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
+      <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-benchmark js-pf-bench-picker">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
-      <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-target">${r.targetPrice !== null ? _fp(r.targetPrice) : '-'}</td>
       <td class="pf-col-num pf-col-achiev">${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
