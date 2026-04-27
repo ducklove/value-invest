@@ -3058,6 +3058,9 @@ let _navChartInstance = null;
 let _navChartResizeObserver = null;
 let _valueChartResizeObserver = null;
 let _navChartData = [];  // cached for benchmark overlay
+let _navChartSeriesForAxis = [];
+let _valueChartData = [];
+let _valueChartSeriesForAxis = [];
 let _benchCache = {};    // code -> [{date, close}]
 
 const _BENCH_COLORS = { KOSPI: '#e74c3c', SP500: '#2563eb', GOLD: '#f59e0b' };
@@ -3109,6 +3112,77 @@ async function onBenchToggle() {
 // On zoom, we multiply by navValues[zoomStartIdx] to scale into NAV space.
 let _benchRatios = {};  // code -> { ratioByLabel: {date: ratio}, labels }
 
+function _chartZoomWindow(length, startPct = 0, endPct = 100) {
+  const last = Math.max(0, length - 1);
+  return {
+    startIdx: Math.max(0, Math.min(last, Math.round(startPct / 100 * last))),
+    endIdx: Math.max(0, Math.min(last, Math.round(endPct / 100 * last))),
+  };
+}
+
+function _chartWindowFromInstance(chart, length) {
+  try {
+    const dz = chart?.getOption?.()?.dataZoom?.[0];
+    return _chartZoomWindow(length, dz?.start ?? 0, dz?.end ?? 100);
+  } catch (_) {
+    return _chartZoomWindow(length, 0, 100);
+  }
+}
+
+function _chartDataToNumbers(values) {
+  return (values || []).map(v => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  });
+}
+
+function _visibleChartValues(seriesList, startIdx, endIdx) {
+  const values = [];
+  for (const series of seriesList || []) {
+    for (let i = startIdx; i <= endIdx; i++) {
+      const n = Number(series?.[i]);
+      if (Number.isFinite(n)) values.push(n);
+    }
+  }
+  return values;
+}
+
+function _applyVisibleYAxis(chart, seriesList, startIdx, endIdx, yZero) {
+  if (!chart?.setOption) return;
+  const values = _visibleChartValues(seriesList, startIdx, endIdx);
+  if (!values.length) {
+    chart.setOption({ yAxis: { min: yZero ? 0 : 'dataMin', max: undefined } });
+    return;
+  }
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (yZero) min = 0;
+  if (min === max) {
+    const pad = Math.max(Math.abs(max) * 0.02, 1);
+    if (!yZero) min -= pad;
+    max += pad;
+  } else {
+    const pad = (max - min) * 0.06;
+    if (!yZero) min -= pad;
+    max += pad;
+  }
+  chart.setOption({ yAxis: { min, max } });
+}
+
+function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!data?.length || !data[startIdx] || !data[endIdx]) {
+    el.innerHTML = '';
+    return;
+  }
+  const start = data[startIdx].date;
+  const end = data[endIdx].date;
+  const days = Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000)) + 1;
+  const points = Math.max(0, endIdx - startIdx + 1);
+  el.innerHTML = `표시 기간 <strong>${escapeHtml(start)} ~ ${escapeHtml(end)}</strong><span>${days.toLocaleString()}일 · ${points.toLocaleString()}개 스냅샷</span>`;
+}
+
 async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
@@ -3119,6 +3193,7 @@ async function renderNavChart(data) {
 
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
+    _updateChartRangeLabel('pfNavRange', [], 0, 0);
     return;
   }
 
@@ -3259,6 +3334,14 @@ async function renderNavChart(data) {
     ],
   });
 
+  _navChartSeriesForAxis = [
+    navValues,
+    ...initBenchSeries.map(series => _chartDataToNumbers(series.data)),
+  ];
+  const fullWindow = _chartZoomWindow(labels.length, 0, 100);
+  _applyVisibleYAxis(ec, _navChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!yZero);
+  _updateChartRangeLabel('pfNavRange', data, fullWindow.startIdx, fullWindow.endIdx);
+
   // On dataZoom change: (a) re-scale benchmark series to the new window,
   // (b) refresh the CAGR card so it reflects the visible period.
   //
@@ -3284,8 +3367,16 @@ async function renderNavChart(data) {
           // Update only benchmark series (index 1+)
           const seriesUpdate = [{ data: navValues.map(v => v === null ? '-' : v) }, ...newBench];
           ec.setOption({ series: seriesUpdate });
+          _navChartSeriesForAxis = [
+            navValues,
+            ...newBench.map(series => _chartDataToNumbers(series.data)),
+          ];
+        } else {
+          _navChartSeriesForAxis = [navValues];
         }
 
+        _applyVisibleYAxis(ec, _navChartSeriesForAxis, startIdx, endIdx, !!document.getElementById('pfNavYZero')?.checked);
+        _updateChartRangeLabel('pfNavRange', data, startIdx, endIdx);
         _updateNavCagrCard(data, startIdx, endIdx);
       }, 80);
     });
@@ -3308,14 +3399,16 @@ async function renderNavChart(data) {
 function onNavYZeroToggle() {
   if (_navChartInstance) {
     const yZero = document.getElementById('pfNavYZero')?.checked;
-    _navChartInstance.setOption({ yAxis: { min: yZero ? 0 : 'dataMin' } });
+    const { startIdx, endIdx } = _chartWindowFromInstance(_navChartInstance, _navChartData.length);
+    _applyVisibleYAxis(_navChartInstance, _navChartSeriesForAxis, startIdx, endIdx, !!yZero);
   }
 }
 
 function onValueYZeroToggle() {
   if (_valueChartInstance) {
     const yZero = document.getElementById('pfValueYZero')?.checked;
-    _valueChartInstance.setOption({ yAxis: { min: yZero ? 0 : 'dataMin' } });
+    const { startIdx, endIdx } = _chartWindowFromInstance(_valueChartInstance, _valueChartData.length);
+    _applyVisibleYAxis(_valueChartInstance, _valueChartSeriesForAxis, startIdx, endIdx, !!yZero);
   }
 }
 
@@ -3326,6 +3419,13 @@ function _navZoomToDays(days) {
   _navChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
 }
 
+function _valueZoomToDays(days) {
+  if (!_valueChartInstance || !_valueChartData.length) return;
+  const total = _valueChartData.length;
+  const startPct = Math.max(0, (1 - days / total) * 100);
+  _valueChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
+}
+
 let _valueChartInstance = null;
 
 async function renderValueChart(data) {
@@ -3333,6 +3433,8 @@ async function renderValueChart(data) {
   if (!container) return;
   if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
   if (_valueChartResizeObserver) { _valueChartResizeObserver.disconnect(); _valueChartResizeObserver = null; }
+  _valueChartData = data || [];
+  _valueChartSeriesForAxis = [];
   await loadChartLib();
 
   // 모바일 layout 확정 대기 — renderNavChart 와 동일 이유.
@@ -3344,6 +3446,7 @@ async function renderValueChart(data) {
 
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
+    _updateChartRangeLabel('pfValueRange', [], 0, 0);
     return;
   }
 
@@ -3373,6 +3476,10 @@ async function renderValueChart(data) {
     yFormatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit,
     dataZoom: true,
   });
+  _valueChartSeriesForAxis = [fxValues.map(v => Math.round(v))];
+  const fullWindow = _chartZoomWindow(data.length, 0, 100);
+  _applyVisibleYAxis(_valueChartInstance, _valueChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!valYZero);
+  _updateChartRangeLabel('pfValueRange', data, fullWindow.startIdx, fullWindow.endIdx);
 
   // NAV 차트와 동일한 ResizeObserver — 폰 탭 전환 시 init 타이밍 보정.
   if (typeof ResizeObserver !== 'undefined' && _valueChartInstance) {
@@ -3402,17 +3509,31 @@ async function renderValueChart(data) {
       ? ((_latestFxVal - _firstFxVal) / _firstFxVal * 100) / valTotalYears : null;
 
     const fmtVal = v => pfCurrency === 'USD' ? '$' + Number(v.toFixed(0)).toLocaleString() : fmtKrw(Math.round(v));
+    const _periodPct = (days) => {
+      if (fxValues.length < 2) return null;
+      const slice = fxValues.slice(-days);
+      if (slice.length < 2 || !(slice[0] > 0)) return null;
+      return ((fxValues[fxValues.length - 1] / slice[0]) - 1) * 100;
+    };
+    const pct7 = _periodPct(7);
+    const pct30 = _periodPct(30);
+    const pct90 = _periodPct(90);
     const items = [
-      { label: '52주 최저', val: fmtVal(min52) },
-      { label: '52주 최고', val: fmtVal(max52) },
-      { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct) },
+      { label: '현재 평가금액', val: fmtVal(_latestFxVal) },
+      { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7), days: 7 },
+      { label: '최근 30일', val: pct30 !== null ? fmtPct(pct30) : '-', cls: returnClass(pct30), days: 30 },
+      { label: '최근 90일', val: pct90 !== null ? fmtPct(pct90) : '-', cls: returnClass(pct90), days: 90 },
+      { label: '52주 최저', val: fmtVal(min52), days: 365 },
+      { label: '52주 최고', val: fmtVal(max52), days: 365 },
+      { label: 'YoY', val: yoyPct !== null ? fmtPct(yoyPct) : '-', cls: returnClass(yoyPct), days: 365 },
       // role='cagr' is the hook _updateValueCagrCard() latches onto when
       // the 평가금액 chart dataZoom moves.
       { label: 'CAGR', val: acctReturn !== null ? fmtPct(acctReturn) : '-', cls: returnClass(acctReturn), role: 'cagr' },
     ];
     statsEl.innerHTML = items.map(p => {
       const role = p.role ? ` data-role="${p.role}"` : '';
-      return `<div class="pf-nav-ret-card"${role}><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
+      const zoomable = p.days ? ` js-pf-value-zoom" data-zoom-days="${p.days}" style="cursor:pointer;` : '';
+      return `<div class="pf-nav-ret-card${zoomable}"${role}><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
     }).join('');
   }
 
@@ -3430,6 +3551,8 @@ async function renderValueChart(data) {
         const last = Math.max(0, data.length - 1);
         const startIdx = Math.max(0, Math.min(last, Math.round(startPct / 100 * last)));
         const endIdx = Math.max(0, Math.min(last, Math.round(endPct / 100 * last)));
+        _applyVisibleYAxis(_valueChartInstance, _valueChartSeriesForAxis, startIdx, endIdx, !!document.getElementById('pfValueYZero')?.checked);
+        _updateChartRangeLabel('pfValueRange', data, startIdx, endIdx);
         _updateValueCagrCard(data, fxValues, startIdx, endIdx);
       }, 80);
     });
@@ -3667,6 +3790,9 @@ async function deleteCashflow(id) {
       } else if ((el = t.closest('.js-pf-nav-zoom'))) {
         const days = Number(el.dataset.zoomDays);
         if (!isNaN(days)) _navZoomToDays(days);
+      } else if ((el = t.closest('.js-pf-value-zoom'))) {
+        const days = Number(el.dataset.zoomDays);
+        if (!isNaN(days)) _valueZoomToDays(days);
       } else if ((el = t.closest('.js-pf-target-clear'))) {
         const code = codeFromTr(el);
         if (code) {

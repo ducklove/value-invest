@@ -886,13 +886,20 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-bench-chip input { display: none; }
 .pf-bench-chip:has(input:checked) { background: var(--primary); color: #fff; border-color: var(--primary); }
 .pf-nav-returns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.pf-chart-range {
+  margin-top: 8px; color: var(--text-secondary); font-size: 12px; line-height: 1.4;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.pf-chart-range strong { color: var(--text); font-weight: 700; }
 .pf-nav-ret-card {
   flex: 1; min-width: 80px; padding: 8px 12px; background: var(--surface);
   border: 1px solid var(--border); border-radius: 8px; text-align: center;
 }
 .pf-nav-ret-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
 .pf-nav-ret-value { font-size: 16px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
-.pf-nav-ret-card[onclick]:hover { border-color: var(--primary); background: var(--hover); }
+.pf-nav-ret-card[data-zoom-days]:hover, .pf-nav-ret-card[onclick]:hover {
+  border-color: var(--primary); background: var(--hover);
+}
 
 /* Cashflow section */
 .pf-cashflow-section { margin-top: 24px; }
