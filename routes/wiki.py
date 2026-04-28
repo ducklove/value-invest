@@ -32,6 +32,8 @@ QA_MAX_QUESTION_CHARS = 1000
 # actual number of entries retrieved is sized by _classify_question().
 QA_CTX_PER_ENTRY_CHARS = 800
 QA_DART_REVIEW_CHARS = int(os.environ.get("WIKI_QA_DART_REVIEW_CHARS", "2600"))
+QA_MAX_TOKENS = int(os.environ.get("WIKI_QA_MAX_TOKENS", "2400"))
+QA_EMPTY_RETRY_MAX_TOKENS = int(os.environ.get("WIKI_QA_EMPTY_RETRY_MAX_TOKENS", "2400"))
 
 
 def _require_user(user):
@@ -539,6 +541,66 @@ QA_SYSTEM = """당신은 한국 주식 애널리스트입니다. 아래 제공�
 """
 
 
+def _qa_chat_payload(model: str, prompt: str, *, stream: bool, max_tokens: int) -> dict:
+    return {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": QA_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": max_tokens,
+        "stream": stream,
+        # Kimi K2.6 can spend the whole completion budget on reasoning and
+        # return empty final content. This UI needs final-answer text only.
+        "reasoning": {"effort": "none", "exclude": True},
+        "include_reasoning": False,
+    }
+
+
+def _extract_final_content(data: dict) -> str:
+    try:
+        message = (data.get("choices") or [{}])[0].get("message") or {}
+    except Exception:
+        return ""
+    content = message.get("content") or ""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or ""))
+            else:
+                parts.append(str(item))
+        content = "".join(parts)
+    return str(content or "").strip()
+
+
+async def _retry_empty_qa_answer(openrouter_key: str, model: str, prompt: str) -> tuple[str, dict]:
+    retry_prompt = (
+        f"{prompt}\n\n"
+        "중요: 내부 추론이나 thinking을 출력하지 말고, 한국어 최종 답변 본문만 작성하세요. "
+        "마크다운 3-6문단으로 바로 답하세요."
+    )
+    payload = _qa_chat_payload(
+        model,
+        retry_prompt,
+        stream=False,
+        max_tokens=QA_EMPTY_RETRY_MAX_TOKENS,
+    )
+    async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, read=90.0)) as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {openrouter_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(f"OpenRouter retry HTTP {resp.status_code}: {resp.text[:300]}")
+    data = resp.json()
+    return _extract_final_content(data), data
+
+
 @router.post("/api/analysis/{stock_code}/ask")
 async def ask_stock(
     stock_code: str,
@@ -649,15 +711,12 @@ async def ask_stock(
                         "Authorization": f"Bearer {openrouter_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": QA_SYSTEM},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "max_tokens": 1500,
-                        "stream": True,
-                    },
+                    json=_qa_chat_payload(
+                        model,
+                        prompt,
+                        stream=True,
+                        max_tokens=QA_MAX_TOKENS,
+                    ),
                 ) as resp:
                     if resp.status_code != 200:
                         body = await resp.aread()
@@ -723,7 +782,39 @@ async def ask_stock(
                 return
 
         answer = "".join(answer_parts).strip()
-        # Persist for audit + rate limit accounting, even if empty.
+        empty_content_error = ""
+        if not answer:
+            try:
+                retry_answer, retry_data = await _retry_empty_qa_answer(openrouter_key, model, prompt)
+                retry_usage = retry_data.get("usage") or {}
+                retry_input = int(retry_usage.get("prompt_tokens") or retry_usage.get("input_tokens") or 0)
+                retry_output = int(retry_usage.get("completion_tokens") or retry_usage.get("output_tokens") or 0)
+                retry_cost = float(retry_usage.get("cost") or retry_usage.get("total_cost") or 0)
+                if retry_input:
+                    input_tokens = int(input_tokens or 0) + retry_input
+                if retry_output:
+                    output_tokens = int(output_tokens or 0) + retry_output
+                if retry_cost:
+                    cost = float(cost or 0) + retry_cost
+                used_model = retry_data.get("model") or used_model
+                if retry_answer:
+                    answer = retry_answer
+                    answer_parts.append(retry_answer)
+                    yield f"data: {_json.dumps({'content': retry_answer})}\n\n"
+                else:
+                    empty_content_error = "empty_content_after_retry"
+            except Exception as exc:
+                logger.exception("ask_stock empty-content retry failed")
+                empty_content_error = f"empty_content_retry_failed: {exc}"
+
+        if not answer:
+            answer = (
+                "AI 모델이 최종 답변 본문을 반환하지 않았습니다. "
+                "현재 모델이 reasoning 토큰만 소진한 것으로 보여요. 잠시 후 다시 질문해 주세요."
+            )
+            yield f"data: {_json.dumps({'content': answer})}\n\n"
+
+        # Persist for audit + rate limit accounting.
         try:
             await cache.save_qa_entry({
                 "google_sub": google_sub,
@@ -748,7 +839,8 @@ async def ask_stock(
             output_tokens=output_tokens,
             cost_usd=float(cost or 0),
             latency_ms=int((datetime.now() - started_at).total_seconds() * 1000),
-            ok=True,
+            ok=not empty_content_error,
+            error=empty_content_error or None,
         )
         yield f"data: {_json.dumps({'done': True, 'sources': source_ids, 'model': used_model, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
 

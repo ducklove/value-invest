@@ -211,6 +211,23 @@ class WikiAskRouteTests(unittest.IsolatedAsyncioTestCase):
         p = c("환율 영향 어떨까?")
         self.assertTrue(p["include_macro"])
 
+    def test_qa_payload_disables_reasoning_for_final_answer(self):
+        payload = wiki_route._qa_chat_payload("moonshotai/kimi-k2.6", "prompt", stream=True, max_tokens=1500)
+
+        self.assertEqual(payload["model"], "moonshotai/kimi-k2.6")
+        self.assertTrue(payload["stream"])
+        self.assertEqual(payload["reasoning"], {"effort": "none", "exclude": True})
+        self.assertFalse(payload["include_reasoning"])
+
+    def test_extract_final_content_handles_openai_text_parts(self):
+        data = {
+            "choices": [
+                {"message": {"content": [{"type": "text", "text": "hello"}, {"type": "text", "text": " world"}]}}
+            ]
+        }
+
+        self.assertEqual(wiki_route._extract_final_content(data), "hello world")
+
 
 class ShortcutTests(unittest.IsolatedAsyncioTestCase):
     """Exercise Tier-0 rule-based shortcuts directly — no HTTP stack."""

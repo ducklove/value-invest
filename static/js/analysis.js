@@ -1631,6 +1631,14 @@ async function askWikiQuestion() {
             }
           }
           if (d.done) {
+            if (!mdText) {
+              mdText = 'AI 모델이 최종 답변 본문을 반환하지 않았습니다. 잠시 후 다시 질문해 주세요.';
+              if (typeof _renderSafeMarkdown === 'function') {
+                answerEl.innerHTML = _renderSafeMarkdown(mdText);
+              } else {
+                answerEl.textContent = mdText;
+              }
+            }
             const srcN = (d.sources || []).length;
             const modelS = d.model ? ` · ${d.model}` : '';
             const costUsd = Number(d.cost || 0);
