@@ -1,0 +1,20 @@
+[Unit]
+Description=Value Invest DART filing review ingestion
+After=network.target
+OnFailure=value-invest-notify@%n.service
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+# Delegates to the running web process so DART/OpenRouter config and DB
+# state stay consistent with the user-facing app.
+ExecStart=/usr/bin/curl -fsSk --max-time 7200 -H "Content-Type: application/json" --data '{"target_limit":20}' -X POST https://127.0.0.1:3691/api/internal/dart-review/ingest
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+MemoryMax=120M
+CPUQuota=30%
+TasksMax=20

@@ -1,0 +1,14 @@
+[Unit]
+Description=Value Invest pre-generate DART filing AI reviews
+
+[Timer]
+# Run a few times per day: enough to pick up newly filed quarterly reports
+# without turning DART/OpenRouter into a hot path.
+OnCalendar=*-*-* 05:10:00
+OnCalendar=*-*-* 12:10:00
+OnCalendar=*-*-* 18:10:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

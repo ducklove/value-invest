@@ -24,6 +24,8 @@ REPO_UNITS=(
   "portfolio-snapshot.timer"
   "value-invest-backup.service"
   "value-invest-backup.timer"
+  "dart-review-ingestion.service"
+  "dart-review-ingestion.timer"
   "wiki-ingestion.service"
   "wiki-ingestion.timer"
   "deploy/value-invest.service"

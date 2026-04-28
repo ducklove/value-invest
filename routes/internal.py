@@ -128,3 +128,42 @@ async def run_wiki_ingest(request: Request, payload: dict = Body(default={})):
     except Exception as exc:
         logger.exception("wiki ingest failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/dart-review/ingest")
+async def run_dart_review_ingest(request: Request, payload: dict = Body(default={})):
+    """Drive the DART filing AI review pre-generation pipeline."""
+    _require_loopback(request)
+    import dart_report_review
+    body = payload or {}
+    codes = body.get("stock_codes") if isinstance(body, dict) else None
+    target_limit = body.get("target_limit") if isinstance(body, dict) else None
+    force = bool(body.get("force")) if isinstance(body, dict) else False
+    try:
+        result = await dart_report_review.run_pipeline(
+            stock_codes=codes,
+            target_limit=target_limit,
+            force=force,
+        )
+        import observability
+        failed = int(result.get("failed") or 0)
+        await observability.record_event(
+            "dart_report_review",
+            "ingest_partial" if failed else "ingest_ok",
+            level="warning" if failed else "info",
+            details={
+                "stocks_processed": result.get("stocks_processed", 0),
+                "generated": result.get("generated", 0),
+                "skipped": result.get("skipped", 0),
+                "failed": failed,
+                "skipped_by_reason": result.get("skipped_by_reason", {}),
+                "failed_by_reason": result.get("failed_by_reason", {}),
+                "target_limit": target_limit,
+                "force": force,
+            },
+            wait=True,
+        )
+        return {"ok": True, **result}
+    except Exception as exc:
+        logger.exception("DART review ingest failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -20,6 +21,7 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 import ai_config
 import cache
 import dart_client
+import observability
 
 
 logger = logging.getLogger(__name__)
@@ -31,8 +33,10 @@ COMPARISON_TEXT_CHARS = int(os.getenv("DART_REVIEW_COMPARISON_CHARS", "9000"))
 COMPARISON_REPORT_COUNT = int(os.getenv("DART_REVIEW_COMPARISON_REPORTS", "2"))
 REPORT_LOOKBACK_DAYS = int(os.getenv("DART_REVIEW_LOOKBACK_DAYS", "1100"))
 DART_FILINGS_CACHE_TTL_S = int(os.getenv("DART_REVIEW_FILINGS_CACHE_TTL_S", "600"))
+DART_REVIEW_TARGET_LIMIT = int(os.getenv("DART_REVIEW_TARGET_LIMIT", "12"))
 
 _filings_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_pipeline_lock = asyncio.Lock()
 
 
 class DartReportReviewError(RuntimeError):
@@ -550,3 +554,208 @@ async def generate_review(stock_code: str, *, google_sub: str | None, force: boo
     saved = await cache.save_dart_report_review(review)
     saved["cached"] = False
     return saved
+
+
+def _reason_from_error(exc: Exception) -> str:
+    message = str(exc)
+    lowered = message.lower()
+    if "opendart_api_key" in lowered or "openrouter api key" in lowered:
+        return "config_missing"
+    if "429" in lowered or "rate" in lowered:
+        return "rate_limited"
+    if "timeout" in lowered or "timed out" in lowered:
+        return "timeout"
+    if "dart" in lowered or "openrouter" in lowered or "http" in lowered:
+        return "upstream_error"
+    return "review_error"
+
+
+async def review_stock(
+    stock_code: str,
+    *,
+    force: bool = False,
+    allow_generate: bool = True,
+) -> dict[str, Any]:
+    """Ensure the latest periodic filing has a cached AI review."""
+    code = str(stock_code or "").strip()
+    if not code:
+        return {"stock_code": code, "status": "skipped", "reason": "invalid_stock_code"}
+
+    corp_code = await cache.get_corp_code(code)
+    if not corp_code:
+        return {"stock_code": code, "status": "skipped", "reason": "no_corp_code"}
+
+    status = await latest_review_status(code)
+    latest = status.get("latest_report") or {}
+    if status.get("status") == "ready" and not force:
+        return {
+            "stock_code": code,
+            "status": "skipped",
+            "reason": "already_ready",
+            "rcept_no": latest.get("rcept_no"),
+        }
+    if status.get("status") == "no_report":
+        return {"stock_code": code, "status": "skipped", "reason": "no_report"}
+    if not allow_generate:
+        return {
+            "stock_code": code,
+            "status": "skipped",
+            "reason": "target_limit_reached",
+            "rcept_no": latest.get("rcept_no"),
+        }
+
+    review = await generate_review(code, google_sub=None, force=force)
+    return {
+        "stock_code": code,
+        "status": "generated",
+        "rcept_no": review.get("rcept_no"),
+        "report_date": review.get("report_date"),
+        "model": review.get("model"),
+    }
+
+
+def _bump_counter(bucket: dict[str, int], key: str | None, amount: int = 1) -> None:
+    name = key or "unknown"
+    bucket[name] = bucket.get(name, 0) + amount
+
+
+async def run_pipeline(
+    stock_codes: list[str] | None = None,
+    *,
+    target_limit: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Pre-generate missing DART filing reviews for active stocks.
+
+    target_limit caps new LLM generations per run, not how many targets are
+    checked. That lets later stocks progress after earlier ones are cached.
+    """
+    if _pipeline_lock.locked():
+        return {
+            "stocks_total": 0,
+            "stocks_processed": 0,
+            "generated": 0,
+            "skipped": 1,
+            "failed": 0,
+            "skipped_by_reason": {"already_running": 1},
+            "failed_by_reason": {},
+            "per_stock": [],
+            "already_running": True,
+        }
+
+    async with _pipeline_lock:
+        if stock_codes is None:
+            stock_codes = await cache.select_wiki_target_stocks()
+        codes = [str(code).strip() for code in stock_codes if str(code or "").strip()]
+        codes = list(dict.fromkeys(codes))
+        try:
+            generation_limit = DART_REVIEW_TARGET_LIMIT if target_limit is None else int(target_limit)
+        except (TypeError, ValueError):
+            generation_limit = DART_REVIEW_TARGET_LIMIT
+
+        overall: dict[str, Any] = {
+            "stocks_total": len(codes),
+            "stocks_processed": 0,
+            "generated": 0,
+            "skipped": 0,
+            "failed": 0,
+            "skipped_by_reason": {},
+            "failed_by_reason": {},
+            "per_stock": [],
+        }
+
+        for code in codes:
+            allow_generate = force or generation_limit <= 0 or overall["generated"] < generation_limit
+            try:
+                result = await review_stock(code, force=force, allow_generate=allow_generate)
+            except Exception as exc:
+                logger.exception("DART review pre-generation failed for %s: %s", code, exc)
+                reason = _reason_from_error(exc)
+                result = {
+                    "stock_code": code,
+                    "status": "failed",
+                    "reason": reason,
+                    "error": str(exc)[:300],
+                }
+
+            overall["stocks_processed"] += 1
+            status = result.get("status")
+            if status == "generated":
+                overall["generated"] += 1
+            elif status == "failed":
+                overall["failed"] += 1
+                _bump_counter(overall["failed_by_reason"], result.get("reason"))
+            else:
+                overall["skipped"] += 1
+                _bump_counter(overall["skipped_by_reason"], result.get("reason"))
+
+            overall["per_stock"].append(result)
+            logger.info("DART review pre-generation %s: %s", code, result)
+
+        return overall
+
+
+async def run_background_loop(
+    stop_event: asyncio.Event,
+    *,
+    interval_seconds: float,
+    target_limit: int = DART_REVIEW_TARGET_LIMIT,
+    initial_delay_seconds: float = 90.0,
+) -> None:
+    """Continuously pre-generate recent filing reviews until stopped."""
+    if initial_delay_seconds > 0:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=initial_delay_seconds)
+            return
+        except asyncio.TimeoutError:
+            pass
+
+    while not stop_event.is_set():
+        try:
+            stats = await run_pipeline(target_limit=target_limit)
+            failed = int(stats.get("failed") or 0)
+            already_running = bool(stats.get("already_running"))
+            if already_running:
+                level = "info"
+                kind = "tick_skipped"
+            elif failed:
+                level = "warning"
+                kind = "tick_partial"
+            else:
+                level = "info"
+                kind = "tick_ok"
+            await observability.record_event(
+                "dart_report_review",
+                kind,
+                level=level,
+                details={
+                    "stocks_processed": stats.get("stocks_processed", 0),
+                    "generated": stats.get("generated", 0),
+                    "skipped": stats.get("skipped", 0),
+                    "failed": failed,
+                    "skipped_by_reason": stats.get("skipped_by_reason", {}),
+                    "failed_by_reason": stats.get("failed_by_reason", {}),
+                    "target_limit": target_limit,
+                },
+            )
+            logger.info(
+                "DART review tick: stocks=%d generated=%d skipped=%d failed=%d",
+                stats.get("stocks_processed", 0),
+                stats.get("generated", 0),
+                stats.get("skipped", 0),
+                failed,
+            )
+        except Exception as exc:
+            logger.exception("DART review background loop iteration crashed: %s", exc)
+            await observability.record_event(
+                "dart_report_review",
+                "tick_crashed",
+                level="error",
+                details={"error": str(exc)[:500]},
+            )
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            return
+        except asyncio.TimeoutError:
+            continue

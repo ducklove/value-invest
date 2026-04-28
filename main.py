@@ -136,6 +136,23 @@ async def lifespan(app: FastAPI):
             )
         )
 
+    # Optional in-process DART review loop. Production normally uses the
+    # systemd dart-review-ingestion.timer to call the same internal
+    # pipeline; keep this disabled by default to avoid double scheduling.
+    import dart_report_review
+    dart_review_stop = asyncio.Event()
+    dart_review_interval = float(os.environ.get("DART_REVIEW_INTERVAL_S", "0"))
+    dart_review_task: asyncio.Task | None = None
+    if dart_review_interval > 0:
+        dart_review_task = asyncio.create_task(
+            dart_report_review.run_background_loop(
+                dart_review_stop,
+                interval_seconds=dart_review_interval,
+                target_limit=int(os.environ.get("DART_REVIEW_TARGET_LIMIT", "12")),
+                initial_delay_seconds=float(os.environ.get("DART_REVIEW_INITIAL_DELAY_S", "90")),
+            )
+        )
+
     # 우선주 배당 Google Sheet 는 연 1회 공시 기반 + 시트 수동 관리라서
     # 자동 refresh 주기를 돌리지 않는다. /api/admin/refresh-preferred-
     # dividends 수동 엔드포인트로만 동기화 — DB 의 preferred_dividends
@@ -177,6 +194,12 @@ async def lifespan(app: FastAPI):
                 await asyncio.wait_for(wiki_task, timeout=5.0)
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 wiki_task.cancel()
+        dart_review_stop.set()
+        if dart_review_task is not None:
+            try:
+                await asyncio.wait_for(dart_review_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                dart_review_task.cancel()
         obs_stop.set()
         try:
             await asyncio.wait_for(obs_task, timeout=2.0)

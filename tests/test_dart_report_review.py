@@ -4,7 +4,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import cache
 import dart_report_review
@@ -79,6 +79,59 @@ class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["review"]["summary_md"], "# 리뷰")
         self.assertEqual(loaded["comparison_reports"][0]["rcept_no"], "20251114000001")
         self.assertEqual(loaded["model"], "deepseek/deepseek-v4-flash")
+
+
+class DartReportReviewPipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_pipeline_skips_ready_and_generates_missing(self):
+        async def fake_status(stock_code):
+            if stock_code == "005930":
+                return {"status": "ready", "latest_report": {"rcept_no": "ready-rcept"}}
+            return {"status": "missing", "latest_report": {"rcept_no": "missing-rcept"}}
+
+        async def fake_generate(stock_code, *, google_sub, force):
+            return {
+                "stock_code": stock_code,
+                "rcept_no": "missing-rcept",
+                "report_date": "2026-04-01",
+                "model": "deepseek/deepseek-v4-flash",
+            }
+
+        with (
+            patch.object(cache, "select_wiki_target_stocks", AsyncMock(return_value=["005930", "000660", "000660"])),
+            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(dart_report_review, "latest_review_status", side_effect=fake_status),
+            patch.object(dart_report_review, "generate_review", side_effect=fake_generate),
+        ):
+            stats = await dart_report_review.run_pipeline(target_limit=1)
+
+        self.assertEqual(stats["stocks_total"], 2)
+        self.assertEqual(stats["stocks_processed"], 2)
+        self.assertEqual(stats["generated"], 1)
+        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(stats["skipped_by_reason"], {"already_ready": 1})
+
+    async def test_generation_limit_counts_new_reviews_not_checked_targets(self):
+        async def fake_status(stock_code):
+            return {"status": "missing", "latest_report": {"rcept_no": stock_code}}
+
+        async def fake_generate(stock_code, *, google_sub, force):
+            return {"stock_code": stock_code, "rcept_no": stock_code, "model": "test-model"}
+
+        with (
+            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(dart_report_review, "latest_review_status", side_effect=fake_status),
+            patch.object(dart_report_review, "generate_review", side_effect=fake_generate),
+        ):
+            stats = await dart_report_review.run_pipeline(
+                stock_codes=["000001", "000002", "000003"],
+                target_limit=2,
+            )
+
+        self.assertEqual(stats["stocks_total"], 3)
+        self.assertEqual(stats["stocks_processed"], 3)
+        self.assertEqual(stats["generated"], 2)
+        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(stats["skipped_by_reason"], {"target_limit_reached": 1})
 
 
 if __name__ == "__main__":
