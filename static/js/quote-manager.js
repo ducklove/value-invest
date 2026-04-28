@@ -9,9 +9,7 @@ const QuoteManager = {
   overflowTimer: null,
   generalPollTimer: null,
   wsActive: false,      // true when this session owns the active WS slot
-  kisConnected: false,  // true only when the server has an upstream KIS WS
   onQuote: null,
-  onStatus: null,
 
   connect() {
     if (this.ws) return;
@@ -30,23 +28,15 @@ const QuoteManager = {
         else if (msg.type === 'subscriptions') {
           this.wsCodes = new Set(msg.ws || []);
           this.overflowCodes = msg.rest || [];
-          this._notifyStatus(msg);
           // Refresh ALL codes immediately (ws + overflow)
           const allCodes = [...(msg.ws || []), ...(msg.rest || [])];
           this._fetchInitialQuotes(allCodes);
           this._startOverflowPolling();
         }
         else if (msg.type === 'ws_status') {
-          const hadActive = Object.prototype.hasOwnProperty.call(msg, 'active');
-          const hadKisStatus = Object.prototype.hasOwnProperty.call(msg, 'kis_connected');
-          const wasStreaming = this.isStreaming();
-          if (hadActive) this.wsActive = Boolean(msg.active);
-          if (hadKisStatus) this.kisConnected = Boolean(msg.kis_connected);
-          const streamingChanged = wasStreaming !== this.isStreaming();
-          this._notifyStatus(msg);
-          if (streamingChanged && !this.isStreaming()) this._pollAll();
           if (msg.active) {
             // We are now the active subscriber
+            this.wsActive = true;
             this._sendSubscriptions();
           } else if (msg.occupied) {
             // Slot busy — request takeover unconditionally; server kicks the oldest session
@@ -58,8 +48,6 @@ const QuoteManager = {
         else if (msg.type === 'ws_taken_over') {
           // Another session took over — fall back to polling
           this.wsActive = false;
-          this.kisConnected = false;
-          this._notifyStatus(msg);
           this._showTakenOverBanner();
         }
       } catch (e) { console.warn(e); }
@@ -67,9 +55,7 @@ const QuoteManager = {
     this.ws.onclose = (ev) => {
       this.connected = false;
       this.wsActive = false;
-      this.kisConnected = false;
       this.ws = null;
-      this._notifyStatus({ type: 'ws_closed', code: ev.code });
       // Don't reconnect if we were kicked by takeover
       if (ev.code === 4001) return;
       this._scheduleReconnect();
@@ -85,8 +71,6 @@ const QuoteManager = {
     if (this.ws) { this.ws.close(); this.ws = null; }
     this.connected = false;
     this.wsActive = false;
-    this.kisConnected = false;
-    this._notifyStatus({ type: 'ws_disconnected' });
   },
 
   _scheduleReconnect() {
@@ -103,20 +87,7 @@ const QuoteManager = {
     setTimeout(() => banner.remove(), 5000);
   },
 
-  isStreaming() { return this.wsActive && this.kisConnected; },
-
-  isLive(code) { return this.isStreaming() && this.wsCodes.has(code); },
-
-  _notifyStatus(message = {}) {
-    if (!this.onStatus) return;
-    this.onStatus({
-      ...message,
-      browserConnected: this.connected,
-      wsActive: this.wsActive,
-      kisConnected: this.kisConnected,
-      streaming: this.isStreaming(),
-    });
-  },
+  isLive(code) { return this.wsActive && this.wsCodes.has(code); },
 
   updateSubscriptions(requested) {
     this.subscriptions = requested;
@@ -202,7 +173,7 @@ const QuoteManager = {
 
   async _pollAll() {
     const allCodes = new Set();
-    if (this.isStreaming()) {
+    if (this.wsActive) {
       // WS 활성: overflow 코드만
       this.overflowCodes.forEach(c => allCodes.add(c));
     } else {
