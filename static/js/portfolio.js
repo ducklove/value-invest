@@ -745,9 +745,9 @@ function renderPortfolio() {
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">Total <span class="pf-summary-date">${_timeLabel}</span></div>
-        <div class="pf-summary-value">${_l ? _fv(_currentFxVal) : '-'}</div>
-        <div class="pf-summary-sub">${_l ? '투자금액 ' + _fv(_currentFxInvested) : _loadingSub}</div>
+        <div class="pf-summary-label">NAV <span class="pf-summary-date">${_timeLabel}</span></div>
+        <div class="pf-summary-value">${_l && curNav != null ? Number(curNav).toFixed(2) : '-'}</div>
+        <div class="pf-summary-sub">${_l ? _fv(_currentFxVal) : _loadingSub}</div>
       </div>
     </div>
     <div class="pf-summary-card">
@@ -3519,7 +3519,7 @@ async function renderValueChart(data) {
     const pct30 = _periodPct(30);
     const pct90 = _periodPct(90);
     const items = [
-      { label: '현재 평가금액', val: fmtVal(_latestFxVal) },
+      { label: '전일 평가금액', val: fmtVal(_latestFxVal) },
       { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7), days: 7 },
       { label: '최근 30일', val: pct30 !== null ? fmtPct(pct30) : '-', cls: returnClass(pct30), days: 30 },
       { label: '최근 90일', val: pct90 !== null ? fmtPct(pct90) : '-', cls: returnClass(pct90), days: 90 },
@@ -3637,7 +3637,7 @@ function renderNavReturns(data) {
     ? ((latestNav - firstNav) / firstNav * 100) / totalYears : null;
 
   const items = [
-    { label: '현재 NAV', val: latestNav.toFixed(2) },
+    { label: '전일 NAV', val: latestNav.toFixed(2) },
     { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7), days: 7 },
     { label: '최근 30일', val: pct30 !== null ? fmtPct(pct30) : '-', cls: returnClass(pct30), days: 30 },
     { label: '최근 90일', val: pct90 !== null ? fmtPct(pct90) : '-', cls: returnClass(pct90), days: 90 },
