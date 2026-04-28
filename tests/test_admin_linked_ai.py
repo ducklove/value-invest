@@ -123,6 +123,14 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(status["configured"])
             self.assertEqual(status["source"], "admin-db")
             self.assertNotIn("test-secret", status["masked"])
+            self.assertEqual(
+                await ai_config.get_model_for_feature("wiki_qa"),
+                "moonshotai/kimi-k2.6",
+            )
+            self.assertEqual(
+                await ai_config.get_model_for_feature("portfolio_fast"),
+                "google/gemma-4-31b-it",
+            )
 
             await ai_config.save_feature_models({"wiki_qa": "openai/gpt-5.5"}, "admin@example.com")
             self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "openai/gpt-5.5")

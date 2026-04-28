@@ -29,13 +29,10 @@ TimeoutStartSec=90s
 # instruct: 140+ language support, 256K context, ~70% cheaper, dense
 # (predictable) architecture.
 Environment="WIKI_MODEL=google/gemma-4-31b-it"
-# Per-stock Q&A is latency-sensitive — the user stares at a blank
-# answer box while the model thinks. Always-on reasoning models add
-# visible overhead for little quality gain once retrieval context is
-# already provided. Use Gemma 4 31B here too. Portfolio AI analysis
-# stays on the reasoning model since that task benefits from
-# chain-of-thought over cross-holding data.
-Environment="WIKI_QA_MODEL=google/gemma-4-31b-it"
+# Per-stock Q&A ("이 종목에 대해 질문하기") uses Kimi K2.6. It handles
+# Korean RAG-style answers well while staying independent from the
+# portfolio insight fast model.
+Environment="WIKI_QA_MODEL=moonshotai/kimi-k2.6"
 
 # How many reports per stock the wiki pipeline tries to backfill on each
 # tick. Default in code is 50 — set here explicitly so the knob is visible

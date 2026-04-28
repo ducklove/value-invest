@@ -11,12 +11,13 @@ import cache
 
 
 OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
+DEFAULT_WIKI_QA_MODEL = "moonshotai/kimi-k2.6"
 
 MODEL_FEATURES: dict[str, dict[str, str]] = {
     "portfolio_fast": {
         "label": "포트폴리오 인사이트 빠름",
         "env": "AI_FAST_MODEL",
-        "default": os.getenv("WIKI_QA_MODEL", "google/gemma-4-31b-it"),
+        "default": "google/gemma-4-31b-it",
     },
     "portfolio_balanced": {
         "label": "포트폴리오 인사이트 균형",
@@ -31,7 +32,7 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
     "wiki_qa": {
         "label": "종목 위키 Q&A",
         "env": "WIKI_QA_MODEL",
-        "default": os.getenv("AI_FAST_MODEL", "google/gemma-4-31b-it"),
+        "default": DEFAULT_WIKI_QA_MODEL,
     },
     "wiki_ingestion": {
         "label": "리포트 위키 요약",
