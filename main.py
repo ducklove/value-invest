@@ -21,6 +21,7 @@ if ENV_PATH.exists():
     load_dotenv(ENV_PATH, override=True)
 
 import cache
+import ai_config
 import dart_client
 import integrations
 import kis_key_manager
@@ -88,6 +89,7 @@ async def lifespan(app: FastAPI):
 
     await kis_proxy_client.init_client()
     await cache.init_db()
+    await ai_config.migrate_legacy_model_defaults()
     await cache.delete_expired_sessions()
 
     # Ensure the wiki PDF cache directory exists. Creating it at startup

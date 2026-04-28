@@ -139,6 +139,21 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
                 "deepseek/deepseek-v4-flash",
             )
 
+    async def test_migrates_legacy_wiki_qa_default_once(self):
+        with patch.dict("os.environ", {}, clear=True):
+            await cache.set_app_setting("AI_MODEL::wiki_qa", "google/gemma-4-31b-it", updated_by="admin@example.com")
+
+            result = await ai_config.migrate_legacy_model_defaults()
+
+            self.assertTrue(result["migrated"])
+            self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "moonshotai/kimi-k2.6")
+
+            await cache.set_app_setting("AI_MODEL::wiki_qa", "google/gemma-4-31b-it", updated_by="admin@example.com")
+            result = await ai_config.migrate_legacy_model_defaults()
+
+            self.assertFalse(result["migrated"])
+            self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "google/gemma-4-31b-it")
+
     async def test_usage_summary_groups_by_feature_and_model(self):
         await ai_config.record_usage(
             google_sub="u1",

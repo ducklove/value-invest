@@ -12,6 +12,9 @@ import cache
 
 OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
 DEFAULT_WIKI_QA_MODEL = "moonshotai/kimi-k2.6"
+_MODEL_SETTING_PREFIX = "AI_MODEL::"
+_WIKI_QA_KIMI_MIGRATION_KEY = "AI_MIGRATION::wiki_qa_kimi_k2_6"
+_WIKI_QA_LEGACY_DEFAULT_MODELS = {"google/gemma-4-31b-it"}
 
 MODEL_FEATURES: dict[str, dict[str, str]] = {
     "portfolio_fast": {
@@ -45,6 +48,14 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
         "default": "deepseek/deepseek-v4-flash",
     },
 }
+
+
+def _model_setting_key(feature: str) -> str:
+    return f"{_MODEL_SETTING_PREFIX}{feature}"
+
+
+def _configured_default_model(spec: dict[str, str]) -> str:
+    return os.getenv(spec["env"], spec["default"])
 
 
 def _load_key_from_file(name: str) -> str:
@@ -117,10 +128,34 @@ async def get_model_for_feature(feature: str) -> str:
     spec = MODEL_FEATURES.get(feature)
     if not spec:
         raise ValueError(f"Unknown AI feature: {feature}")
-    stored = await cache.get_app_setting(f"AI_MODEL::{feature}")
+    stored = await cache.get_app_setting(_model_setting_key(feature))
     if stored and stored.get("value"):
         return str(stored["value"])
-    return os.getenv(spec["env"], spec["default"])
+    return _configured_default_model(spec)
+
+
+async def migrate_legacy_model_defaults() -> dict[str, Any]:
+    """One-shot migration for model defaults that were persisted in admin DB."""
+    feature = "wiki_qa"
+    setting_key = _model_setting_key(feature)
+    marker = await cache.get_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY)
+    if marker:
+        return {"migrated": False, "reason": "already_marked"}
+
+    stored = await cache.get_app_setting(setting_key)
+    stored_value = str((stored or {}).get("value") or "").strip()
+    target = _configured_default_model(MODEL_FEATURES[feature])
+    if stored_value in _WIKI_QA_LEGACY_DEFAULT_MODELS and stored_value != target:
+        await cache.set_app_setting(setting_key, target, updated_by="system:migration")
+        await cache.set_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY, target, updated_by="system:migration")
+        return {"migrated": True, "feature": feature, "from": stored_value, "to": target}
+
+    await cache.set_app_setting(
+        _WIKI_QA_KIMI_MIGRATION_KEY,
+        "skipped",
+        updated_by="system:migration",
+    )
+    return {"migrated": False, "reason": "no_legacy_value"}
 
 
 async def model_profiles() -> dict[str, str]:
@@ -134,7 +169,7 @@ async def model_profiles() -> dict[str, str]:
 async def ai_admin_config(days: int = 30) -> dict[str, Any]:
     features = []
     for key, spec in MODEL_FEATURES.items():
-        stored = await cache.get_app_setting(f"AI_MODEL::{key}")
+        stored = await cache.get_app_setting(_model_setting_key(key))
         model = await get_model_for_feature(key)
         features.append(
             {
@@ -160,7 +195,7 @@ async def save_feature_models(models: dict[str, Any], actor: str | None):
         model = str(value or "").strip()
         if not model:
             raise ValueError(f"{feature} model is required.")
-        await cache.set_app_setting(f"AI_MODEL::{feature}", model, updated_by=actor)
+        await cache.set_app_setting(_model_setting_key(feature), model, updated_by=actor)
 
 
 async def record_usage(
