@@ -10,42 +10,8 @@ function _updateQuoteSubscriptions() {
   QuoteManager.updateSubscriptions(requested);
 }
 
-let _pfQuoteUpdateQueued = false;
-let _pfDeferredRenderTimer = null;
-const _pfQueuedRowUpdates = new Map();
-const _pfQueuedBenchmarkUpdates = new Set();
-const PF_RENDER_AFTER_FLASH_MS = 1850;
-
-function _schedulePortfolioQuoteFlush() {
-  if (_pfQuoteUpdateQueued) return;
-  _pfQuoteUpdateQueued = true;
-  requestAnimationFrame(() => {
-    _pfQuoteUpdateQueued = false;
-    for (const [queuedCode, flash] of _pfQueuedRowUpdates.entries()) {
-      updatePortfolioRowQuote(queuedCode, { flash });
-    }
-    _pfQueuedRowUpdates.clear();
-    for (const queuedCode of _pfQueuedBenchmarkUpdates) {
-      updatePortfolioBenchmarkCells(queuedCode);
-    }
-    _pfQueuedBenchmarkUpdates.clear();
-  });
-}
-
-function _schedulePortfolioRenderAfterFlash() {
-  if (_pfDeferredRenderTimer) clearTimeout(_pfDeferredRenderTimer);
-  _pfDeferredRenderTimer = setTimeout(() => {
-    _pfDeferredRenderTimer = null;
-    if (!pfEditingCode) renderPortfolio();
-  }, PF_RENDER_AFTER_FLASH_MS);
-}
-
-function _queuePortfolioRowQuoteUpdate(code, shouldFlash) {
-  const prev = _pfQueuedRowUpdates.get(code) || false;
-  _pfQueuedRowUpdates.set(code, prev || shouldFlash);
-  _schedulePortfolioQuoteFlush();
-}
-
+let _pfRenderQueued = false;
+const _pfFlashQueuedCodes = new Set();
 QuoteManager.onQuote = function(code, q) {
   // 1) 분석 뷰 활성 종목
   if (code === activeStockCode && q.price != null) {
@@ -61,15 +27,29 @@ QuoteManager.onQuote = function(code, q) {
   if (pfItem && q.price != null) {
     const prevPrice = pfItem.quote ? pfItem.quote.price : null;
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
-    const priceChanged = prevPrice !== q.price;
-    _queuePortfolioRowQuoteUpdate(code, priceChanged);
-    if (priceChanged) _schedulePortfolioRenderAfterFlash();
+    if (prevPrice !== q.price) _pfFlashQueuedCodes.add(code);
   }
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null) {
     pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
-    _pfQueuedBenchmarkUpdates.add(code);
-    _schedulePortfolioQuoteFlush();
+  }
+  if ((pfItem || isBenchmark) && q.price != null) {
+    if (!pfEditingCode && !_pfRenderQueued) {
+      _pfRenderQueued = true;
+      requestAnimationFrame(() => {
+        _pfRenderQueued = false;
+        renderPortfolio();
+        if (_pfFlashQueuedCodes.size) {
+          const tbody = document.getElementById('pfBody');
+          if (tbody) {
+            tbody.querySelectorAll('tr[data-code]').forEach(t => {
+              if (_pfFlashQueuedCodes.has(t.dataset.code)) flashEl(t);
+            });
+          }
+          _pfFlashQueuedCodes.clear();
+        }
+      });
+    }
   }
   // 3) 사이드바
   const sbItem = recentListItems.find(i => i.stock_code === code);

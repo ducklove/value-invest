@@ -48,27 +48,11 @@ function removeGuestRecent(stockCode) {
   localStorage.setItem(GUEST_RECENT_KEY, JSON.stringify(list));
 }
 
-const FLASH_UPDATE_CLASS_A = 'flash-update-a';
-const FLASH_UPDATE_CLASS_B = 'flash-update-b';
-const FLASH_UPDATE_DURATION_MS = 1700;
-
-function flashEl(el, durationMs = FLASH_UPDATE_DURATION_MS) {
+function flashEl(el) {
   if (!el) return;
-  const nextClass = el.classList.contains(FLASH_UPDATE_CLASS_A)
-    ? FLASH_UPDATE_CLASS_B
-    : FLASH_UPDATE_CLASS_A;
-  const token = String((Number(el.dataset.flashToken || 0) || 0) + 1);
-  el.dataset.flashToken = token;
-  if (el._flashTimer) clearTimeout(el._flashTimer);
-  el.classList.remove('flash-update', FLASH_UPDATE_CLASS_A, FLASH_UPDATE_CLASS_B);
+  el.classList.remove('flash-update');
   void el.offsetWidth;
-  el.classList.add(nextClass);
-  el._flashTimer = setTimeout(() => {
-    if (el.dataset.flashToken !== token) return;
-    el.classList.remove(nextClass);
-    delete el.dataset.flashToken;
-    el._flashTimer = null;
-  }, durationMs);
+  el.classList.add('flash-update');
 }
 
 let charts = {};
