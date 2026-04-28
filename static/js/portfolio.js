@@ -286,7 +286,8 @@ function pfToggleGroupFilter(groupName) {
 // 아래 tr 이 매 tick 재생성되면서 :hover transition 이 fresh 시작 →
 // '커서 있는 행이 깜빡임' 문제. 영향 받는 셀만 in-place 로 덮어 쓰고
 // flash 클래스를 그 행에만 붙여 갱신된 행만 번쩍이게 한다.
-function updatePortfolioRowQuote(code) {
+function updatePortfolioRowQuote(code, options = {}) {
+  const shouldFlash = options.flash !== false;
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
   let tr = null;
@@ -332,7 +333,7 @@ function updatePortfolioRowQuote(code) {
   setText('.pf-col-target', targetPrice !== null ? _fp(targetPrice) : '-');
   setText('.pf-col-achiev', achievementPct !== null ? fmtPct(achievementPct, false) : '-');
 
-  flashEl(tr);
+  if (shouldFlash) flashEl(tr);
 }
 
 // 벤치마크 tick 전용: 같은 benchmark_code 를 쓰는 모든 행의 벤치마크

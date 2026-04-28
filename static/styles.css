@@ -183,7 +183,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   20%  { background-color: rgba(250, 204, 21, 0.18); }
   100% { background-color: transparent; }
 }
-.flash-update { animation: flash-update 1.6s cubic-bezier(0.22, 0.61, 0.36, 1); }
+.flash-update,
+.flash-update-a,
+.flash-update-b {
+  animation: flash-update 1.7s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
 
 /* WS live indicator */
 .ws-live-dot {
