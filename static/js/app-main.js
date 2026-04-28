@@ -57,24 +57,14 @@ function _schedulePortfolioQuoteFlush() {
   _pfQuoteUpdateQueued = true;
   requestAnimationFrame(() => {
     _pfQuoteUpdateQueued = false;
-    const rowUpdates = [..._pfQueuedRowUpdates.entries()];
-    const benchmarkUpdates = [..._pfQueuedBenchmarkUpdates];
+    for (const [queuedCode, flash] of _pfQueuedRowUpdates.entries()) {
+      updatePortfolioRowQuote(queuedCode, { flash });
+    }
     _pfQueuedRowUpdates.clear();
+    for (const queuedCode of _pfQueuedBenchmarkUpdates) {
+      updatePortfolioBenchmarkCells(queuedCode);
+    }
     _pfQueuedBenchmarkUpdates.clear();
-    for (const [queuedCode, flash] of rowUpdates) {
-      try {
-        updatePortfolioRowQuote(queuedCode, { flash });
-      } catch (error) {
-        console.warn('portfolio quote row update failed', queuedCode, error);
-      }
-    }
-    for (const queuedCode of benchmarkUpdates) {
-      try {
-        updatePortfolioBenchmarkCells(queuedCode);
-      } catch (error) {
-        console.warn('portfolio benchmark quote update failed', queuedCode, error);
-      }
-    }
   });
 }
 
@@ -98,69 +88,50 @@ QuoteManager.onStatus = function() {
 
 QuoteManager.onQuote = function(code, q) {
   // 1) 분석 뷰 활성 종목
-  try {
-    if (code === activeStockCode && q.price != null) {
-      renderQuoteSnapshot({
-        date: q.date, price: q.price, previous_close: q.previous_close,
-        change: q.change, change_pct: q.change_pct,
-      }, activeIndicators);
-      flashEl(document.getElementById('quoteSummary'));
-    }
-  } catch (error) {
-    console.warn('analysis quote update failed', code, error);
+  if (code === activeStockCode && q.price != null) {
+    renderQuoteSnapshot({
+      date: q.date, price: q.price, previous_close: q.previous_close,
+      change: q.change, change_pct: q.change_pct,
+    }, activeIndicators);
+    flashEl(document.getElementById('quoteSummary'));
   }
-
   // 2) 포트폴리오 종목. 가격이 실제 변경된 경우에만 flash 대상에 추가 —
   //    tick 수신 자체로 flash 하면 거래 활발한 종목이 계속 번쩍거려 거슬림.
-  try {
-    const pfItem = portfolioItems.find(i => i.stock_code === code);
-    if (pfItem && q.price != null) {
-      const prevPrice = pfItem.quote ? pfItem.quote.price : null;
-      pfItem.quote = { ...(pfItem.quote || {}), ...q };
-      const priceChanged = prevPrice !== q.price;
-      _queuePortfolioRowQuoteUpdate(code, priceChanged);
-      if (priceChanged) _schedulePortfolioRenderAfterFlash();
-    }
-  } catch (error) {
-    console.warn('portfolio quote state update failed', code, error);
+  const pfItem = portfolioItems.find(i => i.stock_code === code);
+  if (pfItem && q.price != null) {
+    const prevPrice = pfItem.quote ? pfItem.quote.price : null;
+    pfItem.quote = { ...(pfItem.quote || {}), ...q };
+    const priceChanged = prevPrice !== q.price;
+    _queuePortfolioRowQuoteUpdate(code, priceChanged);
+    if (priceChanged) _schedulePortfolioRenderAfterFlash();
   }
-
-  try {
-    const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
-    if (isBenchmark && q.change_pct != null) {
-      pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
-      _pfQueuedBenchmarkUpdates.add(code);
-      _schedulePortfolioQuoteFlush();
-    }
-  } catch (error) {
-    console.warn('benchmark quote state update failed', code, error);
+  const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
+  if (isBenchmark && q.change_pct != null) {
+    pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
+    _pfQueuedBenchmarkUpdates.add(code);
+    _schedulePortfolioQuoteFlush();
   }
-
   // 3) 사이드바
-  try {
-    const sbItem = recentListItems.find(i => i.stock_code === code);
-    if (sbItem && q.price != null) {
-      sbItem.quote_snapshot = { price: q.price, change: q.change, change_pct: q.change_pct };
-      const wrapper = document.querySelector(`#recentList .sidebar-item[data-code="${code}"]`);
-      if (wrapper) {
-        const priceEl = wrapper.querySelector('.quote-price');
-        const changeEl = wrapper.querySelector('.quote-change');
-        if (priceEl) priceEl.textContent = Number(q.price).toLocaleString();
-        if (changeEl) {
-          const change = Number(q.change || 0);
-          changeEl.classList.remove('up', 'down', 'flat');
-          changeEl.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
-          if (q.change_pct != null) {
-            changeEl.textContent = `${change > 0 ? '+' : ''}${Number(q.change_pct).toFixed(2)}%`;
-          }
+  const sbItem = recentListItems.find(i => i.stock_code === code);
+  if (sbItem && q.price != null) {
+    sbItem.quote_snapshot = { price: q.price, change: q.change, change_pct: q.change_pct };
+    const wrapper = document.querySelector(`#recentList .sidebar-item[data-code="${code}"]`);
+    if (wrapper) {
+      const priceEl = wrapper.querySelector('.quote-price');
+      const changeEl = wrapper.querySelector('.quote-change');
+      if (priceEl) priceEl.textContent = Number(q.price).toLocaleString();
+      if (changeEl) {
+        const change = Number(q.change || 0);
+        changeEl.classList.remove('up', 'down', 'flat');
+        changeEl.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
+        if (q.change_pct != null) {
+          changeEl.textContent = `${change > 0 ? '+' : ''}${Number(q.change_pct).toFixed(2)}%`;
         }
-        // live dot
-        const nameEl = wrapper.querySelector('.name');
-        _syncLiveDot(nameEl, QuoteManager.isLive(code));
       }
+      // live dot
+      const nameEl = wrapper.querySelector('.name');
+      _syncLiveDot(nameEl, QuoteManager.isLive(code));
     }
-  } catch (error) {
-    console.warn('sidebar quote update failed', code, error);
   }
 };
 
