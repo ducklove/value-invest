@@ -26,7 +26,7 @@ import integrations
 import kis_key_manager
 import kis_proxy_client
 import kis_ws_manager
-from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router, nps_router, backtest_router, admin_router, insights_router
+from routes import auth_router, analysis_router, reports_router, stocks_router, cache_router, portfolio_router, ws_quotes_router, nps_router, backtest_router, admin_router, insights_router, dart_review_router
 from routes import portfolio as portfolio_routes
 from routes.internal import router as internal_router
 from routes.wiki import router as wiki_router
@@ -214,6 +214,7 @@ app.include_router(ws_quotes_router)
 app.include_router(nps_router)
 app.include_router(backtest_router)
 app.include_router(insights_router)
+app.include_router(dart_review_router)
 app.include_router(internal_router)
 app.include_router(wiki_router)
 # Admin dashboard used to live on a separate port (admin_app.py :3692) so

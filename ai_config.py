@@ -38,6 +38,11 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
         "env": "WIKI_MODEL",
         "default": os.getenv("AI_DEFAULT_MODEL", "qwen/qwen3.6-plus"),
     },
+    "dart_report_review": {
+        "label": "DART 정기보고서 리뷰",
+        "env": "AI_DART_REVIEW_MODEL",
+        "default": "deepseek/deepseek-v4-flash",
+    },
 }
 
 

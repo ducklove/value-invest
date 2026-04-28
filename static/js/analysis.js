@@ -930,6 +930,9 @@ async function renderResult(data) {
   loadReports(data.stock_code);
   // Wiki is lazy — fire-and-forget, renders under the report table.
   loadWiki(data.stock_code);
+  // DART filing review is cached-first and only spends AI tokens when
+  // the user explicitly generates or refreshes it.
+  loadFilingReview(data.stock_code);
   // 베타 — 1Y 일별 수익률 vs KOSPI. 비동기로 받아 valuation card 갱신.
   loadBeta(data.stock_code);
   _updateQuoteSubscriptions();
@@ -1140,6 +1143,212 @@ async function dropRecentItem(fromIndex, toIndex) {
   } catch (error) {
     showToast(error.message || '순서를 저장하지 못했습니다.');
     await loadRecentList();
+  }
+}
+
+// DART filing AI review
+let _filingReviewLoadId = 0;
+let _filingReviewStockCode = null;
+
+function _setFilingReviewBusy(isBusy) {
+  const generateBtn = document.getElementById('filingReviewGenerateBtn');
+  const refreshBtn = document.getElementById('filingReviewRefreshBtn');
+  if (generateBtn) {
+    generateBtn.disabled = isBusy;
+    generateBtn.textContent = isBusy ? '생성 중...' : 'AI 리뷰 생성';
+  }
+  if (refreshBtn) {
+    refreshBtn.disabled = isBusy;
+    refreshBtn.textContent = isBusy ? '생성 중...' : '새로 생성';
+  }
+}
+
+function _filingReviewToneClass(tone) {
+  const value = String(tone || 'neutral').toLowerCase();
+  if (['good', 'watch', 'bad'].includes(value)) return value;
+  return 'neutral';
+}
+
+function _renderFilingReviewCards(cards) {
+  const container = document.getElementById('filingReviewCards');
+  if (!container) return;
+  const safeCards = Array.isArray(cards) ? cards.slice(0, 8) : [];
+  container.innerHTML = safeCards.map(card => {
+    const tone = _filingReviewToneClass(card.tone);
+    return `<div class="filing-review-card ${tone}">
+      <span>${escapeHtml(card.label || '체크')}</span>
+      <strong>${escapeHtml(card.value || '-')}</strong>
+      <p>${escapeHtml(card.detail || '')}</p>
+    </div>`;
+  }).join('');
+}
+
+function _renderFilingReviewDetails(review) {
+  const details = document.getElementById('filingReviewDetails');
+  const body = document.getElementById('filingReviewDetailsBody');
+  if (!details || !body) return;
+  const comparisons = review.comparison_reports || [];
+  const comparisonRows = comparisons.length
+    ? comparisons.map(item => {
+      const href = safeExternalUrl(item.viewer_url || '');
+      const link = href
+        ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.report_name || item.rcept_no || '')}</a>`
+        : escapeHtml(item.report_name || item.rcept_no || '');
+      const suffix = item.error ? ` · ${escapeHtml(item.error)}` : '';
+      return `<li>${link} <span>${escapeHtml(item.report_date || '')}${suffix}</span></li>`;
+    }).join('')
+    : '<li>비교 보고서 없음</li>';
+  const model = review.model ? `모델 ${escapeHtml(review.model)}` : '';
+  const tokenText = review.tokens_in || review.tokens_out
+    ? `입력 ${Number(review.tokens_in || 0).toLocaleString()} / 출력 ${Number(review.tokens_out || 0).toLocaleString()} 토큰`
+    : '';
+  const sourceLimits = review.review?.source_limits
+    ? `<p>${escapeHtml(review.review.source_limits)}</p>`
+    : '';
+  body.innerHTML = `
+    <ul>${comparisonRows}</ul>
+    ${sourceLimits}
+    <div class="filing-review-runtime">${[model, tokenText, review.created_at ? `생성 ${new Date(review.created_at).toLocaleString('ko-KR')}` : ''].filter(Boolean).join(' · ')}</div>
+  `;
+  details.style.display = 'block';
+}
+
+function renderFilingReview(review, { cached = false } = {}) {
+  const section = document.getElementById('filingReviewSection');
+  const status = document.getElementById('filingReviewStatus');
+  const meta = document.getElementById('filingReviewMeta');
+  const body = document.getElementById('filingReviewBody');
+  const source = document.getElementById('filingReviewSource');
+  const generateBtn = document.getElementById('filingReviewGenerateBtn');
+  const refreshBtn = document.getElementById('filingReviewRefreshBtn');
+  if (!section || !status || !body) return;
+
+  section.style.display = 'block';
+  const title = review.report_name || '최근 정기보고서';
+  const date = review.report_date || '';
+  if (meta) meta.textContent = `${title}${date ? ` · ${date}` : ''}${cached ? ' · 캐시' : ''}`;
+  if (status) status.textContent = '';
+  if (source) {
+    const href = safeExternalUrl(review.review?.viewer_url || review.viewer_url || `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${review.rcept_no || ''}`);
+    source.href = href || '#';
+    source.style.display = href ? 'inline-flex' : 'none';
+  }
+  if (generateBtn) generateBtn.style.display = 'none';
+  if (refreshBtn) refreshBtn.style.display = currentUser ? 'inline-flex' : 'none';
+  _renderFilingReviewCards(review.review?.cards || []);
+  const md = review.review_md || review.review?.summary_md || '';
+  body.innerHTML = md
+    ? (typeof _renderSafeMarkdown === 'function' ? _renderSafeMarkdown(md) : escapeHtml(md))
+    : '<p>생성된 리뷰 본문이 없습니다.</p>';
+  _renderFilingReviewDetails(review);
+}
+
+function renderFilingReviewMissing(data) {
+  const section = document.getElementById('filingReviewSection');
+  const status = document.getElementById('filingReviewStatus');
+  const meta = document.getElementById('filingReviewMeta');
+  const body = document.getElementById('filingReviewBody');
+  const cards = document.getElementById('filingReviewCards');
+  const source = document.getElementById('filingReviewSource');
+  const generateBtn = document.getElementById('filingReviewGenerateBtn');
+  const refreshBtn = document.getElementById('filingReviewRefreshBtn');
+  const details = document.getElementById('filingReviewDetails');
+  if (!section || !status || !body) return;
+
+  section.style.display = 'block';
+  const report = data.latest_report || {};
+  if (meta) meta.textContent = report.report_name ? `${report.report_name}${report.report_date ? ` · ${report.report_date}` : ''}` : '';
+  if (source) {
+    const href = safeExternalUrl(report.viewer_url || '');
+    source.href = href || '#';
+    source.style.display = href ? 'inline-flex' : 'none';
+  }
+  if (cards) cards.innerHTML = '';
+  if (details) details.style.display = 'none';
+  if (data.status === 'no_report') {
+    status.textContent = '최근 DART 정기보고서를 찾지 못했습니다.';
+    body.innerHTML = '';
+    if (generateBtn) generateBtn.style.display = 'none';
+    if (refreshBtn) refreshBtn.style.display = 'none';
+    return;
+  }
+  status.textContent = currentUser
+    ? '아직 생성된 AI 리뷰가 없습니다. 한 번 생성하면 이후에는 캐시로 빠르게 표시됩니다.'
+    : '아직 생성된 AI 리뷰가 없습니다. 로그인하면 최근 공시 리뷰를 생성할 수 있습니다.';
+  body.innerHTML = '';
+  if (generateBtn) {
+    generateBtn.style.display = currentUser ? 'inline-flex' : 'none';
+    generateBtn.disabled = false;
+    generateBtn.textContent = 'AI 리뷰 생성';
+  }
+  if (refreshBtn) refreshBtn.style.display = 'none';
+}
+
+async function loadFilingReview(stockCode) {
+  const section = document.getElementById('filingReviewSection');
+  const status = document.getElementById('filingReviewStatus');
+  const body = document.getElementById('filingReviewBody');
+  const cards = document.getElementById('filingReviewCards');
+  const details = document.getElementById('filingReviewDetails');
+  const loadId = ++_filingReviewLoadId;
+  _filingReviewStockCode = stockCode;
+  if (!section || !status) return;
+
+  section.style.display = 'block';
+  status.textContent = '최근 DART 공시를 확인하는 중...';
+  if (body) body.innerHTML = '';
+  if (cards) cards.innerHTML = '';
+  if (details) details.style.display = 'none';
+
+  if (!hasApiConfiguration()) {
+    status.textContent = 'GitHub Pages에서는 API 서버 연결 후 DART 리뷰를 불러올 수 있습니다.';
+    return;
+  }
+
+  try {
+    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/filing-review`);
+    if (loadId !== _filingReviewLoadId) return;
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    if (data.status === 'ready' && data.review) {
+      renderFilingReview(data.review, { cached: true });
+    } else {
+      renderFilingReviewMissing(data);
+    }
+  } catch (err) {
+    if (loadId !== _filingReviewLoadId) return;
+    status.textContent = 'DART 리뷰 상태를 불러오지 못했습니다: ' + (err.message || err);
+  }
+}
+
+async function generateFilingReview(force = false) {
+  const stockCode = _filingReviewStockCode;
+  const status = document.getElementById('filingReviewStatus');
+  if (!stockCode || !status) return;
+  if (!currentUser) {
+    showToast && showToast('로그인이 필요합니다.');
+    return;
+  }
+  _setFilingReviewBusy(true);
+  status.textContent = force
+    ? 'DART 원문을 다시 읽고 AI 리뷰를 새로 생성하는 중입니다...'
+    : 'DART 원문을 읽고 AI 리뷰를 생성하는 중입니다...';
+  try {
+    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/filing-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    if (data.review) {
+      renderFilingReview(data.review, { cached: Boolean(data.review.cached) });
+      showToast && showToast('DART AI 리뷰가 준비됐습니다.');
+    }
+  } catch (err) {
+    status.textContent = 'AI 리뷰 생성 실패: ' + (err.message || err);
+  } finally {
+    _setFilingReviewBusy(false);
   }
 }
 
@@ -1497,4 +1706,3 @@ async function askWikiQuestion() {
   btn.disabled = false;
   btn.textContent = '질문';
 }
-

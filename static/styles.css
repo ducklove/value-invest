@@ -554,6 +554,177 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .reports-section {
   margin-top: 32px; display: none;
 }
+.filing-review-section {
+  margin-top: 32px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.12), transparent 30%),
+    var(--surface);
+}
+.filing-review-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.filing-review-eyebrow {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.filing-review-header h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.filing-review-header p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 720px;
+}
+.filing-review-count {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.filing-review-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.filing-review-btn,
+.filing-review-source {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.filing-review-btn {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.filing-review-btn.secondary,
+.filing-review-source {
+  background: var(--bg);
+  color: var(--primary);
+  border-color: var(--border);
+}
+.filing-review-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.filing-review-status {
+  min-height: 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.filing-review-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.filing-review-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+}
+.filing-review-card span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.filing-review-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.25;
+}
+.filing-review-card p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.filing-review-card.good { border-color: rgba(22, 163, 74, 0.45); }
+.filing-review-card.watch { border-color: rgba(245, 158, 11, 0.5); }
+.filing-review-card.bad { border-color: rgba(220, 38, 38, 0.45); }
+.filing-review-body {
+  font-size: 13px;
+  line-height: 1.75;
+}
+.filing-review-body h1,
+.filing-review-body h2,
+.filing-review-body h3 {
+  font-size: 15px;
+  margin: 14px 0 6px;
+}
+.filing-review-body p { margin: 0 0 8px; }
+.filing-review-body ul,
+.filing-review-body ol { margin: 0 0 10px; padding-left: 20px; }
+.filing-review-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.filing-review-body th,
+.filing-review-body td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+}
+.filing-review-body th { background: var(--sidebar-bg, var(--bg)); }
+.filing-review-details {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.filing-review-details summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-weight: 700;
+}
+.filing-review-details ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.filing-review-details a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.filing-review-runtime {
+  margin-top: 6px;
+  font-size: 11px;
+}
 .lab-page { max-width: 1040px; margin: 0 auto; padding: 12px 0 40px; }
 .lab-hero {
   position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 22px;
@@ -699,6 +870,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .lab-grid { grid-template-columns: 1fr; }
   .lab-inline-banner a { margin-left: 0; }
   .insight-form-row, .insight-form-row.bottom, .insight-result-grid { grid-template-columns: 1fr; }
+  .filing-review-header { flex-direction: column; }
+  .filing-review-actions { justify-content: flex-start; }
 }
 .reports-section h2 {
   font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;

@@ -126,6 +126,10 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
 
             await ai_config.save_feature_models({"wiki_qa": "openai/gpt-5.5"}, "admin@example.com")
             self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "openai/gpt-5.5")
+            self.assertEqual(
+                await ai_config.get_model_for_feature("dart_report_review"),
+                "deepseek/deepseek-v4-flash",
+            )
 
     async def test_usage_summary_groups_by_feature_and_model(self):
         await ai_config.record_usage(
