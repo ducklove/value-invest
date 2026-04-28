@@ -661,8 +661,8 @@ function renderPortfolio() {
   const _d = new Date();
   const _today = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
   const _snapIsStale = latestSnap && latestSnap.date < _today;
-  const _curNavKrw = (_snapIsStale && latestSnap.total_units && totalMarketValue > 0)
-    ? totalMarketValue / latestSnap.total_units
+  const _curNavKrw = (_snapIsStale && latestSnap.total_units && grandTotalMarketValue > 0)
+    ? grandTotalMarketValue / latestSnap.total_units
     : (latestSnap ? latestSnap.nav : null);
   const curNav = _navAdj(_curNavKrw, pfFxRate);
 
@@ -745,9 +745,13 @@ function renderPortfolio() {
   summary.innerHTML = `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">NAV <span class="pf-summary-date">${_timeLabel}</span></div>
-        <div class="pf-summary-value">${_l && curNav != null ? Number(curNav).toFixed(2) : '-'}</div>
-        <div class="pf-summary-sub">${_l ? _fv(_currentFxVal) : _loadingSub}</div>
+        <div class="pf-summary-label">Total <span class="pf-summary-date">${_timeLabel}</span></div>
+        <div class="pf-summary-value">${_l ? _fv(_currentFxVal) : '-'}</div>
+        <div class="pf-summary-sub">${_l ? '투자금액 ' + _fv(_currentFxInvested) : _loadingSub}</div>
+      </div>
+      <div class="pf-summary-side">
+        <div class="pf-summary-label">NAV</div>
+        <div class="pf-summary-side-value">${_l && curNav != null ? Number(curNav).toFixed(2) : '-'}</div>
       </div>
     </div>
     <div class="pf-summary-card">
