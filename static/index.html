@@ -118,6 +118,21 @@ function trackEvent(name, params = {}) {
       <div class="personalization-status" id="preferenceStatus"></div>
     </div>
     <div class="coverage" id="coverageNote"></div>
+
+    <div class="wiki-qa" id="wikiQa">
+      <div class="wiki-qa-head">
+        <label for="wikiQaInput" class="wiki-qa-label">이 종목에 대해 질문하기</label>
+        <div class="wiki-qa-hint" id="wikiQaHint">로그인하면 DART 공시 리뷰, 증권사 리포트, 재무/시세 정보를 근거로 LLM이 답변합니다.</div>
+      </div>
+      <textarea id="wikiQaInput" class="wiki-qa-input" rows="2"
+        placeholder="예: 최근 분기보고서 기준 주요 변화와 리스크는 무엇인가요?"></textarea>
+      <div class="wiki-qa-actions">
+        <button id="wikiQaSubmit" class="wiki-qa-btn" type="button">질문</button>
+        <span class="wiki-qa-status" id="wikiQaStatus"></span>
+      </div>
+      <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
+      <div class="wiki-qa-meta" id="wikiQaMeta"></div>
+    </div>
   </div>
 
   <div id="emptyState" class="empty-state">
@@ -163,21 +178,6 @@ function trackEvent(name, params = {}) {
   <div class="reports-section" id="reportsSection">
     <h2>증권사 리포트 <span class="report-count" id="reportCount"></span> <span class="wiki-count" id="wikiCount" title="LLM 요약이 완료된 리포트 수"></span></h2>
     <div class="report-note">제목을 누르면 네이버 금융 리서치의 공개 PDF 원문이 열립니다. 각 행의 <strong>요약 내용 보기</strong>를 누르면 LLM이 생성한 한국어 요약이 펼쳐집니다.</div>
-
-    <div class="wiki-qa" id="wikiQa">
-      <div class="wiki-qa-head">
-        <label for="wikiQaInput" class="wiki-qa-label">이 종목에 대해 질문하기</label>
-        <div class="wiki-qa-hint" id="wikiQaHint">로그인하면 수집된 요약 리포트를 근거로 LLM이 답변합니다.</div>
-      </div>
-      <textarea id="wikiQaInput" class="wiki-qa-input" rows="2"
-        placeholder="예: 최근 HBM 매출 전망과 주요 리스크는 무엇인가요?"></textarea>
-      <div class="wiki-qa-actions">
-        <button id="wikiQaSubmit" class="wiki-qa-btn" type="button">질문</button>
-        <span class="wiki-qa-status" id="wikiQaStatus"></span>
-      </div>
-      <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
-      <div class="wiki-qa-meta" id="wikiQaMeta"></div>
-    </div>
 
     <div class="reports-table-wrap">
       <div class="reports-loading" id="reportsLoading">리포트를 불러오는 중...</div>

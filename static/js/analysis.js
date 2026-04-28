@@ -1633,7 +1633,12 @@ function _setupWikiQa(stockCode) {
   const isLoggedIn = !!(typeof currentUser !== 'undefined' && currentUser);
   if (input) input.disabled = !isLoggedIn;
   if (btn) btn.disabled = !isLoggedIn;
-  if (hint) hint.style.display = isLoggedIn ? 'none' : '';
+  if (hint) {
+    hint.textContent = isLoggedIn
+      ? 'DART 공시 리뷰, 증권사 리포트, 재무/시세 정보를 함께 근거로 답변합니다.'
+      : '로그인하면 DART 공시 리뷰, 증권사 리포트, 재무/시세 정보를 근거로 LLM이 답변합니다.';
+    hint.style.display = '';
+  }
 }
 
 async function askWikiQuestion() {

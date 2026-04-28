@@ -1792,6 +1792,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border-radius: 8px;
   background: var(--card-bg, transparent);
 }
+.company-info .wiki-qa {
+  margin: 16px 0 0;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
 .wiki-qa-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
 .wiki-qa-label { font-size: 13px; font-weight: 600; color: var(--text); }
 .wiki-qa-hint { font-size: 11px; color: var(--text-secondary); }
