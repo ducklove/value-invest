@@ -10,6 +10,42 @@ function _updateQuoteSubscriptions() {
   QuoteManager.updateSubscriptions(requested);
 }
 
+function _syncLiveDot(hostEl, live) {
+  if (!hostEl) return;
+  let dot = hostEl.querySelector('.ws-live-dot');
+  if (live && !dot) {
+    dot = document.createElement('span');
+    dot.className = 'ws-live-dot';
+    dot.title = '실시간';
+    hostEl.appendChild(dot);
+  } else if (!live && dot) {
+    dot.remove();
+  }
+}
+
+function refreshQuoteLiveIndicators() {
+  const quoteDate = document.getElementById('quoteDate');
+  if (activeStockCode) {
+    const hasQuoteDate = quoteDate && quoteDate.textContent.trim().length > 0;
+    _syncLiveDot(quoteDate, hasQuoteDate && QuoteManager.isLive(activeStockCode));
+  } else {
+    _syncLiveDot(quoteDate, false);
+  }
+
+  const tbody = document.getElementById('pfBody');
+  if (tbody) {
+    tbody.querySelectorAll('tr[data-code]').forEach(tr => {
+      const nameCell = tr.querySelector('td');
+      _syncLiveDot(nameCell, QuoteManager.isLive(tr.dataset.code));
+    });
+  }
+
+  document.querySelectorAll('#recentList .sidebar-item[data-code]').forEach(wrapper => {
+    const nameEl = wrapper.querySelector('.name');
+    _syncLiveDot(nameEl, QuoteManager.isLive(wrapper.dataset.code));
+  });
+}
+
 let _pfQuoteUpdateQueued = false;
 let _pfDeferredRenderTimer = null;
 const _pfQueuedRowUpdates = new Map();
@@ -45,6 +81,10 @@ function _queuePortfolioRowQuoteUpdate(code, shouldFlash) {
   _pfQueuedRowUpdates.set(code, prev || shouldFlash);
   _schedulePortfolioQuoteFlush();
 }
+
+QuoteManager.onStatus = function() {
+  refreshQuoteLiveIndicators();
+};
 
 QuoteManager.onQuote = function(code, q) {
   // 1) 분석 뷰 활성 종목
@@ -90,14 +130,7 @@ QuoteManager.onQuote = function(code, q) {
       }
       // live dot
       const nameEl = wrapper.querySelector('.name');
-      if (nameEl) {
-        const dot = nameEl.querySelector('.ws-live-dot');
-        if (QuoteManager.isLive(code) && !dot) {
-          const d = document.createElement('span');
-          d.className = 'ws-live-dot'; d.title = '실시간';
-          nameEl.appendChild(d);
-        } else if (!QuoteManager.isLive(code) && dot) { dot.remove(); }
-      }
+      _syncLiveDot(nameEl, QuoteManager.isLive(code));
     }
   }
 };

@@ -230,6 +230,25 @@ class WsConnection:
         self._requested: dict[str, list[str]] = {}
         self._boundary_task: asyncio.Task | None = None
         self.listener: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self.status_listener: asyncio.Queue = asyncio.Queue(maxsize=32)
+        self.connected: bool = False
+
+    def _publish_status(self, connected: bool, reason: str) -> None:
+        """Notify the browser bridge when the upstream KIS socket state changes."""
+        self.connected = connected
+        status = {
+            "kis_connected": connected,
+            "reason": reason,
+            "slot_id": self.key_slot.slot_id,
+        }
+        try:
+            self.status_listener.put_nowait(status)
+        except asyncio.QueueFull:
+            try:
+                self.status_listener.get_nowait()
+                self.status_listener.put_nowait(status)
+            except Exception:
+                pass
 
     # -- Subscription management ------------------------------------------
 
@@ -308,6 +327,7 @@ class WsConnection:
     async def start(self) -> None:
         """Launch the WebSocket event loop as a background task."""
         self._stop_event.clear()
+        self._publish_status(False, "starting")
         self._task = asyncio.create_task(
             self._ws_loop(),
             name=f"kis-ws-slot-{self.key_slot.slot_id}",
@@ -339,6 +359,7 @@ class WsConnection:
     async def stop(self) -> None:
         """Stop the WebSocket connection and background task."""
         self._stop_event.set()
+        self._publish_status(False, "stopping")
         if self._ws is not None:
             try:
                 await self._ws.close()
@@ -358,6 +379,7 @@ class WsConnection:
             except asyncio.CancelledError:
                 pass
             self._boundary_task = None
+        self._publish_status(False, "stopped")
         _active_connections.discard(self)
 
     # -- Event loop -------------------------------------------------------
@@ -380,6 +402,7 @@ class WsConnection:
                     logger.info(
                         "KIS WebSocket connected (slot %d)", self.key_slot.slot_id
                     )
+                    self._publish_status(True, "connected")
 
                     await self.sync_subscriptions()
 
@@ -438,6 +461,7 @@ class WsConnection:
             finally:
                 self._ws = None
                 self._current_subs = set()
+                self._publish_status(False, "disconnected")
 
             if not self._stop_event.is_set():
                 logger.info(
