@@ -3308,6 +3308,7 @@ let _navChartResizeObserver = null;
 let _valueChartResizeObserver = null;
 let _navChartData = [];  // cached for benchmark overlay
 let _navChartSeriesForAxis = [];
+let _navBenchSeriesForAxis = [];
 let _valueChartData = [];
 let _valueChartSeriesForAxis = [];
 let _benchCache = {};    // code -> [{date, close}]
@@ -3402,12 +3403,10 @@ function _visibleChartValues(seriesList, startIdx, endIdx) {
   return values;
 }
 
-function _applyVisibleYAxis(chart, seriesList, startIdx, endIdx, yZero) {
-  if (!chart?.setOption) return;
+function _axisRangeForVisibleSeries(seriesList, startIdx, endIdx, yZero) {
   const values = _visibleChartValues(seriesList, startIdx, endIdx);
   if (!values.length) {
-    chart.setOption({ yAxis: { min: yZero ? 0 : 'dataMin', max: undefined } });
-    return;
+    return { min: yZero ? 0 : 'dataMin', max: undefined };
   }
   let min = Math.min(...values);
   let max = Math.max(...values);
@@ -3421,7 +3420,21 @@ function _applyVisibleYAxis(chart, seriesList, startIdx, endIdx, yZero) {
     if (!yZero) min -= pad;
     max += pad;
   }
-  chart.setOption({ yAxis: { min, max } });
+  return { min, max };
+}
+
+function _applyVisibleYAxis(chart, seriesList, startIdx, endIdx, yZero, axisIndex = 0) {
+  if (!chart?.setOption) return;
+  const axisRange = _axisRangeForVisibleSeries(seriesList, startIdx, endIdx, yZero);
+  const option = chart.getOption?.();
+  const axisCount = Array.isArray(option?.yAxis) ? option.yAxis.length : 0;
+  if (axisIndex === 0 && axisCount <= 1) {
+    chart.setOption({ yAxis: axisRange });
+    return;
+  }
+  const yAxis = Array.from({ length: Math.max(axisIndex + 1, axisCount) }, () => ({}));
+  yAxis[axisIndex] = axisRange;
+  chart.setOption({ yAxis });
 }
 
 function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
@@ -3479,6 +3492,7 @@ async function renderNavChart(data) {
       dataZoom: false,
     });
     _navChartSeriesForAxis = [mobileValues];
+    _navBenchSeriesForAxis = [];
 
     const fullWindow = _chartZoomWindow(labels.length, 0, 100);
     _updateChartRangeLabel('pfNavRange', data, fullWindow.startIdx, fullWindow.endIdx);
@@ -3530,6 +3544,7 @@ async function renderNavChart(data) {
         data: vals.map(v => v === null ? '-' : v),
         smooth: 0.3,
         symbol: 'none',
+        yAxisIndex: 1,
         lineStyle: { color: _BENCH_COLORS[code], width: 1.5, type: 'dashed' },
         itemStyle: { color: _BENCH_COLORS[code] },
         connectNulls: true,
@@ -3560,7 +3575,7 @@ async function renderNavChart(data) {
       textStyle: { color: textColor, fontSize: 11 },
       itemWidth: 18, itemHeight: 2,
     } : undefined,
-    grid: { left: 55, right: 12, top: hasBench ? 28 : 10, bottom: mobileChartMode ? 24 : 56 },
+    grid: { left: 55, right: hasBench ? 56 : 12, top: hasBench ? 28 : 10, bottom: mobileChartMode ? 24 : 56 },
     dataZoom: mobileChartMode ? [] : [
       { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(navColor, 0.12),
         handleStyle: { color: navColor }, textStyle: { color: textColor, fontSize: 10 },
@@ -3576,17 +3591,32 @@ async function renderNavChart(data) {
       axisLabel: { color: textColor, fontSize: 10 },
       splitLine: { show: false },
     },
-    yAxis: {
-      type: 'value',
-      min: yZero ? 0 : 'dataMin',
-      axisLine: { show: false },
-      axisLabel: {
-        color: textColor,
-        fontSize: 10,
-        formatter: v => Math.round(v).toLocaleString(),
+    yAxis: [
+      {
+        type: 'value',
+        min: yZero ? 0 : 'dataMin',
+        axisLine: { show: false },
+        axisLabel: {
+          color: textColor,
+          fontSize: 10,
+          formatter: v => Math.round(v).toLocaleString(),
+        },
+        splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
       },
-      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
-    },
+      {
+        type: 'value',
+        show: hasBench,
+        position: 'right',
+        scale: true,
+        axisLine: { show: false },
+        axisLabel: {
+          color: textColor,
+          fontSize: 10,
+          formatter: v => Math.round(v).toLocaleString(),
+        },
+        splitLine: { show: false },
+      },
+    ],
     tooltip: {
       trigger: 'axis',
       formatter(params) {
@@ -3619,12 +3649,15 @@ async function renderNavChart(data) {
     ],
   });
 
-  // Keep the visible Y-axis anchored to NAV only. Benchmark overlays are
-  // contextual references; letting them expand the axis makes the NAV shape
-  // change just because a comparison checkbox was toggled.
+  // NAV and benchmark overlays use separate Y-axes. This keeps NAV's shape
+  // stable while still fitting benchmark min/max on its own right-side axis.
   _navChartSeriesForAxis = [navValues];
+  _navBenchSeriesForAxis = initBenchSeries.map(series => _chartDataToNumbers(series.data));
   const fullWindow = _chartZoomWindow(labels.length, 0, 100);
-  _applyVisibleYAxis(ec, _navChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!yZero);
+  _applyVisibleYAxis(ec, _navChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!yZero, 0);
+  if (hasBench) {
+    _applyVisibleYAxis(ec, _navBenchSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!yZero, 1);
+  }
   _updateChartRangeLabel('pfNavRange', data, fullWindow.startIdx, fullWindow.endIdx);
 
   // On dataZoom change: (a) re-scale benchmark series to the new window,
@@ -3653,11 +3686,17 @@ async function renderNavChart(data) {
           const seriesUpdate = [{ data: navValues.map(v => v === null ? '-' : v) }, ...newBench];
           ec.setOption({ series: seriesUpdate });
           _navChartSeriesForAxis = [navValues];
+          _navBenchSeriesForAxis = newBench.map(series => _chartDataToNumbers(series.data));
         } else {
           _navChartSeriesForAxis = [navValues];
+          _navBenchSeriesForAxis = [];
         }
 
-        _applyVisibleYAxis(ec, _navChartSeriesForAxis, startIdx, endIdx, !!document.getElementById('pfNavYZero')?.checked);
+        const zoomYZero = !!document.getElementById('pfNavYZero')?.checked;
+        _applyVisibleYAxis(ec, _navChartSeriesForAxis, startIdx, endIdx, zoomYZero, 0);
+        if (hasBench) {
+          _applyVisibleYAxis(ec, _navBenchSeriesForAxis, startIdx, endIdx, zoomYZero, 1);
+        }
         _updateChartRangeLabel('pfNavRange', data, startIdx, endIdx);
         _updateNavCagrCard(data, startIdx, endIdx);
       }, 80);
@@ -3687,7 +3726,10 @@ function onNavYZeroToggle() {
       return;
     }
     const { startIdx, endIdx } = _chartWindowFromInstance(_navChartInstance, _navChartData.length);
-    _applyVisibleYAxis(_navChartInstance, _navChartSeriesForAxis, startIdx, endIdx, !!yZero);
+    _applyVisibleYAxis(_navChartInstance, _navChartSeriesForAxis, startIdx, endIdx, !!yZero, 0);
+    if (_navBenchSeriesForAxis.length) {
+      _applyVisibleYAxis(_navChartInstance, _navBenchSeriesForAxis, startIdx, endIdx, !!yZero, 1);
+    }
   }
 }
 
