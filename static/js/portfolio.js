@@ -3068,8 +3068,8 @@ async function loadPerformanceData() {
     const navData = navResp.ok ? await navResp.json() : [];
     const cfData = cfResp.ok ? await cfResp.json() : [];
     // treemap 은 이제 보유종목 탭 소관 — 여기서 호출 안 함
-    renderNavChart(navData);
-    renderValueChart(navData);
+    await renderNavChart(navData);
+    await renderValueChart(navData);
     renderNavReturns(navData);
     renderCashflows(cfData);
   } catch (e) { console.warn(e); }
@@ -3333,7 +3333,7 @@ async function onBenchToggle() {
   let preservedZoom = null;
   if (_navChartInstance) {
     try {
-      const opt = _navChartInstance.getOption();
+      const opt = _navChartInstance.getOption?.();
       const dz = opt?.dataZoom?.[0];
       if (dz && (dz.start != null || dz.end != null)) {
         preservedZoom = { start: dz.start ?? 0, end: dz.end ?? 100 };
@@ -3341,7 +3341,7 @@ async function onBenchToggle() {
     } catch (_) { /* getOption can throw if chart is mid-dispose */ }
   }
   await renderNavChart(_navChartData);
-  if (preservedZoom && _navChartInstance) {
+  if (preservedZoom && _navChartInstance && typeof _navChartInstance.dispatchAction === 'function') {
     // dispatchAction fires the datazoom listener inside renderNavChart,
     // which re-scales benchmark series to match the restored window.
     _navChartInstance.dispatchAction({
@@ -3433,7 +3433,8 @@ async function renderNavChart(data) {
   if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
   if (_navChartResizeObserver) { _navChartResizeObserver.disconnect(); _navChartResizeObserver = null; }
   await loadChartLib();
-  _navChartData = data;
+  _navChartData = data || [];
+  data = _navChartData;
 
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
@@ -3451,6 +3452,35 @@ async function renderNavChart(data) {
   const yoyPct = last365.length > 1
     ? ((navValues[navValues.length - 1] / navValues[navValues.length - last365.length]) - 1) * 100 : 0;
   const navColor = returnToColor(yoyPct);
+
+  if (typeof USE_UPLOT !== 'undefined' && USE_UPLOT) {
+    const navYZero = document.getElementById('pfNavYZero')?.checked;
+    const mobileValues = navValues.map(v => Number.isFinite(Number(v)) ? Number(v) : null);
+
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    _navChartInstance = createLineChart(container, {
+      labels,
+      values: mobileValues,
+      color: navColor,
+      yMin: navYZero ? 0 : undefined,
+      yFormatter: v => Number(v).toFixed(2),
+      dataZoom: false,
+    });
+    _navChartSeriesForAxis = [mobileValues];
+
+    const fullWindow = _chartZoomWindow(labels.length, 0, 100);
+    _updateChartRangeLabel('pfNavRange', data, fullWindow.startIdx, fullWindow.endIdx);
+
+    if (typeof ResizeObserver !== 'undefined' && _navChartInstance) {
+      const ro = new ResizeObserver(() => {
+        if (_navChartInstance && _navChartInstance.resize) _navChartInstance.resize();
+      });
+      ro.observe(container);
+      _navChartResizeObserver = ro;
+    }
+    return;
+  }
 
   // Precompute benchmark ratio maps (close / first_close for each date)
   const benchCodes = _getSelectedBenchmarks();
@@ -3643,6 +3673,10 @@ async function renderNavChart(data) {
 function onNavYZeroToggle() {
   if (_navChartInstance) {
     const yZero = document.getElementById('pfNavYZero')?.checked;
+    if (typeof _navChartInstance.setOption !== 'function') {
+      void renderNavChart(_navChartData);
+      return;
+    }
     const { startIdx, endIdx } = _chartWindowFromInstance(_navChartInstance, _navChartData.length);
     _applyVisibleYAxis(_navChartInstance, _navChartSeriesForAxis, startIdx, endIdx, !!yZero);
   }
@@ -3651,20 +3685,24 @@ function onNavYZeroToggle() {
 function onValueYZeroToggle() {
   if (_valueChartInstance) {
     const yZero = document.getElementById('pfValueYZero')?.checked;
+    if (typeof _valueChartInstance.setOption !== 'function') {
+      void renderValueChart(_valueChartData);
+      return;
+    }
     const { startIdx, endIdx } = _chartWindowFromInstance(_valueChartInstance, _valueChartData.length);
     _applyVisibleYAxis(_valueChartInstance, _valueChartSeriesForAxis, startIdx, endIdx, !!yZero);
   }
 }
 
 function _navZoomToDays(days) {
-  if (!_navChartInstance || !_navChartData.length) return;
+  if (!_navChartInstance || !_navChartData.length || typeof _navChartInstance.dispatchAction !== 'function') return;
   const total = _navChartData.length;
   const startPct = Math.max(0, (1 - days / total) * 100);
   _navChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
 }
 
 function _valueZoomToDays(days) {
-  if (!_valueChartInstance || !_valueChartData.length) return;
+  if (!_valueChartInstance || !_valueChartData.length || typeof _valueChartInstance.dispatchAction !== 'function') return;
   const total = _valueChartData.length;
   const startPct = Math.max(0, (1 - days / total) * 100);
   _valueChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });

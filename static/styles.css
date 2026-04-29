@@ -1823,6 +1823,39 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-treemap-btn { display: none; }
   .pf-table { font-size: 12px; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
+  .pf-summary {
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .pf-summary-card {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+    padding: 10px 12px;
+    align-items: flex-start;
+    gap: 0;
+  }
+  .pf-summary-text {
+    width: 100%;
+  }
+  .pf-summary-side,
+  .pf-sparkline,
+  .pf-summary-date,
+  .pf-summary-sub {
+    display: none !important;
+  }
+  .pf-summary-label {
+    font-size: 10px;
+    line-height: 1.2;
+    letter-spacing: 0.03em;
+  }
+  .pf-summary-value {
+    margin-top: 3px;
+    font-size: 18px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   /* 추이 분석 차트 높이 축소 — PC 600/300 은 폰에서 한 화면을 가득
      채워 스크롤 낭비 + init 타이밍 문제로 NAV 가 안 그려지는 증상. */
   .pf-nav-chart-container { height: 240px; }
