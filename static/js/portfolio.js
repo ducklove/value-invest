@@ -696,12 +696,12 @@ function renderPortfolio() {
   if (!isFiltered && pfPrevDaySnapshot && pfPrevDaySnapshot.today_net_cashflow) {
     totalDailyPnlDisplay -= _fxConv(pfPrevDaySnapshot.today_net_cashflow, null);
   }
-  // For filtered views, derive daily from live quotes instead of the
-  // snapshot so the total row matches the weighted average of visible
-  // rows exactly. Snapshot-based ratio can drift from the quote's
-  // "prev close" due to 22:00 vs market-close timing, causing the
-  // filtered total to fall outside the constituent row range.
-  if (isFiltered && totalMarketValue > 0) {
+  // Filtered TODAY should use the same 22:00 snapshot baseline as the whole
+  // portfolio. Falling back to quote "previous close" makes yesterday's KRX
+  // daily move leak into the next pre-open session, even though the 22:00
+  // snapshot has already absorbed it. Only use quote math when per-stock
+  // snapshot data is unavailable for the filtered reference date.
+  if (isFiltered && dailyNavPct === null && totalMarketValue > 0) {
     const prevMV = totalMarketValue - totalDailyPnl;
     if (prevMV > 0) {
       dailyNavPct = (totalDailyPnl / prevMV) * 100;
@@ -732,8 +732,9 @@ function renderPortfolio() {
   //
   // 22:00 is the snapshot_nav cron cadence; portfolio_snapshots stores
   // only a date column, but the time is a hard contract of that job.
-  // For filtered views we fall back to live-quote previous_close math
-  // which conceptually shares the same baseline date.
+  // Filtered views also use this 22:00 baseline when per-stock snapshots are
+  // available, so pre-open domestic holdings do not carry over yesterday's
+  // quote change as "today".
   const _todayBaseDate = pfPrevDaySnapshot && pfPrevDaySnapshot.date;
   // Compact "MM/DD HH시 기준" — year omitted (always current or just-passed
   // year), snapshot_nav cron is 22:00 KST so the hour is a hard contract.
