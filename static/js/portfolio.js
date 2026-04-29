@@ -1093,6 +1093,20 @@ function _sparkHourFromTs(ts) {
   return Number(m[1]) + Number(m[2]) / 60;
 }
 
+function _formatLocalYmd(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function _parseLocalYmd(ymd) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function _diffLocalDays(start, end) {
+  return Math.round((end.getTime() - start.getTime()) / 86400000);
+}
+
 function _renderSummarySparklines(currentTotalValue) {
   // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
   if (pfNavHistory.length > 1) {
@@ -1104,24 +1118,38 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparkline('sparkTotalReturn', [], '#dc2626', 252, 'right');
   }
 
-  // 월간 수익률 — pfMonthEndSnap?.total_value 대비 일별 total_value 변동률 (%)
-  if (pfNavHistory.length > 0 && pfMonthEndSnap?.total_value && pfMonthEndSnap?.total_value > 0) {
-    // Local date, not UTC — between 00:00 and 09:00 KST toISOString()
-    // returns the previous day, so the 1st-2nd of a month would drop
-    // the whole sparkline to last month.
-    const _d = new Date();
-    const thisMonth = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}`;
-    const monthData = pfNavHistory.filter(d => d.date >= thisMonth);
-    if (monthData.length > 0) {
-      const monthPcts = monthData.map(d => ((d.total_value / pfMonthEndSnap?.total_value) - 1) * 100);
-      const lastPct = monthPcts[monthPcts.length - 1];
-      _drawSparkline('sparkMonthly', monthPcts,
-        lastPct >= 0 ? '#dc2626' : '#2563eb', 22, 'left');
-    } else {
-      _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
+  // MTD sparkline: fixed previous-month-end -> current-month-end axis.
+  // The first point is always previous month-end at 0%, so the shape is
+  // stable even before the first daily snapshot of the month exists.
+  if (pfMonthEndSnap?.total_value && pfMonthEndSnap?.total_value > 0) {
+    const now = new Date();
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const monthStartYmd = _formatLocalYmd(thisMonthStart);
+    const monthEndYmd = _formatLocalYmd(thisMonthEnd);
+    const axisDays = Math.max(1, _diffLocalDays(prevMonthEnd, thisMonthEnd));
+    const monthPoints = [{ x: 0, y: 0 }];
+    const monthData = pfNavHistory.filter(d => d.date >= monthStartYmd && d.date <= monthEndYmd);
+    for (const d of monthData) {
+      if (!d || !d.total_value) continue;
+      const dt = _parseLocalYmd(d.date);
+      if (!dt) continue;
+      monthPoints.push({
+        x: Math.max(0, Math.min(axisDays, _diffLocalDays(prevMonthEnd, dt))),
+        y: ((d.total_value / pfMonthEndSnap.total_value) - 1) * 100,
+      });
     }
+    if (currentTotalValue) {
+      monthPoints.push({
+        x: Math.max(0, Math.min(axisDays, _diffLocalDays(prevMonthEnd, now))),
+        y: ((currentTotalValue / pfMonthEndSnap.total_value) - 1) * 100,
+      });
+    }
+    const lastPct = monthPoints.length ? monthPoints[monthPoints.length - 1].y : 0;
+    _drawSparklinePoints('sparkMonthly', monthPoints, lastPct >= 0 ? '#dc2626' : '#2563eb', axisDays);
   } else {
-    _drawSparkline('sparkMonthly', [], '#dc2626', 22, 'left');
+    _drawSparklinePoints('sparkMonthly', [], '#dc2626', 31);
   }
 
   // 기준값 = 전일 22:00 결산값 (pfPrevDaySnapshot.total_value). sparkline
