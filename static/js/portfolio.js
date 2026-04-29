@@ -708,7 +708,11 @@ function renderPortfolio() {
       totalDailyPnlDisplay = _fxConv(totalDailyPnl, null);
     }
   }
-  let dailyReturnPct = dailyNavPct ?? 0;
+  // Table footer "등락률" is a quote-session aggregate of the visible rows.
+  // It intentionally differs from the TODAY card, which compares against the
+  // portfolio's 22:00 NAV snapshot.
+  const tableDailyBaseValue = totalMarketValue - totalDailyPnl;
+  const dailyReturnPct = tableDailyBaseValue > 0 ? (totalDailyPnl / tableDailyBaseValue * 100) : null;
 
   // --- Monthly return (MTD) ---
   const _mtd = _periodReturn(pfMonthEndSnap, 'nav');
