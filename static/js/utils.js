@@ -221,6 +221,7 @@ function showToast(message, type = 'error', duration = 4000) {
 const USE_UPLOT = window.innerWidth < 768;
 let _chartLibLoaded = false;
 let _chartLibLoading = null;
+const CHART_LIB_TIMEOUT_MS = 12000;
 
 function _showChartLoading() {
   document.querySelectorAll('.chart-canvas-wrap, .pf-nav-chart-container').forEach(el => {
@@ -235,31 +236,130 @@ function _hideChartLoading() {
   document.querySelectorAll('.chart-loading').forEach(el => el.remove());
 }
 
+function _loadScriptWithFallback(urls, globalName) {
+  return new Promise((resolve, reject) => {
+    let index = 0;
+    const tryNext = () => {
+      if (globalName && window[globalName]) {
+        resolve();
+        return;
+      }
+      if (index >= urls.length) {
+        reject(new Error(`Chart lib load failed: ${globalName || urls[0]}`));
+        return;
+      }
+      const script = document.createElement('script');
+      let settled = false;
+      const cleanup = () => {
+        settled = true;
+        clearTimeout(timer);
+      };
+      const timer = setTimeout(() => {
+        if (settled) return;
+        cleanup();
+        script.remove();
+        index += 1;
+        tryNext();
+      }, CHART_LIB_TIMEOUT_MS);
+      script.src = urls[index];
+      script.async = true;
+      script.onload = () => {
+        if (settled) return;
+        cleanup();
+        resolve();
+      };
+      script.onerror = () => {
+        if (settled) return;
+        cleanup();
+        script.remove();
+        index += 1;
+        tryNext();
+      };
+      document.head.appendChild(script);
+    };
+    tryNext();
+  });
+}
+
+function _loadStylesheetWithFallback(urls) {
+  return new Promise(resolve => {
+    let index = 0;
+    const tryNext = () => {
+      if (index >= urls.length) {
+        resolve();
+        return;
+      }
+      const link = document.createElement('link');
+      let settled = false;
+      const cleanup = () => {
+        settled = true;
+        clearTimeout(timer);
+      };
+      const timer = setTimeout(() => {
+        if (settled) return;
+        cleanup();
+        link.remove();
+        index += 1;
+        tryNext();
+      }, CHART_LIB_TIMEOUT_MS);
+      link.rel = 'stylesheet';
+      link.href = urls[index];
+      link.onload = () => {
+        if (settled) return;
+        cleanup();
+        resolve();
+      };
+      link.onerror = () => {
+        if (settled) return;
+        cleanup();
+        link.remove();
+        index += 1;
+        tryNext();
+      };
+      document.head.appendChild(link);
+    };
+    tryNext();
+  });
+}
+
 function loadChartLib() {
-  if (_chartLibLoaded) return Promise.resolve();
+  const globalName = USE_UPLOT ? 'uPlot' : 'echarts';
+  if (_chartLibLoaded || window[globalName]) {
+    _chartLibLoaded = true;
+    _hideChartLoading();
+    return Promise.resolve();
+  }
   if (_chartLibLoading) return _chartLibLoading;
   _showChartLoading();
-  const src = USE_UPLOT
-    ? 'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js'
-    : 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
-  const promises = [new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Chart lib load failed'));
-    document.head.appendChild(s);
-  })];
+  const scriptUrls = USE_UPLOT
+    ? [
+        'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js',
+        'https://unpkg.com/uplot@1.6.31/dist/uPlot.iife.min.js',
+      ]
+    : [
+        'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.6.0/echarts.min.js',
+        'https://unpkg.com/echarts@5.6.0/dist/echarts.min.js',
+      ];
+  const promises = [_loadScriptWithFallback(scriptUrls, globalName)];
   if (USE_UPLOT) {
-    promises.push(new Promise((resolve, reject) => {
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = 'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css';
-      link.onload = () => resolve();
-      link.onerror = () => reject();
-      document.head.appendChild(link);
-    }));
+    promises.push(_loadStylesheetWithFallback([
+      'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css',
+      'https://unpkg.com/uplot@1.6.31/dist/uPlot.min.css',
+    ]));
   }
-  _chartLibLoading = Promise.all(promises).then(() => { _chartLibLoaded = true; _hideChartLoading(); });
+  _chartLibLoading = Promise.all(promises)
+    .then(() => {
+      if (!window[globalName]) throw new Error(`Chart lib loaded without ${globalName}`);
+      _chartLibLoaded = true;
+    })
+    .catch(err => {
+      _chartLibLoading = null;
+      throw err;
+    })
+    .finally(() => {
+      _hideChartLoading();
+    });
   return _chartLibLoading;
 }
 // Backwards compat alias

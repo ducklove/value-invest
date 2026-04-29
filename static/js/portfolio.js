@@ -3161,18 +3161,33 @@ async function loadPerformanceData() {
     const now = new Date();
     dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   }
+  const showChartError = message => {
+    ['pfNavChart', 'pfValueChart'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:16px;text-align:center;color:var(--text-secondary);font-size:14px;">${escapeHtml(message)}</div>`;
+    });
+  };
   try {
     const [navResp, cfResp] = await Promise.all([
       apiFetch('/api/portfolio/nav-history'),
       apiFetch('/api/portfolio/cashflows'),
     ]);
+    if (!navResp.ok) {
+      throw new Error(navResp.status === 401 ? '로그인이 필요합니다.' : `NAV 데이터를 불러오지 못했습니다. (${navResp.status})`);
+    }
     const navData = navResp.ok ? await navResp.json() : [];
     const cfData = cfResp.ok ? await cfResp.json() : [];
     await renderNavChart(navData);
     await renderValueChart(navData);
     renderNavReturns(navData);
     renderCashflows(cfData, navData);
-  } catch (e) { console.warn(e); }
+  } catch (e) {
+    console.warn(e);
+    const message = e?.message || '추이 그래프를 불러오지 못했습니다.';
+    showChartError(message);
+    if (typeof showToast === 'function') showToast(message, 'error');
+  }
 }
 
 let _treemapInstance = null;
