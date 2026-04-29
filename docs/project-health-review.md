@@ -124,18 +124,24 @@
 
 ## 5. 다음 리팩토링 순서
 
-### 1순위: 포트폴리오 프론트 분리
+### 완료: 포트폴리오 프론트 1차 분리
 
-- `portfolio.js`를 다음 모듈로 나눈다.
-  - `portfolio-state.js`: 전역 상태, 필터, 통화, 선택 그룹.
-  - `portfolio-table.js`: 보유종목 표/카드/행 렌더.
-  - `portfolio-menu.js`: 종목 클릭 메뉴, 인사이트 팝업, 외부 링크.
-  - `portfolio-trends.js`: NAV/평가금액/수익률 카드.
-  - `portfolio-cashflows.js`: 자금 입출금 표/폼.
-  - `portfolio-tags.js`: 투자 아이디어 태그.
-- 이 분리가 끝나야 UI 효과 수정이 실시간 시세나 그래프를 망치는 식의 사이드이펙트를 크게 줄일 수 있다.
+- `portfolio.js`를 다음 실행 순서형 모듈로 나눴다.
+  - `portfolio-shell.js`: 공유 상태, 컬럼 설정, 뷰 전환.
+  - `portfolio-data.js`: 포트폴리오 로딩, 필터/정렬, row quote update.
+  - `portfolio-render.js`: 보유종목 렌더링, 포맷, sparkline.
+  - `portfolio-actions.js`: 편집/삭제/검색/그룹/benchmark/외부 링크 액션.
+  - `portfolio-insights.js`: 투자 인사이트, 태그, linked dashboard helper.
+  - `portfolio-groups-market.js`: 그룹 모달, market bar, CSV, 통화.
+  - `portfolio-ai.js`: 포트폴리오 AI 분석.
+  - `portfolio-performance.js`: 추이 탭 shell, 영역지도, 성과 데이터 로딩.
+  - `portfolio-trends.js`: NAV/평가금액 추이와 수익률 카드.
+  - `portfolio-cashflows.js`: 자금 입출금.
+  - `portfolio-events.js`: delegated event handlers.
+- 2026-04-30에 classic script 실행 순서를 보존하는 방식으로 1차 분리를 완료했다. 실제 파일 경계는 `docs/portfolio-frontend-structure.md`를 기준으로 관리한다.
+- 다음 단계는 전역 공유 상태를 줄이고, domain별 contract test를 추가하면서 더 작은 순수 함수 단위로 이동하는 것이다.
 
-### 2순위: DB 계층 분리
+### 1순위: DB 계층 분리
 
 - `cache.py`를 도메인별 repository로 분리한다.
   - `repositories/users.py`
@@ -146,13 +152,13 @@
   - `repositories/events.py`
 - 다중 statement write는 명시적 transaction helper로만 실행하게 한다.
 
-### 3순위: 관리자 job run 모델
+### 2순위: 관리자 job run 모델
 
 - 현재 수동 job은 이벤트 로그는 남지만, “job run” 자체는 아직 독립 테이블이 아니다.
 - `admin_job_runs`를 만들어 job id, actor, started_at, ended_at, status, stdout tail, stderr tail, retry/cancel 정보를 저장해야 한다.
 - 관리자 UI는 fire-and-forget 알림 대신 run detail 화면을 가져야 한다.
 
-### 4순위: 프론트 테스트 최소 도입
+### 3순위: 프론트 테스트 최소 도입
 
 - 빌드 시스템을 크게 들이지 않더라도, 핵심 JS 모듈에는 Node 기반 contract test를 붙인다.
 - 특히 다음은 회귀 테스트가 필요하다.
@@ -161,7 +167,7 @@
   - portfolio row click과 price flash가 서로 이벤트를 방해하지 않는지.
   - 관리자 mutation fetch header.
 
-### 5순위: 운영 성능 계측
+### 4순위: 운영 성능 계측
 
 - `/api/portfolio/nav-history`, `/api/portfolio/benchmark-history`, `/api/admin/*` 주요 endpoint에 duration event를 남긴다.
 - 화면에서는 “데이터 로딩 중”, “차트 렌더링 중”, “비교지수 불러오는 중”을 분리해서 보여준다.
