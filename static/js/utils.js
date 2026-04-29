@@ -269,6 +269,19 @@ function loadChartLib(options = {}) {
 function preloadChartLib() {
   return loadChartLib({ silent: true });
 }
+function scheduleChartLibPreload() {
+  const run = () => preloadChartLib().catch(() => {});
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 1200 });
+  } else {
+    setTimeout(run, 500);
+  }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', scheduleChartLibPreload, { once: true });
+} else {
+  scheduleChartLibPreload();
+}
 // Backwards compat alias
 const loadECharts = loadChartLib;
 

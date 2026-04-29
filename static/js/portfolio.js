@@ -3177,6 +3177,7 @@ async function loadPerformanceData() {
     const navData = navResp.ok ? await navResp.json() : [];
     if (navData.length) pfNavHistory = navData;
     const cfData = cfResp.ok ? await cfResp.json() : [];
+    renderNavChartPreview(navData);
     renderNavReturns(navData);
     renderCashflows(cfData, navData);
     // The two charts share the same lazy-loaded chart library. Rendering
@@ -3558,6 +3559,77 @@ function _applyVisibleYAxis(chart, seriesList, startIdx, endIdx, yZero) {
   return axisRange;
 }
 
+function renderNavChartPreview(data) {
+  const container = document.getElementById('pfNavChart');
+  if (!container || _navChartInstance) return;
+  const values = (data || []).map(d => {
+    const raw = pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0 ? d.nav / d.fx_usdkrw : d.nav;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }).filter(v => v !== null);
+  if (values.length < 2) return;
+
+  container.innerHTML = `
+    <canvas class="pf-chart-preview-canvas" aria-hidden="true"></canvas>
+    <div class="pf-chart-preview-label">빠른 미리보기 · 상세 차트 준비 중</div>
+  `;
+  const canvas = container.querySelector('canvas');
+  const ctx = canvas?.getContext('2d');
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const w = container.clientWidth || container.parentElement?.clientWidth || 640;
+  const h = container.clientHeight || container.parentElement?.clientHeight || 320;
+  canvas.width = Math.max(1, Math.round(w * dpr));
+  canvas.height = Math.max(1, Math.round(h * dpr));
+  ctx.scale(dpr, dpr);
+
+  const css = getComputedStyle(document.documentElement);
+  const gridColor = css.getPropertyValue('--border').trim() || '#e5e7eb';
+  const textColor = css.getPropertyValue('--text-secondary').trim() || '#64748b';
+  const lineColor = returnToColor(
+    values.length > 1 ? ((values[values.length - 1] / values[0]) - 1) * 100 : 0
+  );
+  const left = 56, right = 14, top = 28, bottom = 34;
+  const axis = _axisRangeForVisibleSeries([values], 0, values.length - 1, false);
+  const min = Number(axis.min);
+  const max = Number(axis.max);
+  const range = max - min || 1;
+  const xFor = i => left + (i / Math.max(1, values.length - 1)) * (w - left - right);
+  const yFor = v => top + (1 - (v - min) / range) * (h - top - bottom);
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = textColor;
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = top + (i / 4) * (h - top - bottom);
+    const val = max - (i / 4) * range;
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(w - right, y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(Math.round(val).toLocaleString(), left - 8, y);
+  }
+
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = xFor(i);
+    const y = yFor(v);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
 function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
   const el = document.getElementById(elId);
   if (!el) return;
@@ -3691,6 +3763,7 @@ async function renderNavChart(data) {
   // 끝난 뒤 init 하고, 그래도 혹시 늦으면 ResizeObserver 가 추가 보완.
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
+  container.innerHTML = '';
   const ec = echarts.init(container);
 
   const initBenchSeries = buildBenchSeries(0);
