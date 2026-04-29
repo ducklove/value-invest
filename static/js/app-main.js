@@ -10,8 +10,45 @@ function _updateQuoteSubscriptions() {
   QuoteManager.updateSubscriptions(requested);
 }
 
-let _pfRenderQueued = false;
+let _pfQuotePaintQueued = false;
+let _pfDeferredRenderTimer = null;
+const _pfQuoteQueuedCodes = new Set();
+const _pfBenchmarkQueuedCodes = new Set();
 const _pfFlashQueuedCodes = new Set();
+
+function _schedulePortfolioDeferredRender(delay = 1200) {
+  if (pfEditingCode) return;
+  clearTimeout(_pfDeferredRenderTimer);
+  _pfDeferredRenderTimer = setTimeout(() => {
+    if (typeof _pfIsPointerInteractionActive === 'function' && _pfIsPointerInteractionActive()) {
+      _schedulePortfolioDeferredRender(350);
+      return;
+    }
+    renderPortfolio();
+  }, delay);
+}
+
+function _paintPortfolioQuoteUpdates() {
+  _pfQuotePaintQueued = false;
+  const rowCodes = [..._pfQuoteQueuedCodes];
+  const benchmarkCodes = [..._pfBenchmarkQueuedCodes];
+  _pfQuoteQueuedCodes.clear();
+  _pfBenchmarkQueuedCodes.clear();
+
+  rowCodes.forEach(rowCode => {
+    updatePortfolioRowQuote(rowCode, _pfFlashQueuedCodes.has(rowCode));
+  });
+  benchmarkCodes.forEach(updatePortfolioBenchmarkCells);
+  _pfFlashQueuedCodes.clear();
+  _schedulePortfolioDeferredRender();
+}
+
+function _queuePortfolioQuotePaint() {
+  if (pfEditingCode || _pfQuotePaintQueued) return;
+  _pfQuotePaintQueued = true;
+  requestAnimationFrame(_paintPortfolioQuoteUpdates);
+}
+
 QuoteManager.onQuote = function(code, q) {
   // 1) 분석 뷰 활성 종목
   if (code === activeStockCode && q.price != null) {
@@ -28,28 +65,15 @@ QuoteManager.onQuote = function(code, q) {
     const prevPrice = pfItem.quote ? pfItem.quote.price : null;
     pfItem.quote = { ...(pfItem.quote || {}), ...q };
     if (prevPrice !== q.price) _pfFlashQueuedCodes.add(code);
+    _pfQuoteQueuedCodes.add(code);
   }
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null) {
     pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
+    _pfBenchmarkQueuedCodes.add(code);
   }
   if ((pfItem || isBenchmark) && q.price != null) {
-    if (!pfEditingCode && !_pfRenderQueued) {
-      _pfRenderQueued = true;
-      requestAnimationFrame(() => {
-        _pfRenderQueued = false;
-        renderPortfolio();
-        if (_pfFlashQueuedCodes.size) {
-          const tbody = document.getElementById('pfBody');
-          if (tbody) {
-            tbody.querySelectorAll('tr[data-code]').forEach(t => {
-              if (_pfFlashQueuedCodes.has(t.dataset.code)) flashEl(t);
-            });
-          }
-          _pfFlashQueuedCodes.clear();
-        }
-      });
-    }
+    _queuePortfolioQuotePaint();
   }
   // 3) 사이드바
   const sbItem = recentListItems.find(i => i.stock_code === code);

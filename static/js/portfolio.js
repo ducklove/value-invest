@@ -20,6 +20,15 @@ let pfPrevDaySnapshot = null; // {total_value, fx_usdkrw, stock_values, today_ne
 let pfCurrency = 'KRW'; // 'KRW' or 'USD'
 let pfFxRate = null; // USD/KRW rate
 const PF_QUOTE_REFRESH_MS = 60_000;
+let _pfPointerGuardUntil = 0;
+
+function _pfMarkPointerInteraction(ms = 450) {
+  _pfPointerGuardUntil = performance.now() + ms;
+}
+
+function _pfIsPointerInteractionActive() {
+  return performance.now() < _pfPointerGuardUntil;
+}
 
 // --- Column visibility ---
 // `defaultVisible: false` 는 "처음 방문하는 사용자에게 기본 숨김".
@@ -299,7 +308,7 @@ function pfToggleGroupFilter(groupName) {
 // 아래 tr 이 매 tick 재생성되면서 :hover transition 이 fresh 시작 →
 // '커서 있는 행이 깜빡임' 문제. 영향 받는 셀만 in-place 로 덮어 쓰고
 // flash 클래스를 그 행에만 붙여 갱신된 행만 번쩍이게 한다.
-function updatePortfolioRowQuote(code) {
+function updatePortfolioRowQuote(code, shouldFlash = true) {
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
   let tr = null;
@@ -336,16 +345,16 @@ function updatePortfolioRowQuote(code) {
   const setText = (sel, txt) => { const el = tr.querySelector(sel); if (el) el.textContent = txt; };
   const setHtml = (sel, html) => { const el = tr.querySelector(sel); if (el) el.innerHTML = html; };
 
-  setText('.pf-col-curprice', price !== null ? _fp(price) : '-');
+  setText('.pf-col-curprice', price !== null ? pfFmtPortfolioValue(price) : '-');
   setHtml('.pf-col-changepct', fmtChangePct(changePct, change));
   setHtml('.pf-col-return', `<span class="pf-return ${returnClass(returnPct)}">${returnPct !== null ? fmtPct(returnPct) : '-'}</span>`);
-  setText('.pf-col-mktval', marketValue !== null ? _fp(marketValue) : '-');
+  setText('.pf-col-mktval', marketValue !== null ? pfFmtPortfolioValue(marketValue) : '-');
   setText('.pf-col-invested', tradingValue !== null ? fmtKrw(tradingValue) : '-');
   setText('.pf-col-divyield', dividendYield !== null ? fmtPct(dividendYield, false) : '-');
-  setText('.pf-col-target', targetPrice !== null ? _fp(targetPrice) : '-');
+  setText('.pf-col-target', targetPrice !== null ? pfFmtPortfolioValue(targetPrice) : '-');
   setText('.pf-col-achiev', achievementPct !== null ? fmtPct(achievementPct, false) : '-');
 
-  flashEl(tr);
+  if (shouldFlash) flashEl(tr);
 }
 
 // 벤치마크 tick 전용: 같은 benchmark_code 를 쓰는 모든 행의 벤치마크
@@ -794,12 +803,7 @@ function renderPortfolio() {
   _renderSummarySparklines(_l ? grandTotalMarketValue : null);
 
   // Table body — apply FX conversion to price columns
-  const _fp = v => {
-    const cv = pfFx(v);
-    return pfCurrency === 'USD'
-      ? '$' + Number(cv).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3})
-      : fmtNum(Math.round(cv));
-  };
+  const _fp = pfFmtPortfolioValue;
   // 편집 중 input 의 사용자 입력(값/포커스/커서)을 re-render 전후로 보존.
   // tbody.innerHTML 재할당은 모든 <input> 을 재생성하므로, QuoteManager
   // WebSocket tick 이나 benchmark polling 이 돌 때마다 편집 중인 값이
@@ -823,6 +827,8 @@ function renderPortfolio() {
     }
   }
 
+  const canManualDrag = !pfSortKey && !pfGroupSort && currentUser && !pfEditingCode;
+
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
@@ -837,6 +843,9 @@ function renderPortfolio() {
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     const safeCode = escapeHtml(r.stock_code);
     const tagHtml = _renderPortfolioRowTags(pfGetTags(r));
+    const dragHandle = canManualDrag
+      ? '<button type="button" class="pf-row-drag-handle js-pf-row-drag" draggable="true" title="드래그하여 순서 변경" aria-label="드래그하여 순서 변경">&#x2630;</button>'
+      : '';
     if (isEditing) {
       return `<tr data-code="${safeCode}">
         <td class="pf-stock-cell js-pf-analyze"><a href="#" class="pf-stock-link"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
@@ -861,8 +870,8 @@ function renderPortfolio() {
         </div></td>
       </tr>`;
     }
-    return `<tr draggable="true" data-code="${safeCode}">
-      <td class="pf-stock-cell js-pf-analyze"><a href="#" class="pf-stock-link"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
+    return `<tr data-code="${safeCode}">
+      <td class="pf-stock-cell js-pf-analyze">${dragHandle}<a href="#" class="pf-stock-link"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
@@ -923,18 +932,25 @@ function renderPortfolio() {
     <td class="pf-col-act"></td>
   </tr>`;
 
-  // Drag-and-drop on rows (manual order only)
-  if (!pfSortKey && !pfGroupSort && currentUser) {
-    tbody.querySelectorAll('tr[draggable]').forEach(tr => {
-      tr.addEventListener('dragstart', (e) => {
+  // Drag-and-drop uses an explicit handle so normal stock-name clicks never
+  // get swallowed by the browser's native row-drag gesture.
+  if (canManualDrag) {
+    tbody.querySelectorAll('.js-pf-row-drag').forEach(handle => {
+      handle.addEventListener('dragstart', (e) => {
+        const tr = handle.closest('tr[data-code]');
+        if (!tr) return;
         tr.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', tr.dataset.code);
       });
-      tr.addEventListener('dragend', () => {
+      handle.addEventListener('dragend', () => {
+        const tr = handle.closest('tr[data-code]');
+        if (!tr) return;
         tr.classList.remove('dragging');
         tbody.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
       });
+    });
+    tbody.querySelectorAll('tr[data-code]').forEach(tr => {
       tr.addEventListener('dragover', (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
@@ -949,8 +965,6 @@ function renderPortfolio() {
         if (fromCode && toCode && fromCode !== toCode) pfDropRow(fromCode, toCode);
       });
     });
-  } else {
-    tbody.querySelectorAll('tr[draggable]').forEach(tr => tr.removeAttribute('draggable'));
   }
 }
 
@@ -1087,6 +1101,13 @@ function fmtKrw(n) {
   if (a >= 1e12) { const v = n / 1e12; const d = a >= 1e15 ? 0 : a >= 1e14 ? 1 : a >= 1e13 ? 2 : 3; return v.toFixed(d) + '조'; }
   if (a >= 1e8)  { const v = n / 1e8;  const d = a >= 1e11 ? 0 : a >= 1e10 ? 1 : a >= 1e9 ? 2 : 3;  return v.toFixed(d) + '억'; }
   return Number(Math.round(n)).toLocaleString();
+}
+
+function pfFmtPortfolioValue(value) {
+  const converted = pfFx(value);
+  return pfCurrency === 'USD'
+    ? '$' + Number(converted).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+    : fmtNum(Math.round(converted));
 }
 function fmtSignedKrw(n) {
   if (n === null) return '-';
@@ -1877,10 +1898,16 @@ async function pfOpenAssetInsight(stockCode) {
   if (title) title.textContent = '투자 인사이트';
   body.innerHTML = '<div class="pf-insight-loading">자산 데이터를 불러오는 중입니다...</div>';
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const slowNoticeId = setTimeout(() => {
+    if (pfAssetInsightCode !== stockCode) return;
+    body.innerHTML = '<div class="pf-insight-loading">첫 조회라 가격/벤치마크 데이터를 조금 더 모으는 중입니다. 완료되면 자동으로 표시됩니다...</div>';
+  }, 12000);
+  const verySlowNoticeId = setTimeout(() => {
+    if (pfAssetInsightCode !== stockCode) return;
+    body.innerHTML = '<div class="pf-insight-loading">외부 데이터 응답이 늦습니다. 요청은 끊지 않고 계속 기다리는 중입니다...</div>';
+  }, 30000);
   try {
-    const resp = await apiFetch(`/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}`, { signal: controller.signal });
+    const resp = await apiFetch(`/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}`);
     if (!resp.ok) {
       let detail = '';
       try {
@@ -1897,12 +1924,11 @@ async function pfOpenAssetInsight(stockCode) {
     body.innerHTML = _renderAssetInsight(data);
   } catch (e) {
     if (pfAssetInsightCode !== stockCode) return;
-    const message = e.name === 'AbortError'
-      ? '인사이트 조회가 15초를 넘겨 중단되었습니다. 잠시 후 다시 열면 캐시된 데이터로 더 빨라질 수 있습니다.'
-      : (e.message || '인사이트를 불러오지 못했습니다.');
+    const message = e.message || '인사이트를 불러오지 못했습니다.';
     body.innerHTML = `<div class="pf-insight-error">${escapeHtml(message)}</div>`;
   } finally {
-    clearTimeout(timeoutId);
+    clearTimeout(slowNoticeId);
+    clearTimeout(verySlowNoticeId);
   }
 }
 
@@ -3972,6 +3998,16 @@ async function deleteCashflow(id) {
 // menu/picker code.
 (function initPfDelegation() {
   const onReady = () => {
+    document.addEventListener('pointerdown', (e) => {
+      if (e.target.closest && e.target.closest('.js-pf-analyze')) {
+        _pfMarkPointerInteraction();
+      }
+    }, true);
+    document.addEventListener('pointerup', (e) => {
+      if (e.target.closest && e.target.closest('.js-pf-analyze')) {
+        _pfMarkPointerInteraction(300);
+      }
+    }, true);
     document.addEventListener('click', (e) => {
       const t = e.target;
       const codeFromTr = (el) => {
@@ -3979,7 +4015,10 @@ async function deleteCashflow(id) {
         return host ? host.dataset.code : null;
       };
       let el;
-      if ((el = t.closest('.js-pf-analyze'))) {
+      if (t.closest('.js-pf-row-drag')) {
+        e.preventDefault();
+        return;
+      } else if ((el = t.closest('.js-pf-analyze'))) {
         const code = codeFromTr(el);
         if (code) { e.preventDefault(); pfGoAnalyze(code, e); }
       } else if ((el = t.closest('.js-pf-save'))) {

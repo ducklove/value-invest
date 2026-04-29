@@ -1680,11 +1680,29 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-sortable { cursor: pointer; user-select: none; }
 .pf-sortable:hover { color: var(--text); }
 .pf-sortable .pf-sort-arrow { font-size: 10px; margin-left: 3px; }
-.pf-table tbody tr[draggable="true"] { cursor: grab; }
-.pf-table tbody tr[draggable="true"]:active { cursor: grabbing; }
 .pf-table tbody tr.dragging { opacity: 0.4; }
 .pf-table tbody tr.drag-over td { border-top: 2px solid var(--primary); }
 .pf-stock-cell { cursor: pointer; }
+.pf-row-drag-handle {
+  margin-right: 6px;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: grab;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: 1px;
+}
+.pf-row-drag-handle:hover {
+  border-color: var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.pf-row-drag-handle:active {
+  cursor: grabbing;
+}
 .pf-stock-link { color: var(--text); text-decoration: none; }
 .pf-stock-link:hover { color: var(--primary); }
 .pf-stock-code { font-size: 11px; color: var(--text-secondary); }
