@@ -322,15 +322,21 @@ function _loadStylesheetWithFallback(urls) {
   });
 }
 
-function loadChartLib() {
+function loadChartLib(options = {}) {
+  const silent = !!options.silent;
   const globalName = USE_UPLOT ? 'uPlot' : 'echarts';
   if (_chartLibLoaded || window[globalName]) {
     _chartLibLoaded = true;
-    _hideChartLoading();
+    if (!silent) _hideChartLoading();
     return Promise.resolve();
   }
-  if (_chartLibLoading) return _chartLibLoading;
-  _showChartLoading();
+  if (_chartLibLoading) {
+    if (!silent) _showChartLoading();
+    return _chartLibLoading.finally(() => {
+      if (!silent) _hideChartLoading();
+    });
+  }
+  if (!silent) _showChartLoading();
   const scriptUrls = USE_UPLOT
     ? [
         'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js',
@@ -358,9 +364,23 @@ function loadChartLib() {
       throw err;
     })
     .finally(() => {
-      _hideChartLoading();
+      if (!silent) _hideChartLoading();
     });
   return _chartLibLoading;
+}
+function preloadChartLib() {
+  return loadChartLib({ silent: true }).catch(err => {
+    console.warn('Chart preload failed; will retry on demand.', err);
+  });
+}
+function scheduleChartPreload() {
+  if (_chartLibLoaded || _chartLibLoading) return;
+  const run = () => preloadChartLib();
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 1500 });
+  } else {
+    setTimeout(run, 800);
+  }
 }
 // Backwards compat alias
 const loadECharts = loadChartLib;
