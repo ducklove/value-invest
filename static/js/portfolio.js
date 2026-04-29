@@ -3619,10 +3619,10 @@ async function renderNavChart(data) {
     ],
   });
 
-  _navChartSeriesForAxis = [
-    navValues,
-    ...initBenchSeries.map(series => _chartDataToNumbers(series.data)),
-  ];
+  // Keep the visible Y-axis anchored to NAV only. Benchmark overlays are
+  // contextual references; letting them expand the axis makes the NAV shape
+  // change just because a comparison checkbox was toggled.
+  _navChartSeriesForAxis = [navValues];
   const fullWindow = _chartZoomWindow(labels.length, 0, 100);
   _applyVisibleYAxis(ec, _navChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!yZero);
   _updateChartRangeLabel('pfNavRange', data, fullWindow.startIdx, fullWindow.endIdx);
@@ -3652,10 +3652,7 @@ async function renderNavChart(data) {
           // Update only benchmark series (index 1+)
           const seriesUpdate = [{ data: navValues.map(v => v === null ? '-' : v) }, ...newBench];
           ec.setOption({ series: seriesUpdate });
-          _navChartSeriesForAxis = [
-            navValues,
-            ...newBench.map(series => _chartDataToNumbers(series.data)),
-          ];
+          _navChartSeriesForAxis = [navValues];
         } else {
           _navChartSeriesForAxis = [navValues];
         }
