@@ -264,7 +264,7 @@ async def healthz():
     # implies the loop is responsive. Also expose loop tick lag for debugging.
     now = time.monotonic()
     lag = max(0.0, now - _last_loop_tick) if _last_loop_tick else None
-    return JSONResponse({"status": "ok", "loop_lag_s": lag})
+    return JSONResponse({"status": "ok", "asset_version": ASSET_VERSION, "loop_lag_s": lag})
 
 
 @app.get("/")

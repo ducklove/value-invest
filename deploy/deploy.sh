@@ -33,6 +33,22 @@ REPO_UNITS=(
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
+wait_for_healthz() {
+  # -k: cert is for cantabile.tplinkdns.com; localhost check skips name match.
+  log "Waiting for healthz"
+  for i in {1..20}; do
+    if curl -fsSk --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
+      log "Healthz OK (attempt $i)"
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Healthz did not respond in time; showing recent logs"
+  sudo /bin/systemctl --no-pager status "$SERVICE" || true
+  return 1
+}
+
 cd "$APP_DIR"
 
 log "Fetching latest from origin/master"
@@ -42,7 +58,9 @@ git reset --hard origin/master
 NEW_SHA="$(git rev-parse HEAD)"
 
 if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
-  log "No new commits ($NEW_SHA). Skipping deploy."
+  log "No new commits ($NEW_SHA). Restarting $SERVICE so the process matches the checkout."
+  sudo /bin/systemctl restart "$SERVICE"
+  wait_for_healthz
   exit 0
 fi
 
@@ -115,16 +133,4 @@ log "Restarting $SERVICE"
 sudo /bin/systemctl restart "$SERVICE"
 
 # --- Health check -----------------------------------------------------------
-# -k: cert is for cantabile.tplinkdns.com; localhost check skips name match.
-log "Waiting for healthz"
-for i in {1..20}; do
-  if curl -fsSk --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
-    log "Healthz OK (attempt $i)"
-    exit 0
-  fi
-  sleep 1
-done
-
-log "Healthz did not respond in time; showing recent logs"
-sudo /bin/systemctl --no-pager status "$SERVICE" || true
-exit 1
+wait_for_healthz
