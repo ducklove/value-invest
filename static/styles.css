@@ -1090,10 +1090,21 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 
 /* Cashflow section */
-.pf-cashflow-section { margin-top: 24px; }
+.pf-cashflow-section {
+  margin-top: 24px;
+  overflow-x: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 84%, var(--bg));
+}
 .pf-cashflow-section h3 { font-size: 16px; margin: 0 0 12px; }
 .pf-cf-form {
-  display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+  display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
 }
 .pf-cf-form select, .pf-cf-form input {
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
@@ -1105,19 +1116,93 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   padding: 8px 16px; border: none; border-radius: 8px;
   background: var(--primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.pf-cf-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-.pf-cf-table th {
-  text-align: left; padding: 8px 6px; border-bottom: 2px solid var(--border);
-  font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap;
+.pf-cf-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  font-size: 12px;
+  table-layout: fixed;
 }
-.pf-cf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.pf-cf-table th:nth-child(1), .pf-cf-table td:nth-child(1) { width: 90px; }
-.pf-cf-table th:nth-child(2), .pf-cf-table td:nth-child(2) { width: 50px; }
-.pf-cf-table th:nth-child(3), .pf-cf-table td:nth-child(3) { width: 100px; text-align: right; }
-.pf-cf-table th:nth-child(4), .pf-cf-table td:nth-child(4) { width: 70px; text-align: right; }
-.pf-cf-table th:nth-child(5), .pf-cf-table td:nth-child(5) { width: 80px; text-align: right; }
-.pf-cf-table th:nth-child(6), .pf-cf-table td:nth-child(6) { width: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pf-cf-table th:nth-child(7), .pf-cf-table td:nth-child(7) { width: 30px; text-align: center; }
+.pf-cf-table th {
+  text-align: left;
+  padding: 0 10px 4px;
+  border-bottom: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.pf-cf-table td {
+  padding: 10px;
+  border-bottom: none;
+  background: var(--surface);
+  white-space: nowrap;
+  vertical-align: middle;
+  box-shadow: 0 1px 0 var(--border), 0 -1px 0 var(--border);
+}
+.pf-cf-table td:first-child {
+  border-radius: 10px 0 0 10px;
+  box-shadow: -1px 0 0 var(--border), 0 1px 0 var(--border), 0 -1px 0 var(--border);
+}
+.pf-cf-table td:last-child {
+  border-radius: 0 10px 10px 0;
+  box-shadow: 1px 0 0 var(--border), 0 1px 0 var(--border), 0 -1px 0 var(--border);
+}
+.pf-cf-table th:nth-child(1), .pf-cf-table td:nth-child(1) { width: 88px; }
+.pf-cf-table th:nth-child(2), .pf-cf-table td:nth-child(2) { width: 64px; }
+.pf-cf-table th:nth-child(3), .pf-cf-table td:nth-child(3) { width: 104px; text-align: right; }
+.pf-cf-table th:nth-child(4), .pf-cf-table td:nth-child(4) { width: 92px; text-align: right; }
+.pf-cf-table th:nth-child(5), .pf-cf-table td:nth-child(5) { width: 96px; text-align: right; }
+.pf-cf-table th:nth-child(6), .pf-cf-table td:nth-child(6) { width: 102px; text-align: right; }
+.pf-cf-table th:nth-child(7), .pf-cf-table td:nth-child(7) {
+  width: auto;
+  min-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-cf-table th:nth-child(8), .pf-cf-table td:nth-child(8) { width: 38px; text-align: center; }
+.pf-cf-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pf-cf-type.deposit {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.09);
+}
+.pf-cf-type.withdrawal {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.1);
+}
+.pf-cf-amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pf-cf-table .pf-row-btn.delete {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+}
+.pf-cf-table .pf-row-btn.delete:hover {
+  background: rgba(220, 38, 38, 0.1);
+}
 
 .pf-filter-bar {
   display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 16px;

@@ -3071,7 +3071,7 @@ async function loadPerformanceData() {
     await renderNavChart(navData);
     await renderValueChart(navData);
     renderNavReturns(navData);
-    renderCashflows(cfData);
+    renderCashflows(cfData, navData);
   } catch (e) { console.warn(e); }
 }
 
@@ -3994,7 +3994,7 @@ function _updateNavCagrCard(data, startIdx, endIdx) {
   valEl.className = 'pf-nav-ret-value ' + (returnClass(cagr) || '');
 }
 
-function renderCashflows(data) {
+function renderCashflows(data, navData = _navChartData) {
   const tbody = document.getElementById('pfCfBody');
   if (!tbody) return;
   if (!data.length) {
@@ -4012,31 +4012,55 @@ function renderCashflows(data) {
     const sign = n > 0 ? '+' : '';
     return sign + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+  const snapshotUnits = (snapshot) => {
+    const units = Number(snapshot?.total_units);
+    if (Number.isFinite(units) && units > 0) return units;
+    const value = Number(snapshot?.total_value);
+    const nav = Number(snapshot?.nav);
+    return Number.isFinite(value) && Number.isFinite(nav) && nav > 0 ? value / nav : null;
+  };
+  const compareCashflows = (a, b) => {
+    const dateCompare = String(a.date || '').localeCompare(String(b.date || ''));
+    if (dateCompare !== 0) return dateCompare;
+    const createdCompare = String(a.created_at || '').localeCompare(String(b.created_at || ''));
+    if (createdCompare !== 0) return createdCompare;
+    return Number(a.id || 0) - Number(b.id || 0);
+  };
+  const snapshots = (navData || [])
+    .map(s => ({ date: String(s.date || ''), units: snapshotUnits(s) }))
+    .filter(s => s.date && Number.isFinite(s.units))
+    .sort((a, b) => a.date.localeCompare(b.date));
   const remainingUnitsById = new Map();
-  let runningUnits = 0;
-  [...data]
-    .sort((a, b) => {
-      const dateCompare = String(a.date || '').localeCompare(String(b.date || ''));
-      if (dateCompare !== 0) return dateCompare;
-      const createdCompare = String(a.created_at || '').localeCompare(String(b.created_at || ''));
-      if (createdCompare !== 0) return createdCompare;
-      return Number(a.id || 0) - Number(b.id || 0);
-    })
-    .forEach(cf => {
+  let runningUnits = null;
+  let snapshotIdx = -1;
+  let activeSnapshotDate = '';
+  [...data].sort(compareCashflows).forEach(cf => {
+    const cfDate = String(cf.date || '');
+    while (snapshotIdx + 1 < snapshots.length && snapshots[snapshotIdx + 1].date <= cfDate) {
+      snapshotIdx += 1;
+      runningUnits = snapshots[snapshotIdx].units;
+      activeSnapshotDate = snapshots[snapshotIdx].date;
+    }
+    if (activeSnapshotDate !== cfDate) {
+      if (runningUnits === null) runningUnits = 0;
       const delta = Number(cf.units_change);
       if (Number.isFinite(delta)) runningUnits += delta;
-      remainingUnitsById.set(String(cf.id), runningUnits);
-    });
-  tbody.innerHTML = data.map(cf => `<tr>
-    <td>${cf.date}</td>
-    <td>${cf.type === 'deposit' ? '입금' : '출금'}</td>
-    <td class="pf-col-num">${fmtNum(Math.round(cf.amount))}원</td>
+    }
+    remainingUnitsById.set(String(cf.id), runningUnits);
+  });
+  tbody.innerHTML = data.map(cf => {
+    const isDeposit = cf.type === 'deposit';
+    return `<tr>
+    <td>${escapeHtml(cf.date || '')}</td>
+    <td><span class="pf-cf-type ${isDeposit ? 'deposit' : 'withdrawal'}">${isDeposit ? '입금' : '출금'}</span></td>
+    <td class="pf-col-num pf-cf-amount ${isDeposit ? 'deposit' : 'withdrawal'}">${fmtNum(Math.round(cf.amount))}원</td>
     <td class="pf-col-num">${fmtCfDecimal(cf.nav_at_time)}</td>
     <td class="pf-col-num">${fmtCfSignedDecimal(cf.units_change)}</td>
     <td class="pf-col-num">${fmtCfDecimal(remainingUnitsById.get(String(cf.id)))}</td>
-    <td>${cf.memo || ''}</td>
-    <td><button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}">X</button></td>
-  </tr>`).join('');
+    <td title="${escapeHtml(cf.memo || '')}">${escapeHtml(cf.memo || '')}</td>
+    <td><button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}" aria-label="입출금 삭제" title="삭제">&times;</button></td>
+  </tr>`;
+  }).join('');
 }
 
 async function addCashflow() {
