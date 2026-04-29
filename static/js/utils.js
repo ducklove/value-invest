@@ -235,10 +235,14 @@ function _hideChartLoading() {
   document.querySelectorAll('.chart-loading').forEach(el => el.remove());
 }
 
-function loadChartLib() {
+function loadChartLib(options = {}) {
+  const silent = !!options.silent;
   if (_chartLibLoaded) return Promise.resolve();
-  if (_chartLibLoading) return _chartLibLoading;
-  _showChartLoading();
+  if (_chartLibLoading) {
+    if (!silent) _showChartLoading();
+    return _chartLibLoading;
+  }
+  if (!silent) _showChartLoading();
   const src = USE_UPLOT
     ? 'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js'
     : 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
@@ -261,6 +265,9 @@ function loadChartLib() {
   }
   _chartLibLoading = Promise.all(promises).then(() => { _chartLibLoaded = true; _hideChartLoading(); });
   return _chartLibLoading;
+}
+function preloadChartLib() {
+  return loadChartLib({ silent: true });
 }
 // Backwards compat alias
 const loadECharts = loadChartLib;

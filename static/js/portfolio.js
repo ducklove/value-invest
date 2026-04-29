@@ -246,6 +246,11 @@ async function loadPortfolio() {
       return item;
     });
     renderPortfolio();
+    if (typeof preloadChartLib === 'function') {
+      const preload = () => preloadChartLib().catch(() => {});
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(preload, { timeout: 2000 });
+      else setTimeout(preload, 800);
+    }
     _updateQuoteSubscriptions();
   } catch (e) { console.warn(e); } finally {
     portfolioLoading = false;
@@ -3162,17 +3167,24 @@ async function loadPerformanceData() {
     dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   }
   try {
+    const navPromise = pfNavHistory.length
+      ? Promise.resolve({ ok: true, json: async () => pfNavHistory })
+      : apiFetch('/api/portfolio/nav-history');
     const [navResp, cfResp] = await Promise.all([
-      apiFetch('/api/portfolio/nav-history'),
+      navPromise,
       apiFetch('/api/portfolio/cashflows'),
     ]);
     const navData = navResp.ok ? await navResp.json() : [];
+    if (navData.length) pfNavHistory = navData;
     const cfData = cfResp.ok ? await cfResp.json() : [];
-    // treemap 은 이제 보유종목 탭 소관 — 여기서 호출 안 함
-    await renderNavChart(navData);
-    await renderValueChart(navData);
     renderNavReturns(navData);
     renderCashflows(cfData, navData);
+    // The two charts share the same lazy-loaded chart library. Rendering
+    // them together avoids paying the layout wait twice in sequence.
+    await Promise.all([
+      renderNavChart(navData),
+      renderValueChart(navData),
+    ]);
   } catch (e) { console.warn(e); }
 }
 
