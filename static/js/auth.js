@@ -343,6 +343,9 @@ function renderAuthState() {
     document.body.classList.remove('mobile-auth');
     mobileAuth.style.display = 'none';
   }
+  if (typeof _setFilingReviewAdminAction === 'function') {
+    _setFilingReviewAdminAction(activeStockCode || '', {});
+  }
 }
 
 async function logout() {

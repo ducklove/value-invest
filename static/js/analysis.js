@@ -1148,6 +1148,41 @@ async function dropRecentItem(fromIndex, toIndex) {
 
 // DART filing AI review
 let _filingReviewLoadId = 0;
+let _filingReviewStockCode = '';
+let _filingReviewActionBusy = false;
+let _filingReviewButtonState = { status: '', canGenerate: false };
+
+function _isAdminUser() {
+  return !!(typeof currentUser !== 'undefined' && currentUser && currentUser.is_admin);
+}
+
+function _setFilingReviewAdminAction(stockCode, state = {}) {
+  const btn = document.getElementById('filingReviewGenerateBtn');
+  if (!btn) return;
+  _filingReviewStockCode = stockCode || _filingReviewStockCode || activeStockCode || '';
+  _filingReviewButtonState = {
+    status: state.status || _filingReviewButtonState.status || '',
+    canGenerate: state.canGenerate !== undefined ? !!state.canGenerate : !!_filingReviewButtonState.canGenerate,
+  };
+
+  if (!_isAdminUser() || !_filingReviewStockCode) {
+    btn.style.display = 'none';
+    btn.onclick = null;
+    return;
+  }
+
+  const status = _filingReviewButtonState.status;
+  const canGenerate = _filingReviewButtonState.canGenerate && status !== 'loading';
+  btn.style.display = 'inline-flex';
+  btn.disabled = _filingReviewActionBusy || !canGenerate;
+  btn.textContent = _filingReviewActionBusy
+    ? 'AI 리뷰 생성 중...'
+    : (status === 'ready' ? 'AI 리뷰 재생성' : 'AI 리뷰 생성');
+  btn.title = canGenerate
+    ? '관리자 권한으로 최신 DART 정기보고서 AI 리뷰를 생성합니다.'
+    : '생성 가능한 DART 정기보고서가 확인되면 활성화됩니다.';
+  btn.onclick = () => generateFilingReview(_filingReviewStockCode, { force: status === 'ready' });
+}
 
 function _filingReviewToneClass(tone) {
   const value = String(tone || 'neutral').toLowerCase();
@@ -1208,6 +1243,7 @@ function renderFilingReview(review, { cached = false } = {}) {
   if (!section || !status || !body) return;
 
   section.style.display = 'block';
+  _setFilingReviewAdminAction(review.stock_code || _filingReviewStockCode, { status: 'ready', canGenerate: true });
   const title = review.report_name || '최근 정기보고서';
   const date = review.report_date || '';
   if (meta) meta.textContent = `${title}${date ? ` · ${date}` : ''}${cached ? ' · 캐시' : ''}`;
@@ -1236,6 +1272,10 @@ function renderFilingReviewMissing(data) {
   if (!section || !status || !body) return;
 
   section.style.display = 'block';
+  _setFilingReviewAdminAction(data.stock_code || _filingReviewStockCode, {
+    status: data.status || 'missing',
+    canGenerate: data.can_generate !== false && data.status !== 'no_report',
+  });
   const report = data.latest_report || {};
   if (meta) meta.textContent = report.report_name ? `${report.report_name}${report.report_date ? ` · ${report.report_date}` : ''}` : '';
   if (source) {
@@ -1263,6 +1303,8 @@ async function loadFilingReview(stockCode) {
   const loadId = ++_filingReviewLoadId;
   if (!section || !status) return;
 
+  _filingReviewStockCode = stockCode;
+  _setFilingReviewAdminAction(stockCode, { status: 'loading', canGenerate: false });
   section.style.display = 'block';
   status.textContent = '최근 DART 공시를 확인하는 중...';
   if (body) body.innerHTML = '';
@@ -1279,6 +1321,7 @@ async function loadFilingReview(stockCode) {
     if (loadId !== _filingReviewLoadId) return;
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    if (loadId !== _filingReviewLoadId) return;
     if (data.status === 'ready' && data.review) {
       renderFilingReview(data.review, { cached: true });
     } else {
@@ -1287,6 +1330,45 @@ async function loadFilingReview(stockCode) {
   } catch (err) {
     if (loadId !== _filingReviewLoadId) return;
     status.textContent = 'DART 리뷰 상태를 불러오지 못했습니다: ' + (err.message || err);
+    _setFilingReviewAdminAction(stockCode, { status: 'error', canGenerate: true });
+  }
+}
+
+async function generateFilingReview(stockCode, { force = true } = {}) {
+  if (!_isAdminUser() || _filingReviewActionBusy) return;
+  const code = stockCode || _filingReviewStockCode || activeStockCode;
+  if (!code) return;
+
+  const status = document.getElementById('filingReviewStatus');
+  _filingReviewActionBusy = true;
+  _setFilingReviewAdminAction(code, _filingReviewButtonState);
+  if (status) {
+    status.textContent = force
+      ? 'DART AI 리뷰를 재생성하는 중입니다. 원문 수집과 LLM 호출 때문에 시간이 걸릴 수 있습니다...'
+      : 'DART AI 리뷰를 생성하는 중입니다. 원문 수집과 LLM 호출 때문에 시간이 걸릴 수 있습니다...';
+  }
+
+  try {
+    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(code)}/filing-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    if (data.status === 'ready' && data.review) {
+      renderFilingReview(data.review, { cached: !data.generated });
+      showToast(data.generated ? '공시 AI 리뷰를 생성했습니다.' : '캐시된 공시 AI 리뷰를 불러왔습니다.', 'success');
+    } else {
+      renderFilingReviewMissing(data);
+      showToast(data.message || '공시 AI 리뷰 상태를 확인했습니다.');
+    }
+  } catch (err) {
+    if (status) status.textContent = 'DART AI 리뷰 생성에 실패했습니다: ' + (err.message || err);
+    showToast(err.message || 'DART AI 리뷰 생성에 실패했습니다.');
+  } finally {
+    _filingReviewActionBusy = false;
+    _setFilingReviewAdminAction(code, _filingReviewButtonState);
   }
 }
 

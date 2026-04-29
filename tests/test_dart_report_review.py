@@ -4,10 +4,14 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+from fastapi import HTTPException
 
 import cache
 import dart_report_review
+from routes import dart_review as dart_review_route
 
 
 class DartReportReviewHelperTests(unittest.TestCase):
@@ -132,6 +136,44 @@ class DartReportReviewPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["generated"], 2)
         self.assertEqual(stats["skipped"], 1)
         self.assertEqual(stats["skipped_by_reason"], {"target_limit_reached": 1})
+
+
+class DartReportReviewRouteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_manual_generation_requires_admin(self):
+        request = SimpleNamespace(headers={"content-type": "application/json"})
+        with patch.object(
+            dart_review_route,
+            "get_current_user",
+            AsyncMock(return_value={"google_sub": "u1", "is_admin": False}),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await dart_review_route.create_filing_review("005930", request, {"force": True})
+
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    async def test_admin_manual_generation_calls_generator(self):
+        request = SimpleNamespace(headers={"content-type": "application/json"})
+        generated = {
+            "stock_code": "005930",
+            "rcept_no": "20260401000001",
+            "report_name": "분기보고서",
+            "review": {"summary_md": "요약", "cards": []},
+            "cached": False,
+        }
+        with (
+            patch.object(
+                dart_review_route,
+                "get_current_user",
+                AsyncMock(return_value={"google_sub": "admin-sub", "is_admin": True}),
+            ),
+            patch.object(dart_review_route.dart_report_review, "generate_review", AsyncMock(return_value=generated)) as gen,
+        ):
+            result = await dart_review_route.create_filing_review("005930", request, {"force": True})
+
+        gen.assert_awaited_once_with("005930", google_sub="admin-sub", force=True)
+        self.assertEqual(result["status"], "ready")
+        self.assertTrue(result["generated"])
+        self.assertEqual(result["review"]["rcept_no"], "20260401000001")
 
 
 if __name__ == "__main__":
