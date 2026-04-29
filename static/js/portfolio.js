@@ -3314,7 +3314,13 @@ function _getSelectedBenchmarks() {
   return Array.from(document.querySelectorAll('.pf-bench-chip input[value]:checked')).map(el => el.value);
 }
 
+function _isMobileChartMode() {
+  return (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 900px)')?.matches)
+    || (typeof USE_UPLOT !== 'undefined' && USE_UPLOT);
+}
+
 async function onBenchToggle() {
+  if (_isMobileChartMode()) return;
   const codes = _getSelectedBenchmarks();
   if (!_navChartData.length) return;
   // Fetch any uncached benchmarks
@@ -3452,9 +3458,9 @@ async function renderNavChart(data) {
   const yoyPct = last365.length > 1
     ? ((navValues[navValues.length - 1] / navValues[navValues.length - last365.length]) - 1) * 100 : 0;
   const navColor = returnToColor(yoyPct);
+  const mobileChartMode = _isMobileChartMode();
 
   if (typeof USE_UPLOT !== 'undefined' && USE_UPLOT) {
-    const navYZero = document.getElementById('pfNavYZero')?.checked;
     const mobileValues = navValues.map(v => Number.isFinite(Number(v)) ? Number(v) : null);
 
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -3463,7 +3469,7 @@ async function renderNavChart(data) {
       labels,
       values: mobileValues,
       color: navColor,
-      yMin: navYZero ? 0 : undefined,
+      yMin: undefined,
       yFormatter: v => Number(v).toFixed(2),
       dataZoom: false,
     });
@@ -3483,7 +3489,7 @@ async function renderNavChart(data) {
   }
 
   // Precompute benchmark ratio maps (close / first_close for each date)
-  const benchCodes = _getSelectedBenchmarks();
+  const benchCodes = mobileChartMode ? [] : _getSelectedBenchmarks();
   _benchRatios = {};
   for (const code of benchCodes) {
     const raw = _benchCache[code] || [];
@@ -3531,7 +3537,7 @@ async function renderNavChart(data) {
   const legendData = ['NAV', ...benchCodes.filter(c => _benchRatios[c]).map(c => _BENCH_LABELS[c] || c)];
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
-  const yZero = document.getElementById('pfNavYZero')?.checked;
+  const yZero = mobileChartMode ? false : document.getElementById('pfNavYZero')?.checked;
 
   // 모바일: 탭 전환 직후 container height 가 layout 확정 전이라 echarts
   // 가 0-크기로 init 되어 차트 안 보임. rAF 두 번으로 layout 확실히
@@ -3549,8 +3555,8 @@ async function renderNavChart(data) {
       textStyle: { color: textColor, fontSize: 11 },
       itemWidth: 18, itemHeight: 2,
     } : undefined,
-    grid: { left: 55, right: 12, top: hasBench ? 28 : 10, bottom: 56 },
-    dataZoom: [
+    grid: { left: 55, right: 12, top: hasBench ? 28 : 10, bottom: mobileChartMode ? 24 : 56 },
+    dataZoom: mobileChartMode ? [] : [
       { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(navColor, 0.12),
         handleStyle: { color: navColor }, textStyle: { color: textColor, fontSize: 10 },
         labelFormatter: (_, val) => labels[Math.round(val)] || '' },
@@ -3671,6 +3677,7 @@ async function renderNavChart(data) {
 }
 
 function onNavYZeroToggle() {
+  if (_isMobileChartMode()) return;
   if (_navChartInstance) {
     const yZero = document.getElementById('pfNavYZero')?.checked;
     if (typeof _navChartInstance.setOption !== 'function') {
@@ -3683,6 +3690,7 @@ function onNavYZeroToggle() {
 }
 
 function onValueYZeroToggle() {
+  if (_isMobileChartMode()) return;
   if (_valueChartInstance) {
     const yZero = document.getElementById('pfValueYZero')?.checked;
     if (typeof _valueChartInstance.setOption !== 'function') {
@@ -3695,6 +3703,7 @@ function onValueYZeroToggle() {
 }
 
 function _navZoomToDays(days) {
+  if (_isMobileChartMode()) return;
   if (!_navChartInstance || !_navChartData.length || typeof _navChartInstance.dispatchAction !== 'function') return;
   const total = _navChartData.length;
   const startPct = Math.max(0, (1 - days / total) * 100);
@@ -3702,6 +3711,7 @@ function _navZoomToDays(days) {
 }
 
 function _valueZoomToDays(days) {
+  if (_isMobileChartMode()) return;
   if (!_valueChartInstance || !_valueChartData.length || typeof _valueChartInstance.dispatchAction !== 'function') return;
   const total = _valueChartData.length;
   const startPct = Math.max(0, (1 - days / total) * 100);
@@ -3748,15 +3758,16 @@ async function renderValueChart(data) {
   const div = pfFxDivisor();
   const unit = pfFxUnit();
   const sym = pfFxSymbol();
+  const mobileChartMode = _isMobileChartMode();
 
-  const valYZero = document.getElementById('pfValueYZero')?.checked;
+  const valYZero = mobileChartMode ? false : document.getElementById('pfValueYZero')?.checked;
   _valueChartInstance = createLineChart(container, {
     labels: data.map(d => d.date),
     values: fxValues.map(v => Math.round(v)),
     color: valColor,
     yMin: valYZero ? 0 : undefined,
     yFormatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit,
-    dataZoom: true,
+    dataZoom: !mobileChartMode,
   });
   _valueChartSeriesForAxis = [fxValues.map(v => Math.round(v))];
   const fullWindow = _chartZoomWindow(data.length, 0, 100);
@@ -3812,9 +3823,10 @@ async function renderValueChart(data) {
       // the 평가금액 chart dataZoom moves.
       { label: 'CAGR', val: acctReturn !== null ? fmtPct(acctReturn) : '-', cls: returnClass(acctReturn), role: 'cagr' },
     ];
-    statsEl.innerHTML = items.map(p => {
+    const displayItems = mobileChartMode ? items.filter(p => !p.days) : items;
+    statsEl.innerHTML = displayItems.map(p => {
       const role = p.role ? ` data-role="${p.role}"` : '';
-      const zoomable = p.days ? ` js-pf-value-zoom" data-zoom-days="${p.days}" style="cursor:pointer;` : '';
+      const zoomable = p.days && !mobileChartMode ? ` js-pf-value-zoom" data-zoom-days="${p.days}" style="cursor:pointer;` : '';
       return `<div class="pf-nav-ret-card${zoomable}"${role}><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
     }).join('');
   }
@@ -3879,6 +3891,7 @@ function _updateValueCagrCard(data, fxValues, startIdx, endIdx) {
 function renderNavReturns(data) {
   const el = document.getElementById('pfNavReturns');
   if (!el || !data.length) { if (el) el.innerHTML = ''; return; }
+  const mobileChartMode = _isMobileChartMode();
 
   const _nav = d => {
     if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
@@ -3931,8 +3944,9 @@ function renderNavReturns(data) {
     // window instead of the full-history snapshot.
     { label: 'CAGR', val: annualizedPct !== null ? fmtPct(annualizedPct) : '-', cls: returnClass(annualizedPct), role: 'cagr' },
   ];
-  el.innerHTML = items.map(p => {
-    const zoomable = p.days ? ` js-pf-nav-zoom" data-zoom-days="${p.days}" style="cursor:pointer;` : '';
+  const displayItems = mobileChartMode ? items.filter(p => !p.days) : items;
+  el.innerHTML = displayItems.map(p => {
+    const zoomable = p.days && !mobileChartMode ? ` js-pf-nav-zoom" data-zoom-days="${p.days}" style="cursor:pointer;` : '';
     const role = p.role ? ` data-role="${p.role}"` : '';
     return `<div class="pf-nav-ret-card${zoomable}"${role}><div class="pf-nav-ret-label">${p.label}</div><div class="pf-nav-ret-value ${p.cls || ''}">${p.val}</div></div>`;
   }).join('');

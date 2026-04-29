@@ -1861,6 +1861,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-nav-chart-container { height: 240px; }
   .pf-nav-chart-container.pf-nav-tall { height: 320px; }
   .pf-nav-chart-container.pf-nav-short { height: 240px; }
+  .pf-nav-chart-wrap .pf-bench-chip,
+  #pfNavReturns .pf-nav-ret-card[data-zoom-days],
+  #pfValueStats .pf-nav-ret-card[data-zoom-days] {
+    display: none !important;
+  }
 }
 
 /* Valuation period buttons — pill tabs */
