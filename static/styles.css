@@ -1055,13 +1055,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-nav-chart-wrap { margin-bottom: 24px; }
 /* NAV/평가금액 차트 컨테이너 — 반응형 높이. 수정자 클래스로 구분:
      .pf-nav-tall  → NAV 기준가 (PC 600px, 폰 320px)
-     .pf-nav-short → 평가금액 (PC 300px, 폰 240px)
+     .pf-nav-short → 평가금액 (PC 600px, 폰 320px)
    수정자 없으면 기본 300px (legacy fallback). 과거에 #pfNavChart 에
    'min-height:600px !important' 가 걸려 있어서 폰 화면을 가득 채우고
    media query override 도 불가능했던 문제를 여기서 해결. */
 .pf-nav-chart-container { position: relative; height: 300px; }
 .pf-nav-chart-container.pf-nav-tall { height: 600px; }
-.pf-nav-chart-container.pf-nav-short { height: 300px; }
+.pf-nav-chart-container.pf-nav-short { height: 600px; }
 .pf-nav-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .pf-nav-header h3 { margin: 0; font-size: 16px; }
 .pf-snapshot-btn {
@@ -1860,7 +1860,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
      채워 스크롤 낭비 + init 타이밍 문제로 NAV 가 안 그려지는 증상. */
   .pf-nav-chart-container { height: 240px; }
   .pf-nav-chart-container.pf-nav-tall { height: 320px; }
-  .pf-nav-chart-container.pf-nav-short { height: 240px; }
+  .pf-nav-chart-container.pf-nav-short { height: 320px; }
   .pf-nav-chart-wrap .pf-bench-chip,
   #pfNavReturns .pf-nav-ret-card[data-zoom-days],
   #pfValueStats .pf-nav-ret-card[data-zoom-days] {
