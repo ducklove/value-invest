@@ -1762,6 +1762,55 @@ function _runOrShowPortfolioLinks(stockCode, e) {
   return true;
 }
 
+function _positionPortfolioPopupMenu(menu, e) {
+  const margin = 8;
+  const anchor = e && e.target && e.target.closest
+    ? (e.target.closest('.js-pf-analyze, .pf-stock-link, button, a') || e.target)
+    : null;
+  const rect = anchor && anchor.getBoundingClientRect
+    ? anchor.getBoundingClientRect()
+    : { left: 100, right: 100, top: 100, bottom: 100 };
+
+  menu.style.visibility = 'hidden';
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+  menu.style.maxHeight = '';
+  menu.style.overflowY = '';
+
+  const viewportW = window.innerWidth || document.documentElement.clientWidth || 1024;
+  const viewportH = window.innerHeight || document.documentElement.clientHeight || 768;
+  const menuW = menu.offsetWidth || 240;
+  const menuH = menu.scrollHeight || menu.offsetHeight || 120;
+  const below = Math.max(0, viewportH - rect.bottom - margin);
+  const above = Math.max(0, rect.top - margin);
+  const openAbove = menuH > below && above > below;
+  const maxViewportMenuH = Math.max(64, viewportH - margin * 2);
+  const available = Math.min(maxViewportMenuH, Math.max(96, (openAbove ? above : below) - 4));
+  const finalH = Math.min(menuH, available);
+
+  if (menuH > available) {
+    menu.style.maxHeight = `${available}px`;
+    menu.style.overflowY = 'auto';
+  }
+
+  let left = rect.left;
+  if (left + menuW > viewportW - margin) {
+    left = Math.max(margin, viewportW - menuW - margin);
+  }
+  left = Math.max(margin, left);
+
+  let top = openAbove ? rect.top - finalH - 4 : rect.bottom + 4;
+  if (top + finalH > viewportH - margin) {
+    top = Math.max(margin, viewportH - finalH - margin);
+  }
+  top = Math.max(margin, top);
+
+  menu.classList.toggle('open-above', openAbove);
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.visibility = '';
+}
+
 function _showPortfolioLinkMenu(actions, e) {
   document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
   const menu = document.createElement('div');
@@ -1773,9 +1822,7 @@ function _showPortfolioLinkMenu(actions, e) {
     </div>
   `).join('');
   document.body.appendChild(menu);
-  const rect = e && e.target ? e.target.getBoundingClientRect() : { left: 100, bottom: 100 };
-  menu.style.left = rect.left + 'px';
-  menu.style.top = (rect.bottom + 4) + 'px';
+  _positionPortfolioPopupMenu(menu, e);
   menu.querySelectorAll('[data-action-idx]').forEach(el => {
     el.addEventListener('click', () => {
       const action = actions[Number(el.dataset.actionIdx)];
@@ -2082,10 +2129,7 @@ function _showPrefMenu(prefCode, commonCode, e) {
     <div class="pf-pref-item" data-action="spread">우선주 괴리율 대시보드</div>
   `;
   document.body.appendChild(menu);
-  // Position near click or element
-  const rect = e && e.target ? e.target.getBoundingClientRect() : { left: 100, bottom: 100 };
-  menu.style.left = rect.left + 'px';
-  menu.style.top = (rect.bottom + 4) + 'px';
+  _positionPortfolioPopupMenu(menu, e);
 
   menu.querySelector('[data-action="common"]').addEventListener('click', () => {
     menu.remove();
@@ -2113,9 +2157,7 @@ function _showHoldingMenu(stockCode, e) {
     <div class="pf-pref-item" data-action="holding">자회사 비율 추이</div>
   `;
   document.body.appendChild(menu);
-  const rect = e && e.target ? e.target.getBoundingClientRect() : { left: 100, bottom: 100 };
-  menu.style.left = rect.left + 'px';
-  menu.style.top = (rect.bottom + 4) + 'px';
+  _positionPortfolioPopupMenu(menu, e);
   menu.querySelector('[data-action="analysis"]').addEventListener('click', () => {
     menu.remove();
     switchView('analysis');

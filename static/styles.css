@@ -989,6 +989,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   position: fixed; z-index: 1001; background: var(--surface);
   border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2);
   min-width: 200px; overflow: hidden;
+  max-height: calc(100vh - 16px);
+  overscroll-behavior: contain;
 }
 .pf-link-menu { min-width: 240px; }
 .pf-pref-item {
