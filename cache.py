@@ -143,6 +143,17 @@ async def init_db():
             FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS portfolio_tags (
+            google_sub TEXT NOT NULL,
+            stock_code TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (google_sub, stock_code, tag),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE,
+            FOREIGN KEY (google_sub, stock_code) REFERENCES user_portfolio(google_sub, stock_code) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS portfolio_snapshots (
             google_sub TEXT NOT NULL,
             date TEXT NOT NULL,
@@ -1412,7 +1423,94 @@ async def get_portfolio(google_sub: str) -> list[dict]:
         """,
         (google_sub,),
     )
+    items = [dict(row) for row in await cursor.fetchall()]
+    if not items:
+        return []
+    tag_rows = await get_portfolio_tags_for_user(google_sub)
+    tags_by_code: dict[str, list[str]] = {}
+    for row in tag_rows:
+        tags_by_code.setdefault(row["stock_code"], []).append(row["tag"])
+    for item in items:
+        item["tags"] = tags_by_code.get(item["stock_code"], [])
+    return items
+
+
+async def get_portfolio_tags_for_user(google_sub: str) -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT stock_code, tag, sort_order
+        FROM portfolio_tags
+        WHERE google_sub = ?
+        ORDER BY stock_code ASC, sort_order ASC, tag ASC
+        """,
+        (google_sub,),
+    )
     return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_portfolio_tags(google_sub: str, stock_code: str) -> list[str]:
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT tag
+        FROM portfolio_tags
+        WHERE google_sub = ? AND stock_code = ?
+        ORDER BY sort_order ASC, tag ASC
+        """,
+        (google_sub, stock_code),
+    )
+    return [row["tag"] for row in await cursor.fetchall()]
+
+
+async def get_portfolio_tag_suggestions(google_sub: str, *, limit: int = 30) -> list[str]:
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT tag, COUNT(*) AS usage_count, MIN(sort_order) AS first_order
+        FROM portfolio_tags
+        WHERE google_sub = ?
+        GROUP BY tag
+        ORDER BY usage_count DESC, first_order ASC, tag ASC
+        LIMIT ?
+        """,
+        (google_sub, int(limit)),
+    )
+    return [row["tag"] for row in await cursor.fetchall()]
+
+
+async def set_portfolio_tags(google_sub: str, stock_code: str, tags: list[str]) -> list[str]:
+    db = await get_db()
+    now = datetime.now().isoformat()
+    await db.execute(
+        "DELETE FROM portfolio_tags WHERE google_sub = ? AND stock_code = ?",
+        (google_sub, stock_code),
+    )
+    clean_tags: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in tags:
+        tag = " ".join(str(raw_tag or "").strip().lstrip("#").split())[:30]
+        if not tag:
+            continue
+        key = tag.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        clean_tags.append(tag)
+        if len(clean_tags) >= 12:
+            break
+    await db.executemany(
+        """
+        INSERT INTO portfolio_tags (google_sub, stock_code, tag, sort_order, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [
+            (google_sub, stock_code, tag, idx, now)
+            for idx, tag in enumerate(clean_tags)
+        ],
+    )
+    await db.commit()
+    return clean_tags
 
 
 # Korean preferred-stock codes end with a suffix other than '0'. The
@@ -1883,6 +1981,7 @@ async def save_portfolio_item(
 
 async def clear_portfolio(google_sub: str):
     db = await get_db()
+    await db.execute("DELETE FROM portfolio_tags WHERE google_sub = ?", (google_sub,))
     await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
     await db.commit()
 
@@ -1895,6 +1994,7 @@ async def replace_portfolio(google_sub: str, items: list[dict]):
         await db.execute("BEGIN IMMEDIATE")
         try:
             now = datetime.now().isoformat()
+            await db.execute("DELETE FROM portfolio_tags WHERE google_sub = ?", (google_sub,))
             await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
             for i, it in enumerate(items):
                 group_name = await _resolve_default_group_name(db, google_sub, it["stock_code"])
@@ -1911,6 +2011,10 @@ async def replace_portfolio(google_sub: str, items: list[dict]):
 
 async def delete_portfolio_item(google_sub: str, stock_code: str):
     db = await get_db()
+    await db.execute(
+        "DELETE FROM portfolio_tags WHERE google_sub = ? AND stock_code = ?",
+        (google_sub, stock_code),
+    )
     await db.execute(
         "DELETE FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
         (google_sub, stock_code),

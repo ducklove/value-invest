@@ -1319,6 +1319,32 @@ def _gold_gap_for_asset(code: str) -> dict | None:
     }
 
 
+def _normalize_portfolio_tags(raw_tags) -> list[str]:
+    if raw_tags is None:
+        return []
+    if isinstance(raw_tags, str):
+        parts = re.split(r"[,#\n]+", raw_tags)
+    elif isinstance(raw_tags, list):
+        parts = raw_tags
+    else:
+        raise HTTPException(status_code=400, detail="tags는 문자열 또는 배열이어야 합니다.")
+
+    tags: list[str] = []
+    seen: set[str] = set()
+    for raw in parts:
+        tag = re.sub(r"\s+", " ", str(raw or "").strip().lstrip("#"))[:30]
+        if not tag:
+            continue
+        key = tag.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        tags.append(tag)
+        if len(tags) >= 12:
+            break
+    return tags
+
+
 @router.get("/api/portfolio/asset-insight/{stock_code}")
 async def asset_insight(stock_code: str, request: Request):
     user = _require_user(await get_current_user(request))
@@ -1357,6 +1383,8 @@ async def asset_insight(stock_code: str, request: Request):
     relative = asset_insights.relative_returns(metrics.get("returns") or {}, benchmark_returns)
     position = asset_insights.calculate_position(item, quote)
     gold_gap = _gold_gap_for_asset(stock_code)
+    tags_task = asyncio.create_task(cache.get_portfolio_tags(user["google_sub"], stock_code))
+    tag_suggestions_task = asyncio.create_task(cache.get_portfolio_tag_suggestions(user["google_sub"]))
 
     benchmark = {
         "code": effective_benchmark,
@@ -1373,6 +1401,8 @@ async def asset_insight(stock_code: str, request: Request):
         "benchmark": benchmark,
         "macro": _format_macro(indicators),
         "goldGap": gold_gap,
+        "tags": await tags_task,
+        "tagSuggestions": await tag_suggestions_task,
         "history": (history_payload.get("rows") or [])[-80:],
         "dataQuality": {
             "historyCurrency": history_payload.get("currency"),
@@ -1380,6 +1410,23 @@ async def asset_insight(stock_code: str, request: Request):
             "benchmarkPoints": benchmark_metrics.get("historyPoints", 0),
         },
         "signals": asset_insights.build_signals(profile, position, metrics, benchmark, gold_gap),
+    }
+
+
+@router.put("/api/portfolio/{stock_code}/tags")
+async def update_portfolio_tags(stock_code: str, request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    stock_code = stock_code.strip()
+    item = await cache.get_portfolio_item(user["google_sub"], stock_code)
+    if not item:
+        raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
+    tags = _normalize_portfolio_tags((payload or {}).get("tags"))
+    saved = await cache.set_portfolio_tags(user["google_sub"], stock_code, tags)
+    return {
+        "ok": True,
+        "stock_code": stock_code,
+        "tags": saved,
+        "tagSuggestions": await cache.get_portfolio_tag_suggestions(user["google_sub"]),
     }
 
 

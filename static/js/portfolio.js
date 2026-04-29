@@ -269,6 +269,19 @@ function pfGetGroup(item) {
   return item.group_name || '기타';
 }
 
+function pfGetTags(item) {
+  return Array.isArray(item?.tags) ? item.tags : [];
+}
+
+function _renderPortfolioRowTags(tags) {
+  const safeTags = Array.isArray(tags) ? tags.filter(Boolean).slice(0, 3) : [];
+  if (!safeTags.length) return '';
+  const more = Array.isArray(tags) && tags.length > safeTags.length
+    ? `<span class="pf-stock-tag more">+${tags.length - safeTags.length}</span>`
+    : '';
+  return `<div class="pf-stock-tags">${safeTags.map(tag => `<span class="pf-stock-tag">${escapeHtml(tag)}</span>`).join('')}${more}</div>`;
+}
+
 function pfToggleGroupFilter(groupName) {
   if (pfGroupFilter === null) {
     pfGroupFilter = new Set([groupName]);
@@ -823,9 +836,10 @@ function renderPortfolio() {
 
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     const safeCode = escapeHtml(r.stock_code);
+    const tagHtml = _renderPortfolioRowTags(pfGetTags(r));
     if (isEditing) {
       return `<tr data-code="${safeCode}">
-        <td><a href="#" class="pf-stock-link js-pf-analyze"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</td>
+        <td class="pf-stock-cell js-pf-analyze"><a href="#" class="pf-stock-link"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
         <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
@@ -848,7 +862,7 @@ function renderPortfolio() {
       </tr>`;
     }
     return `<tr draggable="true" data-code="${safeCode}">
-      <td><a href="#" class="pf-stock-link js-pf-analyze"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</td>
+      <td class="pf-stock-cell js-pf-analyze"><a href="#" class="pf-stock-link"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
@@ -1705,7 +1719,9 @@ function _naverFinanceAction(stockCode, label = '네이버 파이낸스') {
   };
 }
 
-function _portfolioLinkActions(stockCode) {
+function _portfolioLinkActions(stockCode, options = {}) {
+  const includeInsight = options.includeInsight !== false;
+  const includeGoldGap = options.includeGoldGap !== false;
   const actions = [];
   if (_isKoreanAnalysisCode(stockCode)) {
     if (_isPreferredStock(stockCode)) {
@@ -1731,7 +1747,7 @@ function _portfolioLinkActions(stockCode) {
       }
     }
   }
-  if (_hasAssetInsight(stockCode)) {
+  if (includeInsight && _hasAssetInsight(stockCode)) {
     actions.push({
       id: 'insight',
       label: '투자 인사이트',
@@ -1740,7 +1756,7 @@ function _portfolioLinkActions(stockCode) {
     });
   }
   const goldGapInfo = _goldGapInfoForCode(stockCode);
-  if (goldGapInfo.asset) {
+  if (includeGoldGap && goldGapInfo.asset) {
     actions.push({
       id: 'gold-gap',
       label: goldGapInfo.label || 'Gap',
@@ -1838,11 +1854,15 @@ function _showPortfolioLinkMenu(actions, e) {
 }
 
 let pfAssetInsightCode = null;
+let pfAssetInsightData = null;
+let pfAssetInsightActions = [];
 
 function pfCloseAssetInsight() {
   const modal = document.getElementById('pfAssetInsightModal');
   if (modal) modal.style.display = 'none';
   pfAssetInsightCode = null;
+  pfAssetInsightData = null;
+  pfAssetInsightActions = [];
 }
 
 async function pfOpenAssetInsight(stockCode) {
@@ -1851,6 +1871,8 @@ async function pfOpenAssetInsight(stockCode) {
   const body = document.getElementById('pfAssetInsightBody');
   if (!modal || !body || !stockCode) return;
   pfAssetInsightCode = stockCode;
+  pfAssetInsightData = null;
+  pfAssetInsightActions = [];
   modal.style.display = 'flex';
   if (title) title.textContent = '투자 인사이트';
   body.innerHTML = '<div class="pf-insight-loading">자산 데이터를 불러오는 중입니다...</div>';
@@ -1869,6 +1891,7 @@ async function pfOpenAssetInsight(stockCode) {
     }
     const data = await resp.json();
     if (pfAssetInsightCode !== stockCode) return;
+    pfAssetInsightData = data;
     const profile = data.profile || {};
     if (title) title.textContent = `${profile.name || stockCode} 투자 인사이트`;
     body.innerHTML = _renderAssetInsight(data);
@@ -1932,6 +1955,148 @@ function _renderInsightCard(label, value, sub = '', cls = '') {
   </div>`;
 }
 
+function _normalizeInsightTags(tags) {
+  const raw = Array.isArray(tags)
+    ? tags
+    : (typeof tags === 'string' ? tags.split(/[,#\n]+/) : []);
+  const normalized = [];
+  const seen = new Set();
+  for (const value of raw) {
+    const tag = String(value ?? '')
+      .trim()
+      .replace(/^#+/, '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 30);
+    if (!tag) continue;
+    const key = tag.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(tag);
+    if (normalized.length >= 12) break;
+  }
+  return normalized;
+}
+
+function _insightTagListId(code) {
+  const safe = String(code || 'asset').replace(/[^A-Za-z0-9_-]/g, '_');
+  return `pfInsightTagList_${safe}`;
+}
+
+function _renderInsightActionLinks(code, goldGap) {
+  if (!code) {
+    pfAssetInsightActions = [];
+    return '';
+  }
+  pfAssetInsightActions = _portfolioLinkActions(code, {
+    includeInsight: false,
+    includeGoldGap: !goldGap,
+  });
+  if (!pfAssetInsightActions.length) return '';
+  return `<div class="pf-insight-link-actions" aria-label="연결 메뉴">
+    ${pfAssetInsightActions.map((action, idx) => `
+      <button type="button" class="pf-insight-link-action js-pf-insight-action" data-action-idx="${idx}">
+        <strong>${escapeHtml(action.label)}</strong>
+        <span>${escapeHtml(action.hint || '')}</span>
+      </button>
+    `).join('')}
+  </div>`;
+}
+
+function _renderInsightTags(code, tags, suggestions) {
+  const normalizedTags = _normalizeInsightTags(tags);
+  const selectedKeys = new Set(normalizedTags.map(tag => tag.toLocaleLowerCase()));
+  const suggestedTags = _normalizeInsightTags(suggestions)
+    .filter(tag => !selectedKeys.has(tag.toLocaleLowerCase()))
+    .slice(0, 12);
+  const safeCode = escapeHtml(code);
+  const listId = _insightTagListId(code);
+  const tagChips = normalizedTags.length
+    ? normalizedTags.map(tag => `
+      <button type="button" class="pf-insight-tag-chip js-pf-tag-remove" data-code="${safeCode}" data-tag="${escapeHtml(tag)}" title="태그 제거">
+        <span>#${escapeHtml(tag)}</span>
+        <b aria-hidden="true">×</b>
+      </button>
+    `).join('')
+    : '<span class="pf-insight-tag-empty">아직 태그가 없습니다. 투자 아이디어를 짧게 붙여두세요.</span>';
+  const suggestionButtons = suggestedTags.length
+    ? `<div class="pf-insight-tag-suggestions">
+        ${suggestedTags.map(tag => `<button type="button" class="pf-insight-tag-suggestion js-pf-tag-suggest" data-code="${safeCode}" data-tag="${escapeHtml(tag)}">#${escapeHtml(tag)}</button>`).join('')}
+      </div>`
+    : '';
+  const dataListOptions = suggestedTags
+    .map(tag => `<option value="${escapeHtml(tag)}"></option>`)
+    .join('');
+
+  return `<section class="pf-insight-tag-panel" data-code="${safeCode}">
+    <div class="pf-insight-tag-head">
+      <div>
+        <span class="pf-insight-section-kicker">Investment Tags</span>
+        <strong>투자 아이디어 태그</strong>
+      </div>
+      <span>${normalizedTags.length}/12</span>
+    </div>
+    <div class="pf-insight-tag-list">${tagChips}</div>
+    <div class="pf-insight-tag-add">
+      <input id="pfInsightTagInput" class="pf-insight-tag-input" list="${escapeHtml(listId)}" type="text" maxlength="30" placeholder="예: 자산주, 턴어라운드, AI관련주">
+      <datalist id="${escapeHtml(listId)}">${dataListOptions}</datalist>
+      <button type="button" class="pf-insight-tag-add-btn js-pf-tag-add" data-code="${safeCode}">추가</button>
+    </div>
+    ${suggestionButtons}
+  </section>`;
+}
+
+function _updateAssetInsightModalBody() {
+  if (!pfAssetInsightData) return;
+  const body = document.getElementById('pfAssetInsightBody');
+  if (body) body.innerHTML = _renderAssetInsight(pfAssetInsightData);
+}
+
+async function pfSaveAssetTags(stockCode, tags) {
+  const normalizedTags = _normalizeInsightTags(tags);
+  const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}/tags`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags: normalizedTags }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || err.message || '태그 저장에 실패했습니다.');
+  }
+  const data = await resp.json();
+  const savedTags = _normalizeInsightTags(data.tags || normalizedTags);
+  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  if (item) item.tags = savedTags;
+  if (pfAssetInsightCode === stockCode && pfAssetInsightData) {
+    pfAssetInsightData = {
+      ...pfAssetInsightData,
+      tags: savedTags,
+      tagSuggestions: data.tagSuggestions || pfAssetInsightData.tagSuggestions || [],
+    };
+    _updateAssetInsightModalBody();
+  }
+  renderPortfolio();
+  showToast('태그를 저장했습니다.', 'success');
+}
+
+async function pfAddAssetTag(stockCode, rawTag) {
+  const [tag] = _normalizeInsightTags([rawTag]);
+  if (!stockCode || !tag) {
+    showToast('추가할 태그를 입력해 주세요.');
+    return;
+  }
+  const current = _normalizeInsightTags(pfAssetInsightData?.tags || []);
+  const next = _normalizeInsightTags([...current, tag]);
+  await pfSaveAssetTags(stockCode, next);
+}
+
+async function pfRemoveAssetTag(stockCode, tag) {
+  if (!stockCode || !tag) return;
+  const key = String(tag).toLocaleLowerCase();
+  const current = _normalizeInsightTags(pfAssetInsightData?.tags || []);
+  const next = current.filter(existing => existing.toLocaleLowerCase() !== key);
+  await pfSaveAssetTags(stockCode, next);
+}
+
 function _renderAssetInsight(data) {
   const profile = data.profile || {};
   const position = data.position || {};
@@ -1949,6 +2114,9 @@ function _renderAssetInsight(data) {
     (code === 'KRX_GOLD' || String(code).startsWith('CASH_') ? 'KRW' : '')
   );
   const positionCurrency = 'KRW';
+  const goldGap = data.goldGap;
+  const actionLinks = _renderInsightActionLinks(code, goldGap);
+  const tagPanel = _renderInsightTags(code, data.tags || [], data.tagSuggestions || []);
 
   const cards = [
     _renderInsightCard('현재가', _fmtInsightPrice(position.currentPrice, positionCurrency), benchmark.dayChangePct !== null && benchmark.dayChangePct !== undefined ? `벤치마크 오늘 ${_fmtInsightPct(benchmark.dayChangePct)}` : ''),
@@ -1997,7 +2165,6 @@ function _renderAssetInsight(data) {
     </div>
   `).join('') : '<div class="pf-insight-empty">연동된 시장 지표가 없습니다.</div>';
 
-  const goldGap = data.goldGap;
   const goldGapHtml = goldGap ? `
     <div class="pf-insight-gold-gap">
       <div>
@@ -2015,6 +2182,7 @@ function _renderAssetInsight(data) {
         <div class="pf-insight-kicker">${escapeHtml(code)}</div>
         <h4>${escapeHtml(profile.name || code)}</h4>
         <p>${escapeHtml(profile.assetClassLabel || '기타 자산')} 자산을 가격 추세, 벤치마크, 매크로 지표 기준으로 빠르게 점검합니다.</p>
+        ${actionLinks}
       </div>
       <div class="pf-insight-chips">
         <span>${escapeHtml(profile.assetClassLabel || '자산')}</span>
@@ -2023,6 +2191,7 @@ function _renderAssetInsight(data) {
         <span>${Number(quality.historyPoints || 0).toLocaleString()} pts</span>
       </div>
     </div>
+    ${tagPanel}
     <div class="pf-insight-grid">${cards}</div>
     <div class="pf-insight-two-col">
       <section class="pf-insight-section">
@@ -2114,9 +2283,12 @@ function _applyHoldingIntegrationConfig() {
 })();
 
 function pfGoAnalyze(stockCode, e) {
-  if (_runOrShowPortfolioLinks(stockCode, e)) {
-    return;
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
   }
+  document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
+  pfOpenAssetInsight(stockCode);
 }
 
 function _showPrefMenu(prefCode, commonCode, e) {
@@ -3830,6 +4002,22 @@ async function deleteCashflow(id) {
       } else if ((el = t.closest('.js-pf-gold-gap'))) {
         const asset = el.dataset.gapAsset || _goldGapInfoForCode(codeFromTr(el)).asset;
         if (asset) _openGoldGapDashboard(asset);
+      } else if ((el = t.closest('.js-pf-insight-action'))) {
+        e.preventDefault();
+        const action = pfAssetInsightActions[Number(el.dataset.actionIdx)];
+        if (action) action.run();
+      } else if ((el = t.closest('.js-pf-tag-add'))) {
+        e.preventDefault();
+        const panel = el.closest('.pf-insight-tag-panel');
+        const input = panel ? panel.querySelector('.pf-insight-tag-input') : null;
+        const code = el.dataset.code || panel?.dataset.code || pfAssetInsightCode;
+        pfAddAssetTag(code, input ? input.value : '').catch(err => showToast(err.message));
+      } else if ((el = t.closest('.js-pf-tag-remove'))) {
+        e.preventDefault();
+        pfRemoveAssetTag(el.dataset.code || pfAssetInsightCode, el.dataset.tag || '').catch(err => showToast(err.message));
+      } else if ((el = t.closest('.js-pf-tag-suggest'))) {
+        e.preventDefault();
+        pfAddAssetTag(el.dataset.code || pfAssetInsightCode, el.dataset.tag || '').catch(err => showToast(err.message));
       } else if ((el = t.closest('.js-pf-cf-delete'))) {
         const id = Number(el.dataset.cfId);
         if (!isNaN(id)) deleteCashflow(id);
@@ -3857,6 +4045,14 @@ async function deleteCashflow(id) {
       } else if ((el = t.closest('.js-pf-col-toggle'))) {
         pfToggleCol(el.dataset.colKey, el.checked);
       }
+    });
+    document.addEventListener('keydown', (e) => {
+      const el = e.target.closest && e.target.closest('.pf-insight-tag-input');
+      if (!el || e.key !== 'Enter') return;
+      e.preventDefault();
+      const panel = el.closest('.pf-insight-tag-panel');
+      const code = panel?.dataset.code || pfAssetInsightCode;
+      pfAddAssetTag(code, el.value).catch(err => showToast(err.message));
     });
   };
   if (document.readyState === 'loading') {

@@ -50,6 +50,28 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items[0]["stock_code"], "005930")
         self.assertEqual(items[0]["quantity"], 100)
         self.assertEqual(items[0]["avg_price"], 65000)
+        self.assertEqual(items[0]["tags"], [])
+
+    async def test_portfolio_tags_roundtrip(self):
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        saved = await cache.set_portfolio_tags(
+            "u1",
+            "005930",
+            ["자산주", "#턴어라운드", "자산주", "  AI 관련주  ", "ai 관련주"],
+        )
+        self.assertEqual(saved, ["자산주", "턴어라운드", "AI 관련주"])
+
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(items[0]["tags"], ["자산주", "턴어라운드", "AI 관련주"])
+        self.assertEqual(await cache.get_portfolio_tags("u1", "005930"), ["자산주", "턴어라운드", "AI 관련주"])
+
+    async def test_portfolio_tag_suggestions_by_usage(self):
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        await cache.set_portfolio_tags("u1", "005930", ["AI", "자산주"])
+        await cache.set_portfolio_tags("u1", "000660", ["AI", "반도체"])
+
+        self.assertEqual(await cache.get_portfolio_tag_suggestions("u1"), ["AI", "반도체", "자산주"])
 
     async def test_update_item(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
@@ -61,9 +83,11 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_item(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await cache.set_portfolio_tags("u1", "005930", ["자산주"])
         await cache.delete_portfolio_item("u1", "005930")
         items = await cache.get_portfolio("u1")
         self.assertEqual(len(items), 0)
+        self.assertEqual(await cache.get_portfolio_tags("u1", "005930"), [])
 
     async def test_get_portfolio_exposes_created_at(self):
         """UI 의 '등록일자' 컬럼이 비어있지 않도록, get_portfolio SELECT 에
