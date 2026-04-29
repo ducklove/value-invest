@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import deps
-from routes import cache_mgmt, auth, internal, portfolio
+from routes import cache_mgmt, auth, internal, portfolio, admin
 
 
 def _request(path: str = "/") -> Request:
@@ -85,6 +85,53 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.dict("os.environ", {"INTERNAL_API_TOKEN": "secret"}, clear=True):
             internal._require_loopback(request)
+
+    async def test_admin_mutation_rejects_untrusted_origin(self):
+        request = _request_with_headers(
+            "/api/admin/trigger/portfolio-snapshot",
+            headers={
+                "Host": "cantabile.tplinkdns.com:3691",
+                "Content-Type": "application/json",
+                "Origin": "https://evil.example",
+                "X-Forwarded-Proto": "https",
+            },
+            client_host="203.0.113.20",
+        )
+        with patch("routes.admin.get_current_user", new=AsyncMock(return_value={"google_sub": "admin", "is_admin": True})):
+            with self.assertRaises(HTTPException) as exc_info:
+                await admin._require_admin_mutation(request)
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+    async def test_admin_mutation_requires_json_fetch(self):
+        request = _request_with_headers(
+            "/api/admin/trigger/portfolio-snapshot",
+            headers={
+                "Host": "cantabile.tplinkdns.com:3691",
+                "Content-Type": "text/plain",
+                "Origin": "https://cantabile.tplinkdns.com:3691",
+                "X-Forwarded-Proto": "https",
+            },
+            client_host="203.0.113.20",
+        )
+        with patch("routes.admin.get_current_user", new=AsyncMock(return_value={"google_sub": "admin", "is_admin": True})):
+            with self.assertRaises(HTTPException) as exc_info:
+                await admin._require_admin_mutation(request)
+        self.assertEqual(exc_info.exception.status_code, 415)
+
+    async def test_admin_mutation_accepts_trusted_origin(self):
+        request = _request_with_headers(
+            "/api/admin/trigger/portfolio-snapshot",
+            headers={
+                "Host": "cantabile.tplinkdns.com:3691",
+                "Content-Type": "application/json",
+                "Origin": "https://cantabile.tplinkdns.com:3691",
+                "X-Forwarded-Proto": "https",
+            },
+            client_host="203.0.113.20",
+        )
+        with patch("routes.admin.get_current_user", new=AsyncMock(return_value={"google_sub": "admin", "is_admin": True})):
+            user = await admin._require_admin_mutation(request)
+        self.assertTrue(user["is_admin"])
 
     async def test_cashflow_invalid_amount_returns_400(self):
         request = _request_with_headers("/api/portfolio/cashflows")

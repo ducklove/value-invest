@@ -7,6 +7,7 @@ import os
 import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
@@ -14,7 +15,7 @@ import cache
 import ai_config
 import linked_project_admin
 import observability
-from deps import get_current_user
+from deps import TRUSTED_RETURN_ORIGINS, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -29,6 +30,87 @@ async def _require_admin(request: Request) -> dict:
     user = await get_current_user(request)
     if not user or not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    return user
+
+
+_ADMIN_MUTATION_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_LOCAL_OR_TEST_HOSTS = {"testserver", "localhost", "127.0.0.1", "::1"}
+
+
+def _normalize_origin(value: str | None) -> str:
+    """Return scheme://host[:port] for Origin/Referer comparisons."""
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value.strip())
+    except Exception:
+        return ""
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+
+def _request_origin(request: Request) -> str:
+    proto = (
+        request.headers.get("x-forwarded-proto", "")
+        or request.url.scheme
+        or "http"
+    ).split(",", 1)[0].strip()
+    host = (
+        request.headers.get("x-forwarded-host", "")
+        or request.headers.get("host", "")
+        or request.url.netloc
+    ).split(",", 1)[0].strip()
+    if not proto or not host:
+        return ""
+    return f"{proto.lower()}://{host.lower()}"
+
+
+def _trusted_admin_origins(request: Request) -> set[str]:
+    configured = {
+        _normalize_origin(origin)
+        for origin in os.getenv("ADMIN_ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    }
+    defaults = {_normalize_origin(origin) for origin in TRUSTED_RETURN_ORIGINS}
+    current = _request_origin(request)
+    if current:
+        defaults.add(current)
+    return {origin for origin in (defaults | configured) if origin}
+
+
+def _is_local_or_test_request(request: Request) -> bool:
+    host = (
+        request.headers.get("host", "")
+        or request.url.hostname
+        or ""
+    ).split(":", 1)[0].lower()
+    client_host = request.client.host if request.client else ""
+    return host in _LOCAL_OR_TEST_HOSTS or client_host in _LOCAL_OR_TEST_HOSTS
+
+
+async def _require_admin_mutation(request: Request) -> dict:
+    """Shared guard for state-changing admin APIs.
+
+    Admin sessions intentionally work across the GitHub Pages/app-server
+    flow, so relying on the session cookie alone is not enough. Mutations
+    must be JSON fetches from a trusted Origin/Referer.
+    """
+    user = await _require_admin(request)
+    if request.method.upper() not in _ADMIN_MUTATION_METHODS:
+        return user
+
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/json":
+        raise HTTPException(status_code=415, detail="관리자 변경 요청은 application/json 만 허용됩니다.")
+
+    origin = _normalize_origin(request.headers.get("origin"))
+    if not origin:
+        origin = _normalize_origin(request.headers.get("referer"))
+    if not origin and _is_local_or_test_request(request):
+        return user
+    if origin not in _trusted_admin_origins(request):
+        raise HTTPException(status_code=403, detail="허용되지 않은 관리자 요청 출처입니다.")
     return user
 
 
@@ -192,7 +274,7 @@ async def batch_status(request: Request):
     await _require_admin(request)
     jobs = []
     for t in _TIMERS:
-        info = _get_timer_status(t["name"])
+        info = await asyncio.to_thread(_get_timer_status, t["name"])
         # Augment the systemd snapshot with "did this job actually
         # produce data recently?". Without this, a weekend skip or a
         # silent-failure retry can still paint the card green when the
@@ -245,7 +327,7 @@ async def _run_snapshot_job(job_name: str, snap_date: str | None = None):
 
 @router.post("/trigger/{job_name}")
 async def trigger_job(job_name: str, request: Request):
-    await _require_admin(request)
+    user = await _require_admin_mutation(request)
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
     snap_date = body.get("date")
 
@@ -258,6 +340,17 @@ async def trigger_job(job_name: str, request: Request):
         raise HTTPException(status_code=409, detail="이미 실행 중입니다.")
 
     asyncio.create_task(_run_snapshot_job(job_name, snap_date))
+    await observability.record_event(
+        "admin",
+        "manual_job_triggered",
+        level="info",
+        details={
+            "actor": user.get("email") or user.get("google_sub"),
+            "job_name": job_name,
+            "date": snap_date,
+        },
+        wait=True,
+    )
     return {"message": f"{job_name} 실행 시작", "date": snap_date}
 
 
@@ -292,7 +385,7 @@ async def linked_project_config(project_key: str, request: Request):
 
 @router.put("/linked-project-configs/{project_key}")
 async def save_linked_project_config(project_key: str, request: Request, payload: dict = Body(...)):
-    user = await _require_admin(request)
+    user = await _require_admin_mutation(request)
     config = payload.get("config") if isinstance(payload, dict) else None
     if config is None:
         raise HTTPException(status_code=400, detail="config payload is required.")
@@ -328,7 +421,7 @@ async def ai_admin_config(request: Request, days: int = Query(30, ge=1, le=365))
 
 @router.put("/ai-config/key")
 async def save_ai_key(request: Request, payload: dict = Body(...)):
-    user = await _require_admin(request)
+    user = await _require_admin_mutation(request)
     key = str((payload or {}).get("openrouter_api_key") or "").strip()
     try:
         await ai_config.set_openrouter_key(key, user.get("email") or user.get("google_sub"))
@@ -346,7 +439,7 @@ async def save_ai_key(request: Request, payload: dict = Body(...)):
 
 @router.delete("/ai-config/key")
 async def delete_ai_key(request: Request):
-    user = await _require_admin(request)
+    user = await _require_admin_mutation(request)
     await ai_config.delete_openrouter_key()
     await observability.record_event(
         "admin",
@@ -360,7 +453,7 @@ async def delete_ai_key(request: Request):
 
 @router.put("/ai-config/models")
 async def save_ai_models(request: Request, payload: dict = Body(...)):
-    user = await _require_admin(request)
+    user = await _require_admin_mutation(request)
     models = payload.get("models") if isinstance(payload, dict) else None
     if not isinstance(models, dict):
         raise HTTPException(status_code=400, detail="models object is required.")
@@ -574,10 +667,14 @@ async def deploy_status(request: Request):
     auto-deploy runner alive. Serves as the 'is my push live yet'
     signal so the operator doesn't need to SSH."""
     await _require_admin(request)
+    service_started, runner = await asyncio.gather(
+        asyncio.to_thread(_service_start_timestamp),
+        asyncio.to_thread(_runner_status),
+    )
     return {
         "build": _BUILD_INFO,
-        "service_started": _service_start_timestamp(),
-        "actions_runner": _runner_status(),
+        "service_started": service_started,
+        "actions_runner": runner,
     }
 
 
@@ -660,10 +757,21 @@ async def refresh_foreign_dividends_endpoint(request: Request):
     """yfinance 로부터 포트폴리오 내 해외 종목들의 trailing annual
     dividend 를 일괄 fetch + KRW 환산 + upsert. source='manual' 인
     수동 override 는 건드리지 않음."""
-    await _require_admin(request)
+    user = await _require_admin_mutation(request)
     import foreign_dividends
     result = await foreign_dividends.refresh_foreign_dividends()
     result["total_cached"] = await cache.get_foreign_dividends_count()
+    await observability.record_event(
+        "admin",
+        "foreign_dividends_refreshed",
+        level="info",
+        details={
+            "actor": user.get("email") or user.get("google_sub"),
+            "updated": result.get("updated") or result.get("success") or result.get("count"),
+            "total_cached": result.get("total_cached"),
+        },
+        wait=True,
+    )
     return result
 
 
@@ -691,7 +799,7 @@ async def upsert_foreign_dividend_endpoint(request: Request, payload: dict = Bod
     """관리자 수동 배당 입력. body: {stock_code, dps_krw, note?}.
     source='manual' 로 저장되어 이후 auto refresh 에서 덮어쓰지 않음.
     dps_krw 0 허용 (의도적으로 '배당 없음' 명시)."""
-    await _require_admin(request)
+    user = await _require_admin_mutation(request)
     code = str(payload.get("stock_code") or "").strip().upper()
     if not code:
         raise HTTPException(status_code=400, detail="stock_code 는 필수입니다.")
@@ -707,16 +815,37 @@ async def upsert_foreign_dividend_endpoint(request: Request, payload: dict = Bod
     note = payload.get("note")
     note = str(note).strip() if note else None
     await cache.upsert_foreign_dividend_manual(code, dps, note)
+    await observability.record_event(
+        "admin",
+        "foreign_dividend_upserted",
+        level="info",
+        stock_code=code,
+        details={
+            "actor": user.get("email") or user.get("google_sub"),
+            "dps_krw": dps,
+            "has_note": bool(note),
+        },
+        wait=True,
+    )
     return {"ok": True, "stock_code": code, "dps_krw": dps, "note": note, "source": "manual"}
 
 
 @router.delete("/foreign-dividend/{stock_code}")
 async def delete_foreign_dividend_endpoint(request: Request, stock_code: str):
     """수동/자동 entry 제거. 이후 auto refresh 에서 다시 채워질 수 있음."""
-    await _require_admin(request)
-    deleted = await cache.delete_foreign_dividend(stock_code.strip().upper())
+    user = await _require_admin_mutation(request)
+    code = stock_code.strip().upper()
+    deleted = await cache.delete_foreign_dividend(code)
     if not deleted:
         raise HTTPException(status_code=404, detail="해당 종목의 배당 entry 가 없습니다.")
+    await observability.record_event(
+        "admin",
+        "foreign_dividend_deleted",
+        level="warning",
+        stock_code=code,
+        details={"actor": user.get("email") or user.get("google_sub")},
+        wait=True,
+    )
     return {"ok": True, "stock_code": stock_code}
 
 
@@ -725,11 +854,22 @@ async def refresh_preferred_dividends_endpoint(request: Request):
     """수동 트리거 — Google Sheet Data!AI 컬럼을 즉시 재동기화. 주기
     루프(12h)가 알아서 돌지만, 시트 관리자가 방금 값을 바꾼 직후에는
     기다리지 않고 바로 반영하고 싶을 때 쓰기 위함."""
-    await _require_admin(request)
+    user = await _require_admin_mutation(request)
     import preferred_dividends
     result = await preferred_dividends.refresh_preferred_dividends()
     # Attach current cached row count so the dashboard can show before/after.
     result["total_cached"] = await cache.get_preferred_dividends_count()
+    await observability.record_event(
+        "admin",
+        "preferred_dividends_refreshed",
+        level="info",
+        details={
+            "actor": user.get("email") or user.get("google_sub"),
+            "rows": result.get("rows") or result.get("updated") or result.get("count"),
+            "total_cached": result.get("total_cached"),
+        },
+        wait=True,
+    )
     return result
 
 

@@ -121,7 +121,6 @@ async function initApp() {
   setInterval(loadWikiStats, 5 * 60_000);
   QuoteManager.connect();
   _updateQuoteSubscriptions();
-  if (typeof scheduleChartPreload === 'function') scheduleChartPreload();
   trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
 
   // 외부 사이트에서 특정 탭·종목으로 바로 연결 가능하도록 URL 을 해석.

@@ -20,7 +20,10 @@ from routes import admin as admin_route
 def _admin_request() -> Request:
     scope = {
         "type": "http", "method": "POST", "path": "/api/admin/foreign-dividend",
-        "headers": [], "query_string": b"",
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"origin", b"http://testserver"),
+        ], "query_string": b"",
         "client": ("127.0.0.1", 12345), "server": ("testserver", 80),
         "scheme": "http",
     }

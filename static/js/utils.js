@@ -123,12 +123,18 @@ function openIntegration(key, path = '', query = {}) {
 }
 
 function apiFetch(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const isAdminMutation = String(path || '').startsWith('/api/admin/')
+    && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   const init = {
     credentials: 'include',
     ...options,
   };
-  if (options.headers) {
-    init.headers = { ...options.headers };
+  if (options.headers || isAdminMutation) {
+    init.headers = { ...(isAdminMutation ? {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'fetch',
+    } : {}), ...(options.headers || {}) };
   }
   return fetch(buildApiUrl(path), init);
 }

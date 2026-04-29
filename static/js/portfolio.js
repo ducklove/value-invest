@@ -3178,9 +3178,11 @@ async function loadPerformanceData() {
     }
     const navData = navResp.ok ? await navResp.json() : [];
     const cfData = cfResp.ok ? await cfResp.json() : [];
-    await renderNavChart(navData);
-    await renderValueChart(navData);
     renderNavReturns(navData);
+    await Promise.all([
+      renderNavChart(navData),
+      renderValueChart(navData),
+    ]);
     renderCashflows(cfData, navData);
   } catch (e) {
     console.warn(e);
@@ -3579,13 +3581,16 @@ async function renderNavChart(data) {
   if (!container) return;
   if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
   if (_navChartResizeObserver) { _navChartResizeObserver.disconnect(); _navChartResizeObserver = null; }
-  await loadChartLib();
   _navChartData = data || [];
   data = _navChartData;
 
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
     _updateChartRangeLabel('pfNavRange', [], 0, 0);
+    return;
+  }
+  if (typeof PortfolioTrendChart === 'undefined') {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">차트 렌더러를 불러오지 못했습니다.</div>';
     return;
   }
 
@@ -3600,35 +3605,6 @@ async function renderNavChart(data) {
     ? ((navValues[navValues.length - 1] / navValues[navValues.length - last365.length]) - 1) * 100 : 0;
   const navColor = returnToColor(yoyPct);
   const mobileChartMode = _isMobileChartMode();
-
-  if (typeof USE_UPLOT !== 'undefined' && USE_UPLOT) {
-    const mobileValues = navValues.map(v => Number.isFinite(Number(v)) ? Number(v) : null);
-
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-    _navChartInstance = createLineChart(container, {
-      labels,
-      values: mobileValues,
-      color: navColor,
-      yMin: undefined,
-      yFormatter: v => Number(v).toFixed(2),
-      dataZoom: false,
-    });
-    _navChartSeriesForAxis = [mobileValues];
-    _navBenchSeriesForAxis = [];
-
-    const fullWindow = _chartZoomWindow(labels.length, 0, 100);
-    _updateChartRangeLabel('pfNavRange', data, fullWindow.startIdx, fullWindow.endIdx);
-
-    if (typeof ResizeObserver !== 'undefined' && _navChartInstance) {
-      const ro = new ResizeObserver(() => {
-        if (_navChartInstance && _navChartInstance.resize) _navChartInstance.resize();
-      });
-      ro.observe(container);
-      _navChartResizeObserver = ro;
-    }
-    return;
-  }
 
   // Precompute benchmark ratio maps (close / first_close for each date)
   const benchCodes = mobileChartMode ? [] : _getSelectedBenchmarks();
@@ -3688,16 +3664,13 @@ async function renderNavChart(data) {
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
   const yZero = mobileChartMode ? false : document.getElementById('pfNavYZero')?.checked;
 
-  // 모바일: 탭 전환 직후 container height 가 layout 확정 전이라 echarts
-  // 가 0-크기로 init 되어 차트 안 보임. rAF 두 번으로 layout 확실히
-  // 끝난 뒤 init 하고, 그래도 혹시 늦으면 ResizeObserver 가 추가 보완.
-  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-  const ec = echarts.init(container);
+  // Let the tab display style settle once, then draw with the lightweight
+  // in-project canvas renderer. This avoids the ECharts bundle entirely for
+  // the portfolio trend view.
+  await new Promise(r => requestAnimationFrame(r));
 
   const initBenchSeries = buildBenchSeries(0);
-
-  ec.setOption({
+  const ec = PortfolioTrendChart.create(container, {
     legend: hasBench ? {
       data: legendData,
       top: 0, right: 0,
@@ -3705,15 +3678,7 @@ async function renderNavChart(data) {
       itemWidth: 18, itemHeight: 2,
     } : undefined,
     grid: { left: 55, right: 12, top: hasBench ? 28 : 10, bottom: mobileChartMode ? 24 : 56 },
-    dataZoom: mobileChartMode ? [] : [
-      { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(navColor, 0.12),
-        handleStyle: { color: navColor }, textStyle: { color: textColor, fontSize: 10 },
-        labelFormatter: (_, val) => labels[Math.round(val)] || '' },
-      // inside zoom kept for click-drag panning, but wheel is disabled —
-      // hovering over the NAV chart while scrolling the page was hijacking
-      // the scroll and unexpectedly zooming the timeline.
-      { type: 'inside', zoomOnMouseWheel: false, moveOnMouseWheel: false },
-    ],
+    dataZoom: mobileChartMode ? [] : [{ start: 0, end: 100 }],
     xAxis: {
       type: 'category', data: labels,
       axisLine: { lineStyle: { color: gridColor } },
@@ -3752,12 +3717,7 @@ async function renderNavChart(data) {
         symbolSize: navValues.length > 60 ? 0 : 4,
         lineStyle: { color: navColor, width: 2 },
         itemStyle: { color: navColor },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: _hexToRgba(navColor, 0.25) },
-            { offset: 1, color: _hexToRgba(navColor, 0.0) },
-          ]),
-        },
+        areaStyle: {},
       },
       ...initBenchSeries,
     ],
@@ -3813,9 +3773,8 @@ async function renderNavChart(data) {
 
   _navChartInstance = ec;
 
-  // 폰에서 탭 전환 직후 container 높이가 늦게 확정되면 ECharts 가 0 으로
-  // init 되어 차트가 보이지 않음. ResizeObserver 가 크기 확정 시점에
-  // 발화해 자동 resize.
+  // 폰에서 탭 전환 직후 container 높이가 늦게 확정되는 경우가 있어
+  // ResizeObserver 로 크기 확정 시점에 한 번 더 그린다.
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => {
       if (_navChartInstance) _navChartInstance.resize();
@@ -3876,10 +3835,10 @@ async function renderValueChart(data) {
   if (_valueChartResizeObserver) { _valueChartResizeObserver.disconnect(); _valueChartResizeObserver = null; }
   _valueChartData = data || [];
   _valueChartSeriesForAxis = [];
-  await loadChartLib();
 
-  // 모바일 layout 확정 대기 — renderNavChart 와 동일 이유.
-  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  // One frame is enough for the visible tab layout to settle before the
+  // lightweight canvas renderer measures its container.
+  await new Promise(r => requestAnimationFrame(r));
 
   // Stats cards
   const statsEl = document.getElementById('pfValueStats');
@@ -3888,6 +3847,10 @@ async function renderValueChart(data) {
   if (!data.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
     _updateChartRangeLabel('pfValueRange', [], 0, 0);
+    return;
+  }
+  if (typeof PortfolioTrendChart === 'undefined') {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">차트 렌더러를 불러오지 못했습니다.</div>';
     return;
   }
 
@@ -3910,13 +3873,25 @@ async function renderValueChart(data) {
   const mobileChartMode = _isMobileChartMode();
 
   const valYZero = mobileChartMode ? false : document.getElementById('pfValueYZero')?.checked;
-  _valueChartInstance = createLineChart(container, {
-    labels: data.map(d => d.date),
-    values: fxValues.map(v => Math.round(v)),
-    color: valColor,
-    yMin: valYZero ? 0 : undefined,
-    yFormatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit,
-    dataZoom: !mobileChartMode,
+  _valueChartInstance = PortfolioTrendChart.create(container, {
+    grid: { left: 68, right: 12, top: 10, bottom: mobileChartMode ? 24 : 56 },
+    dataZoom: mobileChartMode ? [] : [{ start: 0, end: 100 }],
+    xAxis: { type: 'category', data: data.map(d => d.date) },
+    yAxis: {
+      type: 'value',
+      min: valYZero ? 0 : 'dataMin',
+      axisLabel: { formatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit },
+    },
+    series: [{
+      name: '평가금액',
+      type: 'line',
+      data: fxValues.map(v => Math.round(v)),
+      smooth: 0.3,
+      symbol: 'none',
+      lineStyle: { color: valColor, width: 2 },
+      itemStyle: { color: valColor },
+      areaStyle: {},
+    }],
   });
   _valueChartSeriesForAxis = [fxValues.map(v => Math.round(v))];
   const fullWindow = _chartZoomWindow(data.length, 0, 100);
