@@ -4001,12 +4001,23 @@ function renderCashflows(data) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);">입출금 내역이 없습니다.</td></tr>';
     return;
   }
+  const fmtCfDecimal = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n === 0) return '-';
+    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const fmtCfSignedDecimal = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n === 0) return '-';
+    const sign = n > 0 ? '+' : '';
+    return sign + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
   tbody.innerHTML = data.map(cf => `<tr>
     <td>${cf.date}</td>
     <td>${cf.type === 'deposit' ? '입금' : '출금'}</td>
     <td class="pf-col-num">${fmtNum(Math.round(cf.amount))}원</td>
-    <td class="pf-col-num">${cf.nav_at_time ? cf.nav_at_time.toFixed(2) : '-'}</td>
-    <td class="pf-col-num">${cf.units_change ? (cf.units_change > 0 ? '+' : '') + cf.units_change.toFixed(2) : '-'}</td>
+    <td class="pf-col-num">${fmtCfDecimal(cf.nav_at_time)}</td>
+    <td class="pf-col-num">${fmtCfSignedDecimal(cf.units_change)}</td>
     <td>${cf.memo || ''}</td>
     <td><button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}">X</button></td>
   </tr>`).join('');
