@@ -3823,12 +3823,12 @@ async function renderNavChart(data) {
         symbolSize: navValues.length > 60 ? 0 : 4,
         lineStyle: { color: navColor, width: 2 },
         itemStyle: { color: navColor },
-        areaStyle: !hasBench ? {
+        areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: _hexToRgba(navColor, 0.25) },
             { offset: 1, color: _hexToRgba(navColor, 0.0) },
           ]),
-        } : undefined,
+        },
       },
       ...initBenchSeries,
     ],
