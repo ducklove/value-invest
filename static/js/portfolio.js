@@ -1033,6 +1033,66 @@ function _drawSparkline(canvasId, values, color, maxSlots, align) {
   }
 }
 
+function _drawSparklinePoints(canvasId, points, color, xMax) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const clean = (points || [])
+    .map(p => ({ x: Number(p.x), y: Number(p.y) }))
+    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .sort((a, b) => a.x - b.x);
+  const ys = clean.map(p => p.y);
+  const min = ys.length ? Math.min(...ys) : 0;
+  const max = ys.length ? Math.max(...ys) : 0;
+  const pad = 2;
+  const minZ = Math.min(min, 0);
+  const maxZ = Math.max(max, 0);
+  const rangeZ = maxZ - minZ || 1;
+  const axisMax = xMax || Math.max(clean[clean.length - 1]?.x || 1, 1);
+  const yFor = (v) => pad + (1 - (v - minZ) / rangeZ) * (h - pad * 2);
+  const xFor = (x) => (Math.max(0, Math.min(axisMax, x)) / axisMax) * w;
+  const zeroY = yFor(0);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.strokeStyle = '#64748b';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.globalAlpha = 0.5;
+  ctx.moveTo(0, zeroY);
+  ctx.lineTo(w, zeroY);
+  ctx.stroke();
+  ctx.restore();
+
+  if (clean.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    clean.forEach((p, i) => {
+      const x = xFor(p.x);
+      const y = yFor(p.y);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+}
+
+function _sparkHourFromTs(ts) {
+  const m = String(ts || '').match(/T(\d{2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) + Number(m[2]) / 60;
+}
+
 function _renderSummarySparklines(currentTotalValue) {
   // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
   if (pfNavHistory.length > 1) {
@@ -1065,8 +1125,8 @@ function _renderSummarySparklines(currentTotalValue) {
   }
 
   // 기준값 = 전일 22:00 결산값 (pfPrevDaySnapshot.total_value). sparkline
-  // 각 점 = (value / prev22 - 1) × 100. 기준선(0%) 은 _drawSparkline 이
-  // 자동으로 그림.
+  // 은 전일 22:00 → 당일 22:00의 24시간 축으로 그린다. 첫 점은 항상
+  // 전일 22:00 기준 0%로 고정한다.
   //
   // server snapshot_intraday 가 한 틱에서 일부 종목 가격 fetch 에 실패
   // 하면 그 종목만 avg_price 로 fallback 되어 total_value 가 비정상적
@@ -1077,26 +1137,34 @@ function _renderSummarySparklines(currentTotalValue) {
     ? pfPrevDaySnapshot.total_value
     : null;
   if (!_prevClose) {
-    _drawSparkline('sparkDaily', [], '#dc2626', 28, 'left');
+    _drawSparklinePoints('sparkDaily', [], '#dc2626', 24);
   } else {
-    const raw = [];
+    const raw = [{ x: 0, y: 0 }];
     for (const d of pfIntradayData) {
       if (!d || !d.total_value) continue;
-      if (d.ts && d.ts.endsWith('T00:00')) continue;   // baseline 제외
-      raw.push((d.total_value / _prevClose - 1) * 100);
+      const hour = _sparkHourFromTs(d.ts);
+      if (hour === null) continue;
+      const x = String(d.ts || '').endsWith('T00:00')
+        ? 0
+        : Math.max(0, Math.min(24, hour + 2));
+      raw.push({ x, y: (d.total_value / _prevClose - 1) * 100 });
     }
-    if (currentTotalValue) raw.push((currentTotalValue / _prevClose - 1) * 100);
+    if (currentTotalValue) {
+      const now = new Date();
+      const currentHour = now.getHours() + now.getMinutes() / 60;
+      raw.push({ x: Math.min(24, currentHour + 2), y: (currentTotalValue / _prevClose - 1) * 100 });
+    }
     // Outlier 필터: 현재값 부호와 반대 부호인 점은 일시적 데이터 오류
     // (일부 종목 가격 fetch 실패로 total_value 잘못 저장) 로 간주해 제외.
     // 포트폴리오 전체가 30 분 사이 부호를 뒤집을 정도로 움직이는 건
     // 극히 드묾 — 반대 부호 점 하나가 있다면 데이터 문제일 가능성이
     // 훨씬 큼. 사용자가 '오늘 항상 + 였다' 고 확신하는 케이스와 일치.
-    const lastRaw = raw.length ? raw[raw.length - 1] : 0;
+    const lastRaw = raw.length ? raw[raw.length - 1].y : 0;
     const dayPcts = lastRaw >= 0
-      ? raw.filter(p => p >= 0)
-      : raw.filter(p => p <= 0);
-    const lastPct = dayPcts.length ? dayPcts[dayPcts.length - 1] : 0;
-    _drawSparkline('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 28, 'left');
+      ? raw.filter(p => p.y >= 0)
+      : raw.filter(p => p.y <= 0);
+    const lastPct = dayPcts.length ? dayPcts[dayPcts.length - 1].y : 0;
+    _drawSparklinePoints('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 24);
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
