@@ -3519,78 +3519,11 @@ function _axisRangeForVisibleSeries(seriesList, startIdx, endIdx, yZero) {
   return { min, max };
 }
 
-function _axisRangeForAnchoredSeries(seriesList, startIdx, endIdx, yZero, anchorValue, anchorRatio) {
-  const values = _visibleChartValues(seriesList, startIdx, endIdx);
-  const anchor = Number(anchorValue);
-  const ratio = Number(anchorRatio);
-  if (!values.length || !Number.isFinite(anchor) || !Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) {
-    return _axisRangeForVisibleSeries(seriesList, startIdx, endIdx, yZero);
-  }
-
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
-  const lowerSpan = (anchor - minValue) / ratio;
-  const upperSpan = (maxValue - anchor) / (1 - ratio);
-  let range = Math.max(lowerSpan, upperSpan, Math.abs(anchor) * 0.02, 1);
-  range *= 1.06;
-
-  const zeroMax = anchor / ratio;
-  if (yZero && minValue >= 0 && zeroMax >= maxValue) {
-    return { min: 0, max: zeroMax };
-  }
-
-  return {
-    min: anchor - ratio * range,
-    max: anchor + (1 - ratio) * range,
-  };
-}
-
-function _axisRatioForValue(axisRange, value) {
-  const min = Number(axisRange?.min);
-  const max = Number(axisRange?.max);
-  const n = Number(value);
-  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(n) || min === max) return null;
-  return (n - min) / (max - min);
-}
-
-function _firstVisibleBenchmarkAnchor(benchSeriesList, navSeries, startIdx, endIdx) {
-  for (let i = startIdx; i <= endIdx; i++) {
-    const nav = Number(navSeries?.[i]);
-    if (!Number.isFinite(nav)) continue;
-    for (const series of benchSeriesList || []) {
-      const bench = Number(series?.[i]);
-      if (Number.isFinite(bench)) return { nav, bench };
-    }
-  }
-  return null;
-}
-
-function _setChartYAxisRange(chart, axisRange, axisIndex = 0) {
+function _applyVisibleYAxis(chart, seriesList, startIdx, endIdx, yZero) {
   if (!chart?.setOption) return;
-  const option = chart.getOption?.();
-  const axisCount = Array.isArray(option?.yAxis) ? option.yAxis.length : 0;
-  if (axisIndex === 0 && axisCount <= 1) {
-    chart.setOption({ yAxis: axisRange });
-    return axisRange;
-  }
-  const yAxis = Array.from({ length: Math.max(axisIndex + 1, axisCount) }, () => ({}));
-  yAxis[axisIndex] = axisRange;
-  chart.setOption({ yAxis });
-  return axisRange;
-}
-
-function _applyVisibleYAxis(chart, seriesList, startIdx, endIdx, yZero, axisIndex = 0) {
   const axisRange = _axisRangeForVisibleSeries(seriesList, startIdx, endIdx, yZero);
-  return _setChartYAxisRange(chart, axisRange, axisIndex);
-}
-
-function _applyAnchoredBenchmarkYAxis(chart, benchSeriesList, navSeries, startIdx, endIdx, yZero, navAxisRange) {
-  const anchor = _firstVisibleBenchmarkAnchor(benchSeriesList, navSeries, startIdx, endIdx);
-  const anchorRatio = anchor ? _axisRatioForValue(navAxisRange, anchor.nav) : null;
-  const axisRange = anchorRatio === null
-    ? _axisRangeForVisibleSeries(benchSeriesList, startIdx, endIdx, yZero)
-    : _axisRangeForAnchoredSeries(benchSeriesList, startIdx, endIdx, yZero, anchor.bench, anchorRatio);
-  return _setChartYAxisRange(chart, axisRange, 1);
+  chart.setOption({ yAxis: axisRange });
+  return axisRange;
 }
 
 function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
@@ -3707,7 +3640,6 @@ async function renderNavChart(data) {
         data: vals.map(v => v === null ? '-' : v),
         smooth: 0.3,
         symbol: 'none',
-        yAxisIndex: 1,
         lineStyle: { color: _BENCH_COLORS[code], width: 1.5, type: 'dashed' },
         itemStyle: { color: _BENCH_COLORS[code] },
         connectNulls: true,
@@ -3738,7 +3670,7 @@ async function renderNavChart(data) {
       textStyle: { color: textColor, fontSize: 11 },
       itemWidth: 18, itemHeight: 2,
     } : undefined,
-    grid: { left: 55, right: hasBench ? 56 : 12, top: hasBench ? 28 : 10, bottom: mobileChartMode ? 24 : 56 },
+    grid: { left: 55, right: 12, top: hasBench ? 28 : 10, bottom: mobileChartMode ? 24 : 56 },
     dataZoom: mobileChartMode ? [] : [
       { type: 'slider', height: 22, bottom: 4, borderColor: gridColor, fillerColor: _hexToRgba(navColor, 0.12),
         handleStyle: { color: navColor }, textStyle: { color: textColor, fontSize: 10 },
@@ -3754,32 +3686,17 @@ async function renderNavChart(data) {
       axisLabel: { color: textColor, fontSize: 10 },
       splitLine: { show: false },
     },
-    yAxis: [
-      {
-        type: 'value',
-        min: yZero ? 0 : 'dataMin',
-        axisLine: { show: false },
-        axisLabel: {
-          color: textColor,
-          fontSize: 10,
-          formatter: v => Math.round(v).toLocaleString(),
-        },
-        splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    yAxis: {
+      type: 'value',
+      min: yZero ? 0 : 'dataMin',
+      axisLine: { show: false },
+      axisLabel: {
+        color: textColor,
+        fontSize: 10,
+        formatter: v => Math.round(v).toLocaleString(),
       },
-      {
-        type: 'value',
-        show: hasBench,
-        position: 'right',
-        scale: true,
-        axisLine: { show: false },
-        axisLabel: {
-          color: textColor,
-          fontSize: 10,
-          formatter: v => Math.round(v).toLocaleString(),
-        },
-        splitLine: { show: false },
-      },
-    ],
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    },
     tooltip: {
       trigger: 'axis',
       formatter(params) {
@@ -3812,15 +3729,12 @@ async function renderNavChart(data) {
     ],
   });
 
-  // NAV and benchmark overlays use separate Y-axes. This keeps NAV's shape
-  // stable while still fitting benchmark min/max on its own right-side axis.
-  _navChartSeriesForAxis = [navValues];
+  // NAV and benchmarks share one Y-axis. Benchmarks are normalized to the
+  // visible NAV start, then the common axis range includes every visible line.
   _navBenchSeriesForAxis = initBenchSeries.map(series => _chartDataToNumbers(series.data));
+  _navChartSeriesForAxis = [navValues, ..._navBenchSeriesForAxis];
   const fullWindow = _chartZoomWindow(labels.length, 0, 100);
-  const navAxisRange = _applyVisibleYAxis(ec, _navChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!yZero, 0);
-  if (hasBench) {
-    _applyAnchoredBenchmarkYAxis(ec, _navBenchSeriesForAxis, navValues, fullWindow.startIdx, fullWindow.endIdx, !!yZero, navAxisRange);
-  }
+  _applyVisibleYAxis(ec, _navChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!yZero);
   _updateChartRangeLabel('pfNavRange', data, fullWindow.startIdx, fullWindow.endIdx);
 
   // On dataZoom change: (a) re-scale benchmark series to the new window,
@@ -3848,18 +3762,15 @@ async function renderNavChart(data) {
           // Update only benchmark series (index 1+)
           const seriesUpdate = [{ data: navValues.map(v => v === null ? '-' : v) }, ...newBench];
           ec.setOption({ series: seriesUpdate });
-          _navChartSeriesForAxis = [navValues];
           _navBenchSeriesForAxis = newBench.map(series => _chartDataToNumbers(series.data));
+          _navChartSeriesForAxis = [navValues, ..._navBenchSeriesForAxis];
         } else {
           _navChartSeriesForAxis = [navValues];
           _navBenchSeriesForAxis = [];
         }
 
         const zoomYZero = !!document.getElementById('pfNavYZero')?.checked;
-        const zoomNavAxisRange = _applyVisibleYAxis(ec, _navChartSeriesForAxis, startIdx, endIdx, zoomYZero, 0);
-        if (hasBench) {
-          _applyAnchoredBenchmarkYAxis(ec, _navBenchSeriesForAxis, navValues, startIdx, endIdx, zoomYZero, zoomNavAxisRange);
-        }
+        _applyVisibleYAxis(ec, _navChartSeriesForAxis, startIdx, endIdx, zoomYZero);
         _updateChartRangeLabel('pfNavRange', data, startIdx, endIdx);
         _updateNavCagrCard(data, startIdx, endIdx);
       }, 80);
@@ -3889,18 +3800,7 @@ function onNavYZeroToggle() {
       return;
     }
     const { startIdx, endIdx } = _chartWindowFromInstance(_navChartInstance, _navChartData.length);
-    const navAxisRange = _applyVisibleYAxis(_navChartInstance, _navChartSeriesForAxis, startIdx, endIdx, !!yZero, 0);
-    if (_navBenchSeriesForAxis.length) {
-      _applyAnchoredBenchmarkYAxis(
-        _navChartInstance,
-        _navBenchSeriesForAxis,
-        _navChartSeriesForAxis[0],
-        startIdx,
-        endIdx,
-        !!yZero,
-        navAxisRange
-      );
-    }
+    _applyVisibleYAxis(_navChartInstance, _navChartSeriesForAxis, startIdx, endIdx, !!yZero);
   }
 }
 
