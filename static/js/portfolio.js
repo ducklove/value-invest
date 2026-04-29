@@ -3998,7 +3998,7 @@ function renderCashflows(data) {
   const tbody = document.getElementById('pfCfBody');
   if (!tbody) return;
   if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);">입출금 내역이 없습니다.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);">입출금 내역이 없습니다.</td></tr>';
     return;
   }
   const fmtCfDecimal = (value) => {
@@ -4012,12 +4012,28 @@ function renderCashflows(data) {
     const sign = n > 0 ? '+' : '';
     return sign + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+  const remainingUnitsById = new Map();
+  let runningUnits = 0;
+  [...data]
+    .sort((a, b) => {
+      const dateCompare = String(a.date || '').localeCompare(String(b.date || ''));
+      if (dateCompare !== 0) return dateCompare;
+      const createdCompare = String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      if (createdCompare !== 0) return createdCompare;
+      return Number(a.id || 0) - Number(b.id || 0);
+    })
+    .forEach(cf => {
+      const delta = Number(cf.units_change);
+      if (Number.isFinite(delta)) runningUnits += delta;
+      remainingUnitsById.set(String(cf.id), runningUnits);
+    });
   tbody.innerHTML = data.map(cf => `<tr>
     <td>${cf.date}</td>
     <td>${cf.type === 'deposit' ? '입금' : '출금'}</td>
     <td class="pf-col-num">${fmtNum(Math.round(cf.amount))}원</td>
     <td class="pf-col-num">${fmtCfDecimal(cf.nav_at_time)}</td>
     <td class="pf-col-num">${fmtCfSignedDecimal(cf.units_change)}</td>
+    <td class="pf-col-num">${fmtCfDecimal(remainingUnitsById.get(String(cf.id)))}</td>
     <td>${cf.memo || ''}</td>
     <td><button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}">X</button></td>
   </tr>`).join('');
