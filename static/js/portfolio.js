@@ -3437,28 +3437,43 @@ async function onBenchToggle() {
   if (_isMobileChartMode()) return;
   const codes = _getSelectedBenchmarks();
   if (!_navChartData.length) return;
-  // Fetch any uncached benchmarks
-  const startDate = _navChartData[0].date;
-  const toFetch = codes.filter(c => !_benchCache[c]);
-  if (toFetch.length) {
-    const results = await Promise.all(toFetch.map(c =>
-      apiFetch(`/api/portfolio/benchmark-history?code=${c}&start=${startDate}`).then(r => r.ok ? r.json() : []).catch(() => [])
-    ));
-    toFetch.forEach((c, i) => { _benchCache[c] = results[i]; });
-  }
   // Preserve the current zoom window across re-render. renderNavChart()
   // disposes the chart instance and recreates it from scratch, which would
   // otherwise reset dataZoom to 0~100 — i.e. the user loses their 3M/6M/1Y
   // selection just for checking a benchmark box.
   let preservedZoom = null;
+  let startIdx = 0;
   if (_navChartInstance) {
     try {
       const opt = _navChartInstance.getOption?.();
       const dz = opt?.dataZoom?.[0];
       if (dz && (dz.start != null || dz.end != null)) {
         preservedZoom = { start: dz.start ?? 0, end: dz.end ?? 100 };
+        startIdx = _chartZoomWindow(_navChartData.length, preservedZoom.start, preservedZoom.end).startIdx;
       }
     } catch (_) { /* getOption can throw if chart is mid-dispose */ }
+  }
+  // Fetch any uncached benchmarks. Empty arrays are treated as uncached so a
+  // transient Yahoo/backfill timeout doesn't permanently disable the chip.
+  const startDate = _navChartData[startIdx]?.date || _navChartData[0].date;
+  const toFetch = codes.filter(c => {
+    const cached = _benchCache[c];
+    return !Array.isArray(cached) || cached.length === 0 || String(cached[0]?.date || '') > startDate;
+  });
+  if (toFetch.length) {
+    const results = await Promise.all(toFetch.map(c =>
+      apiFetch(`/api/portfolio/benchmark-history?code=${encodeURIComponent(c)}&start=${encodeURIComponent(startDate)}`)
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => [])
+    ));
+    const failed = [];
+    toFetch.forEach((c, i) => {
+      _benchCache[c] = Array.isArray(results[i]) ? results[i] : [];
+      if (!_benchCache[c].length) failed.push(_BENCH_LABELS[c] || c);
+    });
+    if (failed.length && typeof showToast === 'function') {
+      showToast(`비교지수 데이터를 아직 불러오지 못했습니다: ${failed.join(', ')}`);
+    }
   }
   await renderNavChart(_navChartData);
   if (preservedZoom && _navChartInstance && typeof _navChartInstance.dispatchAction === 'function') {
@@ -3495,6 +3510,7 @@ function _chartWindowFromInstance(chart, length) {
 
 function _chartDataToNumbers(values) {
   return (values || []).map(v => {
+    if (v === null || v === undefined || v === '' || v === '-') return null;
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   });
@@ -3504,7 +3520,9 @@ function _visibleChartValues(seriesList, startIdx, endIdx) {
   const values = [];
   for (const series of seriesList || []) {
     for (let i = startIdx; i <= endIdx; i++) {
-      const n = Number(series?.[i]);
+      const raw = series?.[i];
+      if (raw === null || raw === undefined || raw === '' || raw === '-') continue;
+      const n = Number(raw);
       if (Number.isFinite(n)) values.push(n);
     }
   }
@@ -3516,7 +3534,8 @@ function _axisRangeForVisibleSeries(seriesList, startIdx, endIdx, yZero) {
   if (!values.length) {
     return { min: yZero ? 0 : 'dataMin', max: undefined };
   }
-  let min = Math.min(...values);
+  const dataMin = Math.min(...values);
+  let min = dataMin;
   let max = Math.max(...values);
   if (yZero) min = 0;
   if (min === max) {
@@ -3528,6 +3547,7 @@ function _axisRangeForVisibleSeries(seriesList, startIdx, endIdx, yZero) {
     if (!yZero) min -= pad;
     max += pad;
   }
+  if (!yZero && dataMin >= 0 && min < 0) min = 0;
   return { min, max };
 }
 

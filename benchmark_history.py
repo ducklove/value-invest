@@ -43,6 +43,7 @@ YF_TICKER: dict[str, str] = {
 # is plenty for any period button on the NAV chart and still < 3000 rows
 # per code.
 _MAX_BACKFILL_YEARS = 10
+_YF_TIMEOUT_SECONDS = 8
 
 
 def _download_sync(ticker: str, start: str, end: str) -> list[dict]:
@@ -51,7 +52,15 @@ def _download_sync(ticker: str, start: str, end: str) -> list[dict]:
     distinguish 'no data' from 'exception'."""
     import yfinance as yf
 
-    df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
+    df = yf.download(
+        ticker,
+        start=start,
+        end=end,
+        progress=False,
+        auto_adjust=True,
+        threads=False,
+        timeout=_YF_TIMEOUT_SECONDS,
+    )
     if df.empty:
         return []
     close = df["Close"]

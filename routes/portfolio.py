@@ -1961,16 +1961,24 @@ async def get_benchmark_history(code: str = Query(...), start: str = Query(...))
     keeps the table fresh so normal requests hit SQLite only (~ms) and
     are immune to yfinance outages.
     """
+    import asyncio
+    import logging
+
     import benchmark_history
 
     code_up = code.upper()
     if code_up not in benchmark_history.YF_TICKER:
         raise HTTPException(status_code=400, detail=f"Unknown benchmark: {code}")
 
+    logger = logging.getLogger(__name__)
+
     # Lazy backfill — no-op if DB already covers `start` or further back.
     # Failures here are swallowed (logged) inside backfill_benchmark; we
     # still try to serve whatever rows we have rather than 502-ing.
-    await benchmark_history.backfill_benchmark(code_up, start)
+    try:
+        await asyncio.wait_for(benchmark_history.backfill_benchmark(code_up, start), timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("Benchmark backfill timed out (%s start=%s); serving cached rows only", code_up, start)
 
     rows = await cache.get_benchmark_rows(code_up, start=start)
     return rows
