@@ -15,12 +15,31 @@ let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 let pfYearStartSnap = null; // {date, total_value, fx_usdkrw, ...} for first snapshot of this year
 let pfYearStartStockValues = {}; // stock_code -> market_value at year start
 let pfNavHistory = []; // [{date, nav, total_value, total_invested, total_units}, ...]
+let pfNavHistoryPromise = null;
 let pfIntradayData = []; // [{ts, total_value}, ...]
 let pfPrevDaySnapshot = null; // {total_value, fx_usdkrw, stock_values, today_net_cashflow}
 let pfCurrency = 'KRW'; // 'KRW' or 'USD'
 let pfFxRate = null; // USD/KRW rate
 const PF_QUOTE_REFRESH_MS = 60_000;
 let _pfPointerGuardUntil = 0;
+
+function loadPortfolioNavHistory(force = false) {
+  if (!force && pfNavHistory.length) return Promise.resolve(pfNavHistory);
+  if (!force && pfNavHistoryPromise) return pfNavHistoryPromise;
+  pfNavHistoryPromise = apiFetch('/api/portfolio/nav-history')
+    .then(async r => {
+      if (!r.ok) return pfNavHistory;
+      const data = await r.json();
+      if (Array.isArray(data)) pfNavHistory = data;
+      return pfNavHistory;
+    })
+    .catch(e => {
+      console.warn(e);
+      return pfNavHistory;
+    })
+    .finally(() => { pfNavHistoryPromise = null; });
+  return pfNavHistoryPromise;
+}
 
 function _pfMarkPointerInteraction(ms = 450) {
   _pfPointerGuardUntil = performance.now() + ms;
@@ -218,9 +237,8 @@ async function loadPortfolio() {
       pfYearStartStockValues = (snap && snap.stock_values) || {};
       renderPortfolio();
     }).catch(() => {});
-    apiFetch('/api/portfolio/nav-history').then(async r => {
-      if (!r.ok) return;
-      pfNavHistory = await r.json();
+    loadPortfolioNavHistory().then(data => {
+      if (!Array.isArray(data) || !data.length) return;
       renderPortfolio();
     }).catch(() => {});
     apiFetch('/api/portfolio/intraday').then(async r => {
@@ -246,10 +264,10 @@ async function loadPortfolio() {
       return item;
     });
     renderPortfolio();
-    if (typeof preloadChartLib === 'function') {
-      const preload = () => preloadChartLib().catch(() => {});
-      if (typeof requestIdleCallback === 'function') requestIdleCallback(preload, { timeout: 2000 });
-      else setTimeout(preload, 800);
+    if (typeof warmChartLib === 'function') {
+      const warm = () => warmChartLib();
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(warm);
+      else setTimeout(warm, 1200);
     }
     _updateQuoteSubscriptions();
   } catch (e) { console.warn(e); } finally {
@@ -3167,26 +3185,32 @@ async function loadPerformanceData() {
     dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   }
   try {
-    const navPromise = pfNavHistory.length
-      ? Promise.resolve({ ok: true, json: async () => pfNavHistory })
-      : apiFetch('/api/portfolio/nav-history');
-    const [navResp, cfResp] = await Promise.all([
-      navPromise,
+    const [navData, cfResp] = await Promise.all([
+      loadPortfolioNavHistory(),
       apiFetch('/api/portfolio/cashflows'),
     ]);
-    const navData = navResp.ok ? await navResp.json() : [];
-    if (navData.length) pfNavHistory = navData;
+    if (Array.isArray(navData) && navData.length) pfNavHistory = navData;
     const cfData = cfResp.ok ? await cfResp.json() : [];
     renderNavChartPreview(navData);
     renderNavReturns(navData);
     renderCashflows(cfData, navData);
-    // The two charts share the same lazy-loaded chart library. Rendering
-    // them together avoids paying the layout wait twice in sequence.
-    await Promise.all([
-      renderNavChart(navData),
-      renderValueChart(navData),
-    ]);
+    await renderNavChart(navData);
+    scheduleValueChartRender(navData);
   } catch (e) { console.warn(e); }
+}
+
+let _valueChartRenderToken = 0;
+function scheduleValueChartRender(data) {
+  const token = ++_valueChartRenderToken;
+  const run = () => {
+    if (token !== _valueChartRenderToken || pfActiveTab !== 'performance') return;
+    void renderValueChart(data);
+  };
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 1500 });
+  } else {
+    setTimeout(run, 250);
+  }
 }
 
 let _treemapInstance = null;
@@ -3202,8 +3226,10 @@ async function renderTreemap() {
   if (_treemapInstance) { _treemapInstance.dispose(); _treemapInstance = null; }
   if (_treemapResizeObserver) { _treemapResizeObserver.disconnect(); _treemapResizeObserver = null; }
 
-  // ECharts required for treemap
-  if (typeof echarts === 'undefined') {
+  // ECharts is required for treemap even on mobile, where the line charts use uPlot.
+  if (typeof loadEChartsLib === 'function') {
+    await loadEChartsLib();
+  } else if (typeof echarts === 'undefined') {
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
@@ -4321,6 +4347,15 @@ async function deleteCashflow(id) {
 // menu/picker code.
 (function initPfDelegation() {
   const onReady = () => {
+    const performanceTabButton = document.querySelector('.pf-tab[data-tab="performance"]');
+    if (performanceTabButton && typeof preloadChartLib === 'function') {
+      const preloadCharts = () => preloadChartLib().catch(() => {});
+      performanceTabButton.addEventListener('pointerenter', preloadCharts, { once: true });
+      performanceTabButton.addEventListener('focus', preloadCharts, { once: true });
+      performanceTabButton.addEventListener('touchstart', () => {
+        if (typeof warmChartLib === 'function') warmChartLib();
+      }, { once: true, passive: true });
+    }
     document.addEventListener('pointerdown', (e) => {
       if (e.target.closest && e.target.closest('.js-pf-analyze')) {
         _pfMarkPointerInteraction();
