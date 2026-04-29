@@ -15,31 +15,12 @@ let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 let pfYearStartSnap = null; // {date, total_value, fx_usdkrw, ...} for first snapshot of this year
 let pfYearStartStockValues = {}; // stock_code -> market_value at year start
 let pfNavHistory = []; // [{date, nav, total_value, total_invested, total_units}, ...]
-let pfNavHistoryPromise = null;
 let pfIntradayData = []; // [{ts, total_value}, ...]
 let pfPrevDaySnapshot = null; // {total_value, fx_usdkrw, stock_values, today_net_cashflow}
 let pfCurrency = 'KRW'; // 'KRW' or 'USD'
 let pfFxRate = null; // USD/KRW rate
 const PF_QUOTE_REFRESH_MS = 60_000;
 let _pfPointerGuardUntil = 0;
-
-function loadPortfolioNavHistory(force = false) {
-  if (!force && pfNavHistory.length) return Promise.resolve(pfNavHistory);
-  if (!force && pfNavHistoryPromise) return pfNavHistoryPromise;
-  pfNavHistoryPromise = apiFetch('/api/portfolio/nav-history')
-    .then(async r => {
-      if (!r.ok) return pfNavHistory;
-      const data = await r.json();
-      if (Array.isArray(data)) pfNavHistory = data;
-      return pfNavHistory;
-    })
-    .catch(e => {
-      console.warn(e);
-      return pfNavHistory;
-    })
-    .finally(() => { pfNavHistoryPromise = null; });
-  return pfNavHistoryPromise;
-}
 
 function _pfMarkPointerInteraction(ms = 450) {
   _pfPointerGuardUntil = performance.now() + ms;
@@ -237,8 +218,9 @@ async function loadPortfolio() {
       pfYearStartStockValues = (snap && snap.stock_values) || {};
       renderPortfolio();
     }).catch(() => {});
-    loadPortfolioNavHistory().then(data => {
-      if (!Array.isArray(data) || !data.length) return;
+    apiFetch('/api/portfolio/nav-history').then(async r => {
+      if (!r.ok) return;
+      pfNavHistory = await r.json();
       renderPortfolio();
     }).catch(() => {});
     apiFetch('/api/portfolio/intraday').then(async r => {
@@ -264,10 +246,10 @@ async function loadPortfolio() {
       return item;
     });
     renderPortfolio();
-    if (typeof warmChartLib === 'function') {
-      const warm = () => warmChartLib();
-      if (typeof requestIdleCallback === 'function') requestIdleCallback(warm);
-      else setTimeout(warm, 1200);
+    if (typeof preloadChartLib === 'function') {
+      const preload = () => preloadChartLib().catch(() => {});
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(preload, { timeout: 2000 });
+      else setTimeout(preload, 800);
     }
     _updateQuoteSubscriptions();
   } catch (e) { console.warn(e); } finally {
@@ -3185,32 +3167,25 @@ async function loadPerformanceData() {
     dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   }
   try {
-    const [navData, cfResp] = await Promise.all([
-      loadPortfolioNavHistory(),
+    const navPromise = pfNavHistory.length
+      ? Promise.resolve({ ok: true, json: async () => pfNavHistory })
+      : apiFetch('/api/portfolio/nav-history');
+    const [navResp, cfResp] = await Promise.all([
+      navPromise,
       apiFetch('/api/portfolio/cashflows'),
     ]);
-    if (Array.isArray(navData) && navData.length) pfNavHistory = navData;
+    const navData = navResp.ok ? await navResp.json() : [];
+    if (navData.length) pfNavHistory = navData;
     const cfData = cfResp.ok ? await cfResp.json() : [];
-    renderNavChartPreview(navData);
     renderNavReturns(navData);
     renderCashflows(cfData, navData);
-    await renderNavChart(navData);
-    scheduleValueChartRender(navData);
+    // The two charts share the same lazy-loaded chart library. Rendering
+    // them together avoids paying the layout wait twice in sequence.
+    await Promise.all([
+      renderNavChart(navData),
+      renderValueChart(navData),
+    ]);
   } catch (e) { console.warn(e); }
-}
-
-let _valueChartRenderToken = 0;
-function scheduleValueChartRender(data) {
-  const token = ++_valueChartRenderToken;
-  const run = () => {
-    if (token !== _valueChartRenderToken || pfActiveTab !== 'performance') return;
-    void renderValueChart(data);
-  };
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(run, { timeout: 1500 });
-  } else {
-    setTimeout(run, 250);
-  }
 }
 
 let _treemapInstance = null;
@@ -3226,10 +3201,8 @@ async function renderTreemap() {
   if (_treemapInstance) { _treemapInstance.dispose(); _treemapInstance = null; }
   if (_treemapResizeObserver) { _treemapResizeObserver.disconnect(); _treemapResizeObserver = null; }
 
-  // ECharts is required for treemap even on mobile, where the line charts use uPlot.
-  if (typeof loadEChartsLib === 'function') {
-    await loadEChartsLib();
-  } else if (typeof echarts === 'undefined') {
+  // ECharts required for treemap
+  if (typeof echarts === 'undefined') {
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js';
@@ -3585,77 +3558,6 @@ function _applyVisibleYAxis(chart, seriesList, startIdx, endIdx, yZero) {
   return axisRange;
 }
 
-function renderNavChartPreview(data) {
-  const container = document.getElementById('pfNavChart');
-  if (!container || _navChartInstance) return;
-  const values = (data || []).map(d => {
-    const raw = pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0 ? d.nav / d.fx_usdkrw : d.nav;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
-  }).filter(v => v !== null);
-  if (values.length < 2) return;
-
-  container.innerHTML = `
-    <canvas class="pf-chart-preview-canvas" aria-hidden="true"></canvas>
-    <div class="pf-chart-preview-label">빠른 미리보기 · 상세 차트 준비 중</div>
-  `;
-  const canvas = container.querySelector('canvas');
-  const ctx = canvas?.getContext('2d');
-  if (!ctx) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const w = container.clientWidth || container.parentElement?.clientWidth || 640;
-  const h = container.clientHeight || container.parentElement?.clientHeight || 320;
-  canvas.width = Math.max(1, Math.round(w * dpr));
-  canvas.height = Math.max(1, Math.round(h * dpr));
-  ctx.scale(dpr, dpr);
-
-  const css = getComputedStyle(document.documentElement);
-  const gridColor = css.getPropertyValue('--border').trim() || '#e5e7eb';
-  const textColor = css.getPropertyValue('--text-secondary').trim() || '#64748b';
-  const lineColor = returnToColor(
-    values.length > 1 ? ((values[values.length - 1] / values[0]) - 1) * 100 : 0
-  );
-  const left = 56, right = 14, top = 28, bottom = 34;
-  const axis = _axisRangeForVisibleSeries([values], 0, values.length - 1, false);
-  const min = Number(axis.min);
-  const max = Number(axis.max);
-  const range = max - min || 1;
-  const xFor = i => left + (i / Math.max(1, values.length - 1)) * (w - left - right);
-  const yFor = v => top + (1 - (v - min) / range) * (h - top - bottom);
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.font = '10px sans-serif';
-  ctx.fillStyle = textColor;
-  ctx.strokeStyle = gridColor;
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = top + (i / 4) * (h - top - bottom);
-    const val = max - (i / 4) * range;
-    ctx.globalAlpha = 0.75;
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(w - right, y);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(Math.round(val).toLocaleString(), left - 8, y);
-  }
-
-  ctx.beginPath();
-  values.forEach((v, i) => {
-    const x = xFor(i);
-    const y = yFor(v);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = lineColor;
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'round';
-  ctx.stroke();
-}
-
 function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
   const el = document.getElementById(elId);
   if (!el) return;
@@ -3789,7 +3691,6 @@ async function renderNavChart(data) {
   // 끝난 뒤 init 하고, 그래도 혹시 늦으면 ResizeObserver 가 추가 보완.
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-  container.innerHTML = '';
   const ec = echarts.init(container);
 
   const initBenchSeries = buildBenchSeries(0);
@@ -4347,15 +4248,6 @@ async function deleteCashflow(id) {
 // menu/picker code.
 (function initPfDelegation() {
   const onReady = () => {
-    const performanceTabButton = document.querySelector('.pf-tab[data-tab="performance"]');
-    if (performanceTabButton && typeof preloadChartLib === 'function') {
-      const preloadCharts = () => preloadChartLib().catch(() => {});
-      performanceTabButton.addEventListener('pointerenter', preloadCharts, { once: true });
-      performanceTabButton.addEventListener('focus', preloadCharts, { once: true });
-      performanceTabButton.addEventListener('touchstart', () => {
-        if (typeof warmChartLib === 'function') warmChartLib();
-      }, { once: true, passive: true });
-    }
     document.addEventListener('pointerdown', (e) => {
       if (e.target.closest && e.target.closest('.js-pf-analyze')) {
         _pfMarkPointerInteraction();

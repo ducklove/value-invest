@@ -115,10 +115,10 @@ async def lifespan(app: FastAPI):
     _sd_notify("READY=1")
     watchdog_task = asyncio.create_task(_watchdog_loop())
     insight_warmup_task = None
-    if os.environ.get("PORTFOLIO_INSIGHT_STARTUP_WARMUP", "1") != "0":
+    if os.environ.get("PORTFOLIO_INSIGHT_STARTUP_WARMUP", "0") == "1":
         insight_warmup_task = asyncio.create_task(
             portfolio_routes.warm_asset_insight_common(
-                initial_delay_seconds=float(os.environ.get("PORTFOLIO_INSIGHT_WARMUP_DELAY_S", "5"))
+                initial_delay_seconds=float(os.environ.get("PORTFOLIO_INSIGHT_WARMUP_DELAY_S", "90"))
             )
         )
 

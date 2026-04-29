@@ -1291,7 +1291,7 @@ async def warm_asset_insights_for_items(items: list[dict]) -> None:
 
 def _schedule_asset_insight_warmup(items: list[dict]) -> None:
     global _insight_warmup_task
-    if os.environ.get("PORTFOLIO_INSIGHT_WARMUP", "1") == "0":
+    if os.environ.get("PORTFOLIO_INSIGHT_WARMUP", "0") != "1":
         return
     if _insight_warmup_task and not _insight_warmup_task.done():
         return

@@ -1069,13 +1069,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
 }
 .pf-snapshot-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
-#pfNavChart, #pfValueChart { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); position: relative; overflow: hidden; }
-.pf-chart-preview-canvas { width: 100%; height: 100%; display: block; }
-.pf-chart-preview-label {
-  position: absolute; right: 12px; bottom: 10px; padding: 4px 8px;
-  border-radius: 999px; background: color-mix(in srgb, var(--surface) 82%, transparent);
-  color: var(--text-secondary); font-size: 11px; border: 1px solid var(--border);
-}
+#pfNavChart, #pfValueChart { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .pf-bench-chip { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; padding: 3px 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; color: var(--text-secondary); user-select: none; transition: all .15s; }
 .pf-bench-chip input { display: none; }
 .pf-bench-chip:has(input:checked) { background: var(--primary); color: #fff; border-color: var(--primary); }
