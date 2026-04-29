@@ -3111,9 +3111,22 @@ async function runAiAnalysis() {
 
 // --- Portfolio Performance Tab ---
 let pfActiveTab = 'holdings';
+let _performanceLoadToken = 0;
+
+function _requestPerformanceDataLoad() {
+  const token = ++_performanceLoadToken;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (pfActiveTab === 'performance' && token === _performanceLoadToken) {
+        loadPerformanceData(token);
+      }
+    });
+  });
+}
 
 function pfSwitchTab(tab) {
   pfActiveTab = tab;
+  if (tab !== 'performance') _performanceLoadToken++;
   document.querySelectorAll('.pf-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
   const holdingsTab = document.getElementById('pfHoldingsTab');
   const performanceTab = document.getElementById('pfPerformanceTab');
@@ -3123,7 +3136,7 @@ function pfSwitchTab(tab) {
   activeEl.classList.remove('fade-in');
   void activeEl.offsetWidth;
   activeEl.classList.add('fade-in');
-  if (tab === 'performance') { loadPerformanceData(); _loadAiModels(); }
+  if (tab === 'performance') { _requestPerformanceDataLoad(); _loadAiModels(); }
 }
 
 // 영역지도 팝업 — 기존에는 보유종목 탭 안에서 테이블/영역지도 토글 뷰로
@@ -3160,7 +3173,7 @@ function _pfTreemapEscHandler(e) {
   if (e.key === 'Escape') pfCloseTreemap();
 }
 
-async function loadPerformanceData() {
+async function loadPerformanceData(token = ++_performanceLoadToken) {
   const dateInput = document.getElementById('pfCfDate');
   if (dateInput && !dateInput.value) {
     const now = new Date();
@@ -3177,6 +3190,7 @@ async function loadPerformanceData() {
     const navData = navResp.ok ? await navResp.json() : [];
     if (navData.length) pfNavHistory = navData;
     const cfData = cfResp.ok ? await cfResp.json() : [];
+    if (token !== _performanceLoadToken || pfActiveTab !== 'performance') return;
     renderNavReturns(navData);
     renderCashflows(cfData, navData);
     // The two charts share the same lazy-loaded chart library. Rendering
@@ -3572,12 +3586,24 @@ function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
   el.innerHTML = `표시 기간 <strong>${escapeHtml(start)} ~ ${escapeHtml(end)}</strong><span>${days.toLocaleString()}일 · ${points.toLocaleString()}개 스냅샷</span>`;
 }
 
+function _chartContainerReady(container) {
+  if (!container || pfActiveTab !== 'performance') return false;
+  const rect = container.getBoundingClientRect();
+  return rect.width >= 80 && rect.height >= 80;
+}
+
+async function _waitForChartContainer(container) {
+  for (let i = 0; i < 30; i++) {
+    if (_chartContainerReady(container)) return true;
+    if (pfActiveTab !== 'performance') return false;
+    await new Promise(resolve => requestAnimationFrame(resolve));
+  }
+  return _chartContainerReady(container);
+}
+
 async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
-  if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
-  if (_navChartResizeObserver) { _navChartResizeObserver.disconnect(); _navChartResizeObserver = null; }
-  await loadChartLib();
   _navChartData = data || [];
   data = _navChartData;
 
@@ -3593,6 +3619,11 @@ async function renderNavChart(data) {
   });
   const labels = data.map(d => d.date);
 
+  await loadChartLib();
+  if (!await _waitForChartContainer(container)) return;
+  if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
+  if (_navChartResizeObserver) { _navChartResizeObserver.disconnect(); _navChartResizeObserver = null; }
+
   const last365 = data.slice(-365);
   const yoyPct = last365.length > 1
     ? ((navValues[navValues.length - 1] / navValues[navValues.length - last365.length]) - 1) * 100 : 0;
@@ -3601,8 +3632,6 @@ async function renderNavChart(data) {
 
   if (typeof USE_UPLOT !== 'undefined' && USE_UPLOT) {
     const mobileValues = navValues.map(v => Number.isFinite(Number(v)) ? Number(v) : null);
-
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
     _navChartInstance = createLineChart(container, {
       labels,
@@ -3686,11 +3715,8 @@ async function renderNavChart(data) {
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
   const yZero = mobileChartMode ? false : document.getElementById('pfNavYZero')?.checked;
 
-  // 모바일: 탭 전환 직후 container height 가 layout 확정 전이라 echarts
-  // 가 0-크기로 init 되어 차트 안 보임. rAF 두 번으로 layout 확실히
-  // 끝난 뒤 init 하고, 그래도 혹시 늦으면 ResizeObserver 가 추가 보완.
-  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
+  // _waitForChartContainer() already guaranteed a visible, measurable host.
+  // ResizeObserver still keeps the chart aligned with later layout changes.
   const ec = echarts.init(container);
 
   const initBenchSeries = buildBenchSeries(0);
@@ -3870,14 +3896,10 @@ let _valueChartInstance = null;
 async function renderValueChart(data) {
   const container = document.getElementById('pfValueChart');
   if (!container) return;
-  if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
-  if (_valueChartResizeObserver) { _valueChartResizeObserver.disconnect(); _valueChartResizeObserver = null; }
   _valueChartData = data || [];
   _valueChartSeriesForAxis = [];
   await loadChartLib();
-
-  // 모바일 layout 확정 대기 — renderNavChart 와 동일 이유.
-  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  if (!await _waitForChartContainer(container)) return;
 
   // Stats cards
   const statsEl = document.getElementById('pfValueStats');
@@ -3906,6 +3928,9 @@ async function renderValueChart(data) {
   const unit = pfFxUnit();
   const sym = pfFxSymbol();
   const mobileChartMode = _isMobileChartMode();
+
+  if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
+  if (_valueChartResizeObserver) { _valueChartResizeObserver.disconnect(); _valueChartResizeObserver = null; }
 
   const valYZero = mobileChartMode ? false : document.getElementById('pfValueYZero')?.checked;
   _valueChartInstance = createLineChart(container, {
