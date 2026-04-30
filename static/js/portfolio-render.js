@@ -266,31 +266,34 @@ function renderPortfolio() {
     return snap[field];
   };
 
-  // --- Group-filtered ratio: what fraction of total does the filtered group represent ---
-  // Returns null when historical per-stock data is unavailable — callers
-  // should display "-" rather than approximate with current composition,
-  // which would be biased if the group's weight has shifted.
-  const _groupRatio = (snap) => {
-    if (!isFiltered || !snap) return 1;
+  // Historical baseline for the current filter. For filtered cards, use the
+  // exact per-stock 22:00 snapshot sum for the visible rows, not
+  // `whole snapshot total × group ratio`. The latter mixes cash/other assets
+  // into the selected group and makes TODAY drift away from the settlement
+  // baseline.
+  const _periodBaseValue = (snap) => {
+    if (!snap) return null;
+    if (!isFiltered) return _snapToFxVal(snap);
     const sv = snap.stock_values || {};
-    const allTotal = Object.values(sv).reduce((a, b) => a + b, 0);
-    if (!allTotal || allTotal <= 0) return null;
+    if (!Object.keys(sv).length) return null;
     let filteredTotal = 0;
-    rows.forEach(r => { filteredTotal += (sv[r.stock_code] ?? 0); });
-    return filteredTotal / allTotal;
+    for (const r of rows) {
+      if (!Object.prototype.hasOwnProperty.call(sv, r.stock_code)) return null;
+      filteredTotal += Number(sv[r.stock_code] || 0);
+    }
+    return filteredTotal > 0 ? _fxConv(filteredTotal, snap) : null;
   };
 
   // Helper: compute return % and PnL for a period, group-aware
   const _periodReturn = (snap, navField) => {
     if (!snap) return { pct: null, pnl: null };
-    const ratio = _groupRatio(snap);
+    const baseVal = _periodBaseValue(snap);
     if (isFiltered) {
-      // Under a filter, if no historical per-stock data is available for
+      // Under a filter, if exact historical per-stock data is unavailable for
       // this reference date, return null so the card renders "-" instead
       // of falling through to whole-portfolio NAV (which would misleadingly
       // show the entire portfolio's return for the filtered view).
-      if (ratio === null) return { pct: null, pnl: null };
-      const baseVal = _fxConv(snap.total_value * ratio, snap);
+      if (baseVal === null) return { pct: null, pnl: null };
       const pnl = _currentFxVal - baseVal;
       const pct = baseVal > 0 ? (pnl / baseVal * 100) : null;
       return { pct, pnl };
@@ -298,7 +301,6 @@ function renderPortfolio() {
     // Whole portfolio: NAV-based % + total value PnL
     const nav = _navAdj(snap[navField || 'nav'], snap.fx_usdkrw);
     const pct = nav && curNav ? ((curNav / nav - 1) * 100) : null;
-    const baseVal = _snapToFxVal(snap);
     const pnl = baseVal != null ? _currentFxVal - baseVal : null;
     return { pct, pnl };
   };
@@ -324,18 +326,9 @@ function renderPortfolio() {
   if (!isFiltered && pfPrevDaySnapshot && pfPrevDaySnapshot.today_net_cashflow) {
     totalDailyPnlDisplay -= _fxConv(pfPrevDaySnapshot.today_net_cashflow, null);
   }
-  // Filtered TODAY should use the same 22:00 snapshot baseline as the whole
-  // portfolio. Falling back to quote "previous close" makes yesterday's KRX
-  // daily move leak into the next pre-open session, even though the 22:00
-  // snapshot has already absorbed it. Only use quote math when per-stock
-  // snapshot data is unavailable for the filtered reference date.
-  if (isFiltered && dailyNavPct === null && totalMarketValue > 0) {
-    const prevMV = totalMarketValue - totalDailyPnl;
-    if (prevMV > 0) {
-      dailyNavPct = (totalDailyPnl / prevMV) * 100;
-      totalDailyPnlDisplay = _fxConv(totalDailyPnl, null);
-    }
-  }
+  // Do not fall back to quote previous-close math for filtered TODAY. The
+  // table footer intentionally uses quote-session 등락률, but the TODAY card
+  // is strictly a 22:00 settlement comparison.
   // Table footer "등락률" is a quote-session aggregate of the visible rows.
   // It intentionally differs from the TODAY card, which compares against the
   // portfolio's 22:00 NAV snapshot.

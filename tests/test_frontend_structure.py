@@ -37,3 +37,9 @@ def test_portfolio_feature_files_stay_below_maintenance_ceiling():
     for name in PORTFOLIO_SPLIT_FILES:
         lines = (JS / name).read_text(encoding="utf-8").splitlines()
         assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
+
+
+def test_today_card_does_not_fallback_to_quote_session_return():
+    source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    forbidden = "totalDailyPnl / prevMV"
+    assert forbidden not in source, "TODAY card must stay on the 22:00 settlement baseline, not quote-session math"

@@ -1867,24 +1867,36 @@ async def resolve_name(code: str = Query(..., min_length=1)):
 
 # --- NAV / Snapshots / Cashflows ---
 
+def _portfolio_today_baseline_date(now: datetime | None = None) -> str:
+    """Return the settlement date that the Today card should compare from.
+
+    Portfolio snapshots are produced at 22:00 KST. Until 21:59 the active
+    Today window starts from the previous settlement; from 22:00 onward it
+    starts from the snapshot just produced for the current date.
+    """
+    now = now or datetime.now()
+    baseline = now.date()
+    if now.hour < 22:
+        baseline = baseline - timedelta(days=1)
+    return baseline.isoformat()
+
+
 @router.get("/api/portfolio/prev-day-snapshot")
 async def get_prev_day_snapshot(request: Request):
     user = _require_user(await get_current_user(request))
-    from datetime import date, timedelta
-    today = date.today()
-    yesterday = (today - timedelta(days=1)).isoformat()
+    baseline_date = _portfolio_today_baseline_date()
     db = await cache.get_db()
-    # Previous day's closing snapshot
+    # Latest 22:00 settlement snapshot for the active Today window.
     cursor = await db.execute(
         "SELECT date, total_value, fx_usdkrw, nav FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
-        (user["google_sub"], yesterday),
+        (user["google_sub"], baseline_date),
     )
     snap_row = await cursor.fetchone()
     total_value = snap_row["total_value"] if snap_row else None
     fx_usdkrw = snap_row["fx_usdkrw"] if snap_row else None
     prev_nav = snap_row["nav"] if snap_row else None
     # Per-stock snapshots
-    stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], yesterday)
+    stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], baseline_date)
     stock_values = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
     # Net cashflow not yet reflected in snapshot. Use created_at > snapshot
     # date 22:00 (snapshot runs at 22:00) to catch cashflows entered after
@@ -1893,7 +1905,7 @@ async def get_prev_day_snapshot(request: Request):
     if snap_date:
         created_after = f"{snap_date}T22:00:00"
     else:
-        created_after = today.isoformat()
+        created_after = baseline_date
     cursor2 = await db.execute(
         "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ?",
         (user["google_sub"], created_after),
@@ -1987,15 +1999,23 @@ async def get_benchmark_history(code: str = Query(...), start: str = Query(...))
 @router.get("/api/portfolio/intraday")
 async def get_intraday(request: Request):
     user = _require_user(await get_current_user(request))
-    from datetime import date, timedelta
     today = date.today()
+    baseline_date = _portfolio_today_baseline_date()
     points = await cache.get_intraday_snapshots(user["google_sub"], today.isoformat())
-    # Prepend previous day's closing snapshot as baseline (ts="00:00")
-    yesterday = (today - timedelta(days=1)).isoformat()
+    if baseline_date == today.isoformat():
+        # Once the 22:00 settlement exists, the new Today window starts at
+        # that snapshot. Same-day intraday points before 22:00 belong to the
+        # completed window and must not leak into the reset sparkline.
+        points = [
+            p for p in points
+            if str(p.get("ts") or "") > f"{baseline_date}T22:00"
+        ]
+    # Prepend active 22:00 settlement snapshot as the zero baseline. The
+    # frontend treats T00:00 as x=0 on the 22→22 sparkline axis.
     db = await cache.get_db()
     cursor = await db.execute(
         "SELECT total_value FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
-        (user["google_sub"], yesterday),
+        (user["google_sub"], baseline_date),
     )
     row = await cursor.fetchone()
     if row and row["total_value"]:

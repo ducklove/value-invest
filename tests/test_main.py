@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -139,6 +140,16 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as exc_info:
                 await portfolio.add_cashflow(request, {"type": "deposit", "amount": "not-a-number"})
         self.assertEqual(exc_info.exception.status_code, 400)
+
+    def test_portfolio_today_baseline_resets_at_22(self):
+        self.assertEqual(
+            portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 21, 59, 59)),
+            "2026-04-30",
+        )
+        self.assertEqual(
+            portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 22, 0, 0)),
+            "2026-05-01",
+        )
 
     def test_analysis_snapshot_staleness(self):
         self.assertTrue(deps.analysis_snapshot_is_stale(None))
