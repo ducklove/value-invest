@@ -7,9 +7,39 @@ from routes import portfolio as pf
 class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         pf._asset_history_cache.clear()
+        pf._failed_yf_tickers.clear()
 
     async def asyncTearDown(self):
         pf._asset_history_cache.clear()
+        pf._failed_yf_tickers.clear()
+
+    async def test_static_foreign_etfs_skip_ticker_discovery(self):
+        with patch.object(pf, "_yfinance_find_ticker", new=AsyncMock(side_effect=AssertionError("no probe"))), \
+             patch.object(pf, "_fetch_naver_world_stock", new=AsyncMock(side_effect=AssertionError("no naver"))):
+            self.assertEqual(await pf._resolve_foreign_reuters("A200"), "A200.AX")
+            self.assertEqual(await pf._resolve_foreign_reuters("EUN2.DE"), "EUN2.DE")
+            self.assertEqual(await pf._resolve_foreign_name("A200.AX"), "BetaShares Australia 200 ETF")
+            self.assertEqual(await pf._detect_currency("EUN2.DE"), "EUR")
+
+            resolved = await pf.resolve_name(code="A200")
+
+        self.assertEqual(resolved["stock_code"], "A200.AX")
+        self.assertEqual(resolved["stock_name"], "BetaShares Australia 200 ETF")
+
+    async def test_static_foreign_etf_quote_uses_fast_yahoo_path_only(self):
+        fast = AsyncMock(return_value={"price": 12345, "change": 10, "change_pct": 0.1})
+        legacy = AsyncMock(side_effect=AssertionError("legacy yfinance should not run"))
+        kis = AsyncMock(side_effect=AssertionError("KIS should not run for static non-KIS ETF"))
+
+        with patch.object(pf, "_yfinance_fetch_quote_fast", new=fast), \
+             patch.object(pf, "_yfinance_fetch_quote", new=legacy), \
+             patch.object(pf, "_kis_fetch_foreign_quote", new=kis):
+            quote = await pf._fetch_foreign_quote("EUN2")
+
+        self.assertEqual(quote["price"], 12345)
+        fast.assert_awaited_once_with("EUN2.DE")
+        legacy.assert_not_awaited()
+        kis.assert_not_awaited()
 
     async def test_korean_stock_history_uses_kis_daily_rows(self):
         calls = []

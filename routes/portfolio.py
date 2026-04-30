@@ -35,6 +35,36 @@ router = APIRouter()
 
 _SPECIAL_ASSETS = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
 
+# Static exceptions for foreign ETFs that are already known Yahoo symbols.
+# These avoid the slow yfinance `.info` suffix-probing path during portfolio
+# add/import and quote refreshes.
+_STATIC_FOREIGN_TICKERS = {
+    "A200": {
+        "ticker": "A200.AX",
+        "name": "BetaShares Australia 200 ETF",
+        "currency": "AUD",
+    },
+    "A200.AX": {
+        "ticker": "A200.AX",
+        "name": "BetaShares Australia 200 ETF",
+        "currency": "AUD",
+    },
+    "EUN2": {
+        "ticker": "EUN2.DE",
+        "name": "iShares Core EURO STOXX 50 UCITS ETF EUR",
+        "currency": "EUR",
+    },
+    "EUN2.DE": {
+        "ticker": "EUN2.DE",
+        "name": "iShares Core EURO STOXX 50 UCITS ETF EUR",
+        "currency": "EUR",
+    },
+}
+
+
+def _static_foreign_ticker(code: str) -> dict | None:
+    return _STATIC_FOREIGN_TICKERS.get((code or "").strip().upper())
+
 _CASH_NAMES = {
     "CASH_KRW": "원화", "CASH_USD": "미국 달러", "CASH_EUR": "유로",
     "CASH_JPY": "일본 엔", "CASH_CNY": "중국 위안", "CASH_HKD": "홍콩 달러",
@@ -95,6 +125,9 @@ async def _resolve_name(stock_code: str) -> str | None:
         return _SPECIAL_ASSET_NAMES[stock_code]
     if stock_code in _CASH_NAMES:
         return _CASH_NAMES[stock_code]
+    static = _static_foreign_ticker(stock_code)
+    if static:
+        return static["name"]
     if _is_korean_stock(stock_code):
         name = await cache.resolve_stock_name(stock_code)
         if name:
@@ -149,6 +182,7 @@ _NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 _YAHOO_HTTP_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 _YAHOO_SEM = asyncio.Semaphore(4)
 _INSIGHT_QUOTE_TIMEOUT = 8.5
+_STATIC_FOREIGN_QUOTE_TIMEOUT = 3.0
 
 # Negative cache: tickers we already failed to resolve via yfinance — avoids
 # re-running the 16-suffix loop on every quote refresh.
@@ -188,6 +222,9 @@ async def _yf_run(fn):
 
 async def _resolve_foreign_name(ticker: str) -> str | None:
     """Try yfinance first, then Naver as fallback."""
+    static = _static_foreign_ticker(ticker)
+    if static:
+        return static["name"]
     name = await _yfinance_resolve_name(ticker)
     if name:
         return name
@@ -209,6 +246,9 @@ async def _yfinance_find_ticker(ticker: str) -> str | None:
     """Find a working yfinance ticker, trying various exchange suffixes.
     Bounded by _YF_SEM and a per-call timeout; results (positive and negative)
     are cached to avoid re-running the suffix loop on every quote refresh."""
+    static = _static_foreign_ticker(ticker)
+    if static:
+        return static["ticker"]
     if ticker in _ticker_map:
         return _ticker_map[ticker]
     if ticker in _failed_yf_tickers:
@@ -239,6 +279,9 @@ async def _yfinance_find_ticker(ticker: str) -> str | None:
 
 
 async def _yfinance_resolve_name(ticker: str) -> str | None:
+    static = _static_foreign_ticker(ticker)
+    if static:
+        return static["name"]
     try:
         import yfinance as yf
         found = await _yfinance_find_ticker(ticker)
@@ -257,6 +300,9 @@ async def _yfinance_resolve_name(ticker: str) -> str | None:
 async def _resolve_foreign_reuters(ticker: str) -> str | None:
     """Find a working yfinance ticker, or fall back to Naver reuters code."""
     # yfinance first — more reliable for foreign stocks
+    static = _static_foreign_ticker(ticker)
+    if static:
+        return static["ticker"]
     found = await _yfinance_find_ticker(ticker)
     if found:
         return found
@@ -320,6 +366,24 @@ async def _kis_fetch_foreign_quote(ticker: str) -> dict:
 
 
 async def _fetch_foreign_quote(reuters_code: str) -> dict:
+    static = _static_foreign_ticker(reuters_code)
+    if static:
+        try:
+            q = await asyncio.wait_for(
+                _yfinance_fetch_quote_fast(static["ticker"]),
+                timeout=_STATIC_FOREIGN_QUOTE_TIMEOUT,
+            )
+        except Exception as exc:
+            logger.warning(
+                "static foreign quote fast path failed (%s): %s",
+                static["ticker"],
+                exc,
+            )
+            q = {}
+        if q and q.get("price") is not None:
+            return q
+        return {}
+
     # 1. KIS proxy — fastest and most reliable for US/HK stocks
     q = await _kis_fetch_foreign_quote(reuters_code)
     if q and q.get("price") is not None:
@@ -644,7 +708,7 @@ async def _fetch_quote(stock_code: str) -> dict:
     if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
         return cached[1]
     if _is_dead(stock_code):
-        return {}
+        return _last_known_quotes.get(stock_code, {})
     if _is_cash_asset(stock_code):
         q = await _fetch_cash_quote(stock_code)
     elif stock_code == "KRX_GOLD":
@@ -681,6 +745,8 @@ async def _fetch_quote(stock_code: str) -> dict:
         _last_known_quotes[stock_code] = q
     else:
         _mark_dead(stock_code)
+        if stock_code in _last_known_quotes:
+            return _last_known_quotes[stock_code]
     return q
 
 
@@ -769,6 +835,9 @@ async def _get_fx_rates() -> dict[str, float]:
 
 
 async def _detect_currency(stock_code: str) -> str:
+    static = _static_foreign_ticker(stock_code)
+    if static:
+        return static["currency"]
     # yfinance first
     try:
         import yfinance as yf
@@ -1122,6 +1191,9 @@ async def _asset_history_for_insight(code: str, item: dict) -> dict:
         return {"rows": [], "currency": code.replace("CASH_", "")}
     if _is_korean_stock(code):
         return await _download_korean_history(code)
+    static = _static_foreign_ticker(code)
+    if static:
+        return await _download_yfinance_history(static["ticker"])
     await _ensure_ticker_map()
     ticker = _ticker_map.get(code) or _yfinance_direct_ticker(code)
     return await _download_yfinance_history(ticker)
@@ -1156,7 +1228,12 @@ async def _fetch_quote_for_insight(stock_code: str) -> dict:
         stale = {}
 
     await _ensure_ticker_map()
-    ticker = _ticker_map.get(stock_code) or _yfinance_direct_ticker(stock_code)
+    static = _static_foreign_ticker(stock_code)
+    ticker = (
+        (static["ticker"] if static else None)
+        or _ticker_map.get(stock_code)
+        or _yfinance_direct_ticker(stock_code)
+    )
     try:
         q = await asyncio.wait_for(_yfinance_fetch_quote_fast(ticker), timeout=_INSIGHT_QUOTE_TIMEOUT)
     except Exception as exc:
@@ -1853,6 +1930,13 @@ async def resolve_name(code: str = Query(..., min_length=1)):
         return {"stock_code": code, "stock_name": _CASH_NAMES.get(code, code)}
     if code in _SPECIAL_ASSETS:
         return {"stock_code": code, "stock_name": _SPECIAL_ASSET_NAMES.get(code, code)}
+    static = _static_foreign_ticker(code)
+    if static:
+        return {
+            "stock_code": static["ticker"],
+            "stock_name": static["name"],
+            "reuters_code": static["ticker"],
+        }
     if _is_korean_stock(code):
         name = await _resolve_name(code)
         return {"stock_code": code, "stock_name": name}
