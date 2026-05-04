@@ -479,7 +479,7 @@ function renderPortfolio() {
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
-        <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
+        <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num pf-col-target"><span class="pf-target-edit-wrap"><input class="pf-edit-input" id="pfEditTarget" value="${r.target_price ?? ''}" type="number" step="any" placeholder="자동"><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 즉시 비우기 (자동 계산 복귀)">×</button></span></td>
         <td class="pf-col-num pf-col-achiev">${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
@@ -502,7 +502,7 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-benchmark js-pf-bench-picker">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
-      <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtKrw(r.tradingValue) : '-'}</td>
+      <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
       <td class="pf-col-num pf-col-target">${r.targetPrice !== null ? _fp(r.targetPrice) : '-'}</td>
       <td class="pf-col-num pf-col-achiev">${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
@@ -817,12 +817,16 @@ function _renderSummarySparklines(currentTotalValue) {
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
-function fmtKrw(n) {
+function fmtKrw(n, maxDecimals = null) {
   if (n === null || n === undefined) return '-';
   const a = Math.abs(n);
-  if (a >= 1e12) { const v = n / 1e12; const d = a >= 1e15 ? 0 : a >= 1e14 ? 1 : a >= 1e13 ? 2 : 3; return v.toFixed(d) + '조'; }
-  if (a >= 1e8)  { const v = n / 1e8;  const d = a >= 1e11 ? 0 : a >= 1e10 ? 1 : a >= 1e9 ? 2 : 3;  return v.toFixed(d) + '억'; }
+  const clampDigits = d => Number.isFinite(maxDecimals) ? Math.min(d, Math.max(0, maxDecimals)) : d;
+  if (a >= 1e12) { const v = n / 1e12; const d = clampDigits(a >= 1e15 ? 0 : a >= 1e14 ? 1 : a >= 1e13 ? 2 : 3); return v.toFixed(d) + '조'; }
+  if (a >= 1e8)  { const v = n / 1e8;  const d = clampDigits(a >= 1e11 ? 0 : a >= 1e10 ? 1 : a >= 1e9 ? 2 : 3);  return v.toFixed(d) + '억'; }
   return Number(Math.round(n)).toLocaleString();
+}
+function fmtTradingValueKrw(n) {
+  return fmtKrw(n, 2);
 }
 
 function pfFmtPortfolioValue(value) {
