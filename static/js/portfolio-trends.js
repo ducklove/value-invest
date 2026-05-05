@@ -5,15 +5,23 @@ let _navChartInstance = null;
 // init 되어 차트가 아예 안 보이는 증상 대응. treemap 과 동일 패턴.
 let _navChartResizeObserver = null;
 let _valueChartResizeObserver = null;
+let _groupWeightChartResizeObserver = null;
 let _navChartData = [];  // cached for benchmark overlay
 let _navChartSeriesForAxis = [];
 let _navBenchSeriesForAxis = [];
 let _valueChartData = [];
 let _valueChartSeriesForAxis = [];
+let _groupWeightChartInstance = null;
+let _groupWeightChartData = [];
+let _groupWeightSeriesForAxis = [];
 let _benchCache = {};    // code -> [{date, close}]
 
 const _BENCH_COLORS = { KOSPI: '#e74c3c', SP500: '#2563eb', GOLD: '#f59e0b' };
 const _BENCH_LABELS = { KOSPI: '코스피', SP500: 'S&P 500', GOLD: '금' };
+const _GROUP_WEIGHT_COLORS = [
+  '#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#7c3aed', '#0891b2',
+  '#db2777', '#65a30d', '#ea580c', '#475569', '#0f766e', '#9333ea',
+];
 
 function _getSelectedBenchmarks() {
   return Array.from(document.querySelectorAll('.pf-bench-chip input[value]:checked')).map(el => el.value);
@@ -559,6 +567,174 @@ async function renderValueChart(data) {
         _applyVisibleYAxis(_valueChartInstance, _valueChartSeriesForAxis, startIdx, endIdx, !!document.getElementById('pfValueYZero')?.checked);
         _updateChartRangeLabel('pfValueRange', data, startIdx, endIdx);
         _updateValueCagrCard(data, fxValues, startIdx, endIdx);
+      }, 80);
+    });
+  }
+}
+
+function _prepareGroupWeightChartData(rows) {
+  const cleanRows = (Array.isArray(rows) ? rows : [])
+    .map(row => ({
+      date: String(row.date || ''),
+      group: String(row.group_name || '기타'),
+      weight: Number(row.weight_pct),
+      value: Number(row.market_value),
+    }))
+    .filter(row => row.date && Number.isFinite(row.weight));
+  const dates = Array.from(new Set(cleanRows.map(row => row.date))).sort();
+  const latestDate = dates[dates.length - 1] || null;
+  const latestWeights = {};
+  const totalValues = {};
+  cleanRows.forEach(row => {
+    totalValues[row.group] = (totalValues[row.group] || 0) + Math.abs(Number.isFinite(row.value) ? row.value : 0);
+    if (row.date === latestDate) latestWeights[row.group] = row.weight;
+  });
+  const groups = Array.from(new Set(cleanRows.map(row => row.group))).sort((a, b) => {
+    const latestDiff = (latestWeights[b] ?? -Infinity) - (latestWeights[a] ?? -Infinity);
+    if (latestDiff) return latestDiff;
+    const valueDiff = (totalValues[b] || 0) - (totalValues[a] || 0);
+    if (valueDiff) return valueDiff;
+    return a.localeCompare(b);
+  });
+  const byDateGroup = {};
+  cleanRows.forEach(row => {
+    const key = `${row.date}::${row.group}`;
+    byDateGroup[key] = row.weight;
+  });
+  const latest = cleanRows
+    .filter(row => row.date === latestDate)
+    .sort((a, b) => b.weight - a.weight);
+  return { dates, groups, byDateGroup, latest };
+}
+
+async function renderGroupWeightChart(rows) {
+  const container = document.getElementById('pfGroupWeightChart');
+  if (!container) return;
+  if (_groupWeightChartInstance) {
+    _groupWeightChartInstance.dispose();
+    _groupWeightChartInstance = null;
+  }
+  if (_groupWeightChartResizeObserver) {
+    _groupWeightChartResizeObserver.disconnect();
+    _groupWeightChartResizeObserver = null;
+  }
+  _groupWeightChartData = Array.isArray(rows) ? rows : [];
+  _groupWeightSeriesForAxis = [];
+
+  const statsEl = document.getElementById('pfGroupWeightStats');
+  if (statsEl) statsEl.innerHTML = '';
+
+  await new Promise(r => requestAnimationFrame(r));
+
+  const prepared = _prepareGroupWeightChartData(_groupWeightChartData);
+  if (!prepared.dates.length || !prepared.groups.length) {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">그룹 비중 스냅샷이 아직 없습니다.</div>';
+    _updateChartRangeLabel('pfGroupWeightRange', [], 0, 0);
+    return;
+  }
+  if (typeof PortfolioTrendChart === 'undefined') {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">차트 렌더러를 불러오지 못했습니다.</div>';
+    return;
+  }
+
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+  const mobileChartMode = _isMobileChartMode();
+  const dateObjects = prepared.dates.map(date => ({ date }));
+  const series = prepared.groups.map((group, idx) => {
+    const color = _GROUP_WEIGHT_COLORS[idx % _GROUP_WEIGHT_COLORS.length];
+    return {
+      name: group,
+      type: 'line',
+      data: prepared.dates.map(date => {
+        const value = prepared.byDateGroup[`${date}::${group}`];
+        return Number.isFinite(value) ? Number(value.toFixed(2)) : '-';
+      }),
+      smooth: 0.25,
+      symbol: 'none',
+      lineStyle: { color, width: prepared.groups.length > 8 ? 1.5 : 2 },
+      itemStyle: { color },
+      connectNulls: true,
+      tooltipSuffix: '%',
+    };
+  });
+
+  _groupWeightChartInstance = PortfolioTrendChart.create(container, {
+    legend: {
+      data: prepared.groups,
+      top: 0,
+      right: 0,
+      textStyle: { color: textColor, fontSize: 11 },
+      itemWidth: 18,
+      itemHeight: 2,
+    },
+    grid: { left: 52, right: 12, top: 28, bottom: mobileChartMode ? 24 : 56 },
+    dataZoom: mobileChartMode ? [] : [{ start: 0, end: 100 }],
+    xAxis: {
+      type: 'category',
+      data: prepared.dates,
+      axisLine: { lineStyle: { color: gridColor } },
+      axisLabel: { color: textColor, fontSize: 10 },
+    },
+    yAxis: {
+      type: 'value',
+      min: 'dataMin',
+      axisLabel: {
+        color: textColor,
+        fontSize: 10,
+        formatter: v => `${Number(v).toFixed(0)}%`,
+      },
+      splitLine: { lineStyle: { color: gridColor, width: 0.5 } },
+    },
+    series,
+  });
+
+  _groupWeightSeriesForAxis = series.map(item => _chartDataToNumbers(item.data));
+  const fullWindow = _chartZoomWindow(prepared.dates.length, 0, 100);
+  _applyVisibleYAxis(
+    _groupWeightChartInstance,
+    _groupWeightSeriesForAxis,
+    fullWindow.startIdx,
+    fullWindow.endIdx,
+    false,
+  );
+  _updateChartRangeLabel('pfGroupWeightRange', dateObjects, fullWindow.startIdx, fullWindow.endIdx);
+
+  if (statsEl) {
+    statsEl.innerHTML = prepared.latest.slice(0, 8).map(row => {
+      const value = `${row.weight.toFixed(1)}%`;
+      const title = Number.isFinite(row.value) ? ` title="${escapeHtml(fmtKrw(row.value))}"` : '';
+      return `<div class="pf-nav-ret-card"${title}><div class="pf-nav-ret-label">${escapeHtml(row.group)}</div><div class="pf-nav-ret-value">${value}</div></div>`;
+    }).join('');
+  }
+
+  if (typeof ResizeObserver !== 'undefined' && _groupWeightChartInstance) {
+    const ro = new ResizeObserver(() => {
+      if (_groupWeightChartInstance && _groupWeightChartInstance.resize) {
+        _groupWeightChartInstance.resize();
+      }
+    });
+    ro.observe(container);
+    _groupWeightChartResizeObserver = ro;
+  }
+
+  if (_groupWeightChartInstance && typeof _groupWeightChartInstance.on === 'function') {
+    let _zoomTimer = null;
+    _groupWeightChartInstance.on('datazoom', () => {
+      clearTimeout(_zoomTimer);
+      _zoomTimer = setTimeout(() => {
+        const { startIdx, endIdx } = _chartWindowFromInstance(
+          _groupWeightChartInstance,
+          prepared.dates.length,
+        );
+        _applyVisibleYAxis(
+          _groupWeightChartInstance,
+          _groupWeightSeriesForAxis,
+          startIdx,
+          endIdx,
+          false,
+        );
+        _updateChartRangeLabel('pfGroupWeightRange', dateObjects, startIdx, endIdx);
       }, 80);
     });
   }

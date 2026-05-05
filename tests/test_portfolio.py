@@ -334,3 +334,46 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
     async def test_resolve_unknown_stock(self):
         name = await cache.resolve_stock_name("999999")
         self.assertIsNone(name)
+
+    async def test_group_weight_history_uses_snapshot_values(self):
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 10, 1000,
+            group_name="국내주식",
+        )
+        await cache.save_portfolio_item(
+            "u1", "000660", "SK하이닉스", 10, 1000,
+            group_name="반도체",
+        )
+        await cache.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
+        await cache.save_stock_snapshots(
+            "u1",
+            "2026-01-02",
+            [
+                {"stock_code": "005930", "market_value": 300},
+                {"stock_code": "000660", "market_value": 700},
+            ],
+        )
+
+        rows = await cache.get_group_weight_history("u1")
+
+        by_group = {row["group_name"]: row for row in rows}
+        self.assertAlmostEqual(by_group["국내주식"]["weight_pct"], 30.0)
+        self.assertAlmostEqual(by_group["반도체"]["weight_pct"], 70.0)
+        self.assertEqual(by_group["반도체"]["market_value"], 700)
+
+    async def test_group_weight_history_prefers_snapshot_group_name(self):
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 10, 1000,
+            group_name="현재그룹",
+        )
+        await cache.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
+        await cache.save_stock_snapshots(
+            "u1",
+            "2026-01-02",
+            [{"stock_code": "005930", "market_value": 1000, "group_name": "스냅샷그룹"}],
+        )
+
+        rows = await cache.get_group_weight_history("u1")
+
+        self.assertEqual(rows[0]["group_name"], "스냅샷그룹")
+        self.assertAlmostEqual(rows[0]["weight_pct"], 100.0)

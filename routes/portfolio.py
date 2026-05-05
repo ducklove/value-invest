@@ -2046,6 +2046,12 @@ async def get_nav_history(request: Request):
     return await cache.get_nav_history(user["google_sub"])
 
 
+@router.get("/api/portfolio/group-weight-history")
+async def get_group_weight_history(request: Request):
+    user = _require_user(await get_current_user(request))
+    return await cache.get_group_weight_history(user["google_sub"])
+
+
 @router.get("/api/portfolio/benchmark-history")
 async def get_benchmark_history(code: str = Query(...), start: str = Query(...)):
     """Return daily close prices for a benchmark index, served from the

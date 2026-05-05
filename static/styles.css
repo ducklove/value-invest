@@ -1095,8 +1095,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-nav-chart-container { position: relative; height: 300px; }
 .pf-nav-chart-container.pf-nav-tall { height: 600px; }
 .pf-nav-chart-container.pf-nav-short { height: 600px; }
+.pf-nav-chart-container.pf-group-weight { height: 420px; }
 .pf-nav-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .pf-nav-header h3 { margin: 0; font-size: 16px; }
+.pf-chart-note { color: var(--text-secondary); font-size: 12px; font-weight: 600; }
 .pf-snapshot-btn {
   padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
@@ -1979,6 +1981,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-nav-chart-container { height: 240px; }
   .pf-nav-chart-container.pf-nav-tall { height: 320px; }
   .pf-nav-chart-container.pf-nav-short { height: 320px; }
+  .pf-nav-chart-container.pf-group-weight { height: 280px; }
   .pf-nav-chart-wrap .pf-bench-chip,
   #pfNavReturns .pf-nav-ret-card[data-zoom-days],
   #pfValueStats .pf-nav-ret-card[data-zoom-days] {

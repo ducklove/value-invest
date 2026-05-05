@@ -50,3 +50,14 @@ def test_trade_value_column_uses_two_decimal_compact_format():
     assert "function fmtTradingValueKrw(n)" in source
     assert "return fmtKrw(n, 2);" in source
     assert "fmtKrw(r.tradingValue)" not in source
+
+
+def test_performance_tab_includes_group_weight_trend():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
+
+    assert "pfGroupWeightChart" in html
+    assert "/api/portfolio/group-weight-history" in performance
+    assert "renderGroupWeightChart(groupWeightData)" in performance
+    assert "async function renderGroupWeightChart(rows)" in trends

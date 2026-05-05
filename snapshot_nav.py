@@ -43,7 +43,11 @@ async def _fetch_total_value(google_sub: str) -> tuple[float, float, list[dict]]
             logger.warning("Quote fetch failed for %s: %s", item["stock_code"], e)
             mv = prev_stock_map.get(item["stock_code"], qty * avg_price)
         total_value += mv
-        per_stock.append({"stock_code": item["stock_code"], "market_value": mv})
+        per_stock.append({
+            "stock_code": item["stock_code"],
+            "market_value": mv,
+            "group_name": item.get("group_name"),
+        })
         await asyncio.sleep(0.25)  # rate limit
     return total_value, total_invested, per_stock
 

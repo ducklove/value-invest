@@ -211,6 +211,7 @@
         values: (series.data || []).map(toNumber),
         color: series.lineStyle?.color || series.itemStyle?.color || '#ef4444',
         dashed: series.lineStyle?.type === 'dashed',
+        tooltipSuffix: series.tooltipSuffix || '',
       }));
     }
 
@@ -277,7 +278,8 @@
         .map(series => {
           const value = series.values[idx];
           if (!Number.isFinite(value)) return '';
-          return `<div><span style="background:${series.color}"></span>${series.name || ''}: ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>`;
+          const formatted = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+          return `<div><span style="background:${series.color}"></span>${series.name || ''}: ${formatted}${series.tooltipSuffix || ''}</div>`;
         })
         .filter(Boolean)
         .join('');

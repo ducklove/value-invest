@@ -58,26 +58,29 @@ async function loadPerformanceData() {
     dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   }
   const showChartError = message => {
-    ['pfNavChart', 'pfValueChart'].forEach(id => {
+    ['pfNavChart', 'pfValueChart', 'pfGroupWeightChart'].forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
       el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:16px;text-align:center;color:var(--text-secondary);font-size:14px;">${escapeHtml(message)}</div>`;
     });
   };
   try {
-    const [navResp, cfResp] = await Promise.all([
+    const [navResp, cfResp, groupResp] = await Promise.all([
       apiFetch('/api/portfolio/nav-history'),
       apiFetch('/api/portfolio/cashflows'),
+      apiFetch('/api/portfolio/group-weight-history'),
     ]);
     if (!navResp.ok) {
       throw new Error(navResp.status === 401 ? '로그인이 필요합니다.' : `NAV 데이터를 불러오지 못했습니다. (${navResp.status})`);
     }
     const navData = navResp.ok ? await navResp.json() : [];
     const cfData = cfResp.ok ? await cfResp.json() : [];
+    const groupWeightData = groupResp.ok ? await groupResp.json() : [];
     renderNavReturns(navData);
     await Promise.all([
       renderNavChart(navData),
       renderValueChart(navData),
+      renderGroupWeightChart(groupWeightData),
     ]);
     renderCashflows(cfData, navData);
   } catch (e) {

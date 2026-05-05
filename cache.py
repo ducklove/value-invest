@@ -484,6 +484,7 @@ async def init_db():
     await _ensure_column(db, "user_portfolio", "target_price_disabled", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
+    await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
     await _ensure_column(db, "portfolio_groups", "default_type", "TEXT")
     # Backfill default_type for existing default groups by sort_order
     _type_by_order = {0: "kr", 1: "foreign", 2: "etc"}
@@ -2169,6 +2170,41 @@ async def get_nav_history(google_sub: str) -> list[dict]:
     return [dict(row) for row in await cursor.fetchall()]
 
 
+async def get_group_weight_history(google_sub: str) -> list[dict]:
+    """Return per-date portfolio group weights from saved stock snapshots.
+
+    New snapshots store group_name directly. Older rows fall back to the
+    current portfolio group mapping so existing history remains usable.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT
+            ps.date AS date,
+            COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
+            SUM(ps.market_value) AS market_value,
+            snap.total_value AS total_value,
+            CASE
+                WHEN snap.total_value != 0
+                THEN SUM(ps.market_value) * 100.0 / snap.total_value
+                ELSE NULL
+            END AS weight_pct
+        FROM portfolio_stock_snapshots ps
+        JOIN portfolio_snapshots snap
+          ON snap.google_sub = ps.google_sub
+         AND snap.date = ps.date
+        LEFT JOIN user_portfolio up
+          ON up.google_sub = ps.google_sub
+         AND up.stock_code = ps.stock_code
+        WHERE ps.google_sub = ?
+        GROUP BY ps.date, COALESCE(ps.group_name, up.group_name, '기타'), snap.total_value
+        ORDER BY ps.date ASC, market_value DESC
+        """,
+        (google_sub,),
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
 async def get_cashflows(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
@@ -2225,8 +2261,21 @@ async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
     """Save per-stock market values for a date. items: [{stock_code, market_value}, ...]"""
     db = await get_db()
     await db.executemany(
-        "INSERT OR REPLACE INTO portfolio_stock_snapshots (google_sub, date, stock_code, market_value) VALUES (?, ?, ?, ?)",
-        [(google_sub, date, it["stock_code"], it["market_value"]) for it in items],
+        """
+        INSERT OR REPLACE INTO portfolio_stock_snapshots
+        (google_sub, date, stock_code, market_value, group_name)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                google_sub,
+                date,
+                it["stock_code"],
+                it["market_value"],
+                it.get("group_name"),
+            )
+            for it in items
+        ],
     )
     await db.commit()
 
