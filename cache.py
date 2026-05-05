@@ -485,6 +485,7 @@ async def init_db():
     await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_group_date ON portfolio_stock_snapshots(google_sub, group_name, date)")
     await _ensure_column(db, "portfolio_groups", "default_type", "TEXT")
     # Backfill default_type for existing default groups by sort_order
     _type_by_order = {0: "kr", 1: "foreign", 2: "etc"}
@@ -2223,11 +2224,14 @@ async def get_group_constituent_history(google_sub: str, group_name: str) -> lis
               ON up.google_sub = ps.google_sub
              AND up.stock_code = ps.stock_code
             WHERE ps.google_sub = ?
+              AND (
+                  ps.group_name = ?
+                  OR (ps.group_name IS NULL AND COALESCE(up.group_name, '기타') = ?)
+              )
         ),
         group_totals AS (
             SELECT date, SUM(market_value) AS group_value
             FROM stock_rows
-            WHERE group_name = ?
             GROUP BY date
         )
         SELECT
@@ -2244,7 +2248,6 @@ async def get_group_constituent_history(google_sub: str, group_name: str) -> lis
         FROM stock_rows sr
         JOIN group_totals gt
           ON gt.date = sr.date
-        WHERE sr.group_name = ?
         ORDER BY sr.date ASC, sr.market_value DESC
         """,
         (google_sub, group_name, group_name),

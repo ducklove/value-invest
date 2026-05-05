@@ -1,5 +1,22 @@
 // Portfolio data loading, sorting/filtering state, and in-place quote row updates.
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
+let _pfNavHistoryPromise = null;
+
+async function pfLoadNavHistory({ force = false } = {}) {
+  if (!force && Array.isArray(pfNavHistory) && pfNavHistory.length) return pfNavHistory;
+  if (_pfNavHistoryPromise) return _pfNavHistoryPromise;
+  _pfNavHistoryPromise = (async () => {
+    const resp = await apiFetch('/api/portfolio/nav-history');
+    if (!resp.ok) throw new Error(`NAV history request failed (${resp.status})`);
+    const rows = await resp.json();
+    pfNavHistory = Array.isArray(rows) ? rows : [];
+    return pfNavHistory;
+  })().finally(() => {
+    _pfNavHistoryPromise = null;
+  });
+  return _pfNavHistoryPromise;
+}
+
 async function loadPortfolio() {
   if (portfolioLoading) return;
   portfolioLoading = true;
@@ -47,9 +64,7 @@ async function loadPortfolio() {
       pfYearStartStockValues = (snap && snap.stock_values) || {};
       renderPortfolio();
     }).catch(() => {});
-    apiFetch('/api/portfolio/nav-history').then(async r => {
-      if (!r.ok) return;
-      pfNavHistory = await r.json();
+    pfLoadNavHistory({ force: true }).then(() => {
       renderPortfolio();
     }).catch(() => {});
     apiFetch('/api/portfolio/intraday').then(async r => {

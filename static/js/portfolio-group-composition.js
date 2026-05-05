@@ -2,6 +2,8 @@
 let _groupCompositionChartInstance = null;
 let _groupCompositionResizeObserver = null;
 let _groupCompositionSelected = '';
+let _groupCompositionRequestSeq = 0;
+let _groupCompositionRenderSeq = 0;
 
 const _GROUP_COMPOSITION_MAX_SERIES = 12;
 
@@ -17,6 +19,7 @@ function _disposeGroupCompositionChart() {
 }
 
 function pfHideGroupComposition() {
+  _groupCompositionRequestSeq += 1;
   _disposeGroupCompositionChart();
   _groupCompositionSelected = '';
   document.querySelectorAll('.js-pf-group-weight-card').forEach(card => card.classList.remove('is-active'));
@@ -83,6 +86,7 @@ function _prepareGroupCompositionData(rows) {
 async function pfShowGroupComposition(groupName) {
   groupName = String(groupName || '').trim();
   if (!groupName) return;
+  const requestSeq = ++_groupCompositionRequestSeq;
   _groupCompositionSelected = groupName;
   document.querySelectorAll('.js-pf-group-weight-card').forEach(card => {
     card.classList.toggle('is-active', card.dataset.group === groupName);
@@ -100,8 +104,10 @@ async function pfShowGroupComposition(groupName) {
     const resp = await apiFetch(`/api/portfolio/group-constituent-history?group=${encodeURIComponent(groupName)}`);
     if (!resp.ok) throw new Error(`종목 비중 데이터를 불러오지 못했습니다. (${resp.status})`);
     const rows = await resp.json();
+    if (requestSeq !== _groupCompositionRequestSeq || _groupCompositionSelected !== groupName) return;
     await renderGroupCompositionChart(groupName, rows);
   } catch (err) {
+    if (requestSeq !== _groupCompositionRequestSeq || _groupCompositionSelected !== groupName) return;
     console.warn(err);
     container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">${escapeHtml(err?.message || '종목 비중 데이터를 불러오지 못했습니다.')}</div>`;
   }
@@ -110,8 +116,11 @@ async function pfShowGroupComposition(groupName) {
 async function renderGroupCompositionChart(groupName, rows) {
   const container = document.getElementById('pfGroupCompositionChart');
   if (!container) return;
+  const renderSeq = ++_groupCompositionRenderSeq;
   _disposeGroupCompositionChart();
-  await new Promise(r => requestAnimationFrame(r));
+  const containerReady = await _waitForChartContainer(container);
+  if (!containerReady && container.offsetParent === null) return;
+  if (renderSeq !== _groupCompositionRenderSeq || _groupCompositionSelected !== groupName) return;
 
   const prepared = _prepareGroupCompositionData(rows);
   if (!prepared.dates.length || !prepared.seriesItems.length) {
@@ -177,6 +186,7 @@ async function renderGroupCompositionChart(groupName, rows) {
     },
     series,
   });
+  _kickChartResize(_groupCompositionChartInstance);
 
   const fullWindow = _chartZoomWindow(prepared.dates.length, 0, 100);
   _updateChartRangeLabel('pfGroupCompositionRange', dateObjects, fullWindow.startIdx, fullWindow.endIdx);

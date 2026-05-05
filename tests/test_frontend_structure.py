@@ -56,6 +56,7 @@ def test_trade_value_column_uses_two_decimal_compact_format():
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
     chart = (JS / "portfolio-trend-chart.js").read_text(encoding="utf-8")
@@ -65,12 +66,22 @@ def test_performance_tab_includes_group_weight_trend():
     assert "pfGroupCompositionChart" in html
     assert "#pfGroupWeightChart" in styles
     assert "#pfGroupCompositionChart" in styles
+    assert ".pf-group-composition-wrap" in styles
+    assert "background: transparent" in styles
     assert "100% 누적 면적 차트" in html
+    assert "async function pfLoadNavHistory" in data
+    assert "_pfNavHistoryPromise" in data
     assert "/api/portfolio/group-weight-history" in performance
+    assert "pfLoadGroupWeightHistory" in performance
+    assert "_performanceLoadSeq" in performance
+    assert "const [navResp, cfResp, groupResp] = await Promise.all" not in performance
     assert "renderGroupWeightChart(groupWeightData)" in performance
     assert "async function renderGroupWeightChart(rows)" in trends
+    assert "async function _waitForChartContainer" in trends
+    assert "container.offsetParent === null" in trends
     assert "/api/portfolio/group-constituent-history" in composition
     assert "async function pfShowGroupComposition(groupName)" in composition
+    assert "_groupCompositionRequestSeq" in composition
     assert "stack: 'groupComposition'" in composition
     assert "stock_count" in trends
     assert "stack: 'groupWeight'" in trends

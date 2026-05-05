@@ -2,6 +2,38 @@
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 // --- Portfolio Performance Tab ---
 let pfActiveTab = 'holdings';
+let _performanceLoadSeq = 0;
+let _pfGroupWeightHistory = [];
+let _pfGroupWeightHistoryPromise = null;
+
+function _pfSetChartMessage(ids, message) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:16px;text-align:center;color:var(--text-secondary);font-size:14px;">${escapeHtml(message)}</div>`;
+  });
+}
+
+async function _pfFetchJson(path, label) {
+  const resp = await apiFetch(path);
+  if (!resp.ok) throw new Error(`${label} request failed (${resp.status})`);
+  return await resp.json();
+}
+
+async function pfLoadGroupWeightHistory({ force = false } = {}) {
+  if (!force && Array.isArray(_pfGroupWeightHistory) && _pfGroupWeightHistory.length) {
+    return _pfGroupWeightHistory;
+  }
+  if (_pfGroupWeightHistoryPromise) return _pfGroupWeightHistoryPromise;
+  _pfGroupWeightHistoryPromise = (async () => {
+    const rows = await _pfFetchJson('/api/portfolio/group-weight-history', 'Group weight history');
+    _pfGroupWeightHistory = Array.isArray(rows) ? rows : [];
+    return _pfGroupWeightHistory;
+  })().finally(() => {
+    _pfGroupWeightHistoryPromise = null;
+  });
+  return _pfGroupWeightHistoryPromise;
+}
 
 function pfSwitchTab(tab) {
   pfActiveTab = tab;
@@ -14,6 +46,7 @@ function pfSwitchTab(tab) {
   activeEl.classList.remove('fade-in');
   void activeEl.offsetWidth;
   activeEl.classList.add('fade-in');
+  if (tab !== 'performance') _performanceLoadSeq += 1;
   if (tab === 'performance') { loadPerformanceData(); _loadAiModels(); }
 }
 
@@ -52,41 +85,66 @@ function _pfTreemapEscHandler(e) {
 }
 
 async function loadPerformanceData() {
+  const loadSeq = ++_performanceLoadSeq;
   const dateInput = document.getElementById('pfCfDate');
   if (dateInput && !dateInput.value) {
     const now = new Date();
     dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   }
-  const showChartError = message => {
-    ['pfNavChart', 'pfValueChart', 'pfGroupWeightChart'].forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:16px;text-align:center;color:var(--text-secondary);font-size:14px;">${escapeHtml(message)}</div>`;
-    });
-  };
+  const cachedNav = Array.isArray(pfNavHistory) && pfNavHistory.length ? pfNavHistory : null;
+  const cachedGroup = Array.isArray(_pfGroupWeightHistory) && _pfGroupWeightHistory.length ? _pfGroupWeightHistory : null;
+  const navPromise = typeof pfLoadNavHistory === 'function'
+    ? pfLoadNavHistory()
+    : _pfFetchJson('/api/portfolio/nav-history', 'NAV history');
+  const cashflowPromise = _pfFetchJson('/api/portfolio/cashflows', 'Cashflow history').catch(err => {
+    console.warn(err);
+    return [];
+  });
+  const groupPromise = pfLoadGroupWeightHistory().catch(err => {
+    console.warn(err);
+    return [];
+  });
   try {
-    const [navResp, cfResp, groupResp] = await Promise.all([
-      apiFetch('/api/portfolio/nav-history'),
-      apiFetch('/api/portfolio/cashflows'),
-      apiFetch('/api/portfolio/group-weight-history'),
-    ]);
-    if (!navResp.ok) {
-      throw new Error(navResp.status === 401 ? '로그인이 필요합니다.' : `NAV 데이터를 불러오지 못했습니다. (${navResp.status})`);
+    if (cachedNav) {
+      renderNavReturns(cachedNav);
+      await Promise.all([
+        renderNavChart(cachedNav),
+        renderValueChart(cachedNav),
+      ]);
+    } else {
+      _pfSetChartMessage(['pfNavChart', 'pfValueChart'], '추이 데이터를 불러오는 중입니다...');
     }
-    const navData = navResp.ok ? await navResp.json() : [];
-    const cfData = cfResp.ok ? await cfResp.json() : [];
-    const groupWeightData = groupResp.ok ? await groupResp.json() : [];
-    renderNavReturns(navData);
-    await Promise.all([
-      renderNavChart(navData),
-      renderValueChart(navData),
-      renderGroupWeightChart(groupWeightData),
-    ]);
+
+    if (cachedGroup) {
+      await renderGroupWeightChart(cachedGroup);
+    } else {
+      _pfSetChartMessage(['pfGroupWeightChart'], '그룹 비중 데이터를 불러오는 중입니다...');
+    }
+
+    void groupPromise.then(async groupWeightData => {
+      if (loadSeq !== _performanceLoadSeq) return;
+      await renderGroupWeightChart(groupWeightData);
+    });
+
+    const navData = await navPromise;
+    if (loadSeq !== _performanceLoadSeq) return;
+    if (!cachedNav || navData !== cachedNav) {
+      renderNavReturns(navData);
+      await Promise.all([
+        renderNavChart(navData),
+        renderValueChart(navData),
+      ]);
+    }
+
+    const cfData = await cashflowPromise;
+    if (loadSeq !== _performanceLoadSeq) return;
     renderCashflows(cfData, navData);
+
   } catch (e) {
     console.warn(e);
     const message = e?.message || '추이 그래프를 불러오지 못했습니다.';
-    showChartError(message);
+    if (loadSeq !== _performanceLoadSeq) return;
+    _pfSetChartMessage(['pfNavChart', 'pfValueChart'], message);
     if (typeof showToast === 'function') showToast(message, 'error');
   }
 }

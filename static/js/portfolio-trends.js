@@ -6,6 +6,9 @@ let _navChartInstance = null;
 let _navChartResizeObserver = null;
 let _valueChartResizeObserver = null;
 let _groupWeightChartResizeObserver = null;
+let _navChartRenderSeq = 0;
+let _valueChartRenderSeq = 0;
+let _groupWeightChartRenderSeq = 0;
 let _navChartData = [];  // cached for benchmark overlay
 let _navChartSeriesForAxis = [];
 let _navBenchSeriesForAxis = [];
@@ -22,6 +25,21 @@ const _GROUP_WEIGHT_COLORS = [
   '#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#7c3aed', '#0891b2',
   '#db2777', '#65a30d', '#ea580c', '#475569', '#0f766e', '#9333ea',
 ];
+
+async function _waitForChartContainer(container) {
+  for (let i = 0; i < 5; i++) {
+    await new Promise(r => requestAnimationFrame(r));
+    const rect = container.getBoundingClientRect();
+    if (rect.width > 20 && rect.height > 20) return true;
+  }
+  return false;
+}
+
+function _kickChartResize(chart) {
+  if (!chart || typeof chart.resize !== 'function') return;
+  requestAnimationFrame(() => chart.resize());
+  setTimeout(() => chart.resize(), 120);
+}
 
 function _getSelectedBenchmarks() {
   return Array.from(document.querySelectorAll('.pf-bench-chip input[value]:checked')).map(el => el.value);
@@ -174,6 +192,7 @@ function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
 async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
+  const renderSeq = ++_navChartRenderSeq;
   if (_navChartInstance) { _navChartInstance.dispose(); _navChartInstance = null; }
   if (_navChartResizeObserver) { _navChartResizeObserver.disconnect(); _navChartResizeObserver = null; }
   _navChartData = data || [];
@@ -259,10 +278,12 @@ async function renderNavChart(data) {
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
   const yZero = mobileChartMode ? false : document.getElementById('pfNavYZero')?.checked;
 
-  // Let the tab display style settle once, then draw with the lightweight
-  // in-project canvas renderer. This avoids the ECharts bundle entirely for
-  // the portfolio trend view.
-  await new Promise(r => requestAnimationFrame(r));
+  // Let the tab display style settle before the lightweight renderer
+  // measures the canvas. This prevents zero-size first renders when users
+  // switch tabs quickly or the browser has not completed layout yet.
+  const containerReady = await _waitForChartContainer(container);
+  if (!containerReady && container.offsetParent === null) return;
+  if (renderSeq !== _navChartRenderSeq) return;
 
   const initBenchSeries = buildBenchSeries(0);
   const ec = PortfolioTrendChart.create(container, {
@@ -367,6 +388,7 @@ async function renderNavChart(data) {
   }
 
   _navChartInstance = ec;
+  _kickChartResize(_navChartInstance);
 
   // 폰에서 탭 전환 직후 container 높이가 늦게 확정되는 경우가 있어
   // ResizeObserver 로 크기 확정 시점에 한 번 더 그린다.
@@ -426,14 +448,15 @@ let _valueChartInstance = null;
 async function renderValueChart(data) {
   const container = document.getElementById('pfValueChart');
   if (!container) return;
+  const renderSeq = ++_valueChartRenderSeq;
   if (_valueChartInstance) { _valueChartInstance.dispose(); _valueChartInstance = null; }
   if (_valueChartResizeObserver) { _valueChartResizeObserver.disconnect(); _valueChartResizeObserver = null; }
   _valueChartData = data || [];
   _valueChartSeriesForAxis = [];
 
-  // One frame is enough for the visible tab layout to settle before the
-  // lightweight canvas renderer measures its container.
-  await new Promise(r => requestAnimationFrame(r));
+  const containerReady = await _waitForChartContainer(container);
+  if (!containerReady && container.offsetParent === null) return;
+  if (renderSeq !== _valueChartRenderSeq) return;
 
   // Stats cards
   const statsEl = document.getElementById('pfValueStats');
@@ -488,6 +511,7 @@ async function renderValueChart(data) {
       areaStyle: {},
     }],
   });
+  _kickChartResize(_valueChartInstance);
   _valueChartSeriesForAxis = [fxValues.map(v => Math.round(v))];
   const fullWindow = _chartZoomWindow(data.length, 0, 100);
   _applyVisibleYAxis(_valueChartInstance, _valueChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!valYZero);
@@ -611,6 +635,7 @@ function _prepareGroupWeightChartData(rows) {
 async function renderGroupWeightChart(rows) {
   const container = document.getElementById('pfGroupWeightChart');
   if (!container) return;
+  const renderSeq = ++_groupWeightChartRenderSeq;
   if (_groupWeightChartInstance) {
     _groupWeightChartInstance.dispose();
     _groupWeightChartInstance = null;
@@ -625,7 +650,9 @@ async function renderGroupWeightChart(rows) {
   const statsEl = document.getElementById('pfGroupWeightStats');
   if (statsEl) statsEl.innerHTML = '';
 
-  await new Promise(r => requestAnimationFrame(r));
+  const containerReady = await _waitForChartContainer(container);
+  if (!containerReady && container.offsetParent === null) return;
+  if (renderSeq !== _groupWeightChartRenderSeq) return;
 
   const prepared = _prepareGroupWeightChartData(_groupWeightChartData);
   if (!prepared.dates.length || !prepared.groups.length) {
@@ -691,6 +718,7 @@ async function renderGroupWeightChart(rows) {
     },
     series,
   });
+  _kickChartResize(_groupWeightChartInstance);
 
   _groupWeightSeriesForAxis = series.map(item => _chartDataToNumbers(item.data));
   const fullWindow = _chartZoomWindow(prepared.dates.length, 0, 100);
