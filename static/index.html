@@ -345,6 +345,17 @@ function trackEvent(name, params = {}) {
         </div>
         <div class="pf-chart-range" id="pfGroupWeightRange"></div>
         <div class="pf-nav-returns" id="pfGroupWeightStats"></div>
+        <div class="pf-group-composition-wrap" id="pfGroupCompositionWrap" style="display:none;">
+          <div class="pf-nav-header">
+            <h4 id="pfGroupCompositionTitle">그룹 내 종목 비중 추이</h4>
+            <button class="pf-mini-btn" type="button" onclick="pfHideGroupComposition()">닫기</button>
+          </div>
+          <div class="pf-nav-chart-container pf-group-composition">
+            <div id="pfGroupCompositionChart" style="width:100%;height:100%;"></div>
+          </div>
+          <div class="pf-chart-range" id="pfGroupCompositionRange"></div>
+          <div class="pf-nav-returns" id="pfGroupCompositionStats"></div>
+        </div>
       </div>
 
       <div class="pf-cashflow-section">
@@ -529,6 +540,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-ai.js" defer></script>
 <script src="./js/portfolio-performance.js" defer></script>
 <script src="./js/portfolio-trends.js" defer></script>
+<script src="./js/portfolio-group-composition.js" defer></script>
 <script src="./js/portfolio-cashflows.js" defer></script>
 <script src="./js/portfolio-events.js" defer></script>
 <script src="./js/backtest.js" defer></script>

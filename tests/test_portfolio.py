@@ -379,3 +379,36 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["group_name"], "스냅샷그룹")
         self.assertAlmostEqual(rows[0]["weight_pct"], 100.0)
         self.assertEqual(rows[0]["stock_count"], 1)
+
+    async def test_group_constituent_history_uses_group_total(self):
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 10, 1000,
+            group_name="반도체",
+        )
+        await cache.save_portfolio_item(
+            "u1", "000660", "SK하이닉스", 10, 1000,
+            group_name="반도체",
+        )
+        await cache.save_portfolio_item(
+            "u1", "035420", "NAVER", 10, 1000,
+            group_name="인터넷",
+        )
+        await cache.save_snapshot("u1", "2026-01-02", 2000, 1500, 1000, 2, 1400)
+        await cache.save_stock_snapshots(
+            "u1",
+            "2026-01-02",
+            [
+                {"stock_code": "005930", "market_value": 300},
+                {"stock_code": "000660", "market_value": 700},
+                {"stock_code": "035420", "market_value": 1000},
+            ],
+        )
+
+        rows = await cache.get_group_constituent_history("u1", "반도체")
+
+        by_code = {row["stock_code"]: row for row in rows}
+        self.assertEqual(set(by_code), {"005930", "000660"})
+        self.assertAlmostEqual(by_code["005930"]["weight_pct"], 30.0)
+        self.assertAlmostEqual(by_code["000660"]["weight_pct"], 70.0)
+        self.assertEqual(by_code["005930"]["group_value"], 1000)
+        self.assertEqual(by_code["000660"]["stock_name"], "SK하이닉스")

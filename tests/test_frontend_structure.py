@@ -16,6 +16,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-ai.js",
     "portfolio-performance.js",
     "portfolio-trends.js",
+    "portfolio-group-composition.js",
     "portfolio-cashflows.js",
     "portfolio-events.js",
 ]
@@ -57,12 +58,17 @@ def test_performance_tab_includes_group_weight_trend():
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
     chart = (JS / "portfolio-trend-chart.js").read_text(encoding="utf-8")
+    composition = (JS / "portfolio-group-composition.js").read_text(encoding="utf-8")
 
     assert "pfGroupWeightChart" in html
+    assert "pfGroupCompositionChart" in html
     assert "100% 누적 면적 차트" in html
     assert "/api/portfolio/group-weight-history" in performance
     assert "renderGroupWeightChart(groupWeightData)" in performance
     assert "async function renderGroupWeightChart(rows)" in trends
+    assert "/api/portfolio/group-constituent-history" in composition
+    assert "async function pfShowGroupComposition(groupName)" in composition
+    assert "stack: 'groupComposition'" in composition
     assert "stock_count" in trends
     assert "stack: 'groupWeight'" in trends
     assert "areaStyle: { opacity:" in trends

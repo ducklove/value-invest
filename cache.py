@@ -2206,6 +2206,52 @@ async def get_group_weight_history(google_sub: str) -> list[dict]:
     return [dict(row) for row in await cursor.fetchall()]
 
 
+async def get_group_constituent_history(google_sub: str, group_name: str) -> list[dict]:
+    """Return stock weights within one portfolio group for each snapshot date."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        WITH stock_rows AS (
+            SELECT
+                ps.date AS date,
+                ps.stock_code AS stock_code,
+                COALESCE(up.stock_name, ps.stock_code) AS stock_name,
+                ps.market_value AS market_value,
+                COALESCE(ps.group_name, up.group_name, '기타') AS group_name
+            FROM portfolio_stock_snapshots ps
+            LEFT JOIN user_portfolio up
+              ON up.google_sub = ps.google_sub
+             AND up.stock_code = ps.stock_code
+            WHERE ps.google_sub = ?
+        ),
+        group_totals AS (
+            SELECT date, SUM(market_value) AS group_value
+            FROM stock_rows
+            WHERE group_name = ?
+            GROUP BY date
+        )
+        SELECT
+            sr.date,
+            sr.stock_code,
+            sr.stock_name,
+            sr.market_value,
+            gt.group_value,
+            CASE
+                WHEN gt.group_value != 0
+                THEN sr.market_value * 100.0 / gt.group_value
+                ELSE NULL
+            END AS weight_pct
+        FROM stock_rows sr
+        JOIN group_totals gt
+          ON gt.date = sr.date
+        WHERE sr.group_name = ?
+        ORDER BY sr.date ASC, sr.market_value DESC
+        """,
+        (google_sub, group_name, group_name),
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
 async def get_cashflows(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(

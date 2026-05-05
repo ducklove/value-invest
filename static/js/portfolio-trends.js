@@ -701,8 +701,15 @@ async function renderGroupWeightChart(rows) {
       const value = `${row.weight.toFixed(1)}%`;
       const count = Number.isFinite(row.stockCount) ? ` · ${row.stockCount.toLocaleString()}종목` : '';
       const title = Number.isFinite(row.value) ? ` title="${escapeHtml(fmtKrw(row.value))}"` : '';
-      return `<div class="pf-nav-ret-card"${title}><div class="pf-nav-ret-label">${escapeHtml(row.group)}${count}</div><div class="pf-nav-ret-value">${value}</div></div>`;
+      return `<div class="pf-nav-ret-card js-pf-group-weight-card" data-group="${escapeHtml(row.group)}"${title}><div class="pf-nav-ret-label">${escapeHtml(row.group)}${count}</div><div class="pf-nav-ret-value">${value}</div></div>`;
     }).join('');
+    statsEl.querySelectorAll('.js-pf-group-weight-card').forEach(card => {
+      card.addEventListener('click', () => {
+        if (typeof pfShowGroupComposition === 'function') {
+          pfShowGroupComposition(card.dataset.group || '');
+        }
+      });
+    });
   }
 
   if (typeof ResizeObserver !== 'undefined' && _groupWeightChartInstance) {
