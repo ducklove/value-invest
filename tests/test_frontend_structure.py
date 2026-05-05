@@ -24,6 +24,10 @@ PORTFOLIO_SPLIT_FILES = [
 
 def test_index_loads_portfolio_split_scripts_in_contract_order():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "<title>Value Compass</title>" in html
+    assert "Value is All You Need" in html
+    assert "한국 주식 가치투자 분석" not in html
+
     positions = []
     for name in PORTFOLIO_SPLIT_FILES:
         marker = f'./js/{name}'

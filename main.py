@@ -212,7 +212,7 @@ async def lifespan(app: FastAPI):
         await cache.close_db()
 
 
-app = FastAPI(title="한국 주식 가치투자 분석", lifespan=lifespan)
+app = FastAPI(title="Value Compass", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
