@@ -360,6 +360,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(by_group["국내주식"]["weight_pct"], 30.0)
         self.assertAlmostEqual(by_group["반도체"]["weight_pct"], 70.0)
         self.assertEqual(by_group["반도체"]["market_value"], 700)
+        self.assertEqual(by_group["반도체"]["stock_count"], 1)
 
     async def test_group_weight_history_prefers_snapshot_group_name(self):
         await cache.save_portfolio_item(
@@ -377,3 +378,4 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(rows[0]["group_name"], "스냅샷그룹")
         self.assertAlmostEqual(rows[0]["weight_pct"], 100.0)
+        self.assertEqual(rows[0]["stock_count"], 1)

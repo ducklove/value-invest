@@ -2183,6 +2183,7 @@ async def get_group_weight_history(google_sub: str) -> list[dict]:
             ps.date AS date,
             COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
             SUM(ps.market_value) AS market_value,
+            COUNT(DISTINCT ps.stock_code) AS stock_count,
             snap.total_value AS total_value,
             CASE
                 WHEN snap.total_value != 0

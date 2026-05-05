@@ -212,6 +212,8 @@
         color: series.lineStyle?.color || series.itemStyle?.color || '#ef4444',
         dashed: series.lineStyle?.type === 'dashed',
         tooltipSuffix: series.tooltipSuffix || '',
+        stack: series.stack || null,
+        areaOpacity: series.areaStyle?.opacity,
       }));
     }
 
@@ -321,6 +323,7 @@
       const { min, max } = this._axisRange(seriesList, startIdx, endIdx);
       const textColor = resolveThemeColor('--text-secondary', '#64748b');
       const gridColor = resolveThemeColor('--border', '#e5e7eb');
+      const stackedIndexes = new Set();
 
       ctx.save();
       ctx.font = '11px sans-serif';
@@ -352,7 +355,46 @@
         ctx.fillText(formatDateLabel(labels[idx]), x, plot.bottom + 8);
       }
 
+      const stackNames = Array.from(new Set(seriesList.map(series => series.stack).filter(Boolean)));
+      stackNames.forEach(stackName => {
+        const cumulative = Array(labels.length).fill(0);
+        seriesList.forEach((series, seriesIdx) => {
+          if (series.stack !== stackName) return;
+          stackedIndexes.add(seriesIdx);
+          const topPoints = [];
+          const basePoints = [];
+          for (let i = startIdx; i <= endIdx; i++) {
+            const raw = Number.isFinite(series.values[i]) ? series.values[i] : 0;
+            const base = cumulative[i] || 0;
+            const top = base + raw;
+            topPoints.push({ x: this._xFor(i, plot, startIdx, endIdx), y: this._yFor(top, plot, min, max), i });
+            basePoints.push({ x: this._xFor(i, plot, startIdx, endIdx), y: this._yFor(base, plot, min, max), i });
+            cumulative[i] = top;
+          }
+          if (topPoints.length < 2) return;
+          ctx.beginPath();
+          topPoints.forEach((point, idx) => {
+            if (idx === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+          });
+          basePoints.slice().reverse().forEach(point => ctx.lineTo(point.x, point.y));
+          ctx.closePath();
+          ctx.fillStyle = colorWithAlpha(series.color, Number.isFinite(series.areaOpacity) ? series.areaOpacity : 0.28);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.strokeStyle = series.color;
+          ctx.lineWidth = series.lineStyle?.width || 1.4;
+          topPoints.forEach((point, idx) => {
+            if (idx === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+          });
+          ctx.stroke();
+        });
+      });
+
       seriesList.forEach((series, seriesIdx) => {
+        if (stackedIndexes.has(seriesIdx)) return;
         const points = [];
         for (let i = startIdx; i <= endIdx; i++) {
           const value = series.values[i];

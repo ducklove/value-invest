@@ -579,6 +579,7 @@ function _prepareGroupWeightChartData(rows) {
       group: String(row.group_name || '기타'),
       weight: Number(row.weight_pct),
       value: Number(row.market_value),
+      stockCount: Number(row.stock_count),
     }))
     .filter(row => row.date && Number.isFinite(row.weight));
   const dates = Array.from(new Set(cleanRows.map(row => row.date))).sort();
@@ -648,13 +649,14 @@ async function renderGroupWeightChart(rows) {
       type: 'line',
       data: prepared.dates.map(date => {
         const value = prepared.byDateGroup[`${date}::${group}`];
-        return Number.isFinite(value) ? Number(value.toFixed(2)) : '-';
+        return Number.isFinite(value) ? Number(value.toFixed(2)) : 0;
       }),
+      stack: 'groupWeight',
       smooth: 0.25,
       symbol: 'none',
-      lineStyle: { color, width: prepared.groups.length > 8 ? 1.5 : 2 },
+      lineStyle: { color, width: prepared.groups.length > 8 ? 1 : 1.3 },
       itemStyle: { color },
-      connectNulls: true,
+      areaStyle: { opacity: 0.34 },
       tooltipSuffix: '%',
     };
   });
@@ -678,7 +680,8 @@ async function renderGroupWeightChart(rows) {
     },
     yAxis: {
       type: 'value',
-      min: 'dataMin',
+      min: 0,
+      max: 100,
       axisLabel: {
         color: textColor,
         fontSize: 10,
@@ -691,20 +694,14 @@ async function renderGroupWeightChart(rows) {
 
   _groupWeightSeriesForAxis = series.map(item => _chartDataToNumbers(item.data));
   const fullWindow = _chartZoomWindow(prepared.dates.length, 0, 100);
-  _applyVisibleYAxis(
-    _groupWeightChartInstance,
-    _groupWeightSeriesForAxis,
-    fullWindow.startIdx,
-    fullWindow.endIdx,
-    false,
-  );
   _updateChartRangeLabel('pfGroupWeightRange', dateObjects, fullWindow.startIdx, fullWindow.endIdx);
 
   if (statsEl) {
     statsEl.innerHTML = prepared.latest.slice(0, 8).map(row => {
       const value = `${row.weight.toFixed(1)}%`;
+      const count = Number.isFinite(row.stockCount) ? ` · ${row.stockCount.toLocaleString()}종목` : '';
       const title = Number.isFinite(row.value) ? ` title="${escapeHtml(fmtKrw(row.value))}"` : '';
-      return `<div class="pf-nav-ret-card"${title}><div class="pf-nav-ret-label">${escapeHtml(row.group)}</div><div class="pf-nav-ret-value">${value}</div></div>`;
+      return `<div class="pf-nav-ret-card"${title}><div class="pf-nav-ret-label">${escapeHtml(row.group)}${count}</div><div class="pf-nav-ret-value">${value}</div></div>`;
     }).join('');
   }
 
@@ -726,13 +723,6 @@ async function renderGroupWeightChart(rows) {
         const { startIdx, endIdx } = _chartWindowFromInstance(
           _groupWeightChartInstance,
           prepared.dates.length,
-        );
-        _applyVisibleYAxis(
-          _groupWeightChartInstance,
-          _groupWeightSeriesForAxis,
-          startIdx,
-          endIdx,
-          false,
         );
         _updateChartRangeLabel('pfGroupWeightRange', dateObjects, startIdx, endIdx);
       }, 80);
