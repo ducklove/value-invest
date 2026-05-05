@@ -412,3 +412,70 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(by_code["000660"]["weight_pct"], 70.0)
         self.assertEqual(by_code["005930"]["group_value"], 1000)
         self.assertEqual(by_code["000660"]["stock_name"], "SK하이닉스")
+
+    async def test_group_weight_history_normalizes_to_stock_snapshot_total(self):
+        await cache.save_portfolio_item(
+            "u1", "AAA", "Alpha", 10, 1000,
+            group_name="Core",
+        )
+        await cache.save_portfolio_item(
+            "u1", "BBB", "Beta", 10, 1000,
+            group_name="Satellite",
+        )
+        # Deliberately lower than the per-stock snapshot sum. Group trend
+        # should still stack to 100% for the visible stock snapshot universe.
+        await cache.save_snapshot("u1", "2026-01-02", 900, 800, 1000, 1, 1400)
+        await cache.save_stock_snapshots(
+            "u1",
+            "2026-01-02",
+            [
+                {"stock_code": "AAA", "market_value": 300, "group_name": "Core"},
+                {"stock_code": "BBB", "market_value": 700, "group_name": "Satellite"},
+            ],
+        )
+
+        rows = await cache.get_group_weight_history("u1")
+
+        self.assertAlmostEqual(sum(row["weight_pct"] for row in rows), 100.0)
+        by_group = {row["group_name"]: row for row in rows}
+        self.assertAlmostEqual(by_group["Core"]["weight_pct"], 30.0)
+        self.assertAlmostEqual(by_group["Satellite"]["weight_pct"], 70.0)
+        self.assertEqual(by_group["Core"]["total_value"], 1000)
+
+    async def test_group_and_stock_weights_are_materialized_on_snapshot_save(self):
+        await cache.save_portfolio_item(
+            "u1", "AAA", "Alpha", 10, 1000,
+            group_name="Core",
+        )
+        await cache.save_portfolio_item(
+            "u1", "BBB", "Beta", 10, 1000,
+            group_name="Core",
+        )
+        await cache.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
+        await cache.save_stock_snapshots(
+            "u1",
+            "2026-01-02",
+            [
+                {"stock_code": "AAA", "market_value": 300, "group_name": "Core"},
+                {"stock_code": "BBB", "market_value": 700, "group_name": "Core"},
+            ],
+        )
+
+        db = await cache.get_db()
+        cursor = await db.execute(
+            "SELECT group_name, market_value, stock_count, weight_pct FROM portfolio_group_snapshots WHERE google_sub = ?",
+            ("u1",),
+        )
+        group_rows = [dict(row) for row in await cursor.fetchall()]
+        self.assertEqual(len(group_rows), 1)
+        self.assertEqual(group_rows[0]["group_name"], "Core")
+        self.assertEqual(group_rows[0]["stock_count"], 2)
+        self.assertAlmostEqual(group_rows[0]["weight_pct"], 100.0)
+
+        rows = await cache.get_group_constituent_history("u1", "Core")
+        by_code = {row["stock_code"]: row for row in rows}
+        self.assertEqual(set(by_code), {"AAA", "BBB"})
+        self.assertAlmostEqual(by_code["AAA"]["weight_pct"], 30.0)
+        self.assertAlmostEqual(by_code["BBB"]["weight_pct"], 70.0)
+        self.assertAlmostEqual(by_code["AAA"]["portfolio_weight_pct"], 30.0)
+        self.assertEqual(by_code["AAA"]["stock_name"], "Alpha")

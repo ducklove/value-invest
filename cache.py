@@ -26,6 +26,168 @@ async def close_db():
         _conn = None
 
 
+async def _refresh_group_snapshots(db: aiosqlite.Connection, google_sub: str | None = None, snap_date: str | None = None):
+    """Rebuild pre-aggregated group weights from per-stock snapshots.
+
+    Group trend reads must stay cheap as history grows, so the expensive
+    stock-level GROUP BY happens once at snapshot time (or one-time backfill),
+    not on every chart request.
+    """
+    where = []
+    params: list[str] = []
+    if google_sub is not None:
+        where.append("ps.google_sub = ?")
+        params.append(google_sub)
+    if snap_date is not None:
+        where.append("ps.date = ?")
+        params.append(snap_date)
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+
+    if google_sub is not None and snap_date is not None:
+        await db.execute(
+            "DELETE FROM portfolio_group_snapshots WHERE google_sub = ? AND date = ?",
+            (google_sub, snap_date),
+        )
+    elif google_sub is not None:
+        await db.execute("DELETE FROM portfolio_group_snapshots WHERE google_sub = ?", (google_sub,))
+    else:
+        await db.execute("DELETE FROM portfolio_group_snapshots")
+
+    await db.execute(
+        f"""
+        WITH stock_rows AS (
+            SELECT
+                ps.google_sub,
+                ps.date,
+                COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
+                ps.stock_code,
+                ps.market_value
+            FROM portfolio_stock_snapshots ps
+            LEFT JOIN user_portfolio up
+              ON up.google_sub = ps.google_sub
+             AND up.stock_code = ps.stock_code
+            {where_sql}
+        ),
+        day_totals AS (
+            SELECT google_sub, date, SUM(market_value) AS total_value
+            FROM stock_rows
+            GROUP BY google_sub, date
+        ),
+        group_rows AS (
+            SELECT
+                google_sub,
+                date,
+                group_name,
+                SUM(market_value) AS market_value,
+                COUNT(DISTINCT stock_code) AS stock_count
+            FROM stock_rows
+            GROUP BY google_sub, date, group_name
+        )
+        INSERT OR REPLACE INTO portfolio_group_snapshots
+        (google_sub, date, group_name, market_value, stock_count, total_value, weight_pct)
+        SELECT
+            gr.google_sub,
+            gr.date,
+            gr.group_name,
+            gr.market_value,
+            gr.stock_count,
+            dt.total_value AS total_value,
+            CASE
+                WHEN dt.total_value != 0
+                THEN gr.market_value * 100.0 / dt.total_value
+                ELSE NULL
+            END AS weight_pct
+        FROM group_rows gr
+        JOIN day_totals dt
+          ON dt.google_sub = gr.google_sub
+         AND dt.date = gr.date
+        """,
+        tuple(params),
+    )
+
+
+async def _refresh_stock_weight_snapshots(db: aiosqlite.Connection, google_sub: str | None = None, snap_date: str | None = None):
+    """Rebuild pre-aggregated per-stock weights for group drill-down charts."""
+    where = []
+    params: list[str] = []
+    if google_sub is not None:
+        where.append("ps.google_sub = ?")
+        params.append(google_sub)
+    if snap_date is not None:
+        where.append("ps.date = ?")
+        params.append(snap_date)
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+
+    if google_sub is not None and snap_date is not None:
+        await db.execute(
+            "DELETE FROM portfolio_stock_weight_snapshots WHERE google_sub = ? AND date = ?",
+            (google_sub, snap_date),
+        )
+    elif google_sub is not None:
+        await db.execute("DELETE FROM portfolio_stock_weight_snapshots WHERE google_sub = ?", (google_sub,))
+    else:
+        await db.execute("DELETE FROM portfolio_stock_weight_snapshots")
+
+    await db.execute(
+        f"""
+        WITH stock_rows AS (
+            SELECT
+                ps.google_sub,
+                ps.date,
+                ps.stock_code,
+                COALESCE(up.stock_name, ps.stock_code) AS stock_name,
+                COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
+                ps.market_value
+            FROM portfolio_stock_snapshots ps
+            LEFT JOIN user_portfolio up
+              ON up.google_sub = ps.google_sub
+             AND up.stock_code = ps.stock_code
+            {where_sql}
+        ),
+        day_totals AS (
+            SELECT google_sub, date, SUM(market_value) AS total_value
+            FROM stock_rows
+            GROUP BY google_sub, date
+        ),
+        group_totals AS (
+            SELECT google_sub, date, group_name, SUM(market_value) AS group_value
+            FROM stock_rows
+            GROUP BY google_sub, date, group_name
+        )
+        INSERT OR REPLACE INTO portfolio_stock_weight_snapshots
+        (google_sub, date, group_name, stock_code, stock_name, market_value, group_value, total_value, group_weight_pct, portfolio_weight_pct)
+        SELECT
+            sr.google_sub,
+            sr.date,
+            sr.group_name,
+            sr.stock_code,
+            sr.stock_name,
+            sr.market_value,
+            gt.group_value,
+            dt.total_value,
+            CASE
+                WHEN gt.group_value != 0
+                THEN sr.market_value * 100.0 / gt.group_value
+                ELSE NULL
+            END AS group_weight_pct,
+            CASE
+                WHEN dt.total_value != 0
+                THEN sr.market_value * 100.0 / dt.total_value
+                ELSE NULL
+            END AS portfolio_weight_pct
+        FROM stock_rows sr
+        JOIN group_totals gt
+          ON gt.google_sub = sr.google_sub
+         AND gt.date = sr.date
+         AND gt.group_name = sr.group_name
+        JOIN day_totals dt
+          ON dt.google_sub = sr.google_sub
+         AND dt.date = sr.date
+        """,
+        tuple(params),
+    )
+
+
 async def init_db():
     db = await get_db()
     await db.executescript("""
@@ -188,6 +350,37 @@ async def init_db():
         );
 
         CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_date ON portfolio_stock_snapshots(google_sub, date);
+
+        CREATE TABLE IF NOT EXISTS portfolio_group_snapshots (
+            google_sub TEXT NOT NULL,
+            date TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            market_value REAL NOT NULL DEFAULT 0,
+            stock_count INTEGER NOT NULL DEFAULT 0,
+            total_value REAL NOT NULL DEFAULT 0,
+            weight_pct REAL,
+            PRIMARY KEY (google_sub, date, group_name),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_group_snapshots_sub_date ON portfolio_group_snapshots(google_sub, date);
+
+        CREATE TABLE IF NOT EXISTS portfolio_stock_weight_snapshots (
+            google_sub TEXT NOT NULL,
+            date TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            stock_code TEXT NOT NULL,
+            stock_name TEXT NOT NULL,
+            market_value REAL NOT NULL DEFAULT 0,
+            group_value REAL NOT NULL DEFAULT 0,
+            total_value REAL NOT NULL DEFAULT 0,
+            group_weight_pct REAL,
+            portfolio_weight_pct REAL,
+            PRIMARY KEY (google_sub, date, group_name, stock_code),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_stock_weight_snapshots_sub_group_date ON portfolio_stock_weight_snapshots(google_sub, group_name, date);
 
         CREATE TABLE IF NOT EXISTS portfolio_intraday (
             google_sub TEXT NOT NULL,
@@ -486,6 +679,14 @@ async def init_db():
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_group_date ON portfolio_stock_snapshots(google_sub, group_name, date)")
+    cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_group_snapshots")
+    group_snapshot_count = (await cursor.fetchone())["n"]
+    if group_snapshot_count == 0:
+        await _refresh_group_snapshots(db)
+    cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_stock_weight_snapshots")
+    stock_weight_snapshot_count = (await cursor.fetchone())["n"]
+    if stock_weight_snapshot_count == 0:
+        await _refresh_stock_weight_snapshots(db)
     await _ensure_column(db, "portfolio_groups", "default_type", "TEXT")
     # Backfill default_type for existing default groups by sort_order
     _type_by_order = {0: "kr", 1: "foreign", 2: "etc"}
@@ -2172,35 +2373,23 @@ async def get_nav_history(google_sub: str) -> list[dict]:
 
 
 async def get_group_weight_history(google_sub: str) -> list[dict]:
-    """Return per-date portfolio group weights from saved stock snapshots.
-
-    New snapshots store group_name directly. Older rows fall back to the
-    current portfolio group mapping so existing history remains usable.
-    """
+    """Return pre-aggregated per-date portfolio group weights."""
     db = await get_db()
     cursor = await db.execute(
+        "SELECT COUNT(*) AS n FROM portfolio_group_snapshots WHERE google_sub = ?",
+        (google_sub,),
+    )
+    row = await cursor.fetchone()
+    if not row or row["n"] == 0:
+        await _refresh_group_snapshots(db, google_sub=google_sub)
+        await db.commit()
+
+    cursor = await db.execute(
         """
-        SELECT
-            ps.date AS date,
-            COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
-            SUM(ps.market_value) AS market_value,
-            COUNT(DISTINCT ps.stock_code) AS stock_count,
-            snap.total_value AS total_value,
-            CASE
-                WHEN snap.total_value != 0
-                THEN SUM(ps.market_value) * 100.0 / snap.total_value
-                ELSE NULL
-            END AS weight_pct
-        FROM portfolio_stock_snapshots ps
-        JOIN portfolio_snapshots snap
-          ON snap.google_sub = ps.google_sub
-         AND snap.date = ps.date
-        LEFT JOIN user_portfolio up
-          ON up.google_sub = ps.google_sub
-         AND up.stock_code = ps.stock_code
-        WHERE ps.google_sub = ?
-        GROUP BY ps.date, COALESCE(ps.group_name, up.group_name, '기타'), snap.total_value
-        ORDER BY ps.date ASC, market_value DESC
+        SELECT date, group_name, market_value, stock_count, total_value, weight_pct
+        FROM portfolio_group_snapshots
+        WHERE google_sub = ?
+        ORDER BY date ASC, market_value DESC
         """,
         (google_sub,),
     )
@@ -2208,49 +2397,34 @@ async def get_group_weight_history(google_sub: str) -> list[dict]:
 
 
 async def get_group_constituent_history(google_sub: str, group_name: str) -> list[dict]:
-    """Return stock weights within one portfolio group for each snapshot date."""
+    """Return pre-aggregated stock weights within one portfolio group."""
     db = await get_db()
     cursor = await db.execute(
+        "SELECT COUNT(*) AS n FROM portfolio_stock_weight_snapshots WHERE google_sub = ?",
+        (google_sub,),
+    )
+    row = await cursor.fetchone()
+    if not row or row["n"] == 0:
+        await _refresh_stock_weight_snapshots(db, google_sub=google_sub)
+        await db.commit()
+
+    cursor = await db.execute(
         """
-        WITH stock_rows AS (
-            SELECT
-                ps.date AS date,
-                ps.stock_code AS stock_code,
-                COALESCE(up.stock_name, ps.stock_code) AS stock_name,
-                ps.market_value AS market_value,
-                COALESCE(ps.group_name, up.group_name, '기타') AS group_name
-            FROM portfolio_stock_snapshots ps
-            LEFT JOIN user_portfolio up
-              ON up.google_sub = ps.google_sub
-             AND up.stock_code = ps.stock_code
-            WHERE ps.google_sub = ?
-              AND (
-                  ps.group_name = ?
-                  OR (ps.group_name IS NULL AND COALESCE(up.group_name, '기타') = ?)
-              )
-        ),
-        group_totals AS (
-            SELECT date, SUM(market_value) AS group_value
-            FROM stock_rows
-            GROUP BY date
-        )
         SELECT
-            sr.date,
-            sr.stock_code,
-            sr.stock_name,
-            sr.market_value,
-            gt.group_value,
-            CASE
-                WHEN gt.group_value != 0
-                THEN sr.market_value * 100.0 / gt.group_value
-                ELSE NULL
-            END AS weight_pct
-        FROM stock_rows sr
-        JOIN group_totals gt
-          ON gt.date = sr.date
-        ORDER BY sr.date ASC, sr.market_value DESC
+            date,
+            stock_code,
+            stock_name,
+            market_value,
+            group_value,
+            total_value,
+            group_weight_pct AS weight_pct,
+            portfolio_weight_pct
+        FROM portfolio_stock_weight_snapshots
+        WHERE google_sub = ?
+          AND group_name = ?
+        ORDER BY date ASC, market_value DESC
         """,
-        (google_sub, group_name, group_name),
+        (google_sub, group_name),
     )
     return [dict(row) for row in await cursor.fetchall()]
 
@@ -2327,6 +2501,8 @@ async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
             for it in items
         ],
     )
+    await _refresh_group_snapshots(db, google_sub=google_sub, snap_date=date)
+    await _refresh_stock_weight_snapshots(db, google_sub=google_sub, snap_date=date)
     await db.commit()
 
 
