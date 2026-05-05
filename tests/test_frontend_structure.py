@@ -55,6 +55,7 @@ def test_trade_value_column_uses_two_decimal_compact_format():
 
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
     chart = (JS / "portfolio-trend-chart.js").read_text(encoding="utf-8")
@@ -62,6 +63,8 @@ def test_performance_tab_includes_group_weight_trend():
 
     assert "pfGroupWeightChart" in html
     assert "pfGroupCompositionChart" in html
+    assert "#pfGroupWeightChart" in styles
+    assert "#pfGroupCompositionChart" in styles
     assert "100% 누적 면적 차트" in html
     assert "/api/portfolio/group-weight-history" in performance
     assert "renderGroupWeightChart(groupWeightData)" in performance
