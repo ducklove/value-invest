@@ -66,6 +66,14 @@ def test_portfolio_actions_support_alphanumeric_krx_codes():
     assert "code.length === 6 && /^\\d{5}/.test(code)" not in source
 
 
+def test_group_management_daily_profit_uses_full_amount_format():
+    source = (JS / "portfolio-groups-market.js").read_text(encoding="utf-8")
+
+    assert "function _fmtSignedFullKrw" in source
+    assert "${_fmtSignedFullKrw(dailyPnl)}" in source
+    assert "${fmtSignedKrw(dailyPnl)}" not in source
+
+
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")

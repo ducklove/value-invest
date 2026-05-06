@@ -12,6 +12,14 @@ function closeGroupModal() {
 
 const _PIE_COLORS = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
 
+function _fmtSignedFullKrw(n) {
+  if (n === null || n === undefined) return '-';
+  const rounded = Math.round(Number(n));
+  if (!Number.isFinite(rounded)) return '-';
+  const sign = rounded > 0 ? '+' : rounded < 0 ? '-' : '';
+  return sign + Math.abs(rounded).toLocaleString();
+}
+
 function _drawGroupPie(stats, grandMV) {
   const canvas = document.getElementById('pfGroupPie');
   if (!canvas) return;
@@ -124,7 +132,7 @@ function renderGroupModalBody() {
       <td class="pf-grp-td-num">${fmtNum(Math.round(s.mv))}</td>
       <td class="pf-grp-td-num"><span class="${returnClass(returnPct)}">${fmtPct(returnPct)}</span></td>
       <td class="pf-grp-td-num"><span class="${returnClass(dailyPct)}">${fmtPct(dailyPct)}</span></td>
-      <td class="pf-grp-td-num"><span class="${returnClass(dailyPnl)}">${fmtSignedKrw(dailyPnl)}</span></td>
+      <td class="pf-grp-td-num"><span class="${returnClass(dailyPnl)}">${_fmtSignedFullKrw(dailyPnl)}</span></td>
       <td class="pf-grp-td-act">${delBtn}</td>
     </tr>`;
   }).join('');
