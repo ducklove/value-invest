@@ -41,6 +41,22 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
         legacy.assert_not_awaited()
         kis.assert_not_awaited()
 
+    async def test_alphanumeric_krx_etf_code_stays_on_domestic_path(self):
+        self.assertTrue(pf._is_korean_stock("0074K0"))
+        self.assertTrue(pf._is_korean_stock("0074k0"))
+        self.assertFalse(pf._is_preferred_stock("0074K0"))
+        self.assertTrue(pf._is_preferred_stock("005935"))
+        self.assertTrue(pf._is_preferred_stock("00088K"))
+        self.assertFalse(pf._is_preferred_stock("005930"))
+
+        resolver = AsyncMock(return_value="KRX 알파뉴메릭 ETF")
+        with patch.object(pf, "_resolve_name", new=resolver):
+            resolved = await pf.resolve_name(code="0074k0")
+
+        self.assertEqual(resolved["stock_code"], "0074K0")
+        self.assertEqual(resolved["stock_name"], "KRX 알파뉴메릭 ETF")
+        resolver.assert_awaited_once_with("0074K0")
+
     async def test_korean_stock_history_uses_kis_daily_rows(self):
         calls = []
 

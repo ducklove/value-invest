@@ -386,8 +386,13 @@ async function pfAddFromSearch(code, name) {
 
 let _PREFERRED_PAIR_BY_CODE = {};
 
+function _normalizePortfolioCode(code) {
+  return typeof code === 'string' ? code.trim().toUpperCase() : '';
+}
+
 function _isPreferredStock(code) {
-  return Boolean(_PREFERRED_PAIR_BY_CODE[code]) || /^[0-9]{5}[^0]$/.test(code) || /^[0-9]{5}[A-Z]$/.test(code);
+  const normalized = _normalizePortfolioCode(code);
+  return Boolean(_PREFERRED_PAIR_BY_CODE[normalized]) || /^[0-9]{5}[1-9A-Z]$/.test(normalized);
 }
 
 // 외부 quote 캐시 — 포트폴리오에 없지만 목표가 계산에 필요한 종목들
@@ -502,9 +507,10 @@ function _initPreferredPairsFromConfig() {
 _initPreferredPairsFromConfig();
 
 function _preferredCommonCodeFor(code) {
-  const pair = _PREFERRED_PAIR_BY_CODE[code];
+  const normalized = _normalizePortfolioCode(code);
+  const pair = _PREFERRED_PAIR_BY_CODE[normalized];
   if (pair && pair.commonCode) return pair.commonCode;
-  return code.slice(0, -1) + '0';
+  return normalized.slice(0, -1) + '0';
 }
 
 function _goldGapInfoForCode(code) {
@@ -531,7 +537,7 @@ function _openGoldGapDashboard(asset) {
 }
 
 function _isKoreanAnalysisCode(code) {
-  return typeof code === 'string' && code.length === 6 && /^\d{5}/.test(code);
+  return /^[0-9][0-9A-Z]{5}$/.test(_normalizePortfolioCode(code));
 }
 
 function _hasAssetInsight(code) {

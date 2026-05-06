@@ -34,6 +34,8 @@ router = APIRouter()
 
 
 _SPECIAL_ASSETS = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
+_KRX_CODE_RE = re.compile(r"^[0-9][0-9A-Z]{5}$")
+_KRX_PREFERRED_CODE_RE = re.compile(r"^\d{5}[1-9A-Z]$")
 
 # Static exceptions for foreign ETFs that are already known Yahoo symbols.
 # These avoid the slow yfinance `.info` suffix-probing path during portfolio
@@ -89,14 +91,16 @@ def _is_special_asset(code: str) -> bool:
     return code in _SPECIAL_ASSETS or _is_cash_asset(code)
 
 
+def _normalize_portfolio_code(code: str) -> str:
+    return (code or "").strip().upper()
+
+
 def _is_korean_stock(code: str) -> bool:
-    return len(code) == 6 and code[:5].isdigit()
+    return bool(_KRX_CODE_RE.fullmatch(_normalize_portfolio_code(code)))
 
 
 def _is_preferred_stock(code: str) -> bool:
-    if len(code) != 6 or not code[:5].isdigit():
-        return False
-    return not code[5].isdigit() or code[5] != '0'
+    return bool(_KRX_PREFERRED_CODE_RE.fullmatch(_normalize_portfolio_code(code)))
 
 
 def _common_stock_code(code: str) -> str:
@@ -121,6 +125,7 @@ _SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "CRYPTO_BTC": "비트코인
 
 
 async def _resolve_name(stock_code: str) -> str | None:
+    stock_code = _normalize_portfolio_code(stock_code)
     if stock_code in _SPECIAL_ASSET_NAMES:
         return _SPECIAL_ASSET_NAMES[stock_code]
     if stock_code in _CASH_NAMES:
@@ -1702,6 +1707,7 @@ async def get_portfolio(request: Request):
 @router.put("/api/portfolio/{stock_code}")
 async def save_portfolio_item(stock_code: str, request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
+    stock_code = _normalize_portfolio_code(stock_code)
 
     stock_name = str(payload.get("stock_name") or "").strip()
     if not stock_name:
@@ -1882,7 +1888,7 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
     parsed = []
     errors = []
     for i, row in enumerate(rows):
-        code = str(row.get("stock_code") or "").strip()
+        code = _normalize_portfolio_code(str(row.get("stock_code") or ""))
         if not code:
             errors.append(f"행 {i+1}: 종목코드가 비어 있습니다.")
             continue
@@ -1925,7 +1931,7 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
 
 @router.get("/api/portfolio/resolve-name")
 async def resolve_name(code: str = Query(..., min_length=1)):
-    code = code.strip()
+    code = _normalize_portfolio_code(code)
     if _is_cash_asset(code):
         return {"stock_code": code, "stock_name": _CASH_NAMES.get(code, code)}
     if code in _SPECIAL_ASSETS:

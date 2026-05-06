@@ -57,6 +57,15 @@ def test_trade_value_column_uses_two_decimal_compact_format():
     assert "fmtKrw(r.tradingValue)" not in source
 
 
+def test_portfolio_actions_support_alphanumeric_krx_codes():
+    source = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+
+    assert "function _normalizePortfolioCode" in source
+    assert "^[0-9][0-9A-Z]{5}$" in source
+    assert "^[0-9]{5}[1-9A-Z]$" in source
+    assert "code.length === 6 && /^\\d{5}/.test(code)" not in source
+
+
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
