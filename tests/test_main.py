@@ -141,6 +141,25 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
                 await portfolio.add_cashflow(request, {"type": "deposit", "amount": "not-a-number"})
         self.assertEqual(exc_info.exception.status_code, 400)
 
+    async def test_delete_portfolio_item_normalizes_code(self):
+        request = _request_with_headers("/api/portfolio/004800")
+        deleter = AsyncMock(return_value=True)
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("routes.portfolio.cache.delete_portfolio_item", new=deleter):
+            response = await portfolio.delete_portfolio_item(" 004800 ", request)
+
+        self.assertEqual(response, {"ok": True})
+        deleter.assert_awaited_once_with("u1", "004800")
+
+    async def test_delete_portfolio_item_reports_missing_row(self):
+        request = _request_with_headers("/api/portfolio/004800")
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("routes.portfolio.cache.delete_portfolio_item", new=AsyncMock(return_value=False)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await portfolio.delete_portfolio_item("004800", request)
+
+        self.assertEqual(exc_info.exception.status_code, 404)
+
     def test_portfolio_today_baseline_resets_at_22(self):
         self.assertEqual(
             portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 21, 59, 59)),

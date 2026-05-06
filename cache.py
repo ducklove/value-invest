@@ -2212,17 +2212,18 @@ async def replace_portfolio(google_sub: str, items: list[dict]):
         await db.commit()
 
 
-async def delete_portfolio_item(google_sub: str, stock_code: str):
+async def delete_portfolio_item(google_sub: str, stock_code: str) -> bool:
     db = await get_db()
     await db.execute(
         "DELETE FROM portfolio_tags WHERE google_sub = ? AND stock_code = ?",
         (google_sub, stock_code),
     )
-    await db.execute(
+    cursor = await db.execute(
         "DELETE FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
         (google_sub, stock_code),
     )
     await db.commit()
+    return cursor.rowcount > 0
 
 
 async def update_portfolio_benchmark(google_sub: str, stock_code: str, benchmark_code: str | None):

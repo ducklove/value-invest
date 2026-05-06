@@ -1861,7 +1861,10 @@ async def get_benchmark_quotes(request: Request):
 @router.delete("/api/portfolio/{stock_code}")
 async def delete_portfolio_item(stock_code: str, request: Request):
     user = _require_user(await get_current_user(request))
-    await cache.delete_portfolio_item(user["google_sub"], stock_code)
+    stock_code = _normalize_portfolio_code(stock_code)
+    deleted = await cache.delete_portfolio_item(user["google_sub"], stock_code)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
     return {"ok": True}
 
 

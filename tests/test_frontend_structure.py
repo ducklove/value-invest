@@ -74,6 +74,13 @@ def test_group_management_daily_profit_uses_full_amount_format():
     assert "${fmtSignedKrw(dailyPnl)}" not in source
 
 
+def test_portfolio_delete_uses_encoded_url_and_server_reload():
+    source = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+
+    assert "/api/portfolio/${encodeURIComponent(stockCode)}" in source
+    assert "await loadPortfolio();" in source
+
+
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")

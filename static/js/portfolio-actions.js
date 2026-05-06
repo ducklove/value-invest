@@ -226,10 +226,14 @@ async function deletePortfolioItem(stockCode) {
     : stockCode;
   if (!confirm(`"${displayName}" 를 포트폴리오에서 삭제할까요?`)) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/${stockCode}`, { method: 'DELETE' });
-    if (!resp.ok) throw new Error('삭제 실패');
+    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || '삭제 실패');
+    }
     portfolioItems = portfolioItems.filter(i => i.stock_code !== stockCode);
     renderPortfolio();
+    await loadPortfolio();
   } catch (e) { showToast(e.message); }
 }
 
