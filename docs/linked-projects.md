@@ -59,6 +59,10 @@ Public base URLs can be overridden with:
 - `KIS_PROXY_BASE_URL`
 - `KIS_PROXY_TOKEN` (optional, sent as `X-KIS-Proxy-Token` when the proxy is
   configured with `KIS_PROXY_PUBLIC_TOKENS`)
+- `CLOSE_PRICE_API_BASE_URL` (optional, defaults to `http://192.168.68.84`;
+  used before KIS for daily adjusted close history)
+- `CLOSE_PRICE_API_ENABLED` (set to `0` to disable the internal close-price
+  shortcut and always use the KIS proxy)
 
 ## AI Admin Operations
 

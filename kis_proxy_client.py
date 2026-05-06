@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from datetime import date
 from typing import Any
 
 import httpx
 
+import close_price_client
+
 
 BASE_URL = os.getenv("KIS_PROXY_BASE_URL", "http://cantabile.tplinkdns.com:3288").rstrip("/")
 TIMEOUT_SECONDS = float(os.getenv("KIS_PROXY_TIMEOUT_SECONDS", "20"))
 PROXY_TOKEN = os.getenv("KIS_PROXY_TOKEN", os.getenv("KIS_PROXY_PUBLIC_TOKEN", "")).strip()
+logger = logging.getLogger(__name__)
 _client: httpx.AsyncClient | None = None
 _client_lock: asyncio.Lock | None = None
 
@@ -141,6 +145,18 @@ async def get_history(
     period: str = "D",
     adjusted: bool = True,
 ) -> dict[str, Any]:
+    if str(period or "D").upper() == "D" and adjusted:
+        try:
+            items = await close_price_client.get_daily_close_items(
+                symbol,
+                since=start_date,
+                until=end_date,
+            )
+            if items:
+                return {"items": items, "source": "internal_close_api"}
+        except close_price_client.ClosePriceClientError as exc:
+            logger.info("falling back to KIS history for %s: %s", symbol, exc)
+
     return await _get(
         f"/v1/stocks/{symbol}/history",
         params={

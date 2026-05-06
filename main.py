@@ -22,6 +22,7 @@ if ENV_PATH.exists():
 
 import cache
 import ai_config
+import close_price_client
 import dart_client
 import integrations
 import kis_key_manager
@@ -88,6 +89,7 @@ async def lifespan(app: FastAPI):
     kis_key_manager.load_keys()
 
     await kis_proxy_client.init_client()
+    await close_price_client.init_client()
     await cache.init_db()
     await ai_config.migrate_legacy_model_defaults()
     await cache.delete_expired_sessions()
@@ -209,6 +211,7 @@ async def lifespan(app: FastAPI):
             obs_task.cancel()
         await kis_ws_manager.stop_all()
         await kis_proxy_client.close_client()
+        await close_price_client.close_client()
         await cache.close_db()
 
 
