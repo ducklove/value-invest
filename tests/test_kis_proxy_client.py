@@ -35,38 +35,54 @@ async def test_kis_proxy_token_header_is_forwarded_when_configured():
 
 
 @pytest.mark.asyncio
-async def test_daily_adjusted_history_uses_kis_before_internal_close_backup():
-    kis_payload = {"items": [{"stck_bsop_date": "20260430", "stck_clpr": "220500"}]}
-    internal = AsyncMock(side_effect=AssertionError("internal close backup should not run when KIS succeeds"))
+async def test_daily_adjusted_history_uses_local_daily_api_before_kis():
+    local_items = [{"stck_bsop_date": "20260430", "stck_clpr": 220500.0}]
+    kis = AsyncMock(side_effect=AssertionError("KIS history should not run when local daily API succeeds"))
 
-    with patch.object(kis_proxy_client.close_price_client, "get_daily_close_items", new=internal), \
+    with patch.object(kis_proxy_client.close_price_client, "get_daily_price_items", new=AsyncMock(return_value=local_items)), \
+         patch.object(kis_proxy_client, "_get", new=kis):
+        payload = await kis_proxy_client.get_history("005930", period="D", adjusted=True)
+
+    assert payload == {"items": local_items, "source": "local_daily_price_api"}
+    kis.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_daily_history_falls_back_to_kis_when_local_daily_api_fails():
+    kis_payload = {"items": [{"stck_bsop_date": "20260430", "stck_clpr": "220500"}]}
+
+    with patch.object(
+        kis_proxy_client.close_price_client,
+        "get_daily_price_items",
+        new=AsyncMock(side_effect=kis_proxy_client.close_price_client.ClosePriceClientError("local down")),
+    ), patch.object(kis_proxy_client, "_get", new=AsyncMock(return_value=kis_payload)):
+        payload = await kis_proxy_client.get_history("005930", period="D", adjusted=True)
+
+    assert payload == kis_payload
+
+
+@pytest.mark.asyncio
+async def test_daily_history_falls_back_to_kis_when_local_daily_api_is_empty():
+    kis_payload = {"items": [{"stck_bsop_date": "20260430", "stck_clpr": "220500"}]}
+
+    with patch.object(kis_proxy_client.close_price_client, "get_daily_price_items", new=AsyncMock(return_value=[])), \
          patch.object(kis_proxy_client, "_get", new=AsyncMock(return_value=kis_payload)):
         payload = await kis_proxy_client.get_history("005930", period="D", adjusted=True)
 
     assert payload == kis_payload
-    internal.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_daily_history_uses_internal_close_backup_when_kis_fails():
-    internal_items = [{"stck_bsop_date": "20260430", "stck_clpr": 220500.0}]
+async def test_non_daily_history_stays_on_kis():
+    kis_payload = {"items": [{"stck_bsop_date": "20260430", "stck_clpr": "220500"}]}
+    local = AsyncMock(side_effect=AssertionError("local daily API is only for adjusted daily history"))
 
-    with patch.object(kis_proxy_client.close_price_client, "get_daily_close_items", new=AsyncMock(return_value=internal_items)), \
-         patch.object(kis_proxy_client, "_get", new=AsyncMock(side_effect=kis_proxy_client.KISProxyError("kis down"))):
-        payload = await kis_proxy_client.get_history("005930", period="D", adjusted=True)
+    with patch.object(kis_proxy_client.close_price_client, "get_daily_price_items", new=local), \
+         patch.object(kis_proxy_client, "_get", new=AsyncMock(return_value=kis_payload)):
+        payload = await kis_proxy_client.get_history("005930", period="W", adjusted=True)
 
-    assert payload == {"items": internal_items, "source": "internal_close_api_backup"}
-
-
-@pytest.mark.asyncio
-async def test_daily_history_uses_internal_close_backup_when_kis_is_empty():
-    internal_items = [{"stck_bsop_date": "20260430", "stck_clpr": 220500.0}]
-
-    with patch.object(kis_proxy_client.close_price_client, "get_daily_close_items", new=AsyncMock(return_value=internal_items)), \
-         patch.object(kis_proxy_client, "_get", new=AsyncMock(return_value={"items": []})):
-        payload = await kis_proxy_client.get_history("005930", period="D", adjusted=True)
-
-    assert payload == {"items": internal_items, "source": "internal_close_api_backup"}
+    assert payload == kis_payload
+    local.assert_not_awaited()
 
 
 def test_close_price_rows_are_normalized_to_kis_history_items():
@@ -94,6 +110,47 @@ def test_close_price_rows_are_normalized_to_kis_history_items():
             "date": "2026-04-30",
             "close": 220500.0,
             "close_price": 220500.0,
+        },
+    ]
+
+
+def test_daily_price_rows_are_normalized_to_kis_history_items():
+    rows = kis_proxy_client.close_price_client.daily_rows_to_kis_items(
+        {
+            "prices": {
+                "005930": [
+                    {
+                        "date": "2026-04-30",
+                        "open": 226000,
+                        "high": 227000,
+                        "low": 220000,
+                        "close": "220,500",
+                        "volume": 22161975,
+                        "trading_value": 4984706020346,
+                    }
+                ]
+            }
+        }
+    )
+
+    assert rows == [
+        {
+            "stck_bsop_date": "20260430",
+            "stck_clpr": 220500.0,
+            "date": "2026-04-30",
+            "close": 220500.0,
+            "close_price": 220500.0,
+            "stck_oprc": 226000.0,
+            "open": 226000.0,
+            "stck_hgpr": 227000.0,
+            "high": 227000.0,
+            "stck_lwpr": 220000.0,
+            "low": 220000.0,
+            "acml_vol": 22161975.0,
+            "volume": 22161975.0,
+            "acml_tr_pbmn": 4984706020346.0,
+            "trade_value": 4984706020346.0,
+            "trading_value": 4984706020346.0,
         },
     ]
 

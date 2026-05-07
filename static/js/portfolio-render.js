@@ -478,7 +478,7 @@ function renderPortfolio() {
         <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
-        <td class="pf-col-num pf-col-benchmark">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
+        <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
         <td class="pf-col-num pf-col-target"><span class="pf-target-edit-wrap"><input class="pf-edit-input" id="pfEditTarget" value="${r.target_price ?? ''}" type="number" step="any" placeholder="자동"><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 즉시 비우기 (자동 계산 복귀)">×</button></span></td>
@@ -501,7 +501,7 @@ function renderPortfolio() {
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
-      <td class="pf-col-num pf-col-benchmark js-pf-bench-picker">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
+      <td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
       <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
       <td class="pf-col-num pf-col-target">${r.targetPrice !== null ? _fp(r.targetPrice) : '-'}</td>

@@ -47,7 +47,7 @@
         if (code) deletePortfolioItem(code);
       } else if ((el = t.closest('.js-pf-bench-picker'))) {
         const code = codeFromTr(el);
-        if (code) pfShowBenchmarkPicker(code, el);
+        if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);
       } else if ((el = t.closest('.js-pf-bench-set'))) {
         const code = codeFromTr(el);
         if (code) pfSetBenchmark(code, el.dataset.bench || '');

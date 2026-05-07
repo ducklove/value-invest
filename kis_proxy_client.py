@@ -151,34 +151,30 @@ async def get_history(
         "period": period,
         "adjusted": str(adjusted).lower(),
     }
-    use_close_backup = str(period or "D").upper() == "D" and adjusted
+    use_local_daily = str(period or "D").upper() == "D" and adjusted
 
-    try:
-        payload = await _get(f"/v1/stocks/{symbol}/history", params=params)
-        if not use_close_backup or payload.get("items"):
-            return payload
-        logger.info("KIS history returned no daily rows for %s; trying internal close backup", symbol)
-    except KISProxyError as exc:
-        if not use_close_backup:
-            raise
-        logger.info("KIS history failed for %s; trying internal close backup: %s", symbol, exc)
-        payload = None
-
-    if use_close_backup:
+    if use_local_daily:
         try:
-            items = await close_price_client.get_daily_close_items(
+            items = await close_price_client.get_daily_price_items(
                 symbol,
                 since=start_date,
                 until=end_date,
             )
             if items:
-                return {"items": items, "source": "internal_close_api_backup"}
+                return {"items": items, "source": "local_daily_price_api"}
+            logger.info("local daily price API returned no rows for %s; trying KIS history", symbol)
         except close_price_client.ClosePriceClientError as exc:
-            logger.info("internal close backup failed for %s: %s", symbol, exc)
+            logger.info("local daily price API failed for %s; trying KIS history: %s", symbol, exc)
 
-    if payload is not None:
-        return payload
-    raise KISProxyError(f"KIS proxy request failed and close backup unavailable: {symbol}")
+    try:
+        payload = await _get(f"/v1/stocks/{symbol}/history", params=params)
+        if not use_local_daily or payload.get("items"):
+            return payload
+        logger.info("KIS history returned no daily rows for %s", symbol)
+    except KISProxyError as exc:
+        raise
+
+    return payload
 
 
 async def get_financials(

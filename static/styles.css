@@ -1289,7 +1289,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-group-select:hover { color: var(--text); }
 .pf-group-select:focus { outline: none; color: var(--text); }
 /* Benchmark column */
-.pf-col-benchmark { cursor: pointer; min-width: 70px; }
+.pf-col-benchmark { min-width: 70px; }
+.pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }
 .pf-benchmark-val { font-size: 12px; opacity: 0.6; }
 .pf-benchmark-name { display: block; font-size: 10px; opacity: 0.45; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; }
 .pf-benchmark-picker {

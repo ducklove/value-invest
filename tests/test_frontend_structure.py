@@ -101,6 +101,19 @@ def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
     assert "this._getStaleWsCodes().forEach(c => allCodes.add(c));" in source
 
 
+def test_benchmark_picker_only_opens_in_edit_mode():
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+    events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    assert '<td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">' in render
+    assert '<td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">' in render
+    assert "if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);" in events
+    assert "if (pfEditingCode !== stockCode)" in actions
+    assert ".pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }" in styles
+
+
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")

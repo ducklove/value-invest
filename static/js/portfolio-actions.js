@@ -81,6 +81,10 @@ function pfShowBenchmarkPicker(stockCode, td) {
 
 async function pfSetBenchmark(stockCode, benchmarkCode) {
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
+  if (pfEditingCode !== stockCode) {
+    showToast('벤치마크는 수정모드에서 변경할 수 있습니다.');
+    return;
+  }
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
