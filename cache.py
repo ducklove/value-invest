@@ -959,6 +959,37 @@ async def save_market_data(stock_code: str, data: list[dict]):
     await db.commit()
 
 
+async def upsert_market_dividends(stock_code: str, dividends_by_year: dict[int, float]) -> int:
+    if not dividends_by_year:
+        return 0
+    db = await get_db()
+    rows = []
+    for year, dps in dividends_by_year.items():
+        if dps is None:
+            continue
+        try:
+            rows.append((stock_code, int(year), float(dps)))
+        except (TypeError, ValueError):
+            continue
+    if not rows:
+        return 0
+
+    await db.executemany(
+        """INSERT INTO market_data (stock_code, year, dividend_per_share)
+           VALUES (?, ?, ?)
+           ON CONFLICT(stock_code, year) DO UPDATE SET
+             dividend_per_share = excluded.dividend_per_share,
+             dividend_yield = CASE
+               WHEN market_data.close_price IS NOT NULL AND market_data.close_price != 0
+                 THEN ROUND(excluded.dividend_per_share / market_data.close_price * 100, 2)
+               ELSE market_data.dividend_yield
+             END""",
+        rows,
+    )
+    await db.commit()
+    return len(rows)
+
+
 async def get_market_data(stock_code: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(

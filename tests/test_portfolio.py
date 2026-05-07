@@ -223,10 +223,13 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             {"year": current_year - 1, "close_price": 400000.0, "dividend_per_share": 10000.0},
         ]
         fetch = AsyncMock(return_value=rows)
+        dart_fetch = AsyncMock(return_value={})
 
-        with patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
+        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
             await portfolio_route._warm_market_data_for_dividend("002380")
 
+        dart_fetch.assert_awaited_once()
         fetch.assert_awaited_once()
         dps = await cache.get_trailing_dividends(["002380"])
         self.assertEqual(dps.get("002380"), 10000.0)
@@ -244,12 +247,15 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         await db.commit()
 
         fetch = AsyncMock(return_value=[])
-        with patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
+        dart_fetch = AsyncMock(return_value={})
+        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
             await portfolio_route._warm_market_data_for_dividend("002380")
 
+        dart_fetch.assert_awaited_once()
         fetch.assert_not_awaited()
 
-    async def test_dividend_warmup_refreshes_stale_dividend_year(self):
+    async def test_dividend_warmup_overwrites_stale_latest_dps_from_dart(self):
         from datetime import datetime
 
         db = await cache.get_db()
@@ -257,21 +263,22 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
                VALUES (?, ?, ?, ?)""",
-            ("002380", current_year - 2, 400000, 10000.0),
+            ("002380", current_year - 1, 420500, 10000.0),
         )
         await db.commit()
 
-        rows = [
-            {"year": current_year - 1, "close_price": 420500.0, "dividend_per_share": 15000.0},
-        ]
-        fetch = AsyncMock(return_value=rows)
-        with patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
+        dart_fetch = AsyncMock(return_value={current_year - 1: 15000.0})
+        fetch = AsyncMock(return_value=[])
+        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
             await portfolio_route._warm_market_data_for_dividend("002380")
 
-        fetch.assert_awaited_once()
-        self.assertEqual(fetch.await_args.kwargs.get("corp_code"), "00105271")
+        dart_fetch.assert_awaited_once()
+        fetch.assert_not_awaited()
         dps = await cache.get_trailing_dividends(["002380"])
         self.assertEqual(dps.get("002380"), 15000.0)
+        rows = await cache.get_market_data("002380")
+        self.assertEqual(rows[-1]["dividend_yield"], 3.57)
 
     def test_dividend_warmup_targets_preferred_common_too(self):
         self.assertEqual(

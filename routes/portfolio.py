@@ -16,6 +16,7 @@ import ai_config
 import asset_insights
 import cache
 import integrations
+import dart_client
 import kis_proxy_client
 import kis_ws_manager
 import market_indicators
@@ -1066,9 +1067,26 @@ def _portfolio_dividend_warmup_targets(code: str) -> list[str]:
     return [code]
 
 
+async def _refresh_domestic_dividend_from_dart(code: str) -> int:
+    corp_code = await cache.get_corp_code(code)
+    if not corp_code:
+        return 0
+    current_year = datetime.now().year
+    dividends = await dart_client.fetch_dividend_per_share_by_year(
+        corp_code,
+        start_year=max(current_year - 3, dart_client.DART_ANNUAL_DATA_START_YEAR),
+        end_year=current_year - 1,
+    )
+    return await cache.upsert_market_dividends(code, dividends)
+
+
 async def _warm_market_data_for_dividend(code: str) -> None:
     code = _normalize_portfolio_code(code)
     try:
+        updated = await _refresh_domestic_dividend_from_dart(code)
+        if updated:
+            logger.info("Portfolio DART dividend warmup completed (%s, %d rows)", code, updated)
+            return
         latest_dividend_years = await cache.get_latest_dividend_years([code])
         if latest_dividend_years.get(code, 0) >= datetime.now().year - 1:
             return
@@ -1092,8 +1110,7 @@ def _consume_dividend_warmup_result(code: str, task: asyncio.Task) -> None:
         pass
 
 
-def _schedule_portfolio_dividend_warmup(codes: list[str]) -> None:
-    now = time.monotonic()
+def _portfolio_dividend_warmup_due_targets(codes: list[str], now: float) -> list[str]:
     seen: set[str] = set()
     targets: list[str] = []
     for code in codes:
@@ -1102,6 +1119,7 @@ def _schedule_portfolio_dividend_warmup(codes: list[str]) -> None:
                 seen.add(target)
                 targets.append(target)
 
+    due: list[str] = []
     for code in targets:
         task = _dividend_warmup_tasks.get(code)
         if task and not task.done():
@@ -1109,13 +1127,44 @@ def _schedule_portfolio_dividend_warmup(codes: list[str]) -> None:
         last = _dividend_warmup_last.get(code)
         if last and (now - last) < _DIVIDEND_WARMUP_TTL:
             continue
-        _dividend_warmup_last[code] = now
+        due.append(code)
+    return due
+
+
+def _start_dividend_warmup_task(code: str, now: float) -> asyncio.Task | None:
+    _dividend_warmup_last[code] = now
+    try:
+        task = asyncio.create_task(_warm_market_data_for_dividend(code))
+    except RuntimeError:
+        return None
+    _dividend_warmup_tasks[code] = task
+    task.add_done_callback(lambda t, c=code: _consume_dividend_warmup_result(c, t))
+    return task
+
+
+def _schedule_portfolio_dividend_warmup(codes: list[str]) -> None:
+    now = time.monotonic()
+    for code in _portfolio_dividend_warmup_due_targets(codes, now):
+        _start_dividend_warmup_task(code, now)
+
+
+async def _warm_portfolio_dividends_for_response(codes: list[str], timeout: float = 2.5) -> None:
+    now = time.monotonic()
+    tasks = [
+        task
+        for code in _portfolio_dividend_warmup_due_targets(codes, now)
+        if (task := _start_dividend_warmup_task(code, now)) is not None
+    ]
+    if not tasks:
+        return
+    done, pending = await asyncio.wait(tasks, timeout=timeout)
+    for task in done:
         try:
-            task = asyncio.create_task(_warm_market_data_for_dividend(code))
-        except RuntimeError:
-            return
-        _dividend_warmup_tasks[code] = task
-        task.add_done_callback(lambda t, c=code: _consume_dividend_warmup_result(c, t))
+            task.exception()
+        except asyncio.CancelledError:
+            pass
+    if pending:
+        logger.info("Portfolio dividend warmup still running in background (%d pending)", len(pending))
 
 _INSIGHT_FX_TICKER = {
     "USD": "KRW=X",
@@ -1776,13 +1825,10 @@ async def get_portfolio(request: Request):
     # client keeps the number fresh while the user edits quantity in
     # the inline edit row.
     codes = [it["stock_code"] for it in items]
+    await _warm_portfolio_dividends_for_response(codes)
     dps_map = await cache.get_trailing_dividends(codes)
-    missing_dps_codes = []
     for it in items:
         it["trailing_dps"] = dps_map.get(it["stock_code"])
-        if it["trailing_dps"] is None:
-            missing_dps_codes.append(it["stock_code"])
-    _schedule_portfolio_dividend_warmup(missing_dps_codes)
     enriched = await _enrich_with_cached_quotes(items)
     _schedule_asset_insight_warmup(enriched)
     return enriched
