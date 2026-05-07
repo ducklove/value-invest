@@ -90,6 +90,17 @@ def test_portfolio_add_canonicalizes_alias_before_save():
     assert "pfEditingCode = resolvedCode" in source
 
 
+def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
+    source = (JS / "quote-manager.js").read_text(encoding="utf-8")
+
+    assert "QUOTE_MANAGER_STALE_WS_MS" in source
+    assert "lastQuoteAt: {}" in source
+    assert "_markQuoteFresh(msg.code)" in source
+    assert "_markQuoteFresh(code)" in source
+    assert "async _pollAll()" in source
+    assert "this._getStaleWsCodes().forEach(c => allCodes.add(c));" in source
+
+
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")

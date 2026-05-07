@@ -1,4 +1,9 @@
 // --- WebSocket Quote Manager ---
+const QUOTE_MANAGER_STALE_WS_MS = 90_000;
+const QUOTE_MANAGER_GENERAL_POLL_MS = 60_000;
+const QUOTE_MANAGER_OVERFLOW_POLL_MS = 30_000;
+const QUOTE_MANAGER_RETRY_MS = 5_000;
+
 const QuoteManager = {
   ws: null,
   connected: false,
@@ -6,6 +11,7 @@ const QuoteManager = {
   subscriptions: {},
   wsCodes: new Set(),
   overflowCodes: [],
+  lastQuoteAt: {},
   overflowTimer: null,
   generalPollTimer: null,
   wsActive: false,      // true when this session owns the active WS slot
@@ -18,35 +24,28 @@ const QuoteManager = {
     try { this.ws = new WebSocket(url); } catch { this._scheduleReconnect(); return; }
     this.ws.onopen = () => {
       this.connected = true;
-      // Request takeover immediately (server will check if occupied)
       this.ws.send(JSON.stringify({ action: 'takeover' }));
     };
     this.ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'quote' && msg.code && this.onQuote) this.onQuote(msg.code, msg);
-        else if (msg.type === 'subscriptions') {
+        if (msg.type === 'quote' && msg.code) {
+          if (msg.price != null) this._markQuoteFresh(msg.code);
+          if (this.onQuote) this.onQuote(msg.code, msg);
+        } else if (msg.type === 'subscriptions') {
           this.wsCodes = new Set(msg.ws || []);
           this.overflowCodes = msg.rest || [];
-          // Refresh ALL codes immediately (ws + overflow)
           const allCodes = [...(msg.ws || []), ...(msg.rest || [])];
           this._fetchInitialQuotes(allCodes);
           this._startOverflowPolling();
-        }
-        else if (msg.type === 'ws_status') {
+        } else if (msg.type === 'ws_status') {
           if (msg.active) {
-            // We are now the active subscriber
             this.wsActive = true;
             this._sendSubscriptions();
-          } else if (msg.occupied) {
-            // Slot busy — request takeover unconditionally; server kicks the oldest session
-            if (this.connected && this.ws) {
-              this.ws.send(JSON.stringify({ action: 'takeover' }));
-            }
+          } else if (msg.occupied && this.connected && this.ws) {
+            this.ws.send(JSON.stringify({ action: 'takeover' }));
           }
-        }
-        else if (msg.type === 'ws_taken_over') {
-          // Another session took over — fall back to polling
+        } else if (msg.type === 'ws_taken_over') {
           this.wsActive = false;
           this._showTakenOverBanner();
         }
@@ -56,7 +55,6 @@ const QuoteManager = {
       this.connected = false;
       this.wsActive = false;
       this.ws = null;
-      // Don't reconnect if we were kicked by takeover
       if (ev.code === 4001) return;
       this._scheduleReconnect();
     };
@@ -71,6 +69,9 @@ const QuoteManager = {
     if (this.ws) { this.ws.close(); this.ws = null; }
     this.connected = false;
     this.wsActive = false;
+    this.wsCodes = new Set();
+    this.overflowCodes = [];
+    this.lastQuoteAt = {};
   },
 
   _scheduleReconnect() {
@@ -79,9 +80,8 @@ const QuoteManager = {
   },
 
   _showTakenOverBanner() {
-    // Brief visual notification
     const banner = document.createElement('div');
-    banner.textContent = '다른 세션이 실시간 시세를 가져갔습니다. 1분 간격 폴링으로 전환됩니다.';
+    banner.textContent = '다른 세션이 실시간 시세 연결을 가져갔습니다. 1분 간격 폴링으로 전환합니다.';
     banner.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:10px;background:#e67e22;color:white;text-align:center;z-index:9999;font-size:13px;';
     document.body.appendChild(banner);
     setTimeout(() => banner.remove(), 5000);
@@ -101,29 +101,37 @@ const QuoteManager = {
 
   _retryTimer: null,
 
+  _markQuoteFresh(code) {
+    if (!code) return;
+    this.lastQuoteAt[code] = Date.now();
+  },
+
+  _getStaleWsCodes() {
+    const now = Date.now();
+    return [...this.wsCodes].filter(code =>
+      now - (this.lastQuoteAt[code] || 0) >= QUOTE_MANAGER_STALE_WS_MS
+    );
+  },
+
   async _fetchQuotes(codes) {
-    if (!codes.length) return;
-    // 전 종목 병렬 요청. 각 요청은 개별 HTTP 로 독립적이라 응답 도착
-    // 순서대로 onQuote → 해당 행만 즉시 UI 반영 (progressive loading).
-    // 한꺼번에 발사하지만 upstream 자체 세마포어 (_YF_SEM, _NAVER_SEM
-    // 등) 가 안쪽에서 동시성 제어.
-    await Promise.all(codes.map(code =>
+    const uniqueCodes = [...new Set((codes || []).filter(Boolean))];
+    if (!uniqueCodes.length) return;
+    await Promise.all(uniqueCodes.map(code =>
       apiFetch(`/api/asset-quote/${encodeURIComponent(code)}`)
         .then(async resp => {
           if (!resp.ok) return;
           const q = await resp.json();
-          if (q && q.price != null && this.onQuote) {
-            this.onQuote(code, { code, ...q });
+          if (q && q.price != null) {
+            this._markQuoteFresh(code);
+            if (this.onQuote) this.onQuote(code, { code, ...q });
           }
         })
-        .catch(() => { /* per-code 실패 무시, 다른 종목 영향 없음 */ })
+        .catch(() => { /* Keep one bad quote from blocking the rest. */ })
     ));
-    // Schedule fast retry for any still-missing quotes
     this._scheduleRetry();
   },
 
   _getMissingCodes() {
-    // Check portfolio + sidebar (recent search) items, not benchmark/index codes
     const missing = new Set();
     for (const i of portfolioItems) {
       if (!i.quote || i.quote.price == null) missing.add(i.stock_code);
@@ -140,17 +148,14 @@ const QuoteManager = {
     if (this._retryTimer) return;
     const missing = this._getMissingCodes();
     if (!missing.length) return;
-    // Retry missing codes in 5 seconds
     this._retryTimer = setTimeout(async () => {
       this._retryTimer = null;
       const still = this._getMissingCodes();
       if (still.length) await this._fetchQuotes(still);
-    }, 5000);
+    }, QUOTE_MANAGER_RETRY_MS);
   },
 
   async _fetchInitialQuotes(wsCodes) {
-    // Always refresh ALL codes in the background — initial load may
-    // have stale last-known prices that need updating.
     await this._fetchQuotes(wsCodes);
   },
 
@@ -162,22 +167,20 @@ const QuoteManager = {
     if (this.overflowTimer) clearInterval(this.overflowTimer);
     if (!this.overflowCodes.length) return;
     this._pollOverflow();
-    this.overflowTimer = setInterval(() => this._pollOverflow(), 30_000);
+    this.overflowTimer = setInterval(() => this._pollOverflow(), QUOTE_MANAGER_OVERFLOW_POLL_MS);
   },
 
-  // 60초 간격 전체 폴링 — WS 활성 여부와 무관하게 항상 동작
   _startGeneralPolling() {
     if (this.generalPollTimer) clearInterval(this.generalPollTimer);
-    this.generalPollTimer = setInterval(() => this._pollAll(), 60_000);
+    this.generalPollTimer = setInterval(() => this._pollAll(), QUOTE_MANAGER_GENERAL_POLL_MS);
   },
 
   async _pollAll() {
     const allCodes = new Set();
     if (this.wsActive) {
-      // WS 활성: overflow 코드만
       this.overflowCodes.forEach(c => allCodes.add(c));
+      this._getStaleWsCodes().forEach(c => allCodes.add(c));
     } else {
-      // WS 비활성: 모든 구독 코드 (benchmark 포함)
       for (const codes of Object.values(this.subscriptions)) {
         for (const c of codes) allCodes.add(c);
       }
