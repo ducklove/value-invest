@@ -172,6 +172,29 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         resolver.assert_awaited_once_with("KCC")
         foreign.assert_not_awaited()
 
+    async def test_portfolio_save_canonicalizes_domestic_alias_before_foreign(self):
+        request = _request_with_headers("/api/portfolio/KCC")
+        alias = {"stock_code": "002380", "corp_name": "케이씨씨"}
+        saver = AsyncMock(return_value={"stock_code": "002380"})
+        foreign_name = AsyncMock(side_effect=AssertionError("KCC alias should not be saved as a foreign ticker"))
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("routes.portfolio.cache.resolve_corp_search_query", new=AsyncMock(return_value=alias)), \
+             patch("routes.portfolio.cache.save_portfolio_item", new=saver), \
+             patch("routes.portfolio._resolve_foreign_name", new=foreign_name), \
+             patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={"price": 1000})):
+            await portfolio.save_portfolio_item(
+                "KCC",
+                request,
+                {"stock_name": "", "quantity": 1, "avg_price": 0},
+            )
+
+        saver.assert_awaited_once()
+        args = saver.await_args.args
+        self.assertEqual(args[1], "002380")
+        self.assertEqual(args[2], "케이씨씨")
+        self.assertEqual(args[5], "KRW")
+        foreign_name.assert_not_awaited()
+
     def test_portfolio_today_baseline_resets_at_22(self):
         self.assertEqual(
             portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 21, 59, 59)),

@@ -367,23 +367,33 @@ async function deletePortfolioItem(stockCode) {
 async function pfAddFromSearch(code, name) {
   document.getElementById('pfDropdown').classList.remove('show');
   document.getElementById('pfAddInput').value = '';
-  const existing = portfolioItems.find(i => i.stock_code === code);
+  let resolvedCode = String(code || '').trim();
+  let resolvedName = String(name || '').trim();
+  try {
+    const r = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}`);
+    const d = await r.json();
+    if (d.stock_code) resolvedCode = d.stock_code;
+    if (d.stock_name) resolvedName = d.stock_name;
+  } catch (e) {
+    console.warn('portfolio code canonicalization failed', e);
+  }
+  const existing = portfolioItems.find(i => i.stock_code === resolvedCode);
   if (existing) {
-    startPortfolioEdit(code);
+    startPortfolioEdit(resolvedCode);
     return;
   }
   try {
-    // stock_name empty → backend resolves via Naver Finance
-    const resp = await apiFetch(`/api/portfolio/${code}`, {
+    // Save the canonical code so aliases like KCC cannot create a foreign ticker row.
+    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(resolvedCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stock_name: '', quantity: 1, avg_price: 0 }),
+      body: JSON.stringify({ stock_name: resolvedName, quantity: 1, avg_price: 0 }),
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
       throw new Error(d.detail || '추가 실패');
     }
-    pfEditingCode = code;
+    pfEditingCode = resolvedCode;
     await loadPortfolio();
   } catch (e) { showToast(e.message); }
 }

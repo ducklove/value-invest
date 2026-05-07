@@ -81,6 +81,15 @@ def test_portfolio_delete_uses_encoded_url_and_server_reload():
     assert "await loadPortfolio();" in source
 
 
+def test_portfolio_add_canonicalizes_alias_before_save():
+    source = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+
+    assert "portfolio code canonicalization failed" in source
+    assert "/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}" in source
+    assert "/api/portfolio/${encodeURIComponent(resolvedCode)}" in source
+    assert "pfEditingCode = resolvedCode" in source
+
+
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")

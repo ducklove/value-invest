@@ -138,7 +138,22 @@ async def _resolve_name(stock_code: str) -> str | None:
         if name:
             return name
         return await _fetch_naver_stock_name(stock_code)
+    domestic_match = await _resolve_domestic_code_alias(stock_code)
+    if domestic_match:
+        return domestic_match["corp_name"]
     return await _resolve_foreign_name(stock_code)
+
+
+async def _resolve_domestic_code_alias(stock_code: str) -> dict | None:
+    stock_code = _normalize_portfolio_code(stock_code)
+    if (
+        not stock_code
+        or _is_special_asset(stock_code)
+        or _is_korean_stock(stock_code)
+        or _static_foreign_ticker(stock_code)
+    ):
+        return None
+    return await cache.resolve_corp_search_query(stock_code)
 
 
 async def _fetch_naver_world_stock(reuters_code: str) -> dict | None:
@@ -1710,6 +1725,12 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     stock_code = _normalize_portfolio_code(stock_code)
 
     stock_name = str(payload.get("stock_name") or "").strip()
+    domestic_alias = await _resolve_domestic_code_alias(stock_code)
+    if domestic_alias:
+        stock_code = domestic_alias["stock_code"]
+        if not stock_name:
+            stock_name = domestic_alias["corp_name"]
+
     if not stock_name:
         resolved = await _resolve_name(stock_code)
         if resolved:
@@ -1949,7 +1970,7 @@ async def resolve_name(code: str = Query(..., min_length=1)):
     if _is_korean_stock(code):
         name = await _resolve_name(code)
         return {"stock_code": code, "stock_name": name}
-    domestic_match = await cache.resolve_corp_search_query(code)
+    domestic_match = await _resolve_domestic_code_alias(code)
     if domestic_match:
         return {
             "stock_code": domestic_match["stock_code"],
