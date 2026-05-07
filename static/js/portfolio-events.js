@@ -35,22 +35,28 @@
         const code = codeFromTr(el);
         if (code) { e.preventDefault(); pfGoAnalyze(code, e); }
       } else if ((el = t.closest('.js-pf-save'))) {
+        e.preventDefault();
         const code = codeFromTr(el);
         if (code) savePortfolioEdit(code);
       } else if (t.closest('.js-pf-cancel')) {
+        e.preventDefault();
         cancelPortfolioEdit();
       } else if ((el = t.closest('.js-pf-edit'))) {
+        e.preventDefault();
         const code = codeFromTr(el);
         if (code) startPortfolioEdit(code);
       } else if ((el = t.closest('.js-pf-delete'))) {
+        e.preventDefault();
         const code = codeFromTr(el);
         if (code) deletePortfolioItem(code);
-      } else if ((el = t.closest('.js-pf-bench-picker'))) {
-        const code = codeFromTr(el);
-        if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);
       } else if ((el = t.closest('.js-pf-bench-set'))) {
+        e.preventDefault();
         const code = codeFromTr(el);
         if (code) pfSetBenchmark(code, el.dataset.bench || '');
+      } else if ((el = t.closest('.js-pf-bench-picker'))) {
+        e.preventDefault();
+        const code = codeFromTr(el);
+        if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);
       } else if ((el = t.closest('.js-pf-gold-gap'))) {
         const asset = el.dataset.gapAsset || _goldGapInfoForCode(codeFromTr(el)).asset;
         if (asset) _openGoldGapDashboard(asset);

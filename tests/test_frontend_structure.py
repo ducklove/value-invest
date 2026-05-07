@@ -110,6 +110,7 @@ def test_benchmark_picker_only_opens_in_edit_mode():
     assert '<td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">' in render
     assert '<td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">' in render
     assert "if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);" in events
+    assert events.find("js-pf-bench-set") < events.find("js-pf-bench-picker")
     assert "if (pfEditingCode !== stockCode)" in actions
     assert ".pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }" in styles
 
