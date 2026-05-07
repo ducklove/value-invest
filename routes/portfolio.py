@@ -1051,6 +1051,69 @@ _insight_item_warm_cache: dict[str, float] = {}
 _insight_common_warm_ts: float = 0.0
 _insight_warmup_task: asyncio.Task | None = None
 _INSIGHT_WARMUP_TTL = 15 * 60
+_dividend_warmup_last: dict[str, float] = {}
+_dividend_warmup_tasks: dict[str, asyncio.Task] = {}
+_DIVIDEND_WARMUP_TTL = 6 * 60 * 60
+
+
+def _portfolio_dividend_warmup_targets(code: str) -> list[str]:
+    code = _normalize_portfolio_code(code)
+    if not _is_korean_stock(code):
+        return []
+    if _is_preferred_stock(code):
+        common = _common_stock_code(code)
+        return [code, common] if common != code else [code]
+    return [code]
+
+
+async def _warm_market_data_for_dividend(code: str) -> None:
+    code = _normalize_portfolio_code(code)
+    try:
+        if code in await cache.get_trailing_dividends([code]):
+            return
+        fin_data = await cache.get_financial_data(code)
+        refreshed = await stock_price.fetch_market_data(code, fin_data)
+        if refreshed:
+            await cache.save_market_data(code, refreshed)
+            logger.info("Portfolio dividend market-data warmup completed (%s, %d rows)", code, len(refreshed))
+    except Exception as exc:
+        logger.warning("Portfolio dividend market-data warmup failed (%s): %s", code, exc)
+    finally:
+        _dividend_warmup_tasks.pop(code, None)
+
+
+def _consume_dividend_warmup_result(code: str, task: asyncio.Task) -> None:
+    _dividend_warmup_tasks.pop(code, None)
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        pass
+
+
+def _schedule_portfolio_dividend_warmup(codes: list[str]) -> None:
+    now = time.monotonic()
+    seen: set[str] = set()
+    targets: list[str] = []
+    for code in codes:
+        for target in _portfolio_dividend_warmup_targets(code):
+            if target not in seen:
+                seen.add(target)
+                targets.append(target)
+
+    for code in targets:
+        task = _dividend_warmup_tasks.get(code)
+        if task and not task.done():
+            continue
+        last = _dividend_warmup_last.get(code)
+        if last and (now - last) < _DIVIDEND_WARMUP_TTL:
+            continue
+        _dividend_warmup_last[code] = now
+        try:
+            task = asyncio.create_task(_warm_market_data_for_dividend(code))
+        except RuntimeError:
+            return
+        _dividend_warmup_tasks[code] = task
+        task.add_done_callback(lambda t, c=code: _consume_dividend_warmup_result(c, t))
 
 _INSIGHT_FX_TICKER = {
     "USD": "KRW=X",
@@ -1712,8 +1775,12 @@ async def get_portfolio(request: Request):
     # the inline edit row.
     codes = [it["stock_code"] for it in items]
     dps_map = await cache.get_trailing_dividends(codes)
+    missing_dps_codes = []
     for it in items:
         it["trailing_dps"] = dps_map.get(it["stock_code"])
+        if it["trailing_dps"] is None:
+            missing_dps_codes.append(it["stock_code"])
+    _schedule_portfolio_dividend_warmup(missing_dps_codes)
     enriched = await _enrich_with_cached_quotes(items)
     _schedule_asset_insight_warmup(enriched)
     return enriched
@@ -1839,6 +1906,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     except Exception as exc:
         logger.warning("foreign dividend dispatch guard failed (%s): %s", stock_code, exc)
 
+    _schedule_portfolio_dividend_warmup([stock_code])
     return {"ok": True, **result}
 
 
@@ -1949,6 +2017,7 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
             await cache.save_portfolio_item(
                 user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], item["currency"],
             )
+    _schedule_portfolio_dividend_warmup([item["stock_code"] for item in resolved])
 
     return {"ok": True, "imported": len(resolved), "mode": mode}
 

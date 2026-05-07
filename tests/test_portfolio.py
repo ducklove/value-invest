@@ -1,9 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import cache
+from routes import portfolio as portfolio_route
 
 
 class PortfolioTests(unittest.IsolatedAsyncioTestCase):
@@ -17,6 +18,8 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         # the singleton so init_db() opens a fresh conn on the patched path.
         await cache.close_db()
         await cache.init_db()
+        portfolio_route._dividend_warmup_last.clear()
+        portfolio_route._dividend_warmup_tasks.clear()
 
         db = await cache.get_db()
         await db.execute(
@@ -197,6 +200,51 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_trailing_dividends_empty_list(self):
         self.assertEqual(await cache.get_trailing_dividends([]), {})
+
+    async def test_dividend_warmup_fetches_missing_domestic_market_data(self):
+        """신규 국내 종목은 분석 화면을 열기 전에도 포트폴리오 배당 캐시가
+        백그라운드로 채워져야 한다. KCC(002380)처럼 alias 로 막 등록한
+        종목의 배당액이 계속 '-' 로 남는 회귀를 막는다."""
+        from datetime import datetime
+
+        current_year = datetime.now().year
+        rows = [
+            {"year": current_year - 1, "close_price": 400000.0, "dividend_per_share": 10000.0},
+        ]
+        fetch = AsyncMock(return_value=rows)
+
+        with patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
+            await portfolio_route._warm_market_data_for_dividend("002380")
+
+        fetch.assert_awaited_once()
+        dps = await cache.get_trailing_dividends(["002380"])
+        self.assertEqual(dps.get("002380"), 10000.0)
+
+    async def test_dividend_warmup_skips_when_trailing_dps_exists(self):
+        from datetime import datetime
+
+        db = await cache.get_db()
+        current_year = datetime.now().year
+        await db.execute(
+            """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
+               VALUES (?, ?, ?, ?)""",
+            ("002380", current_year - 1, 400000, 10000.0),
+        )
+        await db.commit()
+
+        fetch = AsyncMock(return_value=[])
+        with patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
+            await portfolio_route._warm_market_data_for_dividend("002380")
+
+        fetch.assert_not_awaited()
+
+    def test_dividend_warmup_targets_preferred_common_too(self):
+        self.assertEqual(
+            portfolio_route._portfolio_dividend_warmup_targets("005935"),
+            ["005935", "005930"],
+        )
+        self.assertEqual(portfolio_route._portfolio_dividend_warmup_targets("002380"), ["002380"])
+        self.assertEqual(portfolio_route._portfolio_dividend_warmup_targets("AAPL"), [])
 
     async def test_search_kcc_alias_prefers_parent_company(self):
         results = await cache.search_corp("KCC")
