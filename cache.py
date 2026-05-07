@@ -2272,11 +2272,12 @@ async def delete_portfolio_item(google_sub: str, stock_code: str) -> bool:
 
 async def update_portfolio_benchmark(google_sub: str, stock_code: str, benchmark_code: str | None):
     db = await get_db()
-    await db.execute(
+    cursor = await db.execute(
         "UPDATE user_portfolio SET benchmark_code = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
         (benchmark_code, datetime.now().isoformat(), google_sub, stock_code),
     )
     await db.commit()
+    return cursor.rowcount > 0
 
 
 async def save_portfolio_order(google_sub: str, ordered_stock_codes: list[str]):

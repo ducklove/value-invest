@@ -480,19 +480,19 @@ function renderPortfolio() {
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
-        <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
-        <td class="pf-col-num pf-col-target"><span class="pf-target-edit-wrap"><input class="pf-edit-input" id="pfEditTarget" value="${r.target_price ?? ''}" type="number" step="any" placeholder="자동"><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 즉시 비우기 (자동 계산 복귀)">×</button></span></td>
+        <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
+        <td class="pf-col-num pf-col-target"><span class="pf-target-edit-wrap"><input class="pf-edit-input js-pf-edit-target" id="pfEditTarget" value="${r.target_price ?? ''}" type="number" step="any" placeholder="자동"><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 즉시 비우기 (자동 계산 복귀)">×</button></span></td>
         <td class="pf-col-num pf-col-achiev">${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-        <td class="pf-col-num pf-col-qty"><input class="pf-edit-input" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
+        <td class="pf-col-num pf-col-qty"><input class="pf-edit-input js-pf-edit-qty" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
         <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
         <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield, false) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
-        <td class="pf-col-date"><input class="pf-edit-input" id="pfEditCreatedAt" value="${r.createdAtSort || ''}" type="date"></td>
+        <td class="pf-col-date"><input class="pf-edit-input js-pf-edit-created-at" id="pfEditCreatedAt" value="${r.createdAtSort || ''}" type="date"></td>
         <td class="pf-col-act"><div class="pf-row-actions">
-          <button class="pf-row-btn save js-pf-save" title="저장">✓</button>
-          <button class="pf-row-btn cancel js-pf-cancel" title="취소">✕</button>
+          <button type="button" class="pf-row-btn save js-pf-save" title="저장">✓</button>
+          <button type="button" class="pf-row-btn cancel js-pf-cancel" title="취소">✕</button>
         </div></td>
       </tr>`;
     }
@@ -514,8 +514,8 @@ function renderPortfolio() {
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
-        <button class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
-        <button class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
+        <button type="button" class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
+        <button type="button" class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
       </div></td>
     </tr>`;
   }).join('');

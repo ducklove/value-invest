@@ -1913,8 +1913,11 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
 @router.put("/api/portfolio/{stock_code}/benchmark")
 async def update_benchmark(stock_code: str, request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
-    benchmark_code = str(payload.get("benchmark_code") or "").strip() or None
-    await cache.update_portfolio_benchmark(user["google_sub"], stock_code, benchmark_code)
+    stock_code = _normalize_portfolio_code(stock_code)
+    benchmark_code = _normalize_portfolio_code(str(payload.get("benchmark_code") or "")) or None
+    updated = await cache.update_portfolio_benchmark(user["google_sub"], stock_code, benchmark_code)
+    if not updated:
+        raise HTTPException(status_code=404, detail="포트폴리오 종목을 찾을 수 없습니다.")
     # Return the effective benchmark and its quote
     effective = benchmark_code or await _resolve_default_benchmark(stock_code)
     bq = await _fetch_benchmark_quote(effective)

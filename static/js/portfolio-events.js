@@ -51,17 +51,10 @@
       if (t.closest('.js-pf-row-drag')) {
         e.preventDefault();
         return;
-      } else if ((el = t.closest('.js-pf-open-insight'))) {
-        e.preventDefault();
-        const code = codeFromTr(el);
-        if (code) pfGoAnalyze(code, e);
-      } else if ((el = t.closest('.js-pf-analyze'))) {
-        const code = codeFromTr(el);
-        if (code) { e.preventDefault(); pfGoAnalyze(code, e); }
       } else if ((el = t.closest('.js-pf-save'))) {
         e.preventDefault();
         const code = codeFromTr(el);
-        if (code) savePortfolioEdit(code);
+        if (code) savePortfolioEdit(code, undefined, el.closest('tr[data-code]'));
       } else if (t.closest('.js-pf-cancel')) {
         e.preventDefault();
         cancelPortfolioEdit();
@@ -81,6 +74,13 @@
         e.preventDefault();
         const code = codeFromTr(el);
         if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);
+      } else if ((el = t.closest('.js-pf-open-insight'))) {
+        e.preventDefault();
+        const code = codeFromTr(el);
+        if (code) pfGoAnalyze(code, e);
+      } else if ((el = t.closest('.js-pf-analyze'))) {
+        const code = codeFromTr(el);
+        if (code) { e.preventDefault(); pfGoAnalyze(code, e); }
       } else if ((el = t.closest('.js-pf-gold-gap'))) {
         const asset = el.dataset.gapAsset || _goldGapInfoForCode(codeFromTr(el)).asset;
         if (asset) _openGoldGapDashboard(asset);

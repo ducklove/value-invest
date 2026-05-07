@@ -86,14 +86,35 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
 
     assert "pf-stock-link js-pf-open-insight" in render
+    save_branch = "((el = t.closest('.js-pf-save')))"
     open_branch = "((el = t.closest('.js-pf-open-insight')))"
     analyze_branch = "((el = t.closest('.js-pf-analyze')))"
+    assert events.find(save_branch) != -1
+    assert events.find(save_branch) < events.find(open_branch)
+    assert events.find(save_branch) < events.find(analyze_branch)
     assert events.find(open_branch) != -1
     assert events.find(open_branch) < events.find(analyze_branch)
     assert "target.closest('#pfBody tr[data-code]')" in events
     assert "isPassivePortfolioRowTarget" in events
     assert "!pfEditingCode && (el = portfolioRowFromTarget(t))" in events
     assert "if (code) pfGoAnalyze(code, e);" in events
+
+
+def test_portfolio_edit_save_is_row_scoped_and_safe():
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+    events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
+
+    assert 'type="button" class="pf-row-btn save js-pf-save"' in render
+    assert 'class="pf-edit-input js-pf-edit-qty"' in render
+    assert 'class="pf-edit-input js-pf-edit-price"' in render
+    assert 'class="pf-edit-input js-pf-edit-target"' in render
+    assert "savePortfolioEdit(code, undefined, el.closest('tr[data-code]'))" in events
+    assert "function _pfFindEditRow(stockCode, row)" in actions
+    assert "editRow?.querySelector('.js-pf-edit-qty')" in actions
+    assert "editRow?.querySelector('.js-pf-edit-price')" in actions
+    assert "/api/portfolio/${encodeURIComponent(stockCode)}" in actions
+    assert "/api/portfolio/${encodeURIComponent(stockCode)}/benchmark" in actions
 
 
 def test_portfolio_add_canonicalizes_alias_before_save():

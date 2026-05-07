@@ -24,7 +24,7 @@ async function pfChangeGroup(stockCode, groupName) {
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
+    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -88,7 +88,7 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/${stockCode}/benchmark`, {
+    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}/benchmark`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ benchmark_code: benchmarkCode || null }),
@@ -119,10 +119,27 @@ function cancelPortfolioEdit() {
   renderPortfolio();
 }
 
-async function savePortfolioEdit(stockCode, stockName) {
-  const qty = parseFloat(document.getElementById('pfEditQty').value);
-  const price = parseFloat(document.getElementById('pfEditPrice').value);
-  if (isNaN(qty) || qty === 0 || isNaN(price) || price < 0) {
+function _pfFindEditRow(stockCode, row) {
+  if (row && row.dataset && row.dataset.code === stockCode) return row;
+  const tbody = document.getElementById('pfBody');
+  if (!tbody) return null;
+  for (const tr of tbody.querySelectorAll('tr[data-code]')) {
+    if (tr.dataset.code === stockCode) return tr;
+  }
+  return null;
+}
+
+async function savePortfolioEdit(stockCode, stockName, row) {
+  const editRow = _pfFindEditRow(stockCode, row);
+  const qtyEl = editRow?.querySelector('.js-pf-edit-qty') || document.getElementById('pfEditQty');
+  const priceEl = editRow?.querySelector('.js-pf-edit-price') || document.getElementById('pfEditPrice');
+  if (!editRow || !qtyEl || !priceEl) {
+    showToast('편집 행을 찾지 못했습니다. 다시 수정해 주세요.');
+    return;
+  }
+  const qty = Number(qtyEl.value);
+  const price = Number(priceEl.value);
+  if (!Number.isFinite(qty) || qty === 0 || !Number.isFinite(price) || price < 0) {
     showToast('수량과 매입가를 올바르게 입력해 주세요.');
     return;
   }
@@ -134,20 +151,29 @@ async function savePortfolioEdit(stockCode, stockName) {
   }
   // 등록일자는 optional — 비워두면 서버가 기존 값 유지. Input[type=date]
   // 는 YYYY-MM-DD 또는 빈 문자열을 돌려주므로 그대로 전달.
-  const createdAtEl = document.getElementById('pfEditCreatedAt');
+  const createdAtEl = editRow.querySelector('.js-pf-edit-created-at') || document.getElementById('pfEditCreatedAt');
   const createdAt = createdAtEl ? createdAtEl.value.trim() : '';
   const body = { stock_name: stockName, quantity: qty, avg_price: price };
   if (createdAt) body.created_at = createdAt;
   // 목표가 input — 비워두면 명시 null 로 보내 자동 계산으로 되돌리고,
   // 숫자 있으면 수동 override 로 저장. PUT 에 'target_price' 키가
   // 있으면 서버는 항상 처리 (sentinel preserve 는 키 미전달 시).
-  const tgtEl = document.getElementById('pfEditTarget');
+  const tgtEl = editRow.querySelector('.js-pf-edit-target') || document.getElementById('pfEditTarget');
   if (tgtEl) {
     const tgtRaw = tgtEl.value.trim();
-    body.target_price = tgtRaw === '' ? null : parseFloat(tgtRaw);
+    if (tgtRaw === '') {
+      body.target_price = null;
+    } else {
+      const targetPrice = Number(tgtRaw);
+      if (!Number.isFinite(targetPrice) || targetPrice < 0) {
+        showToast('목표가를 올바르게 입력해 주세요.');
+        return;
+      }
+      body.target_price = targetPrice;
+    }
   }
   try {
-    const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
+    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -188,7 +214,7 @@ async function clearPortfolioTargetPrice(stockCode) {
     return;
   }
   try {
-    const resp = await apiFetch(`/api/portfolio/${stockCode}`, {
+    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -86,6 +86,17 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items[0]["quantity"], 200)
         self.assertEqual(items[0]["avg_price"], 70000)
 
+    async def test_update_benchmark_reports_missing_row(self):
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+
+        updated = await cache.update_portfolio_benchmark("u1", "005930", "IDX_KOSPI")
+        missing = await cache.update_portfolio_benchmark("u1", "999999", "IDX_KOSPI")
+        items = await cache.get_portfolio("u1")
+
+        self.assertTrue(updated)
+        self.assertFalse(missing)
+        self.assertEqual(items[0]["benchmark_code"], "IDX_KOSPI")
+
     async def test_delete_item(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
         await cache.set_portfolio_tags("u1", "005930", ["자산주"])
