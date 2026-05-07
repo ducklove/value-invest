@@ -81,6 +81,21 @@ def test_portfolio_delete_uses_encoded_url_and_server_reload():
     assert "await loadPortfolio();" in source
 
 
+def test_portfolio_stock_click_uses_explicit_insight_link_handler():
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
+
+    assert "pf-stock-link js-pf-open-insight" in render
+    open_branch = "((el = t.closest('.js-pf-open-insight')))"
+    analyze_branch = "((el = t.closest('.js-pf-analyze')))"
+    assert events.find(open_branch) != -1
+    assert events.find(open_branch) < events.find(analyze_branch)
+    assert "target.closest('#pfBody tr[data-code]')" in events
+    assert "isPassivePortfolioRowTarget" in events
+    assert "!pfEditingCode && (el = portfolioRowFromTarget(t))" in events
+    assert "if (code) pfGoAnalyze(code, e);" in events
+
+
 def test_portfolio_add_canonicalizes_alias_before_save():
     source = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
 
@@ -110,7 +125,7 @@ def test_benchmark_picker_only_opens_in_edit_mode():
     assert '<td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">' in render
     assert '<td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">' in render
     assert "if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);" in events
-    assert events.find("js-pf-bench-set") < events.find("js-pf-bench-picker")
+    assert events.find("((el = t.closest('.js-pf-bench-set')))") < events.find("((el = t.closest('.js-pf-bench-picker')))")
     assert "if (pfEditingCode !== stockCode)" in actions
     assert ".pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }" in styles
 

@@ -474,7 +474,7 @@ function renderPortfolio() {
       : '';
     if (isEditing) {
       return `<tr data-code="${safeCode}">
-        <td class="pf-stock-cell js-pf-analyze"><a href="#" class="pf-stock-link"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
+        <td class="pf-stock-cell js-pf-analyze"><a href="#" class="pf-stock-link js-pf-open-insight"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
         <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
@@ -497,7 +497,7 @@ function renderPortfolio() {
       </tr>`;
     }
     return `<tr data-code="${safeCode}">
-      <td class="pf-stock-cell js-pf-analyze">${dragHandle}<a href="#" class="pf-stock-link"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
+      <td class="pf-stock-cell js-pf-analyze">${dragHandle}<a href="#" class="pf-stock-link js-pf-open-insight"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>

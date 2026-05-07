@@ -11,13 +11,33 @@
 // menu/picker code.
 (function initPfDelegation() {
   const onReady = () => {
+    const portfolioRowFromTarget = (target) => (
+      target.closest ? target.closest('#pfBody tr[data-code]') : null
+    );
+    const isPassivePortfolioRowTarget = (target) => {
+      if (!target.closest) return false;
+      return !target.closest([
+        'a',
+        'button',
+        'input',
+        'select',
+        'textarea',
+        'label',
+        '.js-pf-row-drag',
+        '.js-pf-bench-picker',
+        '.pf-benchmark-picker',
+        '.pf-pref-menu',
+        '.pf-target-edit-wrap',
+        '.pf-stock-tag',
+      ].join(','));
+    };
     document.addEventListener('pointerdown', (e) => {
-      if (e.target.closest && e.target.closest('.js-pf-analyze')) {
+      if (portfolioRowFromTarget(e.target)) {
         _pfMarkPointerInteraction();
       }
     }, true);
     document.addEventListener('pointerup', (e) => {
-      if (e.target.closest && e.target.closest('.js-pf-analyze')) {
+      if (portfolioRowFromTarget(e.target)) {
         _pfMarkPointerInteraction(300);
       }
     }, true);
@@ -31,6 +51,10 @@
       if (t.closest('.js-pf-row-drag')) {
         e.preventDefault();
         return;
+      } else if ((el = t.closest('.js-pf-open-insight'))) {
+        e.preventDefault();
+        const code = codeFromTr(el);
+        if (code) pfGoAnalyze(code, e);
       } else if ((el = t.closest('.js-pf-analyze'))) {
         const code = codeFromTr(el);
         if (code) { e.preventDefault(); pfGoAnalyze(code, e); }
@@ -92,6 +116,10 @@
           e.stopPropagation();
           clearPortfolioTargetPrice(code);
         }
+      } else if (!pfEditingCode && (el = portfolioRowFromTarget(t)) && isPassivePortfolioRowTarget(t)) {
+        e.preventDefault();
+        const code = codeFromTr(el);
+        if (code) pfGoAnalyze(code, e);
       }
     });
     document.addEventListener('change', (e) => {
