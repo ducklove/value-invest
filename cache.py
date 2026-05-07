@@ -809,8 +809,30 @@ async def save_corp_codes(codes: list[dict]):
     await db.commit()
 
 
+_CORP_SEARCH_ALIASES = {
+    # DART stores the KCC parent company as the Korean legal name, so a plain
+    # "KCC" search otherwise only finds KCC건설.
+    "KCC": ["002380"],
+}
+
+
+def _corp_search_alias_codes(query: str) -> list[str]:
+    return _CORP_SEARCH_ALIASES.get((query or "").strip().upper(), [])
+
+
 async def search_corp(query: str) -> list[dict]:
+    query = (query or "").strip()
     db = await get_db()
+    alias_rows = []
+    for stock_code in _corp_search_alias_codes(query):
+        cursor = await db.execute(
+            "SELECT stock_code, corp_code, corp_name FROM corp_codes WHERE stock_code = ?",
+            (stock_code,),
+        )
+        row = await cursor.fetchone()
+        if row:
+            alias_rows.append(dict(row))
+
     cursor = await db.execute(
         "SELECT stock_code, corp_code, corp_name FROM corp_codes "
         "WHERE corp_name LIKE ? OR stock_code LIKE ? "
@@ -827,15 +849,37 @@ async def search_corp(query: str) -> list[dict]:
     )
     rows = await cursor.fetchall()
     results = []
+    seen_codes = set()
     exact_name_seen = set()
-    for row in rows:
-        item = dict(row)
+    for item in [*alias_rows, *(dict(row) for row in rows)]:
+        if item["stock_code"] in seen_codes:
+            continue
+        seen_codes.add(item["stock_code"])
         if item["corp_name"] == query:
             if item["corp_name"] in exact_name_seen:
                 continue
             exact_name_seen.add(item["corp_name"])
         results.append(item)
     return results
+
+
+async def resolve_corp_search_query(query: str) -> dict | None:
+    query = (query or "").strip()
+    if not query:
+        return None
+    rows = await search_corp(query)
+    if not rows:
+        return None
+    first = rows[0]
+    normalized = query.upper()
+    if (
+        _corp_search_alias_codes(query)
+        or first["stock_code"] == query
+        or first["corp_name"] == query
+        or first["corp_name"].upper() == normalized
+    ):
+        return first
+    return None
 
 
 async def get_corp_code(stock_code: str) -> str | None:

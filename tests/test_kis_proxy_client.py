@@ -35,28 +35,38 @@ async def test_kis_proxy_token_header_is_forwarded_when_configured():
 
 
 @pytest.mark.asyncio
-async def test_daily_adjusted_history_prefers_internal_close_price_api():
-    internal_items = [{"stck_bsop_date": "20260430", "stck_clpr": 220500.0}]
-    kis_fallback = AsyncMock(side_effect=AssertionError("KIS fallback should not run"))
+async def test_daily_adjusted_history_uses_kis_before_internal_close_backup():
+    kis_payload = {"items": [{"stck_bsop_date": "20260430", "stck_clpr": "220500"}]}
+    internal = AsyncMock(side_effect=AssertionError("internal close backup should not run when KIS succeeds"))
 
-    with patch.object(kis_proxy_client.close_price_client, "get_daily_close_items", new=AsyncMock(return_value=internal_items)), \
-         patch.object(kis_proxy_client, "_get", new=kis_fallback):
+    with patch.object(kis_proxy_client.close_price_client, "get_daily_close_items", new=internal), \
+         patch.object(kis_proxy_client, "_get", new=AsyncMock(return_value=kis_payload)):
         payload = await kis_proxy_client.get_history("005930", period="D", adjusted=True)
 
-    assert payload == {"items": internal_items, "source": "internal_close_api"}
-    kis_fallback.assert_not_awaited()
+    assert payload == kis_payload
+    internal.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_daily_history_falls_back_to_kis_when_internal_close_is_empty():
-    kis_fallback = AsyncMock(return_value={"items": [{"stck_bsop_date": "20260430", "stck_clpr": "220500"}]})
+async def test_daily_history_uses_internal_close_backup_when_kis_fails():
+    internal_items = [{"stck_bsop_date": "20260430", "stck_clpr": 220500.0}]
 
-    with patch.object(kis_proxy_client.close_price_client, "get_daily_close_items", new=AsyncMock(return_value=[])), \
-         patch.object(kis_proxy_client, "_get", new=kis_fallback):
+    with patch.object(kis_proxy_client.close_price_client, "get_daily_close_items", new=AsyncMock(return_value=internal_items)), \
+         patch.object(kis_proxy_client, "_get", new=AsyncMock(side_effect=kis_proxy_client.KISProxyError("kis down"))):
         payload = await kis_proxy_client.get_history("005930", period="D", adjusted=True)
 
-    assert payload["items"][0]["stck_clpr"] == "220500"
-    kis_fallback.assert_awaited_once()
+    assert payload == {"items": internal_items, "source": "internal_close_api_backup"}
+
+
+@pytest.mark.asyncio
+async def test_daily_history_uses_internal_close_backup_when_kis_is_empty():
+    internal_items = [{"stck_bsop_date": "20260430", "stck_clpr": 220500.0}]
+
+    with patch.object(kis_proxy_client.close_price_client, "get_daily_close_items", new=AsyncMock(return_value=internal_items)), \
+         patch.object(kis_proxy_client, "_get", new=AsyncMock(return_value={"items": []})):
+        payload = await kis_proxy_client.get_history("005930", period="D", adjusted=True)
+
+    assert payload == {"items": internal_items, "source": "internal_close_api_backup"}
 
 
 def test_close_price_rows_are_normalized_to_kis_history_items():

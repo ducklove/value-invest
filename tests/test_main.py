@@ -160,6 +160,18 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 404)
 
+    async def test_portfolio_resolve_name_uses_domestic_search_alias_before_foreign(self):
+        resolver = AsyncMock(return_value={"stock_code": "002380", "corp_name": "케이씨씨"})
+        foreign = AsyncMock(side_effect=AssertionError("KCC alias should not fall through to foreign lookup"))
+        with patch("routes.portfolio.cache.resolve_corp_search_query", new=resolver), \
+             patch("routes.portfolio._resolve_foreign_reuters", new=foreign):
+            response = await portfolio.resolve_name(code="KCC")
+
+        self.assertEqual(response["stock_code"], "002380")
+        self.assertEqual(response["stock_name"], "케이씨씨")
+        resolver.assert_awaited_once_with("KCC")
+        foreign.assert_not_awaited()
+
     def test_portfolio_today_baseline_resets_at_22(self):
         self.assertEqual(
             portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 21, 59, 59)),

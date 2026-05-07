@@ -145,7 +145,26 @@ async def get_history(
     period: str = "D",
     adjusted: bool = True,
 ) -> dict[str, Any]:
-    if str(period or "D").upper() == "D" and adjusted:
+    params = {
+        "start_date": _iso(start_date),
+        "end_date": _iso(end_date),
+        "period": period,
+        "adjusted": str(adjusted).lower(),
+    }
+    use_close_backup = str(period or "D").upper() == "D" and adjusted
+
+    try:
+        payload = await _get(f"/v1/stocks/{symbol}/history", params=params)
+        if not use_close_backup or payload.get("items"):
+            return payload
+        logger.info("KIS history returned no daily rows for %s; trying internal close backup", symbol)
+    except KISProxyError as exc:
+        if not use_close_backup:
+            raise
+        logger.info("KIS history failed for %s; trying internal close backup: %s", symbol, exc)
+        payload = None
+
+    if use_close_backup:
         try:
             items = await close_price_client.get_daily_close_items(
                 symbol,
@@ -153,19 +172,13 @@ async def get_history(
                 until=end_date,
             )
             if items:
-                return {"items": items, "source": "internal_close_api"}
+                return {"items": items, "source": "internal_close_api_backup"}
         except close_price_client.ClosePriceClientError as exc:
-            logger.info("falling back to KIS history for %s: %s", symbol, exc)
+            logger.info("internal close backup failed for %s: %s", symbol, exc)
 
-    return await _get(
-        f"/v1/stocks/{symbol}/history",
-        params={
-            "start_date": _iso(start_date),
-            "end_date": _iso(end_date),
-            "period": period,
-            "adjusted": str(adjusted).lower(),
-        },
-    )
+    if payload is not None:
+        return payload
+    raise KISProxyError(f"KIS proxy request failed and close backup unavailable: {symbol}")
 
 
 async def get_financials(

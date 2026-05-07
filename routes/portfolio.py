@@ -1949,6 +1949,12 @@ async def resolve_name(code: str = Query(..., min_length=1)):
     if _is_korean_stock(code):
         name = await _resolve_name(code)
         return {"stock_code": code, "stock_name": name}
+    domestic_match = await cache.resolve_corp_search_query(code)
+    if domestic_match:
+        return {
+            "stock_code": domestic_match["stock_code"],
+            "stock_name": domestic_match["corp_name"],
+        }
     # Foreign: find reuters code
     reuters = await _resolve_foreign_reuters(code)
     if reuters:

@@ -28,6 +28,8 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             [
                 ("005930", "00126380", "삼성전자", "2026-01-01"),
                 ("000660", "00164779", "SK하이닉스", "2026-01-01"),
+                ("002380", "00105271", "케이씨씨", "2026-01-01"),
+                ("021320", "00105466", "KCC건설", "2026-01-01"),
             ],
         )
         await db.commit()
@@ -195,6 +197,21 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_trailing_dividends_empty_list(self):
         self.assertEqual(await cache.get_trailing_dividends([]), {})
+
+    async def test_search_kcc_alias_prefers_parent_company(self):
+        results = await cache.search_corp("KCC")
+
+        self.assertGreaterEqual(len(results), 2)
+        self.assertEqual(results[0]["stock_code"], "002380")
+        self.assertEqual(results[0]["corp_name"], "케이씨씨")
+        self.assertEqual(results[1]["stock_code"], "021320")
+
+    async def test_resolve_corp_search_query_accepts_kcc_alias(self):
+        resolved = await cache.resolve_corp_search_query("KCC")
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved["stock_code"], "002380")
+        self.assertEqual(resolved["corp_name"], "케이씨씨")
 
     async def test_get_trailing_dividends_preferred_falls_back_to_common(self):
         """우선주 (005935, 00088K 같은 코드) 는 market_data 에 자체 row 가
