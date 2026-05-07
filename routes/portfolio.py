@@ -1069,10 +1069,12 @@ def _portfolio_dividend_warmup_targets(code: str) -> list[str]:
 async def _warm_market_data_for_dividend(code: str) -> None:
     code = _normalize_portfolio_code(code)
     try:
-        if code in await cache.get_trailing_dividends([code]):
+        latest_dividend_years = await cache.get_latest_dividend_years([code])
+        if latest_dividend_years.get(code, 0) >= datetime.now().year - 1:
             return
         fin_data = await cache.get_financial_data(code)
-        refreshed = await stock_price.fetch_market_data(code, fin_data)
+        corp_code = await cache.get_corp_code(code)
+        refreshed = await stock_price.fetch_market_data(code, fin_data, corp_code=corp_code)
         if refreshed:
             await cache.save_market_data(code, refreshed)
             logger.info("Portfolio dividend market-data warmup completed (%s, %d rows)", code, len(refreshed))

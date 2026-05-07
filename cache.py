@@ -969,6 +969,28 @@ async def get_market_data(stock_code: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def get_latest_dividend_years(stock_codes: list[str]) -> dict[str, int]:
+    if not stock_codes:
+        return {}
+    current_year = datetime.now().year
+    placeholders = ",".join("?" for _ in stock_codes)
+    db = await get_db()
+    cursor = await db.execute(
+        f"""SELECT stock_code, MAX(year) AS latest_year
+            FROM market_data
+            WHERE stock_code IN ({placeholders})
+              AND dividend_per_share IS NOT NULL
+              AND year < ?
+            GROUP BY stock_code""",
+        (*stock_codes, current_year),
+    )
+    return {
+        row["stock_code"]: int(row["latest_year"])
+        for row in await cursor.fetchall()
+        if row["latest_year"] is not None
+    }
+
+
 async def save_analysis_meta(stock_code: str, corp_name: str):
     db = await get_db()
     cursor = await db.execute(

@@ -133,7 +133,7 @@ async def _load_cached_analysis_payload(
 
     if needs_market_refresh:
         try:
-            refreshed = await stock_price.fetch_market_data(stock_code, fin_data)
+            refreshed = await stock_price.fetch_market_data(stock_code, fin_data, corp_code=corp_code)
             if refreshed:
                 mkt_data = refreshed
                 await cache.save_market_data(stock_code, refreshed)
@@ -376,7 +376,7 @@ async def analyze_stock(stock_code: str, request: Request):
                 yield sse_event("progress", {"step": "market_start", "message": "시장 데이터를 계산합니다..."})
                 mkt_data = []
                 try:
-                    mkt_data = await stock_price.fetch_market_data(stock_code, fin_data)
+                    mkt_data = await stock_price.fetch_market_data(stock_code, fin_data, corp_code=corp_code)
                     yield sse_event("progress", {
                         "step": "market_done",
                         "message": f"시장 데이터 수집 완료 ({len(mkt_data)}개년 데이터)",

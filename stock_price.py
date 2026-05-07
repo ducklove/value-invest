@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 import kis_proxy_client
 import kis_ws_manager
+import dart_client
 
 
 logger = logging.getLogger(__name__)
@@ -598,6 +599,19 @@ def market_data_needs_refresh(data: list[dict]) -> bool:
     earliest = min((row["year"] for row in data if row.get("year")), default=2000)
     if earliest > 1990:
         return True
+    current_year = datetime.now().year
+    latest_dividend_year = max(
+        (
+            row["year"]
+            for row in data
+            if row.get("year")
+            and row["year"] < current_year
+            and row.get("dividend_per_share") is not None
+        ),
+        default=0,
+    )
+    if latest_dividend_year < current_year - 1:
+        return True
     return False
 
 
@@ -606,6 +620,7 @@ async def fetch_market_data(
     financial_data: list[dict] | None = None,
     start_year: int = 1985,
     end_year: int | None = None,
+    corp_code: str | None = None,
 ) -> list[dict]:
     if end_year is None:
         end_year = datetime.now().year
@@ -620,7 +635,12 @@ async def fetch_market_data(
         loop.run_in_executor(None, _get_yfinance_aux, stock_code, start_year, end_year),
         timeout=15.0,
     )
-    adjusted_history_payload, raw_history_payload, dividends_payload, financials_payload, quote_payload = await asyncio.gather(
+    dart_dividends_future = (
+        dart_client.fetch_dividend_per_share_by_year(corp_code, start_year, end_year)
+        if corp_code
+        else asyncio.sleep(0, result={})
+    )
+    adjusted_history_payload, raw_history_payload, dividends_payload, financials_payload, quote_payload, dart_dividends_payload = await asyncio.gather(
         kis_proxy_client.get_history(
             stock_code,
             start_date=start_date,
@@ -642,6 +662,7 @@ async def fetch_market_data(
         ),
         kis_proxy_client.get_financials(stock_code),
         kis_proxy_client.get_quote(stock_code),
+        dart_dividends_future,
         return_exceptions=True,
     )
 
@@ -660,6 +681,9 @@ async def fetch_market_data(
     if isinstance(quote_payload, Exception):
         logger.warning("현재 상장주식수 조회 실패(%s): %s", stock_code, quote_payload)
         quote_payload = {}
+    if isinstance(dart_dividends_payload, Exception):
+        logger.warning("DART dividend per-share fetch failed (%s): %s", stock_code, dart_dividends_payload)
+        dart_dividends_payload = {}
 
     try:
         close_series, shares_series, dividends_series, splits_series = await yf_future
@@ -682,6 +706,11 @@ async def fetch_market_data(
         kis_raw_dividends_by_year,
         _estimate_price_adjustment_factors(kis_close_by_year, kis_raw_close_by_year),
     )
+    dart_dividends_by_year = {
+        int(year): float(value)
+        for year, value in (dart_dividends_payload or {}).items()
+        if value is not None
+    }
 
     if not close_by_year:
         close_by_year = kis_close_by_year
@@ -692,9 +721,20 @@ async def fetch_market_data(
                 close_by_year[year] = price
 
     dividends_by_year = {
-        year: yfinance_dividends_by_year.get(year, kis_dividends_by_year.get(year))
-        for year in sorted(set(yfinance_dividends_by_year) | set(kis_dividends_by_year))
-        if yfinance_dividends_by_year.get(year) is not None or kis_dividends_by_year.get(year) is not None
+        year: dart_dividends_by_year.get(
+            year,
+            yfinance_dividends_by_year.get(year, kis_dividends_by_year.get(year)),
+        )
+        for year in sorted(
+            set(dart_dividends_by_year)
+            | set(yfinance_dividends_by_year)
+            | set(kis_dividends_by_year)
+        )
+        if (
+            dart_dividends_by_year.get(year) is not None
+            or yfinance_dividends_by_year.get(year) is not None
+            or kis_dividends_by_year.get(year) is not None
+        )
     }
 
     listed_shares = _safe_float(_get_first(_quote_summary(quote_payload), "listed_shares", "lstn_stcn"))

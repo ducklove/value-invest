@@ -249,6 +249,30 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         fetch.assert_not_awaited()
 
+    async def test_dividend_warmup_refreshes_stale_dividend_year(self):
+        from datetime import datetime
+
+        db = await cache.get_db()
+        current_year = datetime.now().year
+        await db.execute(
+            """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
+               VALUES (?, ?, ?, ?)""",
+            ("002380", current_year - 2, 400000, 10000.0),
+        )
+        await db.commit()
+
+        rows = [
+            {"year": current_year - 1, "close_price": 420500.0, "dividend_per_share": 15000.0},
+        ]
+        fetch = AsyncMock(return_value=rows)
+        with patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
+            await portfolio_route._warm_market_data_for_dividend("002380")
+
+        fetch.assert_awaited_once()
+        self.assertEqual(fetch.await_args.kwargs.get("corp_code"), "00105271")
+        dps = await cache.get_trailing_dividends(["002380"])
+        self.assertEqual(dps.get("002380"), 15000.0)
+
     def test_dividend_warmup_targets_preferred_common_too(self):
         self.assertEqual(
             portfolio_route._portfolio_dividend_warmup_targets("005935"),

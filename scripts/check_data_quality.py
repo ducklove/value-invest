@@ -114,6 +114,7 @@ def _detect_series_anomalies(
 
 async def _inspect_stock(stock_code: str, args: argparse.Namespace) -> dict:
     corp_name = await cache.get_corp_name(stock_code) or stock_code
+    corp_code = await cache.get_corp_code(stock_code)
     end_year = args.end_year
     if end_year is None:
         end_year = stock_price.datetime.now().year
@@ -123,6 +124,7 @@ async def _inspect_stock(stock_code: str, args: argparse.Namespace) -> dict:
         financial_data,
         start_year=args.start_year,
         end_year=end_year,
+        corp_code=corp_code,
     )
 
     loop = asyncio.get_event_loop()

@@ -5,6 +5,7 @@ import re
 import zipfile
 import io
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
 
 API_KEY = os.getenv("OPENDART_API_KEY", "")
@@ -84,6 +85,104 @@ def _parse_amount(value: str | None) -> float | None:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def _is_common_stock_dividend_kind(stock_kind: str | None) -> bool:
+    text = (stock_kind or "").strip()
+    if not text:
+        return True
+    if "우선" in text or "없는" in text:
+        return False
+    return "보통" in text or "의결권 있는" in text
+
+
+def _is_cash_dividend_per_share_row(label: str | None) -> bool:
+    normalized = re.sub(r"\s+", "", label or "")
+    return normalized == "주당현금배당금(원)"
+
+
+def parse_dividend_per_share_by_year(
+    payload: dict,
+    start_year: int | None = None,
+    end_year: int | None = None,
+) -> dict[int, float]:
+    """Parse DART allotment matters into common-stock cash DPS by fiscal year.
+
+    The DART annual report endpoint returns three fiscal periods in one row:
+    `thstrm`, `frmtrm`, and `lwfr`. For dividend display we need per-share
+    cash dividends, not total dividends paid, so this parser intentionally
+    ignores aggregate rows and preferred / non-voting stock rows.
+    """
+    if not isinstance(payload, dict) or payload.get("status") != "000":
+        return {}
+
+    out: dict[int, float] = {}
+    offsets = {"thstrm": 0, "frmtrm": -1, "lwfr": -2}
+    for item in payload.get("list") or []:
+        if not _is_cash_dividend_per_share_row(item.get("se")):
+            continue
+        if not _is_common_stock_dividend_kind(item.get("stock_knd")):
+            continue
+
+        settlement_date = str(item.get("stlm_dt") or "")
+        match = re.match(r"(\d{4})", settlement_date)
+        if not match:
+            continue
+        base_year = int(match.group(1))
+
+        for field, offset in offsets.items():
+            year = base_year + offset
+            if start_year is not None and year < start_year:
+                continue
+            if end_year is not None and year > end_year:
+                continue
+            value = _parse_amount(item.get(field))
+            if value is not None:
+                out[year] = value
+
+    return out
+
+
+async def fetch_dividend_per_share_by_year(
+    corp_code: str | None,
+    start_year: int = DART_ANNUAL_DATA_START_YEAR,
+    end_year: int | None = None,
+) -> dict[int, float]:
+    """Fetch common-stock cash DPS from DART annual allotment matters."""
+    if not corp_code or not API_KEY:
+        return {}
+    if end_year is None:
+        end_year = datetime.now().year - 1
+
+    start_year = max(start_year, DART_ANNUAL_DATA_START_YEAR)
+    # Current-year annual reports are not available yet. Querying them first
+    # only adds latency and usually returns "no data".
+    latest_report_year = min(end_year, datetime.now().year - 1)
+    if latest_report_year < start_year:
+        return {}
+
+    out: dict[int, float] = {}
+    async with httpx.AsyncClient(timeout=15) as client:
+        for report_year in range(latest_report_year, start_year - 1, -3):
+            resp = await client.get(
+                f"{BASE_URL}/alotMatter.json",
+                params={
+                    "crtfc_key": API_KEY,
+                    "corp_code": corp_code,
+                    "bsns_year": str(report_year),
+                    "reprt_code": "11011",
+                },
+            )
+            if resp.status_code != 200:
+                continue
+            try:
+                data = resp.json()
+            except ValueError:
+                continue
+            out.update(parse_dividend_per_share_by_year(data, start_year, end_year))
+            await asyncio.sleep(0.15)
+
+    return out
 
 
 async def fetch_financial_statement(
