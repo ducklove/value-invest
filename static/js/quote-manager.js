@@ -3,6 +3,7 @@ const QUOTE_MANAGER_STALE_WS_MS = 90_000;
 const QUOTE_MANAGER_GENERAL_POLL_MS = 60_000;
 const QUOTE_MANAGER_OVERFLOW_POLL_MS = 30_000;
 const QUOTE_MANAGER_RETRY_MS = 5_000;
+const QUOTE_MANAGER_PRIORITY_CODES = new Set(['A200', 'A200.AX', 'EUN2', 'EUN2.DE']);
 
 const QuoteManager = {
   ws: null,
@@ -113,21 +114,32 @@ const QuoteManager = {
     );
   },
 
-  async _fetchQuotes(codes) {
-    const uniqueCodes = [...new Set((codes || []).filter(Boolean))];
+  _quotePriority(code) {
+    if (QUOTE_MANAGER_PRIORITY_CODES.has(String(code || '').toUpperCase())) return 0;
+    return /^\d/.test(String(code || '')) ? 2 : 1;
+  },
+
+  async _fetchQuotes(codes, { fresh = true } = {}) {
+    const uniqueCodes = [...new Set((codes || []).filter(Boolean))]
+      .sort((a, b) => this._quotePriority(a) - this._quotePriority(b));
     if (!uniqueCodes.length) return;
-    await Promise.all(uniqueCodes.map(code =>
-      apiFetch(`/api/asset-quote/${encodeURIComponent(code)}`)
-        .then(async resp => {
-          if (!resp.ok) return;
-          const q = await resp.json();
-          if (q && q.price != null) {
-            this._markQuoteFresh(code);
-            if (this.onQuote) this.onQuote(code, { code, ...q });
-          }
-        })
-        .catch(() => { /* Keep one bad quote from blocking the rest. */ })
-    ));
+    try {
+      const resp = await apiFetch('/api/asset-quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codes: uniqueCodes, fresh }),
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      for (const [code, q] of Object.entries(data || {})) {
+        if (q && q.price != null) {
+          this._markQuoteFresh(code);
+          if (this.onQuote) this.onQuote(code, { code, ...q });
+        }
+      }
+    } catch {
+      /* Keep quote polling best-effort; portfolio rendering must not wait. */
+    }
     this._scheduleRetry();
   },
 
@@ -156,7 +168,8 @@ const QuoteManager = {
   },
 
   async _fetchInitialQuotes(wsCodes) {
-    await this._fetchQuotes(wsCodes);
+    await this._fetchQuotes(wsCodes, { fresh: false });
+    this._scheduleRetry();
   },
 
   async _pollOverflow() {

@@ -218,6 +218,8 @@ _dead_quote_cache: dict[str, float] = {}
 
 
 def _is_dead(code: str) -> bool:
+    if _static_foreign_ticker(code):
+        return False
     ts = _dead_quote_cache.get(code)
     if not ts:
         return False
@@ -228,6 +230,8 @@ def _is_dead(code: str) -> bool:
 
 
 def _mark_dead(code: str) -> None:
+    if _static_foreign_ticker(code):
+        return
     _dead_quote_cache[code] = time.monotonic()
 
 
@@ -771,31 +775,34 @@ async def _fetch_quote(stock_code: str) -> dict:
     return q
 
 
+def _cached_quote_for_code(code: str) -> dict:
+    now = _time.monotonic()
+    ws_q = kis_ws_manager.get_cached_quote(code)
+    if ws_q and ws_q.get("price") is not None:
+        return {
+            "date": ws_q.get("date", ""),
+            "price": ws_q["price"],
+            "previous_close": ws_q.get("previous_close"),
+            "change": ws_q.get("change"),
+            "change_pct": ws_q.get("change_pct"),
+            "trade_value": ws_q.get("trade_value"),
+        }
+    cached = _quote_cache.get(code)
+    if cached:
+        q = dict(cached[1])
+        if (now - cached[0]) >= _QUOTE_CACHE_TTL:
+            q["_stale"] = True
+        return q
+    lk = _last_known_quotes.get(code)
+    return dict(lk, _stale=True) if lk else {}
+
+
 async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
     """Attach cached quotes — WebSocket cache preferred, then polling cache."""
-    now = _time.monotonic()
     result = []
     for item in items:
         enriched = dict(item)
-        code = item["stock_code"]
-        ws_q = kis_ws_manager.get_cached_quote(code)
-        if ws_q and ws_q.get("price") is not None:
-            enriched["quote"] = {
-                "date": ws_q.get("date", ""),
-                "price": ws_q["price"],
-                "previous_close": ws_q.get("previous_close"),
-                "change": ws_q.get("change"),
-                "change_pct": ws_q.get("change_pct"),
-                "trade_value": ws_q.get("trade_value"),
-            }
-        else:
-            cached = _quote_cache.get(code)
-            if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
-                enriched["quote"] = cached[1]
-            else:
-                # Fallback: last-known quote (stale but better than nothing)
-                lk = _last_known_quotes.get(code)
-                enriched["quote"] = dict(lk, _stale=True) if lk else {}
+        enriched["quote"] = _cached_quote_for_code(item["stock_code"])
         result.append(enriched)
     return result
 
@@ -937,6 +944,20 @@ async def _resolve_default_benchmark(code: str) -> str:
             return _common_stock_code(code)
         mtype = await _detect_market_type(code)
         return "IDX_KOSPI" if mtype == "KOSPI" else "IDX_KOSDAQ"
+    return "IDX_SP500"
+
+
+def _resolve_default_benchmark_fast(code: str) -> str:
+    """Cheap benchmark fallback for first-paint portfolio loading."""
+    if _is_cash_asset(code):
+        return _CASH_FX_CODE.get(code, "FX_USDKRW")
+    if code in _SPECIAL_ASSETS:
+        return "FX_USDKRW"
+    if _is_korean_stock(code):
+        if _is_preferred_stock(code):
+            return _common_stock_code(code)
+        cached = _market_type_cache.get(code)
+        return "IDX_KOSDAQ" if cached == "KOSDAQ" else "IDX_KOSPI"
     return "IDX_SP500"
 
 
@@ -1134,7 +1155,11 @@ def _portfolio_dividend_warmup_due_targets(codes: list[str], now: float) -> list
 def _start_dividend_warmup_task(code: str, now: float) -> asyncio.Task | None:
     _dividend_warmup_last[code] = now
     try:
-        task = asyncio.create_task(_warm_market_data_for_dividend(code))
+        async def _delayed_warmup():
+            await asyncio.sleep(10)
+            await _warm_market_data_for_dividend(code)
+
+        task = asyncio.create_task(_delayed_warmup())
     except RuntimeError:
         return None
     _dividend_warmup_tasks[code] = task
@@ -1774,6 +1799,9 @@ async def asset_quote(stock_code: str):
 
 
 _NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
+_ASSET_QUOTES_BATCH_TIMEOUT = 4.5
+_ASSET_QUOTES_ITEM_TIMEOUT = 4.2
+_ASSET_QUOTES_CONCURRENCY = 16
 
 @router.post("/api/asset-quotes")
 async def asset_quotes_batch(payload: dict = Body(...)):
@@ -1782,25 +1810,39 @@ async def asset_quotes_batch(payload: dict = Body(...)):
     if not isinstance(codes, list) or len(codes) > 100:
         raise HTTPException(status_code=400, detail="최대 100개까지 조회 가능합니다.")
     codes = list({str(c).strip() for c in codes if str(c).strip()})
+    fresh = bool(payload.get("fresh", True))
+    if not fresh:
+        return {code: _cached_quote_for_code(code) for code in codes}
 
     # 순차 호출 — 화면은 이미 localStorage snapshot + 서버 cache 로
     # 즉시 떠 있으므로 (loadPortfolio 의 _pfRestoreSnapshot + GET /api/
     # portfolio 의 _enrich_with_cached_quotes), 여기서 하는 건 '뒤에서
     # 조용히 fresh 로 교체' 에 해당. upstream API 에 동시에 때리지 않고
     # 한 종목씩 순차로 처리해 rate limit·외부 서버 부하에 친화적.
+    sem = asyncio.Semaphore(_ASSET_QUOTES_CONCURRENCY)
+
     async def _fetch_one(code):
         if code.startswith(_NON_QUOTABLE_PREFIXES):
             return code, {}
         try:
-            q = await _fetch_quote(code)
+            async with sem:
+                q = await asyncio.wait_for(_fetch_quote(code), timeout=_ASSET_QUOTES_ITEM_TIMEOUT)
             return code, q or {}
-        except Exception:
+        except (asyncio.TimeoutError, Exception):
             return code, {}
 
-    results = []
-    for c in codes:
-        results.append(await _fetch_one(c))
-    return {code: quote for code, quote in results}
+    tasks = [asyncio.create_task(_fetch_one(code)) for code in codes]
+    done, pending = await asyncio.wait(tasks, timeout=_ASSET_QUOTES_BATCH_TIMEOUT)
+    for task in pending:
+        task.cancel()
+    results = {code: {} for code in codes}
+    for task in done:
+        try:
+            code, quote = task.result()
+            results[code] = quote
+        except Exception:
+            pass
+    return results
 
 
 def _require_user(user):
@@ -1811,26 +1853,27 @@ def _require_user(user):
 
 @router.get("/api/portfolio")
 async def get_portfolio(request: Request):
+    started = time.perf_counter()
     user = _require_user(await get_current_user(request))
     await cache.get_portfolio_groups(user["google_sub"])  # ensure default groups
     items = await cache.get_portfolio(user["google_sub"])
-    # Prefetch market types in parallel, then resolve default benchmarks
     needs_resolve = [it for it in items if not it.get("benchmark_code")]
-    if needs_resolve:
-        await _prefetch_market_types([it["stock_code"] for it in needs_resolve])
-        for item in needs_resolve:
-            item["benchmark_code"] = await _resolve_default_benchmark(item["stock_code"])
+    for item in needs_resolve:
+        item["benchmark_code"] = _resolve_default_benchmark_fast(item["stock_code"])
     # Annotate with trailing dividend per share so the UI can show a
     # "배당액" column (= trailing_dps × quantity). Multiplying on the
     # client keeps the number fresh while the user edits quantity in
     # the inline edit row.
     codes = [it["stock_code"] for it in items]
-    await _warm_portfolio_dividends_for_response(codes)
+    _schedule_portfolio_dividend_warmup(codes)
     dps_map = await cache.get_trailing_dividends(codes)
     for it in items:
         it["trailing_dps"] = dps_map.get(it["stock_code"])
     enriched = await _enrich_with_cached_quotes(items)
     _schedule_asset_insight_warmup(enriched)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if elapsed_ms > 1000:
+        logger.warning("portfolio list slow: %.0fms items=%d user=%s", elapsed_ms, len(enriched), user.get("email") or user.get("google_sub"))
     return enriched
 
 

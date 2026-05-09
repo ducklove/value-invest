@@ -1,6 +1,7 @@
 // Portfolio data loading, sorting/filtering state, and in-place quote row updates.
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 let _pfNavHistoryPromise = null;
+const _PF_PORTFOLIO_SNAPSHOT_KEY = 'valueInvestPortfolioSnapshot:v2';
 
 async function pfLoadNavHistory({ force = false } = {}) {
   if (!force && Array.isArray(pfNavHistory) && pfNavHistory.length) return pfNavHistory;
@@ -21,6 +22,7 @@ async function loadPortfolio() {
   if (portfolioLoading) return;
   portfolioLoading = true;
   try {
+    _restorePortfolioSnapshotForFastPaint();
     const resp = await apiFetch('/api/portfolio');
     if (!resp.ok) {
       if (resp.status === 401) {
@@ -89,11 +91,32 @@ async function loadPortfolio() {
       if (!item.quote || item.quote.price == null) item.quote = prevQuotes[item.stock_code] || item.quote;
       return item;
     });
+    _savePortfolioSnapshot(portfolioItems);
     renderPortfolio();
     _updateQuoteSubscriptions();
   } catch (e) { console.warn(e); } finally {
     portfolioLoading = false;
   }
+}
+
+function _restorePortfolioSnapshotForFastPaint() {
+  if (portfolioItems.length) return;
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(_PF_PORTFOLIO_SNAPSHOT_KEY) || 'null');
+    if (!snapshot || !Array.isArray(snapshot.items) || !snapshot.items.length) return;
+    portfolioItems = snapshot.items;
+    renderPortfolio();
+    _updateQuoteSubscriptions();
+  } catch (e) { console.warn(e); }
+}
+
+function _savePortfolioSnapshot(items) {
+  try {
+    localStorage.setItem(_PF_PORTFOLIO_SNAPSHOT_KEY, JSON.stringify({
+      savedAt: Date.now(),
+      items: Array.isArray(items) ? items.slice(0, 300) : [],
+    }));
+  } catch (e) { console.warn(e); }
 }
 
 function pfSort(key) {
