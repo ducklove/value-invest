@@ -108,6 +108,8 @@ def test_portfolio_insight_modal_renders_valuation_cards():
     assert "_renderInsightCard('PBR'" in source
     assert "_renderInsightCard('PER'" in source
     assert "_renderInsightCard('ROE'" in source
+    assert "_renderInsightCard('자사주 비율'" in source
+    assert "valuation.treasuryShareRatioPct" in source
     assert "valuation.applicable" in source
 
 

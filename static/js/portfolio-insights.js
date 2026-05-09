@@ -279,6 +279,7 @@ function _renderAssetInsight(data) {
   const valuationYear = valuation.fiscalYear ? `${valuation.fiscalYear}년 기준` : '';
   const valuationSourceCode = valuation.sourceCode && valuation.sourceCode !== code ? `기준 ${valuation.sourceCode}` : '';
   const valuationBasis = [valuationSourceCode, valuationYear].filter(Boolean).join(' · ');
+  const treasuryBasis = ['발행주식 대비', valuationBasis].filter(Boolean).join(' · ');
 
   const cards = [
     _renderInsightCard('현재가', _fmtInsightPrice(position.currentPrice, positionCurrency), benchmark.dayChangePct !== null && benchmark.dayChangePct !== undefined ? `벤치마크 오늘 ${_fmtInsightPct(benchmark.dayChangePct)}` : ''),
@@ -289,6 +290,7 @@ function _renderAssetInsight(data) {
       _renderInsightCard('PBR', _fmtInsightMultiple(valuation.pbr), valuation.bps !== null && valuation.bps !== undefined ? `BPS ${_fmtInsightPrice(valuation.bps, 'KRW')}` : valuationBasis),
       _renderInsightCard('PER', _fmtInsightMultiple(valuation.per), valuation.eps !== null && valuation.eps !== undefined ? `EPS ${_fmtInsightPrice(valuation.eps, 'KRW')}` : valuationBasis),
       _renderInsightCard('ROE', _fmtInsightPct(valuation.roe, false), valuationBasis),
+      _renderInsightCard('자사주 비율', _fmtInsightPct(valuation.treasuryShareRatioPct, false), treasuryBasis),
     ] : []),
     _renderInsightCard('최근 3개월', _fmtInsightPct(returns['3m']), `벤치마크 대비 ${_fmtInsightPct(relativeReturns['3m'])}`, _insightClass(returns['3m'])),
     _renderInsightCard('60일 변동성', _fmtInsightPct(volatility['60d'], false), '연율화 기준'),

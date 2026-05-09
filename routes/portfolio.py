@@ -1524,6 +1524,70 @@ def _insight_per_share_value(fundamental: dict, key: str) -> float | None:
     return None
 
 
+def _insight_share_number(mapping: dict, *keys: str) -> float | None:
+    for key in keys:
+        value = asset_insights.safe_float(mapping.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _insight_treasury_share_basis(fundamental: dict) -> dict:
+    per_share = fundamental.get("per_share") if isinstance(fundamental, dict) else None
+    if not isinstance(per_share, dict):
+        return {}
+
+    entries = []
+    for key in ("bps", "eps_ttm", "eps_annual"):
+        entry = per_share.get(key)
+        if not isinstance(entry, dict):
+            continue
+        components = entry.get("components")
+        if isinstance(components, list) and components:
+            entries = [component for component in components if isinstance(component, dict)]
+            break
+        if _insight_share_number(entry, "issued_shares", "istc_totqy") is not None:
+            entries = [entry]
+            break
+    if not entries:
+        return {}
+
+    issued_total = 0.0
+    treasury_total = 0.0
+    outstanding_total = 0.0
+    for entry in entries:
+        issued = _insight_share_number(entry, "issued_shares", "istc_totqy")
+        treasury = _insight_share_number(
+            entry,
+            "treasury_shares",
+            "treasury_share_count",
+            "treasury_stock_count",
+            "treas_stock_co",
+            "own_stock_count",
+            "self_stock_count",
+        )
+        outstanding = _insight_share_number(entry, "outstanding_shares", "distributed_shares", "distb_stock_co")
+        if issued is None and outstanding is not None and treasury is not None:
+            issued = outstanding + treasury
+        if treasury is None and issued is not None and outstanding is not None:
+            treasury = max(0.0, issued - outstanding)
+        if issued is not None and issued > 0:
+            issued_total += issued
+        if treasury is not None and treasury > 0:
+            treasury_total += treasury
+        if outstanding is not None and outstanding > 0:
+            outstanding_total += outstanding
+
+    if issued_total <= 0:
+        return {}
+    return {
+        "treasuryShareRatioPct": round(treasury_total / issued_total * 100, 2),
+        "treasuryShares": round(treasury_total),
+        "issuedShares": round(issued_total),
+        "outstandingShares": round(outstanding_total) if outstanding_total > 0 else None,
+    }
+
+
 async def _fetch_insight_valuation_basis(stock_code: str) -> dict:
     code = (stock_code or "").strip()
     if not _is_korean_stock(code):
@@ -1560,6 +1624,7 @@ async def _fetch_insight_valuation_basis(stock_code: str) -> dict:
             "equity": _insight_metric_amount(metrics, "equity"),
         }
     )
+    basis.update(_insight_treasury_share_basis(fundamental))
 
     cached = await cache.get_latest_market_valuation(source_code)
     if cached:
@@ -1603,6 +1668,10 @@ def _build_insight_valuation(quote: dict | None, basis: dict) -> dict:
         "sourceCode": basis.get("sourceCode"),
         "fiscalYear": basis.get("fiscalYear"),
         "asOf": basis.get("asOf"),
+        "treasuryShareRatioPct": basis.get("treasuryShareRatioPct"),
+        "treasuryShares": basis.get("treasuryShares"),
+        "issuedShares": basis.get("issuedShares"),
+        "outstandingShares": basis.get("outstandingShares"),
     }
 
 

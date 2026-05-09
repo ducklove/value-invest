@@ -105,7 +105,24 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
                 },
                 "per_share": {
                     "eps_ttm": {"value": 5000, "treasury_shares_excluded": True},
-                    "bps": {"value": 50000, "treasury_shares_excluded": True},
+                    "bps": {
+                        "value": 50000,
+                        "treasury_shares_excluded": True,
+                        "components": [
+                            {
+                                "stock_kind": "보통주",
+                                "issued_shares": 1000,
+                                "treasury_shares": 100,
+                                "outstanding_shares": 900,
+                            },
+                            {
+                                "stock_kind": "우선주",
+                                "issued_shares": 200,
+                                "treasury_shares": 20,
+                                "outstanding_shares": 180,
+                            },
+                        ],
+                    },
                 },
             }
         }
@@ -125,3 +142,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(valuation["roe"], 11.0)
         self.assertEqual(valuation["eps"], 5000)
         self.assertEqual(valuation["bps"], 50000)
+        self.assertEqual(valuation["treasuryShareRatioPct"], 10.0)
+        self.assertEqual(valuation["treasuryShares"], 120)
+        self.assertEqual(valuation["issuedShares"], 1200)
+        self.assertEqual(valuation["outstandingShares"], 1080)
