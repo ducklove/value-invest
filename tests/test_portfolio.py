@@ -143,6 +143,44 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["003200"]["bps"], 1000)
         self.assertEqual(saved["003200"]["eps"], 100)
 
+    async def test_target_metric_uses_internal_per_share_when_treasury_already_excluded(self):
+        target_metrics_map = {"005930": {"eps": None, "bps": None, "dps": None}}
+        fundamentals = {
+            "005930": {
+                "fiscal_year": 2025,
+                "metrics": {
+                    "equity": {"amount": 424_313_255_000_000},
+                    "net_income": {"amount": 44_260_956_000_000},
+                },
+                "per_share": {
+                    "bps": {
+                        "value": 63997.24,
+                        "shares": 6_630_180_138,
+                        "share_basis": "dart_distributed_shares",
+                        "treasury_shares_excluded": True,
+                    },
+                    "eps_ttm": {
+                        "value": 6675.68,
+                        "shares": 6_630_180_138,
+                        "share_basis": "dart_distributed_shares",
+                        "treasury_shares_excluded": True,
+                    },
+                },
+            }
+        }
+
+        dart = AsyncMock(side_effect=AssertionError("DART share status should not run"))
+        with patch.object(target_metrics_service.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)), \
+             patch.object(target_metrics_service.dart_client, "fetch_common_stock_share_status", new=dart):
+            await target_metrics_service.supplement_target_metrics(
+                [{"stock_code": "005930", "target_price_formula": "BPS*0.5+EPS"}],
+                target_metrics_map,
+            )
+
+        self.assertEqual(target_metrics_map["005930"]["bps"], 63997.24)
+        self.assertEqual(target_metrics_map["005930"]["eps"], 6675.68)
+        dart.assert_not_awaited()
+
     async def test_portfolio_tag_suggestions_by_usage(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
         await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)

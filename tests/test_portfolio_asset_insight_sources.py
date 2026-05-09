@@ -50,6 +50,22 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         local.assert_awaited_once()
         yahoo.assert_not_awaited()
 
+    async def test_kosdaq_and_sp500_benchmark_history_use_internal_macro_api(self):
+        local_rows = [{"date": "2026-05-07", "close": 1000.0}]
+
+        for benchmark_code, series_id in (("IDX_KOSDAQ", "KOSDAQ"), ("IDX_SP500", "SP500")):
+            pf._asset_history_cache.clear()
+            with (
+                patch.object(pf.close_price_client, "get_macro_index", new=AsyncMock(return_value=local_rows)) as local,
+                patch.object(pf, "_download_yfinance_history", new=AsyncMock()) as yahoo,
+            ):
+                rows = await pf._benchmark_history_for_insight(benchmark_code)
+
+            self.assertEqual(rows, local_rows)
+            self.assertEqual(local.await_args.kwargs.get("since") is not None, True)
+            self.assertEqual(local.await_args.args[0], series_id)
+            yahoo.assert_not_awaited()
+
     async def test_local_benchmark_history_falls_back_when_internal_macro_api_is_empty(self):
         yf_rows = [{"date": "2026-05-07", "close": 3201.0}]
 

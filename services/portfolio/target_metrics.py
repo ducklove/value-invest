@@ -22,6 +22,12 @@ _TREASURY_SHARE_KEYS = (
     "own_stock_count",
     "self_stock_count",
 )
+_TREASURY_EXCLUDED_KEYS = (
+    "treasury_shares_excluded",
+    "excludes_treasury_shares",
+    "treasury_excluded",
+    "treasury_adjusted",
+)
 
 
 def _positive_number(value) -> float | None:
@@ -32,6 +38,16 @@ def _positive_number(value) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if number > 0 else None
+
+
+def _truthy(value) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
 
 
 def _metric_amount(metrics: dict, key: str) -> float | None:
@@ -47,12 +63,23 @@ def _per_share_entry(fundamental: dict, key: str) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def _entry_excludes_treasury(entry: dict) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    if any(_truthy(entry.get(key)) for key in _TREASURY_EXCLUDED_KEYS):
+        return True
+    share_basis = str(entry.get("share_basis") or "").strip().lower()
+    if share_basis in {"dart_distributed_shares", "distributed_shares", "outstanding_shares"}:
+        return True
+    return False
+
+
 def _per_share_value(fundamental: dict, key: str, share_status: dict | None = None) -> float | None:
     entry = _per_share_entry(fundamental, key)
     value = _positive_number(entry.get("value"))
     if value is None:
         return None
-    if entry.get("treasury_shares_excluded") is True:
+    if _entry_excludes_treasury(entry):
         return value
 
     distributed = _first_positive(share_status, ("distributed_shares", "distb_stock_co"))
@@ -67,6 +94,18 @@ def _per_share_value(fundamental: dict, key: str, share_status: dict | None = No
     if original_shares is not None:
         return round(value * original_shares / distributed, 2)
     return value
+
+
+def _needs_share_status_for_formula(fundamental: dict, formula_vars: set[str]) -> bool:
+    if not isinstance(fundamental, dict):
+        return True
+    if "BPS" in formula_vars and not _entry_excludes_treasury(_per_share_entry(fundamental, "bps")):
+        return True
+    if "EPS" in formula_vars:
+        eps_entry = _per_share_entry(fundamental, "eps_ttm") or _per_share_entry(fundamental, "eps_annual")
+        if not _entry_excludes_treasury(eps_entry):
+            return True
+    return False
 
 
 def _metric_year(fundamental: dict, metrics: dict) -> int | None:
@@ -151,7 +190,7 @@ async def _fetch_target_share_statuses(codes: list[str], fundamentals: dict, fal
 
 
 async def supplement_target_metrics(items: list[dict], target_metrics_map: dict[str, dict]) -> None:
-    needed: list[str] = []
+    needed_vars: dict[str, set[str]] = {}
     for item in items:
         formula_vars = _formula_financial_vars(item.get("target_price_formula"))
         if not formula_vars:
@@ -163,9 +202,9 @@ async def supplement_target_metrics(items: list[dict], target_metrics_map: dict[
         for candidate in candidates:
             if not candidate or not is_korean_stock(candidate):
                 continue
-            needed.append(candidate)
+            needed_vars.setdefault(candidate, set()).update(formula_vars)
 
-    codes = list(dict.fromkeys(needed))
+    codes = list(needed_vars)
     if not codes:
         return
 
@@ -176,7 +215,15 @@ async def supplement_target_metrics(items: list[dict], target_metrics_map: dict[
         logger.warning("target metric internal API supplement failed (%s): %s", ",".join(codes[:5]), exc)
         return
 
-    share_statuses = await _fetch_target_share_statuses(codes, fundamentals, today.year - 1)
+    share_status_codes = [
+        code
+        for code in codes
+        if _needs_share_status_for_formula(
+            fundamentals.get(code) if isinstance(fundamentals, dict) else {},
+            needed_vars.get(code, set()),
+        )
+    ]
+    share_statuses = await _fetch_target_share_statuses(share_status_codes, fundamentals, today.year - 1) if share_status_codes else {}
     cache_rows: list[dict] = []
     for code in codes:
         fundamental = fundamentals.get(code) if isinstance(fundamentals, dict) else None
