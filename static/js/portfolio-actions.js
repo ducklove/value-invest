@@ -188,7 +188,12 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   const tgtEl = editRow.querySelector('.js-pf-edit-target') || document.getElementById('pfEditTarget');
   if (tgtEl) {
     const tgtRaw = tgtEl.value.trim();
-    body.target_price_formula = tgtRaw;
+    const numericTarget = tgtRaw.replace(/,/g, '');
+    if (tgtRaw && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(numericTarget)) {
+      body.target_price = Number(numericTarget);
+    } else {
+      body.target_price_formula = tgtRaw;
+    }
   }
   _pfSetEditSaving(stockCode, true, editRow);
   try {

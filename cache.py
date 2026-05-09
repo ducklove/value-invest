@@ -2353,6 +2353,7 @@ async def save_portfolio_item(
     if target_price_disabled == 1:
         target_price = None
         target_price_formula = None
+    target_price_formula_db = target_price_formula or ""
 
     if sort_order is None and not existing:
         cursor = await db.execute(
@@ -2380,7 +2381,7 @@ async def save_portfolio_item(
             target_price_formula = excluded.target_price_formula,
             updated_at = excluded.updated_at
         """,
-        (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula, now),
+        (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula_db, now),
     )
     await db.commit()
     return {

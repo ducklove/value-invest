@@ -92,6 +92,14 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items[0]["target_price"], 100000)
         self.assertIsNone(items[0]["target_price_formula"])
 
+        db = await cache.get_db()
+        cursor = await db.execute(
+            "SELECT target_price_formula FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            ("u1", "005930"),
+        )
+        row = await cursor.fetchone()
+        self.assertEqual(row["target_price_formula"], "")
+
     async def test_portfolio_target_metrics_use_latest_positive_values(self):
         db = await cache.get_db()
         await db.executemany(
