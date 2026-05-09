@@ -2032,8 +2032,18 @@ async def get_benchmark_quotes(request: Request):
             bq = _cached_benchmark_quote(bc, allow_stale=True) or {}
             return bc, {**bq, "name": name}
 
-    pairs = await asyncio.gather(*[_fetch_one(bc) for bc in benchmark_codes])
-    return {bc: data for bc, data in pairs}
+    codes = list(benchmark_codes)
+    pairs = await asyncio.gather(*[_fetch_one(bc) for bc in codes], return_exceptions=True)
+    response = {}
+    for bc, pair in zip(codes, pairs):
+        if isinstance(pair, BaseException):
+            name = _resolve_benchmark_name_fast(bc, items)
+            bq = _cached_benchmark_quote(bc, allow_stale=True) or {}
+            response[bc] = {**bq, "name": name}
+            continue
+        code, data = pair
+        response[code] = data
+    return response
 
 
 @router.delete("/api/portfolio/{stock_code}")

@@ -1,4 +1,5 @@
 import unittest
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 from routes import portfolio as pf
@@ -76,3 +77,19 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
             rows = await pf._benchmark_history_for_insight("IDX_KOSPI")
 
         self.assertEqual(rows, yf_rows)
+
+    async def test_benchmark_quotes_child_cancellation_returns_stale_quote(self):
+        pf._benchmark_quote_cache.clear()
+        pf._benchmark_quote_cache.set("IDX_KOSPI", {"change_pct": 1.2})
+
+        with (
+            patch.object(pf, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})),
+            patch.object(pf.cache, "get_portfolio", new=AsyncMock(return_value=[
+                {"stock_code": "005930", "stock_name": "삼성전자", "benchmark_code": "IDX_KOSPI"}
+            ])),
+            patch.object(pf, "_fetch_benchmark_quote", new=AsyncMock(side_effect=asyncio.CancelledError())),
+        ):
+            result = await pf.get_benchmark_quotes(object())
+
+        self.assertEqual(result["IDX_KOSPI"]["change_pct"], 1.2)
+        self.assertEqual(result["IDX_KOSPI"]["name"], pf._resolve_benchmark_name_fast("IDX_KOSPI"))
