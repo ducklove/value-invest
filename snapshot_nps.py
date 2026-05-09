@@ -182,7 +182,7 @@ def _pct_to_treemap_color(pct: float | None, is_dark: bool = False) -> str:
     return f"rgb({r},{g},{b})"
 
 
-def _fetch_kospi_history(dates: list[str]) -> list[dict]:
+def _fetch_kospi_history_yfinance(dates: list[str]) -> list[dict]:
     """Fetch KOSPI index values for given dates using yfinance."""
     try:
         import yfinance as yf
@@ -199,6 +199,39 @@ def _fetch_kospi_history(dates: list[str]) -> list[dict]:
         return result
     except Exception:
         return []
+
+
+async def _fetch_kospi_history(dates: list[str]) -> list[dict]:
+    """Fetch KOSPI closes for NAV overlay, preferring benchmark_daily."""
+    if not dates:
+        return []
+    wanted = set(dates)
+    start = min(dates)
+
+    try:
+        import benchmark_history
+        await benchmark_history.backfill_benchmark("KOSPI", start)
+        await benchmark_history.update_benchmark_today(["KOSPI"])
+        rows = await cache.get_benchmark_rows("KOSPI", start=start)
+        result = [
+            {"date": r["date"], "value": round(float(r["close"]), 2)}
+            for r in rows
+            if r.get("date") in wanted and r.get("close") is not None
+        ]
+        if result:
+            return result
+    except Exception as exc:
+        logger.warning("NPS: benchmark_daily KOSPI history load failed: %s", exc)
+
+    return _fetch_kospi_history_yfinance(dates)
+
+
+async def _is_trading_day(d: date) -> bool:
+    """Check against actual KOSPI closes, not just weekdays."""
+    if d.weekday() >= 5:
+        return False
+    rows = await _fetch_kospi_history([d.isoformat()])
+    return any(row.get("date") == d.isoformat() for row in rows)
 
 
 def _build_treemap_data(holdings: list[dict]) -> list[dict]:
@@ -534,12 +567,14 @@ def _build_html(
     const gridColor = _gridColor();
     const navColor = NPS_NAV_COLOR;
 
-    // Normalize KOSPI to start at 1000 (same as NAV base)
-    const kospiRaw = NPS_KOSPI_DATA.map(d => d.value);
+    // Normalize KOSPI to start at 1000 (same as NAV base). Match by date,
+    // not by array position, so holidays/missing rows never shift the line.
+    const kospiByDate = Object.fromEntries(NPS_KOSPI_DATA.map(d => [d.date, d.value]));
+    const kospiRaw = NPS_NAV_DATA.map(d => kospiByDate[d.date] ?? null);
     let kospiNorm = [];
-    if (kospiRaw.length > 0 && kospiRaw[0] > 0) {{
-      const base = kospiRaw[0];
-      kospiNorm = kospiRaw.map(v => +(v / base * 1000).toFixed(2));
+    const kospiBase = kospiRaw.find(v => v != null && v > 0);
+    if (kospiBase) {{
+      kospiNorm = kospiRaw.map(v => v != null ? +(v / kospiBase * 1000).toFixed(2) : null);
     }}
 
     const series = [{{
@@ -664,11 +699,6 @@ def _build_html(
     return header_html + cards_html + treemap_html + nav_chart_html + value_chart_html + table_html + script_html
 
 
-def _is_trading_day(d: date) -> bool:
-    """Check if a date is a weekday (rough trading day check)."""
-    return d.weekday() < 5  # Mon=0 .. Fri=4
-
-
 async def _load_prev_holdings(snap_date: str, days: int = 2) -> tuple[list[dict], set[str]]:
     """Load previous holdings and determine which codes appeared consistently.
 
@@ -712,7 +742,7 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
     if snap_date is None:
         snap_date = date.today().isoformat()
 
-    if not _is_trading_day(date.fromisoformat(snap_date)):
+    if not await _is_trading_day(date.fromisoformat(snap_date)):
         logger.info("NPS snapshot skipped: %s is not a trading day", snap_date)
         if manage_db:
             await cache.close_db()
@@ -854,19 +884,29 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
         total_units = first_units
         nav = total_value / total_units
 
-    # 5. Compute return metrics
-    # Build a synthetic "today" snapshot appended to history for mtd/ytd calculations
+    # 5. Build a synthetic "today" snapshot appended to history.
     synthetic = history + [{"date": snap_date, "nav": nav, "total_value": total_value}]
 
+    # Use actual KOSPI dates as the trading calendar for charts/period metrics.
+    # Older snapshots may contain weekday holidays (e.g. Labor Day / Children's
+    # Day), which should not appear on the NAV trend axis.
+    all_nav_dates = [s["date"] for s in synthetic]
+    kospi_history = await _fetch_kospi_history(all_nav_dates)
+    trading_dates = {row["date"] for row in kospi_history}
+    chart_synthetic = [s for s in synthetic if s["date"] in trading_dates] if trading_dates else synthetic
+    chart_dates = {s["date"] for s in chart_synthetic}
+    kospi_history = [row for row in kospi_history if row["date"] in chart_dates]
+
+    # 6. Compute return metrics
     today_pct = _today_change_pct(holdings)
-    mtd = _mtd_pct(synthetic, snap_date)
-    ytd = _ytd_pct(synthetic, snap_date)
+    mtd = _mtd_pct(chart_synthetic, snap_date)
+    ytd = _ytd_pct(chart_synthetic, snap_date)
 
     # Build chart histories
-    nav_history = [{"date": s["date"], "nav": s["nav"]} for s in synthetic]
-    value_history = [{"date": s["date"], "total_value": s["total_value"]} for s in synthetic]
+    nav_history = [{"date": s["date"], "nav": s["nav"]} for s in chart_synthetic]
+    value_history = [{"date": s["date"], "total_value": s["total_value"]} for s in chart_synthetic]
 
-    # 6. Prepare items for DB save
+    # 7. Prepare items for DB save
     db_items = []
     for h in holdings:
         code = h.get("stock_code")
@@ -884,10 +924,6 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
 
     await cache.save_nps_holdings(snap_date, db_items)
     logger.info("NPS: holdings saved (%d rows)", len(db_items))
-
-    # 7. Fetch KOSPI history for NAV overlay
-    nav_dates = [s["date"] for s in nav_history]
-    kospi_history = _fetch_kospi_history(nav_dates)
 
     # 8. Generate HTML (use filtered db_items which have valid stock codes)
     generated_html = _build_html(
