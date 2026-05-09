@@ -1,0 +1,62 @@
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from routes import portfolio as pf
+
+
+class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        pf._asset_history_cache.clear()
+
+    async def asyncTearDown(self):
+        pf._asset_history_cache.clear()
+
+    async def test_korean_history_prefers_internal_close_api(self):
+        local_rows = [{"date": "2026-05-07", "close": 12660.0}]
+
+        with (
+            patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=local_rows)) as local,
+            patch.object(pf.kis_proxy_client, "get_history", new=AsyncMock()) as kis,
+        ):
+            result = await pf._download_korean_history("003200", period_days=30)
+
+        self.assertEqual(result["currency"], "KRW")
+        self.assertEqual(result["rows"], [{"date": "2026-05-07", "close": 12660.0}])
+        local.assert_awaited_once()
+        kis.assert_not_awaited()
+
+    async def test_korean_history_falls_back_to_kis_when_internal_api_is_empty(self):
+        kis_payload = {"items": [{"stck_bsop_date": "20260507", "stck_clpr": "12660"}]}
+
+        with (
+            patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])),
+            patch.object(pf.kis_proxy_client, "get_history", new=AsyncMock(return_value=kis_payload)) as kis,
+        ):
+            result = await pf._download_korean_history("003200", period_days=30)
+
+        self.assertEqual(result["rows"], [{"date": "2026-05-07", "close": 12660.0}])
+        kis.assert_awaited_once()
+
+    async def test_kospi_benchmark_history_prefers_internal_macro_api(self):
+        local_rows = [{"date": "2026-05-07", "close": 3200.5}]
+
+        with (
+            patch.object(pf.close_price_client, "get_macro_index", new=AsyncMock(return_value=local_rows)) as local,
+            patch.object(pf, "_download_yfinance_history", new=AsyncMock()) as yahoo,
+        ):
+            rows = await pf._benchmark_history_for_insight("IDX_KOSPI")
+
+        self.assertEqual(rows, [{"date": "2026-05-07", "close": 3200.5}])
+        local.assert_awaited_once()
+        yahoo.assert_not_awaited()
+
+    async def test_local_benchmark_history_falls_back_when_internal_macro_api_is_empty(self):
+        yf_rows = [{"date": "2026-05-07", "close": 3201.0}]
+
+        with (
+            patch.object(pf.close_price_client, "get_macro_index", new=AsyncMock(return_value=[])),
+            patch.object(pf, "_download_yfinance_history", new=AsyncMock(return_value={"rows": yf_rows})),
+        ):
+            rows = await pf._benchmark_history_for_insight("IDX_KOSPI")
+
+        self.assertEqual(rows, yf_rows)

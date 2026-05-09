@@ -190,6 +190,30 @@ def normalize_daily_rows(payload: Any, ticker: str | None = None) -> list[dict[s
     return rows
 
 
+def normalize_value_rows(payload: Any, *, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    raw_rows: Any = []
+    if isinstance(payload, dict):
+        for key in keys:
+            if isinstance(payload.get(key), list):
+                raw_rows = payload[key]
+                break
+        if not raw_rows:
+            raw_rows = payload.get("items") or payload.get("rows") or []
+    elif isinstance(payload, list):
+        raw_rows = payload
+
+    rows: list[dict[str, Any]] = []
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            continue
+        trade_date = _parse_date(raw.get("date") or raw.get("trade_date") or raw.get("business_date"))
+        value = _parse_close(raw.get("close") or raw.get("value") or raw.get("price") or raw.get("index_value"))
+        if trade_date and value is not None:
+            rows.append({"date": trade_date, "close": value})
+    rows.sort(key=lambda row: row["date"])
+    return rows
+
+
 def close_rows_to_kis_items(rows: Any) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for row in normalize_close_rows(rows):
@@ -250,6 +274,13 @@ def _mark_failure() -> None:
         _skip_until = asyncio.get_event_loop().time() + FAILURE_COOLDOWN_SECONDS
 
 
+def _should_mark_failure(exc: Exception) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status == 429 or status >= 500
+    return True
+
+
 async def _get_json(path: str, params: dict[str, Any], *, timeout: float | None = None) -> Any:
     client = await _get_client()
     headers = {"X-Admin-Token": API_TOKEN} if API_TOKEN else None
@@ -279,7 +310,8 @@ async def get_daily_closes(
     try:
         return normalize_close_rows(await _get_json("/api/prices/close", params), ticker=ticker)
     except Exception as exc:
-        _mark_failure()
+        if _should_mark_failure(exc):
+            _mark_failure()
         logger.warning("internal close price API failed (%s): %s", ticker, exc)
         raise ClosePriceClientError(f"internal close price API failed: {ticker}") from exc
 
@@ -312,7 +344,8 @@ async def get_daily_prices(
     try:
         return normalize_daily_rows(await _get_json("/api/prices/daily", params), ticker=ticker)
     except Exception as exc:
-        _mark_failure()
+        if _should_mark_failure(exc):
+            _mark_failure()
         logger.warning("internal daily price API failed (%s): %s", ticker, exc)
         raise ClosePriceClientError(f"internal daily price API failed: {ticker}") from exc
 
@@ -379,9 +412,58 @@ async def get_daily_prices_batch(
         payload = await _get_json("/api/prices/daily", params)
         return {code: normalize_daily_rows(payload, ticker=code) for code in codes}
     except Exception as exc:
-        _mark_failure()
+        if _should_mark_failure(exc):
+            _mark_failure()
         logger.warning("internal batch daily price API failed (%s): %s", ",".join(codes[:5]), exc)
         raise ClosePriceClientError("internal batch daily price API failed") from exc
+
+
+async def get_macro_index(
+    series_id: str,
+    *,
+    since: date | datetime | str | None = None,
+    until: date | datetime | str | None = None,
+) -> list[dict[str, Any]]:
+    series_id = str(series_id or "").strip().upper()
+    if not ENABLED or not series_id or _cooldown_active():
+        return []
+
+    since_iso = _iso(since)
+    until_iso = _iso(until)
+    if not since_iso or not until_iso:
+        return []
+    params = {"series_id": series_id, "since": since_iso, "until": until_iso}
+    try:
+        return normalize_value_rows(await _get_json("/api/macro/indices", params), keys=("indices",))
+    except Exception as exc:
+        if _should_mark_failure(exc):
+            _mark_failure()
+        logger.warning("internal macro index API failed (%s): %s", series_id, exc)
+        raise ClosePriceClientError(f"internal macro index API failed: {series_id}") from exc
+
+
+async def get_macro_commodity(
+    commodity: str,
+    *,
+    since: date | datetime | str | None = None,
+    until: date | datetime | str | None = None,
+) -> list[dict[str, Any]]:
+    commodity = str(commodity or "").strip().lower()
+    if not ENABLED or not commodity or _cooldown_active():
+        return []
+
+    since_iso = _iso(since)
+    until_iso = _iso(until)
+    if not since_iso or not until_iso:
+        return []
+    params = {"commodity": commodity, "since": since_iso, "until": until_iso}
+    try:
+        return normalize_value_rows(await _get_json("/api/macro/commodities", params), keys=("commodities",))
+    except Exception as exc:
+        if _should_mark_failure(exc):
+            _mark_failure()
+        logger.warning("internal macro commodity API failed (%s): %s", commodity, exc)
+        raise ClosePriceClientError(f"internal macro commodity API failed: {commodity}") from exc
 
 
 async def get_basic_fundamentals(

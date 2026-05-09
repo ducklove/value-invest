@@ -57,7 +57,7 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["stock_name"], "KRX 알파뉴메릭 ETF")
         resolver.assert_awaited_once_with("0074K0")
 
-    async def test_korean_stock_history_uses_kis_daily_rows(self):
+    async def test_korean_stock_history_falls_back_to_kis_daily_rows(self):
         calls = []
 
         async def fake_get_history(symbol, **kwargs):
@@ -70,7 +70,8 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
                 ]
             }
 
-        with patch.object(pf.kis_proxy_client, "get_history", new=fake_get_history):
+        with patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])), \
+             patch.object(pf.kis_proxy_client, "get_history", new=fake_get_history):
             payload = await pf._asset_history_for_insight("005930", {"currency": "KRW"})
 
         self.assertEqual(payload["currency"], "KRW")
@@ -105,7 +106,8 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("temporary upstream hiccup")
             return {"items": [{"stck_bsop_date": "20250102", "stck_clpr": "70000"}]}
 
-        with patch.object(pf.kis_proxy_client, "get_history", new=flaky_get_history):
+        with patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])), \
+             patch.object(pf.kis_proxy_client, "get_history", new=flaky_get_history):
             first = await pf._asset_history_for_insight("005930", {"currency": "KRW"})
             second = await pf._asset_history_for_insight("005930", {"currency": "KRW"})
 
