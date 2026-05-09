@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import cache
 from routes import portfolio as portfolio_route
 from services.portfolio import dividends
+from services.portfolio import target_metrics as target_metrics_service
 
 
 class PortfolioTests(unittest.IsolatedAsyncioTestCase):
@@ -106,6 +107,41 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         metrics = await cache.get_portfolio_target_metrics(["005930"])
 
         self.assertEqual(metrics["005930"], {"eps": 1000, "bps": 50000, "dps": 1500})
+
+    async def test_target_metric_internal_fallback_excludes_treasury_shares(self):
+        target_metrics_map = {"003200": {"eps": None, "bps": None, "dps": None}}
+        fundamentals = {
+            "003200": {
+                "fiscal_year": 2025,
+                "metrics": {
+                    "equity": {"amount": 900_000},
+                    "net_income": {"amount": 90_000},
+                },
+            }
+        }
+        fundamentals["003200"]["per_share"] = {
+            "bps": {"value": 900, "numerator_amount": 900_000, "shares": 1000, "treasury_shares_excluded": False},
+            "eps_ttm": {"value": 90, "numerator_amount": 90_000, "shares": 1000, "treasury_shares_excluded": False},
+        }
+
+        with patch.object(target_metrics_service.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)), \
+             patch.object(target_metrics_service.cache, "get_corp_code", new=AsyncMock(return_value="00146269")), \
+             patch.object(target_metrics_service.dart_client, "fetch_common_stock_share_status", new=AsyncMock(return_value={
+                 "issued_shares": 1000,
+                 "treasury_shares": 100,
+                 "distributed_shares": 900,
+             })):
+            await target_metrics_service.supplement_target_metrics(
+                [{"stock_code": "003200", "target_price_formula": "BPS*0.5"}],
+                target_metrics_map,
+            )
+
+        self.assertEqual(target_metrics_map["003200"]["bps"], 1000)
+        self.assertEqual(target_metrics_map["003200"]["eps"], 100)
+
+        saved = await cache.get_portfolio_target_metrics(["003200"])
+        self.assertEqual(saved["003200"]["bps"], 1000)
+        self.assertEqual(saved["003200"]["eps"], 100)
 
     async def test_portfolio_tag_suggestions_by_usage(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)

@@ -1779,6 +1779,48 @@ async def get_portfolio_target_metrics(stock_codes: list[str]) -> dict[str, dict
     return result
 
 
+async def upsert_market_target_metrics(rows: list[dict]) -> int:
+    values: list[tuple] = []
+    for row in rows or []:
+        try:
+            stock_code = str(row.get("stock_code") or "").strip()
+            year = int(row.get("year"))
+        except (TypeError, ValueError):
+            continue
+        if not stock_code:
+            continue
+        values.append(
+            (
+                stock_code,
+                year,
+                row.get("close_price"),
+                row.get("per"),
+                row.get("pbr"),
+                row.get("eps"),
+                row.get("bps"),
+                row.get("market_cap"),
+            )
+        )
+    if not values:
+        return 0
+
+    db = await get_db()
+    await db.executemany(
+        """INSERT INTO market_data (stock_code, year, close_price, per, pbr, eps, bps, market_cap)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(stock_code, year) DO UPDATE SET
+             close_price = COALESCE(excluded.close_price, market_data.close_price),
+             per = COALESCE(excluded.per, market_data.per),
+             pbr = COALESCE(excluded.pbr, market_data.pbr),
+             eps = COALESCE(excluded.eps, market_data.eps),
+             bps = COALESCE(excluded.bps, market_data.bps),
+             market_cap = COALESCE(excluded.market_cap, market_data.market_cap)""",
+        values,
+    )
+    await db.commit()
+    return len(values)
+
+
 async def get_portfolio_tags(google_sub: str, stock_code: str) -> list[str]:
     db = await get_db()
     cursor = await db.execute(

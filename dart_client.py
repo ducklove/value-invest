@@ -87,6 +87,68 @@ def _parse_amount(value: str | None) -> float | None:
         return None
 
 
+def parse_common_stock_share_status(payload: dict) -> dict:
+    """Parse DART stock total quantity status for common shares.
+
+    The important number for per-share valuation is distributable/common
+    shares excluding treasury shares. DART exposes both total issued shares
+    (`istc_totqy`) and treasury shares (`tesstk_co`) in annual reports.
+    """
+    if not isinstance(payload, dict) or payload.get("status") != "000":
+        return {}
+
+    common_row = None
+    fallback_row = None
+    for item in payload.get("list") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("se") or "").strip()
+        if "합계" in kind and fallback_row is None:
+            fallback_row = item
+        if "보통" in kind:
+            common_row = item
+            break
+    row = common_row or fallback_row
+    if not row:
+        return {}
+
+    issued = _parse_amount(row.get("istc_totqy"))
+    treasury = _parse_amount(row.get("tesstk_co"))
+    distributed = _parse_amount(row.get("distb_stock_co"))
+    if distributed is None and issued is not None and treasury is not None:
+        distributed = max(issued - treasury, 0)
+
+    return {
+        "issued_shares": issued,
+        "treasury_shares": treasury,
+        "distributed_shares": distributed,
+        "settlement_date": row.get("stlm_dt"),
+    }
+
+
+async def fetch_common_stock_share_status(corp_code: str | None, year: int) -> dict:
+    """Fetch common-share count status from DART annual report data."""
+    if not corp_code or not API_KEY:
+        return {}
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{BASE_URL}/stockTotqySttus.json",
+            params={
+                "crtfc_key": API_KEY,
+                "corp_code": corp_code,
+                "bsns_year": str(int(year)),
+                "reprt_code": "11011",
+            },
+        )
+    if resp.status_code != 200:
+        return {}
+    try:
+        payload = resp.json()
+    except ValueError:
+        return {}
+    return parse_common_stock_share_status(payload)
+
+
 def _is_common_stock_dividend_kind(stock_kind: str | None) -> bool:
     text = (stock_kind or "").strip()
     if not text:

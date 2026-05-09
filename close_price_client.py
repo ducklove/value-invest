@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = os.getenv("CLOSE_PRICE_API_BASE_URL", "http://192.168.68.84:8400").rstrip("/")
 TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_TIMEOUT_SECONDS", "2.5"))
+FUNDAMENTALS_TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_FUNDAMENTALS_TIMEOUT_SECONDS", "6.0"))
 FAILURE_COOLDOWN_SECONDS = float(os.getenv("CLOSE_PRICE_API_FAILURE_COOLDOWN_SECONDS", "60"))
 ENABLED = os.getenv("CLOSE_PRICE_API_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 API_TOKEN = os.getenv("CLOSE_PRICE_API_TOKEN", os.getenv("FINANCE_PI_API_TOKEN", "")).strip()
@@ -168,6 +169,14 @@ def normalize_daily_rows(payload: Any, ticker: str | None = None) -> list[dict[s
             "trading_value": ("trading_value", "trade_value", "acml_tr_pbmn", "accumulated_trade_value"),
             "market_cap": ("market_cap",),
             "listed_shares": ("listed_shares", "lstn_stcn"),
+            "treasury_shares": (
+                "treasury_shares",
+                "treasury_share_count",
+                "treasury_stock_count",
+                "treas_stock_co",
+                "own_stock_count",
+                "self_stock_count",
+            ),
         }.items():
             value = None
             for key in keys:
@@ -218,6 +227,7 @@ def daily_rows_to_kis_items(rows: Any) -> list[dict[str, Any]]:
             "trading_value": ("acml_tr_pbmn", "trade_value", "trading_value"),
             "market_cap": ("market_cap",),
             "listed_shares": ("listed_shares", "lstn_stcn"),
+            "treasury_shares": ("treasury_shares", "treasury_share_count", "treasury_stock_count"),
         }
         for source, targets in field_map.items():
             if row.get(source) is None:
@@ -240,10 +250,10 @@ def _mark_failure() -> None:
         _skip_until = asyncio.get_event_loop().time() + FAILURE_COOLDOWN_SECONDS
 
 
-async def _get_json(path: str, params: dict[str, Any]) -> Any:
+async def _get_json(path: str, params: dict[str, Any], *, timeout: float | None = None) -> Any:
     client = await _get_client()
     headers = {"X-Admin-Token": API_TOKEN} if API_TOKEN else None
-    response = await client.get(f"{BASE_URL}{path}", params=params, headers=headers)
+    response = await client.get(f"{BASE_URL}{path}", params=params, headers=headers, timeout=timeout)
     response.raise_for_status()
     return response.json()
 
@@ -338,3 +348,76 @@ async def get_daily_price_items(
         finally:
             _skip_until = max(_skip_until, saved_skip_until)
     return await get_daily_close_items(ticker, since=since, until=until)
+
+
+async def get_daily_prices_batch(
+    tickers: list[str] | tuple[str, ...],
+    *,
+    since: date | datetime | str | None = None,
+    until: date | datetime | str | None = None,
+    fields: list[str] | tuple[str, ...] | str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    codes = list(dict.fromkeys(_normalize_ticker(ticker) for ticker in tickers if _normalize_ticker(ticker)))
+    if not ENABLED or not codes or _cooldown_active():
+        return {}
+
+    since_iso = _iso(since)
+    until_iso = _iso(until)
+    if not since_iso or not until_iso:
+        return {}
+    if fields is None:
+        fields = ("open", "high", "low", "close", "volume", "trading_value")
+    if not isinstance(fields, str):
+        fields = ",".join(fields)
+    params = {
+        "tickers": ",".join(codes),
+        "since": since_iso,
+        "until": until_iso,
+        "fields": fields,
+    }
+    try:
+        payload = await _get_json("/api/prices/daily", params)
+        return {code: normalize_daily_rows(payload, ticker=code) for code in codes}
+    except Exception as exc:
+        _mark_failure()
+        logger.warning("internal batch daily price API failed (%s): %s", ",".join(codes[:5]), exc)
+        raise ClosePriceClientError("internal batch daily price API failed") from exc
+
+
+async def get_basic_fundamentals(
+    tickers: list[str] | tuple[str, ...] | str,
+    *,
+    as_of: date | datetime | str | None = None,
+    fiscal_year: int | None = None,
+) -> dict[str, Any]:
+    if isinstance(tickers, str):
+        codes = [_normalize_ticker(tickers)]
+    else:
+        codes = list(dict.fromkeys(_normalize_ticker(ticker) for ticker in tickers if _normalize_ticker(ticker)))
+    if not ENABLED or not codes or _cooldown_active():
+        return {}
+
+    params: dict[str, Any] = {"ticker" if len(codes) == 1 else "tickers": codes[0] if len(codes) == 1 else ",".join(codes)}
+    as_of_iso = _iso(as_of)
+    if as_of_iso:
+        params["as_of"] = as_of_iso
+    if fiscal_year is not None:
+        params["fiscal_year"] = int(fiscal_year)
+
+    try:
+        payload = await _get_json("/api/fundamentals/basic", params, timeout=FUNDAMENTALS_TIMEOUT_SECONDS)
+    except Exception as exc:
+        # Fundamentals can be materially slower than price endpoints. Do not
+        # trip the shared price cooldown for a fundamentals-only timeout.
+        logger.warning("internal fundamentals API failed (%s): %s", ",".join(codes[:5]), exc)
+        raise ClosePriceClientError("internal fundamentals API failed") from exc
+
+    raw = payload.get("fundamentals") if isinstance(payload, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for code in codes:
+        item = raw.get(code) or raw.get(str(code).lstrip("0")) or raw.get(code.upper())
+        if item:
+            normalized[code] = item
+    return normalized

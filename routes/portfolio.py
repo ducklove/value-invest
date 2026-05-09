@@ -36,6 +36,7 @@ from services.portfolio.identifiers import (
 )
 from services.portfolio.quotes import PortfolioQuoteCache, quote_from_ws as _quote_from_ws
 from services.portfolio.targets import parse_target_input as _parse_target_input
+from services.portfolio.target_metrics import supplement_target_metrics as _supplement_target_metrics
 from services.portfolio.benchmarks import (
     BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
     BENCHMARK_FETCH_TIMEOUT as _BENCHMARK_FETCH_TIMEOUT,
@@ -1757,6 +1758,7 @@ async def get_portfolio(request: Request):
         cache.get_trailing_dividends(codes),
         cache.get_portfolio_target_metrics(metric_codes),
     )
+    await _supplement_target_metrics(items, target_metrics_map)
     for it in items:
         code = it["stock_code"]
         metrics = dict(target_metrics_map.get(code) or {})
