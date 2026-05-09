@@ -11,3 +11,5 @@ keys.txt
 server.log
 .superpowers/
 data/pdf_cache/
+data/db-imports/
+*.before-prod-portfolio-import.*.db
