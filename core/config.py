@@ -14,6 +14,8 @@ DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    "http://localhost:8010",
+    "http://127.0.0.1:8010",
     "https://ducklove.github.io",
     "https://cantabile.tplinkdns.com:3691",
 )
@@ -134,4 +136,3 @@ def get_settings(*, force: bool = False, project_root: Path | None = None) -> Ap
     if project_root is None:
         _SETTINGS = settings
     return settings
-
