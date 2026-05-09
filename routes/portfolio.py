@@ -22,6 +22,18 @@ import kis_ws_manager
 import market_indicators
 import stock_price
 from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
+from services.portfolio.identifiers import (
+    CASH_FX_CODE as _CASH_FX_CODE,
+    CASH_NAMES as _CASH_NAMES,
+    SPECIAL_ASSETS as _SPECIAL_ASSETS,
+    common_stock_code as _common_stock_code,
+    is_cash_asset as _is_cash_asset,
+    is_korean_stock as _is_korean_stock,
+    is_preferred_stock as _is_preferred_stock,
+    is_special_asset as _is_special_asset,
+    normalize_portfolio_code as _normalize_portfolio_code,
+    static_foreign_ticker as _static_foreign_ticker,
+)
 
 _OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
 _keys_file = Path(__file__).parent.parent / "keys.txt"
@@ -32,80 +44,6 @@ if _keys_file.exists():
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-_SPECIAL_ASSETS = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
-_KRX_CODE_RE = re.compile(r"^[0-9][0-9A-Z]{5}$")
-_KRX_PREFERRED_CODE_RE = re.compile(r"^\d{5}[1-9A-Z]$")
-
-# Static exceptions for foreign ETFs that are already known Yahoo symbols.
-# These avoid the slow yfinance `.info` suffix-probing path during portfolio
-# add/import and quote refreshes.
-_STATIC_FOREIGN_TICKERS = {
-    "A200": {
-        "ticker": "A200.AX",
-        "name": "BetaShares Australia 200 ETF",
-        "currency": "AUD",
-    },
-    "A200.AX": {
-        "ticker": "A200.AX",
-        "name": "BetaShares Australia 200 ETF",
-        "currency": "AUD",
-    },
-    "EUN2": {
-        "ticker": "EUN2.DE",
-        "name": "iShares Core EURO STOXX 50 UCITS ETF EUR",
-        "currency": "EUR",
-    },
-    "EUN2.DE": {
-        "ticker": "EUN2.DE",
-        "name": "iShares Core EURO STOXX 50 UCITS ETF EUR",
-        "currency": "EUR",
-    },
-}
-
-
-def _static_foreign_ticker(code: str) -> dict | None:
-    return _STATIC_FOREIGN_TICKERS.get((code or "").strip().upper())
-
-_CASH_NAMES = {
-    "CASH_KRW": "원화", "CASH_USD": "미국 달러", "CASH_EUR": "유로",
-    "CASH_JPY": "일본 엔", "CASH_CNY": "중국 위안", "CASH_HKD": "홍콩 달러",
-    "CASH_GBP": "영국 파운드", "CASH_AUD": "호주 달러", "CASH_CAD": "캐나다 달러",
-    "CASH_CHF": "스위스 프랑", "CASH_TWD": "대만 달러", "CASH_VND": "베트남 동",
-    "CASH_SEK": "스웨덴 크로나", "CASH_DKK": "덴마크 크로네", "CASH_NOK": "노르웨이 크로네",
-}
-
-_CASH_FX_CODE = {
-    "CASH_USD": "FX_USDKRW", "CASH_EUR": "FX_EURKRW", "CASH_JPY": "FX_JPYKRW",
-    "CASH_CNY": "FX_CNYKRW", "CASH_HKD": "FX_HKDKRW", "CASH_GBP": "FX_GBPKRW",
-    "CASH_AUD": "FX_AUDKRW", "CASH_CAD": "FX_CADKRW", "CASH_CHF": "FX_CHFKRW",
-    "CASH_TWD": "FX_TWDKRW", "CASH_VND": "FX_VNDKRW",
-}
-
-
-def _is_cash_asset(code: str) -> bool:
-    return code.startswith("CASH_")
-
-
-def _is_special_asset(code: str) -> bool:
-    return code in _SPECIAL_ASSETS or _is_cash_asset(code)
-
-
-def _normalize_portfolio_code(code: str) -> str:
-    return (code or "").strip().upper()
-
-
-def _is_korean_stock(code: str) -> bool:
-    return bool(_KRX_CODE_RE.fullmatch(_normalize_portfolio_code(code)))
-
-
-def _is_preferred_stock(code: str) -> bool:
-    return bool(_KRX_PREFERRED_CODE_RE.fullmatch(_normalize_portfolio_code(code)))
-
-
-def _common_stock_code(code: str) -> str:
-    return code[:5] + '0'
 
 
 async def _fetch_naver_stock_name(stock_code: str) -> str | None:
