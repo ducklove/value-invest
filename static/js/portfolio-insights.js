@@ -93,6 +93,12 @@ function _fmtInsightPrice(value, currency = '') {
   return `${cur} ${n.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
 }
 
+function _fmtInsightMultiple(value) {
+  const n = _insightNum(value);
+  if (n === null) return '-';
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}x`;
+}
+
 function _insightClass(value) {
   const n = _insightNum(value);
   if (n === null) return '';
@@ -255,6 +261,7 @@ function _renderAssetInsight(data) {
   const metrics = data.metrics || {};
   const returns = metrics.returns || {};
   const volatility = metrics.volatility || {};
+  const valuation = data.valuation || {};
   const benchmark = data.benchmark || {};
   const benchmarkReturns = benchmark.returns || {};
   const relativeReturns = benchmark.relativeReturns || {};
@@ -269,12 +276,20 @@ function _renderAssetInsight(data) {
   const goldGap = data.goldGap;
   const actionLinks = _renderInsightActionLinks(code, goldGap);
   const tagPanel = _renderInsightTags(code, data.tags || [], data.tagSuggestions || []);
+  const valuationYear = valuation.fiscalYear ? `${valuation.fiscalYear}년 기준` : '';
+  const valuationSourceCode = valuation.sourceCode && valuation.sourceCode !== code ? `기준 ${valuation.sourceCode}` : '';
+  const valuationBasis = [valuationSourceCode, valuationYear].filter(Boolean).join(' · ');
 
   const cards = [
     _renderInsightCard('현재가', _fmtInsightPrice(position.currentPrice, positionCurrency), benchmark.dayChangePct !== null && benchmark.dayChangePct !== undefined ? `벤치마크 오늘 ${_fmtInsightPct(benchmark.dayChangePct)}` : ''),
     _renderInsightCard('평가금액', _fmtInsightAmount(position.marketValue, positionCurrency), `투입 ${_fmtInsightAmount(position.invested, positionCurrency)}`),
     _renderInsightCard('보유 수익률', _fmtInsightPct(position.returnPct), _fmtInsightSignedAmount(position.pnl, positionCurrency), _insightClass(position.returnPct)),
     _renderInsightCard('오늘 손익', _fmtInsightPct(position.dailyChangePct), _fmtInsightSignedAmount(position.dailyPnl, positionCurrency), _insightClass(position.dailyPnl)),
+    ...(valuation.applicable ? [
+      _renderInsightCard('PBR', _fmtInsightMultiple(valuation.pbr), valuation.bps !== null && valuation.bps !== undefined ? `BPS ${_fmtInsightPrice(valuation.bps, 'KRW')}` : valuationBasis),
+      _renderInsightCard('PER', _fmtInsightMultiple(valuation.per), valuation.eps !== null && valuation.eps !== undefined ? `EPS ${_fmtInsightPrice(valuation.eps, 'KRW')}` : valuationBasis),
+      _renderInsightCard('ROE', _fmtInsightPct(valuation.roe, false), valuationBasis),
+    ] : []),
     _renderInsightCard('최근 3개월', _fmtInsightPct(returns['3m']), `벤치마크 대비 ${_fmtInsightPct(relativeReturns['3m'])}`, _insightClass(returns['3m'])),
     _renderInsightCard('60일 변동성', _fmtInsightPct(volatility['60d'], false), '연율화 기준'),
     _renderInsightCard('최대 낙폭', _fmtInsightPct(metrics.maxDrawdownPct), '최근 1년 가격 기준', _insightClass(metrics.maxDrawdownPct)),

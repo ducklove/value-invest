@@ -100,6 +100,17 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     assert "if (code) pfGoAnalyze(code, e);" in events
 
 
+def test_portfolio_insight_modal_renders_valuation_cards():
+    source = (JS / "portfolio-insights.js").read_text(encoding="utf-8")
+
+    assert "const valuation = data.valuation || {}" in source
+    assert "function _fmtInsightMultiple(value)" in source
+    assert "_renderInsightCard('PBR'" in source
+    assert "_renderInsightCard('PER'" in source
+    assert "_renderInsightCard('ROE'" in source
+    assert "valuation.applicable" in source
+
+
 def test_portfolio_edit_save_is_row_scoped_and_safe():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")

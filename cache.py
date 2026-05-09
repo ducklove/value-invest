@@ -1779,6 +1779,37 @@ async def get_portfolio_target_metrics(stock_codes: list[str]) -> dict[str, dict
     return result
 
 
+async def get_latest_market_valuation(stock_code: str) -> dict:
+    code = str(stock_code or "").strip()
+    if not code:
+        return {}
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT m.stock_code, m.year, m.close_price, m.per, m.pbr, m.eps, m.bps, m.market_cap,
+               f.net_income, f.total_equity
+        FROM market_data m
+        LEFT JOIN financial_data f
+          ON f.stock_code = m.stock_code AND f.year = m.year
+        WHERE m.stock_code = ?
+        ORDER BY m.year DESC
+        """,
+        (code,),
+    )
+    rows = [dict(row) for row in await cursor.fetchall()]
+    result: dict = {"stock_code": code}
+    for row in rows:
+        if result.get("year") is None and any(
+            row.get(key) is not None
+            for key in ("per", "pbr", "eps", "bps", "net_income", "total_equity")
+        ):
+            result["year"] = row.get("year")
+        for key in ("close_price", "per", "pbr", "eps", "bps", "market_cap", "net_income", "total_equity"):
+            if result.get(key) is None and row.get(key) is not None:
+                result[key] = row.get(key)
+    return result if len(result) > 1 else {}
+
+
 async def upsert_market_target_metrics(rows: list[dict]) -> int:
     values: list[tuple] = []
     for row in rows or []:

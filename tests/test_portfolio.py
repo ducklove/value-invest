@@ -108,6 +108,32 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(metrics["005930"], {"eps": 1000, "bps": 50000, "dps": 1500})
 
+    async def test_latest_market_valuation_joins_financial_data(self):
+        db = await cache.get_db()
+        await db.execute(
+            """INSERT INTO market_data
+               (stock_code, year, close_price, per, pbr, eps, bps, market_cap)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("005930", 2025, 70000, 12.5, 1.2, 5600, 58000, 400_000_000_000_000),
+        )
+        await db.execute(
+            """INSERT INTO financial_data
+               (stock_code, year, report_date, net_income, total_equity)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("005930", 2025, "2025-12-31", 44_000_000_000_000, 420_000_000_000_000),
+        )
+        await db.commit()
+
+        valuation = await cache.get_latest_market_valuation("005930")
+
+        self.assertEqual(valuation["year"], 2025)
+        self.assertEqual(valuation["per"], 12.5)
+        self.assertEqual(valuation["pbr"], 1.2)
+        self.assertEqual(valuation["eps"], 5600)
+        self.assertEqual(valuation["bps"], 58000)
+        self.assertEqual(valuation["net_income"], 44_000_000_000_000)
+        self.assertEqual(valuation["total_equity"], 420_000_000_000_000)
+
     async def test_target_metric_internal_fallback_excludes_treasury_shares(self):
         target_metrics_map = {"003200": {"eps": None, "bps": None, "dps": None}}
         fundamentals = {

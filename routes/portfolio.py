@@ -1509,6 +1509,103 @@ def _gold_gap_for_asset(code: str) -> dict | None:
     }
 
 
+def _insight_metric_amount(metrics: dict, key: str) -> float | None:
+    raw = metrics.get(key) if isinstance(metrics, dict) else None
+    if isinstance(raw, dict):
+        raw = raw.get("amount")
+    return asset_insights.safe_float(raw)
+
+
+def _insight_per_share_value(fundamental: dict, key: str) -> float | None:
+    per_share = fundamental.get("per_share") if isinstance(fundamental, dict) else None
+    entry = per_share.get(key) if isinstance(per_share, dict) else None
+    if isinstance(entry, dict):
+        return asset_insights.safe_float(entry.get("value"))
+    return None
+
+
+async def _fetch_insight_valuation_basis(stock_code: str) -> dict:
+    code = (stock_code or "").strip()
+    if not _is_korean_stock(code):
+        return {"applicable": False}
+
+    source_code = _common_stock_code(code) if _is_preferred_stock(code) else code
+    basis = {
+        "applicable": True,
+        "sourceCode": source_code,
+        "source": "market_data",
+    }
+
+    fundamental: dict = {}
+    try:
+        fundamentals = await asyncio.wait_for(
+            close_price_client.get_basic_fundamentals(source_code, as_of=_today_kst_date()),
+            timeout=2.0,
+        )
+        raw = fundamentals.get(source_code) if isinstance(fundamentals, dict) else None
+        if isinstance(raw, dict):
+            fundamental = raw
+            basis["source"] = "internal_fundamentals"
+            basis["fiscalYear"] = raw.get("fiscal_year")
+            basis["asOf"] = raw.get("as_of") or raw.get("available_date")
+    except Exception as exc:
+        logger.info("asset insight valuation fundamentals unavailable (%s): %s", source_code, exc)
+
+    metrics = fundamental.get("metrics") if isinstance(fundamental.get("metrics"), dict) else {}
+    basis.update(
+        {
+            "eps": _insight_per_share_value(fundamental, "eps_ttm") or _insight_per_share_value(fundamental, "eps_annual"),
+            "bps": _insight_per_share_value(fundamental, "bps"),
+            "netIncome": _insight_metric_amount(metrics, "net_income"),
+            "equity": _insight_metric_amount(metrics, "equity"),
+        }
+    )
+
+    cached = await cache.get_latest_market_valuation(source_code)
+    if cached:
+        basis.setdefault("fiscalYear", cached.get("year"))
+        if not basis.get("asOf") and cached.get("year"):
+            basis["asOf"] = str(cached.get("year"))
+        for target_key, cached_key in (
+            ("eps", "eps"),
+            ("bps", "bps"),
+            ("perFallback", "per"),
+            ("pbrFallback", "pbr"),
+            ("netIncome", "net_income"),
+            ("equity", "total_equity"),
+            ("closePrice", "close_price"),
+        ):
+            if basis.get(target_key) is None and cached.get(cached_key) is not None:
+                basis[target_key] = cached.get(cached_key)
+        if basis.get("source") == "market_data":
+            basis["source"] = "market_data_cache"
+
+    return basis
+
+
+def _build_insight_valuation(quote: dict | None, basis: dict) -> dict:
+    if not basis.get("applicable"):
+        return {"applicable": False}
+    price = asset_insights.safe_float((quote or {}).get("price")) or asset_insights.safe_float(basis.get("closePrice"))
+    calculated = asset_insights.calculate_valuation_metrics(
+        price=price,
+        eps=basis.get("eps"),
+        bps=basis.get("bps"),
+        net_income=basis.get("netIncome"),
+        equity=basis.get("equity"),
+        per=basis.get("perFallback"),
+        pbr=basis.get("pbrFallback"),
+    )
+    return {
+        "applicable": True,
+        **calculated,
+        "source": basis.get("source"),
+        "sourceCode": basis.get("sourceCode"),
+        "fiscalYear": basis.get("fiscalYear"),
+        "asOf": basis.get("asOf"),
+    }
+
+
 def _normalize_portfolio_tags(raw_tags) -> list[str]:
     if raw_tags is None:
         return []
@@ -1556,14 +1653,16 @@ async def asset_insight(stock_code: str, request: Request):
         **asset_insights.classify_asset(stock_code, item.get("stock_name") or "", item.get("currency") or ""),
     }
     indicator_task = asyncio.create_task(_fetch_insight_indicators(_macro_codes_for_asset(profile, item.get("currency"))))
+    valuation_task = asyncio.create_task(_fetch_insight_valuation_basis(stock_code))
 
-    quote, history_payload, benchmark_quote, benchmark_name, benchmark_rows, indicators = await asyncio.gather(
+    quote, history_payload, benchmark_quote, benchmark_name, benchmark_rows, indicators, valuation_basis = await asyncio.gather(
         quote_task,
         asset_history_task,
         _fetch_benchmark_quote(effective_benchmark),
         _resolve_benchmark_name(effective_benchmark),
         _benchmark_history_for_insight(effective_benchmark),
         indicator_task,
+        valuation_task,
     )
     profile["benchmarkName"] = benchmark_name
 
@@ -1572,6 +1671,7 @@ async def asset_insight(stock_code: str, request: Request):
     benchmark_returns = benchmark_metrics.get("returns") or {}
     relative = asset_insights.relative_returns(metrics.get("returns") or {}, benchmark_returns)
     position = asset_insights.calculate_position(item, quote)
+    valuation = _build_insight_valuation(quote, valuation_basis)
     gold_gap = _gold_gap_for_asset(stock_code)
     tags_task = asyncio.create_task(cache.get_portfolio_tags(user["google_sub"], stock_code))
     tag_suggestions_task = asyncio.create_task(cache.get_portfolio_tag_suggestions(user["google_sub"]))
@@ -1587,6 +1687,7 @@ async def asset_insight(stock_code: str, request: Request):
         "profile": profile,
         "position": position,
         "quote": quote or {},
+        "valuation": valuation,
         "metrics": metrics,
         "benchmark": benchmark,
         "macro": _format_macro(indicators),

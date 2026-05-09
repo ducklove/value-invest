@@ -202,6 +202,51 @@ def relative_returns(asset_returns: dict[str, Any], benchmark_returns: dict[str,
     return result
 
 
+def calculate_valuation_metrics(
+    *,
+    price: float | None,
+    eps: float | None = None,
+    bps: float | None = None,
+    net_income: float | None = None,
+    equity: float | None = None,
+    per: float | None = None,
+    pbr: float | None = None,
+) -> dict[str, float | None]:
+    price_n = safe_float(price)
+    eps_n = safe_float(eps)
+    bps_n = safe_float(bps)
+    net_income_n = safe_float(net_income)
+    equity_n = safe_float(equity)
+
+    per_n = safe_float(per)
+    if price_n is not None and eps_n is not None and eps_n > 0:
+        per_n = round(price_n / eps_n, 2)
+    elif eps_n is not None and eps_n <= 0:
+        per_n = None
+    elif per_n is not None and per_n <= 0:
+        per_n = None
+
+    pbr_n = safe_float(pbr)
+    if price_n is not None and bps_n is not None and bps_n > 0:
+        pbr_n = round(price_n / bps_n, 2)
+    elif pbr_n is not None and pbr_n <= 0:
+        pbr_n = None
+
+    roe_n = None
+    if net_income_n is not None and equity_n is not None and equity_n > 0:
+        roe_n = round(net_income_n / equity_n * 100, 2)
+    elif eps_n is not None and bps_n is not None and bps_n > 0:
+        roe_n = round(eps_n / bps_n * 100, 2)
+
+    return {
+        "per": per_n,
+        "pbr": pbr_n,
+        "roe": roe_n,
+        "eps": round(eps_n, 2) if eps_n is not None else None,
+        "bps": round(bps_n, 2) if bps_n is not None else None,
+    }
+
+
 def build_signals(
     profile: dict[str, Any],
     position: dict[str, Any],

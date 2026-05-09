@@ -56,3 +56,29 @@ def test_relative_returns_and_signals():
     levels = {signal["level"] for signal in signals}
     assert "warning" in levels
     assert "info" in levels
+
+
+def test_calculate_valuation_metrics_uses_current_price_and_financials():
+    valuation = asset_insights.calculate_valuation_metrics(
+        price=50_000,
+        eps=5_000,
+        bps=40_000,
+        net_income=10_000,
+        equity=100_000,
+        per=99,
+        pbr=9,
+    )
+
+    assert valuation["per"] == 10.0
+    assert valuation["pbr"] == 1.25
+    assert valuation["roe"] == 10.0
+    assert valuation["eps"] == 5000
+    assert valuation["bps"] == 40000
+
+
+def test_calculate_valuation_metrics_hides_negative_per_but_keeps_negative_roe():
+    valuation = asset_insights.calculate_valuation_metrics(price=50_000, eps=-500, bps=40_000, per=12)
+
+    assert valuation["per"] is None
+    assert valuation["pbr"] == 1.25
+    assert valuation["roe"] == -1.25

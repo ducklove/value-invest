@@ -93,3 +93,35 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["IDX_KOSPI"]["change_pct"], 1.2)
         self.assertEqual(result["IDX_KOSPI"]["name"], pf._resolve_benchmark_name_fast("IDX_KOSPI"))
+
+    async def test_insight_valuation_uses_common_stock_fundamentals_for_preferred(self):
+        fundamentals = {
+            "005930": {
+                "fiscal_year": 2025,
+                "as_of": "2026-05-10",
+                "metrics": {
+                    "net_income": {"amount": 44_000_000},
+                    "equity": {"amount": 400_000_000},
+                },
+                "per_share": {
+                    "eps_ttm": {"value": 5000, "treasury_shares_excluded": True},
+                    "bps": {"value": 50000, "treasury_shares_excluded": True},
+                },
+            }
+        }
+
+        with (
+            patch.object(pf.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)) as local,
+            patch.object(pf.cache, "get_latest_market_valuation", new=AsyncMock(return_value={})),
+        ):
+            basis = await pf._fetch_insight_valuation_basis("005935")
+            valuation = pf._build_insight_valuation({"price": 40000}, basis)
+
+        local.assert_awaited_once()
+        self.assertEqual(local.await_args.args[0], "005930")
+        self.assertEqual(valuation["sourceCode"], "005930")
+        self.assertEqual(valuation["per"], 8.0)
+        self.assertEqual(valuation["pbr"], 0.8)
+        self.assertEqual(valuation["roe"], 11.0)
+        self.assertEqual(valuation["eps"], 5000)
+        self.assertEqual(valuation["bps"], 50000)
