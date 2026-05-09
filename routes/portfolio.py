@@ -46,6 +46,12 @@ from services.portfolio.benchmarks import (
     fast_default_benchmark_for_code as _fast_default_benchmark_for_code,
     indicator_to_change_pct as _indicator_to_change_pct,
 )
+from services.portfolio.time_windows import (
+    intraday_axis_baseline_ts as _intraday_axis_baseline_ts,
+    is_after_settlement_marker as _is_after_settlement_marker,
+    portfolio_today_baseline_date as _portfolio_today_baseline_date,
+    today_kst_date as _today_kst_date,
+)
 
 _OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
 _keys_file = Path(__file__).parent.parent / "keys.txt"
@@ -2087,20 +2093,6 @@ async def resolve_name(code: str = Query(..., min_length=1)):
 
 # --- NAV / Snapshots / Cashflows ---
 
-def _portfolio_today_baseline_date(now: datetime | None = None) -> str:
-    """Return the settlement date that the Today card should compare from.
-
-    Portfolio snapshots are produced at 22:00 KST. Until 21:59 the active
-    Today window starts from the previous settlement; from 22:00 onward it
-    starts from the snapshot just produced for the current date.
-    """
-    now = now or datetime.now()
-    baseline = now.date()
-    if now.hour < 22:
-        baseline = baseline - timedelta(days=1)
-    return baseline.isoformat()
-
-
 @router.get("/api/portfolio/prev-day-snapshot")
 async def get_prev_day_snapshot(request: Request):
     user = _require_user(await get_current_user(request))
@@ -2231,17 +2223,14 @@ async def get_benchmark_history(code: str = Query(...), start: str = Query(...))
 @router.get("/api/portfolio/intraday")
 async def get_intraday(request: Request):
     user = _require_user(await get_current_user(request))
-    today = date.today()
+    today = _today_kst_date()
     baseline_date = _portfolio_today_baseline_date()
     points = await cache.get_intraday_snapshots(user["google_sub"], today.isoformat())
     if baseline_date == today.isoformat():
         # Once the 22:00 settlement exists, the new Today window starts at
         # that snapshot. Same-day intraday points before 22:00 belong to the
         # completed window and must not leak into the reset sparkline.
-        points = [
-            p for p in points
-            if str(p.get("ts") or "") > f"{baseline_date}T22:00"
-        ]
+        points = [p for p in points if _is_after_settlement_marker(p.get("ts"), baseline_date)]
     # Prepend active 22:00 settlement snapshot as the zero baseline. The
     # frontend treats T00:00 as x=0 on the 22→22 sparkline axis.
     db = await cache.get_db()
@@ -2251,7 +2240,7 @@ async def get_intraday(request: Request):
     )
     row = await cursor.fetchone()
     if row and row["total_value"]:
-        points = [{"ts": today.isoformat() + "T00:00", "total_value": row["total_value"]}] + points
+        points = [{"ts": _intraday_axis_baseline_ts(today), "total_value": row["total_value"]}] + points
     return points
 
 
