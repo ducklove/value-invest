@@ -34,6 +34,18 @@ from services.portfolio.identifiers import (
     normalize_portfolio_code as _normalize_portfolio_code,
     static_foreign_ticker as _static_foreign_ticker,
 )
+from services.portfolio.benchmarks import (
+    BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
+    BENCHMARK_FETCH_TIMEOUT as _BENCHMARK_FETCH_TIMEOUT,
+    BENCHMARK_TO_INDICATOR as _BENCHMARK_TO_INDICATOR,
+    BENCHMARK_YF_TICKER as _BENCHMARK_YF_TICKER,
+    BenchmarkQuoteCache,
+    benchmark_name as _benchmark_name,
+    benchmark_name_fast as _benchmark_name_fast,
+    default_benchmark_for_code as _default_benchmark_for_code,
+    fast_default_benchmark_for_code as _fast_default_benchmark_for_code,
+    indicator_to_change_pct as _indicator_to_change_pct,
+)
 
 _OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
 _keys_file = Path(__file__).parent.parent / "keys.txt"
@@ -902,51 +914,22 @@ async def _prefetch_market_types(codes: list[str]):
 
 async def _resolve_default_benchmark(code: str) -> str:
     """Return the default benchmark code for a stock."""
-    if _is_cash_asset(code):
-        return _CASH_FX_CODE.get(code, "FX_USDKRW")
-    if code in _SPECIAL_ASSETS:
-        return "FX_USDKRW"
-    if _is_korean_stock(code):
-        if _is_preferred_stock(code):
-            return _common_stock_code(code)
-        mtype = await _detect_market_type(code)
-        return "IDX_KOSPI" if mtype == "KOSPI" else "IDX_KOSDAQ"
-    return "IDX_SP500"
+    market_type = await _detect_market_type(code) if _is_korean_stock(code) and not _is_preferred_stock(code) else None
+    return _default_benchmark_for_code(code, market_type=market_type)
 
 
 def _resolve_default_benchmark_fast(code: str) -> str:
     """Cheap benchmark fallback for first-paint portfolio loading."""
-    if _is_cash_asset(code):
-        return _CASH_FX_CODE.get(code, "FX_USDKRW")
-    if code in _SPECIAL_ASSETS:
-        return "FX_USDKRW"
-    if _is_korean_stock(code):
-        if _is_preferred_stock(code):
-            return _common_stock_code(code)
-        cached = _market_type_cache.get(code)
-        return "IDX_KOSDAQ" if cached == "KOSDAQ" else "IDX_KOSPI"
-    return "IDX_SP500"
-
-
-_BENCHMARK_NAMES = {
-    "IDX_KOSPI": "코스피",
-    "IDX_KOSDAQ": "코스닥",
-    "IDX_SP500": "S&P500",
-    "GOLD": "금",
-    "AGG": "미국 종합채권",
-    "FX_USDKRW": "USD/KRW",
-    "FX_EURKRW": "EUR/KRW",
-    "FX_JPYKRW": "JPY/KRW",
-    "FX_CNYKRW": "CNY/KRW",
-}
+    return _fast_default_benchmark_for_code(code, cached_market_type=_market_type_cache.get(code))
 
 _benchmark_name_cache: dict[str, str] = {}
 
 
 async def _resolve_benchmark_name(code: str) -> str:
     """Resolve a benchmark code to a human-readable name."""
-    if code in _BENCHMARK_NAMES:
-        return _BENCHMARK_NAMES[code]
+    builtin_name = _benchmark_name(code)
+    if builtin_name:
+        return builtin_name
     if code in _benchmark_name_cache:
         return _benchmark_name_cache[code]
     # For codes with dots/slashes, try dash variant first (faster for yfinance)
@@ -961,67 +944,19 @@ async def _resolve_benchmark_name(code: str) -> str:
     _benchmark_name_cache[code] = result
     return result
 
-_benchmark_quote_cache: dict[str, tuple[float, dict]] = {}
-_BENCHMARK_CACHE_TTL = 120  # 2 minutes
-_BENCHMARK_FETCH_TIMEOUT = 2.5
-_BENCHMARK_ENDPOINT_ITEM_TIMEOUT = 2.0
+_benchmark_quote_cache = BenchmarkQuoteCache()
 
 
 def _cached_benchmark_quote(benchmark_code: str, *, allow_stale: bool = True) -> dict | None:
-    cached = _benchmark_quote_cache.get(benchmark_code)
-    if not cached:
-        return None
-    age = _time.monotonic() - cached[0]
-    if age >= _BENCHMARK_CACHE_TTL and not allow_stale:
-        return None
-    q = dict(cached[1] or {})
-    if age >= _BENCHMARK_CACHE_TTL:
-        q["_stale"] = True
-    return q
+    return _benchmark_quote_cache.get(benchmark_code, allow_stale=allow_stale)
 
 
 def _resolve_benchmark_name_fast(code: str, items: list[dict] | None = None) -> str:
-    if code in _BENCHMARK_NAMES:
-        return _BENCHMARK_NAMES[code]
-    if code in _benchmark_name_cache:
-        return _benchmark_name_cache[code]
-    for item in items or []:
-        if item.get("stock_code") == code and item.get("stock_name"):
-            return item["stock_name"]
-    return code
-
-
-_BENCHMARK_TO_INDICATOR = {
-    "IDX_KOSPI": "KOSPI",
-    "IDX_KOSDAQ": "KOSDAQ",
-    "IDX_SP500": "SPX",
-    "GOLD": "CMDT_GC",
-    "FX_USDKRW": "USD_KRW",
-    "FX_EURKRW": "EUR_KRW",
-    "FX_JPYKRW": "JPY_KRW",
-    "FX_CNYKRW": "CNY_KRW",
-}
-
-
-def _indicator_to_change_pct(data: dict) -> float | None:
-    """Convert market_indicators result {change_pct: '0.45%', direction: 'up'} → signed float."""
-    if not data:
-        return None
-    raw = (data.get("change_pct") or "").strip().rstrip("%").replace(",", "")
-    if not raw:
-        return None
-    try:
-        pct = float(raw)
-    except ValueError:
-        return None
-    if data.get("direction") == "down" and pct > 0:
-        pct = -pct
-    return pct
+    return _benchmark_name_fast(code, items, _benchmark_name_cache)
 
 
 async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
     """Fetch a benchmark quote (cached). Reuses market_indicators for shared sources."""
-    now = _time.monotonic()
     cached = _cached_benchmark_quote(benchmark_code, allow_stale=False)
     if cached is not None:
         return cached
@@ -1058,7 +993,7 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
             stock_q = await _fetch_quote(benchmark_code)
         q = {"change_pct": stock_q.get("change_pct")} if stock_q else {}
 
-    _benchmark_quote_cache[benchmark_code] = (now, q)
+    _benchmark_quote_cache.set(benchmark_code, q)
     return q
 
 
