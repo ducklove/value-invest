@@ -46,6 +46,9 @@ from services.portfolio.benchmarks import (
     fast_default_benchmark_for_code as _fast_default_benchmark_for_code,
     indicator_to_change_pct as _indicator_to_change_pct,
 )
+from services.portfolio.dividends import (
+    due_dividend_warmup_targets as _due_dividend_warmup_targets,
+)
 from services.portfolio.time_windows import (
     intraday_axis_baseline_ts as _intraday_axis_baseline_ts,
     is_after_settlement_marker as _is_after_settlement_marker,
@@ -1012,17 +1015,6 @@ _insight_warmup_task: asyncio.Task | None = None
 _INSIGHT_WARMUP_TTL = 15 * 60
 _dividend_warmup_last: dict[str, float] = {}
 _dividend_warmup_tasks: dict[str, asyncio.Task] = {}
-_DIVIDEND_WARMUP_TTL = 6 * 60 * 60
-
-
-def _portfolio_dividend_warmup_targets(code: str) -> list[str]:
-    code = _normalize_portfolio_code(code)
-    if not _is_korean_stock(code):
-        return []
-    if _is_preferred_stock(code):
-        common = _common_stock_code(code)
-        return [code, common] if common != code else [code]
-    return [code]
 
 
 async def _refresh_domestic_dividend_from_dart(code: str) -> int:
@@ -1068,25 +1060,12 @@ def _consume_dividend_warmup_result(code: str, task: asyncio.Task) -> None:
         pass
 
 
-def _portfolio_dividend_warmup_due_targets(codes: list[str], now: float) -> list[str]:
-    seen: set[str] = set()
-    targets: list[str] = []
-    for code in codes:
-        for target in _portfolio_dividend_warmup_targets(code):
-            if target not in seen:
-                seen.add(target)
-                targets.append(target)
-
-    due: list[str] = []
-    for code in targets:
-        task = _dividend_warmup_tasks.get(code)
-        if task and not task.done():
-            continue
-        last = _dividend_warmup_last.get(code)
-        if last and (now - last) < _DIVIDEND_WARMUP_TTL:
-            continue
-        due.append(code)
-    return due
+def _running_dividend_warmup_codes() -> set[str]:
+    return {
+        code
+        for code, task in _dividend_warmup_tasks.items()
+        if task and not task.done()
+    }
 
 
 def _start_dividend_warmup_task(code: str, now: float) -> asyncio.Task | None:
@@ -1106,15 +1085,17 @@ def _start_dividend_warmup_task(code: str, now: float) -> asyncio.Task | None:
 
 def _schedule_portfolio_dividend_warmup(codes: list[str]) -> None:
     now = time.monotonic()
-    for code in _portfolio_dividend_warmup_due_targets(codes, now):
+    due = _due_dividend_warmup_targets(codes, now, _dividend_warmup_last, running_codes=_running_dividend_warmup_codes())
+    for code in due:
         _start_dividend_warmup_task(code, now)
 
 
 async def _warm_portfolio_dividends_for_response(codes: list[str], timeout: float = 2.5) -> None:
     now = time.monotonic()
+    due = _due_dividend_warmup_targets(codes, now, _dividend_warmup_last, running_codes=_running_dividend_warmup_codes())
     tasks = [
         task
-        for code in _portfolio_dividend_warmup_due_targets(codes, now)
+        for code in due
         if (task := _start_dividend_warmup_task(code, now)) is not None
     ]
     if not tasks:

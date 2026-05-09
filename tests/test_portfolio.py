@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import cache
 from routes import portfolio as portfolio_route
+from services.portfolio import dividends
 
 
 class PortfolioTests(unittest.IsolatedAsyncioTestCase):
@@ -292,11 +293,11 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
     def test_dividend_warmup_targets_preferred_common_too(self):
         self.assertEqual(
-            portfolio_route._portfolio_dividend_warmup_targets("005935"),
+            dividends.dividend_warmup_targets("005935"),
             ["005935", "005930"],
         )
-        self.assertEqual(portfolio_route._portfolio_dividend_warmup_targets("002380"), ["002380"])
-        self.assertEqual(portfolio_route._portfolio_dividend_warmup_targets("AAPL"), [])
+        self.assertEqual(dividends.dividend_warmup_targets("002380"), ["002380"])
+        self.assertEqual(dividends.dividend_warmup_targets("AAPL"), [])
 
     async def test_search_kcc_alias_prefers_parent_company(self):
         results = await cache.search_corp("KCC")
