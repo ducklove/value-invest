@@ -2,9 +2,9 @@
 
 The previous design spawned `python3 snapshot_*.py` as separate processes,
 which meant each run started with cold in-memory caches
-(`routes.portfolio._quote_cache`, `_ticker_map`, `_last_known_quotes`,
-`_fx_daily_cache`) and re-hit every upstream — wasting KIS/Naver/yfinance
-rate budget on stocks the web process had just queried seconds earlier.
+(`routes.portfolio._quote_cache`, `_ticker_map`, `_fx_daily_cache`) and
+re-hit every upstream — wasting KIS/Naver/yfinance rate budget on stocks
+the web process had just queried seconds earlier.
 
 These endpoints run the same snapshot logic inside the web process where
 those caches are warm. Access is restricted to loopback so there's no

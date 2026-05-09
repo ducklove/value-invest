@@ -34,6 +34,7 @@ from services.portfolio.identifiers import (
     normalize_portfolio_code as _normalize_portfolio_code,
     static_foreign_ticker as _static_foreign_ticker,
 )
+from services.portfolio.quotes import PortfolioQuoteCache, quote_from_ws as _quote_from_ws
 from services.portfolio.benchmarks import (
     BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
     BENCHMARK_FETCH_TIMEOUT as _BENCHMARK_FETCH_TIMEOUT,
@@ -651,12 +652,7 @@ async def _fetch_cash_quote(stock_code: str) -> dict:
     return {"price": round(rate / unit, 2), "change": 0, "change_pct": 0}
 
 
-_quote_cache: dict[str, tuple[float, dict]] = {}
-_QUOTE_CACHE_TTL = 60
-
-# Last-known quotes — never expires, survives cache TTL expiry.
-# Used as a fallback so the UI can show *something* immediately after restart.
-_last_known_quotes: dict[str, dict] = {}
+_quote_cache = PortfolioQuoteCache()
 
 
 _ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 -> A200.AX)
@@ -687,12 +683,11 @@ async def _save_ticker(stock_code: str, resolved: str):
 
 
 async def _fetch_quote(stock_code: str) -> dict:
-    now = _time.monotonic()
-    cached = _quote_cache.get(stock_code)
-    if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
-        return cached[1]
+    cached = _quote_cache.get_fresh(stock_code)
+    if cached:
+        return cached
     if _is_dead(stock_code):
-        return _last_known_quotes.get(stock_code, {})
+        return _quote_cache.get_fallback(stock_code)
     if _is_cash_asset(stock_code):
         q = await _fetch_cash_quote(stock_code)
     elif stock_code == "KRX_GOLD":
@@ -700,19 +695,8 @@ async def _fetch_quote(stock_code: str) -> dict:
     elif stock_code in _CRYPTO_UPBIT_MAP:
         q = await _fetch_crypto_quote(stock_code)
     elif _is_korean_stock(stock_code):
-        ws_q = kis_ws_manager.get_cached_quote(stock_code)
-        if ws_q and ws_q.get("price") is not None:
-            q = {
-                "date": ws_q.get("date", ""),
-                "price": ws_q["price"],
-                "previous_close": ws_q.get("previous_close"),
-                "change": ws_q.get("change"),
-                "change_pct": ws_q.get("change_pct"),
-                # 시장 누적 거래대금 (원). WS 가 전달. 외국 종목 경로는
-                # 아직 지원 없어 None 으로 떨어지며 UI 에서 '-' 표시.
-                "trade_value": ws_q.get("trade_value"),
-            }
-        else:
+        q = _quote_from_ws(kis_ws_manager.get_cached_quote(stock_code))
+        if not q:
             q = await stock_price.fetch_quote_snapshot(stock_code)
     else:
         # Use resolved ticker if available, otherwise try to resolve
@@ -724,36 +708,19 @@ async def _fetch_quote(stock_code: str) -> dict:
             if resolved and resolved != stock_code:
                 await _save_ticker(stock_code, resolved)
                 q = await _fetch_foreign_quote(resolved)
-    if q and q.get("price") is not None:
-        _quote_cache[stock_code] = (now, q)
-        _last_known_quotes[stock_code] = q
-    else:
+    if not _quote_cache.remember(stock_code, q):
         _mark_dead(stock_code)
-        if stock_code in _last_known_quotes:
-            return _last_known_quotes[stock_code]
+        fallback = _quote_cache.get_fallback(stock_code)
+        if fallback:
+            return fallback
     return q
 
 
 def _cached_quote_for_code(code: str) -> dict:
-    now = _time.monotonic()
-    ws_q = kis_ws_manager.get_cached_quote(code)
-    if ws_q and ws_q.get("price") is not None:
-        return {
-            "date": ws_q.get("date", ""),
-            "price": ws_q["price"],
-            "previous_close": ws_q.get("previous_close"),
-            "change": ws_q.get("change"),
-            "change_pct": ws_q.get("change_pct"),
-            "trade_value": ws_q.get("trade_value"),
-        }
-    cached = _quote_cache.get(code)
-    if cached:
-        q = dict(cached[1])
-        if (now - cached[0]) >= _QUOTE_CACHE_TTL:
-            q["_stale"] = True
-        return q
-    lk = _last_known_quotes.get(code)
-    return dict(lk, _stale=True) if lk else {}
+    ws_quote = _quote_from_ws(kis_ws_manager.get_cached_quote(code))
+    if ws_quote:
+        return ws_quote
+    return _quote_cache.get_cached(code)
 
 
 async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
@@ -1295,14 +1262,10 @@ async def _fetch_quote_for_insight(stock_code: str) -> dict:
     if _is_cash_asset(stock_code) or stock_code == "KRX_GOLD" or stock_code in _CRYPTO_UPBIT_MAP or _is_korean_stock(stock_code):
         return await _fetch_quote(stock_code)
 
-    cached = _quote_cache.get(stock_code)
-    now = _time.monotonic()
-    if cached and (now - cached[0]) < _QUOTE_CACHE_TTL:
-        return cached[1]
-    if stock_code in _last_known_quotes:
-        stale = _last_known_quotes[stock_code]
-    else:
-        stale = {}
+    cached = _quote_cache.get_fresh(stock_code)
+    if cached:
+        return cached
+    stale = _quote_cache.get_fallback(stock_code)
 
     await _ensure_ticker_map()
     static = _static_foreign_ticker(stock_code)
@@ -1316,9 +1279,7 @@ async def _fetch_quote_for_insight(stock_code: str) -> dict:
     except Exception as exc:
         logger.warning("asset insight quote fetch failed (%s): %s", stock_code, exc)
         return stale
-    if q and q.get("price") is not None:
-        _quote_cache[stock_code] = (now, q)
-        _last_known_quotes[stock_code] = q
+    if _quote_cache.remember(stock_code, q):
         return q
     return stale
 
