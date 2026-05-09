@@ -1588,6 +1588,12 @@ def _insight_treasury_share_basis(fundamental: dict) -> dict:
     }
 
 
+def _insight_needs_market_valuation_fallback(basis: dict) -> bool:
+    if basis.get("source") != "internal_fundamentals":
+        return True
+    return any(basis.get(key) is None for key in ("eps", "bps", "netIncome", "equity"))
+
+
 async def _fetch_insight_valuation_basis(stock_code: str) -> dict:
     code = (stock_code or "").strip()
     if not _is_korean_stock(code):
@@ -1602,10 +1608,7 @@ async def _fetch_insight_valuation_basis(stock_code: str) -> dict:
 
     fundamental: dict = {}
     try:
-        fundamentals = await asyncio.wait_for(
-            close_price_client.get_basic_fundamentals(source_code, as_of=_today_kst_date()),
-            timeout=2.0,
-        )
+        fundamentals = await close_price_client.get_basic_fundamentals(source_code, as_of=_today_kst_date())
         raw = fundamentals.get(source_code) if isinstance(fundamentals, dict) else None
         if isinstance(raw, dict):
             fundamental = raw
@@ -1625,6 +1628,9 @@ async def _fetch_insight_valuation_basis(stock_code: str) -> dict:
         }
     )
     basis.update(_insight_treasury_share_basis(fundamental))
+
+    if not _insight_needs_market_valuation_fallback(basis):
+        return basis
 
     cached = await cache.get_latest_market_valuation(source_code)
     if cached:

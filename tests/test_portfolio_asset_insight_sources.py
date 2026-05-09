@@ -146,3 +146,35 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(valuation["treasuryShares"], 120)
         self.assertEqual(valuation["issuedShares"], 1200)
         self.assertEqual(valuation["outstandingShares"], 1080)
+
+    async def test_insight_valuation_prefers_refreshed_internal_bps_over_cache(self):
+        fundamentals = {
+            "009770": {
+                "fiscal_year": 2025,
+                "as_of": "2026-05-10",
+                "metrics": {
+                    "net_income": {"amount": 250_000_000},
+                    "equity": {"amount": 180_000_000_000},
+                },
+                "per_share": {
+                    "eps_ttm": {"value": 100, "treasury_shares_excluded": True},
+                    "bps": {"value": 72000, "treasury_shares_excluded": True},
+                },
+            }
+        }
+        cached = {"year": 2024, "eps": 1, "bps": 1, "net_income": 1, "total_equity": 1}
+
+        cache_lookup = AsyncMock(return_value=cached)
+        with (
+            patch.object(pf.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)),
+            patch.object(pf.cache, "get_latest_market_valuation", new=cache_lookup),
+        ):
+            basis = await pf._fetch_insight_valuation_basis("009770")
+            valuation = pf._build_insight_valuation({"price": 36000}, basis)
+
+        cache_lookup.assert_not_awaited()
+        self.assertEqual(valuation["bps"], 72000)
+        self.assertEqual(valuation["eps"], 100)
+        self.assertEqual(valuation["pbr"], 0.5)
+        self.assertEqual(valuation["per"], 360.0)
+        self.assertEqual(valuation["source"], "internal_fundamentals")
