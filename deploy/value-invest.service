@@ -22,6 +22,12 @@ RestartSec=3
 # take ~45s before the first ready/ping arrives).
 TimeoutStartSec=90s
 
+Environment="VALUE_INVEST_ENV=production"
+# Optional profile file for non-secret production settings. Secrets can remain
+# in .kis.env during the migration, but new knobs should move into
+# .env.production over time.
+EnvironmentFile=-/home/cantabile/Works/value_invest/.env.production
+
 # --- App configuration ---------------------------------------------------
 # Bulk wiki PDF summarization uses a non-reasoning instruct model — the
 # default _AI_DEFAULT_MODEL (Qwen 3.6 Plus) has always-on chain-of-thought,

@@ -7,18 +7,18 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-ENV_PATH = Path(__file__).parent / ".kis.env"
+from core.config import get_settings, load_environment
 
 # Load deployment env before importing modules that freeze config at import
-# time. Lifespan reload is left in place as an idempotent safety net.
-if ENV_PATH.exists():
-    load_dotenv(ENV_PATH, override=True)
+# time. This keeps legacy `.kis.env` and `keys.txt` support, while allowing
+# `.env.development` / `.env.production` profiles going forward.
+load_environment()
+SETTINGS = get_settings()
 
 import cache
 import ai_config
@@ -36,7 +36,7 @@ from routes.wiki import router as wiki_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = SETTINGS.project_root / "static"
 
 # Asset version for cache busting — use short git hash, fall back to timestamp
 def _get_asset_version() -> str:
@@ -84,8 +84,7 @@ async def _watchdog_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if ENV_PATH.exists():
-        load_dotenv(ENV_PATH, override=True)
+    load_environment()
     kis_key_manager.load_keys()
 
     await kis_proxy_client.init_client()
@@ -215,18 +214,11 @@ async def lifespan(app: FastAPI):
         await cache.close_db()
 
 
-app = FastAPI(title="Value Compass", lifespan=lifespan)
+app = FastAPI(title=SETTINGS.app_title, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost",
-        "http://127.0.0.1",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "https://ducklove.github.io",
-        "https://cantabile.tplinkdns.com:3691",
-    ],
+    allow_origins=list(SETTINGS.cors_allowed_origins),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
@@ -267,7 +259,12 @@ async def healthz():
     # implies the loop is responsive. Also expose loop tick lag for debugging.
     now = time.monotonic()
     lag = max(0.0, now - _last_loop_tick) if _last_loop_tick else None
-    return JSONResponse({"status": "ok", "asset_version": ASSET_VERSION, "loop_lag_s": lag})
+    return JSONResponse({
+        "status": "ok",
+        "asset_version": ASSET_VERSION,
+        "environment": SETTINGS.environment,
+        "loop_lag_s": lag,
+    })
 
 
 @app.get("/")
@@ -300,7 +297,7 @@ async def spa_pages():
 
 @app.get("/app-config.js")
 async def app_config():
-    payload = integrations.build_app_config(api_base_url="")
+    payload = integrations.build_app_config(api_base_url=SETTINGS.public_api_base_url)
     return Response(
         content=f"window.APP_CONFIG = {json.dumps(payload, ensure_ascii=False)};",
         media_type="application/javascript",
