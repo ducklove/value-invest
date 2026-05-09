@@ -39,9 +39,9 @@ flowchart TD
 
 ### 2. 앱 조립부 분리
 
-- `main.py`에서 앱 생성 코드를 `core.app_factory:create_app()`로 옮긴다.
-- 라우터 등록, middleware, static route, lifespan 작업을 별도 함수로 쪼갠다.
-- 테스트는 `create_app(settings)`로 dev/prod 설정을 명시해 검증한다.
+- `main.py`에서 앱 생성 코드를 `core.app_factory:create_app()`로 옮긴다. (진행됨)
+- 라우터 등록, middleware, static route, lifespan 작업을 별도 함수로 쪼갠다. (진행됨)
+- 테스트는 `create_app(settings)`로 dev/prod 설정을 명시해 검증한다. (진행됨)
 
 ### 3. 포트폴리오 도메인 분해
 
@@ -74,8 +74,8 @@ flowchart TD
 
 ## 우선순위
 
-1. 환경 분리와 설정 단일화.
-2. `main.py` app factory 분리.
+1. 환경 분리와 설정 단일화. (진행됨)
+2. `main.py` app factory 분리. (진행됨)
 3. `portfolio.py`에서 quote/benchmark부터 서비스로 추출.
 4. `cache.py` repository 분리와 transaction helper.
 5. 프론트 portfolio store 도입.
@@ -86,4 +86,3 @@ flowchart TD
 - `.env.example`, `.env.development.example`, `.env.production.example` 추가.
 - `main.py`가 `core.config`를 통해 CORS, app title, public API base URL을 읽도록 변경.
 - systemd production profile 명시.
-
