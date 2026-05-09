@@ -71,6 +71,42 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items[0]["tags"], ["자산주", "턴어라운드", "AI 관련주"])
         self.assertEqual(await cache.get_portfolio_tags("u1", "005930"), ["자산주", "턴어라운드", "AI 관련주"])
 
+    async def test_target_price_formula_roundtrip(self):
+        await cache.save_portfolio_item(
+            "u1",
+            "005930",
+            "삼성전자",
+            100,
+            65000,
+            target_price_formula="BPS*0.4+DPS*10",
+        )
+
+        items = await cache.get_portfolio("u1")
+        self.assertIsNone(items[0]["target_price"])
+        self.assertEqual(items[0]["target_price_formula"], "BPS*0.4+DPS*10")
+        self.assertEqual(items[0]["target_price_disabled"], 0)
+
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000, target_price=100000)
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(items[0]["target_price"], 100000)
+        self.assertIsNone(items[0]["target_price_formula"])
+
+    async def test_portfolio_target_metrics_use_latest_positive_values(self):
+        db = await cache.get_db()
+        await db.executemany(
+            """INSERT INTO market_data (stock_code, year, eps, bps, dividend_per_share)
+               VALUES (?, ?, ?, ?, ?)""",
+            [
+                ("005930", 2025, 1000, 50000, 1500),
+                ("005930", 2026, None, None, None),
+            ],
+        )
+        await db.commit()
+
+        metrics = await cache.get_portfolio_target_metrics(["005930"])
+
+        self.assertEqual(metrics["005930"], {"eps": 1000, "bps": 50000, "dps": 1500})
+
     async def test_portfolio_tag_suggestions_by_usage(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
         await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)

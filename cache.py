@@ -675,6 +675,7 @@ async def init_db():
     # 표시, 자동 계산도 bypass (사용자가 × 버튼으로 명시 비움).
     await _ensure_column(db, "user_portfolio", "target_price", "REAL")
     await _ensure_column(db, "user_portfolio", "target_price_disabled", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(db, "user_portfolio", "target_price_formula", "TEXT")
     await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
@@ -1716,7 +1717,8 @@ async def get_portfolio(google_sub: str) -> list[dict]:
         SELECT stock_code, stock_name, quantity, avg_price, sort_order,
                COALESCE(currency, 'KRW') AS currency, group_name, benchmark_code,
                created_at, target_price,
-               COALESCE(target_price_disabled, 0) AS target_price_disabled
+               COALESCE(target_price_disabled, 0) AS target_price_disabled,
+               NULLIF(target_price_formula, '') AS target_price_formula
         FROM user_portfolio
         WHERE google_sub = ?
         ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, created_at ASC
@@ -1747,6 +1749,34 @@ async def get_portfolio_tags_for_user(google_sub: str) -> list[dict]:
         (google_sub,),
     )
     return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_portfolio_target_metrics(stock_codes: list[str]) -> dict[str, dict]:
+    codes = [str(code or "").strip() for code in stock_codes if str(code or "").strip()]
+    if not codes:
+        return {}
+    placeholders = ",".join("?" for _ in codes)
+    db = await get_db()
+    cursor = await db.execute(
+        f"""
+        SELECT stock_code, year, eps, bps, dividend_per_share
+        FROM market_data
+        WHERE stock_code IN ({placeholders})
+        ORDER BY stock_code ASC, year DESC
+        """,
+        codes,
+    )
+    result: dict[str, dict] = {code: {"eps": None, "bps": None, "dps": None} for code in codes}
+    for row in await cursor.fetchall():
+        metrics = result.setdefault(row["stock_code"], {"eps": None, "bps": None, "dps": None})
+        for key in ("eps", "bps", "dividend_per_share"):
+            out_key = "dps" if key == "dividend_per_share" else key
+            if metrics.get(out_key) is not None:
+                continue
+            value = row[key]
+            if value is not None and value > 0:
+                metrics[out_key] = value
+    return result
 
 
 async def get_portfolio_tags(google_sub: str, stock_code: str) -> list[str]:
@@ -2180,6 +2210,7 @@ async def add_portfolio_item(
 
 _TARGET_PRICE_UNCHANGED = object()
 _TARGET_DISABLED_UNCHANGED = object()
+_TARGET_FORMULA_UNCHANGED = object()
 
 
 async def save_portfolio_item(
@@ -2188,6 +2219,7 @@ async def save_portfolio_item(
     created_at: str | None = None,
     target_price=_TARGET_PRICE_UNCHANGED,
     target_price_disabled=_TARGET_DISABLED_UNCHANGED,
+    target_price_formula=_TARGET_FORMULA_UNCHANGED,
 ) -> dict:
     """target_price 인자의 의미:
       - 인자 미전달 (sentinel) → 기존 값 그대로 유지 (수량/매입가만 편집할 때)
@@ -2206,7 +2238,7 @@ async def save_portfolio_item(
     # date). Only overwrite created_at when the caller explicitly passes
     # one — that's how the UI's 등록일자 edit gets through.
     cursor = await db.execute(
-        "SELECT sort_order, group_name, benchmark_code, created_at, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+        "SELECT sort_order, group_name, benchmark_code, created_at, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
         (google_sub, stock_code),
     )
     existing = await cursor.fetchone()
@@ -2229,6 +2261,9 @@ async def save_portfolio_item(
     # 으로 되돌림, 숫자면 수동 override 저장.
     if target_price is _TARGET_PRICE_UNCHANGED:
         target_price = existing["target_price"] if existing else None
+    if target_price_formula is _TARGET_FORMULA_UNCHANGED:
+        target_price_formula = existing["target_price_formula"] if existing else None
+    target_price_formula = str(target_price_formula or "").strip() or None
     if target_price_disabled is _TARGET_DISABLED_UNCHANGED:
         target_price_disabled = int(existing["target_price_disabled"]) if existing else 0
     else:
@@ -2238,8 +2273,13 @@ async def save_portfolio_item(
     # 이면 target_price 는 항상 NULL 로 강제.
     if target_price is not None:
         target_price_disabled = 0
+        target_price_formula = None
+    if target_price_formula:
+        target_price = None
+        target_price_disabled = 0
     if target_price_disabled == 1:
         target_price = None
+        target_price_formula = None
 
     if sort_order is None and not existing:
         cursor = await db.execute(
@@ -2252,8 +2292,8 @@ async def save_portfolio_item(
 
     await db.execute(
         """
-        INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(google_sub, stock_code) DO UPDATE SET
             stock_name = excluded.stock_name,
             quantity = excluded.quantity,
@@ -2264,9 +2304,10 @@ async def save_portfolio_item(
             created_at = excluded.created_at,
             target_price = excluded.target_price,
             target_price_disabled = excluded.target_price_disabled,
+            target_price_formula = excluded.target_price_formula,
             updated_at = excluded.updated_at
         """,
-        (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, now),
+        (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula, now),
     )
     await db.commit()
     return {
@@ -2276,6 +2317,7 @@ async def save_portfolio_item(
         "created_at": created_at,
         "target_price": target_price,
         "target_price_disabled": target_price_disabled,
+        "target_price_formula": target_price_formula,
     }
 
 

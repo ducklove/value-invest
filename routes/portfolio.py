@@ -35,6 +35,7 @@ from services.portfolio.identifiers import (
     static_foreign_ticker as _static_foreign_ticker,
 )
 from services.portfolio.quotes import PortfolioQuoteCache, quote_from_ws as _quote_from_ws
+from services.portfolio.targets import parse_target_input as _parse_target_input
 from services.portfolio.benchmarks import (
     BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
     BENCHMARK_FETCH_TIMEOUT as _BENCHMARK_FETCH_TIMEOUT,
@@ -1745,9 +1746,30 @@ async def get_portfolio(request: Request):
     # the inline edit row.
     codes = [it["stock_code"] for it in items]
     _schedule_portfolio_dividend_warmup(codes)
-    dps_map = await cache.get_trailing_dividends(codes)
+    metric_codes = list(dict.fromkeys(
+        codes + [
+            _common_stock_code(code)
+            for code in codes
+            if _is_korean_stock(code) and _is_preferred_stock(code)
+        ]
+    ))
+    dps_map, target_metrics_map = await asyncio.gather(
+        cache.get_trailing_dividends(codes),
+        cache.get_portfolio_target_metrics(metric_codes),
+    )
     for it in items:
-        it["trailing_dps"] = dps_map.get(it["stock_code"])
+        code = it["stock_code"]
+        metrics = dict(target_metrics_map.get(code) or {})
+        if _is_korean_stock(code) and _is_preferred_stock(code):
+            common_metrics = target_metrics_map.get(_common_stock_code(code)) or {}
+            for key in ("eps", "bps", "dps"):
+                if metrics.get(key) is None and common_metrics.get(key) is not None:
+                    metrics[key] = common_metrics[key]
+        trailing_dps = dps_map.get(code)
+        it["trailing_dps"] = trailing_dps
+        if trailing_dps is not None:
+            metrics["dps"] = trailing_dps
+        it["target_metrics"] = metrics
     enriched = await _enrich_with_cached_quotes(items)
     await _fill_snapshot_quotes(user["google_sub"], enriched)
     _schedule_asset_insight_warmup(enriched)
@@ -1827,13 +1849,23 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         except ValueError:
             raise HTTPException(status_code=400, detail="등록일자는 YYYY-MM-DD 형식이어야 합니다.")
 
-    # 목표가 (수동 override). 명시 안 하면 기존 값 유지 (cache 의 sentinel
-    # 처리). "" 또는 null 명시는 자동계산으로 되돌리는 신호.
+    # 목표가 (수동 override). target_price_formula 은 숫자 문자열 또는
+    # BPS/EPS/DPS/보유지분/본주가격/매입가 기반 수식을 받는다. 빈 값은
+    # 자동 계산으로 복귀한다. 기존 target_price payload 도 호환 유지.
     target_price_kwarg: dict = {}
-    if "target_price" in payload:
+    if "target_price_formula" in payload:
+        try:
+            parsed_target = _parse_target_input(payload.get("target_price_formula"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        target_price_kwarg["target_price"] = parsed_target.price
+        target_price_kwarg["target_price_formula"] = parsed_target.formula
+        target_price_kwarg["target_price_disabled"] = False
+    elif "target_price" in payload:
         raw_tp = payload.get("target_price")
         if raw_tp is None or (isinstance(raw_tp, str) and raw_tp.strip() == ""):
             target_price_kwarg["target_price"] = None
+            target_price_kwarg["target_price_formula"] = None
         else:
             try:
                 tp_val = float(raw_tp)
@@ -1842,10 +1874,13 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
             if tp_val < 0:
                 raise HTTPException(status_code=400, detail="목표가는 0 이상이어야 합니다.")
             target_price_kwarg["target_price"] = tp_val
+            target_price_kwarg["target_price_formula"] = None
     # target_price_disabled — True 면 자동 계산도 bypass, UI 는 '-'.
     if "target_price_disabled" in payload:
         raw_d = payload.get("target_price_disabled")
         target_price_kwarg["target_price_disabled"] = bool(raw_d)
+        if bool(raw_d):
+            target_price_kwarg["target_price_formula"] = None
 
     result = await cache.save_portfolio_item(
         user["google_sub"], stock_code, stock_name, quantity, avg_price,

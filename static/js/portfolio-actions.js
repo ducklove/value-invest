@@ -155,22 +155,12 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   const createdAt = createdAtEl ? createdAtEl.value.trim() : '';
   const body = { stock_name: stockName, quantity: qty, avg_price: price };
   if (createdAt) body.created_at = createdAt;
-  // 목표가 input — 비워두면 명시 null 로 보내 자동 계산으로 되돌리고,
-  // 숫자 있으면 수동 override 로 저장. PUT 에 'target_price' 키가
-  // 있으면 서버는 항상 처리 (sentinel preserve 는 키 미전달 시).
+  // 목표가 input — 비워두면 자동 계산으로 되돌리고, 숫자 또는
+  // BPS/EPS/DPS/보유지분/본주가격/매입가 기반 수식을 그대로 서버에 보낸다.
   const tgtEl = editRow.querySelector('.js-pf-edit-target') || document.getElementById('pfEditTarget');
   if (tgtEl) {
     const tgtRaw = tgtEl.value.trim();
-    if (tgtRaw === '') {
-      body.target_price = null;
-    } else {
-      const targetPrice = Number(tgtRaw);
-      if (!Number.isFinite(targetPrice) || targetPrice < 0) {
-        showToast('목표가를 올바르게 입력해 주세요.');
-        return;
-      }
-      body.target_price = targetPrice;
-    }
+    body.target_price_formula = tgtRaw;
   }
   try {
     const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
@@ -194,6 +184,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
       // target_price 도 server 응답을 trust — null/숫자 그대로.
       if ('target_price' in data) item.target_price = data.target_price;
       if ('target_price_disabled' in data) item.target_price_disabled = !!data.target_price_disabled;
+      if ('target_price_formula' in data) item.target_price_formula = data.target_price_formula;
     }
     pfEditingCode = null;
     renderPortfolio();
@@ -222,6 +213,7 @@ async function clearPortfolioTargetPrice(stockCode) {
         quantity: item.quantity,
         avg_price: item.avg_price,
         target_price: null,
+        target_price_formula: null,
         target_price_disabled: true,
       }),
     });
@@ -234,6 +226,8 @@ async function clearPortfolioTargetPrice(stockCode) {
     else item.target_price = null;
     if ('target_price_disabled' in data) item.target_price_disabled = !!data.target_price_disabled;
     else item.target_price_disabled = 1;
+    if ('target_price_formula' in data) item.target_price_formula = data.target_price_formula;
+    else item.target_price_formula = null;
     // 편집 모드면 input 도 즉시 비우기.
     const tgtEl = document.getElementById('pfEditTarget');
     if (tgtEl) tgtEl.value = '';
@@ -483,53 +477,141 @@ async function _ensureExternalQuotes(codes) {
   }
 }
 
+function _preferredCommonPriceForItem(item, allItems) {
+  const commonCode = _preferredCommonCodeFor(item.stock_code);
+  const commonItem = allItems.find(i => i.stock_code === commonCode);
+  const commonPrice = commonItem?.quote?.price;
+  if (commonPrice != null) return Number(commonPrice);
+  const cached = _EXTERNAL_QUOTE_CACHE[commonCode];
+  return cached && cached.price != null ? Number(cached.price) : null;
+}
+
+function _holdingValueForItem(item, allItems) {
+  const meta = _HOLDING_META[item.stock_code];
+  if (!meta || !meta.totalShares) return null;
+  let subTotal = 0;
+  for (const sub of meta.subsidiaries || []) {
+    const cached = _EXTERNAL_QUOTE_CACHE[sub.code];
+    const inPort = allItems.find(i => i.stock_code === sub.code);
+    const subPrice = inPort?.quote?.price ?? cached?.price;
+    if (subPrice == null) return null;
+    subTotal += Number(subPrice) * (sub.sharesHeld || 0);
+  }
+  const free = meta.totalShares - (meta.treasuryShares || 0);
+  return free > 0 && subTotal > 0 ? subTotal / free : null;
+}
+
+function _targetFormulaVariables(item, allItems) {
+  const metrics = item.target_metrics || {};
+  const numberOrNull = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  return {
+    BPS: numberOrNull(metrics.bps),
+    EPS: numberOrNull(metrics.eps),
+    DPS: numberOrNull(metrics.dps ?? item.trailingDps),
+    '보유지분': _holdingValueForItem(item, allItems),
+    '본주가격': _isPreferredStock(item.stock_code) ? _preferredCommonPriceForItem(item, allItems) : null,
+    '매입가': numberOrNull(item.avgPrice ?? item.avg_price),
+  };
+}
+
+function _evaluateTargetFormula(formula, variables) {
+  const text = String(formula || '').trim();
+  if (!text) return null;
+  let pos = 0;
+  const isChar = (ch) => typeof ch === 'string' && ch.length === 1;
+  const isSpace = (ch) => isChar(ch) && /\s/.test(ch);
+  const isDigit = (ch) => isChar(ch) && /[0-9]/.test(ch);
+  const isIdent = (ch) => isChar(ch) && /[A-Za-z가-힣_]/.test(ch);
+  const skip = () => { while (pos < text.length && isSpace(text[pos])) pos += 1; };
+  const parseNumber = () => {
+    const start = pos;
+    while (pos < text.length && /[0-9.]/.test(text[pos])) pos += 1;
+    const n = Number(text.slice(start, pos));
+    if (!Number.isFinite(n)) throw new Error('bad number');
+    return n;
+  };
+  const parseName = () => {
+    const start = pos;
+    while (pos < text.length && isIdent(text[pos])) pos += 1;
+    const name = text.slice(start, pos);
+    if (!Object.prototype.hasOwnProperty.call(variables, name)) throw new Error(`unknown ${name}`);
+    const value = variables[name];
+    if (!Number.isFinite(value)) throw new Error(`missing ${name}`);
+    return value;
+  };
+  const factor = () => {
+    skip();
+    const ch = text[pos];
+    if (ch === '+') { pos += 1; return factor(); }
+    if (ch === '-') { pos += 1; return -factor(); }
+    if (ch === '(') {
+      pos += 1;
+      const value = expr();
+      skip();
+      if (text[pos] !== ')') throw new Error('missing )');
+      pos += 1;
+      return value;
+    }
+    if (isDigit(ch) || ch === '.') return parseNumber();
+    if (isIdent(ch)) return parseName();
+    throw new Error('bad token');
+  };
+  const term = () => {
+    let value = factor();
+    while (true) {
+      skip();
+      const op = text[pos];
+      if (op !== '*' && op !== '/') break;
+      pos += 1;
+      const right = factor();
+      value = op === '*' ? value * right : value / right;
+    }
+    return value;
+  };
+  const expr = () => {
+    let value = term();
+    while (true) {
+      skip();
+      const op = text[pos];
+      if (op !== '+' && op !== '-') break;
+      pos += 1;
+      const right = term();
+      value = op === '+' ? value + right : value - right;
+    }
+    return value;
+  };
+  try {
+    const value = expr();
+    skip();
+    return pos === text.length && Number.isFinite(value) && value >= 0 ? value : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // 목표가 계산. 반환:
-//   - null  → '-' 표시 (CASH_ 등 의미 없음, 또는 명시적 비움)
+//   - null  → '-' 표시 (CASH_ 등 의미 없음, 또는 명시적 비움/수식 변수 부족)
 //   - 숫자 → 그 값. 계산 출처는 _targetPriceSource 가 별도 알려줌.
 function _computeTargetPrice(item, allItems) {
   const code = item.stock_code;
-  // 현금/통화: 목표가 개념 없음
   if (code.startsWith('CASH_')) return null;
-  // 사용자가 × 로 명시적 비움 → 자동 계산도 하지 않고 '-' 로 표시
   if (item.target_price_disabled) return null;
-  // 사용자 수동 override 우선
+  if (item.target_price_formula) {
+    return _evaluateTargetFormula(item.target_price_formula, _targetFormulaVariables(item, allItems));
+  }
   if (item.target_price != null) return Number(item.target_price);
 
-  // 우선주 → 보통주 현재가
   if (_isPreferredStock(code)) {
-    const commonCode = code.slice(0, -1) + '0';
-    const commonItem = allItems.find(i => i.stock_code === commonCode);
-    const commonPrice = commonItem?.quote?.price;
-    if (commonPrice != null) return Number(commonPrice);
-    // 보통주가 포트폴리오에 없으면 _EXTERNAL_QUOTE_CACHE 에서 시도
-    // (편의상 같은 캐시 재활용 — 다른 데서도 fetch 가능).
-    const cached = _EXTERNAL_QUOTE_CACHE[commonCode];
-    if (cached && cached.price != null) return cached.price;
-    // 보통주 가격 모름 → fallback 으로 매입가 × 1.3
-    return item.avg_price * 1.3;
+    return _preferredCommonPriceForItem(item, allItems) ?? item.avg_price * 1.3;
   }
 
-  // 지주사 → NAV per share = Σ(자회사 price × sharesHeld) / (total - treasury)
-  const meta = _HOLDING_META[code];
-  if (meta && meta.totalShares > 0) {
-    let subTotal = 0;
-    let allHave = true;
-    for (const sub of meta.subsidiaries || []) {
-      const cached = _EXTERNAL_QUOTE_CACHE[sub.code];
-      const inPort = allItems.find(i => i.stock_code === sub.code);
-      const subPrice = inPort?.quote?.price ?? cached?.price;
-      if (subPrice == null) { allHave = false; break; }
-      subTotal += Number(subPrice) * (sub.sharesHeld || 0);
-    }
-    if (allHave && subTotal > 0) {
-      const free = meta.totalShares - (meta.treasuryShares || 0);
-      if (free > 0) return subTotal / free;
-    }
-    // 자회사 quote 미로딩 → 일단 매입가 × 1.3 (다음 렌더에 자연 갱신)
-    return item.avg_price * 1.3;
+  if (_HOLDING_META[code]) {
+    return _holdingValueForItem(item, allItems) ?? item.avg_price * 1.3;
   }
 
-  // 그 외 일반 종목 → 매입가 × 1.3
   return item.avg_price * 1.3;
 }
 
@@ -537,10 +619,21 @@ function _targetPriceSource(item) {
   const code = item.stock_code;
   if (code.startsWith('CASH_')) return 'cash';
   if (item.target_price_disabled) return 'disabled';
+  if (item.target_price_formula) return 'formula';
   if (item.target_price != null) return 'manual';
   if (_isPreferredStock(code)) return 'preferred';
   if (_HOLDING_META[code]) return 'holding';
   return 'default';
+}
+
+function _targetPriceTooltip(item) {
+  if (item.target_price_formula) return `목표가 수식: ${item.target_price_formula}`;
+  if (item.target_price != null) return `직접 입력: ${Number(item.target_price).toLocaleString()}원`;
+  const source = _targetPriceSource(item);
+  if (source === 'preferred') return '자동 목표가: 본주가격';
+  if (source === 'holding') return '자동 목표가: 보유지분';
+  if (source === 'default') return '자동 목표가: 매입가 × 1.3';
+  return '';
 }
 
 function _initPreferredPairsFromConfig() {
