@@ -54,6 +54,20 @@ flowchart TD
 - `services/portfolio/insights.py`: AI 인사이트 orchestration.
 - `repositories/portfolio.py`: DB 접근만 담당.
 
+현재 진행:
+
+- `services/portfolio/identifiers.py`: 포트폴리오 코드 정규화, 국내/우선주/현금성/특수자산 판정 분리 완료.
+- `services/portfolio/benchmarks.py`: 기본 벤치마크, 벤치마크 표시명, 지표 등락률 변환, quote cache 분리 완료.
+- `services/portfolio/time_windows.py`: 22시 결산 기준 Today window, intraday baseline timestamp 분리 완료.
+- `services/portfolio/dividends.py`: 배당 워밍업 대상 선정, 우선주 본주 동시 예열, TTL/running 중복 방지 규칙 분리 완료.
+
+다음 후보:
+
+- `services/portfolio/quotes.py`: yfinance/KIS/local API/current quote/stale fallback을 하나의 quote service로 통합.
+- `services/portfolio/names.py`: 종목명/코드 alias/Reuters/Yahoo ticker resolution 분리.
+- `services/portfolio/targets.py`: 목표가 수식 평가와 자동 목표가 근거 계산 분리.
+- `services/portfolio/history.py`: NAV, 평가금액, 그룹/종목 비중 추이 조회와 chart payload 조립 분리.
+
 ### 4. DB 계층 정리
 
 - `cache.py`에서 테이블별 repository를 분리한다.
