@@ -1900,6 +1900,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border: none; background: none; cursor: pointer; color: var(--text-secondary);
   font-size: 14px; padding: 2px 4px; border-radius: 4px; transition: color 0.15s;
 }
+.pf-row-btn:disabled { cursor: wait; opacity: 0.75; }
 .pf-row-btn:hover { color: var(--primary); }
 .pf-row-btn.delete:hover { color: #dc2626; }
 .pf-empty {
@@ -1933,6 +1934,29 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-row-btn.edit { font-size: 15px; }
 .pf-row-btn.save { color: #059669; font-size: 16px; font-weight: 700; }
 .pf-row-btn.save:hover { color: #047857; }
+.pf-row-btn.save[aria-busy="true"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 54px;
+  justify-content: center;
+  color: var(--primary);
+}
+.pf-save-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.pf-save-label { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pf-row-saving td { background: color-mix(in srgb, var(--primary) 7%, var(--surface)); }
+.pf-row-saving .pf-edit-input,
+.pf-row-saving .pf-group-select {
+  opacity: 0.72;
+  cursor: wait;
+}
 .pf-row-btn.cancel { font-size: 15px; }
 .pf-row-btn.cancel:hover { color: #dc2626; }
 

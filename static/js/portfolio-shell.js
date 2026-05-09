@@ -6,6 +6,7 @@ let portfolioItems = [];
 let portfolioLoading = false;
 let pfSearchTimeout = null;
 let pfEditingCode = null;
+let pfSavingEditCode = null;
 let pfSortKey = 'marketValue';
 let pfSortAsc = false;
 let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]

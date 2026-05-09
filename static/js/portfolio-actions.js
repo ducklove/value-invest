@@ -43,6 +43,7 @@ async function pfChangeGroup(stockCode, groupName) {
 function pfShowBenchmarkPicker(stockCode, td) {
   // Close any existing picker
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
+  if (pfSavingEditCode) return;
   const item = portfolioItems.find(i => i.stock_code === stockCode);
   if (!item) return;
   const picker = document.createElement('div');
@@ -81,6 +82,7 @@ function pfShowBenchmarkPicker(stockCode, td) {
 
 async function pfSetBenchmark(stockCode, benchmarkCode) {
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
+  if (pfSavingEditCode) return;
   if (pfEditingCode !== stockCode) {
     showToast('벤치마크는 수정모드에서 변경할 수 있습니다.');
     return;
@@ -108,6 +110,7 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
 }
 
 function startPortfolioEdit(stockCode) {
+  if (pfSavingEditCode) return;
   pfEditingCode = stockCode;
   renderPortfolio();
   const priceInput = document.getElementById('pfEditPrice');
@@ -115,6 +118,7 @@ function startPortfolioEdit(stockCode) {
 }
 
 function cancelPortfolioEdit() {
+  if (pfSavingEditCode) return;
   pfEditingCode = null;
   renderPortfolio();
 }
@@ -129,7 +133,31 @@ function _pfFindEditRow(stockCode, row) {
   return null;
 }
 
+function _pfSetEditSaving(stockCode, saving, row) {
+  pfSavingEditCode = saving ? stockCode : null;
+  const editRow = _pfFindEditRow(stockCode, row);
+  if (!editRow) return;
+  editRow.classList.toggle('pf-row-saving', !!saving);
+  editRow.setAttribute('aria-busy', saving ? 'true' : 'false');
+  editRow.querySelectorAll('input, select, button').forEach(el => {
+    if (el.classList.contains('js-pf-cancel')) {
+      el.disabled = !!saving;
+      return;
+    }
+    if (el.classList.contains('js-pf-save')) {
+      el.disabled = !!saving;
+      el.innerHTML = saving
+        ? '<span class="pf-save-spinner" aria-hidden="true"></span><span class="pf-save-label">저장중</span>'
+        : '✓';
+      el.title = saving ? '저장 중입니다' : '저장';
+      return;
+    }
+    el.disabled = !!saving;
+  });
+}
+
 async function savePortfolioEdit(stockCode, stockName, row) {
+  if (pfSavingEditCode) return;
   const editRow = _pfFindEditRow(stockCode, row);
   const qtyEl = editRow?.querySelector('.js-pf-edit-qty') || document.getElementById('pfEditQty');
   const priceEl = editRow?.querySelector('.js-pf-edit-price') || document.getElementById('pfEditPrice');
@@ -162,6 +190,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     const tgtRaw = tgtEl.value.trim();
     body.target_price_formula = tgtRaw;
   }
+  _pfSetEditSaving(stockCode, true, editRow);
   try {
     const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
       method: 'PUT',
@@ -186,9 +215,13 @@ async function savePortfolioEdit(stockCode, stockName, row) {
       if ('target_price_disabled' in data) item.target_price_disabled = !!data.target_price_disabled;
       if ('target_price_formula' in data) item.target_price_formula = data.target_price_formula;
     }
+    pfSavingEditCode = null;
     pfEditingCode = null;
     renderPortfolio();
-  } catch (e) { showToast(e.message); }
+  } catch (e) {
+    _pfSetEditSaving(stockCode, false, editRow);
+    showToast(e.message);
+  }
 }
 
 // × 버튼 핸들러 — 목표가를 '명시적으로 비움' 상태로 만든다. DB 에

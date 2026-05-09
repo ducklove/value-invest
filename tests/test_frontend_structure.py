@@ -106,11 +106,18 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
 
     assert 'type="button" class="pf-row-btn save js-pf-save"' in render
+    assert "let pfSavingEditCode = null" in (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    assert "const isSaving = pfSavingEditCode === r.stock_code" in render
+    assert 'class="pf-row-saving" aria-busy="true"' in render
+    assert "pf-save-spinner" in render
     assert 'class="pf-edit-input js-pf-edit-qty"' in render
     assert 'class="pf-edit-input js-pf-edit-price"' in render
     assert 'class="pf-edit-input js-pf-edit-target"' in render
     assert "savePortfolioEdit(code, undefined, el.closest('tr[data-code]'))" in events
     assert "function _pfFindEditRow(stockCode, row)" in actions
+    assert "function _pfSetEditSaving(stockCode, saving, row)" in actions
+    assert "if (pfSavingEditCode) return;" in actions
+    assert "_pfSetEditSaving(stockCode, true, editRow)" in actions
     assert "editRow?.querySelector('.js-pf-edit-qty')" in actions
     assert "editRow?.querySelector('.js-pf-edit-price')" in actions
     assert "/api/portfolio/${encodeURIComponent(stockCode)}" in actions

@@ -473,30 +473,37 @@ function renderPortfolio() {
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     const safeCode = escapeHtml(r.stock_code);
     const tagHtml = _renderPortfolioRowTags(pfGetTags(r));
+    const isSaving = pfSavingEditCode === r.stock_code;
+    const editAttrs = isSaving ? ' disabled' : '';
+    const saveAttrs = isSaving ? ' disabled aria-busy="true"' : '';
+    const rowClass = isSaving ? ' class="pf-row-saving" aria-busy="true"' : '';
+    const saveContent = isSaving
+      ? '<span class="pf-save-spinner" aria-hidden="true"></span><span class="pf-save-label">저장중</span>'
+      : '✓';
     const dragHandle = canManualDrag
       ? '<button type="button" class="pf-row-drag-handle js-pf-row-drag" draggable="true" title="드래그하여 순서 변경" aria-label="드래그하여 순서 변경">&#x2630;</button>'
       : '';
     if (isEditing) {
-      return `<tr data-code="${safeCode}">
+      return `<tr data-code="${safeCode}"${rowClass}>
         <td class="pf-stock-cell js-pf-analyze"><a href="#" class="pf-stock-link js-pf-open-insight"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
-        <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
+        <td class="pf-col-group"><select class="pf-group-select js-pf-group"${editAttrs}>${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
-        <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"></td>
-        <td class="pf-col-num pf-col-target"${targetTitle}><span class="pf-target-edit-wrap"><input class="pf-edit-input js-pf-edit-target" id="pfEditTarget" value="${escapeHtml(targetInputValue)}" type="text" inputmode="decimal" placeholder="자동 또는 BPS*0.4+DPS*10" title="${escapeHtml(targetHelp)}"><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 표시 안 함 (- 로 고정)">×</button></span></td>
+        <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"${editAttrs}></td>
+        <td class="pf-col-num pf-col-target"${targetTitle}><span class="pf-target-edit-wrap"><input class="pf-edit-input js-pf-edit-target" id="pfEditTarget" value="${escapeHtml(targetInputValue)}" type="text" inputmode="decimal" placeholder="자동 또는 BPS*0.4+DPS*10" title="${escapeHtml(targetHelp)}"${editAttrs}><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 표시 안 함 (- 로 고정)"${editAttrs}>×</button></span></td>
         <td class="pf-col-num pf-col-achiev"${targetTitle}>${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-        <td class="pf-col-num pf-col-qty"><input class="pf-edit-input js-pf-edit-qty" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"></td>
+        <td class="pf-col-num pf-col-qty"><input class="pf-edit-input js-pf-edit-qty" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"${editAttrs}></td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
         <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
         <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield, false) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
-        <td class="pf-col-date"><input class="pf-edit-input js-pf-edit-created-at" id="pfEditCreatedAt" value="${r.createdAtSort || ''}" type="date"></td>
+        <td class="pf-col-date"><input class="pf-edit-input js-pf-edit-created-at" id="pfEditCreatedAt" value="${r.createdAtSort || ''}" type="date"${editAttrs}></td>
         <td class="pf-col-act"><div class="pf-row-actions">
-          <button type="button" class="pf-row-btn save js-pf-save" title="저장">✓</button>
-          <button type="button" class="pf-row-btn cancel js-pf-cancel" title="취소">✕</button>
+          <button type="button" class="pf-row-btn save js-pf-save" title="${isSaving ? '저장 중입니다' : '저장'}"${saveAttrs}>${saveContent}</button>
+          <button type="button" class="pf-row-btn cancel js-pf-cancel" title="취소"${editAttrs}>✕</button>
         </div></td>
       </tr>`;
     }
