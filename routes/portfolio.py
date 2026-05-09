@@ -1025,6 +1025,32 @@ async def _resolve_benchmark_name(code: str) -> str:
 
 _benchmark_quote_cache: dict[str, tuple[float, dict]] = {}
 _BENCHMARK_CACHE_TTL = 120  # 2 minutes
+_BENCHMARK_FETCH_TIMEOUT = 2.5
+_BENCHMARK_ENDPOINT_ITEM_TIMEOUT = 2.0
+
+
+def _cached_benchmark_quote(benchmark_code: str, *, allow_stale: bool = True) -> dict | None:
+    cached = _benchmark_quote_cache.get(benchmark_code)
+    if not cached:
+        return None
+    age = _time.monotonic() - cached[0]
+    if age >= _BENCHMARK_CACHE_TTL and not allow_stale:
+        return None
+    q = dict(cached[1] or {})
+    if age >= _BENCHMARK_CACHE_TTL:
+        q["_stale"] = True
+    return q
+
+
+def _resolve_benchmark_name_fast(code: str, items: list[dict] | None = None) -> str:
+    if code in _BENCHMARK_NAMES:
+        return _BENCHMARK_NAMES[code]
+    if code in _benchmark_name_cache:
+        return _benchmark_name_cache[code]
+    for item in items or []:
+        if item.get("stock_code") == code and item.get("stock_name"):
+            return item["stock_name"]
+    return code
 
 
 _BENCHMARK_TO_INDICATOR = {
@@ -1058,19 +1084,22 @@ def _indicator_to_change_pct(data: dict) -> float | None:
 async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
     """Fetch a benchmark quote (cached). Reuses market_indicators for shared sources."""
     now = _time.monotonic()
-    cached = _benchmark_quote_cache.get(benchmark_code)
-    if cached and (now - cached[0]) < _BENCHMARK_CACHE_TTL:
-        return cached[1]
+    cached = _cached_benchmark_quote(benchmark_code, allow_stale=False)
+    if cached is not None:
+        return cached
 
     indicator_code = _BENCHMARK_TO_INDICATOR.get(benchmark_code)
     if indicator_code:
         try:
-            data = await market_indicators.fetch_indicators([indicator_code])
+            data = await asyncio.wait_for(
+                market_indicators.fetch_indicators([indicator_code]),
+                timeout=_BENCHMARK_FETCH_TIMEOUT,
+            )
             pct = _indicator_to_change_pct(data.get(indicator_code) or {})
             q = {"change_pct": pct} if pct is not None else {}
         except Exception as e:
             logger.warning("Indicator-based benchmark fetch failed for %s: %s", benchmark_code, e)
-            q = {}
+            return _cached_benchmark_quote(benchmark_code, allow_stale=True) or {}
     elif benchmark_code.startswith("FX_"):
         daily = await _fetch_fx_daily_change(benchmark_code)
         q = {"change_pct": daily.get("change_pct")} if daily and daily.get("change_pct") is not None else {}
@@ -2039,10 +2068,14 @@ async def update_benchmark(stock_code: str, request: Request, payload: dict = Bo
     updated = await cache.update_portfolio_benchmark(user["google_sub"], stock_code, benchmark_code)
     if not updated:
         raise HTTPException(status_code=404, detail="포트폴리오 종목을 찾을 수 없습니다.")
-    # Return the effective benchmark and its quote
-    effective = benchmark_code or await _resolve_default_benchmark(stock_code)
-    bq = await _fetch_benchmark_quote(effective)
-    name = await _resolve_benchmark_name(effective)
+    # Return the effective benchmark and its quote without blocking the edit UI
+    # on slow upstream index/FX sources.
+    effective = benchmark_code or _resolve_default_benchmark_fast(stock_code)
+    try:
+        bq = await asyncio.wait_for(_fetch_benchmark_quote(effective), timeout=_BENCHMARK_ENDPOINT_ITEM_TIMEOUT)
+    except Exception:
+        bq = _cached_benchmark_quote(effective, allow_stale=True) or {}
+    name = _resolve_benchmark_name_fast(effective)
     return {"ok": True, "benchmark_code": benchmark_code, "effective_benchmark": effective, "benchmark_name": name, "benchmark_quote": bq}
 
 
@@ -2051,21 +2084,22 @@ async def get_benchmark_quotes(request: Request):
     """Fetch all unique benchmark quotes for the user's portfolio."""
     user = _require_user(await get_current_user(request))
     items = await cache.get_portfolio(user["google_sub"])
-    needs_resolve = [it for it in items if not it.get("benchmark_code")]
-    if needs_resolve:
-        await _prefetch_market_types([it["stock_code"] for it in needs_resolve])
     benchmark_codes = set()
     for item in items:
-        bc = item.get("benchmark_code") or await _resolve_default_benchmark(item["stock_code"])
-        benchmark_codes.add(bc)
+        bc = item.get("benchmark_code") or _resolve_default_benchmark_fast(item["stock_code"])
+        if bc:
+            benchmark_codes.add(bc)
     async def _fetch_one(bc):
+        name = _resolve_benchmark_name_fast(bc, items)
         try:
-            bq, name = await asyncio.gather(
-                _fetch_benchmark_quote(bc), _resolve_benchmark_name(bc)
+            bq = await asyncio.wait_for(
+                _fetch_benchmark_quote(bc),
+                timeout=_BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
             )
             return bc, {**bq, "name": name}
         except Exception:
-            return bc, {}
+            bq = _cached_benchmark_quote(bc, allow_stale=True) or {}
+            return bc, {**bq, "name": name}
 
     pairs = await asyncio.gather(*[_fetch_one(bc) for bc in benchmark_codes])
     return {bc: data for bc, data in pairs}

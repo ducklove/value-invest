@@ -97,6 +97,16 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(missing)
         self.assertEqual(items[0]["benchmark_code"], "IDX_KOSPI")
 
+    async def test_benchmark_quotes_use_fast_default_without_market_prefetch(self):
+        await cache.save_portfolio_item("u1", "005930", "?쇱꽦?꾩옄", 100, 65000)
+
+        with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch.object(portfolio_route, "_prefetch_market_types", new=AsyncMock(side_effect=AssertionError("slow prefetch"))), \
+             patch.object(portfolio_route, "_fetch_benchmark_quote", new=AsyncMock(return_value={"change_pct": 1.23})):
+            data = await portfolio_route.get_benchmark_quotes(object())
+
+        self.assertEqual(data["IDX_KOSPI"]["change_pct"], 1.23)
+
     async def test_delete_item(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
         await cache.set_portfolio_tags("u1", "005930", ["자산주"])

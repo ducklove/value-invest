@@ -461,51 +461,13 @@ async def _fetch_yahoo_commodity(client: httpx.AsyncClient, symbol: str) -> dict
         return dict(_EMPTY)
 
 
-_gold_prev_cache: float | None = None
-
-
 async def _fetch_gold_live(client: httpx.AsyncClient) -> dict:
-    """Fetch live XAU spot from gold-api.com, prev close from DB."""
-    global _gold_prev_cache
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as gc:
-            r = await gc.get(
-                "https://api.gold-api.com/price/XAU/USD",
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-        if r.status_code != 200:
-            return dict(_EMPTY)
-        data = _json.loads(r.text)
-        price = data.get("price")
-        if not price:
-            return dict(_EMPTY)
-
-        # Load prev close from DB (cached in memory after first load)
-        if _gold_prev_cache is None:
-            try:
-                import cache as _cache
-                stored = await _cache.get_user_setting("__system__", "gold_prev_close")
-                if stored:
-                    _gold_prev_cache = float(stored)
-            except Exception:
-                pass
-        prev = _gold_prev_cache
-
-        if not prev:
-            return {"value": _fmt(price), "change": "", "change_pct": "", "direction": ""}
-
-        diff = price - prev
-        pct = abs(diff) / prev * 100 if prev else 0
-        direction = "up" if diff > 0 else "down" if diff < 0 else ""
-        return {
-            "value": _fmt(price),
-            "change": _fmt(abs(diff)),
-            "change_pct": f"{pct:.2f}%",
-            "direction": direction,
-        }
-    except Exception:
-        return dict(_EMPTY)
+    """Fetch a fast gold futures daily quote for dashboard/benchmark use."""
+    # The spot API can hang past its nominal timeout in some network states.
+    # For the dashboard/benchmark UI, a fast daily futures move is safer than
+    # blocking the whole market summary while waiting for a marginally fresher
+    # spot quote.
+    return await _fetch_yahoo_commodity(client, "GC=F")
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +534,7 @@ async def _fetch_night_futures(client: httpx.AsyncClient) -> dict:
 # don't each re-scrape Naver on every call. Keyed by the sorted codes tuple
 # so different code sets don't collide.
 _indicators_cache: dict[tuple, tuple[float, dict[str, dict]]] = {}
+_indicator_item_cache: dict[str, tuple[float, dict]] = {}
 _INDICATORS_TTL = 60  # seconds — market bar ticks every 60s anyway
 
 
@@ -581,11 +544,25 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     if not codes:
         return results
     import time as _time
-    key = tuple(sorted(codes))
+    requested_codes = list(dict.fromkeys(codes))
+    key = tuple(sorted(requested_codes))
+    now = _time.monotonic()
     cached = _indicators_cache.get(key)
-    if cached and (_time.monotonic() - cached[0]) < _INDICATORS_TTL:
+    if cached and (now - cached[0]) < _INDICATORS_TTL:
         # Return a shallow copy so caller mutations don't poison the cache.
         return dict(cached[1])
+
+    fetch_codes: list[str] = []
+    for code in requested_codes:
+        item_cached = _indicator_item_cache.get(code)
+        if item_cached and (now - item_cached[0]) < _INDICATORS_TTL:
+            results[code] = dict(item_cached[1])
+        else:
+            fetch_codes.append(code)
+
+    if not fetch_codes:
+        _indicators_cache[key] = (now, dict(results))
+        return dict(results)
 
     # Group codes by source to minimize HTTP requests
     kr_indices = []       # need individual fetches
@@ -597,7 +574,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     gold_needed = False
     wti_needed = False
 
-    for code in codes:
+    for code in fetch_codes:
         if code == "CMDT_GC":
             gold_needed = True
         elif code == "OIL_CL":
@@ -706,9 +683,14 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                     results[code] = dict(_EMPTY)
 
     # Fill in any missing codes with empty
-    for code in codes:
+    for code in fetch_codes:
         if code not in results:
             results[code] = dict(_EMPTY)
 
-    _indicators_cache[key] = (_time.monotonic(), dict(results))
-    return results
+    cache_time = _time.monotonic()
+    for code in fetch_codes:
+        _indicator_item_cache[code] = (cache_time, dict(results.get(code) or _EMPTY))
+
+    final_results = {code: dict(results.get(code) or _EMPTY) for code in requested_codes}
+    _indicators_cache[key] = (cache_time, dict(final_results))
+    return final_results
