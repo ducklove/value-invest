@@ -807,6 +807,35 @@ async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
     return result
 
 
+async def _fill_snapshot_quotes(google_sub: str, items: list[dict]) -> None:
+    if not items:
+        return
+    latest = await cache.get_latest_snapshot(google_sub)
+    snap_date = latest.get("date") if latest else None
+    if not snap_date:
+        return
+    rows = await cache.get_stock_snapshots_by_date(google_sub, snap_date)
+    values = {row["stock_code"]: row["market_value"] for row in rows}
+    for item in items:
+        quote = item.get("quote") or {}
+        if quote.get("price") is not None:
+            continue
+        value = values.get(item.get("stock_code"))
+        qty = item.get("quantity")
+        try:
+            if value is None or qty is None or float(qty) == 0:
+                continue
+            item["quote"] = {
+                "date": snap_date,
+                "price": round(float(value) / float(qty), 4),
+                "change": 0,
+                "change_pct": None,
+                "_stale": True,
+            }
+        except (TypeError, ValueError, ZeroDivisionError):
+            continue
+
+
 QUOTE_RATE_INTERVAL = 0.22  # ~4.5 req/s, stays under 5/s limit
 
 # --- FX rate cache ---
@@ -1870,6 +1899,7 @@ async def get_portfolio(request: Request):
     for it in items:
         it["trailing_dps"] = dps_map.get(it["stock_code"])
     enriched = await _enrich_with_cached_quotes(items)
+    await _fill_snapshot_quotes(user["google_sub"], enriched)
     _schedule_asset_insight_warmup(enriched)
     elapsed_ms = (time.perf_counter() - started) * 1000
     if elapsed_ms > 1000:
