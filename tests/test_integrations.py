@@ -24,6 +24,10 @@ def test_build_public_integrations_reads_sibling_project_configs(tmp_path):
         ),
         encoding="utf-8",
     )
+    (holding_dir / "current.js").write_text(
+        'const CURRENT_DATA = {"lastUpdated":"2026-05-10 22:00:00","pairs":[{"id":"sample_holding","holdingValue":9.9,"quoteSource":"mixed"}]};',
+        encoding="utf-8",
+    )
 
     preferred_dir = tmp_path / "common_preferred_spread"
     preferred_dir.mkdir()
@@ -77,6 +81,8 @@ def test_build_public_integrations_reads_sibling_project_configs(tmp_path):
     assert holding["meta"]["123450"]["subsidiaries"] == [
         {"code": "543210", "sharesHeld": 200}
     ]
+    assert holding["meta"]["123450"]["holdingValuePerShare"] == 1_000_000
+    assert holding["items"][0]["current"]["holdingValueUnit"] == "억원"
 
     preferred = public_config["preferredSpread"]
     assert preferred["pairsByPreferredCode"]["005935"]["commonCode"] == "005930"

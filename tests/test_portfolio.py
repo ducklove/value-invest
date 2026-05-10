@@ -157,6 +157,26 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertAlmostEqual(target_price, (100 * 10 + 200 * 5) / 900)
 
+    async def test_target_formula_uses_holding_value_snapshot_without_quotes(self):
+        holding_meta = {
+            "004700": {
+                "totalShares": 1000,
+                "treasuryShares": 100,
+                "holdingValuePerShare": 12345.67,
+                "subsidiaries": [{"code": "BRK-A", "sharesHeld": 1}],
+            }
+        }
+
+        with patch.object(
+            portfolio_route.integrations,
+            "build_public_integrations",
+            return_value={"holdingValue": {"meta": holding_meta}},
+        ), patch.object(portfolio_route, "_fetch_quote", new=AsyncMock()) as fetch_quote:
+            target_price = await portfolio_route._resolve_target_formula_price("004700", "보유지분", 611500)
+
+        fetch_quote.assert_not_awaited()
+        self.assertEqual(target_price, 12345.67)
+
     async def test_portfolio_target_metrics_use_latest_positive_values(self):
         db = await cache.get_db()
         await db.executemany(

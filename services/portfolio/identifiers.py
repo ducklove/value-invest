@@ -39,6 +39,11 @@ CASH_FX_CODE = {
 }
 
 STATIC_FOREIGN_TICKERS: dict[str, dict[str, Any]] = {
+    "BRK-A": {
+        "ticker": "BRK-A",
+        "name": "Berkshire Hathaway Inc. Class A",
+        "currency": "USD",
+    },
     "A200": {
         "ticker": "A200.AX",
         "name": "BetaShares Australia 200 ETF",
@@ -93,4 +98,3 @@ def is_preferred_stock(code: str | None) -> bool:
 def common_stock_code(code: str | None) -> str:
     normalized = normalize_portfolio_code(code)
     return normalized[:5] + "0"
-

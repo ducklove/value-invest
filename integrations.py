@@ -81,6 +81,27 @@ def _read_json(path: Path | None) -> Any:
         return None
 
 
+def _read_js_object(path: Path | None, const_name: str) -> Any:
+    if not path or not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+        marker_idx = text.find(f"const {const_name}")
+        if marker_idx < 0:
+            return None
+        start = text.find("{", marker_idx)
+        end = text.rfind("};")
+        if start < 0:
+            return None
+        if end < start:
+            end = text.rfind("}")
+        if end < start:
+            return None
+        return json.loads(text[start : end + 1])
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _ticker_code(ticker: Any) -> str:
     return str(ticker or "").split(".", 1)[0].strip().upper()
 
@@ -102,11 +123,18 @@ def _holding_value_config(root: Path) -> dict[str, Any]:
     entries = raw_entries if isinstance(raw_entries, list) else []
     items = [_build_holding_item(entry) for entry in entries if isinstance(entry, dict)]
     items = [item for item in items if item]
+    current = _holding_value_current(project_dir)
+    for item in items:
+        snapshot = _build_holding_current_snapshot(item, current)
+        if snapshot:
+            item["current"] = snapshot
     codes = [item["holdingCode"] for item in items]
     meta = {
         item["holdingCode"]: {
             "totalShares": item["holdingTotalShares"],
             "treasuryShares": item["holdingTreasuryShares"],
+            "holdingValuePerShare": (item.get("current") or {}).get("holdingValuePerShare"),
+            "holdingValueUpdatedAt": (item.get("current") or {}).get("updatedAt"),
             "subsidiaries": [
                 {"code": sub["code"], "sharesHeld": sub["sharesHeld"]}
                 for sub in item["subsidiaries"]
@@ -123,6 +151,50 @@ def _holding_value_config(root: Path) -> dict[str, Any]:
         "codes": codes,
         "meta": meta,
         "items": items,
+    }
+
+
+def _holding_value_current(project_dir: Path | None) -> dict[str, Any]:
+    data = _read_js_object(project_dir / "current.js" if project_dir else None, "CURRENT_DATA")
+    if not isinstance(data, dict):
+        return {"updatedAt": None, "pairs": {}}
+    pairs = data.get("pairs") if isinstance(data.get("pairs"), list) else []
+    return {
+        "updatedAt": data.get("lastUpdated") or data.get("generatedAt"),
+        "pairs": {
+            str(pair.get("id") or ""): pair
+            for pair in pairs
+            if isinstance(pair, dict) and pair.get("id")
+        },
+    }
+
+
+def _as_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _build_holding_current_snapshot(item: dict[str, Any], current: dict[str, Any]) -> dict[str, Any] | None:
+    pair = (current.get("pairs") or {}).get(item.get("id"))
+    if not isinstance(pair, dict):
+        return None
+    holding_value = _as_float(pair.get("holdingValue"))
+    total_shares = _as_float(item.get("holdingTotalShares")) or 0
+    treasury_shares = _as_float(item.get("holdingTreasuryShares")) or 0
+    adjusted_shares = total_shares - treasury_shares
+    if holding_value is None or holding_value <= 0 or adjusted_shares <= 0:
+        return None
+    return {
+        "updatedAt": current.get("updatedAt"),
+        "holdingValue": holding_value,
+        "holdingValueUnit": "억원",
+        "holdingValuePerShare": round(holding_value * 100_000_000 / adjusted_shares, 4),
+        "quoteSource": pair.get("quoteSource"),
     }
 
 

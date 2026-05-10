@@ -1943,6 +1943,10 @@ async def _holding_value_for_target_formula(stock_code: str) -> float | None:
     if not isinstance(item, dict):
         return None
 
+    snapshot_value = _target_number_or_none(item.get("holdingValuePerShare"))
+    if snapshot_value is not None and snapshot_value > 0:
+        return snapshot_value
+
     subsidiaries = item.get("subsidiaries") or []
     if not subsidiaries:
         return None

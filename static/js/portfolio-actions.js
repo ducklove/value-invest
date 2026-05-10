@@ -527,16 +527,18 @@ function _preferredCommonPriceForItem(item, allItems) {
 function _holdingValueForItem(item, allItems) {
   const meta = _HOLDING_META[item.stock_code];
   if (!meta || !meta.totalShares) return null;
+  const snapshotValue = Number(meta.holdingValuePerShare);
+  const fallback = Number.isFinite(snapshotValue) && snapshotValue > 0 ? snapshotValue : null;
   let subTotal = 0;
   for (const sub of meta.subsidiaries || []) {
     const cached = _EXTERNAL_QUOTE_CACHE[sub.code];
     const inPort = allItems.find(i => i.stock_code === sub.code);
     const subPrice = inPort?.quote?.price ?? cached?.price;
-    if (subPrice == null) return null;
+    if (subPrice == null) return fallback;
     subTotal += Number(subPrice) * (sub.sharesHeld || 0);
   }
   const free = meta.totalShares - (meta.treasuryShares || 0);
-  return free > 0 && subTotal > 0 ? subTotal / free : null;
+  return free > 0 && subTotal > 0 ? subTotal / free : fallback;
 }
 
 function _targetFormulaUses(item, variableName) {
