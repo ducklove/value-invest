@@ -939,6 +939,23 @@ def _resolve_benchmark_name_fast(code: str, items: list[dict] | None = None) -> 
     return _benchmark_name_fast(code, items, _benchmark_name_cache)
 
 
+def _resolve_benchmark_name_from_code_table(
+    code: str,
+    items: list[dict] | None,
+    corp_code_table: dict[str, dict] | None,
+) -> str:
+    name = _resolve_benchmark_name_fast(code, items)
+    if name != code:
+        return name
+    if _is_korean_stock(code):
+        row = (corp_code_table or {}).get(code) or {}
+        corp_name = row.get("corp_name")
+        if corp_name:
+            _benchmark_name_cache[code] = corp_name
+            return corp_name
+    return name
+
+
 async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
     """Fetch a benchmark quote (cached). Reuses market_indicators for shared sources."""
     cached = _cached_benchmark_quote(benchmark_code, allow_stale=False)
@@ -2179,7 +2196,8 @@ async def update_benchmark(stock_code: str, request: Request, payload: dict = Bo
         bq = await asyncio.wait_for(_fetch_benchmark_quote(effective), timeout=_BENCHMARK_ENDPOINT_ITEM_TIMEOUT)
     except Exception:
         bq = _cached_benchmark_quote(effective, allow_stale=True) or {}
-    name = _resolve_benchmark_name_fast(effective)
+    corp_code_table = await cache.load_corp_code_table()
+    name = _resolve_benchmark_name_from_code_table(effective, None, corp_code_table)
     return {"ok": True, "benchmark_code": benchmark_code, "effective_benchmark": effective, "benchmark_name": name, "benchmark_quote": bq}
 
 
@@ -2193,8 +2211,10 @@ async def get_benchmark_quotes(request: Request):
         bc = item.get("benchmark_code") or _resolve_default_benchmark_fast(item["stock_code"])
         if bc:
             benchmark_codes.add(bc)
+    corp_code_table = await cache.load_corp_code_table()
+
     async def _fetch_one(bc):
-        name = _resolve_benchmark_name_fast(bc, items)
+        name = _resolve_benchmark_name_from_code_table(bc, items, corp_code_table)
         try:
             bq = await asyncio.wait_for(
                 _fetch_benchmark_quote(bc),
@@ -2210,7 +2230,7 @@ async def get_benchmark_quotes(request: Request):
     response = {}
     for bc, pair in zip(codes, pairs):
         if isinstance(pair, BaseException):
-            name = _resolve_benchmark_name_fast(bc, items)
+            name = _resolve_benchmark_name_from_code_table(bc, items, corp_code_table)
             bq = _cached_benchmark_quote(bc, allow_stale=True) or {}
             response[bc] = {**bq, "name": name}
             continue

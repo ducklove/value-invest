@@ -22,6 +22,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         await cache.init_db()
         portfolio_route._dividend_warmup_last.clear()
         portfolio_route._dividend_warmup_tasks.clear()
+        portfolio_route._benchmark_name_cache.clear()
 
         db = await cache.get_db()
         await db.execute(
@@ -310,6 +311,16 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             data = await portfolio_route.get_benchmark_quotes(object())
 
         self.assertEqual(data["IDX_KOSPI"]["change_pct"], 1.23)
+
+    async def test_benchmark_quotes_name_stock_benchmark_from_internal_code_table(self):
+        await cache.save_portfolio_item("u1", "032830", "삼성생명", 100, 90000, benchmark_code="005930")
+
+        with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch.object(portfolio_route, "_fetch_benchmark_quote", new=AsyncMock(return_value={"change_pct": 0.5})):
+            data = await portfolio_route.get_benchmark_quotes(object())
+
+        self.assertEqual(data["005930"]["name"], "삼성전자")
+        self.assertEqual(data["005930"]["change_pct"], 0.5)
 
     async def test_delete_item(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)

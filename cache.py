@@ -6,6 +6,7 @@ from datetime import datetime
 DB_PATH = Path(__file__).parent / "cache.db"
 
 _conn: aiosqlite.Connection | None = None
+_corp_code_table: dict[str, dict[str, str]] | None = None
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -20,10 +21,11 @@ async def get_db() -> aiosqlite.Connection:
 
 async def close_db():
     """Shutdown: close the shared connection."""
-    global _conn
+    global _conn, _corp_code_table
     if _conn is not None:
         await _conn.close()
         _conn = None
+    _corp_code_table = None
 
 
 async def _refresh_group_snapshots(db: aiosqlite.Connection, google_sub: str | None = None, snap_date: str | None = None):
@@ -801,6 +803,7 @@ async def corp_codes_need_refresh() -> bool:
 
 
 async def save_corp_codes(codes: list[dict]):
+    global _corp_code_table
     db = await get_db()
     now = datetime.now().isoformat()
     await db.executemany(
@@ -808,6 +811,15 @@ async def save_corp_codes(codes: list[dict]):
         [(c["stock_code"], c["corp_code"], c["corp_name"], c.get("modify_date"), now) for c in codes],
     )
     await db.commit()
+    _corp_code_table = {
+        str(c["stock_code"]): {
+            "stock_code": str(c["stock_code"]),
+            "corp_code": str(c.get("corp_code") or ""),
+            "corp_name": str(c.get("corp_name") or ""),
+        }
+        for c in codes
+        if c.get("stock_code") and c.get("corp_name")
+    }
 
 
 _CORP_SEARCH_ALIASES = {
@@ -884,21 +896,38 @@ async def resolve_corp_search_query(query: str) -> dict | None:
 
 
 async def get_corp_code(stock_code: str) -> str | None:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT corp_code FROM corp_codes WHERE stock_code = ?", (stock_code,)
-    )
-    row = await cursor.fetchone()
+    row = (await load_corp_code_table()).get(str(stock_code or "").strip())
     return row["corp_code"] if row else None
 
 
 async def get_corp_name(stock_code: str) -> str | None:
+    row = (await load_corp_code_table()).get(str(stock_code or "").strip())
+    return row["corp_name"] if row else None
+
+
+async def load_corp_code_table(*, force: bool = False) -> dict[str, dict[str, str]]:
+    """Return the full internal listed-company code table.
+
+    This is a reference table, not a best-effort quote/name cache. It is
+    refreshed from DART at startup and then kept in memory for fast UI paths
+    such as benchmark label rendering.
+    """
+    global _corp_code_table
+    if _corp_code_table is not None and not force:
+        return _corp_code_table
     db = await get_db()
     cursor = await db.execute(
-        "SELECT corp_name FROM corp_codes WHERE stock_code = ?", (stock_code,)
+        "SELECT stock_code, corp_code, corp_name FROM corp_codes WHERE stock_code IS NOT NULL AND stock_code != ''"
     )
-    row = await cursor.fetchone()
-    return row["corp_name"] if row else None
+    _corp_code_table = {
+        row["stock_code"]: {
+            "stock_code": row["stock_code"],
+            "corp_code": row["corp_code"],
+            "corp_name": row["corp_name"],
+        }
+        for row in await cursor.fetchall()
+    }
+    return _corp_code_table
 
 
 async def save_financial_data(stock_code: str, data: list[dict]):
