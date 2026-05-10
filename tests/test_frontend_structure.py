@@ -122,6 +122,7 @@ def test_holding_target_formula_keeps_external_quotes_fresh():
     assert "function _holdingValueAction(stockCode)" in insights
     assert "_renderInsightActionLinks(code, goldGap, holding)" in insights
     assert "_renderInsightCard('자회사 비율 추이'" in insights
+    assert "holdingValuePerShare: it.current?.holdingValuePerShare" in insights
     assert "function _targetFormulaUses(item, variableName)" in actions
     assert "meta.holdingValuePerShare" in actions
     assert "r.target_price == null || _targetFormulaUses(r, '보유지분')" in render

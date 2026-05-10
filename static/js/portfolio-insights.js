@@ -427,6 +427,8 @@ function _applyHoldingPayload(data, persist) {
     meta[it.holdingCode] = {
       totalShares: it.holdingTotalShares || 0,
       treasuryShares: it.holdingTreasuryShares || 0,
+      holdingValuePerShare: it.current?.holdingValuePerShare ?? it.holdingValuePerShare ?? null,
+      holdingValueUpdatedAt: it.current?.updatedAt ?? it.holdingValueUpdatedAt ?? null,
       subsidiaries: (it.subsidiaries || [])
         .filter(s => s.code && s.sharesHeld != null)
         .map(s => ({ code: s.code, sharesHeld: s.sharesHeld })),
