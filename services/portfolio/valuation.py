@@ -194,6 +194,27 @@ async def _apply_market_cache_fallback(source_code: str, basis: dict) -> dict:
     return basis
 
 
+async def _persist_market_target_metrics(source_code: str, basis: dict) -> None:
+    year = basis.get("fiscalYear")
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return
+    row = {
+        "stock_code": source_code,
+        "year": year,
+        "close_price": basis.get("closePrice"),
+        "eps": basis.get("eps"),
+        "bps": basis.get("bps"),
+    }
+    if row["eps"] is None and row["bps"] is None and row["close_price"] is None:
+        return
+    try:
+        await cache.upsert_market_target_metrics([row])
+    except Exception as exc:
+        logger.info("market target metric cache write failed (%s): %s", source_code, exc)
+
+
 async def fetch_valuation_basis(
     stock_code: str,
     *,
@@ -247,10 +268,11 @@ async def fetch_valuation_basis_map(
         basis = _basis_from_fundamental(source_code, fundamentals.get(source_code) if isinstance(fundamentals, dict) else None)
         if use_market_cache_fallback and needs_market_valuation_fallback(basis):
             basis = await _apply_market_cache_fallback(source_code, basis)
+        if basis.get("source") == "internal_fundamentals":
+            await _persist_market_target_metrics(source_code, basis)
         basis_by_source[source_code] = basis
         _cache_set(source_code, as_of_text, use_market_cache_fallback, basis)
 
     for requested_code, source_code in source_by_requested.items():
         result[requested_code] = _copy_basis(basis_by_source.get(source_code) or _base_basis(source_code))
     return result
-

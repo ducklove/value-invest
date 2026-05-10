@@ -38,7 +38,14 @@ async def supplement_target_metrics(items: list[dict], target_metrics_map: dict[
         for candidate in candidates:
             if not candidate or not is_korean_stock(candidate):
                 continue
-            needed_vars.setdefault(candidate, set()).update(formula_vars)
+            current = target_metrics_map.setdefault(candidate, {"eps": None, "bps": None, "dps": None})
+            missing_vars = {
+                var
+                for var in formula_vars
+                if current.get(var.lower()) is None
+            }
+            if missing_vars:
+                needed_vars.setdefault(candidate, set()).update(missing_vars)
 
     codes = list(needed_vars)
     if not codes:

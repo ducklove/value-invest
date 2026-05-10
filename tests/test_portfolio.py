@@ -100,6 +100,39 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         row = await cursor.fetchone()
         self.assertEqual(row["target_price_formula"], "")
 
+    async def test_target_price_formula_keeps_calculated_fallback(self):
+        await cache.save_portfolio_item(
+            "u1",
+            "005930",
+            "삼성전자",
+            100,
+            65000,
+            target_price=32000,
+            target_price_formula="BPS*0.5",
+        )
+
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(items[0]["target_price"], 32000)
+        self.assertEqual(items[0]["target_price_formula"], "BPS*0.5")
+
+    async def test_regular_edit_preserves_formula_with_calculated_fallback(self):
+        await cache.save_portfolio_item(
+            "u1",
+            "005930",
+            "삼성전자",
+            100,
+            65000,
+            target_price=32000,
+            target_price_formula="BPS*0.5",
+        )
+
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 150, 64000)
+
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(items[0]["quantity"], 150)
+        self.assertEqual(items[0]["target_price"], 32000)
+        self.assertEqual(items[0]["target_price_formula"], "BPS*0.5")
+
     async def test_portfolio_target_metrics_use_latest_positive_values(self):
         db = await cache.get_db()
         await db.executemany(
@@ -165,6 +198,18 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         saved = await cache.get_portfolio_target_metrics(["037350"])
         self.assertIsNone(saved["037350"]["bps"])
         self.assertIsNone(saved["037350"]["eps"])
+
+    async def test_target_metric_does_not_refetch_cached_values(self):
+        target_metrics_map = {"037350": {"eps": None, "bps": 18017.424347205786, "dps": None}}
+
+        with patch.object(target_metrics_service, "fetch_valuation_basis_map", new=AsyncMock()) as shared:
+            await target_metrics_service.supplement_target_metrics(
+                [{"stock_code": "037350", "target_price_formula": "BPS*0.5"}],
+                target_metrics_map,
+            )
+
+        shared.assert_not_awaited()
+        self.assertEqual(target_metrics_map["037350"]["bps"], 18017.424347205786)
 
     async def test_target_metric_uses_shared_valuation_basis_for_eps_and_bps(self):
         target_metrics_map = {"005930": {"eps": None, "bps": None, "dps": None}}

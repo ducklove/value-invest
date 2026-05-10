@@ -36,7 +36,11 @@ from services.portfolio.identifiers import (
     static_foreign_ticker as _static_foreign_ticker,
 )
 from services.portfolio.quotes import PortfolioQuoteCache, quote_from_ws as _quote_from_ws
-from services.portfolio.targets import parse_target_input as _parse_target_input
+from services.portfolio.targets import (
+    evaluate_target_formula as _evaluate_target_formula,
+    extract_target_variables as _extract_target_variables,
+    parse_target_input as _parse_target_input,
+)
 from services.portfolio.target_metrics import supplement_target_metrics as _supplement_target_metrics
 from services.portfolio.benchmarks import (
     BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
@@ -1818,6 +1822,8 @@ async def asset_quotes_batch(payload: dict = Body(...)):
             async with sem:
                 q = await asyncio.wait_for(_fetch_quote(code), timeout=_ASSET_QUOTES_ITEM_TIMEOUT)
             return code, q or {}
+        except asyncio.CancelledError:
+            return code, {}
         except (asyncio.TimeoutError, Exception):
             return code, {}
 
@@ -1827,9 +1833,13 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         task.cancel()
     results = {code: {} for code in codes}
     for task in done:
+        if task.cancelled():
+            continue
         try:
             code, quote = task.result()
             results[code] = quote
+        except asyncio.CancelledError:
+            pass
         except Exception:
             pass
     return results
@@ -1888,6 +1898,58 @@ async def get_portfolio(request: Request):
     if elapsed_ms > 1000:
         logger.warning("portfolio list slow: %.0fms items=%d user=%s", elapsed_ms, len(enriched), user.get("email") or user.get("google_sub"))
     return enriched
+
+
+def _target_number_or_none(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+async def _resolve_target_formula_price(stock_code: str, formula: str, avg_price: float) -> float | None:
+    """Resolve a formula to a saved fallback price at edit/save time.
+
+    BPS/EPS use the same valuation source as the investment insight modal.
+    Dynamic variables such as 보유지분 and 본주가격 are still recomputed on the
+    client when quotes are available, so they intentionally do not block save.
+    """
+    variables = _extract_target_variables(formula)
+    if not variables:
+        return None
+
+    values: dict[str, float | None] = {}
+    if "매입가" in variables:
+        values["매입가"] = _target_number_or_none(avg_price)
+
+    if "DPS" in variables:
+        dps_map = await cache.get_trailing_dividends([stock_code])
+        values["DPS"] = _target_number_or_none(dps_map.get(stock_code))
+
+    if variables & {"BPS", "EPS"}:
+        source_code = _common_stock_code(stock_code) if _is_korean_stock(stock_code) and _is_preferred_stock(stock_code) else stock_code
+        basis = await _fetch_common_valuation_basis(source_code, as_of=_today_kst_date())
+        if "BPS" in variables:
+            values["BPS"] = _target_number_or_none(basis.get("bps"))
+        if "EPS" in variables:
+            values["EPS"] = _target_number_or_none(basis.get("eps"))
+
+    missing_financials = [name for name in ("BPS", "EPS") if name in variables and values.get(name) is None]
+    if missing_financials:
+        raise HTTPException(status_code=400, detail=f"{', '.join(missing_financials)} 값을 가져오지 못했습니다.")
+
+    # 보유지분/본주가격은 실시간 가격 의존 변수라 저장 시점 fallback 계산을
+    # 생략한다. 화면에서는 quote가 들어오면 동일 수식을 다시 평가한다.
+    if any(name not in values or values.get(name) is None for name in variables):
+        return None
+
+    try:
+        return _evaluate_target_formula(formula, values)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/api/portfolio/{stock_code}")
@@ -1972,6 +2034,12 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         target_price_kwarg["target_price"] = parsed_target.price
         target_price_kwarg["target_price_formula"] = parsed_target.formula
         target_price_kwarg["target_price_disabled"] = False
+        if parsed_target.formula:
+            target_price_kwarg["target_price"] = await _resolve_target_formula_price(
+                stock_code,
+                parsed_target.formula,
+                avg_price,
+            )
     elif "target_price" in payload:
         raw_tp = payload.get("target_price")
         if raw_tp is None or (isinstance(raw_tp, str) and raw_tp.strip() == ""):

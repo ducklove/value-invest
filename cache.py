@@ -2304,6 +2304,8 @@ async def save_portfolio_item(
       - True/1             → 자동 계산도 bypass, UI 에서 '-' 로 표시
       - False/0            → 자동 계산 활성화 (기본값)
     """
+    target_price_provided = target_price is not _TARGET_PRICE_UNCHANGED
+    target_formula_provided = target_price_formula is not _TARGET_FORMULA_UNCHANGED
     db = await get_db()
     now = datetime.now().isoformat()
     # Re-read existing row so we can preserve created_at on simple edits
@@ -2342,13 +2344,15 @@ async def save_portfolio_item(
     else:
         target_price_disabled = 1 if target_price_disabled else 0
     # 명시 수동 값을 입력하면 disabled 플래그는 자동 해제 (사용자가
-    # 목표가를 넣었다는 건 '표시하고 싶다' 는 의사). 반대로 disabled=1
-    # 이면 target_price 는 항상 NULL 로 강제.
+    # 목표가를 넣었다는 건 '표시하고 싶다' 는 의사). 수식이 있을 때의
+    # target_price 는 "마지막으로 계산된 fallback 값" 이므로 수식과 함께
+    # 보존한다. 이렇게 해야 BPS/EPS 외부 조회가 늦거나 실패해도 표가
+    # 즉시 마지막 계산값을 표시할 수 있다.
     if target_price is not None:
         target_price_disabled = 0
-        target_price_formula = None
+        if target_price_provided and not target_formula_provided:
+            target_price_formula = None
     if target_price_formula:
-        target_price = None
         target_price_disabled = 0
     if target_price_disabled == 1:
         target_price = None

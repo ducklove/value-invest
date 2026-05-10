@@ -639,7 +639,10 @@ function _computeTargetPrice(item, allItems) {
   if (code.startsWith('CASH_')) return null;
   if (item.target_price_disabled) return null;
   if (item.target_price_formula) {
-    return _evaluateTargetFormula(item.target_price_formula, _targetFormulaVariables(item, allItems));
+    const formulaPrice = _evaluateTargetFormula(item.target_price_formula, _targetFormulaVariables(item, allItems));
+    if (formulaPrice !== null) return formulaPrice;
+    if (item.target_price != null) return Number(item.target_price);
+    return null;
   }
   if (item.target_price != null) return Number(item.target_price);
 
