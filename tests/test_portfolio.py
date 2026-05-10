@@ -142,70 +142,41 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(valuation["net_income"], 44_000_000_000_000)
         self.assertEqual(valuation["total_equity"], 420_000_000_000_000)
 
-    async def test_target_metric_internal_fallback_excludes_treasury_shares(self):
-        target_metrics_map = {"003200": {"eps": None, "bps": None, "dps": None}}
-        fundamentals = {
-            "003200": {
-                "fiscal_year": 2025,
-                "metrics": {
-                    "equity": {"amount": 900_000},
-                    "net_income": {"amount": 90_000},
-                },
-            }
-        }
-        fundamentals["003200"]["per_share"] = {
-            "bps": {"value": 900, "numerator_amount": 900_000, "shares": 1000, "treasury_shares_excluded": False},
-            "eps_ttm": {"value": 90, "numerator_amount": 90_000, "shares": 1000, "treasury_shares_excluded": False},
+    async def test_target_metric_uses_shared_valuation_basis_without_writing_cache(self):
+        target_metrics_map = {"037350": {"eps": None, "bps": None, "dps": None}}
+        shared_basis = {
+            "applicable": True,
+            "source": "internal_fundamentals",
+            "sourceCode": "037350",
+            "bps": 18017.424347205786,
+            "eps": 1982.0,
         }
 
-        with patch.object(target_metrics_service.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)), \
-             patch.object(target_metrics_service.cache, "get_corp_code", new=AsyncMock(return_value="00146269")), \
-             patch.object(target_metrics_service.dart_client, "fetch_common_stock_share_status", new=AsyncMock(return_value={
-                 "issued_shares": 1000,
-                 "treasury_shares": 100,
-                 "distributed_shares": 900,
-             })):
+        with patch.object(target_metrics_service, "fetch_valuation_basis", new=AsyncMock(return_value=shared_basis)) as shared:
             await target_metrics_service.supplement_target_metrics(
-                [{"stock_code": "003200", "target_price_formula": "BPS*0.5"}],
+                [{"stock_code": "037350", "target_price_formula": "BPS*0.5"}],
                 target_metrics_map,
             )
 
-        self.assertEqual(target_metrics_map["003200"]["bps"], 1000)
-        self.assertEqual(target_metrics_map["003200"]["eps"], 100)
+        shared.assert_awaited_once()
+        self.assertEqual(target_metrics_map["037350"]["bps"], 18017.424347205786)
+        self.assertIsNone(target_metrics_map["037350"]["eps"])
 
-        saved = await cache.get_portfolio_target_metrics(["003200"])
-        self.assertEqual(saved["003200"]["bps"], 1000)
-        self.assertEqual(saved["003200"]["eps"], 100)
+        saved = await cache.get_portfolio_target_metrics(["037350"])
+        self.assertIsNone(saved["037350"]["bps"])
+        self.assertIsNone(saved["037350"]["eps"])
 
-    async def test_target_metric_uses_internal_per_share_when_treasury_already_excluded(self):
+    async def test_target_metric_uses_shared_valuation_basis_for_eps_and_bps(self):
         target_metrics_map = {"005930": {"eps": None, "bps": None, "dps": None}}
-        fundamentals = {
-            "005930": {
-                "fiscal_year": 2025,
-                "metrics": {
-                    "equity": {"amount": 424_313_255_000_000},
-                    "net_income": {"amount": 44_260_956_000_000},
-                },
-                "per_share": {
-                    "bps": {
-                        "value": 63997.24,
-                        "shares": 6_630_180_138,
-                        "share_basis": "dart_distributed_shares",
-                        "treasury_shares_excluded": True,
-                    },
-                    "eps_ttm": {
-                        "value": 6675.68,
-                        "shares": 6_630_180_138,
-                        "share_basis": "dart_distributed_shares",
-                        "treasury_shares_excluded": True,
-                    },
-                },
-            }
+        shared_basis = {
+            "applicable": True,
+            "source": "internal_fundamentals",
+            "sourceCode": "005930",
+            "bps": 63997.24,
+            "eps": 6675.68,
         }
 
-        dart = AsyncMock(side_effect=AssertionError("DART share status should not run"))
-        with patch.object(target_metrics_service.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)), \
-             patch.object(target_metrics_service.dart_client, "fetch_common_stock_share_status", new=dart):
+        with patch.object(target_metrics_service, "fetch_valuation_basis", new=AsyncMock(return_value=shared_basis)):
             await target_metrics_service.supplement_target_metrics(
                 [{"stock_code": "005930", "target_price_formula": "BPS*0.5+EPS"}],
                 target_metrics_map,
@@ -213,7 +184,6 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(target_metrics_map["005930"]["bps"], 63997.24)
         self.assertEqual(target_metrics_map["005930"]["eps"], 6675.68)
-        dart.assert_not_awaited()
 
     async def test_portfolio_tag_suggestions_by_usage(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
