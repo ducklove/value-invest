@@ -133,6 +133,30 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items[0]["target_price"], 32000)
         self.assertEqual(items[0]["target_price_formula"], "BPS*0.5")
 
+    async def test_target_formula_resolves_holding_value_fallback(self):
+        holding_meta = {
+            "002380": {
+                "totalShares": 1000,
+                "treasuryShares": 100,
+                "subsidiaries": [
+                    {"code": "028260", "sharesHeld": 10},
+                    {"code": "009540", "sharesHeld": 5},
+                ],
+            }
+        }
+
+        async def fake_quote(code):
+            return {"price": {"028260": 100, "009540": 200}[code]}
+
+        with patch.object(
+            portfolio_route.integrations,
+            "build_public_integrations",
+            return_value={"holdingValue": {"meta": holding_meta}},
+        ), patch.object(portfolio_route, "_fetch_quote", new=AsyncMock(side_effect=fake_quote)):
+            target_price = await portfolio_route._resolve_target_formula_price("002380", "보유지분", 611500)
+
+        self.assertAlmostEqual(target_price, (100 * 10 + 200 * 5) / 900)
+
     async def test_portfolio_target_metrics_use_latest_positive_values(self):
         db = await cache.get_db()
         await db.executemany(

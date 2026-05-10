@@ -126,13 +126,13 @@ function renderPortfolio() {
   const _portCodes = new Set(allRows.map(r => r.stock_code));
   for (const r of allRows) {
     // 우선주: 보통주 quote 가 포트폴리오에 없으면 외부 fetch 필요
-    if (r.target_price == null && _isPreferredStock(r.stock_code)) {
+    if ((r.target_price == null || _targetFormulaUses(r, '본주가격')) && _isPreferredStock(r.stock_code)) {
       const commonCode = r.stock_code.slice(0, -1) + '0';
       if (!_portCodes.has(commonCode)) _externalCodesNeeded.add(commonCode);
     }
     // 지주사: 자회사 quote 들
     const meta = _HOLDING_META[r.stock_code];
-    if (meta && r.target_price == null) {
+    if (meta && (r.target_price == null || _targetFormulaUses(r, '보유지분'))) {
       for (const sub of meta.subsidiaries || []) {
         if (sub.code && !_portCodes.has(sub.code)) _externalCodesNeeded.add(sub.code);
       }

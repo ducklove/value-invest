@@ -119,3 +119,24 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
         codes = pf._macro_codes_for_asset({"assetClass": "korean_stock"}, "KRW")
 
         self.assertEqual(codes, ["USD_KRW", "KOSPI", "KOSDAQ", "KR3Y"])
+
+    async def test_holding_context_marks_holding_value_dashboard(self):
+        config = {
+            "holdingValue": {
+                "baseUrl": "https://ducklove.github.io/holding_value",
+                "meta": {
+                    "002380": {
+                        "totalShares": 1000,
+                        "treasuryShares": 100,
+                        "subsidiaries": [{"code": "028260", "sharesHeld": 10}],
+                    }
+                },
+            }
+        }
+
+        with patch.object(pf.integrations, "build_public_integrations", return_value=config):
+            holding = pf._holding_context_for_asset("002380")
+
+        self.assertEqual(holding["code"], "002380")
+        self.assertEqual(holding["subsidiaryCount"], 1)
+        self.assertEqual(holding["url"], "https://ducklove.github.io/holding_value/?code=002380")

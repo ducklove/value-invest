@@ -140,15 +140,36 @@ function _insightTagListId(code) {
   return `pfInsightTagList_${safe}`;
 }
 
-function _renderInsightActionLinks(code, goldGap) {
+function _syncHoldingContext(holding) {
+  if (!holding || !holding.applicable || !holding.code) return;
+  _HOLDING_CODES.add(holding.code);
+  if (holding.meta && typeof holding.meta === 'object') {
+    _HOLDING_META[holding.code] = holding.meta;
+  }
+}
+
+function _holdingValueAction(stockCode) {
+  return {
+    id: 'holding-value',
+    label: '자회사 비율 추이',
+    hint: 'Holding Value 대시보드',
+    run: () => openIntegration('holdingValue', '', { code: stockCode }),
+  };
+}
+
+function _renderInsightActionLinks(code, goldGap, holding) {
   if (!code) {
     pfAssetInsightActions = [];
     return '';
   }
+  _syncHoldingContext(holding);
   pfAssetInsightActions = _portfolioLinkActions(code, {
     includeInsight: false,
     includeGoldGap: !goldGap,
   });
+  if (holding?.applicable && !pfAssetInsightActions.some(action => action.id === 'holding-value')) {
+    pfAssetInsightActions.splice(Math.min(2, pfAssetInsightActions.length), 0, _holdingValueAction(code));
+  }
   if (!pfAssetInsightActions.length) return '';
   return `<div class="pf-insight-link-actions" aria-label="연결 메뉴">
     ${pfAssetInsightActions.map((action, idx) => `
@@ -274,7 +295,8 @@ function _renderAssetInsight(data) {
   );
   const positionCurrency = 'KRW';
   const goldGap = data.goldGap;
-  const actionLinks = _renderInsightActionLinks(code, goldGap);
+  const holding = data.holding || null;
+  const actionLinks = _renderInsightActionLinks(code, goldGap, holding);
   const tagPanel = _renderInsightTags(code, data.tags || [], data.tagSuggestions || []);
   const valuationYear = valuation.fiscalYear ? `${valuation.fiscalYear}년 기준` : '';
   const valuationSourceCode = valuation.sourceCode && valuation.sourceCode !== code ? `기준 ${valuation.sourceCode}` : '';
@@ -291,6 +313,9 @@ function _renderAssetInsight(data) {
       _renderInsightCard('PER', _fmtInsightMultiple(valuation.per), valuation.eps !== null && valuation.eps !== undefined ? `EPS ${_fmtInsightPrice(valuation.eps, 'KRW')}` : valuationBasis),
       _renderInsightCard('ROE', _fmtInsightPct(valuation.roe, false), valuationBasis),
       _renderInsightCard('자사주 비율', _fmtInsightPct(valuation.treasuryShareRatioPct, false), treasuryBasis),
+    ] : []),
+    ...(holding?.applicable ? [
+      _renderInsightCard('자회사 비율 추이', '연결됨', `${Number(holding.subsidiaryCount || 0).toLocaleString()}개 자회사 · Holding Value`),
     ] : []),
     _renderInsightCard('최근 3개월', _fmtInsightPct(returns['3m']), `벤치마크 대비 ${_fmtInsightPct(relativeReturns['3m'])}`, _insightClass(returns['3m'])),
     _renderInsightCard('60일 변동성', _fmtInsightPct(volatility['60d'], false), '연율화 기준'),
@@ -447,7 +472,11 @@ function _applyHoldingIntegrationConfig() {
   if (!holdingsUrl) return;
   fetch(holdingsUrl)
     .then(r => r.json())
-    .then(data => { _applyHoldingPayload(data, true); })
+    .then(data => {
+      if (_applyHoldingPayload(data, true) && typeof renderPortfolio === 'function') {
+        renderPortfolio();
+      }
+    })
     .catch(() => {});
 })();
 

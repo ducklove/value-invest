@@ -1514,6 +1514,23 @@ def _gold_gap_for_asset(code: str) -> dict | None:
     }
 
 
+def _holding_context_for_asset(code: str) -> dict | None:
+    config = integrations.build_public_integrations().get("holdingValue") or {}
+    meta = (config.get("meta") or {}).get(code)
+    if not isinstance(meta, dict):
+        return None
+    subsidiaries = meta.get("subsidiaries") or []
+    base_url = str(config.get("baseUrl") or "").rstrip("/")
+    return {
+        "applicable": True,
+        "code": code,
+        "baseUrl": base_url,
+        "url": f"{base_url}/?code={quote(code)}" if base_url else "",
+        "subsidiaryCount": len(subsidiaries),
+        "meta": meta,
+    }
+
+
 async def _fetch_insight_valuation_basis(stock_code: str) -> dict:
     return await _fetch_common_valuation_basis(stock_code, as_of=_today_kst_date())
 
@@ -1612,6 +1629,7 @@ async def asset_insight(stock_code: str, request: Request):
     position = asset_insights.calculate_position(item, quote)
     valuation = _build_insight_valuation(quote, valuation_basis)
     gold_gap = _gold_gap_for_asset(stock_code)
+    holding = _holding_context_for_asset(stock_code)
     tags_task = asyncio.create_task(cache.get_portfolio_tags(user["google_sub"], stock_code))
     tag_suggestions_task = asyncio.create_task(cache.get_portfolio_tag_suggestions(user["google_sub"]))
 
@@ -1631,6 +1649,7 @@ async def asset_insight(stock_code: str, request: Request):
         "benchmark": benchmark,
         "macro": _format_macro(indicators),
         "goldGap": gold_gap,
+        "holding": holding,
         "tags": await tags_task,
         "tagSuggestions": await tag_suggestions_task,
         "history": (history_payload.get("rows") or [])[-80:],
@@ -1910,6 +1929,45 @@ def _target_number_or_none(value) -> float | None:
     return number if number == number else None
 
 
+async def _quote_price_for_target_formula(stock_code: str) -> float | None:
+    try:
+        quote = await asyncio.wait_for(_fetch_quote(stock_code), timeout=3.5)
+    except Exception:
+        quote = _cached_quote_for_code(stock_code)
+    return _target_number_or_none((quote or {}).get("price"))
+
+
+async def _holding_value_for_target_formula(stock_code: str) -> float | None:
+    meta = (integrations.build_public_integrations().get("holdingValue") or {}).get("meta") or {}
+    item = meta.get(stock_code)
+    if not isinstance(item, dict):
+        return None
+
+    subsidiaries = item.get("subsidiaries") or []
+    if not subsidiaries:
+        return None
+
+    async def _sub_value(sub: dict) -> float | None:
+        code = str(sub.get("code") or "").strip()
+        shares = _target_number_or_none(sub.get("sharesHeld"))
+        if not code or shares is None:
+            return None
+        price = await _quote_price_for_target_formula(code)
+        if price is None:
+            return None
+        return price * shares
+
+    values = await asyncio.gather(*(_sub_value(sub) for sub in subsidiaries))
+    if any(value is None for value in values):
+        return None
+
+    total_shares = _target_number_or_none(item.get("totalShares"))
+    treasury_shares = _target_number_or_none(item.get("treasuryShares")) or 0
+    free_shares = (total_shares or 0) - treasury_shares
+    sub_total = sum(float(value) for value in values if value is not None)
+    return sub_total / free_shares if free_shares > 0 and sub_total > 0 else None
+
+
 async def _resolve_target_formula_price(stock_code: str, formula: str, avg_price: float) -> float | None:
     """Resolve a formula to a saved fallback price at edit/save time.
 
@@ -1937,12 +1995,19 @@ async def _resolve_target_formula_price(stock_code: str, formula: str, avg_price
         if "EPS" in variables:
             values["EPS"] = _target_number_or_none(basis.get("eps"))
 
+    if "보유지분" in variables:
+        values["보유지분"] = await _holding_value_for_target_formula(stock_code)
+
+    if "본주가격" in variables:
+        common_code = _common_stock_code(stock_code) if _is_korean_stock(stock_code) and _is_preferred_stock(stock_code) else ""
+        values["본주가격"] = await _quote_price_for_target_formula(common_code) if common_code and common_code != stock_code else None
+
     missing_financials = [name for name in ("BPS", "EPS") if name in variables and values.get(name) is None]
     if missing_financials:
         raise HTTPException(status_code=400, detail=f"{', '.join(missing_financials)} 값을 가져오지 못했습니다.")
 
-    # 보유지분/본주가격은 실시간 가격 의존 변수라 저장 시점 fallback 계산을
-    # 생략한다. 화면에서는 quote가 들어오면 동일 수식을 다시 평가한다.
+    # 보유지분/본주가격은 저장 시점 fallback 을 채우되, quote 를 못 얻는
+    # 경우에는 화면의 실시간 quote 도착 후 재평가에 맡긴다.
     if any(name not in values or values.get(name) is None for name in variables):
         return None
 

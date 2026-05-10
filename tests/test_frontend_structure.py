@@ -113,6 +113,21 @@ def test_portfolio_insight_modal_renders_valuation_cards():
     assert "valuation.applicable" in source
 
 
+def test_holding_target_formula_keeps_external_quotes_fresh():
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+    insights = (JS / "portfolio-insights.js").read_text(encoding="utf-8")
+
+    assert "function _syncHoldingContext(holding)" in insights
+    assert "function _holdingValueAction(stockCode)" in insights
+    assert "_renderInsightActionLinks(code, goldGap, holding)" in insights
+    assert "_renderInsightCard('자회사 비율 추이'" in insights
+    assert "function _targetFormulaUses(item, variableName)" in actions
+    assert "r.target_price == null || _targetFormulaUses(r, '보유지분')" in render
+    assert "r.target_price == null || _targetFormulaUses(r, '본주가격')" in render
+    assert "if (_applyHoldingPayload(data, true) && typeof renderPortfolio === 'function')" in insights
+
+
 def test_portfolio_edit_save_is_row_scoped_and_safe():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")

@@ -539,6 +539,10 @@ function _holdingValueForItem(item, allItems) {
   return free > 0 && subTotal > 0 ? subTotal / free : null;
 }
 
+function _targetFormulaUses(item, variableName) {
+  return String(item?.target_price_formula || '').includes(variableName);
+}
+
 function _targetFormulaVariables(item, allItems) {
   const metrics = item.target_metrics || {};
   const numberOrNull = (v) => {
