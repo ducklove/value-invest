@@ -27,6 +27,13 @@ class ClosePriceClientError(RuntimeError):
     pass
 
 
+def _fundamentals_timeout_for_count(count: int) -> float:
+    # The finance-pi fundamentals endpoint computes per-share data on demand.
+    # Batched formula lookups are much cheaper than many concurrent single
+    # calls, but they still need a wider budget than quote endpoints.
+    return max(FUNDAMENTALS_TIMEOUT_SECONDS, min(20.0, FUNDAMENTALS_TIMEOUT_SECONDS + max(0, count - 1) * 1.5))
+
+
 def _get_client_lock() -> asyncio.Lock:
     global _client_lock
     if _client_lock is None:
@@ -487,7 +494,7 @@ async def get_basic_fundamentals(
         params["fiscal_year"] = int(fiscal_year)
 
     try:
-        payload = await _get_json("/api/fundamentals/basic", params, timeout=FUNDAMENTALS_TIMEOUT_SECONDS)
+        payload = await _get_json("/api/fundamentals/basic", params, timeout=_fundamentals_timeout_for_count(len(codes)))
     except Exception as exc:
         # Fundamentals can be materially slower than price endpoints. Do not
         # trip the shared price cooldown for a fundamentals-only timeout.

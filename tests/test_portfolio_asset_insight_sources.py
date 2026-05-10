@@ -135,7 +135,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
             valuation = pf._build_insight_valuation({"price": 40000}, basis)
 
         local.assert_awaited_once()
-        self.assertEqual(local.await_args.args[0], "005930")
+        self.assertEqual(local.await_args.args[0], ["005930"])
         self.assertEqual(valuation["sourceCode"], "005930")
         self.assertEqual(valuation["per"], 8.0)
         self.assertEqual(valuation["pbr"], 0.8)

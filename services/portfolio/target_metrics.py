@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 
 from services.portfolio.identifiers import common_stock_code, is_korean_stock, is_preferred_stock
 from services.portfolio.time_windows import today_kst_date
-from services.portfolio.valuation import fetch_valuation_basis
+from services.portfolio.valuation import fetch_valuation_basis_map
 
 
 logger = logging.getLogger(__name__)
@@ -47,14 +46,13 @@ async def supplement_target_metrics(items: list[dict], target_metrics_map: dict[
 
     today = today_kst_date()
 
-    async def _fetch_one(code: str):
-        try:
-            return code, await fetch_valuation_basis(code, as_of=today)
-        except Exception as exc:
-            logger.warning("target metric valuation basis failed (%s): %s", code, exc)
-            return code, {}
+    try:
+        basis_map = await fetch_valuation_basis_map(codes, as_of=today)
+    except Exception as exc:
+        logger.warning("target metric valuation basis batch failed (%s): %s", ",".join(codes[:5]), exc)
+        return
 
-    for code, basis in await asyncio.gather(*(_fetch_one(code) for code in codes)):
+    for code, basis in basis_map.items():
         if not basis.get("applicable"):
             continue
 

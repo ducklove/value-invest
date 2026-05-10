@@ -152,7 +152,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             "eps": 1982.0,
         }
 
-        with patch.object(target_metrics_service, "fetch_valuation_basis", new=AsyncMock(return_value=shared_basis)) as shared:
+        with patch.object(target_metrics_service, "fetch_valuation_basis_map", new=AsyncMock(return_value={"037350": shared_basis})) as shared:
             await target_metrics_service.supplement_target_metrics(
                 [{"stock_code": "037350", "target_price_formula": "BPS*0.5"}],
                 target_metrics_map,
@@ -176,7 +176,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             "eps": 6675.68,
         }
 
-        with patch.object(target_metrics_service, "fetch_valuation_basis", new=AsyncMock(return_value=shared_basis)):
+        with patch.object(target_metrics_service, "fetch_valuation_basis_map", new=AsyncMock(return_value={"005930": shared_basis})):
             await target_metrics_service.supplement_target_metrics(
                 [{"stock_code": "005930", "target_price_formula": "BPS*0.5+EPS"}],
                 target_metrics_map,
