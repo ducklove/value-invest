@@ -177,19 +177,31 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     const existing = portfolioItems.find(i => i.stock_code === stockCode);
     stockName = existing ? existing.stock_name : '';
   }
+  const existingItem = portfolioItems.find(i => i.stock_code === stockCode);
   // 등록일자는 optional — 비워두면 서버가 기존 값 유지. Input[type=date]
   // 는 YYYY-MM-DD 또는 빈 문자열을 돌려주므로 그대로 전달.
   const createdAtEl = editRow.querySelector('.js-pf-edit-created-at') || document.getElementById('pfEditCreatedAt');
   const createdAt = createdAtEl ? createdAtEl.value.trim() : '';
   const body = { stock_name: stockName, quantity: qty, avg_price: price };
   if (createdAt) body.created_at = createdAt;
-  // 목표가 input — 비워두면 자동 계산으로 되돌리고, 숫자 또는
-  // BPS/EPS/DPS/보유지분/본주가격/매입가 기반 수식을 그대로 서버에 보낸다.
+  // 목표가 input — 기존 목표가/수식이 있던 값을 비우면 "표시 안 함"
+  // 으로 저장한다. 처음부터 자동 목표가였던 빈 input 은 수량/매입가
+  // 편집만으로 자동 목표가가 사라지지 않도록 payload 를 보내지 않는다.
   const tgtEl = editRow.querySelector('.js-pf-edit-target') || document.getElementById('pfEditTarget');
   if (tgtEl) {
     const tgtRaw = tgtEl.value.trim();
     const numericTarget = tgtRaw.replace(/,/g, '');
-    if (tgtRaw && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(numericTarget)) {
+    const hadExplicitTarget = !!(
+      existingItem
+      && (existingItem.target_price != null || existingItem.target_price_formula || existingItem.target_price_disabled)
+    );
+    if (!tgtRaw) {
+      if (hadExplicitTarget) {
+        body.target_price = null;
+        body.target_price_formula = null;
+        body.target_price_disabled = true;
+      }
+    } else if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(numericTarget)) {
       body.target_price = Number(numericTarget);
     } else {
       body.target_price_formula = tgtRaw;

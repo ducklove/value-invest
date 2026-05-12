@@ -468,7 +468,7 @@ function renderPortfolio() {
     const targetInputValue = r.target_price_formula ?? (r.target_price ?? '');
     const targetTooltip = _targetPriceTooltip(r);
     const targetTitle = targetTooltip ? ` title="${escapeHtml(targetTooltip)}"` : '';
-    const targetHelp = '숫자 또는 수식. 사용 가능: BPS, EPS, DPS, 보유지분, 본주가격, 매입가. 예: BPS*0.4+DPS*10';
+    const targetHelp = '숫자 또는 수식. 사용 가능: BPS, EPS, DPS, 보유지분, 본주가격, 매입가. 예: BPS*0.4+DPS*10. 기존 목표가를 비우면 -로 고정됩니다.';
 
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     const safeCode = escapeHtml(r.stock_code);

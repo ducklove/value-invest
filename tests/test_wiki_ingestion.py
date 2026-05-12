@@ -122,6 +122,8 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
     # -- target-stock selection --
 
     async def test_select_target_stocks_union(self):
+        from datetime import datetime, timedelta
+
         db = await cache.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -143,7 +145,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
         )
         await db.execute(
             "INSERT INTO user_recent_analyses (google_sub, stock_code, viewed_at) VALUES (?, ?, ?)",
-            ("u1", "035420", "2026-04-10T00:00:00"),
+            ("u1", "035420", (datetime.now() - timedelta(days=3)).isoformat()),
         )
         await db.execute(
             "INSERT INTO user_recent_analyses (google_sub, stock_code, viewed_at) VALUES (?, ?, ?)",

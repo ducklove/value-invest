@@ -150,6 +150,9 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     assert "_pfSetEditSaving(stockCode, true, editRow)" in actions
     assert "editRow?.querySelector('.js-pf-edit-qty')" in actions
     assert "editRow?.querySelector('.js-pf-edit-price')" in actions
+    assert "const hadExplicitTarget = !!(" in actions
+    assert "body.target_price_disabled = true;" in actions
+    assert "기존 목표가를 비우면 -로 고정됩니다" in render
     assert "/api/portfolio/${encodeURIComponent(stockCode)}" in actions
     assert "/api/portfolio/${encodeURIComponent(stockCode)}/benchmark" in actions
 

@@ -402,6 +402,27 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         items = await cache.get_portfolio("u1")
         self.assertIsNone(items[0]["target_price"])
 
+    async def test_target_price_disabled_clears_and_suppresses_auto_target(self):
+        await cache.save_portfolio_item(
+            "u1", "005930", "삼성전자", 100, 65000, target_price=85000.0,
+        )
+
+        await cache.save_portfolio_item(
+            "u1",
+            "005930",
+            "삼성전자",
+            100,
+            65000,
+            target_price=None,
+            target_price_formula=None,
+            target_price_disabled=True,
+        )
+
+        items = await cache.get_portfolio("u1")
+        self.assertIsNone(items[0]["target_price"])
+        self.assertIsNone(items[0]["target_price_formula"])
+        self.assertEqual(items[0]["target_price_disabled"], 1)
+
     async def test_get_trailing_dividends(self):
         """market_data 의 가장 최근 positive 배당금을 종목별로 반환.
         0 또는 NULL 인 해는 건너뛰고, 올해는 아직 공시 전일 수 있으므로
