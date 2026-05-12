@@ -116,6 +116,7 @@ async function initApp() {
   loadWikiStats();
   setInterval(loadMarketSummary, 60_000);
   setInterval(_pollBenchmarkQuotes, 60_000);
+  setInterval(_refreshActivePortfolioTodayState, 5 * 60_000);
   // Refresh wiki stats every 5 minutes so the badge reflects ongoing
   // background ingestion without needing a reload.
   setInterval(loadWikiStats, 5 * 60_000);
@@ -164,17 +165,25 @@ initApp();
 
 window.addEventListener('pageshow', () => {
   syncAuthState({ refreshRecentList: true, refreshPreference: true });
+  _refreshActivePortfolioTodayState();
 });
 
 window.addEventListener('focus', () => {
   syncAuthState({ refreshRecentList: true, refreshPreference: true });
+  _refreshActivePortfolioTodayState();
 });
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     syncAuthState({ refreshRecentList: true, refreshPreference: true });
+    _refreshActivePortfolioTodayState();
   }
 });
+
+function _refreshActivePortfolioTodayState() {
+  if (activeView !== 'portfolio' || !currentUser || typeof pfRefreshTodayState !== 'function') return;
+  pfRefreshTodayState({ force: true }).catch(() => {});
+}
 
 window.addEventListener('resize', () => {
   Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });

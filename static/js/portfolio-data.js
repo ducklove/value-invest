@@ -1,6 +1,7 @@
 // Portfolio data loading, sorting/filtering state, and in-place quote row updates.
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 let _pfNavHistoryPromise = null;
+let _pfTodayStatePromise = null;
 const _PF_PORTFOLIO_SNAPSHOT_KEY = 'valueInvestPortfolioSnapshot:v2';
 
 async function pfLoadNavHistory({ force = false } = {}) {
@@ -16,6 +17,33 @@ async function pfLoadNavHistory({ force = false } = {}) {
     _pfNavHistoryPromise = null;
   });
   return _pfNavHistoryPromise;
+}
+
+async function pfRefreshTodayState({ force = false, render = true } = {}) {
+  if (_pfTodayStatePromise && !force) return _pfTodayStatePromise;
+  _pfTodayStatePromise = (async () => {
+    const [snapshotResult, intradayResult] = await Promise.allSettled([
+      apiFetch('/api/portfolio/prev-day-snapshot', { cache: 'no-store' }),
+      apiFetch('/api/portfolio/intraday', { cache: 'no-store' }),
+    ]);
+    let updated = false;
+    if (snapshotResult.status === 'fulfilled' && snapshotResult.value.ok) {
+      pfPrevDaySnapshot = await snapshotResult.value.json();
+      updated = true;
+    }
+    if (intradayResult.status === 'fulfilled' && intradayResult.value.ok) {
+      pfIntradayData = await intradayResult.value.json();
+      updated = true;
+    }
+    if (updated && render) renderPortfolio();
+    return { updated };
+  })().catch(e => {
+    console.warn(e);
+    return { updated: false };
+  }).finally(() => {
+    _pfTodayStatePromise = null;
+  });
+  return _pfTodayStatePromise;
 }
 
 async function loadPortfolio() {
@@ -46,12 +74,9 @@ async function loadPortfolio() {
         pfBenchmarkQuotes[k] = { ...(pfBenchmarkQuotes[k] || {}), name: v };
       }
     } catch (e) { console.warn(e); }
-    // Fetch benchmark quotes in background (don't block initial render)
-    apiFetch('/api/portfolio/prev-day-snapshot').then(async r => {
-      if (!r.ok) return;
-      pfPrevDaySnapshot = await r.json();
-      renderPortfolio();
-    }).catch(() => {});
+    // Refresh the 22:00 settlement baseline in the background. Open tabs can
+    // otherwise keep yesterday's in-memory TODAY baseline until a full reload.
+    pfRefreshTodayState().catch(() => {});
     apiFetch('/api/portfolio/month-end-value').then(async r => {
       if (!r.ok) return;
       const snap = await r.json();
@@ -67,11 +92,6 @@ async function loadPortfolio() {
       renderPortfolio();
     }).catch(() => {});
     pfLoadNavHistory({ force: true }).then(() => {
-      renderPortfolio();
-    }).catch(() => {});
-    apiFetch('/api/portfolio/intraday').then(async r => {
-      if (!r.ok) return;
-      pfIntradayData = await r.json();
       renderPortfolio();
     }).catch(() => {});
     apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
