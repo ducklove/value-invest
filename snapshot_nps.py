@@ -4,15 +4,17 @@ import asyncio
 import html
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import cache
-from nps_scraper import fetch_nps_holdings, resolve_stock_codes
+import close_price_client
+from nps_scraper import PUBLIC_NPS_PAGE_URL, fetch_nps_holdings, resolve_stock_codes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 BASE_NAV = 1000.0
+NPS_PRICE_BATCH_SIZE = 400
 
 
 def _esc(text: str) -> str:
@@ -52,34 +54,114 @@ def _pct_color_class(val: float | None) -> str:
     return "nps-up" if val > 0 else "nps-down"
 
 
-async def _fetch_quotes_for_holdings(holdings: list[dict]) -> list[dict]:
-    """Fetch closing price + change_pct for each holding that has a stock_code."""
-    from routes.portfolio import _fetch_quote
+def _chunks(items: list[str], size: int) -> list[list[str]]:
+    return [items[i:i + size] for i in range(0, len(items), size)]
 
+
+async def _fetch_daily_price_rows(
+    codes: list[str],
+    *,
+    until: str,
+    lookback_days: int,
+) -> dict[str, list[dict]]:
+    """Fetch daily price rows in finance-pi batches.
+
+    The public NPS universe has about 1,200 rows, so the old per-stock quote
+    path would take minutes. finance-pi's batched daily endpoint keeps snapshot
+    generation bounded to a few requests and lets the UI serve cached HTML.
+    """
+    unique_codes = [c for c in dict.fromkeys(codes) if c]
+    if not unique_codes:
+        return {}
+    since = (date.fromisoformat(until) - timedelta(days=lookback_days)).isoformat()
+
+    async def _one(chunk: list[str]) -> dict[str, list[dict]]:
+        try:
+            return await close_price_client.get_daily_prices_batch(
+                chunk,
+                since=since,
+                until=until,
+                fields=("close", "volume", "trading_value"),
+            )
+        except Exception as exc:
+            logger.warning("NPS: batched daily price load failed for %d codes: %s", len(chunk), exc)
+            return {}
+
+    batches = await asyncio.gather(*[_one(chunk) for chunk in _chunks(unique_codes, NPS_PRICE_BATCH_SIZE)])
+    merged: dict[str, list[dict]] = {}
+    for batch in batches:
+        for code, rows in batch.items():
+            if rows:
+                merged[code] = rows
+    return merged
+
+
+def _latest_and_prev_close(rows: list[dict]) -> tuple[float | None, float | None]:
+    valid = [r for r in rows if r.get("close") is not None]
+    if not valid:
+        return None, None
+    latest = valid[-1]["close"]
+    prev = valid[-2]["close"] if len(valid) >= 2 else None
+    return float(latest), float(prev) if prev is not None else None
+
+
+async def _derive_public_data_shares(holdings: list[dict]) -> None:
+    source_holdings = [
+        h for h in holdings
+        if h.get("source_market_value") and h.get("stock_code") and not h.get("shares")
+    ]
+    if not source_holdings:
+        return
+
+    source_dates = sorted({h.get("source_date") for h in source_holdings if h.get("source_date")})
+    for source_date in source_dates:
+        subset = [h for h in source_holdings if h.get("source_date") == source_date]
+        rows_by_code = await _fetch_daily_price_rows(
+            [h["stock_code"] for h in subset],
+            until=source_date,
+            lookback_days=20,
+        )
+        derived = 0
+        for h in subset:
+            price, _ = _latest_and_prev_close(rows_by_code.get(h["stock_code"], []))
+            source_market_value = h.get("source_market_value")
+            if price and source_market_value:
+                h["shares"] = max(1, round(float(source_market_value) / price))
+                h["source_price"] = price
+                h["shares_source"] = "public_value_div_year_end_close"
+                derived += 1
+        logger.info("NPS: derived shares for %d/%d public-data holdings (%s)", derived, len(subset), source_date)
+
+
+async def _fetch_quotes_for_holdings(holdings: list[dict], snap_date: str) -> list[dict]:
+    """Fetch closing price + change_pct for each holding that has a stock_code."""
+    await _derive_public_data_shares(holdings)
+
+    codes = [h.get("stock_code", "") for h in holdings if h.get("stock_code")]
+    rows_by_code = await _fetch_daily_price_rows(codes, until=snap_date, lookback_days=10)
     enriched = []
     for h in holdings:
         code = h.get("stock_code", "")
-        if not code:
-            h["price"] = None
-            h["change_pct"] = None
-            h["market_value"] = None
-            enriched.append(h)
-            continue
-        try:
-            q = await _fetch_quote(code)
-            price = q.get("price") if q else None
-            change_pct = q.get("change_pct") if q else None
-        except Exception as e:
-            logger.warning("Quote fetch failed for %s: %s", code, e)
-            price = None
-            change_pct = None
-        shares = h.get("shares", 0)
-        market_value = round(price * shares) if price is not None else None
+        price = None
+        prev_price = None
+        if code:
+            price, prev_price = _latest_and_prev_close(rows_by_code.get(code, []))
+        shares = h.get("shares", 0) or 0
+        source_market_value = h.get("source_market_value")
+        change_pct = None
+        if price is not None and prev_price:
+            change_pct = (price / prev_price - 1) * 100
+        if price is not None and shares:
+            market_value = round(price * shares)
+        elif source_market_value:
+            market_value = source_market_value
+        else:
+            market_value = None
+
         h["price"] = price
         h["change_pct"] = change_pct
         h["market_value"] = market_value
         enriched.append(h)
-        await asyncio.sleep(0.25)  # rate limit
     return enriched
 
 
@@ -350,7 +432,7 @@ def _build_html(
         <th class="pf-col-name pf-sortable" data-sort="name" onclick="npsSort('name')" style="cursor:pointer">종목명</th>
         <th class="pf-col-num pf-sortable" data-sort="change" onclick="npsSort('change')" style="cursor:pointer">등락률</th>
         <th class="pf-col-num">현재가</th>
-        <th class="pf-col-num">수량</th>
+        <th class="pf-col-num">추정수량</th>
         <th class="pf-col-num pf-sortable" data-sort="mv" onclick="npsSort('mv')" style="cursor:pointer">평가금액 ▼</th>
         <th class="pf-col-num">비중</th>
         <th class="pf-col-num pf-sortable" data-sort="own" onclick="npsSort('own')" style="cursor:pointer">지분율</th>
@@ -690,9 +772,20 @@ def _build_html(
 </script>
 """
 
+    source_dates = sorted({h.get("source_date") for h in holdings if h.get("source_date")})
+    source_date_label = source_dates[-1] if source_dates else ""
+    source_note = (
+        f"공공데이터포털 국민연금공단 국내주식 투자정보"
+        f"{' ' + source_date_label + ' 연도말' if source_date_label else ''}"
+        " 평가액을 기본 원천으로 사용하고, 연도말 종가로 추정수량을 환산한 뒤 현재 종가로 재평가합니다."
+    )
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     header_html = f"""<div style="color:var(--text-secondary);font-size:12px;margin-bottom:16px;">
-  국민연금공단 주식 보유 현황 · 기준일 {_esc(snap_date)} · 생성 {_esc(generated_at)}
+  국민연금공단 국내주식 투자정보 · 기준일 {_esc(snap_date)} · 생성 {_esc(generated_at)}
+</div>
+<div class="nps-source-note" style="margin:-6px 0 18px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-muted, rgba(148,163,184,.10));color:var(--text-secondary);font-size:12px;line-height:1.55;">
+  {_esc(source_note)}
+  <a href="{_esc(PUBLIC_NPS_PAGE_URL)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);text-decoration:none;">원천 보기</a>
 </div>
 """
 
@@ -816,7 +909,7 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
     holdings = await resolve_stock_codes(raw_holdings)
 
     # 3. Fetch closing prices
-    holdings = await _fetch_quotes_for_holdings(holdings)
+    holdings = await _fetch_quotes_for_holdings(holdings, snap_date)
 
     # 3-1. Cross-check: carry forward previous-day holdings missing from scrape
     #       Skip if the code was already missing for 2+ consecutive days (likely sold)
@@ -850,8 +943,10 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
         if dropped:
             logger.info("NPS: %d개 종목 2일+ 연속 누락으로 제거 확정", dropped)
 
-    # Filter to those with valid market values; keep unknowns too but mark them
-    valid = [h for h in holdings if h.get("market_value") is not None]
+    # Filter to resolved listed stocks with valid market values. Unresolved
+    # public-data names cannot be priced reliably, so keep totals aligned with
+    # what the UI and DB can actually display.
+    valid = [h for h in holdings if h.get("stock_code") and h.get("market_value") is not None]
     total_value = sum(h["market_value"] for h in valid)
     logger.info("NPS: total_value=%.0f from %d/%d holdings", total_value, len(valid), len(holdings))
 
@@ -910,8 +1005,8 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
     db_items = []
     for h in holdings:
         code = h.get("stock_code")
-        if not code or len(code) != 6 or not code.isdigit():
-            continue  # Skip non-KOSPI/KOSDAQ (must be 6 digits)
+        if not code or len(code) != 6 or not code.isalnum():
+            continue  # Skip non-KRX symbols (KRX listed codes are 6 chars)
         db_items.append({
             "stock_code": code,
             "stock_name": h.get("name", ""),
@@ -920,6 +1015,10 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
             "price": h.get("price"),
             "market_value": h.get("market_value"),
             "change_pct": h.get("change_pct"),
+            "source": h.get("source"),
+            "source_date": h.get("source_date"),
+            "source_market_value": h.get("source_market_value"),
+            "shares_source": h.get("shares_source"),
         })
 
     await cache.save_nps_holdings(snap_date, db_items)

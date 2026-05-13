@@ -2807,6 +2807,7 @@ async def delete_old_intraday(days_to_keep: int = 7):
 
 async def save_nps_holdings(date: str, items: list[dict]):
     db = await get_db()
+    await db.execute("DELETE FROM nps_holdings WHERE date = ?", (date,))
     await db.executemany(
         """INSERT OR REPLACE INTO nps_holdings
         (date, stock_code, stock_name, shares, ownership_pct, price, market_value, change_pct)
