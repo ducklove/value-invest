@@ -1,6 +1,7 @@
 // Portfolio holdings table rendering, formatting helpers, sparklines, benchmark labels.
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
-function renderPortfolio() {
+function renderPortfolio(options = {}) {
+  const summaryOnly = !!(options && options.summaryOnly);
   _pfRenderColToggles();
   const tbody = document.getElementById('pfBody');
   const tfoot = document.getElementById('pfFoot');
@@ -10,7 +11,7 @@ function renderPortfolio() {
 
   // Show/hide filter bar and update counts
   const filterBar = document.getElementById('pfFilterBar');
-  if (filterBar) {
+  if (filterBar && !summaryOnly) {
     filterBar.style.display = portfolioItems.length ? 'flex' : 'none';
     if (portfolioItems.length && pfGroups.length) {
       const counts = {};
@@ -61,9 +62,11 @@ function renderPortfolio() {
   }
 
   if (!portfolioItems.length) {
-    table.style.display = 'none';
-    empty.style.display = 'block';
-    empty.textContent = '포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.';
+    if (!summaryOnly) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      empty.textContent = '포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.';
+    }
     summary.innerHTML = '';
     return;
   }
@@ -122,30 +125,32 @@ function renderPortfolio() {
   // 번째 패스에서 일괄 부여. 외부 quote (포트폴리오에 없는 보통주 /
   // 자회사) 가 필요한 종목들의 코드를 한 번에 모아 백그라운드 fetch.
   // 응답 도착 시 renderPortfolio 재호출되어 자동 갱신.
-  const _externalCodesNeeded = new Set();
-  const _portCodes = new Set(allRows.map(r => r.stock_code));
-  for (const r of allRows) {
-    // 우선주: 보통주 quote 가 포트폴리오에 없으면 외부 fetch 필요
-    if ((r.target_price == null || _targetFormulaUses(r, '본주가격')) && _isPreferredStock(r.stock_code)) {
-      const commonCode = r.stock_code.slice(0, -1) + '0';
-      if (!_portCodes.has(commonCode)) _externalCodesNeeded.add(commonCode);
-    }
-    // 지주사: 자회사 quote 들
-    const meta = _HOLDING_META[r.stock_code];
-    if (meta && (r.target_price == null || _targetFormulaUses(r, '보유지분'))) {
-      for (const sub of meta.subsidiaries || []) {
-        if (sub.code && !_portCodes.has(sub.code)) _externalCodesNeeded.add(sub.code);
+  if (!summaryOnly) {
+    const _externalCodesNeeded = new Set();
+    const _portCodes = new Set(allRows.map(r => r.stock_code));
+    for (const r of allRows) {
+      // 우선주: 보통주 quote 가 포트폴리오에 없으면 외부 fetch 필요
+      if ((r.target_price == null || _targetFormulaUses(r, '본주가격')) && _isPreferredStock(r.stock_code)) {
+        const commonCode = r.stock_code.slice(0, -1) + '0';
+        if (!_portCodes.has(commonCode)) _externalCodesNeeded.add(commonCode);
+      }
+      // 지주사: 자회사 quote 들
+      const meta = _HOLDING_META[r.stock_code];
+      if (meta && (r.target_price == null || _targetFormulaUses(r, '보유지분'))) {
+        for (const sub of meta.subsidiaries || []) {
+          if (sub.code && !_portCodes.has(sub.code)) _externalCodesNeeded.add(sub.code);
+        }
       }
     }
-  }
-  if (_externalCodesNeeded.size) _ensureExternalQuotes([..._externalCodesNeeded]);
+    if (_externalCodesNeeded.size) _ensureExternalQuotes([..._externalCodesNeeded]);
 
-  for (const r of allRows) {
-    r.targetPrice = _computeTargetPrice(r, allRows);
-    r.targetSource = _targetPriceSource(r);
-    r.achievementPct = (r.targetPrice != null && r.targetPrice > 0 && r.price != null)
-      ? (r.price / r.targetPrice * 100)
-      : null;
+    for (const r of allRows) {
+      r.targetPrice = _computeTargetPrice(r, allRows);
+      r.targetSource = _targetPriceSource(r);
+      r.achievementPct = (r.targetPrice != null && r.targetPrice > 0 && r.price != null)
+        ? (r.price / r.targetPrice * 100)
+        : null;
+    }
   }
 
   // Check if all quotes are loaded
@@ -159,14 +164,18 @@ function renderPortfolio() {
   const rows = pfGroupFilter === null ? allRows : allRows.filter(r => pfGroupFilter.has(pfGetGroup(r)));
 
   if (!rows.length) {
-    table.style.display = 'none';
-    empty.style.display = 'block';
-    empty.textContent = '해당 분류의 종목이 없습니다.';
+    if (!summaryOnly) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      empty.textContent = '해당 분류의 종목이 없습니다.';
+    }
     summary.innerHTML = '';
     return;
   }
-  table.style.display = 'table';
-  empty.style.display = 'none';
+  if (!summaryOnly) {
+    table.style.display = 'table';
+    empty.style.display = 'none';
+  }
 
   let totalInvested = 0, totalMarketValue = 0, totalDailyPnl = 0, totalDividend = 0;
   rows.forEach(r => {
@@ -177,7 +186,7 @@ function renderPortfolio() {
   });
 
   // Sort rows: group sort (primary, if on) + column sort (secondary)
-  if (pfGroupSort || pfSortKey) {
+  if (!summaryOnly && (pfGroupSort || pfSortKey)) {
     const grpOrder = {};
     if (pfGroupSort) pfGroups.forEach((g, i) => grpOrder[g.group_name] = i);
     rows.sort((a, b) => {
@@ -217,7 +226,7 @@ function renderPortfolio() {
       return 0;
     });
   }
-  if (pfEditingCode) {
+  if (!summaryOnly && pfEditingCode) {
     const idx = rows.findIndex(r => r.stock_code === pfEditingCode);
     if (idx > 0) {
       const [editing] = rows.splice(idx, 1);
@@ -226,18 +235,20 @@ function renderPortfolio() {
   }
 
   // Update sort arrows in header
-  document.querySelectorAll('.pf-sortable').forEach(th => {
-    const key = th.dataset.sort;
-    const existing = th.querySelector('.pf-sort-arrow');
-    if (existing) existing.remove();
-    const isActive = key === 'group' ? pfGroupSort : pfSortKey === key;
-    if (isActive) {
-      const arrow = document.createElement('span');
-      arrow.className = 'pf-sort-arrow';
-      arrow.textContent = key === 'group' ? ' \u25BC' : (pfSortAsc ? ' \u25B2' : ' \u25BC');
-      th.appendChild(arrow);
-    }
-  });
+  if (!summaryOnly) {
+    document.querySelectorAll('.pf-sortable').forEach(th => {
+      const key = th.dataset.sort;
+      const existing = th.querySelector('.pf-sort-arrow');
+      if (existing) existing.remove();
+      const isActive = key === 'group' ? pfGroupSort : pfSortKey === key;
+      if (isActive) {
+        const arrow = document.createElement('span');
+        arrow.className = 'pf-sort-arrow';
+        arrow.textContent = key === 'group' ? ' \u25BC' : (pfSortAsc ? ' \u25B2' : ' \u25BC');
+        th.appendChild(arrow);
+      }
+    });
+  }
 
   // FX helper: convert KRW value using a specific snapshot's FX rate, or current rate
   const _isUsd = pfCurrency === 'USD' && pfFxRate && pfFxRate > 0;
@@ -427,6 +438,7 @@ function renderPortfolio() {
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
   _renderSummarySparklines(_l ? grandTotalMarketValue : null);
+  if (summaryOnly) return;
 
   // Table body — apply FX conversion to price columns
   const _fp = pfFmtPortfolioValue;

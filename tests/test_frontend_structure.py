@@ -226,3 +226,17 @@ def test_performance_tab_includes_group_weight_trend():
     assert "areaStyle: { opacity:" in trends
     assert "stack: series.stack || null" in chart
     assert "stackedIndexes.add(seriesIdx)" in chart
+
+
+def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
+    app = (JS / "app-main.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+
+    assert "function _queuePortfolioSummaryRender()" in app
+    assert "renderPortfolio({ summaryOnly: true })" in app
+    assert "_queuePortfolioSummaryRender();" in app
+    assert "if (_pfDeferredRenderTimer) return;" in app
+    assert "clearTimeout(_pfDeferredRenderTimer)" not in app
+    assert "function renderPortfolio(options = {})" in render
+    assert "const summaryOnly = !!(options && options.summaryOnly);" in render
+    assert "if (summaryOnly) return;" in render

@@ -12,20 +12,33 @@ function _updateQuoteSubscriptions() {
 
 let _pfQuotePaintQueued = false;
 let _pfDeferredRenderTimer = null;
+let _pfSummaryRenderQueued = false;
 const _pfQuoteQueuedCodes = new Set();
 const _pfBenchmarkQueuedCodes = new Set();
 const _pfFlashQueuedCodes = new Set();
 
 function _schedulePortfolioDeferredRender(delay = 1200) {
   if (pfEditingCode) return;
-  clearTimeout(_pfDeferredRenderTimer);
+  if (_pfDeferredRenderTimer) return;
   _pfDeferredRenderTimer = setTimeout(() => {
+    _pfDeferredRenderTimer = null;
     if (typeof _pfIsPointerInteractionActive === 'function' && _pfIsPointerInteractionActive()) {
       _schedulePortfolioDeferredRender(350);
       return;
     }
     renderPortfolio();
   }, delay);
+}
+
+function _queuePortfolioSummaryRender() {
+  if (_pfSummaryRenderQueued) return;
+  _pfSummaryRenderQueued = true;
+  requestAnimationFrame(() => {
+    _pfSummaryRenderQueued = false;
+    if (activeView === 'portfolio' && typeof renderPortfolio === 'function') {
+      renderPortfolio({ summaryOnly: true });
+    }
+  });
 }
 
 function _paintPortfolioQuoteUpdates() {
@@ -40,6 +53,7 @@ function _paintPortfolioQuoteUpdates() {
   });
   benchmarkCodes.forEach(updatePortfolioBenchmarkCells);
   _pfFlashQueuedCodes.clear();
+  _queuePortfolioSummaryRender();
   _schedulePortfolioDeferredRender();
 }
 
