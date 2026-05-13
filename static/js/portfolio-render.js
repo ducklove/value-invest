@@ -318,24 +318,29 @@ function renderPortfolio(options = {}) {
 
   // --- Compute current NAV ---
   const latestSnap = pfNavHistory.length ? pfNavHistory[pfNavHistory.length - 1] : null;
-  // Snapshots are dated in server local time (KST). Use browser LOCAL date
-  // so the comparison isn't off by a day between 00:00–09:00 KST (when UTC
-  // date is still the previous day and toISOString() would mis-stale-check).
-  const _d = new Date();
-  const _today = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
-  const _snapIsStale = latestSnap && latestSnap.date < _today;
-  const _curNavKrw = (_snapIsStale && latestSnap.total_units && grandTotalMarketValue > 0)
-    ? grandTotalMarketValue / latestSnap.total_units
+  const _liveNavValueKrw = (!isFiltered && pfPrevDaySnapshot && pfPrevDaySnapshot.today_net_cashflow)
+    ? grandTotalMarketValue - Number(pfPrevDaySnapshot.today_net_cashflow || 0)
+    : grandTotalMarketValue;
+  const _curNavKrw = (latestSnap && latestSnap.total_units && _liveNavValueKrw > 0)
+    ? _liveNavValueKrw / latestSnap.total_units
     : (latestSnap ? latestSnap.nav : null);
   const curNav = _navAdj(_curNavKrw, pfFxRate);
 
   // --- Daily return ---
+  const _dailyBaseValue = _periodBaseValue(pfPrevDaySnapshot);
   const _daily = _periodReturn(pfPrevDaySnapshot, 'nav');
   let dailyNavPct = _daily.pct;
   let totalDailyPnlDisplay = _daily.pnl ?? 0;
   // Subtract cashflow for daily (whole portfolio only)
   if (!isFiltered && pfPrevDaySnapshot && pfPrevDaySnapshot.today_net_cashflow) {
     totalDailyPnlDisplay -= _fxConv(pfPrevDaySnapshot.today_net_cashflow, null);
+  }
+  if (!isFiltered && _dailyBaseValue && _dailyBaseValue > 0) {
+    // Keep the headline % and amount on the same 22:00 settlement basis.
+    // After the 22:00 snapshot, latestSnap.nav equals the baseline NAV, so a
+    // pure snapshot NAV comparison stays at 0.00% even while live ticks move
+    // the amount. Use the cashflow-adjusted live PnL over the same base value.
+    dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;
   }
   // Do not fall back to quote previous-close math for filtered TODAY. The
   // table footer intentionally uses quote-session 등락률, but the TODAY card

@@ -50,6 +50,15 @@ def test_today_card_does_not_fallback_to_quote_session_return():
     assert forbidden not in source, "TODAY card must stay on the 22:00 settlement baseline, not quote-session math"
 
 
+def test_today_card_percent_uses_same_settlement_base_as_amount():
+    source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+
+    assert "const _dailyBaseValue = _periodBaseValue(pfPrevDaySnapshot);" in source
+    assert "dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;" in source
+    assert "const _liveNavValueKrw" in source
+    assert "grandTotalMarketValue - Number(pfPrevDaySnapshot.today_net_cashflow || 0)" in source
+
+
 def test_trade_value_column_uses_two_decimal_compact_format():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     assert "function fmtTradingValueKrw(n)" in source
