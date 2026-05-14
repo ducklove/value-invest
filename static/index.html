@@ -218,13 +218,27 @@ function trackEvent(name, params = {}) {
     <div class="pf-filter-bar" id="pfFilterBar"></div>
 
     <div class="pf-add-bar">
-      <input class="pf-add-input" id="pfAddInput" placeholder="종목코드 또는 종목명 (예: 005930, 삼성전자)" autocomplete="off">
-      <div class="dropdown pf-dropdown" id="pfDropdown"></div>
-      <button class="pf-add-btn" id="pfAddBtn" type="button">등록</button>
+      <div class="pf-search-wrap">
+        <input class="pf-search-input" id="pfSearchInput" placeholder="보유 종목 검색 (종목명, 코드, 그룹, 태그)" autocomplete="off">
+        <button class="pf-search-clear" id="pfSearchClear" type="button" title="검색어 지우기" aria-label="검색어 지우기">×</button>
+        <div class="pf-search-meta" id="pfSearchMeta"></div>
+      </div>
+      <button class="pf-add-toggle" id="pfAddToggle" type="button" aria-expanded="false" aria-controls="pfAddPanel">개별 등록</button>
       <button class="pf-csv-toggle" id="pfCsvToggle" type="button" onclick="toggleCsvPanel()">일괄 등록</button>
       <!-- 영역지도는 메인 뷰에서 상시 띄우기엔 공간만 먹어 팝업으로.
            클릭 시 pfOpenTreemap() 이 모달을 띄우고 ECharts 렌더. -->
       <button class="pf-treemap-btn" type="button" onclick="pfOpenTreemap()" title="영역지도로 보기">🗺️ 영역지도</button>
+    </div>
+    <div class="pf-add-panel" id="pfAddPanel" style="display:none;">
+      <div class="pf-add-panel-head">
+        <strong>개별 종목 등록</strong>
+        <span>종목명이나 코드를 입력하고 선택하면 기본값으로 추가한 뒤 바로 수정모드가 열립니다.</span>
+      </div>
+      <div class="pf-add-panel-form">
+        <input class="pf-add-input" id="pfAddInput" placeholder="종목코드 또는 종목명 (예: 005930, 삼성전자)" autocomplete="off">
+        <div class="dropdown pf-dropdown" id="pfDropdown"></div>
+        <button class="pf-add-btn" id="pfAddBtn" type="button">등록</button>
+      </div>
     </div>
     <div class="pf-csv-panel" id="pfCsvPanel" style="display:none;">
       <textarea class="pf-csv-input" id="pfCsvInput" rows="6" placeholder="종목코드,매입가,수량 (한 줄에 하나씩)&#10;005930,65000,100&#10;00088K,7000,200"></textarea>

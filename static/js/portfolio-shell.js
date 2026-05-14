@@ -11,6 +11,7 @@ let pfSortKey = 'marketValue';
 let pfSortAsc = false;
 let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
+let pfPortfolioSearchText = '';
 let pfGroupSort = true;   // independent group sort toggle
 let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
 let pfMonthEndSnap = null; // {total_value, nav, fx_usdkrw, ...} at end of previous month

@@ -311,9 +311,64 @@ async function deletePortfolioItem(stockCode) {
   } catch (e) { showToast(e.message); }
 }
 
-// Portfolio add - search
+function pfSetAddPanelOpen(open) {
+  const panel = document.getElementById('pfAddPanel');
+  const toggle = document.getElementById('pfAddToggle');
+  const input = document.getElementById('pfAddInput');
+  const dropdown = document.getElementById('pfDropdown');
+  if (!panel) return;
+  panel.style.display = open ? 'block' : 'none';
+  if (toggle) {
+    toggle.classList.toggle('active', open);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  if (!open) {
+    if (dropdown) dropdown.classList.remove('show');
+    if (input) input.value = '';
+    return;
+  }
+  setTimeout(() => input?.focus(), 0);
+}
+
+function pfToggleAddPanel() {
+  const panel = document.getElementById('pfAddPanel');
+  pfSetAddPanelOpen(!(panel && panel.style.display !== 'none'));
+}
+
+function pfInitPortfolioTextSearch() {
+  const input = document.getElementById('pfSearchInput');
+  const clear = document.getElementById('pfSearchClear');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    pfSetPortfolioSearchText(input.value);
+    if (clear) clear.style.display = input.value.trim() ? 'inline-flex' : 'none';
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      input.value = '';
+      if (clear) clear.style.display = 'none';
+      pfSetPortfolioSearchText('');
+      input.blur();
+    }
+  });
+  if (clear) {
+    clear.style.display = input.value.trim() ? 'inline-flex' : 'none';
+    clear.addEventListener('click', () => {
+      input.value = '';
+      clear.style.display = 'none';
+      pfSetPortfolioSearchText('');
+      input.focus();
+    });
+  }
+}
+
+// Portfolio add - search inside the individual registration panel.
 (function initPfSearch() {
   document.addEventListener('DOMContentLoaded', () => {
+    pfInitPortfolioTextSearch();
+    const addToggle = document.getElementById('pfAddToggle');
+    if (addToggle) addToggle.addEventListener('click', pfToggleAddPanel);
+
     const input = document.getElementById('pfAddInput');
     const dropdown = document.getElementById('pfDropdown');
     if (!input || !dropdown) return;
@@ -441,6 +496,7 @@ async function deletePortfolioItem(stockCode) {
 async function pfAddFromSearch(code, name) {
   document.getElementById('pfDropdown').classList.remove('show');
   document.getElementById('pfAddInput').value = '';
+  pfSetAddPanelOpen(false);
   let resolvedCode = String(code || '').trim();
   let resolvedName = String(name || '').trim();
   try {

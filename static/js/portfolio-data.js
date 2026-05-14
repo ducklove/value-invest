@@ -169,6 +169,29 @@ function pfGetTags(item) {
   return Array.isArray(item?.tags) ? item.tags : [];
 }
 
+function pfNormalizeSearchText(value) {
+  return String(value || '').trim().toLowerCase().replace(/^#/, '');
+}
+
+function pfRowMatchesSearch(item, query = pfPortfolioSearchText) {
+  const text = pfNormalizeSearchText(query);
+  if (!text) return true;
+  const tokens = text.split(/[\s,]+/).map(t => t.trim()).filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = [
+    item?.stock_name,
+    item?.stock_code,
+    pfGetGroup(item),
+    ...pfGetTags(item),
+  ].map(v => String(v || '').toLowerCase()).join(' ');
+  return tokens.every(token => haystack.includes(token));
+}
+
+function pfSetPortfolioSearchText(value) {
+  pfPortfolioSearchText = String(value || '').trim();
+  renderPortfolio();
+}
+
 function _renderPortfolioRowTags(tags) {
   const safeTags = Array.isArray(tags) ? tags.filter(Boolean).slice(0, 3) : [];
   if (!safeTags.length) return '';

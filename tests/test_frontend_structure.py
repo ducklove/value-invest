@@ -124,6 +124,26 @@ def test_portfolio_insight_modal_renders_valuation_cards():
     assert "valuation.applicable" in source
 
 
+def test_portfolio_search_and_registration_are_separate_controls():
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+
+    assert 'id="pfSearchInput"' in html
+    assert 'id="pfAddToggle"' in html
+    assert 'id="pfAddPanel"' in html
+    assert html.find('id="pfAddToggle"') < html.find('id="pfCsvToggle"')
+    assert 'let pfPortfolioSearchText' in shell
+    assert "function pfRowMatchesSearch" in data
+    assert "...pfGetTags(item)" in data
+    assert "function pfSetAddPanelOpen" in actions
+    assert "pfInitPortfolioTextSearch()" in actions
+    assert "pfSearchMeta" in render
+    assert "검색 결과가 없습니다." in render
+
+
 def test_holding_target_formula_keeps_external_quotes_fresh():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")

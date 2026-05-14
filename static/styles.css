@@ -1753,17 +1753,39 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   position: relative; margin-bottom: 16px;
   display: flex; align-items: center; gap: 10px;
 }
+.pf-search-wrap {
+  flex: 1; max-width: 560px; position: relative;
+}
+.pf-search-input {
+  width: 100%; padding: 10px 42px 10px 14px; border: 1px solid var(--border); border-radius: 10px;
+  font-size: 14px; background: var(--input-bg); color: var(--text); outline: none;
+}
+.pf-search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+.pf-search-clear {
+  position: absolute; right: 8px; top: 7px; width: 26px; height: 26px; align-items: center; justify-content: center;
+  border: none; border-radius: 999px; background: transparent; color: var(--text-secondary); cursor: pointer; display: none;
+  font-size: 16px; line-height: 1;
+}
+.pf-search-clear:hover { background: var(--border); color: var(--text); }
+.pf-search-meta {
+  position: absolute; left: 2px; top: calc(100% + 3px); font-size: 11px; color: var(--text-secondary);
+}
 .pf-add-input {
   flex: 1; max-width: 500px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px;
   font-size: 14px; background: var(--input-bg); color: var(--text); outline: none;
 }
 .pf-add-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+.pf-add-toggle,
 .pf-csv-toggle {
   margin-left: auto; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 600;
   cursor: pointer; transition: color 0.15s; white-space: nowrap; flex-shrink: 0;
 }
-.pf-csv-toggle:hover { color: var(--text); }
+.pf-add-toggle { margin-left: auto; }
+.pf-csv-toggle { margin-left: 0; }
+.pf-add-toggle:hover,
+.pf-csv-toggle:hover,
+.pf-add-toggle.active { color: var(--text); border-color: var(--primary); }
 /* Primary "등록" button — sits right after the add-input so users don't
    have to rely on Enter or clicking a dropdown item. margin-left auto is
    NOT applied here so this button stays adjacent to the input; csv
@@ -1776,6 +1798,20 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-add-btn:hover { opacity: 0.88; }
 .pf-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.pf-add-panel {
+  margin: -6px 0 14px; padding: 14px; border: 1px solid var(--border); border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--primary) 8%);
+  max-width: 680px;
+}
+.pf-add-panel-head {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.pf-add-panel-head strong { font-size: 13px; color: var(--text); }
+.pf-add-panel-head span { font-size: 12px; color: var(--text-secondary); }
+.pf-add-panel-form {
+  position: relative; display: flex; align-items: center; gap: 8px;
+}
+.pf-add-panel-form .pf-add-input { max-width: none; }
 .pf-csv-panel {
   margin-top: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 10px;
   background: var(--surface); max-width: 500px;
@@ -1993,6 +2029,15 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   /* 모바일에선 영역지도 버튼 숨김 — 작은 화면에서 treemap 은 가독성이
      떨어지고, add-bar 가 한 줄에 들어가는 것도 방해. */
   .pf-treemap-btn { display: none; }
+  .pf-add-bar { align-items: stretch; flex-wrap: wrap; gap: 8px; }
+  .pf-search-wrap { flex: 1 1 100%; max-width: none; }
+  .pf-add-toggle { margin-left: 0; }
+  .pf-add-toggle,
+  .pf-csv-toggle { flex: 1 1 calc(50% - 8px); text-align: center; }
+  .pf-add-panel { max-width: none; }
+  .pf-add-panel-form { flex-wrap: wrap; }
+  .pf-add-panel-form .pf-add-input { flex: 1 1 100%; }
+  .pf-add-panel-form .pf-add-btn { width: 100%; }
   .pf-table { font-size: 12px; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
   .pf-summary {

@@ -160,14 +160,21 @@ function renderPortfolio(options = {}) {
   let grandTotalMarketValue = 0;
   allRows.forEach(r => { if (r.marketValue !== null) grandTotalMarketValue += r.marketValue; });
 
-  // Apply group filter
-  const rows = pfGroupFilter === null ? allRows : allRows.filter(r => pfGroupFilter.has(pfGetGroup(r)));
+  // Apply group + text filters. The text search is deliberately local and
+  // instant: it filters the already-loaded holdings by name, code, group, tag.
+  const groupRows = pfGroupFilter === null ? allRows : allRows.filter(r => pfGroupFilter.has(pfGetGroup(r)));
+  const searchText = String(pfPortfolioSearchText || '').trim();
+  const rows = searchText ? groupRows.filter(r => pfRowMatchesSearch(r, searchText)) : groupRows;
+  const searchMeta = document.getElementById('pfSearchMeta');
+  if (searchMeta && !summaryOnly) {
+    searchMeta.textContent = searchText ? `검색 결과 ${rows.length.toLocaleString()} / ${groupRows.length.toLocaleString()}` : '';
+  }
 
   if (!rows.length) {
     if (!summaryOnly) {
       table.style.display = 'none';
       empty.style.display = 'block';
-      empty.textContent = '해당 분류의 종목이 없습니다.';
+      empty.textContent = searchText ? '검색 결과가 없습니다.' : '해당 분류의 종목이 없습니다.';
     }
     summary.innerHTML = '';
     return;
@@ -263,7 +270,7 @@ function renderPortfolio(options = {}) {
   const totalReturnPct = _currentFxInvested !== 0 ? ((_currentFxVal - _currentFxInvested) / Math.abs(_currentFxInvested) * 100) : 0;
 
   // NAV adjusted for currency mode: USD NAV = KRW NAV / FX
-  const isFiltered = pfGroupFilter !== null;
+  const isFiltered = pfGroupFilter !== null || Boolean(searchText);
   const _navAdj = (nav, fx) => {
     if (!_isUsd || !nav) return nav;
     const rate = fx && fx > 0 ? fx : pfFxRate;
@@ -470,7 +477,7 @@ function renderPortfolio(options = {}) {
     }
   }
 
-  const canManualDrag = !pfSortKey && !pfGroupSort && currentUser && !pfEditingCode;
+  const canManualDrag = !pfSortKey && !pfGroupSort && !searchText && currentUser && !pfEditingCode;
 
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
