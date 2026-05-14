@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 import ai_config
@@ -1606,7 +1606,9 @@ def _normalize_portfolio_tags(raw_tags) -> list[str]:
 
 
 @router.get("/api/portfolio/asset-insight/{stock_code}")
-async def asset_insight(stock_code: str, request: Request):
+async def asset_insight(stock_code: str, request: Request, response: Response):
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     user = _require_user(await get_current_user(request))
     stock_code = stock_code.strip()
     items = await cache.get_portfolio(user["google_sub"])

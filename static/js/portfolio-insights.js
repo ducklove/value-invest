@@ -33,7 +33,7 @@ async function pfOpenAssetInsight(stockCode) {
     body.innerHTML = '<div class="pf-insight-loading">외부 데이터 응답이 늦습니다. 요청은 끊지 않고 계속 기다리는 중입니다...</div>';
   }, 30000);
   try {
-    const resp = await apiFetch(`/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}`);
+    const resp = await apiFetch(`/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}?_=${Date.now()}`, { cache: 'no-store' });
     if (!resp.ok) {
       let detail = '';
       try {

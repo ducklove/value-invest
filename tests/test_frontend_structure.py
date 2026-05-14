@@ -112,6 +112,8 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
 def test_portfolio_insight_modal_renders_valuation_cards():
     source = (JS / "portfolio-insights.js").read_text(encoding="utf-8")
 
+    assert "/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}?_=${Date.now()}" in source
+    assert "{ cache: 'no-store' }" in source
     assert "const valuation = data.valuation || {}" in source
     assert "function _fmtInsightMultiple(value)" in source
     assert "_renderInsightCard('PBR'" in source
