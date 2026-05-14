@@ -21,9 +21,10 @@ async def supplement_target_metrics(items: list[dict], target_metrics_map: dict[
     """Fill formula variables from the same valuation source used by insights.
 
     The portfolio table should not maintain a separate BPS/EPS cache for target
-    prices. When a target formula references BPS or EPS, read those values from
-    finance-pi through the shared valuation basis helper, with the same fallback
-    semantics as the investment insight modal.
+    prices. When a target formula references BPS or EPS, refresh those values
+    through the shared valuation basis helper even if market_data already has
+    a cached value. This keeps formula targets aligned with the investment
+    insight modal after finance-pi corrections.
     """
 
     needed_vars: dict[str, set[str]] = {}
@@ -39,13 +40,7 @@ async def supplement_target_metrics(items: list[dict], target_metrics_map: dict[
             if not candidate or not is_korean_stock(candidate):
                 continue
             current = target_metrics_map.setdefault(candidate, {"eps": None, "bps": None, "dps": None})
-            missing_vars = {
-                var
-                for var in formula_vars
-                if current.get(var.lower()) is None
-            }
-            if missing_vars:
-                needed_vars.setdefault(candidate, set()).update(missing_vars)
+            needed_vars.setdefault(candidate, set()).update(formula_vars)
 
     codes = list(needed_vars)
     if not codes:

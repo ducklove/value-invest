@@ -244,17 +244,25 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(saved["037350"]["bps"])
         self.assertIsNone(saved["037350"]["eps"])
 
-    async def test_target_metric_does_not_refetch_cached_values(self):
-        target_metrics_map = {"037350": {"eps": None, "bps": 18017.424347205786, "dps": None}}
+    async def test_target_metric_refreshes_cached_values_for_formula_consistency(self):
+        target_metrics_map = {"037350": {"eps": None, "bps": 1.0, "dps": None}}
+        shared_basis = {
+            "applicable": True,
+            "source": "internal_fundamentals",
+            "sourceCode": "037350",
+            "bps": 18017.424347205786,
+            "eps": 1982.0,
+        }
 
-        with patch.object(target_metrics_service, "fetch_valuation_basis_map", new=AsyncMock()) as shared:
+        with patch.object(target_metrics_service, "fetch_valuation_basis_map", new=AsyncMock(return_value={"037350": shared_basis})) as shared:
             await target_metrics_service.supplement_target_metrics(
                 [{"stock_code": "037350", "target_price_formula": "BPS*0.5"}],
                 target_metrics_map,
             )
 
-        shared.assert_not_awaited()
+        shared.assert_awaited_once()
         self.assertEqual(target_metrics_map["037350"]["bps"], 18017.424347205786)
+        self.assertIsNone(target_metrics_map["037350"]["eps"])
 
     async def test_target_metric_uses_shared_valuation_basis_for_eps_and_bps(self):
         target_metrics_map = {"005930": {"eps": None, "bps": None, "dps": None}}
