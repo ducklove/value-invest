@@ -271,3 +271,27 @@ def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
     assert "function renderPortfolio(options = {})" in render
     assert "const summaryOnly = !!(options && options.summaryOnly);" in render
     assert "if (summaryOnly) return;" in render
+
+
+def test_mobile_simple_mode_is_read_only_and_view_locked():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    auth = (JS / "auth.js").read_text(encoding="utf-8")
+
+    assert 'id="pfSimpleToggle"' in html
+    assert "function pfSyncMobileFixedView()" in shell
+    assert "return currentUser ? 'portfolio' : 'analysis';" in shell
+    assert "function switchView(view, options = {})" in shell
+    assert "view = lockedView;" in shell
+    assert "pfSwitchTab('holdings')" in shell
+    assert "pfSyncMobileFixedView();" in auth
+
+    assert "body.mobile-fixed-portfolio .main-nav .nav-btn:not([data-view=\"portfolio\"])" in styles
+    assert "body.mobile-fixed-analysis .main-nav .nav-btn:not([data-view=\"analysis\"])" in styles
+    assert "body.pf-mobile-simple .pf-tab[data-tab=\"performance\"]" in styles
+    assert "body.pf-mobile-simple .pf-filter-bar" in styles
+    assert "display: none !important;" in styles
+    assert "body.pf-mobile-simple .pf-add-bar" in styles
+    assert "body.pf-mobile-simple .pf-col-toggle-wrap" in styles
+    assert "body.pf-mobile-simple .pf-col-act" in styles

@@ -1,3 +1,7 @@
+function isCompactMobileViewport() {
+  return window.matchMedia('(max-width: 900px), (max-height: 520px) and (max-width: 1180px)').matches;
+}
+
 async function loadAuthConfig() {
   if (!hasApiConfiguration()) {
     authConfig = { enabled: false, googleClientId: '' };
@@ -295,6 +299,21 @@ function renderGoogleButton() {
   });
 }
 
+function updateMobileAuthChrome() {
+  const mobileAuth = document.getElementById('mobileAuthStatus');
+  if (!mobileAuth) return;
+  if (currentUser && isCompactMobileViewport()) {
+    document.body.classList.add('mobile-auth');
+    mobileAuth.style.display = 'flex';
+    document.getElementById('mobileAuthAvatar').src = currentUser.picture || '';
+    document.getElementById('mobileAuthName').textContent = currentUser.name || currentUser.email;
+  } else {
+    document.body.classList.remove('mobile-auth');
+    mobileAuth.style.display = 'none';
+  }
+  if (typeof pfSyncMobileFixedView === 'function') pfSyncMobileFixedView();
+}
+
 function renderAuthState() {
   const statusTitle = document.getElementById('authStatusTitle');
   const statusDetail = document.getElementById('authStatusDetail');
@@ -332,17 +351,7 @@ function renderAuthState() {
 
   renderGoogleButton();
 
-  // Mobile: hide sidebar when logged in, show compact auth indicator
-  const mobileAuth = document.getElementById('mobileAuthStatus');
-  if (currentUser && window.innerWidth <= 900) {
-    document.body.classList.add('mobile-auth');
-    mobileAuth.style.display = 'flex';
-    document.getElementById('mobileAuthAvatar').src = currentUser.picture || '';
-    document.getElementById('mobileAuthName').textContent = currentUser.name || currentUser.email;
-  } else {
-    document.body.classList.remove('mobile-auth');
-    mobileAuth.style.display = 'none';
-  }
+  updateMobileAuthChrome();
   if (typeof _setFilingReviewAdminAction === 'function') {
     _setFilingReviewAdminAction(activeStockCode || '', {});
   }

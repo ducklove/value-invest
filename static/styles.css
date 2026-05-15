@@ -1051,6 +1051,22 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-tab:hover { color: var(--text); }
 .pf-tab.active { background: var(--primary); border-color: var(--primary); color: white; }
+.pf-simple-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pf-simple-toggle:hover { color: var(--text); border-color: var(--primary); }
+.pf-simple-toggle.active { background: var(--text); border-color: var(--text); color: var(--surface); }
 
 /* Currency toggle */
 .pf-currency-toggle { display: flex; gap: 0; margin-left: auto; }
@@ -2084,6 +2100,223 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   #pfNavReturns .pf-nav-ret-card[data-zoom-days],
   #pfValueStats .pf-nav-ret-card[data-zoom-days] {
     display: none !important;
+  }
+}
+
+@media (max-width: 900px), (max-height: 520px) and (max-width: 1180px) {
+  body {
+    display: block;
+  }
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  body.mobile-auth .sidebar { display: none; }
+  body.mobile-fixed-portfolio .main-nav .nav-btn:not([data-view="portfolio"]),
+  body.mobile-fixed-analysis .main-nav .nav-btn:not([data-view="analysis"]) {
+    display: none;
+  }
+  .pf-simple-toggle { display: inline-flex; }
+}
+
+body.pf-mobile-simple .main {
+  padding: 8px 10px 12px;
+}
+body.pf-mobile-simple .header {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  margin: 0 0 8px;
+  padding: 6px 0;
+  background: var(--bg);
+}
+body.pf-mobile-simple .main-nav {
+  min-width: 0;
+}
+body.pf-mobile-simple .nav-btn {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+body.pf-mobile-simple .mobile-auth-name,
+body.pf-mobile-simple .wiki-stats {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+body.pf-mobile-simple .pf-summary-card {
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 8px;
+  gap: 0;
+}
+body.pf-mobile-simple .pf-summary-text {
+  width: 100%;
+}
+body.pf-mobile-simple .pf-summary-side,
+body.pf-mobile-simple .pf-sparkline,
+body.pf-mobile-simple .pf-summary-date,
+body.pf-mobile-simple .pf-summary-sub {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-summary-label {
+  font-size: 9px;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+body.pf-mobile-simple .pf-summary-value {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.pf-mobile-simple .pf-tab-bar {
+  position: sticky;
+  top: 42px;
+  z-index: 50;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 4px 0;
+  background: var(--bg);
+}
+body.pf-mobile-simple .pf-tab {
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+body.pf-mobile-simple .pf-tab[data-tab="performance"] {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-currency-toggle {
+  margin-left: 0;
+}
+body.pf-mobile-simple .pf-currency-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+body.pf-mobile-simple .pf-filter-bar {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-add-bar,
+body.pf-mobile-simple .pf-add-panel,
+body.pf-mobile-simple .pf-csv-panel,
+body.pf-mobile-simple .pf-col-toggle-wrap {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-table-wrap {
+  max-height: calc(100dvh - 190px);
+  overflow: auto;
+  border-radius: 8px;
+  overscroll-behavior: contain;
+}
+body.pf-mobile-simple .pf-table {
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 11px;
+}
+body.pf-mobile-simple .pf-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+body.pf-mobile-simple .pf-table thead th,
+body.pf-mobile-simple .pf-table tbody td,
+body.pf-mobile-simple .pf-table tfoot td {
+  padding: 6px 5px;
+}
+body.pf-mobile-simple .pf-col-group,
+body.pf-mobile-simple .pf-col-benchmark,
+body.pf-mobile-simple .pf-col-invested,
+body.pf-mobile-simple .pf-col-buyprice,
+body.pf-mobile-simple .pf-col-target,
+body.pf-mobile-simple .pf-col-achiev,
+body.pf-mobile-simple .pf-col-qty,
+body.pf-mobile-simple .pf-col-dividend,
+body.pf-mobile-simple .pf-col-divyield,
+body.pf-mobile-simple .pf-col-weight,
+body.pf-mobile-simple .pf-col-date,
+body.pf-mobile-simple .pf-col-act {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-table thead th.pf-col-name,
+body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
+  width: 34%;
+}
+body.pf-mobile-simple .pf-col-changepct { width: 16%; }
+body.pf-mobile-simple .pf-col-curprice { width: 18%; }
+body.pf-mobile-simple .pf-col-return { width: 14%; }
+body.pf-mobile-simple .pf-col-mktval { width: 18%; }
+body.pf-mobile-simple .pf-stock-cell {
+  min-width: 0;
+  white-space: normal;
+}
+body.pf-mobile-simple .pf-table tbody td:not(.pf-stock-cell),
+body.pf-mobile-simple .pf-table tfoot td:not(:first-child) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.pf-mobile-simple .pf-stock-link strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.pf-mobile-simple .pf-stock-tags,
+body.pf-mobile-simple .pf-row-drag-handle {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-nav-chart-wrap {
+  margin-bottom: 12px;
+}
+body.pf-mobile-simple .pf-nav-header {
+  margin-bottom: 6px;
+}
+body.pf-mobile-simple .pf-nav-chart-container.pf-nav-tall,
+body.pf-mobile-simple .pf-nav-chart-container.pf-nav-short {
+  height: min(320px, calc(100dvh - 136px));
+}
+body.pf-mobile-simple .pf-nav-chart-container.pf-group-weight {
+  height: min(280px, calc(100dvh - 136px));
+}
+body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
+  height: min(260px, calc(100dvh - 136px));
+}
+
+@media (max-height: 520px) and (max-width: 1180px) {
+  body.pf-mobile-simple .header {
+    margin-bottom: 4px;
+    padding: 4px 0;
+  }
+  body.pf-mobile-simple .pf-summary {
+    margin-bottom: 6px;
+  }
+  body.pf-mobile-simple .pf-summary-card {
+    padding: 5px 7px;
+  }
+  body.pf-mobile-simple .pf-tab-bar {
+    top: 36px;
+    margin-bottom: 6px;
+  }
+  body.pf-mobile-simple .pf-filter-bar {
+    display: none !important;
+  }
+  body.pf-mobile-simple .pf-table-wrap {
+    max-height: calc(100dvh - 132px);
+  }
+  body.pf-mobile-simple .pf-nav-chart-container.pf-nav-tall,
+  body.pf-mobile-simple .pf-nav-chart-container.pf-nav-short,
+  body.pf-mobile-simple .pf-nav-chart-container.pf-group-weight,
+  body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
+    height: min(230px, calc(100dvh - 98px));
   }
 }
 

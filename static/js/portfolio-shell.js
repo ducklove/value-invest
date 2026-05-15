@@ -25,6 +25,8 @@ let pfCurrency = 'KRW'; // 'KRW' or 'USD'
 let pfFxRate = null; // USD/KRW rate
 const PF_QUOTE_REFRESH_MS = 60_000;
 let _pfPointerGuardUntil = 0;
+const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
+let pfSimpleMode = false;
 
 function _pfMarkPointerInteraction(ms = 450) {
   _pfPointerGuardUntil = performance.now() + ms;
@@ -33,6 +35,84 @@ function _pfMarkPointerInteraction(ms = 450) {
 function _pfIsPointerInteractionActive() {
   return performance.now() < _pfPointerGuardUntil;
 }
+
+function _pfIsSimpleModeViewport() {
+  return window.matchMedia('(max-width: 900px), (max-height: 520px) and (max-width: 1180px)').matches;
+}
+
+function _pfShouldAutoUseSimpleMode() {
+  return window.matchMedia('(max-width: 760px), (max-height: 520px) and (max-width: 1180px)').matches;
+}
+
+function _mobileFixedView() {
+  if (!_pfIsSimpleModeViewport()) return null;
+  return currentUser ? 'portfolio' : 'analysis';
+}
+
+function pfSyncMobileFixedView() {
+  const lockedView = _mobileFixedView();
+  document.body.classList.toggle('mobile-fixed-portfolio', lockedView === 'portfolio');
+  document.body.classList.toggle('mobile-fixed-analysis', lockedView === 'analysis');
+  if (lockedView && activeView !== lockedView) {
+    switchView(lockedView, { allowMobileLockOverride: true });
+  }
+}
+
+function _pfLoadSimpleModePreference() {
+  try {
+    const raw = localStorage.getItem(PF_SIMPLE_MODE_KEY);
+    if (raw === '1') return true;
+    if (raw === '0') return false;
+  } catch (e) {}
+  return null;
+}
+
+function _pfSaveSimpleModePreference(enabled) {
+  try { localStorage.setItem(PF_SIMPLE_MODE_KEY, enabled ? '1' : '0'); } catch (e) {}
+}
+
+function _pfApplySimpleMode(enabled, { persist = false } = {}) {
+  const compactViewport = _pfIsSimpleModeViewport();
+  const active = compactViewport && !!enabled;
+  pfSimpleMode = active;
+  document.body.classList.toggle('pf-mobile-simple', active);
+  if (active && typeof pfSwitchTab === 'function' && typeof pfActiveTab !== 'undefined' && pfActiveTab !== 'holdings') {
+    pfSwitchTab('holdings');
+  }
+  if (persist) _pfSaveSimpleModePreference(active);
+
+  const toggle = document.getElementById('pfSimpleToggle');
+  if (toggle) {
+    toggle.hidden = !compactViewport;
+    toggle.classList.toggle('active', active);
+    toggle.setAttribute('aria-pressed', active ? 'true' : 'false');
+    toggle.textContent = active ? '일반' : '간편';
+    toggle.title = active ? '일반 보기' : '모바일 간편 보기';
+  }
+}
+
+function pfSyncSimpleModeForViewport() {
+  const preference = _pfLoadSimpleModePreference();
+  _pfApplySimpleMode(preference === null ? _pfShouldAutoUseSimpleMode() : preference);
+  pfSyncMobileFixedView();
+}
+
+function pfToggleSimpleMode() {
+  _pfApplySimpleMode(!pfSimpleMode, { persist: true });
+}
+
+(function initPfSimpleMode() {
+  const onReady = () => {
+    pfSyncSimpleModeForViewport();
+    window.addEventListener('resize', pfSyncSimpleModeForViewport);
+    window.addEventListener('orientationchange', pfSyncSimpleModeForViewport);
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onReady);
+  } else {
+    onReady();
+  }
+})();
 
 // --- Column visibility ---
 // `defaultVisible: false` 는 "처음 방문하는 사용자에게 기본 숨김".
@@ -117,7 +197,9 @@ function _pfRenderColToggles() {
   _pfColTogglesRendered = true;
 }
 
-function switchView(view) {
+function switchView(view, options = {}) {
+  const lockedView = options.allowMobileLockOverride ? null : _mobileFixedView();
+  if (lockedView && view !== lockedView) view = lockedView;
   activeView = view;
   document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   const analysisView = document.getElementById('analysisView');

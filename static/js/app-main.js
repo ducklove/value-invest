@@ -200,6 +200,9 @@ function _refreshActivePortfolioTodayState() {
 }
 
 window.addEventListener('resize', () => {
+  if (typeof updateMobileAuthChrome === 'function') updateMobileAuthChrome();
+  if (typeof pfSyncSimpleModeForViewport === 'function') pfSyncSimpleModeForViewport();
+  if (typeof pfSyncMobileFixedView === 'function') pfSyncMobileFixedView();
   Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });
   if (_treemapInstance && _treemapInstance.resize) _treemapInstance.resize();
   if (_navChartInstance && _navChartInstance.resize) _navChartInstance.resize();
