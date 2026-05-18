@@ -252,11 +252,12 @@ def test_nav_chart_shows_selected_benchmark_beta_overlay():
     trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-    assert "function _computeReturnBeta" in trends
+    assert "function _computeReturnStats" in trends
     assert "function _navBenchmarkBeta" in trends
     assert "function _updateNavBetaOverlay" in trends
     assert "NAV beta vs selected benchmark" in trends
     assert "\\u03b2" in trends
+    assert "\\u00b2" in trends
     assert "_updateNavBetaOverlay(labels, navValues, benchCodes, fullWindow.startIdx, fullWindow.endIdx);" in trends
     assert "_updateNavBetaOverlay(labels, navValues, benchCodes, startIdx, endIdx);" in trends
     assert ".pf-nav-beta-overlay" in styles

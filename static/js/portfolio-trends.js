@@ -189,21 +189,24 @@ function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
   el.innerHTML = `표시 기간 <strong>${escapeHtml(start)} ~ ${escapeHtml(end)}</strong><span>${days.toLocaleString()}일 · ${points.toLocaleString()}개 스냅샷</span>`;
 }
 
-function _computeReturnBeta(pairs) {
+function _computeReturnStats(pairs) {
   const n = pairs?.length || 0;
-  if (n < 20) return null;
+  if (n < 20) return { beta: null, rSquared: null };
   const meanNav = pairs.reduce((sum, p) => sum + p.nav, 0) / n;
   const meanBench = pairs.reduce((sum, p) => sum + p.bench, 0) / n;
   let cov = 0;
-  let variance = 0;
+  let navVariance = 0;
+  let benchVariance = 0;
   pairs.forEach(p => {
     const navDiff = p.nav - meanNav;
     const benchDiff = p.bench - meanBench;
     cov += navDiff * benchDiff;
-    variance += benchDiff * benchDiff;
+    navVariance += navDiff * navDiff;
+    benchVariance += benchDiff * benchDiff;
   });
-  if (!(variance > 0)) return null;
-  return cov / variance;
+  const beta = benchVariance > 0 ? cov / benchVariance : null;
+  const rSquared = navVariance > 0 && benchVariance > 0 ? (cov * cov) / (navVariance * benchVariance) : null;
+  return { beta, rSquared };
 }
 
 function _navBenchmarkBeta(labels, navValues, ratioMap, startIdx, endIdx) {
@@ -221,11 +224,15 @@ function _navBenchmarkBeta(labels, navValues, ratioMap, startIdx, endIdx) {
     prevNav = nav;
     prevBench = bench;
   }
-  return { beta: _computeReturnBeta(pairs), sampleSize: pairs.length };
+  return { ..._computeReturnStats(pairs), sampleSize: pairs.length };
 }
 
 function _formatBetaValue(beta) {
   return Number.isFinite(beta) ? beta.toFixed(2) : '-';
+}
+
+function _formatRSquaredValue(rSquared) {
+  return Number.isFinite(rSquared) ? rSquared.toFixed(2) : '-';
 }
 
 function _updateNavBetaOverlay(labels, navValues, benchCodes, startIdx, endIdx) {
@@ -252,8 +259,9 @@ function _updateNavBetaOverlay(labels, navValues, benchCodes, startIdx, endIdx) 
   overlay.title = 'NAV beta vs selected benchmark, based on daily returns in the visible chart range';
   overlay.innerHTML = rows.map(row => {
     const beta = _formatBetaValue(row.beta);
+    const rSquared = _formatRSquaredValue(row.rSquared);
     const hint = row.sampleSize < 20 ? ' title="Need at least 20 return points"' : '';
-    return `<span class="pf-nav-beta-chip"${hint} style="--beta-color:${row.color}"><span class="pf-nav-beta-dot"></span>${escapeHtml(row.label)} \u03b2 ${beta}</span>`;
+    return `<span class="pf-nav-beta-chip"${hint} style="--beta-color:${row.color}"><span class="pf-nav-beta-dot"></span>${escapeHtml(row.label)} \u03b2 ${beta} · R\u00b2 ${rSquared}</span>`;
   }).join('');
 }
 
