@@ -103,3 +103,22 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
         get_quote.assert_awaited_once()
         self.assertEqual(result["price"], 2000.0)
+
+    async def test_fetch_quote_snapshot_falls_back_to_history_when_quote_fails(self):
+        with patch("stock_price.kis_ws_manager.get_cached_quote", return_value=None), \
+             patch("stock_price.kis_ws_manager.active_market_code", return_value="J"), \
+             patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock(side_effect=RuntimeError("quote down"))), \
+             patch("stock_price.kis_proxy_client.get_history", new=AsyncMock(return_value={
+                 "items": [
+                     {"stck_bsop_date": "20260515", "stck_clpr": "1980"},
+                     {"stck_bsop_date": "20260518", "stck_clpr": "2000", "acml_tr_pbmn": "123456"},
+                 ]
+             })) as get_history:
+            result = await stock_price.fetch_quote_snapshot("005930")
+
+        get_history.assert_awaited_once()
+        self.assertEqual(result["date"], "2026-05-18")
+        self.assertEqual(result["price"], 2000.0)
+        self.assertEqual(result["previous_close"], 1980.0)
+        self.assertEqual(result["change"], 20.0)
+        self.assertEqual(result["trade_value"], 123456.0)

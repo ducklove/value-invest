@@ -134,3 +134,14 @@ sudo /bin/systemctl restart "$SERVICE"
 
 # --- Health check -----------------------------------------------------------
 wait_for_healthz
+
+# --- One-time repair --------------------------------------------------------
+# 2026-05-18 NAV was previously rerun through the live quote path. Rebuild it
+# once with the corrected date-specific snapshot logic, then leave a local
+# marker so future deploys do not keep rewriting that historical row.
+REPAIR_MARKER=".deploy-repair-2026-05-18-nav-v2.done"
+if [[ ! -f "$REPAIR_MARKER" ]]; then
+  log "Repairing portfolio NAV snapshot for 2026-05-18"
+  python3 snapshot_nav.py 2026-05-18
+  touch "$REPAIR_MARKER"
+fi

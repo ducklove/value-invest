@@ -983,7 +983,13 @@ async def fetch_quote_snapshot(
     # response is missing fields we need (price / previous_close). This
     # halves KIS proxy traffic for the common case and lets the per-call
     # rate limiter serve twice as many distinct stocks per second.
-    quote_payload = await _get_quote_with_nxt_fallback()
+    quote_failed = False
+    try:
+        quote_payload = await _get_quote_with_nxt_fallback()
+    except Exception as exc:
+        logger.warning("quote fetch failed; falling back to history (%s): %s", stock_code, exc)
+        quote_payload = {}
+        quote_failed = True
     summary = _quote_summary(quote_payload)
 
     latest_price = _safe_float(
@@ -1024,7 +1030,7 @@ async def fetch_quote_snapshot(
 
     history_items: list = []
     latest_history_date = None
-    need_history = latest_price is None or previous_close is None
+    need_history = quote_failed or latest_price is None or previous_close is None
     if need_history:
         try:
             history_payload = await kis_proxy_client.get_history(
@@ -1053,6 +1059,11 @@ async def fetch_quote_snapshot(
         if latest_price is None and history_items:
             latest_price = _safe_float(
                 _get_first(history_items[-1], "stck_clpr", "close_price", "close"),
+                zero_as_none=False,
+            )
+        if trade_value is None and history_items:
+            trade_value = _safe_float(
+                _get_first(history_items[-1], "acml_tr_pbmn", "trade_amount", "trading_value"),
                 zero_as_none=False,
             )
 

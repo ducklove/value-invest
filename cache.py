@@ -2575,6 +2575,26 @@ async def get_latest_snapshot(google_sub: str) -> dict | None:
     return dict(row) if row else None
 
 
+async def get_snapshot_by_date(google_sub: str, snap_date: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw FROM portfolio_snapshots WHERE google_sub = ? AND date = ?",
+        (google_sub, snap_date),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def get_latest_snapshot_before_date(google_sub: str, snap_date: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw FROM portfolio_snapshots WHERE google_sub = ? AND date < ? ORDER BY date DESC LIMIT 1",
+        (google_sub, snap_date),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
 async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float, fx_usdkrw: float | None = None):
     db = await get_db()
     await db.execute(

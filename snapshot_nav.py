@@ -2,14 +2,92 @@
 
 import asyncio
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import cache
+import close_price_client
+import kis_proxy_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 BASE_NAV = 1000.0
+KST = timezone(timedelta(hours=9))
+
+
+def _today_kst() -> date:
+    return datetime.now(KST).date()
+
+
+def _safe_float(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _item_date(item: dict) -> str:
+    text = str(
+        item.get("date")
+        or item.get("trade_date")
+        or item.get("business_date")
+        or item.get("stck_bsop_date")
+        or ""
+    ).strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    return text[:10].replace(".", "-")
+
+
+def _item_close(item: dict) -> float | None:
+    return _safe_float(item.get("close") or item.get("close_price") or item.get("stck_clpr"))
+
+
+async def _fetch_historical_korean_quote(stock_code: str, snap_date: str) -> dict:
+    target = date.fromisoformat(snap_date)
+    try:
+        rows = await close_price_client.get_daily_prices(
+            stock_code,
+            since=target,
+            until=target,
+            fields=("close", "trading_value"),
+        )
+        for row in rows:
+            if row.get("date") == snap_date and row.get("close") is not None:
+                return {
+                    "date": snap_date,
+                    "price": row["close"],
+                    "change": 0,
+                    "change_pct": None,
+                    "trade_value": row.get("trading_value"),
+                }
+    except Exception as exc:
+        logger.warning("Historical close API failed for %s %s: %s", stock_code, snap_date, exc)
+
+    try:
+        payload = await kis_proxy_client.get_history(
+            stock_code,
+            start_date=target,
+            end_date=target,
+            period="D",
+            adjusted=True,
+        )
+        for item in payload.get("items") or []:
+            if _item_date(item) == snap_date:
+                close = _item_close(item)
+                if close is not None:
+                    return {
+                        "date": snap_date,
+                        "price": close,
+                        "change": 0,
+                        "change_pct": None,
+                    }
+    except Exception as exc:
+        logger.warning("KIS historical close failed for %s %s: %s", stock_code, snap_date, exc)
+
+    return {}
 
 
 async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, float, list[dict]]:
@@ -32,11 +110,14 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
         total_invested += qty * avg_price
         try:
             if _is_korean_stock(item["stock_code"]):
-                quote = await _fetch_quote(
-                    item["stock_code"],
-                    force_refresh=True,
-                    use_ws_cache=False,
-                )
+                if date.fromisoformat(snap_date) < _today_kst():
+                    quote = await _fetch_historical_korean_quote(item["stock_code"], snap_date)
+                else:
+                    quote = await _fetch_quote(
+                        item["stock_code"],
+                        force_refresh=True,
+                        use_ws_cache=False,
+                    )
             else:
                 quote = await _fetch_quote(item["stock_code"])
             price = quote.get("price") if quote else None
@@ -66,7 +147,8 @@ async def take_snapshot(google_sub: str, snap_date: str):
         logger.info("Skipping %s: portfolio value is 0", google_sub)
         return
 
-    prev = await cache.get_latest_snapshot(google_sub)
+    existing = await cache.get_snapshot_by_date(google_sub, snap_date)
+    prev = existing or await cache.get_latest_snapshot_before_date(google_sub, snap_date)
 
     if prev is None:
         # First snapshot ever
@@ -76,25 +158,28 @@ async def take_snapshot(google_sub: str, snap_date: str):
         nav = prev["nav"]
         total_units = prev["total_units"]
 
-    # Apply cashflows for this date: adjust units before computing NAV
-    cashflows = await cache.get_pending_cashflows(google_sub, snap_date)
-    for cf in cashflows:
-        if cf["units_change"] is not None:
-            # Already applied (e.g., re-run)
-            continue
-        amt = cf["amount"]
-        if nav > 0:
-            units_delta = amt / nav
-            if cf["type"] == "withdrawal":
-                units_delta = -units_delta
-            total_units += units_delta
-            # Update cashflow record with nav and units
-            db = await cache.get_db()
-            await db.execute(
-                "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
-                (nav, units_delta, cf["id"]),
-            )
-            await db.commit()
+    # On rerun, preserve the already-materialized units for that date. If this
+    # is the first snapshot for snap_date, apply same-day cashflows once.
+    if existing is None:
+        cashflows = await cache.get_pending_cashflows(google_sub, snap_date)
+        for cf in cashflows:
+            if cf["units_change"] is not None:
+                # Already applied (e.g., imported data or a previous run).
+                total_units += cf["units_change"]
+                continue
+            amt = cf["amount"]
+            if nav > 0:
+                units_delta = amt / nav
+                if cf["type"] == "withdrawal":
+                    units_delta = -units_delta
+                total_units += units_delta
+                # Update cashflow record with nav and units
+                db = await cache.get_db()
+                await db.execute(
+                    "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
+                    (nav, units_delta, cf["id"]),
+                )
+                await db.commit()
 
     # Compute new NAV
     if total_units > 0:
@@ -162,7 +247,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     if manage_db:
         await cache.init_db()
     if snap_date is None:
-        snap_date = date.today().isoformat()
+        snap_date = _today_kst().isoformat()
     if date.fromisoformat(snap_date).weekday() >= 5:
         logger.info("Snapshot skipped: %s is a weekend", snap_date)
         import observability
