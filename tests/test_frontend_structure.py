@@ -200,10 +200,11 @@ def test_portfolio_add_canonicalizes_alias_before_save():
 def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
     source = (JS / "quote-manager.js").read_text(encoding="utf-8")
 
-    assert "QUOTE_MANAGER_STALE_WS_MS" in source
-    assert "lastQuoteAt: {}" in source
-    assert "_markQuoteFresh(msg.code)" in source
-    assert "_markQuoteFresh(code)" in source
+    assert "const QUOTE_MANAGER_STALE_WS_MS = 55_000;" in source
+    assert "lastWsQuoteAt: {}" in source
+    assert "_markWsQuoteFresh(msg.code)" in source
+    rest_fetch_loop = source.split("const data = await resp.json();", 1)[1].split("} catch", 1)[0]
+    assert "_markWsQuoteFresh" not in rest_fetch_loop
     assert "async _pollAll()" in source
     assert "this._getStaleWsCodes().forEach(c => allCodes.add(c));" in source
 

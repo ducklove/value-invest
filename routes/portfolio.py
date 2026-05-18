@@ -690,11 +690,17 @@ async def _save_ticker(stock_code: str, resolved: str):
         logger.warning("Ticker map save failed (%s -> %s): %s", stock_code, resolved, exc)
 
 
-async def _fetch_quote(stock_code: str) -> dict:
-    cached = _quote_cache.get_fresh(stock_code)
-    if cached:
-        return cached
-    if _is_dead(stock_code):
+async def _fetch_quote(
+    stock_code: str,
+    *,
+    force_refresh: bool = False,
+    use_ws_cache: bool = True,
+) -> dict:
+    if not force_refresh:
+        cached = _quote_cache.get_fresh(stock_code)
+        if cached:
+            return cached
+    if not force_refresh and _is_dead(stock_code):
         return _quote_cache.get_fallback(stock_code)
     if _is_cash_asset(stock_code):
         q = await _fetch_cash_quote(stock_code)
@@ -703,9 +709,12 @@ async def _fetch_quote(stock_code: str) -> dict:
     elif stock_code in _CRYPTO_UPBIT_MAP:
         q = await _fetch_crypto_quote(stock_code)
     elif _is_korean_stock(stock_code):
-        q = _quote_from_ws(kis_ws_manager.get_cached_quote(stock_code))
+        q = _quote_from_ws(kis_ws_manager.get_cached_quote(stock_code)) if use_ws_cache else None
         if not q:
-            q = await stock_price.fetch_quote_snapshot(stock_code)
+            q = await stock_price.fetch_quote_snapshot(
+                stock_code,
+                use_ws_cache=use_ws_cache,
+            )
     else:
         # Use resolved ticker if available, otherwise try to resolve
         await _ensure_ticker_map()
@@ -1831,8 +1840,8 @@ async def asset_quote(stock_code: str):
 
 
 _NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
-_ASSET_QUOTES_BATCH_TIMEOUT = 4.5
-_ASSET_QUOTES_ITEM_TIMEOUT = 4.2
+_ASSET_QUOTES_BATCH_TIMEOUT = 12.0
+_ASSET_QUOTES_ITEM_TIMEOUT = 10.0
 _ASSET_QUOTES_CONCURRENCY = 16
 
 @router.post("/api/asset-quotes")
@@ -1858,7 +1867,15 @@ async def asset_quotes_batch(payload: dict = Body(...)):
             return code, {}
         try:
             async with sem:
-                q = await asyncio.wait_for(_fetch_quote(code), timeout=_ASSET_QUOTES_ITEM_TIMEOUT)
+                force_upstream = _is_korean_stock(code)
+                q = await asyncio.wait_for(
+                    _fetch_quote(
+                        code,
+                        force_refresh=force_upstream,
+                        use_ws_cache=not force_upstream,
+                    ),
+                    timeout=_ASSET_QUOTES_ITEM_TIMEOUT,
+                )
             return code, q or {}
         except asyncio.CancelledError:
             return code, {}

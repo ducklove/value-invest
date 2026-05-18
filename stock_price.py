@@ -909,8 +909,8 @@ async def fetch_weekly_market_data(
     return results
 
 
-async def fetch_quote_snapshot(stock_code: str) -> dict:
-    ws_quote = kis_ws_manager.get_cached_quote(stock_code)
+async def fetch_quote_snapshot(stock_code: str, *, use_ws_cache: bool = True) -> dict:
+    ws_quote = kis_ws_manager.get_cached_quote(stock_code) if use_ws_cache else None
     if ws_quote and ws_quote.get("price") is not None:
         return {
             "date": ws_quote.get("date", date.today().isoformat()),

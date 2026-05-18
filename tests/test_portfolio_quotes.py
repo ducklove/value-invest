@@ -1,3 +1,8 @@
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from routes import portfolio as portfolio_route
 from services.portfolio import quotes
 
 
@@ -47,3 +52,43 @@ def test_portfolio_quote_cache_ignores_empty_or_priceless_quotes():
     assert not cache.remember("005930", {})
     assert not cache.remember("005930", {"price": None})
     assert cache.get_cached("005930") == {}
+
+
+@pytest.mark.asyncio
+async def test_asset_quotes_batch_fresh_korean_quotes_bypass_ws_cache():
+    with patch.object(
+        portfolio_route,
+        "_fetch_quote",
+        new=AsyncMock(return_value={"price": 2000}),
+    ) as fetch_quote:
+        result = await portfolio_route.asset_quotes_batch({
+            "codes": ["005930"],
+            "fresh": True,
+        })
+
+    assert result == {"005930": {"price": 2000}}
+    fetch_quote.assert_awaited_once_with(
+        "005930",
+        force_refresh=True,
+        use_ws_cache=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_asset_quotes_batch_fresh_non_korean_quotes_keep_normal_cache_path():
+    with patch.object(
+        portfolio_route,
+        "_fetch_quote",
+        new=AsyncMock(return_value={"price": 2000}),
+    ) as fetch_quote:
+        result = await portfolio_route.asset_quotes_batch({
+            "codes": ["AAPL"],
+            "fresh": True,
+        })
+
+    assert result == {"AAPL": {"price": 2000}}
+    fetch_quote.assert_awaited_once_with(
+        "AAPL",
+        force_refresh=False,
+        use_ws_cache=True,
+    )

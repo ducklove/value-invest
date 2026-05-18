@@ -1,5 +1,5 @@
 // --- WebSocket Quote Manager ---
-const QUOTE_MANAGER_STALE_WS_MS = 90_000;
+const QUOTE_MANAGER_STALE_WS_MS = 55_000;
 const QUOTE_MANAGER_GENERAL_POLL_MS = 60_000;
 const QUOTE_MANAGER_OVERFLOW_POLL_MS = 30_000;
 const QUOTE_MANAGER_RETRY_MS = 5_000;
@@ -12,7 +12,7 @@ const QuoteManager = {
   subscriptions: {},
   wsCodes: new Set(),
   overflowCodes: [],
-  lastQuoteAt: {},
+  lastWsQuoteAt: {},
   overflowTimer: null,
   generalPollTimer: null,
   wsActive: false,      // true when this session owns the active WS slot
@@ -31,7 +31,7 @@ const QuoteManager = {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'quote' && msg.code) {
-          if (msg.price != null) this._markQuoteFresh(msg.code);
+          if (msg.price != null) this._markWsQuoteFresh(msg.code);
           if (this.onQuote) this.onQuote(msg.code, msg);
         } else if (msg.type === 'subscriptions') {
           this.wsCodes = new Set(msg.ws || []);
@@ -72,7 +72,7 @@ const QuoteManager = {
     this.wsActive = false;
     this.wsCodes = new Set();
     this.overflowCodes = [];
-    this.lastQuoteAt = {};
+    this.lastWsQuoteAt = {};
   },
 
   _scheduleReconnect() {
@@ -102,15 +102,15 @@ const QuoteManager = {
 
   _retryTimer: null,
 
-  _markQuoteFresh(code) {
+  _markWsQuoteFresh(code) {
     if (!code) return;
-    this.lastQuoteAt[code] = Date.now();
+    this.lastWsQuoteAt[code] = Date.now();
   },
 
   _getStaleWsCodes() {
     const now = Date.now();
     return [...this.wsCodes].filter(code =>
-      now - (this.lastQuoteAt[code] || 0) >= QUOTE_MANAGER_STALE_WS_MS
+      now - (this.lastWsQuoteAt[code] || 0) >= QUOTE_MANAGER_STALE_WS_MS
     );
   },
 
@@ -133,7 +133,6 @@ const QuoteManager = {
       const data = await resp.json();
       for (const [code, q] of Object.entries(data || {})) {
         if (q && q.price != null) {
-          this._markQuoteFresh(code);
           if (this.onQuote) this.onQuote(code, { code, ...q });
         }
       }
