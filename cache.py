@@ -2773,6 +2773,24 @@ async def get_stock_snapshots_by_date(google_sub: str, date: str) -> list[dict]:
     return [dict(r) for r in await cursor.fetchall()]
 
 
+async def get_stock_snapshots_before_date(google_sub: str, date: str) -> list[dict]:
+    """Get per-stock snapshots strictly before a date (latest available)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT MAX(date) AS snap_date FROM portfolio_stock_snapshots WHERE google_sub = ? AND date < ?",
+        (google_sub, date),
+    )
+    row = await cursor.fetchone()
+    snap_date = row["snap_date"] if row else None
+    if not snap_date:
+        return []
+    cursor = await db.execute(
+        "SELECT stock_code, market_value FROM portfolio_stock_snapshots WHERE google_sub = ? AND date = ?",
+        (google_sub, snap_date),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
 async def save_intraday_snapshot(google_sub: str, ts: str, total_value: float):
     db = await get_db()
     await db.execute(

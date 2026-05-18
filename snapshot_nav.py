@@ -12,14 +12,14 @@ logger = logging.getLogger(__name__)
 BASE_NAV = 1000.0
 
 
-async def _fetch_total_value(google_sub: str) -> tuple[float, float, list[dict]]:
+async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, float, list[dict]]:
     """Return (total_market_value, total_invested, per_stock_values) for a user's portfolio."""
-    from routes.portfolio import _fetch_quote
+    from routes.portfolio import _fetch_quote, _is_korean_stock
 
     items = await cache.get_portfolio(google_sub)
     # Load previous per-stock snapshot for fallback (avoids avg_price distortion)
     prev_stock_map = {}
-    prev_stocks = await cache.get_stock_snapshots_by_date(google_sub, date.today().isoformat())
+    prev_stocks = await cache.get_stock_snapshots_before_date(google_sub, snap_date)
     for ps in prev_stocks:
         prev_stock_map[ps["stock_code"]] = ps["market_value"]
 
@@ -31,7 +31,14 @@ async def _fetch_total_value(google_sub: str) -> tuple[float, float, list[dict]]
         avg_price = item["avg_price"]
         total_invested += qty * avg_price
         try:
-            quote = await _fetch_quote(item["stock_code"])
+            if _is_korean_stock(item["stock_code"]):
+                quote = await _fetch_quote(
+                    item["stock_code"],
+                    force_refresh=True,
+                    use_ws_cache=False,
+                )
+            else:
+                quote = await _fetch_quote(item["stock_code"])
             price = quote.get("price") if quote else None
             if price is not None:
                 mv = qty * price
@@ -54,7 +61,7 @@ async def _fetch_total_value(google_sub: str) -> tuple[float, float, list[dict]]
 
 async def take_snapshot(google_sub: str, snap_date: str):
     """Take a daily snapshot and compute NAV for one user."""
-    total_value, total_invested, per_stock = await _fetch_total_value(google_sub)
+    total_value, total_invested, per_stock = await _fetch_total_value(google_sub, snap_date)
     if total_value == 0:
         logger.info("Skipping %s: portfolio value is 0", google_sub)
         return
