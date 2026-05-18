@@ -248,6 +248,21 @@ def test_benchmark_picker_only_opens_in_edit_mode():
     assert ".pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }" in styles
 
 
+def test_nav_chart_shows_selected_benchmark_beta_overlay():
+    trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    assert "function _computeReturnBeta" in trends
+    assert "function _navBenchmarkBeta" in trends
+    assert "function _updateNavBetaOverlay" in trends
+    assert "NAV beta vs selected benchmark" in trends
+    assert "\\u03b2" in trends
+    assert "_updateNavBetaOverlay(labels, navValues, benchCodes, fullWindow.startIdx, fullWindow.endIdx);" in trends
+    assert "_updateNavBetaOverlay(labels, navValues, benchCodes, startIdx, endIdx);" in trends
+    assert ".pf-nav-beta-overlay" in styles
+    assert ".pf-nav-beta-chip" in styles
+
+
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")

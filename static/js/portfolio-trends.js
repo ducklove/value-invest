@@ -189,6 +189,74 @@ function _updateChartRangeLabel(elId, data, startIdx, endIdx) {
   el.innerHTML = `표시 기간 <strong>${escapeHtml(start)} ~ ${escapeHtml(end)}</strong><span>${days.toLocaleString()}일 · ${points.toLocaleString()}개 스냅샷</span>`;
 }
 
+function _computeReturnBeta(pairs) {
+  const n = pairs?.length || 0;
+  if (n < 20) return null;
+  const meanNav = pairs.reduce((sum, p) => sum + p.nav, 0) / n;
+  const meanBench = pairs.reduce((sum, p) => sum + p.bench, 0) / n;
+  let cov = 0;
+  let variance = 0;
+  pairs.forEach(p => {
+    const navDiff = p.nav - meanNav;
+    const benchDiff = p.bench - meanBench;
+    cov += navDiff * benchDiff;
+    variance += benchDiff * benchDiff;
+  });
+  if (!(variance > 0)) return null;
+  return cov / variance;
+}
+
+function _navBenchmarkBeta(labels, navValues, ratioMap, startIdx, endIdx) {
+  const pairs = [];
+  let prevNav = null;
+  let prevBench = null;
+  const last = Math.min(labels.length - 1, endIdx);
+  for (let i = Math.max(0, startIdx); i <= last; i++) {
+    const nav = Number(navValues[i]);
+    const bench = Number(ratioMap?.[labels[i]]);
+    if (!(nav > 0) || !(bench > 0)) continue;
+    if (prevNav !== null && prevBench !== null) {
+      pairs.push({ nav: nav / prevNav - 1, bench: bench / prevBench - 1 });
+    }
+    prevNav = nav;
+    prevBench = bench;
+  }
+  return { beta: _computeReturnBeta(pairs), sampleSize: pairs.length };
+}
+
+function _formatBetaValue(beta) {
+  return Number.isFinite(beta) ? beta.toFixed(2) : '-';
+}
+
+function _updateNavBetaOverlay(labels, navValues, benchCodes, startIdx, endIdx) {
+  const container = document.getElementById('pfNavChart');
+  if (!container) return;
+  const rows = (benchCodes || [])
+    .filter(code => _benchRatios[code])
+    .map(code => ({
+      code,
+      label: _BENCH_LABELS[code] || code,
+      color: _BENCH_COLORS[code] || '#64748b',
+      ..._navBenchmarkBeta(labels, navValues, _benchRatios[code], startIdx, endIdx),
+    }));
+  let overlay = container.querySelector('.pf-nav-beta-overlay');
+  if (!rows.length) {
+    if (overlay) overlay.remove();
+    return;
+  }
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'pf-nav-beta-overlay';
+    container.appendChild(overlay);
+  }
+  overlay.title = 'NAV beta vs selected benchmark, based on daily returns in the visible chart range';
+  overlay.innerHTML = rows.map(row => {
+    const beta = _formatBetaValue(row.beta);
+    const hint = row.sampleSize < 20 ? ' title="Need at least 20 return points"' : '';
+    return `<span class="pf-nav-beta-chip"${hint} style="--beta-color:${row.color}"><span class="pf-nav-beta-dot"></span>${escapeHtml(row.label)} \u03b2 ${beta}</span>`;
+  }).join('');
+}
+
 async function renderNavChart(data) {
   const container = document.getElementById('pfNavChart');
   if (!container) return;
@@ -346,6 +414,7 @@ async function renderNavChart(data) {
   const fullWindow = _chartZoomWindow(labels.length, 0, 100);
   _applyVisibleYAxis(ec, _navChartSeriesForAxis, fullWindow.startIdx, fullWindow.endIdx, !!yZero);
   _updateChartRangeLabel('pfNavRange', data, fullWindow.startIdx, fullWindow.endIdx);
+  _updateNavBetaOverlay(labels, navValues, benchCodes, fullWindow.startIdx, fullWindow.endIdx);
 
   // On dataZoom change: (a) re-scale benchmark series to the new window,
   // (b) refresh the CAGR card so it reflects the visible period.
@@ -382,6 +451,7 @@ async function renderNavChart(data) {
         const zoomYZero = !!document.getElementById('pfNavYZero')?.checked;
         _applyVisibleYAxis(ec, _navChartSeriesForAxis, startIdx, endIdx, zoomYZero);
         _updateChartRangeLabel('pfNavRange', data, startIdx, endIdx);
+        _updateNavBetaOverlay(labels, navValues, benchCodes, startIdx, endIdx);
         _updateNavCagrCard(data, startIdx, endIdx);
       }, 80);
     });

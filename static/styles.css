@@ -1148,6 +1148,24 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border-radius: 8px;
   background: var(--surface);
 }
+.pf-nav-beta-overlay {
+  position: absolute; z-index: 5; top: 6px; left: 58px; right: 210px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  pointer-events: none;
+}
+.pf-nav-beta-chip {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 20px;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--beta-color) 36%, var(--border));
+  background: color-mix(in srgb, var(--surface) 88%, var(--beta-color));
+  color: var(--text); font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+.pf-nav-beta-dot {
+  width: 7px; height: 7px; border-radius: 999px;
+  background: var(--beta-color);
+}
 .pf-bench-chip { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; padding: 3px 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; color: var(--text-secondary); user-select: none; transition: all .15s; }
 .pf-bench-chip input { display: none; }
 .pf-bench-chip:has(input:checked) { background: var(--primary); color: #fff; border-color: var(--primary); }
