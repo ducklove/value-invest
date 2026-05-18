@@ -661,6 +661,7 @@ async def _fetch_cash_quote(stock_code: str) -> dict:
 
 
 _quote_cache = PortfolioQuoteCache()
+_WS_QUOTE_MAX_AGE_SECONDS = 90
 
 
 _ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 -> A200.AX)
@@ -701,7 +702,7 @@ async def _fetch_quote(
         if cached:
             return cached
     if not force_refresh and _is_dead(stock_code):
-        return _quote_cache.get_fallback(stock_code)
+        return _quote_cache.get_fallback(stock_code, mark_stale=True)
     if _is_cash_asset(stock_code):
         q = await _fetch_cash_quote(stock_code)
     elif stock_code == "KRX_GOLD":
@@ -709,11 +710,19 @@ async def _fetch_quote(
     elif stock_code in _CRYPTO_UPBIT_MAP:
         q = await _fetch_crypto_quote(stock_code)
     elif _is_korean_stock(stock_code):
-        q = _quote_from_ws(kis_ws_manager.get_cached_quote(stock_code)) if use_ws_cache else None
+        q = (
+            _quote_from_ws(
+                kis_ws_manager.get_cached_quote(stock_code),
+                max_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
+            )
+            if use_ws_cache
+            else None
+        )
         if not q:
             q = await stock_price.fetch_quote_snapshot(
                 stock_code,
                 use_ws_cache=use_ws_cache,
+                max_ws_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
             )
     else:
         # Use resolved ticker if available, otherwise try to resolve
@@ -727,17 +736,20 @@ async def _fetch_quote(
                 q = await _fetch_foreign_quote(resolved)
     if not _quote_cache.remember(stock_code, q):
         _mark_dead(stock_code)
-        fallback = _quote_cache.get_fallback(stock_code)
+        fallback = _quote_cache.get_fallback(stock_code, mark_stale=True)
         if fallback:
             return fallback
     return q
 
 
 def _cached_quote_for_code(code: str) -> dict:
-    ws_quote = _quote_from_ws(kis_ws_manager.get_cached_quote(code))
+    ws_quote = _quote_from_ws(
+        kis_ws_manager.get_cached_quote(code),
+        max_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
+    )
     if ws_quote:
         return ws_quote
-    return _quote_cache.get_cached(code)
+    return _quote_cache.get_fresh(code) or {}
 
 
 async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
@@ -761,7 +773,7 @@ async def _fill_snapshot_quotes(google_sub: str, items: list[dict]) -> None:
     values = {row["stock_code"]: row["market_value"] for row in rows}
     for item in items:
         quote = item.get("quote") or {}
-        if quote.get("price") is not None:
+        if quote.get("price") is not None and not quote.get("_stale"):
             continue
         value = values.get(item.get("stock_code"))
         qty = item.get("quantity")

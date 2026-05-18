@@ -1,4 +1,5 @@
 import unittest
+import time
 from unittest.mock import AsyncMock, patch
 
 import stock_price
@@ -75,8 +76,30 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
             "price": 1000,
             "change": 10,
             "change_pct": 1.0,
+            "ts": time.time(),
         }), patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock()) as get_quote:
             result = await stock_price.fetch_quote_snapshot("005930")
 
         get_quote.assert_not_awaited()
         self.assertEqual(result["price"], 1000)
+
+    async def test_fetch_quote_snapshot_ignores_old_ws_cache_by_default(self):
+        with patch("stock_price.kis_ws_manager.get_cached_quote", return_value={
+            "date": "20260518",
+            "price": 1000,
+            "change": 10,
+            "change_pct": 1.0,
+            "ts": time.time() - 120,
+        }), patch("stock_price.kis_ws_manager.active_market_code", return_value="J"), \
+             patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={
+                 "summary": {
+                     "current_price": "2000",
+                     "previous_close": "1980",
+                     "change": "20",
+                     "change_rate": "1.01",
+                 }
+             })) as get_quote:
+            result = await stock_price.fetch_quote_snapshot("005930")
+
+        get_quote.assert_awaited_once()
+        self.assertEqual(result["price"], 2000.0)

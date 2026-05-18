@@ -64,8 +64,9 @@ function _queuePortfolioQuotePaint() {
 }
 
 QuoteManager.onQuote = function(code, q) {
+  const usableQuote = quoteIsUsable(q);
   // 1) 분석 뷰 활성 종목
-  if (code === activeStockCode && q.price != null) {
+  if (code === activeStockCode && usableQuote) {
     renderQuoteSnapshot({
       date: q.date, price: q.price, previous_close: q.previous_close,
       change: q.change, change_pct: q.change_pct,
@@ -75,23 +76,23 @@ QuoteManager.onQuote = function(code, q) {
   // 2) 포트폴리오 종목. 가격이 실제 변경된 경우에만 flash 대상에 추가 —
   //    tick 수신 자체로 flash 하면 거래 활발한 종목이 계속 번쩍거려 거슬림.
   const pfItem = portfolioItems.find(i => i.stock_code === code);
-  if (pfItem && q.price != null) {
-    const prevPrice = pfItem.quote ? pfItem.quote.price : null;
-    pfItem.quote = { ...(pfItem.quote || {}), ...q };
+  if (pfItem && usableQuote) {
+    const prevPrice = quotePriceOrNull(pfItem.quote);
+    pfItem.quote = mergeQuoteSnapshot(pfItem.quote, q);
     if (prevPrice !== q.price) _pfFlashQueuedCodes.add(code);
     _pfQuoteQueuedCodes.add(code);
   }
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
-  if (isBenchmark && q.change_pct != null) {
+  if (isBenchmark && q.change_pct != null && q._stale !== true) {
     pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
     _pfBenchmarkQueuedCodes.add(code);
   }
-  if ((pfItem || isBenchmark) && q.price != null) {
+  if ((pfItem && usableQuote) || (isBenchmark && q._stale !== true)) {
     _queuePortfolioQuotePaint();
   }
   // 3) 사이드바
   const sbItem = recentListItems.find(i => i.stock_code === code);
-  if (sbItem && q.price != null) {
+  if (sbItem && usableQuote) {
     sbItem.quote_snapshot = { price: q.price, change: q.change, change_pct: q.change_pct };
     const wrapper = document.querySelector(`#recentList .sidebar-item[data-code="${code}"]`);
     if (wrapper) {

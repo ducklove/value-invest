@@ -145,11 +145,11 @@ const QuoteManager = {
   _getMissingCodes() {
     const missing = new Set();
     for (const i of portfolioItems) {
-      if (!i.quote || i.quote.price == null) missing.add(i.stock_code);
+      if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);
     }
     if (typeof recentListItems !== 'undefined' && Array.isArray(recentListItems)) {
       for (const i of recentListItems) {
-        if (!i.quote || i.quote.price == null) missing.add(i.stock_code);
+        if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);
       }
     }
     return [...missing];

@@ -3,6 +3,7 @@
 let _pfNavHistoryPromise = null;
 let _pfTodayStatePromise = null;
 const _PF_PORTFOLIO_SNAPSHOT_KEY = 'valueInvestPortfolioSnapshot:v2';
+const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;
 
 async function pfLoadNavHistory({ force = false } = {}) {
   if (!force && Array.isArray(pfNavHistory) && pfNavHistory.length) return pfNavHistory;
@@ -106,9 +107,9 @@ async function loadPortfolio() {
     }).catch(() => {});
     // Preserve existing quotes from previous load
     const prevQuotes = {};
-    portfolioItems.forEach(i => { if (i.quote && i.quote.price != null) prevQuotes[i.stock_code] = i.quote; });
+    portfolioItems.forEach(i => { if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote; });
     portfolioItems = freshItems.map(item => {
-      if (!item.quote || item.quote.price == null) item.quote = prevQuotes[item.stock_code] || item.quote;
+      if (!quoteIsUsable(item.quote)) item.quote = prevQuotes[item.stock_code] || item.quote;
       return item;
     });
     _savePortfolioSnapshot(portfolioItems);
@@ -124,7 +125,12 @@ function _restorePortfolioSnapshotForFastPaint() {
   try {
     const snapshot = JSON.parse(localStorage.getItem(_PF_PORTFOLIO_SNAPSHOT_KEY) || 'null');
     if (!snapshot || !Array.isArray(snapshot.items) || !snapshot.items.length) return;
-    portfolioItems = snapshot.items;
+    const savedAt = Number(snapshot.savedAt || 0);
+    const quotesExpired = !savedAt || (Date.now() - savedAt) > _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS;
+    portfolioItems = snapshot.items.map(item => {
+      if (!quotesExpired || !item.quote) return item;
+      return { ...item, quote: { ...item.quote, _stale: true } };
+    });
     renderPortfolio();
     _updateQuoteSubscriptions();
   } catch (e) { console.warn(e); }
@@ -232,15 +238,15 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
   if (!item) return;
 
   const q = item.quote || {};
-  const price = q.price ?? null;
-  const change = q.change ?? 0;
-  const changePct = q.change_pct ?? null;
+  const price = quotePriceOrNull(q);
+  const change = price !== null ? (q.change ?? 0) : 0;
+  const changePct = price !== null ? (q.change_pct ?? null) : null;
   const qty = item.quantity;
   const avgPrice = item.avg_price;
   const marketValue = price !== null ? qty * price : null;
   const rawReturn = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
   const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;
-  const tradingValue = (q.trade_value !== undefined && q.trade_value !== null) ? Number(q.trade_value) : null;
+  const tradingValue = (price !== null && q.trade_value !== undefined && q.trade_value !== null) ? Number(q.trade_value) : null;
   const trailingDps = item.trailing_dps ?? null;
   const dividendYield = (trailingDps !== null && price !== null && price > 0 && qty > 0)
     ? (trailingDps / price * 100) : null;

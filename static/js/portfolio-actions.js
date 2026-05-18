@@ -570,7 +570,7 @@ async function _ensureExternalQuotes(codes) {
     if (!resp.ok) return;
     const data = await resp.json();
     for (const [code, q] of Object.entries(data)) {
-      if (q && q.price != null) {
+      if (quoteIsUsable(q)) {
         _EXTERNAL_QUOTE_CACHE[code] = { price: Number(q.price), ts: Date.now() };
       }
     }
@@ -586,7 +586,7 @@ async function _ensureExternalQuotes(codes) {
 function _preferredCommonPriceForItem(item, allItems) {
   const commonCode = _preferredCommonCodeFor(item.stock_code);
   const commonItem = allItems.find(i => i.stock_code === commonCode);
-  const commonPrice = commonItem?.quote?.price;
+  const commonPrice = quotePriceOrNull(commonItem?.quote);
   if (commonPrice != null) return Number(commonPrice);
   const cached = _EXTERNAL_QUOTE_CACHE[commonCode];
   return cached && cached.price != null ? Number(cached.price) : null;
@@ -601,7 +601,7 @@ function _holdingValueForItem(item, allItems) {
   for (const sub of meta.subsidiaries || []) {
     const cached = _EXTERNAL_QUOTE_CACHE[sub.code];
     const inPort = allItems.find(i => i.stock_code === sub.code);
-    const subPrice = inPort?.quote?.price ?? cached?.price;
+    const subPrice = quotePriceOrNull(inPort?.quote) ?? cached?.price;
     if (subPrice == null) return fallback;
     subTotal += Number(subPrice) * (sub.sharesHeld || 0);
   }

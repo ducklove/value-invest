@@ -209,6 +209,26 @@ def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
     assert "this._getStaleWsCodes().forEach(c => allCodes.add(c));" in source
 
 
+def test_frontend_treats_stale_quotes_as_missing_current_prices():
+    utils = (JS / "utils.js").read_text(encoding="utf-8")
+    quote_manager = (JS / "quote-manager.js").read_text(encoding="utf-8")
+    app_main = (JS / "app-main.js").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+
+    assert "function quoteIsUsable(q)" in utils
+    assert "q._stale !== true" in utils
+    assert "function quotePriceOrNull(q)" in utils
+    assert "function mergeQuoteSnapshot(current, incoming)" in utils
+    assert "if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);" in quote_manager
+    assert "pfItem.quote = mergeQuoteSnapshot(pfItem.quote, q);" in app_main
+    assert "const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;" in data
+    assert "quote: { ...item.quote, _stale: true }" in data
+    assert "if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote;" in data
+    assert "const price = quotePriceOrNull(q);" in data
+    assert "const price = quotePriceOrNull(q);" in render
+
+
 def test_benchmark_picker_only_opens_in_edit_mode():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")

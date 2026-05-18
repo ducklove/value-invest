@@ -74,9 +74,9 @@ function renderPortfolio(options = {}) {
   const allRows = portfolioItems.map(item => {
     const q = item.quote || {};
     const cur = item.currency || 'KRW';
-    const price = q.price ?? null;
-    const change = q.change ?? 0;
-    const changePct = q.change_pct ?? null;
+    const price = quotePriceOrNull(q);
+    const change = price !== null ? (q.change ?? 0) : 0;
+    const changePct = price !== null ? (q.change_pct ?? null) : null;
     const qty = item.quantity;
     const avgPrice = item.avg_price; // already in KRW
     const invested = qty * avgPrice;
@@ -96,7 +96,7 @@ function renderPortfolio(options = {}) {
     // 주식 경로 (KIS WS + HTTP) 에서만 전달. 해외/현금/금/크립토는
     // null → UI 에서 '-' 로 렌더. 추후 yfinance / Naver world / KIS
     // 해외 경로에서도 채우면 자동 적용됨.
-    const tradingValue = (q.trade_value !== undefined && q.trade_value !== null)
+    const tradingValue = (price !== null && q.trade_value !== undefined && q.trade_value !== null)
       ? Number(q.trade_value)
       : null;
     const trailingDps = item.trailing_dps ?? null;

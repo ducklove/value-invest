@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import date, datetime, timedelta
 from statistics import median
 
@@ -23,6 +24,7 @@ import dart_client
 logger = logging.getLogger(__name__)
 
 KRW_PER_EOK = 100_000_000
+WS_QUOTE_MAX_AGE_SECONDS = 90
 
 
 def _safe_float(value, *, zero_as_none: bool = True):
@@ -52,6 +54,16 @@ def _quote_summary(payload: dict | None) -> dict:
         return {}
     summary = payload.get("summary")
     return summary if isinstance(summary, dict) else payload
+
+
+def _ws_quote_is_recent(ws_quote: dict | None, max_age_seconds: float | None) -> bool:
+    if max_age_seconds is None:
+        return True
+    try:
+        ts = float(ws_quote["ts"]) if isinstance(ws_quote, dict) else None
+    except (KeyError, TypeError, ValueError):
+        return False
+    return ts is not None and (time.time() - ts) <= max_age_seconds
 
 
 def _safe_div(numerator, denominator, multiply=1.0):
@@ -909,9 +921,18 @@ async def fetch_weekly_market_data(
     return results
 
 
-async def fetch_quote_snapshot(stock_code: str, *, use_ws_cache: bool = True) -> dict:
+async def fetch_quote_snapshot(
+    stock_code: str,
+    *,
+    use_ws_cache: bool = True,
+    max_ws_age_seconds: float | None = WS_QUOTE_MAX_AGE_SECONDS,
+) -> dict:
     ws_quote = kis_ws_manager.get_cached_quote(stock_code) if use_ws_cache else None
-    if ws_quote and ws_quote.get("price") is not None:
+    if (
+        ws_quote
+        and ws_quote.get("price") is not None
+        and _ws_quote_is_recent(ws_quote, max_ws_age_seconds)
+    ):
         return {
             "date": ws_quote.get("date", date.today().isoformat()),
             "price": ws_quote["price"],

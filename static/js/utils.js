@@ -48,6 +48,20 @@ function removeGuestRecent(stockCode) {
   localStorage.setItem(GUEST_RECENT_KEY, JSON.stringify(list));
 }
 
+function quoteIsUsable(q) {
+  return !!q && q.price !== null && q.price !== undefined && q._stale !== true;
+}
+
+function quotePriceOrNull(q) {
+  return quoteIsUsable(q) ? q.price : null;
+}
+
+function mergeQuoteSnapshot(current, incoming) {
+  const next = { ...(current || {}), ...(incoming || {}) };
+  if (!incoming || incoming._stale !== true) delete next._stale;
+  return next;
+}
+
 function flashEl(el) {
   if (!el) return;
   el.classList.remove('flash-update');

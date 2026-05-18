@@ -7,9 +7,20 @@ from typing import Any
 QUOTE_CACHE_TTL = 60
 
 
-def quote_from_ws(ws_quote: dict[str, Any] | None) -> dict[str, Any] | None:
+def quote_from_ws(
+    ws_quote: dict[str, Any] | None,
+    *,
+    max_age_seconds: float | None = None,
+) -> dict[str, Any] | None:
     if not ws_quote or ws_quote.get("price") is None:
         return None
+    if max_age_seconds is not None:
+        try:
+            ts = float(ws_quote["ts"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if (time.time() - ts) > max_age_seconds:
+            return None
     return {
         "date": ws_quote.get("date", ""),
         "price": ws_quote["price"],

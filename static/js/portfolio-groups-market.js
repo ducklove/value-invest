@@ -100,8 +100,8 @@ function renderGroupModalBody() {
     if (!stats[gn]) stats[gn] = { cnt: 0, invested: 0, mv: 0, prevMV: 0 };
     const s = stats[gn];
     const q = i.quote || {};
-    const price = q.price ?? null;
-    const change = q.change ?? 0;
+    const price = quotePriceOrNull(q);
+    const change = price !== null ? (q.change ?? 0) : 0;
     const qty = i.quantity;
     const avgPrice = i.avg_price;
     s.cnt++;
