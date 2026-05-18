@@ -53,7 +53,7 @@ function quoteIsUsable(q) {
 }
 
 function quotePriceOrNull(q) {
-  return quoteIsUsable(q) ? q.price : null;
+  return q && q.price !== null && q.price !== undefined ? q.price : null;
 }
 
 function mergeQuoteSnapshot(current, incoming) {

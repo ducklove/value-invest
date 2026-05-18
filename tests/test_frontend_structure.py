@@ -209,7 +209,7 @@ def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
     assert "this._getStaleWsCodes().forEach(c => allCodes.add(c));" in source
 
 
-def test_frontend_treats_stale_quotes_as_missing_current_prices():
+def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     utils = (JS / "utils.js").read_text(encoding="utf-8")
     quote_manager = (JS / "quote-manager.js").read_text(encoding="utf-8")
     app_main = (JS / "app-main.js").read_text(encoding="utf-8")
@@ -219,8 +219,13 @@ def test_frontend_treats_stale_quotes_as_missing_current_prices():
     assert "function quoteIsUsable(q)" in utils
     assert "q._stale !== true" in utils
     assert "function quotePriceOrNull(q)" in utils
+    assert "return q && q.price !== null && q.price !== undefined ? q.price : null;" in utils
     assert "function mergeQuoteSnapshot(current, incoming)" in utils
     assert "if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);" in quote_manager
+    assert "const QUOTE_MANAGER_BATCH_SIZE = 8;" in quote_manager
+    assert "const QUOTE_MANAGER_BATCH_PARALLEL = 2;" in quote_manager
+    assert "await this._fetchQuotes(wsCodes, { fresh: false, scheduleRetry: false });" in quote_manager
+    assert "await this._fetchQuotes(missing, { fresh: true });" in quote_manager
     assert "pfItem.quote = mergeQuoteSnapshot(pfItem.quote, q);" in app_main
     assert "const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;" in data
     assert "quote: { ...item.quote, _stale: true }" in data

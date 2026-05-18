@@ -3,6 +3,8 @@ const QUOTE_MANAGER_STALE_WS_MS = 55_000;
 const QUOTE_MANAGER_GENERAL_POLL_MS = 60_000;
 const QUOTE_MANAGER_OVERFLOW_POLL_MS = 30_000;
 const QUOTE_MANAGER_RETRY_MS = 5_000;
+const QUOTE_MANAGER_BATCH_SIZE = 8;
+const QUOTE_MANAGER_BATCH_PARALLEL = 2;
 const QUOTE_MANAGER_PRIORITY_CODES = new Set(['A200', 'A200.AX', 'EUN2', 'EUN2.DE']);
 
 const QuoteManager = {
@@ -17,6 +19,7 @@ const QuoteManager = {
   generalPollTimer: null,
   wsActive: false,      // true when this session owns the active WS slot
   onQuote: null,
+  inflightCodes: new Set(),
 
   connect() {
     if (this.ws) return;
@@ -73,6 +76,7 @@ const QuoteManager = {
     this.wsCodes = new Set();
     this.overflowCodes = [];
     this.lastWsQuoteAt = {};
+    this.inflightCodes.clear();
   },
 
   _scheduleReconnect() {
@@ -119,15 +123,13 @@ const QuoteManager = {
     return /^\d/.test(String(code || '')) ? 2 : 1;
   },
 
-  async _fetchQuotes(codes, { fresh = true } = {}) {
-    const uniqueCodes = [...new Set((codes || []).filter(Boolean))]
-      .sort((a, b) => this._quotePriority(a) - this._quotePriority(b));
-    if (!uniqueCodes.length) return;
+  async _fetchQuoteBatch(codes, { fresh = true } = {}) {
+    codes.forEach(code => this.inflightCodes.add(code));
     try {
       const resp = await apiFetch('/api/asset-quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codes: uniqueCodes, fresh }),
+        body: JSON.stringify({ codes, fresh }),
       });
       if (!resp.ok) return;
       const data = await resp.json();
@@ -138,8 +140,30 @@ const QuoteManager = {
       }
     } catch {
       /* Keep quote polling best-effort; portfolio rendering must not wait. */
+    } finally {
+      codes.forEach(code => this.inflightCodes.delete(code));
     }
-    this._scheduleRetry();
+  },
+
+  async _fetchQuotes(codes, { fresh = true, scheduleRetry = true } = {}) {
+    const uniqueCodes = [...new Set((codes || []).filter(Boolean))]
+      .filter(code => !this.inflightCodes.has(code))
+      .sort((a, b) => this._quotePriority(a) - this._quotePriority(b));
+    if (!uniqueCodes.length) return;
+    const batches = [];
+    for (let i = 0; i < uniqueCodes.length; i += QUOTE_MANAGER_BATCH_SIZE) {
+      batches.push(uniqueCodes.slice(i, i + QUOTE_MANAGER_BATCH_SIZE));
+    }
+    let nextBatch = 0;
+    const workerCount = Math.min(QUOTE_MANAGER_BATCH_PARALLEL, batches.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (nextBatch < batches.length) {
+        const batch = batches[nextBatch++];
+        await this._fetchQuoteBatch(batch, { fresh });
+      }
+    });
+    await Promise.all(workers);
+    if (scheduleRetry) this._scheduleRetry();
   },
 
   _getMissingCodes() {
@@ -167,8 +191,13 @@ const QuoteManager = {
   },
 
   async _fetchInitialQuotes(wsCodes) {
-    await this._fetchQuotes(wsCodes, { fresh: false });
-    this._scheduleRetry();
+    await this._fetchQuotes(wsCodes, { fresh: false, scheduleRetry: false });
+    const missing = this._getMissingCodes();
+    if (missing.length) {
+      await this._fetchQuotes(missing, { fresh: true });
+    } else {
+      this._scheduleRetry();
+    }
   },
 
   async _pollOverflow() {

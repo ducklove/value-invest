@@ -1859,10 +1859,17 @@ _ASSET_QUOTES_CONCURRENCY = 16
 @router.post("/api/asset-quotes")
 async def asset_quotes_batch(payload: dict = Body(...)):
     """Fetch quotes for multiple codes in one request."""
-    codes = payload.get("codes", [])
-    if not isinstance(codes, list) or len(codes) > 100:
+    raw_codes = payload.get("codes", [])
+    if not isinstance(raw_codes, list) or len(raw_codes) > 100:
         raise HTTPException(status_code=400, detail="최대 100개까지 조회 가능합니다.")
-    codes = list({str(c).strip() for c in codes if str(c).strip()})
+    codes = []
+    seen_codes = set()
+    for raw in raw_codes:
+        code = str(raw).strip()
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
+        codes.append(code)
     fresh = bool(payload.get("fresh", True))
     if not fresh:
         return {code: _cached_quote_for_code(code) for code in codes}
