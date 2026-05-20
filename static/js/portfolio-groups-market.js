@@ -430,6 +430,88 @@ function _mbTogglePicker() {
   }, 0);
 }
 
+// --- Market Tape ---
+let marketTapeLoaded = false;
+let marketTapeLastRefresh = 0;
+
+function _mtEventClass(event) {
+  return [
+    'market-tape-item',
+    event.severity || 'info',
+    event.direction || 'flat',
+    event.type || '',
+  ].filter(Boolean).join(' ');
+}
+
+function _mtEventAction(event) {
+  if (event.url) return 'url';
+  if (event.stock_code) return 'stock';
+  return '';
+}
+
+function _mtRenderEvent(event, duplicate = false) {
+  const action = _mtEventAction(event);
+  const attrs = [
+    `class="${escapeHtml(_mtEventClass(event))}"`,
+    `data-badge="${escapeHtml(event.badge || '시장')}"`,
+    duplicate ? 'aria-hidden="true"' : '',
+    action ? `data-action="${escapeHtml(action)}"` : '',
+    event.stock_code ? `data-stock-code="${escapeHtml(event.stock_code)}"` : '',
+    event.url ? `data-url="${escapeHtml(safeExternalUrl(event.url))}"` : '',
+    event.type ? `data-type="${escapeHtml(event.type)}"` : '',
+  ].filter(Boolean).join(' ');
+  return `<span ${attrs}><span class="market-tape-text">${escapeHtml(event.text || event.label || '')}</span></span>`;
+}
+
+function renderMarketTape(data) {
+  const tape = document.getElementById('marketTape');
+  const track = document.getElementById('marketTapeTrack');
+  if (!tape || !track) return;
+
+  const events = Array.isArray(data?.events) ? data.events : [];
+  if (!events.length) {
+    track.innerHTML = '<span class="market-tape-item info" data-badge="시장"><span class="market-tape-text">표시할 시황 이벤트가 없습니다</span></span>';
+    return;
+  }
+
+  const primary = events.map(event => _mtRenderEvent(event)).join('');
+  const duplicate = events.length >= 4 ? events.map(event => _mtRenderEvent(event, true)).join('') : '';
+  track.innerHTML = primary + duplicate;
+
+  track.querySelectorAll('[data-action]').forEach(item => {
+    item.addEventListener('click', () => {
+      const url = item.getAttribute('data-url');
+      const code = item.getAttribute('data-stock-code');
+      if (url) {
+        window.open(url, '_blank', 'noopener');
+      } else if (code) {
+        switchView('analysis');
+        analyzeStock(code);
+      }
+    });
+  });
+
+  if (marketTapeLoaded) flashEl(tape);
+  marketTapeLoaded = true;
+}
+
+async function loadMarketTape(refresh = false) {
+  const btn = document.getElementById('marketTapeRefreshBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const url = `/api/market/tape${refresh ? '?refresh=true' : ''}`;
+    const resp = await apiFetch(url);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    marketTapeLastRefresh = Date.now();
+    renderMarketTape(data);
+  } catch (e) {
+    console.warn(e);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function loadMarketSummary() {
   try {
     if (!mbCodes.length) await _mbLoadCodes();

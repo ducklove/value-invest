@@ -11,26 +11,33 @@ import cache
 
 
 OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
+DEFAULT_PORTFOLIO_AI_MODEL = "~google/gemini-flash-latest"
 DEFAULT_WIKI_QA_MODEL = "moonshotai/kimi-k2.6"
 _MODEL_SETTING_PREFIX = "AI_MODEL::"
 _WIKI_QA_KIMI_MIGRATION_KEY = "AI_MIGRATION::wiki_qa_kimi_k2_6"
 _WIKI_QA_LEGACY_DEFAULT_MODELS = {"google/gemma-4-31b-it"}
+_PORTFOLIO_FLASH_MIGRATION_KEY = "AI_MIGRATION::portfolio_gemini_flash_latest"
+_PORTFOLIO_LEGACY_DEFAULT_MODELS: dict[str, set[str]] = {
+    "portfolio_fast": {"google/gemma-4-31b-it"},
+    "portfolio_balanced": {"qwen/qwen3.6-plus"},
+    "portfolio_premium": {"qwen/qwen3.6-plus"},
+}
 
 MODEL_FEATURES: dict[str, dict[str, str]] = {
     "portfolio_fast": {
         "label": "포트폴리오 인사이트 빠름",
         "env": "AI_FAST_MODEL",
-        "default": "google/gemma-4-31b-it",
+        "default": DEFAULT_PORTFOLIO_AI_MODEL,
     },
     "portfolio_balanced": {
         "label": "포트폴리오 인사이트 균형",
         "env": "AI_DEFAULT_MODEL",
-        "default": "qwen/qwen3.6-plus",
+        "default": DEFAULT_PORTFOLIO_AI_MODEL,
     },
     "portfolio_premium": {
         "label": "포트폴리오 인사이트 고급",
         "env": "AI_PREMIUM_MODEL",
-        "default": os.getenv("AI_DEFAULT_MODEL", "qwen/qwen3.6-plus"),
+        "default": os.getenv("AI_DEFAULT_MODEL", DEFAULT_PORTFOLIO_AI_MODEL),
     },
     "wiki_qa": {
         "label": "종목 위키 Q&A",
@@ -46,6 +53,11 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
         "label": "DART 정기보고서 리뷰",
         "env": "AI_DART_REVIEW_MODEL",
         "default": "deepseek/deepseek-v4-flash",
+    },
+    "market_daily": {
+        "label": "금일 시황",
+        "env": "AI_MARKET_DAILY_MODEL",
+        "default": "google/gemini-3.5-flash",
     },
 }
 
@@ -134,8 +146,7 @@ async def get_model_for_feature(feature: str) -> str:
     return _configured_default_model(spec)
 
 
-async def migrate_legacy_model_defaults() -> dict[str, Any]:
-    """One-shot migration for model defaults that were persisted in admin DB."""
+async def _migrate_legacy_wiki_qa_default() -> dict[str, Any]:
     feature = "wiki_qa"
     setting_key = _model_setting_key(feature)
     marker = await cache.get_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY)
@@ -156,6 +167,45 @@ async def migrate_legacy_model_defaults() -> dict[str, Any]:
         updated_by="system:migration",
     )
     return {"migrated": False, "reason": "no_legacy_value"}
+
+
+async def _migrate_legacy_portfolio_model_defaults() -> dict[str, Any]:
+    marker = await cache.get_app_setting(_PORTFOLIO_FLASH_MIGRATION_KEY)
+    if marker:
+        return {"migrated": False, "reason": "already_marked"}
+
+    migrated: list[str] = []
+    for feature, legacy_values in _PORTFOLIO_LEGACY_DEFAULT_MODELS.items():
+        stored = await cache.get_app_setting(_model_setting_key(feature))
+        stored_value = str((stored or {}).get("value") or "").strip()
+        target = _configured_default_model(MODEL_FEATURES[feature])
+        if stored_value in legacy_values and stored_value != target:
+            await cache.set_app_setting(
+                _model_setting_key(feature),
+                target,
+                updated_by="system:migration",
+            )
+            migrated.append(feature)
+
+    await cache.set_app_setting(
+        _PORTFOLIO_FLASH_MIGRATION_KEY,
+        ",".join(migrated) if migrated else "skipped",
+        updated_by="system:migration",
+    )
+    if migrated:
+        return {"migrated": True, "features": migrated, "to": DEFAULT_PORTFOLIO_AI_MODEL}
+    return {"migrated": False, "reason": "no_legacy_value"}
+
+
+async def migrate_legacy_model_defaults() -> dict[str, Any]:
+    """One-shot migrations for model defaults that were persisted in admin DB."""
+    wiki = await _migrate_legacy_wiki_qa_default()
+    portfolio = await _migrate_legacy_portfolio_model_defaults()
+    return {
+        "migrated": bool(wiki.get("migrated") or portfolio.get("migrated")),
+        "wiki_qa": wiki,
+        "portfolio": portfolio,
+    }
 
 
 async def model_profiles() -> dict[str, str]:
@@ -196,6 +246,26 @@ async def save_feature_models(models: dict[str, Any], actor: str | None):
         if not model:
             raise ValueError(f"{feature} model is required.")
         await cache.set_app_setting(_model_setting_key(feature), model, updated_by=actor)
+
+
+def openrouter_reasoning_controls(model: str) -> dict[str, Any]:
+    """Return conservative OpenRouter reasoning controls for user-facing text.
+
+    Some reasoning-capable models count hidden reasoning against the same
+    completion budget used for the visible answer. For short UI analyses we
+    prefer a small or disabled reasoning budget and hide reasoning content so
+    the browser reliably receives final text.
+    """
+    normalized = (model or "").lower()
+    if "gemini-3" in normalized:
+        return {
+            "reasoning": {"effort": "minimal", "exclude": True},
+            "include_reasoning": False,
+        }
+    return {
+        "reasoning": {"effort": "none", "exclude": True},
+        "include_reasoning": False,
+    }
 
 
 async def record_usage(

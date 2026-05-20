@@ -2617,9 +2617,11 @@ async def delete_cashflow(cf_id: int, request: Request):
 # AI Portfolio Analysis (OpenRouter)
 # ---------------------------------------------------------------------------
 
-_AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", "qwen/qwen3.6-plus")
-_AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", os.getenv("WIKI_QA_MODEL", "google/gemma-4-31b-it"))
+_PORTFOLIO_AI_DEFAULT_MODEL = "~google/gemini-flash-latest"
+_AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", _PORTFOLIO_AI_DEFAULT_MODEL)
+_AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", _PORTFOLIO_AI_DEFAULT_MODEL)
 _AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", _AI_DEFAULT_MODEL)
+_AI_MAX_TOKENS = int(os.getenv("PORTFOLIO_AI_MAX_TOKENS", "3200"))
 
 _AI_SYSTEM_PROMPT = """당신은 한국/해외 자산을 함께 보는 투자 리서치 어시스턴트입니다.
 규칙:
@@ -2850,7 +2852,15 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
 4. 리밸런싱/비중 조절 제안과 우선순위
 5. 추가로 확인해야 할 데이터 공백
 
-한국어로 간결하게 마크다운 형식으로 답변해 주세요."""
+답변 형식:
+- ## 핵심 판단: 3개 이내 bullet
+- ## 포트폴리오 점검: 편중, 수익률, 종목별 근거
+- ## 리스크와 촉매: 단기/중기 시나리오
+- ## 실행 우선순위: 우선순위가 높은 조치부터
+- ## 추가 확인 데이터: 부족한 데이터와 확인 방법
+
+각 섹션은 짧게 유지하고, 표는 꼭 필요할 때만 1개 이하로 쓰세요.
+HTML 태그는 쓰지 말고 한국어 마크다운으로만 답변해 주세요."""
 
     import json as _json
 
@@ -2861,6 +2871,16 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
         # until the model finishes. With stream() the first token reaches
         # the browser as soon as OpenRouter emits it.
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
+            request_payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": _AI_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": _AI_MAX_TOKENS,
+                "stream": True,
+                **ai_config.openrouter_reasoning_controls(model),
+            }
             async with client.stream(
                 "POST",
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -2868,15 +2888,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                     "Authorization": f"Bearer {openrouter_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": _AI_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "max_tokens": 2000,
-                    "stream": True,
-                },
+                json=request_payload,
             ) as resp:
                 if resp.status_code != 200:
                     # Need to consume body before httpx exposes it.

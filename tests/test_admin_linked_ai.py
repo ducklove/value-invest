@@ -129,7 +129,7 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 await ai_config.get_model_for_feature("portfolio_fast"),
-                "google/gemma-4-31b-it",
+                "~google/gemini-flash-latest",
             )
 
             await ai_config.save_feature_models({"wiki_qa": "openai/gpt-5.5"}, "admin@example.com")
@@ -153,6 +153,25 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertFalse(result["migrated"])
             self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "google/gemma-4-31b-it")
+
+    async def test_migrates_legacy_portfolio_defaults_once(self):
+        with patch.dict("os.environ", {}, clear=True):
+            await cache.set_app_setting("AI_MODEL::portfolio_fast", "google/gemma-4-31b-it", updated_by="admin@example.com")
+            await cache.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
+            await cache.set_app_setting("AI_MODEL::portfolio_premium", "qwen/qwen3.6-plus", updated_by="admin@example.com")
+
+            result = await ai_config.migrate_legacy_model_defaults()
+
+            self.assertTrue(result["migrated"])
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_fast"), "~google/gemini-flash-latest")
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "~google/gemini-flash-latest")
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_premium"), "~google/gemini-flash-latest")
+
+            await cache.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
+            result = await ai_config.migrate_legacy_model_defaults()
+
+            self.assertFalse(result["migrated"])
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "qwen/qwen3.6-plus")
 
     async def test_usage_summary_groups_by_feature_and_model(self):
         await ai_config.record_usage(
