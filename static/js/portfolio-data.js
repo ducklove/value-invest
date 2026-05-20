@@ -109,7 +109,12 @@ async function loadPortfolio() {
     const prevQuotes = {};
     portfolioItems.forEach(i => { if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote; });
     portfolioItems = freshItems.map(item => {
-      if (!quoteIsUsable(item.quote)) item.quote = prevQuotes[item.stock_code] || item.quote;
+      const prevQuote = prevQuotes[item.stock_code];
+      if (quoteIsUsable(prevQuote) && quoteIsUsable(item.quote)) {
+        item.quote = mergeQuoteSnapshot(prevQuote, item.quote);
+      } else if (!quoteIsUsable(item.quote)) {
+        item.quote = prevQuote || item.quote;
+      }
       return item;
     });
     _savePortfolioSnapshot(portfolioItems);

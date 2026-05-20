@@ -271,7 +271,11 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "q._stale !== true" in utils
     assert "function quotePriceOrNull(q)" in utils
     assert "return q && q.price !== null && q.price !== undefined ? q.price : null;" in utils
+    assert "function shouldAcceptQuoteSnapshot(current, incoming)" in utils
+    assert "if (incomingDate < currentDate) return false;" in utils
+    assert "quoteSourceRank(incoming) < quoteSourceRank(current)" in utils
     assert "function mergeQuoteSnapshot(current, incoming)" in utils
+    assert "if (!shouldAcceptQuoteSnapshot(current, incoming)) return { ...(current || {}) };" in utils
     assert "if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);" in quote_manager
     assert "const QUOTE_MANAGER_BATCH_SIZE = 8;" in quote_manager
     assert "const QUOTE_MANAGER_BATCH_PARALLEL = 2;" in quote_manager
@@ -281,6 +285,7 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;" in data
     assert "quote: { ...item.quote, _stale: true }" in data
     assert "if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote;" in data
+    assert "item.quote = mergeQuoteSnapshot(prevQuote, item.quote);" in data
     assert "const price = quotePriceOrNull(q);" in data
     assert "const price = quotePriceOrNull(q);" in render
 

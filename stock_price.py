@@ -964,6 +964,8 @@ async def fetch_quote_snapshot(
             # 시장 누적 거래대금 (원). WS 가 전달하는 값 그대로 — 파싱
             # 실패 시 None 이며 UI 는 '-' 로 렌더.
             "trade_value": ws_quote.get("trade_value"),
+            "source": "ws",
+            "ts": ws_quote.get("ts"),
         }
 
     end_date = date.today()
@@ -977,9 +979,11 @@ async def fetch_quote_snapshot(
         market = "J"
 
     quote_is_stale = False
+    effective_market = market
+    quote_source = "rest"
 
     async def _get_quote_with_nxt_fallback():
-        nonlocal quote_is_stale
+        nonlocal quote_is_stale, effective_market
         try:
             payload = await kis_proxy_client.get_quote(stock_code, market=market)
         except kis_proxy_client.KISProxyError as exc:
@@ -988,6 +992,7 @@ async def fetch_quote_snapshot(
                 # is the signal that the stock is not NXT-tradable.
                 logger.info("NXT quote failed; retrying KRX once for %s (%s)", stock_code, exc)
                 quote_is_stale = True
+                effective_market = "J"
                 return await kis_proxy_client.get_quote(stock_code, market="J")
             raise
 
@@ -1087,6 +1092,7 @@ async def fetch_quote_snapshot(
                 _get_first(history_items[-1], "stck_clpr", "close_price", "close"),
                 zero_as_none=False,
             )
+            quote_source = "history"
         if trade_value is None and history_items:
             trade_value = _safe_float(
                 _get_first(history_items[-1], "acml_tr_pbmn", "trade_amount", "trading_value"),
@@ -1104,6 +1110,9 @@ async def fetch_quote_snapshot(
         "change": change,
         "change_pct": change_pct,
         "trade_value": trade_value,
+        "source": quote_source,
+        "market": effective_market,
+        "fetched_at": datetime.now().isoformat(),
     }
     if quote_is_stale:
         result["_stale"] = True

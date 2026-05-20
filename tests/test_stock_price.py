@@ -237,6 +237,7 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
         get_quote.assert_not_awaited()
         self.assertEqual(result["price"], 1000)
+        self.assertEqual(result["source"], "ws")
 
     async def test_fetch_quote_snapshot_ignores_old_ws_cache_by_default(self):
         with patch("stock_price.kis_ws_manager.get_cached_quote", return_value={
@@ -282,6 +283,8 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         get_quote.assert_awaited_once_with("000660", market="NX")
         self.assertEqual(result["price"], 1786000.0)
         self.assertEqual(result["change_pct"], 2.35)
+        self.assertEqual(result["source"], "rest")
+        self.assertEqual(result["market"], "NX")
 
     async def test_fetch_quote_snapshot_does_not_mark_nxt_unsupported_on_error(self):
         get_quote = AsyncMock(side_effect=[
@@ -325,3 +328,4 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["previous_close"], 1980.0)
         self.assertEqual(result["change"], 20.0)
         self.assertEqual(result["trade_value"], 123456.0)
+        self.assertEqual(result["source"], "history")

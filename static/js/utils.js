@@ -56,7 +56,42 @@ function quotePriceOrNull(q) {
   return q && q.price !== null && q.price !== undefined ? q.price : null;
 }
 
+function quoteSnapshotDateValue(q) {
+  const raw = q && q.date;
+  if (!raw) return null;
+  const text = String(raw);
+  let parsed = NaN;
+  if (/^\d{8}$/.test(text)) {
+    parsed = Date.UTC(Number(text.slice(0, 4)), Number(text.slice(4, 6)) - 1, Number(text.slice(6, 8)));
+  } else {
+    parsed = Date.parse(text);
+  }
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function quoteSourceRank(q) {
+  if (!q || q._stale === true) return 0;
+  const source = String(q.source || q._source || '').toLowerCase();
+  if (source.includes('ws')) return 4;
+  if (source.includes('rest') || source.includes('quote')) return 3;
+  if (source.includes('history')) return 1;
+  return 2;
+}
+
+function shouldAcceptQuoteSnapshot(current, incoming) {
+  if (!incoming || incoming.price === null || incoming.price === undefined) return false;
+  if (incoming._stale === true && quoteIsUsable(current)) return false;
+  const currentDate = quoteSnapshotDateValue(current);
+  const incomingDate = quoteSnapshotDateValue(incoming);
+  if (currentDate !== null && incomingDate !== null) {
+    if (incomingDate < currentDate) return false;
+    if (incomingDate === currentDate && quoteSourceRank(incoming) < quoteSourceRank(current)) return false;
+  }
+  return true;
+}
+
 function mergeQuoteSnapshot(current, incoming) {
+  if (!shouldAcceptQuoteSnapshot(current, incoming)) return { ...(current || {}) };
   const next = { ...(current || {}), ...(incoming || {}) };
   if (!incoming || incoming._stale !== true) delete next._stale;
   return next;

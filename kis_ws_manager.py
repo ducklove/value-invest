@@ -210,6 +210,7 @@ def _parse_h0stcnt0(raw: str) -> dict[str, Any] | None:
 
         return {
             "code": code,
+            "date": business_date,
             "trade_time": trade_time,
             "price": price,
             "change_sign": sign,
@@ -218,6 +219,8 @@ def _parse_h0stcnt0(raw: str) -> dict[str, Any] | None:
             "volume": volume,
             "trade_value": trade_value,
             "business_date": business_date,
+            "source": "ws",
+            "market": "NX" if tr_id == "H0NXCNT0" else "J",
             "ts": time.time(),
         }
     except (ValueError, IndexError) as exc:

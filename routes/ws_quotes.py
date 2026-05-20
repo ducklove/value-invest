@@ -56,8 +56,14 @@ async def ws_quotes(websocket: WebSocket):
     session = _Session()
 
     try:
-        # Send all currently cached quotes on connect
-        cached = kis_ws_manager.get_all_cached_quotes()
+        # Send cached WS quotes only when the active WS market matches the
+        # REST market. After NXT closes, KRX WS cache can be older than the
+        # final NXT REST quote and must not repaint the browser backwards.
+        cached = (
+            kis_ws_manager.get_all_cached_quotes()
+            if kis_ws_manager.ws_cache_matches_rest_market()
+            else {}
+        )
         for quote in cached.values():
             await websocket.send_json({"type": "quote", **quote})
 

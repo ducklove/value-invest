@@ -28,6 +28,8 @@ def quote_from_ws(
         "change": ws_quote.get("change"),
         "change_pct": ws_quote.get("change_pct"),
         "trade_value": ws_quote.get("trade_value"),
+        "source": "ws",
+        "ts": ws_quote.get("ts"),
     }
 
 

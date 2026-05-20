@@ -16,6 +16,7 @@ def test_quote_from_ws_normalizes_realtime_payload():
         "change": 10,
         "change_pct": 1.01,
         "trade_value": 123456,
+        "ts": 123.0,
     }) == {
         "date": "20260509",
         "price": 1000,
@@ -23,6 +24,8 @@ def test_quote_from_ws_normalizes_realtime_payload():
         "change": 10,
         "change_pct": 1.01,
         "trade_value": 123456,
+        "source": "ws",
+        "ts": 123.0,
     }
     assert quotes.quote_from_ws({"price": None}) is None
     assert quotes.quote_from_ws(None) is None
@@ -78,6 +81,24 @@ def test_cached_quote_for_code_ignores_stale_polling_cache():
     with patch.object(portfolio_route, "_quote_cache", cache), \
          patch.object(portfolio_route.kis_ws_manager, "get_cached_quote", return_value=None):
         assert portfolio_route._cached_quote_for_code("005930") == {}
+
+
+def test_cached_quote_for_code_ignores_ws_cache_when_market_differs():
+    cache = quotes.PortfolioQuoteCache(ttl_seconds=60)
+    cache.remember("000660", {"price": 1818000, "source": "rest", "market": "NX"})
+
+    with patch.object(portfolio_route, "_quote_cache", cache), \
+         patch.object(portfolio_route.kis_ws_manager, "ws_cache_matches_rest_market", return_value=False), \
+         patch.object(portfolio_route.kis_ws_manager, "get_cached_quote", return_value={
+             "date": "20260521",
+             "price": 1745000,
+             "ts": time.time(),
+         }):
+        assert portfolio_route._cached_quote_for_code("000660") == {
+            "price": 1818000,
+            "source": "rest",
+            "market": "NX",
+        }
 
 
 @pytest.mark.asyncio

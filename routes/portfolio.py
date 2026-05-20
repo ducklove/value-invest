@@ -746,12 +746,13 @@ async def _fetch_quote(
 
 
 def _cached_quote_for_code(code: str) -> dict:
-    ws_quote = _quote_from_ws(
-        kis_ws_manager.get_cached_quote(code),
-        max_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
-    )
-    if ws_quote:
-        return ws_quote
+    if kis_ws_manager.ws_cache_matches_rest_market():
+        ws_quote = _quote_from_ws(
+            kis_ws_manager.get_cached_quote(code),
+            max_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
+        )
+        if ws_quote:
+            return ws_quote
     return _quote_cache.get_fresh(code) or {}
 
 
