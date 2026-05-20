@@ -82,7 +82,10 @@ def _empty_series():
 def _get_history_close_series(history):
     if pd is None or history is None or history.empty:
         return _empty_series()
-    for column in ("Adj Close", "Close"):
+    # Annual/weekly charts show stock price, not total-return adjusted price.
+    # Yahoo Adj Close can become negative for old Korean pre-split histories
+    # after dividend adjustments; Close is the safer fallback price series.
+    for column in ("Close", "Adj Close"):
         if column in history:
             return history[column]
     return _empty_series()

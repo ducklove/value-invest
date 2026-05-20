@@ -7,6 +7,8 @@ from stock_price import (
     _estimate_price_adjustment_factors,
     _adjust_dividends_by_price_factors,
     _build_dividend_events,
+    _get_history_close_series,
+    pd,
 )
 
 
@@ -89,6 +91,19 @@ class GroupCloseByYearTests(unittest.TestCase):
 
     def test_none(self):
         self.assertEqual(_group_close_by_year(None), {})
+
+
+@unittest.skipIf(pd is None, "pandas is not installed")
+class HistoryCloseSeriesTests(unittest.TestCase):
+    def test_prefers_close_over_negative_adj_close(self):
+        history = pd.DataFrame({
+            "Close": [84525.0],
+            "Adj Close": [-35781.39],
+        })
+
+        result = _get_history_close_series(history)
+
+        self.assertEqual(float(result.iloc[0]), 84525.0)
 
 
 class GroupDividendsByYearTests(unittest.TestCase):
