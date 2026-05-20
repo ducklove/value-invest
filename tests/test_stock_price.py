@@ -151,6 +151,7 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(get_quote.await_args_list[0].kwargs, {"market": "NX"})
         self.assertEqual(get_quote.await_args_list[1].kwargs, {"market": None})
         self.assertEqual(result["price"], 1745000.0)
+        self.assertEqual(result["_stale"], True)
 
     async def test_fetch_quote_snapshot_falls_back_to_history_when_quote_fails(self):
         with patch("stock_price.kis_ws_manager.get_cached_quote", return_value=None), \

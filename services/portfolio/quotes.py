@@ -72,6 +72,8 @@ class PortfolioQuoteCache:
     def remember(self, code: str, quote: dict[str, Any] | None) -> bool:
         if not quote or quote.get("price") is None:
             return False
+        if quote.get("_stale") is True:
+            return False
         snapshot = dict(quote)
         self._fresh[code] = (time.monotonic(), snapshot)
         self._last_known[code] = snapshot

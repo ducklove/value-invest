@@ -958,7 +958,10 @@ async def fetch_quote_snapshot(
     if market == "NX" and kis_ws_manager.is_nxt_unsupported(stock_code):
         market = None
 
+    quote_is_stale = False
+
     async def _get_quote_with_nxt_fallback():
+        nonlocal quote_is_stale
         try:
             payload = await kis_proxy_client.get_quote(stock_code, market=market)
         except kis_proxy_client.KISProxyError as exc:
@@ -966,6 +969,7 @@ async def fetch_quote_snapshot(
                 # Treat exceptions as transient; a zero/empty NX payload below
                 # is the signal that the stock is not NXT-tradable.
                 logger.info("NXT quote failed; retrying KRX once for %s (%s)", stock_code, exc)
+                quote_is_stale = True
                 return await kis_proxy_client.get_quote(stock_code, market=None)
             raise
 
@@ -1075,7 +1079,7 @@ async def fetch_quote_snapshot(
         change = round(latest_price - previous_close, 2)
         change_pct = _safe_div(latest_price - previous_close, previous_close, 100)
 
-    return {
+    result = {
         "date": (latest_history_date or end_date).isoformat(),
         "price": latest_price,
         "previous_close": previous_close,
@@ -1083,3 +1087,6 @@ async def fetch_quote_snapshot(
         "change_pct": change_pct,
         "trade_value": trade_value,
     }
+    if quote_is_stale:
+        result["_stale"] = True
+    return result

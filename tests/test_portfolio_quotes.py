@@ -63,6 +63,13 @@ def test_portfolio_quote_cache_ignores_empty_or_priceless_quotes():
     assert cache.get_cached("005930") == {}
 
 
+def test_portfolio_quote_cache_ignores_stale_quotes():
+    cache = quotes.PortfolioQuoteCache()
+
+    assert not cache.remember("005930", {"price": 1000, "_stale": True})
+    assert cache.get_cached("005930") == {}
+
+
 def test_cached_quote_for_code_ignores_stale_polling_cache():
     cache = quotes.PortfolioQuoteCache(ttl_seconds=0)
     cache.remember("005930", {"price": 1000})
