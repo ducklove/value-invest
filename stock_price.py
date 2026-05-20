@@ -953,10 +953,10 @@ async def fetch_quote_snapshot(
 
     market = kis_ws_manager.active_market_code()
     # Some KRX-listed stocks are not available on the NXT after-hours market.
-    # If we previously saw a 5xx for this code on NXT, skip straight to the
-    # default (KRX) market to avoid retrying a doomed call every poll.
+    # If we previously saw an empty NXT payload for this code, skip straight to
+    # KRX to avoid retrying a doomed call every poll.
     if market == "NX" and kis_ws_manager.is_nxt_unsupported(stock_code):
-        market = None
+        market = "J"
 
     quote_is_stale = False
 
@@ -970,7 +970,7 @@ async def fetch_quote_snapshot(
                 # is the signal that the stock is not NXT-tradable.
                 logger.info("NXT quote failed; retrying KRX once for %s (%s)", stock_code, exc)
                 quote_is_stale = True
-                return await kis_proxy_client.get_quote(stock_code, market=None)
+                return await kis_proxy_client.get_quote(stock_code, market="J")
             raise
 
         # Proxy now returns HTTP 200 with current_price=0 for NXT-unlisted
@@ -984,7 +984,7 @@ async def fetch_quote_snapshot(
             if price is None:
                 kis_ws_manager.mark_nxt_unsupported(stock_code)
                 logger.info("NXT 0가 응답 → NXT 미지원으로 표시 후 KRX 재시도: %s", stock_code)
-                return await kis_proxy_client.get_quote(stock_code, market=None)
+                return await kis_proxy_client.get_quote(stock_code, market="J")
         return payload
 
     # Issue the quote call first; only fall back to /history if the quote

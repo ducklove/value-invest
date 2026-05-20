@@ -1753,6 +1753,8 @@ async def asset_quotes_batch(payload: dict = Body(...)):
     async def _fetch_one(code):
         if code.startswith(_NON_QUOTABLE_PREFIXES):
             return code, {}
+        def fallback_quote() -> dict:
+            return _quote_cache.get_fallback(code, mark_stale=True)
         try:
             async with sem:
                 force_upstream = _is_korean_stock(code)
@@ -1766,9 +1768,9 @@ async def asset_quotes_batch(payload: dict = Body(...)):
                 )
             return code, q or {}
         except asyncio.CancelledError:
-            return code, {}
+            return code, fallback_quote()
         except (asyncio.TimeoutError, Exception):
-            return code, {}
+            return code, fallback_quote()
 
     tasks = [asyncio.create_task(_fetch_one(code)) for code in codes]
     done, pending = await asyncio.wait(tasks, timeout=_ASSET_QUOTES_BATCH_TIMEOUT)

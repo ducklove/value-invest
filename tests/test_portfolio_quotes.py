@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, patch
 import time
 
@@ -117,3 +118,22 @@ async def test_asset_quotes_batch_fresh_non_korean_quotes_keep_normal_cache_path
         force_refresh=False,
         use_ws_cache=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_asset_quotes_batch_returns_stale_fallback_on_fetch_timeout():
+    cache = quotes.PortfolioQuoteCache()
+    cache.remember("000660", {"price": 1786000})
+
+    with patch.object(portfolio_route, "_quote_cache", cache), \
+         patch.object(
+             portfolio_route,
+             "_fetch_quote",
+             new=AsyncMock(side_effect=asyncio.TimeoutError()),
+         ):
+        result = await portfolio_route.asset_quotes_batch({
+            "codes": ["000660"],
+            "fresh": True,
+        })
+
+    assert result == {"000660": {"price": 1786000, "_stale": True}}

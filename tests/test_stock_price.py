@@ -149,7 +149,7 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
         mark_unsupported.assert_not_called()
         self.assertEqual(get_quote.await_args_list[0].kwargs, {"market": "NX"})
-        self.assertEqual(get_quote.await_args_list[1].kwargs, {"market": None})
+        self.assertEqual(get_quote.await_args_list[1].kwargs, {"market": "J"})
         self.assertEqual(result["price"], 1745000.0)
         self.assertEqual(result["_stale"], True)
 
