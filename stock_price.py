@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover - optional dependency
 import kis_proxy_client
 import kis_ws_manager
 import dart_client
+import close_price_client
 
 
 logger = logging.getLogger(__name__)
@@ -736,6 +737,17 @@ async def fetch_market_data(
         for year, value in (dart_dividends_payload or {}).items()
         if value is not None
     }
+    local_close_by_year: dict[int, float] = {}
+    if not kis_close_by_year:
+        try:
+            local_close_items = await close_price_client.get_daily_price_items(
+                stock_code,
+                since=start_date,
+                until=end_date,
+            )
+            local_close_by_year = _group_close_by_year(local_close_items)
+        except Exception as exc:
+            logger.info("local daily close fallback failed (%s): %s", stock_code, exc)
 
     # Annual "price" should be a stock price, not Yahoo's total-return style
     # Adj Close. For some Korean pre-split histories (for example 000660
@@ -743,7 +755,7 @@ async def fetch_market_data(
     # adjustment. KIS adjusted history is split-adjusted and remains the
     # authoritative source for KR annual price charts; yfinance only fills
     # years KIS does not provide.
-    close_by_year = dict(kis_close_by_year)
+    close_by_year = dict(kis_close_by_year or local_close_by_year)
     for year, price in yfinance_close_by_year.items():
         if year not in close_by_year:
             close_by_year[year] = price
