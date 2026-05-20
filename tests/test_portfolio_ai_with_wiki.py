@@ -137,10 +137,16 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
         messages = payload.get("messages", [])
         prompt = messages[-1].get("content", "") if messages else ""
         self.assertEqual(payload.get("model"), "~google/gemini-flash-latest")
+        self.assertEqual(payload.get("max_tokens"), 4800)
+        self.assertEqual(payload.get("reasoning"), {"effort": "low", "exclude": True})
         self.assertEqual(messages[0].get("role"), "system")
         self.assertNotIn("종목별 리서치 요약", prompt)
         self.assertIn("HTML 태그는 쓰지 말고", prompt)
+        self.assertIn("판단 근거", prompt)
         self.assertEqual(done.get("wiki_used"), 0)
+        self.assertEqual(done.get("reasoning_effort"), "low")
+        self.assertEqual(done.get("context_holdings"), 15)
+        self.assertEqual(done.get("context_reports_per_holding"), 3)
 
     async def test_prompt_includes_wiki_when_entries_exist(self):
         await cache.save_wiki_entry({

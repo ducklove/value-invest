@@ -10,6 +10,17 @@ function _setPfAiStatus(text, state = 'idle') {
   status.dataset.state = state;
 }
 
+function _pfAiSectionKind(text) {
+  const title = String(text || '').replace(/^#+\s*/, '').trim();
+  if (title.includes('핵심') || title.includes('판단')) return title.includes('근거') ? 'rationale' : 'summary';
+  if (title.includes('점검') || title.includes('구성')) return 'portfolio';
+  if (title.includes('근거')) return 'rationale';
+  if (title.includes('리스크') || title.includes('촉매') || title.includes('시나리오')) return 'risk';
+  if (title.includes('실행') || title.includes('우선순위') || title.includes('리밸런싱')) return 'action';
+  if (title.includes('추가') || title.includes('데이터')) return 'data';
+  return 'default';
+}
+
 function _decoratePfAiResult(container) {
   if (!container || !container.children.length) return;
   const fragment = document.createDocumentFragment();
@@ -18,6 +29,7 @@ function _decoratePfAiResult(container) {
     if (/^H[1-4]$/.test(node.tagName)) {
       section = document.createElement('section');
       section.className = 'pf-ai-section';
+      section.dataset.kind = _pfAiSectionKind(node.textContent);
       const heading = document.createElement('div');
       heading.className = 'pf-ai-section-title';
       heading.appendChild(node);
@@ -130,7 +142,11 @@ async function runAiAnalysis() {
             const cost = costUsd ? ` · ${costKrw !== null ? costKrw.toLocaleString() + '원' : '$' + costUsd.toFixed(6)}` : '';
             const wikiN = Number(d.wiki_used || 0);
             const wikiTag = wikiN > 0 ? ` · 리포트 ${wikiN}건 참조` : '';
-            if (tokens) tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}${wikiTag}`;
+            const reasoning = d.reasoning_effort ? ` · 추론 ${d.reasoning_effort}` : '';
+            const contextN = Number(d.context_holdings || 0);
+            const reportsN = Number(d.context_reports_per_holding || 0);
+            const context = contextN ? ` · 컨텍스트 상위 ${contextN}종목${reportsN ? `×${reportsN}리포트` : ''}` : '';
+            if (tokens) tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}${wikiTag}${reasoning}${context}`;
             _setPfAiStatus('완료', 'done');
           }
         } catch {}

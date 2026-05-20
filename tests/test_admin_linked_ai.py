@@ -208,6 +208,15 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["calls"], 1)
         self.assertAlmostEqual(row["cost_usd"], 0.12)
 
+    def test_reasoning_controls_accept_feature_specific_effort(self):
+        controls = ai_config.openrouter_reasoning_controls("~google/gemini-flash-latest", effort="low")
+
+        self.assertEqual(controls["reasoning"], {"effort": "low", "exclude": True})
+        self.assertFalse(controls["include_reasoning"])
+
+        fallback = ai_config.openrouter_reasoning_controls("~google/gemini-flash-latest", effort="wild")
+        self.assertEqual(fallback["reasoning"], {"effort": "minimal", "exclude": True})
+
     async def test_preferred_dividend_rows_are_listed_for_admin_coverage(self):
         await cache.upsert_preferred_dividends([
             {

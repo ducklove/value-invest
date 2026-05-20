@@ -2621,7 +2621,11 @@ _PORTFOLIO_AI_DEFAULT_MODEL = "~google/gemini-flash-latest"
 _AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", _PORTFOLIO_AI_DEFAULT_MODEL)
 _AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", _PORTFOLIO_AI_DEFAULT_MODEL)
 _AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", _AI_DEFAULT_MODEL)
-_AI_MAX_TOKENS = int(os.getenv("PORTFOLIO_AI_MAX_TOKENS", "3200"))
+_AI_MAX_TOKENS = int(os.getenv("PORTFOLIO_AI_MAX_TOKENS", "4800"))
+_AI_REASONING_EFFORT = os.getenv("PORTFOLIO_AI_REASONING_EFFORT", "low").strip().lower()
+_AI_WIKI_HOLDING_LIMIT = int(os.getenv("PORTFOLIO_AI_WIKI_HOLDING_LIMIT", "15"))
+_AI_WIKI_ENTRY_LIMIT = int(os.getenv("PORTFOLIO_AI_WIKI_ENTRY_LIMIT", "3"))
+_AI_WIKI_KEYPOINT_CHARS = int(os.getenv("PORTFOLIO_AI_WIKI_KEYPOINT_CHARS", "600"))
 
 _AI_SYSTEM_PROMPT = """당신은 한국/해외 자산을 함께 보는 투자 리서치 어시스턴트입니다.
 규칙:
@@ -2726,8 +2730,8 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
     # Optional user inquiry/question to include in the prompt
     user_query = (payload.get("query") or "").strip()
     # Hard cap to avoid runaway prompt growth; anything sensible fits easily.
-    if len(user_query) > 2000:
-        user_query = user_query[:2000]
+    if len(user_query) > 4000:
+        user_query = user_query[:4000]
 
     google_sub = user["google_sub"]
     items = await cache.get_portfolio(google_sub=google_sub)
@@ -2783,9 +2787,9 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
     except Exception:
         market_lines = ["시장 데이터를 가져올 수 없습니다."]
 
-    # Per-holding wiki snippets. Cap at the 10 largest positions so the
-    # prompt stays bounded; each stock gets at most 2 recent wiki entries
-    # with just the key_points (not the full summary).
+    # Per-holding wiki snippets. Keep this bounded, but use enough context
+    # for the model to compare major positions instead of reacting only to
+    # the largest few holdings.
     wiki_lines: list[str] = []
     wiki_used_count = 0
     try:
@@ -2793,11 +2797,11 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
             (i for i in enriched if (i.get("quote", {}) or {}).get("price") and i.get("quantity")),
             key=lambda i: (i["quote"]["price"] or 0) * (i.get("quantity") or 0),
             reverse=True,
-        )[:10]
+        )[:_AI_WIKI_HOLDING_LIMIT]
         for item in ranked:
             code = item["stock_code"]
             name = item.get("stock_name") or code
-            entries = await cache.get_wiki_entries(code, limit=2)
+            entries = await cache.get_wiki_entries(code, limit=_AI_WIKI_ENTRY_LIMIT)
             if not entries:
                 continue
             wiki_lines.append(f"### {name} ({code})")
@@ -2816,7 +2820,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                 # prompt stays readable and compact.
                 flat = " ".join(line.lstrip("- \t") for line in key.splitlines() if line.strip())
                 if flat:
-                    head += f" {flat[:300]}"
+                    head += f" {flat[:_AI_WIKI_KEYPOINT_CHARS]}"
                 wiki_lines.append(head)
                 wiki_used_count += 1
     except Exception as _wiki_exc:
@@ -2855,11 +2859,13 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
 답변 형식:
 - ## 핵심 판단: 3개 이내 bullet
 - ## 포트폴리오 점검: 편중, 수익률, 종목별 근거
+- ## 판단 근거: 데이터에서 실제로 확인한 근거와 추정의 구분
 - ## 리스크와 촉매: 단기/중기 시나리오
 - ## 실행 우선순위: 우선순위가 높은 조치부터
 - ## 추가 확인 데이터: 부족한 데이터와 확인 방법
 
 각 섹션은 짧게 유지하고, 표는 꼭 필요할 때만 1개 이하로 쓰세요.
+내부 추론 과정은 노출하지 말고, 최종 판단의 근거 요약만 보여 주세요.
 HTML 태그는 쓰지 말고 한국어 마크다운으로만 답변해 주세요."""
 
     import json as _json
@@ -2879,7 +2885,7 @@ HTML 태그는 쓰지 말고 한국어 마크다운으로만 답변해 주세요
                 ],
                 "max_tokens": _AI_MAX_TOKENS,
                 "stream": True,
-                **ai_config.openrouter_reasoning_controls(model),
+                **ai_config.openrouter_reasoning_controls(model, effort=_AI_REASONING_EFFORT),
             }
             async with client.stream(
                 "POST",
@@ -2908,7 +2914,7 @@ HTML 태그는 쓰지 말고 한국어 마크다운으로만 답변해 주세요
                         error=msg,
                         latency_ms=int((time.perf_counter() - started_at) * 1000),
                     )
-                    yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'model_profile': model_profile, 'cost': 0, 'wiki_used': wiki_used_count})}\n\n"
+                    yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'model_profile': model_profile, 'cost': 0, 'wiki_used': wiki_used_count, 'reasoning_effort': _AI_REASONING_EFFORT, 'context_holdings': _AI_WIKI_HOLDING_LIMIT, 'context_reports_per_holding': _AI_WIKI_ENTRY_LIMIT})}\n\n"
                     return
 
                 input_tokens = 0
@@ -2954,6 +2960,6 @@ HTML 태그는 쓰지 말고 한국어 마크다운으로만 답변해 주세요
                     latency_ms=int((time.perf_counter() - started_at) * 1000),
                     ok=True,
                 )
-                yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'model_profile': model_profile, 'cost': cost, 'wiki_used': wiki_used_count})}\n\n"
+                yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'model_profile': model_profile, 'cost': cost, 'wiki_used': wiki_used_count, 'reasoning_effort': _AI_REASONING_EFFORT, 'context_holdings': _AI_WIKI_HOLDING_LIMIT, 'context_reports_per_holding': _AI_WIKI_ENTRY_LIMIT})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

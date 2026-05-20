@@ -72,10 +72,14 @@ def test_portfolio_ai_result_has_framed_output_contract():
 
     assert 'id="pfAiOutput"' in html
     assert 'id="pfAiStatus"' in html
+    assert "function _pfAiSectionKind" in source
     assert "function _decoratePfAiResult" in source
     assert "_renderPfAiMarkdown(result, mdText, { decorate: true" in source
+    assert "context_holdings" in source
     assert ".pf-ai-output" in styles
     assert ".pf-ai-section" in styles
+    assert '.pf-ai-section[data-kind="action"]' in styles
+    assert ".pf-ai-result:not(.pf-ai-empty)" in styles
 
 
 def test_today_card_does_not_fallback_to_quote_session_return():

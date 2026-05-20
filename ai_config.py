@@ -287,7 +287,7 @@ async def save_feature_models(models: dict[str, Any], actor: str | None):
         await cache.set_app_setting(_model_setting_key(feature), model, updated_by=actor)
 
 
-def openrouter_reasoning_controls(model: str) -> dict[str, Any]:
+def openrouter_reasoning_controls(model: str, *, effort: str | None = None) -> dict[str, Any]:
     """Return conservative OpenRouter reasoning controls for user-facing text.
 
     Some reasoning-capable models count hidden reasoning against the same
@@ -295,6 +295,16 @@ def openrouter_reasoning_controls(model: str) -> dict[str, Any]:
     prefer a small or disabled reasoning budget and hide reasoning content so
     the browser reliably receives final text.
     """
+    allowed_efforts = {"none", "minimal", "low", "medium", "high", "xhigh"}
+    requested_effort = str(effort or "").strip().lower()
+    if requested_effort:
+        if requested_effort not in allowed_efforts:
+            requested_effort = "minimal"
+        return {
+            "reasoning": {"effort": requested_effort, "exclude": True},
+            "include_reasoning": False,
+        }
+
     normalized = (model or "").lower()
     if "gemini-3" in normalized:
         return {
