@@ -6,6 +6,33 @@ import stock_price
 
 
 class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
+    def test_market_data_needs_refresh_when_cached_close_price_is_negative(self):
+        current_year = stock_price.datetime.now().year
+        self.assertTrue(stock_price.market_data_needs_refresh([
+            {
+                "year": 1989,
+                "close_price": 1000.0,
+                "per": 1,
+                "pbr": 1,
+                "eps": 1,
+                "bps": 1,
+                "dividend_per_share": 1,
+                "dividend_yield": 1,
+                "market_cap": 1,
+            },
+            {
+                "year": current_year - 1,
+                "close_price": -35781.39,
+                "per": 1,
+                "pbr": 1,
+                "eps": 1,
+                "bps": 1,
+                "dividend_per_share": 1,
+                "dividend_yield": 1,
+                "market_cap": 1,
+            },
+        ]))
+
     async def test_fetch_market_data_uses_financial_data_when_kis_financials_fail(self):
         with patch("stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
              patch("stock_price._group_close_by_year_series", return_value={2024: 1000.0}), \
@@ -52,6 +79,48 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["year"], 2025)
         self.assertEqual(result[0]["dividend_per_share"], 15000.0)
         self.assertEqual(result[0]["dividend_yield"], 3.57)
+
+    async def test_fetch_market_data_prefers_kis_adjusted_close_over_yfinance_adj_close(self):
+        with patch("stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
+             patch("stock_price._group_close_by_year_series", return_value={
+                 2000: -35781.39,
+                 2001: -24564.82,
+             }), \
+             patch("stock_price._group_last_by_year_series", return_value={}), \
+             patch("stock_price._group_sum_by_year_series", return_value={}), \
+             patch("stock_price._group_close_by_year", side_effect=[
+                 {2000: 79009.0, 2001: 47503.0},
+                 {2000: 4025.0, 2001: 2420.0},
+             ]), \
+             patch("stock_price._group_dividends_by_year", return_value={}), \
+             patch("stock_price.kis_proxy_client.get_history", new=AsyncMock(return_value={"items": []})), \
+             patch("stock_price.kis_proxy_client.get_dividends", new=AsyncMock(return_value={"items": []})), \
+             patch("stock_price.kis_proxy_client.get_financials", new=AsyncMock(return_value={})), \
+             patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={"summary": {"listed_shares": "100"}})):
+            result = await stock_price.fetch_market_data("000660", start_year=2000, end_year=2001)
+
+        by_year = {row["year"]: row for row in result}
+        self.assertEqual(by_year[2000]["close_price"], 79009.0)
+        self.assertEqual(by_year[2001]["close_price"], 47503.0)
+
+    async def test_fetch_market_data_prefers_kis_dividend_over_yfinance_dividend(self):
+        with patch("stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
+             patch("stock_price._group_close_by_year_series", return_value={2002: -3725.38}), \
+             patch("stock_price._group_last_by_year_series", return_value={}), \
+             patch("stock_price._group_sum_by_year_series", return_value={2002: 12600.01}), \
+             patch("stock_price._group_close_by_year", side_effect=[
+                 {2002: 5496.0},
+                 {2002: 280.0},
+             ]), \
+             patch("stock_price._group_dividends_by_year", return_value={2002: 0.0}), \
+             patch("stock_price.kis_proxy_client.get_history", new=AsyncMock(return_value={"items": []})), \
+             patch("stock_price.kis_proxy_client.get_dividends", new=AsyncMock(return_value={"items": []})), \
+             patch("stock_price.kis_proxy_client.get_financials", new=AsyncMock(return_value={})), \
+             patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={"summary": {"listed_shares": "100"}})):
+            result = await stock_price.fetch_market_data("000660", start_year=2002, end_year=2002)
+
+        self.assertEqual(result[0]["dividend_per_share"], 0.0)
+        self.assertEqual(result[0]["dividend_yield"], 0.0)
 
     async def test_fetch_quote_snapshot_can_bypass_stale_ws_cache(self):
         with patch("stock_price.kis_ws_manager.get_cached_quote", return_value={"price": 1000}), \

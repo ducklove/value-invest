@@ -295,7 +295,10 @@ def _group_dividends_by_year(items: list[dict] | None) -> dict[int, float]:
     grouped: dict[int, float] = {}
     for item in items:
         record_date = _parse_date(_get_first(item, "record_date", "dividend_date", "date"))
-        dividend = _safe_float(_get_first(item, "per_sto_divi_amt", "dividend_per_share", "cash_dividend_per_share"))
+        dividend = _safe_float(
+            _get_first(item, "per_sto_divi_amt", "dividend_per_share", "cash_dividend_per_share"),
+            zero_as_none=False,
+        )
         if record_date and dividend is not None:
             if latest_face:
                 item_face = _safe_float(_get_first(item, "face_val"), zero_as_none=False)
@@ -604,6 +607,11 @@ def _sum_trailing_dividends(
 def market_data_needs_refresh(data: list[dict]) -> bool:
     if not data:
         return True
+    if any(
+        row.get("close_price") is not None and row.get("close_price") <= 0
+        for row in data
+    ):
+        return True
     keys = ("per", "pbr", "eps", "bps", "dividend_per_share", "dividend_yield", "market_cap")
     if not any(row.get(key) is not None for row in data for key in keys):
         return True
@@ -706,7 +714,11 @@ async def fetch_market_data(
         dividends_series = _empty_series()
         splits_series = _empty_series()
 
-    close_by_year = _group_close_by_year_series(close_series)
+    yfinance_close_by_year = {
+        year: price
+        for year, price in _group_close_by_year_series(close_series).items()
+        if price is not None and price > 0
+    }
     split_events = _normalized_split_events(splits_series)
     shares_by_year = _adjust_shares_for_splits(_group_last_by_year_series(shares_series), split_events)
     yfinance_dividends_by_year = _group_sum_by_year_series(dividends_series)
@@ -724,18 +736,21 @@ async def fetch_market_data(
         if value is not None
     }
 
-    if not close_by_year:
-        close_by_year = kis_close_by_year
-    else:
-        # Fill years that yfinance doesn't cover with KIS data
-        for year, price in kis_close_by_year.items():
-            if year not in close_by_year:
-                close_by_year[year] = price
+    # Annual "price" should be a stock price, not Yahoo's total-return style
+    # Adj Close. For some Korean pre-split histories (for example 000660
+    # before 2003), Yahoo reports negative adjusted closes after dividend
+    # adjustment. KIS adjusted history is split-adjusted and remains the
+    # authoritative source for KR annual price charts; yfinance only fills
+    # years KIS does not provide.
+    close_by_year = dict(kis_close_by_year)
+    for year, price in yfinance_close_by_year.items():
+        if year not in close_by_year:
+            close_by_year[year] = price
 
     dividends_by_year = {
         year: dart_dividends_by_year.get(
             year,
-            yfinance_dividends_by_year.get(year, kis_dividends_by_year.get(year)),
+            kis_dividends_by_year.get(year, yfinance_dividends_by_year.get(year)),
         )
         for year in sorted(
             set(dart_dividends_by_year)

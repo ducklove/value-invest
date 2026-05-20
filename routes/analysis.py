@@ -22,6 +22,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+_PRICE_INDICATOR_MARKERS = ("주가", "二쇨")
+
+
+def _analysis_snapshot_has_invalid_prices(snapshot: dict | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    indicators = snapshot.get("indicators")
+    if not isinstance(indicators, dict):
+        return False
+    for label, series in indicators.items():
+        label_text = str(label)
+        if not any(marker in label_text for marker in _PRICE_INDICATOR_MARKERS):
+            continue
+        if not isinstance(series, list):
+            continue
+        for point in series:
+            if not isinstance(point, dict):
+                continue
+            value = point.get("value")
+            try:
+                if value is not None and float(value) < 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
+
+
 async def _get_analysis_lock(stock_code: str) -> asyncio.Lock:
     async with ANALYSIS_LOCKS_GUARD:
         lock = ANALYSIS_LOCKS.get(stock_code)
@@ -308,7 +335,11 @@ async def get_stock_beta(stock_code: str):
 async def analyze_stock(stock_code: str, request: Request):
     current_user = await get_current_user(request)
     snapshot = await cache.get_analysis_snapshot(stock_code)
-    if snapshot and not analysis_snapshot_is_stale(snapshot.get("analyzed_at")):
+    if (
+        snapshot
+        and not analysis_snapshot_is_stale(snapshot.get("analyzed_at"))
+        and not _analysis_snapshot_has_invalid_prices(snapshot)
+    ):
         await _remember_recent_analysis(current_user, stock_code)
         return await _decorate_analysis_payload(snapshot, current_user)
 
@@ -340,7 +371,11 @@ async def analyze_stock(stock_code: str, request: Request):
 
         async with stock_lock:
             snapshot = await cache.get_analysis_snapshot(stock_code)
-            if snapshot and not analysis_snapshot_is_stale(snapshot.get("analyzed_at")):
+            if (
+                snapshot
+                and not analysis_snapshot_is_stale(snapshot.get("analyzed_at"))
+                and not _analysis_snapshot_has_invalid_prices(snapshot)
+            ):
                 await _remember_recent_analysis(current_user, stock_code)
                 yield sse_event("result", await _decorate_analysis_payload(snapshot, current_user))
                 return

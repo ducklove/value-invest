@@ -102,6 +102,13 @@ class GroupDividendsByYearTests(unittest.TestCase):
         self.assertAlmostEqual(result[2023], 1000.0)
         self.assertAlmostEqual(result[2024], 600.0)
 
+    def test_preserves_explicit_zero_dividend(self):
+        items = [
+            {"record_date": "20021231", "per_sto_divi_amt": "0", "face_val": "5000"},
+        ]
+
+        self.assertEqual(_group_dividends_by_year(items), {2002: 0.0})
+
     def test_empty(self):
         self.assertEqual(_group_dividends_by_year([]), {})
 
