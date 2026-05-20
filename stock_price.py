@@ -963,9 +963,9 @@ async def fetch_quote_snapshot(
             payload = await kis_proxy_client.get_quote(stock_code, market=market)
         except kis_proxy_client.KISProxyError as exc:
             if market == "NX":
-                # NXT call failed — remember this and retry on the default market.
-                kis_ws_manager.mark_nxt_unsupported(stock_code)
-                logger.info("NXT 미지원 종목으로 표시 후 KRX로 재시도: %s (%s)", stock_code, exc)
+                # Treat exceptions as transient; a zero/empty NX payload below
+                # is the signal that the stock is not NXT-tradable.
+                logger.info("NXT quote failed; retrying KRX once for %s (%s)", stock_code, exc)
                 return await kis_proxy_client.get_quote(stock_code, market=None)
             raise
 
