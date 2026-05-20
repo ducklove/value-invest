@@ -46,6 +46,79 @@ function getLatestIndicatorValue(series) {
   return Number(entries[entries.length - 1].value);
 }
 
+function _formatDailyMarketCost(costUsd) {
+  const cost = Number(costUsd || 0);
+  if (!Number.isFinite(cost) || cost <= 0) return '';
+  if (typeof pfFxRate !== 'undefined' && pfFxRate) {
+    return `${Math.max(1, Math.round(cost * pfFxRate)).toLocaleString('ko-KR')}원`;
+  }
+  return `$${cost.toFixed(5)}`;
+}
+
+async function loadDailyMarketBrief(refresh = false) {
+  const section = document.getElementById('dailyMarketSection');
+  if (!section) return;
+  const status = document.getElementById('dailyMarketStatus');
+  const body = document.getElementById('dailyMarketBody');
+  const meta = document.getElementById('dailyMarketMeta');
+  const btn = document.getElementById('dailyMarketRefreshBtn');
+  if (btn) btn.disabled = true;
+  if (status) {
+    status.classList.remove('error');
+    status.textContent = refresh ? '최신 시황을 다시 생성하는 중입니다...' : '시황을 불러오는 중입니다...';
+  }
+  if (body && refresh) body.textContent = '';
+  if (meta && refresh) meta.textContent = '';
+
+  try {
+    const url = `/api/market/daily-brief${refresh ? '?refresh=true' : ''}`;
+    const resp = await apiFetch(url);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const markdown = data.markdown || '';
+    if (body) {
+      body.innerHTML = markdown
+        ? _renderSafeMarkdown(markdown)
+        : '<p>표시할 시황 본문이 없습니다.</p>';
+    }
+    const payload = data.payload || {};
+    const notableCount = (payload.moves || []).filter(row => row && row.is_notable).length;
+    const disclosureCount = (payload.disclosures || []).length;
+    const materialCount = (payload.disclosures || []).filter(row => row && row.is_material).length;
+    const tokenText = `입력 ${(data.tokens_in ?? 0).toLocaleString('ko-KR')} / 출력 ${(data.tokens_out ?? 0).toLocaleString('ko-KR')} 토큰`;
+    const costText = _formatDailyMarketCost(data.cost_usd);
+    const cacheText = data.cached ? '캐시' : '새 생성';
+    const generatedAt = data.updated_at ? new Date(data.updated_at).toLocaleString('ko-KR') : '';
+    if (status) {
+      status.textContent = [
+        `${payload.brief_date || data.brief_date || ''} 기준`,
+        `관심목록 ${payload.interest_count || 0}개`,
+        `급등/급락 ${notableCount}개`,
+        `공시 ${disclosureCount}건${materialCount ? ` (중요 후보 ${materialCount}건)` : ''}`,
+      ].filter(Boolean).join(' · ');
+    }
+    if (meta) {
+      meta.textContent = [
+        cacheText,
+        data.model,
+        tokenText,
+        costText,
+        generatedAt ? `생성 ${generatedAt}` : '',
+      ].filter(Boolean).join(' · ');
+    }
+  } catch (err) {
+    if (status) {
+      status.classList.add('error');
+      status.textContent = '금일 시황을 불러오지 못했습니다: ' + (err.message || err);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // Walks backward through a series and returns the latest entry whose
 // value is strictly positive. Used for trailing dividend so the card
 // doesn't read 0% just because the current year hasn't had a payout

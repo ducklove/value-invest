@@ -378,6 +378,93 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .dropdown-item:first-child { border-radius:10px 10px 0 0; }
 .dropdown-item:last-child { border-radius:0 0 10px 10px; }
 
+/* Daily market brief */
+.daily-market-section {
+  margin-bottom: 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.daily-market-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.daily-market-eyebrow {
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.daily-market-header h2 {
+  margin: 2px 0 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+.daily-market-refresh {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.daily-market-refresh:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.daily-market-refresh:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.daily-market-status,
+.daily-market-meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.daily-market-status.error {
+  color: #b91c1c;
+}
+.daily-market-body {
+  margin-top: 10px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.daily-market-body h1,
+.daily-market-body h2,
+.daily-market-body h3 {
+  margin: 14px 0 6px;
+  font-size: 15px;
+}
+.daily-market-body p { margin: 0 0 8px; }
+.daily-market-body ul,
+.daily-market-body ol { margin: 0 0 10px; padding-left: 20px; }
+.daily-market-body li { margin: 2px 0; }
+.daily-market-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.daily-market-body th,
+.daily-market-body td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+}
+.daily-market-body th {
+  background: var(--sidebar-bg, var(--bg));
+}
+
 /* Company info */
 .company-info {
   background: var(--surface); border-radius:12px; padding:20px 24px;

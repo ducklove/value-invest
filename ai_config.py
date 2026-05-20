@@ -47,6 +47,11 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
         "env": "AI_DART_REVIEW_MODEL",
         "default": "deepseek/deepseek-v4-flash",
     },
+    "market_daily": {
+        "label": "금일 시황",
+        "env": "AI_MARKET_DAILY_MODEL",
+        "default": "google/gemini-3.5-flash",
+    },
 }
 
 
@@ -196,6 +201,26 @@ async def save_feature_models(models: dict[str, Any], actor: str | None):
         if not model:
             raise ValueError(f"{feature} model is required.")
         await cache.set_app_setting(_model_setting_key(feature), model, updated_by=actor)
+
+
+def openrouter_reasoning_controls(model: str) -> dict[str, Any]:
+    """Return conservative OpenRouter reasoning controls for user-facing text.
+
+    Some reasoning-capable models count hidden reasoning against the same
+    completion budget used for the visible answer. For short UI analyses we
+    prefer a small or disabled reasoning budget and hide reasoning content so
+    the browser reliably receives final text.
+    """
+    normalized = (model or "").lower()
+    if "gemini-3" in normalized:
+        return {
+            "reasoning": {"effort": "minimal", "exclude": True},
+            "include_reasoning": False,
+        }
+    return {
+        "reasoning": {"effort": "none", "exclude": True},
+        "include_reasoning": False,
+    }
 
 
 async def record_usage(

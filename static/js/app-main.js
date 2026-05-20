@@ -128,6 +128,7 @@ async function initApp() {
   await _mbLoadCatalog();
   await _mbLoadCodes();
   loadMarketSummary();
+  loadDailyMarketBrief();
   loadWikiStats();
   setInterval(loadMarketSummary, 60_000);
   setInterval(_pollBenchmarkQuotes, 60_000);

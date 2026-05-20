@@ -26,6 +26,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         cache_router,
         dart_review_router,
         insights_router,
+        market_daily_router,
         nps_router,
         portfolio_router,
         reports_router,
@@ -46,6 +47,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         nps_router,
         backtest_router,
         insights_router,
+        market_daily_router,
         dart_review_router,
         internal_router,
         wiki_router,
@@ -100,4 +102,3 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     app.state.static_handlers = register_static_routes(app, settings, asset_version)
     return app
-

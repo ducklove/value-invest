@@ -2620,6 +2620,7 @@ async def delete_cashflow(cf_id: int, request: Request):
 _AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", "qwen/qwen3.6-plus")
 _AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", os.getenv("WIKI_QA_MODEL", "google/gemma-4-31b-it"))
 _AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", _AI_DEFAULT_MODEL)
+_AI_MAX_TOKENS = int(os.getenv("PORTFOLIO_AI_MAX_TOKENS", "3200"))
 
 _AI_SYSTEM_PROMPT = """당신은 한국/해외 자산을 함께 보는 투자 리서치 어시스턴트입니다.
 규칙:
@@ -2861,6 +2862,16 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
         # until the model finishes. With stream() the first token reaches
         # the browser as soon as OpenRouter emits it.
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
+            request_payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": _AI_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": _AI_MAX_TOKENS,
+                "stream": True,
+                **ai_config.openrouter_reasoning_controls(model),
+            }
             async with client.stream(
                 "POST",
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -2868,15 +2879,7 @@ async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={
                     "Authorization": f"Bearer {openrouter_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": _AI_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "max_tokens": 2000,
-                    "stream": True,
-                },
+                json=request_payload,
             ) as resp:
                 if resp.status_code != 200:
                     # Need to consume body before httpx exposes it.

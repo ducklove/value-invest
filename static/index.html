@@ -104,6 +104,19 @@ function trackEvent(name, params = {}) {
     <div class="dropdown" id="dropdown"></div>
   </div>
 
+  <section class="daily-market-section" id="dailyMarketSection">
+    <div class="daily-market-header">
+      <div>
+        <div class="daily-market-eyebrow">Market Daily</div>
+        <h2>금일 시황</h2>
+      </div>
+      <button class="daily-market-refresh" id="dailyMarketRefreshBtn" type="button" onclick="loadDailyMarketBrief(true)">새로고침</button>
+    </div>
+    <div class="daily-market-status" id="dailyMarketStatus">시황을 불러오는 중입니다...</div>
+    <div class="daily-market-body" id="dailyMarketBody"></div>
+    <div class="daily-market-meta" id="dailyMarketMeta"></div>
+  </section>
+
   <div class="company-info" id="companyInfo">
     <div class="header-row">
       <h2 id="companyName"></h2>
