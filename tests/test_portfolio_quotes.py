@@ -73,7 +73,7 @@ def test_cached_quote_for_code_ignores_stale_polling_cache():
 
 
 @pytest.mark.asyncio
-async def test_asset_quotes_batch_fresh_korean_quotes_force_refresh_with_age_checked_ws():
+async def test_asset_quotes_batch_fresh_korean_quotes_force_refresh_without_ws_cache():
     with patch.object(
         portfolio_route,
         "_fetch_quote",
@@ -88,7 +88,7 @@ async def test_asset_quotes_batch_fresh_korean_quotes_force_refresh_with_age_che
     fetch_quote.assert_awaited_once_with(
         "005930",
         force_refresh=True,
-        use_ws_cache=True,
+        use_ws_cache=False,
     )
 
 

@@ -1760,7 +1760,7 @@ async def asset_quotes_batch(payload: dict = Body(...)):
                     _fetch_quote(
                         code,
                         force_refresh=force_upstream,
-                        use_ws_cache=True,
+                        use_ws_cache=not force_upstream,
                     ),
                     timeout=_ASSET_QUOTES_ITEM_TIMEOUT,
                 )
