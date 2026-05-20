@@ -17,10 +17,15 @@ _MODEL_SETTING_PREFIX = "AI_MODEL::"
 _WIKI_QA_KIMI_MIGRATION_KEY = "AI_MIGRATION::wiki_qa_kimi_k2_6"
 _WIKI_QA_LEGACY_DEFAULT_MODELS = {"google/gemma-4-31b-it"}
 _PORTFOLIO_FLASH_MIGRATION_KEY = "AI_MIGRATION::portfolio_gemini_flash_latest"
+_PORTFOLIO_QWEN_FLASH_MIGRATION_KEY = "AI_MIGRATION::portfolio_qwen_flash_to_gemini_flash_latest"
 _PORTFOLIO_LEGACY_DEFAULT_MODELS: dict[str, set[str]] = {
     "portfolio_fast": {"google/gemma-4-31b-it"},
     "portfolio_balanced": {"qwen/qwen3.6-plus"},
     "portfolio_premium": {"qwen/qwen3.6-plus"},
+}
+_PORTFOLIO_QWEN_FLASH_LEGACY_MODELS = {
+    "qwen/qwen3.6-flash",
+    "qwen/qwen3.6-plus",
 }
 
 MODEL_FEATURES: dict[str, dict[str, str]] = {
@@ -197,14 +202,48 @@ async def _migrate_legacy_portfolio_model_defaults() -> dict[str, Any]:
     return {"migrated": False, "reason": "no_legacy_value"}
 
 
+async def _migrate_qwen_flash_portfolio_overrides() -> dict[str, Any]:
+    marker = await cache.get_app_setting(_PORTFOLIO_QWEN_FLASH_MIGRATION_KEY)
+    if marker:
+        return {"migrated": False, "reason": "already_marked"}
+
+    migrated: list[str] = []
+    for feature in ("portfolio_fast", "portfolio_balanced", "portfolio_premium"):
+        stored = await cache.get_app_setting(_model_setting_key(feature))
+        stored_value = str((stored or {}).get("value") or "").strip().lower()
+        target = _configured_default_model(MODEL_FEATURES[feature])
+        if stored_value in _PORTFOLIO_QWEN_FLASH_LEGACY_MODELS and stored_value != target.lower():
+            await cache.set_app_setting(
+                _model_setting_key(feature),
+                target,
+                updated_by="system:migration",
+            )
+            migrated.append(feature)
+
+    await cache.set_app_setting(
+        _PORTFOLIO_QWEN_FLASH_MIGRATION_KEY,
+        ",".join(migrated) if migrated else "skipped",
+        updated_by="system:migration",
+    )
+    if migrated:
+        return {"migrated": True, "features": migrated, "to": DEFAULT_PORTFOLIO_AI_MODEL}
+    return {"migrated": False, "reason": "no_legacy_value"}
+
+
 async def migrate_legacy_model_defaults() -> dict[str, Any]:
     """One-shot migrations for model defaults that were persisted in admin DB."""
     wiki = await _migrate_legacy_wiki_qa_default()
     portfolio = await _migrate_legacy_portfolio_model_defaults()
+    portfolio_qwen_flash = await _migrate_qwen_flash_portfolio_overrides()
     return {
-        "migrated": bool(wiki.get("migrated") or portfolio.get("migrated")),
+        "migrated": bool(
+            wiki.get("migrated")
+            or portfolio.get("migrated")
+            or portfolio_qwen_flash.get("migrated")
+        ),
         "wiki_qa": wiki,
         "portfolio": portfolio,
+        "portfolio_qwen_flash": portfolio_qwen_flash,
     }
 
 
