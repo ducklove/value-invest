@@ -16,6 +16,7 @@ function _pfAiSectionKind(text) {
   if (title.includes('점검') || title.includes('구성')) return 'portfolio';
   if (title.includes('근거')) return 'rationale';
   if (title.includes('리스크') || title.includes('촉매') || title.includes('시나리오')) return 'risk';
+  if (title.includes('도표') || title.includes('그래프') || title.includes('차트') || title.includes('비교표')) return 'visual';
   if (title.includes('실행') || title.includes('우선순위') || title.includes('리밸런싱')) return 'action';
   if (title.includes('추가') || title.includes('데이터')) return 'data';
   return 'default';

@@ -143,6 +143,7 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("종목별 리서치 요약", prompt)
         self.assertIn("HTML 태그는 쓰지 말고", prompt)
         self.assertIn("판단 근거", prompt)
+        self.assertIn("ASCII 막대그래프", prompt)
         self.assertEqual(done.get("wiki_used"), 0)
         self.assertEqual(done.get("reasoning_effort"), "low")
         self.assertEqual(done.get("context_holdings"), 15)
