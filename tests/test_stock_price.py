@@ -77,7 +77,8 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
             "change": 10,
             "change_pct": 1.0,
             "ts": time.time(),
-        }), patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock()) as get_quote:
+        }), patch("stock_price.kis_ws_manager.ws_cache_matches_rest_market", return_value=True), \
+             patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock()) as get_quote:
             result = await stock_price.fetch_quote_snapshot("005930")
 
         get_quote.assert_not_awaited()
@@ -90,7 +91,8 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
             "change": 10,
             "change_pct": 1.0,
             "ts": time.time() - 120,
-        }), patch("stock_price.kis_ws_manager.active_market_code", return_value="J"), \
+        }), patch("stock_price.kis_ws_manager.ws_cache_matches_rest_market", return_value=True), \
+             patch("stock_price.kis_ws_manager.active_market_code", return_value="J"), \
              patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={
                  "summary": {
                      "current_price": "2000",
@@ -103,6 +105,29 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
         get_quote.assert_awaited_once()
         self.assertEqual(result["price"], 2000.0)
+
+    async def test_fetch_quote_snapshot_ignores_ws_cache_when_rest_market_differs(self):
+        with patch("stock_price.kis_ws_manager.get_cached_quote", return_value={
+            "date": "20260520",
+            "price": 1745000,
+            "change": 0,
+            "change_pct": 0.0,
+            "ts": time.time(),
+        }), patch("stock_price.kis_ws_manager.ws_cache_matches_rest_market", return_value=False), \
+             patch("stock_price.kis_ws_manager.active_market_code", return_value="NX"), \
+             patch("stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={
+                 "summary": {
+                     "current_price": "1786000",
+                     "previous_close": "1745000",
+                     "change": "41000",
+                     "change_rate": "2.35",
+                 }
+             })) as get_quote:
+            result = await stock_price.fetch_quote_snapshot("000660")
+
+        get_quote.assert_awaited_once_with("000660", market="NX")
+        self.assertEqual(result["price"], 1786000.0)
+        self.assertEqual(result["change_pct"], 2.35)
 
     async def test_fetch_quote_snapshot_falls_back_to_history_when_quote_fails(self):
         with patch("stock_price.kis_ws_manager.get_cached_quote", return_value=None), \

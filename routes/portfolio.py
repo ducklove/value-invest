@@ -712,12 +712,13 @@ async def _fetch_quote(
     elif stock_code in _CRYPTO_UPBIT_MAP:
         q = await _fetch_crypto_quote(stock_code)
     elif _is_korean_stock(stock_code):
+        use_ws_quote = use_ws_cache and kis_ws_manager.ws_cache_matches_rest_market()
         q = (
             _quote_from_ws(
                 kis_ws_manager.get_cached_quote(stock_code),
                 max_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
             )
-            if use_ws_cache
+            if use_ws_quote
             else None
         )
         if not q:

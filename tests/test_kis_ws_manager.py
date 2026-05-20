@@ -17,7 +17,9 @@ def test_rest_market_uses_j_during_regular_session():
 def test_rest_market_keeps_nxt_after_websocket_session_closes():
     assert kis_ws_manager._active_tr_id(_dt(21, 10)) == "H0STCNT0"
     assert kis_ws_manager.active_market_code(_dt(21, 10)) == "NX"
+    assert kis_ws_manager.ws_cache_matches_rest_market(_dt(21, 10)) is False
 
 
 def test_rest_market_uses_nxt_before_regular_open():
     assert kis_ws_manager.active_market_code(_dt(8, 30)) == "NX"
+    assert kis_ws_manager.ws_cache_matches_rest_market(_dt(8, 30)) is True

@@ -58,6 +58,14 @@ def active_market_code(now: datetime | None = None) -> str:
     return "J" if _KRX_OPEN <= cur < _KRX_CLOSE else "NX"
 
 
+def active_ws_market_code(now: datetime | None = None) -> str:
+    return "J" if _active_tr_id(now) == "H0STCNT0" else "NX"
+
+
+def ws_cache_matches_rest_market(now: datetime | None = None) -> bool:
+    return active_ws_market_code(now) == active_market_code(now)
+
+
 def _kst_clock_time(now: datetime | None = None) -> dtime:
     current = now or datetime.now(KST)
     if current.tzinfo is not None:

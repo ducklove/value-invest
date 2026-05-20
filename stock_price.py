@@ -927,7 +927,11 @@ async def fetch_quote_snapshot(
     use_ws_cache: bool = True,
     max_ws_age_seconds: float | None = WS_QUOTE_MAX_AGE_SECONDS,
 ) -> dict:
-    ws_quote = kis_ws_manager.get_cached_quote(stock_code) if use_ws_cache else None
+    ws_quote = (
+        kis_ws_manager.get_cached_quote(stock_code)
+        if use_ws_cache and kis_ws_manager.ws_cache_matches_rest_market()
+        else None
+    )
     if (
         ws_quote
         and ws_quote.get("price") is not None
