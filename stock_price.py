@@ -665,7 +665,7 @@ async def fetch_market_data(
         if corp_code
         else asyncio.sleep(0, result={})
     )
-    adjusted_history_payload, raw_history_payload, dividends_payload, financials_payload, quote_payload, dart_dividends_payload = await asyncio.gather(
+    adjusted_history_payload, raw_history_payload, dividends_payload, financials_payload, quote_payload, dart_dividends_payload, local_close_items = await asyncio.gather(
         kis_proxy_client.get_history(
             stock_code,
             start_date=start_date,
@@ -688,6 +688,11 @@ async def fetch_market_data(
         kis_proxy_client.get_financials(stock_code),
         kis_proxy_client.get_quote(stock_code),
         dart_dividends_future,
+        close_price_client.get_daily_price_items(
+            stock_code,
+            since=start_date,
+            until=end_date,
+        ),
         return_exceptions=True,
     )
 
@@ -709,27 +714,19 @@ async def fetch_market_data(
     if isinstance(dart_dividends_payload, Exception):
         logger.warning("DART dividend per-share fetch failed (%s): %s", stock_code, dart_dividends_payload)
         dart_dividends_payload = {}
+    if isinstance(local_close_items, Exception):
+        logger.info("local daily close fetch failed (%s): %s", stock_code, local_close_items)
+        local_close_items = []
 
     try:
-        close_series, shares_series, dividends_series, splits_series = await yf_future
+        _close_series, shares_series, _dividends_series, splits_series = await yf_future
     except Exception as exc:
         logger.warning("yfinance 연간 시계열 조회 실패(%s): %s", stock_code, exc)
-        close_series = _empty_series()
         shares_series = _empty_series()
-        dividends_series = _empty_series()
         splits_series = _empty_series()
 
-    yfinance_close_by_year = {
-        year: price
-        for year, price in _group_close_by_year_series(close_series).items()
-        if price is not None and price > 0
-    }
     split_events = _normalized_split_events(splits_series)
     shares_by_year = _adjust_shares_for_splits(_group_last_by_year_series(shares_series), split_events)
-    # Yahoo dividend events for old Korean histories are often adjusted in a
-    # different share/price basis than KIS/DART. Keep them out of the annual
-    # Korean analysis path; missing past dividends are normalized to 0 below.
-    yfinance_dividends_by_year: dict[int, float] = {}
 
     kis_close_by_year = _group_close_by_year(adjusted_history_payload.get("items"))
     kis_raw_close_by_year = _group_close_by_year(raw_history_payload.get("items"))
@@ -743,26 +740,15 @@ async def fetch_market_data(
         for year, value in (dart_dividends_payload or {}).items()
         if value is not None
     }
-    local_close_by_year: dict[int, float] = {}
-    if not kis_close_by_year:
-        try:
-            local_close_items = await close_price_client.get_daily_price_items(
-                stock_code,
-                since=start_date,
-                until=end_date,
-            )
-            local_close_by_year = _group_close_by_year(local_close_items)
-        except Exception as exc:
-            logger.info("local daily close fallback failed (%s): %s", stock_code, exc)
+    local_close_by_year = _group_close_by_year(local_close_items)
 
-    # Annual "price" should be a stock price, not Yahoo's total-return style
-    # Adj Close. For some Korean pre-split histories (for example 000660
-    # before 2003), Yahoo reports negative adjusted closes after dividend
-    # adjustment. KIS adjusted history is split-adjusted and remains the
-    # authoritative source for KR annual price charts; yfinance only fills
-    # years KIS does not provide.
-    close_by_year = dict(kis_close_by_year or local_close_by_year)
-    for year, price in yfinance_close_by_year.items():
+    # Annual "price" for Korean stocks must come from corporate-action-aware
+    # domestic sources. The internal close-price service is primary because it
+    # serves our normalized adjusted daily series; KIS adjusted yearly history
+    # only fills gaps. Yahoo's KR history can mix split/reduction and dividend
+    # adjustment bases, so never use it as a numeric price fallback.
+    close_by_year = dict(local_close_by_year)
+    for year, price in kis_close_by_year.items():
         if year not in close_by_year:
             close_by_year[year] = price
 
