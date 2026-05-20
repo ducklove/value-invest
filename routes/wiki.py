@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 import ai_config
 import cache
 from deps import get_current_user
+from services import ai_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -558,20 +559,7 @@ def _qa_chat_payload(model: str, prompt: str, *, stream: bool, max_tokens: int) 
 
 
 def _extract_final_content(data: dict) -> str:
-    try:
-        message = (data.get("choices") or [{}])[0].get("message") or {}
-    except Exception:
-        return ""
-    content = message.get("content") or ""
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                parts.append(str(item.get("text") or ""))
-            else:
-                parts.append(str(item))
-        content = "".join(parts)
-    return str(content or "").strip()
+    return ai_client.message_content_from_response(data)
 
 
 async def _retry_empty_qa_answer(openrouter_key: str, model: str, prompt: str) -> tuple[str, dict]:
@@ -586,19 +574,16 @@ async def _retry_empty_qa_answer(openrouter_key: str, model: str, prompt: str) -
         stream=False,
         max_tokens=QA_EMPTY_RETRY_MAX_TOKENS,
     )
-    async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, read=90.0)) as client:
-        resp = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {openrouter_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-    if resp.status_code != 200:
-        raise RuntimeError(f"OpenRouter retry HTTP {resp.status_code}: {resp.text[:300]}")
-    data = resp.json()
-    return _extract_final_content(data), data
+    result = await ai_client.post_chat_completion(
+        feature="wiki_qa",
+        payload=payload,
+        google_sub=None,
+        model=model,
+        model_profile="wiki_qa",
+        timeout=httpx.Timeout(90.0, read=90.0),
+        record_usage=False,
+    )
+    return result["content"], result["data"]
 
 
 @router.post("/api/analysis/{stock_code}/ask")
@@ -704,19 +689,15 @@ async def ask_stock(
         used_model = model
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
             try:
-                async with client.stream(
-                    "POST",
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {openrouter_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=_qa_chat_payload(
+                async with ai_client.stream_chat_completion(
+                    client,
+                    _qa_chat_payload(
                         model,
                         prompt,
                         stream=True,
                         max_tokens=QA_MAX_TOKENS,
                     ),
+                    openrouter_key=openrouter_key,
                 ) as resp:
                     if resp.status_code != 200:
                         body = await resp.aread()

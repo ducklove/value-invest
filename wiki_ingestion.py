@@ -34,6 +34,7 @@ import ai_config
 import cache
 import observability
 import report_client
+from services import ai_client
 from routes.reports import _is_allowed_report_pdf_url
 
 logger = logging.getLogger(__name__)
@@ -67,9 +68,6 @@ DEFAULT_PER_STOCK_LIMIT = _default_per_stock_limit()
 # starve user-facing AI analysis.
 _LLM_SEMAPHORE = asyncio.Semaphore(2)
 _DOWNLOAD_SEMAPHORE = asyncio.Semaphore(4)
-
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
 
 # ---------------------------------------------------------------------------
 # Low-level helpers
@@ -186,16 +184,8 @@ def _split_summary_sections(md: str) -> tuple[str, str]:
 
 
 async def summarize_report(meta: dict, text: str, model: str | None = None) -> dict:
-    """Call OpenRouter for a structured markdown summary.
-
-    Returns {summary_md, key_points_md, tokens_in, tokens_out, model}.
-    Raises on upstream failure — callers catch and mark parse_failed."""
-    key = await ai_config.get_openrouter_key()
-    if not key:
-        raise RuntimeError("OpenRouter key not configured")
+    """Call OpenRouter for a structured markdown summary."""
     model = model or await ai_config.get_model_for_feature("wiki_ingestion")
-    started_at = datetime.now()
-
     prompt = build_summary_prompt(meta, text)
     payload = {
         "model": model,
@@ -204,56 +194,33 @@ async def summarize_report(meta: dict, text: str, model: str | None = None) -> d
             {"role": "user", "content": prompt},
         ],
         "max_tokens": 1200,
-        # Bulk; no stream needed, we're not showing tokens to the user.
         "stream": False,
     }
-    async with _LLM_SEMAPHORE:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            resp = await client.post(
-                OPENROUTER_URL,
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-    if resp.status_code != 200:
-        error = f"OpenRouter {resp.status_code}: {resp.text[:300]}"
-        await ai_config.record_usage(
-            google_sub=None,
+    try:
+        result = await ai_client.post_chat_completion(
             feature="wiki_ingestion",
+            payload=payload,
+            google_sub=None,
             model=model,
             model_profile="wiki_ingestion",
-            ok=False,
-            error=error,
-            latency_ms=int((datetime.now() - started_at).total_seconds() * 1000),
+            timeout=90.0,
+            ok_if_content=True,
         )
-        raise RuntimeError(error)
-    data = resp.json()
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as exc:
-        raise RuntimeError(f"OpenRouter response malformed: {data}") from exc
-    usage = data.get("usage") or {}
+    except ai_client.MissingOpenRouterKeyError as exc:
+        raise RuntimeError("OpenRouter key not configured") from exc
+    except ai_client.OpenRouterError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    content = result["content"]
+    if not content:
+        raise RuntimeError(f"OpenRouter response malformed: {result['data']}")
     summary_md, key_points_md = _split_summary_sections(content)
-    used_model = data.get("model") or model
-    await ai_config.record_usage(
-        google_sub=None,
-        feature="wiki_ingestion",
-        model=used_model,
-        model_profile="wiki_ingestion",
-        input_tokens=usage.get("prompt_tokens") or 0,
-        output_tokens=usage.get("completion_tokens") or 0,
-        cost_usd=float(usage.get("cost") or 0),
-        latency_ms=int((datetime.now() - started_at).total_seconds() * 1000),
-        ok=True,
-    )
     return {
         "summary_md": summary_md,
         "key_points_md": key_points_md,
-        "tokens_in": usage.get("prompt_tokens"),
-        "tokens_out": usage.get("completion_tokens"),
-        "model": used_model,
+        "tokens_in": result["input_tokens"],
+        "tokens_out": result["output_tokens"],
+        "model": result["model"],
     }
 
 

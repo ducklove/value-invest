@@ -19,12 +19,12 @@ import cache
 import dart_client
 import market_indicators
 import stock_price
+from services import ai_client
 from services.portfolio.identifiers import is_korean_stock, normalize_portfolio_code
 
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DART_VIEWER_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
 
 INTEREST_LIMIT = int(os.environ.get("MARKET_DAILY_INTEREST_LIMIT", "36"))
@@ -641,9 +641,10 @@ evidence bundle:
 
 
 async def _call_openrouter(payload: dict[str, Any], google_sub: str | None) -> dict[str, Any]:
-    openrouter_key = await ai_config.get_openrouter_key()
     model = await ai_config.get_model_for_feature("market_daily")
-    if not openrouter_key:
+    try:
+        await ai_client.require_openrouter_key()
+    except ai_client.MissingOpenRouterKeyError:
         markdown = _fallback_markdown(payload, "AI API 키가 없어 수집된 근거만 표시합니다.")
         return {
             "markdown": markdown,
@@ -669,75 +670,32 @@ async def _call_openrouter(payload: dict[str, Any], google_sub: str | None) -> d
         "max_tokens": MARKET_DAILY_MAX_TOKENS,
         **ai_config.openrouter_reasoning_controls(model),
     }
-    started = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, read=90.0)) as client:
-            resp = await client.post(
-                OPENROUTER_URL,
-                headers={
-                    "Authorization": f"Bearer {openrouter_key}",
-                    "Content-Type": "application/json",
-                },
-                json=request_payload,
-            )
-            if resp.status_code in {400, 422} and "reasoning" in request_payload:
-                retry_payload = dict(request_payload)
-                retry_payload.pop("reasoning", None)
-                retry_payload.pop("include_reasoning", None)
-                resp = await client.post(
-                    OPENROUTER_URL,
-                    headers={
-                        "Authorization": f"Bearer {openrouter_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=retry_payload,
-                )
-        if resp.status_code != 200:
-            raise RuntimeError(f"OpenRouter HTTP {resp.status_code}: {resp.text[:300]}")
-        data = resp.json()
-        message = (data.get("choices") or [{}])[0].get("message") or {}
-        markdown = str(message.get("content") or "").strip()
-        usage = data.get("usage") or {}
-        tokens_in = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-        tokens_out = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-        cost_usd = float(usage.get("cost") or usage.get("total_cost") or 0.0)
-        if not cost_usd and (tokens_in or tokens_out):
-            cost_usd = estimate_gemini35_flash_cost(tokens_in, tokens_out)
-        await ai_config.record_usage(
-            google_sub=google_sub,
+        result = await ai_client.post_chat_completion(
             feature="market_daily",
-            model=data.get("model") or model,
+            payload=request_payload,
+            google_sub=google_sub,
+            model=model,
             model_profile="market_daily",
-            input_tokens=tokens_in,
-            output_tokens=tokens_out,
-            cost_usd=cost_usd,
-            latency_ms=int((time.monotonic() - started) * 1000),
-            ok=bool(markdown),
-            error=None if markdown else "empty_content",
+            timeout=httpx.Timeout(90.0, read=90.0),
+            cost_estimator=estimate_gemini35_flash_cost,
+            ok_if_content=True,
         )
+        markdown = result["content"]
         had_content = bool(markdown)
         if not markdown:
             markdown = _fallback_markdown(payload, "AI 모델이 최종 본문을 반환하지 않아 수집된 근거만 표시합니다.")
         return {
             "markdown": markdown,
-            "model": data.get("model") or model,
-            "tokens_in": tokens_in,
-            "tokens_out": tokens_out,
-            "cost_usd": cost_usd,
+            "model": result["model"],
+            "tokens_in": result["input_tokens"],
+            "tokens_out": result["output_tokens"],
+            "cost_usd": result["cost_usd"],
             "llm_ok": had_content,
             "error": None if had_content else "empty_content",
         }
     except Exception as exc:
         logger.exception("daily market: LLM call failed")
-        await ai_config.record_usage(
-            google_sub=google_sub,
-            feature="market_daily",
-            model=model,
-            model_profile="market_daily",
-            ok=False,
-            error=str(exc),
-            latency_ms=int((time.monotonic() - started) * 1000),
-        )
         return {
             "markdown": _fallback_markdown(payload, f"AI 호출에 실패해 수집된 근거만 표시합니다. ({exc})"),
             "model": model,

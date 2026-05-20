@@ -87,6 +87,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
             patch.object(pf.cache, "get_portfolio", new=AsyncMock(return_value=[
                 {"stock_code": "005930", "stock_name": "삼성전자", "benchmark_code": "IDX_KOSPI"}
             ])),
+            patch.object(pf.cache, "load_corp_code_table", new=AsyncMock(return_value={})),
             patch.object(pf, "_fetch_benchmark_quote", new=AsyncMock(side_effect=asyncio.CancelledError())),
         ):
             result = await pf.get_benchmark_quotes(object())
@@ -130,6 +131,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(pf.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)) as local,
             patch.object(pf.cache, "get_latest_market_valuation", new=AsyncMock(return_value={})),
+            patch.object(pf.cache, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
         ):
             basis = await pf._fetch_insight_valuation_basis("005935")
             valuation = pf._build_insight_valuation({"price": 40000}, basis)
@@ -168,6 +170,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(pf.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)),
             patch.object(pf.cache, "get_latest_market_valuation", new=cache_lookup),
+            patch.object(pf.cache, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
         ):
             basis = await pf._fetch_insight_valuation_basis("009770")
             valuation = pf._build_insight_valuation({"price": 36000}, basis)

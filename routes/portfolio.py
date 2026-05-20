@@ -23,6 +23,8 @@ import kis_ws_manager
 import market_indicators
 import stock_price
 from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
+from services import ai_client
+from services.portfolio import history as portfolio_history
 from services.portfolio.identifiers import (
     CASH_FX_CODE as _CASH_FX_CODE,
     CASH_NAMES as _CASH_NAMES,
@@ -1019,8 +1021,8 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
     return q
 
 
-_ASSET_HISTORY_CACHE_TTL = 15 * 60
-_asset_history_cache: dict[str, tuple[float, dict]] = {}
+_ASSET_HISTORY_CACHE_TTL = portfolio_history.ASSET_HISTORY_CACHE_TTL
+_asset_history_cache = portfolio_history.asset_history_cache
 _insight_fx_cache: dict[str, tuple[float, float]] = {}
 _insight_item_warm_cache: dict[str, float] = {}
 _insight_common_warm_ts: float = 0.0
@@ -1146,16 +1148,6 @@ _BENCHMARK_YF_TICKER = {
     "FX_CNYKRW": "CNYKRW=X",
 }
 
-_LOCAL_BENCHMARK_INDEX_SERIES = {
-    "IDX_KOSPI": "KOSPI",
-    "IDX_KOSDAQ": "KOSDAQ",
-    "IDX_SP500": "SP500",
-}
-_LOCAL_BENCHMARK_COMMODITIES = {
-    "GOLD": "gold",
-}
-
-
 def _yfinance_direct_ticker(code: str) -> str:
     ticker = (code or "").strip()
     if "/" in ticker:
@@ -1210,137 +1202,13 @@ async def _resolve_insight_benchmark(item: dict) -> str:
 
 
 async def _download_yfinance_history(ticker: str, period: str = "1y") -> dict:
-    ticker = (ticker or "").strip()
-    if not ticker:
-        return {"rows": [], "currency": None}
-    key = f"{ticker}:{period}"
-    now = _time.monotonic()
-    cached = _asset_history_cache.get(key)
-    if cached and (now - cached[0]) < _ASSET_HISTORY_CACHE_TTL:
-        return cached[1]
-
-    try:
-        payload = await asyncio.wait_for(_fetch_yahoo_chart(ticker, range_=period), timeout=7.0)
-    except Exception as exc:
-        logger.warning("asset insight history fetch failed (%s): %s", ticker, exc)
-        payload = {"rows": [], "currency": None}
-    result = {
-        "rows": payload.get("rows") or [],
-        "currency": payload.get("currency") or _infer_yf_currency(ticker),
-    }
-    _asset_history_cache[key] = (now, result)
-    return result
-
+    return await portfolio_history.download_yfinance_history(ticker, period=period)
 
 async def _download_korean_history(code: str, period_days: int = 370) -> dict:
-    code = (code or "").strip()
-    if not _is_korean_stock(code):
-        return {"rows": [], "currency": None}
-    key = f"KIS:{code}:{period_days}"
-    now = _time.monotonic()
-    cached = _asset_history_cache.get(key)
-    if cached and (now - cached[0]) < _ASSET_HISTORY_CACHE_TTL:
-        return cached[1]
-
-    end_date = date.today()
-    start_date = end_date - timedelta(days=period_days)
-    if code.isdigit():
-        try:
-            local_rows = await asyncio.wait_for(
-                close_price_client.get_daily_closes(code, since=start_date, until=end_date),
-                timeout=3.0,
-            )
-        except Exception as exc:
-            logger.info("Local Korean asset insight history unavailable (%s): %s", code, exc)
-            local_rows = []
-        if local_rows:
-            result = {
-                "rows": [
-                    {"date": row["date"], "close": round(float(row["close"]), 6)}
-                    for row in local_rows
-                    if row.get("date") and row.get("close") is not None
-                ],
-                "currency": "KRW",
-            }
-            _asset_history_cache[key] = (_time.monotonic(), result)
-            return result
-
-    try:
-        payload = await asyncio.wait_for(
-            kis_proxy_client.get_history(
-                code,
-                start_date=start_date,
-                end_date=end_date,
-                period="D",
-                adjusted=True,
-            ),
-            timeout=8.0,
-        )
-    except Exception as exc:
-        logger.warning("Korean asset insight history fetch failed (%s): %s", code, exc)
-        return {"rows": [], "currency": "KRW"}
-
-    items = payload.get("items") if isinstance(payload, dict) else []
-    if not items and isinstance(payload, dict):
-        for value in payload.values():
-            if isinstance(value, list) and value:
-                items = value
-                break
-    rows = []
-    for item in stock_price._sorted_history_items(items):
-        trade_date = stock_price._parse_date(
-            stock_price._get_first(item, "stck_bsop_date", "date", "trade_date", "business_date")
-        )
-        close = stock_price._safe_float(
-            stock_price._get_first(item, "stck_clpr", "close_price", "close"),
-            zero_as_none=False,
-        )
-        if trade_date and close is not None:
-            rows.append({"date": trade_date.isoformat(), "close": round(float(close), 6)})
-
-    result = {"rows": rows, "currency": "KRW"}
-    _asset_history_cache[key] = (now, result)
-    return result
-
+    return await portfolio_history.download_korean_history(code, period_days=period_days)
 
 async def _download_local_benchmark_history(benchmark_code: str, period_days: int = 370) -> list[dict]:
-    series_id = _LOCAL_BENCHMARK_INDEX_SERIES.get(benchmark_code)
-    commodity = _LOCAL_BENCHMARK_COMMODITIES.get(benchmark_code)
-    if not series_id and not commodity:
-        return []
-
-    key = f"LOCAL_BENCH:{benchmark_code}:{period_days}"
-    now = _time.monotonic()
-    cached = _asset_history_cache.get(key)
-    if cached and (now - cached[0]) < _ASSET_HISTORY_CACHE_TTL:
-        return cached[1].get("rows") or []
-
-    end_date = date.today()
-    start_date = end_date - timedelta(days=period_days)
-    try:
-        if series_id:
-            rows = await asyncio.wait_for(
-                close_price_client.get_macro_index(series_id, since=start_date, until=end_date),
-                timeout=2.0,
-            )
-        else:
-            rows = await asyncio.wait_for(
-                close_price_client.get_macro_commodity(commodity, since=start_date, until=end_date),
-                timeout=2.0,
-            )
-    except Exception as exc:
-        logger.info("Local benchmark insight history unavailable (%s): %s", benchmark_code, exc)
-        rows = []
-
-    normalized = [
-        {"date": row["date"], "close": round(float(row["close"]), 6)}
-        for row in rows
-        if row.get("date") and row.get("close") is not None
-    ]
-    if normalized:
-        _asset_history_cache[key] = (now, {"rows": normalized, "currency": "KRW" if series_id else "USD"})
-    return normalized
-
+    return await portfolio_history.download_local_benchmark_history(benchmark_code, period_days=period_days)
 
 async def _asset_history_for_insight(code: str, item: dict) -> dict:
     special = asset_insights.yfinance_ticker_for_special_asset(code)
@@ -2887,14 +2755,10 @@ HTML 태그는 쓰지 말고 한국어 마크다운으로만 답변해 주세요
                 "stream": True,
                 **ai_config.openrouter_reasoning_controls(model, effort=_AI_REASONING_EFFORT),
             }
-            async with client.stream(
-                "POST",
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {openrouter_key}",
-                    "Content-Type": "application/json",
-                },
-                json=request_payload,
+            async with ai_client.stream_chat_completion(
+                client,
+                request_payload,
+                openrouter_key=openrouter_key,
             ) as resp:
                 if resp.status_code != 200:
                     # Need to consume body before httpx exposes it.

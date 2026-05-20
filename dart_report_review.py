@@ -22,6 +22,7 @@ import ai_config
 import cache
 import dart_client
 import observability
+from services import ai_client
 
 
 logger = logging.getLogger(__name__)
@@ -372,12 +373,7 @@ def _normalize_review(raw_text: str) -> dict[str, Any]:
 
 
 async def _call_openrouter(prompt: str, *, google_sub: str | None) -> tuple[dict[str, Any], dict[str, Any]]:
-    openrouter_key = await ai_config.get_openrouter_key()
-    if not openrouter_key:
-        raise DartReportReviewError("OpenRouter API key가 설정되어 있지 않습니다.")
-
     model = await ai_config.get_model_for_feature("dart_report_review")
-    started = time.monotonic()
     payload = {
         "model": model,
         "messages": [
@@ -394,58 +390,26 @@ async def _call_openrouter(prompt: str, *, google_sub: str | None) -> tuple[dict
         "max_tokens": 2800,
     }
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, read=120.0)) as client:
-            resp = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {openrouter_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-        if resp.status_code != 200:
-            msg = resp.text[:500]
-            raise DartReportReviewError(f"OpenRouter 호출 실패: HTTP {resp.status_code} {msg}")
-        data = resp.json()
-        choice = (data.get("choices") or [{}])[0]
-        raw_text = (choice.get("message") or {}).get("content") or ""
-        usage = data.get("usage") or {}
-        input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-        output_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-        cost = float(usage.get("cost") or usage.get("total_cost") or 0)
-        latency_ms = int((time.monotonic() - started) * 1000)
-        await ai_config.record_usage(
-            google_sub=google_sub,
+        result = await ai_client.post_chat_completion(
             feature="dart_report_review",
-            model=data.get("model") or model,
-            model_profile="dart_report_review",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=cost,
-            latency_ms=latency_ms,
-            ok=True,
-        )
-        return _normalize_review(raw_text), {
-            "model": data.get("model") or model,
-            "tokens_in": input_tokens,
-            "tokens_out": output_tokens,
-            "cost_usd": cost,
-        }
-    except Exception as exc:
-        if isinstance(exc, DartReportReviewError):
-            error = str(exc)
-        else:
-            error = repr(exc)
-        await ai_config.record_usage(
+            payload=payload,
             google_sub=google_sub,
-            feature="dart_report_review",
             model=model,
             model_profile="dart_report_review",
-            ok=False,
-            error=error,
-            latency_ms=int((time.monotonic() - started) * 1000),
+            timeout=httpx.Timeout(120.0, read=120.0),
+            retry_without_reasoning=False,
         )
-        raise
+    except ai_client.MissingOpenRouterKeyError as exc:
+        raise DartReportReviewError("OpenRouter API key is not configured.") from exc
+    except ai_client.OpenRouterError as exc:
+        raise DartReportReviewError(f"OpenRouter call failed: {exc}") from exc
+
+    return _normalize_review(result["content"]), {
+        "model": result["model"],
+        "tokens_in": result["input_tokens"],
+        "tokens_out": result["output_tokens"],
+        "cost_usd": result["cost_usd"],
+    }
 
 
 async def latest_review_status(stock_code: str) -> dict[str, Any]:
