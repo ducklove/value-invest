@@ -65,6 +65,15 @@ def test_market_tape_is_bottom_frame_outside_main():
     assert "padding-bottom: 52px;" in styles
 
 
+def test_market_tape_down_events_have_blue_alert_background():
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    assert ".market-tape-item.breaking.down" in styles
+    assert ".market-tape-item.alert.down" in styles
+    assert "rgba(37, 99, 235, 0.08)" in styles
+    assert "#1d4ed8" in styles
+
+
 def test_portfolio_ai_result_has_framed_output_contract():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
