@@ -52,3 +52,15 @@ async def get_daily_market_brief(
     saved["llm_ok"] = generated.get("llm_ok")
     saved["error"] = generated.get("error")
     return saved
+
+
+@router.get("/api/market/tape")
+async def get_market_tape(
+    request: Request,
+    refresh: bool = Query(False),
+):
+    user = await get_current_user(request)
+    return await market_daily.build_market_tape(
+        google_sub=user["google_sub"] if user else None,
+        refresh=refresh,
+    )

@@ -24,3 +24,67 @@ class MarketDailyRuleTests(unittest.TestCase):
             market_daily.estimate_gemini35_flash_cost(12_000, 1_200),
             0.0288,
         )
+
+    def test_market_tape_prioritizes_breaking_events(self):
+        payload = {
+            "market": [
+                {"code": "KOSPI", "label": "KOSPI", "value": "2,700.00", "change_pct": -2.3},
+                {"code": "USD_KRW", "label": "달러/원", "value": "1,350.00", "change_pct": 0.2},
+            ],
+            "moves": [
+                {
+                    "stock_code": "005930",
+                    "stock_name": "삼성전자",
+                    "price": 80000,
+                    "change_pct": 4.5,
+                    "relative_pct": 6.8,
+                    "move_type": "급등",
+                    "is_notable": True,
+                },
+            ],
+            "disclosures": [
+                {
+                    "stock_code": "000660",
+                    "stock_name": "SK하이닉스",
+                    "report_name": "단일판매ㆍ공급계약체결",
+                    "rcept_no": "202605200001",
+                    "is_material": True,
+                    "material_reason": "공급계약",
+                    "url": "https://dart.example.test",
+                },
+            ],
+            "news": [
+                {
+                    "stock_code": "005930",
+                    "title": "삼성전자 장중 강세",
+                    "outlet": "테스트뉴스",
+                    "published_at": "2026.05.20 10:00",
+                },
+            ],
+        }
+
+        events = market_daily.build_market_tape_events(payload)
+
+        self.assertGreaterEqual(len(events), 4)
+        self.assertEqual(events[0]["type"], "disclosure")
+        self.assertEqual(events[0]["severity"], "breaking")
+        self.assertEqual(events[1]["type"], "stock_move")
+        self.assertEqual(events[1]["badge"], "급등")
+        kospi = next(event for event in events if event["label"] == "KOSPI")
+        self.assertEqual(kospi["severity"], "breaking")
+
+    def test_market_tape_omits_flat_watchlist_noise(self):
+        events = market_daily.build_market_tape_events({
+            "market": [],
+            "moves": [
+                {
+                    "stock_code": "005930",
+                    "stock_name": "삼성전자",
+                    "change_pct": 0.3,
+                    "relative_pct": 0.1,
+                    "is_notable": False,
+                },
+            ],
+        })
+
+        self.assertEqual(events, [])

@@ -34,9 +34,12 @@ NOTABLE_MOVE_LIMIT = int(os.environ.get("MARKET_DAILY_NOTABLE_MOVE_LIMIT", "12")
 NEWS_STOCK_LIMIT = int(os.environ.get("MARKET_DAILY_NEWS_STOCK_LIMIT", "8"))
 NEWS_PER_STOCK = int(os.environ.get("MARKET_DAILY_NEWS_PER_STOCK", "4"))
 MARKET_DAILY_MAX_TOKENS = int(os.environ.get("MARKET_DAILY_MAX_TOKENS", "1800"))
+MARKET_TAPE_TTL_SECONDS = int(os.environ.get("MARKET_TAPE_TTL_SECONDS", "45"))
+MARKET_TAPE_EVENT_LIMIT = int(os.environ.get("MARKET_TAPE_EVENT_LIMIT", "40"))
 
 _NEWS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _NEWS_CACHE_TTL_SECONDS = 600
+_TAPE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 _MATERIAL_DISCLOSURE_KEYWORDS = [
     "유상증자",
@@ -368,6 +371,221 @@ async def _news_for_focus_codes(codes: list[str]) -> list[dict[str, Any]]:
 def _source_hash(payload: dict[str, Any]) -> str:
     source = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _event_id(*parts: Any) -> str:
+    raw = "|".join(str(part or "") for part in parts)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _format_pct(value: float | None) -> str:
+    return f"{value:+.2f}%" if isinstance(value, (int, float)) else "-"
+
+
+def _format_price(value: Any) -> str:
+    number = _safe_float(value)
+    if number is None:
+        return ""
+    if abs(number) >= 1000:
+        return f"{number:,.0f}"
+    return f"{number:,.2f}"
+
+
+def _severity_rank(severity: str) -> int:
+    return {"breaking": 0, "alert": 1, "watch": 2, "info": 3}.get(severity, 4)
+
+
+def _type_rank(event_type: str) -> int:
+    return {"disclosure": 0, "stock_move": 1, "news": 2, "index_move": 3}.get(event_type, 4)
+
+
+def _market_event(row: dict[str, Any]) -> dict[str, Any] | None:
+    code = row.get("code") or ""
+    label = row.get("label") or code
+    value = row.get("value") or "-"
+    pct = row.get("change_pct")
+    direction = "up" if isinstance(pct, (int, float)) and pct > 0 else "down" if isinstance(pct, (int, float)) and pct < 0 else "flat"
+    abs_pct = abs(pct) if isinstance(pct, (int, float)) else 0.0
+    domestic_index = code in {"KOSPI", "KOSDAQ", "KOSPI200"}
+    severity = "breaking" if domestic_index and abs_pct >= 2 else "alert" if abs_pct >= 1 else "info"
+    return {
+        "id": _event_id("index", code, value, pct),
+        "type": "index_move",
+        "severity": severity,
+        "direction": direction,
+        "badge": "지수" if domestic_index else "시장",
+        "label": label,
+        "text": f"{label} {value} {_format_pct(pct)}",
+        "value": value,
+        "change_pct": pct,
+        "sort_key": [_severity_rank(severity), _type_rank("index_move"), code],
+    }
+
+
+def _stock_move_event(row: dict[str, Any]) -> dict[str, Any] | None:
+    pct = row.get("change_pct")
+    if not isinstance(pct, (int, float)):
+        return None
+    stock_code = row.get("stock_code") or ""
+    name = row.get("stock_name") or stock_code
+    price = _format_price(row.get("price"))
+    is_notable = bool(row.get("is_notable"))
+    abs_pct = abs(pct)
+    severity = "breaking" if is_notable else "alert" if abs_pct >= 5 else "watch" if abs_pct >= 2 else "info"
+    badge = row.get("move_type") if is_notable else "관심"
+    direction = "up" if pct > 0 else "down" if pct < 0 else "flat"
+    rel = row.get("relative_pct")
+    detail = f"KOSPI 대비 {_format_pct(rel)}p" if isinstance(rel, (int, float)) and is_notable else ""
+    parts = [f"{name} {_format_pct(pct)}"]
+    if price:
+        parts.append(price)
+    if detail:
+        parts.append(detail)
+    return {
+        "id": _event_id("stock", stock_code, row.get("date"), pct, row.get("relative_pct")),
+        "type": "stock_move",
+        "severity": severity,
+        "direction": direction,
+        "badge": badge or "관심",
+        "label": name,
+        "text": " · ".join(parts),
+        "stock_code": stock_code,
+        "stock_name": name,
+        "change_pct": pct,
+        "relative_pct": rel,
+        "is_notable": is_notable,
+        "sort_key": [_severity_rank(severity), _type_rank("stock_move"), -abs(row.get("relative_pct") or pct)],
+    }
+
+
+def _disclosure_event(row: dict[str, Any]) -> dict[str, Any] | None:
+    report_name = row.get("report_name") or ""
+    if not report_name:
+        return None
+    stock_code = row.get("stock_code") or ""
+    name = row.get("stock_name") or row.get("corp_name") or stock_code
+    is_material = bool(row.get("is_material"))
+    severity = "breaking" if is_material else "watch"
+    reason = row.get("material_reason")
+    return {
+        "id": _event_id("disclosure", stock_code, row.get("rcept_no"), report_name),
+        "type": "disclosure",
+        "severity": severity,
+        "direction": "flat",
+        "badge": "공시",
+        "label": name,
+        "text": f"{name} {report_name}" + (f" · {reason}" if reason else ""),
+        "stock_code": stock_code,
+        "stock_name": name,
+        "url": row.get("url") or "",
+        "is_material": is_material,
+        "sort_key": [_severity_rank(severity), _type_rank("disclosure"), stock_code],
+    }
+
+
+def _news_event(row: dict[str, Any]) -> dict[str, Any] | None:
+    title = row.get("title") or ""
+    if not title:
+        return None
+    stock_code = row.get("stock_code") or ""
+    outlet = row.get("outlet") or ""
+    return {
+        "id": _event_id("news", stock_code, row.get("published_at"), title),
+        "type": "news",
+        "severity": "watch",
+        "direction": "flat",
+        "badge": "뉴스",
+        "label": stock_code or outlet or "뉴스",
+        "text": f"{stock_code} {title}".strip() + (f" · {outlet}" if outlet else ""),
+        "stock_code": stock_code,
+        "url": row.get("url") or "",
+        "published_at": row.get("published_at") or "",
+        "sort_key": [_severity_rank("watch"), _type_rank("news"), stock_code],
+    }
+
+
+def build_market_tape_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert collected market evidence into compact tape events."""
+    candidates: list[dict[str, Any]] = []
+
+    for row in payload.get("disclosures") or []:
+        event = _disclosure_event(row)
+        if event:
+            candidates.append(event)
+
+    for row in payload.get("moves") or []:
+        event = _stock_move_event(row)
+        if event and (event.get("is_notable") or event.get("severity") != "info"):
+            candidates.append(event)
+
+    for row in payload.get("news") or []:
+        event = _news_event(row)
+        if event:
+            candidates.append(event)
+
+    for row in payload.get("market") or []:
+        event = _market_event(row)
+        if event:
+            candidates.append(event)
+
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for event in candidates:
+        event_id = event.get("id")
+        if not event_id or event_id in seen:
+            continue
+        seen.add(event_id)
+        deduped.append(event)
+
+    deduped.sort(key=lambda event: event.get("sort_key") or [9])
+    for event in deduped:
+        event.pop("sort_key", None)
+    return deduped[:MARKET_TAPE_EVENT_LIMIT]
+
+
+async def build_market_tape(*, google_sub: str | None = None, refresh: bool = False) -> dict[str, Any]:
+    cache_key = google_sub or "public"
+    cached = _TAPE_CACHE.get(cache_key)
+    if cached and not refresh and time.monotonic() - cached[0] < MARKET_TAPE_TTL_SECONDS:
+        return {**cached[1], "cached": True}
+
+    brief_date = _today_iso()
+    interests = await _interest_universe(google_sub)
+    market_rows, kospi_pct = await _market_snapshot()
+    moves = await _quote_moves(interests, kospi_pct) if interests else []
+    disclosures, disclosure_warnings = await _fetch_dart_disclosures(interests, brief_date) if interests else ([], [])
+    focus_codes = [
+        *(row["stock_code"] for row in moves if row.get("is_notable")),
+        *(row["stock_code"] for row in disclosures if row.get("is_material")),
+    ]
+    news = await _news_for_focus_codes(focus_codes)
+    payload = {
+        "brief_date": brief_date,
+        "generated_at": datetime.now().isoformat(),
+        "market": market_rows,
+        "moves": moves,
+        "disclosures": disclosures,
+        "news": news,
+        "source_warnings": disclosure_warnings,
+        "interest_count": len(interests),
+    }
+    events = build_market_tape_events(payload)
+    result = {
+        "brief_date": brief_date,
+        "generated_at": payload["generated_at"],
+        "cached": False,
+        "refresh_interval_seconds": max(30, MARKET_TAPE_TTL_SECONDS),
+        "events": events,
+        "counts": {
+            "events": len(events),
+            "breaking": sum(1 for event in events if event.get("severity") == "breaking"),
+            "interest_count": len(interests),
+            "disclosures": len(disclosures),
+            "notable_moves": sum(1 for row in moves if row.get("is_notable")),
+        },
+    }
+    _TAPE_CACHE[cache_key] = (time.monotonic(), result)
+    return result
 
 
 def _fallback_markdown(payload: dict[str, Any], message: str) -> str:

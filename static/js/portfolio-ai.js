@@ -2,6 +2,55 @@
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 // --- AI Analysis ---
 let _aiModelsLoaded = false;
+
+function _setPfAiStatus(text, state = 'idle') {
+  const status = document.getElementById('pfAiStatus');
+  if (!status) return;
+  status.textContent = text;
+  status.dataset.state = state;
+}
+
+function _decoratePfAiResult(container) {
+  if (!container || !container.children.length) return;
+  const fragment = document.createDocumentFragment();
+  let section = null;
+  Array.from(container.children).forEach(node => {
+    if (/^H[1-4]$/.test(node.tagName)) {
+      section = document.createElement('section');
+      section.className = 'pf-ai-section';
+      const heading = document.createElement('div');
+      heading.className = 'pf-ai-section-title';
+      heading.appendChild(node);
+      section.appendChild(heading);
+      fragment.appendChild(section);
+      return;
+    }
+    if (!section) {
+      section = document.createElement('section');
+      section.className = 'pf-ai-section pf-ai-section-lead';
+      fragment.appendChild(section);
+    }
+    section.appendChild(node);
+  });
+  container.replaceChildren(fragment);
+}
+
+function _renderPfAiMarkdown(target, mdText, options = {}) {
+  if (!target) return;
+  const text = (mdText || '').trim();
+  target.classList.toggle('pf-ai-empty', !text);
+  if (!text) {
+    target.textContent = options.emptyText || '분석 실행 후 결과가 여기에 표시됩니다.';
+    return;
+  }
+  if (typeof _renderSafeMarkdown === 'function') {
+    target.innerHTML = _renderSafeMarkdown(mdText);
+    if (options.decorate) _decoratePfAiResult(target);
+  } else {
+    target.textContent = mdText;
+  }
+}
+
 async function _loadAiModels() {
   if (_aiModelsLoaded) return;
   // Show model picker only for admin
@@ -29,10 +78,13 @@ async function runAiAnalysis() {
   const btn = document.getElementById('pfAiBtn');
   const result = document.getElementById('pfAiResult');
   const tokens = document.getElementById('pfAiTokens');
+  const output = document.getElementById('pfAiOutput');
   btn.disabled = true;
   btn.textContent = '분석 중...';
-  result.textContent = '';
-  tokens.textContent = '';
+  if (output) output.classList.add('is-loading');
+  _setPfAiStatus('분석 중', 'loading');
+  _renderPfAiMarkdown(result, '', { emptyText: '분석 결과를 생성하고 있습니다...' });
+  if (tokens) tokens.textContent = '';
 
   const modelInput = document.getElementById('pfAiModelInput');
   const selectedModel = modelInput ? modelInput.value.trim() : '';
@@ -69,14 +121,7 @@ async function runAiAnalysis() {
           const d = JSON.parse(line.slice(6));
           if (d.content) {
             mdText += d.content;
-            // Live preview: render markdown as it streams.
-            // Sanitize with DOMPurify — prompt injection via portfolio
-            // names could otherwise cause the model to echo raw HTML.
-            if (typeof marked !== 'undefined') {
-              result.innerHTML = _renderSafeMarkdown(mdText);
-            } else {
-              result.textContent = mdText;
-            }
+            _renderPfAiMarkdown(result, mdText);
           }
           if (d.done) {
             const model = d.model ? ` · ${d.model}` : '';
@@ -85,16 +130,22 @@ async function runAiAnalysis() {
             const cost = costUsd ? ` · ${costKrw !== null ? costKrw.toLocaleString() + '원' : '$' + costUsd.toFixed(6)}` : '';
             const wikiN = Number(d.wiki_used || 0);
             const wikiTag = wikiN > 0 ? ` · 리포트 ${wikiN}건 참조` : '';
-            tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}${wikiTag}`;
+            if (tokens) tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}${wikiTag}`;
+            _setPfAiStatus('완료', 'done');
           }
         } catch {}
       }
     }
     // Final render
-    if (typeof marked !== 'undefined' && mdText) result.innerHTML = _renderSafeMarkdown(mdText);
+    _renderPfAiMarkdown(result, mdText, { decorate: true, emptyText: '분석 결과가 비어 있습니다.' });
   } catch (e) {
-    result.textContent = '분석 실패: ' + e.message;
+    if (result) {
+      result.classList.add('pf-ai-empty');
+      result.textContent = '분석 실패: ' + e.message;
+    }
+    _setPfAiStatus('오류', 'error');
   }
+  if (output) output.classList.remove('is-loading');
   btn.disabled = false;
   btn.textContent = '분석 실행';
 }

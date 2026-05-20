@@ -332,8 +332,14 @@ function trackEvent(name, params = {}) {
           <button class="bt-run" onclick="runAiAnalysis()" id="pfAiBtn" style="margin-left:auto;padding:6px 14px;font-size:12px;">분석 실행</button>
         </div>
         <textarea id="pfAiQuery" placeholder="AI에게 추가로 묻고 싶은 내용이 있으면 입력하세요 (선택). 예: 금리 인상 가능성을 고려해 포트폴리오를 평가해줘." rows="2" style="width:100%;margin:8px 0 4px;padding:8px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);resize:vertical;font-family:inherit;"></textarea>
-        <div id="pfAiResult" class="pf-ai-result"></div>
-        <div id="pfAiTokens" style="font-size:11px;color:var(--text-secondary);margin-top:8px;"></div>
+        <div class="pf-ai-output" id="pfAiOutput" aria-live="polite">
+          <div class="pf-ai-output-head">
+            <span>AI 분석 결과</span>
+            <span id="pfAiStatus" class="pf-ai-status">대기</span>
+          </div>
+          <div id="pfAiResult" class="pf-ai-result pf-ai-empty">분석 실행 후 결과가 여기에 표시됩니다.</div>
+        </div>
+        <div id="pfAiTokens" class="pf-ai-meta"></div>
       </div>
 
       <div class="pf-nav-chart-wrap">
@@ -515,6 +521,16 @@ function trackEvent(name, params = {}) {
   </div>
 
 </div>
+
+<section class="market-tape" id="marketTape" aria-live="polite" aria-label="실시간 시황 테이프">
+  <div class="market-tape-head">Market Tape</div>
+  <div class="market-tape-viewport">
+    <div class="market-tape-track" id="marketTapeTrack">
+      <span class="market-tape-item info">시황 테이프를 불러오는 중입니다</span>
+    </div>
+  </div>
+  <button class="market-tape-refresh" id="marketTapeRefreshBtn" type="button" onclick="loadMarketTape(true)" title="시황 테이프 새로고침">↻</button>
+</section>
 
 <div class="chart-modal-overlay" id="chartModal" style="display:none;" onclick="if(event.target===this)closeChartModal()" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
   <div class="chart-modal">

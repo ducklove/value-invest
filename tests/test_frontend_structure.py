@@ -44,6 +44,40 @@ def test_portfolio_feature_files_stay_below_maintenance_ceiling():
         assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
 
 
+def test_portfolio_default_sort_is_unset():
+    source = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+
+    assert "let pfSortKey = null;" in source
+    assert "let pfGroupSort = false;" in source
+
+
+def test_market_tape_is_bottom_frame_outside_main():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    main_close = html.index("</div>\n\n<section class=\"market-tape\"")
+    tape_pos = html.index('id="marketTape"')
+    chart_modal_pos = html.index('id="chartModal"')
+    assert main_close < tape_pos < chart_modal_pos
+    assert "position: fixed;" in styles
+    assert "bottom: 0;" in styles
+    assert "border-top: 1px solid var(--border);" in styles
+    assert "padding-bottom: 52px;" in styles
+
+
+def test_portfolio_ai_result_has_framed_output_contract():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    source = (JS / "portfolio-ai.js").read_text(encoding="utf-8")
+
+    assert 'id="pfAiOutput"' in html
+    assert 'id="pfAiStatus"' in html
+    assert "function _decoratePfAiResult" in source
+    assert "_renderPfAiMarkdown(result, mdText, { decorate: true" in source
+    assert ".pf-ai-output" in styles
+    assert ".pf-ai-section" in styles
+
+
 def test_today_card_does_not_fallback_to_quote_session_return():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     forbidden = "totalDailyPnl / prevMV"

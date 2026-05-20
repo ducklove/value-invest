@@ -128,9 +128,11 @@ async function initApp() {
   await _mbLoadCatalog();
   await _mbLoadCodes();
   loadMarketSummary();
+  loadMarketTape();
   loadDailyMarketBrief();
   loadWikiStats();
   setInterval(loadMarketSummary, 60_000);
+  setInterval(() => loadMarketTape(false), 45_000);
   setInterval(_pollBenchmarkQuotes, 60_000);
   setInterval(_refreshActivePortfolioTodayState, 5 * 60_000);
   // Refresh wiki stats every 5 minutes so the badge reflects ongoing
