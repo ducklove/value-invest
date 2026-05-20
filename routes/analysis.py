@@ -41,8 +41,10 @@ def _analysis_snapshot_has_invalid_prices(snapshot: dict | None) -> bool:
             if not isinstance(point, dict):
                 continue
             value = point.get("value")
+            if value is None:
+                return True
             try:
-                if value is not None and float(value) < 0:
+                if float(value) < 0:
                     return True
             except (TypeError, ValueError):
                 continue

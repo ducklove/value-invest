@@ -33,6 +33,22 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
             },
         ]))
 
+    def test_market_data_needs_refresh_when_cached_close_price_is_missing(self):
+        current_year = stock_price.datetime.now().year
+        self.assertTrue(stock_price.market_data_needs_refresh([
+            {
+                "year": current_year - 1,
+                "close_price": None,
+                "per": 1,
+                "pbr": 1,
+                "eps": 1,
+                "bps": 1,
+                "dividend_per_share": 1,
+                "dividend_yield": 1,
+                "market_cap": 1,
+            },
+        ]))
+
     async def test_fetch_market_data_uses_financial_data_when_kis_financials_fail(self):
         with patch("stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
              patch("stock_price._group_close_by_year_series", return_value={2024: 1000.0}), \

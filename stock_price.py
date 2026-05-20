@@ -608,8 +608,9 @@ def market_data_needs_refresh(data: list[dict]) -> bool:
     if not data:
         return True
     if any(
-        row.get("close_price") is not None and row.get("close_price") <= 0
+        row.get("close_price") is None or row.get("close_price") <= 0
         for row in data
+        if row.get("year") is not None and row.get("year") <= datetime.now().year
     ):
         return True
     keys = ("per", "pbr", "eps", "bps", "dividend_per_share", "dividend_yield", "market_cap")
