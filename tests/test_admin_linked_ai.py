@@ -173,6 +173,21 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result["migrated"])
             self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "qwen/qwen3.6-plus")
 
+    async def test_migrates_qwen_flash_portfolio_override_even_after_first_marker(self):
+        with patch.dict("os.environ", {}, clear=True):
+            await cache.set_app_setting(
+                "AI_MIGRATION::portfolio_gemini_flash_latest",
+                "skipped",
+                updated_by="system:migration",
+            )
+            await cache.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-flash", updated_by="admin@example.com")
+
+            result = await ai_config.migrate_legacy_model_defaults()
+
+            self.assertTrue(result["migrated"])
+            self.assertTrue(result["portfolio_qwen_flash"]["migrated"])
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "~google/gemini-flash-latest")
+
     async def test_usage_summary_groups_by_feature_and_model(self):
         await ai_config.record_usage(
             google_sub="u1",
