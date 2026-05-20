@@ -31,12 +31,24 @@ def _analysis_snapshot_has_invalid_prices(snapshot: dict | None) -> bool:
     indicators = snapshot.get("indicators")
     if not isinstance(indicators, dict):
         return False
+    price_series = []
     for label, series in indicators.items():
         label_text = str(label)
         if not any(marker in label_text for marker in _PRICE_INDICATOR_MARKERS):
             continue
         if not isinstance(series, list):
             continue
+        price_series.append(series)
+
+    if not price_series and indicators:
+        # Older snapshots can have mojibake labels such as "?? (?)". Analyzer
+        # emits annual price as the first indicator, so use insertion order as
+        # a defensive fallback for cache invalidation only.
+        first_label, first_series = next(iter(indicators.items()))
+        if isinstance(first_series, list) and any(ch in str(first_label) for ch in ("?", "�")):
+            price_series.append(first_series)
+
+    for series in price_series:
         for point in series:
             if not isinstance(point, dict):
                 continue

@@ -33,3 +33,14 @@ def test_analysis_snapshot_missing_annual_price_is_invalid():
     }
 
     assert analysis._analysis_snapshot_has_invalid_prices(snapshot)
+
+
+def test_analysis_snapshot_uses_first_indicator_when_price_label_is_mojibake():
+    snapshot = {
+        "indicators": {
+            "?? (?)": [{"year": 2000, "value": None}],
+            "PER": [{"year": 2000, "value": 1.2}],
+        }
+    }
+
+    assert analysis._analysis_snapshot_has_invalid_prices(snapshot)
