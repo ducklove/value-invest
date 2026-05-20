@@ -726,7 +726,10 @@ async def fetch_market_data(
     }
     split_events = _normalized_split_events(splits_series)
     shares_by_year = _adjust_shares_for_splits(_group_last_by_year_series(shares_series), split_events)
-    yfinance_dividends_by_year = _group_sum_by_year_series(dividends_series)
+    # Yahoo dividend events for old Korean histories are often adjusted in a
+    # different share/price basis than KIS/DART. Keep them out of the annual
+    # Korean analysis path; missing past dividends are normalized to 0 below.
+    yfinance_dividends_by_year: dict[int, float] = {}
 
     kis_close_by_year = _group_close_by_year(adjusted_history_payload.get("items"))
     kis_raw_close_by_year = _group_close_by_year(raw_history_payload.get("items"))
@@ -766,16 +769,14 @@ async def fetch_market_data(
     dividends_by_year = {
         year: dart_dividends_by_year.get(
             year,
-            kis_dividends_by_year.get(year, yfinance_dividends_by_year.get(year)),
+            kis_dividends_by_year.get(year),
         )
         for year in sorted(
             set(dart_dividends_by_year)
-            | set(yfinance_dividends_by_year)
             | set(kis_dividends_by_year)
         )
         if (
             dart_dividends_by_year.get(year) is not None
-            or yfinance_dividends_by_year.get(year) is not None
             or kis_dividends_by_year.get(year) is not None
         )
     }
