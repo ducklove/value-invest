@@ -47,18 +47,27 @@ _NXT_AFTER_CLOSE = dtime(21, 0)
 
 
 def active_market_code(now: datetime | None = None) -> str:
-    """KIS REST FID_COND_MRKT_DIV_CODE matching the active session window.
+    """KIS REST FID_COND_MRKT_DIV_CODE for quote snapshots.
 
-    Returns ``"J"`` for KRX 정규시간, ``"NX"`` for NXT 운영시간.
-    Mirrors :func:`_active_tr_id` so REST fallback queries the same venue
-    as the WebSocket subscription.
+    WebSocket subscriptions stop using NXT after 21:00 because no more live
+    ticks arrive, but REST can still return the final NXT after-market price.
+    Keep REST on NX outside regular KRX hours so stale/missing WS quotes do
+    not fall back to the 15:30 close until the next regular session opens.
     """
-    return "J" if _active_tr_id(now) == "H0STCNT0" else "NX"
+    cur = _kst_clock_time(now)
+    return "J" if _KRX_OPEN <= cur < _KRX_CLOSE else "NX"
+
+
+def _kst_clock_time(now: datetime | None = None) -> dtime:
+    current = now or datetime.now(KST)
+    if current.tzinfo is not None:
+        current = current.astimezone(KST)
+    return current.timetz().replace(tzinfo=None)
 
 
 def _active_tr_id(now: datetime | None = None) -> str:
     """Return the TR_ID that should be subscribed at *now* (KST)."""
-    cur = (now or datetime.now(KST)).timetz().replace(tzinfo=None)
+    cur = _kst_clock_time(now)
     if _KRX_OPEN <= cur < _KRX_CLOSE:
         return "H0STCNT0"
     if cur < _NXT_AFTER_CLOSE:  # 00:00~09:00 또는 15:30~21:00 → NXT
