@@ -22,6 +22,29 @@ function _pfAiSectionKind(text) {
   return 'default';
 }
 
+function _pfAiSectionHasBody(section) {
+  if (!section) return false;
+  return Array.from(section.children).some(child => {
+    if (child.classList && child.classList.contains('pf-ai-section-title')) return false;
+    if (String(child.textContent || '').trim()) return true;
+    return !!child.querySelector('table,img,svg,canvas');
+  });
+}
+
+function _normalizePfAiEmptySections(fragment) {
+  Array.from(fragment.children).forEach(child => {
+    if (!child.classList || !child.classList.contains('pf-ai-section')) return;
+    if (_pfAiSectionHasBody(child)) return;
+    const title = Array.from(child.children).find(el => el.classList && el.classList.contains('pf-ai-section-title'));
+    if (!title) {
+      child.remove();
+      return;
+    }
+    child.className = 'pf-ai-group-heading';
+    child.removeAttribute('data-kind');
+  });
+}
+
 function _decoratePfAiResult(container) {
   if (!container || !container.children.length) return;
   const fragment = document.createDocumentFragment();
@@ -45,6 +68,7 @@ function _decoratePfAiResult(container) {
     }
     section.appendChild(node);
   });
+  _normalizePfAiEmptySections(fragment);
   container.replaceChildren(fragment);
 }
 

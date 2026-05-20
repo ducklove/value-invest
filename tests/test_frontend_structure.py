@@ -74,11 +74,13 @@ def test_portfolio_ai_result_has_framed_output_contract():
     assert 'id="pfAiStatus"' in html
     assert "function _pfAiSectionKind" in source
     assert "function _decoratePfAiResult" in source
+    assert "function _normalizePfAiEmptySections" in source
     assert "_renderPfAiMarkdown(result, mdText, { decorate: true" in source
     assert "context_holdings" in source
     assert "data-kind=\"visual\"" in styles or 'data-kind="visual"' in styles
     assert ".pf-ai-output" in styles
     assert ".pf-ai-section" in styles
+    assert ".pf-ai-group-heading" in styles
     assert '.pf-ai-section[data-kind="action"]' in styles
     assert ".pf-ai-result:not(.pf-ai-empty)" in styles
     assert "repeat(auto-fit" in styles

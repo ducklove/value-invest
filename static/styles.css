@@ -1153,6 +1153,31 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border-radius: 8px;
   background: var(--surface);
 }
+.pf-ai-group-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px -2px;
+  color: var(--text);
+  font-weight: 800;
+}
+.pf-ai-group-heading::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--primary);
+  flex: 0 0 auto;
+}
+.pf-ai-result .pf-ai-group-heading h1,
+.pf-ai-result .pf-ai-group-heading h2,
+.pf-ai-result .pf-ai-group-heading h3,
+.pf-ai-result .pf-ai-group-heading h4 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+}
 .pf-ai-section[data-kind="summary"],
 .pf-ai-section[data-kind="visual"],
 .pf-ai-section[data-kind="action"] {
