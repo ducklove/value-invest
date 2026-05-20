@@ -357,7 +357,10 @@ async def _fetch_stock_news(stock_code: str, limit: int = NEWS_PER_STOCK) -> lis
         return []
 
 
-async def _news_for_focus_codes(codes: list[str]) -> list[dict[str, Any]]:
+async def _news_for_focus_codes(
+    codes: list[str],
+    stock_names: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     unique = []
     seen = set()
     for code in codes:
@@ -365,7 +368,25 @@ async def _news_for_focus_codes(codes: list[str]) -> list[dict[str, Any]]:
             unique.append(code)
             seen.add(code)
     batches = await asyncio.gather(*(_fetch_stock_news(code) for code in unique[:NEWS_STOCK_LIMIT]))
-    return [item for batch in batches for item in batch]
+    names = stock_names or {}
+    rows: list[dict[str, Any]] = []
+    for batch in batches:
+        for item in batch:
+            code = item.get("stock_code") or ""
+            name = names.get(code)
+            rows.append({**item, **({"stock_name": name} if name else {})})
+    return rows
+
+
+def _focus_stock_names(*groups: list[dict[str, Any]]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for group in groups:
+        for row in group or []:
+            code = row.get("stock_code")
+            name = row.get("stock_name") or row.get("corp_name")
+            if code and name and name != code:
+                names.setdefault(code, name)
+    return names
 
 
 def _source_hash(payload: dict[str, Any]) -> str:
@@ -488,18 +509,25 @@ def _news_event(row: dict[str, Any]) -> dict[str, Any] | None:
     if not title:
         return None
     stock_code = row.get("stock_code") or ""
+    raw_name = row.get("stock_name") or row.get("corp_name") or ""
+    name = raw_name if raw_name and raw_name != stock_code else ""
+    prefix = f"[{name}] " if name and name not in title else ""
     outlet = row.get("outlet") or ""
+    text = f"{prefix}{title}".strip()
+    if outlet:
+        text = f"{text} \u00b7 {outlet}"
     return {
         "id": _event_id("news", stock_code, row.get("published_at"), title),
         "type": "news",
         "severity": "watch",
         "direction": "flat",
         "badge": "뉴스",
-        "label": stock_code or outlet or "뉴스",
-        "text": f"{stock_code} {title}".strip() + (f" · {outlet}" if outlet else ""),
         "stock_code": stock_code,
+        "stock_name": name,
         "url": row.get("url") or "",
         "published_at": row.get("published_at") or "",
+        "label": name or outlet or "\ub274\uc2a4",
+        "text": text,
         "sort_key": [_severity_rank("watch"), _type_rank("news"), stock_code],
     }
 
@@ -558,7 +586,7 @@ async def build_market_tape(*, google_sub: str | None = None, refresh: bool = Fa
         *(row["stock_code"] for row in moves if row.get("is_notable")),
         *(row["stock_code"] for row in disclosures if row.get("is_material")),
     ]
-    news = await _news_for_focus_codes(focus_codes)
+    news = await _news_for_focus_codes(focus_codes, _focus_stock_names(moves, disclosures))
     payload = {
         "brief_date": brief_date,
         "generated_at": datetime.now().isoformat(),
@@ -718,7 +746,7 @@ async def build_daily_market_brief(*, google_sub: str | None = None, brief_date:
         *(row["stock_code"] for row in moves if row.get("is_notable")),
         *(row["stock_code"] for row in disclosures if row.get("is_material")),
     ]
-    news = await _news_for_focus_codes(focus_codes)
+    news = await _news_for_focus_codes(focus_codes, _focus_stock_names(moves, disclosures))
 
     payload: dict[str, Any] = {
         "brief_date": brief_date,

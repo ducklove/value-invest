@@ -88,3 +88,35 @@ class MarketDailyRuleTests(unittest.TestCase):
         })
 
         self.assertEqual(events, [])
+
+    def test_market_tape_news_uses_stock_name_instead_of_code_when_needed(self):
+        events = market_daily.build_market_tape_events({
+            "news": [
+                {
+                    "stock_code": "005930",
+                    "stock_name": "\uc0bc\uc131\uc804\uc790",
+                    "title": "\ubc18\ub3c4\uccb4 \ud22c\uc790 \ud655\ub300",
+                    "outlet": "\uc5f0\ud569\ub274\uc2a4",
+                    "published_at": "2026.05.21 10:00",
+                },
+            ],
+        })
+
+        self.assertEqual(events[0]["text"], "[\uc0bc\uc131\uc804\uc790] \ubc18\ub3c4\uccb4 \ud22c\uc790 \ud655\ub300 \u00b7 \uc5f0\ud569\ub274\uc2a4")
+        self.assertNotIn("005930", events[0]["text"])
+
+    def test_market_tape_news_does_not_repeat_stock_name_in_title(self):
+        events = market_daily.build_market_tape_events({
+            "news": [
+                {
+                    "stock_code": "005930",
+                    "stock_name": "\uc0bc\uc131\uc804\uc790",
+                    "title": "\uc0bc\uc131\uc804\uc790 \uc2e0\uc81c\ud488 \uacf5\uac1c",
+                    "outlet": "\uc5f0\ud569\ub274\uc2a4",
+                    "published_at": "2026.05.21 10:00",
+                },
+            ],
+        })
+
+        self.assertEqual(events[0]["text"], "\uc0bc\uc131\uc804\uc790 \uc2e0\uc81c\ud488 \uacf5\uac1c \u00b7 \uc5f0\ud569\ub274\uc2a4")
+        self.assertNotIn("[\uc0bc\uc131\uc804\uc790]", events[0]["text"])
