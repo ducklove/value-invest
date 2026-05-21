@@ -76,6 +76,40 @@ _MATERIAL_DISCLOSURE_KEYWORDS = [
     "불성실공시",
 ]
 
+_LOW_SIGNAL_DISCLOSURE_KEYWORDS = [
+    "기업설명회",
+    "IR",
+    "사업보고서",
+    "반기보고서",
+    "분기보고서",
+    "정기보고서",
+    "감사보고서제출",
+    "주주총회소집공고",
+    "의결권대리행사권유참고서류",
+    "주주총회집중일개최사유신고",
+]
+
+_SECURITIES_DISCLOSURE_NAME_HINTS = [
+    "증권",
+    "투자증권",
+    "증권금융",
+    "선물",
+]
+
+_SECURITIES_LOW_SIGNAL_DISCLOSURE_KEYWORDS = [
+    "투자설명서",
+    "일괄신고",
+    "증권신고서",
+    "증권발행실적보고서",
+    "발행실적보고서",
+    "파생결합증권",
+    "주식워런트증권",
+    "상장지수증권",
+    "상장지수집합투자기구",
+    "집합투자증권",
+    "증권투자신탁",
+]
+
 
 def _today_iso() -> str:
     return date.today().isoformat()
@@ -143,6 +177,37 @@ def _material_disclosure_reason(report_name: str) -> str | None:
         if keyword in normalized:
             return keyword
     return None
+
+
+def _compact_disclosure_text(*values: Any) -> str:
+    text = html.unescape(" ".join(str(value or "") for value in values))
+    text = re.sub(r"\s+", "", text)
+    return text.replace("ㆍ", "").replace("·", "").lower()
+
+
+def _matches_disclosure_keyword(text: str, keywords: list[str]) -> bool:
+    return any(_compact_disclosure_text(keyword) in text for keyword in keywords)
+
+
+def _is_securities_disclosure(row: dict[str, Any]) -> bool:
+    issuer_text = _compact_disclosure_text(row.get("stock_name"), row.get("corp_name"))
+    return _matches_disclosure_keyword(issuer_text, _SECURITIES_DISCLOSURE_NAME_HINTS)
+
+
+def _is_low_signal_disclosure(row: dict[str, Any]) -> bool:
+    report_text = _compact_disclosure_text(row.get("report_name"))
+    if _matches_disclosure_keyword(report_text, _LOW_SIGNAL_DISCLOSURE_KEYWORDS):
+        return True
+    if _is_securities_disclosure(row):
+        return _matches_disclosure_keyword(report_text, _SECURITIES_LOW_SIGNAL_DISCLOSURE_KEYWORDS)
+    return False
+
+
+def _should_show_disclosure_on_tape(row: dict[str, Any]) -> bool:
+    report_name = row.get("report_name") or ""
+    if not report_name or _is_low_signal_disclosure(row):
+        return False
+    return bool(row.get("is_material") or row.get("material_reason") or _material_disclosure_reason(report_name))
 
 
 async def _interest_universe(google_sub: str | None) -> list[dict[str, Any]]:
@@ -485,9 +550,9 @@ def _disclosure_event(row: dict[str, Any]) -> dict[str, Any] | None:
         return None
     stock_code = row.get("stock_code") or ""
     name = row.get("stock_name") or row.get("corp_name") or stock_code
-    is_material = bool(row.get("is_material"))
+    reason = row.get("material_reason") or _material_disclosure_reason(report_name)
+    is_material = bool(row.get("is_material") or reason)
     severity = "breaking" if is_material else "watch"
-    reason = row.get("material_reason")
     return {
         "id": _event_id("disclosure", stock_code, row.get("rcept_no"), report_name),
         "type": "disclosure",
@@ -537,6 +602,8 @@ def build_market_tape_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
 
     for row in payload.get("disclosures") or []:
+        if not _should_show_disclosure_on_tape(row):
+            continue
         event = _disclosure_event(row)
         if event:
             candidates.append(event)

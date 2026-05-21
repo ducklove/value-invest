@@ -89,6 +89,54 @@ class MarketDailyRuleTests(unittest.TestCase):
 
         self.assertEqual(events, [])
 
+    def test_market_tape_omits_non_material_disclosure_noise(self):
+        events = market_daily.build_market_tape_events({
+            "disclosures": [
+                {
+                    "stock_code": "005930",
+                    "stock_name": "\uc0bc\uc131\uc804\uc790",
+                    "report_name": "\uae30\uc5c5\uc124\uba85\ud68c(IR)\uac1c\ucd5c",
+                    "rcept_no": "202605210001",
+                    "is_material": False,
+                },
+            ],
+        })
+
+        self.assertEqual(events, [])
+
+    def test_market_tape_filters_routine_securities_disclosure(self):
+        events = market_daily.build_market_tape_events({
+            "disclosures": [
+                {
+                    "stock_code": "005940",
+                    "stock_name": "NH\ud22c\uc790\uc99d\uad8c",
+                    "report_name": "\uc77c\uad04\uc2e0\uace0\ucd94\uac00\uc11c\ub958(\ud30c\uc0dd\uacb0\ud569\uc99d\uad8c)",
+                    "rcept_no": "202605210002",
+                    "is_material": True,
+                    "material_reason": "\uc720\uc0c1\uc99d\uc790",
+                },
+            ],
+        })
+
+        self.assertEqual(events, [])
+
+    def test_market_tape_keeps_major_securities_disclosure(self):
+        events = market_daily.build_market_tape_events({
+            "disclosures": [
+                {
+                    "stock_code": "039490",
+                    "stock_name": "\ud0a4\uc6c0\uc99d\uad8c",
+                    "report_name": "\ubc30\ub2f9\uacb0\uc815",
+                    "rcept_no": "202605210003",
+                },
+            ],
+        })
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "disclosure")
+        self.assertEqual(events[0]["severity"], "breaking")
+        self.assertIn("\ubc30\ub2f9", events[0]["text"])
+
     def test_market_tape_news_uses_stock_name_instead_of_code_when_needed(self):
         events = market_daily.build_market_tape_events({
             "news": [
