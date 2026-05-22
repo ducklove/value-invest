@@ -1019,6 +1019,10 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
             stock_q = await _fetch_quote(benchmark_code)
         q = {"change_pct": stock_q.get("change_pct")} if stock_q else {}
 
+    if not q:
+        stale = _cached_benchmark_quote(benchmark_code, allow_stale=True)
+        if stale:
+            return stale
     _benchmark_quote_cache.set(benchmark_code, q)
     return q
 

@@ -85,6 +85,13 @@ def _calc_change_pct(value_str: str, change_str: str, direction: str) -> str:
     return ""
 
 
+def _indicator_has_value(data: dict | None) -> bool:
+    if not data:
+        return False
+    value = data.get("value")
+    return value is not None and str(value).strip() != ""
+
+
 # ---------------------------------------------------------------------------
 # Korean index fetchers (KOSPI, KOSDAQ, KOSPI200)
 # ---------------------------------------------------------------------------
@@ -553,11 +560,14 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
         return dict(cached[1])
 
     fetch_codes: list[str] = []
+    stale_results: dict[str, dict] = {}
     for code in requested_codes:
         item_cached = _indicator_item_cache.get(code)
         if item_cached and (now - item_cached[0]) < _INDICATORS_TTL:
             results[code] = dict(item_cached[1])
         else:
+            if item_cached and _indicator_has_value(item_cached[1]):
+                stale_results[code] = dict(item_cached[1])
             fetch_codes.append(code)
 
     if not fetch_codes:
@@ -684,8 +694,10 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
 
     # Fill in any missing codes with empty
     for code in fetch_codes:
-        if code not in results:
-            results[code] = dict(_EMPTY)
+        current = results.get(code) or dict(_EMPTY)
+        if not _indicator_has_value(current) and code in stale_results:
+            current = {**stale_results[code], "_stale": True}
+        results[code] = current
 
     cache_time = _time.monotonic()
     for code in fetch_codes:

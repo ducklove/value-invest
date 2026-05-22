@@ -28,6 +28,28 @@ let _pfPointerGuardUntil = 0;
 const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
 let pfSimpleMode = false;
 
+function pfBenchmarkQuoteHasChange(q) {
+  return q && q.change_pct !== null && q.change_pct !== undefined && q.change_pct !== '';
+}
+
+function pfMergeBenchmarkQuote(code, incoming) {
+  if (!code || !incoming || typeof incoming !== 'object') return false;
+  const current = pfBenchmarkQuotes[code] || {};
+  const merged = { ...current };
+  const incomingHasChange = pfBenchmarkQuoteHasChange(incoming);
+  const currentHasChange = pfBenchmarkQuoteHasChange(current);
+  const canReplaceChange = incomingHasChange && (incoming._stale !== true || !currentHasChange);
+
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value === null || value === undefined || value === '') continue;
+    if (['change_pct', 'change', 'direction', 'value'].includes(key) && !canReplaceChange) continue;
+    merged[key] = value;
+  }
+
+  pfBenchmarkQuotes[code] = merged;
+  return true;
+}
+
 function _pfMarkPointerInteraction(ms = 450) {
   _pfPointerGuardUntil = performance.now() + ms;
 }

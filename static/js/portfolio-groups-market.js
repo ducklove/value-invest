@@ -266,6 +266,7 @@ let mbCatalog = {};
 let mbLoaded = false;
 let mbPickerOpen = false;
 let mbDragFrom = -1;
+let mbLastDataMap = {};
 
 function _mbGetCodes() {
   try { const v = JSON.parse(localStorage.getItem(MB_LS_KEY)); if (Array.isArray(v)) return v; } catch (e) { console.warn(e); }
@@ -297,6 +298,23 @@ function _mbIsHidden(code) {
     if (h >= 9 && h < 18) return true;
   }
   return false;
+}
+
+function _mbIndicatorHasValue(data) {
+  return data && data.value !== null && data.value !== undefined && String(data.value).trim() !== '';
+}
+
+function _mbMergeDataMap(dataMap) {
+  const merged = { ...mbLastDataMap };
+  for (const [code, data] of Object.entries(dataMap || {})) {
+    if (_mbIndicatorHasValue(data)) {
+      merged[code] = data;
+    } else if (!merged[code]) {
+      merged[code] = data;
+    }
+  }
+  mbLastDataMap = merged;
+  return merged;
 }
 
 function _mbRenderBar(dataMap) {
@@ -518,7 +536,7 @@ async function loadMarketSummary() {
     const resp = await apiFetch(`/api/market-summary?codes=${mbCodes.join(',')}`);
     if (!resp.ok) return;
     const dataMap = await resp.json();
-    _mbRenderBar(dataMap);
+    _mbRenderBar(_mbMergeDataMap(dataMap));
   } catch (e) { console.warn(e); }
 }
 
@@ -527,7 +545,7 @@ async function _pollBenchmarkQuotes() {
     const r = await apiFetch('/api/portfolio/benchmark-quotes');
     if (!r.ok) return;
     const fresh = await r.json();
-    for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
+    for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);
     // 전체 재렌더 대신 벤치마크 셀만 업데이트 — 이래야 WS tick 으로 in-
     // place 갱신된 다른 셀들이 60초 polling 때마다 뒤집히지 않음.
     if (activeView === 'portfolio') {

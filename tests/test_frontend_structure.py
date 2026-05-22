@@ -290,6 +290,22 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "const price = quotePriceOrNull(q);" in render
 
 
+def test_market_bar_and_benchmark_polling_do_not_clear_good_values_on_empty_refresh():
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    groups = (JS / "portfolio-groups-market.js").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+
+    assert "function pfMergeBenchmarkQuote(code, incoming)" in shell
+    assert "incoming._stale !== true || !currentHasChange" in shell
+    assert "let mbLastDataMap = {}" in groups
+    assert "function _mbMergeDataMap(dataMap)" in groups
+    assert "_mbRenderBar(_mbMergeDataMap(dataMap));" in groups
+    assert "for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);" in groups
+    assert "for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);" in data
+    assert "pfMergeBenchmarkQuote(data.effective_benchmark" in actions
+
+
 def test_benchmark_picker_only_opens_in_edit_mode():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")

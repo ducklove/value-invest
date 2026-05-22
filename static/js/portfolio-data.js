@@ -98,7 +98,7 @@ async function loadPortfolio() {
     apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
       if (!r.ok) return;
       const fresh = await r.json();
-      for (const [k, v] of Object.entries(fresh)) pfBenchmarkQuotes[k] = v;
+      for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);
       // Save names to localStorage
       const names = {};
       for (const [k, v] of Object.entries(pfBenchmarkQuotes)) { if (v.name) names[k] = v.name; }

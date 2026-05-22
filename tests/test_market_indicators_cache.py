@@ -1,4 +1,5 @@
 import unittest
+import time
 from unittest.mock import patch
 
 import market_indicators
@@ -32,3 +33,24 @@ class MarketIndicatorsCacheTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(second["KOSPI"]["change_pct"], "1.00%")
 
+    async def test_refresh_failure_keeps_stale_indicator_value(self):
+        stale_ts = time.monotonic() - market_indicators._INDICATORS_TTL - 1
+        market_indicators._indicator_item_cache["SPX"] = (
+            stale_ts,
+            {
+                "value": "6,000.00",
+                "change": "12.00",
+                "change_pct": "0.20%",
+                "direction": "up",
+            },
+        )
+
+        async def empty_foreign_index(client, symbol: str) -> dict:
+            return dict(market_indicators._EMPTY)
+
+        with patch.object(market_indicators, "_fetch_foreign_index", side_effect=empty_foreign_index):
+            result = await market_indicators.fetch_indicators(["SPX"])
+
+        self.assertEqual(result["SPX"]["value"], "6,000.00")
+        self.assertEqual(result["SPX"]["change_pct"], "0.20%")
+        self.assertTrue(result["SPX"]["_stale"])

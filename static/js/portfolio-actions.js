@@ -99,11 +99,10 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
     const data = await resp.json();
     item.benchmark_code = data.effective_benchmark;
     if (data.benchmark_quote || data.benchmark_name) {
-      pfBenchmarkQuotes[data.effective_benchmark] = {
-        ...(pfBenchmarkQuotes[data.effective_benchmark] || {}),
-        ...data.benchmark_quote,
+      pfMergeBenchmarkQuote(data.effective_benchmark, {
+        ...(data.benchmark_quote || {}),
         name: data.benchmark_name || data.effective_benchmark,
-      };
+      });
     }
     renderPortfolio();
   } catch (e) { showToast(e.message); }

@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -23,6 +24,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         portfolio_route._dividend_warmup_last.clear()
         portfolio_route._dividend_warmup_tasks.clear()
         portfolio_route._benchmark_name_cache.clear()
+        portfolio_route._benchmark_quote_cache.clear()
 
         db = await cache.get_db()
         await db.execute(
@@ -329,6 +331,23 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(data["005930"]["name"], "삼성전자")
         self.assertEqual(data["005930"]["change_pct"], 0.5)
+
+    async def test_benchmark_quote_fetch_keeps_stale_value_on_empty_indicator(self):
+        portfolio_route._benchmark_quote_cache.set("IDX_SP500", {"change_pct": 0.42})
+        portfolio_route._benchmark_quote_cache._data["IDX_SP500"] = (
+            time.monotonic() - portfolio_route._benchmark_quote_cache.ttl_seconds - 1,
+            {"change_pct": 0.42},
+        )
+
+        with patch.object(
+            portfolio_route.market_indicators,
+            "fetch_indicators",
+            new=AsyncMock(return_value={"SPX": {"value": "", "change_pct": "", "direction": ""}}),
+        ):
+            result = await portfolio_route._fetch_benchmark_quote("IDX_SP500")
+
+        self.assertEqual(result["change_pct"], 0.42)
+        self.assertTrue(result["_stale"])
 
     async def test_delete_item(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
