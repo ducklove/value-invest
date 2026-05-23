@@ -15,6 +15,10 @@ BASE_NAV = 1000.0
 KST = timezone(timedelta(hours=9))
 
 
+class SnapshotIncomplete(RuntimeError):
+    """Raised when NAV cannot be valued without using a non-market fallback."""
+
+
 def _today_kst() -> date:
     return datetime.now(KST).date()
 
@@ -104,6 +108,7 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
     total_value = 0.0
     total_invested = 0.0
     per_stock = []
+    missing: list[str] = []
     for item in items:
         qty = item["quantity"]
         avg_price = item["avg_price"]
@@ -120,16 +125,22 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
                     )
             else:
                 quote = await _fetch_quote(item["stock_code"])
-            price = quote.get("price") if quote else None
+            price = None if not quote or quote.get("_stale") is True else _safe_float(quote.get("price"))
             if price is not None:
                 mv = qty * price
+            elif item["stock_code"] in prev_stock_map:
+                mv = prev_stock_map[item["stock_code"]]
+                logger.warning("Quote unavailable for %s, using previous stock snapshot %.0f", item["stock_code"], mv)
             else:
-                # Fallback: use previous snapshot value, then avg_price as last resort
-                mv = prev_stock_map.get(item["stock_code"], qty * avg_price)
-                logger.warning("Quote unavailable for %s, using fallback value %.0f", item["stock_code"], mv)
+                missing.append(item["stock_code"])
+                continue
         except Exception as e:
             logger.warning("Quote fetch failed for %s: %s", item["stock_code"], e)
-            mv = prev_stock_map.get(item["stock_code"], qty * avg_price)
+            if item["stock_code"] in prev_stock_map:
+                mv = prev_stock_map[item["stock_code"]]
+            else:
+                missing.append(item["stock_code"])
+                continue
         total_value += mv
         per_stock.append({
             "stock_code": item["stock_code"],
@@ -137,6 +148,10 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
             "group_name": item.get("group_name"),
         })
         await asyncio.sleep(0.25)  # rate limit
+    if missing:
+        raise SnapshotIncomplete(
+            "missing daily quotes without stock snapshot fallback: " + ", ".join(missing[:8])
+        )
     return total_value, total_invested, per_stock
 
 

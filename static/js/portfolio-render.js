@@ -820,11 +820,9 @@ function _renderSummarySparklines(currentTotalValue) {
   // 은 전일 22:00 → 당일 22:00의 24시간 축으로 그린다. 첫 점은 항상
   // 전일 22:00 기준 0%로 고정한다.
   //
-  // server snapshot_intraday 가 한 틱에서 일부 종목 가격 fetch 에 실패
-  // 하면 그 종목만 avg_price 로 fallback 되어 total_value 가 비정상적
-  // 으로 한참 낮게 저장되는 케이스 있음 → sparkline 에 실제로는 없던
-  // 급락 dip 이 찍혀 사용자 체감 "잘못된 곳에 뭐가 있다". 인접 포인트
-  // 대비 ±3% 이상 튀는 점은 outlier 로 간주해 제외.
+  // Older intraday snapshots, or a transient upstream pricing outage, can
+  // leave an isolated bad tick in the day line. Keep the sparkline defensive
+  // so one bad stored point does not imply a real portfolio move.
   const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
     ? pfPrevDaySnapshot.total_value
     : null;

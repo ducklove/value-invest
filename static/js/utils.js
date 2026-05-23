@@ -69,6 +69,19 @@ function quoteSnapshotDateValue(q) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function quoteSnapshotTimeValue(q) {
+  if (!q) return null;
+  const rawTs = q.ts ?? q.fetched_at ?? q.fetchedAt ?? q._receivedAt;
+  if (rawTs === null || rawTs === undefined || rawTs === '') return null;
+  if (typeof rawTs === 'number' || /^\d+(\.\d+)?$/.test(String(rawTs))) {
+    const numeric = Number(rawTs);
+    if (!Number.isFinite(numeric)) return null;
+    return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+  }
+  const parsed = Date.parse(String(rawTs));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function quoteSourceRank(q) {
   if (!q || q._stale === true) return 0;
   const source = String(q.source || q._source || '').toLowerCase();
@@ -85,7 +98,15 @@ function shouldAcceptQuoteSnapshot(current, incoming) {
   const incomingDate = quoteSnapshotDateValue(incoming);
   if (currentDate !== null && incomingDate !== null) {
     if (incomingDate < currentDate) return false;
-    if (incomingDate === currentDate && quoteSourceRank(incoming) < quoteSourceRank(current)) return false;
+    if (incomingDate === currentDate) {
+      const currentTime = quoteSnapshotTimeValue(current);
+      const incomingTime = quoteSnapshotTimeValue(incoming);
+      if (currentTime !== null && incomingTime !== null) {
+        if (incomingTime < currentTime) return false;
+        if (incomingTime > currentTime) return true;
+      }
+      if (quoteSourceRank(incoming) < quoteSourceRank(current)) return false;
+    }
   }
   return true;
 }

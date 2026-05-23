@@ -2,29 +2,77 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import cache
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+KST = timezone(timedelta(hours=9))
 
-async def _fetch_total_value(google_sub: str) -> float:
-    from routes.portfolio import _fetch_quote
 
+class IntradaySnapshotIncomplete(RuntimeError):
+    """Raised when a user portfolio cannot be valued without distorting NAV."""
+
+
+def _today_kst() -> str:
+    return datetime.now(KST).date().isoformat()
+
+
+def _quote_price(quote: dict | None) -> float | None:
+    if not quote or quote.get("_stale") is True:
+        return None
+    value = quote.get("price")
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _fetch_total_value(google_sub: str, snap_date: str | None = None) -> float:
+    from routes.portfolio import _fetch_quote, _is_korean_stock
+
+    snap_date = snap_date or _today_kst()
     items = await cache.get_portfolio(google_sub)
+    prev_stock_values = {
+        row["stock_code"]: float(row["market_value"])
+        for row in await cache.get_stock_snapshots_by_date(google_sub, snap_date)
+        if row.get("stock_code") and row.get("market_value") is not None
+    }
     total = 0.0
+    missing: list[str] = []
+    fallback_count = 0
     for item in items:
-        qty = item["quantity"]
-        avg_price = item["avg_price"]
+        code = item["stock_code"]
+        qty = float(item["quantity"])
         try:
-            quote = await _fetch_quote(item["stock_code"])
-            price = quote.get("price") if quote else None
-            total += qty * (price if price is not None else avg_price)
-        except Exception:
-            total += qty * avg_price
+            if _is_korean_stock(code):
+                quote = await _fetch_quote(code, force_refresh=True, use_ws_cache=False)
+            else:
+                quote = await _fetch_quote(code)
+            price = _quote_price(quote)
+        except Exception as exc:
+            logger.warning("Intraday quote fetch failed for %s: %s", code, exc)
+            price = None
+
+        if price is not None:
+            total += qty * price
+        elif code in prev_stock_values:
+            total += prev_stock_values[code]
+            fallback_count += 1
+            logger.warning("Intraday quote unavailable for %s, using latest stock snapshot", code)
+        else:
+            missing.append(code)
         await asyncio.sleep(0.15)
+    if missing:
+        raise IntradaySnapshotIncomplete(
+            "missing intraday quotes without stock snapshot fallback: " + ", ".join(missing[:8])
+        )
+    if fallback_count:
+        logger.warning("Intraday snapshot used stock-snapshot fallback for %d holdings", fallback_count)
     return total
 
 

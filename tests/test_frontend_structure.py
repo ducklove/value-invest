@@ -281,7 +281,10 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "function quotePriceOrNull(q)" in utils
     assert "return q && q.price !== null && q.price !== undefined ? q.price : null;" in utils
     assert "function shouldAcceptQuoteSnapshot(current, incoming)" in utils
+    assert "function quoteSnapshotTimeValue(q)" in utils
+    assert "q.ts ?? q.fetched_at ?? q.fetchedAt ?? q._receivedAt" in utils
     assert "if (incomingDate < currentDate) return false;" in utils
+    assert "if (incomingTime > currentTime) return true;" in utils
     assert "quoteSourceRank(incoming) < quoteSourceRank(current)" in utils
     assert "function mergeQuoteSnapshot(current, incoming)" in utils
     assert "if (!shouldAcceptQuoteSnapshot(current, incoming)) return { ...(current || {}) };" in utils
