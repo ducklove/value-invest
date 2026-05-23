@@ -25,6 +25,9 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         portfolio_route._dividend_warmup_tasks.clear()
         portfolio_route._benchmark_name_cache.clear()
         portfolio_route._benchmark_quote_cache.clear()
+        portfolio_route._fx_daily_cache.clear()
+        portfolio_route._fx_cache.clear()
+        portfolio_route._fx_cache_ts = 0
 
         db = await cache.get_db()
         await db.execute(
@@ -348,6 +351,74 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["change_pct"], 0.42)
         self.assertTrue(result["_stale"])
+
+    async def test_prev_day_snapshot_attributes_today_cashflows_to_cash_krw(self):
+        await cache.save_snapshot("u1", "2026-05-22", 1_000_000, 900_000, 100.0, 10_000, 1300.0)
+        await cache.save_stock_snapshots(
+            "u1",
+            "2026-05-22",
+            [
+                {"stock_code": "CASH_KRW", "market_value": 400_000, "group_name": "현금/채권"},
+                {"stock_code": "AGG", "market_value": 600_000, "group_name": "현금/채권"},
+            ],
+        )
+        db = await cache.get_db()
+        await db.execute(
+            """
+            INSERT INTO portfolio_cashflows
+            (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("u1", "2026-05-23", "deposit", 50_000, None, None, "test", "2026-05-22T22:30:00"),
+        )
+        await db.commit()
+
+        with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch.object(portfolio_route, "_portfolio_today_baseline_date", return_value="2026-05-23"):
+            result = await portfolio_route.get_prev_day_snapshot(object())
+
+        self.assertEqual(result["date"], "2026-05-22")
+        self.assertEqual(result["stock_values"]["CASH_KRW"], 400_000)
+        self.assertEqual(result["today_net_cashflow"], 50_000)
+        self.assertEqual(result["today_cashflows_by_stock"], {"CASH_KRW": 50_000})
+
+    async def test_cash_and_foreign_quotes_share_daily_fx_source(self):
+        with patch.object(
+            portfolio_route,
+            "_fetch_fx_daily_change",
+            new=AsyncMock(return_value={"price": 1500.0, "change": 10.0, "change_pct": 0.67}),
+        ), patch.object(
+            portfolio_route,
+            "_get_fx_rates",
+            new=AsyncMock(return_value={"FX_USDKRW": 1400.0}),
+        ) as get_fx_rates:
+            cash = await portfolio_route._fetch_cash_quote("CASH_USD")
+            converted = await portfolio_route._fx_to_krw("USA", 10.0)
+
+        self.assertEqual(cash["price"], 1500.0)
+        self.assertEqual(converted, 15000.0)
+        get_fx_rates.assert_not_awaited()
+
+    async def test_fast_yahoo_quote_uses_portfolio_fx_source(self):
+        with patch.object(
+            portfolio_route,
+            "_fetch_yahoo_chart",
+            new=AsyncMock(return_value={
+                "rows": [{"date": "2026-05-21", "close": 99.0}, {"date": "2026-05-22", "close": 100.0}],
+                "currency": "USD",
+                "meta": {"regularMarketPrice": 100.0, "chartPreviousClose": 99.0},
+            }),
+        ), patch.object(
+            portfolio_route,
+            "_fx_rate_for_currency",
+            new=AsyncMock(return_value=1500.0),
+        ) as fx_rate:
+            quote = await portfolio_route._yfinance_fetch_quote_fast("AGG")
+
+        self.assertEqual(quote["price"], 150000)
+        self.assertEqual(quote["change"], 1500)
+        self.assertEqual(quote["change_pct"], 1.01)
+        fx_rate.assert_awaited_once_with("USD")
 
     async def test_delete_item(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)

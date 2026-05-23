@@ -110,6 +110,15 @@ def test_today_card_percent_uses_same_settlement_base_as_amount():
     assert "grandTotalMarketValue - Number(pfPrevDaySnapshot.today_net_cashflow || 0)" in source
 
 
+def test_filtered_today_card_excludes_attributed_cashflows():
+    source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+
+    assert "const _periodCashflowValue = (snap) =>" in source
+    assert "snap.today_cashflows_by_stock || {}" in source
+    assert "for (const r of rows) total += Number(byStock[r.stock_code] || 0);" in source
+    assert "const pnl = (_currentFxVal - _periodCashflowValue(snap)) - baseVal;" in source
+
+
 def test_trade_value_column_uses_two_decimal_compact_format():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     assert "function fmtTradingValueKrw(n)" in source

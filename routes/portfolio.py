@@ -524,7 +524,7 @@ async def _yfinance_fetch_quote_fast(ticker: str) -> dict:
         change = round(price - prev, 4) if prev else 0
         change_pct = round(change / prev * 100, 2) if prev else None
         currency = (payload.get("currency") or _infer_yf_currency(ticker)).upper()
-        fx_rate = await _insight_fx_rate(currency)
+        fx_rate = await _fx_rate_for_currency(currency)
         price_krw = price * fx_rate
         change_krw = change * fx_rate
         return {
@@ -605,7 +605,7 @@ async def _fetch_fx_daily_change(fx_code: str) -> dict:
     import time
     cached = _fx_daily_cache.get(fx_code)
     if cached and (time.time() - cached[0]) < _FX_DAILY_CACHE_TTL:
-        return cached[1]
+        return dict(cached[1])
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
@@ -633,7 +633,49 @@ async def _fetch_fx_daily_change(fx_code: str) -> dict:
                 return result
     except Exception as e:
         logger.warning("FX daily fetch failed for %s: %s", fx_code, e)
+    if cached:
+        stale = dict(cached[1])
+        stale["_stale"] = True
+        return stale
     return {}
+
+
+async def _fx_rate_for_code(fx_code: str) -> float | None:
+    unit = _FX_UNIT.get(fx_code, 1)
+    daily = await _fetch_fx_daily_change(fx_code)
+    if daily.get("price"):
+        return float(daily["price"]) / unit
+    rates = await _get_fx_rates()
+    rate = rates.get(fx_code)
+    if not rate:
+        return None
+    return float(rate) / unit
+
+
+_CURRENCY_TO_FX_CODE = {
+    "USD": "FX_USDKRW",
+    "EUR": "FX_EURKRW",
+    "JPY": "FX_JPYKRW",
+    "CNY": "FX_CNYKRW",
+    "HKD": "FX_HKDKRW",
+    "GBP": "FX_GBPKRW",
+    "AUD": "FX_AUDKRW",
+    "CAD": "FX_CADKRW",
+    "CHF": "FX_CHFKRW",
+    "TWD": "FX_TWDKRW",
+    "VND": "FX_VNDKRW",
+}
+
+
+async def _fx_rate_for_currency(currency: str | None) -> float:
+    currency = (currency or "KRW").upper()
+    if currency == "KRW":
+        return 1.0
+    fx_code = _CURRENCY_TO_FX_CODE.get(currency)
+    if not fx_code:
+        return 1.0
+    rate = await _fx_rate_for_code(fx_code)
+    return rate if rate and rate > 0 else 1.0
 
 
 async def _fetch_cash_quote(stock_code: str) -> dict:
@@ -655,11 +697,10 @@ async def _fetch_cash_quote(stock_code: str) -> dict:
             "change_pct": daily["change_pct"],
         }
     # Fallback: exchangeList scrape — current rate only, no change.
-    rates = await _get_fx_rates()
-    rate = rates.get(fx_code)
+    rate = await _fx_rate_for_code(fx_code)
     if not rate:
         return {}
-    return {"price": round(rate / unit, 2), "change": 0, "change_pct": 0}
+    return {"price": round(rate, 2), "change": 0, "change_pct": 0}
 
 
 _quote_cache = PortfolioQuoteCache()
@@ -877,12 +918,10 @@ async def _fx_to_krw(nation: str, amount: float) -> float:
     fx_code = _NATION_TO_FX.get(nation)
     if not fx_code:
         return amount  # unknown nation, assume already KRW-like
-    rates = await _get_fx_rates()
-    rate = rates.get(fx_code)
+    rate = await _fx_rate_for_code(fx_code)
     if not rate:
         return amount
-    unit = _FX_UNIT.get(fx_code, 1)
-    return amount * rate / unit
+    return amount * rate
 
 
 # --- Benchmark ---
@@ -2292,11 +2331,20 @@ async def get_prev_day_snapshot(request: Request):
         (user["google_sub"], created_after),
     )
     today_net_cashflow = 0.0
+    today_cashflows_by_stock: dict[str, float] = {}
     for row in await cursor2.fetchall():
+        signed_amount = 0.0
         if row["type"] == "deposit":
-            today_net_cashflow += row["amount"]
+            signed_amount = row["amount"]
         elif row["type"] == "withdrawal":
-            today_net_cashflow -= row["amount"]
+            signed_amount = -row["amount"]
+        today_net_cashflow += signed_amount
+        if signed_amount:
+            # Portfolio cashflow mutations are materialized through CASH_KRW.
+            # Expose the attribution so filtered Today cards can remove
+            # deposits/withdrawals from group return instead of treating cash
+            # movement as investment performance.
+            today_cashflows_by_stock["CASH_KRW"] = today_cashflows_by_stock.get("CASH_KRW", 0.0) + signed_amount
     return {
         # date is the baseline the UI's Today card compares against. Was
         # missing from the response, which made the frontend's baseline
@@ -2309,6 +2357,7 @@ async def get_prev_day_snapshot(request: Request):
         "nav": prev_nav,
         "stock_values": stock_values,
         "today_net_cashflow": today_net_cashflow,
+        "today_cashflows_by_stock": today_cashflows_by_stock,
     }
 
 

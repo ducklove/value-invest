@@ -302,6 +302,14 @@ function renderPortfolio(options = {}) {
     return filteredTotal > 0 ? _fxConv(filteredTotal, snap) : null;
   };
 
+  const _periodCashflowValue = (snap) => {
+    if (!snap || !isFiltered) return 0;
+    const byStock = snap.today_cashflows_by_stock || {};
+    let total = 0;
+    for (const r of rows) total += Number(byStock[r.stock_code] || 0);
+    return total ? _fxConv(total, null) : 0;
+  };
+
   // Helper: compute return % and PnL for a period, group-aware
   const _periodReturn = (snap, navField) => {
     if (!snap) return { pct: null, pnl: null };
@@ -312,7 +320,7 @@ function renderPortfolio(options = {}) {
       // of falling through to whole-portfolio NAV (which would misleadingly
       // show the entire portfolio's return for the filtered view).
       if (baseVal === null) return { pct: null, pnl: null };
-      const pnl = _currentFxVal - baseVal;
+      const pnl = (_currentFxVal - _periodCashflowValue(snap)) - baseVal;
       const pct = baseVal > 0 ? (pnl / baseVal * 100) : null;
       return { pct, pnl };
     }
