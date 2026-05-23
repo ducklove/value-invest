@@ -53,9 +53,12 @@ def active_market_code(now: datetime | None = None) -> str:
     ticks arrive, but REST can still return the final NXT after-market price.
     Keep REST on NX outside regular KRX hours so stale/missing WS quotes do
     not fall back to the 15:30 close until the next regular session opens.
+    Weekends/holidays have no regular KRX session, so prefer NX all day.
     """
-    cur = _kst_clock_time(now)
-    return "J" if _KRX_OPEN <= cur < _KRX_CLOSE else "NX"
+    current = _as_kst_datetime(now)
+    cur = current.timetz().replace(tzinfo=None)
+    is_weekday = current.weekday() < 5
+    return "J" if is_weekday and _KRX_OPEN <= cur < _KRX_CLOSE else "NX"
 
 
 def active_ws_market_code(now: datetime | None = None) -> str:
@@ -67,10 +70,15 @@ def ws_cache_matches_rest_market(now: datetime | None = None) -> bool:
 
 
 def _kst_clock_time(now: datetime | None = None) -> dtime:
+    current = _as_kst_datetime(now)
+    return current.timetz().replace(tzinfo=None)
+
+
+def _as_kst_datetime(now: datetime | None = None) -> datetime:
     current = now or datetime.now(KST)
     if current.tzinfo is not None:
         current = current.astimezone(KST)
-    return current.timetz().replace(tzinfo=None)
+    return current
 
 
 def _active_tr_id(now: datetime | None = None) -> str:

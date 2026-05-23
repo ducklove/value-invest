@@ -10,6 +10,10 @@ def _dt(hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 5, 20, hour, minute, tzinfo=KST)
 
 
+def _sat(hour: int, minute: int = 0) -> datetime:
+    return datetime(2026, 5, 23, hour, minute, tzinfo=KST)
+
+
 def test_rest_market_uses_j_during_regular_session():
     assert kis_ws_manager.active_market_code(_dt(9, 30)) == "J"
 
@@ -23,6 +27,11 @@ def test_rest_market_keeps_nxt_after_websocket_session_closes():
 def test_rest_market_uses_nxt_before_regular_open():
     assert kis_ws_manager.active_market_code(_dt(8, 30)) == "NX"
     assert kis_ws_manager.ws_cache_matches_rest_market(_dt(8, 30)) is True
+
+
+def test_rest_market_uses_nxt_on_weekend_regular_hours():
+    assert kis_ws_manager.active_market_code(_sat(10, 30)) == "NX"
+    assert kis_ws_manager.ws_cache_matches_rest_market(_sat(10, 30)) is False
 
 
 def test_parse_realtime_quote_carries_market_and_source_metadata():
