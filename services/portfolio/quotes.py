@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from cache_layer import MemoryTTLCache
+
 
 QUOTE_CACHE_TTL = 60
 
@@ -38,7 +40,7 @@ class PortfolioQuoteCache:
 
     def __init__(self, ttl_seconds: float = QUOTE_CACHE_TTL):
         self.ttl_seconds = ttl_seconds
-        self._fresh: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._fresh = MemoryTTLCache("portfolio.quote", ttl_seconds)
         self._last_known: dict[str, dict[str, Any]] = {}
 
     @property
@@ -47,17 +49,13 @@ class PortfolioQuoteCache:
 
     def get_fresh(self, code: str) -> dict[str, Any] | None:
         cached = self._fresh.get(code)
-        if not cached:
-            return None
-        if (time.monotonic() - cached[0]) >= self.ttl_seconds:
-            return None
-        return dict(cached[1])
+        return dict(cached) if cached else None
 
     def get_cached(self, code: str) -> dict[str, Any]:
-        cached = self._fresh.get(code)
+        cached = self._fresh.get_entry(code, allow_stale=True)
         if cached:
-            quote = dict(cached[1])
-            if (time.monotonic() - cached[0]) >= self.ttl_seconds:
+            quote = dict(cached.value)
+            if cached.stale:
                 quote["_stale"] = True
             return quote
         return self.get_fallback(code, mark_stale=True)
@@ -77,7 +75,7 @@ class PortfolioQuoteCache:
         if quote.get("_stale") is True:
             return False
         snapshot = dict(quote)
-        self._fresh[code] = (time.monotonic(), snapshot)
+        self._fresh.set(code, snapshot)
         self._last_known[code] = snapshot
         return True
 

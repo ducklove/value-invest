@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 
 import ai_config
 import cache
+from cache_layer import MemoryTTLCache
 from deps import get_current_user
 from services import ai_client
 
@@ -305,18 +306,17 @@ async def _load_macro_context() -> str:
 
 # Naver news scrape for recent headlines. Cheap fallback for "뉴스에
 # 뭐 나왔어?" / "최근 어떻게 움직였어?" type questions.
-_news_cache: dict[str, tuple[float, list[dict]]] = {}
 _NEWS_CACHE_TTL = 600  # 10 min
+_news_cache = MemoryTTLCache("wiki.news", _NEWS_CACHE_TTL)
 
 
 async def _fetch_recent_news(stock_code: str, limit: int = 6) -> list[dict]:
     """Scrape Naver finance news list for the stock code.
     Returns list of {date, title, outlet}. Best-effort; returns [] on
     any failure."""
-    import time as _time
-    cached = _news_cache.get(stock_code)
-    if cached and (_time.monotonic() - cached[0]) < _NEWS_CACHE_TTL:
-        return cached[1][:limit]
+    cached = _news_cache.get_entry(stock_code)
+    if cached is not None:
+        return cached.value[:limit]
     try:
         import httpx
         import re as _re
@@ -344,7 +344,7 @@ async def _fetch_recent_news(stock_code: str, limit: int = 6) -> list[dict]:
                 "outlet": clean(outlet),
                 "date": clean(date),
             })
-        _news_cache[stock_code] = (_time.monotonic(), news)
+        _news_cache.set(stock_code, news)
         return news
     except Exception:
         return []

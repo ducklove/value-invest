@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 import httpx
 
+from cache_layer import MemoryTTLCache
 import close_price_client
 import kis_proxy_client
 import stock_price
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 YAHOO_HTTP_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 YAHOO_SEM = asyncio.Semaphore(4)
 ASSET_HISTORY_CACHE_TTL = 15 * 60
-asset_history_cache: dict[str, tuple[float, dict]] = {}
+asset_history_cache = MemoryTTLCache("portfolio.asset_history", ASSET_HISTORY_CACHE_TTL)
 
 LOCAL_BENCHMARK_INDEX_SERIES = {
     "IDX_KOSPI": "KOSPI",
@@ -97,10 +97,9 @@ async def download_yfinance_history(ticker: str, period: str = "1y") -> dict:
     if not ticker:
         return {"rows": [], "currency": None}
     key = f"{ticker}:{period}"
-    now = time.monotonic()
-    cached = asset_history_cache.get(key)
-    if cached and (now - cached[0]) < ASSET_HISTORY_CACHE_TTL:
-        return cached[1]
+    cached = asset_history_cache.get_entry(key)
+    if cached is not None:
+        return cached.value
 
     try:
         payload = await asyncio.wait_for(fetch_yahoo_chart(ticker, range_=period), timeout=7.0)
@@ -111,7 +110,7 @@ async def download_yfinance_history(ticker: str, period: str = "1y") -> dict:
         "rows": payload.get("rows") or [],
         "currency": payload.get("currency") or infer_yf_currency(ticker),
     }
-    asset_history_cache[key] = (now, result)
+    asset_history_cache.set(key, result)
     return result
 
 
@@ -120,10 +119,9 @@ async def download_korean_history(code: str, period_days: int = 370) -> dict:
     if not is_korean_stock(code):
         return {"rows": [], "currency": None}
     key = f"KIS:{code}:{period_days}"
-    now = time.monotonic()
-    cached = asset_history_cache.get(key)
-    if cached and (now - cached[0]) < ASSET_HISTORY_CACHE_TTL:
-        return cached[1]
+    cached = asset_history_cache.get_entry(key)
+    if cached is not None:
+        return cached.value
 
     end_date = date.today()
     start_date = end_date - timedelta(days=period_days)
@@ -145,7 +143,7 @@ async def download_korean_history(code: str, period_days: int = 370) -> dict:
                 ],
                 "currency": "KRW",
             }
-            asset_history_cache[key] = (time.monotonic(), result)
+            asset_history_cache.set(key, result)
             return result
 
     try:
@@ -182,7 +180,7 @@ async def download_korean_history(code: str, period_days: int = 370) -> dict:
             rows.append({"date": trade_date.isoformat(), "close": round(float(close), 6)})
 
     result = {"rows": rows, "currency": "KRW"}
-    asset_history_cache[key] = (now, result)
+    asset_history_cache.set(key, result)
     return result
 
 
@@ -193,10 +191,9 @@ async def download_local_benchmark_history(benchmark_code: str, period_days: int
         return []
 
     key = f"LOCAL_BENCH:{benchmark_code}:{period_days}"
-    now = time.monotonic()
-    cached = asset_history_cache.get(key)
-    if cached and (now - cached[0]) < ASSET_HISTORY_CACHE_TTL:
-        return cached[1].get("rows") or []
+    cached = asset_history_cache.get_entry(key)
+    if cached is not None:
+        return cached.value.get("rows") or []
 
     end_date = date.today()
     start_date = end_date - timedelta(days=period_days)
@@ -221,5 +218,5 @@ async def download_local_benchmark_history(benchmark_code: str, period_days: int
         if row.get("date") and row.get("close") is not None
     ]
     if normalized:
-        asset_history_cache[key] = (now, {"rows": normalized, "currency": "KRW" if series_id else "USD"})
+        asset_history_cache.set(key, {"rows": normalized, "currency": "KRW" if series_id else "USD"})
     return normalized

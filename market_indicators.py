@@ -12,6 +12,8 @@ import re
 
 import httpx
 
+from cache_layer import MemoryTTLCache
+
 # ---------------------------------------------------------------------------
 # Catalog
 # ---------------------------------------------------------------------------
@@ -540,9 +542,9 @@ async def _fetch_night_futures(client: httpx.AsyncClient) -> dict:
 # Module-level cache so AI analysis / market-bar polling / admin page
 # don't each re-scrape Naver on every call. Keyed by the sorted codes tuple
 # so different code sets don't collide.
-_indicators_cache: dict[tuple, tuple[float, dict[str, dict]]] = {}
-_indicator_item_cache: dict[str, tuple[float, dict]] = {}
 _INDICATORS_TTL = 60  # seconds — market bar ticks every 60s anyway
+_indicators_cache = MemoryTTLCache("market_indicators.batch", _INDICATORS_TTL)
+_indicator_item_cache = MemoryTTLCache("market_indicators.item", _INDICATORS_TTL)
 
 
 async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
@@ -550,28 +552,25 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     results: dict[str, dict] = {}
     if not codes:
         return results
-    import time as _time
     requested_codes = list(dict.fromkeys(codes))
     key = tuple(sorted(requested_codes))
-    now = _time.monotonic()
     cached = _indicators_cache.get(key)
-    if cached and (now - cached[0]) < _INDICATORS_TTL:
-        # Return a shallow copy so caller mutations don't poison the cache.
-        return dict(cached[1])
+    if cached:
+        return dict(cached)
 
     fetch_codes: list[str] = []
     stale_results: dict[str, dict] = {}
     for code in requested_codes:
-        item_cached = _indicator_item_cache.get(code)
-        if item_cached and (now - item_cached[0]) < _INDICATORS_TTL:
-            results[code] = dict(item_cached[1])
+        item_cached = _indicator_item_cache.get_entry(code, allow_stale=True)
+        if item_cached and item_cached.fresh:
+            results[code] = dict(item_cached.value)
         else:
-            if item_cached and _indicator_has_value(item_cached[1]):
-                stale_results[code] = dict(item_cached[1])
+            if item_cached and _indicator_has_value(item_cached.value):
+                stale_results[code] = dict(item_cached.value)
             fetch_codes.append(code)
 
     if not fetch_codes:
-        _indicators_cache[key] = (now, dict(results))
+        _indicators_cache.set(key, dict(results))
         return dict(results)
 
     # Group codes by source to minimize HTTP requests
@@ -699,10 +698,9 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             current = {**stale_results[code], "_stale": True}
         results[code] = current
 
-    cache_time = _time.monotonic()
     for code in fetch_codes:
-        _indicator_item_cache[code] = (cache_time, dict(results.get(code) or _EMPTY))
+        _indicator_item_cache.set(code, dict(results.get(code) or _EMPTY))
 
     final_results = {code: dict(results.get(code) or _EMPTY) for code in requested_codes}
-    _indicators_cache[key] = (cache_time, dict(final_results))
+    _indicators_cache.set(key, dict(final_results))
     return final_results

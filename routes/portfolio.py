@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 import ai_config
 import asset_insights
 import cache
+from cache_layer import MemoryTTLCache
 import close_price_client
 import integrations
 import dart_client
@@ -184,25 +185,19 @@ _failed_yf_tickers: set[str] = set()
 # that are temporarily (or permanently) broken upstream. TTL-based so a
 # stock that recovers will be retried after the window expires.
 _DEAD_QUOTE_TTL = 300  # seconds
-_dead_quote_cache: dict[str, float] = {}
+_dead_quote_cache = MemoryTTLCache("portfolio.dead_quote", _DEAD_QUOTE_TTL)
 
 
 def _is_dead(code: str) -> bool:
     if _static_foreign_ticker(code):
         return False
-    ts = _dead_quote_cache.get(code)
-    if not ts:
-        return False
-    if (time.monotonic() - ts) < _DEAD_QUOTE_TTL:
-        return True
-    _dead_quote_cache.pop(code, None)
-    return False
+    return _dead_quote_cache.get(code) is not None
 
 
 def _mark_dead(code: str) -> None:
     if _static_foreign_ticker(code):
         return
-    _dead_quote_cache[code] = time.monotonic()
+    _dead_quote_cache.set(code, True)
 
 
 async def _yf_run(fn):
@@ -537,8 +532,6 @@ async def _yfinance_fetch_quote_fast(ticker: str) -> dict:
         return {}
 
 
-import time as _time
-
 async def _fetch_krx_gold_quote() -> dict:
     """Fetch KRX gold spot price from Naver Finance gold page."""
     try:
@@ -592,8 +585,8 @@ async def _fetch_crypto_quote(stock_code: str) -> dict:
     return {}
 
 
-_fx_daily_cache: dict[str, tuple[float, dict]] = {}  # fx_code -> (ts, {price, change, change_pct})
 _FX_DAILY_CACHE_TTL = 300
+_fx_daily_cache = MemoryTTLCache("portfolio.fx_daily", _FX_DAILY_CACHE_TTL)
 
 
 async def _fetch_fx_daily_change(fx_code: str) -> dict:
@@ -602,10 +595,9 @@ async def _fetch_fx_daily_change(fx_code: str) -> dict:
     Uses the per-currency daily-quote page, same pattern as KRX gold.
     Returns {} on failure; caller can fall back to a plain rate lookup.
     """
-    import time
-    cached = _fx_daily_cache.get(fx_code)
-    if cached and (time.time() - cached[0]) < _FX_DAILY_CACHE_TTL:
-        return dict(cached[1])
+    cached = _fx_daily_cache.get_entry(fx_code, allow_stale=True)
+    if cached is not None and cached.fresh:
+        return dict(cached.value)
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
@@ -623,18 +615,18 @@ async def _fetch_fx_daily_change(fx_code: str) -> dict:
                 change = price - prev
                 change_pct = round(change / prev * 100, 2) if prev else 0.0
                 result = {"price": price, "change": change, "change_pct": change_pct}
-                _fx_daily_cache[fx_code] = (time.time(), result)
+                _fx_daily_cache.set(fx_code, result)
                 return result
             if rows:
                 # Only one row available (first listing day?) — no delta.
                 price = float(rows[0].replace(",", ""))
                 result = {"price": price, "change": 0.0, "change_pct": 0.0}
-                _fx_daily_cache[fx_code] = (time.time(), result)
+                _fx_daily_cache.set(fx_code, result)
                 return result
     except Exception as e:
         logger.warning("FX daily fetch failed for %s: %s", fx_code, e)
-    if cached:
-        stale = dict(cached[1])
+    if cached is not None:
+        stale = dict(cached.value)
         stale["_stale"] = True
         return stale
     return {}
@@ -839,7 +831,7 @@ async def _fill_snapshot_quotes(google_sub: str, items: list[dict]) -> None:
 QUOTE_RATE_INTERVAL = 0.22  # ~4.5 req/s, stays under 5/s limit
 
 # --- FX rate cache ---
-_fx_cache: dict[str, float] = {}
+_fx_cache = MemoryTTLCache("portfolio.fx_rates", None)
 _fx_cache_ts: float = 0
 _FX_CACHE_TTL = 300  # 5 minutes
 
@@ -862,9 +854,10 @@ _FX_UNIT = {"FX_JPYKRW": 100, "FX_VNDKRW": 100}
 
 async def _get_fx_rates() -> dict[str, float]:
     import time
-    global _fx_cache, _fx_cache_ts
-    if _fx_cache and (time.time() - _fx_cache_ts) < _FX_CACHE_TTL:
-        return _fx_cache
+    global _fx_cache_ts
+    cached = _fx_cache.get("rates")
+    if cached is not None:
+        return cached
     try:
         rates = {}
         async with httpx.AsyncClient(timeout=5) as c:
@@ -884,11 +877,11 @@ async def _get_fx_rates() -> dict[str, float]:
                     except ValueError:
                         pass
         if rates:
-            _fx_cache = rates
+            _fx_cache.set("rates", rates, ttl_seconds=_FX_CACHE_TTL)
             _fx_cache_ts = time.time()
     except Exception:
         pass
-    return _fx_cache
+    return _fx_cache.get("rates", allow_stale=True) or {}
 
 
 async def _detect_currency(stock_code: str) -> str:
@@ -926,7 +919,7 @@ async def _fx_to_krw(nation: str, amount: float) -> float:
 
 # --- Benchmark ---
 
-_market_type_cache: dict[str, str] = {}  # stock_code -> "KOSPI" | "KOSDAQ"
+_market_type_cache = MemoryTTLCache("portfolio.market_type")  # stock_code -> "KOSPI" | "KOSDAQ"
 
 
 async def _detect_market_type(code: str) -> str:
@@ -942,11 +935,11 @@ async def _detect_market_type(code: str) -> str:
                     follow_redirects=True,
                 )
         if "코스닥" in resp.text[:30000]:
-            _market_type_cache[code] = "KOSDAQ"
+            _market_type_cache.set(code, "KOSDAQ")
         else:
-            _market_type_cache[code] = "KOSPI"
+            _market_type_cache.set(code, "KOSPI")
     except Exception:
-        _market_type_cache[code] = "KOSPI"
+        _market_type_cache.set(code, "KOSPI")
     return _market_type_cache[code]
 
 
@@ -970,7 +963,7 @@ def _resolve_default_benchmark_fast(code: str) -> str:
     """Cheap benchmark fallback for first-paint portfolio loading."""
     return _fast_default_benchmark_for_code(code, cached_market_type=_market_type_cache.get(code))
 
-_benchmark_name_cache: dict[str, str] = {}
+_benchmark_name_cache = MemoryTTLCache("portfolio.benchmark_name")
 
 
 async def _resolve_benchmark_name(code: str) -> str:
@@ -989,7 +982,7 @@ async def _resolve_benchmark_name(code: str) -> str:
     else:
         name = await _resolve_name(code)
     result = name or code
-    _benchmark_name_cache[code] = result
+    _benchmark_name_cache.set(code, result)
     return result
 
 _benchmark_quote_cache = BenchmarkQuoteCache()
@@ -1015,7 +1008,7 @@ def _resolve_benchmark_name_from_code_table(
         row = (corp_code_table or {}).get(code) or {}
         corp_name = row.get("corp_name")
         if corp_name:
-            _benchmark_name_cache[code] = corp_name
+            _benchmark_name_cache.set(code, corp_name)
             return corp_name
     return name
 
@@ -1068,11 +1061,13 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
 
 _ASSET_HISTORY_CACHE_TTL = portfolio_history.ASSET_HISTORY_CACHE_TTL
 _asset_history_cache = portfolio_history.asset_history_cache
-_insight_fx_cache: dict[str, tuple[float, float]] = {}
-_insight_item_warm_cache: dict[str, float] = {}
+_INSIGHT_FX_CACHE_TTL = 300
+_INSIGHT_WARMUP_TTL = 15 * 60
+_insight_fx_cache = MemoryTTLCache("portfolio.insight_fx", _INSIGHT_FX_CACHE_TTL)
+_insight_item_warm_cache = MemoryTTLCache("portfolio.insight_item_warmup", _INSIGHT_WARMUP_TTL)
+_insight_common_warm_cache = MemoryTTLCache("portfolio.insight_common_warmup", _INSIGHT_WARMUP_TTL)
 _insight_common_warm_ts: float = 0.0
 _insight_warmup_task: asyncio.Task | None = None
-_INSIGHT_WARMUP_TTL = 15 * 60
 _dividend_warmup_last: dict[str, float] = {}
 _dividend_warmup_tasks: dict[str, asyncio.Task] = {}
 
@@ -1210,10 +1205,9 @@ async def _insight_fx_rate(currency: str | None) -> float:
     currency = (currency or "KRW").upper()
     if currency == "KRW":
         return 1.0
-    now = _time.monotonic()
     cached = _insight_fx_cache.get(currency)
-    if cached and (now - cached[0]) < 300:
-        return cached[1]
+    if cached is not None:
+        return cached
     ticker = _INSIGHT_FX_TICKER.get(currency)
     if not ticker:
         return 1.0
@@ -1225,7 +1219,7 @@ async def _insight_fx_rate(currency: str | None) -> float:
         rate = asset_insights.safe_float(rows[-1].get("close"))
     if rate is None or rate <= 0:
         return 1.0
-    _insight_fx_cache[currency] = (now, rate)
+    _insight_fx_cache.set(currency, rate)
     return rate
 
 
@@ -1371,8 +1365,7 @@ async def warm_asset_insight_common(initial_delay_seconds: float = 0.0) -> None:
     global _insight_common_warm_ts
     if initial_delay_seconds > 0:
         await asyncio.sleep(initial_delay_seconds)
-    now = _time.monotonic()
-    if _insight_common_warm_ts and (now - _insight_common_warm_ts) < _INSIGHT_WARMUP_TTL:
+    if _insight_common_warm_cache.get("common") is not None:
         return
     try:
         await asyncio.gather(
@@ -1388,7 +1381,8 @@ async def warm_asset_insight_common(initial_delay_seconds: float = 0.0) -> None:
             _fetch_insight_indicators(["USD_KRW", "KOSPI", "KOSDAQ", "SPX", "IXIC", "US10Y", "KR3Y", "CMDT_GC"]),
             return_exceptions=True,
         )
-        _insight_common_warm_ts = _time.monotonic()
+        _insight_common_warm_cache.set("common", True)
+        _insight_common_warm_ts = time.monotonic()
         logger.info("Portfolio asset insight common warmup completed")
     except Exception as exc:
         logger.warning("Portfolio asset insight common warmup failed: %s", exc)
@@ -1402,9 +1396,7 @@ async def _warm_asset_insight_item(item: dict) -> None:
     code = item.get("stock_code") or ""
     if not _is_asset_insight_candidate(code):
         return
-    now = _time.monotonic()
-    last = _insight_item_warm_cache.get(code)
-    if last and (now - last) < _INSIGHT_WARMUP_TTL:
+    if _insight_item_warm_cache.get(code) is not None:
         return
 
     effective_benchmark = await _resolve_insight_benchmark(item)
@@ -1421,7 +1413,7 @@ async def _warm_asset_insight_item(item: dict) -> None:
         _fetch_insight_indicators(_macro_codes_for_asset(profile, item.get("currency"))),
         return_exceptions=True,
     )
-    _insight_item_warm_cache[code] = _time.monotonic()
+    _insight_item_warm_cache.set(code, True)
 
 
 async def warm_asset_insights_for_items(items: list[dict]) -> None:

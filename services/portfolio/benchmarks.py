@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import time
 from typing import Any
+
+from cache_layer import MemoryTTLCache
 
 from services.portfolio.identifiers import (
     CASH_FX_CODE,
@@ -56,22 +57,19 @@ BENCHMARK_ENDPOINT_ITEM_TIMEOUT = 2.0
 class BenchmarkQuoteCache:
     def __init__(self, ttl_seconds: float = BENCHMARK_CACHE_TTL):
         self.ttl_seconds = ttl_seconds
-        self._data: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._data = MemoryTTLCache("portfolio.benchmark_quote", ttl_seconds)
 
     def get(self, benchmark_code: str, *, allow_stale: bool = True) -> dict[str, Any] | None:
-        cached = self._data.get(benchmark_code)
+        cached = self._data.get_entry(benchmark_code, allow_stale=allow_stale)
         if not cached:
             return None
-        age = time.monotonic() - cached[0]
-        if age >= self.ttl_seconds and not allow_stale:
-            return None
-        quote = dict(cached[1] or {})
-        if age >= self.ttl_seconds:
+        quote = dict(cached.value or {})
+        if cached.stale:
             quote["_stale"] = True
         return quote
 
     def set(self, benchmark_code: str, quote: dict[str, Any]) -> None:
-        self._data[benchmark_code] = (time.monotonic(), dict(quote or {}))
+        self._data.set(benchmark_code, dict(quote or {}))
 
     def clear(self) -> None:
         self._data.clear()
@@ -122,4 +120,3 @@ def indicator_to_change_pct(data: dict) -> float | None:
     if data.get("direction") == "down" and pct > 0:
         pct = -pct
     return pct
-

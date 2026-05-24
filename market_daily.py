@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import re
-import time
 from datetime import date, datetime
 from typing import Any
 from urllib.parse import urljoin
@@ -16,6 +15,7 @@ import httpx
 
 import ai_config
 import cache
+from cache_layer import MemoryTTLCache
 import dart_client
 import market_indicators
 import stock_price
@@ -37,9 +37,9 @@ MARKET_DAILY_MAX_TOKENS = int(os.environ.get("MARKET_DAILY_MAX_TOKENS", "1800"))
 MARKET_TAPE_TTL_SECONDS = int(os.environ.get("MARKET_TAPE_TTL_SECONDS", "45"))
 MARKET_TAPE_EVENT_LIMIT = int(os.environ.get("MARKET_TAPE_EVENT_LIMIT", "40"))
 
-_NEWS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _NEWS_CACHE_TTL_SECONDS = 600
-_TAPE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_NEWS_CACHE = MemoryTTLCache("market_daily.news", _NEWS_CACHE_TTL_SECONDS)
+_TAPE_CACHE = MemoryTTLCache("market_daily.tape", MARKET_TAPE_TTL_SECONDS)
 
 _MATERIAL_DISCLOSURE_KEYWORDS = [
     "유상증자",
@@ -386,9 +386,9 @@ def _clean_html_text(value: str) -> str:
 
 
 async def _fetch_stock_news(stock_code: str, limit: int = NEWS_PER_STOCK) -> list[dict[str, Any]]:
-    cached = _NEWS_CACHE.get(stock_code)
-    if cached and time.monotonic() - cached[0] < _NEWS_CACHE_TTL_SECONDS:
-        return cached[1][:limit]
+    cached = _NEWS_CACHE.get_entry(stock_code)
+    if cached is not None:
+        return cached.value[:limit]
 
     try:
         url = f"https://finance.naver.com/item/news_news.naver?code={stock_code}&page=1"
@@ -415,7 +415,7 @@ async def _fetch_stock_news(stock_code: str, limit: int = NEWS_PER_STOCK) -> lis
                     "url": urljoin("https://finance.naver.com", href),
                 }
             )
-        _NEWS_CACHE[stock_code] = (time.monotonic(), news)
+        _NEWS_CACHE.set(stock_code, news)
         return news
     except Exception as exc:
         logger.info("daily market: news skipped for %s: %s", stock_code, exc)
@@ -640,9 +640,9 @@ def build_market_tape_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 async def build_market_tape(*, google_sub: str | None = None, refresh: bool = False) -> dict[str, Any]:
     cache_key = google_sub or "public"
-    cached = _TAPE_CACHE.get(cache_key)
-    if cached and not refresh and time.monotonic() - cached[0] < MARKET_TAPE_TTL_SECONDS:
-        return {**cached[1], "cached": True}
+    cached = _TAPE_CACHE.get_entry(cache_key)
+    if cached is not None and not refresh:
+        return {**cached.value, "cached": True}
 
     brief_date = _today_iso()
     interests = await _interest_universe(google_sub)
@@ -679,7 +679,7 @@ async def build_market_tape(*, google_sub: str | None = None, refresh: bool = Fa
             "notable_moves": sum(1 for row in moves if row.get("is_notable")),
         },
     }
-    _TAPE_CACHE[cache_key] = (time.monotonic(), result)
+    _TAPE_CACHE.set(cache_key, result)
     return result
 
 

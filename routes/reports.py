@@ -47,6 +47,13 @@ def _report_signature(report: dict | None) -> tuple:
     )
 
 
+def _pop_cache_meta(report: dict) -> tuple[str | None, str | None, bool]:
+    cached_at = report.pop("_cached_at", None)
+    expires_at = report.pop("_expires_at", None)
+    stale = bool(report.pop("_stale", False))
+    return cached_at, expires_at, stale
+
+
 @router.get("/api/reports/{stock_code}")
 async def get_reports(stock_code: str, refresh: bool = False):
     """증권사 리포트 목록 (네이버 금융, 최근 3년)."""
@@ -59,6 +66,8 @@ async def get_reports(stock_code: str, refresh: bool = False):
                     "reports": cached_reports["reports"],
                     "cached": True,
                     "cached_at": cached_reports["fetched_at"],
+                    "expires_at": cached_reports.get("expires_at"),
+                    "stale": cached_reports.get("stale", False),
                 }
 
         reports = await report_client.fetch_reports(stock_code)
@@ -79,8 +88,15 @@ async def get_latest_report(stock_code: str, refresh: bool = False):
             None if refresh else LATEST_REPORT_CACHE_TTL_MINUTES,
         )
         if not refresh and cached_report:
-            cached_at = cached_report.pop("_cached_at", None)
-            return {"stock_code": stock_code, "report": cached_report, "cached": True, "cached_at": cached_at}
+            cached_at, expires_at, stale = _pop_cache_meta(cached_report)
+            return {
+                "stock_code": stock_code,
+                "report": cached_report,
+                "cached": True,
+                "cached_at": cached_at,
+                "expires_at": expires_at,
+                "stale": stale,
+            }
 
         report = await report_client.fetch_latest_report(stock_code)
         if report:
@@ -88,8 +104,15 @@ async def get_latest_report(stock_code: str, refresh: bool = False):
             await cache.save_latest_report(stock_code, report)
             return {"stock_code": stock_code, "report": report, "cached": False, "changed": changed}
         if cached_report:
-            cached_at = cached_report.pop("_cached_at", None)
-            return {"stock_code": stock_code, "report": cached_report, "cached": True, "cached_at": cached_at, "stale": True}
+            cached_at, expires_at, _ = _pop_cache_meta(cached_report)
+            return {
+                "stock_code": stock_code,
+                "report": cached_report,
+                "cached": True,
+                "cached_at": cached_at,
+                "expires_at": expires_at,
+                "stale": True,
+            }
         return {"stock_code": stock_code, "report": None, "cached": False, "changed": False}
     except Exception as e:
         logger.error(f"최신 증권사 리포트 조회 실패: {e}")

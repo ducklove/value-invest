@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import re
-import time
 import warnings
 import zipfile
 from datetime import date, datetime, timedelta
@@ -20,6 +19,7 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 import ai_config
 import cache
+from cache_layer import MemoryTTLCache
 import dart_client
 import observability
 from services import ai_client
@@ -36,7 +36,7 @@ REPORT_LOOKBACK_DAYS = int(os.getenv("DART_REVIEW_LOOKBACK_DAYS", "1100"))
 DART_FILINGS_CACHE_TTL_S = int(os.getenv("DART_REVIEW_FILINGS_CACHE_TTL_S", "600"))
 DART_REVIEW_TARGET_LIMIT = int(os.getenv("DART_REVIEW_TARGET_LIMIT", "12"))
 
-_filings_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_filings_cache = MemoryTTLCache("dart_report_review.filings", DART_FILINGS_CACHE_TTL_S)
 _pipeline_lock = asyncio.Lock()
 
 
@@ -90,9 +90,9 @@ def _normalize_filing(item: dict[str, Any]) -> dict[str, Any]:
 async def fetch_periodic_filings(corp_code: str, *, limit: int = 8) -> list[dict[str, Any]]:
     """Return recent quarterly/half/annual filings from OpenDART."""
     cache_key = corp_code.strip()
-    cached = _filings_cache.get(cache_key)
-    if cached and time.monotonic() - cached[0] < DART_FILINGS_CACHE_TTL_S:
-        return [dict(item) for item in cached[1][:limit]]
+    cached = _filings_cache.get_entry(cache_key)
+    if cached is not None:
+        return [dict(item) for item in cached.value[:limit]]
 
     api_key = _dart_key()
     if not api_key:
@@ -119,7 +119,7 @@ async def fetch_periodic_filings(corp_code: str, *, limit: int = 8) -> list[dict
     status = str(data.get("status") or "")
     if status != "000":
         if status in {"013", "014"}:
-            _filings_cache[cache_key] = (time.monotonic(), [])
+            _filings_cache.set(cache_key, [])
             return []
         raise DartReportReviewError(data.get("message") or f"DART 공시검색 실패({status})")
 
@@ -136,7 +136,7 @@ async def fetch_periodic_filings(corp_code: str, *, limit: int = 8) -> list[dict
         filings.append(filing)
         if len(filings) >= limit:
             break
-    _filings_cache[cache_key] = (time.monotonic(), [dict(item) for item in filings])
+    _filings_cache.set(cache_key, [dict(item) for item in filings])
     return filings
 
 

@@ -13,6 +13,7 @@ from datetime import date
 from fastapi import APIRouter, Body, HTTPException, Request
 
 import cache
+from cache_layer import MemoryTTLCache
 import stock_price
 from deps import get_current_user
 
@@ -26,7 +27,7 @@ FETCH_CONCURRENCY = 8
 
 # Cache for market-cap pool weekly series: years -> (series, name_by_code)
 # Persists for the process lifetime — historical weekly data is immutable.
-_mcap_cache: dict[int, tuple[dict, dict]] = {}
+_mcap_cache = MemoryTTLCache("backtest.mcap_pool")
 
 SCORE_KEYS = {
     "per_low": ("per", False),       # lower is better, must be > 0
@@ -158,12 +159,13 @@ async def backtest_watchlist(request: Request, payload: dict = Body(default={}))
     if is_mcap:
         cached = _mcap_cache.get(years)
         if cached:
-            series, name_by_code = cached
+            series = cached["series"]
+            name_by_code = cached["name_by_code"]
             universe_items = [{"stock_code": c, "name": name_by_code.get(c, c)} for c in series]
         else:
             universe_items, name_by_code = await _load_mcap_pool()
             series = await _fetch_series(universe_items, years)
-            _mcap_cache[years] = (series, name_by_code)
+            _mcap_cache.set(years, {"series": series, "name_by_code": name_by_code})
     else:
         universe_items = await _load_static_universe(user, source)
         name_by_code = {s["stock_code"]: s["name"] for s in universe_items}

@@ -26,6 +26,8 @@ from typing import Any
 
 import websockets
 
+from cache_layer import MemoryTTLCache
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -131,7 +133,7 @@ def is_korean_stock(code: str) -> bool:
 # Quote cache (shared across all connections)
 # ---------------------------------------------------------------------------
 
-_quote_cache: dict[str, dict[str, Any]] = {}
+_quote_cache = MemoryTTLCache("kis_ws.quote")
 _quote_cache_date: str = ""  # KST YYYYMMDD when the cache was last valid
 
 # Set of KRX stock codes that have been observed to NOT trade on the NXT
@@ -170,7 +172,11 @@ def get_cached_quote(code: str) -> dict[str, Any] | None:
 def get_all_cached_quotes() -> dict[str, dict[str, Any]]:
     """Return a shallow copy of the full quote cache."""
     _flush_stale_cache()
-    return dict(_quote_cache)
+    return {
+        code: quote
+        for code in _quote_cache.keys()
+        if (quote := _quote_cache.get(code)) is not None
+    }
 
 
 # ---------------------------------------------------------------------------

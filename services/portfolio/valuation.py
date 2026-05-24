@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import date, datetime
 from typing import Any
 
 import asset_insights
 import cache
+from cache_layer import MemoryTTLCache
 import close_price_client
 from services.portfolio.identifiers import common_stock_code, is_korean_stock, is_preferred_stock
 from services.portfolio.time_windows import today_kst_date
@@ -15,7 +15,7 @@ from services.portfolio.time_windows import today_kst_date
 logger = logging.getLogger(__name__)
 
 _VALUATION_CACHE_TTL_SECONDS = 300
-_valuation_basis_cache: dict[tuple[str, str, bool], tuple[float, dict]] = {}
+_valuation_basis_cache = MemoryTTLCache("portfolio.valuation_basis", _VALUATION_CACHE_TTL_SECONDS)
 
 
 def _as_of_key(as_of: date | datetime | str | None) -> str:
@@ -34,18 +34,12 @@ def _copy_basis(basis: dict) -> dict:
 def _cache_get(source_code: str, as_of_key: str, use_market_cache_fallback: bool) -> dict | None:
     key = (source_code, as_of_key, bool(use_market_cache_fallback))
     cached = _valuation_basis_cache.get(key)
-    if not cached:
-        return None
-    ts, basis = cached
-    if time.monotonic() - ts > _VALUATION_CACHE_TTL_SECONDS:
-        _valuation_basis_cache.pop(key, None)
-        return None
-    return _copy_basis(basis)
+    return _copy_basis(cached) if cached else None
 
 
 def _cache_set(source_code: str, as_of_key: str, use_market_cache_fallback: bool, basis: dict) -> None:
     key = (source_code, as_of_key, bool(use_market_cache_fallback))
-    _valuation_basis_cache[key] = (time.monotonic(), _copy_basis(basis))
+    _valuation_basis_cache.set(key, _copy_basis(basis))
 
 
 def metric_amount(metrics: dict, key: str) -> float | None:

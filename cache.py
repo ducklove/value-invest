@@ -3,7 +3,12 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+from cache_layer import CacheEntry, expires_at_for, parse_iso
+
 DB_PATH = Path(__file__).parent / "cache.db"
+
+CACHE_NS_LATEST_REPORT = "reports.latest"
+CACHE_NS_REPORT_LIST = "reports.list"
 
 _conn: aiosqlite.Connection | None = None
 _corp_code_table: dict[str, dict[str, str]] | None = None
@@ -284,6 +289,20 @@ async def init_db():
             reports_json TEXT NOT NULL,
             fetched_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS cache_values (
+            namespace TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value_json TEXT NOT NULL,
+            cached_at TEXT NOT NULL,
+            expires_at TEXT,
+            ttl_seconds REAL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (namespace, key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cache_values_expires
+            ON cache_values(namespace, expires_at);
 
         CREATE TABLE IF NOT EXISTS user_portfolio (
             google_sub TEXT NOT NULL,
@@ -701,6 +720,7 @@ async def init_db():
     await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
+    await _backfill_legacy_cache_values(db)
     await db.execute("CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_group_date ON portfolio_stock_snapshots(google_sub, group_name, date)")
     cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_group_snapshots")
     group_snapshot_count = (await cursor.fetchone())["n"]
@@ -748,6 +768,149 @@ async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, defi
     columns = {row["name"] for row in rows}
     if column not in columns:
         await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+async def _backfill_legacy_cache_values(db: aiosqlite.Connection) -> None:
+    """Promote older per-feature cache tables into the unified cache table."""
+    await db.execute(
+        """
+        INSERT OR IGNORE INTO cache_values
+            (namespace, key, value_json, cached_at, expires_at, ttl_seconds, updated_at)
+        SELECT ?, stock_code, report_json, fetched_at, NULL, NULL, fetched_at
+        FROM latest_report_cache
+        """,
+        (CACHE_NS_LATEST_REPORT,),
+    )
+    await db.execute(
+        """
+        INSERT OR IGNORE INTO cache_values
+            (namespace, key, value_json, cached_at, expires_at, ttl_seconds, updated_at)
+        SELECT ?, stock_code, reports_json, fetched_at, NULL, NULL, fetched_at
+        FROM report_list_cache
+        """,
+        (CACHE_NS_REPORT_LIST,),
+    )
+
+
+def _ttl_for_minutes(ttl_minutes: int | None) -> float | None:
+    if ttl_minutes is None:
+        return None
+    return float(ttl_minutes) * 60
+
+
+def _cache_entry_from_row(
+    row: aiosqlite.Row,
+    *,
+    ttl_seconds: float | None = None,
+) -> CacheEntry | None:
+    cached_at = parse_iso(row["cached_at"])
+    if cached_at is None:
+        return None
+    stored_ttl = row["ttl_seconds"]
+    effective_ttl = ttl_seconds if ttl_seconds is not None else (
+        float(stored_ttl) if stored_ttl is not None else None
+    )
+    expires_at = expires_at_for(cached_at, effective_ttl)
+    if expires_at is None:
+        expires_at = row["expires_at"]
+    stale = False
+    expires_at_dt = parse_iso(expires_at)
+    if expires_at_dt is not None:
+        stale = datetime.now() >= expires_at_dt
+    try:
+        value = json.loads(row["value_json"])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return CacheEntry(
+        key=row["key"],
+        value=value,
+        cached_at=row["cached_at"],
+        expires_at=expires_at,
+        ttl_seconds=effective_ttl,
+        stale=stale,
+    )
+
+
+async def set_cache_value(
+    namespace: str,
+    key: str,
+    value,
+    *,
+    ttl_seconds: float | None = None,
+) -> CacheEntry:
+    """Store one JSON cache value with explicit cached/expires timestamps."""
+    db = await get_db()
+    cached_at_dt = datetime.now()
+    cached_at = cached_at_dt.isoformat(timespec="seconds")
+    expires_at = expires_at_for(cached_at_dt, ttl_seconds)
+    await db.execute(
+        """
+        INSERT INTO cache_values
+            (namespace, key, value_json, cached_at, expires_at, ttl_seconds, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(namespace, key) DO UPDATE SET
+            value_json = excluded.value_json,
+            cached_at = excluded.cached_at,
+            expires_at = excluded.expires_at,
+            ttl_seconds = excluded.ttl_seconds,
+            updated_at = excluded.updated_at
+        """,
+        (
+            namespace,
+            key,
+            json.dumps(value, ensure_ascii=False),
+            cached_at,
+            expires_at,
+            ttl_seconds,
+            cached_at,
+        ),
+    )
+    await db.commit()
+    return CacheEntry(
+        key=key,
+        value=value,
+        cached_at=cached_at,
+        expires_at=expires_at,
+        ttl_seconds=ttl_seconds,
+        stale=False,
+    )
+
+
+async def get_cache_value_entry(
+    namespace: str,
+    key: str,
+    *,
+    ttl_seconds: float | None = None,
+    allow_stale: bool = False,
+) -> CacheEntry | None:
+    """Read one cache value. A stale row is returned only when allowed."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT namespace, key, value_json, cached_at, expires_at, ttl_seconds
+        FROM cache_values
+        WHERE namespace = ? AND key = ?
+        """,
+        (namespace, key),
+    )
+    row = await cursor.fetchone()
+    if not row:
+        return None
+    entry = _cache_entry_from_row(row, ttl_seconds=ttl_seconds)
+    if entry is None:
+        return None
+    if entry.stale and not allow_stale:
+        return None
+    return entry.with_value_copy()
+
+
+async def delete_cache_value(namespace: str, key: str) -> None:
+    db = await get_db()
+    await db.execute(
+        "DELETE FROM cache_values WHERE namespace = ? AND key = ?",
+        (namespace, key),
+    )
+    await db.commit()
 
 
 _DEFAULT_GROUPS = [
@@ -1148,6 +1311,10 @@ async def delete_analysis(stock_code: str):
     await db.execute("DELETE FROM analysis_meta WHERE stock_code = ?", (stock_code,))
     await db.execute("DELETE FROM latest_report_cache WHERE stock_code = ?", (stock_code,))
     await db.execute("DELETE FROM report_list_cache WHERE stock_code = ?", (stock_code,))
+    await db.execute(
+        "DELETE FROM cache_values WHERE namespace IN (?, ?) AND key = ?",
+        (CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST, stock_code),
+    )
     await db.execute("DELETE FROM dart_report_reviews WHERE stock_code = ?", (stock_code,))
     await db.commit()
 
@@ -3018,63 +3185,43 @@ async def get_latest_nps_html() -> str | None:
 
 
 async def save_latest_report(stock_code: str, report: dict):
-    db = await get_db()
-    await db.execute(
-        "INSERT OR REPLACE INTO latest_report_cache (stock_code, report_json, fetched_at) VALUES (?, ?, ?)",
-        (stock_code, json.dumps(report, ensure_ascii=False), datetime.now().isoformat()),
-    )
-    await db.commit()
+    await set_cache_value(CACHE_NS_LATEST_REPORT, stock_code, report)
 
 
 async def get_latest_report(stock_code: str, ttl_minutes: int | None = None) -> dict | None:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT report_json, fetched_at FROM latest_report_cache WHERE stock_code = ?",
-        (stock_code,),
+    entry = await get_cache_value_entry(
+        CACHE_NS_LATEST_REPORT,
+        stock_code,
+        ttl_seconds=_ttl_for_minutes(ttl_minutes),
+        allow_stale=ttl_minutes is None,
     )
-    row = await cursor.fetchone()
-    if not row:
+    if entry is None:
         return None
-
-    fetched_at = datetime.fromisoformat(row["fetched_at"])
-    if ttl_minutes is not None:
-        age_seconds = (datetime.now() - fetched_at).total_seconds()
-        if age_seconds > ttl_minutes * 60:
-            return None
-
-    report = json.loads(row["report_json"])
-    report["_cached_at"] = row["fetched_at"]
+    report = entry.copy_value()
+    report["_cached_at"] = entry.cached_at
+    report["_expires_at"] = entry.expires_at
+    report["_stale"] = entry.stale
     return report
 
 
 async def save_report_list(stock_code: str, reports: list[dict]):
-    db = await get_db()
-    await db.execute(
-        "INSERT OR REPLACE INTO report_list_cache (stock_code, reports_json, fetched_at) VALUES (?, ?, ?)",
-        (stock_code, json.dumps(reports, ensure_ascii=False), datetime.now().isoformat()),
-    )
-    await db.commit()
+    await set_cache_value(CACHE_NS_REPORT_LIST, stock_code, reports)
 
 
 async def get_report_list(stock_code: str, ttl_minutes: int | None = None) -> dict | None:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT reports_json, fetched_at FROM report_list_cache WHERE stock_code = ?",
-        (stock_code,),
+    entry = await get_cache_value_entry(
+        CACHE_NS_REPORT_LIST,
+        stock_code,
+        ttl_seconds=_ttl_for_minutes(ttl_minutes),
+        allow_stale=ttl_minutes is None,
     )
-    row = await cursor.fetchone()
-    if not row:
+    if entry is None:
         return None
-
-    fetched_at = datetime.fromisoformat(row["fetched_at"])
-    if ttl_minutes is not None:
-        age_seconds = (datetime.now() - fetched_at).total_seconds()
-        if age_seconds > ttl_minutes * 60:
-            return None
-
     return {
-        "reports": json.loads(row["reports_json"]),
-        "fetched_at": row["fetched_at"],
+        "reports": entry.copy_value(),
+        "fetched_at": entry.cached_at,
+        "expires_at": entry.expires_at,
+        "stale": entry.stale,
     }
 
 
