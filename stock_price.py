@@ -972,13 +972,14 @@ async def fetch_quote_snapshot(
     start_date = end_date - timedelta(days=14)
 
     market = kis_ws_manager.active_market_code()
+    quote_is_stale = False
     # Some KRX-listed stocks are not available on the NXT after-hours market.
     # If we previously saw an empty NXT payload for this code, skip straight to
     # KRX to avoid retrying a doomed call every poll.
     if market == "NX" and kis_ws_manager.is_nxt_unsupported(stock_code):
         market = "J"
+        quote_is_stale = True
 
-    quote_is_stale = False
     effective_market = market
     quote_source = "rest"
 
@@ -1007,6 +1008,8 @@ async def fetch_quote_snapshot(
             if price is None:
                 kis_ws_manager.mark_nxt_unsupported(stock_code)
                 logger.info("NXT 0가 응답 → NXT 미지원으로 표시 후 KRX 재시도: %s", stock_code)
+                quote_is_stale = True
+                effective_market = "J"
                 return await kis_proxy_client.get_quote(stock_code, market="J")
         return payload
 
@@ -1114,6 +1117,6 @@ async def fetch_quote_snapshot(
         "market": effective_market,
         "fetched_at": datetime.now().isoformat(),
     }
-    if quote_is_stale:
+    if quote_is_stale or quote_source == "history":
         result["_stale"] = True
     return result

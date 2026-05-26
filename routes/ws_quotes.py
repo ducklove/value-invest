@@ -104,6 +104,31 @@ async def _stop_session(session: _Session) -> None:
     session.is_active = False
 
 
+async def _evict_oldest_session(exclude: _Session | None = None) -> bool:
+    old_ws: WebSocket | None = None
+    old_session: _Session | None = None
+    async with _sessions_lock:
+        for candidate_ws, candidate_session in list(_sessions.items()):
+            if candidate_session is exclude:
+                continue
+            old_ws = candidate_ws
+            old_session = candidate_session
+            old_session.kicked = True
+            del _sessions[candidate_ws]
+            break
+
+    if old_ws is None or old_session is None:
+        return False
+
+    await _stop_session(old_session)
+    try:
+        await _send_json(old_ws, old_session, {"type": "ws_taken_over"})
+        await old_ws.close(code=4001, reason="taken_over")
+    except Exception:
+        pass
+    return True
+
+
 async def _trim_extra_connections(session: _Session, desired_count: int) -> None:
     while len(session.ws_conns) > desired_count:
         task = session.relay_tasks.pop()
@@ -143,7 +168,11 @@ async def _ensure_session_capacity(
     while len(session.ws_conns) < desired:
         key_slot = await kis_key_manager.acquire()
         if key_slot is None:
-            break
+            if not await _evict_oldest_session(exclude=session):
+                break
+            key_slot = await kis_key_manager.acquire()
+            if key_slot is None:
+                break
         await _start_connection(websocket, session, key_slot)
 
     await _trim_extra_connections(session, min(desired, len(session.ws_conns)))
