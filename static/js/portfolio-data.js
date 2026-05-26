@@ -209,7 +209,10 @@ function _renderPortfolioRowTags(tags) {
   const more = Array.isArray(tags) && tags.length > safeTags.length
     ? `<span class="pf-stock-tag more">+${tags.length - safeTags.length}</span>`
     : '';
-  return `<div class="pf-stock-tags">${safeTags.map(tag => `<span class="pf-stock-tag">${escapeHtml(tag)}</span>`).join('')}${more}</div>`;
+  return `<div class="pf-stock-tags">${safeTags.map(tag => {
+    const safeTag = escapeHtml(tag);
+    return `<button type="button" class="pf-stock-tag js-pf-open-tag-summary" data-tag="${safeTag}" title="#${safeTag}">${safeTag}</button>`;
+  }).join('')}${more}</div>`;
 }
 
 function pfToggleGroupFilter(groupName) {

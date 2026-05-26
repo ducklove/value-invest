@@ -74,6 +74,47 @@ def test_portfolio_quote_cache_ignores_stale_quotes():
     assert cache.get_cached("005930") == {}
 
 
+def test_portfolio_quote_cache_keeps_rest_quote_over_later_history_fallback():
+    cache = quotes.PortfolioQuoteCache()
+
+    assert cache.remember("005930", {
+        "date": "2026-05-26",
+        "price": 1000,
+        "source": "rest",
+        "fetched_at": "2026-05-26T09:01:00",
+    })
+    assert not cache.remember("005930", {
+        "date": "2026-05-26",
+        "price": 990,
+        "source": "history",
+        "fetched_at": "2026-05-26T09:02:00",
+    })
+    assert cache.get_fresh("005930") == {
+        "date": "2026-05-26",
+        "price": 1000,
+        "source": "rest",
+        "fetched_at": "2026-05-26T09:01:00",
+    }
+
+
+def test_portfolio_quote_cache_accepts_newer_same_source_quote():
+    cache = quotes.PortfolioQuoteCache()
+
+    assert cache.remember("005930", {
+        "date": "2026-05-26",
+        "price": 1000,
+        "source": "rest",
+        "fetched_at": "2026-05-26T09:01:00",
+    })
+    assert cache.remember("005930", {
+        "date": "2026-05-26",
+        "price": 1010,
+        "source": "rest",
+        "fetched_at": "2026-05-26T09:02:00",
+    })
+    assert cache.get_fresh("005930")["price"] == 1010
+
+
 def test_cached_quote_for_code_ignores_stale_polling_cache():
     cache = quotes.PortfolioQuoteCache(ttl_seconds=0)
     cache.remember("005930", {"price": 1000})

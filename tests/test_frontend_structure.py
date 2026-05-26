@@ -18,6 +18,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-trends.js",
     "portfolio-group-composition.js",
     "portfolio-cashflows.js",
+    "portfolio-tag-summary.js",
     "portfolio-events.js",
 ]
 
@@ -169,6 +170,22 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     assert "if (code) pfGoAnalyze(code, e);" in events
 
 
+def test_portfolio_tag_summary_popup_uses_weighted_daily_return():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
+    source = (JS / "portfolio-tag-summary.js").read_text(encoding="utf-8")
+
+    assert html.find("./js/portfolio-tag-summary.js") < html.find("./js/portfolio-events.js")
+    assert "js-pf-open-tag-summary" in data
+    assert "data-tag=\"${safeTag}\"" in data
+    assert "pfOpenTagSummary(el.dataset.tag || '')" in events
+    assert "function pfOpenTagSummary(tag)" in source
+    assert "baseValue > 0 ? dailyPnl / baseValue * 100 : null" in source
+    assert "tagStats.dailyReturnPct - allStats.dailyReturnPct" in source
+    assert "pf-tag-summary-table" in source
+
+
 def test_portfolio_insight_modal_renders_valuation_cards():
     source = (JS / "portfolio-insights.js").read_text(encoding="utf-8")
 
@@ -284,8 +301,11 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "function quoteSnapshotTimeValue(q)" in utils
     assert "q.ts ?? q.fetched_at ?? q.fetchedAt ?? q._receivedAt" in utils
     assert "if (incomingDate < currentDate) return false;" in utils
-    assert "if (incomingTime > currentTime) return true;" in utils
-    assert "quoteSourceRank(incoming) < quoteSourceRank(current)" in utils
+    assert "const currentRank = quoteSourceRank(current);" in utils
+    assert "const incomingRank = quoteSourceRank(incoming);" in utils
+    assert "if (incomingRank < currentRank) return false;" in utils
+    assert "if (incomingRank > currentRank) return true;" in utils
+    assert utils.find("if (incomingRank < currentRank) return false;") < utils.find("const currentTime = quoteSnapshotTimeValue(current);")
     assert "function mergeQuoteSnapshot(current, incoming)" in utils
     assert "if (!shouldAcceptQuoteSnapshot(current, incoming)) return { ...(current || {}) };" in utils
     assert "if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);" in quote_manager
@@ -293,6 +313,7 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "const QUOTE_MANAGER_BATCH_PARALLEL = 2;" in quote_manager
     assert "await this._fetchQuotes(wsCodes, { fresh: false, scheduleRetry: false });" in quote_manager
     assert "await this._fetchQuotes(missing, { fresh: true });" in quote_manager
+    assert "shouldAcceptQuoteSnapshot(pfItem.quote, q)" in app_main
     assert "pfItem.quote = mergeQuoteSnapshot(pfItem.quote, q);" in app_main
     assert "const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;" in data
     assert "quote: { ...item.quote, _stale: true }" in data

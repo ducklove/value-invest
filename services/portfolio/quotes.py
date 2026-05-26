@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Any
 
 from cache_layer import MemoryTTLCache
@@ -33,6 +34,87 @@ def quote_from_ws(
         "source": "ws",
         "ts": ws_quote.get("ts"),
     }
+
+
+def _quote_date_value(quote: dict[str, Any] | None) -> int | None:
+    if not quote:
+        return None
+    raw = quote.get("date")
+    if not raw:
+        return None
+    text = str(raw)
+    try:
+        if len(text) == 8 and text.isdigit():
+            return datetime(int(text[:4]), int(text[4:6]), int(text[6:8])).date().toordinal()
+        return datetime.fromisoformat(text[:10]).date().toordinal()
+    except (TypeError, ValueError):
+        return None
+
+
+def _quote_time_value(quote: dict[str, Any] | None) -> float | None:
+    if not quote:
+        return None
+    raw = None
+    for key in ("ts", "fetched_at", "fetchedAt", "_receivedAt"):
+        value = quote.get(key)
+        if value is not None and value != "":
+            raw = value
+            break
+    if raw is None:
+        return None
+    try:
+        numeric = float(raw)
+        return numeric * 1000 if numeric < 10_000_000_000 else numeric
+    except (TypeError, ValueError):
+        pass
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp() * 1000
+    except (TypeError, ValueError):
+        return None
+
+
+def _quote_source_rank(quote: dict[str, Any] | None) -> int:
+    if not quote or quote.get("_stale") is True:
+        return 0
+    source = str(quote.get("source") or quote.get("_source") or "").lower()
+    if "ws" in source:
+        return 4
+    if "rest" in source or "quote" in source:
+        return 3
+    if "history" in source:
+        return 1
+    return 2
+
+
+def should_accept_quote_snapshot(
+    current: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> bool:
+    if not incoming or incoming.get("price") is None:
+        return False
+    if incoming.get("_stale") is True and current and current.get("price") is not None:
+        return False
+
+    current_date = _quote_date_value(current)
+    incoming_date = _quote_date_value(incoming)
+    if current_date is not None and incoming_date is not None:
+        if incoming_date < current_date:
+            return False
+        if incoming_date > current_date:
+            return True
+
+    current_rank = _quote_source_rank(current)
+    incoming_rank = _quote_source_rank(incoming)
+    if incoming_rank < current_rank:
+        return False
+    if incoming_rank > current_rank:
+        return True
+
+    current_time = _quote_time_value(current)
+    incoming_time = _quote_time_value(incoming)
+    if current_time is not None and incoming_time is not None:
+        return incoming_time >= current_time
+    return True
 
 
 class PortfolioQuoteCache:
@@ -73,6 +155,8 @@ class PortfolioQuoteCache:
         if not quote or quote.get("price") is None:
             return False
         if quote.get("_stale") is True:
+            return False
+        if not should_accept_quote_snapshot(self._last_known.get(code), quote):
             return False
         snapshot = dict(quote)
         self._fresh.set(code, snapshot)

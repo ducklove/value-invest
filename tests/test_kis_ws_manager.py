@@ -51,3 +51,26 @@ def test_parse_realtime_quote_carries_market_and_source_metadata():
     assert quote["date"] == "20260521"
     assert quote["source"] == "ws"
     assert quote["market"] == "NX"
+
+
+def test_subscription_plan_uses_single_connection_capacity_by_default():
+    codes = [f"{idx:06d}" for idx in range(45)]
+    requested = {"portfolio": codes, "sidebar": ["AAPL"]}
+
+    plan = kis_ws_manager.plan_requested_subscriptions(requested)
+
+    assert plan["ws"] == codes[:kis_ws_manager.MAX_SUBSCRIPTIONS]
+    assert plan["rest"] == codes[kis_ws_manager.MAX_SUBSCRIPTIONS:] + ["AAPL"]
+
+
+def test_subscription_plan_can_use_combined_websocket_capacity():
+    codes = [f"{idx:06d}" for idx in range(45)]
+    requested = {"portfolio": codes, "sidebar": ["AAPL"]}
+
+    plan = kis_ws_manager.plan_requested_subscriptions(
+        requested,
+        max_subscriptions=kis_ws_manager.MAX_SUBSCRIPTIONS * 2,
+    )
+
+    assert plan["ws"] == codes
+    assert plan["rest"] == ["AAPL"]

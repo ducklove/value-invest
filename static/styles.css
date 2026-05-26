@@ -2353,18 +2353,108 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   align-items: center;
   max-width: 92px;
   padding: 2px 6px;
+  border: 0;
   border-radius: 999px;
   background: rgba(34, 197, 94, 0.10);
   color: #166534;
+  font-family: inherit;
   font-size: 10px;
   line-height: 1.25;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pf-stock-tag:hover {
+  background: rgba(34, 197, 94, 0.16);
+  color: #15803d;
+}
 .pf-stock-tag.more {
   background: rgba(148, 163, 184, 0.16);
   color: var(--text-secondary);
+  cursor: default;
+}
+.pf-tag-summary-modal {
+  width: min(760px, 95vw);
+  max-width: none;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pf-tag-summary-body {
+  max-height: none;
+  overflow-y: auto;
+}
+.pf-tag-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.pf-tag-summary-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.pf-tag-summary-label,
+.pf-tag-summary-sub {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.pf-tag-summary-value {
+  margin-top: 5px;
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pf-tag-summary-table-wrap {
+  overflow-x: auto;
+}
+.pf-tag-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pf-tag-summary-table th,
+.pf-tag-summary-table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+.pf-tag-summary-table th:first-child,
+.pf-tag-summary-table td:first-child {
+  text-align: left;
+  min-width: 170px;
+}
+.pf-tag-summary-table td strong,
+.pf-tag-summary-table td span {
+  display: block;
+}
+.pf-tag-summary-table td span {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.pf-tag-summary-empty {
+  padding: 24px 10px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .pf-tag-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pf-tag-summary-value {
+    font-size: 16px;
+  }
 }
 .pf-return.positive { color: #b91c1c; }
 .pf-return.negative { color: #1d4ed8; }

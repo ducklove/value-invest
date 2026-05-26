@@ -74,6 +74,10 @@
         e.preventDefault();
         const code = codeFromTr(el);
         if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);
+      } else if ((el = t.closest('.js-pf-open-tag-summary'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        pfOpenTagSummary(el.dataset.tag || '');
       } else if ((el = t.closest('.js-pf-open-insight'))) {
         e.preventDefault();
         const code = codeFromTr(el);

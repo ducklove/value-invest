@@ -98,15 +98,18 @@ function shouldAcceptQuoteSnapshot(current, incoming) {
   const incomingDate = quoteSnapshotDateValue(incoming);
   if (currentDate !== null && incomingDate !== null) {
     if (incomingDate < currentDate) return false;
-    if (incomingDate === currentDate) {
-      const currentTime = quoteSnapshotTimeValue(current);
-      const incomingTime = quoteSnapshotTimeValue(incoming);
-      if (currentTime !== null && incomingTime !== null) {
-        if (incomingTime < currentTime) return false;
-        if (incomingTime > currentTime) return true;
-      }
-      if (quoteSourceRank(incoming) < quoteSourceRank(current)) return false;
-    }
+    if (incomingDate > currentDate) return true;
+  }
+  const currentRank = quoteSourceRank(current);
+  const incomingRank = quoteSourceRank(incoming);
+  if (incomingRank < currentRank) return false;
+  if (incomingRank > currentRank) return true;
+
+  const currentTime = quoteSnapshotTimeValue(current);
+  const incomingTime = quoteSnapshotTimeValue(incoming);
+  if (currentTime !== null && incomingTime !== null) {
+    if (incomingTime < currentTime) return false;
+    if (incomingTime > currentTime) return true;
   }
   return true;
 }

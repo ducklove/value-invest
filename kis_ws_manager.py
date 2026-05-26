@@ -129,6 +129,38 @@ def is_korean_stock(code: str) -> bool:
     return bool(_KR_CODE_RE.match(code)) if isinstance(code, str) else False
 
 
+def plan_requested_subscriptions(
+    requested: dict[str, list[str]] | None,
+    *,
+    max_subscriptions: int = MAX_SUBSCRIPTIONS,
+) -> dict[str, list[str]]:
+    """Split requested codes into live WS capacity and REST overflow.
+
+    The caller decides the total available live capacity. A single
+    ``WsConnection`` passes ``MAX_SUBSCRIPTIONS``; the browser endpoint can
+    pass N * ``MAX_SUBSCRIPTIONS`` when it owns multiple key slots.
+    """
+    ws_codes: list[str] = []
+    rest_codes: list[str] = []
+    seen: set[str] = set()
+    safe_requested = requested if isinstance(requested, dict) else {}
+    for category in PRIORITY_ORDER:
+        for raw_code in safe_requested.get(category, []) or []:
+            code = str(raw_code or "").strip()
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            if is_korean_stock(code):
+                ws_codes.append(code)
+            else:
+                rest_codes.append(code)
+    limit = max(0, int(max_subscriptions or 0))
+    return {
+        "ws": ws_codes[:limit],
+        "rest": ws_codes[limit:] + rest_codes,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Quote cache (shared across all connections)
 # ---------------------------------------------------------------------------
@@ -275,21 +307,10 @@ class WsConnection:
         return self._compute_plan()
 
     def _compute_plan(self) -> dict[str, list[str]]:
-        ws_codes: list[str] = []
-        rest_codes: list[str] = []
-        seen: set[str] = set()
-        for category in PRIORITY_ORDER:
-            for code in self._requested.get(category, []):
-                if code in seen:
-                    continue
-                seen.add(code)
-                if is_korean_stock(code):
-                    ws_codes.append(code)
-                else:
-                    rest_codes.append(code)
-        rest_codes = ws_codes[MAX_SUBSCRIPTIONS:] + rest_codes
-        ws_codes = ws_codes[:MAX_SUBSCRIPTIONS]
-        return {"ws": ws_codes, "rest": rest_codes}
+        return plan_requested_subscriptions(
+            self._requested,
+            max_subscriptions=MAX_SUBSCRIPTIONS,
+        )
 
     async def sync_subscriptions(self) -> None:
         """Add/remove WS subscriptions to match the current plan."""

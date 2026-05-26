@@ -771,10 +771,10 @@ async def _fetch_quote(
                 await _save_ticker(stock_code, resolved)
                 q = await _fetch_foreign_quote(resolved)
     if not _quote_cache.remember(stock_code, q):
-        _mark_dead(stock_code)
         fallback = _quote_cache.get_fallback(stock_code, mark_stale=True)
         if fallback:
             return fallback
+        _mark_dead(stock_code)
     return q
 
 
