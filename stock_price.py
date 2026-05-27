@@ -988,10 +988,10 @@ async def fetch_quote_snapshot(
             payload = await kis_proxy_client.get_quote(stock_code, market=market)
         except kis_proxy_client.KISProxyError as exc:
             if market == "NX":
-                # Treat exceptions as transient; a zero/empty NX payload below
-                # is the signal that the stock is not NXT-tradable.
+                # Retry KRX once. If KRX returns a quote, it is still a live
+                # REST quote for KRX-only/NXT-missing stocks; only history
+                # fallback is marked stale below.
                 logger.info("NXT quote failed; retrying KRX once for %s (%s)", stock_code, exc)
-                quote_is_stale = True
                 effective_market = "J"
                 return await kis_proxy_client.get_quote(stock_code, market="J")
             raise

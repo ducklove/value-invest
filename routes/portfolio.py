@@ -1758,9 +1758,9 @@ async def asset_quote(stock_code: str):
 
 
 _NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
-_ASSET_QUOTES_BATCH_TIMEOUT = 12.0
-_ASSET_QUOTES_ITEM_TIMEOUT = 10.0
-_ASSET_QUOTES_CONCURRENCY = 16
+_ASSET_QUOTES_BATCH_TIMEOUT = 18.0
+_ASSET_QUOTES_ITEM_TIMEOUT = 15.0
+_ASSET_QUOTES_CONCURRENCY = 4
 
 @router.post("/api/asset-quotes")
 async def asset_quotes_batch(payload: dict = Body(...)):
