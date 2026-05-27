@@ -225,8 +225,15 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
 
 def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
 
+    assert 'const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight"' in render
+    assert '${dragHandle}${stockIdentity}' in render
+    assert ".pf-stock-main" in styles
+    assert "display: inline-flex;" in styles
+    assert ".pf-stock-line" in styles
+    assert "flex-direction: column;" in styles
     assert "pf-stock-link js-pf-open-insight" in render
     save_branch = "((el = t.closest('.js-pf-save')))"
     open_branch = "((el = t.closest('.js-pf-open-insight')))"

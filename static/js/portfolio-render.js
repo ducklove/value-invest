@@ -486,7 +486,7 @@ function renderPortfolio(options = {}) {
     const isEditing = pfEditingCode === r.stock_code;
     const isCash = r.stock_code.startsWith('CASH_');
     const isSpecialFloat = ['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(r.stock_code) || isCash;
-    const curTag = r.stock_code === 'KRX_GOLD' ? ' <span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? ` <span class="pf-stock-code">${r.cur}</span>` : '';
+    const curTag = r.stock_code === 'KRX_GOLD' ? '<span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? `<span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isSpecialFloat ? 'any' : '1';
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : isCash ? 2 : 8;
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
@@ -509,9 +509,10 @@ function renderPortfolio(options = {}) {
     const dragHandle = canManualDrag
       ? '<button type="button" class="pf-row-drag-handle js-pf-row-drag" draggable="true" title="드래그하여 순서 변경" aria-label="드래그하여 순서 변경">&#x2630;</button>'
       : '';
+    const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight"><strong>${escapeHtml(r.stock_name)}</strong></a><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</span>${tagHtml}</span>`;
     if (isEditing) {
       return `<tr data-code="${safeCode}"${rowClass}>
-        <td class="pf-stock-cell js-pf-analyze"><a href="#" class="pf-stock-link js-pf-open-insight"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
+        <td class="pf-stock-cell js-pf-analyze">${stockIdentity}</td>
         <td class="pf-col-group"><select class="pf-group-select js-pf-group"${editAttrs}>${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
@@ -534,7 +535,7 @@ function renderPortfolio(options = {}) {
       </tr>`;
     }
     return `<tr data-code="${safeCode}">
-      <td class="pf-stock-cell js-pf-analyze">${dragHandle}<a href="#" class="pf-stock-link js-pf-open-insight"><strong>${escapeHtml(r.stock_name)}</strong></a> <span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${tagHtml}</td>
+      <td class="pf-stock-cell js-pf-analyze">${dragHandle}${stockIdentity}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
