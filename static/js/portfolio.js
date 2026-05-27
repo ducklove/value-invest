@@ -8,6 +8,7 @@
   var files = [
     'portfolio-shell.js',
     'portfolio-data.js',
+    'portfolio-order.js',
     'portfolio-render.js',
     'portfolio-actions.js',
     'portfolio-insights.js',

@@ -50,7 +50,7 @@ async function pfRefreshTodayState({ force = false, render = true } = {}) {
 async function loadPortfolio({ force = false } = {}) {
   if (portfolioLoading) return;
   const loadOrderRevision = pfManualOrderRevision;
-  const preservePendingManualOrder = !!(pfPendingManualOrderCodes && pfManualOrderSaveInFlight);
+  const preservePendingManualOrder = !!pfPendingManualOrderCodes;
   portfolioLoading = true;
   try {
     _restorePortfolioSnapshotForFastPaint();

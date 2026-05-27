@@ -9,6 +9,7 @@ JS = STATIC / "js"
 PORTFOLIO_SPLIT_FILES = [
     "portfolio-shell.js",
     "portfolio-data.js",
+    "portfolio-order.js",
     "portfolio-render.js",
     "portfolio-actions.js",
     "portfolio-insights.js",
@@ -204,23 +205,43 @@ def test_portfolio_delete_uses_encoded_url_and_server_reload():
 def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
     data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    order = (JS / "portfolio-order.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
     assert "let pfPendingManualOrderCodes = null;" in shell
     assert "let pfManualOrderRevision = 0;" in shell
     assert "let pfManualOrderSaveInFlight = false;" in shell
     assert "const loadOrderRevision = pfManualOrderRevision;" in data
-    assert "const preservePendingManualOrder = !!(pfPendingManualOrderCodes && pfManualOrderSaveInFlight);" in data
+    assert "const preservePendingManualOrder = !!pfPendingManualOrderCodes;" in data
     assert "nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);" in data
     assert data.find("nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);") < data.find("portfolioItems = nextPortfolioItems;")
     assert "function pfApplyManualOrder(items, orderedCodes)" in data
-    assert "pfPendingManualOrderCodes = orderCodes;" in actions
-    assert "pfManualOrderRevision += 1;" in actions
-    assert "pfManualOrderSaveInFlight = true;" in actions
-    assert "_savePortfolioSnapshot(portfolioItems);" in actions
-    assert "if (!resp.ok)" in actions
-    assert "throw new Error(data.detail || '종목 순서 저장 실패');" in actions
-    assert "await loadPortfolio({ force: true });" in actions
+    assert "function _pfNextOrderAfterDrop(items, fromCode, toCode, dropPosition = 'before')" in order
+    assert "const targetIdx = next.findIndex(i => i.stock_code === toCode);" in order
+    assert "const insertIdx = dropPosition === 'after' ? targetIdx + 1 : targetIdx;" in order
+    assert "function _pfClearPortfolioDragOver(root = document)" in order
+    assert "function _pfDropPositionForEvent(e, row)" in order
+    assert "async function pfFlushManualOrderSave()" in order
+    assert "while (pfPendingManualOrderCodes && pfPendingManualOrderCodes.length)" in order
+    assert "if (!_pfSameOrderCodes(pfPendingManualOrderCodes, orderCodes) || pfManualOrderRevision !== orderRevision)" in order
+    assert "_legacyPfDropRowImmediateSave" not in order
+    assert "pfPendingManualOrderCodes = orderCodes;" in order
+    assert "pfManualOrderRevision += 1;" in order
+    assert "pfManualOrderSaveInFlight = true;" in order
+    assert "_pfSetPortfolioSortOrder(orderCodes);" in order
+    assert "_savePortfolioSnapshot(portfolioItems);" in order
+    assert "if (!resp.ok)" in order
+    assert "throw new Error(data.detail || 'Portfolio order save failed');" in order
+    assert "await loadPortfolio({ force: true });" in order
+    assert "async function pfDropRow" not in actions
+    assert "const canManualDrag = pfGroupFilter === null && !pfSortKey && !pfGroupSort && !searchText && currentUser && !pfEditingCode;" in render
+    assert "_pfDropPositionForEvent(e, tr)" in render
+    assert "_pfClearPortfolioDragOver(tbody)" in render
+    assert "pfDropRow(fromCode, toCode, dropPosition)" in render
+    assert ".pf-table tbody tr.drag-over-before td" in styles
+    assert ".pf-table tbody tr.drag-over-after td" in styles
 
 
 def test_portfolio_stock_click_uses_explicit_insight_link_handler():

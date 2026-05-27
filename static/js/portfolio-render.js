@@ -479,7 +479,7 @@ function renderPortfolio(options = {}) {
     }
   }
 
-  const canManualDrag = !pfSortKey && !pfGroupSort && !searchText && currentUser && !pfEditingCode;
+  const canManualDrag = pfGroupFilter === null && !pfSortKey && !pfGroupSort && !searchText && currentUser && !pfEditingCode;
 
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
@@ -611,22 +611,26 @@ function renderPortfolio(options = {}) {
         const tr = handle.closest('tr[data-code]');
         if (!tr) return;
         tr.classList.remove('dragging');
-        tbody.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        _pfClearPortfolioDragOver(tbody);
       });
     });
     tbody.querySelectorAll('tr[data-code]').forEach(tr => {
       tr.addEventListener('dragover', (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        if (!tr.classList.contains('dragging')) tr.classList.add('drag-over');
+        _pfClearPortfolioDragOver(tbody);
+        if (!tr.classList.contains('dragging')) {
+          tr.classList.add(_pfDropPositionForEvent(e, tr) === 'after' ? 'drag-over-after' : 'drag-over-before');
+        }
       });
-      tr.addEventListener('dragleave', () => tr.classList.remove('drag-over'));
+      tr.addEventListener('dragleave', () => tr.classList.remove('drag-over-before', 'drag-over-after'));
       tr.addEventListener('drop', (e) => {
         e.preventDefault();
-        tr.classList.remove('drag-over');
+        const dropPosition = _pfDropPositionForEvent(e, tr);
+        tr.classList.remove('drag-over-before', 'drag-over-after');
         const fromCode = e.dataTransfer.getData('text/plain');
         const toCode = tr.dataset.code;
-        if (fromCode && toCode && fromCode !== toCode) pfDropRow(fromCode, toCode);
+        if (fromCode && toCode && fromCode !== toCode) pfDropRow(fromCode, toCode, dropPosition);
       });
     });
   }

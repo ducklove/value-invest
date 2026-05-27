@@ -2317,7 +2317,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-sortable:hover { color: var(--text); }
 .pf-sortable .pf-sort-arrow { font-size: 10px; margin-left: 3px; }
 .pf-table tbody tr.dragging { opacity: 0.4; }
-.pf-table tbody tr.drag-over td { border-top: 2px solid var(--primary); }
+.pf-table tbody tr.drag-over-before td { border-top: 2px solid var(--primary); }
+.pf-table tbody tr.drag-over-after td { border-bottom: 2px solid var(--primary); }
 .pf-stock-cell {
   cursor: pointer;
   min-width: 0;
