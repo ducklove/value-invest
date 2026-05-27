@@ -751,10 +751,49 @@ function _drawSparklinePoints(canvasId, points, color, xMax) {
   }
 }
 
-function _sparkHourFromTs(ts) {
-  const m = String(ts || '').match(/T(\d{2}):(\d{2})/);
+function _sparkLocalMinuteValue(ts) {
+  const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!m) return null;
-  return Number(m[1]) + Number(m[2]) / 60;
+  return Date.UTC(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5]),
+  ) / 60000;
+}
+
+function _sparkAxisEndTs(axisStartTs) {
+  const start = _sparkLocalMinuteValue(axisStartTs);
+  if (start === null) return null;
+  const end = new Date((start + 24 * 60) * 60000);
+  return `${end.getUTCFullYear()}-${String(end.getUTCMonth() + 1).padStart(2, '0')}-${String(end.getUTCDate()).padStart(2, '0')}T${String(end.getUTCHours()).padStart(2, '0')}:${String(end.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+function _sparkNowKstIsoMinute() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date()).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function _sparkAxisHoursFromTs(ts, axisStartTs, axisEndTs) {
+  const start = _sparkLocalMinuteValue(axisStartTs);
+  const end = _sparkLocalMinuteValue(axisEndTs);
+  const value = _sparkLocalMinuteValue(ts);
+  if (start === null || end === null || value === null || end <= start) return null;
+  const hours = (value - start) / 60;
+  const maxHours = (end - start) / 60;
+  return Math.max(0, Math.min(maxHours, hours));
 }
 
 function _formatLocalYmd(date) {
@@ -826,23 +865,26 @@ function _renderSummarySparklines(currentTotalValue) {
   const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
     ? pfPrevDaySnapshot.total_value
     : null;
-  if (!_prevClose) {
+  const axisStartTs = pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null;
+  const axisEndTs = axisStartTs ? _sparkAxisEndTs(axisStartTs) : null;
+  if (!_prevClose || !axisStartTs || !axisEndTs) {
     _drawSparklinePoints('sparkDaily', [], '#dc2626', 24);
   } else {
     const raw = [{ x: 0, y: 0 }];
+    let axisMaxHours = 0;
     for (const d of pfIntradayData) {
       if (!d || !d.total_value) continue;
-      const hour = _sparkHourFromTs(d.ts);
-      if (hour === null) continue;
-      const x = String(d.ts || '').endsWith('T00:00')
-        ? 0
-        : Math.max(0, Math.min(24, hour + 2));
+      const x = _sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs);
+      if (x === null) continue;
+      axisMaxHours = Math.max(axisMaxHours, x);
       raw.push({ x, y: (d.total_value / _prevClose - 1) * 100 });
     }
     if (currentTotalValue) {
-      const now = new Date();
-      const currentHour = now.getHours() + now.getMinutes() / 60;
-      raw.push({ x: Math.min(24, currentHour + 2), y: (currentTotalValue / _prevClose - 1) * 100 });
+      const x = _sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs);
+      if (x !== null) {
+        axisMaxHours = Math.max(axisMaxHours, x);
+        raw.push({ x, y: (currentTotalValue / _prevClose - 1) * 100 });
+      }
     }
     // Outlier 필터: 현재값 부호와 반대 부호인 점은 일시적 데이터 오류
     // (일부 종목 가격 fetch 실패로 total_value 잘못 저장) 로 간주해 제외.
@@ -854,7 +896,8 @@ function _renderSummarySparklines(currentTotalValue) {
       ? raw.filter(p => p.y >= 0)
       : raw.filter(p => p.y <= 0);
     const lastPct = dayPcts.length ? dayPcts[dayPcts.length - 1].y : 0;
-    _drawSparklinePoints('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', 24);
+    const visibleAxisMaxHours = Math.max(0.25, Math.min(24, axisMaxHours || dayPcts[dayPcts.length - 1]?.x || 24));
+    _drawSparklinePoints('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', visibleAxisMaxHours);
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }

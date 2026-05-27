@@ -80,7 +80,7 @@ async def run(manage_db: bool = True):
     if manage_db:
         await cache.init_db()
     await cache.delete_old_intraday(days_to_keep=7)
-    ts = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    ts = datetime.now(KST).strftime("%Y-%m-%dT%H:%M")
     users = await cache.get_all_users_with_portfolio()
     logger.info("Intraday snapshot for %d users at %s", len(users), ts)
     ok = 0

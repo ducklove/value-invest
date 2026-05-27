@@ -22,4 +22,15 @@ def test_intraday_settlement_marker_filters_completed_window():
 
 
 def test_intraday_axis_baseline_timestamp_is_start_of_chart_day():
-    assert tw.intraday_axis_baseline_ts("2026-05-09") == "2026-05-09T00:00"
+    assert tw.intraday_axis_baseline_ts("2026-05-09") == "2026-05-09T22:00"
+
+
+def test_intraday_axis_window_uses_settlement_to_next_settlement():
+    assert tw.intraday_axis_window(datetime(2026, 5, 9, 21, 59, 59)) == (
+        "2026-05-08T22:00",
+        "2026-05-09T22:00",
+    )
+    assert tw.intraday_axis_window(datetime(2026, 5, 9, 22, 0, 0)) == (
+        "2026-05-09T22:00",
+        "2026-05-10T22:00",
+    )

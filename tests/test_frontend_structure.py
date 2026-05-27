@@ -111,6 +111,22 @@ def test_today_card_percent_uses_same_settlement_base_as_amount():
     assert "grandTotalMarketValue - Number(pfPrevDaySnapshot.today_net_cashflow || 0)" in source
 
 
+def test_today_sparkline_maps_ticks_from_settlement_axis():
+    source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+
+    assert "function _sparkAxisHoursFromTs" in source
+    assert "function _sparkNowKstIsoMinute" in source
+    assert "const axisStartTs = pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null;" in source
+    assert "const axisEndTs = axisStartTs ? _sparkAxisEndTs(axisStartTs) : null;" in source
+    assert "_sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs)" in source
+    assert "_sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs)" in source
+    assert "let axisMaxHours = 0;" in source
+    assert "const visibleAxisMaxHours = Math.max(0.25, Math.min(24, axisMaxHours || dayPcts[dayPcts.length - 1]?.x || 24));" in source
+    assert "_drawSparklinePoints('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', visibleAxisMaxHours);" in source
+    assert "hour + 2" not in source
+    assert "endsWith('T00:00')" not in source
+
+
 def test_filtered_today_card_excludes_attributed_cashflows():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
 

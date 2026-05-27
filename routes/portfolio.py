@@ -61,8 +61,7 @@ from services.portfolio.dividends import (
     due_dividend_warmup_targets as _due_dividend_warmup_targets,
 )
 from services.portfolio.time_windows import (
-    intraday_axis_baseline_ts as _intraday_axis_baseline_ts,
-    is_after_settlement_marker as _is_after_settlement_marker,
+    intraday_axis_window as _intraday_axis_window,
     portfolio_today_baseline_date as _portfolio_today_baseline_date,
     today_kst_date as _today_kst_date,
 )
@@ -2433,16 +2432,12 @@ async def get_benchmark_history(code: str = Query(...), start: str = Query(...))
 @router.get("/api/portfolio/intraday")
 async def get_intraday(request: Request):
     user = _require_user(await get_current_user(request))
-    today = _today_kst_date()
-    baseline_date = _portfolio_today_baseline_date()
-    points = await cache.get_intraday_snapshots(user["google_sub"], today.isoformat())
-    if baseline_date == today.isoformat():
-        # Once the 22:00 settlement exists, the new Today window starts at
-        # that snapshot. Same-day intraday points before 22:00 belong to the
-        # completed window and must not leak into the reset sparkline.
-        points = [p for p in points if _is_after_settlement_marker(p.get("ts"), baseline_date)]
-    # Prepend active 22:00 settlement snapshot as the zero baseline. The
-    # frontend treats T00:00 as x=0 on the 22→22 sparkline axis.
+    axis_start, axis_end = _intraday_axis_window()
+    baseline_date = axis_start[:10]
+    points = await cache.get_intraday_snapshots_between(user["google_sub"], axis_start, axis_end)
+    # Prepend the active 22:00 settlement snapshot as the zero baseline.
+    # The frontend maps x by elapsed time from this timestamp, so the API
+    # should expose the real axis start instead of a synthetic midnight marker.
     db = await cache.get_db()
     cursor = await db.execute(
         "SELECT total_value FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
@@ -2450,7 +2445,7 @@ async def get_intraday(request: Request):
     )
     row = await cursor.fetchone()
     if row and row["total_value"]:
-        points = [{"ts": _intraday_axis_baseline_ts(today), "total_value": row["total_value"]}] + points
+        points = [{"ts": axis_start, "total_value": row["total_value"]}] + points
     return points
 
 

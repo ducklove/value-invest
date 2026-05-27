@@ -3104,10 +3104,31 @@ async def save_intraday_snapshot(google_sub: str, ts: str, total_value: float):
 
 async def get_intraday_snapshots(google_sub: str, date: str) -> list[dict]:
     """Get intraday snapshots for a given date (YYYY-MM-DD)."""
+    return await get_intraday_snapshots_between(
+        google_sub,
+        date + "T00:00",
+        date + "T99:99",
+        include_start=True,
+    )
+
+
+async def get_intraday_snapshots_between(
+    google_sub: str,
+    start_ts: str,
+    end_ts: str,
+    *,
+    include_start: bool = False,
+) -> list[dict]:
+    """Get intraday snapshots in a timestamp range.
+
+    Timestamps are stored as local KST ISO minutes, so lexicographic range
+    scans match chronological ordering.
+    """
     db = await get_db()
+    start_op = ">=" if include_start else ">"
     cursor = await db.execute(
-        "SELECT ts, total_value FROM portfolio_intraday WHERE google_sub = ? AND ts >= ? AND ts < ? ORDER BY ts ASC",
-        (google_sub, date + "T00:00", date + "T99:99"),
+        f"SELECT ts, total_value FROM portfolio_intraday WHERE google_sub = ? AND ts {start_op} ? AND ts < ? ORDER BY ts ASC",
+        (google_sub, start_ts, end_ts),
     )
     return [dict(r) for r in await cursor.fetchall()]
 
