@@ -858,10 +858,6 @@ function _renderSummarySparklines(currentTotalValue) {
   // 기준값 = 전일 22:00 결산값 (pfPrevDaySnapshot.total_value). sparkline
   // 은 전일 22:00 → 당일 22:00의 24시간 축으로 그린다. 첫 점은 항상
   // 전일 22:00 기준 0%로 고정한다.
-  //
-  // Older intraday snapshots, or a transient upstream pricing outage, can
-  // leave an isolated bad tick in the day line. Keep the sparkline defensive
-  // so one bad stored point does not imply a real portfolio move.
   const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
     ? pfPrevDaySnapshot.total_value
     : null;
