@@ -29,6 +29,56 @@ def _replace_json_const(html: str, name: str, value: list[dict]) -> str:
     return re.sub(pattern, f"const {name}   = {payload};", html, count=1, flags=re.S)
 
 
+def _same_number(a, b, *, rel_tol: float = 1e-12) -> bool:
+    try:
+        av = float(a)
+        bv = float(b)
+    except (TypeError, ValueError):
+        return False
+    scale = max(abs(av), abs(bv), 1.0)
+    return abs(av - bv) <= scale * rel_tol
+
+
+def _drop_bad_nps_chart_points(
+    nav_data: list[dict],
+    value_data: list[dict],
+    kospi_data: list[dict],
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Drop known-bad NPS chart points created from incomplete close prices."""
+    values_by_date = {row.get("date"): row.get("total_value") for row in value_data or []}
+    kospi_by_date = {row.get("date"): row.get("value") for row in kospi_data or []}
+    kept_nav: list[dict] = []
+    kept_dates: list[str] = []
+    for row in nav_data or []:
+        d = row.get("date")
+        nav = row.get("nav")
+        if not d or nav is None:
+            continue
+        if kept_nav:
+            prev = kept_nav[-1]
+            try:
+                ratio = float(nav) / float(prev["nav"])
+            except (TypeError, ValueError, ZeroDivisionError):
+                ratio = 1.0
+            if ratio < 0.70 or ratio > 1.35:
+                continue
+            prev_date = kept_dates[-1]
+            if (
+                _same_number(nav, prev.get("nav"))
+                and _same_number(values_by_date.get(d), values_by_date.get(prev_date))
+                and not _same_number(kospi_by_date.get(d), kospi_by_date.get(prev_date))
+            ):
+                continue
+        kept_nav.append(row)
+        kept_dates.append(d)
+    kept = set(kept_dates)
+    return (
+        kept_nav,
+        [row for row in (value_data or []) if row.get("date") in kept],
+        [row for row in (kospi_data or []) if row.get("date") in kept],
+    )
+
+
 async def _kospi_rows_for_dates(dates: list[str], embedded: list[dict]) -> list[dict]:
     if not dates:
         return []
@@ -71,6 +121,7 @@ async def _repair_nps_chart_html(html: str) -> str:
     value_fixed = [row for row in (value_data or []) if row.get("date") in trading_dates]
     fixed_dates = {row["date"] for row in nav_fixed}
     kospi_fixed = [row for row in kospi_data if row["date"] in fixed_dates]
+    nav_fixed, value_fixed, kospi_fixed = _drop_bad_nps_chart_points(nav_fixed, value_fixed, kospi_fixed)
 
     html = _replace_json_const(html, "NPS_NAV_DATA", nav_fixed)
     if value_data is not None:

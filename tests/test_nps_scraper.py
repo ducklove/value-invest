@@ -68,3 +68,40 @@ class NpsResolutionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(holdings[0]["shares"], 15_815_566)
         self.assertEqual(holdings[0]["shares_source"], "public_value_div_year_end_close")
+
+    async def test_snapshot_quotes_require_exact_snapshot_date(self):
+        holdings = [{
+            "name": "삼성전자",
+            "stock_code": "005930",
+            "shares": 10,
+            "source_market_value": 2_000_000,
+        }]
+
+        async def fake_prices(tickers, *, since, until, fields=None):
+            self.assertEqual(until, "2026-05-26")
+            return {"005930": [{"date": "2026-05-22", "close": 200000}]}
+
+        with patch.object(snapshot_nps.close_price_client, "get_daily_prices_batch", new=fake_prices):
+            enriched = await snapshot_nps._fetch_quotes_for_holdings(holdings, "2026-05-26")
+
+        self.assertIsNone(enriched[0]["price"])
+        self.assertIsNone(enriched[0]["market_value"])
+        self.assertFalse(enriched[0]["_has_exact_price"])
+        self.assertEqual(enriched[0]["_price_date"], "2026-05-22")
+
+    async def test_snapshot_price_coverage_rejects_stale_top_holdings(self):
+        holdings = [
+            {
+                "name": f"Top {i}",
+                "stock_code": f"00000{i}",
+                "shares": 10,
+                "source_market_value": 1000 - i,
+                "_has_exact_price": i >= 3,
+                "_price_date": "2026-05-22" if i < 3 else "2026-05-26",
+                "market_value": 1000 if i >= 3 else None,
+            }
+            for i in range(20)
+        ]
+
+        with self.assertRaises(snapshot_nps.NpsSnapshotIncomplete):
+            snapshot_nps._validate_price_coverage(holdings, "2026-05-26")

@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 BASE_NAV = 1000.0
 NPS_PRICE_BATCH_SIZE = 400
+NPS_MIN_PRICE_SOURCE_COVERAGE = 0.90
+NPS_MIN_PRICE_COUNT_COVERAGE = 0.70
+
+
+class NpsSnapshotIncomplete(RuntimeError):
+    """Raised when an NPS snapshot would be built from incomplete price data."""
 
 
 def _esc(text: str) -> str:
@@ -96,13 +102,44 @@ async def _fetch_daily_price_rows(
     return merged
 
 
+def _valid_price_rows(rows: list[dict]) -> list[dict]:
+    return sorted([
+        r for r in rows
+        if r.get("date") and r.get("close") is not None
+    ], key=lambda r: r["date"])
+
+
 def _latest_and_prev_close(rows: list[dict]) -> tuple[float | None, float | None]:
-    valid = [r for r in rows if r.get("close") is not None]
+    valid = _valid_price_rows(rows)
     if not valid:
         return None, None
     latest = valid[-1]["close"]
     prev = valid[-2]["close"] if len(valid) >= 2 else None
     return float(latest), float(prev) if prev is not None else None
+
+
+def _latest_close_on_or_before(rows: list[dict], target_date: str) -> tuple[float | None, float | None, str | None]:
+    valid = [r for r in _valid_price_rows(rows) if r["date"] <= target_date]
+    if not valid:
+        return None, None, None
+    latest = valid[-1]
+    prev = valid[-2]["close"] if len(valid) >= 2 else None
+    return float(latest["close"]), float(prev) if prev is not None else None, latest["date"]
+
+
+def _close_on_date(rows: list[dict], target_date: str) -> tuple[float | None, float | None, str | None]:
+    valid = _valid_price_rows(rows)
+    for idx, row in enumerate(valid):
+        if row["date"] != target_date:
+            continue
+        prev = None
+        for prev_row in reversed(valid[:idx]):
+            if prev_row["date"] < target_date:
+                prev = prev_row["close"]
+                break
+        return float(row["close"]), float(prev) if prev is not None else None, row["date"]
+    latest_price, _prev, latest_date = _latest_close_on_or_before(rows, target_date)
+    return None, None, latest_date if latest_price is not None else None
 
 
 async def _derive_public_data_shares(holdings: list[dict]) -> None:
@@ -123,7 +160,7 @@ async def _derive_public_data_shares(holdings: list[dict]) -> None:
         )
         derived = 0
         for h in subset:
-            price, _ = _latest_and_prev_close(rows_by_code.get(h["stock_code"], []))
+            price, _, _ = _latest_close_on_or_before(rows_by_code.get(h["stock_code"], []), source_date)
             source_market_value = h.get("source_market_value")
             if price and source_market_value:
                 h["shares"] = max(1, round(float(source_market_value) / price))
@@ -144,8 +181,9 @@ async def _fetch_quotes_for_holdings(holdings: list[dict], snap_date: str) -> li
         code = h.get("stock_code", "")
         price = None
         prev_price = None
+        price_date = None
         if code:
-            price, prev_price = _latest_and_prev_close(rows_by_code.get(code, []))
+            price, prev_price, price_date = _close_on_date(rows_by_code.get(code, []), snap_date)
         shares = h.get("shares", 0) or 0
         source_market_value = h.get("source_market_value")
         change_pct = None
@@ -153,16 +191,51 @@ async def _fetch_quotes_for_holdings(holdings: list[dict], snap_date: str) -> li
             change_pct = (price / prev_price - 1) * 100
         if price is not None and shares:
             market_value = round(price * shares)
-        elif source_market_value:
+        elif source_market_value and not code:
             market_value = source_market_value
         else:
             market_value = None
 
         h["price"] = price
+        h["_price_date"] = price_date
+        h["_has_exact_price"] = price_date == snap_date and price is not None
         h["change_pct"] = change_pct
         h["market_value"] = market_value
         enriched.append(h)
     return enriched
+
+
+def _validate_price_coverage(holdings: list[dict], snap_date: str) -> None:
+    candidates = [
+        h for h in holdings
+        if h.get("stock_code") and h.get("shares") and h.get("source_market_value")
+    ]
+    if not candidates:
+        return
+    priced = [h for h in candidates if h.get("_has_exact_price") and h.get("market_value") is not None]
+    source_total = sum(float(h.get("source_market_value") or 0) for h in candidates)
+    priced_source_total = sum(float(h.get("source_market_value") or 0) for h in priced)
+    source_coverage = priced_source_total / source_total if source_total > 0 else 1.0
+    count_coverage = len(priced) / len(candidates) if candidates else 1.0
+    missing_top = [
+        h for h in sorted(candidates, key=lambda x: float(x.get("source_market_value") or 0), reverse=True)[:20]
+        if not h.get("_has_exact_price")
+    ]
+    if (
+        source_coverage < NPS_MIN_PRICE_SOURCE_COVERAGE
+        or count_coverage < NPS_MIN_PRICE_COUNT_COVERAGE
+        or len(missing_top) >= 3
+    ):
+        names = ", ".join(
+            f"{h.get('name') or h.get('stock_name')}({h.get('stock_code')}, latest={h.get('_price_date') or '-'})"
+            for h in missing_top[:8]
+        )
+        raise NpsSnapshotIncomplete(
+            "NPS price coverage is incomplete for "
+            f"{snap_date}: source_coverage={source_coverage:.1%}, "
+            f"count_coverage={count_coverage:.1%}, missing_top={len(missing_top)}"
+            + (f" [{names}]" if names else "")
+        )
 
 
 def _compute_nav(snapshots: list[dict], total_value: float) -> tuple[float, float]:
@@ -910,6 +983,7 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
 
     # 3. Fetch closing prices
     holdings = await _fetch_quotes_for_holdings(holdings, snap_date)
+    _validate_price_coverage(holdings, snap_date)
 
     # 3-1. Cross-check: carry forward previous-day holdings missing from scrape
     #       Skip if the code was already missing for 2+ consecutive days (likely sold)
@@ -951,8 +1025,7 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
     logger.info("NPS: total_value=%.0f from %d/%d holdings", total_value, len(valid), len(holdings))
 
     if total_value == 0:
-        logger.error("NPS: total value is 0, aborting")
-        return
+        raise NpsSnapshotIncomplete(f"NPS total value is 0 for {snap_date}")
 
     # 4. Load history, compute NAV
     existing_snapshots = await cache.get_nps_snapshots()
@@ -966,6 +1039,14 @@ async def run_nps_snapshot(snap_date: str | None = None, manage_db: bool = True)
         total_units = total_value / BASE_NAV
     else:
         latest = history[-1]
+        prev_total = float(latest.get("total_value") or 0)
+        if prev_total > 0:
+            ratio = total_value / prev_total
+            if ratio < 0.70 or ratio > 1.35:
+                raise NpsSnapshotIncomplete(
+                    f"NPS total value jump is implausible for {snap_date}: "
+                    f"prev={prev_total:.0f}, current={total_value:.0f}, ratio={ratio:.2f}"
+                )
         # total_units is not stored in nps_snapshots, re-derive from nav/total_value chain
         # We'll store total_units in the nav field slot and total_value accurately
         # Actually nps_snapshots only stores (date, total_value, nav, total_count, generated_html)

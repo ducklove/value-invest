@@ -172,3 +172,35 @@ asyncio.run(main())
 PY
   touch "$REPAIR_MARKER"
 fi
+
+# 2026-05-20 NPS NAV was saved from incomplete per-stock close coverage, and
+# 2026-05-26/27 reused the last available 2026-05-22 stock closes while KOSPI
+# itself had moved on. Rebuild the dates whose exact closes are available and
+# remove the known stale rows; route-level chart repair also filters any
+# lingering bad embedded JSON from older generated_html.
+REPAIR_MARKER=".deploy-repair-2026-05-nps-nav-bad-points.done"
+if [[ ! -f "$REPAIR_MARKER" ]]; then
+  log "Repairing invalid May 2026 NPS NAV chart points"
+  for d in 2026-05-20 2026-05-21 2026-05-22; do
+    log "Rebuilding NPS snapshot for $d"
+    if ! python3 snapshot_nps.py "$d"; then
+      log "NPS repair for $d failed; continuing with remaining dates and route-level chart filtering"
+    fi
+  done
+  python3 - <<'PY'
+import asyncio
+import cache
+
+async def main():
+    await cache.init_db()
+    db = await cache.get_db()
+    for day in ("2026-05-26", "2026-05-27"):
+        await db.execute("DELETE FROM nps_holdings WHERE date = ?", (day,))
+        await db.execute("DELETE FROM nps_snapshots WHERE date = ?", (day,))
+    await db.commit()
+    await cache.close_db()
+
+asyncio.run(main())
+PY
+  touch "$REPAIR_MARKER"
+fi
