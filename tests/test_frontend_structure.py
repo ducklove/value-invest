@@ -230,10 +230,15 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
 
     assert 'const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight"' in render
     assert '${dragHandle}${stockIdentity}' in render
+    assert 'class="pf-stock-cell pf-stock-cell-with-drag js-pf-analyze"' in render
+    assert ".pf-stock-cell-with-drag" in styles
+    assert "grid-template-columns: 16px minmax(0, 1fr);" in styles
     assert ".pf-stock-main" in styles
     assert "display: inline-flex;" in styles
     assert ".pf-stock-line" in styles
     assert "flex-direction: column;" in styles
+    assert "flex-wrap: wrap;" in styles
+    assert "overflow-wrap: anywhere;" in styles
     assert "pf-stock-link js-pf-open-insight" in render
     save_branch = "((el = t.closest('.js-pf-save')))"
     open_branch = "((el = t.closest('.js-pf-open-insight')))"

@@ -2318,22 +2318,34 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-sortable .pf-sort-arrow { font-size: 10px; margin-left: 3px; }
 .pf-table tbody tr.dragging { opacity: 0.4; }
 .pf-table tbody tr.drag-over td { border-top: 2px solid var(--primary); }
-.pf-stock-cell { cursor: pointer; }
+.pf-stock-cell {
+  cursor: pointer;
+  min-width: 0;
+}
+.pf-stock-cell-with-drag {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 6px;
+  align-items: start;
+}
 .pf-stock-main {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
+  max-width: 100%;
   vertical-align: top;
 }
 .pf-stock-line {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
+  max-width: 100%;
 }
 .pf-row-drag-handle {
-  margin-right: 6px;
+  margin: 1px 0 0;
   padding: 2px 5px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -2352,7 +2364,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-row-drag-handle:active {
   cursor: grabbing;
 }
-.pf-stock-link { color: var(--text); text-decoration: none; }
+.pf-stock-link {
+  color: var(--text);
+  text-decoration: none;
+  min-width: 0;
+}
+.pf-stock-link strong {
+  overflow-wrap: anywhere;
+}
 .pf-stock-link:hover { color: var(--primary); }
 .pf-stock-code { font-size: 11px; color: var(--text-secondary); }
 .pf-stock-tags {
@@ -2795,6 +2814,9 @@ body.pf-mobile-simple .pf-col-mktval { width: 18%; }
 body.pf-mobile-simple .pf-stock-cell {
   min-width: 0;
   white-space: normal;
+}
+body.pf-mobile-simple .pf-stock-cell-with-drag {
+  display: block;
 }
 body.pf-mobile-simple .pf-table tbody td:not(.pf-stock-cell),
 body.pf-mobile-simple .pf-table tfoot td:not(:first-child) {

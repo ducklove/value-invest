@@ -535,7 +535,7 @@ function renderPortfolio(options = {}) {
       </tr>`;
     }
     return `<tr data-code="${safeCode}">
-      <td class="pf-stock-cell js-pf-analyze">${dragHandle}${stockIdentity}</td>
+      <td class="pf-stock-cell pf-stock-cell-with-drag js-pf-analyze">${dragHandle}${stockIdentity}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
