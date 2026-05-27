@@ -7,16 +7,44 @@ async function pfDropRow(fromCode, toCode) {
   const next = portfolioItems.slice();
   const [moved] = next.splice(fromIdx, 1);
   next.splice(toIdx, 0, moved);
-  portfolioItems = next;
+  const orderCodes = next.map(i => i.stock_code);
+  pfPendingManualOrderCodes = orderCodes;
+  pfManualOrderRevision += 1;
+  pfManualOrderSaveInFlight = true;
+  if (pfManualOrderKeepTimer) {
+    clearTimeout(pfManualOrderKeepTimer);
+    pfManualOrderKeepTimer = null;
+  }
+  portfolioItems = pfApplyManualOrder(next, orderCodes);
+  _savePortfolioSnapshot(portfolioItems);
   renderPortfolio();
   try {
-    await apiFetch('/api/portfolio/order', {
+    const resp = await apiFetch('/api/portfolio/order', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stock_codes: next.map(i => i.stock_code) }),
+      body: JSON.stringify({ stock_codes: orderCodes }),
     });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || '종목 순서 저장 실패');
+    }
+    portfolioItems = pfApplyManualOrder(portfolioItems, orderCodes);
+    _savePortfolioSnapshot(portfolioItems);
+    renderPortfolio();
+    pfManualOrderKeepTimer = setTimeout(() => {
+      if (pfPendingManualOrderCodes === orderCodes) pfPendingManualOrderCodes = null;
+      pfManualOrderKeepTimer = null;
+    }, 5000);
   } catch (e) {
-    await loadPortfolio();
+    pfPendingManualOrderCodes = null;
+    if (pfManualOrderKeepTimer) {
+      clearTimeout(pfManualOrderKeepTimer);
+      pfManualOrderKeepTimer = null;
+    }
+    showToast(e.message || '종목 순서 저장 실패');
+    await loadPortfolio({ force: true });
+  } finally {
+    pfManualOrderSaveInFlight = false;
   }
 }
 

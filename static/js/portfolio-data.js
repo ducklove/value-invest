@@ -49,6 +49,8 @@ async function pfRefreshTodayState({ force = false, render = true } = {}) {
 
 async function loadPortfolio({ force = false } = {}) {
   if (portfolioLoading) return;
+  const loadOrderRevision = pfManualOrderRevision;
+  const preservePendingManualOrder = !!(pfPendingManualOrderCodes && pfManualOrderSaveInFlight);
   portfolioLoading = true;
   try {
     _restorePortfolioSnapshotForFastPaint();
@@ -109,7 +111,7 @@ async function loadPortfolio({ force = false } = {}) {
     // Preserve existing quotes from previous load
     const prevQuotes = {};
     portfolioItems.forEach(i => { if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote; });
-    portfolioItems = freshItems.map(item => {
+    let nextPortfolioItems = freshItems.map(item => {
       const prevQuote = prevQuotes[item.stock_code];
       if (quoteIsUsable(prevQuote) && quoteIsUsable(item.quote)) {
         item.quote = mergeQuoteSnapshot(prevQuote, item.quote);
@@ -118,6 +120,10 @@ async function loadPortfolio({ force = false } = {}) {
       }
       return item;
     });
+    if (pfPendingManualOrderCodes && (preservePendingManualOrder || pfManualOrderRevision > loadOrderRevision)) {
+      nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);
+    }
+    portfolioItems = nextPortfolioItems;
     await todayStatePromise;
     _savePortfolioSnapshot(portfolioItems);
     renderPortfolio();
@@ -150,6 +156,21 @@ function _savePortfolioSnapshot(items) {
       items: Array.isArray(items) ? items.slice(0, 300) : [],
     }));
   } catch (e) { console.warn(e); }
+}
+
+function pfApplyManualOrder(items, orderedCodes) {
+  if (!Array.isArray(items) || !items.length || !Array.isArray(orderedCodes) || !orderedCodes.length) return items;
+  const rank = new Map();
+  orderedCodes.forEach((code, index) => {
+    const normalized = String(code || '').trim();
+    if (normalized && !rank.has(normalized)) rank.set(normalized, index);
+  });
+  if (!rank.size) return items;
+  return items.map((item, index) => ({ item, index })).sort((a, b) => {
+    const ar = rank.has(a.item.stock_code) ? rank.get(a.item.stock_code) : Number.POSITIVE_INFINITY;
+    const br = rank.has(b.item.stock_code) ? rank.get(b.item.stock_code) : Number.POSITIVE_INFINITY;
+    return ar === br ? a.index - b.index : ar - br;
+  }).map(entry => entry.item);
 }
 
 function pfSort(key) {

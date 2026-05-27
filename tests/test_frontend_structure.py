@@ -201,6 +201,28 @@ def test_portfolio_delete_uses_encoded_url_and_server_reload():
     assert "await loadPortfolio();" in source
 
 
+def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+
+    assert "let pfPendingManualOrderCodes = null;" in shell
+    assert "let pfManualOrderRevision = 0;" in shell
+    assert "let pfManualOrderSaveInFlight = false;" in shell
+    assert "const loadOrderRevision = pfManualOrderRevision;" in data
+    assert "const preservePendingManualOrder = !!(pfPendingManualOrderCodes && pfManualOrderSaveInFlight);" in data
+    assert "nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);" in data
+    assert data.find("nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);") < data.find("portfolioItems = nextPortfolioItems;")
+    assert "function pfApplyManualOrder(items, orderedCodes)" in data
+    assert "pfPendingManualOrderCodes = orderCodes;" in actions
+    assert "pfManualOrderRevision += 1;" in actions
+    assert "pfManualOrderSaveInFlight = true;" in actions
+    assert "_savePortfolioSnapshot(portfolioItems);" in actions
+    assert "if (!resp.ok)" in actions
+    assert "throw new Error(data.detail || '종목 순서 저장 실패');" in actions
+    assert "await loadPortfolio({ force: true });" in actions
+
+
 def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")

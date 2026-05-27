@@ -13,6 +13,10 @@ let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
 let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
 let pfPortfolioSearchText = '';
 let pfGroupSort = false;  // independent group sort toggle
+let pfPendingManualOrderCodes = null;
+let pfManualOrderRevision = 0;
+let pfManualOrderSaveInFlight = false;
+let pfManualOrderKeepTimer = null;
 let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
 let pfMonthEndSnap = null; // {total_value, nav, fx_usdkrw, ...} at end of previous month
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
