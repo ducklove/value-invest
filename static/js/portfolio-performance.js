@@ -100,6 +100,10 @@ async function loadPerformanceData() {
     console.warn(err);
     return [];
   });
+  void cashflowPromise.then(cfData => {
+    if (loadSeq !== _performanceLoadSeq) return;
+    renderCashflows(cfData, cachedNav || pfNavHistory || _navChartData);
+  });
   const groupPromise = pfLoadGroupWeightHistory().catch(err => {
     console.warn(err);
     return [];
