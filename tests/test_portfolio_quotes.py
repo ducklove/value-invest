@@ -233,3 +233,37 @@ async def test_force_refreshed_rest_quote_returns_even_when_ws_cache_rank_wins()
 
     assert result == rest_quote
     assert cache.get_fresh("005930")["source"] == "ws"
+
+
+@pytest.mark.asyncio
+async def test_force_refreshed_stale_quote_keeps_fresh_cache_value():
+    cache = quotes.PortfolioQuoteCache()
+    fresh_quote = {
+        "date": "2026-05-27",
+        "price": 27100,
+        "change_pct": -1.63,
+        "source": "rest",
+        "fetched_at": "2026-05-27T20:01:00",
+    }
+    cache.remember("000950", fresh_quote)
+    stale_history = {
+        "date": "2026-05-22",
+        "price": 28000,
+        "change_pct": -0.36,
+        "source": "history",
+        "_stale": True,
+    }
+
+    with patch.object(portfolio_route, "_quote_cache", cache), \
+         patch.object(
+             portfolio_route.stock_price,
+             "fetch_quote_snapshot",
+             new=AsyncMock(return_value=stale_history),
+         ):
+        result = await portfolio_route._fetch_quote(
+            "000950",
+            force_refresh=True,
+            use_ws_cache=False,
+        )
+
+    assert result == fresh_quote

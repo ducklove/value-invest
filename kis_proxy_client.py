@@ -108,6 +108,12 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
                 should_retry = exc.response.status_code >= 500 and (
                     "EGW00201" in body or "초당 거래건수" in body
                 )
+            if isinstance(exc, httpx.HTTPStatusError):
+                status_code = exc.response.status_code
+                if status_code == 429 or status_code >= 500:
+                    should_retry = True
+            elif isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+                should_retry = True
             if should_retry and attempt < 2:
                 await asyncio.sleep(0.4 * (attempt + 1))
                 continue

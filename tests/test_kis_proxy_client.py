@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 import kis_proxy_client
@@ -22,6 +23,29 @@ class _FakeClient:
         return _FakeResponse()
 
 
+class _HTTPErrorResponse:
+    def __init__(self, status_code, text=""):
+        self.status_code = status_code
+        self.text = text
+        self.request = httpx.Request("GET", "http://test.local")
+
+    def raise_for_status(self):
+        raise httpx.HTTPStatusError("transient", request=self.request, response=self)
+
+    def json(self):
+        return {}
+
+
+class _SequenceClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def get(self, url, params=None, headers=None):
+        self.calls.append({"url": url, "params": params, "headers": headers})
+        return self.responses.pop(0)
+
+
 @pytest.mark.asyncio
 async def test_kis_proxy_token_header_is_forwarded_when_configured():
     fake = _FakeClient()
@@ -32,6 +56,18 @@ async def test_kis_proxy_token_header_is_forwarded_when_configured():
 
     assert payload == {"ok": True}
     assert fake.calls[0]["headers"] == {"X-KIS-Proxy-Token": "secret"}
+
+
+@pytest.mark.asyncio
+async def test_kis_proxy_retries_transient_http_status_without_body_match():
+    fake = _SequenceClient([_HTTPErrorResponse(502, "proxy busy"), _FakeResponse()])
+    with patch.object(kis_proxy_client, "_get_client", new=AsyncMock(return_value=fake)), \
+         patch.object(kis_proxy_client, "_acquire_rate_slot", new=AsyncMock()), \
+         patch.object(kis_proxy_client.asyncio, "sleep", new=AsyncMock()):
+        payload = await kis_proxy_client._get("/v1/stocks/005930/quote")
+
+    assert payload == {"ok": True}
+    assert len(fake.calls) == 2
 
 
 @pytest.mark.asyncio

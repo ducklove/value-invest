@@ -769,6 +769,10 @@ async def _fetch_quote(
             if resolved and resolved != stock_code:
                 await _save_ticker(stock_code, resolved)
                 q = await _fetch_foreign_quote(resolved)
+    if force_refresh and q and q.get("_stale") is True:
+        cached = _quote_cache.get_fresh(stock_code)
+        if cached:
+            return cached
     if not _quote_cache.remember(stock_code, q):
         if force_refresh and q and q.get("price") is not None:
             return q
@@ -1760,7 +1764,7 @@ async def asset_quote(stock_code: str):
 _NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
 _ASSET_QUOTES_BATCH_TIMEOUT = 18.0
 _ASSET_QUOTES_ITEM_TIMEOUT = 15.0
-_ASSET_QUOTES_CONCURRENCY = 4
+_ASSET_QUOTES_CONCURRENCY = 2
 
 @router.post("/api/asset-quotes")
 async def asset_quotes_batch(payload: dict = Body(...)):
