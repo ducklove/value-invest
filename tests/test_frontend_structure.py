@@ -121,8 +121,9 @@ def test_today_sparkline_maps_ticks_from_settlement_axis():
     assert "_sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs)" in source
     assert "_sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs)" in source
     assert "let axisMaxHours = 0;" in source
-    assert "const visibleAxisMaxHours = Math.max(0.25, Math.min(24, axisMaxHours || dayPcts[dayPcts.length - 1]?.x || 24));" in source
-    assert "_drawSparklinePoints('sparkDaily', dayPcts, lastPct >= 0 ? '#dc2626' : '#2563eb', visibleAxisMaxHours);" in source
+    assert "const visibleAxisMaxHours = Math.max(0.25, Math.min(24, axisMaxHours || raw[raw.length - 1]?.x || 24));" in source
+    assert "_drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', visibleAxisMaxHours);" in source
+    assert "raw.filter(p => p.y" not in source
     assert "hour + 2" not in source
     assert "endsWith('T00:00')" not in source
 
