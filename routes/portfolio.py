@@ -1762,8 +1762,8 @@ async def asset_quote(stock_code: str):
 
 
 _NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
-_ASSET_QUOTES_BATCH_TIMEOUT = 18.0
-_ASSET_QUOTES_ITEM_TIMEOUT = 15.0
+_ASSET_QUOTES_BATCH_TIMEOUT = 45.0
+_ASSET_QUOTES_ITEM_TIMEOUT = 30.0
 _ASSET_QUOTES_CONCURRENCY = 2
 
 @router.post("/api/asset-quotes")
@@ -1813,11 +1813,19 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         except (asyncio.TimeoutError, Exception):
             return code, fallback_quote()
 
-    tasks = [asyncio.create_task(_fetch_one(code)) for code in codes]
+    task_codes = {}
+    tasks = []
+    for code in codes:
+        task = asyncio.create_task(_fetch_one(code))
+        task_codes[task] = code
+        tasks.append(task)
     done, pending = await asyncio.wait(tasks, timeout=_ASSET_QUOTES_BATCH_TIMEOUT)
-    for task in pending:
-        task.cancel()
     results = {code: {} for code in codes}
+    for task in pending:
+        code = task_codes.get(task)
+        if code:
+            results[code] = _quote_cache.get_fallback(code, mark_stale=True)
+        task.cancel()
     for task in done:
         if task.cancelled():
             continue

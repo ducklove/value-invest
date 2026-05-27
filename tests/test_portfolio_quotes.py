@@ -202,6 +202,26 @@ async def test_asset_quotes_batch_returns_stale_fallback_on_fetch_timeout():
 
 
 @pytest.mark.asyncio
+async def test_asset_quotes_batch_returns_fallback_for_pending_batch_timeout():
+    cache = quotes.PortfolioQuoteCache()
+    cache.remember("000660", {"price": 1786000})
+
+    async def slow_fetch(*args, **kwargs):
+        await asyncio.sleep(1)
+        return {"price": 1}
+
+    with patch.object(portfolio_route, "_quote_cache", cache), \
+         patch.object(portfolio_route, "_ASSET_QUOTES_BATCH_TIMEOUT", 0.01), \
+         patch.object(portfolio_route, "_fetch_quote", new=slow_fetch):
+        result = await portfolio_route.asset_quotes_batch({
+            "codes": ["000660"],
+            "fresh": True,
+        })
+
+    assert result == {"000660": {"price": 1786000, "_stale": True}}
+
+
+@pytest.mark.asyncio
 async def test_force_refreshed_rest_quote_returns_even_when_ws_cache_rank_wins():
     cache = quotes.PortfolioQuoteCache()
     cache.remember("005930", {
