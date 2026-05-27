@@ -457,7 +457,7 @@ function renderPortfolio(options = {}) {
       </div>
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
-  _renderSummarySparklines(_l ? grandTotalMarketValue : null);
+  _renderSummarySparklines(_l ? _liveNavValueKrw : null);
   if (summaryOnly) return;
 
   // Table body — apply FX conversion to price columns
@@ -752,14 +752,17 @@ function _drawSparklinePoints(canvasId, points, color, xMax) {
 }
 
 function _sparkLocalMinuteValue(ts) {
-  const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d+(?:\.\d+)?))?/);
   if (!m) return null;
+  const seconds = Number(m[6] || 0);
   return Date.UTC(
     Number(m[1]),
     Number(m[2]) - 1,
     Number(m[3]),
     Number(m[4]),
     Number(m[5]),
+    Math.floor(seconds),
+    Math.round((seconds % 1) * 1000),
   ) / 60000;
 }
 
@@ -794,6 +797,27 @@ function _sparkAxisHoursFromTs(ts, axisStartTs, axisEndTs) {
   const hours = (value - start) / 60;
   const maxHours = (end - start) / 60;
   return Math.max(0, Math.min(maxHours, hours));
+}
+
+function _sparkTodayCashflowThroughTs(ts) {
+  const target = _sparkLocalMinuteValue(ts);
+  if (target === null) return 0;
+  const cashflows = Array.isArray(pfPrevDaySnapshot?.today_cashflows)
+    ? pfPrevDaySnapshot.today_cashflows
+    : [];
+  let total = 0;
+  for (const cf of cashflows) {
+    const cfTime = _sparkLocalMinuteValue(cf?.created_at);
+    if (cfTime === null || cfTime > target) continue;
+    if (cf.signed_amount !== undefined && cf.signed_amount !== null) {
+      total += Number(cf.signed_amount || 0);
+    } else if (cf.type === 'deposit') {
+      total += Number(cf.amount || 0);
+    } else if (cf.type === 'withdrawal') {
+      total -= Number(cf.amount || 0);
+    }
+  }
+  return total;
 }
 
 function _formatLocalYmd(date) {
@@ -873,7 +897,8 @@ function _renderSummarySparklines(currentTotalValue) {
       const x = _sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs);
       if (x === null) continue;
       axisMaxHours = Math.max(axisMaxHours, x);
-      raw.push({ x, y: (d.total_value / _prevClose - 1) * 100 });
+      const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);
+      raw.push({ x, y: (adjustedTotal / _prevClose - 1) * 100 });
     }
     if (currentTotalValue) {
       const x = _sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs);

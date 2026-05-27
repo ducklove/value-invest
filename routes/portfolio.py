@@ -2318,11 +2318,12 @@ async def get_prev_day_snapshot(request: Request):
     else:
         created_after = baseline_date
     cursor2 = await db.execute(
-        "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ?",
+        "SELECT id, type, amount, created_at FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ? ORDER BY created_at ASC, id ASC",
         (user["google_sub"], created_after),
     )
     today_net_cashflow = 0.0
     today_cashflows_by_stock: dict[str, float] = {}
+    today_cashflows: list[dict] = []
     for row in await cursor2.fetchall():
         signed_amount = 0.0
         if row["type"] == "deposit":
@@ -2330,6 +2331,14 @@ async def get_prev_day_snapshot(request: Request):
         elif row["type"] == "withdrawal":
             signed_amount = -row["amount"]
         today_net_cashflow += signed_amount
+        if signed_amount:
+            today_cashflows.append({
+                "id": row["id"],
+                "type": row["type"],
+                "amount": row["amount"],
+                "signed_amount": signed_amount,
+                "created_at": row["created_at"],
+            })
         if signed_amount:
             # Portfolio cashflow mutations are materialized through CASH_KRW.
             # Expose the attribution so filtered Today cards can remove
@@ -2349,6 +2358,7 @@ async def get_prev_day_snapshot(request: Request):
         "stock_values": stock_values,
         "today_net_cashflow": today_net_cashflow,
         "today_cashflows_by_stock": today_cashflows_by_stock,
+        "today_cashflows": today_cashflows,
     }
 
 

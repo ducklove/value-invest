@@ -109,6 +109,7 @@ def test_today_card_percent_uses_same_settlement_base_as_amount():
     assert "dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;" in source
     assert "const _liveNavValueKrw" in source
     assert "grandTotalMarketValue - Number(pfPrevDaySnapshot.today_net_cashflow || 0)" in source
+    assert "_renderSummarySparklines(_l ? _liveNavValueKrw : null);" in source
 
 
 def test_today_sparkline_maps_ticks_from_settlement_axis():
@@ -116,10 +117,13 @@ def test_today_sparkline_maps_ticks_from_settlement_axis():
 
     assert "function _sparkAxisHoursFromTs" in source
     assert "function _sparkNowKstIsoMinute" in source
+    assert "function _sparkTodayCashflowThroughTs" in source
     assert "const axisStartTs = pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null;" in source
     assert "const axisEndTs = axisStartTs ? _sparkAxisEndTs(axisStartTs) : null;" in source
     assert "_sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs)" in source
     assert "_sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs)" in source
+    assert "const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);" in source
+    assert "adjustedTotal / _prevClose - 1" in source
     assert "let axisMaxHours = 0;" in source
     assert "const visibleAxisMaxHours = Math.max(0.25, Math.min(24, axisMaxHours || raw[raw.length - 1]?.x || 24));" in source
     assert "_drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', visibleAxisMaxHours);" in source

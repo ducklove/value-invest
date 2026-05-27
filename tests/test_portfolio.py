@@ -381,6 +381,13 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["stock_values"]["CASH_KRW"], 400_000)
         self.assertEqual(result["today_net_cashflow"], 50_000)
         self.assertEqual(result["today_cashflows_by_stock"], {"CASH_KRW": 50_000})
+        self.assertEqual(len(result["today_cashflows"]), 1)
+        cashflow = result["today_cashflows"][0]
+        self.assertEqual(cashflow["type"], "deposit")
+        self.assertEqual(cashflow["amount"], 50_000)
+        self.assertEqual(cashflow["signed_amount"], 50_000)
+        self.assertEqual(cashflow["created_at"], "2026-05-22T22:30:00")
+        self.assertIn("id", cashflow)
 
     async def test_cash_and_foreign_quotes_share_daily_fx_source(self):
         with patch.object(
