@@ -1996,6 +1996,43 @@ async def _resolve_target_formula_price(stock_code: str, formula: str, avg_price
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.put("/api/portfolio/order")
+async def save_portfolio_order(request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    stock_codes = payload.get("stock_codes")
+    if not isinstance(stock_codes, list) or not stock_codes:
+        raise HTTPException(status_code=400, detail="정렬할 종목 목록이 필요합니다.")
+    codes: list[str] = []
+    seen: set[str] = set()
+    for raw in stock_codes:
+        code = _normalize_portfolio_code(str(raw or ""))
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    if not codes:
+        raise HTTPException(status_code=400, detail="정렬할 종목 목록이 필요합니다.")
+
+    current = await cache.get_portfolio(user["google_sub"])
+    current_codes = [item["stock_code"] for item in current]
+    current_set = set(current_codes)
+    requested_set = set(codes)
+    if len(codes) != len(current_codes) or requested_set != current_set:
+        missing = [code for code in current_codes if code not in requested_set]
+        unknown = [code for code in codes if code not in current_set]
+        detail = "포트폴리오 전체 종목 순서와 맞지 않습니다."
+        parts = []
+        if missing:
+            parts.append("missing=" + ",".join(missing[:8]))
+        if unknown:
+            parts.append("unknown=" + ",".join(unknown[:8]))
+        if parts:
+            detail += " " + " ".join(parts)
+        raise HTTPException(status_code=400, detail=detail)
+
+    await cache.save_portfolio_order(user["google_sub"], codes)
+    return {"ok": True, "count": len(codes)}
+
+
 @router.put("/api/portfolio/{stock_code}")
 async def save_portfolio_item(stock_code: str, request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
@@ -2204,17 +2241,6 @@ async def delete_portfolio_item(stock_code: str, request: Request):
     deleted = await cache.delete_portfolio_item(user["google_sub"], stock_code)
     if not deleted:
         raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
-    return {"ok": True}
-
-
-@router.put("/api/portfolio/order")
-async def save_portfolio_order(request: Request, payload: dict = Body(...)):
-    user = _require_user(await get_current_user(request))
-    stock_codes = payload.get("stock_codes")
-    if not isinstance(stock_codes, list) or not stock_codes:
-        raise HTTPException(status_code=400, detail="정렬할 종목 목록이 필요합니다.")
-    codes = [str(c).strip() for c in stock_codes if str(c).strip()]
-    await cache.save_portfolio_order(user["google_sub"], codes)
     return {"ok": True}
 
 

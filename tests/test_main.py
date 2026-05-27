@@ -160,6 +160,41 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 404)
 
+    async def test_portfolio_order_saves_full_normalized_code_list(self):
+        request = _request_with_headers("/api/portfolio/order")
+        saver = AsyncMock()
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("routes.portfolio.cache.get_portfolio", new=AsyncMock(return_value=[
+                 {"stock_code": "BBB"},
+                 {"stock_code": "AAA"},
+             ])), \
+             patch("routes.portfolio.cache.save_portfolio_order", new=saver):
+            response = await portfolio.save_portfolio_order(
+                request,
+                {"stock_codes": [" bbb ", "aaa"]},
+            )
+
+        self.assertEqual(response, {"ok": True, "count": 2})
+        saver.assert_awaited_once_with("u1", ["BBB", "AAA"])
+
+    async def test_portfolio_order_rejects_partial_or_unknown_code_list(self):
+        request = _request_with_headers("/api/portfolio/order")
+        saver = AsyncMock()
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("routes.portfolio.cache.get_portfolio", new=AsyncMock(return_value=[
+                 {"stock_code": "AAA"},
+                 {"stock_code": "BBB"},
+             ])), \
+             patch("routes.portfolio.cache.save_portfolio_order", new=saver):
+            with self.assertRaises(HTTPException) as exc_info:
+                await portfolio.save_portfolio_order(
+                    request,
+                    {"stock_codes": ["BBB", "CCC"]},
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        saver.assert_not_awaited()
+
     async def test_portfolio_resolve_name_uses_domestic_search_alias_before_foreign(self):
         resolver = AsyncMock(return_value={"stock_code": "002380", "corp_name": "케이씨씨"})
         foreign = AsyncMock(side_effect=AssertionError("KCC alias should not fall through to foreign lookup"))

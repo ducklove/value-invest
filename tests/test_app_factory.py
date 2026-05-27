@@ -42,3 +42,15 @@ class AppFactoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/redoc", paths)
         self.assertIn("/openapi.json", paths)
 
+    def test_portfolio_order_route_precedes_dynamic_stock_put_route(self):
+        app = create_app(self._settings())
+        put_paths = [
+            route.path
+            for route in app.routes
+            if hasattr(route, "path") and "PUT" in getattr(route, "methods", set())
+        ]
+
+        self.assertLess(
+            put_paths.index("/api/portfolio/order"),
+            put_paths.index("/api/portfolio/{stock_code}"),
+        )
