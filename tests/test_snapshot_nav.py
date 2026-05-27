@@ -165,3 +165,52 @@ async def test_take_snapshot_rerun_preserves_existing_units():
     get_before.assert_not_awaited()
     get_cashflows.assert_not_awaited()
     save_snapshot.assert_awaited_once_with("u1", "2026-05-18", 12000, 8000, 1200, 10, snapshot_nav._fx_usdkrw)
+
+
+@pytest.mark.asyncio
+async def test_take_snapshot_applies_same_day_cashflow_units_to_nav_denominator():
+    fake_db = AsyncMock()
+    with patch.object(
+        snapshot_nav,
+        "_fetch_total_value",
+        new=AsyncMock(return_value=(12000, 8000, [{"stock_code": "005930", "market_value": 12000}])),
+    ), patch.object(
+        snapshot_nav.cache,
+        "get_snapshot_by_date",
+        new=AsyncMock(return_value=None),
+    ), patch.object(
+        snapshot_nav.cache,
+        "get_latest_snapshot_before_date",
+        new=AsyncMock(return_value={"date": "2026-05-17", "nav": 1000, "total_units": 10}),
+    ), patch.object(
+        snapshot_nav.cache,
+        "get_pending_cashflows",
+        new=AsyncMock(return_value=[
+            {"id": 1, "type": "deposit", "amount": 2000, "units_change": None},
+            {"id": 2, "type": "withdrawal", "amount": 1000, "units_change": None},
+        ]),
+    ), patch.object(
+        snapshot_nav.cache,
+        "get_db",
+        new=AsyncMock(return_value=fake_db),
+    ), patch.object(
+        snapshot_nav.cache,
+        "save_snapshot",
+        new=AsyncMock(),
+    ) as save_snapshot, patch.object(
+        snapshot_nav.cache,
+        "save_stock_snapshots",
+        new=AsyncMock(),
+    ):
+        await snapshot_nav.take_snapshot("u1", "2026-05-18")
+
+    assert fake_db.execute.await_count == 2
+    fake_db.execute.assert_any_await(
+        "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
+        (1000, 2.0, 1),
+    )
+    fake_db.execute.assert_any_await(
+        "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
+        (1000, -1.0, 2),
+    )
+    save_snapshot.assert_awaited_once_with("u1", "2026-05-18", 12000, 8000, 12000 / 11, 11, snapshot_nav._fx_usdkrw)

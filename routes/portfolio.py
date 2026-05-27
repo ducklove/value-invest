@@ -2332,7 +2332,7 @@ async def get_prev_day_snapshot(request: Request):
     else:
         created_after = baseline_date
     cursor2 = await db.execute(
-        "SELECT id, type, amount, created_at FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ? ORDER BY created_at ASC, id ASC",
+        "SELECT id, type, amount, nav_at_time, units_change, created_at FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ? ORDER BY created_at ASC, id ASC",
         (user["google_sub"], created_after),
     )
     today_net_cashflow = 0.0
@@ -2350,7 +2350,9 @@ async def get_prev_day_snapshot(request: Request):
                 "id": row["id"],
                 "type": row["type"],
                 "amount": row["amount"],
+                "nav_at_time": row["nav_at_time"],
                 "signed_amount": signed_amount,
+                "units_change": row["units_change"],
                 "created_at": row["created_at"],
             })
         if signed_amount:

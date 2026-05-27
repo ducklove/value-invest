@@ -69,6 +69,19 @@ function renderCashflows(data, navData = _navChartData) {
   }).join('');
 }
 
+async function refreshPortfolioAfterCashflowMutation() {
+  const tasks = [];
+  if (typeof loadPortfolio === 'function') {
+    tasks.push(loadPortfolio({ force: true }));
+  }
+  if (typeof pfRefreshTodayState === 'function') {
+    tasks.push(pfRefreshTodayState({ force: true, render: false }));
+  }
+  await Promise.allSettled(tasks);
+  if (typeof renderPortfolio === 'function') renderPortfolio();
+  if (typeof loadPerformanceData === 'function') loadPerformanceData();
+}
+
 async function addCashflow() {
   const type = document.getElementById('pfCfType').value;
   const date = document.getElementById('pfCfDate').value;
@@ -84,7 +97,7 @@ async function addCashflow() {
     if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || '등록 실패'); }
     document.getElementById('pfCfAmount').value = '';
     document.getElementById('pfCfMemo').value = '';
-    loadPerformanceData();
+    await refreshPortfolioAfterCashflowMutation();
   } catch (e) { showToast(e.message); }
 }
 
@@ -92,6 +105,6 @@ async function deleteCashflow(id) {
   if (!confirm('이 입출금 내역을 삭제할까요?')) return;
   try {
     await apiFetch(`/api/portfolio/cashflows/${id}`, { method: 'DELETE' });
-    loadPerformanceData();
+    await refreshPortfolioAfterCashflowMutation();
   } catch (e) { showToast(e.message); }
 }

@@ -47,7 +47,7 @@ async function pfRefreshTodayState({ force = false, render = true } = {}) {
   return _pfTodayStatePromise;
 }
 
-async function loadPortfolio() {
+async function loadPortfolio({ force = false } = {}) {
   if (portfolioLoading) return;
   portfolioLoading = true;
   try {
@@ -75,9 +75,10 @@ async function loadPortfolio() {
         pfBenchmarkQuotes[k] = { ...(pfBenchmarkQuotes[k] || {}), name: v };
       }
     } catch (e) { console.warn(e); }
-    // Refresh the 22:00 settlement baseline in the background. Open tabs can
-    // otherwise keep yesterday's in-memory TODAY baseline until a full reload.
-    pfRefreshTodayState().catch(() => {});
+    // Refresh the 22:00 settlement baseline before the fresh portfolio render.
+    // Cashflows mutate CASH_KRW immediately, so Today must combine the fresh
+    // holdings and the fresh cashflow-adjusted baseline in the same paint.
+    const todayStatePromise = pfRefreshTodayState({ force: true, render: false }).catch(() => ({ updated: false }));
     apiFetch('/api/portfolio/month-end-value').then(async r => {
       if (!r.ok) return;
       const snap = await r.json();
@@ -117,6 +118,7 @@ async function loadPortfolio() {
       }
       return item;
     });
+    await todayStatePromise;
     _savePortfolioSnapshot(portfolioItems);
     renderPortfolio();
     _updateQuoteSubscriptions();

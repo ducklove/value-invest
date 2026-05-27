@@ -333,11 +333,23 @@ function renderPortfolio(options = {}) {
 
   // --- Compute current NAV ---
   const latestSnap = pfNavHistory.length ? pfNavHistory[pfNavHistory.length - 1] : null;
-  const _liveNavValueKrw = (!isFiltered && pfPrevDaySnapshot && pfPrevDaySnapshot.today_net_cashflow)
-    ? grandTotalMarketValue - Number(pfPrevDaySnapshot.today_net_cashflow || 0)
-    : grandTotalMarketValue;
-  const _curNavKrw = (latestSnap && latestSnap.total_units && _liveNavValueKrw > 0)
-    ? _liveNavValueKrw / latestSnap.total_units
+  let _pendingUnitsChange = 0;
+  let _pendingCashflowWithoutUnits = 0;
+  if (!isFiltered && Array.isArray(pfPrevDaySnapshot?.today_cashflows)) {
+    for (const cf of pfPrevDaySnapshot.today_cashflows) {
+      const units = Number(cf?.units_change);
+      if (Number.isFinite(units)) _pendingUnitsChange += units;
+      else _pendingCashflowWithoutUnits += Number(cf?.signed_amount || 0);
+    }
+  } else if (!isFiltered && pfPrevDaySnapshot?.today_net_cashflow) {
+    _pendingCashflowWithoutUnits = Number(pfPrevDaySnapshot.today_net_cashflow || 0);
+  }
+  const _liveNavUnits = latestSnap && latestSnap.total_units
+    ? Number(latestSnap.total_units) + _pendingUnitsChange
+    : null;
+  const _liveNavValueKrw = grandTotalMarketValue - _pendingCashflowWithoutUnits;
+  const _curNavKrw = (_liveNavUnits && _liveNavUnits > 0 && _liveNavValueKrw > 0)
+    ? _liveNavValueKrw / _liveNavUnits
     : (latestSnap ? latestSnap.nav : null);
   const curNav = _navAdj(_curNavKrw, pfFxRate);
 
@@ -357,12 +369,7 @@ function renderPortfolio(options = {}) {
     // the amount. Use the cashflow-adjusted live PnL over the same base value.
     dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;
   }
-  // Do not fall back to quote previous-close math for filtered TODAY. The
-  // table footer intentionally uses quote-session 등락률, but the TODAY card
-  // is strictly a 22:00 settlement comparison.
-  // Table footer "등락률" is a quote-session aggregate of the visible rows.
-  // It intentionally differs from the TODAY card, which compares against the
-  // portfolio's 22:00 NAV snapshot.
+  // Table footer is quote-session math; TODAY stays on the 22:00 NAV snapshot.
   const tableDailyBaseValue = totalMarketValue - totalDailyPnl;
   const dailyReturnPct = tableDailyBaseValue > 0 ? (totalDailyPnl / tableDailyBaseValue * 100) : null;
 
@@ -381,22 +388,9 @@ function renderPortfolio(options = {}) {
   // Date labels for summary cards
   const _now = new Date();
   const _timeLabel = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
-  // Today card: the baseline is the previous-day 22:00 KST snapshot,
-  // not "today". Showing today's date here was misleading — the value
-  // actually describes change vs that prior snapshot. We surface the
-  // snapshot's real timestamp so "Today" is unambiguous.
-  //
-  // 22:00 is the snapshot_nav cron cadence; portfolio_snapshots stores
-  // only a date column, but the time is a hard contract of that job.
-  // Filtered views also use this 22:00 baseline when per-stock snapshots are
-  // available, so pre-open domestic holdings do not carry over yesterday's
-  // quote change as "today".
+  // Today compares against the previous 22:00 KST settlement snapshot.
   const _todayBaseDate = pfPrevDaySnapshot && pfPrevDaySnapshot.date;
-  // Compact "MM/DD HH시 기준" — year omitted (always current or just-passed
-  // year), snapshot_nav cron is 22:00 KST so the hour is a hard contract.
-  // pfPrevDaySnapshot.date is YYYY-MM-DD from the server; slice instead
-  // of Date() parsing to avoid timezone-off-by-one when the browser
-  // timezone doesn't match KST.
+  // Slice YYYY-MM-DD directly to avoid timezone-off-by-one browser parsing.
   const _todayLabel = _todayBaseDate
     ? `${_todayBaseDate.slice(5, 7)}/${_todayBaseDate.slice(8, 10)} 22시 기준`
     : '기준 없음';

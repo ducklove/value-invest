@@ -108,7 +108,12 @@ def test_today_card_percent_uses_same_settlement_base_as_amount():
     assert "const _dailyBaseValue = _periodBaseValue(pfPrevDaySnapshot);" in source
     assert "dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;" in source
     assert "const _liveNavValueKrw" in source
-    assert "grandTotalMarketValue - Number(pfPrevDaySnapshot.today_net_cashflow || 0)" in source
+    assert "let _pendingUnitsChange = 0;" in source
+    assert "let _pendingCashflowWithoutUnits = 0;" in source
+    assert "Number(cf?.units_change)" in source
+    assert "Number(cf?.signed_amount || 0)" in source
+    assert "Number(latestSnap.total_units) + _pendingUnitsChange" in source
+    assert "grandTotalMarketValue - _pendingCashflowWithoutUnits" in source
     assert "_renderSummarySparklines(_l ? _liveNavValueKrw : null);" in source
 
 
@@ -148,6 +153,21 @@ def test_cashflow_history_renders_before_nav_charts_finish():
     assert "renderCashflows(cfData, cachedNav || pfNavHistory || _navChartData);" in source
     assert source.find("void cashflowPromise.then(cfData =>") < source.find("const navData = await navPromise;")
     assert "renderCashflows(cfData, navData);" in source
+
+
+def test_cashflow_mutations_refresh_today_and_holdings_before_rerender():
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    cashflows = (JS / "portfolio-cashflows.js").read_text(encoding="utf-8")
+
+    assert "async function loadPortfolio({ force = false } = {})" in data
+    assert "const todayStatePromise = pfRefreshTodayState({ force: true, render: false }).catch(() => ({ updated: false }));" in data
+    assert "await todayStatePromise;" in data
+    assert data.find("await todayStatePromise;") < data.find("_savePortfolioSnapshot(portfolioItems);")
+    assert "async function refreshPortfolioAfterCashflowMutation()" in cashflows
+    assert "loadPortfolio({ force: true })" in cashflows
+    assert "pfRefreshTodayState({ force: true, render: false })" in cashflows
+    assert "await refreshPortfolioAfterCashflowMutation();" in cashflows
+    assert "loadPerformanceData();" in cashflows
 
 
 def test_trade_value_column_uses_two_decimal_compact_format():

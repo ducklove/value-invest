@@ -385,7 +385,9 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         cashflow = result["today_cashflows"][0]
         self.assertEqual(cashflow["type"], "deposit")
         self.assertEqual(cashflow["amount"], 50_000)
+        self.assertIsNone(cashflow["nav_at_time"])
         self.assertEqual(cashflow["signed_amount"], 50_000)
+        self.assertIsNone(cashflow["units_change"])
         self.assertEqual(cashflow["created_at"], "2026-05-22T22:30:00")
         self.assertIn("id", cashflow)
 
