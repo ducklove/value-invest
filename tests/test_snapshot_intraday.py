@@ -6,7 +6,35 @@ import snapshot_intraday
 
 
 @pytest.mark.asyncio
-async def test_fetch_total_value_uses_prior_stock_snapshot_when_quote_missing():
+async def test_fetch_total_value_uses_prior_stock_snapshot_for_non_korean_quote_missing():
+    fetch_quote = AsyncMock(return_value={})
+    with patch.object(
+        snapshot_intraday.cache,
+        "get_portfolio",
+        new=AsyncMock(return_value=[
+            {"stock_code": "AAPL", "quantity": 2, "avg_price": 1000},
+        ]),
+    ), patch.object(
+        snapshot_intraday.cache,
+        "get_stock_snapshots_by_date",
+        new=AsyncMock(return_value=[
+            {"stock_code": "AAPL", "market_value": 1234},
+        ]),
+    ), patch(
+        "routes.portfolio._is_korean_stock",
+        return_value=False,
+    ), patch(
+        "routes.portfolio._fetch_quote",
+        new=fetch_quote,
+    ):
+        total = await snapshot_intraday._fetch_total_value("u1", "2026-05-18")
+
+    fetch_quote.assert_awaited_once_with("AAPL")
+    assert total == 1234
+
+
+@pytest.mark.asyncio
+async def test_fetch_total_value_refuses_korean_stock_snapshot_fallback_when_quote_missing():
     fetch_quote = AsyncMock(return_value={})
     with patch.object(
         snapshot_intraday.cache,
@@ -27,14 +55,14 @@ async def test_fetch_total_value_uses_prior_stock_snapshot_when_quote_missing():
         "routes.portfolio._fetch_quote",
         new=fetch_quote,
     ):
-        total = await snapshot_intraday._fetch_total_value("u1", "2026-05-18")
+        with pytest.raises(snapshot_intraday.IntradaySnapshotIncomplete):
+            await snapshot_intraday._fetch_total_value("u1", "2026-05-18")
 
     fetch_quote.assert_awaited_once_with(
         "005930",
         force_refresh=True,
         use_ws_cache=False,
     )
-    assert total == 1234
 
 
 @pytest.mark.asyncio

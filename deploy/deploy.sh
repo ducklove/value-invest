@@ -145,3 +145,30 @@ if [[ ! -f "$REPAIR_MARKER" ]]; then
   python3 snapshot_nav.py 2026-05-18
   touch "$REPAIR_MARKER"
 fi
+
+# 2026-05-27 17:00~20:30 KST intraday points were recorded while the quote
+# refresh path could fall back to stale per-stock snapshot values for Korean
+# holdings. Those rows make the Today sparkline falsely hover near 0 until
+# the live point is appended. Remove only that known-bad window; later ticks
+# are produced by the corrected strict intraday quote path.
+REPAIR_MARKER=".deploy-repair-2026-05-27-intraday-stale-quotes.done"
+if [[ ! -f "$REPAIR_MARKER" ]]; then
+  log "Removing invalid 2026-05-27 intraday quote-fallback points"
+  python3 - <<'PY'
+import asyncio
+import cache
+
+async def main():
+    await cache.init_db()
+    db = await cache.get_db()
+    await db.execute(
+        "DELETE FROM portfolio_intraday WHERE ts >= ? AND ts < ?",
+        ("2026-05-27T17:00", "2026-05-27T20:30"),
+    )
+    await db.commit()
+    await cache.close_db()
+
+asyncio.run(main())
+PY
+  touch "$REPAIR_MARKER"
+fi

@@ -48,8 +48,9 @@ async def _fetch_total_value(google_sub: str, snap_date: str | None = None) -> f
     for item in items:
         code = item["stock_code"]
         qty = float(item["quantity"])
+        is_korean = _is_korean_stock(code)
         try:
-            if _is_korean_stock(code):
+            if is_korean:
                 quote = await _fetch_quote(code, force_refresh=True, use_ws_cache=False)
             else:
                 quote = await _fetch_quote(code)
@@ -60,7 +61,7 @@ async def _fetch_total_value(google_sub: str, snap_date: str | None = None) -> f
 
         if price is not None:
             total += qty * price
-        elif code in prev_stock_values:
+        elif code in prev_stock_values and not is_korean:
             total += prev_stock_values[code]
             fallback_count += 1
             logger.warning("Intraday quote unavailable for %s, using latest stock snapshot", code)
