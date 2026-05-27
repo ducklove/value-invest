@@ -327,15 +327,21 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "if (incomingRank < currentRank) return false;" in utils
     assert "if (incomingRank > currentRank) return true;" in utils
     assert utils.find("if (incomingRank < currentRank) return false;") < utils.find("const currentTime = quoteSnapshotTimeValue(current);")
+    assert "function mergeQuoteSupplementalFields(current, incoming)" in utils
+    assert "const fields = ['previous_close', 'trade_value'];" in utils
+    assert "if (!quoteValuePresent(next.change_pct))" in utils
+    assert "(price - previousClose) / previousClose * 100" in utils
     assert "function mergeQuoteSnapshot(current, incoming)" in utils
-    assert "if (!shouldAcceptQuoteSnapshot(current, incoming)) return { ...(current || {}) };" in utils
+    assert "if (!shouldAcceptQuoteSnapshot(current, incoming)) return mergeQuoteSupplementalFields(current, incoming);" in utils
+    assert "function quoteSnapshotDisplayChanged(before, after)" in utils
     assert "if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);" in quote_manager
     assert "const QUOTE_MANAGER_BATCH_SIZE = 8;" in quote_manager
     assert "const QUOTE_MANAGER_BATCH_PARALLEL = 2;" in quote_manager
     assert "await this._fetchQuotes(wsCodes, { fresh: false, scheduleRetry: false });" in quote_manager
     assert "await this._fetchQuotes(missing, { fresh: true });" in quote_manager
-    assert "shouldAcceptQuoteSnapshot(pfItem.quote, q)" in app_main
-    assert "pfItem.quote = mergeQuoteSnapshot(pfItem.quote, q);" in app_main
+    assert "const nextQuote = mergeQuoteSnapshot(pfItem.quote, q);" in app_main
+    assert "pfQuoteAccepted = quoteSnapshotDisplayChanged(pfItem.quote, nextQuote);" in app_main
+    assert "pfItem.quote = nextQuote;" in app_main
     assert "const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;" in data
     assert "quote: { ...item.quote, _stale: true }" in data
     assert "if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote;" in data

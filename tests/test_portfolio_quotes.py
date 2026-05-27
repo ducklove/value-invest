@@ -199,3 +199,37 @@ async def test_asset_quotes_batch_returns_stale_fallback_on_fetch_timeout():
         })
 
     assert result == {"000660": {"price": 1786000, "_stale": True}}
+
+
+@pytest.mark.asyncio
+async def test_force_refreshed_rest_quote_returns_even_when_ws_cache_rank_wins():
+    cache = quotes.PortfolioQuoteCache()
+    cache.remember("005930", {
+        "price": 70000,
+        "source": "ws",
+        "ts": time.time(),
+    })
+    rest_quote = {
+        "date": "2026-05-27",
+        "price": 70100,
+        "previous_close": 69500,
+        "change": 600,
+        "change_pct": 0.86,
+        "source": "rest",
+        "fetched_at": "2026-05-27T19:45:00",
+    }
+
+    with patch.object(portfolio_route, "_quote_cache", cache), \
+         patch.object(
+             portfolio_route.stock_price,
+             "fetch_quote_snapshot",
+             new=AsyncMock(return_value=rest_quote),
+         ):
+        result = await portfolio_route._fetch_quote(
+            "005930",
+            force_refresh=True,
+            use_ws_cache=False,
+        )
+
+    assert result == rest_quote
+    assert cache.get_fresh("005930")["source"] == "ws"

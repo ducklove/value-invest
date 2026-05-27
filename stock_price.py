@@ -978,7 +978,6 @@ async def fetch_quote_snapshot(
     # KRX to avoid retrying a doomed call every poll.
     if market == "NX" and kis_ws_manager.is_nxt_unsupported(stock_code):
         market = "J"
-        quote_is_stale = True
 
     effective_market = market
     quote_source = "rest"
@@ -1008,7 +1007,6 @@ async def fetch_quote_snapshot(
             if price is None:
                 kis_ws_manager.mark_nxt_unsupported(stock_code)
                 logger.info("NXT 0가 응답 → NXT 미지원으로 표시 후 KRX 재시도: %s", stock_code)
-                quote_is_stale = True
                 effective_market = "J"
                 return await kis_proxy_client.get_quote(stock_code, market="J")
         return payload

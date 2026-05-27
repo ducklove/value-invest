@@ -331,7 +331,7 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["source"], "history")
         self.assertEqual(result["_stale"], True)
 
-    async def test_fetch_quote_snapshot_marks_nxt_zero_fallback_to_krx_stale(self):
+    async def test_fetch_quote_snapshot_treats_nxt_zero_fallback_to_krx_as_fresh(self):
         get_quote = AsyncMock(side_effect=[
             {"summary": {"current_price": "0"}},
             {"summary": {
@@ -354,4 +354,24 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(get_quote.await_args_list[1].kwargs, {"market": "J"})
         self.assertEqual(result["price"], 1745000.0)
         self.assertEqual(result["market"], "J")
-        self.assertEqual(result["_stale"], True)
+        self.assertNotIn("_stale", result)
+
+    async def test_fetch_quote_snapshot_uses_known_nxt_unsupported_krx_as_fresh(self):
+        get_quote = AsyncMock(return_value={"summary": {
+            "current_price": "27100",
+            "previous_close": "27550",
+            "change": "-450",
+            "change_rate": "-1.63",
+        }})
+
+        with patch("stock_price.kis_ws_manager.get_cached_quote", return_value=None), \
+             patch("stock_price.kis_ws_manager.active_market_code", return_value="NX"), \
+             patch("stock_price.kis_ws_manager.is_nxt_unsupported", return_value=True), \
+             patch("stock_price.kis_proxy_client.get_quote", new=get_quote):
+            result = await stock_price.fetch_quote_snapshot("000950")
+
+        get_quote.assert_awaited_once_with("000950", market="J")
+        self.assertEqual(result["price"], 27100.0)
+        self.assertEqual(result["change_pct"], -1.63)
+        self.assertEqual(result["market"], "J")
+        self.assertNotIn("_stale", result)

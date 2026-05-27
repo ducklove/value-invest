@@ -114,11 +114,48 @@ function shouldAcceptQuoteSnapshot(current, incoming) {
   return true;
 }
 
+function quoteValuePresent(value) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function mergeQuoteSupplementalFields(current, incoming) {
+  const next = { ...(current || {}) };
+  if (!incoming || incoming._stale === true) return next;
+  const fields = ['previous_close', 'trade_value'];
+  fields.forEach(field => {
+    if (!quoteValuePresent(next[field]) && quoteValuePresent(incoming[field])) {
+      next[field] = incoming[field];
+    }
+  });
+  const price = Number(next.price);
+  const previousClose = Number(next.previous_close);
+  if (Number.isFinite(price) && Number.isFinite(previousClose) && previousClose !== 0) {
+    if (!quoteValuePresent(next.change)) {
+      next.change = price - previousClose;
+    }
+    if (!quoteValuePresent(next.change_pct)) {
+      next.change_pct = (price - previousClose) / previousClose * 100;
+    }
+  } else {
+    ['change', 'change_pct'].forEach(field => {
+      if (!quoteValuePresent(next[field]) && quoteValuePresent(incoming[field])) {
+        next[field] = incoming[field];
+      }
+    });
+  }
+  return next;
+}
+
 function mergeQuoteSnapshot(current, incoming) {
-  if (!shouldAcceptQuoteSnapshot(current, incoming)) return { ...(current || {}) };
+  if (!shouldAcceptQuoteSnapshot(current, incoming)) return mergeQuoteSupplementalFields(current, incoming);
   const next = { ...(current || {}), ...(incoming || {}) };
   if (!incoming || incoming._stale !== true) delete next._stale;
   return next;
+}
+
+function quoteSnapshotDisplayChanged(before, after) {
+  const fields = ['date', 'price', 'previous_close', 'change', 'change_pct', 'trade_value', '_stale'];
+  return fields.some(field => (before || {})[field] !== (after || {})[field]);
 }
 
 function flashEl(el) {

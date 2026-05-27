@@ -66,24 +66,31 @@ function _queuePortfolioQuotePaint() {
 QuoteManager.onQuote = function(code, q) {
   const usableQuote = quoteIsUsable(q);
   // 1) 분석 뷰 활성 종목
-  if (code === activeStockCode && usableQuote && shouldAcceptQuoteSnapshot(activeQuoteSnapshot, q)) {
-    activeQuoteSnapshot = mergeQuoteSnapshot(activeQuoteSnapshot, q);
-    renderQuoteSnapshot({
-      date: activeQuoteSnapshot.date, price: activeQuoteSnapshot.price, previous_close: activeQuoteSnapshot.previous_close,
-      change: activeQuoteSnapshot.change, change_pct: activeQuoteSnapshot.change_pct,
-    }, activeIndicators);
-    flashEl(document.getElementById('quoteSummary'));
+  if (code === activeStockCode && usableQuote) {
+    const nextQuote = mergeQuoteSnapshot(activeQuoteSnapshot, q);
+    const accepted = quoteSnapshotDisplayChanged(activeQuoteSnapshot, nextQuote);
+    activeQuoteSnapshot = nextQuote;
+    if (accepted) {
+      renderQuoteSnapshot({
+        date: activeQuoteSnapshot.date, price: activeQuoteSnapshot.price, previous_close: activeQuoteSnapshot.previous_close,
+        change: activeQuoteSnapshot.change, change_pct: activeQuoteSnapshot.change_pct,
+      }, activeIndicators);
+      flashEl(document.getElementById('quoteSummary'));
+    }
   }
   // 2) 포트폴리오 종목. 가격이 실제 변경된 경우에만 flash 대상에 추가 —
   //    tick 수신 자체로 flash 하면 거래 활발한 종목이 계속 번쩍거려 거슬림.
   const pfItem = portfolioItems.find(i => i.stock_code === code);
   let pfQuoteAccepted = false;
-  if (pfItem && usableQuote && shouldAcceptQuoteSnapshot(pfItem.quote, q)) {
+  if (pfItem && usableQuote) {
     const prevPrice = quotePriceOrNull(pfItem.quote);
-    pfItem.quote = mergeQuoteSnapshot(pfItem.quote, q);
-    pfQuoteAccepted = true;
-    if (prevPrice !== quotePriceOrNull(pfItem.quote)) _pfFlashQueuedCodes.add(code);
-    _pfQuoteQueuedCodes.add(code);
+    const nextQuote = mergeQuoteSnapshot(pfItem.quote, q);
+    pfQuoteAccepted = quoteSnapshotDisplayChanged(pfItem.quote, nextQuote);
+    if (pfQuoteAccepted) {
+      pfItem.quote = nextQuote;
+      if (prevPrice !== quotePriceOrNull(pfItem.quote)) _pfFlashQueuedCodes.add(code);
+      _pfQuoteQueuedCodes.add(code);
+    }
   }
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null && q._stale !== true) {
@@ -95,35 +102,38 @@ QuoteManager.onQuote = function(code, q) {
   }
   // 3) 사이드바
   const sbItem = recentListItems.find(i => i.stock_code === code);
-  if (sbItem && usableQuote && shouldAcceptQuoteSnapshot(sbItem.quote_snapshot, q)) {
-    sbItem.quote_snapshot = mergeQuoteSnapshot(sbItem.quote_snapshot, {
+  if (sbItem && usableQuote) {
+    const nextQuote = mergeQuoteSnapshot(sbItem.quote_snapshot, {
       date: q.date, price: q.price, previous_close: q.previous_close,
       change: q.change, change_pct: q.change_pct, source: q.source,
       ts: q.ts, fetched_at: q.fetched_at,
     });
-    const wrapper = document.querySelector(`#recentList .sidebar-item[data-code="${code}"]`);
-    if (wrapper) {
-      const sq = sbItem.quote_snapshot || {};
-      const priceEl = wrapper.querySelector('.quote-price');
-      const changeEl = wrapper.querySelector('.quote-change');
-      if (priceEl) priceEl.textContent = Number(sq.price).toLocaleString();
-      if (changeEl) {
-        const change = Number(sq.change || 0);
-        changeEl.classList.remove('up', 'down', 'flat');
-        changeEl.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
-        if (sq.change_pct != null) {
-          changeEl.textContent = `${change > 0 ? '+' : ''}${Number(sq.change_pct).toFixed(2)}%`;
+    if (quoteSnapshotDisplayChanged(sbItem.quote_snapshot, nextQuote)) {
+      sbItem.quote_snapshot = nextQuote;
+      const wrapper = document.querySelector(`#recentList .sidebar-item[data-code="${code}"]`);
+      if (wrapper) {
+        const sq = sbItem.quote_snapshot || {};
+        const priceEl = wrapper.querySelector('.quote-price');
+        const changeEl = wrapper.querySelector('.quote-change');
+        if (priceEl) priceEl.textContent = Number(sq.price).toLocaleString();
+        if (changeEl) {
+          const change = Number(sq.change || 0);
+          changeEl.classList.remove('up', 'down', 'flat');
+          changeEl.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
+          if (sq.change_pct != null) {
+            changeEl.textContent = `${change > 0 ? '+' : ''}${Number(sq.change_pct).toFixed(2)}%`;
+          }
         }
-      }
-      // live dot
-      const nameEl = wrapper.querySelector('.name');
-      if (nameEl) {
-        const dot = nameEl.querySelector('.ws-live-dot');
-        if (QuoteManager.isLive(code) && !dot) {
-          const d = document.createElement('span');
-          d.className = 'ws-live-dot'; d.title = '실시간';
-          nameEl.appendChild(d);
-        } else if (!QuoteManager.isLive(code) && dot) { dot.remove(); }
+        // live dot
+        const nameEl = wrapper.querySelector('.name');
+        if (nameEl) {
+          const dot = nameEl.querySelector('.ws-live-dot');
+          if (QuoteManager.isLive(code) && !dot) {
+            const d = document.createElement('span');
+            d.className = 'ws-live-dot'; d.title = '실시간';
+            nameEl.appendChild(d);
+          } else if (!QuoteManager.isLive(code) && dot) { dot.remove(); }
+        }
       }
     }
   }
