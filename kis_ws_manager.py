@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Any
@@ -27,6 +26,7 @@ from typing import Any
 import websockets
 
 from cache_layer import MemoryTTLCache
+from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
 logger = logging.getLogger(__name__)
 
@@ -112,9 +112,6 @@ def _seconds_until_next_boundary(now: datetime | None = None) -> float:
 # Priority order — lower index = higher priority
 PRIORITY_ORDER: list[str] = ["portfolio", "benchmark", "sidebar", "analysis"]
 
-# Korean stock code pattern: first 5 chars are digits, 6th is digit or uppercase letter
-_KR_CODE_RE = re.compile(r"^\d{5}[\dA-Z]$")
-
 # Reconnect delay after disconnect
 RECONNECT_DELAY_S = 5.0
 
@@ -126,7 +123,7 @@ RECONNECT_DELAY_S = 5.0
 
 def is_korean_stock(code: str) -> bool:
     """Return True if *code* looks like a Korean stock code."""
-    return bool(_KR_CODE_RE.match(code)) if isinstance(code, str) else False
+    return _is_portfolio_korean_stock(code)
 
 
 def plan_requested_subscriptions(

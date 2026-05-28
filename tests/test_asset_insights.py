@@ -21,6 +21,11 @@ def test_classify_asset_covers_non_domestic_asset_types():
     assert asset_insights.classify_asset("MSFT", "Microsoft")["assetClass"] == "foreign_stock"
 
 
+def test_classify_asset_treats_alphanumeric_krx_etf_as_domestic():
+    assert asset_insights.is_korean_stock("0074K0")
+    assert asset_insights.classify_asset("0074K0", "KoAct K수출핵심기업TOP30액티브", "KRW")["assetClass"] == "korean_stock"
+
+
 def test_calculate_history_metrics_returns_risk_and_window_stats():
     values = list(range(100, 400))
     metrics = asset_insights.calculate_history_metrics(_rows(values))

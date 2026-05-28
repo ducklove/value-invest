@@ -53,6 +53,11 @@ def test_parse_realtime_quote_carries_market_and_source_metadata():
     assert quote["market"] == "NX"
 
 
+def test_alphanumeric_krx_etf_code_is_korean_stock():
+    assert kis_ws_manager.is_korean_stock("0074K0")
+    assert kis_ws_manager.is_korean_stock("0074k0")
+
+
 def test_subscription_plan_uses_single_connection_capacity_by_default():
     codes = [f"{idx:06d}" for idx in range(45)]
     requested = {"portfolio": codes, "sidebar": ["AAPL"]}
@@ -61,6 +66,13 @@ def test_subscription_plan_uses_single_connection_capacity_by_default():
 
     assert plan["ws"] == codes[:kis_ws_manager.MAX_SUBSCRIPTIONS]
     assert plan["rest"] == codes[kis_ws_manager.MAX_SUBSCRIPTIONS:] + ["AAPL"]
+
+
+def test_subscription_plan_keeps_alphanumeric_krx_etf_on_websocket_path():
+    plan = kis_ws_manager.plan_requested_subscriptions({"portfolio": ["0074K0", "AAPL"]})
+
+    assert plan["ws"] == ["0074K0"]
+    assert plan["rest"] == ["AAPL"]
 
 
 def test_subscription_plan_can_use_combined_websocket_capacity():

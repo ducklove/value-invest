@@ -65,6 +65,15 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items[0]["avg_price"], 65000)
         self.assertEqual(items[0]["tags"], [])
 
+    async def test_alphanumeric_krx_etf_gets_domestic_default_group(self):
+        await cache.save_portfolio_item("u1", "0074K0", "KoAct K ETF", 10, 21000)
+        items = await cache.get_portfolio("u1")
+        domestic_group = next(name for name, _, _, default_type in cache._DEFAULT_GROUPS if default_type == "kr")
+
+        self.assertEqual(cache._default_type_for_code("0074K0"), "kr")
+        self.assertEqual(items[0]["stock_code"], "0074K0")
+        self.assertEqual(items[0]["group_name"], domestic_group)
+
     async def test_portfolio_tags_roundtrip(self):
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
         saved = await cache.set_portfolio_tags(

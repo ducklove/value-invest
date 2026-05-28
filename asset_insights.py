@@ -4,6 +4,8 @@ import math
 import statistics
 from typing import Any
 
+from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
+
 
 RETURN_WINDOWS = {
     "1m": 21,
@@ -55,7 +57,7 @@ def percent_change(current: float | None, base: float | None) -> float | None:
 
 
 def is_korean_stock(code: str) -> bool:
-    return len(code) == 6 and code[:5].isdigit()
+    return _is_portfolio_korean_stock(code)
 
 
 def classify_asset(code: str, name: str = "", currency: str = "") -> dict[str, str]:

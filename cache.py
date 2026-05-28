@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime
 
 from cache_layer import CacheEntry, expires_at_for, parse_iso
+from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
 DB_PATH = Path(__file__).parent / "cache.db"
 
@@ -930,7 +931,7 @@ def _default_type_for_code(stock_code: str) -> str:
     """Return the default_type key (kr/foreign/etc) for a stock code."""
     if _is_special_or_cash(stock_code):
         return "etc"
-    if len(stock_code) == 6 and stock_code[:5].isdigit():
+    if _is_portfolio_korean_stock(stock_code):
         return "kr"
     return "foreign"
 

@@ -16,6 +16,7 @@ import cache
 from cache_layer import MemoryTTLCache
 import stock_price
 from deps import get_current_user
+from services.portfolio.identifiers import is_korean_stock, normalize_portfolio_code
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -53,7 +54,7 @@ async def _load_static_universe(user: dict, source: str) -> list[dict]:
         items = await cache.get_portfolio(google_sub=user["google_sub"])
         if not items:
             raise HTTPException(status_code=400, detail="포트폴리오가 비어 있습니다.")
-        kr = [i for i in items if i["stock_code"].isdigit() and len(i["stock_code"]) == 6]
+        kr = [i for i in items if is_korean_stock(i["stock_code"])]
         if not kr:
             raise HTTPException(status_code=400, detail="포트폴리오에 국내 주식이 없습니다.")
         return [{"stock_code": i["stock_code"], "name": i.get("stock_name") or i["stock_code"]}
@@ -86,8 +87,8 @@ def _scrape_mcap_ranking() -> list[dict]:
                 name_a = tds[1].find("a")
                 if not name_a or "code=" not in (name_a.get("href") or ""):
                     continue
-                code = name_a["href"].split("code=")[-1]
-                if code in seen or not code.isdigit() or len(code) != 6:
+                code = normalize_portfolio_code(name_a["href"].split("code=")[-1])
+                if code in seen or not is_korean_stock(code):
                     continue
                 seen.add(code)
                 results.append({"stock_code": code, "name": name_a.get_text(strip=True)})

@@ -88,6 +88,29 @@ async def test_get_stock_uses_rest_when_websocket_unavailable_and_caches_result(
 
 
 @pytest.mark.asyncio
+async def test_get_stock_treats_alphanumeric_krx_etf_as_domestic_rest_quote():
+    rest_quote = {
+        "price": 21480,
+        "previous_close": 21300,
+        "source": "rest",
+        "market": "J",
+        "fetched_at": "2026-05-28T09:02:00",
+    }
+    with patch.object(stock_quotes.kis_ws_manager, "ws_cache_matches_rest_market", return_value=False), \
+         patch.object(stock_quotes.stock_price, "fetch_quote_snapshot", new=AsyncMock(return_value=rest_quote)) as rest:
+        stock = await stock_quotes.get_stock("0074K0")
+
+    rest.assert_awaited_once_with(
+        "0074K0",
+        use_ws_cache=True,
+        max_ws_age_seconds=stock_quotes.stock_price.WS_QUOTE_MAX_AGE_SECONDS,
+    )
+    assert stock is not None
+    assert stock.current_price == 21480
+    assert stock.market == "J"
+
+
+@pytest.mark.asyncio
 async def test_get_stock_rejects_lower_rank_history_after_rest_quote():
     rest_quote = {
         "price": 70100,

@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+import foreign_dividends
 from routes import admin as admin_route
 
 
@@ -24,6 +25,10 @@ def test_foreign_dividends_does_not_import_portfolio_route_private_helpers():
     source = (ROOT / "foreign_dividends.py").read_text(encoding="utf-8")
 
     assert "from routes.portfolio import" not in source
+
+
+def test_foreign_dividends_excludes_alphanumeric_krx_etf_codes():
+    assert foreign_dividends._is_korean_code("0074K0")
 
 
 def _admin_request() -> Request:

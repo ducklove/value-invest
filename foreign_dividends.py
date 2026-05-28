@@ -24,13 +24,14 @@ from datetime import datetime
 
 import cache
 from services.portfolio import runtime_quotes as portfolio_quotes
+from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
 logger = logging.getLogger(__name__)
 
 
 def _is_korean_code(code: str) -> bool:
     """6-character KRX code guard for excluding domestic holdings."""
-    return len(code) == 6 and code[:5].isdigit()
+    return _is_portfolio_korean_stock(code)
 
 
 def _is_cash_or_special(code: str) -> bool:
