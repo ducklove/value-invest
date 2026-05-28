@@ -2988,6 +2988,13 @@ async def get_cashflows(google_sub: str) -> list[dict]:
     return [dict(row) for row in await cursor.fetchall()]
 
 
+class CashflowBalanceError(ValueError):
+    def __init__(self, balance: float, amount: float):
+        self.balance = balance
+        self.amount = amount
+        super().__init__(f"insufficient CASH_KRW balance: {balance} < {amount}")
+
+
 async def add_cashflow(google_sub: str, date: str, cf_type: str, amount: float, memo: str | None, nav_at_time: float | None, units_change: float | None) -> dict:
     db = await get_db()
     now = datetime.now().isoformat()
@@ -2998,6 +3005,99 @@ async def add_cashflow(google_sub: str, date: str, cf_type: str, amount: float, 
     await db.commit()
     return {"id": cursor.lastrowid, "date": date, "type": cf_type, "amount": amount, "nav_at_time": nav_at_time, "units_change": units_change, "memo": memo, "created_at": now}
 
+
+async def add_cashflow_and_sync_cash(
+    google_sub: str,
+    date: str,
+    cf_type: str,
+    amount: float,
+    memo: str | None,
+    nav_at_time: float | None,
+    units_change: float | None,
+) -> dict:
+    now = datetime.now().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            cash_cursor = await db.execute(
+                "SELECT quantity, avg_price FROM user_portfolio WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
+                (google_sub,),
+            )
+            cash_item = await cash_cursor.fetchone()
+            cash_balance = (cash_item["quantity"] * cash_item["avg_price"]) if cash_item else 0
+            if cf_type == "withdrawal" and cash_balance < amount:
+                raise CashflowBalanceError(cash_balance, amount)
+
+            cursor = await db.execute(
+                "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (google_sub, date, cf_type, amount, nav_at_time, units_change, memo, now),
+            )
+
+            delta = int(amount) if cf_type == "deposit" else -int(amount)
+            if cash_item:
+                new_qty = max(0, int(cash_item["quantity"]) + delta)
+                await db.execute(
+                    "UPDATE user_portfolio SET quantity = ?, updated_at = ? WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
+                    (new_qty, now, google_sub),
+                )
+            elif cf_type == "deposit":
+                await db.execute(
+                    "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, currency, created_at, updated_at) VALUES (?, 'CASH_KRW', '원화', 1.0, ?, 'KRW', ?, ?)",
+                    (google_sub, int(amount), now, now),
+                )
+
+            await db.commit()
+            return {
+                "id": cursor.lastrowid,
+                "date": date,
+                "type": cf_type,
+                "amount": amount,
+                "nav_at_time": nav_at_time,
+                "units_change": units_change,
+                "memo": memo,
+                "created_at": now,
+            }
+        except Exception:
+            await db.rollback()
+            raise
+
+
+async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await db.execute(
+                "SELECT id, type, amount FROM portfolio_cashflows WHERE id = ? AND google_sub = ?",
+                (cf_id, google_sub),
+            )
+            cf = await cursor.fetchone()
+            if not cf:
+                await db.commit()
+                return False
+
+            await db.execute("DELETE FROM portfolio_cashflows WHERE id = ? AND google_sub = ?", (cf_id, google_sub))
+            cash_cursor = await db.execute(
+                "SELECT quantity FROM user_portfolio WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
+                (google_sub,),
+            )
+            cash_item = await cash_cursor.fetchone()
+            if cash_item:
+                reverse_delta = -cf["amount"] if cf["type"] == "deposit" else cf["amount"]
+                new_qty = max(0, int(cash_item["quantity"]) + int(reverse_delta))
+                await db.execute(
+                    "UPDATE user_portfolio SET quantity = ?, updated_at = ? WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
+                    (new_qty, datetime.now().isoformat(), google_sub),
+                )
+
+            await db.commit()
+            return True
+        except Exception:
+            await db.rollback()
+            raise
 
 async def get_cashflow(google_sub: str, cf_id: int) -> dict | None:
     db = await get_db()
@@ -3013,7 +3113,6 @@ async def delete_cashflow(google_sub: str, cf_id: int):
     db = await get_db()
     await db.execute("DELETE FROM portfolio_cashflows WHERE id = ? AND google_sub = ?", (cf_id, google_sub))
     await db.commit()
-
 
 async def get_all_users_with_portfolio() -> list[str]:
     db = await get_db()

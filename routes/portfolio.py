@@ -20,12 +20,12 @@ import close_price_client
 import integrations
 import dart_client
 import kis_proxy_client
-import kis_ws_manager
 import market_indicators
 import stock_price
 from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
-from services import ai_client
+from services import ai_client, stock_quotes
 from services.portfolio import history as portfolio_history
+from services.portfolio import runtime_quotes as portfolio_runtime_quotes
 from services.portfolio.identifiers import (
     CASH_FX_CODE as _CASH_FX_CODE,
     CASH_NAMES as _CASH_NAMES,
@@ -38,7 +38,6 @@ from services.portfolio.identifiers import (
     normalize_portfolio_code as _normalize_portfolio_code,
     static_foreign_ticker as _static_foreign_ticker,
 )
-from services.portfolio.quotes import PortfolioQuoteCache, quote_from_ws as _quote_from_ws
 from services.portfolio.targets import (
     evaluate_target_formula as _evaluate_target_formula,
     extract_target_variables as _extract_target_variables,
@@ -178,26 +177,6 @@ _STATIC_FOREIGN_QUOTE_TIMEOUT = 3.0
 # Negative cache: tickers we already failed to resolve via yfinance — avoids
 # re-running the 16-suffix loop on every quote refresh.
 _failed_yf_tickers: set[str] = set()
-
-# Negative cache for any code whose last quote fetch returned empty.
-# Stops the per-poll storm against KIS proxy / Naver / yfinance for codes
-# that are temporarily (or permanently) broken upstream. TTL-based so a
-# stock that recovers will be retried after the window expires.
-_DEAD_QUOTE_TTL = 300  # seconds
-_dead_quote_cache = MemoryTTLCache("portfolio.dead_quote", _DEAD_QUOTE_TTL)
-
-
-def _is_dead(code: str) -> bool:
-    if _static_foreign_ticker(code):
-        return False
-    return _dead_quote_cache.get(code) is not None
-
-
-def _mark_dead(code: str) -> None:
-    if _static_foreign_ticker(code):
-        return
-    _dead_quote_cache.set(code, True)
-
 
 async def _yf_run(fn):
     """Run a synchronous yfinance call in the executor, bounded by a
@@ -694,7 +673,6 @@ async def _fetch_cash_quote(stock_code: str) -> dict:
     return {"price": round(rate, 2), "change": 0, "change_pct": 0}
 
 
-_quote_cache = PortfolioQuoteCache()
 _WS_QUOTE_MAX_AGE_SECONDS = 90
 
 
@@ -725,41 +703,14 @@ async def _save_ticker(stock_code: str, resolved: str):
         logger.warning("Ticker map save failed (%s -> %s): %s", stock_code, resolved, exc)
 
 
-async def _fetch_quote(
-    stock_code: str,
-    *,
-    force_refresh: bool = False,
-    use_ws_cache: bool = True,
-) -> dict:
-    if not force_refresh:
-        cached = _quote_cache.get_fresh(stock_code)
-        if cached:
-            return cached
-    if not force_refresh and _is_dead(stock_code):
-        return _quote_cache.get_fallback(stock_code, mark_stale=True)
+async def _fetch_external_quote_for_stock_service(stock_code: str) -> dict:
     if _is_cash_asset(stock_code):
-        q = await _fetch_cash_quote(stock_code)
+        return await _fetch_cash_quote(stock_code)
     elif stock_code == "KRX_GOLD":
-        q = await _fetch_krx_gold_quote()
+        return await _fetch_krx_gold_quote()
     elif stock_code in _CRYPTO_UPBIT_MAP:
-        q = await _fetch_crypto_quote(stock_code)
-    elif _is_korean_stock(stock_code):
-        use_ws_quote = use_ws_cache and kis_ws_manager.ws_cache_matches_rest_market()
-        q = (
-            _quote_from_ws(
-                kis_ws_manager.get_cached_quote(stock_code),
-                max_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
-            )
-            if use_ws_quote
-            else None
-        )
-        if not q:
-            q = await stock_price.fetch_quote_snapshot(
-                stock_code,
-                use_ws_cache=use_ws_cache,
-                max_ws_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
-            )
-    else:
+        return await _fetch_crypto_quote(stock_code)
+    elif not _is_korean_stock(stock_code):
         # Use resolved ticker if available, otherwise try to resolve
         await _ensure_ticker_map()
         ticker = _ticker_map.get(stock_code, stock_code)
@@ -769,29 +720,32 @@ async def _fetch_quote(
             if resolved and resolved != stock_code:
                 await _save_ticker(stock_code, resolved)
                 q = await _fetch_foreign_quote(resolved)
-    if force_refresh and q and q.get("_stale") is True:
-        cached = _quote_cache.get_fresh(stock_code)
-        if cached:
-            return cached
-    if not _quote_cache.remember(stock_code, q):
-        if force_refresh and q and q.get("price") is not None:
-            return q
-        fallback = _quote_cache.get_fallback(stock_code, mark_stale=True)
-        if fallback:
-            return fallback
-        _mark_dead(stock_code)
+        return q
+    return {}
+
+
+stock_quotes.register_quote_fetcher(_fetch_external_quote_for_stock_service)
+
+
+async def _fetch_quote(
+    stock_code: str,
+    *,
+    force_refresh: bool = False,
+    use_ws_cache: bool = True,
+) -> dict:
+    q = stock_quotes.stock_to_quote(
+        await stock_quotes.get_stock(
+            stock_code,
+            force_refresh=force_refresh,
+            use_ws_cache=use_ws_cache,
+            max_ws_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
+        )
+    )
     return q
 
 
 def _cached_quote_for_code(code: str) -> dict:
-    if kis_ws_manager.ws_cache_matches_rest_market():
-        ws_quote = _quote_from_ws(
-            kis_ws_manager.get_cached_quote(code),
-            max_age_seconds=_WS_QUOTE_MAX_AGE_SECONDS,
-        )
-        if ws_quote:
-            return ws_quote
-    return _quote_cache.get_fresh(code) or {}
+    return stock_quotes.stock_to_quote(stock_quotes.get_stock_cached(code, allow_stale=False))
 
 
 async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
@@ -920,6 +874,34 @@ async def _fx_to_krw(nation: str, amount: float) -> float:
     if not rate:
         return amount
     return amount * rate
+
+
+class _PortfolioRuntimeQuoteProvider:
+    async def fetch_quote(
+        self,
+        stock_code: str,
+        *,
+        force_refresh: bool = False,
+        use_ws_cache: bool = True,
+    ) -> dict:
+        return await _fetch_quote(
+            stock_code,
+            force_refresh=force_refresh,
+            use_ws_cache=use_ws_cache,
+        )
+
+    async def fetch_cash_quote(self, stock_code: str) -> dict:
+        return await _fetch_cash_quote(stock_code)
+
+    async def load_ticker_map(self) -> dict[str, str]:
+        await _ensure_ticker_map()
+        return dict(_ticker_map)
+
+    async def fx_to_krw(self, nation: str, amount: float) -> float:
+        return await _fx_to_krw(nation, amount)
+
+
+portfolio_runtime_quotes.register_provider(_PortfolioRuntimeQuoteProvider())
 
 
 # --- Benchmark ---
@@ -1289,29 +1271,7 @@ async def _benchmark_history_for_insight(benchmark_code: str | None) -> list[dic
 
 
 async def _fetch_quote_for_insight(stock_code: str) -> dict:
-    if _is_cash_asset(stock_code) or stock_code == "KRX_GOLD" or stock_code in _CRYPTO_UPBIT_MAP or _is_korean_stock(stock_code):
-        return await _fetch_quote(stock_code)
-
-    cached = _quote_cache.get_fresh(stock_code)
-    if cached:
-        return cached
-    stale = _quote_cache.get_fallback(stock_code)
-
-    await _ensure_ticker_map()
-    static = _static_foreign_ticker(stock_code)
-    ticker = (
-        (static["ticker"] if static else None)
-        or _ticker_map.get(stock_code)
-        or _yfinance_direct_ticker(stock_code)
-    )
-    try:
-        q = await asyncio.wait_for(_yfinance_fetch_quote_fast(ticker), timeout=_INSIGHT_QUOTE_TIMEOUT)
-    except Exception as exc:
-        logger.warning("asset insight quote fetch failed (%s): %s", stock_code, exc)
-        return stale
-    if _quote_cache.remember(stock_code, q):
-        return q
-    return stale
+    return await _fetch_quote(stock_code)
 
 
 def _macro_codes_for_asset(profile: dict, currency: str | None) -> list[str]:
@@ -1712,36 +1672,50 @@ async def stream_portfolio_quotes(request: Request):
             except Exception:
                 return code, {}
 
-        quote_tasks = [asyncio.create_task(_one_quote(it["stock_code"])) for it in items]
-
-        # Resolve benchmark codes in parallel too (some need _detect_market_type).
-        async def _resolve_bc(item: dict) -> str:
-            return item.get("benchmark_code") or await _resolve_default_benchmark(item["stock_code"])
-
-        bc_task = asyncio.create_task(asyncio.gather(*[_resolve_bc(it) for it in items]))
-
-        for fut in asyncio.as_completed(quote_tasks):
-            code, quote = await fut
-            yield f"data: {_json.dumps({'stock_code': code, 'quote': quote}, ensure_ascii=False)}\n\n"
-
+        quote_tasks: list[asyncio.Task] = []
+        bench_tasks: list[asyncio.Task] = []
+        bc_task: asyncio.Future | None = None
         try:
-            benchmark_codes = set(await bc_task)
-        except Exception:
-            benchmark_codes = set()
+            quote_tasks = [asyncio.create_task(_one_quote(it["stock_code"])) for it in items]
 
-        # Benchmark quotes in parallel as well.
-        async def _one_bench(bc: str) -> tuple[str, dict]:
+            # Resolve benchmark codes in parallel too (some need _detect_market_type).
+            async def _resolve_bc(item: dict) -> str:
+                return item.get("benchmark_code") or await _resolve_default_benchmark(item["stock_code"])
+
+            bc_task = asyncio.gather(*[_resolve_bc(it) for it in items])
+
+            for fut in asyncio.as_completed(quote_tasks):
+                code, quote = await fut
+                yield f"data: {_json.dumps({'stock_code': code, 'quote': quote}, ensure_ascii=False)}\n\n"
+
             try:
-                return bc, await _fetch_benchmark_quote(bc)
+                benchmark_codes = set(await bc_task)
             except Exception:
-                return bc, {}
+                benchmark_codes = set()
 
-        bench_tasks = [asyncio.create_task(_one_bench(bc)) for bc in benchmark_codes]
-        for fut in asyncio.as_completed(bench_tasks):
-            bc, bq = await fut
-            yield f"data: {_json.dumps({'benchmark_code': bc, 'benchmark_quote': bq}, ensure_ascii=False)}\n\n"
+            # Benchmark quotes in parallel as well.
+            async def _one_bench(bc: str) -> tuple[str, dict]:
+                try:
+                    return bc, await _fetch_benchmark_quote(bc)
+                except Exception:
+                    return bc, {}
 
-        yield "data: {\"done\": true}\n\n"
+            bench_tasks = [asyncio.create_task(_one_bench(bc)) for bc in benchmark_codes]
+            for fut in asyncio.as_completed(bench_tasks):
+                bc, bq = await fut
+                yield f"data: {_json.dumps({'benchmark_code': bc, 'benchmark_quote': bq}, ensure_ascii=False)}\n\n"
+
+            yield "data: {\"done\": true}\n\n"
+        finally:
+            pending = [
+                task
+                for task in [*quote_tasks, *bench_tasks, bc_task]
+                if task is not None and not task.done()
+            ]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
     from fastapi.responses import StreamingResponse
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -1795,7 +1769,10 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         if code.startswith(_NON_QUOTABLE_PREFIXES):
             return code, {}
         def fallback_quote() -> dict:
-            return _quote_cache.get_fallback(code, mark_stale=True)
+            q = stock_quotes.stock_to_quote(stock_quotes.get_stock_cached(code, allow_stale=True))
+            if q:
+                q["_stale"] = True
+            return q
         try:
             async with sem:
                 force_upstream = _is_korean_stock(code)
@@ -1824,7 +1801,10 @@ async def asset_quotes_batch(payload: dict = Body(...)):
     for task in pending:
         code = task_codes.get(task)
         if code:
-            results[code] = _quote_cache.get_fallback(code, mark_stale=True)
+            q = stock_quotes.stock_to_quote(stock_quotes.get_stock_cached(code, allow_stale=True))
+            if q:
+                q["_stale"] = True
+            results[code] = q
         task.cancel()
     for task in done:
         if task.cancelled():
@@ -2525,16 +2505,7 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
         cf_date = date.today().isoformat()
     memo = str(payload.get("memo") or "").strip() or None
 
-    # For withdrawals, check CASH_KRW balance
     google_sub = user["google_sub"]
-    if cf_type == "withdrawal":
-        cash_item = await cache.get_portfolio_item(google_sub, "CASH_KRW")
-        cash_balance = (cash_item["quantity"] * cash_item["avg_price"]) if cash_item else 0
-        if cash_balance < amount:
-            raise HTTPException(
-                status_code=400,
-                detail=f"원화 잔액이 부족합니다. (잔액: {cash_balance:,.0f}원, 출금액: {amount:,.0f}원)",
-            )
 
     # Get latest NAV for units calculation
     latest = await cache.get_latest_snapshot(google_sub)
@@ -2543,16 +2514,21 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
     if cf_type == "withdrawal":
         units_change = -units_change
 
-    result = await cache.add_cashflow(google_sub, cf_date, cf_type, amount, memo, nav_at_time, units_change)
-
-    # Sync CASH_KRW in portfolio
-    cash_item = await cache.get_portfolio_item(google_sub, "CASH_KRW")
-    if cash_item:
-        delta = amount if cf_type == "deposit" else -amount
-        new_qty = max(0, cash_item["quantity"] + int(delta))
-        await cache.update_portfolio_quantity(google_sub, "CASH_KRW", new_qty)
-    elif cf_type == "deposit":
-        await cache.add_portfolio_item(google_sub, "CASH_KRW", "원화", 1.0, int(amount), "KRW")
+    try:
+        result = await cache.add_cashflow_and_sync_cash(
+            google_sub,
+            cf_date,
+            cf_type,
+            amount,
+            memo,
+            nav_at_time,
+            units_change,
+        )
+    except cache.CashflowBalanceError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"원화 잔액이 부족합니다. (잔액: {exc.balance:,.0f}원, 출금액: {exc.amount:,.0f}원)",
+        )
 
     return {"ok": True, **result}
 
@@ -2561,18 +2537,7 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
 async def delete_cashflow(cf_id: int, request: Request):
     user = _require_user(await get_current_user(request))
     google_sub = user["google_sub"]
-
-    # Get cashflow info before deleting to reverse CASH_KRW
-    cf = await cache.get_cashflow(google_sub, cf_id)
-    await cache.delete_cashflow(google_sub, cf_id)
-
-    if cf:
-        cash_item = await cache.get_portfolio_item(google_sub, "CASH_KRW")
-        if cash_item:
-            # Reverse: deposit was +, so undo is -; withdrawal was -, so undo is +
-            reverse_delta = -cf["amount"] if cf["type"] == "deposit" else cf["amount"]
-            new_qty = max(0, cash_item["quantity"] + int(reverse_delta))
-            await cache.update_portfolio_quantity(google_sub, "CASH_KRW", new_qty)
+    await cache.delete_cashflow_and_sync_cash(google_sub, cf_id)
 
     return {"ok": True}
 

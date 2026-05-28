@@ -20,6 +20,7 @@ import dart_client
 import market_indicators
 import stock_price
 from services import ai_client
+from services.portfolio import runtime_quotes as portfolio_quotes
 from services.portfolio.identifiers import is_korean_stock, normalize_portfolio_code
 
 
@@ -288,7 +289,7 @@ async def _quote_moves(interests: list[dict[str, Any]], kospi_pct: float | None)
         async with semaphore:
             code = item["stock_code"]
             try:
-                quote = await stock_price.fetch_quote_snapshot(code)
+                quote = await portfolio_quotes.fetch_quote(code)
             except Exception as exc:
                 logger.info("daily market: quote skipped for %s: %s", code, exc)
                 quote = {}

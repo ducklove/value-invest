@@ -1,10 +1,12 @@
 import asyncio
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 import time
 
 import pytest
 
 from routes import portfolio as portfolio_route
+from services import stock_quotes
 from services.portfolio import quotes
 
 
@@ -116,29 +118,34 @@ def test_portfolio_quote_cache_accepts_newer_same_source_quote():
 
 
 def test_cached_quote_for_code_ignores_stale_polling_cache():
-    cache = quotes.PortfolioQuoteCache(ttl_seconds=0)
-    cache.remember("005930", {"price": 1000})
-
-    with patch.object(portfolio_route, "_quote_cache", cache), \
-         patch.object(portfolio_route.kis_ws_manager, "get_cached_quote", return_value=None):
+    with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=None):
         assert portfolio_route._cached_quote_for_code("005930") == {}
 
 
-def test_cached_quote_for_code_ignores_ws_cache_when_market_differs():
-    cache = quotes.PortfolioQuoteCache(ttl_seconds=60)
-    cache.remember("000660", {"price": 1818000, "source": "rest", "market": "NX"})
+def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
+    stock = stock_quotes.Stock(
+        code="000660",
+        current_price=1818000,
+        previous_close=1745000,
+        volume=778872,
+        created_at=datetime(2026, 5, 21, 15, 31),
+        source="rest",
+        market="NX",
+    )
 
-    with patch.object(portfolio_route, "_quote_cache", cache), \
-         patch.object(portfolio_route.kis_ws_manager, "ws_cache_matches_rest_market", return_value=False), \
-         patch.object(portfolio_route.kis_ws_manager, "get_cached_quote", return_value={
-             "date": "20260521",
-             "price": 1745000,
-             "ts": time.time(),
-         }):
+    with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock):
         assert portfolio_route._cached_quote_for_code("000660") == {
+            "code": "000660",
+            "date": "2026-05-21",
             "price": 1818000,
+            "previous_close": 1745000,
+            "change": 73000,
+            "change_pct": 4.18,
+            "volume": 778872,
+            "trade_value": None,
             "source": "rest",
             "market": "NX",
+            "fetched_at": "2026-05-21T15:31:00",
         }
 
 
@@ -163,6 +170,46 @@ async def test_asset_quotes_batch_fresh_korean_quotes_force_refresh_without_ws_c
 
 
 @pytest.mark.asyncio
+async def test_stream_portfolio_quotes_streams_quote_and_benchmark():
+    with patch.object(
+        portfolio_route,
+        "get_current_user",
+        new=AsyncMock(return_value={"google_sub": "u1"}),
+    ), patch.object(
+        portfolio_route.cache,
+        "get_portfolio",
+        new=AsyncMock(return_value=[{"stock_code": "005930"}]),
+    ), patch.object(
+        portfolio_route,
+        "_prefetch_market_types",
+        new=AsyncMock(),
+    ), patch.object(
+        portfolio_route,
+        "_fetch_quote",
+        new=AsyncMock(return_value={"price": 1000}),
+    ), patch.object(
+        portfolio_route,
+        "_resolve_default_benchmark",
+        new=AsyncMock(return_value="IDX_KOSPI"),
+    ), patch.object(
+        portfolio_route,
+        "_fetch_benchmark_quote",
+        new=AsyncMock(return_value={"change_pct": 1.2}),
+    ):
+        response = await portfolio_route.stream_portfolio_quotes(object())
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+
+    body = "".join(chunks)
+    assert '"stock_code": "005930"' in body
+    assert '"price": 1000' in body
+    assert '"benchmark_code": "IDX_KOSPI"' in body
+    assert '"change_pct": 1.2' in body
+    assert body.endswith('data: {"done": true}\n\n')
+
+
+@pytest.mark.asyncio
 async def test_asset_quotes_batch_fresh_non_korean_quotes_keep_normal_cache_path():
     with patch.object(
         portfolio_route,
@@ -184,10 +231,15 @@ async def test_asset_quotes_batch_fresh_non_korean_quotes_keep_normal_cache_path
 
 @pytest.mark.asyncio
 async def test_asset_quotes_batch_returns_stale_fallback_on_fetch_timeout():
-    cache = quotes.PortfolioQuoteCache()
-    cache.remember("000660", {"price": 1786000})
+    stock = stock_quotes.Stock(
+        code="000660",
+        current_price=1786000,
+        previous_close=None,
+        volume=None,
+        created_at=datetime(2026, 5, 28, 9, 1),
+    )
 
-    with patch.object(portfolio_route, "_quote_cache", cache), \
+    with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock), \
          patch.object(
              portfolio_route,
              "_fetch_quote",
@@ -198,19 +250,25 @@ async def test_asset_quotes_batch_returns_stale_fallback_on_fetch_timeout():
             "fresh": True,
         })
 
-    assert result == {"000660": {"price": 1786000, "_stale": True}}
+    assert result["000660"]["price"] == 1786000
+    assert result["000660"]["_stale"] is True
 
 
 @pytest.mark.asyncio
 async def test_asset_quotes_batch_returns_fallback_for_pending_batch_timeout():
-    cache = quotes.PortfolioQuoteCache()
-    cache.remember("000660", {"price": 1786000})
+    stock = stock_quotes.Stock(
+        code="000660",
+        current_price=1786000,
+        previous_close=None,
+        volume=None,
+        created_at=datetime(2026, 5, 28, 9, 1),
+    )
 
     async def slow_fetch(*args, **kwargs):
         await asyncio.sleep(1)
         return {"price": 1}
 
-    with patch.object(portfolio_route, "_quote_cache", cache), \
+    with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock), \
          patch.object(portfolio_route, "_ASSET_QUOTES_BATCH_TIMEOUT", 0.01), \
          patch.object(portfolio_route, "_fetch_quote", new=slow_fetch):
         result = await portfolio_route.asset_quotes_batch({
@@ -218,17 +276,12 @@ async def test_asset_quotes_batch_returns_fallback_for_pending_batch_timeout():
             "fresh": True,
         })
 
-    assert result == {"000660": {"price": 1786000, "_stale": True}}
+    assert result["000660"]["price"] == 1786000
+    assert result["000660"]["_stale"] is True
 
 
 @pytest.mark.asyncio
 async def test_force_refreshed_rest_quote_returns_even_when_ws_cache_rank_wins():
-    cache = quotes.PortfolioQuoteCache()
-    cache.remember("005930", {
-        "price": 70000,
-        "source": "ws",
-        "ts": time.time(),
-    })
     rest_quote = {
         "date": "2026-05-27",
         "price": 70100,
@@ -239,25 +292,34 @@ async def test_force_refreshed_rest_quote_returns_even_when_ws_cache_rank_wins()
         "fetched_at": "2026-05-27T19:45:00",
     }
 
-    with patch.object(portfolio_route, "_quote_cache", cache), \
-         patch.object(
-             portfolio_route.stock_price,
-             "fetch_quote_snapshot",
-             new=AsyncMock(return_value=rest_quote),
-         ):
+    stock = stock_quotes.Stock(
+        code="005930",
+        current_price=70100,
+        previous_close=69500,
+        volume=None,
+        created_at=datetime(2026, 5, 27, 19, 45),
+        source="rest",
+    )
+
+    with patch.object(portfolio_route.stock_quotes, "get_stock", new=AsyncMock(return_value=stock)) as get_stock:
         result = await portfolio_route._fetch_quote(
             "005930",
             force_refresh=True,
             use_ws_cache=False,
         )
 
-    assert result == rest_quote
-    assert cache.get_fresh("005930")["source"] == "ws"
+    assert result["price"] == rest_quote["price"]
+    assert result["previous_close"] == rest_quote["previous_close"]
+    get_stock.assert_awaited_once_with(
+        "005930",
+        force_refresh=True,
+        use_ws_cache=False,
+        max_ws_age_seconds=portfolio_route._WS_QUOTE_MAX_AGE_SECONDS,
+    )
 
 
 @pytest.mark.asyncio
 async def test_force_refreshed_stale_quote_keeps_fresh_cache_value():
-    cache = quotes.PortfolioQuoteCache()
     fresh_quote = {
         "date": "2026-05-27",
         "price": 27100,
@@ -265,25 +327,20 @@ async def test_force_refreshed_stale_quote_keeps_fresh_cache_value():
         "source": "rest",
         "fetched_at": "2026-05-27T20:01:00",
     }
-    cache.remember("000950", fresh_quote)
-    stale_history = {
-        "date": "2026-05-22",
-        "price": 28000,
-        "change_pct": -0.36,
-        "source": "history",
-        "_stale": True,
-    }
+    stock = stock_quotes.Stock(
+        code="000950",
+        current_price=27100,
+        previous_close=27549,
+        volume=None,
+        created_at=datetime(2026, 5, 27, 20, 1),
+        source="rest",
+    )
 
-    with patch.object(portfolio_route, "_quote_cache", cache), \
-         patch.object(
-             portfolio_route.stock_price,
-             "fetch_quote_snapshot",
-             new=AsyncMock(return_value=stale_history),
-         ):
+    with patch.object(portfolio_route.stock_quotes, "get_stock", new=AsyncMock(return_value=stock)):
         result = await portfolio_route._fetch_quote(
             "000950",
             force_refresh=True,
             use_ws_cache=False,
         )
 
-    assert result == fresh_quote
+    assert result["price"] == fresh_quote["price"]

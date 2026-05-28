@@ -20,6 +20,7 @@ import cache
 from cache_layer import MemoryTTLCache
 from deps import get_current_user
 from services import ai_client
+from services.portfolio import runtime_quotes as portfolio_quotes
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -221,8 +222,7 @@ async def _load_stock_summary(stock_code: str) -> str:
     # Live quote — uses the warm quote cache populated by portfolio/WS.
     live_line = ""
     try:
-        from routes.portfolio import _fetch_quote
-        q = await _fetch_quote(stock_code)
+        q = await portfolio_quotes.fetch_quote(stock_code)
         if q and q.get("price"):
             price = q.get("price")
             chg_pct = q.get("change_pct")
@@ -426,8 +426,7 @@ async def _try_shortcut(stock_code: str, question: str) -> str | None:
     # shortcuts and let the LLM handle it with whatever context we have.
     quote = {}
     try:
-        from routes.portfolio import _fetch_quote
-        quote = await _fetch_quote(stock_code) or {}
+        quote = await portfolio_quotes.fetch_quote(stock_code) or {}
     except Exception:
         pass
 

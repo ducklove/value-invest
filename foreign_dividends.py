@@ -23,15 +23,13 @@ import logging
 from datetime import datetime
 
 import cache
+from services.portfolio import runtime_quotes as portfolio_quotes
 
 logger = logging.getLogger(__name__)
 
 
 def _is_korean_code(code: str) -> bool:
-    """Same rule used in routes/portfolio._is_korean_stock — 6-digit
-    numeric code = KOSPI/KOSDAQ. We duplicate it here (rather than
-    importing) to avoid pulling routes.portfolio into this module and
-    creating an import cycle via its indirect deps."""
+    """6-character KRX code guard for excluding domestic holdings."""
     return len(code) == 6 and code[:5].isdigit()
 
 
@@ -180,13 +178,10 @@ async def refresh_foreign_dividends(
             return {"ok": False, "error": str(exc)[:300], "rows_written": 0,
                     "total_attempted": 0}
 
-    # Resolve each portfolio code to the yfinance ticker (ticker_map
-    # handles forms like BRK.B vs BRK-B, suffixed HK tickers, etc).
-    # We import routes.portfolio lazily to avoid a startup-time import
-    # cycle — foreign_dividends gets imported early from cache / admin,
-    # while routes.portfolio pulls in plenty of other modules.
-    from routes.portfolio import _ticker_map, _ensure_ticker_map, _fx_to_krw
-    await _ensure_ticker_map()
+    # Resolve each portfolio code to the yfinance ticker (ticker_map handles
+    # forms like BRK.B vs BRK-B, suffixed HK tickers, etc). Keep this behind
+    # the quote seam so this module does not depend on route internals.
+    ticker_map = await portfolio_quotes.load_ticker_map()
 
     rows: list[dict] = []
     failures: list[str] = []
@@ -202,7 +197,7 @@ async def refresh_foreign_dividends(
     }
 
     for code in stock_codes:
-        ticker = _ticker_map.get(code, code)
+        ticker = ticker_map.get(code, code)
         try:
             info = await _fetch_one(ticker)
         except Exception as exc:
@@ -216,7 +211,7 @@ async def refresh_foreign_dividends(
         currency = info["currency"]
         nation = _CUR_TO_NATION.get(currency, "USA")
         try:
-            dps_krw = await _fx_to_krw(nation, dps_native)
+            dps_krw = await portfolio_quotes.fx_to_krw(nation, dps_native)
         except Exception as exc:
             logger.warning("foreign_dividends: fx to KRW failed (%s %s): %s", code, currency, exc)
             failures.append(code)

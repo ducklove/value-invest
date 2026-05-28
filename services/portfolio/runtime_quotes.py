@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+from services.portfolio.identifiers import is_korean_stock
+
+
+class RuntimeQuoteProvider(Protocol):
+    async def fetch_quote(
+        self,
+        stock_code: str,
+        *,
+        force_refresh: bool = False,
+        use_ws_cache: bool = True,
+    ) -> dict[str, Any]: ...
+
+    async def fetch_cash_quote(self, stock_code: str) -> dict[str, Any]: ...
+
+    async def load_ticker_map(self) -> dict[str, str]: ...
+
+    async def fx_to_krw(self, nation: str, amount: float) -> float: ...
+
+
+_provider: RuntimeQuoteProvider | None = None
+
+
+def register_provider(provider: RuntimeQuoteProvider) -> None:
+    global _provider
+    _provider = provider
+
+
+def _get_provider() -> RuntimeQuoteProvider:
+    if _provider is None:
+        # Importing the route module registers the current provider. This is a
+        # temporary bridge while quote fetching is being moved out of routes.
+        from routes import portfolio as _portfolio_route  # noqa: F401
+    if _provider is None:
+        raise RuntimeError("portfolio quote provider is not registered")
+    return _provider
+
+
+async def fetch_quote(
+    stock_code: str,
+    *,
+    force_refresh: bool = False,
+    use_ws_cache: bool = True,
+) -> dict[str, Any]:
+    """Public quote seam for batch/service callers.
+
+    The implementation still delegates to the existing portfolio runtime while
+    quote fetching is being extracted. Callers outside HTTP routes should depend
+    on this module so the backing implementation can move without touching them.
+    """
+    return await _get_provider().fetch_quote(
+        stock_code,
+        force_refresh=force_refresh,
+        use_ws_cache=use_ws_cache,
+    )
+
+
+async def fetch_cash_quote(stock_code: str) -> dict[str, Any]:
+    return await _get_provider().fetch_cash_quote(stock_code)
+
+
+async def load_ticker_map() -> dict[str, str]:
+    return await _get_provider().load_ticker_map()
+
+
+async def fx_to_krw(nation: str, amount: float) -> float:
+    return await _get_provider().fx_to_krw(nation, amount)

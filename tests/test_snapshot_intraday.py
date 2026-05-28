@@ -1,8 +1,18 @@
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 import snapshot_intraday
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_snapshot_intraday_does_not_import_portfolio_route_private_helpers():
+    source = (ROOT / "snapshot_intraday.py").read_text(encoding="utf-8")
+
+    assert "from routes.portfolio import" not in source
 
 
 @pytest.mark.asyncio
@@ -20,11 +30,13 @@ async def test_fetch_total_value_uses_prior_stock_snapshot_for_non_korean_quote_
         new=AsyncMock(return_value=[
             {"stock_code": "AAPL", "market_value": 1234},
         ]),
-    ), patch(
-        "routes.portfolio._is_korean_stock",
+    ), patch.object(
+        snapshot_intraday.portfolio_quotes,
+        "is_korean_stock",
         return_value=False,
-    ), patch(
-        "routes.portfolio._fetch_quote",
+    ), patch.object(
+        snapshot_intraday.portfolio_quotes,
+        "fetch_quote",
         new=fetch_quote,
     ):
         total = await snapshot_intraday._fetch_total_value("u1", "2026-05-18")
@@ -48,11 +60,13 @@ async def test_fetch_total_value_refuses_korean_stock_snapshot_fallback_when_quo
         new=AsyncMock(return_value=[
             {"stock_code": "005930", "market_value": 1234},
         ]),
-    ), patch(
-        "routes.portfolio._is_korean_stock",
+    ), patch.object(
+        snapshot_intraday.portfolio_quotes,
+        "is_korean_stock",
         return_value=True,
-    ), patch(
-        "routes.portfolio._fetch_quote",
+    ), patch.object(
+        snapshot_intraday.portfolio_quotes,
+        "fetch_quote",
         new=fetch_quote,
     ):
         with pytest.raises(snapshot_intraday.IntradaySnapshotIncomplete):
@@ -79,11 +93,13 @@ async def test_fetch_total_value_ignores_stale_quote_when_snapshot_fallback_exis
         new=AsyncMock(return_value=[
             {"stock_code": "CASH_USD", "market_value": 15190},
         ]),
-    ), patch(
-        "routes.portfolio._is_korean_stock",
+    ), patch.object(
+        snapshot_intraday.portfolio_quotes,
+        "is_korean_stock",
         return_value=False,
-    ), patch(
-        "routes.portfolio._fetch_quote",
+    ), patch.object(
+        snapshot_intraday.portfolio_quotes,
+        "fetch_quote",
         new=AsyncMock(return_value={"price": 9999, "_stale": True}),
     ):
         total = await snapshot_intraday._fetch_total_value("u1", "2026-05-18")
@@ -103,11 +119,13 @@ async def test_fetch_total_value_refuses_avg_price_fallback_without_snapshot():
         snapshot_intraday.cache,
         "get_stock_snapshots_by_date",
         new=AsyncMock(return_value=[]),
-    ), patch(
-        "routes.portfolio._is_korean_stock",
+    ), patch.object(
+        snapshot_intraday.portfolio_quotes,
+        "is_korean_stock",
         return_value=True,
-    ), patch(
-        "routes.portfolio._fetch_quote",
+    ), patch.object(
+        snapshot_intraday.portfolio_quotes,
+        "fetch_quote",
         new=AsyncMock(return_value={}),
     ):
         with pytest.raises(snapshot_intraday.IntradaySnapshotIncomplete):

@@ -1,7 +1,17 @@
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 import pytest
 
 import snapshot_nav
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_snapshot_nav_does_not_import_portfolio_route_private_helpers():
+    source = (ROOT / "snapshot_nav.py").read_text(encoding="utf-8")
+
+    assert "from routes.portfolio import" not in source
 
 
 @pytest.mark.asyncio
@@ -17,11 +27,13 @@ async def test_fetch_total_value_forces_rest_for_korean_stocks():
         snapshot_nav.cache,
         "get_stock_snapshots_before_date",
         new=AsyncMock(return_value=[]),
-    ), patch(
-        "routes.portfolio._is_korean_stock",
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "is_korean_stock",
         return_value=True,
-    ), patch(
-        "routes.portfolio._fetch_quote",
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "fetch_quote",
         new=AsyncMock(return_value={"price": 2000}),
     ) as fetch_quote:
         total_value, total_invested, per_stock = await snapshot_nav._fetch_total_value("u1", today)
@@ -52,11 +64,13 @@ async def test_fetch_total_value_uses_historical_close_for_past_korean_snapshot(
         snapshot_nav.close_price_client,
         "get_daily_prices",
         new=AsyncMock(return_value=[{"date": "2026-05-18", "close": 1800}]),
-    ) as daily_prices, patch(
-        "routes.portfolio._is_korean_stock",
+    ) as daily_prices, patch.object(
+        snapshot_nav.portfolio_quotes,
+        "is_korean_stock",
         return_value=True,
-    ), patch(
-        "routes.portfolio._fetch_quote",
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "fetch_quote",
         new=AsyncMock(return_value={"price": 9999}),
     ) as fetch_quote:
         total_value, _total_invested, per_stock = await snapshot_nav._fetch_total_value("u1", "2026-05-18")
@@ -80,8 +94,9 @@ async def test_fetch_total_value_uses_prior_date_snapshot_only_as_fallback():
         snapshot_nav.cache,
         "get_stock_snapshots_before_date",
         new=get_before,
-    ), patch(
-        "routes.portfolio._is_korean_stock",
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "is_korean_stock",
         return_value=True,
     ), patch.object(
         snapshot_nav.close_price_client,
@@ -91,8 +106,9 @@ async def test_fetch_total_value_uses_prior_date_snapshot_only_as_fallback():
         snapshot_nav.kis_proxy_client,
         "get_history",
         new=AsyncMock(return_value={"items": []}),
-    ), patch(
-        "routes.portfolio._fetch_quote",
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "fetch_quote",
         new=AsyncMock(return_value={"price": 9999, "_stale": True}),
     ):
         total_value, _total_invested, per_stock = await snapshot_nav._fetch_total_value("u1", "2026-05-18")
@@ -114,8 +130,9 @@ async def test_fetch_total_value_refuses_avg_price_fallback_without_snapshot():
         snapshot_nav.cache,
         "get_stock_snapshots_before_date",
         new=AsyncMock(return_value=[]),
-    ), patch(
-        "routes.portfolio._is_korean_stock",
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "is_korean_stock",
         return_value=True,
     ), patch.object(
         snapshot_nav.close_price_client,
@@ -125,8 +142,9 @@ async def test_fetch_total_value_refuses_avg_price_fallback_without_snapshot():
         snapshot_nav.kis_proxy_client,
         "get_history",
         new=AsyncMock(return_value={"items": []}),
-    ), patch(
-        "routes.portfolio._fetch_quote",
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "fetch_quote",
         new=AsyncMock(return_value={}),
     ):
         with pytest.raises(snapshot_nav.SnapshotIncomplete):

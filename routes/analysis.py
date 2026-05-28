@@ -8,6 +8,7 @@ import analyzer
 import cache
 import dart_client
 import stock_price
+from services import stock_quotes
 from deps import (
     ANALYSIS_SEMAPHORE,
     ANALYSIS_LOCKS,
@@ -100,7 +101,7 @@ async def _build_analysis_response(
 ) -> dict:
     weekly_mkt_data, quote_snapshot = await asyncio.gather(
         stock_price.fetch_weekly_market_data(stock_code, fin_data),
-        stock_price.fetch_quote_snapshot(stock_code),
+        stock_quotes.get_quote_snapshot(stock_code),
         return_exceptions=True,
     )
     if isinstance(weekly_mkt_data, Exception):

@@ -1,6 +1,34 @@
 import unittest
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 import market_daily
+
+
+@pytest.mark.asyncio
+async def test_quote_moves_uses_portfolio_runtime_quote_boundary():
+    with patch.object(
+        market_daily.portfolio_quotes,
+        "fetch_quote",
+        new=AsyncMock(return_value={
+            "price": 70000,
+            "date": "2026-05-28",
+            "change": 700,
+            "change_pct": 1.0,
+            "trade_value": 123000,
+        }),
+    ) as fetch_quote:
+        rows = await market_daily._quote_moves(
+            [{"stock_code": "AAPL", "stock_name": "Apple", "sources": ["watch"]}],
+            0.2,
+        )
+
+    fetch_quote.assert_awaited_once_with("AAPL")
+    self_row = rows[0]
+    assert self_row["stock_code"] == "AAPL"
+    assert self_row["price"] == 70000
+    assert self_row["change_pct"] == 1.0
 
 
 class MarketDailyRuleTests(unittest.TestCase):

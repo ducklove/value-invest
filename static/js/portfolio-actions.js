@@ -174,7 +174,18 @@ async function savePortfolioEdit(stockCode, stockName, row) {
       existingItem
       && (existingItem.target_price != null || existingItem.target_price_formula || existingItem.target_price_disabled)
     );
-    if (!tgtRaw) {
+    const existingFormula = String(existingItem?.target_price_formula || '').trim();
+    const existingTarget = existingItem?.target_price != null ? Number(existingItem.target_price) : null;
+    const targetUnchanged = !!existingItem && (
+      (existingFormula && tgtRaw === existingFormula)
+      || (!existingFormula && existingTarget !== null && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(numericTarget) && Number(numericTarget) === existingTarget)
+      || (!existingFormula && existingTarget === null && !tgtRaw && !existingItem.target_price_disabled)
+    );
+    if (targetUnchanged) {
+      // Do not resend an unchanged target/formula. Some formulas require
+      // server-side financial or quote lookups, which makes quantity/price
+      // edits wait on unrelated upstream calls.
+    } else if (!tgtRaw) {
       if (hadExplicitTarget) {
         body.target_price = null;
         body.target_price_formula = null;

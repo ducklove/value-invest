@@ -510,6 +510,7 @@ function renderPortfolio(options = {}) {
       ? '<button type="button" class="pf-row-drag-handle js-pf-row-drag" draggable="true" title="드래그하여 순서 변경" aria-label="드래그하여 순서 변경">&#x2630;</button>'
       : '';
     const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight"><strong>${escapeHtml(r.stock_name)}</strong></a><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</span>${tagHtml}</span>`;
+    const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
     if (isEditing) {
       return `<tr data-code="${safeCode}"${rowClass}>
         <td class="pf-stock-cell js-pf-analyze">${stockIdentity}</td>
@@ -535,7 +536,7 @@ function renderPortfolio(options = {}) {
       </tr>`;
     }
     return `<tr data-code="${safeCode}">
-      <td class="pf-stock-cell pf-stock-cell-with-drag js-pf-analyze">${dragHandle}${stockIdentity}</td>
+      <td class="${stockCellClass}">${dragHandle}${stockIdentity}</td>
       <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>

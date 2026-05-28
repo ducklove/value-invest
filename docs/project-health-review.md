@@ -172,3 +172,23 @@
 - `/api/portfolio/nav-history`, `/api/portfolio/benchmark-history`, `/api/admin/*` 주요 endpoint에 duration event를 남긴다.
 - 화면에서는 “데이터 로딩 중”, “차트 렌더링 중”, “비교지수 불러오는 중”을 분리해서 보여준다.
 - 사용자가 느끼는 문제를 다음부터는 추측이 아니라 endpoint별 시간으로 바로 분리한다.
+
+## 6. 2026-05-28 재점검 메모
+
+이번 재점검에서도 변경 비용의 핵심 원인은 보안보다 결합도와 경계 부재였다.
+
+- `routes/portfolio.py`는 파일 분리가 일부 진행됐지만 여전히 quote, benchmark, AI, cashflow, snapshot orchestration을 함께 가진다. 라우터는 HTTP 입력/출력만 담당하고 나머지는 service로 밀어내야 한다.
+- `cache.py`는 스키마, migration, repository, 일부 도메인 규칙이 섞여 있다. repository 분리 전 단계로 cashflow와 `CASH_KRW` 잔액 갱신은 단일 transaction 함수로 묶었다.
+- 프론트는 `portfolio.js` 단일 파일은 해소됐지만 classic script 순서와 전역 상태가 여전히 실제 의존성 계약이다. 파일 분리 다음 단계는 store/namespace 도입과 동작 기반 테스트다.
+- 로컬 산출물(`.venv`, `.claude`, `server.*.log`, repair marker)이 작업 트리를 오염시켜 검색과 리뷰 비용을 키웠다. `.gitignore`를 현재 운영 산출물에 맞춰 확장했다.
+- `/api/portfolio/quotes` SSE 경로에는 `asyncio.create_task(asyncio.gather(...))` 형태의 비동기 task 오류 가능성과 disconnect 시 pending task 정리 누락이 있었다. gather 사용과 cleanup을 보강했다.
+- `services/stock_quotes.py`를 추가해 국내 주식 현재가 조회는 이 service를 통해서만 수행하게 했다. 이 service가 `Stock` 모델, 캐시, WS cache 조회, REST fallback, 지속 callback 구독을 관리한다.
+- 테스트는 44개 Python 테스트 파일 규모까지 늘었다. `pytest.ini`로 테스트 경로와 async 모드를 명시해 실행 환경 drift를 줄였다.
+
+근본 해결 순서는 다음이 현실적이다.
+
+1. `routes/portfolio.py`에서 cashflow, quote, history를 service 단위로 먼저 추출한다. 국내 주식 현재가는 `services.stock_quotes`로 1차 강제 분리했다.
+2. `cache.py`에 transaction helper를 만든 뒤 portfolio item update처럼 함께 성공/실패해야 하는 write를 추가로 묶는다. cashflow와 `CASH_KRW` 동기화는 2026-05-28에 전용 transaction 함수로 먼저 처리했다.
+3. 배치 스크립트가 route private 함수가 아니라 public service API를 호출하게 바꾼다. 2026-05-28에 `services.portfolio.runtime_quotes` provider seam을 추가해 `snapshot_nav.py`, `snapshot_intraday.py`, `routes/wiki.py`, `foreign_dividends.py`의 직접 의존은 제거했다. 실제 quote 구현은 아직 `routes.portfolio`에 남아 있으므로 다음 단계에서 `QuoteService`로 완전히 옮겨야 한다.
+4. 프론트는 ES module 전환을 한 번에 하지 말고 `portfolioStore` 같은 단일 namespace부터 만들고, 기존 전역 변수 접근을 점진적으로 줄인다.
+5. 문자열 존재 테스트는 최소 유지하고 quote stream, cashflow mutation, portfolio render 같은 사용자 흐름 중심의 contract test를 늘린다.

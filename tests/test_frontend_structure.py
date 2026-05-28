@@ -251,7 +251,8 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
 
     assert 'const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight"' in render
     assert '${dragHandle}${stockIdentity}' in render
-    assert 'class="pf-stock-cell pf-stock-cell-with-drag js-pf-analyze"' in render
+    assert "const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';" in render
+    assert '<td class="${stockCellClass}">${dragHandle}${stockIdentity}</td>' in render
     assert ".pf-stock-cell-with-drag" in styles
     assert "grid-template-columns: 16px minmax(0, 1fr);" in styles
     assert ".pf-stock-main" in styles
@@ -364,6 +365,8 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     assert "editRow?.querySelector('.js-pf-edit-qty')" in actions
     assert "editRow?.querySelector('.js-pf-edit-price')" in actions
     assert "const hadExplicitTarget = !!(" in actions
+    assert "const targetUnchanged = !!existingItem && (" in actions
+    assert "Do not resend an unchanged target/formula." in actions
     assert "body.target_price_disabled = true;" in actions
     assert "기존 목표가를 비우면 -로 고정됩니다" in render
     assert "/api/portfolio/${encodeURIComponent(stockCode)}" in actions

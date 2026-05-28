@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
+.venv/
+.claude/
+.pytest_cache/
 cache.db
 cache.db-shm
 cache.db-wal
@@ -8,7 +11,9 @@ keys.txt
 .env*
 !.env.example
 !.env.*.example
+*.log
 server.log
+.deploy-repair-*.done
 .superpowers/
 data/pdf_cache/
 data/db-imports/

@@ -9,7 +9,7 @@ from fastapi import Request, Response
 
 import auth_service
 import cache
-import stock_price
+from services import stock_quotes
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ async def attach_quote_snapshots(items: list[dict]) -> list[dict]:
             return enriched
         try:
             async with RECENT_QUOTES_SEMAPHORE:
-                enriched["quote_snapshot"] = await stock_price.fetch_quote_snapshot(item["stock_code"])
+                enriched["quote_snapshot"] = await stock_quotes.get_quote_snapshot(item["stock_code"])
         except Exception as exc:
             logger.warning("사이드바 현재가 조회 실패(%s): %s", item.get("stock_code"), exc)
             enriched["quote_snapshot"] = {}

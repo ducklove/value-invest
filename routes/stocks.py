@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
-import stock_price
 from deps import get_current_user
+from services import stock_quotes
 
 router = APIRouter()
 
@@ -95,4 +95,4 @@ async def quote_snapshot(stock_code: str):
     corp_code = await cache.get_corp_code(stock_code)
     if not corp_code:
         raise HTTPException(status_code=404, detail="종목코드를 찾을 수 없습니다.")
-    return await stock_price.fetch_quote_snapshot(stock_code)
+    return await stock_quotes.get_quote_snapshot(stock_code)

@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 import cache
 import close_price_client
 import kis_proxy_client
+from services.portfolio import runtime_quotes as portfolio_quotes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -96,8 +97,6 @@ async def _fetch_historical_korean_quote(stock_code: str, snap_date: str) -> dic
 
 async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, float, list[dict]]:
     """Return (total_market_value, total_invested, per_stock_values) for a user's portfolio."""
-    from routes.portfolio import _fetch_quote, _is_korean_stock
-
     items = await cache.get_portfolio(google_sub)
     # Load previous per-stock snapshot for fallback (avoids avg_price distortion)
     prev_stock_map = {}
@@ -114,17 +113,17 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
         avg_price = item["avg_price"]
         total_invested += qty * avg_price
         try:
-            if _is_korean_stock(item["stock_code"]):
+            if portfolio_quotes.is_korean_stock(item["stock_code"]):
                 if date.fromisoformat(snap_date) < _today_kst():
                     quote = await _fetch_historical_korean_quote(item["stock_code"], snap_date)
                 else:
-                    quote = await _fetch_quote(
+                    quote = await portfolio_quotes.fetch_quote(
                         item["stock_code"],
                         force_refresh=True,
                         use_ws_cache=False,
                     )
             else:
-                quote = await _fetch_quote(item["stock_code"])
+                quote = await portfolio_quotes.fetch_quote(item["stock_code"])
             price = None if not quote or quote.get("_stale") is True else _safe_float(quote.get("price"))
             if price is not None:
                 mv = qty * price
@@ -243,8 +242,7 @@ async def _fetch_fx_usdkrw():
     """Fetch current USD/KRW rate."""
     global _fx_usdkrw
     try:
-        from routes.portfolio import _fetch_cash_quote
-        q = await _fetch_cash_quote("CASH_USD")
+        q = await portfolio_quotes.fetch_cash_quote("CASH_USD")
         if q and q.get("price"):
             _fx_usdkrw = q["price"]
             logger.info("FX USD/KRW: %.2f", _fx_usdkrw)

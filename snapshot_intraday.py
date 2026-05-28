@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import cache
+from services.portfolio import runtime_quotes as portfolio_quotes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -33,8 +34,6 @@ def _quote_price(quote: dict | None) -> float | None:
 
 
 async def _fetch_total_value(google_sub: str, snap_date: str | None = None) -> float:
-    from routes.portfolio import _fetch_quote, _is_korean_stock
-
     snap_date = snap_date or _today_kst()
     items = await cache.get_portfolio(google_sub)
     prev_stock_values = {
@@ -48,12 +47,12 @@ async def _fetch_total_value(google_sub: str, snap_date: str | None = None) -> f
     for item in items:
         code = item["stock_code"]
         qty = float(item["quantity"])
-        is_korean = _is_korean_stock(code)
+        is_korean = portfolio_quotes.is_korean_stock(code)
         try:
             if is_korean:
-                quote = await _fetch_quote(code, force_refresh=True, use_ws_cache=False)
+                quote = await portfolio_quotes.fetch_quote(code, force_refresh=True, use_ws_cache=False)
             else:
-                quote = await _fetch_quote(code)
+                quote = await portfolio_quotes.fetch_quote(code)
             price = _quote_price(quote)
         except Exception as exc:
             logger.warning("Intraday quote fetch failed for %s: %s", code, exc)

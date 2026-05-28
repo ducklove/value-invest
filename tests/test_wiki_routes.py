@@ -260,31 +260,31 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
     async def test_shortcut_per_question(self):
         # _fetch_quote returns empty dict via mock so shortcut relies on
         # market_data only.
-        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={})):
+        with patch.object(wiki_route.portfolio_quotes, "fetch_quote", new=AsyncMock(return_value={})):
             ans = await wiki_route._try_shortcut("005930", "PER 몇이야?")
         self.assertIsNotNone(ans)
         self.assertIn("13.5", ans)
         self.assertIn("삼성전자", ans)
 
     async def test_shortcut_market_cap(self):
-        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={})):
+        with patch.object(wiki_route.portfolio_quotes, "fetch_quote", new=AsyncMock(return_value={})):
             ans = await wiki_route._try_shortcut("005930", "시가총액은?")
         self.assertIsNotNone(ans)
         self.assertIn("조", ans)  # 460조 formatted
 
     async def test_shortcut_dividend_yield(self):
-        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={})):
+        with patch.object(wiki_route.portfolio_quotes, "fetch_quote", new=AsyncMock(return_value={})):
             ans = await wiki_route._try_shortcut("005930", "배당수익률 얼마?")
         self.assertIsNotNone(ans)
         self.assertIn("0.48", ans)
 
     async def test_shortcut_current_price_needs_live_quote(self):
         # Without live quote, the 현재가 shortcut can't answer and falls through.
-        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={})):
+        with patch.object(wiki_route.portfolio_quotes, "fetch_quote", new=AsyncMock(return_value={})):
             ans = await wiki_route._try_shortcut("005930", "현재가 얼마?")
         self.assertIsNone(ans)
         # With a live quote it should answer.
-        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={
+        with patch.object(wiki_route.portfolio_quotes, "fetch_quote", new=AsyncMock(return_value={
             "price": 80000, "change": 500, "change_pct": 0.63,
         })):
             ans = await wiki_route._try_shortcut("005930", "현재가 얼마?")
@@ -294,7 +294,7 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_shortcut_misses_complex_question(self):
         # A deep question must fall through to LLM.
-        with patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={"price": 80000})):
+        with patch.object(wiki_route.portfolio_quotes, "fetch_quote", new=AsyncMock(return_value={"price": 80000})):
             ans = await wiki_route._try_shortcut("005930", "이 종목 앞으로 전망 어때?")
         self.assertIsNone(ans)
 

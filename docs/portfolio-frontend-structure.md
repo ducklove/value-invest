@@ -8,17 +8,29 @@
 
 `static/index.html`은 아래 순서로 포트폴리오 기능을 로드한다. 순서가 곧 의존성 계약이므로 임의로 바꾸지 않는다.
 
-1. `portfolio-shell.js`: 공유 상태, 컬럼 표시 설정, 뷰 전환, NPS 뷰 진입점.
-2. `portfolio-data.js`: 포트폴리오 API 로딩, 정렬/필터 상태, 실시간 quote row 업데이트.
-3. `portfolio-render.js`: 보유종목 테이블/카드 렌더링, 숫자 포맷, sparkline, benchmark 표시.
-4. `portfolio-actions.js`: 행 drag/drop, 그룹/benchmark/편집/삭제/검색/목표가/외부 링크 액션.
-5. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
-6. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
-7. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
-8. `portfolio-performance.js`: 추이 분석 탭 shell, 영역지도, 성과 데이터 로딩.
-9. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화.
-10. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
-11. `portfolio-events.js`: document-level delegated event handlers.
+1. `utils.js`: 공통 API fetch, 포맷, 앱 설정, markdown 렌더링.
+2. `portfolio-trend-chart.js`: NAV/평가금액 추이용 canvas chart adapter.
+3. `quote-manager.js`: WebSocket 시세와 polling fallback lifecycle.
+4. `auth.js`: 로그인, 세션, 사용자 상태.
+5. `search.js`: 종목 검색 UI.
+6. `analysis.js`: 단일 종목 분석 UI.
+7. `portfolio-shell.js`: 공유 상태, 컬럼 표시 설정, 뷰 전환, NPS 뷰 진입점.
+8. `portfolio-data.js`: 포트폴리오 API 로딩, 정렬/필터 상태, 실시간 quote row 업데이트.
+9. `portfolio-order.js`: 보유종목 drag/drop 정렬과 저장.
+10. `portfolio-render.js`: 보유종목 테이블/카드 렌더링, 숫자 포맷, sparkline, benchmark 표시.
+11. `portfolio-actions.js`: 그룹/benchmark/편집/삭제/검색/목표가/외부 링크 액션.
+12. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
+13. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
+14. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
+15. `portfolio-performance.js`: 추이 분석 탭 shell, 영역지도, 성과 데이터 로딩.
+16. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화.
+17. `portfolio-group-composition.js`: 그룹 구성 추이 drill-down.
+18. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
+19. `portfolio-tag-summary.js`: 태그 요약 UI.
+20. `portfolio-events.js`: document-level delegated event handlers.
+21. `backtest.js`: 백테스트 UI.
+22. `insights.js`: 인사이트 목록 UI.
+23. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
 
 ## Legacy Entrypoint
 

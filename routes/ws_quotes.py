@@ -17,6 +17,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 import kis_key_manager
 import kis_ws_manager
+from services import stock_quotes
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,13 @@ async def _send_json(websocket: WebSocket, session: _Session, payload: dict) -> 
         await websocket.send_json(payload)
 
 
+def _quote_payload(raw_quote: dict) -> dict | None:
+    stock = stock_quotes.remember_quote(raw_quote.get("code"), raw_quote)
+    if stock is None:
+        return None
+    return {"type": "quote", **stock_quotes.stock_to_quote(stock)}
+
+
 async def _start_connection(
     websocket: WebSocket,
     session: _Session,
@@ -73,7 +81,9 @@ async def _start_connection(
         try:
             while True:
                 quote = await conn.listener.get()
-                await _send_json(websocket, session, {"type": "quote", **quote})
+                payload = _quote_payload(quote)
+                if payload:
+                    await _send_json(websocket, session, payload)
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -211,7 +221,9 @@ async def ws_quotes(websocket: WebSocket):
             else {}
         )
         for quote in cached.values():
-            await _send_json(websocket, session, {"type": "quote", **quote})
+            payload = _quote_payload(quote)
+            if payload:
+                await _send_json(websocket, session, payload)
 
         # Report slot availability
         await _send_json(websocket, session, {
@@ -329,11 +341,9 @@ async def ws_quotes(websocket: WebSocket):
                 all_cached = kis_ws_manager.get_all_cached_quotes()
                 for code in result["ws"]:
                     if code in all_cached:
-                        await _send_json(
-                            websocket,
-                            session,
-                            {"type": "quote", **all_cached[code]},
-                        )
+                        payload = _quote_payload(all_cached[code])
+                        if payload:
+                            await _send_json(websocket, session, payload)
 
     except WebSocketDisconnect:
         logger.debug("Browser WebSocket disconnected")
