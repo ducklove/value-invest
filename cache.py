@@ -3136,28 +3136,43 @@ async def get_pending_cashflows(google_sub: str, date: str) -> list[dict]:
 
 
 async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
-    """Save per-stock market values for a date. items: [{stock_code, market_value}, ...]"""
-    db = await get_db()
-    await db.executemany(
-        """
-        INSERT OR REPLACE INTO portfolio_stock_snapshots
-        (google_sub, date, stock_code, market_value, group_name)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                google_sub,
-                date,
-                it["stock_code"],
-                it["market_value"],
-                it.get("group_name"),
+    """Save per-stock market values for a date. items: [{stock_code, market_value}, ...]
+
+    The per-stock write and the two aggregate rebuilds (group + weight
+    snapshots) must succeed or fail together: each rebuild DELETEs the day's
+    rows before re-INSERTing, so a partial failure would otherwise leave the
+    aggregate tables emptied. Run them in one explicit transaction on a
+    dedicated connection and roll back on any error.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout=5000")
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await db.executemany(
+                """
+                INSERT OR REPLACE INTO portfolio_stock_snapshots
+                (google_sub, date, stock_code, market_value, group_name)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        google_sub,
+                        date,
+                        it["stock_code"],
+                        it["market_value"],
+                        it.get("group_name"),
+                    )
+                    for it in items
+                ],
             )
-            for it in items
-        ],
-    )
-    await _refresh_group_snapshots(db, google_sub=google_sub, snap_date=date)
-    await _refresh_stock_weight_snapshots(db, google_sub=google_sub, snap_date=date)
-    await db.commit()
+            await _refresh_group_snapshots(db, google_sub=google_sub, snap_date=date)
+            await _refresh_stock_weight_snapshots(db, google_sub=google_sub, snap_date=date)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
 
 async def get_stock_snapshots_by_date(google_sub: str, date: str) -> list[dict]:

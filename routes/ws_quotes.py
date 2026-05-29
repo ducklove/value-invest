@@ -17,6 +17,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 import kis_key_manager
 import kis_ws_manager
+from core.config import get_settings
 from services import stock_quotes
 
 logger = logging.getLogger(__name__)
@@ -24,27 +25,61 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _origin_allowed(origin: str | None) -> bool:
+    """Allow the handshake only from a same-site browser.
+
+    Browsers cannot forge the Origin header, so requiring it to be in the
+    CORS allowlist blocks drive-by cross-site pages from opening the quote
+    socket and exhausting scarce KIS key slots via ``takeover``. The SPA is
+    served same-origin from the app, so its Origin is the app's own URL,
+    which must be present in CORS_ALLOWED_ORIGINS (it is by default).
+    """
+    if not origin:
+        return False
+    allowed = get_settings().cors_allowed_origins
+    if "*" in allowed:
+        return True
+    target = origin.rstrip("/").lower()
+    return any(target == candidate.rstrip("/").lower() for candidate in allowed)
+
+
 # ---------------------------------------------------------------------------
 # Session tracking
 # ---------------------------------------------------------------------------
+
+
+class _Conn:
+    """One KIS WebSocket connection bundled with the key slot and relay task it owns.
+
+    Keeping the three together (instead of three parallel lists) makes start,
+    trim, and teardown atomic per connection — a partial failure can no longer
+    desynchronize the lists or leak a key slot.
+    """
+
+    __slots__ = ("key_slot", "ws_conn", "relay_task")
+
+    def __init__(
+        self,
+        key_slot: kis_key_manager.KeySlot,
+        ws_conn: kis_ws_manager.WsConnection,
+    ) -> None:
+        self.key_slot = key_slot
+        self.ws_conn = ws_conn
+        self.relay_task: asyncio.Task | None = None
 
 
 class _Session:
     """Mutable state for one browser WebSocket handler."""
 
     __slots__ = (
-        "key_slots",
-        "ws_conns",
-        "relay_tasks",
+        "conns",
         "send_lock",
         "is_active",
         "kicked",
     )
 
     def __init__(self) -> None:
-        self.key_slots: list[kis_key_manager.KeySlot] = []
-        self.ws_conns: list[kis_ws_manager.WsConnection] = []
-        self.relay_tasks: list[asyncio.Task] = []
+        self.conns: list[_Conn] = []
         self.send_lock = asyncio.Lock()
         self.is_active: bool = False
         self.kicked: bool = False
@@ -72,45 +107,61 @@ async def _start_connection(
     session: _Session,
     key_slot: kis_key_manager.KeySlot,
 ) -> None:
-    conn = kis_ws_manager.WsConnection(key_slot)
-    await conn.start()
-    session.key_slots.append(key_slot)
-    session.ws_conns.append(conn)
+    ws_conn = kis_ws_manager.WsConnection(key_slot)
+    entry = _Conn(key_slot, ws_conn)
+    # Register the slot before start() so that if start() raises, teardown
+    # still releases the key slot instead of leaking it.
+    session.conns.append(entry)
+    try:
+        await ws_conn.start()
+    except Exception:
+        session.conns.remove(entry)
+        await _teardown_conn(entry)
+        raise
 
     async def _relay() -> None:
         try:
             while True:
-                quote = await conn.listener.get()
-                payload = _quote_payload(quote)
+                quote = await ws_conn.listener.get()
+                try:
+                    payload = _quote_payload(quote)
+                except Exception:
+                    logger.warning("ws relay: failed to build quote payload", exc_info=True)
+                    continue
                 if payload:
                     await _send_json(websocket, session, payload)
         except asyncio.CancelledError:
             pass
         except Exception:
-            pass
+            # Send failure (browser gone) or listener error: stop relaying and
+            # let the main receive loop detect the disconnect and clean up.
+            logger.warning("ws relay stopped unexpectedly", exc_info=True)
 
-    session.relay_tasks.append(
-        asyncio.create_task(_relay(), name=f"ws-quote-relay-{key_slot.slot_id}")
+    entry.relay_task = asyncio.create_task(
+        _relay(), name=f"ws-quote-relay-{key_slot.slot_id}"
     )
 
 
-async def _stop_session(session: _Session) -> None:
-    for task in list(session.relay_tasks):
-        task.cancel()
-    for task in list(session.relay_tasks):
+async def _teardown_conn(entry: _Conn) -> None:
+    """Cancel the relay task, stop the connection, and always release the slot."""
+    if entry.relay_task is not None:
+        entry.relay_task.cancel()
         try:
-            await task
+            await entry.relay_task
         except asyncio.CancelledError:
             pass
-    session.relay_tasks.clear()
+        entry.relay_task = None
+    try:
+        await entry.ws_conn.stop()
+    except Exception:
+        logger.warning("ws teardown: connection stop failed", exc_info=True)
+    await kis_key_manager.release(entry.key_slot)
 
-    for conn in list(session.ws_conns):
-        await conn.stop()
-    session.ws_conns.clear()
 
-    for slot in list(session.key_slots):
-        await kis_key_manager.release(slot)
-    session.key_slots.clear()
+async def _stop_session(session: _Session) -> None:
+    for entry in list(session.conns):
+        await _teardown_conn(entry)
+    session.conns.clear()
     session.is_active = False
 
 
@@ -140,17 +191,9 @@ async def _evict_oldest_session(exclude: _Session | None = None) -> bool:
 
 
 async def _trim_extra_connections(session: _Session, desired_count: int) -> None:
-    while len(session.ws_conns) > desired_count:
-        task = session.relay_tasks.pop()
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        conn = session.ws_conns.pop()
-        await conn.stop()
-        slot = session.key_slots.pop()
-        await kis_key_manager.release(slot)
+    while len(session.conns) > desired_count:
+        entry = session.conns.pop()
+        await _teardown_conn(entry)
 
 
 async def _ensure_session_capacity(
@@ -175,7 +218,7 @@ async def _ensure_session_capacity(
         ),
     )
 
-    while len(session.ws_conns) < desired:
+    while len(session.conns) < desired:
         key_slot = await kis_key_manager.acquire()
         if key_slot is None:
             if not await _evict_oldest_session(exclude=session):
@@ -185,19 +228,19 @@ async def _ensure_session_capacity(
                 break
         await _start_connection(websocket, session, key_slot)
 
-    await _trim_extra_connections(session, min(desired, len(session.ws_conns)))
+    await _trim_extra_connections(session, min(desired, len(session.conns)))
 
 
 def _apply_multi_connection_plan(session: _Session, requested: dict) -> dict[str, list[str]]:
-    capacity = len(session.ws_conns) * kis_ws_manager.MAX_SUBSCRIPTIONS
+    capacity = len(session.conns) * kis_ws_manager.MAX_SUBSCRIPTIONS
     result = kis_ws_manager.plan_requested_subscriptions(
         requested,
         max_subscriptions=capacity,
     )
-    for idx, conn in enumerate(session.ws_conns):
+    for idx, entry in enumerate(session.conns):
         start = idx * kis_ws_manager.MAX_SUBSCRIPTIONS
         end = start + kis_ws_manager.MAX_SUBSCRIPTIONS
-        conn.update_subscriptions({"portfolio": result["ws"][start:end]})
+        entry.ws_conn.update_subscriptions({"portfolio": result["ws"][start:end]})
     return result
 
 
@@ -208,6 +251,12 @@ def _apply_multi_connection_plan(session: _Session, requested: dict) -> dict[str
 
 @router.websocket("/ws/quotes")
 async def ws_quotes(websocket: WebSocket):
+    if not _origin_allowed(websocket.headers.get("origin")):
+        logger.warning(
+            "ws/quotes rejected: untrusted origin %r", websocket.headers.get("origin")
+        )
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     session = _Session()
 
@@ -254,7 +303,7 @@ async def ws_quotes(websocket: WebSocket):
                             "type": "ws_status",
                             "occupied": False,
                             "active": True,
-                            "slots_active": len(session.ws_conns),
+                            "slots_active": len(session.conns),
                         },
                     )
                     continue
@@ -304,14 +353,14 @@ async def ws_quotes(websocket: WebSocket):
                         "type": "ws_status",
                         "occupied": False,
                         "active": True,
-                        "slots_active": len(session.ws_conns),
+                        "slots_active": len(session.conns),
                         "slots_total": kis_key_manager.total_count(),
                         "slots_available": kis_key_manager.available_count(),
                     },
                 )
 
             elif action == "subscribe":
-                if not session.is_active or not session.ws_conns:
+                if not session.is_active or not session.conns:
                     # Not active — all codes fall back to REST
                     await _send_json(websocket, session, {
                         "type": "subscriptions",
@@ -329,12 +378,12 @@ async def ws_quotes(websocket: WebSocket):
                 await _send_json(websocket, session, {
                     "type": "subscriptions",
                     **result,
-                    "slots_active": len(session.ws_conns),
+                    "slots_active": len(session.conns),
                     "slots_total": kis_key_manager.total_count(),
                     "slots_available": kis_key_manager.available_count(),
                 })
                 await asyncio.gather(
-                    *(conn.sync_subscriptions() for conn in session.ws_conns)
+                    *(entry.ws_conn.sync_subscriptions() for entry in session.conns)
                 )
 
                 # Send cached quotes for newly subscribed codes

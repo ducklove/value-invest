@@ -1163,18 +1163,6 @@ _INSIGHT_FX_TICKER = {
     "CHF": "CHFKRW=X",
 }
 
-_BENCHMARK_YF_TICKER = {
-    "IDX_KOSPI": "^KS11",
-    "IDX_KOSDAQ": "^KQ11",
-    "IDX_SP500": "^GSPC",
-    "GOLD": "GC=F",
-    "AGG": "AGG",
-    "FX_USDKRW": "KRW=X",
-    "FX_EURKRW": "EURKRW=X",
-    "FX_JPYKRW": "JPYKRW=X",
-    "FX_CNYKRW": "CNYKRW=X",
-}
-
 def _yfinance_direct_ticker(code: str) -> str:
     ticker = (code or "").strip()
     if "/" in ticker:

@@ -28,19 +28,40 @@ def _load_keys() -> dict[str, str]:
     return values
 
 
-_KEYS = _load_keys()
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", _KEYS.get("GOOGLE_CLIENT_ID", ""))
-SESSION_SECRET = os.getenv("SESSION_SECRET", _KEYS.get("SESSION_SECRET", ""))
+_KEYS_CACHE: dict[str, str] | None = None
+
+
+def _keys() -> dict[str, str]:
+    """Lazily read keys.txt once.
+
+    keys.txt is a static file so caching it is fine. The point of reading
+    lazily is os.getenv: values loaded by core.config.load_environment()
+    (e.g. .env.production) must be seen instead of being frozen at import
+    time — otherwise importing this module before load_environment() (batch
+    scripts, tests) silently disables auth.
+    """
+    global _KEYS_CACHE
+    if _KEYS_CACHE is None:
+        _KEYS_CACHE = _load_keys()
+    return _KEYS_CACHE
+
+
+def google_client_id() -> str:
+    return os.getenv("GOOGLE_CLIENT_ID") or _keys().get("GOOGLE_CLIENT_ID", "")
+
+
+def session_secret() -> str:
+    return os.getenv("SESSION_SECRET") or _keys().get("SESSION_SECRET", "")
 
 
 def is_enabled() -> bool:
-    return bool(GOOGLE_CLIENT_ID and SESSION_SECRET)
+    return bool(google_client_id() and session_secret())
 
 
 def public_config() -> dict:
     return {
         "enabled": is_enabled(),
-        "google_client_id": GOOGLE_CLIENT_ID if is_enabled() else "",
+        "google_client_id": google_client_id() if is_enabled() else "",
     }
 
 
@@ -49,10 +70,11 @@ def new_session_token() -> str:
 
 
 def hash_session_token(token: str) -> str:
-    if not SESSION_SECRET:
+    secret = session_secret()
+    if not secret:
         raise RuntimeError("SESSION_SECRET is not configured.")
     digest = hmac.new(
-        SESSION_SECRET.encode("utf-8"),
+        secret.encode("utf-8"),
         token.encode("utf-8"),
         hashlib.sha256,
     )
@@ -68,13 +90,14 @@ async def verify_google_credential(credential: str) -> dict:
 
 
 def _verify_google_credential_sync(credential: str) -> dict:
-    if not GOOGLE_CLIENT_ID:
+    client_id = google_client_id()
+    if not client_id:
         raise RuntimeError("GOOGLE_CLIENT_ID is not configured.")
 
     idinfo = id_token.verify_oauth2_token(
         credential,
         google_requests.Request(),
-        GOOGLE_CLIENT_ID,
+        client_id,
     )
 
     google_sub = (idinfo.get("sub") or "").strip()

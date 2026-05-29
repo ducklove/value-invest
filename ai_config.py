@@ -42,7 +42,8 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
     "portfolio_premium": {
         "label": "포트폴리오 인사이트 고급",
         "env": "AI_PREMIUM_MODEL",
-        "default": os.getenv("AI_DEFAULT_MODEL", DEFAULT_PORTFOLIO_AI_MODEL),
+        "default_env": "AI_DEFAULT_MODEL",
+        "default": DEFAULT_PORTFOLIO_AI_MODEL,
     },
     "wiki_qa": {
         "label": "종목 위키 Q&A",
@@ -52,7 +53,8 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
     "wiki_ingestion": {
         "label": "리포트 위키 요약",
         "env": "WIKI_MODEL",
-        "default": os.getenv("AI_DEFAULT_MODEL", "qwen/qwen3.6-plus"),
+        "default_env": "AI_DEFAULT_MODEL",
+        "default": "qwen/qwen3.6-plus",
     },
     "dart_report_review": {
         "label": "DART 정기보고서 리뷰",
@@ -72,7 +74,15 @@ def _model_setting_key(feature: str) -> str:
 
 
 def _configured_default_model(spec: dict[str, str]) -> str:
-    return os.getenv(spec["env"], spec["default"])
+    value = os.getenv(spec["env"])
+    if value:
+        return value
+    chained_env = spec.get("default_env")
+    if chained_env:
+        chained = os.getenv(chained_env)
+        if chained:
+            return chained
+    return spec["default"]
 
 
 def _load_key_from_file(name: str) -> str:

@@ -67,15 +67,19 @@ def _request_origin(request: Request) -> str:
 
 
 def _trusted_admin_origins(request: Request) -> set[str]:
+    """Static allowlist only — never derived from request headers.
+
+    Trusting a request-derived Origin (Host / X-Forwarded-Host) would let an
+    attacker who can spoof those headers add their own origin to the trusted
+    set and slip past the CSRF guard. Use the fixed defaults plus the
+    ADMIN_ALLOWED_ORIGINS env allowlist instead.
+    """
     configured = {
         _normalize_origin(origin)
         for origin in os.getenv("ADMIN_ALLOWED_ORIGINS", "").split(",")
         if origin.strip()
     }
     defaults = {_normalize_origin(origin) for origin in TRUSTED_RETURN_ORIGINS}
-    current = _request_origin(request)
-    if current:
-        defaults.add(current)
     return {origin for origin in (defaults | configured) if origin}
 
 
@@ -87,6 +91,21 @@ def _is_local_or_test_request(request: Request) -> bool:
     ).split(":", 1)[0].lower()
     client_host = request.client.host if request.client else ""
     return host in _LOCAL_OR_TEST_HOSTS or client_host in _LOCAL_OR_TEST_HOSTS
+
+
+def _origin_host_is_local(origin: str) -> bool:
+    """True if a normalized Origin/Referer points at a loopback/test host.
+
+    Such an origin cannot be produced by a cross-site attacker page (its
+    Origin is always the attacker's own public domain), so it is safe to
+    trust without consulting any spoofable request header like Host /
+    X-Forwarded-Host.
+    """
+    try:
+        host = (urlparse(origin).hostname or "").lower()
+    except Exception:
+        return False
+    return host in _LOCAL_OR_TEST_HOSTS
 
 
 async def _require_admin_mutation(request: Request) -> dict:
@@ -107,11 +126,15 @@ async def _require_admin_mutation(request: Request) -> dict:
     origin = _normalize_origin(request.headers.get("origin"))
     if not origin:
         origin = _normalize_origin(request.headers.get("referer"))
-    if not origin and _is_local_or_test_request(request):
-        return user
-    if origin not in _trusted_admin_origins(request):
+    if not origin:
+        # No Origin/Referer at all (non-browser client): allow only genuine
+        # local/test requests, never a public deployment.
+        if _is_local_or_test_request(request):
+            return user
         raise HTTPException(status_code=403, detail="허용되지 않은 관리자 요청 출처입니다.")
-    return user
+    if origin in _trusted_admin_origins(request) or _origin_host_is_local(origin):
+        return user
+    raise HTTPException(status_code=403, detail="허용되지 않은 관리자 요청 출처입니다.")
 
 
 # ---------------------------------------------------------------------------

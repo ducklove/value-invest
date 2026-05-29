@@ -236,6 +236,12 @@ async def get_stock(
         cached = _stock_cache.get(normalized)
         if cached:
             return cached
+        # WS realtime takes priority over a stale dead-stock marker so a
+        # single REST failure does not blind us to live ticks for 5 minutes.
+        if use_ws_cache:
+            ws_stock = _get_ws_stock(normalized, max_age_seconds=max_ws_age_seconds)
+            if ws_stock:
+                return _remember(ws_stock)
         if _dead_stock_cache.get(normalized):
             return _last_known.get(normalized)
 
@@ -245,12 +251,12 @@ async def get_stock(
             cached = _stock_cache.get(normalized)
             if cached:
                 return cached
-            if _dead_stock_cache.get(normalized):
-                return _last_known.get(normalized)
             if use_ws_cache:
                 ws_stock = _get_ws_stock(normalized, max_age_seconds=max_ws_age_seconds)
                 if ws_stock:
                     return _remember(ws_stock)
+            if _dead_stock_cache.get(normalized):
+                return _last_known.get(normalized)
 
         quote = await _fetch_upstream_quote(
             normalized,
