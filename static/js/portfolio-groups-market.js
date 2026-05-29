@@ -333,9 +333,9 @@ function _mbRenderBar(dataMap) {
       const isDown = d.direction === 'down';
       const cls = isDown ? 'mi-down' : (d.direction === 'up' ? 'mi-up' : '');
       const sign = isDown ? '-' : (d.direction === 'up' ? '+' : '');
-      const chgVal = d.change ? `${sign}${d.change}` : '';
-      const chgPct = rawPct ? `(${sign}${rawPct}%)` : '';
-      valHtml = d.value;
+      const chgVal = d.change ? `${sign}${escapeHtml(String(d.change))}` : '';
+      const chgPct = rawPct ? `(${sign}${escapeHtml(rawPct)}%)` : '';
+      valHtml = escapeHtml(String(d.value));
       chgHtml = `<span class="${cls}">${chgVal} ${chgPct}</span>`;
     }
     html += `<span class="mi-label" draggable="true" data-idx="${r}">${escapeHtml(label)}</span>`;

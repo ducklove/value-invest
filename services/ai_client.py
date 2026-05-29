@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Callable, AsyncIterator
@@ -10,6 +11,15 @@ import ai_config
 
 
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+_SECRET_RE = re.compile(r"(sk-or-[A-Za-z0-9._-]+|sk-[A-Za-z0-9._-]+|Bearer\s+[A-Za-z0-9._-]+)")
+
+
+def _sanitize_secret_text(text: str) -> str:
+    """Redact OpenRouter/bearer secrets that may leak into error strings or DB logs."""
+    if not text:
+        return text
+    return _SECRET_RE.sub("***", text)
 
 
 class OpenRouterError(RuntimeError):
@@ -112,7 +122,7 @@ async def post_chat_completion(
                 )
         if resp.status_code != 200:
             raise OpenRouterError(
-                f"OpenRouter HTTP {resp.status_code}: {resp.text[:300]}",
+                f"OpenRouter HTTP {resp.status_code}: {_sanitize_secret_text(resp.text[:300])}",
                 status_code=resp.status_code,
             )
         data = resp.json()
@@ -149,7 +159,7 @@ async def post_chat_completion(
                 model=resolved_model,
                 model_profile=model_profile or feature,
                 ok=False,
-                error=str(exc),
+                error=_sanitize_secret_text(str(exc)),
                 latency_ms=int((time.monotonic() - started) * 1000),
             )
         raise

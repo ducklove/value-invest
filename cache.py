@@ -21,6 +21,7 @@ async def get_db() -> aiosqlite.Connection:
         _conn = await aiosqlite.connect(DB_PATH)
         _conn.row_factory = aiosqlite.Row
         await _conn.execute("PRAGMA journal_mode=WAL")
+        await _conn.execute("PRAGMA busy_timeout=5000")
         await _conn.execute("PRAGMA foreign_keys=ON")
     return _conn
 
@@ -2722,6 +2723,7 @@ async def replace_portfolio(google_sub: str, items: list[dict]):
     """Atomic replace: delete all + insert new in one transaction."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout=5000")
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute("BEGIN IMMEDIATE")
         try:
@@ -3019,6 +3021,7 @@ async def add_cashflow_and_sync_cash(
     now = datetime.now().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout=5000")
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute("BEGIN IMMEDIATE")
         try:
@@ -3068,6 +3071,7 @@ async def add_cashflow_and_sync_cash(
 async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout=5000")
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute("BEGIN IMMEDIATE")
         try:

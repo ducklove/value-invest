@@ -2537,7 +2537,9 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
 async def delete_cashflow(cf_id: int, request: Request):
     user = _require_user(await get_current_user(request))
     google_sub = user["google_sub"]
-    await cache.delete_cashflow_and_sync_cash(google_sub, cf_id)
+    deleted = await cache.delete_cashflow_and_sync_cash(google_sub, cf_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="현금흐름을 찾을 수 없습니다.")
 
     return {"ok": True}
 
