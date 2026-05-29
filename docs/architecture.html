@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>value-invest 아키텍처 문서</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --line:#2a2f3a;
+    --txt:#e6e9ef; --muted:#9aa3b2; --accent:#5ab0ff; --accent2:#7ee0a2;
+    --warn:#ffcf66; --bad:#ff7b72; --chip:#222836;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+    line-height:1.6;font-size:15px}
+  header{padding:42px 28px 28px;border-bottom:1px solid var(--line);
+    background:radial-gradient(1200px 300px at 20% -40%,rgba(90,176,255,.18),transparent)}
+  header h1{margin:0 0 6px;font-size:30px;letter-spacing:-.5px}
+  header .sub{color:var(--muted);font-size:14px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px}
+  nav.toc{position:sticky;top:0;z-index:5;background:rgba(15,17,21,.92);
+    backdrop-filter:blur(6px);border-bottom:1px solid var(--line);padding:10px 0}
+  nav.toc .wrap{display:flex;flex-wrap:wrap;gap:8px}
+  nav.toc a{color:var(--muted);text-decoration:none;font-size:12.5px;
+    padding:4px 10px;border:1px solid var(--line);border-radius:999px}
+  nav.toc a:hover{color:var(--txt);border-color:var(--accent)}
+  section{padding:34px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:21px;margin:0 0 14px;display:flex;align-items:center;gap:10px}
+  h2 .n{color:var(--accent);font-variant-numeric:tabular-nums;font-size:15px;
+    border:1px solid var(--line);border-radius:8px;padding:1px 8px}
+  h3{font-size:16px;margin:22px 0 8px;color:#cfd6e2}
+  p{margin:8px 0;color:#d3d8e2}
+  code{background:var(--chip);padding:1px 6px;border-radius:5px;font-size:13px;
+    font-family:"SF Mono",Consolas,monospace;color:#e8d9a8}
+  .muted{color:var(--muted)}
+  ul{margin:8px 0;padding-left:20px}
+  li{margin:3px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  td code{white-space:nowrap}
+  .grid{display:grid;gap:14px}
+  .cards{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin:0 0 6px;font-size:14.5px}
+  .card p{margin:2px 0;font-size:13px;color:var(--muted)}
+  .badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;
+    border:1px solid var(--line);color:var(--muted)}
+  .b-done{color:#0c1a12;background:var(--accent2);border-color:var(--accent2)}
+  .b-prog{color:#1c1607;background:var(--warn);border-color:var(--warn)}
+  .b-plan{color:#cdd3df;background:var(--chip)}
+  .b-debt{color:#240f0e;background:var(--bad);border-color:var(--bad)}
+  /* layered diagram */
+  .stack{display:flex;flex-direction:column;gap:0;margin:18px 0}
+  .layer{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;position:relative}
+  .layer + .layer{margin-top:30px}
+  .layer + .layer::before{content:"▼";position:absolute;top:-24px;left:50%;
+    transform:translateX(-50%);color:var(--accent);font-size:13px}
+  .layer .lh{font-size:12px;color:var(--accent);text-transform:uppercase;
+    letter-spacing:.6px;margin-bottom:8px}
+  .boxes{display:flex;flex-wrap:wrap;gap:8px}
+  .box{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:6px 11px;font-size:12.5px;font-family:"SF Mono",Consolas,monospace;color:#cfe3ff}
+  .box.new{border-color:var(--accent2);color:#bff3d2}
+  .box.big{border-color:var(--warn);color:#ffe3a6}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .note{background:var(--panel2);border-left:3px solid var(--accent);
+    padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0;color:#cdd6e4;font-size:13.5px}
+  .flow{font-family:"SF Mono",Consolas,monospace;font-size:13px;color:#bcd;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto}
+  footer{padding:26px;color:var(--muted);font-size:12.5px;text-align:center}
+  a.src{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>value-invest — 시스템 아키텍처</h1>
+    <div class="sub">가치투자 포트폴리오 / 분석 / 실시간 시세 플랫폼 · FastAPI + SQLite + 바닐라 SPA · 라즈베리파이 자가호스팅<br>
+    문서 기준일 2026-05-30 · 저장소 <code>github.com/ducklove/value-invest</code></div>
+  </div>
+</header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#overview">1. 개요</a>
+  <a href="#layers">2. 계층 구조</a>
+  <a href="#runtime">3. 런타임·배포</a>
+  <a href="#backend">4. 백엔드 모듈</a>
+  <a href="#services">5. 포트폴리오 서비스</a>
+  <a href="#data">6. 데이터·캐시</a>
+  <a href="#quotes">7. 실시간 시세 파이프라인</a>
+  <a href="#frontend">8. 프론트엔드</a>
+  <a href="#refactor">9. 리팩토링 현황</a>
+  <a href="#debt">10. 남은 부채·다음 단계</a>
+</div></nav>
+
+<div class="wrap">
+
+<section id="overview">
+  <h2><span class="n">1</span> 개요</h2>
+  <p>단일 FastAPI 프로세스가 REST API, 정적 SPA, 관리자 콘솔, WebSocket 실시간 시세, 내부 배치 트리거를 모두 담당한다.
+  영속성은 단일 SQLite(<code>cache.db</code>)가 분석 캐시·사용자/세션·포트폴리오·NAV 스냅샷·AI 사용량·공시/리포트 요약·운영 이벤트를 저장한다.
+  운영 작업(일일정산·장중 스냅샷·NPS·wiki/DART ingestion)은 systemd 타이머가 내부 엔드포인트 또는 CLI로 호출한다.</p>
+  <div class="grid cards">
+    <div class="card"><h4>웹/실시간</h4><p>FastAPI · Uvicorn</p><p>SSE 스트리밍 + <code>/ws/quotes</code> WebSocket</p></div>
+    <div class="card"><h4>영속성</h4><p>SQLite (WAL, busy_timeout)</p><p>인메모리 TTL 캐시 계층</p></div>
+    <div class="card"><h4>외부 연동</h4><p>KIS(국내/해외·WS), 네이버, yfinance, Upbit, DART, OpenRouter(AI)</p></div>
+    <div class="card"><h4>배포</h4><p>GitHub Actions → 자가호스팅 러너(홈 라즈베리파이)</p><p>master push = 자동 배포</p></div>
+  </div>
+</section>
+
+<section id="layers">
+  <h2><span class="n">2</span> 계층 구조</h2>
+  <p class="muted">의존 방향은 위 → 아래 단방향이 목표다. 최근 리팩토링으로 시세/통화 로직이 라우터에서 서비스 계층으로 내려가는 중이다.</p>
+  <div class="stack">
+    <div class="layer">
+      <div class="lh">Client</div>
+      <div class="boxes">
+        <span class="box">브라우저 SPA (static/)</span>
+        <span class="box">관리자 콘솔 (admin.html)</span>
+        <span class="box">systemd timers</span>
+        <span class="box">연결 프로젝트 (holdingValue · preferredSpread · goldGap · kisProxy)</span>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="lh">App 조립 · 횡단 (core/)</div>
+      <div class="boxes">
+        <span class="box">app_factory</span><span class="box">config</span><span class="box">lifespan</span>
+        <span class="box">runtime (watchdog)</span><span class="box">static_routes</span>
+        <span class="box">deps (인증/세션)</span><span class="box">observability</span>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="lh">HTTP 핸들러 (routes/)</div>
+      <div class="boxes">
+        <span class="box big">portfolio*</span><span class="box">analysis</span><span class="box">admin</span>
+        <span class="box">auth</span><span class="box">ws_quotes</span><span class="box">nps</span>
+        <span class="box">wiki</span><span class="box">reports</span><span class="box">insights</span>
+        <span class="box">backtest</span><span class="box">stocks</span><span class="box">internal</span>
+        <span class="box">market_daily</span><span class="box">dart_review</span><span class="box">cache_mgmt</span>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="lh">도메인 서비스 (services/)</div>
+      <div class="boxes">
+        <span class="box">stock_quotes</span><span class="box">ai_client</span>
+        <span class="box">portfolio/identifiers</span><span class="box">benchmarks</span>
+        <span class="box">dividends</span><span class="box">history</span><span class="box">targets</span>
+        <span class="box">target_metrics</span><span class="box">time_windows</span><span class="box">valuation</span>
+        <span class="box">runtime_quotes (seam)</span>
+        <span class="box new">currencies ✦</span><span class="box new">fx ✦</span><span class="box new">special_assets ✦</span>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="lh">외부 클라이언트 / 도메인 로직</div>
+      <div class="boxes">
+        <span class="box">stock_price</span><span class="box">kis_proxy_client</span>
+        <span class="box">kis_ws_manager</span><span class="box">kis_key_manager</span>
+        <span class="box">close_price_client</span><span class="box">dart_client</span>
+        <span class="box">market_indicators</span><span class="box">asset_insights</span>
+        <span class="box">report_client</span><span class="box">nps_scraper</span>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="lh">영속성</div>
+      <div class="boxes">
+        <span class="box big">cache.py (SQLite repository 허브)</span>
+        <span class="box">cache_layer (MemoryTTLCache)</span>
+        <span class="box">cache.db</span>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--accent2)"></span>✦ 오늘 신설된 모듈</span>
+    <span><span class="dot" style="background:var(--warn)"></span>분해가 더 필요한 대형 파일</span>
+  </div>
+</section>
+
+<section id="runtime">
+  <h2><span class="n">3</span> 런타임 · 배포</h2>
+  <h3>부팅 (core.lifespan)</h3>
+  <ul>
+    <li><code>load_environment()</code> → <code>.env</code> → <code>.env.&lt;profile&gt;</code> → <code>.kis.env</code> → <code>keys.txt</code> 순으로 설정 로드</li>
+    <li>KIS 키 로드, KIS 프록시/close price 클라이언트 init, <code>cache.init_db()</code>, corp_codes 갱신 점검</li>
+    <li>백그라운드 루프: watchdog(sd_notify), wiki ingestion, DART 리뷰, observability prune, (옵션) insight 워밍업</li>
+    <li>종료 시 백그라운드 태스크 취소·대기, WS 정리, 클라이언트/DB close</li>
+  </ul>
+  <h3>배포 파이프라인</h3>
+  <div class="flow">git push origin master
+   └─▶ GitHub Actions: <b>deploy-home.yml</b> (self-hosted runner @ 홈 라즈베리파이)
+          └─▶ deploy/deploy.sh → 코드 갱신 + 서비스 재시작 (≈30s)</div>
+  <p class="muted">과거 <code>deploy-pages.yml</code>(GitHub Pages 프론트 호스팅)은 프론트를 FastAPI가 직접 서빙하도록 전환하며 제거됨. 현재 프론트·API 모두 동일 출처(라즈베리파이)에서 서빙.</p>
+</section>
+
+<section id="backend">
+  <h2><span class="n">4</span> 백엔드 모듈 카탈로그</h2>
+  <table>
+    <thead><tr><th>영역</th><th>모듈</th><th>책임</th></tr></thead>
+    <tbody>
+      <tr><td>코어</td><td><code>core/app_factory · config · lifespan · runtime · static_routes</code></td><td>앱 생성, 환경 설정 단일 로딩, 라이프사이클, watchdog, SPA 서빙</td></tr>
+      <tr><td>인증</td><td><code>auth_service · deps · routes/auth</code></td><td>Google OAuth 검증, 세션 토큰 해시/쿠키, 현재 사용자 조회 (설정은 호출 시점 lazy 조회)</td></tr>
+      <tr><td>포트폴리오 API</td><td><code>routes/portfolio.py</code> <span class="badge b-prog">분해중</span></td><td>포트폴리오 CRUD, 시세 배치, 벤치마크, 현금흐름, AI 분석 — 시세/이름해석 구현이 아직 일부 잔존</td></tr>
+      <tr><td>실시간 시세</td><td><code>routes/ws_quotes · services/stock_quotes · kis_ws_manager · kis_key_manager</code></td><td>브라우저 WS, KIS WS 연결/키 슬롯, 시세 단일 진입점·캐시</td></tr>
+      <tr><td>시세 소스</td><td><code>stock_price · kis_proxy_client · close_price_client · special_assets · fx</code></td><td>국내 KIS REST + 네이버 벌크, 일별 종가, 금/크립토, 환율 변환</td></tr>
+      <tr><td>분석/AI</td><td><code>routes/analysis · services/ai_client · ai_config · asset_insights · market_indicators</code></td><td>종목 분석, OpenRouter 호출(비밀 마스킹), 기능별 모델, 자산 인사이트</td></tr>
+      <tr><td>위키/공시</td><td><code>routes/wiki · wiki_ingestion · dart_report_review · dart_client · report_client</code></td><td>리포트 위키 요약, DART 정기보고서 리뷰</td></tr>
+      <tr><td>NPS/벤치마크</td><td><code>routes/nps · nps_scraper · benchmark_history</code></td><td>국민연금 스냅샷, 비교지수 이력</td></tr>
+      <tr><td>관리자/운영</td><td><code>routes/admin · internal · cache_mgmt · observability · linked_project_admin · integrations</code></td><td>배치 모니터링·수동 트리거(정적 출처 CSRF 가드), 내부 loopback 엔드포인트, 연결 프로젝트 설정</td></tr>
+      <tr><td>배치 CLI</td><td><code>snapshot_nav · snapshot_intraday · snapshot_nps</code></td><td>systemd 타이머가 호출하는 일일/장중 스냅샷</td></tr>
+      <tr><td>영속성</td><td><code>cache.py</code> <span class="badge b-prog">분해 예정</span> · <code>cache_layer.py</code></td><td>SQLite 스키마/마이그레이션/repository, 인메모리 TTL 캐시</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="services">
+  <h2><span class="n">5</span> 포트폴리오 서비스 분해 (services/portfolio)</h2>
+  <p>라우터의 god-module화를 막기 위해 순수 로직을 도메인별로 추출 중이다. 의존 방향은 <code>routes → services → (fx → currencies)</code> 단방향.</p>
+  <div class="grid cards">
+    <div class="card"><h4>identifiers</h4><p>코드 정규화, 국내/우선주/현금성/특수자산 판정, 정적 해외 ticker</p></div>
+    <div class="card"><h4>currencies ✦</h4><p>통화·국적·FX코드 매핑 단일화 (기존 9곳 분산 → 1곳, 비대칭 문서화)</p></div>
+    <div class="card"><h4>fx ✦</h4><p>환율 조회/일별변동/원화 변환 + 캐시</p></div>
+    <div class="card"><h4>special_assets ✦</h4><p>KRX 금현물(네이버), 크립토(Upbit) 시세</p></div>
+    <div class="card"><h4>benchmarks</h4><p>기본 벤치마크, 표시명, 지표 등락률 변환, quote 캐시</p></div>
+    <div class="card"><h4>dividends</h4><p>배당 워밍업 대상 선정, 우선주-본주 동시 예열, TTL/중복 방지</p></div>
+    <div class="card"><h4>history</h4><p>NAV/평가금액/비중 추이 조회, Yahoo 차트</p></div>
+    <div class="card"><h4>targets · target_metrics</h4><p>목표가 수식 평가, 메트릭 보강</p></div>
+    <div class="card"><h4>time_windows</h4><p>22시 결산 기준 Today window, intraday baseline</p></div>
+    <div class="card"><h4>valuation</h4><p>밸류에이션 보조 계산</p></div>
+    <div class="card"><h4>runtime_quotes</h4><p>배치/외부 코드가 라우터 private에 의존하지 않게 하는 provider seam <span class="badge b-prog">정상화 예정</span></p></div>
+    <div class="card"><h4>stock_quotes (services/)</h4><p>국내 시세 단일 진입점: WS 캐시 우선 → REST fallback, dead-stock 처리, 지속 구독</p></div>
+  </div>
+</section>
+
+<section id="data">
+  <h2><span class="n">6</span> 데이터 · 캐시 계층</h2>
+  <h3>SQLite (cache.db, WAL)</h3>
+  <p>주요 테이블 군: 분석 캐시(KV), corp_codes, financial/market_data, users/sessions, user_portfolio, portfolio_cashflows,
+  스냅샷(nav / stock / group / stock_weight / intraday), NPS, wiki(+FTS), benchmark, system_events, ai_usage_events, app_settings, pdf_cache.</p>
+  <ul>
+    <li>웹·배치가 동일 파일에 동시 쓰기 → 모든 커넥션에 <code>busy_timeout=5000</code>, 다중 statement write는 <code>BEGIN IMMEDIATE</code> 트랜잭션 + rollback</li>
+    <li>그룹/종목 비중은 스냅샷 시점에 사전 집계(차트 조회를 가볍게 유지)</li>
+  </ul>
+  <h3>인메모리 TTL 캐시 (cache_layer.MemoryTTLCache)</h3>
+  <p>시세(stock.current / dead), FX(rates / daily), 벤치마크, insight FX, yfinance 음성 캐시(TTL — 일시적 실패 자동 회복), KIS WS quote 캐시 등.</p>
+</section>
+
+<section id="quotes">
+  <h2><span class="n">7</span> 실시간 시세 파이프라인</h2>
+  <div class="flow">브라우저
+  ├─ WebSocket <b>/ws/quotes</b> (Origin 검증) ─▶ kis_ws_manager (KIS WS, 키 슬롯 N개, takeover)
+  │      └─ 실시간 체결 ─▶ _quote_cache ─▶ relay ─▶ 브라우저
+  └─ REST <b>POST /api/asset-quotes</b> (초기/폴백)
+         ├─ 국내(KRX) : <b>stock_price.fetch_bulk_quotes_kr</b> (네이버 벌크 1회) ✦
+         │                 ↳ 실패 시 종목별 KIS REST fallback
+         ├─ 해외        : KIS 해외 → yfinance → 네이버 world  (→ fx 원화 변환)
+         ├─ 금/크립토   : special_assets (네이버/Upbit)
+         └─ 현금성      : fx 환율
+
+  공통 경유: <b>services.stock_quotes</b> (WS 캐시 우선 → REST, dead-stock TTL, should_accept 가드)</div>
+  <div class="note"><b>오늘 개선:</b> 초기 로딩이 종목별 N회 호출 → 국내는 네이버 벌크 1회로. WS는 핸드셰이크 Origin 검증·키 슬롯 누수 차단. 해외는 yfinance 일시 실패가 영구 캐시되던 버그를 TTL 캐시로 자동 회복.</div>
+</section>
+
+<section id="frontend">
+  <h2><span class="n">8</span> 프론트엔드</h2>
+  <p>빌드 시스템 없이 <code>index.html</code> + classic script 다수 + <code>styles.css</code>. 로드 순서가 곧 의존성 계약이며, 공유 상태는 전역 변수다.</p>
+  <table>
+    <thead><tr><th>그룹</th><th>파일</th></tr></thead>
+    <tbody>
+      <tr><td>셸/상태/렌더</td><td><code>portfolio-shell · portfolio-data · portfolio-render · app-main</code></td></tr>
+      <tr><td>액션/이벤트</td><td><code>portfolio-actions · portfolio-events · portfolio-order</code></td></tr>
+      <tr><td>추이/성과</td><td><code>portfolio-performance · portfolio-trends · portfolio-trend-chart · portfolio-group-composition</code></td></tr>
+      <tr><td>인사이트/AI/시장</td><td><code>portfolio-insights · portfolio-ai · portfolio-groups-market · portfolio-tag-summary · insights</code></td></tr>
+      <tr><td>현금흐름</td><td><code>portfolio-cashflows</code></td></tr>
+      <tr><td>실시간 시세</td><td><code>quote-manager</code> (WS + 배치 폴링, 벌크 활용 위해 배치 크기 상향)</td></tr>
+      <tr><td>공통/분석/관리자</td><td><code>utils · analysis · admin · auth · search · app-config</code></td></tr>
+    </tbody>
+  </table>
+  <p class="muted">XSS 방어는 <code>escapeHtml</code> / <code>_renderSafeMarkdown</code>(DOMPurify)로 대부분 일관. 행 액션은 document-level 단일 위임.</p>
+</section>
+
+<section id="refactor">
+  <h2><span class="n">9</span> 리팩토링 현황 (2026-05-30 세션)</h2>
+  <table>
+    <thead><tr><th>상태</th><th>항목</th><th>커밋</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge b-done">완료</span></td><td>DB busy_timeout · cashflow 404 · 마켓바 escape · AI 비밀 마스킹</td><td><code>40534ba8</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>미사용 GitHub Pages 워크플로우 제거 + Pages 비활성화</td><td><code>214d43e7</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>WS 인증(Origin)·dead-cache·키 슬롯 누수·설정 lazy·스냅샷 트랜잭션·admin CSRF 가드</td><td><code>5f471105</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>초기 시세 벌크 조회(네이버) + 벤치마크 tick O(N²)→O(N)</td><td><code>c4ae2310</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>해외 시세 음성 캐시 TTL화 (특정 종목 영구 미표시 버그 수정)</td><td><code>6a9cbaa3</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>FX/통화 분리 → <code>fx.py · currencies.py</code></td><td><code>0721b2f5</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>특수자산(금/크립토) 시세 분리 → <code>special_assets.py</code></td><td><code>703bead1</code></td></tr>
+      <tr><td><span class="badge b-prog">다음</span></td><td>해외 시세+이름해석 클러스터(~16함수) → <code>foreign.py</code> + 테스트 patch 갱신, runtime_quotes seam 정상화</td><td class="muted">신선한 컨텍스트에서 진행</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">모든 완료 항목은 전체 테스트 통과(527개) 후 master 배포됨. 동작 보존을 원칙으로 단계마다 검증.</p>
+</section>
+
+<section id="debt">
+  <h2><span class="n">10</span> 남은 기술 부채 · 다음 단계</h2>
+  <div class="grid cards">
+    <div class="card"><h4><span class="badge b-prog">2b</span> 해외 시세 클러스터 분리</h4><p>라우터에서 가장 큰 덩어리. 테스트 3개 파일의 내부 호출 patch 동반 갱신 필요. 결합도 해소의 핵심.</p></div>
+    <div class="card"><h4><span class="badge b-plan">3</span> cache.py repository 분리</h4><p>3,900줄에 스키마/마이그레이션/12+ repository/비즈니스 규칙 혼재. 버전드 마이그레이션 체계로 교체.</p></div>
+    <div class="card"><h4><span class="badge b-plan">4</span> 프론트 store 도입</h4><p>전역 변수·로드 순서 의존 → 단일 namespace/store. 렌더는 store snapshot 기반.</p></div>
+    <div class="card"><h4><span class="badge b-debt">잔여</span> 효율</h4><p>tick 핫패스 전역 인덱스화, <code>get_portfolio</code> 직렬 await 병렬화.</p></div>
+    <div class="card"><h4><span class="badge b-debt">잔여</span> 보안</h4><p>NPS 뷰 innerHTML+inline script(1st-party지만 유일한 sanitizer 우회 경로).</p></div>
+    <div class="card"><h4><span class="badge b-debt">잔여</span> 테스트</h4><p>프론트 문자열 존재 검증 → jsdom 동작 테스트로 점진 이전.</p></div>
+  </div>
+</section>
+
+</div>
+<footer>
+  value-invest 아키텍처 문서 · 자동 생성(세션 기록 기반) · 변경 시 갱신 권장 · <code>docs/architecture.html</code>
+</footer>
+</body>
+</html>
