@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import cache
 from routes import portfolio as portfolio_route
 from services.portfolio import dividends
+from services.portfolio import foreign
 from services.portfolio import fx
 from services.portfolio import target_metrics as target_metrics_service
 
@@ -419,8 +420,8 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fast_yahoo_quote_uses_portfolio_fx_source(self):
         with patch.object(
-            portfolio_route,
-            "_fetch_yahoo_chart",
+            foreign,
+            "fetch_yahoo_chart",
             new=AsyncMock(return_value={
                 "rows": [{"date": "2026-05-21", "close": 99.0}, {"date": "2026-05-22", "close": 100.0}],
                 "currency": "USD",
@@ -431,7 +432,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             "fx_rate_for_currency",
             new=AsyncMock(return_value=1500.0),
         ) as fx_rate:
-            quote = await portfolio_route._yfinance_fetch_quote_fast("AGG")
+            quote = await foreign.yfinance_fetch_quote_fast("AGG")
 
         self.assertEqual(quote["price"], 150000)
         self.assertEqual(quote["change"], 1500)

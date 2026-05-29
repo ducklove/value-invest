@@ -2,24 +2,25 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from routes import portfolio as pf
+from services.portfolio import foreign
 
 
 class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         pf._asset_history_cache.clear()
-        pf._failed_yf_cache.clear()
+        foreign._failed_yf_cache.clear()
 
     async def asyncTearDown(self):
         pf._asset_history_cache.clear()
-        pf._failed_yf_cache.clear()
+        foreign._failed_yf_cache.clear()
 
     async def test_static_foreign_etfs_skip_ticker_discovery(self):
-        with patch.object(pf, "_yfinance_find_ticker", new=AsyncMock(side_effect=AssertionError("no probe"))), \
-             patch.object(pf, "_fetch_naver_world_stock", new=AsyncMock(side_effect=AssertionError("no naver"))):
-            self.assertEqual(await pf._resolve_foreign_reuters("A200"), "A200.AX")
-            self.assertEqual(await pf._resolve_foreign_reuters("EUN2.DE"), "EUN2.DE")
-            self.assertEqual(await pf._resolve_foreign_name("A200.AX"), "BetaShares Australia 200 ETF")
-            self.assertEqual(await pf._detect_currency("EUN2.DE"), "EUR")
+        with patch.object(foreign, "yfinance_find_ticker", new=AsyncMock(side_effect=AssertionError("no probe"))), \
+             patch.object(foreign, "fetch_naver_world_stock", new=AsyncMock(side_effect=AssertionError("no naver"))):
+            self.assertEqual(await foreign.resolve_foreign_reuters("A200"), "A200.AX")
+            self.assertEqual(await foreign.resolve_foreign_reuters("EUN2.DE"), "EUN2.DE")
+            self.assertEqual(await foreign.resolve_foreign_name("A200.AX"), "BetaShares Australia 200 ETF")
+            self.assertEqual(await foreign.detect_currency("EUN2.DE"), "EUR")
 
             resolved = await pf.resolve_name(code="A200")
 
@@ -31,10 +32,10 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
         legacy = AsyncMock(side_effect=AssertionError("legacy yfinance should not run"))
         kis = AsyncMock(side_effect=AssertionError("KIS should not run for static non-KIS ETF"))
 
-        with patch.object(pf, "_yfinance_fetch_quote_fast", new=fast), \
-             patch.object(pf, "_yfinance_fetch_quote", new=legacy), \
-             patch.object(pf, "_kis_fetch_foreign_quote", new=kis):
-            quote = await pf._fetch_foreign_quote("EUN2")
+        with patch.object(foreign, "yfinance_fetch_quote_fast", new=fast), \
+             patch.object(foreign, "yfinance_fetch_quote", new=legacy), \
+             patch.object(foreign, "kis_fetch_foreign_quote", new=kis):
+            quote = await foreign.fetch_foreign_quote("EUN2")
 
         self.assertEqual(quote["price"], 12345)
         fast.assert_awaited_once_with("EUN2.DE")
@@ -50,7 +51,7 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(pf._is_preferred_stock("005930"))
 
         resolver = AsyncMock(return_value="KRX 알파뉴메릭 ETF")
-        with patch.object(pf, "_resolve_name", new=resolver):
+        with patch.object(foreign, "resolve_name", new=resolver):
             resolved = await pf.resolve_name(code="0074k0")
 
         self.assertEqual(resolved["stock_code"], "0074K0")
