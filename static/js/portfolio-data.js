@@ -309,10 +309,14 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
 function updatePortfolioBenchmarkCells(code) {
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
+  // Build a code→item index once per call (O(N)) instead of a linear
+  // portfolioItems.find per row (which made this O(N²) per benchmark tick).
+  // Local-only, rebuilt each call, so there is no stale-index risk.
+  const byCode = new Map(portfolioItems.map(i => [i.stock_code, i]));
   tbody.querySelectorAll('tr[data-code]').forEach(tr => {
     if (tr.querySelector('input.pf-edit-input')) return;
     const pfCode = tr.dataset.code;
-    const item = portfolioItems.find(i => i.stock_code === pfCode);
+    const item = byCode.get(pfCode);
     if (!item || item.benchmark_code !== code) return;
     const cell = tr.querySelector('.pf-col-benchmark');
     if (cell) cell.innerHTML = fmtBenchmarkPct(code) + `<span class="pf-benchmark-name">${escapeHtml(benchmarkName(code || ''))}</span>`;

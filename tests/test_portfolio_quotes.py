@@ -151,7 +151,12 @@ def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
 
 @pytest.mark.asyncio
 async def test_asset_quotes_batch_fresh_korean_quotes_force_refresh_without_ws_cache():
+    # Bulk source unavailable → falls through to the per-code path.
     with patch.object(
+        portfolio_route.stock_price,
+        "fetch_bulk_quotes_kr",
+        new=AsyncMock(return_value={}),
+    ), patch.object(
         portfolio_route,
         "_fetch_quote",
         new=AsyncMock(return_value={"price": 2000}),
@@ -167,6 +172,48 @@ async def test_asset_quotes_batch_fresh_korean_quotes_force_refresh_without_ws_c
         force_refresh=True,
         use_ws_cache=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_asset_quotes_batch_uses_bulk_for_korean_codes_without_per_code_calls():
+    bulk_quote = {
+        "price": 318500,
+        "previous_close": 299500,
+        "change": 19000,
+        "change_pct": 6.34,
+        "source": "naver",
+        "date": "2026-05-29",
+        "fetched_at": "2026-05-29T18:59:15",
+    }
+    remembered = stock_quotes.Stock(
+        code="005930",
+        current_price=318500,
+        previous_close=299500,
+        volume=None,
+        created_at=datetime(2026, 5, 29, 18, 59, 15),
+        source="naver",
+    )
+    with patch.object(
+        portfolio_route.stock_price,
+        "fetch_bulk_quotes_kr",
+        new=AsyncMock(return_value={"005930": bulk_quote}),
+    ), patch.object(
+        portfolio_route.stock_quotes,
+        "remember_quote",
+        return_value=remembered,
+    ), patch.object(
+        portfolio_route,
+        "_fetch_quote",
+        new=AsyncMock(),
+    ) as fetch_quote:
+        result = await portfolio_route.asset_quotes_batch({
+            "codes": ["005930"],
+            "fresh": True,
+        })
+
+    assert result["005930"]["price"] == 318500
+    # The bulk fast path must satisfy domestic codes without per-code calls.
+    fetch_quote.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -240,6 +287,7 @@ async def test_asset_quotes_batch_returns_stale_fallback_on_fetch_timeout():
     )
 
     with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock), \
+         patch.object(portfolio_route.stock_price, "fetch_bulk_quotes_kr", new=AsyncMock(return_value={})), \
          patch.object(
              portfolio_route,
              "_fetch_quote",
@@ -269,6 +317,7 @@ async def test_asset_quotes_batch_returns_fallback_for_pending_batch_timeout():
         return {"price": 1}
 
     with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock), \
+         patch.object(portfolio_route.stock_price, "fetch_bulk_quotes_kr", new=AsyncMock(return_value={})), \
          patch.object(portfolio_route, "_ASSET_QUOTES_BATCH_TIMEOUT", 0.01), \
          patch.object(portfolio_route, "_fetch_quote", new=slow_fetch):
         result = await portfolio_route.asset_quotes_batch({

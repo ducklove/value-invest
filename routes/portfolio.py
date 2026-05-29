@@ -1746,11 +1746,34 @@ async def asset_quotes_batch(payload: dict = Body(...)):
     if not fresh:
         return {code: _cached_quote_for_code(code) for code in codes}
 
-    # 순차 호출 — 화면은 이미 localStorage snapshot + 서버 cache 로
-    # 즉시 떠 있으므로 (loadPortfolio 의 _pfRestoreSnapshot + GET /api/
-    # portfolio 의 _enrich_with_cached_quotes), 여기서 하는 건 '뒤에서
-    # 조용히 fresh 로 교체' 에 해당. upstream API 에 동시에 때리지 않고
-    # 한 종목씩 순차로 처리해 rate limit·외부 서버 부하에 친화적.
+    results: dict[str, dict] = {code: {} for code in codes}
+
+    # Fast path: pull every domestic (KRX) code in ONE bulk upstream call
+    # instead of one rate-limited KIS quote call each. This is the dominant
+    # cost on initial load for a domestic-heavy portfolio. Best-effort —
+    # anything the bulk source can't resolve falls through to the per-code
+    # path below, so there is no regression if Naver is unavailable.
+    domestic = [code for code in codes if _is_korean_stock(code)]
+    if domestic:
+        try:
+            bulk = await asyncio.wait_for(
+                stock_price.fetch_bulk_quotes_kr(domestic),
+                timeout=_ASSET_QUOTES_ITEM_TIMEOUT,
+            )
+        except (asyncio.TimeoutError, Exception) as exc:
+            logger.warning("벌크 시세 조회 실패; 개별 조회로 폴백: %s", exc)
+            bulk = {}
+        for code, quote in bulk.items():
+            remembered = stock_quotes.remember_quote(code, quote)
+            results[code] = stock_quotes.stock_to_quote(remembered) if remembered else quote
+
+    remaining = [code for code in codes if not results.get(code)]
+    if not remaining:
+        return results
+
+    # Per-code path for foreign / special assets and any domestic code the
+    # bulk call missed. Low concurrency keeps these upstreams rate-friendly;
+    # the screen is already painted from snapshot + server cache.
     sem = asyncio.Semaphore(_ASSET_QUOTES_CONCURRENCY)
 
     async def _fetch_one(code):
@@ -1780,12 +1803,11 @@ async def asset_quotes_batch(payload: dict = Body(...)):
 
     task_codes = {}
     tasks = []
-    for code in codes:
+    for code in remaining:
         task = asyncio.create_task(_fetch_one(code))
         task_codes[task] = code
         tasks.append(task)
     done, pending = await asyncio.wait(tasks, timeout=_ASSET_QUOTES_BATCH_TIMEOUT)
-    results = {code: {} for code in codes}
     for task in pending:
         code = task_codes.get(task)
         if code:

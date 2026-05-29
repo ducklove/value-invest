@@ -3,7 +3,10 @@ const QUOTE_MANAGER_STALE_WS_MS = 55_000;
 const QUOTE_MANAGER_GENERAL_POLL_MS = 60_000;
 const QUOTE_MANAGER_OVERFLOW_POLL_MS = 30_000;
 const QUOTE_MANAGER_RETRY_MS = 5_000;
-const QUOTE_MANAGER_BATCH_SIZE = 4;
+// The backend /api/asset-quotes pulls all domestic (KRX) codes in one bulk
+// upstream call, so larger client batches mean fewer round-trips (≈ one
+// request for a typical portfolio) instead of one request per 4 codes.
+const QUOTE_MANAGER_BATCH_SIZE = 30;
 const QUOTE_MANAGER_BATCH_PARALLEL = 1;
 const QUOTE_MANAGER_PRIORITY_CODES = new Set(['A200', 'A200.AX', 'EUN2', 'EUN2.DE']);
 

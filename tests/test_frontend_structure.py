@@ -422,7 +422,7 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "if (!shouldAcceptQuoteSnapshot(current, incoming)) return mergeQuoteSupplementalFields(current, incoming);" in utils
     assert "function quoteSnapshotDisplayChanged(before, after)" in utils
     assert "if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);" in quote_manager
-    assert "const QUOTE_MANAGER_BATCH_SIZE = 4;" in quote_manager
+    assert "const QUOTE_MANAGER_BATCH_SIZE = 30;" in quote_manager
     assert "const QUOTE_MANAGER_BATCH_PARALLEL = 1;" in quote_manager
     assert "await this._fetchQuotes(wsCodes, { fresh: false, scheduleRetry: false });" in quote_manager
     assert "await this._fetchQuotes(missing, { fresh: true });" in quote_manager

@@ -16,6 +16,8 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     yf = None
 
+import httpx
+
 import kis_proxy_client
 import kis_ws_manager
 import dart_client
@@ -26,6 +28,129 @@ logger = logging.getLogger(__name__)
 
 KRW_PER_EOK = 100_000_000
 WS_QUOTE_MAX_AGE_SECONDS = 90
+
+
+# ---------------------------------------------------------------------------
+# Bulk domestic quotes (Naver) — fetch many KRX codes in a single call so an
+# N-stock portfolio costs ~1 upstream request on initial load instead of N
+# rate-limited KIS quote calls.
+# ---------------------------------------------------------------------------
+
+_NAVER_BULK_URL = "https://polling.finance.naver.com/api/realtime/domestic/stock/"
+_NAVER_BULK_CHUNK = 40
+_NAVER_BULK_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
+_NAVER_BULK_SEM = asyncio.Semaphore(4)
+_NAVER_UP_CODES = {"1", "2"}      # 상한 / 상승
+_NAVER_DOWN_CODES = {"4", "5"}    # 하한 / 하락
+
+
+def _naver_num(value) -> float | None:
+    """Parse a Naver numeric string such as '317,000' or '10,306,931백만'."""
+    if value in (None, ""):
+        return None
+    text = str(value).replace(",", "").strip()
+    multiplier = 1.0
+    if text.endswith("백만"):
+        text, multiplier = text[:-2].strip(), 1_000_000.0
+    elif text.endswith("억"):
+        text, multiplier = text[:-1].strip(), 100_000_000.0
+    try:
+        return float(text) * multiplier
+    except (TypeError, ValueError):
+        return None
+
+
+def _naver_sign(block: dict) -> int:
+    code = str((block.get("compareToPreviousPrice") or {}).get("code") or "").strip()
+    if code in _NAVER_DOWN_CODES:
+        return -1
+    if code in _NAVER_UP_CODES:
+        return 1
+    return 0
+
+
+def _naver_quote_from_block(price_key: str, block: dict) -> dict | None:
+    price = _naver_num(block.get(price_key))
+    if price is None:
+        return None
+    sign = _naver_sign(block)
+    change_mag = _naver_num(block.get("compareToPreviousClosePrice"))
+    change = sign * change_mag if change_mag is not None else None
+    previous_close = round(price - change, 2) if change is not None else None
+    if change is not None and previous_close:
+        change_pct = round(change / previous_close * 100, 2)
+    else:
+        ratio = _naver_num(block.get("fluctuationsRatio"))
+        change_pct = sign * ratio if ratio is not None else None
+    return {
+        "price": price,
+        "previous_close": previous_close,
+        "change": change,
+        "change_pct": change_pct,
+        "volume": _naver_num(block.get("accumulatedTradingVolume")),
+        "trade_value": _naver_num(block.get("accumulatedTradingValue")),
+    }
+
+
+def _parse_naver_bulk_entry(entry: dict) -> tuple[str, dict] | None:
+    code = str(entry.get("itemCode") or "").strip()
+    if not code:
+        return None
+    # Prefer the after-hours (시간외/NXT) price while that session is open so
+    # the snapshot matches the live KIS NXT quote; otherwise the regular
+    # session price (held in `closePrice` even during the open session).
+    over = entry.get("overMarketPriceInfo")
+    quote = None
+    if isinstance(over, dict) and over.get("overMarketStatus") == "OPEN":
+        quote = _naver_quote_from_block("overPrice", over)
+    if quote is None:
+        quote = _naver_quote_from_block("closePrice", entry)
+    if quote is None:
+        return None
+    traded_at = str(entry.get("localTradedAt") or "")
+    quote["date"] = traded_at[:10] if len(traded_at) >= 10 else date.today().isoformat()
+    quote["source"] = "naver"
+    quote["fetched_at"] = datetime.now().isoformat()
+    return code, quote
+
+
+async def _fetch_naver_bulk_chunk(codes: list[str]) -> dict[str, dict]:
+    async with _NAVER_BULK_SEM:
+        async with httpx.AsyncClient(timeout=_NAVER_BULK_TIMEOUT) as client:
+            resp = await client.get(
+                _NAVER_BULK_URL + ",".join(codes),
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+    if resp.status_code != 200:
+        return {}
+    out: dict[str, dict] = {}
+    for entry in resp.json().get("datas", []) or []:
+        parsed = _parse_naver_bulk_entry(entry)
+        if parsed:
+            out[parsed[0]] = parsed[1]
+    return out
+
+
+async def fetch_bulk_quotes_kr(codes: list[str]) -> dict[str, dict]:
+    """Fetch many domestic (KRX) quotes in a single upstream call.
+
+    Best-effort: returns only the codes it could resolve, so callers must
+    fall back to the per-code path for anything missing.
+    """
+    unique = [c for c in dict.fromkeys((c or "").strip() for c in codes) if c]
+    if not unique:
+        return {}
+    chunks = [unique[i:i + _NAVER_BULK_CHUNK] for i in range(0, len(unique), _NAVER_BULK_CHUNK)]
+    merged: dict[str, dict] = {}
+    for result in await asyncio.gather(
+        *(_fetch_naver_bulk_chunk(chunk) for chunk in chunks),
+        return_exceptions=True,
+    ):
+        if isinstance(result, dict):
+            merged.update(result)
+        else:
+            logger.warning("네이버 벌크 시세 청크 실패: %s", result)
+    return merged
 
 
 def _safe_float(value, *, zero_as_none: bool = True):
