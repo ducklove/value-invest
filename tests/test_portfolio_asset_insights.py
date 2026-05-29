@@ -7,11 +7,11 @@ from routes import portfolio as pf
 class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         pf._asset_history_cache.clear()
-        pf._failed_yf_tickers.clear()
+        pf._failed_yf_cache.clear()
 
     async def asyncTearDown(self):
         pf._asset_history_cache.clear()
-        pf._failed_yf_tickers.clear()
+        pf._failed_yf_cache.clear()
 
     async def test_static_foreign_etfs_skip_ticker_discovery(self):
         with patch.object(pf, "_yfinance_find_ticker", new=AsyncMock(side_effect=AssertionError("no probe"))), \

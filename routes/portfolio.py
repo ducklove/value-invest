@@ -174,9 +174,20 @@ _YAHOO_SEM = asyncio.Semaphore(4)
 _INSIGHT_QUOTE_TIMEOUT = 8.5
 _STATIC_FOREIGN_QUOTE_TIMEOUT = 3.0
 
-# Negative cache: tickers we already failed to resolve via yfinance — avoids
-# re-running the 16-suffix loop on every quote refresh.
-_failed_yf_tickers: set[str] = set()
+# Negative cache: tickers we just failed to fetch/resolve via yfinance —
+# avoids re-running the 16-suffix probe loop on every quote refresh. TTL'd
+# (not a permanent set) so a transient Yahoo error or rate-limit can no longer
+# block a ticker until the next server restart; it self-heals after the TTL.
+_FAILED_YF_TTL = 300
+_failed_yf_cache = MemoryTTLCache("portfolio.failed_yf", _FAILED_YF_TTL)
+
+
+def _yf_marked_failed(ticker: str) -> bool:
+    return bool(_failed_yf_cache.get(ticker))
+
+
+def _yf_mark_failed(ticker: str) -> None:
+    _failed_yf_cache.set(ticker, True)
 
 async def _yf_run(fn):
     """Run a synchronous yfinance call in the executor, bounded by a
@@ -219,7 +230,7 @@ async def _yfinance_find_ticker(ticker: str) -> str | None:
         return static["ticker"]
     if ticker in _ticker_map:
         return _ticker_map[ticker]
-    if ticker in _failed_yf_tickers:
+    if _yf_marked_failed(ticker):
         return None
     try:
         import yfinance as yf
@@ -242,7 +253,7 @@ async def _yfinance_find_ticker(ticker: str) -> str | None:
                 continue
     except Exception:
         pass
-    _failed_yf_tickers.add(ticker)
+    _yf_mark_failed(ticker)
     return None
 
 
@@ -388,7 +399,7 @@ async def _fetch_foreign_quote(reuters_code: str) -> dict:
 
 
 async def _yfinance_fetch_quote(ticker: str) -> dict:
-    if ticker in _failed_yf_tickers:
+    if _yf_marked_failed(ticker):
         return {}
     try:
         import yfinance as yf
@@ -415,7 +426,7 @@ async def _yfinance_fetch_quote(ticker: str) -> dict:
         }
     except Exception as exc:
         logger.warning("yfinance 시세 조회 실패(%s): %s", ticker, exc)
-        _failed_yf_tickers.add(ticker)
+        _yf_mark_failed(ticker)
         return {}
 
 
@@ -481,7 +492,7 @@ async def _fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str =
 
 
 async def _yfinance_fetch_quote_fast(ticker: str) -> dict:
-    if ticker in _failed_yf_tickers:
+    if _yf_marked_failed(ticker):
         return {}
 
     try:
