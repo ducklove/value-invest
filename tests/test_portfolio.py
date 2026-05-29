@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import cache
 from routes import portfolio as portfolio_route
 from services.portfolio import dividends
+from services.portfolio import fx
 from services.portfolio import target_metrics as target_metrics_service
 
 
@@ -25,9 +26,8 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         portfolio_route._dividend_warmup_tasks.clear()
         portfolio_route._benchmark_name_cache.clear()
         portfolio_route._benchmark_quote_cache.clear()
-        portfolio_route._fx_daily_cache.clear()
-        portfolio_route._fx_cache.clear()
-        portfolio_route._fx_cache_ts = 0
+        fx._fx_daily_cache.clear()
+        fx._fx_cache.clear()
 
         db = await cache.get_db()
         await db.execute(
@@ -402,16 +402,16 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cash_and_foreign_quotes_share_daily_fx_source(self):
         with patch.object(
-            portfolio_route,
-            "_fetch_fx_daily_change",
+            fx,
+            "fetch_fx_daily_change",
             new=AsyncMock(return_value={"price": 1500.0, "change": 10.0, "change_pct": 0.67}),
         ), patch.object(
-            portfolio_route,
-            "_get_fx_rates",
+            fx,
+            "get_fx_rates",
             new=AsyncMock(return_value={"FX_USDKRW": 1400.0}),
         ) as get_fx_rates:
             cash = await portfolio_route._fetch_cash_quote("CASH_USD")
-            converted = await portfolio_route._fx_to_krw("USA", 10.0)
+            converted = await fx.fx_to_krw("USA", 10.0)
 
         self.assertEqual(cash["price"], 1500.0)
         self.assertEqual(converted, 15000.0)
@@ -427,8 +427,8 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
                 "meta": {"regularMarketPrice": 100.0, "chartPreviousClose": 99.0},
             }),
         ), patch.object(
-            portfolio_route,
-            "_fx_rate_for_currency",
+            fx,
+            "fx_rate_for_currency",
             new=AsyncMock(return_value=1500.0),
         ) as fx_rate:
             quote = await portfolio_route._yfinance_fetch_quote_fast("AGG")

@@ -24,6 +24,8 @@ import market_indicators
 import stock_price
 from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
 from services import ai_client, stock_quotes
+from services.portfolio import currencies
+from services.portfolio import fx
 from services.portfolio import history as portfolio_history
 from services.portfolio import runtime_quotes as portfolio_runtime_quotes
 from services.portfolio.identifiers import (
@@ -154,13 +156,6 @@ _YFINANCE_SUFFIXES = (
     "", ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".L", ".AX", ".T",
     ".HK", ".SS", ".SZ", ".SW", ".ST", ".CO",
 )
-
-_CURRENCY_MAP = {
-    "USD": "USA", "EUR": "DEU", "GBP": "GBR", "JPY": "JPN",
-    "HKD": "HKG", "CNY": "CHN", "AUD": "AUS", "CAD": "CAN",
-    "CHF": "CHE", "SEK": "SWE", "DKK": "DNK", "NOK": "NOR",
-    "TWD": "TWN", "VND": "VNM",
-}
 
 # --- Concurrency bounds & deadlines for external calls ---
 # Limits how many in-flight calls can hit each external dependency at once,
@@ -331,9 +326,9 @@ async def _kis_fetch_foreign_quote(ticker: str) -> dict:
             price = s.get("price")
             if price is not None:
                 nation = {"NAS": "USA", "NYS": "USA", "AMS": "USA", "HKS": "HKG", "TSE": "JPN", "SHS": "CHN", "SZS": "CHN"}.get(excd, "USA")
-                price_krw = await _fx_to_krw(nation, price)
+                price_krw = await fx.fx_to_krw(nation, price)
                 change = s.get("change") or 0
-                change_krw = await _fx_to_krw(nation, change)
+                change_krw = await fx.fx_to_krw(nation, change)
                 return {
                     "price": round(price_krw),
                     "change": round(change_krw),
@@ -384,8 +379,8 @@ async def _fetch_foreign_quote(reuters_code: str) -> dict:
             change = float(change_str)
             change_pct = float(d.get("fluctuationsRatio", 0))
             nation = d.get("nationType", "")
-            price_krw = await _fx_to_krw(nation, price)
-            change_krw = await _fx_to_krw(nation, change)
+            price_krw = await fx.fx_to_krw(nation, price)
+            change_krw = await fx.fx_to_krw(nation, change)
             return {
                 "price": round(price_krw),
                 "change": round(change_krw),
@@ -416,9 +411,9 @@ async def _yfinance_fetch_quote(ticker: str) -> dict:
             return {}
         change = round(price - prev, 4) if price and prev else 0
         change_pct = round(change / prev * 100, 2) if prev else None
-        nation = _CURRENCY_MAP.get(currency, "USA")
-        price_krw = await _fx_to_krw(nation, price)
-        change_krw = await _fx_to_krw(nation, change)
+        nation = currencies.CURRENCY_TO_NATION.get(currency, "USA")
+        price_krw = await fx.fx_to_krw(nation, price)
+        change_krw = await fx.fx_to_krw(nation, change)
         return {
             "price": round(price_krw),
             "change": round(change_krw),
@@ -508,7 +503,7 @@ async def _yfinance_fetch_quote_fast(ticker: str) -> dict:
         change = round(price - prev, 4) if prev else 0
         change_pct = round(change / prev * 100, 2) if prev else None
         currency = (payload.get("currency") or _infer_yf_currency(ticker)).upper()
-        fx_rate = await _fx_rate_for_currency(currency)
+        fx_rate = await fx.fx_rate_for_currency(currency)
         price_krw = price * fx_rate
         change_krw = change * fx_rate
         return {
@@ -574,91 +569,6 @@ async def _fetch_crypto_quote(stock_code: str) -> dict:
     return {}
 
 
-_FX_DAILY_CACHE_TTL = 300
-_fx_daily_cache = MemoryTTLCache("portfolio.fx_daily", _FX_DAILY_CACHE_TTL)
-
-
-async def _fetch_fx_daily_change(fx_code: str) -> dict:
-    """Fetch today's FX rate + change vs. previous business day from Naver.
-
-    Uses the per-currency daily-quote page, same pattern as KRX gold.
-    Returns {} on failure; caller can fall back to a plain rate lookup.
-    """
-    cached = _fx_daily_cache.get_entry(fx_code, allow_stale=True)
-    if cached is not None and cached.fresh:
-        return dict(cached.value)
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(
-                f"https://finance.naver.com/marketindex/exchangeDailyQuote.naver?marketindexCd={fx_code}",
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            html = resp.content.decode("euc-kr", errors="ignore")
-            rows = re.findall(
-                r'<tr class="(?:up|down)">\s*<td class="date">[^<]+</td>\s*<td class="num">([\d,\.]+)</td>',
-                html,
-            )
-            if len(rows) >= 2:
-                price = float(rows[0].replace(",", ""))
-                prev = float(rows[1].replace(",", ""))
-                change = price - prev
-                change_pct = round(change / prev * 100, 2) if prev else 0.0
-                result = {"price": price, "change": change, "change_pct": change_pct}
-                _fx_daily_cache.set(fx_code, result)
-                return result
-            if rows:
-                # Only one row available (first listing day?) — no delta.
-                price = float(rows[0].replace(",", ""))
-                result = {"price": price, "change": 0.0, "change_pct": 0.0}
-                _fx_daily_cache.set(fx_code, result)
-                return result
-    except Exception as e:
-        logger.warning("FX daily fetch failed for %s: %s", fx_code, e)
-    if cached is not None:
-        stale = dict(cached.value)
-        stale["_stale"] = True
-        return stale
-    return {}
-
-
-async def _fx_rate_for_code(fx_code: str) -> float | None:
-    unit = _FX_UNIT.get(fx_code, 1)
-    daily = await _fetch_fx_daily_change(fx_code)
-    if daily.get("price"):
-        return float(daily["price"]) / unit
-    rates = await _get_fx_rates()
-    rate = rates.get(fx_code)
-    if not rate:
-        return None
-    return float(rate) / unit
-
-
-_CURRENCY_TO_FX_CODE = {
-    "USD": "FX_USDKRW",
-    "EUR": "FX_EURKRW",
-    "JPY": "FX_JPYKRW",
-    "CNY": "FX_CNYKRW",
-    "HKD": "FX_HKDKRW",
-    "GBP": "FX_GBPKRW",
-    "AUD": "FX_AUDKRW",
-    "CAD": "FX_CADKRW",
-    "CHF": "FX_CHFKRW",
-    "TWD": "FX_TWDKRW",
-    "VND": "FX_VNDKRW",
-}
-
-
-async def _fx_rate_for_currency(currency: str | None) -> float:
-    currency = (currency or "KRW").upper()
-    if currency == "KRW":
-        return 1.0
-    fx_code = _CURRENCY_TO_FX_CODE.get(currency)
-    if not fx_code:
-        return 1.0
-    rate = await _fx_rate_for_code(fx_code)
-    return rate if rate and rate > 0 else 1.0
-
-
 async def _fetch_cash_quote(stock_code: str) -> dict:
     """Fetch cash quote: KRW=1, others=FX rate to KRW with daily change."""
     if stock_code == "CASH_KRW":
@@ -666,9 +576,9 @@ async def _fetch_cash_quote(stock_code: str) -> dict:
     fx_code = _CASH_FX_CODE.get(stock_code)
     if not fx_code:
         return {}
-    unit = _FX_UNIT.get(fx_code, 1)
+    unit = currencies.FX_UNIT.get(fx_code, 1)
     # Prefer the per-currency daily-quote scrape — gives us change vs prev close.
-    daily = await _fetch_fx_daily_change(fx_code)
+    daily = await fx.fetch_fx_daily_change(fx_code)
     if daily.get("price"):
         price = daily["price"] / unit
         change = daily["change"] / unit
@@ -678,7 +588,7 @@ async def _fetch_cash_quote(stock_code: str) -> dict:
             "change_pct": daily["change_pct"],
         }
     # Fallback: exchangeList scrape — current rate only, no change.
-    rate = await _fx_rate_for_code(fx_code)
+    rate = await fx.fx_rate_for_code(fx_code)
     if not rate:
         return {}
     return {"price": round(rate, 2), "change": 0, "change_pct": 0}
@@ -800,60 +710,6 @@ async def _fill_snapshot_quotes(google_sub: str, items: list[dict]) -> None:
 
 QUOTE_RATE_INTERVAL = 0.22  # ~4.5 req/s, stays under 5/s limit
 
-# --- FX rate cache ---
-_fx_cache = MemoryTTLCache("portfolio.fx_rates", None)
-_fx_cache_ts: float = 0
-_FX_CACHE_TTL = 300  # 5 minutes
-
-_NATION_TO_CURRENCY = {
-    "USA": "USD", "VNM": "VND", "JPN": "JPY", "CHN": "CNY",
-    "HKG": "HKD", "GBR": "GBP", "TWN": "TWD", "AUS": "AUD",
-    "CAN": "CAD", "CHE": "CHF", "DEU": "EUR", "FRA": "EUR",
-    "NLD": "EUR", "ITA": "EUR", "ESP": "EUR",
-}
-
-_NATION_TO_FX = {
-    "USA": "FX_USDKRW", "VNM": "FX_VNDKRW", "JPN": "FX_JPYKRW",
-    "CHN": "FX_CNYKRW", "HKG": "FX_HKDKRW", "GBR": "FX_GBPKRW",
-    "EUR": "FX_EURKRW", "DEU": "FX_EURKRW", "FRA": "FX_EURKRW",
-    "TWN": "FX_TWDKRW", "AUS": "FX_AUDKRW", "CAN": "FX_CADKRW",
-    "CHE": "FX_CHFKRW",
-}
-_FX_UNIT = {"FX_JPYKRW": 100, "FX_VNDKRW": 100}
-
-
-async def _get_fx_rates() -> dict[str, float]:
-    import time
-    global _fx_cache_ts
-    cached = _fx_cache.get("rates")
-    if cached is not None:
-        return cached
-    try:
-        rates = {}
-        async with httpx.AsyncClient(timeout=5) as c:
-            for page in (1, 2):
-                r = await c.get(
-                    f"https://finance.naver.com/marketindex/exchangeList.naver?page={page}",
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                import re as _re
-                rows = _re.findall(
-                    r'marketindexCd=(\w+)"[^>]*>[^<]*</a>.*?<td class="sale">([^<]+)',
-                    r.text, _re.DOTALL,
-                )
-                for code, val in rows:
-                    try:
-                        rates[code] = float(val.strip().replace(",", ""))
-                    except ValueError:
-                        pass
-        if rates:
-            _fx_cache.set("rates", rates, ttl_seconds=_FX_CACHE_TTL)
-            _fx_cache_ts = time.time()
-    except Exception:
-        pass
-    return _fx_cache.get("rates", allow_stale=True) or {}
-
-
 async def _detect_currency(stock_code: str) -> str:
     static = _static_foreign_ticker(stock_code)
     if static:
@@ -872,19 +728,8 @@ async def _detect_currency(stock_code: str) -> str:
     d = await _fetch_naver_world_stock(stock_code.upper())
     if d:
         nation = d.get("nationType", "")
-        return _NATION_TO_CURRENCY.get(nation, "USD")
+        return currencies.NATION_TO_CURRENCY.get(nation, "USD")
     return "USD"
-
-
-async def _fx_to_krw(nation: str, amount: float) -> float:
-    """Convert foreign currency amount to KRW."""
-    fx_code = _NATION_TO_FX.get(nation)
-    if not fx_code:
-        return amount  # unknown nation, assume already KRW-like
-    rate = await _fx_rate_for_code(fx_code)
-    if not rate:
-        return amount
-    return amount * rate
 
 
 class _PortfolioRuntimeQuoteProvider:
@@ -909,7 +754,7 @@ class _PortfolioRuntimeQuoteProvider:
         return dict(_ticker_map)
 
     async def fx_to_krw(self, nation: str, amount: float) -> float:
-        return await _fx_to_krw(nation, amount)
+        return await fx.fx_to_krw(nation, amount)
 
 
 portfolio_runtime_quotes.register_provider(_PortfolioRuntimeQuoteProvider())
@@ -1030,7 +875,7 @@ async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
             logger.warning("Indicator-based benchmark fetch failed for %s: %s", benchmark_code, e)
             return _cached_benchmark_quote(benchmark_code, allow_stale=True) or {}
     elif benchmark_code.startswith("FX_"):
-        daily = await _fetch_fx_daily_change(benchmark_code)
+        daily = await fx.fetch_fx_daily_change(benchmark_code)
         q = {"change_pct": daily.get("change_pct")} if daily and daily.get("change_pct") is not None else {}
     else:
         # It's a stock code (e.g., common stock for preferred)
