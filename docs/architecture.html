@@ -315,7 +315,7 @@
     <div class="card"><h4><span class="badge b-plan">4</span> 프론트 store 도입</h4><p>전역 변수·로드 순서 의존 → 단일 namespace/store. 렌더는 store snapshot 기반.</p></div>
     <div class="card"><h4><span class="badge b-debt">잔여</span> 효율</h4><p>tick 핫패스 전역 인덱스화, <code>get_portfolio</code> 직렬 await 병렬화.</p></div>
     <div class="card"><h4><span class="badge b-done">보안</span> NPS 스크립트 임베딩</h4><p>NPS 뷰는 부모 CSS 변수·차트 라이브러리에 의존해 iframe 격리가 어려움 → 실효적 주입 지점(inline script 내 JSON의 <code>&lt;/script&gt;</code> 브레이크아웃)을 <code><</code> 이스케이프로 차단(snapshot_nps · routes/nps, 동작 보존).</p></div>
-    <div class="card"><h4><span class="badge b-debt">잔여</span> 테스트</h4><p>프론트 문자열 존재 검증 → jsdom 동작 테스트로 점진 이전.</p></div>
+    <div class="card"><h4><span class="badge b-prog">테스트</span> jsdom 도입</h4><p>jsdom 하니스(<code>package.json</code> · <code>tests/js/</code>, <code>npm test</code>) 구축 + utils.js 동작 테스트(escapeHtml/safeExternalUrl/quote/guest-recent)로 점진 이전 시작. 기존 문자열 검증은 순차 이전 예정.</p></div>
   </div>
 </section>
 

@@ -18,3 +18,4 @@ server.log
 data/pdf_cache/
 data/db-imports/
 *.before-prod-portfolio-import.*.db
+node_modules/
