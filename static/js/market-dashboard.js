@@ -100,9 +100,10 @@ function _mdRenderDashboard(catalog, dataMap) {
 }
 
 async function loadInvestingDashboard(refresh = false) {
-  // Market-ranking widget loads independently so a slow/failed indicator fetch
-  // never blocks it (and vice versa).
+  // Sibling widgets load independently so a slow/failed indicator fetch never
+  // blocks them (and vice versa).
   if (typeof loadMarketMovers === 'function') loadMarketMovers();
+  if (typeof loadSectors === 'function') loadSectors();
   if (_mdInFlight) return _mdInFlight;
   _mdInFlight = (async () => {
     try {
@@ -187,6 +188,40 @@ function _mvRenderRows(root, items) {
       if (typeof switchView === 'function') switchView('analysis');
       if (typeof analyzeStock === 'function') analyzeStock(code);
     }));
+}
+
+// --- 업종별 등락 (sector performance) — rail widget ---
+let _secInFlight = false;
+
+function _secRenderRows(root, items) {
+  if (!items.length) {
+    root.innerHTML = '<section class="md-section"><h3 class="md-section-title">업종별 등락</h3>'
+      + '<div class="md-loading">표시할 업종이 없습니다.</div></section>';
+    return;
+  }
+  const rows = items.map((it) => {
+    const dirCls = it.direction === 'up' ? 'md-up' : (it.direction === 'down' ? 'md-down' : 'md-flat');
+    return `<div class="sec-row">`
+      + `<span class="sec-name">${escapeHtml(String(it.name || ''))}</span>`
+      + `<span class="sec-chg ${dirCls}">${escapeHtml(String(it.change_pct || ''))}</span></div>`;
+  }).join('');
+  root.innerHTML = '<section class="md-section"><h3 class="md-section-title">업종별 등락</h3>'
+    + `<div class="sec-rows">${rows}</div></section>`;
+}
+
+async function loadSectors() {
+  const root = document.getElementById('marketSectors');
+  if (!root || _secInFlight) return;
+  _secInFlight = true;
+  try {
+    const r = await apiFetch('/api/market/sectors?limit=12');
+    const data = r.ok ? await r.json() : { sectors: [] };
+    _secRenderRows(root, data.sectors || []);
+  } catch (e) {
+    console.warn('sectors load failed', e);
+  } finally {
+    _secInFlight = false;
+  }
 }
 
 async function loadMarketMovers() {

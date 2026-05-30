@@ -37,6 +37,34 @@ class MarketMoversParserTests(unittest.TestCase):
         self.assertEqual(market_movers._parse_ranking_table("<div>no table</div>", None), [])
 
 
+class SectorParserTests(unittest.TestCase):
+    def _sector_html(self) -> str:
+        return (FIXTURES / "naver_sise_group.html").read_text(encoding="utf-8")
+
+    def test_parse_sector_table(self):
+        rows = market_movers._parse_sector_table(self._sector_html())
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["name"], "전자제품")
+        self.assertEqual(rows[0]["change_pct"], "+29.19%")
+        self.assertEqual(rows[0]["direction"], "up")
+
+    def test_sector_direction_from_sign(self):
+        html = (
+            '<table class="type_1"><tr><th>업종명</th><th>전일대비</th></tr>'
+            '<tr><td><a href="/sise/sise_group_detail.naver?no=1">철강</a></td>'
+            '<td class="number">-2.50%</td></tr>'
+            '<tr><td><a href="/sise/sise_group_detail.naver?no=2">은행</a></td>'
+            '<td class="number">0.00%</td></tr></table>'
+        )
+        rows = market_movers._parse_sector_table(html)
+        self.assertEqual(rows[0]["direction"], "down")
+        self.assertEqual(rows[1]["direction"], "flat")
+
+    def test_parse_empty_sector_table(self):
+        self.assertEqual(market_movers._parse_sector_table(""), [])
+        self.assertEqual(market_movers._parse_sector_table("<div>nope</div>"), [])
+
+
 class MarketMoversEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_endpoint_returns_items_and_clamps_limit(self):
         fake = AsyncMock(return_value=[{"rank": "1", "code": "005930", "name": "삼성전자",
@@ -50,6 +78,13 @@ class MarketMoversEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["items"][0]["code"], "005930")
         # limit clamped to <= 30
         self.assertLessEqual(fake.await_args.args[2], 30)
+
+    async def test_sectors_endpoint_returns_items_and_clamps_limit(self):
+        fake = AsyncMock(return_value=[{"name": "전자제품", "change_pct": "+29.19%", "direction": "up"}])
+        with patch.object(market_movers, "fetch_sectors", new=fake):
+            result = await stocks_route.get_market_sectors(limit=999)
+        self.assertEqual(result["sectors"][0]["name"], "전자제품")
+        self.assertLessEqual(fake.await_args.args[0], 40)
 
 
 if __name__ == "__main__":

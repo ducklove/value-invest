@@ -37,6 +37,16 @@ async def get_market_movers(kind: str = "market_cap", market: str = "kospi", lim
     return {"kind": kind, "market": market, "items": items}
 
 
+@router.get("/api/market/sectors")
+async def get_market_sectors(limit: int = 12):
+    """Public 업종별 등락 (Naver sise_group)."""
+    import market_movers
+
+    limit = max(1, min(int(limit), 40))
+    items = await market_movers.fetch_sectors(limit)
+    return {"sectors": items}
+
+
 @router.get("/api/settings/market-bar")
 async def get_market_bar_setting(request: Request):
     import json

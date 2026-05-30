@@ -33,8 +33,19 @@ _KINDS: dict[str, tuple[str, str | None]] = {
 
 _MOVERS_TTL = 90  # seconds — rankings move intraday but not every second
 _movers_cache = MemoryTTLCache("market.movers", _MOVERS_TTL)
+_SECTOR_TTL = 120  # 업종 등락은 더 천천히 움직인다
+_sector_cache = MemoryTTLCache("market.sectors", _SECTOR_TTL)
 _SEM = asyncio.Semaphore(3)
 _HTTP_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
+
+
+async def _get_html(url: str) -> str:
+    """Fetch a Naver finance page and decode EUC-KR. Bounded by _SEM/timeout."""
+    async with _SEM:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+    return resp.content.decode("euc-kr", errors="replace")
 
 
 def _direction_from_blind(text: str) -> str:
@@ -121,18 +132,68 @@ async def fetch_market_movers(kind: str, market: str = "kospi", limit: int = 10)
     sosok = "1" if market == "kosdaq" else "0"
     url = f"{_BASE}{path}?sosok={sosok}"
     try:
-        async with _SEM:
-            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=True) as client:
-                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                resp.raise_for_status()
-        html = resp.content.decode("euc-kr", errors="replace")
+        html = await _get_html(url)
         items = _parse_ranking_table(html, metric)
         if items:
             _movers_cache.set(key, items)
         return items[:limit]
     except Exception as exc:
         logger.warning("market movers fetch failed (%s/%s): %s", kind, market, exc)
-        stale = _movers_cache.get_entry(key, allow_stale=True) if hasattr(_movers_cache, "get_entry") else None
-        if stale and getattr(stale, "value", None):
-            return list(stale.value)[:limit]
+        return _stale(_movers_cache, key, limit)
+
+
+def _stale(cache: MemoryTTLCache, key: str, limit: int) -> list[dict]:
+    """Best-effort stale fallback when a live fetch fails."""
+    entry = cache.get_entry(key, allow_stale=True) if hasattr(cache, "get_entry") else None
+    if entry and getattr(entry, "value", None):
+        return list(entry.value)[:limit]
+    return []
+
+
+def _parse_sector_table(html: str) -> list[dict]:
+    """Parse 업종별 시세 (sise_group?type=upjong) into {name, change_pct, direction}.
+
+    The page is a ``table.type_1`` of 업종명 · 전일대비(등락률) · 상승/보합/하락
+    counts. Direction comes from the 등락률 sign (no .blind marker here). Pure.
+    """
+    soup = BeautifulSoup(html or "", "html.parser")
+    table = soup.select_one("table.type_1")
+    if not table:
         return []
+    items: list[dict] = []
+    for tr in table.find_all("tr"):
+        a = tr.select_one("a[href*='sise_group_detail']")
+        if not a:
+            continue
+        tds = tr.find_all("td")
+        if len(tds) < 2:
+            continue
+        change_pct = tds[1].get_text(" ", strip=True).replace(" ", "")
+        direction = (
+            "up" if change_pct.startswith("+")
+            else "down" if change_pct.startswith("-")
+            else "flat"
+        )
+        items.append({
+            "name": a.get_text(strip=True),
+            "change_pct": change_pct,
+            "direction": direction,
+        })
+    return items
+
+
+async def fetch_sectors(limit: int = 12) -> list[dict]:
+    """Fetch 업종별 등락 (cached). Naver pre-sorts by 등락률 descending."""
+    key = "upjong"
+    cached = _sector_cache.get(key)
+    if cached is not None:
+        return cached[:limit]
+    url = f"{_BASE}/sise/sise_group.naver?type=upjong"
+    try:
+        items = _parse_sector_table(await _get_html(url))
+        if items:
+            _sector_cache.set(key, items)
+        return items[:limit]
+    except Exception as exc:
+        logger.warning("sector fetch failed: %s", exc)
+        return _stale(_sector_cache, key, limit)

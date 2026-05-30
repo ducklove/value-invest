@@ -21,7 +21,7 @@ function load() {
     "<!doctype html><html><body>"
       + "<div class='md-grid' id='marketDashboard'>"
       + "<div class='md-main'><div id='mdIndMain'></div><div id='marketMovers'></div></div>"
-      + "<aside class='md-rail'><div id='mdIndRail'></div></aside>"
+      + "<aside class='md-rail'><div id='mdIndRail'></div><div id='marketSectors'></div></aside>"
       + "</div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
   );
@@ -130,4 +130,27 @@ test("_mvRenderRows renders ranking rows with direction class, metric, escaping"
   assert.match(rows[1].innerHTML, /mv-chg md-down/);
   // hostile name escaped
   assert.ok(!rows[1].innerHTML.includes("<b>x</b>"));
+});
+
+test("_secRenderRows renders sector rows with direction class + escaping", () => {
+  const w = load();
+  const root = w.document.getElementById("marketSectors");
+  w._secRenderRows(root, [
+    { name: "전자제품", change_pct: "+29.19%", direction: "up" },
+    { name: "<i>철강</i>", change_pct: "-2.50%", direction: "down" },
+  ]);
+  const rows = root.querySelectorAll(".sec-row");
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].innerHTML, /전자제품/);
+  assert.match(rows[0].innerHTML, /sec-chg md-up/);
+  assert.match(rows[1].innerHTML, /sec-chg md-down/);
+  assert.ok(!rows[1].innerHTML.includes("<i>철강</i>"));
+  assert.match(root.querySelector(".md-section-title").textContent, /업종별 등락/);
+});
+
+test("_secRenderRows shows empty state when no sectors", () => {
+  const w = load();
+  const root = w.document.getElementById("marketSectors");
+  w._secRenderRows(root, []);
+  assert.match(root.innerHTML, /표시할 업종이 없습니다/);
 });
