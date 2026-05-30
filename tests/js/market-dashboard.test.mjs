@@ -20,7 +20,7 @@ function load() {
   const dom = new JSDOM(
     "<!doctype html><html><body>"
       + "<div class='md-grid' id='marketDashboard'>"
-      + "<div class='md-main'><div id='mdIndMain'></div><div id='marketMovers'></div><div id='marketNews'></div></div>"
+      + "<div class='md-main'><div id='mdIndMain'></div><div id='marketMovers'></div><div id='externalTools'></div><div id='marketNews'></div></div>"
       + "<aside class='md-rail'><div id='mdIndRail'></div><div id='marketSectors'></div></aside>"
       + "</div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
@@ -216,6 +216,61 @@ test("_newsRender renders external links with title/meta and escapes hostile fie
   assert.ok(!items[1].innerHTML.includes("<script>bad</script>"));
   assert.ok(!items[1].innerHTML.includes("<b>x</b>"));
   assert.equal(items[1].getAttribute("href"), "#");
+});
+
+test("_extRender builds 3 tool cards with deep-link, gap sign class, escaping", () => {
+  const w = load();
+  const root = w.document.getElementById("externalTools");
+  w._extRender(root, {
+    holding: {
+      url: "https://ducklove.github.io/holding_value/",
+      averageRatio: 215.6,
+      top: [{ name: "영풍→고려아연", code: "000670", ratio: 781.87 },
+            { name: "<b>x</b>", code: "036710", ratio: 512.18 }],
+    },
+    spread: {
+      url: "https://ducklove.github.io/common_preferred_spread/",
+      averageSpread: 48.28,
+      top: [{ name: "두산퓨얼셀", code: "336260", spread: 88.8 }],
+    },
+    goldGap: {
+      url: "https://ducklove.github.io/gold_gap/",
+      assets: [{ key: "gold", label: "금", gap: -2.81, link: "https://ducklove.github.io/gold_gap/?asset=gold&gold_source=ny_futures" },
+               { key: "usdt", label: "USDT", gap: 1.2, link: "https://ducklove.github.io/gold_gap/?asset=usdt" }],
+    },
+  });
+  const cards = root.querySelectorAll(".ext-card");
+  assert.equal(cards.length, 3);
+  // holding row uses ?code= deep-link
+  const holdingFirst = cards[0].querySelector(".ext-row");
+  assert.match(holdingFirst.getAttribute("href"), /holding_value\/\?code=000670/);
+  assert.equal(holdingFirst.getAttribute("target"), "_blank");
+  // ratio formatted as percent
+  assert.match(cards[0].innerHTML, /781\.9%/);
+  // spread card does NOT use code deep-link (param unsupported) → plain home url
+  const spreadFirst = cards[1].querySelector(".ext-row");
+  assert.equal(spreadFirst.getAttribute("href"), "https://ducklove.github.io/common_preferred_spread/");
+  // gold gap: negative → md-down, positive → md-up; uses asset deep-link
+  assert.ok(cards[2].querySelector(".ext-val.md-down"));
+  assert.ok(cards[2].querySelector(".ext-val.md-up"));
+  assert.match(cards[2].querySelector(".ext-row").getAttribute("href"), /asset=gold/);
+  // hostile name escaped
+  assert.ok(!root.innerHTML.includes("<b>x</b>"));
+});
+
+test("_extRender renders empty when no data", () => {
+  const w = load();
+  const root = w.document.getElementById("externalTools");
+  w._extRender(root, {});
+  assert.equal(root.innerHTML, "");
+});
+
+test("_extPct formats percents (signed for gaps)", () => {
+  const w = load();
+  assert.equal(w._extPct(781.87), "781.9%");
+  assert.equal(w._extPct(-2.81, true), "-2.81%");
+  assert.equal(w._extPct(1.2, true), "+1.20%");
+  assert.equal(w._extPct(null), "-");
 });
 
 test("_newsRender shows empty state when no news", () => {

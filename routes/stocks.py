@@ -66,6 +66,14 @@ async def get_investor_flows():
     return {"flows": flows}
 
 
+@router.get("/api/external/insights")
+async def external_insights():
+    """Public — 외부 분석 도구(지주사 NAV·우선주 괴리율·김치프리미엄) 요약."""
+    import external_tools
+
+    return await external_tools.fetch_external_insights()
+
+
 @router.get("/api/settings/market-bar")
 async def get_market_bar_setting(request: Request):
     import json

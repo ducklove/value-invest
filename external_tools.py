@@ -1,0 +1,206 @@
+"""외부 분석 도구(GitHub Pages) 요약 소비 모듈.
+
+ducklove 계정의 독립 정적 대시보드 세 개가 GitHub Actions 배치로 생성·커밋하는
+public JSON을 읽어, 투자정보 대시보드의 허브 위젯과 종목분석 deep-link 카드에
+쓸 요약을 만든다.
+
+- holding_value         : 지주사 NAV 디스카운트(보유지분가치 vs 조정시총 비율)
+- common_preferred_spread: 우선주-보통주 괴리율
+- gold_gap              : 김치프리미엄(금/BTC/USDT 국내외 가격차)
+
+데이터는 raw.githubusercontent 에서 받아 길게 캐시한다(배치가 분 단위로만 갱신).
+각 도구 fetch는 서로 독립적으로 실패를 허용해, 하나가 죽어도 나머지는 표시된다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+
+import httpx
+
+from cache_layer import MemoryTTLCache
+
+logger = logging.getLogger(__name__)
+
+_RAW = "https://raw.githubusercontent.com/ducklove"
+# 사용자에게 보여줄(새 탭) 도구 홈 — GitHub Pages
+SITE = {
+    "holding": "https://ducklove.github.io/holding_value/",
+    "spread": "https://ducklove.github.io/common_preferred_spread/",
+    "goldGap": "https://ducklove.github.io/gold_gap/",
+}
+
+_TTL = 900  # 15분 — 배치 갱신 주기에 맞춤
+_cache = MemoryTTLCache("external.tools", _TTL)
+_SEM = asyncio.Semaphore(3)
+_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
+
+_GOLD_LABELS = {"gold": "금", "bitcoin": "비트코인", "usdt": "USDT"}
+# gold_gap deep-link용 기본 소스(gold만 소스 선택이 있음)
+_GOLD_LINK = {
+    "gold": "?asset=gold&gold_source=ny_futures",
+    "bitcoin": "?asset=bitcoin",
+    "usdt": "?asset=usdt",
+}
+
+
+async def _get_json(url: str):
+    async with _SEM:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "value-invest/1.0"})
+            resp.raise_for_status()
+    return resp.json()
+
+
+def _code(ticker: str) -> str:
+    """'005930.KS' -> '005930'."""
+    return (ticker or "").split(".", 1)[0]
+
+
+def _summarize_holding(current: dict, config: list, top_n: int = 5) -> dict:
+    """지주사: ratio(보유가치/시총 %, 높을수록 저평가) 내림차순 TOP."""
+    meta = {
+        c.get("id"): {"name": c.get("name") or c.get("id"), "code": _code(c.get("holdingTicker", ""))}
+        for c in (config or [])
+    }
+    rows = []
+    for p in current.get("pairs", []) or []:
+        ratio = p.get("ratio")
+        if ratio is None:
+            continue
+        m = meta.get(p.get("id"), {})
+        rows.append({
+            "name": m.get("name", p.get("id")),
+            "code": m.get("code", ""),
+            "ratio": ratio,
+            "ratioChange": p.get("ratioChange"),
+        })
+    rows.sort(key=lambda r: r["ratio"], reverse=True)
+    summary = current.get("summary") or {}
+    return {
+        "averageRatio": summary.get("averageRatio"),
+        "pairCount": summary.get("pairCount"),
+        "top": rows[:top_n],
+        "lastUpdated": current.get("lastUpdated"),
+        "url": SITE["holding"],
+    }
+
+
+def _summarize_spread(current: dict, config: list, top_n: int = 5) -> dict:
+    """우선주: spread(괴리율 %, 높을수록 우선주 할인 큼) 내림차순 TOP."""
+    meta = {
+        c.get("id"): {"name": c.get("name") or c.get("commonName") or c.get("id"), "code": _code(c.get("commonTicker", ""))}
+        for c in (config or [])
+    }
+    rows = []
+    for cid, v in (current.get("prices") or {}).items():
+        m = meta.get(cid)
+        if not m:  # config에 정의된 보통주 쌍만(우선주 단독 항목 제외)
+            continue
+        spread = v.get("spread")
+        if spread is None:
+            continue
+        rows.append({
+            "name": m["name"],
+            "code": m["code"],
+            "spread": spread,
+            "spreadChange": v.get("spreadChange"),
+        })
+    rows.sort(key=lambda r: r["spread"], reverse=True)
+    return {
+        "averageSpread": current.get("averageSpread"),
+        "averageSpreadChange": current.get("averageSpreadChange"),
+        "top": rows[:top_n],
+        "lastUpdated": current.get("lastUpdated"),
+        "url": SITE["spread"],
+    }
+
+
+def _summarize_gold(data: dict) -> dict:
+    """김치프리미엄: 자산별 최신 gap_pct(양수=김프, 음수=역프)."""
+    assets = []
+    for key in ("gold", "bitcoin", "usdt"):
+        a = data.get(key) or {}
+        gp = a.get("gap_pct") or []
+        dates = a.get("dates") or []
+        if not gp:
+            continue
+        assets.append({
+            "key": key,
+            "label": _GOLD_LABELS[key],
+            "gap": gp[-1],
+            "date": dates[-1] if dates else None,
+            "link": SITE["goldGap"] + _GOLD_LINK.get(key, ""),
+        })
+    return {"assets": assets, "updatedAt": data.get("updated_at"), "url": SITE["goldGap"]}
+
+
+async def _holding_summary() -> dict | None:
+    cur, cfg = await asyncio.gather(
+        _get_json(f"{_RAW}/holding_value/master/current.json"),
+        _get_json(f"{_RAW}/holding_value/master/config.json"),
+    )
+    return _summarize_holding(cur, cfg)
+
+
+async def _spread_summary() -> dict | None:
+    cur, cfg = await asyncio.gather(
+        _get_json(f"{_RAW}/common_preferred_spread/master/current.json"),
+        _get_json(f"{_RAW}/common_preferred_spread/master/config.json"),
+    )
+    return _summarize_spread(cur, cfg)
+
+
+async def _gold_summary() -> dict | None:
+    data = await _get_json(f"{_RAW}/gold_gap/master/data.json")
+    return _summarize_gold(data)
+
+
+async def fetch_external_insights() -> dict:
+    """세 도구 요약을 한 번에. 도구별 독립 실패 허용 + 길게 캐시."""
+    cached = _cache.get("insights")
+    if cached is not None:
+        return cached
+
+    results = await asyncio.gather(
+        _holding_summary(), _spread_summary(), _gold_summary(),
+        return_exceptions=True,
+    )
+    keys = ("holding", "spread", "goldGap")
+    out: dict = {}
+    for key, res in zip(keys, results):
+        if isinstance(res, Exception) or res is None:
+            logger.warning("external insight '%s' failed: %s", key, res)
+            continue
+        out[key] = res
+
+    if out:
+        _cache.set("insights", out)
+        return out
+    # 전부 실패 시 스테일 폴백
+    entry = _cache.get_entry("insights", allow_stale=True) if hasattr(_cache, "get_entry") else None
+    if entry and getattr(entry, "value", None):
+        return dict(entry.value)
+    return out
+
+
+async def fetch_stock_links(code: str) -> dict:
+    """종목분석 deep-link 카드용 — 이 종목코드에 해당하는 우선주/지주사 정보."""
+    code = (code or "").strip()
+    insights = await fetch_external_insights()
+    result: dict = {}
+
+    spread = insights.get("spread") or {}
+    for row in spread.get("top", []):  # top만으로는 부족 → 전체 매칭이 필요할 수 있음
+        if row.get("code") == code:
+            result["preferred"] = {**row, "url": SITE["spread"]}
+            break
+
+    holding = insights.get("holding") or {}
+    for row in holding.get("top", []):
+        if row.get("code") == code:
+            result["holding"] = {**row, "url": SITE["holding"] + f"?code={code}"}
+            break
+
+    return result

@@ -146,6 +146,7 @@ async function loadInvestingDashboard(refresh = false) {
   if (typeof loadMarketMovers === 'function') loadMarketMovers();
   if (typeof loadSectors === 'function') loadSectors();
   if (typeof loadMarketNews === 'function') loadMarketNews();
+  if (typeof loadExternalInsights === 'function') loadExternalInsights();
   if (_mdInFlight) return _mdInFlight;
   _mdInFlight = (async () => {
     try {
@@ -265,6 +266,87 @@ async function loadSectors() {
     console.warn('sectors load failed', e);
   } finally {
     _secInFlight = false;
+  }
+}
+
+// --- 분석 도구 (external insights) — 외부 GitHub Pages 도구 요약 허브 ---
+// 지주사 NAV 디스카운트 / 우선주 괴리율 / 김치프리미엄. public JSON 요약을
+// 한 섹션에 카드로 묶고, 항목 클릭 시 해당 도구로(새 탭, 가능하면 deep-link).
+let _extInFlight = false;
+
+function _extSafeUrl(url) {
+  return /^https?:\/\//.test(String(url || '')) ? String(url) : '#';
+}
+
+function _extPct(v, signed) {
+  if (v === null || v === undefined || v === '') return '-';
+  const n = Number(v);
+  if (!isFinite(n)) return escapeHtml(String(v));
+  return (signed && n > 0 ? '+' : '') + n.toFixed(signed ? 2 : 1) + '%';
+}
+
+function _extLinkRows(rows, valKey, baseUrl, useCode) {
+  return (rows || []).map((r) => {
+    // holding 도구만 ?code= deep-link 지원. 그 외엔 도구 홈으로.
+    const href = useCode && r.code ? `${baseUrl}?code=${encodeURIComponent(r.code)}` : baseUrl;
+    return `<a class="ext-row" href="${escapeHtml(_extSafeUrl(href))}" target="_blank" rel="noopener noreferrer">`
+      + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
+      + `<span class="ext-val">${escapeHtml(_extPct(r[valKey]))}</span></a>`;
+  }).join('');
+}
+
+function _extCard(title, url, subText, bodyHtml) {
+  return '<div class="ext-card">'
+    + `<div class="ext-head"><span>${escapeHtml(title)}</span>`
+    + `<a href="${escapeHtml(_extSafeUrl(url))}" target="_blank" rel="noopener noreferrer" class="ext-more" title="도구 열기">↗</a></div>`
+    + (subText ? `<div class="ext-sub">${escapeHtml(subText)}</div>` : '')
+    + `<div class="ext-rows">${bodyHtml}</div></div>`;
+}
+
+function _extRender(root, data) {
+  const cards = [];
+  const h = data && data.holding;
+  if (h && (h.top || []).length) {
+    const sub = h.averageRatio != null ? `평균 ${_extPct(h.averageRatio)} · 보유가치/시총` : '보유가치/시총';
+    cards.push(_extCard('지주사 저평가', h.url, sub, _extLinkRows(h.top, 'ratio', h.url, true)));
+  }
+  const s = data && data.spread;
+  if (s && (s.top || []).length) {
+    const sub = s.averageSpread != null ? `평균 괴리율 ${_extPct(s.averageSpread)}` : '우선주 괴리율';
+    cards.push(_extCard('우선주 괴리율', s.url, sub, _extLinkRows(s.top, 'spread', s.url, false)));
+  }
+  const g = data && data.goldGap;
+  if (g && (g.assets || []).length) {
+    const rows = g.assets.map((a) => {
+      const n = Number(a.gap);
+      const cls = isFinite(n) ? (n > 0 ? 'md-up' : (n < 0 ? 'md-down' : 'md-flat')) : 'md-flat';
+      return `<a class="ext-row" href="${escapeHtml(_extSafeUrl(a.link || g.url))}" target="_blank" rel="noopener noreferrer">`
+        + `<span class="ext-name">${escapeHtml(String(a.label || a.key || ''))}</span>`
+        + `<span class="ext-val ${cls}">${escapeHtml(_extPct(a.gap, true))}</span></a>`;
+    }).join('');
+    cards.push(_extCard('김치프리미엄', g.url, '국내가 vs 국제가', rows));
+  }
+  if (!cards.length) {
+    root.innerHTML = '';
+    return;
+  }
+  root.innerHTML = '<section class="md-section ext-section">'
+    + '<h3 class="md-section-title">분석 도구</h3>'
+    + `<div class="ext-grid">${cards.join('')}</div></section>`;
+}
+
+async function loadExternalInsights() {
+  const root = document.getElementById('externalTools');
+  if (!root || _extInFlight) return;
+  _extInFlight = true;
+  try {
+    const r = await apiFetch('/api/external/insights');
+    const data = r.ok ? await r.json() : {};
+    _extRender(root, data);
+  } catch (e) {
+    console.warn('external insights load failed', e);
+  } finally {
+    _extInFlight = false;
   }
 }
 
