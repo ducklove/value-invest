@@ -35,6 +35,13 @@ COMPARISON_REPORT_COUNT = int(os.getenv("DART_REVIEW_COMPARISON_REPORTS", "2"))
 REPORT_LOOKBACK_DAYS = int(os.getenv("DART_REVIEW_LOOKBACK_DAYS", "1100"))
 DART_FILINGS_CACHE_TTL_S = int(os.getenv("DART_REVIEW_FILINGS_CACHE_TTL_S", "600"))
 DART_REVIEW_TARGET_LIMIT = int(os.getenv("DART_REVIEW_TARGET_LIMIT", "12"))
+# Output budget for the review JSON. The summary_md (markdown tables + bars),
+# cards, watch_items and comparison_notes routinely exceed a small cap; when the
+# model is cut off mid-JSON the parser falls back to dumping the raw blob into
+# summary_md, which the UI then renders as garbled markdown. A generous default
+# plus a larger one-shot retry keeps that failure mode rare.
+DART_REVIEW_MAX_TOKENS = int(os.getenv("DART_REVIEW_MAX_TOKENS", "4096"))
+DART_REVIEW_MAX_TOKENS_RETRY = int(os.getenv("DART_REVIEW_MAX_TOKENS_RETRY", "8000"))
 
 _filings_cache = MemoryTTLCache("dart_report_review.filings", DART_FILINGS_CACHE_TTL_S)
 _pipeline_lock = asyncio.Lock()
@@ -359,7 +366,7 @@ def _normalize_review(raw_text: str) -> dict[str, Any]:
     try:
         parsed = json.loads(_strip_json_fence(raw_text))
     except Exception:
-        parsed = {"summary_md": raw_text.strip()}
+        parsed = {"summary_md": (raw_text or "").strip()}
     if not isinstance(parsed, dict):
         parsed = {"summary_md": str(parsed)}
     parsed.setdefault("summary_md", "")
@@ -372,7 +379,56 @@ def _normalize_review(raw_text: str) -> dict[str, Any]:
     return parsed
 
 
-async def _call_openrouter(prompt: str, *, google_sub: str | None) -> tuple[dict[str, Any], dict[str, Any]]:
+def _looks_like_raw_json_blob(text: str | None) -> bool:
+    r"""True when a JSON payload was dumped verbatim into a markdown field.
+
+    This is the truncated/unparseable-output failure mode: when ``json.loads``
+    fails, ``_normalize_review`` falls back to putting the entire raw LLM text
+    into ``summary_md``. Rendering that as markdown shows the user raw
+    ``{"summary_md": ...}`` with literal ``\n`` and broken tables, so such a
+    payload must be treated as broken rather than displayed or cached as a real
+    review. Normal markdown starts with a heading or prose, never ``{``.
+    """
+    head = (text or "").lstrip()
+    if not head.startswith("{"):
+        return False
+    return '"summary_md"' in head[:400]
+
+
+def _finish_reason_from_response(data: dict[str, Any] | None) -> str | None:
+    try:
+        return ((data or {}).get("choices") or [{}])[0].get("finish_reason")
+    except Exception:
+        return None
+
+
+def _review_payload_is_broken(payload: dict[str, Any], *, finish_reason: str | None = None) -> bool:
+    """A freshly generated review is broken when the model output was cut off
+    (``finish_reason == "length"``) or the JSON could not be parsed and the raw
+    blob landed in ``summary_md``. Such payloads must never be cached."""
+    if finish_reason == "length":
+        return True
+    summary = payload.get("summary_md") if isinstance(payload, dict) else None
+    return _looks_like_raw_json_blob(summary)
+
+
+def _cached_review_is_broken(cached: dict[str, Any] | None) -> bool:
+    """Detect a previously cached review poisoned by the truncation bug, so the
+    read path can fall back to ``missing`` and let the background pipeline
+    regenerate it instead of serving raw JSON to the UI."""
+    if not isinstance(cached, dict):
+        return False
+    review = cached.get("review")
+    summary = review.get("summary_md") if isinstance(review, dict) else None
+    return _looks_like_raw_json_blob(summary or cached.get("review_md"))
+
+
+async def _call_openrouter(
+    prompt: str,
+    *,
+    google_sub: str | None,
+    max_tokens: int = DART_REVIEW_MAX_TOKENS,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     model = await ai_config.get_model_for_feature("dart_report_review")
     payload = {
         "model": model,
@@ -387,7 +443,7 @@ async def _call_openrouter(prompt: str, *, google_sub: str | None) -> tuple[dict
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.2,
-        "max_tokens": 2800,
+        "max_tokens": max_tokens,
     }
     try:
         result = await ai_client.post_chat_completion(
@@ -409,6 +465,7 @@ async def _call_openrouter(prompt: str, *, google_sub: str | None) -> tuple[dict
         "tokens_in": result["input_tokens"],
         "tokens_out": result["output_tokens"],
         "cost_usd": result["cost_usd"],
+        "finish_reason": _finish_reason_from_response(result.get("data")),
     }
 
 
@@ -430,7 +487,7 @@ async def latest_review_status(stock_code: str) -> dict[str, Any]:
         }
     latest = filings[0]
     cached = await cache.get_dart_report_review(stock_code, latest["rcept_no"])
-    if cached:
+    if cached and not _cached_review_is_broken(cached):
         cached["cached"] = True
         return {
             "stock_code": stock_code,
@@ -442,7 +499,12 @@ async def latest_review_status(stock_code: str) -> dict[str, Any]:
             "review": cached,
             "available_reports": filings,
         }
+    # A poisoned (truncated-JSON) cache entry would otherwise be served as
+    # "ready" forever and skipped by the background pipeline. Fall through to
+    # "missing" so the UI shows the waiting state and the entry gets regenerated.
     stale = await cache.get_dart_report_review(stock_code)
+    if _cached_review_is_broken(stale):
+        stale = None
     return {
         "stock_code": stock_code,
         "corp_code": corp_code,
@@ -491,6 +553,23 @@ async def generate_review(stock_code: str, *, google_sub: str | None, force: boo
         financial_context=await _financial_context(stock_code),
     )
     review_payload, usage = await _call_openrouter(prompt, google_sub=google_sub)
+    if _review_payload_is_broken(review_payload, finish_reason=usage.get("finish_reason")):
+        logger.warning(
+            "DART review truncated/unparseable for %s (finish_reason=%s, tokens_out=%s); "
+            "retrying with a larger token budget",
+            stock_code,
+            usage.get("finish_reason"),
+            usage.get("tokens_out"),
+        )
+        review_payload, usage = await _call_openrouter(
+            prompt, google_sub=google_sub, max_tokens=DART_REVIEW_MAX_TOKENS_RETRY
+        )
+        if _review_payload_is_broken(review_payload, finish_reason=usage.get("finish_reason")):
+            # Never cache a truncated/garbled payload — that is exactly what made
+            # the broken review stick until a manual regeneration.
+            raise DartReportReviewError(
+                "AI 응답이 잘려 정상적인 리뷰를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
+            )
 
     review = {
         "stock_code": stock_code,

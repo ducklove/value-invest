@@ -47,6 +47,147 @@ class DartReportReviewHelperTests(unittest.TestCase):
         self.assertIn("주요 제품", snippet)
 
 
+class DartReportReviewBrokenDetectionTests(unittest.TestCase):
+    def test_truncated_json_blob_is_detected_as_broken(self):
+        blob = '{"summary_md": "# 삼성전자 1분기 실적\\n\\n## 요약\\n| 항목 | 값 |", "cards": [{"label":"매출"'
+        self.assertTrue(dart_report_review._looks_like_raw_json_blob(blob))
+        self.assertTrue(dart_report_review._review_payload_is_broken({"summary_md": blob}))
+
+    def test_normal_markdown_is_not_broken(self):
+        md = "# 삼성전자 1분기 실적\n\n## 실적 요약\n| 항목 | 값 |"
+        self.assertFalse(dart_report_review._looks_like_raw_json_blob(md))
+        self.assertFalse(dart_report_review._review_payload_is_broken({"summary_md": md}, finish_reason="stop"))
+
+    def test_length_finish_reason_marks_payload_broken(self):
+        self.assertTrue(
+            dart_report_review._review_payload_is_broken({"summary_md": "# 정상"}, finish_reason="length")
+        )
+
+    def test_cached_review_broken_uses_review_md_or_summary(self):
+        blob = '{"summary_md": "본문", "cards": ['
+        self.assertTrue(dart_report_review._cached_review_is_broken({"review": {"summary_md": blob}}))
+        self.assertTrue(dart_report_review._cached_review_is_broken({"review_md": blob}))
+        self.assertFalse(dart_report_review._cached_review_is_broken({"review": {"summary_md": "# 정상"}, "review_md": "# 정상"}))
+        self.assertFalse(dart_report_review._cached_review_is_broken(None))
+
+    def test_finish_reason_extraction(self):
+        data = {"choices": [{"finish_reason": "length"}]}
+        self.assertEqual(dart_report_review._finish_reason_from_response(data), "length")
+        self.assertIsNone(dart_report_review._finish_reason_from_response({}))
+        self.assertIsNone(dart_report_review._finish_reason_from_response(None))
+
+
+class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
+    BROKEN = (
+        {"summary_md": '{"summary_md": "본문", "cards": [{"label":"매출"', "cards": []},
+        {"model": "m", "tokens_in": 1, "tokens_out": 2, "cost_usd": 0.0, "finish_reason": "length"},
+    )
+    GOOD = (
+        {
+            "summary_md": "# 정상 리뷰",
+            "cards": [{"label": "매출", "value": "증가", "tone": "good"}],
+            "watch_items": [],
+            "comparison_notes": [],
+            "source_limits": "",
+        },
+        {"model": "m", "tokens_in": 3, "tokens_out": 4, "cost_usd": 0.001, "finish_reason": "stop"},
+    )
+
+    def _common_patches(self, save_mock):
+        filings = [{
+            "rcept_no": "r1",
+            "report_name": "분기보고서 (2026.03)",
+            "report_date": "2026-04-01",
+            "viewer_url": "u",
+            "kind": "분기",
+            "period": "2026.03",
+        }]
+        return [
+            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
+            patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
+            patch.object(dart_report_review, "fetch_document_text", AsyncMock(return_value="원문 텍스트")),
+            patch.object(dart_report_review, "_financial_context", AsyncMock(return_value="재무 컨텍스트")),
+            patch.object(cache, "save_dart_report_review", save_mock),
+        ]
+
+    async def _run_generate(self, call_mock, save_mock):
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            for p in self._common_patches(save_mock):
+                stack.enter_context(p)
+            stack.enter_context(patch.object(dart_report_review, "_call_openrouter", call_mock))
+            return await dart_report_review.generate_review("005930", google_sub=None, force=True)
+
+    async def test_persistent_truncation_retries_then_raises_without_caching(self):
+        call = AsyncMock(side_effect=[self.BROKEN, self.BROKEN])
+        save = AsyncMock(side_effect=lambda review: review)
+
+        with self.assertRaises(dart_report_review.DartReportReviewError):
+            await self._run_generate(call, save)
+
+        self.assertEqual(call.await_count, 2)
+        save.assert_not_awaited()
+        # retry must escalate the token budget
+        self.assertEqual(
+            call.await_args_list[1].kwargs.get("max_tokens"),
+            dart_report_review.DART_REVIEW_MAX_TOKENS_RETRY,
+        )
+
+    async def test_truncation_then_success_caches_good_review(self):
+        call = AsyncMock(side_effect=[self.BROKEN, self.GOOD])
+        save = AsyncMock(side_effect=lambda review: review)
+
+        saved = await self._run_generate(call, save)
+
+        self.assertEqual(call.await_count, 2)
+        save.assert_awaited_once()
+        self.assertEqual(saved["review"]["summary_md"], "# 정상 리뷰")
+        self.assertEqual(saved["review_md"], "# 정상 리뷰")
+        self.assertFalse(saved["cached"])
+
+    async def test_first_attempt_healthy_does_not_retry(self):
+        call = AsyncMock(side_effect=[self.GOOD])
+        save = AsyncMock(side_effect=lambda review: review)
+
+        saved = await self._run_generate(call, save)
+
+        self.assertEqual(call.await_count, 1)
+        save.assert_awaited_once()
+        self.assertEqual(saved["review_md"], "# 정상 리뷰")
+
+    async def test_latest_status_treats_broken_cache_as_missing(self):
+        broken_cached = {
+            "review": {"summary_md": '{"summary_md": "본문", "cards": ['},
+            "review_md": '{"summary_md": "본문", "cards": [',
+        }
+        filings = [{"rcept_no": "r1", "report_name": "분기보고서 (2026.03)", "report_date": "2026-04-01"}]
+        with (
+            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
+            patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
+            patch.object(cache, "get_dart_report_review", AsyncMock(return_value=broken_cached)),
+        ):
+            result = await dart_report_review.latest_review_status("005930")
+
+        self.assertEqual(result["status"], "missing")
+        self.assertIsNone(result["previous_review"])
+
+    async def test_latest_status_serves_healthy_cache_as_ready(self):
+        good_cached = {"review": {"summary_md": "# 정상"}, "review_md": "# 정상"}
+        filings = [{"rcept_no": "r1", "report_name": "분기보고서 (2026.03)", "report_date": "2026-04-01"}]
+        with (
+            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
+            patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
+            patch.object(cache, "get_dart_report_review", AsyncMock(return_value=good_cached)),
+        ):
+            result = await dart_report_review.latest_review_status("005930")
+
+        self.assertEqual(result["status"], "ready")
+        self.assertTrue(result["review"]["cached"])
+
+
 class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
