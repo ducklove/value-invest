@@ -332,7 +332,7 @@ function renderPortfolio(options = {}) {
   };
 
   // --- Compute current NAV ---
-  const latestSnap = pfNavHistory.length ? pfNavHistory[pfNavHistory.length - 1] : null;
+  const latestSnap = PfStore.navHistory.length ? PfStore.navHistory[PfStore.navHistory.length - 1] : null;
   let _pendingUnitsChange = 0;
   let _pendingCashflowWithoutUnits = 0;
   if (!isFiltered && Array.isArray(pfPrevDaySnapshot?.today_cashflows)) {
@@ -836,8 +836,8 @@ function _diffLocalDays(start, end) {
 
 function _renderSummarySparklines(currentTotalValue) {
   // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
-  if (pfNavHistory.length > 1) {
-    const last365 = pfNavHistory.slice(-365);
+  if (PfStore.navHistory.length > 1) {
+    const last365 = PfStore.navHistory.slice(-365);
     const returnPcts = last365.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
     const lastReturn = returnPcts[returnPcts.length - 1] || 0;
     _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb', 252, 'right');
@@ -857,7 +857,7 @@ function _renderSummarySparklines(currentTotalValue) {
     const monthEndYmd = _formatLocalYmd(thisMonthEnd);
     const axisDays = Math.max(1, _diffLocalDays(prevMonthEnd, thisMonthEnd));
     const monthPoints = [{ x: 0, y: 0 }];
-    const monthData = pfNavHistory.filter(d => d.date >= monthStartYmd && d.date <= monthEndYmd);
+    const monthData = PfStore.navHistory.filter(d => d.date >= monthStartYmd && d.date <= monthEndYmd);
     for (const d of monthData) {
       if (!d || !d.total_value) continue;
       const dt = _parseLocalYmd(d.date);

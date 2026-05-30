@@ -34,6 +34,9 @@ test("PfStore is exposed with a benchmarkQuotes map", () => {
   // Cross-realm object: compare shape via key count, not deepEqual({}).
   assert.equal(typeof w.PfStore.benchmarkQuotes, "object");
   assert.equal(Object.keys(w.PfStore.benchmarkQuotes).length, 0);
+  // NAV history slice.
+  assert.ok(Array.isArray(w.PfStore.navHistory));
+  assert.equal(w.PfStore.navHistory.length, 0);
 });
 
 test("benchmarkQuotes is a single mutable store others can share", () => {

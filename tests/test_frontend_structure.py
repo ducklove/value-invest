@@ -151,7 +151,7 @@ def test_cashflow_history_renders_before_nav_charts_finish():
     source = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
 
     assert "void cashflowPromise.then(cfData =>" in source
-    assert "renderCashflows(cfData, cachedNav || pfNavHistory || _navChartData);" in source
+    assert "renderCashflows(cfData, cachedNav || PfStore.navHistory || _navChartData);" in source
     assert source.find("void cashflowPromise.then(cfData =>") < source.find("const navData = await navPromise;")
     assert "renderCashflows(cfData, navData);" in source
 

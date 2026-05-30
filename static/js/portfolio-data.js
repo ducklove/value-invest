@@ -6,14 +6,14 @@ const _PF_PORTFOLIO_SNAPSHOT_KEY = 'valueInvestPortfolioSnapshot:v2';
 const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;
 
 async function pfLoadNavHistory({ force = false } = {}) {
-  if (!force && Array.isArray(pfNavHistory) && pfNavHistory.length) return pfNavHistory;
+  if (!force && Array.isArray(PfStore.navHistory) && PfStore.navHistory.length) return PfStore.navHistory;
   if (_pfNavHistoryPromise) return _pfNavHistoryPromise;
   _pfNavHistoryPromise = (async () => {
     const resp = await apiFetch('/api/portfolio/nav-history');
     if (!resp.ok) throw new Error(`NAV history request failed (${resp.status})`);
     const rows = await resp.json();
-    pfNavHistory = Array.isArray(rows) ? rows : [];
-    return pfNavHistory;
+    PfStore.navHistory = Array.isArray(rows) ? rows : [];
+    return PfStore.navHistory;
   })().finally(() => {
     _pfNavHistoryPromise = null;
   });

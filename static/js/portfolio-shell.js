@@ -22,7 +22,7 @@ let pfMonthEndSnap = null; // {total_value, nav, fx_usdkrw, ...} at end of previ
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 let pfYearStartSnap = null; // {date, total_value, fx_usdkrw, ...} for first snapshot of this year
 let pfYearStartStockValues = {}; // stock_code -> market_value at year start
-let pfNavHistory = []; // [{date, nav, total_value, total_invested, total_units}, ...]
+// NAV history now lives in PfStore.navHistory (portfolio-store.js).
 let pfIntradayData = []; // [{ts, total_value}, ...]
 let pfPrevDaySnapshot = null; // {total_value, fx_usdkrw, stock_values, today_net_cashflow}
 let pfCurrency = 'KRW'; // 'KRW' or 'USD'
