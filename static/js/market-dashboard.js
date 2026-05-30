@@ -78,11 +78,14 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
 }
 
 function _mdRenderDashboard(catalog, dataMap) {
-  const root = document.getElementById('marketDashboard');
-  if (!root) return;
+  // The two-column shell is stable HTML in index.html; we only fill the
+  // indicator slots so sibling widgets (movers, 수급, 뉴스) aren't disturbed.
+  const mainEl = document.getElementById('mdIndMain');
+  const railEl = document.getElementById('mdIndRail');
+  if (!mainEl || !railEl) return;
   const groups = _mdGroupByCategory(catalog);
   if (!groups.length) {
-    root.innerHTML = '<div class="md-loading">표시할 지표가 없습니다.</div>';
+    mainEl.innerHTML = '<div class="md-loading">표시할 지표가 없습니다.</div>';
     return;
   }
   const main = [];
@@ -92,13 +95,14 @@ function _mdRenderDashboard(catalog, dataMap) {
     const html = _mdSectionHtml(category, codes, catalog, dataMap, isHero ? 'hero' : 'list');
     (isHero || MD_MAIN_CATEGORIES.includes(category) ? main : rail).push(html);
   }
-  root.innerHTML = '<div class="md-grid">'
-    + `<div class="md-main">${main.join('')}</div>`
-    + `<aside class="md-rail">${rail.join('')}</aside>`
-    + '</div>';
+  mainEl.innerHTML = main.join('');
+  railEl.innerHTML = rail.join('');
 }
 
 async function loadInvestingDashboard(refresh = false) {
+  // Market-ranking widget loads independently so a slow/failed indicator fetch
+  // never blocks it (and vice versa).
+  if (typeof loadMarketMovers === 'function') loadMarketMovers();
   if (_mdInFlight) return _mdInFlight;
   _mdInFlight = (async () => {
     try {
@@ -115,13 +119,90 @@ async function loadInvestingDashboard(refresh = false) {
       _mdLoadedOnce = true;
     } catch (e) {
       console.warn('investing dashboard load failed', e);
-      const root = document.getElementById('marketDashboard');
-      if (root && !_mdLoadedOnce) {
-        root.innerHTML = '<div class="md-loading">시장 지표를 불러오지 못했습니다.</div>';
+      const mainEl = document.getElementById('mdIndMain');
+      if (mainEl && !_mdLoadedOnce) {
+        mainEl.innerHTML = '<div class="md-loading">시장 지표를 불러오지 못했습니다.</div>';
       }
     } finally {
       _mdInFlight = null;
     }
   })();
   return _mdInFlight;
+}
+
+
+// --- 시장 랭킹 (market movers): 시총상위 / 거래상위 / 급상승 / 급하락 ---
+const MV_TABS = [
+  { kind: 'market_cap', label: '시총상위' },
+  { kind: 'volume', label: '거래상위' },
+  { kind: 'rising', label: '급상승' },
+  { kind: 'falling', label: '급하락' },
+];
+let _mvKind = 'market_cap';
+let _mvMarket = 'kospi';
+let _mvInFlight = false;
+
+function _mvRenderShell(root) {
+  const tabs = MV_TABS.map((t) =>
+    `<button class="mv-tab${t.kind === _mvKind ? ' active' : ''}" data-kind="${t.kind}">${escapeHtml(t.label)}</button>`
+  ).join('');
+  const markets = [['kospi', '코스피'], ['kosdaq', '코스닥']].map(([m, label]) =>
+    `<button class="mv-mkt${m === _mvMarket ? ' active' : ''}" data-market="${m}">${label}</button>`
+  ).join('');
+  root.innerHTML = '<section class="md-section mv-section">'
+    + '<div class="mv-head"><h3 class="md-section-title">시장 랭킹</h3>'
+    + `<div class="mv-mkts">${markets}</div></div>`
+    + `<div class="mv-tabs">${tabs}</div>`
+    + '<div class="mv-body"><div class="md-loading">불러오는 중...</div></div>'
+    + '</section>';
+  root.querySelectorAll('.mv-tab').forEach((b) =>
+    b.addEventListener('click', () => { _mvKind = b.dataset.kind; loadMarketMovers(); }));
+  root.querySelectorAll('.mv-mkt').forEach((b) =>
+    b.addEventListener('click', () => { _mvMarket = b.dataset.market; loadMarketMovers(); }));
+}
+
+function _mvRenderRows(root, items) {
+  const body = root.querySelector('.mv-body');
+  if (!body) return;
+  if (!items.length) {
+    body.innerHTML = '<div class="md-loading">표시할 종목이 없습니다.</div>';
+    return;
+  }
+  const showMetric = _mvKind === 'market_cap' || _mvKind === 'volume';
+  body.innerHTML = items.map((it) => {
+    const dirCls = it.direction === 'up' ? 'md-up' : (it.direction === 'down' ? 'md-down' : 'md-flat');
+    const metric = showMetric && it.metric
+      ? `<span class="mv-metric">${escapeHtml(String(it.metric))}</span>` : '';
+    return `<button class="mv-row" data-code="${escapeHtml(String(it.code || ''))}">`
+      + `<span class="mv-rank">${escapeHtml(String(it.rank || ''))}</span>`
+      + `<span class="mv-name">${escapeHtml(String(it.name || ''))}</span>`
+      + `<span class="mv-price">${escapeHtml(String(it.price || '-'))}</span>`
+      + `<span class="mv-chg ${dirCls}">${escapeHtml(String(it.change_pct || ''))}</span>`
+      + `${metric}</button>`;
+  }).join('');
+  body.querySelectorAll('.mv-row').forEach((b) =>
+    b.addEventListener('click', () => {
+      const code = b.dataset.code;
+      if (!code) return;
+      if (typeof switchView === 'function') switchView('analysis');
+      if (typeof analyzeStock === 'function') analyzeStock(code);
+    }));
+}
+
+async function loadMarketMovers() {
+  const root = document.getElementById('marketMovers');
+  if (!root || _mvInFlight) return;
+  _mvInFlight = true;
+  _mvRenderShell(root);
+  try {
+    const r = await apiFetch(`/api/market/movers?kind=${encodeURIComponent(_mvKind)}&market=${encodeURIComponent(_mvMarket)}&limit=10`);
+    const data = r.ok ? await r.json() : { items: [] };
+    _mvRenderRows(root, data.items || []);
+  } catch (e) {
+    console.warn('market movers load failed', e);
+    const body = root.querySelector('.mv-body');
+    if (body) body.innerHTML = '<div class="md-loading">불러오지 못했습니다.</div>';
+  } finally {
+    _mvInFlight = false;
+  }
 }

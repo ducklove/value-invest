@@ -108,8 +108,14 @@ function trackEvent(name, params = {}) {
         </div>
         <button class="md-refresh" id="marketDashboardRefreshBtn" type="button" onclick="loadInvestingDashboard(true)">새로고침</button>
       </div>
-      <div class="market-dashboard" id="marketDashboard">
-        <div class="md-loading">시장 지표를 불러오는 중입니다...</div>
+      <div class="md-grid" id="marketDashboard">
+        <div class="md-main">
+          <div id="mdIndMain"><div class="md-loading">시장 지표를 불러오는 중입니다...</div></div>
+          <div id="marketMovers"></div>
+        </div>
+        <aside class="md-rail">
+          <div id="mdIndRail"></div>
+        </aside>
       </div>
     </section>
 

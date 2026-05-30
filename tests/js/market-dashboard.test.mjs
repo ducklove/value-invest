@@ -18,7 +18,11 @@ const DASH = read("market-dashboard.js");
 
 function load() {
   const dom = new JSDOM(
-    "<!doctype html><html><body><div id='marketDashboard'></div></body></html>",
+    "<!doctype html><html><body>"
+      + "<div class='md-grid' id='marketDashboard'>"
+      + "<div class='md-main'><div id='mdIndMain'></div><div id='marketMovers'></div></div>"
+      + "<aside class='md-rail'><div id='mdIndRail'></div></aside>"
+      + "</div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
   );
   for (const src of [UTILS, DASH]) {
@@ -68,9 +72,9 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   };
   w._mdRenderDashboard(CATALOG, dataMap);
   const root = w.document.getElementById("marketDashboard");
-  const main = root.querySelector(".md-grid > .md-main");
-  const rail = root.querySelector(".md-grid > .md-rail");
-  assert.ok(main && rail, "two-column shell present");
+  const main = w.document.getElementById("mdIndMain");
+  const rail = w.document.getElementById("mdIndRail");
+  assert.ok(main && rail, "indicator slots present");
 
   // 국내 지수 → hero card in main, with value + up class.
   const hero = main.querySelector(".md-hero-card");
@@ -97,4 +101,33 @@ test("_mdRenderDashboard escapes catalog labels (no raw HTML injection)", () => 
   const html = w.document.getElementById("marketDashboard").innerHTML;
   assert.ok(!html.includes("<img src=x"));
   assert.match(html, /&lt;img src=x/);
+});
+
+test("_mvRenderShell renders 4 ranking tabs + market toggle with active state", () => {
+  const w = load();
+  const root = w.document.getElementById("marketMovers");
+  w._mvRenderShell(root);
+  assert.equal(root.querySelectorAll(".mv-tab").length, 4);
+  assert.ok(root.querySelector(".mv-tab.active[data-kind='market_cap']"));
+  assert.ok(root.querySelector(".mv-mkt.active[data-market='kospi']"));
+  assert.ok(root.querySelector(".mv-body"));
+});
+
+test("_mvRenderRows renders ranking rows with direction class, metric, escaping", () => {
+  const w = load();
+  const root = w.document.getElementById("marketMovers");
+  w._mvRenderShell(root);
+  w._mvRenderRows(root, [
+    { rank: "1", code: "005930", name: "삼성전자", price: "317,000", change_pct: "+5.84%", direction: "up", metric: "470조" },
+    { rank: "2", code: "000660", name: "<b>x</b>", price: "100", change_pct: "-1.0%", direction: "down" },
+  ]);
+  const rows = root.querySelectorAll(".mv-row");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].dataset.code, "005930");
+  assert.match(rows[0].innerHTML, /삼성전자/);
+  assert.match(rows[0].innerHTML, /mv-chg md-up/);
+  assert.match(rows[0].innerHTML, /470조/); // metric shown for market_cap kind
+  assert.match(rows[1].innerHTML, /mv-chg md-down/);
+  // hostile name escaped
+  assert.ok(!rows[1].innerHTML.includes("<b>x</b>"));
 });

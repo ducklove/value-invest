@@ -27,6 +27,16 @@ async def list_indicators():
     return market_indicators.CATALOG
 
 
+@router.get("/api/market/movers")
+async def get_market_movers(kind: str = "market_cap", market: str = "kospi", limit: int = 10):
+    """Public 시장 랭킹 — 시총상위/거래상위/급상승/급하락 (Naver sise)."""
+    import market_movers
+
+    limit = max(1, min(int(limit), 30))
+    items = await market_movers.fetch_market_movers(kind, market, limit)
+    return {"kind": kind, "market": market, "items": items}
+
+
 @router.get("/api/settings/market-bar")
 async def get_market_bar_setting(request: Request):
     import json

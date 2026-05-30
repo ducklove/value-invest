@@ -601,6 +601,30 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .md-row-label { flex: 1; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .md-row-val { font-weight: 700; font-variant-numeric: tabular-nums; }
 .md-row .md-chg { min-width: 72px; text-align: right; font-size: 12px; font-weight: 600; }
+
+/* 시장 랭킹 (movers) widget */
+.mv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mv-head .md-section-title { margin: 0; padding: 0; border-bottom: none; }
+.mv-mkts { display: inline-flex; gap: 4px; }
+.mv-mkt { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 11px; padding: 3px 10px; border-radius: 999px; cursor: pointer; }
+.mv-mkt.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.mv-tabs { display: flex; gap: 4px; margin: 10px 0 6px; flex-wrap: wrap; }
+.mv-tab { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 12px; padding: 5px 11px; border-radius: 8px; cursor: pointer; }
+.mv-tab.active { background: var(--surface-muted, rgba(148,163,184,.12)); color: var(--text); border-color: var(--primary); font-weight: 700; }
+.mv-body { display: flex; flex-direction: column; }
+.mv-row {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  text-align: left; background: transparent; border: none;
+  border-bottom: 1px solid var(--border); padding: 7px 2px; cursor: pointer;
+  font-size: 13px; color: var(--text);
+}
+.mv-row:last-child { border-bottom: none; }
+.mv-row:hover { background: var(--surface-muted, rgba(148,163,184,.08)); }
+.mv-rank { flex: 0 0 auto; width: 18px; text-align: right; color: var(--text-secondary); font-size: 12px; }
+.mv-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mv-price { font-weight: 600; font-variant-numeric: tabular-nums; }
+.mv-chg { min-width: 64px; text-align: right; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mv-metric { min-width: 82px; text-align: right; color: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .md-up { color: #b91c1c; }
 .md-down { color: #1d4ed8; }
 .md-flat { color: var(--text-secondary); }
