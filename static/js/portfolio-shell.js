@@ -71,10 +71,10 @@ function _pfShouldAutoUseSimpleMode() {
 }
 
 function _mobileFixedView() {
-  if (!_pfIsSimpleModeViewport()) return null;
-  // Logged-in mobile is pinned to the portfolio. Logged-out mobile is left
-  // unpinned so visitors can move between the public 투자정보 and 종목분석 tabs.
-  return currentUser ? 'portfolio' : null;
+  // 과거에는 로그인한 모바일 사용자를 포트폴리오에 강제 고정했지만, 하단 탭바로
+  // 4개 뷰를 자유롭게 오가도록 바뀌면서 lock 을 해제한다. 첫 진입 기본값(로그인 시
+  // 포트폴리오)은 initApp 에서 별도로 처리하므로 여기서 강제할 필요가 없다.
+  return null;
 }
 
 function pfSyncMobileFixedView() {
@@ -229,7 +229,8 @@ function switchView(view, options = {}) {
   const lockedView = options.allowMobileLockOverride ? null : _mobileFixedView();
   if (lockedView && view !== lockedView) view = lockedView;
   activeView = view;
-  document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
+  // 데스크톱 상단 탭(.nav-btn)과 모바일 하단 탭바(.mnav-btn) 활성 상태를 함께 동기화.
+  document.querySelectorAll('.nav-btn, .mnav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   const investingView = document.getElementById('investingView');
   const analysisView = document.getElementById('analysisView');
   const portfolioView = document.getElementById('portfolioView');
@@ -266,6 +267,11 @@ function switchView(view, options = {}) {
     loadInsightsBoard();
   }
   _updateQuoteSubscriptions();
+  // 모바일에서 탭 전환 시 이전 뷰의 스크롤 위치가 남아 본문이 중간에서 시작하는
+  // 어색함을 막기 위해 최상단으로 이동.
+  if (typeof isCompactMobileViewport === 'function' && isCompactMobileViewport()) {
+    window.scrollTo(0, 0);
+  }
 }
 
 let _npsLoaded = false;

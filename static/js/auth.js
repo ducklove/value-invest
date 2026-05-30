@@ -301,15 +301,24 @@ function renderGoogleButton() {
 
 function updateMobileAuthChrome() {
   const mobileAuth = document.getElementById('mobileAuthStatus');
+  const mobileLogin = document.getElementById('mobileLoginBtn');
   if (!mobileAuth) return;
-  if (currentUser && isCompactMobileViewport()) {
+  const compact = isCompactMobileViewport();
+  if (currentUser && compact) {
     document.body.classList.add('mobile-auth');
     mobileAuth.style.display = 'flex';
     document.getElementById('mobileAuthAvatar').src = currentUser.picture || '';
     document.getElementById('mobileAuthName').textContent = currentUser.name || currentUser.email;
+    if (mobileLogin) mobileLogin.style.display = 'none';
   } else {
     document.body.classList.remove('mobile-auth');
     mobileAuth.style.display = 'none';
+    // 비로그인 모바일에서는 사이드바가 숨겨지므로 헤더의 로그인 버튼이 유일한 진입점.
+    if (mobileLogin) {
+      const showLogin = compact && !currentUser && Boolean(authConfig?.enabled);
+      mobileLogin.style.display = showLogin ? 'inline-flex' : 'none';
+      if (showLogin) mobileLogin.href = buildLoginPageUrl();
+    }
   }
   if (typeof pfSyncMobileFixedView === 'function') pfSyncMobileFixedView();
 }

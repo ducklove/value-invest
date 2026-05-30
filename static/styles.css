@@ -2989,7 +2989,9 @@ body.pf-mobile-simple .pf-col-toggle-wrap {
   display: none !important;
 }
 body.pf-mobile-simple .pf-table-wrap {
-  max-height: calc(100dvh - 190px);
+  /* 100dvh 에서 헤더+요약+탭 영역과 하단 탭바(약 62px) 높이를 함께 제외해
+     테이블 마지막 행이 하단 탭바에 가리지 않도록 한다. */
+  max-height: calc(100dvh - 248px);
   overflow: auto;
   border-radius: 8px;
   overscroll-behavior: contain;
@@ -3073,6 +3075,8 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 }
 
 @media (max-height: 520px) and (max-width: 1180px) {
+  /* 가로(landscape) 짧은 화면에선 헤더 높이를 더 줄인다 — 하단 탭바 오프셋 변수도 축소. */
+  body { --m-header-h: 38px; }
   body.pf-mobile-simple .header {
     margin-bottom: 4px;
     padding: 4px 0;
@@ -3084,14 +3088,13 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
     padding: 5px 7px;
   }
   body.pf-mobile-simple .pf-tab-bar {
-    top: 36px;
     margin-bottom: 6px;
   }
   body.pf-mobile-simple .pf-filter-bar {
     display: none !important;
   }
   body.pf-mobile-simple .pf-table-wrap {
-    max-height: calc(100dvh - 132px);
+    max-height: calc(100dvh - 150px);
   }
   body.pf-mobile-simple .pf-nav-chart-container.pf-nav-tall,
   body.pf-mobile-simple .pf-nav-chart-container.pf-nav-short,
@@ -3294,3 +3297,160 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
   font-size: 10px;
   color: var(--text-secondary);
 }
+
+/* ============================================================
+   모바일 셸 (≤900px): 하단 탭바 + 슬림 고정 헤더
+   - 데스크톱 사이드바(로그인/시장바/최근목록)가 콘텐츠 위에 쌓이던
+     구조를 걷어내고, 앱처럼 하단 탭바 + 상단 슬림 헤더로 재구성한다.
+   - 아래 컴포넌트들은 기본적으로 숨겨두고 모바일 미디어쿼리에서만 노출.
+   ============================================================ */
+.mobile-brand,
+.mobile-login,
+.mobile-tabbar { display: none; }
+
+/* 하단 고정 탭바 */
+.mobile-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 880;
+  grid-template-columns: repeat(4, 1fr);
+  background: color-mix(in srgb, var(--surface) 97%, var(--bg));
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 22px rgba(15, 23, 42, 0.08);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+[data-theme="dark"] .mobile-tabbar {
+  box-shadow: 0 -6px 22px rgba(0, 0, 0, 0.4);
+}
+.mnav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 4px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s ease;
+}
+.mnav-btn svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mnav-btn.active { color: var(--primary); }
+.mnav-btn.active svg { stroke-width: 2.3; }
+
+/* 슬림 헤더용 브랜드 워드마크 */
+.mobile-brand {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+}
+.mobile-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+.mobile-brand-name {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 헤더 로그인 진입 버튼 (비로그인 모바일) */
+.mobile-login {
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.mobile-login:hover { filter: brightness(0.96); }
+
+@media (max-width: 900px) {
+  body { --m-header-h: 50px; }
+
+  /* 슬림 고정 헤더 */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 820;
+    min-height: var(--m-header-h);
+    margin-bottom: 12px;
+    padding: 6px 0;
+    gap: 10px;
+    background: var(--bg);
+    box-sizing: border-box;
+  }
+  .mobile-brand { display: flex; flex: 1 1 auto; }
+  /* 상단 가로 탭은 하단 탭바로 대체 */
+  .main-nav { display: none; }
+  /* 헤더에는 브랜드 + (테마/로그인/프로필)만 남긴다 */
+  .wiki-stats { display: none; }
+  .theme-toggle { flex: 0 0 auto; }
+
+  /* 콘텐츠 위에 쌓이던 사이드바, 그리고 하단에 겹치는 시황 테이프 제거 */
+  .sidebar { display: none !important; }
+  .market-tape { display: none !important; }
+
+  /* 본문 여백을 좁히고(가독 폭 확보) 하단 탭바 높이만큼 패딩 확보 */
+  .main {
+    padding: 12px 14px;
+    padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* 하단 탭바 노출 */
+  .mobile-tabbar { display: grid; }
+
+  /* 섹션 카드 패딩 축소 — 좁은 화면에서 내부 콘텐츠 폭을 더 확보 */
+  .market-dashboard-section,
+  .daily-market-section {
+    padding: 14px;
+  }
+
+  /* 시장 랭킹: 컬럼이 많아 종목명이 한 글자로 잘리던 문제 해결.
+     말미의 거래량/시총 보조 수치(.mv-metric)를 숨겨 이름 폭을 확보하고,
+     변화율 칼럼 최소폭도 줄인다. */
+  .mv-metric { display: none; }
+  .mv-chg { min-width: 56px; }
+  .mv-row { gap: 6px; padding: 8px 2px; font-size: 13.5px; }
+  .mv-name { font-weight: 600; }
+}
+
+/* 헤더 높이를 참조하는 포트폴리오 간편모드의 sticky 탭바 오프셋을
+   변수와 동기화 (아래 pf-tab-bar/landscape 규칙에서 사용). */
+body.pf-mobile-simple .pf-tab-bar { top: var(--m-header-h, 42px); }
