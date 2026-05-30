@@ -1,7 +1,7 @@
 // Portfolio row actions: group/benchmark edits, CRUD, search, target/link actions.
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 async function pfChangeGroup(stockCode, groupName) {
-  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
     const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
@@ -24,7 +24,7 @@ function pfShowBenchmarkPicker(stockCode, td) {
   // Close any existing picker
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
   if (pfSavingEditCode) return;
-  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
   const picker = document.createElement('div');
   picker.className = 'pf-benchmark-picker';
@@ -67,7 +67,7 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
     showToast('벤치마크는 수정모드에서 변경할 수 있습니다.');
     return;
   }
-  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
     const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}/benchmark`, {
@@ -153,10 +153,10 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   // When called from the delegated handler the name is looked up locally
   // rather than smuggled through the DOM as a JS-string literal.
   if (stockName === undefined) {
-    const existing = portfolioItems.find(i => i.stock_code === stockCode);
+    const existing = PfStore.items.find(i => i.stock_code === stockCode);
     stockName = existing ? existing.stock_name : '';
   }
-  const existingItem = portfolioItems.find(i => i.stock_code === stockCode);
+  const existingItem = PfStore.items.find(i => i.stock_code === stockCode);
   // 등록일자는 optional — 비워두면 서버가 기존 값 유지. Input[type=date]
   // 는 YYYY-MM-DD 또는 빈 문자열을 돌려주므로 그대로 전달.
   const createdAtEl = editRow.querySelector('.js-pf-edit-created-at') || document.getElementById('pfEditCreatedAt');
@@ -210,7 +210,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     }
     const data = await resp.json().catch(() => ({}));
     // Update local item without full reload
-    const item = portfolioItems.find(i => i.stock_code === stockCode);
+    const item = PfStore.items.find(i => i.stock_code === stockCode);
     if (item) {
       item.quantity = qty;
       item.avg_price = price;
@@ -236,7 +236,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
 // bypass 되어 UI 는 '-' 로 고정. 다시 표시하려면 사용자가 직접 숫자를
 // 입력하면 disabled 플래그가 자동 해제된다.
 async function clearPortfolioTargetPrice(stockCode) {
-  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
   // 이미 disabled 면 중복 요청 불필요.
   if (item.target_price_disabled) {
@@ -284,7 +284,7 @@ async function deletePortfolioItem(stockCode) {
   // misclick on the ✕ in a dense table silently wiped a holding. Look up
   // the display name so the operator sees which stock they're about to
   // remove, not just an opaque code.
-  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  const item = PfStore.items.find(i => i.stock_code === stockCode);
   const displayName = item && item.stock_name
     ? `${item.stock_name} (${stockCode})`
     : stockCode;
@@ -295,7 +295,7 @@ async function deletePortfolioItem(stockCode) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.detail || '삭제 실패');
     }
-    portfolioItems = portfolioItems.filter(i => i.stock_code !== stockCode);
+    PfStore.items = PfStore.items.filter(i => i.stock_code !== stockCode);
     renderPortfolio();
     await loadPortfolio();
   } catch (e) { showToast(e.message); }
@@ -497,7 +497,7 @@ async function pfAddFromSearch(code, name) {
   } catch (e) {
     console.warn('portfolio code canonicalization failed', e);
   }
-  const existing = portfolioItems.find(i => i.stock_code === resolvedCode);
+  const existing = PfStore.items.find(i => i.stock_code === resolvedCode);
   if (existing) {
     startPortfolioEdit(resolvedCode);
     return;

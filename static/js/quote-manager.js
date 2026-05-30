@@ -171,7 +171,7 @@ const QuoteManager = {
 
   _getMissingCodes() {
     const missing = new Set();
-    for (const i of portfolioItems) {
+    for (const i of PfStore.items) {
       if (!quoteIsUsable(i.quote)) missing.add(i.stock_code);
     }
     if (typeof recentListItems !== 'undefined' && Array.isArray(recentListItems)) {

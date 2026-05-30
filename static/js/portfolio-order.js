@@ -8,7 +8,7 @@ function _pfSetPortfolioSortOrder(orderCodes) {
   if (!Array.isArray(orderCodes) || !orderCodes.length) return;
   const rank = new Map();
   orderCodes.forEach((code, index) => rank.set(String(code || '').trim(), index));
-  portfolioItems.forEach(item => {
+  PfStore.items.forEach(item => {
     if (rank.has(item.stock_code)) item.sort_order = rank.get(item.stock_code);
   });
 }
@@ -37,7 +37,7 @@ function _pfDropPositionForEvent(e, row) {
 }
 
 async function pfDropRow(fromCode, toCode, dropPosition = 'before') {
-  const next = _pfNextOrderAfterDrop(portfolioItems, fromCode, toCode, dropPosition);
+  const next = _pfNextOrderAfterDrop(PfStore.items, fromCode, toCode, dropPosition);
   if (!next) return;
   const orderCodes = next.map(i => i.stock_code);
   pfPendingManualOrderCodes = orderCodes;
@@ -46,9 +46,9 @@ async function pfDropRow(fromCode, toCode, dropPosition = 'before') {
     clearTimeout(pfManualOrderKeepTimer);
     pfManualOrderKeepTimer = null;
   }
-  portfolioItems = pfApplyManualOrder(next, orderCodes);
+  PfStore.items = pfApplyManualOrder(next, orderCodes);
   _pfSetPortfolioSortOrder(orderCodes);
-  _savePortfolioSnapshot(portfolioItems);
+  _savePortfolioSnapshot(PfStore.items);
   renderPortfolio();
   void pfFlushManualOrderSave();
 }
@@ -86,9 +86,9 @@ async function pfFlushManualOrderSave() {
       if (!_pfSameOrderCodes(pfPendingManualOrderCodes, orderCodes) || pfManualOrderRevision !== orderRevision) {
         continue;
       }
-      portfolioItems = pfApplyManualOrder(portfolioItems, orderCodes);
+      PfStore.items = pfApplyManualOrder(PfStore.items, orderCodes);
       _pfSetPortfolioSortOrder(orderCodes);
-      _savePortfolioSnapshot(portfolioItems);
+      _savePortfolioSnapshot(PfStore.items);
       renderPortfolio();
       const savedCodes = orderCodes.slice();
       pfManualOrderKeepTimer = setTimeout(() => {

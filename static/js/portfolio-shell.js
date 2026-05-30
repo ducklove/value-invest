@@ -2,7 +2,7 @@
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 // --- Portfolio ---
 let activeView = 'analysis';
-let portfolioItems = [];
+// Holdings list now lives in PfStore.items (portfolio-store.js).
 let portfolioLoading = false;
 let pfSearchTimeout = null;
 let pfEditingCode = null;

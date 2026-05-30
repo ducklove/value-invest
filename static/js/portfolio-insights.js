@@ -243,7 +243,7 @@ async function pfSaveAssetTags(stockCode, tags) {
   }
   const data = await resp.json();
   const savedTags = _normalizeInsightTags(data.tags || normalizedTags);
-  const item = portfolioItems.find(i => i.stock_code === stockCode);
+  const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (item) item.tags = savedTags;
   if (pfAssetInsightCode === stockCode && pfAssetInsightData) {
     pfAssetInsightData = {

@@ -180,7 +180,7 @@ async function renderTreemap() {
   // Wait one frame for container layout
   await new Promise(r => requestAnimationFrame(r));
 
-  if (!portfolioItems.length) {
+  if (!PfStore.items.length) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">포트폴리오가 비어 있습니다.</div>';
     return;
   }
@@ -189,7 +189,7 @@ async function renderTreemap() {
 
   // Build treemap data grouped by pfGetGroup (exclude negative qty)
   const groups = {};
-  portfolioItems.forEach(item => {
+  PfStore.items.forEach(item => {
     if (item.quantity <= 0) return;
     const gn = pfGetGroup(item);
     if (!groups[gn]) groups[gn] = [];

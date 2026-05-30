@@ -9,7 +9,7 @@ function _pfNumberOrNull(value) {
 }
 
 function _pfTagSummaryRows() {
-  return portfolioItems.map(item => {
+  return PfStore.items.map(item => {
     const q = item.quote || {};
     const price = quotePriceOrNull(q);
     const qty = _pfNumberOrNull(item.quantity) ?? 0;

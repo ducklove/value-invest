@@ -110,7 +110,7 @@ async function loadPortfolio({ force = false } = {}) {
     }).catch(() => {});
     // Preserve existing quotes from previous load
     const prevQuotes = {};
-    portfolioItems.forEach(i => { if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote; });
+    PfStore.items.forEach(i => { if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote; });
     let nextPortfolioItems = freshItems.map(item => {
       const prevQuote = prevQuotes[item.stock_code];
       if (quoteIsUsable(prevQuote) && quoteIsUsable(item.quote)) {
@@ -123,9 +123,9 @@ async function loadPortfolio({ force = false } = {}) {
     if (pfPendingManualOrderCodes && (preservePendingManualOrder || pfManualOrderRevision > loadOrderRevision)) {
       nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);
     }
-    portfolioItems = nextPortfolioItems;
+    PfStore.items = nextPortfolioItems;
     await todayStatePromise;
-    _savePortfolioSnapshot(portfolioItems);
+    _savePortfolioSnapshot(PfStore.items);
     renderPortfolio();
     _updateQuoteSubscriptions();
   } catch (e) { console.warn(e); } finally {
@@ -134,13 +134,13 @@ async function loadPortfolio({ force = false } = {}) {
 }
 
 function _restorePortfolioSnapshotForFastPaint() {
-  if (portfolioItems.length) return;
+  if (PfStore.items.length) return;
   try {
     const snapshot = JSON.parse(localStorage.getItem(_PF_PORTFOLIO_SNAPSHOT_KEY) || 'null');
     if (!snapshot || !Array.isArray(snapshot.items) || !snapshot.items.length) return;
     const savedAt = Number(snapshot.savedAt || 0);
     const quotesExpired = !savedAt || (Date.now() - savedAt) > _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS;
-    portfolioItems = snapshot.items.map(item => {
+    PfStore.items = snapshot.items.map(item => {
       if (!quotesExpired || !item.quote) return item;
       return { ...item, quote: { ...item.quote, _stale: true } };
     });
@@ -265,7 +265,7 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
   const tr = tbody.querySelector(`tr[data-code="${CSS.escape(code)}"]`);
   if (!tr) return;
   if (tr.querySelector('input.pf-edit-input')) return;
-  const item = portfolioItems.find(i => i.stock_code === code);
+  const item = PfStore.items.find(i => i.stock_code === code);
   if (!item) return;
 
   const q = item.quote || {};
@@ -282,10 +282,10 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
   const dividendYield = (trailingDps !== null && price !== null && price > 0 && qty > 0)
     ? (trailingDps / price * 100) : null;
   // _computeTargetPrice 호출 — renderPortfolio 경로와 동일 모양의 첫 인자
-  // + portfolioItems (각 item 의 quote.price 로 조회). pfItem.quote 는
+  // + PfStore.items (각 item 의 quote.price 로 조회). pfItem.quote 는
   // 이미 onQuote 에서 최신값으로 업데이트된 상태.
   const rowLike = { ...item, price };
-  const targetPrice = _computeTargetPrice(rowLike, portfolioItems);
+  const targetPrice = _computeTargetPrice(rowLike, PfStore.items);
   const achievementPct = (targetPrice != null && targetPrice > 0 && price != null)
     ? (price / targetPrice * 100) : null;
 
@@ -310,9 +310,9 @@ function updatePortfolioBenchmarkCells(code) {
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
   // Build a code→item index once per call (O(N)) instead of a linear
-  // portfolioItems.find per row (which made this O(N²) per benchmark tick).
+  // PfStore.items.find per row (which made this O(N²) per benchmark tick).
   // Local-only, rebuilt each call, so there is no stale-index risk.
-  const byCode = new Map(portfolioItems.map(i => [i.stock_code, i]));
+  const byCode = new Map(PfStore.items.map(i => [i.stock_code, i]));
   tbody.querySelectorAll('tr[data-code]').forEach(tr => {
     if (tr.querySelector('input.pf-edit-input')) return;
     const pfCode = tr.dataset.code;

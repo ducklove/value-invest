@@ -1,7 +1,7 @@
 // --- Quote subscription management ---
 function _updateQuoteSubscriptions() {
   const requested = { portfolio: [], benchmark: [], sidebar: [], analysis: [] };
-  portfolioItems.forEach(item => {
+  PfStore.items.forEach(item => {
     requested.portfolio.push(item.stock_code);
     if (item.benchmark_code) requested.benchmark.push(item.benchmark_code);
   });
@@ -80,7 +80,7 @@ QuoteManager.onQuote = function(code, q) {
   }
   // 2) 포트폴리오 종목. 가격이 실제 변경된 경우에만 flash 대상에 추가 —
   //    tick 수신 자체로 flash 하면 거래 활발한 종목이 계속 번쩍거려 거슬림.
-  const pfItem = portfolioItems.find(i => i.stock_code === code);
+  const pfItem = PfStore.items.find(i => i.stock_code === code);
   let pfQuoteAccepted = false;
   if (pfItem && usableQuote) {
     const prevPrice = quotePriceOrNull(pfItem.quote);
@@ -92,7 +92,7 @@ QuoteManager.onQuote = function(code, q) {
       _pfQuoteQueuedCodes.add(code);
     }
   }
-  const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
+  const isBenchmark = PfStore.items.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null && q._stale !== true) {
     PfStore.benchmarkQuotes[code] = { ...(PfStore.benchmarkQuotes[code] || {}), change_pct: q.change_pct };
     _pfBenchmarkQueuedCodes.add(code);

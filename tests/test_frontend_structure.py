@@ -163,7 +163,7 @@ def test_cashflow_mutations_refresh_today_and_holdings_before_rerender():
     assert "async function loadPortfolio({ force = false } = {})" in data
     assert "const todayStatePromise = pfRefreshTodayState({ force: true, render: false }).catch(() => ({ updated: false }));" in data
     assert "await todayStatePromise;" in data
-    assert data.find("await todayStatePromise;") < data.find("_savePortfolioSnapshot(portfolioItems);")
+    assert data.find("await todayStatePromise;") < data.find("_savePortfolioSnapshot(PfStore.items);")
     assert "async function refreshPortfolioAfterCashflowMutation()" in cashflows
     assert "loadPortfolio({ force: true })" in cashflows
     assert "pfRefreshTodayState({ force: true, render: false })" in cashflows
@@ -216,7 +216,7 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     assert "const loadOrderRevision = pfManualOrderRevision;" in data
     assert "const preservePendingManualOrder = !!pfPendingManualOrderCodes;" in data
     assert "nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);" in data
-    assert data.find("nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);") < data.find("portfolioItems = nextPortfolioItems;")
+    assert data.find("nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);") < data.find("PfStore.items = nextPortfolioItems;")
     assert "function pfApplyManualOrder(items, orderedCodes)" in data
     assert "function _pfNextOrderAfterDrop(items, fromCode, toCode, dropPosition = 'before')" in order
     assert "const targetIdx = next.findIndex(i => i.stock_code === toCode);" in order
@@ -231,7 +231,7 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     assert "pfManualOrderRevision += 1;" in order
     assert "pfManualOrderSaveInFlight = true;" in order
     assert "_pfSetPortfolioSortOrder(orderCodes);" in order
-    assert "_savePortfolioSnapshot(portfolioItems);" in order
+    assert "_savePortfolioSnapshot(PfStore.items);" in order
     assert "if (!resp.ok)" in order
     assert "throw new Error(data.detail || 'Portfolio order save failed');" in order
     assert "await loadPortfolio({ force: true });" in order

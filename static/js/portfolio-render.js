@@ -12,11 +12,11 @@ function renderPortfolio(options = {}) {
   // Show/hide filter bar and update counts
   const filterBar = document.getElementById('pfFilterBar');
   if (filterBar && !summaryOnly) {
-    filterBar.style.display = portfolioItems.length ? 'flex' : 'none';
-    if (portfolioItems.length && pfGroups.length) {
+    filterBar.style.display = PfStore.items.length ? 'flex' : 'none';
+    if (PfStore.items.length && pfGroups.length) {
       const counts = {};
       pfGroups.forEach(g => counts[g.group_name] = 0);
-      portfolioItems.forEach(i => {
+      PfStore.items.forEach(i => {
         const gn = pfGetGroup(i);
         if (counts[gn] !== undefined) counts[gn]++;
         else counts[gn] = 1;
@@ -61,7 +61,7 @@ function renderPortfolio(options = {}) {
     }
   }
 
-  if (!portfolioItems.length) {
+  if (!PfStore.items.length) {
     if (!summaryOnly) {
       table.style.display = 'none';
       empty.style.display = 'block';
@@ -71,7 +71,7 @@ function renderPortfolio(options = {}) {
     return;
   }
 
-  const allRows = portfolioItems.map(item => {
+  const allRows = PfStore.items.map(item => {
     const q = item.quote || {};
     const cur = item.currency || 'KRW';
     const price = quotePriceOrNull(q);
@@ -957,7 +957,7 @@ function fmtBenchmarkPct(benchmarkCode) {
   const bq = PfStore.benchmarkQuotes[benchmarkCode];
   // For stock benchmarks (e.g., common stock for preferred), check regular quote cache
   if (!bq && benchmarkCode.length === 6) {
-    const item = portfolioItems.find(i => i.stock_code === benchmarkCode);
+    const item = PfStore.items.find(i => i.stock_code === benchmarkCode);
     if (item && item.quote) {
       const pct = item.quote.change_pct;
       if (pct !== null && pct !== undefined) {
@@ -982,7 +982,7 @@ function benchmarkName(code) {
     const preset = _BENCHMARK_PRESETS.find(p => p.code === code);
     if (preset) name = preset.name;
     else {
-      const item = portfolioItems.find(i => i.stock_code === code);
+      const item = PfStore.items.find(i => i.stock_code === code);
       name = item ? item.stock_name : code;
     }
   }

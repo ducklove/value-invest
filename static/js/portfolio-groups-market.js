@@ -95,7 +95,7 @@ function renderGroupModalBody() {
   // of its constituents. Missing-quote items are excluded from both sides.
   const stats = {};
   let grandMV = 0;
-  portfolioItems.forEach(i => {
+  PfStore.items.forEach(i => {
     const gn = pfGetGroup(i);
     if (!stats[gn]) stats[gn] = { cnt: 0, invested: 0, mv: 0, prevMV: 0 };
     const s = stats[gn];
@@ -223,7 +223,7 @@ async function renameGroup(inputEl) {
     }
     const g = pfGroups.find(g => g.group_name === orig);
     if (g) g.group_name = newName;
-    portfolioItems.forEach(i => { if (i.group_name === orig) i.group_name = newName; });
+    PfStore.items.forEach(i => { if (i.group_name === orig) i.group_name = newName; });
     if (pfGroupFilter && pfGroupFilter.has(orig)) {
       pfGroupFilter.delete(orig);
       pfGroupFilter.add(newName);
@@ -238,7 +238,7 @@ async function renameGroup(inputEl) {
 
 async function deleteGroup(groupName) {
   const counts = {};
-  portfolioItems.forEach(i => {
+  PfStore.items.forEach(i => {
     const g = pfGetGroup(i);
     counts[g] = (counts[g] || 0) + 1;
   });
