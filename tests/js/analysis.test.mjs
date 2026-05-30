@@ -15,7 +15,7 @@ const read = (p) => readFileSync(join(__dirname, "..", "..", "static", "js", p),
 
 function load() {
   const dom = new JSDOM(
-    "<!doctype html><html><body><div id='stockExternalLinks'></div></body></html>",
+    "<!doctype html><html><body><div id='coverageNote'></div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
   );
   for (const src of [read("utils.js"), read("analysis.js")]) {
@@ -26,10 +26,9 @@ function load() {
   return dom.window;
 }
 
-test("renderStockExternalLinks builds preferred + holding cards, escapes + neutralizes urls", () => {
+test("_externalValuationCards builds preferred + holding valuation-cards, escapes + neutralizes urls", () => {
   const w = load();
-  const root = w.document.getElementById("stockExternalLinks");
-  w.renderStockExternalLinks(root, {
+  const cards = w._externalValuationCards({
     preferred: {
       name: "<b>x</b>", preferredName: "삼성전자우",
       spread: 36.12, commonPrice: 317000, preferredPrice: 202500,
@@ -40,30 +39,30 @@ test("renderStockExternalLinks builds preferred + holding cards, escapes + neutr
       url: "https://ducklove.github.io/holding_value/?code=000670",
     },
   });
-  const cards = root.querySelectorAll(".sxl-card");
   assert.equal(cards.length, 2);
+  // they share the .valuation-card grid styling (not a separate widget)
+  const root = w.document.getElementById("coverageNote");
+  root.innerHTML = cards.join("");
+  const els = root.querySelectorAll("a.valuation-card.is-link");
+  assert.equal(els.length, 2);
   assert.match(root.innerHTML, /36\.1%/);   // spread percent
   assert.match(root.innerHTML, /781\.9%/);  // ratio percent
-  // hostile name escaped
-  assert.ok(!root.innerHTML.includes("<b>x</b>"));
-  // javascript: url neutralized to '#', https url preserved
-  assert.equal(cards[0].getAttribute("href"), "#");
-  assert.equal(cards[0].getAttribute("target"), "_blank");
-  assert.equal(cards[1].getAttribute("href"), "https://ducklove.github.io/holding_value/?code=000670");
+  assert.ok(!root.innerHTML.includes("<b>x</b>"));  // hostile name escaped
+  // javascript: url neutralized to '#', https preserved
+  assert.equal(els[0].getAttribute("href"), "#");
+  assert.equal(els[0].getAttribute("target"), "_blank");
+  assert.equal(els[1].getAttribute("href"), "https://ducklove.github.io/holding_value/?code=000670");
 });
 
-test("renderStockExternalLinks renders only the matching card", () => {
+test("_externalValuationCards returns only the matching card", () => {
   const w = load();
-  const root = w.document.getElementById("stockExternalLinks");
-  w.renderStockExternalLinks(root, { holding: { name: "영풍", ratio: 781.87, url: "https://x.test/" } });
-  const cards = root.querySelectorAll(".sxl-card");
+  const cards = w._externalValuationCards({ holding: { name: "영풍", ratio: 781.87, url: "https://x.test/" } });
   assert.equal(cards.length, 1);
-  assert.match(cards[0].innerHTML, /지주사/);
+  assert.match(cards[0], /지주사/);
 });
 
-test("renderStockExternalLinks renders empty string when no match", () => {
+test("_externalValuationCards returns [] when no links", () => {
   const w = load();
-  const root = w.document.getElementById("stockExternalLinks");
-  w.renderStockExternalLinks(root, {});
-  assert.equal(root.innerHTML, "");
+  assert.deepEqual([...w._externalValuationCards(null)], []);
+  assert.deepEqual([...w._externalValuationCards({})], []);
 });

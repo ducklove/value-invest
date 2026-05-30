@@ -179,6 +179,7 @@ function getCurrentValuationMetrics(indicators, quoteSnapshot) {
 // 베타는 별도 엔드포인트에서 비동기로 받아오며, 처음 렌더 시에는 '…' 로
 // 플레이스홀더를 그렸다가 loadBeta 가 완료되면 해당 카드만 덮어쓴다.
 let _currentBeta = null;   // {beta, sample_size, benchmark} 또는 null
+let _currentStockLinks = null;  // {preferred?, holding?} 또는 null — 외부 분석 도구
 
 function renderCurrentValuationSummary(indicators, quoteSnapshot) {
   const metrics = getCurrentValuationMetrics(indicators, quoteSnapshot);
@@ -192,10 +193,11 @@ function renderCurrentValuationSummary(indicators, quoteSnapshot) {
     { label: '베타 (1Y)', value: betaVal, attr: 'data-beta="1"' },
   ].map(item => (
     `<div class="valuation-card" ${item.attr || ''}><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span></div>`
-  )).join('');
+  )).join('') + _externalValuationCards(_currentStockLinks).join('');
 }
 
-// 외부 분석 도구 deep-link 카드 — 이 종목이 우선주 쌍/지주사면 해당 도구로 연결.
+// 외부 분석 도구 카드 — 이 종목이 우선주 쌍/지주사면 밸류에이션 그리드에 같은
+// .valuation-card 로 합류시킨다(별도 위젯이 아니라 PER/PBR/베타와 한 그리드).
 function _sxlSafeUrl(url) {
   return /^https?:\/\//.test(String(url || '')) ? String(url) : '#';
 }
@@ -210,41 +212,50 @@ function _sxlPct(v) {
   return isFinite(n) ? n.toFixed(1) + '%' : '-';
 }
 
-function renderStockExternalLinks(root, data) {
-  if (!root) return;
+// links = {preferred?, holding?} → valuation-card(링크) HTML 배열.
+function _externalValuationCards(links) {
+  if (!links) return [];
+  const card = (label, value, sub, url) => (
+    `<a class="valuation-card is-link" href="${escapeHtml(_sxlSafeUrl(url))}" target="_blank" rel="noopener noreferrer" title="외부 분석 도구로 이동">`
+    + `<span class="valuation-label">${escapeHtml(label)}</span>`
+    + `<span class="valuation-value">${escapeHtml(value)}</span>`
+    + (sub ? `<span class="valuation-sub">${sub}</span>` : '')
+    + '</a>'
+  );
   const cards = [];
-  const p = data && data.preferred;
+  const p = links.preferred;
   if (p) {
     const sub = `${escapeHtml(String(p.name || ''))} ${_sxlNum(p.commonPrice)}`
       + ` · ${escapeHtml(String(p.preferredName || '우선주'))} ${_sxlNum(p.preferredPrice)}`;
-    cards.push(`<a class="sxl-card" href="${escapeHtml(_sxlSafeUrl(p.url))}" target="_blank" rel="noopener noreferrer">`
-      + '<div class="sxl-title">우선주 괴리율</div>'
-      + `<div class="sxl-main">${escapeHtml(_sxlPct(p.spread))}</div>`
-      + `<div class="sxl-sub">${sub}</div></a>`);
+    cards.push(card('우선주 괴리율', _sxlPct(p.spread), sub, p.url));
   }
-  const h = data && data.holding;
+  const h = links.holding;
   if (h) {
-    const sub = `보유지분가치 ${_sxlNum(h.holdingValue)} · 조정시총 ${_sxlNum(h.marketCap)} (억)`;
-    cards.push(`<a class="sxl-card" href="${escapeHtml(_sxlSafeUrl(h.url))}" target="_blank" rel="noopener noreferrer">`
-      + '<div class="sxl-title">지주사 보유가치/시총</div>'
-      + `<div class="sxl-main">${escapeHtml(_sxlPct(h.ratio))}</div>`
-      + `<div class="sxl-sub">${sub}</div></a>`);
+    const sub = `보유 ${_sxlNum(h.holdingValue)} · 시총 ${_sxlNum(h.marketCap)} (억)`;
+    cards.push(card('지주사 보유가치/시총', _sxlPct(h.ratio), sub, h.url));
   }
-  root.innerHTML = cards.length
-    ? `<div class="sxl-wrap"><span class="sxl-label">외부 분석 도구</span>${cards.join('')}</div>`
-    : '';
+  return cards;
+}
+
+// coverageNote(밸류에이션 그리드) 재렌더 + 카드 수에 맞춰 열 수 조정용 data-count.
+// PER/PBR/배당/베타(4) + 외부카드(0~2). 4→4열, 5·6→3열로 외톨이를 없앤다.
+function _renderCoverage() {
+  const el = document.getElementById('coverageNote');
+  if (!el) return;
+  el.innerHTML = renderCurrentValuationSummary(activeIndicators || {}, activeQuoteSnapshot || {});
+  const ext = _currentStockLinks
+    ? (_currentStockLinks.preferred ? 1 : 0) + (_currentStockLinks.holding ? 1 : 0) : 0;
+  el.dataset.count = String(4 + ext);
 }
 
 async function loadStockExternalLinks(stockCode) {
-  const root = document.getElementById('stockExternalLinks');
-  if (!root) return;
-  root.innerHTML = '';  // 이전 종목 카드 제거
   try {
     const resp = await apiFetch(`/api/external/stock/${encodeURIComponent(stockCode)}`);
     if (!resp.ok) return;
     const data = await resp.json();
     if (activeStockCode !== stockCode) return;  // 종목이 바뀌었으면 무시
-    renderStockExternalLinks(root, data);
+    _currentStockLinks = (data && (data.preferred || data.holding)) ? data : null;
+    _renderCoverage();
   } catch (e) {
     console.warn('stock external links failed', e);
   }
@@ -262,13 +273,7 @@ async function loadBeta(stockCode) {
   }
   // 분석 종목이 바뀌지 않았다면 valuation card 만 재렌더.
   if (activeStockCode === stockCode) {
-    const coverageNote = document.getElementById('coverageNote');
-    if (coverageNote) {
-      coverageNote.innerHTML = renderCurrentValuationSummary(
-        activeIndicators || {},
-        activeQuoteSnapshot || {},
-      );
-    }
+    _renderCoverage();
   }
 }
 
@@ -304,7 +309,7 @@ function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
     quoteDate.textContent = '';
   }
 
-  coverageNote.innerHTML = renderCurrentValuationSummary(indicators || {}, quote);
+  _renderCoverage();
 }
 
 function isPerChart(key) {
@@ -1005,6 +1010,7 @@ async function analyzeStock(stockCode) {
 
 async function renderResult(data) {
   _lastAnalysisData = data;
+  _currentStockLinks = null;  // 종목 전환 — 이전 외부 카드 제거(loadStockExternalLinks가 다시 채움)
   _currentPeriod = 'all';
   _dailyCache = {};
   document.querySelectorAll('.vp-btn').forEach(b => b.classList.toggle('active', b.dataset.period === 'all'));

@@ -892,14 +892,26 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .company-info .coverage {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 기본: PER/PBR/배당/베타 4개 → 4열 한 줄(베타 외톨이 방지). */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+/* 외부 카드가 붙어 5·6개가 되면 3열로(3+2 / 3×3)— 외톨이 없이 정렬. */
+.company-info .coverage[data-count="5"],
+.company-info .coverage[data-count="6"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .valuation-card {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
   background: linear-gradient(180deg, rgba(37,99,235,0.05), rgba(37,99,235,0.01));
+}
+.valuation-card.is-link { text-decoration: none; display: block; transition: border-color .12s; }
+.valuation-card.is-link:hover { border-color: var(--accent, #2563eb); }
+.valuation-sub {
+  display: block; margin-top: 5px; font-size: 11px; line-height: 1.35;
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
 }
 .valuation-label {
   display: block;
@@ -919,8 +931,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   font-variant-numeric: tabular-nums;
 }
 @media (max-width:900px) {
-  .company-info .coverage {
-    grid-template-columns: 1fr;
+  .company-info .coverage,
+  .company-info .coverage[data-count="5"],
+  .company-info .coverage[data-count="6"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .market-tape {
     min-height: 48px;
