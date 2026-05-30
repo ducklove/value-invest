@@ -33,6 +33,7 @@ SITE = {
 
 _TTL = 900  # 15분 — 배치 갱신 주기에 맞춤
 _cache = MemoryTTLCache("external.tools", _TTL)
+_raw_cache = MemoryTTLCache("external.raw", _TTL)  # (current, config) 원본 — 요약·deep-link 공용
 _SEM = asyncio.Semaphore(3)
 _TIMEOUT = httpx.Timeout(8.0, connect=4.0)
 
@@ -136,19 +137,26 @@ def _summarize_gold(data: dict) -> dict:
     return {"assets": assets, "updatedAt": data.get("updated_at"), "url": SITE["goldGap"]}
 
 
-async def _holding_summary() -> dict | None:
+async def _load_pair(repo: str) -> tuple[dict, list]:
+    """(current, config) 원본을 받아 캐시. 요약과 deep-link가 함께 쓴다."""
+    cached = _raw_cache.get(repo)
+    if cached is not None:
+        return cached
     cur, cfg = await asyncio.gather(
-        _get_json(f"{_RAW}/holding_value/master/current.json"),
-        _get_json(f"{_RAW}/holding_value/master/config.json"),
+        _get_json(f"{_RAW}/{repo}/master/current.json"),
+        _get_json(f"{_RAW}/{repo}/master/config.json"),
     )
+    _raw_cache.set(repo, (cur, cfg))
+    return cur, cfg
+
+
+async def _holding_summary() -> dict | None:
+    cur, cfg = await _load_pair("holding_value")
     return _summarize_holding(cur, cfg)
 
 
 async def _spread_summary() -> dict | None:
-    cur, cfg = await asyncio.gather(
-        _get_json(f"{_RAW}/common_preferred_spread/master/current.json"),
-        _get_json(f"{_RAW}/common_preferred_spread/master/config.json"),
-    )
+    cur, cfg = await _load_pair("common_preferred_spread")
     return _summarize_spread(cur, cfg)
 
 
@@ -185,22 +193,67 @@ async def fetch_external_insights() -> dict:
     return out
 
 
+def _match_preferred(code: str, current: dict, config: list) -> dict | None:
+    """보통주/우선주 코드 어느 쪽이든 매칭되면 그 쌍의 괴리율 정보를 돌려준다."""
+    prices = current.get("prices") or {}
+    for c in config or []:
+        if code in (_code(c.get("commonTicker", "")), _code(c.get("preferredTicker", ""))):
+            v = prices.get(c.get("id")) or {}
+            if v.get("spread") is None:
+                return None
+            return {
+                "name": c.get("name") or c.get("commonName") or c.get("id"),
+                "preferredName": c.get("preferredName"),
+                "spread": v.get("spread"),
+                "spreadChange": v.get("spreadChange"),
+                "commonPrice": v.get("commonPrice"),
+                "preferredPrice": v.get("preferredPrice"),
+                "url": SITE["spread"],
+            }
+    return None
+
+
+def _match_holding(code: str, current: dict, config: list) -> dict | None:
+    """종목이 지주사면 보유지분가치/시총 비율 정보를 돌려준다(?code= deep-link)."""
+    pairs = {p.get("id"): p for p in current.get("pairs", []) or []}
+    for c in config or []:
+        if _code(c.get("holdingTicker", "")) == code:
+            p = pairs.get(c.get("id")) or {}
+            if p.get("ratio") is None:
+                return None
+            return {
+                "name": c.get("name") or c.get("id"),
+                "ratio": p.get("ratio"),
+                "ratioChange": p.get("ratioChange"),
+                "holdingValue": p.get("holdingValue"),
+                "marketCap": p.get("marketCap"),
+                "url": SITE["holding"] + f"?code={code}",
+            }
+    return None
+
+
 async def fetch_stock_links(code: str) -> dict:
-    """종목분석 deep-link 카드용 — 이 종목코드에 해당하는 우선주/지주사 정보."""
+    """종목분석 deep-link 카드용 — 이 종목코드에 해당하는 우선주/지주사 정보.
+
+    config 전체를 매핑하므로 TOP 요약과 달리 임의 종목을 커버한다. 두 도구는
+    서로 독립적으로 조회·실패 허용.
+    """
     code = (code or "").strip()
-    insights = await fetch_external_insights()
+    if not code:
+        return {}
     result: dict = {}
-
-    spread = insights.get("spread") or {}
-    for row in spread.get("top", []):  # top만으로는 부족 → 전체 매칭이 필요할 수 있음
-        if row.get("code") == code:
-            result["preferred"] = {**row, "url": SITE["spread"]}
-            break
-
-    holding = insights.get("holding") or {}
-    for row in holding.get("top", []):
-        if row.get("code") == code:
-            result["holding"] = {**row, "url": SITE["holding"] + f"?code={code}"}
-            break
-
+    try:
+        cur, cfg = await _load_pair("common_preferred_spread")
+        pref = _match_preferred(code, cur, cfg)
+        if pref:
+            result["preferred"] = pref
+    except Exception as exc:
+        logger.warning("stock-link preferred lookup failed (%s): %s", code, exc)
+    try:
+        cur, cfg = await _load_pair("holding_value")
+        hold = _match_holding(code, cur, cfg)
+        if hold:
+            result["holding"] = hold
+    except Exception as exc:
+        logger.warning("stock-link holding lookup failed (%s): %s", code, exc)
     return result

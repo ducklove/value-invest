@@ -74,6 +74,14 @@ async def external_insights():
     return await external_tools.fetch_external_insights()
 
 
+@router.get("/api/external/stock/{code}")
+async def external_stock_links(code: str):
+    """Public — 종목분석 deep-link: 이 종목의 우선주 괴리율/지주사 NAV 정보."""
+    import external_tools
+
+    return await external_tools.fetch_stock_links(code)
+
+
 @router.get("/api/settings/market-bar")
 async def get_market_bar_setting(request: Request):
     import json

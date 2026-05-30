@@ -195,6 +195,61 @@ function renderCurrentValuationSummary(indicators, quoteSnapshot) {
   )).join('');
 }
 
+// 외부 분석 도구 deep-link 카드 — 이 종목이 우선주 쌍/지주사면 해당 도구로 연결.
+function _sxlSafeUrl(url) {
+  return /^https?:\/\//.test(String(url || '')) ? String(url) : '#';
+}
+
+function _sxlNum(v) {
+  const n = Number(v);
+  return isFinite(n) ? n.toLocaleString('ko-KR') : '-';
+}
+
+function _sxlPct(v) {
+  const n = Number(v);
+  return isFinite(n) ? n.toFixed(1) + '%' : '-';
+}
+
+function renderStockExternalLinks(root, data) {
+  if (!root) return;
+  const cards = [];
+  const p = data && data.preferred;
+  if (p) {
+    const sub = `${escapeHtml(String(p.name || ''))} ${_sxlNum(p.commonPrice)}`
+      + ` · ${escapeHtml(String(p.preferredName || '우선주'))} ${_sxlNum(p.preferredPrice)}`;
+    cards.push(`<a class="sxl-card" href="${escapeHtml(_sxlSafeUrl(p.url))}" target="_blank" rel="noopener noreferrer">`
+      + '<div class="sxl-title">우선주 괴리율</div>'
+      + `<div class="sxl-main">${escapeHtml(_sxlPct(p.spread))}</div>`
+      + `<div class="sxl-sub">${sub}</div></a>`);
+  }
+  const h = data && data.holding;
+  if (h) {
+    const sub = `보유지분가치 ${_sxlNum(h.holdingValue)} · 조정시총 ${_sxlNum(h.marketCap)} (억)`;
+    cards.push(`<a class="sxl-card" href="${escapeHtml(_sxlSafeUrl(h.url))}" target="_blank" rel="noopener noreferrer">`
+      + '<div class="sxl-title">지주사 보유가치/시총</div>'
+      + `<div class="sxl-main">${escapeHtml(_sxlPct(h.ratio))}</div>`
+      + `<div class="sxl-sub">${sub}</div></a>`);
+  }
+  root.innerHTML = cards.length
+    ? `<div class="sxl-wrap"><span class="sxl-label">외부 분석 도구</span>${cards.join('')}</div>`
+    : '';
+}
+
+async function loadStockExternalLinks(stockCode) {
+  const root = document.getElementById('stockExternalLinks');
+  if (!root) return;
+  root.innerHTML = '';  // 이전 종목 카드 제거
+  try {
+    const resp = await apiFetch(`/api/external/stock/${encodeURIComponent(stockCode)}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (activeStockCode !== stockCode) return;  // 종목이 바뀌었으면 무시
+    renderStockExternalLinks(root, data);
+  } catch (e) {
+    console.warn('stock external links failed', e);
+  }
+}
+
 async function loadBeta(stockCode) {
   // 새 분석이 시작되면 이전 베타는 날려 플레이스홀더 '…' 로 표시되게.
   _currentBeta = null;
@@ -1008,6 +1063,8 @@ async function renderResult(data) {
   loadFilingReview(data.stock_code);
   // 베타 — 1Y 일별 수익률 vs KOSPI. 비동기로 받아 valuation card 갱신.
   loadBeta(data.stock_code);
+  // 외부 분석 도구(우선주 괴리율/지주사 NAV) deep-link 카드 — 해당 시 표시.
+  loadStockExternalLinks(data.stock_code);
   _updateQuoteSubscriptions();
 }
 

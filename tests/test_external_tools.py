@@ -67,6 +67,51 @@ class ExternalSummaryTests(unittest.TestCase):
         self.assertIn("asset=gold", gold["link"])
 
 
+class StockLinkMatchTests(unittest.TestCase):
+    SPREAD_CUR = {"prices": {"samsung_elec": {"spread": 36.12, "spreadChange": -0.14,
+                                              "commonPrice": 317000, "preferredPrice": 202500}}}
+    SPREAD_CFG = [{"id": "samsung_elec", "name": "삼성전자", "commonTicker": "005930.KS",
+                   "preferredTicker": "005935.KS", "preferredName": "삼성전자우"}]
+    HOLD_CUR = {"pairs": [{"id": "yp", "ratio": 781.87, "ratioChange": 3.05,
+                           "holdingValue": 72253.4, "marketCap": 9241.1}]}
+    HOLD_CFG = [{"id": "yp", "name": "영풍→고려아연", "holdingTicker": "000670.KS"}]
+
+    def test_match_preferred_by_common_or_preferred_code(self):
+        for code in ("005930", "005935"):  # 보통주/우선주 코드 둘 다 매칭
+            m = external_tools._match_preferred(code, self.SPREAD_CUR, self.SPREAD_CFG)
+            self.assertIsNotNone(m)
+            self.assertEqual(m["spread"], 36.12)
+            self.assertEqual(m["preferredName"], "삼성전자우")
+        self.assertIsNone(external_tools._match_preferred("035720", self.SPREAD_CUR, self.SPREAD_CFG))
+
+    def test_match_holding_with_code_deeplink(self):
+        m = external_tools._match_holding("000670", self.HOLD_CUR, self.HOLD_CFG)
+        self.assertIsNotNone(m)
+        self.assertEqual(m["ratio"], 781.87)
+        self.assertIn("?code=000670", m["url"])
+        self.assertIsNone(external_tools._match_holding("999999", self.HOLD_CUR, self.HOLD_CFG))
+
+
+class StockLinkFetchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_stock_links_combines_both_tools(self):
+        external_tools._raw_cache.clear()
+
+        async def fake_load(repo):
+            if repo == "common_preferred_spread":
+                return StockLinkMatchTests.SPREAD_CUR, StockLinkMatchTests.SPREAD_CFG
+            return StockLinkMatchTests.HOLD_CUR, StockLinkMatchTests.HOLD_CFG
+
+        with patch.object(external_tools, "_load_pair", new=AsyncMock(side_effect=fake_load)):
+            pref = await external_tools.fetch_stock_links("005930")
+            self.assertIn("preferred", pref)
+            self.assertNotIn("holding", pref)
+            hold = await external_tools.fetch_stock_links("000670")
+            self.assertIn("holding", hold)
+            empty = await external_tools.fetch_stock_links("035720")
+            self.assertEqual(empty, {})
+            self.assertEqual(await external_tools.fetch_stock_links(""), {})
+
+
 class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_insights_endpoint_passthrough(self):
         payload = {"holding": {"top": []}, "spread": {"top": []}, "goldGap": {"assets": []}}
@@ -74,6 +119,13 @@ class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(external_tools, "fetch_external_insights", new=fake):
             result = await stocks_route.external_insights()
         self.assertEqual(result, payload)
+
+    async def test_stock_links_endpoint_passthrough(self):
+        fake = AsyncMock(return_value={"preferred": {"spread": 36.12}})
+        with patch.object(external_tools, "fetch_stock_links", new=fake):
+            result = await stocks_route.external_stock_links("005930")
+        self.assertEqual(result["preferred"]["spread"], 36.12)
+        self.assertEqual(fake.await_args.args[0], "005930")
 
     async def test_insights_partial_failure_keeps_others(self):
         # 한 도구 fetch가 실패해도 나머지는 살아남는다.

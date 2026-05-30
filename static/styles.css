@@ -670,6 +670,19 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .ext-row:hover { background: var(--surface-muted, rgba(148,163,184,.08)); }
 .ext-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ext-val { flex: 0 0 auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sxl-wrap { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 10px 0; }
+.sxl-label {
+  display: flex; align-items: center; font-size: 11px; font-weight: 600;
+  color: var(--text-secondary); padding-right: 2px;
+}
+.sxl-card {
+  display: block; text-decoration: none; color: inherit; min-width: 150px;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+}
+.sxl-card:hover { border-color: var(--accent, #2563eb); }
+.sxl-title { font-size: 11px; color: var(--text-secondary); }
+.sxl-main { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
+.sxl-sub { font-size: 11px; color: var(--text-secondary); }
 .news-list { display: flex; flex-direction: column; }
 .news-item {
   display: block; text-decoration: none; color: inherit;
