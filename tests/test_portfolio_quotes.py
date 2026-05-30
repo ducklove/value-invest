@@ -7,6 +7,7 @@ import pytest
 
 from routes import portfolio as portfolio_route
 from services import stock_quotes
+from services.portfolio import quote_service
 from services.portfolio import quotes
 
 
@@ -363,7 +364,7 @@ async def test_force_refreshed_rest_quote_returns_even_when_ws_cache_rank_wins()
         "005930",
         force_refresh=True,
         use_ws_cache=False,
-        max_ws_age_seconds=portfolio_route._WS_QUOTE_MAX_AGE_SECONDS,
+        max_ws_age_seconds=quote_service.WS_QUOTE_MAX_AGE_SECONDS,
     )
 
 

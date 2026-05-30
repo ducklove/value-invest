@@ -153,7 +153,7 @@
         <span class="box">dividends</span><span class="box">history</span><span class="box">targets</span>
         <span class="box">target_metrics</span><span class="box">time_windows</span><span class="box">valuation</span>
         <span class="box">runtime_quotes (seam)</span>
-        <span class="box new">currencies ✦</span><span class="box new">fx ✦</span><span class="box new">special_assets ✦</span><span class="box new">foreign ✦</span>
+        <span class="box new">currencies ✦</span><span class="box new">fx ✦</span><span class="box new">special_assets ✦</span><span class="box new">foreign ✦</span><span class="box new">quote_service ✦</span>
       </div>
     </div>
     <div class="layer">
@@ -232,7 +232,7 @@
     <div class="card"><h4>targets · target_metrics</h4><p>목표가 수식 평가, 메트릭 보강</p></div>
     <div class="card"><h4>time_windows</h4><p>22시 결산 기준 Today window, intraday baseline</p></div>
     <div class="card"><h4>valuation</h4><p>밸류에이션 보조 계산</p></div>
-    <div class="card"><h4>runtime_quotes</h4><p>배치/외부 코드가 라우터 private에 의존하지 않게 하는 provider seam <span class="badge b-prog">정상화 예정</span></p></div>
+    <div class="card"><h4>runtime_quotes · quote_service ✦</h4><p>배치/외부 코드가 라우터 private에 의존하지 않게 하는 provider seam <span class="badge b-done">정상화 완료</span>. quote 구현(현재가/현금/외부자산 디스패처/provider)을 <code>quote_service</code>로 이동, <code>_get_provider</code>의 routes 역import 제거. 라우터는 patch용 얇은 위임자만 유지.</p></div>
     <div class="card"><h4>stock_quotes (services/)</h4><p>국내 시세 단일 진입점: WS 캐시 우선 → REST fallback, dead-stock 처리, 지속 구독</p></div>
   </div>
 </section>
@@ -297,7 +297,7 @@
       <tr><td><span class="badge b-done">완료</span></td><td>FX/통화 분리 → <code>fx.py · currencies.py</code></td><td><code>0721b2f5</code></td></tr>
       <tr><td><span class="badge b-done">완료</span></td><td>특수자산(금/크립토) 시세 분리 → <code>special_assets.py</code></td><td><code>703bead1</code></td></tr>
       <tr><td><span class="badge b-done">완료</span></td><td>해외 시세+이름해석 클러스터(~21함수) → <code>foreign.py</code> + 테스트 patch 갱신</td><td class="muted">이번 커밋</td></tr>
-      <tr><td><span class="badge b-prog">다음</span></td><td>runtime_quotes seam 정상화 (라우터 역import 제거, provider를 service로 이동)</td><td class="muted">후속 단계</td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>runtime_quotes seam 정상화 → <code>quote_service.py</code> (라우터 역import 제거, provider/디스패처를 service로 이동)</td><td class="muted">이번 커밋</td></tr>
     </tbody>
   </table>
   <p class="muted">모든 완료 항목은 전체 테스트 통과(527개) 후 master 배포됨. 동작 보존을 원칙으로 단계마다 검증.</p>
@@ -306,7 +306,7 @@
 <section id="debt">
   <h2><span class="n">10</span> 남은 기술 부채 · 다음 단계</h2>
   <div class="grid cards">
-    <div class="card"><h4><span class="badge b-done">2b</span> 해외 시세 클러스터 분리</h4><p>라우터에서 가장 큰 덩어리를 <code>foreign.py</code>로 추출 완료. 테스트 3개 파일의 내부 호출 patch 동반 갱신. 남은 seam 정상화는 후속 단계.</p></div>
+    <div class="card"><h4><span class="badge b-done">2b</span> 해외 시세 클러스터 분리</h4><p>라우터에서 가장 큰 덩어리를 <code>foreign.py</code>로 추출 완료. 테스트 3개 파일의 내부 호출 patch 동반 갱신. 이어서 runtime_quotes seam도 <code>quote_service.py</code>로 정상화 완료.</p></div>
     <div class="card"><h4><span class="badge b-plan">3</span> cache.py repository 분리</h4><p>3,900줄에 스키마/마이그레이션/12+ repository/비즈니스 규칙 혼재. 버전드 마이그레이션 체계로 교체.</p></div>
     <div class="card"><h4><span class="badge b-plan">4</span> 프론트 store 도입</h4><p>전역 변수·로드 순서 의존 → 단일 namespace/store. 렌더는 store snapshot 기반.</p></div>
     <div class="card"><h4><span class="badge b-debt">잔여</span> 효율</h4><p>tick 핫패스 전역 인덱스화, <code>get_portfolio</code> 직렬 await 병렬화.</p></div>

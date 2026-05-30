@@ -31,9 +31,11 @@ def register_provider(provider: RuntimeQuoteProvider) -> None:
 
 def _get_provider() -> RuntimeQuoteProvider:
     if _provider is None:
-        # Importing the route module registers the current provider. This is a
-        # temporary bridge while quote fetching is being moved out of routes.
-        from routes import portfolio as _portfolio_route  # noqa: F401
+        # Importing the quote service registers the provider (and the external
+        # stock-quote fetcher). This no longer reaches back into routes, so
+        # batch jobs and other services get a provider without loading the HTTP
+        # layer.
+        from services.portfolio import quote_service  # noqa: F401
     if _provider is None:
         raise RuntimeError("portfolio quote provider is not registered")
     return _provider
