@@ -3441,51 +3441,6 @@ async def save_dart_report_review(review: dict) -> dict:
     return await get_dart_report_review(review.get("stock_code"), review.get("rcept_no")) or review
 
 
-# ---------------------------------------------------------------------------
-# User settings (key-value)
-# ---------------------------------------------------------------------------
-
-async def get_user_setting(google_sub: str, key: str) -> str | None:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT value FROM user_settings WHERE google_sub = ? AND key = ?",
-        (google_sub, key),
-    )
-    row = await cursor.fetchone()
-    return row["value"] if row else None
-
-
-async def set_user_setting(google_sub: str, key: str, value: str):
-    db = await get_db()
-    await db.execute(
-        """INSERT INTO user_settings (google_sub, key, value, updated_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(google_sub, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
-        (google_sub, key, value, datetime.now().isoformat()),
-    )
-    await db.commit()
-
-
-# ---------------------------------------------------------------------------
-# Ticker map (foreign stock code → resolved ticker)
-# ---------------------------------------------------------------------------
-
-async def load_ticker_map() -> dict[str, str]:
-    db = await get_db()
-    cursor = await db.execute("SELECT stock_code, resolved_ticker FROM ticker_map")
-    return {r["stock_code"]: r["resolved_ticker"] for r in await cursor.fetchall()}
-
-
-async def save_ticker(stock_code: str, resolved_ticker: str):
-    db = await get_db()
-    await db.execute(
-        """INSERT INTO ticker_map (stock_code, resolved_ticker, updated_at)
-           VALUES (?, ?, ?)
-           ON CONFLICT(stock_code) DO UPDATE SET resolved_ticker = excluded.resolved_ticker, updated_at = excluded.updated_at""",
-        (stock_code, resolved_ticker, datetime.now().isoformat()),
-    )
-    await db.commit()
-
 
 # ---------------------------------------------------------------------------
 # Wiki / research-report pipeline
@@ -3663,209 +3618,6 @@ async def get_wiki_stats() -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# System events (observability)
-# ---------------------------------------------------------------------------
-
-async def insert_system_event(
-    level: str,
-    source: str,
-    kind: str,
-    *,
-    stock_code: str | None = None,
-    details: str | None = None,
-    ts: str | None = None,
-) -> int:
-    """Append a structured event row. `details` should be a JSON string —
-    callers (via observability.record_event) serialize their payload once
-    to avoid a redundant json.loads at read time."""
-    db = await get_db()
-    if ts is None:
-        ts = datetime.now().isoformat(timespec="seconds")
-    cursor = await db.execute(
-        """INSERT INTO system_events (ts, level, source, kind, stock_code, details)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (ts, level, source, kind, stock_code, details),
-    )
-    await db.commit()
-    return cursor.lastrowid
-
-
-async def get_system_events(
-    *,
-    source: str | None = None,
-    level: str | None = None,
-    stock_code: str | None = None,
-    since: str | None = None,
-    limit: int = 100,
-) -> list[dict]:
-    """Filtered newest-first fetch for the admin dashboard."""
-    clauses: list[str] = []
-    params: list = []
-    if source:
-        clauses.append("source = ?")
-        params.append(source)
-    if level:
-        clauses.append("level = ?")
-        params.append(level)
-    if stock_code:
-        clauses.append("stock_code = ?")
-        params.append(stock_code)
-    if since:
-        clauses.append("ts >= ?")
-        params.append(since)
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    # Hard cap — prevent a frontend bug or curl typo from slurping the
-    # whole table.
-    limit = max(1, min(int(limit), 1000))
-    params.append(limit)
-    db = await get_db()
-    cursor = await db.execute(
-        f"SELECT id, ts, level, source, kind, stock_code, details "
-        f"FROM system_events {where} ORDER BY ts DESC, id DESC LIMIT ?",
-        params,
-    )
-    return [dict(r) for r in await cursor.fetchall()]
-
-
-async def summarize_system_events(since_iso: str) -> dict:
-    """Aggregate counts by (source, level) since `since_iso`. Used by the
-    top-of-dashboard status card so the admin sees failure spikes without
-    scrolling through events."""
-    db = await get_db()
-    cursor = await db.execute(
-        """SELECT source, level, COUNT(*) AS n
-           FROM system_events WHERE ts >= ?
-           GROUP BY source, level""",
-        (since_iso,),
-    )
-    out: dict[str, dict[str, int]] = {}
-    for row in await cursor.fetchall():
-        out.setdefault(row["source"], {})[row["level"]] = int(row["n"])
-    return out
-
-
-async def prune_system_events(max_age_days: int = 30, max_rows: int = 100_000) -> int:
-    """Best-effort cleanup: drop events older than `max_age_days`, then if
-    still above `max_rows` trim the oldest until under the cap. Returns
-    rows deleted (0 if table was already small)."""
-    db = await get_db()
-    # Age-based trim.
-    cursor = await db.execute(
-        "DELETE FROM system_events WHERE ts < datetime('now', ?)",
-        (f"-{int(max_age_days)} days",),
-    )
-    age_deleted = cursor.rowcount or 0
-    # Row-count trim as a safety net. Count only if there's risk of being
-    # over — skip when obviously fine.
-    cursor = await db.execute("SELECT COUNT(*) AS n FROM system_events")
-    row = await cursor.fetchone()
-    total = int(row["n"]) if row else 0
-    overflow_deleted = 0
-    if total > max_rows:
-        excess = total - max_rows
-        cursor = await db.execute(
-            "DELETE FROM system_events WHERE id IN "
-            "(SELECT id FROM system_events ORDER BY ts ASC, id ASC LIMIT ?)",
-            (excess,),
-        )
-        overflow_deleted = cursor.rowcount or 0
-    await db.commit()
-    return age_deleted + overflow_deleted
-
-
-async def get_latest_event(source: str, kind: str | None = None) -> dict | None:
-    """Return the most recent matching event. Dashboard uses this to show
-    'last successful tick' per subsystem."""
-    db = await get_db()
-    if kind:
-        cursor = await db.execute(
-            "SELECT id, ts, level, source, kind, stock_code, details "
-            "FROM system_events WHERE source = ? AND kind = ? "
-            "ORDER BY ts DESC, id DESC LIMIT 1",
-            (source, kind),
-        )
-    else:
-        cursor = await db.execute(
-            "SELECT id, ts, level, source, kind, stock_code, details "
-            "FROM system_events WHERE source = ? "
-            "ORDER BY ts DESC, id DESC LIMIT 1",
-            (source,),
-        )
-    row = await cursor.fetchone()
-    return dict(row) if row else None
-
-
-# ---------------------------------------------------------------------------
-# Benchmark daily series (KOSPI / SP500 / GOLD / ...)
-# ---------------------------------------------------------------------------
-
-async def save_benchmark_rows(code: str, rows: list[dict], source: str = "yfinance") -> int:
-    """Upsert daily rows for a benchmark code.
-
-    rows: [{"date": "YYYY-MM-DD", "close": float}, ...]
-    Returns number of rows written. Safe to call with overlapping ranges —
-    the (code, date) PK makes each call idempotent.
-    """
-    if not rows:
-        return 0
-    # Match the rest of this module — plain local-time ISO (no TZ suffix).
-    fetched_at = datetime.now().isoformat(timespec="seconds")
-    db = await get_db()
-    await db.executemany(
-        """INSERT INTO benchmark_daily (code, date, close, source, fetched_at)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(code, date) DO UPDATE SET
-               close=excluded.close,
-               source=excluded.source,
-               fetched_at=excluded.fetched_at""",
-        [(code, r["date"], float(r["close"]), source, fetched_at) for r in rows if r.get("close") is not None],
-    )
-    await db.commit()
-    return len(rows)
-
-
-async def get_benchmark_rows(code: str, start: str | None = None, end: str | None = None) -> list[dict]:
-    """Read {date, close} rows for a benchmark code, optionally bounded by
-    inclusive [start, end] (YYYY-MM-DD). Ordered by date ascending."""
-    db = await get_db()
-    clauses = ["code = ?"]
-    params: list = [code]
-    if start:
-        clauses.append("date >= ?")
-        params.append(start)
-    if end:
-        clauses.append("date <= ?")
-        params.append(end)
-    sql = f"SELECT date, close FROM benchmark_daily WHERE {' AND '.join(clauses)} ORDER BY date ASC"
-    cursor = await db.execute(sql, params)
-    return [{"date": r["date"], "close": r["close"]} for r in await cursor.fetchall()]
-
-
-async def get_benchmark_last_date(code: str) -> str | None:
-    """Return the latest stored date for a code, or None if table is empty
-    for that code. Used to compute the incremental fetch window."""
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT MAX(date) AS d FROM benchmark_daily WHERE code = ?",
-        (code,),
-    )
-    row = await cursor.fetchone()
-    return row["d"] if row and row["d"] else None
-
-
-async def get_benchmark_earliest_date(code: str) -> str | None:
-    """Return the earliest stored date for a code. Used by lazy backfill to
-    decide whether the request's `start` predates what we have on disk."""
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT MIN(date) AS d FROM benchmark_daily WHERE code = ?",
-        (code,),
-    )
-    row = await cursor.fetchone()
-    return row["d"] if row and row["d"] else None
-
-
 async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:
     """Pick which stocks the wiki ingestion pipeline should process.
 
@@ -3900,3 +3652,31 @@ async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:
         WHERE stock_code IS NOT NULL""",
     )
     return [r["stock_code"] for r in await cursor.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Repository re-exports — see repositories/ package. Imported at the bottom so
+# get_db() and shared primitives above are already defined; repositories reach
+# the connection via cache.get_db() (no import cycle).
+# ---------------------------------------------------------------------------
+from repositories.system_events import (  # noqa: E402
+    insert_system_event,
+    get_system_events,
+    summarize_system_events,
+    prune_system_events,
+    get_latest_event,
+)
+from repositories.benchmark_daily import (  # noqa: E402
+    save_benchmark_rows,
+    get_benchmark_rows,
+    get_benchmark_last_date,
+    get_benchmark_earliest_date,
+)
+from repositories.ticker_map import (  # noqa: E402
+    load_ticker_map,
+    save_ticker,
+)
+from repositories.user_settings import (  # noqa: E402
+    get_user_setting,
+    set_user_setting,
+)
