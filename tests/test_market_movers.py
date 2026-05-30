@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import market_movers
+import market_news
 from routes import stocks as stocks_route
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -65,6 +66,28 @@ class SectorParserTests(unittest.TestCase):
         self.assertEqual(market_movers._parse_sector_table("<div>nope</div>"), [])
 
 
+class MarketNewsParserTests(unittest.TestCase):
+    def _news_html(self) -> str:
+        return (FIXTURES / "naver_mainnews.html").read_text(encoding="utf-8")
+
+    def test_parse_news(self):
+        rows = market_news._parse_news(self._news_html())
+        self.assertEqual(len(rows), 2)
+        first = rows[0]
+        self.assertTrue(first["title"])
+        self.assertTrue(first["url"].startswith("https://finance.naver.com/news/"))
+        self.assertEqual(first["source"], "아이뉴스24")
+        self.assertEqual(first["date"], "2026-05-30 20:45:07")
+        # summary must NOT bleed in the press/date child spans
+        self.assertNotIn("아이뉴스24", first["summary"])
+        self.assertNotIn("2026-05-30 20:45:07", first["summary"])
+        self.assertTrue(first["summary"])
+
+    def test_parse_empty_news(self):
+        self.assertEqual(market_news._parse_news(""), [])
+        self.assertEqual(market_news._parse_news("<div>nope</div>"), [])
+
+
 class MarketMoversEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_endpoint_returns_items_and_clamps_limit(self):
         fake = AsyncMock(return_value=[{"rank": "1", "code": "005930", "name": "삼성전자",
@@ -85,6 +108,14 @@ class MarketMoversEndpointTests(unittest.IsolatedAsyncioTestCase):
             result = await stocks_route.get_market_sectors(limit=999)
         self.assertEqual(result["sectors"][0]["name"], "전자제품")
         self.assertLessEqual(fake.await_args.args[0], 40)
+
+    async def test_news_endpoint_returns_items_and_clamps_limit(self):
+        fake = AsyncMock(return_value=[{"title": "헤드라인", "url": "https://finance.naver.com/x",
+                                        "source": "언론사", "date": "2026-05-30", "summary": "요약"}])
+        with patch.object(market_news, "fetch_market_news", new=fake):
+            result = await stocks_route.get_market_news(limit=999)
+        self.assertEqual(result["news"][0]["title"], "헤드라인")
+        self.assertLessEqual(fake.await_args.args[0], 20)
 
 
 if __name__ == "__main__":

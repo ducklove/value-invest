@@ -20,7 +20,7 @@ function load() {
   const dom = new JSDOM(
     "<!doctype html><html><body>"
       + "<div class='md-grid' id='marketDashboard'>"
-      + "<div class='md-main'><div id='mdIndMain'></div><div id='marketMovers'></div></div>"
+      + "<div class='md-main'><div id='mdIndMain'></div><div id='marketMovers'></div><div id='marketNews'></div></div>"
       + "<aside class='md-rail'><div id='mdIndRail'></div><div id='marketSectors'></div></aside>"
       + "</div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
@@ -153,4 +153,32 @@ test("_secRenderRows shows empty state when no sectors", () => {
   const root = w.document.getElementById("marketSectors");
   w._secRenderRows(root, []);
   assert.match(root.innerHTML, /표시할 업종이 없습니다/);
+});
+
+test("_newsRender renders external links with title/meta and escapes hostile fields", () => {
+  const w = load();
+  const root = w.document.getElementById("marketNews");
+  w._newsRender(root, [
+    { title: "코스피 급등", url: "https://finance.naver.com/news/x", source: "아이뉴스24", date: "2026-05-30 20:45", summary: "요약문" },
+    { title: "<script>bad</script>", url: "javascript:alert(1)", source: "S", date: "", summary: "<b>x</b>" },
+  ]);
+  const items = root.querySelectorAll(".news-item");
+  assert.equal(items.length, 2);
+  // first opens externally in a new tab
+  assert.equal(items[0].getAttribute("href"), "https://finance.naver.com/news/x");
+  assert.equal(items[0].getAttribute("target"), "_blank");
+  assert.match(items[0].getAttribute("rel"), /noopener/);
+  assert.match(items[0].innerHTML, /코스피 급등/);
+  assert.match(items[0].innerHTML, /아이뉴스24 · 2026-05-30 20:45/);
+  // hostile title/summary escaped; non-http url neutralized to '#'
+  assert.ok(!items[1].innerHTML.includes("<script>bad</script>"));
+  assert.ok(!items[1].innerHTML.includes("<b>x</b>"));
+  assert.equal(items[1].getAttribute("href"), "#");
+});
+
+test("_newsRender shows empty state when no news", () => {
+  const w = load();
+  const root = w.document.getElementById("marketNews");
+  w._newsRender(root, []);
+  assert.match(root.innerHTML, /표시할 뉴스가 없습니다/);
 });

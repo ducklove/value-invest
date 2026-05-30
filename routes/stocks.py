@@ -47,6 +47,16 @@ async def get_market_sectors(limit: int = 12):
     return {"sectors": items}
 
 
+@router.get("/api/market/news")
+async def get_market_news(limit: int = 8):
+    """Public 주요 뉴스 (Naver finance mainnews)."""
+    import market_news
+
+    limit = max(1, min(int(limit), 20))
+    items = await market_news.fetch_market_news(limit)
+    return {"news": items}
+
+
 @router.get("/api/settings/market-bar")
 async def get_market_bar_setting(request: Request):
     import json

@@ -104,6 +104,7 @@ async function loadInvestingDashboard(refresh = false) {
   // blocks them (and vice versa).
   if (typeof loadMarketMovers === 'function') loadMarketMovers();
   if (typeof loadSectors === 'function') loadSectors();
+  if (typeof loadMarketNews === 'function') loadMarketNews();
   if (_mdInFlight) return _mdInFlight;
   _mdInFlight = (async () => {
     try {
@@ -221,6 +222,46 @@ async function loadSectors() {
     console.warn('sectors load failed', e);
   } finally {
     _secInFlight = false;
+  }
+}
+
+// --- 주요 뉴스 (market news) — main-column widget ---
+let _newsInFlight = false;
+
+function _newsRender(root, items) {
+  if (!items.length) {
+    root.innerHTML = '<section class="md-section"><h3 class="md-section-title">주요 뉴스</h3>'
+      + '<div class="md-loading">표시할 뉴스가 없습니다.</div></section>';
+    return;
+  }
+  const rows = items.map((it) => {
+    const meta = [it.source, it.date].filter(Boolean).map((s) => escapeHtml(String(s))).join(' · ');
+    const summ = it.summary
+      ? `<div class="news-summary">${escapeHtml(String(it.summary))}</div>` : '';
+    const url = String(it.url || '');
+    const safeUrl = /^https?:\/\//.test(url) ? url : '#';
+    return `<a class="news-item" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">`
+      + `<div class="news-title">${escapeHtml(String(it.title || ''))}</div>`
+      + summ
+      + (meta ? `<div class="news-meta">${meta}</div>` : '')
+      + '</a>';
+  }).join('');
+  root.innerHTML = '<section class="md-section"><h3 class="md-section-title">주요 뉴스</h3>'
+    + `<div class="news-list">${rows}</div></section>`;
+}
+
+async function loadMarketNews() {
+  const root = document.getElementById('marketNews');
+  if (!root || _newsInFlight) return;
+  _newsInFlight = true;
+  try {
+    const r = await apiFetch('/api/market/news?limit=8');
+    const data = r.ok ? await r.json() : { news: [] };
+    _newsRender(root, data.news || []);
+  } catch (e) {
+    console.warn('market news load failed', e);
+  } finally {
+    _newsInFlight = false;
   }
 }
 
