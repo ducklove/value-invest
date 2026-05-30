@@ -59,7 +59,7 @@ test("_mdChange maps direction to class + sign", () => {
   assert.equal(flat.text, "");
 });
 
-test("_mdRenderDashboard renders grouped cards with values, change classes, escaping", () => {
+test("_mdRenderDashboard builds two-column layout: hero indices in main, others in rail", () => {
   const w = load();
   const dataMap = {
     KOSPI: { value: "2,650.12", change: "10.0", change_pct: "0.38%", direction: "up" },
@@ -68,16 +68,26 @@ test("_mdRenderDashboard renders grouped cards with values, change classes, esca
   };
   w._mdRenderDashboard(CATALOG, dataMap);
   const root = w.document.getElementById("marketDashboard");
-  const html = root.innerHTML;
-  assert.match(html, /md-group-title">국내 지수</);
-  assert.match(html, /2,650\.12/);
-  assert.match(html, /md-chg md-up/);
-  assert.match(html, /md-chg md-down/);
-  // a code without data shows the placeholder value
-  assert.ok(root.querySelectorAll(".md-card").length === Object.keys(CATALOG).length);
-  // groups rendered in order
-  const titles = [...root.querySelectorAll(".md-group-title")].map((el) => el.textContent);
-  assert.deepEqual(titles, ["국내 지수", "해외 지수", "원자재", "환율", "신규카테고리"]);
+  const main = root.querySelector(".md-grid > .md-main");
+  const rail = root.querySelector(".md-grid > .md-rail");
+  assert.ok(main && rail, "two-column shell present");
+
+  // 국내 지수 → hero card in main, with value + up class.
+  const hero = main.querySelector(".md-hero-card");
+  assert.ok(hero && /2,650\.12/.test(hero.innerHTML));
+  assert.ok(root.querySelector(".md-hero-card .md-chg.md-up"));
+  // 해외 지수 (SPX) → compact row in main, with down class.
+  assert.match(main.innerHTML, /md-chg md-down/);
+
+  // hero count = # of 국내 지수 codes (1); rows = the other 4 codes.
+  assert.equal(root.querySelectorAll(".md-hero-card").length, 1);
+  assert.equal(root.querySelectorAll(".md-row").length, 4);
+
+  // main column carries 국내 지수 then 해외 지수; rail carries the rest in order.
+  const mainTitles = [...main.querySelectorAll(".md-section-title")].map((el) => el.textContent);
+  assert.deepEqual(mainTitles, ["국내 지수", "해외 지수"]);
+  const railTitles = [...rail.querySelectorAll(".md-section-title")].map((el) => el.textContent);
+  assert.deepEqual(railTitles, ["원자재", "환율", "신규카테고리"]);
 });
 
 test("_mdRenderDashboard escapes catalog labels (no raw HTML injection)", () => {

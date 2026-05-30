@@ -41,36 +41,61 @@ function _mdGroupByCategory(catalog) {
   return cats.map((cat) => ({ category: cat, codes: groups[cat] }));
 }
 
+// Naver-style information architecture: prominent 주요 지수 hero in the main
+// column, 해외 증시 below it, and the lighter indicator strips (환율·원자재·
+// 금리·야간선물) in a right rail. Phase 2 ranking/수급/업종/뉴스 sections and a
+// future 경제캘린더 slot into these columns without changing this skeleton.
+const MD_HERO_CATEGORIES = ['국내 지수'];
+const MD_MAIN_CATEGORIES = ['해외 지수'];
+
+function _mdCardHtml(code, catalog, dataMap, variant) {
+  const meta = catalog[code] || {};
+  const label = meta.label || code;
+  const d = dataMap ? dataMap[code] : null;
+  let valHtml = '-';
+  let chgHtml = '';
+  if (d && d.value) {
+    const c = _mdChange(d);
+    valHtml = escapeHtml(String(d.value));
+    chgHtml = c.text ? `<span class="md-chg ${c.cls}">${escapeHtml(c.text)}</span>` : '';
+  }
+  if (variant === 'hero') {
+    return `<div class="md-hero-card">`
+      + `<div class="md-hero-label">${escapeHtml(label)}</div>`
+      + `<div class="md-hero-val">${valHtml}</div>${chgHtml}</div>`;
+  }
+  return `<div class="md-row">`
+    + `<span class="md-row-label">${escapeHtml(label)}</span>`
+    + `<span class="md-row-val">${valHtml}</span>${chgHtml}</div>`;
+}
+
+function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
+  const body = variant === 'hero'
+    ? `<div class="md-hero">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'hero')).join('')}</div>`
+    : `<div class="md-rows">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'list')).join('')}</div>`;
+  return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}">`
+    + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}</section>`;
+}
+
 function _mdRenderDashboard(catalog, dataMap) {
   const root = document.getElementById('marketDashboard');
   if (!root) return;
   const groups = _mdGroupByCategory(catalog);
-  let html = '';
-  for (const { category, codes } of groups) {
-    let cards = '';
-    for (const code of codes) {
-      const meta = catalog[code] || {};
-      const label = meta.label || code;
-      const d = dataMap ? dataMap[code] : null;
-      let valHtml = '-';
-      let chgHtml = '';
-      if (d && d.value) {
-        const c = _mdChange(d);
-        valHtml = escapeHtml(String(d.value));
-        chgHtml = c.text ? `<span class="md-chg ${c.cls}">${escapeHtml(c.text)}</span>` : '';
-      }
-      cards += `<div class="md-card">`
-        + `<div class="md-card-label">${escapeHtml(label)}</div>`
-        + `<div class="md-card-val">${valHtml}</div>`
-        + `${chgHtml}`
-        + `</div>`;
-    }
-    html += `<section class="md-group">`
-      + `<h3 class="md-group-title">${escapeHtml(category)}</h3>`
-      + `<div class="md-cards">${cards}</div>`
-      + `</section>`;
+  if (!groups.length) {
+    root.innerHTML = '<div class="md-loading">표시할 지표가 없습니다.</div>';
+    return;
   }
-  root.innerHTML = html || '<div class="md-loading">표시할 지표가 없습니다.</div>';
+  const main = [];
+  const rail = [];
+  for (const { category, codes } of groups) {
+    const isHero = MD_HERO_CATEGORIES.includes(category);
+    const html = _mdSectionHtml(category, codes, catalog, dataMap, isHero ? 'hero' : 'list');
+    (isHero || MD_MAIN_CATEGORIES.includes(category) ? main : rail).push(html);
+  }
+  root.innerHTML = '<div class="md-grid">'
+    + `<div class="md-main">${main.join('')}</div>`
+    + `<aside class="md-rail">${rail.join('')}</aside>`
+    + '</div>';
 }
 
 async function loadInvestingDashboard(refresh = false) {
