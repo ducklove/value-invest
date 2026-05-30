@@ -1202,10 +1202,22 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .filing-review-body th,
 .filing-review-body td {
   border: 1px solid var(--border);
-  padding: 6px 8px;
+  padding: 7px 10px;
   text-align: left;
+  vertical-align: middle;
 }
-.filing-review-body th { background: var(--sidebar-bg, var(--bg)); }
+/* 첫 컬럼(구분/부문)은 좌측, 나머지 숫자 컬럼은 우측 + 자릿수 폭 균일로 정렬을 맞춘다. */
+.filing-review-body th:not(:first-child),
+.filing-review-body td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.filing-review-body th {
+  background: var(--sidebar-bg, var(--bg));
+  font-weight: 700;
+}
+.filing-review-body td:first-child { font-weight: 600; }
 .filing-review-details {
   margin-top: 12px;
   color: var(--text-secondary);
@@ -3402,7 +3414,9 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 .mobile-login:hover { filter: brightness(0.96); }
 
 @media (max-width: 900px) {
-  body { --m-header-h: 50px; }
+  /* 시황 테이프를 숨기므로 그 보정용 body 하단 패딩(52px)은 모바일에서 불필요 —
+     하단 탭바 여백은 .main 의 padding-bottom 으로 처리한다. */
+  body { --m-header-h: 50px; padding-bottom: 0; }
 
   /* 슬림 고정 헤더 */
   .header {

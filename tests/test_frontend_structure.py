@@ -57,10 +57,14 @@ def test_market_tape_is_bottom_frame_outside_main():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-    main_close = html.index("</div>\n\n<section class=\"market-tape\"")
+    # 하단 탭바(.mobile-tabbar)와 시황 테이프는 모두 .main 바깥(아래)에 위치하고,
+    # 차트 모달보다 앞선다. 탭바는 main 의 닫는 </div> 바로 뒤에 온다.
+    main_open = html.index('<div class="main">')
+    tabbar_pos = html.index('id="mobileTabbar"')
     tape_pos = html.index('id="marketTape"')
     chart_modal_pos = html.index('id="chartModal"')
-    assert main_close < tape_pos < chart_modal_pos
+    assert main_open < tabbar_pos < tape_pos < chart_modal_pos
+    assert "</div>\n\n<nav class=\"mobile-tabbar\"" in html
     assert "position: fixed;" in styles
     assert "bottom: 0;" in styles
     assert "border-top: 1px solid var(--border);" in styles
@@ -534,7 +538,7 @@ def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
     assert "if (summaryOnly) return;" in render
 
 
-def test_mobile_simple_mode_is_read_only_and_view_locked():
+def test_mobile_simple_mode_is_read_only_and_nav_uses_bottom_tabbar():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
     shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
@@ -542,16 +546,20 @@ def test_mobile_simple_mode_is_read_only_and_view_locked():
 
     assert 'id="pfSimpleToggle"' in html
     assert "function pfSyncMobileFixedView()" in shell
-    # Logged-in mobile is pinned to the portfolio; logged-out mobile is left
-    # unpinned so visitors can switch between the public 투자정보/종목분석 tabs.
-    assert "return currentUser ? 'portfolio' : null;" in shell
     assert "function switchView(view, options = {})" in shell
-    assert "view = lockedView;" in shell
     assert "pfSwitchTab('holdings')" in shell
     assert "pfSyncMobileFixedView();" in auth
 
-    assert "body.mobile-fixed-portfolio .main-nav .nav-btn:not([data-view=\"portfolio\"])" in styles
-    assert "body.mobile-fixed-analysis .main-nav .nav-btn:not([data-view=\"analysis\"])" in styles
+    # 하단 탭바 도입으로 로그인 모바일을 포트폴리오에 고정하던 lock 은 해제됐다.
+    # _mobileFixedView 는 항상 null 을 반환하고, 첫 진입 기본값만 initApp 에서 처리한다.
+    assert "function _mobileFixedView()" in shell
+    assert "return currentUser ? 'portfolio' : null;" not in shell
+    # 모바일 내비게이션은 하단 탭바(.mnav-btn)이며 switchView 가 상단/하단 탭을 함께 동기화.
+    assert 'id="mobileTabbar"' in html
+    assert 'class="mnav-btn' in html
+    assert ".nav-btn, .mnav-btn" in shell
+
+    # 간편 모드는 편집/부가 UI 를 감춰 읽기 전용으로 동작한다.
     assert "body.pf-mobile-simple .pf-tab[data-tab=\"performance\"]" in styles
     assert "body.pf-mobile-simple .pf-filter-bar" in styles
     assert "display: none !important;" in styles
