@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import aiosqlite
+
 import cache
 
 
@@ -436,3 +438,291 @@ async def list_preferred_dividends() -> list[dict]:
            ORDER BY source_name COLLATE NOCASE, stock_code ASC"""
     )
     return [dict(row) for row in await cursor.fetchall()]
+
+
+# --- Portfolio holdings + groups CRUD (write side) ---
+
+
+async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "SELECT stock_code, stock_name, quantity, avg_price, COALESCE(currency, 'KRW') AS currency, group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+        (google_sub, stock_code),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def update_portfolio_quantity(google_sub: str, stock_code: str, new_quantity: int):
+    db = await cache.get_db()
+    await db.execute(
+        "UPDATE user_portfolio SET quantity = ? WHERE google_sub = ? AND stock_code = ?",
+        (new_quantity, google_sub, stock_code),
+    )
+    await db.commit()
+
+
+async def add_portfolio_item(
+    google_sub: str, stock_code: str, stock_name: str, avg_price: float, quantity: int, currency: str = "KRW",
+):
+    db = await cache.get_db()
+    now = datetime.now().isoformat()
+    await db.execute(
+        "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, currency, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (google_sub, stock_code, stock_name, avg_price, quantity, currency, now),
+    )
+    await db.commit()
+
+
+_TARGET_PRICE_UNCHANGED = object()
+_TARGET_DISABLED_UNCHANGED = object()
+_TARGET_FORMULA_UNCHANGED = object()
+
+
+async def save_portfolio_item(
+    google_sub: str, stock_code: str, stock_name: str, quantity: float, avg_price: float,
+    currency: str = "KRW", group_name: str | None = None, benchmark_code: str | None = None,
+    created_at: str | None = None,
+    target_price=_TARGET_PRICE_UNCHANGED,
+    target_price_disabled=_TARGET_DISABLED_UNCHANGED,
+    target_price_formula=_TARGET_FORMULA_UNCHANGED,
+) -> dict:
+    """target_price 인자의 의미:
+      - 인자 미전달 (sentinel) → 기존 값 그대로 유지 (수량/매입가만 편집할 때)
+      - None              → 자동 계산으로 되돌림 (수동 override 해제)
+      - float             → 명시적 수동 고정값
+
+    target_price_disabled:
+      - 미전달             → 기존 값 보존
+      - True/1             → 자동 계산도 bypass, UI 에서 '-' 로 표시
+      - False/0            → 자동 계산 활성화 (기본값)
+    """
+    target_price_provided = target_price is not _TARGET_PRICE_UNCHANGED
+    target_formula_provided = target_price_formula is not _TARGET_FORMULA_UNCHANGED
+    db = await cache.get_db()
+    now = datetime.now().isoformat()
+    # Re-read existing row so we can preserve created_at on simple edits
+    # (quantity / avg_price updates shouldn't reset the registration
+    # date). Only overwrite created_at when the caller explicitly passes
+    # one — that's how the UI's 등록일자 edit gets through.
+    cursor = await db.execute(
+        "SELECT sort_order, group_name, benchmark_code, created_at, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+        (google_sub, stock_code),
+    )
+    existing = await cursor.fetchone()
+    sort_order = existing["sort_order"] if existing else None
+    if group_name is None:
+        if existing:
+            group_name = existing["group_name"]
+        else:
+            group_name = await cache._resolve_default_group_name(db, google_sub, stock_code)
+    if benchmark_code is None and existing:
+        benchmark_code = existing["benchmark_code"]
+
+    # Preserve existing created_at unless overridden; for brand-new rows
+    # use `now`. This ordering means an explicit `created_at=None` on an
+    # edit leaves the original date untouched, which matches the edit-
+    # form contract (leaving the 등록일자 field blank = "no change").
+    if created_at is None:
+        created_at = existing["created_at"] if existing else now
+    # target_price 미전달이면 기존 값 보존, 명시 None 이면 자동계산
+    # 으로 되돌림, 숫자면 수동 override 저장.
+    if target_price is _TARGET_PRICE_UNCHANGED:
+        target_price = existing["target_price"] if existing else None
+    if target_price_formula is _TARGET_FORMULA_UNCHANGED:
+        target_price_formula = existing["target_price_formula"] if existing else None
+    target_price_formula = str(target_price_formula or "").strip() or None
+    if target_price_disabled is _TARGET_DISABLED_UNCHANGED:
+        target_price_disabled = int(existing["target_price_disabled"]) if existing else 0
+    else:
+        target_price_disabled = 1 if target_price_disabled else 0
+    # 명시 수동 값을 입력하면 disabled 플래그는 자동 해제 (사용자가
+    # 목표가를 넣었다는 건 '표시하고 싶다' 는 의사). 수식이 있을 때의
+    # target_price 는 "마지막으로 계산된 fallback 값" 이므로 수식과 함께
+    # 보존한다. 이렇게 해야 BPS/EPS 외부 조회가 늦거나 실패해도 표가
+    # 즉시 마지막 계산값을 표시할 수 있다.
+    if target_price is not None:
+        target_price_disabled = 0
+        if target_price_provided and not target_formula_provided:
+            target_price_formula = None
+    if target_price_formula:
+        target_price_disabled = 0
+    if target_price_disabled == 1:
+        target_price = None
+        target_price_formula = None
+    target_price_formula_db = target_price_formula or ""
+
+    if sort_order is None and not existing:
+        cursor = await db.execute(
+            "SELECT MIN(sort_order) AS mn FROM user_portfolio WHERE google_sub = ? AND sort_order IS NOT NULL",
+            (google_sub,),
+        )
+        row = await cursor.fetchone()
+        min_order = row["mn"] if row and row["mn"] is not None else 0
+        sort_order = min_order - 1
+
+    await db.execute(
+        """
+        INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(google_sub, stock_code) DO UPDATE SET
+            stock_name = excluded.stock_name,
+            quantity = excluded.quantity,
+            avg_price = excluded.avg_price,
+            currency = excluded.currency,
+            group_name = excluded.group_name,
+            benchmark_code = excluded.benchmark_code,
+            created_at = excluded.created_at,
+            target_price = excluded.target_price,
+            target_price_disabled = excluded.target_price_disabled,
+            target_price_formula = excluded.target_price_formula,
+            updated_at = excluded.updated_at
+        """,
+        (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula_db, now),
+    )
+    await db.commit()
+    return {
+        "stock_code": stock_code, "stock_name": stock_name,
+        "quantity": quantity, "avg_price": avg_price, "currency": currency,
+        "group_name": group_name, "benchmark_code": benchmark_code,
+        "created_at": created_at,
+        "target_price": target_price,
+        "target_price_disabled": target_price_disabled,
+        "target_price_formula": target_price_formula,
+    }
+
+
+async def clear_portfolio(google_sub: str):
+    db = await cache.get_db()
+    await db.execute("DELETE FROM portfolio_tags WHERE google_sub = ?", (google_sub,))
+    await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
+    await db.commit()
+
+
+async def replace_portfolio(google_sub: str, items: list[dict]):
+    """Atomic replace: delete all + insert new in one transaction."""
+    async with aiosqlite.connect(cache.DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout=5000")
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            now = datetime.now().isoformat()
+            await db.execute("DELETE FROM portfolio_tags WHERE google_sub = ?", (google_sub,))
+            await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
+            for i, it in enumerate(items):
+                group_name = await cache._resolve_default_group_name(db, google_sub, it["stock_code"])
+                await db.execute(
+                    """INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (google_sub, it["stock_code"], it["stock_name"], it["quantity"], it["avg_price"], i, it.get("currency", "KRW"), group_name, now, now),
+                )
+        except Exception:
+            await db.rollback()
+            raise
+        await db.commit()
+
+
+async def delete_portfolio_item(google_sub: str, stock_code: str) -> bool:
+    db = await cache.get_db()
+    await db.execute(
+        "DELETE FROM portfolio_tags WHERE google_sub = ? AND stock_code = ?",
+        (google_sub, stock_code),
+    )
+    cursor = await db.execute(
+        "DELETE FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+        (google_sub, stock_code),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def update_portfolio_benchmark(google_sub: str, stock_code: str, benchmark_code: str | None):
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "UPDATE user_portfolio SET benchmark_code = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
+        (benchmark_code, datetime.now().isoformat(), google_sub, stock_code),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def save_portfolio_order(google_sub: str, ordered_stock_codes: list[str]):
+    db = await cache.get_db()
+    await db.executemany(
+        "UPDATE user_portfolio SET sort_order = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
+        [
+            (index, datetime.now().isoformat(), google_sub, code)
+            for index, code in enumerate(ordered_stock_codes)
+        ],
+    )
+    await db.commit()
+
+
+async def get_portfolio_groups(google_sub: str) -> list[dict]:
+    db = await cache.get_db()
+    await cache._ensure_default_groups(db, google_sub)
+    await db.commit()
+    cursor = await db.execute(
+        "SELECT group_name, sort_order, is_default FROM portfolio_groups WHERE google_sub = ? ORDER BY sort_order ASC",
+        (google_sub,),
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+async def add_portfolio_group(google_sub: str, group_name: str) -> dict:
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "SELECT MAX(sort_order) AS mx FROM portfolio_groups WHERE google_sub = ?",
+        (google_sub,),
+    )
+    row = await cursor.fetchone()
+    next_order = (row["mx"] or 0) + 1
+    await db.execute(
+        "INSERT INTO portfolio_groups (google_sub, group_name, sort_order, is_default) VALUES (?, ?, ?, 0)",
+        (google_sub, group_name, next_order),
+    )
+    await db.commit()
+    return {"group_name": group_name, "sort_order": next_order, "is_default": 0}
+
+
+async def rename_portfolio_group(google_sub: str, old_name: str, new_name: str):
+    db = await cache.get_db()
+    await db.execute(
+        "UPDATE portfolio_groups SET group_name = ? WHERE google_sub = ? AND group_name = ?",
+        (new_name, google_sub, old_name),
+    )
+    await db.execute(
+        "UPDATE user_portfolio SET group_name = ? WHERE google_sub = ? AND group_name = ?",
+        (new_name, google_sub, old_name),
+    )
+    await db.commit()
+
+
+async def delete_portfolio_group(google_sub: str, group_name: str):
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "SELECT stock_code FROM user_portfolio WHERE google_sub = ? AND group_name = ?",
+        (google_sub, group_name),
+    )
+    items = await cursor.fetchall()
+    for item in items:
+        default_grp = await cache._resolve_default_group_name(db, google_sub, item["stock_code"])
+        await db.execute(
+            "UPDATE user_portfolio SET group_name = ? WHERE google_sub = ? AND stock_code = ?",
+            (default_grp, google_sub, item["stock_code"]),
+        )
+    await db.execute(
+        "DELETE FROM portfolio_groups WHERE google_sub = ? AND group_name = ?",
+        (google_sub, group_name),
+    )
+    await db.commit()
+
+
+async def save_portfolio_groups_order(google_sub: str, group_names: list[str]):
+    db = await cache.get_db()
+    await db.executemany(
+        "UPDATE portfolio_groups SET sort_order = ? WHERE google_sub = ? AND group_name = ?",
+        [(i, google_sub, name) for i, name in enumerate(group_names)],
+    )
+    await db.commit()

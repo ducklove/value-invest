@@ -447,6 +447,24 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items), 0)
         self.assertEqual(await cache.get_portfolio_tags("u1", "005930"), [])
 
+    async def test_replace_portfolio_atomic_bulk_swap(self):
+        # replace_portfolio opens its own aiosqlite connection for an atomic
+        # delete-all + insert (the bulk-import "replace" path). Exercises that
+        # fresh-connection path against cache.DB_PATH.
+        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await cache.replace_portfolio("u1", [
+            {"stock_code": "000660", "stock_name": "SK하이닉스", "quantity": 5, "avg_price": 180000},
+            {"stock_code": "AAPL", "stock_name": "Apple", "quantity": 3, "avg_price": 200, "currency": "USD"},
+        ])
+        items = await cache.get_portfolio("u1")
+        self.assertEqual(sorted(i["stock_code"] for i in items), ["000660", "AAPL"])
+        # Second replace fully swaps again (atomic, no leftovers from the first).
+        await cache.replace_portfolio("u1", [
+            {"stock_code": "035720", "stock_name": "카카오", "quantity": 1, "avg_price": 50000},
+        ])
+        items2 = await cache.get_portfolio("u1")
+        self.assertEqual([i["stock_code"] for i in items2], ["035720"])
+
     async def test_get_portfolio_exposes_created_at(self):
         """UI 의 '등록일자' 컬럼이 비어있지 않도록, get_portfolio SELECT 에
         created_at 이 반드시 포함돼야 한다는 계약 고정."""
