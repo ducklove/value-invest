@@ -94,50 +94,46 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   assert.deepEqual(railTitles, ["원자재", "환율", "신규카테고리"]);
 });
 
-test("_mdRenderDashboard places an investor-flows slot inside the 국내 지수 hero section", () => {
+test("_mdRenderDashboard puts a per-card flow slot inside each 국내 지수 hero card", () => {
   const w = load();
-  w._mdRenderDashboard(CATALOG, { KOSPI: { value: "2,650", direction: "up" } });
+  // two 국내 지수 codes so we can assert one slot per card
+  const catalog = {
+    KOSPI: { label: "KOSPI", category: "국내 지수" },
+    KOSDAQ: { label: "KOSDAQ", category: "국내 지수" },
+    SPX: { label: "S&P 500", category: "해외 지수" },
+  };
+  w._mdRenderDashboard(catalog, { KOSPI: { value: "2,650", direction: "up" } });
   const main = w.document.getElementById("mdIndMain");
-  const heroSection = main.querySelector(".md-hero-section");
-  assert.ok(heroSection, "hero section rendered");
-  // the flows slot must live INSIDE the 국내 지수 hero section, not elsewhere
-  assert.ok(heroSection.querySelector("#mdFlows"), "flows slot is inside hero section");
+  const cards = main.querySelectorAll(".md-hero-card");
+  assert.equal(cards.length, 2);
+  // every hero card carries its own flow slot, keyed by the index code
+  const codes = [...cards].map((c) => c.querySelector(".md-card-flow")?.dataset.flowCode);
+  assert.deepEqual([...codes].sort(), ["KOSDAQ", "KOSPI"]);
 });
 
-test("_flowsHtml renders 코스피/코스닥 net-buy with direction class + escaping", () => {
+test("_cardFlowHtml renders one market's 개인/외국인/기관 with direction class + escaping", () => {
   const w = load();
-  const html = w._flowsHtml({
-    kospi: {
-      date: "26.05.29",
-      individual: { value: "-14,054", direction: "down" },
-      foreign: { value: "-10,421", direction: "down" },
-      institution: { value: "23,688", direction: "up" },
-    },
-    kosdaq: {
-      date: "26.05.29",
-      individual: { value: "<b>x</b>", direction: "flat" },
-      foreign: { value: "115", direction: "up" },
-      institution: { value: "-3,140", direction: "down" },
-    },
+  const html = w._cardFlowHtml({
+    date: "26.05.29",
+    individual: { value: "-14,054", direction: "down" },
+    foreign: { value: "<b>x</b>", direction: "flat" },
+    institution: { value: "23,688", direction: "up" },
   });
-  // mount to read structure
   const root = w.document.getElementById("mdIndMain");
   root.innerHTML = html;
-  const rows = root.querySelectorAll(".flow-row");
-  assert.equal(rows.length, 2);
-  assert.match(root.innerHTML, /투자자 순매수/);
+  const rows = root.querySelectorAll(".cf-row");
+  assert.equal(rows.length, 3);
+  assert.match(root.innerHTML, /순매수/);
   assert.match(root.innerHTML, /26\.05\.29/);
-  // 코스피 기관 순매수 양수 → up
-  assert.ok(root.querySelector(".flow-val.md-up"));
-  assert.ok(root.querySelector(".flow-val.md-down"));
-  // hostile value escaped
-  assert.ok(!root.innerHTML.includes("<b>x</b>"));
+  assert.ok(root.querySelector(".cf-val.md-up"));   // 기관 +
+  assert.ok(root.querySelector(".cf-val.md-down"));  // 개인 -
+  assert.ok(!root.innerHTML.includes("<b>x</b>"));   // hostile value escaped
 });
 
-test("_flowsHtml returns empty string when no flows", () => {
+test("_cardFlowHtml returns empty string when no flow", () => {
   const w = load();
-  assert.equal(w._flowsHtml(null), "");
-  assert.equal(w._flowsHtml({}), "");
+  assert.equal(w._cardFlowHtml(null), "");
+  assert.equal(w._cardFlowHtml(undefined), "");
 });
 
 test("_mdRenderDashboard escapes catalog labels (no raw HTML injection)", () => {

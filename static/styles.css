@@ -633,17 +633,19 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .sec-row:last-child { border-bottom: none; }
 .sec-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sec-chg { flex: 0 0 auto; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.md-flows { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.flow-head {
-  display: flex; align-items: baseline; gap: 8px; justify-content: space-between;
-  font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;
+.md-card-flow { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.md-card-flow:empty { display: none; }
+.cf-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px;
 }
-.flow-unit { font-weight: 400; font-size: 11px; }
-.flow-row { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; flex-wrap: wrap; }
-.flow-mkt { flex: 0 0 42px; font-size: 12px; color: var(--text-secondary); }
-.flow-cell { display: inline-flex; align-items: baseline; gap: 4px; min-width: 96px; }
-.flow-actor { font-size: 11px; color: var(--text-secondary); }
-.flow-val { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cf-date { font-weight: 400; }
+.cf-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  font-size: 12px; padding: 2px 0;
+}
+.cf-actor { color: var(--text-secondary); }
+.cf-val { font-weight: 600; font-variant-numeric: tabular-nums; }
 .news-list { display: flex; flex-direction: column; }
 .news-item {
   display: block; text-decoration: none; color: inherit;

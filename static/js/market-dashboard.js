@@ -60,37 +60,36 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
     chgHtml = c.text ? `<span class="md-chg ${c.cls}">${escapeHtml(c.text)}</span>` : '';
   }
   if (variant === 'hero') {
+    // 카드 안에 해당 시장 수급 슬롯을 둔다. 캐시값이 있으면 즉시 채우고,
+    // loadInvestorFlows()가 최신값으로 갱신한다(없으면 빈 슬롯).
+    const flow = _mdFlows ? _mdFlows[String(code).toLowerCase()] : null;
+    const flowSlot = `<div class="md-card-flow" data-flow-code="${escapeHtml(String(code))}">${_cardFlowHtml(flow)}</div>`;
     return `<div class="md-hero-card">`
       + `<div class="md-hero-label">${escapeHtml(label)}</div>`
-      + `<div class="md-hero-val">${valHtml}</div>${chgHtml}</div>`;
+      + `<div class="md-hero-val">${valHtml}</div>${chgHtml}`
+      + flowSlot + `</div>`;
   }
   return `<div class="md-row">`
     + `<span class="md-row-label">${escapeHtml(label)}</span>`
     + `<span class="md-row-val">${valHtml}</span>${chgHtml}</div>`;
 }
 
-// 최근 투자자별 순매수(개인/외국인/기관). 국내 지수 hero 카드 안에 함께 표시.
+// 최근 투자자별 순매수(개인/외국인/기관). 각 국내 지수 카드(코스피/코스닥)
+// 안에 해당 시장 수급을 넣는다. {kospi, kosdaq} 형태이며 코드를 소문자화해
+// 매칭한다(KOSPI→kospi).
 let _mdFlows = null;
 let _flowsInFlight = false;
 
-function _flowsHtml(flows) {
-  if (!flows || (!flows.kospi && !flows.kosdaq)) return '';
-  const date = (flows.kospi && flows.kospi.date) || (flows.kosdaq && flows.kosdaq.date) || '';
+function _cardFlowHtml(flow) {
+  if (!flow) return '';
   const actors = [['individual', '개인'], ['foreign', '외국인'], ['institution', '기관']];
-  const marketRow = (mkt, label) => {
-    const f = flows[mkt];
-    if (!f) return '';
-    const cells = actors.map(([k, name]) => {
-      const d = f[k] || {};
-      const cls = d.direction === 'up' ? 'md-up' : (d.direction === 'down' ? 'md-down' : 'md-flat');
-      return '<span class="flow-cell">'
-        + `<span class="flow-actor">${name}</span>`
-        + `<span class="flow-val ${cls}">${escapeHtml(String(d.value || '-'))}</span></span>`;
-    }).join('');
-    return `<div class="flow-row"><span class="flow-mkt">${escapeHtml(label)}</span>${cells}</div>`;
-  };
-  return `<div class="flow-head">투자자 순매수<span class="flow-unit">${escapeHtml(date)} · 억원</span></div>`
-    + marketRow('kospi', '코스피') + marketRow('kosdaq', '코스닥');
+  const rows = actors.map(([k, name]) => {
+    const d = flow[k] || {};
+    const cls = d.direction === 'up' ? 'md-up' : (d.direction === 'down' ? 'md-down' : 'md-flat');
+    return `<div class="cf-row"><span class="cf-actor">${name}</span>`
+      + `<span class="cf-val ${cls}">${escapeHtml(String(d.value || '-'))}</span></div>`;
+  }).join('');
+  return `<div class="cf-head">순매수<span class="cf-date">${escapeHtml(String(flow.date || ''))} · 억</span></div>${rows}`;
 }
 
 async function loadInvestorFlows() {
@@ -100,8 +99,10 @@ async function loadInvestorFlows() {
     const r = await apiFetch('/api/market/investor-flows');
     const data = r.ok ? await r.json() : {};
     _mdFlows = data.flows || null;
-    const el = document.getElementById('mdFlows');
-    if (el) el.innerHTML = _mdFlows ? _flowsHtml(_mdFlows) : '';
+    document.querySelectorAll('.md-card-flow[data-flow-code]').forEach((el) => {
+      const f = _mdFlows ? _mdFlows[String(el.dataset.flowCode).toLowerCase()] : null;
+      el.innerHTML = _cardFlowHtml(f);
+    });
   } catch (e) {
     console.warn('investor flows load failed', e);
   } finally {
@@ -113,12 +114,8 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
   const body = variant === 'hero'
     ? `<div class="md-hero">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'hero')).join('')}</div>`
     : `<div class="md-rows">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'list')).join('')}</div>`;
-  // hero 섹션(국내 지수) 하단에 수급 동향 슬롯을 둔다. 캐시된 값이 있으면 즉시
-  // 채워 새로고침 시 깜빡임을 막고, loadInvestorFlows()가 최신값으로 갱신한다.
-  const flowsSlot = variant === 'hero'
-    ? `<div id="mdFlows" class="md-flows">${_mdFlows ? _flowsHtml(_mdFlows) : ''}</div>` : '';
   return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}">`
-    + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}${flowsSlot}</section>`;
+    + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}</section>`;
 }
 
 function _mdRenderDashboard(catalog, dataMap) {
