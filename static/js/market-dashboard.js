@@ -69,12 +69,56 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
     + `<span class="md-row-val">${valHtml}</span>${chgHtml}</div>`;
 }
 
+// 최근 투자자별 순매수(개인/외국인/기관). 국내 지수 hero 카드 안에 함께 표시.
+let _mdFlows = null;
+let _flowsInFlight = false;
+
+function _flowsHtml(flows) {
+  if (!flows || (!flows.kospi && !flows.kosdaq)) return '';
+  const date = (flows.kospi && flows.kospi.date) || (flows.kosdaq && flows.kosdaq.date) || '';
+  const actors = [['individual', '개인'], ['foreign', '외국인'], ['institution', '기관']];
+  const marketRow = (mkt, label) => {
+    const f = flows[mkt];
+    if (!f) return '';
+    const cells = actors.map(([k, name]) => {
+      const d = f[k] || {};
+      const cls = d.direction === 'up' ? 'md-up' : (d.direction === 'down' ? 'md-down' : 'md-flat');
+      return '<span class="flow-cell">'
+        + `<span class="flow-actor">${name}</span>`
+        + `<span class="flow-val ${cls}">${escapeHtml(String(d.value || '-'))}</span></span>`;
+    }).join('');
+    return `<div class="flow-row"><span class="flow-mkt">${escapeHtml(label)}</span>${cells}</div>`;
+  };
+  return `<div class="flow-head">투자자 순매수<span class="flow-unit">${escapeHtml(date)} · 억원</span></div>`
+    + marketRow('kospi', '코스피') + marketRow('kosdaq', '코스닥');
+}
+
+async function loadInvestorFlows() {
+  if (_flowsInFlight) return;
+  _flowsInFlight = true;
+  try {
+    const r = await apiFetch('/api/market/investor-flows');
+    const data = r.ok ? await r.json() : {};
+    _mdFlows = data.flows || null;
+    const el = document.getElementById('mdFlows');
+    if (el) el.innerHTML = _mdFlows ? _flowsHtml(_mdFlows) : '';
+  } catch (e) {
+    console.warn('investor flows load failed', e);
+  } finally {
+    _flowsInFlight = false;
+  }
+}
+
 function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
   const body = variant === 'hero'
     ? `<div class="md-hero">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'hero')).join('')}</div>`
     : `<div class="md-rows">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'list')).join('')}</div>`;
+  // hero 섹션(국내 지수) 하단에 수급 동향 슬롯을 둔다. 캐시된 값이 있으면 즉시
+  // 채워 새로고침 시 깜빡임을 막고, loadInvestorFlows()가 최신값으로 갱신한다.
+  const flowsSlot = variant === 'hero'
+    ? `<div id="mdFlows" class="md-flows">${_mdFlows ? _flowsHtml(_mdFlows) : ''}</div>` : '';
   return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}">`
-    + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}</section>`;
+    + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}${flowsSlot}</section>`;
 }
 
 function _mdRenderDashboard(catalog, dataMap) {
@@ -119,6 +163,8 @@ async function loadInvestingDashboard(refresh = false) {
       const dataMap = sr.ok ? await sr.json() : {};
       _mdRenderDashboard(catalog, dataMap);
       _mdLoadedOnce = true;
+      // 수급 슬롯은 hero 섹션과 함께 생성되므로 렌더 직후 채운다.
+      if (typeof loadInvestorFlows === 'function') loadInvestorFlows();
     } catch (e) {
       console.warn('investing dashboard load failed', e);
       const mainEl = document.getElementById('mdIndMain');

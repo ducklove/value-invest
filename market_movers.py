@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from bs4 import BeautifulSoup
@@ -35,6 +36,8 @@ _MOVERS_TTL = 90  # seconds — rankings move intraday but not every second
 _movers_cache = MemoryTTLCache("market.movers", _MOVERS_TTL)
 _SECTOR_TTL = 120  # 업종 등락은 더 천천히 움직인다
 _sector_cache = MemoryTTLCache("market.sectors", _SECTOR_TTL)
+_FLOWS_TTL = 600  # 투자자별 매매동향은 장 마감 후 1회 확정 — 길게 캐시
+_flows_cache = MemoryTTLCache("market.flows", _FLOWS_TTL)
 _SEM = asyncio.Semaphore(3)
 _HTTP_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 
@@ -197,3 +200,68 @@ async def fetch_sectors(limit: int = 12) -> list[dict]:
     except Exception as exc:
         logger.warning("sector fetch failed: %s", exc)
         return _stale(_sector_cache, key, limit)
+
+
+def _flow_dir(value: str) -> str:
+    """순매수(+) → up, 순매도(-) → down."""
+    v = (value or "").strip()
+    if v.startswith("-"):
+        return "down"
+    if v and v not in ("0", "0.0") and any(c.isdigit() for c in v):
+        return "up"
+    return "flat"
+
+
+def _parse_investor_trend(html: str) -> dict | None:
+    """Parse 투자자별 매매동향 (investorDealTrendDay) — most recent business day.
+
+    The page's ``table.type_1`` lists 날짜 · 개인 · 외국인 · 기관계 · … with the
+    newest day first. Returns {date, individual, foreign, institution} (순매수,
+    단위 억원) for that first data row, or None. Pure (no network).
+    """
+    soup = BeautifulSoup(html or "", "html.parser")
+    table = soup.select_one("table.type_1")
+    if not table:
+        return None
+    for tr in table.find_all("tr"):
+        tds = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+        # data rows lead with a date like "26.05.29"
+        if len(tds) >= 4 and tds[0] and "." in tds[0] and any(c.isdigit() for c in tds[0]):
+            individual, foreign, institution = tds[1], tds[2], tds[3]
+            return {
+                "date": tds[0],
+                "individual": {"value": individual, "direction": _flow_dir(individual)},
+                "foreign": {"value": foreign, "direction": _flow_dir(foreign)},
+                "institution": {"value": institution, "direction": _flow_dir(institution)},
+            }
+    return None
+
+
+async def fetch_investor_flows() -> dict:
+    """Fetch 코스피·코스닥 투자자별 순매수 (개인/외국인/기관, 최근 영업일).
+
+    Naver shows the latest business day on/below the given ``bizdate``, so we
+    pass today's KST date and the first row is always the most recent session.
+    TTL-cached; stale fallback on upstream failure.
+    """
+    cached = _flows_cache.get("flows")
+    if cached is not None:
+        return cached
+    # bizdate를 미래로 줘도 가장 가까운 과거 영업일을 반환하므로 KST '오늘'이면 충분
+    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
+    out: dict = {}
+    try:
+        for sosok, key in (("01", "kospi"), ("02", "kosdaq")):
+            url = f"{_BASE}/sise/investorDealTrendDay.naver?bizdate={today}&sosok={sosok}"
+            row = _parse_investor_trend(await _get_html(url))
+            if row:
+                out[key] = row
+        if out:
+            _flows_cache.set("flows", out)
+        return out
+    except Exception as exc:
+        logger.warning("investor flows fetch failed: %s", exc)
+        entry = _flows_cache.get_entry("flows", allow_stale=True) if hasattr(_flows_cache, "get_entry") else None
+        if entry and getattr(entry, "value", None):
+            return dict(entry.value)
+        return out

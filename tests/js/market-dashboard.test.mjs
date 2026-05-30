@@ -94,6 +94,52 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   assert.deepEqual(railTitles, ["원자재", "환율", "신규카테고리"]);
 });
 
+test("_mdRenderDashboard places an investor-flows slot inside the 국내 지수 hero section", () => {
+  const w = load();
+  w._mdRenderDashboard(CATALOG, { KOSPI: { value: "2,650", direction: "up" } });
+  const main = w.document.getElementById("mdIndMain");
+  const heroSection = main.querySelector(".md-hero-section");
+  assert.ok(heroSection, "hero section rendered");
+  // the flows slot must live INSIDE the 국내 지수 hero section, not elsewhere
+  assert.ok(heroSection.querySelector("#mdFlows"), "flows slot is inside hero section");
+});
+
+test("_flowsHtml renders 코스피/코스닥 net-buy with direction class + escaping", () => {
+  const w = load();
+  const html = w._flowsHtml({
+    kospi: {
+      date: "26.05.29",
+      individual: { value: "-14,054", direction: "down" },
+      foreign: { value: "-10,421", direction: "down" },
+      institution: { value: "23,688", direction: "up" },
+    },
+    kosdaq: {
+      date: "26.05.29",
+      individual: { value: "<b>x</b>", direction: "flat" },
+      foreign: { value: "115", direction: "up" },
+      institution: { value: "-3,140", direction: "down" },
+    },
+  });
+  // mount to read structure
+  const root = w.document.getElementById("mdIndMain");
+  root.innerHTML = html;
+  const rows = root.querySelectorAll(".flow-row");
+  assert.equal(rows.length, 2);
+  assert.match(root.innerHTML, /투자자 순매수/);
+  assert.match(root.innerHTML, /26\.05\.29/);
+  // 코스피 기관 순매수 양수 → up
+  assert.ok(root.querySelector(".flow-val.md-up"));
+  assert.ok(root.querySelector(".flow-val.md-down"));
+  // hostile value escaped
+  assert.ok(!root.innerHTML.includes("<b>x</b>"));
+});
+
+test("_flowsHtml returns empty string when no flows", () => {
+  const w = load();
+  assert.equal(w._flowsHtml(null), "");
+  assert.equal(w._flowsHtml({}), "");
+});
+
 test("_mdRenderDashboard escapes catalog labels (no raw HTML injection)", () => {
   const w = load();
   const evil = { X: { label: "<img src=x onerror=alert(1)>", category: "국내 지수" } };

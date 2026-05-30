@@ -66,6 +66,32 @@ class SectorParserTests(unittest.TestCase):
         self.assertEqual(market_movers._parse_sector_table("<div>nope</div>"), [])
 
 
+class InvestorFlowsParserTests(unittest.TestCase):
+    def _trend_html(self) -> str:
+        return (FIXTURES / "naver_investor_trend.html").read_text(encoding="utf-8")
+
+    def test_parse_investor_trend_first_row(self):
+        row = market_movers._parse_investor_trend(self._trend_html())
+        self.assertIsNotNone(row)
+        self.assertEqual(row["date"], "26.05.29")
+        # 개인/외국인/기관계 순서 + 부호로 방향 판정
+        self.assertEqual(row["individual"]["value"], "-14,054")
+        self.assertEqual(row["individual"]["direction"], "down")
+        self.assertEqual(row["foreign"]["direction"], "down")
+        self.assertEqual(row["institution"]["value"], "23,688")
+        self.assertEqual(row["institution"]["direction"], "up")
+
+    def test_flow_direction_helper(self):
+        self.assertEqual(market_movers._flow_dir("23,688"), "up")
+        self.assertEqual(market_movers._flow_dir("-1,000"), "down")
+        self.assertEqual(market_movers._flow_dir("0"), "flat")
+        self.assertEqual(market_movers._flow_dir(""), "flat")
+
+    def test_parse_investor_trend_missing(self):
+        self.assertIsNone(market_movers._parse_investor_trend(""))
+        self.assertIsNone(market_movers._parse_investor_trend("<table class='type_1'></table>"))
+
+
 class MarketNewsParserTests(unittest.TestCase):
     def _news_html(self) -> str:
         return (FIXTURES / "naver_mainnews.html").read_text(encoding="utf-8")
@@ -116,6 +142,16 @@ class MarketMoversEndpointTests(unittest.IsolatedAsyncioTestCase):
             result = await stocks_route.get_market_news(limit=999)
         self.assertEqual(result["news"][0]["title"], "헤드라인")
         self.assertLessEqual(fake.await_args.args[0], 20)
+
+    async def test_investor_flows_endpoint(self):
+        payload = {"kospi": {"date": "26.05.29",
+                             "individual": {"value": "-14,054", "direction": "down"},
+                             "foreign": {"value": "-10,421", "direction": "down"},
+                             "institution": {"value": "23,688", "direction": "up"}}}
+        fake = AsyncMock(return_value=payload)
+        with patch.object(market_movers, "fetch_investor_flows", new=fake):
+            result = await stocks_route.get_investor_flows()
+        self.assertEqual(result["flows"]["kospi"]["institution"]["direction"], "up")
 
 
 if __name__ == "__main__":

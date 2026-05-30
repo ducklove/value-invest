@@ -57,6 +57,15 @@ async def get_market_news(limit: int = 8):
     return {"news": items}
 
 
+@router.get("/api/market/investor-flows")
+async def get_investor_flows():
+    """Public 투자자별 매매동향 — 코스피·코스닥 개인/외국인/기관 순매수(최근 영업일)."""
+    import market_movers
+
+    flows = await market_movers.fetch_investor_flows()
+    return {"flows": flows}
+
+
 @router.get("/api/settings/market-bar")
 async def get_market_bar_setting(request: Request):
     import json
