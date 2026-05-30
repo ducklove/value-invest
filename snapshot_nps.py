@@ -27,6 +27,23 @@ def _esc(text: str) -> str:
     return html.escape(str(text or ""), quote=True)
 
 
+def _json_for_script(value) -> str:
+    """``json.dumps`` for safe embedding inside an inline ``<script>`` block.
+
+    Escapes the characters that can terminate the script context — ``</script>``
+    and ``<!--``. The escapes are JSON/JS-equivalent (``\\u003c`` parses to
+    ``<``), so the data a chart receives is byte-for-byte unchanged; this only
+    closes the one sanitizer-bypass path where a holding name could break out of
+    the inline script.
+    """
+    return (
+        json.dumps(value, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
 def _fmt_krw(val: float) -> str:
     """Format KRW value with comma-separated thousands (no suffix)."""
     return f"{round(val):,}"
@@ -583,12 +600,12 @@ def _build_html(
 </style>
 <script>
 (function() {{
-  const NPS_TREEMAP_DATA = {json.dumps(treemap_data, ensure_ascii=False)};
-  const NPS_NAV_DATA     = {json.dumps(nav_chart_data, ensure_ascii=False)};
-  const NPS_KOSPI_DATA   = {json.dumps(kospi_history or [], ensure_ascii=False)};
-  const NPS_VALUE_DATA   = {json.dumps(value_chart_data, ensure_ascii=False)};
-  const NPS_NAV_COLOR    = {json.dumps(nav_color)};
-  const NPS_VAL_COLOR    = {json.dumps(val_color)};
+  const NPS_TREEMAP_DATA = {_json_for_script(treemap_data)};
+  const NPS_NAV_DATA     = {_json_for_script(nav_chart_data)};
+  const NPS_KOSPI_DATA   = {_json_for_script(kospi_history or [])};
+  const NPS_VALUE_DATA   = {_json_for_script(value_chart_data)};
+  const NPS_NAV_COLOR    = {_json_for_script(nav_color)};
+  const NPS_VAL_COLOR    = {_json_for_script(val_color)};
 
   function _loadScript(src) {{
     return new Promise((resolve, reject) => {{

@@ -23,10 +23,30 @@ def _extract_json_const(html: str, name: str) -> list[dict] | None:
         return None
 
 
+def _json_for_script(value) -> str:
+    """``json.dumps`` for safe embedding inside an inline ``<script>`` block.
+
+    Escapes ``<``/``>``/``&`` so a value can't terminate the script context
+    (``</script>``). JSON/JS-equivalent (``\\u003c`` parses to ``<``), so the
+    chart data is unchanged — this matches the escaping used when the HTML is
+    first generated in snapshot_nps.py.
+    """
+    return (
+        json.dumps(value, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
 def _replace_json_const(html: str, name: str, value: list[dict]) -> str:
-    payload = json.dumps(value, ensure_ascii=False)
+    payload = _json_for_script(value)
     pattern = _JSON_CONST_RE.format(name=re.escape(name))
-    return re.sub(pattern, f"const {name}   = {payload};", html, count=1, flags=re.S)
+    replacement = f"const {name}   = {payload};"
+    # Use a function replacement so the payload (which contains \uXXXX escapes)
+    # is inserted literally — a plain string replacement would treat \u as a
+    # bad backreference and raise re.error.
+    return re.sub(pattern, lambda _m: replacement, html, count=1, flags=re.S)
 
 
 def _same_number(a, b, *, rel_tol: float = 1e-12) -> bool:

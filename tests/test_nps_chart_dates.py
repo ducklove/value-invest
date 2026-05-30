@@ -4,9 +4,39 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import json
+
 import cache
 from routes import nps as nps_route
 import snapshot_nps
+
+
+class NpsScriptEscapingTests(unittest.TestCase):
+    """The NPS view injects server HTML and executes its inline <script>, so any
+    data embedded in that script must not be able to break out of it."""
+
+    def test_json_for_script_neutralizes_script_breakout(self):
+        evil = [{"name": "ACME</script><script>alert(1)//", "value": 1}]
+        out = snapshot_nps._json_for_script(evil)
+        self.assertNotIn("</script>", out)
+        self.assertNotIn("<script>", out)
+        self.assertIn("\\u003c", out)
+        # JSON/JS-equivalent: parsed data is unchanged.
+        self.assertEqual(json.loads(out), evil)
+
+    def test_route_json_for_script_matches_generator(self):
+        evil = [{"date": "2026-01-01", "value": 1, "x": "a<b>&c"}]
+        out = nps_route._json_for_script(evil)
+        self.assertNotIn("</script>", out)
+        self.assertEqual(json.loads(out), evil)
+
+    def test_replace_json_const_inserts_escaped_payload_and_round_trips(self):
+        html = "x const NPS_KOSPI_DATA   = []; y"
+        rows = [{"date": "2026-01-01", "value": 1, "note": "a</script>b"}]
+        replaced = nps_route._replace_json_const(html, "NPS_KOSPI_DATA", rows)
+        self.assertNotIn("</script>", replaced)
+        # The const must still be readable back as the original data.
+        self.assertEqual(nps_route._extract_json_const(replaced, "NPS_KOSPI_DATA"), rows)
 
 
 class NpsChartDateTests(unittest.IsolatedAsyncioTestCase):
