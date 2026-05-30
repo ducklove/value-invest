@@ -147,6 +147,7 @@ async function initApp() {
   await _mbLoadCodes();
   loadMarketSummary();
   loadMarketTape();
+  if (typeof loadInvestingDashboard === 'function') loadInvestingDashboard();
   loadDailyMarketBrief();
   loadWikiStats();
   setInterval(loadMarketSummary, 60_000);
@@ -174,6 +175,7 @@ async function initApp() {
   const code = params.get('code');
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
   const PATH_TO_VIEW = {
+    '/investing': 'investing',
     '/analysis': 'analysis',
     '/portfolio': 'portfolio',
     '/nps': 'nps',

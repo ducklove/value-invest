@@ -72,7 +72,9 @@ function _pfShouldAutoUseSimpleMode() {
 
 function _mobileFixedView() {
   if (!_pfIsSimpleModeViewport()) return null;
-  return currentUser ? 'portfolio' : 'analysis';
+  // Logged-in mobile is pinned to the portfolio. Logged-out mobile is left
+  // unpinned so visitors can move between the public 투자정보 and 종목분석 tabs.
+  return currentUser ? 'portfolio' : null;
 }
 
 function pfSyncMobileFixedView() {
@@ -228,19 +230,22 @@ function switchView(view, options = {}) {
   if (lockedView && view !== lockedView) view = lockedView;
   activeView = view;
   document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
+  const investingView = document.getElementById('investingView');
   const analysisView = document.getElementById('analysisView');
   const portfolioView = document.getElementById('portfolioView');
   const npsView = document.getElementById('npsView');
   const labsView = document.getElementById('labsView');
   const backtestView = document.getElementById('backtestView');
   const insightsView = document.getElementById('insightsView');
+  if (investingView) investingView.style.display = view === 'investing' ? 'block' : 'none';
   analysisView.style.display = view === 'analysis' ? 'block' : 'none';
   portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
   if (npsView) npsView.style.display = view === 'nps' ? 'block' : 'none';
   if (labsView) labsView.style.display = view === 'labs' ? 'block' : 'none';
   if (backtestView) backtestView.style.display = view === 'backtest' ? 'block' : 'none';
   if (insightsView) insightsView.style.display = view === 'insights' ? 'block' : 'none';
-  const activeEl = view === 'analysis' ? analysisView
+  const activeEl = view === 'investing' ? investingView
+                  : view === 'analysis' ? analysisView
                   : view === 'portfolio' ? portfolioView
                   : view === 'labs' ? labsView
                   : view === 'backtest' ? backtestView
@@ -251,7 +256,9 @@ function switchView(view, options = {}) {
     void activeEl.offsetWidth;
     activeEl.classList.add('fade-in');
   }
-  if (view === 'portfolio') {
+  if (view === 'investing' && typeof loadInvestingDashboard === 'function') {
+    loadInvestingDashboard();
+  } else if (view === 'portfolio') {
     loadPortfolio();
   } else if (view === 'nps') {
     loadNpsView();

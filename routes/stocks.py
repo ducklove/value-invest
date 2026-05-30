@@ -12,7 +12,7 @@ async def market_summary(codes: str = ""):
     import market_indicators
 
     code_list = (
-        [c.strip()[:30] for c in codes.split(",") if c.strip()][:20]
+        [c.strip()[:30] for c in codes.split(",") if c.strip()][:40]
         if codes
         else ["KOSPI", "KOSDAQ", "USD_KRW", "CMDT_GC", "NIGHT_FUTURES"]
     )
