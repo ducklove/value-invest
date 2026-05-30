@@ -258,11 +258,11 @@ function pfToggleGroupFilter(groupName) {
 function updatePortfolioRowQuote(code, shouldFlash = true) {
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
-  let tr = null;
-  const rows = tbody.querySelectorAll('tr[data-code]');
-  for (const t of rows) {
-    if (t.dataset.code === code) { tr = t; break; }
-  }
+  // Hot path (runs per quote tick): let the browser match the row by attribute
+  // instead of materializing every tr[data-code] and scanning in JS. Querying
+  // live each call keeps it correct across re-render / reorder / edit — no
+  // persistent index to invalidate. CSS.escape guards codes with dots etc.
+  const tr = tbody.querySelector(`tr[data-code="${CSS.escape(code)}"]`);
   if (!tr) return;
   if (tr.querySelector('input.pf-edit-input')) return;
   const item = portfolioItems.find(i => i.stock_code === code);
