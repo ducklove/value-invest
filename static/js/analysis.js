@@ -1326,6 +1326,47 @@ function _filingReviewToneClass(tone) {
   return 'neutral';
 }
 
+// 구버전 캐시 리뷰는 summary_md 안에 유니코드 블록 막대(█▇▆…, U+2580–U+259F)가
+// 박혀 있어 폰트에서 깨져 보인다. 마크다운 렌더 전에 그 문자들을 제거해 텍스트만
+// 남긴다(숫자/설명은 보존). 신규 리뷰는 metric_trends 차트로 대체된다.
+function _stripBlockBars(md) {
+  return String(md || '').replace(/[▀-▟]+/g, '').replace(/[ \t]{2,}/g, ' ');
+}
+
+function _mtFmt(value, unit) {
+  if (value === null || value === undefined || !isFinite(Number(value))) return '-';
+  return Number(value).toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + (unit || '');
+}
+
+// metric_trends → before/after 비교 가로 막대 차트. 같은 지표의 두 값을
+// max 기준으로 정규화해 길이를 잡는다(음수는 0폭, 절댓값 기준).
+function _renderMetricTrends(trends) {
+  if (!Array.isArray(trends) || !trends.length) return '';
+  const items = trends.map((t) => {
+    const unit = t.unit || '';
+    const bv = t.before && t.before.value;
+    const av = t.after && t.after.value;
+    const nb = Number(bv);
+    const na = Number(av);
+    const scale = Math.max(Math.abs(isFinite(nb) ? nb : 0), Math.abs(isFinite(na) ? na : 0)) || 1;
+    const width = (v) => (isFinite(Number(v)) ? Math.max(2, Math.min(100, (Math.abs(Number(v)) / scale) * 100)) : 0);
+    const bar = (cls, whenLabel, v) => (
+      '<div class="mt-bar-row">'
+      + `<span class="mt-when">${escapeHtml(String(whenLabel || ''))}</span>`
+      + `<span class="mt-track"><span class="mt-fill ${cls}" style="width:${width(v)}%"></span></span>`
+      + `<span class="mt-val">${escapeHtml(_mtFmt(v, unit))}</span></div>`
+    );
+    return '<div class="mt-item"><div class="mt-head">'
+      + `<span class="mt-label">${escapeHtml(String(t.label || ''))}</span>`
+      + (t.note ? `<span class="mt-note">${escapeHtml(String(t.note))}</span>` : '')
+      + '</div>'
+      + bar('mt-before', t.before && t.before.label, bv)
+      + bar('mt-after', t.after && t.after.label, av)
+      + '</div>';
+  }).join('');
+  return `<div class="mt-wrap"><div class="mt-title">핵심 지표 변화</div>${items}</div>`;
+}
+
 function _renderFilingReviewCards(cards) {
   const container = document.getElementById('filingReviewCards');
   if (!container) return;
@@ -1391,9 +1432,12 @@ function renderFilingReview(review, { cached = false } = {}) {
   }
   _renderFilingReviewCards(review.review?.cards || []);
   const md = review.review_md || review.review?.summary_md || '';
-  body.innerHTML = md
-    ? (typeof _renderSafeMarkdown === 'function' ? _renderSafeMarkdown(md) : escapeHtml(md))
+  const cleanMd = _stripBlockBars(md);
+  body.innerHTML = cleanMd
+    ? (typeof _renderSafeMarkdown === 'function' ? _renderSafeMarkdown(cleanMd) : escapeHtml(cleanMd))
     : '<p>생성된 리뷰 본문이 없습니다.</p>';
+  const trendsEl = document.getElementById('filingReviewTrends');
+  if (trendsEl) trendsEl.innerHTML = _renderMetricTrends(review.review?.metric_trends || review.metric_trends || []);
   _renderFilingReviewDetails(review);
 }
 
@@ -1420,6 +1464,7 @@ function renderFilingReviewMissing(data) {
     source.style.display = href ? 'inline-flex' : 'none';
   }
   if (cards) cards.innerHTML = '';
+  { const t = document.getElementById('filingReviewTrends'); if (t) t.innerHTML = ''; }
   if (details) details.style.display = 'none';
   if (data.status === 'no_report') {
     status.textContent = '최근 DART 정기보고서를 찾지 못했습니다.';
@@ -1445,6 +1490,7 @@ async function loadFilingReview(stockCode) {
   status.textContent = '최근 DART 공시를 확인하는 중...';
   if (body) body.innerHTML = '';
   if (cards) cards.innerHTML = '';
+  { const t = document.getElementById('filingReviewTrends'); if (t) t.innerHTML = ''; }
   if (details) details.style.display = 'none';
 
   if (!hasApiConfiguration()) {

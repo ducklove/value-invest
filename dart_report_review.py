@@ -324,20 +324,32 @@ def _build_prompt(
 - 주 보고서가 핵심 재료입니다. 비교 보고서는 변화/반복 리스크를 확인하는 보조 근거로만 쓰세요.
 - 근거가 없는 추정은 금지하고, 불확실한 경우 "보고서에서 명확히 확인되지 않음"이라고 쓰세요.
 - 투자 판단에 유용한 순서로 재구성하세요: 한눈 요약, 실적/수익성, 재무안정성/현금흐름, 사업부/제품, 리스크, 다음 체크포인트.
-- 그래픽화는 텍스트 막대, 신호등 카드, 체크리스트처럼 웹에서 바로 렌더링하기 좋은 형태로 만드세요.
+- 신호등 카드와 체크리스트, 표처럼 웹에서 바로 렌더링하기 좋은 형태로 만드세요.
+- 핵심 지표의 직전 대비 변화는 summary_md에 텍스트 막대(█ 등)로 그리지 말고, 반드시
+  별도의 metric_trends 배열로만 제공하세요. 화면에서 막대 그래프로 렌더링됩니다.
 - 반드시 한국어로 답하세요.
 - 아래 JSON만 반환하세요. JSON 밖 설명/마크다운 코드펜스는 쓰지 마세요.
 
 반환 JSON 스키마:
 {{
-  "summary_md": "마크다운 본문. 표와 짧은 막대 그래프를 포함.",
+  "summary_md": "마크다운 본문. 표와 산문 위주. 텍스트 막대 그래프는 넣지 마세요.",
   "cards": [
     {{"label": "핵심 항목", "value": "짧은 값", "tone": "good|watch|bad|neutral", "detail": "한 줄 해석"}}
+  ],
+  "metric_trends": [
+    {{"label": "영업이익률", "unit": "%", "note": "한 줄 코멘트(선택)",
+      "before": {{"label": "2025 연간", "value": 13.1}},
+      "after": {{"label": "2026 1분기", "value": 42.8}}}}
   ],
   "watch_items": ["확인해야 할 항목"],
   "comparison_notes": ["전/이전 보고서 대비 확인 사항"],
   "source_limits": "사용한 원문 범위와 한계"
 }}
+
+metric_trends 작성 규칙:
+- 투자 판단에 중요한 지표 2~5개의 직전 대비 변화만 담으세요(영업이익률·매출·핵심 사업부 비중 등).
+- value 는 단위 기호 없이 숫자만 쓰고, 단위는 unit 에 따로 쓰세요(예: "%", "조", "억").
+- before/after 의 label 에는 비교 시점을 쓰세요(예: "2025 연간", "2026 1분기").
 
 {financial_context}
 
@@ -362,6 +374,51 @@ def _strip_json_fence(text: str) -> str:
     return text
 
 
+def _coerce_number(value: Any) -> float | None:
+    """LLM이 숫자 또는 '13.1%'/'333.6조' 같은 문자열로 줄 수 있어 첫 수치를 뽑는다."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        m = re.search(r"-?\d[\d,]*(?:\.\d+)?", value)
+        if m:
+            try:
+                return float(m.group(0).replace(",", ""))
+            except ValueError:
+                return None
+    return None
+
+
+def _normalize_metric_trends(raw: Any) -> list[dict[str, Any]]:
+    """metric_trends를 {label, unit, note, before:{label,value}, after:{label,value}} 로 정규화.
+
+    value 가 None/문자열이어도 숫자를 뽑고, before/after 둘 다 값이 없으면 버린다.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        before = item.get("before") if isinstance(item.get("before"), dict) else {}
+        after = item.get("after") if isinstance(item.get("after"), dict) else {}
+        bv = _coerce_number(before.get("value"))
+        av = _coerce_number(after.get("value"))
+        if bv is None and av is None:
+            continue
+        out.append({
+            "label": str(item.get("label") or "")[:40],
+            "unit": str(item.get("unit") or "")[:8],
+            "note": str(item.get("note") or "")[:80],
+            "before": {"label": str(before.get("label") or "")[:24], "value": bv},
+            "after": {"label": str(after.get("label") or "")[:24], "value": av},
+        })
+        if len(out) >= 8:
+            break
+    return out
+
+
 def _normalize_review(raw_text: str) -> dict[str, Any]:
     try:
         parsed = json.loads(_strip_json_fence(raw_text))
@@ -376,6 +433,7 @@ def _normalize_review(raw_text: str) -> dict[str, Any]:
     parsed.setdefault("source_limits", "")
     if not isinstance(parsed["cards"], list):
         parsed["cards"] = []
+    parsed["metric_trends"] = _normalize_metric_trends(parsed.get("metric_trends"))
     return parsed
 
 

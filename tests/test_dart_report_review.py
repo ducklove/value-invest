@@ -25,6 +25,39 @@ class DartReportReviewHelperTests(unittest.TestCase):
         self.assertEqual(parsed["summary_md"], "# 요약")
         self.assertEqual(parsed["cards"][0]["tone"], "good")
 
+    def test_coerce_number_from_value_or_string(self):
+        self.assertEqual(dart_report_review._coerce_number(13.1), 13.1)
+        self.assertEqual(dart_report_review._coerce_number("42.8%"), 42.8)
+        self.assertEqual(dart_report_review._coerce_number("333.6조"), 333.6)
+        self.assertEqual(dart_report_review._coerce_number("1,665"), 1665.0)
+        self.assertIsNone(dart_report_review._coerce_number("N/A"))
+        self.assertIsNone(dart_report_review._coerce_number(True))
+
+    def test_normalize_metric_trends_parses_and_filters(self):
+        raw = {
+            "summary_md": "# 요약",
+            "metric_trends": [
+                {"label": "영업이익률", "unit": "%", "note": "약 3.3배",
+                 "before": {"label": "2025 연간", "value": "13.1%"},
+                 "after": {"label": "2026 1분기", "value": 42.8}},
+                {"label": "매출", "before": {"value": "333.6조"}, "after": {"value": "133.9조"}},
+                {"label": "빈 항목", "before": {}, "after": {}},  # 값 없음 → 제외
+                "not a dict",  # 비dict → 무시
+            ],
+        }
+        parsed = dart_report_review._normalize_review(json.dumps(raw))
+        trends = parsed["metric_trends"]
+        self.assertEqual(len(trends), 2)  # 빈 항목/문자열 제거
+        self.assertEqual(trends[0]["label"], "영업이익률")
+        self.assertEqual(trends[0]["before"]["value"], 13.1)   # "13.1%" → 13.1
+        self.assertEqual(trends[0]["after"]["value"], 42.8)
+        self.assertEqual(trends[0]["unit"], "%")
+        self.assertEqual(trends[1]["before"]["value"], 333.6)
+
+    def test_normalize_review_defaults_metric_trends_to_list(self):
+        parsed = dart_report_review._normalize_review('{"summary_md":"x"}')
+        self.assertEqual(parsed["metric_trends"], [])
+
     def test_zip_document_text_extracts_html_body(self):
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:

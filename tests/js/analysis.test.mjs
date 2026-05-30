@@ -66,3 +66,43 @@ test("_externalValuationCards returns [] when no links", () => {
   assert.deepEqual([...w._externalValuationCards(null)], []);
   assert.deepEqual([...w._externalValuationCards({})], []);
 });
+
+test("_stripBlockBars removes unicode block-bar glyphs but keeps text", () => {
+  const w = load();
+  const out = w._stripBlockBars("영업이익률: ████ 13.1% → ████████ 42.8% (증가)");
+  assert.ok(!/[▀-▟]/.test(out));
+  assert.match(out, /13\.1%/);
+  assert.match(out, /42\.8%/);
+});
+
+test("_renderMetricTrends draws before/after bars normalized to the larger value", () => {
+  const w = load();
+  const html = w._renderMetricTrends([
+    { label: "영업이익률", unit: "%", note: "약 3.3배 증가",
+      before: { label: "2025 연간", value: 13.1 },
+      after: { label: "2026 1분기", value: 42.8 } },
+    { label: "<b>x</b>", unit: "조",
+      before: { label: "전", value: 333.6 },
+      after: { label: "후", value: 133.9 } },
+  ]);
+  const root = w.document.getElementById("coverageNote");
+  root.innerHTML = html;
+  const items = root.querySelectorAll(".mt-item");
+  assert.equal(items.length, 2);
+  assert.match(root.innerHTML, /핵심 지표 변화/);
+  assert.match(root.innerHTML, /약 3\.3배 증가/);
+  // after(42.8) is the larger of the pair → its fill is 100%
+  const fills = items[0].querySelectorAll(".mt-fill");
+  assert.equal(fills[1].style.width, "100%");
+  // before(13.1)/42.8 ≈ 30.6%
+  assert.match(fills[0].style.width, /^30\./);
+  // unit appended to value, hostile label escaped
+  assert.match(items[0].innerHTML, /42\.8%/);
+  assert.ok(!root.innerHTML.includes("<b>x</b>"));
+});
+
+test("_renderMetricTrends returns empty string when no trends", () => {
+  const w = load();
+  assert.equal(w._renderMetricTrends([]), "");
+  assert.equal(w._renderMetricTrends(null), "");
+});
