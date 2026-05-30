@@ -409,6 +409,24 @@ def infer_yf_currency(ticker: str) -> str:
     return "USD"
 
 
+def yfinance_direct_ticker(code: str) -> str:
+    """Normalize a portfolio code into a direct yfinance ticker.
+
+    Yahoo uses dash class shares (BRK-B / BF-B) but keeps exchange suffixes such
+    as ``7203.T`` unchanged. Slashes become dashes.
+    """
+    ticker = (code or "").strip()
+    if "/" in ticker:
+        ticker = ticker.replace("/", "-")
+    if "." in ticker:
+        prefix, suffix = ticker.rsplit(".", 1)
+        # Yahoo uses BRK-B/BF-B for US class shares, but keeps exchange
+        # suffixes such as 7203.T unchanged.
+        if len(suffix) == 1 and prefix.replace(".", "").isalpha():
+            ticker = f"{prefix}-{suffix}"
+    return ticker
+
+
 async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = "1d") -> dict:
     ticker = (ticker or "").strip()
     if not ticker:

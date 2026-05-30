@@ -47,17 +47,10 @@ from services.portfolio.targets import (
     parse_target_input as _parse_target_input,
 )
 from services.portfolio.target_metrics import supplement_target_metrics as _supplement_target_metrics
+from services.portfolio import benchmarks
 from services.portfolio.benchmarks import (
     BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
-    BENCHMARK_FETCH_TIMEOUT as _BENCHMARK_FETCH_TIMEOUT,
-    BENCHMARK_TO_INDICATOR as _BENCHMARK_TO_INDICATOR,
     BENCHMARK_YF_TICKER as _BENCHMARK_YF_TICKER,
-    BenchmarkQuoteCache,
-    benchmark_name as _benchmark_name,
-    benchmark_name_fast as _benchmark_name_fast,
-    default_benchmark_for_code as _default_benchmark_for_code,
-    fast_default_benchmark_for_code as _fast_default_benchmark_for_code,
-    indicator_to_change_pct as _indicator_to_change_pct,
 )
 from services.portfolio.dividends import (
     due_dividend_warmup_targets as _due_dividend_warmup_targets,
@@ -156,82 +149,42 @@ QUOTE_RATE_INTERVAL = 0.22  # ~4.5 req/s, stays under 5/s limit
 
 
 # --- Benchmark ---
+#
+# Implementation lives in services.portfolio.benchmarks; the router keeps thin
+# delegators (and cache aliases pointing at the service's shared objects) so its
+# endpoints and the tests that patch ``routes.portfolio._<fn>`` keep working.
 
-_market_type_cache = MemoryTTLCache("portfolio.market_type")  # stock_code -> "KOSPI" | "KOSDAQ"
+_market_type_cache = benchmarks.market_type_cache
+_benchmark_name_cache = benchmarks.benchmark_name_cache
+_benchmark_quote_cache = benchmarks.benchmark_quote_cache
 
 
 async def _detect_market_type(code: str) -> str:
-    """Detect if a Korean stock is KOSPI or KOSDAQ via Naver Finance."""
-    if code in _market_type_cache:
-        return _market_type_cache[code]
-    try:
-        async with foreign._NAVER_SEM:
-            async with httpx.AsyncClient(timeout=foreign._NAVER_HTTP_TIMEOUT) as client:
-                resp = await client.get(
-                    f"https://finance.naver.com/item/main.naver?code={code}",
-                    headers={"User-Agent": "Mozilla/5.0"},
-                    follow_redirects=True,
-                )
-        if "코스닥" in resp.text[:30000]:
-            _market_type_cache.set(code, "KOSDAQ")
-        else:
-            _market_type_cache.set(code, "KOSPI")
-    except Exception:
-        _market_type_cache.set(code, "KOSPI")
-    return _market_type_cache[code]
+    return await benchmarks.detect_market_type(code)
 
 
 async def _prefetch_market_types(codes: list[str]):
-    """Bulk-detect market types in parallel for codes not yet cached."""
-    uncached = [c for c in codes if c not in _market_type_cache and _is_korean_stock(c) and not _is_preferred_stock(c)]
-    if not uncached:
-        return
-    async def _detect(code):
-        await _detect_market_type(code)
-    await asyncio.gather(*[_detect(c) for c in uncached])
+    return await benchmarks.prefetch_market_types(codes)
 
 
 async def _resolve_default_benchmark(code: str) -> str:
-    """Return the default benchmark code for a stock."""
-    market_type = await _detect_market_type(code) if _is_korean_stock(code) and not _is_preferred_stock(code) else None
-    return _default_benchmark_for_code(code, market_type=market_type)
+    return await benchmarks.resolve_default_benchmark(code)
 
 
 def _resolve_default_benchmark_fast(code: str) -> str:
-    """Cheap benchmark fallback for first-paint portfolio loading."""
-    return _fast_default_benchmark_for_code(code, cached_market_type=_market_type_cache.get(code))
-
-_benchmark_name_cache = MemoryTTLCache("portfolio.benchmark_name")
+    return benchmarks.resolve_default_benchmark_fast(code)
 
 
 async def _resolve_benchmark_name(code: str) -> str:
-    """Resolve a benchmark code to a human-readable name."""
-    builtin_name = _benchmark_name(code)
-    if builtin_name:
-        return builtin_name
-    if code in _benchmark_name_cache:
-        return _benchmark_name_cache[code]
-    # For codes with dots/slashes, try dash variant first (faster for yfinance)
-    alt = code.replace(".", "-").replace("/", "-") if not _is_korean_stock(code) else None
-    if alt and alt != code:
-        name = await foreign.yfinance_resolve_name(alt)
-        if not name:
-            name = await foreign.resolve_name(code)
-    else:
-        name = await foreign.resolve_name(code)
-    result = name or code
-    _benchmark_name_cache.set(code, result)
-    return result
-
-_benchmark_quote_cache = BenchmarkQuoteCache()
+    return await benchmarks.resolve_benchmark_name(code)
 
 
 def _cached_benchmark_quote(benchmark_code: str, *, allow_stale: bool = True) -> dict | None:
-    return _benchmark_quote_cache.get(benchmark_code, allow_stale=allow_stale)
+    return benchmarks.cached_benchmark_quote(benchmark_code, allow_stale=allow_stale)
 
 
 def _resolve_benchmark_name_fast(code: str, items: list[dict] | None = None) -> str:
-    return _benchmark_name_fast(code, items, _benchmark_name_cache)
+    return benchmarks.resolve_benchmark_name_fast(code, items)
 
 
 def _resolve_benchmark_name_from_code_table(
@@ -239,62 +192,11 @@ def _resolve_benchmark_name_from_code_table(
     items: list[dict] | None,
     corp_code_table: dict[str, dict] | None,
 ) -> str:
-    name = _resolve_benchmark_name_fast(code, items)
-    if name != code:
-        return name
-    if _is_korean_stock(code):
-        row = (corp_code_table or {}).get(code) or {}
-        corp_name = row.get("corp_name")
-        if corp_name:
-            _benchmark_name_cache.set(code, corp_name)
-            return corp_name
-    return name
+    return benchmarks.resolve_benchmark_name_from_code_table(code, items, corp_code_table)
 
 
 async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
-    """Fetch a benchmark quote (cached). Reuses market_indicators for shared sources."""
-    cached = _cached_benchmark_quote(benchmark_code, allow_stale=False)
-    if cached is not None:
-        return cached
-
-    indicator_code = _BENCHMARK_TO_INDICATOR.get(benchmark_code)
-    if indicator_code:
-        try:
-            data = await asyncio.wait_for(
-                market_indicators.fetch_indicators([indicator_code]),
-                timeout=_BENCHMARK_FETCH_TIMEOUT,
-            )
-            pct = _indicator_to_change_pct(data.get(indicator_code) or {})
-            q = {"change_pct": pct} if pct is not None else {}
-        except Exception as e:
-            logger.warning("Indicator-based benchmark fetch failed for %s: %s", benchmark_code, e)
-            return _cached_benchmark_quote(benchmark_code, allow_stale=True) or {}
-    elif benchmark_code.startswith("FX_"):
-        daily = await fx.fetch_fx_daily_change(benchmark_code)
-        q = {"change_pct": daily.get("change_pct")} if daily and daily.get("change_pct") is not None else {}
-    else:
-        # It's a stock code (e.g., common stock for preferred)
-        # For codes with dots/slashes, try dash variant directly first (faster)
-        preset_ticker = _BENCHMARK_YF_TICKER.get(benchmark_code)
-        if preset_ticker:
-            stock_q = await foreign.yfinance_fetch_quote_fast(preset_ticker)
-        else:
-            alt = _yfinance_direct_ticker(benchmark_code) if not _is_korean_stock(benchmark_code) else None
-            stock_q = None
-        if not preset_ticker and alt and alt != benchmark_code:
-            stock_q = await foreign.yfinance_fetch_quote_fast(alt)
-            if not stock_q or not stock_q.get("change_pct"):
-                stock_q = await _fetch_quote(benchmark_code)
-        elif not preset_ticker:
-            stock_q = await _fetch_quote(benchmark_code)
-        q = {"change_pct": stock_q.get("change_pct")} if stock_q else {}
-
-    if not q:
-        stale = _cached_benchmark_quote(benchmark_code, allow_stale=True)
-        if stale:
-            return stale
-    _benchmark_quote_cache.set(benchmark_code, q)
-    return q
+    return await benchmarks.fetch_benchmark_quote(benchmark_code)
 
 
 _ASSET_HISTORY_CACHE_TTL = portfolio_history.ASSET_HISTORY_CACHE_TTL
@@ -414,19 +316,6 @@ _INSIGHT_FX_TICKER = {
     "CHF": "CHFKRW=X",
 }
 
-def _yfinance_direct_ticker(code: str) -> str:
-    ticker = (code or "").strip()
-    if "/" in ticker:
-        ticker = ticker.replace("/", "-")
-    if "." in ticker:
-        prefix, suffix = ticker.rsplit(".", 1)
-        # Yahoo uses BRK-B/BF-B for US class shares, but keeps exchange
-        # suffixes such as 7203.T unchanged.
-        if len(suffix) == 1 and prefix.replace(".", "").isalpha():
-            ticker = f"{prefix}-{suffix}"
-    return ticker
-
-
 async def _insight_fx_rate(currency: str | None) -> float:
     currency = (currency or "KRW").upper()
     if currency == "KRW":
@@ -487,7 +376,7 @@ async def _asset_history_for_insight(code: str, item: dict) -> dict:
     if static:
         return await _download_yfinance_history(static["ticker"])
     await foreign.ensure_ticker_map()
-    ticker = foreign._ticker_map.get(code) or _yfinance_direct_ticker(code)
+    ticker = foreign._ticker_map.get(code) or foreign.yfinance_direct_ticker(code)
     return await _download_yfinance_history(ticker)
 
 
@@ -502,7 +391,7 @@ async def _benchmark_history_for_insight(benchmark_code: str | None) -> list[dic
         return local_rows
     ticker = _BENCHMARK_YF_TICKER.get(benchmark_code)
     if not ticker:
-        ticker = _yfinance_direct_ticker(benchmark_code)
+        ticker = foreign.yfinance_direct_ticker(benchmark_code)
     if not ticker:
         return []
     payload = await _download_yfinance_history(ticker)
