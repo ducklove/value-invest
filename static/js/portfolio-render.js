@@ -954,7 +954,7 @@ const _BENCHMARK_PRESETS = [
 
 function fmtBenchmarkPct(benchmarkCode) {
   if (!benchmarkCode) return '<span class="pf-benchmark-val">-</span>';
-  const bq = pfBenchmarkQuotes[benchmarkCode];
+  const bq = PfStore.benchmarkQuotes[benchmarkCode];
   // For stock benchmarks (e.g., common stock for preferred), check regular quote cache
   if (!bq && benchmarkCode.length === 6) {
     const item = portfolioItems.find(i => i.stock_code === benchmarkCode);
@@ -976,7 +976,7 @@ function benchmarkName(code) {
   if (!code) return '';
   let name;
   // Check if benchmark-quotes API returned a name
-  const bq = pfBenchmarkQuotes[code];
+  const bq = PfStore.benchmarkQuotes[code];
   if (bq && bq.name && bq.name !== code) name = bq.name;
   else {
     const preset = _BENCHMARK_PRESETS.find(p => p.code === code);

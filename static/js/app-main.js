@@ -94,7 +94,7 @@ QuoteManager.onQuote = function(code, q) {
   }
   const isBenchmark = portfolioItems.some(i => i.benchmark_code === code);
   if (isBenchmark && q.change_pct != null && q._stale !== true) {
-    pfBenchmarkQuotes[code] = { ...(pfBenchmarkQuotes[code] || {}), change_pct: q.change_pct };
+    PfStore.benchmarkQuotes[code] = { ...(PfStore.benchmarkQuotes[code] || {}), change_pct: q.change_pct };
     _pfBenchmarkQueuedCodes.add(code);
   }
   if (pfQuoteAccepted || (isBenchmark && q._stale !== true)) {

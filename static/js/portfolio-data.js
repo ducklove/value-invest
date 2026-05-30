@@ -74,7 +74,7 @@ async function loadPortfolio({ force = false } = {}) {
     try {
       const cached = JSON.parse(localStorage.getItem('pfBenchmarkNames') || '{}');
       for (const [k, v] of Object.entries(cached)) {
-        pfBenchmarkQuotes[k] = { ...(pfBenchmarkQuotes[k] || {}), name: v };
+        PfStore.benchmarkQuotes[k] = { ...(PfStore.benchmarkQuotes[k] || {}), name: v };
       }
     } catch (e) { console.warn(e); }
     // Refresh the 22:00 settlement baseline before the fresh portfolio render.
@@ -104,7 +104,7 @@ async function loadPortfolio({ force = false } = {}) {
       for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);
       // Save names to localStorage
       const names = {};
-      for (const [k, v] of Object.entries(pfBenchmarkQuotes)) { if (v.name) names[k] = v.name; }
+      for (const [k, v] of Object.entries(PfStore.benchmarkQuotes)) { if (v.name) names[k] = v.name; }
       try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch (e) { console.warn(e); }
       renderPortfolio();
     }).catch(() => {});

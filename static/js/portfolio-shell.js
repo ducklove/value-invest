@@ -17,7 +17,7 @@ let pfPendingManualOrderCodes = null;
 let pfManualOrderRevision = 0;
 let pfManualOrderSaveInFlight = false;
 let pfManualOrderKeepTimer = null;
-let pfBenchmarkQuotes = {}; // benchmark_code -> {change_pct, name}
+// Benchmark quotes now live in PfStore.benchmarkQuotes (portfolio-store.js).
 let pfMonthEndSnap = null; // {total_value, nav, fx_usdkrw, ...} at end of previous month
 let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
 let pfYearStartSnap = null; // {date, total_value, fx_usdkrw, ...} for first snapshot of this year
@@ -38,7 +38,7 @@ function pfBenchmarkQuoteHasChange(q) {
 
 function pfMergeBenchmarkQuote(code, incoming) {
   if (!code || !incoming || typeof incoming !== 'object') return false;
-  const current = pfBenchmarkQuotes[code] || {};
+  const current = PfStore.benchmarkQuotes[code] || {};
   const merged = { ...current };
   const incomingHasChange = pfBenchmarkQuoteHasChange(incoming);
   const currentHasChange = pfBenchmarkQuoteHasChange(current);
@@ -50,7 +50,7 @@ function pfMergeBenchmarkQuote(code, incoming) {
     merged[key] = value;
   }
 
-  pfBenchmarkQuotes[code] = merged;
+  PfStore.benchmarkQuotes[code] = merged;
   return true;
 }
 
