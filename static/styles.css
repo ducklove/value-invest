@@ -1206,10 +1206,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   text-align: left;
   vertical-align: middle;
 }
-/* 첫 컬럼(구분/부문)은 좌측, 나머지 숫자 컬럼은 우측 + 자릿수 폭 균일로 정렬을 맞춘다. */
+/* 첫 컬럼(구분/부문)은 좌측, 나머지 숫자 컬럼은 우측 + 자릿수 폭 균일로 정렬을 맞춘다.
+   marked 가 표 정렬 구문을 인라인 align 으로 넣어 셀마다 어긋나는 것을 막기 위해
+   !important 로 강제한다. */
+.filing-review-body th:first-child,
+.filing-review-body td:first-child { text-align: left !important; }
 .filing-review-body th:not(:first-child),
 .filing-review-body td:not(:first-child) {
-  text-align: right;
+  text-align: right !important;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
