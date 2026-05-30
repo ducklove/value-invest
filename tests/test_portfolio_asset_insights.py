@@ -3,15 +3,16 @@ from unittest.mock import AsyncMock, patch
 
 from routes import portfolio as pf
 from services.portfolio import foreign
+from services.portfolio import insights
 
 
 class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        pf._asset_history_cache.clear()
+        insights.asset_history_cache.clear()
         foreign._failed_yf_cache.clear()
 
     async def asyncTearDown(self):
-        pf._asset_history_cache.clear()
+        insights.asset_history_cache.clear()
         foreign._failed_yf_cache.clear()
 
     async def test_static_foreign_etfs_skip_ticker_discovery(self):
@@ -73,7 +74,7 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])), \
              patch.object(pf.kis_proxy_client, "get_history", new=fake_get_history):
-            payload = await pf._asset_history_for_insight("005930", {"currency": "KRW"})
+            payload = await insights.asset_history_for_insight("005930", {"currency": "KRW"})
 
         self.assertEqual(payload["currency"], "KRW")
         self.assertEqual(
@@ -91,8 +92,8 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
         rows = [{"date": "2025-01-02", "close": 70000.0}]
         downloader = AsyncMock(return_value={"rows": rows, "currency": "KRW"})
 
-        with patch.object(pf, "_download_korean_history", new=downloader):
-            result = await pf._benchmark_history_for_insight("005930")
+        with patch.object(insights, "download_korean_history", new=downloader):
+            result = await insights.benchmark_history_for_insight("005930")
 
         self.assertEqual(result, rows)
         downloader.assert_awaited_once_with("005930")
@@ -109,15 +110,15 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])), \
              patch.object(pf.kis_proxy_client, "get_history", new=flaky_get_history):
-            first = await pf._asset_history_for_insight("005930", {"currency": "KRW"})
-            second = await pf._asset_history_for_insight("005930", {"currency": "KRW"})
+            first = await insights.asset_history_for_insight("005930", {"currency": "KRW"})
+            second = await insights.asset_history_for_insight("005930", {"currency": "KRW"})
 
         self.assertEqual(first["rows"], [])
         self.assertEqual(second["rows"], [{"date": "2025-01-02", "close": 70000.0}])
         self.assertEqual(calls, 2)
 
     async def test_korean_stock_macro_codes_include_domestic_market(self):
-        codes = pf._macro_codes_for_asset({"assetClass": "korean_stock"}, "KRW")
+        codes = insights.macro_codes_for_asset({"assetClass": "korean_stock"}, "KRW")
 
         self.assertEqual(codes, ["USD_KRW", "KOSPI", "KOSDAQ", "KR3Y"])
 
@@ -136,7 +137,7 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch.object(pf.integrations, "build_public_integrations", return_value=config):
-            holding = pf._holding_context_for_asset("002380")
+            holding = insights.holding_context_for_asset("002380")
 
         self.assertEqual(holding["code"], "002380")
         self.assertEqual(holding["subsidiaryCount"], 1)

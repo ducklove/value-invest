@@ -153,7 +153,7 @@
         <span class="box">dividends</span><span class="box">history</span><span class="box">targets</span>
         <span class="box">target_metrics</span><span class="box">time_windows</span><span class="box">valuation</span>
         <span class="box">runtime_quotes (seam)</span>
-        <span class="box new">currencies ✦</span><span class="box new">fx ✦</span><span class="box new">special_assets ✦</span><span class="box new">foreign ✦</span><span class="box new">quote_service ✦</span>
+        <span class="box new">currencies ✦</span><span class="box new">fx ✦</span><span class="box new">special_assets ✦</span><span class="box new">foreign ✦</span><span class="box new">quote_service ✦</span><span class="box new">insights ✦</span>
       </div>
     </div>
     <div class="layer">
@@ -204,7 +204,7 @@
     <tbody>
       <tr><td>코어</td><td><code>core/app_factory · config · lifespan · runtime · static_routes</code></td><td>앱 생성, 환경 설정 단일 로딩, 라이프사이클, watchdog, SPA 서빙</td></tr>
       <tr><td>인증</td><td><code>auth_service · deps · routes/auth</code></td><td>Google OAuth 검증, 세션 토큰 해시/쿠키, 현재 사용자 조회 (설정은 호출 시점 lazy 조회)</td></tr>
-      <tr><td>포트폴리오 API</td><td><code>routes/portfolio.py</code> <span class="badge b-prog">분해중</span></td><td>포트폴리오 CRUD, 시세 배치, 벤치마크, 현금흐름, AI 분석 — 해외 시세+이름해석은 <code>foreign</code>으로 추출 완료, 라우터엔 디스패처·엔드포인트만 잔존</td></tr>
+      <tr><td>포트폴리오 API</td><td><code>routes/portfolio.py</code> <span class="badge b-prog">분해중</span></td><td>포트폴리오 CRUD, 현금흐름, 목표가, 엔드포인트 — 해외 시세/이름해석(<code>foreign</code>)·현재가(<code>quote_service</code>)·벤치마크(<code>benchmarks</code>)·AI 인사이트(<code>insights</code>) 추출 완료. 2,706→1,741줄</td></tr>
       <tr><td>실시간 시세</td><td><code>routes/ws_quotes · services/stock_quotes · kis_ws_manager · kis_key_manager</code></td><td>브라우저 WS, KIS WS 연결/키 슬롯, 시세 단일 진입점·캐시</td></tr>
       <tr><td>시세 소스</td><td><code>stock_price · kis_proxy_client · close_price_client · special_assets · fx</code></td><td>국내 KIS REST + 네이버 벌크, 일별 종가, 금/크립토, 환율 변환</td></tr>
       <tr><td>분석/AI</td><td><code>routes/analysis · services/ai_client · ai_config · asset_insights · market_indicators</code></td><td>종목 분석, OpenRouter 호출(비밀 마스킹), 기능별 모델, 자산 인사이트</td></tr>
@@ -226,7 +226,8 @@
     <div class="card"><h4>fx ✦</h4><p>환율 조회/일별변동/원화 변환 + 캐시</p></div>
     <div class="card"><h4>special_assets ✦</h4><p>KRX 금현물(네이버), 크립토(Upbit) 시세</p></div>
     <div class="card"><h4>foreign ✦</h4><p>해외 시세(KIS 해외→yfinance→네이버 world), 이름/Reuters/ticker 해석, ticker map, yfinance 음성 캐시</p></div>
-    <div class="card"><h4>benchmarks</h4><p>기본 벤치마크, 표시명, 지표 등락률 변환, quote 캐시</p></div>
+    <div class="card"><h4>benchmarks ✦</h4><p>기본 벤치마크/표시명/지표 등락률 변환, quote 캐시 + 시장구분(KOSPI/KOSDAQ) 감지, 벤치마크명/quote 조회 orchestration</p></div>
+    <div class="card"><h4>insights ✦</h4><p>자산 인사이트 orchestration: 종목/벤치마크 히스토리, 매크로 지표, 인사이트 FX, 밸류에이션, 금괴리/보유맥락, 백그라운드 워밍업</p></div>
     <div class="card"><h4>dividends</h4><p>배당 워밍업 대상 선정, 우선주-본주 동시 예열, TTL/중복 방지</p></div>
     <div class="card"><h4>history</h4><p>NAV/평가금액/비중 추이 조회, Yahoo 차트</p></div>
     <div class="card"><h4>targets · target_metrics</h4><p>목표가 수식 평가, 메트릭 보강</p></div>
@@ -296,8 +297,11 @@
       <tr><td><span class="badge b-done">완료</span></td><td>해외 시세 음성 캐시 TTL화 (특정 종목 영구 미표시 버그 수정)</td><td><code>6a9cbaa3</code></td></tr>
       <tr><td><span class="badge b-done">완료</span></td><td>FX/통화 분리 → <code>fx.py · currencies.py</code></td><td><code>0721b2f5</code></td></tr>
       <tr><td><span class="badge b-done">완료</span></td><td>특수자산(금/크립토) 시세 분리 → <code>special_assets.py</code></td><td><code>703bead1</code></td></tr>
-      <tr><td><span class="badge b-done">완료</span></td><td>해외 시세+이름해석 클러스터(~21함수) → <code>foreign.py</code> + 테스트 patch 갱신</td><td class="muted">이번 커밋</td></tr>
-      <tr><td><span class="badge b-done">완료</span></td><td>runtime_quotes seam 정상화 → <code>quote_service.py</code> (라우터 역import 제거, provider/디스패처를 service로 이동)</td><td class="muted">이번 커밋</td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>해외 시세+이름해석 클러스터(~21함수) → <code>foreign.py</code> + 테스트 patch 갱신</td><td><code>7fc8918e</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>DART AI 리뷰 깨짐 수정 (truncation 캐시 오염 + self-heal)</td><td><code>e7c0066e</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>runtime_quotes seam 정상화 → <code>quote_service.py</code> (라우터 역import 제거, provider/디스패처를 service로 이동)</td><td><code>51e230b7</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>벤치마크 클러스터 → <code>benchmarks.py</code> (시장구분/기본벤치마크/표시명/quote orchestration)</td><td><code>96a82c72</code></td></tr>
+      <tr><td><span class="badge b-done">완료</span></td><td>AI 인사이트 클러스터 → <code>insights.py</code> + 테스트 patch 갱신</td><td class="muted">이번 커밋</td></tr>
     </tbody>
   </table>
   <p class="muted">모든 완료 항목은 전체 테스트 통과(527개) 후 master 배포됨. 동작 보존을 원칙으로 단계마다 검증.</p>
@@ -306,7 +310,7 @@
 <section id="debt">
   <h2><span class="n">10</span> 남은 기술 부채 · 다음 단계</h2>
   <div class="grid cards">
-    <div class="card"><h4><span class="badge b-done">2b</span> 해외 시세 클러스터 분리</h4><p>라우터에서 가장 큰 덩어리를 <code>foreign.py</code>로 추출 완료. 테스트 3개 파일의 내부 호출 patch 동반 갱신. 이어서 runtime_quotes seam도 <code>quote_service.py</code>로 정상화 완료.</p></div>
+    <div class="card"><h4><span class="badge b-done">2b</span> 포트폴리오 라우터 분해</h4><p><code>foreign</code>(해외 시세/이름) → <code>quote_service</code>(현재가 seam) → <code>benchmarks</code>(벤치마크) → <code>insights</code>(AI 인사이트)까지 추출 완료. 라우터 2,706→1,741줄. 동작 보존, 테스트 동반 갱신.</p></div>
     <div class="card"><h4><span class="badge b-plan">3</span> cache.py repository 분리</h4><p>3,900줄에 스키마/마이그레이션/12+ repository/비즈니스 규칙 혼재. 버전드 마이그레이션 체계로 교체.</p></div>
     <div class="card"><h4><span class="badge b-plan">4</span> 프론트 store 도입</h4><p>전역 변수·로드 순서 의존 → 단일 namespace/store. 렌더는 store snapshot 기반.</p></div>
     <div class="card"><h4><span class="badge b-debt">잔여</span> 효율</h4><p>tick 핫패스 전역 인덱스화, <code>get_portfolio</code> 직렬 await 병렬화.</p></div>

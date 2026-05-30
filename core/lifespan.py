@@ -32,7 +32,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     import kis_proxy_client
     import kis_ws_manager
     import observability
-    from routes import portfolio as portfolio_routes
+    from services.portfolio import insights as portfolio_insights
 
     kis_key_manager.load_keys()
 
@@ -65,7 +65,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     insight_warmup_task = None
     if os.environ.get("PORTFOLIO_INSIGHT_STARTUP_WARMUP", "0") == "1":
         insight_warmup_task = asyncio.create_task(
-            portfolio_routes.warm_asset_insight_common(
+            portfolio_insights.warm_asset_insight_common(
                 initial_delay_seconds=float(os.environ.get("PORTFOLIO_INSIGHT_WARMUP_DELAY_S", "90"))
             )
         )
