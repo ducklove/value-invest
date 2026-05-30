@@ -1115,212 +1115,6 @@ async def load_corp_code_table(*, force: bool = False) -> dict[str, dict[str, st
     return _corp_code_table
 
 
-async def save_financial_data(stock_code: str, data: list[dict]):
-    db = await get_db()
-    await db.executemany(
-        "INSERT OR REPLACE INTO financial_data "
-        "(stock_code, year, report_date, revenue, operating_profit, net_income, total_assets, total_liabilities, total_equity) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (
-                stock_code,
-                d["year"],
-                d.get("report_date"),
-                d.get("revenue"),
-                d.get("operating_profit"),
-                d.get("net_income"),
-                d.get("total_assets"),
-                d.get("total_liabilities"),
-                d.get("total_equity"),
-            )
-            for d in data
-        ],
-    )
-    await db.commit()
-
-
-async def get_financial_data(stock_code: str) -> list[dict]:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT * FROM financial_data WHERE stock_code = ? ORDER BY year",
-        (stock_code,),
-    )
-    rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
-
-
-async def save_market_data(stock_code: str, data: list[dict]):
-    db = await get_db()
-    await db.executemany(
-        "INSERT OR REPLACE INTO market_data "
-        "(stock_code, year, close_price, per, pbr, eps, bps, dividend_per_share, dividend_yield, market_cap) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (
-                stock_code,
-                d["year"],
-                d.get("close_price"),
-                d.get("per"),
-                d.get("pbr"),
-                d.get("eps"),
-                d.get("bps"),
-                d.get("dividend_per_share"),
-                d.get("dividend_yield"),
-                d.get("market_cap"),
-            )
-            for d in data
-        ],
-    )
-    await db.commit()
-
-
-async def upsert_market_dividends(stock_code: str, dividends_by_year: dict[int, float]) -> int:
-    if not dividends_by_year:
-        return 0
-    db = await get_db()
-    rows = []
-    for year, dps in dividends_by_year.items():
-        if dps is None:
-            continue
-        try:
-            rows.append((stock_code, int(year), float(dps)))
-        except (TypeError, ValueError):
-            continue
-    if not rows:
-        return 0
-
-    await db.executemany(
-        """INSERT INTO market_data (stock_code, year, dividend_per_share)
-           VALUES (?, ?, ?)
-           ON CONFLICT(stock_code, year) DO UPDATE SET
-             dividend_per_share = excluded.dividend_per_share,
-             dividend_yield = CASE
-               WHEN market_data.close_price IS NOT NULL AND market_data.close_price != 0
-                 THEN ROUND(excluded.dividend_per_share / market_data.close_price * 100, 2)
-               ELSE market_data.dividend_yield
-             END""",
-        rows,
-    )
-    await db.commit()
-    return len(rows)
-
-
-async def get_market_data(stock_code: str) -> list[dict]:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT * FROM market_data WHERE stock_code = ? ORDER BY year",
-        (stock_code,),
-    )
-    rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
-
-
-async def get_latest_dividend_years(stock_codes: list[str]) -> dict[str, int]:
-    if not stock_codes:
-        return {}
-    current_year = datetime.now().year
-    placeholders = ",".join("?" for _ in stock_codes)
-    db = await get_db()
-    cursor = await db.execute(
-        f"""SELECT stock_code, MAX(year) AS latest_year
-            FROM market_data
-            WHERE stock_code IN ({placeholders})
-              AND dividend_per_share IS NOT NULL
-              AND year < ?
-            GROUP BY stock_code""",
-        (*stock_codes, current_year),
-    )
-    return {
-        row["stock_code"]: int(row["latest_year"])
-        for row in await cursor.fetchall()
-        if row["latest_year"] is not None
-    }
-
-
-async def save_analysis_meta(stock_code: str, corp_name: str):
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT payload_json FROM analysis_meta WHERE stock_code = ?",
-        (stock_code,),
-    )
-    row = await cursor.fetchone()
-    await db.execute(
-        "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
-        (
-            stock_code,
-            corp_name,
-            datetime.now().isoformat(),
-            row["payload_json"] if row else None,
-        ),
-    )
-    await db.commit()
-
-
-async def save_analysis_snapshot(stock_code: str, corp_name: str, payload: dict):
-    db = await get_db()
-    analyzed_at = payload.get("analyzed_at") or datetime.now().isoformat()
-    snapshot = dict(payload)
-    snapshot["analyzed_at"] = analyzed_at
-    await db.execute(
-        "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
-        (
-            stock_code,
-            corp_name,
-            analyzed_at,
-            json.dumps(snapshot, ensure_ascii=False),
-        ),
-    )
-    await db.commit()
-
-
-async def get_analysis_meta(stock_code: str) -> dict | None:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT * FROM analysis_meta WHERE stock_code = ?", (stock_code,)
-    )
-    row = await cursor.fetchone()
-    return dict(row) if row else None
-
-
-async def get_analysis_snapshot(stock_code: str) -> dict | None:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT stock_code, corp_name, analyzed_at, payload_json FROM analysis_meta WHERE stock_code = ?",
-        (stock_code,),
-    )
-    row = await cursor.fetchone()
-    if not row or not row["payload_json"]:
-        return None
-    try:
-        payload = json.loads(row["payload_json"])
-    except json.JSONDecodeError:
-        return None
-
-    if not isinstance(payload, dict):
-        return None
-
-    payload.setdefault("stock_code", row["stock_code"])
-    payload.setdefault("corp_name", row["corp_name"])
-    payload.setdefault("analyzed_at", row["analyzed_at"])
-    payload["cached"] = True
-    return payload
-
-
-async def delete_analysis(stock_code: str):
-    db = await get_db()
-    await db.execute("DELETE FROM financial_data WHERE stock_code = ?", (stock_code,))
-    await db.execute("DELETE FROM market_data WHERE stock_code = ?", (stock_code,))
-    await db.execute("DELETE FROM analysis_meta WHERE stock_code = ?", (stock_code,))
-    await db.execute("DELETE FROM latest_report_cache WHERE stock_code = ?", (stock_code,))
-    await db.execute("DELETE FROM report_list_cache WHERE stock_code = ?", (stock_code,))
-    await db.execute(
-        "DELETE FROM cache_values WHERE namespace IN (?, ?) AND key = ?",
-        (CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST, stock_code),
-    )
-    await db.execute("DELETE FROM dart_report_reviews WHERE stock_code = ?", (stock_code,))
-    await db.commit()
-
-
 async def upsert_user(user: dict):
     db = await get_db()
     now = datetime.now().isoformat()
@@ -1858,4 +1652,19 @@ from repositories.insight_posts import (  # noqa: E402
     list_insight_posts,
     get_insight_post,
     delete_insight_post,
+)
+from repositories.financial import (  # noqa: E402
+    save_financial_data,
+    get_financial_data,
+    save_market_data,
+    upsert_market_dividends,
+    get_market_data,
+    get_latest_dividend_years,
+)
+from repositories.analysis import (  # noqa: E402
+    save_analysis_meta,
+    save_analysis_snapshot,
+    get_analysis_meta,
+    get_analysis_snapshot,
+    delete_analysis,
 )
