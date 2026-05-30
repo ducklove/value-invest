@@ -598,9 +598,16 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   font-size: 13px;
 }
 .md-row:last-child { border-bottom: none; }
-.md-row-label { flex: 1; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.md-row-val { font-weight: 700; font-variant-numeric: tabular-nums; }
-.md-row .md-chg { min-width: 72px; text-align: right; font-size: 12px; font-weight: 600; }
+.md-row-label { flex: 1; min-width: 0; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 값·변동을 고정폭 우측정렬 컬럼으로 둬 행마다 세로로 정렬되게 한다. */
+.md-row-val { flex: 0 0 auto; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.md-row .md-chg { flex: 0 0 auto; text-align: right; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 메인 컬럼(해외 지수)은 값이 크고 변동이 길다(예: 닛케이225 +1,636.38). */
+.md-main .md-row-val { min-width: 92px; }
+.md-main .md-row .md-chg { min-width: 140px; }
+/* 우측 레일(원자재·환율·채권·야간선물)은 폭이 좁고 값/변동이 짧다. */
+.md-rail .md-row-val { min-width: 64px; }
+.md-rail .md-row .md-chg { min-width: 104px; }
 
 /* 시장 랭킹 (movers) widget */
 .mv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
