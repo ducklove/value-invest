@@ -85,7 +85,8 @@ function trackEvent(name, params = {}) {
 <div class="main">
   <div class="header">
     <nav class="main-nav">
-      <button class="nav-btn active" data-view="analysis" onclick="switchView('analysis')">분석</button>
+      <button class="nav-btn active" data-view="investing" onclick="switchView('investing')">투자정보</button>
+      <button class="nav-btn" data-view="analysis" onclick="switchView('analysis')">종목분석</button>
       <button class="nav-btn" data-view="portfolio" onclick="switchView('portfolio')">포트폴리오</button>
       <button class="nav-btn" data-view="nps" onclick="switchView('nps')">국민연금</button>
     </nav>
@@ -98,24 +99,39 @@ function trackEvent(name, params = {}) {
     <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환">🌓</button>
   </div>
 
-  <div id="analysisView">
+  <div id="investingView">
+    <section class="market-dashboard-section">
+      <div class="md-header">
+        <div>
+          <div class="md-eyebrow">Market</div>
+          <h2>투자정보</h2>
+        </div>
+        <button class="md-refresh" id="marketDashboardRefreshBtn" type="button" onclick="loadInvestingDashboard(true)">새로고침</button>
+      </div>
+      <div class="market-dashboard" id="marketDashboard">
+        <div class="md-loading">시장 지표를 불러오는 중입니다...</div>
+      </div>
+    </section>
+
+    <section class="daily-market-section" id="dailyMarketSection">
+      <div class="daily-market-header">
+        <div>
+          <div class="daily-market-eyebrow">Market Daily</div>
+          <h2>금일 시황</h2>
+        </div>
+        <button class="daily-market-refresh" id="dailyMarketRefreshBtn" type="button" onclick="loadDailyMarketBrief(true)">새로고침</button>
+      </div>
+      <div class="daily-market-status" id="dailyMarketStatus">시황을 불러오는 중입니다...</div>
+      <div class="daily-market-body" id="dailyMarketBody"></div>
+      <div class="daily-market-meta" id="dailyMarketMeta"></div>
+    </section>
+  </div><!-- /investingView -->
+
+  <div id="analysisView" style="display:none;">
   <div class="search-container">
     <input class="search-input" id="searchInput" placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930)" autocomplete="off">
     <div class="dropdown" id="dropdown"></div>
   </div>
-
-  <section class="daily-market-section" id="dailyMarketSection">
-    <div class="daily-market-header">
-      <div>
-        <div class="daily-market-eyebrow">Market Daily</div>
-        <h2>금일 시황</h2>
-      </div>
-      <button class="daily-market-refresh" id="dailyMarketRefreshBtn" type="button" onclick="loadDailyMarketBrief(true)">새로고침</button>
-    </div>
-    <div class="daily-market-status" id="dailyMarketStatus">시황을 불러오는 중입니다...</div>
-    <div class="daily-market-body" id="dailyMarketBody"></div>
-    <div class="daily-market-meta" id="dailyMarketMeta"></div>
-  </section>
 
   <div class="company-info" id="companyInfo">
     <div class="header-row">
@@ -577,6 +593,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/auth.js" defer></script>
 <script src="./js/search.js" defer></script>
 <script src="./js/analysis.js" defer></script>
+<script src="./js/market-dashboard.js" defer></script>
 <script src="./js/portfolio-store.js" defer></script>
 <script src="./js/portfolio-shell.js" defer></script>
 <script src="./js/portfolio-data.js" defer></script>

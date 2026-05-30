@@ -542,7 +542,9 @@ def test_mobile_simple_mode_is_read_only_and_view_locked():
 
     assert 'id="pfSimpleToggle"' in html
     assert "function pfSyncMobileFixedView()" in shell
-    assert "return currentUser ? 'portfolio' : 'analysis';" in shell
+    # Logged-in mobile is pinned to the portfolio; logged-out mobile is left
+    # unpinned so visitors can switch between the public 투자정보/종목분석 tabs.
+    assert "return currentUser ? 'portfolio' : null;" in shell
     assert "function switchView(view, options = {})" in shell
     assert "view = lockedView;" in shell
     assert "pfSwitchTab('holdings')" in shell
