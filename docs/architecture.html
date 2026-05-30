@@ -311,7 +311,7 @@
   <h2><span class="n">10</span> 남은 기술 부채 · 다음 단계</h2>
   <div class="grid cards">
     <div class="card"><h4><span class="badge b-done">2b</span> 포트폴리오 라우터 분해</h4><p><code>foreign</code>(해외 시세/이름) → <code>quote_service</code>(현재가 seam) → <code>benchmarks</code>(벤치마크) → <code>insights</code>(AI 인사이트)까지 추출 완료. 라우터 2,706→1,741줄. 동작 보존, 테스트 동반 갱신.</p></div>
-    <div class="card"><h4><span class="badge b-plan">3</span> cache.py repository 분리</h4><p>3,900줄에 스키마/마이그레이션/12+ repository/비즈니스 규칙 혼재. 버전드 마이그레이션 체계로 교체.</p></div>
+    <div class="card"><h4><span class="badge b-prog">3</span> cache.py repository 분리</h4><p><code>repositories/</code> 패키지 신설 + facade 재export로 7개 도메인 추출(system_events·benchmark_daily·ticker_map·user_settings·nps·dart_review·wiki·foreign_dividends). cache.py 3,902→3,236줄. 스키마/마이그레이션 방식 유지. 남은 코어(portfolio CRUD·NAV/스냅샷/현금흐름 트랜잭션·corp/financial/market + cache-value)는 혼합·교차결합이라 전용 분할 예정.</p></div>
     <div class="card"><h4><span class="badge b-prog">4</span> 프론트 store 도입</h4><p><code>portfolio-store.js</code> 신설(단일 <code>PfStore</code> namespace) + 첫 상태 슬라이스(benchmark quotes)를 전역 → <code>PfStore.benchmarkQuotes</code>로 이전(jsdom 검증). pfNavHistory/portfolioItems는 검증과 함께 순차 이전.</p></div>
     <div class="card"><h4><span class="badge b-prog">효율</span> tick 핫패스</h4><p>quote tick 행 조회를 JS 전체 스캔 → 브라우저 네이티브 속성 선택자(<code>querySelector</code> + CSS.escape)로 단축(stale 인덱스 위험 없음, jsdom 검증). <code>get_portfolio</code>는 이미 핵심 DB 호출 <code>asyncio.gather</code> 병렬화 완료.</p></div>
     <div class="card"><h4><span class="badge b-done">보안</span> NPS 스크립트 임베딩</h4><p>NPS 뷰는 부모 CSS 변수·차트 라이브러리에 의존해 iframe 격리가 어려움 → 실효적 주입 지점(inline script 내 JSON의 <code>&lt;/script&gt;</code> 브레이크아웃)을 <code><</code> 이스케이프로 차단(snapshot_nps · routes/nps, 동작 보존).</p></div>
