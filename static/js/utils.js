@@ -498,6 +498,22 @@ function scheduleChartPreload() {
     setTimeout(run, 800);
   }
 }
+// echarts 전용 로더. 모바일(USE_UPLOT)에서 밸류에이션 차트는 uPlot 을 쓰지만,
+// 증권사 목표가 차트는 echarts API(scatter+legend+tooltip+클릭)에 의존하므로
+// loadChartLib 와 별개로 echarts 를 보장 로드한다.
+let _echartsLoading = null;
+function loadEcharts() {
+  if (typeof window !== 'undefined' && window.echarts) return Promise.resolve();
+  if (_echartsLoading) return _echartsLoading;
+  _echartsLoading = _loadScriptWithFallback([
+    'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.6.0/echarts.min.js',
+    'https://unpkg.com/echarts@5.6.0/dist/echarts.min.js',
+  ], 'echarts')
+    .then(() => { if (!window.echarts) throw new Error('echarts load failed'); })
+    .catch(err => { _echartsLoading = null; throw err; });
+  return _echartsLoading;
+}
 // Backwards compat alias
 const loadECharts = loadChartLib;
 

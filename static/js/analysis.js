@@ -436,7 +436,8 @@ async function _overlayTargetPrices(reports) {
   card.appendChild(chartDiv);
   grid.appendChild(card);
 
-  await loadChartLib();
+  // 목표가 차트는 echarts 전용 — 모바일(uPlot)에서도 echarts 를 보장 로드한다.
+  await loadEcharts();
 
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';
@@ -526,7 +527,7 @@ async function _overlayTargetPrices(reports) {
   });
 }
 
-function _openTargetPriceModal(dates, prices, targetLine, scatterData, labels) {
+async function _openTargetPriceModal(dates, prices, targetLine, scatterData, labels) {
   const modal = document.getElementById('chartModal');
   const titleEl = document.getElementById('chartModalTitle');
   const canvas = document.getElementById('chartModalCanvas');
@@ -535,6 +536,9 @@ function _openTargetPriceModal(dates, prices, targetLine, scatterData, labels) {
   document.body.style.overflow = 'hidden';
 
   if (_modalChart) { _modalChart.dispose(); _modalChart = null; }
+
+  // 모바일(uPlot)에서도 모달 목표가 차트는 echarts 가 필요하므로 보장 로드.
+  await loadEcharts();
 
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
   const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';

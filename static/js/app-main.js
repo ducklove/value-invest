@@ -141,6 +141,11 @@ QuoteManager.onQuote = function(code, q) {
 
 // Init
 async function initApp() {
+  // 브라우저의 스크롤 위치 복원을 끈다 — 모바일에서 새로고침/재방문 시 이전 스크롤
+  // 위치(아래로 내려간 상태)로 복원돼 포트폴리오가 중간부터 보이는 문제를 막는다.
+  if ('scrollRestoration' in history) {
+    try { history.scrollRestoration = 'manual'; } catch (e) {}
+  }
   await initAuth();
   await loadRecentList();
   await _mbLoadCatalog();
@@ -196,6 +201,8 @@ async function initApp() {
     // Mobile + logged in → default to portfolio (경로가 명시된 경우
     // 이 기본값은 덮지 않음).
     switchView('portfolio');
+    // 포트폴리오 데이터가 비동기로 채워진 뒤에도 화면을 최상단에서 시작하도록 보정.
+    requestAnimationFrame(() => window.scrollTo(0, 0));
   }
 }
 
