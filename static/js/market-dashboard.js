@@ -27,9 +27,14 @@ function _mdChange(d) {
   return { cls, text: [chgVal, chgPct].filter(Boolean).join(' ') };
 }
 
+// 투자정보 대시보드 표시에서만 제외할 코드 (데이터 수집·금일시황 등 다른 경로는 유지).
+// KOSPI200 은 국내 지수 카드에서 자리가 어색하고 중요도가 낮아 숨긴다.
+const MD_HIDDEN_CODES = new Set(['KOSPI200']);
+
 function _mdGroupByCategory(catalog) {
   const groups = {};
   for (const [code, meta] of Object.entries(catalog || {})) {
+    if (MD_HIDDEN_CODES.has(code)) continue;
     const cat = (meta && meta.category) || '기타';
     (groups[cat] = groups[cat] || []).push(code);
   }
