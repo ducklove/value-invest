@@ -3043,7 +3043,8 @@ body.pf-mobile-simple .pf-table thead th {
 body.pf-mobile-simple .pf-table thead th,
 body.pf-mobile-simple .pf-table tbody td,
 body.pf-mobile-simple .pf-table tfoot td {
-  padding: 6px 5px;
+  /* 가로 패딩을 줄여(5→3) 종목명에 줄 폭을 더 확보. 숫자 컬럼 내용은 그대로 들어간다. */
+  padding: 6px 3px;
 }
 body.pf-mobile-simple .pf-col-group,
 body.pf-mobile-simple .pf-col-benchmark,
@@ -3061,12 +3062,14 @@ body.pf-mobile-simple .pf-col-act {
 }
 body.pf-mobile-simple .pf-table thead th.pf-col-name,
 body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
-  width: 34%;
+  /* 종목명 칸을 최대한 확보(34→42%). 나머지 숫자 컬럼은 흔한 값(현재가·평가금액
+     7~10자리, 등락률·수익률 ±두 자릿수%)이 들어갈 만큼만 배분한다. */
+  width: 42%;
 }
-body.pf-mobile-simple .pf-col-changepct { width: 16%; }
-body.pf-mobile-simple .pf-col-curprice { width: 18%; }
-body.pf-mobile-simple .pf-col-return { width: 14%; }
-body.pf-mobile-simple .pf-col-mktval { width: 18%; }
+body.pf-mobile-simple .pf-col-changepct { width: 13%; }
+body.pf-mobile-simple .pf-col-curprice { width: 16%; }
+body.pf-mobile-simple .pf-col-return { width: 12%; }
+body.pf-mobile-simple .pf-col-mktval { width: 17%; }
 body.pf-mobile-simple .pf-stock-cell {
   min-width: 0;
   white-space: normal;
