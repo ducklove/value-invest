@@ -328,7 +328,16 @@ async def fetch_foreign_quote(reuters_code: str) -> dict:
     if q and q.get("price") is not None:
         return q
 
-    # 2. yfinance fallback
+    # 2. yfinance via the Yahoo chart API (httpx + browser UA) — far more
+    #    reliable from a server IP than fast_info, which Yahoo rate-limits.
+    #    This is the same path static ETFs use; without it a non-static
+    #    foreign ticker (e.g. AAA.AX on the ASX, which KIS does not serve)
+    #    had only fast_info and could fail repeatedly, leaving its value blank.
+    q = await yfinance_fetch_quote_fast(reuters_code)
+    if q and q.get("price") is not None:
+        return q
+
+    # 2b. fast_info fallback
     q = await yfinance_fetch_quote(reuters_code)
     if q and q.get("price") is not None:
         return q
@@ -470,9 +479,9 @@ async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = 
 
 
 async def yfinance_fetch_quote_fast(ticker: str) -> dict:
-    if yf_marked_failed(ticker):
-        return {}
-
+    # No negative-cache gate here: the chart API is a single cheap, reliable
+    # call, so it must not be skipped just because the unreliable fast_info
+    # path marked this ticker as failed (that is exactly when we want it).
     try:
         payload = await asyncio.wait_for(fetch_yahoo_chart(ticker, range_="5d"), timeout=7.0)
         values = [row["close"] for row in payload.get("rows") or [] if row.get("close") is not None]
