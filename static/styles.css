@@ -608,6 +608,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 /* 우측 레일(원자재·환율·채권·야간선물)은 폭이 좁고 값/변동이 짧다. */
 .md-rail .md-row-val { min-width: 64px; }
 .md-rail .md-row .md-chg { min-width: 104px; }
+@media (max-width: 900px) {
+  /* 모바일: 종목명 공간 확보 — 변동 절대값을 숨겨 등락%만 표시하고 값/변동 폭 축소 */
+  .md-row .md-chg-abs { display: none; }
+  .md-main .md-row-val,
+  .md-rail .md-row-val { min-width: 56px; }
+  .md-main .md-row .md-chg,
+  .md-rail .md-row .md-chg { min-width: 0; }
+}
 
 /* 시장 랭킹 (movers) widget */
 .mv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

@@ -63,6 +63,24 @@ test("_mdChange maps direction to class + sign", () => {
   assert.equal(flat.text, "");
 });
 
+test("_mdChange exposes abs/pct for mobile collapsing", () => {
+  const w = load();
+  const c = w._mdChange({ direction: "up", change: "1,636.38", change_pct: "2.53%" });
+  assert.equal(c.abs, "+1,636.38");
+  assert.equal(c.pct, "(+2.53%)");
+  assert.equal(c.text, "+1,636.38 (+2.53%)");
+});
+
+test("_mdRenderDashboard list rows split change into abs/pct spans", () => {
+  const w = load();
+  w._mdRenderDashboard(CATALOG, { SPX: { value: "5,300.0", change: "8.0", change_pct: "-0.15%", direction: "down" } });
+  const main = w.document.getElementById("mdIndMain");
+  const abs = main.querySelector(".md-row .md-chg .md-chg-abs");
+  const pct = main.querySelector(".md-row .md-chg .md-chg-pct");
+  assert.ok(abs && /-8\.0/.test(abs.textContent), "abs span present");
+  assert.ok(pct && /-0\.15%/.test(pct.textContent), "pct span present");
+});
+
 test("_mdRenderDashboard builds two-column layout: hero indices in main, others in rail", () => {
   const w = load();
   const dataMap = {

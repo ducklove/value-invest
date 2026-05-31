@@ -24,7 +24,8 @@ function _mdChange(d) {
   const sign = isDown ? '-' : (isUp ? '+' : '');
   const chgVal = d.change ? `${sign}${String(d.change)}` : '';
   const chgPct = rawPct ? `(${sign}${rawPct}%)` : '';
-  return { cls, text: [chgVal, chgPct].filter(Boolean).join(' ') };
+  // abs/pct 분리: 좁은 화면(모바일)에서는 절대값을 숨기고 등락%만 노출한다.
+  return { cls, text: [chgVal, chgPct].filter(Boolean).join(' '), abs: chgVal, pct: chgPct };
 }
 
 // 투자정보 대시보드 표시에서만 제외할 코드 (데이터 수집·금일시황 등 다른 경로는 유지).
@@ -58,11 +59,17 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
   const label = meta.label || code;
   const d = dataMap ? dataMap[code] : null;
   let valHtml = '-';
-  let chgHtml = '';
+  let chgHtml = '';      // hero: 절대값+%(full)
+  let rowChgHtml = '';   // list: abs/pct 분리(모바일에서 abs 숨김)
   if (d && d.value) {
     const c = _mdChange(d);
     valHtml = escapeHtml(String(d.value));
     chgHtml = c.text ? `<span class="md-chg ${c.cls}">${escapeHtml(c.text)}</span>` : '';
+    rowChgHtml = c.text
+      ? `<span class="md-chg ${c.cls}">`
+        + (c.abs ? `<span class="md-chg-abs">${escapeHtml(c.abs)} </span>` : '')
+        + `<span class="md-chg-pct">${escapeHtml(c.pct)}</span></span>`
+      : '';
   }
   if (variant === 'hero') {
     // 카드 안에 해당 시장 수급 슬롯을 둔다. 캐시값이 있으면 즉시 채우고,
@@ -76,7 +83,7 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
   }
   return `<div class="md-row">`
     + `<span class="md-row-label">${escapeHtml(label)}</span>`
-    + `<span class="md-row-val">${valHtml}</span>${chgHtml}</div>`;
+    + `<span class="md-row-val">${valHtml}</span>${rowChgHtml}</div>`;
 }
 
 // 최근 투자자별 순매수(개인/외국인/기관). 각 국내 지수 카드(코스피/코스닥)
