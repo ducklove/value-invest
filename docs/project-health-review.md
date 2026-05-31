@@ -172,6 +172,7 @@
 - `/api/portfolio/nav-history`, `/api/portfolio/benchmark-history`, `/api/admin/*` 주요 endpoint에 duration event를 남긴다.
 - 화면에서는 “데이터 로딩 중”, “차트 렌더링 중”, “비교지수 불러오는 중”을 분리해서 보여준다.
 - 사용자가 느끼는 문제를 다음부터는 추측이 아니라 endpoint별 시간으로 바로 분리한다.
+- (진행됨) 2026-05-31에 endpoint별 계측의 1차를 깔았다. 아래 7번 메모 참조.
 
 ## 6. 2026-05-28 재점검 메모
 
@@ -192,3 +193,17 @@
 3. 배치 스크립트가 route private 함수가 아니라 public service API를 호출하게 바꾼다. 2026-05-28에 `services.portfolio.runtime_quotes` provider seam을 추가해 `snapshot_nav.py`, `snapshot_intraday.py`, `routes/wiki.py`, `foreign_dividends.py`의 직접 의존은 제거했다. 실제 quote 구현은 아직 `routes.portfolio`에 남아 있으므로 다음 단계에서 `QuoteService`로 완전히 옮겨야 한다.
 4. 프론트는 ES module 전환을 한 번에 하지 말고 `portfolioStore` 같은 단일 namespace부터 만들고, 기존 전역 변수 접근을 점진적으로 줄인다.
 5. 문자열 존재 테스트는 최소 유지하고 quote stream, cashflow mutation, portfolio render 같은 사용자 흐름 중심의 contract test를 늘린다.
+
+## 7. 2026-05-31 메모: 요청 계측 + 흐름 통합 테스트
+
+5번 항목(사용자 흐름 contract test)과 4순위(운영 성능 계측)를 함께 진행했다.
+
+- **요청 latency 계측 미들웨어**를 `core/app_factory.py`에 추가했다(`_RequestLatencyMiddleware`).
+  - `/api/*` 요청만 계측하고, 느린 요청(`>= app.state.slow_request_ms`, 기본 1000ms, env `SLOW_REQUEST_MS`)과 5xx 에러만 `observability.record_event(source="http", ...)`로 `system_events`에 남긴다. 정상·빠른 트래픽은 한 줄도 쓰지 않아 quote 폴링이 테이블을 채우지 않는다.
+  - `BaseHTTPMiddleware`가 아니라 **순수 ASGI 미들웨어**로 구현했다. SSE(`/api/portfolio/quotes`, 분석 스트림) 응답을 버퍼링하지 않고, latency는 `http.response.start`까지의 time-to-first-byte로 측정해 장시간 스트림이 “느림”으로 오분류되지 않는다.
+  - 기록은 fire-and-forget이라 응답을 막지 않고, 실패해도 요청을 깨지 않는다.
+  - 다음 단계: 관리자 대시보드가 `(source="http")` 이벤트를 endpoint별 p95/에러율로 렌더하면, “느린 endpoint”를 추측이 아니라 데이터로 본다.
+- **흐름 통합 테스트**를 `tests/test_integration_flows.py`에 추가했다(9 케이스). 라우트 핸들러를 직접 부르는 기존 단위 테스트와 달리, `create_app()`을 임시 SQLite로 띄우고 `httpx.ASGITransport`로 실제 HTTP 스택(라우팅·미들웨어·직렬화·핸들러→repository→DB)을 통과시킨다. lifespan만 건너뛰고(KIS/DART client 기동 회피) 인증·백그라운드 워밍업만 스텁한다.
+  - 포트폴리오 종목 GET/DELETE 왕복과 재삭제 404.
+  - 현금흐름 입금/출금 ↔ `CASH_KRW` 잔액 동기화, 잔액 부족 시 400과 트랜잭션 롤백(커밋된 현금흐름 2건만 남음).
+  - 미들웨어: 느린 요청 기록 / 빠른 요청 미기록 / 비-API 미계측 / 5xx 에러 기록 / 실제 `system_events` 영속화(목 없이) / 스트리밍 청크 무버퍼 통과.
