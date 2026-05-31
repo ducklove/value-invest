@@ -1179,6 +1179,7 @@ from repositories.system_events import (  # noqa: E402
     insert_system_event,
     get_system_events,
     summarize_system_events,
+    summarize_http_metrics,
     prune_system_events,
     get_latest_event,
 )

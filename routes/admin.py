@@ -771,6 +771,18 @@ async def event_summary(request: Request, hours: float = 24):
     return {"hours": hours, "by_source": summary, "latest": latest}
 
 
+@router.get("/http-metrics")
+async def http_metrics(request: Request, hours: float = 24):
+    """Per-endpoint view of recorded slow / 5xx HTTP requests over the last
+    `hours`. Source is the latency-observer middleware (observability
+    source='http'). Only the problematic tail is recorded, so the UI labels
+    these as slow/error counts rather than average response time."""
+    await _require_admin(request)
+    since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    endpoints = await cache.summarize_http_metrics(since)
+    return {"hours": hours, "endpoints": endpoints}
+
+
 # ---------------------------------------------------------------------------
 # Subsystem diagnostics — /diag/<subsystem>
 # ---------------------------------------------------------------------------

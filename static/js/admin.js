@@ -18,7 +18,7 @@ async function loadAdminView() {
     // deploy-status answers the "did my push land" question at a glance,
     // so it sits right next to the other meta-status calls and renders
     // at the top of the page.
-    const [deployRes, batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes, linkedConfigsRes, aiConfigRes] = await Promise.all([
+    const [deployRes, batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes, httpRes, linkedConfigsRes, aiConfigRes] = await Promise.all([
       apiFetch('/api/admin/deploy-status'),
       apiFetch('/api/admin/batch-status'),
       apiFetch('/api/admin/server-stats'),
@@ -26,6 +26,7 @@ async function loadAdminView() {
       apiFetch('/api/admin/users'),
       apiFetch('/api/admin/event-summary?hours=24'),
       apiFetch('/api/admin/events?limit=50'),
+      apiFetch('/api/admin/http-metrics?hours=24'),
       apiFetch('/api/admin/linked-project-configs'),
       apiFetch('/api/admin/ai-config'),
     ]);
@@ -40,9 +41,10 @@ async function loadAdminView() {
     const users = await usersRes.json();
     const summary = summaryRes.ok ? await summaryRes.json() : {by_source: {}, latest: {}};
     const events = eventsRes.ok ? await eventsRes.json() : [];
+    const httpMetrics = httpRes.ok ? await httpRes.json() : {endpoints: []};
     _linkedProjectConfigs = linkedConfigsRes.ok ? await linkedConfigsRes.json() : [];
     _aiAdminConfig = aiConfigRes.ok ? await aiConfigRes.json() : null;
-    container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events, _linkedProjectConfigs, _aiAdminConfig);
+    container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events, httpMetrics, _linkedProjectConfigs, _aiAdminConfig);
     _adminLoaded = true;
     _startLiveUpdates();
     // 해외 배당 목록은 섹션 HTML 삽입 후에만 컨테이너가 존재 — 별도
@@ -54,7 +56,7 @@ async function loadAdminView() {
   }
 }
 
-function _renderAdmin(deploy, batch, server, db, users, summary, events, linkedConfigs, aiConfig) {
+function _renderAdmin(deploy, batch, server, db, users, summary, events, httpMetrics, linkedConfigs, aiConfig) {
   return `
     <div class="admin-dashboard">
       <h2 class="admin-title">시스템 관리</h2>
@@ -62,6 +64,7 @@ function _renderAdmin(deploy, batch, server, db, users, summary, events, linkedC
       <div id="adminLiveSection">${_renderServerCard(server)}</div>
       ${_renderBatchSection(batch)}
       ${_renderSubsystemSummary(summary)}
+      ${_renderHttpMetricsSection(httpMetrics)}
       ${_renderDataSyncSection()}
       ${_renderAiConfigSection(aiConfig)}
       ${_renderLinkedProjectConfigSection(linkedConfigs)}
@@ -69,6 +72,46 @@ function _renderAdmin(deploy, batch, server, db, users, summary, events, linkedC
       ${_renderEventsSection(events)}
       ${_renderUsersSection(users)}
       ${_renderDbSection(db)}
+    </div>
+  `;
+}
+
+// --- HTTP performance (latency observer) --------------------------------
+//
+// 요청 계측 미들웨어가 /api/* 의 느린 요청(>= SLOW_REQUEST_MS)과 5xx 만
+// system_events(source="http") 에 남긴다. 여기서는 endpoint 별로 묶어
+// "어디가 느리고 어디가 실패하는지"를 한눈에 본다. 정상·빠른 요청은
+// 기록되지 않으므로 평균 응답시간이 아니라 "문제 구간"으로 읽어야 한다.
+
+function _renderHttpMetricsSection(httpMetrics) {
+  const endpoints = (httpMetrics && httpMetrics.endpoints) || [];
+  const hours = (httpMetrics && httpMetrics.hours) || 24;
+  const rows = endpoints.map(e => {
+    const errCls = (e.errors || 0) > 0 ? 'admin-status-fail' : '';
+    const maxCls = (e.max_ms != null && e.max_ms >= 3000) ? 'admin-status-fail'
+                 : (e.max_ms != null && e.max_ms >= 1000) ? 'admin-status-run'
+                 : '';
+    const fmt = (v) => (v == null ? '-' : Math.round(v).toLocaleString());
+    return `
+      <tr>
+        <td><code>${_esc(e.path || '(unknown)')}</code></td>
+        <td style="text-align:right;">${e.count || 0}</td>
+        <td style="text-align:right;" class="${errCls}">${e.errors || 0}</td>
+        <td style="text-align:right;">${fmt(e.avg_ms)}</td>
+        <td style="text-align:right;" class="${maxCls}">${fmt(e.max_ms)}</td>
+        <td><span class="admin-sub">${e.last_ts ? _fmtRelTime(e.last_ts) : '-'}</span></td>
+      </tr>`;
+  }).join('');
+  return `
+    <div class="admin-section">
+      <h3>HTTP 성능 <span class="admin-sub">느린 요청·에러 / 최근 ${hours}시간 (ms)</span>
+        <button class="admin-btn admin-btn-secondary" onclick="loadAdminView()" style="float:right;">새로고침</button>
+      </h3>
+      <p class="admin-sub" style="margin:0 0 8px;">느린 요청(≥SLOW_REQUEST_MS)과 5xx 만 기록됩니다. 정상·빠른 요청은 집계에 없습니다.</p>
+      <table class="admin-table admin-table-compact">
+        <thead><tr><th>경로</th><th style="text-align:right;">건수</th><th style="text-align:right;">에러</th><th style="text-align:right;">평균</th><th style="text-align:right;">최대</th><th>최근</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">기록된 느린 요청/에러 없음</td></tr>'}</tbody>
+      </table>
     </div>
   `;
 }

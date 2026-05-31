@@ -118,6 +118,45 @@ async def prune_system_events(max_age_days: int = 30, max_rows: int = 100_000) -
     return age_deleted + overflow_deleted
 
 
+async def summarize_http_metrics(since_iso: str, *, limit: int = 100) -> list[dict]:
+    """Aggregate recorded HTTP events (source='http') by request path.
+
+    The latency-observer middleware only records *slow* (>= threshold) and
+    *error* (5xx) requests, so these rows describe the problematic tail — not
+    all traffic. Counts/latencies should be read as "how bad is the slow path",
+    not "average response time". Durations live in the JSON ``details`` blob, so
+    we pull them out with ``json_extract``.
+    """
+    db = await cache.get_db()
+    limit = max(1, min(int(limit), 1000))
+    cursor = await db.execute(
+        """
+        SELECT
+          json_extract(details, '$.path') AS path,
+          COUNT(*) AS count,
+          SUM(CASE WHEN kind = 'error' THEN 1 ELSE 0 END) AS errors,
+          AVG(json_extract(details, '$.duration_ms')) AS avg_ms,
+          MAX(json_extract(details, '$.duration_ms')) AS max_ms,
+          MAX(ts) AS last_ts
+        FROM system_events
+        WHERE source = 'http' AND ts >= ?
+        GROUP BY path
+        ORDER BY errors DESC, count DESC, max_ms DESC
+        LIMIT ?
+        """,
+        (since_iso, limit),
+    )
+    out: list[dict] = []
+    for row in await cursor.fetchall():
+        item = dict(row)
+        if item.get("avg_ms") is not None:
+            item["avg_ms"] = round(float(item["avg_ms"]), 1)
+        if item.get("max_ms") is not None:
+            item["max_ms"] = round(float(item["max_ms"]), 1)
+        out.append(item)
+    return out
+
+
 async def get_latest_event(source: str, kind: str | None = None) -> dict | None:
     """Return the most recent matching event. Dashboard uses this to show
     'last successful tick' per subsystem."""

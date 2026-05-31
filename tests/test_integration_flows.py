@@ -160,6 +160,33 @@ class RequestObservabilityTests(IntegrationAppHarness):
         self.assertEqual(kwargs["details"]["status"], 500)
         self.assertEqual(kwargs["details"]["path"], "/api/portfolio/cashflows")
 
+    async def test_http_metrics_aggregate_by_path(self):
+        """The admin `/http-metrics` view aggregates recorded http events per
+        path. Guards the json_extract SQL in summarize_http_metrics."""
+        async def rec(path, kind, ms, status):
+            await observability.record_event(
+                "http", kind,
+                level="error" if kind == "error" else "warning",
+                details={"method": "GET", "path": path, "status": status, "duration_ms": ms},
+                wait=True,
+            )
+
+        await rec("/api/a", "slow", 1200.0, 200)
+        await rec("/api/a", "slow", 800.0, 200)
+        await rec("/api/a", "error", 50.0, 500)
+        await rec("/api/b", "slow", 1500.0, 201)
+
+        rows = await cache.summarize_http_metrics(observability.iso_hours_ago(1))
+        by_path = {r["path"]: r for r in rows}
+
+        self.assertEqual(by_path["/api/a"]["count"], 3)
+        self.assertEqual(by_path["/api/a"]["errors"], 1)
+        self.assertEqual(by_path["/api/a"]["max_ms"], 1200.0)
+        self.assertEqual(by_path["/api/b"]["count"], 1)
+        self.assertEqual(by_path["/api/b"]["errors"], 0)
+        # Most-erroring path sorts first.
+        self.assertEqual(rows[0]["path"], "/api/a")
+
     async def test_event_is_persisted_to_system_events(self):
         """No mock on record_event: prove the row actually lands in the table
         the admin dashboard reads. The write is fire-and-forget, so poll."""
