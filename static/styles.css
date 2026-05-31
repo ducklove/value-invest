@@ -3032,9 +3032,9 @@ body.pf-mobile-simple .pf-table-wrap {
 }
 body.pf-mobile-simple .pf-table {
   min-width: 0;
-  /* auto 레이아웃: 숫자 컬럼이 각자 내용 길이에 맞춰 자동으로 넓어지고(안 잘림)
-     짧으면 좁아진다. 종목명만 말줄임으로 남는 폭을 흡수(아래 max-width:0 트릭). */
-  table-layout: auto;
+  /* fixed 레이아웃으로 컬럼 폭을 명시 — auto + max-width:0 트릭은 모바일 Safari 에서
+     종목명 칸이 0 으로 접혀 이름이 사라지는 문제가 있어 쓰지 않는다. */
+  table-layout: fixed;
   font-size: 11px;
 }
 body.pf-mobile-simple .pf-table thead th {
@@ -3062,18 +3062,20 @@ body.pf-mobile-simple .pf-col-date,
 body.pf-mobile-simple .pf-col-act {
   display: none !important;
 }
-/* 숫자 컬럼(등락률·현재가·수익률·평가금액)은 별도 폭을 주지 않는다 — auto 레이아웃에서
-   각자 내용 폭에 맞춰 자동으로 넓어져 값이 길어도 안 잘리고, 짧으면 좁아져 낭비도 없다.
-   종목명만 width:100% + max-width:0 + overflow:hidden 으로 남는 폭을 모두 흡수하고,
-   긴 이름은 표를 밀어내지 않고 칸 안에서 말줄임된다(헤더 '종목명'은 남는 폭이 충분). */
+/* 종목명은 폭을 고정하지 않고 나머지 공간을 흡수(width:auto), 긴 이름은 말줄임.
+   숫자 컬럼은 흔한 값이 안 잘릴 만큼 고정 px — 평가금액은 십억대("1,234,567,890"≈66px)
+   까지 들어가도록 80px, 등락률은 두 자릿수%("+15.04%")까지 56px. */
 body.pf-mobile-simple .pf-table thead th.pf-col-name,
 body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
-  width: 100%;
-  max-width: 0;
-  overflow: hidden;
+  width: auto;
 }
+body.pf-mobile-simple .pf-col-changepct { width: 56px; }
+body.pf-mobile-simple .pf-col-curprice { width: 64px; }
+body.pf-mobile-simple .pf-col-return { width: 56px; }
+body.pf-mobile-simple .pf-col-mktval { width: 80px; }
 body.pf-mobile-simple .pf-stock-cell {
   min-width: 0;
+  white-space: normal;
 }
 body.pf-mobile-simple .pf-stock-cell-with-drag {
   display: block;
