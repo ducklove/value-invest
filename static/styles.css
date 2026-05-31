@@ -3062,14 +3062,16 @@ body.pf-mobile-simple .pf-col-act {
 }
 body.pf-mobile-simple .pf-table thead th.pf-col-name,
 body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
-  /* 종목명 칸을 최대한 확보(34→42%). 나머지 숫자 컬럼은 흔한 값(현재가·평가금액
-     7~10자리, 등락률·수익률 ±두 자릿수%)이 들어갈 만큼만 배분한다. */
-  width: 42%;
+  /* 종목명 칸은 폭을 고정하지 않고 나머지 공간을 모두 흡수(width:auto).
+     숫자 컬럼만 내용에 맞춘 고정 px 로 묶으므로, 화면이 넓은(고해상도) 폰일수록
+     남는 폭이 그대로 종목명으로 가서 잘림이 줄어든다. */
+  width: auto;
 }
-body.pf-mobile-simple .pf-col-changepct { width: 13%; }
-body.pf-mobile-simple .pf-col-curprice { width: 16%; }
-body.pf-mobile-simple .pf-col-return { width: 12%; }
-body.pf-mobile-simple .pf-col-mktval { width: 17%; }
+/* 숫자 컬럼은 흔한 값이 들어갈 만큼만 고정 px (box-sizing: border-box, 가로패딩 3px 포함). */
+body.pf-mobile-simple .pf-col-changepct { width: 50px; }
+body.pf-mobile-simple .pf-col-curprice { width: 58px; }
+body.pf-mobile-simple .pf-col-return { width: 46px; }
+body.pf-mobile-simple .pf-col-mktval { width: 60px; }
 body.pf-mobile-simple .pf-stock-cell {
   min-width: 0;
   white-space: normal;
@@ -3089,6 +3091,19 @@ body.pf-mobile-simple .pf-stock-link strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 간편모드: 종목명만 한 줄로 보이도록 종목코드와 실시간(웹소켓) 표시를 숨기고
+   줄바꿈을 막는다. 종목명 strong 이 셀 폭을 모두 쓰고 넘치면 말줄임 처리된다. */
+body.pf-mobile-simple .pf-stock-code,
+body.pf-mobile-simple .ws-live-dot {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-stock-line {
+  flex-wrap: nowrap;
+}
+body.pf-mobile-simple .pf-stock-main {
+  max-width: 100%;
+  min-width: 0;
 }
 body.pf-mobile-simple .pf-stock-tags,
 body.pf-mobile-simple .pf-row-drag-handle {
