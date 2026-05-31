@@ -230,14 +230,25 @@ function _refreshActivePortfolioTodayState() {
   pfRefreshTodayState({ force: true }).catch(() => {});
 }
 
-window.addEventListener('resize', () => {
-  if (typeof updateMobileAuthChrome === 'function') updateMobileAuthChrome();
-  if (typeof pfSyncSimpleModeForViewport === 'function') pfSyncSimpleModeForViewport();
-  if (typeof pfSyncMobileFixedView === 'function') pfSyncMobileFixedView();
+function _resizeAllCharts() {
   Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });
   if (_treemapInstance && _treemapInstance.resize) _treemapInstance.resize();
   if (_navChartInstance && _navChartInstance.resize) _navChartInstance.resize();
   if (_valueChartInstance && _valueChartInstance.resize) _valueChartInstance.resize();
+}
+
+window.addEventListener('resize', () => {
+  if (typeof updateMobileAuthChrome === 'function') updateMobileAuthChrome();
+  if (typeof pfSyncSimpleModeForViewport === 'function') pfSyncSimpleModeForViewport();
+  if (typeof pfSyncMobileFixedView === 'function') pfSyncMobileFixedView();
+  _resizeAllCharts();
+});
+
+// 모바일 회전 대응. iOS Safari 는 orientationchange 직후 resize 이벤트가 레이아웃
+// 갱신 전에 발생해 차트가 옛 폭으로 남는다. 레이아웃이 안정될 시간을 두고 여러 시점에
+// 다시 리사이즈해 가로↔세로 전환 시 그래프가 새 폭에 맞춰지도록 한다.
+window.addEventListener('orientationchange', () => {
+  [120, 350, 650].forEach(delay => setTimeout(_resizeAllCharts, delay));
 });
 
 // Esc closes any visible modal. Iterates in display order so the top-most

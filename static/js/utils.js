@@ -694,7 +694,12 @@ function _createUPlotChart(container, opts) {
   // Return ECharts-compatible interface
   return {
     dispose() { if (_ro) { _ro.disconnect(); _ro = null; } chart.destroy(); },
-    resize() { chart.setSize({ width: container.clientWidth, height: container.clientHeight || h }); },
+    resize() {
+      const cw = container.clientWidth;
+      if (cw <= 0) return;
+      chart.setSize({ width: cw, height: container.clientHeight || h });
+      chart.redraw();
+    },
     _uplot: chart,
   };
 }
