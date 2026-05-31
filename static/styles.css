@@ -989,6 +989,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background:var(--surface); border:1px solid var(--border);
   border-radius:12px; padding:16px 20px;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  /* 차트가 넓게 그려진 뒤(가로보기) 화면이 좁아질 때(세로보기) 그리드 칸이
+     min-content 로 늘어나 축소가 막히는 것을 방지 — 칸이 컨테이너보다 커지지 않게. */
+  min-width: 0;
 }
 .chart-card:hover {
   box-shadow: 0 4px 16px rgba(0,0,0,0.08);
@@ -1001,6 +1004,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .chart-canvas-wrap {
   position: relative;
   height: 220px;
+  min-width: 0;
+  overflow: hidden;
 }
 .chart-note {
   margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.4;
