@@ -3067,11 +3067,13 @@ body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
      남는 폭이 그대로 종목명으로 가서 잘림이 줄어든다. */
   width: auto;
 }
-/* 숫자 컬럼은 흔한 값이 들어갈 만큼만 고정 px (box-sizing: border-box, 가로패딩 3px 포함). */
-body.pf-mobile-simple .pf-col-changepct { width: 50px; }
+/* 등락률·현재가·수익률은 값 범위가 정해져 있어 고정 px (box-sizing: border-box, 가로패딩 3px 포함).
+   평가금액은 자릿수가 큰(수백만~수억) 값이 들어가 고정 px 로는 고해상도 폰에서 잘려서,
+   화면 폭에 비례해 늘어나도록 % 로 둔다(예전 넓이 복원). 나머지는 종목명(width:auto)이 흡수. */
+body.pf-mobile-simple .pf-col-changepct { width: 56px; }
 body.pf-mobile-simple .pf-col-curprice { width: 58px; }
 body.pf-mobile-simple .pf-col-return { width: 46px; }
-body.pf-mobile-simple .pf-col-mktval { width: 60px; }
+body.pf-mobile-simple .pf-col-mktval { width: 18%; }
 body.pf-mobile-simple .pf-stock-cell {
   min-width: 0;
   white-space: normal;
