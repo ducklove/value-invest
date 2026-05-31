@@ -154,6 +154,29 @@ test("_cardFlowHtml returns empty string when no flow", () => {
   assert.equal(w._cardFlowHtml(undefined), "");
 });
 
+test("hero cards embed a Naver mini trend chart for KOSPI/KOSDAQ only", () => {
+  const w = load();
+  const catalog = {
+    KOSPI: { label: "KOSPI", category: "국내 지수" },
+    KOSDAQ: { label: "KOSDAQ", category: "국내 지수" },
+  };
+  w._mdRenderDashboard(catalog, { KOSPI: { value: "2,650", direction: "up" } });
+  const main = w.document.getElementById("mdIndMain");
+  const charts = main.querySelectorAll(".md-hero-card img.md-hero-chart");
+  assert.equal(charts.length, 2);
+  assert.match(charts[0].getAttribute("src"), /KOSPI_end_up_tablet\.png\?\d+/);
+  assert.match(charts[1].getAttribute("src"), /KOSDAQ_end_up_tablet\.png\?\d+/);
+  // failed image hides itself rather than showing a broken icon
+  assert.match(charts[0].getAttribute("onerror") || "", /display='none'/);
+});
+
+test("_miniChartHtml only emits for known index symbols", () => {
+  const w = load();
+  assert.match(w._miniChartHtml("KOSPI"), /md-hero-chart/);
+  assert.equal(w._miniChartHtml("SPX"), "");
+  assert.equal(w._miniChartHtml("AAPL"), "");
+});
+
 test("_mdRenderDashboard escapes catalog labels (no raw HTML injection)", () => {
   const w = load();
   const evil = { X: { label: "<img src=x onerror=alert(1)>", category: "국내 지수" } };

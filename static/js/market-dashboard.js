@@ -54,6 +54,20 @@ function _mdGroupByCategory(catalog) {
 const MD_HERO_CATEGORIES = ['국내 지수'];
 const MD_MAIN_CATEGORIES = ['해외 지수'];
 
+// 국내 지수 hero 카드 우상단에 띄울 네이버 일간 미니 차트(코드=네이버 심볼).
+// down 변형 파일은 없고 _end_up_tablet.png 만 존재하며, 이미지 내용 자체가
+// 당일 등락을 반영한다. 캐시버스팅을 5분 단위로 둬 최신 차트를 받되 과도한
+// 재요청은 피한다.
+const MD_MINI_CHART = new Set(['KOSPI', 'KOSDAQ']);
+
+function _miniChartHtml(code) {
+  if (!MD_MINI_CHART.has(code)) return '';
+  const bust = Math.floor(Date.now() / 300000);
+  const url = `https://ssl.pstatic.net/imgfinance/chart/mobile/mini/${code}_end_up_tablet.png?${bust}`;
+  return `<img class="md-hero-chart" src="${escapeHtml(url)}" alt="${escapeHtml(code)} 일간 추이"`
+    + ` loading="lazy" onerror="this.style.display='none'">`;
+}
+
 function _mdCardHtml(code, catalog, dataMap, variant) {
   const meta = catalog[code] || {};
   const label = meta.label || code;
@@ -77,6 +91,7 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
     const flow = _mdFlows ? _mdFlows[String(code).toLowerCase()] : null;
     const flowSlot = `<div class="md-card-flow" data-flow-code="${escapeHtml(String(code))}">${_cardFlowHtml(flow)}</div>`;
     return `<div class="md-hero-card">`
+      + _miniChartHtml(code)
       + `<div class="md-hero-label">${escapeHtml(label)}</div>`
       + `<div class="md-hero-val">${valHtml}</div>${chgHtml}`
       + flowSlot + `</div>`;

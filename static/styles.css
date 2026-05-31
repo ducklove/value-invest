@@ -583,10 +583,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 /* 주요 지수 hero — prominent cards */
 .md-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-.md-hero-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
+.md-hero-card { position: relative; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
 .md-hero-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
 .md-hero-val { font-size: 22px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .md-hero-card .md-chg { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; }
+/* 우상단 일간 미니 차트 — 값/변동을 가리지 않게 우측 상단 여백에 배치 */
+.md-hero-chart { position: absolute; top: 12px; right: 12px; width: 132px; max-width: 46%; height: auto; pointer-events: none; }
+@media (max-width: 560px) { .md-hero-chart { display: none; } }
 /* compact indicator rows — label .... value (change%) */
 .md-rows { display: flex; flex-direction: column; }
 .md-row {
