@@ -656,9 +656,28 @@ function _createUPlotChart(container, opts) {
   };
 
   const chart = new uPlot(uOpts, data, container);
+
+  // 컨테이너가 아직 레이아웃되지 않아(예: 뷰가 display:none 인 상태로 렌더) 폭이 0이면
+  // uPlot 이 0 폭으로 굳어 빈 차트가 된다. ResizeObserver 로 컨테이너가 실제 폭을 갖는
+  // 순간(뷰가 보일 때·회전·창 크기 변경) 자동으로 다시 사이즈를 맞춰 자가 치유한다.
+  let _ro = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    _ro = new ResizeObserver(() => {
+      const cw = container.clientWidth;
+      if (cw <= 0) return;
+      const ch = container.clientHeight || h;
+      // 폭이 바뀌면 다시 맞춘다. 그리고 0폭으로 생성됐다가 뷰가 보이며 폭이 생긴
+      // 경우 setSize 만으로는 시리즈(선)가 다시 그려지지 않을 때가 있어 redraw 로
+      // 강제 재그리기한다(크기 동일해도 1회 페인트 보정).
+      if (cw !== chart.width || ch !== chart.height) chart.setSize({ width: cw, height: ch });
+      chart.redraw();
+    });
+    _ro.observe(container);
+  }
+
   // Return ECharts-compatible interface
   return {
-    dispose() { chart.destroy(); },
+    dispose() { if (_ro) { _ro.disconnect(); _ro = null; } chart.destroy(); },
     resize() { chart.setSize({ width: container.clientWidth, height: container.clientHeight || h }); },
     _uplot: chart,
   };

@@ -3023,9 +3023,10 @@ body.pf-mobile-simple .pf-col-toggle-wrap {
   display: none !important;
 }
 body.pf-mobile-simple .pf-table-wrap {
-  /* 100dvh 에서 헤더+요약+탭 영역과 하단 탭바(약 62px) 높이를 함께 제외해
-     테이블 마지막 행이 하단 탭바에 가리지 않도록 한다. */
-  max-height: calc(100dvh - 248px);
+  /* 100dvh 에서 위쪽 크롬(헤더+요약+탭 ≈ 125px)과 하단 탭바(≈53px)를 제외해
+     테이블 박스가 하단 탭바 바로 위까지 정확히 채우도록 한다. 값이 과하면 박스
+     아래 공백이 생기고, 모자라면 페이지가 스크롤된다(100dvh 라 화면 높이에 자동 맞춤). */
+  max-height: calc(100dvh - 182px);
   overflow: auto;
   border-radius: 8px;
   overscroll-behavior: contain;
