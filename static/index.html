@@ -353,26 +353,6 @@ function trackEvent(name, params = {}) {
     </div><!-- /pfHoldingsTab -->
 
     <div id="pfPerformanceTab" style="display:none;">
-      <div class="pf-nav-chart-wrap" id="pfAiWrap">
-        <div class="pf-nav-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <h3>AI 포트폴리오 분석</h3>
-          <div id="pfAiModelPicker" style="display:none;margin-left:8px;">
-            <input list="pfAiModelList" id="pfAiModelInput" placeholder="모델 선택/입력" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);width:260px;">
-            <datalist id="pfAiModelList"></datalist>
-          </div>
-          <button class="bt-run" onclick="runAiAnalysis()" id="pfAiBtn" style="margin-left:auto;padding:6px 14px;font-size:12px;">분석 실행</button>
-        </div>
-        <textarea id="pfAiQuery" placeholder="AI에게 추가로 묻고 싶은 내용이 있으면 입력하세요 (선택). 예: 금리 인상 가능성을 고려해 포트폴리오를 평가해줘." rows="2" style="width:100%;margin:8px 0 4px;padding:8px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);resize:vertical;font-family:inherit;"></textarea>
-        <div class="pf-ai-output" id="pfAiOutput" aria-live="polite">
-          <div class="pf-ai-output-head">
-            <span>AI 분석 결과</span>
-            <span id="pfAiStatus" class="pf-ai-status">대기</span>
-          </div>
-          <div id="pfAiResult" class="pf-ai-result pf-ai-empty">분석 실행 후 결과가 여기에 표시됩니다.</div>
-        </div>
-        <div id="pfAiTokens" class="pf-ai-meta"></div>
-      </div>
-
       <div class="pf-nav-chart-wrap">
         <div class="pf-nav-header">
           <h3>NAV 기준가 추이</h3>
@@ -441,6 +421,26 @@ function trackEvent(name, params = {}) {
           <thead><tr><th>날짜</th><th>구분</th><th>금액</th><th>기준가</th><th>좌수변동</th><th>잔여 좌수</th><th>메모</th><th></th></tr></thead>
           <tbody id="pfCfBody"></tbody>
         </table>
+      </div>
+
+      <div class="pf-nav-chart-wrap" id="pfAiWrap" style="margin-top:24px;">
+        <div class="pf-nav-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <h3>AI 포트폴리오 분석</h3>
+          <div id="pfAiModelPicker" style="display:none;margin-left:8px;">
+            <input list="pfAiModelList" id="pfAiModelInput" placeholder="모델 선택/입력" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);width:260px;">
+            <datalist id="pfAiModelList"></datalist>
+          </div>
+          <button class="bt-run" onclick="runAiAnalysis()" id="pfAiBtn" style="margin-left:auto;padding:6px 14px;font-size:12px;">분석 실행</button>
+        </div>
+        <textarea id="pfAiQuery" placeholder="AI에게 추가로 묻고 싶은 내용이 있으면 입력하세요 (선택). 예: 금리 인상 가능성을 고려해 포트폴리오를 평가해줘." rows="2" style="width:100%;margin:8px 0 4px;padding:8px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);resize:vertical;font-family:inherit;"></textarea>
+        <div class="pf-ai-output" id="pfAiOutput" aria-live="polite">
+          <div class="pf-ai-output-head">
+            <span>AI 분석 결과</span>
+            <span id="pfAiStatus" class="pf-ai-status">대기</span>
+          </div>
+          <div id="pfAiResult" class="pf-ai-result pf-ai-empty">분석 실행 후 결과가 여기에 표시됩니다.</div>
+        </div>
+        <div id="pfAiTokens" class="pf-ai-meta"></div>
       </div>
     </div><!-- /pfPerformanceTab -->
   </div><!-- /portfolioView -->
