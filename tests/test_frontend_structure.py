@@ -10,6 +10,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-shell.js",
     "portfolio-data.js",
     "portfolio-order.js",
+    "portfolio-sparklines.js",
     "portfolio-render.js",
     "portfolio-actions.js",
     "portfolio-insights.js",
