@@ -129,7 +129,12 @@ def test_today_sparkline_maps_ticks_from_settlement_axis():
     assert "function _sparkAxisHoursFromTs" in source
     assert "function _sparkNowKstIsoMinute" in source
     assert "function _sparkTodayCashflowThroughTs" in source
-    assert "const axisStartTs = pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null;" in source
+    # Axis start comes from the intraday window (earliest ts the backend
+    # prepends), NOT pfPrevDaySnapshot.date — the latter is the last trading
+    # day's settlement and drifts from the window start across weekends.
+    assert "const _intradayAxisStart = (Array.isArray(pfIntradayData) ? pfIntradayData : [])" in source
+    assert ".reduce((min, d) => (d?.ts && (min === null || d.ts < min) ? d.ts : min), null);" in source
+    assert "const axisStartTs = _intradayAxisStart || (pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null);" in source
     assert "const axisEndTs = axisStartTs ? _sparkAxisEndTs(axisStartTs) : null;" in source
     assert "_sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs)" in source
     assert "_sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs)" in source

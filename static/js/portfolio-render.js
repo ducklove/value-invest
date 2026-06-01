@@ -773,13 +773,15 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparklinePoints('sparkMonthly', [], '#dc2626', 31);
   }
 
-  // 기준값 = 전일 22:00 결산값 (pfPrevDaySnapshot.total_value). sparkline
-  // 은 전일 22:00 → 당일 22:00의 24시간 축으로 그린다. 첫 점은 항상
-  // 전일 22:00 기준 0%로 고정한다.
+  // sparkline 은 "오늘" 결산 창(직전 22:00 → 다음 22:00) 24시간 축으로 그린다.
+  // 축 시작은 백엔드가 intraday 맨 앞에 끼우는 결산경계 ts(최소 ts)를 쓴다.
+  // pfPrevDaySnapshot.date(마지막 거래일)는 주말 끼면 어긋나 장중 점이 몰린다.
   const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
     ? pfPrevDaySnapshot.total_value
     : null;
-  const axisStartTs = pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null;
+  const _intradayAxisStart = (Array.isArray(pfIntradayData) ? pfIntradayData : [])
+    .reduce((min, d) => (d?.ts && (min === null || d.ts < min) ? d.ts : min), null);
+  const axisStartTs = _intradayAxisStart || (pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null);
   const axisEndTs = axisStartTs ? _sparkAxisEndTs(axisStartTs) : null;
   if (!_prevClose || !axisStartTs || !axisEndTs) {
     _drawSparklinePoints('sparkDaily', [], '#dc2626', 24);
