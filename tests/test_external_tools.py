@@ -51,6 +51,23 @@ class ExternalSummaryTests(unittest.TestCase):
         self.assertNotIn("doosan_fc_pref", [r.get("code") for r in out["top"]])
         self.assertEqual(out["top"][0]["code"], "336260")
 
+    def test_summarize_spac_sorts_by_annualized_return(self):
+        current = {
+            "lastUpdated": "2026-06-01 14:58:47 KST",
+            "summary": {"averageAnnualizedReturn": 1.69, "belowIpoCount": 19, "totalCount": 73},
+            "prices": {
+                "0131D0": {"name": "키움히어로제2호스팩", "annualizedReturn": 3.1, "ratio": 0.9875},
+                "474660": {"name": "신한제12호스팩", "annualizedReturn": 6.05, "ratio": 1.025},
+                "0072Z0": {"name": "KB제33호스팩", "ratio": 0.9945},  # 기대수익률 없음 → 제외
+            },
+        }
+        out = external_tools._summarize_spac(current)
+        self.assertEqual([r["name"] for r in out["top"]], ["신한제12호스팩", "키움히어로제2호스팩"])
+        self.assertEqual(out["top"][0]["code"], "474660")
+        self.assertEqual(out["averageAnnualizedReturn"], 1.69)
+        self.assertEqual(out["belowIpoCount"], 19)
+        self.assertEqual(out["url"], external_tools.SITE["spac"])
+
     def test_summarize_gold_latest_gap_and_links(self):
         data = {
             "updated_at": "2026-05-30 16:34 KST",
@@ -132,11 +149,13 @@ class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         external_tools._cache.clear()
         with patch.object(external_tools, "_holding_summary", new=AsyncMock(side_effect=RuntimeError("boom"))), \
              patch.object(external_tools, "_spread_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
-             patch.object(external_tools, "_gold_summary", new=AsyncMock(return_value={"assets": [], "url": "u"})):
+             patch.object(external_tools, "_gold_summary", new=AsyncMock(return_value={"assets": [], "url": "u"})), \
+             patch.object(external_tools, "_spac_summary", new=AsyncMock(return_value={"top": [], "url": "u"})):
             out = await external_tools.fetch_external_insights()
         self.assertNotIn("holding", out)
         self.assertIn("spread", out)
         self.assertIn("goldGap", out)
+        self.assertIn("spac", out)
 
 
 if __name__ == "__main__":

@@ -342,6 +342,12 @@ function _extRender(root, data) {
     const sub = s.averageSpread != null ? `평균 괴리율 ${_extPct(s.averageSpread)}` : '우선주 괴리율';
     cards.push(_extCard('우선주 괴리율', s.url, sub, _extLinkRows(s.top, 'spread', s.url, false)));
   }
+  const p = data && data.spac;
+  if (p && (p.top || []).length) {
+    // spac-hunter 는 ?code= deep-link 지원 → useCode=true.
+    const sub = p.averageAnnualizedReturn != null ? `평균 연환산 ${_extPct(p.averageAnnualizedReturn)}` : '연환산 기대수익률';
+    cards.push(_extCard('스팩 기대수익', p.url, sub, _extLinkRows(p.top, 'annualizedReturn', p.url, true)));
+  }
   const g = data && data.goldGap;
   if (g && (g.assets || []).length) {
     const rows = g.assets.map((a) => {

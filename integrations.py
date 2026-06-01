@@ -10,6 +10,7 @@ DEFAULT_WORKSPACE_ROOT = PROJECT_ROOT.parent
 DEFAULT_BASE_URLS = {
     "holdingValue": "https://ducklove.github.io/holding_value",
     "preferredSpread": "https://ducklove.github.io/common_preferred_spread",
+    "spacHunter": "https://ducklove.github.io/spac-hunter",
     "goldGap": "https://ducklove.github.io/gold_gap",
     "kisProxy": "http://cantabile.tplinkdns.com:3288",
 }
@@ -45,6 +46,7 @@ def build_public_integrations(workspace_root: Path | None = None) -> dict[str, A
     return {
         "holdingValue": _holding_value_config(root),
         "preferredSpread": _preferred_spread_config(root),
+        "spacHunter": _spac_hunter_config(),
         "goldGap": _gold_gap_config(root),
         "kisProxy": _kis_proxy_config(),
     }
@@ -266,6 +268,12 @@ def _build_preferred_pair(entry: dict[str, Any]) -> dict[str, Any] | None:
         "commonName": entry.get("commonName") or common_code,
         "preferredName": entry.get("preferredName") or preferred_code,
     }
+
+
+def _spac_hunter_config() -> dict[str, Any]:
+    # spac-hunter 는 별도 서브 프로젝트(SPA)로, 종목 코드를 ?code= 쿼리로만
+    # 받는다. 로컬 config 를 읽을 필요가 없어 baseUrl 만 노출한다.
+    return {"baseUrl": _base_url("spacHunter", "SPAC_HUNTER_BASE_URL")}
 
 
 def _gold_gap_config(root: Path) -> dict[str, Any]:

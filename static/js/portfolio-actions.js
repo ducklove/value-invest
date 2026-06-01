@@ -799,6 +799,27 @@ function _analysisAction(stockCode, label = '분석 화면', hint = '재무/밸�
   };
 }
 
+function _stockNameForCode(code) {
+  const normalized = _normalizePortfolioCode(code);
+  const items = (typeof PfStore !== 'undefined' && Array.isArray(PfStore.items)) ? PfStore.items : [];
+  const item = items.find(i => _normalizePortfolioCode(i.stock_code) === normalized);
+  return item && item.stock_name ? String(item.stock_name) : '';
+}
+
+// 국내 스팩(SPAC)은 상장 종목명에 항상 "스팩"이 들어간다(예: 교보15호스팩).
+function _isSpacStock(code) {
+  return /스팩/.test(_stockNameForCode(code));
+}
+
+function _spacAnalysisAction(stockCode, label = '스팩 분석', hint = 'SPAC Hunter 분석') {
+  return {
+    id: `spac-${stockCode}`,
+    label,
+    hint,
+    run: () => openIntegration('spacHunter', '', { code: stockCode }),
+  };
+}
+
 function _naverFinanceAction(stockCode, label = '네이버 파이낸스') {
   const targetCode = _isPreferredStock(stockCode) ? _preferredCommonCodeFor(stockCode) : stockCode;
   return {
@@ -831,7 +852,7 @@ function _portfolioLinkActions(stockCode, options = {}) {
         run: () => openIntegration('preferredSpread', '', { code: stockCode }),
       });
     } else {
-      actions.push(_analysisAction(stockCode));
+      actions.push(_isSpacStock(stockCode) ? _spacAnalysisAction(stockCode) : _analysisAction(stockCode));
       actions.push(_naverFinanceAction(stockCode));
       if (_HOLDING_CODES.has(stockCode)) {
         actions.push({

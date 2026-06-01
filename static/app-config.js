@@ -13,6 +13,9 @@ window.APP_CONFIG = {
       dataUrl: "https://ducklove.github.io/common_preferred_spread/data.js",
       currentUrl: "https://ducklove.github.io/common_preferred_spread/current.json"
     },
+    spacHunter: {
+      baseUrl: "https://ducklove.github.io/spac-hunter"
+    },
     goldGap: {
       baseUrl: "https://ducklove.github.io/gold_gap",
       configUrl: "https://ducklove.github.io/gold_gap/config.json",

@@ -299,6 +299,37 @@ test("_extRender builds 3 tool cards with deep-link, gap sign class, escaping", 
   assert.ok(!root.innerHTML.includes("<b>x</b>"));
 });
 
+test("_extRender adds a SPAC card (after spread) with ?code= deep-link", () => {
+  const w = load();
+  const root = w.document.getElementById("externalTools");
+  w._extRender(root, {
+    spread: {
+      url: "https://ducklove.github.io/common_preferred_spread/",
+      averageSpread: 48.28,
+      top: [{ name: "두산퓨얼셀", code: "336260", spread: 88.8 }],
+    },
+    spac: {
+      url: "https://ducklove.github.io/spac-hunter/",
+      averageAnnualizedReturn: 1.7,
+      top: [{ name: "신한제12호스팩", code: "474660", annualizedReturn: 6.2 },
+            { name: "<b>x</b>", code: "0131D0", annualizedReturn: 3.1 }],
+    },
+  });
+  const cards = root.querySelectorAll(".ext-card");
+  assert.equal(cards.length, 2);
+  // spac card comes right after the spread card.
+  const spacCard = cards[1];
+  assert.match(spacCard.innerHTML, /스팩 기대수익/);
+  assert.match(spacCard.innerHTML, /평균 연환산 1\.7%/);
+  // each row deep-links into spac-hunter via ?code=.
+  const first = spacCard.querySelector(".ext-row");
+  assert.match(first.getAttribute("href"), /spac-hunter\/\?code=474660/);
+  assert.equal(first.getAttribute("target"), "_blank");
+  assert.match(spacCard.innerHTML, /6\.2%/);
+  // hostile name escaped.
+  assert.ok(!root.innerHTML.includes("<b>x</b>"));
+});
+
 test("_extRender renders empty when no data", () => {
   const w = load();
   const root = w.document.getElementById("externalTools");
