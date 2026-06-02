@@ -107,17 +107,13 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         )
     )
 
-    # Telegram bot poller (handles the /start link handshake) + portfolio
-    # alert evaluation loop. Both no-op unless TELEGRAM_BOT_TOKEN is set; the
-    # alert loop additionally needs NOTIFY_ALERT_INTERVAL_S > 0.
+    # Portfolio alert evaluation loop. Credentials are per-user (stored in
+    # notification_channels), so there is no server-wide bot poller — the loop
+    # just needs NOTIFY_ALERT_INTERVAL_S > 0; evaluate_user skips users without
+    # an active channel.
     from services.notifications import engine as notify_engine
-    from services.notifications import telegram as notify_telegram
 
     notify_stop = asyncio.Event()
-    notify_poll_task: asyncio.Task | None = None
-    if notify_telegram.is_configured():
-        notify_poll_task = asyncio.create_task(notify_telegram.run_poll_loop(notify_stop))
-
     alert_interval = float(os.environ.get("NOTIFY_ALERT_INTERVAL_S", "0"))
     notify_alert_task: asyncio.Task | None = None
     if alert_interval > 0:
@@ -165,12 +161,11 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
             obs_task.cancel()
 
         notify_stop.set()
-        for notify_task in (notify_poll_task, notify_alert_task):
-            if notify_task is not None:
-                try:
-                    await asyncio.wait_for(notify_task, timeout=2.0)
-                except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
-                    notify_task.cancel()
+        if notify_alert_task is not None:
+            try:
+                await asyncio.wait_for(notify_alert_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                notify_alert_task.cancel()
 
         await kis_ws_manager.stop_all()
         await kis_proxy_client.close_client()

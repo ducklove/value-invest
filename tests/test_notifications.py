@@ -21,7 +21,7 @@ import cache
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
 from routes import notifications as notif_route
-from services.notifications import channels, engine, kakao
+from services.notifications import channels, engine, kakao, telegram
 
 
 def _test_settings() -> AppSettings:
@@ -88,13 +88,72 @@ class NotificationHarness(unittest.IsolatedAsyncioTestCase):
 
 
 class AlertCrudTests(NotificationHarness):
-    async def test_channels_status_without_config(self):
+    async def test_channels_status_initial(self):
         resp = await self.client.get("/api/notifications/channels")
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        self.assertFalse(body["telegram"]["configured"])
         self.assertFalse(body["telegram"]["connected"])
-        self.assertFalse(body["kakao"]["configured"])
+        self.assertFalse(body["kakao"]["connected"])
+        # kakao block exposes the redirect_uri the user must register
+        self.assertIn("redirect_uri", body["kakao"])
+
+    async def test_telegram_register_manual_chat(self):
+        with patch.object(telegram, "get_me", new=AsyncMock(return_value={"username": "mybot"})), \
+             patch.object(telegram, "send_message", new=AsyncMock(return_value=True)):
+            resp = await self.client.post(
+                "/api/notifications/telegram/register",
+                json={"bot_token": "123:ABC", "chat_id": "555"},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertTrue(resp.json()["connected"])
+        ch = await cache.get_notification_channel("u1", "telegram")
+        self.assertEqual(ch["config"]["chat_id"], "555")
+        self.assertEqual(ch["config"]["bot_token"], "123:ABC")
+        self.assertTrue(ch["verified"])
+
+    async def test_telegram_register_autodetect_chat(self):
+        with patch.object(telegram, "get_me", new=AsyncMock(return_value={"username": "mybot"})), \
+             patch.object(telegram, "get_recent_chat_id", new=AsyncMock(return_value=("999", "nick"))), \
+             patch.object(telegram, "send_message", new=AsyncMock(return_value=True)):
+            resp = await self.client.post(
+                "/api/notifications/telegram/register", json={"bot_token": "123:ABC"}
+            )
+        self.assertTrue(resp.json()["connected"])
+        self.assertEqual(resp.json()["chat_id"], "999")
+
+    async def test_telegram_register_needs_message_first(self):
+        with patch.object(telegram, "get_me", new=AsyncMock(return_value={"username": "mybot"})), \
+             patch.object(telegram, "get_recent_chat_id", new=AsyncMock(return_value=None)):
+            resp = await self.client.post(
+                "/api/notifications/telegram/register", json={"bot_token": "123:ABC"}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["connected"])
+        ch = await cache.get_notification_channel("u1", "telegram")
+        self.assertFalse(ch["verified"])  # token stored, awaiting chat_id
+
+    async def test_telegram_register_invalid_token(self):
+        with patch.object(telegram, "get_me", new=AsyncMock(return_value=None)):
+            resp = await self.client.post(
+                "/api/notifications/telegram/register", json={"bot_token": "bad"}
+            )
+        self.assertEqual(resp.status_code, 400)
+
+    async def test_kakao_connect_returns_authorize_url(self):
+        resp = await self.client.post(
+            "/api/notifications/kakao/connect", json={"rest_key": "REST123"}
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertIn("REST123", body["authorize_url"])
+        self.assertIn("/api/notifications/kakao/callback", body["redirect_uri"])
+        ch = await cache.get_notification_channel("u1", "kakao")
+        self.assertEqual(ch["config"]["rest_key"], "REST123")
+        self.assertFalse(ch["verified"])  # not verified until callback
+
+    async def test_kakao_connect_requires_key(self):
+        resp = await self.client.post("/api/notifications/kakao/connect", json={})
+        self.assertEqual(resp.status_code, 400)
 
     async def test_price_alert_crud_roundtrip(self):
         resp = await self.client.post(
@@ -292,7 +351,7 @@ class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):
     async def test_refresh_on_401_then_retry(self):
         await cache.upsert_notification_channel(
             "u1", "kakao",
-            config={"access_token": "old", "access_expires_at": time.time() + 3600, "refresh_token": "r"},
+            config={"rest_key": "K", "access_token": "old", "access_expires_at": time.time() + 3600, "refresh_token": "r"},
             enabled=True, verified=True,
         )
         ch = await cache.get_notification_channel("u1", "kakao")

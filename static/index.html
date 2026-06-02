@@ -370,24 +370,24 @@ function trackEvent(name, params = {}) {
             <div class="pf-alert-help" id="pfAlertHelp" hidden>
               <p class="pf-alert-help-intro">포트폴리오 조건(지정가·목표가 달성·등락률·총평가액)을 만족하면 메신저로 알려드립니다. 받을 채널을 <b>본인 계정</b>으로 연결한 뒤, 아래 ‘알림 규칙’에서 조건을 추가하세요. 연결·규칙은 모두 본인에게만 적용됩니다.</p>
               <div class="pf-alert-help-block">
-                <strong>① 텔레그램 — 누구나 바로 연결</strong>
+                <strong>① 텔레그램 — 내 봇 토큰으로 등록</strong>
                 <ol>
-                  <li>아래 ‘텔레그램’ 줄의 <b>[연결]</b> 버튼을 누릅니다.</li>
-                  <li>새 창에서 텔레그램이 열리고 봇 대화가 시작됩니다. 하단의 <b>[시작]</b>(/start)을 누르세요.<br><span class="pf-alert-help-sub">휴대폰에 텔레그램 앱이 있으면 앱으로, 없으면 web.telegram.org로 열립니다. 텔레그램 계정이 없으면 먼저 가입(전화번호)하세요.</span></li>
-                  <li>“연결되었습니다” 메시지를 받으면 이 화면이 자동으로 <b>‘연결됨’</b>으로 바뀝니다.</li>
-                  <li><b>[테스트]</b> 버튼으로 실제 수신을 확인하세요.</li>
+                  <li>텔레그램에서 <b>@BotFather</b>를 열고 <b>/newbot</b>으로 봇을 만든 뒤 <b>봇 토큰</b>(예: <code>123456:ABC-...</code>)을 복사합니다.</li>
+                  <li>아래 ‘텔레그램’ 칸에 토큰을 붙여넣고 <b>[연결]</b>을 누릅니다.</li>
+                  <li>방금 만든 봇과 대화를 열어 <b>아무 메시지나</b> 보낸 뒤 다시 <b>[연결]</b>을 누르면 chat_id가 자동 감지됩니다.<br><span class="pf-alert-help-sub">원하면 chat_id를 직접 입력해도 됩니다(@userinfobot로 확인). 텔레그램 계정이 없으면 먼저 가입하세요.</span></li>
+                  <li>연결되면 <b>[테스트]</b>로 실제 수신을 확인하세요.</li>
                 </ol>
               </div>
               <div class="pf-alert-help-block">
-                <strong>② 카카오톡 — 카카오 로그인으로 연결</strong>
+                <strong>② 카카오톡 — 내 카카오 앱으로 등록</strong>
                 <ol>
-                  <li>아래 ‘카카오톡’ 줄의 <b>[카카오 로그인]</b> 버튼을 누릅니다.</li>
-                  <li>카카오 계정으로 로그인하고 <b>‘카카오톡 메시지 전송’</b>에 동의합니다.</li>
-                  <li>동의가 끝나면 이 화면이 자동으로 <b>‘연결됨’</b>으로 바뀝니다. <b>[테스트]</b>로 확인하세요.</li>
+                  <li><b>developers.kakao.com</b>에서 앱을 만들고 <b>REST API 키</b>를 복사합니다. <span class="pf-alert-help-sub">본인 앱이면 본인이 관리자라 ‘나에게 보내기’가 검수 없이 됩니다.</span></li>
+                  <li>그 앱에서 <b>카카오 로그인 활성화</b>, 동의항목 <b>‘카카오톡 메시지 전송’</b> 사용 설정, <b>Redirect URI</b>에 아래 카카오 칸에 표시되는 주소를 등록합니다.</li>
+                  <li>아래 ‘카카오톡’ 칸에 REST 키를 붙여넣고 <b>[카카오 연결]</b> → 카카오 로그인·동의.</li>
+                  <li>연결되면 <b>[테스트]</b>로 확인하세요.</li>
                 </ol>
-                <p class="pf-alert-help-warn">⚠️ 카카오 정책상, 권한 검수 전에는 앱에 등록된 <b>‘테스트 사용자(팀원)’</b>만 연결할 수 있습니다. 로그인 단계에서 막히면 <b>운영자에게 본인 카카오 계정(이메일)</b>을 알려 등록을 요청하세요. 불특정 다수 공개는 운영자의 카카오 ‘카카오톡 메시지’ 권한 검수가 필요합니다.</p>
               </div>
-              <p class="pf-alert-help-foot">· 텔레그램과 카카오를 모두 연결하면 양쪽으로 동시에 받습니다. · 각 줄의 버튼으로 임시 끄기·해제를 언제든 할 수 있습니다.</p>
+              <p class="pf-alert-help-foot">· 텔레그램과 카카오를 모두 연결하면 양쪽으로 동시에 받습니다. · 각 줄의 버튼으로 임시 끄기·해제를 언제든 할 수 있습니다. · 입력한 토큰/키는 본인 계정에만 저장되어 본인에게 보내는 데만 쓰입니다.</p>
             </div>
             <div class="pf-alert-channels" id="pfAlertChannels">상태 확인 중…</div>
           </section>

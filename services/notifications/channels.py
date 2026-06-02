@@ -35,8 +35,9 @@ async def dispatch(google_sub: str, text: str) -> int:
         config = ch.get("config") or {}
         try:
             if name == "telegram":
+                token = config.get("bot_token") or telegram.default_token()
                 chat_id = config.get("chat_id")
-                if chat_id and await telegram.send_message(chat_id, text):
+                if token and chat_id and await telegram.send_message(token, chat_id, text):
                     sent += 1
             elif name == "kakao":
                 if await kakao.send_to_user(google_sub, ch, text):

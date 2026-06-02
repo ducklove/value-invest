@@ -308,10 +308,8 @@ async def run_alert_loop(stop_event: asyncio.Event, *, interval_seconds: float, 
     if interval_seconds <= 0:
         logger.info("alert loop disabled (NOTIFY_ALERT_INTERVAL_S<=0)")
         return
-    from services.notifications import kakao, telegram
-    if not (telegram.is_configured() or kakao.is_configured()):
-        logger.info("alert loop disabled (no notification channel configured)")
-        return
+    # Credentials are per-user, so we don't gate on any env token — users with
+    # a registered channel are picked up by evaluate_user; others are skipped.
     logger.info("alert loop starting (interval=%.0fs)", interval_seconds)
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=initial_delay_seconds)

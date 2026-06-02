@@ -85,83 +85,102 @@ async function pfAlertsLoadChannels() {
   pfAlertsRenderChannels();
 }
 
-function pfAlertsChannelRow(opts) {
-  // opts: {key, name, ch, connectFn, badgeWho}
-  const { key, name, ch, connectLabel, badgeWho } = opts;
-  if (!ch.configured) {
-    return `<div class="pf-alert-channel">
-      <span class="pf-alert-channel-name">${name}</span>
-      <span class="pf-alert-badge off">서버 미설정</span>
-    </div>`;
-  }
-  if (ch.connected) {
-    const who = badgeWho ? `<span class="pf-alert-who">${badgeWho}</span>` : '';
-    const onoff = ch.enabled
-      ? '<span class="pf-alert-badge on">알림 켜짐</span>'
-      : '<span class="pf-alert-badge off">알림 꺼짐</span>';
-    return `<div class="pf-alert-channel">
-      <span class="pf-alert-channel-name">${name}</span>
-      ${onoff}${who}
-      <span class="pf-alert-channel-actions">
-        <button class="pf-alert-btn" type="button" onclick="pfAlertsTest('${key}')">테스트</button>
-        <button class="pf-alert-btn" type="button" onclick="pfAlertsToggleChannel('${key}', ${ch.enabled ? 'false' : 'true'})">${ch.enabled ? '끄기' : '켜기'}</button>
-        <button class="pf-alert-btn danger" type="button" onclick="pfAlertsUnlink('${key}')">해제</button>
-      </span>
-    </div>`;
-  }
+function pfAlertsChannelActions(key, enabled) {
+  return `<span class="pf-alert-channel-actions">
+    <button class="pf-alert-btn" type="button" onclick="pfAlertsTest('${key}')">테스트</button>
+    <button class="pf-alert-btn" type="button" onclick="pfAlertsToggleChannel('${key}', ${enabled ? 'false' : 'true'})">${enabled ? '끄기' : '켜기'}</button>
+    <button class="pf-alert-btn danger" type="button" onclick="pfAlertsUnlink('${key}')">해제</button>
+  </span>`;
+}
+
+function pfAlertsConnectedRow(name, enabled, who) {
+  const onoff = enabled
+    ? '<span class="pf-alert-badge on">알림 켜짐</span>'
+    : '<span class="pf-alert-badge off">알림 꺼짐</span>';
+  const whoHtml = who ? `<span class="pf-alert-who">${who}</span>` : '';
+  const key = name === '카카오톡' ? 'kakao' : 'telegram';
   return `<div class="pf-alert-channel">
-    <span class="pf-alert-channel-name">${name}</span>
-    <span class="pf-alert-badge off">연결 안 됨</span>
-    <span class="pf-alert-channel-actions">
-      <button class="pf-alert-btn primary" type="button" onclick="pfAlertsConnect('${key}')">${connectLabel}</button>
-    </span>
+    <span class="pf-alert-channel-name">${name}</span>${onoff}${whoHtml}
+    ${pfAlertsChannelActions(key, enabled)}
+  </div>`;
+}
+
+function pfAlertsTelegramBlock(tg) {
+  if (tg.connected) {
+    const who = tg.username ? `@${escapeHtml(tg.username)}` : (tg.chat_id ? `chat ${escapeHtml(String(tg.chat_id))}` : '');
+    return pfAlertsConnectedRow('텔레그램', tg.enabled, who);
+  }
+  return `<div class="pf-alert-channel-reg">
+    <div class="pf-alert-channel-reg-head"><span class="pf-alert-channel-name">텔레그램</span><span class="pf-alert-badge off">연결 안 됨</span></div>
+    <div class="pf-alert-reg-form">
+      <input class="pf-modal-input" id="pfTgToken" type="text" placeholder="봇 토큰 (BotFather에서 발급)" autocomplete="off">
+      <input class="pf-modal-input" id="pfTgChat" type="text" placeholder="chat_id (선택 · 비우면 자동 감지)" autocomplete="off">
+      <button class="pf-alert-btn primary" type="button" onclick="pfAlertsTelegramRegister()">연결</button>
+    </div>
+    <div class="pf-alert-hint" id="pfTgHint"></div>
+  </div>`;
+}
+
+function pfAlertsKakaoBlock(kk) {
+  if (kk.connected) {
+    const who = kk.nickname ? escapeHtml(kk.nickname) : '';
+    return pfAlertsConnectedRow('카카오톡', kk.enabled, who);
+  }
+  const redirect = kk.redirect_uri || '';
+  const redirectHtml = redirect
+    ? `<div class="pf-alert-hint">카카오 앱의 <b>Redirect URI</b>에 아래 주소를 등록하세요:<br><code class="pf-alert-redirect">${escapeHtml(redirect)}</code></div>`
+    : '<div class="pf-alert-hint">서버 주소를 확인할 수 없어 Redirect URI를 표시하지 못했습니다.</div>';
+  return `<div class="pf-alert-channel-reg">
+    <div class="pf-alert-channel-reg-head"><span class="pf-alert-channel-name">카카오톡</span><span class="pf-alert-badge off">연결 안 됨</span></div>
+    <div class="pf-alert-reg-form">
+      <input class="pf-modal-input" id="pfKkKey" type="text" placeholder="카카오 REST API 키" autocomplete="off">
+      <button class="pf-alert-btn primary" type="button" onclick="pfAlertsKakaoConnect()">카카오 연결</button>
+    </div>
+    ${redirectHtml}
+    <div class="pf-alert-hint" id="pfKkHint"></div>
   </div>`;
 }
 
 function pfAlertsRenderChannels() {
   const el = document.getElementById('pfAlertChannels');
   const data = PfAlerts.channels || {};
-  const tg = data.telegram || { configured: false };
-  const kk = data.kakao || { configured: false };
-  let html = '';
-  html += pfAlertsChannelRow({
-    key: 'telegram', name: '텔레그램', ch: tg, connectLabel: '연결',
-    badgeWho: tg.username ? `@${escapeHtml(tg.username)}` : '',
-  });
-  html += pfAlertsChannelRow({
-    key: 'kakao', name: '카카오톡', ch: kk, connectLabel: '카카오 로그인',
-    badgeWho: kk.nickname ? escapeHtml(kk.nickname) : '',
-  });
-  if (!tg.configured && !kk.configured) {
-    html += '<div class="pf-alert-hint">서버에 <code>TELEGRAM_BOT_TOKEN</code> 또는 <code>KAKAO_REST_API_KEY</code> 가 설정되면 연결할 수 있습니다.</div>';
-  }
-  if (kk.configured) {
-    html += '<div class="pf-alert-hint">카카오는 앱에 등록된 <b>팀원·테스트 사용자</b>만 바로 연결됩니다. 일반 사용자에게 열려면 카카오 <b>권한 검수</b>가 필요합니다. 텔레그램은 누구나 즉시 연결됩니다.</div>';
-  }
-  html += '<div class="pf-alert-hint" id="pfAlertConnectHint"></div>';
-  el.innerHTML = html;
+  el.innerHTML =
+    pfAlertsTelegramBlock(data.telegram || {})
+    + pfAlertsKakaoBlock(data.kakao || {});
 }
 
-async function pfAlertsConnect(key) {
-  const hint = document.getElementById('pfAlertConnectHint');
+async function pfAlertsTelegramRegister() {
+  const hint = document.getElementById('pfTgHint');
+  const token = ((document.getElementById('pfTgToken') || {}).value || '').trim();
+  const chat = ((document.getElementById('pfTgChat') || {}).value || '').trim();
+  if (!token) { if (hint) hint.textContent = '봇 토큰을 입력하세요.'; return; }
+  if (hint) hint.textContent = '확인 중…';
   try {
-    if (key === 'telegram') {
-      const resp = await pfAlertsApi('/telegram/link', { method: 'POST', body: '{}' });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || '연결 코드 생성 실패');
-      window.open(data.deep_link, '_blank', 'noopener');
-      if (hint) hint.textContent = '텔레그램에서 [시작]을 누르면 자동으로 연결됩니다… (대기 중)';
-      pfAlertsStartPoll('telegram', data.expires_in_minutes || 10);
-    } else {
-      const resp = await pfAlertsApi('/kakao/connect');
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || '카카오 연결 시작 실패');
-      window.open(data.authorize_url, '_blank', 'width=480,height=720');
-      if (hint) hint.textContent = '카카오 로그인 후 동의하면 연결됩니다… (대기 중)';
-      pfAlertsStartPoll('kakao', data.expires_in_minutes || 10);
-    }
+    const resp = await pfAlertsApi('/telegram/register', {
+      method: 'POST', body: JSON.stringify({ bot_token: token, chat_id: chat }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || '연결 실패');
+    if (data.connected) pfAlertsLoadChannels();
+    else if (hint) hint.textContent = data.detail || '봇에게 메시지를 보낸 뒤 다시 [연결]을 누르세요.';
   } catch (e) {
-    if (hint) hint.textContent = (e && e.message) || '연결을 시작하지 못했습니다.';
+    if (hint) hint.textContent = (e && e.message) || '연결에 실패했습니다.';
+  }
+}
+
+async function pfAlertsKakaoConnect() {
+  const hint = document.getElementById('pfKkHint');
+  const key = ((document.getElementById('pfKkKey') || {}).value || '').trim();
+  if (!key) { if (hint) hint.textContent = '카카오 REST API 키를 입력하세요.'; return; }
+  try {
+    const resp = await pfAlertsApi('/kakao/connect', { method: 'POST', body: JSON.stringify({ rest_key: key }) });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || '연결 실패');
+    window.open(data.authorize_url, '_blank', 'width=480,height=720');
+    if (hint) hint.textContent = '카카오 로그인 후 동의하면 연결됩니다… (대기 중)';
+    pfAlertsStartPoll('kakao', data.expires_in_minutes || 10);
+  } catch (e) {
+    if (hint) hint.textContent = (e && e.message) || '연결에 실패했습니다.';
   }
 }
 
@@ -172,7 +191,7 @@ function pfAlertsStartPoll(kind, ttlMinutes) {
   PfAlerts.pollTimer = setInterval(async () => {
     if (Date.now() > PfAlerts.pollDeadline) {
       pfAlertsStopPoll();
-      const hint = document.getElementById('pfAlertConnectHint');
+      const hint = document.getElementById(kind === 'kakao' ? 'pfKkHint' : 'pfTgHint');
       if (hint) hint.textContent = '연결 시간이 만료되었습니다. 다시 시도해주세요.';
       return;
     }
@@ -419,7 +438,8 @@ async function pfAlertsDelete(id) {
 if (typeof window !== 'undefined') {
   Object.assign(window, {
     pfOpenAlerts, pfCloseAlerts, pfAlertsToggleHelp,
-    pfAlertsConnect, pfAlertsTest, pfAlertsToggleChannel, pfAlertsUnlink,
+    pfAlertsTelegramRegister, pfAlertsKakaoConnect,
+    pfAlertsTest, pfAlertsToggleChannel, pfAlertsUnlink,
     pfAlertsSetCategory, pfAlertsSubmit, pfAlertsToggle, pfAlertsDelete,
   });
 }

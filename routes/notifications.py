@@ -1,9 +1,13 @@
-"""User-facing notification settings: channels, Telegram bot linking, alerts.
+"""User-facing notification settings: per-user channel registration + alerts.
 
-Auth-gated (`/api/notifications/*`). The Telegram link flow hands the client a
-`t.me/<bot>?start=<code>` deep link; the bot poller (services.notifications.
-telegram.run_poll_loop) captures the chat_id and marks the channel verified, so
-the client just polls `link-status` until connected.
+Auth-gated (`/api/notifications/*`). Credentials are per-user:
+* Telegram — the user registers their own bot token (from @BotFather) and a
+  chat_id (auto-detected via getUpdates after they message their bot, or typed).
+* Kakao    — the user registers their own app REST key and OAuths against it;
+  since they're the app admin, "나에게 보내기" works without business review.
+
+Env tokens (TELEGRAM_BOT_TOKEN / KAKAO_REST_API_KEY) remain an optional shared
+fallback only.
 """
 
 from __future__ import annotations
@@ -38,14 +42,16 @@ def _require_user(user):
 async def get_channels(request: Request):
     user = _require_user(await get_current_user(request))
     items = await cache.list_notification_channels(user["google_sub"])
-    telegram_status = {"connected": False, "enabled": False, "username": None, "configured": telegram.is_configured()}
-    kakao_status = {"connected": False, "enabled": False, "nickname": None, "configured": kakao.is_configured()}
+    telegram_status = {"connected": False, "enabled": False, "username": None, "chat_id": None}
+    kakao_status = {"connected": False, "enabled": False, "nickname": None, "redirect_uri": kakao.redirect_uri(str(request.base_url))}
     for ch in items:
         if ch["channel"] == "telegram":
+            cfg = ch.get("config") or {}
             telegram_status.update({
                 "connected": bool(ch.get("verified")),
                 "enabled": bool(ch.get("enabled")),
-                "username": (ch.get("config") or {}).get("username"),
+                "username": cfg.get("username"),
+                "chat_id": cfg.get("chat_id"),
             })
         elif ch["channel"] == "kakao":
             kakao_status.update({
@@ -56,35 +62,46 @@ async def get_channels(request: Request):
     return {"telegram": telegram_status, "kakao": kakao_status}
 
 
-@router.post("/telegram/link")
-async def telegram_link(request: Request):
+@router.post("/telegram/register")
+async def telegram_register(request: Request, payload: dict = Body(...)):
+    """Register the user's own bot token. chat_id is taken from the body, or
+    auto-detected via getUpdates (the user must have messaged their bot once)."""
     user = _require_user(await get_current_user(request))
-    if not telegram.is_configured():
-        raise HTTPException(status_code=503, detail="텔레그램 봇이 서버에 설정되어 있지 않습니다.")
-    bot = await telegram.get_bot_username()
-    if not bot:
-        raise HTTPException(status_code=503, detail="텔레그램 봇 정보를 확인할 수 없습니다.")
-    code = secrets.token_urlsafe(9)
-    expires_at = (datetime.now() + timedelta(minutes=LINK_TTL_MINUTES)).isoformat()
-    await cache.create_notification_link(code, user["google_sub"], "telegram", expires_at)
-    return {
-        "code": code,
-        "deep_link": f"https://t.me/{bot}?start={code}",
-        "bot_username": bot,
-        "expires_in_minutes": LINK_TTL_MINUTES,
-    }
+    token = str(payload.get("bot_token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="봇 토큰을 입력하세요.")
+    me = await telegram.get_me(token)
+    if not me:
+        raise HTTPException(status_code=400, detail="봇 토큰이 올바르지 않습니다. BotFather에서 발급한 토큰을 확인하세요.")
+    username = me.get("username")
 
+    chat_id = payload.get("chat_id")
+    chat_id = str(chat_id).strip() if chat_id not in (None, "") else ""
+    if not chat_id:
+        detected = await telegram.get_recent_chat_id(token)
+        if detected:
+            chat_id = detected[0]
 
-@router.get("/telegram/link-status")
-async def telegram_link_status(request: Request):
-    user = _require_user(await get_current_user(request))
-    ch = await cache.get_notification_channel(user["google_sub"], "telegram")
-    if not ch:
-        return {"connected": False, "username": None}
-    return {
-        "connected": bool(ch.get("verified")),
-        "username": (ch.get("config") or {}).get("username"),
-    }
+    if not chat_id:
+        # Token is valid but we don't know where to send yet — keep it and
+        # tell the user to message the bot, then retry.
+        await cache.upsert_notification_channel(
+            user["google_sub"], "telegram",
+            config={"bot_token": token, "username": username},
+            enabled=True, verified=False,
+        )
+        return {
+            "connected": False,
+            "username": username,
+            "detail": f"@{username} 봇에게 텔레그램에서 아무 메시지나 보낸 뒤 다시 [연결]을 누르세요. (또는 chat_id를 직접 입력)",
+        }
+
+    config = {"bot_token": token, "chat_id": chat_id, "username": username}
+    await cache.upsert_notification_channel(
+        user["google_sub"], "telegram", config=config, enabled=True, verified=True
+    )
+    await telegram.send_message(token, chat_id, "✅ Value Compass 알림이 연결되었습니다.")
+    return {"connected": True, "username": username, "chat_id": chat_id}
 
 
 @router.put("/channels/telegram")
@@ -103,9 +120,11 @@ async def test_telegram(request: Request):
     ch = await cache.get_notification_channel(user["google_sub"], "telegram")
     if not ch or not ch.get("verified"):
         raise HTTPException(status_code=400, detail="먼저 텔레그램을 연결해주세요.")
-    chat_id = (ch.get("config") or {}).get("chat_id")
+    cfg = ch.get("config") or {}
+    token = cfg.get("bot_token") or telegram.default_token()
+    chat_id = cfg.get("chat_id")
     ok = await telegram.send_message(
-        chat_id, "🔔 Value Compass 테스트 알림입니다. 정상적으로 연결되었습니다."
+        token, chat_id, "🔔 Value Compass 테스트 알림입니다. 정상적으로 연결되었습니다."
     )
     if not ok:
         raise HTTPException(status_code=502, detail="텔레그램 전송에 실패했습니다.")
@@ -141,18 +160,30 @@ def _kakao_result_page(title: str, message: str) -> Response:
     return Response(content=html, media_type="text/html; charset=utf-8")
 
 
-@router.get("/kakao/connect")
-async def kakao_connect(request: Request):
+@router.post("/kakao/connect")
+async def kakao_connect(request: Request, payload: dict = Body(default={})):
+    """Start Kakao OAuth using the user's own REST key (env key as fallback).
+
+    The REST key is stashed in the (unverified) kakao channel so the public
+    callback can exchange the code with the same key.
+    """
     user = _require_user(await get_current_user(request))
-    if not kakao.is_configured():
-        raise HTTPException(status_code=503, detail="카카오 앱이 서버에 설정되어 있지 않습니다.")
-    if not kakao.redirect_uri(str(request.base_url)):
-        raise HTTPException(status_code=503, detail="카카오 Redirect URI가 설정되어 있지 않습니다.")
+    rest_key = str((payload or {}).get("rest_key") or "").strip() or kakao.env_key()
+    if not rest_key:
+        raise HTTPException(status_code=400, detail="카카오 REST API 키를 입력하세요.")
+    redirect = kakao.redirect_uri(str(request.base_url))
+    if not redirect:
+        raise HTTPException(status_code=503, detail="Redirect URI를 확인할 수 없습니다.")
+    # Persist the rest_key (unverified) so the callback can use it.
+    await cache.upsert_notification_channel(
+        user["google_sub"], "kakao", config={"rest_key": rest_key}, enabled=True, verified=False
+    )
     state = secrets.token_urlsafe(12)
     expires_at = (datetime.now() + timedelta(minutes=LINK_TTL_MINUTES)).isoformat()
     await cache.create_notification_link(state, user["google_sub"], "kakao", expires_at)
     return {
-        "authorize_url": kakao.authorize_url(state, request_base=str(request.base_url)),
+        "authorize_url": kakao.authorize_url(rest_key, state, redirect),
+        "redirect_uri": redirect,
         "expires_in_minutes": LINK_TTL_MINUTES,
     }
 
@@ -165,25 +196,31 @@ async def kakao_callback(request: Request):
     if params.get("error") or not params.get("code") or not params.get("state"):
         return _kakao_result_page(
             "연결 실패",
-            "연결이 취소되었거나 오류가 발생했습니다. 카카오는 앱에 등록된 테스트 사용자만 "
-            "연결할 수 있으니, 막힌 경우 운영자에게 카카오 계정 등록을 요청하세요.",
+            "연결이 취소되었거나 오류가 발생했습니다. 카카오 앱 설정(카카오 로그인 활성화, "
+            "카카오톡 메시지 동의항목, Redirect URI 등록)을 확인한 뒤 다시 시도하세요.",
         )
     link = await cache.pop_notification_link(params["state"])
     if not link or link.get("channel") != "kakao":
         return _kakao_result_page("연결 실패", "연결 코드가 만료되었습니다. 다시 시도해주세요.")
+    google_sub = link["google_sub"]
+    pending = await cache.get_notification_channel(google_sub, "kakao")
+    rest_key = ((pending or {}).get("config") or {}).get("rest_key") or kakao.env_key()
+    redirect = kakao.redirect_uri(str(request.base_url))
+    if not rest_key:
+        return _kakao_result_page("연결 실패", "REST API 키 정보가 없습니다. 처음부터 다시 시도하세요.")
     try:
-        tokens = await kakao.exchange_code(params["code"], request_base=str(request.base_url))
+        tokens = await kakao.exchange_code(rest_key, params["code"], redirect)
     except Exception as exc:
         logger.warning("kakao token exchange failed: %s", exc)
-        return _kakao_result_page("연결 실패", "토큰 발급에 실패했습니다. 잠시 후 다시 시도해주세요.")
-    config = dict(tokens)
+        return _kakao_result_page("연결 실패", "토큰 발급에 실패했습니다. REST 키와 Redirect URI 등록을 확인하세요.")
+    config = {"rest_key": rest_key, **tokens}
     nickname = await kakao.fetch_nickname(tokens["access_token"])
     if nickname:
         config["nickname"] = nickname
     await cache.upsert_notification_channel(
-        link["google_sub"], "kakao", config=config, enabled=True, verified=True
+        google_sub, "kakao", config=config, enabled=True, verified=True
     )
-    logger.info("kakao linked user=%s", link["google_sub"][:8])
+    logger.info("kakao linked user=%s", google_sub[:8])
     return _kakao_result_page("연결 완료", "카카오톡 알림이 연결되었습니다. 이 창은 닫으셔도 됩니다.")
 
 

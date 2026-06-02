@@ -95,29 +95,30 @@ test("총평가액 폼: 종목 선택 없음", () => {
   assert.ok(html.includes('id="pfAlertThreshold"'));
 });
 
-test("채널 행: 텔레그램 연결됨 + 카카오 미설정", () => {
+test("채널: 텔레그램 연결됨 행 + 카카오 등록 폼", () => {
   const w = loadAlerts();
   w.PfAlerts.channels = {
-    telegram: { configured: true, connected: true, enabled: true, username: "mybot" },
-    kakao: { configured: false, connected: false },
+    telegram: { connected: true, enabled: true, username: "mybot" },
+    kakao: { connected: false, redirect_uri: "https://x.test/api/notifications/kakao/callback" },
   };
   w.pfAlertsRenderChannels();
   const html = w.document.getElementById("pfAlertChannels").innerHTML;
   assert.match(html, /텔레그램/);
-  assert.match(html, /카카오톡/);
-  assert.match(html, /테스트/);          // 텔레그램 연결됨 -> 테스트 버튼
-  assert.match(html, /서버 미설정/);      // 카카오 미설정 배지
+  assert.match(html, /테스트/);                 // 텔레그램 연결됨 -> 테스트 버튼
+  assert.ok(html.includes('id="pfKkKey"'));     // 카카오 미연결 -> REST 키 입력
+  assert.match(html, /kakao\/callback/);        // Redirect URI 안내
 });
 
-test("카카오 미연결(설정됨) 행은 '카카오 로그인' 버튼을 보인다", () => {
+test("텔레그램 미연결 행은 봇 토큰 등록 폼을 보인다", () => {
   const w = loadAlerts();
   w.PfAlerts.channels = {
-    telegram: { configured: false, connected: false },
-    kakao: { configured: true, connected: false },
+    telegram: { connected: false },
+    kakao: { connected: false, redirect_uri: "https://x.test/cb" },
   };
   w.pfAlertsRenderChannels();
   const html = w.document.getElementById("pfAlertChannels").innerHTML;
-  assert.match(html, /카카오 로그인/);
+  assert.ok(html.includes('id="pfTgToken"'), "봇 토큰 입력");
+  assert.ok(html.includes('id="pfTgChat"'), "chat_id 입력");
 });
 
 test("규칙 목록: 목표가 달성/종목 일간 라벨", () => {

@@ -1,13 +1,17 @@
-"""KakaoTalk channel via the "나에게 보내기"(memo) API.
+"""KakaoTalk channel via the "나에게 보내기"(memo) API — per-user app keys.
 
-Unlike Telegram (one permanent bot token), Kakao needs per-user OAuth:
-* the user logs in + consents to ``talk_message`` (handled by the connect/
-  callback routes), which yields an access token (~6h) + refresh token (~2mo);
-* tokens live in ``notification_channels.config_json`` (channel='kakao');
-* ``send_to_user`` refreshes the access token on demand and persists it, so the
-  alert engine just calls ``channels.dispatch`` like any other channel.
+Each user registers their OWN Kakao app (REST API key). Because they are the
+admin of their own app, the ``talk_message`` "나에게 보내기" scope works for
+them **without** Kakao's business review — that review/test-user gating only
+bites when many users share one operator app.
 
-Everything is a no-op when ``KAKAO_REST_API_KEY`` is unset.
+Per-user flow:
+* the user pastes their REST API key + registers our redirect URI in their app;
+* OAuth (connect/callback routes) yields access(~6h)+refresh(~2mo) tokens;
+* tokens + the rest_key live in ``notification_channels.config_json``;
+* ``send_to_user`` refreshes on demand using the stored rest_key.
+
+``KAKAO_REST_API_KEY`` env remains an optional fallback (shared operator app).
 """
 
 from __future__ import annotations
@@ -31,12 +35,14 @@ MEMO_TEXT_MAX = 200  # Kakao default text template limit.
 _APP_URL = "https://cantabile.tplinkdns.com:3691"
 
 
-def _rest_key() -> str:
+def env_key() -> str:
     return (os.getenv("KAKAO_REST_API_KEY") or "").strip()
 
 
 def is_configured() -> bool:
-    return bool(_rest_key())
+    """Whether the optional server-wide fallback app key is set. Per-user app
+    keys work regardless of this."""
+    return bool(env_key())
 
 
 def redirect_uri(request_base: str | None = None) -> str:
@@ -49,10 +55,10 @@ def redirect_uri(request_base: str | None = None) -> str:
     return f"{base}/api/notifications/kakao/callback" if base else ""
 
 
-def authorize_url(state: str, *, request_base: str | None = None) -> str:
+def authorize_url(rest_key: str, state: str, redirect: str) -> str:
     params = {
-        "client_id": _rest_key(),
-        "redirect_uri": redirect_uri(request_base),
+        "client_id": rest_key,
+        "redirect_uri": redirect,
         "response_type": "code",
         "scope": "talk_message",
         "state": state,
@@ -72,11 +78,11 @@ def _store_format(payload: dict) -> dict:
     return out
 
 
-async def exchange_code(code: str, *, request_base: str | None = None) -> dict:
+async def exchange_code(rest_key: str, code: str, redirect: str) -> dict:
     data = {
         "grant_type": "authorization_code",
-        "client_id": _rest_key(),
-        "redirect_uri": redirect_uri(request_base),
+        "client_id": rest_key,
+        "redirect_uri": redirect,
         "code": code,
     }
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -87,8 +93,8 @@ async def exchange_code(code: str, *, request_base: str | None = None) -> dict:
     return _store_format(payload)
 
 
-async def _refresh_token(refresh: str) -> dict:
-    data = {"grant_type": "refresh_token", "client_id": _rest_key(), "refresh_token": refresh}
+async def _refresh_token(rest_key: str, refresh: str) -> dict:
+    data = {"grant_type": "refresh_token", "client_id": rest_key, "refresh_token": refresh}
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(f"{AUTH_BASE}/oauth/token", data=data)
         payload = resp.json()
@@ -133,15 +139,16 @@ def _expired(expires_at) -> bool:
 
 
 async def _refresh_into(google_sub: str, config: dict, enabled: bool) -> bool:
-    """Refresh the access token in-place and persist. Returns success."""
+    """Refresh the access token in-place (using the per-user rest_key) and
+    persist. Returns success."""
     refresh = config.get("refresh_token")
-    if not refresh:
+    rest_key = config.get("rest_key") or env_key()
+    if not refresh or not rest_key:
         return False
     try:
-        fresh = await _refresh_token(refresh)
+        fresh = await _refresh_token(rest_key, refresh)
     except Exception as exc:
         logger.warning("kakao refresh failed user=%s: %s", google_sub[:8], exc)
-        # Refresh token is dead — flag for reconnect so the UI can prompt.
         try:
             await cache.upsert_notification_channel(
                 google_sub, "kakao", config=config, enabled=enabled, verified=False
