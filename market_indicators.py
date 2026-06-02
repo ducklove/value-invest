@@ -8,7 +8,9 @@ Public API:
 
 import asyncio
 import json as _json
+import os
 import re
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -51,9 +53,14 @@ CATALOG: dict[str, dict] = {
     "US10Y":  {"label": "미국10년물", "category": "채권"},
     "US20Y":  {"label": "미국20년물", "category": "채권"},
     "US30Y":  {"label": "미국30년물", "category": "채권"},
+    "KOFR":     {"label": "KOFR",     "category": "채권"},
+    "KR_MSB1Y": {"label": "통안채1년", "category": "채권"},
+    "KR2Y":   {"label": "한국2년물", "category": "채권"},
     "KR3Y":   {"label": "한국3년물", "category": "채권"},
     "KR5Y":   {"label": "한국5년물", "category": "채권"},
     "KR10Y":  {"label": "한국10년물", "category": "채권"},
+    "KR20Y":  {"label": "한국20년물", "category": "채권"},
+    "KR30Y":  {"label": "한국30년물", "category": "채권"},
     "JP10Y":  {"label": "일본10년물", "category": "채권"},
     "DE10Y":  {"label": "독일10년물", "category": "채권"},
     "FR10Y":  {"label": "프랑스10년물", "category": "채권"},
@@ -596,6 +603,80 @@ async def _fetch_cnbc_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict
 
 
 # ---------------------------------------------------------------------------
+# Korean bond yields (Bank of Korea ECOS — 국고채 전 만기·통안채·KOFR)
+# ---------------------------------------------------------------------------
+
+# CNBC 에 없는 한국물(전 만기 국고채·통안채·KOFR)을 한국은행 ECOS 시장금리(일별)
+# 통계표 817Y002 에서 가져온다. 기존 KR3Y(Naver)·KR5Y/KR10Y(CNBC)는 실시간성이
+# 좋아 그대로 두고, ECOS 가 유일 소스인 항목만 여기서 채운다.
+# ECOS 일별 금리는 직전 영업일 기준으로 공표(당일 장중값 아님)된다.
+_ECOS_STAT = "817Y002"
+_ECOS_BOND_MAP = {
+    "KOFR":     "010901000",  # KOFR(공시RFR)
+    "KR_MSB1Y": "010400001",  # 통안증권(1년)
+    "KR2Y":     "010195000",  # 국고채(2년)
+    "KR20Y":    "010220000",  # 국고채(20년)
+    "KR30Y":    "010230000",  # 국고채(30년)
+}
+
+
+async def _fetch_ecos_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict[str, dict]:
+    """Fetch Korean bond yields from the BOK ECOS API (one request, all items).
+
+    Returns {internal_code: result_dict}. Empty results if ECOS_API_KEY is unset.
+    """
+    out = {code: dict(_EMPTY) for code in codes}
+    api_key = os.getenv("ECOS_API_KEY", "").strip()
+    item_to_code = {_ECOS_BOND_MAP[c]: c for c in codes if c in _ECOS_BOND_MAP}
+    if not api_key or not item_to_code:
+        return out
+    try:
+        end = datetime.now()
+        start = end - timedelta(days=14)  # 최근 2영업일 확보(공휴일·공표지연 여유)
+        url = (
+            f"https://ecos.bok.or.kr/api/StatisticSearch/{api_key}/json/kr/1/700/"
+            f"{_ECOS_STAT}/D/{start:%Y%m%d}/{end:%Y%m%d}"
+        )
+        r = await client.get(url, headers={"User-Agent": "value-invest/1.0"})
+        if r.status_code != 200:
+            return out
+        rows = (_json.loads(r.text).get("StatisticSearch") or {}).get("row") or []
+        # 항목코드별 (날짜, 값) 시계열 수집 — 필요한 항목만.
+        series: dict[str, list] = {}
+        for row in rows:
+            ic = row.get("ITEM_CODE1")
+            if ic not in item_to_code:
+                continue
+            val, t = row.get("DATA_VALUE"), row.get("TIME")
+            if val in (None, "") or not t:
+                continue
+            try:
+                series.setdefault(ic, []).append((t, float(val)))
+            except (ValueError, TypeError):
+                continue
+        for ic, pts in series.items():
+            pts.sort(key=lambda x: x[0])
+            price = pts[-1][1]
+            prev = pts[-2][1] if len(pts) >= 2 else price
+            diff = round(price - prev, 2)  # 표시 정밀도(.2f) 이하 변동은 '변동 없음'
+            if diff == 0:
+                out[item_to_code[ic]] = {
+                    "value": f"{price:.2f}", "change": "", "change_pct": "", "direction": "",
+                }
+                continue
+            change_pct = f"{abs(diff) / prev * 100:.2f}%" if prev else ""
+            out[item_to_code[ic]] = {
+                "value": f"{price:.2f}",
+                "change": f"{abs(diff):.2f}",
+                "change_pct": change_pct,
+                "direction": "up" if diff > 0 else "down",
+            }
+    except Exception:
+        pass
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Gold futures (Yahoo Finance — near-24h coverage)
 # ---------------------------------------------------------------------------
 
@@ -741,6 +822,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     world_daily_items = []  # need individual fetches
     fx_daily_items = []   # AUD/VND — exchangeDailyQuote, one request each
     cnbc_bond_items = []  # government bonds — one batched CNBC request
+    ecos_bond_items = []  # Korean bonds — one batched ECOS request
     us10y_needed = False
     night_futures_needed = False
     gold_needed = False
@@ -761,6 +843,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             fx_daily_items.append(code)
         elif code in _CNBC_BOND_MAP:
             cnbc_bond_items.append(code)
+        elif code in _ECOS_BOND_MAP:
+            ecos_bond_items.append(code)
         elif code in _WORLD_DAILY_CODES:
             world_daily_items.append(code)
         elif code == "US10Y":
@@ -807,6 +891,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_cnbc_bonds(client, cnbc_bond_items))
             task_keys.append(("cnbc_bonds", None))
 
+        # Korean bonds (ECOS) — one batched request covers all items
+        if ecos_bond_items:
+            tasks.append(_fetch_ecos_bonds(client, ecos_bond_items))
+            task_keys.append(("ecos_bonds", None))
+
         # US 10Y bond
         if us10y_needed:
             tasks.append(_fetch_us10y(client))
@@ -849,6 +938,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 # an unexpected shape can't overwrite unrelated entries.
                 if isinstance(result, dict):
                     for c in cnbc_bond_items:
+                        if c in result:
+                            results[c] = result[c]
+            elif kind == "ecos_bonds":
+                if isinstance(result, dict):
+                    for c in ecos_bond_items:
                         if c in result:
                             results[c] = result[c]
             elif kind == "gold":
