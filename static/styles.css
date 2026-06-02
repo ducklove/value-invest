@@ -2061,6 +2061,27 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-alert-section { padding: 4px 0 14px; }
 .pf-alert-section + .pf-alert-section { border-top: 1px solid var(--border); padding-top: 14px; }
 .pf-alert-section h4 { margin: 0 0 10px; font-size: 13px; color: var(--text-secondary); font-weight: 600; }
+.pf-alert-help-toggle {
+  margin-left: 8px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer;
+  vertical-align: middle;
+}
+.pf-alert-help-toggle:hover { background: var(--hover-bg); }
+.pf-alert-help {
+  margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg); font-size: 12.5px; line-height: 1.6;
+}
+.pf-alert-help-intro { margin: 0 0 10px; color: var(--text-secondary); }
+.pf-alert-help-block { margin: 0 0 10px; }
+.pf-alert-help-block strong { display: block; margin-bottom: 4px; font-size: 13px; }
+.pf-alert-help-block ol { margin: 0; padding-left: 18px; }
+.pf-alert-help-block li { margin: 2px 0; }
+.pf-alert-help-sub { color: var(--text-secondary); font-size: 11.5px; }
+.pf-alert-help-warn {
+  margin: 6px 0 0; padding: 8px 10px; border-radius: 8px;
+  background: rgba(245,158,11,0.12); color: var(--text); font-size: 12px;
+}
+.pf-alert-help-foot { margin: 6px 0 0; color: var(--text-secondary); font-size: 11.5px; }
 .pf-alert-channels { display: flex; flex-direction: column; gap: 8px; }
 .pf-alert-channel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .pf-alert-channel-name { font-weight: 600; min-width: 64px; }

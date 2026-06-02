@@ -56,6 +56,19 @@ document.addEventListener('keydown', (e) => {
   if (modal && modal.style.display !== 'none') pfCloseAlerts();
 });
 
+function pfAlertsToggleHelp() {
+  const help = document.getElementById('pfAlertHelp');
+  const btn = document.querySelector('.pf-alert-help-toggle');
+  if (!help) return;
+  const show = help.hasAttribute('hidden');
+  if (show) help.removeAttribute('hidden');
+  else help.setAttribute('hidden', '');
+  if (btn) {
+    btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+    btn.textContent = show ? '연결 방법 ▴' : '연결 방법 ▾';
+  }
+}
+
 // --- Channels (telegram + kakao) -------------------------------------------
 
 async function pfAlertsLoadChannels() {
@@ -405,7 +418,7 @@ async function pfAlertsDelete(id) {
 
 if (typeof window !== 'undefined') {
   Object.assign(window, {
-    pfOpenAlerts, pfCloseAlerts,
+    pfOpenAlerts, pfCloseAlerts, pfAlertsToggleHelp,
     pfAlertsConnect, pfAlertsTest, pfAlertsToggleChannel, pfAlertsUnlink,
     pfAlertsSetCategory, pfAlertsSubmit, pfAlertsToggle, pfAlertsDelete,
   });

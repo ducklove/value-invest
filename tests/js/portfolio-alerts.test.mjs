@@ -25,6 +25,8 @@ const SOURCES = [
 const MODAL_HTML = `
   <div class="pf-modal-overlay" id="pfAlertsModal" style="display:none;">
     <div class="pf-modal-body">
+      <button class="pf-alert-help-toggle" onclick="pfAlertsToggleHelp()" aria-expanded="false">연결 방법 ▾</button>
+      <div class="pf-alert-help" id="pfAlertHelp" hidden></div>
       <div class="pf-alert-channels" id="pfAlertChannels"></div>
       <div class="pf-alert-form" id="pfAlertForm"></div>
       <div class="pf-alert-list" id="pfAlertList"></div>
@@ -137,4 +139,16 @@ test("pfOpenAlerts 는 모달을 표시한다", () => {
   const w = loadAlerts();
   w.pfOpenAlerts();
   assert.equal(w.document.getElementById("pfAlertsModal").style.display, "flex");
+});
+
+test("연결 방법 안내는 토글로 열고 닫힌다", () => {
+  const w = loadAlerts();
+  const help = w.document.getElementById("pfAlertHelp");
+  const btn = w.document.querySelector(".pf-alert-help-toggle");
+  assert.ok(help.hasAttribute("hidden"), "초기엔 숨김");
+  w.pfAlertsToggleHelp();
+  assert.ok(!help.hasAttribute("hidden"), "토글 후 표시");
+  assert.equal(btn.getAttribute("aria-expanded"), "true");
+  w.pfAlertsToggleHelp();
+  assert.ok(help.hasAttribute("hidden"), "다시 토글하면 숨김");
 });

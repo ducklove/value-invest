@@ -163,7 +163,11 @@ async def kakao_callback(request: Request):
     # session. Kakao redirects the OAuth popup here with ?code & ?state.
     params = request.query_params
     if params.get("error") or not params.get("code") or not params.get("state"):
-        return _kakao_result_page("연결 실패", "연결이 취소되었거나 오류가 발생했습니다.")
+        return _kakao_result_page(
+            "연결 실패",
+            "연결이 취소되었거나 오류가 발생했습니다. 카카오는 앱에 등록된 테스트 사용자만 "
+            "연결할 수 있으니, 막힌 경우 운영자에게 카카오 계정 등록을 요청하세요.",
+        )
     link = await cache.pop_notification_link(params["state"])
     if not link or link.get("channel") != "kakao":
         return _kakao_result_page("연결 실패", "연결 코드가 만료되었습니다. 다시 시도해주세요.")

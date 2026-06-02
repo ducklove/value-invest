@@ -364,7 +364,31 @@ function trackEvent(name, params = {}) {
         </div>
         <div class="pf-modal-body pf-alerts-body">
           <section class="pf-alert-section">
-            <h4>알림 채널</h4>
+            <h4>알림 채널
+              <button class="pf-alert-help-toggle" type="button" onclick="pfAlertsToggleHelp()" aria-expanded="false" aria-controls="pfAlertHelp">연결 방법 ▾</button>
+            </h4>
+            <div class="pf-alert-help" id="pfAlertHelp" hidden>
+              <p class="pf-alert-help-intro">포트폴리오 조건(지정가·목표가 달성·등락률·총평가액)을 만족하면 메신저로 알려드립니다. 받을 채널을 <b>본인 계정</b>으로 연결한 뒤, 아래 ‘알림 규칙’에서 조건을 추가하세요. 연결·규칙은 모두 본인에게만 적용됩니다.</p>
+              <div class="pf-alert-help-block">
+                <strong>① 텔레그램 — 누구나 바로 연결</strong>
+                <ol>
+                  <li>아래 ‘텔레그램’ 줄의 <b>[연결]</b> 버튼을 누릅니다.</li>
+                  <li>새 창에서 텔레그램이 열리고 봇 대화가 시작됩니다. 하단의 <b>[시작]</b>(/start)을 누르세요.<br><span class="pf-alert-help-sub">휴대폰에 텔레그램 앱이 있으면 앱으로, 없으면 web.telegram.org로 열립니다. 텔레그램 계정이 없으면 먼저 가입(전화번호)하세요.</span></li>
+                  <li>“연결되었습니다” 메시지를 받으면 이 화면이 자동으로 <b>‘연결됨’</b>으로 바뀝니다.</li>
+                  <li><b>[테스트]</b> 버튼으로 실제 수신을 확인하세요.</li>
+                </ol>
+              </div>
+              <div class="pf-alert-help-block">
+                <strong>② 카카오톡 — 카카오 로그인으로 연결</strong>
+                <ol>
+                  <li>아래 ‘카카오톡’ 줄의 <b>[카카오 로그인]</b> 버튼을 누릅니다.</li>
+                  <li>카카오 계정으로 로그인하고 <b>‘카카오톡 메시지 전송’</b>에 동의합니다.</li>
+                  <li>동의가 끝나면 이 화면이 자동으로 <b>‘연결됨’</b>으로 바뀝니다. <b>[테스트]</b>로 확인하세요.</li>
+                </ol>
+                <p class="pf-alert-help-warn">⚠️ 카카오 정책상, 권한 검수 전에는 앱에 등록된 <b>‘테스트 사용자(팀원)’</b>만 연결할 수 있습니다. 로그인 단계에서 막히면 <b>운영자에게 본인 카카오 계정(이메일)</b>을 알려 등록을 요청하세요. 불특정 다수 공개는 운영자의 카카오 ‘카카오톡 메시지’ 권한 검수가 필요합니다.</p>
+              </div>
+              <p class="pf-alert-help-foot">· 텔레그램과 카카오를 모두 연결하면 양쪽으로 동시에 받습니다. · 각 줄의 버튼으로 임시 끄기·해제를 언제든 할 수 있습니다.</p>
+            </div>
             <div class="pf-alert-channels" id="pfAlertChannels">상태 확인 중…</div>
           </section>
           <section class="pf-alert-section">
