@@ -40,9 +40,21 @@ CATALOG: dict[str, dict] = {
     "EUR_KRW": {"label": "유로/원", "category": "환율"},
     "JPY_KRW": {"label": "엔/원",  "category": "환율"},
     "CNY_KRW": {"label": "위안/원", "category": "환율"},
+    "AUD_KRW": {"label": "호주달러/원", "category": "환율"},
+    "VND_KRW": {"label": "베트남동/원", "category": "환율"},
+    "USD_IDX": {"label": "달러지수", "category": "환율"},
     # 채권
-    "KR3Y":   {"label": "한국3년물", "category": "채권"},
+    "US2Y":   {"label": "미국2년물", "category": "채권"},
     "US10Y":  {"label": "미국10년물", "category": "채권"},
+    "US30Y":  {"label": "미국30년물", "category": "채권"},
+    "KR3Y":   {"label": "한국3년물", "category": "채권"},
+    "KR5Y":   {"label": "한국5년물", "category": "채권"},
+    "KR10Y":  {"label": "한국10년물", "category": "채권"},
+    "JP10Y":  {"label": "일본10년물", "category": "채권"},
+    "DE10Y":  {"label": "독일10년물", "category": "채권"},
+    "FR10Y":  {"label": "프랑스10년물", "category": "채권"},
+    "GB10Y":  {"label": "영국10년물", "category": "채권"},
+    "AU10Y":  {"label": "호주10년물", "category": "채권"},
     # 야간선물
     "NIGHT_FUTURES": {"label": "야간선물", "category": "야간선물"},
 }
@@ -232,6 +244,7 @@ _MARKETINDEX_FX_MAP = {
     "EUR_KRW": "head eur",
     "JPY_KRW": "head jpy",
     "CNY_KRW": "head cny",
+    "USD_IDX": "head usd_idx",  # 달러지수 — 메인 페이지 head 블록 구조가 환율과 동일
 }
 
 
@@ -435,6 +448,146 @@ async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# FX daily quote (AUD, VND — not on the marketindex front-page head blocks)
+# ---------------------------------------------------------------------------
+
+_FX_DAILY_MAP = {
+    "AUD_KRW": "FX_AUDKRW",
+    "VND_KRW": "FX_VNDKRW",  # 네이버 표기와 동일하게 100동당 원으로 인용
+}
+
+
+async def _fetch_fx_daily(client: httpx.AsyncClient, fx_code: str) -> dict:
+    """Fetch an FX rate + daily change from Naver's exchangeDailyQuote page.
+
+    Used for currencies absent from the marketindex front-page head blocks
+    (AUD, VND). The first two rows are today's and the previous business day's
+    rates; the daily change is derived from them.
+    """
+    try:
+        r = await client.get(
+            f"https://finance.naver.com/marketindex/exchangeDailyQuote.naver?marketindexCd={fx_code}",
+            headers=_HEADERS,
+        )
+        html = r.content.decode("euc-kr", errors="ignore")
+        rows = re.findall(
+            r'<tr class="(?:up|down)">\s*<td class="date">[^<]+</td>\s*<td class="num">([\d,\.]+)</td>',
+            html,
+        )
+        if not rows:
+            return dict(_EMPTY)
+        price = float(rows[0].replace(",", ""))
+        prev = float(rows[1].replace(",", "")) if len(rows) >= 2 else price
+        diff = price - prev
+        direction = "up" if diff > 0 else "down" if diff < 0 else ""
+        change_pct = f"{abs(diff) / prev * 100:.2f}%" if prev else ""
+        return {
+            "value": _fmt(price),
+            "change": _fmt(abs(diff)),
+            "change_pct": change_pct,
+            "direction": direction,
+        }
+    except Exception:
+        return dict(_EMPTY)
+
+
+# ---------------------------------------------------------------------------
+# Government bond yields (CNBC quote API — one request covers all symbols)
+# ---------------------------------------------------------------------------
+
+# 내부 코드 → CNBC 심볼. US10Y(Yahoo ^TNX)·KR3Y(Naver)는 기존 경로를 유지하고,
+# 신규 만기/국가만 CNBC 한 번의 묶음 요청으로 가져온다.
+_CNBC_BOND_MAP = {
+    "US2Y":  "US2Y",
+    "US30Y": "US30Y",
+    "KR5Y":  "KR5Y-KR",
+    "KR10Y": "KR10Y-KR",
+    "JP10Y": "JP10Y-JP",
+    "DE10Y": "DE10Y-DE",
+    "FR10Y": "FR10Y-FR",
+    "GB10Y": "UK10Y-GB",
+    "AU10Y": "AU10Y-AU",
+}
+
+
+def _parse_cnbc_quote(q: dict) -> dict:
+    """Map one CNBC FormattedQuote into the indicator result shape."""
+    last_raw = str(q.get("last") or "").strip().rstrip("%").strip()
+    try:
+        value = float(last_raw.replace(",", ""))
+    except ValueError:
+        return dict(_EMPTY)
+    value_str = f"{value:.2f}"
+
+    changetype = str(q.get("changetype") or "").upper()
+    chg_raw = str(q.get("change") or "").strip()
+    # 'UNCH' = unchanged; treat as flat with no delta.
+    if chg_raw in ("", "UNCH", "NA") or changetype == "UNCH":
+        return {"value": value_str, "change": "", "change_pct": "", "direction": ""}
+    try:
+        chg = float(chg_raw.replace(",", "").replace("+", ""))
+    except ValueError:
+        return {"value": value_str, "change": "", "change_pct": "", "direction": ""}
+
+    direction = (
+        "up" if changetype == "UP"
+        else "down" if changetype == "DOWN"
+        else "up" if chg > 0 else "down" if chg < 0 else ""
+    )
+
+    # CNBC's own change_pct for yields is unreliable; derive it from yesterday's
+    # close to match the US10Y/KR3Y convention (|Δyield| / prev_yield).
+    change_pct = ""
+    prev_raw = str(q.get("previous_day_closing") or "").rstrip("%").strip()
+    try:
+        prev = float(prev_raw.replace(",", ""))
+        if prev:
+            change_pct = f"{abs(chg) / prev * 100:.2f}%"
+    except ValueError:
+        pass
+
+    return {
+        "value": value_str,
+        "change": f"{abs(chg):.2f}",
+        "change_pct": change_pct,
+        "direction": direction,
+    }
+
+
+async def _fetch_cnbc_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict[str, dict]:
+    """Fetch several government-bond yields from CNBC in one batched request."""
+    out = {code: dict(_EMPTY) for code in codes}
+    sym_to_code = {_CNBC_BOND_MAP[c]: c for c in codes if c in _CNBC_BOND_MAP}
+    if not sym_to_code:
+        return out
+    try:
+        r = await client.get(
+            "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol",
+            params={
+                "symbols": "|".join(sym_to_code.keys()),
+                "requestMethod": "itv",
+                "noform": "1",
+                "partnerId": "2",
+                "fund": "1",
+                "exthrs": "1",
+                "output": "json",
+            },
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+        )
+        if r.status_code != 200:
+            return out
+        data = _json.loads(r.text)
+        quotes = data.get("FormattedQuoteResult", {}).get("FormattedQuote") or []
+        for q in quotes:
+            code = sym_to_code.get(q.get("symbol"))
+            if code:
+                out[code] = _parse_cnbc_quote(q)
+    except Exception:
+        pass
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Gold futures (Yahoo Finance — near-24h coverage)
 # ---------------------------------------------------------------------------
 
@@ -578,6 +731,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     foreign_indices = []  # need individual fetches
     marketindex_items = []  # share one page fetch
     world_daily_items = []  # need individual fetches
+    fx_daily_items = []   # AUD/VND — exchangeDailyQuote, one request each
+    cnbc_bond_items = []  # government bonds — one batched CNBC request
     us10y_needed = False
     night_futures_needed = False
     gold_needed = False
@@ -594,6 +749,10 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             foreign_indices.append(code)
         elif code in _MARKETINDEX_COMMODITY_MAP or code in _MARKETINDEX_FX_MAP or code == "KR3Y":
             marketindex_items.append(code)
+        elif code in _FX_DAILY_MAP:
+            fx_daily_items.append(code)
+        elif code in _CNBC_BOND_MAP:
+            cnbc_bond_items.append(code)
         elif code in _WORLD_DAILY_CODES:
             world_daily_items.append(code)
         elif code == "US10Y":
@@ -630,6 +789,16 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_world_daily_quote(client, market_code))
             task_keys.append(("world_daily", code))
 
+        # FX daily quote (AUD, VND) — each needs a separate fetch
+        for code in fx_daily_items:
+            tasks.append(_fetch_fx_daily(client, _FX_DAILY_MAP[code]))
+            task_keys.append(("fx_daily", code))
+
+        # Government bonds (CNBC) — one batched request covers all symbols
+        if cnbc_bond_items:
+            tasks.append(_fetch_cnbc_bonds(client, cnbc_bond_items))
+            task_keys.append(("cnbc_bonds", None))
+
         # US 10Y bond
         if us10y_needed:
             tasks.append(_fetch_us10y(client))
@@ -665,6 +834,15 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 marketindex_html = result
             elif kind == "world_daily":
                 results[code] = result
+            elif kind == "fx_daily":
+                results[code] = result
+            elif kind == "cnbc_bonds":
+                # result is {internal_code: data}; copy only requested codes so
+                # an unexpected shape can't overwrite unrelated entries.
+                if isinstance(result, dict):
+                    for c in cnbc_bond_items:
+                        if c in result:
+                            results[c] = result[c]
             elif kind == "gold":
                 results["CMDT_GC"] = result
             elif kind == "wti":
