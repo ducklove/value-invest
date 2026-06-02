@@ -8,8 +8,54 @@ from stock_price import (
     _adjust_dividends_by_price_factors,
     _build_dividend_events,
     _get_history_close_series,
+    _naver_quote_from_block,
     pd,
 )
+
+
+class NaverQuoteSignTests(unittest.TestCase):
+    """Naver returns compareToPreviousClosePrice / fluctuationsRatio already
+    SIGNED. The parser must not multiply by the direction code again (that
+    flipped every DOWN stock to a positive change — e.g. -7.6% → +8.9%)."""
+
+    @staticmethod
+    def _block(price, change, sign_code, ratio):
+        return {
+            "compareToPreviousPrice": {"code": sign_code},
+            "compareToPreviousClosePrice": change,
+            "fluctuationsRatio": ratio,
+            "accumulatedTradingVolume": "1,000",
+        }
+
+    def test_down_stock_keeps_negative_change(self):
+        # 두산퓨얼셀 사례: 종가 82,800, 전일대비 -6,800(signCode 5=하락), -7.59%.
+        q = _naver_quote_from_block("closePrice", {
+            "closePrice": "82,800", **self._block("82,800", "-6,800", "5", "-7.59"),
+        })
+        self.assertEqual(q["change"], -6800)
+        self.assertEqual(q["previous_close"], 89600)
+        self.assertAlmostEqual(q["change_pct"], -7.59, places=2)
+
+    def test_up_stock_stays_positive(self):
+        q = _naver_quote_from_block("closePrice", {
+            "closePrice": "116,300", **self._block("116,300", "100", "2", "0.09"),
+        })
+        self.assertEqual(q["change"], 100)
+        self.assertGreater(q["change_pct"], 0)
+
+    def test_unsigned_magnitude_still_resolves_direction(self):
+        # 원천이 부호 없는 크기로 와도 signCode로 방향을 맞춘다.
+        q = _naver_quote_from_block("closePrice", {
+            "closePrice": "82,800", **self._block("82,800", "6,800", "5", "7.59"),
+        })
+        self.assertEqual(q["change"], -6800)
+        self.assertLess(q["change_pct"], 0)
+
+    def test_ratio_fallback_when_change_missing(self):
+        q = _naver_quote_from_block("closePrice", {
+            "closePrice": "82,800", **self._block("82,800", None, "5", "-7.59"),
+        })
+        self.assertAlmostEqual(q["change_pct"], -7.59, places=2)
 
 
 class SafeFloatTests(unittest.TestCase):

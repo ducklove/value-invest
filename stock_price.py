@@ -69,19 +69,32 @@ def _naver_sign(block: dict) -> int:
     return 0
 
 
+def _naver_signed(raw: float | None, sign: int) -> float | None:
+    """Apply Naver's direction code to a magnitude without double-signing.
+
+    Naver returns compareToPreviousClosePrice / fluctuationsRatio already
+    SIGNED (e.g. '-6,800', '-7.59'). Earlier code multiplied those by the
+    signCode again, flipping every DOWN stock to positive (a -7.6% day showed
+    as +8.9%). Take abs()+signCode so the result is correct whether the source
+    value is signed or an unsigned magnitude; when the code is 보합/미상 (0)
+    trust the value's own sign instead of zeroing it out.
+    """
+    if raw is None:
+        return None
+    return sign * abs(raw) if sign != 0 else raw
+
+
 def _naver_quote_from_block(price_key: str, block: dict) -> dict | None:
     price = _naver_num(block.get(price_key))
     if price is None:
         return None
     sign = _naver_sign(block)
-    change_mag = _naver_num(block.get("compareToPreviousClosePrice"))
-    change = sign * change_mag if change_mag is not None else None
+    change = _naver_signed(_naver_num(block.get("compareToPreviousClosePrice")), sign)
     previous_close = round(price - change, 2) if change is not None else None
     if change is not None and previous_close:
         change_pct = round(change / previous_close * 100, 2)
     else:
-        ratio = _naver_num(block.get("fluctuationsRatio"))
-        change_pct = sign * ratio if ratio is not None else None
+        change_pct = _naver_signed(_naver_num(block.get("fluctuationsRatio")), sign)
     return {
         "price": price,
         "previous_close": previous_close,
