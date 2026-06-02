@@ -122,6 +122,9 @@ function pfAlertsRenderChannels() {
   if (!tg.configured && !kk.configured) {
     html += '<div class="pf-alert-hint">서버에 <code>TELEGRAM_BOT_TOKEN</code> 또는 <code>KAKAO_REST_API_KEY</code> 가 설정되면 연결할 수 있습니다.</div>';
   }
+  if (kk.configured) {
+    html += '<div class="pf-alert-hint">카카오는 앱에 등록된 <b>팀원·테스트 사용자</b>만 바로 연결됩니다. 일반 사용자에게 열려면 카카오 <b>권한 검수</b>가 필요합니다. 텔레그램은 누구나 즉시 연결됩니다.</div>';
+  }
   html += '<div class="pf-alert-hint" id="pfAlertConnectHint"></div>';
   el.innerHTML = html;
 }
