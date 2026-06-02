@@ -93,30 +93,17 @@ def _summarize_holding(current: dict, config: list, top_n: int = 5) -> dict:
 def _summarize_spread(current: dict, config: list, top_n: int = 5) -> dict:
     """우선주: spread(괴리율 %, 높을수록 우선주 할인 큼) 내림차순 TOP.
 
-    같은 보통주에 우선주가 여럿이면(예: 두산퓨얼셀1우/2우B) preferredTicker 가
-    가장 작은 = 먼저 상장된 기본 우선주(보통 '1우') 하나만 노출한다.
+    같은 보통주에 우선주가 여럿이면(예: 두산퓨얼셀1우/2우B) 괴리율이 가장 큰
+    우선주 하나만 노출한다.
     """
     meta = {
         c.get("id"): {"name": c.get("name") or c.get("commonName") or c.get("id"), "code": _code(c.get("commonTicker", ""))}
         for c in (config or [])
     }
-    # 보통주(commonTicker)별 대표 우선주 한 개만: preferredTicker 사전순 최소.
-    by_common: dict = {}
-    for c in (config or []):
-        ct = _code(c.get("commonTicker", ""))
-        if not ct:
-            continue
-        best = by_common.get(ct)
-        if best is None or (c.get("preferredTicker") or "") < (best.get("preferredTicker") or ""):
-            by_common[ct] = c
-    primary_ids = {c.get("id") for c in by_common.values()}
-
     rows = []
     for cid, v in (current.get("prices") or {}).items():
-        if cid not in primary_ids:  # 보통주 쌍 + 대표 우선주만(다중우선주/단독 제외)
-            continue
         m = meta.get(cid)
-        if not m:
+        if not m:  # config에 정의된 보통주 쌍만(우선주 단독 항목 제외)
             continue
         spread = v.get("spread")
         if spread is None:
@@ -127,7 +114,13 @@ def _summarize_spread(current: dict, config: list, top_n: int = 5) -> dict:
             "spread": spread,
             "spreadChange": v.get("spreadChange"),
         })
-    rows.sort(key=lambda r: r["spread"], reverse=True)
+    # 같은 보통주의 다중우선주는 괴리율(spread)이 가장 큰 하나만 남긴다.
+    best_by_code: dict = {}
+    for r in rows:
+        cur = best_by_code.get(r["code"])
+        if cur is None or r["spread"] > cur["spread"]:
+            best_by_code[r["code"]] = r
+    rows = sorted(best_by_code.values(), key=lambda r: r["spread"], reverse=True)
     return {
         "averageSpread": current.get("averageSpread"),
         "averageSpreadChange": current.get("averageSpreadChange"),
