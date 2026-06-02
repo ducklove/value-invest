@@ -366,3 +366,46 @@ test("_newsRender shows empty state when no news", () => {
   w._newsRender(root, []);
   assert.match(root.innerHTML, /표시할 뉴스가 없습니다/);
 });
+
+// --- 국채 (yield curve + 국가별 10년물) ---
+const BOND_CATALOG = {
+  US3M: { label: "미국3개월", category: "국채", country: "US", maturity: 0.25 },
+  US10Y: { label: "미국10년물", category: "국채", country: "US", maturity: 10 },
+  KOFR: { label: "KOFR", category: "국채", country: "KR", maturity: 0 },
+  KR10Y: { label: "한국10년물", category: "국채", country: "KR", maturity: 10 },
+  JP10Y: { label: "일본10년물", category: "국채", country: "JP", maturity: 10 },
+};
+const BOND_DATA = {
+  US3M: { value: "3.71", direction: "down" },
+  US10Y: { value: "4.45", direction: "down" },
+  KOFR: { value: "2.54", direction: "down" },
+  KR10Y: { value: "4.12", direction: "down" },
+  JP10Y: { value: "2.57", direction: "down" },
+};
+
+test("_mdBondCurve aligns KR/US onto a shared maturity axis (nulls where missing)", () => {
+  const w = load();
+  const curve = w._mdBondCurve(Object.keys(BOND_CATALOG), BOND_CATALOG, BOND_DATA);
+  assert.deepEqual([...curve.labels], ["KOFR", "3M", "10Y"]);
+  assert.deepEqual([...curve.kr], [2.54, null, 4.12]); // 한국은 3M 없음
+  assert.deepEqual([...curve.us], [null, 3.71, 4.45]); // 미국은 KOFR 없음
+});
+
+test("_mdBondCountries lists 10Y by yield desc, incl KR/US", () => {
+  const w = load();
+  const cs = w._mdBondCountries(Object.keys(BOND_CATALOG), BOND_CATALOG, BOND_DATA);
+  assert.deepEqual([...cs.map((c) => c.name)], ["미국", "한국", "일본"]);
+  assert.equal(cs[0].value, 4.45);
+});
+
+test("_mdRenderDashboard renders 국채 chart containers + 수치 tables", () => {
+  const w = load();
+  w._mdRenderDashboard(BOND_CATALOG, BOND_DATA);
+  const main = w.document.getElementById("mdIndMain");
+  assert.ok(main.querySelector("#bondYieldCurve"), "yield curve container");
+  assert.ok(main.querySelector("#bondCountryCompare"), "country compare container");
+  const curveTbl = main.querySelector("#bondCurveTable .bond-tbl");
+  assert.ok(curveTbl && /KOFR/.test(curveTbl.textContent), "curve table filled");
+  const ctryTbl = main.querySelector("#bondCountryTable .bond-tbl");
+  assert.ok(ctryTbl && /미국/.test(ctryTbl.textContent), "country table filled");
+});

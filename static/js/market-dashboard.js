@@ -13,7 +13,12 @@ let _mdLoadedOnce = false;
 let _mdInFlight = null;
 
 // Display order for category groups; unknown categories fall to the end.
-const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '원자재', '환율', '채권', '야간선물'];
+const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물'];
+
+// 국채(yield curve·국가비교) 렌더링 상수/상태.
+const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주' };
+const BOND_CURVE_COLORS = { KR: '#2563eb', US: '#e11d48' };
+let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
 
 function _mdChange(d) {
   // Mirror the market-bar contract: direction up/down/flat, change_pct like "1.23%".
@@ -146,12 +151,188 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
     + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}</section>`;
 }
 
+// --- 국채 (yield curve + 국가별 10년물 비교) ---
+
+function _bondVal(d) {
+  if (!d || d.value == null || d.value === '') return null;
+  const n = Number(String(d.value).replace(/,/g, ''));
+  return isFinite(n) ? n : null;
+}
+
+function _bondMatLabel(m) {
+  if (m === 0) return 'KOFR';
+  if (m < 1) return Math.round(m * 12) + 'M';  // 0.25 → 3M
+  return m + 'Y';
+}
+
+// 한국·미국 곡선을 공통 만기축에 맞춰 정렬. {labels, kr[], us[]} (없는 만기는 null).
+function _mdBondCurve(codes, catalog, dataMap) {
+  const pick = (country) => codes
+    .filter((c) => (catalog[c] || {}).country === country && (catalog[c] || {}).maturity != null)
+    .map((c) => ({ m: catalog[c].maturity, v: _bondVal(dataMap ? dataMap[c] : null) }))
+    .filter((x) => x.v != null)
+    .sort((a, b) => a.m - b.m);
+  const kr = pick('KR');
+  const us = pick('US');
+  const mats = [...new Set([...kr, ...us].map((x) => x.m))].sort((a, b) => a - b);
+  const krMap = new Map(kr.map((x) => [x.m, x.v]));
+  const usMap = new Map(us.map((x) => [x.m, x.v]));
+  return {
+    labels: mats.map(_bondMatLabel),
+    kr: mats.map((m) => (krMap.has(m) ? krMap.get(m) : null)),
+    us: mats.map((m) => (usMap.has(m) ? usMap.get(m) : null)),
+  };
+}
+
+// 국가별 10년물(maturity===10) 비교, 금리 내림차순.
+function _mdBondCountries(codes, catalog, dataMap) {
+  return codes
+    .filter((c) => (catalog[c] || {}).maturity === 10)
+    .map((c) => ({
+      country: catalog[c].country,
+      name: BOND_COUNTRY_NAMES[catalog[c].country] || catalog[c].country,
+      value: _bondVal(dataMap ? dataMap[c] : null),
+    }))
+    .filter((x) => x.value != null)
+    .sort((a, b) => b.value - a.value);
+}
+
+function _bondCurveTableHtml(curve) {
+  if (!curve.labels.length) return '';
+  const rows = curve.labels.map((lab, i) => {
+    const kr = curve.kr[i], us = curve.us[i];
+    return `<tr><td class="bt-mat">${escapeHtml(lab)}</td>`
+      + `<td>${kr == null ? '-' : kr.toFixed(2)}</td>`
+      + `<td>${us == null ? '-' : us.toFixed(2)}</td></tr>`;
+  }).join('');
+  return '<table class="bond-tbl"><thead><tr><th>만기</th><th>한국</th><th>미국</th></tr></thead>'
+    + `<tbody>${rows}</tbody></table>`;
+}
+
+function _bondCountryTableHtml(countries) {
+  if (!countries.length) return '';
+  const rows = countries.map((c) =>
+    `<tr><td>${escapeHtml(c.name)}</td><td>${c.value.toFixed(2)}</td></tr>`).join('');
+  return '<table class="bond-tbl"><thead><tr><th>국가</th><th>10년물</th></tr></thead>'
+    + `<tbody>${rows}</tbody></table>`;
+}
+
+function _mdBondSectionHtml() {
+  return '<section class="md-section md-bond-section">'
+    + '<h3 class="md-section-title">국채</h3>'
+    + '<div class="md-bond-sub">기간별 금리 (Yield Curve)</div>'
+    + '<div class="md-bond-chart" id="bondYieldCurve"></div>'
+    + '<div class="md-bond-table" id="bondCurveTable"></div>'
+    + '<div class="md-bond-sub">국가별 10년물</div>'
+    + '<div class="md-bond-chart md-bond-chart-sm" id="bondCountryCompare"></div>'
+    + '<div class="md-bond-table" id="bondCountryTable"></div>'
+    + '</section>';
+}
+
+function _disposeBondCharts() {
+  _bondCharts.forEach(({ ec, ro }) => {
+    try { if (ro) ro.disconnect(); } catch (e) { /* noop */ }
+    try { if (ec) ec.dispose(); } catch (e) { /* noop */ }
+  });
+  _bondCharts = [];
+}
+
+function _bondChartTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  return {
+    text: cs.getPropertyValue('--text-secondary').trim() || '#888',
+    grid: cs.getPropertyValue('--border').trim() || '#333',
+  };
+}
+
+function _bondTrackChart(el, ec) {
+  let ro = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(() => { try { ec.resize(); } catch (e) { /* noop */ } });
+    ro.observe(el);
+  }
+  _bondCharts.push({ ec, ro });
+}
+
+function _drawBondCurveChart(curve) {
+  const el = document.getElementById('bondYieldCurve');
+  if (!el || !window.echarts || !curve.labels.length) return;
+  const t = _bondChartTheme();
+  const ec = echarts.init(el);
+  const mkSeries = (name, data, color) => ({
+    name, type: 'line', data: data.map((v) => (v == null ? '-' : v)),
+    smooth: 0.2, symbol: 'circle', symbolSize: 5, connectNulls: true,
+    lineStyle: { color, width: 2 }, itemStyle: { color },
+  });
+  ec.setOption({
+    grid: { left: 46, right: 14, top: 28, bottom: 24 },
+    legend: { data: ['한국', '미국'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 2 },
+    xAxis: { type: 'category', data: curve.labels, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 10 }, splitLine: { show: false } },
+    yAxis: { type: 'value', scale: true, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) + '%' }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
+    tooltip: {
+      trigger: 'axis',
+      formatter(ps) {
+        let h = ps[0] ? ps[0].axisValue : '';
+        for (const p of ps) {
+          if (p.value == null || p.value === '-') continue;
+          h += `<br/><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px;"></span>${p.seriesName}: ${Number(p.value).toFixed(2)}%`;
+        }
+        return h;
+      },
+    },
+    series: [mkSeries('한국', curve.kr, BOND_CURVE_COLORS.KR), mkSeries('미국', curve.us, BOND_CURVE_COLORS.US)],
+  });
+  _bondTrackChart(el, ec);
+}
+
+function _drawBondCountryChart(countries) {
+  const el = document.getElementById('bondCountryCompare');
+  if (!el || !window.echarts || !countries.length) return;
+  const t = _bondChartTheme();
+  const ec = echarts.init(el);
+  // 가로 막대: 금리 높은 국가가 위로 오도록 역순(echarts y-category는 아래부터).
+  const ordered = countries.slice().reverse();
+  const names = ordered.map((c) => c.name);
+  ec.setOption({
+    grid: { left: 48, right: 44, top: 8, bottom: 8 },
+    xAxis: { type: 'value', scale: true, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
+    yAxis: { type: 'category', data: names, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 11 } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (ps) => `${ps[0].name}: ${Number(ps[0].value).toFixed(2)}%` },
+    series: [{
+      type: 'bar', barWidth: '55%',
+      data: ordered.map((c) => ({
+        value: c.value,
+        itemStyle: { color: (c.country === 'KR' || c.country === 'US') ? '#2563eb' : '#94a3b8', borderRadius: [0, 3, 3, 0] },
+      })),
+      label: { show: true, position: 'right', color: t.text, fontSize: 10, formatter: (p) => Number(p.value).toFixed(2) },
+    }],
+  });
+  _bondTrackChart(el, ec);
+}
+
+function _mdRenderBonds(codes, catalog, dataMap) {
+  const curve = _mdBondCurve(codes, catalog, dataMap);
+  const countries = _mdBondCountries(codes, catalog, dataMap);
+  const curveTbl = document.getElementById('bondCurveTable');
+  if (curveTbl) curveTbl.innerHTML = _bondCurveTableHtml(curve);
+  const ctryTbl = document.getElementById('bondCountryTable');
+  if (ctryTbl) ctryTbl.innerHTML = _bondCountryTableHtml(countries);
+  // 다중 시리즈/막대라 echarts 로 통일(모바일 포함, 목표가 차트와 동일 전략).
+  if (typeof loadEcharts === 'function') {
+    loadEcharts().then(() => {
+      _drawBondCurveChart(curve);
+      _drawBondCountryChart(countries);
+    }).catch((e) => console.warn('bond charts load failed', e));
+  }
+}
+
 function _mdRenderDashboard(catalog, dataMap) {
   // The two-column shell is stable HTML in index.html; we only fill the
   // indicator slots so sibling widgets (movers, 수급, 뉴스) aren't disturbed.
   const mainEl = document.getElementById('mdIndMain');
   const railEl = document.getElementById('mdIndRail');
   if (!mainEl || !railEl) return;
+  _disposeBondCharts();  // 재렌더 전 이전 차트 정리(누수 방지)
   const groups = _mdGroupByCategory(catalog);
   if (!groups.length) {
     mainEl.innerHTML = '<div class="md-loading">표시할 지표가 없습니다.</div>';
@@ -159,13 +340,20 @@ function _mdRenderDashboard(catalog, dataMap) {
   }
   const main = [];
   const rail = [];
+  let bondCodes = null;
   for (const { category, codes } of groups) {
+    if (category === '국채') {
+      bondCodes = codes;
+      main.push(_mdBondSectionHtml());  // 차트 컨테이너 + 수치 리스트 자리
+      continue;
+    }
     const isHero = MD_HERO_CATEGORIES.includes(category);
     const html = _mdSectionHtml(category, codes, catalog, dataMap, isHero ? 'hero' : 'list');
     (isHero || MD_MAIN_CATEGORIES.includes(category) ? main : rail).push(html);
   }
   mainEl.innerHTML = main.join('');
   railEl.innerHTML = rail.join('');
+  if (bondCodes) _mdRenderBonds(bondCodes, catalog, dataMap);
 }
 
 async function loadInvestingDashboard(refresh = false) {
