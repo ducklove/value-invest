@@ -1,16 +1,17 @@
-// Portfolio condition alerts: Telegram linking + alert rule CRUD.
+// Portfolio condition alerts: notification channels (텔레그램 + 카카오톡) + rules.
 //
-// Opens from the 🔔 알림 button in the portfolio toolbar. v1 channel is
-// Telegram (bot auto-link via deep link + server-side getUpdates poller);
-// rule types are 지정가(price) / 총평가액(nav) / 일간등락률(daily change).
-// Kakao can be added later as another channel without touching this rule UI.
+// Opens from the 🔔 알림 button in the portfolio toolbar.
+// 채널: 텔레그램(봇 딥링크 + getUpdates 폴링) / 카카오톡(OAuth "나에게 보내기").
+// 규칙: 종목 지정가 / 종목 목표가 달성 / 종목 일간등락률 /
+//       포트폴리오 총평가액 / 포트폴리오 일간등락률. 엣지 트리거(서버측).
 
 const PfAlerts = {
-  channel: null,
+  channels: null,
   alerts: [],
-  linkTimer: null,
-  linkDeadline: 0,
-  category: 'price', // price | nav | daily
+  pollTimer: null,
+  pollDeadline: 0,
+  pollKind: null, // 'telegram' | 'kakao'
+  category: 'price', // price | target | stockDaily | nav | daily
 };
 
 if (typeof window !== 'undefined') window.PfAlerts = PfAlerts;
@@ -39,14 +40,14 @@ function pfOpenAlerts() {
   if (!modal) return;
   modal.style.display = 'flex';
   pfAlertsRenderForm();
-  pfAlertsLoadChannel();
+  pfAlertsLoadChannels();
   pfAlertsLoadList();
 }
 
 function pfCloseAlerts() {
   const modal = document.getElementById('pfAlertsModal');
   if (modal) modal.style.display = 'none';
-  pfAlertsStopLinkPoll();
+  pfAlertsStopPoll();
 }
 
 document.addEventListener('keydown', (e) => {
@@ -55,168 +56,208 @@ document.addEventListener('keydown', (e) => {
   if (modal && modal.style.display !== 'none') pfCloseAlerts();
 });
 
-// --- Channel (Telegram) -----------------------------------------------------
+// --- Channels (telegram + kakao) -------------------------------------------
 
-async function pfAlertsLoadChannel() {
-  const statusEl = document.getElementById('pfAlertChannelStatus');
-  const actionsEl = document.getElementById('pfAlertChannelActions');
-  if (!statusEl || !actionsEl) return;
+async function pfAlertsLoadChannels() {
+  const el = document.getElementById('pfAlertChannels');
+  if (!el) return;
   try {
     const resp = await pfAlertsApi('/channels');
     if (!resp.ok) throw new Error('load failed');
-    PfAlerts.channel = await resp.json();
+    PfAlerts.channels = await resp.json();
   } catch (e) {
-    statusEl.textContent = '채널 정보를 불러오지 못했습니다.';
-    actionsEl.innerHTML = '';
+    el.textContent = '채널 정보를 불러오지 못했습니다.';
     return;
   }
-  pfAlertsRenderChannel();
+  pfAlertsRenderChannels();
 }
 
-function pfAlertsRenderChannel() {
-  const statusEl = document.getElementById('pfAlertChannelStatus');
-  const actionsEl = document.getElementById('pfAlertChannelActions');
-  const ch = PfAlerts.channel || {};
-  const tg = ch.telegram || {};
-  if (!ch.bot_configured) {
-    statusEl.innerHTML = '<span class="pf-alert-badge off">서버에 텔레그램 봇이 설정되지 않았습니다.</span>'
-      + '<div class="pf-alert-hint">관리자가 <code>TELEGRAM_BOT_TOKEN</code> 을 설정하면 사용할 수 있습니다.</div>';
-    actionsEl.innerHTML = '';
-    return;
+function pfAlertsChannelRow(opts) {
+  // opts: {key, name, ch, connectFn, badgeWho}
+  const { key, name, ch, connectLabel, badgeWho } = opts;
+  if (!ch.configured) {
+    return `<div class="pf-alert-channel">
+      <span class="pf-alert-channel-name">${name}</span>
+      <span class="pf-alert-badge off">서버 미설정</span>
+    </div>`;
   }
-  if (tg.connected) {
-    const who = tg.username ? ` (@${escapeHtml(tg.username)})` : '';
-    const onoff = tg.enabled
-      ? '<span class="pf-alert-badge on">연결됨 · 알림 켜짐</span>'
-      : '<span class="pf-alert-badge off">연결됨 · 알림 꺼짐</span>';
-    statusEl.innerHTML = onoff + `<span class="pf-alert-who">${who}</span>`;
-    actionsEl.innerHTML = `
-      <button class="pf-alert-btn" type="button" onclick="pfAlertsTest()">테스트 전송</button>
-      <button class="pf-alert-btn" type="button" onclick="pfAlertsToggleChannel(${tg.enabled ? 'false' : 'true'})">${tg.enabled ? '알림 끄기' : '알림 켜기'}</button>
-      <button class="pf-alert-btn danger" type="button" onclick="pfAlertsUnlink()">연결 해제</button>`;
-  } else {
-    statusEl.innerHTML = '<span class="pf-alert-badge off">연결 안 됨</span>';
-    actionsEl.innerHTML = `
-      <button class="pf-alert-btn primary" type="button" onclick="pfAlertsConnect()">텔레그램 연결</button>
-      <span class="pf-alert-hint" id="pfAlertLinkHint"></span>`;
+  if (ch.connected) {
+    const who = badgeWho ? `<span class="pf-alert-who">${badgeWho}</span>` : '';
+    const onoff = ch.enabled
+      ? '<span class="pf-alert-badge on">알림 켜짐</span>'
+      : '<span class="pf-alert-badge off">알림 꺼짐</span>';
+    return `<div class="pf-alert-channel">
+      <span class="pf-alert-channel-name">${name}</span>
+      ${onoff}${who}
+      <span class="pf-alert-channel-actions">
+        <button class="pf-alert-btn" type="button" onclick="pfAlertsTest('${key}')">테스트</button>
+        <button class="pf-alert-btn" type="button" onclick="pfAlertsToggleChannel('${key}', ${ch.enabled ? 'false' : 'true'})">${ch.enabled ? '끄기' : '켜기'}</button>
+        <button class="pf-alert-btn danger" type="button" onclick="pfAlertsUnlink('${key}')">해제</button>
+      </span>
+    </div>`;
   }
+  return `<div class="pf-alert-channel">
+    <span class="pf-alert-channel-name">${name}</span>
+    <span class="pf-alert-badge off">연결 안 됨</span>
+    <span class="pf-alert-channel-actions">
+      <button class="pf-alert-btn primary" type="button" onclick="pfAlertsConnect('${key}')">${connectLabel}</button>
+    </span>
+  </div>`;
 }
 
-async function pfAlertsConnect() {
-  const hint = document.getElementById('pfAlertLinkHint');
+function pfAlertsRenderChannels() {
+  const el = document.getElementById('pfAlertChannels');
+  const data = PfAlerts.channels || {};
+  const tg = data.telegram || { configured: false };
+  const kk = data.kakao || { configured: false };
+  let html = '';
+  html += pfAlertsChannelRow({
+    key: 'telegram', name: '텔레그램', ch: tg, connectLabel: '연결',
+    badgeWho: tg.username ? `@${escapeHtml(tg.username)}` : '',
+  });
+  html += pfAlertsChannelRow({
+    key: 'kakao', name: '카카오톡', ch: kk, connectLabel: '카카오 로그인',
+    badgeWho: kk.nickname ? escapeHtml(kk.nickname) : '',
+  });
+  if (!tg.configured && !kk.configured) {
+    html += '<div class="pf-alert-hint">서버에 <code>TELEGRAM_BOT_TOKEN</code> 또는 <code>KAKAO_REST_API_KEY</code> 가 설정되면 연결할 수 있습니다.</div>';
+  }
+  html += '<div class="pf-alert-hint" id="pfAlertConnectHint"></div>';
+  el.innerHTML = html;
+}
+
+async function pfAlertsConnect(key) {
+  const hint = document.getElementById('pfAlertConnectHint');
   try {
-    const resp = await pfAlertsApi('/telegram/link', { method: 'POST', body: '{}' });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || '연결 코드 생성 실패');
-    window.open(data.deep_link, '_blank', 'noopener');
-    if (hint) hint.textContent = '텔레그램에서 [시작]을 누르면 자동으로 연결됩니다… (대기 중)';
-    pfAlertsStartLinkPoll(data.expires_in_minutes || 10);
+    if (key === 'telegram') {
+      const resp = await pfAlertsApi('/telegram/link', { method: 'POST', body: '{}' });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '연결 코드 생성 실패');
+      window.open(data.deep_link, '_blank', 'noopener');
+      if (hint) hint.textContent = '텔레그램에서 [시작]을 누르면 자동으로 연결됩니다… (대기 중)';
+      pfAlertsStartPoll('telegram', data.expires_in_minutes || 10);
+    } else {
+      const resp = await pfAlertsApi('/kakao/connect');
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '카카오 연결 시작 실패');
+      window.open(data.authorize_url, '_blank', 'width=480,height=720');
+      if (hint) hint.textContent = '카카오 로그인 후 동의하면 연결됩니다… (대기 중)';
+      pfAlertsStartPoll('kakao', data.expires_in_minutes || 10);
+    }
   } catch (e) {
-    if (hint) hint.textContent = (e && e.message) || '연결 코드 생성 실패';
+    if (hint) hint.textContent = (e && e.message) || '연결을 시작하지 못했습니다.';
   }
 }
 
-function pfAlertsStartLinkPoll(ttlMinutes) {
-  pfAlertsStopLinkPoll();
-  PfAlerts.linkDeadline = Date.now() + ttlMinutes * 60 * 1000;
-  PfAlerts.linkTimer = setInterval(async () => {
-    if (Date.now() > PfAlerts.linkDeadline) {
-      pfAlertsStopLinkPoll();
-      const hint = document.getElementById('pfAlertLinkHint');
+function pfAlertsStartPoll(kind, ttlMinutes) {
+  pfAlertsStopPoll();
+  PfAlerts.pollKind = kind;
+  PfAlerts.pollDeadline = Date.now() + ttlMinutes * 60 * 1000;
+  PfAlerts.pollTimer = setInterval(async () => {
+    if (Date.now() > PfAlerts.pollDeadline) {
+      pfAlertsStopPoll();
+      const hint = document.getElementById('pfAlertConnectHint');
       if (hint) hint.textContent = '연결 시간이 만료되었습니다. 다시 시도해주세요.';
       return;
     }
     try {
-      const resp = await pfAlertsApi('/telegram/link-status');
+      const resp = await pfAlertsApi('/channels');
       const data = await resp.json();
-      if (data.connected) {
-        pfAlertsStopLinkPoll();
-        pfAlertsLoadChannel();
+      const ch = data[kind] || {};
+      if (ch.connected) {
+        PfAlerts.channels = data;
+        pfAlertsStopPoll();
+        pfAlertsRenderChannels();
       }
     } catch (e) { /* keep polling */ }
   }, 2500);
 }
 
-function pfAlertsStopLinkPoll() {
-  if (PfAlerts.linkTimer) {
-    clearInterval(PfAlerts.linkTimer);
-    PfAlerts.linkTimer = null;
+function pfAlertsStopPoll() {
+  if (PfAlerts.pollTimer) {
+    clearInterval(PfAlerts.pollTimer);
+    PfAlerts.pollTimer = null;
   }
 }
 
-async function pfAlertsTest() {
+async function pfAlertsTest(key) {
   try {
-    const resp = await pfAlertsApi('/channels/telegram/test', { method: 'POST', body: '{}' });
+    const resp = await pfAlertsApi(`/channels/${key}/test`, { method: 'POST', body: '{}' });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || '전송 실패');
-    alert('테스트 메시지를 보냈습니다. 텔레그램을 확인하세요.');
+    alert('테스트 메시지를 보냈습니다. 메신저를 확인하세요.');
   } catch (e) {
     alert((e && e.message) || '테스트 전송에 실패했습니다.');
   }
 }
 
-async function pfAlertsToggleChannel(enabled) {
+async function pfAlertsToggleChannel(key, enabled) {
   try {
-    await pfAlertsApi('/channels/telegram', {
-      method: 'PUT',
-      body: JSON.stringify({ enabled }),
-    });
+    await pfAlertsApi(`/channels/${key}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
   } finally {
-    pfAlertsLoadChannel();
+    pfAlertsLoadChannels();
   }
 }
 
-async function pfAlertsUnlink() {
-  if (!confirm('텔레그램 연결을 해제할까요? 알림이 더 이상 전송되지 않습니다.')) return;
+async function pfAlertsUnlink(key) {
+  const label = key === 'kakao' ? '카카오톡' : '텔레그램';
+  if (!confirm(`${label} 연결을 해제할까요? 해당 채널로 알림이 전송되지 않습니다.`)) return;
   try {
-    await pfAlertsApi('/telegram', { method: 'DELETE' });
+    await pfAlertsApi(`/${key}`, { method: 'DELETE' });
   } finally {
-    pfAlertsLoadChannel();
+    pfAlertsLoadChannels();
   }
 }
 
 // --- Rule form --------------------------------------------------------------
 
-function pfAlertsRenderForm() {
-  const form = document.getElementById('pfAlertForm');
-  if (!form) return;
-  const cat = PfAlerts.category;
+function pfAlertsStockSelect() {
   const holdings = (window.PfStore && PfStore.items) || [];
-  const stockOptions = holdings
+  const options = holdings
     .map((it) => {
       const price = it.quote && it.quote.price != null ? ` · 현재가 ${pfFmtNum(it.quote.price)}` : '';
       return `<option value="${escapeHtml(it.stock_code)}">${escapeHtml(it.stock_name || it.stock_code)}${price}</option>`;
     })
     .join('');
+  return `<select class="pf-modal-input pf-alert-stock" id="pfAlertStock">${options || '<option value="">보유 종목 없음</option>'}</select>`;
+}
 
+function pfAlertsDirSelect() {
+  return `<select class="pf-modal-input pf-alert-dir" id="pfAlertDir">
+    <option value="above">이상</option><option value="below">이하</option>
+  </select>`;
+}
+
+function pfAlertsRenderForm() {
+  const form = document.getElementById('pfAlertForm');
+  if (!form) return;
+  const cat = PfAlerts.category;
   let valueField = '';
   if (cat === 'price') {
-    valueField = `
-      <select class="pf-modal-input pf-alert-stock" id="pfAlertStock">${stockOptions || '<option value="">보유 종목 없음</option>'}</select>
-      <select class="pf-modal-input pf-alert-dir" id="pfAlertDir">
-        <option value="above">이상</option><option value="below">이하</option>
-      </select>
-      <input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="지정가">`;
+    valueField = pfAlertsStockSelect() + pfAlertsDirSelect()
+      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="지정가">';
+  } else if (cat === 'target') {
+    valueField = pfAlertsStockSelect()
+      + '<span class="pf-alert-form-note">설정한 목표가에 도달하면 알림</span>';
+  } else if (cat === 'stockDaily') {
+    valueField = pfAlertsStockSelect() + pfAlertsDirSelect()
+      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="등락률(%)">';
   } else if (cat === 'nav') {
-    valueField = `
-      <select class="pf-modal-input pf-alert-dir" id="pfAlertDir">
-        <option value="above">이상</option><option value="below">이하</option>
-      </select>
-      <input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="총평가액(원)">`;
-  } else {
-    valueField = `
-      <select class="pf-modal-input pf-alert-dir" id="pfAlertDir">
-        <option value="above">이상</option><option value="below">이하</option>
-      </select>
-      <input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="일간 등락률(%)">`;
+    valueField = pfAlertsDirSelect()
+      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="총평가액(원)">';
+  } else { // daily
+    valueField = pfAlertsDirSelect()
+      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="등락률(%)">';
   }
 
   form.innerHTML = `
     <div class="pf-alert-form-row">
       <select class="pf-modal-input pf-alert-cat" id="pfAlertCat" onchange="pfAlertsSetCategory(this.value)">
         <option value="price"${cat === 'price' ? ' selected' : ''}>종목 지정가</option>
+        <option value="target"${cat === 'target' ? ' selected' : ''}>종목 목표가 달성</option>
+        <option value="stockDaily"${cat === 'stockDaily' ? ' selected' : ''}>종목 일간 등락률</option>
         <option value="nav"${cat === 'nav' ? ' selected' : ''}>포트폴리오 총평가액</option>
-        <option value="daily"${cat === 'daily' ? ' selected' : ''}>일간 등락률</option>
+        <option value="daily"${cat === 'daily' ? ' selected' : ''}>포트폴리오 일간 등락률</option>
       </select>
       ${valueField}
     </div>
@@ -231,28 +272,35 @@ function pfAlertsSetCategory(cat) {
   pfAlertsRenderForm();
 }
 
+// 카테고리 -> {alert_type, scope} 매핑. 지정가/목표가는 서버가 stock 스코프를
+// 유추하므로 scope 생략; 일간등락률은 stock/portfolio 가 같은 타입이라 명시.
 function pfAlertsBuildType(cat, dir) {
-  if (cat === 'price') return dir === 'below' ? 'price_below' : 'price_above';
-  if (cat === 'nav') return dir === 'below' ? 'nav_below' : 'nav_above';
-  return dir === 'below' ? 'daily_change_below' : 'daily_change_above';
+  if (cat === 'price') return { alert_type: dir === 'below' ? 'price_below' : 'price_above' };
+  if (cat === 'target') return { alert_type: 'target_reached' };
+  if (cat === 'stockDaily') return { alert_type: dir === 'below' ? 'daily_change_below' : 'daily_change_above', scope: 'stock' };
+  if (cat === 'nav') return { alert_type: dir === 'below' ? 'nav_below' : 'nav_above' };
+  return { alert_type: dir === 'below' ? 'daily_change_below' : 'daily_change_above', scope: 'portfolio' };
 }
 
 async function pfAlertsSubmit() {
   const cat = PfAlerts.category;
   const dir = (document.getElementById('pfAlertDir') || {}).value || 'above';
-  const thresholdRaw = (document.getElementById('pfAlertThreshold') || {}).value;
   const note = (document.getElementById('pfAlertNote') || {}).value || '';
-  const threshold = Number(thresholdRaw);
-  if (!isFinite(threshold) || thresholdRaw === '') {
-    alert('임계값을 입력해주세요.');
-    return;
-  }
-  const payload = { alert_type: pfAlertsBuildType(cat, dir), threshold, note };
-  if (cat === 'price') {
+  const payload = { ...pfAlertsBuildType(cat, dir), note };
+
+  const needsStock = cat === 'price' || cat === 'target' || cat === 'stockDaily';
+  if (needsStock) {
     const code = (document.getElementById('pfAlertStock') || {}).value;
     if (!code) { alert('종목을 선택해주세요.'); return; }
     payload.stock_code = code;
   }
+  if (cat !== 'target') {
+    const thresholdRaw = (document.getElementById('pfAlertThreshold') || {}).value;
+    const threshold = Number(thresholdRaw);
+    if (!isFinite(threshold) || thresholdRaw === '') { alert('임계값을 입력해주세요.'); return; }
+    payload.threshold = threshold;
+  }
+
   try {
     const resp = await pfAlertsApi('/alerts', { method: 'POST', body: JSON.stringify(payload) });
     const data = await resp.json().catch(() => ({}));
@@ -282,18 +330,29 @@ async function pfAlertsLoadList() {
   pfAlertsRenderList();
 }
 
+function pfAlertsStockName(code) {
+  const held = (window.PfStore && PfStore.items) || [];
+  const item = held.find((it) => it.stock_code === code);
+  return item ? (item.stock_name || code) : code;
+}
+
 function pfAlertsLabel(rule) {
   const t = rule.alert_type;
-  const held = (window.PfStore && PfStore.items) || [];
+  const dir = t.endsWith('above') ? '이상' : '이하';
+  if (t === 'target_reached') {
+    return `${escapeHtml(pfAlertsStockName(rule.stock_code))} 목표가 달성 시`;
+  }
   if (t === 'price_above' || t === 'price_below') {
-    const item = held.find((it) => it.stock_code === rule.stock_code);
-    const name = item ? (item.stock_name || rule.stock_code) : rule.stock_code;
-    return `${escapeHtml(name)} 현재가 ${pfFmtNum(rule.threshold)} ${t.endsWith('above') ? '이상' : '이하'}`;
+    return `${escapeHtml(pfAlertsStockName(rule.stock_code))} 현재가 ${pfFmtNum(rule.threshold)} ${dir}`;
   }
   if (t === 'nav_above' || t === 'nav_below') {
-    return `총평가액 ${pfFmtNum(rule.threshold)}원 ${t.endsWith('above') ? '이상' : '이하'}`;
+    return `총평가액 ${pfFmtNum(rule.threshold)}원 ${dir}`;
   }
-  return `일간 등락률 ${Number(rule.threshold).toFixed(2)}% ${t.endsWith('above') ? '이상' : '이하'}`;
+  // daily_change_*
+  const pct = `${Number(rule.threshold).toFixed(2)}% ${dir}`;
+  return rule.scope === 'stock'
+    ? `${escapeHtml(pfAlertsStockName(rule.stock_code))} 일간 등락률 ${pct}`
+    : `포트폴리오 일간 등락률 ${pct}`;
 }
 
 function pfAlertsRenderList() {

@@ -13,10 +13,11 @@ import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi.responses import Response
 
 import cache
 from deps import get_current_user
-from services.notifications import engine, telegram
+from services.notifications import engine, kakao, telegram
 
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
@@ -37,15 +38,22 @@ def _require_user(user):
 async def get_channels(request: Request):
     user = _require_user(await get_current_user(request))
     items = await cache.list_notification_channels(user["google_sub"])
-    telegram_status = {"connected": False, "enabled": False, "username": None}
+    telegram_status = {"connected": False, "enabled": False, "username": None, "configured": telegram.is_configured()}
+    kakao_status = {"connected": False, "enabled": False, "nickname": None, "configured": kakao.is_configured()}
     for ch in items:
         if ch["channel"] == "telegram":
-            telegram_status = {
+            telegram_status.update({
                 "connected": bool(ch.get("verified")),
                 "enabled": bool(ch.get("enabled")),
                 "username": (ch.get("config") or {}).get("username"),
-            }
-    return {"bot_configured": telegram.is_configured(), "telegram": telegram_status}
+            })
+        elif ch["channel"] == "kakao":
+            kakao_status.update({
+                "connected": bool(ch.get("verified")),
+                "enabled": bool(ch.get("enabled")),
+                "nickname": (ch.get("config") or {}).get("nickname"),
+            })
+    return {"telegram": telegram_status, "kakao": kakao_status}
 
 
 @router.post("/telegram/link")
@@ -111,19 +119,127 @@ async def unlink_telegram(request: Request):
     return {"ok": True}
 
 
+# --- KakaoTalk (OAuth "나에게 보내기") --------------------------------------
+
+def _kakao_result_page(title: str, message: str) -> Response:
+    """Tiny page shown in the OAuth popup after Kakao redirects back."""
+    html = (
+        "<!doctype html><html lang='ko'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<title>{title}</title>"
+        "<style>body{font-family:system-ui,'Apple SD Gothic Neo',sans-serif;"
+        "display:flex;flex-direction:column;align-items:center;justify-content:center;"
+        "height:100vh;margin:0;background:#f7f7f8;color:#222;text-align:center;padding:20px}"
+        "h1{font-size:18px;margin:0 0 8px}p{color:#666;font-size:14px;margin:0 0 20px}"
+        "button{padding:9px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;"
+        "font-size:14px;cursor:pointer}</style></head><body>"
+        f"<h1>{title}</h1><p>{message}</p>"
+        "<button onclick='window.close()'>창 닫기</button>"
+        "<script>setTimeout(function(){try{window.close();}catch(e){}},1500);</script>"
+        "</body></html>"
+    )
+    return Response(content=html, media_type="text/html; charset=utf-8")
+
+
+@router.get("/kakao/connect")
+async def kakao_connect(request: Request):
+    user = _require_user(await get_current_user(request))
+    if not kakao.is_configured():
+        raise HTTPException(status_code=503, detail="카카오 앱이 서버에 설정되어 있지 않습니다.")
+    if not kakao.redirect_uri(str(request.base_url)):
+        raise HTTPException(status_code=503, detail="카카오 Redirect URI가 설정되어 있지 않습니다.")
+    state = secrets.token_urlsafe(12)
+    expires_at = (datetime.now() + timedelta(minutes=LINK_TTL_MINUTES)).isoformat()
+    await cache.create_notification_link(state, user["google_sub"], "kakao", expires_at)
+    return {
+        "authorize_url": kakao.authorize_url(state, request_base=str(request.base_url)),
+        "expires_in_minutes": LINK_TTL_MINUTES,
+    }
+
+
+@router.get("/kakao/callback")
+async def kakao_callback(request: Request):
+    # Public endpoint: identity comes from the single-use `state` code, not the
+    # session. Kakao redirects the OAuth popup here with ?code & ?state.
+    params = request.query_params
+    if params.get("error") or not params.get("code") or not params.get("state"):
+        return _kakao_result_page("연결 실패", "연결이 취소되었거나 오류가 발생했습니다.")
+    link = await cache.pop_notification_link(params["state"])
+    if not link or link.get("channel") != "kakao":
+        return _kakao_result_page("연결 실패", "연결 코드가 만료되었습니다. 다시 시도해주세요.")
+    try:
+        tokens = await kakao.exchange_code(params["code"], request_base=str(request.base_url))
+    except Exception as exc:
+        logger.warning("kakao token exchange failed: %s", exc)
+        return _kakao_result_page("연결 실패", "토큰 발급에 실패했습니다. 잠시 후 다시 시도해주세요.")
+    config = dict(tokens)
+    nickname = await kakao.fetch_nickname(tokens["access_token"])
+    if nickname:
+        config["nickname"] = nickname
+    await cache.upsert_notification_channel(
+        link["google_sub"], "kakao", config=config, enabled=True, verified=True
+    )
+    logger.info("kakao linked user=%s", link["google_sub"][:8])
+    return _kakao_result_page("연결 완료", "카카오톡 알림이 연결되었습니다. 이 창은 닫으셔도 됩니다.")
+
+
+@router.put("/channels/kakao")
+async def toggle_kakao(request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    enabled = bool(payload.get("enabled", True))
+    ok = await cache.set_notification_channel_enabled(user["google_sub"], "kakao", enabled)
+    if not ok:
+        raise HTTPException(status_code=404, detail="연결된 카카오 계정이 없습니다.")
+    return {"ok": True, "enabled": enabled}
+
+
+@router.post("/channels/kakao/test")
+async def test_kakao(request: Request):
+    user = _require_user(await get_current_user(request))
+    ch = await cache.get_notification_channel(user["google_sub"], "kakao")
+    if not ch or not ch.get("verified"):
+        raise HTTPException(status_code=400, detail="먼저 카카오 계정을 연결해주세요.")
+    ok = await kakao.send_to_user(
+        user["google_sub"], ch, "🔔 Value Compass 테스트 알림입니다. 정상적으로 연결되었습니다."
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail="카카오 전송에 실패했습니다. 연결을 다시 시도해주세요.")
+    return {"ok": True}
+
+
+@router.delete("/kakao")
+async def unlink_kakao(request: Request):
+    user = _require_user(await get_current_user(request))
+    await cache.delete_notification_channel(user["google_sub"], "kakao")
+    return {"ok": True}
+
+
 # --- Alert rules ------------------------------------------------------------
 
 async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
     alert_type = str(payload.get("alert_type") or "").strip()
     if alert_type not in engine.ALL_ALERT_TYPES:
         raise HTTPException(status_code=400, detail="지원하지 않는 알림 유형입니다.")
-    # scope is derived from the type so the two can't disagree.
-    scope = "stock" if alert_type in engine.STOCK_ALERT_TYPES else "portfolio"
 
-    try:
-        threshold = float(payload.get("threshold"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="임계값을 숫자로 입력해주세요.")
+    # Scope: price/target are always per-stock, nav always portfolio;
+    # daily-change can be either, so it reads an explicit scope.
+    if alert_type in engine.PRICE_TYPES or alert_type in engine.TARGET_TYPES:
+        scope = "stock"
+    elif alert_type in engine.NAV_TYPES:
+        scope = "portfolio"
+    else:  # daily_change_*
+        scope = str(payload.get("scope") or "portfolio").strip()
+        if scope not in ("stock", "portfolio"):
+            raise HTTPException(status_code=400, detail="알림 범위가 올바르지 않습니다.")
+
+    # target_reached uses the holding's own 목표가, so no user threshold.
+    if alert_type in engine.TARGET_TYPES:
+        threshold = 0.0
+    else:
+        try:
+            threshold = float(payload.get("threshold"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="임계값을 숫자로 입력해주세요.")
 
     stock_code = None
     if scope == "stock":
@@ -132,10 +248,10 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
             raise HTTPException(status_code=400, detail="종목을 선택해주세요.")
         held = {it["stock_code"] for it in await cache.get_portfolio(google_sub)}
         if stock_code not in held:
-            raise HTTPException(status_code=400, detail="보유 종목에 대해서만 지정가 알림을 설정할 수 있습니다.")
-        if threshold <= 0:
+            raise HTTPException(status_code=400, detail="보유 종목에 대해서만 종목 알림을 설정할 수 있습니다.")
+        if alert_type in engine.PRICE_TYPES and threshold <= 0:
             raise HTTPException(status_code=400, detail="지정가는 0보다 커야 합니다.")
-    elif alert_type in ("nav_above", "nav_below") and threshold <= 0:
+    elif alert_type in engine.NAV_TYPES and threshold <= 0:
         raise HTTPException(status_code=400, detail="총평가액 기준은 0보다 커야 합니다.")
 
     note = str(payload.get("note") or "").strip()[:200]

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 import cache
-from services.notifications import telegram
+from services.notifications import kakao, telegram
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,9 @@ async def dispatch(google_sub: str, text: str) -> int:
                 chat_id = config.get("chat_id")
                 if chat_id and await telegram.send_message(chat_id, text):
                     sent += 1
-            # elif name == "kakao":  # v2
+            elif name == "kakao":
+                if await kakao.send_to_user(google_sub, ch, text):
+                    sent += 1
             else:
                 logger.debug("dispatch: unknown channel %s", name)
         except Exception as exc:

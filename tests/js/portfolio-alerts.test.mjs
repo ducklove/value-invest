@@ -1,8 +1,8 @@
 // jsdom behavior test for static/js/portfolio-alerts.js.
 //
-// 조건 알림 모달의 순수 렌더링/매핑 로직(폼 생성, 채널 상태, 규칙 목록 라벨,
-// alert_type 매핑)을 실제 소스를 브라우저와 같은 순서로 올려 검증한다.
-// fetch 가 필요한 비동기 로딩은 여기서 다루지 않는다(백엔드 통합 테스트가 담당).
+// 조건 알림 모달의 순수 렌더링/매핑 로직(폼 생성, 채널 행 렌더, 규칙 목록 라벨,
+// 카테고리→{alert_type,scope} 매핑)을 실제 소스를 브라우저와 같은 순서로 올려
+// 검증한다. fetch 가 필요한 비동기 로딩은 백엔드 통합 테스트가 담당한다.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -25,8 +25,7 @@ const SOURCES = [
 const MODAL_HTML = `
   <div class="pf-modal-overlay" id="pfAlertsModal" style="display:none;">
     <div class="pf-modal-body">
-      <div class="pf-alert-channel-status" id="pfAlertChannelStatus"></div>
-      <div class="pf-alert-channel-actions" id="pfAlertChannelActions"></div>
+      <div class="pf-alert-channels" id="pfAlertChannels"></div>
       <div class="pf-alert-form" id="pfAlertForm"></div>
       <div class="pf-alert-list" id="pfAlertList"></div>
     </div>
@@ -38,7 +37,6 @@ function loadAlerts(items = []) {
     url: "https://app.example.com/",
   });
   const { window } = dom;
-  // pfOpenAlerts 의 비동기 로딩이 호출할 수 있으므로 거부 스텁만 둔다.
   window.fetch = () => Promise.reject(new Error("no fetch in test"));
   for (const src of SOURCES) {
     const script = window.document.createElement("script");
@@ -49,60 +47,90 @@ function loadAlerts(items = []) {
   return window;
 }
 
-test("alert_type 매핑: 카테고리+방향 -> 서버 타입", () => {
+const SAMSUNG = { stock_code: "005930", stock_name: "삼성전자", quote: { price: 72000 } };
+
+test("카테고리 -> {alert_type, scope} 매핑", () => {
   const w = loadAlerts();
-  assert.equal(w.pfAlertsBuildType("price", "above"), "price_above");
-  assert.equal(w.pfAlertsBuildType("price", "below"), "price_below");
-  assert.equal(w.pfAlertsBuildType("nav", "above"), "nav_above");
-  assert.equal(w.pfAlertsBuildType("daily", "below"), "daily_change_below");
+  // {...} 로 현재 realm 객체로 복사해 cross-realm prototype 차이 회피.
+  assert.deepEqual({ ...w.pfAlertsBuildType("price", "above") }, { alert_type: "price_above" });
+  assert.deepEqual({ ...w.pfAlertsBuildType("target", "above") }, { alert_type: "target_reached" });
+  assert.deepEqual({ ...w.pfAlertsBuildType("stockDaily", "below") }, { alert_type: "daily_change_below", scope: "stock" });
+  assert.deepEqual({ ...w.pfAlertsBuildType("nav", "above") }, { alert_type: "nav_above" });
+  assert.deepEqual({ ...w.pfAlertsBuildType("daily", "below") }, { alert_type: "daily_change_below", scope: "portfolio" });
 });
 
-test("지정가 폼은 보유 종목 옵션과 현재가 힌트를 렌더한다", () => {
-  const w = loadAlerts([{ stock_code: "005930", stock_name: "삼성전자", quote: { price: 72000 } }]);
+test("지정가 폼: 종목 + 방향 + 지정가 입력", () => {
+  const w = loadAlerts([SAMSUNG]);
   w.pfAlertsSetCategory("price");
   const html = w.document.getElementById("pfAlertForm").innerHTML;
   assert.match(html, /삼성전자/);
-  assert.match(html, /현재가/);
-  assert.ok(html.includes('id="pfAlertStock"'), "종목 선택 셀렉트가 있어야 함");
-  assert.ok(html.includes('id="pfAlertThreshold"'), "지정가 입력이 있어야 함");
-});
-
-test("총평가액 폼은 종목 선택을 숨긴다", () => {
-  const w = loadAlerts([{ stock_code: "005930", stock_name: "삼성전자", quote: { price: 72000 } }]);
-  w.pfAlertsSetCategory("nav");
-  const html = w.document.getElementById("pfAlertForm").innerHTML;
-  assert.ok(!html.includes('id="pfAlertStock"'), "총평가액 모드엔 종목 선택이 없어야 함");
+  assert.ok(html.includes('id="pfAlertStock"'));
   assert.ok(html.includes('id="pfAlertThreshold"'));
 });
 
-test("봇 미설정 시 안내 문구를 보여준다", () => {
-  const w = loadAlerts();
-  w.PfAlerts.channel = { bot_configured: false, telegram: { connected: false } };
-  w.pfAlertsRenderChannel();
-  const html = w.document.getElementById("pfAlertChannelStatus").innerHTML;
-  assert.match(html, /TELEGRAM_BOT_TOKEN/);
+test("목표가 달성 폼: 종목만, 임계값 입력 없음", () => {
+  const w = loadAlerts([SAMSUNG]);
+  w.pfAlertsSetCategory("target");
+  const html = w.document.getElementById("pfAlertForm").innerHTML;
+  assert.ok(html.includes('id="pfAlertStock"'));
+  assert.ok(!html.includes('id="pfAlertThreshold"'), "목표가 달성엔 임계값 입력이 없어야 함");
+  assert.match(html, /목표가/);
 });
 
-test("연결됨 상태는 테스트/해제 버튼을 노출한다", () => {
-  const w = loadAlerts();
-  w.PfAlerts.channel = { bot_configured: true, telegram: { connected: true, enabled: true, username: "mybot" } };
-  w.pfAlertsRenderChannel();
-  const actions = w.document.getElementById("pfAlertChannelActions").innerHTML;
-  assert.match(actions, /테스트 전송/);
-  assert.match(actions, /연결 해제/);
+test("종목 일간 등락률 폼: 종목 + 방향 + % 입력", () => {
+  const w = loadAlerts([SAMSUNG]);
+  w.pfAlertsSetCategory("stockDaily");
+  const html = w.document.getElementById("pfAlertForm").innerHTML;
+  assert.ok(html.includes('id="pfAlertStock"'));
+  assert.ok(html.includes('id="pfAlertThreshold"'));
 });
 
-test("규칙 목록은 종목명과 방향, 무장 상태를 라벨로 보여준다", () => {
-  const w = loadAlerts([{ stock_code: "005930", stock_name: "삼성전자", quote: { price: 72000 } }]);
+test("총평가액 폼: 종목 선택 없음", () => {
+  const w = loadAlerts([SAMSUNG]);
+  w.pfAlertsSetCategory("nav");
+  const html = w.document.getElementById("pfAlertForm").innerHTML;
+  assert.ok(!html.includes('id="pfAlertStock"'));
+  assert.ok(html.includes('id="pfAlertThreshold"'));
+});
+
+test("채널 행: 텔레그램 연결됨 + 카카오 미설정", () => {
+  const w = loadAlerts();
+  w.PfAlerts.channels = {
+    telegram: { configured: true, connected: true, enabled: true, username: "mybot" },
+    kakao: { configured: false, connected: false },
+  };
+  w.pfAlertsRenderChannels();
+  const html = w.document.getElementById("pfAlertChannels").innerHTML;
+  assert.match(html, /텔레그램/);
+  assert.match(html, /카카오톡/);
+  assert.match(html, /테스트/);          // 텔레그램 연결됨 -> 테스트 버튼
+  assert.match(html, /서버 미설정/);      // 카카오 미설정 배지
+});
+
+test("카카오 미연결(설정됨) 행은 '카카오 로그인' 버튼을 보인다", () => {
+  const w = loadAlerts();
+  w.PfAlerts.channels = {
+    telegram: { configured: false, connected: false },
+    kakao: { configured: true, connected: false },
+  };
+  w.pfAlertsRenderChannels();
+  const html = w.document.getElementById("pfAlertChannels").innerHTML;
+  assert.match(html, /카카오 로그인/);
+});
+
+test("규칙 목록: 목표가 달성/종목 일간 라벨", () => {
+  const w = loadAlerts([SAMSUNG]);
   w.PfAlerts.alerts = [
-    { id: 1, alert_type: "price_above", threshold: 72000, stock_code: "005930", enabled: 1, armed: 1, note: "목표" },
+    { id: 1, alert_type: "target_reached", scope: "stock", threshold: 0, stock_code: "005930", enabled: 1, armed: 1, note: "" },
+    { id: 2, alert_type: "daily_change_below", scope: "stock", threshold: -5, stock_code: "005930", enabled: 1, armed: 1, note: "" },
+    { id: 3, alert_type: "daily_change_above", scope: "portfolio", threshold: 3, enabled: 1, armed: 0, note: "" },
   ];
   w.pfAlertsRenderList();
   const html = w.document.getElementById("pfAlertList").innerHTML;
-  assert.match(html, /삼성전자/);
-  assert.match(html, /이상/);
-  assert.match(html, /대기/);
-  assert.match(html, /목표/);
+  assert.match(html, /삼성전자 목표가 달성 시/);
+  assert.match(html, /삼성전자 일간 등락률/);
+  assert.match(html, /포트폴리오 일간 등락률/);
+  assert.match(html, /발송됨/); // armed=0 인 규칙
 });
 
 test("pfOpenAlerts 는 모달을 표시한다", () => {
