@@ -81,6 +81,20 @@ test("_mdRenderDashboard list rows split change into abs/pct spans", () => {
   assert.ok(pct && /-0\.15%/.test(pct.textContent), "pct span present");
 });
 
+test("list rows show '-' placeholder when 전일대비 is missing (값만 있고 변동 없음)", () => {
+  const w = load();
+  // CNBC UNCH 처럼 값은 있으나 change/change_pct 가 비어있는 경우.
+  w._mdRenderDashboard(CATALOG, { USD_KRW: { value: "1,517.60", change: "", change_pct: "", direction: "" } });
+  const rail = w.document.getElementById("mdIndRail");
+  const usdRow = [...rail.querySelectorAll(".md-row")].find((r) => /달러\/원/.test(r.textContent));
+  assert.ok(usdRow, "행은 그대로 유지(정렬 지킴)");
+  assert.match(usdRow.querySelector(".md-row-val").textContent, /1,517\.60/);
+  // 전일대비 영역은 빈칸이 아니라 '-' 로 채워진다.
+  const chg = usdRow.querySelector(".md-chg");
+  assert.ok(chg, "전일대비 영역 존재");
+  assert.equal(chg.textContent.trim(), "-");
+});
+
 test("_mdRenderDashboard builds two-column layout: hero indices in main, others in rail", () => {
   const w = load();
   const dataMap = {

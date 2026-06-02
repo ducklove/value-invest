@@ -74,16 +74,17 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
   const d = dataMap ? dataMap[code] : null;
   let valHtml = '-';
   let chgHtml = '';      // hero: 절대값+%(full)
-  let rowChgHtml = '';   // list: abs/pct 분리(모바일에서 abs 숨김)
+  // list: 전일대비를 못 구한 항목도 자리(정렬)는 지키고 '-' placeholder 로 표시.
+  let rowChgHtml = '<span class="md-chg md-flat">-</span>';
   if (d && d.value) {
     const c = _mdChange(d);
     valHtml = escapeHtml(String(d.value));
     chgHtml = c.text ? `<span class="md-chg ${c.cls}">${escapeHtml(c.text)}</span>` : '';
-    rowChgHtml = c.text
-      ? `<span class="md-chg ${c.cls}">`
+    if (c.text) {
+      rowChgHtml = `<span class="md-chg ${c.cls}">`
         + (c.abs ? `<span class="md-chg-abs">${escapeHtml(c.abs)} </span>` : '')
-        + `<span class="md-chg-pct">${escapeHtml(c.pct)}</span></span>`
-      : '';
+        + `<span class="md-chg-pct">${escapeHtml(c.pct)}</span></span>`;
+    }
   }
   if (variant === 'hero') {
     // 카드 안에 해당 시장 수급 슬롯을 둔다. 캐시값이 있으면 즉시 채우고,
