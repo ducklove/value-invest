@@ -52,12 +52,13 @@ function _mdGroupByCategory(catalog) {
   return cats.map((cat) => ({ category: cat, codes: groups[cat] }));
 }
 
-// Naver-style information architecture: prominent 주요 지수 hero in the main
-// column, 해외 증시 below it, and the lighter indicator strips (환율·원자재·
-// 금리·야간선물) in a right rail. Phase 2 ranking/수급/업종/뉴스 sections and a
-// future 경제캘린더 slot into these columns without changing this skeleton.
+// Naver-style information architecture: prominent 주요 지수 hero + 국채 in the
+// main column; the lighter indicator strips (해외 지수·환율·원자재·야간선물) and
+// 시장 랭킹 in the right rail so the two columns stay balanced in height.
 const MD_HERO_CATEGORIES = ['국내 지수'];
-const MD_MAIN_CATEGORIES = ['해외 지수'];
+// Categories forced into the main column (besides hero/국채). Empty = only the
+// hero + 국채 live in main; everything else goes to the rail.
+const MD_MAIN_CATEGORIES = [];
 
 // 국내 지수 hero 카드 우상단에 띄울 네이버 일간 미니 차트(코드=네이버 심볼).
 // down 변형 파일은 없고 _end_up_tablet.png 만 존재하며, 이미지 내용 자체가
@@ -209,15 +210,9 @@ function _bondCurveTableHtml(curve) {
     + `<tbody>${rows}</tbody></table>`;
 }
 
-function _bondCountryTableHtml(countries) {
-  if (!countries.length) return '';
-  const rows = countries.map((c) =>
-    `<tr><td>${escapeHtml(c.name)}</td><td>${c.value.toFixed(2)}</td></tr>`).join('');
-  return '<table class="bond-tbl"><thead><tr><th>국가</th><th>10년물</th></tr></thead>'
-    + `<tbody>${rows}</tbody></table>`;
-}
-
 function _mdBondSectionHtml() {
+  // 국가별 10년물은 비교 그래프(bondCountryCompare)가 모든 국가를 막대로 보여주므로
+  // 별도 수치 표는 생략한다. 기간별 금리는 곡선이 한·미만이라 표를 함께 둔다.
   return '<section class="md-section md-bond-section">'
     + '<h3 class="md-section-title">국채</h3>'
     + '<div class="md-bond-sub">기간별 금리 (Yield Curve)</div>'
@@ -225,7 +220,6 @@ function _mdBondSectionHtml() {
     + '<div class="md-bond-table" id="bondCurveTable"></div>'
     + '<div class="md-bond-sub">국가별 10년물</div>'
     + '<div class="md-bond-chart md-bond-chart-sm" id="bondCountryCompare"></div>'
-    + '<div class="md-bond-table" id="bondCountryTable"></div>'
     + '</section>';
 }
 
@@ -315,8 +309,6 @@ function _mdRenderBonds(codes, catalog, dataMap) {
   const countries = _mdBondCountries(codes, catalog, dataMap);
   const curveTbl = document.getElementById('bondCurveTable');
   if (curveTbl) curveTbl.innerHTML = _bondCurveTableHtml(curve);
-  const ctryTbl = document.getElementById('bondCountryTable');
-  if (ctryTbl) ctryTbl.innerHTML = _bondCountryTableHtml(countries);
   // 다중 시리즈/막대라 echarts 로 통일(모바일 포함, 목표가 차트와 동일 전략).
   if (typeof loadEcharts === 'function') {
     loadEcharts().then(() => {

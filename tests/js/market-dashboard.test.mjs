@@ -20,8 +20,8 @@ function load() {
   const dom = new JSDOM(
     "<!doctype html><html><body>"
       + "<div class='md-grid' id='marketDashboard'>"
-      + "<div class='md-main'><div id='mdIndMain'></div><div id='marketMovers'></div><div id='externalTools'></div><div id='marketNews'></div></div>"
-      + "<aside class='md-rail'><div id='mdIndRail'></div><div id='marketSectors'></div></aside>"
+      + "<div class='md-main'><div id='mdIndMain'></div><div id='externalTools'></div><div id='marketNews'></div></div>"
+      + "<aside class='md-rail'><div id='mdIndRail'></div><div id='marketMovers'></div><div id='marketSectors'></div></aside>"
       + "</div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
   );
@@ -74,9 +74,9 @@ test("_mdChange exposes abs/pct for mobile collapsing", () => {
 test("_mdRenderDashboard list rows split change into abs/pct spans", () => {
   const w = load();
   w._mdRenderDashboard(CATALOG, { SPX: { value: "5,300.0", change: "8.0", change_pct: "-0.15%", direction: "down" } });
-  const main = w.document.getElementById("mdIndMain");
-  const abs = main.querySelector(".md-row .md-chg .md-chg-abs");
-  const pct = main.querySelector(".md-row .md-chg .md-chg-pct");
+  const rail = w.document.getElementById("mdIndRail");  // 해외 지수는 이제 레일
+  const abs = rail.querySelector(".md-row .md-chg .md-chg-abs");
+  const pct = rail.querySelector(".md-row .md-chg .md-chg-pct");
   assert.ok(abs && /-8\.0/.test(abs.textContent), "abs span present");
   assert.ok(pct && /-0\.15%/.test(pct.textContent), "pct span present");
 });
@@ -112,18 +112,18 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   const hero = main.querySelector(".md-hero-card");
   assert.ok(hero && /2,650\.12/.test(hero.innerHTML));
   assert.ok(root.querySelector(".md-hero-card .md-chg.md-up"));
-  // 해외 지수 (SPX) → compact row in main, with down class.
-  assert.match(main.innerHTML, /md-chg md-down/);
+  // 해외 지수 (SPX) → compact row in the rail now, with down class.
+  assert.match(rail.innerHTML, /md-chg md-down/);
 
   // hero count = # of 국내 지수 codes (1); rows = the other 4 codes.
   assert.equal(root.querySelectorAll(".md-hero-card").length, 1);
   assert.equal(root.querySelectorAll(".md-row").length, 4);
 
-  // main column carries 국내 지수 then 해외 지수; rail carries the rest in order.
+  // main carries only 국내 지수 (hero); the rail carries 해외 지수 + the rest.
   const mainTitles = [...main.querySelectorAll(".md-section-title")].map((el) => el.textContent);
-  assert.deepEqual(mainTitles, ["국내 지수", "해외 지수"]);
+  assert.deepEqual(mainTitles, ["국내 지수"]);
   const railTitles = [...rail.querySelectorAll(".md-section-title")].map((el) => el.textContent);
-  assert.deepEqual(railTitles, ["원자재", "환율", "신규카테고리"]);
+  assert.deepEqual(railTitles, ["해외 지수", "원자재", "환율", "신규카테고리"]);
 });
 
 test("_mdRenderDashboard puts a per-card flow slot inside each 국내 지수 hero card", () => {
@@ -398,7 +398,7 @@ test("_mdBondCountries lists 10Y by yield desc, incl KR/US", () => {
   assert.equal(cs[0].value, 4.45);
 });
 
-test("_mdRenderDashboard renders 국채 chart containers + 수치 tables", () => {
+test("_mdRenderDashboard renders 국채 chart containers + yield-curve table", () => {
   const w = load();
   w._mdRenderDashboard(BOND_CATALOG, BOND_DATA);
   const main = w.document.getElementById("mdIndMain");
@@ -406,6 +406,6 @@ test("_mdRenderDashboard renders 국채 chart containers + 수치 tables", () =>
   assert.ok(main.querySelector("#bondCountryCompare"), "country compare container");
   const curveTbl = main.querySelector("#bondCurveTable .bond-tbl");
   assert.ok(curveTbl && /KOFR/.test(curveTbl.textContent), "curve table filled");
-  const ctryTbl = main.querySelector("#bondCountryTable .bond-tbl");
-  assert.ok(ctryTbl && /미국/.test(ctryTbl.textContent), "country table filled");
+  // 국가별 10년물은 그래프만 두고 텍스트 표는 제거됨.
+  assert.equal(main.querySelector("#bondCountryTable"), null, "country table removed");
 });
