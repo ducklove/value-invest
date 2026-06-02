@@ -51,22 +51,42 @@ class ExternalSummaryTests(unittest.TestCase):
         self.assertNotIn("doosan_fc_pref", [r.get("code") for r in out["top"]])
         self.assertEqual(out["top"][0]["code"], "336260")
 
-    def test_summarize_spac_sorts_by_annualized_return(self):
+    def test_summarize_spac_sorts_by_current_price(self):
         current = {
             "lastUpdated": "2026-06-01 14:58:47 KST",
             "summary": {"averageAnnualizedReturn": 1.69, "belowIpoCount": 19, "totalCount": 73},
             "prices": {
-                "0131D0": {"name": "키움히어로제2호스팩", "annualizedReturn": 3.1, "ratio": 0.9875},
-                "474660": {"name": "신한제12호스팩", "annualizedReturn": 6.05, "ratio": 1.025},
-                "0072Z0": {"name": "KB제33호스팩", "ratio": 0.9945},  # 기대수익률 없음 → 제외
+                "474660": {"name": "신한제12호스팩", "currentPrice": 2010, "ipoPrice": 2000, "annualizedReturn": 6.05, "ratio": 1.025},
+                "0131D0": {"name": "키움히어로제2호스팩", "currentPrice": 1975, "ipoPrice": 2000, "annualizedReturn": 3.1, "ratio": 0.9875},
+                "0072Z0": {"name": "KB제33호스팩", "ratio": 0.9945},  # 현재가 없음 → 제외
             },
         }
         out = external_tools._summarize_spac(current)
-        self.assertEqual([r["name"] for r in out["top"]], ["신한제12호스팩", "키움히어로제2호스팩"])
-        self.assertEqual(out["top"][0]["code"], "474660")
+        # 현재가 낮은 순: 키움(1975) < 신한(2010)
+        self.assertEqual([r["name"] for r in out["top"]], ["키움히어로제2호스팩", "신한제12호스팩"])
+        self.assertEqual(out["top"][0]["code"], "0131D0")
+        self.assertEqual(out["top"][0]["currentPrice"], 1975)
         self.assertEqual(out["averageAnnualizedReturn"], 1.69)
         self.assertEqual(out["belowIpoCount"], 19)
         self.assertEqual(out["url"], external_tools.SITE["spac"])
+
+    def test_summarize_spread_dedupes_multi_preferred_by_max_spread(self):
+        # 같은 보통주(336260)에 우선주 2개 → 괴리율 큰 것 하나만 노출.
+        current = {
+            "prices": {
+                "doosan_fc_1": {"spread": 87.0, "spreadChange": 0.1},
+                "doosan_fc_2": {"spread": 89.0, "spreadChange": 0.2},
+            },
+        }
+        config = [
+            {"id": "doosan_fc_1", "name": "두산퓨얼셀/1우", "commonTicker": "336260.KS", "preferredTicker": "33626K.KS"},
+            {"id": "doosan_fc_2", "name": "두산퓨얼셀/2우B", "commonTicker": "336260.KS", "preferredTicker": "33626L.KS"},
+        ]
+        out = external_tools._summarize_spread(current, config)
+        self.assertEqual(len(out["top"]), 1)
+        self.assertEqual(out["top"][0]["name"], "두산퓨얼셀/2우B")
+        self.assertEqual(out["top"][0]["spread"], 89.0)
+        self.assertEqual(out["top"][0]["code"], "336260")
 
     def test_summarize_gold_latest_gap_and_links(self):
         data = {
