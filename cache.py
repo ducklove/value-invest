@@ -747,6 +747,7 @@ async def init_db():
             armed INTEGER NOT NULL DEFAULT 1,
             last_triggered_at TEXT,
             last_value REAL,
+            state_json TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
@@ -770,6 +771,8 @@ async def init_db():
     await _ensure_column(db, "user_portfolio", "target_price_disabled", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "user_portfolio", "target_price_formula", "TEXT")
     await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
+    # Per-holding edge-trigger state for blanket (all_stocks) alert rules.
+    await _ensure_column(db, "portfolio_alerts", "state_json", "TEXT NOT NULL DEFAULT '{}'")
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
     await _backfill_legacy_cache_values(db)
@@ -1404,4 +1407,5 @@ from repositories.notifications import (  # noqa: E402
     update_portfolio_alert,
     delete_portfolio_alert,
     set_portfolio_alert_state,
+    set_portfolio_alert_state_json,
 )

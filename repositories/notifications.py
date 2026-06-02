@@ -162,7 +162,7 @@ async def delete_expired_notification_links() -> int:
 
 _ALERT_COLUMNS = (
     "id, google_sub, scope, stock_code, alert_type, threshold, enabled, note,"
-    " armed, last_triggered_at, last_value, created_at, updated_at"
+    " armed, last_triggered_at, last_value, state_json, created_at, updated_at"
 )
 
 
@@ -227,8 +227,10 @@ async def update_portfolio_alert(google_sub: str, alert_id: int, **fields) -> bo
     if not sets:
         return False
     # Editing thresholds/type should reset the edge-trigger so a freshly
-    # changed rule can fire again.
+    # changed rule can fire again (both the single `armed` flag and the
+    # per-holding blanket state).
     sets.append("armed = 1")
+    sets.append("state_json = '{}'")
     sets.append("updated_at = ?")
     params.append(_now())
     params.extend([google_sub, alert_id])
@@ -249,6 +251,16 @@ async def delete_portfolio_alert(google_sub: str, alert_id: int) -> bool:
     )
     await db.commit()
     return cursor.rowcount > 0
+
+
+async def set_portfolio_alert_state_json(alert_id: int, state_json: str) -> None:
+    """Persist per-holding edge state for blanket (all_stocks) rules."""
+    db = await cache.get_db()
+    await db.execute(
+        "UPDATE portfolio_alerts SET state_json = ?, updated_at = ? WHERE id = ?",
+        (state_json, _now(), alert_id),
+    )
+    await db.commit()
 
 
 async def set_portfolio_alert_state(

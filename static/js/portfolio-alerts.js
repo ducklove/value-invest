@@ -11,7 +11,7 @@ const PfAlerts = {
   pollTimer: null,
   pollDeadline: 0,
   pollKind: null, // 'telegram' | 'kakao'
-  category: 'price', // price | target | stockDaily | nav | daily
+  category: 'price', // price | target | dailyAbs | nav | daily
 };
 
 if (typeof window !== 'undefined') window.PfAlerts = PfAlerts;
@@ -272,15 +272,15 @@ function pfAlertsRenderForm() {
     valueField = pfAlertsStockSelect() + pfAlertsDirSelect()
       + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="지정가">';
   } else if (cat === 'target') {
-    valueField = pfAlertsStockSelect()
-      + '<span class="pf-alert-form-note">설정한 목표가에 도달하면 알림</span>';
-  } else if (cat === 'stockDaily') {
-    valueField = pfAlertsStockSelect() + pfAlertsDirSelect()
-      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="등락률(%)">';
+    valueField = '<span class="pf-alert-form-note">보유 전 종목의 목표가 도달 시 알림 (켜고 끄기만)</span>';
+  } else if (cat === 'dailyAbs') {
+    valueField = '<span class="pf-alert-form-note">전 종목, 하루</span>'
+      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" min="0" placeholder="±% (예: 5)">'
+      + '<span class="pf-alert-form-note">이상 등락 시</span>';
   } else if (cat === 'nav') {
     valueField = pfAlertsDirSelect()
       + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="총평가액(원)">';
-  } else { // daily
+  } else { // daily (포트폴리오 전체)
     valueField = pfAlertsDirSelect()
       + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="등락률(%)">';
   }
@@ -289,8 +289,8 @@ function pfAlertsRenderForm() {
     <div class="pf-alert-form-row">
       <select class="pf-modal-input pf-alert-cat" id="pfAlertCat" onchange="pfAlertsSetCategory(this.value)">
         <option value="price"${cat === 'price' ? ' selected' : ''}>종목 지정가</option>
-        <option value="target"${cat === 'target' ? ' selected' : ''}>종목 목표가 달성</option>
-        <option value="stockDaily"${cat === 'stockDaily' ? ' selected' : ''}>종목 일간 등락률</option>
+        <option value="target"${cat === 'target' ? ' selected' : ''}>목표가 도달 (전체)</option>
+        <option value="dailyAbs"${cat === 'dailyAbs' ? ' selected' : ''}>종목 일간 등락률 (전체)</option>
         <option value="nav"${cat === 'nav' ? ' selected' : ''}>포트폴리오 총평가액</option>
         <option value="daily"${cat === 'daily' ? ' selected' : ''}>포트폴리오 일간 등락률</option>
       </select>
@@ -298,7 +298,7 @@ function pfAlertsRenderForm() {
     </div>
     <div class="pf-alert-form-row">
       <input class="pf-modal-input pf-alert-note" id="pfAlertNote" type="text" maxlength="200" placeholder="메모(선택)">
-      <button class="pf-modal-add-btn" type="button" onclick="pfAlertsSubmit()">규칙 추가</button>
+      <button class="pf-modal-add-btn" type="button" onclick="pfAlertsSubmit()">${cat === 'target' ? '목표가 알림 켜기' : '규칙 추가'}</button>
     </div>`;
 }
 
@@ -307,14 +307,13 @@ function pfAlertsSetCategory(cat) {
   pfAlertsRenderForm();
 }
 
-// 카테고리 -> {alert_type, scope} 매핑. 지정가/목표가는 서버가 stock 스코프를
-// 유추하므로 scope 생략; 일간등락률은 stock/portfolio 가 같은 타입이라 명시.
+// 카테고리 -> {alert_type} 매핑. 서버가 alert_type 으로 scope 를 유추한다.
 function pfAlertsBuildType(cat, dir) {
   if (cat === 'price') return { alert_type: dir === 'below' ? 'price_below' : 'price_above' };
   if (cat === 'target') return { alert_type: 'target_reached' };
-  if (cat === 'stockDaily') return { alert_type: dir === 'below' ? 'daily_change_below' : 'daily_change_above', scope: 'stock' };
+  if (cat === 'dailyAbs') return { alert_type: 'daily_change_abs' };
   if (cat === 'nav') return { alert_type: dir === 'below' ? 'nav_below' : 'nav_above' };
-  return { alert_type: dir === 'below' ? 'daily_change_below' : 'daily_change_above', scope: 'portfolio' };
+  return { alert_type: dir === 'below' ? 'daily_change_below' : 'daily_change_above' };
 }
 
 async function pfAlertsSubmit() {
@@ -323,8 +322,7 @@ async function pfAlertsSubmit() {
   const note = (document.getElementById('pfAlertNote') || {}).value || '';
   const payload = { ...pfAlertsBuildType(cat, dir), note };
 
-  const needsStock = cat === 'price' || cat === 'target' || cat === 'stockDaily';
-  if (needsStock) {
+  if (cat === 'price') {
     const code = (document.getElementById('pfAlertStock') || {}).value;
     if (!code) { alert('종목을 선택해주세요.'); return; }
     payload.stock_code = code;
@@ -375,7 +373,10 @@ function pfAlertsLabel(rule) {
   const t = rule.alert_type;
   const dir = t.endsWith('above') ? '이상' : '이하';
   if (t === 'target_reached') {
-    return `${escapeHtml(pfAlertsStockName(rule.stock_code))} 목표가 달성 시`;
+    return '보유 전 종목 — 목표가 도달 시';
+  }
+  if (t === 'daily_change_abs') {
+    return `보유 전 종목 — 일간 등락률 ±${pfFmtNum(rule.threshold)}% 이상`;
   }
   if (t === 'price_above' || t === 'price_below') {
     return `${escapeHtml(pfAlertsStockName(rule.stock_code))} 현재가 ${pfFmtNum(rule.threshold)} ${dir}`;
@@ -383,11 +384,8 @@ function pfAlertsLabel(rule) {
   if (t === 'nav_above' || t === 'nav_below') {
     return `총평가액 ${pfFmtNum(rule.threshold)}원 ${dir}`;
   }
-  // daily_change_*
-  const pct = `${Number(rule.threshold).toFixed(2)}% ${dir}`;
-  return rule.scope === 'stock'
-    ? `${escapeHtml(pfAlertsStockName(rule.stock_code))} 일간 등락률 ${pct}`
-    : `포트폴리오 일간 등락률 ${pct}`;
+  // daily_change_above / below (포트폴리오 전체)
+  return `포트폴리오 일간 등락률 ${Number(rule.threshold).toFixed(2)}% ${dir}`;
 }
 
 function pfAlertsRenderList() {

@@ -176,30 +176,41 @@ class AlertCrudTests(NotificationHarness):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual((await self.client.get("/api/notifications/alerts")).json(), [])
 
-    async def test_target_reached_needs_no_threshold(self):
+    async def test_target_reached_blanket_singleton(self):
         resp = await self.client.post(
-            "/api/notifications/alerts",
-            json={"alert_type": "target_reached", "stock_code": "005930"},
+            "/api/notifications/alerts", json={"alert_type": "target_reached"}
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         rule = resp.json()
-        self.assertEqual(rule["scope"], "stock")
-        self.assertEqual(rule["alert_type"], "target_reached")
+        self.assertEqual(rule["scope"], "all_stocks")
+        self.assertIsNone(rule["stock_code"])
         self.assertEqual(rule["threshold"], 0)
+        # creating again upserts the same singleton rule
+        resp2 = await self.client.post(
+            "/api/notifications/alerts", json={"alert_type": "target_reached"}
+        )
+        self.assertEqual(resp2.json()["id"], rule["id"])
+        self.assertEqual(len((await self.client.get("/api/notifications/alerts")).json()), 1)
 
-    async def test_stock_scope_daily_change(self):
+    async def test_daily_abs_blanket(self):
         resp = await self.client.post(
-            "/api/notifications/alerts",
-            json={"alert_type": "daily_change_above", "scope": "stock", "threshold": 5, "stock_code": "005930"},
+            "/api/notifications/alerts", json={"alert_type": "daily_change_abs", "threshold": 5}
         )
         self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertEqual(resp.json()["scope"], "stock")
-        self.assertEqual(resp.json()["stock_code"], "005930")
+        self.assertEqual(resp.json()["scope"], "all_stocks")
+        self.assertEqual(resp.json()["threshold"], 5)
+        self.assertIsNone(resp.json()["stock_code"])
 
-    async def test_portfolio_scope_daily_change(self):
+    async def test_daily_abs_requires_positive(self):
+        resp = await self.client.post(
+            "/api/notifications/alerts", json={"alert_type": "daily_change_abs", "threshold": 0}
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    async def test_portfolio_daily_change(self):
         resp = await self.client.post(
             "/api/notifications/alerts",
-            json={"alert_type": "daily_change_below", "scope": "portfolio", "threshold": -3},
+            json={"alert_type": "daily_change_below", "threshold": -3},
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["scope"], "portfolio")
@@ -281,9 +292,9 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await engine.evaluate_user("u1"), 1)
             self.assertEqual(disp.await_count, 2)
 
-    async def test_target_reached_uses_holding_target(self):
+    async def test_target_reached_blanket_uses_holding_target(self):
         await _set_target_price("u1", "005930", 70000)
-        await self._rule(alert_type="target_reached", threshold=0.0)
+        await self._rule(scope="all_stocks", alert_type="target_reached", threshold=0.0, stock_code=None)
         captured = {}
 
         async def capture(google_sub, text):
@@ -303,17 +314,24 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         self.assertIn("목표가 달성", captured["text"])
         self.assertIn("삼성전자", captured["text"])
 
-    async def test_stock_daily_change_uses_change_pct(self):
-        alert_id = await self._rule(alert_type="daily_change_above", threshold=5.0)
+    async def test_daily_abs_blanket_edge(self):
+        rid = await self._rule(scope="all_stocks", alert_type="daily_change_abs", threshold=5.0, stock_code=None)
         disp = AsyncMock()
-        q = {"price": 80000.0, "change_pct": 7.0}  # +7% >= 5%
+        q = {"price": 80000.0, "change_pct": 7.0}  # |+7| >= 5 -> fire
 
         with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
             self.assertEqual(await engine.evaluate_user("u1"), 1)
-            q["change_pct"] = 3.0  # below -> re-arm, no fire
+            self.assertEqual(disp.await_count, 1)
+            q["change_pct"] = 3.0  # |3| < 5 -> re-arm, no fire
             self.assertEqual(await engine.evaluate_user("u1"), 0)
-            self.assertEqual((await cache.get_portfolio_alert("u1", alert_id))["armed"], 1)
+            q["change_pct"] = -8.0  # |-8| >= 5 -> fire again (down move)
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+            self.assertEqual(disp.await_count, 2)
+        # per-holding state recorded in state_json
+        import json as _json
+        state = _json.loads((await cache.get_portfolio_alert("u1", rid))["state_json"])
+        self.assertIn("005930", state)
 
     async def test_disabled_rule_not_evaluated(self):
         await self._rule(enabled=False)

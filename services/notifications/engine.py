@@ -5,20 +5,26 @@ A rule fires once when its condition flips from unmet → met (and the rule is
 met. This stops every evaluation tick from re-sending the same alert while a
 threshold stays crossed, yet lets it fire again on the next genuine crossing.
 
-Data sources are reused verbatim so alerts agree with what the UI shows:
+Rule shapes:
+* per-stock      — ``price_above`` / ``price_below`` (one rule per holding).
+* portfolio-wide — ``nav_above`` / ``nav_below`` and ``daily_change_above`` /
+  ``daily_change_below`` (whole-portfolio NAV / NAV daily change).
+* blanket        — ``target_reached`` (every holding's own 목표가) and
+  ``daily_change_abs`` (every holding moving ±n% intraday). One rule covers all
+  holdings; per-holding edge state lives in ``state_json`` so each holding fires
+  once independently.
+
+Data sources are reused so alerts agree with what the UI shows:
 * per-stock price / daily change → ``runtime_quotes.fetch_quote``
 * effective 목표가 → ``target_price`` column, else 우선주 본주가, else 매입가×1.3
-  (mirrors static/js/portfolio-actions.js:_computeTargetPrice for the common cases)
-* portfolio NAV → ``snapshot_intraday._fetch_total_value`` (same intraday sum)
+* portfolio NAV → ``snapshot_intraday._fetch_total_value``
 * prev-close NAV → latest ``portfolio_snapshots`` row (the Today baseline)
-
-``scope`` ('stock' | 'portfolio') is stored on each rule, so daily-change rules
-can be either per-stock or whole-portfolio without the type being ambiguous.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 import cache
@@ -30,14 +36,13 @@ from services.portfolio.time_windows import portfolio_today_baseline_date
 
 logger = logging.getLogger(__name__)
 
-PRICE_TYPES = frozenset({"price_above", "price_below"})
-TARGET_TYPES = frozenset({"target_reached"})
-DAILY_TYPES = frozenset({"daily_change_above", "daily_change_below"})
-NAV_TYPES = frozenset({"nav_above", "nav_below"})
-# daily-change can be either scope; the rule's `scope` field disambiguates.
-STOCK_ALERT_TYPES = PRICE_TYPES | TARGET_TYPES | DAILY_TYPES
-PORTFOLIO_ALERT_TYPES = NAV_TYPES | DAILY_TYPES
-ALL_ALERT_TYPES = PRICE_TYPES | TARGET_TYPES | DAILY_TYPES | NAV_TYPES
+PRICE_TYPES = frozenset({"price_above", "price_below"})            # scope=stock
+NAV_TYPES = frozenset({"nav_above", "nav_below"})                  # scope=portfolio
+PORTFOLIO_DAILY_TYPES = frozenset({"daily_change_above", "daily_change_below"})  # scope=portfolio
+TARGET_TYPES = frozenset({"target_reached"})                      # blanket (all holdings)
+DAILY_ABS_TYPES = frozenset({"daily_change_abs"})                 # blanket (all holdings, ±n%)
+BLANKET_TYPES = TARGET_TYPES | DAILY_ABS_TYPES
+ALL_ALERT_TYPES = PRICE_TYPES | NAV_TYPES | PORTFOLIO_DAILY_TYPES | BLANKET_TYPES
 
 
 def _condition_met(alert_type: str, metric: float, threshold: float) -> bool:
@@ -145,47 +150,90 @@ async def _prev_close_nav(google_sub: str) -> float | None:
     return value if value and value > 0 else None
 
 
-def _format_message(rule: dict, name: str, metric: float, *, target: float | None = None) -> str:
-    scope = rule["scope"]
+def _note_suffix(rule: dict) -> str:
+    note = (rule.get("note") or "").strip()
+    return f"\n📝 {note}" if note else ""
+
+
+def _format_portfolio_message(rule: dict, metric: float) -> str:
     alert_type = rule["alert_type"]
     threshold = rule["threshold"]
-    note = (rule.get("note") or "").strip()
-    suffix = f"\n📝 {note}" if note else ""
-
-    if alert_type == "target_reached":
-        return (
-            f"🎯 [{name}] 목표가 달성\n"
-            f"현재가 {_fmt_num(metric)} (목표가 {_fmt_num(target)})"
-            f"{suffix}"
-        )
-    if alert_type in PRICE_TYPES:
-        direction = "이상" if alert_type.endswith("_above") else "이하"
-        return (
-            f"🔔 [{name}] 지정가 알림\n"
-            f"현재가 {_fmt_num(metric)} (지정가 {_fmt_num(threshold)} {direction})"
-            f"{suffix}"
-        )
-    if alert_type in DAILY_TYPES and scope == "stock":
-        direction = "이상" if alert_type.endswith("_above") else "이하"
-        return (
-            f"🔔 [{name}] 일간 등락률 알림\n"
-            f"현재 {_fmt_pct(metric)} (기준 {_fmt_pct(threshold)} {direction})"
-            f"{suffix}"
-        )
+    direction = "이상" if alert_type.endswith("_above") else "이하"
     if alert_type in NAV_TYPES:
-        direction = "이상" if alert_type.endswith("_above") else "이하"
         return (
             f"🔔 포트폴리오 총평가액 알림\n"
             f"현재 {_fmt_num(metric)}원 (기준 {_fmt_num(threshold)}원 {direction})"
-            f"{suffix}"
+            f"{_note_suffix(rule)}"
         )
-    # portfolio daily change
-    direction = "이상" if alert_type.endswith("_above") else "이하"
     return (
         f"🔔 포트폴리오 일간 등락률 알림\n"
         f"현재 {_fmt_pct(metric)} (기준 {_fmt_pct(threshold)} {direction})"
-        f"{suffix}"
+        f"{_note_suffix(rule)}"
     )
+
+
+def _format_price_message(rule: dict, name: str, metric: float) -> str:
+    direction = "이상" if rule["alert_type"].endswith("_above") else "이하"
+    return (
+        f"🔔 [{name}] 지정가 알림\n"
+        f"현재가 {_fmt_num(metric)} (지정가 {_fmt_num(rule['threshold'])} {direction})"
+        f"{_note_suffix(rule)}"
+    )
+
+
+async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_map: dict) -> int:
+    """Evaluate a blanket rule across every holding with per-holding edge state."""
+    try:
+        state = json.loads(rule.get("state_json") or "{}")
+    except (TypeError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+
+    alert_type = rule["alert_type"]
+    threshold = rule["threshold"]
+    sent = 0
+    changed = False
+
+    for code, item in items_by_code.items():
+        quote = quote_map.get(code, {})
+        price = None
+        target = None
+        chg = None
+        if alert_type in TARGET_TYPES:
+            price = _quote_price(quote)
+            if price is None:
+                continue
+            common_price = _quote_price(quote_map.get(common_stock_code(code), {}))
+            target = _effective_target(item, common_price)
+            if target is None:
+                continue
+            condition = price >= target
+        else:  # daily_change_abs
+            chg = _quote_change_pct(quote)
+            if chg is None:
+                continue
+            condition = abs(chg) >= threshold
+
+        armed = state.get(code, True)
+        if condition and armed:
+            name = item.get("stock_name") or code
+            if alert_type in TARGET_TYPES:
+                text = f"🎯 [{name}] 목표가 달성\n현재가 {_fmt_num(price)} (목표가 {_fmt_num(target)})"
+            else:
+                text = f"🔔 [{name}] 일간 등락률 알림\n현재 {_fmt_pct(chg)} (기준 ±{_fmt_num(threshold)}%)"
+            text += _note_suffix(rule)
+            await channels.dispatch(google_sub, text)
+            state[code] = False
+            changed = True
+            sent += 1
+        elif not condition and armed is False:
+            state[code] = True
+            changed = True
+
+    if changed:
+        await cache.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+    return sent
 
 
 async def evaluate_user(google_sub: str) -> int:
@@ -207,31 +255,25 @@ async def evaluate_user(google_sub: str) -> int:
         item = items_by_code.get(code or "")
         return (item.get("stock_name") if item else None) or code or ""
 
-    # --- decide which quotes we need ---
-    stock_codes: set[str] = set()
-    target_codes: set[str] = set()
-    for rule in rules:
-        if rule["scope"] != "stock" or not rule.get("stock_code"):
-            continue
-        stock_codes.add(rule["stock_code"])
-        if rule["alert_type"] == "target_reached":
-            target_codes.add(rule["stock_code"])
+    # --- which quotes do we need? ---
+    price_codes = {r["stock_code"] for r in rules if r["alert_type"] in PRICE_TYPES and r.get("stock_code")}
+    has_blanket = any(r["alert_type"] in BLANKET_TYPES for r in rules)
+    needed: set[str] = set(price_codes)
+    if has_blanket:
+        needed |= set(items_by_code)
     # 우선주 자동 목표가는 본주가를 추가로 조회해야 한다.
-    extra_common: set[str] = set()
-    for code in target_codes:
-        item = items_by_code.get(code)
-        if not item:
-            continue
-        if item.get("target_price") in (None, "") and not item.get("target_price_disabled") and is_preferred_stock(code):
-            extra_common.add(common_stock_code(code))
+    if any(r["alert_type"] in TARGET_TYPES for r in rules):
+        for code, item in items_by_code.items():
+            if item.get("target_price") in (None, "") and not item.get("target_price_disabled") and is_preferred_stock(code):
+                needed.add(common_stock_code(code))
 
     quote_map: dict[str, dict] = {}
-    for code in stock_codes | extra_common:
+    for code in needed:
         quote_map[code] = await _safe_quote(code)
         await asyncio.sleep(0.1)
 
-    needs_nav = any(r["scope"] == "portfolio" and r["alert_type"] in NAV_TYPES for r in rules)
-    needs_pf_daily = any(r["scope"] == "portfolio" and r["alert_type"] in DAILY_TYPES for r in rules)
+    needs_nav = any(r["alert_type"] in NAV_TYPES for r in rules)
+    needs_pf_daily = any(r["alert_type"] in PORTFOLIO_DAILY_TYPES for r in rules)
     nav: float | None = None
     pf_daily_pct: float | None = None
     if needs_nav or needs_pf_daily:
@@ -243,42 +285,29 @@ async def evaluate_user(google_sub: str) -> int:
 
     sent = 0
     for rule in rules:
-        scope = rule["scope"]
         alert_type = rule["alert_type"]
-        code = rule.get("stock_code")
-        metric: float | None = None
-        target: float | None = None
 
-        if scope == "stock":
-            quote = quote_map.get(code or "", {})
-            if alert_type in PRICE_TYPES:
-                metric = _quote_price(quote)
-            elif alert_type == "target_reached":
-                metric = _quote_price(quote)
-                item = items_by_code.get(code or "")
-                if item is not None:
-                    common_price = _quote_price(quote_map.get(common_stock_code(code or ""), {}))
-                    target = _effective_target(item, common_price)
-            elif alert_type in DAILY_TYPES:
-                metric = _quote_change_pct(quote)
-        else:  # portfolio
-            if alert_type in NAV_TYPES:
-                metric = nav
-            elif alert_type in DAILY_TYPES:
-                metric = pf_daily_pct
+        if alert_type in BLANKET_TYPES:
+            sent += await _eval_blanket(google_sub, rule, items_by_code, quote_map)
+            continue
+
+        # single-metric rules (price / nav / portfolio daily) use the `armed` flag
+        if alert_type in PRICE_TYPES:
+            metric = _quote_price(quote_map.get(rule.get("stock_code") or "", {}))
+        elif alert_type in NAV_TYPES:
+            metric = nav
+        else:  # portfolio daily change
+            metric = pf_daily_pct
 
         if metric is None:
-            continue  # missing data — leave edge state untouched
-        if alert_type == "target_reached":
-            if target is None:
-                continue
-            condition = metric >= target
-        else:
-            condition = _condition_met(alert_type, metric, rule["threshold"])
-
+            continue
+        condition = _condition_met(alert_type, metric, rule["threshold"])
         armed = bool(rule["armed"])
         if condition and armed:
-            text = _format_message(rule, _name(code), metric, target=target)
+            if alert_type in PRICE_TYPES:
+                text = _format_price_message(rule, _name(rule.get("stock_code")), metric)
+            else:
+                text = _format_portfolio_message(rule, metric)
             await channels.dispatch(google_sub, text)
             await cache.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
             sent += 1

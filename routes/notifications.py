@@ -262,18 +262,17 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
     if alert_type not in engine.ALL_ALERT_TYPES:
         raise HTTPException(status_code=400, detail="지원하지 않는 알림 유형입니다.")
 
-    # Scope: price/target are always per-stock, nav always portfolio;
-    # daily-change can be either, so it reads an explicit scope.
-    if alert_type in engine.PRICE_TYPES or alert_type in engine.TARGET_TYPES:
+    # Scope is derived from the type: price is per-stock; target_reached and
+    # daily_change_abs are blanket (all holdings); nav / portfolio daily are
+    # whole-portfolio.
+    if alert_type in engine.PRICE_TYPES:
         scope = "stock"
-    elif alert_type in engine.NAV_TYPES:
+    elif alert_type in engine.BLANKET_TYPES:
+        scope = "all_stocks"
+    else:
         scope = "portfolio"
-    else:  # daily_change_*
-        scope = str(payload.get("scope") or "portfolio").strip()
-        if scope not in ("stock", "portfolio"):
-            raise HTTPException(status_code=400, detail="알림 범위가 올바르지 않습니다.")
 
-    # target_reached uses the holding's own 목표가, so no user threshold.
+    # target_reached uses each holding's own 목표가, so no user threshold.
     if alert_type in engine.TARGET_TYPES:
         threshold = 0.0
     else:
@@ -290,10 +289,12 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
         held = {it["stock_code"] for it in await cache.get_portfolio(google_sub)}
         if stock_code not in held:
             raise HTTPException(status_code=400, detail="보유 종목에 대해서만 종목 알림을 설정할 수 있습니다.")
-        if alert_type in engine.PRICE_TYPES and threshold <= 0:
+        if threshold <= 0:
             raise HTTPException(status_code=400, detail="지정가는 0보다 커야 합니다.")
     elif alert_type in engine.NAV_TYPES and threshold <= 0:
         raise HTTPException(status_code=400, detail="총평가액 기준은 0보다 커야 합니다.")
+    elif alert_type in engine.DAILY_ABS_TYPES and threshold <= 0:
+        raise HTTPException(status_code=400, detail="등락률 기준은 0보다 커야 합니다.")
 
     note = str(payload.get("note") or "").strip()[:200]
     enabled = bool(payload.get("enabled", True))
@@ -316,9 +317,20 @@ async def get_alerts(request: Request):
 @router.post("/alerts")
 async def create_alert(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
-    rule = await _validate_alert_payload(user["google_sub"], payload)
-    alert_id = await cache.create_portfolio_alert(user["google_sub"], **rule)
-    return await cache.get_portfolio_alert(user["google_sub"], alert_id)
+    sub = user["google_sub"]
+    rule = await _validate_alert_payload(sub, payload)
+    # Blanket rules (목표가 도달 / 전 종목 일간 등락률) are singletons per user:
+    # creating one again just updates the existing rule instead of duplicating.
+    if rule["alert_type"] in engine.BLANKET_TYPES:
+        for existing in await cache.list_portfolio_alerts(sub):
+            if existing["alert_type"] == rule["alert_type"]:
+                await cache.update_portfolio_alert(
+                    sub, existing["id"],
+                    threshold=rule["threshold"], note=rule["note"], enabled=rule["enabled"],
+                )
+                return await cache.get_portfolio_alert(sub, existing["id"])
+    alert_id = await cache.create_portfolio_alert(sub, **rule)
+    return await cache.get_portfolio_alert(sub, alert_id)
 
 
 @router.put("/alerts/{alert_id}")
