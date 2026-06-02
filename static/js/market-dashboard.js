@@ -323,6 +323,18 @@ function _extLinkRows(rows, valKey, baseUrl, useCode) {
   }).join('');
 }
 
+function _extSpacRows(rows, baseUrl) {
+  // 스팩은 현재가(원)를 그대로 보여준다(저가순). spac-hunter 는 ?code= deep-link 지원.
+  return (rows || []).map((r) => {
+    const href = r.code ? `${baseUrl}?code=${encodeURIComponent(r.code)}` : baseUrl;
+    const n = Number(r.currentPrice);
+    const price = (r.currentPrice != null && isFinite(n)) ? n.toLocaleString() : '-';
+    return `<a class="ext-row" href="${escapeHtml(_extSafeUrl(href))}" target="_blank" rel="noopener noreferrer">`
+      + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
+      + `<span class="ext-val">${escapeHtml(price)}</span></a>`;
+  }).join('');
+}
+
 function _extCard(title, url, subText, bodyHtml) {
   return '<div class="ext-card">'
     + `<div class="ext-head"><span>${escapeHtml(title)}</span>`
@@ -345,9 +357,8 @@ function _extRender(root, data) {
   }
   const p = data && data.spac;
   if (p && (p.top || []).length) {
-    // spac-hunter 는 ?code= deep-link 지원 → useCode=true.
-    const sub = p.averageAnnualizedReturn != null ? `평균 연환산 ${_extPct(p.averageAnnualizedReturn)}` : '연환산 기대수익률';
-    cards.push(_extCard('스팩 기대수익', p.url, sub, _extLinkRows(p.top, 'annualizedReturn', p.url, true)));
+    // 현재가가 낮은(공모가 대비 할인 큰) 순. spac-hunter 는 ?code= deep-link 지원.
+    cards.push(_extCard('스팩 저가순', p.url, '현재가 낮은 순', _extSpacRows(p.top, p.url)));
   }
   const g = data && data.goldGap;
   if (g && (g.assets || []).length) {

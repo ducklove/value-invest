@@ -313,7 +313,7 @@ test("_extRender builds 3 tool cards with deep-link, gap sign class, escaping", 
   assert.ok(!root.innerHTML.includes("<b>x</b>"));
 });
 
-test("_extRender adds a SPAC card (after spread) with ?code= deep-link", () => {
+test("_extRender adds a SPAC card (after spread) showing 현재가 with ?code= deep-link", () => {
   const w = load();
   const root = w.document.getElementById("externalTools");
   w._extRender(root, {
@@ -324,22 +324,23 @@ test("_extRender adds a SPAC card (after spread) with ?code= deep-link", () => {
     },
     spac: {
       url: "https://ducklove.github.io/spac-hunter/",
-      averageAnnualizedReturn: 1.7,
-      top: [{ name: "신한제12호스팩", code: "474660", annualizedReturn: 6.2 },
-            { name: "<b>x</b>", code: "0131D0", annualizedReturn: 3.1 }],
+      // 백엔드가 현재가 오름차순으로 정렬해 내려준다.
+      top: [{ name: "신한제12호스팩", code: "474660", currentPrice: 1975 },
+            { name: "<b>x</b>", code: "0131D0", currentPrice: 1990 }],
     },
   });
   const cards = root.querySelectorAll(".ext-card");
   assert.equal(cards.length, 2);
   // spac card comes right after the spread card.
   const spacCard = cards[1];
-  assert.match(spacCard.innerHTML, /스팩 기대수익/);
-  assert.match(spacCard.innerHTML, /평균 연환산 1\.7%/);
+  assert.match(spacCard.innerHTML, /스팩 저가순/);
+  assert.match(spacCard.innerHTML, /현재가 낮은 순/);
   // each row deep-links into spac-hunter via ?code=.
   const first = spacCard.querySelector(".ext-row");
   assert.match(first.getAttribute("href"), /spac-hunter\/\?code=474660/);
   assert.equal(first.getAttribute("target"), "_blank");
-  assert.match(spacCard.innerHTML, /6\.2%/);
+  // 현재가가 원 단위(천단위 콤마)로 표시된다.
+  assert.match(spacCard.innerHTML, /1,975/);
   // hostile name escaped.
   assert.ok(!root.innerHTML.includes("<b>x</b>"));
 });

@@ -91,15 +91,32 @@ def _summarize_holding(current: dict, config: list, top_n: int = 5) -> dict:
 
 
 def _summarize_spread(current: dict, config: list, top_n: int = 5) -> dict:
-    """우선주: spread(괴리율 %, 높을수록 우선주 할인 큼) 내림차순 TOP."""
+    """우선주: spread(괴리율 %, 높을수록 우선주 할인 큼) 내림차순 TOP.
+
+    같은 보통주에 우선주가 여럿이면(예: 두산퓨얼셀1우/2우B) preferredTicker 가
+    가장 작은 = 먼저 상장된 기본 우선주(보통 '1우') 하나만 노출한다.
+    """
     meta = {
         c.get("id"): {"name": c.get("name") or c.get("commonName") or c.get("id"), "code": _code(c.get("commonTicker", ""))}
         for c in (config or [])
     }
+    # 보통주(commonTicker)별 대표 우선주 한 개만: preferredTicker 사전순 최소.
+    by_common: dict = {}
+    for c in (config or []):
+        ct = _code(c.get("commonTicker", ""))
+        if not ct:
+            continue
+        best = by_common.get(ct)
+        if best is None or (c.get("preferredTicker") or "") < (best.get("preferredTicker") or ""):
+            by_common[ct] = c
+    primary_ids = {c.get("id") for c in by_common.values()}
+
     rows = []
     for cid, v in (current.get("prices") or {}).items():
+        if cid not in primary_ids:  # 보통주 쌍 + 대표 우선주만(다중우선주/단독 제외)
+            continue
         m = meta.get(cid)
-        if not m:  # config에 정의된 보통주 쌍만(우선주 단독 항목 제외)
+        if not m:
             continue
         spread = v.get("spread")
         if spread is None:
@@ -140,21 +157,23 @@ def _summarize_gold(data: dict) -> dict:
 
 
 def _summarize_spac(current: dict, top_n: int = 5) -> dict:
-    """스팩: 연환산 기대수익률(추정 청산분배금/현재가 기반) 내림차순 TOP."""
+    """스팩: 현재가가 낮은(공모가 대비 할인 큰) 순 TOP."""
     rows = []
     for code, v in (current.get("prices") or {}).items():
         if not isinstance(v, dict):
             continue
-        annualized = v.get("annualizedReturn")
-        if annualized is None:
+        price = v.get("currentPrice")
+        if price is None:
             continue
         rows.append({
             "name": v.get("name") or code,
             "code": code,
-            "annualizedReturn": annualized,
+            "currentPrice": price,
+            "ipoPrice": v.get("ipoPrice"),
+            "annualizedReturn": v.get("annualizedReturn"),
             "ratio": v.get("ratio"),
         })
-    rows.sort(key=lambda r: r["annualizedReturn"], reverse=True)
+    rows.sort(key=lambda r: r["currentPrice"])
     summary = current.get("summary") or {}
     return {
         "averageAnnualizedReturn": summary.get("averageAnnualizedReturn"),
