@@ -273,6 +273,8 @@ function trackEvent(name, params = {}) {
       <!-- 영역지도는 메인 뷰에서 상시 띄우기엔 공간만 먹어 팝업으로.
            클릭 시 pfOpenTreemap() 이 모달을 띄우고 ECharts 렌더. -->
       <button class="pf-treemap-btn" type="button" onclick="pfOpenTreemap()" title="영역지도로 보기">🗺️ 영역지도</button>
+      <!-- 조건 알림: 지정가/총평가액/일간등락률 달성 시 텔레그램으로 메시지. -->
+      <button class="pf-treemap-btn pf-alerts-btn" type="button" onclick="pfOpenAlerts()" title="조건 알림 설정">🔔 알림</button>
     </div>
     <div class="pf-add-panel" id="pfAddPanel" style="display:none;">
       <div class="pf-add-panel-head">
@@ -348,6 +350,32 @@ function trackEvent(name, params = {}) {
           <button class="pf-modal-close" type="button" onclick="pfCloseAssetInsight()" aria-label="닫기">&times;</button>
         </div>
         <div class="pf-modal-body pf-insight-body" id="pfAssetInsightBody"></div>
+      </div>
+    </div>
+
+    <!-- 조건 알림 설정 모달. 텔레그램 연결 + 알림 규칙(지정가/총평가액/일간등락률).
+         기존 .pf-modal-overlay/.pf-modal 패턴 재사용. 동적 부분은
+         portfolio-alerts.js 가 채운다. -->
+    <div class="pf-modal-overlay" id="pfAlertsModal" style="display:none;" onclick="if(event.target===this)pfCloseAlerts()" role="dialog" aria-modal="true" aria-labelledby="pfAlertsTitle">
+      <div class="pf-modal pf-alerts-modal">
+        <div class="pf-modal-header">
+          <h3 id="pfAlertsTitle">🔔 포트폴리오 조건 알림</h3>
+          <button class="pf-modal-close" type="button" onclick="pfCloseAlerts()" aria-label="닫기">&times;</button>
+        </div>
+        <div class="pf-modal-body pf-alerts-body">
+          <section class="pf-alert-section">
+            <h4>텔레그램 연결</h4>
+            <div class="pf-alert-channel" id="pfAlertChannel">
+              <div class="pf-alert-channel-status" id="pfAlertChannelStatus">상태 확인 중…</div>
+              <div class="pf-alert-channel-actions" id="pfAlertChannelActions"></div>
+            </div>
+          </section>
+          <section class="pf-alert-section">
+            <h4>알림 규칙</h4>
+            <div class="pf-alert-form" id="pfAlertForm"></div>
+            <div class="pf-alert-list" id="pfAlertList"></div>
+          </section>
+        </div>
       </div>
     </div>
     </div><!-- /pfHoldingsTab -->
@@ -642,6 +670,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-group-composition.js" defer></script>
 <script src="./js/portfolio-cashflows.js" defer></script>
+<script src="./js/portfolio-alerts.js" defer></script>
 <script src="./js/portfolio-tag-summary.js" defer></script>
 <script src="./js/portfolio-events.js" defer></script>
 <script src="./js/backtest.js" defer></script>

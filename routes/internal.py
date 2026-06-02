@@ -101,6 +101,23 @@ async def run_nps_snapshot_ep(request: Request, payload: dict = Body(default={})
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/notifications/evaluate")
+async def run_notifications_evaluate(request: Request):
+    """Run one portfolio-alert evaluation pass over all users. Loopback-only.
+
+    Lets a systemd timer drive alerts on the same cadence as snapshots, and
+    makes the alert engine testable without waiting for the in-process loop.
+    """
+    _require_loopback(request)
+    from services.notifications import engine
+    try:
+        result = await engine.evaluate_all()
+        return {"ok": True, **result}
+    except Exception as exc:
+        logger.exception("notification evaluate failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/wiki/ingest")
 async def run_wiki_ingest(request: Request, payload: dict = Body(default={})):
     """Drive the wiki ingestion pipeline. Loopback-only.

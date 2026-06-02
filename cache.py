@@ -702,6 +702,56 @@ async def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_insight_posts_created ON insight_posts(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_insight_posts_user_created ON insight_posts(google_sub, created_at DESC);
+
+        -- Notification channels: per-user delivery targets. channel is e.g.
+        -- 'telegram' (and later 'kakao'); config_json holds channel-specific
+        -- payload (telegram: {"chat_id":..., "username":...}). verified=1 once
+        -- the bot link handshake captured a real chat_id.
+        CREATE TABLE IF NOT EXISTS notification_channels (
+            google_sub TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            config_json TEXT NOT NULL DEFAULT '{}',
+            verified INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (google_sub, channel),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+
+        -- One-shot codes for the Telegram bot auto-link handshake. The
+        -- getUpdates poller maps an incoming `/start <code>` back to the user
+        -- who generated it, then deletes the row.
+        CREATE TABLE IF NOT EXISTS notification_links (
+            code TEXT PRIMARY KEY,
+            google_sub TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+
+        -- Portfolio alert rules + edge-trigger state. scope='stock' uses
+        -- stock_code; scope='portfolio' aggregates NAV / daily change. `armed`
+        -- prevents re-sending every tick: it drops to 0 when fired and re-arms
+        -- to 1 once the condition is no longer met.
+        CREATE TABLE IF NOT EXISTS portfolio_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            google_sub TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            stock_code TEXT,
+            alert_type TEXT NOT NULL,
+            threshold REAL NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            note TEXT NOT NULL DEFAULT '',
+            armed INTEGER NOT NULL DEFAULT 1,
+            last_triggered_at TEXT,
+            last_value REAL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_portfolio_alerts_user ON portfolio_alerts(google_sub, enabled);
     """)
     await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
     await _ensure_column(db, "financial_data", "report_date", "TEXT")
@@ -1338,4 +1388,20 @@ from repositories.user_stocks import (  # noqa: E402
     save_user_stock_order,
     save_starred_order,
     unstar_stock,
+)
+from repositories.notifications import (  # noqa: E402
+    get_notification_channel,
+    list_notification_channels,
+    upsert_notification_channel,
+    set_notification_channel_enabled,
+    delete_notification_channel,
+    create_notification_link,
+    pop_notification_link,
+    delete_expired_notification_links,
+    list_portfolio_alerts,
+    get_portfolio_alert,
+    create_portfolio_alert,
+    update_portfolio_alert,
+    delete_portfolio_alert,
+    set_portfolio_alert_state,
 )
