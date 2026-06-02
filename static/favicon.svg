@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Value Compass">
+  <defs>
+    <linearGradient id="vcBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <!-- 브랜드 마크와 같은 파란 라운드 사각형 -->
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#vcBg)"/>
+  <!-- 나침반 베젤(작은 크기에선 사라지고 큰 크기에서만 은은히) -->
+  <circle cx="32" cy="32" r="21" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="2"/>
+  <!-- 나침반 바늘: 북쪽(위·성장 방향)으로 살짝 기울여 가치 상승을 암시 -->
+  <g transform="rotate(20 32 32)">
+    <path d="M32 11 L38.5 33 L32 31 L25.5 33 Z" fill="#ffffff"/>
+    <path d="M32 53 L38.5 31 L32 33 L25.5 31 Z" fill="#ffffff" fill-opacity="0.5"/>
+  </g>
+  <!-- 중심 피벗 -->
+  <circle cx="32" cy="32" r="3.4" fill="#ffffff"/>
+  <circle cx="32" cy="32" r="3.4" fill="none" stroke="#1d4ed8" stroke-width="1.2"/>
+</svg>

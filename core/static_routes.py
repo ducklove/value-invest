@@ -51,6 +51,11 @@ def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: s
     async def styles() -> FileResponse:
         return FileResponse(static_dir / "styles.css", media_type="text/css")
 
+    async def favicon() -> FileResponse:
+        # Single SVG mark serves both /favicon.svg (linked) and /favicon.ico
+        # (browsers' default probe) so any page gets the icon without a 404.
+        return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
+
     async def admin_page() -> Response:
         html = (static_dir / "admin.html").read_text(encoding="utf-8")
         html = _with_asset_version(html, asset_version, relative=False)
@@ -62,6 +67,8 @@ def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: s
     app.add_api_route("/app-config.js", app_config, methods=["GET"])
     app.add_api_route("/api/integrations", integrations_status, methods=["GET"])
     app.add_api_route("/styles.css", styles, methods=["GET"])
+    app.add_api_route("/favicon.svg", favicon, methods=["GET"])
+    app.add_api_route("/favicon.ico", favicon, methods=["GET"])
     app.add_api_route("/admin.html", admin_page, methods=["GET"])
     app.mount("/js", StaticFiles(directory=str(static_dir / "js")), name="js")
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
