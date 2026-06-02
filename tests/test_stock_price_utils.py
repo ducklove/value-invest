@@ -1,5 +1,8 @@
 import unittest
 from datetime import date, datetime
+from unittest.mock import patch
+
+import stock_price
 from stock_price import (
     _safe_float, _safe_div, _get_first,
     _group_close_by_year, _group_dividends_by_year,
@@ -9,8 +12,52 @@ from stock_price import (
     _build_dividend_events,
     _get_history_close_series,
     _naver_quote_from_block,
+    _parse_naver_bulk_entry,
     pd,
 )
+
+
+class NaverBulkMarketSelectionTests(unittest.TestCase):
+    """Outside regular KRX hours the bulk (Naver) path must mirror the live KIS
+    market (active_market_code) and surface the NXT after-hours price; during
+    regular hours it uses the KRX regular-session price. Keeps the initial
+    portfolio paint from flickering KRX↔NXT against the live stream in 시간외."""
+
+    ENTRY = {
+        "itemCode": "005930",
+        "closePrice": "360,500",
+        "compareToPreviousPrice": {"code": "2"},
+        "compareToPreviousClosePrice": "11,500",
+        "fluctuationsRatio": "3.30",
+        "localTradedAt": "2026-06-02T15:30:00+09:00",
+        "overMarketPriceInfo": {
+            "overMarketStatus": "CLOSE",  # NXT 마감 후에도 NX면 NXT가를 써야
+            "overPrice": "362,500",
+            "compareToPreviousPrice": {"code": "2"},
+            "compareToPreviousClosePrice": "13,500",
+            "fluctuationsRatio": "3.87",
+            "localTradedAt": "2026-06-02T20:00:00.000000+09:00",
+        },
+    }
+
+    def test_after_hours_uses_nxt_overprice(self):
+        with patch.object(stock_price.kis_ws_manager, "active_market_code", return_value="NX"):
+            code, q = _parse_naver_bulk_entry(self.ENTRY)
+        self.assertEqual(code, "005930")
+        self.assertEqual(q["price"], 362500)
+        self.assertAlmostEqual(q["change_pct"], 3.87, places=2)
+
+    def test_regular_hours_uses_krx_close(self):
+        with patch.object(stock_price.kis_ws_manager, "active_market_code", return_value="J"):
+            _, q = _parse_naver_bulk_entry(self.ENTRY)
+        self.assertEqual(q["price"], 360500)
+        self.assertAlmostEqual(q["change_pct"], 3.30, places=2)
+
+    def test_nxt_unavailable_falls_back_to_krx(self):
+        entry = {k: v for k, v in self.ENTRY.items() if k != "overMarketPriceInfo"}
+        with patch.object(stock_price.kis_ws_manager, "active_market_code", return_value="NX"):
+            _, q = _parse_naver_bulk_entry(entry)
+        self.assertEqual(q["price"], 360500)  # NXT 미거래 → KRX 폴백
 
 
 class NaverQuoteSignTests(unittest.TestCase):

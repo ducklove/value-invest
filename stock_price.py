@@ -109,18 +109,26 @@ def _parse_naver_bulk_entry(entry: dict) -> tuple[str, dict] | None:
     code = str(entry.get("itemCode") or "").strip()
     if not code:
         return None
-    # Prefer the after-hours (시간외/NXT) price while that session is open so
-    # the snapshot matches the live KIS NXT quote; otherwise the regular
-    # session price (held in `closePrice` even during the open session).
+    # Match the live KIS market selection (kis_ws_manager.active_market_code):
+    # outside regular KRX hours the after-hours/NXT price is the live one, so
+    # prefer Naver's `overPrice` (NXT, traded through ~20:00) whenever it
+    # exists. Previously this only triggered while overMarketStatus=="OPEN",
+    # so after 20:00 the bulk path reverted to the 15:30 KRX close while the
+    # KIS stream still showed NXT — the same stock flickered KRX↔NXT in 시간외.
+    # During regular hours active_market_code() is "J", so closePrice (the live
+    # regular-session price) is used as before.
     over = entry.get("overMarketPriceInfo")
     quote = None
-    if isinstance(over, dict) and over.get("overMarketStatus") == "OPEN":
+    traded_at = str(entry.get("localTradedAt") or "")
+    if isinstance(over, dict) and kis_ws_manager.active_market_code() == "NX":
         quote = _naver_quote_from_block("overPrice", over)
+        if quote is not None:
+            # NXT trade time (e.g. 20:00) → correct trading day for staleness.
+            traded_at = str(over.get("localTradedAt") or traded_at)
     if quote is None:
         quote = _naver_quote_from_block("closePrice", entry)
     if quote is None:
         return None
-    traded_at = str(entry.get("localTradedAt") or "")
     quote["date"] = traded_at[:10] if len(traded_at) >= 10 else date.today().isoformat()
     quote["source"] = "naver"
     quote["fetched_at"] = datetime.now().isoformat()
