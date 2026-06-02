@@ -44,8 +44,12 @@ CATALOG: dict[str, dict] = {
     "VND_KRW": {"label": "베트남동/원", "category": "환율"},
     "USD_IDX": {"label": "달러지수", "category": "환율"},
     # 채권
+    "US3M":   {"label": "미국3개월", "category": "채권"},
+    "US1Y":   {"label": "미국1년물", "category": "채권"},
     "US2Y":   {"label": "미국2년물", "category": "채권"},
+    "US3Y":   {"label": "미국3년물", "category": "채권"},
     "US10Y":  {"label": "미국10년물", "category": "채권"},
+    "US20Y":  {"label": "미국20년물", "category": "채권"},
     "US30Y":  {"label": "미국30년물", "category": "채권"},
     "KR3Y":   {"label": "한국3년물", "category": "채권"},
     "KR5Y":   {"label": "한국5년물", "category": "채권"},
@@ -498,7 +502,11 @@ async def _fetch_fx_daily(client: httpx.AsyncClient, fx_code: str) -> dict:
 # 내부 코드 → CNBC 심볼. US10Y(Yahoo ^TNX)·KR3Y(Naver)는 기존 경로를 유지하고,
 # 신규 만기/국가만 CNBC 한 번의 묶음 요청으로 가져온다.
 _CNBC_BOND_MAP = {
+    "US3M":  "US3M",
+    "US1Y":  "US1Y",
     "US2Y":  "US2Y",
+    "US3Y":  "US3Y",
+    "US20Y": "US20Y",
     "US30Y": "US30Y",
     "KR5Y":  "KR5Y-KR",
     "KR10Y": "KR10Y-KR",
