@@ -132,6 +132,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .market-bar .mi-chg { text-align: right; font-size: 10px; white-space: nowrap; padding: 3px 2px; }
 .market-bar .mi-up { color: #b91c1c; }
 .market-bar .mi-down { color: #1d4ed8; }
+.market-bar .mi-flat { color: var(--text-secondary); }
 .market-bar .mi-drop-target { background: color-mix(in srgb, var(--primary) 12%, transparent); }
 .mi-del {
   opacity: 0; border: none; background: none; cursor: pointer;

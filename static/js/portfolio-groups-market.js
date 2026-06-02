@@ -327,7 +327,9 @@ function _mbRenderBar(dataMap) {
     const label = cat ? cat.label : code;
     const d = dataMap ? dataMap[code] : null;
     const r = idx;  // row index
-    let valHtml = '-', chgHtml = '';
+    let valHtml = '-';
+    // 전일대비를 못 구한 항목도 빈칸 대신 '-' placeholder 로 표시(투자정보 화면과 동일).
+    let chgHtml = '<span class="mi-flat">-</span>';
     if (d && d.value) {
       const rawPct = (d.change_pct || '').replace(/[-+%]/g, '');
       const isDown = d.direction === 'down';
@@ -336,7 +338,9 @@ function _mbRenderBar(dataMap) {
       const chgVal = d.change ? `${sign}${escapeHtml(String(d.change))}` : '';
       const chgPct = rawPct ? `(${sign}${escapeHtml(rawPct)}%)` : '';
       valHtml = escapeHtml(String(d.value));
-      chgHtml = `<span class="${cls}">${chgVal} ${chgPct}</span>`;
+      if (chgVal || chgPct) {
+        chgHtml = `<span class="${cls}">${chgVal} ${chgPct}</span>`;
+      }
     }
     html += `<span class="mi-label" draggable="true" data-idx="${r}">${escapeHtml(label)}</span>`;
     html += `<span class="mi-val" data-idx="${r}">${valHtml}</span>`;
