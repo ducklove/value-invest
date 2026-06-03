@@ -16,8 +16,8 @@ let _mdInFlight = null;
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물'];
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
-const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주' };
-const BOND_CURVE_COLORS = { KR: '#2563eb', US: '#e11d48' };
+const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주' };
+const BOND_CURVE_COLORS = { KR: '#2563eb', US: '#e11d48', JP: '#16a34a' };
 let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
 
 function _mdChange(d) {
@@ -161,12 +161,12 @@ function _bondVal(d) {
 }
 
 function _bondMatLabel(m) {
-  if (m === 0) return 'KOFR';
+  if (m === 0) return 'overnight';  // 한국=KOFR, 미국=SOFR
   if (m < 1) return Math.round(m * 12) + 'M';  // 0.25 → 3M
   return m + 'Y';
 }
 
-// 한국·미국 곡선을 공통 만기축에 맞춰 정렬. {labels, kr[], us[]} (없는 만기는 null).
+// 한국·미국·일본 곡선을 공통 만기축에 맞춰 정렬. {labels, kr[], us[], jp[]} (없는 만기는 null).
 function _mdBondCurve(codes, catalog, dataMap) {
   const pick = (country) => codes
     .filter((c) => (catalog[c] || {}).country === country && (catalog[c] || {}).maturity != null)
@@ -175,13 +175,16 @@ function _mdBondCurve(codes, catalog, dataMap) {
     .sort((a, b) => a.m - b.m);
   const kr = pick('KR');
   const us = pick('US');
-  const mats = [...new Set([...kr, ...us].map((x) => x.m))].sort((a, b) => a - b);
+  const jp = pick('JP');
+  const mats = [...new Set([...kr, ...us, ...jp].map((x) => x.m))].sort((a, b) => a - b);
   const krMap = new Map(kr.map((x) => [x.m, x.v]));
   const usMap = new Map(us.map((x) => [x.m, x.v]));
+  const jpMap = new Map(jp.map((x) => [x.m, x.v]));
   return {
     labels: mats.map(_bondMatLabel),
     kr: mats.map((m) => (krMap.has(m) ? krMap.get(m) : null)),
     us: mats.map((m) => (usMap.has(m) ? usMap.get(m) : null)),
+    jp: mats.map((m) => (jpMap.has(m) ? jpMap.get(m) : null)),
   };
 }
 
@@ -200,19 +203,18 @@ function _mdBondCountries(codes, catalog, dataMap) {
 
 function _bondCurveTableHtml(curve) {
   if (!curve.labels.length) return '';
-  const rows = curve.labels.map((lab, i) => {
-    const kr = curve.kr[i], us = curve.us[i];
-    return `<tr><td class="bt-mat">${escapeHtml(lab)}</td>`
-      + `<td>${kr == null ? '-' : kr.toFixed(2)}</td>`
-      + `<td>${us == null ? '-' : us.toFixed(2)}</td></tr>`;
-  }).join('');
-  return '<table class="bond-tbl"><thead><tr><th>만기</th><th>한국</th><th>미국</th></tr></thead>'
+  const cell = (v) => `<td>${v == null ? '-' : v.toFixed(2)}</td>`;
+  const rows = curve.labels.map((lab, i) =>
+    `<tr><td class="bt-mat">${escapeHtml(lab)}</td>`
+    + cell(curve.kr[i]) + cell(curve.us[i]) + cell(curve.jp[i]) + '</tr>'
+  ).join('');
+  return '<table class="bond-tbl"><thead><tr><th>만기</th><th>한국</th><th>미국</th><th>일본</th></tr></thead>'
     + `<tbody>${rows}</tbody></table>`;
 }
 
 function _mdBondSectionHtml() {
   // 국가별 10년물은 비교 그래프(bondCountryCompare)가 모든 국가를 막대로 보여주므로
-  // 별도 수치 표는 생략한다. 기간별 금리는 곡선이 한·미만이라 표를 함께 둔다.
+  // 별도 수치 표는 생략한다. 기간별 금리는 곡선이 한·미·일이라 표를 함께 둔다.
   return '<section class="md-section md-bond-section">'
     + '<h3 class="md-section-title">국채</h3>'
     + '<div class="md-bond-sub">기간별 금리 (Yield Curve)</div>'
@@ -260,7 +262,7 @@ function _drawBondCurveChart(curve) {
   });
   ec.setOption({
     grid: { left: 46, right: 14, top: 28, bottom: 24 },
-    legend: { data: ['한국', '미국'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 2 },
+    legend: { data: ['한국', '미국', '일본'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 2 },
     xAxis: { type: 'category', data: curve.labels, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 10 }, splitLine: { show: false } },
     yAxis: { type: 'value', scale: true, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) + '%' }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
     tooltip: {
@@ -274,7 +276,11 @@ function _drawBondCurveChart(curve) {
         return h;
       },
     },
-    series: [mkSeries('한국', curve.kr, BOND_CURVE_COLORS.KR), mkSeries('미국', curve.us, BOND_CURVE_COLORS.US)],
+    series: [
+      mkSeries('한국', curve.kr, BOND_CURVE_COLORS.KR),
+      mkSeries('미국', curve.us, BOND_CURVE_COLORS.US),
+      mkSeries('일본', curve.jp, BOND_CURVE_COLORS.JP),
+    ],
   });
   _bondTrackChart(el, ec);
 }

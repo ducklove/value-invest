@@ -45,7 +45,8 @@ CATALOG: dict[str, dict] = {
     "AUD_KRW": {"label": "호주달러/원", "category": "환율"},
     "VND_KRW": {"label": "베트남동/원", "category": "환율"},
     "USD_IDX": {"label": "달러지수", "category": "환율"},
-    # 국채 — country(KR/US/기타)·maturity(년, KOFR=0)로 프론트가 yield curve·국가비교 구성
+    # 국채 — country(KR/US/기타)·maturity(년, overnight=0)로 프론트가 yield curve·국가비교 구성
+    "US_SOFR": {"label": "미국 SOFR", "category": "국채", "country": "US", "maturity": 0},
     "US3M":   {"label": "미국3개월", "category": "국채", "country": "US", "maturity": 0.25},
     "US1Y":   {"label": "미국1년물", "category": "국채", "country": "US", "maturity": 1},
     "US2Y":   {"label": "미국2년물", "category": "국채", "country": "US", "maturity": 2},
@@ -54,6 +55,7 @@ CATALOG: dict[str, dict] = {
     "US20Y":  {"label": "미국20년물", "category": "국채", "country": "US", "maturity": 20},
     "US30Y":  {"label": "미국30년물", "category": "국채", "country": "US", "maturity": 30},
     "KOFR":     {"label": "KOFR",     "category": "국채", "country": "KR", "maturity": 0},
+    "KR_CD91":  {"label": "한국 CD(91일)", "category": "국채", "country": "KR", "maturity": 0.25},
     "KR_MSB1Y": {"label": "통안채1년", "category": "국채", "country": "KR", "maturity": 1},
     "KR2Y":   {"label": "한국2년물", "category": "국채", "country": "KR", "maturity": 2},
     "KR3Y":   {"label": "한국3년물", "category": "국채", "country": "KR", "maturity": 3},
@@ -61,11 +63,17 @@ CATALOG: dict[str, dict] = {
     "KR10Y":  {"label": "한국10년물", "category": "국채", "country": "KR", "maturity": 10},
     "KR20Y":  {"label": "한국20년물", "category": "국채", "country": "KR", "maturity": 20},
     "KR30Y":  {"label": "한국30년물", "category": "국채", "country": "KR", "maturity": 30},
+    "JP2Y":   {"label": "일본2년물", "category": "국채", "country": "JP", "maturity": 2},
+    "JP3Y":   {"label": "일본3년물", "category": "국채", "country": "JP", "maturity": 3},
+    "JP5Y":   {"label": "일본5년물", "category": "국채", "country": "JP", "maturity": 5},
     "JP10Y":  {"label": "일본10년물", "category": "국채", "country": "JP", "maturity": 10},
+    "JP20Y":  {"label": "일본20년물", "category": "국채", "country": "JP", "maturity": 20},
+    "JP30Y":  {"label": "일본30년물", "category": "국채", "country": "JP", "maturity": 30},
     "DE10Y":  {"label": "독일10년물", "category": "국채", "country": "DE", "maturity": 10},
     "FR10Y":  {"label": "프랑스10년물", "category": "국채", "country": "FR", "maturity": 10},
     "GB10Y":  {"label": "영국10년물", "category": "국채", "country": "GB", "maturity": 10},
     "AU10Y":  {"label": "호주10년물", "category": "국채", "country": "AU", "maturity": 10},
+    "CN10Y":  {"label": "중국10년물", "category": "국채", "country": "CN", "maturity": 10},
     # 야간선물
     "NIGHT_FUTURES": {"label": "야간선물", "category": "야간선물"},
 }
@@ -459,6 +467,47 @@ async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# US overnight RFR (SOFR — Federal Reserve Bank of New York public API)
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_sofr(client: httpx.AsyncClient) -> dict:
+    """Fetch SOFR (US 익일물 RFR, KOFR 대응) from the NY Fed public rates API.
+
+    ECOS KOFR 와 같은 표시 정밀도(.2f)·직전 영업일 대비 방식으로 맞춘다.
+    """
+    try:
+        r = await client.get(
+            "https://markets.newyorkfed.org/api/rates/secured/sofr/last/2.json",
+            headers={"User-Agent": "value-invest/1.0", "Accept": "application/json"},
+        )
+        if r.status_code != 200:
+            return dict(_EMPTY)
+        refs = (_json.loads(r.text).get("refRates") or [])
+        pts = [
+            (x.get("effectiveDate"), x.get("percentRate"))
+            for x in refs if x.get("percentRate") is not None and x.get("effectiveDate")
+        ]
+        if not pts:
+            return dict(_EMPTY)
+        pts.sort(key=lambda x: x[0], reverse=True)  # 최신 영업일 우선
+        price = float(pts[0][1])
+        prev = float(pts[1][1]) if len(pts) >= 2 else price
+        diff = round(price - prev, 2)
+        if diff == 0:
+            return {"value": f"{price:.2f}", "change": "", "change_pct": "", "direction": ""}
+        change_pct = f"{abs(diff) / prev * 100:.2f}%" if prev else ""
+        return {
+            "value": f"{price:.2f}",
+            "change": f"{abs(diff):.2f}",
+            "change_pct": change_pct,
+            "direction": "up" if diff > 0 else "down",
+        }
+    except Exception:
+        return dict(_EMPTY)
+
+
+# ---------------------------------------------------------------------------
 # FX daily quote (AUD, VND — not on the marketindex front-page head blocks)
 # ---------------------------------------------------------------------------
 
@@ -517,11 +566,17 @@ _CNBC_BOND_MAP = {
     "US30Y": "US30Y",
     "KR5Y":  "KR5Y-KR",
     "KR10Y": "KR10Y-KR",
+    "JP2Y":  "JP2Y-JP",
+    "JP3Y":  "JP3Y-JP",
+    "JP5Y":  "JP5Y-JP",
     "JP10Y": "JP10Y-JP",
+    "JP20Y": "JP20Y-JP",
+    "JP30Y": "JP30Y-JP",
     "DE10Y": "DE10Y-DE",
     "FR10Y": "FR10Y-FR",
     "GB10Y": "UK10Y-GB",
     "AU10Y": "AU10Y-AU",
+    "CN10Y": "CN10Y-CN",
 }
 
 
@@ -613,6 +668,7 @@ async def _fetch_cnbc_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict
 _ECOS_STAT = "817Y002"
 _ECOS_BOND_MAP = {
     "KOFR":     "010901000",  # KOFR(공시RFR)
+    "KR_CD91":  "010502000",  # CD(91일) — 미국 3M(US3M)에 대응하는 한국 단기금리
     "KR_MSB1Y": "010400001",  # 통안증권(1년)
     "KR2Y":     "010195000",  # 국고채(2년)
     "KR20Y":    "010220000",  # 국고채(20년)
@@ -824,6 +880,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     cnbc_bond_items = []  # government bonds — one batched CNBC request
     ecos_bond_items = []  # Korean bonds — one batched ECOS request
     us10y_needed = False
+    sofr_needed = False
     night_futures_needed = False
     gold_needed = False
     wti_needed = False
@@ -849,6 +906,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             world_daily_items.append(code)
         elif code == "US10Y":
             us10y_needed = True
+        elif code == "US_SOFR":
+            sofr_needed = True
         elif code == "NIGHT_FUTURES":
             night_futures_needed = True
 
@@ -901,6 +960,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_us10y(client))
             task_keys.append(("us10y", None))
 
+        # US overnight RFR (SOFR)
+        if sofr_needed:
+            tasks.append(_fetch_sofr(client))
+            task_keys.append(("sofr", None))
+
         # Commodities
         if gold_needed:
             tasks.append(_fetch_gold_live(client))
@@ -951,6 +1015,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 results["OIL_CL"] = result
             elif kind == "us10y":
                 results["US10Y"] = result
+            elif kind == "sofr":
+                results["US_SOFR"] = result
             elif kind == "night_futures":
                 results["NIGHT_FUTURES"] = result
 
