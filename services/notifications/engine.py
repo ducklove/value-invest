@@ -350,6 +350,124 @@ async def evaluate_all() -> dict:
     return {"users": len(users), "evaluated": evaluated, "sent": total_sent}
 
 
+# --- Economic calendar event result alerts ---------------------------------
+
+_CALENDAR_STALE_DAYS = 30
+
+
+def _calendar_num(value) -> float | None:
+    """Extract a comparable number from a calendar value ('3.2%','$24.86B','115K')."""
+    cleaned = "".join(c for c in str(value or "") if c.isdigit() or c in ".-")
+    if cleaned in ("", "-", ".", "-."):
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _calendar_surprise(actual, forecast) -> str:
+    a = _calendar_num(actual)
+    f = _calendar_num(forecast)
+    if a is None or f is None:
+        return ""
+    if a > f:
+        return "📈 예상 상회"
+    if a < f:
+        return "📉 예상 하회"
+    return "= 예상 부합"
+
+
+def _format_calendar_message(sub: dict, ev: dict) -> str:
+    flag = (ev.get("flag") or "").strip()
+    cname = (ev.get("country_name") or sub.get("country_name") or "").strip()
+    name = (ev.get("event") or sub.get("event") or "").strip()
+    actual = (ev.get("actual") or "").strip()
+    forecast = (ev.get("forecast") or sub.get("forecast") or "").strip()
+    previous = (ev.get("previous") or sub.get("previous") or "").strip()
+
+    head = " ".join(p for p in (flag, cname) if p)
+    line2 = f"{head} · {name}" if head else name
+    detail = f"실제 {actual or '-'}"
+    extras = []
+    if forecast:
+        extras.append(f"예상 {forecast}")
+    if previous:
+        extras.append(f"이전 {previous}")
+    if extras:
+        detail += f" ({', '.join(extras)})"
+
+    lines = ["📅 경제지표 결과 발표", line2, detail]
+    surprise = _calendar_surprise(actual, forecast)
+    if surprise:
+        lines.append(surprise)
+    return "\n".join(lines)
+
+
+async def evaluate_calendar_all() -> dict:
+    """Fire 'result released' alerts for subscribed calendar events.
+
+    One shared calendar fetch covers all pending subscriptions: we union their
+    countries over the [oldest pending date .. today] window, index the result
+    by zeroin ``index_id``, then notify each user whose subscribed event now has
+    an ``actual`` value. Edge-triggered via the ``fired`` flag (one send each).
+    """
+    import economic_calendar
+    from collections import defaultdict
+    from datetime import date, timedelta
+
+    pending = await cache.list_pending_calendar_subscriptions()
+    if not pending:
+        return {"subs": 0, "sent": 0}
+
+    today = date.today().isoformat()
+    stale_cutoff = (date.today() - timedelta(days=_CALENDAR_STALE_DAYS)).isoformat()
+    # A future event has no result yet; only dates up to today can fire.
+    candidates = [s for s in pending if (s.get("event_date") or "") <= today]
+
+    events_by_id: dict[str, dict] = {}
+    dates = [s["event_date"] for s in candidates if s.get("event_date") and s["event_date"] >= stale_cutoff]
+    if dates:
+        countries = sorted({s.get("country") for s in candidates if s.get("country")})
+        try:
+            data = await economic_calendar.fetch_economic_calendar(
+                start_date=min(dates),
+                end_date=today,
+                countries=countries or None,
+                importance=["high", "mid", "low"],
+            )
+            events_by_id = {
+                e["index_id"]: e for e in data.get("events", []) if e.get("index_id")
+            }
+        except Exception as exc:
+            logger.warning("calendar alert fetch failed: %s", exc)
+
+    by_user: dict[str, list] = defaultdict(list)
+    for sub in candidates:
+        by_user[sub["google_sub"]].append(sub)
+
+    sent = 0
+    for google_sub, subs in by_user.items():
+        try:
+            if not await channels.has_active_channel(google_sub):
+                continue
+            for sub in subs:
+                ev = events_by_id.get(sub.get("event_id"))
+                if not ev or not (ev.get("actual") or "").strip():
+                    continue
+                await channels.dispatch(google_sub, _format_calendar_message(sub, ev))
+                await cache.mark_calendar_subscription_fired(sub["id"])
+                sent += 1
+        except Exception as exc:
+            logger.warning("calendar alert eval failed for %s: %s", google_sub[:8], exc)
+
+    try:
+        await cache.delete_stale_calendar_subscriptions(stale_cutoff)
+    except Exception:
+        pass
+    return {"subs": len(pending), "sent": sent}
+
+
 async def run_alert_loop(stop_event: asyncio.Event, *, interval_seconds: float, initial_delay_seconds: float = 30.0) -> None:
     """Periodically evaluate alerts until ``stop_event`` is set."""
     if interval_seconds <= 0:
@@ -372,6 +490,14 @@ async def run_alert_loop(stop_event: asyncio.Event, *, interval_seconds: float, 
             raise
         except Exception as exc:
             logger.warning("alert loop pass failed: %s", exc)
+        try:
+            cal = await evaluate_calendar_all()
+            if cal.get("sent"):
+                logger.info("calendar alert loop sent %d notifications", cal["sent"])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("calendar alert pass failed: %s", exc)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
         except asyncio.TimeoutError:

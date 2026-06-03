@@ -753,6 +753,29 @@ async def init_db():
             FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_portfolio_alerts_user ON portfolio_alerts(google_sub, enabled);
+
+        -- 경제캘린더 이벤트 구독: 사용자가 특정 지표 발표(zeroin index_id)에 대해
+        -- '결과치(actual) 발표 시 알림'을 신청한 것. fired=1 로 엣지 트리거(결과
+        -- 발표 시 1회만 발송). event_date 는 폴링 윈도우·스테일 정리에 쓴다.
+        CREATE TABLE IF NOT EXISTS economic_calendar_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            google_sub TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            event_date TEXT NOT NULL,
+            event_datetime TEXT,
+            country TEXT,
+            country_name TEXT,
+            event TEXT,
+            importance TEXT,
+            forecast TEXT,
+            previous TEXT,
+            fired INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(google_sub, event_id),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_econ_cal_subs_pending ON economic_calendar_subscriptions(fired, event_date);
     """)
     await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
     await _ensure_column(db, "financial_data", "report_date", "TEXT")
@@ -1408,4 +1431,10 @@ from repositories.notifications import (  # noqa: E402
     delete_portfolio_alert,
     set_portfolio_alert_state,
     set_portfolio_alert_state_json,
+    list_calendar_subscriptions,
+    upsert_calendar_subscription,
+    delete_calendar_subscription,
+    list_pending_calendar_subscriptions,
+    mark_calendar_subscription_fired,
+    delete_stale_calendar_subscriptions,
 )

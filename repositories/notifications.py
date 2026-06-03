@@ -283,3 +283,103 @@ async def set_portfolio_alert_state(
             (1 if armed else 0, last_value, _now(), alert_id),
         )
     await db.commit()
+
+
+# --- Economic calendar subscriptions ---------------------------------------
+
+_ECON_SUB_COLUMNS = (
+    "id, google_sub, event_id, event_date, event_datetime, country, country_name,"
+    " event, importance, forecast, previous, fired, created_at, updated_at"
+)
+
+
+async def list_calendar_subscriptions(google_sub: str, *, pending_only: bool = False) -> list[dict]:
+    db = await cache.get_db()
+    query = f"SELECT {_ECON_SUB_COLUMNS} FROM economic_calendar_subscriptions WHERE google_sub = ?"
+    if pending_only:
+        query += " AND fired = 0"
+    query += " ORDER BY event_date ASC, id ASC"
+    cursor = await db.execute(query, (google_sub,))
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+async def upsert_calendar_subscription(
+    google_sub: str,
+    event_id: str,
+    *,
+    event_date: str,
+    event_datetime: str = "",
+    country: str = "",
+    country_name: str = "",
+    event: str = "",
+    importance: str = "",
+    forecast: str = "",
+    previous: str = "",
+) -> None:
+    """Subscribe a user to one calendar event's result. Re-subscribing re-arms
+    (fired→0) so an edited/re-checked event can fire again."""
+    db = await cache.get_db()
+    now = _now()
+    await db.execute(
+        """
+        INSERT INTO economic_calendar_subscriptions
+            (google_sub, event_id, event_date, event_datetime, country, country_name,
+             event, importance, forecast, previous, fired, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        ON CONFLICT(google_sub, event_id) DO UPDATE SET
+            event_date = excluded.event_date,
+            event_datetime = excluded.event_datetime,
+            country = excluded.country,
+            country_name = excluded.country_name,
+            event = excluded.event,
+            importance = excluded.importance,
+            forecast = excluded.forecast,
+            previous = excluded.previous,
+            fired = 0,
+            updated_at = excluded.updated_at
+        """,
+        (google_sub, event_id, event_date, event_datetime, country, country_name,
+         event, importance, forecast, previous, now, now),
+    )
+    await db.commit()
+
+
+async def delete_calendar_subscription(google_sub: str, event_id: str) -> bool:
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "DELETE FROM economic_calendar_subscriptions WHERE google_sub = ? AND event_id = ?",
+        (google_sub, event_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def list_pending_calendar_subscriptions() -> list[dict]:
+    """All un-fired subscriptions across users — the engine's work list."""
+    db = await cache.get_db()
+    cursor = await db.execute(
+        f"SELECT {_ECON_SUB_COLUMNS} FROM economic_calendar_subscriptions"
+        " WHERE fired = 0 ORDER BY event_date ASC, id ASC"
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+async def mark_calendar_subscription_fired(sub_id: int) -> None:
+    db = await cache.get_db()
+    await db.execute(
+        "UPDATE economic_calendar_subscriptions SET fired = 1, updated_at = ? WHERE id = ?",
+        (_now(), sub_id),
+    )
+    await db.commit()
+
+
+async def delete_stale_calendar_subscriptions(before_date: str) -> int:
+    """Drop subscriptions for events whose date is older than ``before_date``
+    (fired or not) so the table and the polling window stay bounded."""
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "DELETE FROM economic_calendar_subscriptions WHERE event_date < ?",
+        (before_date,),
+    )
+    await db.commit()
+    return cursor.rowcount

@@ -30,6 +30,12 @@ let _ecCustom = { start: '', end: '' };
 let _ecInFlight = null;
 let _ecShellReady = false;
 
+// 결과 알림 구독 상태(로그인 시). _ecSubs=구독한 event_id 집합,
+// _ecEventById=토글 시 메타 조회용, _ecSubsLoaded=세션당 1회만 서버 조회.
+let _ecSubs = new Set();
+let _ecEventById = {};
+let _ecSubsLoaded = false;
+
 function _ecFmtDate(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -80,6 +86,18 @@ function _ecValCell(label, value, extraCls) {
     + `<span class="ec-val-v">${v}</span></span>`;
 }
 
+// 결과 미발표(actual 없음) 이벤트에만 🔔 구독 체크박스. 발표된 행은 빈 칸으로
+// 정렬만 유지. event_id(zeroin index_id)가 없으면 추적 불가라 체크박스 생략.
+function _ecBellCell(ev) {
+  const hasActual = ev.actual && String(ev.actual).trim() !== '';
+  const eid = String(ev.index_id || '').trim();
+  if (hasActual || !eid) return '<span class="ec-bell-cell"></span>';
+  const checked = _ecSubs.has(eid) ? ' checked' : '';
+  return `<span class="ec-bell-cell"><label class="ec-bell" title="결과 발표 시 알림 받기">`
+    + `<input type="checkbox" class="ec-bell-cb" data-eid="${escapeHtml(eid)}"${checked}>`
+    + `<span class="ec-bell-ico" aria-hidden="true">🔔</span></label></span>`;
+}
+
 function _ecRowHtml(ev) {
   const impCls = ev.importance ? `ec-imp-${ev.importance}` : 'ec-imp-low';
   const impLabel = ev.importance_label || '';
@@ -96,7 +114,9 @@ function _ecRowHtml(ev) {
     + _ecValCell('실제', ev.actual, `ec-actual ${actualCls}`)
     + _ecValCell('예상', ev.forecast, '')
     + _ecValCell('이전', ev.previous, '')
-    + `</span></div>`;
+    + `</span>`
+    + _ecBellCell(ev)
+    + `</div>`;
 }
 
 function _ecGroupByDate(events) {
@@ -126,6 +146,12 @@ function _ecRenderBody(data) {
   const body = document.getElementById('econCalBody');
   if (!body) return;
   const events = (data && data.events) || [];
+  // 토글 시 구독 메타(날짜·국가·예상치 등) 조회용 인덱스.
+  _ecEventById = {};
+  for (const ev of events) {
+    const eid = String(ev.index_id || '').trim();
+    if (eid) _ecEventById[eid] = ev;
+  }
   if (!events.length) {
     body.innerHTML = '<div class="md-loading">해당 조건의 일정이 없습니다.</div>';
     return;
@@ -200,14 +226,110 @@ function _ecRenderShell() {
   if (start) start.addEventListener('change', onCustom);
   if (end) end.addEventListener('change', onCustom);
 
+  // 🔔 체크박스는 본문이 매 렌더마다 다시 그려지므로 위임 리스너로 처리.
+  const body = document.getElementById('econCalBody');
+  if (body) {
+    body.addEventListener('change', (e) => {
+      const cb = e.target.closest && e.target.closest('.ec-bell-cb');
+      if (cb) _ecToggleSubscription(cb);
+    });
+  }
+
   _ecShellReady = true;
   _ecSyncFilterActive();
+}
+
+// 구독 목록을 세션당 1회 로드(로그인 시). 필터 변경 시엔 메모리 _ecSubs를 재사용.
+async function _ecLoadSubs() {
+  if (_ecSubsLoaded || !window.currentUser) return;
+  try {
+    const r = await apiFetch('/api/notifications/calendar');
+    if (r.ok) {
+      const d = await r.json();
+      _ecSubs = new Set(d.event_ids || []);
+    }
+  } catch (e) {
+    console.warn('calendar subscriptions load failed', e);
+  } finally {
+    _ecSubsLoaded = true;
+  }
+}
+
+// 활성 알림 채널(텔레그램/카카오) 보유 여부. 켤 때만 조회하므로 매번 신선하게.
+async function _ecHasActiveChannel() {
+  try {
+    const r = await apiFetch('/api/notifications/channels');
+    if (!r.ok) return false;
+    const d = await r.json();
+    const tg = d.telegram || {};
+    const kk = d.kakao || {};
+    return Boolean((tg.connected && tg.enabled) || (kk.connected && kk.enabled));
+  } catch (e) {
+    return false;
+  }
+}
+
+function _ecPromptLogin() {
+  if (confirm('경제지표 결과 알림은 로그인 후 이용할 수 있습니다. 로그인 페이지로 이동할까요?')) {
+    if (typeof buildLoginPageUrl === 'function') window.location.href = buildLoginPageUrl();
+  }
+}
+
+function _ecPromptChannel() {
+  if (confirm('알림을 받으려면 텔레그램 또는 카카오톡 연결이 필요합니다. 포트폴리오 > 알림 설정으로 이동할까요?')) {
+    if (typeof switchView === 'function') switchView('portfolio');
+    if (typeof pfOpenAlerts === 'function') setTimeout(pfOpenAlerts, 80);
+  }
+}
+
+async function _ecToggleSubscription(cb) {
+  const eid = cb.dataset.eid;
+  const wantOn = cb.checked;
+  if (!window.currentUser) { cb.checked = false; _ecPromptLogin(); return; }
+
+  if (wantOn) {
+    if (!(await _ecHasActiveChannel())) { cb.checked = false; _ecPromptChannel(); return; }
+    const ev = _ecEventById[eid] || {};
+    try {
+      const r = await apiFetch('/api/notifications/calendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_id: eid,
+          event_date: ev.date || '',
+          event_datetime: ev.datetime || '',
+          country: ev.country || '',
+          country_name: ev.country_name || '',
+          event: ev.event || '',
+          importance: ev.importance || '',
+          forecast: ev.forecast || '',
+          previous: ev.previous || '',
+        }),
+      });
+      if (!r.ok) {
+        if (r.status === 409) { cb.checked = false; _ecPromptChannel(); return; }
+        throw new Error('subscribe failed');
+      }
+      _ecSubs.add(eid);
+    } catch (e) {
+      cb.checked = false;
+      console.warn('calendar subscribe failed', e);
+    }
+  } else {
+    try {
+      await apiFetch('/api/notifications/calendar/' + encodeURIComponent(eid), { method: 'DELETE' });
+    } catch (e) {
+      console.warn('calendar unsubscribe failed', e);
+    }
+    _ecSubs.delete(eid);
+  }
 }
 
 async function loadEconomicCalendar() {
   const root = document.getElementById('econCalContent');
   if (!root) return;
   if (!_ecShellReady) _ecRenderShell();
+  if (window.currentUser && !_ecSubsLoaded) await _ecLoadSubs();
   const { start, end } = _ecRangeDates();
   const params = new URLSearchParams({ start, end });
   if (_ecCountries.size) params.set('countries', [..._ecCountries].join(','));

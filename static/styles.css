@@ -910,7 +910,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .ec-row {
   display: grid;
-  grid-template-columns: 48px 76px 40px minmax(0, 1fr) auto;
+  grid-template-columns: 48px 76px 40px minmax(0, 1fr) auto 32px;
   align-items: center;
   gap: 10px;
   padding: 8px 2px;
@@ -943,13 +943,26 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 [data-theme="dark"] .ec-actual.ec-up, [data-theme="dark"] .ec-up { color: #fca5a5; }
 [data-theme="dark"] .ec-actual.ec-down, [data-theme="dark"] .ec-down { color: #93c5fd; }
 
+/* 🔔 결과 알림 구독 토글 */
+.ec-bell-cell { display: inline-flex; justify-content: center; align-items: center; }
+.ec-bell { cursor: pointer; display: inline-flex; align-items: center; line-height: 1; }
+.ec-bell-cb { position: absolute; opacity: 0; width: 0; height: 0; }
+.ec-bell-ico {
+  font-size: 15px;
+  filter: grayscale(1) opacity(0.4);
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+.ec-bell:hover .ec-bell-ico { filter: grayscale(0.3) opacity(0.8); }
+.ec-bell-cb:checked + .ec-bell-ico { filter: none; transform: scale(1.1); }
+.ec-bell-cb:focus-visible + .ec-bell-ico { outline: 2px solid var(--primary); border-radius: 4px; }
+
 @media (max-width: 720px) {
   .ec-row {
-    grid-template-columns: 44px 1fr;
+    grid-template-columns: 44px 1fr 30px;
     grid-template-areas:
-      "time country"
-      "time event"
-      "time vals";
+      "time country bell"
+      "time event   bell"
+      "time vals    bell";
     gap: 2px 10px;
     row-gap: 2px;
   }
@@ -959,6 +972,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .ec-event { grid-area: event; font-weight: 600; }
   .ec-vals { grid-area: vals; justify-content: flex-start; margin-top: 2px; }
   .ec-val { align-items: flex-start; }
+  .ec-bell-cell { grid-area: bell; align-self: center; }
 }
 
 /* Company info */

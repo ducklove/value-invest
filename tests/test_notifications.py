@@ -12,12 +12,14 @@ from __future__ import annotations
 import tempfile
 import time
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 
 import cache
+import economic_calendar
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
 from routes import notifications as notif_route
@@ -252,6 +254,41 @@ class AlertCrudTests(NotificationHarness):
         )
         self.assertEqual(resp.status_code, 400)
 
+    async def test_calendar_subscription_requires_channel_then_crud(self):
+        # 채널이 없으면 구독 시도는 409.
+        resp = await self.client.post(
+            "/api/notifications/calendar",
+            json={"event_id": "777", "event_date": "2026-06-10"},
+        )
+        self.assertEqual(resp.status_code, 409)
+
+        # 채널 연결 후 구독 → GET event_ids → DELETE.
+        await cache.upsert_notification_channel(
+            "u1", "telegram", config={"chat_id": 1, "username": "t"}, enabled=True, verified=True
+        )
+        resp = await self.client.post(
+            "/api/notifications/calendar",
+            json={
+                "event_id": "777", "event_date": "2026-06-10", "country": "us",
+                "country_name": "미국", "event": "CPI", "importance": "high",
+                "forecast": "3.4%", "previous": "3.6%",
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual((await self.client.get("/api/notifications/calendar")).json()["event_ids"], ["777"])
+        resp = await self.client.delete("/api/notifications/calendar/777")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual((await self.client.get("/api/notifications/calendar")).json()["event_ids"], [])
+
+    async def test_calendar_subscription_missing_fields_rejected(self):
+        await cache.upsert_notification_channel(
+            "u1", "telegram", config={"chat_id": 1}, enabled=True, verified=True
+        )
+        resp = await self.client.post(
+            "/api/notifications/calendar", json={"event_id": "", "event_date": ""}
+        )
+        self.assertEqual(resp.status_code, 400)
+
 
 class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -426,6 +463,111 @@ class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):
             ok = await kakao.send_to_user("u1", channel, "hi")
         self.assertFalse(ok)
         send.assert_not_awaited()
+
+
+class CalendarAlertEngineHarness(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / "cache.db"
+        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch.start()
+        await cache.close_db()
+        await cache.init_db()
+        await _seed_user_and_holding()
+        await cache.upsert_notification_channel(
+            "u1", "telegram", config={"chat_id": 1, "username": "t"}, enabled=True, verified=True
+        )
+
+    async def asyncTearDown(self) -> None:
+        await cache.close_db()
+        self.db_patch.stop()
+        self.temp_dir.cleanup()
+
+    def _event(self, **kw):
+        ev = {
+            "index_id": "777", "date": date.today().isoformat(), "time": "22:30",
+            "country": "us", "country_name": "미국", "flag": "🇺🇸",
+            "event": "CPI (전년비)", "importance": "high", "importance_label": "상",
+            "actual": "3.2%", "forecast": "3.4%", "previous": "3.6%",
+        }
+        ev.update(kw)
+        return ev
+
+    async def test_fires_once_when_actual_released(self):
+        today = date.today().isoformat()
+        await cache.upsert_calendar_subscription(
+            "u1", "777", event_date=today, country="us", country_name="미국",
+            event="CPI (전년비)", importance="high", forecast="3.4%", previous="3.6%",
+        )
+        captured = {}
+
+        async def cap(google_sub, text):
+            captured["text"] = text
+            return 1
+
+        with patch.object(economic_calendar, "fetch_economic_calendar",
+                          new=AsyncMock(return_value={"events": [self._event()]})), \
+             patch.object(channels, "dispatch", new=cap):
+            result = await engine.evaluate_calendar_all()
+        self.assertEqual(result["sent"], 1)
+        self.assertIn("결과 발표", captured["text"])
+        self.assertIn("CPI", captured["text"])
+        self.assertIn("예상 하회", captured["text"])  # 3.2 < 3.4
+
+        # fired=1 이후엔 재발송 없음(엣지 트리거).
+        with patch.object(economic_calendar, "fetch_economic_calendar",
+                          new=AsyncMock(return_value={"events": [self._event()]})), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            self.assertEqual((await engine.evaluate_calendar_all())["sent"], 0)
+        disp.assert_not_awaited()
+
+    async def test_no_fire_when_actual_still_empty(self):
+        today = date.today().isoformat()
+        await cache.upsert_calendar_subscription("u1", "777", event_date=today, country="us", event="X")
+        with patch.object(economic_calendar, "fetch_economic_calendar",
+                          new=AsyncMock(return_value={"events": [self._event(actual="")]})), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            self.assertEqual((await engine.evaluate_calendar_all())["sent"], 0)
+        disp.assert_not_awaited()
+        # 대기 상태 유지(아직 fired 아님)
+        self.assertEqual(len(await cache.list_pending_calendar_subscriptions()), 1)
+
+    async def test_no_fire_without_active_channel(self):
+        await cache.delete_notification_channel("u1", "telegram")
+        today = date.today().isoformat()
+        await cache.upsert_calendar_subscription("u1", "777", event_date=today, country="us", event="X")
+        with patch.object(economic_calendar, "fetch_economic_calendar",
+                          new=AsyncMock(return_value={"events": [self._event()]})), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            self.assertEqual((await engine.evaluate_calendar_all())["sent"], 0)
+        disp.assert_not_awaited()
+
+
+class CalendarMessageHelperTests(unittest.TestCase):
+    def test_num_parsing(self):
+        self.assertEqual(engine._calendar_num("3.2%"), 3.2)
+        self.assertEqual(engine._calendar_num("$24.86B"), 24.86)
+        self.assertEqual(engine._calendar_num("-2K"), -2.0)
+        self.assertIsNone(engine._calendar_num(""))
+        self.assertIsNone(engine._calendar_num("-"))
+
+    def test_surprise_direction(self):
+        self.assertEqual(engine._calendar_surprise("3.5", "3.4"), "📈 예상 상회")
+        self.assertEqual(engine._calendar_surprise("3.2", "3.4"), "📉 예상 하회")
+        self.assertEqual(engine._calendar_surprise("3.4", "3.4"), "= 예상 부합")
+        self.assertEqual(engine._calendar_surprise("3.4", ""), "")
+
+    def test_message_uses_fresh_event_values(self):
+        sub = {"country_name": "미국", "event": "CPI", "forecast": "9.9", "previous": "8.8"}
+        ev = {
+            "flag": "🇺🇸", "country_name": "미국", "event": "CPI (전년비)",
+            "actual": "3.2%", "forecast": "3.4%", "previous": "3.6%",
+        }
+        msg = engine._format_calendar_message(sub, ev)
+        self.assertIn("CPI (전년비)", msg)        # 신선한 이벤트명 우선
+        self.assertIn("실제 3.2%", msg)
+        self.assertIn("예상 3.4%", msg)
+        self.assertIn("이전 3.6%", msg)
 
 
 if __name__ == "__main__":

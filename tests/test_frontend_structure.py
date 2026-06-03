@@ -44,6 +44,24 @@ def test_economic_calendar_section_and_script_present():
     assert ".ec-row" in styles
 
 
+def test_economic_calendar_result_alert_checkbox_contract():
+    js = (JS / "economic-calendar.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    # 결과 미발표 행에만 🔔 체크박스, event_id(zeroin index_id) 기반 추적.
+    assert "ec-bell-cb" in js
+    assert "function _ecBellCell(ev)" in js
+    assert "async function _ecToggleSubscription(cb)" in js
+    # 게이트: 비로그인 → 로그인 팝업 / 채널 무 → 포트폴리오 알림 안내.
+    assert "function _ecPromptLogin()" in js
+    assert "function _ecPromptChannel()" in js
+    assert "async function _ecHasActiveChannel()" in js
+    assert "if (!window.currentUser) { cb.checked = false; _ecPromptLogin(); return; }" in js
+    assert "/api/notifications/calendar" in js
+    assert "pfOpenAlerts" in js
+    assert ".ec-bell-cb:checked + .ec-bell-ico" in styles
+
+
 def test_index_loads_portfolio_split_scripts_in_contract_order():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert "<title>Value Compass</title>" in html

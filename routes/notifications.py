@@ -21,7 +21,7 @@ from fastapi.responses import Response
 
 import cache
 from deps import get_current_user
-from services.notifications import engine, kakao, telegram
+from services.notifications import channels, engine, kakao, telegram
 
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
@@ -364,4 +364,53 @@ async def delete_alert(alert_id: int, request: Request):
     ok = await cache.delete_portfolio_alert(user["google_sub"], alert_id)
     if not ok:
         raise HTTPException(status_code=404, detail="알림 규칙을 찾을 수 없습니다.")
+    return {"ok": True}
+
+
+# --- Economic calendar event subscriptions ---------------------------------
+
+@router.get("/calendar")
+async def get_calendar_subscriptions(request: Request):
+    """이 사용자가 결과 알림을 신청한 경제캘린더 이벤트들. 프론트는 event_ids로
+    체크박스 상태를 복원한다(아직 발송 전인 것만)."""
+    user = _require_user(await get_current_user(request))
+    subs = await cache.list_calendar_subscriptions(user["google_sub"], pending_only=True)
+    return {"event_ids": [s["event_id"] for s in subs]}
+
+
+@router.post("/calendar")
+async def subscribe_calendar(request: Request, payload: dict = Body(...)):
+    """경제캘린더 이벤트 결과 발표 시 알림 구독. 활성 채널이 없으면 409."""
+    user = _require_user(await get_current_user(request))
+    if not await channels.has_active_channel(user["google_sub"]):
+        raise HTTPException(
+            status_code=409,
+            detail="알림을 받으려면 먼저 텔레그램 또는 카카오톡을 연결하세요.",
+        )
+    event_id = str(payload.get("event_id") or "").strip()[:40]
+    event_date = str(payload.get("event_date") or "").strip()[:10]
+    if not event_id or not event_date:
+        raise HTTPException(status_code=400, detail="이벤트 정보가 올바르지 않습니다.")
+
+    def _s(key: str, limit: int) -> str:
+        return str(payload.get(key) or "").strip()[:limit]
+
+    await cache.upsert_calendar_subscription(
+        user["google_sub"], event_id,
+        event_date=event_date,
+        event_datetime=_s("event_datetime", 30),
+        country=_s("country", 4),
+        country_name=_s("country_name", 20),
+        event=_s("event", 200),
+        importance=_s("importance", 8),
+        forecast=_s("forecast", 40),
+        previous=_s("previous", 40),
+    )
+    return {"ok": True, "event_id": event_id}
+
+
+@router.delete("/calendar/{event_id}")
+async def unsubscribe_calendar(event_id: str, request: Request):
+    user = _require_user(await get_current_user(request))
+    await cache.delete_calendar_subscription(user["google_sub"], event_id)
     return {"ok": True}
