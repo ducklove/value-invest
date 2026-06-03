@@ -818,6 +818,149 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background: var(--sidebar-bg, var(--bg));
 }
 
+/* 경제 캘린더 (Economic Calendar) */
+.econ-cal-section {
+  margin-bottom: 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.econ-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.econ-cal-eyebrow {
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.econ-cal-header h2 { margin: 2px 0 0; font-size: 20px; line-height: 1.25; }
+.econ-cal-refresh {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.econ-cal-refresh:hover { border-color: var(--primary); color: var(--primary); }
+.econ-cal-note { color: var(--text-secondary); font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
+
+.ec-filters { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.ec-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ec-flabel { font-size: 12px; color: var(--text-secondary); font-weight: 700; margin-right: 2px; }
+.ec-range-btn, .ec-chip {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.ec-range-btn:hover, .ec-chip:hover { border-color: var(--primary); }
+.ec-range-btn.active, .ec-chip.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+.ec-custom { display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.ec-date {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+/* 중요도 칩 점 색상 */
+.ec-imp-chip i {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 5px; vertical-align: middle; background: var(--text-secondary);
+}
+.ec-imp-chip.ec-imp-high i { background: #dc2626; }
+.ec-imp-chip.ec-imp-mid i { background: #f59e0b; }
+.ec-imp-chip.ec-imp-low i { background: #94a3b8; }
+.ec-imp-chip.active i { background: #fff; }
+
+.ec-daygroup { margin-bottom: 14px; }
+.ec-dayhead {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+  padding: 6px 2px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 2px;
+}
+.ec-dow { color: var(--text-secondary); font-weight: 600; }
+.ec-today-badge {
+  display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; color: #fff; background: var(--primary);
+}
+.ec-row {
+  display: grid;
+  grid-template-columns: 48px 76px 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.ec-row:last-child { border-bottom: none; }
+.ec-time { color: var(--text-secondary); font-weight: 700; }
+.ec-country { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.ec-flag { font-size: 14px; }
+.ec-cname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ec-imp { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--text-secondary); }
+.ec-imp i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+.ec-imp.ec-imp-high { color: #dc2626; }
+.ec-imp.ec-imp-high i { background: #dc2626; }
+.ec-imp.ec-imp-mid { color: #d97706; }
+.ec-imp.ec-imp-mid i { background: #f59e0b; }
+.ec-imp.ec-imp-low i { background: #94a3b8; }
+.ec-event { min-width: 0; overflow-wrap: anywhere; }
+.ec-vals { display: inline-flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; }
+.ec-val { display: inline-flex; flex-direction: column; align-items: flex-end; min-width: 44px; }
+.ec-val-k { font-size: 10px; color: var(--text-secondary); }
+.ec-val-v { font-weight: 700; }
+.ec-actual.ec-up { color: #b91c1c; }
+.ec-actual.ec-down { color: #1d4ed8; }
+.ec-up { color: #b91c1c; }
+.ec-down { color: #1d4ed8; }
+.ec-flat { color: var(--text); }
+[data-theme="dark"] .ec-actual.ec-up, [data-theme="dark"] .ec-up { color: #fca5a5; }
+[data-theme="dark"] .ec-actual.ec-down, [data-theme="dark"] .ec-down { color: #93c5fd; }
+
+@media (max-width: 720px) {
+  .ec-row {
+    grid-template-columns: 44px 1fr;
+    grid-template-areas:
+      "time country"
+      "time event"
+      "time vals";
+    gap: 2px 10px;
+    row-gap: 2px;
+  }
+  .ec-time { grid-area: time; align-self: start; }
+  .ec-country { grid-area: country; }
+  .ec-imp { display: none; }
+  .ec-event { grid-area: event; font-weight: 600; }
+  .ec-vals { grid-area: vals; justify-content: flex-start; margin-top: 2px; }
+  .ec-val { align-items: flex-start; }
+}
+
 /* Company info */
 .company-info {
   background: var(--surface); border-radius:12px; padding:20px 24px;

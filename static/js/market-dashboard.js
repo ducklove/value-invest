@@ -355,6 +355,7 @@ async function loadInvestingDashboard(refresh = false) {
   if (typeof loadSectors === 'function') loadSectors();
   if (typeof loadMarketNews === 'function') loadMarketNews();
   if (typeof loadExternalInsights === 'function') loadExternalInsights();
+  if (typeof loadEconomicCalendar === 'function') loadEconomicCalendar();
   if (_mdInFlight) return _mdInFlight;
   _mdInFlight = (async () => {
     try {

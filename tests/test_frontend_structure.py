@@ -25,6 +25,25 @@ PORTFOLIO_SPLIT_FILES = [
 ]
 
 
+def test_economic_calendar_section_and_script_present():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (JS / "economic-calendar.js").read_text(encoding="utf-8")
+    dashboard = (JS / "market-dashboard.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    # 투자정보 뷰 안, 금일 시황 섹션 다음의 풀폭 섹션으로 산다.
+    assert 'id="econCalSection"' in html
+    assert 'id="econCalContent"' in html
+    assert "./js/economic-calendar.js" in html
+    assert html.find('id="dailyMarketSection"') < html.find('id="econCalSection"')
+    assert html.find('id="econCalSection"') < html.find("<!-- /investingView -->")
+    # 투자정보 대시보드 로드 시 함께 로드된다.
+    assert "if (typeof loadEconomicCalendar === 'function') loadEconomicCalendar();" in dashboard
+    assert "async function loadEconomicCalendar()" in js
+    assert ".econ-cal-section" in styles
+    assert ".ec-row" in styles
+
+
 def test_index_loads_portfolio_split_scripts_in_contract_order():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert "<title>Value Compass</title>" in html

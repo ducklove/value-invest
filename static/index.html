@@ -145,6 +145,18 @@ function trackEvent(name, params = {}) {
       <div class="daily-market-body" id="dailyMarketBody"></div>
       <div class="daily-market-meta" id="dailyMarketMeta"></div>
     </section>
+
+    <section class="econ-cal-section" id="econCalSection">
+      <div class="econ-cal-header">
+        <div>
+          <div class="econ-cal-eyebrow">Economic Calendar</div>
+          <h2>경제 캘린더</h2>
+        </div>
+        <button class="econ-cal-refresh" type="button" onclick="loadEconomicCalendar()">새로고침</button>
+      </div>
+      <div class="econ-cal-note">주요 경제지표 발표 일정과 실제·예상·이전치를 국가·중요도·기간으로 확인하세요. (출처: 제로인/한경 경제캘린더 피드)</div>
+      <div id="econCalContent"><div class="md-loading">경제 일정을 불러오는 중입니다...</div></div>
+    </section>
   </div><!-- /investingView -->
 
   <div id="analysisView" style="display:none;">
@@ -683,6 +695,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/search.js" defer></script>
 <script src="./js/analysis.js" defer></script>
 <script src="./js/market-dashboard.js" defer></script>
+<script src="./js/economic-calendar.js" defer></script>
 <script src="./js/portfolio-store.js" defer></script>
 <script src="./js/portfolio-shell.js" defer></script>
 <script src="./js/portfolio-data.js" defer></script>

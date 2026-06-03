@@ -66,6 +66,48 @@ async def get_investor_flows():
     return {"flows": flows}
 
 
+@router.get("/api/market/economic-calendar")
+async def get_economic_calendar(
+    start: str = "",
+    end: str = "",
+    countries: str = "",
+    importance: str = "",
+):
+    """Public 경제캘린더 (zeroin/한경 피드). 국가·중요도·기간 필터.
+
+    countries: 국가코드 CSV(예: kr,us,eu). importance: high,mid,low CSV.
+    start/end: YYYY-MM-DD. 미지정 시 오늘~+6일.
+    """
+    from datetime import date, datetime, timedelta
+
+    import economic_calendar
+
+    def _parse_date(s: str):
+        try:
+            return datetime.strptime(s.strip(), "%Y-%m-%d").date()
+        except (ValueError, AttributeError):
+            return None
+
+    today = date.today()
+    start_d = _parse_date(start) or today
+    end_d = _parse_date(end) or (start_d + timedelta(days=6))
+    if end_d < start_d:
+        start_d, end_d = end_d, start_d
+    # 과도한 범위 방어(업스트림 부하·응답 크기) — 최대 62일.
+    if (end_d - start_d).days > 62:
+        end_d = start_d + timedelta(days=62)
+
+    code_list = [c.strip().lower() for c in countries.split(",") if c.strip()][:30]
+    level_list = [l.strip().lower() for l in importance.split(",") if l.strip()][:3]
+
+    return await economic_calendar.fetch_economic_calendar(
+        start_date=start_d.isoformat(),
+        end_date=end_d.isoformat(),
+        countries=code_list or None,
+        importance=level_list or None,
+    )
+
+
 @router.get("/api/external/insights")
 async def external_insights():
     """Public — 외부 분석 도구(지주사 NAV·우선주 괴리율·김치프리미엄) 요약."""
