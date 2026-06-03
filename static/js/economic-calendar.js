@@ -308,20 +308,6 @@ async function _ecLoadSubs() {
   }
 }
 
-// 활성 알림 채널(텔레그램/카카오) 보유 여부. 켤 때만 조회하므로 매번 신선하게.
-async function _ecHasActiveChannel() {
-  try {
-    const r = await apiFetch('/api/notifications/channels');
-    if (!r.ok) return false;
-    const d = await r.json();
-    const tg = d.telegram || {};
-    const kk = d.kakao || {};
-    return Boolean((tg.connected && tg.enabled) || (kk.connected && kk.enabled));
-  } catch (e) {
-    return false;
-  }
-}
-
 function _ecPromptLogin() {
   if (confirm('경제지표 결과 알림은 로그인 후 이용할 수 있습니다. 로그인 페이지로 이동할까요?')) {
     if (typeof buildLoginPageUrl === 'function') window.location.href = buildLoginPageUrl();
@@ -341,7 +327,8 @@ async function _ecToggleSubscription(cb) {
   if (!currentUser) { cb.checked = false; _ecPromptLogin(); return; }
 
   if (wantOn) {
-    if (!(await _ecHasActiveChannel())) { cb.checked = false; _ecPromptChannel(); return; }
+    // 채널 보유 여부는 서버가 단일 진실원: 구독을 시도하고 409(채널 없음)면 안내.
+    // 별도 클라이언트 사전체크는 오판(이미 연결됐는데 연결하라는 팝업) 위험이 있어 제거.
     const ev = _ecEventById[eid] || {};
     try {
       const r = await apiFetch('/api/notifications/calendar', {

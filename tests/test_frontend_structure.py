@@ -57,8 +57,10 @@ def test_economic_calendar_result_alert_checkbox_contract():
     # 게이트: 비로그인 → 로그인 팝업 / 채널 무 → 포트폴리오 알림 안내.
     assert "function _ecPromptLogin()" in js
     assert "function _ecPromptChannel()" in js
-    assert "async function _ecHasActiveChannel()" in js
     assert "if (!currentUser) { cb.checked = false; _ecPromptLogin(); return; }" in js
+    # 채널 보유는 서버 409 가 단일 진실원(클라이언트 사전체크 오판 방지).
+    assert "_ecHasActiveChannel" not in js
+    assert "if (r.status === 409) { cb.checked = false; _ecPromptChannel(); return; }" in js
     # currentUser 는 utils.js 의 전역 let — window 속성이 아니므로 bare 참조여야 한다.
     assert "window.currentUser" not in js
     assert "/api/notifications/calendar" in js

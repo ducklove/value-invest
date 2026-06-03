@@ -30,10 +30,14 @@ def _with_asset_version(html: str, asset_version: str, *, relative: bool) -> str
 def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: str) -> StaticHandlers:
     static_dir = settings.project_root / "static"
 
+    # HTML 문서는 캐시하지 않는다(자산은 ?v=<커밋해시>로 캐시버스팅하지만, HTML
+    # 자체가 브라우저에 캐시되면 옛 ?v= 를 가리켜 배포가 반영되지 않는다).
+    _HTML_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
     async def index() -> Response:
         html = (static_dir / "index.html").read_text(encoding="utf-8")
         html = _with_asset_version(html, asset_version, relative=True)
-        return Response(content=html, media_type="text/html")
+        return Response(content=html, media_type="text/html", headers=_HTML_NO_CACHE)
 
     async def spa_pages() -> Response:
         return await index()
@@ -59,7 +63,7 @@ def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: s
     async def admin_page() -> Response:
         html = (static_dir / "admin.html").read_text(encoding="utf-8")
         html = _with_asset_version(html, asset_version, relative=False)
-        return Response(content=html, media_type="text/html")
+        return Response(content=html, media_type="text/html", headers=_HTML_NO_CACHE)
 
     app.add_api_route("/", index, methods=["GET"])
     for path in SPA_PATHS:
