@@ -1,6 +1,6 @@
 # Project Architecture Graph
 
-작성일: 2026-04-30
+작성일: 2026-04-30 · 갱신일: 2026-06-04 (finance-pi, spac-hunter 반영)
 
 ```mermaid
 flowchart TB
@@ -15,7 +15,7 @@ flowchart TB
   GitHubPages -->|"redirect to app server"| Pi
   Pi --> SQLite
 
-  subgraph ValueInvest["value-invest"]
+  subgraph ValueInvest["value-invest (포트폴리오·분석 허브)"]
     Static["Static SPA<br/>index.html + split portfolio JS"]
     API["FastAPI Routes<br/>analysis / portfolio / reports<br/>wiki / auth / admin / integrations"]
     WS["WebSocket Quotes<br/>KIS realtime ticks"]
@@ -41,29 +41,47 @@ flowchart TB
   Pi -.runs.-> AI
   Pi -.loads.-> Integrations
 
-  subgraph SubProjects["Linked Subprojects"]
-    Holding["holding_value<br/>GitHub Pages dashboard<br/>config.json / api/holdings.json"]
-    Preferred["common_preferred_spread<br/>GitHub Pages dashboard<br/>config.json / current.json / data.js"]
-    GoldGap["gold_gap<br/>GitHub Pages dashboard<br/>config.json / data.json"]
-    KisProxy["kis-proxy<br/>public KIS proxy<br/>cantabile.tplinkdns.com:3288"]
+  subgraph SharedInfra["공용 인프라 (상시 서버)"]
+    KisProxy["kis-proxy<br/>FastAPI :3288<br/>KIS 인증대행·조회 프록시"]
+    FinancePi["finance-pi<br/>Raspberry Pi 데이터레이크 :8400<br/>Bronze/Silver/Gold + 백테스트<br/>내부 prices/macro/fundamentals API"]
   end
 
+  subgraph Dashboards["Linked Dashboards (GitHub Pages)"]
+    Holding["holding_value<br/>지주사 가치 대시보드<br/>config.json / api/holdings.json"]
+    Preferred["common_preferred_spread<br/>보통주·우선주 괴리율<br/>config.json / current.json / data.js"]
+    GoldGap["gold_gap<br/>금/BTC 김치프리미엄<br/>Flask + 정적 / config.json / data.json"]
+    SpacHunter["spac-hunter<br/>스팩 공모가 괴리·합병<br/>(독립 배포 · 허브 미연결)"]
+  end
+
+  %% 허브 → 대시보드 (설정/링크)
   Integrations -->|"read local config or public fallback"| Holding
   Integrations -->|"read local config or public fallback"| Preferred
   Integrations -->|"read local config or public fallback"| GoldGap
-  API -->|"server-side quote/order-compatible calls"| KisProxy
-  WS -->|"KIS realtime connection manager"| KisProxy
-
-  Static -->|"지주사 링크"| Holding
+  Static -->|"지주사 링크 + holdings.json"| Holding
   Static -->|"우선주 괴리율 링크"| Preferred
   Static -->|"금/BTC gap 링크"| GoldGap
+
+  %% 허브 → 공용 인프라
+  API -->|"server-side quote/history calls"| KisProxy
+  WS -->|"KIS realtime connection manager"| KisProxy
+  API -.->|"종가 백업 API (192.168.68.84:8400)"| FinancePi
+
+  %% 대시보드 → 공용 인프라
+  Holding -->|"시세 history"| KisProxy
+  Preferred -->|"시세 history"| KisProxy
+  Preferred -->|"종가/거시/배당 내부 API"| FinancePi
+
+  %% 개념적 연결 (런타임 의존 없음)
+  FinancePi -. "SPAC 도메인 모델 개념 공유" .- SpacHunter
 
   subgraph ExternalData["External Data Sources"]
     GoogleOAuth["Google OAuth"]
     GoogleSheets["Google Sheets<br/>preferred dividends"]
+    KRX["KRX / KIND<br/>상장종목·공시목록"]
     DART["DART 공시 API"]
     Naver["Naver Finance / Reports"]
     Yahoo["Yahoo Finance / yfinance"]
+    Crypto["Upbit / Bithumb / Binance<br/>gold.org"]
     KIS["Korea Investment Securities API"]
     OpenRouter["OpenRouter AI Gateway"]
   end
@@ -73,8 +91,25 @@ flowchart TB
   API -->|"reports / Naver finance links"| Naver
   API -->|"foreign dividends / benchmarks"| Yahoo
   API -->|"preferred dividends refresh"| GoogleSheets
-  KisProxy --> KIS
   AI --> OpenRouter
+  KisProxy --> KIS
+
+  %% finance-pi 수집 소스
+  FinancePi --> KIS
+  FinancePi --> KRX
+  FinancePi --> DART
+  FinancePi --> Naver
+
+  %% 대시보드 직접 소스
+  Preferred --> KIS
+  Preferred --> Naver
+  Holding --> KIS
+  Holding --> Yahoo
+  GoldGap --> Crypto
+  GoldGap --> Naver
+  SpacHunter --> KRX
+  SpacHunter --> DART
+  SpacHunter --> Naver
 
   subgraph Systemd["Systemd Timers / Services"]
     NavTimer["portfolio-snapshot.timer<br/>daily NAV"]
@@ -113,7 +148,12 @@ flowchart TB
 ## 핵심 해석
 
 - `value-invest`는 사용자 포트폴리오와 분석을 모으는 허브다.
+- 연관 저장소는 **공용 인프라**와 **링크 대시보드** 두 계층으로 나뉜다.
+  - 공용 인프라(상시 서버): `kis-proxy`(:3288, KIS 인증대행·조회 프록시), `finance-pi`(:8400, 라즈베리파이 데이터레이크·백테스트 플랫폼 + 내부 prices/macro/fundamentals API).
+  - 링크 대시보드(GitHub Pages): `holding_value`, `common_preferred_spread`, `gold_gap`, `spac-hunter`.
 - `holding_value`, `common_preferred_spread`, `gold_gap`은 독립 배포를 유지하고, `value-invest`가 설정과 링크를 읽어 연결한다.
-- `kis-proxy`는 브라우저 직접 호출 대상이 아니라 서버/KIS 실시간 계층이 사용하는 외부 프록시다.
+- `kis-proxy`는 브라우저 직접 호출 대상이 아니라 서버/KIS 실시간 계층, 그리고 `holding_value`·`common_preferred_spread`의 시세 history 조회가 함께 사용하는 프록시다.
+- `finance-pi`는 KRX·DART·KIS·Naver를 수집해 Gold 테이블로 만들고 내부 API를 노출한다. `common_preferred_spread`가 종가/거시지표/배당을 끌어다 쓰고, `value-invest`는 KIS history가 비었을 때의 종가 백업 소스(`CLOSE_PRICE_API_BASE_URL`)로 사용한다.
+- `spac-hunter`는 연관 프로젝트 중 유일하게 런타임 연결이 없는 독립 대시보드다(KRX/KIND·DART·Naver 직접 수집, 허브에도 미연결). 다만 `finance-pi` 아키텍처 문서 §4.3의 스팩 합병 정체성 모델(`spac_pre`/`spac_post`)과 개념적으로만 겹친다.
 - 운영 자동화는 systemd timer가 `/api/internal/*`를 호출하는 구조다.
 - 관리자 화면은 linked project config, AI 모델/키, 수동 배치, 이벤트/진단을 한곳에서 관리하는 운영 콘솔이다.
