@@ -48,6 +48,7 @@ CATALOG: dict[str, dict] = {
     # 국채 — country(KR/US/기타)·maturity(년, overnight=0)로 프론트가 yield curve·국가비교 구성
     "US_SOFR": {"label": "미국 SOFR", "category": "국채", "country": "US", "maturity": 0},
     "US3M":   {"label": "미국3개월", "category": "국채", "country": "US", "maturity": 0.25},
+    "US6M":   {"label": "미국6개월", "category": "국채", "country": "US", "maturity": 0.5},
     "US1Y":   {"label": "미국1년물", "category": "국채", "country": "US", "maturity": 1},
     "US2Y":   {"label": "미국2년물", "category": "국채", "country": "US", "maturity": 2},
     "US3Y":   {"label": "미국3년물", "category": "국채", "country": "US", "maturity": 3},
@@ -57,6 +58,7 @@ CATALOG: dict[str, dict] = {
     "US30Y":  {"label": "미국30년물", "category": "국채", "country": "US", "maturity": 30},
     "KOFR":     {"label": "KOFR",     "category": "국채", "country": "KR", "maturity": 0},
     "KR_CD91":  {"label": "한국 CD(91일)", "category": "국채", "country": "KR", "maturity": 0.25},
+    "KR_KORIBOR6M": {"label": "한국 KORIBOR(6개월)", "category": "국채", "country": "KR", "maturity": 0.5},
     "KR_MSB1Y": {"label": "통안채1년", "category": "국채", "country": "KR", "maturity": 1},
     "KR2Y":   {"label": "한국2년물", "category": "국채", "country": "KR", "maturity": 2},
     "KR3Y":   {"label": "한국3년물", "category": "국채", "country": "KR", "maturity": 3},
@@ -563,6 +565,7 @@ _CNBC_BOND_MAP = {
     "US3M":  "US3M",
     "US1Y":  "US1Y",
     "US2Y":  "US2Y",
+    "US6M":  "US6M",
     "US3Y":  "US3Y",
     "US5Y":  "US5Y",
     "US20Y": "US20Y",
@@ -673,6 +676,7 @@ _ECOS_STAT = "817Y002"
 _ECOS_BOND_MAP = {
     "KOFR":     "010901000",  # KOFR(공시RFR)
     "KR_CD91":  "010502000",  # CD(91일) — 미국 3M(US3M)에 대응하는 한국 단기금리
+    "KR_KORIBOR6M": "010151000",  # KORIBOR(6개월) — 한국 6개월 단기금리(국고채 6M 부재)
     "KR_MSB1Y": "010400001",  # 통안증권(1년)
     "KR2Y":     "010195000",  # 국고채(2년)
     "KR20Y":    "010220000",  # 국고채(20년)
