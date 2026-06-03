@@ -17,6 +17,40 @@ from stock_price import (
 )
 
 
+class KrxLimitTests(unittest.TestCase):
+    """상한가/하한가는 base×1.30/×0.70 을 해당 가격대 호가단위로 내림/올림한
+    '정확한' 호가여야 한다(근사 ±30% 아님)."""
+
+    def test_tick_sizes(self):
+        from services.krx_limits import krx_tick_size
+        self.assertEqual(krx_tick_size(1999), 1)
+        self.assertEqual(krx_tick_size(2000), 5)
+        self.assertEqual(krx_tick_size(5000), 10)
+        self.assertEqual(krx_tick_size(20000), 50)
+        self.assertEqual(krx_tick_size(50000), 100)
+        self.assertEqual(krx_tick_size(200000), 500)
+        self.assertEqual(krx_tick_size(500000), 1000)
+
+    def test_clean_multiples_are_exactly_30pct(self):
+        from services.krx_limits import krx_upper_limit, krx_lower_limit
+        for base in (1000, 10000, 50000, 100000, 200000, 500000):
+            self.assertEqual(krx_upper_limit(base), base * 1.3)
+            self.assertEqual(krx_lower_limit(base), base * 0.7)
+
+    def test_tick_rounding_band_crossing(self):
+        from services.krx_limits import krx_upper_limit, krx_lower_limit
+        # 기준가 89,600 → 상한가 116,400(=tick100 내림, +29.91%), 하한가 62,800.
+        self.assertEqual(krx_upper_limit(89600), 116400)
+        self.assertEqual(krx_lower_limit(89600), 62800)
+        # base tick(10) ≠ 상한가대 tick(50) 경계: 19,010 → 상한가 24,700.
+        self.assertEqual(krx_upper_limit(19010), 24700)
+
+    def test_none_for_invalid_base(self):
+        from services.krx_limits import krx_upper_limit, krx_lower_limit
+        self.assertIsNone(krx_upper_limit(None))
+        self.assertIsNone(krx_lower_limit(0))
+
+
 class NaverBulkMarketSelectionTests(unittest.TestCase):
     """Outside regular KRX hours the bulk (Naver) path must mirror the live KIS
     market (active_market_code) and surface the NXT after-hours price; during

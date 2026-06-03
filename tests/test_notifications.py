@@ -207,6 +207,20 @@ class AlertCrudTests(NotificationHarness):
         )
         self.assertEqual(resp.status_code, 400)
 
+    async def test_limit_reached_blanket_singleton(self):
+        resp = await self.client.post(
+            "/api/notifications/alerts", json={"alert_type": "limit_reached"}
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        rule = resp.json()
+        self.assertEqual(rule["scope"], "all_stocks")
+        self.assertEqual(rule["threshold"], 0)
+        self.assertIsNone(rule["stock_code"])
+        resp2 = await self.client.post(
+            "/api/notifications/alerts", json={"alert_type": "limit_reached"}
+        )
+        self.assertEqual(resp2.json()["id"], rule["id"])  # singleton upsert
+
     async def test_portfolio_daily_change(self):
         resp = await self.client.post(
             "/api/notifications/alerts",
@@ -332,6 +346,30 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         import json as _json
         state = _json.loads((await cache.get_portfolio_alert("u1", rid))["state_json"])
         self.assertIn("005930", state)
+
+    async def test_limit_reached_blanket_edge(self):
+        # 005930(국내). 기준가 10,000 → 상한가 13,000 / 하한가 7,000 (정확 호가단위).
+        await self._rule(scope="all_stocks", alert_type="limit_reached", threshold=0.0, stock_code=None)
+        disp = AsyncMock()
+        q = {"price": 13000.0, "previous_close": 10000.0}  # 상한가 정확 도달
+
+        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
+             patch.object(channels, "dispatch", new=disp):
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+            self.assertEqual(await engine.evaluate_user("u1"), 0)  # edge, no re-fire
+            q["price"] = 12990.0  # 상한가 1틱 아래 → 도달 아님(재무장)
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+            q["price"] = 7000.0   # 하한가 정확 도달
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+            self.assertEqual(disp.await_count, 2)
+
+    async def test_limit_reached_not_fired_just_below_limit(self):
+        # +29% 수준이어도 상한가(13,000) 미만이면 발화하지 않음 (근사 아님).
+        await self._rule(scope="all_stocks", alert_type="limit_reached", threshold=0.0, stock_code=None)
+        with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 12900.0, "previous_close": 10000.0})), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+        disp.assert_not_awaited()
 
     async def test_disabled_rule_not_evaluated(self):
         await self._rule(enabled=False)

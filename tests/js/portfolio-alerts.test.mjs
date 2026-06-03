@@ -56,6 +56,7 @@ test("카테고리 -> {alert_type} 매핑", () => {
   // {...} 로 현재 realm 객체로 복사해 cross-realm prototype 차이 회피.
   assert.deepEqual({ ...w.pfAlertsBuildType("price", "above") }, { alert_type: "price_above" });
   assert.deepEqual({ ...w.pfAlertsBuildType("target", "above") }, { alert_type: "target_reached" });
+  assert.deepEqual({ ...w.pfAlertsBuildType("limit", "above") }, { alert_type: "limit_reached" });
   assert.deepEqual({ ...w.pfAlertsBuildType("dailyAbs", "above") }, { alert_type: "daily_change_abs" });
   assert.deepEqual({ ...w.pfAlertsBuildType("nav", "above") }, { alert_type: "nav_above" });
   assert.deepEqual({ ...w.pfAlertsBuildType("daily", "below") }, { alert_type: "daily_change_below" });
@@ -85,6 +86,15 @@ test("종목 일간 등락률(전체) 폼: 종목 없이 ±% 입력만", () => {
   const html = w.document.getElementById("pfAlertForm").innerHTML;
   assert.ok(!html.includes('id="pfAlertStock"'), "전체 대상이라 종목 선택 없음");
   assert.ok(html.includes('id="pfAlertThreshold"'));
+});
+
+test("상하한가 도달(전체) 폼: 종목 선택·임계값 모두 없음", () => {
+  const w = loadAlerts([SAMSUNG]);
+  w.pfAlertsSetCategory("limit");
+  const html = w.document.getElementById("pfAlertForm").innerHTML;
+  assert.ok(!html.includes('id="pfAlertStock"'), "전체 대상이라 종목 선택 없음");
+  assert.ok(!html.includes('id="pfAlertThreshold"'), "임계값 입력 없음");
+  assert.match(html, /상한가/);
 });
 
 test("총평가액 폼: 종목 선택 없음", () => {
@@ -127,12 +137,14 @@ test("규칙 목록: 블랭킷/포트폴리오 라벨", () => {
     { id: 1, alert_type: "target_reached", scope: "all_stocks", threshold: 0, enabled: 1, armed: 1, note: "" },
     { id: 2, alert_type: "daily_change_abs", scope: "all_stocks", threshold: 5, enabled: 1, armed: 1, note: "" },
     { id: 3, alert_type: "daily_change_above", scope: "portfolio", threshold: 3, enabled: 1, armed: 0, note: "" },
+    { id: 4, alert_type: "limit_reached", scope: "all_stocks", threshold: 0, enabled: 1, armed: 1, note: "" },
   ];
   w.pfAlertsRenderList();
   const html = w.document.getElementById("pfAlertList").innerHTML;
   assert.match(html, /보유 전 종목 — 목표가 도달 시/);
   assert.match(html, /보유 전 종목 — 일간 등락률 ±5% 이상/);
   assert.match(html, /포트폴리오 일간 등락률/);
+  assert.match(html, /보유 전 종목 — 상한가·하한가 도달 시/);
 });
 
 test("pfOpenAlerts 는 모달을 표시한다", () => {

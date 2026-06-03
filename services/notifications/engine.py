@@ -28,6 +28,7 @@ import json
 import logging
 
 import cache
+from services.krx_limits import krx_lower_limit, krx_upper_limit
 from services.notifications import channels
 from services.portfolio import runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_preferred_stock
@@ -41,7 +42,8 @@ NAV_TYPES = frozenset({"nav_above", "nav_below"})                  # scope=portf
 PORTFOLIO_DAILY_TYPES = frozenset({"daily_change_above", "daily_change_below"})  # scope=portfolio
 TARGET_TYPES = frozenset({"target_reached"})                      # blanket (all holdings)
 DAILY_ABS_TYPES = frozenset({"daily_change_abs"})                 # blanket (all holdings, ±n%)
-BLANKET_TYPES = TARGET_TYPES | DAILY_ABS_TYPES
+LIMIT_TYPES = frozenset({"limit_reached"})                        # blanket (all holdings, 상/하한가)
+BLANKET_TYPES = TARGET_TYPES | DAILY_ABS_TYPES | LIMIT_TYPES
 ALL_ALERT_TYPES = PRICE_TYPES | NAV_TYPES | PORTFOLIO_DAILY_TYPES | BLANKET_TYPES
 
 
@@ -197,9 +199,10 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
 
     for code, item in items_by_code.items():
         quote = quote_map.get(code, {})
-        price = None
-        target = None
-        chg = None
+        name = item.get("stock_name") or code
+        condition = False
+        text = None
+
         if alert_type in TARGET_TYPES:
             price = _quote_price(quote)
             if price is None:
@@ -209,21 +212,36 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
             if target is None:
                 continue
             condition = price >= target
+            if condition:
+                text = f"🎯 [{name}] 목표가 달성\n현재가 {_fmt_num(price)} (목표가 {_fmt_num(target)})"
+        elif alert_type in LIMIT_TYPES:
+            # 상/하한가는 국내 주식만. 전일 기준가(previous_close)에 호가단위를
+            # 적용한 정확한 상한가/하한가와 현재가를 비교한다(근사 ±30% 아님).
+            if not runtime_quotes.is_korean_stock(code):
+                continue
+            price = _quote_price(quote)
+            base = _to_float(quote.get("previous_close"))
+            if price is None or base is None:
+                continue
+            upper = krx_upper_limit(base)
+            lower = krx_lower_limit(base)
+            if upper is not None and price >= upper:
+                condition = True
+                text = f"🔼 [{name}] 상한가 도달\n현재가 {_fmt_num(price)} (상한가 {_fmt_num(upper)})"
+            elif lower is not None and price <= lower:
+                condition = True
+                text = f"🔽 [{name}] 하한가 도달\n현재가 {_fmt_num(price)} (하한가 {_fmt_num(lower)})"
         else:  # daily_change_abs
             chg = _quote_change_pct(quote)
             if chg is None:
                 continue
             condition = abs(chg) >= threshold
+            if condition:
+                text = f"🔔 [{name}] 일간 등락률 알림\n현재 {_fmt_pct(chg)} (기준 ±{_fmt_num(threshold)}%)"
 
         armed = state.get(code, True)
         if condition and armed:
-            name = item.get("stock_name") or code
-            if alert_type in TARGET_TYPES:
-                text = f"🎯 [{name}] 목표가 달성\n현재가 {_fmt_num(price)} (목표가 {_fmt_num(target)})"
-            else:
-                text = f"🔔 [{name}] 일간 등락률 알림\n현재 {_fmt_pct(chg)} (기준 ±{_fmt_num(threshold)}%)"
-            text += _note_suffix(rule)
-            await channels.dispatch(google_sub, text)
+            await channels.dispatch(google_sub, (text or "") + _note_suffix(rule))
             state[code] = False
             changed = True
             sent += 1

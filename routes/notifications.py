@@ -272,8 +272,9 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
     else:
         scope = "portfolio"
 
-    # target_reached uses each holding's own 목표가, so no user threshold.
-    if alert_type in engine.TARGET_TYPES:
+    # target_reached / limit_reached have no user threshold (holding's own
+    # 목표가 / fixed 상·하한가).
+    if alert_type in engine.TARGET_TYPES or alert_type in engine.LIMIT_TYPES:
         threshold = 0.0
     else:
         try:
