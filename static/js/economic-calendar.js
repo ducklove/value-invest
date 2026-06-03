@@ -278,7 +278,7 @@ function _ecRenderShell() {
 
 // 구독 목록을 세션당 1회 로드(로그인 시). 필터 변경 시엔 메모리 _ecSubs를 재사용.
 async function _ecLoadSubs() {
-  if (_ecSubsLoaded || !window.currentUser) return;
+  if (_ecSubsLoaded || !currentUser) return;
   try {
     const r = await apiFetch('/api/notifications/calendar');
     if (r.ok) {
@@ -322,7 +322,7 @@ function _ecPromptChannel() {
 async function _ecToggleSubscription(cb) {
   const eid = cb.dataset.eid;
   const wantOn = cb.checked;
-  if (!window.currentUser) { cb.checked = false; _ecPromptLogin(); return; }
+  if (!currentUser) { cb.checked = false; _ecPromptLogin(); return; }
 
   if (wantOn) {
     if (!(await _ecHasActiveChannel())) { cb.checked = false; _ecPromptChannel(); return; }
@@ -369,7 +369,7 @@ async function loadEconomicCalendar() {
     _ecLoadLevels();   // 저장된 중요도별 국가 선택 복원(셸 렌더 전에)
     _ecRenderShell();
   }
-  if (window.currentUser && !_ecSubsLoaded) await _ecLoadSubs();
+  if (currentUser && !_ecSubsLoaded) await _ecLoadSubs();
   const params = new URLSearchParams({ start: _ecStart, end: _ecEnd });
   // 중요도별 국가 선택은 항상 명시적으로 전달('' = 그 중요도 숨김).
   params.set('high', _ecLevelParam('high'));

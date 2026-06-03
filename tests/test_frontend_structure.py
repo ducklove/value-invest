@@ -56,7 +56,9 @@ def test_economic_calendar_result_alert_checkbox_contract():
     assert "function _ecPromptLogin()" in js
     assert "function _ecPromptChannel()" in js
     assert "async function _ecHasActiveChannel()" in js
-    assert "if (!window.currentUser) { cb.checked = false; _ecPromptLogin(); return; }" in js
+    assert "if (!currentUser) { cb.checked = false; _ecPromptLogin(); return; }" in js
+    # currentUser 는 utils.js 의 전역 let — window 속성이 아니므로 bare 참조여야 한다.
+    assert "window.currentUser" not in js
     assert "/api/notifications/calendar" in js
     assert "pfOpenAlerts" in js
     assert ".ec-bell-cb:checked + .ec-bell-ico" in styles
