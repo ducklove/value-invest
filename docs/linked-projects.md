@@ -10,8 +10,13 @@ URLs or server-side environment variables instead of copying their code.
 | --- | --- | --- | --- |
 | `holdingValue` | `https://github.com/ducklove/holding_value` | `../hodling-value` or `../holding_value` | Loads `api/holdings.json` and links holding-company rows to the dashboard. |
 | `preferredSpread` | `https://github.com/ducklove/common_preferred_spread` | `../common_preferred_spread` | Links preferred-stock rows to the spread dashboard. |
+| `spacHunter` | `https://github.com/ducklove/spac-hunter` | `../spac-hunter` | Links SPAC portfolio rows to the spac dashboard via `?code=`. Exposes `baseUrl` only (no local `config.json`). |
 | `goldGap` | `https://github.com/ducklove/gold_gap` | `../gold_gap` | Links `KRX_GOLD` and `CRYPTO_BTC` portfolio rows to the gold/bitcoin gap dashboard. |
 | `kisProxy` | `https://github.com/ducklove/kis-proxy` | `../kis-proxy` | Used server-side by `kis_proxy_client.py` through `KIS_PROXY_BASE_URL`. |
+
+> `finance-pi` (`../finance-pi`, Raspberry Pi 데이터레이크 `:8400`)는 위 integration
+> registry에 속하지 않는 인프라 백엔드다. `value-invest`는 이를 `CLOSE_PRICE_API_BASE_URL`
+> 종가 백업 소스로만 쓴다(아래 Local Config Discovery 참고).
 
 ## Operating Model
 
@@ -39,8 +44,24 @@ URLs or server-side environment variables instead of copying their code.
 
 - Preferred stocks open `preferredSpread` with `?code=<preferred-code>`.
 - Holding-company stocks open `holdingValue` with `?code=<stock-code>`.
+- SPAC stocks open `spacHunter` with `?code=<spac-code>`.
 - `KRX_GOLD` opens `goldGap` with `?asset=gold`.
 - `CRYPTO_BTC` opens `goldGap` with `?asset=bitcoin`.
+
+## Server-side External Insights
+
+Separate from the browser deep-links above, `external_tools.py`
+(`fetch_external_insights`) pulls each dashboard's published JSON from
+`raw.githubusercontent`, summarizes it, and feeds the AI portfolio-insight layer.
+Results are cached ~15 minutes and each fetch fails independently:
+
+- `holdingValue`: `current.json` — largest NAV discounts.
+- `preferredSpread`: `current.json` — widest common/preferred spreads.
+- `goldGap`: `data.json` — gap per asset.
+- `spacHunter`: `current.json` (branch `main`) — deepest discount-to-offer SPACs.
+
+This path needs neither local config nor the `/admin.html` config writer; it only
+needs each dashboard's public GitHub Pages / raw content to be reachable.
 
 ## Local Config Discovery
 
@@ -55,13 +76,14 @@ Public base URLs can be overridden with:
 
 - `HOLDING_VALUE_BASE_URL`
 - `PREFERRED_SPREAD_BASE_URL`
+- `SPAC_HUNTER_BASE_URL`
 - `GOLD_GAP_BASE_URL`
 - `KIS_PROXY_BASE_URL`
 - `KIS_PROXY_TOKEN` (optional, sent as `X-KIS-Proxy-Token` when the proxy is
   configured with `KIS_PROXY_PUBLIC_TOKENS`)
-- `CLOSE_PRICE_API_BASE_URL` (optional, defaults to `http://192.168.68.84`;
-  backup source for daily adjusted close history when KIS history fails or is
-  empty)
+- `CLOSE_PRICE_API_BASE_URL` (optional, defaults to `http://192.168.68.84`; this
+  is the `finance-pi` data-lake internal API, used as a backup source for daily
+  adjusted close history when KIS history fails or is empty)
 - `CLOSE_PRICE_API_ENABLED` (set to `0` to disable the internal close-price
   shortcut and always use the KIS proxy)
 
