@@ -48,9 +48,11 @@ def test_economic_calendar_result_alert_checkbox_contract():
     js = (JS / "economic-calendar.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-    # 결과 미발표 행에만 🔔 체크박스, event_id(zeroin index_id) 기반 추적.
+    # 결과 미발표 + 아직 지나지 않은 행에만 🔔 체크박스(과거 일정은 숨김).
     assert "ec-bell-cb" in js
     assert "function _ecBellCell(ev)" in js
+    assert "function _ecIsPast(ev)" in js
+    assert "hasActual || !eid || _ecIsPast(ev)" in js
     assert "async function _ecToggleSubscription(cb)" in js
     # 게이트: 비로그인 → 로그인 팝업 / 채널 무 → 포트폴리오 알림 안내.
     assert "function _ecPromptLogin()" in js

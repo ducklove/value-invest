@@ -107,12 +107,28 @@ function _ecValCell(label, value, extraCls) {
     + `<span class="ec-val-v">${v}</span></span>`;
 }
 
-// 결과 미발표(actual 없음) 이벤트에만 🔔 구독 체크박스. 발표된 행은 빈 칸으로
-// 정렬만 유지. event_id(zeroin index_id)가 없으면 추적 불가라 체크박스 생략.
+// 이벤트 예정 시각(브라우저 로컬=KST). datetime 없으면 날짜의 그날 끝으로 본다
+// (날짜만 있는 항목을 당일 동안은 미래로 취급).
+function _ecEventDate(ev) {
+  const m = String(ev.datetime || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  const dm = String(ev.date || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (dm) return new Date(+dm[1], +dm[2] - 1, +dm[3], 23, 59);
+  return null;
+}
+
+function _ecIsPast(ev) {
+  const d = _ecEventDate(ev);
+  return d ? d.getTime() < Date.now() : false;
+}
+
+// 결과 미발표(actual 없음) + 아직 지나지 않은 이벤트에만 🔔 구독 체크박스.
+// 발표됐거나 이미 지난 일정(결과가 더 안 나옴)은 빈 칸으로 정렬만 유지.
+// event_id(zeroin index_id)가 없으면 추적 불가라 체크박스 생략.
 function _ecBellCell(ev) {
   const hasActual = ev.actual && String(ev.actual).trim() !== '';
   const eid = String(ev.index_id || '').trim();
-  if (hasActual || !eid) return '<span class="ec-bell-cell"></span>';
+  if (hasActual || !eid || _ecIsPast(ev)) return '<span class="ec-bell-cell"></span>';
   const checked = _ecSubs.has(eid) ? ' checked' : '';
   return `<span class="ec-bell-cell"><label class="ec-bell" title="결과 발표 시 알림 받기">`
     + `<input type="checkbox" class="ec-bell-cb" data-eid="${escapeHtml(eid)}"${checked}>`
