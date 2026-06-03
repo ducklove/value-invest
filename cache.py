@@ -827,7 +827,7 @@ async def init_db():
         await _ensure_default_groups(db, sub)
         await db.execute("""
             UPDATE user_portfolio SET group_name = '기타'
-            WHERE google_sub = ? AND group_name IS NULL AND stock_code IN ('KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH')
+            WHERE google_sub = ? AND group_name IS NULL AND stock_code IN ('KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT')
         """, (sub,))
         await db.execute("""
             UPDATE user_portfolio SET group_name = '한국주식'
@@ -997,7 +997,7 @@ _DEFAULT_GROUPS = [
     ("기타", 2, 1, "etc"),
 ]
 
-_SPECIAL_ASSETS_SET = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
+_SPECIAL_ASSETS_SET = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
 
 
 def _is_special_or_cash(code: str) -> bool:

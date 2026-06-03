@@ -40,7 +40,7 @@ from services.portfolio.identifiers import (
 logger = logging.getLogger(__name__)
 
 
-_SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "CRYPTO_BTC": "비트코인", "CRYPTO_ETH": "이더리움"}
+_SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "CRYPTO_BTC": "비트코인", "CRYPTO_ETH": "이더리움", "CRYPTO_USDT": "테더"}
 
 _EXCHANGE_SUFFIXES = (
     "", ".O", ".K", ".N", ".HM", ".HK", ".T", ".SS", ".SZ", ".L", ".AX",

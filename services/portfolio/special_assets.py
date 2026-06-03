@@ -14,7 +14,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Special-asset code → Upbit market.
-CRYPTO_UPBIT_MAP: dict[str, str] = {"CRYPTO_BTC": "KRW-BTC", "CRYPTO_ETH": "KRW-ETH"}
+CRYPTO_UPBIT_MAP: dict[str, str] = {
+    "CRYPTO_BTC": "KRW-BTC",
+    "CRYPTO_ETH": "KRW-ETH",
+    "CRYPTO_USDT": "KRW-USDT",
+}
 
 
 def is_crypto_asset(stock_code: str) -> bool:

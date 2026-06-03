@@ -485,7 +485,7 @@ function renderPortfolio(options = {}) {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = pfEditingCode === r.stock_code;
     const isCash = r.stock_code.startsWith('CASH_');
-    const isSpecialFloat = ['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH'].includes(r.stock_code) || isCash;
+    const isSpecialFloat = ['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(r.stock_code) || isCash;
     const curTag = r.stock_code === 'KRX_GOLD' ? '<span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? `<span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isSpecialFloat ? 'any' : '1';
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : isCash ? 2 : 8;

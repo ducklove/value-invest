@@ -94,7 +94,7 @@ async def resolve_insight_benchmark(item: dict) -> str:
         return manual
     if code == "KRX_GOLD":
         return "GOLD"
-    if code in {"CRYPTO_BTC", "CRYPTO_ETH"}:
+    if code in {"CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}:
         return "IDX_SP500"
     if _is_cash_asset(code):
         return _CASH_FX_CODE.get(code, "FX_USDKRW")

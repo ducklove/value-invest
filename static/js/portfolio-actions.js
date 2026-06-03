@@ -378,6 +378,7 @@ function pfInitPortfolioTextSearch() {
             { code: 'KRX_GOLD', name: 'KRX 금현물', keywords: ['금', '금현물', 'krx금', 'krx_gold', 'gold'] },
             { code: 'CRYPTO_BTC', name: '비트코인', keywords: ['btc', '비트코인', 'bitcoin'] },
             { code: 'CRYPTO_ETH', name: '이더리움', keywords: ['eth', '이더리움', 'ethereum'] },
+            { code: 'CRYPTO_USDT', name: '테더', keywords: ['usdt', '테더', 'tether'] },
             { code: 'CASH_KRW', name: '원화', keywords: ['krw', '원화', '현금', '원'] },
             { code: 'CASH_USD', name: '미국 달러', keywords: ['usd', '달러', '미국달러', 'dollar'] },
             { code: 'CASH_EUR', name: '유로', keywords: ['eur', '유로', 'euro'] },

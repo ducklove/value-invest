@@ -95,6 +95,7 @@ def yfinance_ticker_for_special_asset(code: str) -> str | None:
         "KRX_GOLD": "GC=F",
         "CRYPTO_BTC": "BTC-USD",
         "CRYPTO_ETH": "ETH-USD",
+        "CRYPTO_USDT": "USDT-USD",
         "CASH_USD": "KRW=X",
         "CASH_EUR": "EURKRW=X",
         "CASH_JPY": "JPYKRW=X",

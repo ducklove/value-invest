@@ -37,7 +37,7 @@ def _is_korean_code(code: str) -> bool:
 def _is_cash_or_special(code: str) -> bool:
     if code.startswith("CASH_"):
         return True
-    return code in {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
+    return code in {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
 
 
 async def select_foreign_target_codes() -> list[str]:

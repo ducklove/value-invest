@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 
-SPECIAL_ASSETS = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH"}
+SPECIAL_ASSETS = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
 
 CASH_NAMES = {
     "CASH_KRW": "원화",
