@@ -22,11 +22,13 @@ const EC_IMPORTANCE = [
 ];
 const EC_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
-// 필터 상태(기본: 주요국 / 상·중 / 이번 주). 하(low) 는 잡음이 많아 기본 제외.
-let _ecCountries = new Set(['kr', 'us', 'cn', 'eu', 'jp']);
-let _ecImportance = new Set(['high', 'mid']);
-let _ecRange = 'week'; // 'today' | 'week' | 'next' | 'custom'
-let _ecCustom = { start: '', end: '' };
+// 기간(시작/종료일, 기본=이번 주) + 중요도별 국가 선택.
+const EC_LS_KEY = 'econCalLevelCountries';
+let _ecStart = '';
+let _ecEnd = '';
+// _ecLevels[level] = 'all'(모든 국가) | Set(국가코드). 빈 Set = 해당 중요도 숨김.
+// 기본: 상=모든 국가, 중·하=한국만.
+let _ecLevels = { high: 'all', mid: new Set(['kr']), low: new Set(['kr']) };
 let _ecInFlight = null;
 let _ecShellReady = false;
 
@@ -43,26 +45,45 @@ function _ecFmtDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-// 선택된 기간 → {start, end} ISO 문자열(브라우저 로컬=KST 기준).
-function _ecRangeDates() {
+// 이번 주(월요일~일요일, 브라우저 로컬=KST 기준).
+function _ecThisWeek() {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (_ecRange === 'today') {
-    const s = _ecFmtDate(today);
-    return { start: s, end: s };
-  }
-  if (_ecRange === 'custom') {
-    const s = _ecCustom.start || _ecFmtDate(today);
-    const e = _ecCustom.end || s;
-    return { start: s, end: e };
-  }
-  // week / next: 월요일 시작 ~ 일요일 끝
   const dow = (today.getDay() + 6) % 7; // 월=0 ... 일=6
   const monday = new Date(today);
-  monday.setDate(today.getDate() - dow + (_ecRange === 'next' ? 7 : 0));
+  monday.setDate(today.getDate() - dow);
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
   return { start: _ecFmtDate(monday), end: _ecFmtDate(sunday) };
+}
+
+// 중요도별 국가 선택을 localStorage 에 보존(브라우저 기준, 로그인 불필요).
+function _ecLoadLevels() {
+  try {
+    const raw = localStorage.getItem(EC_LS_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      const norm = (v) => (v === 'all' ? 'all' : new Set(Array.isArray(v) ? v : []));
+      _ecLevels = { high: norm(o.high), mid: norm(o.mid), low: norm(o.low) };
+    }
+  } catch (e) { /* 기본값 유지 */ }
+}
+
+function _ecSaveLevels() {
+  try {
+    const o = {};
+    for (const lvl of ['high', 'mid', 'low']) {
+      o[lvl] = _ecLevels[lvl] === 'all' ? 'all' : [..._ecLevels[lvl]];
+    }
+    localStorage.setItem(EC_LS_KEY, JSON.stringify(o));
+  } catch (e) { /* noop */ }
+}
+
+// 한 중요도의 선택을 API 파라미터 문자열로. 'all' | 'kr,us' | '' (비활성).
+function _ecLevelParam(lvl) {
+  const v = _ecLevels[lvl];
+  if (v === 'all') return 'all';
+  return v && v.size ? [...v].join(',') : '';
 }
 
 // "실제 vs 예상" 방향(같은 단위 비교). 한국 색관례(빨강=높음/상승, 파랑=낮음).
@@ -167,64 +188,80 @@ function _ecRenderBody(data) {
   }).join('');
 }
 
-function _ecSyncFilterActive() {
-  document.querySelectorAll('#econCalContent .ec-chip[data-country]').forEach((b) => {
-    b.classList.toggle('active', _ecCountries.has(b.dataset.country));
-  });
-  document.querySelectorAll('#econCalContent .ec-chip[data-imp]').forEach((b) => {
-    b.classList.toggle('active', _ecImportance.has(b.dataset.imp));
-  });
-  document.querySelectorAll('#econCalContent .ec-range-btn[data-range]').forEach((b) => {
-    b.classList.toggle('active', b.dataset.range === _ecRange);
-  });
-  const custom = document.getElementById('econCalCustom');
-  if (custom) custom.style.display = _ecRange === 'custom' ? 'flex' : 'none';
+// 설정 패널: 중요도(상/중/하)별로 국가를 선택. '전체'는 모든 국가.
+function _ecRenderSettings() {
+  const el = document.getElementById('econCalSettings');
+  if (!el) return;
+  el.innerHTML = EC_IMPORTANCE.map((m) => {
+    const lvl = m.level;
+    const isAll = _ecLevels[lvl] === 'all';
+    const set = isAll ? null : _ecLevels[lvl];
+    const allChip = `<button class="ec-chip ec-all-chip${isAll ? ' active' : ''}" data-lvl="${lvl}" data-all="1">전체</button>`;
+    const chips = EC_COUNTRY_CHIPS.map((c) => {
+      const active = !isAll && set.has(c.code);
+      return `<button class="ec-chip${active ? ' active' : ''}${isAll ? ' dim' : ''}" data-lvl="${lvl}" data-country="${c.code}">${c.flag} ${escapeHtml(c.name)}</button>`;
+    }).join('');
+    return `<div class="ec-set-row"><span class="ec-set-label ec-imp-${lvl}"><i></i>${m.label}</span>`
+      + `<span class="ec-set-chips">${allChip}${chips}</span></div>`;
+  }).join('');
+
+  el.querySelectorAll('.ec-chip[data-all]').forEach((b) => b.addEventListener('click', () => {
+    const lvl = b.dataset.lvl;
+    _ecLevels[lvl] = _ecLevels[lvl] === 'all' ? new Set() : 'all';
+    _ecSaveLevels();
+    _ecRenderSettings();
+    loadEconomicCalendar();
+  }));
+  el.querySelectorAll('.ec-chip[data-country]').forEach((b) => b.addEventListener('click', () => {
+    const lvl = b.dataset.lvl;
+    const code = b.dataset.country;
+    if (_ecLevels[lvl] === 'all') _ecLevels[lvl] = new Set();  // '전체' → 특정 국가 모드로 전환
+    const set = _ecLevels[lvl];
+    if (set.has(code)) set.delete(code); else set.add(code);
+    _ecSaveLevels();
+    _ecRenderSettings();
+    loadEconomicCalendar();
+  }));
 }
 
 function _ecRenderShell() {
   const root = document.getElementById('econCalContent');
   if (!root) return;
-  const ranges = [['today', '오늘'], ['week', '이번 주'], ['next', '다음 주'], ['custom', '직접선택']]
-    .map(([r, label]) => `<button class="ec-range-btn" data-range="${r}">${label}</button>`).join('');
-  const chips = EC_COUNTRY_CHIPS
-    .map((c) => `<button class="ec-chip" data-country="${c.code}">${c.flag} ${escapeHtml(c.name)}</button>`).join('');
-  const imps = EC_IMPORTANCE
-    .map((m) => `<button class="ec-chip ec-imp-chip ec-imp-${m.level}" data-imp="${m.level}"><i></i>${m.label}</button>`).join('');
+  const wk = _ecThisWeek();
+  if (!_ecStart) _ecStart = wk.start;
+  if (!_ecEnd) _ecEnd = wk.end;
+
   root.innerHTML = '<div class="ec-filters">'
-    + `<div class="ec-filter-row ec-ranges">${ranges}`
-    + '<span class="ec-custom" id="econCalCustom">'
-    + '<input type="date" class="ec-date" id="econCalStart"> ~ '
-    + '<input type="date" class="ec-date" id="econCalEnd"></span></div>'
-    + `<div class="ec-filter-row ec-countries">${chips}</div>`
-    + `<div class="ec-filter-row ec-imps"><span class="ec-flabel">중요도</span>${imps}</div>`
+    + '<div class="ec-filter-row ec-daterow">'
+    + `<input type="date" class="ec-date" id="econCalStart" value="${_ecStart}" aria-label="시작일">`
+    + '<span class="ec-date-sep">~</span>'
+    + `<input type="date" class="ec-date" id="econCalEnd" value="${_ecEnd}" aria-label="종료일">`
+    + '<button class="ec-settings-toggle" id="econCalSettingsToggle" type="button" aria-expanded="false">⚙ 설정</button>'
+    + '</div>'
+    + '<div class="ec-settings" id="econCalSettings" hidden></div>'
     + '</div>'
     + '<div class="ec-body" id="econCalBody"><div class="md-loading">경제 일정을 불러오는 중입니다...</div></div>';
 
-  root.querySelectorAll('.ec-range-btn[data-range]').forEach((b) => b.addEventListener('click', () => {
-    _ecRange = b.dataset.range;
-    _ecSyncFilterActive();
-    if (_ecRange !== 'custom') loadEconomicCalendar();
-  }));
-  root.querySelectorAll('.ec-chip[data-country]').forEach((b) => b.addEventListener('click', () => {
-    const c = b.dataset.country;
-    if (_ecCountries.has(c)) _ecCountries.delete(c); else _ecCountries.add(c);
-    _ecSyncFilterActive();
-    loadEconomicCalendar();
-  }));
-  root.querySelectorAll('.ec-chip[data-imp]').forEach((b) => b.addEventListener('click', () => {
-    const l = b.dataset.imp;
-    if (_ecImportance.has(l)) _ecImportance.delete(l); else _ecImportance.add(l);
-    _ecSyncFilterActive();
-    loadEconomicCalendar();
-  }));
   const start = document.getElementById('econCalStart');
   const end = document.getElementById('econCalEnd');
-  const onCustom = () => {
-    _ecCustom = { start: start.value, end: end.value };
-    if (start.value && end.value) loadEconomicCalendar();
+  const onDate = () => {
+    if (!start.value || !end.value) return;
+    _ecStart = start.value;
+    _ecEnd = end.value;
+    loadEconomicCalendar();
   };
-  if (start) start.addEventListener('change', onCustom);
-  if (end) end.addEventListener('change', onCustom);
+  if (start) start.addEventListener('change', onDate);
+  if (end) end.addEventListener('change', onDate);
+
+  const toggle = document.getElementById('econCalSettingsToggle');
+  if (toggle) toggle.addEventListener('click', () => {
+    const panel = document.getElementById('econCalSettings');
+    if (!panel) return;
+    const show = panel.hasAttribute('hidden');
+    if (show) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
+    toggle.setAttribute('aria-expanded', show ? 'true' : 'false');
+    toggle.classList.toggle('active', show);
+  });
 
   // 🔔 체크박스는 본문이 매 렌더마다 다시 그려지므로 위임 리스너로 처리.
   const body = document.getElementById('econCalBody');
@@ -235,8 +272,8 @@ function _ecRenderShell() {
     });
   }
 
+  _ecRenderSettings();
   _ecShellReady = true;
-  _ecSyncFilterActive();
 }
 
 // 구독 목록을 세션당 1회 로드(로그인 시). 필터 변경 시엔 메모리 _ecSubs를 재사용.
@@ -328,12 +365,16 @@ async function _ecToggleSubscription(cb) {
 async function loadEconomicCalendar() {
   const root = document.getElementById('econCalContent');
   if (!root) return;
-  if (!_ecShellReady) _ecRenderShell();
+  if (!_ecShellReady) {
+    _ecLoadLevels();   // 저장된 중요도별 국가 선택 복원(셸 렌더 전에)
+    _ecRenderShell();
+  }
   if (window.currentUser && !_ecSubsLoaded) await _ecLoadSubs();
-  const { start, end } = _ecRangeDates();
-  const params = new URLSearchParams({ start, end });
-  if (_ecCountries.size) params.set('countries', [..._ecCountries].join(','));
-  if (_ecImportance.size) params.set('importance', [..._ecImportance].join(','));
+  const params = new URLSearchParams({ start: _ecStart, end: _ecEnd });
+  // 중요도별 국가 선택은 항상 명시적으로 전달('' = 그 중요도 숨김).
+  params.set('high', _ecLevelParam('high'));
+  params.set('mid', _ecLevelParam('mid'));
+  params.set('low', _ecLevelParam('low'));
   const reqKey = params.toString();
   _ecInFlight = reqKey;
   try {

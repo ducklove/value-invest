@@ -68,15 +68,18 @@ async def get_investor_flows():
 
 @router.get("/api/market/economic-calendar")
 async def get_economic_calendar(
+    request: Request,
     start: str = "",
     end: str = "",
-    countries: str = "",
-    importance: str = "",
+    high: str = "",
+    mid: str = "",
+    low: str = "",
 ):
-    """Public 경제캘린더 (zeroin/한경 피드). 국가·중요도·기간 필터.
+    """Public 경제캘린더 (zeroin/한경 피드). 기간 + 중요도별 국가 선택.
 
-    countries: 국가코드 CSV(예: kr,us,eu). importance: high,mid,low CSV.
-    start/end: YYYY-MM-DD. 미지정 시 오늘~+6일.
+    high/mid/low: 각 중요도의 국가 선택. 'all'(모든 국가) 또는 국가코드 CSV(예:
+    kr,us). 빈 값(쿼리에는 있으나 비어 있음)은 그 중요도 숨김. 셋 다 미지정이면
+    기본값(상=전체, 중·하=한국)을 적용. start/end: YYYY-MM-DD, 미지정 시 오늘~+6일.
     """
     from datetime import date, datetime, timedelta
 
@@ -97,14 +100,31 @@ async def get_economic_calendar(
     if (end_d - start_d).days > 62:
         end_d = start_d + timedelta(days=62)
 
-    code_list = [c.strip().lower() for c in countries.split(",") if c.strip()][:30]
-    level_list = [l.strip().lower() for l in importance.split(",") if l.strip()][:3]
+    def _level_sel(raw: str):
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        if raw.lower() == "all":
+            return "all"
+        return [c.strip().lower() for c in raw.split(",") if c.strip()][:30]
 
-    return await economic_calendar.fetch_economic_calendar(
+    qp = request.query_params
+    raw_by_level = {"high": high, "mid": mid, "low": low}
+    selection: dict[str, object] = {}
+    for level, raw in raw_by_level.items():
+        if level not in qp:
+            continue  # 미지정 — 기본값 처리 대상
+        sel = _level_sel(raw)
+        if sel is not None:  # 쿼리에 있으나 빈 값이면 비활성(생략)
+            selection[level] = sel
+    # 중요도 파라미터가 하나도 없으면(맨손 호출) 기본값 적용.
+    if not any(level in qp for level in ("high", "mid", "low")):
+        selection = {"high": "all", "mid": ["kr"], "low": ["kr"]}
+
+    return await economic_calendar.fetch_calendar_by_level(
         start_date=start_d.isoformat(),
         end_date=end_d.isoformat(),
-        countries=code_list or None,
-        importance=level_list or None,
+        selection=selection,
     )
 
 

@@ -875,24 +875,54 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background: var(--primary);
   color: #fff;
 }
-.ec-custom { display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.ec-daterow { gap: 8px; }
+.ec-date-sep { color: var(--text-secondary); }
 .ec-date {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);
-  padding: 4px 8px;
+  padding: 5px 8px;
   font-size: 12px;
 }
-/* 중요도 칩 점 색상 */
-.ec-imp-chip i {
-  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-  margin-right: 5px; vertical-align: middle; background: var(--text-secondary);
+.ec-settings-toggle {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
-.ec-imp-chip.ec-imp-high i { background: #dc2626; }
-.ec-imp-chip.ec-imp-mid i { background: #f59e0b; }
-.ec-imp-chip.ec-imp-low i { background: #94a3b8; }
-.ec-imp-chip.active i { background: #fff; }
+.ec-settings-toggle:hover { border-color: var(--primary); color: var(--primary); }
+.ec-settings-toggle.active { border-color: var(--primary); color: var(--primary); }
+
+/* 설정 패널: 중요도별 국가 선택 */
+.ec-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--sidebar-bg, var(--bg));
+}
+.ec-set-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ec-set-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 800; min-width: 28px;
+}
+.ec-set-label i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); }
+.ec-set-label.ec-imp-high { color: #dc2626; }
+.ec-set-label.ec-imp-high i { background: #dc2626; }
+.ec-set-label.ec-imp-mid { color: #d97706; }
+.ec-set-label.ec-imp-mid i { background: #f59e0b; }
+.ec-set-label.ec-imp-low i { background: #94a3b8; }
+.ec-set-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ec-all-chip { font-weight: 800; }
+.ec-chip.dim { opacity: 0.4; }
 
 .ec-daygroup { margin-bottom: 14px; }
 .ec-dayhead {

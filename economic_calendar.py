@@ -206,3 +206,59 @@ async def fetch_economic_calendar(
         if entry and getattr(entry, "value", None):
             return dict(entry.value)
         return _result([])
+
+
+async def fetch_calendar_by_level(
+    *,
+    start_date: str,
+    end_date: str,
+    selection: dict[str, object],
+) -> dict:
+    """중요도별 국가 선택으로 캘린더를 가져온다.
+
+    ``selection`` 은 ``{level: 'all' | [codes]}`` (level ∈ high/mid/low). 같은
+    국가셋을 공유하는 레벨끼리 묶어 zeroin 을 호출하므로(상=전체국가, 중·하=한국만
+    같은 기본값에서 과다 페치를 피한다), 각 그룹 결과의 합집합이 곧 원하는 집합이
+    되어 별도 후필터가 필요 없다. 빈/미지정 레벨은 비활성(해당 중요도 숨김)."""
+    all_codes = list(COUNTRY_META.keys())
+    norm: dict[str, tuple] = {}
+    for level in ("high", "mid", "low"):
+        sel = selection.get(level)
+        if sel == "all":
+            codes = all_codes
+        elif sel:
+            codes = [c for c in sel if c in COUNTRY_META]
+        else:
+            codes = []
+        if codes and level in _CODE_BY_LEVEL:
+            norm[level] = tuple(sorted(set(codes)))
+
+    if not norm:
+        return {"events": [], "start": start_date, "end": end_date}
+
+    # 같은 국가셋을 쓰는 레벨끼리 한 번의 요청으로 묶는다.
+    groups: dict[tuple, list[str]] = {}
+    for level, codes in norm.items():
+        groups.setdefault(codes, []).append(level)
+
+    results = await asyncio.gather(*[
+        fetch_economic_calendar(
+            start_date=start_date, end_date=end_date,
+            countries=list(codes), importance=levels,
+        )
+        for codes, levels in groups.items()
+    ], return_exceptions=True)
+
+    events: list[dict] = []
+    seen: set = set()
+    for r in results:
+        if isinstance(r, Exception) or not isinstance(r, dict):
+            continue
+        for e in r.get("events", []):
+            key = e.get("index_id") or (e.get("datetime"), e.get("country"), e.get("event"))
+            if key in seen:
+                continue
+            seen.add(key)
+            events.append(e)
+    events.sort(key=lambda e: e.get("datetime") or "")
+    return {"events": events, "start": start_date, "end": end_date}

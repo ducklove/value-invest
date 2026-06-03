@@ -62,6 +62,26 @@ def test_economic_calendar_result_alert_checkbox_contract():
     assert ".ec-bell-cb:checked + .ec-bell-ico" in styles
 
 
+def test_economic_calendar_filter_is_dates_plus_per_importance_settings():
+    js = (JS / "economic-calendar.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    # 기간은 시작/종료일 입력 + 기본 이번 주. 빠른 범위 버튼(오늘/이번주/다음주)은 제거.
+    assert "function _ecThisWeek()" in js
+    assert "id=\"econCalStart\"" in js
+    assert "id=\"econCalEnd\"" in js
+    assert "ec-range-btn" not in js
+    # 국가·중요도는 ⚙ 설정 패널의 '중요도별 국가 선택'으로.
+    assert "function _ecRenderSettings()" in js
+    assert "id=\"econCalSettingsToggle\"" in js
+    assert "function _ecLevelParam(lvl)" in js
+    # 기본값: 상=전체, 중·하=한국만.
+    assert "high: 'all', mid: new Set(['kr']), low: new Set(['kr'])" in js
+    assert "params.set('high'" in js
+    assert ".ec-settings" in styles
+    assert ".ec-set-row" in styles
+
+
 def test_index_loads_portfolio_split_scripts_in_contract_order():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert "<title>Value Compass</title>" in html

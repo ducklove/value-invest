@@ -4,6 +4,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from starlette.requests import Request
+
 import economic_calendar
 from routes import stocks as stocks_route
 
@@ -69,44 +71,104 @@ class NationParamTests(unittest.TestCase):
         self.assertEqual(natcd, "kr|eu")
 
 
+def _req(query: str) -> Request:
+    return Request({"type": "http", "method": "GET", "query_string": query.encode(), "headers": []})
+
+
 class CalendarEndpointTests(unittest.IsolatedAsyncioTestCase):
-    async def test_default_range_is_today_through_plus_six(self):
+    async def test_default_selection_when_no_level_params(self):
         fake = AsyncMock(return_value={"events": []})
-        with patch.object(economic_calendar, "fetch_economic_calendar", new=fake):
-            await stocks_route.get_economic_calendar()
+        with patch.object(economic_calendar, "fetch_calendar_by_level", new=fake):
+            await stocks_route.get_economic_calendar(_req(""))
         kw = fake.await_args.kwargs
         today = date.today()
         self.assertEqual(kw["start_date"], today.isoformat())
         self.assertEqual(kw["end_date"], (today + timedelta(days=6)).isoformat())
+        self.assertEqual(kw["selection"], {"high": "all", "mid": ["kr"], "low": ["kr"]})
 
-    async def test_csv_params_are_parsed_and_lowercased(self):
+    async def test_per_level_country_selection_parsed(self):
         fake = AsyncMock(return_value={"events": []})
-        with patch.object(economic_calendar, "fetch_economic_calendar", new=fake):
+        with patch.object(economic_calendar, "fetch_calendar_by_level", new=fake):
             await stocks_route.get_economic_calendar(
-                start="2026-06-01", end="2026-06-07",
-                countries="KR, us ,EU", importance="HIGH,mid",
+                _req("start=2026-06-01&end=2026-06-07&high=all&mid=KR,us&low="),
+                start="2026-06-01", end="2026-06-07", high="all", mid="KR,us", low="",
             )
         kw = fake.await_args.kwargs
         self.assertEqual(kw["start_date"], "2026-06-01")
         self.assertEqual(kw["end_date"], "2026-06-07")
-        self.assertEqual(kw["countries"], ["kr", "us", "eu"])
-        self.assertEqual(kw["importance"], ["high", "mid"])
+        # high='all', mid 소문자화, low 는 빈 값(쿼리에 있으나)이라 비활성→생략.
+        self.assertEqual(kw["selection"], {"high": "all", "mid": ["kr", "us"]})
+
+    async def test_all_levels_empty_selection_is_respected(self):
+        fake = AsyncMock(return_value={"events": []})
+        with patch.object(economic_calendar, "fetch_calendar_by_level", new=fake):
+            await stocks_route.get_economic_calendar(
+                _req("high=&mid=&low="), high="", mid="", low="",
+            )
+        # 명시적으로 모두 비웠으면 기본값이 아니라 빈 선택을 전달.
+        self.assertEqual(fake.await_args.kwargs["selection"], {})
 
     async def test_reversed_dates_are_swapped(self):
         fake = AsyncMock(return_value={"events": []})
-        with patch.object(economic_calendar, "fetch_economic_calendar", new=fake):
-            await stocks_route.get_economic_calendar(start="2026-06-10", end="2026-06-01")
+        with patch.object(economic_calendar, "fetch_calendar_by_level", new=fake):
+            await stocks_route.get_economic_calendar(_req(""), start="2026-06-10", end="2026-06-01")
         kw = fake.await_args.kwargs
         self.assertEqual(kw["start_date"], "2026-06-01")
         self.assertEqual(kw["end_date"], "2026-06-10")
 
     async def test_oversized_span_is_clamped_to_62_days(self):
         fake = AsyncMock(return_value={"events": []})
-        with patch.object(economic_calendar, "fetch_economic_calendar", new=fake):
-            await stocks_route.get_economic_calendar(start="2026-01-01", end="2026-12-31")
+        with patch.object(economic_calendar, "fetch_calendar_by_level", new=fake):
+            await stocks_route.get_economic_calendar(_req(""), start="2026-01-01", end="2026-12-31")
         kw = fake.await_args.kwargs
         self.assertEqual(kw["start_date"], "2026-01-01")
         self.assertEqual(kw["end_date"], (date(2026, 1, 1) + timedelta(days=62)).isoformat())
+
+
+class FetchByLevelTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    async def _fake_fetch(*, start_date, end_date, countries, importance):
+        # (country, level) 조합마다 한 건씩 — 그룹핑/병합 검증용.
+        evs = []
+        for c in countries:
+            for lvl in importance:
+                evs.append({
+                    "index_id": f"{c}-{lvl}", "datetime": f"2026-06-01 {len(evs):04d}",
+                    "country": c, "importance": lvl, "event": f"{c} {lvl}",
+                })
+        return {"events": evs}
+
+    async def test_distinct_country_sets_fetched_separately(self):
+        fake = AsyncMock(side_effect=self._fake_fetch)
+        with patch.object(economic_calendar, "fetch_economic_calendar", new=fake):
+            result = await economic_calendar.fetch_calendar_by_level(
+                start_date="2026-06-01", end_date="2026-06-07",
+                selection={"high": "all", "mid": ["kr"]},
+            )
+        ids = {e["index_id"] for e in result["events"]}
+        self.assertEqual(fake.await_count, 2)        # all-국가(high) + kr(mid)
+        self.assertIn("us-high", ids)                # high 는 전체 국가
+        self.assertIn("kr-mid", ids)                 # mid 는 한국만
+        self.assertNotIn("us-mid", ids)              # mid 비한국은 안 가져옴
+
+    async def test_levels_sharing_country_set_use_one_fetch(self):
+        fake = AsyncMock(side_effect=self._fake_fetch)
+        with patch.object(economic_calendar, "fetch_economic_calendar", new=fake):
+            await economic_calendar.fetch_calendar_by_level(
+                start_date="2026-06-01", end_date="2026-06-07",
+                selection={"high": ["kr"], "mid": ["kr"]},
+            )
+        self.assertEqual(fake.await_count, 1)
+        self.assertEqual(set(fake.await_args.kwargs["importance"]), {"high", "mid"})
+
+    async def test_empty_selection_fetches_nothing(self):
+        fake = AsyncMock(side_effect=self._fake_fetch)
+        with patch.object(economic_calendar, "fetch_economic_calendar", new=fake):
+            result = await economic_calendar.fetch_calendar_by_level(
+                start_date="2026-06-01", end_date="2026-06-07", selection={},
+            )
+        self.assertEqual(result["events"], [])
+        self.assertEqual(fake.await_count, 0)
 
 
 if __name__ == "__main__":
