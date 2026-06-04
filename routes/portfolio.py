@@ -367,6 +367,8 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
     valuation = insights.build_insight_valuation(quote, valuation_basis)
     gold_gap = insights.gold_gap_for_asset(stock_code)
     holding = insights.holding_context_for_asset(stock_code)
+    import external_tools
+    etf = await external_tools.etf_link_for(stock_code)
     tags_task = asyncio.create_task(cache.get_portfolio_tags(user["google_sub"], stock_code))
     tag_suggestions_task = asyncio.create_task(cache.get_portfolio_tag_suggestions(user["google_sub"]))
 
@@ -387,6 +389,7 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
         "macro": insights.format_macro(indicators),
         "goldGap": gold_gap,
         "holding": holding,
+        "etf": etf,
         "tags": await tags_task,
         "tagSuggestions": await tag_suggestions_task,
         "history": (history_payload.get("rows") or [])[-80:],

@@ -157,7 +157,17 @@ function _holdingValueAction(stockCode) {
   };
 }
 
-function _renderInsightActionLinks(code, goldGap, holding) {
+function _etfInfoAction(etf) {
+  const url = /^https?:\/\//.test(String(etf?.url || '')) ? etf.url : '';
+  return {
+    id: 'etf-info',
+    label: 'ETF 상세',
+    hint: 'eiayn ETF 분석',
+    run: () => { if (url) window.open(url, '_blank', 'noopener'); },
+  };
+}
+
+function _renderInsightActionLinks(code, goldGap, holding, etf) {
   if (!code) {
     pfAssetInsightActions = [];
     return '';
@@ -169,6 +179,9 @@ function _renderInsightActionLinks(code, goldGap, holding) {
   });
   if (holding?.applicable && !pfAssetInsightActions.some(action => action.id === 'holding-value')) {
     pfAssetInsightActions.splice(Math.min(2, pfAssetInsightActions.length), 0, _holdingValueAction(code));
+  }
+  if (etf?.url) {
+    pfAssetInsightActions.push(_etfInfoAction(etf));
   }
   if (!pfAssetInsightActions.length) return '';
   return `<div class="pf-insight-link-actions" aria-label="연결 메뉴">
@@ -296,7 +309,8 @@ function _renderAssetInsight(data) {
   const positionCurrency = 'KRW';
   const goldGap = data.goldGap;
   const holding = data.holding || null;
-  const actionLinks = _renderInsightActionLinks(code, goldGap, holding);
+  const etf = data.etf || null;
+  const actionLinks = _renderInsightActionLinks(code, goldGap, holding, etf);
   const tagPanel = _renderInsightTags(code, data.tags || [], data.tagSuggestions || []);
   const valuationYear = valuation.fiscalYear ? `${valuation.fiscalYear}년 기준` : '';
   const valuationSourceCode = valuation.sourceCode && valuation.sourceCode !== code ? `기준 ${valuation.sourceCode}` : '';

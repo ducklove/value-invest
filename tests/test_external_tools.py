@@ -130,7 +130,7 @@ class StockLinkMatchTests(unittest.TestCase):
 
 
 class StockLinkFetchTests(unittest.IsolatedAsyncioTestCase):
-    async def test_fetch_stock_links_combines_both_tools(self):
+    async def test_fetch_stock_links_combines_tools_and_etf(self):
         external_tools._raw_cache.clear()
 
         async def fake_load(repo):
@@ -138,15 +138,43 @@ class StockLinkFetchTests(unittest.IsolatedAsyncioTestCase):
                 return StockLinkMatchTests.SPREAD_CUR, StockLinkMatchTests.SPREAD_CFG
             return StockLinkMatchTests.HOLD_CUR, StockLinkMatchTests.HOLD_CFG
 
-        with patch.object(external_tools, "_load_pair", new=AsyncMock(side_effect=fake_load)):
+        # ETF universe 는 eiayn 원격 파일이므로 네트워크 없이 고정 집합으로 패치.
+        with patch.object(external_tools, "_load_pair", new=AsyncMock(side_effect=fake_load)), \
+             patch.object(external_tools, "fetch_etf_universe", new=AsyncMock(return_value={"069500", "VOO"})):
             pref = await external_tools.fetch_stock_links("005930")
             self.assertIn("preferred", pref)
             self.assertNotIn("holding", pref)
+            self.assertNotIn("etf", pref)
             hold = await external_tools.fetch_stock_links("000670")
             self.assertIn("holding", hold)
+            # 국내 ETF 코드 → etf 링크만
+            kr_etf = await external_tools.fetch_stock_links("069500")
+            self.assertIn("etf", kr_etf)
+            self.assertEqual(kr_etf["etf"]["url"], "https://ducklove.github.io/eiayn/#search?code=069500")
+            # 해외 ETF 티커(소문자) → 정규화 후 매칭
+            us_etf = await external_tools.fetch_stock_links("voo")
+            self.assertEqual(us_etf["etf"]["code"], "VOO")
             empty = await external_tools.fetch_stock_links("035720")
             self.assertEqual(empty, {})
             self.assertEqual(await external_tools.fetch_stock_links(""), {})
+
+
+class EtfLinkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_etf_link_for_matches_and_normalizes(self):
+        with patch.object(external_tools, "fetch_etf_universe", new=AsyncMock(return_value={"069500", "VOO"})):
+            self.assertEqual(
+                (await external_tools.etf_link_for("069500"))["url"],
+                "https://ducklove.github.io/eiayn/#search?code=069500",
+            )
+            self.assertEqual((await external_tools.etf_link_for("voo"))["code"], "VOO")
+            # 거래소 접미사가 붙어도 앞부분으로 매칭
+            self.assertEqual((await external_tools.etf_link_for("VOO.US"))["code"], "VOO")
+            self.assertIsNone(await external_tools.etf_link_for("005930"))
+            self.assertIsNone(await external_tools.etf_link_for(""))
+
+    async def test_etf_link_for_empty_universe(self):
+        with patch.object(external_tools, "fetch_etf_universe", new=AsyncMock(return_value=set())):
+            self.assertIsNone(await external_tools.etf_link_for("VOO"))
 
 
 class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):

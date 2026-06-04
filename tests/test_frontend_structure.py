@@ -88,6 +88,20 @@ def test_economic_calendar_filter_is_dates_plus_per_importance_settings():
     assert ".ec-set-row" in styles
 
 
+def test_etf_deep_links_to_eiayn_in_analysis_and_portfolio():
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+    insights = (JS / "portfolio-insights.js").read_text(encoding="utf-8")
+
+    # 분석뷰 밸류에이션 그리드: ETF면 외부 카드 합류(우선주/지주사와 동일 패턴).
+    assert "const e = links.etf;" in analysis
+    assert "ETF 상세" in analysis
+    assert "data.preferred || data.holding || data.etf" in analysis
+    # 포트폴리오 인사이트 모달: ETF 액션 링크(eiayn 새 탭).
+    assert "function _etfInfoAction(etf)" in insights
+    assert "_renderInsightActionLinks(code, goldGap, holding, etf)" in insights
+    assert "const etf = data.etf || null;" in insights
+
+
 def test_index_loads_portfolio_split_scripts_in_contract_order():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert "<title>Value Compass</title>" in html
@@ -407,7 +421,7 @@ def test_holding_target_formula_keeps_external_quotes_fresh():
 
     assert "function _syncHoldingContext(holding)" in insights
     assert "function _holdingValueAction(stockCode)" in insights
-    assert "_renderInsightActionLinks(code, goldGap, holding)" in insights
+    assert "_renderInsightActionLinks(code, goldGap, holding, etf)" in insights
     assert "_renderInsightCard('자회사 비율 추이'" in insights
     assert "holdingValuePerShare: it.current?.holdingValuePerShare" in insights
     assert "function _targetFormulaUses(item, variableName)" in actions

@@ -31,6 +31,7 @@ SITE = {
     "spread": "https://ducklove.github.io/common_preferred_spread/",
     "goldGap": "https://ducklove.github.io/gold_gap/",
     "spac": "https://ducklove.github.io/spac-hunter/",
+    "etf": "https://ducklove.github.io/eiayn/",
 }
 
 _TTL = 900  # 15분 — 배치 갱신 주기에 맞춤
@@ -38,6 +39,62 @@ _cache = MemoryTTLCache("external.tools", _TTL)
 _raw_cache = MemoryTTLCache("external.raw", _TTL)  # (current, config) 원본 — 요약·deep-link 공용
 _SEM = asyncio.Semaphore(3)
 _TIMEOUT = httpx.Timeout(8.0, connect=4.0)
+
+# eiayn(ETF) 프로젝트의 커버 종목 universe. 우선주·지주사처럼 "외부 프로젝트가
+# 발행한 목록과 코드 매칭" 패턴 — 국내(6자리/6자 KRX)·해외(VOO 등 티커) 모두 포함.
+# 파일이 크고(수 MB) 느리게 바뀌므로 길게 캐시한다.
+_ETF_DATA_URL = "https://ducklove.github.io/eiayn/data/etfs.json"
+_ETF_UNIVERSE_TTL = 6 * 3600  # 6시간
+_etf_universe_cache = MemoryTTLCache("external.etf_universe", _ETF_UNIVERSE_TTL)
+_ETF_TIMEOUT = httpx.Timeout(20.0, connect=5.0)
+
+
+async def fetch_etf_universe() -> set[str]:
+    """eiayn 이 커버하는 ETF 코드 집합(대문자 정규화). 실패 시 스테일/빈 집합."""
+    cached = _etf_universe_cache.get("universe")
+    if cached is not None:
+        return cached
+    try:
+        async with _SEM:
+            async with httpx.AsyncClient(timeout=_ETF_TIMEOUT, follow_redirects=True) as client:
+                resp = await client.get(_ETF_DATA_URL, headers={"User-Agent": "value-invest/1.0"})
+                resp.raise_for_status()
+        data = resp.json()
+        universe = {
+            str(c).strip().upper()
+            for c in (data.get("universe") or [])
+            if str(c).strip()
+        }
+        if universe:
+            _etf_universe_cache.set("universe", universe)
+        return universe
+    except Exception as exc:
+        logger.warning("ETF universe fetch failed: %s", exc)
+        entry = _etf_universe_cache.get_entry("universe", allow_stale=True) if hasattr(_etf_universe_cache, "get_entry") else None
+        return entry.value if entry and getattr(entry, "value", None) else set()
+
+
+def etf_deep_link(code: str) -> str:
+    """eiayn 종목 딥링크(해시 라우트)."""
+    return f"{SITE['etf']}#search?code={code}"
+
+
+async def etf_link_for(code: str) -> dict | None:
+    """code 가 ETF(eiayn universe)면 딥링크 정보를, 아니면 None.
+
+    해외 티커에 거래소 접미사가 붙어 와도(예: VOO.US) 앞부분으로 한 번 더 맞춰본다.
+    """
+    norm = (code or "").strip().upper()
+    if not norm:
+        return None
+    universe = await fetch_etf_universe()
+    if not universe:
+        return None
+    base = norm.split(".", 1)[0]
+    matched = norm if norm in universe else (base if base in universe else None)
+    if not matched:
+        return None
+    return {"code": matched, "url": etf_deep_link(matched)}
 
 _GOLD_LABELS = {"gold": "금", "bitcoin": "비트코인", "usdt": "USDT"}
 # gold_gap deep-link용 기본 소스(gold만 소스 선택이 있음)
@@ -304,4 +361,10 @@ async def fetch_stock_links(code: str) -> dict:
             result["holding"] = hold
     except Exception as exc:
         logger.warning("stock-link holding lookup failed (%s): %s", code, exc)
+    try:
+        etf = await etf_link_for(code)
+        if etf:
+            result["etf"] = etf
+    except Exception as exc:
+        logger.warning("stock-link etf lookup failed (%s): %s", code, exc)
     return result

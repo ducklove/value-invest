@@ -234,6 +234,10 @@ function _externalValuationCards(links) {
     const sub = `보유 ${_sxlNum(h.holdingValue)} · 시총 ${_sxlNum(h.marketCap)} (억)`;
     cards.push(card('지주사 보유가치/시총', _sxlPct(h.ratio), sub, h.url));
   }
+  const e = links.etf;
+  if (e && e.url) {
+    cards.push(card('ETF 상세', 'eiayn ↗', '국내·해외 ETF 분석', e.url));
+  }
   return cards;
 }
 
@@ -244,7 +248,7 @@ function _renderCoverage() {
   if (!el) return;
   el.innerHTML = renderCurrentValuationSummary(activeIndicators || {}, activeQuoteSnapshot || {});
   const ext = _currentStockLinks
-    ? (_currentStockLinks.preferred ? 1 : 0) + (_currentStockLinks.holding ? 1 : 0) : 0;
+    ? (_currentStockLinks.preferred ? 1 : 0) + (_currentStockLinks.holding ? 1 : 0) + (_currentStockLinks.etf ? 1 : 0) : 0;
   el.dataset.count = String(4 + ext);
 }
 
@@ -254,7 +258,7 @@ async function loadStockExternalLinks(stockCode) {
     if (!resp.ok) return;
     const data = await resp.json();
     if (activeStockCode !== stockCode) return;  // 종목이 바뀌었으면 무시
-    _currentStockLinks = (data && (data.preferred || data.holding)) ? data : null;
+    _currentStockLinks = (data && (data.preferred || data.holding || data.etf)) ? data : null;
     _renderCoverage();
   } catch (e) {
     console.warn('stock external links failed', e);
