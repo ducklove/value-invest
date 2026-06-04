@@ -32,6 +32,7 @@ from services.krx_limits import krx_lower_limit, krx_upper_limit
 from services.notifications import channels
 from services.portfolio import runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_preferred_stock
+from services.portfolio.target_resolver import resolve_formula_target
 from services.portfolio.time_windows import portfolio_today_baseline_date
 
 
@@ -114,15 +115,22 @@ def _quote_change_pct(quote: dict) -> float | None:
     return _to_float((quote or {}).get("change_pct"))
 
 
-def _effective_target(item: dict, common_price: float | None) -> float | None:
-    """Resolve the 목표가 the UI would show for the common cases.
+async def _effective_target(item: dict, common_price: float | None) -> float | None:
+    """Resolve the 목표가 the UI shows.
 
-    Order: explicit/formula-fallback `target_price` → 우선주 본주가 → 매입가×1.3.
-    Returns None when the user disabled the target or no basis is available.
-    지주사 NAV-기반 자동 목표가는 서버에서 재현하지 않고 매입가×1.3로 폴백한다.
+    Order: 수식이면 라이브 데이터로 직접 평가(보유지분·BPS 등) → 저장된 숫자 목표가
+    → 우선주 본주가 → 매입가×1.3. 비활성(×)이면 None.
+    수식 평가가 핵심: 저장된 target_price 폴백은 stale 하거나(보유지분 수식은) 비어
+    있어 화면값(예: 삼성생명 ~926,044)과 크게 달라질 수 있다.
     """
     if item.get("target_price_disabled"):
         return None
+    formula = (item.get("target_price_formula") or "").strip()
+    if formula:
+        resolved = await resolve_formula_target(item["stock_code"], formula, item.get("avg_price"))
+        if resolved is not None:
+            return resolved
+        # 라이브 변수(보유지분 등)를 못 얻으면 저장 폴백/자동값으로.
     saved = _to_float(item.get("target_price"))
     if saved is not None and saved > 0:
         return saved
@@ -245,7 +253,7 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
             if price is None:
                 continue
             common_price = _quote_price(quote_map.get(common_stock_code(code), {}))
-            target = _effective_target(item, common_price)
+            target = await _effective_target(item, common_price)
             if target is None:
                 continue
             condition = price >= target

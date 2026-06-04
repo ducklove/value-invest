@@ -387,6 +387,15 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         self.assertIn("목표가 달성", captured["text"])
         self.assertIn("삼성전자", captured["text"])
 
+    async def test_effective_target_prefers_live_formula(self):
+        # 삼성생명류: 수식 목표가가 있으면 매입가×1.3 자동값이 아니라 라이브 수식 결과.
+        item = {"stock_code": "005930", "target_price_formula": "BPS*0.5", "avg_price": 200000}
+        with patch.object(engine, "resolve_formula_target", new=AsyncMock(return_value=926044.0)):
+            self.assertEqual(await engine._effective_target(item, None), 926044.0)
+        # 라이브 변수를 못 얻어 수식이 None 이면 매입가×1.3 자동값으로 폴백.
+        with patch.object(engine, "resolve_formula_target", new=AsyncMock(return_value=None)):
+            self.assertEqual(await engine._effective_target(item, None), 260000.0)
+
     async def test_daily_abs_blanket_edge(self):
         rid = await self._rule(scope="all_stocks", alert_type="daily_change_abs", threshold=5.0, stock_code=None)
         disp = AsyncMock()
