@@ -75,8 +75,8 @@ async def fetch_etf_universe() -> set[str]:
 
 
 def etf_deep_link(code: str) -> str:
-    """eiayn 종목 딥링크(해시 라우트)."""
-    return f"{SITE['etf']}#search?code={code}"
+    """eiayn 종목 딥링크. 쿼리 파라미터 방식(예: .../eiayn/?code=VOO)."""
+    return f"{SITE['etf']}?code={code}"
 
 
 async def etf_link_for(code: str) -> dict | None:

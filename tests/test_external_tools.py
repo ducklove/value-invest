@@ -150,7 +150,7 @@ class StockLinkFetchTests(unittest.IsolatedAsyncioTestCase):
             # 국내 ETF 코드 → etf 링크만
             kr_etf = await external_tools.fetch_stock_links("069500")
             self.assertIn("etf", kr_etf)
-            self.assertEqual(kr_etf["etf"]["url"], "https://ducklove.github.io/eiayn/#search?code=069500")
+            self.assertEqual(kr_etf["etf"]["url"], "https://ducklove.github.io/eiayn/?code=069500")
             # 해외 ETF 티커(소문자) → 정규화 후 매칭
             us_etf = await external_tools.fetch_stock_links("voo")
             self.assertEqual(us_etf["etf"]["code"], "VOO")
@@ -164,7 +164,7 @@ class EtfLinkTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(external_tools, "fetch_etf_universe", new=AsyncMock(return_value={"069500", "VOO"})):
             self.assertEqual(
                 (await external_tools.etf_link_for("069500"))["url"],
-                "https://ducklove.github.io/eiayn/#search?code=069500",
+                "https://ducklove.github.io/eiayn/?code=069500",
             )
             self.assertEqual((await external_tools.etf_link_for("voo"))["code"], "VOO")
             # 거래소 접미사가 붙어도 앞부분으로 매칭
