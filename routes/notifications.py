@@ -414,3 +414,67 @@ async def unsubscribe_calendar(event_id: str, request: Request):
     user = _require_user(await get_current_user(request))
     await cache.delete_calendar_subscription(user["google_sub"], event_id)
     return {"ok": True}
+
+
+@router.get("/calendar/status")
+async def calendar_alert_status(request: Request):
+    """캘린더 결과 알림 진단(로그인 사용자 본인 기준).
+
+    "알림이 안 온다"의 원인을 한 번에 가린다:
+    - alert_loop_enabled : 서버 알림 루프가 켜져 있나(NOTIFY_ALERT_INTERVAL_S>0).
+    - has_active_channel : 텔레그램/카카오가 연결+활성인가.
+    - pending            : 아직 발송 전인 구독 목록(없으면 구독이 저장 안 된 것).
+    - ready_to_fire_now  : 현재 실제치(actual)가 이미 나와 다음 틱에 발송될 항목.
+    """
+    import os
+    from datetime import date
+
+    import economic_calendar
+
+    user = _require_user(await get_current_user(request))
+    sub = user["google_sub"]
+
+    try:
+        interval = float(os.environ.get("NOTIFY_ALERT_INTERVAL_S", "0") or 0)
+    except (TypeError, ValueError):
+        interval = 0.0
+    has_channel = await channels.has_active_channel(sub)
+    pending = await cache.list_calendar_subscriptions(sub, pending_only=True)
+
+    today = date.today().isoformat()
+    candidates = [s for s in pending if (s.get("event_date") or "") <= today]
+    ready: list[dict] = []
+    if candidates:
+        countries = sorted({s.get("country") for s in candidates if s.get("country")})
+        try:
+            data = await economic_calendar.fetch_economic_calendar(
+                start_date=min(s["event_date"] for s in candidates),
+                end_date=today,
+                countries=countries or None,
+                importance=["high", "mid", "low"],
+            )
+            by_id = {e["index_id"]: e for e in data.get("events", []) if e.get("index_id")}
+            for s in candidates:
+                ev = by_id.get(s.get("event_id"))
+                if ev and (ev.get("actual") or "").strip():
+                    ready.append({"event": s.get("event"), "actual": ev.get("actual")})
+        except Exception:
+            pass
+
+    return {
+        "alert_loop_enabled": interval > 0,
+        "alert_interval_s": interval,
+        "has_active_channel": has_channel,
+        "server_today": today,
+        "pending_count": len(pending),
+        "pending": [
+            {
+                "event": s.get("event"),
+                "country": s.get("country_name") or s.get("country"),
+                "date": s.get("event_date"),
+                "datetime": s.get("event_datetime"),
+            }
+            for s in pending
+        ],
+        "ready_to_fire_now": ready,
+    }

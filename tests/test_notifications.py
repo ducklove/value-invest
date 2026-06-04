@@ -289,6 +289,28 @@ class AlertCrudTests(NotificationHarness):
         )
         self.assertEqual(resp.status_code, 400)
 
+    async def test_calendar_status_diagnostic_reports_state(self):
+        await cache.upsert_notification_channel(
+            "u1", "telegram", config={"chat_id": 1}, enabled=True, verified=True
+        )
+        today = date.today().isoformat()
+        await cache.upsert_calendar_subscription(
+            "u1", "777", event_date=today, country="us", country_name="미국",
+            event="CPI", importance="high", forecast="3.4%",
+        )
+        ev = {"index_id": "777", "actual": "3.2%", "forecast": "3.4%", "country": "us", "event": "CPI"}
+        with patch.dict("os.environ", {"NOTIFY_ALERT_INTERVAL_S": "60"}), \
+             patch.object(economic_calendar, "fetch_economic_calendar",
+                          new=AsyncMock(return_value={"events": [ev]})):
+            resp = await self.client.get("/api/notifications/calendar/status")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertTrue(body["alert_loop_enabled"])
+        self.assertTrue(body["has_active_channel"])
+        self.assertEqual(body["pending_count"], 1)
+        self.assertEqual(len(body["ready_to_fire_now"]), 1)
+        self.assertEqual(body["ready_to_fire_now"][0]["actual"], "3.2%")
+
 
 class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -411,6 +433,48 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_rule_not_evaluated(self):
         await self._rule(enabled=False)
         with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 80000.0})), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+        disp.assert_not_awaited()
+
+    async def test_portfolio_daily_change_uses_total_value_scale(self):
+        # 전일 결산: total_value 1억, nav(per-unit) 1,500. 일간등락은 total_value
+        # 끼리 비교해야 함(per-unit nav 와 비교하면 수억 % 버그).
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units)"
+            " VALUES ('u1', '2020-01-01', 100000000, 100000000, 1500, 66666.0)"
+        )
+        await db.commit()
+        await self._rule(scope="portfolio", alert_type="daily_change_above", threshold=1.0, stock_code=None)
+        captured = {}
+
+        async def cap(google_sub, text):
+            captured["text"] = text
+            return 1
+
+        # 오늘 총평가액 1억 100만 → +1.00%
+        with patch.object(engine, "_portfolio_nav", new=AsyncMock(return_value=101000000.0)), \
+             patch.object(channels, "dispatch", new=cap):
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+        self.assertIn("+1.00%", captured["text"])
+        self.assertNotIn("e+", captured["text"].lower())  # 비정상 거대값 아님
+
+    async def test_portfolio_daily_change_excludes_cashflow(self):
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units)"
+            " VALUES ('u1', '2020-01-01', 100000000, 100000000, 1500, 66666.0)"
+        )
+        # 오늘 1천만원 입금 → 총평가액 +1천만이지만 수익률엔 포함 안 됨.
+        await db.execute(
+            "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, created_at)"
+            " VALUES ('u1', '2020-01-02', 'deposit', 10000000, '2020-01-02T09:00:00')"
+        )
+        await db.commit()
+        await self._rule(scope="portfolio", alert_type="daily_change_above", threshold=1.0, stock_code=None)
+        # 오늘 총평가액 = 1억(원금) + 1천만(입금) = 1억1천만. 현금흐름 제외 시 0% → 미발화.
+        with patch.object(engine, "_portfolio_nav", new=AsyncMock(return_value=110000000.0)), \
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:
             self.assertEqual(await engine.evaluate_user("u1"), 0)
         disp.assert_not_awaited()
