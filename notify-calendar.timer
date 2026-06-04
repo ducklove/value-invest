@@ -1,0 +1,13 @@
+[Unit]
+Description=Evaluate economic-calendar result alerts every 10 minutes (24/7)
+
+[Timer]
+# Economic data is released at all hours — US evenings/overnight (KST), EU
+# afternoons, and occasionally weekends — so unlike the KRX-hours portfolio
+# alert timer this runs every day, around the clock. Evaluation is cheap and
+# no-ops when no subscriptions are pending. System clock is KST on the Pi.
+OnCalendar=*-*-* *:00/10
+Persistent=false
+
+[Install]
+WantedBy=timers.target

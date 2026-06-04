@@ -30,6 +30,8 @@ REPO_UNITS=(
   "wiki-ingestion.timer"
   "notify-alerts.service"
   "notify-alerts.timer"
+  "notify-calendar.service"
+  "notify-calendar.timer"
   "deploy/value-invest.service"
 )
 

@@ -1,0 +1,22 @@
+[Unit]
+Description=Economic-calendar result alerts evaluation
+After=network.target
+OnFailure=value-invest-notify@%n.service
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+# Calendar result alerts only (portfolio alerts run on notify-alerts.timer).
+# Economic results are released around the clock — US evenings/overnight (KST),
+# EU afternoons, weekends — so this runs on a broad schedule, unlike the
+# KRX-hours portfolio timer. Loopback-only; reuses the warm web process.
+ExecStart=/usr/bin/curl -fsSk --max-time 120 -X POST https://127.0.0.1:3691/api/internal/notifications/evaluate-calendar
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+MemoryMax=100M
+CPUQuota=30%
+TasksMax=20

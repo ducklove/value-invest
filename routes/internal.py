@@ -103,26 +103,39 @@ async def run_nps_snapshot_ep(request: Request, payload: dict = Body(default={})
 
 @router.post("/notifications/evaluate")
 async def run_notifications_evaluate(request: Request):
-    """Run one alert-evaluation pass over all users. Loopback-only.
+    """Run one portfolio-alert evaluation pass over all users. Loopback-only.
 
-    Covers BOTH portfolio condition alerts and economic-calendar result alerts,
-    so the systemd timer (which replaces the in-process loop) drives every alert
-    type. Calendar failures are isolated so a feed hiccup can't block portfolio
-    alerts (and vice versa).
+    Driven by notify-alerts.timer (KRX hours). Economic-calendar result alerts
+    run on their own timer (`evaluate-calendar`) so each timer drives exactly one
+    alert type — no overlap, no duplicate sends.
     """
     _require_loopback(request)
     from services.notifications import engine
     try:
         result = await engine.evaluate_all()
+        return {"ok": True, **result}
     except Exception as exc:
         logger.exception("notification evaluate failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/notifications/evaluate-calendar")
+async def run_calendar_notifications_evaluate(request: Request):
+    """Run one economic-calendar result-alert evaluation pass. Loopback-only.
+
+    Driven by notify-calendar.timer on a broad, around-the-clock schedule, since
+    economic results are released at all hours (US evenings/overnight KST, EU
+    afternoons, weekends) — unlike the KRX-hours portfolio alert timer. No-ops
+    cheaply when no subscriptions are pending.
+    """
+    _require_loopback(request)
+    from services.notifications import engine
     try:
-        calendar = await engine.evaluate_calendar_all()
-    except Exception:
-        logger.exception("calendar alert evaluate failed")
-        calendar = {"subs": 0, "sent": 0, "error": True}
-    return {"ok": True, **result, "calendar": calendar}
+        result = await engine.evaluate_calendar_all()
+        return {"ok": True, **result}
+    except Exception as exc:
+        logger.exception("calendar notification evaluate failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/wiki/ingest")
