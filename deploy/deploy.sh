@@ -28,6 +28,8 @@ REPO_UNITS=(
   "dart-review-ingestion.timer"
   "wiki-ingestion.service"
   "wiki-ingestion.timer"
+  "notify-alerts.service"
+  "notify-alerts.timer"
   "deploy/value-invest.service"
 )
 
