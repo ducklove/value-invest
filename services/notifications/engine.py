@@ -136,20 +136,48 @@ async def _portfolio_nav(google_sub: str) -> float | None:
     return total if total and total > 0 else None
 
 
-async def _prev_close_nav(google_sub: str) -> float | None:
+async def _prev_close_value(google_sub: str) -> tuple[float | None, str | None]:
+    """전일 결산 '총평가액'과 그 결산 날짜.
+
+    일간 등락률은 오늘 총평가액(_portfolio_nav)과 같은 스케일인 total_value 와
+    비교해야 한다. 과거에 per-unit `nav`(기준가, ~천원대)와 비교해 수억 %가 나오던
+    버그를 막는다.
+    """
     baseline = portfolio_today_baseline_date()
     db = await cache.get_db()
     cursor = await db.execute(
-        "SELECT nav, total_value FROM portfolio_snapshots"
+        "SELECT date, total_value, nav FROM portfolio_snapshots"
         " WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (google_sub, baseline),
     )
     row = await cursor.fetchone()
     if not row:
-        return None
-    value = row["nav"] if row["nav"] is not None else row["total_value"]
-    value = _to_float(value)
-    return value if value and value > 0 else None
+        return None, None
+    value = _to_float(row["total_value"])
+    if value is None:
+        value = _to_float(row["nav"])
+    return (value if value and value > 0 else None), row["date"]
+
+
+async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None) -> float:
+    """결산(22:00) 이후 입금(+)·출금(-) 순합. Today 카드와 동일한 보정으로,
+    오늘 들어온/나간 현금을 수익률에서 제외한다."""
+    if not snap_date:
+        return 0.0
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "SELECT type, amount FROM portfolio_cashflows"
+        " WHERE google_sub = ? AND created_at > ?",
+        (google_sub, f"{snap_date}T22:00:00"),
+    )
+    net = 0.0
+    for row in await cursor.fetchall():
+        amount = _to_float(row["amount"]) or 0.0
+        if row["type"] == "deposit":
+            net += amount
+        elif row["type"] == "withdrawal":
+            net -= amount
+    return net
 
 
 def _note_suffix(rule: dict) -> str:
@@ -292,14 +320,16 @@ async def evaluate_user(google_sub: str) -> int:
 
     needs_nav = any(r["alert_type"] in NAV_TYPES for r in rules)
     needs_pf_daily = any(r["alert_type"] in PORTFOLIO_DAILY_TYPES for r in rules)
-    nav: float | None = None
+    nav: float | None = None  # 오늘 총평가액 (총평가액 알림 + 일간등락 분자)
     pf_daily_pct: float | None = None
     if needs_nav or needs_pf_daily:
         nav = await _portfolio_nav(google_sub)
     if needs_pf_daily and nav is not None:
-        prev = await _prev_close_nav(google_sub)
-        if prev:
-            pf_daily_pct = (nav - prev) / prev * 100.0
+        prev_total, prev_date = await _prev_close_value(google_sub)
+        if prev_total:
+            # 오늘 들어온/나간 현금은 수익률에서 제외 (Today 카드와 동일).
+            net_cf = await _net_cashflow_since_settlement(google_sub, prev_date)
+            pf_daily_pct = (nav - net_cf - prev_total) / prev_total * 100.0
 
     sent = 0
     for rule in rules:
