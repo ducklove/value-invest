@@ -56,21 +56,30 @@ def _condition_met(alert_type: str, metric: float, threshold: float) -> bool:
 
 
 def _fmt_num(value: float | None) -> str:
+    """원/가격 표시: 한국 주식·금액은 정수 원이므로 소숫점 없이 반올림."""
     if value is None:
         return "-"
     try:
         number = float(value)
     except (TypeError, ValueError):
         return str(value)
-    if abs(number - round(number)) < 1e-9:
-        return f"{round(number):,}"
-    return f"{number:,.2f}"
+    return f"{round(number):,}"
 
 
 def _fmt_pct(value: float | None) -> str:
     if value is None:
         return "-"
     return f"{value:+.2f}%"
+
+
+def _fmt_thresh(value: float | None) -> str:
+    """임계 % 표시: 불필요한 소숫점 0 제거 (5 → '5', 2.5 → '2.5')."""
+    if value is None:
+        return "-"
+    try:
+        return f"{float(value):g}"
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _to_float(value) -> float | None:
@@ -265,7 +274,7 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
                 continue
             condition = abs(chg) >= threshold
             if condition:
-                text = f"🔔 [{name}] 일간 등락률 알림\n현재 {_fmt_pct(chg)} (기준 ±{_fmt_num(threshold)}%)"
+                text = f"🔔 [{name}] 일간 등락률 알림\n현재 {_fmt_pct(chg)} (기준 ±{_fmt_thresh(threshold)}%)"
 
         armed = state.get(code, True)
         if condition and armed:
