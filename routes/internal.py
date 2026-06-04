@@ -103,19 +103,26 @@ async def run_nps_snapshot_ep(request: Request, payload: dict = Body(default={})
 
 @router.post("/notifications/evaluate")
 async def run_notifications_evaluate(request: Request):
-    """Run one portfolio-alert evaluation pass over all users. Loopback-only.
+    """Run one alert-evaluation pass over all users. Loopback-only.
 
-    Lets a systemd timer drive alerts on the same cadence as snapshots, and
-    makes the alert engine testable without waiting for the in-process loop.
+    Covers BOTH portfolio condition alerts and economic-calendar result alerts,
+    so the systemd timer (which replaces the in-process loop) drives every alert
+    type. Calendar failures are isolated so a feed hiccup can't block portfolio
+    alerts (and vice versa).
     """
     _require_loopback(request)
     from services.notifications import engine
     try:
         result = await engine.evaluate_all()
-        return {"ok": True, **result}
     except Exception as exc:
         logger.exception("notification evaluate failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    try:
+        calendar = await engine.evaluate_calendar_all()
+    except Exception:
+        logger.exception("calendar alert evaluate failed")
+        calendar = {"subs": 0, "sent": 0, "error": True}
+    return {"ok": True, **result, "calendar": calendar}
 
 
 @router.post("/wiki/ingest")
