@@ -1,0 +1,22 @@
+[Unit]
+Description=Portfolio condition alerts evaluation
+After=network.target
+OnFailure=value-invest-notify@%n.service
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+# Drives one alert-evaluation pass inside the web process (warm quote caches),
+# same loopback-only pattern as the snapshot timers. This replaces the need for
+# the in-process loop (NOTIFY_ALERT_INTERVAL_S); keep that at 0 when using this
+# timer so alerts aren't evaluated twice.
+ExecStart=/usr/bin/curl -fsSk --max-time 120 -X POST https://127.0.0.1:3691/api/internal/notifications/evaluate
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+MemoryMax=100M
+CPUQuota=30%
+TasksMax=20
