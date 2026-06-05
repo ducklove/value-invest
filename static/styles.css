@@ -2907,7 +2907,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
      table-layout:auto 라 셀이 내용따라 늘어나므로 max-width(%가 아닌 고정값)로
      상한을 둬야 말줄임이 실제로 걸린다. */
   display: inline-block;
-  max-width: 260px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
