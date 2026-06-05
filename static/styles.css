@@ -2903,7 +2903,15 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   min-width: 0;
 }
 .pf-stock-link strong {
-  overflow-wrap: anywhere;
+  /* 종목명이 길면(예: 영문 ETF 풀네임) 한 줄로 말줄임. 전체 이름은 title hover.
+     table-layout:auto 라 셀이 내용따라 늘어나므로 max-width(%가 아닌 고정값)로
+     상한을 둬야 말줄임이 실제로 걸린다. */
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 .pf-stock-link:hover { color: var(--primary); }
 .pf-stock-code { font-size: 11px; color: var(--text-secondary); }
@@ -3060,13 +3068,6 @@ body.pf-compact-rows .pf-stock-line {
 body.pf-compact-rows .pf-stock-main {
   max-width: 100%;
   min-width: 0;
-}
-body.pf-compact-rows .pf-stock-link strong {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 body.pf-compact-rows .pf-table tbody td,
 body.pf-compact-rows .pf-table tfoot td {
