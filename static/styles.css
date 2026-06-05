@@ -3038,6 +3038,41 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   font-size: 12px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; user-select: none;
 }
 .pf-col-toggle-wrap input[type="checkbox"] { margin: 0; accent-color: var(--primary); }
+/* 컴팩트 보기 토글 (컬럼 토글 줄 맨 앞) */
+.pf-compact-toggle { font-weight: 600; color: var(--text); }
+.pf-col-toggle-sep {
+  align-self: stretch; width: 1px; min-height: 14px;
+  background: var(--border); margin: 0 4px;
+}
+/* === 컴팩트 보기 (body.pf-compact-rows) ===
+   태그·순서이동 핸들을 숨기고 종목명을 한 줄(말줄임)로, 행 위아래 간격을
+   좁혀 한 화면에 더 많은 종목을 본다. 데스크톱·모바일 공통 옵션. */
+body.pf-compact-rows .pf-stock-tags,
+body.pf-compact-rows .pf-row-drag-handle {
+  display: none !important;
+}
+body.pf-compact-rows .pf-stock-cell-with-drag {
+  display: block;
+}
+body.pf-compact-rows .pf-stock-line {
+  flex-wrap: nowrap;
+}
+body.pf-compact-rows .pf-stock-main {
+  max-width: 100%;
+  min-width: 0;
+}
+body.pf-compact-rows .pf-stock-link strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.pf-compact-rows .pf-table tbody td,
+body.pf-compact-rows .pf-table tfoot td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
 .pf-row-actions { display: flex; gap: 4px; justify-content: center; }
 .pf-row-btn {
   border: none; background: none; cursor: pointer; color: var(--text-secondary);

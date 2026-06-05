@@ -31,6 +31,11 @@ const PF_QUOTE_REFRESH_MS = 60_000;
 let _pfPointerGuardUntil = 0;
 const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
 let pfSimpleMode = false;
+// 컴팩트 보기: 종목명을 한 줄로, 태그·순서이동 핸들을 숨기고 행 간격을 좁힌다.
+// 모바일 전용인 pf-mobile-simple 과 달리 데스크톱에서도 동작하는 보기 옵션.
+const PF_COMPACT_ROWS_KEY = 'pf_compact_rows';
+let pfCompactRows = false;
+try { pfCompactRows = localStorage.getItem(PF_COMPACT_ROWS_KEY) === '1'; } catch (e) {}
 
 function pfBenchmarkQuoteHasChange(q) {
   return q && q.change_pct !== null && q.change_pct !== undefined && q.change_pct !== '';
@@ -212,6 +217,25 @@ function pfToggleCol(key, checked) {
     });
   }
 }
+function _pfApplyCompactRows(enabled) {
+  pfCompactRows = !!enabled;
+  document.body.classList.toggle('pf-compact-rows', pfCompactRows);
+  const cb = document.getElementById('pfCompactToggle');
+  if (cb && cb.checked !== pfCompactRows) cb.checked = pfCompactRows;
+}
+function pfToggleCompactRows(checked) {
+  _pfApplyCompactRows(checked);
+  try { localStorage.setItem(PF_COMPACT_ROWS_KEY, pfCompactRows ? '1' : '0'); } catch (e) {}
+}
+(function initPfCompactRows() {
+  const apply = () => _pfApplyCompactRows(pfCompactRows);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', apply);
+  } else {
+    apply();
+  }
+})();
+
 let _pfColTogglesRendered = false;
 function _pfRenderColToggles() {
   const vis = _pfGetColVisibility();
@@ -219,9 +243,14 @@ function _pfRenderColToggles() {
   if (_pfColTogglesRendered) return;
   const wrap = document.getElementById('pfColToggles');
   if (!wrap) return;
-  wrap.innerHTML = PF_COL_DEFS.map(c =>
+  const compactToggle =
+    `<label class="pf-compact-toggle" title="태그·순서이동 아이콘을 숨기고 종목명을 한 줄로, 행 간격을 좁게 표시">`
+    + `<input type="checkbox" id="pfCompactToggle" class="js-pf-compact-toggle"${pfCompactRows ? ' checked' : ''}> 컴팩트</label>`
+    + `<span class="pf-col-toggle-sep" aria-hidden="true"></span>`;
+  const colToggles = PF_COL_DEFS.map(c =>
     `<label><input type="checkbox" class="js-pf-col-toggle" data-col-key="${escapeHtml(c.key)}" ${vis[c.key] ? 'checked' : ''}> ${c.label}</label>`
   ).join('');
+  wrap.innerHTML = compactToggle + colToggles;
   _pfColTogglesRendered = true;
 }
 

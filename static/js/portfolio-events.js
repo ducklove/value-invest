@@ -134,6 +134,8 @@
         if (host) pfChangeGroup(host.dataset.code, el.value);
       } else if ((el = t.closest('.js-pf-col-toggle'))) {
         pfToggleCol(el.dataset.colKey, el.checked);
+      } else if ((el = t.closest('.js-pf-compact-toggle'))) {
+        pfToggleCompactRows(el.checked);
       }
     });
     document.addEventListener('keydown', (e) => {
