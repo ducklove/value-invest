@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 
 import cache
 from services.krx_limits import krx_lower_limit, krx_upper_limit
@@ -197,6 +198,22 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
     return net
 
 
+def _today_str() -> str:
+    # last_triggered_at / state_json 의 발송시각도 datetime.now() 로 저장되므로
+    # 같은 시계(서버 로컬=KST)로 비교해 TZ 어긋남을 피한다.
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _fired_today(last_triggered_at) -> bool:
+    """동일 알림이 오늘 이미 발송됐는지 — 하루 1회 상한용.
+
+    조건이 임계값 근처에서 오르내리거나 평가기가 둘 돌아 같은 알림이 하루에
+    여러 번 가던 문제를 막는다. 다음 날이 되면 last_triggered_at 이 어제라 다시
+    1회 발송 가능.
+    """
+    return bool(last_triggered_at) and str(last_triggered_at)[:10] == _today_str()
+
+
 def _note_suffix(rule: dict) -> str:
     note = (rule.get("note") or "").strip()
     return f"\n📝 {note}" if note else ""
@@ -239,6 +256,7 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
 
     alert_type = rule["alert_type"]
     threshold = rule["threshold"]
+    today_str = _today_str()
     sent = 0
     changed = False
 
@@ -284,14 +302,23 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
             if condition:
                 text = f"🔔 [{name}] 일간 등락률 알림\n현재 {_fmt_pct(chg)} (기준 ±{_fmt_thresh(threshold)}%)"
 
-        armed = state.get(code, True)
-        if condition and armed:
+        # per-holding 상태: {"armed": bool, "fired": "YYYY-MM-DD"|None}.
+        # 레거시 형식(bool)도 수용. fired 가 오늘이면 재발송하지 않음(하루 1회).
+        entry = state.get(code)
+        if isinstance(entry, dict):
+            armed = bool(entry.get("armed", True))
+            fired = entry.get("fired")
+        else:
+            armed = entry if isinstance(entry, bool) else True
+            fired = None
+
+        if condition and armed and fired != today_str:
             await channels.dispatch(google_sub, (text or "") + _note_suffix(rule))
-            state[code] = False
+            state[code] = {"armed": False, "fired": today_str}
             changed = True
             sent += 1
-        elif not condition and armed is False:
-            state[code] = True
+        elif not condition and not armed:
+            state[code] = {"armed": True, "fired": fired}
             changed = True
 
     if changed:
@@ -368,7 +395,7 @@ async def evaluate_user(google_sub: str) -> int:
             continue
         condition = _condition_met(alert_type, metric, rule["threshold"])
         armed = bool(rule["armed"])
-        if condition and armed:
+        if condition and armed and not _fired_today(rule.get("last_triggered_at")):
             if alert_type in PRICE_TYPES:
                 text = _format_price_message(rule, _name(rule.get("stock_code")), metric)
             else:

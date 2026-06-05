@@ -343,25 +343,34 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await engine.evaluate_user("u1"), 0)
         disp.assert_not_awaited()
 
-    async def test_price_edge_trigger_fires_once_then_rearms(self):
+    async def test_price_fires_at_most_once_per_day(self):
         alert_id = await self._rule(threshold=72000.0)
         disp = AsyncMock()
         q = {"price": 80000.0}  # above
+        db = await cache.get_db()
 
         with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
-            self.assertEqual(await engine.evaluate_user("u1"), 1)
+            self.assertEqual(await engine.evaluate_user("u1"), 1)  # fires
             self.assertEqual(disp.await_count, 1)
-            self.assertEqual((await cache.get_portfolio_alert("u1", alert_id))["armed"], 0)
 
             self.assertEqual(await engine.evaluate_user("u1"), 0)  # still met, disarmed
-            self.assertEqual(disp.await_count, 1)
 
             q["price"] = 60000.0  # below -> re-arm
             self.assertEqual(await engine.evaluate_user("u1"), 0)
             self.assertEqual((await cache.get_portfolio_alert("u1", alert_id))["armed"], 1)
 
-            q["price"] = 90000.0  # above again -> fire
+            # 같은 날 다시 임계 돌파 -> 하루 1회 상한으로 재발송 안 함
+            q["price"] = 90000.0
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+            self.assertEqual(disp.await_count, 1)
+
+            # 다음 날(last_triggered_at 이 어제) -> 다시 1회 발송
+            await db.execute(
+                "UPDATE portfolio_alerts SET last_triggered_at = '2020-01-01T10:00:00' WHERE id = ?",
+                (alert_id,),
+            )
+            await db.commit()
             self.assertEqual(await engine.evaluate_user("u1"), 1)
             self.assertEqual(disp.await_count, 2)
 
@@ -396,38 +405,55 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         with patch.object(engine, "resolve_formula_target", new=AsyncMock(return_value=None)):
             self.assertEqual(await engine._effective_target(item, None), 260000.0)
 
-    async def test_daily_abs_blanket_edge(self):
+    async def test_daily_abs_blanket_once_per_day(self):
+        import json as _json
         rid = await self._rule(scope="all_stocks", alert_type="daily_change_abs", threshold=5.0, stock_code=None)
         disp = AsyncMock()
         q = {"price": 80000.0, "change_pct": 7.0}  # |+7| >= 5 -> fire
+        db = await cache.get_db()
 
         with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
             self.assertEqual(await engine.evaluate_user("u1"), 1)
             self.assertEqual(disp.await_count, 1)
-            q["change_pct"] = 3.0  # |3| < 5 -> re-arm, no fire
+            q["change_pct"] = 3.0  # |3| < 5 -> re-arm
             self.assertEqual(await engine.evaluate_user("u1"), 0)
-            q["change_pct"] = -8.0  # |-8| >= 5 -> fire again (down move)
+            # 같은 날 다시 ±5% 돌파 -> 하루 1회 상한으로 재발송 안 함
+            q["change_pct"] = -8.0
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+            self.assertEqual(disp.await_count, 1)
+            # 다음 날(fired 가 어제) -> 다시 1회
+            await db.execute(
+                "UPDATE portfolio_alerts SET state_json = ? WHERE id = ?",
+                (_json.dumps({"005930": {"armed": True, "fired": "2020-01-01"}}), rid),
+            )
+            await db.commit()
             self.assertEqual(await engine.evaluate_user("u1"), 1)
             self.assertEqual(disp.await_count, 2)
-        # per-holding state recorded in state_json
-        import json as _json
-        state = _json.loads((await cache.get_portfolio_alert("u1", rid))["state_json"])
-        self.assertIn("005930", state)
 
-    async def test_limit_reached_blanket_edge(self):
+    async def test_limit_reached_blanket_once_per_day(self):
+        import json as _json
         # 005930(국내). 기준가 10,000 → 상한가 13,000 / 하한가 7,000 (정확 호가단위).
-        await self._rule(scope="all_stocks", alert_type="limit_reached", threshold=0.0, stock_code=None)
+        rid = await self._rule(scope="all_stocks", alert_type="limit_reached", threshold=0.0, stock_code=None)
         disp = AsyncMock()
         q = {"price": 13000.0, "previous_close": 10000.0}  # 상한가 정확 도달
+        db = await cache.get_db()
 
         with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
-            self.assertEqual(await engine.evaluate_user("u1"), 1)
-            self.assertEqual(await engine.evaluate_user("u1"), 0)  # edge, no re-fire
-            q["price"] = 12990.0  # 상한가 1틱 아래 → 도달 아님(재무장)
+            self.assertEqual(await engine.evaluate_user("u1"), 1)  # 상한가 발화
+            q["price"] = 12990.0  # 1틱 아래 → 재무장
             self.assertEqual(await engine.evaluate_user("u1"), 0)
-            q["price"] = 7000.0   # 하한가 정확 도달
+            # 같은 날 하한가 도달해도 하루 1회 상한 → 재발송 안 함
+            q["price"] = 7000.0
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+            self.assertEqual(disp.await_count, 1)
+            # 다음 날 → 다시 1회
+            await db.execute(
+                "UPDATE portfolio_alerts SET state_json = ? WHERE id = ?",
+                (_json.dumps({"005930": {"armed": True, "fired": "2020-01-01"}}), rid),
+            )
+            await db.commit()
             self.assertEqual(await engine.evaluate_user("u1"), 1)
             self.assertEqual(disp.await_count, 2)
 
