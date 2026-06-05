@@ -3060,7 +3060,11 @@ body.pf-compact-rows .pf-row-drag-handle {
   display: none !important;
 }
 body.pf-compact-rows .pf-stock-cell-with-drag {
-  display: block;
+  /* td 를 본래의 table-cell 로 되돌려 vertical-align:middle 이 살아나게 한다.
+     display:block 이면 셀이 행 높이를 못 따라가(그룹 select·벤치마크 2줄 등으로
+     행이 높을 때) 종목명이 위로 붙는다. grid 가 풀리므로 드래그 핸들(숨김)이
+     차지하던 16px 들여쓰기도 함께 사라져 종목명이 셀 왼쪽부터 시작한다. */
+  display: table-cell;
 }
 body.pf-compact-rows .pf-stock-line {
   flex-wrap: nowrap;
