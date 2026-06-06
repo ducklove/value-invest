@@ -301,6 +301,13 @@ function switchView(view, options = {}) {
 }
 
 let _npsLoaded = false;
+// nps-tracker 임베드 URL — 임베드 모드(embed=true) + 현재 앱 테마를 쿼리로 전달.
+function _npsFrameSrc() {
+  const cfg = window.APP_CONFIG && window.APP_CONFIG.integrations && window.APP_CONFIG.integrations.npsTracker;
+  const base = (cfg && cfg.baseUrl) || 'https://ducklove.github.io/nps-tracker';
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  return base.replace(/\/+$/, '') + '/?embed=true&theme=' + theme;
+}
 function loadNpsView() {
   const container = document.getElementById('npsContent');
   if (!container) return;
@@ -308,10 +315,8 @@ function loadNpsView() {
   _npsLoaded = true;
   // 국민연금 포트폴리오는 별도 정적 대시보드(nps-tracker)로 분리됐다. 허브는
   // 이를 iframe 으로 임베드만 하고, 요약은 투자정보 '분석 도구' 카드가 보여준다.
-  const cfg = window.APP_CONFIG && window.APP_CONFIG.integrations && window.APP_CONFIG.integrations.npsTracker;
-  const base = (cfg && cfg.baseUrl) || 'https://ducklove.github.io/nps-tracker';
   const iframe = document.createElement('iframe');
-  iframe.src = base.replace(/\/+$/, '') + '/';
+  iframe.src = _npsFrameSrc();
   iframe.title = '국민연금 국내주식 포트폴리오';
   iframe.loading = 'lazy';
   iframe.className = 'nps-frame';
@@ -319,4 +324,9 @@ function loadNpsView() {
   container.classList.add('is-frame');
   container.innerHTML = '';
   container.appendChild(iframe);
+}
+// 테마 토글 시 임베드된 nps-tracker 도 같은 테마로 다시 로드한다(쿼리 갱신).
+function syncNpsFrameTheme() {
+  const ifr = document.querySelector('#npsContent iframe.nps-frame');
+  if (ifr) ifr.src = _npsFrameSrc();
 }

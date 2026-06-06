@@ -5,6 +5,7 @@ function toggleTheme() {
   html.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
   Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });
+  if (typeof syncNpsFrameTheme === 'function') syncNpsFrameTheme();
   trackEvent('theme_toggle', { theme: next });
 }
 (function initTheme() {
