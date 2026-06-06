@@ -7,7 +7,7 @@
 `value-invest` 내부에 들어 있는 국민연금(NPS) 기능을 두 관심사로 나눠 분리한다.
 
 1. **표시용 대시보드**(공개 NPS 페이지 스크래핑 → NAV·KOSPI 차트) → 독립 정적
-   서브프로젝트(`nps-portfolio`)로 분리. 기존 4개 대시보드와 동일 패턴.
+   서브프로젝트(`nps-tracker`)로 분리. 기존 4개 대시보드와 동일 패턴.
 2. **백테스트 유니버스용 시점별 보유내역**(연구 입력) → `finance-pi`(PIT
    데이터레이크)로 이관. `value-invest` 백테스트는 finance-pi 내부 API에서 읽는다.
 
@@ -48,7 +48,7 @@ flowchart LR
     STATIC["SPA<br/>NPS 탭 → 외부 링크"]
   end
 
-  subgraph NppDash["nps-portfolio (신규 정적 대시보드)"]
+  subgraph NppDash["nps-tracker (신규 정적 대시보드)"]
     FETCH["fetch_data.py<br/>NPS 스크래핑"]
     PUB["current.json / holdings_history.json<br/>index.html (NAV·KOSPI 차트)"]
   end
@@ -71,7 +71,7 @@ flowchart LR
 
 ## 레포별 변경
 
-### A. 신규 정적 서브프로젝트 `nps-portfolio`
+### A. 신규 정적 서브프로젝트 `nps-tracker`
 
 기존 4개 대시보드(`spac-hunter` 등)와 동일 골격.
 
@@ -82,9 +82,9 @@ flowchart LR
   - `holdings_history.json`(또는 `data.js`) — 차트용 NAV/KOSPI 시계열.
   - `index.html` — NAV vs KOSPI 차트(현재 `snapshot_nps.py`가 만드는 HTML 이식).
 - `.github/workflows` — 일 1회(22:05 KST 대응) 스크래핑 → 커밋 → GitHub Pages.
-- 배포: `ducklove.github.io/nps-portfolio`.
+- 배포: `ducklove.github.io/nps-tracker`.
 
-> **이름 미정**: `nps-portfolio` / `nps-holdings` / `nps-tracker` 중 택1 (열린 결정).
+> 레포 이름 결정: **`nps-tracker`** (GitHub Pages `ducklove.github.io/nps-tracker`).
 
 ### B. `finance-pi` — NPS 보유내역 PIT 이관
 
@@ -113,8 +113,8 @@ flowchart LR
    - `routes/internal.py`의 `/snapshot/nps` 제거, systemd `nps-snapshot.timer` 폐기.
    - `cache.py`의 `nps_holdings` / `nps_snapshots` 테이블 + 재노출 함수 제거
      (마이그레이션: 테이블 drop은 보류하고 deprecate만 → 안전).
-   - 프런트 `npsView`를 외부 대시보드 링크로 교체(탭 유지하되 `loadNpsView()`는
-     외부 링크/iframe). 또는 다른 대시보드처럼 포트폴리오 행 링크로만.
+   - 프런트 `npsView` 탭은 **유지**하되, `loadNpsView()`가 `/api/nps/html`(내부
+     생성) 대신 **nps-tracker를 iframe으로 임베드**하도록 변경(결정: iframe 유지).
 3. **통합 추가**:
    - `integrations.py` `DEFAULT_BASE_URLS`에 `npsPortfolio` 추가 + `?date=`/링크.
    - `external_tools.py`에 `_summarize_nps()` 추가(5번째 대시보드 요약).
@@ -123,7 +123,7 @@ flowchart LR
 ## Published 스키마(초안)
 
 ```jsonc
-// nps-portfolio/current.json
+// nps-tracker/current.json
 {
   "lastUpdated": "2026-06-05 22:07:00",
   "summary": { "totalValue": 0, "nav": 1000.0, "count": 0, "asOf": "2026-06-05" },
@@ -146,7 +146,7 @@ flowchart LR
    기존 `nps_holdings`와 동일 결과를 내는지 비교 검증.
 2. **백테스트 재배선**(value-invest). 로컬 테이블과 finance-pi API 결과를 동시
    비교하는 shadow 모드로 한동안 운영 → 일치 확인 후 로컬 의존 제거.
-3. **nps-portfolio 신규 레포** 구축·배포. 허브 NPS 탭이 아직 내부 HTML이어도 무방.
+3. **nps-tracker 신규 레포** 구축·배포. 허브 NPS 탭이 아직 내부 HTML이어도 무방.
 4. **허브 프런트/통합 전환**: NPS 탭 → 외부 대시보드, 통합 설정/인사이트 추가.
 5. **내부 NPS 코드·타이머·테스트 제거**. 마지막에. 테이블 drop은 더 뒤로.
 6. **문서 갱신** 및 정리.
@@ -162,9 +162,13 @@ flowchart LR
   낮으므로 일 1회 캐시로 충분.
 - **롤백**: 5단계(코드 제거) 전까지는 내부 NPS가 살아 있어 언제든 되돌릴 수 있음.
 
-## 열린 결정사항
+## 결정사항 (2026-06-06)
 
-- 신규 레포 이름(`nps-portfolio` 등).
-- 허브 NPS 탭을 **외부 링크로 대체**할지, **iframe 임베드 유지**할지.
+- 신규 레포 이름: **`nps-tracker`**.
+- 허브 NPS 탭: **iframe 임베드 유지**(탭 유지, `loadNpsView()`가 nps-tracker를 iframe).
+- 착수 지점: **Phase 1 (finance-pi NPS 인제스트 구축)** 부터.
+
+### 아직 열린 것
+
 - finance-pi 유니버스 API 경로·인증(`/api/universe/nps` vs `/api/nps/holdings`).
-- 과거 `nps_snapshots.generated_html`(차트) 자산을 새 레포로 이관할지/재생성할지.
+- 과거 `nps_snapshots.generated_html`(차트) 자산을 nps-tracker로 이관할지/재생성할지.
