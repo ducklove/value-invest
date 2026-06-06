@@ -485,8 +485,9 @@ async function loadSectors() {
 }
 
 // --- 분석 도구 (external insights) — 외부 GitHub Pages 도구 요약 허브 ---
-// 지주사 NAV 디스카운트 / 우선주 괴리율 / 김치프리미엄. public JSON 요약을
-// 한 섹션에 카드로 묶고, 항목 클릭 시 해당 도구로(새 탭, 가능하면 deep-link).
+// 지주사 NAV 디스카운트 / 우선주 괴리율 / 스팩 / 김치프리미엄 / 국민연금.
+// public JSON 요약을 한 섹션에 카드로 묶고, 항목 클릭 시 해당 도구로(새 탭,
+// 가능하면 deep-link).
 let _extInFlight = false;
 
 function _extSafeUrl(url) {
@@ -557,6 +558,13 @@ function _extRender(root, data) {
         + `<span class="ext-val ${cls}">${escapeHtml(_extPct(a.gap, true))}</span></a>`;
     }).join('');
     cards.push(_extCard('김치프리미엄', g.url, '국내가 vs 국제가', rows));
+  }
+  const nps = data && data.nps;
+  if (nps && (nps.top || []).length) {
+    const sub = nps.nav != null
+      ? `NAV ${Number(nps.nav).toFixed(1)} · 비중 상위`
+      : '포트폴리오 비중 상위';
+    cards.push(_extCard('국민연금', nps.url, sub, _extLinkRows(nps.top, 'weight', nps.url, false)));
   }
   if (!cards.length) {
     root.innerHTML = '';

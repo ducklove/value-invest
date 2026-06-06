@@ -14,7 +14,7 @@
 4. `auth.js`: 로그인, 세션, 사용자 상태.
 5. `search.js`: 종목 검색 UI.
 6. `analysis.js`: 단일 종목 분석 UI.
-7. `portfolio-shell.js`: 공유 상태, 컬럼 표시 설정, 뷰 전환, NPS 뷰 진입점.
+7. `portfolio-shell.js`: 공유 상태, 컬럼 표시 설정, 뷰 전환, NPS 탭(nps-tracker iframe) 진입점.
 8. `portfolio-data.js`: 포트폴리오 API 로딩, 정렬/필터 상태, 실시간 quote row 업데이트.
 9. `portfolio-order.js`: 보유종목 drag/drop 정렬과 저장.
 10. `portfolio-render.js`: 보유종목 테이블/카드 렌더링, 숫자 포맷, sparkline, benchmark 표시.
@@ -28,9 +28,8 @@
 18. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
 19. `portfolio-tag-summary.js`: 태그 요약 UI.
 20. `portfolio-events.js`: document-level delegated event handlers.
-21. `backtest.js`: 백테스트 UI.
-22. `insights.js`: 인사이트 목록 UI.
-23. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
+21. `insights.js`: 인사이트 목록 UI.
+22. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
 
 ## Legacy Entrypoint
 

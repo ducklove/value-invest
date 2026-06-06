@@ -10,7 +10,7 @@
 
 - FastAPI 단일 서버가 API, 정적 SPA, 관리자 콘솔, WebSocket 실시간 시세, 내부 배치 트리거를 함께 담당한다.
 - SQLite(`cache.db`)가 분석 캐시, 사용자/세션, 포트폴리오, NAV 스냅샷, AI 사용량, 공시/리포트 요약, 운영 이벤트를 저장한다.
-- systemd timer가 NAV/NPS/장중 스냅샷, wiki/DART ingestion 같은 운영 작업을 호출한다.
+- systemd timer가 NAV/장중 스냅샷, wiki/DART ingestion 같은 운영 작업을 호출한다.
 - 프론트엔드는 별도 빌드 시스템 없이 `static/index.html` + 여러 JS 파일 + `styles.css`로 구성되어 있다.
 
 ### 연결 프로젝트
@@ -19,10 +19,11 @@
 - `preferredSpread`: 우선주-본주 괴리율 링크 및 설정 관리.
 - `spacHunter`: 스팩 공모가 괴리율 링크(`?code=`). baseUrl만 노출하고 로컬 config는 없다.
 - `goldGap`: 금/비트코인 gap 링크 및 포트폴리오 특수자산 연결.
+- `npsTracker`: 국민연금 국내주식 포트폴리오 대시보드. NPS 탭에 iframe 임베드하고 baseUrl만 노출한다.
 - `kisProxy`: KIS API 호출 프록시. 브라우저가 아니라 서버에서 `kis_proxy_client.py`를 통해 사용한다.
 - `finance-pi`: 라즈베리파이 데이터레이크(`:8400`). integration registry 밖의 인프라로, `CLOSE_PRICE_API_BASE_URL` 종가 백업 소스로만 쓴다.
 - 통합 설정은 `integrations.py`, `/app-config.js`, `/api/integrations`, `/admin.html`의 linked-project config 관리가 담당한다.
-- 프런트 딥링크와 별개로 `external_tools.py`가 4개 대시보드의 published JSON(`current.json`/`data.json`)을 `raw.githubusercontent`에서 받아 요약해 AI 포트폴리오 인사이트 입력으로 쓴다(약 15분 캐시).
+- 프런트 딥링크와 별개로 `external_tools.py`가 5개 대시보드의 published JSON(`current.json`/`data.json`)을 `raw.githubusercontent`에서 받아 요약해 AI 포트폴리오 인사이트 입력으로 쓴다(약 15분 캐시).
 
 ### 규모
 

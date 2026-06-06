@@ -83,24 +83,6 @@ async def run_intraday_snapshot(request: Request):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/snapshot/nps")
-async def run_nps_snapshot_ep(request: Request, payload: dict = Body(default={})):
-    """NPS daily snapshot. Accepts optional {"date": "YYYY-MM-DD"} so a
-    backfill call after a missed run doesn't require SSH'ing into the
-    Pi to run the Python CLI."""
-    _require_loopback(request)
-    import snapshot_nps
-    snap_date = None
-    if isinstance(payload, dict) and payload.get("date"):
-        snap_date = str(payload["date"]).strip()
-    try:
-        await snapshot_nps.run_nps_snapshot(snap_date=snap_date, manage_db=False)
-        return {"ok": True, "kind": "nps", "date": snap_date or "today"}
-    except Exception as exc:
-        logger.exception("nps snapshot failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
 @router.post("/notifications/evaluate")
 async def run_notifications_evaluate(request: Request):
     """Run one portfolio-alert evaluation pass over all users. Loopback-only.

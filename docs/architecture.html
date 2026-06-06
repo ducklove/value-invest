@@ -105,7 +105,7 @@
   <h2><span class="n">1</span> 개요</h2>
   <p>단일 FastAPI 프로세스가 REST API, 정적 SPA, 관리자 콘솔, WebSocket 실시간 시세, 내부 배치 트리거를 모두 담당한다.
   영속성은 단일 SQLite(<code>cache.db</code>)가 분석 캐시·사용자/세션·포트폴리오·NAV 스냅샷·AI 사용량·공시/리포트 요약·운영 이벤트를 저장한다.
-  운영 작업(일일정산·장중 스냅샷·NPS·wiki/DART ingestion)은 systemd 타이머가 내부 엔드포인트 또는 CLI로 호출한다.</p>
+  운영 작업(일일정산·장중 스냅샷·wiki/DART ingestion)은 systemd 타이머가 내부 엔드포인트 또는 CLI로 호출한다.</p>
   <div class="grid cards">
     <div class="card"><h4>웹/실시간</h4><p>FastAPI · Uvicorn</p><p>SSE 스트리밍 + <code>/ws/quotes</code> WebSocket</p></div>
     <div class="card"><h4>영속성</h4><p>SQLite (WAL, busy_timeout)</p><p>인메모리 TTL 캐시 계층</p></div>
@@ -139,9 +139,9 @@
       <div class="lh">HTTP 핸들러 (routes/)</div>
       <div class="boxes">
         <span class="box big">portfolio*</span><span class="box">analysis</span><span class="box">admin</span>
-        <span class="box">auth</span><span class="box">ws_quotes</span><span class="box">nps</span>
-        <span class="box">wiki</span><span class="box">reports</span><span class="box">insights</span>
-        <span class="box">backtest</span><span class="box">stocks</span><span class="box">internal</span>
+        <span class="box">auth</span><span class="box">ws_quotes</span><span class="box">wiki</span>
+        <span class="box">reports</span><span class="box">insights</span><span class="box">stocks</span>
+        <span class="box">internal</span><span class="box">notifications</span>
         <span class="box">market_daily</span><span class="box">dart_review</span><span class="box">cache_mgmt</span>
       </div>
     </div>
@@ -163,7 +163,7 @@
         <span class="box">kis_ws_manager</span><span class="box">kis_key_manager</span>
         <span class="box">close_price_client</span><span class="box">dart_client</span>
         <span class="box">market_indicators</span><span class="box">asset_insights</span>
-        <span class="box">report_client</span><span class="box">nps_scraper</span>
+        <span class="box">report_client</span>
       </div>
     </div>
     <div class="layer">
@@ -209,9 +209,9 @@
       <tr><td>시세 소스</td><td><code>stock_price · kis_proxy_client · close_price_client · special_assets · fx</code></td><td>국내 KIS REST + 네이버 벌크, 일별 종가, 금/크립토, 환율 변환</td></tr>
       <tr><td>분석/AI</td><td><code>routes/analysis · services/ai_client · ai_config · asset_insights · market_indicators</code></td><td>종목 분석, OpenRouter 호출(비밀 마스킹), 기능별 모델, 자산 인사이트</td></tr>
       <tr><td>위키/공시</td><td><code>routes/wiki · wiki_ingestion · dart_report_review · dart_client · report_client</code></td><td>리포트 위키 요약, DART 정기보고서 리뷰</td></tr>
-      <tr><td>NPS/벤치마크</td><td><code>routes/nps · nps_scraper · benchmark_history</code></td><td>국민연금 스냅샷, 비교지수 이력</td></tr>
+      <tr><td>벤치마크</td><td><code>benchmark_history</code></td><td>비교지수(KOSPI 등) 일별 이력. 국민연금은 <code>nps-tracker</code>(외부 정적 대시보드)로 분리.</td></tr>
       <tr><td>관리자/운영</td><td><code>routes/admin · internal · cache_mgmt · observability · linked_project_admin · integrations</code></td><td>배치 모니터링·수동 트리거(정적 출처 CSRF 가드), 내부 loopback 엔드포인트, 연결 프로젝트 설정</td></tr>
-      <tr><td>배치 CLI</td><td><code>snapshot_nav · snapshot_intraday · snapshot_nps</code></td><td>systemd 타이머가 호출하는 일일/장중 스냅샷</td></tr>
+      <tr><td>배치 CLI</td><td><code>snapshot_nav · snapshot_intraday</code></td><td>systemd 타이머가 호출하는 일일/장중 스냅샷</td></tr>
       <tr><td>영속성</td><td><code>cache.py</code> <span class="badge b-done">분해됨</span> · <code>repositories/</code> · <code>cache_layer.py</code></td><td>cache.py=DB 코어(연결·스키마·마이그레이션·cache-value), 테이블별 repository 18개는 <code>repositories/</code>로 분리, 인메모리 TTL 캐시</td></tr>
     </tbody>
   </table>
@@ -311,10 +311,10 @@
   <h2><span class="n">10</span> 남은 기술 부채 · 다음 단계</h2>
   <div class="grid cards">
     <div class="card"><h4><span class="badge b-done">2b</span> 포트폴리오 라우터 분해</h4><p><code>foreign</code>(해외 시세/이름) → <code>quote_service</code>(현재가 seam) → <code>benchmarks</code>(벤치마크) → <code>insights</code>(AI 인사이트)까지 추출 완료. 라우터 2,706→1,741줄. 동작 보존, 테스트 동반 갱신.</p></div>
-    <div class="card"><h4><span class="badge b-done">3</span> cache.py repository 분리</h4><p><code>repositories/</code> 패키지로 18개 도메인 추출(system_events·benchmark_daily·ticker_map·user_settings·nps·dart_review·wiki·foreign_dividends·portfolio·snapshots·app_settings·ai_usage·market_brief·insight_posts·financial·analysis·users·user_stocks). facade 재export로 모든 <code>cache.*</code> 호출 무변경, AST 감사로 누락 참조 0 확인. <b>cache.py 3,902→1,340줄(66%↓)</b>. 남은 건 DB 코어(연결/init_db/스키마/마이그레이션·cache-value 레이어·공유 스냅샷/그룹 helper·corp_codes 인메모리 전역). 스키마/마이그레이션 방식 유지.</p></div>
+    <div class="card"><h4><span class="badge b-done">3</span> cache.py repository 분리</h4><p><code>repositories/</code> 패키지로 18개 도메인 추출(system_events·benchmark_daily·ticker_map·user_settings·dart_review·wiki·foreign_dividends·portfolio·snapshots·app_settings·ai_usage·market_brief·insight_posts·financial·analysis·users·user_stocks). facade 재export로 모든 <code>cache.*</code> 호출 무변경, AST 감사로 누락 참조 0 확인. <b>cache.py 3,902→1,340줄(66%↓)</b>. 남은 건 DB 코어(연결/init_db/스키마/마이그레이션·cache-value 레이어·공유 스냅샷/그룹 helper·corp_codes 인메모리 전역). 스키마/마이그레이션 방식 유지.</p></div>
     <div class="card"><h4><span class="badge b-prog">4</span> 프론트 store 도입</h4><p><code>portfolio-store.js</code> 신설(단일 <code>PfStore</code> namespace) + 첫 상태 슬라이스(benchmark quotes)를 전역 → <code>PfStore.benchmarkQuotes</code>로 이전(jsdom 검증). pfNavHistory/portfolioItems는 검증과 함께 순차 이전.</p></div>
     <div class="card"><h4><span class="badge b-prog">효율</span> tick 핫패스</h4><p>quote tick 행 조회를 JS 전체 스캔 → 브라우저 네이티브 속성 선택자(<code>querySelector</code> + CSS.escape)로 단축(stale 인덱스 위험 없음, jsdom 검증). <code>get_portfolio</code>는 이미 핵심 DB 호출 <code>asyncio.gather</code> 병렬화 완료.</p></div>
-    <div class="card"><h4><span class="badge b-done">보안</span> NPS 스크립트 임베딩</h4><p>NPS 뷰는 부모 CSS 변수·차트 라이브러리에 의존해 iframe 격리가 어려움 → 실효적 주입 지점(inline script 내 JSON의 <code>&lt;/script&gt;</code> 브레이크아웃)을 <code><</code> 이스케이프로 차단(snapshot_nps · routes/nps, 동작 보존).</p></div>
+    <div class="card"><h4><span class="badge b-done">분리</span> 국민연금 → nps-tracker</h4><p>내부에서 공개 NPS 페이지를 스크래핑하고 NAV/KOSPI 차트 HTML을 생성하던 <code>snapshot_nps · nps_scraper · routes/nps · repositories/nps</code>를 제거하고, 별도 정적 대시보드 <code>nps-tracker</code>(GitHub Pages)로 분리. 허브 NPS 탭은 이를 iframe 임베드하고, 요약은 투자정보 '분석 도구' 카드가 <code>current.json</code>으로 표시. 깨지기 쉬운 스크래핑이 배포 게이트(전체 pytest)에서 빠짐. <code>nps_holdings/nps_snapshots</code> 테이블은 롤백 대비 보존(deprecate).</p></div>
     <div class="card"><h4><span class="badge b-prog">테스트</span> jsdom 도입</h4><p>jsdom 하니스(<code>package.json</code> · <code>tests/js/</code>, <code>npm test</code>) 구축 + utils.js 동작 테스트(escapeHtml/safeExternalUrl/quote/guest-recent)로 점진 이전 시작. 기존 문자열 검증은 순차 이전 예정.</p></div>
   </div>
 </section>

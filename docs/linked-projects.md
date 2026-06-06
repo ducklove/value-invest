@@ -12,6 +12,7 @@ URLs or server-side environment variables instead of copying their code.
 | `preferredSpread` | `https://github.com/ducklove/common_preferred_spread` | `../common_preferred_spread` | Links preferred-stock rows to the spread dashboard. |
 | `spacHunter` | `https://github.com/ducklove/spac-hunter` | `../spac-hunter` | Links SPAC portfolio rows to the spac dashboard via `?code=`. Exposes `baseUrl` only (no local `config.json`). |
 | `goldGap` | `https://github.com/ducklove/gold_gap` | `../gold_gap` | Links `KRX_GOLD` and `CRYPTO_BTC` portfolio rows to the gold/bitcoin gap dashboard. |
+| `npsTracker` | `https://github.com/ducklove/nps-tracker` | — | Embeds the NPS domestic-equity portfolio dashboard in the NPS tab via iframe and summarizes `current.json` for the 투자정보 insight card. Exposes `baseUrl` only. |
 | `kisProxy` | `https://github.com/ducklove/kis-proxy` | `../kis-proxy` | Used server-side by `kis_proxy_client.py` through `KIS_PROXY_BASE_URL`. |
 
 > `finance-pi` (`../finance-pi`, Raspberry Pi 데이터레이크 `:8400`)는 위 integration
@@ -59,6 +60,7 @@ Results are cached ~15 minutes and each fetch fails independently:
 - `preferredSpread`: `current.json` — widest common/preferred spreads.
 - `goldGap`: `data.json` — gap per asset.
 - `spacHunter`: `current.json` (branch `main`) — deepest discount-to-offer SPACs.
+- `npsTracker`: `current.json` (branch `main`) — National Pension Service domestic-equity holdings by portfolio weight (top), NAV, and total value.
 
 This path needs neither local config nor the `/admin.html` config writer; it only
 needs each dashboard's public GitHub Pages / raw content to be reachable.
@@ -78,6 +80,7 @@ Public base URLs can be overridden with:
 - `PREFERRED_SPREAD_BASE_URL`
 - `SPAC_HUNTER_BASE_URL`
 - `GOLD_GAP_BASE_URL`
+- `NPS_TRACKER_BASE_URL`
 - `KIS_PROXY_BASE_URL`
 - `KIS_PROXY_TOKEN` (optional, sent as `X-KIS-Proxy-Token` when the proxy is
   configured with `KIS_PROXY_PUBLIC_TOKENS`)

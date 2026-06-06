@@ -1470,7 +1470,6 @@ function _renderSubsystemSummary(summary) {
   const labels = {
     snapshot_nav:       '포트폴리오 NAV 스냅샷',
     snapshot_intraday:  '장중 스냅샷',
-    snapshot_nps:       '국민연금 스냅샷',
     wiki_ingestion:     '위키 인제션 루프',
     benchmark_history:  '벤치마크 일별 증분',
   };

@@ -415,6 +415,9 @@ async def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_intraday_sub_ts ON portfolio_intraday(google_sub, ts);
 
+        -- DEPRECATED: 국민연금 데이터는 nps-tracker(별도 정적 대시보드)로 분리됐다.
+        -- 아래 두 테이블은 더 이상 기록되지 않으며, 과거 데이터 보존을 위해 drop만
+        -- 보류한 상태다(롤백 안전장치). 새 코드는 참조하지 말 것.
         CREATE TABLE IF NOT EXISTS nps_holdings (
             date TEXT NOT NULL,
             stock_code TEXT NOT NULL,
@@ -1272,14 +1275,6 @@ from repositories.ticker_map import (  # noqa: E402
 from repositories.user_settings import (  # noqa: E402
     get_user_setting,
     set_user_setting,
-)
-from repositories.nps import (  # noqa: E402
-    save_nps_holdings,
-    get_nps_holdings,
-    save_nps_snapshot,
-    get_nps_snapshots,
-    get_latest_nps_snapshot,
-    get_latest_nps_html,
 )
 from repositories.dart_review import (  # noqa: E402
     get_dart_report_review,

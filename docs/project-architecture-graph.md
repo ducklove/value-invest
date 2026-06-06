@@ -19,7 +19,7 @@ flowchart TB
     Static["Static SPA<br/>index.html + split portfolio JS"]
     API["FastAPI Routes<br/>analysis / portfolio / reports<br/>wiki / auth / admin / integrations"]
     WS["WebSocket Quotes<br/>KIS realtime ticks"]
-    Batch["Batch / Internal APIs<br/>snapshot NAV / intraday / NPS<br/>wiki ingestion / DART review"]
+    Batch["Batch / Internal APIs<br/>snapshot NAV / intraday<br/>wiki ingestion / DART review"]
     AI["AI Layer<br/>OpenRouter models<br/>portfolio insight / wiki Q&A<br/>DART filing review"]
     Integrations["Integration Config<br/>/app-config.js<br/>/api/integrations<br/>linked_project_admin.py"]
     Insights["External Insights<br/>external_tools.py<br/>대시보드 published JSON 요약"]
@@ -124,14 +124,12 @@ flowchart TB
   subgraph Systemd["Systemd Timers / Services"]
     NavTimer["portfolio-snapshot.timer<br/>daily NAV"]
     IntradayTimer["portfolio-intraday.timer<br/>intraday snapshots"]
-    NpsTimer["nps-snapshot.timer<br/>NPS holdings"]
     WikiTimer["wiki-ingestion.timer<br/>broker report wiki"]
     DartTimer["dart-review-ingestion.timer<br/>filing AI review"]
   end
 
   NavTimer -->|"POST /api/internal/snapshot/nav"| Batch
   IntradayTimer -->|"POST /api/internal/snapshot/intraday"| Batch
-  NpsTimer -->|"POST /api/internal/snapshot/nps"| Batch
   WikiTimer -->|"POST /api/internal/wiki/ingest"| Batch
   DartTimer -->|"POST /api/internal/dart-review/ingest"| Batch
 

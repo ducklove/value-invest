@@ -16,8 +16,6 @@ UNIT_DST="${UNIT_DST:-/etc/systemd/system}"
 # restart picks up any dependency timer changes first.
 REPO_UNITS=(
   "value-invest-notify@.service"
-  "nps-snapshot.service"
-  "nps-snapshot.timer"
   "portfolio-intraday.service"
   "portfolio-intraday.timer"
   "portfolio-snapshot.service"
@@ -109,6 +107,26 @@ python3 -m pytest -q
 # code stays on disk for inspection.
 trap - ERR
 
+# --- Retire units no longer maintained in-repo ------------------------------
+# Deleting a .timer/.service from the repo doesn't remove an already-installed,
+# enabled copy on the host. Explicitly stop+disable+delete retired units so a
+# stale timer can't keep POSTing a route that no longer exists (e.g. the NPS
+# snapshot timer after the nps-tracker split). Idempotent: a no-op once gone.
+RETIRED_UNITS=(
+  "nps-snapshot.timer"
+  "nps-snapshot.service"
+)
+RETIRED_ANY=0
+for dead in "${RETIRED_UNITS[@]}"; do
+  if [[ -f "$UNIT_DST/$dead" ]]; then
+    log "Retiring unit: $dead"
+    sudo /bin/systemctl disable --now "$dead" 2>/dev/null || true
+    sudo rm -f "$UNIT_DST/$dead"
+    RETIRED_ANY=1
+  fi
+done
+(( RETIRED_ANY )) && sudo /bin/systemctl daemon-reload
+
 # --- systemd unit sync ------------------------------------------------------
 UNITS_TO_RELOAD=()
 for src in "${REPO_UNITS[@]}"; do
@@ -169,38 +187,6 @@ async def main():
         "DELETE FROM portfolio_intraday WHERE ts >= ? AND ts < ?",
         ("2026-05-27T17:00", "2026-05-27T20:30"),
     )
-    await db.commit()
-    await cache.close_db()
-
-asyncio.run(main())
-PY
-  touch "$REPAIR_MARKER"
-fi
-
-# 2026-05-20 NPS NAV was saved from incomplete per-stock close coverage, and
-# 2026-05-26/27 reused the last available 2026-05-22 stock closes while KOSPI
-# itself had moved on. Rebuild the dates whose exact closes are available and
-# remove the known stale rows; route-level chart repair also filters any
-# lingering bad embedded JSON from older generated_html.
-REPAIR_MARKER=".deploy-repair-2026-05-nps-nav-bad-points.done"
-if [[ ! -f "$REPAIR_MARKER" ]]; then
-  log "Repairing invalid May 2026 NPS NAV chart points"
-  for d in 2026-05-20 2026-05-21 2026-05-22; do
-    log "Rebuilding NPS snapshot for $d"
-    if ! python3 snapshot_nps.py "$d"; then
-      log "NPS repair for $d failed; continuing with remaining dates and route-level chart filtering"
-    fi
-  done
-  python3 - <<'PY'
-import asyncio
-import cache
-
-async def main():
-    await cache.init_db()
-    db = await cache.get_db()
-    for day in ("2026-05-26", "2026-05-27"):
-        await db.execute("DELETE FROM nps_holdings WHERE date = ?", (day,))
-        await db.execute("DELETE FROM nps_snapshots WHERE date = ?", (day,))
     await db.commit()
     await cache.close_db()
 

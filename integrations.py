@@ -12,6 +12,7 @@ DEFAULT_BASE_URLS = {
     "preferredSpread": "https://ducklove.github.io/common_preferred_spread",
     "spacHunter": "https://ducklove.github.io/spac-hunter",
     "goldGap": "https://ducklove.github.io/gold_gap",
+    "npsTracker": "https://ducklove.github.io/nps-tracker",
     "kisProxy": "http://cantabile.tplinkdns.com:3288",
 }
 
@@ -48,6 +49,7 @@ def build_public_integrations(workspace_root: Path | None = None) -> dict[str, A
         "preferredSpread": _preferred_spread_config(root),
         "spacHunter": _spac_hunter_config(),
         "goldGap": _gold_gap_config(root),
+        "npsTracker": _nps_tracker_config(),
         "kisProxy": _kis_proxy_config(),
     }
 
@@ -274,6 +276,13 @@ def _spac_hunter_config() -> dict[str, Any]:
     # spac-hunter 는 별도 서브 프로젝트(SPA)로, 종목 코드를 ?code= 쿼리로만
     # 받는다. 로컬 config 를 읽을 필요가 없어 baseUrl 만 노출한다.
     return {"baseUrl": _base_url("spacHunter", "SPAC_HUNTER_BASE_URL")}
+
+
+def _nps_tracker_config() -> dict[str, Any]:
+    # nps-tracker 는 국민연금 국내주식 포트폴리오 대시보드(별도 정적 SPA).
+    # 허브 NPS 탭은 이를 iframe 으로 임베드하고, 인사이트 요약은 external_tools
+    # 가 current.json 을 직접 읽는다. 여기선 임베드용 baseUrl 만 노출한다.
+    return {"baseUrl": _base_url("npsTracker", "NPS_TRACKER_BASE_URL")}
 
 
 def _gold_gap_config(root: Path) -> dict[str, Any]:

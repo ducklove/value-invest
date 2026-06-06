@@ -62,7 +62,7 @@ class SystemEventCacheTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_filter_by_source_level_stock(self):
         await cache.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
-        await cache.insert_system_event(level="error", source="snapshot_nps", kind="scrape_failed")
+        await cache.insert_system_event(level="error", source="snapshot_nav", kind="tick_crashed")
         await cache.insert_system_event(
             level="warning", source="wiki_ingestion", kind="pdf_parse_failed",
             stock_code="005930",
@@ -74,7 +74,7 @@ class SystemEventCacheTests(unittest.IsolatedAsyncioTestCase):
         # Level filter.
         errs = await cache.get_system_events(level="error")
         self.assertEqual(len(errs), 1)
-        self.assertEqual(errs[0]["source"], "snapshot_nps")
+        self.assertEqual(errs[0]["source"], "snapshot_nav")
         # Stock filter.
         by_stock = await cache.get_system_events(stock_code="005930")
         self.assertEqual(len(by_stock), 1)
@@ -233,11 +233,11 @@ class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_events_applies_filters(self):
         await cache.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
-        await cache.insert_system_event(level="error", source="snapshot_nps", kind="scrape_failed")
+        await cache.insert_system_event(level="error", source="snapshot_nav", kind="tick_crashed")
         with patch("routes.admin.get_current_user", AsyncMock(return_value=await self._mk_admin())):
             rows = await admin_route.list_events(_admin_request(), level="error")
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["source"], "snapshot_nps")
+        self.assertEqual(rows[0]["source"], "snapshot_nav")
 
     async def test_event_summary_groups_correctly(self):
         await cache.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
@@ -248,13 +248,13 @@ class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["by_source"]["wiki_ingestion"]["info"], 1)
         self.assertEqual(summary["by_source"]["wiki_ingestion"]["error"], 1)
         # Known sources always appear in `latest` (value None if no row yet).
-        self.assertIn("snapshot_nps", summary["latest"])
-        self.assertIsNone(summary["latest"]["snapshot_nps"])
+        self.assertIn("snapshot_intraday", summary["latest"])
+        self.assertIsNone(summary["latest"]["snapshot_intraday"])
 
 
 class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
     """Guards the "exit 0 ≠ success" distinction. Before this, the
-    dashboard painted snapshot_nps green on days when the job exited
+    dashboard painted snapshot_nav green on days when the job exited
     cleanly without writing (weekend skip / silent-retry give-up /
     4/17 miss). Staleness needs to be derived from the DOWNSTREAM
     table, not from systemd state."""
@@ -271,26 +271,27 @@ class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
         self.db_patch.stop()
         self.tmp.cleanup()
 
-    async def test_latest_data_date_for_nps_reads_from_table(self):
+    async def test_latest_data_date_for_portfolio_reads_from_table(self):
         db = await cache.get_db()
         await db.execute(
-            "INSERT INTO nps_snapshots (date, total_value, nav, total_count, generated_html) VALUES (?, ?, ?, ?, ?)",
-            ("2026-04-16", 1_000_000, 1000.0, 100, ""),
+            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("u1", "a@b.c", "A", None, 1, "2026-01-01", "2026-01-01"),
         )
-        await db.execute(
-            "INSERT INTO nps_snapshots (date, total_value, nav, total_count, generated_html) VALUES (?, ?, ?, ?, ?)",
-            ("2026-04-14", 1_000_000, 1000.0, 100, ""),
-        )
+        for d in ("2026-04-16", "2026-04-14"):
+            await db.execute(
+                "INSERT INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units) VALUES (?, ?, ?, ?, ?, ?)",
+                ("u1", d, 1_000_000, 900_000, 1100.0, 1000.0),
+            )
         await db.commit()
-        latest = await admin_route._latest_data_date_for("nps-snapshot")
+        latest = await admin_route._latest_data_date_for("portfolio-snapshot")
         self.assertEqual(latest, "2026-04-16")
 
     async def test_latest_data_date_none_when_empty(self):
-        self.assertIsNone(await admin_route._latest_data_date_for("nps-snapshot"))
+        self.assertIsNone(await admin_route._latest_data_date_for("portfolio-intraday"))
         self.assertIsNone(await admin_route._latest_data_date_for("portfolio-snapshot"))
 
     def test_staleness_flags_missing_when_no_data(self):
-        result = admin_route._compute_staleness("nps-snapshot", None)
+        result = admin_route._compute_staleness("portfolio-snapshot", None)
         self.assertEqual(result["level"], "missing")
         self.assertIn("데이터 없음", result["note"])
 
@@ -303,7 +304,7 @@ class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
         while probe.weekday() >= 5:
             probe -= timedelta(days=1)
         latest = probe.isoformat()
-        result = admin_route._compute_staleness("nps-snapshot", latest)
+        result = admin_route._compute_staleness("portfolio-snapshot", latest)
         self.assertEqual(result["level"], "ok")
         self.assertEqual(result["trading_days_behind"], 0)
 
@@ -327,24 +328,28 @@ class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
             if cursor.weekday() < 5:
                 steps -= 1
         stale_latest = cursor.isoformat()
-        result = admin_route._compute_staleness("nps-snapshot", stale_latest)
+        result = admin_route._compute_staleness("portfolio-snapshot", stale_latest)
         self.assertEqual(result["level"], "stale")
         self.assertEqual(result["trading_days_behind"], 3)
 
     def test_staleness_handles_malformed_date(self):
         # Defensive: a corrupted DB value shouldn't crash the dashboard.
-        result = admin_route._compute_staleness("nps-snapshot", "not-a-date")
+        result = admin_route._compute_staleness("portfolio-snapshot", "not-a-date")
         self.assertEqual(result["level"], "stale")
         self.assertIsNone(result["trading_days_behind"])
 
     async def test_batch_status_attaches_staleness_per_job(self):
         admin_user = {"google_sub": "u1", "email": "a@b.c", "is_admin": True}
         db = await cache.get_db()
-        # Seed stale NPS data (10 days old on any day of the week).
+        await db.execute(
+            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("u1", "a@b.c", "A", None, 1, "2026-01-01", "2026-01-01"),
+        )
+        # Seed stale portfolio data (10 days old on any day of the week).
         stale_date = (date.today() - timedelta(days=10)).isoformat()
         await db.execute(
-            "INSERT INTO nps_snapshots (date, total_value, nav, total_count, generated_html) VALUES (?, ?, ?, ?, ?)",
-            (stale_date, 1_000_000, 1000.0, 100, ""),
+            "INSERT INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units) VALUES (?, ?, ?, ?, ?, ?)",
+            ("u1", stale_date, 1_000_000, 900_000, 1100.0, 1000.0),
         )
         await db.commit()
         with patch("routes.admin.get_current_user", AsyncMock(return_value=admin_user)), \
@@ -355,13 +360,13 @@ class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
                  "timer_active": "active", "last_trigger": "",
              }):
             jobs = await admin_route.batch_status(_admin_request())
-        nps_row = next(j for j in jobs if j["name"] == "nps-snapshot")
-        self.assertEqual(nps_row["latest_data_date"], stale_date)
-        self.assertEqual(nps_row["staleness"]["level"], "stale")
+        row = next(j for j in jobs if j["name"] == "portfolio-snapshot")
+        self.assertEqual(row["latest_data_date"], stale_date)
+        self.assertEqual(row["staleness"]["level"], "stale")
         # Crucial invariant: systemd says success, data says stale.
         # The dashboard now shows both so the operator can spot the
         # mismatch instead of trusting the green check alone.
-        self.assertEqual(nps_row["status"], "success")
+        self.assertEqual(row["status"], "success")
 
 
 class DeployStatusRouteTests(unittest.IsolatedAsyncioTestCase):

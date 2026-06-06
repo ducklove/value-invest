@@ -143,7 +143,6 @@ async def _require_admin_mutation(request: Request) -> dict:
 
 _TIMERS = [
     {"name": "portfolio-snapshot", "label": "포트폴리오 일일정산", "schedule": "매일 22:00"},
-    {"name": "nps-snapshot", "label": "국민연금 일일정산", "schedule": "매일 22:05"},
     {"name": "portfolio-intraday", "label": "포트폴리오 장중", "schedule": "09:00~21:30 (30분)"},
 ]
 
@@ -214,10 +213,6 @@ async def _latest_data_date_for(job_name: str) -> str | None:
     if job_name == "portfolio-snapshot":
         # Any user's most recent NAV snapshot date.
         cursor = await db.execute("SELECT MAX(date) AS d FROM portfolio_snapshots")
-        row = await cursor.fetchone()
-        return row["d"] if row and row["d"] else None
-    if job_name == "nps-snapshot":
-        cursor = await db.execute("SELECT MAX(date) AS d FROM nps_snapshots")
         row = await cursor.fetchone()
         return row["d"] if row and row["d"] else None
     if job_name == "portfolio-intraday":
@@ -301,7 +296,7 @@ async def batch_status(request: Request):
         # Augment the systemd snapshot with "did this job actually
         # produce data recently?". Without this, a weekend skip or a
         # silent-failure retry can still paint the card green when the
-        # operator cares whether 4/17 got written to nps_snapshots.
+        # operator cares whether 4/17 got written to portfolio_snapshots.
         latest_data_date = await _latest_data_date_for(t["name"])
         staleness = _compute_staleness(t["name"], latest_data_date)
         jobs.append({
@@ -320,7 +315,6 @@ _running_jobs: dict[str, asyncio.subprocess.Process] = {}
 
 _JOB_SCRIPTS = {
     "portfolio-snapshot": "snapshot_nav.py",
-    "nps-snapshot": "snapshot_nps.py",
     "portfolio-intraday": "snapshot_intraday.py",
 }
 
@@ -761,7 +755,7 @@ async def event_summary(request: Request, hours: float = 24):
     # Attach "latest tick" per known subsystem so the card can show "15 min
     # ago" vs a cold "no tick in 3 days" state at a glance.
     known_sources = [
-        "snapshot_nav", "snapshot_intraday", "snapshot_nps",
+        "snapshot_nav", "snapshot_intraday",
         "wiki_ingestion", "benchmark_history",
     ]
     latest: dict[str, dict | None] = {}

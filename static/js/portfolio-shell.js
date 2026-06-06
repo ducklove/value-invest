@@ -301,23 +301,22 @@ function switchView(view, options = {}) {
 }
 
 let _npsLoaded = false;
-async function loadNpsView() {
+function loadNpsView() {
   const container = document.getElementById('npsContent');
   if (!container) return;
   if (_npsLoaded) return;
-  try {
-    const resp = await apiFetch('/api/nps/html');
-    if (!resp.ok) throw new Error('NPS 데이터를 불러올 수 없습니다.');
-    container.innerHTML = await resp.text();
-    _npsLoaded = true;
-    // Execute inline scripts in the inserted HTML
-    container.querySelectorAll('script').forEach(oldScript => {
-      const newScript = document.createElement('script');
-      newScript.textContent = oldScript.textContent;
-      oldScript.replaceWith(newScript);
-    });
-  } catch (e) {
-    container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-secondary);">${escapeHtml(e.message)}</div>`;
-    console.warn(e);
-  }
+  _npsLoaded = true;
+  // 국민연금 포트폴리오는 별도 정적 대시보드(nps-tracker)로 분리됐다. 허브는
+  // 이를 iframe 으로 임베드만 하고, 요약은 투자정보 '분석 도구' 카드가 보여준다.
+  const cfg = window.APP_CONFIG && window.APP_CONFIG.integrations && window.APP_CONFIG.integrations.npsTracker;
+  const base = (cfg && cfg.baseUrl) || 'https://ducklove.github.io/nps-tracker';
+  const iframe = document.createElement('iframe');
+  iframe.src = base.replace(/\/+$/, '') + '/';
+  iframe.title = '국민연금 국내주식 포트폴리오';
+  iframe.loading = 'lazy';
+  iframe.className = 'nps-frame';
+  iframe.setAttribute('referrerpolicy', 'no-referrer');
+  container.classList.add('is-frame');
+  container.innerHTML = '';
+  container.appendChild(iframe);
 }

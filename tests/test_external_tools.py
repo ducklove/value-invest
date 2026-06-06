@@ -31,6 +31,25 @@ class ExternalSummaryTests(unittest.TestCase):
         self.assertEqual(out["top"][0]["code"], "000670")
         self.assertEqual(out["url"], external_tools.SITE["holding"])
 
+    def test_summarize_nps_sorts_by_weight(self):
+        current = {
+            "lastUpdated": "2026-06-05 22:07:00",
+            "asOf": "2026-06-05",
+            "summary": {"totalValue": 476000000, "nav": 2040.52, "count": 2, "todayPct": -5.51},
+            "holdings": [
+                {"stock_code": "000660", "stock_name": "SK하이닉스", "weight": 8.2, "market_value": 100, "change_pct": 1.1},
+                {"stock_code": "005930", "stock_name": "삼성전자", "weight": 31.7, "market_value": 200, "change_pct": -6.4},
+                {"stock_code": "035720", "stock_name": "카카오"},  # weight 없음 → 뒤로
+            ],
+        }
+        out = external_tools._summarize_nps(current)
+        self.assertEqual(out["nav"], 2040.52)
+        self.assertEqual(out["count"], 2)
+        # weight 내림차순, 값 없는 항목은 뒤로.
+        self.assertEqual([r["code"] for r in out["top"]], ["005930", "000660", "035720"])
+        self.assertEqual(out["top"][0]["name"], "삼성전자")
+        self.assertEqual(out["url"], external_tools.SITE["nps"])
+
     def test_summarize_spread_keeps_only_config_pairs(self):
         current = {
             "averageSpread": 48.28,
@@ -198,12 +217,14 @@ class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(external_tools, "_holding_summary", new=AsyncMock(side_effect=RuntimeError("boom"))), \
              patch.object(external_tools, "_spread_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
              patch.object(external_tools, "_gold_summary", new=AsyncMock(return_value={"assets": [], "url": "u"})), \
-             patch.object(external_tools, "_spac_summary", new=AsyncMock(return_value={"top": [], "url": "u"})):
+             patch.object(external_tools, "_spac_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
+             patch.object(external_tools, "_nps_summary", new=AsyncMock(return_value={"top": [], "url": "u"})):
             out = await external_tools.fetch_external_insights()
         self.assertNotIn("holding", out)
         self.assertIn("spread", out)
         self.assertIn("goldGap", out)
         self.assertIn("spac", out)
+        self.assertIn("nps", out)
 
 
 if __name__ == "__main__":

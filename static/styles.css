@@ -1512,6 +1512,17 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border: 0; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .bt-run:hover { background: var(--primary-hover); }
+
+/* 국민연금 탭: 분리된 nps-tracker 대시보드를 iframe 으로 임베드. */
+.nps-embed { padding: 32px 16px; text-align: center; color: var(--text-secondary); }
+.nps-embed.is-frame { padding: 0; text-align: initial; }
+.nps-frame {
+  width: 100%; height: calc(100vh - 96px); min-height: 480px;
+  border: 0; display: block; background: var(--surface); border-radius: 8px;
+}
+@media (max-width: 900px) {
+  .nps-frame { height: calc(100vh - 128px); min-height: 360px; border-radius: 0; }
+}
 .pf-ai-output {
   margin-top: 10px;
   border: 1px solid var(--border);

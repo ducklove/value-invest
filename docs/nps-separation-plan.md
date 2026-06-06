@@ -172,3 +172,26 @@ flowchart LR
 
 - finance-pi 유니버스 API 경로·인증(`/api/universe/nps` vs `/api/nps/holdings`).
 - 과거 `nps_snapshots.generated_html`(차트) 자산을 nps-tracker로 이관할지/재생성할지.
+
+## 구현 상태 (value-invest, 2026-06-06)
+
+레포 C(`value-invest`) 작업 완료. 다만 **백테스트 재배선(원안 B/C-1)은 백테스트
+자체가 레거시로 제거되면서 불필요해졌다** — `routes/backtest.py`의 `universe="nps"`는
+실제로는 `nps_holdings`가 아니라 네이버 시총 순위를 쓰는 '시총 Top 30'이었고, 이미
+메인 탭에서 빠진 실험 기능이라 통째로 제거했다. 따라서 `value-invest`는 finance-pi
+`/api/universe/nps`에 런타임 의존하지 않는다(해당 API/인증 결정도 보류 무효화).
+
+완료된 것:
+
+- **백테스트 레거시 제거**: `routes/backtest.py`·`static/js/backtest.js` 및 라우터·SPA
+  경로·딥링크·실험실 카드·전용 `.bt-*` CSS 정리(`.bt-run`은 포트폴리오 AI 버튼이 재사용해 보존).
+- **NPS 탭 → nps-tracker iframe**: `loadNpsView()`가 `/api/nps/html`(내부 생성) 대신
+  `https://ducklove.github.io/nps-tracker/`를 iframe 임베드(`integrations.npsTracker.baseUrl`).
+- **통합**: `integrations.py` `npsTracker` baseUrl + `external_tools._summarize_nps`
+  (5번째 대시보드 요약 — 투자정보 '분석 도구' 카드에 비중 상위·NAV로 노출).
+- **내부 NPS 제거**: `snapshot_nps`·`nps_scraper`·`backfill_nps`·`repositories/nps`·
+  `routes/nps` 삭제, internal `/snapshot/nps`·admin 트리거/모니터링·systemd
+  `nps-snapshot.timer/service`·`deploy.sh` 5월 repair 블록 정리. `nps_holdings`/
+  `nps_snapshots` 테이블은 롤백 대비 보존(deprecate, drop 보류).
+- **테스트·문서**: NPS 전용 테스트 제거·batch 모니터링 테스트를 portfolio-snapshot으로
+  재배선, 전체 `pytest` 644 통과. 아키텍처 문서 4종 갱신.
