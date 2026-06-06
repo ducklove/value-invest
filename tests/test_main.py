@@ -245,7 +245,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(deps.analysis_snapshot_is_stale("2999-01-01T00:00:00"))
 
     async def test_spa_pages_serve_index_html(self):
-        """Deep-link paths (/analysis, /portfolio, /nps, /backtest, /insights) must serve
+        """Deep-link paths (/analysis, /portfolio, /nps, /insights) must serve
         the same index.html the SPA uses so bookmarks and external links
         resolve correctly. Otherwise they'd 404 before the JS can read
         window.location.pathname and pick a tab."""
@@ -265,5 +265,5 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         we catch it here before deploy."""
         import main
         registered = {route.path for route in main.app.routes if hasattr(route, "path")}
-        for p in ("/analysis", "/portfolio", "/nps", "/backtest", "/insights"):
+        for p in ("/analysis", "/portfolio", "/nps", "/insights"):
             self.assertIn(p, registered, f"deep-link route {p} missing")

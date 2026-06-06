@@ -171,7 +171,6 @@ async function initApp() {
   //   /portfolio             → 포트폴리오 탭
   //   /nps                   → 국민연금 탭
   //   /labs                  → 실험실 허브 (메인 탭에서는 숨김)
-  //   /backtest              → 실험실 백테스트 (직접 URL)
   //   /insights              → 실험실 인사이트 보드 (직접 URL)
   //   /?code=005930          → (기존 호환) 분석 탭 + 자동 분석
   // 서버가 이 path 들을 모두 index.html 로 서빙하므로 SPA 진입 후
@@ -185,7 +184,6 @@ async function initApp() {
     '/portfolio': 'portfolio',
     '/nps': 'nps',
     '/labs': 'labs',
-    '/backtest': 'backtest',
     '/insights': 'insights',
   };
   const viewFromPath = PATH_TO_VIEW[path];

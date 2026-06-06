@@ -1505,43 +1505,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .lab-inline-banner strong { color: var(--text); }
 .lab-inline-banner a { margin-left: auto; color: var(--primary); text-decoration: none; font-weight: 700; }
-.bt-page { max-width: 1100px; margin: 0 auto; padding: 8px 0 32px; }
-.bt-page h2 { font-size: 20px; margin-bottom: 8px; }
-.bt-page h3 { font-size: 15px; margin: 24px 0 10px; }
-.bt-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.bt-table th, .bt-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: left; }
-.bt-table th { background: var(--sidebar-bg, var(--bg)); font-weight: 600; color: var(--text-secondary); font-size: 12px; }
-.bt-table td.num, .bt-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.bt-table tr:last-child td { border-bottom: 0; }
-.bt-missing { margin-top: 16px; font-size: 12px; color: var(--text-secondary); }
-.bt-note { color: var(--text-secondary); font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
-.bt-form {
-  display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-  padding: 14px 16px; margin-bottom: 12px;
-}
-.bt-form label {
-  display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary);
-}
-.bt-form input[type="number"], .bt-form select {
-  width: 96px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg); color: var(--text); font-size: 13px;
-}
+/* 레거시 백테스트 화면에서 쓰던 .bt-* 중 .bt-run 만 남긴다 — 포트폴리오 AI
+   분석 실행 버튼(#pfAiBtn)이 이 버튼 스타일을 재사용한다. */
 .bt-run {
   margin-left: auto; padding: 8px 18px; background: var(--primary); color: #fff;
   border: 0; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .bt-run:hover { background: var(--primary-hover); }
-.bt-stat-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px; margin-bottom: 12px;
-}
-.bt-stat {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;
-}
-.bt-stat label { font-size: 11px; color: var(--text-secondary); }
-.bt-stat strong { font-size: 16px; font-variant-numeric: tabular-nums; }
 .pf-ai-output {
   margin-top: 10px;
   border: 1px solid var(--border);

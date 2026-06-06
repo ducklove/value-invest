@@ -12,7 +12,7 @@ import integrations
 from core.config import AppSettings
 
 
-SPA_PATHS = ("/analysis", "/portfolio", "/nps", "/labs", "/backtest", "/insights")
+SPA_PATHS = ("/analysis", "/portfolio", "/nps", "/labs", "/insights")
 
 
 StaticHandlers = dict[str, Callable[[], Awaitable[Response]]]
