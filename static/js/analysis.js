@@ -1702,7 +1702,7 @@ async function loadReports(stockCode) {
   }
 
   try {
-    const latestResp = await apiFetch(`/api/reports/${stockCode}/latest?refresh=1`);
+    const latestResp = await apiFetch(`/api/reports/${stockCode}/latest`);
     const latestData = await latestResp.json();
     if (requestId !== reportsRequestId) return;
     const networkLatest = latestData.report || null;

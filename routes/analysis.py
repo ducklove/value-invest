@@ -296,6 +296,12 @@ async def get_stock_beta(stock_code: str):
     from datetime import date, timedelta
     import benchmark_history
 
+    # 베타는 1년 일봉 회귀라 일중 변동 의미가 없어 월 1회만 갱신한다. 캐시 hit 시
+    # KIS 일봉/KOSPI 재조회 없이 즉시 반환(종목분석 재방문 속도 개선).
+    _beta_cached = await cache.get_cache_value_entry("stock_beta", stock_code)
+    if _beta_cached is not None:
+        return _beta_cached.value
+
     end_date = date.today()
     start_date = end_date - timedelta(days=400)  # ~1y 여유 (주말/휴장 포함)
     start_iso = start_date.isoformat()
@@ -337,13 +343,17 @@ async def get_stock_beta(stock_code: str):
     matched_dates = matched_dates[-253:]
 
     beta = _compute_beta_from_pairs(pairs)
-    return {
+    result = {
         "beta": beta,
         "sample_size": max(0, len(pairs) - 1),
         "start": matched_dates[0] if matched_dates else None,
         "end": matched_dates[-1] if matched_dates else None,
         "benchmark": "KOSPI",
     }
+    # 유효한 beta 만 30일 캐시(실패=null 은 다음 방문에 재시도).
+    if result["beta"] is not None:
+        await cache.set_cache_value("stock_beta", stock_code, result, ttl_seconds=30 * 24 * 3600)
+    return result
 
 
 @router.get("/api/analyze/{stock_code}")
