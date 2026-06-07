@@ -180,6 +180,7 @@ function getCurrentValuationMetrics(indicators, quoteSnapshot) {
 // 플레이스홀더를 그렸다가 loadBeta 가 완료되면 해당 카드만 덮어쓴다.
 let _currentBeta = null;   // {beta, sample_size, benchmark} 또는 null
 let _currentStockLinks = null;  // {preferred?, holding?} 또는 null — 외부 분석 도구
+let _currentDr = null;  // [{label, exchange, ticker, change_pct, converted_price}] 또는 null — 해외 DR
 
 function renderCurrentValuationSummary(indicators, quoteSnapshot) {
   const metrics = getCurrentValuationMetrics(indicators, quoteSnapshot);
@@ -193,7 +194,7 @@ function renderCurrentValuationSummary(indicators, quoteSnapshot) {
     { label: '베타 (1Y)', value: betaVal, attr: 'data-beta="1"' },
   ].map(item => (
     `<div class="valuation-card" ${item.attr || ''}><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span></div>`
-  )).join('') + _externalValuationCards(_currentStockLinks).join('');
+  )).join('') + _externalValuationCards(_currentStockLinks).join('') + _drValuationCards(_currentDr).join('');
 }
 
 // 외부 분석 도구 카드 — 이 종목이 우선주 쌍/지주사면 밸류에이션 그리드에 같은
@@ -241,6 +242,21 @@ function _externalValuationCards(links) {
   return cards;
 }
 
+// 해외 DR 카드 — 교환비율·환율로 환산한 '원주 1주 환산가(원)' + DR 일간상승률을
+// 같은 .valuation-card 그리드에 합류시킨다. 환산가는 외국인 디스카운트/시차로
+// 원주와 다소 차이날 수 있다(저유동성 거래소는 일간상승률이 비거나 튈 수 있음).
+function _drValuationCards(drs) {
+  if (!Array.isArray(drs) || !drs.length) return [];
+  return drs.map(d => {
+    const pct = (d.change_pct != null && isFinite(Number(d.change_pct))) ? _sxlPct(d.change_pct) : '—';
+    const sub = `${escapeHtml(String(d.ticker || ''))} · 일간 ${pct}`;
+    return `<div class="valuation-card">`
+      + `<span class="valuation-label">${escapeHtml(String(d.label || ''))} (${escapeHtml(String(d.exchange || ''))})</span>`
+      + `<span class="valuation-value">${_sxlNum(d.converted_price)}원</span>`
+      + `<span class="valuation-sub">${sub}</span></div>`;
+  });
+}
+
 // coverageNote(밸류에이션 그리드) 재렌더 + 카드 수에 맞춰 열 수 조정용 data-count.
 // PER/PBR/배당/베타(4) + 외부카드(0~2). 4→4열, 5·6→3열로 외톨이를 없앤다.
 function _renderCoverage() {
@@ -249,7 +265,8 @@ function _renderCoverage() {
   el.innerHTML = renderCurrentValuationSummary(activeIndicators || {}, activeQuoteSnapshot || {});
   const ext = _currentStockLinks
     ? (_currentStockLinks.preferred ? 1 : 0) + (_currentStockLinks.holding ? 1 : 0) + (_currentStockLinks.etf ? 1 : 0) : 0;
-  el.dataset.count = String(4 + ext);
+  const drCount = Array.isArray(_currentDr) ? _currentDr.length : 0;
+  el.dataset.count = String(4 + ext + drCount);
 }
 
 async function loadStockExternalLinks(stockCode) {
@@ -278,6 +295,20 @@ async function loadBeta(stockCode) {
   // 분석 종목이 바뀌지 않았다면 valuation card 만 재렌더.
   if (activeStockCode === stockCode) {
     _renderCoverage();
+  }
+}
+
+async function loadStockDr(stockCode) {
+  _currentDr = null;
+  try {
+    const resp = await apiFetch(`/api/analyze/${encodeURIComponent(stockCode)}/dr`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (activeStockCode !== stockCode) return;  // 종목이 바뀌었으면 무시
+    _currentDr = (data && Array.isArray(data.drs) && data.drs.length) ? data.drs : null;
+    _renderCoverage();
+  } catch (e) {
+    console.warn('stock DR load failed', e);
   }
 }
 
@@ -1019,6 +1050,7 @@ async function analyzeStock(stockCode) {
 async function renderResult(data) {
   _lastAnalysisData = data;
   _currentStockLinks = null;  // 종목 전환 — 이전 외부 카드 제거(loadStockExternalLinks가 다시 채움)
+  _currentDr = null;  // 종목 전환 — 이전 DR 카드 제거(loadStockDr가 다시 채움)
   _currentPeriod = 'all';
   _dailyCache = {};
   document.querySelectorAll('.vp-btn').forEach(b => b.classList.toggle('active', b.dataset.period === 'all'));
@@ -1079,6 +1111,8 @@ async function renderResult(data) {
   loadBeta(data.stock_code);
   // 외부 분석 도구(우선주 괴리율/지주사 NAV) deep-link 카드 — 해당 시 표시.
   loadStockExternalLinks(data.stock_code);
+  // 해외 DR(예탁증서) 환산가 — 해당 종목에 DR 이 매핑돼 있으면 카드로 표시.
+  loadStockDr(data.stock_code);
   _updateQuoteSubscriptions();
 }
 

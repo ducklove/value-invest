@@ -356,6 +356,50 @@ async def get_stock_beta(stock_code: str):
     return result
 
 
+@router.get("/api/analyze/{stock_code}/dr")
+async def get_stock_dr(stock_code: str):
+    """해외 DR(예탁증서) 환산가 — 스태틱 매핑된 DR 의 현재가를 교환비율·환율로
+    원주 1주 환산가(원)로 변환하고, DR 별 일간상승률(외화 기준)을 함께 준다.
+
+    일간 등락이라 장중 갱신은 필요하되 매 방문 재조회는 과하므로 5분 캐시.
+    """
+    import dr_registry
+    from services.portfolio import foreign
+
+    drs = dr_registry.drs_for(stock_code)
+    if not drs:
+        return {"stock_code": stock_code, "drs": []}
+
+    cached = await cache.get_cache_value_entry("stock_dr", stock_code)
+    if cached is not None:
+        return cached.value
+
+    async def _quote(d: dict):
+        try:
+            q = await foreign.yfinance_fetch_quote(d["ticker"])
+        except Exception:
+            q = {}
+        price_krw = q.get("price") if isinstance(q, dict) else None
+        if not price_krw:
+            return None
+        spd = d["shares_per_dr"]
+        return {
+            "label": d["label"],
+            "exchange": d["exchange"],
+            "ticker": d["ticker"],
+            "currency": d["currency"],
+            "change_pct": q.get("change_pct"),
+            "converted_price": round(price_krw / spd) if spd else None,
+        }
+
+    quoted = await asyncio.gather(*(_quote(d) for d in drs))
+    drs_out = [q for q in quoted if q]
+    payload = {"stock_code": stock_code, "drs": drs_out}
+    if drs_out:
+        await cache.set_cache_value("stock_dr", stock_code, payload, ttl_seconds=300)
+    return payload
+
+
 @router.get("/api/analyze/{stock_code}")
 async def analyze_stock(stock_code: str, request: Request):
     current_user = await get_current_user(request)
