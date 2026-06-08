@@ -164,22 +164,53 @@ async def _fetch_kr_index(client: httpx.AsyncClient, naver_code: str) -> dict:
             change_val = change_block.group(1).strip()
             change_pct = change_block.group(2).strip().lstrip("+-")
         else:
-            # Fallback: separate change_value and change_rate elements (KPI200)
-            chg_m = re.search(r'id="change_value"[^>]*>.*?>([\d,.]+)', html, re.DOTALL)
+            # Fallback: KPI200 layout. The change magnitude lives in a <span>
+            # inside id="change_value" and the signed rate in a <strong> inside
+            # id="change_rate". Anchoring on those exact tags avoids grabbing
+            # stray digits (e.g. an <img width="7">) or an unrelated "0.00%".
+            chg_m = re.search(
+                r'id="change_value".*?<span[^>]*>\s*([\d,.]+)\s*<', html, re.DOTALL
+            )
             change_val = chg_m.group(1).strip() if chg_m else ""
-            rate_m = re.search(r'id="change_rate"[^>]*>.*?>([\d,.]+%)', html, re.DOTALL)
-            change_pct = rate_m.group(1).strip().lstrip("+-") if rate_m else ""
-            # Direction from change_value class (p11_red=up, p11_blue=down)
+            rate_m = re.search(
+                r'id="change_rate".*?<strong[^>]*>\s*([+-]?[\d,.]+)\s*%', html, re.DOTALL
+            )
+            rate_raw = rate_m.group(1).strip() if rate_m else ""
+            # A rate is only trustworthy alongside a parsed magnitude; otherwise
+            # leave it blank so downstream omits the index instead of asserting 0%.
+            change_pct = rate_raw.lstrip("+-") + "%" if (rate_raw and change_val) else ""
             if not d:
-                dir_m2 = re.search(r'id="change_value"[^>]*>.*?class="[^"]*p11_(red|blue)', html, re.DOTALL)
-                if dir_m2:
-                    d = "up" if dir_m2.group(1) == "red" else "dn"
+                if rate_raw.startswith("-"):
+                    d = "dn"
+                elif re.search(r'id="change_value".*?ico_down\.gif', html, re.DOTALL):
+                    d = "dn"
+                elif re.search(r'id="change_value".*?ico_up\.gif', html, re.DOTALL):
+                    d = "up"
+                elif rate_raw and float(rate_raw) > 0:
+                    d = "up"
+
+        direction = "up" if d == "up" else "down" if d == "dn" else ""
+
+        # Reconcile: recompute the rate from value + magnitude and prefer it when
+        # the scraped rate is missing or inconsistent. This is the structural fix
+        # for the "변동 없이 0.00%" bug — a fabricated/stray rate can no longer
+        # survive a cross-check against the actual value and change.
+        if value_str and change_val and direction:
+            recomputed = _calc_change_pct(value_str, change_val, direction)
+            if recomputed:
+                scraped = float(change_pct.rstrip("%")) if change_pct.rstrip("%").replace(".", "").isdigit() else None
+                if scraped is None or abs(scraped - float(recomputed.rstrip("%"))) > 0.1:
+                    change_pct = recomputed
+        elif not change_val:
+            # No reliable magnitude → never emit a change/rate at all.
+            change_val = ""
+            change_pct = ""
 
         return {
             "value": value_str,
             "change": change_val,
             "change_pct": change_pct,
-            "direction": "up" if d == "up" else "down" if d == "dn" else "",
+            "direction": direction,
         }
     except Exception:
         return dict(_EMPTY)

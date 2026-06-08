@@ -166,6 +166,64 @@ def detect_relative_move(stock_change_pct: float | None, kospi_change_pct: float
     }
 
 
+def _portfolio_summary(moves: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Aggregate the day for *actually held* positions (quantity known).
+
+    Turns the per-stock quotes the brief already collected into a portfolio-level
+    view — weighted day return, up/down breadth, and the names that drove or
+    cushioned the move — so the brief can lead with "what happened to my money"
+    instead of restating index quotes. Uses no extra network calls.
+    """
+    rows: list[dict[str, Any]] = []
+    total_mv = 0.0
+    weighted_pct = 0.0
+    up = down = flat = 0
+    for move in moves or []:
+        if "portfolio" not in (move.get("sources") or []):
+            continue
+        qty = _safe_float(move.get("quantity"))
+        price = _safe_float(move.get("price"))
+        pct = move.get("change_pct")
+        if not qty or price is None or not isinstance(pct, (int, float)):
+            continue
+        market_value = qty * price
+        if market_value <= 0:
+            continue
+        per_share_change = _safe_float(move.get("change"))
+        day_pl = per_share_change * qty if per_share_change is not None else market_value * pct / (100.0 + pct)
+        total_mv += market_value
+        weighted_pct += market_value * pct
+        if pct > 0:
+            up += 1
+        elif pct < 0:
+            down += 1
+        else:
+            flat += 1
+        rows.append(
+            {
+                "stock_code": move.get("stock_code"),
+                "stock_name": move.get("stock_name"),
+                "change_pct": round(pct, 2),
+                "day_pl": round(day_pl),
+            }
+        )
+    if not rows or total_mv <= 0:
+        return None
+    rows.sort(key=lambda r: r["day_pl"])
+    detractors = [r for r in rows if r["day_pl"] < 0][:3]
+    contributors = [r for r in reversed(rows) if r["day_pl"] > 0][:3]
+    return {
+        "holding_count": len(rows),
+        "up": up,
+        "down": down,
+        "flat": flat,
+        "weighted_day_return_pct": round(weighted_pct / total_mv, 2),
+        "est_total_market_value": round(total_mv),
+        "top_contributors": contributors,
+        "top_detractors": detractors,
+    }
+
+
 def estimate_gemini35_flash_cost(input_tokens: int = 0, output_tokens: int = 0, *, batch: bool = False) -> float:
     input_price = 0.75 if batch else 1.50
     output_price = 4.50 if batch else 9.00
@@ -299,6 +357,7 @@ async def _quote_moves(interests: list[dict[str, Any]], kospi_pct: float | None)
                 "stock_code": code,
                 "stock_name": item.get("stock_name") or code,
                 "sources": sorted(set(item.get("sources") or [])),
+                "quantity": item.get("quantity"),
                 "price": quote.get("price"),
                 "date": quote.get("date"),
                 "change": quote.get("change"),
@@ -722,14 +781,15 @@ def _build_prompt(payload: dict[str, Any]) -> str:
     compact["disclosures"] = (payload.get("disclosures") or [])[:30]
     compact["news"] = (payload.get("news") or [])[: NEWS_STOCK_LIMIT * NEWS_PER_STOCK]
     evidence = json.dumps(compact, ensure_ascii=False, indent=2, default=str)
-    return f"""아래 evidence bundle만 근거로 한국어 금일 시황을 작성하세요.
+    return f"""당신은 사용자의 보유·관심 종목 관점에서 "오늘 내 종목에 무슨 일이 있었고, 무엇을 확인해야 하는가"를 쓰는 투자 리서치 어시스턴트입니다. 아래 evidence bundle만 근거로, 일반 시황 복창이 아니라 개별 종목 신호를 해석하는 한국어 글을 쓰세요.
 
-요구사항:
-- 근거 없는 단정 금지. 가격 변동의 원인은 공시/뉴스 제목상 가능한 연결만 "가능성"으로 표현하세요.
-- 관심목록 공시와 급등/급락을 시장 요약보다 우선합니다.
-- 링크가 있는 공시/뉴스는 종목명 뒤에 짧게 출처를 언급하되, 긴 URL은 본문에 노출하지 마세요.
-- 출력은 마크다운으로 5개 섹션 이내, 900~1300자 정도로 간결하게 작성하세요.
-- 반드시 마지막에 "확인 필요" 항목을 1~3개 적으세요.
+작성 규칙:
+1. 포트폴리오부터: `portfolio_summary`가 있으면 첫 문단에서 가중 일간수익률(`weighted_day_return_pct`)을 KOSPI 등락과 비교하고, 손익을 주도/방어한 종목(`top_contributors`/`top_detractors`)을 이름과 함께 짚으세요. `portfolio_summary`가 null이면 이 문단을 생략하세요.
+2. 종목 단위 인과: `moves`·`disclosures`·`news`를 종목별로 묶어 해석하세요. 가격 변동의 원인은 같은 종목의 공시/뉴스 제목과 "가능성" 수준으로만 연결하고, 근거 없는 단정은 금지합니다. 연결할 공시·뉴스가 없으면 "원인 미확인"으로 두세요.
+3. 지수·환율·원자재 복창 금지: `market` 수치를 그대로 나열하는 별도 섹션을 만들지 마세요. 매크로는 보유 종목 해석에 필요할 때만 한 줄 맥락으로 녹이세요.
+4. 데이터 누락은 생략: evidence에 없거나 비어 있는 수치를 0·"변동 없음"으로 단정하지 마세요. 값이 비어 있으면 그 지표 자체를 언급하지 마세요.
+5. 확인 필요(필수, 1~4개): 각 항목은 evidence의 구체적 근거에 연결된 행동이어야 합니다(예: 특정 공시 원문 확인, 임박한 실적/배당락, 목표가·손절가 근접). "급락 원인 점검" 같은 일반론은 금지합니다.
+6. 형식: 마크다운, 핵심부터, 인사말·군더더기 없이. 링크가 있는 공시/뉴스는 종목명 뒤에 짧은 출처로만 언급하고 긴 URL은 본문에 노출하지 마세요.
 
 evidence bundle:
 {evidence}
@@ -826,6 +886,7 @@ async def build_daily_market_brief(*, google_sub: str | None = None, brief_date:
         },
         "interest_count": len(interests),
         "interest_limit": INTEREST_LIMIT,
+        "portfolio_summary": _portfolio_summary(moves),
         "market": market_rows,
         "moves": moves,
         "disclosures": disclosures,

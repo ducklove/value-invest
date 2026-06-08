@@ -47,6 +47,30 @@ class MarketDailyRuleTests(unittest.TestCase):
         self.assertEqual(result["threshold_pct"], 3.0)
         self.assertEqual(result["relative_pct"], -2.8)
 
+    def test_portfolio_summary_aggregates_only_held_positions(self):
+        moves = [
+            {"stock_code": "A", "stock_name": "에이", "sources": ["portfolio"],
+             "quantity": 10, "price": 1000, "change": -50, "change_pct": -4.76},
+            {"stock_code": "B", "stock_name": "비", "sources": ["portfolio"],
+             "quantity": 5, "price": 2000, "change": 100, "change_pct": 5.26},
+            {"stock_code": "C", "stock_name": "씨", "sources": ["starred"],
+             "quantity": None, "price": 3000, "change": 10, "change_pct": 0.3},
+        ]
+        summary = market_daily._portfolio_summary(moves)
+        self.assertEqual(summary["holding_count"], 2)  # starred w/o quantity excluded
+        self.assertEqual(summary["up"], 1)
+        self.assertEqual(summary["down"], 1)
+        # mv(A)=mv(B)=10,000 → weighted avg of -4.76 and +5.26 = +0.25
+        self.assertEqual(summary["weighted_day_return_pct"], 0.25)
+        self.assertEqual(summary["top_detractors"][0]["stock_code"], "A")
+        self.assertEqual(summary["top_detractors"][0]["day_pl"], -500)
+        self.assertEqual(summary["top_contributors"][0]["stock_code"], "B")
+
+    def test_portfolio_summary_none_without_quantified_holdings(self):
+        self.assertIsNone(
+            market_daily._portfolio_summary([{"stock_code": "C", "sources": ["starred"]}])
+        )
+
     def test_gemini35_flash_cost_estimate(self):
         self.assertAlmostEqual(
             market_daily.estimate_gemini35_flash_cost(12_000, 1_200),
