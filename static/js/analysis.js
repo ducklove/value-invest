@@ -247,14 +247,19 @@ function _externalValuationCards(links) {
 // 원주와 다소 차이날 수 있다(저유동성 거래소는 일간상승률이 비거나 튈 수 있음).
 function _drValuationCards(drs) {
   if (!Array.isArray(drs) || !drs.length) return [];
+  const ordPrice = Number(activeQuoteSnapshot && activeQuoteSnapshot.price) || 0;
   return drs.map(d => {
+    const conv = Number(d.converted_price);
+    // 환산가가 원주가 대비 크게 어긋나면(저유동성 DR 의 yfinance 시세 오류 —
+    // 예: SMSN.L stale 가격) 카드를 감춘다. 틀린 환산가를 보여주느니 빼는 게 낫다.
+    if (ordPrice > 0 && conv > 0 && (conv / ordPrice < 0.6 || conv / ordPrice > 1.6)) return '';
     const pct = (d.change_pct != null && isFinite(Number(d.change_pct))) ? _sxlPct(d.change_pct) : '—';
     const sub = `${escapeHtml(String(d.ticker || ''))} · 일간 ${pct}`;
     return `<div class="valuation-card">`
       + `<span class="valuation-label">${escapeHtml(String(d.label || ''))} (${escapeHtml(String(d.exchange || ''))})</span>`
       + `<span class="valuation-value">${_sxlNum(d.converted_price)}원</span>`
       + `<span class="valuation-sub">${sub}</span></div>`;
-  });
+  }).filter(Boolean);
 }
 
 // coverageNote(밸류에이션 그리드) 재렌더 + 카드 수에 맞춰 열 수 조정용 data-count.
@@ -263,10 +268,9 @@ function _renderCoverage() {
   const el = document.getElementById('coverageNote');
   if (!el) return;
   el.innerHTML = renderCurrentValuationSummary(activeIndicators || {}, activeQuoteSnapshot || {});
-  const ext = _currentStockLinks
-    ? (_currentStockLinks.preferred ? 1 : 0) + (_currentStockLinks.holding ? 1 : 0) + (_currentStockLinks.etf ? 1 : 0) : 0;
-  const drCount = Array.isArray(_currentDr) ? _currentDr.length : 0;
-  el.dataset.count = String(4 + ext + drCount);
+  // 실제 렌더된 카드 수로 열 수를 정한다 — DR sanity 가드로 일부가 숨겨질 수
+  // 있어 _currentDr.length 가 아니라 DOM 의 실제 .valuation-card 수를 센다.
+  el.dataset.count = String(el.querySelectorAll('.valuation-card').length);
 }
 
 async function loadStockExternalLinks(stockCode) {
