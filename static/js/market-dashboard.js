@@ -494,6 +494,19 @@ function _extSafeUrl(url) {
   return /^https?:\/\//.test(String(url || '')) ? String(url) : '#';
 }
 
+// 외부 도구는 새 탭(deep-link)으로 열린다. 현재 앱 테마를 ?theme= 로 넘겨
+// 열린 대시보드가 같은 라이트/다크로 뜨게 한다.
+function _withTheme(url) {
+  const u = String(url || '');
+  if (!/^https?:\/\//.test(u)) return u;
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  return u + (u.includes('?') ? '&' : '?') + 'theme=' + theme;
+}
+
+function _extHref(url) {
+  return _extSafeUrl(_withTheme(url));
+}
+
 function _extPct(v, signed) {
   if (v === null || v === undefined || v === '') return '-';
   const n = Number(v);
@@ -505,7 +518,7 @@ function _extLinkRows(rows, valKey, baseUrl, useCode) {
   return (rows || []).map((r) => {
     // holding 도구만 ?code= deep-link 지원. 그 외엔 도구 홈으로.
     const href = useCode && r.code ? `${baseUrl}?code=${encodeURIComponent(r.code)}` : baseUrl;
-    return `<a class="ext-row" href="${escapeHtml(_extSafeUrl(href))}" target="_blank" rel="noopener noreferrer">`
+    return `<a class="ext-row" href="${escapeHtml(_extHref(href))}" target="_blank" rel="noopener noreferrer">`
       + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
       + `<span class="ext-val">${escapeHtml(_extPct(r[valKey]))}</span></a>`;
   }).join('');
@@ -517,16 +530,26 @@ function _extSpacRows(rows, baseUrl) {
     const href = r.code ? `${baseUrl}?code=${encodeURIComponent(r.code)}` : baseUrl;
     const n = Number(r.currentPrice);
     const price = (r.currentPrice != null && isFinite(n)) ? n.toLocaleString() : '-';
-    return `<a class="ext-row" href="${escapeHtml(_extSafeUrl(href))}" target="_blank" rel="noopener noreferrer">`
+    return `<a class="ext-row" href="${escapeHtml(_extHref(href))}" target="_blank" rel="noopener noreferrer">`
       + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
       + `<span class="ext-val">${escapeHtml(price)}</span></a>`;
   }).join('');
 }
 
+function _extAllocRows(classes, url) {
+  // 자산배분 행은 종목 deep-link이 아니라 도구 홈으로(테마 포함).
+  const href = escapeHtml(_extHref(url));
+  return (classes || []).map((c) =>
+    `<a class="ext-row" href="${href}" target="_blank" rel="noopener noreferrer">`
+    + `<span class="ext-name">${escapeHtml(String(c.label || c.key || ''))}</span>`
+    + `<span class="ext-val">${escapeHtml(_extPct(c.pct))}</span></a>`
+  ).join('');
+}
+
 function _extCard(title, url, subText, bodyHtml) {
   return '<div class="ext-card">'
     + `<div class="ext-head"><span>${escapeHtml(title)}</span>`
-    + `<a href="${escapeHtml(_extSafeUrl(url))}" target="_blank" rel="noopener noreferrer" class="ext-more" title="도구 열기">↗</a></div>`
+    + `<a href="${escapeHtml(_extHref(url))}" target="_blank" rel="noopener noreferrer" class="ext-more" title="도구 열기">↗</a></div>`
     + (subText ? `<div class="ext-sub">${escapeHtml(subText)}</div>` : '')
     + `<div class="ext-rows">${bodyHtml}</div></div>`;
 }
@@ -553,14 +576,19 @@ function _extRender(root, data) {
     const rows = g.assets.map((a) => {
       const n = Number(a.gap);
       const cls = isFinite(n) ? (n > 0 ? 'md-up' : (n < 0 ? 'md-down' : 'md-flat')) : 'md-flat';
-      return `<a class="ext-row" href="${escapeHtml(_extSafeUrl(a.link || g.url))}" target="_blank" rel="noopener noreferrer">`
+      return `<a class="ext-row" href="${escapeHtml(_extHref(a.link || g.url))}" target="_blank" rel="noopener noreferrer">`
         + `<span class="ext-name">${escapeHtml(String(a.label || a.key || ''))}</span>`
         + `<span class="ext-val ${cls}">${escapeHtml(_extPct(a.gap, true))}</span></a>`;
     }).join('');
     cards.push(_extCard('김치프리미엄', g.url, '국내가 vs 국제가', rows));
   }
   const nps = data && data.nps;
-  if (nps && (nps.top || []).length) {
+  const npsAlloc = nps && nps.allocation;
+  if (npsAlloc && (npsAlloc.classes || []).length) {
+    // 기금 자산배분(국내주식/해외주식/국내채권/해외채권/대체투자) 비중.
+    const sub = npsAlloc.asOf ? `자산배분 · ${npsAlloc.asOf} 기준` : '자산배분';
+    cards.push(_extCard('국민연금', nps.url, sub, _extAllocRows(npsAlloc.classes, nps.url)));
+  } else if (nps && (nps.top || []).length) {
     const sub = nps.nav != null
       ? `NAV ${Number(nps.nav).toFixed(1)} · 비중 상위`
       : '포트폴리오 비중 상위';

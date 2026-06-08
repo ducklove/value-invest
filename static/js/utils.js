@@ -224,7 +224,9 @@ function buildIntegrationUrl(key, path = '', query = {}) {
 }
 
 function openIntegration(key, path = '', query = {}) {
-  const url = buildIntegrationUrl(key, path, query);
+  // 새 탭으로 열리는 연결 대시보드가 현재 앱 테마(라이트/다크)로 뜨도록 전달.
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const url = buildIntegrationUrl(key, path, { theme, ...query });
   if (!url) {
     showToast('Integration URL is not configured.', 'warning');
     return;

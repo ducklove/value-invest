@@ -259,6 +259,7 @@ def _summarize_nps(current: dict, top_n: int = 5) -> dict:
         "count": summary.get("count"),
         "todayPct": summary.get("todayPct"),
         "asOf": summary.get("asOf") or current.get("asOf"),
+        "allocation": current.get("allocation"),
         "top": rows[:top_n],
         "lastUpdated": current.get("lastUpdated"),
         "url": SITE["nps"],
