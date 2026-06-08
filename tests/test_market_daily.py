@@ -71,6 +71,81 @@ class MarketDailyRuleTests(unittest.TestCase):
             market_daily._portfolio_summary([{"stock_code": "C", "sources": ["starred"]}])
         )
 
+    def test_parse_investor_flow_reads_signed_institution_and_foreign(self):
+        html = (
+            '<table class="type2">'
+            '<tr><th>날짜</th><th>종가</th></tr>'
+            '<tr>'
+            '<td>2026.06.08</td><td>295,500</td><td>33,500</td><td>-10.18%</td>'
+            '<td>38,467,019</td><td>-3,937,194</td><td>-1,174,306</td>'
+            '<td>2,789,250,329</td><td>47.71%</td>'
+            '</tr></table>'
+        )
+        flow = market_daily._parse_investor_flow(html)
+        self.assertEqual(flow["date"], "2026.06.08")
+        self.assertEqual(flow["institution_net"], -3937194)
+        self.assertEqual(flow["foreign_net"], -1174306)
+
+    def test_parse_investor_flow_returns_none_without_full_row(self):
+        html = '<table class="type2"><tr><td>2026.06.08</td><td>1</td><td>2</td></tr></table>'
+        self.assertIsNone(market_daily._parse_investor_flow(html))
+
+    def test_map_news_item_adds_snippet_and_outlet(self):
+        item = {
+            "titleFull": "삼성전자 HBM4 공급 확대",
+            "title": "삼성전자 HBM4",
+            "officeId": "117",
+            "articleId": "0004072607",
+            "officeName": "테스트뉴스",
+            "datetime": "202606081931",
+            "body": "삼성전자가 HBM4 공급 계약을 확대했다고 밝혔다.",
+            "mobileNewsUrl": "https://m.stock.naver.com/news/x",
+        }
+        mapped = market_daily._map_news_item(item, "005930")
+        self.assertEqual(mapped["title"], "삼성전자 HBM4 공급 확대")
+        self.assertEqual(mapped["outlet"], "테스트뉴스")
+        self.assertEqual(mapped["published_at"], "2026.06.08 19:31")
+        self.assertTrue(mapped["snippet"].startswith("삼성전자가 HBM4"))
+        self.assertEqual(mapped["url"], "https://m.stock.naver.com/news/x")
+
+    def test_map_news_item_builds_url_and_skips_empty_title(self):
+        mapped = market_daily._map_news_item(
+            {"title": "t", "officeId": "117", "articleId": "A", "datetime": "x"}, "005930"
+        )
+        self.assertIn("article_id=A", mapped["url"])
+        self.assertIn("office_id=117", mapped["url"])
+        self.assertIsNone(market_daily._map_news_item({"body": "x"}, "005930"))
+
+    def test_map_news_item_truncates_long_snippet(self):
+        mapped = market_daily._map_news_item({"title": "t", "body": "가" * 200}, "005930")
+        self.assertTrue(mapped["snippet"].endswith("…"))
+        self.assertLessEqual(len(mapped["snippet"]), 161)
+
+    def test_flatten_news_payload_handles_flat_and_grouped(self):
+        self.assertEqual(market_daily._flatten_news_payload([{"id": 1}]), [{"id": 1}])
+        self.assertEqual(market_daily._flatten_news_payload([{"items": [{"id": 1}]}]), [{"id": 1}])
+        self.assertEqual(market_daily._flatten_news_payload({"items": [{"id": 1}]}), [{"id": 1}])
+        self.assertEqual(market_daily._flatten_news_payload(None), [])
+
+    def test_extract_upcoming_dividend_picks_nearest_future_in_window(self):
+        from datetime import date
+
+        today = date(2026, 6, 8)
+        rows = [
+            {"record_date": "20260630", "per_sto_divi_amt": "361"},
+            {"record_date": "20251231"},  # past
+            {"record_date": "20261231"},  # beyond window
+        ]
+        event = market_daily._extract_upcoming_dividend(rows, today, 45)
+        self.assertEqual(event, {"date": "2026-06-30", "amount": 361.0})
+        # nearest wins
+        nearer = market_daily._extract_upcoming_dividend(
+            [{"record_date": "20260701"}, {"record_date": "20260615"}], today, 45
+        )
+        self.assertEqual(nearer["date"], "2026-06-15")
+        # no parseable date → None (fail-safe, never fabricates)
+        self.assertIsNone(market_daily._extract_upcoming_dividend([{"foo": "bar"}], today, 45))
+
     def test_gemini35_flash_cost_estimate(self):
         self.assertAlmostEqual(
             market_daily.estimate_gemini35_flash_cost(12_000, 1_200),

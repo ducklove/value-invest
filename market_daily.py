@@ -7,9 +7,8 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
-from urllib.parse import urljoin
 
 import httpx
 
@@ -17,8 +16,8 @@ import ai_config
 import cache
 from cache_layer import MemoryTTLCache
 import dart_client
+import kis_proxy_client
 import market_indicators
-import stock_price
 from services import ai_client
 from services.portfolio import runtime_quotes as portfolio_quotes
 from services.portfolio.identifiers import is_korean_stock, normalize_portfolio_code
@@ -38,8 +37,16 @@ MARKET_DAILY_MAX_TOKENS = int(os.environ.get("MARKET_DAILY_MAX_TOKENS", "1800"))
 MARKET_TAPE_TTL_SECONDS = int(os.environ.get("MARKET_TAPE_TTL_SECONDS", "45"))
 MARKET_TAPE_EVENT_LIMIT = int(os.environ.get("MARKET_TAPE_EVENT_LIMIT", "40"))
 
+INVESTOR_FLOW_LIMIT = int(os.environ.get("MARKET_DAILY_INVESTOR_FLOW_LIMIT", "10"))
+UPCOMING_DIVIDEND_WINDOW_DAYS = int(os.environ.get("MARKET_DAILY_DIVIDEND_WINDOW_DAYS", "45"))
+UPCOMING_DIVIDEND_LIMIT = int(os.environ.get("MARKET_DAILY_DIVIDEND_LIMIT", "20"))
+
+NAVER_MOBILE_NEWS_API = "https://m.stock.naver.com/api/news/stock/{code}?pageSize={size}&page=1"
+NAVER_FRGN_URL = "https://finance.naver.com/item/frgn.naver?code={code}&page=1"
+
 _NEWS_CACHE_TTL_SECONDS = 600
 _NEWS_CACHE = MemoryTTLCache("market_daily.news", _NEWS_CACHE_TTL_SECONDS)
+_FLOW_CACHE = MemoryTTLCache("market_daily.flows", 600)
 _TAPE_CACHE = MemoryTTLCache("market_daily.tape", MARKET_TAPE_TTL_SECONDS)
 
 _MATERIAL_DISCLOSURE_KEYWORDS = [
@@ -445,41 +452,231 @@ def _clean_html_text(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", html.unescape(value or ""))).strip()
 
 
+def _format_naver_news_datetime(raw: Any) -> str:
+    text = str(raw or "").strip()
+    if len(text) == 12 and text.isdigit():
+        return f"{text[0:4]}.{text[4:6]}.{text[6:8]} {text[8:10]}:{text[10:12]}"
+    return text
+
+
+def _map_news_item(item: dict[str, Any], stock_code: str) -> dict[str, Any] | None:
+    """Map one Naver mobile news API item to the brief's news shape.
+
+    Pure (no network) so the field mapping is unit-testable. Adds ``snippet``
+    (the article lead paragraph) so the model can reason about causation from
+    actual content, not just the headline.
+    """
+    title = _clean_html_text(item.get("titleFull") or item.get("title") or "")
+    if not title:
+        return None
+    office_id = str(item.get("officeId") or "").strip()
+    article_id = str(item.get("articleId") or "").strip()
+    url = item.get("mobileNewsUrl") or (
+        f"https://finance.naver.com/item/news_read.naver?article_id={article_id}"
+        f"&office_id={office_id}&code={stock_code}"
+        if article_id and office_id
+        else ""
+    )
+    snippet = _clean_html_text(item.get("body") or "")
+    if len(snippet) > 160:
+        snippet = snippet[:160].rstrip() + "…"
+    return {
+        "stock_code": stock_code,
+        "title": title,
+        "outlet": _clean_html_text(item.get("officeName") or ""),
+        "published_at": _format_naver_news_datetime(item.get("datetime")),
+        "url": url,
+        "snippet": snippet,
+    }
+
+
+def _flatten_news_payload(payload: Any) -> list[dict[str, Any]]:
+    items = payload if isinstance(payload, list) else (payload.get("items") if isinstance(payload, dict) else [])
+    flat: list[dict[str, Any]] = []
+    for entry in items or []:
+        if isinstance(entry, dict) and isinstance(entry.get("items"), list):
+            flat.extend(x for x in entry["items"] if isinstance(x, dict))
+        elif isinstance(entry, dict):
+            flat.append(entry)
+    return flat
+
+
 async def _fetch_stock_news(stock_code: str, limit: int = NEWS_PER_STOCK) -> list[dict[str, Any]]:
     cached = _NEWS_CACHE.get_entry(stock_code)
     if cached is not None:
         return cached.value[:limit]
 
     try:
-        url = f"https://finance.naver.com/item/news_news.naver?code={stock_code}&page=1"
+        url = NAVER_MOBILE_NEWS_API.format(code=stock_code, size=max(limit, 1) * 2)
         async with httpx.AsyncClient(
             timeout=8.0,
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"},
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://m.stock.naver.com/"},
         ) as client:
             resp = await client.get(url)
-        html_body = resp.content.decode("euc-kr", errors="ignore")
-        rows = re.findall(
-            r'<td class="title">.*?<a href="([^"]+)"[^>]*>(.+?)</a>.*?'
-            r'<td class="info">(.+?)</td>.*?<td class="date">([^<]+)</td>',
-            html_body,
-            re.DOTALL,
-        )
         news: list[dict[str, Any]] = []
-        for href, title, outlet, published_at in rows[:limit]:
-            news.append(
-                {
-                    "stock_code": stock_code,
-                    "title": _clean_html_text(title),
-                    "outlet": _clean_html_text(outlet),
-                    "published_at": _clean_html_text(published_at),
-                    "url": urljoin("https://finance.naver.com", href),
-                }
-            )
+        for item in _flatten_news_payload(resp.json()):
+            mapped = _map_news_item(item, stock_code)
+            if mapped:
+                news.append(mapped)
+            if len(news) >= limit:
+                break
         _NEWS_CACHE.set(stock_code, news)
         return news
     except Exception as exc:
         logger.info("daily market: news skipped for %s: %s", stock_code, exc)
         return []
+
+
+def _parse_investor_flow(html: str) -> dict[str, Any] | None:
+    """Parse the latest dated row of Naver's frgn ``table.type2``.
+
+    Columns: 0 date · 1 close · 2 prev-diff · 3 chg% · 4 volume ·
+    5 institution net · 6 foreign net · 7 foreign-held · 8 foreign-held%.
+    Net columns are signed share counts (음수 = 순매도). Pure/unit-testable.
+    """
+    for table in re.findall(r'<table[^>]*class="type2".*?</table>', html or "", re.DOTALL):
+        for row in re.findall(r"<tr[^>]*>(.*?)</tr>", table, re.DOTALL):
+            if not re.search(r"\d{4}\.\d{2}\.\d{2}", row):
+                continue
+            cells = [
+                re.sub(r"<[^>]+>", "", c).strip().replace(",", "")
+                for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+            ]
+            if len(cells) < 7:
+                continue
+            institution = _safe_float(cells[5])
+            foreign = _safe_float(cells[6])
+            if institution is None and foreign is None:
+                return None
+            return {
+                "date": cells[0].strip(),
+                "institution_net": int(institution) if institution is not None else None,
+                "foreign_net": int(foreign) if foreign is not None else None,
+            }
+    return None
+
+
+async def _fetch_investor_flow(stock_code: str) -> dict[str, Any] | None:
+    cached = _FLOW_CACHE.get_entry(stock_code)
+    if cached is not None:
+        return cached.value
+    try:
+        async with httpx.AsyncClient(
+            timeout=8.0,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"},
+        ) as client:
+            resp = await client.get(NAVER_FRGN_URL.format(code=stock_code))
+        parsed = _parse_investor_flow(resp.content.decode("euc-kr", errors="ignore"))
+        result = {"stock_code": stock_code, **parsed} if parsed else None
+        _FLOW_CACHE.set(stock_code, result)
+        return result
+    except Exception as exc:
+        logger.info("daily market: investor flow skipped for %s: %s", stock_code, exc)
+        return None
+
+
+async def _investor_flows_for_codes(
+    codes: list[str], stock_names: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for code in codes:
+        if code and code not in seen:
+            unique.append(code)
+            seen.add(code)
+    semaphore = asyncio.Semaphore(max(1, QUOTE_CONCURRENCY))
+
+    async def fetch_one(code: str) -> dict[str, Any] | None:
+        async with semaphore:
+            return await _fetch_investor_flow(code)
+
+    rows = await asyncio.gather(*(fetch_one(code) for code in unique[:INVESTOR_FLOW_LIMIT]))
+    names = stock_names or {}
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if row:
+            name = names.get(row["stock_code"])
+            out.append({**row, **({"stock_name": name} if name else {})})
+    return out
+
+
+def _parse_yyyymmdd(value: Any) -> date | None:
+    text = re.sub(r"\D", "", str(value or ""))
+    if len(text) != 8:
+        return None
+    try:
+        return datetime.strptime(text, "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+_DIVIDEND_DATE_KEYS = (
+    "record_date",
+    "record_dt",
+    "divi_dt",
+    "stck_divi_dt",
+    "ex_date",
+    "divi_pay_dt",
+)
+
+
+def _extract_upcoming_dividend(
+    rows: Any, today: date, window_days: int
+) -> dict[str, Any] | None:
+    """Nearest future dividend record/ex date within the window, or None.
+
+    Fail-safe: only returns when an actual future date parses out of the KIS
+    rows, so an unexpected response shape yields nothing instead of a guess.
+    """
+    best: dict[str, Any] | None = None
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        for key in _DIVIDEND_DATE_KEYS:
+            parsed = _parse_yyyymmdd(row.get(key))
+            if parsed and today <= parsed <= today + timedelta(days=window_days):
+                if best is None or parsed < best["date_obj"]:
+                    amount = _safe_float(
+                        row.get("per_sto_divi_amt") or row.get("divi_amt") or row.get("amount")
+                    )
+                    best = {"date_obj": parsed, "date": parsed.isoformat(), "amount": amount}
+                break
+    if not best:
+        return None
+    return {"date": best["date"], "amount": best["amount"]}
+
+
+async def _upcoming_dividends(interests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    holdings = [item for item in interests if "portfolio" in (item.get("sources") or [])]
+    if not holdings:
+        return []
+    today = date.today()
+    end = today + timedelta(days=UPCOMING_DIVIDEND_WINDOW_DAYS)
+    semaphore = asyncio.Semaphore(max(1, QUOTE_CONCURRENCY))
+
+    async def fetch_one(item: dict[str, Any]) -> dict[str, Any] | None:
+        code = item["stock_code"]
+        async with semaphore:
+            try:
+                payload = await kis_proxy_client.get_dividends(code, start_date=today, end_date=end)
+            except Exception as exc:
+                logger.info("daily market: dividend schedule skipped for %s: %s", code, exc)
+                return None
+        rows = payload.get("dividends") if isinstance(payload, dict) else None
+        event = _extract_upcoming_dividend(rows, today, UPCOMING_DIVIDEND_WINDOW_DAYS)
+        if not event:
+            return None
+        return {
+            "stock_code": code,
+            "stock_name": item.get("stock_name") or code,
+            "type": "배당기준일",
+            **event,
+        }
+
+    rows = await asyncio.gather(*(fetch_one(item) for item in holdings[:UPCOMING_DIVIDEND_LIMIT]))
+    out = [row for row in rows if row]
+    out.sort(key=lambda row: row["date"])
+    return out
 
 
 async def _news_for_focus_codes(
@@ -747,7 +944,7 @@ def _fallback_markdown(payload: dict[str, Any], message: str) -> str:
     market = payload.get("market") or []
     moves = [row for row in payload.get("moves") or [] if row.get("is_notable")]
     disclosures = payload.get("disclosures") or []
-    lines = [f"### 금일 시황", "", message, ""]
+    lines = ["### 금일 시황", "", message, ""]
     if market:
         lines.append("**시장 지표**")
         for row in market[:5]:
@@ -785,10 +982,11 @@ def _build_prompt(payload: dict[str, Any]) -> str:
 
 작성 규칙:
 1. 포트폴리오부터: `portfolio_summary`가 있으면 첫 문단에서 가중 일간수익률(`weighted_day_return_pct`)을 KOSPI 등락과 비교하고, 손익을 주도/방어한 종목(`top_contributors`/`top_detractors`)을 이름과 함께 짚으세요. `portfolio_summary`가 null이면 이 문단을 생략하세요.
-2. 종목 단위 인과: `moves`·`disclosures`·`news`를 종목별로 묶어 해석하세요. 가격 변동의 원인은 같은 종목의 공시/뉴스 제목과 "가능성" 수준으로만 연결하고, 근거 없는 단정은 금지합니다. 연결할 공시·뉴스가 없으면 "원인 미확인"으로 두세요.
+2. 종목 단위 인과: `moves`·`disclosures`·`news`·`investor_flows`를 종목별로 묶어 해석하세요. 가격 변동의 원인은 같은 종목의 공시/뉴스(제목과 `snippet` 요약)와 "가능성" 수준으로만 연결하고, 근거 없는 단정은 금지합니다. 연결할 공시·뉴스가 없으면 "원인 미확인"으로 두세요.
+   - 수급: `investor_flows`의 외국인·기관 순매매(`foreign_net`/`institution_net`, 음수=순매도, 단위=주)를 해당 종목 해석에 보조 근거로 쓰세요. 수급과 가격 방향이 어긋나면 그 점을 짚으세요.
 3. 지수·환율·원자재 복창 금지: `market` 수치를 그대로 나열하는 별도 섹션을 만들지 마세요. 매크로는 보유 종목 해석에 필요할 때만 한 줄 맥락으로 녹이세요.
 4. 데이터 누락은 생략: evidence에 없거나 비어 있는 수치를 0·"변동 없음"으로 단정하지 마세요. 값이 비어 있으면 그 지표 자체를 언급하지 마세요.
-5. 확인 필요(필수, 1~4개): 각 항목은 evidence의 구체적 근거에 연결된 행동이어야 합니다(예: 특정 공시 원문 확인, 임박한 실적/배당락, 목표가·손절가 근접). "급락 원인 점검" 같은 일반론은 금지합니다.
+5. 확인 필요(필수, 1~4개): 각 항목은 evidence의 구체적 근거에 연결된 행동이어야 합니다(예: 특정 공시 원문 확인, 목표가·손절가 근접). `upcoming_events`(임박 배당기준일 등)가 있으면 종목명과 날짜를 넣어 확인 필요에 포함하세요. "급락 원인 점검" 같은 일반론은 금지합니다.
 6. 형식: 마크다운, 핵심부터, 인사말·군더더기 없이. 링크가 있는 공시/뉴스는 종목명 뒤에 짧은 출처로만 언급하고 긴 URL은 본문에 노출하지 마세요.
 
 evidence bundle:
@@ -874,7 +1072,10 @@ async def build_daily_market_brief(*, google_sub: str | None = None, brief_date:
         *(row["stock_code"] for row in moves if row.get("is_notable")),
         *(row["stock_code"] for row in disclosures if row.get("is_material")),
     ]
-    news = await _news_for_focus_codes(focus_codes, _focus_stock_names(moves, disclosures))
+    focus_names = _focus_stock_names(moves, disclosures)
+    news = await _news_for_focus_codes(focus_codes, focus_names)
+    investor_flows = await _investor_flows_for_codes(focus_codes, focus_names) if focus_codes else []
+    upcoming_events = await _upcoming_dividends(interests) if interests else []
 
     payload: dict[str, Any] = {
         "brief_date": brief_date,
@@ -891,6 +1092,8 @@ async def build_daily_market_brief(*, google_sub: str | None = None, brief_date:
         "moves": moves,
         "disclosures": disclosures,
         "news": news,
+        "investor_flows": investor_flows,
+        "upcoming_events": upcoming_events,
         "source_warnings": disclosure_warnings,
     }
     source_hash = _source_hash(payload)
