@@ -20,6 +20,15 @@ async def market_summary(codes: str = ""):
     return results
 
 
+@router.get("/api/market/live")
+async def market_live(codes: str = ""):
+    """야간선물·바이낸스 등 빠르게 변하는 지표만 짧은 TTL 로 조회(박스 단위 갱신)."""
+    import market_indicators
+
+    code_list = [c.strip()[:30] for c in codes.split(",") if c.strip()][:10]
+    return await market_indicators.fetch_indicators_live(code_list)
+
+
 @router.get("/api/market-indicators")
 async def list_indicators():
     import market_indicators

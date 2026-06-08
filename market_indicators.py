@@ -1164,3 +1164,51 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     final_results = {code: dict(results.get(code) or _EMPTY) for code in requested_codes}
     _indicators_cache.set(key, dict(final_results))
     return final_results
+
+
+# ---------------------------------------------------------------------------
+# 박스 단위 라이브 갱신 — 야간선물·바이낸스처럼 빠르게 변하는 지표만 짧은 TTL 로.
+# ---------------------------------------------------------------------------
+_LIVE_TTL = 8  # seconds — 클라이언트 10초 폴링보다 짧게(동시·연속 폴링 합치기)
+_live_cache = MemoryTTLCache("market_indicators.live", _LIVE_TTL)
+_LIVE_CODES = {"NIGHT_FUTURES", *_BINANCE_MAP}
+
+
+async def fetch_indicators_live(codes: list[str]) -> dict[str, dict]:
+    """야간선물·바이낸스만 짧은 TTL 로 조회한다(박스 단위 갱신용).
+
+    60초 batch/item 캐시를 거치지 않고 해당 fetcher 를 직접 호출하되, 8초
+    캐시로 동시/연속 폴링을 합쳐 외부 부하를 막는다. 지원하지 않는 코드는 무시.
+    """
+    wanted = [c for c in dict.fromkeys(codes) if c in _LIVE_CODES]
+    if not wanted:
+        return {}
+    key = tuple(sorted(wanted))
+    cached = _live_cache.get(key)
+    if cached:
+        return dict(cached)
+
+    results: dict[str, dict] = {}
+    binance_items = [c for c in wanted if c in _BINANCE_MAP]
+    async with httpx.AsyncClient(timeout=5) as client:
+        tasks = []
+        task_kinds = []
+        if binance_items:
+            tasks.append(_fetch_binance_tickers(client, binance_items))
+            task_kinds.append("binance")
+        if "NIGHT_FUTURES" in wanted:
+            tasks.append(_fetch_night_futures(client))
+            task_kinds.append("night")
+        fetched = await asyncio.gather(*tasks, return_exceptions=True)
+        for kind, res in zip(task_kinds, fetched):
+            if isinstance(res, Exception):
+                continue
+            if kind == "binance" and isinstance(res, dict):
+                results.update(res)
+            elif kind == "night":
+                results["NIGHT_FUTURES"] = res
+
+    for c in wanted:
+        results.setdefault(c, dict(_EMPTY))
+    _live_cache.set(key, dict(results))
+    return dict(results)

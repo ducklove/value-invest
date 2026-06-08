@@ -148,7 +148,7 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
   const body = variant === 'hero'
     ? `<div class="md-hero">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'hero')).join('')}</div>`
     : `<div class="md-rows">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'list')).join('')}</div>`;
-  return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}">`
+  return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}" data-md-cat="${escapeHtml(category)}">`
     + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}</section>`;
 }
 
@@ -229,6 +229,58 @@ function _mdWireBinanceToggle(catalog, dataMap) {
       if (rowsEl) rowsEl.innerHTML = _bnbRowsHtml(codes, catalog, dataMap);
     })
   );
+}
+
+// --- 박스 단위 라이브 갱신: 야간선물·바이낸스만 10초마다(가볍게) ---
+// 전용 엔드포인트(/api/market/live, 서버 8초 캐시)로 5개 코드만 받아 해당
+// 섹션 행만 교체한다(전체 재렌더·차트 재init 없음). 숨겨진 뷰/백그라운드 탭은 스킵.
+const MD_LIVE_CODES = ['NIGHT_FUTURES', 'BNB_EWY', 'BNB_SAMSUNG', 'BNB_SKHYNIX', 'BNB_HYUNDAI'];
+const MD_LIVE_INTERVAL_MS = 10000;
+let _mdLastDataMap = null;
+let _mdLiveTimer = null;
+
+function _mdLiveActive() {
+  if (typeof document === 'undefined' || document.hidden) return false;
+  const view = document.getElementById('investingView');
+  if (view && view.offsetParent === null) return false;  // 숨겨진 투자정보 뷰면 스킵
+  return !!document.getElementById('mdIndRail');
+}
+
+function _mdRefreshCategoryRows(category) {
+  const sec = document.querySelector(`[data-md-cat="${category}"]`);
+  const rowsEl = sec && sec.querySelector('.md-rows');
+  if (!rowsEl || !_mdCatalog) return;
+  const codes = Object.keys(_mdCatalog).filter((c) => (_mdCatalog[c] || {}).category === category);
+  rowsEl.innerHTML = codes.map((c) => _mdCardHtml(c, _mdCatalog, _mdLastDataMap, 'list')).join('');
+}
+
+async function _mdLiveRefresh() {
+  if (!_mdCatalog || !_mdLastDataMap || !_mdLiveActive()) return;
+  let live;
+  try {
+    const r = await apiFetch('/api/market/live?codes=' + encodeURIComponent(MD_LIVE_CODES.join(',')));
+    if (!r.ok) return;
+    live = await r.json();
+  } catch (e) {
+    return;
+  }
+  if (!live || typeof live !== 'object') return;
+  // 최신값만 머지(USD_KRW 등 환산 기준은 그대로 유지).
+  Object.assign(_mdLastDataMap, live);
+  // 야간선물: 일반 섹션 행 교체.
+  _mdRefreshCategoryRows('야간선물');
+  // 바이낸스: 통화 토글 상태 반영해 행만 교체(토글 버튼/리스너는 유지).
+  const bnb = document.getElementById('mdBinanceSection');
+  const bnbRows = bnb && bnb.querySelector('.md-rows');
+  if (bnbRows) {
+    const codes = Object.keys(_mdCatalog).filter((c) => (_mdCatalog[c] || {}).category === '바이낸스');
+    bnbRows.innerHTML = _bnbRowsHtml(codes, _mdCatalog, _mdLastDataMap);
+  }
+}
+
+function _mdStartLiveRefresh() {
+  if (_mdLiveTimer || typeof setInterval === 'undefined') return;
+  _mdLiveTimer = setInterval(_mdLiveRefresh, MD_LIVE_INTERVAL_MS);
 }
 
 // --- 국채 (yield curve + 국가별 10년물 비교) ---
@@ -436,6 +488,7 @@ function _mdRenderDashboard(catalog, dataMap) {
   const mainEl = document.getElementById('mdIndMain');
   const railEl = document.getElementById('mdIndRail');
   if (!mainEl || !railEl) return;
+  _mdLastDataMap = dataMap;  // 라이브 갱신이 머지·환산에 쓸 최신 dataMap
   _disposeBondCharts();  // 재렌더 전 이전 차트 정리(누수 방지)
   const groups = _mdGroupByCategory(catalog);
   if (!groups.length) {
@@ -488,6 +541,7 @@ async function loadInvestingDashboard(refresh = false) {
       const dataMap = sr.ok ? await sr.json() : {};
       _mdRenderDashboard(catalog, dataMap);
       _mdLoadedOnce = true;
+      _mdStartLiveRefresh();  // 야간선물·바이낸스 10초 라이브 갱신 시작(1회만)
       // 수급 슬롯은 hero 섹션과 함께 생성되므로 렌더 직후 채운다.
       if (typeof loadInvestorFlows === 'function') loadInvestorFlows();
     } catch (e) {
