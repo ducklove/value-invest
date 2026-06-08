@@ -563,14 +563,28 @@ function _extSpacRows(rows, baseUrl) {
   }).join('');
 }
 
+// 국민연금 중기 자산배분 목표 비중(%) — current.json 의 allocation 에는 추정
+// 현재 비중(pct)만 있어, 공표된 목표치를 key 기준 상수로 둔다. 데이터 소스가
+// class 별 target 을 제공하면 그 값을 우선한다.
+const NPS_TARGET_ALLOC = {
+  domestic_stock: 20.8,
+  domestic_bond: 23.1,
+  foreign_stock: 34.7,
+  foreign_bond: 7.4,
+  alternative: 14.0,
+};
+
 function _extAllocRows(classes, url) {
   // 자산배분 행은 종목 deep-link이 아니라 도구 홈으로(테마 포함).
+  // 값 = 추정 현재 비중, 괄호 = 목표 비중.
   const href = escapeHtml(_extHref(url));
-  return (classes || []).map((c) =>
-    `<a class="ext-row" href="${href}" target="_blank" rel="noopener noreferrer">`
-    + `<span class="ext-name">${escapeHtml(String(c.label || c.key || ''))}</span>`
-    + `<span class="ext-val">${escapeHtml(_extPct(c.pct))}</span></a>`
-  ).join('');
+  return (classes || []).map((c) => {
+    const target = c.target != null ? c.target : NPS_TARGET_ALLOC[c.key];
+    const valTxt = _extPct(c.pct) + (target != null ? ` (${_extPct(target)})` : '');
+    return `<a class="ext-row" href="${href}" target="_blank" rel="noopener noreferrer">`
+      + `<span class="ext-name">${escapeHtml(String(c.label || c.key || ''))}</span>`
+      + `<span class="ext-val">${escapeHtml(valTxt)}</span></a>`;
+  }).join('');
 }
 
 function _extCard(title, url, subText, bodyHtml) {
@@ -612,11 +626,9 @@ function _extRender(root, data) {
   const nps = data && data.nps;
   const npsAlloc = nps && nps.allocation;
   if (npsAlloc && (npsAlloc.classes || []).length) {
-    // 기금 자산배분(국내주식/해외주식/국내채권/해외채권/대체투자) 비중.
-    // 공표 최신월은 수개월 시차라 현재월 추정치를 노출하고 '추정'으로 표시.
-    const suffix = npsAlloc.estimated ? '추정' : '기준';
-    const sub = npsAlloc.asOf ? `자산배분 · ${npsAlloc.asOf} ${suffix}` : '자산배분';
-    cards.push(_extCard('국민연금', nps.url, sub, _extAllocRows(npsAlloc.classes, nps.url)));
+    // 기금 자산배분(국내주식/해외주식/국내채권/해외채권/대체투자): 추정 현재
+    // 비중과 괄호 안 목표 비중을 함께 표시한다.
+    cards.push(_extCard('국민연금 자산 비중', nps.url, '자산배분 (목표치)', _extAllocRows(npsAlloc.classes, nps.url)));
   } else if (nps && (nps.top || []).length) {
     const sub = nps.nav != null
       ? `NAV ${Number(nps.nav).toFixed(1)} · 비중 상위`
