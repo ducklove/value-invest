@@ -13,7 +13,9 @@
 - label:          표시 라벨
 
 교환비율 출처(2026-06 deep-research, 1차 출처 다수 검증):
-- 삼성전자 GDR/GDS(SMSN/SMSD, 런던): LSE 증권명 'each Rep 25', 2018 50:1 액면분할 → 1 DR = 25주
+- 삼성전자 GDR/GDS(SMSN/SMSD, 런던 IOB): LSE 증권명 'each Rep 25', 2018 50:1 액면분할 → 1 DR = 25주.
+  티커는 .IL(LSE International Order Book — 외국 DR 의 USD 거래 세그먼트)을 쓴다.
+  .L(LSE 메인) 피드는 yfinance 에서 stale/오류값(SMSN.L≈1179 vs SMSN.IL≈5020)이라 부적합.
 - SK하이닉스 GDR(HY9H, 프랑크푸르트): Deutsche Börse / skhynix IR 'Rep 1 Ord' → 1 DR = 1주
 - POSCO홀딩스 ADS(PKX): SEC 20-F 'one-fourth of one share' → 0.25
 - SK텔레콤 ADS(SKM): SEC 6-K 'five-ninths of one share'(2021 분할/분사 후) → 5/9
@@ -32,10 +34,10 @@ from __future__ import annotations
 
 DR_REGISTRY: dict[str, list[dict]] = {
     "005930": [  # 삼성전자 보통주
-        {"ticker": "SMSN.L", "exchange": "런던", "currency": "USD", "shares_per_dr": 25, "label": "삼성전자 GDR"},
+        {"ticker": "SMSN.IL", "exchange": "런던", "currency": "USD", "shares_per_dr": 25, "label": "삼성전자 GDR"},
     ],
     "005935": [  # 삼성전자 우선주
-        {"ticker": "SMSD.L", "exchange": "런던", "currency": "USD", "shares_per_dr": 25, "label": "삼성전자우 GDS"},
+        {"ticker": "SMSD.IL", "exchange": "런던", "currency": "USD", "shares_per_dr": 25, "label": "삼성전자우 GDS"},
     ],
     "000660": [  # SK하이닉스
         {"ticker": "HY9H.F", "exchange": "프랑크푸르트", "currency": "EUR", "shares_per_dr": 1, "label": "SK하이닉스 GDR"},
