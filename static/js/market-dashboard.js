@@ -152,6 +152,85 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
     + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}</section>`;
 }
 
+// --- 바이낸스 섹션: USDT↔원화 토글(기본 원화) ---
+// 값은 바이낸스 USDT 선물가. 원화 모드면 USD_KRW 환율로 환산해 표시한다.
+// (등락%·방향은 통화와 무관하므로 그대로 둔다.)
+let _bnbCcy = null;  // 'KRW' | 'USDT' — lazy init(localStorage)
+
+function _bnbCurrentCcy() {
+  if (_bnbCcy == null) {
+    _bnbCcy = 'KRW';
+    try { if (localStorage.getItem('bnbCcy') === 'USDT') _bnbCcy = 'USDT'; } catch (e) { /* noop */ }
+  }
+  return _bnbCcy;
+}
+
+function _bnbParseNum(s) {
+  if (s == null) return null;
+  const n = Number(String(s).replace(/,/g, ''));
+  return isFinite(n) ? n : null;
+}
+
+function _bnbUsdKrwRate(dataMap) {
+  return _bnbParseNum(dataMap && dataMap.USD_KRW ? dataMap.USD_KRW.value : null);
+}
+
+function _bnbFmtKrw(n) {
+  return Math.round(n).toLocaleString('en-US');
+}
+
+function _bnbRowsHtml(codes, catalog, dataMap) {
+  const useKrw = _bnbCurrentCcy() === 'KRW';
+  const rate = _bnbUsdKrwRate(dataMap);
+  // 원화 모드 + 환율이 있으면 value/change 를 환산한 view 로 기존 행 렌더러 재사용.
+  const view = {};
+  for (const c of codes) {
+    const d = dataMap && dataMap[c] ? dataMap[c] : {};
+    if (useKrw && rate) {
+      const v = _bnbParseNum(d.value);
+      const ch = _bnbParseNum(d.change);
+      view[c] = Object.assign({}, d, {
+        value: v != null ? _bnbFmtKrw(v * rate) : d.value,
+        change: ch != null ? _bnbFmtKrw(ch * rate) : d.change,
+      });
+    } else {
+      view[c] = d;
+    }
+  }
+  return codes.map((c) => _mdCardHtml(c, catalog, view, 'list')).join('');
+}
+
+function _mdBinanceSectionHtml(codes, catalog, dataMap) {
+  const ccy = _bnbCurrentCcy();
+  const btn = (key, label) =>
+    `<button class="mv-mkt${ccy === key ? ' active' : ''}" data-bnb-ccy="${key}">${label}</button>`;
+  return '<section class="md-section bnb-section" id="mdBinanceSection">'
+    + '<div class="mv-head"><h3 class="md-section-title">바이낸스</h3>'
+    + `<div class="mv-mkts">${btn('KRW', '원화')}${btn('USDT', 'USDT')}</div></div>`
+    + `<div class="md-rows">${_bnbRowsHtml(codes, catalog, dataMap)}</div></section>`;
+}
+
+function _mdWireBinanceToggle(catalog, dataMap) {
+  const sec = document.getElementById('mdBinanceSection');
+  if (!sec) return;
+  const codes = Object.keys(catalog || {}).filter(
+    (c) => (catalog[c] || {}).category === '바이낸스'
+  );
+  sec.querySelectorAll('[data-bnb-ccy]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const ccy = b.dataset.bnbCcy === 'USDT' ? 'USDT' : 'KRW';
+      if (ccy === _bnbCurrentCcy()) return;
+      _bnbCcy = ccy;
+      try { localStorage.setItem('bnbCcy', ccy); } catch (e) { /* noop */ }
+      // 버튼은 유지(리스너 보존)하고 active 표시 + 행만 다시 그린다.
+      sec.querySelectorAll('[data-bnb-ccy]').forEach((x) =>
+        x.classList.toggle('active', x.dataset.bnbCcy === ccy));
+      const rowsEl = sec.querySelector('.md-rows');
+      if (rowsEl) rowsEl.innerHTML = _bnbRowsHtml(codes, catalog, dataMap);
+    })
+  );
+}
+
 // --- 국채 (yield curve + 국가별 10년물 비교) ---
 
 function _bondVal(d) {
@@ -372,12 +451,18 @@ function _mdRenderDashboard(catalog, dataMap) {
       main.push(_mdBondSectionHtml());  // 차트 컨테이너 + 수치 리스트 자리
       continue;
     }
+    if (category === '바이낸스') {
+      // 우측 rail 에 통화 토글(원화/USDT) 포함 섹션으로 렌더.
+      rail.push(_mdBinanceSectionHtml(codes, catalog, dataMap));
+      continue;
+    }
     const isHero = MD_HERO_CATEGORIES.includes(category);
     const html = _mdSectionHtml(category, codes, catalog, dataMap, isHero ? 'hero' : 'list');
     (isHero || MD_MAIN_CATEGORIES.includes(category) ? main : rail).push(html);
   }
   mainEl.innerHTML = main.join('');
   railEl.innerHTML = rail.join('');
+  _mdWireBinanceToggle(catalog, dataMap);
   if (bondCodes) _mdRenderBonds(bondCodes, catalog, dataMap);
 }
 
