@@ -160,6 +160,14 @@ function _bondVal(d) {
   return isFinite(n) ? n : null;
 }
 
+// 전일대비 금리 변동(%p, 부호는 direction). 값이 없으면 null.
+function _bondChg(d) {
+  if (!d || d.change == null || d.change === '') return null;
+  const n = Number(String(d.change).replace(/[,+%]/g, ''));
+  if (!isFinite(n)) return null;
+  return d.direction === 'down' ? -Math.abs(n) : Math.abs(n);
+}
+
 function _bondMatLabel(m) {
   if (m === 0) return 'overnight';  // 한국=KOFR, 미국=SOFR
   if (m < 1) return Math.round(m * 12) + 'M';  // 0.25 → 3M
@@ -170,21 +178,30 @@ function _bondMatLabel(m) {
 function _mdBondCurve(codes, catalog, dataMap) {
   const pick = (country) => codes
     .filter((c) => (catalog[c] || {}).country === country && (catalog[c] || {}).maturity != null)
-    .map((c) => ({ m: catalog[c].maturity, v: _bondVal(dataMap ? dataMap[c] : null) }))
+    .map((c) => ({
+      m: catalog[c].maturity,
+      v: _bondVal(dataMap ? dataMap[c] : null),
+      chg: _bondChg(dataMap ? dataMap[c] : null),
+    }))
     .filter((x) => x.v != null)
     .sort((a, b) => a.m - b.m);
   const kr = pick('KR');
   const us = pick('US');
   const jp = pick('JP');
   const mats = [...new Set([...kr, ...us, ...jp].map((x) => x.m))].sort((a, b) => a - b);
-  const krMap = new Map(kr.map((x) => [x.m, x.v]));
-  const usMap = new Map(us.map((x) => [x.m, x.v]));
-  const jpMap = new Map(jp.map((x) => [x.m, x.v]));
+  const vMap = (arr) => new Map(arr.map((x) => [x.m, x.v]));
+  const cMap = (arr) => new Map(arr.map((x) => [x.m, x.chg]));
+  const krV = vMap(kr); const usV = vMap(us); const jpV = vMap(jp);
+  const krC = cMap(kr); const usC = cMap(us); const jpC = cMap(jp);
+  const at = (map, m) => (map.has(m) ? map.get(m) : null);
   return {
     labels: mats.map(_bondMatLabel),
-    kr: mats.map((m) => (krMap.has(m) ? krMap.get(m) : null)),
-    us: mats.map((m) => (usMap.has(m) ? usMap.get(m) : null)),
-    jp: mats.map((m) => (jpMap.has(m) ? jpMap.get(m) : null)),
+    kr: mats.map((m) => at(krV, m)),
+    us: mats.map((m) => at(usV, m)),
+    jp: mats.map((m) => at(jpV, m)),
+    krChg: mats.map((m) => at(krC, m)),
+    usChg: mats.map((m) => at(usC, m)),
+    jpChg: mats.map((m) => at(jpC, m)),
   };
 }
 
@@ -203,10 +220,20 @@ function _mdBondCountries(codes, catalog, dataMap) {
 
 function _bondCurveTableHtml(curve) {
   if (!curve.labels.length) return '';
-  const cell = (v) => `<td>${v == null ? '-' : v.toFixed(2)}</td>`;
+  // 금리 옆 괄호에 전일대비 변동(%p, 부호·색상). 변동값 없으면 금리만.
+  const cell = (v, c) => {
+    if (v == null) return '<td>-</td>';
+    let chg = '';
+    if (c != null && isFinite(c)) {
+      const cls = c > 0 ? 'md-up' : (c < 0 ? 'md-down' : 'md-flat');
+      const sign = c > 0 ? '+' : '';
+      chg = ` <span class="bt-chg ${cls}">(${sign}${c.toFixed(2)})</span>`;
+    }
+    return `<td>${v.toFixed(2)}${chg}</td>`;
+  };
   const rows = curve.labels.map((lab, i) =>
     `<tr><td class="bt-mat">${escapeHtml(lab)}</td>`
-    + cell(curve.kr[i]) + cell(curve.us[i]) + cell(curve.jp[i]) + '</tr>'
+    + cell(curve.kr[i], curve.krChg[i]) + cell(curve.us[i], curve.usChg[i]) + cell(curve.jp[i], curve.jpChg[i]) + '</tr>'
   ).join('');
   return '<table class="bond-tbl"><thead><tr><th>만기</th><th>한국</th><th>미국</th><th>일본</th></tr></thead>'
     + `<tbody>${rows}</tbody></table>`;
@@ -217,7 +244,7 @@ function _mdBondSectionHtml() {
   // 별도 수치 표는 생략한다. 기간별 금리는 곡선이 한·미·일이라 표를 함께 둔다.
   return '<section class="md-section md-bond-section">'
     + '<h3 class="md-section-title">국채</h3>'
-    + '<div class="md-bond-sub">기간별 금리 (Yield Curve)</div>'
+    + '<div class="md-bond-sub">기간별 금리 (Yield Curve · 괄호=전일대비 %p)</div>'
     + '<div class="md-bond-chart" id="bondYieldCurve"></div>'
     + '<div class="md-bond-table" id="bondCurveTable"></div>'
     + '<div class="md-bond-sub">국가별 10년물</div>'
@@ -586,7 +613,9 @@ function _extRender(root, data) {
   const npsAlloc = nps && nps.allocation;
   if (npsAlloc && (npsAlloc.classes || []).length) {
     // 기금 자산배분(국내주식/해외주식/국내채권/해외채권/대체투자) 비중.
-    const sub = npsAlloc.asOf ? `자산배분 · ${npsAlloc.asOf} 기준` : '자산배분';
+    // 공표 최신월은 수개월 시차라 현재월 추정치를 노출하고 '추정'으로 표시.
+    const suffix = npsAlloc.estimated ? '추정' : '기준';
+    const sub = npsAlloc.asOf ? `자산배분 · ${npsAlloc.asOf} ${suffix}` : '자산배분';
     cards.push(_extCard('국민연금', nps.url, sub, _extAllocRows(npsAlloc.classes, nps.url)));
   } else if (nps && (nps.top || []).length) {
     const sub = nps.nav != null

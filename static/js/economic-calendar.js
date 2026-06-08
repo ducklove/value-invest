@@ -128,7 +128,14 @@ function _ecIsPast(ev) {
 function _ecBellCell(ev) {
   const hasActual = ev.actual && String(ev.actual).trim() !== '';
   const eid = String(ev.index_id || '').trim();
-  if (hasActual || !eid || _ecIsPast(ev)) return '<span class="ec-bell-cell"></span>';
+  // 구독했던 이벤트의 결과가 나오면 🔔 마커를 남겨(행 배경 강조와 함께) 눈에 띄게 한다.
+  if (hasActual) {
+    if (eid && _ecSubs.has(eid)) {
+      return '<span class="ec-bell-cell"><span class="ec-bell-done" title="구독한 일정의 결과가 발표됨">🔔</span></span>';
+    }
+    return '<span class="ec-bell-cell"></span>';
+  }
+  if (!eid || _ecIsPast(ev)) return '<span class="ec-bell-cell"></span>';
   const checked = _ecSubs.has(eid) ? ' checked' : '';
   return `<span class="ec-bell-cell"><label class="ec-bell" title="결과 발표 시 알림 받기">`
     + `<input type="checkbox" class="ec-bell-cb" data-eid="${escapeHtml(eid)}"${checked}>`
@@ -140,7 +147,10 @@ function _ecRowHtml(ev) {
   const impLabel = ev.importance_label || '';
   const hasActual = ev.actual && String(ev.actual).trim() !== '';
   const actualCls = hasActual ? _ecActualClass(ev.actual, ev.forecast) : 'ec-flat';
-  return `<div class="ec-row">`
+  // 내가 알림 구독한 일정의 결과가 나왔으면 행 배경으로 강조.
+  const eid = String(ev.index_id || '').trim();
+  const alerted = hasActual && eid && _ecSubs.has(eid);
+  return `<div class="ec-row${alerted ? ' ec-row-alerted' : ''}">`
     + `<span class="ec-time">${escapeHtml(String(ev.time || '').trim() || '-')}</span>`
     + `<span class="ec-country" title="${escapeHtml(String(ev.country_name || ''))}">`
     + `<span class="ec-flag">${escapeHtml(String(ev.flag || ''))}</span>`

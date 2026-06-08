@@ -630,6 +630,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .bond-tbl th, .bond-tbl td { padding: 3px 6px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .bond-tbl th:first-child, .bond-tbl td:first-child { text-align: left; color: var(--text-secondary); }
 .bond-tbl th { color: var(--text-secondary); font-weight: 600; }
+.bond-tbl .bt-chg { font-size: 0.85em; margin-left: 1px; }
 
 /* 시장 랭킹 (movers) widget */
 .mv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -949,6 +950,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   font-variant-numeric: tabular-nums;
 }
 .ec-row:last-child { border-bottom: none; }
+/* 내가 알림 구독한 일정의 결과가 발표되면 행을 눈에 띄게 강조 */
+.ec-row-alerted {
+  background: rgba(245, 158, 11, 0.14);
+  box-shadow: inset 3px 0 0 var(--warn, #f59e0b);
+  border-radius: 0 6px 6px 0;
+}
+.ec-bell-done { font-size: 13px; line-height: 1; }
 .ec-time { color: var(--text-secondary); font-weight: 700; }
 .ec-country { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .ec-flag { font-size: 14px; }

@@ -52,7 +52,11 @@ def test_economic_calendar_result_alert_checkbox_contract():
     assert "ec-bell-cb" in js
     assert "function _ecBellCell(ev)" in js
     assert "function _ecIsPast(ev)" in js
-    assert "hasActual || !eid || _ecIsPast(ev)" in js
+    assert "if (!eid || _ecIsPast(ev)) return" in js
+    # 구독한 일정의 결과가 발표되면 🔔 마커 + 행 배경 강조로 눈에 띄게 한다.
+    assert "ec-bell-done" in js
+    assert "ec-row-alerted" in js
+    assert ".ec-row-alerted" in styles
     assert "async function _ecToggleSubscription(cb)" in js
     # 게이트: 비로그인 → 로그인 팝업 / 채널 무 → 포트폴리오 알림 안내.
     assert "function _ecPromptLogin()" in js

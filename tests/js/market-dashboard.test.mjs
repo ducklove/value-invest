@@ -296,15 +296,16 @@ test("_extRender builds 3 tool cards with deep-link, gap sign class, escaping", 
   });
   const cards = root.querySelectorAll(".ext-card");
   assert.equal(cards.length, 3);
-  // holding row uses ?code= deep-link
+  // holding row uses ?code= deep-link, with current theme appended.
   const holdingFirst = cards[0].querySelector(".ext-row");
   assert.match(holdingFirst.getAttribute("href"), /holding_value\/\?code=000670/);
+  assert.match(holdingFirst.getAttribute("href"), /[?&]theme=(light|dark)/);
   assert.equal(holdingFirst.getAttribute("target"), "_blank");
   // ratio formatted as percent
   assert.match(cards[0].innerHTML, /781\.9%/);
-  // spread card does NOT use code deep-link (param unsupported) → plain home url
+  // spread card does NOT use code deep-link (param unsupported) → home url + theme
   const spreadFirst = cards[1].querySelector(".ext-row");
-  assert.equal(spreadFirst.getAttribute("href"), "https://ducklove.github.io/common_preferred_spread/");
+  assert.equal(spreadFirst.getAttribute("href"), "https://ducklove.github.io/common_preferred_spread/?theme=light");
   // gold gap: negative → md-down, positive → md-up; uses asset deep-link
   assert.ok(cards[2].querySelector(".ext-val.md-down"));
   assert.ok(cards[2].querySelector(".ext-val.md-up"));
