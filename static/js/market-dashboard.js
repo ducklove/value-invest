@@ -13,7 +13,7 @@ let _mdLoadedOnce = false;
 let _mdInFlight = null;
 
 // Display order for category groups; unknown categories fall to the end.
-const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물'];
+const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
 const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주' };

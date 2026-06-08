@@ -80,6 +80,11 @@ CATALOG: dict[str, dict] = {
     "CN10Y":  {"label": "중국10년물", "category": "국채", "country": "CN", "maturity": 10},
     # 야간선물
     "NIGHT_FUTURES": {"label": "야간선물", "category": "야간선물"},
+    # 바이낸스 USDⓈ-M 선물 (토큰화 주식 무기한) — USDT 가격·24h 등락
+    "BNB_EWY":     {"label": "EWY",        "category": "바이낸스"},
+    "BNB_SAMSUNG": {"label": "삼성전자",   "category": "바이낸스"},
+    "BNB_SKHYNIX": {"label": "SK하이닉스", "category": "바이낸스"},
+    "BNB_HYUNDAI": {"label": "현대차",     "category": "바이낸스"},
 }
 
 _EMPTY = {"value": "", "change": "", "change_pct": "", "direction": ""}
@@ -284,6 +289,62 @@ async def _fetch_foreign_index(client: httpx.AsyncClient, symbol: str) -> dict:
         }
     except Exception:
         return dict(_EMPTY)
+
+
+# ---------------------------------------------------------------------------
+# Binance USDⓈ-M Futures (tokenized stock perps) — 한 번의 배치 요청
+# ---------------------------------------------------------------------------
+_BINANCE_MAP = {
+    "BNB_EWY":     "EWYUSDT",
+    "BNB_SAMSUNG": "SAMSUNGUSDT",
+    "BNB_SKHYNIX": "SKHYNIXUSDT",
+    "BNB_HYUNDAI": "HYUNDAIUSDT",
+}
+
+
+async def _fetch_binance_tickers(client: httpx.AsyncClient, codes: list[str]) -> dict:
+    """바이낸스 USDⓈ-M 선물 24h 티커(배치). {code: {value, change, change_pct, direction}}.
+
+    값은 USDT 가격, change 는 절대 변동(부호 제외, 프론트가 direction 으로 부호 표시).
+    실패·결측은 _EMPTY 로 안전 폴백한다.
+    """
+    out: dict[str, dict] = {}
+    symbols = [_BINANCE_MAP[c] for c in codes if c in _BINANCE_MAP]
+    if not symbols:
+        return out
+    try:
+        r = await client.get(
+            "https://fapi.binance.com/fapi/v1/ticker/24hr",
+            params={"symbols": _json.dumps(symbols, separators=(",", ":"))},
+            headers=_HEADERS,
+        )
+        rows = r.json()
+        by_symbol = {
+            row.get("symbol"): row for row in rows if isinstance(row, dict)
+        } if isinstance(rows, list) else {}
+        for code in codes:
+            row = by_symbol.get(_BINANCE_MAP.get(code))
+            if not row:
+                out[code] = dict(_EMPTY)
+                continue
+            try:
+                last = float(row.get("lastPrice"))
+                chg = float(row.get("priceChange"))
+                pct = float(row.get("priceChangePercent"))
+            except (TypeError, ValueError):
+                out[code] = dict(_EMPTY)
+                continue
+            direction = "up" if pct > 0 else ("down" if pct < 0 else "")
+            out[code] = {
+                "value": _fmt(last),
+                "change": _fmt(abs(chg)),
+                "change_pct": f"{abs(pct):.2f}%",
+                "direction": direction,
+            }
+    except Exception:
+        for code in codes:
+            out.setdefault(code, dict(_EMPTY))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -923,6 +984,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     night_futures_needed = False
     gold_needed = False
     wti_needed = False
+    binance_items = []  # 바이낸스 선물 — one batched request
 
     for code in fetch_codes:
         if code == "CMDT_GC":
@@ -949,6 +1011,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             sofr_needed = True
         elif code == "NIGHT_FUTURES":
             night_futures_needed = True
+        elif code in _BINANCE_MAP:
+            binance_items.append(code)
 
     need_marketindex_page = len(marketindex_items) > 0
 
@@ -1017,6 +1081,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_night_futures(client))
             task_keys.append(("night_futures", None))
 
+        # Binance USDⓈ-M futures — one batched request covers all symbols
+        if binance_items:
+            tasks.append(_fetch_binance_tickers(client, binance_items))
+            task_keys.append(("binance", None))
+
         # Run all in parallel
         fetched = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -1058,6 +1127,12 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 results["US_SOFR"] = result
             elif kind == "night_futures":
                 results["NIGHT_FUTURES"] = result
+            elif kind == "binance":
+                # result is {code: data}; copy only requested codes.
+                if isinstance(result, dict):
+                    for c in binance_items:
+                        if c in result:
+                            results[c] = result[c]
 
         # Parse marketindex page items
         if marketindex_html:
