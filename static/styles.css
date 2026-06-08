@@ -528,15 +528,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 /* 투자정보 (Investing dashboard) — public market overview grid */
 .market-dashboard-section {
   margin-bottom: 24px;
-  padding: 18px 20px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
 }
 .md-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   margin-bottom: 14px;
 }
@@ -572,7 +568,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
-  background: var(--bg);
+  background: var(--surface);
 }
 .md-section-title {
   margin: 0 0 10px;
@@ -584,7 +580,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 /* 주요 지수 hero — prominent cards */
 .md-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-.md-hero-card { position: relative; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
+.md-hero-card { position: relative; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--bg); }
 .md-hero-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
 .md-hero-val { font-size: 22px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .md-hero-card .md-chg { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; }
@@ -681,7 +677,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .ext-card {
   border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
-  background: var(--surface, transparent);
+  background: var(--bg, transparent);
 }
 .ext-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -3801,7 +3797,6 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
   .mobile-tabbar { display: grid; }
 
   /* 섹션 카드 패딩 축소 — 좁은 화면에서 내부 콘텐츠 폭을 더 확보 */
-  .market-dashboard-section,
   .daily-market-section {
     padding: 14px;
   }
