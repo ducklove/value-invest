@@ -548,6 +548,27 @@ function _hexToRgba(hex, alpha) {
  * @param {HTMLElement} container - div element
  * @param {Object} opts - { labels, values, color, smooth, fill, yMin, tooltipPrefix, yFormatter, connectNulls }
  */
+// echarts 폭0 자가복구 — grid 가 display:none→grid 로 막 바뀐 직후처럼 레이아웃
+// reflow 전에 init 되면 캔버스가 0 크기로 굳어 차트가 안 보인다(다른 종목을 갔다
+// 와야 보이던 증상). 컨테이너가 실제 크기를 가지는 순간 한 번 resize 해서 그린다.
+function _autoResizeOnLayout(ec, container) {
+  if (container.clientWidth && container.clientHeight) return;  // 이미 정상
+  let done = false, ro = null;
+  const fix = () => {
+    if (done) return;
+    if (container.clientWidth && container.clientHeight) {
+      done = true;
+      try { ec.resize(); } catch (e) {}
+      if (ro) ro.disconnect();
+    }
+  };
+  if (typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(fix);
+    ro.observe(container);
+  }
+  requestAnimationFrame(fix);  // ResizeObserver 미지원/누락 대비 폴백 한 프레임
+}
+
 function createLineChart(container, opts) {
   const { labels, values, color = '#3b82f6', smooth = 0.3, fill = true,
           yMin, tooltipPrefix = '', yFormatter, connectNulls = false, dataZoom = false } = opts;
@@ -618,6 +639,7 @@ function _createEChartsChart(container, opts) {
       connectNulls,
     }],
   });
+  _autoResizeOnLayout(ec, container);
   return ec;
 }
 
