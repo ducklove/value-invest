@@ -291,7 +291,7 @@ function _drawBondCurveChart(curve) {
     grid: { left: 46, right: 14, top: 28, bottom: 24 },
     legend: { data: ['한국', '미국', '일본'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 2 },
     xAxis: { type: 'category', data: curve.labels, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 10 }, splitLine: { show: false } },
-    yAxis: { type: 'value', scale: true, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) + '%' }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
+    yAxis: { type: 'value', min: 0, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) + '%' }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
     tooltip: {
       trigger: 'axis',
       formatter(ps) {
