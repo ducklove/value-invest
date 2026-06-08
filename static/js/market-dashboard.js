@@ -351,22 +351,28 @@ function _mdBondCountries(codes, catalog, dataMap) {
 
 function _bondCurveTableHtml(curve) {
   if (!curve.labels.length) return '';
-  // 금리 옆 괄호에 전일대비 변동(%p, 부호·색상). 변동값 없으면 금리만.
-  const cell = (v, c) => {
-    if (v == null) return '<td>-</td>';
-    let chg = '';
-    if (c != null && isFinite(c)) {
-      const cls = c > 0 ? 'md-up' : (c < 0 ? 'md-down' : 'md-flat');
-      const sign = c > 0 ? '+' : '';
-      chg = ` <span class="bt-chg ${cls}">(${sign}${c.toFixed(2)})</span>`;
-    }
-    return `<td>${v.toFixed(2)}${chg}</td>`;
+  // 금리(값)와 전일대비 변동(%p)을 국가별 별도 컬럼으로 분리해 자리를 맞춘다.
+  const valCell = (v, grp) => `<td class="bt-val${grp ? ' bt-grp' : ''}">${v == null ? '-' : v.toFixed(2)}</td>`;
+  const chgCell = (c) => {
+    if (c == null || !isFinite(c)) return '<td class="bt-chg">-</td>';
+    const cls = c > 0 ? 'md-up' : (c < 0 ? 'md-down' : 'md-flat');
+    return `<td class="bt-chg ${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</td>`;
   };
   const rows = curve.labels.map((lab, i) =>
     `<tr><td class="bt-mat">${escapeHtml(lab)}</td>`
-    + cell(curve.kr[i], curve.krChg[i]) + cell(curve.us[i], curve.usChg[i]) + cell(curve.jp[i], curve.jpChg[i]) + '</tr>'
+    + valCell(curve.kr[i], false) + chgCell(curve.krChg[i])
+    + valCell(curve.us[i], true) + chgCell(curve.usChg[i])
+    + valCell(curve.jp[i], true) + chgCell(curve.jpChg[i])
+    + '</tr>'
   ).join('');
-  return '<table class="bond-tbl"><thead><tr><th>만기</th><th>한국</th><th>미국</th><th>일본</th></tr></thead>'
+  return '<table class="bond-tbl bond-tbl-split">'
+    + '<thead>'
+    + '<tr><th rowspan="2">만기</th>'
+    + '<th colspan="2">한국</th><th colspan="2" class="bt-grp">미국</th><th colspan="2" class="bt-grp">일본</th></tr>'
+    + '<tr><th class="bt-sub">금리</th><th class="bt-sub">변동</th>'
+    + '<th class="bt-sub bt-grp">금리</th><th class="bt-sub">변동</th>'
+    + '<th class="bt-sub bt-grp">금리</th><th class="bt-sub">변동</th></tr>'
+    + '</thead>'
     + `<tbody>${rows}</tbody></table>`;
 }
 
@@ -375,7 +381,7 @@ function _mdBondSectionHtml() {
   // 별도 수치 표는 생략한다. 기간별 금리는 곡선이 한·미·일이라 표를 함께 둔다.
   return '<section class="md-section md-bond-section">'
     + '<h3 class="md-section-title">국채</h3>'
-    + '<div class="md-bond-sub">기간별 금리 (Yield Curve · 괄호=전일대비 %p)</div>'
+    + '<div class="md-bond-sub">기간별 금리 (Yield Curve · 변동=전일대비 %p)</div>'
     + '<div class="md-bond-chart" id="bondYieldCurve"></div>'
     + '<div class="md-bond-table" id="bondCurveTable"></div>'
     + '<div class="md-bond-sub">국가별 10년물</div>'
