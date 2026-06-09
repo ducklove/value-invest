@@ -204,27 +204,31 @@ def test_today_card_percent_uses_same_settlement_base_as_amount():
     assert "_renderSummarySparklines(_l ? _liveNavValueKrw : null);" in source
 
 
-def test_today_sparkline_maps_ticks_from_settlement_axis():
+def test_today_sparkline_uses_8_to_20_session_axis():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
 
     assert "function _sparkAxisHoursFromTs" in source
     assert "function _sparkNowKstIsoMinute" in source
     assert "function _sparkTodayCashflowThroughTs" in source
-    # Axis start comes from the intraday window (earliest ts the backend
-    # prepends), NOT pfPrevDaySnapshot.date — the latter is the last trading
-    # day's settlement and drifts from the window start across weekends.
-    assert "const _intradayAxisStart = (Array.isArray(pfIntradayData) ? pfIntradayData : [])" in source
-    assert ".reduce((min, d) => (d?.ts && (min === null || d.ts < min) ? d.ts : min), null);" in source
-    assert "const axisStartTs = _intradayAxisStart || (pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null);" in source
-    assert "const axisEndTs = axisStartTs ? _sparkAxisEndTs(axisStartTs) : null;" in source
+    # TODAY 축은 세션일 08:00~20:00(KST) 고정 — 결산창의 야간 빈 구간을 잘라낸다.
+    # 세션일은 intraday 최신 점 날짜(주말·공휴일에도 정합), 없으면 현재 KST.
+    assert "const SPARK_DAILY_START_HOUR = 8;" in source
+    assert "const SPARK_DAILY_END_HOUR = 20;" in source
+    assert "function _sparkDailyAxis" in source
+    assert "const _dailyAxis = _sparkDailyAxis();" in source
+    assert "const axisStartTs = _dailyAxis.start;" in source
+    assert "const axisEndTs = _dailyAxis.end;" in source
+    assert "const _dailyAxisHours = SPARK_DAILY_END_HOUR - SPARK_DAILY_START_HOUR;" in source
     assert "_sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs)" in source
     assert "_sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs)" in source
+    # y 는 직전 22:00 결산(prevClose) 대비 등락% 유지(축만 바뀜).
     assert "const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);" in source
     assert "adjustedTotal / _prevClose - 1" in source
-    assert "let axisMaxHours = 0;" in source
-    assert "const visibleAxisMaxHours = Math.max(0.25, Math.min(24, axisMaxHours || raw[raw.length - 1]?.x || 24));" in source
-    assert "_drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', visibleAxisMaxHours);" in source
+    assert "_drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', _dailyAxisHours);" in source
     assert "raw.filter(p => p.y" not in source
+    # 24시간 결산창 축은 제거됨.
+    assert "_sparkAxisEndTs" not in source
+    assert "visibleAxisMaxHours" not in source
     assert "hour + 2" not in source
     assert "endsWith('T00:00')" not in source
 

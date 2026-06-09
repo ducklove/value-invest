@@ -661,11 +661,21 @@ function _sparkLocalMinuteValue(ts) {
   ) / 60000;
 }
 
-function _sparkAxisEndTs(axisStartTs) {
-  const start = _sparkLocalMinuteValue(axisStartTs);
-  if (start === null) return null;
-  const end = new Date((start + 24 * 60) * 60000);
-  return `${end.getUTCFullYear()}-${String(end.getUTCMonth() + 1).padStart(2, '0')}-${String(end.getUTCDate()).padStart(2, '0')}T${String(end.getUTCHours()).padStart(2, '0')}:${String(end.getUTCMinutes()).padStart(2, '0')}`;
+// TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축으로 그린다. 결산창(직전 22:00→
+// 다음 22:00)의 야간 빈 구간을 잘라 장전·장중·장후 활성 시간대만 보여준다.
+const SPARK_DAILY_START_HOUR = 8;
+const SPARK_DAILY_END_HOUR = 20;
+// 세션일 = intraday 최신 점의 날짜(주말·공휴일에도 장중 점이 몰리지 않음). 없으면 현재 KST.
+function _sparkDailyAxis() {
+  const ints = Array.isArray(pfIntradayData) ? pfIntradayData : [];
+  let maxTs = null;
+  for (const d of ints) {
+    if (d && d.ts && (maxTs === null || d.ts > maxTs)) maxTs = d.ts;
+  }
+  const m = maxTs && /^(\d{4})-(\d{2})-(\d{2})T/.exec(maxTs);
+  const ymd = m ? `${m[1]}-${m[2]}-${m[3]}` : _sparkNowKstIsoMinute().slice(0, 10);
+  const pad = (n) => String(n).padStart(2, '0');
+  return { start: `${ymd}T${pad(SPARK_DAILY_START_HOUR)}:00`, end: `${ymd}T${pad(SPARK_DAILY_END_HOUR)}:00` };
 }
 
 function _sparkNowKstIsoMinute() {
@@ -774,39 +784,35 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparklinePoints('sparkMonthly', [], '#dc2626', 31);
   }
 
-  // sparkline 은 "오늘" 결산 창(직전 22:00 → 다음 22:00) 24시간 축으로 그린다.
-  // 축 시작은 백엔드가 intraday 맨 앞에 끼우는 결산경계 ts(최소 ts)를 쓴다.
-  // pfPrevDaySnapshot.date(마지막 거래일)는 주말 끼면 어긋나 장중 점이 몰린다.
+  // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 22:00 결산(prevClose)
+  // 대비 등락%. 축은 _sparkDailyAxis() 가 세션일 기준으로 만든다(now 까지 그려지고
+  // 우측 빈 구간은 미래 시간).
   const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
     ? pfPrevDaySnapshot.total_value
     : null;
-  const _intradayAxisStart = (Array.isArray(pfIntradayData) ? pfIntradayData : [])
-    .reduce((min, d) => (d?.ts && (min === null || d.ts < min) ? d.ts : min), null);
-  const axisStartTs = _intradayAxisStart || (pfPrevDaySnapshot?.date ? `${pfPrevDaySnapshot.date}T22:00` : null);
-  const axisEndTs = axisStartTs ? _sparkAxisEndTs(axisStartTs) : null;
-  if (!_prevClose || !axisStartTs || !axisEndTs) {
-    _drawSparklinePoints('sparkDaily', [], '#dc2626', 24);
+  const _dailyAxis = _sparkDailyAxis();
+  const axisStartTs = _dailyAxis.start;
+  const axisEndTs = _dailyAxis.end;
+  const _dailyAxisHours = SPARK_DAILY_END_HOUR - SPARK_DAILY_START_HOUR;
+  if (!_prevClose) {
+    _drawSparklinePoints('sparkDaily', [], '#dc2626', _dailyAxisHours);
   } else {
     const raw = [{ x: 0, y: 0 }];
-    let axisMaxHours = 0;
     for (const d of pfIntradayData) {
       if (!d || !d.total_value) continue;
       const x = _sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs);
       if (x === null) continue;
-      axisMaxHours = Math.max(axisMaxHours, x);
       const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);
       raw.push({ x, y: (adjustedTotal / _prevClose - 1) * 100 });
     }
     if (currentTotalValue) {
       const x = _sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs);
       if (x !== null) {
-        axisMaxHours = Math.max(axisMaxHours, x);
         raw.push({ x, y: (currentTotalValue / _prevClose - 1) * 100 });
       }
     }
     const lastPct = raw.length ? raw[raw.length - 1].y : 0;
-    const visibleAxisMaxHours = Math.max(0.25, Math.min(24, axisMaxHours || raw[raw.length - 1]?.x || 24));
-    _drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', visibleAxisMaxHours);
+    _drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', _dailyAxisHours);
   }
 }
 function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
