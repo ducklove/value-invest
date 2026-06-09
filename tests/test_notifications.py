@@ -273,6 +273,27 @@ class AlertCrudTests(NotificationHarness):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["stock_code"], "000660")
 
+    async def test_blanket_feed_all_alerts_crud(self):
+        # 신규 공시(전체)/리포트(전체): scope=all_stocks, threshold 0, 사용자당 singleton.
+        for atype in ("disclosure_new_all", "report_new_all"):
+            resp = await self.client.post("/api/notifications/alerts", json={"alert_type": atype})
+            self.assertEqual(resp.status_code, 200, resp.text)
+            rule = resp.json()
+            self.assertEqual(rule["scope"], "all_stocks")
+            self.assertEqual(rule["threshold"], 0)
+            self.assertIsNone(rule["stock_code"])
+            resp2 = await self.client.post("/api/notifications/alerts", json={"alert_type": atype})
+            self.assertEqual(resp2.json()["id"], rule["id"])  # singleton upsert
+
+    async def test_analysis_feed_off_creates_disabled_rule(self):
+        # 종목 분석 '꺼짐' = enabled:false 개별 규칙(전체를 억제하는 마커).
+        resp = await self.client.post(
+            "/api/notifications/alerts",
+            json={"alert_type": "disclosure_new", "stock_code": "005930", "source": "analysis", "enabled": False},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["enabled"], 0)
+
     async def test_target_reached_blanket_singleton(self):
         resp = await self.client.post(
             "/api/notifications/alerts", json={"alert_type": "target_reached"}
@@ -432,6 +453,15 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         defaults = dict(scope="stock", alert_type="price_above", threshold=72000.0, stock_code="005930")
         defaults.update(kw)
         return await cache.create_portfolio_alert("u1", **defaults)
+
+    async def _add_holding(self, code, name):
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT OR IGNORE INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, created_at, updated_at)"
+            " VALUES ('u1', ?, ?, 10, 1000, 't', 't')",
+            (code, name),
+        )
+        await db.commit()
 
     async def test_no_dispatch_without_active_channel(self):
         await cache.delete_notification_channel("u1", "telegram")
@@ -715,6 +745,57 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:
             await engine.evaluate_all()
         self.assertGreaterEqual(disp.await_count, 1)  # u2 발화(80000 >= 72000)
+
+    async def test_blanket_disclosure_feed_baseline_then_fire(self):
+        await self._add_holding("000660", "SK하이닉스")
+        await self._rule(scope="all_stocks", alert_type="disclosure_new_all", threshold=0.0, stock_code=None)
+        disp = AsyncMock()
+        feed = {
+            "005930": {"rcept_no": "A1", "report_nm": "주요사항보고서", "rcept_dt": "20260101"},
+            "000660": {"rcept_no": "B1", "report_nm": "주요사항보고서", "rcept_dt": "20260101"},
+        }
+
+        async def fake_feed(kind, code, fc):
+            v = feed.get(code)
+            return dict(v) if v else None
+
+        with patch.object(engine, "_cached_feed", new=fake_feed), \
+             patch.object(channels, "dispatch", new=disp):
+            self.assertEqual(await engine.evaluate_user("u1"), 0)  # 첫 틱: 두 종목 baseline만
+            disp.assert_not_awaited()
+            feed["005930"] = {"rcept_no": "A2", "report_nm": "단일판매ㆍ공급계약체결", "rcept_dt": "20260102"}
+            self.assertEqual(await engine.evaluate_user("u1"), 1)  # 005930 신규 → 1회
+            self.assertEqual(disp.await_count, 1)
+
+    async def test_blanket_feed_respects_per_stock_override(self):
+        # 전체 신규공시 ON + 개별: 005930 켜짐(개별 발송), 000660 꺼짐(억제).
+        # blanket 은 개별 규칙이 있는 두 종목을 모두 스킵 → 발송은 005930 개별 경로만.
+        await self._add_holding("000660", "SK하이닉스")
+        await self._rule(scope="all_stocks", alert_type="disclosure_new_all", threshold=0.0, stock_code=None)
+        await cache.create_portfolio_alert("u1", scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="005930", enabled=True)
+        await cache.create_portfolio_alert("u1", scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="000660", enabled=False)
+        feed = {
+            "005930": {"rcept_no": "A1", "report_nm": "주요사항보고서", "rcept_dt": "20260101"},
+            "000660": {"rcept_no": "B1", "report_nm": "주요사항보고서", "rcept_dt": "20260101"},
+        }
+        calls = []
+
+        async def fake_feed(kind, code, fc):
+            v = feed.get(code)
+            return dict(v) if v else None
+
+        async def cap(google_sub, text):
+            calls.append(text)
+            return 1
+
+        with patch.object(engine, "_cached_feed", new=fake_feed), \
+             patch.object(channels, "dispatch", new=cap):
+            self.assertEqual(await engine.evaluate_user("u1"), 0)  # 첫 틱: 005930 개별 baseline
+            feed["005930"] = {"rcept_no": "A2", "report_nm": "단일판매ㆍ공급계약체결", "rcept_dt": "20260102"}
+            feed["000660"] = {"rcept_no": "B2", "report_nm": "단일판매ㆍ공급계약체결", "rcept_dt": "20260102"}
+            self.assertEqual(await engine.evaluate_user("u1"), 1)  # 005930 개별만
+        self.assertTrue(any("삼성전자" in t for t in calls))
+        self.assertTrue(all("SK하이닉스" not in t for t in calls))  # 000660(꺼짐) 억제
 
 
 class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):

@@ -274,8 +274,10 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
     else:
         scope = "portfolio"
 
-    # 사용자 임계값이 없는 유형: 목표가/상하한가 도달, 신규 공시/리포트.
-    if alert_type in (engine.TARGET_TYPES | engine.LIMIT_TYPES | engine.STOCK_FEED_TYPES):
+    # 사용자 임계값이 없는 유형: 목표가/상하한가 도달, 개별·전체 신규 공시/리포트.
+    if alert_type in (
+        engine.TARGET_TYPES | engine.LIMIT_TYPES | engine.STOCK_FEED_TYPES | engine.BLANKET_FEED_TYPES
+    ):
         threshold = 0.0
     else:
         try:

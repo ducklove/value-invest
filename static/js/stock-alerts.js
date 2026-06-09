@@ -93,9 +93,12 @@ function saRender() {
   saRenderList();
 }
 
-function saToggleBtn(type, rule) {
-  const on = !!(rule && rule.enabled);
-  return `<button class="pf-alert-btn sa-toggle${on ? ' on' : ''}" type="button" onclick="saToggleFeed('${type}', ${on ? 'false' : 'true'})">${on ? '켜짐' : '꺼짐'}</button>`;
+function saFeedSelect(type, rule) {
+  // 현재 상태: 규칙 없음=unset(전체 설정 따름), enabled=1=on(이 종목 켜짐),
+  // enabled=0=off(전체가 켜져도 이 종목은 억제).
+  const mode = rule ? (rule.enabled ? 'on' : 'off') : 'unset';
+  const opt = (v, label) => `<option value="${v}"${mode === v ? ' selected' : ''}>${label}</option>`;
+  return `<select class="pf-modal-input sa-feed-select" onchange="saSetFeedMode('${type}', this.value)">${opt('unset', '설정 안함 (전체 설정 따름)')}${opt('off', '꺼짐')}${opt('on', '켜짐')}</select>`;
 }
 
 function saRenderForm() {
@@ -123,12 +126,12 @@ function saRenderForm() {
     <div class="pf-alert-form-row sa-toggle-row">
       <span class="sa-field-label">신규 공시</span>
       <span class="sa-note">증권발행실적보고서 등 발행 공시는 제외</span>
-      ${saToggleBtn('disclosure_new', disc)}
+      ${saFeedSelect('disclosure_new', disc)}
     </div>
     <div class="pf-alert-form-row sa-toggle-row">
       <span class="sa-field-label">신규 리포트</span>
       <span class="sa-note">증권사 리포트가 새로 올라오면 알림</span>
-      ${saToggleBtn('report_new', rep)}
+      ${saFeedSelect('report_new', rep)}
     </div>`;
 }
 
@@ -189,15 +192,15 @@ async function saSetDaily() {
   await saCreate({ alert_type: 'stock_daily_abs', threshold: val });
 }
 
-async function saToggleFeed(type, on) {
-  const turnOn = (on === true || on === 'true');
+async function saSetFeedMode(type, mode) {
   const existing = saFindAlert(type);
-  if (turnOn) {
-    if (existing) { await saToggle(existing.id, true); return; }
-    await saCreate({ alert_type: type });
-  } else if (existing) {
-    await saToggle(existing.id, false);
+  if (mode === 'unset') {
+    if (existing) await saDelete(existing.id);  // 규칙 제거 → 전체(blanket) 설정 따름
+    else saLoadList();
+    return;
   }
+  // off/on: (종목, 유형) singleton 으로 생성·갱신. enabled 로 켜짐/꺼짐(억제) 표현.
+  await saCreate({ alert_type: type, enabled: mode === 'on' });
 }
 
 async function saToggle(id, enabled) {
@@ -219,6 +222,6 @@ async function saDelete(id) {
 if (typeof window !== 'undefined') {
   Object.assign(window, {
     openStockAlerts, closeStockAlerts, saRender,
-    saAddPrice, saSetDaily, saToggleFeed, saToggle, saDelete,
+    saAddPrice, saSetDaily, saSetFeedMode, saToggle, saDelete,
   });
 }

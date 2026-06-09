@@ -58,6 +58,8 @@ test("카테고리 -> {alert_type} 매핑", () => {
   assert.deepEqual({ ...w.pfAlertsBuildType("target", "above") }, { alert_type: "target_reached" });
   assert.deepEqual({ ...w.pfAlertsBuildType("limit", "above") }, { alert_type: "limit_reached" });
   assert.deepEqual({ ...w.pfAlertsBuildType("dailyAbs", "above") }, { alert_type: "daily_change_abs" });
+  assert.deepEqual({ ...w.pfAlertsBuildType("disclosureAll", "above") }, { alert_type: "disclosure_new_all" });
+  assert.deepEqual({ ...w.pfAlertsBuildType("reportAll", "above") }, { alert_type: "report_new_all" });
   assert.deepEqual({ ...w.pfAlertsBuildType("nav", "above") }, { alert_type: "nav_above" });
   assert.deepEqual({ ...w.pfAlertsBuildType("daily", "below") }, { alert_type: "daily_change_below" });
 });
@@ -150,6 +152,22 @@ test("규칙 목록: 블랭킷/포트폴리오 라벨", () => {
   assert.match(html, /보유 전 종목 — 일간 등락률 ±5% 이상/);
   assert.match(html, /포트폴리오 일간 등락률/);
   assert.match(html, /보유 전 종목 — 상한가·하한가 도달 시/);
+});
+
+test("카테고리에 신규 공시/리포트(전체) 옵션 + 목록 라벨", () => {
+  const w = loadAlerts([SAMSUNG]);
+  w.pfAlertsSetCategory("target");
+  const formHtml = w.document.getElementById("pfAlertForm").innerHTML;
+  assert.match(formHtml, /신규 공시 \(전체\)/);
+  assert.match(formHtml, /신규 리포트 \(전체\)/);
+  w.PfAlerts.alerts = [
+    { id: 5, alert_type: "disclosure_new_all", scope: "all_stocks", threshold: 0, enabled: 1, armed: 1, note: "" },
+    { id: 6, alert_type: "report_new_all", scope: "all_stocks", threshold: 0, enabled: 1, armed: 1, note: "" },
+  ];
+  w.pfAlertsRenderList();
+  const listHtml = w.document.getElementById("pfAlertList").innerHTML;
+  assert.match(listHtml, /보유 전 종목 — 신규 공시 시/);
+  assert.match(listHtml, /보유 전 종목 — 신규 리포트 시/);
 });
 
 test("규칙 목록: 중요 규칙은 배지·강조 카드·별 토글을 보인다", () => {

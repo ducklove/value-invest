@@ -45,7 +45,10 @@ PORTFOLIO_DAILY_TYPES = frozenset({"daily_change_above", "daily_change_below"}) 
 TARGET_TYPES = frozenset({"target_reached"})                      # blanket (all holdings)
 DAILY_ABS_TYPES = frozenset({"daily_change_abs"})                 # blanket (all holdings, ±n%)
 LIMIT_TYPES = frozenset({"limit_reached"})                        # blanket (all holdings, 상/하한가)
-BLANKET_TYPES = TARGET_TYPES | DAILY_ABS_TYPES | LIMIT_TYPES
+# blanket 중 시세가 필요한 것(전 종목 quote)과 외부 feed(공시/리포트)를 구분.
+BLANKET_QUOTE_TYPES = TARGET_TYPES | DAILY_ABS_TYPES | LIMIT_TYPES
+BLANKET_FEED_TYPES = frozenset({"disclosure_new_all", "report_new_all"})  # 보유 전 종목 신규 공시/리포트
+BLANKET_TYPES = BLANKET_QUOTE_TYPES | BLANKET_FEED_TYPES
 # 개별 종목(분석 화면) 알림 — 보유 여부 무관, scope='stock'.
 STOCK_DAILY_ABS_TYPES = frozenset({"stock_daily_abs"})            # 개별 종목 일간 등락률 ±n%
 STOCK_FEED_TYPES = frozenset({"disclosure_new", "report_new"})    # 신규 공시 / 신규 리포트
@@ -502,6 +505,56 @@ async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: d
     return 1
 
 
+async def _eval_blanket_feed(
+    google_sub: str, rule: dict, items_by_code: dict, override_codes: set, feed_cache: dict | None
+) -> int:
+    """보유 전 종목 신규 공시/리포트(blanket). per-holding baseline 을 state_json
+    ``{"<code>": "<ident>"}`` 에 저장한다.
+
+    개별(분석 화면) 규칙이 있는 종목(override_codes)은 스킵 — 그 종목은 개별 설정이
+    우선한다. 첫 관측은 baseline 만 저장(미발송), 이후 식별자가 바뀌면 1회 발송.
+    """
+    try:
+        state = json.loads(rule.get("state_json") or "{}")
+    except (TypeError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+
+    kind = "disc" if rule["alert_type"] == "disclosure_new_all" else "rep"
+    sent = 0
+    changed = False
+    for code, item in items_by_code.items():
+        if code in override_codes:
+            continue  # 개별 설정(켜짐/꺼짐)이 전체에 우선 → blanket 평가 제외
+        latest = await _cached_feed(kind, code, feed_cache)
+        if not latest:
+            continue
+        raw = latest.get("rcept_no") if kind == "disc" else latest.get("sig")
+        ident = str(raw or "")
+        if not ident:
+            continue
+        baseline = state.get(code)
+        if baseline is None:
+            state[code] = ident  # 첫 관측: 기준선만, 미발송
+            changed = True
+            continue
+        if ident == baseline:
+            continue
+        name = item.get("stock_name") or code
+        text = _format_disclosure_message(rule, name, latest) if kind == "disc" else _format_report_message(rule, name, latest)
+        if rule.get("important"):
+            text = _emphasize(text)
+        await channels.dispatch(google_sub, text)
+        state[code] = ident
+        changed = True
+        sent += 1
+
+    if changed:
+        await cache.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+    return sent
+
+
 async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> int:
     """Evaluate all enabled rules for one user. Returns alerts sent."""
     rules = await cache.list_portfolio_alerts(google_sub, enabled_only=True)
@@ -533,10 +586,23 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
         r["stock_code"] for r in rules
         if r["alert_type"] in (PRICE_TYPES | STOCK_DAILY_ABS_TYPES) and r.get("stock_code")
     }
-    has_blanket = any(r["alert_type"] in BLANKET_TYPES for r in rules)
+    has_quote_blanket = any(r["alert_type"] in BLANKET_QUOTE_TYPES for r in rules)
     needed: set[str] = set(metric_codes)
-    if has_blanket:
+    if has_quote_blanket:
         needed |= set(items_by_code)
+    # 전체 신규 공시/리포트(blanket feed)가 있으면, 개별 규칙이 걸린 종목은 그 종목의
+    # 개별 설정(켜짐/꺼짐)이 우선하므로 blanket 평가에서 제외한다(enabled 무관 조회).
+    override_disc: set[str] = set()
+    override_rep: set[str] = set()
+    if any(r["alert_type"] in BLANKET_FEED_TYPES for r in rules):
+        for r in await cache.list_portfolio_alerts(google_sub):
+            code = r.get("stock_code")
+            if not code:
+                continue
+            if r.get("alert_type") == "disclosure_new":
+                override_disc.add(code)
+            elif r.get("alert_type") == "report_new":
+                override_rep.add(code)
     # 우선주 자동 목표가는 본주가를 추가로 조회해야 한다.
     if any(r["alert_type"] in TARGET_TYPES for r in rules):
         for code, item in items_by_code.items():
@@ -565,7 +631,12 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
     for rule in rules:
         alert_type = rule["alert_type"]
 
-        if alert_type in BLANKET_TYPES:
+        if alert_type in BLANKET_FEED_TYPES:
+            override = override_disc if alert_type == "disclosure_new_all" else override_rep
+            sent += await _eval_blanket_feed(google_sub, rule, items_by_code, override, feed_cache)
+            continue
+
+        if alert_type in BLANKET_TYPES:  # quote blanket (목표가/일간등락/상하한가)
             sent += await _eval_blanket(google_sub, rule, items_by_code, quote_map)
             continue
 
