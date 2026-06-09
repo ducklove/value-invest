@@ -1126,6 +1126,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .company-info .coverage[data-count="6"] {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+/* 기본 7개(PER/PBR/ROE/배당/시총/목표가/베타)는 4열(4+3). 외부·DR 로 9개면 3열(3×3). */
+.company-info .coverage[data-count="9"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .valuation-card {
   border: 1px solid var(--border);
   border-radius: 10px;

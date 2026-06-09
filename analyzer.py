@@ -60,6 +60,7 @@ def analyze(
         "주가": [{"date": item["date"], "value": item.get("close_price")} for item in wmd],
         "PER": [{"date": item["date"], "value": item.get("per")} for item in wmd],
         "PBR": [{"date": item["date"], "value": item.get("pbr")} for item in wmd],
+        "주당배당금 (원)": [{"date": item["date"], "value": item.get("dividend_per_share")} for item in wmd],
         "배당수익률 (%)": [{"date": item["date"], "value": item.get("dividend_yield")} for item in wmd],
         "시가총액": [{"date": item["date"], "value": item.get("market_cap")} for item in wmd],
         "EPS (원)": [{"date": item["date"], "value": item.get("eps")} for item in wmd],

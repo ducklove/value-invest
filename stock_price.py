@@ -1072,6 +1072,7 @@ async def fetch_weekly_market_data(
                 "pbr": _safe_div(close_price, bps) if close_price else None,
                 "eps": eps,
                 "bps": bps,
+                "dividend_per_share": active_financial.get("dividend_per_share") if active_financial else None,
                 "dividend_yield": _safe_div(trailing_dividends, close_price, 100)
                 if trailing_dividends is not None and close_price
                 else None,

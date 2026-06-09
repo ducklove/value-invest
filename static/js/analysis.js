@@ -158,7 +158,7 @@ function getLatestDerivedBps(indicators) {
 function getCurrentValuationMetrics(indicators, quoteSnapshot) {
   const currentPrice = Number(quoteSnapshot?.price);
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
-    return { per: null, pbr: null, dividendYield: null };
+    return { per: null, pbr: null, roe: null, dividendYield: null, marketCap: null };
   }
 
   const latestEps = getLatestIndicatorValue(indicators['EPS (원)']);
@@ -172,8 +172,24 @@ function getCurrentValuationMetrics(indicators, quoteSnapshot) {
   return {
     per: latestEps && latestEps > 0 ? currentPrice / latestEps : null,
     pbr: latestBps && latestBps > 0 ? currentPrice / latestBps : null,
+    roe: getLatestIndicatorValue(indicators['ROE (%)']),
     dividendYield: trailingDps !== null ? (trailingDps / currentPrice) * 100 : null,
+    marketCap: getCurrentMarketCap(indicators, currentPrice),
   };
+}
+
+// 현재 시총 = 최신 연간 (시가총액/주가)로 추정한 상장주식수 × 현재가.
+// 둘 중 하나라도 없으면 최신 연간 시총을 그대로 쓴다.
+function getCurrentMarketCap(indicators, currentPrice) {
+  const mcapSeries = (indicators['시가총액'] && indicators['시가총액'].length)
+    ? indicators['시가총액']
+    : (indicators['시가총액 (억원)'] || []).map(d => ({ ...d, value: d.value != null ? d.value * 1e8 : null }));
+  const latestMcap = getLatestIndicatorValue(mcapSeries);
+  const latestAnnualPrice = getLatestIndicatorValue(indicators['주가 (원)']);
+  if (latestMcap && latestAnnualPrice && latestAnnualPrice > 0 && currentPrice > 0) {
+    return (latestMcap / latestAnnualPrice) * currentPrice;
+  }
+  return latestMcap;
 }
 
 // 베타는 별도 엔드포인트에서 비동기로 받아오며, 처음 렌더 시에는 '…' 로
@@ -181,6 +197,36 @@ function getCurrentValuationMetrics(indicators, quoteSnapshot) {
 let _currentBeta = null;   // {beta, sample_size, benchmark} 또는 null
 let _currentStockLinks = null;  // {preferred?, holding?} 또는 null — 외부 분석 도구
 let _currentDr = null;  // [{label, exchange, ticker, change_pct, converted_price}] 또는 null — 해외 DR
+
+// 시총을 조/억 단위로 압축 표기.
+function _fmtMarketCap(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return 'N/A';
+  if (n >= 1e12) return (n / 1e12).toFixed(n >= 1e13 ? 1 : 2) + '조';
+  if (n >= 1e8) return Math.round(n / 1e8).toLocaleString('ko-KR') + '억';
+  return Math.round(n).toLocaleString('ko-KR');
+}
+
+// 증권사 목표가: 발표 3개월 이내 리포트의 목표주가 중 최근 5개 평균(allReports 기준).
+function _computeBrokerTargetAvg() {
+  if (!Array.isArray(allReports) || !allReports.length) return null;
+  const cutoff = _dateDaysAgo(90);  // 3개월(=90일) 초과분 제외
+  const valid = [];
+  for (const r of allReports) {
+    const tp = r && r.target_price ? Number(String(r.target_price).replace(/,/g, '')) : null;
+    const d = r && r.date ? String(r.date).slice(0, 10) : '';
+    if (tp && tp > 0 && d && d >= cutoff) valid.push({ date: d, price: tp });
+  }
+  if (!valid.length) return null;
+  valid.sort((a, b) => b.date.localeCompare(a.date));  // 최신 발표순
+  const recent = valid.slice(0, 5);
+  return Math.round(recent.reduce((acc, x) => acc + x.price, 0) / recent.length);
+}
+
+function _fmtTargetAvg() {
+  const avg = _computeBrokerTargetAvg();
+  return avg ? avg.toLocaleString('ko-KR') + '원' : 'N/A';
+}
 
 function renderCurrentValuationSummary(indicators, quoteSnapshot) {
   const metrics = getCurrentValuationMetrics(indicators, quoteSnapshot);
@@ -190,7 +236,10 @@ function renderCurrentValuationSummary(indicators, quoteSnapshot) {
   return [
     { label: 'PER', value: formatMetricNumber(metrics.per) },
     { label: 'PBR', value: formatMetricNumber(metrics.pbr) },
+    { label: 'ROE', value: formatMetricNumber(metrics.roe, '%') },
     { label: '배당수익률', value: formatMetricNumber(metrics.dividendYield, '%') },
+    { label: '시가총액', value: _fmtMarketCap(metrics.marketCap) },
+    { label: '목표가', value: _fmtTargetAvg() },
     { label: '베타 (1Y)', value: betaVal, attr: 'data-beta="1"' },
   ].map(item => (
     `<div class="valuation-card" ${item.attr || ''}><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span></div>`
@@ -395,6 +444,7 @@ function formatWeeklyTickLabel(value) {
 let _lastWeeklyIndicators = null;
 
 async function _overlayTargetPrices(reports) {
+  _renderCoverage();  // 목표가 카드(최근 5개 평균, 3개월 이내)를 로드된 리포트로 갱신
   if (!_lastWeeklyIndicators) return;
   const priceSeries = _lastWeeklyIndicators['주가'] || [];
   if (priceSeries.length === 0) return;
@@ -816,6 +866,7 @@ async function switchValuationPeriod(period) {
     const dailyIndicators = {};
     for (const key of WEEKLY_CHART_KEYS) {
       const fieldMap = { '주가': 'close_price', 'PER': 'per', 'PBR': 'pbr', '배당수익률 (%)': 'dividend_yield',
+        '주당배당금 (원)': 'dividend_per_share',
         '시가총액': 'market_cap', 'EPS (원)': 'eps', 'ROE (%)': 'roe', '부채비율 (%)': 'debt_ratio', '영업이익률 (%)': 'operating_margin' };
       const field = fieldMap[key];
       if (field) {
@@ -1055,6 +1106,7 @@ async function renderResult(data) {
   _lastAnalysisData = data;
   _currentStockLinks = null;  // 종목 전환 — 이전 외부 카드 제거(loadStockExternalLinks가 다시 채움)
   _currentDr = null;  // 종목 전환 — 이전 DR 카드 제거(loadStockDr가 다시 채움)
+  allReports = [];    // 이전 종목 리포트 잔상 제거 — loadReports 가 다시 채우고 목표가 카드 갱신
   _currentPeriod = 'all';
   _dailyCache = {};
   document.querySelectorAll('.vp-btn').forEach(b => b.classList.toggle('active', b.dataset.period === 'all'));

@@ -246,6 +246,7 @@ async def get_daily_data(stock_code: str):
             "per": stock_price._safe_div(close, eps) if close else None,
             "pbr": stock_price._safe_div(close, bps) if close else None,
             "eps": eps,
+            "dividend_per_share": active_financial.get("dividend_per_share") if active_financial else None,
             "dividend_yield": stock_price._safe_div(trailing_div, close, 100) if trailing_div is not None and close else None,
             "market_cap": round(close * shares, 2) if close and shares else None,
             "roe": active_financial.get("roe") if active_financial else None,
