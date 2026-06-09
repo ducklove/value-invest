@@ -626,7 +626,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .bond-tbl th, .bond-tbl td { padding: 3px 6px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .bond-tbl th:first-child, .bond-tbl td:first-child { text-align: left; color: var(--text-secondary); }
 .bond-tbl th { color: var(--text-secondary); font-weight: 600; }
-.bond-tbl .bt-sub { font-weight: 500; font-size: 0.9em; color: var(--text-secondary); }
+/* th.bt-sub: th:first-child(만기용 좌측정렬)와 동일 특이성이지만 뒤에 와서 우선 → 한국 금리 헤더도 우측정렬 */
+.bond-tbl th.bt-sub { font-weight: 500; font-size: 0.9em; color: var(--text-secondary); text-align: right; }
 .bond-tbl .bt-chg { font-size: 0.85em; padding-left: 3px; }
 .bond-tbl-split .bt-val { padding-right: 3px; }
 .bond-tbl-split .bt-grp { border-left: 1px solid var(--border); padding-left: 10px; }
