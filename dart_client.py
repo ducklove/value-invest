@@ -5,7 +5,7 @@ import re
 import zipfile
 import io
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 API_KEY = os.getenv("OPENDART_API_KEY", "")
@@ -358,3 +358,44 @@ async def fetch_financial_statements(
         await asyncio.sleep(0.5)  # DART rate limit
 
     return results
+
+
+async def fetch_recent_disclosures(corp_code: str, *, days: int = 30, page_count: int = 20) -> list[dict]:
+    """특정 회사의 최근 공시 목록(최신순) — 신규 공시 알림용.
+
+    보고서명 필터(저신호 제외 등)는 호출 측 책임이다. 반환 항목:
+    ``{rcept_no, report_nm, rcept_dt, corp_name}``. 접수일 내림차순(최신 우선).
+    """
+    if not corp_code or not API_KEY:
+        return []
+    end = datetime.now()
+    start = end - timedelta(days=days)
+    params = {
+        "crtfc_key": API_KEY,
+        "corp_code": corp_code,
+        "bgn_de": start.strftime("%Y%m%d"),
+        "end_de": end.strftime("%Y%m%d"),
+        "sort": "date",
+        "sort_mth": "desc",
+        "page_no": "1",
+        "page_count": str(page_count),
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(f"{BASE_URL}/list.json", params=params)
+    if resp.status_code != 200:
+        return []
+    try:
+        data = resp.json()
+    except ValueError:
+        return []
+    if data.get("status") != "000":
+        return []  # "013"/"014" = 공시 없음(정상)
+    return [
+        {
+            "rcept_no": item.get("rcept_no"),
+            "report_nm": item.get("report_nm"),
+            "rcept_dt": item.get("rcept_dt"),
+            "corp_name": item.get("corp_name"),
+        }
+        for item in data.get("list", [])
+    ]

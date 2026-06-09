@@ -62,13 +62,11 @@ test("카테고리 -> {alert_type} 매핑", () => {
   assert.deepEqual({ ...w.pfAlertsBuildType("daily", "below") }, { alert_type: "daily_change_below" });
 });
 
-test("지정가 폼: 종목 + 방향 + 지정가 입력", () => {
+test("포트폴리오 모달 카테고리에 '종목 지정가' 생성 옵션이 없다 (종목 분석 화면으로 이동)", () => {
   const w = loadAlerts([SAMSUNG]);
-  w.pfAlertsSetCategory("price");
+  w.pfAlertsSetCategory("target");
   const html = w.document.getElementById("pfAlertForm").innerHTML;
-  assert.match(html, /삼성전자/);
-  assert.ok(html.includes('id="pfAlertStock"'));
-  assert.ok(html.includes('id="pfAlertThreshold"'));
+  assert.ok(!html.includes(">종목 지정가</option>"), "지정가 생성 옵션 제거됨");
 });
 
 test("폼에 중요 알림 체크박스가 있다", () => {

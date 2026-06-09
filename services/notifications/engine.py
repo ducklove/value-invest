@@ -46,7 +46,13 @@ TARGET_TYPES = frozenset({"target_reached"})                      # blanket (all
 DAILY_ABS_TYPES = frozenset({"daily_change_abs"})                 # blanket (all holdings, ±n%)
 LIMIT_TYPES = frozenset({"limit_reached"})                        # blanket (all holdings, 상/하한가)
 BLANKET_TYPES = TARGET_TYPES | DAILY_ABS_TYPES | LIMIT_TYPES
-ALL_ALERT_TYPES = PRICE_TYPES | NAV_TYPES | PORTFOLIO_DAILY_TYPES | BLANKET_TYPES
+# 개별 종목(분석 화면) 알림 — 보유 여부 무관, scope='stock'.
+STOCK_DAILY_ABS_TYPES = frozenset({"stock_daily_abs"})            # 개별 종목 일간 등락률 ±n%
+STOCK_FEED_TYPES = frozenset({"disclosure_new", "report_new"})    # 신규 공시 / 신규 리포트
+ALL_ALERT_TYPES = (
+    PRICE_TYPES | NAV_TYPES | PORTFOLIO_DAILY_TYPES | BLANKET_TYPES
+    | STOCK_DAILY_ABS_TYPES | STOCK_FEED_TYPES
+)
 
 
 def _condition_met(alert_type: str, metric: float, threshold: float) -> bool:
@@ -254,6 +260,42 @@ def _format_price_message(rule: dict, name: str, metric: float) -> str:
     )
 
 
+def _format_stock_daily_message(rule: dict, name: str, metric: float) -> str:
+    return (
+        f"🔔 [{name}] 일간 등락률 알림\n"
+        f"현재 {_fmt_pct(metric)} (기준 ±{_fmt_thresh(rule['threshold'])}%)"
+        f"{_note_suffix(rule)}"
+    )
+
+
+def _format_disclosure_message(rule: dict, name: str, item: dict) -> str:
+    rcept = str(item.get("rcept_no") or "").strip()
+    url = f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept}" if rcept else ""
+    lines = [f"📑 [{name}] 새 공시", str(item.get("report_nm") or "").strip()]
+    if url:
+        lines.append(url)
+    return "\n".join(p for p in lines if p) + _note_suffix(rule)
+
+
+def _format_report_message(rule: dict, name: str, item: dict) -> str:
+    firm = str(item.get("firm") or "").strip()
+    title = str(item.get("title") or "").strip()
+    head = " · ".join(p for p in (firm, title) if p)
+    lines = [f"📈 [{name}] 새 리포트"]
+    if head:
+        lines.append(head)
+    extras = []
+    rec = str(item.get("recommendation") or "").strip()
+    tp = str(item.get("target_price") or "").strip()
+    if rec:
+        extras.append(rec)
+    if tp:
+        extras.append(f"목표가 {tp}")
+    if extras:
+        lines.append(" / ".join(extras))
+    return "\n".join(lines) + _note_suffix(rule)
+
+
 async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_map: dict) -> int:
     """Evaluate a blanket rule across every holding with per-holding edge state."""
     try:
@@ -338,7 +380,129 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
     return sent
 
 
-async def evaluate_user(google_sub: str) -> int:
+# --- 신규 공시 / 리포트 (개별 종목 feed 알림) -------------------------------
+#
+# baseline(마지막으로 관측한 최신 식별자)을 state_json 에 저장한다. 구독 직후
+# baseline 이 없으면 현재 최신을 저장만 하고 미발송(과거 항목 폭탄 방지). 이후
+# 최신이 baseline 과 달라지면 1회 발송하고 baseline 을 갱신한다. armed/하루1회
+# 상한은 쓰지 않는다(갱신 자체가 dedup).
+#
+# 외부 API 비용은 두 단계로 줄인다: (1) 같은 평가 패스에서 같은 종목을 여러
+# 사용자가 구독해도 ``feed_cache`` 로 1회만 조회, (2) 패스 간에는 모듈 전역
+# TTL 캐시로 과도한 재조회를 막는다.
+_FEED_TTL_SECONDS = 600.0
+_disc_cache: dict[str, tuple[float, dict | None]] = {}
+_rep_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+def _is_excluded_disclosure(report_nm: str) -> bool:
+    """발행 관련 저신호 공시(증권발행실적보고서·증권신고서·투자설명서 등) 제외."""
+    from market_daily import (
+        _SECURITIES_LOW_SIGNAL_DISCLOSURE_KEYWORDS,
+        _compact_disclosure_text,
+        _matches_disclosure_keyword,
+    )
+    compact = _compact_disclosure_text(report_nm)
+    return _matches_disclosure_keyword(compact, _SECURITIES_LOW_SIGNAL_DISCLOSURE_KEYWORDS)
+
+
+async def _fetch_latest_disclosure(code: str) -> dict | None:
+    import dart_client
+    try:
+        corp_code = await cache.get_corp_code(code)
+        if not corp_code:
+            return None
+        items = await dart_client.fetch_recent_disclosures(corp_code)
+    except Exception as exc:
+        logger.info("disclosure fetch failed for %s: %s", code, exc)
+        return None
+    for item in items or []:
+        if _is_excluded_disclosure(str(item.get("report_nm") or "")):
+            continue
+        return item  # 최신순이므로 첫 비저신호 공시가 최신
+    return None
+
+
+async def _fetch_latest_report_sig(code: str) -> dict | None:
+    import report_client
+    try:
+        report = await report_client.fetch_latest_report(code)
+    except Exception as exc:
+        logger.info("report fetch failed for %s: %s", code, exc)
+        return None
+    if not report:
+        return None
+    sig = "|".join(str(report.get(k) or "") for k in ("date", "title", "firm", "pdf_url"))
+    return {
+        "sig": sig,
+        "firm": report.get("firm"),
+        "title": report.get("title"),
+        "target_price": report.get("target_price"),
+        "recommendation": report.get("recommendation"),
+    }
+
+
+async def _cached_feed(kind: str, code: str, feed_cache: dict | None):
+    """공시('disc')/리포트('rep') 최신값을 per-pass + 모듈 TTL 캐시로 조회."""
+    import time as _time
+
+    pass_key = (kind, code)
+    if feed_cache is not None and pass_key in feed_cache:
+        return feed_cache[pass_key]
+    store = _disc_cache if kind == "disc" else _rep_cache
+    now = _time.time()
+    hit = store.get(code)
+    if hit and now - hit[0] < _FEED_TTL_SECONDS:
+        result = hit[1]
+    else:
+        result = await (_fetch_latest_disclosure(code) if kind == "disc" else _fetch_latest_report_sig(code))
+        store[code] = (now, result)
+    if feed_cache is not None:
+        feed_cache[pass_key] = result
+    return result
+
+
+async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: dict | None) -> int:
+    code = rule.get("stock_code") or ""
+    if not code:
+        return 0
+    alert_type = rule["alert_type"]
+    try:
+        state = json.loads(rule.get("state_json") or "{}")
+    except (TypeError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    baseline = state.get("baseline")
+
+    if alert_type == "disclosure_new":
+        latest = await _cached_feed("disc", code, feed_cache)
+        if not latest:
+            return 0
+        ident = str(latest.get("rcept_no") or "")
+        text = _format_disclosure_message(rule, name, latest)
+    else:  # report_new
+        latest = await _cached_feed("rep", code, feed_cache)
+        if not latest:
+            return 0
+        ident = str(latest.get("sig") or "")
+        text = _format_report_message(rule, name, latest)
+
+    if not ident:
+        return 0
+    if baseline is None or ident == baseline:
+        # 첫 관측(또는 변화 없음): 기준선만 저장/유지, 발송 안 함.
+        if baseline != ident:
+            await cache.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
+        return 0
+    if rule.get("important"):
+        text = _emphasize(text)
+    await channels.dispatch(google_sub, text)
+    await cache.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
+    return 1
+
+
+async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> int:
     """Evaluate all enabled rules for one user. Returns alerts sent."""
     rules = await cache.list_portfolio_alerts(google_sub, enabled_only=True)
     if not rules:
@@ -353,14 +517,24 @@ async def evaluate_user(google_sub: str) -> int:
     except Exception:
         pass
 
-    def _name(code: str | None) -> str:
+    async def _name(code: str | None) -> str:
         item = items_by_code.get(code or "")
-        return (item.get("stock_name") if item else None) or code or ""
+        nm = item.get("stock_name") if item else None
+        if nm:
+            return nm
+        try:  # 비보유 종목(분석 화면 알림)은 corp_codes 표에서 이름 보강
+            return (await cache.get_corp_name(code)) or code or ""
+        except Exception:
+            return code or ""
 
     # --- which quotes do we need? ---
-    price_codes = {r["stock_code"] for r in rules if r["alert_type"] in PRICE_TYPES and r.get("stock_code")}
+    # price + 개별 종목 일간등락률 규칙의 종목 시세가 필요하다.
+    metric_codes = {
+        r["stock_code"] for r in rules
+        if r["alert_type"] in (PRICE_TYPES | STOCK_DAILY_ABS_TYPES) and r.get("stock_code")
+    }
     has_blanket = any(r["alert_type"] in BLANKET_TYPES for r in rules)
-    needed: set[str] = set(price_codes)
+    needed: set[str] = set(metric_codes)
     if has_blanket:
         needed |= set(items_by_code)
     # 우선주 자동 목표가는 본주가를 추가로 조회해야 한다.
@@ -395,9 +569,15 @@ async def evaluate_user(google_sub: str) -> int:
             sent += await _eval_blanket(google_sub, rule, items_by_code, quote_map)
             continue
 
-        # single-metric rules (price / nav / portfolio daily) use the `armed` flag
+        if alert_type in STOCK_FEED_TYPES:
+            sent += await _eval_stock_feed(google_sub, rule, await _name(rule.get("stock_code")), feed_cache)
+            continue
+
+        # single-metric rules (price / 개별 일간등락 / nav / portfolio daily): armed 플래그
         if alert_type in PRICE_TYPES:
             metric = _quote_price(quote_map.get(rule.get("stock_code") or "", {}))
+        elif alert_type in STOCK_DAILY_ABS_TYPES:
+            metric = _quote_change_pct(quote_map.get(rule.get("stock_code") or "", {}))
         elif alert_type in NAV_TYPES:
             metric = nav
         else:  # portfolio daily change
@@ -405,11 +585,16 @@ async def evaluate_user(google_sub: str) -> int:
 
         if metric is None:
             continue
-        condition = _condition_met(alert_type, metric, rule["threshold"])
+        if alert_type in STOCK_DAILY_ABS_TYPES:
+            condition = abs(metric) >= rule["threshold"]
+        else:
+            condition = _condition_met(alert_type, metric, rule["threshold"])
         armed = bool(rule["armed"])
         if condition and armed and not _fired_today(rule.get("last_triggered_at")):
             if alert_type in PRICE_TYPES:
-                text = _format_price_message(rule, _name(rule.get("stock_code")), metric)
+                text = _format_price_message(rule, await _name(rule.get("stock_code")), metric)
+            elif alert_type in STOCK_DAILY_ABS_TYPES:
+                text = _format_stock_daily_message(rule, await _name(rule.get("stock_code")), metric)
             else:
                 text = _format_portfolio_message(rule, metric)
             if rule.get("important"):
@@ -425,13 +610,23 @@ async def evaluate_user(google_sub: str) -> int:
 
 
 async def evaluate_all() -> dict:
-    """One evaluation pass over every user that has portfolio holdings."""
-    users = await cache.get_all_users_with_portfolio()
+    """One evaluation pass over every user with portfolio holdings or alert rules.
+
+    개별 종목(분석 화면) 알림은 보유 종목이 아닐 수 있으므로, 보유 사용자에 더해
+    알림 규칙이 하나라도 있는 사용자도 평가 대상에 포함한다. 같은 공시/리포트
+    종목을 여러 사용자가 구독해도 외부 API 를 한 번만 치도록 feed_cache 를 공유한다.
+    """
+    users = set(await cache.get_all_users_with_portfolio())
+    try:
+        users |= set(await cache.get_all_users_with_alerts())
+    except Exception:
+        pass
+    feed_cache: dict = {}
     total_sent = 0
     evaluated = 0
     for google_sub in users:
         try:
-            total_sent += await evaluate_user(google_sub)
+            total_sent += await evaluate_user(google_sub, feed_cache=feed_cache)
             evaluated += 1
         except Exception as exc:
             logger.warning("alert evaluation failed for %s: %s", google_sub[:8], exc)

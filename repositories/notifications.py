@@ -277,6 +277,19 @@ async def set_portfolio_alert_important(google_sub: str, alert_id: int, importan
     return cursor.rowcount > 0
 
 
+async def get_all_users_with_alerts() -> list[str]:
+    """알림 규칙(enabled)이 하나라도 있는 사용자 — 비보유 종목 개별 알림 평가 대상.
+
+    ``get_all_users_with_portfolio`` 만으로는 보유하지 않은 종목에 건 분석 화면
+    알림이 평가되지 않으므로, 평가 루프가 이 집합과 합집합으로 순회한다.
+    """
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "SELECT DISTINCT google_sub FROM portfolio_alerts WHERE enabled = 1"
+    )
+    return [row["google_sub"] for row in await cursor.fetchall()]
+
+
 async def set_portfolio_alert_state(
     alert_id: int,
     *,

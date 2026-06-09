@@ -1430,6 +1430,7 @@ from repositories.notifications import (  # noqa: E402
     set_portfolio_alert_state,
     set_portfolio_alert_state_json,
     set_portfolio_alert_important,
+    get_all_users_with_alerts,
     list_calendar_subscriptions,
     upsert_calendar_subscription,
     delete_calendar_subscription,

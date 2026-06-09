@@ -2379,6 +2379,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-alert-star { padding: 6px 9px; font-size: 13px; line-height: 1; }
 .pf-alert-star.on { color: #f59e0b; border-color: #f59e0b; background: rgba(245,158,11,0.12); }
+/* 종목 분석 화면 — 개별 종목 알림 모달 */
+.sa-field-label { flex: 0 0 76px; align-self: center; font-size: 13px; font-weight: 600; color: var(--text); }
+.sa-note { flex: 1; align-self: center; font-size: 11px; color: var(--text-secondary); min-width: 0; }
+.pf-alert-form-row .sa-price-dir { flex: 0 0 72px; min-width: 60px; }
+.pf-alert-form-row .sa-price-val, .pf-alert-form-row .sa-daily-val { flex: 1; min-width: 90px; }
+.sa-toggle-row { align-items: center; }
+.sa-toggle.on { background: rgba(34,197,94,0.14); color: #16a34a; border-color: #16a34a; }
 
 /* 영역지도 전용 모달 — 반드시 위의 .pf-modal / .pf-modal-body 정의들
    뒤에 위치해야 함. CSS 는 같은 specificity 일 때 뒤에 선언된 규칙이

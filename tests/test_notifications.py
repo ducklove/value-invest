@@ -212,6 +212,67 @@ class AlertCrudTests(NotificationHarness):
         self.assertEqual(resp.json()["important"], 1)
         self.assertEqual(resp.json()["armed"], 0)  # 보존됨
 
+    async def test_analysis_stock_alerts_allow_unheld(self):
+        # 분석 화면(source=analysis)은 비보유 종목(000660)도 허용, 4유형 모두.
+        for body in (
+            {"alert_type": "price_above", "threshold": 50000, "stock_code": "000660", "source": "analysis"},
+            {"alert_type": "stock_daily_abs", "threshold": 5, "stock_code": "000660", "source": "analysis"},
+            {"alert_type": "disclosure_new", "stock_code": "000660", "source": "analysis"},
+            {"alert_type": "report_new", "stock_code": "000660", "source": "analysis"},
+        ):
+            resp = await self.client.post("/api/notifications/alerts", json=body)
+            self.assertEqual(resp.status_code, 200, resp.text)
+            self.assertEqual(resp.json()["scope"], "stock")
+            self.assertEqual(resp.json()["stock_code"], "000660")
+
+    async def test_unheld_stock_rejected_without_analysis_source(self):
+        # source 없으면 기존처럼 보유 종목만 허용 → 비보유(000660) 거부(하위호환).
+        resp = await self.client.post(
+            "/api/notifications/alerts",
+            json={"alert_type": "price_above", "threshold": 50000, "stock_code": "000660"},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    async def test_feed_alert_has_no_threshold(self):
+        resp = await self.client.post(
+            "/api/notifications/alerts",
+            json={"alert_type": "disclosure_new", "stock_code": "005930", "source": "analysis"},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["threshold"], 0)
+
+    async def test_stock_daily_abs_requires_positive(self):
+        resp = await self.client.post(
+            "/api/notifications/alerts",
+            json={"alert_type": "stock_daily_abs", "threshold": 0, "stock_code": "005930", "source": "analysis"},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    async def test_per_stock_singleton_vs_price_multi(self):
+        # (종목,유형) singleton: stock_daily_abs 재생성은 같은 규칙 갱신.
+        first = await self.client.post(
+            "/api/notifications/alerts",
+            json={"alert_type": "stock_daily_abs", "threshold": 5, "stock_code": "005930", "source": "analysis"},
+        )
+        rid = first.json()["id"]
+        second = await self.client.post(
+            "/api/notifications/alerts",
+            json={"alert_type": "stock_daily_abs", "threshold": 8, "stock_code": "005930", "source": "analysis"},
+        )
+        self.assertEqual(second.json()["id"], rid)
+        self.assertEqual(second.json()["threshold"], 8)
+        # 가격 알림은 한 종목에 여러 개 허용(서로 다른 id).
+        p1 = await self.client.post("/api/notifications/alerts", json={"alert_type": "price_above", "threshold": 70000, "stock_code": "005930", "source": "analysis"})
+        p2 = await self.client.post("/api/notifications/alerts", json={"alert_type": "price_above", "threshold": 80000, "stock_code": "005930", "source": "analysis"})
+        self.assertNotEqual(p1.json()["id"], p2.json()["id"])
+
+    async def test_alerts_filter_by_stock_code(self):
+        await self.client.post("/api/notifications/alerts", json={"alert_type": "price_above", "threshold": 70000, "stock_code": "005930", "source": "analysis"})
+        await self.client.post("/api/notifications/alerts", json={"alert_type": "price_above", "threshold": 50000, "stock_code": "000660", "source": "analysis"})
+        rows = (await self.client.get("/api/notifications/alerts?stock_code=000660")).json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["stock_code"], "000660")
+
     async def test_target_reached_blanket_singleton(self):
         resp = await self.client.post(
             "/api/notifications/alerts", json={"alert_type": "target_reached"}
@@ -358,6 +419,9 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         await cache.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 123, "username": "t"}, enabled=True, verified=True
         )
+        # feed(공시/리포트) 모듈 전역 TTL 캐시는 테스트 간 공유되므로 초기화.
+        engine._disc_cache.clear()
+        engine._rep_cache.clear()
 
     async def asyncTearDown(self) -> None:
         await cache.close_db()
@@ -575,6 +639,82 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:
             self.assertEqual(await engine.evaluate_user("u1"), 0)
         disp.assert_not_awaited()
+
+    async def test_stock_daily_abs_fires_once_per_day(self):
+        await self._rule(scope="stock", alert_type="stock_daily_abs", threshold=5.0, stock_code="005930")
+        disp = AsyncMock()
+        q = {"price": 80000.0, "change_pct": 7.0}  # |7| >= 5 → 발화
+        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
+             patch.object(channels, "dispatch", new=disp):
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+            self.assertEqual(disp.await_count, 1)
+            q["change_pct"] = 3.0  # |3| < 5 → 재무장
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+            q["change_pct"] = -9.0  # 같은 날 재돌파 → 하루1회로 미발송
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+            self.assertEqual(disp.await_count, 1)
+
+    async def test_disclosure_new_baseline_then_fire(self):
+        await self._rule(scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="005930")
+        disp = AsyncMock()
+        box = {"v": {"rcept_no": "111", "report_nm": "주요사항보고서", "rcept_dt": "20260101"}}
+
+        async def fake_feed(kind, code, fc):
+            return dict(box["v"]) if box["v"] else None
+
+        with patch.object(engine, "_cached_feed", new=fake_feed), \
+             patch.object(channels, "dispatch", new=disp):
+            self.assertEqual(await engine.evaluate_user("u1"), 0)  # 첫 틱: baseline만, 미발송
+            disp.assert_not_awaited()
+            box["v"] = {"rcept_no": "222", "report_nm": "단일판매ㆍ공급계약체결", "rcept_dt": "20260102"}
+            self.assertEqual(await engine.evaluate_user("u1"), 1)  # 신규 → 1회
+            self.assertEqual(disp.await_count, 1)
+            self.assertEqual(await engine.evaluate_user("u1"), 0)  # 동일 유지 → 미발송
+            self.assertEqual(disp.await_count, 1)
+
+    async def test_fetch_latest_disclosure_skips_low_signal(self):
+        # 최신이 증권발행실적보고서(저신호)면 건너뛰고 다음 실질 공시를 잡는다.
+        raw = [
+            {"rcept_no": "300", "report_nm": "증권발행실적보고서", "rcept_dt": "20260103", "corp_name": "삼성전자"},
+            {"rcept_no": "299", "report_nm": "주요사항보고서(자기주식취득결정)", "rcept_dt": "20260102", "corp_name": "삼성전자"},
+        ]
+        with patch.object(cache, "get_corp_code", new=AsyncMock(return_value="00126380")), \
+             patch("dart_client.fetch_recent_disclosures", new=AsyncMock(return_value=raw)):
+            latest = await engine._fetch_latest_disclosure("005930")
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest["rcept_no"], "299")
+
+    async def test_report_new_baseline_then_fire(self):
+        await self._rule(scope="stock", alert_type="report_new", threshold=0.0, stock_code="005930")
+        disp = AsyncMock()
+        box = {"v": {"sig": "2026-01-01|제목A|미래에셋|http://x/a.pdf", "firm": "미래에셋", "title": "제목A", "target_price": "90000", "recommendation": "매수"}}
+
+        async def fake_feed(kind, code, fc):
+            return dict(box["v"]) if box["v"] else None
+
+        with patch.object(engine, "_cached_feed", new=fake_feed), \
+             patch.object(channels, "dispatch", new=disp):
+            self.assertEqual(await engine.evaluate_user("u1"), 0)  # baseline
+            disp.assert_not_awaited()
+            box["v"] = {"sig": "2026-01-05|제목B|한국투자|http://x/b.pdf", "firm": "한국투자", "title": "제목B", "target_price": "", "recommendation": ""}
+            self.assertEqual(await engine.evaluate_user("u1"), 1)  # 신규 리포트
+            self.assertEqual(disp.await_count, 1)
+
+    async def test_evaluate_all_includes_alert_only_user(self):
+        # 포트폴리오는 없고 알림 규칙만 있는 사용자(u2)도 평가 대상에 포함.
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
+            " VALUES ('u2','e2@x','U2','',1,'t','t')"
+        )
+        await db.commit()
+        await cache.upsert_notification_channel("u2", "telegram", config={"chat_id": 1, "username": "t"}, enabled=True, verified=True)
+        await cache.create_portfolio_alert("u2", scope="stock", alert_type="price_above", threshold=72000.0, stock_code="005930")
+        self.assertIn("u2", await cache.get_all_users_with_alerts())
+        with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 80000.0})), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            await engine.evaluate_all()
+        self.assertGreaterEqual(disp.await_count, 1)  # u2 발화(80000 >= 72000)
 
 
 class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):

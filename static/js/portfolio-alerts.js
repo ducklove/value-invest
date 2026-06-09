@@ -11,7 +11,7 @@ const PfAlerts = {
   pollTimer: null,
   pollDeadline: 0,
   pollKind: null, // 'telegram' | 'kakao'
-  category: 'price', // price | target | dailyAbs | nav | daily
+  category: 'target', // target | limit | dailyAbs | nav | daily (종목 지정가는 종목 분석 화면으로 이동)
 };
 
 if (typeof window !== 'undefined') window.PfAlerts = PfAlerts;
@@ -268,10 +268,7 @@ function pfAlertsRenderForm() {
   if (!form) return;
   const cat = PfAlerts.category;
   let valueField = '';
-  if (cat === 'price') {
-    valueField = pfAlertsStockSelect() + pfAlertsDirSelect()
-      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="지정가">';
-  } else if (cat === 'target') {
+  if (cat === 'target') {
     valueField = '<span class="pf-alert-form-note">보유 전 종목의 목표가 도달 시 알림 (켜고 끄기만)</span>';
   } else if (cat === 'limit') {
     valueField = '<span class="pf-alert-form-note">보유 전 종목 중 상한가·하한가 도달 시 알림 (켜고 끄기만)</span>';
@@ -290,7 +287,6 @@ function pfAlertsRenderForm() {
   form.innerHTML = `
     <div class="pf-alert-form-row">
       <select class="pf-modal-input pf-alert-cat" id="pfAlertCat" onchange="pfAlertsSetCategory(this.value)">
-        <option value="price"${cat === 'price' ? ' selected' : ''}>종목 지정가</option>
         <option value="target"${cat === 'target' ? ' selected' : ''}>목표가 도달 (전체)</option>
         <option value="limit"${cat === 'limit' ? ' selected' : ''}>상한가·하한가 도달 (전체)</option>
         <option value="dailyAbs"${cat === 'dailyAbs' ? ' selected' : ''}>종목 일간 등락률 (전체)</option>
@@ -330,11 +326,6 @@ async function pfAlertsSubmit() {
   const important = !!((document.getElementById('pfAlertImportant') || {}).checked);
   const payload = { ...pfAlertsBuildType(cat, dir), note, important };
 
-  if (cat === 'price') {
-    const code = (document.getElementById('pfAlertStock') || {}).value;
-    if (!code) { alert('종목을 선택해주세요.'); return; }
-    payload.stock_code = code;
-  }
   if (cat !== 'target' && cat !== 'limit') {
     const thresholdRaw = (document.getElementById('pfAlertThreshold') || {}).value;
     const threshold = Number(thresholdRaw);

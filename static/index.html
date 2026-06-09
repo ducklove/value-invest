@@ -174,6 +174,7 @@ function trackEvent(name, params = {}) {
     <div class="personalization-panel" id="personalizationPanel">
       <div class="personalization-actions">
         <button class="personalization-btn" id="favoriteBtn" type="button" onclick="toggleFavorite()">관심종목</button>
+        <button class="personalization-btn" id="stockAlertBtn" type="button" onclick="openStockAlerts()" title="이 종목의 가격·등락률·공시·리포트 알림">🔔 알림</button>
         <button class="personalization-btn primary" id="saveNoteBtn" type="button" onclick="savePreferenceNote()">메모 저장</button>
       </div>
       <textarea class="personalization-note" id="preferenceNote" rows="3" placeholder="이 종목에 대한 내 메모를 남겨보세요."></textarea>
@@ -583,6 +584,27 @@ function trackEvent(name, params = {}) {
   <button class="market-tape-refresh" id="marketTapeRefreshBtn" type="button" onclick="loadMarketTape(true)" title="시황 테이프 새로고침">↻</button>
 </section>
 
+<!-- 종목 분석 화면 — 개별 종목 알림 모달. 내용은 stock-alerts.js 가 채운다. -->
+<div class="pf-modal-overlay" id="stockAlertModal" style="display:none;" onclick="if(event.target===this)closeStockAlerts()" role="dialog" aria-modal="true" aria-labelledby="stockAlertTitle">
+  <div class="pf-modal pf-alerts-modal">
+    <div class="pf-modal-header">
+      <h3 id="stockAlertTitle">🔔 <span id="stockAlertStockName">종목</span> 알림</h3>
+      <button class="pf-modal-close" type="button" onclick="closeStockAlerts()" aria-label="닫기">&times;</button>
+    </div>
+    <div class="pf-modal-body pf-alerts-body">
+      <p class="pf-alert-hint">가격 도달·일간 등락률·신규 공시·신규 리포트 알림을 설정합니다. 받을 채널(텔레그램·카카오톡)은 포트폴리오 ‘🔔 알림’에서 연결하세요.</p>
+      <section class="pf-alert-section">
+        <h4>알림 추가</h4>
+        <div class="pf-alert-form" id="stockAlertForm"></div>
+      </section>
+      <section class="pf-alert-section">
+        <h4>설정된 가격 알림</h4>
+        <div class="pf-alert-list" id="stockAlertList"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
 <div class="chart-modal-overlay" id="chartModal" style="display:none;" onclick="if(event.target===this)closeChartModal()" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
   <div class="chart-modal">
     <div class="chart-modal-header">
@@ -628,6 +650,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/auth.js" defer></script>
 <script src="./js/search.js" defer></script>
 <script src="./js/analysis.js" defer></script>
+<script src="./js/stock-alerts.js" defer></script>
 <script src="./js/market-dashboard.js" defer></script>
 <script src="./js/economic-calendar.js" defer></script>
 <script src="./js/portfolio-store.js" defer></script>

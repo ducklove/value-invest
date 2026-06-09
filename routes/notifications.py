@@ -265,16 +265,17 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
     # Scope is derived from the type: price is per-stock; target_reached and
     # daily_change_abs are blanket (all holdings); nav / portfolio daily are
     # whole-portfolio.
-    if alert_type in engine.PRICE_TYPES:
+    # Scope 매핑: 개별 종목(가격/일간등락/신규공시/신규리포트)=stock,
+    # target/daily_abs/limit=blanket(all_stocks), 나머지=portfolio.
+    if alert_type in (engine.PRICE_TYPES | engine.STOCK_DAILY_ABS_TYPES | engine.STOCK_FEED_TYPES):
         scope = "stock"
     elif alert_type in engine.BLANKET_TYPES:
         scope = "all_stocks"
     else:
         scope = "portfolio"
 
-    # target_reached / limit_reached have no user threshold (holding's own
-    # 목표가 / fixed 상·하한가).
-    if alert_type in engine.TARGET_TYPES or alert_type in engine.LIMIT_TYPES:
+    # 사용자 임계값이 없는 유형: 목표가/상하한가 도달, 신규 공시/리포트.
+    if alert_type in (engine.TARGET_TYPES | engine.LIMIT_TYPES | engine.STOCK_FEED_TYPES):
         threshold = 0.0
     else:
         try:
@@ -287,11 +288,15 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
         stock_code = str(payload.get("stock_code") or "").strip()
         if not stock_code:
             raise HTTPException(status_code=400, detail="종목을 선택해주세요.")
-        held = {it["stock_code"] for it in await cache.get_portfolio(google_sub)}
-        if stock_code not in held:
-            raise HTTPException(status_code=400, detail="보유 종목에 대해서만 종목 알림을 설정할 수 있습니다.")
-        if threshold <= 0:
-            raise HTTPException(status_code=400, detail="지정가는 0보다 커야 합니다.")
+        # 분석 화면(source="analysis")은 임의 종목 허용. 포트폴리오 경유는 보유 종목만.
+        if str(payload.get("source") or "") != "analysis":
+            held = {it["stock_code"] for it in await cache.get_portfolio(google_sub)}
+            if stock_code not in held:
+                raise HTTPException(status_code=400, detail="보유 종목에 대해서만 종목 알림을 설정할 수 있습니다.")
+        if alert_type in engine.PRICE_TYPES and threshold <= 0:
+            raise HTTPException(status_code=400, detail="가격은 0보다 커야 합니다.")
+        if alert_type in engine.STOCK_DAILY_ABS_TYPES and threshold <= 0:
+            raise HTTPException(status_code=400, detail="등락률 기준은 0보다 커야 합니다.")
     elif alert_type in engine.NAV_TYPES and threshold <= 0:
         raise HTTPException(status_code=400, detail="총평가액 기준은 0보다 커야 합니다.")
     elif alert_type in engine.DAILY_ABS_TYPES and threshold <= 0:
@@ -312,9 +317,13 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
 
 
 @router.get("/alerts")
-async def get_alerts(request: Request):
+async def get_alerts(request: Request, stock_code: str | None = None):
     user = _require_user(await get_current_user(request))
-    return await cache.list_portfolio_alerts(user["google_sub"])
+    alerts = await cache.list_portfolio_alerts(user["google_sub"])
+    if stock_code:
+        code = stock_code.strip()
+        alerts = [a for a in alerts if a.get("stock_code") == code]
+    return alerts
 
 
 @router.post("/alerts")
@@ -322,11 +331,22 @@ async def create_alert(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
     sub = user["google_sub"]
     rule = await _validate_alert_payload(sub, payload)
-    # Blanket rules (목표가 도달 / 전 종목 일간 등락률) are singletons per user:
-    # creating one again just updates the existing rule instead of duplicating.
+    # Blanket(목표가/전종목 일간등락/상하한가)은 사용자당 singleton, 개별 종목의
+    # 일간등락·신규공시·신규리포트는 (종목, 유형) 단위 singleton — 재생성 시 기존
+    # 규칙을 갱신(중복 방지). 가격(price_*)은 한 종목에 여러 개 둘 수 있어 제외.
+    singleton_per_stock = engine.STOCK_DAILY_ABS_TYPES | engine.STOCK_FEED_TYPES
     if rule["alert_type"] in engine.BLANKET_TYPES:
         for existing in await cache.list_portfolio_alerts(sub):
             if existing["alert_type"] == rule["alert_type"]:
+                await cache.update_portfolio_alert(
+                    sub, existing["id"],
+                    threshold=rule["threshold"], note=rule["note"], enabled=rule["enabled"],
+                    important=rule["important"],
+                )
+                return await cache.get_portfolio_alert(sub, existing["id"])
+    elif rule["alert_type"] in singleton_per_stock:
+        for existing in await cache.list_portfolio_alerts(sub):
+            if existing["alert_type"] == rule["alert_type"] and existing["stock_code"] == rule["stock_code"]:
                 await cache.update_portfolio_alert(
                     sub, existing["id"],
                     threshold=rule["threshold"], note=rule["note"], enabled=rule["enabled"],
