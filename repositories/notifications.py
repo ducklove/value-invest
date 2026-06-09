@@ -162,7 +162,7 @@ async def delete_expired_notification_links() -> int:
 
 _ALERT_COLUMNS = (
     "id, google_sub, scope, stock_code, alert_type, threshold, enabled, note,"
-    " armed, last_triggered_at, last_value, state_json, created_at, updated_at"
+    " important, armed, last_triggered_at, last_value, state_json, created_at, updated_at"
 )
 
 
@@ -196,17 +196,19 @@ async def create_portfolio_alert(
     stock_code: str | None = None,
     note: str = "",
     enabled: bool = True,
+    important: bool = False,
 ) -> int:
     db = await cache.get_db()
     now = _now()
     cursor = await db.execute(
         """
         INSERT INTO portfolio_alerts
-            (google_sub, scope, stock_code, alert_type, threshold, enabled, note,
+            (google_sub, scope, stock_code, alert_type, threshold, enabled, note, important,
              armed, last_triggered_at, last_value, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)
         """,
-        (google_sub, scope, stock_code, alert_type, threshold, 1 if enabled else 0, note, now, now),
+        (google_sub, scope, stock_code, alert_type, threshold, 1 if enabled else 0, note,
+         1 if important else 0, now, now),
     )
     await db.commit()
     return int(cursor.lastrowid)
@@ -214,13 +216,13 @@ async def create_portfolio_alert(
 
 async def update_portfolio_alert(google_sub: str, alert_id: int, **fields) -> bool:
     """Update editable fields. Any change re-arms the rule (armed=1)."""
-    allowed = {"scope", "stock_code", "alert_type", "threshold", "enabled", "note"}
+    allowed = {"scope", "stock_code", "alert_type", "threshold", "enabled", "note", "important"}
     sets: list[str] = []
     params: list = []
     for key, value in fields.items():
         if key not in allowed or value is None:
             continue
-        if key == "enabled":
+        if key in ("enabled", "important"):
             value = 1 if value else 0
         sets.append(f"{key} = ?")
         params.append(value)
@@ -261,6 +263,18 @@ async def set_portfolio_alert_state_json(alert_id: int, state_json: str) -> None
         (state_json, _now(), alert_id),
     )
     await db.commit()
+
+
+async def set_portfolio_alert_important(google_sub: str, alert_id: int, important: bool) -> bool:
+    """중요 표시만 토글한다. 엣지 상태(armed/state_json)는 건드리지 않아,
+    이미 발송된 규칙을 중요로 바꿔도 그날 다시 발송되지 않는다."""
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "UPDATE portfolio_alerts SET important = ?, updated_at = ? WHERE google_sub = ? AND id = ?",
+        (1 if important else 0, _now(), google_sub, alert_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
 
 
 async def set_portfolio_alert_state(

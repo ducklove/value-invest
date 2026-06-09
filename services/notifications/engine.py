@@ -219,6 +219,15 @@ def _note_suffix(rule: dict) -> str:
     return f"\n📝 {note}" if note else ""
 
 
+def _emphasize(text: str) -> str:
+    """중요 알림: 강조 헤더로 감싸 메신저에서 더 눈에 띄게 한다.
+
+    텔레그램·카카오 모두 plain text 로 보내므로(마크다운 미적용) 굵게 대신
+    이모지·구분선으로 강조한다. 카카오 200자 제한을 감안해 헤더는 짧게 둔다.
+    """
+    return f"🚨🚨 중요 알림 🚨🚨\n━━━━━━━━━━\n{text}"
+
+
 def _format_portfolio_message(rule: dict, metric: float) -> str:
     alert_type = rule["alert_type"]
     threshold = rule["threshold"]
@@ -313,7 +322,10 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
             fired = None
 
         if condition and armed and fired != today_str:
-            await channels.dispatch(google_sub, (text or "") + _note_suffix(rule))
+            message = (text or "") + _note_suffix(rule)
+            if rule.get("important"):
+                message = _emphasize(message)
+            await channels.dispatch(google_sub, message)
             state[code] = {"armed": False, "fired": today_str}
             changed = True
             sent += 1
@@ -400,6 +412,8 @@ async def evaluate_user(google_sub: str) -> int:
                 text = _format_price_message(rule, _name(rule.get("stock_code")), metric)
             else:
                 text = _format_portfolio_message(rule, metric)
+            if rule.get("important"):
+                text = _emphasize(text)
             await channels.dispatch(google_sub, text)
             await cache.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
             sent += 1

@@ -299,6 +299,7 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
 
     note = str(payload.get("note") or "").strip()[:200]
     enabled = bool(payload.get("enabled", True))
+    important = bool(payload.get("important", False))
     return {
         "scope": scope,
         "alert_type": alert_type,
@@ -306,6 +307,7 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
         "stock_code": stock_code,
         "note": note,
         "enabled": enabled,
+        "important": important,
     }
 
 
@@ -328,6 +330,7 @@ async def create_alert(request: Request, payload: dict = Body(...)):
                 await cache.update_portfolio_alert(
                     sub, existing["id"],
                     threshold=rule["threshold"], note=rule["note"], enabled=rule["enabled"],
+                    important=rule["important"],
                 )
                 return await cache.get_portfolio_alert(sub, existing["id"])
     alert_id = await cache.create_portfolio_alert(sub, **rule)
@@ -349,8 +352,15 @@ async def update_alert(alert_id: int, request: Request, payload: dict = Body(...
         )
         return await cache.get_portfolio_alert(user["google_sub"], alert_id)
 
+    # 중요 표시만 토글: 검증·엣지 리셋 없이 가볍게 갱신.
+    if set(payload.keys()) <= {"important"}:
+        await cache.set_portfolio_alert_important(
+            user["google_sub"], alert_id, bool(payload.get("important"))
+        )
+        return await cache.get_portfolio_alert(user["google_sub"], alert_id)
+
     merged = dict(existing)
-    for key in ("alert_type", "threshold", "stock_code", "note", "enabled"):
+    for key in ("alert_type", "threshold", "stock_code", "note", "enabled", "important"):
         if key in payload:
             merged[key] = payload[key]
     validated = await _validate_alert_payload(user["google_sub"], merged)

@@ -178,6 +178,40 @@ class AlertCrudTests(NotificationHarness):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual((await self.client.get("/api/notifications/alerts")).json(), [])
 
+    async def test_important_flag_crud(self):
+        # 생성 시 important=True → 저장. 이후 중요 표시만 토글(검증 없이).
+        resp = await self.client.post(
+            "/api/notifications/alerts",
+            json={"alert_type": "price_above", "threshold": 72000, "stock_code": "005930", "important": True},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        rule = resp.json()
+        self.assertEqual(rule["important"], 1)
+        alert_id = rule["id"]
+
+        resp = await self.client.put(f"/api/notifications/alerts/{alert_id}", json={"important": False})
+        self.assertEqual(resp.json()["important"], 0)
+        resp = await self.client.put(f"/api/notifications/alerts/{alert_id}", json={"important": True})
+        self.assertEqual(resp.json()["important"], 1)
+
+    async def test_important_defaults_off(self):
+        resp = await self.client.post(
+            "/api/notifications/alerts", json={"alert_type": "nav_above", "threshold": 100000000}
+        )
+        self.assertEqual(resp.json()["important"], 0)
+
+    async def test_important_toggle_preserves_armed(self):
+        # 발송되어 disarmed 된 규칙을 중요로 토글해도 엣지 상태(armed=0)가 보존되어
+        # 같은 날 재발송되지 않는다.
+        rid = await cache.create_portfolio_alert(
+            "u1", scope="stock", alert_type="price_above", threshold=72000.0, stock_code="005930"
+        )
+        await cache.set_portfolio_alert_state(rid, armed=False, last_value=80000.0, triggered=True)
+        resp = await self.client.put(f"/api/notifications/alerts/{rid}", json={"important": True})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["important"], 1)
+        self.assertEqual(resp.json()["armed"], 0)  # 보존됨
+
     async def test_target_reached_blanket_singleton(self):
         resp = await self.client.post(
             "/api/notifications/alerts", json={"alert_type": "target_reached"}
@@ -373,6 +407,34 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             self.assertEqual(await engine.evaluate_user("u1"), 1)
             self.assertEqual(disp.await_count, 2)
+
+    async def test_important_rule_emphasizes_message(self):
+        # 중요 규칙 발화 시 강조 헤더를 덧붙이되 원래 본문은 그대로 포함.
+        await self._rule(threshold=72000.0, important=True)
+        captured = {}
+
+        async def cap(google_sub, text):
+            captured["text"] = text
+            return 1
+
+        with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 80000.0})), \
+             patch.object(channels, "dispatch", new=cap):
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+        self.assertIn("중요 알림", captured["text"])
+        self.assertIn("지정가 알림", captured["text"])
+
+    async def test_normal_rule_not_emphasized(self):
+        await self._rule(threshold=72000.0)  # important 기본 False
+        captured = {}
+
+        async def cap(google_sub, text):
+            captured["text"] = text
+            return 1
+
+        with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 80000.0})), \
+             patch.object(channels, "dispatch", new=cap):
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+        self.assertNotIn("중요 알림", captured["text"])
 
     async def test_target_reached_blanket_uses_holding_target(self):
         await _set_target_price("u1", "005930", 70000)

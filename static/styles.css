@@ -2341,6 +2341,24 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .pf-alert-state.armed { background: rgba(59,130,246,0.14); color: #2563eb; }
 .pf-alert-state.fired { background: rgba(245,158,11,0.16); color: #d97706; }
 .pf-alert-state.off { background: var(--hover-bg); color: var(--text-secondary); }
+/* 중요 알림: 폼 체크박스 · 목록 카드 강조 · 배지 · 별 토글 */
+.pf-alert-important-check {
+  display: flex; align-items: center; gap: 4px; align-self: center; flex: 0 0 auto;
+  font-size: 12px; color: var(--text-secondary); white-space: nowrap; cursor: pointer;
+}
+.pf-alert-important-check input { cursor: pointer; margin: 0; }
+.pf-alert-rule.important {
+  border-color: rgba(239,68,68,0.55);
+  box-shadow: inset 3px 0 0 #dc2626;
+  background: rgba(239,68,68,0.05);
+}
+.pf-alert-flag {
+  display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px;
+  background: rgba(239,68,68,0.14); color: #dc2626; font-size: 11px; font-weight: 700;
+  vertical-align: middle;
+}
+.pf-alert-star { padding: 6px 9px; font-size: 13px; line-height: 1; }
+.pf-alert-star.on { color: #f59e0b; border-color: #f59e0b; background: rgba(245,158,11,0.12); }
 
 /* 영역지도 전용 모달 — 반드시 위의 .pf-modal / .pf-modal-body 정의들
    뒤에 위치해야 함. CSS 는 같은 specificity 일 때 뒤에 선언된 규칙이

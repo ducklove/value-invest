@@ -747,6 +747,7 @@ async def init_db():
             threshold REAL NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
             note TEXT NOT NULL DEFAULT '',
+            important INTEGER NOT NULL DEFAULT 0,
             armed INTEGER NOT NULL DEFAULT 1,
             last_triggered_at TEXT,
             last_value REAL,
@@ -799,6 +800,8 @@ async def init_db():
     await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
     # Per-holding edge-trigger state for blanket (all_stocks) alert rules.
     await _ensure_column(db, "portfolio_alerts", "state_json", "TEXT NOT NULL DEFAULT '{}'")
+    # 중요 알림 표시 — 발송 시 강조 헤더로 더 눈에 띄게 보낸다.
+    await _ensure_column(db, "portfolio_alerts", "important", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
     await _backfill_legacy_cache_values(db)
@@ -1426,6 +1429,7 @@ from repositories.notifications import (  # noqa: E402
     delete_portfolio_alert,
     set_portfolio_alert_state,
     set_portfolio_alert_state_json,
+    set_portfolio_alert_important,
     list_calendar_subscriptions,
     upsert_calendar_subscription,
     delete_calendar_subscription,

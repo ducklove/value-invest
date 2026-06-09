@@ -71,6 +71,13 @@ test("지정가 폼: 종목 + 방향 + 지정가 입력", () => {
   assert.ok(html.includes('id="pfAlertThreshold"'));
 });
 
+test("폼에 중요 알림 체크박스가 있다", () => {
+  const w = loadAlerts([SAMSUNG]);
+  w.pfAlertsSetCategory("price");
+  const html = w.document.getElementById("pfAlertForm").innerHTML;
+  assert.ok(html.includes('id="pfAlertImportant"'), "중요 체크박스 존재");
+});
+
 test("목표가 도달(전체) 폼: 종목 선택·임계값 모두 없음", () => {
   const w = loadAlerts([SAMSUNG]);
   w.pfAlertsSetCategory("target");
@@ -145,6 +152,20 @@ test("규칙 목록: 블랭킷/포트폴리오 라벨", () => {
   assert.match(html, /보유 전 종목 — 일간 등락률 ±5% 이상/);
   assert.match(html, /포트폴리오 일간 등락률/);
   assert.match(html, /보유 전 종목 — 상한가·하한가 도달 시/);
+});
+
+test("규칙 목록: 중요 규칙은 배지·강조 카드·별 토글을 보인다", () => {
+  const w = loadAlerts([SAMSUNG]);
+  w.PfAlerts.alerts = [
+    { id: 1, alert_type: "price_above", scope: "stock", stock_code: "005930", threshold: 72000, enabled: 1, armed: 1, note: "", important: 1 },
+    { id: 2, alert_type: "nav_above", scope: "portfolio", threshold: 1000, enabled: 1, armed: 1, note: "", important: 0 },
+  ];
+  w.pfAlertsRenderList();
+  const html = w.document.getElementById("pfAlertList").innerHTML;
+  assert.match(html, /🚨 중요/);                                // 중요 배지
+  assert.match(html, /class="pf-alert-rule\s+important"/);      // 카드 강조 클래스
+  assert.match(html, /pfAlertsToggleImportant\(1, false\)/);    // 중요 → 해제 토글
+  assert.match(html, /pfAlertsToggleImportant\(2, true\)/);     // 일반 → 중요 토글
 });
 
 test("pfOpenAlerts 는 모달을 표시한다", () => {

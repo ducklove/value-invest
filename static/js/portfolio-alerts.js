@@ -301,6 +301,9 @@ function pfAlertsRenderForm() {
     </div>
     <div class="pf-alert-form-row">
       <input class="pf-modal-input pf-alert-note" id="pfAlertNote" type="text" maxlength="200" placeholder="메모(선택)">
+      <label class="pf-alert-important-check" title="발송 시 강조 헤더로 더 눈에 띄게 보냅니다">
+        <input type="checkbox" id="pfAlertImportant"> 🚨 중요
+      </label>
       <button class="pf-modal-add-btn" type="button" onclick="pfAlertsSubmit()">${cat === 'target' ? '목표가 알림 켜기' : cat === 'limit' ? '상하한가 알림 켜기' : '규칙 추가'}</button>
     </div>`;
 }
@@ -324,7 +327,8 @@ async function pfAlertsSubmit() {
   const cat = PfAlerts.category;
   const dir = (document.getElementById('pfAlertDir') || {}).value || 'above';
   const note = (document.getElementById('pfAlertNote') || {}).value || '';
-  const payload = { ...pfAlertsBuildType(cat, dir), note };
+  const important = !!((document.getElementById('pfAlertImportant') || {}).checked);
+  const payload = { ...pfAlertsBuildType(cat, dir), note, important };
 
   if (cat === 'price') {
     const code = (document.getElementById('pfAlertStock') || {}).value;
@@ -344,8 +348,10 @@ async function pfAlertsSubmit() {
     if (!resp.ok) throw new Error(data.detail || '규칙 추가 실패');
     const noteEl = document.getElementById('pfAlertNote');
     const thrEl = document.getElementById('pfAlertThreshold');
+    const impEl = document.getElementById('pfAlertImportant');
     if (noteEl) noteEl.value = '';
     if (thrEl) thrEl.value = '';
+    if (impEl) impEl.checked = false;
     pfAlertsLoadList();
   } catch (e) {
     alert((e && e.message) || '규칙 추가에 실패했습니다.');
@@ -408,14 +414,18 @@ function pfAlertsRenderList() {
       : '<span class="pf-alert-state fired" title="이미 발송됨. 조건이 풀리면 다시 무장">발송됨</span>';
     const note = (rule.note || '').trim();
     const noteHtml = note ? `<span class="pf-alert-rule-note">📝 ${escapeHtml(note)}</span>` : '';
+    const important = !!rule.important;
+    const flagHtml = important ? '<span class="pf-alert-flag" title="중요 알림 — 강조해서 발송">🚨 중요</span>' : '';
+    const starBtn = `<button class="pf-alert-btn pf-alert-star${important ? ' on' : ''}" type="button" title="${important ? '중요 표시 해제' : '중요 알림으로 표시'}" onclick="pfAlertsToggleImportant(${rule.id}, ${important ? 'false' : 'true'})">${important ? '★' : '☆'}</button>`;
     return `
-      <div class="pf-alert-rule ${rule.enabled ? '' : 'disabled'}">
+      <div class="pf-alert-rule ${rule.enabled ? '' : 'disabled'}${important ? ' important' : ''}">
         <div class="pf-alert-rule-main">
-          <span class="pf-alert-rule-label">${pfAlertsLabel(rule)}</span>
+          <span class="pf-alert-rule-label">${flagHtml}${pfAlertsLabel(rule)}</span>
           ${noteHtml}
         </div>
         <div class="pf-alert-rule-actions">
           ${rule.enabled ? armed : '<span class="pf-alert-state off">꺼짐</span>'}
+          ${starBtn}
           <button class="pf-alert-btn" type="button" onclick="pfAlertsToggle(${rule.id}, ${rule.enabled ? 'false' : 'true'})">${rule.enabled ? '끄기' : '켜기'}</button>
           <button class="pf-alert-btn danger" type="button" onclick="pfAlertsDelete(${rule.id})">삭제</button>
         </div>
@@ -426,6 +436,14 @@ function pfAlertsRenderList() {
 async function pfAlertsToggle(id, enabled) {
   try {
     await pfAlertsApi(`/alerts/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
+  } finally {
+    pfAlertsLoadList();
+  }
+}
+
+async function pfAlertsToggleImportant(id, important) {
+  try {
+    await pfAlertsApi(`/alerts/${id}`, { method: 'PUT', body: JSON.stringify({ important }) });
   } finally {
     pfAlertsLoadList();
   }
@@ -445,6 +463,6 @@ if (typeof window !== 'undefined') {
     pfOpenAlerts, pfCloseAlerts, pfAlertsToggleHelp,
     pfAlertsTelegramRegister, pfAlertsKakaoConnect,
     pfAlertsTest, pfAlertsToggleChannel, pfAlertsUnlink,
-    pfAlertsSetCategory, pfAlertsSubmit, pfAlertsToggle, pfAlertsDelete,
+    pfAlertsSetCategory, pfAlertsSubmit, pfAlertsToggle, pfAlertsToggleImportant, pfAlertsDelete,
   });
 }
