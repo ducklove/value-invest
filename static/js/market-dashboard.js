@@ -37,6 +37,14 @@ function _mdChange(d) {
 // KOSPI200 은 국내 지수 카드에서 자리가 어색하고 중요도가 낮아 숨긴다.
 const MD_HIDDEN_CODES = new Set(['KOSPI200']);
 
+// 야간선물 섹션은 야간 거래 시간대(18:00~익일 09:00, 브라우저 로컬=KST)에만
+// 노출한다. 주간(09:00~18:00)에는 값이 정체돼 혼란을 주므로 섹션을 숨긴다.
+// (마켓바 _mbIsHidden 과 동일한 기준.)
+function _mdNightFuturesVisible() {
+  const h = new Date().getHours();
+  return h >= 18 || h < 9;
+}
+
 function _mdGroupByCategory(catalog) {
   const groups = {};
   for (const [code, meta] of Object.entries(catalog || {})) {
@@ -267,8 +275,16 @@ async function _mdLiveRefresh() {
   if (!live || typeof live !== 'object') return;
   // 최신값만 머지(USD_KRW 등 환산 기준은 그대로 유지).
   Object.assign(_mdLastDataMap, live);
-  // 야간선물: 일반 섹션 행 교체.
-  _mdRefreshCategoryRows('야간선물');
+  // 야간선물: 노출 시간대(18~09시)면 행만 교체. 경계를 넘어 가시성이 바뀌었으면
+  // 전체 재렌더로 섹션을 추가/제거하고 이번 주기는 종료(중복 작업 방지).
+  const nfVisible = _mdNightFuturesVisible();
+  const nfSec = document.querySelector('[data-md-cat="야간선물"]');
+  if (nfVisible === !!nfSec) {
+    if (nfVisible) _mdRefreshCategoryRows('야간선물');
+  } else {
+    _mdRenderDashboard(_mdCatalog, _mdLastDataMap);
+    return;
+  }
   // 바이낸스: 통화 토글 상태 반영해 행만 교체(토글 버튼/리스너는 유지).
   const bnb = document.getElementById('mdBinanceSection');
   const bnbRows = bnb && bnb.querySelector('.md-rows');
@@ -505,6 +521,7 @@ function _mdRenderDashboard(catalog, dataMap) {
   const rail = [];
   let bondCodes = null;
   for (const { category, codes } of groups) {
+    if (category === '야간선물' && !_mdNightFuturesVisible()) continue;  // 야간(18~09시)만 노출
     if (category === '국채') {
       bondCodes = codes;
       main.push(_mdBondSectionHtml());  // 차트 컨테이너 + 수치 리스트 자리
