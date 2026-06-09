@@ -51,11 +51,12 @@ test("스팩 종목은 '분석 화면' 대신 '스팩 분석' 액션을 받고 s
   const first = actions[0];
   assert.equal(first.label, "스팩 분석");
 
-  // openIntegration() 은 window.open(url, ...) 으로 새 탭을 연다.
+  // openIntegration() 은 window.open(url, ...) 으로 새 탭을 연다. 외부 도구는
+  // 현재 앱 테마를 ?theme= 로 받으므로(기본 light), code 앞에 theme 가 붙는다.
   let openedUrl = "";
   w.open = (url) => { openedUrl = url; };
   first.run();
-  assert.equal(openedUrl, "https://ducklove.github.io/spac-hunter/?code=0131D0");
+  assert.equal(openedUrl, "https://ducklove.github.io/spac-hunter/?theme=light&code=0131D0");
 });
 
 test("일반 국내 종목은 '분석 화면' 액션을 유지한다", () => {
