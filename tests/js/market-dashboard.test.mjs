@@ -420,7 +420,7 @@ const BOND_DATA = {
 test("_mdBondCurve aligns KR/US/JP onto a shared maturity axis (overnight label, nulls where missing)", () => {
   const w = load();
   const curve = w._mdBondCurve(Object.keys(BOND_CATALOG), BOND_CATALOG, BOND_DATA);
-  assert.deepEqual([...curve.labels], ["overnight", "3M", "2Y", "10Y"]);
+  assert.deepEqual([...curve.labels], ["1D", "3M", "2Y", "10Y"]);
   assert.deepEqual([...curve.kr], [2.54, 2.60, null, 4.12]); // 한국: overnight=KOFR, 3M=CD91, 2Y 없음
   assert.deepEqual([...curve.us], [4.30, 3.71, null, 4.45]); // 미국: overnight=SOFR, 3M, 2Y 없음
   assert.deepEqual([...curve.jp], [null, null, 1.40, 2.57]); // 일본: 2Y/10Y만
@@ -433,6 +433,32 @@ test("_mdBondCountries lists 10Y by yield desc, incl KR/US/JP/CN", () => {
   assert.equal(cs[0].value, 4.45);
 });
 
+test("_mdBondCountries maps newly added IT/CA/IN/BR to Korean names, yield desc", () => {
+  const w = load();
+  const cat = {
+    US10Y: { category: "국채", country: "US", maturity: 10 },
+    IT10Y: { category: "국채", country: "IT", maturity: 10 },
+    CA10Y: { category: "국채", country: "CA", maturity: 10 },
+    IN10Y: { category: "국채", country: "IN", maturity: 10 },
+    BR10Y: { category: "국채", country: "BR", maturity: 10 },
+  };
+  const data = {
+    US10Y: { value: "4.45" }, IT10Y: { value: "3.83" }, CA10Y: { value: "3.53" },
+    IN10Y: { value: "6.91" }, BR10Y: { value: "14.76" },
+  };
+  const cs = w._mdBondCountries(Object.keys(cat), cat, data);
+  // 금리 내림차순 + BOND_COUNTRY_NAMES 한글 매핑.
+  assert.deepEqual([...cs.map((c) => c.name)], ["브라질", "인도", "미국", "이탈리아", "캐나다"]);
+});
+
+test("_bondMatLabel maps overnight(0) to 1D, sub-year to months, else years", () => {
+  const w = load();
+  assert.equal(w._bondMatLabel(0), "1D");
+  assert.equal(w._bondMatLabel(0.25), "3M");
+  assert.equal(w._bondMatLabel(0.5), "6M");
+  assert.equal(w._bondMatLabel(10), "10Y");
+});
+
 test("_mdRenderDashboard renders 국채 chart containers + yield-curve table", () => {
   const w = load();
   w._mdRenderDashboard(BOND_CATALOG, BOND_DATA);
@@ -440,7 +466,7 @@ test("_mdRenderDashboard renders 국채 chart containers + yield-curve table", (
   assert.ok(main.querySelector("#bondYieldCurve"), "yield curve container");
   assert.ok(main.querySelector("#bondCountryCompare"), "country compare container");
   const curveTbl = main.querySelector("#bondCurveTable .bond-tbl");
-  assert.ok(curveTbl && /overnight/.test(curveTbl.textContent), "curve table filled");
+  assert.ok(curveTbl && /1D/.test(curveTbl.textContent), "curve table filled");
   assert.ok(/일본/.test(curveTbl.textContent), "curve table has 일본 column");
   // 국가별 10년물은 그래프만 두고 텍스트 표는 제거됨.
   assert.equal(main.querySelector("#bondCountryTable"), null, "country table removed");

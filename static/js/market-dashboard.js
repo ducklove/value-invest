@@ -16,7 +16,7 @@ let _mdInFlight = null;
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
-const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주' };
+const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', CA: '캐나다', IN: '인도', BR: '브라질' };
 const BOND_CURVE_COLORS = { KR: '#2563eb', US: '#e11d48', JP: '#16a34a' };
 let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
 
@@ -316,7 +316,7 @@ function _bondChg(d) {
 }
 
 function _bondMatLabel(m) {
-  if (m === 0) return 'overnight';  // 한국=KOFR, 미국=SOFR
+  if (m === 0) return '1D';  // 익일물(overnight): 한국=KOFR, 미국=SOFR
   if (m < 1) return Math.round(m * 12) + 'M';  // 0.25 → 3M
   return m + 'Y';
 }

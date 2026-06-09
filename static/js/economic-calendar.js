@@ -189,6 +189,35 @@ function _ecDateHeading(iso) {
     + (isToday ? '<span class="ec-today-badge">오늘</span>' : '');
 }
 
+// 현재 시각 표시선(파란 라인). 오늘 그룹에서 시간순 정렬된 행 사이,
+// 처음으로 현재 시각을 지나지 않은 일정 앞에 끼워 "지금 여기"를 보여준다.
+function _ecNowLineHtml() {
+  const d = new Date();
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `<div class="ec-now-line" role="separator" aria-label="현재 시각 ${hm}"><span>${hm}</span></div>`;
+}
+
+function _ecRowsWithNowLine(sortedRows) {
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const toMin = (t) => {
+    const m = String(t == null ? '' : t).match(/(\d{1,2}):(\d{2})/);
+    return m ? (+m[1]) * 60 + (+m[2]) : null;  // 시각 불명(전일/미정 등)은 위치에서 제외
+  };
+  let html = '';
+  let inserted = false;
+  for (const ev of sortedRows) {
+    const mins = toMin(ev.time);
+    if (!inserted && mins != null && mins >= nowMin) {
+      html += _ecNowLineHtml();
+      inserted = true;
+    }
+    html += _ecRowHtml(ev);
+  }
+  if (!inserted) html += _ecNowLineHtml();  // 남은 일정이 모두 과거면 맨 아래
+  return html;
+}
+
 function _ecRenderBody(data) {
   const body = document.getElementById('econCalBody');
   if (!body) return;
@@ -204,12 +233,13 @@ function _ecRenderBody(data) {
     return;
   }
   const groups = _ecGroupByDate(events);
+  const todayIso = _ecFmtDate(new Date());
   body.innerHTML = groups.map(([iso, rows]) => {
-    const rowsHtml = rows
-      .slice()
-      .sort((a, b) => (String(a.time) < String(b.time) ? -1 : 1))
-      .map(_ecRowHtml)
-      .join('');
+    const sorted = rows.slice().sort((a, b) => (String(a.time) < String(b.time) ? -1 : 1));
+    // 오늘 그룹에만 현재 시각 표시선을 끼운다.
+    const rowsHtml = iso === todayIso
+      ? _ecRowsWithNowLine(sorted)
+      : sorted.map(_ecRowHtml).join('');
     return `<div class="ec-daygroup"><div class="ec-dayhead">${_ecDateHeading(iso)}</div>${rowsHtml}</div>`;
   }).join('');
 }

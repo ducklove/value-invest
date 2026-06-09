@@ -78,6 +78,10 @@ CATALOG: dict[str, dict] = {
     "GB10Y":  {"label": "영국10년물", "category": "국채", "country": "GB", "maturity": 10},
     "AU10Y":  {"label": "호주10년물", "category": "국채", "country": "AU", "maturity": 10},
     "CN10Y":  {"label": "중국10년물", "category": "국채", "country": "CN", "maturity": 10},
+    "IT10Y":  {"label": "이탈리아10년물", "category": "국채", "country": "IT", "maturity": 10},
+    "CA10Y":  {"label": "캐나다10년물", "category": "국채", "country": "CA", "maturity": 10},
+    "IN10Y":  {"label": "인도10년물", "category": "국채", "country": "IN", "maturity": 10},
+    "BR10Y":  {"label": "브라질10년물", "category": "국채", "country": "BR", "maturity": 10},
     # 야간선물
     "NIGHT_FUTURES": {"label": "야간선물", "category": "야간선물"},
     # 바이낸스 USDⓈ-M 선물 (토큰화 주식 무기한) — USDT 가격·24h 등락
@@ -676,6 +680,10 @@ _CNBC_BOND_MAP = {
     "GB10Y": "UK10Y-GB",
     "AU10Y": "AU10Y-AU",
     "CN10Y": "CN10Y-CN",
+    "IT10Y": "IT10Y-IT",
+    "CA10Y": "CA10Y-CA",
+    "IN10Y": "IN10Y-IN",
+    "BR10Y": "BR10Y-BR",
 }
 
 

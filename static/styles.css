@@ -599,7 +599,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 /* 주요 지수 hero — prominent cards */
 .md-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-.md-hero-card { position: relative; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--bg); }
+/* 박스(테두리·배경) 없이 섹션 바탕에 그대로 — 값/차트만 노출 */
+.md-hero-card { position: relative; padding: 4px 2px 6px; }
 .md-hero-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
 .md-hero-val { font-size: 22px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .md-hero-card .md-chg { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; }
@@ -975,6 +976,25 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background: rgba(245, 158, 11, 0.14);
   box-shadow: inset 3px 0 0 var(--warn, #f59e0b);
   border-radius: 0 6px 6px 0;
+}
+/* 오늘 일정에서 현재 시각 위치를 가리키는 파란 라인 */
+.ec-now-line {
+  position: relative;
+  height: 0;
+  margin: 4px 0;
+  border-top: 2px solid var(--primary);
+}
+.ec-now-line span {
+  position: absolute;
+  top: -8px;
+  right: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .ec-bell-done { font-size: 13px; line-height: 1; }
 .ec-time { color: var(--text-secondary); font-weight: 700; }
