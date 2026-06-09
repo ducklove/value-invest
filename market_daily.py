@@ -18,6 +18,8 @@ from cache_layer import MemoryTTLCache
 import dart_client
 import kis_proxy_client
 import market_indicators
+import market_movers
+import market_sessions
 from services import ai_client
 from services.portfolio import runtime_quotes as portfolio_quotes
 from services.portfolio.identifiers import is_korean_stock, normalize_portfolio_code
@@ -36,6 +38,14 @@ NEWS_PER_STOCK = int(os.environ.get("MARKET_DAILY_NEWS_PER_STOCK", "4"))
 MARKET_DAILY_MAX_TOKENS = int(os.environ.get("MARKET_DAILY_MAX_TOKENS", "1800"))
 MARKET_TAPE_TTL_SECONDS = int(os.environ.get("MARKET_TAPE_TTL_SECONDS", "45"))
 MARKET_TAPE_EVENT_LIMIT = int(os.environ.get("MARKET_TAPE_EVENT_LIMIT", "40"))
+# 마켓테이프 종목 선정(시장 전체 기준) — 시총상위/급등락 각 시장별 상한 개수
+TAPE_MARKET_CAP_COUNT = int(os.environ.get("MARKET_TAPE_MARKET_CAP_COUNT", "6"))
+TAPE_MOVER_COUNT = int(os.environ.get("MARKET_TAPE_MOVER_COUNT", "8"))
+# |등락률| 이 값 이상이면 상한가/하한가로 간주(KRX ±30% 밴드, 호가단위 보정으로 ~29.x%)
+TAPE_LIMIT_PCT = float(os.environ.get("MARKET_TAPE_LIMIT_PCT", "29.0"))
+# 급등/급락 최소 등락률. Naver 급상승/급하락 페이지는 변동폭과 무관하게 상위 N개를
+# 늘 반환하므로, 이 값 미만은 '이슈'로 보지 않고 버린다(시총상위는 변동과 무관하게 유지).
+TAPE_SURGE_PCT = float(os.environ.get("MARKET_TAPE_SURGE_PCT", "5.0"))
 
 INVESTOR_FLOW_LIMIT = int(os.environ.get("MARKET_DAILY_INVESTOR_FLOW_LIMIT", "10"))
 UPCOMING_DIVIDEND_WINDOW_DAYS = int(os.environ.get("MARKET_DAILY_DIVIDEND_WINDOW_DAYS", "45"))
@@ -345,6 +355,120 @@ async def _market_snapshot() -> tuple[list[dict[str, Any]], float | None]:
             kospi_pct = pct
         rows.append(row)
     return rows, kospi_pct
+
+
+# 홈 지수·24h 매크로는 상시 노출, 해외 주가지수는 그 시장이 열렸을 때만(닫히면 종가라 stale).
+_TAPE_HOME_INDEX_CODES = ["KOSPI", "KOSDAQ"]
+_TAPE_OPEN_INDEX_CODES = {
+    "US": ["SPX", "IXIC", "DJI"],
+    "JP": ["NI225"],
+    "HK": ["HSI"],
+    "CN": ["SHC"],
+}
+_TAPE_MACRO_CODES = ["USD_KRW", "OIL_CL"]  # 환율·원유는 사실상 24h라 항상 유효
+
+
+def _tape_index_codes(open_markets: set[str]) -> list[str]:
+    """현재 열린 시장 위주로 테이프에 노출할 지수 코드 목록(순서 보존, 중복 제거)."""
+    codes = list(_TAPE_HOME_INDEX_CODES)
+    for market in ("US", "JP", "HK", "CN"):
+        if market in open_markets:
+            codes.extend(_TAPE_OPEN_INDEX_CODES[market])
+    codes.extend(_TAPE_MACRO_CODES)
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for code in codes:
+        if code not in seen:
+            seen.add(code)
+            ordered.append(code)
+    return ordered
+
+
+async def _tape_index_rows(now: datetime | None = None) -> list[dict[str, Any]]:
+    """열린 시장 기준 지수 시세 행. KOSPI200은 _market_event 단계에서 한 번 더 걸러짐."""
+    codes = _tape_index_codes(market_sessions.open_markets(now))
+    data = await market_indicators.fetch_indicators(codes)
+    rows: list[dict[str, Any]] = []
+    for code in codes:
+        raw = data.get(code) or {}
+        rows.append({
+            "code": code,
+            "label": market_indicators.CATALOG.get(code, {}).get("label", code),
+            "value": raw.get("value") or "",
+            "change": raw.get("change") or "",
+            "change_pct": _signed_change_pct(raw.get("change_pct"), raw.get("direction")),
+            "direction": raw.get("direction") or "",
+        })
+    return rows
+
+
+# 한 종목이 여러 랭킹에 동시에 들면 더 강한 시그널을 채택(상/하한가 > 급등락 > 시총).
+_TAPE_BUCKET_RANK = {"상한가": 4, "하한가": 4, "급등": 3, "급락": 3, "시총": 1}
+
+
+def _mover_bucket(kind: str, pct: float | None) -> str | None:
+    """랭킹 종류+등락률을 테이프 배지로 매핑. 급등락 미달(노이즈)은 None(=버림).
+
+    시총상위는 변동폭과 무관하게 항상 노출(대형주 시세). 급상승/급하락 랭킹은
+    ±TAPE_LIMIT_PCT 이상이면 상/하한가, ±TAPE_SURGE_PCT 이상이면 급등/급락,
+    그 미만이면 None.
+    """
+    if kind == "market_cap":
+        return "시총"
+    if not isinstance(pct, (int, float)):
+        return None
+    if kind == "rising":
+        if pct >= TAPE_LIMIT_PCT:
+            return "상한가"
+        return "급등" if pct >= TAPE_SURGE_PCT else None
+    if kind == "falling":
+        if pct <= -TAPE_LIMIT_PCT:
+            return "하한가"
+        return "급락" if pct <= -TAPE_SURGE_PCT else None
+    return None
+
+
+async def _tape_movers() -> list[dict[str, Any]]:
+    """시총상위·급등·급락(상/하한가 포함)을 코스피/코스닥에서 모아 종목당 1건으로 정리."""
+    specs = [
+        ("market_cap", "kospi", TAPE_MARKET_CAP_COUNT),
+        ("market_cap", "kosdaq", TAPE_MARKET_CAP_COUNT),
+        ("rising", "kospi", TAPE_MOVER_COUNT),
+        ("rising", "kosdaq", TAPE_MOVER_COUNT),
+        ("falling", "kospi", TAPE_MOVER_COUNT),
+        ("falling", "kosdaq", TAPE_MOVER_COUNT),
+    ]
+    results = await asyncio.gather(
+        *(market_movers.fetch_market_movers(kind, market, count) for kind, market, count in specs),
+        return_exceptions=True,
+    )
+    best: dict[str, dict[str, Any]] = {}
+    for (kind, market, _count), rows in zip(specs, results):
+        if isinstance(rows, BaseException):
+            logger.info("tape movers fetch failed (%s/%s): %s", kind, market, rows)
+            continue
+        for row in rows:
+            code = (row.get("code") or "").strip()
+            name = (row.get("name") or "").strip()
+            if not code or not name:
+                continue
+            pct = _safe_float(row.get("change_pct"))
+            bucket = _mover_bucket(kind, pct)
+            if bucket is None:  # 급등락 미달 등 노이즈는 제외
+                continue
+            candidate = {
+                "stock_code": code,
+                "stock_name": name,
+                "price": row.get("price"),
+                "change_pct": pct,
+                "direction": row.get("direction") or "",
+                "bucket": bucket,
+                "market": market,
+            }
+            existing = best.get(code)
+            if existing is None or _TAPE_BUCKET_RANK.get(bucket, 0) > _TAPE_BUCKET_RANK.get(existing["bucket"], 0):
+                best[code] = candidate
+    return list(best.values())
 
 
 async def _quote_moves(interests: list[dict[str, Any]], kospi_pct: float | None) -> list[dict[str, Any]]:
@@ -805,6 +929,40 @@ def _stock_move_event(row: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _mover_event(row: dict[str, Any]) -> dict[str, Any] | None:
+    """시장 전체 랭킹(_tape_movers) 1건을 테이프 종목 이벤트로 변환."""
+    code = row.get("stock_code") or ""
+    pct = row.get("change_pct")
+    if not code or not isinstance(pct, (int, float)):
+        return None
+    name = row.get("stock_name") or code
+    bucket = row.get("bucket") or "시총"
+    direction = "up" if pct > 0 else "down" if pct < 0 else "flat"
+    if bucket in ("상한가", "하한가"):
+        severity = "breaking"
+    elif bucket in ("급등", "급락"):
+        severity = "alert"
+    else:  # 시총 상위
+        severity = "watch"
+    parts = [f"{name} {_format_pct(pct)}"]
+    price = _format_price(row.get("price"))
+    if price:
+        parts.append(price)
+    return {
+        "id": _event_id("mover", code, bucket, pct, row.get("price")),
+        "type": "stock_move",
+        "severity": severity,
+        "direction": direction,
+        "badge": bucket,
+        "label": name,
+        "text": " · ".join(parts),
+        "stock_code": code,
+        "stock_name": name,
+        "change_pct": pct,
+        "sort_key": [_severity_rank(severity), _type_rank("stock_move"), -abs(pct)],
+    }
+
+
 def _disclosure_event(row: dict[str, Any]) -> dict[str, Any] | None:
     report_name = row.get("report_name") or ""
     if not report_name:
@@ -837,9 +995,9 @@ def _news_event(row: dict[str, Any]) -> dict[str, Any] | None:
     stock_code = row.get("stock_code") or ""
     raw_name = row.get("stock_name") or row.get("corp_name") or ""
     name = raw_name if raw_name and raw_name != stock_code else ""
-    prefix = f"[{name}] " if name and name not in title else ""
     outlet = row.get("outlet") or ""
-    text = f"{prefix}{title}".strip()
+    # \ub274\uc2a4 \uc81c\ubaa9 \uc55e [\uc885\ubaa9\uba85] \uba38\ub9ac\ud45c\ub294 \ubd99\uc774\uc9c0 \uc54a\ub294\ub2e4(\uac00\ub3c5\uc131 \u2014 \uc885\ubaa9 \uc815\ubcf4\ub294 data-stock-code \ub85c \uc720\uc9c0).
+    text = title.strip()
     if outlet:
         text = f"{text} \u00b7 {outlet}"
     return {
@@ -874,6 +1032,11 @@ def build_market_tape_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if event and (event.get("is_notable") or event.get("severity") != "info"):
             candidates.append(event)
 
+    for row in payload.get("movers") or []:
+        event = _mover_event(row)
+        if event:
+            candidates.append(event)
+
     for row in payload.get("news") or []:
         event = _news_event(row)
         if event:
@@ -900,30 +1063,37 @@ def build_market_tape_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def build_market_tape(*, google_sub: str | None = None, refresh: bool = False) -> dict[str, Any]:
-    cache_key = google_sub or "public"
+    # 테이프는 시장 전체 기준(열린 시장 지수·시총상위·상하한가·급등락)이라 사용자별로
+    # 달라지지 않는다 → 공용 캐시 키 하나로 모든 사용자가 공유한다(google_sub는 무시).
+    cache_key = "public"
     cached = _TAPE_CACHE.get_entry(cache_key)
     if cached is not None and not refresh:
         return {**cached.value, "cached": True}
 
     brief_date = _today_iso()
-    interests = await _interest_universe(google_sub)
-    market_rows, kospi_pct = await _market_snapshot()
-    moves = await _quote_moves(interests, kospi_pct) if interests else []
-    disclosures, disclosure_warnings = await _fetch_dart_disclosures(interests, brief_date) if interests else ([], [])
-    focus_codes = [
-        *(row["stock_code"] for row in moves if row.get("is_notable")),
-        *(row["stock_code"] for row in disclosures if row.get("is_material")),
-    ]
-    news = await _news_for_focus_codes(focus_codes, _focus_stock_names(moves, disclosures))
+    market_rows = await _tape_index_rows()
+    movers = await _tape_movers()
+
+    # 이슈 종목(상/하한가·급등락)만 공시·뉴스 시드로 사용. 시총만인 종목은 제외.
+    focus = [m for m in movers if m.get("bucket") in ("상한가", "하한가", "급등", "급락")]
+    focus.sort(key=lambda m: abs(m.get("change_pct") or 0), reverse=True)
+    focus = focus[:NEWS_STOCK_LIMIT]
+    focus_interests = [{"stock_code": m["stock_code"], "stock_name": m["stock_name"]} for m in focus]
+    focus_codes = [m["stock_code"] for m in focus]
+    names = {m["stock_code"]: m["stock_name"] for m in movers}
+
+    disclosures, disclosure_warnings = (
+        await _fetch_dart_disclosures(focus_interests, brief_date) if focus_interests else ([], [])
+    )
+    news = await _news_for_focus_codes(focus_codes, names) if focus_codes else []
     payload = {
         "brief_date": brief_date,
         "generated_at": datetime.now().isoformat(),
         "market": market_rows,
-        "moves": moves,
+        "movers": movers,
         "disclosures": disclosures,
         "news": news,
         "source_warnings": disclosure_warnings,
-        "interest_count": len(interests),
     }
     events = build_market_tape_events(payload)
     result = {
@@ -935,9 +1105,8 @@ async def build_market_tape(*, google_sub: str | None = None, refresh: bool = Fa
         "counts": {
             "events": len(events),
             "breaking": sum(1 for event in events if event.get("severity") == "breaking"),
-            "interest_count": len(interests),
+            "movers": len(movers),
             "disclosures": len(disclosures),
-            "notable_moves": sum(1 for row in moves if row.get("is_notable")),
         },
     }
     _TAPE_CACHE.set(cache_key, result)

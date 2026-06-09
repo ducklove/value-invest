@@ -228,6 +228,54 @@ class MarketDailyRuleTests(unittest.TestCase):
         self.assertIn("KOSPI", labels)
         self.assertNotIn("KOSPI200", labels)
 
+    def test_tape_index_codes_features_open_markets_only(self):
+        # 전 시장 마감: 홈 지수(KOSPI/KOSDAQ) + 24h 매크로만.
+        self.assertEqual(
+            market_daily._tape_index_codes(set()),
+            ["KOSPI", "KOSDAQ", "USD_KRW", "OIL_CL"],
+        )
+        # 미국장 열림: 미국 지수 추가.
+        self.assertEqual(
+            market_daily._tape_index_codes({"US"}),
+            ["KOSPI", "KOSDAQ", "SPX", "IXIC", "DJI", "USD_KRW", "OIL_CL"],
+        )
+        # 아시아장 열림: 닛케이·항셍·상해 추가.
+        self.assertEqual(
+            market_daily._tape_index_codes({"JP", "HK", "CN"}),
+            ["KOSPI", "KOSDAQ", "NI225", "HSI", "SHC", "USD_KRW", "OIL_CL"],
+        )
+
+    def test_mover_bucket_classifies_limit_and_moves(self):
+        self.assertEqual(market_daily._mover_bucket("rising", 29.9), "상한가")
+        self.assertEqual(market_daily._mover_bucket("rising", 7.2), "급등")
+        self.assertEqual(market_daily._mover_bucket("falling", -30.0), "하한가")
+        self.assertEqual(market_daily._mover_bucket("falling", -6.0), "급락")
+        # 시총상위는 변동폭과 무관하게 항상 유지.
+        self.assertEqual(market_daily._mover_bucket("market_cap", 0.3), "시총")
+        # ±5% 미만 급상승/급하락은 노이즈 → 버림(None).
+        self.assertIsNone(market_daily._mover_bucket("rising", 1.2))
+        self.assertIsNone(market_daily._mover_bucket("falling", -3.0))
+        self.assertIsNone(market_daily._mover_bucket("rising", None))
+
+    def test_market_tape_movers_become_stock_events(self):
+        events = market_daily.build_market_tape_events({
+            "movers": [
+                {"stock_code": "005930", "stock_name": "삼성전자", "price": 80000,
+                 "change_pct": 1.2, "direction": "up", "bucket": "시총"},
+                {"stock_code": "900110", "stock_name": "이슈상한", "price": 13000,
+                 "change_pct": 29.9, "direction": "up", "bucket": "상한가"},
+            ],
+        })
+
+        # 상한가(breaking)가 시총(watch)보다 먼저.
+        self.assertEqual(events[0]["badge"], "상한가")
+        self.assertEqual(events[0]["severity"], "breaking")
+        self.assertEqual(events[0]["type"], "stock_move")
+        self.assertEqual(events[0]["stock_code"], "900110")
+        cap = next(e for e in events if e["badge"] == "시총")
+        self.assertEqual(cap["severity"], "watch")
+        self.assertIn("삼성전자", cap["text"])
+
     def test_market_tape_omits_non_material_disclosure_noise(self):
         events = market_daily.build_market_tape_events({
             "disclosures": [
@@ -276,7 +324,7 @@ class MarketDailyRuleTests(unittest.TestCase):
         self.assertEqual(events[0]["severity"], "breaking")
         self.assertIn("\ubc30\ub2f9", events[0]["text"])
 
-    def test_market_tape_news_uses_stock_name_instead_of_code_when_needed(self):
+    def test_market_tape_news_drops_stock_name_prefix(self):
         events = market_daily.build_market_tape_events({
             "news": [
                 {
@@ -289,8 +337,12 @@ class MarketDailyRuleTests(unittest.TestCase):
             ],
         })
 
-        self.assertEqual(events[0]["text"], "[\uc0bc\uc131\uc804\uc790] \ubc18\ub3c4\uccb4 \ud22c\uc790 \ud655\ub300 \u00b7 \uc5f0\ud569\ub274\uc2a4")
+        # \ub274\uc2a4 \uc81c\ubaa9 \uc55e [\uc885\ubaa9\uba85] \uba38\ub9ac\ud45c\ub294 \uc81c\uac70 \u2014 \uc81c\ubaa9+\ucd9c\ucc98\ub9cc.
+        self.assertEqual(events[0]["text"], "\ubc18\ub3c4\uccb4 \ud22c\uc790 \ud655\ub300 \u00b7 \uc5f0\ud569\ub274\uc2a4")
+        self.assertNotIn("[\uc0bc\uc131\uc804\uc790]", events[0]["text"])
         self.assertNotIn("005930", events[0]["text"])
+        # \uc885\ubaa9 \uc815\ubcf4 \uc790\uccb4\ub294 \uba54\ud0c0\ub85c \uc720\uc9c0(\ud074\ub9ad \uc2dc \uc885\ubaa9 \uc774\ub3d9).
+        self.assertEqual(events[0]["stock_code"], "005930")
 
     def test_market_tape_news_does_not_repeat_stock_name_in_title(self):
         events = market_daily.build_market_tape_events({
