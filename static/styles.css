@@ -378,6 +378,25 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
   overflow: hidden;
 }
+/* 시황 테이프는 콘텐츠 위에 떠 있는 fixed 오버레이라, 일반 flash-update가
+   element 자체 background-color 를 transparent 로 애니메이션하면 1.6초 동안
+   불투명 배경이 사라져 뒤 콘텐츠가 비쳐 보인다. 테이프 배경은 건드리지 않고
+   ::after 오버레이로만 깜빡이게 한다. */
+.market-tape.flash-update {
+  animation: none;
+}
+.market-tape.flash-update::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: marketTapeFlash 1.6s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+@keyframes marketTapeFlash {
+  0%   { background-color: rgba(250, 204, 21, 0.00); }
+  20%  { background-color: rgba(250, 204, 21, 0.18); }
+  100% { background-color: rgba(250, 204, 21, 0.00); }
+}
 .market-tape-head {
   flex: 0 0 auto;
   color: var(--primary);

@@ -744,6 +744,10 @@ def _type_rank(event_type: str) -> int:
 
 def _market_event(row: dict[str, Any]) -> dict[str, Any] | None:
     code = row.get("code") or ""
+    # KOSPI200은 인트라데이 현행화가 안 돼 시세가 stale → 테이프에는 노출하지 않는다.
+    # (일일 브리핑용 _market_snapshot 에는 그대로 남겨 둠)
+    if code == "KOSPI200":
+        return None
     label = row.get("label") or code
     value = row.get("value") or "-"
     pct = row.get("change_pct")

@@ -216,6 +216,18 @@ class MarketDailyRuleTests(unittest.TestCase):
 
         self.assertEqual(events, [])
 
+    def test_market_tape_excludes_kospi200(self):
+        events = market_daily.build_market_tape_events({
+            "market": [
+                {"code": "KOSPI", "label": "KOSPI", "value": "2,700.00", "change_pct": -2.3},
+                {"code": "KOSPI200", "label": "KOSPI200", "value": "360.00", "change_pct": -2.1},
+            ],
+        })
+
+        labels = [event["label"] for event in events]
+        self.assertIn("KOSPI", labels)
+        self.assertNotIn("KOSPI200", labels)
+
     def test_market_tape_omits_non_material_disclosure_noise(self):
         events = market_daily.build_market_tape_events({
             "disclosures": [
