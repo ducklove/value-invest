@@ -1,4 +1,4 @@
-"""Intraday portfolio snapshot. Run via cron every 30 minutes."""
+"""Intraday portfolio snapshot. Run via systemd timer every 10 minutes (08:00-20:00 KST)."""
 
 import asyncio
 import logging

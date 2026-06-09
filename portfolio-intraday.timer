@@ -1,8 +1,10 @@
 [Unit]
-Description=Run portfolio intraday snapshot every 30 minutes (9:00-22:00)
+Description=Run portfolio intraday snapshot every 10 minutes (08:00-20:00 KST)
 
 [Timer]
-OnCalendar=*-*-* 09..21:00,30:00
+# TODAY sparkline(08:00~20:00 축)에 맞춰 10분 간격으로 캡처.
+OnCalendar=*-*-* 08..19:00/10:00
+OnCalendar=*-*-* 20:00:00
 Persistent=false
 
 [Install]

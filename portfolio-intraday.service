@@ -1,5 +1,5 @@
 [Unit]
-Description=Portfolio intraday snapshot (30-min)
+Description=Portfolio intraday snapshot (10-min)
 After=network.target
 OnFailure=value-invest-notify@%n.service
 
