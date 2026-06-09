@@ -931,6 +931,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border-radius: 10px;
   background: var(--sidebar-bg, var(--bg));
 }
+/* hidden 속성이 위 display:flex 를 이기도록 — 안 그러면 패널이 늘 펼쳐져 토글이 무력화됨 */
+.ec-settings[hidden] { display: none; }
 .ec-set-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ec-set-label {
   display: inline-flex; align-items: center; gap: 5px;

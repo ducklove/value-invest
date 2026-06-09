@@ -88,3 +88,15 @@ test("표시선 라벨은 현재 시각(HH:MM)을 보여준다", () => {
   const line = w.document.getElementById("econCalBody").querySelector(".ec-now-line span");
   assert.equal(line.textContent, "09:05");
 });
+
+test("⚙ 설정 버튼이 필터 패널의 hidden 속성을 토글한다", () => {
+  const w = load(12, 0);
+  w._ecRenderShell();
+  const panel = w.document.getElementById("econCalSettings");
+  const toggle = w.document.getElementById("econCalSettingsToggle");
+  assert.ok(panel.hasAttribute("hidden"), "초기엔 숨김 상태");
+  toggle.click();
+  assert.ok(!panel.hasAttribute("hidden"), "클릭하면 펼쳐짐");
+  toggle.click();
+  assert.ok(panel.hasAttribute("hidden"), "다시 클릭하면 숨겨짐");
+});
