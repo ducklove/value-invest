@@ -1,5 +1,4 @@
 """Tests for /api/analysis/{code}/wiki and .../ask routes."""
-import json
 import tempfile
 import unittest
 from pathlib import Path

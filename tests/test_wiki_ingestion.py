@@ -546,7 +546,6 @@ class SkipReasonAggregationTests(unittest.IsolatedAsyncioTestCase):
         as an anomaly.
         """
         import asyncio
-        import observability
 
         stop = asyncio.Event()
 

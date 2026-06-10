@@ -222,7 +222,7 @@ def import_portfolio_rows(
         _backup_sqlite(target, backup_path)
 
     with _connect(target) as conn:
-        conn.execute(f"ATTACH DATABASE ? AS src", (str(source),))
+        conn.execute("ATTACH DATABASE ? AS src", (str(source),))
         try:
             source_user = _find_source_user(conn, source_google_sub, source_email)
             source_sub = source_user["google_sub"]

@@ -3,10 +3,8 @@ import logging
 import os
 import re
 import time
-from datetime import date, datetime, timedelta, timezone
-from functools import partial
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
@@ -15,23 +13,16 @@ from fastapi.responses import StreamingResponse
 import ai_config
 import asset_insights
 import cache
-from cache_layer import MemoryTTLCache
-import close_price_client
 import integrations
 import dart_client
-import kis_proxy_client
 import market_indicators
 import stock_price
-from deps import RECENT_QUOTES_SEMAPHORE, get_current_user
+from deps import get_current_user
 from services import ai_client, stock_quotes
-from services.portfolio import currencies
 from services.portfolio import foreign
-from services.portfolio import fx
 from services.portfolio import insights
 from services.portfolio import quote_service
-from services.portfolio import history as portfolio_history
 from services.portfolio.identifiers import (
-    CASH_FX_CODE as _CASH_FX_CODE,
     CASH_NAMES as _CASH_NAMES,
     SPECIAL_ASSETS as _SPECIAL_ASSETS,
     common_stock_code as _common_stock_code,
@@ -51,7 +42,6 @@ from services.portfolio.target_metrics import supplement_target_metrics as _supp
 from services.portfolio import benchmarks
 from services.portfolio.benchmarks import (
     BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
-    BENCHMARK_YF_TICKER as _BENCHMARK_YF_TICKER,
 )
 from services.portfolio.dividends import (
     due_dividend_warmup_targets as _due_dividend_warmup_targets,
@@ -1239,7 +1229,6 @@ async def get_prev_day_snapshot(request: Request):
 @router.get("/api/portfolio/month-end-value")
 async def get_month_end_value(request: Request):
     user = _require_user(await get_current_user(request))
-    from datetime import date, timedelta
     month_end = (date.today().replace(day=1) - timedelta(days=1)).isoformat()
     snapshot = await cache.get_month_end_snapshot(user["google_sub"])
     stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], month_end)
@@ -1474,7 +1463,7 @@ def _fmt_krw_ai(v: float) -> str:
 @router.get("/api/portfolio/ai-models")
 async def ai_model_list(request: Request):
     """Return available OpenRouter models (for admin model picker)."""
-    user = _require_user(await get_current_user(request))
+    _require_user(await get_current_user(request))
     profiles = await _ai_model_profiles_async()
     openrouter_key = await ai_config.get_openrouter_key()
     if not openrouter_key:
