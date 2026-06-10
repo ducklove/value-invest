@@ -1,27 +1,12 @@
-import tempfile
-import unittest
-from pathlib import Path
-from unittest.mock import patch
-
 import cache
+from _harness import TempDbMixin, seed_user
 from repositories import user_stocks as user_stocks_repo
-import repositories.db
 
 
-class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
+class CacheOrderTests(TempDbMixin):
+    async def seed(self):
+        await seed_user()
         db = await cache.get_db()
-        await db.execute(
-            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("u1", "user@example.com", "User", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
-        )
         await db.executemany(
             "INSERT INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
             [
@@ -41,11 +26,6 @@ class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         await db.commit()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
 
     # --- Recent tab ---
 

@@ -1,14 +1,12 @@
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from _harness import TempDbMixin
 from repositories import insight_posts as insight_posts_repo
-import repositories.db
 from routes import insights
 
 
@@ -26,13 +24,8 @@ def _request(method: str = "GET", path: str = "/api/insights") -> Request:
     return Request(scope)
 
 
-class InsightRouteTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class InsightRouteTests(TempDbMixin):
+    async def seed(self):
         db = await cache.get_db()
         await db.execute(
             """
@@ -49,11 +42,6 @@ class InsightRouteTests(unittest.IsolatedAsyncioTestCase):
             ("u2", "u2@example.com", "User Two", "", 1, "2026-01-01", "2026-01-01", 0),
         )
         await db.commit()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
 
     async def test_create_and_list_insight_post(self):
         user = {"google_sub": "u1", "email": "u1@example.com", "name": "User One"}

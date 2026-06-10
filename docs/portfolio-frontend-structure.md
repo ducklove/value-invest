@@ -26,13 +26,15 @@
 16. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
 17. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
 18. `portfolio-performance.js`: 추이 분석 탭 shell, 영역지도, 성과 데이터 로딩.
-19. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화.
-20. `portfolio-group-composition.js`: 그룹 구성 추이 drill-down.
-21. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
-22. `portfolio-tag-summary.js`: 태그 요약 UI.
-23. `portfolio-events.js`: document-level delegated event handlers.
-24. `insights.js`: 인사이트 목록 UI.
-25. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
+19. `portfolio-trends-benchmark.js`: NAV 차트 비교지수 선택/캐시, beta·R² 통계와 beta 오버레이.
+20. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화, 공용 차트 헬퍼.
+21. `portfolio-trends-group-weight.js`: 그룹 비중 100% 누적 면적 차트와 drill-down 진입(`_GROUP_WEIGHT_COLORS` 공급).
+22. `portfolio-group-composition.js`: 그룹 구성 추이 drill-down.
+23. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
+24. `portfolio-tag-summary.js`: 태그 요약 UI.
+25. `portfolio-events.js`: document-level delegated event handlers.
+26. `insights.js`: 인사이트 목록 UI.
+27. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
 
 ## Legacy Entrypoint
 
@@ -44,7 +46,7 @@
 - split 파일이 1,000줄에 가까워지면 기능을 더 나눈다.
 - UI 이벤트는 가능하면 `portfolio-events.js`의 delegated handler에 추가한다.
 - 테이블 전체 재렌더가 필요한지, 특정 셀 in-place update로 충분한지 먼저 구분한다.
-- NAV/평가금액 추이 차트는 `portfolio-trends.js`와 `portfolio-trend-chart.js` 안에서만 수정한다.
+- NAV/평가금액 추이 차트는 `portfolio-trends.js`와 `portfolio-trend-chart.js` 안에서만 수정한다. 비교지수/beta 오버레이는 `portfolio-trends-benchmark.js`, 그룹 비중 차트는 `portfolio-trends-group-weight.js`가 기능 홈이다.
 - 파일 간 공유 상태는 `PfStore`(portfolio-store.js)에 둔다 — sort/filters/edit/manualOrder/snapshots/currency/prefs 그룹 또는 최상위 속성. 단일 파일만 쓰는 plumbing(타이머, DOM ref, 상수)만 해당 파일 상단 `let`으로 두고 이름 앞에 `_pf`를 붙인다.
 
 ## Test Guardrails

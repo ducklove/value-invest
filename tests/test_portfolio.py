@@ -1,14 +1,11 @@
-import tempfile
 import time
-import unittest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import cache
+from _harness import TempDbMixin, seed_corp_codes, seed_user
 from repositories import financial as financial_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
-import repositories.db
 from routes import portfolio as portfolio_route
 from services.portfolio import dividends
 from services.portfolio import foreign
@@ -17,43 +14,21 @@ from services.portfolio import target_metrics as target_metrics_service
 from services.portfolio import target_resolver
 
 
-class PortfolioTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        # Previous test may have left cache._conn pointing at a now-deleted
-        # temp DB or a closed handle. close_db() is idempotent and resets
-        # the singleton so init_db() opens a fresh conn on the patched path.
-        await cache.close_db()
-        await cache.init_db()
+class PortfolioTests(TempDbMixin):
+    async def seed(self):
         dividends.reset_warmup_state()
         portfolio_route._benchmark_name_cache.clear()
         portfolio_route._benchmark_quote_cache.clear()
         fx._fx_daily_cache.clear()
         fx._fx_cache.clear()
 
-        db = await cache.get_db()
-        await db.execute(
-            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("u1", "user@example.com", "User", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
-        )
-        await db.executemany(
-            "INSERT INTO corp_codes (stock_code, corp_code, corp_name, updated_at) VALUES (?, ?, ?, ?)",
-            [
-                ("005930", "00126380", "삼성전자", "2026-01-01"),
-                ("000660", "00164779", "SK하이닉스", "2026-01-01"),
-                ("002380", "00105271", "케이씨씨", "2026-01-01"),
-                ("021320", "00105466", "KCC건설", "2026-01-01"),
-            ],
-        )
-        await db.commit()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
+        await seed_user()
+        await seed_corp_codes([
+            ("005930", "00126380", "삼성전자", "2026-01-01"),
+            ("000660", "00164779", "SK하이닉스", "2026-01-01"),
+            ("002380", "00105271", "케이씨씨", "2026-01-01"),
+            ("021320", "00105466", "KCC건설", "2026-01-01"),
+        ])
 
     # --- CRUD ---
 

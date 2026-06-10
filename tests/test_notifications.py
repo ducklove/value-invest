@@ -9,18 +9,16 @@ Kakao HTTP calls stubbed so the logic is exercised deterministically.
 
 from __future__ import annotations
 
-import tempfile
 import time
 import unittest
 from datetime import date
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 
 import cache
+from _harness import TempDbMixin
 from repositories import notifications as notifications_repo
-import repositories.db
 import economic_calendar
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
@@ -63,15 +61,12 @@ async def _set_target_price(google_sub, code, target):
     await db.commit()
 
 
-class NotificationHarness(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class NotificationHarness(TempDbMixin):
+    async def seed(self) -> None:
         await _seed_user_and_holding()
+
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
 
         self.user = {"google_sub": "u1", "email": "e@x", "name": "U"}
         self.auth_patch = patch.object(
@@ -86,9 +81,7 @@ class NotificationHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
         self.auth_patch.stop()
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
+        await super().asyncTearDown()
 
 
 class AlertCrudTests(NotificationHarness):
@@ -430,14 +423,8 @@ class AlertCrudTests(NotificationHarness):
         self.assertEqual(body["ready_to_fire_now"][0]["actual"], "3.2%")
 
 
-class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class AlertEngineHarness(TempDbMixin):
+    async def seed(self) -> None:
         await _seed_user_and_holding()
         await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 123, "username": "t"}, enabled=True, verified=True
@@ -445,11 +432,6 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         # feed(공시/리포트) 모듈 전역 TTL 캐시는 테스트 간 공유되므로 초기화.
         engine._disc_cache.clear()
         engine._rep_cache.clear()
-
-    async def asyncTearDown(self) -> None:
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
 
     async def _rule(self, **kw):
         defaults = dict(scope="stock", alert_type="price_above", threshold=72000.0, stock_code="005930")
@@ -800,20 +782,9 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("SK하이닉스" not in t for t in calls))  # 000660(꺼짐) 억제
 
 
-class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class KakaoChannelTests(TempDbMixin):
+    async def seed(self) -> None:
         await _seed_user_and_holding()
-
-    async def asyncTearDown(self) -> None:
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
 
     async def test_send_ok_with_fresh_token(self):
         channel = {
@@ -849,23 +820,12 @@ class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):
         send.assert_not_awaited()
 
 
-class CalendarAlertEngineHarness(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class CalendarAlertEngineHarness(TempDbMixin):
+    async def seed(self) -> None:
         await _seed_user_and_holding()
         await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 1, "username": "t"}, enabled=True, verified=True
         )
-
-    async def asyncTearDown(self) -> None:
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
 
     def _event(self, **kw):
         ev = {

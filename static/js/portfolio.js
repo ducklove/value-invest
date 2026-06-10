@@ -15,7 +15,9 @@
     'portfolio-groups-market.js',
     'portfolio-ai.js',
     'portfolio-performance.js',
+    'portfolio-trends-benchmark.js',
     'portfolio-trends.js',
+    'portfolio-trends-group-weight.js',
     'portfolio-cashflows.js',
     'portfolio-events.js',
   ];

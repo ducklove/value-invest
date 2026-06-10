@@ -5,10 +5,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import ai_config
-import cache
+from _harness import TempDbMixin
 from repositories import app_settings as app_settings_repo
 from repositories import portfolio as portfolio_repo
-import repositories.db
 import linked_project_admin
 
 
@@ -105,19 +104,7 @@ class LinkedProjectAdminTests(unittest.TestCase):
             self.assertEqual(written[1]["preferredTicker"], "35320K.KS")
 
 
-class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
-
+class AiAdminConfigTests(TempDbMixin):
     async def test_key_status_masks_secret_and_models_are_runtime_configurable(self):
         with patch.dict("os.environ", {}, clear=True):
             await ai_config.set_openrouter_key("sk-or-test-secret-123456", "admin@example.com")

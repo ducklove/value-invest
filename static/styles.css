@@ -1,3 +1,44 @@
+/* ============================================================
+   styles.css — Table of Contents (section headers: `=== Title ===`)
+    1. Theme variables
+    2. Base & reset (custom scrollbar 포함)
+    3. Sidebar
+    4. Chart loading animation
+    5. WS live indicator
+    6. Main
+    7. Theme toggle
+    8. Market tape (Bloomberg-style)
+    9. Search
+   10. 투자정보 (Investing dashboard)
+   11. 시장 랭킹 (movers) widget
+   12. Daily market brief
+   13. 경제 캘린더 (Economic Calendar)
+   14. Company info
+   15. Charts grid
+   16. Loading overlay
+   17. Reports section
+   18. 국민연금 탭 (nps-tracker iframe)
+   19. Portfolio AI analysis (.pf-ai-*)
+   20. Insight board
+   21. Broker reports table & badges
+   22. Empty state
+   23. Portfolio (table · tabs · alerts · modals)
+   24. NAV chart
+   25. Cashflow section
+   26. 컴팩트 보기 (body.pf-compact-rows)
+   27. Mobile auth indicator
+   28. Mobile overrides (≤900px · short landscape)
+   29. Valuation period buttons
+   30. Chart modal
+   31. Portrait phone — hide non-essential columns
+   32. Admin Dashboard
+   33. Wiki stats chip / Wiki count chip
+   34. Inline LLM summary
+   35. Wiki Q&A
+   36. 모바일 셸 (≤900px) — 하단 탭바 + 슬림 고정 헤더
+   ============================================================ */
+
+/* === Theme variables === */
 :root {
   --bg: #f5f5f5; --surface: #ffffff; --text: #1a1a1a; --text-secondary: #666;
   --border: #e0e0e0; --primary: #2563eb; --primary-hover: #1d4ed8;
@@ -13,6 +54,7 @@
   --loading-bg: rgba(15,23,42,0.85);
 }
 
+/* === Base & reset === */
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -28,7 +70,7 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
-/* Sidebar */
+/* === Sidebar === */
 .sidebar {
   width: 340px; background: var(--sidebar-bg); border-right: 1px solid var(--border);
   padding: 20px; flex-shrink: 0; overflow-y: auto;
@@ -163,7 +205,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .mb-pick-item:hover { background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
 .mb-pick-item.disabled { opacity: 0.35; cursor: default; pointer-events: none; }
-/* Chart loading animation */
+/* === Chart loading animation === */
 .chart-loading {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; z-index: 5;
 }
@@ -220,7 +262,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .flash-update { animation: flash-update 1.6s cubic-bezier(0.22, 0.61, 0.36, 1); }
 
-/* WS live indicator */
+/* === WS live indicator === */
 .ws-live-dot {
   display: inline-block;
   width: 5px; height: 5px;
@@ -339,7 +381,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .sidebar-item:hover .delete-btn { opacity: 1; }
 .sidebar-item .delete-btn:hover { color: #dc2626; }
 
-/* Main */
+/* === Main === */
 .main { flex:1; padding: 24px 32px; overflow-y: auto; }
 .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
 .main-nav { display: flex; gap: 0; }
@@ -352,13 +394,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .nav-btn:last-child { border-radius: 0 10px 10px 0; border-left: none; }
 .nav-btn:hover { color: var(--text); }
 .nav-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
-/* Theme toggle */
+/* === Theme toggle === */
 .theme-toggle {
   background: var(--surface); border:1px solid var(--border); border-radius:8px;
   padding:8px 14px; cursor:pointer; font-size:18px;
 }
 
-/* Bloomberg-style market tape */
+/* === Market tape (Bloomberg-style) === */
 .market-tape {
   position: fixed;
   left: 0;
@@ -485,16 +527,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background: rgba(37, 99, 235, 0.1);
   color: var(--primary);
 }
-.market-tape-item.up .market-tape-change { color: #b91c1c; }
-.market-tape-item.down .market-tape-change { color: #1d4ed8; }
-.market-tape-item.flat .market-tape-change { color: var(--text-secondary); }
 .market-tape-text {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.market-tape-change {
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
 }
 .market-tape-refresh {
   flex: 0 0 auto;
@@ -521,7 +556,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   to { transform: translateX(-50%); }
 }
 
-/* Search */
+/* === Search === */
 .search-container { position:relative; margin-bottom:24px; max-width:500px; }
 .search-input {
   width:100%; padding:12px 16px; border:1px solid var(--border);
@@ -543,8 +578,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .dropdown-item:first-child { border-radius:10px 10px 0 0; }
 .dropdown-item:last-child { border-radius:0 0 10px 10px; }
 
-/* Daily market brief */
-/* 투자정보 (Investing dashboard) — public market overview grid */
+/* === 투자정보 (Investing dashboard) — public market overview grid === */
 .market-dashboard-section {
   margin-bottom: 24px;
 }
@@ -554,13 +588,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   justify-content: flex-end;
   gap: 12px;
   margin-bottom: 14px;
-}
-.md-eyebrow {
-  color: var(--primary);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 .md-header h2 {
   margin: 2px 0 0;
@@ -653,7 +680,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .bond-tbl-split .bt-grp { border-left: 1px solid var(--border); padding-left: 10px; }
 .bond-tbl-split thead tr:first-child th:not(:first-child) { text-align: center; }
 
-/* 시장 랭킹 (movers) widget */
+/* === 시장 랭킹 (movers) widget === */
 .mv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .mv-head .md-section-title { margin: 0; padding: 0; border-bottom: none; }
 .mv-mkts { display: inline-flex; gap: 4px; }
@@ -721,19 +748,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .ext-row:hover { background: var(--surface-muted, rgba(148,163,184,.08)); }
 .ext-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ext-val { flex: 0 0 auto; font-weight: 600; font-variant-numeric: tabular-nums; }
-.sxl-wrap { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 10px 0; }
-.sxl-label {
-  display: flex; align-items: center; font-size: 11px; font-weight: 600;
-  color: var(--text-secondary); padding-right: 2px;
-}
-.sxl-card {
-  display: block; text-decoration: none; color: inherit; min-width: 150px;
-  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
-}
-.sxl-card:hover { border-color: var(--accent, #2563eb); }
-.sxl-title { font-size: 11px; color: var(--text-secondary); }
-.sxl-main { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
-.sxl-sub { font-size: 11px; color: var(--text-secondary); }
 .news-list { display: flex; flex-direction: column; }
 .news-item {
   display: block; text-decoration: none; color: inherit;
@@ -754,6 +768,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 [data-theme="dark"] .md-up { color: #fca5a5; }
 [data-theme="dark"] .md-down { color: #93c5fd; }
 
+/* === Daily market brief === */
 .daily-market-section {
   margin-bottom: 24px;
   padding: 18px 20px;
@@ -840,7 +855,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   background: var(--sidebar-bg, var(--bg));
 }
 
-/* 경제 캘린더 (Economic Calendar) */
+/* === 경제 캘린더 (Economic Calendar) === */
 .econ-cal-section {
   margin-bottom: 24px;
   padding: 18px 20px;
@@ -879,7 +894,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
 .ec-filters { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .ec-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.ec-flabel { font-size: 12px; color: var(--text-secondary); font-weight: 700; margin-right: 2px; }
 .ec-range-btn, .ec-chip {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1055,7 +1069,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .ec-bell-cell { grid-area: bell; align-self: center; }
 }
 
-/* Company info */
+/* === Company info === */
 .company-info {
   background: var(--surface); border-radius:12px; padding:20px 24px;
   margin-bottom:24px; border:1px solid var(--border); display:none;
@@ -1232,7 +1246,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   padding-left: 12px; border-left: 3px solid var(--primary);
 }
 
-/* Charts grid */
+/* === Charts grid === */
 .charts-grid {
   display:grid; grid-template-columns: repeat(2, 1fr); gap:20px;
 }
@@ -1264,7 +1278,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .chart-card canvas, .chart-card > div > div { display:block; width:100%!important; height:100%!important; }
 
-/* Loading overlay */
+/* === Loading overlay === */
 .loading-overlay {
   position:fixed; inset:0; background:var(--loading-bg);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -1302,7 +1316,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .cancel-btn:hover { border-color: #dc2626; color: #dc2626; }
 
-/* Reports section */
+/* === Reports section === */
 .reports-section {
   margin-top: 32px; display: none;
 }
@@ -1566,8 +1580,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border: 0; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .bt-run:hover { background: var(--primary-hover); }
+#btChart { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
 
-/* 국민연금 탭: 분리된 nps-tracker 대시보드를 iframe 으로 임베드. */
+/* === 국민연금 탭 — 분리된 nps-tracker 대시보드를 iframe 으로 임베드 === */
 .nps-embed { padding: 32px 16px; text-align: center; color: var(--text-secondary); }
 .nps-embed.is-frame { padding: 0; text-align: initial; }
 .nps-frame {
@@ -1577,6 +1592,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 @media (max-width: 900px) {
   .nps-frame { height: calc(100vh - 128px); min-height: 360px; border-radius: 0; }
 }
+/* === Portfolio AI analysis (.pf-ai-*) === */
 .pf-ai-output {
   margin-top: 10px;
   border: 1px solid var(--border);
@@ -1757,10 +1773,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
     grid-template-columns: 1fr;
   }
 }
-.bt-loading { color: var(--text-secondary); font-size: 13px; }
-.bt-error { color: var(--negative, #dc2626); font-size: 13px; min-height: 18px; }
-#btChart { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
 
+/* === Insight board === */
 .insight-board-page { max-width: 980px; margin: 0 auto; padding: 8px 0 40px; }
 .insight-board-page h2 { font-size: 20px; margin-bottom: 8px; }
 .insight-board-note { color: var(--text-secondary); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
@@ -1815,6 +1829,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .filing-review-header { flex-direction: column; }
   .filing-review-actions { justify-content: flex-start; }
 }
+
+/* === Broker reports table & badges === */
 .reports-section h2 {
   font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
 }
@@ -1887,7 +1903,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .report-summary { display: none; }
 }
 
-/* Empty state */
+/* === Empty state === */
 .empty-state {
   text-align:center; margin-top:80px; color:var(--text-secondary);
 }
@@ -1898,7 +1914,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .empty-state h2 { font-size:20px; margin-bottom:8px; color:var(--text); }
 
-/* Portfolio */
+/* === Portfolio (table · tabs · alerts · modals) === */
 .pf-summary {
   display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;
 }
@@ -2009,7 +2025,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-treemap-btn:hover { background: var(--hover-bg); color: var(--text); }
 
-/* NAV chart */
+/* === NAV chart === */
 .pf-nav-chart-wrap { margin-bottom: 24px; }
 /* NAV/평가금액 차트 컨테이너 — 반응형 높이. 수정자 클래스로 구분:
      .pf-nav-tall  → NAV 기준가 (PC 600px, 폰 320px)
@@ -2044,11 +2060,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-mini-btn:hover { border-color: var(--primary); color: var(--primary); }
 .pf-nav-ret-card.is-active { border-color: var(--primary); background: var(--hover); }
-.pf-snapshot-btn {
-  padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
-  background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
-}
-.pf-snapshot-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
 #pfNavChart,
 #pfValueChart,
 #pfGroupWeightChart,
@@ -2262,7 +2273,7 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   .pf-journal-form-row #stockJournalQty { width: auto; }
 }
 
-/* Cashflow section */
+/* === Cashflow section === */
 .pf-cashflow-section {
   margin-top: 24px;
   overflow-x: auto;
@@ -2477,10 +2488,6 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 .pf-alert-help-block ol { margin: 0; padding-left: 18px; }
 .pf-alert-help-block li { margin: 2px 0; }
 .pf-alert-help-sub { color: var(--text-secondary); font-size: 11.5px; }
-.pf-alert-help-warn {
-  margin: 6px 0 0; padding: 8px 10px; border-radius: 8px;
-  background: rgba(245,158,11,0.12); color: var(--text); font-size: 12px;
-}
 .pf-alert-help-foot { margin: 6px 0 0; color: var(--text-secondary); font-size: 11.5px; }
 .pf-alert-channels { display: flex; flex-direction: column; gap: 12px; }
 .pf-alert-channel-reg {
@@ -2940,7 +2947,6 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   background: transparent; color: var(--text); font-size: 14px;
 }
 .pf-grp-name:focus { border-color: var(--primary); background: var(--bg); outline: none; }
-.pf-grp-cnt { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 .pf-grp-del {
   background: none; border: none; color: var(--text-secondary); font-size: 18px;
   cursor: pointer; line-height: 1; padding: 2px 6px;
@@ -3372,7 +3378,7 @@ body.pf-compact-rows .pf-table tfoot td {
 .pf-row-btn.cancel { font-size: 15px; }
 .pf-row-btn.cancel:hover { color: #dc2626; }
 
-/* Mobile auth indicator (hidden by default, shown via JS on mobile+logged-in) */
+/* === Mobile auth indicator — hidden by default, shown via JS on mobile+logged-in === */
 .mobile-auth-status {
   display: none;
   align-items: center;
@@ -3391,6 +3397,7 @@ body.pf-compact-rows .pf-table tfoot td {
   color: var(--text-secondary); font-size: 11px; padding: 2px 6px; cursor: pointer;
 }
 
+/* === Mobile overrides (≤900px · short landscape) === */
 @media (max-width:900px) {
   body {
     display: block;
@@ -3706,7 +3713,7 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
   }
 }
 
-/* Valuation period buttons — pill tabs */
+/* === Valuation period buttons — pill tabs === */
 .section-heading-row { display: flex; align-items: baseline; gap: 12px; }
 .section-heading-row .section-heading { margin: 0; }
 .valuation-period-btns { display: inline-flex; gap: 2px; }
@@ -3719,7 +3726,7 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 .vp-btn.active { background: var(--text-secondary); color: var(--bg); opacity: 0.85; }
 [data-theme="dark"] .vp-btn.active { background: var(--text-secondary); color: var(--bg); }
 
-/* Chart modal */
+/* === Chart modal === */
 .chart-modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000;
   display: flex; align-items: center; justify-content: center; padding: 24px;
@@ -3740,7 +3747,7 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 .charts-grid .chart-card { cursor: pointer; transition: box-shadow 0.15s; }
 .charts-grid .chart-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
 
-/* Portrait phone — hide non-essential columns */
+/* === Portrait phone — hide non-essential columns === */
 @media (max-width:600px) {
   .pf-col-group,
   .pf-col-benchmark,
@@ -3797,7 +3804,7 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 .admin-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .admin-btn-secondary { margin-left: 4px; font-size: 11px; color: var(--text-secondary); }
 
-/* Wiki stats chip in the top header */
+/* === Wiki stats chip in the top header === */
 .wiki-stats {
   font-size: 11px;
   color: var(--text-secondary);
@@ -3840,6 +3847,7 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 .report-summary-body p { margin: 6px 0; }
 .report-summary-body strong { color: var(--text); }
 
+/* === Wiki Q&A === */
 .wiki-qa {
   margin: 8px 0 20px;
   padding: 14px 16px;
@@ -3900,12 +3908,10 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
   color: var(--text-secondary);
 }
 
-/* ============================================================
-   모바일 셸 (≤900px): 하단 탭바 + 슬림 고정 헤더
+/* === 모바일 셸 (≤900px) — 하단 탭바 + 슬림 고정 헤더 ===
    - 데스크톱 사이드바(로그인/시장바/최근목록)가 콘텐츠 위에 쌓이던
      구조를 걷어내고, 앱처럼 하단 탭바 + 상단 슬림 헤더로 재구성한다.
-   - 아래 컴포넌트들은 기본적으로 숨겨두고 모바일 미디어쿼리에서만 노출.
-   ============================================================ */
+   - 아래 컴포넌트들은 기본적으로 숨겨두고 모바일 미디어쿼리에서만 노출. */
 .mobile-brand,
 .mobile-login,
 .mobile-tabbar { display: none; }

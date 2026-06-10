@@ -8,16 +8,14 @@ DB 는 test_notifications 와 같은 temp-DB 패턴(repositories.db.DB_PATH 패�
 from __future__ import annotations
 
 import json
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 
 import cache
+from _harness import TempDbMixin
 from repositories import notifications as notifications_repo
-import repositories.db
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
 from repositories import rebalance_targets as targets_repo
@@ -75,20 +73,9 @@ async def _seed_snapshot_portfolio(google_sub="u1", date="2026-06-09"):
     ])
 
 
-class TempDbHarness(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class TempDbHarness(TempDbMixin):
+    async def seed(self) -> None:
         await _seed_user()
-
-    async def asyncTearDown(self) -> None:
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
 
 
 # --- 저장소 CRUD -------------------------------------------------------------

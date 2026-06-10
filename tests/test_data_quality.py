@@ -5,19 +5,17 @@ edge cases included), system_events recording via run_all_checks, the
 loopback-guarded internal endpoint, and the admin event-summary exposure
 the '데이터 품질' panel reads.
 """
-import tempfile
 import unittest
 from datetime import date, datetime
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from _harness import TempDbMixin
 from repositories import benchmark_daily as benchmark_repo
 from repositories import system_events as system_events_repo
-import repositories.db
 from repositories import snapshots as snapshots_repo
 import observability
 from routes import admin as admin_route
@@ -94,19 +92,7 @@ class TradingDayHelperTests(unittest.TestCase):
         self.assertEqual(data_quality.trading_day_gap(date(2026, 6, 10), date(2026, 6, 12)), 0)
 
 
-class _SeededDbTestCase(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
-
+class _SeededDbTestCase(TempDbMixin):
     async def _seed_user_with_holdings(self, sub: str = "u1"):
         db = await cache.get_db()
         await db.execute(

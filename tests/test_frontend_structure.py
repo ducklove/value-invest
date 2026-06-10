@@ -22,7 +22,9 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-rebalance.js",
     "portfolio-dividends-calendar.js",
     "portfolio-journal.js",
+    "portfolio-trends-benchmark.js",
     "portfolio-trends.js",
+    "portfolio-trends-group-weight.js",
     "portfolio-group-composition.js",
     "portfolio-cashflows.js",
     "portfolio-tag-summary.js",
@@ -700,19 +702,66 @@ def test_benchmark_picker_only_opens_in_edit_mode():
 
 
 def test_nav_chart_shows_selected_benchmark_beta_overlay():
+    benchmark = (JS / "portfolio-trends-benchmark.js").read_text(encoding="utf-8")
     trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-    assert "function _computeReturnStats" in trends
-    assert "function _navBenchmarkBeta" in trends
-    assert "function _updateNavBetaOverlay" in trends
-    assert "NAV beta vs selected benchmark" in trends
-    assert "\\u03b2" in trends
-    assert "\\u00b2" in trends
+    # beta/R² 통계와 오버레이 정의는 portfolio-trends-benchmark.js 가 기능 홈.
+    assert "function _computeReturnStats" in benchmark
+    assert "function _navBenchmarkBeta" in benchmark
+    assert "function _updateNavBetaOverlay" in benchmark
+    assert "NAV beta vs selected benchmark" in benchmark
+    assert "\\u03b2" in benchmark
+    assert "\\u00b2" in benchmark
+    # NAV 차트 렌더(본체)가 초기/줌 양쪽에서 오버레이를 갱신한다.
     assert "_updateNavBetaOverlay(labels, navValues, benchCodes, fullWindow.startIdx, fullWindow.endIdx);" in trends
     assert "_updateNavBetaOverlay(labels, navValues, benchCodes, startIdx, endIdx);" in trends
     assert ".pf-nav-beta-overlay" in styles
     assert ".pf-nav-beta-chip" in styles
+
+
+def test_trends_split_files_keep_feature_homes():
+    benchmark = (JS / "portfolio-trends-benchmark.js").read_text(encoding="utf-8")
+    trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
+    group_weight = (JS / "portfolio-trends-group-weight.js").read_text(encoding="utf-8")
+    composition = (JS / "portfolio-group-composition.js").read_text(encoding="utf-8")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    # 본체: NAV/평가금액 차트 렌더, 수익률 카드, 기간/Y축 동기화, 공용 차트 헬퍼.
+    assert "async function renderNavChart(data)" in trends
+    assert "async function renderValueChart(data)" in trends
+    assert "function renderNavReturns(data)" in trends
+    assert "function onNavYZeroToggle()" in trends
+    assert "function onValueYZeroToggle()" in trends
+    assert "function _navZoomToDays(days)" in trends
+    assert "function _valueZoomToDays(days)" in trends
+    assert "function _updateNavCagrCard(" in trends
+    assert "function _updateValueCagrCard(" in trends
+    assert "function _chartZoomWindow(" in trends
+    assert "function _chartWindowFromInstance(" in trends
+    assert "function _applyVisibleYAxis(" in trends
+    assert "function _updateChartRangeLabel(" in trends
+    assert "function _isMobileChartMode()" in trends
+    # 비교지수: 칩 선택 → 히스토리 fetch/캐시 → NAV 재렌더 + beta 오버레이.
+    assert "async function onBenchToggle()" in benchmark
+    assert "function _getSelectedBenchmarks()" in benchmark
+    assert "let _benchCache = {};" in benchmark
+    assert "let _benchRatios = {};" in benchmark
+    assert "/api/portfolio/benchmark-history" in benchmark
+    assert "await renderNavChart(_navChartData);" in benchmark
+    # 그룹 비중: 100% 누적 차트 + 구성 drill-down 진입. 색상 팔레트는
+    # portfolio-group-composition.js 와 공유하므로 그보다 먼저 로드된다.
+    assert "function _prepareGroupWeightChartData(rows)" in group_weight
+    assert "async function renderGroupWeightChart(rows)" in group_weight
+    assert "const _GROUP_WEIGHT_COLORS = [" in group_weight
+    assert "pfShowGroupComposition(card.dataset.group || '')" in group_weight
+    assert "_GROUP_WEIGHT_COLORS[idx % _GROUP_WEIGHT_COLORS.length]" in composition
+    assert html.find("./js/portfolio-trends-group-weight.js") < html.find("./js/portfolio-group-composition.js")
+    # 이동한 심볼이 본체에 중복 정의로 남지 않는다.
+    assert "function _computeReturnStats" not in trends
+    assert "function _updateNavBetaOverlay(" not in trends
+    assert "_GROUP_WEIGHT_COLORS = [" not in trends
+    assert "function renderGroupWeightChart" not in trends
 
 
 def test_performance_tab_includes_group_weight_trend():
@@ -721,6 +770,7 @@ def test_performance_tab_includes_group_weight_trend():
     data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
+    group_weight = (JS / "portfolio-trends-group-weight.js").read_text(encoding="utf-8")
     chart = (JS / "portfolio-trend-chart.js").read_text(encoding="utf-8")
     composition = (JS / "portfolio-group-composition.js").read_text(encoding="utf-8")
 
@@ -738,16 +788,17 @@ def test_performance_tab_includes_group_weight_trend():
     assert "_performanceLoadSeq" in performance
     assert "const [navResp, cfResp, groupResp] = await Promise.all" not in performance
     assert "renderGroupWeightChart(groupWeightData)" in performance
-    assert "async function renderGroupWeightChart(rows)" in trends
+    assert "async function renderGroupWeightChart(rows)" in group_weight
     assert "async function _waitForChartContainer" in trends
     assert "container.offsetParent === null" in trends
+    assert "container.offsetParent === null" in group_weight
     assert "/api/portfolio/group-constituent-history" in composition
     assert "async function pfShowGroupComposition(groupName)" in composition
     assert "_groupCompositionRequestSeq" in composition
     assert "stack: 'groupComposition'" in composition
-    assert "stock_count" in trends
-    assert "stack: 'groupWeight'" in trends
-    assert "areaStyle: { opacity:" in trends
+    assert "stock_count" in group_weight
+    assert "stack: 'groupWeight'" in group_weight
+    assert "areaStyle: { opacity:" in group_weight
     assert "stack: series.stack || null" in chart
     assert "stackedIndexes.add(seriesIdx)" in chart
 

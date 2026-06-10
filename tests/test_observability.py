@@ -6,18 +6,16 @@ cache, and the end-to-end contract we care about is "operator clicks
 something and sees the right rows".
 """
 import json
-import tempfile
 import unittest
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from _harness import TempDbMixin
 from repositories import wiki as wiki_repo
-import repositories.db
 from repositories import system_events as system_events_repo
 import observability
 from routes import admin as admin_route
@@ -37,19 +35,7 @@ def _admin_request() -> Request:
     return Request(scope)
 
 
-class SystemEventCacheTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
-
+class SystemEventCacheTests(TempDbMixin):
     async def test_insert_and_read(self):
         row_id = await system_events_repo.insert_system_event(
             level="info", source="wiki_ingestion", kind="tick_ok",
@@ -154,19 +140,7 @@ class SystemEventCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 10)
 
 
-class RecordEventTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
-
+class RecordEventTests(TempDbMixin):
     async def test_record_event_wait_writes_synchronously(self):
         await observability.record_event(
             "wiki_ingestion", "tick_ok",
@@ -201,19 +175,7 @@ class RecordEventTests(unittest.IsolatedAsyncioTestCase):
             await observability.record_event("X", "test", wait=True)
 
 
-class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
-
+class AdminEventRouteTests(TempDbMixin):
     async def _mk_admin(self) -> dict:
         return {"google_sub": "u1", "email": "a@b.c", "is_admin": True}
 
@@ -255,24 +217,12 @@ class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(summary["latest"]["snapshot_intraday"])
 
 
-class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
+class BatchStatusDataFreshnessTests(TempDbMixin):
     """Guards the "exit 0 ≠ success" distinction. Before this, the
     dashboard painted snapshot_nav green on days when the job exited
     cleanly without writing (weekend skip / silent-retry give-up /
     4/17 miss). Staleness needs to be derived from the DOWNSTREAM
     table, not from systemd state."""
-
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
 
     async def test_latest_data_date_for_portfolio_reads_from_table(self):
         db = await cache.get_db()
@@ -372,22 +322,10 @@ class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["status"], "success")
 
 
-class DeployStatusRouteTests(unittest.IsolatedAsyncioTestCase):
+class DeployStatusRouteTests(TempDbMixin):
     """Guard the 'did my push land' endpoint. If this ever breaks, the
     admin dashboard's only non-SSH way to tell which commit is live
     goes with it."""
-
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
 
     async def _mk_admin(self) -> dict:
         return {"google_sub": "u1", "email": "a@b.c", "is_admin": True}
@@ -419,19 +357,7 @@ class DeployStatusRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["active"])
 
 
-class WikiDiagRouteTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
-
+class WikiDiagRouteTests(TempDbMixin):
     async def _mk_admin(self) -> dict:
         return {"google_sub": "u1", "email": "a@b.c", "is_admin": True}
 

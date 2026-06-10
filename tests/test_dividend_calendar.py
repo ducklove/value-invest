@@ -7,17 +7,15 @@
 """
 
 import json
-import tempfile
 import unittest
 from datetime import date
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-import repositories.db
+from _harness import TempDbMixin, seed_user
 from routes import dividend_calendar as dividend_calendar_route
 from services import dividend_calendar
 
@@ -100,22 +98,14 @@ class EstimatedEventHeuristicTests(unittest.TestCase):
         self.assertEqual([zero, none, cash, sold], [[], [], [], []])
 
 
-class _SeededDbTestCase(unittest.IsolatedAsyncioTestCase):
+class _SeededDbTestCase(TempDbMixin):
     """임시 DB 시드: 국내/우선주/해외/무배당/현금 보유 + 배당 테이블."""
 
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+    async def seed(self):
         dividend_calendar_route._calendar_cache.clear()
 
+        await seed_user()
         db = await cache.get_db()
-        await db.execute(
-            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("u1", "user@example.com", "User", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
-        )
         holdings = [
             ("u1", "005930", "삼성전자", 10, 70000.0),
             ("u1", "005935", "삼성전자우", 3, 60000.0),
@@ -146,9 +136,7 @@ class _SeededDbTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         dividend_calendar_route._calendar_cache.clear()
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
+        await super().asyncTearDown()
 
 
 class BuildCalendarTests(_SeededDbTestCase):

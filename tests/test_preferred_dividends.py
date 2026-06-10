@@ -5,22 +5,20 @@ Covered:
     blanks, non-numeric cells)
   * Dynamic column discovery — parser must find "2025우" wherever it
     lives, not a fixed offset
-  * cache.upsert_preferred_dividends idempotency
-  * cache.get_trailing_dividends resolution priority:
+  * portfolio_repo.upsert_preferred_dividends idempotency
+  * portfolio_repo.get_trailing_dividends resolution priority:
       exact market_data > preferred_dividends > common-stock fallback
 
 No network. fetch_csv / refresh loop is not unit-tested — those are
 integration paths exercised manually (the Pi startup log shows whether
 they succeeded).
 """
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 
 import cache
-import repositories.db
 import preferred_dividends as pd_mod
+from _harness import TempDbMixin
+from repositories import portfolio as portfolio_repo
 
 
 # Minimal CSV that mirrors the real sheet's layout. Column count matches
@@ -126,29 +124,17 @@ class ParseSheetCsvTests(unittest.TestCase):
         self.assertEqual(out[0]["stock_code"], "00088K")
 
 
-class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
-
+class UpsertAndLookupTests(TempDbMixin):
     async def test_upsert_is_idempotent(self):
         rows = [
             {"stock_code": "005935", "dividend_per_share": 1444.0, "source_name": "삼성전자우",
              "common_code": "005930", "sheet_year": 2025},
         ]
-        self.assertEqual(await cache.upsert_preferred_dividends(rows), 1)
+        self.assertEqual(await portfolio_repo.upsert_preferred_dividends(rows), 1)
         # Second import with updated value — should update, not duplicate.
         rows[0]["dividend_per_share"] = 1500.0
-        await cache.upsert_preferred_dividends(rows)
-        self.assertEqual(await cache.get_preferred_dividends_count(), 1)
+        await portfolio_repo.upsert_preferred_dividends(rows)
+        self.assertEqual(await portfolio_repo.get_preferred_dividends_count(), 1)
 
     async def test_trailing_dividend_priority(self):
         """해결 우선순위 검증:
@@ -172,16 +158,16 @@ class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
         await db.commit()
 
         # 시트 데이터가 없을 때: 보통주 값으로 fallback.
-        dps_fallback = await cache.get_trailing_dividends(["005935"])
+        dps_fallback = await portfolio_repo.get_trailing_dividends(["005935"])
         self.assertEqual(dps_fallback.get("005935"), 1444.0)
 
         # 시트 데이터 주입: 우선주 프리미엄 반영된 값.
-        await cache.upsert_preferred_dividends([{
+        await portfolio_repo.upsert_preferred_dividends([{
             "stock_code": "005935", "dividend_per_share": 1445.0,
             "source_name": "삼성전자우", "common_code": "005930",
             "sheet_year": 2025,
         }])
-        dps_sheet = await cache.get_trailing_dividends(["005935"])
+        dps_sheet = await portfolio_repo.get_trailing_dividends(["005935"])
         self.assertEqual(dps_sheet.get("005935"), 1445.0)
 
         # 우선주 자체 market_data row 가 생기면 그게 최우선.
@@ -191,7 +177,7 @@ class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
             ("005935", current_year - 1, 58000, 1450.0),
         )
         await db.commit()
-        dps_direct = await cache.get_trailing_dividends(["005935"])
+        dps_direct = await portfolio_repo.get_trailing_dividends(["005935"])
         self.assertEqual(dps_direct.get("005935"), 1450.0)
 
     async def test_sheet_zero_is_authoritative(self):
@@ -208,12 +194,12 @@ class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
         )
         await db.commit()
 
-        await cache.upsert_preferred_dividends([{
+        await portfolio_repo.upsert_preferred_dividends([{
             "stock_code": "005935", "dividend_per_share": 0.0,  # 시트 0 = 확정 '배당 없음'
             "source_name": "삼성전자우", "common_code": "005930",
             "sheet_year": 2025,
         }])
-        dps = await cache.get_trailing_dividends(["005935"])
+        dps = await portfolio_repo.get_trailing_dividends(["005935"])
         self.assertEqual(dps.get("005935"), 0.0)  # 시트 값 그대로
 
     async def test_missing_sheet_row_falls_back_to_common(self):
@@ -229,7 +215,7 @@ class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
         )
         await db.commit()
         # 시트에 005935 row 없음 (upsert 안 함) → 보통주 fallback.
-        dps = await cache.get_trailing_dividends(["005935"])
+        dps = await portfolio_repo.get_trailing_dividends(["005935"])
         self.assertEqual(dps.get("005935"), 1444.0)
 
     async def test_non_preferred_code_unaffected(self):
@@ -246,11 +232,11 @@ class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
         await db.commit()
         # Insert a preferred_dividends row for the common code — should
         # be ignored since code doesn't end in a preferred suffix.
-        await cache.upsert_preferred_dividends([{
+        await portfolio_repo.upsert_preferred_dividends([{
             "stock_code": "005930", "dividend_per_share": 99999.0,
             "source_name": "bogus", "common_code": None, "sheet_year": 2025,
         }])
-        dps = await cache.get_trailing_dividends(["005930"])
+        dps = await portfolio_repo.get_trailing_dividends(["005930"])
         self.assertEqual(dps.get("005930"), 1444.0)
 
 
