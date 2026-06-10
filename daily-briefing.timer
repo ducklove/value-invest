@@ -1,0 +1,15 @@
+[Unit]
+Description=AI daily briefing push on weekdays at 08:20 KST
+
+[Timer]
+# 평일 08:20 — 미국 장 마감 데이터(전일 결산 스냅샷·환율)가 정착한 뒤,
+# KRX 개장(09:00) 전에 도착하도록. 주말은 새 데이터가 없어 건너뛴다.
+# Persistent=false 인 이유: 브리핑은 '아침'이라는 시점 자체가 가치다.
+# 다운타임 후 부팅 시 따라잡기(catch-up)로 한낮/저녁에 뒷북 브리핑을
+# 푸시하면 정보 가치는 없고 스팸이 된다 — 놓친 날은 그냥 건너뛴다.
+OnCalendar=Mon..Fri *-*-* 08:20:00
+Persistent=false
+RandomizedDelaySec=1m
+
+[Install]
+WantedBy=timers.target

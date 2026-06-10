@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 import cache
+
+import repositories.db
+from repositories import dart_review as dart_review_repo
+from repositories import wiki as wiki_repo
 import dart_report_review
 from routes import dart_review as dart_review_route
 
@@ -141,7 +145,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
             patch.object(dart_report_review, "fetch_document_text", AsyncMock(return_value="원문 텍스트")),
             patch.object(dart_report_review, "_financial_context", AsyncMock(return_value="재무 컨텍스트")),
-            patch.object(cache, "save_dart_report_review", save_mock),
+            patch.object(dart_review_repo, "save_dart_report_review", save_mock),
         ]
 
     async def _run_generate(self, call_mock, save_mock):
@@ -199,7 +203,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
             patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
-            patch.object(cache, "get_dart_report_review", AsyncMock(return_value=broken_cached)),
+            patch.object(dart_review_repo, "get_dart_report_review", AsyncMock(return_value=broken_cached)),
         ):
             result = await dart_report_review.latest_review_status("005930")
 
@@ -213,7 +217,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
             patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
-            patch.object(cache, "get_dart_report_review", AsyncMock(return_value=good_cached)),
+            patch.object(dart_review_repo, "get_dart_report_review", AsyncMock(return_value=good_cached)),
         ):
             result = await dart_report_review.latest_review_status("005930")
 
@@ -224,7 +228,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
 class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -235,7 +239,7 @@ class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     async def test_save_and_get_dart_report_review_roundtrips_json(self):
-        saved = await cache.save_dart_report_review({
+        saved = await dart_review_repo.save_dart_report_review({
             "stock_code": "005930",
             "corp_code": "00126380",
             "corp_name": "삼성전자",
@@ -252,7 +256,7 @@ class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
             "cost_usd": 0.001,
         })
 
-        loaded = await cache.get_dart_report_review("005930", "20260401000001")
+        loaded = await dart_review_repo.get_dart_report_review("005930", "20260401000001")
 
         self.assertEqual(saved["review"]["summary_md"], "# 리뷰")
         self.assertEqual(loaded["comparison_reports"][0]["rcept_no"], "20251114000001")
@@ -275,7 +279,7 @@ class DartReportReviewPipelineTests(unittest.IsolatedAsyncioTestCase):
             }
 
         with (
-            patch.object(cache, "select_wiki_target_stocks", AsyncMock(return_value=["005930", "000660", "000660"])),
+            patch.object(wiki_repo, "select_wiki_target_stocks", AsyncMock(return_value=["005930", "000660", "000660"])),
             patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
             patch.object(dart_report_review, "latest_review_status", side_effect=fake_status),
             patch.object(dart_report_review, "generate_review", side_effect=fake_generate),

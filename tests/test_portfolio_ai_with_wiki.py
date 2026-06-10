@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, patch
 from starlette.requests import Request
 
 import cache
+from repositories import wiki as wiki_repo
+import repositories.db
 from routes import portfolio as pf
 
 
@@ -56,7 +58,7 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -117,14 +119,17 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
                 return _FakeStreamCtx(200, lines)
 
         user = {"google_sub": "u1", "is_admin": False}
+        # Domain logic lives in services.portfolio.ai_analysis, which reaches
+        # quote enrichment / market indicators through shared module objects —
+        # patch those directly instead of via the routes.portfolio namespace.
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value=user)), \
              patch("httpx.AsyncClient", _FakeClient), \
-             patch("routes.portfolio._enrich_with_cached_quotes", new=AsyncMock(return_value=[{
+             patch("services.portfolio.quote_service.enrich_with_cached_quotes", new=AsyncMock(return_value=[{
                  "stock_code": "005930", "stock_name": "삼성전자",
                  "quantity": 10, "avg_price": 70000,
                  "quote": {"price": 80000, "change_pct": 1.5},
              }])), \
-             patch("routes.portfolio.market_indicators.fetch_indicators", new=AsyncMock(return_value={})):
+             patch("market_indicators.fetch_indicators", new=AsyncMock(return_value={})):
             response = await pf.ai_portfolio_analysis(_mk_request(), {})
             # Drain the stream INSIDE the patch context — the generator
             # is iterated lazily, so exiting `with patch(...)` before
@@ -150,7 +155,7 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(done.get("context_reports_per_holding"), 3)
 
     async def test_prompt_includes_wiki_when_entries_exist(self):
-        await cache.save_wiki_entry({
+        await wiki_repo.save_wiki_entry({
             "stock_code": "005930", "source_type": "broker_report", "source_ref": "sha1",
             "report_date": "2026-03-10", "firm": "삼성증권", "title": "HBM",
             "recommendation": "Buy", "target_price": 90000.0,

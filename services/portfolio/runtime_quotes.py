@@ -2,7 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from services.portfolio.identifiers import is_korean_stock
+# 재수출(seam): snapshot_nav/snapshot_intraday 등 배치 호출자가 identifiers를
+# 직접 import하지 않고 이 모듈을 통해 쓴다. 테스트도 이 경로를 patch한다.
+from services.portfolio.identifiers import is_korean_stock  # noqa: F401
+
+__all__ = [
+    "RuntimeQuoteProvider",
+    "register_provider",
+    "fetch_quote",
+    "fetch_cash_quote",
+    "load_ticker_map",
+    "fx_to_krw",
+    "is_korean_stock",
+]
 
 
 class RuntimeQuoteProvider(Protocol):

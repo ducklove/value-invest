@@ -9,11 +9,11 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def get_dart_report_review(stock_code: str, rcept_no: str | None = None) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     if rcept_no:
         cursor = await db.execute(
             "SELECT * FROM dart_report_reviews WHERE stock_code = ? AND rcept_no = ?",
@@ -39,7 +39,7 @@ async def get_dart_report_review(stock_code: str, rcept_no: str | None = None) -
 
 
 async def save_dart_report_review(review: dict) -> dict:
-    db = await cache.get_db()
+    db = await get_db()
     now = datetime.now().isoformat()
     review_payload = review.get("review") or {}
     comparison_reports = review.get("comparison_reports") or []
@@ -86,3 +86,23 @@ async def save_dart_report_review(review: dict) -> dict:
     )
     await db.commit()
     return await get_dart_report_review(review.get("stock_code"), review.get("rcept_no")) or review
+
+
+async def list_recent_reviews(stock_codes: list[str], since_iso: str, *, limit: int = 10) -> list[dict]:
+    """최근(created_at >= since)에 새로 생성된 정기보고서 리뷰 — 데일리 브리핑의
+    '신규 공시' 소스. 본문(review_json)은 빼고 헤더만 가볍게 돌려준다."""
+    if not stock_codes:
+        return []
+    placeholders = ",".join("?" for _ in stock_codes)
+    db = await get_db()
+    cursor = await db.execute(
+        f"""
+        SELECT stock_code, corp_name, report_name, report_date, created_at
+        FROM dart_report_reviews
+        WHERE stock_code IN ({placeholders}) AND created_at >= ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (*stock_codes, since_iso, max(1, int(limit))),
+    )
+    return [dict(r) for r in await cursor.fetchall()]

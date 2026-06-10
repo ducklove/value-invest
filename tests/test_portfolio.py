@@ -5,26 +5,30 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import cache
+from repositories import financial as financial_repo
+from repositories import portfolio as portfolio_repo
+from repositories import snapshots as snapshots_repo
+import repositories.db
 from routes import portfolio as portfolio_route
 from services.portfolio import dividends
 from services.portfolio import foreign
 from services.portfolio import fx
 from services.portfolio import target_metrics as target_metrics_service
+from services.portfolio import target_resolver
 
 
 class PortfolioTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         # Previous test may have left cache._conn pointing at a now-deleted
         # temp DB or a closed handle. close_db() is idempotent and resets
         # the singleton so init_db() opens a fresh conn on the patched path.
         await cache.close_db()
         await cache.init_db()
-        portfolio_route._dividend_warmup_last.clear()
-        portfolio_route._dividend_warmup_tasks.clear()
+        dividends.reset_warmup_state()
         portfolio_route._benchmark_name_cache.clear()
         portfolio_route._benchmark_quote_cache.clear()
         fx._fx_daily_cache.clear()
@@ -54,12 +58,12 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
     # --- CRUD ---
 
     async def test_empty_portfolio(self):
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items, [])
 
     async def test_add_item(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["stock_code"], "005930")
         self.assertEqual(items[0]["quantity"], 100)
@@ -67,29 +71,29 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items[0]["tags"], [])
 
     async def test_alphanumeric_krx_etf_gets_domestic_default_group(self):
-        await cache.save_portfolio_item("u1", "0074K0", "KoAct K ETF", 10, 21000)
-        items = await cache.get_portfolio("u1")
-        domestic_group = next(name for name, _, _, default_type in cache._DEFAULT_GROUPS if default_type == "kr")
+        await portfolio_repo.save_portfolio_item("u1", "0074K0", "KoAct K ETF", 10, 21000)
+        items = await portfolio_repo.get_portfolio("u1")
+        domestic_group = next(name for name, _, _, default_type in portfolio_repo._DEFAULT_GROUPS if default_type == "kr")
 
-        self.assertEqual(cache._default_type_for_code("0074K0"), "kr")
+        self.assertEqual(portfolio_repo._default_type_for_code("0074K0"), "kr")
         self.assertEqual(items[0]["stock_code"], "0074K0")
         self.assertEqual(items[0]["group_name"], domestic_group)
 
     async def test_portfolio_tags_roundtrip(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        saved = await cache.set_portfolio_tags(
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        saved = await portfolio_repo.set_portfolio_tags(
             "u1",
             "005930",
             ["자산주", "#턴어라운드", "자산주", "  AI 관련주  ", "ai 관련주"],
         )
         self.assertEqual(saved, ["자산주", "턴어라운드", "AI 관련주"])
 
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["tags"], ["자산주", "턴어라운드", "AI 관련주"])
-        self.assertEqual(await cache.get_portfolio_tags("u1", "005930"), ["자산주", "턴어라운드", "AI 관련주"])
+        self.assertEqual(await portfolio_repo.get_portfolio_tags("u1", "005930"), ["자산주", "턴어라운드", "AI 관련주"])
 
     async def test_target_price_formula_roundtrip(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1",
             "005930",
             "삼성전자",
@@ -98,13 +102,13 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             target_price_formula="BPS*0.4+DPS*10",
         )
 
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertIsNone(items[0]["target_price"])
         self.assertEqual(items[0]["target_price_formula"], "BPS*0.4+DPS*10")
         self.assertEqual(items[0]["target_price_disabled"], 0)
 
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000, target_price=100000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000, target_price=100000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["target_price"], 100000)
         self.assertIsNone(items[0]["target_price_formula"])
 
@@ -117,7 +121,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["target_price_formula"], "")
 
     async def test_target_price_formula_keeps_calculated_fallback(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1",
             "005930",
             "삼성전자",
@@ -127,12 +131,12 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             target_price_formula="BPS*0.5",
         )
 
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["target_price"], 32000)
         self.assertEqual(items[0]["target_price_formula"], "BPS*0.5")
 
     async def test_regular_edit_preserves_formula_with_calculated_fallback(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1",
             "005930",
             "삼성전자",
@@ -142,9 +146,9 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             target_price_formula="BPS*0.5",
         )
 
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 150, 64000)
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 150, 64000)
 
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["quantity"], 150)
         self.assertEqual(items[0]["target_price"], 32000)
         self.assertEqual(items[0]["target_price_formula"], "BPS*0.5")
@@ -161,14 +165,17 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        async def fake_quote(code):
+        async def fake_quote(code, **kwargs):
             return {"price": {"028260": 100, "009540": 200}[code]}
 
+        # patch.object mutates the shared module objects the service reads at
+        # call time (commit 99ef2ba pattern) — the formula resolution now lives
+        # in services.portfolio.target_resolver.
         with patch.object(
-            portfolio_route.integrations,
+            target_resolver.integrations,
             "build_public_integrations",
             return_value={"holdingValue": {"meta": holding_meta}},
-        ), patch.object(portfolio_route, "_fetch_quote", new=AsyncMock(side_effect=fake_quote)):
+        ), patch.object(target_resolver.runtime_quotes, "fetch_quote", new=AsyncMock(side_effect=fake_quote)):
             target_price = await portfolio_route._resolve_target_formula_price("002380", "보유지분", 611500)
 
         self.assertAlmostEqual(target_price, (100 * 10 + 200 * 5) / 900)
@@ -184,10 +191,10 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch.object(
-            portfolio_route.integrations,
+            target_resolver.integrations,
             "build_public_integrations",
             return_value={"holdingValue": {"meta": holding_meta}},
-        ), patch.object(portfolio_route, "_fetch_quote", new=AsyncMock()) as fetch_quote:
+        ), patch.object(target_resolver.runtime_quotes, "fetch_quote", new=AsyncMock()) as fetch_quote:
             target_price = await portfolio_route._resolve_target_formula_price("004700", "보유지분", 611500)
 
         fetch_quote.assert_not_awaited()
@@ -205,7 +212,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         )
         await db.commit()
 
-        metrics = await cache.get_portfolio_target_metrics(["005930"])
+        metrics = await portfolio_repo.get_portfolio_target_metrics(["005930"])
 
         self.assertEqual(metrics["005930"], {"eps": 1000, "bps": 50000, "dps": 1500})
 
@@ -225,7 +232,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         )
         await db.commit()
 
-        valuation = await cache.get_latest_market_valuation("005930")
+        valuation = await portfolio_repo.get_latest_market_valuation("005930")
 
         self.assertEqual(valuation["year"], 2025)
         self.assertEqual(valuation["per"], 12.5)
@@ -255,7 +262,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(target_metrics_map["037350"]["bps"], 18017.424347205786)
         self.assertIsNone(target_metrics_map["037350"]["eps"])
 
-        saved = await cache.get_portfolio_target_metrics(["037350"])
+        saved = await portfolio_repo.get_portfolio_target_metrics(["037350"])
         self.assertIsNone(saved["037350"]["bps"])
         self.assertIsNone(saved["037350"]["eps"])
 
@@ -299,34 +306,34 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(target_metrics_map["005930"]["eps"], 6675.68)
 
     async def test_portfolio_tag_suggestions_by_usage(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
-        await cache.set_portfolio_tags("u1", "005930", ["AI", "자산주"])
-        await cache.set_portfolio_tags("u1", "000660", ["AI", "반도체"])
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        await portfolio_repo.set_portfolio_tags("u1", "005930", ["AI", "자산주"])
+        await portfolio_repo.set_portfolio_tags("u1", "000660", ["AI", "반도체"])
 
-        self.assertEqual(await cache.get_portfolio_tag_suggestions("u1"), ["AI", "반도체", "자산주"])
+        self.assertEqual(await portfolio_repo.get_portfolio_tag_suggestions("u1"), ["AI", "반도체", "자산주"])
 
     async def test_update_item(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 200, 70000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 200, 70000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["quantity"], 200)
         self.assertEqual(items[0]["avg_price"], 70000)
 
     async def test_update_benchmark_reports_missing_row(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
 
-        updated = await cache.update_portfolio_benchmark("u1", "005930", "IDX_KOSPI")
-        missing = await cache.update_portfolio_benchmark("u1", "999999", "IDX_KOSPI")
-        items = await cache.get_portfolio("u1")
+        updated = await portfolio_repo.update_portfolio_benchmark("u1", "005930", "IDX_KOSPI")
+        missing = await portfolio_repo.update_portfolio_benchmark("u1", "999999", "IDX_KOSPI")
+        items = await portfolio_repo.get_portfolio("u1")
 
         self.assertTrue(updated)
         self.assertFalse(missing)
         self.assertEqual(items[0]["benchmark_code"], "IDX_KOSPI")
 
     async def test_benchmark_quotes_use_fast_default_without_market_prefetch(self):
-        await cache.save_portfolio_item("u1", "005930", "?쇱꽦?꾩옄", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "005930", "?쇱꽦?꾩옄", 100, 65000)
 
         with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
              patch.object(portfolio_route, "_prefetch_market_types", new=AsyncMock(side_effect=AssertionError("slow prefetch"))), \
@@ -336,7 +343,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["IDX_KOSPI"]["change_pct"], 1.23)
 
     async def test_benchmark_quotes_name_stock_benchmark_from_internal_code_table(self):
-        await cache.save_portfolio_item("u1", "032830", "삼성생명", 100, 90000, benchmark_code="005930")
+        await portfolio_repo.save_portfolio_item("u1", "032830", "삼성생명", 100, 90000, benchmark_code="005930")
 
         with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
              patch.object(portfolio_route, "_fetch_benchmark_quote", new=AsyncMock(return_value={"change_pct": 0.5})):
@@ -352,9 +359,11 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             {"change_pct": 0.42},
         )
 
-        with patch.object(
-            portfolio_route.market_indicators,
-            "fetch_indicators",
+        # fetch_indicators is consumed by services.portfolio.benchmarks via the
+        # shared market_indicators module object — patch it directly instead of
+        # reaching through the routes.portfolio namespace.
+        with patch(
+            "market_indicators.fetch_indicators",
             new=AsyncMock(return_value={"SPX": {"value": "", "change_pct": "", "direction": ""}}),
         ):
             result = await portfolio_route._fetch_benchmark_quote("IDX_SP500")
@@ -363,8 +372,8 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["_stale"])
 
     async def test_prev_day_snapshot_attributes_today_cashflows_to_cash_krw(self):
-        await cache.save_snapshot("u1", "2026-05-22", 1_000_000, 900_000, 100.0, 10_000, 1300.0)
-        await cache.save_stock_snapshots(
+        await snapshots_repo.save_snapshot("u1", "2026-05-22", 1_000_000, 900_000, 100.0, 10_000, 1300.0)
+        await snapshots_repo.save_stock_snapshots(
             "u1",
             "2026-05-22",
             [
@@ -440,36 +449,36 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         fx_rate.assert_awaited_once_with("USD")
 
     async def test_delete_item(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.set_portfolio_tags("u1", "005930", ["자산주"])
-        await cache.delete_portfolio_item("u1", "005930")
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.set_portfolio_tags("u1", "005930", ["자산주"])
+        await portfolio_repo.delete_portfolio_item("u1", "005930")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 0)
-        self.assertEqual(await cache.get_portfolio_tags("u1", "005930"), [])
+        self.assertEqual(await portfolio_repo.get_portfolio_tags("u1", "005930"), [])
 
     async def test_replace_portfolio_atomic_bulk_swap(self):
         # replace_portfolio opens its own aiosqlite connection for an atomic
         # delete-all + insert (the bulk-import "replace" path). Exercises that
-        # fresh-connection path against cache.DB_PATH.
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.replace_portfolio("u1", [
+        # fresh-connection path against repositories.db.DB_PATH.
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.replace_portfolio("u1", [
             {"stock_code": "000660", "stock_name": "SK하이닉스", "quantity": 5, "avg_price": 180000},
             {"stock_code": "AAPL", "stock_name": "Apple", "quantity": 3, "avg_price": 200, "currency": "USD"},
         ])
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(sorted(i["stock_code"] for i in items), ["000660", "AAPL"])
         # Second replace fully swaps again (atomic, no leftovers from the first).
-        await cache.replace_portfolio("u1", [
+        await portfolio_repo.replace_portfolio("u1", [
             {"stock_code": "035720", "stock_name": "카카오", "quantity": 1, "avg_price": 50000},
         ])
-        items2 = await cache.get_portfolio("u1")
+        items2 = await portfolio_repo.get_portfolio("u1")
         self.assertEqual([i["stock_code"] for i in items2], ["035720"])
 
     async def test_get_portfolio_exposes_created_at(self):
         """UI 의 '등록일자' 컬럼이 비어있지 않도록, get_portfolio SELECT 에
         created_at 이 반드시 포함돼야 한다는 계약 고정."""
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 1)
         self.assertIn("created_at", items[0])
         self.assertTrue(items[0]["created_at"])  # non-empty ISO string
@@ -477,72 +486,72 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
     async def test_save_portfolio_preserves_created_at_on_edit(self):
         """수량/매입가만 편집할 때 등록일자가 리셋되면 안 된다."""
         import asyncio
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        original = (await cache.get_portfolio("u1"))[0]["created_at"]
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        original = (await portfolio_repo.get_portfolio("u1"))[0]["created_at"]
         # Wait a beat so the timestamp would differ if we accidentally reset
         # created_at to now() during the second save.
         await asyncio.sleep(0.01)
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 200, 70000)
-        updated = (await cache.get_portfolio("u1"))[0]["created_at"]
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 200, 70000)
+        updated = (await portfolio_repo.get_portfolio("u1"))[0]["created_at"]
         self.assertEqual(updated, original)
 
     async def test_save_portfolio_accepts_explicit_created_at(self):
         """등록일자 edit form 에서 넘어온 명시적 값은 존중되어야 함."""
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
         explicit = "2025-01-15T00:00:00"
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 100, 65000, created_at=explicit,
         )
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["created_at"], explicit)
 
     async def test_target_price_default_null(self):
         """신규 등록 시 target_price 미전달이면 NULL → 프론트에서 자동 계산 경로."""
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertIn("target_price", items[0])
         self.assertIsNone(items[0]["target_price"])
 
     async def test_target_price_explicit_value_persists(self):
         """수동 override 값은 그대로 저장."""
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 100, 65000, target_price=85000.0,
         )
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["target_price"], 85000.0)
 
     async def test_target_price_unchanged_sentinel_preserves(self):
         """수량/매입가만 편집할 때 (target_price 인자 미전달) 기존 override 유지.
         sentinel 처리가 깨지면 자동 계산으로 reset 되어 사용자 의도 위반."""
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 100, 65000, target_price=85000.0,
         )
         # target_price 인자 안 넘김 → 기존 85000 유지되어야
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 200, 70000,
         )
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["target_price"], 85000.0)
         self.assertEqual(items[0]["quantity"], 200)
         self.assertEqual(items[0]["avg_price"], 70000)
 
     async def test_target_price_explicit_none_clears(self):
         """target_price=None 명시는 자동 계산으로 되돌림 (override 해제)."""
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 100, 65000, target_price=85000.0,
         )
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 100, 65000, target_price=None,
         )
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertIsNone(items[0]["target_price"])
 
     async def test_target_price_disabled_clears_and_suppresses_auto_target(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 100, 65000, target_price=85000.0,
         )
 
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1",
             "005930",
             "삼성전자",
@@ -553,7 +562,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             target_price_disabled=True,
         )
 
-        items = await cache.get_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertIsNone(items[0]["target_price"])
         self.assertIsNone(items[0]["target_price_formula"])
         self.assertEqual(items[0]["target_price_disabled"], 1)
@@ -582,7 +591,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         await db.commit()
-        dps = await cache.get_trailing_dividends(["005930", "000660", "035420", "999999"])
+        dps = await portfolio_repo.get_trailing_dividends(["005930", "000660", "035420", "999999"])
         # 005930 은 current_year-1 = 0 이므로 그 값 반환.
         self.assertEqual(dps.get("005930"), 0.0)
         self.assertEqual(dps.get("000660"), 1200.0)
@@ -591,7 +600,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("999999", dps)  # no rows → 여전히 제외
 
     async def test_get_trailing_dividends_empty_list(self):
-        self.assertEqual(await cache.get_trailing_dividends([]), {})
+        self.assertEqual(await portfolio_repo.get_trailing_dividends([]), {})
 
     async def test_dividend_warmup_fetches_missing_domestic_market_data(self):
         """신규 국내 종목은 분석 화면을 열기 전에도 포트폴리오 배당 캐시가
@@ -606,13 +615,13 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         fetch = AsyncMock(return_value=rows)
         dart_fetch = AsyncMock(return_value={})
 
-        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
-             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
-            await portfolio_route._warm_market_data_for_dividend("002380")
+        with patch.object(dividends.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(dividends.stock_price, "fetch_market_data", fetch):
+            await dividends.warm_market_data_for_dividend("002380")
 
         dart_fetch.assert_awaited_once()
         fetch.assert_awaited_once()
-        dps = await cache.get_trailing_dividends(["002380"])
+        dps = await portfolio_repo.get_trailing_dividends(["002380"])
         self.assertEqual(dps.get("002380"), 10000.0)
 
     async def test_dividend_warmup_skips_when_trailing_dps_exists(self):
@@ -629,9 +638,9 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         fetch = AsyncMock(return_value=[])
         dart_fetch = AsyncMock(return_value={})
-        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
-             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
-            await portfolio_route._warm_market_data_for_dividend("002380")
+        with patch.object(dividends.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(dividends.stock_price, "fetch_market_data", fetch):
+            await dividends.warm_market_data_for_dividend("002380")
 
         dart_fetch.assert_awaited_once()
         fetch.assert_not_awaited()
@@ -650,15 +659,15 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         dart_fetch = AsyncMock(return_value={current_year - 1: 15000.0})
         fetch = AsyncMock(return_value=[])
-        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
-             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
-            await portfolio_route._warm_market_data_for_dividend("002380")
+        with patch.object(dividends.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(dividends.stock_price, "fetch_market_data", fetch):
+            await dividends.warm_market_data_for_dividend("002380")
 
         dart_fetch.assert_awaited_once()
         fetch.assert_not_awaited()
-        dps = await cache.get_trailing_dividends(["002380"])
+        dps = await portfolio_repo.get_trailing_dividends(["002380"])
         self.assertEqual(dps.get("002380"), 15000.0)
-        rows = await cache.get_market_data("002380")
+        rows = await financial_repo.get_market_data("002380")
         self.assertEqual(rows[-1]["dividend_yield"], 3.57)
 
     def test_dividend_warmup_targets_preferred_common_too(self):
@@ -701,7 +710,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         await db.commit()
-        dps = await cache.get_trailing_dividends([
+        dps = await portfolio_repo.get_trailing_dividends([
             "005935",   # 삼성전자 우선주 → 005930 fallback
             "00088K",   # 한화 종류우선주 → 000880 fallback (6자리, K suffix)
             "005930",   # 직접 매치
@@ -728,52 +737,52 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         await db.commit()
-        dps = await cache.get_trailing_dividends(["005935"])
+        dps = await portfolio_repo.get_trailing_dividends(["005935"])
         self.assertEqual(dps.get("005935"), 1445.0)
 
     async def test_delete_nonexistent(self):
-        await cache.delete_portfolio_item("u1", "999999")
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.delete_portfolio_item("u1", "999999")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 0)
 
     async def test_multiple_items(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 2)
 
     # --- Ordering ---
 
     async def test_reorder(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
-        await cache.save_portfolio_order("u1", ["000660", "005930"])
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        await portfolio_repo.save_portfolio_order("u1", ["000660", "005930"])
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["stock_code"], "000660")
         self.assertEqual(items[1]["stock_code"], "005930")
 
     async def test_new_item_goes_to_top(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.save_portfolio_order("u1", ["005930"])
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_order("u1", ["005930"])
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["stock_code"], "000660")
 
     # --- Delete + re-add ---
 
     async def test_delete_then_readd(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.delete_portfolio_item("u1", "005930")
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 50, 72000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.delete_portfolio_item("u1", "005930")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 50, 72000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["quantity"], 50)
 
     async def test_delete_one_keeps_others(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
-        await cache.delete_portfolio_item("u1", "005930")
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        await portfolio_repo.delete_portfolio_item("u1", "005930")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["stock_code"], "000660")
 
@@ -791,31 +800,31 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
     # --- Bulk / clear ---
 
     async def test_clear_portfolio(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
-        await cache.clear_portfolio("u1")
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        await portfolio_repo.clear_portfolio("u1")
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 0)
 
     async def test_clear_then_add(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.clear_portfolio("u1")
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 50, 190000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.clear_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 50, 190000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["stock_code"], "000660")
 
     async def test_bulk_add_preserves_existing(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 30, 180000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(len(items), 2)
 
     async def test_bulk_replace_clears_first(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
-        await cache.clear_portfolio("u1")
-        await cache.save_portfolio_item("u1", "000660", "SK하이닉스", 50, 190000)
-        items = await cache.get_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.clear_portfolio("u1")
+        await portfolio_repo.save_portfolio_item("u1", "000660", "SK하이닉스", 50, 190000)
+        items = await portfolio_repo.get_portfolio("u1")
         self.assertNotIn("005930", [i["stock_code"] for i in items])
         self.assertIn("000660", [i["stock_code"] for i in items])
 
@@ -824,16 +833,16 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(name)
 
     async def test_group_weight_history_uses_snapshot_values(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 10, 1000,
             group_name="국내주식",
         )
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "000660", "SK하이닉스", 10, 1000,
             group_name="반도체",
         )
-        await cache.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
-        await cache.save_stock_snapshots(
+        await snapshots_repo.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
+        await snapshots_repo.save_stock_snapshots(
             "u1",
             "2026-01-02",
             [
@@ -842,7 +851,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        rows = await cache.get_group_weight_history("u1")
+        rows = await snapshots_repo.get_group_weight_history("u1")
 
         by_group = {row["group_name"]: row for row in rows}
         self.assertAlmostEqual(by_group["국내주식"]["weight_pct"], 30.0)
@@ -851,38 +860,38 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_group["반도체"]["stock_count"], 1)
 
     async def test_group_weight_history_prefers_snapshot_group_name(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 10, 1000,
             group_name="현재그룹",
         )
-        await cache.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
-        await cache.save_stock_snapshots(
+        await snapshots_repo.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
+        await snapshots_repo.save_stock_snapshots(
             "u1",
             "2026-01-02",
             [{"stock_code": "005930", "market_value": 1000, "group_name": "스냅샷그룹"}],
         )
 
-        rows = await cache.get_group_weight_history("u1")
+        rows = await snapshots_repo.get_group_weight_history("u1")
 
         self.assertEqual(rows[0]["group_name"], "스냅샷그룹")
         self.assertAlmostEqual(rows[0]["weight_pct"], 100.0)
         self.assertEqual(rows[0]["stock_count"], 1)
 
     async def test_group_constituent_history_uses_group_total(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "005930", "삼성전자", 10, 1000,
             group_name="반도체",
         )
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "000660", "SK하이닉스", 10, 1000,
             group_name="반도체",
         )
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "035420", "NAVER", 10, 1000,
             group_name="인터넷",
         )
-        await cache.save_snapshot("u1", "2026-01-02", 2000, 1500, 1000, 2, 1400)
-        await cache.save_stock_snapshots(
+        await snapshots_repo.save_snapshot("u1", "2026-01-02", 2000, 1500, 1000, 2, 1400)
+        await snapshots_repo.save_stock_snapshots(
             "u1",
             "2026-01-02",
             [
@@ -892,7 +901,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        rows = await cache.get_group_constituent_history("u1", "반도체")
+        rows = await snapshots_repo.get_group_constituent_history("u1", "반도체")
 
         by_code = {row["stock_code"]: row for row in rows}
         self.assertEqual(set(by_code), {"005930", "000660"})
@@ -902,18 +911,18 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_code["000660"]["stock_name"], "SK하이닉스")
 
     async def test_group_weight_history_normalizes_to_stock_snapshot_total(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "AAA", "Alpha", 10, 1000,
             group_name="Core",
         )
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "BBB", "Beta", 10, 1000,
             group_name="Satellite",
         )
         # Deliberately lower than the per-stock snapshot sum. Group trend
         # should still stack to 100% for the visible stock snapshot universe.
-        await cache.save_snapshot("u1", "2026-01-02", 900, 800, 1000, 1, 1400)
-        await cache.save_stock_snapshots(
+        await snapshots_repo.save_snapshot("u1", "2026-01-02", 900, 800, 1000, 1, 1400)
+        await snapshots_repo.save_stock_snapshots(
             "u1",
             "2026-01-02",
             [
@@ -922,7 +931,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        rows = await cache.get_group_weight_history("u1")
+        rows = await snapshots_repo.get_group_weight_history("u1")
 
         self.assertAlmostEqual(sum(row["weight_pct"] for row in rows), 100.0)
         by_group = {row["group_name"]: row for row in rows}
@@ -931,16 +940,16 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_group["Core"]["total_value"], 1000)
 
     async def test_group_and_stock_weights_are_materialized_on_snapshot_save(self):
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "AAA", "Alpha", 10, 1000,
             group_name="Core",
         )
-        await cache.save_portfolio_item(
+        await portfolio_repo.save_portfolio_item(
             "u1", "BBB", "Beta", 10, 1000,
             group_name="Core",
         )
-        await cache.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
-        await cache.save_stock_snapshots(
+        await snapshots_repo.save_snapshot("u1", "2026-01-02", 1000, 800, 1000, 1, 1400)
+        await snapshots_repo.save_stock_snapshots(
             "u1",
             "2026-01-02",
             [
@@ -960,7 +969,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(group_rows[0]["stock_count"], 2)
         self.assertAlmostEqual(group_rows[0]["weight_pct"], 100.0)
 
-        rows = await cache.get_group_constituent_history("u1", "Core")
+        rows = await snapshots_repo.get_group_constituent_history("u1", "Core")
         by_code = {row["stock_code"]: row for row in rows}
         self.assertEqual(set(by_code), {"AAA", "BBB"})
         self.assertAlmostEqual(by_code["AAA"]["weight_pct"], 30.0)

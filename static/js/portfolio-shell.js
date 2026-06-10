@@ -1,41 +1,18 @@
 // Portfolio shell: shared state, columns, view switching, NPS entrypoint.
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 // --- Portfolio ---
-let activeView = 'analysis';
-// Holdings list now lives in PfStore.items (portfolio-store.js).
-let portfolioLoading = false;
-let pfSearchTimeout = null;
-let pfEditingCode = null;
-let pfSavingEditCode = null;
-let pfSortKey = null;
-let pfSortAsc = false;
-let pfGroups = [];        // [{group_name, sort_order, is_default}, ...]
-let pfGroupFilter = null; // null = all selected, Set of group_names = filtered
-let pfPortfolioSearchText = '';
-let pfGroupSort = false;  // independent group sort toggle
-let pfPendingManualOrderCodes = null;
-let pfManualOrderRevision = 0;
-let pfManualOrderSaveInFlight = false;
-let pfManualOrderKeepTimer = null;
-// Benchmark quotes now live in PfStore.benchmarkQuotes (portfolio-store.js).
-let pfMonthEndSnap = null; // {total_value, nav, fx_usdkrw, ...} at end of previous month
-let pfMonthEndStockValues = {}; // stock_code -> market_value at month end
-let pfYearStartSnap = null; // {date, total_value, fx_usdkrw, ...} for first snapshot of this year
-let pfYearStartStockValues = {}; // stock_code -> market_value at year start
-// NAV history now lives in PfStore.navHistory (portfolio-store.js).
-let pfIntradayData = []; // [{ts, total_value}, ...]
-let pfPrevDaySnapshot = null; // {total_value, fx_usdkrw, stock_values, today_net_cashflow}
-let pfCurrency = 'KRW'; // 'KRW' or 'USD'
-let pfFxRate = null; // USD/KRW rate
+// Cross-file portfolio view state lives in PfStore (portfolio-store.js):
+// items, benchmarkQuotes, navHistory, activeView, loading, groups, sort,
+// filters, edit, manualOrder, snapshots, currency, prefs.
+// Only file-local UI plumbing (timers, style element refs, pointer guards)
+// stays as top-level declarations in the owning split file.
 const PF_QUOTE_REFRESH_MS = 60_000;
 let _pfPointerGuardUntil = 0;
 const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
-let pfSimpleMode = false;
 // 컴팩트 보기: 종목명을 한 줄로, 태그·순서이동 핸들을 숨기고 행 간격을 좁힌다.
 // 모바일 전용인 pf-mobile-simple 과 달리 데스크톱에서도 동작하는 보기 옵션.
 const PF_COMPACT_ROWS_KEY = 'pf_compact_rows';
-let pfCompactRows = false;
-try { pfCompactRows = localStorage.getItem(PF_COMPACT_ROWS_KEY) === '1'; } catch (e) {}
+try { PfStore.prefs.compactRows = localStorage.getItem(PF_COMPACT_ROWS_KEY) === '1'; } catch (e) {}
 
 function pfBenchmarkQuoteHasChange(q) {
   return q && q.change_pct !== null && q.change_pct !== undefined && q.change_pct !== '';
@@ -86,7 +63,7 @@ function pfSyncMobileFixedView() {
   const lockedView = _mobileFixedView();
   document.body.classList.toggle('mobile-fixed-portfolio', lockedView === 'portfolio');
   document.body.classList.toggle('mobile-fixed-analysis', lockedView === 'analysis');
-  if (lockedView && activeView !== lockedView) {
+  if (lockedView && PfStore.activeView !== lockedView) {
     switchView(lockedView, { allowMobileLockOverride: true });
   }
 }
@@ -107,7 +84,7 @@ function _pfSaveSimpleModePreference(enabled) {
 function _pfApplySimpleMode(enabled, { persist = false } = {}) {
   const compactViewport = _pfIsSimpleModeViewport();
   const active = compactViewport && !!enabled;
-  pfSimpleMode = active;
+  PfStore.prefs.simpleMode = active;
   document.body.classList.toggle('pf-mobile-simple', active);
   if (active && typeof pfSwitchTab === 'function' && typeof pfActiveTab !== 'undefined' && pfActiveTab !== 'holdings') {
     pfSwitchTab('holdings');
@@ -131,7 +108,7 @@ function pfSyncSimpleModeForViewport() {
 }
 
 function pfToggleSimpleMode() {
-  _pfApplySimpleMode(!pfSimpleMode, { persist: true });
+  _pfApplySimpleMode(!PfStore.prefs.simpleMode, { persist: true });
 }
 
 (function initPfSimpleMode() {
@@ -218,17 +195,17 @@ function pfToggleCol(key, checked) {
   }
 }
 function _pfApplyCompactRows(enabled) {
-  pfCompactRows = !!enabled;
-  document.body.classList.toggle('pf-compact-rows', pfCompactRows);
+  PfStore.prefs.compactRows = !!enabled;
+  document.body.classList.toggle('pf-compact-rows', PfStore.prefs.compactRows);
   const cb = document.getElementById('pfCompactToggle');
-  if (cb && cb.checked !== pfCompactRows) cb.checked = pfCompactRows;
+  if (cb && cb.checked !== PfStore.prefs.compactRows) cb.checked = PfStore.prefs.compactRows;
 }
 function pfToggleCompactRows(checked) {
   _pfApplyCompactRows(checked);
-  try { localStorage.setItem(PF_COMPACT_ROWS_KEY, pfCompactRows ? '1' : '0'); } catch (e) {}
+  try { localStorage.setItem(PF_COMPACT_ROWS_KEY, PfStore.prefs.compactRows ? '1' : '0'); } catch (e) {}
 }
 (function initPfCompactRows() {
-  const apply = () => _pfApplyCompactRows(pfCompactRows);
+  const apply = () => _pfApplyCompactRows(PfStore.prefs.compactRows);
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', apply);
   } else {
@@ -245,7 +222,7 @@ function _pfRenderColToggles() {
   if (!wrap) return;
   const compactToggle =
     `<label class="pf-compact-toggle" title="태그·순서이동 아이콘을 숨기고 종목명을 한 줄로, 행 간격을 좁게 표시">`
-    + `<input type="checkbox" id="pfCompactToggle" class="js-pf-compact-toggle"${pfCompactRows ? ' checked' : ''}> 컴팩트</label>`
+    + `<input type="checkbox" id="pfCompactToggle" class="js-pf-compact-toggle"${PfStore.prefs.compactRows ? ' checked' : ''}> 컴팩트</label>`
     + `<span class="pf-col-toggle-sep" aria-hidden="true"></span>`;
   const colToggles = PF_COL_DEFS.map(c =>
     `<label><input type="checkbox" class="js-pf-col-toggle" data-col-key="${escapeHtml(c.key)}" ${vis[c.key] ? 'checked' : ''}> ${c.label}</label>`
@@ -257,7 +234,7 @@ function _pfRenderColToggles() {
 function switchView(view, options = {}) {
   const lockedView = options.allowMobileLockOverride ? null : _mobileFixedView();
   if (lockedView && view !== lockedView) view = lockedView;
-  activeView = view;
+  PfStore.activeView = view;
   // 데스크톱 상단 탭(.nav-btn)과 모바일 하단 탭바(.mnav-btn) 활성 상태를 함께 동기화.
   document.querySelectorAll('.nav-btn, .mnav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   const investingView = document.getElementById('investingView');

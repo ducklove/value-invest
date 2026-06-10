@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime
+from datetime import date
 from unittest.mock import patch
 
 import stock_price

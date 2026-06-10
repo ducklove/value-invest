@@ -2094,6 +2094,174 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border-color: var(--primary); background: var(--hover);
 }
 
+/* Risk panel (성과 탭 '리스크' 카드) — 타일은 .pf-nav-ret-card 를 재사용하고,
+   flex 대신 grid 로 깔아 좁은 화면에서 2열로 접는다. 색·테두리는 모두
+   CSS 변수 기반이라 다크 테마도 그대로 따라간다. */
+.pf-risk-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px; margin-top: 12px;
+}
+.pf-risk-grid .pf-nav-ret-card { min-width: 0; }
+.pf-risk-sub {
+  font-size: 10px; color: var(--text-secondary); margin-top: 2px;
+  line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.pf-risk-empty {
+  margin-top: 12px; padding: 24px 12px; text-align: center;
+  color: var(--text-secondary); font-size: 13px;
+  border: 1px dashed var(--border); border-radius: 8px;
+}
+@media (max-width: 760px) {
+  .pf-risk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Rebalancing card (성과 탭 '리밸런싱') — 빈 상태는 .pf-risk-empty,
+   버튼·입력은 .pf-mini-btn/.pf-alert-btn/.pf-modal-input 을 재사용한다.
+   색은 모두 CSS 변수 기반이라 다크 테마를 그대로 따른다. */
+.pf-rebal-header-actions { margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pf-rebal-alert-toggle {
+  display: inline-flex; gap: 4px; align-items: center; font-size: 12px;
+  color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+}
+.pf-rebal-table-wrap { margin-top: 12px; overflow-x: auto; }
+.pf-rebal-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
+.pf-rebal-table th {
+  text-align: right; padding: 6px 8px; font-size: 11px; font-weight: 600;
+  color: var(--text-secondary); border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.pf-rebal-table th:first-child { text-align: left; }
+.pf-rebal-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.pf-rebal-label { text-align: left; }
+.pf-rebal-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-rebal-sub { font-size: 11px; color: var(--text-secondary); }
+.pf-rebal-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px;
+  font-weight: 700; background: var(--hover); color: var(--text-secondary);
+  border: 1px solid var(--border); vertical-align: middle;
+}
+.pf-rebal-badge.group { color: var(--primary); border-color: var(--primary); background: transparent; }
+.pf-rebal-drift.breached { font-weight: 800; }
+tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
+.pf-rebal-breached-count { color: #dc2626; }
+.pf-rebal-editor {
+  margin-top: 12px; padding: 12px; border: 1px dashed var(--border);
+  border-radius: 8px; display: flex; flex-direction: column; gap: 8px;
+}
+.pf-rebal-editor-head { font-size: 12px; color: var(--text-secondary); }
+.pf-rebal-editor-row {
+  display: grid; grid-template-columns: 84px minmax(0, 1fr) 96px 110px 34px;
+  gap: 6px; align-items: center;
+}
+.pf-rebal-editor-row .pf-modal-input { min-width: 0; }
+.pf-rebal-editor-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  /* 모바일은 2열로 접는다(.pf-risk-grid 패턴) — 구분/대상, 목표/오차+삭제. */
+  .pf-rebal-editor-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Dividend calendar card (성과 탭 '배당 캘린더') — 빈 상태는 .pf-risk-empty
+   재사용, 색은 모두 CSS 변수 기반. 예상 이벤트는 점선+흐림으로 확정과 구분. */
+.pf-divcal-list { margin-top: 12px; }
+.pf-divcal-month {
+  display: flex; align-items: center; gap: 8px; padding: 8px 6px;
+  border-bottom: 1px solid var(--border); font-size: 13px; cursor: pointer;
+  user-select: none;
+}
+.pf-divcal-month.empty { cursor: default; color: var(--text-secondary); }
+.pf-divcal-month.now { background: var(--hover); border-radius: 6px; }
+.pf-divcal-month-label { font-weight: 600; }
+.pf-divcal-month.empty .pf-divcal-month-label { font-weight: 400; }
+.pf-divcal-month-total {
+  margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.pf-divcal-caret { width: 14px; text-align: center; color: var(--text-secondary); font-size: 11px; }
+.pf-divcal-events { padding: 2px 6px 8px 28px; }
+.pf-divcal-event {
+  display: grid; grid-template-columns: 86px minmax(0, 1fr) auto;
+  gap: 2px 10px; align-items: center; padding: 6px 0; font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.pf-divcal-event:last-child { border-bottom: none; }
+.pf-divcal-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-divcal-stock { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pf-divcal-stock-name { font-weight: 600; }
+.pf-divcal-sub { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
+.pf-divcal-amount {
+  text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600;
+}
+/* 예상 이벤트 — 확정 대비 흐리게(추정치임을 시각적으로 강조). */
+.pf-divcal-event.pf-divcal-est .pf-divcal-stock-name,
+.pf-divcal-event.pf-divcal-est .pf-divcal-amount { color: var(--text-secondary); font-weight: 500; }
+/* 다가오는(오늘 이후) 이벤트 — 날짜를 강조해 임박 일정이 한눈에 띄게. */
+.pf-divcal-event.pf-divcal-upcoming .pf-divcal-date { color: var(--primary); font-weight: 700; }
+.pf-divcal-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px;
+  font-weight: 700; background: transparent; color: var(--text-secondary);
+  border: 1px dashed var(--border); vertical-align: middle;
+}
+.pf-divcal-badge.confirmed { color: var(--primary); border: 1px solid var(--primary); }
+.pf-divcal-note { margin-top: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+@media (max-width: 760px) {
+  /* 모바일은 2열로 접는다(.pf-risk-grid 패턴) — 날짜/금액, 종목은 풀폭. */
+  .pf-divcal-event { grid-template-columns: minmax(0, 1fr) auto; }
+  .pf-divcal-event .pf-divcal-stock { grid-column: 1 / -1; }
+  .pf-divcal-events { padding-left: 16px; }
+}
+
+/* Investment journal (투자 일지) — 분석 화면 #stockJournalSection 과 성과 탭
+   #pfJournalWrap 두 표면이 같은 카드 스타일을 공유한다. 빈 상태는
+   .pf-risk-empty 재사용, 색은 모두 CSS 변수 기반. */
+.stock-journal {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.stock-journal-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.stock-journal-label { font-weight: 700; font-size: 13.5px; }
+.stock-journal-hint { font-size: 11.5px; color: var(--text-secondary); }
+.pf-journal-form { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.pf-journal-form-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pf-journal-form-row .pf-modal-input { min-width: 0; }
+.pf-journal-form-row #stockJournalQty { width: 120px; }
+.pf-journal-note-input {
+  width: 100%; box-sizing: border-box; resize: vertical; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
+  background: var(--surface); color: var(--text-primary); font-family: inherit;
+}
+.pf-journal-form-hint { font-size: 11px; color: var(--text-secondary); }
+.pf-journal-form-actions { display: flex; gap: 6px; margin-top: 4px; }
+.pf-journal-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pf-journal-card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
+  font-size: 12.5px; background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+}
+.pf-journal-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf-journal-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+  font-weight: 700; border: 1px solid var(--border); color: var(--text-secondary);
+}
+.pf-journal-badge.buy { color: #dc2626; border-color: #dc2626; }
+.pf-journal-badge.sell { color: #2563eb; border-color: #2563eb; }
+.pf-journal-stock { font-weight: 700; color: var(--text-primary); text-decoration: none; }
+.pf-journal-stock:hover { text-decoration: underline; }
+.pf-journal-date { color: var(--text-secondary); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.pf-journal-actions { margin-left: auto; display: flex; gap: 2px; }
+.pf-journal-icon-btn {
+  border: none; background: transparent; cursor: pointer; font-size: 13px;
+  padding: 2px 4px; border-radius: 6px; line-height: 1;
+}
+.pf-journal-icon-btn:hover { background: var(--hover); }
+.pf-journal-prices { margin-top: 6px; font-variant-numeric: tabular-nums; }
+.pf-journal-sub { font-size: 11px; color: var(--text-secondary); }
+.pf-journal-note { margin-top: 6px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }
+.pf-journal-edit { margin-top: 6px; }
+.pf-journal-foot { margin-top: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+@media (max-width: 760px) {
+  /* 모바일 — 폼 컨트롤은 풀폭으로 접고(.pf-rebal-editor-row 패턴), 카드의
+     액션 버튼은 헤더 줄바꿈을 허용한다. */
+  .pf-journal-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pf-journal-form-row #stockJournalQty { width: auto; }
+}
+
 /* Cashflow section */
 .pf-cashflow-section {
   margin-top: 24px;

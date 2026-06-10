@@ -5,6 +5,7 @@ import time
 
 import pytest
 
+from repositories import portfolio as portfolio_repo
 from routes import portfolio as portfolio_route
 from services import stock_quotes
 from services.portfolio import quote_service
@@ -119,8 +120,8 @@ def test_portfolio_quote_cache_accepts_newer_same_source_quote():
 
 
 def test_cached_quote_for_code_ignores_stale_polling_cache():
-    with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=None):
-        assert portfolio_route._cached_quote_for_code("005930") == {}
+    with patch.object(quote_service.stock_quotes, "get_stock_cached", return_value=None):
+        assert quote_service.cached_quote_for_code("005930") == {}
 
 
 def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
@@ -134,8 +135,8 @@ def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
         market="NX",
     )
 
-    with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock):
-        assert portfolio_route._cached_quote_for_code("000660") == {
+    with patch.object(quote_service.stock_quotes, "get_stock_cached", return_value=stock):
+        assert quote_service.cached_quote_for_code("000660") == {
             "code": "000660",
             "date": "2026-05-21",
             "price": 1818000,
@@ -224,7 +225,7 @@ async def test_stream_portfolio_quotes_streams_quote_and_benchmark():
         "get_current_user",
         new=AsyncMock(return_value={"google_sub": "u1"}),
     ), patch.object(
-        portfolio_route.cache,
+        portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[{"stock_code": "005930"}]),
     ), patch.object(

@@ -1,5 +1,4 @@
 """Tests for /api/analysis/{code}/wiki and .../ask routes."""
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +8,8 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from repositories import wiki as wiki_repo
+import repositories.db
 from routes import wiki as wiki_route
 
 
@@ -16,7 +17,7 @@ class WikiListRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -28,7 +29,7 @@ class WikiListRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def _seed(self, stock_code: str, n: int = 3):
         for i in range(n):
-            await cache.save_wiki_entry({
+            await wiki_repo.save_wiki_entry({
                 "stock_code": stock_code,
                 "source_type": "broker_report",
                 "source_ref": f"sha-{i}",
@@ -104,7 +105,7 @@ class WikiAskRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -138,7 +139,7 @@ class WikiAskRouteTests(unittest.IsolatedAsyncioTestCase):
         user = {"google_sub": "u1", "is_admin": False}
         # Pre-seed 20 Q&A rows from today to hit the default cap.
         for i in range(20):
-            await cache.save_qa_entry({
+            await wiki_repo.save_qa_entry({
                 "google_sub": "u1", "stock_code": "005930",
                 "question": f"q{i}", "answer_md": "a",
                 "source_ids": "[]", "model": "m",
@@ -235,7 +236,7 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

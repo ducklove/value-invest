@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# 주가/배당 시계열 이상치 점검 CLI — 실제 점검 로직은 services/data_quality.py
+# 로 승격됐고(정기 점검은 data-quality.timer 가 구동), 이 스크립트는 종목
+# 선택 + 사람이 읽는 출력만 담당하는 thin wrapper 로 남는다.
 import argparse
 import asyncio
 import json
@@ -10,7 +13,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import cache
-import stock_price
+from repositories import user_stocks as user_stocks_repo
+from services import data_quality
 
 
 async def _get_target_codes(args: argparse.Namespace) -> list[str]:
@@ -26,143 +30,22 @@ async def _get_target_codes(args: argparse.Namespace) -> list[str]:
         finally:
             await db.close()
 
-    cached_items = await cache.get_cached_analyses()
+    cached_items = await user_stocks_repo.get_cached_analyses()
     codes = [item["stock_code"] for item in cached_items]
     if args.limit:
         codes = codes[:args.limit]
     return codes
 
 
-def _detect_series_anomalies(
-    stock_code: str,
-    corp_name: str,
-    market_data: list[dict],
-    raw_dividends_by_year: dict[int, float],
-    adjusted_dividends_by_year: dict[int, float],
-    split_events: list[tuple],
-    max_dividend_yield: float,
-    max_dividend_jump: float,
-) -> list[dict]:
-    findings: list[dict] = []
-    split_year_pairs = set()
-    for split_ts, _ in split_events:
-        split_year_pairs.add((split_ts.year - 1, split_ts.year))
-        split_year_pairs.add((split_ts.year, split_ts.year + 1))
-
-    for row in market_data:
-        year = row["year"]
-        dividend_yield = row.get("dividend_yield")
-        if dividend_yield is not None and dividend_yield > max_dividend_yield:
-            findings.append({
-                "severity": "high",
-                "type": "dividend_yield_outlier",
-                "year": year,
-                "message": f"{year} 배당수익률 {dividend_yield}%가 임계치 {max_dividend_yield}%를 초과합니다.",
-            })
-
-    prev_row = None
-    for row in market_data:
-        dps = row.get("dividend_per_share")
-        if prev_row and dps is not None and prev_row.get("dividend_per_share") not in (None, 0):
-            prev_dps = prev_row["dividend_per_share"]
-            ratio = dps / prev_dps
-            year_pair = (prev_row["year"], row["year"])
-            if year_pair in split_year_pairs:
-                prev_row = row
-                continue
-            if ratio >= max_dividend_jump or ratio <= (1 / max_dividend_jump):
-                findings.append({
-                    "severity": "medium",
-                    "type": "dividend_jump",
-                    "year": row["year"],
-                    "message": (
-                        f"{prev_row['year']} -> {row['year']} 주당배당금이 "
-                        f"{prev_dps:.2f}원 -> {dps:.2f}원으로 크게 변했습니다."
-                    ),
-                })
-        prev_row = row
-
-    if split_events:
-        split_summaries = [f"{ts.date()} x{ratio:g}" for ts, ratio in split_events]
-        for year, raw_value in sorted(raw_dividends_by_year.items()):
-            adjusted_value = adjusted_dividends_by_year.get(year)
-            if raw_value is None or adjusted_value is None or raw_value == 0:
-                continue
-            diff_ratio = abs(adjusted_value - raw_value) / abs(raw_value)
-            if diff_ratio >= 0.5:
-                findings.append({
-                    "severity": "info",
-                    "type": "dividend_adjusted_for_split",
-                    "year": year,
-                    "message": (
-                        f"{year} raw 주당배당금 {raw_value:.2f}원을 "
-                        f"split/감자 이력({', '.join(split_summaries)}) 기준으로 {adjusted_value:.2f}원으로 보정했습니다."
-                    ),
-                })
-
-    for row in market_data:
-        if row.get("close_price") is None:
-            findings.append({
-                "severity": "low",
-                "type": "missing_close_price",
-                "year": row["year"],
-                "message": f"{row['year']} 종가 데이터가 비어 있습니다.",
-            })
-
-    return findings
-
-
 async def _inspect_stock(stock_code: str, args: argparse.Namespace) -> dict:
-    corp_name = await cache.get_corp_name(stock_code) or stock_code
-    corp_code = await cache.get_corp_code(stock_code)
-    end_year = args.end_year
-    if end_year is None:
-        end_year = stock_price.datetime.now().year
-    financial_data = await cache.get_financial_data(stock_code)
-    market_data = await stock_price.fetch_market_data(
+    # 서비스로 위임 — args namespace 를 명시 파라미터로 풀어 전달.
+    return await data_quality.inspect_stock(
         stock_code,
-        financial_data,
         start_year=args.start_year,
-        end_year=end_year,
-        corp_code=corp_code,
+        end_year=args.end_year,
+        max_dividend_yield=args.max_dividend_yield,
+        max_dividend_jump=args.max_dividend_jump,
     )
-
-    loop = asyncio.get_event_loop()
-    try:
-        _, _, raw_dividends, raw_splits = await loop.run_in_executor(
-            None,
-            stock_price._get_yfinance_aux,
-            stock_code,
-            args.start_year,
-            end_year,
-        )
-    except Exception:
-        raw_dividends = None
-        raw_splits = None
-
-    split_events = stock_price._normalized_split_events(raw_splits)
-    adjusted_dividends = stock_price._adjust_dividends_for_splits(raw_dividends, split_events)
-    raw_dividends_by_year = stock_price._group_sum_by_year_series(raw_dividends)
-    adjusted_dividends_by_year = stock_price._group_sum_by_year_series(adjusted_dividends)
-
-    findings = _detect_series_anomalies(
-        stock_code,
-        corp_name,
-        market_data,
-        raw_dividends_by_year,
-        adjusted_dividends_by_year,
-        split_events,
-        args.max_dividend_yield,
-        args.max_dividend_jump,
-    )
-
-    return {
-        "stock_code": stock_code,
-        "corp_name": corp_name,
-        "years": [row["year"] for row in market_data],
-        "findings": findings,
-        "split_events": [{"date": ts.strftime("%Y-%m-%d"), "ratio": ratio} for ts, ratio in split_events],
-    }
 
 
 def _print_human(results: list[dict]) -> None:
@@ -211,8 +94,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=50, help="검사 종목 수 제한. 기본값 50")
     parser.add_argument("--start-year", type=int, default=2000, help="검사 시작 연도")
     parser.add_argument("--end-year", type=int, default=None, help="검사 종료 연도")
-    parser.add_argument("--max-dividend-yield", type=float, default=50.0, help="배당수익률 이상치 임계치")
-    parser.add_argument("--max-dividend-jump", type=float, default=5.0, help="전년 대비 주당배당금 점프 배수 임계치")
+    parser.add_argument("--max-dividend-yield", type=float, default=data_quality.DEFAULT_MAX_DIVIDEND_YIELD,
+                        help="배당수익률 이상치 임계치")
+    parser.add_argument("--max-dividend-jump", type=float, default=data_quality.DEFAULT_MAX_DIVIDEND_JUMP,
+                        help="전년 대비 주당배당금 점프 배수 임계치")
     parser.add_argument("--json", action="store_true", help="JSON으로 출력")
     return parser.parse_args()
 

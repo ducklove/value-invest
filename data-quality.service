@@ -1,0 +1,22 @@
+[Unit]
+Description=Value Invest data quality checks
+After=network.target
+OnFailure=value-invest-notify@%n.service
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+# 정기 데이터 품질 점검 — NAV 스냅샷 신선도/장중 포인트/벤치마크 증분/
+# system_events error 율. 웹 프로세스 안(loopback 내부 엔드포인트)에서
+# 실행되어 DB 상태가 사용자 화면과 동일 기준으로 평가된다. 결과는
+# system_events(source='data_quality') 로 남고 임계 초과 시 level=error.
+ExecStart=/usr/bin/curl -fsSk --max-time 120 -X POST https://127.0.0.1:3691/api/internal/data-quality/check
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+MemoryMax=100M
+CPUQuota=30%
+TasksMax=20

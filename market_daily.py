@@ -13,7 +13,9 @@ from typing import Any
 import httpx
 
 import ai_config
-import cache
+import cache  # corp-code 헬퍼(get_corp_code)는 아직 cache 소유
+from repositories import portfolio as portfolio_repo
+from repositories import user_stocks as user_stocks_repo
 from cache_layer import MemoryTTLCache
 import dart_client
 import kis_proxy_client
@@ -293,7 +295,7 @@ async def _interest_universe(google_sub: str | None) -> list[dict[str, Any]]:
     seen: dict[str, dict[str, Any]] = {}
 
     try:
-        portfolio = await cache.get_portfolio(google_sub)
+        portfolio = await portfolio_repo.get_portfolio(google_sub)
     except Exception:
         logger.exception("daily market: portfolio load failed")
         portfolio = []
@@ -312,7 +314,7 @@ async def _interest_universe(google_sub: str | None) -> list[dict[str, Any]]:
         )["sources"].append("portfolio")
 
     try:
-        starred = await cache.get_cached_analyses(google_sub=google_sub, tab="starred")
+        starred = await user_stocks_repo.get_cached_analyses(google_sub=google_sub, tab="starred")
     except Exception:
         logger.exception("daily market: starred list load failed")
         starred = []

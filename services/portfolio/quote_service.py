@@ -98,6 +98,20 @@ async def fetch_quote(
     return q
 
 
+def cached_quote_for_code(code: str) -> dict:
+    return stock_quotes.stock_to_quote(stock_quotes.get_stock_cached(code, allow_stale=False))
+
+
+async def enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
+    """Attach cached quotes — WebSocket cache preferred, then polling cache."""
+    result = []
+    for item in items:
+        enriched = dict(item)
+        enriched["quote"] = cached_quote_for_code(item["stock_code"])
+        result.append(enriched)
+    return result
+
+
 class _PortfolioRuntimeQuoteProvider:
     async def fetch_quote(
         self,

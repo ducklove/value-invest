@@ -19,7 +19,8 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 
-import cache
+from repositories import notifications as notifications_repo
+from repositories import portfolio as portfolio_repo
 from deps import get_current_user
 from services.notifications import channels, engine, kakao, telegram
 
@@ -41,7 +42,7 @@ def _require_user(user):
 @router.get("/channels")
 async def get_channels(request: Request):
     user = _require_user(await get_current_user(request))
-    items = await cache.list_notification_channels(user["google_sub"])
+    items = await notifications_repo.list_notification_channels(user["google_sub"])
     telegram_status = {"connected": False, "enabled": False, "username": None, "chat_id": None}
     kakao_status = {"connected": False, "enabled": False, "nickname": None, "redirect_uri": kakao.redirect_uri(str(request.base_url))}
     for ch in items:
@@ -59,7 +60,39 @@ async def get_channels(request: Request):
                 "enabled": bool(ch.get("enabled")),
                 "nickname": (ch.get("config") or {}).get("nickname"),
             })
-    return {"telegram": telegram_status, "kakao": kakao_status}
+    # 데일리 브리핑 옵트인도 같은 응답에 실어 알림 설정 모달이 한 번에 그린다.
+    from services import daily_briefing
+    briefing_enabled = await daily_briefing.is_enabled(user["google_sub"])
+    return {
+        "telegram": telegram_status,
+        "kakao": kakao_status,
+        "daily_briefing": {"enabled": briefing_enabled},
+    }
+
+
+# --- AI 데일리 브리핑 옵트인 (기본 OFF) --------------------------------------
+
+@router.get("/briefing")
+async def get_briefing_setting(request: Request):
+    user = _require_user(await get_current_user(request))
+    from services import daily_briefing
+    return {"enabled": await daily_briefing.is_enabled(user["google_sub"])}
+
+
+@router.put("/briefing")
+async def put_briefing_setting(request: Request, payload: dict = Body(...)):
+    """아침 데일리 브리핑 켜기/끄기. 켤 때는 받을 채널이 있어야 의미가 있으므로
+    활성 채널이 없으면 409 (캘린더 구독과 동일한 규칙)."""
+    user = _require_user(await get_current_user(request))
+    from services import daily_briefing
+    enabled = bool(payload.get("enabled"))
+    if enabled and not await channels.has_active_channel(user["google_sub"]):
+        raise HTTPException(
+            status_code=409,
+            detail="브리핑을 받으려면 먼저 텔레그램 또는 카카오톡을 연결하세요.",
+        )
+    await daily_briefing.set_enabled(user["google_sub"], enabled)
+    return {"ok": True, "enabled": enabled}
 
 
 @router.post("/telegram/register")
@@ -85,7 +118,7 @@ async def telegram_register(request: Request, payload: dict = Body(...)):
     if not chat_id:
         # Token is valid but we don't know where to send yet — keep it and
         # tell the user to message the bot, then retry.
-        await cache.upsert_notification_channel(
+        await notifications_repo.upsert_notification_channel(
             user["google_sub"], "telegram",
             config={"bot_token": token, "username": username},
             enabled=True, verified=False,
@@ -97,7 +130,7 @@ async def telegram_register(request: Request, payload: dict = Body(...)):
         }
 
     config = {"bot_token": token, "chat_id": chat_id, "username": username}
-    await cache.upsert_notification_channel(
+    await notifications_repo.upsert_notification_channel(
         user["google_sub"], "telegram", config=config, enabled=True, verified=True
     )
     await telegram.send_message(token, chat_id, "✅ Value Compass 알림이 연결되었습니다.")
@@ -108,7 +141,7 @@ async def telegram_register(request: Request, payload: dict = Body(...)):
 async def toggle_telegram(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
     enabled = bool(payload.get("enabled", True))
-    ok = await cache.set_notification_channel_enabled(user["google_sub"], "telegram", enabled)
+    ok = await notifications_repo.set_notification_channel_enabled(user["google_sub"], "telegram", enabled)
     if not ok:
         raise HTTPException(status_code=404, detail="연결된 텔레그램이 없습니다.")
     return {"ok": True, "enabled": enabled}
@@ -117,7 +150,7 @@ async def toggle_telegram(request: Request, payload: dict = Body(...)):
 @router.post("/channels/telegram/test")
 async def test_telegram(request: Request):
     user = _require_user(await get_current_user(request))
-    ch = await cache.get_notification_channel(user["google_sub"], "telegram")
+    ch = await notifications_repo.get_notification_channel(user["google_sub"], "telegram")
     if not ch or not ch.get("verified"):
         raise HTTPException(status_code=400, detail="먼저 텔레그램을 연결해주세요.")
     cfg = ch.get("config") or {}
@@ -134,7 +167,7 @@ async def test_telegram(request: Request):
 @router.delete("/telegram")
 async def unlink_telegram(request: Request):
     user = _require_user(await get_current_user(request))
-    await cache.delete_notification_channel(user["google_sub"], "telegram")
+    await notifications_repo.delete_notification_channel(user["google_sub"], "telegram")
     return {"ok": True}
 
 
@@ -175,12 +208,12 @@ async def kakao_connect(request: Request, payload: dict = Body(default={})):
     if not redirect:
         raise HTTPException(status_code=503, detail="Redirect URI를 확인할 수 없습니다.")
     # Persist the rest_key (unverified) so the callback can use it.
-    await cache.upsert_notification_channel(
+    await notifications_repo.upsert_notification_channel(
         user["google_sub"], "kakao", config={"rest_key": rest_key}, enabled=True, verified=False
     )
     state = secrets.token_urlsafe(12)
     expires_at = (datetime.now() + timedelta(minutes=LINK_TTL_MINUTES)).isoformat()
-    await cache.create_notification_link(state, user["google_sub"], "kakao", expires_at)
+    await notifications_repo.create_notification_link(state, user["google_sub"], "kakao", expires_at)
     return {
         "authorize_url": kakao.authorize_url(rest_key, state, redirect),
         "redirect_uri": redirect,
@@ -199,11 +232,11 @@ async def kakao_callback(request: Request):
             "연결이 취소되었거나 오류가 발생했습니다. 카카오 앱 설정(카카오 로그인 활성화, "
             "카카오톡 메시지 동의항목, Redirect URI 등록)을 확인한 뒤 다시 시도하세요.",
         )
-    link = await cache.pop_notification_link(params["state"])
+    link = await notifications_repo.pop_notification_link(params["state"])
     if not link or link.get("channel") != "kakao":
         return _kakao_result_page("연결 실패", "연결 코드가 만료되었습니다. 다시 시도해주세요.")
     google_sub = link["google_sub"]
-    pending = await cache.get_notification_channel(google_sub, "kakao")
+    pending = await notifications_repo.get_notification_channel(google_sub, "kakao")
     rest_key = ((pending or {}).get("config") or {}).get("rest_key") or kakao.env_key()
     redirect = kakao.redirect_uri(str(request.base_url))
     if not rest_key:
@@ -217,7 +250,7 @@ async def kakao_callback(request: Request):
     nickname = await kakao.fetch_nickname(tokens["access_token"])
     if nickname:
         config["nickname"] = nickname
-    await cache.upsert_notification_channel(
+    await notifications_repo.upsert_notification_channel(
         google_sub, "kakao", config=config, enabled=True, verified=True
     )
     logger.info("kakao linked user=%s", google_sub[:8])
@@ -228,7 +261,7 @@ async def kakao_callback(request: Request):
 async def toggle_kakao(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
     enabled = bool(payload.get("enabled", True))
-    ok = await cache.set_notification_channel_enabled(user["google_sub"], "kakao", enabled)
+    ok = await notifications_repo.set_notification_channel_enabled(user["google_sub"], "kakao", enabled)
     if not ok:
         raise HTTPException(status_code=404, detail="연결된 카카오 계정이 없습니다.")
     return {"ok": True, "enabled": enabled}
@@ -237,7 +270,7 @@ async def toggle_kakao(request: Request, payload: dict = Body(...)):
 @router.post("/channels/kakao/test")
 async def test_kakao(request: Request):
     user = _require_user(await get_current_user(request))
-    ch = await cache.get_notification_channel(user["google_sub"], "kakao")
+    ch = await notifications_repo.get_notification_channel(user["google_sub"], "kakao")
     if not ch or not ch.get("verified"):
         raise HTTPException(status_code=400, detail="먼저 카카오 계정을 연결해주세요.")
     ok = await kakao.send_to_user(
@@ -251,7 +284,7 @@ async def test_kakao(request: Request):
 @router.delete("/kakao")
 async def unlink_kakao(request: Request):
     user = _require_user(await get_current_user(request))
-    await cache.delete_notification_channel(user["google_sub"], "kakao")
+    await notifications_repo.delete_notification_channel(user["google_sub"], "kakao")
     return {"ok": True}
 
 
@@ -274,9 +307,11 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
     else:
         scope = "portfolio"
 
-    # 사용자 임계값이 없는 유형: 목표가/상하한가 도달, 개별·전체 신규 공시/리포트.
+    # 사용자 임계값이 없는 유형: 목표가/상하한가 도달, 개별·전체 신규 공시/리포트,
+    # 리밸런싱 드리프트(임계값은 목표별 tolerance 가 대신함).
     if alert_type in (
-        engine.TARGET_TYPES | engine.LIMIT_TYPES | engine.STOCK_FEED_TYPES | engine.BLANKET_FEED_TYPES
+        engine.TARGET_TYPES | engine.LIMIT_TYPES | engine.STOCK_FEED_TYPES
+        | engine.BLANKET_FEED_TYPES | engine.REBALANCE_TYPES
     ):
         threshold = 0.0
     else:
@@ -292,7 +327,7 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
             raise HTTPException(status_code=400, detail="종목을 선택해주세요.")
         # 분석 화면(source="analysis")은 임의 종목 허용. 포트폴리오 경유는 보유 종목만.
         if str(payload.get("source") or "") != "analysis":
-            held = {it["stock_code"] for it in await cache.get_portfolio(google_sub)}
+            held = {it["stock_code"] for it in await portfolio_repo.get_portfolio(google_sub)}
             if stock_code not in held:
                 raise HTTPException(status_code=400, detail="보유 종목에 대해서만 종목 알림을 설정할 수 있습니다.")
         if alert_type in engine.PRICE_TYPES and threshold <= 0:
@@ -321,7 +356,7 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
 @router.get("/alerts")
 async def get_alerts(request: Request, stock_code: str | None = None):
     user = _require_user(await get_current_user(request))
-    alerts = await cache.list_portfolio_alerts(user["google_sub"])
+    alerts = await notifications_repo.list_portfolio_alerts(user["google_sub"])
     if stock_code:
         code = stock_code.strip()
         alerts = [a for a in alerts if a.get("stock_code") == code]
@@ -337,63 +372,64 @@ async def create_alert(request: Request, payload: dict = Body(...)):
     # 일간등락·신규공시·신규리포트는 (종목, 유형) 단위 singleton — 재생성 시 기존
     # 규칙을 갱신(중복 방지). 가격(price_*)은 한 종목에 여러 개 둘 수 있어 제외.
     singleton_per_stock = engine.STOCK_DAILY_ABS_TYPES | engine.STOCK_FEED_TYPES
-    if rule["alert_type"] in engine.BLANKET_TYPES:
-        for existing in await cache.list_portfolio_alerts(sub):
+    # 리밸런싱 드리프트도 사용자당 singleton — 목표 목록 전체를 한 규칙이 본다.
+    if rule["alert_type"] in (engine.BLANKET_TYPES | engine.REBALANCE_TYPES):
+        for existing in await notifications_repo.list_portfolio_alerts(sub):
             if existing["alert_type"] == rule["alert_type"]:
-                await cache.update_portfolio_alert(
+                await notifications_repo.update_portfolio_alert(
                     sub, existing["id"],
                     threshold=rule["threshold"], note=rule["note"], enabled=rule["enabled"],
                     important=rule["important"],
                 )
-                return await cache.get_portfolio_alert(sub, existing["id"])
+                return await notifications_repo.get_portfolio_alert(sub, existing["id"])
     elif rule["alert_type"] in singleton_per_stock:
-        for existing in await cache.list_portfolio_alerts(sub):
+        for existing in await notifications_repo.list_portfolio_alerts(sub):
             if existing["alert_type"] == rule["alert_type"] and existing["stock_code"] == rule["stock_code"]:
-                await cache.update_portfolio_alert(
+                await notifications_repo.update_portfolio_alert(
                     sub, existing["id"],
                     threshold=rule["threshold"], note=rule["note"], enabled=rule["enabled"],
                     important=rule["important"],
                 )
-                return await cache.get_portfolio_alert(sub, existing["id"])
-    alert_id = await cache.create_portfolio_alert(sub, **rule)
-    return await cache.get_portfolio_alert(sub, alert_id)
+                return await notifications_repo.get_portfolio_alert(sub, existing["id"])
+    alert_id = await notifications_repo.create_portfolio_alert(sub, **rule)
+    return await notifications_repo.get_portfolio_alert(sub, alert_id)
 
 
 @router.put("/alerts/{alert_id}")
 async def update_alert(alert_id: int, request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
-    existing = await cache.get_portfolio_alert(user["google_sub"], alert_id)
+    existing = await notifications_repo.get_portfolio_alert(user["google_sub"], alert_id)
     if not existing:
         raise HTTPException(status_code=404, detail="알림 규칙을 찾을 수 없습니다.")
 
     # Pure on/off toggle: skip stock-membership re-validation so disabling a
     # rule whose stock was later removed still works.
     if set(payload.keys()) <= {"enabled"}:
-        await cache.update_portfolio_alert(
+        await notifications_repo.update_portfolio_alert(
             user["google_sub"], alert_id, enabled=bool(payload.get("enabled", True))
         )
-        return await cache.get_portfolio_alert(user["google_sub"], alert_id)
+        return await notifications_repo.get_portfolio_alert(user["google_sub"], alert_id)
 
     # 중요 표시만 토글: 검증·엣지 리셋 없이 가볍게 갱신.
     if set(payload.keys()) <= {"important"}:
-        await cache.set_portfolio_alert_important(
+        await notifications_repo.set_portfolio_alert_important(
             user["google_sub"], alert_id, bool(payload.get("important"))
         )
-        return await cache.get_portfolio_alert(user["google_sub"], alert_id)
+        return await notifications_repo.get_portfolio_alert(user["google_sub"], alert_id)
 
     merged = dict(existing)
     for key in ("alert_type", "threshold", "stock_code", "note", "enabled", "important"):
         if key in payload:
             merged[key] = payload[key]
     validated = await _validate_alert_payload(user["google_sub"], merged)
-    await cache.update_portfolio_alert(user["google_sub"], alert_id, **validated)
-    return await cache.get_portfolio_alert(user["google_sub"], alert_id)
+    await notifications_repo.update_portfolio_alert(user["google_sub"], alert_id, **validated)
+    return await notifications_repo.get_portfolio_alert(user["google_sub"], alert_id)
 
 
 @router.delete("/alerts/{alert_id}")
 async def delete_alert(alert_id: int, request: Request):
     user = _require_user(await get_current_user(request))
-    ok = await cache.delete_portfolio_alert(user["google_sub"], alert_id)
+    ok = await notifications_repo.delete_portfolio_alert(user["google_sub"], alert_id)
     if not ok:
         raise HTTPException(status_code=404, detail="알림 규칙을 찾을 수 없습니다.")
     return {"ok": True}
@@ -406,7 +442,7 @@ async def get_calendar_subscriptions(request: Request):
     """이 사용자가 결과 알림을 신청한 경제캘린더 이벤트들. 프론트는 event_ids로
     체크박스 상태를 복원한다(아직 발송 전인 것만)."""
     user = _require_user(await get_current_user(request))
-    subs = await cache.list_calendar_subscriptions(user["google_sub"], pending_only=True)
+    subs = await notifications_repo.list_calendar_subscriptions(user["google_sub"], pending_only=True)
     return {"event_ids": [s["event_id"] for s in subs]}
 
 
@@ -427,7 +463,7 @@ async def subscribe_calendar(request: Request, payload: dict = Body(...)):
     def _s(key: str, limit: int) -> str:
         return str(payload.get(key) or "").strip()[:limit]
 
-    await cache.upsert_calendar_subscription(
+    await notifications_repo.upsert_calendar_subscription(
         user["google_sub"], event_id,
         event_date=event_date,
         event_datetime=_s("event_datetime", 30),
@@ -444,7 +480,7 @@ async def subscribe_calendar(request: Request, payload: dict = Body(...)):
 @router.delete("/calendar/{event_id}")
 async def unsubscribe_calendar(event_id: str, request: Request):
     user = _require_user(await get_current_user(request))
-    await cache.delete_calendar_subscription(user["google_sub"], event_id)
+    await notifications_repo.delete_calendar_subscription(user["google_sub"], event_id)
     return {"ok": True}
 
 
@@ -471,7 +507,7 @@ async def calendar_alert_status(request: Request):
     except (TypeError, ValueError):
         interval = 0.0
     has_channel = await channels.has_active_channel(sub)
-    pending = await cache.list_calendar_subscriptions(sub, pending_only=True)
+    pending = await notifications_repo.list_calendar_subscriptions(sub, pending_only=True)
 
     today = date.today().isoformat()
     candidates = [s for s in pending if (s.get("event_date") or "") <= today]

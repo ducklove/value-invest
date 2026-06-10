@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def get_user_setting(google_sub: str, key: str) -> str | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT value FROM user_settings WHERE google_sub = ? AND key = ?",
         (google_sub, key),
@@ -20,8 +20,22 @@ async def get_user_setting(google_sub: str, key: str) -> str | None:
     return row["value"] if row else None
 
 
+async def get_users_with_setting(key: str, value: str) -> list[str]:
+    """All google_subs whose setting ``key`` equals ``value`` (exact match).
+
+    Batch jobs (e.g. the daily-briefing sender) use this to find opted-in
+    users without scanning every user row.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT google_sub FROM user_settings WHERE key = ? AND value = ?",
+        (key, value),
+    )
+    return [row["google_sub"] for row in await cursor.fetchall()]
+
+
 async def set_user_setting(google_sub: str, key: str, value: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         """INSERT INTO user_settings (google_sub, key, value, updated_at)
            VALUES (?, ?, ?, ?)

@@ -12,6 +12,10 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
+from repositories import foreign_dividends as foreign_dividends_repo
+from repositories import portfolio as portfolio_repo
+from repositories import system_events as system_events_repo
+from repositories import users as users_repo
 import ai_config
 import linked_project_admin
 import observability
@@ -378,7 +382,7 @@ async def trigger_job(job_name: str, request: Request):
 @router.get("/users")
 async def list_users(request: Request):
     await _require_admin(request)
-    return await cache.get_all_users()
+    return await users_repo.get_all_users()
 
 
 # ---------------------------------------------------------------------------
@@ -728,13 +732,13 @@ async def list_events(
     Note: query parameters are typed as plain Python defaults (not
     fastapi.Query) so unit tests can call this function directly. FastAPI
     still parses strings via annotations; the hard bounds (limit ≤1000)
-    are enforced inside cache.get_system_events.
+    are enforced inside system_events_repo.get_system_events.
     """
     await _require_admin(request)
     since = None
     if hours is not None and hours > 0:
         since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
-    rows = await cache.get_system_events(
+    rows = await system_events_repo.get_system_events(
         source=source,
         level=level,
         stock_code=stock_code,
@@ -751,7 +755,7 @@ async def event_summary(request: Request, hours: float = 24):
     highlighted."""
     await _require_admin(request)
     since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
-    summary = await cache.summarize_system_events(since)
+    summary = await system_events_repo.summarize_system_events(since)
     # Attach "latest tick" per known subsystem so the card can show "15 min
     # ago" vs a cold "no tick in 3 days" state at a glance.
     known_sources = [
@@ -760,9 +764,14 @@ async def event_summary(request: Request, hours: float = 24):
     ]
     latest: dict[str, dict | None] = {}
     for src in known_sources:
-        row = await cache.get_latest_event(src)
+        row = await system_events_repo.get_latest_event(src)
         latest[src] = _parse_event_row(row) if row else None
-    return {"hours": hours, "by_source": summary, "latest": latest}
+    # 데이터 품질 점검(data-quality.timer)의 최신 요약 이벤트 — details 에
+    # 전체 결과(counts + results)가 통째로 들어 있어, 패널은 이 한 행만으로
+    # '최근 점검 + 실패 항목'을 그릴 수 있다.
+    dq_row = await system_events_repo.get_latest_event("data_quality", "check_summary")
+    data_quality = _parse_event_row(dq_row) if dq_row else None
+    return {"hours": hours, "by_source": summary, "latest": latest, "data_quality": data_quality}
 
 
 @router.get("/http-metrics")
@@ -773,7 +782,7 @@ async def http_metrics(request: Request, hours: float = 24):
     these as slow/error counts rather than average response time."""
     await _require_admin(request)
     since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
-    endpoints = await cache.summarize_http_metrics(since)
+    endpoints = await system_events_repo.summarize_http_metrics(since)
     return {"hours": hours, "endpoints": endpoints}
 
 
@@ -789,7 +798,7 @@ async def refresh_foreign_dividends_endpoint(request: Request):
     user = await _require_admin_mutation(request)
     import foreign_dividends
     result = await foreign_dividends.refresh_foreign_dividends()
-    result["total_cached"] = await cache.get_foreign_dividends_count()
+    result["total_cached"] = await foreign_dividends_repo.get_foreign_dividends_count()
     await observability.record_event(
         "admin",
         "foreign_dividends_refreshed",
@@ -808,7 +817,7 @@ async def refresh_foreign_dividends_endpoint(request: Request):
 async def list_foreign_dividends_endpoint(request: Request):
     """관리자 UI 의 목록 뷰용. 수동 override row 가 먼저 오도록 정렬."""
     await _require_admin(request)
-    return await cache.list_foreign_dividends()
+    return await foreign_dividends_repo.list_foreign_dividends()
 
 
 @router.get("/preferred-dividends")
@@ -820,7 +829,7 @@ async def list_preferred_dividends_endpoint(request: Request):
     config is updated. Showing both lets the admin spot drift immediately.
     """
     await _require_admin(request)
-    return await cache.list_preferred_dividends()
+    return await portfolio_repo.list_preferred_dividends()
 
 
 @router.post("/foreign-dividend")
@@ -843,7 +852,7 @@ async def upsert_foreign_dividend_endpoint(request: Request, payload: dict = Bod
         raise HTTPException(status_code=400, detail="dps_krw 는 0 이상이어야 합니다.")
     note = payload.get("note")
     note = str(note).strip() if note else None
-    await cache.upsert_foreign_dividend_manual(code, dps, note)
+    await foreign_dividends_repo.upsert_foreign_dividend_manual(code, dps, note)
     await observability.record_event(
         "admin",
         "foreign_dividend_upserted",
@@ -864,7 +873,7 @@ async def delete_foreign_dividend_endpoint(request: Request, stock_code: str):
     """수동/자동 entry 제거. 이후 auto refresh 에서 다시 채워질 수 있음."""
     user = await _require_admin_mutation(request)
     code = stock_code.strip().upper()
-    deleted = await cache.delete_foreign_dividend(code)
+    deleted = await foreign_dividends_repo.delete_foreign_dividend(code)
     if not deleted:
         raise HTTPException(status_code=404, detail="해당 종목의 배당 entry 가 없습니다.")
     await observability.record_event(
@@ -887,7 +896,7 @@ async def refresh_preferred_dividends_endpoint(request: Request):
     import preferred_dividends
     result = await preferred_dividends.refresh_preferred_dividends()
     # Attach current cached row count so the dashboard can show before/after.
-    result["total_cached"] = await cache.get_preferred_dividends_count()
+    result["total_cached"] = await portfolio_repo.get_preferred_dividends_count()
     await observability.record_event(
         "admin",
         "preferred_dividends_refreshed",

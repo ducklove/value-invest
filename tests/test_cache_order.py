@@ -4,13 +4,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import cache
+from repositories import user_stocks as user_stocks_repo
+import repositories.db
 
 
 class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -48,20 +50,20 @@ class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
     # --- Recent tab ---
 
     async def test_save_user_stock_order_reorders_recent_items(self):
-        await cache.save_user_stock_order("u1", ["222222", "111111", "333333"])
-        items = await cache.get_cached_analyses(google_sub="u1")
+        await user_stocks_repo.save_user_stock_order("u1", ["222222", "111111", "333333"])
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertEqual([item["stock_code"] for item in items], ["222222", "111111", "333333"])
 
     async def test_new_item_appears_at_top_after_reorder(self):
-        await cache.save_user_stock_order("u1", ["222222", "111111", "333333"])
-        await cache.touch_user_recent_analysis("u1", "444444")
-        items = await cache.get_cached_analyses(google_sub="u1")
+        await user_stocks_repo.save_user_stock_order("u1", ["222222", "111111", "333333"])
+        await user_stocks_repo.touch_user_recent_analysis("u1", "444444")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertEqual(items[0]["stock_code"], "444444")
 
     async def test_existing_item_moves_to_top_on_re_search(self):
-        await cache.save_user_stock_order("u1", ["111111", "222222", "333333"])
-        await cache.touch_user_recent_analysis("u1", "333333")
-        items = await cache.get_cached_analyses(google_sub="u1")
+        await user_stocks_repo.save_user_stock_order("u1", ["111111", "222222", "333333"])
+        await user_stocks_repo.touch_user_recent_analysis("u1", "333333")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertEqual(items[0]["stock_code"], "333333")
 
     async def test_overflow_trims_oldest(self):
@@ -74,48 +76,48 @@ class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
         await db.commit()
 
         for c in codes[:20]:
-            await cache.touch_user_recent_analysis("u1", c)
-        items = await cache.get_cached_analyses(google_sub="u1")
+            await user_stocks_repo.touch_user_recent_analysis("u1", c)
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertEqual(len(items), 20)
 
-        await cache.touch_user_recent_analysis("u1", codes[20])
-        items = await cache.get_cached_analyses(google_sub="u1")
+        await user_stocks_repo.touch_user_recent_analysis("u1", codes[20])
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertLessEqual(len(items), 20)
         self.assertEqual(items[0]["stock_code"], codes[20])
 
     async def test_deleted_item_reappears_on_re_search(self):
-        await cache.save_user_stock_order("u1", ["111111", "222222", "333333"])
-        await cache.delete_user_recent_analysis("u1", "222222")
-        items = await cache.get_cached_analyses(google_sub="u1")
+        await user_stocks_repo.save_user_stock_order("u1", ["111111", "222222", "333333"])
+        await user_stocks_repo.delete_user_recent_analysis("u1", "222222")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertNotIn("222222", [i["stock_code"] for i in items])
 
-        await cache.touch_user_recent_analysis("u1", "222222")
-        items = await cache.get_cached_analyses(google_sub="u1")
+        await user_stocks_repo.touch_user_recent_analysis("u1", "222222")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertEqual(items[0]["stock_code"], "222222")
 
     async def test_delete_all_then_re_add(self):
         for code in ["111111", "222222", "333333"]:
-            await cache.delete_user_recent_analysis("u1", code)
-        items = await cache.get_cached_analyses(google_sub="u1")
+            await user_stocks_repo.delete_user_recent_analysis("u1", code)
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertEqual(len(items), 0)
 
-        await cache.touch_user_recent_analysis("u1", "111111")
-        items = await cache.get_cached_analyses(google_sub="u1")
+        await user_stocks_repo.touch_user_recent_analysis("u1", "111111")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1")
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["stock_code"], "111111")
 
     # --- Starred tab ---
 
     async def _star(self, stock_code):
-        await cache.save_user_stock_preference("u1", stock_code, is_starred=True)
+        await user_stocks_repo.save_user_stock_preference("u1", stock_code, is_starred=True)
 
     async def _unstar(self, stock_code):
-        await cache.unstar_stock("u1", stock_code)
+        await user_stocks_repo.unstar_stock("u1", stock_code)
 
     async def test_starred_tab_shows_only_starred(self):
         await self._star("111111")
         await self._star("333333")
-        items = await cache.get_cached_analyses(google_sub="u1", tab="starred")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="starred")
         codes = [i["stock_code"] for i in items]
         self.assertIn("111111", codes)
         self.assertIn("333333", codes)
@@ -124,22 +126,22 @@ class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
     async def test_starred_item_appears_at_top(self):
         await self._star("333333")
         await self._star("111111")
-        items = await cache.get_cached_analyses(google_sub="u1", tab="starred")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="starred")
         self.assertEqual(items[0]["stock_code"], "111111")
 
     async def test_starred_order_reorder(self):
         await self._star("111111")
         await self._star("222222")
         await self._star("333333")
-        await cache.save_starred_order("u1", ["333333", "111111", "222222"])
-        items = await cache.get_cached_analyses(google_sub="u1", tab="starred")
+        await user_stocks_repo.save_starred_order("u1", ["333333", "111111", "222222"])
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="starred")
         self.assertEqual([i["stock_code"] for i in items], ["333333", "111111", "222222"])
 
     async def test_unstar_removes_from_starred_tab(self):
         await self._star("111111")
         await self._star("222222")
         await self._unstar("111111")
-        items = await cache.get_cached_analyses(google_sub="u1", tab="starred")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="starred")
         codes = [i["stock_code"] for i in items]
         self.assertNotIn("111111", codes)
         self.assertIn("222222", codes)
@@ -149,24 +151,24 @@ class CacheOrderTests(unittest.IsolatedAsyncioTestCase):
         await self._star("222222")
         await self._unstar("111111")
         await self._star("111111")
-        items = await cache.get_cached_analyses(google_sub="u1", tab="starred")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="starred")
         self.assertEqual(items[0]["stock_code"], "111111")
 
     async def test_unstar_does_not_affect_recent_tab(self):
         await self._star("222222")
         await self._unstar("222222")
-        items = await cache.get_cached_analyses(google_sub="u1", tab="recent")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="recent")
         codes = [i["stock_code"] for i in items]
         self.assertIn("222222", codes)
 
     async def test_delete_from_recent_does_not_affect_starred(self):
         await self._star("222222")
-        await cache.delete_user_recent_analysis("u1", "222222")
-        recent = await cache.get_cached_analyses(google_sub="u1", tab="recent")
-        starred = await cache.get_cached_analyses(google_sub="u1", tab="starred")
+        await user_stocks_repo.delete_user_recent_analysis("u1", "222222")
+        recent = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="recent")
+        starred = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="starred")
         self.assertNotIn("222222", [i["stock_code"] for i in recent])
         self.assertIn("222222", [i["stock_code"] for i in starred])
 
     async def test_starred_tab_empty_by_default(self):
-        items = await cache.get_cached_analyses(google_sub="u1", tab="starred")
+        items = await user_stocks_repo.get_cached_analyses(google_sub="u1", tab="starred")
         self.assertEqual(len(items), 0)

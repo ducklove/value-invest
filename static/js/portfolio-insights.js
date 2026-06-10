@@ -493,7 +493,8 @@ function _applyHoldingIntegrationConfig() {
         renderPortfolio();
       }
     })
-    .catch(() => {});
+    // 외부 보유지분 데이터는 선택적 보강 — 실패해도 조용히 로그만 남긴다.
+    .catch(e => reportApiError(e, '보유지분 데이터', { silent: true }));
 })();
 
 function pfGoAnalyze(stockCode, e) {

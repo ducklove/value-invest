@@ -7,17 +7,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def load_ticker_map() -> dict[str, str]:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute("SELECT stock_code, resolved_ticker FROM ticker_map")
     return {r["stock_code"]: r["resolved_ticker"] for r in await cursor.fetchall()}
 
 
 async def save_ticker(stock_code: str, resolved_ticker: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         """INSERT INTO ticker_map (stock_code, resolved_ticker, updated_at)
            VALUES (?, ?, ?)

@@ -9,7 +9,7 @@ We write the trailingAnnualDividendRate (last 12 months actual payouts in
 native currency), convert to KRW using the same FX path the quote
 fetchers use, and upsert into `foreign_dividends` with source='yfinance'.
 Rows that an admin has manually overridden (source='manual') are
-preserved — see cache.upsert_foreign_dividends_auto for the guard clause.
+preserved — see repositories.foreign_dividends.upsert_foreign_dividends_auto for the guard clause.
 
 Like the preferred-dividends module, this one has NO background loop —
 admin triggers it on demand. yfinance responses for dividend fields are
@@ -22,7 +22,8 @@ import asyncio
 import logging
 from datetime import datetime
 
-import cache
+from repositories import db as db_repo
+from repositories import foreign_dividends as foreign_dividends_repo
 from services.portfolio import runtime_quotes as portfolio_quotes
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
@@ -45,7 +46,7 @@ async def select_foreign_target_codes() -> list[str]:
     across all users' portfolios that's NOT a Korean common stock,
     preferred stock, cash asset, or crypto/gold. Callers typically
     pass this straight into fetch_many()."""
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     cursor = await db.execute(
         "SELECT DISTINCT stock_code FROM user_portfolio WHERE stock_code IS NOT NULL"
     )
@@ -225,7 +226,7 @@ async def refresh_foreign_dividends(
         })
 
     try:
-        written = await cache.upsert_foreign_dividends_auto(rows)
+        written = await foreign_dividends_repo.upsert_foreign_dividends_auto(rows)
     except Exception as exc:
         logger.exception("foreign_dividends: upsert failed")
         return {"ok": False, "error": f"upsert: {exc}", "rows_written": 0,

@@ -1,5 +1,4 @@
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +6,9 @@ from unittest.mock import patch
 
 import ai_config
 import cache
+from repositories import app_settings as app_settings_repo
+from repositories import portfolio as portfolio_repo
+import repositories.db
 import linked_project_admin
 
 
@@ -106,7 +108,7 @@ class LinkedProjectAdminTests(unittest.TestCase):
 class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -141,14 +143,14 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_migrates_legacy_wiki_qa_default_once(self):
         with patch.dict("os.environ", {}, clear=True):
-            await cache.set_app_setting("AI_MODEL::wiki_qa", "google/gemma-4-31b-it", updated_by="admin@example.com")
+            await app_settings_repo.set_app_setting("AI_MODEL::wiki_qa", "google/gemma-4-31b-it", updated_by="admin@example.com")
 
             result = await ai_config.migrate_legacy_model_defaults()
 
             self.assertTrue(result["migrated"])
             self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "moonshotai/kimi-k2.6")
 
-            await cache.set_app_setting("AI_MODEL::wiki_qa", "google/gemma-4-31b-it", updated_by="admin@example.com")
+            await app_settings_repo.set_app_setting("AI_MODEL::wiki_qa", "google/gemma-4-31b-it", updated_by="admin@example.com")
             result = await ai_config.migrate_legacy_model_defaults()
 
             self.assertFalse(result["migrated"])
@@ -156,9 +158,9 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_migrates_legacy_portfolio_defaults_once(self):
         with patch.dict("os.environ", {}, clear=True):
-            await cache.set_app_setting("AI_MODEL::portfolio_fast", "google/gemma-4-31b-it", updated_by="admin@example.com")
-            await cache.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
-            await cache.set_app_setting("AI_MODEL::portfolio_premium", "qwen/qwen3.6-plus", updated_by="admin@example.com")
+            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_fast", "google/gemma-4-31b-it", updated_by="admin@example.com")
+            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
+            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_premium", "qwen/qwen3.6-plus", updated_by="admin@example.com")
 
             result = await ai_config.migrate_legacy_model_defaults()
 
@@ -167,7 +169,7 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "~google/gemini-flash-latest")
             self.assertEqual(await ai_config.get_model_for_feature("portfolio_premium"), "~google/gemini-flash-latest")
 
-            await cache.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
+            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
             result = await ai_config.migrate_legacy_model_defaults()
 
             self.assertFalse(result["migrated"])
@@ -175,12 +177,12 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_migrates_qwen_flash_portfolio_override_even_after_first_marker(self):
         with patch.dict("os.environ", {}, clear=True):
-            await cache.set_app_setting(
+            await app_settings_repo.set_app_setting(
                 "AI_MIGRATION::portfolio_gemini_flash_latest",
                 "skipped",
                 updated_by="system:migration",
             )
-            await cache.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-flash", updated_by="admin@example.com")
+            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-flash", updated_by="admin@example.com")
 
             result = await ai_config.migrate_legacy_model_defaults()
 
@@ -218,7 +220,7 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fallback["reasoning"], {"effort": "minimal", "exclude": True})
 
     async def test_preferred_dividend_rows_are_listed_for_admin_coverage(self):
-        await cache.upsert_preferred_dividends([
+        await portfolio_repo.upsert_preferred_dividends([
             {
                 "stock_code": "35320K",
                 "dividend_per_share": 450.0,
@@ -228,7 +230,7 @@ class AiAdminConfigTests(unittest.IsolatedAsyncioTestCase):
             }
         ])
 
-        rows = await cache.list_preferred_dividends()
+        rows = await portfolio_repo.list_preferred_dividends()
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["stock_code"], "35320K")

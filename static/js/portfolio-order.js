@@ -1,4 +1,8 @@
 // Portfolio manual row ordering: drag placement, optimistic order, and save queue.
+// File-local: timer that keeps an optimistic manual order alive briefly after
+// a failed save (only used here; cross-file order state is PfStore.manualOrder).
+let pfManualOrderKeepTimer = null;
+
 function _pfSameOrderCodes(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
   return a.every((code, index) => String(code || '') === String(b[index] || ''));
@@ -40,8 +44,8 @@ async function pfDropRow(fromCode, toCode, dropPosition = 'before') {
   const next = _pfNextOrderAfterDrop(PfStore.items, fromCode, toCode, dropPosition);
   if (!next) return;
   const orderCodes = next.map(i => i.stock_code);
-  pfPendingManualOrderCodes = orderCodes;
-  pfManualOrderRevision += 1;
+  PfStore.manualOrder.pendingCodes = orderCodes;
+  PfStore.manualOrder.revision += 1;
   if (pfManualOrderKeepTimer) {
     clearTimeout(pfManualOrderKeepTimer);
     pfManualOrderKeepTimer = null;
@@ -54,12 +58,12 @@ async function pfDropRow(fromCode, toCode, dropPosition = 'before') {
 }
 
 async function pfFlushManualOrderSave() {
-  if (pfManualOrderSaveInFlight) return;
-  pfManualOrderSaveInFlight = true;
+  if (PfStore.manualOrder.saveInFlight) return;
+  PfStore.manualOrder.saveInFlight = true;
   try {
-    while (pfPendingManualOrderCodes && pfPendingManualOrderCodes.length) {
-      const orderCodes = pfPendingManualOrderCodes.slice();
-      const orderRevision = pfManualOrderRevision;
+    while (PfStore.manualOrder.pendingCodes && PfStore.manualOrder.pendingCodes.length) {
+      const orderCodes = PfStore.manualOrder.pendingCodes.slice();
+      const orderRevision = PfStore.manualOrder.revision;
       try {
         const resp = await apiFetch('/api/portfolio/order', {
           method: 'PUT',
@@ -71,8 +75,8 @@ async function pfFlushManualOrderSave() {
           throw new Error(data.detail || 'Portfolio order save failed');
         }
       } catch (e) {
-        if (_pfSameOrderCodes(pfPendingManualOrderCodes, orderCodes) && pfManualOrderRevision === orderRevision) {
-          pfPendingManualOrderCodes = null;
+        if (_pfSameOrderCodes(PfStore.manualOrder.pendingCodes, orderCodes) && PfStore.manualOrder.revision === orderRevision) {
+          PfStore.manualOrder.pendingCodes = null;
           if (pfManualOrderKeepTimer) {
             clearTimeout(pfManualOrderKeepTimer);
             pfManualOrderKeepTimer = null;
@@ -83,7 +87,7 @@ async function pfFlushManualOrderSave() {
         }
         continue;
       }
-      if (!_pfSameOrderCodes(pfPendingManualOrderCodes, orderCodes) || pfManualOrderRevision !== orderRevision) {
+      if (!_pfSameOrderCodes(PfStore.manualOrder.pendingCodes, orderCodes) || PfStore.manualOrder.revision !== orderRevision) {
         continue;
       }
       PfStore.items = pfApplyManualOrder(PfStore.items, orderCodes);
@@ -92,12 +96,12 @@ async function pfFlushManualOrderSave() {
       renderPortfolio();
       const savedCodes = orderCodes.slice();
       pfManualOrderKeepTimer = setTimeout(() => {
-        if (_pfSameOrderCodes(pfPendingManualOrderCodes, savedCodes)) pfPendingManualOrderCodes = null;
+        if (_pfSameOrderCodes(PfStore.manualOrder.pendingCodes, savedCodes)) PfStore.manualOrder.pendingCodes = null;
         pfManualOrderKeepTimer = null;
       }, 5000);
       return;
     }
   } finally {
-    pfManualOrderSaveInFlight = false;
+    PfStore.manualOrder.saveInFlight = false;
   }
 }

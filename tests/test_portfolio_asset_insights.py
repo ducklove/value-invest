@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
+import close_price_client
+import kis_proxy_client
 from routes import portfolio as pf
 from services.portfolio import foreign
 from services.portfolio import insights
@@ -72,8 +74,8 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
                 ]
             }
 
-        with patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])), \
-             patch.object(pf.kis_proxy_client, "get_history", new=fake_get_history):
+        with patch.object(close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])), \
+             patch.object(kis_proxy_client, "get_history", new=fake_get_history):
             payload = await insights.asset_history_for_insight("005930", {"currency": "KRW"})
 
         self.assertEqual(payload["currency"], "KRW")
@@ -108,8 +110,8 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("temporary upstream hiccup")
             return {"items": [{"stck_bsop_date": "20250102", "stck_clpr": "70000"}]}
 
-        with patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])), \
-             patch.object(pf.kis_proxy_client, "get_history", new=flaky_get_history):
+        with patch.object(close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])), \
+             patch.object(kis_proxy_client, "get_history", new=flaky_get_history):
             first = await insights.asset_history_for_insight("005930", {"currency": "KRW"})
             second = await insights.asset_history_for_insight("005930", {"currency": "KRW"})
 
@@ -136,7 +138,9 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        with patch.object(pf.integrations, "build_public_integrations", return_value=config):
+        # holding_context_for_asset reads integrations through the insights
+        # module; patch it there directly instead of via the route namespace.
+        with patch.object(insights.integrations, "build_public_integrations", return_value=config):
             holding = insights.holding_context_for_asset("002380")
 
         self.assertEqual(holding["code"], "002380")

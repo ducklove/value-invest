@@ -4,9 +4,13 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-import cache
+import cache  # init_db/close_db(스키마·연결 수명)는 아직 cache 소유
 import close_price_client
 import kis_proxy_client
+from repositories import db as db_repo
+from repositories import portfolio as portfolio_repo
+from repositories import snapshots as snapshots_repo
+from repositories import user_settings as user_settings_repo
 from services.portfolio import runtime_quotes as portfolio_quotes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -97,10 +101,10 @@ async def _fetch_historical_korean_quote(stock_code: str, snap_date: str) -> dic
 
 async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, float, list[dict]]:
     """Return (total_market_value, total_invested, per_stock_values) for a user's portfolio."""
-    items = await cache.get_portfolio(google_sub)
+    items = await portfolio_repo.get_portfolio(google_sub)
     # Load previous per-stock snapshot for fallback (avoids avg_price distortion)
     prev_stock_map = {}
-    prev_stocks = await cache.get_stock_snapshots_before_date(google_sub, snap_date)
+    prev_stocks = await snapshots_repo.get_stock_snapshots_before_date(google_sub, snap_date)
     for ps in prev_stocks:
         prev_stock_map[ps["stock_code"]] = ps["market_value"]
 
@@ -161,8 +165,8 @@ async def take_snapshot(google_sub: str, snap_date: str):
         logger.info("Skipping %s: portfolio value is 0", google_sub)
         return
 
-    existing = await cache.get_snapshot_by_date(google_sub, snap_date)
-    prev = existing or await cache.get_latest_snapshot_before_date(google_sub, snap_date)
+    existing = await snapshots_repo.get_snapshot_by_date(google_sub, snap_date)
+    prev = existing or await snapshots_repo.get_latest_snapshot_before_date(google_sub, snap_date)
 
     if prev is None:
         # First snapshot ever
@@ -175,7 +179,7 @@ async def take_snapshot(google_sub: str, snap_date: str):
     # On rerun, preserve the already-materialized units for that date. If this
     # is the first snapshot for snap_date, apply same-day cashflows once.
     if existing is None:
-        cashflows = await cache.get_pending_cashflows(google_sub, snap_date)
+        cashflows = await snapshots_repo.get_pending_cashflows(google_sub, snap_date)
         for cf in cashflows:
             if cf["units_change"] is not None:
                 # Already applied (e.g., imported data or a previous run).
@@ -188,7 +192,7 @@ async def take_snapshot(google_sub: str, snap_date: str):
                     units_delta = -units_delta
                 total_units += units_delta
                 # Update cashflow record with nav and units
-                db = await cache.get_db()
+                db = await db_repo.get_db()
                 await db.execute(
                     "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
                     (nav, units_delta, cf["id"]),
@@ -202,9 +206,9 @@ async def take_snapshot(google_sub: str, snap_date: str):
         nav = BASE_NAV
         total_units = total_value / BASE_NAV if total_value > 0 else 0
 
-    await cache.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
+    await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
     if per_stock:
-        await cache.save_stock_snapshots(google_sub, snap_date, per_stock)
+        await snapshots_repo.save_stock_snapshots(google_sub, snap_date, per_stock)
     logger.info("Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f stocks=%d fx=%.1f", google_sub[:8], snap_date, total_value, nav, total_units, len(per_stock), _fx_usdkrw or 0)
 
 
@@ -217,7 +221,7 @@ async def _save_gold_close():
             if r.status_code == 200:
                 price = r.json().get("price")
                 if price:
-                    await cache.set_user_setting("__system__", "gold_prev_close", str(price))
+                    await user_settings_repo.set_user_setting("__system__", "gold_prev_close", str(price))
                     logger.info("Gold prev close saved: %.2f", price)
     except Exception as e:
         logger.warning("Failed to save gold close: %s", e)
@@ -272,7 +276,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
             await cache.close_db()
         return
     await _fetch_fx_usdkrw()
-    users = await cache.get_all_users_with_portfolio()
+    users = await snapshots_repo.get_all_users_with_portfolio()
     logger.info("Taking snapshots for %d users on %s", len(users), snap_date)
     success_count = 0
     failed_users: list[str] = []

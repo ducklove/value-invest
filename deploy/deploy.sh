@@ -30,6 +30,10 @@ REPO_UNITS=(
   "notify-alerts.timer"
   "notify-calendar.service"
   "notify-calendar.timer"
+  "data-quality.service"
+  "data-quality.timer"
+  "daily-briefing.service"
+  "daily-briefing.timer"
   "deploy/value-invest.service"
 )
 
@@ -93,18 +97,41 @@ if grep -qE '^requirements(-dev)?\.txt$' <<<"$CHANGED_FILES"; then
   python3 -m pip list 2>/dev/null | grep -iE '^(fastapi|uvicorn|aiosqlite|httpx|beautifulsoup4|yfinance|google-auth|python-dotenv|websockets)\b' || true
 fi
 
+# --- Lint -------------------------------------------------------------------
+# Blocking like the tests below. The ruleset lives in pyproject.toml and is
+# intentionally conservative (real defects, not style churn); widen it there.
+log "Installing dev dependencies"
+python3 -m pip install "${PIP_FLAGS[@]}" --quiet -r requirements-dev.txt
+log "Running ruff"
+python3 -m ruff check .
+
 # --- Tests ------------------------------------------------------------------
 # Blocking: a test failure aborts the deploy via the ERR trap, which rolls
 # the checkout back to OLD_SHA. The previous non-blocking behaviour was a
 # stopgap while the `_conn` singleton leak in the test fixtures made 32
 # tests spuriously fail; that's been fixed.
 log "Running tests"
-python3 -m pip install "${PIP_FLAGS[@]}" --quiet -r requirements-dev.txt
 python3 -m pytest -q
 
+# --- JS tests ----------------------------------------------------------------
+# Blocking when node is available: the jsdom behaviour tests are the growing
+# replacement for the Python string-presence checks, so a red run must stop
+# the deploy exactly like pytest. If the runner has no node yet, warn loudly
+# instead of bricking deploys — install node to turn this into a hard gate.
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  if [[ ! -d node_modules ]] || grep -qE '^package(-lock)?\.json$' <<<"$CHANGED_FILES"; then
+    log "Installing JS dev dependencies (npm ci)"
+    npm ci --no-audit --no-fund
+  fi
+  log "Running JS tests"
+  npm test
+else
+  log "WARNING: node/npm not found on runner — JS tests SKIPPED. Install node to enforce this gate."
+fi
+
 # Past this point, rolling the checkout back would desync from a restarted
-# service, so clear the trap. Health-check failure is reported but the new
-# code stays on disk for inspection.
+# service, so clear the trap. The health check below has its own explicit
+# rollback path instead.
 trap - ERR
 
 # --- Retire units no longer maintained in-repo ------------------------------
@@ -155,7 +182,18 @@ log "Restarting $SERVICE"
 sudo /bin/systemctl restart "$SERVICE"
 
 # --- Health check -----------------------------------------------------------
-wait_for_healthz
+# Blocking: if the new code doesn't come up healthy, roll the checkout back
+# to OLD_SHA and restart so the service returns to the last good state
+# instead of staying down. pip deps upgraded above are left in place — the
+# version ranges that satisfied OLD_SHA still apply, and downgrading live
+# site-packages mid-incident is riskier than leaving them.
+if ! wait_for_healthz; then
+  log "Healthz failed on $NEW_SHA — rolling back to $OLD_SHA and restarting"
+  git reset --hard "$OLD_SHA"
+  sudo /bin/systemctl restart "$SERVICE"
+  wait_for_healthz || log "Healthz still failing after rollback — manual intervention required"
+  exit 1
+fi
 
 # --- One-time repair --------------------------------------------------------
 # 2026-05-18 NAV was previously rerun through the live quote path. Rebuild it

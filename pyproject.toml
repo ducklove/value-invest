@@ -1,0 +1,15 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["static", "docs"]
+
+[tool.ruff.lint]
+# 시작은 실제 결함 위주(F: pyflakes, E9: 런타임 오류 직결 규칙)로 좁게 간다.
+# 배포 게이트(deploy.sh)가 이 설정을 그대로 쓰므로, 규칙 확대는 위반 0을
+# 확인한 커밋에서만 한다.
+select = ["F", "E9"]
+
+[tool.ruff.lint.per-file-ignores]
+"core/__init__.py" = ["F401"]
+"repositories/__init__.py" = ["F401"]
+"services/__init__.py" = ["F401"]

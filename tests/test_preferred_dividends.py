@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import cache
+import repositories.db
 import preferred_dividends as pd_mod
 
 
@@ -128,7 +129,7 @@ class ParseSheetCsvTests(unittest.TestCase):
 class UpsertAndLookupTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

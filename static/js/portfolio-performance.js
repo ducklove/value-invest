@@ -47,7 +47,18 @@ function pfSwitchTab(tab) {
   void activeEl.offsetWidth;
   activeEl.classList.add('fade-in');
   if (tab !== 'performance') _performanceLoadSeq += 1;
-  if (tab === 'performance') { loadPerformanceData(); _loadAiModels(); }
+  if (tab === 'performance') {
+    loadPerformanceData();
+    _loadAiModels();
+    // 리스크 카드도 성과 탭이 보일 때만 lazy 로드(portfolio-risk.js).
+    if (typeof pfLoadRiskPanel === 'function') pfLoadRiskPanel();
+    // 리밸런싱 카드 동일 패턴(portfolio-rebalance.js).
+    if (typeof pfLoadRebalancePanel === 'function') pfLoadRebalancePanel();
+    // 배당 캘린더 카드 동일 패턴(portfolio-dividends-calendar.js).
+    if (typeof pfLoadDividendCalendarPanel === 'function') pfLoadDividendCalendarPanel();
+    // 투자 일지 카드 동일 패턴(portfolio-journal.js).
+    if (typeof pfLoadJournalPanel === 'function') pfLoadJournalPanel();
+  }
 }
 
 // 영역지도 팝업 — 기존에는 보유종목 탭 안에서 테이블/영역지도 토글 뷰로

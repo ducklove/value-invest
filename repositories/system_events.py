@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def insert_system_event(
@@ -23,7 +23,7 @@ async def insert_system_event(
     """Append a structured event row. `details` should be a JSON string —
     callers (via observability.record_event) serialize their payload once
     to avoid a redundant json.loads at read time."""
-    db = await cache.get_db()
+    db = await get_db()
     if ts is None:
         ts = datetime.now().isoformat(timespec="seconds")
     cursor = await db.execute(
@@ -63,7 +63,7 @@ async def get_system_events(
     # whole table.
     limit = max(1, min(int(limit), 1000))
     params.append(limit)
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         f"SELECT id, ts, level, source, kind, stock_code, details "
         f"FROM system_events {where} ORDER BY ts DESC, id DESC LIMIT ?",
@@ -76,7 +76,7 @@ async def summarize_system_events(since_iso: str) -> dict:
     """Aggregate counts by (source, level) since `since_iso`. Used by the
     top-of-dashboard status card so the admin sees failure spikes without
     scrolling through events."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         """SELECT source, level, COUNT(*) AS n
            FROM system_events WHERE ts >= ?
@@ -93,7 +93,7 @@ async def prune_system_events(max_age_days: int = 30, max_rows: int = 100_000) -
     """Best-effort cleanup: drop events older than `max_age_days`, then if
     still above `max_rows` trim the oldest until under the cap. Returns
     rows deleted (0 if table was already small)."""
-    db = await cache.get_db()
+    db = await get_db()
     # Age-based trim.
     cursor = await db.execute(
         "DELETE FROM system_events WHERE ts < datetime('now', ?)",
@@ -127,7 +127,7 @@ async def summarize_http_metrics(since_iso: str, *, limit: int = 100) -> list[di
     not "average response time". Durations live in the JSON ``details`` blob, so
     we pull them out with ``json_extract``.
     """
-    db = await cache.get_db()
+    db = await get_db()
     limit = max(1, min(int(limit), 1000))
     cursor = await db.execute(
         """
@@ -160,7 +160,7 @@ async def summarize_http_metrics(since_iso: str, *, limit: int = 100) -> list[di
 async def get_latest_event(source: str, kind: str | None = None) -> dict | None:
     """Return the most recent matching event. Dashboard uses this to show
     'last successful tick' per subsystem."""
-    db = await cache.get_db()
+    db = await get_db()
     if kind:
         cursor = await db.execute(
             "SELECT id, ts, level, source, kind, stock_code, details "

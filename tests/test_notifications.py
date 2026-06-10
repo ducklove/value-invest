@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 import cache
+from repositories import notifications as notifications_repo
+import repositories.db
 import economic_calendar
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
@@ -65,7 +67,7 @@ class NotificationHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -108,7 +110,7 @@ class AlertCrudTests(NotificationHarness):
             )
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertTrue(resp.json()["connected"])
-        ch = await cache.get_notification_channel("u1", "telegram")
+        ch = await notifications_repo.get_notification_channel("u1", "telegram")
         self.assertEqual(ch["config"]["chat_id"], "555")
         self.assertEqual(ch["config"]["bot_token"], "123:ABC")
         self.assertTrue(ch["verified"])
@@ -131,7 +133,7 @@ class AlertCrudTests(NotificationHarness):
             )
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json()["connected"])
-        ch = await cache.get_notification_channel("u1", "telegram")
+        ch = await notifications_repo.get_notification_channel("u1", "telegram")
         self.assertFalse(ch["verified"])  # token stored, awaiting chat_id
 
     async def test_telegram_register_invalid_token(self):
@@ -149,7 +151,7 @@ class AlertCrudTests(NotificationHarness):
         body = resp.json()
         self.assertIn("REST123", body["authorize_url"])
         self.assertIn("/api/notifications/kakao/callback", body["redirect_uri"])
-        ch = await cache.get_notification_channel("u1", "kakao")
+        ch = await notifications_repo.get_notification_channel("u1", "kakao")
         self.assertEqual(ch["config"]["rest_key"], "REST123")
         self.assertFalse(ch["verified"])  # not verified until callback
 
@@ -203,10 +205,10 @@ class AlertCrudTests(NotificationHarness):
     async def test_important_toggle_preserves_armed(self):
         # 발송되어 disarmed 된 규칙을 중요로 토글해도 엣지 상태(armed=0)가 보존되어
         # 같은 날 재발송되지 않는다.
-        rid = await cache.create_portfolio_alert(
+        rid = await notifications_repo.create_portfolio_alert(
             "u1", scope="stock", alert_type="price_above", threshold=72000.0, stock_code="005930"
         )
-        await cache.set_portfolio_alert_state(rid, armed=False, last_value=80000.0, triggered=True)
+        await notifications_repo.set_portfolio_alert_state(rid, armed=False, last_value=80000.0, triggered=True)
         resp = await self.client.put(f"/api/notifications/alerts/{rid}", json={"important": True})
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["important"], 1)
@@ -379,7 +381,7 @@ class AlertCrudTests(NotificationHarness):
         self.assertEqual(resp.status_code, 409)
 
         # 채널 연결 후 구독 → GET event_ids → DELETE.
-        await cache.upsert_notification_channel(
+        await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 1, "username": "t"}, enabled=True, verified=True
         )
         resp = await self.client.post(
@@ -397,7 +399,7 @@ class AlertCrudTests(NotificationHarness):
         self.assertEqual((await self.client.get("/api/notifications/calendar")).json()["event_ids"], [])
 
     async def test_calendar_subscription_missing_fields_rejected(self):
-        await cache.upsert_notification_channel(
+        await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 1}, enabled=True, verified=True
         )
         resp = await self.client.post(
@@ -406,11 +408,11 @@ class AlertCrudTests(NotificationHarness):
         self.assertEqual(resp.status_code, 400)
 
     async def test_calendar_status_diagnostic_reports_state(self):
-        await cache.upsert_notification_channel(
+        await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 1}, enabled=True, verified=True
         )
         today = date.today().isoformat()
-        await cache.upsert_calendar_subscription(
+        await notifications_repo.upsert_calendar_subscription(
             "u1", "777", event_date=today, country="us", country_name="미국",
             event="CPI", importance="high", forecast="3.4%",
         )
@@ -432,12 +434,12 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
         await _seed_user_and_holding()
-        await cache.upsert_notification_channel(
+        await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 123, "username": "t"}, enabled=True, verified=True
         )
         # feed(공시/리포트) 모듈 전역 TTL 캐시는 테스트 간 공유되므로 초기화.
@@ -452,7 +454,7 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
     async def _rule(self, **kw):
         defaults = dict(scope="stock", alert_type="price_above", threshold=72000.0, stock_code="005930")
         defaults.update(kw)
-        return await cache.create_portfolio_alert("u1", **defaults)
+        return await notifications_repo.create_portfolio_alert("u1", **defaults)
 
     async def _add_holding(self, code, name):
         db = await cache.get_db()
@@ -464,7 +466,7 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         await db.commit()
 
     async def test_no_dispatch_without_active_channel(self):
-        await cache.delete_notification_channel("u1", "telegram")
+        await notifications_repo.delete_notification_channel("u1", "telegram")
         await self._rule()
         with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 80000.0})), \
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:
@@ -486,7 +488,7 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
 
             q["price"] = 60000.0  # below -> re-arm
             self.assertEqual(await engine.evaluate_user("u1"), 0)
-            self.assertEqual((await cache.get_portfolio_alert("u1", alert_id))["armed"], 1)
+            self.assertEqual((await notifications_repo.get_portfolio_alert("u1", alert_id))["armed"], 1)
 
             # 같은 날 다시 임계 돌파 -> 하루 1회 상한으로 재발송 안 함
             q["price"] = 90000.0
@@ -738,9 +740,9 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
             " VALUES ('u2','e2@x','U2','',1,'t','t')"
         )
         await db.commit()
-        await cache.upsert_notification_channel("u2", "telegram", config={"chat_id": 1, "username": "t"}, enabled=True, verified=True)
-        await cache.create_portfolio_alert("u2", scope="stock", alert_type="price_above", threshold=72000.0, stock_code="005930")
-        self.assertIn("u2", await cache.get_all_users_with_alerts())
+        await notifications_repo.upsert_notification_channel("u2", "telegram", config={"chat_id": 1, "username": "t"}, enabled=True, verified=True)
+        await notifications_repo.create_portfolio_alert("u2", scope="stock", alert_type="price_above", threshold=72000.0, stock_code="005930")
+        self.assertIn("u2", await notifications_repo.get_all_users_with_alerts())
         with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 80000.0})), \
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:
             await engine.evaluate_all()
@@ -772,8 +774,8 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
         # blanket 은 개별 규칙이 있는 두 종목을 모두 스킵 → 발송은 005930 개별 경로만.
         await self._add_holding("000660", "SK하이닉스")
         await self._rule(scope="all_stocks", alert_type="disclosure_new_all", threshold=0.0, stock_code=None)
-        await cache.create_portfolio_alert("u1", scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="005930", enabled=True)
-        await cache.create_portfolio_alert("u1", scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="000660", enabled=False)
+        await notifications_repo.create_portfolio_alert("u1", scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="005930", enabled=True)
+        await notifications_repo.create_portfolio_alert("u1", scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="000660", enabled=False)
         feed = {
             "005930": {"rcept_no": "A1", "report_nm": "주요사항보고서", "rcept_dt": "20260101"},
             "000660": {"rcept_no": "B1", "report_nm": "주요사항보고서", "rcept_dt": "20260101"},
@@ -802,7 +804,7 @@ class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -824,19 +826,19 @@ class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):
         send.assert_awaited_once()
 
     async def test_refresh_on_401_then_retry(self):
-        await cache.upsert_notification_channel(
+        await notifications_repo.upsert_notification_channel(
             "u1", "kakao",
             config={"rest_key": "K", "access_token": "old", "access_expires_at": time.time() + 3600, "refresh_token": "r"},
             enabled=True, verified=True,
         )
-        ch = await cache.get_notification_channel("u1", "kakao")
+        ch = await notifications_repo.get_notification_channel("u1", "kakao")
         with patch.object(kakao, "_send_memo", new=AsyncMock(side_effect=[401, 200])), \
              patch.object(kakao, "_refresh_token", new=AsyncMock(return_value={
                  "access_token": "new", "access_expires_at": time.time() + 3600,
              })):
             ok = await kakao.send_to_user("u1", ch, "hi")
         self.assertTrue(ok)
-        updated = await cache.get_notification_channel("u1", "kakao")
+        updated = await notifications_repo.get_notification_channel("u1", "kakao")
         self.assertEqual(updated["config"]["access_token"], "new")
 
     async def test_expired_without_refresh_token_fails(self):
@@ -851,12 +853,12 @@ class CalendarAlertEngineHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
         await _seed_user_and_holding()
-        await cache.upsert_notification_channel(
+        await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 1, "username": "t"}, enabled=True, verified=True
         )
 
@@ -877,7 +879,7 @@ class CalendarAlertEngineHarness(unittest.IsolatedAsyncioTestCase):
 
     async def test_fires_once_when_actual_released(self):
         today = date.today().isoformat()
-        await cache.upsert_calendar_subscription(
+        await notifications_repo.upsert_calendar_subscription(
             "u1", "777", event_date=today, country="us", country_name="미국",
             event="CPI (전년비)", importance="high", forecast="3.4%", previous="3.6%",
         )
@@ -905,19 +907,19 @@ class CalendarAlertEngineHarness(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_fire_when_actual_still_empty(self):
         today = date.today().isoformat()
-        await cache.upsert_calendar_subscription("u1", "777", event_date=today, country="us", event="X")
+        await notifications_repo.upsert_calendar_subscription("u1", "777", event_date=today, country="us", event="X")
         with patch.object(economic_calendar, "fetch_economic_calendar",
                           new=AsyncMock(return_value={"events": [self._event(actual="")]})), \
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:
             self.assertEqual((await engine.evaluate_calendar_all())["sent"], 0)
         disp.assert_not_awaited()
         # 대기 상태 유지(아직 fired 아님)
-        self.assertEqual(len(await cache.list_pending_calendar_subscriptions()), 1)
+        self.assertEqual(len(await notifications_repo.list_pending_calendar_subscriptions()), 1)
 
     async def test_no_fire_without_active_channel(self):
-        await cache.delete_notification_channel("u1", "telegram")
+        await notifications_repo.delete_notification_channel("u1", "telegram")
         today = date.today().isoformat()
-        await cache.upsert_calendar_subscription("u1", "777", event_date=today, country="us", event="X")
+        await notifications_repo.upsert_calendar_subscription("u1", "777", event_date=today, country="us", event="X")
         with patch.object(economic_calendar, "fetch_economic_calendar",
                           new=AsyncMock(return_value={"events": [self._event()]})), \
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:

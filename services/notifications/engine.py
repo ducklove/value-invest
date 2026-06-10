@@ -29,6 +29,9 @@ import logging
 from datetime import datetime
 
 import cache
+from repositories import notifications as notifications_repo
+from repositories import portfolio as portfolio_repo
+from repositories import snapshots as snapshots_repo
 from services.krx_limits import krx_lower_limit, krx_upper_limit
 from services.notifications import channels
 from services.portfolio import runtime_quotes
@@ -52,9 +55,12 @@ BLANKET_TYPES = BLANKET_QUOTE_TYPES | BLANKET_FEED_TYPES
 # 개별 종목(분석 화면) 알림 — 보유 여부 무관, scope='stock'.
 STOCK_DAILY_ABS_TYPES = frozenset({"stock_daily_abs"})            # 개별 종목 일간 등락률 ±n%
 STOCK_FEED_TYPES = frozenset({"disclosure_new", "report_new"})    # 신규 공시 / 신규 리포트
+# 리밸런싱 드리프트 — scope=portfolio, 임계값은 목표별 tolerance(rebalance_targets)
+# 가 대신하므로 rule.threshold 는 쓰지 않는다(0). 목표별 엣지 상태는 state_json.
+REBALANCE_TYPES = frozenset({"rebalance_drift"})
 ALL_ALERT_TYPES = (
     PRICE_TYPES | NAV_TYPES | PORTFOLIO_DAILY_TYPES | BLANKET_TYPES
-    | STOCK_DAILY_ABS_TYPES | STOCK_FEED_TYPES
+    | STOCK_DAILY_ABS_TYPES | STOCK_FEED_TYPES | REBALANCE_TYPES
 )
 
 
@@ -299,6 +305,79 @@ def _format_report_message(rule: dict, name: str, item: dict) -> str:
     return "\n".join(lines) + _note_suffix(rule)
 
 
+def _format_rebalance_message(rule: dict, breached_items: list[dict]) -> str:
+    """리밸런싱 알림 본문 — 이탈 항목을 '이름 현재% (목표 n%, ±x.x%p)' 줄로 나열."""
+    lines = ["⚖️ 리밸런싱 알림 — 목표 비중 이탈"]
+    for item in breached_items:
+        label = str(item.get("label") or item.get("key") or "")
+        if item.get("scope") == "group":
+            label += " 그룹"
+        current = item.get("current_weight_pct") or 0.0
+        drift = item.get("drift_pct") or 0.0
+        lines.append(
+            f"{label} {current:.1f}% (목표 {_fmt_thresh(item.get('target_weight_pct'))}%, {drift:+.1f}%p)"
+        )
+    return "\n".join(lines) + _note_suffix(rule)
+
+
+async def _eval_rebalance(google_sub: str, rule: dict) -> int:
+    """리밸런싱 드리프트 규칙 평가 — 목표별 엣지 트리거.
+
+    services.portfolio.rebalance 의 보고서(최근 일별 스냅샷 기준 — 시세 조회
+    없음)를 읽어 |드리프트| > tolerance 인 목표를 찾는다. 목표별 상태는
+    blanket 규칙과 같은 형식으로 state_json 에 저장한다:
+    ``{"<scope>:<key>": {"armed": bool, "fired": "YYYY-MM-DD"|None}}``.
+    발화하면 disarm, 허용 오차 안으로 복귀하면 re-arm, 같은 날은 1회만
+    (fired 날짜 상한) — 기존 규칙들의 엣지 시멘틱과 동일. 새로 발화하는
+    목표들은 한 메시지로 묶어 보낸다.
+    """
+    from services.portfolio import rebalance as rebalance_service
+
+    try:
+        report = await rebalance_service.compute_rebalance(google_sub)
+    except Exception as exc:
+        logger.warning("rebalance report failed for %s: %s", google_sub[:8], exc)
+        return 0
+
+    try:
+        state = json.loads(rule.get("state_json") or "{}")
+    except (TypeError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+
+    today_str = _today_str()
+    to_send: list[dict] = []
+    changed = False
+    for item in report.get("items", []):
+        state_key = f"{item.get('scope')}:{item.get('key')}"
+        entry = state.get(state_key)
+        if isinstance(entry, dict):
+            armed = bool(entry.get("armed", True))
+            fired = entry.get("fired")
+        else:
+            armed = True
+            fired = None
+        if item.get("breached") and armed and fired != today_str:
+            to_send.append(item)
+            state[state_key] = {"armed": False, "fired": today_str}
+            changed = True
+        elif not item.get("breached") and not armed:
+            state[state_key] = {"armed": True, "fired": fired}
+            changed = True
+
+    sent = 0
+    if to_send:
+        message = _format_rebalance_message(rule, to_send)
+        if rule.get("important"):
+            message = _emphasize(message)
+        await channels.dispatch(google_sub, message)
+        sent = 1
+    if changed:
+        await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+    return sent
+
+
 async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_map: dict) -> int:
     """Evaluate a blanket rule across every holding with per-holding edge state."""
     try:
@@ -379,7 +458,7 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
             changed = True
 
     if changed:
-        await cache.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+        await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
     return sent
 
 
@@ -496,12 +575,12 @@ async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: d
     if baseline is None or ident == baseline:
         # 첫 관측(또는 변화 없음): 기준선만 저장/유지, 발송 안 함.
         if baseline != ident:
-            await cache.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
+            await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
         return 0
     if rule.get("important"):
         text = _emphasize(text)
     await channels.dispatch(google_sub, text)
-    await cache.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
+    await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
     return 1
 
 
@@ -551,13 +630,13 @@ async def _eval_blanket_feed(
         sent += 1
 
     if changed:
-        await cache.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+        await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
     return sent
 
 
 async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> int:
     """Evaluate all enabled rules for one user. Returns alerts sent."""
-    rules = await cache.list_portfolio_alerts(google_sub, enabled_only=True)
+    rules = await notifications_repo.list_portfolio_alerts(google_sub, enabled_only=True)
     if not rules:
         return 0
     if not await channels.has_active_channel(google_sub):
@@ -565,7 +644,7 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
 
     items_by_code: dict[str, dict] = {}
     try:
-        for item in await cache.get_portfolio(google_sub):
+        for item in await portfolio_repo.get_portfolio(google_sub):
             items_by_code[item["stock_code"]] = item
     except Exception:
         pass
@@ -595,7 +674,7 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
     override_disc: set[str] = set()
     override_rep: set[str] = set()
     if any(r["alert_type"] in BLANKET_FEED_TYPES for r in rules):
-        for r in await cache.list_portfolio_alerts(google_sub):
+        for r in await notifications_repo.list_portfolio_alerts(google_sub):
             code = r.get("stock_code")
             if not code:
                 continue
@@ -644,6 +723,10 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
             sent += await _eval_stock_feed(google_sub, rule, await _name(rule.get("stock_code")), feed_cache)
             continue
 
+        if alert_type in REBALANCE_TYPES:  # 리밸런싱 드리프트 (스냅샷 기반, 시세 불필요)
+            sent += await _eval_rebalance(google_sub, rule)
+            continue
+
         # single-metric rules (price / 개별 일간등락 / nav / portfolio daily): armed 플래그
         if alert_type in PRICE_TYPES:
             metric = _quote_price(quote_map.get(rule.get("stock_code") or "", {}))
@@ -671,12 +754,12 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
             if rule.get("important"):
                 text = _emphasize(text)
             await channels.dispatch(google_sub, text)
-            await cache.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
+            await notifications_repo.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
             sent += 1
         elif not condition and not armed:
-            await cache.set_portfolio_alert_state(rule["id"], armed=True, last_value=metric, triggered=False)
+            await notifications_repo.set_portfolio_alert_state(rule["id"], armed=True, last_value=metric, triggered=False)
         else:
-            await cache.set_portfolio_alert_state(rule["id"], armed=armed, last_value=metric, triggered=False)
+            await notifications_repo.set_portfolio_alert_state(rule["id"], armed=armed, last_value=metric, triggered=False)
     return sent
 
 
@@ -687,9 +770,9 @@ async def evaluate_all() -> dict:
     알림 규칙이 하나라도 있는 사용자도 평가 대상에 포함한다. 같은 공시/리포트
     종목을 여러 사용자가 구독해도 외부 API 를 한 번만 치도록 feed_cache 를 공유한다.
     """
-    users = set(await cache.get_all_users_with_portfolio())
+    users = set(await snapshots_repo.get_all_users_with_portfolio())
     try:
-        users |= set(await cache.get_all_users_with_alerts())
+        users |= set(await notifications_repo.get_all_users_with_alerts())
     except Exception:
         pass
     feed_cache: dict = {}
@@ -770,7 +853,7 @@ async def evaluate_calendar_all() -> dict:
     from collections import defaultdict
     from datetime import date, timedelta
 
-    pending = await cache.list_pending_calendar_subscriptions()
+    pending = await notifications_repo.list_pending_calendar_subscriptions()
     if not pending:
         return {"subs": 0, "sent": 0}
 
@@ -810,13 +893,13 @@ async def evaluate_calendar_all() -> dict:
                 if not ev or not (ev.get("actual") or "").strip():
                     continue
                 await channels.dispatch(google_sub, _format_calendar_message(sub, ev))
-                await cache.mark_calendar_subscription_fired(sub["id"])
+                await notifications_repo.mark_calendar_subscription_fired(sub["id"])
                 sent += 1
         except Exception as exc:
             logger.warning("calendar alert eval failed for %s: %s", google_sub[:8], exc)
 
     try:
-        await cache.delete_stale_calendar_subscriptions(stale_cutoff)
+        await notifications_repo.delete_stale_calendar_subscriptions(stale_cutoff)
     except Exception:
         pass
     return {"subs": len(pending), "sent": sent}

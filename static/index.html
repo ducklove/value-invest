@@ -8,7 +8,8 @@
 <meta property="og:description" content="Value is All You Need. 가치 중심의 투자 분석과 포트폴리오 인사이트를 한곳에서 확인하세요.">
 <title>Value Compass</title>
 <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-<link rel="apple-touch-icon" href="./favicon.svg">
+<link rel="apple-touch-icon" href="./static/icon-640.jpg">
+<link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#2563eb">
 <meta property="og:image" content="https://cantabile.tplinkdns.com:3691/static/icon-640.jpg">
 <meta property="og:image:width" content="640">
@@ -195,6 +196,16 @@ function trackEvent(name, params = {}) {
       </div>
       <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
       <div class="wiki-qa-meta" id="wikiQaMeta"></div>
+    </div>
+
+    <!-- 투자 일지 — 이 종목에 대한 매수/매도/메모 판단 기록. portfolio-journal.js 가 채운다. -->
+    <div class="stock-journal" id="stockJournalSection">
+      <div class="stock-journal-head">
+        <span class="stock-journal-label">📝 투자 일지</span>
+        <span class="stock-journal-hint">매수·매도 판단의 이유를 기록하고, 나중에 당시 가격 대비 수익률과 함께 복기하세요.</span>
+      </div>
+      <div id="stockJournalForm"></div>
+      <div id="stockJournalList"></div>
     </div>
   </div>
 
@@ -434,6 +445,52 @@ function trackEvent(name, params = {}) {
         <div class="pf-nav-returns" id="pfNavReturns"></div>
       </div>
 
+      <div class="pf-nav-chart-wrap" id="pfRiskWrap" style="margin-top:24px;">
+        <div class="pf-nav-header">
+          <h3>리스크</h3>
+          <div class="valuation-period-btns" id="pfRiskWindowBtns" style="margin-left:auto;"></div>
+        </div>
+        <div id="pfRiskContent" class="pf-risk-content">
+          <div class="pf-risk-empty">성과 탭을 열면 리스크 지표를 불러옵니다.</div>
+        </div>
+      </div>
+
+      <div class="pf-nav-chart-wrap" id="pfRebalanceWrap" style="margin-top:24px;">
+        <div class="pf-nav-header">
+          <h3>리밸런싱</h3>
+          <div class="pf-rebal-header-actions">
+            <label class="pf-rebal-alert-toggle" title="목표 비중 이탈 항목이 생기면 연결된 알림 채널로 보냅니다">
+              <input type="checkbox" id="pfRebalanceAlertCb" onchange="pfRebalanceToggleAlert(this.checked)"> 이탈 시 알림
+            </label>
+            <button class="pf-mini-btn" type="button" id="pfRebalanceEditBtn" onclick="pfRebalanceToggleEditor()">목표 설정</button>
+          </div>
+        </div>
+        <div id="pfRebalanceEditor" class="pf-rebal-editor" style="display:none;"></div>
+        <div id="pfRebalanceContent" class="pf-rebal-content">
+          <div class="pf-risk-empty">성과 탭을 열면 리밸런싱 현황을 불러옵니다.</div>
+        </div>
+      </div>
+
+      <div class="pf-nav-chart-wrap" id="pfDivCalWrap" style="margin-top:24px;">
+        <div class="pf-nav-header">
+          <h3>배당 캘린더</h3>
+          <span class="pf-chart-note">월별 예상 배당 현금흐름 · 보유수량 × 주당 배당</span>
+        </div>
+        <div id="pfDivCalContent" class="pf-divcal-content">
+          <div class="pf-risk-empty">성과 탭을 열면 배당 캘린더를 불러옵니다.</div>
+        </div>
+      </div>
+
+      <div class="pf-nav-chart-wrap" id="pfJournalWrap" style="margin-top:24px;">
+        <div class="pf-nav-header">
+          <h3>투자 일지</h3>
+          <span class="pf-chart-note">매수·매도 판단 기록 · 당시 가격 대비 현재 수익률 복기</span>
+        </div>
+        <div id="pfJournalContent" class="pf-journal-content">
+          <div class="pf-risk-empty">성과 탭을 열면 투자 일지를 불러옵니다.</div>
+        </div>
+      </div>
+
       <div class="pf-nav-chart-wrap" style="margin-top:24px;">
         <div class="pf-nav-header">
           <h3>평가금액 추이</h3>
@@ -649,6 +706,8 @@ function trackEvent(name, params = {}) {
 <script src="./js/quote-manager.js" defer></script>
 <script src="./js/auth.js" defer></script>
 <script src="./js/search.js" defer></script>
+<script src="./js/analysis-charts.js" defer></script>
+<script src="./js/analysis-filings.js" defer></script>
 <script src="./js/analysis.js" defer></script>
 <script src="./js/stock-alerts.js" defer></script>
 <script src="./js/market-dashboard.js" defer></script>
@@ -664,6 +723,10 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-groups-market.js" defer></script>
 <script src="./js/portfolio-ai.js" defer></script>
 <script src="./js/portfolio-performance.js" defer></script>
+<script src="./js/portfolio-risk.js" defer></script>
+<script src="./js/portfolio-rebalance.js" defer></script>
+<script src="./js/portfolio-dividends-calendar.js" defer></script>
+<script src="./js/portfolio-journal.js" defer></script>
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-group-composition.js" defer></script>
 <script src="./js/portfolio-cashflows.js" defer></script>

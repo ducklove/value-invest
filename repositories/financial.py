@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def save_financial_data(stock_code: str, data: list[dict]):
-    db = await cache.get_db()
+    db = await get_db()
     await db.executemany(
         "INSERT OR REPLACE INTO financial_data "
         "(stock_code, year, report_date, revenue, operating_profit, net_income, total_assets, total_liabilities, total_equity) "
@@ -35,7 +35,7 @@ async def save_financial_data(stock_code: str, data: list[dict]):
 
 
 async def get_financial_data(stock_code: str) -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT * FROM financial_data WHERE stock_code = ? ORDER BY year",
         (stock_code,),
@@ -45,7 +45,7 @@ async def get_financial_data(stock_code: str) -> list[dict]:
 
 
 async def save_market_data(stock_code: str, data: list[dict]):
-    db = await cache.get_db()
+    db = await get_db()
     await db.executemany(
         "INSERT OR REPLACE INTO market_data "
         "(stock_code, year, close_price, per, pbr, eps, bps, dividend_per_share, dividend_yield, market_cap) "
@@ -72,7 +72,7 @@ async def save_market_data(stock_code: str, data: list[dict]):
 async def upsert_market_dividends(stock_code: str, dividends_by_year: dict[int, float]) -> int:
     if not dividends_by_year:
         return 0
-    db = await cache.get_db()
+    db = await get_db()
     rows = []
     for year, dps in dividends_by_year.items():
         if dps is None:
@@ -101,7 +101,7 @@ async def upsert_market_dividends(stock_code: str, dividends_by_year: dict[int, 
 
 
 async def get_market_data(stock_code: str) -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT * FROM market_data WHERE stock_code = ? ORDER BY year",
         (stock_code,),
@@ -115,7 +115,7 @@ async def get_latest_dividend_years(stock_codes: list[str]) -> dict[str, int]:
         return {}
     current_year = datetime.now().year
     placeholders = ",".join("?" for _ in stock_codes)
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         f"""SELECT stock_code, MAX(year) AS latest_year
             FROM market_data

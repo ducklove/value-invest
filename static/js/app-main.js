@@ -18,7 +18,7 @@ const _pfBenchmarkQueuedCodes = new Set();
 const _pfFlashQueuedCodes = new Set();
 
 function _schedulePortfolioDeferredRender(delay = 1200) {
-  if (pfEditingCode) return;
+  if (PfStore.edit.code) return;
   if (_pfDeferredRenderTimer) return;
   _pfDeferredRenderTimer = setTimeout(() => {
     _pfDeferredRenderTimer = null;
@@ -35,7 +35,7 @@ function _queuePortfolioSummaryRender() {
   _pfSummaryRenderQueued = true;
   requestAnimationFrame(() => {
     _pfSummaryRenderQueued = false;
-    if (activeView === 'portfolio' && typeof renderPortfolio === 'function') {
+    if (PfStore.activeView === 'portfolio' && typeof renderPortfolio === 'function') {
       renderPortfolio({ summaryOnly: true });
     }
   });
@@ -58,7 +58,7 @@ function _paintPortfolioQuoteUpdates() {
 }
 
 function _queuePortfolioQuotePaint() {
-  if (pfEditingCode || _pfQuotePaintQueued) return;
+  if (PfStore.edit.code || _pfQuotePaintQueued) return;
   _pfQuotePaintQueued = true;
   requestAnimationFrame(_paintPortfolioQuoteUpdates);
 }
@@ -224,8 +224,9 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function _refreshActivePortfolioTodayState() {
-  if (activeView !== 'portfolio' || !currentUser || typeof pfRefreshTodayState !== 'function') return;
-  pfRefreshTodayState({ force: true }).catch(() => {});
+  if (PfStore.activeView !== 'portfolio' || !currentUser || typeof pfRefreshTodayState !== 'function') return;
+  // 탭 복귀 시 백그라운드 갱신 — 실패해도 토스트 없이 로그만.
+  pfRefreshTodayState({ force: true }).catch(e => reportApiError(e, '오늘 수익 갱신', { silent: true }));
 }
 
 function _resizeAllCharts() {
@@ -286,4 +287,16 @@ async function loadWikiStats() {
   } catch {
     // Silent — the badge is optional UX; no error toast.
   }
+}
+
+// --- PWA: service worker registration (installability v1) ---------------
+// Feature-detected and non-fatal — the app behaves identically without it.
+// sw.js is conservative by contract: network-first for HTML and /api/*,
+// cache-first only for ?v=-stamped (immutable) assets and manifest/icons.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Silent — installability is a progressive enhancement.
+    });
+  });
 }

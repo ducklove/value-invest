@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -17,11 +18,31 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-groups-market.js",
     "portfolio-ai.js",
     "portfolio-performance.js",
+    "portfolio-risk.js",
+    "portfolio-rebalance.js",
+    "portfolio-dividends-calendar.js",
+    "portfolio-journal.js",
     "portfolio-trends.js",
     "portfolio-group-composition.js",
     "portfolio-cashflows.js",
     "portfolio-tag-summary.js",
     "portfolio-events.js",
+]
+
+# Dependencies-first: charts and filings define globals (chart state,
+# allReports, loadWiki, ...) that analysis.js orchestrates at runtime.
+ANALYSIS_SPLIT_FILES = [
+    "analysis-charts.js",
+    "analysis-filings.js",
+    "analysis.js",
+]
+
+# Dependencies-first: admin.js provides the shared helpers (_esc,
+# _adminInputStyle) and bootstrapping; the panel modules load after it.
+ADMIN_SPLIT_FILES = [
+    "admin.js",
+    "admin-observability.js",
+    "admin-linked-projects.js",
 ]
 
 
@@ -128,11 +149,126 @@ def test_portfolio_feature_files_stay_below_maintenance_ceiling():
         assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
 
 
-def test_portfolio_default_sort_is_unset():
-    source = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+def test_index_loads_analysis_split_scripts_in_contract_order():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
 
-    assert "let pfSortKey = null;" in source
-    assert "let pfGroupSort = false;" in source
+    positions = []
+    for name in ANALYSIS_SPLIT_FILES:
+        marker = f'./js/{name}'
+        pos = html.find(marker)
+        assert pos != -1, f"{name} is not loaded by index.html"
+        positions.append(pos)
+    assert positions == sorted(positions), "analysis split script order changed"
+    # 분할 파일은 검색(search.js) 다음, 나머지 뷰 스크립트(stock-alerts.js) 앞에 묶여 산다.
+    assert html.find("./js/search.js") < positions[0]
+    assert positions[-1] < html.find("./js/stock-alerts.js")
+
+
+def test_analysis_split_files_keep_feature_homes():
+    charts = (JS / "analysis-charts.js").read_text(encoding="utf-8")
+    filings = (JS / "analysis-filings.js").read_text(encoding="utf-8")
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+
+    # 차트: 주간/연간 그리드, 목표가 오버레이, 차트 모달, 기간 전환.
+    assert "async function renderChartGrid(" in charts
+    assert "async function _overlayTargetPrices(" in charts
+    assert "function openChartModal(" in charts
+    assert "function closeChartModal()" in charts
+    assert "async function switchValuationPeriod(" in charts
+    # 공시/리포트: DART AI 리뷰, 리포트 테이블, 위키 요약.
+    assert "function renderFilingReview(" in filings
+    assert "async function generateFilingReview(" in filings
+    assert "function renderReportsTable(" in filings
+    assert "async function loadWiki(" in filings
+    # 본체: 분석 SSE 오케스트레이션, 시세 요약, 위키 Q&A.
+    assert "async function analyzeStock(" in analysis
+    assert "async function renderResult(" in analysis
+    assert "function renderQuoteSnapshot(" in analysis
+    assert "async function askWikiQuestion()" in analysis
+    # SSE 스트리밍 호출은 apiFetch 타임아웃 제외 플래그를 유지한다.
+    assert "stream: true" in analysis
+
+
+def test_analysis_split_files_stay_below_maintenance_ceiling():
+    for name in ANALYSIS_SPLIT_FILES:
+        lines = (JS / name).read_text(encoding="utf-8").splitlines()
+        assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
+
+
+def test_admin_page_loads_admin_split_scripts_in_contract_order():
+    html = (STATIC / "admin.html").read_text(encoding="utf-8")
+
+    positions = []
+    for name in ADMIN_SPLIT_FILES:
+        marker = f'/js/{name}'
+        pos = html.find(marker)
+        assert pos != -1, f"{name} is not loaded by admin.html"
+        positions.append(pos)
+    assert positions == sorted(positions), "admin split script order changed"
+    # 인라인 apiFetch 헬퍼(credentials:'include')는 모든 admin 스크립트보다 먼저.
+    assert html.find("async function apiFetch(") != -1
+    assert html.find("async function apiFetch(") < positions[0]
+    # 부트스트랩 호출(loadAdminView)은 모든 스크립트가 로드된 뒤에 실행된다.
+    assert positions[-1] < html.find("loadAdminView();")
+
+
+def test_admin_split_files_keep_feature_homes():
+    admin = (JS / "admin.js").read_text(encoding="utf-8")
+    observability = (JS / "admin-observability.js").read_text(encoding="utf-8")
+    linked = (JS / "admin-linked-projects.js").read_text(encoding="utf-8")
+
+    # 본체: 부트스트랩 오케스트레이션, AI 운영 관리, 공용 헬퍼.
+    assert "async function loadAdminView()" in admin
+    assert "function _renderAdmin(" in admin
+    assert "function _renderAiConfigSection(" in admin
+    assert "async function saveAiKey()" in admin
+    assert "async function saveAiModels()" in admin
+    assert "function _esc(" in admin
+    assert "function _adminInputStyle()" in admin
+    # 관측성: 배포/서버/배치/사용자/DB/이벤트/HTTP 패널 + 5초 라이브 갱신 +
+    # 수동 작업 실행 + 위키 진단 폼.
+    assert "function _renderDeployCard(" in observability
+    assert "function _renderServerCard(" in observability
+    assert "function _startLiveUpdates()" in observability
+    assert "async function _updateLiveStats()" in observability
+    assert "function _renderBatchSection(" in observability
+    assert "function _renderUsersSection(" in observability
+    assert "function _renderDbSection(" in observability
+    assert "function _renderEventsSection(" in observability
+    assert "function _renderHttpMetricsSection(" in observability
+    assert "function _renderSubsystemSummary(" in observability
+    # 데이터 품질 카드: event-summary 의 data_quality(check_summary) 한 행으로 렌더.
+    assert "function _renderDataQualitySection(" in observability
+    assert "_renderDataQualitySection(summary.data_quality)" in observability
+    assert "async function triggerJob(" in observability
+    assert "async function runWikiDiag()" in observability
+    # 연결 프로젝트 config + 우선주/해외 배당 관리.
+    assert "function _renderLinkedProjectConfigSection(" in linked
+    assert "async function saveLinkedProjectConfig(" in linked
+    assert "async function saveGoldGapConfig()" in linked
+    assert "async function saveHoldingConfigItem()" in linked
+    assert "async function savePreferredConfigItem()" in linked
+    assert "function _renderDataSyncSection()" in linked
+    assert "async function refreshPreferredDividends()" in linked
+    assert "async function refreshForeignDividends()" in linked
+    assert "async function submitForeignDividend()" in linked
+    assert "function prefillPreferredConfigFromDividend(" in linked
+    # 오류 보고는 reportApiError 헬퍼 경유를 유지한다(765d8a5).
+    assert "reportApiError(e, '실행 요청');" in observability
+    assert "reportApiError(e, '삭제');" in linked
+
+
+def test_admin_split_files_stay_below_maintenance_ceiling():
+    for name in ADMIN_SPLIT_FILES:
+        lines = (JS / name).read_text(encoding="utf-8").splitlines()
+        assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
+
+
+def test_portfolio_default_sort_is_unset():
+    # Sort state lives in PfStore (portfolio-store.js), not bare shell globals.
+    source = (JS / "portfolio-store.js").read_text(encoding="utf-8")
+
+    assert "sort: { key: null, asc: false, groupSort: false }," in source
 
 
 def test_market_tape_is_bottom_frame_outside_main():
@@ -192,7 +328,7 @@ def test_today_card_does_not_fallback_to_quote_session_return():
 def test_today_card_percent_uses_same_settlement_base_as_amount():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
 
-    assert "const _dailyBaseValue = _periodBaseValue(pfPrevDaySnapshot);" in source
+    assert "const _dailyBaseValue = _periodBaseValue(PfStore.snapshots.prevDay);" in source
     assert "dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;" in source
     assert "const _liveNavValueKrw" in source
     assert "let _pendingUnitsChange = 0;" in source
@@ -298,20 +434,18 @@ def test_portfolio_delete_uses_encoded_url_and_server_reload():
 
 
 def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
-    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    store = (JS / "portfolio-store.js").read_text(encoding="utf-8")
     data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
     order = (JS / "portfolio-order.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-    assert "let pfPendingManualOrderCodes = null;" in shell
-    assert "let pfManualOrderRevision = 0;" in shell
-    assert "let pfManualOrderSaveInFlight = false;" in shell
-    assert "const loadOrderRevision = pfManualOrderRevision;" in data
-    assert "const preservePendingManualOrder = !!pfPendingManualOrderCodes;" in data
-    assert "nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);" in data
-    assert data.find("nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);") < data.find("PfStore.items = nextPortfolioItems;")
+    assert "manualOrder: { pendingCodes: null, revision: 0, saveInFlight: false }," in store
+    assert "const loadOrderRevision = PfStore.manualOrder.revision;" in data
+    assert "const preservePendingManualOrder = !!PfStore.manualOrder.pendingCodes;" in data
+    assert "nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, PfStore.manualOrder.pendingCodes);" in data
+    assert data.find("nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, PfStore.manualOrder.pendingCodes);") < data.find("PfStore.items = nextPortfolioItems;")
     assert "function pfApplyManualOrder(items, orderedCodes)" in data
     assert "function _pfNextOrderAfterDrop(items, fromCode, toCode, dropPosition = 'before')" in order
     assert "const targetIdx = next.findIndex(i => i.stock_code === toCode);" in order
@@ -319,19 +453,19 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     assert "function _pfClearPortfolioDragOver(root = document)" in order
     assert "function _pfDropPositionForEvent(e, row)" in order
     assert "async function pfFlushManualOrderSave()" in order
-    assert "while (pfPendingManualOrderCodes && pfPendingManualOrderCodes.length)" in order
-    assert "if (!_pfSameOrderCodes(pfPendingManualOrderCodes, orderCodes) || pfManualOrderRevision !== orderRevision)" in order
+    assert "while (PfStore.manualOrder.pendingCodes && PfStore.manualOrder.pendingCodes.length)" in order
+    assert "if (!_pfSameOrderCodes(PfStore.manualOrder.pendingCodes, orderCodes) || PfStore.manualOrder.revision !== orderRevision)" in order
     assert "_legacyPfDropRowImmediateSave" not in order
-    assert "pfPendingManualOrderCodes = orderCodes;" in order
-    assert "pfManualOrderRevision += 1;" in order
-    assert "pfManualOrderSaveInFlight = true;" in order
+    assert "PfStore.manualOrder.pendingCodes = orderCodes;" in order
+    assert "PfStore.manualOrder.revision += 1;" in order
+    assert "PfStore.manualOrder.saveInFlight = true;" in order
     assert "_pfSetPortfolioSortOrder(orderCodes);" in order
     assert "_savePortfolioSnapshot(PfStore.items);" in order
     assert "if (!resp.ok)" in order
     assert "throw new Error(data.detail || 'Portfolio order save failed');" in order
     assert "await loadPortfolio({ force: true });" in order
     assert "async function pfDropRow" not in actions
-    assert "const canManualDrag = pfGroupFilter === null && !pfSortKey && !pfGroupSort && !searchText && currentUser && !pfEditingCode;" in render
+    assert "const canManualDrag = PfStore.filters.group === null && !PfStore.sort.key && !PfStore.sort.groupSort && !searchText && currentUser && !PfStore.edit.code;" in render
     assert "_pfDropPositionForEvent(e, tr)" in render
     assert "_pfClearPortfolioDragOver(tbody)" in render
     assert "pfDropRow(fromCode, toCode, dropPosition)" in render
@@ -367,7 +501,7 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     assert events.find(open_branch) < events.find(analyze_branch)
     assert "target.closest('#pfBody tr[data-code]')" in events
     assert "isPassivePortfolioRowTarget" in events
-    assert "!pfEditingCode && (el = portfolioRowFromTarget(t))" in events
+    assert "!PfStore.edit.code && (el = portfolioRowFromTarget(t))" in events
     assert "if (code) pfGoAnalyze(code, e);" in events
 
 
@@ -413,7 +547,9 @@ def test_portfolio_search_and_registration_are_separate_controls():
     assert 'id="pfAddToggle"' in html
     assert 'id="pfAddPanel"' in html
     assert html.find('id="pfAddToggle"') < html.find('id="pfCsvToggle"')
-    assert 'let pfPortfolioSearchText' in shell
+    # Search text lives in PfStore.filters (portfolio-store.js).
+    assert "filters: { group: null, searchText: '' }," in (JS / "portfolio-store.js").read_text(encoding="utf-8")
+    assert "PfStore.filters.searchText" in shell or "PfStore.filters.searchText" in data
     assert "function pfRowMatchesSearch" in data
     assert "...pfGetTags(item)" in data
     assert "function pfSetAddPanelOpen" in actions
@@ -445,8 +581,9 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
 
     assert 'type="button" class="pf-row-btn save js-pf-save"' in render
-    assert "let pfSavingEditCode = null" in (JS / "portfolio-shell.js").read_text(encoding="utf-8")
-    assert "const isSaving = pfSavingEditCode === r.stock_code" in render
+    # Edit state lives in PfStore.edit (portfolio-store.js).
+    assert "edit: { code: null, savingCode: null }," in (JS / "portfolio-store.js").read_text(encoding="utf-8")
+    assert "const isSaving = PfStore.edit.savingCode === r.stock_code" in render
     assert 'class="pf-row-saving" aria-busy="true"' in render
     assert "pf-save-spinner" in render
     assert 'class="pf-edit-input js-pf-edit-qty"' in render
@@ -455,7 +592,7 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     assert "savePortfolioEdit(code, undefined, el.closest('tr[data-code]'))" in events
     assert "function _pfFindEditRow(stockCode, row)" in actions
     assert "function _pfSetEditSaving(stockCode, saving, row)" in actions
-    assert "if (pfSavingEditCode) return;" in actions
+    assert "if (PfStore.edit.savingCode) return;" in actions
     assert "_pfSetEditSaving(stockCode, true, editRow)" in actions
     assert "editRow?.querySelector('.js-pf-edit-qty')" in actions
     assert "editRow?.querySelector('.js-pf-edit-price')" in actions
@@ -474,7 +611,7 @@ def test_portfolio_add_canonicalizes_alias_before_save():
     assert "portfolio code canonicalization failed" in source
     assert "/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}" in source
     assert "/api/portfolio/${encodeURIComponent(resolvedCode)}" in source
-    assert "pfEditingCode = resolvedCode" in source
+    assert "PfStore.edit.code = resolvedCode" in source
 
 
 def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
@@ -556,9 +693,9 @@ def test_benchmark_picker_only_opens_in_edit_mode():
 
     assert '<td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">' in render
     assert '<td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">' in render
-    assert "if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);" in events
+    assert "if (code && PfStore.edit.code === code) pfShowBenchmarkPicker(code, el);" in events
     assert events.find("((el = t.closest('.js-pf-bench-set')))") < events.find("((el = t.closest('.js-pf-bench-picker')))")
-    assert "if (pfEditingCode !== stockCode)" in actions
+    assert "if (PfStore.edit.code !== stockCode)" in actions
     assert ".pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }" in styles
 
 
@@ -613,6 +750,235 @@ def test_performance_tab_includes_group_weight_trend():
     assert "areaStyle: { opacity:" in trends
     assert "stack: series.stack || null" in chart
     assert "stackedIndexes.add(seriesIdx)" in chart
+
+
+def test_performance_tab_includes_risk_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    risk = (JS / "portfolio-risk.js").read_text(encoding="utf-8")
+
+    # '리스크' 카드는 성과 탭의 NAV 수익률 요약(#pfNavReturns) 바로 다음,
+    # 평가금액 추이 앞에 산다. 윈도 버튼은 기존 .vp-btn 스타일 재사용.
+    assert 'id="pfRiskWrap"' in html
+    assert 'id="pfRiskWindowBtns"' in html
+    assert 'id="pfRiskContent"' in html
+    assert html.find('id="pfNavReturns"') < html.find('id="pfRiskWrap"')
+    assert html.find('id="pfRiskWrap"') < html.find('id="pfValueChart"')
+    # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
+    assert "if (typeof pfLoadRiskPanel === 'function') pfLoadRiskPanel();" in performance
+    # 기능 홈: fetch/렌더/윈도 전환/메모는 portfolio-risk.js.
+    assert "async function pfLoadRiskPanel(" in risk
+    assert "function pfRiskSetWindow(" in risk
+    assert "function _pfRenderRiskPanel(" in risk
+    assert "/api/portfolio/risk?window=" in risk
+    assert "const _pfRiskCache = {};" in risk
+    # 백그라운드 로드 — 오류는 silent 보고 + 패널 내 안내.
+    assert "reportApiError(e, '리스크 지표', { silent: true });" in risk
+    # 데이터 부족 시 친절한 빈 상태 문구.
+    assert "데이터가 부족합니다" in risk
+    # 포맷터는 portfolio-render.js / utils.js 공용 헬퍼 재사용(중복 정의 금지).
+    assert "function fmtPct(" not in risk
+    assert "function returnClass(" not in risk
+    assert "function escapeHtml(" not in risk
+    # 스타일: 타일은 .pf-nav-ret-card 재사용, 좁은 화면에선 2열 그리드.
+    assert ".pf-risk-grid" in styles
+    assert ".pf-risk-empty" in styles
+    assert ".pf-risk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+
+
+def test_performance_tab_includes_rebalance_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    rebalance = (JS / "portfolio-rebalance.js").read_text(encoding="utf-8")
+    alerts = (JS / "portfolio-alerts.js").read_text(encoding="utf-8")
+
+    # '리밸런싱' 카드는 성과 탭의 리스크 카드(#pfRiskWrap) 바로 다음,
+    # 평가금액 추이 앞에 산다. 에디터는 모달이 아닌 인라인 리스트.
+    assert 'id="pfRebalanceWrap"' in html
+    assert 'id="pfRebalanceContent"' in html
+    assert 'id="pfRebalanceEditor"' in html
+    assert 'id="pfRebalanceAlertCb"' in html
+    assert html.find('id="pfRiskWrap"') < html.find('id="pfRebalanceWrap"')
+    assert html.find('id="pfRebalanceWrap"') < html.find('id="pfValueChart"')
+    # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
+    assert "if (typeof pfLoadRebalancePanel === 'function') pfLoadRebalancePanel();" in performance
+    # 기능 홈: 보고서 fetch/렌더, 목표 에디터(PUT 전체 교체), 알림 토글.
+    assert "async function pfLoadRebalancePanel(" in rebalance
+    assert "function _pfRenderRebalanceReport(" in rebalance
+    assert "'/api/portfolio/rebalance'" in rebalance
+    assert "'/api/portfolio/rebalance/targets'" in rebalance
+    assert "method: 'PUT'" in rebalance
+    assert "목표 비중을 설정하면 이탈 현황이 표시됩니다." in rebalance
+    # 이탈 시 알림 = rebalance_drift 규칙(사용자당 singleton, 임계값 없음).
+    assert "alert_type: 'rebalance_drift'" in rebalance
+    assert "/api/notifications/alerts" in rebalance
+    assert "리밸런싱 — 목표 비중 이탈 시" in alerts
+    # 백그라운드 로드는 silent, 사용자 조작(저장/토글)은 토스트.
+    assert "reportApiError(e, '리밸런싱 현황', { silent: true });" in rebalance
+    assert "reportApiError(e, '리밸런싱 목표 저장');" in rebalance
+    assert "reportApiError(e, '리밸런싱 이탈 알림');" in rebalance
+    # 포맷터는 공용 헬퍼 재사용(중복 정의 금지).
+    assert "function fmtPct(" not in rebalance
+    assert "function fmtKrw(" not in rebalance
+    assert "function escapeHtml(" not in rebalance
+    # 스타일: 빈 상태는 .pf-risk-empty 재사용, 에디터 행은 모바일 2열 접기.
+    assert ".pf-rebal-table" in styles
+    assert ".pf-rebal-editor-row" in styles
+    assert ".pf-rebal-editor-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+
+
+def test_performance_tab_includes_dividend_calendar_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    divcal = (JS / "portfolio-dividends-calendar.js").read_text(encoding="utf-8")
+
+    # '배당 캘린더' 카드는 성과 탭의 리밸런싱 카드(#pfRebalanceWrap) 바로
+    # 다음, 평가금액 추이 앞에 산다.
+    assert 'id="pfDivCalWrap"' in html
+    assert 'id="pfDivCalContent"' in html
+    assert html.find('id="pfRebalanceWrap"') < html.find('id="pfDivCalWrap"')
+    assert html.find('id="pfDivCalWrap"') < html.find('id="pfValueChart"')
+    # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
+    assert "if (typeof pfLoadDividendCalendarPanel === 'function') pfLoadDividendCalendarPanel();" in performance
+    # 기능 홈: fetch/렌더/월 펼침은 portfolio-dividends-calendar.js.
+    assert "async function pfLoadDividendCalendarPanel(" in divcal
+    assert "function _pfRenderDividendCalendar(" in divcal
+    assert "function pfDivCalToggleMonth(" in divcal
+    assert "/api/portfolio/dividend-calendar?months=12" in divcal
+    # 빈 상태 + 확정/예상 배지 + 기준일은 월 합계 제외 안내.
+    assert "보유 종목의 배당 정보가 수집되면 표시됩니다." in divcal
+    assert "확정" in divcal and "예상" in divcal
+    assert "월 합계에서 제외" in divcal
+    # 백그라운드 로드는 silent 보고 + 패널 내 안내.
+    assert "reportApiError(e, '배당 캘린더', { silent: true });" in divcal
+    # 포맷터는 공용 헬퍼 재사용(중복 정의 금지).
+    assert "function fmtKrw(" not in divcal
+    assert "function escapeHtml(" not in divcal
+    # 스타일: 월 행/이벤트 그리드 + 예상(점선·흐림)/임박 강조 + 모바일 접기.
+    assert ".pf-divcal-month" in styles
+    assert ".pf-divcal-event" in styles
+    assert ".pf-divcal-badge.confirmed" in styles
+    assert ".pf-divcal-event.pf-divcal-est" in styles
+    assert ".pf-divcal-event.pf-divcal-upcoming .pf-divcal-date" in styles
+    assert ".pf-divcal-event { grid-template-columns: minmax(0, 1fr) auto; }" in styles
+
+
+def test_investment_journal_lives_in_analysis_view_and_performance_tab():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    journal = (JS / "portfolio-journal.js").read_text(encoding="utf-8")
+
+    # 표면 ① 종목 분석 화면: companyInfo 안(위키 Q&A 다음)의 '📝 투자 일지'
+    # 섹션 — renderResult 가 활성 종목으로 loadStockJournal 을 호출한다.
+    assert 'id="stockJournalSection"' in html
+    assert 'id="stockJournalForm"' in html
+    assert 'id="stockJournalList"' in html
+    assert "📝 투자 일지" in html
+    assert html.find('id="wikiQa"') < html.find('id="stockJournalSection"')
+    assert html.find('id="stockJournalSection"') < html.find('id="emptyState"')
+    assert "if (typeof loadStockJournal === 'function') loadStockJournal(data.stock_code);" in analysis
+    # 표면 ② 성과 탭 '투자 일지' 카드: 배당 캘린더 다음, 평가금액 추이 앞.
+    # 전 종목 타임라인(읽기/복기) — 성과 탭이 보일 때만 lazy 로드.
+    assert 'id="pfJournalWrap"' in html
+    assert 'id="pfJournalContent"' in html
+    assert html.find('id="pfDivCalWrap"') < html.find('id="pfJournalWrap"')
+    assert html.find('id="pfJournalWrap"') < html.find('id="pfValueChart"')
+    assert "if (typeof pfLoadJournalPanel === 'function') pfLoadJournalPanel();" in performance
+    # 기능 홈: fetch/렌더/폼/인라인 수정/삭제는 portfolio-journal.js.
+    assert "async function pfLoadJournalPanel(" in journal
+    assert "async function loadStockJournal(" in journal
+    assert "async function stockJournalSubmit()" in journal
+    assert "async function pfJournalSaveNote(" in journal
+    assert "async function pfJournalDelete(" in journal
+    assert "'/api/portfolio/journal'" in journal
+    assert "/api/portfolio/journal?stock_code=" in journal
+    assert "method: 'PATCH'" in journal
+    assert "method: 'DELETE'" in journal
+    # 백그라운드 로드는 silent, 사용자 조작(기록/수정/삭제)은 토스트.
+    assert "reportApiError(e, '투자 일지', { silent: true });" in journal
+    assert "reportApiError(e, '투자 일지 기록');" in journal
+    assert "reportApiError(e, '투자 일지 수정');" in journal
+    assert "reportApiError(e, '투자 일지 삭제');" in journal
+    # note 는 escapeHtml 로만 렌더(원시 HTML 금지) + 삭제는 confirm 게이트.
+    assert "${escapeHtml(entry.note)}" in journal
+    assert "window.confirm(" in journal
+    # 빈 상태/로그인 안내 문구.
+    assert "아직 기록이 없습니다" in journal
+    assert "기록된 투자 일지가 없습니다" in journal
+    # 포맷터는 공용 헬퍼 재사용(중복 정의 금지).
+    assert "function fmtPct(" not in journal
+    assert "function returnClass(" not in journal
+    assert "function escapeHtml(" not in journal
+    # 스타일: 카드/배지/폼 + 모바일 2열 접기(.pf-rebal-editor-row 패턴).
+    assert ".pf-journal-card" in styles
+    assert ".pf-journal-badge.buy" in styles
+    assert ".stock-journal" in styles
+    assert ".pf-journal-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+
+
+def test_pwa_manifest_declares_installable_app():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    manifest = json.loads((STATIC / "manifest.webmanifest").read_text(encoding="utf-8"))
+
+    # index.html wires the manifest + theme color + iOS raster touch icon.
+    assert '<link rel="manifest" href="./manifest.webmanifest">' in html
+    assert '<meta name="theme-color" content="#2563eb">' in html
+    assert '<link rel="apple-touch-icon" href="./static/icon-640.jpg">' in html
+
+    # Installability contract: standalone display from '/', Korean app name.
+    assert manifest["lang"] == "ko"
+    assert manifest["name"] == "Value Compass — 가치투자 나침반"
+    assert manifest["short_name"] == "Value Compass"
+    assert manifest["start_url"] == "/"
+    assert manifest["scope"] == "/"
+    assert manifest["display"] == "standalone"
+    # Colors mirror styles.css :root (--bg / --primary).
+    assert manifest["background_color"] == "#f5f5f5"
+    assert manifest["theme_color"] == "#2563eb"
+    icons = {icon["src"]: icon for icon in manifest["icons"]}
+    assert icons["/favicon.svg"]["type"] == "image/svg+xml"
+    assert icons["/favicon.svg"]["sizes"] == "any"
+    assert icons["/static/icon-640.jpg"]["type"] == "image/jpeg"
+    assert icons["/static/icon-640.jpg"]["sizes"] == "640x640"
+
+
+def test_pwa_service_worker_keeps_conservative_cache_contract():
+    sw = (STATIC / "sw.js").read_text(encoding="utf-8")
+    app_main = (JS / "app-main.js").read_text(encoding="utf-8")
+
+    # Registration is feature-detected and non-fatal (app-main.js tail).
+    assert "'serviceWorker' in navigator" in app_main
+    assert "navigator.serviceWorker.register('/sw.js')" in app_main
+    assert ".catch(" in app_main
+
+    # The SW must never break server-side ?v= cache busting:
+    # HTML is network-first and never cached; /api/* is never intercepted.
+    assert "NO HTML caching" in sw
+    assert "network-only" in sw
+    assert "request.mode === 'navigate'" in sw
+    assert "url.pathname.startsWith('/api/')) return;" in sw
+    # cache-first applies only to immutable ?v=-stamped URLs + manifest/icons.
+    assert "url.searchParams.has('v')" in sw
+    assert "isVersionStampedAsset(url) || isPrecachedShellExtra(url)" in sw
+    assert "'/manifest.webmanifest'" in sw
+    assert "'/favicon.svg'" in sw
+    assert "'/static/icon-640.jpg'" in sw
+    # No offline app shell — only a tiny inline navigation fallback.
+    assert "OFFLINE_HTML" in sw
+    assert "status: 503" in sw
+    # Versioned cache name + activate-time cleanup of old caches.
+    assert "const CACHE_NAME = 'vc-static-v" in sw
+    assert "keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))" in sw
+    # Guard against strategy regressions: no stale-while-revalidate, no
+    # caching inside the navigation branch.
+    assert "staleWhileRevalidate" not in sw
+    navigate_branch = sw.split("request.mode === 'navigate'", 1)[1]
+    assert "cache.put" not in navigate_branch
 
 
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():

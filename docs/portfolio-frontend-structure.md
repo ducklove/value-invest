@@ -1,6 +1,6 @@
 # Portfolio Frontend Structure
 
-작성일: 2026-04-30
+작성일: 2026-04-30 · 갱신: 2026-06-10 (analysis/admin 분할, PfStore 상태 통합 반영)
 
 `static/js/portfolio.js`가 4,000줄을 넘으면서 작은 UI 변경이 실시간 시세, 그래프, 메뉴, 태그, 현금흐름에 예상치 못한 영향을 주는 상태가 되었다. 1차 리팩토링은 빌드 시스템을 새로 도입하지 않고, classic script 전역 계약과 실행 순서를 유지하면서 기능별 파일 경계를 나누는 방식으로 진행했다.
 
@@ -13,23 +13,26 @@
 3. `quote-manager.js`: WebSocket 시세와 polling fallback lifecycle.
 4. `auth.js`: 로그인, 세션, 사용자 상태.
 5. `search.js`: 종목 검색 UI.
-6. `analysis.js`: 단일 종목 분석 UI.
-7. `portfolio-shell.js`: 공유 상태, 컬럼 표시 설정, 뷰 전환, NPS 탭(nps-tracker iframe) 진입점.
-8. `portfolio-data.js`: 포트폴리오 API 로딩, 정렬/필터 상태, 실시간 quote row 업데이트.
-9. `portfolio-order.js`: 보유종목 drag/drop 정렬과 저장.
-10. `portfolio-render.js`: 보유종목 테이블/카드 렌더링, 숫자 포맷, sparkline, benchmark 표시.
-11. `portfolio-actions.js`: 그룹/benchmark/편집/삭제/검색/목표가/외부 링크 액션.
-12. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
-13. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
-14. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
-15. `portfolio-performance.js`: 추이 분석 탭 shell, 영역지도, 성과 데이터 로딩.
-16. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화.
-17. `portfolio-group-composition.js`: 그룹 구성 추이 drill-down.
-18. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
-19. `portfolio-tag-summary.js`: 태그 요약 UI.
-20. `portfolio-events.js`: document-level delegated event handlers.
-21. `insights.js`: 인사이트 목록 UI.
-22. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
+6. `analysis-charts.js`: 주간/연간 가치평가 차트 렌더, 기간 전환, 목표가 오버레이, 차트 모달.
+7. `analysis-filings.js`: DART AI 리뷰 카드/상세, 리포트 테이블, 위키 요약 로딩.
+8. `analysis.js`: 단일 종목 분석 본체 — 검색, 기업 헤더, 개인화, analyze SSE, 위키 Q&A.
+9. `portfolio-store.js`: `PfStore` — 파일 간 공유 포트폴리오 상태의 단일 컨테이너.
+10. `portfolio-shell.js`: 컬럼 표시 설정, 뷰 전환, NPS 탭(nps-tracker iframe) 진입점, 파일 로컬 plumbing.
+11. `portfolio-data.js`: 포트폴리오 API 로딩, 정렬/필터 상태, 실시간 quote row 업데이트.
+12. `portfolio-order.js`: 보유종목 drag/drop 정렬과 저장.
+13. `portfolio-render.js`: 보유종목 테이블/카드 렌더링, 숫자 포맷, sparkline, benchmark 표시.
+14. `portfolio-actions.js`: 그룹/benchmark/편집/삭제/검색/목표가/외부 링크 액션.
+15. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
+16. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
+17. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
+18. `portfolio-performance.js`: 추이 분석 탭 shell, 영역지도, 성과 데이터 로딩.
+19. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화.
+20. `portfolio-group-composition.js`: 그룹 구성 추이 drill-down.
+21. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
+22. `portfolio-tag-summary.js`: 태그 요약 UI.
+23. `portfolio-events.js`: document-level delegated event handlers.
+24. `insights.js`: 인사이트 목록 UI.
+25. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
 
 ## Legacy Entrypoint
 
@@ -42,7 +45,7 @@
 - UI 이벤트는 가능하면 `portfolio-events.js`의 delegated handler에 추가한다.
 - 테이블 전체 재렌더가 필요한지, 특정 셀 in-place update로 충분한지 먼저 구분한다.
 - NAV/평가금액 추이 차트는 `portfolio-trends.js`와 `portfolio-trend-chart.js` 안에서만 수정한다.
-- 전역 변수 추가가 필요하면 `portfolio-shell.js` 또는 해당 도메인 파일 상단에 두고, 이름 앞에 `pf` 또는 `_pf`를 붙인다.
+- 파일 간 공유 상태는 `PfStore`(portfolio-store.js)에 둔다 — sort/filters/edit/manualOrder/snapshots/currency/prefs 그룹 또는 최상위 속성. 단일 파일만 쓰는 plumbing(타이머, DOM ref, 상수)만 해당 파일 상단 `let`으로 두고 이름 앞에 `_pf`를 붙인다.
 
 ## Test Guardrails
 
@@ -52,4 +55,12 @@
 - 새 HTML이 legacy `portfolio.js`를 직접 로드하지 않는다.
 - 포트폴리오 split 파일이 1,000줄 미만을 유지한다.
 
+- `ANALYSIS_SPLIT_FILES` / `ADMIN_SPLIT_FILES` 계약: analysis/admin 분할 파일의 로드 순서, 기능 귀속(함수가 약속된 파일에 존재), 1,000줄 상한.
+
 이 테스트가 실패하면 단순히 숫자를 고치지 말고, 왜 해당 파일이 커졌는지 보고 도메인 경계를 다시 잘라야 한다.
+
+## Admin Page
+
+`static/admin.html`은 inline `apiFetch` → `admin.js`(부트스트랩·AI 설정·공용 헬퍼) →
+`admin-observability.js`(관측성 패널·라이브 갱신·수동 잡) →
+`admin-linked-projects.js`(연결 프로젝트 config·외국/우선주 배당 관리) 순서로 로드한다.
