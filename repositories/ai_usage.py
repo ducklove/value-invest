@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def insert_ai_usage_event(
@@ -23,7 +23,7 @@ async def insert_ai_usage_event(
     ok: bool = True,
     error: str | None = None,
 ):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         """
         INSERT INTO ai_usage_events
@@ -48,7 +48,7 @@ async def insert_ai_usage_event(
 
 
 async def summarize_ai_usage(days: int = 30) -> dict:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         """
         SELECT feature, model, model_profile,

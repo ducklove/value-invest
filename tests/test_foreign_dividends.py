@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+import repositories.db
 import foreign_dividends
 from routes import admin as admin_route
 
@@ -221,7 +222,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
 class CacheHelpersTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -327,7 +328,7 @@ class CacheHelpersTests(unittest.IsolatedAsyncioTestCase):
 class GetTrailingDividendsResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -408,7 +409,7 @@ class GetTrailingDividendsResolutionTests(unittest.IsolatedAsyncioTestCase):
 class AdminEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

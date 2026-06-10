@@ -1,200 +1,33 @@
 import aiosqlite
 import json
-from pathlib import Path
 from datetime import datetime
 
-from cache_layer import CacheEntry, expires_at_for, parse_iso
-from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
+from cache_layer import (
+    CACHE_NS_LATEST_REPORT,
+    CACHE_NS_REPORT_LIST,
+    CacheEntry,
+    expires_at_for,
+    parse_iso,
+)
+from repositories import db as _db
 
-DB_PATH = Path(__file__).parent / "cache.db"
+# 커넥션 싱글톤의 원본은 repositories/db.py 로 이동했다. 아래는 기존
+# ``cache.get_db()`` / ``cache.DB_PATH`` 호출부(레거시 모듈, deploy.sh
+# repair 스크립트)를 위한 얇은 재수출. 주의: DB_PATH 는 읽기 전용 별칭
+# 이라 테스트/스크립트가 경로를 바꾸려면 repositories.db.DB_PATH 를
+# 패치해야 한다 — get_db() 가 호출 시점에 그쪽 전역을 읽는다.
+DB_PATH = _db.DB_PATH
+get_db = _db.get_db
+transaction = _db.transaction
 
-CACHE_NS_LATEST_REPORT = "reports.latest"
-CACHE_NS_REPORT_LIST = "reports.list"
-
-_conn: aiosqlite.Connection | None = None
 _corp_code_table: dict[str, dict[str, str]] | None = None
 
 
-async def get_db() -> aiosqlite.Connection:
-    global _conn
-    if _conn is None:
-        _conn = await aiosqlite.connect(DB_PATH)
-        _conn.row_factory = aiosqlite.Row
-        await _conn.execute("PRAGMA journal_mode=WAL")
-        await _conn.execute("PRAGMA busy_timeout=5000")
-        await _conn.execute("PRAGMA foreign_keys=ON")
-    return _conn
-
-
 async def close_db():
-    """Shutdown: close the shared connection."""
-    global _conn, _corp_code_table
-    if _conn is not None:
-        await _conn.close()
-        _conn = None
+    """Shutdown: close the shared connection (+ cache.py 의 메모리 테이블 리셋)."""
+    global _corp_code_table
+    await _db.close_db()
     _corp_code_table = None
-
-
-async def _refresh_group_snapshots(db: aiosqlite.Connection, google_sub: str | None = None, snap_date: str | None = None):
-    """Rebuild pre-aggregated group weights from per-stock snapshots.
-
-    Group trend reads must stay cheap as history grows, so the expensive
-    stock-level GROUP BY happens once at snapshot time (or one-time backfill),
-    not on every chart request.
-    """
-    where = []
-    params: list[str] = []
-    if google_sub is not None:
-        where.append("ps.google_sub = ?")
-        params.append(google_sub)
-    if snap_date is not None:
-        where.append("ps.date = ?")
-        params.append(snap_date)
-    where_sql = "WHERE " + " AND ".join(where) if where else ""
-
-    if google_sub is not None and snap_date is not None:
-        await db.execute(
-            "DELETE FROM portfolio_group_snapshots WHERE google_sub = ? AND date = ?",
-            (google_sub, snap_date),
-        )
-    elif google_sub is not None:
-        await db.execute("DELETE FROM portfolio_group_snapshots WHERE google_sub = ?", (google_sub,))
-    else:
-        await db.execute("DELETE FROM portfolio_group_snapshots")
-
-    await db.execute(
-        f"""
-        WITH stock_rows AS (
-            SELECT
-                ps.google_sub,
-                ps.date,
-                COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
-                ps.stock_code,
-                ps.market_value
-            FROM portfolio_stock_snapshots ps
-            LEFT JOIN user_portfolio up
-              ON up.google_sub = ps.google_sub
-             AND up.stock_code = ps.stock_code
-            {where_sql}
-        ),
-        day_totals AS (
-            SELECT google_sub, date, SUM(market_value) AS total_value
-            FROM stock_rows
-            GROUP BY google_sub, date
-        ),
-        group_rows AS (
-            SELECT
-                google_sub,
-                date,
-                group_name,
-                SUM(market_value) AS market_value,
-                COUNT(DISTINCT stock_code) AS stock_count
-            FROM stock_rows
-            GROUP BY google_sub, date, group_name
-        )
-        INSERT OR REPLACE INTO portfolio_group_snapshots
-        (google_sub, date, group_name, market_value, stock_count, total_value, weight_pct)
-        SELECT
-            gr.google_sub,
-            gr.date,
-            gr.group_name,
-            gr.market_value,
-            gr.stock_count,
-            dt.total_value AS total_value,
-            CASE
-                WHEN dt.total_value != 0
-                THEN gr.market_value * 100.0 / dt.total_value
-                ELSE NULL
-            END AS weight_pct
-        FROM group_rows gr
-        JOIN day_totals dt
-          ON dt.google_sub = gr.google_sub
-         AND dt.date = gr.date
-        """,
-        tuple(params),
-    )
-
-
-async def _refresh_stock_weight_snapshots(db: aiosqlite.Connection, google_sub: str | None = None, snap_date: str | None = None):
-    """Rebuild pre-aggregated per-stock weights for group drill-down charts."""
-    where = []
-    params: list[str] = []
-    if google_sub is not None:
-        where.append("ps.google_sub = ?")
-        params.append(google_sub)
-    if snap_date is not None:
-        where.append("ps.date = ?")
-        params.append(snap_date)
-    where_sql = "WHERE " + " AND ".join(where) if where else ""
-
-    if google_sub is not None and snap_date is not None:
-        await db.execute(
-            "DELETE FROM portfolio_stock_weight_snapshots WHERE google_sub = ? AND date = ?",
-            (google_sub, snap_date),
-        )
-    elif google_sub is not None:
-        await db.execute("DELETE FROM portfolio_stock_weight_snapshots WHERE google_sub = ?", (google_sub,))
-    else:
-        await db.execute("DELETE FROM portfolio_stock_weight_snapshots")
-
-    await db.execute(
-        f"""
-        WITH stock_rows AS (
-            SELECT
-                ps.google_sub,
-                ps.date,
-                ps.stock_code,
-                COALESCE(up.stock_name, ps.stock_code) AS stock_name,
-                COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
-                ps.market_value
-            FROM portfolio_stock_snapshots ps
-            LEFT JOIN user_portfolio up
-              ON up.google_sub = ps.google_sub
-             AND up.stock_code = ps.stock_code
-            {where_sql}
-        ),
-        day_totals AS (
-            SELECT google_sub, date, SUM(market_value) AS total_value
-            FROM stock_rows
-            GROUP BY google_sub, date
-        ),
-        group_totals AS (
-            SELECT google_sub, date, group_name, SUM(market_value) AS group_value
-            FROM stock_rows
-            GROUP BY google_sub, date, group_name
-        )
-        INSERT OR REPLACE INTO portfolio_stock_weight_snapshots
-        (google_sub, date, group_name, stock_code, stock_name, market_value, group_value, total_value, group_weight_pct, portfolio_weight_pct)
-        SELECT
-            sr.google_sub,
-            sr.date,
-            sr.group_name,
-            sr.stock_code,
-            sr.stock_name,
-            sr.market_value,
-            gt.group_value,
-            dt.total_value,
-            CASE
-                WHEN gt.group_value != 0
-                THEN sr.market_value * 100.0 / gt.group_value
-                ELSE NULL
-            END AS group_weight_pct,
-            CASE
-                WHEN dt.total_value != 0
-                THEN sr.market_value * 100.0 / dt.total_value
-                ELSE NULL
-            END AS portfolio_weight_pct
-        FROM stock_rows sr
-        JOIN group_totals gt
-          ON gt.google_sub = sr.google_sub
-         AND gt.date = sr.date
-         AND gt.group_name = sr.group_name
-        JOIN day_totals dt
-          ON dt.google_sub = sr.google_sub
-         AND dt.date = sr.date
-        """,
-        tuple(params),
-    )
 
 
 async def init_db():
@@ -997,60 +830,6 @@ async def delete_cache_value(namespace: str, key: str) -> None:
     await db.commit()
 
 
-_DEFAULT_GROUPS = [
-    ("한국주식", 0, 1, "kr"),
-    ("해외주식", 1, 1, "foreign"),
-    ("기타", 2, 1, "etc"),
-]
-
-_SPECIAL_ASSETS_SET = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
-
-
-def _is_special_or_cash(code: str) -> bool:
-    return code in _SPECIAL_ASSETS_SET or code.startswith("CASH_")
-
-
-def _default_type_for_code(stock_code: str) -> str:
-    """Return the default_type key (kr/foreign/etc) for a stock code."""
-    if _is_special_or_cash(stock_code):
-        return "etc"
-    if _is_portfolio_korean_stock(stock_code):
-        return "kr"
-    return "foreign"
-
-
-async def _resolve_default_group_name(db: aiosqlite.Connection, google_sub: str, stock_code: str) -> str:
-    """Look up the actual current group name for a default group type, even if renamed."""
-    dtype = _default_type_for_code(stock_code)
-    cursor = await db.execute(
-        "SELECT group_name FROM portfolio_groups WHERE google_sub = ? AND default_type = ?",
-        (google_sub, dtype),
-    )
-    row = await cursor.fetchone()
-    if row:
-        return row["group_name"]
-    # Fallback: original name
-    for name, _, _, dt in _DEFAULT_GROUPS:
-        if dt == dtype:
-            return name
-    return "기타"
-
-
-async def _ensure_default_groups(db: aiosqlite.Connection, google_sub: str):
-    cursor = await db.execute(
-        "SELECT COUNT(*) AS cnt FROM portfolio_groups WHERE google_sub = ? AND is_default = 1",
-        (google_sub,),
-    )
-    row = await cursor.fetchone()
-    if row["cnt"] >= len(_DEFAULT_GROUPS):
-        return
-    for name, order, is_default, dtype in _DEFAULT_GROUPS:
-        await db.execute(
-            "INSERT OR IGNORE INTO portfolio_groups (google_sub, group_name, sort_order, is_default, default_type) VALUES (?, ?, ?, ?, ?)",
-            (google_sub, name, order, is_default, dtype),
-        )
-
-
 async def is_corp_codes_loaded() -> bool:
     db = await get_db()
     cursor = await db.execute("SELECT COUNT(*) FROM corp_codes")
@@ -1172,6 +951,13 @@ async def get_corp_name(stock_code: str) -> str | None:
     return row["corp_name"] if row else None
 
 
+async def resolve_stock_name(stock_code: str) -> str | None:
+    name = await get_corp_name(stock_code)
+    if name:
+        return name
+    return None
+
+
 async def load_corp_code_table(*, force: bool = False) -> dict[str, dict[str, str]]:
     """Return the full internal listed-company code table.
 
@@ -1207,7 +993,7 @@ async def get_db_stats() -> dict:
         tables[tname] = (await cnt.fetchone())["c"]
     # DB file size
     import os
-    db_size = os.path.getsize(DB_PATH) if DB_PATH.exists() else 0
+    db_size = os.path.getsize(_db.DB_PATH) if _db.DB_PATH.exists() else 0
     return {"tables": tables, "db_size_bytes": db_size}
 
 
@@ -1254,8 +1040,10 @@ async def get_report_list(stock_code: str, ttl_minutes: int | None = None) -> di
 
 # ---------------------------------------------------------------------------
 # Repository re-exports — see repositories/ package. Imported at the bottom so
-# get_db() and shared primitives above are already defined; repositories reach
-# the connection via cache.get_db() (no import cycle).
+# shared primitives above are already defined; repositories reach the
+# connection via repositories.db.get_db() (no import cycle). The leading-
+# underscore names are re-imported because init_db()'s migration pass and a
+# few legacy ``cache._<fn>`` callers (tests 포함) still use them.
 # ---------------------------------------------------------------------------
 from repositories.system_events import (  # noqa: E402
     insert_system_event,
@@ -1304,7 +1092,10 @@ from repositories.foreign_dividends import (  # noqa: E402
     get_foreign_dividend,
 )
 from repositories.portfolio import (  # noqa: E402
-    resolve_stock_name,
+    _DEFAULT_GROUPS,
+    _default_type_for_code,
+    _resolve_default_group_name,
+    _ensure_default_groups,
     get_portfolio,
     get_portfolio_tags_for_user,
     get_portfolio_target_metrics,
@@ -1335,6 +1126,8 @@ from repositories.portfolio import (  # noqa: E402,F811
     save_portfolio_groups_order,
 )
 from repositories.snapshots import (  # noqa: E402
+    _refresh_group_snapshots,
+    _refresh_stock_weight_snapshots,
     CashflowBalanceError,
     get_latest_snapshot,
     get_snapshot_by_date,

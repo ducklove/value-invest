@@ -30,6 +30,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 import cache
+import repositories.db
 import observability
 from core import app_factory
 from core.app_factory import create_app
@@ -57,7 +58,7 @@ class IntegrationAppHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         # A prior test may have left cache._conn pointing at a deleted temp DB.
         await cache.close_db()

@@ -7,11 +7,11 @@ these as ``cache.<fn>`` so wiki_ingestion and the wiki routes are unchanged.
 
 from __future__ import annotations
 
-import cache
+from repositories.db import get_db
 
 
 async def get_pdf_cache_by_sha1(pdf_sha1: str) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT * FROM report_pdf_cache WHERE pdf_sha1 = ?", (pdf_sha1,),
     )
@@ -21,7 +21,7 @@ async def get_pdf_cache_by_sha1(pdf_sha1: str) -> dict | None:
 
 async def save_pdf_cache_row(row: dict) -> None:
     """Upsert a row into report_pdf_cache. `row` must contain pdf_sha1."""
-    db = await cache.get_db()
+    db = await get_db()
     cols = [
         "pdf_sha1", "stock_code", "pdf_url", "file_path", "file_bytes",
         "parsed_text", "parse_status", "parse_error", "downloaded_at", "parsed_at",
@@ -39,7 +39,7 @@ async def save_pdf_cache_row(row: dict) -> None:
 
 async def pdf_is_already_summarized(stock_code: str, pdf_sha1: str) -> bool:
     """Returns True if a wiki entry for this PDF already exists."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT 1 FROM stock_wiki_entries WHERE stock_code = ? AND source_type = 'broker_report' AND source_ref = ? LIMIT 1",
         (stock_code, pdf_sha1),
@@ -51,7 +51,7 @@ async def save_wiki_entry(entry: dict) -> int:
     """Insert a wiki entry. Returns the new row id. Enforces UNIQUE via
     ON CONFLICT — duplicate (stock, source_type, source_ref) replaces
     the prior summary so re-summarizing with a better model overwrites."""
-    db = await cache.get_db()
+    db = await get_db()
     cols = [
         "stock_code", "source_type", "source_ref", "report_date", "firm",
         "title", "recommendation", "target_price", "summary_md", "key_points_md",
@@ -70,7 +70,7 @@ async def save_wiki_entry(entry: dict) -> int:
 
 
 async def get_wiki_entries(stock_code: str, limit: int = 20) -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     # LEFT JOIN report_pdf_cache so each entry carries the PDF URL it was
     # summarized from. Frontend uses this to attach summaries to matching
     # rows in the broker-report table (and keep the Q&A Retrieval layer
@@ -95,7 +95,7 @@ async def search_wiki(stock_code: str, query: str, limit: int = 5) -> list[dict]
     fewer than `limit` matches (e.g. question is too short for meaningful
     tokens, or FTS index is empty). Returned rows are the same shape as
     get_wiki_entries()."""
-    db = await cache.get_db()
+    db = await get_db()
     # FTS MATCH expects a sanitized query — strip characters FTS treats as
     # operators to avoid "fts5: syntax error near ..." on user input.
     sanitized = _sanitize_fts_query(query)
@@ -136,7 +136,7 @@ def _sanitize_fts_query(q: str) -> str:
 
 
 async def qa_count_since(google_sub: str, since_iso: str) -> int:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT COUNT(*) AS n FROM stock_qa_history WHERE google_sub = ? AND created_at >= ?",
         (google_sub, since_iso),
@@ -146,7 +146,7 @@ async def qa_count_since(google_sub: str, since_iso: str) -> int:
 
 
 async def save_qa_entry(entry: dict) -> int:
-    db = await cache.get_db()
+    db = await get_db()
     cols = [
         "google_sub", "stock_code", "question", "answer_md", "source_ids",
         "model", "tokens_in", "tokens_out", "cost_usd", "created_at",
@@ -165,7 +165,7 @@ async def get_wiki_stats() -> dict:
     """Aggregate counts for the wiki pipeline — cheap queries, safe to
     call on every page load. Returns {stocks_covered, total_entries,
     pdfs_cached, latest_entry_date}."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT COUNT(DISTINCT stock_code) AS stocks, COUNT(*) AS entries, MAX(COALESCE(report_date, created_at)) AS latest FROM stock_wiki_entries",
     )
@@ -200,7 +200,7 @@ async def select_wiki_target_stocks(recent_days: int = 30) -> list[str]:
     regardless of session state, so folding it in makes "user searched
     for this stock" the robust trigger the pipeline needed.
     """
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         f"""SELECT DISTINCT stock_code FROM (
             SELECT stock_code FROM user_portfolio

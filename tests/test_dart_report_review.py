@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 import cache
+import repositories.db
 import dart_report_review
 from routes import dart_review as dart_review_route
 
@@ -224,7 +225,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
 class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

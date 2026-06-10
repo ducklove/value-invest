@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def get_app_setting(key: str) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT key, value, is_secret, updated_by, updated_at FROM app_settings WHERE key = ?",
         (key,),
@@ -21,7 +21,7 @@ async def get_app_setting(key: str) -> dict | None:
 
 
 async def set_app_setting(key: str, value: str, *, is_secret: bool = False, updated_by: str | None = None):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         """
         INSERT INTO app_settings (key, value, is_secret, updated_by, updated_at)
@@ -38,6 +38,6 @@ async def set_app_setting(key: str, value: str, *, is_secret: bool = False, upda
 
 
 async def delete_app_setting(key: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute("DELETE FROM app_settings WHERE key = ?", (key,))
     await db.commit()

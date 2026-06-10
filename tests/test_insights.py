@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+import repositories.db
 from routes import insights
 
 
@@ -27,7 +28,7 @@ def _request(method: str = "GET", path: str = "/api/insights") -> Request:
 class InsightRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

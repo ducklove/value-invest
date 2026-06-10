@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import cache
+import repositories.db
 from routes import portfolio as portfolio_route
 from services.portfolio import dividends
 from services.portfolio import foreign
@@ -16,7 +17,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         # Previous test may have left cache._conn pointing at a now-deleted
         # temp DB or a closed handle. close_db() is idempotent and resets
@@ -450,7 +451,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
     async def test_replace_portfolio_atomic_bulk_swap(self):
         # replace_portfolio opens its own aiosqlite connection for an atomic
         # delete-all + insert (the bulk-import "replace" path). Exercises that
-        # fresh-connection path against cache.DB_PATH.
+        # fresh-connection path against repositories.db.DB_PATH.
         await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
         await cache.replace_portfolio("u1", [
             {"stock_code": "000660", "stock_name": "SK하이닉스", "quantity": 5, "avg_price": 180000},

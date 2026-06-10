@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import cache
+import repositories.db
 import wiki_ingestion
 
 
@@ -46,7 +47,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         # Redirect the PDF cache dir to a temp location so tests don't
         # write into the repo.
@@ -461,7 +462,7 @@ class SkipReasonAggregationTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.temp_dir.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.temp_dir.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

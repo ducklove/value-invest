@@ -4,12 +4,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import cache
+import repositories.db
 
 
 class PortfolioCashflowTransactionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.temp_dir.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.temp_dir.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

@@ -9,11 +9,11 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def get_dart_report_review(stock_code: str, rcept_no: str | None = None) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     if rcept_no:
         cursor = await db.execute(
             "SELECT * FROM dart_report_reviews WHERE stock_code = ? AND rcept_no = ?",
@@ -39,7 +39,7 @@ async def get_dart_report_review(stock_code: str, rcept_no: str | None = None) -
 
 
 async def save_dart_report_review(review: dict) -> dict:
-    db = await cache.get_db()
+    db = await get_db()
     now = datetime.now().isoformat()
     review_payload = review.get("review") or {}
     comparison_reports = review.get("comparison_reports") or []

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def upsert_foreign_dividends_auto(rows: list[dict]) -> int:
@@ -26,7 +26,7 @@ async def upsert_foreign_dividends_auto(rows: list[dict]) -> int:
     if not rows:
         return 0
     now = datetime.now().isoformat(timespec="seconds")
-    db = await cache.get_db()
+    db = await get_db()
     written = 0
     for r in rows:
         code = (r.get("stock_code") or "").strip()
@@ -62,7 +62,7 @@ async def upsert_foreign_dividend_manual(
     if not code:
         raise ValueError("stock_code is required")
     now = datetime.now().isoformat(timespec="seconds")
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         """INSERT INTO foreign_dividends
            (stock_code, dps_native, currency, dps_krw, source, manual_note, fetched_at)
@@ -86,7 +86,7 @@ async def delete_foreign_dividend(stock_code: str) -> bool:
     code = (stock_code or "").strip()
     if not code:
         return False
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "DELETE FROM foreign_dividends WHERE stock_code = ?",
         (code,),
@@ -100,7 +100,7 @@ async def list_foreign_dividends() -> list[dict]:
     source surfaced so the UI can badge manual vs. auto. Sorted by
     source (manual first — those are the ones the admin is curating)
     then by stock_code."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         """SELECT stock_code, dps_native, currency, dps_krw, source,
                   manual_note, fetched_at
@@ -111,7 +111,7 @@ async def list_foreign_dividends() -> list[dict]:
 
 
 async def get_foreign_dividends_count() -> int:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute("SELECT COUNT(*) AS n FROM foreign_dividends")
     row = await cursor.fetchone()
     return int(row["n"]) if row else 0
@@ -124,7 +124,7 @@ async def get_foreign_dividend(stock_code: str) -> dict | None:
     code = (stock_code or "").strip()
     if not code:
         return None
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT stock_code, dps_krw, source FROM foreign_dividends WHERE stock_code = ?",
         (code,),

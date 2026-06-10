@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 import cache
+import repositories.db
 import economic_calendar
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
@@ -65,7 +66,7 @@ class NotificationHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -432,7 +433,7 @@ class AlertEngineHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -802,7 +803,7 @@ class KakaoChannelTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -851,7 +852,7 @@ class CalendarAlertEngineHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

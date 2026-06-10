@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def save_benchmark_rows(code: str, rows: list[dict], source: str = "yfinance") -> int:
@@ -22,7 +22,7 @@ async def save_benchmark_rows(code: str, rows: list[dict], source: str = "yfinan
         return 0
     # Match the rest of this module — plain local-time ISO (no TZ suffix).
     fetched_at = datetime.now().isoformat(timespec="seconds")
-    db = await cache.get_db()
+    db = await get_db()
     await db.executemany(
         """INSERT INTO benchmark_daily (code, date, close, source, fetched_at)
            VALUES (?, ?, ?, ?, ?)
@@ -39,7 +39,7 @@ async def save_benchmark_rows(code: str, rows: list[dict], source: str = "yfinan
 async def get_benchmark_rows(code: str, start: str | None = None, end: str | None = None) -> list[dict]:
     """Read {date, close} rows for a benchmark code, optionally bounded by
     inclusive [start, end] (YYYY-MM-DD). Ordered by date ascending."""
-    db = await cache.get_db()
+    db = await get_db()
     clauses = ["code = ?"]
     params: list = [code]
     if start:
@@ -56,7 +56,7 @@ async def get_benchmark_rows(code: str, start: str | None = None, end: str | Non
 async def get_benchmark_last_date(code: str) -> str | None:
     """Return the latest stored date for a code, or None if table is empty
     for that code. Used to compute the incremental fetch window."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT MAX(date) AS d FROM benchmark_daily WHERE code = ?",
         (code,),
@@ -68,7 +68,7 @@ async def get_benchmark_last_date(code: str) -> str | None:
 async def get_benchmark_earliest_date(code: str) -> str | None:
     """Return the earliest stored date for a code. Used by lazy backfill to
     decide whether the request's `start` predates what we have on disk."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT MIN(date) AS d FROM benchmark_daily WHERE code = ?",
         (code,),

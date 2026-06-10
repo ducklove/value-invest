@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import cache  # noqa: E402
+import repositories.db  # noqa: E402
 
 
 USER_TABLES = [
@@ -84,14 +85,16 @@ def _backup_sqlite(source: Path, backup_path: Path) -> None:
 
 
 async def _ensure_target_schema(target: Path) -> None:
-    original_db_path = cache.DB_PATH
+    # 커넥션이 읽는 경로의 원본은 repositories.db.DB_PATH 다 (cache.DB_PATH
+    # 는 읽기 전용 별칭이라 대입해도 효과 없음).
+    original_db_path = repositories.db.DB_PATH
     try:
-        cache.DB_PATH = target
+        repositories.db.DB_PATH = target
         await cache.close_db()
         await cache.init_db()
         await cache.close_db()
     finally:
-        cache.DB_PATH = original_db_path
+        repositories.db.DB_PATH = original_db_path
 
 
 def _find_source_user(conn: sqlite3.Connection, source_google_sub: str | None, source_email: str | None) -> sqlite3.Row:
