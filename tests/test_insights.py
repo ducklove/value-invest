@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from repositories import insight_posts as insight_posts_repo
 import repositories.db
 from routes import insights
 
@@ -75,7 +76,7 @@ class InsightRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["result_summary"]["return_pct"], 42.5)
 
     async def test_private_post_visible_only_to_author(self):
-        await cache.create_insight_post(
+        await insight_posts_repo.create_insight_post(
             google_sub="u1",
             title="private",
             insight_md="body",
@@ -101,7 +102,7 @@ class InsightRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc.exception.status_code, 400)
 
     async def test_delete_allows_author_only(self):
-        post = await cache.create_insight_post(
+        post = await insight_posts_repo.create_insight_post(
             google_sub="u1",
             title="delete me",
             insight_md="body",

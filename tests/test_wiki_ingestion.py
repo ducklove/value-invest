@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import cache
+from repositories import system_events as system_events_repo
+from repositories import wiki as wiki_repo
 import repositories.db
 import wiki_ingestion
 
@@ -155,7 +157,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
         )
         await db.commit()
 
-        codes = await cache.select_wiki_target_stocks(recent_days=30)
+        codes = await wiki_repo.select_wiki_target_stocks(recent_days=30)
         self.assertIn("005930", codes)
         self.assertIn("000660", codes)
         self.assertIn("035420", codes)
@@ -182,7 +184,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
             ("042660", "한화오션", old_ts, "{}"),
         )
         await db.commit()
-        codes = await cache.select_wiki_target_stocks(recent_days=30)
+        codes = await wiki_repo.select_wiki_target_stocks(recent_days=30)
         self.assertIn("051910", codes)
         self.assertNotIn("042660", codes)
 
@@ -214,7 +216,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
             ("u2", "005930", datetime.now().isoformat()),
         )
         await db.commit()
-        codes = await cache.select_wiki_target_stocks(recent_days=30)
+        codes = await wiki_repo.select_wiki_target_stocks(recent_days=30)
         self.assertEqual(codes.count("005930"), 1)
 
     # -- dedup by sha1 --
@@ -232,10 +234,10 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
             "downloaded_at": "2026-04-17T00:00:00",
             "parsed_at": "2026-04-17T00:00:00",
         }
-        await cache.save_pdf_cache_row(row)
+        await wiki_repo.save_pdf_cache_row(row)
         # Upsert with different URL but same sha1 → still one row.
         row2 = dict(row, pdf_url="https://stock.pstatic.net/stock-research/different.pdf")
-        await cache.save_pdf_cache_row(row2)
+        await wiki_repo.save_pdf_cache_row(row2)
         db = await cache.get_db()
         cursor = await db.execute("SELECT COUNT(*) AS n, pdf_url FROM report_pdf_cache WHERE pdf_sha1 = ?", (row["pdf_sha1"],))
         r = await cursor.fetchone()
@@ -248,7 +250,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
         stock = "005930"
         sha = "abcd" * 10
         # Pre-seed PDF cache + wiki entry.
-        await cache.save_pdf_cache_row({
+        await wiki_repo.save_pdf_cache_row({
             "pdf_sha1": sha, "stock_code": stock,
             "pdf_url": "https://stock.pstatic.net/stock-research/x.pdf",
             "file_path": None, "file_bytes": 1,
@@ -257,7 +259,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
             "downloaded_at": "2026-04-17T00:00:00",
             "parsed_at": "2026-04-17T00:00:00",
         })
-        await cache.save_wiki_entry({
+        await wiki_repo.save_wiki_entry({
             "stock_code": stock, "source_type": "broker_report", "source_ref": sha,
             "report_date": "2026-03-10", "firm": "F", "title": "T",
             "recommendation": "Buy", "target_price": 1.0,
@@ -303,7 +305,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
             result = await wiki_ingestion.ingest_pdf_for_report(stock, report)
         self.assertTrue(result.get("ok"), msg=f"unexpected result: {result}")
 
-        entries = await cache.get_wiki_entries(stock, limit=10)
+        entries = await wiki_repo.get_wiki_entries(stock, limit=10)
         self.assertEqual(len(entries), 1)
         e = entries[0]
         self.assertEqual(e["stock_code"], stock)
@@ -372,7 +374,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fts_search_finds_seeded_entry(self):
         stock = "005930"
-        await cache.save_wiki_entry({
+        await wiki_repo.save_wiki_entry({
             "stock_code": stock, "source_type": "broker_report", "source_ref": "sha1",
             "report_date": "2026-03-10", "firm": "F", "title": "HBM 수혜주 전망",
             "recommendation": "Buy", "target_price": 90000.0,
@@ -382,13 +384,13 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
             "created_at": "2026-04-17T00:00:00",
         })
         # FTS query containing a keyword present in summary/key_points.
-        rows = await cache.search_wiki(stock, "HBM", limit=3)
+        rows = await wiki_repo.search_wiki(stock, "HBM", limit=3)
         self.assertEqual(len(rows), 1)
         self.assertIn("HBM", rows[0]["summary_md"])
 
     async def test_search_wiki_fallback_when_fts_empty(self):
         stock = "005930"
-        await cache.save_wiki_entry({
+        await wiki_repo.save_wiki_entry({
             "stock_code": stock, "source_type": "broker_report", "source_ref": "sha1",
             "report_date": "2026-03-10", "firm": "F", "title": "T",
             "recommendation": "Buy", "target_price": 90000.0,
@@ -398,7 +400,7 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
             "created_at": "2026-04-17T00:00:00",
         })
         # Query with no matching tokens → FTS returns 0 → fallback to recency.
-        rows = await cache.search_wiki(stock, "nonexistentgibberishzzz", limit=3)
+        rows = await wiki_repo.search_wiki(stock, "nonexistentgibberishzzz", limit=3)
         self.assertGreaterEqual(len(rows), 1)
 
     # -- background loop --
@@ -573,7 +575,7 @@ class SkipReasonAggregationTests(unittest.IsolatedAsyncioTestCase):
             # detached. Give the loop one more scheduling cycle.
             await asyncio.sleep(0.05)
 
-        rows = await cache.get_system_events(source="wiki_ingestion")
+        rows = await system_events_repo.get_system_events(source="wiki_ingestion")
         self.assertGreaterEqual(len(rows), 1)
         import json as _json
         last = rows[0]  # newest first

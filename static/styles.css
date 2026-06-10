@@ -2160,6 +2160,55 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   .pf-rebal-editor-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* Dividend calendar card (성과 탭 '배당 캘린더') — 빈 상태는 .pf-risk-empty
+   재사용, 색은 모두 CSS 변수 기반. 예상 이벤트는 점선+흐림으로 확정과 구분. */
+.pf-divcal-list { margin-top: 12px; }
+.pf-divcal-month {
+  display: flex; align-items: center; gap: 8px; padding: 8px 6px;
+  border-bottom: 1px solid var(--border); font-size: 13px; cursor: pointer;
+  user-select: none;
+}
+.pf-divcal-month.empty { cursor: default; color: var(--text-secondary); }
+.pf-divcal-month.now { background: var(--hover); border-radius: 6px; }
+.pf-divcal-month-label { font-weight: 600; }
+.pf-divcal-month.empty .pf-divcal-month-label { font-weight: 400; }
+.pf-divcal-month-total {
+  margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.pf-divcal-caret { width: 14px; text-align: center; color: var(--text-secondary); font-size: 11px; }
+.pf-divcal-events { padding: 2px 6px 8px 28px; }
+.pf-divcal-event {
+  display: grid; grid-template-columns: 86px minmax(0, 1fr) auto;
+  gap: 2px 10px; align-items: center; padding: 6px 0; font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.pf-divcal-event:last-child { border-bottom: none; }
+.pf-divcal-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-divcal-stock { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pf-divcal-stock-name { font-weight: 600; }
+.pf-divcal-sub { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
+.pf-divcal-amount {
+  text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600;
+}
+/* 예상 이벤트 — 확정 대비 흐리게(추정치임을 시각적으로 강조). */
+.pf-divcal-event.pf-divcal-est .pf-divcal-stock-name,
+.pf-divcal-event.pf-divcal-est .pf-divcal-amount { color: var(--text-secondary); font-weight: 500; }
+/* 다가오는(오늘 이후) 이벤트 — 날짜를 강조해 임박 일정이 한눈에 띄게. */
+.pf-divcal-event.pf-divcal-upcoming .pf-divcal-date { color: var(--primary); font-weight: 700; }
+.pf-divcal-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px;
+  font-weight: 700; background: transparent; color: var(--text-secondary);
+  border: 1px dashed var(--border); vertical-align: middle;
+}
+.pf-divcal-badge.confirmed { color: var(--primary); border: 1px solid var(--primary); }
+.pf-divcal-note { margin-top: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+@media (max-width: 760px) {
+  /* 모바일은 2열로 접는다(.pf-risk-grid 패턴) — 날짜/금액, 종목은 풀폭. */
+  .pf-divcal-event { grid-template-columns: minmax(0, 1fr) auto; }
+  .pf-divcal-event .pf-divcal-stock { grid-column: 1 / -1; }
+  .pf-divcal-events { padding-left: 16px; }
+}
+
 /* Cashflow section */
 .pf-cashflow-section {
   margin-top: 24px;

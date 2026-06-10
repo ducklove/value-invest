@@ -26,6 +26,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
 
     import ai_config
     import cache
+    from repositories import users as users_repo
     import close_price_client
     import dart_client
     import kis_key_manager
@@ -40,7 +41,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     await close_price_client.init_client()
     await cache.init_db()
     await ai_config.migrate_legacy_model_defaults()
-    await cache.delete_expired_sessions()
+    await users_repo.delete_expired_sessions()
 
     (settings.project_root / "data" / "pdf_cache").mkdir(parents=True, exist_ok=True)
     try:

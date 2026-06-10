@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import close_price_client
 import kis_proxy_client
+from repositories import portfolio as portfolio_repo
 from routes import portfolio as pf
 from services.portfolio import insights
 
@@ -87,7 +88,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(pf, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})),
-            patch.object(pf.cache, "get_portfolio", new=AsyncMock(return_value=[
+            patch.object(portfolio_repo, "get_portfolio", new=AsyncMock(return_value=[
                 {"stock_code": "005930", "stock_name": "삼성전자", "benchmark_code": "IDX_KOSPI"}
             ])),
             patch.object(pf.cache, "load_corp_code_table", new=AsyncMock(return_value={})),
@@ -133,8 +134,8 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)) as local,
-            patch.object(pf.cache, "get_latest_market_valuation", new=AsyncMock(return_value={})),
-            patch.object(pf.cache, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
+            patch.object(portfolio_repo, "get_latest_market_valuation", new=AsyncMock(return_value={})),
+            patch.object(portfolio_repo, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
         ):
             basis = await insights.fetch_insight_valuation_basis("005935")
             valuation = insights.build_insight_valuation({"price": 40000}, basis)
@@ -172,8 +173,8 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         cache_lookup = AsyncMock(return_value=cached)
         with (
             patch.object(close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)),
-            patch.object(pf.cache, "get_latest_market_valuation", new=cache_lookup),
-            patch.object(pf.cache, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
+            patch.object(portfolio_repo, "get_latest_market_valuation", new=cache_lookup),
+            patch.object(portfolio_repo, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
         ):
             basis = await insights.fetch_insight_valuation_basis("009770")
             valuation = insights.build_insight_valuation({"price": 36000}, basis)

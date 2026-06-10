@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-import cache
+from repositories import user_stocks as user_stocks_repo
 from deps import attach_quote_snapshots, get_current_user
 
 router = APIRouter()
@@ -25,9 +25,9 @@ async def delete_cache(stock_code: str, request: Request, tab: str = Query("rece
     if not current_user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
     if tab == "starred":
-        await cache.unstar_stock(current_user["google_sub"], stock_code)
+        await user_stocks_repo.unstar_stock(current_user["google_sub"], stock_code)
     else:
-        await cache.delete_user_recent_analysis(current_user["google_sub"], stock_code)
+        await user_stocks_repo.delete_user_recent_analysis(current_user["google_sub"], stock_code)
     return {"ok": True, "scope": "user", "tab": tab}
 
 
@@ -43,16 +43,16 @@ async def update_cache_order(request: Request, payload: dict = Body(...)):
 
     tab = payload.get("tab", "recent")
     if tab == "starred":
-        await cache.save_starred_order(current_user["google_sub"], stock_codes)
+        await user_stocks_repo.save_starred_order(current_user["google_sub"], stock_codes)
     else:
-        await cache.save_user_stock_order(current_user["google_sub"], stock_codes)
+        await user_stocks_repo.save_user_stock_order(current_user["google_sub"], stock_codes)
     return {"ok": True, "stock_codes": stock_codes, "tab": tab}
 
 
 @router.get("/api/cache/list")
 async def cache_list(request: Request, include_quotes: bool = Query(False), tab: str = Query("recent")):
     current_user = await get_current_user(request)
-    items = await cache.get_cached_analyses(
+    items = await user_stocks_repo.get_cached_analyses(
         limit=20,
         include_quotes=include_quotes,
         google_sub=current_user["google_sub"] if current_user else None,

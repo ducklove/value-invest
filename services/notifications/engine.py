@@ -29,6 +29,9 @@ import logging
 from datetime import datetime
 
 import cache
+from repositories import notifications as notifications_repo
+from repositories import portfolio as portfolio_repo
+from repositories import snapshots as snapshots_repo
 from services.krx_limits import krx_lower_limit, krx_upper_limit
 from services.notifications import channels
 from services.portfolio import runtime_quotes
@@ -371,7 +374,7 @@ async def _eval_rebalance(google_sub: str, rule: dict) -> int:
         await channels.dispatch(google_sub, message)
         sent = 1
     if changed:
-        await cache.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+        await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
     return sent
 
 
@@ -455,7 +458,7 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
             changed = True
 
     if changed:
-        await cache.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+        await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
     return sent
 
 
@@ -572,12 +575,12 @@ async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: d
     if baseline is None or ident == baseline:
         # 첫 관측(또는 변화 없음): 기준선만 저장/유지, 발송 안 함.
         if baseline != ident:
-            await cache.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
+            await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
         return 0
     if rule.get("important"):
         text = _emphasize(text)
     await channels.dispatch(google_sub, text)
-    await cache.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
+    await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
     return 1
 
 
@@ -627,13 +630,13 @@ async def _eval_blanket_feed(
         sent += 1
 
     if changed:
-        await cache.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+        await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
     return sent
 
 
 async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> int:
     """Evaluate all enabled rules for one user. Returns alerts sent."""
-    rules = await cache.list_portfolio_alerts(google_sub, enabled_only=True)
+    rules = await notifications_repo.list_portfolio_alerts(google_sub, enabled_only=True)
     if not rules:
         return 0
     if not await channels.has_active_channel(google_sub):
@@ -641,7 +644,7 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
 
     items_by_code: dict[str, dict] = {}
     try:
-        for item in await cache.get_portfolio(google_sub):
+        for item in await portfolio_repo.get_portfolio(google_sub):
             items_by_code[item["stock_code"]] = item
     except Exception:
         pass
@@ -671,7 +674,7 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
     override_disc: set[str] = set()
     override_rep: set[str] = set()
     if any(r["alert_type"] in BLANKET_FEED_TYPES for r in rules):
-        for r in await cache.list_portfolio_alerts(google_sub):
+        for r in await notifications_repo.list_portfolio_alerts(google_sub):
             code = r.get("stock_code")
             if not code:
                 continue
@@ -751,12 +754,12 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
             if rule.get("important"):
                 text = _emphasize(text)
             await channels.dispatch(google_sub, text)
-            await cache.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
+            await notifications_repo.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
             sent += 1
         elif not condition and not armed:
-            await cache.set_portfolio_alert_state(rule["id"], armed=True, last_value=metric, triggered=False)
+            await notifications_repo.set_portfolio_alert_state(rule["id"], armed=True, last_value=metric, triggered=False)
         else:
-            await cache.set_portfolio_alert_state(rule["id"], armed=armed, last_value=metric, triggered=False)
+            await notifications_repo.set_portfolio_alert_state(rule["id"], armed=armed, last_value=metric, triggered=False)
     return sent
 
 
@@ -767,9 +770,9 @@ async def evaluate_all() -> dict:
     알림 규칙이 하나라도 있는 사용자도 평가 대상에 포함한다. 같은 공시/리포트
     종목을 여러 사용자가 구독해도 외부 API 를 한 번만 치도록 feed_cache 를 공유한다.
     """
-    users = set(await cache.get_all_users_with_portfolio())
+    users = set(await snapshots_repo.get_all_users_with_portfolio())
     try:
-        users |= set(await cache.get_all_users_with_alerts())
+        users |= set(await notifications_repo.get_all_users_with_alerts())
     except Exception:
         pass
     feed_cache: dict = {}
@@ -850,7 +853,7 @@ async def evaluate_calendar_all() -> dict:
     from collections import defaultdict
     from datetime import date, timedelta
 
-    pending = await cache.list_pending_calendar_subscriptions()
+    pending = await notifications_repo.list_pending_calendar_subscriptions()
     if not pending:
         return {"subs": 0, "sent": 0}
 
@@ -890,13 +893,13 @@ async def evaluate_calendar_all() -> dict:
                 if not ev or not (ev.get("actual") or "").strip():
                     continue
                 await channels.dispatch(google_sub, _format_calendar_message(sub, ev))
-                await cache.mark_calendar_subscription_fired(sub["id"])
+                await notifications_repo.mark_calendar_subscription_fired(sub["id"])
                 sent += 1
         except Exception as exc:
             logger.warning("calendar alert eval failed for %s: %s", google_sub[:8], exc)
 
     try:
-        await cache.delete_stale_calendar_subscriptions(stale_cutoff)
+        await notifications_repo.delete_stale_calendar_subscriptions(stale_cutoff)
     except Exception:
         pass
     return {"subs": len(pending), "sent": sent}

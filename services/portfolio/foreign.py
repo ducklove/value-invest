@@ -25,6 +25,7 @@ from urllib.parse import quote
 import httpx
 
 import cache
+from repositories import ticker_map as ticker_map_repo
 import kis_proxy_client
 from cache_layer import MemoryTTLCache
 from services.portfolio import currencies
@@ -514,7 +515,7 @@ async def ensure_ticker_map():
     if _ticker_map_loaded:
         return
     try:
-        saved = await cache.load_ticker_map()
+        saved = await ticker_map_repo.load_ticker_map()
         _ticker_map.update(saved)
         logger.info("Ticker map loaded: %d entries from DB", len(saved))
     except Exception as exc:
@@ -526,7 +527,7 @@ async def save_ticker(stock_code: str, resolved: str):
     """Save a resolved ticker to both memory and DB."""
     _ticker_map[stock_code] = resolved
     try:
-        await cache.save_ticker(stock_code, resolved)
+        await ticker_map_repo.save_ticker(stock_code, resolved)
     except Exception as exc:
         logger.warning("Ticker map save failed (%s -> %s): %s", stock_code, resolved, exc)
 

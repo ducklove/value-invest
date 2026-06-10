@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import re
@@ -6,17 +7,19 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
-import ai_config
 import asset_insights
 import cache
-import market_indicators
+from repositories import benchmark_daily as benchmark_repo
+from repositories import foreign_dividends as foreign_dividends_repo
+from repositories import portfolio as portfolio_repo
+from repositories import snapshots as snapshots_repo
 import stock_price
 from deps import get_current_user
-from services import ai_client, stock_quotes
+from services import stock_quotes
+from services.portfolio import ai_analysis
 from services.portfolio import foreign
 from services.portfolio import insights
 from services.portfolio import quote_service
@@ -84,27 +87,27 @@ async def _fetch_quote(
 
 
 def _cached_quote_for_code(code: str) -> dict:
-    return stock_quotes.stock_to_quote(stock_quotes.get_stock_cached(code, allow_stale=False))
+    """Cached-quote lookup (delegates to the quote service).
+
+    Kept as a thin module-level name for router-internal callers; the
+    implementation lives in ``services.portfolio.quote_service``.
+    """
+    return quote_service.cached_quote_for_code(code)
 
 
 async def _enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
-    """Attach cached quotes — WebSocket cache preferred, then polling cache."""
-    result = []
-    for item in items:
-        enriched = dict(item)
-        enriched["quote"] = _cached_quote_for_code(item["stock_code"])
-        result.append(enriched)
-    return result
+    """Attach cached quotes (delegates to the quote service)."""
+    return await quote_service.enrich_with_cached_quotes(items)
 
 
 async def _fill_snapshot_quotes(google_sub: str, items: list[dict]) -> None:
     if not items:
         return
-    latest = await cache.get_latest_snapshot(google_sub)
+    latest = await snapshots_repo.get_latest_snapshot(google_sub)
     snap_date = latest.get("date") if latest else None
     if not snap_date:
         return
-    rows = await cache.get_stock_snapshots_by_date(google_sub, snap_date)
+    rows = await snapshots_repo.get_stock_snapshots_by_date(google_sub, snap_date)
     values = {row["stock_code"]: row["market_value"] for row in rows}
     for item in items:
         quote = item.get("quote") or {}
@@ -212,7 +215,7 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
     response.headers["Pragma"] = "no-cache"
     user = _require_user(await get_current_user(request))
     stock_code = stock_code.strip()
-    items = await cache.get_portfolio(user["google_sub"])
+    items = await portfolio_repo.get_portfolio(user["google_sub"])
     item = next((it for it in items if it["stock_code"] == stock_code), None)
     if not item:
         raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
@@ -252,8 +255,8 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
     holding = insights.holding_context_for_asset(stock_code)
     import external_tools
     etf = await external_tools.etf_link_for(stock_code)
-    tags_task = asyncio.create_task(cache.get_portfolio_tags(user["google_sub"], stock_code))
-    tag_suggestions_task = asyncio.create_task(cache.get_portfolio_tag_suggestions(user["google_sub"]))
+    tags_task = asyncio.create_task(portfolio_repo.get_portfolio_tags(user["google_sub"], stock_code))
+    tag_suggestions_task = asyncio.create_task(portfolio_repo.get_portfolio_tag_suggestions(user["google_sub"]))
 
     benchmark = {
         "code": effective_benchmark,
@@ -289,23 +292,23 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
 async def update_portfolio_tags(stock_code: str, request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
     stock_code = stock_code.strip()
-    item = await cache.get_portfolio_item(user["google_sub"], stock_code)
+    item = await portfolio_repo.get_portfolio_item(user["google_sub"], stock_code)
     if not item:
         raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
     tags = _normalize_portfolio_tags((payload or {}).get("tags"))
-    saved = await cache.set_portfolio_tags(user["google_sub"], stock_code, tags)
+    saved = await portfolio_repo.set_portfolio_tags(user["google_sub"], stock_code, tags)
     return {
         "ok": True,
         "stock_code": stock_code,
         "tags": saved,
-        "tagSuggestions": await cache.get_portfolio_tag_suggestions(user["google_sub"]),
+        "tagSuggestions": await portfolio_repo.get_portfolio_tag_suggestions(user["google_sub"]),
     }
 
 
 @router.get("/api/portfolio/groups")
 async def get_groups(request: Request):
     user = _require_user(await get_current_user(request))
-    return await cache.get_portfolio_groups(user["google_sub"])
+    return await portfolio_repo.get_portfolio_groups(user["google_sub"])
 
 
 @router.post("/api/portfolio/groups")
@@ -314,10 +317,10 @@ async def add_group(request: Request, payload: dict = Body(...)):
     name = str(payload.get("name") or "").strip()[:50]
     if not name:
         raise HTTPException(status_code=400, detail="그룹명을 입력해 주세요.")
-    groups = await cache.get_portfolio_groups(user["google_sub"])
+    groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
     if any(g["group_name"] == name for g in groups):
         raise HTTPException(status_code=400, detail="이미 존재하는 그룹명입니다.")
-    result = await cache.add_portfolio_group(user["google_sub"], name)
+    result = await portfolio_repo.add_portfolio_group(user["google_sub"], name)
     return {"ok": True, **result}
 
 
@@ -327,27 +330,27 @@ async def rename_group(group_name: str, request: Request, payload: dict = Body(.
     new_name = str(payload.get("new_name") or "").strip()[:50]
     if not new_name:
         raise HTTPException(status_code=400, detail="새 그룹명을 입력해 주세요.")
-    groups = await cache.get_portfolio_groups(user["google_sub"])
+    groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
     target = next((g for g in groups if g["group_name"] == group_name), None)
     if not target:
         raise HTTPException(status_code=404, detail="그룹을 찾을 수 없습니다.")
     if any(g["group_name"] == new_name for g in groups):
         raise HTTPException(status_code=400, detail="이미 존재하는 그룹명입니다.")
-    await cache.rename_portfolio_group(user["google_sub"], group_name, new_name)
+    await portfolio_repo.rename_portfolio_group(user["google_sub"], group_name, new_name)
     return {"ok": True}
 
 
 @router.delete("/api/portfolio/groups/{group_name}")
 async def delete_group(group_name: str, request: Request):
     user = _require_user(await get_current_user(request))
-    groups = await cache.get_portfolio_groups(user["google_sub"])
+    groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
     target = next((g for g in groups if g["group_name"] == group_name), None)
     if not target:
         raise HTTPException(status_code=404, detail="그룹을 찾을 수 없습니다.")
     default_count = sum(1 for g in groups if g["is_default"])
     if target["is_default"] and default_count <= 3:
         raise HTTPException(status_code=400, detail="기본 그룹은 삭제할 수 없습니다.")
-    await cache.delete_portfolio_group(user["google_sub"], group_name)
+    await portfolio_repo.delete_portfolio_group(user["google_sub"], group_name)
     return {"ok": True}
 
 
@@ -358,7 +361,7 @@ async def save_groups_order(request: Request, payload: dict = Body(...)):
     if not isinstance(names, list) or not names or len(names) > 50:
         raise HTTPException(status_code=400, detail="그룹 목록이 필요합니다.")
     names = [str(n).strip()[:50] for n in names if str(n).strip()]
-    await cache.save_portfolio_groups_order(user["google_sub"], names)
+    await portfolio_repo.save_portfolio_groups_order(user["google_sub"], names)
     return {"ok": True}
 
 
@@ -366,7 +369,7 @@ async def save_groups_order(request: Request, payload: dict = Body(...)):
 async def stream_portfolio_quotes(request: Request):
     """Stream quote updates one by one with rate limiting."""
     user = _require_user(await get_current_user(request))
-    items = await cache.get_portfolio(user["google_sub"])
+    items = await portfolio_repo.get_portfolio(user["google_sub"])
 
     # Prefetch market types before streaming
     needs_resolve = [it for it in items if not it.get("benchmark_code")]
@@ -564,8 +567,8 @@ def _require_user(user):
 async def get_portfolio(request: Request):
     started = time.perf_counter()
     user = _require_user(await get_current_user(request))
-    await cache.get_portfolio_groups(user["google_sub"])  # ensure default groups
-    items = await cache.get_portfolio(user["google_sub"])
+    await portfolio_repo.get_portfolio_groups(user["google_sub"])  # ensure default groups
+    items = await portfolio_repo.get_portfolio(user["google_sub"])
     needs_resolve = [it for it in items if not it.get("benchmark_code")]
     for item in needs_resolve:
         item["benchmark_code"] = _resolve_default_benchmark_fast(item["stock_code"])
@@ -583,8 +586,8 @@ async def get_portfolio(request: Request):
         ]
     ))
     dps_map, target_metrics_map = await asyncio.gather(
-        cache.get_trailing_dividends(codes),
-        cache.get_portfolio_target_metrics(metric_codes),
+        portfolio_repo.get_trailing_dividends(codes),
+        portfolio_repo.get_portfolio_target_metrics(metric_codes),
     )
     await _supplement_target_metrics(items, target_metrics_map)
     for it in items:
@@ -638,7 +641,7 @@ async def save_portfolio_order(request: Request, payload: dict = Body(...)):
     if not codes:
         raise HTTPException(status_code=400, detail="정렬할 종목 목록이 필요합니다.")
 
-    current = await cache.get_portfolio(user["google_sub"])
+    current = await portfolio_repo.get_portfolio(user["google_sub"])
     current_codes = [item["stock_code"] for item in current]
     current_set = set(current_codes)
     requested_set = set(codes)
@@ -655,7 +658,7 @@ async def save_portfolio_order(request: Request, payload: dict = Body(...)):
             detail += " " + " ".join(parts)
         raise HTTPException(status_code=400, detail=detail)
 
-    await cache.save_portfolio_order(user["google_sub"], codes)
+    await portfolio_repo.save_portfolio_order(user["google_sub"], codes)
     return {"ok": True, "count": len(codes)}
 
 
@@ -708,7 +711,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
             currency = await foreign.detect_currency(stock_code)
     group_name = str(payload.get("group_name") or "").strip() or None
     if group_name:
-        groups = await cache.get_portfolio_groups(user["google_sub"])
+        groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
         if not any(g["group_name"] == group_name for g in groups):
             raise HTTPException(status_code=400, detail=f"존재하지 않는 그룹명입니다: {group_name}")
     benchmark_code = str(payload.get("benchmark_code") or "").strip() or None
@@ -716,7 +719,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     # ISO so other columns (created_at DESC ordering) keep working, but
     # parse strictly so a malformed string can't overwrite the field
     # with garbage. None / empty string → leave existing value alone
-    # (handled by cache.save_portfolio_item default semantics).
+    # (handled by portfolio_repo.save_portfolio_item default semantics).
     created_at_raw = str(payload.get("created_at") or "").strip()
     created_at: str | None = None
     if created_at_raw:
@@ -768,7 +771,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         if bool(raw_d):
             target_price_kwarg["target_price_formula"] = None
 
-    result = await cache.save_portfolio_item(
+    result = await portfolio_repo.save_portfolio_item(
         user["google_sub"], stock_code, stock_name, quantity, avg_price,
         currency, group_name, benchmark_code, created_at,
         **target_price_kwarg,
@@ -783,7 +786,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         if (not _is_korean_stock(stock_code)
                 and not _is_cash_asset(stock_code)
                 and stock_code not in _SPECIAL_ASSETS):
-            existing_div = await cache.get_foreign_dividend(stock_code)
+            existing_div = await foreign_dividends_repo.get_foreign_dividend(stock_code)
             if existing_div is None:
                 async def _bg_fetch_dividend(code: str):
                     try:
@@ -807,7 +810,7 @@ async def update_benchmark(stock_code: str, request: Request, payload: dict = Bo
     user = _require_user(await get_current_user(request))
     stock_code = _normalize_portfolio_code(stock_code)
     benchmark_code = _normalize_portfolio_code(str(payload.get("benchmark_code") or "")) or None
-    updated = await cache.update_portfolio_benchmark(user["google_sub"], stock_code, benchmark_code)
+    updated = await portfolio_repo.update_portfolio_benchmark(user["google_sub"], stock_code, benchmark_code)
     if not updated:
         raise HTTPException(status_code=404, detail="포트폴리오 종목을 찾을 수 없습니다.")
     # Return the effective benchmark and its quote without blocking the edit UI
@@ -826,7 +829,7 @@ async def update_benchmark(stock_code: str, request: Request, payload: dict = Bo
 async def get_benchmark_quotes(request: Request):
     """Fetch all unique benchmark quotes for the user's portfolio."""
     user = _require_user(await get_current_user(request))
-    items = await cache.get_portfolio(user["google_sub"])
+    items = await portfolio_repo.get_portfolio(user["google_sub"])
     benchmark_codes = set()
     for item in items:
         bc = item.get("benchmark_code") or _resolve_default_benchmark_fast(item["stock_code"])
@@ -864,7 +867,7 @@ async def get_benchmark_quotes(request: Request):
 async def delete_portfolio_item(stock_code: str, request: Request):
     user = _require_user(await get_current_user(request))
     stock_code = _normalize_portfolio_code(stock_code)
-    deleted = await cache.delete_portfolio_item(user["google_sub"], stock_code)
+    deleted = await portfolio_repo.delete_portfolio_item(user["google_sub"], stock_code)
     if not deleted:
         raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
     return {"ok": True}
@@ -913,10 +916,10 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
         item["currency"] = "KRW" if _is_korean_stock(code) or _is_special_asset(code) else await foreign.detect_currency(code)
 
     if mode == "replace":
-        await cache.replace_portfolio(user["google_sub"], resolved)
+        await portfolio_repo.replace_portfolio(user["google_sub"], resolved)
     else:
         for item in resolved:
-            await cache.save_portfolio_item(
+            await portfolio_repo.save_portfolio_item(
                 user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], item["currency"],
             )
     dividends.schedule_for_portfolio([item["stock_code"] for item in resolved])
@@ -946,7 +949,7 @@ async def get_prev_day_snapshot(request: Request):
     fx_usdkrw = snap_row["fx_usdkrw"] if snap_row else None
     prev_nav = snap_row["nav"] if snap_row else None
     # Per-stock snapshots
-    stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], baseline_date)
+    stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], baseline_date)
     stock_values = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
     # Net cashflow not yet reflected in snapshot. Use created_at > snapshot
     # date 22:00 (snapshot runs at 22:00) to catch cashflows entered after
@@ -1007,8 +1010,8 @@ async def get_prev_day_snapshot(request: Request):
 async def get_month_end_value(request: Request):
     user = _require_user(await get_current_user(request))
     month_end = (date.today().replace(day=1) - timedelta(days=1)).isoformat()
-    snapshot = await cache.get_month_end_snapshot(user["google_sub"])
-    stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], month_end)
+    snapshot = await snapshots_repo.get_month_end_snapshot(user["google_sub"])
+    stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], month_end)
     result = dict(snapshot) if snapshot else {}
     result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
     return result
@@ -1017,10 +1020,10 @@ async def get_month_end_value(request: Request):
 @router.get("/api/portfolio/year-start-value")
 async def get_year_start_value(request: Request):
     user = _require_user(await get_current_user(request))
-    snapshot = await cache.get_year_start_snapshot(user["google_sub"])
+    snapshot = await snapshots_repo.get_year_start_snapshot(user["google_sub"])
     result = dict(snapshot) if snapshot else {}
     if snapshot and snapshot.get("date"):
-        stock_snapshots = await cache.get_stock_snapshots_by_date(user["google_sub"], snapshot["date"])
+        stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], snapshot["date"])
         result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
     else:
         result["stock_values"] = {}
@@ -1030,19 +1033,19 @@ async def get_year_start_value(request: Request):
 @router.get("/api/portfolio/nav-history")
 async def get_nav_history(request: Request):
     user = _require_user(await get_current_user(request))
-    return await cache.get_nav_history(user["google_sub"])
+    return await snapshots_repo.get_nav_history(user["google_sub"])
 
 
 @router.get("/api/portfolio/group-weight-history")
 async def get_group_weight_history(request: Request):
     user = _require_user(await get_current_user(request))
-    return await cache.get_group_weight_history(user["google_sub"])
+    return await snapshots_repo.get_group_weight_history(user["google_sub"])
 
 
 @router.get("/api/portfolio/group-constituent-history")
 async def get_group_constituent_history(request: Request, group: str = Query(..., min_length=1)):
     user = _require_user(await get_current_user(request))
-    return await cache.get_group_constituent_history(user["google_sub"], group.strip())
+    return await snapshots_repo.get_group_constituent_history(user["google_sub"], group.strip())
 
 
 @router.get("/api/portfolio/benchmark-history")
@@ -1075,7 +1078,7 @@ async def get_benchmark_history(code: str = Query(...), start: str = Query(...))
     except asyncio.TimeoutError:
         logger.warning("Benchmark backfill timed out (%s start=%s); serving cached rows only", code_up, start)
 
-    rows = await cache.get_benchmark_rows(code_up, start=start)
+    rows = await benchmark_repo.get_benchmark_rows(code_up, start=start)
     return rows
 
 
@@ -1084,7 +1087,7 @@ async def get_intraday(request: Request):
     user = _require_user(await get_current_user(request))
     axis_start, axis_end = _intraday_axis_window()
     baseline_date = axis_start[:10]
-    points = await cache.get_intraday_snapshots_between(user["google_sub"], axis_start, axis_end)
+    points = await snapshots_repo.get_intraday_snapshots_between(user["google_sub"], axis_start, axis_end)
     # Prepend the active 22:00 settlement snapshot as the zero baseline.
     # The frontend maps x by elapsed time from this timestamp, so the API
     # should expose the real axis start instead of a synthetic midnight marker.
@@ -1102,7 +1105,7 @@ async def get_intraday(request: Request):
 @router.get("/api/portfolio/cashflows")
 async def get_cashflows(request: Request):
     user = _require_user(await get_current_user(request))
-    return await cache.get_cashflows(user["google_sub"])
+    return await snapshots_repo.get_cashflows(user["google_sub"])
 
 
 @router.post("/api/portfolio/cashflows")
@@ -1126,14 +1129,14 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
     google_sub = user["google_sub"]
 
     # Get latest NAV for units calculation
-    latest = await cache.get_latest_snapshot(google_sub)
+    latest = await snapshots_repo.get_latest_snapshot(google_sub)
     nav_at_time = latest["nav"] if latest else 1000.0
     units_change = amount / nav_at_time
     if cf_type == "withdrawal":
         units_change = -units_change
 
     try:
-        result = await cache.add_cashflow_and_sync_cash(
+        result = await snapshots_repo.add_cashflow_and_sync_cash(
             google_sub,
             cf_date,
             cf_type,
@@ -1142,7 +1145,7 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
             nav_at_time,
             units_change,
         )
-    except cache.CashflowBalanceError as exc:
+    except snapshots_repo.CashflowBalanceError as exc:
         raise HTTPException(
             status_code=400,
             detail=f"원화 잔액이 부족합니다. (잔액: {exc.balance:,.0f}원, 출금액: {exc.amount:,.0f}원)",
@@ -1155,7 +1158,7 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
 async def delete_cashflow(cf_id: int, request: Request):
     user = _require_user(await get_current_user(request))
     google_sub = user["google_sub"]
-    deleted = await cache.delete_cashflow_and_sync_cash(google_sub, cf_id)
+    deleted = await snapshots_repo.delete_cashflow_and_sync_cash(google_sub, cf_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="현금흐름을 찾을 수 없습니다.")
 
@@ -1165,346 +1168,31 @@ async def delete_cashflow(cf_id: int, request: Request):
 # ---------------------------------------------------------------------------
 # AI Portfolio Analysis (OpenRouter)
 # ---------------------------------------------------------------------------
-
-_PORTFOLIO_AI_DEFAULT_MODEL = "~google/gemini-flash-latest"
-_AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", _PORTFOLIO_AI_DEFAULT_MODEL)
-_AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", _PORTFOLIO_AI_DEFAULT_MODEL)
-_AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", _AI_DEFAULT_MODEL)
-_AI_MAX_TOKENS = int(os.getenv("PORTFOLIO_AI_MAX_TOKENS", "4800"))
-_AI_REASONING_EFFORT = os.getenv("PORTFOLIO_AI_REASONING_EFFORT", "low").strip().lower()
-_AI_WIKI_HOLDING_LIMIT = int(os.getenv("PORTFOLIO_AI_WIKI_HOLDING_LIMIT", "15"))
-_AI_WIKI_ENTRY_LIMIT = int(os.getenv("PORTFOLIO_AI_WIKI_ENTRY_LIMIT", "3"))
-_AI_WIKI_KEYPOINT_CHARS = int(os.getenv("PORTFOLIO_AI_WIKI_KEYPOINT_CHARS", "600"))
-
-_AI_SYSTEM_PROMPT = """당신은 한국/해외 자산을 함께 보는 투자 리서치 어시스턴트입니다.
-규칙:
-- 제공된 포트폴리오, 시장지표, 리서치 요약에 근거해 답하세요.
-- 알 수 없는 사실은 추정이라고 분명히 말하고, 없는 데이터를 꾸며내지 마세요.
-- 투자 조언은 단정 대신 조건부 시나리오와 리스크로 표현하세요.
-- 결론에는 실행 우선순위와 확인해야 할 데이터 공백을 포함하세요."""
-
-
-def _ai_model_profiles() -> dict[str, str]:
-    return {
-        "fast": _AI_FAST_MODEL,
-        "balanced": _AI_DEFAULT_MODEL,
-        "premium": _AI_PREMIUM_MODEL,
-    }
-
-
-async def _ai_model_profiles_async() -> dict[str, str]:
-    return await ai_config.model_profiles()
-
-
-async def _resolve_ai_model(payload: dict, user: dict) -> tuple[str, str]:
-    profile = str(payload.get("profile") or payload.get("mode") or "balanced").strip().lower()
-    profiles = await _ai_model_profiles_async()
-    if profile not in profiles:
-        profile = "balanced"
-    model = profiles[profile]
-    req_model = str(payload.get("model") or "").strip()
-    if req_model and user.get("is_admin"):
-        model = req_model
-        profile = "custom"
-    return model, profile
-
-
-def _fmt_krw_ai(v: float) -> str:
-    """Format KRW for AI prompt: 조/억 units with 4 significant digits."""
-    av = abs(v)
-    if av >= 1e12:  # 조
-        jo = v / 1e12
-        # 4 sig figs: e.g. 93.56조, 1.234조, 123.4조
-        if av >= 1e15:
-            return f"{jo:,.0f}조"
-        elif av >= 1e14:
-            return f"{jo:,.1f}조"
-        elif av >= 1e13:
-            return f"{jo:,.2f}조"
-        else:
-            return f"{jo:,.3f}조"
-    elif av >= 1e8:  # 억
-        eok = v / 1e8
-        if av >= 1e11:
-            return f"{eok:,.0f}억"
-        elif av >= 1e10:
-            return f"{eok:,.1f}억"
-        elif av >= 1e9:
-            return f"{eok:,.2f}억"
-        else:
-            return f"{eok:,.3f}억"
-    else:
-        return f"{v:,.0f}원"
+# Domain logic (model selection, prompt assembly, OpenRouter streaming call,
+# usage-ledger writes) lives in services/portfolio/ai_analysis.py. The routes
+# below keep only the HTTP shell: auth, typed-error -> HTTPException mapping
+# and the SSE framing of the domain events the service yields.
 
 
 @router.get("/api/portfolio/ai-models")
 async def ai_model_list(request: Request):
     """Return available OpenRouter models (for admin model picker)."""
     _require_user(await get_current_user(request))
-    profiles = await _ai_model_profiles_async()
-    openrouter_key = await ai_config.get_openrouter_key()
-    if not openrouter_key:
-        return {"models": [], "default": profiles["balanced"], "profiles": profiles}
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get("https://openrouter.ai/api/v1/models")
-            data = resp.json().get("data", [])
-            models = []
-            for m in data:
-                p = m.get("pricing", {})
-                models.append({
-                    "id": m["id"],
-                    "name": m.get("name", m["id"]),
-                    "prompt_price": float(p.get("prompt", 0)) * 1e6,
-                    "completion_price": float(p.get("completion", 0)) * 1e6,
-                    "context": m.get("context_length", 0),
-                })
-            models.sort(key=lambda x: x["id"])
-            return {"models": models, "default": profiles["balanced"], "profiles": profiles}
-    except Exception as exc:
-        logger.warning("Failed to fetch OpenRouter models: %s", exc)
-        return {"models": [], "default": profiles["balanced"], "profiles": profiles}
+    return await ai_analysis.list_models()
 
 
 @router.post("/api/portfolio/ai-analysis")
 async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={})):
     user = _require_user(await get_current_user(request))
-    openrouter_key = await ai_config.get_openrouter_key()
-    if not openrouter_key:
+    try:
+        ctx = await ai_analysis.prepare_analysis(payload, user)
+    except ai_analysis.MissingAPIKeyError:
         raise HTTPException(status_code=500, detail="AI API 키가 설정되지 않았습니다.")
-
-    model, model_profile = await _resolve_ai_model(payload, user)
-    started_at = time.perf_counter()
-
-    # Optional user inquiry/question to include in the prompt
-    user_query = (payload.get("query") or "").strip()
-    # Hard cap to avoid runaway prompt growth; anything sensible fits easily.
-    if len(user_query) > 4000:
-        user_query = user_query[:4000]
-
-    google_sub = user["google_sub"]
-    items = await cache.get_portfolio(google_sub=google_sub)
-    if not items:
+    except ai_analysis.EmptyPortfolioError:
         raise HTTPException(status_code=400, detail="포트폴리오가 비어 있습니다.")
 
-    enriched = await _enrich_with_cached_quotes(items)
-
-    # Build holdings summary
-    holdings_lines = []
-    total_value = 0
-    for item in enriched:
-        q = item.get("quote", {})
-        price = q.get("price")
-        qty = item.get("quantity", 0)
-        avg = item.get("avg_price", 0)
-        mv = price * qty if price and qty else None
-        ret = ((price - avg) / avg * 100) if price and avg and avg > 0 else None
-        chg = q.get("change_pct")
-        name = item.get("stock_name", item["stock_code"])
-        line = f"- {name} ({item['stock_code']}): 수량={qty}, 매입가={_fmt_krw_ai(avg)}"
-        if price:
-            line += f", 현재가={_fmt_krw_ai(price)}"
-        if ret is not None:
-            line += f", 수익률={ret:+.1f}%"
-        if chg is not None:
-            line += f", 일간={chg:+.2f}%"
-        if mv:
-            line += f", 평가={_fmt_krw_ai(mv)}"
-            total_value += mv
-        holdings_lines.append(line)
-
-    # NAV / performance
-    from datetime import date as _date
-    nav_history = await cache.get_nav_history(google_sub)
-    perf_lines = []
-    if nav_history:
-        latest = nav_history[-1]
-        first = nav_history[0]
-        perf_lines.append(f"NAV: {latest['nav']:.2f} ({first['date']}~{latest['date']})")
-        if len(nav_history) > 252:
-            yoy = (latest['nav'] / nav_history[-252]['nav'] - 1) * 100
-            perf_lines.append(f"YoY: {yoy:+.2f}%")
-        days = (_date.fromisoformat(latest['date']) - _date.fromisoformat(first['date'])).days
-        if days > 365:
-            cagr = ((latest['nav'] / first['nav']) ** (365 / days) - 1) * 100
-            perf_lines.append(f"CAGR: {cagr:+.2f}%")
-
-    # Market summary
-    try:
-        market = await market_indicators.fetch_indicators(["KOSPI", "KOSDAQ", "USD_KRW", "SPX", "US10Y", "OIL_CL"])
-        market_lines = [f"- {k}: {v.get('value','')} ({v.get('direction','')}{v.get('change_pct','')})" for k, v in market.items()]
-    except Exception:
-        market_lines = ["시장 데이터를 가져올 수 없습니다."]
-
-    # Per-holding wiki snippets. Keep this bounded, but use enough context
-    # for the model to compare major positions instead of reacting only to
-    # the largest few holdings.
-    wiki_lines: list[str] = []
-    wiki_used_count = 0
-    try:
-        ranked = sorted(
-            (i for i in enriched if (i.get("quote", {}) or {}).get("price") and i.get("quantity")),
-            key=lambda i: (i["quote"]["price"] or 0) * (i.get("quantity") or 0),
-            reverse=True,
-        )[:_AI_WIKI_HOLDING_LIMIT]
-        for item in ranked:
-            code = item["stock_code"]
-            name = item.get("stock_name") or code
-            entries = await cache.get_wiki_entries(code, limit=_AI_WIKI_ENTRY_LIMIT)
-            if not entries:
-                continue
-            wiki_lines.append(f"### {name} ({code})")
-            for e in entries:
-                date_s = e.get("report_date") or (e.get("created_at") or "")[:10]
-                firm = e.get("firm") or ""
-                rec = (e.get("recommendation") or "").strip()
-                tp = e.get("target_price")
-                tp_s = f"TP={int(tp):,}" if tp else ""
-                head = f"- [{firm}, {date_s}"
-                if rec: head += f", {rec}"
-                if tp_s: head += f", {tp_s}"
-                head += "]"
-                key = (e.get("key_points_md") or "").strip()
-                # Fold bullets into one line (< 300 chars) so the full
-                # prompt stays readable and compact.
-                flat = " ".join(line.lstrip("- \t") for line in key.splitlines() if line.strip())
-                if flat:
-                    head += f" {flat[:_AI_WIKI_KEYPOINT_CHARS]}"
-                wiki_lines.append(head)
-                wiki_used_count += 1
-    except Exception as _wiki_exc:
-        logger.warning("portfolio AI wiki injection failed: %s", _wiki_exc)
-
-    query_section = f"""
-
-## 사용자 질문/요청
-{user_query}
-
-위 질문/요청을 우선적으로 고려하여 답변해 주세요.""" if user_query else ""
-
-    wiki_section = (
-        f"\n\n## 종목별 리서치 요약 (최근 증권사 리포트)\n{chr(10).join(wiki_lines)}"
-        if wiki_lines else ""
-    )
-
-    prompt = f"""아래 포트폴리오를 분석해 주세요.
-
-## 보유 종목 (총 평가: {_fmt_krw_ai(total_value)})
-{chr(10).join(holdings_lines)}
-
-## 성과
-{chr(10).join(perf_lines) if perf_lines else "N/A"}
-
-## 시장 현황
-{chr(10).join(market_lines)}{wiki_section}{query_section}
-
-분석 항목:
-1. 포트폴리오 구성 평가 (분산도, 섹터 편중)
-2. 주요 종목 밸류에이션과 리스크 — 증권사 의견을 근거로 인용 가능하면 인용
-3. 시장 상황 고려 단기/중기 시나리오
-4. 리밸런싱/비중 조절 제안과 우선순위
-5. 추가로 확인해야 할 데이터 공백
-
-답변 형식:
-- ## 핵심 판단: 3개 이내 bullet
-- ## 포트폴리오 점검: 편중, 수익률, 종목별 근거
-- ## 판단 근거: 데이터에서 실제로 확인한 근거와 추정의 구분
-- ## 리스크와 촉매: 단기/중기 시나리오
-- ## 실행 우선순위: 우선순위가 높은 조치부터
-- ## 추가 확인 데이터: 부족한 데이터와 확인 방법
-
-각 섹션은 짧게 유지하되, 가독성이 좋아지는 경우 마크다운 표, 비교 도표, ASCII 막대그래프를 적극 활용하세요.
-내부 추론 과정은 노출하지 말고, 최종 판단의 근거 요약만 보여 주세요.
-HTML 태그는 쓰지 말고 한국어 마크다운으로만 답변해 주세요."""
-
-    import json as _json
-
     async def _stream():
-        # Use client.stream() (context manager) rather than client.post() —
-        # the latter buffers the entire response body even with stream=True
-        # in the JSON payload, defeating the purpose and inflating latency
-        # until the model finishes. With stream() the first token reaches
-        # the browser as soon as OpenRouter emits it.
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
-            request_payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": _AI_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": _AI_MAX_TOKENS,
-                "stream": True,
-                **ai_config.openrouter_reasoning_controls(model, effort=_AI_REASONING_EFFORT),
-            }
-            async with ai_client.stream_chat_completion(
-                client,
-                request_payload,
-                openrouter_key=openrouter_key,
-            ) as resp:
-                if resp.status_code != 200:
-                    # Need to consume body before httpx exposes it.
-                    body = await resp.aread()
-                    try:
-                        err = _json.loads(body)
-                        msg = err.get("error", {}).get("message", f"HTTP {resp.status_code}")
-                    except Exception:
-                        msg = f"HTTP {resp.status_code}"
-                    yield f"data: {_json.dumps({'content': f'API 오류: {msg}'})}\n\n"
-                    await ai_config.record_usage(
-                        google_sub=google_sub,
-                        feature="portfolio_analysis",
-                        model=model,
-                        model_profile=model_profile,
-                        ok=False,
-                        error=msg,
-                        latency_ms=int((time.perf_counter() - started_at) * 1000),
-                    )
-                    yield f"data: {_json.dumps({'done': True, 'input_tokens': 0, 'output_tokens': 0, 'model': model, 'model_profile': model_profile, 'cost': 0, 'wiki_used': wiki_used_count, 'reasoning_effort': _AI_REASONING_EFFORT, 'context_holdings': _AI_WIKI_HOLDING_LIMIT, 'context_reports_per_holding': _AI_WIKI_ENTRY_LIMIT})}\n\n"
-                    return
-
-                input_tokens = 0
-                output_tokens = 0
-                cost = 0
-                async for line in resp.aiter_lines():
-                    # If the browser closed the tab, stop consuming upstream
-                    # tokens — OpenRouter bills per-token and a forgotten
-                    # request could run to the full max_tokens budget.
-                    if await request.is_disconnected():
-                        logger.info("AI analysis: client disconnected, aborting upstream")
-                        return
-                    if not line.startswith("data: "):
-                        continue
-                    payload = line[6:]
-                    if payload.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = _json.loads(payload)
-                        if "error" in chunk:
-                            yield f"data: {_json.dumps({'content': chunk['error'].get('message', 'Unknown error')})}\n\n"
-                            break
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            output_tokens += 1
-                            yield f"data: {_json.dumps({'content': content})}\n\n"
-                        usage = chunk.get("usage")
-                        if usage:
-                            input_tokens = usage.get("prompt_tokens", input_tokens)
-                            output_tokens = usage.get("completion_tokens", output_tokens)
-                            cost = usage.get("cost", cost) or cost
-                    except Exception:
-                        continue
-                await ai_config.record_usage(
-                    google_sub=google_sub,
-                    feature="portfolio_analysis",
-                    model=model,
-                    model_profile=model_profile,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cost_usd=float(cost or 0),
-                    latency_ms=int((time.perf_counter() - started_at) * 1000),
-                    ok=True,
-                )
-                yield f"data: {_json.dumps({'done': True, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model': model, 'model_profile': model_profile, 'cost': cost, 'wiki_used': wiki_used_count, 'reasoning_effort': _AI_REASONING_EFFORT, 'context_holdings': _AI_WIKI_HOLDING_LIMIT, 'context_reports_per_holding': _AI_WIKI_ENTRY_LIMIT})}\n\n"
+        async for event in ai_analysis.stream_analysis(ctx, is_disconnected=request.is_disconnected):
+            yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

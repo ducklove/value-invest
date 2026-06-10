@@ -73,7 +73,13 @@ const QuoteManager = {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.overflowTimer) { clearInterval(this.overflowTimer); this.overflowTimer = null; }
     if (this.generalPollTimer) { clearInterval(this.generalPollTimer); this.generalPollTimer = null; }
-    if (this.ws) { this.ws.close(); this.ws = null; }
+    if (this.ws) {
+      // close 이벤트가 비동기로 도착해 onclose의 재접속 경로를 되살리지
+      // 않도록, 명시적 해제에서는 핸들러를 먼저 뗀다.
+      this.ws.onclose = null;
+      this.ws.close();
+      this.ws = null;
+    }
     this.connected = false;
     this.wsActive = false;
     this.wsCodes = new Set();

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
+from repositories import user_settings as user_settings_repo
+from repositories import user_stocks as user_stocks_repo
 from deps import get_current_user
 from services import stock_quotes
 
@@ -159,7 +161,7 @@ async def get_market_bar_setting(request: Request):
     user = await get_current_user(request)
     if not user:
         return {"codes": None}  # client uses localStorage
-    raw = await cache.get_user_setting(user["google_sub"], "market_bar_codes")
+    raw = await user_settings_repo.get_user_setting(user["google_sub"], "market_bar_codes")
     return {"codes": json.loads(raw) if raw else None}
 
 
@@ -173,7 +175,7 @@ async def set_market_bar_setting(request: Request, payload: dict = Body(...)):
     if not isinstance(codes, list) or len(codes) > 10:
         raise HTTPException(status_code=400, detail="최대 10개까지 설정할 수 있습니다.")
     codes = [str(c).strip()[:30] for c in codes if isinstance(c, str) and str(c).strip()]
-    await cache.set_user_setting(user["google_sub"], "market_bar_codes", json.dumps(codes))
+    await user_settings_repo.set_user_setting(user["google_sub"], "market_bar_codes", json.dumps(codes))
     return {"ok": True}
 
 
@@ -188,7 +190,7 @@ async def get_stock_preference(stock_code: str, request: Request):
     current_user = await get_current_user(request)
     if not current_user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    preference = await cache.get_user_stock_preference(current_user["google_sub"], stock_code)
+    preference = await user_stocks_repo.get_user_stock_preference(current_user["google_sub"], stock_code)
     return {
         "stock_code": stock_code,
         "authenticated": True,
@@ -202,7 +204,7 @@ async def update_stock_preference(stock_code: str, request: Request, payload: di
     if not current_user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
 
-    preference = await cache.save_user_stock_preference(
+    preference = await user_stocks_repo.save_user_stock_preference(
         current_user["google_sub"],
         stock_code,
         is_starred=payload.get("is_starred") if "is_starred" in payload else None,

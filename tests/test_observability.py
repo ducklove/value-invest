@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from repositories import wiki as wiki_repo
 import repositories.db
 from repositories import system_events as system_events_repo
 import observability
@@ -50,85 +51,85 @@ class SystemEventCacheTests(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     async def test_insert_and_read(self):
-        row_id = await cache.insert_system_event(
+        row_id = await system_events_repo.insert_system_event(
             level="info", source="wiki_ingestion", kind="tick_ok",
             details=json.dumps({"summarized": 3}),
         )
         self.assertGreater(row_id, 0)
 
-        rows = await cache.get_system_events()
+        rows = await system_events_repo.get_system_events()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source"], "wiki_ingestion")
         self.assertEqual(rows[0]["kind"], "tick_ok")
         self.assertIn("summarized", rows[0]["details"])
 
     async def test_filter_by_source_level_stock(self):
-        await cache.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
-        await cache.insert_system_event(level="error", source="snapshot_nav", kind="tick_crashed")
-        await cache.insert_system_event(
+        await system_events_repo.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
+        await system_events_repo.insert_system_event(level="error", source="snapshot_nav", kind="tick_crashed")
+        await system_events_repo.insert_system_event(
             level="warning", source="wiki_ingestion", kind="pdf_parse_failed",
             stock_code="005930",
         )
 
         # Source filter.
-        wiki = await cache.get_system_events(source="wiki_ingestion")
+        wiki = await system_events_repo.get_system_events(source="wiki_ingestion")
         self.assertEqual(len(wiki), 2)
         # Level filter.
-        errs = await cache.get_system_events(level="error")
+        errs = await system_events_repo.get_system_events(level="error")
         self.assertEqual(len(errs), 1)
         self.assertEqual(errs[0]["source"], "snapshot_nav")
         # Stock filter.
-        by_stock = await cache.get_system_events(stock_code="005930")
+        by_stock = await system_events_repo.get_system_events(stock_code="005930")
         self.assertEqual(len(by_stock), 1)
 
     async def test_since_filter(self):
         past = (datetime.now() - timedelta(hours=2)).isoformat(timespec="seconds")
         recent = datetime.now().isoformat(timespec="seconds")
-        await cache.insert_system_event(level="info", source="X", kind="old", ts=past)
-        await cache.insert_system_event(level="info", source="X", kind="new", ts=recent)
+        await system_events_repo.insert_system_event(level="info", source="X", kind="old", ts=past)
+        await system_events_repo.insert_system_event(level="info", source="X", kind="new", ts=recent)
         cutoff = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
-        rows = await cache.get_system_events(since=cutoff)
+        rows = await system_events_repo.get_system_events(since=cutoff)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["kind"], "new")
 
     async def test_newest_first_ordering(self):
         ts_old = (datetime.now() - timedelta(minutes=5)).isoformat(timespec="seconds")
         ts_new = datetime.now().isoformat(timespec="seconds")
-        await cache.insert_system_event(level="info", source="X", kind="a", ts=ts_old)
-        await cache.insert_system_event(level="info", source="X", kind="b", ts=ts_new)
-        rows = await cache.get_system_events()
+        await system_events_repo.insert_system_event(level="info", source="X", kind="a", ts=ts_old)
+        await system_events_repo.insert_system_event(level="info", source="X", kind="b", ts=ts_new)
+        rows = await system_events_repo.get_system_events()
         self.assertEqual(rows[0]["kind"], "b")  # newest first
 
     async def test_limit_clamped(self):
         for i in range(5):
-            await cache.insert_system_event(level="info", source="X", kind=f"k{i}")
+            await system_events_repo.insert_system_event(level="info", source="X", kind=f"k{i}")
         # Negative / zero → minimum 1, huge → capped at 1000
-        rows = await cache.get_system_events(limit=0)
+        rows = await system_events_repo.get_system_events(limit=0)
         self.assertEqual(len(rows), 1)
-        rows = await cache.get_system_events(limit=10000)
+        rows = await system_events_repo.get_system_events(limit=10000)
         self.assertEqual(len(rows), 5)
 
     async def test_summarize(self):
-        await cache.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
-        await cache.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
-        await cache.insert_system_event(level="error", source="wiki_ingestion", kind="tick_crashed")
-        await cache.insert_system_event(level="info", source="snapshot_nav", kind="tick_ok")
+        await system_events_repo.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
+        await system_events_repo.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
+        await system_events_repo.insert_system_event(level="error", source="wiki_ingestion", kind="tick_crashed")
+        await system_events_repo.insert_system_event(level="info", source="snapshot_nav", kind="tick_ok")
         since = (datetime.now() - timedelta(days=1)).isoformat(timespec="seconds")
-        summary = await cache.summarize_system_events(since)
+        summary = await system_events_repo.summarize_system_events(since)
         self.assertEqual(summary["wiki_ingestion"]["info"], 2)
         self.assertEqual(summary["wiki_ingestion"]["error"], 1)
         self.assertEqual(summary["snapshot_nav"]["info"], 1)
 
     async def test_latest_event(self):
-        await cache.insert_system_event(
+        await system_events_repo.insert_system_event(
             level="info", source="wiki_ingestion", kind="tick_ok",
             ts=(datetime.now() - timedelta(minutes=10)).isoformat(timespec="seconds"),
         )
-        await cache.insert_system_event(
+        await system_events_repo.insert_system_event(
             level="info", source="wiki_ingestion", kind="tick_ok",
             ts=datetime.now().isoformat(timespec="seconds"),
         )
-        row = await cache.get_latest_event("wiki_ingestion")
+        row = await system_events_repo.get_latest_event("wiki_ingestion")
         self.assertIsNotNone(row)
         # Returns the newer one.
         self.assertIsNotNone(row["ts"])
@@ -136,20 +137,20 @@ class SystemEventCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_prune_by_age(self):
         # Insert one row 40 days old and one recent.
         old_ts = (datetime.now() - timedelta(days=40)).isoformat(timespec="seconds")
-        await cache.insert_system_event(level="info", source="X", kind="old", ts=old_ts)
-        await cache.insert_system_event(level="info", source="X", kind="new")
-        deleted = await cache.prune_system_events(max_age_days=30)
+        await system_events_repo.insert_system_event(level="info", source="X", kind="old", ts=old_ts)
+        await system_events_repo.insert_system_event(level="info", source="X", kind="new")
+        deleted = await system_events_repo.prune_system_events(max_age_days=30)
         self.assertEqual(deleted, 1)
-        rows = await cache.get_system_events()
+        rows = await system_events_repo.get_system_events()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["kind"], "new")
 
     async def test_prune_row_cap(self):
         for i in range(20):
-            await cache.insert_system_event(level="info", source="X", kind=f"k{i}")
-        deleted = await cache.prune_system_events(max_age_days=30, max_rows=10)
+            await system_events_repo.insert_system_event(level="info", source="X", kind=f"k{i}")
+        deleted = await system_events_repo.prune_system_events(max_age_days=30, max_rows=10)
         self.assertEqual(deleted, 10)
-        rows = await cache.get_system_events(limit=100)
+        rows = await system_events_repo.get_system_events(limit=100)
         self.assertEqual(len(rows), 10)
 
 
@@ -171,7 +172,7 @@ class RecordEventTests(unittest.IsolatedAsyncioTestCase):
             "wiki_ingestion", "tick_ok",
             level="info", details={"summarized": 5}, wait=True,
         )
-        rows = await cache.get_system_events()
+        rows = await system_events_repo.get_system_events()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["kind"], "tick_ok")
         self.assertIn('"summarized": 5', rows[0]["details"])
@@ -181,7 +182,7 @@ class RecordEventTests(unittest.IsolatedAsyncioTestCase):
         await observability.record_event(
             "X", "weird", level="BOGUS", wait=True,
         )
-        rows = await cache.get_system_events()
+        rows = await system_events_repo.get_system_events()
         self.assertEqual(rows[0]["level"], "info")
 
     async def test_record_event_handles_unserializable_details(self):
@@ -190,7 +191,7 @@ class RecordEventTests(unittest.IsolatedAsyncioTestCase):
         await observability.record_event(
             "X", "with_datetime", details={"when": dt}, wait=True,
         )
-        rows = await cache.get_system_events()
+        rows = await system_events_repo.get_system_events()
         self.assertIn("2026", rows[0]["details"])
 
     async def test_record_event_never_raises_on_db_failure(self):
@@ -223,7 +224,7 @@ class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
 
     async def test_list_events_returns_parsed_details(self):
-        await cache.insert_system_event(
+        await system_events_repo.insert_system_event(
             level="info", source="wiki_ingestion", kind="tick_ok",
             details=json.dumps({"summarized": 7, "skipped": 3}),
         )
@@ -234,17 +235,17 @@ class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["details_obj"]["skipped"], 3)
 
     async def test_list_events_applies_filters(self):
-        await cache.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
-        await cache.insert_system_event(level="error", source="snapshot_nav", kind="tick_crashed")
+        await system_events_repo.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
+        await system_events_repo.insert_system_event(level="error", source="snapshot_nav", kind="tick_crashed")
         with patch("routes.admin.get_current_user", AsyncMock(return_value=await self._mk_admin())):
             rows = await admin_route.list_events(_admin_request(), level="error")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source"], "snapshot_nav")
 
     async def test_event_summary_groups_correctly(self):
-        await cache.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
-        await cache.insert_system_event(level="error", source="wiki_ingestion", kind="tick_crashed")
-        await cache.insert_system_event(level="info", source="snapshot_nav", kind="tick_ok")
+        await system_events_repo.insert_system_event(level="info", source="wiki_ingestion", kind="tick_ok")
+        await system_events_repo.insert_system_event(level="error", source="wiki_ingestion", kind="tick_crashed")
+        await system_events_repo.insert_system_event(level="info", source="snapshot_nav", kind="tick_ok")
         with patch("routes.admin.get_current_user", AsyncMock(return_value=await self._mk_admin())):
             summary = await admin_route.event_summary(_admin_request(), hours=24)
         self.assertEqual(summary["by_source"]["wiki_ingestion"]["info"], 1)
@@ -467,7 +468,7 @@ class WikiDiagRouteTests(unittest.IsolatedAsyncioTestCase):
              "pdf_url": "https://stock.pstatic.net/stock-research/company/74/x.pdf"},
         ]
         # Seed DB as though ingestion has already succeeded.
-        await cache.save_wiki_entry({
+        await wiki_repo.save_wiki_entry({
             "stock_code": "051910", "source_type": "broker_report",
             "source_ref": "sha1abc", "report_date": "2026-03-06",
             "firm": "한국IR협의회", "title": "R1", "recommendation": "Buy",

@@ -10,9 +10,6 @@ extend-exclude = ["static", "docs"]
 select = ["F", "E9"]
 
 [tool.ruff.lint.per-file-ignores]
-# cache.py 하단 재수출 블록은 Phase 1(허브 해체)에서 제거 예정 — 그때까지
-# 의도된 미사용 import다.
-"cache.py" = ["F401"]
 "core/__init__.py" = ["F401"]
 "repositories/__init__.py" = ["F401"]
 "services/__init__.py" = ["F401"]

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Body, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 import auth_service
-import cache
+from repositories import users as users_repo
 from deps import (
     SESSION_COOKIE_NAME,
     TRUSTED_RETURN_ORIGINS,
@@ -235,11 +235,11 @@ async def auth_google(request: Request, response: Response, payload: dict = Body
         logger.warning("Google 로그인 검증 실패: %s", exc)
         raise HTTPException(status_code=502, detail="Google 인증 서버를 확인하지 못했습니다.") from exc
 
-    await cache.upsert_user(user)
-    await cache.delete_expired_sessions()
+    await users_repo.upsert_user(user)
+    await users_repo.delete_expired_sessions()
 
     session_token = auth_service.new_session_token()
-    await cache.create_user_session(
+    await users_repo.create_user_session(
         auth_service.hash_session_token(session_token),
         user["google_sub"],
         auth_service.session_expiry_iso(),
@@ -253,7 +253,7 @@ async def auth_logout(request: Request, response: Response):
     session_token = request.cookies.get(SESSION_COOKIE_NAME)
     if session_token and auth_service.is_enabled():
         try:
-            await cache.delete_user_session(auth_service.hash_session_token(session_token))
+            await users_repo.delete_user_session(auth_service.hash_session_token(session_token))
         except RuntimeError:
             pass
     clear_session_cookie(response, request)
@@ -281,11 +281,11 @@ async def auth_google_callback(request: Request):
         logger.warning("Google redirect login verification failed: %s", exc)
         return RedirectResponse(_append_query_value(return_to, "auth_error", "google"), status_code=303)
 
-    await cache.upsert_user(user)
-    await cache.delete_expired_sessions()
+    await users_repo.upsert_user(user)
+    await users_repo.delete_expired_sessions()
 
     session_token = auth_service.new_session_token()
-    await cache.create_user_session(
+    await users_repo.create_user_session(
         auth_service.hash_session_token(session_token),
         user["google_sub"],
         auth_service.session_expiry_iso(),

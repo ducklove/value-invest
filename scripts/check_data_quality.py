@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import cache
+from repositories import user_stocks as user_stocks_repo
 from services import data_quality
 
 
@@ -29,7 +30,7 @@ async def _get_target_codes(args: argparse.Namespace) -> list[str]:
         finally:
             await db.close()
 
-    cached_items = await cache.get_cached_analyses()
+    cached_items = await user_stocks_repo.get_cached_analyses()
     codes = [item["stock_code"] for item in cached_items]
     if args.limit:
         codes = codes[:args.limit]

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-import cache
+from repositories import notifications as notifications_repo
 from services.notifications import kakao, telegram
 
 
@@ -22,7 +22,7 @@ async def dispatch(google_sub: str, text: str) -> int:
     can't block the others or the evaluation loop.
     """
     try:
-        channels = await cache.list_notification_channels(google_sub)
+        channels = await notifications_repo.list_notification_channels(google_sub)
     except Exception as exc:
         logger.warning("dispatch channel lookup failed user=%s: %s", google_sub[:8], exc)
         return 0
@@ -51,7 +51,7 @@ async def dispatch(google_sub: str, text: str) -> int:
 
 async def has_active_channel(google_sub: str) -> bool:
     try:
-        channels = await cache.list_notification_channels(google_sub)
+        channels = await notifications_repo.list_notification_channels(google_sub)
     except Exception:
         return False
     return any(c.get("enabled") and c.get("verified") for c in channels)

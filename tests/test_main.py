@@ -145,7 +145,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         request = _request_with_headers("/api/portfolio/004800")
         deleter = AsyncMock(return_value=True)
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
-             patch("routes.portfolio.cache.delete_portfolio_item", new=deleter):
+             patch("repositories.portfolio.delete_portfolio_item", new=deleter):
             response = await portfolio.delete_portfolio_item(" 004800 ", request)
 
         self.assertEqual(response, {"ok": True})
@@ -154,7 +154,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_delete_portfolio_item_reports_missing_row(self):
         request = _request_with_headers("/api/portfolio/004800")
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
-             patch("routes.portfolio.cache.delete_portfolio_item", new=AsyncMock(return_value=False)):
+             patch("repositories.portfolio.delete_portfolio_item", new=AsyncMock(return_value=False)):
             with self.assertRaises(HTTPException) as exc_info:
                 await portfolio.delete_portfolio_item("004800", request)
 
@@ -164,11 +164,11 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         request = _request_with_headers("/api/portfolio/order")
         saver = AsyncMock()
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
-             patch("routes.portfolio.cache.get_portfolio", new=AsyncMock(return_value=[
+             patch("repositories.portfolio.get_portfolio", new=AsyncMock(return_value=[
                  {"stock_code": "BBB"},
                  {"stock_code": "AAA"},
              ])), \
-             patch("routes.portfolio.cache.save_portfolio_order", new=saver):
+             patch("repositories.portfolio.save_portfolio_order", new=saver):
             response = await portfolio.save_portfolio_order(
                 request,
                 {"stock_codes": [" bbb ", "aaa"]},
@@ -181,11 +181,11 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         request = _request_with_headers("/api/portfolio/order")
         saver = AsyncMock()
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
-             patch("routes.portfolio.cache.get_portfolio", new=AsyncMock(return_value=[
+             patch("repositories.portfolio.get_portfolio", new=AsyncMock(return_value=[
                  {"stock_code": "AAA"},
                  {"stock_code": "BBB"},
              ])), \
-             patch("routes.portfolio.cache.save_portfolio_order", new=saver):
+             patch("repositories.portfolio.save_portfolio_order", new=saver):
             with self.assertRaises(HTTPException) as exc_info:
                 await portfolio.save_portfolio_order(
                     request,
@@ -214,7 +214,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         foreign_name = AsyncMock(side_effect=AssertionError("KCC alias should not be saved as a foreign ticker"))
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
              patch("routes.portfolio.cache.resolve_corp_search_query", new=AsyncMock(return_value=alias)), \
-             patch("routes.portfolio.cache.save_portfolio_item", new=saver), \
+             patch("repositories.portfolio.save_portfolio_item", new=saver), \
              patch("services.portfolio.foreign.resolve_foreign_name", new=foreign_name), \
              patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={"price": 1000})):
             await portfolio.save_portfolio_item(

@@ -24,7 +24,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-import cache
+from repositories import notifications as notifications_repo
 
 
 logger = logging.getLogger(__name__)
@@ -150,7 +150,7 @@ async def _refresh_into(google_sub: str, config: dict, enabled: bool) -> bool:
     except Exception as exc:
         logger.warning("kakao refresh failed user=%s: %s", google_sub[:8], exc)
         try:
-            await cache.upsert_notification_channel(
+            await notifications_repo.upsert_notification_channel(
                 google_sub, "kakao", config=config, enabled=enabled, verified=False
             )
         except Exception:
@@ -161,7 +161,7 @@ async def _refresh_into(google_sub: str, config: dict, enabled: bool) -> bool:
     if fresh.get("refresh_token"):
         config["refresh_token"] = fresh["refresh_token"]
         config["refresh_expires_at"] = fresh["refresh_expires_at"]
-    await cache.upsert_notification_channel(
+    await notifications_repo.upsert_notification_channel(
         google_sub, "kakao", config=config, enabled=enabled, verified=True
     )
     return True

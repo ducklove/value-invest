@@ -15,6 +15,8 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from repositories import benchmark_daily as benchmark_repo
+from repositories import system_events as system_events_repo
 import repositories.db
 from repositories import snapshots as snapshots_repo
 import observability
@@ -218,29 +220,29 @@ class BenchmarkFreshnessTests(_SeededDbTestCase):
 
     async def test_fresh_and_slightly_lagged_codes_are_ok(self):
         # 미국장 시차 감안 — 2 거래일 이내 지연은 ok.
-        await cache.save_benchmark_rows("KOSPI", [{"date": "2026-06-10", "close": 2800.0}])
-        await cache.save_benchmark_rows("SP500", [{"date": "2026-06-08", "close": 6000.0}])
+        await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": "2026-06-10", "close": 2800.0}])
+        await benchmark_repo.save_benchmark_rows("SP500", [{"date": "2026-06-08", "close": 6000.0}])
         results = {r["check"]: r for r in await data_quality.check_benchmark_freshness(now=WED_LATE)}
         self.assertEqual(results["benchmark_freshness_KOSPI"]["status"], "ok")
         self.assertEqual(results["benchmark_freshness_SP500"]["status"], "ok")
 
     async def test_stale_code_escalates_to_error(self):
         # 2026-05-20(수) → 06-10 기준 거래일 15일 지연 — error.
-        await cache.save_benchmark_rows("GOLD", [{"date": "2026-05-20", "close": 2400.0}])
+        await benchmark_repo.save_benchmark_rows("GOLD", [{"date": "2026-05-20", "close": 2400.0}])
         results = {r["check"]: r for r in await data_quality.check_benchmark_freshness(now=WED_LATE)}
         self.assertEqual(results["benchmark_freshness_GOLD"]["status"], "error")
 
 
 class SystemEventsErrorRateTests(_SeededDbTestCase):
     async def test_no_errors_is_ok(self):
-        await cache.insert_system_event(level="info", source="snapshot_nav", kind="tick_ok")
+        await system_events_repo.insert_system_event(level="info", source="snapshot_nav", kind="tick_ok")
         result = await data_quality.check_system_events_error_rate(now=datetime.now())
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["value"], 0)
 
     async def test_some_errors_is_warn(self):
         for _ in range(3):
-            await cache.insert_system_event(level="error", source="kis_ws", kind="reconnect_failed")
+            await system_events_repo.insert_system_event(level="error", source="kis_ws", kind="reconnect_failed")
         result = await data_quality.check_system_events_error_rate(now=datetime.now())
         self.assertEqual(result["status"], "warn")
         self.assertEqual(result["value"], 3)
@@ -248,13 +250,13 @@ class SystemEventsErrorRateTests(_SeededDbTestCase):
 
     async def test_error_flood_escalates(self):
         for _ in range(12):
-            await cache.insert_system_event(level="error", source="http", kind="error")
+            await system_events_repo.insert_system_event(level="error", source="http", kind="error")
         result = await data_quality.check_system_events_error_rate(now=datetime.now())
         self.assertEqual(result["status"], "error")
 
     async def test_own_events_are_excluded(self):
         # 자기증폭 방지 — data_quality 자신의 error 는 세지 않는다.
-        await cache.insert_system_event(level="error", source="data_quality", kind="nav_snapshot_freshness")
+        await system_events_repo.insert_system_event(level="error", source="data_quality", kind="nav_snapshot_freshness")
         result = await data_quality.check_system_events_error_rate(now=datetime.now())
         self.assertEqual(result["status"], "ok")
 
@@ -266,24 +268,24 @@ class RunAllChecksTests(_SeededDbTestCase):
         self.assertEqual(out["counts"]["error"], 0)
         self.assertGreaterEqual(out["counts"]["warn"], 3)
 
-        rows = await cache.get_system_events(source="data_quality")
+        rows = await system_events_repo.get_system_events(source="data_quality")
         kinds = {r["kind"] for r in rows}
         self.assertIn("check_summary", kinds)
         self.assertIn("benchmark_freshness_KOSPI", kinds)
         # 요약 이벤트 level 은 warn 존재 → warning.
-        summary_row = await cache.get_latest_event("data_quality", "check_summary")
+        summary_row = await system_events_repo.get_latest_event("data_quality", "check_summary")
         self.assertEqual(summary_row["level"], "warning")
         self.assertIn('"results"', summary_row["details"])
 
     async def test_all_ok_records_only_info_summary(self):
-        await cache.save_benchmark_rows("KOSPI", [{"date": "2026-06-10", "close": 2800.0}])
-        await cache.save_benchmark_rows("SP500", [{"date": "2026-06-09", "close": 6000.0}])
-        await cache.save_benchmark_rows("GOLD", [{"date": "2026-06-09", "close": 2400.0}])
+        await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": "2026-06-10", "close": 2800.0}])
+        await benchmark_repo.save_benchmark_rows("SP500", [{"date": "2026-06-09", "close": 6000.0}])
+        await benchmark_repo.save_benchmark_rows("GOLD", [{"date": "2026-06-09", "close": 2400.0}])
         out = await data_quality.run_all_checks(now=WED_LATE)
         self.assertEqual(out["counts"]["warn"], 0)
         self.assertEqual(out["counts"]["error"], 0)
 
-        rows = await cache.get_system_events(source="data_quality")
+        rows = await system_events_repo.get_system_events(source="data_quality")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["kind"], "check_summary")
         self.assertEqual(rows[0]["level"], "info")
@@ -292,10 +294,10 @@ class RunAllChecksTests(_SeededDbTestCase):
         await self._seed_user_with_holdings()  # 스냅샷 없음 → NAV error
         out = await data_quality.run_all_checks(now=WED_LATE)
         self.assertGreaterEqual(out["counts"]["error"], 1)
-        summary_row = await cache.get_latest_event("data_quality", "check_summary")
+        summary_row = await system_events_repo.get_latest_event("data_quality", "check_summary")
         self.assertEqual(summary_row["level"], "error")
         # 실패 점검 개별 이벤트도 level=error 로 남는다.
-        errs = await cache.get_system_events(source="data_quality", level="error")
+        errs = await system_events_repo.get_system_events(source="data_quality", level="error")
         self.assertTrue(any(r["kind"] == "nav_snapshot_freshness" for r in errs))
 
     async def test_crashing_check_becomes_error_result_not_exception(self):
@@ -308,7 +310,7 @@ class RunAllChecksTests(_SeededDbTestCase):
 
     async def test_record_false_writes_no_events(self):
         await data_quality.run_all_checks(now=WED_LATE, record=False)
-        rows = await cache.get_system_events(source="data_quality")
+        rows = await system_events_repo.get_system_events(source="data_quality")
         self.assertEqual(rows, [])
 
 
