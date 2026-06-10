@@ -31,7 +31,11 @@ async function apiFetch(url, opts) {
   return fetch(url, { credentials: 'include', ...(opts || {}) });
 }
 </script>
+<!-- 의존 순서: admin.js 가 공용 헬퍼(_esc, _adminInputStyle)와 부트스트랩을
+     제공하므로 가장 먼저. 패널 모듈은 그 뒤에 로드된다. -->
 <script src="/js/admin.js"></script>
+<script src="/js/admin-observability.js"></script>
+<script src="/js/admin-linked-projects.js"></script>
 <script>
 _adminLoaded = false;
 loadAdminView();

@@ -32,6 +32,14 @@ ANALYSIS_SPLIT_FILES = [
     "analysis.js",
 ]
 
+# Dependencies-first: admin.js provides the shared helpers (_esc,
+# _adminInputStyle) and bootstrapping; the panel modules load after it.
+ADMIN_SPLIT_FILES = [
+    "admin.js",
+    "admin-observability.js",
+    "admin-linked-projects.js",
+]
+
 
 def test_economic_calendar_section_and_script_present():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -178,6 +186,72 @@ def test_analysis_split_files_keep_feature_homes():
 
 def test_analysis_split_files_stay_below_maintenance_ceiling():
     for name in ANALYSIS_SPLIT_FILES:
+        lines = (JS / name).read_text(encoding="utf-8").splitlines()
+        assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
+
+
+def test_admin_page_loads_admin_split_scripts_in_contract_order():
+    html = (STATIC / "admin.html").read_text(encoding="utf-8")
+
+    positions = []
+    for name in ADMIN_SPLIT_FILES:
+        marker = f'/js/{name}'
+        pos = html.find(marker)
+        assert pos != -1, f"{name} is not loaded by admin.html"
+        positions.append(pos)
+    assert positions == sorted(positions), "admin split script order changed"
+    # 인라인 apiFetch 헬퍼(credentials:'include')는 모든 admin 스크립트보다 먼저.
+    assert html.find("async function apiFetch(") != -1
+    assert html.find("async function apiFetch(") < positions[0]
+    # 부트스트랩 호출(loadAdminView)은 모든 스크립트가 로드된 뒤에 실행된다.
+    assert positions[-1] < html.find("loadAdminView();")
+
+
+def test_admin_split_files_keep_feature_homes():
+    admin = (JS / "admin.js").read_text(encoding="utf-8")
+    observability = (JS / "admin-observability.js").read_text(encoding="utf-8")
+    linked = (JS / "admin-linked-projects.js").read_text(encoding="utf-8")
+
+    # 본체: 부트스트랩 오케스트레이션, AI 운영 관리, 공용 헬퍼.
+    assert "async function loadAdminView()" in admin
+    assert "function _renderAdmin(" in admin
+    assert "function _renderAiConfigSection(" in admin
+    assert "async function saveAiKey()" in admin
+    assert "async function saveAiModels()" in admin
+    assert "function _esc(" in admin
+    assert "function _adminInputStyle()" in admin
+    # 관측성: 배포/서버/배치/사용자/DB/이벤트/HTTP 패널 + 5초 라이브 갱신 +
+    # 수동 작업 실행 + 위키 진단 폼.
+    assert "function _renderDeployCard(" in observability
+    assert "function _renderServerCard(" in observability
+    assert "function _startLiveUpdates()" in observability
+    assert "async function _updateLiveStats()" in observability
+    assert "function _renderBatchSection(" in observability
+    assert "function _renderUsersSection(" in observability
+    assert "function _renderDbSection(" in observability
+    assert "function _renderEventsSection(" in observability
+    assert "function _renderHttpMetricsSection(" in observability
+    assert "function _renderSubsystemSummary(" in observability
+    assert "async function triggerJob(" in observability
+    assert "async function runWikiDiag()" in observability
+    # 연결 프로젝트 config + 우선주/해외 배당 관리.
+    assert "function _renderLinkedProjectConfigSection(" in linked
+    assert "async function saveLinkedProjectConfig(" in linked
+    assert "async function saveGoldGapConfig()" in linked
+    assert "async function saveHoldingConfigItem()" in linked
+    assert "async function savePreferredConfigItem()" in linked
+    assert "function _renderDataSyncSection()" in linked
+    assert "async function refreshPreferredDividends()" in linked
+    assert "async function refreshForeignDividends()" in linked
+    assert "async function submitForeignDividend()" in linked
+    assert "function prefillPreferredConfigFromDividend(" in linked
+    # 오류 보고는 reportApiError 헬퍼 경유를 유지한다(765d8a5).
+    assert "reportApiError(e, '실행 요청');" in observability
+    assert "reportApiError(e, '삭제');" in linked
+
+
+def test_admin_split_files_stay_below_maintenance_ceiling():
+    for name in ADMIN_SPLIT_FILES:
         lines = (JS / name).read_text(encoding="utf-8").splitlines()
         assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
 
