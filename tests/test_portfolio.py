@@ -11,6 +11,7 @@ from services.portfolio import dividends
 from services.portfolio import foreign
 from services.portfolio import fx
 from services.portfolio import target_metrics as target_metrics_service
+from services.portfolio import target_resolver
 
 
 class PortfolioTests(unittest.IsolatedAsyncioTestCase):
@@ -24,8 +25,7 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         # the singleton so init_db() opens a fresh conn on the patched path.
         await cache.close_db()
         await cache.init_db()
-        portfolio_route._dividend_warmup_last.clear()
-        portfolio_route._dividend_warmup_tasks.clear()
+        dividends.reset_warmup_state()
         portfolio_route._benchmark_name_cache.clear()
         portfolio_route._benchmark_quote_cache.clear()
         fx._fx_daily_cache.clear()
@@ -162,14 +162,17 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        async def fake_quote(code):
+        async def fake_quote(code, **kwargs):
             return {"price": {"028260": 100, "009540": 200}[code]}
 
+        # patch.object mutates the shared module objects the service reads at
+        # call time (commit 99ef2ba pattern) — the formula resolution now lives
+        # in services.portfolio.target_resolver.
         with patch.object(
-            portfolio_route.integrations,
+            target_resolver.integrations,
             "build_public_integrations",
             return_value={"holdingValue": {"meta": holding_meta}},
-        ), patch.object(portfolio_route, "_fetch_quote", new=AsyncMock(side_effect=fake_quote)):
+        ), patch.object(target_resolver.runtime_quotes, "fetch_quote", new=AsyncMock(side_effect=fake_quote)):
             target_price = await portfolio_route._resolve_target_formula_price("002380", "보유지분", 611500)
 
         self.assertAlmostEqual(target_price, (100 * 10 + 200 * 5) / 900)
@@ -185,10 +188,10 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch.object(
-            portfolio_route.integrations,
+            target_resolver.integrations,
             "build_public_integrations",
             return_value={"holdingValue": {"meta": holding_meta}},
-        ), patch.object(portfolio_route, "_fetch_quote", new=AsyncMock()) as fetch_quote:
+        ), patch.object(target_resolver.runtime_quotes, "fetch_quote", new=AsyncMock()) as fetch_quote:
             target_price = await portfolio_route._resolve_target_formula_price("004700", "보유지분", 611500)
 
         fetch_quote.assert_not_awaited()
@@ -607,9 +610,9 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
         fetch = AsyncMock(return_value=rows)
         dart_fetch = AsyncMock(return_value={})
 
-        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
-             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
-            await portfolio_route._warm_market_data_for_dividend("002380")
+        with patch.object(dividends.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(dividends.stock_price, "fetch_market_data", fetch):
+            await dividends.warm_market_data_for_dividend("002380")
 
         dart_fetch.assert_awaited_once()
         fetch.assert_awaited_once()
@@ -630,9 +633,9 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         fetch = AsyncMock(return_value=[])
         dart_fetch = AsyncMock(return_value={})
-        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
-             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
-            await portfolio_route._warm_market_data_for_dividend("002380")
+        with patch.object(dividends.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(dividends.stock_price, "fetch_market_data", fetch):
+            await dividends.warm_market_data_for_dividend("002380")
 
         dart_fetch.assert_awaited_once()
         fetch.assert_not_awaited()
@@ -651,9 +654,9 @@ class PortfolioTests(unittest.IsolatedAsyncioTestCase):
 
         dart_fetch = AsyncMock(return_value={current_year - 1: 15000.0})
         fetch = AsyncMock(return_value=[])
-        with patch.object(portfolio_route.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
-             patch.object(portfolio_route.stock_price, "fetch_market_data", fetch):
-            await portfolio_route._warm_market_data_for_dividend("002380")
+        with patch.object(dividends.dart_client, "fetch_dividend_per_share_by_year", dart_fetch), \
+             patch.object(dividends.stock_price, "fetch_market_data", fetch):
+            await dividends.warm_market_data_for_dividend("002380")
 
         dart_fetch.assert_awaited_once()
         fetch.assert_not_awaited()

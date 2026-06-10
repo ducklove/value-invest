@@ -138,7 +138,9 @@ class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        with patch.object(pf.integrations, "build_public_integrations", return_value=config):
+        # holding_context_for_asset reads integrations through the insights
+        # module; patch it there directly instead of via the route namespace.
+        with patch.object(insights.integrations, "build_public_integrations", return_value=config):
             holding = insights.holding_context_for_asset("002380")
 
         self.assertEqual(holding["code"], "002380")

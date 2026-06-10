@@ -3,7 +3,7 @@ import logging
 import os
 import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import httpx
@@ -13,8 +13,6 @@ from fastapi.responses import StreamingResponse
 import ai_config
 import asset_insights
 import cache
-import integrations
-import dart_client
 import market_indicators
 import stock_price
 from deps import get_current_user
@@ -23,7 +21,6 @@ from services.portfolio import foreign
 from services.portfolio import insights
 from services.portfolio import quote_service
 from services.portfolio.identifiers import (
-    CASH_NAMES as _CASH_NAMES,
     SPECIAL_ASSETS as _SPECIAL_ASSETS,
     common_stock_code as _common_stock_code,
     is_cash_asset as _is_cash_asset,
@@ -31,27 +28,20 @@ from services.portfolio.identifiers import (
     is_preferred_stock as _is_preferred_stock,
     is_special_asset as _is_special_asset,
     normalize_portfolio_code as _normalize_portfolio_code,
-    static_foreign_ticker as _static_foreign_ticker,
 )
-from services.portfolio.targets import (
-    evaluate_target_formula as _evaluate_target_formula,
-    extract_target_variables as _extract_target_variables,
-    parse_target_input as _parse_target_input,
-)
+from services.portfolio import target_resolver
+from services.portfolio.targets import parse_target_input as _parse_target_input
 from services.portfolio.target_metrics import supplement_target_metrics as _supplement_target_metrics
 from services.portfolio import benchmarks
 from services.portfolio.benchmarks import (
     BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
 )
-from services.portfolio.dividends import (
-    due_dividend_warmup_targets as _due_dividend_warmup_targets,
-)
+from services.portfolio import dividends
+from services.portfolio import names
 from services.portfolio.time_windows import (
     intraday_axis_window as _intraday_axis_window,
     portfolio_today_baseline_date as _portfolio_today_baseline_date,
-    today_kst_date as _today_kst_date,
 )
-from services.portfolio.valuation import fetch_valuation_basis as _fetch_common_valuation_basis
 
 _OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
 _keys_file = Path(__file__).parent.parent / "keys.txt"
@@ -188,103 +178,6 @@ def _resolve_benchmark_name_from_code_table(
 
 async def _fetch_benchmark_quote(benchmark_code: str) -> dict:
     return await benchmarks.fetch_benchmark_quote(benchmark_code)
-
-
-_dividend_warmup_last: dict[str, float] = {}
-_dividend_warmup_tasks: dict[str, asyncio.Task] = {}
-
-
-async def _refresh_domestic_dividend_from_dart(code: str) -> int:
-    corp_code = await cache.get_corp_code(code)
-    if not corp_code:
-        return 0
-    current_year = datetime.now().year
-    dividends = await dart_client.fetch_dividend_per_share_by_year(
-        corp_code,
-        start_year=max(current_year - 3, dart_client.DART_ANNUAL_DATA_START_YEAR),
-        end_year=current_year - 1,
-    )
-    return await cache.upsert_market_dividends(code, dividends)
-
-
-async def _warm_market_data_for_dividend(code: str) -> None:
-    code = _normalize_portfolio_code(code)
-    try:
-        updated = await _refresh_domestic_dividend_from_dart(code)
-        if updated:
-            logger.info("Portfolio DART dividend warmup completed (%s, %d rows)", code, updated)
-            return
-        latest_dividend_years = await cache.get_latest_dividend_years([code])
-        if latest_dividend_years.get(code, 0) >= datetime.now().year - 1:
-            return
-        fin_data = await cache.get_financial_data(code)
-        corp_code = await cache.get_corp_code(code)
-        refreshed = await stock_price.fetch_market_data(code, fin_data, corp_code=corp_code)
-        if refreshed:
-            await cache.save_market_data(code, refreshed)
-            logger.info("Portfolio dividend market-data warmup completed (%s, %d rows)", code, len(refreshed))
-    except Exception as exc:
-        logger.warning("Portfolio dividend market-data warmup failed (%s): %s", code, exc)
-    finally:
-        _dividend_warmup_tasks.pop(code, None)
-
-
-def _consume_dividend_warmup_result(code: str, task: asyncio.Task) -> None:
-    _dividend_warmup_tasks.pop(code, None)
-    try:
-        task.exception()
-    except asyncio.CancelledError:
-        pass
-
-
-def _running_dividend_warmup_codes() -> set[str]:
-    return {
-        code
-        for code, task in _dividend_warmup_tasks.items()
-        if task and not task.done()
-    }
-
-
-def _start_dividend_warmup_task(code: str, now: float) -> asyncio.Task | None:
-    _dividend_warmup_last[code] = now
-    try:
-        async def _delayed_warmup():
-            await asyncio.sleep(10)
-            await _warm_market_data_for_dividend(code)
-
-        task = asyncio.create_task(_delayed_warmup())
-    except RuntimeError:
-        return None
-    _dividend_warmup_tasks[code] = task
-    task.add_done_callback(lambda t, c=code: _consume_dividend_warmup_result(c, t))
-    return task
-
-
-def _schedule_portfolio_dividend_warmup(codes: list[str]) -> None:
-    now = time.monotonic()
-    due = _due_dividend_warmup_targets(codes, now, _dividend_warmup_last, running_codes=_running_dividend_warmup_codes())
-    for code in due:
-        _start_dividend_warmup_task(code, now)
-
-
-async def _warm_portfolio_dividends_for_response(codes: list[str], timeout: float = 2.5) -> None:
-    now = time.monotonic()
-    due = _due_dividend_warmup_targets(codes, now, _dividend_warmup_last, running_codes=_running_dividend_warmup_codes())
-    tasks = [
-        task
-        for code in due
-        if (task := _start_dividend_warmup_task(code, now)) is not None
-    ]
-    if not tasks:
-        return
-    done, pending = await asyncio.wait(tasks, timeout=timeout)
-    for task in done:
-        try:
-            task.exception()
-        except asyncio.CancelledError:
-            pass
-    if pending:
-        logger.info("Portfolio dividend warmup still running in background (%d pending)", len(pending))
 
 
 def _normalize_portfolio_tags(raw_tags) -> list[str]:
@@ -681,7 +574,7 @@ async def get_portfolio(request: Request):
     # client keeps the number fresh while the user edits quantity in
     # the inline edit row.
     codes = [it["stock_code"] for it in items]
-    _schedule_portfolio_dividend_warmup(codes)
+    dividends.schedule_for_portfolio(codes)
     metric_codes = list(dict.fromkeys(
         codes + [
             _common_stock_code(code)
@@ -716,105 +609,16 @@ async def get_portfolio(request: Request):
     return enriched
 
 
-def _target_number_or_none(value) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number == number else None
-
-
-async def _quote_price_for_target_formula(stock_code: str) -> float | None:
-    try:
-        quote = await asyncio.wait_for(_fetch_quote(stock_code), timeout=3.5)
-    except Exception:
-        quote = _cached_quote_for_code(stock_code)
-    return _target_number_or_none((quote or {}).get("price"))
-
-
-async def _holding_value_for_target_formula(stock_code: str) -> float | None:
-    meta = (integrations.build_public_integrations().get("holdingValue") or {}).get("meta") or {}
-    item = meta.get(stock_code)
-    if not isinstance(item, dict):
-        return None
-
-    snapshot_value = _target_number_or_none(item.get("holdingValuePerShare"))
-    if snapshot_value is not None and snapshot_value > 0:
-        return snapshot_value
-
-    subsidiaries = item.get("subsidiaries") or []
-    if not subsidiaries:
-        return None
-
-    async def _sub_value(sub: dict) -> float | None:
-        code = str(sub.get("code") or "").strip()
-        shares = _target_number_or_none(sub.get("sharesHeld"))
-        if not code or shares is None:
-            return None
-        price = await _quote_price_for_target_formula(code)
-        if price is None:
-            return None
-        return price * shares
-
-    values = await asyncio.gather(*(_sub_value(sub) for sub in subsidiaries))
-    if any(value is None for value in values):
-        return None
-
-    total_shares = _target_number_or_none(item.get("totalShares"))
-    treasury_shares = _target_number_or_none(item.get("treasuryShares")) or 0
-    free_shares = (total_shares or 0) - treasury_shares
-    sub_total = sum(float(value) for value in values if value is not None)
-    return sub_total / free_shares if free_shares > 0 and sub_total > 0 else None
-
-
 async def _resolve_target_formula_price(stock_code: str, formula: str, avg_price: float) -> float | None:
-    """Resolve a formula to a saved fallback price at edit/save time.
+    """Save-time formula resolution (delegates to the target resolver service).
 
-    BPS/EPS use the same valuation source as the investment insight modal.
-    Dynamic variables such as 보유지분 and 본주가격 are still recomputed on the
-    client when quotes are available, so they intentionally do not block save.
+    Kept as a thin module-level name so the save handler stays readable; the
+    implementation lives in ``services.portfolio.target_resolver`` and this
+    wrapper only maps service errors to HTTP 400.
     """
-    variables = _extract_target_variables(formula)
-    if not variables:
-        return None
-
-    values: dict[str, float | None] = {}
-    if "매입가" in variables:
-        values["매입가"] = _target_number_or_none(avg_price)
-
-    if "DPS" in variables:
-        dps_map = await cache.get_trailing_dividends([stock_code])
-        values["DPS"] = _target_number_or_none(dps_map.get(stock_code))
-
-    if variables & {"BPS", "EPS"}:
-        source_code = _common_stock_code(stock_code) if _is_korean_stock(stock_code) and _is_preferred_stock(stock_code) else stock_code
-        basis = await _fetch_common_valuation_basis(source_code, as_of=_today_kst_date())
-        if "BPS" in variables:
-            values["BPS"] = _target_number_or_none(basis.get("bps"))
-        if "EPS" in variables:
-            values["EPS"] = _target_number_or_none(basis.get("eps"))
-
-    if "보유지분" in variables:
-        values["보유지분"] = await _holding_value_for_target_formula(stock_code)
-
-    if "본주가격" in variables:
-        common_code = _common_stock_code(stock_code) if _is_korean_stock(stock_code) and _is_preferred_stock(stock_code) else ""
-        values["본주가격"] = await _quote_price_for_target_formula(common_code) if common_code and common_code != stock_code else None
-
-    missing_financials = [name for name in ("BPS", "EPS") if name in variables and values.get(name) is None]
-    if missing_financials:
-        raise HTTPException(status_code=400, detail=f"{', '.join(missing_financials)} 값을 가져오지 못했습니다.")
-
-    # 보유지분/본주가격은 저장 시점 fallback 을 채우되, quote 를 못 얻는
-    # 경우에는 화면의 실시간 quote 도착 후 재평가에 맡긴다.
-    if any(name not in values or values.get(name) is None for name in variables):
-        return None
-
     try:
-        return _evaluate_target_formula(formula, values)
-    except Exception as exc:
+        return await target_resolver.resolve_formula_target_at_save(stock_code, formula, avg_price)
+    except target_resolver.TargetFormulaError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -994,7 +798,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     except Exception as exc:
         logger.warning("foreign dividend dispatch guard failed (%s): %s", stock_code, exc)
 
-    _schedule_portfolio_dividend_warmup([stock_code])
+    dividends.schedule_for_portfolio([stock_code])
     return {"ok": True, **result}
 
 
@@ -1115,41 +919,14 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
             await cache.save_portfolio_item(
                 user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], item["currency"],
             )
-    _schedule_portfolio_dividend_warmup([item["stock_code"] for item in resolved])
+    dividends.schedule_for_portfolio([item["stock_code"] for item in resolved])
 
     return {"ok": True, "imported": len(resolved), "mode": mode}
 
 
 @router.get("/api/portfolio/resolve-name")
 async def resolve_name(code: str = Query(..., min_length=1)):
-    code = _normalize_portfolio_code(code)
-    if _is_cash_asset(code):
-        return {"stock_code": code, "stock_name": _CASH_NAMES.get(code, code)}
-    if code in _SPECIAL_ASSETS:
-        return {"stock_code": code, "stock_name": foreign._SPECIAL_ASSET_NAMES.get(code, code)}
-    static = _static_foreign_ticker(code)
-    if static:
-        return {
-            "stock_code": static["ticker"],
-            "stock_name": static["name"],
-            "reuters_code": static["ticker"],
-        }
-    if _is_korean_stock(code):
-        name = await foreign.resolve_name(code)
-        return {"stock_code": code, "stock_name": name}
-    domestic_match = await foreign.resolve_domestic_code_alias(code)
-    if domestic_match:
-        return {
-            "stock_code": domestic_match["stock_code"],
-            "stock_name": domestic_match["corp_name"],
-        }
-    # Foreign: find reuters code
-    reuters = await foreign.resolve_foreign_reuters(code)
-    if reuters:
-        d = await foreign.fetch_naver_world_stock(reuters)
-        name = d.get("stockName") or d.get("stockNameEng") if d else None
-        return {"stock_code": reuters, "stock_name": name, "reuters_code": reuters}
-    return {"stock_code": code, "stock_name": None}
+    return await names.resolve_portfolio_name(code)
 
 
 # --- NAV / Snapshots / Cashflows ---

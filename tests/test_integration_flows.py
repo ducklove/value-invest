@@ -36,6 +36,7 @@ from core import app_factory
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
 from routes import portfolio as portfolio_route
+from services.portfolio import dividends
 
 
 def _test_settings() -> AppSettings:
@@ -65,10 +66,9 @@ class IntegrationAppHarness(unittest.IsolatedAsyncioTestCase):
         await cache.init_db()
 
         # Background warmups fan out to DART / AI and must not fire in tests.
-        portfolio_route._dividend_warmup_last.clear()
-        portfolio_route._dividend_warmup_tasks.clear()
+        dividends.reset_warmup_state()
         self._patches = [
-            patch.object(portfolio_route, "_schedule_portfolio_dividend_warmup", lambda codes: None),
+            patch.object(dividends, "schedule_for_portfolio", lambda codes: None),
             patch.object(portfolio_route.insights, "schedule_asset_insight_warmup", lambda enriched: None),
         ]
         for p in self._patches:
