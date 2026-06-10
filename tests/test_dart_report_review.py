@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 import cache
+
 import repositories.db
 from repositories import dart_review as dart_review_repo
 from repositories import wiki as wiki_repo
@@ -238,7 +239,7 @@ class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     async def test_save_and_get_dart_report_review_roundtrips_json(self):
-        saved = await cache.save_dart_report_review({
+        saved = await dart_review_repo.save_dart_report_review({
             "stock_code": "005930",
             "corp_code": "00126380",
             "corp_name": "삼성전자",
@@ -255,7 +256,7 @@ class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
             "cost_usd": 0.001,
         })
 
-        loaded = await cache.get_dart_report_review("005930", "20260401000001")
+        loaded = await dart_review_repo.get_dart_report_review("005930", "20260401000001")
 
         self.assertEqual(saved["review"]["summary_md"], "# 리뷰")
         self.assertEqual(loaded["comparison_reports"][0]["rcept_no"], "20251114000001")

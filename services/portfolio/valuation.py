@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import Any
 
 import asset_insights
-import cache
+from repositories import portfolio as portfolio_repo
 from cache_layer import MemoryTTLCache
 import close_price_client
 from services.portfolio.identifiers import common_stock_code, is_korean_stock, is_preferred_stock
@@ -164,7 +164,7 @@ def _basis_from_fundamental(source_code: str, raw: dict | None) -> dict:
 
 
 async def _apply_market_cache_fallback(source_code: str, basis: dict) -> dict:
-    cached = await cache.get_latest_market_valuation(source_code)
+    cached = await portfolio_repo.get_latest_market_valuation(source_code)
     if not cached:
         return basis
 
@@ -204,7 +204,7 @@ async def _persist_market_target_metrics(source_code: str, basis: dict) -> None:
     if row["eps"] is None and row["bps"] is None and row["close_price"] is None:
         return
     try:
-        await cache.upsert_market_target_metrics([row])
+        await portfolio_repo.upsert_market_target_metrics([row])
     except Exception as exc:
         logger.info("market target metric cache write failed (%s): %s", source_code, exc)
 

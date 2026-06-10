@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import cache
+from repositories import portfolio as portfolio_repo
 import integrations
 from services import stock_quotes
 from services.portfolio import runtime_quotes
@@ -112,7 +112,7 @@ async def resolve_formula_target(stock_code: str, formula: str, avg_price) -> fl
     if "매입가" in variables:
         values["매입가"] = _num(avg_price)
     if "DPS" in variables:
-        dps_map = await cache.get_trailing_dividends([stock_code])
+        dps_map = await portfolio_repo.get_trailing_dividends([stock_code])
         values["DPS"] = _num(dps_map.get(stock_code))
     if variables & {"BPS", "EPS"}:
         source = (
@@ -169,7 +169,7 @@ async def resolve_formula_target_at_save(stock_code: str, formula: str, avg_pric
         values["매입가"] = _num(avg_price)
 
     if "DPS" in variables:
-        dps_map = await cache.get_trailing_dividends([stock_code])
+        dps_map = await portfolio_repo.get_trailing_dividends([stock_code])
         values["DPS"] = _num(dps_map.get(stock_code))
 
     if variables & {"BPS", "EPS"}:

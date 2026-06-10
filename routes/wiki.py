@@ -17,6 +17,8 @@ from fastapi.responses import StreamingResponse
 
 import ai_config
 import cache
+from repositories import dart_review as dart_review_repo
+from repositories import wiki as wiki_repo
 from cache_layer import MemoryTTLCache
 from deps import get_current_user
 from services import ai_client
@@ -57,7 +59,7 @@ def _today_kst_iso() -> str:
 @router.get("/api/analysis/{stock_code}/wiki")
 async def get_stock_wiki(stock_code: str, limit: int = Query(20, ge=1, le=100)):
     """Return wiki entries for a stock, most-recent first. Public read."""
-    entries = await cache.get_wiki_entries(stock_code, limit=limit)
+    entries = await wiki_repo.get_wiki_entries(stock_code, limit=limit)
     return {
         "stock_code": stock_code,
         "count": len(entries),
@@ -69,7 +71,7 @@ async def get_stock_wiki(stock_code: str, limit: int = Query(20, ge=1, le=100)):
 async def get_wiki_stats():
     """Cheap aggregate — how many stocks / reports the wiki covers.
     Public read, safe to call from the page header on every load."""
-    return await cache.get_wiki_stats()
+    return await wiki_repo.get_wiki_stats()
 
 
 def _build_qa_context(entries: list[dict]) -> str:
@@ -112,7 +114,7 @@ async def _load_dart_review_context(stock_code: str) -> str:
     high-priority disclosure block when available.
     """
     try:
-        review = await cache.get_dart_report_review(stock_code)
+        review = await dart_review_repo.get_dart_report_review(stock_code)
     except Exception:
         logger.exception("failed to load cached DART review for QA")
         return ""
@@ -626,7 +628,7 @@ async def ask_stock(
 
     # Rate limit: 20/day per user (ENV-overridable). Only applies to
     # actual LLM calls; shortcuts are free.
-    used = await cache.qa_count_since(google_sub, _today_kst_iso())
+    used = await wiki_repo.qa_count_since(google_sub, _today_kst_iso())
     if used >= QA_DAILY_LIMIT:
         raise HTTPException(
             status_code=429,
@@ -645,7 +647,7 @@ async def ask_stock(
 
     # Retrieval sized by question complexity. Shallow questions skip
     # big wiki chunks; deep ones get TOP-8 with FTS + recency fallback.
-    entries = await cache.search_wiki(stock_code, question, limit=plan["wiki_limit"])
+    entries = await wiki_repo.search_wiki(stock_code, question, limit=plan["wiki_limit"])
     source_ids = [e["id"] for e in entries]
     wiki_block = _build_qa_context(entries) if entries else "(요약된 리포트 없음)"
     stock_block = await _load_stock_summary(stock_code)
@@ -796,7 +798,7 @@ async def ask_stock(
 
         # Persist for audit + rate limit accounting.
         try:
-            await cache.save_qa_entry({
+            await wiki_repo.save_qa_entry({
                 "google_sub": google_sub,
                 "stock_code": stock_code,
                 "question": question,

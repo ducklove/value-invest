@@ -30,6 +30,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 import cache
+from repositories import portfolio as portfolio_repo
+from repositories import system_events as system_events_repo
 import repositories.db
 import observability
 from core import app_factory
@@ -177,7 +179,7 @@ class RequestObservabilityTests(IntegrationAppHarness):
         await rec("/api/a", "error", 50.0, 500)
         await rec("/api/b", "slow", 1500.0, 201)
 
-        rows = await cache.summarize_http_metrics(observability.iso_hours_ago(1))
+        rows = await system_events_repo.summarize_http_metrics(observability.iso_hours_ago(1))
         by_path = {r["path"]: r for r in rows}
 
         self.assertEqual(by_path["/api/a"]["count"], 3)
@@ -197,7 +199,7 @@ class RequestObservabilityTests(IntegrationAppHarness):
 
         events = []
         for _ in range(200):
-            events = await cache.get_system_events(source="http")
+            events = await system_events_repo.get_system_events(source="http")
             if events:
                 break
             await asyncio.sleep(0.01)
@@ -212,7 +214,7 @@ class RequestObservabilityTests(IntegrationAppHarness):
 
 class PortfolioFlowTests(IntegrationAppHarness):
     async def test_portfolio_item_get_delete_roundtrip(self):
-        await cache.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
 
         resp = await self.client.get("/api/portfolio")
         self.assertEqual(resp.status_code, 200)

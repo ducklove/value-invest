@@ -5,6 +5,7 @@ import time
 
 import pytest
 
+from repositories import portfolio as portfolio_repo
 from routes import portfolio as portfolio_route
 from services import stock_quotes
 from services.portfolio import quote_service
@@ -224,7 +225,7 @@ async def test_stream_portfolio_quotes_streams_quote_and_benchmark():
         "get_current_user",
         new=AsyncMock(return_value={"google_sub": "u1"}),
     ), patch.object(
-        portfolio_route.cache,
+        portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[{"stock_code": "005930"}]),
     ), patch.object(

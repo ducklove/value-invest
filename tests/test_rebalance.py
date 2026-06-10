@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 import cache
+from repositories import notifications as notifications_repo
 import repositories.db
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
@@ -340,14 +341,14 @@ class RebalanceAlertEngineTests(TempDbHarness):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         await _seed_snapshot_portfolio()
-        await cache.upsert_notification_channel(
+        await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 123, "username": "t"}, enabled=True, verified=True
         )
 
     async def _rule(self, **kw):
         defaults = dict(scope="portfolio", alert_type="rebalance_drift", threshold=0.0, stock_code=None)
         defaults.update(kw)
-        return await cache.create_portfolio_alert("u1", **defaults)
+        return await notifications_repo.create_portfolio_alert("u1", **defaults)
 
     async def test_fires_once_and_rearms_within_tolerance(self):
         # 005930: 현재 60% / 목표 50% / 오차 5%p → 돌파
@@ -369,7 +370,7 @@ class RebalanceAlertEngineTests(TempDbHarness):
             # 목표를 58%로 → 드리프트 +2%p (오차 내) → re-arm
             await targets_repo.upsert_target("u1", "stock", "005930", 58.0, 5.0)
             self.assertEqual(await engine.evaluate_user("u1"), 0)
-            rule = await cache.get_portfolio_alert("u1", alert_id)
+            rule = await notifications_repo.get_portfolio_alert("u1", alert_id)
             state = json.loads(rule["state_json"])
             self.assertTrue(state["stock:005930"]["armed"])
 
@@ -479,7 +480,7 @@ class RebalanceAlertCrudTests(TempDbHarness):
             "/api/notifications/alerts", json={"alert_type": "rebalance_drift", "important": True})
         self.assertEqual(resp2.status_code, 200, resp2.text)
         self.assertEqual(resp2.json()["id"], body["id"])
-        rules = await cache.list_portfolio_alerts("u1")
+        rules = await notifications_repo.list_portfolio_alerts("u1")
         self.assertEqual(len(rules), 1)
 
 

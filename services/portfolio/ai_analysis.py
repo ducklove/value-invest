@@ -32,7 +32,9 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 import httpx
 
 import ai_config
-import cache
+from repositories import portfolio as portfolio_repo
+from repositories import snapshots as snapshots_repo
+from repositories import wiki as wiki_repo
 import market_indicators
 from services import ai_client
 from services.portfolio import quote_service
@@ -226,7 +228,7 @@ async def wiki_research_lines(enriched: list[dict]) -> tuple[list[str], int]:
         for item in ranked:
             code = item["stock_code"]
             name = item.get("stock_name") or code
-            entries = await cache.get_wiki_entries(code, limit=WIKI_ENTRY_LIMIT)
+            entries = await wiki_repo.get_wiki_entries(code, limit=WIKI_ENTRY_LIMIT)
             if not entries:
                 continue
             wiki_lines.append(f"### {name} ({code})")
@@ -344,13 +346,13 @@ async def prepare_analysis(payload: dict, user: dict) -> AnalysisContext:
         user_query = user_query[:USER_QUERY_MAX_CHARS]
 
     google_sub = user["google_sub"]
-    items = await cache.get_portfolio(google_sub=google_sub)
+    items = await portfolio_repo.get_portfolio(google_sub=google_sub)
     if not items:
         raise EmptyPortfolioError("portfolio is empty")
 
     enriched = await quote_service.enrich_with_cached_quotes(items)
     holdings_lines, total_value = holdings_summary(enriched)
-    perf_lines = performance_lines(await cache.get_nav_history(google_sub))
+    perf_lines = performance_lines(await snapshots_repo.get_nav_history(google_sub))
     market_lines = await market_summary_lines()
     wiki_lines, wiki_used_count = await wiki_research_lines(enriched)
 

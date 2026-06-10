@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import benchmark_history
 import cache
+from repositories import benchmark_daily as benchmark_repo
 import repositories.db
 from routes import portfolio as pf
 
@@ -41,60 +42,60 @@ class BenchmarkCacheTests(unittest.IsolatedAsyncioTestCase):
             {"date": "2026-04-11", "close": 101.5},
             {"date": "2026-04-12", "close": 99.8},
         ]
-        n = await cache.save_benchmark_rows("KOSPI", rows)
+        n = await benchmark_repo.save_benchmark_rows("KOSPI", rows)
         self.assertEqual(n, 3)
 
-        got = await cache.get_benchmark_rows("KOSPI")
+        got = await benchmark_repo.get_benchmark_rows("KOSPI")
         self.assertEqual([r["date"] for r in got], ["2026-04-10", "2026-04-11", "2026-04-12"])
         self.assertAlmostEqual(got[1]["close"], 101.5)
 
     async def test_upsert_overwrites_same_date(self):
-        await cache.save_benchmark_rows("KOSPI", [{"date": "2026-04-10", "close": 100.0}])
+        await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": "2026-04-10", "close": 100.0}])
         # Second save with a different close on the same date should overwrite,
         # not duplicate — the NAV chart shouldn't see two 2026-04-10 points.
-        await cache.save_benchmark_rows("KOSPI", [{"date": "2026-04-10", "close": 123.0}])
-        rows = await cache.get_benchmark_rows("KOSPI")
+        await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": "2026-04-10", "close": 123.0}])
+        rows = await benchmark_repo.get_benchmark_rows("KOSPI")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["close"], 123.0)
 
     async def test_start_filter(self):
-        await cache.save_benchmark_rows("KOSPI", [
+        await benchmark_repo.save_benchmark_rows("KOSPI", [
             {"date": "2026-04-01", "close": 1},
             {"date": "2026-04-05", "close": 2},
             {"date": "2026-04-10", "close": 3},
         ])
-        rows = await cache.get_benchmark_rows("KOSPI", start="2026-04-05")
+        rows = await benchmark_repo.get_benchmark_rows("KOSPI", start="2026-04-05")
         self.assertEqual([r["date"] for r in rows], ["2026-04-05", "2026-04-10"])
 
     async def test_scoped_to_code(self):
-        await cache.save_benchmark_rows("KOSPI", [{"date": "2026-04-01", "close": 1}])
-        await cache.save_benchmark_rows("SP500", [{"date": "2026-04-01", "close": 5000}])
-        k = await cache.get_benchmark_rows("KOSPI")
-        s = await cache.get_benchmark_rows("SP500")
+        await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": "2026-04-01", "close": 1}])
+        await benchmark_repo.save_benchmark_rows("SP500", [{"date": "2026-04-01", "close": 5000}])
+        k = await benchmark_repo.get_benchmark_rows("KOSPI")
+        s = await benchmark_repo.get_benchmark_rows("SP500")
         self.assertEqual(len(k), 1)
         self.assertEqual(len(s), 1)
         self.assertEqual(k[0]["close"], 1)
         self.assertEqual(s[0]["close"], 5000)
 
     async def test_last_and_earliest(self):
-        self.assertIsNone(await cache.get_benchmark_last_date("GOLD"))
-        self.assertIsNone(await cache.get_benchmark_earliest_date("GOLD"))
-        await cache.save_benchmark_rows("GOLD", [
+        self.assertIsNone(await benchmark_repo.get_benchmark_last_date("GOLD"))
+        self.assertIsNone(await benchmark_repo.get_benchmark_earliest_date("GOLD"))
+        await benchmark_repo.save_benchmark_rows("GOLD", [
             {"date": "2026-03-30", "close": 2200},
             {"date": "2026-04-05", "close": 2300},
             {"date": "2026-04-02", "close": 2250},
         ])
-        self.assertEqual(await cache.get_benchmark_last_date("GOLD"), "2026-04-05")
-        self.assertEqual(await cache.get_benchmark_earliest_date("GOLD"), "2026-03-30")
+        self.assertEqual(await benchmark_repo.get_benchmark_last_date("GOLD"), "2026-04-05")
+        self.assertEqual(await benchmark_repo.get_benchmark_earliest_date("GOLD"), "2026-03-30")
 
     async def test_save_skips_null_close(self):
         # yfinance occasionally returns NaN rows — `_download_sync` drops
         # them, but defense in depth: the helper also filters None.
-        await cache.save_benchmark_rows("KOSPI", [
+        await benchmark_repo.save_benchmark_rows("KOSPI", [
             {"date": "2026-04-10", "close": None},
             {"date": "2026-04-11", "close": 100.0},
         ])
-        rows = await cache.get_benchmark_rows("KOSPI")
+        rows = await benchmark_repo.get_benchmark_rows("KOSPI")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["date"], "2026-04-11")
 
@@ -118,7 +119,7 @@ class BackfillTests(unittest.IsolatedAsyncioTestCase):
         n = await benchmark_history.backfill_benchmark("UNKNOWN", "2026-01-01")
         self.assertEqual(n, 0)
         # Nothing written.
-        self.assertEqual(await cache.get_benchmark_rows("UNKNOWN"), [])
+        self.assertEqual(await benchmark_repo.get_benchmark_rows("UNKNOWN"), [])
 
     async def test_empty_db_triggers_download(self):
         fake_rows = [
@@ -137,12 +138,12 @@ class BackfillTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(n, 2)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][0], "^GSPC")
-        saved = await cache.get_benchmark_rows("SP500")
+        saved = await benchmark_repo.get_benchmark_rows("SP500")
         self.assertEqual(len(saved), 2)
 
     async def test_no_download_when_db_already_covers(self):
         # Seed DB with data reaching back past the requested start.
-        await cache.save_benchmark_rows("KOSPI", [
+        await benchmark_repo.save_benchmark_rows("KOSPI", [
             {"date": "2026-01-01", "close": 2500.0},
             {"date": "2026-04-01", "close": 2700.0},
         ])
@@ -203,7 +204,7 @@ class UpdateTodayTests(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     async def test_starts_day_after_last_stored(self):
-        await cache.save_benchmark_rows("KOSPI", [{"date": "2026-04-10", "close": 2700.0}])
+        await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": "2026-04-10", "close": 2700.0}])
 
         captured = []
 
@@ -220,7 +221,7 @@ class UpdateTodayTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_skips_when_already_up_to_date(self):
         future = (date.today() + timedelta(days=1)).isoformat()
-        await cache.save_benchmark_rows("KOSPI", [{"date": future, "close": 2700.0}])
+        await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": future, "close": 2700.0}])
 
         calls = []
 
@@ -245,8 +246,8 @@ class UpdateTodayTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(written["SP500"], 0)
         self.assertEqual(written["KOSPI"], 1)
-        self.assertEqual(len(await cache.get_benchmark_rows("KOSPI")), 1)
-        self.assertEqual(len(await cache.get_benchmark_rows("SP500")), 0)
+        self.assertEqual(len(await benchmark_repo.get_benchmark_rows("KOSPI")), 1)
+        self.assertEqual(len(await benchmark_repo.get_benchmark_rows("SP500")), 0)
 
     async def test_defaults_to_all_codes(self):
         async def no_data(ticker, start, end):
@@ -280,7 +281,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
 
     async def test_serves_from_db_without_network(self):
-        await cache.save_benchmark_rows("KOSPI", [
+        await benchmark_repo.save_benchmark_rows("KOSPI", [
             {"date": "2026-04-01", "close": 2700.0},
             {"date": "2026-04-02", "close": 2710.0},
         ])

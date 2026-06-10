@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 
 import cache
+from repositories import financial as financial_repo
 import dart_client
 import stock_price
 from services.portfolio.identifiers import (
@@ -80,7 +81,7 @@ async def refresh_domestic_dividend_from_dart(code: str) -> int:
         start_year=max(current_year - 3, dart_client.DART_ANNUAL_DATA_START_YEAR),
         end_year=current_year - 1,
     )
-    return await cache.upsert_market_dividends(code, dividends)
+    return await financial_repo.upsert_market_dividends(code, dividends)
 
 
 async def warm_market_data_for_dividend(code: str) -> None:
@@ -90,14 +91,14 @@ async def warm_market_data_for_dividend(code: str) -> None:
         if updated:
             logger.info("Portfolio DART dividend warmup completed (%s, %d rows)", code, updated)
             return
-        latest_dividend_years = await cache.get_latest_dividend_years([code])
+        latest_dividend_years = await financial_repo.get_latest_dividend_years([code])
         if latest_dividend_years.get(code, 0) >= datetime.now().year - 1:
             return
-        fin_data = await cache.get_financial_data(code)
+        fin_data = await financial_repo.get_financial_data(code)
         corp_code = await cache.get_corp_code(code)
         refreshed = await stock_price.fetch_market_data(code, fin_data, corp_code=corp_code)
         if refreshed:
-            await cache.save_market_data(code, refreshed)
+            await financial_repo.save_market_data(code, refreshed)
             logger.info("Portfolio dividend market-data warmup completed (%s, %d rows)", code, len(refreshed))
     except Exception as exc:
         logger.warning("Portfolio dividend market-data warmup failed (%s): %s", code, exc)

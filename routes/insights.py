@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-import cache
+from repositories import insight_posts as insight_posts_repo
 import observability
 from deps import get_current_user
 
@@ -107,7 +107,7 @@ def _with_permissions(post: dict, user: dict | None) -> dict:
 @router.get("")
 async def list_insights(request: Request, limit: int = 50):
     user = await get_current_user(request)
-    rows = await cache.list_insight_posts(
+    rows = await insight_posts_repo.list_insight_posts(
         viewer_google_sub=user.get("google_sub") if user else None,
         limit=limit,
     )
@@ -117,7 +117,7 @@ async def list_insights(request: Request, limit: int = 50):
 @router.get("/{post_id}")
 async def get_insight(post_id: int, request: Request):
     user = await get_current_user(request)
-    post = await cache.get_insight_post(
+    post = await insight_posts_repo.get_insight_post(
         post_id,
         viewer_google_sub=user.get("google_sub") if user else None,
     )
@@ -130,7 +130,7 @@ async def get_insight(post_id: int, request: Request):
 async def create_insight(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
     cleaned = _clean_payload(payload or {})
-    post = await cache.create_insight_post(
+    post = await insight_posts_repo.create_insight_post(
         google_sub=user["google_sub"],
         **cleaned,
     )
@@ -152,7 +152,7 @@ async def create_insight(request: Request, payload: dict = Body(...)):
 @router.delete("/{post_id}")
 async def delete_insight(post_id: int, request: Request):
     user = _require_user(await get_current_user(request))
-    deleted = await cache.delete_insight_post(
+    deleted = await insight_posts_repo.delete_insight_post(
         post_id,
         google_sub=user["google_sub"],
         is_admin=bool(user.get("is_admin")),

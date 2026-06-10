@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from starlette.requests import Request
 
 import cache
+from repositories import wiki as wiki_repo
 import repositories.db
 from routes import portfolio as pf
 
@@ -154,7 +155,7 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(done.get("context_reports_per_holding"), 3)
 
     async def test_prompt_includes_wiki_when_entries_exist(self):
-        await cache.save_wiki_entry({
+        await wiki_repo.save_wiki_entry({
             "stock_code": "005930", "source_type": "broker_report", "source_ref": "sha1",
             "report_date": "2026-03-10", "firm": "삼성증권", "title": "HBM",
             "recommendation": "Buy", "target_price": 90000.0,

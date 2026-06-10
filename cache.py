@@ -31,6 +31,11 @@ async def close_db():
 
 
 async def init_db():
+    # Migration-only repository helpers (one-time backfills below). Imported
+    # locally so cache.py's module surface stays free of repository names.
+    from repositories.portfolio import _ensure_default_groups
+    from repositories.snapshots import _refresh_group_snapshots, _refresh_stock_weight_snapshots
+
     db = await get_db()
     await db.executescript("""
         CREATE TABLE IF NOT EXISTS corp_codes (
@@ -1056,49 +1061,14 @@ async def get_report_list(stock_code: str, ttl_minutes: int | None = None) -> di
 
 
 # ---------------------------------------------------------------------------
-# Repository re-exports — see repositories/ package. Imported at the bottom so
-# shared primitives above are already defined; repositories reach the
-# connection via repositories.db.get_db() (no import cycle). The leading-
-# underscore names are re-imported because init_db()'s migration pass and a
-# few legacy ``cache._<fn>`` callers (tests 포함) still use them.
+# Residual compat re-exports — Phase 1 leftovers. Kept ONLY because
+# tests/test_foreign_dividends.py and tests/test_preferred_dividends.py still
+# call these as ``cache.<fn>`` and those files are frozen while the
+# dividend-calendar work is in flight. Every other consumer imports
+# repositories/* directly; delete this block when those two tests are
+# migrated.
 # ---------------------------------------------------------------------------
-from repositories.system_events import (  # noqa: E402
-    insert_system_event,
-    get_system_events,
-    summarize_system_events,
-    summarize_http_metrics,
-    prune_system_events,
-    get_latest_event,
-)
-from repositories.benchmark_daily import (  # noqa: E402
-    save_benchmark_rows,
-    get_benchmark_rows,
-    get_benchmark_last_date,
-    get_benchmark_earliest_date,
-)
-from repositories.ticker_map import (  # noqa: E402
-    load_ticker_map,
-    save_ticker,
-)
-from repositories.user_settings import (  # noqa: E402
-    get_user_setting,
-    set_user_setting,
-)
-from repositories.dart_review import (  # noqa: E402
-    get_dart_report_review,
-    save_dart_report_review,
-)
-from repositories.wiki import (  # noqa: E402
-    save_pdf_cache_row,
-    save_wiki_entry,
-    get_wiki_entries,
-    search_wiki,
-    qa_count_since,
-    save_qa_entry,
-    get_wiki_stats,
-    select_wiki_target_stocks,
-)
-from repositories.foreign_dividends import (  # noqa: E402
+from repositories.foreign_dividends import (  # noqa: E402,F401
     upsert_foreign_dividends_auto,
     upsert_foreign_dividend_manual,
     delete_foreign_dividend,
@@ -1106,119 +1076,8 @@ from repositories.foreign_dividends import (  # noqa: E402
     get_foreign_dividends_count,
     get_foreign_dividend,
 )
-from repositories.portfolio import (  # noqa: E402
-    _DEFAULT_GROUPS,
-    _default_type_for_code,
-    _ensure_default_groups,
-    get_portfolio,
-    get_portfolio_target_metrics,
-    get_latest_market_valuation,
-    upsert_market_target_metrics,
-    get_portfolio_tags,
-    get_portfolio_tag_suggestions,
-    set_portfolio_tags,
+from repositories.portfolio import (  # noqa: E402,F401
     get_trailing_dividends,
     upsert_preferred_dividends,
     get_preferred_dividends_count,
-    list_preferred_dividends,
-)
-from repositories.portfolio import (  # noqa: E402,F811
-    get_portfolio_item,
-    save_portfolio_item,
-    clear_portfolio,
-    replace_portfolio,
-    delete_portfolio_item,
-    update_portfolio_benchmark,
-    save_portfolio_order,
-    get_portfolio_groups,
-    add_portfolio_group,
-    rename_portfolio_group,
-    delete_portfolio_group,
-    save_portfolio_groups_order,
-)
-from repositories.snapshots import (  # noqa: E402
-    _refresh_group_snapshots,
-    _refresh_stock_weight_snapshots,
-    CashflowBalanceError,
-    get_latest_snapshot,
-    save_snapshot,
-    get_month_end_snapshot,
-    get_year_start_snapshot,
-    get_nav_history,
-    get_group_weight_history,
-    get_group_constituent_history,
-    get_cashflows,
-    add_cashflow_and_sync_cash,
-    delete_cashflow_and_sync_cash,
-    get_all_users_with_portfolio,
-    save_stock_snapshots,
-    get_stock_snapshots_by_date,
-    get_intraday_snapshots_between,
-)
-from repositories.app_settings import (  # noqa: E402
-    set_app_setting,
-)
-from repositories.market_brief import (  # noqa: E402
-    get_daily_market_brief,
-    save_daily_market_brief,
-)
-from repositories.insight_posts import (  # noqa: E402
-    create_insight_post,
-    list_insight_posts,
-    get_insight_post,
-    delete_insight_post,
-)
-from repositories.financial import (  # noqa: E402
-    save_financial_data,
-    get_financial_data,
-    save_market_data,
-    upsert_market_dividends,
-    get_market_data,
-    get_latest_dividend_years,
-)
-from repositories.analysis import (  # noqa: E402
-    save_analysis_snapshot,
-    get_analysis_meta,
-    get_analysis_snapshot,
-)
-from repositories.users import (  # noqa: E402
-    upsert_user,
-    create_user_session,
-    delete_user_session,
-    delete_expired_sessions,
-    get_all_users,
-)
-from repositories.user_stocks import (  # noqa: E402
-    touch_user_recent_analysis,
-    delete_user_recent_analysis,
-    get_user_stock_preference,
-    save_user_stock_preference,
-    get_cached_analyses,
-    save_user_stock_order,
-    save_starred_order,
-    unstar_stock,
-)
-from repositories.notifications import (  # noqa: E402
-    get_notification_channel,
-    list_notification_channels,
-    upsert_notification_channel,
-    set_notification_channel_enabled,
-    delete_notification_channel,
-    create_notification_link,
-    pop_notification_link,
-    list_portfolio_alerts,
-    get_portfolio_alert,
-    create_portfolio_alert,
-    update_portfolio_alert,
-    delete_portfolio_alert,
-    set_portfolio_alert_state,
-    set_portfolio_alert_state_json,
-    set_portfolio_alert_important,
-    get_all_users_with_alerts,
-    list_calendar_subscriptions,
-    upsert_calendar_subscription,
-    delete_calendar_subscription,
-    list_pending_calendar_subscriptions,
-    mark_calendar_subscription_fired,
-    delete_stale_calendar_subscriptions,
 )

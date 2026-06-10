@@ -6,6 +6,10 @@ from fastapi.responses import StreamingResponse
 
 import analyzer
 import cache
+from repositories import analysis as analysis_repo
+from repositories import benchmark_daily as benchmark_repo
+from repositories import financial as financial_repo
+from repositories import user_stocks as user_stocks_repo
 import dart_client
 import stock_price
 from services import stock_quotes
@@ -71,7 +75,7 @@ async def _decorate_analysis_payload(payload: dict, user: dict | None) -> dict:
     enriched = dict(payload)
     enriched["authenticated"] = bool(user)
     if user:
-        enriched["user_preference"] = await cache.get_user_stock_preference(
+        enriched["user_preference"] = await user_stocks_repo.get_user_stock_preference(
             user["google_sub"],
             payload["stock_code"],
         )
@@ -82,7 +86,7 @@ async def _decorate_analysis_payload(payload: dict, user: dict | None) -> dict:
 
 async def _remember_recent_analysis(user: dict | None, stock_code: str):
     if user:
-        await cache.touch_user_recent_analysis(user["google_sub"], stock_code)
+        await user_stocks_repo.touch_user_recent_analysis(user["google_sub"], stock_code)
 
 
 async def _build_analysis_response(
@@ -139,7 +143,7 @@ async def _ensure_financial_report_dates(stock_code: str, corp_code: str | None,
             updated = True
 
     if updated:
-        await cache.save_financial_data(stock_code, fin_data)
+        await financial_repo.save_financial_data(stock_code, fin_data)
 
     return fin_data
 
@@ -147,7 +151,7 @@ async def _ensure_financial_report_dates(stock_code: str, corp_code: str | None,
 async def _ensure_financial_coverage(stock_code: str, corp_code: str | None, fin_data: list[dict]) -> list[dict]:
     merged = await stock_price.ensure_financial_data_coverage(stock_code, fin_data)
     if merged != fin_data:
-        await cache.save_financial_data(stock_code, merged)
+        await financial_repo.save_financial_data(stock_code, merged)
     return await _ensure_financial_report_dates(stock_code, corp_code, merged)
 
 
@@ -157,11 +161,11 @@ async def _load_cached_analysis_payload(
     corp_name: str,
     analyzed_at: str | None,
 ) -> dict:
-    fin_data = await cache.get_financial_data(stock_code)
+    fin_data = await financial_repo.get_financial_data(stock_code)
     if corp_code:
         fin_data = await _ensure_financial_report_dates(stock_code, corp_code, fin_data)
 
-    mkt_data = await cache.get_market_data(stock_code)
+    mkt_data = await financial_repo.get_market_data(stock_code)
     needs_market_refresh = stock_price.market_data_needs_refresh(mkt_data)
 
     if corp_code and (not fin_data or needs_market_refresh):
@@ -172,7 +176,7 @@ async def _load_cached_analysis_payload(
             refreshed = await stock_price.fetch_market_data(stock_code, fin_data, corp_code=corp_code)
             if refreshed:
                 mkt_data = refreshed
-                await cache.save_market_data(stock_code, refreshed)
+                await financial_repo.save_market_data(stock_code, refreshed)
         except Exception as e:
             logger.warning(f"시장 데이터 갱신 실패({stock_code}): {e}")
 
@@ -184,7 +188,7 @@ async def _load_cached_analysis_payload(
         cached=True,
         analyzed_at=analyzed_at,
     )
-    await cache.save_analysis_snapshot(stock_code, corp_name, payload)
+    await analysis_repo.save_analysis_snapshot(stock_code, corp_name, payload)
     return payload
 
 
@@ -306,7 +310,7 @@ async def get_stock_beta(stock_code: str):
     # KOSPI benchmark lazy backfill + load. 실패는 조용히 — beta=null 반환.
     try:
         await benchmark_history.backfill_benchmark("KOSPI", start_iso)
-        kospi_rows = await cache.get_benchmark_rows("KOSPI", start=start_iso)
+        kospi_rows = await benchmark_repo.get_benchmark_rows("KOSPI", start=start_iso)
     except Exception as e:
         logger.warning(f"KOSPI 벤치마크 로드 실패({stock_code}): {e}")
         kospi_rows = []
@@ -400,7 +404,7 @@ async def get_stock_dr(stock_code: str):
 @router.get("/api/analyze/{stock_code}")
 async def analyze_stock(stock_code: str, request: Request):
     current_user = await get_current_user(request)
-    snapshot = await cache.get_analysis_snapshot(stock_code)
+    snapshot = await analysis_repo.get_analysis_snapshot(stock_code)
     if (
         snapshot
         and not analysis_snapshot_is_stale(snapshot.get("analyzed_at"))
@@ -409,7 +413,7 @@ async def analyze_stock(stock_code: str, request: Request):
         await _remember_recent_analysis(current_user, stock_code)
         return await _decorate_analysis_payload(snapshot, current_user)
 
-    meta = await cache.get_analysis_meta(stock_code)
+    meta = await analysis_repo.get_analysis_meta(stock_code)
     if meta:
         corp_code = await cache.get_corp_code(stock_code)
         payload = await _load_cached_analysis_payload(
@@ -436,7 +440,7 @@ async def analyze_stock(stock_code: str, request: Request):
             yield sse_event("progress", {"step": "queued_global", "message": "다른 분석 작업이 많아 잠시 대기합니다..."})
 
         async with stock_lock:
-            snapshot = await cache.get_analysis_snapshot(stock_code)
+            snapshot = await analysis_repo.get_analysis_snapshot(stock_code)
             if (
                 snapshot
                 and not analysis_snapshot_is_stale(snapshot.get("analyzed_at"))
@@ -446,7 +450,7 @@ async def analyze_stock(stock_code: str, request: Request):
                 yield sse_event("result", await _decorate_analysis_payload(snapshot, current_user))
                 return
 
-            meta = await cache.get_analysis_meta(stock_code)
+            meta = await analysis_repo.get_analysis_meta(stock_code)
             if meta:
                 payload = await _load_cached_analysis_payload(
                     stock_code,
@@ -492,9 +496,9 @@ async def analyze_stock(stock_code: str, request: Request):
 
                 yield sse_event("progress", {"step": "saving", "message": "데이터를 캐시에 저장합니다..."})
                 if fin_data:
-                    await cache.save_financial_data(stock_code, fin_data)
+                    await financial_repo.save_financial_data(stock_code, fin_data)
                 if mkt_data:
-                    await cache.save_market_data(stock_code, mkt_data)
+                    await financial_repo.save_market_data(stock_code, mkt_data)
 
                 yield sse_event("progress", {"step": "analyzing", "message": "지표를 계산합니다..."})
                 payload = await _build_analysis_response(
@@ -504,7 +508,7 @@ async def analyze_stock(stock_code: str, request: Request):
                     mkt_data,
                     cached=False,
                 )
-                await cache.save_analysis_snapshot(stock_code, corp_name or stock_code, payload)
+                await analysis_repo.save_analysis_snapshot(stock_code, corp_name or stock_code, payload)
                 await _remember_recent_analysis(current_user, stock_code)
                 yield sse_event("result", await _decorate_analysis_payload(payload, current_user))
 

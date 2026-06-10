@@ -4,7 +4,7 @@ import os
 
 from fastapi import APIRouter, Query, Request
 
-import cache
+from repositories import market_brief as market_brief_repo
 import market_daily
 from deps import get_current_user
 
@@ -24,7 +24,7 @@ async def get_daily_market_brief(
     brief_date = market_daily._today_iso()
 
     if not refresh:
-        cached = await cache.get_daily_market_brief(
+        cached = await market_brief_repo.get_daily_market_brief(
             google_sub,
             brief_date,
             max_age_minutes=MARKET_DAILY_CACHE_TTL_MINUTES,
@@ -37,7 +37,7 @@ async def get_daily_market_brief(
         google_sub=user["google_sub"] if user else None,
         brief_date=brief_date,
     )
-    saved = await cache.save_daily_market_brief(
+    saved = await market_brief_repo.save_daily_market_brief(
         google_sub=google_sub,
         brief_date=generated["brief_date"],
         source_hash=generated["source_hash"],
