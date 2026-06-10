@@ -67,6 +67,14 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
         "env": "AI_MARKET_DAILY_MODEL",
         "default": "google/gemini-3.5-flash",
     },
+    "daily_briefing": {
+        # 아침 배치 푸시용 짧은 요약 — 빠르고 싼 모델이면 충분해서
+        # 포트폴리오 '빠름' 모델 체인을 기본값으로 따라간다.
+        "label": "AI 데일리 브리핑",
+        "env": "AI_DAILY_BRIEFING_MODEL",
+        "default_env": "AI_FAST_MODEL",
+        "default": DEFAULT_PORTFOLIO_AI_MODEL,
+    },
 }
 
 
