@@ -613,6 +613,23 @@ async def init_db():
             FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_econ_cal_subs_pending ON economic_calendar_subscriptions(fired, event_date);
+
+        -- 리밸런싱 목표 비중: scope='stock'(target_key=종목코드) 또는
+        -- scope='group'(target_key=그룹명) 단위 목표 비중(%)과 드리프트 허용
+        -- 오차(%p). CRUD 는 repositories/rebalance_targets.py 소유.
+        CREATE TABLE IF NOT EXISTS rebalance_targets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            google_sub TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            target_key TEXT NOT NULL,
+            target_weight_pct REAL NOT NULL,
+            tolerance_pct REAL NOT NULL DEFAULT 5.0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(google_sub, scope, target_key),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_rebalance_targets_user ON rebalance_targets(google_sub);
     """)
     await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
     await _ensure_column(db, "financial_data", "report_date", "TEXT")

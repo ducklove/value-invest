@@ -35,6 +35,7 @@ def _register_feature_routers(app: FastAPI) -> None:
     )
     from routes.internal import router as internal_router
     from routes.portfolio_risk import router as portfolio_risk_router
+    from routes.rebalance import router as rebalance_router
     from routes.wiki import router as wiki_router
 
     for router in (
@@ -45,6 +46,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         cache_router,
         portfolio_router,
         portfolio_risk_router,
+        rebalance_router,
         ws_quotes_router,
         insights_router,
         market_daily_router,

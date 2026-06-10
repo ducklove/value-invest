@@ -545,6 +545,40 @@ async def get_stock_snapshots_before_date(google_sub: str, date: str) -> list[di
     return [dict(r) for r in await cursor.fetchall()]
 
 
+async def get_latest_stock_snapshot_rows(google_sub: str) -> list[dict]:
+    """가장 최근 스냅샷 날짜의 종목별 평가액 행 (리밸런싱 현재 비중 기반).
+
+    그룹/이름/수량은 user_portfolio 에서 보강한다 — 그룹 귀속 규칙
+    (COALESCE(ps.group_name, up.group_name, '기타'))은 그룹 비중 차트를 만드는
+    ``_refresh_group_snapshots`` 와 동일해, 리밸런싱 보고서의 그룹 비중이 UI 의
+    그룹 비중과 같은 기준으로 계산된다. quantity 는 근사 주당가
+    (market_value / quantity) 계산용 — 스냅샷 이후 수량이 바뀌면 근사치가 된다.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT
+            ps.date,
+            ps.stock_code,
+            COALESCE(up.stock_name, ps.stock_code) AS stock_name,
+            COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
+            ps.market_value,
+            up.quantity
+        FROM portfolio_stock_snapshots ps
+        LEFT JOIN user_portfolio up
+          ON up.google_sub = ps.google_sub
+         AND up.stock_code = ps.stock_code
+        WHERE ps.google_sub = ?
+          AND ps.date = (
+              SELECT MAX(date) FROM portfolio_stock_snapshots WHERE google_sub = ?
+          )
+        ORDER BY ps.market_value DESC
+        """,
+        (google_sub, google_sub),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
 async def save_intraday_snapshot(google_sub: str, ts: str, total_value: float):
     db = await get_db()
     await db.execute(

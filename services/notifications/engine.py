@@ -52,9 +52,12 @@ BLANKET_TYPES = BLANKET_QUOTE_TYPES | BLANKET_FEED_TYPES
 # 개별 종목(분석 화면) 알림 — 보유 여부 무관, scope='stock'.
 STOCK_DAILY_ABS_TYPES = frozenset({"stock_daily_abs"})            # 개별 종목 일간 등락률 ±n%
 STOCK_FEED_TYPES = frozenset({"disclosure_new", "report_new"})    # 신규 공시 / 신규 리포트
+# 리밸런싱 드리프트 — scope=portfolio, 임계값은 목표별 tolerance(rebalance_targets)
+# 가 대신하므로 rule.threshold 는 쓰지 않는다(0). 목표별 엣지 상태는 state_json.
+REBALANCE_TYPES = frozenset({"rebalance_drift"})
 ALL_ALERT_TYPES = (
     PRICE_TYPES | NAV_TYPES | PORTFOLIO_DAILY_TYPES | BLANKET_TYPES
-    | STOCK_DAILY_ABS_TYPES | STOCK_FEED_TYPES
+    | STOCK_DAILY_ABS_TYPES | STOCK_FEED_TYPES | REBALANCE_TYPES
 )
 
 
@@ -297,6 +300,79 @@ def _format_report_message(rule: dict, name: str, item: dict) -> str:
     if extras:
         lines.append(" / ".join(extras))
     return "\n".join(lines) + _note_suffix(rule)
+
+
+def _format_rebalance_message(rule: dict, breached_items: list[dict]) -> str:
+    """리밸런싱 알림 본문 — 이탈 항목을 '이름 현재% (목표 n%, ±x.x%p)' 줄로 나열."""
+    lines = ["⚖️ 리밸런싱 알림 — 목표 비중 이탈"]
+    for item in breached_items:
+        label = str(item.get("label") or item.get("key") or "")
+        if item.get("scope") == "group":
+            label += " 그룹"
+        current = item.get("current_weight_pct") or 0.0
+        drift = item.get("drift_pct") or 0.0
+        lines.append(
+            f"{label} {current:.1f}% (목표 {_fmt_thresh(item.get('target_weight_pct'))}%, {drift:+.1f}%p)"
+        )
+    return "\n".join(lines) + _note_suffix(rule)
+
+
+async def _eval_rebalance(google_sub: str, rule: dict) -> int:
+    """리밸런싱 드리프트 규칙 평가 — 목표별 엣지 트리거.
+
+    services.portfolio.rebalance 의 보고서(최근 일별 스냅샷 기준 — 시세 조회
+    없음)를 읽어 |드리프트| > tolerance 인 목표를 찾는다. 목표별 상태는
+    blanket 규칙과 같은 형식으로 state_json 에 저장한다:
+    ``{"<scope>:<key>": {"armed": bool, "fired": "YYYY-MM-DD"|None}}``.
+    발화하면 disarm, 허용 오차 안으로 복귀하면 re-arm, 같은 날은 1회만
+    (fired 날짜 상한) — 기존 규칙들의 엣지 시멘틱과 동일. 새로 발화하는
+    목표들은 한 메시지로 묶어 보낸다.
+    """
+    from services.portfolio import rebalance as rebalance_service
+
+    try:
+        report = await rebalance_service.compute_rebalance(google_sub)
+    except Exception as exc:
+        logger.warning("rebalance report failed for %s: %s", google_sub[:8], exc)
+        return 0
+
+    try:
+        state = json.loads(rule.get("state_json") or "{}")
+    except (TypeError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+
+    today_str = _today_str()
+    to_send: list[dict] = []
+    changed = False
+    for item in report.get("items", []):
+        state_key = f"{item.get('scope')}:{item.get('key')}"
+        entry = state.get(state_key)
+        if isinstance(entry, dict):
+            armed = bool(entry.get("armed", True))
+            fired = entry.get("fired")
+        else:
+            armed = True
+            fired = None
+        if item.get("breached") and armed and fired != today_str:
+            to_send.append(item)
+            state[state_key] = {"armed": False, "fired": today_str}
+            changed = True
+        elif not item.get("breached") and not armed:
+            state[state_key] = {"armed": True, "fired": fired}
+            changed = True
+
+    sent = 0
+    if to_send:
+        message = _format_rebalance_message(rule, to_send)
+        if rule.get("important"):
+            message = _emphasize(message)
+        await channels.dispatch(google_sub, message)
+        sent = 1
+    if changed:
+        await cache.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
+    return sent
 
 
 async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_map: dict) -> int:
@@ -642,6 +718,10 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
 
         if alert_type in STOCK_FEED_TYPES:
             sent += await _eval_stock_feed(google_sub, rule, await _name(rule.get("stock_code")), feed_cache)
+            continue
+
+        if alert_type in REBALANCE_TYPES:  # 리밸런싱 드리프트 (스냅샷 기반, 시세 불필요)
+            sent += await _eval_rebalance(google_sub, rule)
             continue
 
         # single-metric rules (price / 개별 일간등락 / nav / portfolio daily): armed 플래그
