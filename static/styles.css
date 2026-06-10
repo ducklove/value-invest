@@ -2116,6 +2116,50 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .pf-risk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* Rebalancing card (성과 탭 '리밸런싱') — 빈 상태는 .pf-risk-empty,
+   버튼·입력은 .pf-mini-btn/.pf-alert-btn/.pf-modal-input 을 재사용한다.
+   색은 모두 CSS 변수 기반이라 다크 테마를 그대로 따른다. */
+.pf-rebal-header-actions { margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pf-rebal-alert-toggle {
+  display: inline-flex; gap: 4px; align-items: center; font-size: 12px;
+  color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+}
+.pf-rebal-table-wrap { margin-top: 12px; overflow-x: auto; }
+.pf-rebal-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
+.pf-rebal-table th {
+  text-align: right; padding: 6px 8px; font-size: 11px; font-weight: 600;
+  color: var(--text-secondary); border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.pf-rebal-table th:first-child { text-align: left; }
+.pf-rebal-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.pf-rebal-label { text-align: left; }
+.pf-rebal-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-rebal-sub { font-size: 11px; color: var(--text-secondary); }
+.pf-rebal-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px;
+  font-weight: 700; background: var(--hover); color: var(--text-secondary);
+  border: 1px solid var(--border); vertical-align: middle;
+}
+.pf-rebal-badge.group { color: var(--primary); border-color: var(--primary); background: transparent; }
+.pf-rebal-drift.breached { font-weight: 800; }
+tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
+.pf-rebal-breached-count { color: #dc2626; }
+.pf-rebal-editor {
+  margin-top: 12px; padding: 12px; border: 1px dashed var(--border);
+  border-radius: 8px; display: flex; flex-direction: column; gap: 8px;
+}
+.pf-rebal-editor-head { font-size: 12px; color: var(--text-secondary); }
+.pf-rebal-editor-row {
+  display: grid; grid-template-columns: 84px minmax(0, 1fr) 96px 110px 34px;
+  gap: 6px; align-items: center;
+}
+.pf-rebal-editor-row .pf-modal-input { min-width: 0; }
+.pf-rebal-editor-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  /* 모바일은 2열로 접는다(.pf-risk-grid 패턴) — 구분/대상, 목표/오차+삭제. */
+  .pf-rebal-editor-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 /* Cashflow section */
 .pf-cashflow-section {
   margin-top: 24px;

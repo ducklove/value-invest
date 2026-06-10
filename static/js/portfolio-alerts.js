@@ -400,6 +400,10 @@ function pfAlertsLabel(rule) {
   if (t === 'daily_change_abs') {
     return `보유 전 종목 — 일간 등락률 ±${pfFmtNum(rule.threshold)}% 이상`;
   }
+  if (t === 'rebalance_drift') {
+    // 임계값 없음 — 목표별 허용 오차(리밸런싱 카드에서 설정)가 기준.
+    return '리밸런싱 — 목표 비중 이탈 시';
+  }
   if (t === 'price_above' || t === 'price_below') {
     return `${escapeHtml(pfAlertsStockName(rule.stock_code))} 현재가 ${pfFmtNum(rule.threshold)} ${dir}`;
   }

@@ -444,6 +444,22 @@ function trackEvent(name, params = {}) {
         </div>
       </div>
 
+      <div class="pf-nav-chart-wrap" id="pfRebalanceWrap" style="margin-top:24px;">
+        <div class="pf-nav-header">
+          <h3>리밸런싱</h3>
+          <div class="pf-rebal-header-actions">
+            <label class="pf-rebal-alert-toggle" title="목표 비중 이탈 항목이 생기면 연결된 알림 채널로 보냅니다">
+              <input type="checkbox" id="pfRebalanceAlertCb" onchange="pfRebalanceToggleAlert(this.checked)"> 이탈 시 알림
+            </label>
+            <button class="pf-mini-btn" type="button" id="pfRebalanceEditBtn" onclick="pfRebalanceToggleEditor()">목표 설정</button>
+          </div>
+        </div>
+        <div id="pfRebalanceEditor" class="pf-rebal-editor" style="display:none;"></div>
+        <div id="pfRebalanceContent" class="pf-rebal-content">
+          <div class="pf-risk-empty">성과 탭을 열면 리밸런싱 현황을 불러옵니다.</div>
+        </div>
+      </div>
+
       <div class="pf-nav-chart-wrap" style="margin-top:24px;">
         <div class="pf-nav-header">
           <h3>평가금액 추이</h3>
@@ -677,6 +693,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-ai.js" defer></script>
 <script src="./js/portfolio-performance.js" defer></script>
 <script src="./js/portfolio-risk.js" defer></script>
+<script src="./js/portfolio-rebalance.js" defer></script>
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-group-composition.js" defer></script>
 <script src="./js/portfolio-cashflows.js" defer></script>

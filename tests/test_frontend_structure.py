@@ -18,6 +18,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-ai.js",
     "portfolio-performance.js",
     "portfolio-risk.js",
+    "portfolio-rebalance.js",
     "portfolio-trends.js",
     "portfolio-group-composition.js",
     "portfolio-cashflows.js",
@@ -781,6 +782,48 @@ def test_performance_tab_includes_risk_panel():
     assert ".pf-risk-grid" in styles
     assert ".pf-risk-empty" in styles
     assert ".pf-risk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+
+
+def test_performance_tab_includes_rebalance_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    rebalance = (JS / "portfolio-rebalance.js").read_text(encoding="utf-8")
+    alerts = (JS / "portfolio-alerts.js").read_text(encoding="utf-8")
+
+    # '리밸런싱' 카드는 성과 탭의 리스크 카드(#pfRiskWrap) 바로 다음,
+    # 평가금액 추이 앞에 산다. 에디터는 모달이 아닌 인라인 리스트.
+    assert 'id="pfRebalanceWrap"' in html
+    assert 'id="pfRebalanceContent"' in html
+    assert 'id="pfRebalanceEditor"' in html
+    assert 'id="pfRebalanceAlertCb"' in html
+    assert html.find('id="pfRiskWrap"') < html.find('id="pfRebalanceWrap"')
+    assert html.find('id="pfRebalanceWrap"') < html.find('id="pfValueChart"')
+    # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
+    assert "if (typeof pfLoadRebalancePanel === 'function') pfLoadRebalancePanel();" in performance
+    # 기능 홈: 보고서 fetch/렌더, 목표 에디터(PUT 전체 교체), 알림 토글.
+    assert "async function pfLoadRebalancePanel(" in rebalance
+    assert "function _pfRenderRebalanceReport(" in rebalance
+    assert "'/api/portfolio/rebalance'" in rebalance
+    assert "'/api/portfolio/rebalance/targets'" in rebalance
+    assert "method: 'PUT'" in rebalance
+    assert "목표 비중을 설정하면 이탈 현황이 표시됩니다." in rebalance
+    # 이탈 시 알림 = rebalance_drift 규칙(사용자당 singleton, 임계값 없음).
+    assert "alert_type: 'rebalance_drift'" in rebalance
+    assert "/api/notifications/alerts" in rebalance
+    assert "리밸런싱 — 목표 비중 이탈 시" in alerts
+    # 백그라운드 로드는 silent, 사용자 조작(저장/토글)은 토스트.
+    assert "reportApiError(e, '리밸런싱 현황', { silent: true });" in rebalance
+    assert "reportApiError(e, '리밸런싱 목표 저장');" in rebalance
+    assert "reportApiError(e, '리밸런싱 이탈 알림');" in rebalance
+    # 포맷터는 공용 헬퍼 재사용(중복 정의 금지).
+    assert "function fmtPct(" not in rebalance
+    assert "function fmtKrw(" not in rebalance
+    assert "function escapeHtml(" not in rebalance
+    # 스타일: 빈 상태는 .pf-risk-empty 재사용, 에디터 행은 모바일 2열 접기.
+    assert ".pf-rebal-table" in styles
+    assert ".pf-rebal-editor-row" in styles
+    assert ".pf-rebal-editor-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
 
 
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
