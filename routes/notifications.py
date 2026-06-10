@@ -274,9 +274,11 @@ async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
     else:
         scope = "portfolio"
 
-    # 사용자 임계값이 없는 유형: 목표가/상하한가 도달, 개별·전체 신규 공시/리포트.
+    # 사용자 임계값이 없는 유형: 목표가/상하한가 도달, 개별·전체 신규 공시/리포트,
+    # 리밸런싱 드리프트(임계값은 목표별 tolerance 가 대신함).
     if alert_type in (
-        engine.TARGET_TYPES | engine.LIMIT_TYPES | engine.STOCK_FEED_TYPES | engine.BLANKET_FEED_TYPES
+        engine.TARGET_TYPES | engine.LIMIT_TYPES | engine.STOCK_FEED_TYPES
+        | engine.BLANKET_FEED_TYPES | engine.REBALANCE_TYPES
     ):
         threshold = 0.0
     else:
@@ -337,7 +339,8 @@ async def create_alert(request: Request, payload: dict = Body(...)):
     # 일간등락·신규공시·신규리포트는 (종목, 유형) 단위 singleton — 재생성 시 기존
     # 규칙을 갱신(중복 방지). 가격(price_*)은 한 종목에 여러 개 둘 수 있어 제외.
     singleton_per_stock = engine.STOCK_DAILY_ABS_TYPES | engine.STOCK_FEED_TYPES
-    if rule["alert_type"] in engine.BLANKET_TYPES:
+    # 리밸런싱 드리프트도 사용자당 singleton — 목표 목록 전체를 한 규칙이 본다.
+    if rule["alert_type"] in (engine.BLANKET_TYPES | engine.REBALANCE_TYPES):
         for existing in await cache.list_portfolio_alerts(sub):
             if existing["alert_type"] == rule["alert_type"]:
                 await cache.update_portfolio_alert(

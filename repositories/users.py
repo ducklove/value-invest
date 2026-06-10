@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def upsert_user(user: dict):
-    db = await cache.get_db()
+    db = await get_db()
     now = datetime.now().isoformat()
     await db.execute(
         """
@@ -38,7 +38,7 @@ async def upsert_user(user: dict):
 
 
 async def create_user_session(session_token_hash: str, google_sub: str, expires_at: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         """
         INSERT OR REPLACE INTO user_sessions (session_token_hash, google_sub, created_at, expires_at)
@@ -50,7 +50,7 @@ async def create_user_session(session_token_hash: str, google_sub: str, expires_
 
 
 async def get_user_by_session(session_token_hash: str) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         """
         SELECT u.google_sub, u.email, u.name, u.picture, u.email_verified, u.is_admin
@@ -65,7 +65,7 @@ async def get_user_by_session(session_token_hash: str) -> dict | None:
 
 
 async def delete_user_session(session_token_hash: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         "DELETE FROM user_sessions WHERE session_token_hash = ?",
         (session_token_hash,),
@@ -74,7 +74,7 @@ async def delete_user_session(session_token_hash: str):
 
 
 async def delete_expired_sessions():
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         "DELETE FROM user_sessions WHERE expires_at <= ?",
         (datetime.now().isoformat(),),
@@ -83,7 +83,7 @@ async def delete_expired_sessions():
 
 
 async def get_all_users() -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT google_sub, email, name, picture, is_admin, created_at, last_login_at FROM users ORDER BY last_login_at DESC"
     )

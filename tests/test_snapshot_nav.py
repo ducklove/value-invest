@@ -18,13 +18,13 @@ def test_snapshot_nav_does_not_import_portfolio_route_private_helpers():
 async def test_fetch_total_value_forces_rest_for_korean_stocks():
     today = snapshot_nav._today_kst().isoformat()
     with patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[
             {"stock_code": "005930", "quantity": 2, "avg_price": 1000, "group_name": "KR"},
         ]),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_stock_snapshots_before_date",
         new=AsyncMock(return_value=[]),
     ), patch.object(
@@ -51,13 +51,13 @@ async def test_fetch_total_value_forces_rest_for_korean_stocks():
 @pytest.mark.asyncio
 async def test_fetch_total_value_uses_historical_close_for_past_korean_snapshot():
     with patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[
             {"stock_code": "005930", "quantity": 2, "avg_price": 1000, "group_name": "KR"},
         ]),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_stock_snapshots_before_date",
         new=AsyncMock(return_value=[]),
     ), patch.object(
@@ -85,13 +85,13 @@ async def test_fetch_total_value_uses_historical_close_for_past_korean_snapshot(
 async def test_fetch_total_value_uses_prior_date_snapshot_only_as_fallback():
     get_before = AsyncMock(return_value=[{"stock_code": "005930", "market_value": 1234}])
     with patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[
             {"stock_code": "005930", "quantity": 2, "avg_price": 1000, "group_name": "KR"},
         ]),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_stock_snapshots_before_date",
         new=get_before,
     ), patch.object(
@@ -121,13 +121,13 @@ async def test_fetch_total_value_uses_prior_date_snapshot_only_as_fallback():
 @pytest.mark.asyncio
 async def test_fetch_total_value_refuses_avg_price_fallback_without_snapshot():
     with patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[
             {"stock_code": "005930", "quantity": 2, "avg_price": 1000, "group_name": "KR"},
         ]),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_stock_snapshots_before_date",
         new=AsyncMock(return_value=[]),
     ), patch.object(
@@ -158,23 +158,23 @@ async def test_take_snapshot_rerun_preserves_existing_units():
         "_fetch_total_value",
         new=AsyncMock(return_value=(12000, 8000, [{"stock_code": "005930", "market_value": 12000}])),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_snapshot_by_date",
         new=AsyncMock(return_value={"date": "2026-05-18", "nav": 1000, "total_units": 10}),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_latest_snapshot_before_date",
         new=AsyncMock(),
     ) as get_before, patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_pending_cashflows",
         new=AsyncMock(),
     ) as get_cashflows, patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "save_snapshot",
         new=AsyncMock(),
     ) as save_snapshot, patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "save_stock_snapshots",
         new=AsyncMock(),
     ):
@@ -193,30 +193,30 @@ async def test_take_snapshot_applies_same_day_cashflow_units_to_nav_denominator(
         "_fetch_total_value",
         new=AsyncMock(return_value=(12000, 8000, [{"stock_code": "005930", "market_value": 12000}])),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_snapshot_by_date",
         new=AsyncMock(return_value=None),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_latest_snapshot_before_date",
         new=AsyncMock(return_value={"date": "2026-05-17", "nav": 1000, "total_units": 10}),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "get_pending_cashflows",
         new=AsyncMock(return_value=[
             {"id": 1, "type": "deposit", "amount": 2000, "units_change": None},
             {"id": 2, "type": "withdrawal", "amount": 1000, "units_change": None},
         ]),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.db_repo,
         "get_db",
         new=AsyncMock(return_value=fake_db),
     ), patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "save_snapshot",
         new=AsyncMock(),
     ) as save_snapshot, patch.object(
-        snapshot_nav.cache,
+        snapshot_nav.snapshots_repo,
         "save_stock_snapshots",
         new=AsyncMock(),
     ):

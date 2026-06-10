@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 async def get_user_setting(google_sub: str, key: str) -> str | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT value FROM user_settings WHERE google_sub = ? AND key = ?",
         (google_sub, key),
@@ -21,7 +21,7 @@ async def get_user_setting(google_sub: str, key: str) -> str | None:
 
 
 async def set_user_setting(google_sub: str, key: str, value: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         """INSERT INTO user_settings (google_sub, key, value, updated_at)
            VALUES (?, ?, ?, ?)

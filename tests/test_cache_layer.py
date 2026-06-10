@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import cache
+import repositories.db
 from cache_layer import MemoryTTLCache
 
 
@@ -45,7 +46,7 @@ class PersistentCacheValueTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 
-import cache
+from repositories.db import get_db
 
 
 async def create_insight_post(
@@ -22,7 +22,7 @@ async def create_insight_post(
     tags: list[str] | None = None,
     visibility: str = "public",
 ) -> dict:
-    db = await cache.get_db()
+    db = await get_db()
     now = datetime.now().isoformat()
     await db.execute(
         """
@@ -71,7 +71,7 @@ def _inflate_insight_row(row) -> dict:
 
 
 async def list_insight_posts(*, viewer_google_sub: str | None = None, limit: int = 50) -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     limit = max(1, min(int(limit or 50), 100))
     if viewer_google_sub:
         cursor = await db.execute(
@@ -104,7 +104,7 @@ async def list_insight_posts(*, viewer_google_sub: str | None = None, limit: int
 
 
 async def get_insight_post(post_id: int, *, viewer_google_sub: str | None = None) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     if viewer_google_sub:
         cursor = await db.execute(
             """
@@ -130,7 +130,7 @@ async def get_insight_post(post_id: int, *, viewer_google_sub: str | None = None
 
 
 async def delete_insight_post(post_id: int, *, google_sub: str, is_admin: bool = False) -> bool:
-    db = await cache.get_db()
+    db = await get_db()
     if is_admin:
         cursor = await db.execute("DELETE FROM insight_posts WHERE id = ?", (post_id,))
     else:

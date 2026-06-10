@@ -177,7 +177,7 @@ async def get_history(
         if not use_local_daily or payload.get("items"):
             return payload
         logger.info("KIS history returned no daily rows for %s", symbol)
-    except KISProxyError as exc:
+    except KISProxyError:
         raise
 
     return payload

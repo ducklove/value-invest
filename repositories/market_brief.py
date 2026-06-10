@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 
-import cache
+from repositories.db import get_db
 
 
 async def get_daily_market_brief(
@@ -17,7 +17,7 @@ async def get_daily_market_brief(
     *,
     max_age_minutes: int | None = None,
 ) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         """
         SELECT google_sub, brief_date, source_hash, payload_json, markdown,
@@ -58,7 +58,7 @@ async def save_daily_market_brief(
     tokens_out: int | None = None,
     cost_usd: float | None = None,
 ) -> dict:
-    db = await cache.get_db()
+    db = await get_db()
     now = datetime.now().isoformat()
     await db.execute(
         """

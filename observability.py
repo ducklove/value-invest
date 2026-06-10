@@ -32,7 +32,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-import cache
+from repositories import system_events as system_events_repo
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ async def record_event(
 
     async def _do_write() -> None:
         try:
-            await cache.insert_system_event(
+            await system_events_repo.insert_system_event(
                 level=level,
                 source=source,
                 kind=kind,
@@ -121,7 +121,7 @@ async def run_prune_loop(
             pass
     while not stop_event.is_set():
         try:
-            deleted = await cache.prune_system_events(
+            deleted = await system_events_repo.prune_system_events(
                 max_age_days=max_age_days, max_rows=max_rows,
             )
             if deleted:

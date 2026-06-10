@@ -8,14 +8,14 @@ from __future__ import annotations
 from datetime import datetime
 import json
 
-import cache
+from repositories.db import get_db
 
 
 USER_RECENT_MAX = 20
 
 
 async def touch_user_recent_analysis(google_sub: str, stock_code: str):
-    db = await cache.get_db()
+    db = await get_db()
     now = datetime.now().isoformat()
     await db.execute(
         """
@@ -68,7 +68,7 @@ async def touch_user_recent_analysis(google_sub: str, stock_code: str):
 
 
 async def delete_user_recent_analysis(google_sub: str, stock_code: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         "DELETE FROM user_recent_analyses WHERE google_sub = ? AND stock_code = ?",
         (google_sub, stock_code),
@@ -77,7 +77,7 @@ async def delete_user_recent_analysis(google_sub: str, stock_code: str):
 
 
 async def get_user_stock_preference(google_sub: str, stock_code: str) -> dict:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         """
         SELECT is_starred, is_pinned, sort_order, starred_order, note, updated_at
@@ -123,7 +123,7 @@ async def save_user_stock_preference(
         "note": current["note"] if note is None else note.strip()[:2000],
     }
 
-    db = await cache.get_db()
+    db = await get_db()
     updated_at = datetime.now().isoformat()
     becoming_starred = next_pref["is_starred"] and not current["is_starred"]
     becoming_unstarred = not next_pref["is_starred"] and current["is_starred"]
@@ -165,7 +165,7 @@ async def get_cached_analyses(
     google_sub: str | None = None,
     tab: str = "recent",
 ) -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     select_fields = "stock_code, corp_name, analyzed_at"
     if include_quotes:
         select_fields += ", payload_json"
@@ -230,7 +230,7 @@ async def get_cached_analyses(
 
 
 async def save_user_stock_order(google_sub: str, ordered_stock_codes: list[str]):
-    db = await cache.get_db()
+    db = await get_db()
     updated_at = datetime.now().isoformat()
     await db.executemany(
         """
@@ -250,7 +250,7 @@ async def save_user_stock_order(google_sub: str, ordered_stock_codes: list[str])
 
 
 async def save_starred_order(google_sub: str, ordered_stock_codes: list[str]):
-    db = await cache.get_db()
+    db = await get_db()
     updated_at = datetime.now().isoformat()
     await db.executemany(
         """
@@ -267,7 +267,7 @@ async def save_starred_order(google_sub: str, ordered_stock_codes: list[str]):
 
 
 async def unstar_stock(google_sub: str, stock_code: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         """
         UPDATE user_stock_preferences

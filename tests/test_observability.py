@@ -16,6 +16,8 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+import repositories.db
+from repositories import system_events as system_events_repo
 import observability
 from routes import admin as admin_route
 
@@ -37,7 +39,7 @@ def _admin_request() -> Request:
 class SystemEventCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -154,7 +156,7 @@ class SystemEventCacheTests(unittest.IsolatedAsyncioTestCase):
 class RecordEventTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -192,8 +194,8 @@ class RecordEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2026", rows[0]["details"])
 
     async def test_record_event_never_raises_on_db_failure(self):
-        # Patch cache.insert_system_event to explode; observability must swallow.
-        with patch.object(cache, "insert_system_event", AsyncMock(side_effect=RuntimeError("boom"))):
+        # Patch system_events 저장소의 insert_system_event to explode; observability must swallow.
+        with patch.object(system_events_repo, "insert_system_event", AsyncMock(side_effect=RuntimeError("boom"))):
             # Must not raise.
             await observability.record_event("X", "test", wait=True)
 
@@ -201,7 +203,7 @@ class RecordEventTests(unittest.IsolatedAsyncioTestCase):
 class AdminEventRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -261,7 +263,7 @@ class BatchStatusDataFreshnessTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -376,7 +378,7 @@ class DeployStatusRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()
@@ -419,7 +421,7 @@ class DeployStatusRouteTests(unittest.IsolatedAsyncioTestCase):
 class WikiDiagRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(cache, "DB_PATH", Path(self.tmp.name) / "cache.db")
+        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
         self.db_patch.start()
         await cache.close_db()
         await cache.init_db()

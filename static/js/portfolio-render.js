@@ -13,17 +13,17 @@ function renderPortfolio(options = {}) {
   const filterBar = document.getElementById('pfFilterBar');
   if (filterBar && !summaryOnly) {
     filterBar.style.display = PfStore.items.length ? 'flex' : 'none';
-    if (PfStore.items.length && pfGroups.length) {
+    if (PfStore.items.length && PfStore.groups.length) {
       const counts = {};
-      pfGroups.forEach(g => counts[g.group_name] = 0);
+      PfStore.groups.forEach(g => counts[g.group_name] = 0);
       PfStore.items.forEach(i => {
         const gn = pfGetGroup(i);
         if (counts[gn] !== undefined) counts[gn]++;
         else counts[gn] = 1;
       });
       // Build a fingerprint to avoid unnecessary DOM rebuilds (prevents click loss during rAF re-renders)
-      const fingerprint = pfGroups.map(g => {
-        const active = pfGroupFilter === null || pfGroupFilter.has(g.group_name);
+      const fingerprint = PfStore.groups.map(g => {
+        const active = PfStore.filters.group === null || PfStore.filters.group.has(g.group_name);
         return `${g.group_name}:${counts[g.group_name] || 0}:${active ? 1 : 0}`;
       }).join('|');
       if (filterBar.dataset.fingerprint !== fingerprint) {
@@ -40,8 +40,8 @@ function renderPortfolio(options = {}) {
             if (gn) pfToggleGroupFilter(gn);
           });
         }
-        pfGroups.forEach(g => {
-          const active = pfGroupFilter === null || pfGroupFilter.has(g.group_name);
+        PfStore.groups.forEach(g => {
+          const active = PfStore.filters.group === null || PfStore.filters.group.has(g.group_name);
           const btn = document.createElement('button');
           btn.className = 'pf-filter-btn' + (active ? ' active' : '');
           btn.dataset.groupName = g.group_name;
@@ -162,8 +162,8 @@ function renderPortfolio(options = {}) {
 
   // Apply group + text filters. The text search is deliberately local and
   // instant: it filters the already-loaded holdings by name, code, group, tag.
-  const groupRows = pfGroupFilter === null ? allRows : allRows.filter(r => pfGroupFilter.has(pfGetGroup(r)));
-  const searchText = String(pfPortfolioSearchText || '').trim();
+  const groupRows = PfStore.filters.group === null ? allRows : allRows.filter(r => PfStore.filters.group.has(pfGetGroup(r)));
+  const searchText = String(PfStore.filters.searchText || '').trim();
   const rows = searchText ? groupRows.filter(r => pfRowMatchesSearch(r, searchText)) : groupRows;
   const searchMeta = document.getElementById('pfSearchMeta');
   if (searchMeta && !summaryOnly) {
@@ -193,12 +193,12 @@ function renderPortfolio(options = {}) {
   });
 
   // Sort rows: group sort (primary, if on) + column sort (secondary)
-  if (!summaryOnly && (pfGroupSort || pfSortKey)) {
+  if (!summaryOnly && (PfStore.sort.groupSort || PfStore.sort.key)) {
     const grpOrder = {};
-    if (pfGroupSort) pfGroups.forEach((g, i) => grpOrder[g.group_name] = i);
+    if (PfStore.sort.groupSort) PfStore.groups.forEach((g, i) => grpOrder[g.group_name] = i);
     rows.sort((a, b) => {
       // Primary: group sort
-      if (pfGroupSort) {
+      if (PfStore.sort.groupSort) {
         const ga = grpOrder[pfGetGroup(a)] ?? 999;
         const gb = grpOrder[pfGetGroup(b)] ?? 999;
         if (ga !== gb) return ga - gb;
@@ -206,35 +206,35 @@ function renderPortfolio(options = {}) {
       // Secondary: column sort. null/NaN/빈값은 방향 무관 항상 맨 아래.
       // 이전엔 `?? -Infinity` 로 치환해서 desc 에선 적절히 뒤로 갔지만
       // asc 에선 맨 앞에 몰려 "정렬 안된 것처럼" 보이는 버그가 있었다.
-      if (pfSortKey) {
-        if (pfSortKey === 'name') {
+      if (PfStore.sort.key) {
+        if (PfStore.sort.key === 'name') {
           const va = a.stock_name || '';
           const vb = b.stock_name || '';
           if (!va && vb) return 1;
           if (va && !vb) return -1;
-          return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+          return PfStore.sort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
         }
-        if (pfSortKey === 'createdAtSort') {
+        if (PfStore.sort.key === 'createdAtSort') {
           const va = a.createdAtSort || '';
           const vb = b.createdAtSort || '';
           if (!va && vb) return 1;
           if (va && !vb) return -1;
-          return pfSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+          return PfStore.sort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
         }
-        const aVal = a[pfSortKey];
-        const bVal = b[pfSortKey];
+        const aVal = a[PfStore.sort.key];
+        const bVal = b[PfStore.sort.key];
         const aMissing = aVal == null || Number.isNaN(aVal);
         const bMissing = bVal == null || Number.isNaN(bVal);
         if (aMissing && bMissing) return 0;
         if (aMissing) return 1;
         if (bMissing) return -1;
-        return pfSortAsc ? aVal - bVal : bVal - aVal;
+        return PfStore.sort.asc ? aVal - bVal : bVal - aVal;
       }
       return 0;
     });
   }
-  if (!summaryOnly && pfEditingCode) {
-    const idx = rows.findIndex(r => r.stock_code === pfEditingCode);
+  if (!summaryOnly && PfStore.edit.code) {
+    const idx = rows.findIndex(r => r.stock_code === PfStore.edit.code);
     if (idx > 0) {
       const [editing] = rows.splice(idx, 1);
       rows.unshift(editing);
@@ -247,21 +247,21 @@ function renderPortfolio(options = {}) {
       const key = th.dataset.sort;
       const existing = th.querySelector('.pf-sort-arrow');
       if (existing) existing.remove();
-      const isActive = key === 'group' ? pfGroupSort : pfSortKey === key;
+      const isActive = key === 'group' ? PfStore.sort.groupSort : PfStore.sort.key === key;
       if (isActive) {
         const arrow = document.createElement('span');
         arrow.className = 'pf-sort-arrow';
-        arrow.textContent = key === 'group' ? ' \u25BC' : (pfSortAsc ? ' \u25B2' : ' \u25BC');
+        arrow.textContent = key === 'group' ? ' \u25BC' : (PfStore.sort.asc ? ' \u25B2' : ' \u25BC');
         th.appendChild(arrow);
       }
     });
   }
 
   // FX helper: convert KRW value using a specific snapshot's FX rate, or current rate
-  const _isUsd = pfCurrency === 'USD' && pfFxRate && pfFxRate > 0;
+  const _isUsd = PfStore.currency.unit === 'USD' && PfStore.currency.fxRate && PfStore.currency.fxRate > 0;
   const _fxConv = (krwVal, snap) => {
     if (!_isUsd) return krwVal;
-    const rate = snap && snap.fx_usdkrw ? snap.fx_usdkrw : pfFxRate;
+    const rate = snap && snap.fx_usdkrw ? snap.fx_usdkrw : PfStore.currency.fxRate;
     return rate && rate > 0 ? krwVal / rate : krwVal;
   };
   const _currentFxVal = _fxConv(totalMarketValue, null); // today uses current rate
@@ -270,10 +270,10 @@ function renderPortfolio(options = {}) {
   const totalReturnPct = _currentFxInvested !== 0 ? ((_currentFxVal - _currentFxInvested) / Math.abs(_currentFxInvested) * 100) : 0;
 
   // NAV adjusted for currency mode: USD NAV = KRW NAV / FX
-  const isFiltered = pfGroupFilter !== null || Boolean(searchText);
+  const isFiltered = PfStore.filters.group !== null || Boolean(searchText);
   const _navAdj = (nav, fx) => {
     if (!_isUsd || !nav) return nav;
-    const rate = fx && fx > 0 ? fx : pfFxRate;
+    const rate = fx && fx > 0 ? fx : PfStore.currency.fxRate;
     return rate && rate > 0 ? nav / rate : nav;
   };
 
@@ -335,14 +335,14 @@ function renderPortfolio(options = {}) {
   const latestSnap = PfStore.navHistory.length ? PfStore.navHistory[PfStore.navHistory.length - 1] : null;
   let _pendingUnitsChange = 0;
   let _pendingCashflowWithoutUnits = 0;
-  if (!isFiltered && Array.isArray(pfPrevDaySnapshot?.today_cashflows)) {
-    for (const cf of pfPrevDaySnapshot.today_cashflows) {
+  if (!isFiltered && Array.isArray(PfStore.snapshots.prevDay?.today_cashflows)) {
+    for (const cf of PfStore.snapshots.prevDay.today_cashflows) {
       const units = Number(cf?.units_change);
       if (Number.isFinite(units)) _pendingUnitsChange += units;
       else _pendingCashflowWithoutUnits += Number(cf?.signed_amount || 0);
     }
-  } else if (!isFiltered && pfPrevDaySnapshot?.today_net_cashflow) {
-    _pendingCashflowWithoutUnits = Number(pfPrevDaySnapshot.today_net_cashflow || 0);
+  } else if (!isFiltered && PfStore.snapshots.prevDay?.today_net_cashflow) {
+    _pendingCashflowWithoutUnits = Number(PfStore.snapshots.prevDay.today_net_cashflow || 0);
   }
   const _liveNavUnits = latestSnap && latestSnap.total_units
     ? Number(latestSnap.total_units) + _pendingUnitsChange
@@ -351,16 +351,16 @@ function renderPortfolio(options = {}) {
   const _curNavKrw = (_liveNavUnits && _liveNavUnits > 0 && _liveNavValueKrw > 0)
     ? _liveNavValueKrw / _liveNavUnits
     : (latestSnap ? latestSnap.nav : null);
-  const curNav = _navAdj(_curNavKrw, pfFxRate);
+  const curNav = _navAdj(_curNavKrw, PfStore.currency.fxRate);
 
   // --- Daily return ---
-  const _dailyBaseValue = _periodBaseValue(pfPrevDaySnapshot);
-  const _daily = _periodReturn(pfPrevDaySnapshot, 'nav');
+  const _dailyBaseValue = _periodBaseValue(PfStore.snapshots.prevDay);
+  const _daily = _periodReturn(PfStore.snapshots.prevDay, 'nav');
   let dailyNavPct = _daily.pct;
   let totalDailyPnlDisplay = _daily.pnl ?? 0;
   // Subtract cashflow for daily (whole portfolio only)
-  if (!isFiltered && pfPrevDaySnapshot && pfPrevDaySnapshot.today_net_cashflow) {
-    totalDailyPnlDisplay -= _fxConv(pfPrevDaySnapshot.today_net_cashflow, null);
+  if (!isFiltered && PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.today_net_cashflow) {
+    totalDailyPnlDisplay -= _fxConv(PfStore.snapshots.prevDay.today_net_cashflow, null);
   }
   if (!isFiltered && _dailyBaseValue && _dailyBaseValue > 0) {
     // Keep the headline % and amount on the same 22:00 settlement basis.
@@ -374,13 +374,13 @@ function renderPortfolio(options = {}) {
   const dailyReturnPct = tableDailyBaseValue > 0 ? (totalDailyPnl / tableDailyBaseValue * 100) : null;
 
   // --- Monthly return (MTD) ---
-  const _mtd = _periodReturn(pfMonthEndSnap, 'nav');
+  const _mtd = _periodReturn(PfStore.snapshots.monthEnd, 'nav');
   const monthlyNavPct = _mtd.pct;
   const _mtdPnl = _mtd.pnl;
   const monthlyReturnPct = monthlyNavPct;
 
   // --- YTD return ---
-  const yearStartSnap = pfYearStartSnap || null;
+  const yearStartSnap = PfStore.snapshots.yearStart || null;
   const _ytd = _periodReturn(yearStartSnap, 'nav');
   const ytdReturnPct = _ytd.pct;
   const _ytdPnl = _ytd.pnl;
@@ -389,7 +389,7 @@ function renderPortfolio(options = {}) {
   const _now = new Date();
   const _timeLabel = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
   // Today compares against the previous 22:00 KST settlement snapshot.
-  const _todayBaseDate = pfPrevDaySnapshot && pfPrevDaySnapshot.date;
+  const _todayBaseDate = PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.date;
   // Slice YYYY-MM-DD directly to avoid timezone-off-by-one browser parsing.
   const _todayLabel = _todayBaseDate
     ? `${_todayBaseDate.slice(5, 7)}/${_todayBaseDate.slice(8, 10)} 22시 기준`
@@ -403,9 +403,9 @@ function renderPortfolio(options = {}) {
   const _loadingSub = !_l ? `<span style="opacity:0.5">시세 로딩 중 (${allRows.length - _loadingCount}/${allRows.length})</span>` : '';
   // Format helpers — values passed here are already FX-converted
   const _fmtUsdVal = v => '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3});
-  const _fv = v => pfCurrency === 'USD' ? _fmtUsdVal(v) : fmtKrw(v);
+  const _fv = v => PfStore.currency.unit === 'USD' ? _fmtUsdVal(v) : fmtKrw(v);
   const _fsv = v => {
-    if (pfCurrency === 'USD') {
+    if (PfStore.currency.unit === 'USD') {
       const abs = Math.round(Math.abs(v));
       const sign = v > 0 ? '+' : v < 0 ? '-' : '';
       return sign + '$' + abs.toLocaleString();
@@ -413,7 +413,7 @@ function renderPortfolio(options = {}) {
     return fmtSignedKrw(v);
   };
   // Today's daily PnL in selected currency
-  const _dailyPnlFx = pfCurrency === 'USD' ? pfFx(totalDailyPnl) : totalDailyPnl;
+  const _dailyPnlFx = PfStore.currency.unit === 'USD' ? pfFx(totalDailyPnl) : totalDailyPnl;
 
   summary.innerHTML = `
     <div class="pf-summary-card">
@@ -463,7 +463,7 @@ function renderPortfolio(options = {}) {
   // 비워도 즉시 '자동 계산 값' 으로 복원되던 증상이 대표적.
   // 따라서 DOM 교체 전에 현재 값을 snapshot 하고, 교체 후에 복원한다.
   const _editInputIds = ['pfEditPrice', 'pfEditTarget', 'pfEditQty', 'pfEditCreatedAt'];
-  const _preservedEdit = pfEditingCode ? {} : null;
+  const _preservedEdit = PfStore.edit.code ? {} : null;
   if (_preservedEdit) {
     for (const id of _editInputIds) {
       const el = document.getElementById(id);
@@ -479,18 +479,18 @@ function renderPortfolio(options = {}) {
     }
   }
 
-  const canManualDrag = pfGroupFilter === null && !pfSortKey && !pfGroupSort && !searchText && currentUser && !pfEditingCode;
+  const canManualDrag = PfStore.filters.group === null && !PfStore.sort.key && !PfStore.sort.groupSort && !searchText && currentUser && !PfStore.edit.code;
 
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
-    const isEditing = pfEditingCode === r.stock_code;
+    const isEditing = PfStore.edit.code === r.stock_code;
     const isCash = r.stock_code.startsWith('CASH_');
     const isSpecialFloat = ['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(r.stock_code) || isCash;
     const curTag = r.stock_code === 'KRX_GOLD' ? '<span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? `<span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isSpecialFloat ? 'any' : '1';
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : isCash ? 2 : 8;
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
-    const groupOpts = pfGroups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
+    const groupOpts = PfStore.groups.map(g => `<option value="${escapeHtml(g.group_name)}"${g.group_name === pfGetGroup(r) ? ' selected' : ''}>${escapeHtml(g.group_name)}</option>`).join('');
     const targetInputValue = r.target_price_formula ?? (r.target_price ?? '');
     const targetTooltip = _targetPriceTooltip(r);
     const targetTitle = targetTooltip ? ` title="${escapeHtml(targetTooltip)}"` : '';
@@ -499,7 +499,7 @@ function renderPortfolio(options = {}) {
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     const safeCode = escapeHtml(r.stock_code);
     const tagHtml = _renderPortfolioRowTags(pfGetTags(r));
-    const isSaving = pfSavingEditCode === r.stock_code;
+    const isSaving = PfStore.edit.savingCode === r.stock_code;
     const editAttrs = isSaving ? ' disabled' : '';
     const saveAttrs = isSaving ? ' disabled aria-busy="true"' : '';
     const rowClass = isSaving ? ' class="pf-row-saving" aria-busy="true"' : '';
@@ -667,7 +667,7 @@ const SPARK_DAILY_START_HOUR = 8;
 const SPARK_DAILY_END_HOUR = 20;
 // 세션일 = intraday 최신 점의 날짜(주말·공휴일에도 장중 점이 몰리지 않음). 없으면 현재 KST.
 function _sparkDailyAxis() {
-  const ints = Array.isArray(pfIntradayData) ? pfIntradayData : [];
+  const ints = Array.isArray(PfStore.snapshots.intraday) ? PfStore.snapshots.intraday : [];
   let maxTs = null;
   for (const d of ints) {
     if (d && d.ts && (maxTs === null || d.ts > maxTs)) maxTs = d.ts;
@@ -707,8 +707,8 @@ function _sparkAxisHoursFromTs(ts, axisStartTs, axisEndTs) {
 function _sparkTodayCashflowThroughTs(ts) {
   const target = _sparkLocalMinuteValue(ts);
   if (target === null) return 0;
-  const cashflows = Array.isArray(pfPrevDaySnapshot?.today_cashflows)
-    ? pfPrevDaySnapshot.today_cashflows
+  const cashflows = Array.isArray(PfStore.snapshots.prevDay?.today_cashflows)
+    ? PfStore.snapshots.prevDay.today_cashflows
     : [];
   let total = 0;
   for (const cf of cashflows) {
@@ -753,7 +753,7 @@ function _renderSummarySparklines(currentTotalValue) {
   // MTD sparkline: fixed previous-month-end -> current-month-end axis.
   // The first point is always previous month-end at 0%, so the shape is
   // stable even before the first daily snapshot of the month exists.
-  if (pfMonthEndSnap?.total_value && pfMonthEndSnap?.total_value > 0) {
+  if (PfStore.snapshots.monthEnd?.total_value && PfStore.snapshots.monthEnd?.total_value > 0) {
     const now = new Date();
     const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
     const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -769,13 +769,13 @@ function _renderSummarySparklines(currentTotalValue) {
       if (!dt) continue;
       monthPoints.push({
         x: Math.max(0, Math.min(axisDays, _diffLocalDays(prevMonthEnd, dt))),
-        y: ((d.total_value / pfMonthEndSnap.total_value) - 1) * 100,
+        y: ((d.total_value / PfStore.snapshots.monthEnd.total_value) - 1) * 100,
       });
     }
     if (currentTotalValue) {
       monthPoints.push({
         x: Math.max(0, Math.min(axisDays, _diffLocalDays(prevMonthEnd, now))),
-        y: ((currentTotalValue / pfMonthEndSnap.total_value) - 1) * 100,
+        y: ((currentTotalValue / PfStore.snapshots.monthEnd.total_value) - 1) * 100,
       });
     }
     const lastPct = monthPoints.length ? monthPoints[monthPoints.length - 1].y : 0;
@@ -787,8 +787,8 @@ function _renderSummarySparklines(currentTotalValue) {
   // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 22:00 결산(prevClose)
   // 대비 등락%. 축은 _sparkDailyAxis() 가 세션일 기준으로 만든다(now 까지 그려지고
   // 우측 빈 구간은 미래 시간).
-  const _prevClose = (pfPrevDaySnapshot && pfPrevDaySnapshot.total_value > 0)
-    ? pfPrevDaySnapshot.total_value
+  const _prevClose = (PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.total_value > 0)
+    ? PfStore.snapshots.prevDay.total_value
     : null;
   const _dailyAxis = _sparkDailyAxis();
   const axisStartTs = _dailyAxis.start;
@@ -798,7 +798,7 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparklinePoints('sparkDaily', [], '#dc2626', _dailyAxisHours);
   } else {
     const raw = [{ x: 0, y: 0 }];
-    for (const d of pfIntradayData) {
+    for (const d of PfStore.snapshots.intraday) {
       if (!d || !d.total_value) continue;
       const x = _sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs);
       if (x === null) continue;
@@ -830,7 +830,7 @@ function fmtTradingValueKrw(n) {
 
 function pfFmtPortfolioValue(value) {
   const converted = pfFx(value);
-  return pfCurrency === 'USD'
+  return PfStore.currency.unit === 'USD'
     ? '$' + Number(converted).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
     : fmtNum(Math.round(converted));
 }

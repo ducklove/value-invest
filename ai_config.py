@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import cache
+from repositories import ai_usage as ai_usage_repo
+from repositories import app_settings as app_settings_repo
 
 
 OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
@@ -108,7 +109,7 @@ def _mask_secret(value: str) -> str:
 
 
 async def get_openrouter_key() -> str:
-    stored = await cache.get_app_setting(OPENROUTER_KEY_SETTING)
+    stored = await app_settings_repo.get_app_setting(OPENROUTER_KEY_SETTING)
     if stored and stored.get("value"):
         return str(stored["value"])
     env_or_file = os.getenv(OPENROUTER_KEY_SETTING, "") or _load_key_from_file(OPENROUTER_KEY_SETTING)
@@ -121,7 +122,7 @@ async def get_openrouter_key() -> str:
 
 
 async def openrouter_key_status() -> dict[str, Any]:
-    stored = await cache.get_app_setting(OPENROUTER_KEY_SETTING)
+    stored = await app_settings_repo.get_app_setting(OPENROUTER_KEY_SETTING)
     if stored and stored.get("value"):
         value = str(stored["value"])
         return {
@@ -144,18 +145,18 @@ async def set_openrouter_key(value: str, actor: str | None):
     value = value.strip()
     if not value:
         raise ValueError("OpenRouter API key is required.")
-    await cache.set_app_setting(OPENROUTER_KEY_SETTING, value, is_secret=True, updated_by=actor)
+    await app_settings_repo.set_app_setting(OPENROUTER_KEY_SETTING, value, is_secret=True, updated_by=actor)
 
 
 async def delete_openrouter_key():
-    await cache.delete_app_setting(OPENROUTER_KEY_SETTING)
+    await app_settings_repo.delete_app_setting(OPENROUTER_KEY_SETTING)
 
 
 async def get_model_for_feature(feature: str) -> str:
     spec = MODEL_FEATURES.get(feature)
     if not spec:
         raise ValueError(f"Unknown AI feature: {feature}")
-    stored = await cache.get_app_setting(_model_setting_key(feature))
+    stored = await app_settings_repo.get_app_setting(_model_setting_key(feature))
     if stored and stored.get("value"):
         return str(stored["value"])
     return _configured_default_model(spec)
@@ -164,19 +165,19 @@ async def get_model_for_feature(feature: str) -> str:
 async def _migrate_legacy_wiki_qa_default() -> dict[str, Any]:
     feature = "wiki_qa"
     setting_key = _model_setting_key(feature)
-    marker = await cache.get_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY)
+    marker = await app_settings_repo.get_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY)
     if marker:
         return {"migrated": False, "reason": "already_marked"}
 
-    stored = await cache.get_app_setting(setting_key)
+    stored = await app_settings_repo.get_app_setting(setting_key)
     stored_value = str((stored or {}).get("value") or "").strip()
     target = _configured_default_model(MODEL_FEATURES[feature])
     if stored_value in _WIKI_QA_LEGACY_DEFAULT_MODELS and stored_value != target:
-        await cache.set_app_setting(setting_key, target, updated_by="system:migration")
-        await cache.set_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY, target, updated_by="system:migration")
+        await app_settings_repo.set_app_setting(setting_key, target, updated_by="system:migration")
+        await app_settings_repo.set_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY, target, updated_by="system:migration")
         return {"migrated": True, "feature": feature, "from": stored_value, "to": target}
 
-    await cache.set_app_setting(
+    await app_settings_repo.set_app_setting(
         _WIKI_QA_KIMI_MIGRATION_KEY,
         "skipped",
         updated_by="system:migration",
@@ -185,24 +186,24 @@ async def _migrate_legacy_wiki_qa_default() -> dict[str, Any]:
 
 
 async def _migrate_legacy_portfolio_model_defaults() -> dict[str, Any]:
-    marker = await cache.get_app_setting(_PORTFOLIO_FLASH_MIGRATION_KEY)
+    marker = await app_settings_repo.get_app_setting(_PORTFOLIO_FLASH_MIGRATION_KEY)
     if marker:
         return {"migrated": False, "reason": "already_marked"}
 
     migrated: list[str] = []
     for feature, legacy_values in _PORTFOLIO_LEGACY_DEFAULT_MODELS.items():
-        stored = await cache.get_app_setting(_model_setting_key(feature))
+        stored = await app_settings_repo.get_app_setting(_model_setting_key(feature))
         stored_value = str((stored or {}).get("value") or "").strip()
         target = _configured_default_model(MODEL_FEATURES[feature])
         if stored_value in legacy_values and stored_value != target:
-            await cache.set_app_setting(
+            await app_settings_repo.set_app_setting(
                 _model_setting_key(feature),
                 target,
                 updated_by="system:migration",
             )
             migrated.append(feature)
 
-    await cache.set_app_setting(
+    await app_settings_repo.set_app_setting(
         _PORTFOLIO_FLASH_MIGRATION_KEY,
         ",".join(migrated) if migrated else "skipped",
         updated_by="system:migration",
@@ -213,24 +214,24 @@ async def _migrate_legacy_portfolio_model_defaults() -> dict[str, Any]:
 
 
 async def _migrate_qwen_flash_portfolio_overrides() -> dict[str, Any]:
-    marker = await cache.get_app_setting(_PORTFOLIO_QWEN_FLASH_MIGRATION_KEY)
+    marker = await app_settings_repo.get_app_setting(_PORTFOLIO_QWEN_FLASH_MIGRATION_KEY)
     if marker:
         return {"migrated": False, "reason": "already_marked"}
 
     migrated: list[str] = []
     for feature in ("portfolio_fast", "portfolio_balanced", "portfolio_premium"):
-        stored = await cache.get_app_setting(_model_setting_key(feature))
+        stored = await app_settings_repo.get_app_setting(_model_setting_key(feature))
         stored_value = str((stored or {}).get("value") or "").strip().lower()
         target = _configured_default_model(MODEL_FEATURES[feature])
         if stored_value in _PORTFOLIO_QWEN_FLASH_LEGACY_MODELS and stored_value != target.lower():
-            await cache.set_app_setting(
+            await app_settings_repo.set_app_setting(
                 _model_setting_key(feature),
                 target,
                 updated_by="system:migration",
             )
             migrated.append(feature)
 
-    await cache.set_app_setting(
+    await app_settings_repo.set_app_setting(
         _PORTFOLIO_QWEN_FLASH_MIGRATION_KEY,
         ",".join(migrated) if migrated else "skipped",
         updated_by="system:migration",
@@ -268,7 +269,7 @@ async def model_profiles() -> dict[str, str]:
 async def ai_admin_config(days: int = 30) -> dict[str, Any]:
     features = []
     for key, spec in MODEL_FEATURES.items():
-        stored = await cache.get_app_setting(_model_setting_key(key))
+        stored = await app_settings_repo.get_app_setting(_model_setting_key(key))
         model = await get_model_for_feature(key)
         features.append(
             {
@@ -283,7 +284,7 @@ async def ai_admin_config(days: int = 30) -> dict[str, Any]:
     return {
         "openrouter": await openrouter_key_status(),
         "features": features,
-        "usage": await cache.summarize_ai_usage(days=days),
+        "usage": await ai_usage_repo.summarize_ai_usage(days=days),
     }
 
 
@@ -294,7 +295,7 @@ async def save_feature_models(models: dict[str, Any], actor: str | None):
         model = str(value or "").strip()
         if not model:
             raise ValueError(f"{feature} model is required.")
-        await cache.set_app_setting(_model_setting_key(feature), model, updated_by=actor)
+        await app_settings_repo.set_app_setting(_model_setting_key(feature), model, updated_by=actor)
 
 
 def openrouter_reasoning_controls(model: str, *, effort: str | None = None) -> dict[str, Any]:
@@ -340,7 +341,7 @@ async def record_usage(
     ok: bool = True,
     error: str | None = None,
 ):
-    await cache.insert_ai_usage_event(
+    await ai_usage_repo.insert_ai_usage_event(
         google_sub=google_sub,
         feature=feature,
         model=model,

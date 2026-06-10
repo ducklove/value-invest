@@ -3,20 +3,48 @@
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 
 from fastapi import Request, Response
 
 import auth_service
-import cache
+from repositories import users as users_repo
 from services import stock_quotes
 
 logger = logging.getLogger(__name__)
 
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
 # --- Constants ---
-ANALYSIS_SEMAPHORE = asyncio.Semaphore(2)
+ANALYSIS_CONCURRENCY = _env_int("ANALYSIS_CONCURRENCY", 2)
+ANALYSIS_SEMAPHORE = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 ANALYSIS_LOCKS: dict[str, asyncio.Lock] = {}
 ANALYSIS_LOCKS_GUARD = asyncio.Lock()
+# 종목코드마다 락이 하나씩 쌓이므로 상한을 두고, 넘으면 아무도 잡고 있지 않은
+# 오래된 락부터 비운다. dict 삽입 순서가 곧 LRU 근사다.
+ANALYSIS_LOCKS_MAX = _env_int("ANALYSIS_LOCKS_MAX", 512)
+
+
+async def get_analysis_lock(stock_code: str) -> asyncio.Lock:
+    async with ANALYSIS_LOCKS_GUARD:
+        lock = ANALYSIS_LOCKS.pop(stock_code, None)
+        if lock is None:
+            lock = asyncio.Lock()
+        ANALYSIS_LOCKS[stock_code] = lock  # 재삽입으로 최신 사용 순서 유지
+        if len(ANALYSIS_LOCKS) > ANALYSIS_LOCKS_MAX:
+            for code, candidate in list(ANALYSIS_LOCKS.items()):
+                if len(ANALYSIS_LOCKS) <= ANALYSIS_LOCKS_MAX:
+                    break
+                if code != stock_code and not candidate.locked():
+                    del ANALYSIS_LOCKS[code]
+        return lock
 LATEST_REPORT_CACHE_TTL_MINUTES = 1440  # 24h — 최신 리포트는 하루 1회만 재수집
 REPORT_LIST_CACHE_TTL_MINUTES = 60
 ANALYSIS_SNAPSHOT_TTL_MINUTES = 60
@@ -68,7 +96,7 @@ async def get_current_user(request: Request) -> dict | None:
         token_hash = auth_service.hash_session_token(session_token)
     except RuntimeError:
         return None
-    return await cache.get_user_by_session(token_hash)
+    return await users_repo.get_user_by_session(token_hash)
 
 
 def set_session_cookie(response: Response, request: Request, session_token: str):

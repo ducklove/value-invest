@@ -8,11 +8,12 @@ from __future__ import annotations
 from datetime import datetime
 import json
 
-import cache
+from cache_layer import CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST
+from repositories.db import get_db
 
 
 async def save_analysis_meta(stock_code: str, corp_name: str):
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT payload_json FROM analysis_meta WHERE stock_code = ?",
         (stock_code,),
@@ -31,7 +32,7 @@ async def save_analysis_meta(stock_code: str, corp_name: str):
 
 
 async def save_analysis_snapshot(stock_code: str, corp_name: str, payload: dict):
-    db = await cache.get_db()
+    db = await get_db()
     analyzed_at = payload.get("analyzed_at") or datetime.now().isoformat()
     snapshot = dict(payload)
     snapshot["analyzed_at"] = analyzed_at
@@ -48,7 +49,7 @@ async def save_analysis_snapshot(stock_code: str, corp_name: str, payload: dict)
 
 
 async def get_analysis_meta(stock_code: str) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT * FROM analysis_meta WHERE stock_code = ?", (stock_code,)
     )
@@ -57,7 +58,7 @@ async def get_analysis_meta(stock_code: str) -> dict | None:
 
 
 async def get_analysis_snapshot(stock_code: str) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT stock_code, corp_name, analyzed_at, payload_json FROM analysis_meta WHERE stock_code = ?",
         (stock_code,),
@@ -81,7 +82,7 @@ async def get_analysis_snapshot(stock_code: str) -> dict | None:
 
 
 async def delete_analysis(stock_code: str):
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute("DELETE FROM financial_data WHERE stock_code = ?", (stock_code,))
     await db.execute("DELETE FROM market_data WHERE stock_code = ?", (stock_code,))
     await db.execute("DELETE FROM analysis_meta WHERE stock_code = ?", (stock_code,))
@@ -89,7 +90,7 @@ async def delete_analysis(stock_code: str):
     await db.execute("DELETE FROM report_list_cache WHERE stock_code = ?", (stock_code,))
     await db.execute(
         "DELETE FROM cache_values WHERE namespace IN (?, ?) AND key = ?",
-        (cache.CACHE_NS_LATEST_REPORT, cache.CACHE_NS_REPORT_LIST, stock_code),
+        (CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST, stock_code),
     )
     await db.execute("DELETE FROM dart_report_reviews WHERE stock_code = ?", (stock_code,))
     await db.commit()

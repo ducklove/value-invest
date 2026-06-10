@@ -30,11 +30,13 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 import cache
+import repositories.db
 import observability
 from core import app_factory
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
 from routes import portfolio as portfolio_route
+from services.portfolio import dividends
 
 
 def _test_settings() -> AppSettings:
@@ -57,17 +59,16 @@ class IntegrationAppHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(cache, "DB_PATH", self.db_path)
+        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
         # A prior test may have left cache._conn pointing at a deleted temp DB.
         await cache.close_db()
         await cache.init_db()
 
         # Background warmups fan out to DART / AI and must not fire in tests.
-        portfolio_route._dividend_warmup_last.clear()
-        portfolio_route._dividend_warmup_tasks.clear()
+        dividends.reset_warmup_state()
         self._patches = [
-            patch.object(portfolio_route, "_schedule_portfolio_dividend_warmup", lambda codes: None),
+            patch.object(dividends, "schedule_for_portfolio", lambda codes: None),
             patch.object(portfolio_route.insights, "schedule_asset_insight_warmup", lambda enriched: None),
         ]
         for p in self._patches:

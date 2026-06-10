@@ -92,11 +92,32 @@ flowchart TD
 
 ## 우선순위
 
-1. 환경 분리와 설정 단일화. (진행됨)
-2. `main.py` app factory 분리. (진행됨)
-3. `portfolio.py`에서 quote/benchmark부터 서비스로 추출.
-4. `cache.py` repository 분리와 transaction helper.
-5. 프론트 portfolio store 도입.
+1. 환경 분리와 설정 단일화. (완료)
+2. `main.py` app factory 분리. (완료)
+3. `portfolio.py`에서 quote/benchmark부터 서비스로 추출. (진행 중 — names/targets/배당 워밍업 잔여)
+4. `cache.py` repository 분리와 transaction helper. (완료 — 2026-06-10)
+5. 프론트 portfolio store 도입. (완료 — 2026-06-10)
+
+## 2026-06-10 진행 기록
+
+상세 평가와 후속 로드맵은 `docs/refactoring-review-2026-06.html` 참고.
+
+- **4단계 완료**: `repositories/db.py`가 커넥션 싱글턴(DB_PATH/get_db/close_db)과
+  `transaction()`(공유 단일 커넥션 직렬화, BEGIN IMMEDIATE, 재진입 합류)을 소유.
+  repository 19개와 레거시 모듈 11개(ai_config, market_daily, snapshot_*, wiki_ingestion,
+  observability, *_dividends, benchmark_history, dart_report_review, deps)가 cache 재수출
+  대신 repository를 직접 import. cache.py에는 스키마(init_db)·corp-code 헬퍼·
+  남은 소비자(routes/services)용 재수출만 잔존. 다중 statement 쓰기 11곳 원자화.
+- **5단계 완료**: `PfStore`가 파일 간 공유 상태 23개를 소유(sort/filters/edit/
+  manualOrder/snapshots/currency/prefs). 파일 로컬 plumbing만 모듈 상단 `let`.
+- **대형 파일 분할**: analysis.js → analysis-charts/analysis-filings/본체(각 1,000줄 미만),
+  admin.js → admin-observability/admin-linked-projects/본체. 분할 계약은
+  test_frontend_structure.py가 강제.
+- **배포 게이트**: ruff(F·E9) → pytest → JS 테스트(node 가용 시) 3중 차단 게이트,
+  healthz 실패 시 OLD_SHA 롤백·재기동. `pyproject.toml`이 lint 규칙의 단일 출처.
+- **프런트 fetch 계층**: apiFetch 타임아웃(스트리밍 제외) + reportApiError(토스트/무음).
+- **신규 기능**: `GET /api/portfolio/risk` — NAV 기반 리스크 지표(수익률·변동성·MDD·
+  샤프·베타/상관, 1M~ALL 윈도우).
 
 ## 이번 브랜치의 첫 변경 범위
 

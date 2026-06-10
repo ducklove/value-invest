@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-import cache
+from repositories.db import get_db
 
 
 def _now() -> str:
@@ -24,7 +24,7 @@ def _now() -> str:
 # --- Channels ---------------------------------------------------------------
 
 async def get_notification_channel(google_sub: str, channel: str) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT google_sub, channel, enabled, config_json, verified, created_at, updated_at"
         " FROM notification_channels WHERE google_sub = ? AND channel = ?",
@@ -42,7 +42,7 @@ async def get_notification_channel(google_sub: str, channel: str) -> dict | None
 
 
 async def list_notification_channels(google_sub: str) -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT google_sub, channel, enabled, config_json, verified, created_at, updated_at"
         " FROM notification_channels WHERE google_sub = ? ORDER BY channel ASC",
@@ -67,7 +67,7 @@ async def upsert_notification_channel(
     enabled: bool = True,
     verified: bool = True,
 ) -> None:
-    db = await cache.get_db()
+    db = await get_db()
     now = _now()
     await db.execute(
         """
@@ -94,7 +94,7 @@ async def upsert_notification_channel(
 
 
 async def set_notification_channel_enabled(google_sub: str, channel: str, enabled: bool) -> bool:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "UPDATE notification_channels SET enabled = ?, updated_at = ?"
         " WHERE google_sub = ? AND channel = ?",
@@ -105,7 +105,7 @@ async def set_notification_channel_enabled(google_sub: str, channel: str, enable
 
 
 async def delete_notification_channel(google_sub: str, channel: str) -> bool:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "DELETE FROM notification_channels WHERE google_sub = ? AND channel = ?",
         (google_sub, channel),
@@ -117,7 +117,7 @@ async def delete_notification_channel(google_sub: str, channel: str) -> bool:
 # --- Bot-link handshake codes ----------------------------------------------
 
 async def create_notification_link(code: str, google_sub: str, channel: str, expires_at: str) -> None:
-    db = await cache.get_db()
+    db = await get_db()
     # One pending link per user+channel — replace any earlier code.
     await db.execute(
         "DELETE FROM notification_links WHERE google_sub = ? AND channel = ?",
@@ -133,7 +133,7 @@ async def create_notification_link(code: str, google_sub: str, channel: str, exp
 
 async def pop_notification_link(code: str) -> dict | None:
     """Resolve and consume a link code. Returns the row if still valid, else None."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT code, google_sub, channel, created_at, expires_at FROM notification_links WHERE code = ?",
         (code,),
@@ -150,7 +150,7 @@ async def pop_notification_link(code: str) -> dict | None:
 
 
 async def delete_expired_notification_links() -> int:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "DELETE FROM notification_links WHERE expires_at < ?", (_now(),)
     )
@@ -167,7 +167,7 @@ _ALERT_COLUMNS = (
 
 
 async def list_portfolio_alerts(google_sub: str, *, enabled_only: bool = False) -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     query = f"SELECT {_ALERT_COLUMNS} FROM portfolio_alerts WHERE google_sub = ?"
     params: tuple = (google_sub,)
     if enabled_only:
@@ -178,7 +178,7 @@ async def list_portfolio_alerts(google_sub: str, *, enabled_only: bool = False) 
 
 
 async def get_portfolio_alert(google_sub: str, alert_id: int) -> dict | None:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         f"SELECT {_ALERT_COLUMNS} FROM portfolio_alerts WHERE google_sub = ? AND id = ?",
         (google_sub, alert_id),
@@ -198,7 +198,7 @@ async def create_portfolio_alert(
     enabled: bool = True,
     important: bool = False,
 ) -> int:
-    db = await cache.get_db()
+    db = await get_db()
     now = _now()
     cursor = await db.execute(
         """
@@ -236,7 +236,7 @@ async def update_portfolio_alert(google_sub: str, alert_id: int, **fields) -> bo
     sets.append("updated_at = ?")
     params.append(_now())
     params.extend([google_sub, alert_id])
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         f"UPDATE portfolio_alerts SET {', '.join(sets)} WHERE google_sub = ? AND id = ?",
         params,
@@ -246,7 +246,7 @@ async def update_portfolio_alert(google_sub: str, alert_id: int, **fields) -> bo
 
 
 async def delete_portfolio_alert(google_sub: str, alert_id: int) -> bool:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "DELETE FROM portfolio_alerts WHERE google_sub = ? AND id = ?",
         (google_sub, alert_id),
@@ -257,7 +257,7 @@ async def delete_portfolio_alert(google_sub: str, alert_id: int) -> bool:
 
 async def set_portfolio_alert_state_json(alert_id: int, state_json: str) -> None:
     """Persist per-holding edge state for blanket (all_stocks) rules."""
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         "UPDATE portfolio_alerts SET state_json = ?, updated_at = ? WHERE id = ?",
         (state_json, _now(), alert_id),
@@ -268,7 +268,7 @@ async def set_portfolio_alert_state_json(alert_id: int, state_json: str) -> None
 async def set_portfolio_alert_important(google_sub: str, alert_id: int, important: bool) -> bool:
     """중요 표시만 토글한다. 엣지 상태(armed/state_json)는 건드리지 않아,
     이미 발송된 규칙을 중요로 바꿔도 그날 다시 발송되지 않는다."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "UPDATE portfolio_alerts SET important = ?, updated_at = ? WHERE google_sub = ? AND id = ?",
         (1 if important else 0, _now(), google_sub, alert_id),
@@ -283,7 +283,7 @@ async def get_all_users_with_alerts() -> list[str]:
     ``get_all_users_with_portfolio`` 만으로는 보유하지 않은 종목에 건 분석 화면
     알림이 평가되지 않으므로, 평가 루프가 이 집합과 합집합으로 순회한다.
     """
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "SELECT DISTINCT google_sub FROM portfolio_alerts WHERE enabled = 1"
     )
@@ -298,7 +298,7 @@ async def set_portfolio_alert_state(
     triggered: bool = False,
 ) -> None:
     """Persist edge-trigger state after an evaluation pass."""
-    db = await cache.get_db()
+    db = await get_db()
     if triggered:
         await db.execute(
             "UPDATE portfolio_alerts SET armed = ?, last_value = ?, last_triggered_at = ?, updated_at = ? WHERE id = ?",
@@ -321,7 +321,7 @@ _ECON_SUB_COLUMNS = (
 
 
 async def list_calendar_subscriptions(google_sub: str, *, pending_only: bool = False) -> list[dict]:
-    db = await cache.get_db()
+    db = await get_db()
     query = f"SELECT {_ECON_SUB_COLUMNS} FROM economic_calendar_subscriptions WHERE google_sub = ?"
     if pending_only:
         query += " AND fired = 0"
@@ -345,7 +345,7 @@ async def upsert_calendar_subscription(
 ) -> None:
     """Subscribe a user to one calendar event's result. Re-subscribing re-arms
     (fired→0) so an edited/re-checked event can fire again."""
-    db = await cache.get_db()
+    db = await get_db()
     now = _now()
     await db.execute(
         """
@@ -372,7 +372,7 @@ async def upsert_calendar_subscription(
 
 
 async def delete_calendar_subscription(google_sub: str, event_id: str) -> bool:
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "DELETE FROM economic_calendar_subscriptions WHERE google_sub = ? AND event_id = ?",
         (google_sub, event_id),
@@ -383,7 +383,7 @@ async def delete_calendar_subscription(google_sub: str, event_id: str) -> bool:
 
 async def list_pending_calendar_subscriptions() -> list[dict]:
     """All un-fired subscriptions across users — the engine's work list."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         f"SELECT {_ECON_SUB_COLUMNS} FROM economic_calendar_subscriptions"
         " WHERE fired = 0 ORDER BY event_date ASC, id ASC"
@@ -392,7 +392,7 @@ async def list_pending_calendar_subscriptions() -> list[dict]:
 
 
 async def mark_calendar_subscription_fired(sub_id: int) -> None:
-    db = await cache.get_db()
+    db = await get_db()
     await db.execute(
         "UPDATE economic_calendar_subscriptions SET fired = 1, updated_at = ? WHERE id = ?",
         (_now(), sub_id),
@@ -403,7 +403,7 @@ async def mark_calendar_subscription_fired(sub_id: int) -> None:
 async def delete_stale_calendar_subscriptions(before_date: str) -> int:
     """Drop subscriptions for events whose date is older than ``before_date``
     (fired or not) so the table and the polling window stay bounded."""
-    db = await cache.get_db()
+    db = await get_db()
     cursor = await db.execute(
         "DELETE FROM economic_calendar_subscriptions WHERE event_date < ?",
         (before_date,),

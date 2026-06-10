@@ -73,7 +73,7 @@
       } else if ((el = t.closest('.js-pf-bench-picker'))) {
         e.preventDefault();
         const code = codeFromTr(el);
-        if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);
+        if (code && PfStore.edit.code === code) pfShowBenchmarkPicker(code, el);
       } else if ((el = t.closest('.js-pf-open-tag-summary'))) {
         e.preventDefault();
         e.stopPropagation();
@@ -120,7 +120,7 @@
           e.stopPropagation();
           clearPortfolioTargetPrice(code);
         }
-      } else if (!pfEditingCode && (el = portfolioRowFromTarget(t)) && isPassivePortfolioRowTarget(t)) {
+      } else if (!PfStore.edit.code && (el = portfolioRowFromTarget(t)) && isPassivePortfolioRowTarget(t)) {
         e.preventDefault();
         const code = codeFromTr(el);
         if (code) pfGoAnalyze(code, e);

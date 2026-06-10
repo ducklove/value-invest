@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
+# DB cache_values 테이블의 네임스페이스 키. 원래 cache.py 상수였는데,
+# repositories/analysis.py 가 cache 를 import 하지 않고도 쓸 수 있도록
+# leaf 모듈인 여기로 옮겼다. cache.py 가 그대로 재수출한다.
+CACHE_NS_LATEST_REPORT = "reports.latest"
+CACHE_NS_REPORT_LIST = "reports.list"
+
 
 def now_iso() -> str:
     """Naive local ISO timestamp, matching the rest of the app's DB rows."""

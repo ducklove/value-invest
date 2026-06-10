@@ -27,7 +27,7 @@ import asyncio
 import logging
 from datetime import date, timedelta
 
-import cache
+from repositories import benchmark_daily as benchmark_repo
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ async def backfill_benchmark(code: str, start: str) -> int:
         logger.warning("Unknown benchmark code for backfill: %s", code)
         return 0
 
-    earliest = await cache.get_benchmark_earliest_date(code)
+    earliest = await benchmark_repo.get_benchmark_earliest_date(code)
     today = date.today()
 
     # Cap the backfill window so a pathological `start` (e.g. 1990-01-01)
@@ -121,7 +121,7 @@ async def backfill_benchmark(code: str, start: str) -> int:
         logger.info("Benchmark backfill returned no rows (%s %s..%s)", code, fetch_from, end_date)
         return 0
 
-    return await cache.save_benchmark_rows(code, rows)
+    return await benchmark_repo.save_benchmark_rows(code, rows)
 
 
 async def update_benchmark_today(codes: list[str] | None = None) -> dict[str, int]:
@@ -141,7 +141,7 @@ async def update_benchmark_today(codes: list[str] | None = None) -> dict[str, in
         if not ticker:
             continue
 
-        last = await cache.get_benchmark_last_date(code)
+        last = await benchmark_repo.get_benchmark_last_date(code)
         if last:
             # Start the fetch window one day after last stored date.
             try:
@@ -171,7 +171,7 @@ async def update_benchmark_today(codes: list[str] | None = None) -> dict[str, in
             continue
 
         if rows:
-            n = await cache.save_benchmark_rows(code, rows)
+            n = await benchmark_repo.save_benchmark_rows(code, rows)
             written[code] = n
             logger.info("Benchmark increment %s: +%d rows (%s..%s)", code, n, rows[0]["date"], rows[-1]["date"])
         else:

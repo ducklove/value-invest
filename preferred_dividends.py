@@ -10,7 +10,7 @@ The user maintains a hand-curated Google Sheet with exact per-year
 preferred dividends. Its `Data` tab column AI holds the most recent
 year's preferred dividend per share. We fetch that tab via the public
 CSV export, parse the rows, and upsert into the `preferred_dividends`
-table. `cache.get_trailing_dividends` prefers this data over the
+table. `repositories.portfolio.get_trailing_dividends` prefers this data over the
 common-stock fallback when available.
 
 Sync cadence: **manual only** via the admin dashboard. Preferred
@@ -32,7 +32,7 @@ from datetime import datetime
 
 import httpx
 
-import cache
+from repositories import portfolio as portfolio_repo
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def _clean_number(cell: str) -> float | None:
 
 def parse_sheet_csv(csv_text: str) -> list[dict]:
     """Pure parsing — no I/O, no DB. Returns list of row dicts ready for
-    cache.upsert_preferred_dividends.
+    repositories.portfolio.upsert_preferred_dividends.
 
     Rows with missing code are skipped (header row and blanks at the end).
     Rows with no recognizable dividend value go through with None, which
@@ -179,7 +179,7 @@ async def refresh_preferred_dividends() -> dict:
         return {"ok": False, "error": f"parse: {exc}", "rows_written": 0}
 
     try:
-        written = await cache.upsert_preferred_dividends(rows)
+        written = await portfolio_repo.upsert_preferred_dividends(rows)
     except Exception as exc:
         logger.exception("preferred_dividends: upsert failed")
         return {"ok": False, "error": f"upsert: {exc}", "rows_written": 0}

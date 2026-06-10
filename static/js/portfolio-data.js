@@ -29,17 +29,17 @@ async function pfRefreshTodayState({ force = false, render = true } = {}) {
     ]);
     let updated = false;
     if (snapshotResult.status === 'fulfilled' && snapshotResult.value.ok) {
-      pfPrevDaySnapshot = await snapshotResult.value.json();
+      PfStore.snapshots.prevDay = await snapshotResult.value.json();
       updated = true;
     }
     if (intradayResult.status === 'fulfilled' && intradayResult.value.ok) {
-      pfIntradayData = await intradayResult.value.json();
+      PfStore.snapshots.intraday = await intradayResult.value.json();
       updated = true;
     }
     if (updated && render) renderPortfolio();
     return { updated };
   })().catch(e => {
-    console.warn(e);
+    reportApiError(e, '오늘 수익 데이터', { silent: true });
     return { updated: false };
   }).finally(() => {
     _pfTodayStatePromise = null;
@@ -48,10 +48,10 @@ async function pfRefreshTodayState({ force = false, render = true } = {}) {
 }
 
 async function loadPortfolio({ force = false } = {}) {
-  if (portfolioLoading) return;
-  const loadOrderRevision = pfManualOrderRevision;
-  const preservePendingManualOrder = !!pfPendingManualOrderCodes;
-  portfolioLoading = true;
+  if (PfStore.loading) return;
+  const loadOrderRevision = PfStore.manualOrder.revision;
+  const preservePendingManualOrder = !!PfStore.manualOrder.pendingCodes;
+  PfStore.loading = true;
   try {
     _restorePortfolioSnapshotForFastPaint();
     const resp = await apiFetch('/api/portfolio');
@@ -68,7 +68,7 @@ async function loadPortfolio({ force = false } = {}) {
     // Load groups (fast), restore cached benchmark names from localStorage
     try {
       const gResp = await apiFetch('/api/portfolio/groups');
-      if (gResp.ok) pfGroups = await gResp.json();
+      if (gResp.ok) PfStore.groups = await gResp.json();
     } catch (e) { console.warn(e); }
     // Restore benchmark names from localStorage cache for instant display
     try {
@@ -84,20 +84,20 @@ async function loadPortfolio({ force = false } = {}) {
     apiFetch('/api/portfolio/month-end-value').then(async r => {
       if (!r.ok) return;
       const snap = await r.json();
-      pfMonthEndSnap = snap && snap.total_value ? snap : null;
-      pfMonthEndStockValues = snap.stock_values || {};
+      PfStore.snapshots.monthEnd = snap && snap.total_value ? snap : null;
+      PfStore.snapshots.monthEndStockValues = snap.stock_values || {};
       renderPortfolio();
-    }).catch(() => {});
+    }).catch(e => reportApiError(e, '월말 평가액', { silent: true }));
     apiFetch('/api/portfolio/year-start-value').then(async r => {
       if (!r.ok) return;
       const snap = await r.json();
-      pfYearStartSnap = snap && snap.total_value ? snap : null;
-      pfYearStartStockValues = (snap && snap.stock_values) || {};
+      PfStore.snapshots.yearStart = snap && snap.total_value ? snap : null;
+      PfStore.snapshots.yearStartStockValues = (snap && snap.stock_values) || {};
       renderPortfolio();
-    }).catch(() => {});
+    }).catch(e => reportApiError(e, '연초 평가액', { silent: true }));
     pfLoadNavHistory({ force: true }).then(() => {
       renderPortfolio();
-    }).catch(() => {});
+    }).catch(e => reportApiError(e, 'NAV 히스토리', { silent: true }));
     apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
       if (!r.ok) return;
       const fresh = await r.json();
@@ -107,7 +107,7 @@ async function loadPortfolio({ force = false } = {}) {
       for (const [k, v] of Object.entries(PfStore.benchmarkQuotes)) { if (v.name) names[k] = v.name; }
       try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch (e) { console.warn(e); }
       renderPortfolio();
-    }).catch(() => {});
+    }).catch(e => reportApiError(e, '벤치마크 시세', { silent: true }));
     // Preserve existing quotes from previous load
     const prevQuotes = {};
     PfStore.items.forEach(i => { if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote; });
@@ -120,8 +120,8 @@ async function loadPortfolio({ force = false } = {}) {
       }
       return item;
     });
-    if (pfPendingManualOrderCodes && (preservePendingManualOrder || pfManualOrderRevision > loadOrderRevision)) {
-      nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);
+    if (PfStore.manualOrder.pendingCodes && (preservePendingManualOrder || PfStore.manualOrder.revision > loadOrderRevision)) {
+      nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, PfStore.manualOrder.pendingCodes);
     }
     PfStore.items = nextPortfolioItems;
     await todayStatePromise;
@@ -129,7 +129,7 @@ async function loadPortfolio({ force = false } = {}) {
     renderPortfolio();
     _updateQuoteSubscriptions();
   } catch (e) { console.warn(e); } finally {
-    portfolioLoading = false;
+    PfStore.loading = false;
   }
 }
 
@@ -178,19 +178,19 @@ function pfSort(key) {
   // 이전 구현은 첫 클릭 후 desc → none 을 반복하며 asc 단계로 아예
   // 넘어가지 않는 버그가 있었다.
   if (key === 'group') {
-    pfGroupSort = !pfGroupSort;
-  } else if (pfSortKey === key) {
-    if (!pfSortAsc) {
+    PfStore.sort.groupSort = !PfStore.sort.groupSort;
+  } else if (PfStore.sort.key === key) {
+    if (!PfStore.sort.asc) {
       // 현재 내림차순 → 올림차순
-      pfSortAsc = true;
+      PfStore.sort.asc = true;
     } else {
       // 현재 올림차순 → 해제
-      pfSortKey = null;
-      pfSortAsc = true;
+      PfStore.sort.key = null;
+      PfStore.sort.asc = true;
     }
   } else {
-    pfSortKey = key;
-    pfSortAsc = false;   // 첫 클릭은 내림차순 (이름 포함 통일)
+    PfStore.sort.key = key;
+    PfStore.sort.asc = false;   // 첫 클릭은 내림차순 (이름 포함 통일)
   }
   renderPortfolio();
 }
@@ -207,7 +207,7 @@ function pfNormalizeSearchText(value) {
   return String(value || '').trim().toLowerCase().replace(/^#/, '');
 }
 
-function pfRowMatchesSearch(item, query = pfPortfolioSearchText) {
+function pfRowMatchesSearch(item, query = PfStore.filters.searchText) {
   const text = pfNormalizeSearchText(query);
   if (!text) return true;
   const tokens = text.split(/[\s,]+/).map(t => t.trim()).filter(Boolean);
@@ -222,7 +222,7 @@ function pfRowMatchesSearch(item, query = pfPortfolioSearchText) {
 }
 
 function pfSetPortfolioSearchText(value) {
-  pfPortfolioSearchText = String(value || '').trim();
+  PfStore.filters.searchText = String(value || '').trim();
   renderPortfolio();
 }
 
@@ -239,14 +239,14 @@ function _renderPortfolioRowTags(tags) {
 }
 
 function pfToggleGroupFilter(groupName) {
-  if (pfGroupFilter === null) {
-    pfGroupFilter = new Set([groupName]);
-  } else if (pfGroupFilter.has(groupName)) {
-    pfGroupFilter.delete(groupName);
-    if (pfGroupFilter.size === 0) pfGroupFilter = null;
+  if (PfStore.filters.group === null) {
+    PfStore.filters.group = new Set([groupName]);
+  } else if (PfStore.filters.group.has(groupName)) {
+    PfStore.filters.group.delete(groupName);
+    if (PfStore.filters.group.size === 0) PfStore.filters.group = null;
   } else {
-    pfGroupFilter.add(groupName);
-    if (pfGroups.length && pfGroupFilter.size === pfGroups.length) pfGroupFilter = null;
+    PfStore.filters.group.add(groupName);
+    if (PfStore.groups.length && PfStore.filters.group.size === PfStore.groups.length) PfStore.filters.group = null;
   }
   renderPortfolio();
 }

@@ -4,7 +4,9 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-import cache
+import cache  # init_db/close_db(스키마·연결 수명)는 아직 cache 소유
+from repositories import portfolio as portfolio_repo
+from repositories import snapshots as snapshots_repo
 from services.portfolio import runtime_quotes as portfolio_quotes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -35,10 +37,10 @@ def _quote_price(quote: dict | None) -> float | None:
 
 async def _fetch_total_value(google_sub: str, snap_date: str | None = None) -> float:
     snap_date = snap_date or _today_kst()
-    items = await cache.get_portfolio(google_sub)
+    items = await portfolio_repo.get_portfolio(google_sub)
     prev_stock_values = {
         row["stock_code"]: float(row["market_value"])
-        for row in await cache.get_stock_snapshots_by_date(google_sub, snap_date)
+        for row in await snapshots_repo.get_stock_snapshots_by_date(google_sub, snap_date)
         if row.get("stock_code") and row.get("market_value") is not None
     }
     total = 0.0
@@ -79,9 +81,9 @@ async def _fetch_total_value(google_sub: str, snap_date: str | None = None) -> f
 async def run(manage_db: bool = True):
     if manage_db:
         await cache.init_db()
-    await cache.delete_old_intraday(days_to_keep=7)
+    await snapshots_repo.delete_old_intraday(days_to_keep=7)
     ts = datetime.now(KST).strftime("%Y-%m-%dT%H:%M")
-    users = await cache.get_all_users_with_portfolio()
+    users = await snapshots_repo.get_all_users_with_portfolio()
     logger.info("Intraday snapshot for %d users at %s", len(users), ts)
     ok = 0
     failed: list[str] = []
@@ -89,7 +91,7 @@ async def run(manage_db: bool = True):
         try:
             total_value = await _fetch_total_value(google_sub)
             if total_value > 0:
-                await cache.save_intraday_snapshot(google_sub, ts, total_value)
+                await snapshots_repo.save_intraday_snapshot(google_sub, ts, total_value)
                 logger.info("  %s: %.0f", google_sub[:8], total_value)
                 ok += 1
         except Exception as e:
