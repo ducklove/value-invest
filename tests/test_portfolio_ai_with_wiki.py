@@ -1,15 +1,13 @@
 """Verify portfolio AI prompt includes/excludes wiki snippets correctly
 and doesn't explode when wiki is empty."""
 import json
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from starlette.requests import Request
 
 import cache
+from _harness import TempDbMixin
 from repositories import wiki as wiki_repo
-import repositories.db
 from routes import portfolio as pf
 
 
@@ -54,14 +52,8 @@ async def _consume_stream(response) -> tuple[str, list[dict]]:
     return "".join(contents), dones
 
 
-class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class PortfolioAIWikiTests(TempDbMixin):
+    async def seed(self):
         db = await cache.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -79,9 +71,7 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         pf._OPENROUTER_KEY = self._orig_key
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
+        await super().asyncTearDown()
 
     async def _run_and_capture_prompt(self):
         """Invoke ai_portfolio_analysis with an HTTP mock that records the

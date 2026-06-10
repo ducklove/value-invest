@@ -11,10 +11,8 @@
 
 from __future__ import annotations
 
-import tempfile
 import unittest
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -22,7 +20,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-import repositories.db
+from _harness import TempDbMixin
 from repositories import app_settings as app_settings_repo
 from repositories import snapshots as snapshots_repo
 from repositories import system_events as system_events_repo
@@ -51,20 +49,7 @@ def _request(path: str = "/", headers: dict[str, str] | None = None, client_host
     return Request(scope)
 
 
-class DailyBriefingHarness(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self) -> None:
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
-
+class DailyBriefingHarness(TempDbMixin):
     async def _seed_user(self, sub: str = "u1") -> None:
         db = await cache.get_db()
         await db.execute(

@@ -1,9 +1,7 @@
 import io
 import json
-import tempfile
 import unittest
 import zipfile
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -11,7 +9,7 @@ from fastapi import HTTPException
 
 import cache
 
-import repositories.db
+from _harness import TempDbMixin
 from repositories import dart_review as dart_review_repo
 from repositories import wiki as wiki_repo
 import dart_report_review
@@ -225,19 +223,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["review"]["cached"])
 
 
-class DartReportReviewCacheTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
-
+class DartReportReviewCacheTests(TempDbMixin):
     async def test_save_and_get_dart_report_review_roundtrips_json(self):
         saved = await dart_review_repo.save_dart_report_review({
             "stock_code": "005930",

@@ -9,15 +9,13 @@ services.stock_quotes.get_quote_snapshot 를 AsyncMock 으로 패치 — 실제
 
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 
 import cache
-import repositories.db
+from _harness import TempDbMixin
 from core.app_factory import create_app
 from core.config import AppSettings, PROJECT_ROOT
 from repositories import journal as journal_repo
@@ -69,21 +67,10 @@ def _quote_mock(price):
     return AsyncMock(return_value={"code": "X", "price": price, "previous_close": price})
 
 
-class TempDbHarness(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class TempDbHarness(TempDbMixin):
+    async def seed(self) -> None:
         await _seed_user("u1")
         await _seed_user("u2")
-
-    async def asyncTearDown(self) -> None:
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
 
 
 # --- 저장소 CRUD -------------------------------------------------------------

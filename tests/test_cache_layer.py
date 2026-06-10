@@ -1,11 +1,8 @@
-import tempfile
 import time
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 
 import cache
-import repositories.db
+from _harness import TempDbMixin
 from cache_layer import MemoryTTLCache
 
 
@@ -42,20 +39,7 @@ class MemoryTTLCacheTests(unittest.TestCase):
         self.assertTrue(stale.stale)
 
 
-class PersistentCacheValueTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
-
+class PersistentCacheValueTests(TempDbMixin):
     async def test_persistent_cache_uses_single_entry_shape(self):
         await cache.set_cache_value("test.persistent", "alpha", {"value": 1})
 

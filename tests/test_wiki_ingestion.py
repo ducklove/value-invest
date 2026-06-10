@@ -3,15 +3,14 @@
 Uses the same isolated-DB fixture pattern as test_portfolio.py. All LLM
 and HTTP calls are monkeypatched — no network."""
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import cache
+from _harness import TempDbMixin
 from repositories import system_events as system_events_repo
 from repositories import wiki as wiki_repo
-import repositories.db
 import wiki_ingestion
 
 
@@ -45,25 +44,18 @@ class PerStockLimitEnvTests(unittest.TestCase):
 SAMPLE_PDF_BYTES = b"%PDF-1.4\n%stub\n1 0 obj <<>> endobj\n%%EOF\n"
 
 
-class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
+class WikiIngestionTests(TempDbMixin):
     async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
+        await super().asyncSetUp()
         # Redirect the PDF cache dir to a temp location so tests don't
         # write into the repo.
-        self.pdf_dir = Path(self.temp_dir.name) / "pdf_cache"
+        self.pdf_dir = Path(self.tmp.name) / "pdf_cache"
         self.pdf_dir_patch = patch.object(wiki_ingestion, "PDF_CACHE_DIR", self.pdf_dir)
         self.pdf_dir_patch.start()
-        await cache.close_db()
-        await cache.init_db()
 
     async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
         self.pdf_dir_patch.stop()
-        self.temp_dir.cleanup()
+        await super().asyncTearDown()
 
     # -- low-level helpers --
 
@@ -456,23 +448,11 @@ class WikiIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_count["n"], 0)
 
 
-class SkipReasonAggregationTests(unittest.IsolatedAsyncioTestCase):
+class SkipReasonAggregationTests(TempDbMixin):
     """Verify the per-reason breakdown survives from ingest_pdf_for_report
     all the way up through ingest_stock, run_pipeline, and into the
     background-loop's tick event. The LG화학 bug was hidden precisely
     because this chain used to lose the "why" and only kept the "how many"."""
-
-    async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.temp_dir.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
 
     async def test_ingest_stock_aggregates_skipped_by_reason(self):
         # Simulate three reports with three distinct fates by patching

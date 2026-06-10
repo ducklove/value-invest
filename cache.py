@@ -1078,26 +1078,3 @@ async def get_report_list(stock_code: str, ttl_minutes: int | None = None) -> di
         "expires_at": entry.expires_at,
         "stale": entry.stale,
     }
-
-
-# ---------------------------------------------------------------------------
-# Residual compat re-exports — Phase 1 leftovers. Kept ONLY because
-# tests/test_foreign_dividends.py and tests/test_preferred_dividends.py still
-# call these as ``cache.<fn>`` and those files are frozen while the
-# dividend-calendar work is in flight. Every other consumer imports
-# repositories/* directly; delete this block when those two tests are
-# migrated.
-# ---------------------------------------------------------------------------
-from repositories.foreign_dividends import (  # noqa: E402,F401
-    upsert_foreign_dividends_auto,
-    upsert_foreign_dividend_manual,
-    delete_foreign_dividend,
-    list_foreign_dividends,
-    get_foreign_dividends_count,
-    get_foreign_dividend,
-)
-from repositories.portfolio import (  # noqa: E402,F401
-    get_trailing_dividends,
-    upsert_preferred_dividends,
-    get_preferred_dividends_count,
-)

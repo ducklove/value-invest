@@ -8,33 +8,18 @@ touches yfinance via `backfill_benchmark` the first time a code is seen
 
 These tests pin that behavior without going to the network.
 """
-import tempfile
 import unittest
 from datetime import date, timedelta
-from pathlib import Path
 from unittest.mock import patch
 
 import benchmark_history
-import cache
+from _harness import TempDbMixin
 from repositories import benchmark_daily as benchmark_repo
-import repositories.db
 from routes import portfolio as pf
 
 
-class BenchmarkCacheTests(unittest.IsolatedAsyncioTestCase):
+class BenchmarkCacheTests(TempDbMixin):
     """Pure cache.py helpers — no yfinance, no route."""
-
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
 
     async def test_save_and_read_rows(self):
         rows = [
@@ -100,20 +85,8 @@ class BenchmarkCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["date"], "2026-04-11")
 
 
-class BackfillTests(unittest.IsolatedAsyncioTestCase):
+class BackfillTests(TempDbMixin):
     """backfill_benchmark — lazy full-history pull."""
-
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
 
     async def test_rejects_unknown_code(self):
         n = await benchmark_history.backfill_benchmark("UNKNOWN", "2026-01-01")
@@ -188,20 +161,8 @@ class BackfillTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(actual_start, ten_years_ago)
 
 
-class UpdateTodayTests(unittest.IsolatedAsyncioTestCase):
+class UpdateTodayTests(TempDbMixin):
     """update_benchmark_today — nightly incremental from snapshot_nav."""
-
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
 
     async def test_starts_day_after_last_stored(self):
         await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": "2026-04-10", "close": 2700.0}])
@@ -259,20 +220,8 @@ class UpdateTodayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(written.keys()), set(benchmark_history.YF_TICKER.keys()))
 
 
-class RouteTests(unittest.IsolatedAsyncioTestCase):
+class RouteTests(TempDbMixin):
     """get_benchmark_history endpoint — DB-first behavior."""
-
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
 
     async def test_rejects_unknown_code(self):
         from fastapi import HTTPException

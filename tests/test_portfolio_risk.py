@@ -5,17 +5,15 @@
 바뀌면 여기 기대값도 의도적으로 함께 바꿔야 한다.
 """
 
-import tempfile
 import unittest
 from datetime import date, timedelta
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-import repositories.db
+from _harness import TempDbMixin, seed_user
 from repositories import benchmark_daily as benchmark_daily_repo
 from routes import portfolio_risk as portfolio_risk_route
 from services.portfolio import risk
@@ -182,21 +180,12 @@ def _request(path: str = "/api/portfolio/risk") -> Request:
     return Request(scope)
 
 
-class PortfolioRiskRouteTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db_patch = patch.object(repositories.db, "DB_PATH", Path(self.tmp.name) / "cache.db")
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class PortfolioRiskRouteTests(TempDbMixin):
+    async def seed(self):
         portfolio_risk_route._risk_cache.clear()
 
+        await seed_user()
         db = await cache.get_db()
-        await db.execute(
-            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("u1", "user@example.com", "User", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
-        )
-        await db.commit()
 
         # 오늘(KST) 기준 과거 100일치 일별 스냅샷 — 포트폴리오 수익률은
         # +2% / -1% 교대, 벤치마크는 정확히 그 절반 → beta=2, corr=1.
@@ -219,9 +208,7 @@ class PortfolioRiskRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         portfolio_risk_route._risk_cache.clear()
-        await cache.close_db()
-        self.db_patch.stop()
-        self.tmp.cleanup()
+        await super().asyncTearDown()
 
     async def test_risk_endpoint_payload_contract(self):
         user = {"google_sub": "u1", "email": "user@example.com"}

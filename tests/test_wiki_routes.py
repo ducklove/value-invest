@@ -1,32 +1,17 @@
 """Tests for /api/analysis/{code}/wiki and .../ask routes."""
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from _harness import TempDbMixin, seed_corp_codes, seed_user
 from repositories import wiki as wiki_repo
-import repositories.db
 from routes import wiki as wiki_route
 
 
-class WikiListRouteTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
-
+class WikiListRouteTests(TempDbMixin):
     async def _seed(self, stock_code: str, n: int = 3):
         for i in range(n):
             await wiki_repo.save_wiki_entry({
@@ -101,26 +86,10 @@ def _mk_request() -> Request:
     return Request(scope)
 
 
-class WikiAskRouteTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+class WikiAskRouteTests(TempDbMixin):
+    async def seed(self):
         # Seed a user; Q&A gate needs authenticated.
-        db = await cache.get_db()
-        await db.execute(
-            "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("u1", "u1@e.com", "U", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
-        )
-        await db.commit()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
+        await seed_user("u1", "u1@e.com", "U")
 
     async def test_ask_requires_login(self):
         with patch("routes.wiki.get_current_user", new=AsyncMock(return_value=None)):
@@ -230,21 +199,12 @@ class WikiAskRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(wiki_route._extract_final_content(data), "hello world")
 
 
-class ShortcutTests(unittest.IsolatedAsyncioTestCase):
+class ShortcutTests(TempDbMixin):
     """Exercise Tier-0 rule-based shortcuts directly — no HTTP stack."""
 
-    async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "cache.db"
-        self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
-        self.db_patch.start()
-        await cache.close_db()
-        await cache.init_db()
+    async def seed(self):
+        await seed_corp_codes([("005930", "00126380", "삼성전자", "2026-01-01")])
         db = await cache.get_db()
-        await db.execute(
-            "INSERT INTO corp_codes (stock_code, corp_code, corp_name, updated_at) VALUES (?, ?, ?, ?)",
-            ("005930", "00126380", "삼성전자", "2026-01-01"),
-        )
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, per, pbr, eps, bps,
                 dividend_per_share, dividend_yield, market_cap)
@@ -252,11 +212,6 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
             ("005930", 2025, 75000, 13.5, 1.25, 5500, 60000, 361.0, 0.48, 460_000_000_000_000),
         )
         await db.commit()
-
-    async def asyncTearDown(self):
-        await cache.close_db()
-        self.db_patch.stop()
-        self.temp_dir.cleanup()
 
     async def test_shortcut_per_question(self):
         # _fetch_quote returns empty dict via mock so shortcut relies on
