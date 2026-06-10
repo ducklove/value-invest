@@ -233,6 +233,9 @@ def test_admin_split_files_keep_feature_homes():
     assert "function _renderEventsSection(" in observability
     assert "function _renderHttpMetricsSection(" in observability
     assert "function _renderSubsystemSummary(" in observability
+    # 데이터 품질 카드: event-summary 의 data_quality(check_summary) 한 행으로 렌더.
+    assert "function _renderDataQualitySection(" in observability
+    assert "_renderDataQualitySection(summary.data_quality)" in observability
     assert "async function triggerJob(" in observability
     assert "async function runWikiDiag()" in observability
     # 연결 프로젝트 config + 우선주/해외 배당 관리.

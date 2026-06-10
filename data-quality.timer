@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily data-quality checks at 22:30 KST
+
+[Timer]
+# 22:00 NAV 스냅샷(+벤치마크 증분)이 끝난 직후가 '오늘 데이터가 다
+# 정착했어야 하는' 시점 — 22:30 에 하루 한 번 점검한다. Persistent 로
+# 꺼져 있던 날도 부팅 후 따라잡는다. 시스템 시계는 KST.
+OnCalendar=*-*-* 22:30:00
+Persistent=true
+RandomizedDelaySec=2m
+
+[Install]
+WantedBy=timers.target

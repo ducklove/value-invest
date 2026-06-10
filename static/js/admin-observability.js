@@ -467,6 +467,70 @@ function _renderSubsystemSummary(summary) {
       <h3>서브시스템 상태 <span class="admin-sub">최근 24시간</span></h3>
       <div class="admin-cards">${tiles}</div>
     </div>
+    ${_renderDataQualitySection(summary.data_quality)}
+  `;
+}
+
+// --- 데이터 품질 점검 -----------------------------------------------------
+//
+// data-quality.timer 가 매일 22:30(KST) 돌리는 정기 점검의 최신 결과.
+// /api/admin/event-summary 가 내려주는 check_summary 이벤트 하나
+// (source='data_quality') 의 details(counts + results)로 전체를 그린다.
+// 비정상(warn/error) 점검만 표로 노출 — 전부 정상이면 카운트 한 줄.
+
+const _DQ_CHECK_LABELS = {
+  nav_snapshot_freshness: 'NAV 스냅샷 신선도',
+  intraday_points: '장중 스냅샷 (금일)',
+  system_events_error_rate: '시스템 이벤트 에러율 (24h)',
+};
+
+function _dqCheckLabel(check) {
+  if (_DQ_CHECK_LABELS[check]) return _DQ_CHECK_LABELS[check];
+  if (check && check.indexOf('benchmark_freshness_') === 0) {
+    return `벤치마크 신선도 (${check.slice('benchmark_freshness_'.length)})`;
+  }
+  return check || '(unknown)';
+}
+
+function _renderDataQualitySection(dq) {
+  if (!dq) {
+    return `
+      <div class="admin-section">
+        <h3>데이터 품질 <span class="admin-sub">매일 22:30 자동 점검</span></h3>
+        <div class="admin-sub" style="padding:8px 0;">아직 점검 기록이 없습니다 — data-quality.timer 첫 실행 후 표시됩니다.</div>
+      </div>
+    `;
+  }
+  const d = dq.details_obj || {};
+  const counts = d.counts || {};
+  const results = Array.isArray(d.results) ? d.results : [];
+  const failing = results.filter(r => r && r.status !== 'ok');
+  const err = counts.error || 0;
+  const warn = counts.warn || 0;
+  const okCount = counts.ok || 0;
+  const headCls = err > 0 ? 'admin-status-fail' : warn > 0 ? 'admin-status-run' : 'admin-status-ok';
+  const headIcon = err > 0 ? '✗' : warn > 0 ? '⚠' : '✓';
+  const failRows = failing.map(r => {
+    const cls = r.status === 'error' ? 'admin-status-fail' : 'admin-status-run';
+    const icon = r.status === 'error' ? '✗' : '⚠';
+    return `
+      <tr>
+        <td>${_esc(_dqCheckLabel(r.check))}<div class="admin-sub"><code>${_esc(r.check)}</code></div></td>
+        <td class="${cls}">${icon} ${_esc(r.status)}</td>
+        <td>${_esc(r.detail || '')}</td>
+        <td style="text-align:right;">${r.value != null ? _esc(String(r.value)) : '-'}</td>
+      </tr>`;
+  }).join('');
+  return `
+    <div class="admin-section">
+      <h3>데이터 품질 <span class="admin-sub">최근 점검 ${_fmtRelTime(dq.ts)} · 매일 22:30 자동</span></h3>
+      <div class="admin-card-value ${headCls}" style="margin-bottom:8px;">${headIcon} 정상 ${okCount} · 주의 ${warn} · 오류 ${err}</div>
+      ${failing.length ? `
+      <table class="admin-table admin-table-compact">
+        <thead><tr><th>점검</th><th>상태</th><th>상세</th><th style="text-align:right;">값</th></tr></thead>
+        <tbody>${failRows}</tbody>
+      </table>` : '<div class="admin-sub">모든 점검 통과 — 비정상 항목 없음</div>'}
+    </div>
   `;
 }
 

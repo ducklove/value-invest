@@ -762,7 +762,12 @@ async def event_summary(request: Request, hours: float = 24):
     for src in known_sources:
         row = await cache.get_latest_event(src)
         latest[src] = _parse_event_row(row) if row else None
-    return {"hours": hours, "by_source": summary, "latest": latest}
+    # 데이터 품질 점검(data-quality.timer)의 최신 요약 이벤트 — details 에
+    # 전체 결과(counts + results)가 통째로 들어 있어, 패널은 이 한 행만으로
+    # '최근 점검 + 실패 항목'을 그릴 수 있다.
+    dq_row = await cache.get_latest_event("data_quality", "check_summary")
+    data_quality = _parse_event_row(dq_row) if dq_row else None
+    return {"hours": hours, "by_source": summary, "latest": latest, "data_quality": data_quality}
 
 
 @router.get("/http-metrics")

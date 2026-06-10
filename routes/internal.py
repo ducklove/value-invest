@@ -120,6 +120,24 @@ async def run_calendar_notifications_evaluate(request: Request):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/data-quality/check")
+async def run_data_quality_check(request: Request):
+    """데이터 품질 정기 점검 한 사이클 실행. Loopback-only.
+
+    data-quality.timer (매일 22:30 KST — 22:00 NAV 스냅샷/벤치마크 증분이
+    끝난 뒤) 가 구동한다. 점검 결과는 system_events(source='data_quality')
+    에 기록되고 관리자 패널 '데이터 품질' 카드가 이를 읽는다.
+    """
+    _require_loopback(request)
+    from services import data_quality
+    try:
+        result = await data_quality.run_all_checks()
+        return {"ok": True, **result}
+    except Exception as exc:
+        logger.exception("data quality check failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/wiki/ingest")
 async def run_wiki_ingest(request: Request, payload: dict = Body(default={})):
     """Drive the wiki ingestion pipeline. Loopback-only.
