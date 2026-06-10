@@ -17,6 +17,7 @@ from starlette.requests import Request
 
 import cache
 import repositories.db
+from repositories import system_events as system_events_repo
 import observability
 from routes import admin as admin_route
 
@@ -193,8 +194,8 @@ class RecordEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2026", rows[0]["details"])
 
     async def test_record_event_never_raises_on_db_failure(self):
-        # Patch cache.insert_system_event to explode; observability must swallow.
-        with patch.object(cache, "insert_system_event", AsyncMock(side_effect=RuntimeError("boom"))):
+        # Patch system_events 저장소의 insert_system_event to explode; observability must swallow.
+        with patch.object(system_events_repo, "insert_system_event", AsyncMock(side_effect=RuntimeError("boom"))):
             # Must not raise.
             await observability.record_event("X", "test", wait=True)
 

@@ -19,13 +19,13 @@ def test_snapshot_intraday_does_not_import_portfolio_route_private_helpers():
 async def test_fetch_total_value_uses_prior_stock_snapshot_for_non_korean_quote_missing():
     fetch_quote = AsyncMock(return_value={})
     with patch.object(
-        snapshot_intraday.cache,
+        snapshot_intraday.portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[
             {"stock_code": "AAPL", "quantity": 2, "avg_price": 1000},
         ]),
     ), patch.object(
-        snapshot_intraday.cache,
+        snapshot_intraday.snapshots_repo,
         "get_stock_snapshots_by_date",
         new=AsyncMock(return_value=[
             {"stock_code": "AAPL", "market_value": 1234},
@@ -49,13 +49,13 @@ async def test_fetch_total_value_uses_prior_stock_snapshot_for_non_korean_quote_
 async def test_fetch_total_value_refuses_korean_stock_snapshot_fallback_when_quote_missing():
     fetch_quote = AsyncMock(return_value={})
     with patch.object(
-        snapshot_intraday.cache,
+        snapshot_intraday.portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[
             {"stock_code": "005930", "quantity": 2, "avg_price": 1000},
         ]),
     ), patch.object(
-        snapshot_intraday.cache,
+        snapshot_intraday.snapshots_repo,
         "get_stock_snapshots_by_date",
         new=AsyncMock(return_value=[
             {"stock_code": "005930", "market_value": 1234},
@@ -82,13 +82,13 @@ async def test_fetch_total_value_refuses_korean_stock_snapshot_fallback_when_quo
 @pytest.mark.asyncio
 async def test_fetch_total_value_ignores_stale_quote_when_snapshot_fallback_exists():
     with patch.object(
-        snapshot_intraday.cache,
+        snapshot_intraday.portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[
             {"stock_code": "CASH_USD", "quantity": 10, "avg_price": 1400},
         ]),
     ), patch.object(
-        snapshot_intraday.cache,
+        snapshot_intraday.snapshots_repo,
         "get_stock_snapshots_by_date",
         new=AsyncMock(return_value=[
             {"stock_code": "CASH_USD", "market_value": 15190},
@@ -110,13 +110,13 @@ async def test_fetch_total_value_ignores_stale_quote_when_snapshot_fallback_exis
 @pytest.mark.asyncio
 async def test_fetch_total_value_refuses_avg_price_fallback_without_snapshot():
     with patch.object(
-        snapshot_intraday.cache,
+        snapshot_intraday.portfolio_repo,
         "get_portfolio",
         new=AsyncMock(return_value=[
             {"stock_code": "005930", "quantity": 2, "avg_price": 1000},
         ]),
     ), patch.object(
-        snapshot_intraday.cache,
+        snapshot_intraday.snapshots_repo,
         "get_stock_snapshots_by_date",
         new=AsyncMock(return_value=[]),
     ), patch.object(

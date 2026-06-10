@@ -18,7 +18,10 @@ import httpx
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 import ai_config
-import cache
+import cache  # corp-code 헬퍼(get_corp_code/get_corp_name)는 아직 cache 소유
+from repositories import dart_review as dart_review_repo
+from repositories import financial as financial_repo
+from repositories import wiki as wiki_repo
 from cache_layer import MemoryTTLCache
 import dart_client
 import observability
@@ -253,8 +256,8 @@ def _focus_snippets(text: str, *, limit: int) -> str:
 
 
 async def _financial_context(stock_code: str) -> str:
-    fin_rows = await cache.get_financial_data(stock_code)
-    mkt_rows = await cache.get_market_data(stock_code)
+    fin_rows = await financial_repo.get_financial_data(stock_code)
+    mkt_rows = await financial_repo.get_market_data(stock_code)
     if not fin_rows and not mkt_rows:
         return ""
 
@@ -544,7 +547,7 @@ async def latest_review_status(stock_code: str) -> dict[str, Any]:
             "review": None,
         }
     latest = filings[0]
-    cached = await cache.get_dart_report_review(stock_code, latest["rcept_no"])
+    cached = await dart_review_repo.get_dart_report_review(stock_code, latest["rcept_no"])
     if cached and not _cached_review_is_broken(cached):
         cached["cached"] = True
         return {
@@ -560,7 +563,7 @@ async def latest_review_status(stock_code: str) -> dict[str, Any]:
     # A poisoned (truncated-JSON) cache entry would otherwise be served as
     # "ready" forever and skipped by the background pipeline. Fall through to
     # "missing" so the UI shows the waiting state and the entry gets regenerated.
-    stale = await cache.get_dart_report_review(stock_code)
+    stale = await dart_review_repo.get_dart_report_review(stock_code)
     if _cached_review_is_broken(stale):
         stale = None
     return {
@@ -586,7 +589,7 @@ async def generate_review(stock_code: str, *, google_sub: str | None, force: boo
         raise DartReportReviewError("최근 DART 정기보고서를 찾지 못했습니다.")
     primary = filings[0]
     if not force:
-        cached = await cache.get_dart_report_review(stock_code, primary["rcept_no"])
+        cached = await dart_review_repo.get_dart_report_review(stock_code, primary["rcept_no"])
         if cached:
             cached["cached"] = True
             return cached
@@ -652,7 +655,7 @@ async def generate_review(stock_code: str, *, google_sub: str | None, force: boo
         "cost_usd": usage["cost_usd"],
         "created_at": datetime.now().isoformat(),
     }
-    saved = await cache.save_dart_report_review(review)
+    saved = await dart_review_repo.save_dart_report_review(review)
     saved["cached"] = False
     return saved
 
@@ -746,7 +749,7 @@ async def run_pipeline(
 
     async with _pipeline_lock:
         if stock_codes is None:
-            stock_codes = await cache.select_wiki_target_stocks()
+            stock_codes = await wiki_repo.select_wiki_target_stocks()
         codes = [str(code).strip() for code in stock_codes if str(code or "").strip()]
         codes = list(dict.fromkeys(codes))
         try:

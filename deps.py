@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from fastapi import Request, Response
 
 import auth_service
-import cache
+from repositories import users as users_repo
 from services import stock_quotes
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ async def get_current_user(request: Request) -> dict | None:
         token_hash = auth_service.hash_session_token(session_token)
     except RuntimeError:
         return None
-    return await cache.get_user_by_session(token_hash)
+    return await users_repo.get_user_by_session(token_hash)
 
 
 def set_session_cookie(response: Response, request: Request, session_token: str):

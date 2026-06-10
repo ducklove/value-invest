@@ -30,7 +30,8 @@ from pathlib import Path
 import httpx
 
 import ai_config
-import cache
+import cache  # corp-code/리포트목록 캐시(get_corp_name/get_report_list)는 아직 cache 소유
+from repositories import wiki as wiki_repo
 import observability
 import report_client
 from services import ai_client
@@ -275,7 +276,7 @@ async def ingest_pdf_for_report(
     except Exception as exc:
         # Record the failure so we don't keep retrying every run.
         tmp_sha = hashlib.sha1(pdf_url.encode()).hexdigest()
-        await cache.save_pdf_cache_row({
+        await wiki_repo.save_pdf_cache_row({
             "pdf_sha1": tmp_sha,
             "stock_code": stock_code,
             "pdf_url": pdf_url,
@@ -293,7 +294,7 @@ async def ingest_pdf_for_report(
     pdf_sha1 = _sha1_hex(pdf_bytes)
 
     # Step 2: already summarized for this stock? Skip LLM call.
-    if await cache.pdf_is_already_summarized(stock_code, pdf_sha1):
+    if await wiki_repo.pdf_is_already_summarized(stock_code, pdf_sha1):
         return {"skipped": "already_summarized", "pdf_sha1": pdf_sha1}
 
     # Persist the PDF bytes (cheap insurance for later re-parse / audit).
@@ -318,7 +319,7 @@ async def ingest_pdf_for_report(
         stored_path = str(file_path.relative_to(APP_DIR))
     except ValueError:
         stored_path = str(file_path)
-    await cache.save_pdf_cache_row({
+    await wiki_repo.save_pdf_cache_row({
         "pdf_sha1": pdf_sha1,
         "stock_code": stock_code,
         "pdf_url": pdf_url,
@@ -342,7 +343,7 @@ async def ingest_pdf_for_report(
         return {"failed": "summarize", "pdf_sha1": pdf_sha1, "error": str(exc)[:300]}
 
     # Step 5: persist wiki entry
-    await cache.save_wiki_entry({
+    await wiki_repo.save_wiki_entry({
         "stock_code": stock_code,
         "source_type": "broker_report",
         "source_ref": pdf_sha1,
@@ -533,10 +534,10 @@ async def run_pipeline(
 ) -> dict:
     """Top-level: iterate target stocks and ingest.
 
-    If `stock_codes` is None, uses cache.select_wiki_target_stocks() —
+    If `stock_codes` is None, uses wiki_repo.select_wiki_target_stocks() —
     portfolio + starred + recently-viewed."""
     if stock_codes is None:
-        stock_codes = await cache.select_wiki_target_stocks()
+        stock_codes = await wiki_repo.select_wiki_target_stocks()
     stock_codes = list(dict.fromkeys(stock_codes))  # dedupe, preserve order
 
     overall = {

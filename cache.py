@@ -1072,9 +1072,7 @@ from repositories.dart_review import (  # noqa: E402
     save_dart_report_review,
 )
 from repositories.wiki import (  # noqa: E402
-    get_pdf_cache_by_sha1,
     save_pdf_cache_row,
-    pdf_is_already_summarized,
     save_wiki_entry,
     get_wiki_entries,
     search_wiki,
@@ -1094,10 +1092,8 @@ from repositories.foreign_dividends import (  # noqa: E402
 from repositories.portfolio import (  # noqa: E402
     _DEFAULT_GROUPS,
     _default_type_for_code,
-    _resolve_default_group_name,
     _ensure_default_groups,
     get_portfolio,
-    get_portfolio_tags_for_user,
     get_portfolio_target_metrics,
     get_latest_market_valuation,
     upsert_market_target_metrics,
@@ -1111,8 +1107,6 @@ from repositories.portfolio import (  # noqa: E402
 )
 from repositories.portfolio import (  # noqa: E402,F811
     get_portfolio_item,
-    update_portfolio_quantity,
-    add_portfolio_item,
     save_portfolio_item,
     clear_portfolio,
     replace_portfolio,
@@ -1130,8 +1124,6 @@ from repositories.snapshots import (  # noqa: E402
     _refresh_stock_weight_snapshots,
     CashflowBalanceError,
     get_latest_snapshot,
-    get_snapshot_by_date,
-    get_latest_snapshot_before_date,
     save_snapshot,
     get_month_end_snapshot,
     get_year_start_snapshot,
@@ -1139,29 +1131,15 @@ from repositories.snapshots import (  # noqa: E402
     get_group_weight_history,
     get_group_constituent_history,
     get_cashflows,
-    add_cashflow,
     add_cashflow_and_sync_cash,
     delete_cashflow_and_sync_cash,
-    get_cashflow,
-    delete_cashflow,
     get_all_users_with_portfolio,
-    get_pending_cashflows,
     save_stock_snapshots,
     get_stock_snapshots_by_date,
-    get_stock_snapshots_before_date,
-    save_intraday_snapshot,
-    get_intraday_snapshots,
     get_intraday_snapshots_between,
-    delete_old_intraday,
 )
 from repositories.app_settings import (  # noqa: E402
-    get_app_setting,
     set_app_setting,
-    delete_app_setting,
-)
-from repositories.ai_usage import (  # noqa: E402
-    insert_ai_usage_event,
-    summarize_ai_usage,
 )
 from repositories.market_brief import (  # noqa: E402
     get_daily_market_brief,
@@ -1182,16 +1160,13 @@ from repositories.financial import (  # noqa: E402
     get_latest_dividend_years,
 )
 from repositories.analysis import (  # noqa: E402
-    save_analysis_meta,
     save_analysis_snapshot,
     get_analysis_meta,
     get_analysis_snapshot,
-    delete_analysis,
 )
 from repositories.users import (  # noqa: E402
     upsert_user,
     create_user_session,
-    get_user_by_session,
     delete_user_session,
     delete_expired_sessions,
     get_all_users,
@@ -1214,7 +1189,6 @@ from repositories.notifications import (  # noqa: E402
     delete_notification_channel,
     create_notification_link,
     pop_notification_link,
-    delete_expired_notification_links,
     list_portfolio_alerts,
     get_portfolio_alert,
     create_portfolio_alert,

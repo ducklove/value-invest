@@ -11,6 +11,8 @@ from fastapi import HTTPException
 
 import cache
 import repositories.db
+from repositories import dart_review as dart_review_repo
+from repositories import wiki as wiki_repo
 import dart_report_review
 from routes import dart_review as dart_review_route
 
@@ -142,7 +144,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
             patch.object(dart_report_review, "fetch_document_text", AsyncMock(return_value="원문 텍스트")),
             patch.object(dart_report_review, "_financial_context", AsyncMock(return_value="재무 컨텍스트")),
-            patch.object(cache, "save_dart_report_review", save_mock),
+            patch.object(dart_review_repo, "save_dart_report_review", save_mock),
         ]
 
     async def _run_generate(self, call_mock, save_mock):
@@ -200,7 +202,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
             patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
-            patch.object(cache, "get_dart_report_review", AsyncMock(return_value=broken_cached)),
+            patch.object(dart_review_repo, "get_dart_report_review", AsyncMock(return_value=broken_cached)),
         ):
             result = await dart_report_review.latest_review_status("005930")
 
@@ -214,7 +216,7 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
             patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
-            patch.object(cache, "get_dart_report_review", AsyncMock(return_value=good_cached)),
+            patch.object(dart_review_repo, "get_dart_report_review", AsyncMock(return_value=good_cached)),
         ):
             result = await dart_report_review.latest_review_status("005930")
 
@@ -276,7 +278,7 @@ class DartReportReviewPipelineTests(unittest.IsolatedAsyncioTestCase):
             }
 
         with (
-            patch.object(cache, "select_wiki_target_stocks", AsyncMock(return_value=["005930", "000660", "000660"])),
+            patch.object(wiki_repo, "select_wiki_target_stocks", AsyncMock(return_value=["005930", "000660", "000660"])),
             patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
             patch.object(dart_report_review, "latest_review_status", side_effect=fake_status),
             patch.object(dart_report_review, "generate_review", side_effect=fake_generate),
