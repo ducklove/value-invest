@@ -14,10 +14,10 @@ async function pfChangeGroup(stockCode, groupName) {
         group_name: groupName,
       }),
     });
-    if (!resp.ok) throw new Error('그룹 변경 실패');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     item.group_name = groupName;
     renderPortfolio();
-  } catch (e) { showToast(e.message); }
+  } catch (e) { reportApiError(e, '그룹 변경'); }
 }
 
 function pfShowBenchmarkPicker(stockCode, td) {
@@ -75,7 +75,7 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ benchmark_code: benchmarkCode || null }),
     });
-    if (!resp.ok) throw new Error('벤치마크 변경 실패');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     item.benchmark_code = data.effective_benchmark;
     if (data.benchmark_quote || data.benchmark_name) {
@@ -85,7 +85,7 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
       });
     }
     renderPortfolio();
-  } catch (e) { showToast(e.message); }
+  } catch (e) { reportApiError(e, '벤치마크 변경'); }
 }
 
 function startPortfolioEdit(stockCode) {
@@ -206,7 +206,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || '저장 실패');
+      throw new Error(d.detail || `HTTP ${resp.status}`);
     }
     const data = await resp.json().catch(() => ({}));
     // Update local item without full reload
@@ -227,7 +227,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     renderPortfolio();
   } catch (e) {
     _pfSetEditSaving(stockCode, false, editRow);
-    showToast(e.message);
+    reportApiError(e, '저장');
   }
 }
 
@@ -259,7 +259,7 @@ async function clearPortfolioTargetPrice(stockCode) {
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || '목표가 초기화 실패');
+      throw new Error(d.detail || `HTTP ${resp.status}`);
     }
     const data = await resp.json().catch(() => ({}));
     if ('target_price' in data) item.target_price = data.target_price;
@@ -274,7 +274,7 @@ async function clearPortfolioTargetPrice(stockCode) {
     renderPortfolio();
     showToast('목표가를 비웠습니다. (- 로 표시)', 'success');
   } catch (e) {
-    showToast(e.message);
+    reportApiError(e, '목표가 초기화');
   }
 }
 
@@ -293,12 +293,12 @@ async function deletePortfolioItem(stockCode) {
     const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, { method: 'DELETE' });
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      throw new Error(data.detail || '삭제 실패');
+      throw new Error(data.detail || `HTTP ${resp.status}`);
     }
     PfStore.items = PfStore.items.filter(i => i.stock_code !== stockCode);
     renderPortfolio();
     await loadPortfolio();
-  } catch (e) { showToast(e.message); }
+  } catch (e) { reportApiError(e, '삭제'); }
 }
 
 function pfSetAddPanelOpen(open) {
@@ -512,11 +512,11 @@ async function pfAddFromSearch(code, name) {
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || '추가 실패');
+      throw new Error(d.detail || `HTTP ${resp.status}`);
     }
     pfEditingCode = resolvedCode;
     await loadPortfolio();
-  } catch (e) { showToast(e.message); }
+  } catch (e) { reportApiError(e, '추가'); }
 }
 
 let _PREFERRED_PAIR_BY_CODE = {};
@@ -568,7 +568,8 @@ async function _ensureExternalQuotes(codes) {
     // 새 quote 도착 → 의존 row (우선주 / 지주사) 의 목표가 다시 그리기
     if (typeof renderPortfolio === 'function') renderPortfolio();
   } catch (e) {
-    console.warn('external quote fetch failed', e);
+    // 우선주/지주사 목표가 보조 시세 — 백그라운드 보강이라 토스트 없이 로그만.
+    reportApiError(e, '외부 시세 조회', { silent: true });
   } finally {
     _externalFetchInflight = false;
   }

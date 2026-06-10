@@ -225,7 +225,8 @@ document.addEventListener('visibilitychange', () => {
 
 function _refreshActivePortfolioTodayState() {
   if (activeView !== 'portfolio' || !currentUser || typeof pfRefreshTodayState !== 'function') return;
-  pfRefreshTodayState({ force: true }).catch(() => {});
+  // 탭 복귀 시 백그라운드 갱신 — 실패해도 토스트 없이 로그만.
+  pfRefreshTodayState({ force: true }).catch(e => reportApiError(e, '오늘 수익 갱신', { silent: true }));
 }
 
 function _resizeAllCharts() {

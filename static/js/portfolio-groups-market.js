@@ -194,14 +194,14 @@ async function addNewGroup() {
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || '추가 실패');
+      throw new Error(d.detail || `HTTP ${resp.status}`);
     }
     const result = await resp.json();
     pfGroups.push(result);
     input.value = '';
     renderGroupModalBody();
     renderPortfolio();
-  } catch (e) { showToast(e.message); }
+  } catch (e) { reportApiError(e, '그룹 추가'); }
 }
 
 async function renameGroup(inputEl) {
@@ -219,7 +219,7 @@ async function renameGroup(inputEl) {
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || '변경 실패');
+      throw new Error(d.detail || `HTTP ${resp.status}`);
     }
     const g = pfGroups.find(g => g.group_name === orig);
     if (g) g.group_name = newName;
@@ -231,7 +231,7 @@ async function renameGroup(inputEl) {
     inputEl.dataset.orig = newName;
     renderPortfolio();
   } catch (e) {
-    showToast(e.message);
+    reportApiError(e, '그룹 이름 변경');
     inputEl.value = orig;
   }
 }
@@ -248,13 +248,13 @@ async function deleteGroup(groupName) {
     const resp = await apiFetch(`/api/portfolio/groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || '삭제 실패');
+      throw new Error(d.detail || `HTTP ${resp.status}`);
     }
     pfGroups = pfGroups.filter(g => g.group_name !== groupName);
     if (pfGroupFilter) pfGroupFilter.delete(groupName);
     await loadPortfolio();
     renderGroupModalBody();
-  } catch (e) { showToast(e.message); }
+  } catch (e) { reportApiError(e, '그룹 삭제'); }
 }
 
 // --- Market Bar ---
@@ -274,7 +274,8 @@ function _mbGetCodes() {
 }
 function _mbSaveCodes() {
   localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes));
-  if (currentUser) apiFetch('/api/settings/market-bar', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes: mbCodes }) }).catch(() => {});
+  // localStorage 가 1차 저장소 — 서버 동기화는 best-effort 라 조용히 로그만.
+  if (currentUser) apiFetch('/api/settings/market-bar', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes: mbCodes }) }).catch(e => reportApiError(e, '시장바 설정 저장', { silent: true }));
 }
 async function _mbLoadCodes() {
   if (currentUser) {
@@ -596,15 +597,16 @@ async function submitCsv(mode) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode, items }),
+      timeoutMs: 60000, // 대량 등록은 기본 20초보다 오래 걸릴 수 있다
     });
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || '등록 실패');
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     document.getElementById('pfCsvInput').value = '';
     document.getElementById('pfCsvPanel').style.display = 'none';
     showToast(`${data.imported}개 종목이 ${mode === 'replace' ? '교체' : '추가'} 등록되었습니다.`, 'success');
     await loadPortfolio();
   } catch (e) {
-    showToast(e.message);
+    reportApiError(e, 'CSV 등록');
   } finally {
     btns.forEach(b => b.disabled = false);
   }

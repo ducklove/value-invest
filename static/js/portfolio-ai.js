@@ -138,6 +138,7 @@ async function runAiAnalysis() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
+      stream: true, // SSE 스트리밍 — 기본 타임아웃 제외
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));

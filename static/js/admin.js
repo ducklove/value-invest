@@ -295,12 +295,12 @@ async function deleteForeignDividend(code) {
     const res = await apiFetch(`/api/admin/foreign-dividend/${encodeURIComponent(code)}`, { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      alert(`삭제 실패: ${data.detail || res.statusText}`);
+      showToast(`삭제 실패: ${data.detail || res.statusText}`);
       return;
     }
     await loadForeignDividendsList();
   } catch (e) {
-    alert(`삭제 에러: ${e.message}`);
+    reportApiError(e, '삭제');
   }
 }
 
@@ -1367,7 +1367,7 @@ async function triggerJob(jobName) {
     alert(data.message || '실행 시작');
     setTimeout(loadAdminView, 2000);
   } catch (e) {
-    alert('실행 요청 실패: ' + e.message);
+    reportApiError(e, '실행 요청');
   }
 }
 
@@ -1392,7 +1392,7 @@ async function triggerJobWithDate(jobName) {
     alert(`${data.message} (${dateStr})`);
     setTimeout(loadAdminView, 2000);
   } catch (e) {
-    alert('실행 요청 실패: ' + e.message);
+    reportApiError(e, '실행 요청');
   }
 }
 
@@ -1594,7 +1594,8 @@ async function runWikiDiag() {
   }
   result.innerHTML = '<div style="color:var(--text-secondary);padding:8px;">진단 중... (Naver 스크랩 포함하여 최대 15초 정도 소요)</div>';
   try {
-    const res = await apiFetch(`/api/admin/diag/wiki?code=${encodeURIComponent(code)}`);
+    // Naver 스크랩 포함 최대 15초+ 걸릴 수 있어 기본 20초 타임아웃을 늘린다.
+    const res = await apiFetch(`/api/admin/diag/wiki?code=${encodeURIComponent(code)}`, { timeoutMs: 60000 });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       const detail = data.detail || res.statusText || '';

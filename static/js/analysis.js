@@ -977,7 +977,8 @@ async function analyzeStock(stockCode) {
 
   try {
     trackEvent('analysis_start', { stock_code: stockCode });
-    const resp = await apiFetch(`/api/analyze/${stockCode}`, { signal });
+    // SSE 스트리밍 응답 — apiFetch 기본 타임아웃 제외(stream: true).
+    const resp = await apiFetch(`/api/analyze/${stockCode}`, { signal, stream: true });
     const contentType = resp.headers.get('content-type') || '';
 
     // 캐시 히트: 일반 JSON 응답
@@ -1966,6 +1967,7 @@ async function askWikiQuestion() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question: q }),
+      stream: true, // SSE 스트리밍 — 기본 타임아웃 제외
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));

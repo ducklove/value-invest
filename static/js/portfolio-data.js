@@ -39,7 +39,7 @@ async function pfRefreshTodayState({ force = false, render = true } = {}) {
     if (updated && render) renderPortfolio();
     return { updated };
   })().catch(e => {
-    console.warn(e);
+    reportApiError(e, '오늘 수익 데이터', { silent: true });
     return { updated: false };
   }).finally(() => {
     _pfTodayStatePromise = null;
@@ -87,17 +87,17 @@ async function loadPortfolio({ force = false } = {}) {
       pfMonthEndSnap = snap && snap.total_value ? snap : null;
       pfMonthEndStockValues = snap.stock_values || {};
       renderPortfolio();
-    }).catch(() => {});
+    }).catch(e => reportApiError(e, '월말 평가액', { silent: true }));
     apiFetch('/api/portfolio/year-start-value').then(async r => {
       if (!r.ok) return;
       const snap = await r.json();
       pfYearStartSnap = snap && snap.total_value ? snap : null;
       pfYearStartStockValues = (snap && snap.stock_values) || {};
       renderPortfolio();
-    }).catch(() => {});
+    }).catch(e => reportApiError(e, '연초 평가액', { silent: true }));
     pfLoadNavHistory({ force: true }).then(() => {
       renderPortfolio();
-    }).catch(() => {});
+    }).catch(e => reportApiError(e, 'NAV 히스토리', { silent: true }));
     apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
       if (!r.ok) return;
       const fresh = await r.json();
@@ -107,7 +107,7 @@ async function loadPortfolio({ force = false } = {}) {
       for (const [k, v] of Object.entries(PfStore.benchmarkQuotes)) { if (v.name) names[k] = v.name; }
       try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch (e) { console.warn(e); }
       renderPortfolio();
-    }).catch(() => {});
+    }).catch(e => reportApiError(e, '벤치마크 시세', { silent: true }));
     // Preserve existing quotes from previous load
     const prevQuotes = {};
     PfStore.items.forEach(i => { if (quoteIsUsable(i.quote)) prevQuotes[i.stock_code] = i.quote; });

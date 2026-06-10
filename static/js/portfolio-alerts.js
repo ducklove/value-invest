@@ -219,16 +219,18 @@ async function pfAlertsTest(key) {
   try {
     const resp = await pfAlertsApi(`/channels/${key}/test`, { method: 'POST', body: '{}' });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || '전송 실패');
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     alert('테스트 메시지를 보냈습니다. 메신저를 확인하세요.');
   } catch (e) {
-    alert((e && e.message) || '테스트 전송에 실패했습니다.');
+    reportApiError(e, '테스트 전송');
   }
 }
 
 async function pfAlertsToggleChannel(key, enabled) {
   try {
     await pfAlertsApi(`/channels/${key}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
+  } catch (e) {
+    reportApiError(e, '채널 설정 변경');
   } finally {
     pfAlertsLoadChannels();
   }
@@ -239,6 +241,8 @@ async function pfAlertsUnlink(key) {
   if (!confirm(`${label} 연결을 해제할까요? 해당 채널로 알림이 전송되지 않습니다.`)) return;
   try {
     await pfAlertsApi(`/${key}`, { method: 'DELETE' });
+  } catch (e) {
+    reportApiError(e, '연결 해제');
   } finally {
     pfAlertsLoadChannels();
   }
@@ -344,7 +348,7 @@ async function pfAlertsSubmit() {
   try {
     const resp = await pfAlertsApi('/alerts', { method: 'POST', body: JSON.stringify(payload) });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || '규칙 추가 실패');
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     const noteEl = document.getElementById('pfAlertNote');
     const thrEl = document.getElementById('pfAlertThreshold');
     const impEl = document.getElementById('pfAlertImportant');
@@ -353,7 +357,7 @@ async function pfAlertsSubmit() {
     if (impEl) impEl.checked = false;
     pfAlertsLoadList();
   } catch (e) {
-    alert((e && e.message) || '규칙 추가에 실패했습니다.');
+    reportApiError(e, '알림 규칙 추가');
   }
 }
 
@@ -441,6 +445,8 @@ function pfAlertsRenderList() {
 async function pfAlertsToggle(id, enabled) {
   try {
     await pfAlertsApi(`/alerts/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
+  } catch (e) {
+    reportApiError(e, '알림 규칙 변경');
   } finally {
     pfAlertsLoadList();
   }
@@ -449,6 +455,8 @@ async function pfAlertsToggle(id, enabled) {
 async function pfAlertsToggleImportant(id, important) {
   try {
     await pfAlertsApi(`/alerts/${id}`, { method: 'PUT', body: JSON.stringify({ important }) });
+  } catch (e) {
+    reportApiError(e, '중요 표시 변경');
   } finally {
     pfAlertsLoadList();
   }
@@ -458,6 +466,8 @@ async function pfAlertsDelete(id) {
   if (!confirm('이 알림 규칙을 삭제할까요?')) return;
   try {
     await pfAlertsApi(`/alerts/${id}`, { method: 'DELETE' });
+  } catch (e) {
+    reportApiError(e, '알림 규칙 삭제');
   } finally {
     pfAlertsLoadList();
   }

@@ -235,21 +235,52 @@ function openIntegration(key, path = '', query = {}) {
   window.open(url, '_blank', 'noopener');
 }
 
+// apiFetch 기본 타임아웃. 일반 JSON API 는 20초가 지나면 AbortController 로
+// 중단한다. 호출별로 { timeoutMs: n } 으로 조정(0/null 이면 비활성).
+const API_FETCH_TIMEOUT_MS = 20000;
+
 function apiFetch(path, options = {}) {
-  const method = String(options.method || 'GET').toUpperCase();
+  const { stream = false, timeoutMs = API_FETCH_TIMEOUT_MS, ...fetchOptions } = options;
+  const method = String(fetchOptions.method || 'GET').toUpperCase();
   const isAdminMutation = String(path || '').startsWith('/api/admin/')
     && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   const init = {
     credentials: 'include',
-    ...options,
+    ...fetchOptions,
   };
-  if (options.headers || isAdminMutation) {
+  if (fetchOptions.headers || isAdminMutation) {
     init.headers = { ...(isAdminMutation ? {
       'Content-Type': 'application/json',
       'X-Requested-With': 'fetch',
-    } : {}), ...(options.headers || {}) };
+    } : {}), ...(fetchOptions.headers || {}) };
   }
-  return fetch(buildApiUrl(path), init);
+  // SSE/스트리밍 응답({ stream: true } — AI 분석, 위키 Q&A 등)은 20초보다
+  // 오래 열려 있어야 하므로 타임아웃을 걸지 않는다. 호출자가 직접 signal 을
+  // 넘긴 경우(분석 취소 등)도 호출자의 수명 관리를 그대로 따른다.
+  if (stream || fetchOptions.signal || !timeoutMs) {
+    return fetch(buildApiUrl(path), init);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  init.signal = controller.signal;
+  return fetch(buildApiUrl(path), init).finally(() => clearTimeout(timer));
+}
+
+function _isAbortError(error) {
+  return !!error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
+// API 오류 공통 처리 — 콘솔에는 항상 컨텍스트와 함께 남긴다.
+// 사용자가 직접 누른 동작(기본)은 토스트로 알리고('저장 실패: ...' 톤),
+// 백그라운드 갱신/선택적 보강은 { silent: true } 로 로그만 남긴다.
+function reportApiError(error, context, options = {}) {
+  const label = context || '요청';
+  console.warn(`[api] ${label} 실패`, error);
+  if (options.silent) return;
+  const detail = _isAbortError(error)
+    ? '요청 시간이 초과되었습니다.'
+    : (error && error.message) || '네트워크 오류';
+  showToast(`${label} 실패: ${detail}`);
 }
 
 function escapeHtml(value) {

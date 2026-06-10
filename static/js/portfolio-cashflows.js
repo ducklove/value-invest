@@ -94,17 +94,18 @@ async function addCashflow() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, date: date || undefined, amount, memo: memo || undefined }),
     });
-    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || '등록 실패'); }
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`); }
     document.getElementById('pfCfAmount').value = '';
     document.getElementById('pfCfMemo').value = '';
     await refreshPortfolioAfterCashflowMutation();
-  } catch (e) { showToast(e.message); }
+  } catch (e) { reportApiError(e, '입출금 등록'); }
 }
 
 async function deleteCashflow(id) {
   if (!confirm('이 입출금 내역을 삭제할까요?')) return;
   try {
-    await apiFetch(`/api/portfolio/cashflows/${id}`, { method: 'DELETE' });
+    const resp = await apiFetch(`/api/portfolio/cashflows/${id}`, { method: 'DELETE' });
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`); }
     await refreshPortfolioAfterCashflowMutation();
-  } catch (e) { showToast(e.message); }
+  } catch (e) { reportApiError(e, '입출금 삭제'); }
 }
