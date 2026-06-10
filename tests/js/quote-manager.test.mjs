@@ -383,11 +383,10 @@ test("disconnect clears every timer and resets state", () => {
   assert.equal(qm.overflowCodes.length, 0); // realm-safe empty check
 });
 
-test("BUG(documented): the close event delivered after disconnect() resurrects the connection", async () => {
-  // disconnect() closes the socket but leaves its onclose handler attached.
-  // A real browser fires the close event asynchronously with a normal code
-  // (1000/1005), which is != 4001, so the handler schedules a reconnect —
-  // 5s later QuoteManager silently reopens a socket nobody asked for.
+test("disconnect() detaches onclose so the deferred close event cannot resurrect the connection", async () => {
+  // 회귀 가드: 과거에는 disconnect()가 onclose를 떼지 않아, 브라우저가
+  // 비동기로 전달하는 close 이벤트(code 1000/1005 != 4001)가 5초 뒤
+  // 아무도 원하지 않은 재접속을 일으켰다.
   const { qm, clock, MockWebSocket } = createHarness();
   qm.connect();
   const ws = MockWebSocket.instances[0];
@@ -395,10 +394,10 @@ test("BUG(documented): the close event delivered after disconnect() resurrects t
 
   qm.disconnect();
   assert.equal(clock.pending(), 0);
+  assert.equal(ws.onclose, null, "disconnect() must detach onclose before closing");
 
-  ws.onclose({ code: 1000 }); // the deferred browser close event
-  assert.equal(clock.pending(), 1, "a reconnect timer now exists despite disconnect()");
+  if (typeof ws.onclose === "function") ws.onclose({ code: 1000 });
+  assert.equal(clock.pending(), 0, "no reconnect timer after explicit disconnect");
   await clock.tick(5_000);
-  assert.equal(MockWebSocket.instances.length, 2, "reconnected after explicit disconnect (current behavior)");
-  qm.disconnect();
+  assert.equal(MockWebSocket.instances.length, 1, "no reconnection after explicit disconnect");
 });
