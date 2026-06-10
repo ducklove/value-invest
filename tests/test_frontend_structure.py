@@ -17,6 +17,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-groups-market.js",
     "portfolio-ai.js",
     "portfolio-performance.js",
+    "portfolio-risk.js",
     "portfolio-trends.js",
     "portfolio-group-composition.js",
     "portfolio-cashflows.js",
@@ -742,6 +743,41 @@ def test_performance_tab_includes_group_weight_trend():
     assert "areaStyle: { opacity:" in trends
     assert "stack: series.stack || null" in chart
     assert "stackedIndexes.add(seriesIdx)" in chart
+
+
+def test_performance_tab_includes_risk_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    risk = (JS / "portfolio-risk.js").read_text(encoding="utf-8")
+
+    # '리스크' 카드는 성과 탭의 NAV 수익률 요약(#pfNavReturns) 바로 다음,
+    # 평가금액 추이 앞에 산다. 윈도 버튼은 기존 .vp-btn 스타일 재사용.
+    assert 'id="pfRiskWrap"' in html
+    assert 'id="pfRiskWindowBtns"' in html
+    assert 'id="pfRiskContent"' in html
+    assert html.find('id="pfNavReturns"') < html.find('id="pfRiskWrap"')
+    assert html.find('id="pfRiskWrap"') < html.find('id="pfValueChart"')
+    # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
+    assert "if (typeof pfLoadRiskPanel === 'function') pfLoadRiskPanel();" in performance
+    # 기능 홈: fetch/렌더/윈도 전환/메모는 portfolio-risk.js.
+    assert "async function pfLoadRiskPanel(" in risk
+    assert "function pfRiskSetWindow(" in risk
+    assert "function _pfRenderRiskPanel(" in risk
+    assert "/api/portfolio/risk?window=" in risk
+    assert "const _pfRiskCache = {};" in risk
+    # 백그라운드 로드 — 오류는 silent 보고 + 패널 내 안내.
+    assert "reportApiError(e, '리스크 지표', { silent: true });" in risk
+    # 데이터 부족 시 친절한 빈 상태 문구.
+    assert "데이터가 부족합니다" in risk
+    # 포맷터는 portfolio-render.js / utils.js 공용 헬퍼 재사용(중복 정의 금지).
+    assert "function fmtPct(" not in risk
+    assert "function returnClass(" not in risk
+    assert "function escapeHtml(" not in risk
+    # 스타일: 타일은 .pf-nav-ret-card 재사용, 좁은 화면에선 2열 그리드.
+    assert ".pf-risk-grid" in styles
+    assert ".pf-risk-empty" in styles
+    assert ".pf-risk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
 
 
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
