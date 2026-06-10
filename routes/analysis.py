@@ -11,10 +11,9 @@ import stock_price
 from services import stock_quotes
 from deps import (
     ANALYSIS_SEMAPHORE,
-    ANALYSIS_LOCKS,
-    ANALYSIS_LOCKS_GUARD,
     analysis_snapshot_is_stale,
     default_user_preference,
+    get_analysis_lock,
     get_current_user,
     sse_event,
 )
@@ -65,12 +64,7 @@ def _analysis_snapshot_has_invalid_prices(snapshot: dict | None) -> bool:
 
 
 async def _get_analysis_lock(stock_code: str) -> asyncio.Lock:
-    async with ANALYSIS_LOCKS_GUARD:
-        lock = ANALYSIS_LOCKS.get(stock_code)
-        if lock is None:
-            lock = asyncio.Lock()
-            ANALYSIS_LOCKS[stock_code] = lock
-        return lock
+    return await get_analysis_lock(stock_code)
 
 
 async def _decorate_analysis_payload(payload: dict, user: dict | None) -> dict:
