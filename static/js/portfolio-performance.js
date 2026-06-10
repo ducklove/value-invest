@@ -54,6 +54,8 @@ function pfSwitchTab(tab) {
     if (typeof pfLoadRiskPanel === 'function') pfLoadRiskPanel();
     // 리밸런싱 카드 동일 패턴(portfolio-rebalance.js).
     if (typeof pfLoadRebalancePanel === 'function') pfLoadRebalancePanel();
+    // 배당 캘린더 카드 동일 패턴(portfolio-dividends-calendar.js).
+    if (typeof pfLoadDividendCalendarPanel === 'function') pfLoadDividendCalendarPanel();
   }
 }
 

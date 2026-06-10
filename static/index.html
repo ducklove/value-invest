@@ -460,6 +460,16 @@ function trackEvent(name, params = {}) {
         </div>
       </div>
 
+      <div class="pf-nav-chart-wrap" id="pfDivCalWrap" style="margin-top:24px;">
+        <div class="pf-nav-header">
+          <h3>배당 캘린더</h3>
+          <span class="pf-chart-note">월별 예상 배당 현금흐름 · 보유수량 × 주당 배당</span>
+        </div>
+        <div id="pfDivCalContent" class="pf-divcal-content">
+          <div class="pf-risk-empty">성과 탭을 열면 배당 캘린더를 불러옵니다.</div>
+        </div>
+      </div>
+
       <div class="pf-nav-chart-wrap" style="margin-top:24px;">
         <div class="pf-nav-header">
           <h3>평가금액 추이</h3>
@@ -694,6 +704,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-performance.js" defer></script>
 <script src="./js/portfolio-risk.js" defer></script>
 <script src="./js/portfolio-rebalance.js" defer></script>
+<script src="./js/portfolio-dividends-calendar.js" defer></script>
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-group-composition.js" defer></script>
 <script src="./js/portfolio-cashflows.js" defer></script>

@@ -19,6 +19,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-performance.js",
     "portfolio-risk.js",
     "portfolio-rebalance.js",
+    "portfolio-dividends-calendar.js",
     "portfolio-trends.js",
     "portfolio-group-composition.js",
     "portfolio-cashflows.js",
@@ -824,6 +825,43 @@ def test_performance_tab_includes_rebalance_panel():
     assert ".pf-rebal-table" in styles
     assert ".pf-rebal-editor-row" in styles
     assert ".pf-rebal-editor-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+
+
+def test_performance_tab_includes_dividend_calendar_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    divcal = (JS / "portfolio-dividends-calendar.js").read_text(encoding="utf-8")
+
+    # '배당 캘린더' 카드는 성과 탭의 리밸런싱 카드(#pfRebalanceWrap) 바로
+    # 다음, 평가금액 추이 앞에 산다.
+    assert 'id="pfDivCalWrap"' in html
+    assert 'id="pfDivCalContent"' in html
+    assert html.find('id="pfRebalanceWrap"') < html.find('id="pfDivCalWrap"')
+    assert html.find('id="pfDivCalWrap"') < html.find('id="pfValueChart"')
+    # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
+    assert "if (typeof pfLoadDividendCalendarPanel === 'function') pfLoadDividendCalendarPanel();" in performance
+    # 기능 홈: fetch/렌더/월 펼침은 portfolio-dividends-calendar.js.
+    assert "async function pfLoadDividendCalendarPanel(" in divcal
+    assert "function _pfRenderDividendCalendar(" in divcal
+    assert "function pfDivCalToggleMonth(" in divcal
+    assert "/api/portfolio/dividend-calendar?months=12" in divcal
+    # 빈 상태 + 확정/예상 배지 + 기준일은 월 합계 제외 안내.
+    assert "보유 종목의 배당 정보가 수집되면 표시됩니다." in divcal
+    assert "확정" in divcal and "예상" in divcal
+    assert "월 합계에서 제외" in divcal
+    # 백그라운드 로드는 silent 보고 + 패널 내 안내.
+    assert "reportApiError(e, '배당 캘린더', { silent: true });" in divcal
+    # 포맷터는 공용 헬퍼 재사용(중복 정의 금지).
+    assert "function fmtKrw(" not in divcal
+    assert "function escapeHtml(" not in divcal
+    # 스타일: 월 행/이벤트 그리드 + 예상(점선·흐림)/임박 강조 + 모바일 접기.
+    assert ".pf-divcal-month" in styles
+    assert ".pf-divcal-event" in styles
+    assert ".pf-divcal-badge.confirmed" in styles
+    assert ".pf-divcal-event.pf-divcal-est" in styles
+    assert ".pf-divcal-event.pf-divcal-upcoming .pf-divcal-date" in styles
+    assert ".pf-divcal-event { grid-template-columns: minmax(0, 1fr) auto; }" in styles
 
 
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
