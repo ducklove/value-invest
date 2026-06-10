@@ -49,8 +49,9 @@ function getLatestIndicatorValue(series) {
 function _formatDailyMarketCost(costUsd) {
   const cost = Number(costUsd || 0);
   if (!Number.isFinite(cost) || cost <= 0) return '';
-  if (typeof pfFxRate !== 'undefined' && pfFxRate) {
-    return `${Math.max(1, Math.round(cost * pfFxRate)).toLocaleString('ko-KR')}원`;
+  // analysis.js loads before portfolio-store.js — guard the whole namespace.
+  if (typeof PfStore !== 'undefined' && PfStore.currency.fxRate) {
+    return `${Math.max(1, Math.round(cost * PfStore.currency.fxRate)).toLocaleString('ko-KR')}원`;
   }
   return `$${cost.toFixed(5)}`;
 }

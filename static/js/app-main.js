@@ -18,7 +18,7 @@ const _pfBenchmarkQueuedCodes = new Set();
 const _pfFlashQueuedCodes = new Set();
 
 function _schedulePortfolioDeferredRender(delay = 1200) {
-  if (pfEditingCode) return;
+  if (PfStore.edit.code) return;
   if (_pfDeferredRenderTimer) return;
   _pfDeferredRenderTimer = setTimeout(() => {
     _pfDeferredRenderTimer = null;
@@ -35,7 +35,7 @@ function _queuePortfolioSummaryRender() {
   _pfSummaryRenderQueued = true;
   requestAnimationFrame(() => {
     _pfSummaryRenderQueued = false;
-    if (activeView === 'portfolio' && typeof renderPortfolio === 'function') {
+    if (PfStore.activeView === 'portfolio' && typeof renderPortfolio === 'function') {
       renderPortfolio({ summaryOnly: true });
     }
   });
@@ -58,7 +58,7 @@ function _paintPortfolioQuoteUpdates() {
 }
 
 function _queuePortfolioQuotePaint() {
-  if (pfEditingCode || _pfQuotePaintQueued) return;
+  if (PfStore.edit.code || _pfQuotePaintQueued) return;
   _pfQuotePaintQueued = true;
   requestAnimationFrame(_paintPortfolioQuoteUpdates);
 }
@@ -224,7 +224,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function _refreshActivePortfolioTodayState() {
-  if (activeView !== 'portfolio' || !currentUser || typeof pfRefreshTodayState !== 'function') return;
+  if (PfStore.activeView !== 'portfolio' || !currentUser || typeof pfRefreshTodayState !== 'function') return;
   // 탭 복귀 시 백그라운드 갱신 — 실패해도 토스트 없이 로그만.
   pfRefreshTodayState({ force: true }).catch(e => reportApiError(e, '오늘 수익 갱신', { silent: true }));
 }

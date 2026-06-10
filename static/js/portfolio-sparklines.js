@@ -4,8 +4,8 @@
 // These are pure rendering helpers — they take a canvas id + pre-computed
 // series and draw, touching no portfolio state. The data-preparation side
 // (_renderSummarySparklines + the _spark* settlement-axis helpers) stays in
-// portfolio-render.js because it is tightly coupled to pfPrevDaySnapshot /
-// pfIntradayData and is asserted there by tests/test_frontend_structure.py.
+// portfolio-render.js because it is tightly coupled to PfStore.snapshots.prevDay /
+// PfStore.snapshots.intraday and is asserted there by tests/test_frontend_structure.py.
 //
 // _drawSparkline      — evenly-spaced values across fixed slots (right/left aligned).
 // _drawSparklinePoints — explicit {x,y} points on a 0..xMax axis.

@@ -1,5 +1,7 @@
 // Portfolio row actions: group/benchmark edits, CRUD, search, target/link actions.
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
+// File-local: debounce timer for the registration search box (only used here).
+let pfSearchTimeout = null;
 async function pfChangeGroup(stockCode, groupName) {
   const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
@@ -23,7 +25,7 @@ async function pfChangeGroup(stockCode, groupName) {
 function pfShowBenchmarkPicker(stockCode, td) {
   // Close any existing picker
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
-  if (pfSavingEditCode) return;
+  if (PfStore.edit.savingCode) return;
   const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
   const picker = document.createElement('div');
@@ -62,8 +64,8 @@ function pfShowBenchmarkPicker(stockCode, td) {
 
 async function pfSetBenchmark(stockCode, benchmarkCode) {
   document.querySelectorAll('.pf-benchmark-picker').forEach(el => el.remove());
-  if (pfSavingEditCode) return;
-  if (pfEditingCode !== stockCode) {
+  if (PfStore.edit.savingCode) return;
+  if (PfStore.edit.code !== stockCode) {
     showToast('벤치마크는 수정모드에서 변경할 수 있습니다.');
     return;
   }
@@ -89,16 +91,16 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
 }
 
 function startPortfolioEdit(stockCode) {
-  if (pfSavingEditCode) return;
-  pfEditingCode = stockCode;
+  if (PfStore.edit.savingCode) return;
+  PfStore.edit.code = stockCode;
   renderPortfolio();
   const priceInput = document.getElementById('pfEditPrice');
   if (priceInput) priceInput.focus();
 }
 
 function cancelPortfolioEdit() {
-  if (pfSavingEditCode) return;
-  pfEditingCode = null;
+  if (PfStore.edit.savingCode) return;
+  PfStore.edit.code = null;
   renderPortfolio();
 }
 
@@ -113,7 +115,7 @@ function _pfFindEditRow(stockCode, row) {
 }
 
 function _pfSetEditSaving(stockCode, saving, row) {
-  pfSavingEditCode = saving ? stockCode : null;
+  PfStore.edit.savingCode = saving ? stockCode : null;
   const editRow = _pfFindEditRow(stockCode, row);
   if (!editRow) return;
   editRow.classList.toggle('pf-row-saving', !!saving);
@@ -136,7 +138,7 @@ function _pfSetEditSaving(stockCode, saving, row) {
 }
 
 async function savePortfolioEdit(stockCode, stockName, row) {
-  if (pfSavingEditCode) return;
+  if (PfStore.edit.savingCode) return;
   const editRow = _pfFindEditRow(stockCode, row);
   const qtyEl = editRow?.querySelector('.js-pf-edit-qty') || document.getElementById('pfEditQty');
   const priceEl = editRow?.querySelector('.js-pf-edit-price') || document.getElementById('pfEditPrice');
@@ -222,8 +224,8 @@ async function savePortfolioEdit(stockCode, stockName, row) {
       if ('target_price_disabled' in data) item.target_price_disabled = !!data.target_price_disabled;
       if ('target_price_formula' in data) item.target_price_formula = data.target_price_formula;
     }
-    pfSavingEditCode = null;
-    pfEditingCode = null;
+    PfStore.edit.savingCode = null;
+    PfStore.edit.code = null;
     renderPortfolio();
   } catch (e) {
     _pfSetEditSaving(stockCode, false, editRow);
@@ -514,7 +516,7 @@ async function pfAddFromSearch(code, name) {
       const d = await resp.json().catch(() => ({}));
       throw new Error(d.detail || `HTTP ${resp.status}`);
     }
-    pfEditingCode = resolvedCode;
+    PfStore.edit.code = resolvedCode;
     await loadPortfolio();
   } catch (e) { reportApiError(e, '추가'); }
 }

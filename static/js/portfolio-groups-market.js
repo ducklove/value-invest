@@ -33,7 +33,7 @@ function _drawGroupPie(stats, grandMV) {
   ctx.scale(dpr, dpr);
 
   const cx = size / 2, cy = size / 2, r = 70;
-  const slices = pfGroups.map((g, i) => {
+  const slices = PfStore.groups.map((g, i) => {
     const s = stats[g.group_name] || { mv: 0 };
     return { name: g.group_name, value: s.mv, color: _PIE_COLORS[i % _PIE_COLORS.length] };
   }).filter(s => s.value > 0);
@@ -113,8 +113,8 @@ function renderGroupModalBody() {
       grandMV += mv;
     }
   });
-  const defaultCount = pfGroups.filter(x => x.is_default).length;
-  const rowsHtml = pfGroups.map((g, i) => {
+  const defaultCount = PfStore.groups.filter(x => x.is_default).length;
+  const rowsHtml = PfStore.groups.map((g, i) => {
     const s = stats[g.group_name] || { cnt: 0, invested: 0, mv: 0, prevMV: 0 };
     const weight = grandMV > 0 ? (s.mv / grandMV * 100) : 0;
     const returnPct = s.invested !== 0 ? ((s.mv - s.invested) / Math.abs(s.invested) * 100) : 0;
@@ -163,15 +163,15 @@ function renderGroupModalBody() {
       const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
       const toIdx = parseInt(row.dataset.grpIdx);
       if (isNaN(fromIdx) || isNaN(toIdx) || fromIdx === toIdx) return;
-      const [moved] = pfGroups.splice(fromIdx, 1);
-      pfGroups.splice(toIdx, 0, moved);
+      const [moved] = PfStore.groups.splice(fromIdx, 1);
+      PfStore.groups.splice(toIdx, 0, moved);
       renderGroupModalBody();
       renderPortfolio();
       try {
         await apiFetch('/api/portfolio/groups-order', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ group_names: pfGroups.map(g => g.group_name) }),
+          body: JSON.stringify({ group_names: PfStore.groups.map(g => g.group_name) }),
         });
       } catch (e) { console.warn(e); }
     });
@@ -197,7 +197,7 @@ async function addNewGroup() {
       throw new Error(d.detail || `HTTP ${resp.status}`);
     }
     const result = await resp.json();
-    pfGroups.push(result);
+    PfStore.groups.push(result);
     input.value = '';
     renderGroupModalBody();
     renderPortfolio();
@@ -221,12 +221,12 @@ async function renameGroup(inputEl) {
       const d = await resp.json().catch(() => ({}));
       throw new Error(d.detail || `HTTP ${resp.status}`);
     }
-    const g = pfGroups.find(g => g.group_name === orig);
+    const g = PfStore.groups.find(g => g.group_name === orig);
     if (g) g.group_name = newName;
     PfStore.items.forEach(i => { if (i.group_name === orig) i.group_name = newName; });
-    if (pfGroupFilter && pfGroupFilter.has(orig)) {
-      pfGroupFilter.delete(orig);
-      pfGroupFilter.add(newName);
+    if (PfStore.filters.group && PfStore.filters.group.has(orig)) {
+      PfStore.filters.group.delete(orig);
+      PfStore.filters.group.add(newName);
     }
     inputEl.dataset.orig = newName;
     renderPortfolio();
@@ -250,8 +250,8 @@ async function deleteGroup(groupName) {
       const d = await resp.json().catch(() => ({}));
       throw new Error(d.detail || `HTTP ${resp.status}`);
     }
-    pfGroups = pfGroups.filter(g => g.group_name !== groupName);
-    if (pfGroupFilter) pfGroupFilter.delete(groupName);
+    PfStore.groups = PfStore.groups.filter(g => g.group_name !== groupName);
+    if (PfStore.filters.group) PfStore.filters.group.delete(groupName);
     await loadPortfolio();
     renderGroupModalBody();
   } catch (e) { reportApiError(e, '그룹 삭제'); }
@@ -553,7 +553,7 @@ async function _pollBenchmarkQuotes() {
     for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);
     // 전체 재렌더 대신 벤치마크 셀만 업데이트 — 이래야 WS tick 으로 in-
     // place 갱신된 다른 셀들이 60초 polling 때마다 뒤집히지 않음.
-    if (activeView === 'portfolio') {
+    if (PfStore.activeView === 'portfolio') {
       for (const k of Object.keys(fresh)) updatePortfolioBenchmarkCells(k);
     }
   } catch (e) { console.warn(e); }
@@ -614,26 +614,26 @@ async function submitCsv(mode) {
 
 // --- Currency conversion ---
 function pfFx(krwValue) {
-  if (pfCurrency === 'USD' && pfFxRate && pfFxRate > 0) return krwValue / pfFxRate;
+  if (PfStore.currency.unit === 'USD' && PfStore.currency.fxRate && PfStore.currency.fxRate > 0) return krwValue / PfStore.currency.fxRate;
   return krwValue;
 }
-function pfFxSymbol() { return pfCurrency === 'USD' ? '$' : ''; }
-function pfFxUnit() { return pfCurrency === 'USD' ? 'M' : '억'; }
-function pfFxDivisor() { return pfCurrency === 'USD' ? 1e6 : 1e8; }
+function pfFxSymbol() { return PfStore.currency.unit === 'USD' ? '$' : ''; }
+function pfFxUnit() { return PfStore.currency.unit === 'USD' ? 'M' : '억'; }
+function pfFxDivisor() { return PfStore.currency.unit === 'USD' ? 1e6 : 1e8; }
 
 async function _ensureFxRate() {
-  if (pfFxRate) return;
+  if (PfStore.currency.fxRate) return;
   try {
     const resp = await apiFetch('/api/asset-quote/CASH_USD');
     if (resp.ok) {
       const d = await resp.json();
-      if (d.price) pfFxRate = d.price; // KRW per 1 USD
+      if (d.price) PfStore.currency.fxRate = d.price; // KRW per 1 USD
     }
   } catch (e) { console.warn(e); }
 }
 
 function pfSetCurrency(currency) {
-  pfCurrency = currency;
+  PfStore.currency.unit = currency;
   document.querySelectorAll('.pf-currency-btn').forEach(b => b.classList.toggle('active', b.dataset.currency === currency));
   const refresh = () => {
     renderPortfolio();

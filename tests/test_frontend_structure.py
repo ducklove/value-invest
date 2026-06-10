@@ -183,10 +183,10 @@ def test_analysis_split_files_stay_below_maintenance_ceiling():
 
 
 def test_portfolio_default_sort_is_unset():
-    source = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    # Sort state lives in PfStore (portfolio-store.js), not bare shell globals.
+    source = (JS / "portfolio-store.js").read_text(encoding="utf-8")
 
-    assert "let pfSortKey = null;" in source
-    assert "let pfGroupSort = false;" in source
+    assert "sort: { key: null, asc: false, groupSort: false }," in source
 
 
 def test_market_tape_is_bottom_frame_outside_main():
@@ -246,7 +246,7 @@ def test_today_card_does_not_fallback_to_quote_session_return():
 def test_today_card_percent_uses_same_settlement_base_as_amount():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
 
-    assert "const _dailyBaseValue = _periodBaseValue(pfPrevDaySnapshot);" in source
+    assert "const _dailyBaseValue = _periodBaseValue(PfStore.snapshots.prevDay);" in source
     assert "dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;" in source
     assert "const _liveNavValueKrw" in source
     assert "let _pendingUnitsChange = 0;" in source
@@ -352,20 +352,18 @@ def test_portfolio_delete_uses_encoded_url_and_server_reload():
 
 
 def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
-    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    store = (JS / "portfolio-store.js").read_text(encoding="utf-8")
     data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
     order = (JS / "portfolio-order.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-    assert "let pfPendingManualOrderCodes = null;" in shell
-    assert "let pfManualOrderRevision = 0;" in shell
-    assert "let pfManualOrderSaveInFlight = false;" in shell
-    assert "const loadOrderRevision = pfManualOrderRevision;" in data
-    assert "const preservePendingManualOrder = !!pfPendingManualOrderCodes;" in data
-    assert "nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);" in data
-    assert data.find("nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, pfPendingManualOrderCodes);") < data.find("PfStore.items = nextPortfolioItems;")
+    assert "manualOrder: { pendingCodes: null, revision: 0, saveInFlight: false }," in store
+    assert "const loadOrderRevision = PfStore.manualOrder.revision;" in data
+    assert "const preservePendingManualOrder = !!PfStore.manualOrder.pendingCodes;" in data
+    assert "nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, PfStore.manualOrder.pendingCodes);" in data
+    assert data.find("nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, PfStore.manualOrder.pendingCodes);") < data.find("PfStore.items = nextPortfolioItems;")
     assert "function pfApplyManualOrder(items, orderedCodes)" in data
     assert "function _pfNextOrderAfterDrop(items, fromCode, toCode, dropPosition = 'before')" in order
     assert "const targetIdx = next.findIndex(i => i.stock_code === toCode);" in order
@@ -373,19 +371,19 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     assert "function _pfClearPortfolioDragOver(root = document)" in order
     assert "function _pfDropPositionForEvent(e, row)" in order
     assert "async function pfFlushManualOrderSave()" in order
-    assert "while (pfPendingManualOrderCodes && pfPendingManualOrderCodes.length)" in order
-    assert "if (!_pfSameOrderCodes(pfPendingManualOrderCodes, orderCodes) || pfManualOrderRevision !== orderRevision)" in order
+    assert "while (PfStore.manualOrder.pendingCodes && PfStore.manualOrder.pendingCodes.length)" in order
+    assert "if (!_pfSameOrderCodes(PfStore.manualOrder.pendingCodes, orderCodes) || PfStore.manualOrder.revision !== orderRevision)" in order
     assert "_legacyPfDropRowImmediateSave" not in order
-    assert "pfPendingManualOrderCodes = orderCodes;" in order
-    assert "pfManualOrderRevision += 1;" in order
-    assert "pfManualOrderSaveInFlight = true;" in order
+    assert "PfStore.manualOrder.pendingCodes = orderCodes;" in order
+    assert "PfStore.manualOrder.revision += 1;" in order
+    assert "PfStore.manualOrder.saveInFlight = true;" in order
     assert "_pfSetPortfolioSortOrder(orderCodes);" in order
     assert "_savePortfolioSnapshot(PfStore.items);" in order
     assert "if (!resp.ok)" in order
     assert "throw new Error(data.detail || 'Portfolio order save failed');" in order
     assert "await loadPortfolio({ force: true });" in order
     assert "async function pfDropRow" not in actions
-    assert "const canManualDrag = pfGroupFilter === null && !pfSortKey && !pfGroupSort && !searchText && currentUser && !pfEditingCode;" in render
+    assert "const canManualDrag = PfStore.filters.group === null && !PfStore.sort.key && !PfStore.sort.groupSort && !searchText && currentUser && !PfStore.edit.code;" in render
     assert "_pfDropPositionForEvent(e, tr)" in render
     assert "_pfClearPortfolioDragOver(tbody)" in render
     assert "pfDropRow(fromCode, toCode, dropPosition)" in render
@@ -421,7 +419,7 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     assert events.find(open_branch) < events.find(analyze_branch)
     assert "target.closest('#pfBody tr[data-code]')" in events
     assert "isPassivePortfolioRowTarget" in events
-    assert "!pfEditingCode && (el = portfolioRowFromTarget(t))" in events
+    assert "!PfStore.edit.code && (el = portfolioRowFromTarget(t))" in events
     assert "if (code) pfGoAnalyze(code, e);" in events
 
 
@@ -467,7 +465,9 @@ def test_portfolio_search_and_registration_are_separate_controls():
     assert 'id="pfAddToggle"' in html
     assert 'id="pfAddPanel"' in html
     assert html.find('id="pfAddToggle"') < html.find('id="pfCsvToggle"')
-    assert 'let pfPortfolioSearchText' in shell
+    # Search text lives in PfStore.filters (portfolio-store.js).
+    assert "filters: { group: null, searchText: '' }," in (JS / "portfolio-store.js").read_text(encoding="utf-8")
+    assert "PfStore.filters.searchText" in shell or "PfStore.filters.searchText" in data
     assert "function pfRowMatchesSearch" in data
     assert "...pfGetTags(item)" in data
     assert "function pfSetAddPanelOpen" in actions
@@ -499,8 +499,9 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
 
     assert 'type="button" class="pf-row-btn save js-pf-save"' in render
-    assert "let pfSavingEditCode = null" in (JS / "portfolio-shell.js").read_text(encoding="utf-8")
-    assert "const isSaving = pfSavingEditCode === r.stock_code" in render
+    # Edit state lives in PfStore.edit (portfolio-store.js).
+    assert "edit: { code: null, savingCode: null }," in (JS / "portfolio-store.js").read_text(encoding="utf-8")
+    assert "const isSaving = PfStore.edit.savingCode === r.stock_code" in render
     assert 'class="pf-row-saving" aria-busy="true"' in render
     assert "pf-save-spinner" in render
     assert 'class="pf-edit-input js-pf-edit-qty"' in render
@@ -509,7 +510,7 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     assert "savePortfolioEdit(code, undefined, el.closest('tr[data-code]'))" in events
     assert "function _pfFindEditRow(stockCode, row)" in actions
     assert "function _pfSetEditSaving(stockCode, saving, row)" in actions
-    assert "if (pfSavingEditCode) return;" in actions
+    assert "if (PfStore.edit.savingCode) return;" in actions
     assert "_pfSetEditSaving(stockCode, true, editRow)" in actions
     assert "editRow?.querySelector('.js-pf-edit-qty')" in actions
     assert "editRow?.querySelector('.js-pf-edit-price')" in actions
@@ -528,7 +529,7 @@ def test_portfolio_add_canonicalizes_alias_before_save():
     assert "portfolio code canonicalization failed" in source
     assert "/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}" in source
     assert "/api/portfolio/${encodeURIComponent(resolvedCode)}" in source
-    assert "pfEditingCode = resolvedCode" in source
+    assert "PfStore.edit.code = resolvedCode" in source
 
 
 def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
@@ -610,9 +611,9 @@ def test_benchmark_picker_only_opens_in_edit_mode():
 
     assert '<td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">' in render
     assert '<td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">' in render
-    assert "if (code && pfEditingCode === code) pfShowBenchmarkPicker(code, el);" in events
+    assert "if (code && PfStore.edit.code === code) pfShowBenchmarkPicker(code, el);" in events
     assert events.find("((el = t.closest('.js-pf-bench-set')))") < events.find("((el = t.closest('.js-pf-bench-picker')))")
-    assert "if (pfEditingCode !== stockCode)" in actions
+    assert "if (PfStore.edit.code !== stockCode)" in actions
     assert ".pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }" in styles
 
 

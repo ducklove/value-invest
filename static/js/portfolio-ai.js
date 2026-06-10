@@ -164,7 +164,7 @@ async function runAiAnalysis() {
           if (d.done) {
             const model = d.model ? ` · ${d.model}` : '';
             const costUsd = Number(d.cost || 0);
-            const costKrw = costUsd && pfFxRate ? Math.round(costUsd * pfFxRate) : null;
+            const costKrw = costUsd && PfStore.currency.fxRate ? Math.round(costUsd * PfStore.currency.fxRate) : null;
             const cost = costUsd ? ` · ${costKrw !== null ? costKrw.toLocaleString() + '원' : '$' + costUsd.toFixed(6)}` : '';
             const wikiN = Number(d.wiki_used || 0);
             const wikiTag = wikiN > 0 ? ` · 리포트 ${wikiN}건 참조` : '';

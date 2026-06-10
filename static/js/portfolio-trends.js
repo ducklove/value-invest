@@ -286,7 +286,7 @@ async function renderNavChart(data) {
   }
 
   const navValues = data.map(d => {
-    if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
+    if (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
     return d.nav;
   });
   const labels = data.map(d => d.date);
@@ -553,8 +553,8 @@ async function renderValueChart(data) {
 
   // Convert values using per-day FX rate when available
   const fxValues = data.map(d => {
-    if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.total_value / d.fx_usdkrw;
-    if (pfCurrency === 'USD') return pfFx(d.total_value); // fallback to current rate
+    if (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.total_value / d.fx_usdkrw;
+    if (PfStore.currency.unit === 'USD') return pfFx(d.total_value); // fallback to current rate
     return d.total_value;
   });
 
@@ -577,7 +577,7 @@ async function renderValueChart(data) {
     yAxis: {
       type: 'value',
       min: valYZero ? 0 : 'dataMin',
-      axisLabel: { formatter: v => sym + (v / div).toFixed(pfCurrency === 'USD' ? 2 : 0) + unit },
+      axisLabel: { formatter: v => sym + (v / div).toFixed(PfStore.currency.unit === 'USD' ? 2 : 0) + unit },
     },
     series: [{
       name: '평가금액',
@@ -623,7 +623,7 @@ async function renderValueChart(data) {
     const acctReturn = valTotalYears > 0 && _firstFxVal > 0
       ? ((_latestFxVal - _firstFxVal) / _firstFxVal * 100) / valTotalYears : null;
 
-    const fmtVal = v => pfCurrency === 'USD' ? '$' + Number(v.toFixed(0)).toLocaleString() : fmtKrw(Math.round(v));
+    const fmtVal = v => PfStore.currency.unit === 'USD' ? '$' + Number(v.toFixed(0)).toLocaleString() : fmtKrw(Math.round(v));
     const _periodPct = (days) => {
       if (fxValues.length < 2) return null;
       const slice = fxValues.slice(-days);
@@ -885,7 +885,7 @@ function renderNavReturns(data) {
   const mobileChartMode = _isMobileChartMode();
 
   const _nav = d => {
-    if (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
+    if (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
     return d.nav;
   };
 
@@ -967,7 +967,7 @@ function _updateNavCagrCard(data, startIdx, endIdx) {
   }
   // Same FX-aware accessor renderNavReturns uses — keep the two in sync so
   // switching the display currency is reflected in the zoomed CAGR too.
-  const _nav = d => (pfCurrency === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) ? d.nav / d.fx_usdkrw : d.nav;
+  const _nav = d => (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) ? d.nav / d.fx_usdkrw : d.nav;
   const firstNav = _nav(data[startIdx]);
   const lastNav = _nav(data[endIdx]);
   const days = (new Date(data[endIdx].date) - new Date(data[startIdx].date)) / 86400000;
