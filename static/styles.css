@@ -2209,6 +2209,59 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   .pf-divcal-events { padding-left: 16px; }
 }
 
+/* Investment journal (투자 일지) — 분석 화면 #stockJournalSection 과 성과 탭
+   #pfJournalWrap 두 표면이 같은 카드 스타일을 공유한다. 빈 상태는
+   .pf-risk-empty 재사용, 색은 모두 CSS 변수 기반. */
+.stock-journal {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.stock-journal-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.stock-journal-label { font-weight: 700; font-size: 13.5px; }
+.stock-journal-hint { font-size: 11.5px; color: var(--text-secondary); }
+.pf-journal-form { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.pf-journal-form-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pf-journal-form-row .pf-modal-input { min-width: 0; }
+.pf-journal-form-row #stockJournalQty { width: 120px; }
+.pf-journal-note-input {
+  width: 100%; box-sizing: border-box; resize: vertical; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
+  background: var(--surface); color: var(--text-primary); font-family: inherit;
+}
+.pf-journal-form-hint { font-size: 11px; color: var(--text-secondary); }
+.pf-journal-form-actions { display: flex; gap: 6px; margin-top: 4px; }
+.pf-journal-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pf-journal-card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
+  font-size: 12.5px; background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+}
+.pf-journal-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf-journal-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+  font-weight: 700; border: 1px solid var(--border); color: var(--text-secondary);
+}
+.pf-journal-badge.buy { color: #dc2626; border-color: #dc2626; }
+.pf-journal-badge.sell { color: #2563eb; border-color: #2563eb; }
+.pf-journal-stock { font-weight: 700; color: var(--text-primary); text-decoration: none; }
+.pf-journal-stock:hover { text-decoration: underline; }
+.pf-journal-date { color: var(--text-secondary); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.pf-journal-actions { margin-left: auto; display: flex; gap: 2px; }
+.pf-journal-icon-btn {
+  border: none; background: transparent; cursor: pointer; font-size: 13px;
+  padding: 2px 4px; border-radius: 6px; line-height: 1;
+}
+.pf-journal-icon-btn:hover { background: var(--hover); }
+.pf-journal-prices { margin-top: 6px; font-variant-numeric: tabular-nums; }
+.pf-journal-sub { font-size: 11px; color: var(--text-secondary); }
+.pf-journal-note { margin-top: 6px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }
+.pf-journal-edit { margin-top: 6px; }
+.pf-journal-foot { margin-top: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+@media (max-width: 760px) {
+  /* 모바일 — 폼 컨트롤은 풀폭으로 접고(.pf-rebal-editor-row 패턴), 카드의
+     액션 버튼은 헤더 줄바꿈을 허용한다. */
+  .pf-journal-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pf-journal-form-row #stockJournalQty { width: auto; }
+}
+
 /* Cashflow section */
 .pf-cashflow-section {
   margin-top: 24px;

@@ -138,6 +138,24 @@ async def run_data_quality_check(request: Request):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/daily-briefing/send")
+async def run_daily_briefing_send(request: Request):
+    """AI 데일리 브리핑 배치 발송 한 사이클. Loopback-only.
+
+    daily-briefing.timer (평일 08:20 KST) 가 구동한다. 옵트인
+    (user_settings.daily_briefing_enabled='true') 사용자에게만 생성·발송하고,
+    사용자별 결과는 system_events(source='daily_briefing') 에 남는다.
+    """
+    _require_loopback(request)
+    from services import daily_briefing
+    try:
+        result = await daily_briefing.send_briefings()
+        return {"ok": True, **result}
+    except Exception as exc:
+        logger.exception("daily briefing send failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/wiki/ingest")
 async def run_wiki_ingest(request: Request, payload: dict = Body(default={})):
     """Drive the wiki ingestion pipeline. Loopback-only.

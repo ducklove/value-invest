@@ -1,0 +1,24 @@
+[Unit]
+Description=Value Invest AI daily briefing push
+After=network.target
+OnFailure=value-invest-notify@%n.service
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+# 아침 데일리 브리핑 배치 — 옵트인 사용자별로 어제 NAV 변화/기여 종목/신규
+# 공시·리포트/오늘 경제 일정을 모아 LLM 요약(실패 시 템플릿 폴백)을 만들고
+# 텔레그램/카카오로 푸시한다. 웹 프로세스 안(loopback 내부 엔드포인트)에서
+# 실행되어 따뜻한 캐시·동일한 DB 기준을 공유한다. 사용자별 결과는
+# system_events(source='daily_briefing') 에 남는다.
+# LLM 호출이 사용자 수만큼 직렬로 일어나므로 타임아웃을 넉넉히 둔다.
+ExecStart=/usr/bin/curl -fsSk --max-time 600 -X POST https://127.0.0.1:3691/api/internal/daily-briefing/send
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+MemoryMax=100M
+CPUQuota=30%
+TasksMax=20

@@ -635,6 +635,26 @@ async def init_db():
             FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_rebalance_targets_user ON rebalance_targets(google_sub);
+
+        -- 투자 일지: 매수/매도/메모 판단의 '이유'를 기록하고 나중에 결과와
+        -- 함께 복기한다. price_at_entry/target_price_at_entry 는 작성 시점
+        -- 스냅샷(없으면 NULL). 항목은 append-only — note 만 수정 가능, 삭제
+        -- 허용. CRUD 는 repositories/journal.py 소유.
+        CREATE TABLE IF NOT EXISTS investment_journal (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            google_sub TEXT NOT NULL,
+            stock_code TEXT NOT NULL,
+            stock_name TEXT,
+            entry_type TEXT NOT NULL,
+            note TEXT NOT NULL,
+            price_at_entry REAL,
+            quantity REAL,
+            target_price_at_entry REAL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_investment_journal_user_stock ON investment_journal(google_sub, stock_code);
     """)
     await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
     await _ensure_column(db, "financial_data", "report_date", "TEXT")

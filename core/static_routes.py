@@ -60,6 +60,25 @@ def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: s
         # (browsers' default probe) so any page gets the icon without a 404.
         return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
 
+    async def manifest() -> FileResponse:
+        return FileResponse(
+            static_dir / "manifest.webmanifest",
+            media_type="application/manifest+json",
+        )
+
+    async def service_worker() -> FileResponse:
+        # no-cache so the browser revalidates /sw.js on every check and SW
+        # updates land promptly after a deploy; Service-Worker-Allowed lets
+        # the root-scope registration control the whole origin.
+        return FileResponse(
+            static_dir / "sw.js",
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "no-cache, must-revalidate",
+                "Service-Worker-Allowed": "/",
+            },
+        )
+
     async def admin_page() -> Response:
         html = (static_dir / "admin.html").read_text(encoding="utf-8")
         html = _with_asset_version(html, asset_version, relative=False)
@@ -73,6 +92,8 @@ def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: s
     app.add_api_route("/styles.css", styles, methods=["GET"])
     app.add_api_route("/favicon.svg", favicon, methods=["GET"])
     app.add_api_route("/favicon.ico", favicon, methods=["GET"])
+    app.add_api_route("/manifest.webmanifest", manifest, methods=["GET"])
+    app.add_api_route("/sw.js", service_worker, methods=["GET"])
     app.add_api_route("/admin.html", admin_page, methods=["GET"])
     app.mount("/js", StaticFiles(directory=str(static_dir / "js")), name="js")
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -83,6 +104,8 @@ def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: s
         "app_config": app_config,
         "integrations_status": integrations_status,
         "styles": styles,
+        "manifest": manifest,
+        "service_worker": service_worker,
         "admin_page": admin_page,
     }
 

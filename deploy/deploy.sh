@@ -32,6 +32,8 @@ REPO_UNITS=(
   "notify-calendar.timer"
   "data-quality.service"
   "data-quality.timer"
+  "daily-briefing.service"
+  "daily-briefing.timer"
   "deploy/value-invest.service"
 )
 

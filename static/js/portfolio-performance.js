@@ -56,6 +56,8 @@ function pfSwitchTab(tab) {
     if (typeof pfLoadRebalancePanel === 'function') pfLoadRebalancePanel();
     // 배당 캘린더 카드 동일 패턴(portfolio-dividends-calendar.js).
     if (typeof pfLoadDividendCalendarPanel === 'function') pfLoadDividendCalendarPanel();
+    // 투자 일지 카드 동일 패턴(portfolio-journal.js).
+    if (typeof pfLoadJournalPanel === 'function') pfLoadJournalPanel();
   }
 }
 

@@ -60,7 +60,39 @@ async def get_channels(request: Request):
                 "enabled": bool(ch.get("enabled")),
                 "nickname": (ch.get("config") or {}).get("nickname"),
             })
-    return {"telegram": telegram_status, "kakao": kakao_status}
+    # 데일리 브리핑 옵트인도 같은 응답에 실어 알림 설정 모달이 한 번에 그린다.
+    from services import daily_briefing
+    briefing_enabled = await daily_briefing.is_enabled(user["google_sub"])
+    return {
+        "telegram": telegram_status,
+        "kakao": kakao_status,
+        "daily_briefing": {"enabled": briefing_enabled},
+    }
+
+
+# --- AI 데일리 브리핑 옵트인 (기본 OFF) --------------------------------------
+
+@router.get("/briefing")
+async def get_briefing_setting(request: Request):
+    user = _require_user(await get_current_user(request))
+    from services import daily_briefing
+    return {"enabled": await daily_briefing.is_enabled(user["google_sub"])}
+
+
+@router.put("/briefing")
+async def put_briefing_setting(request: Request, payload: dict = Body(...)):
+    """아침 데일리 브리핑 켜기/끄기. 켤 때는 받을 채널이 있어야 의미가 있으므로
+    활성 채널이 없으면 409 (캘린더 구독과 동일한 규칙)."""
+    user = _require_user(await get_current_user(request))
+    from services import daily_briefing
+    enabled = bool(payload.get("enabled"))
+    if enabled and not await channels.has_active_channel(user["google_sub"]):
+        raise HTTPException(
+            status_code=409,
+            detail="브리핑을 받으려면 먼저 텔레그램 또는 카카오톡을 연결하세요.",
+        )
+    await daily_briefing.set_enabled(user["google_sub"], enabled)
+    return {"ok": True, "enabled": enabled}
 
 
 @router.post("/telegram/register")

@@ -141,12 +141,41 @@ function pfAlertsKakaoBlock(kk) {
   </div>`;
 }
 
+// 데일리 브리핑(아침 배치 푸시) 옵트인 — 채널과 같은 모달에서 켜고 끈다.
+// 서버 기본값 OFF. 발송은 연결된 채널(텔레그램/카카오)을 그대로 탄다.
+function pfAlertsBriefingBlock(br) {
+  const enabled = !!(br && br.enabled);
+  const onoff = enabled
+    ? '<span class="pf-alert-badge on">켜짐</span>'
+    : '<span class="pf-alert-badge off">꺼짐</span>';
+  return `<div class="pf-alert-channel" title="평일 아침 08:20, 연결된 채널로 어제 포트폴리오 요약·새 공시/리포트·오늘 일정을 담은 AI 브리핑을 보냅니다">
+    <span class="pf-alert-channel-name">🌅 데일리 브리핑</span>${onoff}
+    <span class="pf-alert-who">평일 08:20 발송</span>
+    <span class="pf-alert-channel-actions">
+      <button class="pf-alert-btn" type="button" onclick="pfAlertsToggleBriefing(${enabled ? 'false' : 'true'})">${enabled ? '끄기' : '켜기'}</button>
+    </span>
+  </div>`;
+}
+
+async function pfAlertsToggleBriefing(enabled) {
+  try {
+    const resp = await pfAlertsApi('/briefing', { method: 'PUT', body: JSON.stringify({ enabled }) });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+  } catch (e) {
+    reportApiError(e, '데일리 브리핑 설정');
+  } finally {
+    pfAlertsLoadChannels();
+  }
+}
+
 function pfAlertsRenderChannels() {
   const el = document.getElementById('pfAlertChannels');
   const data = PfAlerts.channels || {};
   el.innerHTML =
     pfAlertsTelegramBlock(data.telegram || {})
-    + pfAlertsKakaoBlock(data.kakao || {});
+    + pfAlertsKakaoBlock(data.kakao || {})
+    + pfAlertsBriefingBlock(data.daily_briefing || {});
 }
 
 async function pfAlertsTelegramRegister() {
@@ -481,7 +510,7 @@ if (typeof window !== 'undefined') {
   Object.assign(window, {
     pfOpenAlerts, pfCloseAlerts, pfAlertsToggleHelp,
     pfAlertsTelegramRegister, pfAlertsKakaoConnect,
-    pfAlertsTest, pfAlertsToggleChannel, pfAlertsUnlink,
+    pfAlertsTest, pfAlertsToggleChannel, pfAlertsUnlink, pfAlertsToggleBriefing,
     pfAlertsSetCategory, pfAlertsSubmit, pfAlertsToggle, pfAlertsToggleImportant, pfAlertsDelete,
   });
 }

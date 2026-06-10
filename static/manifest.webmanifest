@@ -1,0 +1,25 @@
+{
+  "lang": "ko",
+  "name": "Value Compass — 가치투자 나침반",
+  "short_name": "Value Compass",
+  "description": "Value is All You Need. 주식, 포트폴리오, 대체자산을 가치 중심으로 분석하는 투자 인사이트 허브.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f5f5",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-640.jpg",
+      "sizes": "640x640",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}

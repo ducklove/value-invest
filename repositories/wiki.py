@@ -90,6 +90,26 @@ async def get_wiki_entries(stock_code: str, limit: int = 20) -> list[dict]:
     return [dict(r) for r in await cursor.fetchall()]
 
 
+async def list_recent_entries(stock_codes: list[str], since_iso: str, *, limit: int = 10) -> list[dict]:
+    """최근(created_at >= since) 수집된 위키 항목(증권사 리포트 요약) 헤더 —
+    데일리 브리핑의 '신규 리포트' 소스. 요약 본문은 싣지 않는다."""
+    if not stock_codes:
+        return []
+    placeholders = ",".join("?" for _ in stock_codes)
+    db = await get_db()
+    cursor = await db.execute(
+        f"""
+        SELECT stock_code, firm, title, recommendation, target_price, report_date, created_at
+        FROM stock_wiki_entries
+        WHERE stock_code IN ({placeholders}) AND created_at >= ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (*stock_codes, since_iso, max(1, int(limit))),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
 async def search_wiki(stock_code: str, query: str, limit: int = 5) -> list[dict]:
     """FTS search scoped to one stock. Falls back to recency if FTS returns
     fewer than `limit` matches (e.g. question is too short for meaningful

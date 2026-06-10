@@ -648,6 +648,8 @@ async function renderResult(data) {
   loadStockExternalLinks(data.stock_code);
   // 해외 DR(예탁증서) 환산가 — 해당 종목에 DR 이 매핑돼 있으면 카드로 표시.
   loadStockDr(data.stock_code);
+  // 투자 일지 — 이 종목의 판단 기록 폼/타임라인(portfolio-journal.js).
+  if (typeof loadStockJournal === 'function') loadStockJournal(data.stock_code);
   _updateQuoteSubscriptions();
 }
 
