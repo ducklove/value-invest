@@ -196,6 +196,16 @@ function trackEvent(name, params = {}) {
       <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
       <div class="wiki-qa-meta" id="wikiQaMeta"></div>
     </div>
+
+    <!-- 투자 일지 — 이 종목에 대한 매수/매도/메모 판단 기록. portfolio-journal.js 가 채운다. -->
+    <div class="stock-journal" id="stockJournalSection">
+      <div class="stock-journal-head">
+        <span class="stock-journal-label">📝 투자 일지</span>
+        <span class="stock-journal-hint">매수·매도 판단의 이유를 기록하고, 나중에 당시 가격 대비 수익률과 함께 복기하세요.</span>
+      </div>
+      <div id="stockJournalForm"></div>
+      <div id="stockJournalList"></div>
+    </div>
   </div>
 
   <div id="emptyState" class="empty-state">
@@ -470,6 +480,16 @@ function trackEvent(name, params = {}) {
         </div>
       </div>
 
+      <div class="pf-nav-chart-wrap" id="pfJournalWrap" style="margin-top:24px;">
+        <div class="pf-nav-header">
+          <h3>투자 일지</h3>
+          <span class="pf-chart-note">매수·매도 판단 기록 · 당시 가격 대비 현재 수익률 복기</span>
+        </div>
+        <div id="pfJournalContent" class="pf-journal-content">
+          <div class="pf-risk-empty">성과 탭을 열면 투자 일지를 불러옵니다.</div>
+        </div>
+      </div>
+
       <div class="pf-nav-chart-wrap" style="margin-top:24px;">
         <div class="pf-nav-header">
           <h3>평가금액 추이</h3>
@@ -705,6 +725,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-risk.js" defer></script>
 <script src="./js/portfolio-rebalance.js" defer></script>
 <script src="./js/portfolio-dividends-calendar.js" defer></script>
+<script src="./js/portfolio-journal.js" defer></script>
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-group-composition.js" defer></script>
 <script src="./js/portfolio-cashflows.js" defer></script>

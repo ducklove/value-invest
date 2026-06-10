@@ -35,6 +35,7 @@ def _register_feature_routers(app: FastAPI) -> None:
     )
     from routes.dividend_calendar import router as dividend_calendar_router
     from routes.internal import router as internal_router
+    from routes.journal import router as journal_router
     from routes.portfolio_risk import router as portfolio_risk_router
     from routes.rebalance import router as rebalance_router
     from routes.wiki import router as wiki_router
@@ -49,6 +50,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         portfolio_risk_router,
         rebalance_router,
         dividend_calendar_router,
+        journal_router,
         ws_quotes_router,
         insights_router,
         market_daily_router,
@@ -179,7 +181,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=list(settings.cors_allowed_origins),
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        # PATCH: 투자 일지 note 수정(routes/journal.py)이 사용 — 교차 출처
+        # 프런트(GitHub Pages 등)의 preflight 가 거부되지 않게 허용한다.
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
     )
 

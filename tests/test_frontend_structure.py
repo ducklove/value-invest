@@ -20,6 +20,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-risk.js",
     "portfolio-rebalance.js",
     "portfolio-dividends-calendar.js",
+    "portfolio-journal.js",
     "portfolio-trends.js",
     "portfolio-group-composition.js",
     "portfolio-cashflows.js",
@@ -862,6 +863,61 @@ def test_performance_tab_includes_dividend_calendar_panel():
     assert ".pf-divcal-event.pf-divcal-est" in styles
     assert ".pf-divcal-event.pf-divcal-upcoming .pf-divcal-date" in styles
     assert ".pf-divcal-event { grid-template-columns: minmax(0, 1fr) auto; }" in styles
+
+
+def test_investment_journal_lives_in_analysis_view_and_performance_tab():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    journal = (JS / "portfolio-journal.js").read_text(encoding="utf-8")
+
+    # 표면 ① 종목 분석 화면: companyInfo 안(위키 Q&A 다음)의 '📝 투자 일지'
+    # 섹션 — renderResult 가 활성 종목으로 loadStockJournal 을 호출한다.
+    assert 'id="stockJournalSection"' in html
+    assert 'id="stockJournalForm"' in html
+    assert 'id="stockJournalList"' in html
+    assert "📝 투자 일지" in html
+    assert html.find('id="wikiQa"') < html.find('id="stockJournalSection"')
+    assert html.find('id="stockJournalSection"') < html.find('id="emptyState"')
+    assert "if (typeof loadStockJournal === 'function') loadStockJournal(data.stock_code);" in analysis
+    # 표면 ② 성과 탭 '투자 일지' 카드: 배당 캘린더 다음, 평가금액 추이 앞.
+    # 전 종목 타임라인(읽기/복기) — 성과 탭이 보일 때만 lazy 로드.
+    assert 'id="pfJournalWrap"' in html
+    assert 'id="pfJournalContent"' in html
+    assert html.find('id="pfDivCalWrap"') < html.find('id="pfJournalWrap"')
+    assert html.find('id="pfJournalWrap"') < html.find('id="pfValueChart"')
+    assert "if (typeof pfLoadJournalPanel === 'function') pfLoadJournalPanel();" in performance
+    # 기능 홈: fetch/렌더/폼/인라인 수정/삭제는 portfolio-journal.js.
+    assert "async function pfLoadJournalPanel(" in journal
+    assert "async function loadStockJournal(" in journal
+    assert "async function stockJournalSubmit()" in journal
+    assert "async function pfJournalSaveNote(" in journal
+    assert "async function pfJournalDelete(" in journal
+    assert "'/api/portfolio/journal'" in journal
+    assert "/api/portfolio/journal?stock_code=" in journal
+    assert "method: 'PATCH'" in journal
+    assert "method: 'DELETE'" in journal
+    # 백그라운드 로드는 silent, 사용자 조작(기록/수정/삭제)은 토스트.
+    assert "reportApiError(e, '투자 일지', { silent: true });" in journal
+    assert "reportApiError(e, '투자 일지 기록');" in journal
+    assert "reportApiError(e, '투자 일지 수정');" in journal
+    assert "reportApiError(e, '투자 일지 삭제');" in journal
+    # note 는 escapeHtml 로만 렌더(원시 HTML 금지) + 삭제는 confirm 게이트.
+    assert "${escapeHtml(entry.note)}" in journal
+    assert "window.confirm(" in journal
+    # 빈 상태/로그인 안내 문구.
+    assert "아직 기록이 없습니다" in journal
+    assert "기록된 투자 일지가 없습니다" in journal
+    # 포맷터는 공용 헬퍼 재사용(중복 정의 금지).
+    assert "function fmtPct(" not in journal
+    assert "function returnClass(" not in journal
+    assert "function escapeHtml(" not in journal
+    # 스타일: 카드/배지/폼 + 모바일 2열 접기(.pf-rebal-editor-row 패턴).
+    assert ".pf-journal-card" in styles
+    assert ".pf-journal-badge.buy" in styles
+    assert ".stock-journal" in styles
+    assert ".pf-journal-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
 
 
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
