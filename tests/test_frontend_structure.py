@@ -24,6 +24,14 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-events.js",
 ]
 
+# Dependencies-first: charts and filings define globals (chart state,
+# allReports, loadWiki, ...) that analysis.js orchestrates at runtime.
+ANALYSIS_SPLIT_FILES = [
+    "analysis-charts.js",
+    "analysis-filings.js",
+    "analysis.js",
+]
+
 
 def test_economic_calendar_section_and_script_present():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -124,6 +132,52 @@ def test_index_loads_portfolio_split_scripts_in_contract_order():
 
 def test_portfolio_feature_files_stay_below_maintenance_ceiling():
     for name in PORTFOLIO_SPLIT_FILES:
+        lines = (JS / name).read_text(encoding="utf-8").splitlines()
+        assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
+
+
+def test_index_loads_analysis_split_scripts_in_contract_order():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    positions = []
+    for name in ANALYSIS_SPLIT_FILES:
+        marker = f'./js/{name}'
+        pos = html.find(marker)
+        assert pos != -1, f"{name} is not loaded by index.html"
+        positions.append(pos)
+    assert positions == sorted(positions), "analysis split script order changed"
+    # 분할 파일은 검색(search.js) 다음, 나머지 뷰 스크립트(stock-alerts.js) 앞에 묶여 산다.
+    assert html.find("./js/search.js") < positions[0]
+    assert positions[-1] < html.find("./js/stock-alerts.js")
+
+
+def test_analysis_split_files_keep_feature_homes():
+    charts = (JS / "analysis-charts.js").read_text(encoding="utf-8")
+    filings = (JS / "analysis-filings.js").read_text(encoding="utf-8")
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+
+    # 차트: 주간/연간 그리드, 목표가 오버레이, 차트 모달, 기간 전환.
+    assert "async function renderChartGrid(" in charts
+    assert "async function _overlayTargetPrices(" in charts
+    assert "function openChartModal(" in charts
+    assert "function closeChartModal()" in charts
+    assert "async function switchValuationPeriod(" in charts
+    # 공시/리포트: DART AI 리뷰, 리포트 테이블, 위키 요약.
+    assert "function renderFilingReview(" in filings
+    assert "async function generateFilingReview(" in filings
+    assert "function renderReportsTable(" in filings
+    assert "async function loadWiki(" in filings
+    # 본체: 분석 SSE 오케스트레이션, 시세 요약, 위키 Q&A.
+    assert "async function analyzeStock(" in analysis
+    assert "async function renderResult(" in analysis
+    assert "function renderQuoteSnapshot(" in analysis
+    assert "async function askWikiQuestion()" in analysis
+    # SSE 스트리밍 호출은 apiFetch 타임아웃 제외 플래그를 유지한다.
+    assert "stream: true" in analysis
+
+
+def test_analysis_split_files_stay_below_maintenance_ceiling():
+    for name in ANALYSIS_SPLIT_FILES:
         lines = (JS / name).read_text(encoding="utf-8").splitlines()
         assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
 

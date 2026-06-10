@@ -1,7 +1,8 @@
-// jsdom behavior tests for static/js/analysis.js — focused on the external-tool
-// deep-link cards (renderStockExternalLinks). Loads utils.js (escapeHtml) +
-// analysis.js into a jsdom window. Network-bound loadStockExternalLinks() and
-// the heavy analyze flow are not exercised here.
+// jsdom behavior tests for the analysis view scripts — focused on the
+// external-tool deep-link cards (analysis.js) and the DART filing review
+// rendering helpers (analysis-filings.js). Loads utils.js (escapeHtml) plus
+// the analysis split files in index.html order. Network-bound
+// loadStockExternalLinks() and the heavy analyze flow are not exercised here.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -18,7 +19,7 @@ function load() {
     "<!doctype html><html><body><div id='coverageNote'></div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
   );
-  for (const src of [read("utils.js"), read("analysis.js")]) {
+  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis.js")]) {
     const s = dom.window.document.createElement("script");
     s.textContent = src;
     dom.window.document.body.appendChild(s);
