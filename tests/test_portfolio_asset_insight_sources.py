@@ -2,6 +2,8 @@ import unittest
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+import close_price_client
+import kis_proxy_client
 from routes import portfolio as pf
 from services.portfolio import insights
 
@@ -17,8 +19,8 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         local_rows = [{"date": "2026-05-07", "close": 12660.0}]
 
         with (
-            patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=local_rows)) as local,
-            patch.object(pf.kis_proxy_client, "get_history", new=AsyncMock()) as kis,
+            patch.object(close_price_client, "get_daily_closes", new=AsyncMock(return_value=local_rows)) as local,
+            patch.object(kis_proxy_client, "get_history", new=AsyncMock()) as kis,
         ):
             result = await insights.download_korean_history("003200", period_days=30)
 
@@ -31,8 +33,8 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         kis_payload = {"items": [{"stck_bsop_date": "20260507", "stck_clpr": "12660"}]}
 
         with (
-            patch.object(pf.close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])),
-            patch.object(pf.kis_proxy_client, "get_history", new=AsyncMock(return_value=kis_payload)) as kis,
+            patch.object(close_price_client, "get_daily_closes", new=AsyncMock(return_value=[])),
+            patch.object(kis_proxy_client, "get_history", new=AsyncMock(return_value=kis_payload)) as kis,
         ):
             result = await insights.download_korean_history("003200", period_days=30)
 
@@ -43,7 +45,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         local_rows = [{"date": "2026-05-07", "close": 3200.5}]
 
         with (
-            patch.object(pf.close_price_client, "get_macro_index", new=AsyncMock(return_value=local_rows)) as local,
+            patch.object(close_price_client, "get_macro_index", new=AsyncMock(return_value=local_rows)) as local,
             patch.object(insights, "download_yfinance_history", new=AsyncMock()) as yahoo,
         ):
             rows = await insights.benchmark_history_for_insight("IDX_KOSPI")
@@ -58,7 +60,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         for benchmark_code, series_id in (("IDX_KOSDAQ", "KOSDAQ"), ("IDX_SP500", "SP500")):
             insights.asset_history_cache.clear()
             with (
-                patch.object(pf.close_price_client, "get_macro_index", new=AsyncMock(return_value=local_rows)) as local,
+                patch.object(close_price_client, "get_macro_index", new=AsyncMock(return_value=local_rows)) as local,
                 patch.object(insights, "download_yfinance_history", new=AsyncMock()) as yahoo,
             ):
                 rows = await insights.benchmark_history_for_insight(benchmark_code)
@@ -72,7 +74,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         yf_rows = [{"date": "2026-05-07", "close": 3201.0}]
 
         with (
-            patch.object(pf.close_price_client, "get_macro_index", new=AsyncMock(return_value=[])),
+            patch.object(close_price_client, "get_macro_index", new=AsyncMock(return_value=[])),
             patch.object(insights, "download_yfinance_history", new=AsyncMock(return_value={"rows": yf_rows})),
         ):
             rows = await insights.benchmark_history_for_insight("IDX_KOSPI")
@@ -130,7 +132,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with (
-            patch.object(pf.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)) as local,
+            patch.object(close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)) as local,
             patch.object(pf.cache, "get_latest_market_valuation", new=AsyncMock(return_value={})),
             patch.object(pf.cache, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
         ):
@@ -169,7 +171,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
 
         cache_lookup = AsyncMock(return_value=cached)
         with (
-            patch.object(pf.close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)),
+            patch.object(close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)),
             patch.object(pf.cache, "get_latest_market_valuation", new=cache_lookup),
             patch.object(pf.cache, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
         ):
