@@ -118,14 +118,17 @@ class PortfolioAIWikiTests(unittest.IsolatedAsyncioTestCase):
                 return _FakeStreamCtx(200, lines)
 
         user = {"google_sub": "u1", "is_admin": False}
+        # Domain logic lives in services.portfolio.ai_analysis, which reaches
+        # quote enrichment / market indicators through shared module objects —
+        # patch those directly instead of via the routes.portfolio namespace.
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value=user)), \
              patch("httpx.AsyncClient", _FakeClient), \
-             patch("routes.portfolio._enrich_with_cached_quotes", new=AsyncMock(return_value=[{
+             patch("services.portfolio.quote_service.enrich_with_cached_quotes", new=AsyncMock(return_value=[{
                  "stock_code": "005930", "stock_name": "삼성전자",
                  "quantity": 10, "avg_price": 70000,
                  "quote": {"price": 80000, "change_pct": 1.5},
              }])), \
-             patch("routes.portfolio.market_indicators.fetch_indicators", new=AsyncMock(return_value={})):
+             patch("market_indicators.fetch_indicators", new=AsyncMock(return_value={})):
             response = await pf.ai_portfolio_analysis(_mk_request(), {})
             # Drain the stream INSIDE the patch context — the generator
             # is iterated lazily, so exiting `with patch(...)` before

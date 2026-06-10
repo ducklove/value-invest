@@ -119,8 +119,8 @@ def test_portfolio_quote_cache_accepts_newer_same_source_quote():
 
 
 def test_cached_quote_for_code_ignores_stale_polling_cache():
-    with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=None):
-        assert portfolio_route._cached_quote_for_code("005930") == {}
+    with patch.object(quote_service.stock_quotes, "get_stock_cached", return_value=None):
+        assert quote_service.cached_quote_for_code("005930") == {}
 
 
 def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
@@ -134,8 +134,8 @@ def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
         market="NX",
     )
 
-    with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock):
-        assert portfolio_route._cached_quote_for_code("000660") == {
+    with patch.object(quote_service.stock_quotes, "get_stock_cached", return_value=stock):
+        assert quote_service.cached_quote_for_code("000660") == {
             "code": "000660",
             "date": "2026-05-21",
             "price": 1818000,
