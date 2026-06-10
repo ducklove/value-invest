@@ -288,3 +288,15 @@ async function loadWikiStats() {
     // Silent — the badge is optional UX; no error toast.
   }
 }
+
+// --- PWA: service worker registration (installability v1) ---------------
+// Feature-detected and non-fatal — the app behaves identically without it.
+// sw.js is conservative by contract: network-first for HTML and /api/*,
+// cache-first only for ?v=-stamped (immutable) assets and manifest/icons.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Silent — installability is a progressive enhancement.
+    });
+  });
+}

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -918,6 +919,66 @@ def test_investment_journal_lives_in_analysis_view_and_performance_tab():
     assert ".pf-journal-badge.buy" in styles
     assert ".stock-journal" in styles
     assert ".pf-journal-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+
+
+def test_pwa_manifest_declares_installable_app():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    manifest = json.loads((STATIC / "manifest.webmanifest").read_text(encoding="utf-8"))
+
+    # index.html wires the manifest + theme color + iOS raster touch icon.
+    assert '<link rel="manifest" href="./manifest.webmanifest">' in html
+    assert '<meta name="theme-color" content="#2563eb">' in html
+    assert '<link rel="apple-touch-icon" href="./static/icon-640.jpg">' in html
+
+    # Installability contract: standalone display from '/', Korean app name.
+    assert manifest["lang"] == "ko"
+    assert manifest["name"] == "Value Compass — 가치투자 나침반"
+    assert manifest["short_name"] == "Value Compass"
+    assert manifest["start_url"] == "/"
+    assert manifest["scope"] == "/"
+    assert manifest["display"] == "standalone"
+    # Colors mirror styles.css :root (--bg / --primary).
+    assert manifest["background_color"] == "#f5f5f5"
+    assert manifest["theme_color"] == "#2563eb"
+    icons = {icon["src"]: icon for icon in manifest["icons"]}
+    assert icons["/favicon.svg"]["type"] == "image/svg+xml"
+    assert icons["/favicon.svg"]["sizes"] == "any"
+    assert icons["/static/icon-640.jpg"]["type"] == "image/jpeg"
+    assert icons["/static/icon-640.jpg"]["sizes"] == "640x640"
+
+
+def test_pwa_service_worker_keeps_conservative_cache_contract():
+    sw = (STATIC / "sw.js").read_text(encoding="utf-8")
+    app_main = (JS / "app-main.js").read_text(encoding="utf-8")
+
+    # Registration is feature-detected and non-fatal (app-main.js tail).
+    assert "'serviceWorker' in navigator" in app_main
+    assert "navigator.serviceWorker.register('/sw.js')" in app_main
+    assert ".catch(" in app_main
+
+    # The SW must never break server-side ?v= cache busting:
+    # HTML is network-first and never cached; /api/* is never intercepted.
+    assert "NO HTML caching" in sw
+    assert "network-only" in sw
+    assert "request.mode === 'navigate'" in sw
+    assert "url.pathname.startsWith('/api/')) return;" in sw
+    # cache-first applies only to immutable ?v=-stamped URLs + manifest/icons.
+    assert "url.searchParams.has('v')" in sw
+    assert "isVersionStampedAsset(url) || isPrecachedShellExtra(url)" in sw
+    assert "'/manifest.webmanifest'" in sw
+    assert "'/favicon.svg'" in sw
+    assert "'/static/icon-640.jpg'" in sw
+    # No offline app shell — only a tiny inline navigation fallback.
+    assert "OFFLINE_HTML" in sw
+    assert "status: 503" in sw
+    # Versioned cache name + activate-time cleanup of old caches.
+    assert "const CACHE_NAME = 'vc-static-v" in sw
+    assert "keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))" in sw
+    # Guard against strategy regressions: no stale-while-revalidate, no
+    # caching inside the navigation branch.
+    assert "staleWhileRevalidate" not in sw
+    navigate_branch = sw.split("request.mode === 'navigate'", 1)[1]
+    assert "cache.put" not in navigate_branch
 
 
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
