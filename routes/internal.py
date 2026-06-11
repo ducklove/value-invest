@@ -101,6 +101,67 @@ async def run_notifications_evaluate(request: Request):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+# 텔레그램 메시지 한도(4096) 아래에서 제목/출처 표기와 채널별 오버헤드 여유분.
+_NOTIFY_TEXT_MAX = 3800
+
+
+@router.post("/notify")
+async def send_notification(request: Request, payload: dict = Body(...)):
+    """연결 프로젝트 공용 알림 발송 — 채널 설정·토큰은 이 허브 한 곳에만 둔다.
+
+    gold_gap, spac-hunter, nps-tracker, finance-pi 같은 서브프로젝트는
+    텔레그램 봇 토큰이나 카카오 OAuth 토큰을 들고 있을 필요 없이 이
+    엔드포인트 하나만 호출한다. 카카오 refresh token 은 갱신 시 회전하므로
+    여러 프로세스가 같은 토큰을 공유하면 서로를 무효화한다 — 발송 주체를
+    허브로 단일화해야 하는 구조적 이유. 같은 호스트는 loopback 으로, 다른
+    호스트(finance-pi 등)는 INTERNAL_API_TOKEN + X-Internal-Token 헤더로
+    인증한다.
+
+    payload:
+      text        필수. 본문.
+      title       선택. 첫 줄에 📌 와 함께 표기.
+      source      선택. 발신 프로젝트 표기 (마지막 줄 "— <source>").
+      google_sub  선택. 지정 시 해당 사용자에게만, 생략 시 활성 채널을 가진
+                  전체 사용자에게 보낸다.
+    """
+    _require_loopback(request)
+    text = str((payload or {}).get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    title = str(payload.get("title") or "").strip()
+    source = str(payload.get("source") or "").strip()
+    lines = []
+    if title:
+        lines.append(f"📌 {title}")
+    lines.append(text)
+    if source:
+        lines.append(f"— {source}")
+    message = "\n".join(lines)
+    if len(message) > _NOTIFY_TEXT_MAX:
+        message = message[: _NOTIFY_TEXT_MAX - 1] + "…"
+
+    from repositories import users as users_repo
+    from services.notifications import channels
+
+    requested_sub = str(payload.get("google_sub") or "").strip()
+    if requested_sub:
+        targets = [requested_sub]
+    else:
+        targets = [u["google_sub"] for u in await users_repo.get_all_users()]
+
+    sent = 0
+    notified_users = 0
+    for sub in targets:
+        # dispatch 는 채널 단위 실패를 삼키고 보낸 건수만 돌려준다 — 한
+        # 채널 장애가 다른 수신자/채널을 막지 않는다.
+        count = await channels.dispatch(sub, message)
+        sent += count
+        if count:
+            notified_users += 1
+    return {"ok": True, "sent": sent, "users": notified_users}
+
+
 @router.post("/notifications/evaluate-calendar")
 async def run_calendar_notifications_evaluate(request: Request):
     """Run one economic-calendar result-alert evaluation pass. Loopback-only.
