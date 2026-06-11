@@ -9,6 +9,17 @@ from cache_layer import MemoryTTLCache
 
 QUOTE_CACHE_TTL = 60
 
+# 같은 거래일 안에서 낮은 랭크 소스(naver/rest)가 높은 랭크(ws) 시세를 덮지
+# 못하게 막는 보호 시간. 늦게 도착한 REST 응답이 더 새로운 WS 틱을 되돌리는
+# 레이스를 막는 게 목적이므로, 이 시간이 지나면 시각 비교로 더 새로운 시세를
+# 받아들인다 — 보호를 무기한으로 두면 WS 틱이 끊긴 종목(거래 한산, WS 연결
+# 유실)이 아침 틱 한 번에 그날 내내 동결된다.
+#
+# 20초인 이유: 레이스의 최대 폭은 REST 응답의 비행 시간(KIS proxy 타임아웃
+# 20초)이고, 프론트 일반 폴링이 60초 주기라 55초 미만이면 어떤 값이든 첫
+# 폴링에서 동결이 풀린다 — 더 줄여도 회복은 빨라지지 않고 마진만 준다.
+QUOTE_RANK_PROTECT_SECONDS = 20.0
+
 
 def quote_from_ws(
     ws_quote: dict[str, Any] | None,
@@ -86,6 +97,14 @@ def _quote_source_rank(quote: dict[str, Any] | None) -> int:
     return 2
 
 
+def _quote_is_recent(quote: dict[str, Any] | None) -> bool:
+    timestamp_ms = _quote_time_value(quote)
+    if timestamp_ms is None:
+        # 시각을 알 수 없으면 보수적으로 "신선"으로 취급해 랭크 보호를 유지.
+        return True
+    return (time.time() * 1000 - timestamp_ms) < QUOTE_RANK_PROTECT_SECONDS * 1000
+
+
 def should_accept_quote_snapshot(
     current: dict[str, Any] | None,
     incoming: dict[str, Any] | None,
@@ -105,10 +124,12 @@ def should_accept_quote_snapshot(
 
     current_rank = _quote_source_rank(current)
     incoming_rank = _quote_source_rank(incoming)
-    if incoming_rank < current_rank:
-        return False
     if incoming_rank > current_rank:
         return True
+    # 랭크 강등은 현재 시세가 보호 시간 안에 있을 때만 거부 — 보호가 끝나면
+    # 아래 시각 비교로 넘어가 더 새로운 값이면 받아들인다.
+    if incoming_rank < current_rank and _quote_is_recent(current):
+        return False
 
     current_time = _quote_time_value(current)
     incoming_time = _quote_time_value(incoming)

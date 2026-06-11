@@ -35,6 +35,29 @@ def test_quote_from_ws_normalizes_realtime_payload():
     assert quotes.quote_from_ws(None) is None
 
 
+def test_should_accept_quote_snapshot_rank_protection_expires_with_age():
+    today = datetime.now().date().isoformat()
+    now = time.time()
+    rest_incoming = {"price": 101, "date": today, "source": "rest", "ts": now}
+
+    # 보호 시간 안의 ws 시세는 낮은 랭크 갱신을 거부한다 (레이스 방지).
+    fresh_ws = {"price": 100, "date": today, "source": "ws", "ts": now - 5}
+    assert quotes.should_accept_quote_snapshot(fresh_ws, rest_incoming) is False
+
+    # 보호 시간이 지나면 시각 비교로 넘어가 더 새로운 시세를 받아들인다 —
+    # WS 틱이 끊긴 종목이 그날 내내 동결되지 않는다.
+    aged_ws = {"price": 100, "date": today, "source": "ws", "ts": now - 60}
+    assert quotes.should_accept_quote_snapshot(aged_ws, rest_incoming) is True
+
+    # 보호가 끝났어도 더 오래된 시세는 여전히 거부된다.
+    older_incoming = {"price": 99, "date": today, "source": "rest", "ts": now - 120}
+    assert quotes.should_accept_quote_snapshot(aged_ws, older_incoming) is False
+
+    # 시각 정보가 없는 현재 시세는 보수적으로 보호를 유지한다.
+    timeless_ws = {"price": 100, "date": today, "source": "ws"}
+    assert quotes.should_accept_quote_snapshot(timeless_ws, rest_incoming) is False
+
+
 def test_quote_from_ws_rejects_old_payload_when_max_age_requested():
     old = {"price": 1000, "ts": time.time() - 120}
 
@@ -79,26 +102,25 @@ def test_portfolio_quote_cache_ignores_stale_quotes():
 
 
 def test_portfolio_quote_cache_keeps_rest_quote_over_later_history_fallback():
+    # 랭크 보호는 신선한(보호 시간 내) 시세에만 적용되므로 현재 시각 기준
+    # 픽스처로 레이스 시나리오(직후 도착한 history 폴백)를 재현한다.
     cache = quotes.PortfolioQuoteCache()
-
-    assert cache.remember("005930", {
-        "date": "2026-05-26",
+    today = datetime.now().date().isoformat()
+    rest_quote = {
+        "date": today,
         "price": 1000,
         "source": "rest",
-        "fetched_at": "2026-05-26T09:01:00",
-    })
+        "fetched_at": datetime.now().isoformat(),
+    }
+
+    assert cache.remember("005930", rest_quote)
     assert not cache.remember("005930", {
-        "date": "2026-05-26",
+        "date": today,
         "price": 990,
         "source": "history",
-        "fetched_at": "2026-05-26T09:02:00",
+        "fetched_at": datetime.now().isoformat(),
     })
-    assert cache.get_fresh("005930") == {
-        "date": "2026-05-26",
-        "price": 1000,
-        "source": "rest",
-        "fetched_at": "2026-05-26T09:01:00",
-    }
+    assert cache.get_fresh("005930") == rest_quote
 
 
 def test_portfolio_quote_cache_accepts_newer_same_source_quote():

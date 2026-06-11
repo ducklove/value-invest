@@ -645,9 +645,13 @@ def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     assert "if (incomingDate < currentDate) return false;" in utils
     assert "const currentRank = quoteSourceRank(current);" in utils
     assert "const incomingRank = quoteSourceRank(incoming);" in utils
-    assert "if (incomingRank < currentRank) return false;" in utils
     assert "if (incomingRank > currentRank) return true;" in utils
-    assert utils.find("if (incomingRank < currentRank) return false;") < utils.find("const currentTime = quoteSnapshotTimeValue(current);")
+    # 랭크 강등 거부는 보호 시간 내 신선한 시세에만 적용 — WS 틱이 끊긴
+    # 종목이 같은 날짜 안에서 폴링 갱신까지 막혀 동결되지 않게 한다.
+    assert "const QUOTE_RANK_PROTECT_MS = 20_000;" in utils
+    assert "function quoteSnapshotIsRecent(q)" in utils
+    assert "if (incomingRank < currentRank && quoteSnapshotIsRecent(current)) return false;" in utils
+    assert utils.find("if (incomingRank < currentRank && quoteSnapshotIsRecent(current)) return false;") < utils.find("const currentTime = quoteSnapshotTimeValue(current);")
     assert "function mergeQuoteSupplementalFields(current, incoming)" in utils
     assert "const fields = ['previous_close', 'trade_value'];" in utils
     assert "if (!quoteValuePresent(next.change_pct))" in utils

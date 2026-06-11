@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -112,17 +112,19 @@ async def test_get_stock_treats_alphanumeric_krx_etf_as_domestic_rest_quote():
 
 @pytest.mark.asyncio
 async def test_get_stock_rejects_lower_rank_history_after_rest_quote():
+    # 랭크 보호는 현재 시세가 신선할 때(QUOTE_RANK_PROTECT_SECONDS 이내)의
+    # 레이스 방지 장치다 — 직후 도착한 비-stale history 가 REST 를 덮지 못한다.
     rest_quote = {
         "price": 70100,
         "previous_close": 69500,
         "source": "rest",
-        "fetched_at": "2026-05-28T09:02:00",
+        "fetched_at": datetime.now().isoformat(),
     }
     history_quote = {
         "price": 69900,
         "previous_close": 69500,
         "source": "history",
-        "fetched_at": "2026-05-28T09:03:00",
+        "fetched_at": datetime.now().isoformat(),
     }
     with patch.object(stock_quotes.kis_ws_manager, "ws_cache_matches_rest_market", return_value=False), \
          patch.object(stock_quotes.stock_price, "fetch_quote_snapshot", new=AsyncMock(side_effect=[rest_quote, history_quote])):
@@ -201,6 +203,61 @@ async def test_get_bulk_quote_snapshots_skips_upstream_for_empty_input():
     ) as bulk:
         assert await stock_quotes.get_bulk_quote_snapshots(["", "  "]) == {}
     bulk.assert_not_awaited()
+
+
+def _naver_bulk_quote(price: float) -> dict:
+    return {
+        "price": price,
+        "previous_close": 69000,
+        "source": "naver",
+        "date": datetime.now().date().isoformat(),
+        "fetched_at": datetime.now().isoformat(),
+    }
+
+
+@pytest.mark.asyncio
+async def test_bulk_refresh_unfreezes_quote_after_ws_ticks_stop():
+    # WS 틱이 끊긴 종목: 마지막 ws 시세가 보호 시간을 넘기면 폴링이 가져온
+    # 네이버 벌크 시세가 같은 날이라도 받아들여져야 한다 (동결 버그 회귀 방지).
+    stock_quotes._last_known["005930"] = stock_quotes.Stock(
+        code="005930",
+        current_price=70000,
+        previous_close=69000,
+        volume=None,
+        created_at=datetime.now() - timedelta(seconds=120),
+        source="ws",
+    )
+    with patch.object(
+        stock_quotes.stock_price,
+        "fetch_bulk_quotes_kr",
+        new=AsyncMock(return_value={"005930": _naver_bulk_quote(70500)}),
+    ):
+        results = await stock_quotes.get_bulk_quote_snapshots(["005930"])
+
+    assert results["005930"]["price"] == 70500
+    assert stock_quotes._last_known["005930"].current_price == 70500
+
+
+@pytest.mark.asyncio
+async def test_bulk_refresh_keeps_fresh_ws_quote_within_protect_window():
+    # 보호 시간 안의 ws 시세는 낮은 랭크 벌크 시세가 덮지 못한다 (레이스 방지).
+    stock_quotes._last_known["005930"] = stock_quotes.Stock(
+        code="005930",
+        current_price=70000,
+        previous_close=69000,
+        volume=None,
+        created_at=datetime.now() - timedelta(seconds=5),
+        source="ws",
+    )
+    with patch.object(
+        stock_quotes.stock_price,
+        "fetch_bulk_quotes_kr",
+        new=AsyncMock(return_value={"005930": _naver_bulk_quote(70500)}),
+    ):
+        results = await stock_quotes.get_bulk_quote_snapshots(["005930"])
+
+    assert results["005930"]["price"] == 70000
+    assert stock_quotes._last_known["005930"].current_price == 70000
 
 
 @pytest.mark.asyncio

@@ -92,6 +92,18 @@ function quoteSourceRank(q) {
   return 2;
 }
 
+// 랭크 강등 보호 시간 — 서버(services/portfolio/quotes.py의
+// QUOTE_RANK_PROTECT_SECONDS)와 같은 값·같은 이유. 늦게 도착한 REST 응답이
+// 더 새로운 WS 틱을 되돌리는 레이스만 막고, 보호가 끝나면 시각 비교로
+// 넘어가 WS 틱이 끊긴 종목도 폴링 시세로 계속 갱신되게 한다.
+const QUOTE_RANK_PROTECT_MS = 20_000;
+
+function quoteSnapshotIsRecent(q) {
+  const ts = quoteSnapshotTimeValue(q);
+  if (ts === null) return true; // 시각을 모르면 보수적으로 보호 유지
+  return Date.now() - ts < QUOTE_RANK_PROTECT_MS;
+}
+
 function shouldAcceptQuoteSnapshot(current, incoming) {
   if (!incoming || incoming.price === null || incoming.price === undefined) return false;
   if (incoming._stale === true && quoteIsUsable(current)) return false;
@@ -103,8 +115,9 @@ function shouldAcceptQuoteSnapshot(current, incoming) {
   }
   const currentRank = quoteSourceRank(current);
   const incomingRank = quoteSourceRank(incoming);
-  if (incomingRank < currentRank) return false;
   if (incomingRank > currentRank) return true;
+  // 랭크 강등은 현재 시세가 보호 시간 안에 있을 때만 거부.
+  if (incomingRank < currentRank && quoteSnapshotIsRecent(current)) return false;
 
   const currentTime = quoteSnapshotTimeValue(current);
   const incomingTime = quoteSnapshotTimeValue(incoming);
