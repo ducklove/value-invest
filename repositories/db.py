@@ -13,10 +13,13 @@ repositories/* 는 cache 를 import 하지 않고 이 모듈만 본다. cache.py
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import aiosqlite
+
+from core.errors import DBError
 
 # 프로젝트 루트의 cache.db — cache.py 가 들고 있던 경로와 동일.
 DB_PATH = Path(__file__).resolve().parent.parent / "cache.db"
@@ -77,6 +80,10 @@ async def transaction():
     호출은, 같은 task 라면 바깥 트랜잭션에 그대로 합류한다 (BEGIN/COMMIT
     없이 커넥션만 yield) — 데드락 없이 바깥 블록이 commit/rollback 을
     단독 결정한다.
+
+    예외: 블록 안에서 발생한 sqlite 오류는 롤백 후 ``core.errors.DBError``
+    로 변환된다 (원본 메시지 보존, ``__cause__`` 유지). 앱 정의 예외나
+    일반 예외는 타입 그대로 통과한다.
     """
     global _txn_owner
     current = asyncio.current_task()
@@ -91,6 +98,9 @@ async def transaction():
             await db.execute("BEGIN IMMEDIATE")
             try:
                 yield db
+            except sqlite3.Error as exc:
+                await db.rollback()
+                raise DBError(str(exc)) from exc
             except BaseException:
                 await db.rollback()
                 raise

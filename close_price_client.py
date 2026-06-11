@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from core.errors import ExternalServiceError
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,7 @@ _client_lock: asyncio.Lock | None = None
 _skip_until: float = 0.0
 
 
-class ClosePriceClientError(RuntimeError):
+class ClosePriceClientError(ExternalServiceError):
     pass
 
 
