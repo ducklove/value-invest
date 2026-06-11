@@ -65,6 +65,54 @@ Results are cached ~15 minutes and each fetch fails independently:
 This path needs neither local config nor the `/admin.html` config writer; it only
 needs each dashboard's public GitHub Pages / raw content to be reachable.
 
+## Shared Notification API (공용 알림)
+
+서브프로젝트는 텔레그램 봇 토큰이나 카카오 OAuth 토큰을 **직접 들고 있지
+않는다**. 알림 채널 설정·토큰·카카오 refresh 갱신은 전부 이 허브 한 곳에
+있고, 다른 프로젝트는 HTTP 한 번으로 발송을 위임한다. 카카오 refresh
+token 은 갱신 시 회전하므로 여러 프로세스가 같은 토큰을 공유하면 서로를
+무효화한다 — 발송 주체를 허브로 단일화해야 하는 구조적 이유이기도 하다.
+
+```
+POST /api/internal/notify
+{
+  "text":   "금 시세 괴리 5% 초과",   // 필수
+  "title":  "골드갭 알림",            // 선택 — 첫 줄에 📌 표기
+  "source": "gold_gap",              // 선택 — 마지막 줄 "— gold_gap"
+  "google_sub": "..."                // 선택 — 생략 시 활성 채널 보유 전체 사용자
+}
+→ {"ok": true, "sent": 2, "users": 1}
+```
+
+인증은 다른 `/api/internal/*` 와 동일: 같은 호스트는 loopback 으로 충분하고,
+다른 호스트(finance-pi 등)는 `.env.production` 의 `INTERNAL_API_TOKEN` 값을
+`X-Internal-Token` 헤더로 보낸다.
+
+```bash
+# 같은 Pi 의 다른 프로젝트 (loopback)
+curl -s -X POST http://127.0.0.1:3691/api/internal/notify \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"백테스트 완료","source":"nps-tracker"}'
+```
+
+```python
+# 다른 호스트의 프로젝트 (예: finance-pi) — 의존성은 httpx 뿐
+import httpx
+
+def notify(text: str, *, title: str = "", source: str = "finance-pi") -> None:
+    httpx.post(
+        "https://cantabile.tplinkdns.com:3691/api/internal/notify",
+        json={"text": text, "title": title, "source": source},
+        headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+        timeout=10,
+    )
+```
+
+메시지는 텔레그램 한도 아래(3,800자)로 잘리고, 채널 단위 실패는 허브가
+삼키므로 호출자는 fire-and-forget 으로 쓰면 된다. 시세가 필요한
+서브프로젝트는 같은 원리로 `POST /api/asset-quotes` (국내·해외·금·암호화폐
+공통, 인증 불요)를 호출한다 — 시세 수집기/토큰을 복제하지 않는다.
+
 ## Local Config Discovery
 
 By default `value-invest` looks one directory above the repo root for sibling
