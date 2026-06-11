@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from core.config import AppSettings, get_settings, load_environment
+from core.errors import register_exception_handlers
 from core.lifespan import app_lifespan
 from core.runtime import RuntimeState, get_asset_version
 from core.static_routes import register_static_routes
@@ -187,6 +188,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
     )
 
+    register_exception_handlers(app)
     _register_latency_observer(app)
     _register_feature_routers(app)
 

@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 import close_price_client
+from core.errors import ExternalServiceError
 
 
 BASE_URL = os.getenv("KIS_PROXY_BASE_URL", "http://cantabile.tplinkdns.com:3288").rstrip("/")
@@ -50,7 +51,7 @@ async def _acquire_rate_slot() -> None:
         _last_send_ts = now
 
 
-class KISProxyError(RuntimeError):
+class KISProxyError(ExternalServiceError):
     pass
 
 

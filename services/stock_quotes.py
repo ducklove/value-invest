@@ -1,3 +1,27 @@
+"""현재가 조회의 단일 진입점 — 국내 주식·해외 주식·특수자산(현금/금/암호화폐).
+
+모든 quote 조회(API route, 배치, 알림 엔진)는 이 모듈의 ``get_stock`` /
+``get_quote_snapshot`` / ``get_bulk_quote_snapshots`` 를 거친다. 호출자가
+``stock_price`` 나 개별 수집기를 직접 부르지 않아야 캐시·폴백·동시성 제어가
+한 곳에서 유지된다.
+
+폴백 정책 (위에서 아래로, 성공하면 멈춤):
+
+1. **메모리 캐시** (``_stock_cache``, TTL 60초) — 코드 무관 공통.
+2. **KIS WebSocket 캐시** — 국내 주식, 시장 모드(KRX/NXT)가 일치하고
+   ``max_ws_age_seconds`` 이내일 때만.
+3. **업스트림 조회**
+   - 국내 주식: ``stock_price.fetch_quote_snapshot`` — KIS proxy REST
+     (NXT 실패 시 KRX 1회 재시도) → 일봉 히스토리 종가(stale 표기).
+     다건은 ``get_bulk_quote_snapshots`` 가 네이버 벌크 API 1회 호출로
+     처리하고, 빠진 코드만 위 개별 경로로 흘려보낸다(호출자 책임).
+   - 해외 주식·특수자산: ``register_quote_fetcher`` 로 주입된 외부 fetcher
+     (``services.portfolio.quote_service`` — 현금/FX 환율 스크레이프,
+     KRX 금, 암호화폐, 해외는 ticker 해석 후 yfinance/Naver).
+4. **dead-stock 캐시 + last-known** — 업스트림 실패 시 5분간 재시도를
+   막고(_dead_stock_cache) 마지막으로 성공한 시세를 stale 로 반환.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -272,6 +296,25 @@ async def get_stock(
 
 async def get_quote_snapshot(code: str, **kwargs: Any) -> dict[str, Any]:
     return stock_to_quote(await get_stock(code, **kwargs))
+
+
+async def get_bulk_quote_snapshots(codes: list[str]) -> dict[str, dict[str, Any]]:
+    """국내(KRX) 코드 다건을 한 번의 업스트림 호출로 조회해 캐시에 반영한다.
+
+    Best-effort: 업스트림이 해석하지 못한 코드는 결과에서 빠지므로 호출자는
+    빠진 코드를 개별 경로(``get_stock``/``get_quote_snapshot``)로 폴백해야
+    한다. 성공한 시세는 단건 경로와 같은 캐시(``remember_quote``)에 기록돼
+    이후 단건 조회·cached 조회와 일관된 값을 돌려준다.
+    """
+    normalized = [c for c in dict.fromkeys(_normalize_code(c) for c in codes) if c]
+    if not normalized:
+        return {}
+    bulk = await stock_price.fetch_bulk_quotes_kr(normalized)
+    results: dict[str, dict[str, Any]] = {}
+    for code, quote in bulk.items():
+        remembered = remember_quote(code, quote)
+        results[_normalize_code(code)] = stock_to_quote(remembered) if remembered else quote
+    return results
 
 
 def getStock(code: str) -> Stock | None:

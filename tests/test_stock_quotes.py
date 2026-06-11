@@ -30,7 +30,7 @@ def test_runtime_quote_callers_use_stock_quotes_service_boundary():
         if path in allowed:
             continue
         source = path.read_text(encoding="utf-8")
-        if "fetch_quote_snapshot(" in source:
+        if "fetch_quote_snapshot(" in source or "fetch_bulk_quotes_kr(" in source:
             offenders.append(str(path.relative_to(ROOT)))
 
     assert offenders == []
@@ -164,6 +164,43 @@ async def test_get_quote_snapshot_derives_change_from_previous_close():
     assert quote["change"] == 600
     assert quote["change_pct"] == 0.86
     assert quote["volume"] == 100
+
+
+@pytest.mark.asyncio
+async def test_get_bulk_quote_snapshots_caches_results_for_single_code_path():
+    bulk_quote = {
+        "price": 318500,
+        "previous_close": 299500,
+        "source": "naver",
+        "date": "2026-06-11",
+        "fetched_at": "2026-06-11T10:00:00",
+    }
+    with patch.object(
+        stock_quotes.stock_price,
+        "fetch_bulk_quotes_kr",
+        new=AsyncMock(return_value={"005930": bulk_quote}),
+    ) as bulk:
+        results = await stock_quotes.get_bulk_quote_snapshots(["005930", "005930", " ", "000660"])
+
+    bulk.assert_awaited_once_with(["005930", "000660"])
+    assert results["005930"]["price"] == 318500
+    assert results["005930"]["change"] == 19000
+    # 벌크로 받은 시세는 단건 캐시에도 기록돼 이후 cached 조회와 일관돼야 한다.
+    cached = stock_quotes.get_stock_cached("005930", allow_stale=False)
+    assert cached is not None and cached.current_price == 318500
+    # 업스트림이 해석 못 한 코드는 결과에서 빠진다(호출자가 개별 폴백).
+    assert "000660" not in results
+
+
+@pytest.mark.asyncio
+async def test_get_bulk_quote_snapshots_skips_upstream_for_empty_input():
+    with patch.object(
+        stock_quotes.stock_price,
+        "fetch_bulk_quotes_kr",
+        new=AsyncMock(),
+    ) as bulk:
+        assert await stock_quotes.get_bulk_quote_snapshots(["", "  "]) == {}
+    bulk.assert_not_awaited()
 
 
 @pytest.mark.asyncio

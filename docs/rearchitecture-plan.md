@@ -61,15 +61,15 @@ flowchart TD
 - `services/portfolio/time_windows.py`: 22시 결산 기준 Today window, intraday baseline timestamp 분리 완료.
 - `services/portfolio/dividends.py`: 배당 워밍업 대상 선정, 우선주 본주 동시 예열, TTL/running 중복 방지 규칙 분리 완료.
 - `services/portfolio/runtime_quotes.py`: 배치/wiki/외국배당 코드가 `routes.portfolio` private 함수에 직접 의존하지 않도록 quote provider seam 추가 완료. 실제 구현은 아직 route runtime에 있으므로 다음 단계에서 `QuoteService`로 이동 필요.
-- `services/stock_quotes.py`: 국내 주식 현재가의 단일 진입점 추가 완료. `Stock(code, current_price, previous_close, volume, created_at)` 모델, 1회 조회(`get_stock`/`getStock`), 지속 구독(`get_stock_cont`/`getStockCont`), 내부 캐시, WS 우선/REST fallback을 이 모듈에 모았다. API/배치의 현재가 조회는 `stock_price.fetch_quote_snapshot`을 직접 호출하지 않고 이 service를 거친다.
+- `services/stock_quotes.py`: 현재가의 단일 진입점 완료 — 국내 주식에 더해 해외 주식·특수자산(현금/금/암호화폐)은 `quote_service`가 주입한 외부 fetcher로, 국내 다건은 `get_bulk_quote_snapshots`(네이버 벌크 1회 호출)로 같은 캐시를 공유한다. `Stock(code, current_price, previous_close, volume, created_at)` 모델, 1회 조회(`get_stock`/`getStock`), 지속 구독(`get_stock_cont`/`getStockCont`), 내부 캐시, WS 우선/REST fallback을 이 모듈에 모았다. API/배치의 현재가 조회는 `stock_price.fetch_quote_snapshot`/`fetch_bulk_quotes_kr`을 직접 호출하지 않고 이 service를 거친다(테스트가 경계 강제). 폴백 정책은 모듈 docstring에 명문화.
 - `cache.add_cashflow_and_sync_cash`, `cache.delete_cashflow_and_sync_cash`: 현금흐름과 `CASH_KRW` 잔액 갱신을 단일 transaction으로 묶는 1차 DB 경계 정리 완료.
 
-다음 후보:
+위 "다음 후보"였던 항목들은 모두 완료됐다:
 
-- `services/stock_quotes.py`: 현재 국내 주식 중심으로 강제한 단일 진입점을 해외 주식과 특수자산 quote까지 확장한다.
-- `services/portfolio/names.py`: 종목명/코드 alias/Reuters/Yahoo ticker resolution 분리.
-- `services/portfolio/targets.py`: 목표가 수식 평가와 자동 목표가 근거 계산 분리.
-- `services/portfolio/history.py`: NAV, 평가금액, 그룹/종목 비중 추이 조회와 chart payload 조립 분리.
+- `services/stock_quotes.py` 해외·특수자산 확장 + 국내 벌크 경로 흡수 (2026-06-11).
+- `services/portfolio/names.py`, `targets.py`(+`target_resolver.py`/`target_metrics.py`), `history.py` 분리 완료.
+
+남은 것: `routes/portfolio.py`는 1,195줄로 목표(1,000줄 미만)에 아직 못 미친다 — 다음 추출 후보를 정할 때 갱신할 것.
 
 ### 4. DB 계층 정리
 
@@ -94,9 +94,30 @@ flowchart TD
 
 1. 환경 분리와 설정 단일화. (완료)
 2. `main.py` app factory 분리. (완료)
-3. `portfolio.py`에서 quote/benchmark부터 서비스로 추출. (진행 중 — names/targets/배당 워밍업 잔여)
+3. `portfolio.py`에서 quote/benchmark부터 서비스로 추출. (완료 — 2026-06-11, names/targets/배당 워밍업/벌크 시세 포함)
 4. `cache.py` repository 분리와 transaction helper. (완료 — 2026-06-10)
 5. 프론트 portfolio store 도입. (완료 — 2026-06-10)
+
+## 2026-06-11 진행 기록
+
+리팩토링 리뷰(`docs/refactoring-review-2026-06.html`) Phase 2 잔여 2건 처리:
+
+- **2-1 시세 단일화 마무리**: 국내 벌크 시세(`fetch_bulk_quotes_kr`)의 마지막
+  직접 호출(`routes/portfolio.py`)을 `services/stock_quotes.get_bulk_quote_snapshots`
+  로 흡수 — 벌크 결과가 단건 경로와 같은 캐시에 기록된다. 폴백 정책
+  (메모리 캐시 → KIS WS → KIS REST/NXT 재시도/외부 fetcher → dead-cache+stale)을
+  모듈 docstring에 명문화하고, `fetch_quote_snapshot`/`fetch_bulk_quotes_kr`
+  직접 호출 금지를 구조 테스트로 강제.
+- **2-5 예외 처리 체계화(기반 + 1차 적용)**: `core/errors.py`에
+  `AppError(RuntimeError)` / `ExternalServiceError`(502) / `RateLimitError`(429) /
+  `DBError`(500) 계층과 `register_exception_handlers()` 도입, app factory에서 등록.
+  `KISProxyError`·`ClosePriceClientError`를 `ExternalServiceError`로 재베이스
+  (RuntimeError 상속 유지로 기존 핸들러 호환), `repositories/db.transaction()`이
+  sqlite 오류를 `DBError`로 변환(메시지·cause 보존). **잔여**: 라우트별 광역
+  `except Exception`의 점진 교체는 파일 단위로 계속한다.
+- **auth 상태 복원력**: `/api/auth/me`의 네트워크 오류·5xx를 "비로그인"으로
+  오판해 로그인 UI가 깜빡이던 문제 수정 — 4xx/명시적 user:null만 로그아웃
+  판정, 그 외에는 직전 상태 유지. jsdom 행위 테스트 7건 추가.
 
 ## 2026-06-10 진행 기록
 
