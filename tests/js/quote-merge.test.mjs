@@ -126,6 +126,32 @@ test("shouldAcceptQuoteSnapshot — same date: rank downgrade rejected, upgrade 
   );
 });
 
+test("shouldAcceptQuoteSnapshot — rank protection expires after QUOTE_RANK_PROTECT_MS", () => {
+  const d = "20260611";
+  const nowSec = Date.now() / 1000;
+  const restIncoming = { price: 101, date: d, source: "rest", ts: nowSec };
+
+  // 보호 시간 안의 ws 시세는 낮은 랭크 갱신을 거부 (레이스 방지).
+  assert.equal(
+    w.shouldAcceptQuoteSnapshot({ price: 100, date: d, source: "ws", ts: nowSec - 5 }, restIncoming),
+    false,
+  );
+  // 보호 시간이 지나면 시각 비교로 더 새로운 폴링 시세를 받아들인다 —
+  // WS 틱이 끊긴 종목이 같은 날짜 안에서 동결되지 않는다.
+  const agedWs = { price: 100, date: d, source: "ws", ts: nowSec - 60 };
+  assert.equal(w.shouldAcceptQuoteSnapshot(agedWs, restIncoming), true);
+  // 보호가 끝났어도 더 오래된 시세는 여전히 거부.
+  assert.equal(
+    w.shouldAcceptQuoteSnapshot(agedWs, { price: 99, date: d, source: "rest", ts: nowSec - 120 }),
+    false,
+  );
+  // 시각 정보가 없는 현재 시세는 보수적으로 보호 유지.
+  assert.equal(
+    w.shouldAcceptQuoteSnapshot({ price: 100, date: d, source: "ws" }, restIncoming),
+    false,
+  );
+});
+
 test("shouldAcceptQuoteSnapshot — equal rank falls back to ts (sec vs ms normalized)", () => {
   // current ts in epoch seconds, incoming in epoch ms — 1s older → rejected.
   assert.equal(
