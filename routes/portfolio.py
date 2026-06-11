@@ -16,7 +16,6 @@ from repositories import benchmark_daily as benchmark_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
-import stock_price
 from deps import get_current_user
 from services import stock_quotes
 from services.portfolio import ai_analysis
@@ -485,15 +484,13 @@ async def asset_quotes_batch(payload: dict = Body(...)):
     if domestic:
         try:
             bulk = await asyncio.wait_for(
-                stock_price.fetch_bulk_quotes_kr(domestic),
+                stock_quotes.get_bulk_quote_snapshots(domestic),
                 timeout=_ASSET_QUOTES_ITEM_TIMEOUT,
             )
-        except (asyncio.TimeoutError, Exception) as exc:
+        except Exception as exc:
             logger.warning("벌크 시세 조회 실패; 개별 조회로 폴백: %s", exc)
             bulk = {}
-        for code, quote in bulk.items():
-            remembered = stock_quotes.remember_quote(code, quote)
-            results[code] = stock_quotes.stock_to_quote(remembered) if remembered else quote
+        results.update(bulk)
 
     remaining = [code for code in codes if not results.get(code)]
     if not remaining:

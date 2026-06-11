@@ -155,8 +155,8 @@ def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
 async def test_asset_quotes_batch_fresh_korean_quotes_force_refresh_without_ws_cache():
     # Bulk source unavailable → falls through to the per-code path.
     with patch.object(
-        portfolio_route.stock_price,
-        "fetch_bulk_quotes_kr",
+        stock_quotes,
+        "get_bulk_quote_snapshots",
         new=AsyncMock(return_value={}),
     ), patch.object(
         portfolio_route,
@@ -196,11 +196,11 @@ async def test_asset_quotes_batch_uses_bulk_for_korean_codes_without_per_code_ca
         source="naver",
     )
     with patch.object(
-        portfolio_route.stock_price,
+        stock_quotes.stock_price,
         "fetch_bulk_quotes_kr",
         new=AsyncMock(return_value={"005930": bulk_quote}),
     ), patch.object(
-        portfolio_route.stock_quotes,
+        stock_quotes,
         "remember_quote",
         return_value=remembered,
     ), patch.object(
@@ -289,7 +289,7 @@ async def test_asset_quotes_batch_returns_stale_fallback_on_fetch_timeout():
     )
 
     with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock), \
-         patch.object(portfolio_route.stock_price, "fetch_bulk_quotes_kr", new=AsyncMock(return_value={})), \
+         patch.object(stock_quotes, "get_bulk_quote_snapshots", new=AsyncMock(return_value={})), \
          patch.object(
              portfolio_route,
              "_fetch_quote",
@@ -319,7 +319,7 @@ async def test_asset_quotes_batch_returns_fallback_for_pending_batch_timeout():
         return {"price": 1}
 
     with patch.object(portfolio_route.stock_quotes, "get_stock_cached", return_value=stock), \
-         patch.object(portfolio_route.stock_price, "fetch_bulk_quotes_kr", new=AsyncMock(return_value={})), \
+         patch.object(stock_quotes, "get_bulk_quote_snapshots", new=AsyncMock(return_value={})), \
          patch.object(portfolio_route, "_ASSET_QUOTES_BATCH_TIMEOUT", 0.01), \
          patch.object(portfolio_route, "_fetch_quote", new=slow_fetch):
         result = await portfolio_route.asset_quotes_batch({
