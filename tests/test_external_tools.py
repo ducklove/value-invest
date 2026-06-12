@@ -158,6 +158,29 @@ class ExternalSummaryTests(unittest.TestCase):
         self.assertEqual(external_tools._summarize_etf_picks({}, "2026-06-12")["top"], [])
 
 
+class EtfChangeFillTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fill_etf_changes_merges_realtime_quotes(self):
+        from services import stock_quotes
+        picks = [
+            {"code": "310970", "name": "A"},
+            {"code": "278540", "name": "B"},
+        ]
+        quotes = {"310970": {"price": 10000, "change_pct": 1.23}}
+        with patch.object(stock_quotes, "get_bulk_quote_snapshots", new=AsyncMock(return_value=quotes)) as fake:
+            await external_tools._fill_etf_changes(picks)
+        self.assertEqual(fake.await_args.args[0], ["310970", "278540"])
+        self.assertEqual(picks[0]["changePct"], 1.23)
+        self.assertNotIn("changePct", picks[1])  # 시세 못 구한 종목은 그대로('-' 표시)
+
+    async def test_fill_etf_changes_survives_fetch_failure(self):
+        from services import stock_quotes
+        picks = [{"code": "310970"}]
+        with patch.object(stock_quotes, "get_bulk_quote_snapshots", new=AsyncMock(side_effect=RuntimeError("boom"))):
+            await external_tools._fill_etf_changes(picks)  # 예외 전파 없이 통과
+        self.assertNotIn("changePct", picks[0])
+        await external_tools._fill_etf_changes([])  # 빈 목록도 무해
+
+
 class StockLinkMatchTests(unittest.TestCase):
     SPREAD_CUR = {"prices": {"samsung_elec": {"spread": 36.12, "spreadChange": -0.14,
                                               "commonPrice": 317000, "preferredPrice": 202500}}}

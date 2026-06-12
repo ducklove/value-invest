@@ -371,7 +371,7 @@ test("_extRender adds a SPAC card (after spread) showing 현재가 with ?code= d
   assert.ok(!root.innerHTML.includes("<b>x</b>"));
 });
 
-test("_extRender adds 오늘의 추천 ETF card with AIYN scores and deep-links", () => {
+test("_extRender adds 오늘의 추천 ETF card with realtime daily change and deep-links", () => {
   const w = load();
   const root = w.document.getElementById("externalTools");
   w._extRender(root, {
@@ -379,8 +379,9 @@ test("_extRender adds 오늘의 추천 ETF card with AIYN scores and deep-links"
       url: "https://ducklove.github.io/eiayn/",
       date: "2026-06-12",
       top: [
-        { rank: 1, name: "TIGER MSCI Korea TR", code: "310970", score: 92, link: "https://ducklove.github.io/eiayn/?code=310970" },
-        { rank: 7, name: "<b>x</b>", code: "0000", score: null },  // link 없음 → 도구 홈
+        { rank: 1, name: "TIGER MSCI Korea TR", code: "310970", score: 92, changePct: 1.23, link: "https://ducklove.github.io/eiayn/?code=310970" },
+        { rank: 5, name: "KODEX 코리아밸류업", code: "495850", score: 86, changePct: -0.5 },
+        { rank: 7, name: "<b>x</b>", code: "0000", score: 83 },  // 시세 실패 → changePct 없음, link 없음 → 도구 홈
       ],
     },
   });
@@ -389,14 +390,18 @@ test("_extRender adds 오늘의 추천 ETF card with AIYN scores and deep-links"
   assert.match(cards[0].innerHTML, /오늘의 추천 ETF/);
   assert.match(cards[0].innerHTML, /AIYN TOP 100/);
   const rows = cards[0].querySelectorAll(".ext-row");
-  assert.equal(rows.length, 2);
-  // 항목 deep-link + 테마 전달, AIYN 점수 표기.
+  assert.equal(rows.length, 3);
+  // 항목 deep-link + 테마 전달, 값 = 일간 등락률(부호 + 방향 색상).
   assert.match(rows[0].getAttribute("href"), /eiayn\/\?code=310970/);
   assert.match(rows[0].getAttribute("href"), /[?&]theme=(light|dark)/);
-  assert.match(rows[0].innerHTML, /92점/);
-  // score 없으면 '-', link 없으면 도구 홈, 적대적 이름 escape.
-  assert.match(rows[1].getAttribute("href"), /eiayn\//);
-  assert.match(rows[1].querySelector(".ext-val").textContent, /^-$/);
+  assert.equal(rows[0].querySelector(".ext-val").textContent, "+1.23%");
+  assert.ok(rows[0].querySelector(".ext-val.md-up"));
+  assert.equal(rows[1].querySelector(".ext-val").textContent, "-0.50%");
+  assert.ok(rows[1].querySelector(".ext-val.md-down"));
+  // 시세 없는 항목은 '-'(md-flat), link 없으면 도구 홈, 적대적 이름 escape.
+  assert.match(rows[2].getAttribute("href"), /eiayn\//);
+  assert.equal(rows[2].querySelector(".ext-val").textContent, "-");
+  assert.ok(rows[2].querySelector(".ext-val.md-flat"));
   assert.ok(!cards[0].innerHTML.includes("<b>x</b>"));
 });
 

@@ -330,9 +330,35 @@ async def _gold_summary() -> dict | None:
     return _summarize_gold(data)
 
 
+async def _fill_etf_changes(picks: list[dict]) -> None:
+    """추천 ETF 의 일간 등락률(changePct)을 실시간 시세로 채운다.
+
+    rankings.json 은 일배치 산출물이라 등락률이 하루 묵는다 — 목록(추첨)만
+    거기서 쓰고 등락률은 시세 서비스(벌크)로 별도 조회한다. TOP 100 이 전부
+    국내(KRX) ETF 라 벌크 한 번이면 충분하고, 시세를 못 구한 종목은
+    changePct 없이 둔다(프론트는 '-' 표시).
+    """
+    codes = [str(p.get("code") or "").strip() for p in picks]
+    codes = [c for c in codes if c]
+    if not codes:
+        return
+    try:
+        from services import stock_quotes
+        quotes = await stock_quotes.get_bulk_quote_snapshots(codes)
+    except Exception as exc:
+        logger.warning("ETF picks quote fetch failed: %s", exc)
+        return
+    for p in picks:
+        q = quotes.get(str(p.get("code") or "").strip())
+        if isinstance(q, dict) and q.get("change_pct") is not None:
+            p["changePct"] = q["change_pct"]
+
+
 async def _etf_picks_summary() -> dict | None:
     data = await _get_json("https://ducklove.github.io/eiayn/data/rankings.json")
-    return _summarize_etf_picks(data, datetime.now(KST).strftime("%Y-%m-%d"))
+    out = _summarize_etf_picks(data, datetime.now(KST).strftime("%Y-%m-%d"))
+    await _fill_etf_changes(out["top"])
+    return out
 
 
 async def _spac_summary() -> dict | None:

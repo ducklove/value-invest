@@ -787,12 +787,15 @@ function _extRender(root, data) {
   }
   const ep = data && data.etfPicks;
   if (ep && (ep.top || []).length) {
-    // AIYN 점수 TOP 100 중 날마다(서버, KST 날짜 시드) 5개 추첨. 값 = AIYN 점수.
+    // AIYN 점수 TOP 100 중 날마다(서버, KST 날짜 시드) 5개 추첨.
+    // 값 = 일간 등락률(서버가 실시간 시세로 별도 조회) — 방향 색상 포함.
     const rows = ep.top.map((r) => {
-      const score = r.score == null ? '-' : `${r.score}점`;
+      const n = Number(r.changePct);
+      const has = r.changePct != null && isFinite(n);
+      const cls = has ? (n > 0 ? 'md-up' : (n < 0 ? 'md-down' : 'md-flat')) : 'md-flat';
       return `<a class="ext-row" href="${escapeHtml(_extHref(r.link || ep.url))}" target="_blank" rel="noopener noreferrer">`
         + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
-        + `<span class="ext-val">${escapeHtml(score)}</span></a>`;
+        + `<span class="ext-val ${cls}">${escapeHtml(_extPct(r.changePct, true))}</span></a>`;
     }).join('');
     cards.push(_extCard('오늘의 추천 ETF', ep.url, 'AIYN TOP 100 중 오늘의 5선', rows));
   }
