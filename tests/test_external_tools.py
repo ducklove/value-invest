@@ -112,15 +112,50 @@ class ExternalSummaryTests(unittest.TestCase):
             "updated_at": "2026-05-30 16:34 KST",
             "gold": {"dates": ["2026-05-30", "2026-05-31"], "gap_pct": [-3.0, -2.81]},
             "bitcoin": {"dates": ["2026-05-31"], "gap_pct": [-1.63]},
+            "eth": {"dates": ["2026-05-31"], "gap_pct": [-0.99]},
             "usdt": {"gap_pct": []},  # 빈 → 제외
         }
         out = external_tools._summarize_gold(data)
         keys = [a["key"] for a in out["assets"]]
-        self.assertEqual(keys, ["gold", "bitcoin"])
+        self.assertEqual(keys, ["gold", "bitcoin", "eth"])
         gold = out["assets"][0]
         self.assertEqual(gold["gap"], -2.81)  # 최신값
         self.assertEqual(gold["date"], "2026-05-31")
         self.assertIn("asset=gold", gold["link"])
+        eth = out["assets"][2]
+        self.assertEqual(eth["label"], "이더리움")
+        self.assertIn("asset=eth", eth["link"])
+
+    def test_summarize_etf_picks_daily_seed_stable_and_rank_sorted(self):
+        data = {
+            "count": 100,
+            "generatedAt": "2026-06-11T23:03:12.120Z",
+            "etfs": [
+                {"rank": i, "ticker": f"T{i:03d}", "shortName": f"ETF{i}",
+                 "market": "국내", "aiynScore": 100 - i,
+                 "link": f"https://ducklove.github.io/eiayn/?code=T{i:03d}"}
+                for i in range(1, 101)
+            ],
+        }
+        out1 = external_tools._summarize_etf_picks(data, "2026-06-12")
+        out2 = external_tools._summarize_etf_picks(data, "2026-06-12")
+        # 같은 날짜 시드 → 항상 같은 5개 (캐시 만료 후 재계산에도 불변).
+        self.assertEqual(len(out1["top"]), 5)
+        self.assertEqual([r["code"] for r in out1["top"]], [r["code"] for r in out2["top"]])
+        # 노출은 rank 오름차순.
+        ranks = [r["rank"] for r in out1["top"]]
+        self.assertEqual(ranks, sorted(ranks))
+        self.assertEqual(out1["universe"], 100)
+        self.assertEqual(out1["url"], external_tools.SITE["etf"])
+        # 다른 날짜 시드 → 다른 조합 (시드 고정이라 이 비교 결과도 결정적).
+        out3 = external_tools._summarize_etf_picks(data, "2026-06-13")
+        self.assertNotEqual([r["code"] for r in out1["top"]], [r["code"] for r in out3["top"]])
+
+    def test_summarize_etf_picks_small_universe(self):
+        data = {"etfs": [{"rank": 1, "ticker": "A", "shortName": "A", "aiynScore": 9}]}
+        out = external_tools._summarize_etf_picks(data, "2026-06-12")
+        self.assertEqual(len(out["top"]), 1)
+        self.assertEqual(external_tools._summarize_etf_picks({}, "2026-06-12")["top"], [])
 
 
 class StockLinkMatchTests(unittest.TestCase):
@@ -218,13 +253,15 @@ class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
              patch.object(external_tools, "_spread_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
              patch.object(external_tools, "_gold_summary", new=AsyncMock(return_value={"assets": [], "url": "u"})), \
              patch.object(external_tools, "_spac_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
-             patch.object(external_tools, "_nps_summary", new=AsyncMock(return_value={"top": [], "url": "u"})):
+             patch.object(external_tools, "_nps_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
+             patch.object(external_tools, "_etf_picks_summary", new=AsyncMock(return_value={"top": [], "url": "u"})):
             out = await external_tools.fetch_external_insights()
         self.assertNotIn("holding", out)
         self.assertIn("spread", out)
         self.assertIn("goldGap", out)
         self.assertIn("spac", out)
         self.assertIn("nps", out)
+        self.assertIn("etfPicks", out)
 
 
 if __name__ == "__main__":

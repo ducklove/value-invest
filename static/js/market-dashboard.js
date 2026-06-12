@@ -785,6 +785,17 @@ function _extRender(root, data) {
     }).join('');
     cards.push(_extCard('김치프리미엄', g.url, '국내가 vs 국제가', rows));
   }
+  const ep = data && data.etfPicks;
+  if (ep && (ep.top || []).length) {
+    // AIYN 점수 TOP 100 중 날마다(서버, KST 날짜 시드) 5개 추첨. 값 = AIYN 점수.
+    const rows = ep.top.map((r) => {
+      const score = r.score == null ? '-' : `${r.score}점`;
+      return `<a class="ext-row" href="${escapeHtml(_extHref(r.link || ep.url))}" target="_blank" rel="noopener noreferrer">`
+        + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
+        + `<span class="ext-val">${escapeHtml(score)}</span></a>`;
+    }).join('');
+    cards.push(_extCard('오늘의 추천 ETF', ep.url, 'AIYN TOP 100 중 오늘의 5선', rows));
+  }
   const nps = data && data.nps;
   const npsAlloc = nps && nps.allocation;
   if (npsAlloc && (npsAlloc.classes || []).length) {
