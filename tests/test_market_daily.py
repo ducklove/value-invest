@@ -6,70 +6,164 @@ import pytest
 import market_daily
 
 
-@pytest.mark.asyncio
-async def test_quote_moves_uses_portfolio_runtime_quote_boundary():
-    with patch.object(
-        market_daily.portfolio_quotes,
-        "fetch_quote",
-        new=AsyncMock(return_value={
-            "price": 70000,
-            "date": "2026-05-28",
-            "change": 700,
-            "change_pct": 1.0,
-            "trade_value": 123000,
-        }),
-    ) as fetch_quote:
-        rows = await market_daily._quote_moves(
-            [{"stock_code": "AAPL", "stock_name": "Apple", "sources": ["watch"]}],
-            0.2,
-        )
+def _llm_env_patches(post_mock):
+    """_call_openrouter 호출에 필요한 외부 의존(모델 설정·키·LLM)을 한 번에 패치."""
+    return (
+        patch.object(market_daily.ai_config, "get_model_for_feature", new=AsyncMock(return_value="test-model")),
+        patch.object(market_daily.ai_config, "openrouter_reasoning_controls", return_value={}),
+        patch.object(market_daily.ai_client, "require_openrouter_key", new=AsyncMock()),
+        patch.object(market_daily.ai_client, "post_chat_completion", new=post_mock),
+    )
 
-    fetch_quote.assert_awaited_once_with("AAPL")
-    self_row = rows[0]
-    assert self_row["stock_code"] == "AAPL"
-    assert self_row["price"] == 70000
-    assert self_row["change_pct"] == 1.0
+
+@pytest.mark.asyncio
+async def test_call_openrouter_retries_transient_failure_then_succeeds():
+    ok = {"content": "## 시황", "model": "test-model", "input_tokens": 10, "output_tokens": 20, "cost_usd": 0.001}
+    post = AsyncMock(side_effect=[RuntimeError("timeout"), ok])
+    p1, p2, p3, p4 = _llm_env_patches(post)
+    with p1, p2, p3, p4:
+        result = await market_daily._call_openrouter({"market": [], "movers": [], "market_news": []}, None)
+    assert result["llm_ok"] is True
+    assert result["markdown"] == "## 시황"
+    assert post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_call_openrouter_falls_back_after_all_attempts():
+    payload = {
+        "market": [{"code": "KOSPI", "label": "KOSPI", "value": "8,414.04", "change_pct": 8.37}],
+        "movers": [],
+        "market_news": [],
+    }
+    post = AsyncMock(side_effect=RuntimeError("down"))
+    p1, p2, p3, p4 = _llm_env_patches(post)
+    with p1, p2, p3, p4:
+        result = await market_daily._call_openrouter(payload, None)
+    assert result["llm_ok"] is False
+    assert "KOSPI" in result["markdown"]  # fallback 은 수집 근거를 보여준다
+    assert post.await_count == market_daily.MARKET_DAILY_LLM_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_call_openrouter_retries_empty_content():
+    ok = {"content": "## 본문", "model": "test-model", "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.0}
+    post = AsyncMock(side_effect=[{**ok, "content": ""}, ok])
+    p1, p2, p3, p4 = _llm_env_patches(post)
+    with p1, p2, p3, p4:
+        result = await market_daily._call_openrouter({"market": [], "movers": [], "market_news": []}, None)
+    assert result["llm_ok"] is True
+    assert result["markdown"] == "## 본문"
+
+
+@pytest.mark.asyncio
+async def test_build_daily_market_brief_is_market_wide_without_portfolio():
+    with patch.object(market_daily, "_market_snapshot", new=AsyncMock(
+            return_value=([{"code": "KOSPI", "label": "KOSPI", "value": "8,000", "change_pct": 1.0}], 1.0))), \
+         patch.object(market_daily, "_tape_movers", new=AsyncMock(return_value=[
+             {"stock_code": "900110", "stock_name": "이슈", "price": 1000,
+              "change_pct": 12.0, "direction": "up", "bucket": "급등", "market": "kosdaq"},
+             {"stock_code": "005930", "stock_name": "삼성전자", "price": 80000,
+              "change_pct": 1.0, "direction": "up", "bucket": "시총", "market": "kospi"},
+         ])), \
+         patch.object(market_daily.market_movers, "fetch_sectors", new=AsyncMock(
+             return_value=[{"name": "반도체", "change_pct": "+3.00%", "direction": "up"}])), \
+         patch.object(market_daily.market_movers, "fetch_investor_flows", new=AsyncMock(
+             return_value={"kospi": {"date": "26.06.12"}})), \
+         patch.object(market_daily.market_news, "fetch_market_news", new=AsyncMock(
+             return_value=[{"title": "코스피 급등", "source": "테스트"}])), \
+         patch.object(market_daily, "_fetch_dart_disclosures", new=AsyncMock(return_value=([], []))) as disc, \
+         patch.object(market_daily, "_news_for_focus_codes", new=AsyncMock(return_value=[])), \
+         patch.object(market_daily, "_investor_flows_for_codes", new=AsyncMock(return_value=[])), \
+         patch.object(market_daily, "_call_openrouter", new=AsyncMock(return_value={
+             "markdown": "# x", "model": "m", "tokens_in": 1, "tokens_out": 1,
+             "cost_usd": 0.0, "llm_ok": True, "error": None})):
+        brief = await market_daily.build_daily_market_brief(google_sub="user-1")
+
+    payload = brief["payload"]
+    # 포트폴리오/관심종목 흔적이 없어야 한다 — 시장 전체 기준 공용 브리프.
+    assert "portfolio_summary" not in payload
+    assert "moves" not in payload
+    assert "interest_count" not in payload
+    assert "upcoming_events" not in payload
+    assert payload["scope"] == "market"
+    assert payload["movers"][0]["stock_code"] == "900110"
+    assert payload["sectors"][0]["name"] == "반도체"
+    assert payload["market_investor_flows"]["kospi"]["date"] == "26.06.12"
+    assert payload["market_news"][0]["title"] == "코스피 급등"
+    # 공시·뉴스 시드는 이슈 종목(급등락)만 — 시총상위(005930)는 제외.
+    seeded = disc.await_args.args[0]
+    assert [s["stock_code"] for s in seeded] == ["900110"]
+
+
+@pytest.mark.asyncio
+async def test_build_daily_market_brief_survives_source_failures():
+    with patch.object(market_daily, "_market_snapshot", new=AsyncMock(side_effect=RuntimeError("boom"))), \
+         patch.object(market_daily, "_tape_movers", new=AsyncMock(return_value=[])), \
+         patch.object(market_daily.market_movers, "fetch_sectors", new=AsyncMock(side_effect=RuntimeError("boom"))), \
+         patch.object(market_daily.market_movers, "fetch_investor_flows", new=AsyncMock(return_value={})), \
+         patch.object(market_daily.market_news, "fetch_market_news", new=AsyncMock(return_value=[])), \
+         patch.object(market_daily, "_call_openrouter", new=AsyncMock(return_value={
+             "markdown": "# x", "model": "m", "tokens_in": 1, "tokens_out": 1,
+             "cost_usd": 0.0, "llm_ok": True, "error": None})):
+        brief = await market_daily.build_daily_market_brief()
+
+    payload = brief["payload"]
+    assert payload["market"] == []
+    assert payload["sectors"] == []
+    assert any("market" in w for w in payload["source_warnings"])
+
+
+@pytest.mark.asyncio
+async def test_build_daily_market_brief_times_out_hung_source():
+    import asyncio
+
+    async def _hang(*_args, **_kwargs):
+        await asyncio.sleep(60)
+
+    with patch.object(market_daily, "BRIEF_SOURCE_TIMEOUT_S", 0.05), \
+         patch.object(market_daily, "_market_snapshot", new=_hang), \
+         patch.object(market_daily, "_tape_movers", new=AsyncMock(return_value=[])), \
+         patch.object(market_daily.market_movers, "fetch_sectors", new=AsyncMock(return_value=[])), \
+         patch.object(market_daily.market_movers, "fetch_investor_flows", new=AsyncMock(return_value={})), \
+         patch.object(market_daily.market_news, "fetch_market_news", new=AsyncMock(return_value=[])), \
+         patch.object(market_daily, "_call_openrouter", new=AsyncMock(return_value={
+             "markdown": "# x", "model": "m", "tokens_in": 1, "tokens_out": 1,
+             "cost_usd": 0.0, "llm_ok": True, "error": None})):
+        brief = await asyncio.wait_for(market_daily.build_daily_market_brief(), timeout=5)
+
+    # 매달린 소스는 타임아웃으로 비우고 나머지로 브리프를 만든다(전체 hang 금지).
+    assert brief["payload"]["market"] == []
+    assert any("market" in w for w in brief["payload"]["source_warnings"])
 
 
 class MarketDailyRuleTests(unittest.TestCase):
-    def test_relative_move_uses_two_percent_threshold_when_kospi_is_quiet(self):
-        result = market_daily.detect_relative_move(3.1, 0.8)
+    def test_build_prompt_is_market_wide(self):
+        prompt = market_daily._build_prompt({
+            "market": [], "movers": [], "sectors": [], "market_investor_flows": {},
+            "market_news": [], "news": [], "disclosures": [], "investor_flows": [],
+        })
+        # 시장 전체 관점 + 포트폴리오 관점 금지 문구.
+        self.assertIn("시장 전체", prompt)
+        self.assertIn("포트폴리오·보유종목·관심종목 관점은 절대 넣지 마세요", prompt)
+        # 옛 포트폴리오 evidence 키가 프롬프트 지침에 남아 있으면 안 된다.
+        self.assertNotIn("portfolio_summary", prompt)
+        self.assertNotIn("weighted_day_return_pct", prompt)
+        self.assertNotIn("upcoming_events", prompt)
 
-        self.assertTrue(result["is_notable"])
-        self.assertEqual(result["move_type"], "급등")
-        self.assertEqual(result["threshold_pct"], 2.0)
-        self.assertEqual(result["relative_pct"], 2.3)
-
-    def test_relative_move_uses_kospi_move_when_market_is_wide(self):
-        result = market_daily.detect_relative_move(-5.8, -3.0)
-
-        self.assertFalse(result["is_notable"])
-        self.assertEqual(result["threshold_pct"], 3.0)
-        self.assertEqual(result["relative_pct"], -2.8)
-
-    def test_portfolio_summary_aggregates_only_held_positions(self):
-        moves = [
-            {"stock_code": "A", "stock_name": "에이", "sources": ["portfolio"],
-             "quantity": 10, "price": 1000, "change": -50, "change_pct": -4.76},
-            {"stock_code": "B", "stock_name": "비", "sources": ["portfolio"],
-             "quantity": 5, "price": 2000, "change": 100, "change_pct": 5.26},
-            {"stock_code": "C", "stock_name": "씨", "sources": ["starred"],
-             "quantity": None, "price": 3000, "change": 10, "change_pct": 0.3},
-        ]
-        summary = market_daily._portfolio_summary(moves)
-        self.assertEqual(summary["holding_count"], 2)  # starred w/o quantity excluded
-        self.assertEqual(summary["up"], 1)
-        self.assertEqual(summary["down"], 1)
-        # mv(A)=mv(B)=10,000 → weighted avg of -4.76 and +5.26 = +0.25
-        self.assertEqual(summary["weighted_day_return_pct"], 0.25)
-        self.assertEqual(summary["top_detractors"][0]["stock_code"], "A")
-        self.assertEqual(summary["top_detractors"][0]["day_pl"], -500)
-        self.assertEqual(summary["top_contributors"][0]["stock_code"], "B")
-
-    def test_portfolio_summary_none_without_quantified_holdings(self):
-        self.assertIsNone(
-            market_daily._portfolio_summary([{"stock_code": "C", "sources": ["starred"]}])
-        )
+    def test_fallback_markdown_is_market_wide(self):
+        payload = {
+            "market": [{"code": "KOSPI", "label": "KOSPI", "value": "8,414.04", "change_pct": 8.37}],
+            "movers": [
+                {"stock_code": "1", "stock_name": "상한이슈", "change_pct": 29.9, "bucket": "상한가"},
+                {"stock_code": "2", "stock_name": "시총만", "change_pct": 0.5, "bucket": "시총"},
+            ],
+            "market_news": [{"title": "코스피 급등 마감", "source": "테스트뉴스"}],
+        }
+        md = market_daily._fallback_markdown(payload, "메시지")
+        self.assertIn("+8.37%", md)
+        self.assertIn("상한이슈", md)
+        self.assertNotIn("시총만", md)  # 이슈(급등락·상하한가)만 노출
+        self.assertIn("코스피 급등 마감", md)
 
     def test_parse_investor_flow_reads_signed_institution_and_foreign(self):
         html = (
@@ -126,25 +220,6 @@ class MarketDailyRuleTests(unittest.TestCase):
         self.assertEqual(market_daily._flatten_news_payload([{"items": [{"id": 1}]}]), [{"id": 1}])
         self.assertEqual(market_daily._flatten_news_payload({"items": [{"id": 1}]}), [{"id": 1}])
         self.assertEqual(market_daily._flatten_news_payload(None), [])
-
-    def test_extract_upcoming_dividend_picks_nearest_future_in_window(self):
-        from datetime import date
-
-        today = date(2026, 6, 8)
-        rows = [
-            {"record_date": "20260630", "per_sto_divi_amt": "361"},
-            {"record_date": "20251231"},  # past
-            {"record_date": "20261231"},  # beyond window
-        ]
-        event = market_daily._extract_upcoming_dividend(rows, today, 45)
-        self.assertEqual(event, {"date": "2026-06-30", "amount": 361.0})
-        # nearest wins
-        nearer = market_daily._extract_upcoming_dividend(
-            [{"record_date": "20260701"}, {"record_date": "20260615"}], today, 45
-        )
-        self.assertEqual(nearer["date"], "2026-06-15")
-        # no parseable date → None (fail-safe, never fabricates)
-        self.assertIsNone(market_daily._extract_upcoming_dividend([{"foo": "bar"}], today, 45))
 
     def test_gemini35_flash_cost_estimate(self):
         self.assertAlmostEqual(
@@ -359,3 +434,55 @@ class MarketDailyRuleTests(unittest.TestCase):
 
         self.assertEqual(events[0]["text"], "\uc0bc\uc131\uc804\uc790 \uc2e0\uc81c\ud488 \uacf5\uac1c \u00b7 \uc5f0\ud569\ub274\uc2a4")
         self.assertNotIn("[\uc0bc\uc131\uc804\uc790]", events[0]["text"])
+
+
+class DailyBriefRouteTests(unittest.IsolatedAsyncioTestCase):
+    """브리프 라우트: 공용 캐시 키 + 실패한 생성은 캐시에 저장하지 않는다."""
+
+    GEN_OK = {
+        "brief_date": "2026-06-12", "source_hash": "h", "payload": {"scope": "market"},
+        "markdown": "# 시황", "model": "m", "tokens_in": 1, "tokens_out": 2,
+        "cost_usd": 0.0, "llm_ok": True, "error": None,
+    }
+
+    async def test_failed_generation_is_not_cached(self):
+        from routes import market_daily as route
+
+        gen = {**self.GEN_OK, "markdown": "fallback", "llm_ok": False, "error": "timeout"}
+        with patch.object(route, "get_current_user", new=AsyncMock(return_value=None)), \
+             patch.object(route.market_brief_repo, "get_daily_market_brief", new=AsyncMock(return_value=None)), \
+             patch.object(route.market_brief_repo, "save_daily_market_brief", new=AsyncMock()) as save, \
+             patch.object(route.market_daily, "build_daily_market_brief", new=AsyncMock(return_value=gen)):
+            result = await route.get_daily_market_brief(request=None, refresh=False)
+        save.assert_not_awaited()  # 실패 본문이 30분 캐시를 점유하면 안 된다
+        self.assertFalse(result["llm_ok"])
+        self.assertEqual(result["markdown"], "fallback")
+        self.assertEqual(result["error"], "timeout")
+
+    async def test_brief_is_shared_under_public_key(self):
+        from routes import market_daily as route
+
+        user = {"google_sub": "user-123"}
+        saved = {"markdown": "# 시황", "payload": {}}
+        with patch.object(route, "get_current_user", new=AsyncMock(return_value=user)), \
+             patch.object(route.market_brief_repo, "get_daily_market_brief", new=AsyncMock(return_value=None)) as get, \
+             patch.object(route.market_brief_repo, "save_daily_market_brief", new=AsyncMock(return_value=saved)) as save, \
+             patch.object(route.market_daily, "build_daily_market_brief", new=AsyncMock(return_value=dict(self.GEN_OK))) as build:
+            result = await route.get_daily_market_brief(request=None, refresh=False)
+        # 캐시 조회·저장 모두 사용자와 무관한 public 키.
+        self.assertEqual(get.await_args.args[0], "public")
+        self.assertEqual(save.await_args.kwargs["google_sub"], "public")
+        # 생성(비용 귀속)에는 요청 사용자를 넘긴다.
+        self.assertEqual(build.await_args.kwargs["google_sub"], "user-123")
+        self.assertTrue(result["llm_ok"])
+
+    async def test_cached_brief_short_circuits(self):
+        from routes import market_daily as route
+
+        cached = {"markdown": "# 캐시", "payload": {}}
+        with patch.object(route, "get_current_user", new=AsyncMock(return_value=None)), \
+             patch.object(route.market_brief_repo, "get_daily_market_brief", new=AsyncMock(return_value=cached)), \
+             patch.object(route.market_daily, "build_daily_market_brief", new=AsyncMock()) as build:
+            result = await route.get_daily_market_brief(request=None, refresh=False)
+        build.assert_not_awaited()
+        self.assertTrue(result["cached"])

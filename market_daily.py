@@ -7,37 +7,39 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 import httpx
 
 import ai_config
 import cache  # corp-code 헬퍼(get_corp_code)는 아직 cache 소유
-from repositories import portfolio as portfolio_repo
-from repositories import user_stocks as user_stocks_repo
 from cache_layer import MemoryTTLCache
 import dart_client
-import kis_proxy_client
 import market_indicators
 import market_movers
+import market_news
 import market_sessions
 from services import ai_client
-from services.portfolio import runtime_quotes as portfolio_quotes
-from services.portfolio.identifiers import is_korean_stock, normalize_portfolio_code
 
 
 logger = logging.getLogger(__name__)
 
 DART_VIEWER_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
 
-INTEREST_LIMIT = int(os.environ.get("MARKET_DAILY_INTEREST_LIMIT", "36"))
 QUOTE_CONCURRENCY = int(os.environ.get("MARKET_DAILY_QUOTE_CONCURRENCY", "6"))
 DISCLOSURE_CONCURRENCY = int(os.environ.get("MARKET_DAILY_DISCLOSURE_CONCURRENCY", "4"))
-NOTABLE_MOVE_LIMIT = int(os.environ.get("MARKET_DAILY_NOTABLE_MOVE_LIMIT", "12"))
 NEWS_STOCK_LIMIT = int(os.environ.get("MARKET_DAILY_NEWS_STOCK_LIMIT", "8"))
 NEWS_PER_STOCK = int(os.environ.get("MARKET_DAILY_NEWS_PER_STOCK", "4"))
 MARKET_DAILY_MAX_TOKENS = int(os.environ.get("MARKET_DAILY_MAX_TOKENS", "1800"))
+# 일시 오류(타임아웃·빈 응답)가 실패 본문으로 굳지 않게 LLM 호출을 짧게 재시도.
+MARKET_DAILY_LLM_ATTEMPTS = int(os.environ.get("MARKET_DAILY_LLM_ATTEMPTS", "2"))
+# 시황 브리프 evidence 상한 — 업종 등락 / 시장 전반 뉴스 / 시장 전체 급등락(프롬프트 압축용)
+BRIEF_SECTOR_LIMIT = int(os.environ.get("MARKET_DAILY_SECTOR_LIMIT", "12"))
+BRIEF_MARKET_NEWS_LIMIT = int(os.environ.get("MARKET_DAILY_MARKET_NEWS_LIMIT", "8"))
+BRIEF_MOVER_LIMIT = int(os.environ.get("MARKET_DAILY_MOVER_LIMIT", "24"))
+# 소스별 수집 타임아웃 — 업스트림 하나가 매달려도 브리프 전체가 hang 하지 않게.
+BRIEF_SOURCE_TIMEOUT_S = float(os.environ.get("MARKET_DAILY_SOURCE_TIMEOUT_S", "25"))
 MARKET_TAPE_TTL_SECONDS = int(os.environ.get("MARKET_TAPE_TTL_SECONDS", "45"))
 MARKET_TAPE_EVENT_LIMIT = int(os.environ.get("MARKET_TAPE_EVENT_LIMIT", "40"))
 # 마켓테이프 종목 선정(시장 전체 기준) — 시총상위/급등락 각 시장별 상한 개수
@@ -50,8 +52,6 @@ TAPE_LIMIT_PCT = float(os.environ.get("MARKET_TAPE_LIMIT_PCT", "29.0"))
 TAPE_SURGE_PCT = float(os.environ.get("MARKET_TAPE_SURGE_PCT", "5.0"))
 
 INVESTOR_FLOW_LIMIT = int(os.environ.get("MARKET_DAILY_INVESTOR_FLOW_LIMIT", "10"))
-UPCOMING_DIVIDEND_WINDOW_DAYS = int(os.environ.get("MARKET_DAILY_DIVIDEND_WINDOW_DAYS", "45"))
-UPCOMING_DIVIDEND_LIMIT = int(os.environ.get("MARKET_DAILY_DIVIDEND_LIMIT", "20"))
 
 NAVER_MOBILE_NEWS_API = "https://m.stock.naver.com/api/news/stock/{code}?pageSize={size}&page=1"
 NAVER_FRGN_URL = "https://finance.naver.com/item/frgn.naver?code={code}&page=1"
@@ -161,88 +161,6 @@ def _signed_change_pct(raw_pct: Any, direction: str | None = None) -> float | No
     return pct
 
 
-def detect_relative_move(stock_change_pct: float | None, kospi_change_pct: float | None) -> dict[str, Any]:
-    """Apply the user-defined 급등/급락 rule against KOSPI movement."""
-    if stock_change_pct is None:
-        return {
-            "is_notable": False,
-            "relative_pct": None,
-            "threshold_pct": None,
-            "move_type": None,
-        }
-    if kospi_change_pct is None:
-        relative = stock_change_pct
-        threshold = 2.0
-    else:
-        relative = stock_change_pct - kospi_change_pct
-        threshold = max(2.0, abs(kospi_change_pct))
-    notable = abs(relative) >= threshold
-    return {
-        "is_notable": notable,
-        "relative_pct": round(relative, 2),
-        "threshold_pct": round(threshold, 2),
-        "move_type": "급등" if notable and relative > 0 else "급락" if notable and relative < 0 else None,
-    }
-
-
-def _portfolio_summary(moves: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Aggregate the day for *actually held* positions (quantity known).
-
-    Turns the per-stock quotes the brief already collected into a portfolio-level
-    view — weighted day return, up/down breadth, and the names that drove or
-    cushioned the move — so the brief can lead with "what happened to my money"
-    instead of restating index quotes. Uses no extra network calls.
-    """
-    rows: list[dict[str, Any]] = []
-    total_mv = 0.0
-    weighted_pct = 0.0
-    up = down = flat = 0
-    for move in moves or []:
-        if "portfolio" not in (move.get("sources") or []):
-            continue
-        qty = _safe_float(move.get("quantity"))
-        price = _safe_float(move.get("price"))
-        pct = move.get("change_pct")
-        if not qty or price is None or not isinstance(pct, (int, float)):
-            continue
-        market_value = qty * price
-        if market_value <= 0:
-            continue
-        per_share_change = _safe_float(move.get("change"))
-        day_pl = per_share_change * qty if per_share_change is not None else market_value * pct / (100.0 + pct)
-        total_mv += market_value
-        weighted_pct += market_value * pct
-        if pct > 0:
-            up += 1
-        elif pct < 0:
-            down += 1
-        else:
-            flat += 1
-        rows.append(
-            {
-                "stock_code": move.get("stock_code"),
-                "stock_name": move.get("stock_name"),
-                "change_pct": round(pct, 2),
-                "day_pl": round(day_pl),
-            }
-        )
-    if not rows or total_mv <= 0:
-        return None
-    rows.sort(key=lambda r: r["day_pl"])
-    detractors = [r for r in rows if r["day_pl"] < 0][:3]
-    contributors = [r for r in reversed(rows) if r["day_pl"] > 0][:3]
-    return {
-        "holding_count": len(rows),
-        "up": up,
-        "down": down,
-        "flat": flat,
-        "weighted_day_return_pct": round(weighted_pct / total_mv, 2),
-        "est_total_market_value": round(total_mv),
-        "top_contributors": contributors,
-        "top_detractors": detractors,
-    }
-
-
 def estimate_gemini35_flash_cost(input_tokens: int = 0, output_tokens: int = 0, *, batch: bool = False) -> float:
     input_price = 0.75 if batch else 1.50
     output_price = 4.50 if batch else 9.00
@@ -286,55 +204,6 @@ def _should_show_disclosure_on_tape(row: dict[str, Any]) -> bool:
     if not report_name or _is_low_signal_disclosure(row):
         return False
     return bool(row.get("is_material") or row.get("material_reason") or _material_disclosure_reason(report_name))
-
-
-async def _interest_universe(google_sub: str | None) -> list[dict[str, Any]]:
-    if not google_sub:
-        return []
-
-    seen: dict[str, dict[str, Any]] = {}
-
-    try:
-        portfolio = await portfolio_repo.get_portfolio(google_sub)
-    except Exception:
-        logger.exception("daily market: portfolio load failed")
-        portfolio = []
-    for item in portfolio:
-        code = normalize_portfolio_code(item.get("stock_code"))
-        if not is_korean_stock(code):
-            continue
-        seen.setdefault(
-            code,
-            {
-                "stock_code": code,
-                "stock_name": item.get("stock_name") or code,
-                "sources": [],
-                "quantity": item.get("quantity"),
-            },
-        )["sources"].append("portfolio")
-
-    try:
-        starred = await user_stocks_repo.get_cached_analyses(google_sub=google_sub, tab="starred")
-    except Exception:
-        logger.exception("daily market: starred list load failed")
-        starred = []
-    for item in starred:
-        code = normalize_portfolio_code(item.get("stock_code"))
-        if not is_korean_stock(code):
-            continue
-        seen.setdefault(
-            code,
-            {
-                "stock_code": code,
-                "stock_name": item.get("corp_name") or code,
-                "sources": [],
-                "quantity": None,
-            },
-        )["sources"].append("starred")
-
-    items = list(seen.values())
-    items.sort(key=lambda x: (0 if "portfolio" in x.get("sources", []) else 1, x["stock_code"]))
-    return items[:INTEREST_LIMIT]
 
 
 async def _market_snapshot() -> tuple[list[dict[str, Any]], float | None]:
@@ -471,41 +340,6 @@ async def _tape_movers() -> list[dict[str, Any]]:
             if existing is None or _TAPE_BUCKET_RANK.get(bucket, 0) > _TAPE_BUCKET_RANK.get(existing["bucket"], 0):
                 best[code] = candidate
     return list(best.values())
-
-
-async def _quote_moves(interests: list[dict[str, Any]], kospi_pct: float | None) -> list[dict[str, Any]]:
-    semaphore = asyncio.Semaphore(max(1, QUOTE_CONCURRENCY))
-
-    async def fetch_one(item: dict[str, Any]) -> dict[str, Any]:
-        async with semaphore:
-            code = item["stock_code"]
-            try:
-                quote = await portfolio_quotes.fetch_quote(code)
-            except Exception as exc:
-                logger.info("daily market: quote skipped for %s: %s", code, exc)
-                quote = {}
-            stock_pct = _safe_float(quote.get("change_pct"))
-            detected = detect_relative_move(stock_pct, kospi_pct)
-            return {
-                "stock_code": code,
-                "stock_name": item.get("stock_name") or code,
-                "sources": sorted(set(item.get("sources") or [])),
-                "quantity": item.get("quantity"),
-                "price": quote.get("price"),
-                "date": quote.get("date"),
-                "change": quote.get("change"),
-                "change_pct": stock_pct,
-                "kospi_change_pct": kospi_pct,
-                "relative_pct": detected["relative_pct"],
-                "threshold_pct": detected["threshold_pct"],
-                "move_type": detected["move_type"],
-                "is_notable": detected["is_notable"],
-                "trade_value": quote.get("trade_value"),
-            }
-
-    rows = await asyncio.gather(*(fetch_one(item) for item in interests))
-    rows.sort(key=lambda row: abs(row.get("relative_pct") or 0), reverse=True)
-    return rows
 
 
 async def _fetch_dart_disclosures(interests: list[dict[str, Any]], brief_date: str) -> tuple[list[dict[str, Any]], list[str]]:
@@ -726,85 +560,6 @@ async def _investor_flows_for_codes(
     return out
 
 
-def _parse_yyyymmdd(value: Any) -> date | None:
-    text = re.sub(r"\D", "", str(value or ""))
-    if len(text) != 8:
-        return None
-    try:
-        return datetime.strptime(text, "%Y%m%d").date()
-    except ValueError:
-        return None
-
-
-_DIVIDEND_DATE_KEYS = (
-    "record_date",
-    "record_dt",
-    "divi_dt",
-    "stck_divi_dt",
-    "ex_date",
-    "divi_pay_dt",
-)
-
-
-def _extract_upcoming_dividend(
-    rows: Any, today: date, window_days: int
-) -> dict[str, Any] | None:
-    """Nearest future dividend record/ex date within the window, or None.
-
-    Fail-safe: only returns when an actual future date parses out of the KIS
-    rows, so an unexpected response shape yields nothing instead of a guess.
-    """
-    best: dict[str, Any] | None = None
-    for row in rows or []:
-        if not isinstance(row, dict):
-            continue
-        for key in _DIVIDEND_DATE_KEYS:
-            parsed = _parse_yyyymmdd(row.get(key))
-            if parsed and today <= parsed <= today + timedelta(days=window_days):
-                if best is None or parsed < best["date_obj"]:
-                    amount = _safe_float(
-                        row.get("per_sto_divi_amt") or row.get("divi_amt") or row.get("amount")
-                    )
-                    best = {"date_obj": parsed, "date": parsed.isoformat(), "amount": amount}
-                break
-    if not best:
-        return None
-    return {"date": best["date"], "amount": best["amount"]}
-
-
-async def _upcoming_dividends(interests: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    holdings = [item for item in interests if "portfolio" in (item.get("sources") or [])]
-    if not holdings:
-        return []
-    today = date.today()
-    end = today + timedelta(days=UPCOMING_DIVIDEND_WINDOW_DAYS)
-    semaphore = asyncio.Semaphore(max(1, QUOTE_CONCURRENCY))
-
-    async def fetch_one(item: dict[str, Any]) -> dict[str, Any] | None:
-        code = item["stock_code"]
-        async with semaphore:
-            try:
-                payload = await kis_proxy_client.get_dividends(code, start_date=today, end_date=end)
-            except Exception as exc:
-                logger.info("daily market: dividend schedule skipped for %s: %s", code, exc)
-                return None
-        rows = payload.get("dividends") if isinstance(payload, dict) else None
-        event = _extract_upcoming_dividend(rows, today, UPCOMING_DIVIDEND_WINDOW_DAYS)
-        if not event:
-            return None
-        return {
-            "stock_code": code,
-            "stock_name": item.get("stock_name") or code,
-            "type": "배당기준일",
-            **event,
-        }
-
-    rows = await asyncio.gather(*(fetch_one(item) for item in holdings[:UPCOMING_DIVIDEND_LIMIT]))
-    out = [row for row in rows if row]
-    out.sort(key=lambda row: row["date"])
-    return out
-
-
 async def _news_for_focus_codes(
     codes: list[str],
     stock_names: dict[str, str] | None = None,
@@ -824,17 +579,6 @@ async def _news_for_focus_codes(
             name = names.get(code)
             rows.append({**item, **({"stock_name": name} if name else {})})
     return rows
-
-
-def _focus_stock_names(*groups: list[dict[str, Any]]) -> dict[str, str]:
-    names: dict[str, str] = {}
-    for group in groups:
-        for row in group or []:
-            code = row.get("stock_code")
-            name = row.get("stock_name") or row.get("corp_name")
-            if code and name and name != code:
-                names.setdefault(code, name)
-    return names
 
 
 def _source_hash(payload: dict[str, Any]) -> str:
@@ -1117,8 +861,8 @@ async def build_market_tape(*, google_sub: str | None = None, refresh: bool = Fa
 
 def _fallback_markdown(payload: dict[str, Any], message: str) -> str:
     market = payload.get("market") or []
-    moves = [row for row in payload.get("moves") or [] if row.get("is_notable")]
-    disclosures = payload.get("disclosures") or []
+    issues = [m for m in payload.get("movers") or [] if m.get("bucket") in ("상한가", "하한가", "급등", "급락")]
+    headlines = payload.get("market_news") or []
     lines = ["### 금일 시황", "", message, ""]
     if market:
         lines.append("**시장 지표**")
@@ -1127,42 +871,37 @@ def _fallback_markdown(payload: dict[str, Any], message: str) -> str:
             pct_text = f"{pct:+.2f}%" if isinstance(pct, (int, float)) else "-"
             lines.append(f"- {row.get('label') or row.get('code')}: {row.get('value') or '-'} ({pct_text})")
         lines.append("")
-    if moves:
-        lines.append("**관심목록 급등/급락**")
-        for row in moves[:8]:
-            lines.append(
-                f"- {row['stock_name']}({row['stock_code']}): {row.get('change_pct'):+.2f}% "
-                f"/ KOSPI 대비 {row.get('relative_pct'):+.2f}%p"
-            )
+    if issues:
+        lines.append("**급등/급락·상하한가**")
+        for row in issues[:8]:
+            pct = row.get("change_pct")
+            pct_text = f"{pct:+.2f}%" if isinstance(pct, (int, float)) else "-"
+            lines.append(f"- {row.get('stock_name')}({row.get('stock_code')}): {pct_text} · {row.get('bucket')}")
         lines.append("")
-    if disclosures:
-        lines.append("**관심목록 공시**")
-        for row in disclosures[:8]:
-            lines.append(f"- {row['stock_name']}({row['stock_code']}): {row['report_name']}")
+    if headlines:
+        lines.append("**주요 뉴스**")
+        for row in headlines[:5]:
+            outlet = row.get("source") or ""
+            lines.append(f"- {row.get('title')}" + (f" · {outlet}" if outlet else ""))
     return "\n".join(lines).strip()
 
 
 def _build_prompt(payload: dict[str, Any]) -> str:
     compact = dict(payload)
-    compact["moves"] = [
-        row
-        for row in (payload.get("moves") or [])
-        if row.get("is_notable") or abs(row.get("relative_pct") or 0) >= 1.2
-    ][:NOTABLE_MOVE_LIMIT]
-    compact["largest_moves"] = (payload.get("moves") or [])[: min(10, NOTABLE_MOVE_LIMIT)]
+    compact["movers"] = (payload.get("movers") or [])[:BRIEF_MOVER_LIMIT]
     compact["disclosures"] = (payload.get("disclosures") or [])[:30]
     compact["news"] = (payload.get("news") or [])[: NEWS_STOCK_LIMIT * NEWS_PER_STOCK]
+    compact["market_news"] = (payload.get("market_news") or [])[:BRIEF_MARKET_NEWS_LIMIT]
     evidence = json.dumps(compact, ensure_ascii=False, indent=2, default=str)
-    return f"""당신은 사용자의 보유·관심 종목 관점에서 "오늘 내 종목에 무슨 일이 있었고, 무엇을 확인해야 하는가"를 쓰는 투자 리서치 어시스턴트입니다. 아래 evidence bundle만 근거로, 일반 시황 복창이 아니라 개별 종목 신호를 해석하는 한국어 글을 쓰세요.
+    return f"""당신은 한국 주식시장의 하루를 근거 중심으로 해석하는 투자 리서치 어시스턴트입니다. 아래 evidence bundle만 근거로 "오늘 시장 전체에 무슨 일이 있었는가"를 설명하는 한국어 시황 분석을 쓰세요. 이 글은 모든 독자가 공유하는 시장 분석입니다 — 특정 사용자의 포트폴리오·보유종목·관심종목 관점은 절대 넣지 마세요.
 
 작성 규칙:
-1. 포트폴리오부터: `portfolio_summary`가 있으면 첫 문단에서 가중 일간수익률(`weighted_day_return_pct`)을 KOSPI 등락과 비교하고, 손익을 주도/방어한 종목(`top_contributors`/`top_detractors`)을 이름과 함께 짚으세요. `portfolio_summary`가 null이면 이 문단을 생략하세요.
-2. 종목 단위 인과: `moves`·`disclosures`·`news`·`investor_flows`를 종목별로 묶어 해석하세요. 가격 변동의 원인은 같은 종목의 공시/뉴스(제목과 `snippet` 요약)와 "가능성" 수준으로만 연결하고, 근거 없는 단정은 금지합니다. 연결할 공시·뉴스가 없으면 "원인 미확인"으로 두세요.
-   - 수급: `investor_flows`의 외국인·기관 순매매(`foreign_net`/`institution_net`, 음수=순매도, 단위=주)를 해당 종목 해석에 보조 근거로 쓰세요. 수급과 가격 방향이 어긋나면 그 점을 짚으세요.
-3. 지수·환율·원자재 복창 금지: `market` 수치를 그대로 나열하는 별도 섹션을 만들지 마세요. 매크로는 보유 종목 해석에 필요할 때만 한 줄 맥락으로 녹이세요.
+1. 시장 큰 그림부터: 첫 문단에서 코스피·코스닥 등락(`market`)과 투자자별 순매수(`market_investor_flows`, 단위=억원)를 묶어 오늘 장의 성격(주도 수급 주체, 위험선호/회피)을 요약하세요. 글로벌 지수·환율·금리·유가는 국내 장 해석에 필요한 만큼만 한 줄 맥락으로 녹이고, 수치를 그대로 나열하는 별도 섹션은 만들지 마세요.
+2. 업종 흐름: `sectors`(업종별 등락)에서 두드러진 강세/약세 업종을 짚으세요. 가능하면 `market_news`·`news` 헤드라인과 "가능성" 수준으로만 연결하고, 근거 없는 단정은 금지합니다.
+3. 이슈 종목: `movers` 중 상한가/하한가/급등/급락 종목을 골라 해석하세요. 급등락의 원인은 같은 종목의 `disclosures`/`news`(제목과 `snippet` 요약)와 연결하되, 연결할 근거가 없으면 "원인 미확인"으로 두세요. `investor_flows`(이슈 종목별 외국인·기관 순매매, 음수=순매도, 단위=주)는 보조 근거로만 쓰세요.
 4. 데이터 누락은 생략: evidence에 없거나 비어 있는 수치를 0·"변동 없음"으로 단정하지 마세요. 값이 비어 있으면 그 지표 자체를 언급하지 마세요.
-5. 확인 필요(필수, 1~4개): 각 항목은 evidence의 구체적 근거에 연결된 행동이어야 합니다(예: 특정 공시 원문 확인, 목표가·손절가 근접). `upcoming_events`(임박 배당기준일 등)가 있으면 종목명과 날짜를 넣어 확인 필요에 포함하세요. "급락 원인 점검" 같은 일반론은 금지합니다.
-6. 형식: 마크다운, 핵심부터, 인사말·군더더기 없이. 링크가 있는 공시/뉴스는 종목명 뒤에 짧은 출처로만 언급하고 긴 URL은 본문에 노출하지 마세요.
+5. 마지막에 "체크포인트"(2~4개): evidence의 구체적 근거에 연결된 관찰 포인트만 쓰세요(예: 특정 공시 원문 확인, 특정 업종 추세 지속 여부, 환율 레벨). "시장 변동성 주의" 같은 일반론은 금지합니다.
+6. 형식: 마크다운, 핵심부터, 인사말·군더더기 없이. 링크가 있는 공시/뉴스는 짧은 출처 표기만 하고 긴 URL은 본문에 노출하지 마세요.
 
 evidence bundle:
 {evidence}
@@ -1199,77 +938,109 @@ async def _call_openrouter(payload: dict[str, Any], google_sub: str | None) -> d
         "max_tokens": MARKET_DAILY_MAX_TOKENS,
         **ai_config.openrouter_reasoning_controls(model),
     }
-    try:
-        result = await ai_client.post_chat_completion(
-            feature="market_daily",
-            payload=request_payload,
-            google_sub=google_sub,
-            model=model,
-            model_profile="market_daily",
-            timeout=httpx.Timeout(90.0, read=90.0),
-            cost_estimator=estimate_gemini35_flash_cost,
-            ok_if_content=True,
-        )
+    # 타임아웃·빈 응답 같은 일시 오류로 곧장 실패 본문이 굳지 않게 짧게 재시도한다.
+    attempts = max(1, MARKET_DAILY_LLM_ATTEMPTS)
+    last_error = "unknown"
+    for attempt in range(1, attempts + 1):
+        try:
+            result = await ai_client.post_chat_completion(
+                feature="market_daily",
+                payload=request_payload,
+                google_sub=google_sub,
+                model=model,
+                model_profile="market_daily",
+                timeout=httpx.Timeout(90.0, read=90.0),
+                cost_estimator=estimate_gemini35_flash_cost,
+                ok_if_content=True,
+            )
+        except Exception as exc:
+            last_error = str(exc)
+            logger.exception("daily market: LLM call failed (attempt %d/%d)", attempt, attempts)
+            continue
         markdown = result["content"]
-        had_content = bool(markdown)
-        if not markdown:
-            markdown = _fallback_markdown(payload, "AI 모델이 최종 본문을 반환하지 않아 수집된 근거만 표시합니다.")
-        return {
-            "markdown": markdown,
-            "model": result["model"],
-            "tokens_in": result["input_tokens"],
-            "tokens_out": result["output_tokens"],
-            "cost_usd": result["cost_usd"],
-            "llm_ok": had_content,
-            "error": None if had_content else "empty_content",
-        }
-    except Exception as exc:
-        logger.exception("daily market: LLM call failed")
-        return {
-            "markdown": _fallback_markdown(payload, f"AI 호출에 실패해 수집된 근거만 표시합니다. ({exc})"),
-            "model": model,
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "cost_usd": 0.0,
-            "llm_ok": False,
-            "error": str(exc),
-        }
+        if markdown:
+            return {
+                "markdown": markdown,
+                "model": result["model"],
+                "tokens_in": result["input_tokens"],
+                "tokens_out": result["output_tokens"],
+                "cost_usd": result["cost_usd"],
+                "llm_ok": True,
+                "error": None,
+            }
+        last_error = "empty_content"
+        logger.warning("daily market: empty LLM content (attempt %d/%d)", attempt, attempts)
+    return {
+        "markdown": _fallback_markdown(payload, f"AI 생성에 실패해 수집된 근거만 표시합니다. ({last_error})"),
+        "model": model,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "llm_ok": False,
+        "error": last_error,
+    }
 
 
 async def build_daily_market_brief(*, google_sub: str | None = None, brief_date: str | None = None) -> dict[str, Any]:
-    brief_date = brief_date or _today_iso()
-    interests = await _interest_universe(google_sub)
-    market_rows, kospi_pct = await _market_snapshot()
-    moves = await _quote_moves(interests, kospi_pct) if interests else []
-    disclosures, disclosure_warnings = await _fetch_dart_disclosures(interests, brief_date) if interests else ([], [])
+    """시장 전체 기준 금일 시황 — 사용자 포트폴리오·관심종목과 무관한 공용 브리프.
 
-    focus_codes = [
-        *(row["stock_code"] for row in moves if row.get("is_notable")),
-        *(row["stock_code"] for row in disclosures if row.get("is_material")),
-    ]
-    focus_names = _focus_stock_names(moves, disclosures)
-    news = await _news_for_focus_codes(focus_codes, focus_names)
-    investor_flows = await _investor_flows_for_codes(focus_codes, focus_names) if focus_codes else []
-    upcoming_events = await _upcoming_dividends(interests) if interests else []
+    지수·시장 수급(개인/외국인/기관)·업종 등락·시장 전체 급등락(상하한가 포함)과
+    이슈 종목의 공시/뉴스/수급을 모아 LLM 으로 해석한다. 소스별 독립 실패 허용
+    (한 소스가 죽어도 나머지 근거로 생성). google_sub 는 AI 비용 귀속용으로만 쓴다.
+    """
+    brief_date = brief_date or _today_iso()
+    warnings: list[str] = []
+
+    async def _safe(name: str, coro, default):
+        # 소스별 타임아웃 + 독립 실패 허용: 한 업스트림이 느리거나 죽어도
+        # 나머지 근거만으로 브리프를 만든다(전체 요청 hang 방지).
+        try:
+            return await asyncio.wait_for(coro, timeout=BRIEF_SOURCE_TIMEOUT_S)
+        except Exception as exc:
+            reason = "타임아웃" if isinstance(exc, asyncio.TimeoutError) else str(exc)
+            logger.warning("daily market: %s 수집 실패: %s", name, reason)
+            warnings.append(f"{name} 수집 실패")
+            return default
+
+    (market_rows, kospi_pct), movers, sectors, market_flows, market_news_rows = await asyncio.gather(
+        _safe("market", _market_snapshot(), ([], None)),
+        _safe("movers", _tape_movers(), []),
+        _safe("sectors", market_movers.fetch_sectors(BRIEF_SECTOR_LIMIT), []),
+        _safe("market_investor_flows", market_movers.fetch_investor_flows(), {}),
+        _safe("market_news", market_news.fetch_market_news(BRIEF_MARKET_NEWS_LIMIT), []),
+    )
+
+    # 이슈 종목(상/하한가·급등락)만 공시·뉴스·종목수급 시드로 사용(마켓테이프와 동일 기준).
+    focus = [m for m in movers if m.get("bucket") in ("상한가", "하한가", "급등", "급락")]
+    focus.sort(key=lambda m: abs(m.get("change_pct") or 0), reverse=True)
+    focus = focus[:NEWS_STOCK_LIMIT]
+    focus_interests = [{"stock_code": m["stock_code"], "stock_name": m["stock_name"]} for m in focus]
+    focus_codes = [m["stock_code"] for m in focus]
+    names = {m["stock_code"]: m["stock_name"] for m in movers}
+
+    if focus_interests:
+        (disclosures, disclosure_warnings), news, investor_flows = await asyncio.gather(
+            _safe("disclosures", _fetch_dart_disclosures(focus_interests, brief_date), ([], [])),
+            _safe("news", _news_for_focus_codes(focus_codes, names), []),
+            _safe("investor_flows", _investor_flows_for_codes(focus_codes, names), []),
+        )
+    else:
+        disclosures, disclosure_warnings, news, investor_flows = [], [], [], []
 
     payload: dict[str, Any] = {
         "brief_date": brief_date,
         "generated_at": datetime.now().isoformat(),
+        "scope": "market",  # 시장 전체 기준(포트폴리오 무관) — 표기·하위호환 판별용
         "kospi_change_pct": kospi_pct,
-        "relative_move_rule": {
-            "threshold_pct": max(2.0, abs(kospi_pct or 0)),
-            "description": "abs(stock_change_pct - kospi_change_pct) >= max(2%, abs(kospi_change_pct))",
-        },
-        "interest_count": len(interests),
-        "interest_limit": INTEREST_LIMIT,
-        "portfolio_summary": _portfolio_summary(moves),
         "market": market_rows,
-        "moves": moves,
+        "market_investor_flows": market_flows,
+        "sectors": sectors,
+        "movers": movers,
+        "market_news": market_news_rows,
         "disclosures": disclosures,
         "news": news,
         "investor_flows": investor_flows,
-        "upcoming_events": upcoming_events,
-        "source_warnings": disclosure_warnings,
+        "source_warnings": [*warnings, *disclosure_warnings],
     }
     source_hash = _source_hash(payload)
     llm_result = await _call_openrouter(payload, google_sub)

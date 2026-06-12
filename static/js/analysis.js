@@ -86,20 +86,28 @@ async function loadDailyMarketBrief(refresh = false) {
         : '<p>표시할 시황 본문이 없습니다.</p>';
     }
     const payload = data.payload || {};
-    const notableCount = (payload.moves || []).filter(row => row && row.is_notable).length;
+    // 시장 전체 기준 브리프: 이슈 종목 = 상/하한가·급등·급락 movers.
+    const issueCount = (payload.movers || [])
+      .filter(row => row && ['상한가', '하한가', '급등', '급락'].includes(row.bucket)).length;
     const disclosureCount = (payload.disclosures || []).length;
     const materialCount = (payload.disclosures || []).filter(row => row && row.is_material).length;
     const tokenText = `입력 ${(data.tokens_in ?? 0).toLocaleString('ko-KR')} / 출력 ${(data.tokens_out ?? 0).toLocaleString('ko-KR')} 토큰`;
     const costText = _formatDailyMarketCost(data.cost_usd);
     const cacheText = data.cached ? '캐시' : '새 생성';
     const generatedAt = data.updated_at ? new Date(data.updated_at).toLocaleString('ko-KR') : '';
+    // 기준 시각 = 증거 수집 시점(payload.generated_at, 서버 KST). 문자열에서
+    // HH:MM만 뽑아 타임존 재해석 없이 그대로 표기한다(없으면 날짜만).
+    const baseTimeMatch = String(payload.generated_at || data.updated_at || '').match(/[T ](\d{2}):(\d{2})/);
+    const baseTime = baseTimeMatch ? ` ${baseTimeMatch[1]}:${baseTimeMatch[2]}` : '';
     if (status) {
       status.textContent = [
-        `${payload.brief_date || data.brief_date || ''} 기준`,
-        `관심목록 ${payload.interest_count || 0}개`,
-        `급등/급락 ${notableCount}개`,
+        `${payload.brief_date || data.brief_date || ''}${baseTime} 기준`,
+        '시장 전체',
+        `급등/급락 ${issueCount}개`,
         `공시 ${disclosureCount}건${materialCount ? ` (중요 후보 ${materialCount}건)` : ''}`,
+        data.llm_ok === false ? '생성 실패 — 새로고침 시 재시도' : '',
       ].filter(Boolean).join(' · ');
+      status.classList.toggle('error', data.llm_ok === false);
     }
     if (meta) {
       meta.textContent = [
