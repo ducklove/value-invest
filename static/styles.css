@@ -652,7 +652,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 /* 메인 컬럼(해외 지수)은 값이 크고 변동이 길다(예: 닛케이225 +1,636.38). */
 .md-main .md-row-val { min-width: 92px; }
 .md-main .md-row .md-chg { min-width: 140px; }
-/* 우측 레일(원자재·환율·채권·야간선물)은 폭이 좁고 값/변동이 짧다. */
+/* 우측 레일(원자재·환율·채권·KOSPI 선물)은 폭이 좁고 값/변동이 짧다. */
 .md-rail .md-row-val { min-width: 64px; }
 .md-rail .md-row .md-chg { min-width: 104px; }
 @media (max-width: 900px) {
@@ -662,6 +662,29 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .md-rail .md-row-val { min-width: 56px; }
   .md-main .md-row .md-chg,
   .md-rail .md-row .md-chg { min-width: 0; }
+}
+
+.md-kospi-futures-section {
+  padding-bottom: 10px;
+}
+.md-kospi-futures-frame-wrap {
+  width: 100%;
+  height: 260px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--bg);
+}
+.md-kospi-futures-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--surface);
+}
+@media (max-width: 900px) {
+  .md-kospi-futures-frame-wrap {
+    height: 300px;
+  }
 }
 
 /* 국채 (yield curve + 국가별 10년물 비교) */

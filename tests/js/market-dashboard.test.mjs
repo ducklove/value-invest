@@ -126,29 +126,23 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   assert.deepEqual(railTitles, ["해외 지수", "원자재", "환율", "신규카테고리"]);
 });
 
-test("야간선물 섹션은 야간(18:00~익일 09:00)에만 렌더된다", () => {
+test("야간선물 카테고리는 KOSPI 선물 iframe 섹션으로 상시 렌더된다", () => {
   const w = load();
   const catalog = {
     KOSPI: { label: "KOSPI", category: "국내 지수" },
     NIGHT_FUTURES: { label: "야간선물", category: "야간선물" },
   };
   const data = { NIGHT_FUTURES: { value: "350.5", change: "1.2", change_pct: "0.3%", direction: "up" } };
-  // window.Date 를 교체해 _mdNightFuturesVisible() 이 보는 시각을 고정한다.
-  const hasNightSection = (hour) => {
-    const RealDate = w.Date;
-    class MockDate extends RealDate { getHours() { return hour; } }
-    w.Date = MockDate;
-    try {
-      w._mdRenderDashboard(catalog, data);
-      return !!w.document.querySelector('[data-md-cat="야간선물"]');
-    } finally {
-      w.Date = RealDate;
-    }
-  };
-  // 야간(18시~익일 09시 직전): 노출.
-  for (const h of [18, 22, 0, 8]) assert.equal(hasNightSection(h), true, `${h}시에는 노출돼야 함`);
-  // 주간(09시~18시 직전): 숨김.
-  for (const h of [9, 12, 17]) assert.equal(hasNightSection(h), false, `${h}시에는 숨겨야 함`);
+  w._mdRenderDashboard(catalog, data);
+  const section = w.document.querySelector('[data-md-cat="야간선물"]');
+  assert.ok(section, "야간선물 카테고리 섹션은 시간대와 무관하게 노출");
+  assert.equal(section.querySelector(".md-section-title").textContent, "KOSPI 선물");
+  const frame = section.querySelector("iframe.md-kospi-futures-frame");
+  assert.ok(frame, "실시간 그래프 iframe 존재");
+  assert.equal(
+    frame.getAttribute("src"),
+    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=1D",
+  );
 });
 
 test("_mdRenderDashboard puts a per-card flow slot inside each 국내 지수 hero card", () => {

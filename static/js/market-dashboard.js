@@ -5,7 +5,7 @@
 // (values: code -> {value, change, change_pct, direction}). Renders the
 // indicators grouped by category into #marketDashboard. No auth required.
 //
-// Phase 1 covers the indicator grid (지수·해외증시·원자재·환율·금리·야간선물).
+// Phase 1 covers the indicator grid (지수·해외증시·원자재·환율·금리·KOSPI 선물).
 // Crypto / news / 수급·시총·업종 widgets are layered on in later steps.
 
 let _mdCatalog = null; // {code: {label, category}}
@@ -14,6 +14,7 @@ let _mdInFlight = null;
 
 // Display order for category groups; unknown categories fall to the end.
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
+const MD_KOSPI_FUTURES_FRAME_URL = 'https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=1D';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
 const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', CA: '캐나다', IN: '인도', BR: '브라질' };
@@ -37,14 +38,6 @@ function _mdChange(d) {
 // KOSPI200 은 국내 지수 카드에서 자리가 어색하고 중요도가 낮아 숨긴다.
 const MD_HIDDEN_CODES = new Set(['KOSPI200']);
 
-// 야간선물 섹션은 야간 거래 시간대(18:00~익일 09:00, 브라우저 로컬=KST)에만
-// 노출한다. 주간(09:00~18:00)에는 값이 정체돼 혼란을 주므로 섹션을 숨긴다.
-// (마켓바 _mbIsHidden 과 동일한 기준.)
-function _mdNightFuturesVisible() {
-  const h = new Date().getHours();
-  return h >= 18 || h < 9;
-}
-
 function _mdGroupByCategory(catalog) {
   const groups = {};
   for (const [code, meta] of Object.entries(catalog || {})) {
@@ -61,7 +54,7 @@ function _mdGroupByCategory(catalog) {
 }
 
 // Naver-style information architecture: prominent 주요 지수 hero + 국채 in the
-// main column; the lighter indicator strips (해외 지수·환율·원자재·야간선물) and
+// main column; the lighter indicator strips (해외 지수·환율·원자재·KOSPI 선물) and
 // 시장 랭킹 in the right rail so the two columns stay balanced in height.
 const MD_HERO_CATEGORIES = ['국내 지수'];
 // Categories forced into the main column (besides hero/국채). Empty = only the
@@ -160,6 +153,15 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
     + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}</section>`;
 }
 
+function _mdKospiFuturesSectionHtml() {
+  return '<section class="md-section md-kospi-futures-section" data-md-cat="야간선물">'
+    + '<h3 class="md-section-title">KOSPI 선물</h3>'
+    + '<div class="md-kospi-futures-frame-wrap">'
+    + `<iframe class="md-kospi-futures-frame" src="${escapeHtml(MD_KOSPI_FUTURES_FRAME_URL)}" `
+    + 'title="KOSPI 선물 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>'
+    + '</div></section>';
+}
+
 // --- 바이낸스 섹션: USDT↔원화 토글(기본 원화) ---
 // 값은 바이낸스 USDT 선물가. 원화 모드면 USD_KRW 환율로 환산해 표시한다.
 // (등락%·방향은 통화와 무관하므로 그대로 둔다.)
@@ -239,10 +241,10 @@ function _mdWireBinanceToggle(catalog, dataMap) {
   );
 }
 
-// --- 박스 단위 라이브 갱신: 야간선물·바이낸스만 10초마다(가볍게) ---
-// 전용 엔드포인트(/api/market/live, 서버 8초 캐시)로 5개 코드만 받아 해당
+// --- 박스 단위 라이브 갱신: 바이낸스만 10초마다(가볍게) ---
+// 전용 엔드포인트(/api/market/live, 서버 8초 캐시)로 필요한 코드만 받아 해당
 // 섹션 행만 교체한다(전체 재렌더·차트 재init 없음). 숨겨진 뷰/백그라운드 탭은 스킵.
-const MD_LIVE_CODES = ['NIGHT_FUTURES', 'BNB_EWY', 'BNB_SAMSUNG', 'BNB_SKHYNIX', 'BNB_HYUNDAI'];
+const MD_LIVE_CODES = ['BNB_EWY', 'BNB_SAMSUNG', 'BNB_SKHYNIX', 'BNB_HYUNDAI'];
 const MD_LIVE_INTERVAL_MS = 10000;
 let _mdLastDataMap = null;
 let _mdLiveTimer = null;
@@ -252,14 +254,6 @@ function _mdLiveActive() {
   const view = document.getElementById('investingView');
   if (view && view.offsetParent === null) return false;  // 숨겨진 투자정보 뷰면 스킵
   return !!document.getElementById('mdIndRail');
-}
-
-function _mdRefreshCategoryRows(category) {
-  const sec = document.querySelector(`[data-md-cat="${category}"]`);
-  const rowsEl = sec && sec.querySelector('.md-rows');
-  if (!rowsEl || !_mdCatalog) return;
-  const codes = Object.keys(_mdCatalog).filter((c) => (_mdCatalog[c] || {}).category === category);
-  rowsEl.innerHTML = codes.map((c) => _mdCardHtml(c, _mdCatalog, _mdLastDataMap, 'list')).join('');
 }
 
 async function _mdLiveRefresh() {
@@ -275,16 +269,6 @@ async function _mdLiveRefresh() {
   if (!live || typeof live !== 'object') return;
   // 최신값만 머지(USD_KRW 등 환산 기준은 그대로 유지).
   Object.assign(_mdLastDataMap, live);
-  // 야간선물: 노출 시간대(18~09시)면 행만 교체. 경계를 넘어 가시성이 바뀌었으면
-  // 전체 재렌더로 섹션을 추가/제거하고 이번 주기는 종료(중복 작업 방지).
-  const nfVisible = _mdNightFuturesVisible();
-  const nfSec = document.querySelector('[data-md-cat="야간선물"]');
-  if (nfVisible === !!nfSec) {
-    if (nfVisible) _mdRefreshCategoryRows('야간선물');
-  } else {
-    _mdRenderDashboard(_mdCatalog, _mdLastDataMap);
-    return;
-  }
   // 바이낸스: 통화 토글 상태 반영해 행만 교체(토글 버튼/리스너는 유지).
   const bnb = document.getElementById('mdBinanceSection');
   const bnbRows = bnb && bnb.querySelector('.md-rows');
@@ -521,7 +505,10 @@ function _mdRenderDashboard(catalog, dataMap) {
   const rail = [];
   let bondCodes = null;
   for (const { category, codes } of groups) {
-    if (category === '야간선물' && !_mdNightFuturesVisible()) continue;  // 야간(18~09시)만 노출
+    if (category === '야간선물') {
+      rail.push(_mdKospiFuturesSectionHtml());
+      continue;
+    }
     if (category === '국채') {
       bondCodes = codes;
       main.push(_mdBondSectionHtml());  // 차트 컨테이너 + 수치 리스트 자리
@@ -564,7 +551,7 @@ async function loadInvestingDashboard(refresh = false) {
       const dataMap = sr.ok ? await sr.json() : {};
       _mdRenderDashboard(catalog, dataMap);
       _mdLoadedOnce = true;
-      _mdStartLiveRefresh();  // 야간선물·바이낸스 10초 라이브 갱신 시작(1회만)
+      _mdStartLiveRefresh();  // 바이낸스 10초 라이브 갱신 시작(1회만)
       // 수급 슬롯은 hero 섹션과 함께 생성되므로 렌더 직후 채운다.
       if (typeof loadInvestorFlows === 'function') loadInvestorFlows();
     } catch (e) {
