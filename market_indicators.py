@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
+import kis_proxy_client
 from cache_layer import MemoryTTLCache
 
 # ---------------------------------------------------------------------------
@@ -890,56 +891,51 @@ async def _fetch_gold_live(client: httpx.AsyncClient) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Night futures (esignal.co.kr socket.io)
+# Night futures (KIS proxy — 코스피200 야간선물 최근월물)
 # ---------------------------------------------------------------------------
 
 
-async def _fetch_night_futures(client: httpx.AsyncClient) -> dict:
+def _parse_night_futures_summary(summary: dict) -> dict:
+    """KIS 야간선물 quote summary → indicator 결과 형태. 파싱 실패는 _EMPTY.
+
+    change_sign 은 KIS 부호 코드(1=상한 2=상승 3=보합 4=하한 5=하락).
+    change/change_rate 는 부호가 섞여 올 수 있어 절대값으로 표기하고 방향은
+    부호 코드(없으면 change 부호)에서 정한다.
+    """
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://esignal.co.kr/kospi200-futures-night/",
-            "Origin": "https://esignal.co.kr",
-        }
-        # EIO=4 (Socket.IO v4) handshake
-        r1 = await client.get(
-            "https://esignal.co.kr/proxy/8888/socket.io/",
-            params={"EIO": "4", "transport": "polling"},
-            headers=headers,
-        )
-        m = re.search(r'"sid":"([^"]+)"', r1.text)
-        if not m:
-            return dict(_EMPTY)
-        sid = m.group(1)
-        # Send namespace connect packet
-        await client.post(
-            "https://esignal.co.kr/proxy/8888/socket.io/",
-            params={"EIO": "4", "transport": "polling", "sid": sid},
-            headers=headers,
-            content="40",
-        )
-        # Poll for data
-        r3 = await client.get(
-            "https://esignal.co.kr/proxy/8888/socket.io/",
-            params={"EIO": "4", "transport": "polling", "sid": sid},
-            headers=headers,
-        )
-        pm = re.search(r'\["populate","(\{.+?\})"\]', r3.text)
-        if not pm:
-            return dict(_EMPTY)
-        raw = pm.group(1).replace('\\"', '"')
-        data = _json.loads(raw)
-        val = float(data["value"])
-        diff = float(data["value_diff"])
-        prev = float(data["value_day"])
-        pct = round(abs(diff) / prev * 100, 2) if prev else 0
-        direction = "up" if diff > 0 else "down" if diff < 0 else ""
-        return {
-            "value": _fmt(val),
-            "change": _fmt(abs(diff)),
-            "change_pct": f"{pct:.2f}%",
-            "direction": direction,
-        }
+        val = float(summary["current_price"])
+    except (KeyError, TypeError, ValueError):
+        return dict(_EMPTY)
+    try:
+        chg = float(summary.get("change"))
+    except (TypeError, ValueError):
+        chg = None
+    try:
+        pct = float(summary.get("change_rate"))
+    except (TypeError, ValueError):
+        pct = None
+    sign = str(summary.get("change_sign") or "")
+    if sign in ("1", "2"):
+        direction = "up"
+    elif sign in ("4", "5"):
+        direction = "down"
+    elif chg:
+        direction = "up" if chg > 0 else "down"
+    else:
+        direction = ""
+    return {
+        "value": _fmt(val),
+        "change": _fmt(abs(chg)) if chg is not None else "",
+        "change_pct": f"{abs(pct):.2f}%" if pct is not None else "",
+        "direction": direction,
+    }
+
+
+async def _fetch_night_futures() -> dict:
+    """야간선물 시세 — KIS proxy 경유(외부 API 는 KIS proxy 로 정리하는 방향)."""
+    try:
+        payload = await kis_proxy_client.get_night_futures_quote()
+        return _parse_night_futures_summary(payload.get("summary") or {})
     except Exception:
         return dict(_EMPTY)
 
@@ -1090,7 +1086,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
 
         # Night futures
         if night_futures_needed:
-            tasks.append(_fetch_night_futures(client))
+            tasks.append(_fetch_night_futures())
             task_keys.append(("night_futures", None))
 
         # Binance USDⓈ-M futures — one batched request covers all symbols
@@ -1209,7 +1205,7 @@ async def fetch_indicators_live(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_binance_tickers(client, binance_items))
             task_kinds.append("binance")
         if "NIGHT_FUTURES" in wanted:
-            tasks.append(_fetch_night_futures(client))
+            tasks.append(_fetch_night_futures())
             task_kinds.append("night")
         fetched = await asyncio.gather(*tasks, return_exceptions=True)
         for kind, res in zip(task_kinds, fetched):

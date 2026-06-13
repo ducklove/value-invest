@@ -195,6 +195,15 @@ async def get_financials(
     )
 
 
+async def get_night_futures_quote() -> dict[str, Any]:
+    """코스피200 야간선물(EUREX 연계) 최근월물 시세.
+
+    응답의 ``summary`` 에 current_price/change/change_sign/change_rate/
+    previous_close 가 정규화돼 있다(부호 코드는 KIS 관례: 1·2=상승, 4·5=하락).
+    """
+    return await _get("/v1/futures/kospi-night/near-month/quote")
+
+
 async def get_dividends(
     symbol: str,
     *,
