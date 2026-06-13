@@ -108,10 +108,14 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   const rail = w.document.getElementById("mdIndRail");
   assert.ok(main && rail, "indicator slots present");
 
-  // 국내 지수 → hero card in main, with value + up class.
+  // 국내 지수 → API iframe hero card in main.
   const hero = main.querySelector(".md-hero-card");
-  assert.ok(hero && /2,650\.12/.test(hero.innerHTML));
-  assert.ok(root.querySelector(".md-hero-card .md-chg.md-up"));
+  assert.ok(hero && /KOSPI/.test(hero.innerHTML));
+  assert.ok(root.querySelector(".md-hero-card iframe.md-index-frame"));
+  assert.match(
+    root.querySelector(".md-hero-card iframe.md-index-frame").getAttribute("src"),
+    /index=kospi&theme=light&period=1D&headless=1/,
+  );
   // 해외 지수 (SPX) → compact row in the rail now, with down class.
   assert.match(rail.innerHTML, /md-chg md-down/);
 
@@ -174,7 +178,7 @@ test("_cardFlowHtml renders one market's 개인/외국인/기관 with direction 
   root.innerHTML = html;
   const rows = root.querySelectorAll(".cf-row");
   assert.equal(rows.length, 3);
-  assert.match(root.innerHTML, /순매수/);
+  assert.match(root.innerHTML, /일간 매매동향/);
   assert.match(root.innerHTML, /26\.05\.29/);
   assert.ok(root.querySelector(".cf-val.md-up"));   // 기관 +
   assert.ok(root.querySelector(".cf-val.md-down"));  // 개인 -
@@ -187,27 +191,38 @@ test("_cardFlowHtml returns empty string when no flow", () => {
   assert.equal(w._cardFlowHtml(undefined), "");
 });
 
-test("hero cards embed a Naver mini trend chart for KOSPI/KOSDAQ only", () => {
+test("hero cards embed API index frames for KOSPI/KOSDAQ only", () => {
   const w = load();
   const catalog = {
     KOSPI: { label: "KOSPI", category: "국내 지수" },
     KOSDAQ: { label: "KOSDAQ", category: "국내 지수" },
+    OTHER: { label: "OTHER", category: "국내 지수" },
   };
-  w._mdRenderDashboard(catalog, { KOSPI: { value: "2,650", direction: "up" } });
+  w._mdRenderDashboard(catalog, { OTHER: { value: "2,650", direction: "up" } });
   const main = w.document.getElementById("mdIndMain");
-  const charts = main.querySelectorAll(".md-hero-card img.md-hero-chart");
-  assert.equal(charts.length, 2);
-  assert.match(charts[0].getAttribute("src"), /KOSPI_end_up_tablet\.png\?\d+/);
-  assert.match(charts[1].getAttribute("src"), /KOSDAQ_end_up_tablet\.png\?\d+/);
-  // failed image hides itself rather than showing a broken icon
-  assert.match(charts[0].getAttribute("onerror") || "", /display='none'/);
+  const frames = main.querySelectorAll(".md-hero-card iframe.md-index-frame");
+  assert.equal(frames.length, 2);
+  assert.equal(
+    frames[0].getAttribute("src"),
+    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=light&period=1D&headless=1",
+  );
+  assert.equal(
+    frames[1].getAttribute("src"),
+    "https://cantabile.tplinkdns.com:3358/?index=kosdaq&theme=light&period=1D&headless=1",
+  );
+  assert.ok(main.querySelector(".md-hero-card .md-hero-val"), "unknown domestic index keeps value fallback");
 });
 
-test("_miniChartHtml only emits for known index symbols", () => {
+test("_mdIndexFrameHtml only emits for KOSPI/KOSDAQ", () => {
   const w = load();
-  assert.match(w._miniChartHtml("KOSPI"), /md-hero-chart/);
-  assert.equal(w._miniChartHtml("SPX"), "");
-  assert.equal(w._miniChartHtml("AAPL"), "");
+  assert.equal(
+    w._mdIndexFrameUrl("kospi"),
+    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=light&period=1D&headless=1",
+  );
+  assert.match(w._mdIndexFrameHtml("KOSPI", "KOSPI"), /index=kospi&amp;theme=light&amp;period=1D&amp;headless=1/);
+  assert.match(w._mdIndexFrameHtml("KOSDAQ", "KOSDAQ"), /index=kosdaq&amp;theme=light&amp;period=1D&amp;headless=1/);
+  assert.equal(w._mdIndexFrameHtml("SPX", "S&P 500"), "");
+  assert.equal(w._mdIndexFrameHtml("AAPL", "Apple"), "");
 });
 
 test("_mdRenderDashboard escapes catalog labels (no raw HTML injection)", () => {

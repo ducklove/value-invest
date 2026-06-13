@@ -625,15 +625,30 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   border-bottom: 1px solid var(--border);
 }
 /* 주요 지수 hero — prominent cards */
-.md-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-/* 박스(테두리·배경) 없이 섹션 바탕에 그대로 — 값/차트만 노출 */
+.md-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+/* 박스(테두리·배경) 없이 섹션 바탕에 그대로 — 값/그래프만 노출 */
 .md-hero-card { position: relative; padding: 4px 2px 6px; }
 .md-hero-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
 .md-hero-val { font-size: 22px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .md-hero-card .md-chg { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; }
-/* 우상단 일간 미니 차트 — 값/변동을 가리지 않게 우측 상단 여백에 배치 */
-.md-hero-chart { position: absolute; top: 12px; right: 12px; width: 132px; max-width: 46%; height: auto; pointer-events: none; }
-@media (max-width: 560px) { .md-hero-chart { display: none; } }
+.md-index-frame-wrap {
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--bg);
+}
+.md-index-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--surface);
+}
+@media (max-width: 560px) {
+  .md-hero { grid-template-columns: 1fr; }
+  .md-index-frame-wrap { height: 240px; }
+}
 /* compact indicator rows — label .... value (change%) */
 .md-rows { display: flex; flex-direction: column; }
 .md-row {
@@ -665,6 +680,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 
 .md-kospi-futures-section {
+  border: 0;
   padding-bottom: 10px;
 }
 .md-kospi-futures-frame-wrap {

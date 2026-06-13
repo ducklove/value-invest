@@ -14,7 +14,9 @@ let _mdInFlight = null;
 
 // Display order for category groups; unknown categories fall to the end.
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
-const MD_KOSPI_FUTURES_FRAME_URL = 'https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=1D&headless=1';
+const MD_INDEX_FRAME_BASE_URL = 'https://cantabile.tplinkdns.com:3358/';
+const MD_INDEX_FRAME_CODES = { KOSPI: 'kospi', KOSDAQ: 'kosdaq' };
+const MD_KOSPI_FUTURES_FRAME_URL = _mdIndexFrameUrl('kospi-night-futures');
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
 const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', CA: '캐나다', IN: '인도', BR: '브라질' };
@@ -53,7 +55,7 @@ function _mdGroupByCategory(catalog) {
   return cats.map((cat) => ({ category: cat, codes: groups[cat] }));
 }
 
-// Naver-style information architecture: prominent 주요 지수 hero + 국채 in the
+// Information architecture: prominent 주요 지수 hero + 국채 in the
 // main column; the lighter indicator strips (해외 지수·환율·원자재·KOSPI 선물) and
 // 시장 랭킹 in the right rail so the two columns stay balanced in height.
 const MD_HERO_CATEGORIES = ['국내 지수'];
@@ -61,18 +63,19 @@ const MD_HERO_CATEGORIES = ['국내 지수'];
 // hero + 국채 live in main; everything else goes to the rail.
 const MD_MAIN_CATEGORIES = [];
 
-// 국내 지수 hero 카드 우상단에 띄울 네이버 일간 미니 차트(코드=네이버 심볼).
-// down 변형 파일은 없고 _end_up_tablet.png 만 존재하며, 이미지 내용 자체가
-// 당일 등락을 반영한다. 캐시버스팅을 5분 단위로 둬 최신 차트를 받되 과도한
-// 재요청은 피한다.
-const MD_MINI_CHART = new Set(['KOSPI', 'KOSDAQ']);
+function _mdIndexFrameUrl(index) {
+  const params = new URLSearchParams({ index, theme: 'light', period: '1D', headless: '1' });
+  return `${MD_INDEX_FRAME_BASE_URL}?${params.toString()}`;
+}
 
-function _miniChartHtml(code) {
-  if (!MD_MINI_CHART.has(code)) return '';
-  const bust = Math.floor(Date.now() / 300000);
-  const url = `https://ssl.pstatic.net/imgfinance/chart/mobile/mini/${code}_end_up_tablet.png?${bust}`;
-  return `<img class="md-hero-chart" src="${escapeHtml(url)}" alt="${escapeHtml(code)} 일간 추이"`
-    + ` loading="lazy" onerror="this.style.display='none'">`;
+function _mdIndexFrameHtml(code, label) {
+  const index = MD_INDEX_FRAME_CODES[code];
+  if (!index) return '';
+  const url = _mdIndexFrameUrl(index);
+  return '<div class="md-index-frame-wrap">'
+    + `<iframe class="md-index-frame" src="${escapeHtml(url)}" `
+    + `title="${escapeHtml(label)} 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>`
+    + '</div>';
 }
 
 function _mdCardHtml(code, catalog, dataMap, variant) {
@@ -98,8 +101,13 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
     // loadInvestorFlows()가 최신값으로 갱신한다(없으면 빈 슬롯).
     const flow = _mdFlows ? _mdFlows[String(code).toLowerCase()] : null;
     const flowSlot = `<div class="md-card-flow" data-flow-code="${escapeHtml(String(code))}">${_cardFlowHtml(flow)}</div>`;
+    const frameHtml = _mdIndexFrameHtml(code, label);
+    if (frameHtml) {
+      return `<div class="md-hero-card md-index-card">`
+        + `<div class="md-hero-label">${escapeHtml(label)}</div>`
+        + frameHtml + flowSlot + `</div>`;
+    }
     return `<div class="md-hero-card">`
-      + _miniChartHtml(code)
       + `<div class="md-hero-label">${escapeHtml(label)}</div>`
       + `<div class="md-hero-val">${valHtml}</div>${chgHtml}`
       + flowSlot + `</div>`;
@@ -109,7 +117,7 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
     + `<span class="md-row-val">${valHtml}</span>${rowChgHtml}</div>`;
 }
 
-// 최근 투자자별 순매수(개인/외국인/기관). 각 국내 지수 카드(코스피/코스닥)
+// 최근 투자자별 일간 매매동향(개인/외국인/기관). 각 국내 지수 카드(코스피/코스닥)
 // 안에 해당 시장 수급을 넣는다. {kospi, kosdaq} 형태이며 코드를 소문자화해
 // 매칭한다(KOSPI→kospi).
 let _mdFlows = null;
@@ -124,7 +132,7 @@ function _cardFlowHtml(flow) {
     return `<div class="cf-row"><span class="cf-actor">${name}</span>`
       + `<span class="cf-val ${cls}">${escapeHtml(String(d.value || '-'))}</span></div>`;
   }).join('');
-  return `<div class="cf-head">순매수<span class="cf-date">${escapeHtml(String(flow.date || ''))} · 억</span></div>${rows}`;
+  return `<div class="cf-head">일간 매매동향<span class="cf-date">${escapeHtml(String(flow.date || ''))} · 억</span></div>${rows}`;
 }
 
 async function loadInvestorFlows() {
