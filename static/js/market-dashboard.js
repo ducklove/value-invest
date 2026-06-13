@@ -14,7 +14,7 @@ let _mdInFlight = null;
 
 // Display order for category groups; unknown categories fall to the end.
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
-const MD_KOSPI_FUTURES_FRAME_URL = 'https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=1D';
+const MD_KOSPI_FUTURES_FRAME_URL = 'https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=1D&headless=1';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
 const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', CA: '캐나다', IN: '인도', BR: '브라질' };
