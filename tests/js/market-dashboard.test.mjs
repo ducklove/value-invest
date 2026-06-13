@@ -219,10 +219,44 @@ test("_mdIndexFrameHtml only emits for KOSPI/KOSDAQ", () => {
     w._mdIndexFrameUrl("kospi"),
     "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=light&period=1D&headless=1",
   );
+  assert.equal(
+    w._mdIndexFrameUrl("kospi", "dark"),
+    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=dark&period=1D&headless=1",
+  );
   assert.match(w._mdIndexFrameHtml("KOSPI", "KOSPI"), /index=kospi&amp;theme=light&amp;period=1D&amp;headless=1/);
   assert.match(w._mdIndexFrameHtml("KOSDAQ", "KOSDAQ"), /index=kosdaq&amp;theme=light&amp;period=1D&amp;headless=1/);
   assert.equal(w._mdIndexFrameHtml("SPX", "S&P 500"), "");
   assert.equal(w._mdIndexFrameHtml("AAPL", "Apple"), "");
+});
+
+test("market dashboard iframe URLs follow data-theme and resync on theme toggle", () => {
+  const w = load();
+  const catalog = {
+    KOSPI: { label: "KOSPI", category: "국내 지수" },
+    NIGHT_FUTURES: { label: "야간선물", category: "야간선물" },
+  };
+  w._mdRenderDashboard(catalog, {});
+  const frames = w.document.querySelectorAll("iframe[data-md-frame-index]");
+  assert.equal(frames.length, 2);
+  assert.equal(
+    frames[0].getAttribute("src"),
+    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=light&period=1D&headless=1",
+  );
+  assert.equal(
+    frames[1].getAttribute("src"),
+    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=1D&headless=1",
+  );
+
+  w.document.documentElement.setAttribute("data-theme", "dark");
+  w.syncMarketDashboardFrameTheme();
+  assert.equal(
+    frames[0].getAttribute("src"),
+    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=dark&period=1D&headless=1",
+  );
+  assert.equal(
+    frames[1].getAttribute("src"),
+    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=dark&period=1D&headless=1",
+  );
 });
 
 test("_mdRenderDashboard escapes catalog labels (no raw HTML injection)", () => {
