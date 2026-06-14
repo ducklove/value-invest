@@ -320,6 +320,14 @@ function _bondChg(d) {
   return d.direction === 'down' ? -Math.abs(n) : Math.abs(n);
 }
 
+function _bondChangePctText(d) {
+  if (!d || !d.change_pct) return '';
+  const raw = String(d.change_pct).replace(/[-+%]/g, '').trim();
+  if (!raw) return '';
+  const sign = d.direction === 'down' ? '-' : (d.direction === 'up' ? '+' : '');
+  return `${sign}${raw}%`;
+}
+
 function _bondMatLabel(m) {
   if (m === 0) return '1D';  // 익일물(overnight): 한국=KOFR, 미국=SOFR
   if (m < 1) return Math.round(m * 12) + 'M';  // 0.25 → 3M
@@ -365,6 +373,7 @@ function _mdBondCountries(codes, catalog, dataMap) {
       country: catalog[c].country,
       name: BOND_COUNTRY_NAMES[catalog[c].country] || catalog[c].country,
       value: _bondVal(dataMap ? dataMap[c] : null),
+      changePct: _bondChangePctText(dataMap ? dataMap[c] : null),
     }))
     .filter((x) => x.value != null)
     .sort((a, b) => b.value - a.value);
@@ -482,14 +491,32 @@ function _drawBondCountryChart(countries) {
     grid: { left: 48, right: 44, top: 8, bottom: 8 },
     xAxis: { type: 'value', scale: true, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
     yAxis: { type: 'category', data: names, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 11 } },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (ps) => `${ps[0].name}: ${Number(ps[0].value).toFixed(2)}%` },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter(ps) {
+        const row = ordered[ps[0].dataIndex];
+        const pct = row && row.changePct ? ` (${row.changePct})` : '';
+        return `${ps[0].name}: ${Number(ps[0].value).toFixed(2)}%${pct}`;
+      },
+    },
     series: [{
       type: 'bar', barWidth: '55%',
       data: ordered.map((c) => ({
         value: c.value,
         itemStyle: { color: (c.country === 'KR' || c.country === 'US') ? '#2563eb' : '#94a3b8', borderRadius: [0, 3, 3, 0] },
       })),
-      label: { show: true, position: 'right', color: t.text, fontSize: 10, formatter: (p) => Number(p.value).toFixed(2) },
+      label: {
+        show: true,
+        position: 'right',
+        color: t.text,
+        fontSize: 10,
+        formatter: (p) => {
+          const row = ordered[p.dataIndex];
+          const pct = row && row.changePct ? ` (${row.changePct})` : '';
+          return `${Number(p.value).toFixed(2)}${pct}`;
+        },
+      },
     }],
   });
   _bondTrackChart(el, ec);

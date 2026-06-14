@@ -7,10 +7,15 @@ Public API:
 """
 
 import asyncio
+import csv
+import io
 import json as _json
 import os
 import re
+import zipfile
 from datetime import datetime, timedelta
+from urllib.parse import urljoin
+import xml.etree.ElementTree as ET
 
 import httpx
 
@@ -68,7 +73,10 @@ CATALOG: dict[str, dict] = {
     "KR20Y":  {"label": "한국20년물", "category": "국채", "country": "KR", "maturity": 20},
     "KR30Y":  {"label": "한국30년물", "category": "국채", "country": "KR", "maturity": 30},
     "KR50Y":  {"label": "한국50년물", "category": "국채", "country": "KR", "maturity": 50},
+    "JP_TONA": {"label": "일본 TONA", "category": "국채", "country": "JP", "maturity": 0},
+    "JP3M":   {"label": "일본3개월", "category": "국채", "country": "JP", "maturity": 0.25},
     "JP6M":   {"label": "일본6개월", "category": "국채", "country": "JP", "maturity": 0.5},
+    "JP1Y":   {"label": "일본1년물", "category": "국채", "country": "JP", "maturity": 1},
     "JP2Y":   {"label": "일본2년물", "category": "국채", "country": "JP", "maturity": 2},
     "JP3Y":   {"label": "일본3년물", "category": "국채", "country": "JP", "maturity": 3},
     "JP5Y":   {"label": "일본5년물", "category": "국채", "country": "JP", "maturity": 5},
@@ -672,6 +680,7 @@ _CNBC_BOND_MAP = {
     "KR5Y":  "KR5Y-KR",
     "KR10Y": "KR10Y-KR",
     "KR50Y": "KR50Y-KR",
+    "JP3M":  "JP3M-JP",
     "JP6M":  "JP6M-JP",
     "JP2Y":  "JP2Y-JP",
     "JP3Y":  "JP3Y-JP",
@@ -766,6 +775,144 @@ async def _fetch_cnbc_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict
                 out[code] = _parse_cnbc_quote(q)
     except Exception:
         pass
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Japanese short/medium rates (BOJ TONA + MOF JGB current CSV)
+# ---------------------------------------------------------------------------
+
+_MOF_JGB_MAP = {
+    "JP1Y": "1年",
+}
+
+
+def _quote_from_current_prev(current: float, prev: float | None, decimals: int = 2) -> dict:
+    """Build an indicator quote from current and previous yield values."""
+    if prev is None:
+        return {"value": f"{current:.{decimals}f}", "change": "", "change_pct": "", "direction": ""}
+    diff = current - prev
+    if abs(diff) < 1e-12:
+        return {"value": f"{current:.{decimals}f}", "change": "", "change_pct": "", "direction": ""}
+    return {
+        "value": f"{current:.{decimals}f}",
+        "change": f"{abs(diff):.{decimals}f}",
+        "change_pct": f"{abs(diff) / prev * 100:.2f}%" if prev else "",
+        "direction": "up" if diff > 0 else "down",
+    }
+
+
+def _xlsx_cell_values(blob: bytes) -> dict[str, str]:
+    """Read simple cell values from the first worksheet without an xlsx dependency."""
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        shared: list[str] = []
+        try:
+            root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+            for si in root.findall("m:si", ns):
+                shared.append("".join(t.text or "" for t in si.findall(".//m:t", ns)))
+        except KeyError:
+            pass
+        sheet = ET.fromstring(zf.read("xl/worksheets/sheet1.xml"))
+    out: dict[str, str] = {}
+    for cell in sheet.findall(".//m:c", ns):
+        ref = cell.attrib.get("r")
+        val_node = cell.find("m:v", ns)
+        if not ref or val_node is None or val_node.text is None:
+            continue
+        value = val_node.text
+        if cell.attrib.get("t") == "s":
+            try:
+                value = shared[int(value)]
+            except (ValueError, IndexError):
+                continue
+        out[ref] = value
+    return out
+
+
+def _parse_boj_tona_xlsx(blob: bytes) -> float | None:
+    """Extract the weighted average overnight call rate from a BOJ XLSX."""
+    cells = _xlsx_cell_values(blob)
+    # BOJ's current format has the Average value in C10.
+    try:
+        return float(cells["C10"])
+    except (KeyError, ValueError):
+        return None
+
+
+async def _fetch_boj_tona(client: httpx.AsyncClient) -> dict:
+    """Fetch Japan overnight call rate (TONA/MUTAN), JP counterpart to KOFR/SOFR."""
+    try:
+        page_url = "https://www.boj.or.jp/en/statistics/market/short/mutan/index.htm"
+        page = await client.get(page_url, headers={"User-Agent": "Mozilla/5.0"})
+        if page.status_code != 200:
+            return dict(_EMPTY)
+        links = [
+            urljoin(page_url, href)
+            for href in re.findall(r'href="([^"]+d_release/md/[^"]+\.xlsx)"', page.text)
+        ]
+        if not links:
+            return dict(_EMPTY)
+        latest_r = await client.get(links[0], headers={"User-Agent": "Mozilla/5.0"})
+        if latest_r.status_code != 200:
+            return dict(_EMPTY)
+        current = _parse_boj_tona_xlsx(latest_r.content)
+        if current is None:
+            return dict(_EMPTY)
+        prev = None
+        if len(links) >= 2:
+            prev_r = await client.get(links[1], headers={"User-Agent": "Mozilla/5.0"})
+            if prev_r.status_code == 200:
+                prev = _parse_boj_tona_xlsx(prev_r.content)
+        return _quote_from_current_prev(current, prev, decimals=3)
+    except Exception:
+        return dict(_EMPTY)
+
+
+async def _fetch_mof_jgb_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict[str, dict]:
+    """Fetch Japan JGB current-data yields from Japan MOF CSV."""
+    out = {code: dict(_EMPTY) for code in codes}
+    wanted = {code: _MOF_JGB_MAP[code] for code in codes if code in _MOF_JGB_MAP}
+    if not wanted:
+        return out
+    try:
+        r = await client.get(
+            "https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code != 200:
+            return out
+        out.update(_parse_mof_jgb_csv(r.content, wanted))
+    except Exception:
+        pass
+    return out
+
+
+def _parse_mof_jgb_csv(blob: bytes, wanted: dict[str, str]) -> dict[str, dict]:
+    out = {code: dict(_EMPTY) for code in wanted}
+    rows = list(csv.reader(io.StringIO(blob.decode("cp932", errors="ignore"))))
+    if len(rows) < 4:
+        return out
+    header = rows[1]
+    data_rows = [
+        row for row in rows[2:]
+        if len(row) >= len(header) and re.match(r"^R\d+\.\d+\.\d+$", row[0].strip())
+    ]
+    if not data_rows:
+        return out
+    latest = data_rows[-1]
+    prev = data_rows[-2] if len(data_rows) >= 2 else None
+    idx_by_label = {label: i for i, label in enumerate(header)}
+    for code, label in wanted.items():
+        idx = idx_by_label.get(label)
+        if idx is None:
+            continue
+        try:
+            current = float(latest[idx])
+            previous = float(prev[idx]) if prev is not None else None
+        except (ValueError, IndexError):
+            continue
+        out[code] = _quote_from_current_prev(current, previous, decimals=2)
     return out
 
 
@@ -987,8 +1134,10 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     fx_daily_items = []   # AUD/VND — exchangeDailyQuote, one request each
     cnbc_bond_items = []  # government bonds — one batched CNBC request
     ecos_bond_items = []  # Korean bonds — one batched ECOS request
+    mof_jgb_items = []  # Japan MOF JGB current data
     us10y_needed = False
     sofr_needed = False
+    jp_tona_needed = False
     night_futures_needed = False
     gold_needed = False
     wti_needed = False
@@ -1011,12 +1160,16 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             cnbc_bond_items.append(code)
         elif code in _ECOS_BOND_MAP:
             ecos_bond_items.append(code)
+        elif code in _MOF_JGB_MAP:
+            mof_jgb_items.append(code)
         elif code in _WORLD_DAILY_CODES:
             world_daily_items.append(code)
         elif code == "US10Y":
             us10y_needed = True
         elif code == "US_SOFR":
             sofr_needed = True
+        elif code == "JP_TONA":
+            jp_tona_needed = True
         elif code == "NIGHT_FUTURES":
             night_futures_needed = True
         elif code in _BINANCE_MAP:
@@ -1066,6 +1219,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_ecos_bonds(client, ecos_bond_items))
             task_keys.append(("ecos_bonds", None))
 
+        # Japan MOF JGB current data — one CSV request covers all requested maturities
+        if mof_jgb_items:
+            tasks.append(_fetch_mof_jgb_bonds(client, mof_jgb_items))
+            task_keys.append(("mof_jgb_bonds", None))
+
         # US 10Y bond
         if us10y_needed:
             tasks.append(_fetch_us10y(client))
@@ -1075,6 +1233,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
         if sofr_needed:
             tasks.append(_fetch_sofr(client))
             task_keys.append(("sofr", None))
+
+        # Japan overnight call rate (TONA/MUTAN)
+        if jp_tona_needed:
+            tasks.append(_fetch_boj_tona(client))
+            task_keys.append(("jp_tona", None))
 
         # Commodities
         if gold_needed:
@@ -1125,6 +1288,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                     for c in ecos_bond_items:
                         if c in result:
                             results[c] = result[c]
+            elif kind == "mof_jgb_bonds":
+                if isinstance(result, dict):
+                    for c in mof_jgb_items:
+                        if c in result:
+                            results[c] = result[c]
             elif kind == "gold":
                 results["CMDT_GC"] = result
             elif kind == "wti":
@@ -1133,6 +1301,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 results["US10Y"] = result
             elif kind == "sofr":
                 results["US_SOFR"] = result
+            elif kind == "jp_tona":
+                results["JP_TONA"] = result
             elif kind == "night_futures":
                 results["NIGHT_FUTURES"] = result
             elif kind == "binance":
