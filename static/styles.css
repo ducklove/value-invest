@@ -667,7 +667,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 /* 메인 컬럼(해외 지수)은 값이 크고 변동이 길다(예: 닛케이225 +1,636.38). */
 .md-main .md-row-val { min-width: 92px; }
 .md-main .md-row .md-chg { min-width: 140px; }
-/* 우측 레일(원자재·환율·채권·KOSPI 선물)은 폭이 좁고 값/변동이 짧다. */
+/* 우측 레일(원자재·환율·채권·KOSPI200)은 폭이 좁고 값/변동이 짧다. */
 .md-rail .md-row-val { min-width: 64px; }
 .md-rail .md-row .md-chg { min-width: 104px; }
 @media (max-width: 900px) {

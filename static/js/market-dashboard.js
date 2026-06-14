@@ -5,7 +5,7 @@
 // (values: code -> {value, change, change_pct, direction}). Renders the
 // indicators grouped by category into #marketDashboard. No auth required.
 //
-// Phase 1 covers the indicator grid (지수·해외증시·원자재·환율·금리·KOSPI 선물).
+// Phase 1 covers the indicator grid (지수·해외증시·원자재·환율·금리·KOSPI200).
 // Crypto / news / 수급·시총·업종 widgets are layered on in later steps.
 
 let _mdCatalog = null; // {code: {label, category}}
@@ -16,6 +16,7 @@ let _mdInFlight = null;
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
 const MD_INDEX_FRAME_BASE_URL = 'https://cantabile.tplinkdns.com:3358/';
 const MD_INDEX_FRAME_CODES = { KOSPI: 'kospi', KOSDAQ: 'kosdaq' };
+const MD_INDEX_FRAME_DEFAULT_PERIOD = '1D';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
 const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', CA: '캐나다', IN: '인도', BR: '브라질' };
@@ -55,7 +56,7 @@ function _mdGroupByCategory(catalog) {
 }
 
 // Information architecture: prominent 주요 지수 hero + 국채 in the
-// main column; the lighter indicator strips (해외 지수·환율·원자재·KOSPI 선물) and
+// main column; the lighter indicator strips (해외 지수·환율·원자재·KOSPI200) and
 // 시장 랭킹 in the right rail so the two columns stay balanced in height.
 const MD_HERO_CATEGORIES = ['국내 지수'];
 // Categories forced into the main column (besides hero/국채). Empty = only the
@@ -66,8 +67,8 @@ function _mdCurrentTheme() {
   return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
 }
 
-function _mdIndexFrameUrl(index, theme = _mdCurrentTheme()) {
-  const params = new URLSearchParams({ index, theme, period: '1D', headless: '1' });
+function _mdIndexFrameUrl(index, theme = _mdCurrentTheme(), period = MD_INDEX_FRAME_DEFAULT_PERIOD) {
+  const params = new URLSearchParams({ index, theme, period, headless: '1' });
   return `${MD_INDEX_FRAME_BASE_URL}?${params.toString()}`;
 }
 
@@ -78,6 +79,7 @@ function _mdIndexFrameHtml(code, label) {
   return '<div class="md-index-frame-wrap">'
     + `<iframe class="md-index-frame" src="${escapeHtml(url)}" `
     + `data-md-frame-index="${escapeHtml(index)}" `
+    + `data-md-frame-period="${escapeHtml(MD_INDEX_FRAME_DEFAULT_PERIOD)}" `
     + `title="${escapeHtml(label)} 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>`
     + '</div>';
 }
@@ -85,7 +87,8 @@ function _mdIndexFrameHtml(code, label) {
 function syncMarketDashboardFrameTheme() {
   document.querySelectorAll('iframe[data-md-frame-index]').forEach((frame) => {
     const index = frame.dataset.mdFrameIndex;
-    if (index) frame.src = _mdIndexFrameUrl(index);
+    const period = frame.dataset.mdFramePeriod || MD_INDEX_FRAME_DEFAULT_PERIOD;
+    if (index) frame.src = _mdIndexFrameUrl(index, _mdCurrentTheme(), period);
   });
 }
 
@@ -173,13 +176,15 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
 }
 
 function _mdKospiFuturesSectionHtml() {
-  const index = 'kospi-night-futures';
+  const index = 'kospi200';
+  const period = '24H';
   return '<section class="md-section md-kospi-futures-section" data-md-cat="야간선물">'
-    + '<h3 class="md-section-title">KOSPI 선물</h3>'
+    + '<h3 class="md-section-title">KOSPI200</h3>'
     + '<div class="md-kospi-futures-frame-wrap">'
-    + `<iframe class="md-kospi-futures-frame" src="${escapeHtml(_mdIndexFrameUrl(index))}" `
+    + `<iframe class="md-kospi-futures-frame" src="${escapeHtml(_mdIndexFrameUrl(index, _mdCurrentTheme(), period))}" `
     + `data-md-frame-index="${escapeHtml(index)}" `
-    + 'title="KOSPI 선물 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>'
+    + `data-md-frame-period="${escapeHtml(period)}" `
+    + 'title="KOSPI200 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>'
     + '</div></section>';
 }
 
