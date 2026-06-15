@@ -633,7 +633,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .md-hero-card .md-chg { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; }
 .md-index-frame-wrap {
   width: 100%;
-  height: 220px;
+  height: 264px;
   overflow: hidden;
   border-radius: 8px;
   background: var(--bg);
@@ -647,7 +647,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 @media (max-width: 560px) {
   .md-hero { grid-template-columns: 1fr; }
-  .md-index-frame-wrap { height: 240px; }
+  .md-index-frame-wrap { height: 288px; }
 }
 /* compact indicator rows — label .... value (change%) */
 .md-rows { display: flex; flex-direction: column; }
