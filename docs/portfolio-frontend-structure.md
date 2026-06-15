@@ -25,7 +25,7 @@
 15. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
 16. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
 17. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
-18. `portfolio-performance.js`: 추이 분석 탭 shell, 영역지도, 성과 데이터 로딩.
+18. `portfolio-performance.js`: 심층 분석 탭 shell, 영역지도, 성과 데이터 로딩.
 19. `portfolio-trends-benchmark.js`: NAV 차트 비교지수 선택/캐시, beta·R² 통계와 beta 오버레이.
 20. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화, 공용 차트 헬퍼.
 21. `portfolio-trends-group-weight.js`: 그룹 비중 100% 누적 면적 차트와 drill-down 진입(`_GROUP_WEIGHT_COLORS` 공급).

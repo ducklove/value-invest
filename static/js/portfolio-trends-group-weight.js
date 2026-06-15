@@ -73,12 +73,12 @@ async function renderGroupWeightChart(rows) {
 
   const prepared = _prepareGroupWeightChartData(_groupWeightChartData);
   if (!prepared.dates.length || !prepared.groups.length) {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">그룹 비중 스냅샷이 아직 없습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">그룹 비중 스냅샷이 아직 없습니다.</div>';
     _updateChartRangeLabel('pfGroupWeightRange', [], 0, 0);
     return;
   }
   if (typeof PortfolioTrendChart === 'undefined') {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">차트 렌더러를 불러오지 못했습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">차트 렌더러를 불러오지 못했습니다.</div>';
     return;
   }
 

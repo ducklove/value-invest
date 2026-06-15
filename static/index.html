@@ -277,7 +277,7 @@ function trackEvent(name, params = {}) {
 
     <div class="pf-tab-bar">
       <button class="pf-tab active" data-tab="holdings" onclick="pfSwitchTab('holdings')">보유종목</button>
-      <button class="pf-tab" data-tab="performance" onclick="pfSwitchTab('performance')">추이 분석</button>
+      <button class="pf-tab" data-tab="performance" onclick="pfSwitchTab('performance')">심층 분석</button>
       <button class="pf-simple-toggle" id="pfSimpleToggle" type="button" aria-pressed="false" onclick="pfToggleSimpleMode()" title="모바일 간편 보기">간편</button>
       <div class="pf-currency-toggle">
         <button class="pf-currency-btn active" data-currency="KRW" onclick="pfSetCurrency('KRW')">₩</button>
@@ -428,10 +428,18 @@ function trackEvent(name, params = {}) {
     </div><!-- /pfHoldingsTab -->
 
     <div id="pfPerformanceTab" style="display:none;">
-      <div class="pf-nav-chart-wrap">
+      <div class="pf-deep-head">
+        <div class="pf-deep-title">
+          <h2>심층 분석</h2>
+          <span>NAV · 리스크 · 리밸런싱 · 현금흐름</span>
+        </div>
+        <div class="pf-deep-meta">스냅샷 기준</div>
+      </div>
+
+      <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary">
         <div class="pf-nav-header">
           <h3>NAV 기준가 추이</h3>
-          <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;align-items:center;">
+          <div class="pf-analysis-actions">
             <label class="pf-bench-chip"><input type="checkbox" value="KOSPI" onchange="onBenchToggle()"><span>코스피</span></label>
             <label class="pf-bench-chip"><input type="checkbox" value="SP500" onchange="onBenchToggle()"><span>S&P 500</span></label>
             <label class="pf-bench-chip"><input type="checkbox" value="GOLD" onchange="onBenchToggle()"><span>금</span></label>
@@ -445,17 +453,18 @@ function trackEvent(name, params = {}) {
         <div class="pf-nav-returns" id="pfNavReturns"></div>
       </div>
 
-      <div class="pf-nav-chart-wrap" id="pfRiskWrap" style="margin-top:24px;">
+      <div class="pf-analysis-grid pf-analysis-grid-compact">
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfRiskWrap">
         <div class="pf-nav-header">
           <h3>리스크</h3>
-          <div class="valuation-period-btns" id="pfRiskWindowBtns" style="margin-left:auto;"></div>
+          <div class="valuation-period-btns" id="pfRiskWindowBtns"></div>
         </div>
         <div id="pfRiskContent" class="pf-risk-content">
           <div class="pf-risk-empty">성과 탭을 열면 리스크 지표를 불러옵니다.</div>
         </div>
       </div>
 
-      <div class="pf-nav-chart-wrap" id="pfRebalanceWrap" style="margin-top:24px;">
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfRebalanceWrap">
         <div class="pf-nav-header">
           <h3>리밸런싱</h3>
           <div class="pf-rebal-header-actions">
@@ -471,7 +480,7 @@ function trackEvent(name, params = {}) {
         </div>
       </div>
 
-      <div class="pf-nav-chart-wrap" id="pfDivCalWrap" style="margin-top:24px;">
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfDivCalWrap">
         <div class="pf-nav-header">
           <h3>배당 캘린더</h3>
           <span class="pf-chart-note">월별 예상 배당 현금흐름 · 보유수량 × 주당 배당</span>
@@ -481,7 +490,7 @@ function trackEvent(name, params = {}) {
         </div>
       </div>
 
-      <div class="pf-nav-chart-wrap" id="pfJournalWrap" style="margin-top:24px;">
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfJournalWrap">
         <div class="pf-nav-header">
           <h3>투자 일지</h3>
           <span class="pf-chart-note">매수·매도 판단 기록 · 당시 가격 대비 현재 수익률 복기</span>
@@ -490,11 +499,13 @@ function trackEvent(name, params = {}) {
           <div class="pf-risk-empty">성과 탭을 열면 투자 일지를 불러옵니다.</div>
         </div>
       </div>
+      </div>
 
-      <div class="pf-nav-chart-wrap" style="margin-top:24px;">
+      <div class="pf-analysis-grid pf-analysis-grid-trends">
+      <div class="pf-nav-chart-wrap pf-analysis-card">
         <div class="pf-nav-header">
           <h3>평가금액 추이</h3>
-          <label class="pf-bench-chip" style="margin-left:auto;"><input type="checkbox" id="pfValueYZero" onchange="onValueYZeroToggle()"><span>Y축 0부터</span></label>
+          <label class="pf-bench-chip"><input type="checkbox" id="pfValueYZero" onchange="onValueYZeroToggle()"><span>Y축 0부터</span></label>
         </div>
         <div class="pf-nav-chart-container pf-nav-short">
           <div id="pfValueChart" style="width:100%;height:100%;"></div>
@@ -503,7 +514,7 @@ function trackEvent(name, params = {}) {
         <div class="pf-nav-returns" id="pfValueStats"></div>
       </div>
 
-      <div class="pf-nav-chart-wrap" style="margin-top:24px;">
+      <div class="pf-nav-chart-wrap pf-analysis-card">
         <div class="pf-nav-header">
           <h3>그룹 비중 추이</h3>
           <span class="pf-chart-note">100% 누적 면적 차트 · 일별 스냅샷 기준</span>
@@ -525,8 +536,10 @@ function trackEvent(name, params = {}) {
           <div class="pf-nav-returns" id="pfGroupCompositionStats"></div>
         </div>
       </div>
+      </div>
 
-      <div class="pf-cashflow-section">
+      <div class="pf-analysis-grid pf-analysis-grid-flow">
+      <div class="pf-cashflow-section pf-analysis-card">
         <h3>자금 입출금</h3>
         <div class="pf-cf-form">
           <select id="pfCfType">
@@ -544,8 +557,8 @@ function trackEvent(name, params = {}) {
         </table>
       </div>
 
-      <div class="pf-nav-chart-wrap" id="pfAiWrap" style="margin-top:24px;">
-        <div class="pf-nav-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfAiWrap">
+        <div class="pf-nav-header pf-ai-toolbar">
           <h3>AI 포트폴리오 분석</h3>
           <div id="pfAiModelPicker" style="display:none;margin-left:8px;">
             <input list="pfAiModelList" id="pfAiModelInput" placeholder="모델 선택/입력" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);width:260px;">
@@ -562,6 +575,7 @@ function trackEvent(name, params = {}) {
           <div id="pfAiResult" class="pf-ai-result pf-ai-empty">분석 실행 후 결과가 여기에 표시됩니다.</div>
         </div>
         <div id="pfAiTokens" class="pf-ai-meta"></div>
+      </div>
       </div>
     </div><!-- /pfPerformanceTab -->
   </div><!-- /portfolioView -->

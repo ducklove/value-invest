@@ -10,7 +10,14 @@ async function pfLoadNavHistory({ force = false } = {}) {
   if (_pfNavHistoryPromise) return _pfNavHistoryPromise;
   _pfNavHistoryPromise = (async () => {
     const resp = await apiFetch('/api/portfolio/nav-history');
-    if (!resp.ok) throw new Error(`NAV history request failed (${resp.status})`);
+    if (!resp.ok) {
+      const message = resp.status === 401
+        ? '로그인 후 심층 분석 데이터를 확인할 수 있습니다.'
+        : `NAV history request failed (${resp.status})`;
+      const err = new Error(message);
+      err.status = resp.status;
+      throw err;
+    }
     const rows = await resp.json();
     PfStore.navHistory = Array.isArray(rows) ? rows : [];
     return PfStore.navHistory;

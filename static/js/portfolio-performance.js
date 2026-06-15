@@ -10,13 +10,20 @@ function _pfSetChartMessage(ids, message) {
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:16px;text-align:center;color:var(--text-secondary);font-size:14px;">${escapeHtml(message)}</div>`;
+    el.innerHTML = `<div class="pf-chart-message">${escapeHtml(message)}</div>`;
   });
 }
 
 async function _pfFetchJson(path, label) {
   const resp = await apiFetch(path);
-  if (!resp.ok) throw new Error(`${label} request failed (${resp.status})`);
+  if (!resp.ok) {
+    const message = resp.status === 401
+      ? '로그인 후 심층 분석 데이터를 확인할 수 있습니다.'
+      : `${label} request failed (${resp.status})`;
+    const err = new Error(message);
+    err.status = resp.status;
+    throw err;
+  }
   return await resp.json();
 }
 
@@ -108,7 +115,7 @@ async function loadPerformanceData() {
     ? pfLoadNavHistory()
     : _pfFetchJson('/api/portfolio/nav-history', 'NAV history');
   const cashflowPromise = _pfFetchJson('/api/portfolio/cashflows', 'Cashflow history').catch(err => {
-    console.warn(err);
+    if (err?.status !== 401) console.warn(err);
     return [];
   });
   void cashflowPromise.then(cfData => {
@@ -116,7 +123,7 @@ async function loadPerformanceData() {
     renderCashflows(cfData, cachedNav || PfStore.navHistory || _navChartData);
   });
   const groupPromise = pfLoadGroupWeightHistory().catch(err => {
-    console.warn(err);
+    if (err?.status !== 401) console.warn(err);
     return [];
   });
   try {
@@ -127,7 +134,7 @@ async function loadPerformanceData() {
         renderValueChart(cachedNav),
       ]);
     } else {
-      _pfSetChartMessage(['pfNavChart', 'pfValueChart'], '추이 데이터를 불러오는 중입니다...');
+      _pfSetChartMessage(['pfNavChart', 'pfValueChart'], '심층 분석 데이터를 불러오는 중입니다...');
     }
 
     if (cachedGroup) {
@@ -156,11 +163,11 @@ async function loadPerformanceData() {
     renderCashflows(cfData, navData);
 
   } catch (e) {
-    console.warn(e);
-    const message = e?.message || '추이 그래프를 불러오지 못했습니다.';
+    if (e?.status !== 401) console.warn(e);
+    const message = e?.message || '심층 분석 그래프를 불러오지 못했습니다.';
     if (loadSeq !== _performanceLoadSeq) return;
     _pfSetChartMessage(['pfNavChart', 'pfValueChart'], message);
-    if (typeof showToast === 'function') showToast(message, 'error');
+    if (e?.status !== 401 && typeof showToast === 'function') showToast(message, 'error');
   }
 }
 
@@ -192,7 +199,7 @@ async function renderTreemap() {
   await new Promise(r => requestAnimationFrame(r));
 
   if (!PfStore.items.length) {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">포트폴리오가 비어 있습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">포트폴리오가 비어 있습니다.</div>';
     return;
   }
 

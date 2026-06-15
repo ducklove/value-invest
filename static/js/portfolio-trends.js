@@ -124,12 +124,12 @@ async function renderNavChart(data) {
   data = _navChartData;
 
   if (!data.length) {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">스냅샷 데이터가 없습니다.</div>';
     _updateChartRangeLabel('pfNavRange', [], 0, 0);
     return;
   }
   if (typeof PortfolioTrendChart === 'undefined') {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">차트 렌더러를 불러오지 못했습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">차트 렌더러를 불러오지 못했습니다.</div>';
     return;
   }
 
@@ -390,12 +390,12 @@ async function renderValueChart(data) {
   if (statsEl) statsEl.innerHTML = '';
 
   if (!data.length) {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">스냅샷 데이터가 없습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">스냅샷 데이터가 없습니다.</div>';
     _updateChartRangeLabel('pfValueRange', [], 0, 0);
     return;
   }
   if (typeof PortfolioTrendChart === 'undefined') {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">차트 렌더러를 불러오지 못했습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">차트 렌더러를 불러오지 못했습니다.</div>';
     return;
   }
 

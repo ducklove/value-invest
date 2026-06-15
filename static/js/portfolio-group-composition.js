@@ -98,7 +98,7 @@ async function pfShowGroupComposition(groupName) {
   if (!wrap || !container) return;
   wrap.style.display = 'block';
   if (title) title.textContent = `${groupName} 내 종목 비중 추이`;
-  container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">종목 비중 데이터를 불러오는 중입니다...</div>';
+  container.innerHTML = '<div class="pf-chart-message">종목 비중 데이터를 불러오는 중입니다...</div>';
 
   try {
     const resp = await apiFetch(`/api/portfolio/group-constituent-history?group=${encodeURIComponent(groupName)}`);
@@ -109,7 +109,7 @@ async function pfShowGroupComposition(groupName) {
   } catch (err) {
     if (requestSeq !== _groupCompositionRequestSeq || _groupCompositionSelected !== groupName) return;
     console.warn(err);
-    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">${escapeHtml(err?.message || '종목 비중 데이터를 불러오지 못했습니다.')}</div>`;
+    container.innerHTML = `<div class="pf-chart-message">${escapeHtml(err?.message || '종목 비중 데이터를 불러오지 못했습니다.')}</div>`;
   }
 }
 
@@ -124,12 +124,12 @@ async function renderGroupCompositionChart(groupName, rows) {
 
   const prepared = _prepareGroupCompositionData(rows);
   if (!prepared.dates.length || !prepared.seriesItems.length) {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">이 그룹의 종목 비중 스냅샷이 아직 없습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">이 그룹의 종목 비중 스냅샷이 아직 없습니다.</div>';
     _updateChartRangeLabel('pfGroupCompositionRange', [], 0, 0);
     return;
   }
   if (typeof PortfolioTrendChart === 'undefined') {
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;">차트 렌더러를 불러오지 못했습니다.</div>';
+    container.innerHTML = '<div class="pf-chart-message">차트 렌더러를 불러오지 못했습니다.</div>';
     return;
   }
 
