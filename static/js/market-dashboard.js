@@ -118,7 +118,6 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
     const frameHtml = _mdIndexFrameHtml(code, label);
     if (frameHtml) {
       return `<div class="md-hero-card md-index-card">`
-        + `<div class="md-hero-label">${escapeHtml(label)}</div>`
         + frameHtml + flowSlot + `</div>`;
     }
     return `<div class="md-hero-card">`
@@ -167,12 +166,23 @@ async function loadInvestorFlows() {
   }
 }
 
+function _mdSectionTitle(category, codes, variant) {
+  if (variant === 'hero' && category === '국내 지수') {
+    const labels = (codes || [])
+      .filter((code) => MD_INDEX_FRAME_CODES[code])
+      .map((code) => code);
+    if (labels.length) return `국내지수 (${labels.join(' / ')})`;
+  }
+  return category;
+}
+
 function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
   const body = variant === 'hero'
     ? `<div class="md-hero">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'hero')).join('')}</div>`
     : `<div class="md-rows">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'list')).join('')}</div>`;
+  const title = _mdSectionTitle(category, codes, variant);
   return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}" data-md-cat="${escapeHtml(category)}">`
-    + `<h3 class="md-section-title">${escapeHtml(category)}</h3>${body}</section>`;
+    + `<h3 class="md-section-title">${escapeHtml(title)}</h3>${body}</section>`;
 }
 
 function _mdKospiFuturesSectionHtml() {
