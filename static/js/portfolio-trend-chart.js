@@ -27,7 +27,7 @@
   function formatDateLabel(label) {
     if (!label || typeof label !== 'string') return '';
     const parts = label.split('-');
-    if (parts.length === 3) return `${parts[1]}-${parts[2]}`;
+    if (parts.length >= 2 && parts[0].length === 4) return `${parts[0]}-${parts[1]}`;
     return label;
   }
 

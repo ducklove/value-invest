@@ -805,6 +805,13 @@ def test_performance_tab_includes_group_weight_trend():
     assert "areaStyle: { opacity:" in group_weight
     assert "stack: series.stack || null" in chart
     assert "stackedIndexes.add(seriesIdx)" in chart
+    assert "#pfPerformanceTab" in styles
+    assert "width: 100%;" in styles
+    assert "max-width: 1180px" not in styles[styles.find("#pfPerformanceTab"):styles.find(".pf-deep-head")]
+    assert "grid-template-columns: minmax(0, 1fr);" in styles
+    assert "return `${parts[0]}-${parts[1]}`;" in chart
+    assert "{ label: '전일 NAV'" not in trends
+    assert "_periodPctByCalendarDays(data, navValues, 7)" in trends
 
 
 def test_performance_tab_includes_risk_panel():

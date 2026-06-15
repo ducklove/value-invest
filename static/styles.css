@@ -2082,7 +2082,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 #pfPerformanceTab {
   display: grid;
   gap: 16px;
-  max-width: 1180px;
+  width: 100%;
 }
 .pf-deep-head {
   display: flex;
@@ -2126,7 +2126,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-analysis-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 .pf-analysis-grid-flow {

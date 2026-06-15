@@ -58,6 +58,52 @@ function _chartDataToNumbers(values) {
   });
 }
 
+const _PF_DAY_MS = 86400000;
+
+function _pfDateMs(rowOrDate) {
+  const raw = typeof rowOrDate === 'string' ? rowOrDate : rowOrDate?.date;
+  const text = String(raw || '');
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+  if (match) return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const fallback = Date.parse(text);
+  return Number.isFinite(fallback) ? fallback : NaN;
+}
+
+function _findLookbackIndexByDays(data, days, endIdx = (data?.length || 0) - 1) {
+  if (!Array.isArray(data) || endIdx <= 0 || !(days > 0)) return -1;
+  const endMs = _pfDateMs(data[endIdx]);
+  if (!Number.isFinite(endMs)) return -1;
+  const targetMs = endMs - days * _PF_DAY_MS;
+  for (let i = endIdx - 1; i >= 0; i--) {
+    const ms = _pfDateMs(data[i]);
+    if (Number.isFinite(ms) && ms <= targetMs) return i;
+  }
+  return -1;
+}
+
+function _periodPctByCalendarDays(data, values, days, endIdx = (data?.length || 0) - 1) {
+  const startIdx = _findLookbackIndexByDays(data, days, endIdx);
+  const latest = values?.[endIdx];
+  const base = startIdx >= 0 ? values[startIdx] : null;
+  if (!Number.isFinite(Number(latest)) || !Number.isFinite(Number(base)) || !(Number(base) > 0)) return null;
+  return ((Number(latest) / Number(base)) - 1) * 100;
+}
+
+function _valuesWithinCalendarDays(data, values, days, endIdx = (data?.length || 0) - 1) {
+  if (!Array.isArray(data) || !Array.isArray(values) || endIdx < 0) return [];
+  const endMs = _pfDateMs(data[endIdx]);
+  if (!Number.isFinite(endMs)) return values.slice(Math.max(0, endIdx - days), endIdx + 1).filter(v => Number.isFinite(Number(v)));
+  const startMs = endMs - days * _PF_DAY_MS;
+  const result = [];
+  for (let i = 0; i <= endIdx; i++) {
+    const ms = _pfDateMs(data[i]);
+    const value = Number(values[i]);
+    if (Number.isFinite(ms) && ms >= startMs && ms <= endMs && Number.isFinite(value)) result.push(value);
+  }
+  if (result.length) return result;
+  return values.slice(Math.max(0, endIdx - days), endIdx + 1).filter(v => Number.isFinite(Number(v)));
+}
+
 function _visibleChartValues(seriesList, startIdx, endIdx) {
   const values = [];
   for (const series of seriesList || []) {
@@ -358,7 +404,10 @@ function _navZoomToDays(days) {
   if (_isMobileChartMode()) return;
   if (!_navChartInstance || !_navChartData.length || typeof _navChartInstance.dispatchAction !== 'function') return;
   const total = _navChartData.length;
-  const startPct = Math.max(0, (1 - days / total) * 100);
+  const startIdx = _findLookbackIndexByDays(_navChartData, days);
+  const fallbackIdx = Math.max(0, total - days - 1);
+  const resolvedIdx = startIdx >= 0 ? startIdx : fallbackIdx;
+  const startPct = total > 1 ? Math.max(0, Math.min(100, (resolvedIdx / (total - 1)) * 100)) : 0;
   _navChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
 }
 
@@ -366,7 +415,10 @@ function _valueZoomToDays(days) {
   if (_isMobileChartMode()) return;
   if (!_valueChartInstance || !_valueChartData.length || typeof _valueChartInstance.dispatchAction !== 'function') return;
   const total = _valueChartData.length;
-  const startPct = Math.max(0, (1 - days / total) * 100);
+  const startIdx = _findLookbackIndexByDays(_valueChartData, days);
+  const fallbackIdx = Math.max(0, total - days - 1);
+  const resolvedIdx = startIdx >= 0 ? startIdx : fallbackIdx;
+  const startPct = total > 1 ? Math.max(0, Math.min(100, (resolvedIdx / (total - 1)) * 100)) : 0;
   _valueChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
 }
 
@@ -455,13 +507,12 @@ async function renderValueChart(data) {
 
   // Value stats cards — use FX-converted values
   if (statsEl) {
-    const fxLast365 = fxValues.slice(-365);
+    const fxLast365 = _valuesWithinCalendarDays(data, fxValues, 365);
     const min52 = Math.min(...fxLast365);
     const max52 = Math.max(...fxLast365);
 
     // YoY (using FX-adjusted values)
-    const yoyPct = fxLast365.length > 1
-      ? ((fxValues[fxValues.length - 1] / fxLast365[0]) - 1) * 100 : null;
+    const yoyPct = _periodPctByCalendarDays(data, fxValues, 365);
 
     // CAGR using FX-adjusted values
     const valTotalDays = data.length > 1 ? (new Date(data[data.length - 1].date) - new Date(data[0].date)) / 86400000 : 0;
@@ -472,15 +523,9 @@ async function renderValueChart(data) {
       ? ((_latestFxVal - _firstFxVal) / _firstFxVal * 100) / valTotalYears : null;
 
     const fmtVal = v => PfStore.currency.unit === 'USD' ? '$' + Number(v.toFixed(0)).toLocaleString() : fmtKrw(Math.round(v));
-    const _periodPct = (days) => {
-      if (fxValues.length < 2) return null;
-      const slice = fxValues.slice(-days);
-      if (slice.length < 2 || !(slice[0] > 0)) return null;
-      return ((fxValues[fxValues.length - 1] / slice[0]) - 1) * 100;
-    };
-    const pct7 = _periodPct(7);
-    const pct30 = _periodPct(30);
-    const pct90 = _periodPct(90);
+    const pct7 = _periodPctByCalendarDays(data, fxValues, 7);
+    const pct30 = _periodPctByCalendarDays(data, fxValues, 30);
+    const pct90 = _periodPctByCalendarDays(data, fxValues, 90);
     const items = [
       { label: '전일 평가금액', val: fmtVal(_latestFxVal) },
       { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7), days: 7 },
@@ -571,29 +616,19 @@ function renderNavReturns(data) {
   const latest = data[data.length - 1];
   const latestNav = _nav(latest);
   const firstNav = _nav(data[0]);
+  const navValues = data.map(_nav);
 
-  // Period returns helper
-  const _periodPct = (days) => {
-    if (data.length < 2) return null;
-    const slice = data.slice(-days);
-    if (!slice.length) return null;
-    const base = _nav(slice[0]);
-    return base > 0 ? ((latestNav / base) - 1) * 100 : null;
-  };
-
-  const pct7 = _periodPct(7);
-  const pct30 = _periodPct(30);
-  const pct90 = _periodPct(90);
+  const pct7 = _periodPctByCalendarDays(data, navValues, 7);
+  const pct30 = _periodPctByCalendarDays(data, navValues, 30);
+  const pct90 = _periodPctByCalendarDays(data, navValues, 90);
 
   // 52-week range
-  const last365 = data.slice(-365);
-  const navs52 = last365.map(d => _nav(d));
+  const navs52 = _valuesWithinCalendarDays(data, navValues, 365);
   const min52 = Math.min(...navs52);
   const max52 = Math.max(...navs52);
 
   // YoY
-  const oneYearAgo = last365.length >= 252 ? last365[0] : (last365.length > 0 ? last365[0] : null);
-  const yoyPct = oneYearAgo ? ((latestNav / _nav(oneYearAgo)) - 1) * 100 : null;
+  const yoyPct = _periodPctByCalendarDays(data, navValues, 365);
 
   // CAGR
   const totalDays = data.length > 1 ? (new Date(latest.date) - new Date(data[0].date)) / 86400000 : 0;
@@ -602,7 +637,6 @@ function renderNavReturns(data) {
     ? ((latestNav - firstNav) / firstNav * 100) / totalYears : null;
 
   const items = [
-    { label: '전일 NAV', val: latestNav.toFixed(2) },
     { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7), days: 7 },
     { label: '최근 30일', val: pct30 !== null ? fmtPct(pct30) : '-', cls: returnClass(pct30), days: 30 },
     { label: '최근 90일', val: pct90 !== null ? fmtPct(pct90) : '-', cls: returnClass(pct90), days: 90 },
