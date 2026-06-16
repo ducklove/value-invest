@@ -114,7 +114,7 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   assert.ok(root.querySelector(".md-hero-card iframe.md-index-frame"));
   assert.match(
     root.querySelector(".md-hero-card iframe.md-index-frame").getAttribute("src"),
-    /index=kospi&theme=light&period=1D&headless=1/,
+    /index=ekospi&theme=light&period=1D&headless=1/,
   );
   // 해외 지수 (SPX) → compact row in the rail now, with down class.
   assert.match(rail.innerHTML, /md-chg md-down/);
@@ -130,7 +130,7 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   assert.deepEqual(railTitles, ["해외 지수", "원자재", "환율", "신규카테고리"]);
 });
 
-test("야간선물 카테고리는 KOSPI200 iframe 섹션으로 상시 렌더된다", () => {
+test("야간선물 카테고리는 야간선물 iframe 섹션으로 상시 렌더된다", () => {
   const w = load();
   const catalog = {
     KOSPI: { label: "KOSPI", category: "국내 지수" },
@@ -140,12 +140,12 @@ test("야간선물 카테고리는 KOSPI200 iframe 섹션으로 상시 렌더된
   w._mdRenderDashboard(catalog, data);
   const section = w.document.querySelector('[data-md-cat="야간선물"]');
   assert.ok(section, "야간선물 카테고리 섹션은 시간대와 무관하게 노출");
-  assert.equal(section.querySelector(".md-section-title").textContent, "KOSPI200");
+  assert.equal(section.querySelector(".md-section-title").textContent, "야간선물");
   const frame = section.querySelector("iframe.md-kospi-futures-frame");
   assert.ok(frame, "실시간 그래프 iframe 존재");
   assert.equal(
     frame.getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi200&theme=light&period=24H&headless=1",
+    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=24H&headless=1",
   );
 });
 
@@ -204,7 +204,7 @@ test("hero cards embed API index frames for KOSPI/KOSDAQ only", () => {
   assert.equal(frames.length, 2);
   assert.equal(
     frames[0].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=light&period=1D&headless=1",
+    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=light&period=1D&headless=1",
   );
   assert.equal(
     frames[1].getAttribute("src"),
@@ -218,14 +218,14 @@ test("hero cards embed API index frames for KOSPI/KOSDAQ only", () => {
 test("_mdIndexFrameHtml only emits for KOSPI/KOSDAQ", () => {
   const w = load();
   assert.equal(
-    w._mdIndexFrameUrl("kospi"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=light&period=1D&headless=1",
+    w._mdIndexFrameUrl("ekospi"),
+    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=light&period=1D&headless=1",
   );
   assert.equal(
-    w._mdIndexFrameUrl("kospi", "dark"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=dark&period=1D&headless=1",
+    w._mdIndexFrameUrl("ekospi", "dark"),
+    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=dark&period=1D&headless=1",
   );
-  assert.match(w._mdIndexFrameHtml("KOSPI", "KOSPI"), /index=kospi&amp;theme=light&amp;period=1D&amp;headless=1/);
+  assert.match(w._mdIndexFrameHtml("KOSPI", "KOSPI"), /index=ekospi&amp;theme=light&amp;period=1D&amp;headless=1/);
   assert.match(w._mdIndexFrameHtml("KOSDAQ", "KOSDAQ"), /index=kosdaq&amp;theme=light&amp;period=1D&amp;headless=1/);
   assert.equal(w._mdIndexFrameHtml("SPX", "S&P 500"), "");
   assert.equal(w._mdIndexFrameHtml("AAPL", "Apple"), "");
@@ -242,22 +242,22 @@ test("market dashboard iframe URLs follow data-theme and resync on theme toggle"
   assert.equal(frames.length, 2);
   assert.equal(
     frames[0].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=light&period=1D&headless=1",
+    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=light&period=1D&headless=1",
   );
   assert.equal(
     frames[1].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi200&theme=light&period=24H&headless=1",
+    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=24H&headless=1",
   );
 
   w.document.documentElement.setAttribute("data-theme", "dark");
   w.syncMarketDashboardFrameTheme();
   assert.equal(
     frames[0].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi&theme=dark&period=1D&headless=1",
+    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=dark&period=1D&headless=1",
   );
   assert.equal(
     frames[1].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi200&theme=dark&period=24H&headless=1",
+    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=dark&period=24H&headless=1",
   );
 });
 

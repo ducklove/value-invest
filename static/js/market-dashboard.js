@@ -5,7 +5,7 @@
 // (values: code -> {value, change, change_pct, direction}). Renders the
 // indicators grouped by category into #marketDashboard. No auth required.
 //
-// Phase 1 covers the indicator grid (지수·해외증시·원자재·환율·금리·KOSPI200).
+// Phase 1 covers the indicator grid (지수·해외증시·원자재·환율·금리·야간선물).
 // Crypto / news / 수급·시총·업종 widgets are layered on in later steps.
 
 let _mdCatalog = null; // {code: {label, category}}
@@ -15,7 +15,7 @@ let _mdInFlight = null;
 // Display order for category groups; unknown categories fall to the end.
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
 const MD_INDEX_FRAME_BASE_URL = 'https://cantabile.tplinkdns.com:3358/';
-const MD_INDEX_FRAME_CODES = { KOSPI: 'kospi', KOSDAQ: 'kosdaq' };
+const MD_INDEX_FRAME_CODES = { KOSPI: 'ekospi', KOSDAQ: 'kosdaq' };
 const MD_INDEX_FRAME_DEFAULT_PERIOD = '1D';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
@@ -56,7 +56,7 @@ function _mdGroupByCategory(catalog) {
 }
 
 // Information architecture: prominent 주요 지수 hero + 국채 in the
-// main column; the lighter indicator strips (해외 지수·환율·원자재·KOSPI200) and
+// main column; the lighter indicator strips (해외 지수·환율·원자재·야간선물) and
 // 시장 랭킹 in the right rail so the two columns stay balanced in height.
 const MD_HERO_CATEGORIES = ['국내 지수'];
 // Categories forced into the main column (besides hero/국채). Empty = only the
@@ -186,15 +186,15 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
 }
 
 function _mdKospiFuturesSectionHtml() {
-  const index = 'kospi200';
+  const index = 'kospi-night-futures';
   const period = '24H';
   return '<section class="md-section md-kospi-futures-section" data-md-cat="야간선물">'
-    + '<h3 class="md-section-title">KOSPI200</h3>'
+    + '<h3 class="md-section-title">야간선물</h3>'
     + '<div class="md-kospi-futures-frame-wrap">'
     + `<iframe class="md-kospi-futures-frame" src="${escapeHtml(_mdIndexFrameUrl(index, _mdCurrentTheme(), period))}" `
     + `data-md-frame-index="${escapeHtml(index)}" `
     + `data-md-frame-period="${escapeHtml(period)}" `
-    + 'title="KOSPI200 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>'
+    + 'title="야간선물 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>'
     + '</div></section>';
 }
 
