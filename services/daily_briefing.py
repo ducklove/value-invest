@@ -26,6 +26,7 @@ import logging
 from datetime import date, timedelta
 
 import ai_config
+import close_price_client
 from repositories import dart_review as dart_review_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -102,10 +103,90 @@ def _nav_block(latest: dict | None, prev: dict | None) -> dict | None:
     return block
 
 
-def _movers(curr_rows: list[dict], prev_rows: list[dict], names: dict[str, str]) -> dict:
-    """종목별 평가액 변화(원) 기준 기여 상위/하위. 두 날짜 모두 존재하는 종목만
-    비교한다(신규 매수/전량 매도를 등락으로 오인하지 않도록). 현금성 코드는 제외."""
+def _safe_float(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _price_row_date(row: dict) -> str | None:
+    text = str(
+        row.get("date")
+        or row.get("trade_date")
+        or row.get("business_date")
+        or row.get("stck_bsop_date")
+        or ""
+    ).strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    return text[:10] or None
+
+
+def _price_change_from_rows(rows: list[dict], target_date: str) -> dict | None:
+    points: list[tuple[str, float]] = []
+    for row in rows:
+        row_date = _price_row_date(row)
+        close = _safe_float(row.get("close") or row.get("close_price") or row.get("stck_clpr"))
+        if row_date and row_date <= target_date and close is not None and close > 0:
+            points.append((row_date, close))
+    points.sort(key=lambda item: item[0])
+    if len(points) < 2:
+        return None
+
+    current_date, current_close = points[-1]
+    prev_date, prev_close = points[-2]
+    if current_date != target_date or prev_close <= 0:
+        return None
+
+    return {
+        "date": current_date,
+        "price": current_close,
+        "prev_date": prev_date,
+        "prev_price": prev_close,
+        "change_pct": (current_close / prev_close - 1.0) * 100.0,
+    }
+
+
+async def _daily_price_changes_by_code(codes: list[str], since: str | None, until: str | None) -> dict[str, dict]:
+    if not codes or not since or not until:
+        return {}
+    try:
+        rows_by_code = await close_price_client.get_daily_prices_batch(
+            codes,
+            since=since,
+            until=until,
+            fields=("close",),
+        )
+    except Exception as exc:
+        logger.warning("briefing daily price change block failed: %s", exc)
+        return {}
+
+    changes: dict[str, dict] = {}
+    for code in codes:
+        rows = rows_by_code.get(code) or rows_by_code.get(code.upper()) or []
+        change = _price_change_from_rows(rows, until)
+        if change is not None:
+            changes[code] = change
+    return changes
+
+
+def _movers(
+    curr_rows: list[dict],
+    prev_rows: list[dict],
+    names: dict[str, str],
+    price_changes: dict[str, dict] | None = None,
+) -> dict:
+    """종목별 가격 변동률로 가격 기여 상위/하위를 계산한다.
+
+    평가액 증감률은 수량 변경의 영향을 받으므로 퍼센트와 기여액 모두 종가의
+    일간 변동률을 기준으로 잡는다. 두 날짜 모두 존재하고 가격을 확인할 수
+    있는 종목만 비교하며, 현금성 코드는 제외한다.
+    """
     prev_by_code = {r["stock_code"]: float(r.get("market_value") or 0) for r in prev_rows}
+    price_changes = price_changes or {}
     deltas: list[dict] = []
     for row in curr_rows:
         code = row["stock_code"]
@@ -114,14 +195,19 @@ def _movers(curr_rows: list[dict], prev_rows: list[dict], names: dict[str, str])
         prev_mv = prev_by_code.get(code)
         if prev_mv is None or prev_mv <= 0:
             continue
-        mv = float(row.get("market_value") or 0)
-        change = mv - prev_mv
+        price_change = price_changes.get(code)
+        if not price_change:
+            continue
+        change_pct = price_change["change_pct"]
+        change = prev_mv * change_pct / 100.0
         deltas.append(
             {
                 "stock_code": code,
                 "stock_name": names.get(code, code),
                 "change_krw": change,
-                "change_pct": change / prev_mv * 100.0,
+                "change_pct": change_pct,
+                "price": price_change["price"],
+                "prev_price": price_change["prev_price"],
             }
         )
     deltas.sort(key=lambda d: d["change_krw"], reverse=True)
@@ -160,7 +246,18 @@ async def build_briefing_context(google_sub: str) -> dict:
                 r["stock_code"]: r.get("stock_name") or r["stock_code"]
                 for r in await snapshots_repo.get_latest_stock_snapshot_rows(google_sub)
             }
-            context["movers"] = _movers(curr_rows, prev_rows, names)
+            prev_codes = {r["stock_code"] for r in prev_rows}
+            mover_codes = sorted(
+                row["stock_code"]
+                for row in curr_rows
+                if row["stock_code"] in prev_codes and not row["stock_code"].startswith("CASH_")
+            )
+            price_changes = await _daily_price_changes_by_code(
+                mover_codes,
+                prev.get("date") if prev else None,
+                latest["date"],
+            )
+            context["movers"] = _movers(curr_rows, prev_rows, names, price_changes)
     except Exception as exc:
         logger.warning("briefing NAV block failed user=%s: %s", google_sub[:8], exc)
 
@@ -214,6 +311,12 @@ def _fmt_signed_krw(value: float) -> str:
     return f"{sign}{ai_analysis.fmt_krw(abs(value))}"
 
 
+def _fmt_mover(mover: dict) -> str:
+    pct = mover.get("change_pct")
+    pct_text = f"(가격 {pct:+.1f}%)" if pct is not None else ""
+    return f"{mover['stock_name']} {_fmt_signed_krw(mover['change_krw'])}{pct_text}"
+
+
 def _context_lines(context: dict) -> list[str]:
     """컨텍스트를 사람이 읽을 수 있는 줄들로 변환 — 템플릿 폴백 본문이자
     LLM 프롬프트의 데이터 섹션."""
@@ -230,16 +333,10 @@ def _context_lines(context: dict) -> list[str]:
 
     movers = context.get("movers") or {}
     if movers.get("top"):
-        parts = ", ".join(
-            f"{m['stock_name']} {_fmt_signed_krw(m['change_krw'])}({m['change_pct']:+.1f}%)"
-            for m in movers["top"]
-        )
+        parts = ", ".join(_fmt_mover(m) for m in movers["top"])
         lines.append(f"📈 상승 기여: {parts}")
     if movers.get("bottom"):
-        parts = ", ".join(
-            f"{m['stock_name']} {_fmt_signed_krw(m['change_krw'])}({m['change_pct']:+.1f}%)"
-            for m in movers["bottom"]
-        )
+        parts = ", ".join(_fmt_mover(m) for m in movers["bottom"])
         lines.append(f"📉 하락 기여: {parts}")
 
     for f in context.get("filings") or []:

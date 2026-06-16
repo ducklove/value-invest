@@ -118,8 +118,13 @@ class BriefingContextTests(DailyBriefingHarness):
             "time": "21:30", "country_name": "미국", "flag": "🇺🇸",
             "event": "소비자물가지수(CPI)", "importance": "high",
         }]}
+        price_rows = {
+            "005930": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 1020}],
+            "000660": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 970}],
+        }
         with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value=calendar_payload)), \
-             patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=["- KOSPI: 2900 (+0.5%)"])):
+             patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=["- KOSPI: 2900 (+0.5%)"])), \
+             patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
             ctx = await daily_briefing.build_briefing_context("u1")
 
         # 어제 NAV 변화 (원·%)
@@ -133,8 +138,14 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertEqual(top_codes, ["005930"])
         self.assertEqual(bottom_codes, ["000660"])
         self.assertEqual(ctx["movers"]["top"][0]["stock_name"], "삼성전자")
-        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_krw"], 70_000)
+        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_krw"], 10_000)
+        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_pct"], 2.0)
+        self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_krw"], -9_000)
+        self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_pct"], -3.0)
         self.assertNotIn("CASH_KRW", top_codes + bottom_codes)
+        self.assertEqual(set(prices.await_args.args[0]), {"005930", "000660"})
+        self.assertEqual(prices.await_args.kwargs["since"], d_prev)
+        self.assertEqual(prices.await_args.kwargs["until"], d_last)
         # 신규 공시 리뷰 / 리포트
         self.assertEqual(ctx["filings"][0]["report_name"], "분기보고서 (2026.03)")
         self.assertEqual(ctx["reports"][0]["title"], "HBM 사이클 점검")
@@ -147,6 +158,7 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertTrue(text.startswith("🌅 데일리 브리핑"))
         self.assertIn("삼성전자", text)
         self.assertIn("+5.00%", text)
+        self.assertIn("가격 +2.0%", text)
 
     async def test_context_with_empty_db_is_safe(self):
         await self._seed_user("u-empty")
