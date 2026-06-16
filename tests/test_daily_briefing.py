@@ -160,6 +160,25 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertIn("+5.00%", text)
         self.assertIn("가격 +2.0%", text)
 
+    async def test_movers_fall_back_to_market_value_when_daily_prices_empty(self):
+        await self._seed_user()
+        await self._seed_snapshots()
+        with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
+             patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value={})):
+            ctx = await daily_briefing.build_briefing_context("u1")
+
+        top = ctx["movers"]["top"]
+        bottom = ctx["movers"]["bottom"]
+        self.assertEqual([m["stock_code"] for m in top], ["005930"])
+        self.assertEqual([m["stock_code"] for m in bottom], ["000660"])
+        self.assertEqual(top[0]["basis"], "market_value")
+        self.assertEqual(bottom[0]["basis"], "market_value")
+        self.assertEqual(ctx["diagnostics"]["price_change_codes"], 0)
+        self.assertEqual(ctx["diagnostics"]["mover_value_fallbacks"], 2)
+        text = daily_briefing.render_template_briefing(ctx)
+        self.assertIn("평가액 +14.0%", text)
+
     async def test_context_with_empty_db_is_safe(self):
         await self._seed_user("u-empty")
         with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
@@ -216,7 +235,7 @@ class GenerateBriefingTests(DailyBriefingHarness):
         resp.status_code = 200
         resp.json.return_value = {
             "model": "test/model",
-            "choices": [{"message": {"content": "🌅 데일리 브리핑\n어제 +5.0% 상승했습니다."}}],
+            "choices": [{"message": {"content": "🌅 데일리 브리핑\n어제 +5.0% 상승했습니다.\n오늘은 기여 종목을 확인하세요."}}],
             "usage": {"prompt_tokens": 120, "completion_tokens": 45, "cost": 0.0011},
         }
         with patch.object(daily_briefing, "build_briefing_context", new=AsyncMock(return_value=self._minimal_context())), \
@@ -232,6 +251,25 @@ class GenerateBriefingTests(DailyBriefingHarness):
         self.assertEqual(rows[0]["ok"], 1)
         self.assertEqual(rows[0]["input_tokens"], 120)
         self.assertEqual(rows[0]["output_tokens"], 45)
+
+    async def test_too_short_llm_response_falls_back_to_template(self):
+        await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "model": "test/model",
+            "choices": [{"message": {"content": "어제 +5.0% 상승했습니다."}}],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 4, "cost": 0.0001},
+        }
+        with patch.object(daily_briefing, "build_briefing_context", new=AsyncMock(return_value=self._minimal_context())), \
+             patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=resp)):
+            briefing = await daily_briefing.generate_briefing("u1")
+        self.assertEqual(briefing["source"], "template")
+        self.assertEqual(briefing["fallback_reason"], "ai_too_short")
+        self.assertTrue(briefing["text"].startswith("🌅 데일리 브리핑"))
+        self.assertGreaterEqual(briefing["stats"]["text_lines"], 3)
+        rows = await self._usage_rows()
+        self.assertEqual(rows[0]["ok"], 1)
 
 
 class SendBriefingsTests(DailyBriefingHarness):
