@@ -93,7 +93,12 @@ class TradingDayHelperTests(unittest.TestCase):
 
 
 class _SeededDbTestCase(TempDbMixin):
-    async def _seed_user_with_holdings(self, sub: str = "u1"):
+    async def _seed_user_with_holdings(
+        self,
+        sub: str = "u1",
+        stock_code: str = "005930",
+        stock_name: str = "삼성전자",
+    ):
         db = await cache.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -101,7 +106,7 @@ class _SeededDbTestCase(TempDbMixin):
         )
         await db.execute(
             "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (sub, "005930", "삼성전자", 60000.0, 10, "2026-01-01", "2026-01-01"),
+            (sub, stock_code, stock_name, 60000.0, 10, "2026-01-01", "2026-01-01"),
         )
         await db.commit()
 
@@ -159,6 +164,56 @@ class NavSnapshotFreshnessTests(_SeededDbTestCase):
         result = await data_quality.check_nav_snapshot_freshness(now=WED_LATE)
         self.assertEqual(result["status"], "ok")
         self.assertIn("생략", result["detail"])
+
+
+class PortfolioStockSnapshotFreshnessTests(_SeededDbTestCase):
+    async def test_no_holdings_skips(self):
+        result = await data_quality.check_portfolio_stock_snapshot_freshness(now=WED_LATE)
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("생략", result["detail"])
+
+    async def test_fresh_held_stock_snapshot_is_ok(self):
+        await self._seed_user_with_holdings(stock_code="DAX.O", stock_name="Global X DAX Germany ETF")
+        await snapshots_repo.save_stock_snapshots("u1", "2026-06-10", [
+            {"stock_code": "DAX.O", "market_value": 687_050},
+        ])
+        result = await data_quality.check_portfolio_stock_snapshot_freshness(now=WED_LATE)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["value"], 0)
+
+    async def test_stale_held_stock_snapshot_is_error(self):
+        await self._seed_user_with_holdings(stock_code="DAX.O", stock_name="Global X DAX Germany ETF")
+        await snapshots_repo.save_stock_snapshots("u1", "2026-06-04", [
+            {"stock_code": "DAX.O", "market_value": 665_950},
+        ])
+        result = await data_quality.check_portfolio_stock_snapshot_freshness(now=WED_LATE)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["value"], 4)
+        self.assertIn("DAX.O", result["detail"])
+
+    async def test_missing_held_stock_snapshot_is_error(self):
+        await self._seed_user_with_holdings(stock_code="DAX.O", stock_name="Global X DAX Germany ETF")
+        result = await data_quality.check_portfolio_stock_snapshot_freshness(now=WED_LATE)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["value"], 1)
+        self.assertIn("DAX.O", result["detail"])
+
+    async def test_stale_dotted_foreign_code_is_kept_in_detail_examples(self):
+        await self._seed_user_with_holdings(stock_code="000001", stock_name="A")
+        db = await cache.get_db()
+        for code in ("000002", "000003", "000004", "000005", "000006", "DAX.O"):
+            await db.execute(
+                "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("u1", code, code, 1000.0, 1, "2026-01-01", "2026-01-01"),
+            )
+        await db.commit()
+        await snapshots_repo.save_stock_snapshots("u1", "2026-06-04", [
+            {"stock_code": code, "market_value": 1000}
+            for code in ("000001", "000002", "000003", "000004", "000005", "000006", "DAX.O")
+        ])
+        result = await data_quality.check_portfolio_stock_snapshot_freshness(now=WED_LATE)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("DAX.O", result["detail"])
 
 
 class IntradayPointsTests(_SeededDbTestCase):

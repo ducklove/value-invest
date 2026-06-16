@@ -52,6 +52,7 @@ _YFINANCE_SUFFIXES = (
     "", ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".L", ".AX", ".T",
     ".HK", ".SS", ".SZ", ".SW", ".ST", ".CO",
 )
+_REUTERS_STRIP_SUFFIXES = (".OQ", ".PK", ".O", ".K")
 
 # --- Concurrency bounds & deadlines for external calls ---
 # Limits how many in-flight calls can hit each external dependency at once,
@@ -64,6 +65,7 @@ _YAHOO_HTTP_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 _YAHOO_SEM = asyncio.Semaphore(4)
 _INSIGHT_QUOTE_TIMEOUT = 8.5
 _STATIC_FOREIGN_QUOTE_TIMEOUT = 3.0
+_KIS_FOREIGN_QUOTE_TIMEOUT = 4.0
 
 # Negative cache: tickers we just failed to fetch/resolve via yfinance —
 # avoids re-running the 16-suffix probe loop on every quote refresh. TTL'd
@@ -195,7 +197,7 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
         return None
     try:
         import yfinance as yf
-        candidates = [ticker] if "." in ticker else [ticker + s for s in _YFINANCE_SUFFIXES]
+        candidates = _yfinance_candidates(ticker)
 
         def _probe(cand):
             t = yf.Ticker(cand)
@@ -216,6 +218,31 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
         pass
     yf_mark_failed(ticker)
     return None
+
+
+def _strip_reuters_suffix(ticker: str) -> str | None:
+    upper = (ticker or "").upper()
+    for suffix in _REUTERS_STRIP_SUFFIXES:
+        if upper.endswith(suffix):
+            return ticker[: -len(suffix)]
+    return None
+
+
+def _yfinance_candidates(ticker: str) -> list[str]:
+    ticker = (ticker or "").strip()
+    if not ticker:
+        return []
+    if "." not in ticker:
+        return [ticker + suffix for suffix in _YFINANCE_SUFFIXES]
+
+    candidates = [ticker]
+    stripped = _strip_reuters_suffix(ticker)
+    if stripped:
+        candidates.append(stripped)
+    direct = yfinance_direct_ticker(ticker)
+    if direct != ticker:
+        candidates.append(direct)
+    return list(dict.fromkeys(candidates))
 
 
 async def yfinance_resolve_name(ticker: str) -> str | None:
@@ -287,7 +314,10 @@ async def kis_fetch_foreign_quote(ticker: str) -> dict:
     symbol = ticker.split(".")[0].upper()
     for excd in exchanges:
         try:
-            data = await kis_proxy_client.get_overseas_quote(symbol, excd)
+            data = await asyncio.wait_for(
+                kis_proxy_client.get_overseas_quote(symbol, excd),
+                timeout=_KIS_FOREIGN_QUOTE_TIMEOUT,
+            )
             s = data.get("summary", {})
             price = s.get("price")
             if price is not None:

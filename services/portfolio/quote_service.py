@@ -72,7 +72,7 @@ async def fetch_external_quote_for_stock_service(stock_code: str) -> dict:
         await foreign.ensure_ticker_map()
         ticker = foreign._ticker_map.get(stock_code, stock_code)
         q = await foreign.fetch_foreign_quote(ticker)
-        if not q and ticker == stock_code and "." not in stock_code:
+        if not q and ticker == stock_code:
             resolved = await foreign.resolve_foreign_reuters(stock_code)
             if resolved and resolved != stock_code:
                 await foreign.save_ticker(stock_code, resolved)
