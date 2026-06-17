@@ -214,7 +214,7 @@ test("hero cards embed API index frames for KOSPI/KOSDAQ only", () => {
     frames[1].getAttribute("src"),
     "https://cantabile.tplinkdns.com:3358/?index=kosdaq&theme=light&period=1D&headless=1",
   );
-  assert.equal(main.querySelectorAll(".md-index-card .md-hero-label").length, 0);
+  assert.equal(main.querySelector(".md-index-card .md-index-frame-label").textContent, "eKOSPI");
   assert.equal(main.querySelector(".md-section-title").textContent, "국내지수 (eKOSPI / KOSDAQ)");
   assert.ok(main.querySelector(".md-hero-card .md-hero-val"), "unknown domestic index keeps value fallback");
 });
