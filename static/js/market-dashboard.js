@@ -16,6 +16,11 @@ let _mdInFlight = null;
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
 const MD_INDEX_FRAME_BASE_URL = 'https://cantabile.tplinkdns.com:3358/';
 const MD_INDEX_FRAME_CODES = { KOSPI: 'ekospi', KOSDAQ: 'kosdaq' };
+const MD_INDEX_DISPLAY_LABELS = { KOSPI: 'eKOSPI', KOSDAQ: 'KOSDAQ' };
+const MD_INDEX_DESCRIPTIONS = {
+  KOSPI: 'eKOSPI: 코스피 실시간 지수',
+  KOSDAQ: 'KOSDAQ: 코스닥 실시간 지수',
+};
 const MD_INDEX_FRAME_DEFAULT_PERIOD = '1D';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
@@ -170,10 +175,19 @@ function _mdSectionTitle(category, codes, variant) {
   if (variant === 'hero' && category === '국내 지수') {
     const labels = (codes || [])
       .filter((code) => MD_INDEX_FRAME_CODES[code])
-      .map((code) => code);
+      .map((code) => MD_INDEX_DISPLAY_LABELS[code] || code);
     if (labels.length) return `국내지수 (${labels.join(' / ')})`;
   }
   return category;
+}
+
+function _mdSectionTitleTooltip(category, codes, variant) {
+  if (variant !== 'hero' || category !== '국내 지수') return '';
+  return (codes || [])
+    .filter((code) => MD_INDEX_FRAME_CODES[code])
+    .map((code) => MD_INDEX_DESCRIPTIONS[code] || '')
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
@@ -181,8 +195,10 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
     ? `<div class="md-hero">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'hero')).join('')}</div>`
     : `<div class="md-rows">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'list')).join('')}</div>`;
   const title = _mdSectionTitle(category, codes, variant);
+  const titleTooltip = _mdSectionTitleTooltip(category, codes, variant);
+  const titleAttr = titleTooltip ? ` title="${escapeHtml(titleTooltip)}"` : '';
   return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}" data-md-cat="${escapeHtml(category)}">`
-    + `<h3 class="md-section-title">${escapeHtml(title)}</h3>${body}</section>`;
+    + `<h3 class="md-section-title"${titleAttr}>${escapeHtml(title)}</h3>${body}</section>`;
 }
 
 function _mdKospiFuturesSectionHtml() {

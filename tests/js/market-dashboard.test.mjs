@@ -125,7 +125,11 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
 
   // main carries only 국내 지수 (hero); the rail carries 해외 지수 + the rest.
   const mainTitles = [...main.querySelectorAll(".md-section-title")].map((el) => el.textContent);
-  assert.deepEqual(mainTitles, ["국내지수 (KOSPI)"]);
+  assert.deepEqual(mainTitles, ["국내지수 (eKOSPI)"]);
+  assert.equal(
+    main.querySelector(".md-section-title").getAttribute("title"),
+    "eKOSPI: 코스피 실시간 지수",
+  );
   const railTitles = [...rail.querySelectorAll(".md-section-title")].map((el) => el.textContent);
   assert.deepEqual(railTitles, ["해외 지수", "원자재", "환율", "신규카테고리"]);
 });
@@ -211,7 +215,7 @@ test("hero cards embed API index frames for KOSPI/KOSDAQ only", () => {
     "https://cantabile.tplinkdns.com:3358/?index=kosdaq&theme=light&period=1D&headless=1",
   );
   assert.equal(main.querySelectorAll(".md-index-card .md-hero-label").length, 0);
-  assert.equal(main.querySelector(".md-section-title").textContent, "국내지수 (KOSPI / KOSDAQ)");
+  assert.equal(main.querySelector(".md-section-title").textContent, "국내지수 (eKOSPI / KOSDAQ)");
   assert.ok(main.querySelector(".md-hero-card .md-hero-val"), "unknown domestic index keeps value fallback");
 });
 
