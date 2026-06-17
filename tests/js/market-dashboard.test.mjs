@@ -128,7 +128,7 @@ test("_mdRenderDashboard builds two-column layout: hero indices in main, others 
   assert.deepEqual(mainTitles, ["국내지수 (eKOSPI)"]);
   assert.equal(
     main.querySelector(".md-section-title").getAttribute("title"),
-    "eKOSPI: 코스피 실시간 지수",
+    "eKOSPI: 장중에는 KOSPI, 장외에는 finance 선물 EWYUSDT 기반 KOSPI 환산 지수",
   );
   const railTitles = [...rail.querySelectorAll(".md-section-title")].map((el) => el.textContent);
   assert.deepEqual(railTitles, ["해외 지수", "원자재", "환율", "신규카테고리"]);

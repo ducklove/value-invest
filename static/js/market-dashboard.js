@@ -18,7 +18,7 @@ const MD_INDEX_FRAME_BASE_URL = 'https://cantabile.tplinkdns.com:3358/';
 const MD_INDEX_FRAME_CODES = { KOSPI: 'ekospi', KOSDAQ: 'kosdaq' };
 const MD_INDEX_DISPLAY_LABELS = { KOSPI: 'eKOSPI', KOSDAQ: 'KOSDAQ' };
 const MD_INDEX_DESCRIPTIONS = {
-  KOSPI: 'eKOSPI: 코스피 실시간 지수',
+  KOSPI: 'eKOSPI: 장중에는 KOSPI, 장외에는 finance 선물 EWYUSDT 기반 KOSPI 환산 지수',
   KOSDAQ: 'KOSDAQ: 코스닥 실시간 지수',
 };
 const MD_INDEX_FRAME_DEFAULT_PERIOD = '1D';
@@ -120,7 +120,7 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
     // loadInvestorFlows()가 최신값으로 갱신한다(없으면 빈 슬롯).
     const flow = _mdFlows ? _mdFlows[String(code).toLowerCase()] : null;
     const flowSlot = `<div class="md-card-flow" data-flow-code="${escapeHtml(String(code))}">${_cardFlowHtml(flow)}</div>`;
-    const frameHtml = _mdIndexFrameHtml(code, label);
+    const frameHtml = _mdIndexFrameHtml(code, MD_INDEX_DISPLAY_LABELS[code] || label);
     if (frameHtml) {
       return `<div class="md-hero-card md-index-card">`
         + frameHtml + flowSlot + `</div>`;
