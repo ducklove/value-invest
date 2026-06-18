@@ -132,7 +132,7 @@ class PortfolioAIWikiTests(TempDbMixin):
         messages = payload.get("messages", [])
         prompt = messages[-1].get("content", "") if messages else ""
         self.assertEqual(payload.get("model"), "~google/gemini-flash-latest")
-        self.assertEqual(payload.get("max_tokens"), 4800)
+        self.assertEqual(payload.get("max_tokens"), pf.ai_analysis.AI_MAX_TOKENS)
         self.assertEqual(payload.get("reasoning"), {"effort": "low", "exclude": True})
         self.assertEqual(messages[0].get("role"), "system")
         self.assertNotIn("종목별 리서치 요약", prompt)

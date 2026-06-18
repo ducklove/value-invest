@@ -172,8 +172,10 @@ async function runAiAnalysis() {
             const contextN = Number(d.context_holdings || 0);
             const reportsN = Number(d.context_reports_per_holding || 0);
             const context = contextN ? ` · 컨텍스트 상위 ${contextN}종목${reportsN ? `×${reportsN}리포트` : ''}` : '';
-            if (tokens) tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}${wikiTag}${reasoning}${context}`;
-            _setPfAiStatus('완료', 'done');
+            const truncated = d.truncated ? ` · 응답 잘림${d.max_tokens ? `(${Number(d.max_tokens).toLocaleString()} 토큰 한도)` : ''}` : '';
+            const finish = d.finish_reason && d.finish_reason !== 'stop' ? ` · 종료 ${d.finish_reason}` : '';
+            if (tokens) tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}${wikiTag}${reasoning}${context}${truncated}${finish}`;
+            _setPfAiStatus(d.truncated ? '토큰 한도 도달' : '완료', d.truncated ? 'warning' : 'done');
           }
         } catch {}
       }

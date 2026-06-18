@@ -52,6 +52,7 @@ _YFINANCE_SUFFIXES = (
     "", ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".L", ".AX", ".T",
     ".HK", ".SS", ".SZ", ".SW", ".ST", ".CO",
 )
+_REUTERS_STRIP_SUFFIXES = (".OQ", ".PK", ".O", ".K")
 
 # --- Concurrency bounds & deadlines for external calls ---
 # Limits how many in-flight calls can hit each external dependency at once,
@@ -61,9 +62,12 @@ _YF_SEM = asyncio.Semaphore(3)
 _YF_CALL_TIMEOUT = 8.0
 _NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 _YAHOO_HTTP_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
+_YAHOO_SEARCH_TIMEOUT = httpx.Timeout(4.0, connect=2.0)
 _YAHOO_SEM = asyncio.Semaphore(4)
 _INSIGHT_QUOTE_TIMEOUT = 8.5
 _STATIC_FOREIGN_QUOTE_TIMEOUT = 3.0
+_KIS_FOREIGN_QUOTE_TIMEOUT = 4.0
+_FOREIGN_SEARCH_QUOTE_TYPES = {"EQUITY", "ETF", "MUTUALFUND"}
 
 # Negative cache: tickers we just failed to fetch/resolve via yfinance —
 # avoids re-running the 16-suffix probe loop on every quote refresh. TTL'd
@@ -195,7 +199,7 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
         return None
     try:
         import yfinance as yf
-        candidates = [ticker] if "." in ticker else [ticker + s for s in _YFINANCE_SUFFIXES]
+        candidates = _yfinance_candidates(ticker)
 
         def _probe(cand):
             t = yf.Ticker(cand)
@@ -216,6 +220,31 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
         pass
     yf_mark_failed(ticker)
     return None
+
+
+def _strip_reuters_suffix(ticker: str) -> str | None:
+    upper = (ticker or "").upper()
+    for suffix in _REUTERS_STRIP_SUFFIXES:
+        if upper.endswith(suffix):
+            return ticker[: -len(suffix)]
+    return None
+
+
+def _yfinance_candidates(ticker: str) -> list[str]:
+    ticker = (ticker or "").strip()
+    if not ticker:
+        return []
+    if "." not in ticker:
+        return [ticker + suffix for suffix in _YFINANCE_SUFFIXES]
+
+    candidates = [ticker]
+    stripped = _strip_reuters_suffix(ticker)
+    if stripped:
+        candidates.append(stripped)
+    direct = yfinance_direct_ticker(ticker)
+    if direct != ticker:
+        candidates.append(direct)
+    return list(dict.fromkeys(candidates))
 
 
 async def yfinance_resolve_name(ticker: str) -> str | None:
@@ -287,7 +316,10 @@ async def kis_fetch_foreign_quote(ticker: str) -> dict:
     symbol = ticker.split(".")[0].upper()
     for excd in exchanges:
         try:
-            data = await kis_proxy_client.get_overseas_quote(symbol, excd)
+            data = await asyncio.wait_for(
+                kis_proxy_client.get_overseas_quote(symbol, excd),
+                timeout=_KIS_FOREIGN_QUOTE_TIMEOUT,
+            )
             s = data.get("summary", {})
             price = s.get("price")
             if price is not None:
@@ -435,6 +467,129 @@ def yfinance_direct_ticker(code: str) -> str:
         if len(suffix) == 1 and prefix.replace(".", "").isalpha():
             ticker = f"{prefix}-{suffix}"
     return ticker
+
+
+def _looks_like_direct_foreign_ticker(query: str) -> bool:
+    raw = (query or "").strip()
+    if not raw or len(raw) > 24 or any(ch.isspace() for ch in raw):
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./-]*", raw):
+        return False
+    return raw == raw.upper() or any(ch in raw for ch in ".-/")
+
+
+def _foreign_search_fallback(query: str) -> dict | None:
+    if not _looks_like_direct_foreign_ticker(query):
+        return None
+    ticker = yfinance_direct_ticker(_normalize_portfolio_code(query))
+    if not ticker:
+        return None
+    return {
+        "stock_code": ticker,
+        "ticker": ticker,
+        "stock_name": ticker,
+        "exchange": "",
+        "quote_type": "TICKER",
+        "currency": infer_yf_currency(ticker),
+        "source": "direct",
+    }
+
+
+def _normalize_yahoo_search_quote(raw: dict) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    symbol = _normalize_portfolio_code(raw.get("symbol"))
+    if not symbol or len(symbol) > 30:
+        return None
+    if symbol.startswith("^") or symbol.endswith("=X"):
+        return None
+    quote_type = _normalize_portfolio_code(raw.get("quoteType") or raw.get("typeDisp"))
+    if quote_type and quote_type not in _FOREIGN_SEARCH_QUOTE_TYPES:
+        return None
+    name = (
+        str(raw.get("shortname") or "").strip()
+        or str(raw.get("longname") or "").strip()
+        or str(raw.get("name") or "").strip()
+        or symbol
+    )
+    exchange = (
+        str(raw.get("exchDisp") or "").strip()
+        or str(raw.get("fullExchangeName") or "").strip()
+        or str(raw.get("exchange") or "").strip()
+    )
+    currency = _normalize_portfolio_code(raw.get("currency")) or infer_yf_currency(symbol)
+    return {
+        "stock_code": symbol,
+        "ticker": symbol,
+        "stock_name": name,
+        "exchange": exchange,
+        "quote_type": quote_type or "EQUITY",
+        "currency": currency,
+        "source": "yahoo",
+    }
+
+
+async def search_foreign_tickers(query: str, *, limit: int = 8) -> list[dict]:
+    """Fast Yahoo-style ticker suggestions for the portfolio add box.
+
+    The UI should not ask users for Reuters suffixes such as ``.O``. Yahoo
+    symbols (AAPL, BRK-B, 7203.T) are what our chart path already understands,
+    so suggestions return those directly and fall back to a direct ticker only
+    when the user clearly typed one.
+    """
+    raw = str(query or "").strip()
+    if not raw:
+        return []
+
+    results: list[dict] = []
+    static = _static_foreign_ticker(raw)
+    if static:
+        results.append({
+            "stock_code": static["ticker"],
+            "ticker": static["ticker"],
+            "stock_name": static["name"],
+            "exchange": "",
+            "quote_type": "EQUITY",
+            "currency": static["currency"],
+            "source": "static",
+        })
+
+    try:
+        async with _YAHOO_SEM:
+            async with httpx.AsyncClient(timeout=_YAHOO_SEARCH_TIMEOUT, follow_redirects=True) as client:
+                resp = await client.get(
+                    "https://query1.finance.yahoo.com/v1/finance/search",
+                    params={
+                        "q": raw,
+                        "quotesCount": max(12, limit * 3),
+                        "newsCount": 0,
+                        "enableFuzzyQuery": "true",
+                    },
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                resp.raise_for_status()
+        for quote_row in (resp.json() or {}).get("quotes") or []:
+            item = _normalize_yahoo_search_quote(quote_row)
+            if item:
+                results.append(item)
+    except Exception as exc:
+        logger.debug("Yahoo ticker search failed (%s): %s", raw, exc)
+
+    fallback = _foreign_search_fallback(raw)
+    if fallback:
+        results.append(fallback)
+
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for item in results:
+        code = item.get("stock_code")
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        deduped.append(item)
+        if len(deduped) >= limit:
+            break
+    return deduped
 
 
 async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = "1d") -> dict:

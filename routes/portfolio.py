@@ -705,7 +705,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         elif _is_korean_stock(stock_code) or _is_special_asset(stock_code):
             currency = "KRW"
         else:
-            currency = await foreign.detect_currency(stock_code)
+            currency = foreign.infer_yf_currency(foreign.yfinance_direct_ticker(stock_code))
     group_name = str(payload.get("group_name") or "").strip() or None
     if group_name:
         groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
@@ -927,6 +927,11 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
 @router.get("/api/portfolio/resolve-name")
 async def resolve_name(code: str = Query(..., min_length=1)):
     return await names.resolve_portfolio_name(code)
+
+
+@router.get("/api/portfolio/search-foreign")
+async def search_foreign(q: str = Query(..., min_length=1), limit: int = Query(8, ge=1, le=20)):
+    return await foreign.search_foreign_tickers(q, limit=limit)
 
 
 # --- NAV / Snapshots / Cashflows ---

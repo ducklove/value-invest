@@ -7,6 +7,8 @@ let _filingReviewLoadId = 0;
 let _filingReviewStockCode = '';
 let _filingReviewActionBusy = false;
 let _filingReviewButtonState = { status: '', canGenerate: false };
+const FILING_REVIEW_STATUS_TIMEOUT_MS = 60000;
+const FILING_REVIEW_GENERATE_TIMEOUT_MS = 10 * 60 * 1000;
 
 function _isAdminUser() {
   return !!(typeof currentUser !== 'undefined' && currentUser && currentUser.is_admin);
@@ -219,7 +221,9 @@ async function loadFilingReview(stockCode) {
   }
 
   try {
-    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/filing-review`);
+    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/filing-review`, {
+      timeoutMs: FILING_REVIEW_STATUS_TIMEOUT_MS,
+    });
     if (loadId !== _filingReviewLoadId) return;
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
@@ -255,6 +259,7 @@ async function generateFilingReview(stockCode, { force = true } = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ force }),
+      timeoutMs: FILING_REVIEW_GENERATE_TIMEOUT_MS,
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);

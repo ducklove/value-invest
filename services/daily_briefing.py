@@ -26,6 +26,7 @@ import logging
 from datetime import date, timedelta
 
 import ai_config
+import close_price_client
 from repositories import dart_review as dart_review_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -44,6 +45,7 @@ MAX_TOKENS = 1200  # 10~15줄 요약이면 충분 — 폭주 방지 상한.
 MOVER_COUNT = 3
 CALENDAR_EVENT_LIMIT = 6
 FEED_ITEM_LIMIT = 5
+MIN_USABLE_AI_LINES = 3
 
 SYSTEM_PROMPT = """당신은 개인 투자자를 위한 아침 브리핑 작성자입니다.
 규칙:
@@ -102,10 +104,94 @@ def _nav_block(latest: dict | None, prev: dict | None) -> dict | None:
     return block
 
 
-def _movers(curr_rows: list[dict], prev_rows: list[dict], names: dict[str, str]) -> dict:
-    """종목별 평가액 변화(원) 기준 기여 상위/하위. 두 날짜 모두 존재하는 종목만
-    비교한다(신규 매수/전량 매도를 등락으로 오인하지 않도록). 현금성 코드는 제외."""
+def _safe_float(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _price_row_date(row: dict) -> str | None:
+    text = str(
+        row.get("date")
+        or row.get("trade_date")
+        or row.get("business_date")
+        or row.get("stck_bsop_date")
+        or ""
+    ).strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    return text[:10] or None
+
+
+def _price_change_from_rows(rows: list[dict], target_date: str) -> dict | None:
+    points: list[tuple[str, float]] = []
+    for row in rows:
+        row_date = _price_row_date(row)
+        close = _safe_float(row.get("close") or row.get("close_price") or row.get("stck_clpr"))
+        if row_date and row_date <= target_date and close is not None and close > 0:
+            points.append((row_date, close))
+    points.sort(key=lambda item: item[0])
+    if len(points) < 2:
+        return None
+
+    current_date, current_close = points[-1]
+    prev_date, prev_close = points[-2]
+    if current_date != target_date or prev_close <= 0:
+        return None
+
+    return {
+        "date": current_date,
+        "price": current_close,
+        "prev_date": prev_date,
+        "prev_price": prev_close,
+        "change_pct": (current_close / prev_close - 1.0) * 100.0,
+    }
+
+
+async def _daily_price_changes_by_code(codes: list[str], since: str | None, until: str | None) -> dict[str, dict]:
+    if not codes or not since or not until:
+        return {}
+    try:
+        rows_by_code = await close_price_client.get_daily_prices_batch(
+            codes,
+            since=since,
+            until=until,
+            fields=("close",),
+        )
+    except Exception as exc:
+        logger.warning("briefing daily price change block failed: %s", exc)
+        return {}
+
+    changes: dict[str, dict] = {}
+    for code in codes:
+        rows = rows_by_code.get(code) or rows_by_code.get(code.upper()) or []
+        change = _price_change_from_rows(rows, until)
+        if change is not None:
+            changes[code] = change
+    return changes
+
+
+def _movers(
+    curr_rows: list[dict],
+    prev_rows: list[dict],
+    names: dict[str, str],
+    price_changes: dict[str, dict] | None = None,
+    *,
+    allow_value_fallback: bool = False,
+) -> dict:
+    """종목별 가격 변동률로 가격 기여 상위/하위를 계산한다.
+
+    평가액 증감률은 수량 변경의 영향을 받으므로 퍼센트와 기여액 모두 종가의
+    일간 변동률을 기준으로 잡는다. 두 날짜 모두 존재하고 가격을 확인할 수
+    있는 종목만 우선 비교하며, 현금성 코드는 제외한다. 일별 종가 API가 비거나
+    특정 코드만 빠진 날에는 브리핑이 NAV 한 줄로 축소되지 않도록 평가액 변화
+    기준 폴백을 쓴다. 이 폴백은 종목별 설명에 "평가액"으로 표시한다.
+    """
     prev_by_code = {r["stock_code"]: float(r.get("market_value") or 0) for r in prev_rows}
+    price_changes = price_changes or {}
     deltas: list[dict] = []
     for row in curr_rows:
         code = row["stock_code"]
@@ -114,14 +200,33 @@ def _movers(curr_rows: list[dict], prev_rows: list[dict], names: dict[str, str])
         prev_mv = prev_by_code.get(code)
         if prev_mv is None or prev_mv <= 0:
             continue
-        mv = float(row.get("market_value") or 0)
-        change = mv - prev_mv
+        price_change = price_changes.get(code)
+        if price_change:
+            change_pct = price_change["change_pct"]
+            change = prev_mv * change_pct / 100.0
+            basis = "price"
+            extra = {
+                "price": price_change["price"],
+                "prev_price": price_change["prev_price"],
+            }
+        elif allow_value_fallback:
+            mv = float(row.get("market_value") or 0)
+            change = mv - prev_mv
+            if change == 0:
+                continue
+            change_pct = change / prev_mv * 100.0
+            basis = "market_value"
+            extra = {}
+        else:
+            continue
         deltas.append(
             {
                 "stock_code": code,
                 "stock_name": names.get(code, code),
                 "change_krw": change,
-                "change_pct": change / prev_mv * 100.0,
+                "change_pct": change_pct,
+                "basis": basis,
+                **extra,
             }
         )
     deltas.sort(key=lambda d: d["change_krw"], reverse=True)
@@ -160,7 +265,30 @@ async def build_briefing_context(google_sub: str) -> dict:
                 r["stock_code"]: r.get("stock_name") or r["stock_code"]
                 for r in await snapshots_repo.get_latest_stock_snapshot_rows(google_sub)
             }
-            context["movers"] = _movers(curr_rows, prev_rows, names)
+            prev_codes = {r["stock_code"] for r in prev_rows}
+            mover_codes = sorted(
+                row["stock_code"]
+                for row in curr_rows
+                if row["stock_code"] in prev_codes and not row["stock_code"].startswith("CASH_")
+            )
+            price_changes = await _daily_price_changes_by_code(
+                mover_codes,
+                prev.get("date") if prev else None,
+                latest["date"],
+            )
+            context["movers"] = _movers(
+                curr_rows,
+                prev_rows,
+                names,
+                price_changes,
+                allow_value_fallback=True,
+            )
+            movers = (context["movers"].get("top") or []) + (context["movers"].get("bottom") or [])
+            context["diagnostics"] = {
+                "mover_candidates": len(mover_codes),
+                "price_change_codes": len(price_changes),
+                "mover_value_fallbacks": sum(1 for m in movers if m.get("basis") == "market_value"),
+            }
     except Exception as exc:
         logger.warning("briefing NAV block failed user=%s: %s", google_sub[:8], exc)
 
@@ -214,6 +342,13 @@ def _fmt_signed_krw(value: float) -> str:
     return f"{sign}{ai_analysis.fmt_krw(abs(value))}"
 
 
+def _fmt_mover(mover: dict) -> str:
+    pct = mover.get("change_pct")
+    label = "가격" if mover.get("basis") == "price" else "평가액"
+    pct_text = f"({label} {pct:+.1f}%)" if pct is not None else ""
+    return f"{mover['stock_name']} {_fmt_signed_krw(mover['change_krw'])}{pct_text}"
+
+
 def _context_lines(context: dict) -> list[str]:
     """컨텍스트를 사람이 읽을 수 있는 줄들로 변환 — 템플릿 폴백 본문이자
     LLM 프롬프트의 데이터 섹션."""
@@ -230,16 +365,10 @@ def _context_lines(context: dict) -> list[str]:
 
     movers = context.get("movers") or {}
     if movers.get("top"):
-        parts = ", ".join(
-            f"{m['stock_name']} {_fmt_signed_krw(m['change_krw'])}({m['change_pct']:+.1f}%)"
-            for m in movers["top"]
-        )
+        parts = ", ".join(_fmt_mover(m) for m in movers["top"])
         lines.append(f"📈 상승 기여: {parts}")
     if movers.get("bottom"):
-        parts = ", ".join(
-            f"{m['stock_name']} {_fmt_signed_krw(m['change_krw'])}({m['change_pct']:+.1f}%)"
-            for m in movers["bottom"]
-        )
+        parts = ", ".join(_fmt_mover(m) for m in movers["bottom"])
         lines.append(f"📉 하락 기여: {parts}")
 
     for f in context.get("filings") or []:
@@ -264,11 +393,50 @@ def _context_lines(context: dict) -> list[str]:
     return lines
 
 
-def render_template_briefing(context: dict) -> str:
-    """LLM 없이 컨텍스트만으로 만든 브리핑 — OpenRouter 장애 시에도 발송된다."""
+def _nonempty_lines(text: str) -> list[str]:
+    return [line.strip() for line in (text or "").splitlines() if line.strip()]
+
+
+def _template_body_lines(context: dict) -> list[str]:
     body = _context_lines(context)
     if not body:
         body = ["오늘은 요약할 새 데이터가 없습니다."]
+    movers = context.get("movers") or {}
+    if context.get("nav") and not movers.get("top") and not movers.get("bottom"):
+        body.append("기여 종목: 종목별 종가 데이터가 비어 있어 세부 기여는 생략했습니다.")
+    if len(body) < MIN_USABLE_AI_LINES:
+        body.append("오늘 확인: 큰 변동의 원인을 종목별 가격·환율·현금흐름으로 나눠 점검하세요.")
+    return body
+
+
+def _ai_text_is_usable(text: str) -> bool:
+    lines = _nonempty_lines(text)
+    if len(lines) < MIN_USABLE_AI_LINES:
+        return False
+    return any("데일리 브리핑" in line for line in lines[:2])
+
+
+def _briefing_stats(context: dict, text: str) -> dict:
+    movers = context.get("movers") or {}
+    mover_rows = (movers.get("top") or []) + (movers.get("bottom") or [])
+    return {
+        "text_lines": len(_nonempty_lines(text)),
+        "context_lines": len(_context_lines(context)),
+        "has_nav": bool(context.get("nav")),
+        "mover_top": len(movers.get("top") or []),
+        "mover_bottom": len(movers.get("bottom") or []),
+        "mover_value_fallbacks": sum(1 for m in mover_rows if m.get("basis") == "market_value"),
+        "filings": len(context.get("filings") or []),
+        "reports": len(context.get("reports") or []),
+        "calendar": len(context.get("calendar") or []),
+        "market": len(context.get("market") or []),
+        **(context.get("diagnostics") or {}),
+    }
+
+
+def render_template_briefing(context: dict) -> str:
+    """LLM 없이 컨텍스트만으로 만든 브리핑 — OpenRouter 장애 시에도 발송된다."""
+    body = _template_body_lines(context)
     return "\n".join([f"🌅 데일리 브리핑 ({context.get('date')})", *body])
 
 
@@ -300,6 +468,7 @@ async def generate_briefing(google_sub: str) -> dict:
     LLM 텍스트를 못 얻으면 템플릿 렌더로 폴백 — 발송 자체는 항상 가능하다.
     """
     context = await build_briefing_context(google_sub)
+    fallback_text = render_template_briefing(context)
     try:
         model = await ai_config.get_model_for_feature(FEATURE)
         payload = {
@@ -321,11 +490,38 @@ async def generate_briefing(google_sub: str) -> dict:
         )
         text = (result.get("content") or "").strip()
         if text:
-            return {"text": text, "source": "ai", "model": result.get("model") or model, "context": context}
+            if _ai_text_is_usable(text):
+                return {
+                    "text": text,
+                    "source": "ai",
+                    "model": result.get("model") or model,
+                    "context": context,
+                    "stats": _briefing_stats(context, text),
+                }
+            logger.warning(
+                "daily briefing LLM too short user=%s lines=%s",
+                google_sub[:8],
+                len(_nonempty_lines(text)),
+            )
+            return {
+                "text": fallback_text,
+                "source": "template",
+                "model": None,
+                "fallback_reason": "ai_too_short",
+                "context": context,
+                "stats": _briefing_stats(context, fallback_text),
+            }
         logger.warning("daily briefing LLM returned empty content user=%s", google_sub[:8])
     except Exception as exc:
         logger.warning("daily briefing LLM failed user=%s: %s", google_sub[:8], exc)
-    return {"text": render_template_briefing(context), "source": "template", "model": None, "context": context}
+    return {
+        "text": fallback_text,
+        "source": "template",
+        "model": None,
+        "fallback_reason": "ai_failed_or_empty",
+        "context": context,
+        "stats": _briefing_stats(context, fallback_text),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +552,7 @@ async def send_briefings() -> dict:
             delivered = await channels.dispatch(google_sub, briefing["text"])
             if delivered > 0:
                 sent += 1
+                stats = briefing.get("stats") or _briefing_stats(briefing.get("context") or {}, briefing["text"])
                 await observability.record_event(
                     "daily_briefing",
                     "send_ok",
@@ -363,6 +560,8 @@ async def send_briefings() -> dict:
                         "user": google_sub[:8],
                         "source": briefing["source"],
                         "model": briefing.get("model"),
+                        "fallback_reason": briefing.get("fallback_reason"),
+                        "stats": stats,
                         "channels": delivered,
                     },
                     wait=True,

@@ -19,13 +19,33 @@ class RuntimeState:
 def get_asset_version(project_root: Path) -> str:
     """Return a stable asset version for cache busting."""
     try:
-        return subprocess.check_output(
+        commit = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=project_root,
             stderr=subprocess.DEVNULL,
         ).decode().strip()
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain", "--", "static"],
+            cwd=project_root,
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        if status:
+            return f"{commit}-{_static_assets_mtime(project_root)}"
+        return commit
     except Exception:
         return str(int(time.time()))
+
+
+def _static_assets_mtime(project_root: Path) -> str:
+    static_dir = project_root / "static"
+    latest = 0
+    for path in static_dir.rglob("*"):
+        try:
+            if path.is_file():
+                latest = max(latest, path.stat().st_mtime_ns)
+        except OSError:
+            continue
+    return format(latest or time.time_ns(), "x")
 
 
 def sd_notify(msg: str) -> None:
@@ -50,4 +70,3 @@ async def watchdog_loop(state: RuntimeState, interval_seconds: float = 10.0) -> 
             await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:
             break
-

@@ -13,6 +13,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-order.js",
     "portfolio-sparklines.js",
     "portfolio-render.js",
+    "portfolio-add-search.js",
     "portfolio-actions.js",
     "portfolio-insights.js",
     "portfolio-groups-market.js",
@@ -43,6 +44,7 @@ ANALYSIS_SPLIT_FILES = [
 # _adminInputStyle) and bootstrapping; the panel modules load after it.
 ADMIN_SPLIT_FILES = [
     "admin.js",
+    "admin-charts.js",
     "admin-observability.js",
     "admin-linked-projects.js",
 ]
@@ -180,6 +182,8 @@ def test_analysis_split_files_keep_feature_homes():
     # 공시/리포트: DART AI 리뷰, 리포트 테이블, 위키 요약.
     assert "function renderFilingReview(" in filings
     assert "async function generateFilingReview(" in filings
+    assert "const FILING_REVIEW_STATUS_TIMEOUT_MS = 60000;" in filings
+    assert "const FILING_REVIEW_GENERATE_TIMEOUT_MS = 10 * 60 * 1000;" in filings
     assert "function renderReportsTable(" in filings
     assert "async function loadWiki(" in filings
     # 본체: 분석 SSE 오케스트레이션, 시세 요약, 위키 Q&A.
@@ -311,6 +315,8 @@ def test_portfolio_ai_result_has_framed_output_contract():
     assert "function _decoratePfAiResult" in source
     assert "function _normalizePfAiEmptySections" in source
     assert "_renderPfAiMarkdown(result, mdText, { decorate: true" in source
+    assert "d.truncated" in source
+    assert "d.finish_reason" in source
     assert "context_holdings" in source
     assert "data-kind=\"visual\"" in styles or 'data-kind="visual"' in styles
     assert ".pf-ai-output" in styles
@@ -613,7 +619,23 @@ def test_portfolio_add_canonicalizes_alias_before_save():
     assert "portfolio code canonicalization failed" in source
     assert "/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}" in source
     assert "/api/portfolio/${encodeURIComponent(resolvedCode)}" in source
-    assert "PfStore.edit.code = resolvedCode" in source
+    assert "pfApplySavedPortfolioItem(saved, resolvedCode, resolvedName, resolvedCurrency)" in source
+    assert "startPortfolioEdit(saved.stock_code || resolvedCode)" in source
+    assert "loadPortfolio({ force: true }).catch" in source
+
+
+def test_portfolio_add_has_fast_foreign_search_path():
+    source = (
+        (JS / "portfolio-add-search.js").read_text(encoding="utf-8")
+        + "\n"
+        + (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+    )
+
+    assert "function pfCanonicalDirectTicker" in source
+    assert "function pfInferTickerCurrency" in source
+    assert "/api/portfolio/search-foreign?q=${encodeURIComponent(raw)}" in source
+    assert "/api/portfolio/search-foreign?q=${encodeURIComponent(q)}" in source
+    assert "if (resolvedCurrency) body.currency = resolvedCurrency;" in source
 
 
 def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():

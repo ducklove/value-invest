@@ -4,6 +4,7 @@
 
 let _adminLoaded = false;
 let _aiAdminConfig = null;
+let _adminUsers = [];
 
 async function loadAdminView() {
   const container = document.getElementById('adminContent');
@@ -15,7 +16,7 @@ async function loadAdminView() {
     // deploy-status answers the "did my push land" question at a glance,
     // so it sits right next to the other meta-status calls and renders
     // at the top of the page.
-    const [deployRes, batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes, httpRes, linkedConfigsRes, aiConfigRes] = await Promise.all([
+    const [deployRes, batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes, httpRes, timelineRes, linkedConfigsRes, aiConfigRes] = await Promise.all([
       apiFetch('/api/admin/deploy-status'),
       apiFetch('/api/admin/batch-status'),
       apiFetch('/api/admin/server-stats'),
@@ -24,6 +25,7 @@ async function loadAdminView() {
       apiFetch('/api/admin/event-summary?hours=24'),
       apiFetch('/api/admin/events?limit=50'),
       apiFetch('/api/admin/http-metrics?hours=24'),
+      apiFetch('/api/admin/timeseries?hours=24'),
       apiFetch('/api/admin/linked-project-configs'),
       apiFetch('/api/admin/ai-config'),
     ]);
@@ -39,10 +41,14 @@ async function loadAdminView() {
     const summary = summaryRes.ok ? await summaryRes.json() : {by_source: {}, latest: {}};
     const events = eventsRes.ok ? await eventsRes.json() : [];
     const httpMetrics = httpRes.ok ? await httpRes.json() : {endpoints: []};
+    const timeline = timelineRes.ok ? await timelineRes.json() : {hours: 24, events: [], http: []};
     _linkedProjectConfigs = linkedConfigsRes.ok ? await linkedConfigsRes.json() : [];
     _aiAdminConfig = aiConfigRes.ok ? await aiConfigRes.json() : null;
-    container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events, httpMetrics, _linkedProjectConfigs, _aiAdminConfig);
+    _adminUsers = Array.isArray(users) ? users : [];
+    container.innerHTML = _renderAdmin(deploy, batch, server, db, _adminUsers, summary, events, httpMetrics, timeline, _linkedProjectConfigs, _aiAdminConfig);
     _adminLoaded = true;
+    if (typeof _seedServerSeries === 'function') _seedServerSeries(server);
+    if (typeof _renderServerTimeline === 'function') _renderServerTimeline();
     _startLiveUpdates();
     // 해외 배당 목록은 섹션 HTML 삽입 후에만 컨테이너가 존재 — 별도
     // 비동기 로드로 가져와 표시. 실패해도 페이지 나머지엔 영향 없음.
@@ -53,25 +59,138 @@ async function loadAdminView() {
   }
 }
 
-function _renderAdmin(deploy, batch, server, db, users, summary, events, httpMetrics, linkedConfigs, aiConfig) {
+function _renderAdmin(deploy, batch, server, db, users, summary, events, httpMetrics, timeline, linkedConfigs, aiConfig) {
   return `
-    <div class="admin-dashboard">
-      <h2 class="admin-title">시스템 관리</h2>
-      ${_renderDeployCard(deploy)}
-      <div id="adminLiveSection">${_renderServerCard(server)}</div>
-      ${_renderBatchSection(batch)}
-      ${_renderSubsystemSummary(summary)}
-      ${_renderHttpMetricsSection(httpMetrics)}
+    <div class="admin-shell">
+      ${_renderAdminTopbar()}
+      ${_renderOperationsOverview(deploy, server, db, users, summary, httpMetrics)}
+      ${_renderTimelineSection(server, timeline)}
+      <div class="admin-grid-two">
+        ${_renderBatchSection(batch)}
+        ${_renderSubsystemSummary(summary)}
+      </div>
+      <div class="admin-grid-two">
+        ${_renderHttpMetricsSection(httpMetrics)}
+        ${_renderDbSection(db)}
+      </div>
+      ${_renderEventsSection(events)}
+      ${_renderUsersSection(users)}
       ${_renderDataSyncSection()}
       ${_renderAiConfigSection(aiConfig)}
       ${_renderLinkedProjectConfigSection(linkedConfigs)}
       ${_renderDiagSection()}
-      ${_renderEventsSection(events)}
-      ${_renderUsersSection(users)}
-      ${_renderDbSection(db)}
     </div>
   `;
 }
+
+function _renderAdminTopbar() {
+  return `
+    <header class="admin-topbar">
+      <div class="admin-brand">
+        <div class="admin-brand-mark">VI</div>
+        <div>
+          <h1>Value Invest Admin</h1>
+          <p>운영 콘솔 · 배포, 시스템, 사용자, 데이터 파이프라인</p>
+        </div>
+      </div>
+      <div class="admin-actions">
+        <button class="admin-btn" onclick="loadAdminView()" type="button">새로고침</button>
+        <button class="theme-toggle" onclick="toggleAdminTheme()" type="button" aria-label="테마 전환">◐</button>
+      </div>
+    </header>
+  `;
+}
+
+function _renderOperationsOverview(deploy, server, db, users, summary, httpMetrics) {
+  const memTotal = server?.memory?.MemTotal || 0;
+  const memAvail = server?.memory?.MemAvailable || 0;
+  const memUsed = Math.max(0, memTotal - memAvail);
+  const memPct = memTotal ? Math.round(memUsed / memTotal * 100) : 0;
+  const diskTotal = server?.disk?.total || 0;
+  const diskUsed = server?.disk?.used || 0;
+  const diskPct = diskTotal ? Math.round(diskUsed / diskTotal * 100) : 0;
+  const cpuPct = _serverCpuPct(server);
+  const eventCounts = Object.values(summary?.by_source || {}).reduce((acc, levels) => {
+    acc.error += Number(levels.error || 0);
+    acc.warning += Number(levels.warning || 0);
+    acc.info += Number(levels.info || 0);
+    return acc;
+  }, {error: 0, warning: 0, info: 0});
+  const httpErrors = (httpMetrics?.endpoints || []).reduce((sum, row) => sum + Number(row.errors || 0), 0);
+  const commit = deploy?.build?.short_sha || '-';
+  const runner = deploy?.actions_runner?.active ? '동작 중' : '중지';
+  const runnerCls = deploy?.actions_runner?.active ? 'admin-status-ok' : 'admin-status-fail';
+  const portfolioUsers = (users || []).filter(u => Number(u.portfolio_count || 0) > 0).length;
+  return `
+    <section class="admin-hero">
+      <div class="admin-status-panel">
+        <div class="admin-panel-head">
+          <div>
+            <h2 class="admin-panel-title">운영 콘솔</h2>
+            <div class="admin-panel-sub">최근 24시간 기준 상태를 한 화면에서 확인합니다.</div>
+          </div>
+          <span class="admin-badge admin-badge-internal">내부망 전용 링크 사용</span>
+        </div>
+        <div class="admin-kpi-grid">
+          ${_renderKpi('현재 커밋', `<code>${_esc(commit)}</code>`, _esc(deploy?.build?.subject || runner), '')}
+          ${_renderKpi('CPU 사용률', `${cpuPct}%`, server?.cpu_temp != null ? `CPU ${server.cpu_temp.toFixed(1)}°C` : '실시간 샘플', _progressBar(cpuPct), 'adminCpuLoad')}
+          ${_renderKpi('메모리', `${memPct}%`, `${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)}`, _progressBar(memPct), 'adminMemory')}
+          ${_renderKpi('디스크', `${diskPct}%`, `${_fmtBytes(diskUsed)} / ${_fmtBytes(diskTotal)}`, _progressBar(diskPct))}
+          ${_renderKpi('사용자', `${(users || []).length.toLocaleString()}명`, `포트폴리오 ${portfolioUsers.toLocaleString()}명`, '')}
+        </div>
+      </div>
+      <div class="admin-status-panel">
+        <div class="admin-panel-head">
+          <div>
+            <h2 class="admin-panel-title">위험 신호</h2>
+            <div class="admin-panel-sub">오류와 지연을 먼저 봅니다.</div>
+          </div>
+          <span class="${runnerCls}">${runner}</span>
+        </div>
+        <div class="admin-cards">
+          <div class="admin-card">
+            <div class="admin-card-label">이벤트 오류</div>
+            <div class="admin-card-value ${eventCounts.error ? 'admin-status-fail' : 'admin-status-ok'}">${eventCounts.error.toLocaleString()}</div>
+            <div class="admin-sub">warning ${eventCounts.warning.toLocaleString()} · info ${eventCounts.info.toLocaleString()}</div>
+          </div>
+          <div class="admin-card">
+            <div class="admin-card-label">HTTP 오류</div>
+            <div class="admin-card-value ${httpErrors ? 'admin-status-fail' : 'admin-status-ok'}">${httpErrors.toLocaleString()}</div>
+            <div class="admin-sub">느린/5xx 요청 tail 기준</div>
+          </div>
+          <div class="admin-card">
+            <div class="admin-card-label">DB 크기</div>
+            <div class="admin-card-value">${_fmtBytes(db?.db_size_bytes || 0)}</div>
+            <div class="admin-sub">${Object.keys(db?.tables || {}).length} tables</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function _renderKpi(label, value, note, progress, id) {
+  return `
+    <div class="admin-kpi" ${id ? `id="${id}"` : ''}>
+      <div class="admin-kpi-label">${label}</div>
+      <div class="admin-kpi-value">${value}</div>
+      ${note ? `<div class="admin-kpi-note">${note}</div>` : ''}
+      ${progress || ''}
+    </div>
+  `;
+}
+
+function toggleAdminTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('valueInvestAdminTheme', next); } catch (_) {}
+  if (typeof _renderServerTimeline === 'function') _renderServerTimeline();
+}
+
+try {
+  const savedAdminTheme = localStorage.getItem('valueInvestAdminTheme');
+  if (savedAdminTheme) document.documentElement.setAttribute('data-theme', savedAdminTheme);
+} catch (_) {}
 
 // --- AI operations ------------------------------------------------------
 
@@ -227,7 +346,7 @@ async function saveAiModels() {
 // --- Shared helpers (used by all admin-* modules) ---
 
 function _adminInputStyle() {
-  return 'padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text-primary);';
+  return 'min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-primary);font:inherit;font-size:13px;';
 }
 
 function _esc(str) {

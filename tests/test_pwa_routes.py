@@ -36,10 +36,10 @@ class PwaRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.headers["cache-control"], "no-cache, must-revalidate")
         self.assertEqual(resp.headers["service-worker-allowed"], "/")
         self.assertTrue(resp.headers["content-type"].startswith("application/javascript"))
-        self.assertTrue(str(resp.path).endswith("static/sw.js"))
+        self.assertTrue(resp.path.as_posix().endswith("static/sw.js"))
 
     async def test_manifest_served_with_manifest_mime(self):
         resp = await self.app.state.static_handlers["manifest"]()
 
         self.assertTrue(resp.headers["content-type"].startswith("application/manifest+json"))
-        self.assertTrue(str(resp.path).endswith("static/manifest.webmanifest"))
+        self.assertTrue(resp.path.as_posix().endswith("static/manifest.webmanifest"))

@@ -45,11 +45,15 @@ PORTFOLIO_AI_DEFAULT_MODEL = "~google/gemini-flash-latest"
 AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", PORTFOLIO_AI_DEFAULT_MODEL)
 AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", PORTFOLIO_AI_DEFAULT_MODEL)
 AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", AI_DEFAULT_MODEL)
-AI_MAX_TOKENS = int(os.getenv("PORTFOLIO_AI_MAX_TOKENS", "4800"))
+AI_MAX_TOKENS = int(os.getenv("PORTFOLIO_AI_MAX_TOKENS", "8000"))
 AI_REASONING_EFFORT = os.getenv("PORTFOLIO_AI_REASONING_EFFORT", "low").strip().lower()
 WIKI_HOLDING_LIMIT = int(os.getenv("PORTFOLIO_AI_WIKI_HOLDING_LIMIT", "15"))
 WIKI_ENTRY_LIMIT = int(os.getenv("PORTFOLIO_AI_WIKI_ENTRY_LIMIT", "3"))
 WIKI_KEYPOINT_CHARS = int(os.getenv("PORTFOLIO_AI_WIKI_KEYPOINT_CHARS", "600"))
+TRUNCATION_NOTICE = (
+    "\n\n> 응답이 모델 출력 토큰 한도에 도달해 끝부분이 잘렸을 수 있습니다. "
+    "질문 범위를 좁히거나 다시 실행해 주세요.\n"
+)
 
 # Hard cap to avoid runaway prompt growth; anything sensible fits easily.
 USER_QUERY_MAX_CHARS = 4000
@@ -375,7 +379,14 @@ async def prepare_analysis(payload: dict, user: dict) -> AnalysisContext:
     )
 
 
-def _done_event(ctx: AnalysisContext, *, input_tokens, output_tokens, cost) -> dict[str, Any]:
+def _done_event(
+    ctx: AnalysisContext,
+    *,
+    input_tokens,
+    output_tokens,
+    cost,
+    finish_reason: str | None = None,
+) -> dict[str, Any]:
     return {
         "done": True,
         "input_tokens": input_tokens,
@@ -387,6 +398,9 @@ def _done_event(ctx: AnalysisContext, *, input_tokens, output_tokens, cost) -> d
         "reasoning_effort": AI_REASONING_EFFORT,
         "context_holdings": WIKI_HOLDING_LIMIT,
         "context_reports_per_holding": WIKI_ENTRY_LIMIT,
+        "finish_reason": finish_reason,
+        "truncated": finish_reason == "length",
+        "max_tokens": AI_MAX_TOKENS,
     }
 
 
@@ -447,6 +461,7 @@ async def stream_analysis(
             input_tokens = 0
             output_tokens = 0
             cost = 0
+            finish_reason = None
             async for line in resp.aiter_lines():
                 # If the browser closed the tab, stop consuming upstream
                 # tokens — OpenRouter bills per-token and a forgotten
@@ -464,7 +479,11 @@ async def stream_analysis(
                     if "error" in chunk:
                         yield {"content": chunk["error"].get("message", "Unknown error")}
                         break
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    choice = (chunk.get("choices") or [{}])[0] or {}
+                    chunk_finish_reason = choice.get("finish_reason")
+                    if chunk_finish_reason:
+                        finish_reason = chunk_finish_reason
+                    delta = choice.get("delta", {})
                     content = delta.get("content", "")
                     if content:
                         output_tokens += 1
@@ -476,6 +495,9 @@ async def stream_analysis(
                         cost = usage.get("cost", cost) or cost
                 except Exception:
                     continue
+            truncated = finish_reason == "length"
+            if truncated:
+                yield {"content": TRUNCATION_NOTICE}
             await ai_config.record_usage(
                 google_sub=ctx.google_sub,
                 feature="portfolio_analysis",
@@ -485,6 +507,13 @@ async def stream_analysis(
                 output_tokens=output_tokens,
                 cost_usd=float(cost or 0),
                 latency_ms=int((time.perf_counter() - ctx.started_at) * 1000),
-                ok=True,
+                ok=not truncated,
+                error="finish_reason_length" if truncated else None,
             )
-            yield _done_event(ctx, input_tokens=input_tokens, output_tokens=output_tokens, cost=cost)
+            yield _done_event(
+                ctx,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost=cost,
+                finish_reason=finish_reason,
+            )

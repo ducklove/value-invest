@@ -46,11 +46,15 @@ _INTRADAY_CHECK_FROM_MINUTES = 10 * 60
 
 # NAV 스냅샷: 1~2 거래일 지연 → warn, 3거래일 이상 → error.
 _NAV_ERROR_TRADING_DAYS = 3
+# 현재 보유 종목별 스냅샷도 NAV와 같은 기준으로 본다. 전체 NAV가 최신이어도
+# 특정 해외/특수 종목만 조용히 빠지는 경우를 잡기 위함이다.
+_STOCK_SNAPSHOT_ERROR_TRADING_DAYS = 3
 # 벤치마크(yfinance): 미국장 시차·휴장·소스 지연을 감안해 느슨하게.
 _BENCH_OK_TRADING_DAYS = 2
 _BENCH_ERROR_TRADING_DAYS = 5
 # system_events error 율: 최근 24시간 error 가 이 건수 이상이면 격상.
 _EVENT_ERROR_ESCALATE = 10
+_REUTERS_LIKE_SUFFIXES = (".OQ", ".PK", ".O", ".K")
 
 # 종목별 시계열 점검 기본 임계치 (CLI --max-dividend-yield/--max-dividend-jump).
 DEFAULT_MAX_DIVIDEND_YIELD = 50.0
@@ -128,6 +132,98 @@ async def check_nav_snapshot_freshness(now: datetime | None = None) -> dict:
         "status": status,
         "detail": f"최신 {latest} — 기대 {expected} 대비 거래일 {gap}일 지연",
         "value": gap,
+    }
+
+
+async def check_portfolio_stock_snapshot_freshness(now: datetime | None = None) -> dict:
+    """현재 보유 종목별 스냅샷 신선도.
+
+    전체 NAV 최신성만 보면 한 종목의 가격 조회가 실패해 이전값으로 묻히는
+    문제를 놓칠 수 있다. 현재 보유 중인 비현금 종목마다
+    portfolio_stock_snapshots 의 최신 날짜를 확인한다.
+    """
+    check = "portfolio_stock_snapshot_freshness"
+    now = now or datetime.now()
+    expected = last_expected_trading_day(now, settled_minutes=SETTLED_MINUTES)
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        WITH holdings AS (
+            SELECT google_sub, stock_code
+            FROM user_portfolio
+            WHERE stock_code IS NOT NULL
+              AND stock_code NOT LIKE 'CASH_%'
+              AND COALESCE(quantity, 0) > 0
+        ),
+        latest AS (
+            SELECT google_sub, stock_code, MAX(date) AS latest_date
+            FROM portfolio_stock_snapshots
+            GROUP BY google_sub, stock_code
+        )
+        SELECT h.google_sub, h.stock_code, l.latest_date
+        FROM holdings h
+        LEFT JOIN latest l
+          ON l.google_sub = h.google_sub
+         AND l.stock_code = h.stock_code
+        ORDER BY h.google_sub, h.stock_code
+        """
+    )
+    rows = [dict(row) for row in await cursor.fetchall()]
+    if not rows:
+        return {"check": check, "status": "ok", "detail": "보유 비현금 종목 없음 — 검사 생략", "value": None}
+
+    missing = [row for row in rows if not row.get("latest_date")]
+    stale: list[dict] = []
+    parse_errors: list[dict] = []
+    for row in rows:
+        latest = row.get("latest_date")
+        if not latest:
+            continue
+        try:
+            latest_d = date.fromisoformat(str(latest))
+        except ValueError:
+            parse_errors.append(row)
+            continue
+        gap = trading_day_gap(expected, latest_d)
+        if gap > 0:
+            stale.append({**row, "gap": gap})
+
+    if not (missing or parse_errors or stale):
+        return {"check": check, "status": "ok", "detail": f"보유 종목별 스냅샷 최신 (기대 {expected})", "value": 0}
+
+    stale.sort(key=lambda row: row["gap"], reverse=True)
+    max_gap = stale[0]["gap"] if stale else 0
+    status = "error" if (missing or parse_errors or max_gap >= _STOCK_SNAPSHOT_ERROR_TRADING_DAYS) else "warn"
+    details: list[str] = []
+    if missing or parse_errors:
+        examples = missing[:4] + parse_errors[:4]
+        missing_detail = ", ".join(f"{row['stock_code']}({row['google_sub'][:8]})" for row in examples)
+        missing_suffix = " 등" if len(missing) + len(parse_errors) > len(examples) else ""
+        details.append(f"누락/날짜 오류: {missing_detail}{missing_suffix}")
+    if stale:
+        stale_examples = stale[:5]
+        for row in stale:
+            code = row["stock_code"].upper()
+            if any(code.endswith(suffix) for suffix in _REUTERS_LIKE_SUFFIXES) and row not in stale_examples:
+                stale_examples.append(row)
+            if len(stale_examples) >= 8:
+                break
+        for row in stale:
+            if "." in row["stock_code"] and row not in stale_examples:
+                stale_examples.append(row)
+            if len(stale_examples) >= 8:
+                break
+        stale_detail = ", ".join(
+            f"{row['stock_code']} 최신 {row['latest_date']}({row['gap']}일)"
+            for row in stale_examples
+        )
+        stale_suffix = " 등" if len(stale) > len(stale_examples) else ""
+        details.append(f"지연: {stale_detail}{stale_suffix}")
+    return {
+        "check": check,
+        "status": status,
+        "detail": f"보유 종목별 스냅샷 {'; '.join(details)} — 기대 {expected}",
+        "value": max_gap or len(missing) + len(parse_errors),
     }
 
 
@@ -229,6 +325,7 @@ async def run_all_checks(*, now: datetime | None = None, record: bool = True) ->
 
     results: list[dict] = []
     results += await _safe("nav_snapshot_freshness", check_nav_snapshot_freshness(now=now))
+    results += await _safe("portfolio_stock_snapshot_freshness", check_portfolio_stock_snapshot_freshness(now=now))
     results += await _safe("intraday_points", check_intraday_points(now=now))
     results += await _safe("benchmark_freshness", check_benchmark_freshness(now=now))
     results += await _safe("system_events_error_rate", check_system_events_error_rate(now=now))
@@ -424,6 +521,7 @@ __all__: list[str] = [
     "check_benchmark_freshness",
     "check_intraday_points",
     "check_nav_snapshot_freshness",
+    "check_portfolio_stock_snapshot_freshness",
     "check_system_events_error_rate",
     "detect_series_anomalies",
     "inspect_stock",

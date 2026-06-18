@@ -1,6 +1,8 @@
 """Admin API endpoints — batch job monitoring, manual triggers, system stats."""
 
 import asyncio
+import html
+import ipaddress
 import json
 import logging
 import os
@@ -9,7 +11,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
 import cache
 from repositories import foreign_dividends as foreign_dividends_repo
@@ -38,7 +40,20 @@ async def _require_admin(request: Request) -> dict:
 
 
 _ADMIN_MUTATION_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-_LOCAL_OR_TEST_HOSTS = {"testserver", "localhost", "127.0.0.1", "::1"}
+_LOCAL_OR_TEST_HOSTS = {"testserver", "testclient", "localhost", "127.0.0.1", "::1"}
+_INTERNAL_NETWORKS = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in (
+        "127.0.0.0/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
 
 
 def _normalize_origin(value: str | None) -> str:
@@ -110,6 +125,55 @@ def _origin_host_is_local(origin: str) -> bool:
     except Exception:
         return False
     return host in _LOCAL_OR_TEST_HOSTS
+
+
+def _strip_host_port(value: str | None) -> str:
+    host = str(value or "").strip()
+    if not host:
+        return ""
+    if host.startswith("[") and "]" in host:
+        return host[1:host.index("]")]
+    if host.count(":") == 1 and "." in host:
+        return host.split(":", 1)[0]
+    return host
+
+
+def _effective_client_host(request: Request) -> str:
+    """Best-effort real client IP behind the local reverse proxy.
+
+    If a proxy provides X-Forwarded-For, prefer its right-most address over
+    request.client.host so a public caller proxied through 127.0.0.1 is not
+    mistaken for a local request.
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        for part in reversed(xff.split(",")):
+            host = _strip_host_port(part)
+            if host:
+                return host
+    for header in ("x-real-ip", "cf-connecting-ip"):
+        host = _strip_host_port(request.headers.get(header))
+        if host:
+            return host
+    return _strip_host_port(request.client.host if request.client else "")
+
+
+def _is_internal_network_request(request: Request) -> bool:
+    host = _effective_client_host(request).lower()
+    if host in _LOCAL_OR_TEST_HOSTS:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(ip in network for network in _INTERNAL_NETWORKS)
+
+
+async def _require_internal_admin(request: Request) -> dict:
+    user = await _require_admin(request)
+    if not _is_internal_network_request(request):
+        raise HTTPException(status_code=403, detail="내부 네트워크에서만 열 수 있는 관리자 링크입니다.")
+    return user
 
 
 async def _require_admin_mutation(request: Request) -> dict:
@@ -383,6 +447,201 @@ async def trigger_job(job_name: str, request: Request):
 async def list_users(request: Request):
     await _require_admin(request)
     return await users_repo.get_all_users()
+
+
+def _clean_profile_payload(payload: dict) -> dict:
+    email = str((payload or {}).get("email") or "").strip()[:320]
+    name = str((payload or {}).get("name") or "").strip()[:120]
+    picture = str((payload or {}).get("picture") or "").strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="올바른 이메일을 입력해 주세요.")
+    if not name:
+        raise HTTPException(status_code=400, detail="이름을 입력해 주세요.")
+    if picture and not picture.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="프로필 이미지는 http(s) URL이어야 합니다.")
+    return {
+        "email": email,
+        "name": name,
+        "picture": picture[:1000] or None,
+        "email_verified": bool((payload or {}).get("email_verified")),
+    }
+
+
+@router.patch("/users/{google_sub}")
+async def update_user_profile(google_sub: str, request: Request, payload: dict = Body(...)):
+    actor = await _require_admin_mutation(request)
+    clean = _clean_profile_payload(payload)
+    updated = await users_repo.update_user_profile(google_sub, **clean)
+    if not updated:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    await observability.record_event(
+        "admin",
+        "user_profile_updated",
+        level="info",
+        details={
+            "actor": actor.get("email") or actor.get("google_sub"),
+            "target": google_sub,
+            "email": clean["email"],
+        },
+        wait=True,
+    )
+    return {"ok": True, "user": updated}
+
+
+@router.put("/users/{google_sub}/role")
+async def update_user_role(google_sub: str, request: Request, payload: dict = Body(...)):
+    actor = await _require_admin_mutation(request)
+    target = await users_repo.get_user(google_sub)
+    if not target:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    next_is_admin = bool((payload or {}).get("is_admin"))
+    if target.get("is_admin") and not next_is_admin and await users_repo.count_admin_users() <= 1:
+        raise HTTPException(status_code=400, detail="마지막 관리자는 일반 사용자로 변경할 수 없습니다.")
+    updated = await users_repo.set_user_admin(google_sub, next_is_admin)
+    await observability.record_event(
+        "admin",
+        "user_role_updated",
+        level="warning",
+        details={
+            "actor": actor.get("email") or actor.get("google_sub"),
+            "target": google_sub,
+            "is_admin": next_is_admin,
+        },
+        wait=True,
+    )
+    return {"ok": True, "user": updated}
+
+
+@router.delete("/users/{google_sub}")
+async def delete_user(google_sub: str, request: Request):
+    actor = await _require_admin_mutation(request)
+    target = await users_repo.get_user(google_sub)
+    if not target:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    if google_sub == actor.get("google_sub"):
+        raise HTTPException(status_code=400, detail="현재 로그인한 관리자 계정은 삭제할 수 없습니다.")
+    if target.get("is_admin") and await users_repo.count_admin_users() <= 1:
+        raise HTTPException(status_code=400, detail="마지막 관리자는 삭제할 수 없습니다.")
+    deleted = await users_repo.delete_user(google_sub)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    await observability.record_event(
+        "admin",
+        "user_deleted",
+        level="warning",
+        details={
+            "actor": actor.get("email") or actor.get("google_sub"),
+            "target": google_sub,
+            "target_email": target.get("email"),
+        },
+        wait=True,
+    )
+    return {"ok": True}
+
+
+@router.get("/portfolio-search")
+async def search_portfolios(
+    request: Request,
+    q: str = Query("", min_length=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    await _require_admin(request)
+    rows = await users_repo.search_user_portfolios(q, limit=limit)
+    for row in rows:
+        row["portfolio_url"] = f"/api/admin/users/{row['google_sub']}/portfolio.html"
+    return {"query": q, "rows": rows}
+
+
+def _html_page_escape(value) -> str:
+    return html.escape(str(value or ""), quote=True)
+
+
+def _render_admin_portfolio_page(user: dict, items: list[dict], *, actor: dict) -> str:
+    safe_name = _html_page_escape(user.get("name") or user.get("email") or user.get("google_sub"))
+    total_cost = 0.0
+    for item in items:
+        try:
+            total_cost += float(item.get("quantity") or 0) * float(item.get("avg_price") or 0)
+        except (TypeError, ValueError):
+            pass
+    rows = "\n".join(
+        f"""
+        <tr>
+          <td><strong>{_html_page_escape(item.get("stock_name") or item.get("stock_code"))}</strong><span>{_html_page_escape(item.get("stock_code"))}</span></td>
+          <td>{_html_page_escape(item.get("group_name") or "-")}</td>
+          <td class="num">{float(item.get("quantity") or 0):,.2f}</td>
+          <td class="num">{float(item.get("avg_price") or 0):,.2f} {_html_page_escape(item.get("currency") or "")}</td>
+          <td>{_html_page_escape((item.get("created_at") or "")[:10])}</td>
+        </tr>
+        """
+        for item in items
+    ) or '<tr><td colspan="5" class="empty">포트폴리오 보유 종목이 없습니다.</td></tr>'
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{safe_name} 포트폴리오</title>
+  <style>
+    :root {{ color-scheme: light; --bg:#f6f8fb; --surface:#fff; --line:#dbe2ea; --text:#111827; --muted:#64748b; --accent:#0f766e; }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; min-height:100vh; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }}
+    main {{ width:min(1120px, calc(100% - 32px)); margin:0 auto; padding:28px 0 48px; }}
+    header {{ display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:18px; }}
+    h1 {{ margin:0; font-size:24px; line-height:1.2; letter-spacing:0; }}
+    .sub {{ color:var(--muted); font-size:13px; margin-top:6px; }}
+    .badge {{ display:inline-flex; align-items:center; min-height:24px; padding:0 10px; border:1px solid rgba(15,118,110,.25); border-radius:6px; color:var(--accent); background:rgba(15,118,110,.08); font-size:12px; font-weight:700; }}
+    .summary {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:16px; }}
+    .metric {{ background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }}
+    .metric span {{ display:block; color:var(--muted); font-size:12px; margin-bottom:6px; }}
+    .metric strong {{ font-size:20px; font-variant-numeric:tabular-nums; }}
+    table {{ width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; }}
+    th,td {{ padding:11px 13px; border-bottom:1px solid var(--line); text-align:left; font-size:13px; }}
+    th {{ color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; background:#f8fafc; }}
+    td strong {{ display:block; font-size:13px; }}
+    td span {{ color:var(--muted); font-size:12px; }}
+    .num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+    .empty {{ text-align:center; color:var(--muted); padding:28px; }}
+    a {{ color:var(--accent); text-decoration:none; font-weight:700; }}
+    @media (max-width:720px) {{ main {{ width:calc(100% - 20px); padding-top:16px; }} header,.summary {{ display:block; }} .metric {{ margin-bottom:8px; }} table {{ display:block; overflow:auto; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>{safe_name} 포트폴리오</h1>
+        <div class="sub">{_html_page_escape(user.get("email"))} · google_sub {_html_page_escape(user.get("google_sub"))}</div>
+        <div class="sub">열람 관리자: {_html_page_escape(actor.get("email") or actor.get("google_sub"))}</div>
+      </div>
+      <div><span class="badge">내부망 전용</span></div>
+    </header>
+    <section class="summary">
+      <div class="metric"><span>보유 종목</span><strong>{len(items):,}</strong></div>
+      <div class="metric"><span>매입 원금 합계</span><strong>{total_cost:,.0f}</strong></div>
+      <div class="metric"><span>최근 로그인</span><strong>{_html_page_escape((user.get("last_login_at") or "-")[:10])}</strong></div>
+    </section>
+    <table>
+      <thead><tr><th>종목</th><th>그룹</th><th class="num">수량</th><th class="num">평균단가</th><th>등록일</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    <p class="sub"><a href="/admin.html">관리자 콘솔로 돌아가기</a></p>
+  </main>
+</body>
+</html>"""
+
+
+@router.get("/users/{google_sub}/portfolio.html", response_class=Response)
+async def user_portfolio_page(google_sub: str, request: Request):
+    actor = await _require_internal_admin(request)
+    user = await users_repo.get_user(google_sub)
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    items = await portfolio_repo.get_portfolio(google_sub)
+    return Response(
+        content=_render_admin_portfolio_page(user, items, actor=actor),
+        media_type="text/html; charset=utf-8",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +1043,18 @@ async def http_metrics(request: Request, hours: float = 24):
     since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
     endpoints = await system_events_repo.summarize_http_metrics(since)
     return {"hours": hours, "endpoints": endpoints}
+
+
+@router.get("/timeseries")
+async def admin_timeseries(request: Request, hours: float = Query(24, ge=1, le=168)):
+    """Chart-friendly hourly observability buckets for the admin console."""
+    await _require_admin(request)
+    since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    events, http = await asyncio.gather(
+        system_events_repo.summarize_event_timeseries(since),
+        system_events_repo.summarize_http_timeseries(since),
+    )
+    return {"hours": hours, "events": events, "http": http}
 
 
 # ---------------------------------------------------------------------------

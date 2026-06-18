@@ -8,6 +8,7 @@ import pytest
 from repositories import portfolio as portfolio_repo
 from routes import portfolio as portfolio_route
 from services import stock_quotes
+from services.portfolio import foreign
 from services.portfolio import quote_service
 from services.portfolio import quotes
 
@@ -171,6 +172,92 @@ def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
             "market": "NX",
             "fetched_at": "2026-05-21T15:31:00",
         }
+
+
+def test_yfinance_candidates_strip_reuters_suffixes():
+    assert foreign._yfinance_candidates("DAX.O")[:2] == ["DAX.O", "DAX"]
+    assert foreign._yfinance_candidates("BRK.B") == ["BRK.B", "BRK-B"]
+
+
+def test_foreign_search_normalizes_yahoo_quotes_to_portfolio_items():
+    item = foreign._normalize_yahoo_search_quote({
+        "symbol": "aapl",
+        "shortname": "Apple Inc.",
+        "quoteType": "EQUITY",
+        "exchDisp": "NASDAQ",
+        "currency": "USD",
+    })
+
+    assert item == {
+        "stock_code": "AAPL",
+        "ticker": "AAPL",
+        "stock_name": "Apple Inc.",
+        "exchange": "NASDAQ",
+        "quote_type": "EQUITY",
+        "currency": "USD",
+        "source": "yahoo",
+    }
+    assert foreign._normalize_yahoo_search_quote({"symbol": "^GSPC", "quoteType": "INDEX"}) is None
+    assert foreign._normalize_yahoo_search_quote({"symbol": "EURUSD=X", "quoteType": "CURRENCY"}) is None
+
+
+def test_foreign_search_direct_fallback_uses_yahoo_ticker_format():
+    fallback = foreign._foreign_search_fallback("BRK.B")
+
+    assert fallback["stock_code"] == "BRK-B"
+    assert fallback["currency"] == "USD"
+    assert foreign._foreign_search_fallback("apple") is None
+
+
+@pytest.mark.asyncio
+async def test_kis_foreign_quote_timeout_returns_empty_for_fallback():
+    async def slow_quote(*args, **kwargs):
+        await asyncio.sleep(1)
+        return {"summary": {"price": 45.5}}
+
+    with patch.object(foreign, "guess_kis_exchanges", return_value=["NAS"]), \
+         patch.object(foreign.kis_proxy_client, "get_overseas_quote", new=slow_quote), \
+         patch.object(foreign, "_KIS_FOREIGN_QUOTE_TIMEOUT", 0.01):
+        result = await foreign.kis_fetch_foreign_quote("DAX")
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_berkshire_class_b_quote_uses_static_yahoo_ticker():
+    fast = AsyncMock(return_value={"price": 12345, "change": 10, "change_pct": 0.1})
+    kis = AsyncMock(side_effect=AssertionError("KIS should not run for BRK.B alias"))
+
+    with patch.object(foreign, "yfinance_fetch_quote_fast", new=fast), \
+         patch.object(foreign, "kis_fetch_foreign_quote", new=kis):
+        result = await foreign.fetch_foreign_quote("BRK.B")
+
+    assert result["price"] == 12345
+    fast.assert_awaited_once_with("BRK-B")
+    kis.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_foreign_quote_resolves_reuters_suffix_after_direct_quote_fails():
+    with patch.dict(quote_service.foreign._ticker_map, {}, clear=True), \
+         patch.object(quote_service.foreign, "ensure_ticker_map", new=AsyncMock()), \
+         patch.object(
+             quote_service.foreign,
+             "fetch_foreign_quote",
+             new=AsyncMock(side_effect=[{}, {"price": 68705, "change_pct": 1.87}]),
+         ) as fetch_foreign_quote, \
+         patch.object(
+             quote_service.foreign,
+             "resolve_foreign_reuters",
+             new=AsyncMock(return_value="DAX"),
+         ) as resolve_foreign_reuters, \
+         patch.object(quote_service.foreign, "save_ticker", new=AsyncMock()) as save_ticker:
+        result = await quote_service.fetch_external_quote_for_stock_service("DAX.O")
+
+    assert result == {"price": 68705, "change_pct": 1.87}
+    assert [call.args[0] for call in fetch_foreign_quote.await_args_list] == ["DAX.O", "DAX"]
+    resolve_foreign_reuters.assert_awaited_once_with("DAX.O")
+    save_ticker.assert_awaited_once_with("DAX.O", "DAX")
 
 
 @pytest.mark.asyncio
