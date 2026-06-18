@@ -44,6 +44,7 @@ ANALYSIS_SPLIT_FILES = [
 # _adminInputStyle) and bootstrapping; the panel modules load after it.
 ADMIN_SPLIT_FILES = [
     "admin.js",
+    "admin-charts.js",
     "admin-observability.js",
     "admin-linked-projects.js",
 ]
