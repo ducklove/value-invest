@@ -3,6 +3,209 @@
 // diagnostic form. Split from static/js/admin.js to keep panels maintainable.
 
 let _liveInterval = null;
+let _adminServerSeries = [];
+const _ADMIN_SERVER_SERIES_LIMIT = 120;
+
+function _serverCpuPct(s) {
+  if (!s) return 0;
+  if (typeof s.cpu_pct === 'number') return Math.max(0, Math.min(100, Math.round(s.cpu_pct)));
+  const loadParts = (s.load_avg || '').split(' ');
+  const load1m = parseFloat(loadParts[0]) || 0;
+  return Math.max(0, Math.min(100, Math.round(load1m / 4 * 100)));
+}
+
+function _serverMemoryPct(s) {
+  const memTotal = s?.memory?.MemTotal || 0;
+  const memAvail = s?.memory?.MemAvailable || 0;
+  return memTotal ? Math.round((memTotal - memAvail) / memTotal * 100) : 0;
+}
+
+function _serverDiskPct(s) {
+  const diskTotal = s?.disk?.total || 0;
+  const diskUsed = s?.disk?.used || 0;
+  return diskTotal ? Math.round(diskUsed / diskTotal * 100) : 0;
+}
+
+function _serverSample(s) {
+  return {
+    ts: Date.now(),
+    cpu: _serverCpuPct(s),
+    memory: _serverMemoryPct(s),
+    disk: _serverDiskPct(s),
+    temp: s?.cpu_temp == null ? null : Number(s.cpu_temp),
+  };
+}
+
+function _seedServerSeries(s) {
+  _adminServerSeries = [_serverSample(s)];
+}
+
+function _pushServerSample(s) {
+  _adminServerSeries.push(_serverSample(s));
+  if (_adminServerSeries.length > _ADMIN_SERVER_SERIES_LIMIT) {
+    _adminServerSeries = _adminServerSeries.slice(-_ADMIN_SERVER_SERIES_LIMIT);
+  }
+}
+
+function _adminChartTextColor() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#64748b';
+}
+
+function _adminChartGridColor() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#dbe3ee';
+}
+
+function _renderTimelineSection(server, timeline) {
+  const seeded = _adminServerSeries.length ? _adminServerSeries : [_serverSample(server)];
+  return `
+    <section class="admin-chart-grid">
+      <div class="admin-chart-panel">
+        <div class="admin-chart-head">
+          <div>
+            <h2 class="admin-chart-title">서버 상태</h2>
+            <div class="admin-chart-sub">5초 라이브 샘플 · CPU/메모리/디스크</div>
+          </div>
+          <span class="admin-badge">live</span>
+        </div>
+        <div class="admin-chart" id="adminServerChart">${_renderServerChartSvg(seeded)}</div>
+      </div>
+      <div class="admin-chart-panel">
+        <div class="admin-chart-head">
+          <div>
+            <h2 class="admin-chart-title">이벤트 발생</h2>
+            <div class="admin-chart-sub">최근 ${timeline?.hours || 24}시간 · info/warn/error</div>
+          </div>
+        </div>
+        <div class="admin-chart">${_renderEventChartSvg(timeline?.events || [])}</div>
+      </div>
+      <div class="admin-chart-panel">
+        <div class="admin-chart-head">
+          <div>
+            <h2 class="admin-chart-title">접속 통계</h2>
+            <div class="admin-chart-sub">느린 요청/5xx tail · HTTP 관측</div>
+          </div>
+        </div>
+        <div class="admin-chart">${_renderHttpChartSvg(timeline?.http || [])}</div>
+      </div>
+    </section>
+  `;
+}
+
+function _renderServerTimeline() {
+  const el = document.getElementById('adminServerChart');
+  if (el) el.innerHTML = _renderServerChartSvg(_adminServerSeries);
+}
+
+function _chartBaseSvg(inner, {maxLabel = '100%', minLabel = '0'} = {}) {
+  const text = _adminChartTextColor();
+  const grid = _adminChartGridColor();
+  return `
+    <svg viewBox="0 0 560 218" role="img" aria-label="시계열 그래프" preserveAspectRatio="none">
+      <line x1="44" y1="20" x2="44" y2="176" stroke="${grid}" stroke-width="1"/>
+      <line x1="44" y1="176" x2="540" y2="176" stroke="${grid}" stroke-width="1"/>
+      <line x1="44" y1="98" x2="540" y2="98" stroke="${grid}" stroke-width="1" stroke-dasharray="3 5"/>
+      <text x="10" y="25" fill="${text}" font-size="11">${maxLabel}</text>
+      <text x="18" y="179" fill="${text}" font-size="11">${minLabel}</text>
+      ${inner}
+    </svg>
+  `;
+}
+
+function _polyline(points, key, color, maxValue = 100) {
+  if (!points.length) return '';
+  const width = 496;
+  const height = 156;
+  const x0 = 44;
+  const y0 = 176;
+  const denom = Math.max(1, points.length - 1);
+  const coords = points.map((p, idx) => {
+    const v = Math.max(0, Math.min(maxValue, Number(p[key] || 0)));
+    const x = x0 + (idx / denom) * width;
+    const y = y0 - (v / maxValue) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<polyline points="${coords}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+function _renderServerChartSvg(points) {
+  const data = (points || []).filter(Boolean);
+  if (!data.length) return '<div class="admin-chart-empty">서버 샘플 대기 중</div>';
+  const last = data[data.length - 1] || {};
+  const legend = `
+    <g transform="translate(44,198)" font-size="11">
+      <circle cx="0" cy="-4" r="4" fill="#2563eb"/><text x="10" y="0" fill="${_adminChartTextColor()}">CPU ${Math.round(last.cpu || 0)}%</text>
+      <circle cx="92" cy="-4" r="4" fill="#0f766e"/><text x="102" y="0" fill="${_adminChartTextColor()}">Memory ${Math.round(last.memory || 0)}%</text>
+      <circle cx="214" cy="-4" r="4" fill="#d97706"/><text x="224" y="0" fill="${_adminChartTextColor()}">Disk ${Math.round(last.disk || 0)}%</text>
+    </g>
+  `;
+  return _chartBaseSvg(`
+    ${_polyline(data, 'cpu', '#2563eb')}
+    ${_polyline(data, 'memory', '#0f766e')}
+    ${_polyline(data, 'disk', '#d97706')}
+    ${legend}
+  `);
+}
+
+function _bucketLabel(bucket) {
+  if (!bucket) return '';
+  const d = new Date(bucket);
+  if (Number.isNaN(d.getTime())) return String(bucket).slice(11, 16);
+  return `${String(d.getHours()).padStart(2, '0')}:00`;
+}
+
+function _renderEventChartSvg(rows) {
+  const data = (rows || []).filter(r => r && r.bucket);
+  if (!data.length) return '<div class="admin-chart-empty">이벤트 기록 없음</div>';
+  const max = Math.max(1, ...data.map(r => Number(r.total || 0)));
+  const barW = Math.max(4, Math.min(28, 452 / data.length));
+  const gap = data.length > 1 ? Math.max(2, (496 - data.length * barW) / (data.length - 1)) : 0;
+  const bars = data.map((r, idx) => {
+    const x = 44 + idx * (barW + gap);
+    let y = 176;
+    const parts = [
+      ['info', '#0f766e'],
+      ['warning', '#d97706'],
+      ['error', '#dc2626'],
+    ];
+    const rects = parts.map(([key, color]) => {
+      const h = (Number(r[key] || 0) / max) * 156;
+      y -= h;
+      return h > 0 ? `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${color}" rx="2"/>` : '';
+    }).join('');
+    const label = idx === 0 || idx === data.length - 1 || idx % Math.ceil(data.length / 4) === 0
+      ? `<text x="${x.toFixed(1)}" y="192" fill="${_adminChartTextColor()}" font-size="10">${_bucketLabel(r.bucket)}</text>`
+      : '';
+    return rects + label;
+  }).join('');
+  const legend = `<text x="410" y="18" fill="${_adminChartTextColor()}" font-size="11">최대 ${max.toLocaleString()}건/h</text>`;
+  return _chartBaseSvg(`${legend}${bars}`, {maxLabel: `${max}`, minLabel: '0'});
+}
+
+function _renderHttpChartSvg(rows) {
+  const data = (rows || []).filter(r => r && r.bucket);
+  if (!data.length) return '<div class="admin-chart-empty">느린 요청/5xx 기록 없음</div>';
+  const max = Math.max(1, ...data.map(r => Number(r.count || 0)));
+  const barW = Math.max(4, Math.min(28, 452 / data.length));
+  const gap = data.length > 1 ? Math.max(2, (496 - data.length * barW) / (data.length - 1)) : 0;
+  const bars = data.map((r, idx) => {
+    const x = 44 + idx * (barW + gap);
+    const totalH = (Number(r.count || 0) / max) * 156;
+    const errH = (Number(r.errors || 0) / max) * 156;
+    const y = 176 - totalH;
+    const errY = 176 - errH;
+    const label = idx === 0 || idx === data.length - 1 || idx % Math.ceil(data.length / 4) === 0
+      ? `<text x="${x.toFixed(1)}" y="192" fill="${_adminChartTextColor()}" font-size="10">${_bucketLabel(r.bucket)}</text>`
+      : '';
+    return `
+      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${totalH.toFixed(1)}" fill="#2563eb" opacity="0.78" rx="2"/>
+      ${errH > 0 ? `<rect x="${x.toFixed(1)}" y="${errY.toFixed(1)}" width="${barW.toFixed(1)}" height="${errH.toFixed(1)}" fill="#dc2626" rx="2"/>` : ''}
+      ${label}
+    `;
+  }).join('');
+  const maxLatency = Math.max(0, ...data.map(r => Number(r.max_ms || 0)));
+  const legend = `<text x="356" y="18" fill="${_adminChartTextColor()}" font-size="11">max ${Math.round(maxLatency).toLocaleString()}ms</text>`;
+  return _chartBaseSvg(`${legend}${bars}`, {maxLabel: `${max}`, minLabel: '0'});
+}
 
 // --- HTTP performance (latency observer) --------------------------------
 //
@@ -175,30 +378,35 @@ async function _updateLiveStats() {
   try {
     const res = await apiFetch('/api/admin/server-stats');
     const s = await res.json();
+    _pushServerSample(s);
+    _renderServerTimeline();
 
     // CPU Temp
     const tempEl = document.getElementById('adminCpuTemp');
     if (tempEl && s.cpu_temp != null) {
       const tempPct = Math.round(s.cpu_temp / 85 * 100);
-      tempEl.querySelector('.admin-card-value').textContent = s.cpu_temp.toFixed(1) + '°C';
-      tempEl.querySelector('.admin-progress-fill').style.width = tempPct + '%';
-      tempEl.querySelector('.admin-progress-fill').style.background = _progressColor(tempPct);
+      const valueEl = tempEl.querySelector('.admin-card-value, .admin-kpi-value');
+      if (valueEl) valueEl.textContent = s.cpu_temp.toFixed(1) + '°C';
+      const fill = tempEl.querySelector('.admin-progress-fill');
+      if (fill) {
+        fill.style.width = tempPct + '%';
+        fill.style.background = _progressColor(tempPct);
+      }
     }
 
     // CPU Load (true utilization from /proc/stat)
     const loadEl = document.getElementById('adminCpuLoad');
     if (loadEl) {
-      let loadPct;
-      if (typeof s.cpu_pct === 'number') {
-        loadPct = Math.round(s.cpu_pct);
-      } else {
-        const loadParts = (s.load_avg || '').split(' ');
-        const load1m = parseFloat(loadParts[0]) || 0;
-        loadPct = Math.round(load1m / 4 * 100);
+      const loadPct = _serverCpuPct(s);
+      const valueEl = loadEl.querySelector('.admin-card-value, .admin-kpi-value');
+      if (valueEl) valueEl.textContent = loadPct + '%';
+      const noteEl = loadEl.querySelector('.admin-kpi-note');
+      if (noteEl && s.cpu_temp != null) noteEl.textContent = `CPU ${s.cpu_temp.toFixed(1)}°C`;
+      const fill = loadEl.querySelector('.admin-progress-fill');
+      if (fill) {
+        fill.style.width = loadPct + '%';
+        fill.style.background = _progressColor(loadPct);
       }
-      loadEl.querySelector('.admin-card-value').textContent = loadPct + '%';
-      loadEl.querySelector('.admin-progress-fill').style.width = loadPct + '%';
-      loadEl.querySelector('.admin-progress-fill').style.background = _progressColor(loadPct);
     }
 
     // Memory
@@ -208,9 +416,15 @@ async function _updateLiveStats() {
       const memAvail = s.memory?.MemAvailable || 0;
       const memUsed = memTotal - memAvail;
       const memPct = memTotal ? Math.round(memUsed / memTotal * 100) : 0;
-      memEl.querySelector('.admin-card-value').textContent = `${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)} (${memPct}%)`;
-      memEl.querySelector('.admin-progress-fill').style.width = memPct + '%';
-      memEl.querySelector('.admin-progress-fill').style.background = _progressColor(memPct);
+      const valueEl = memEl.querySelector('.admin-card-value, .admin-kpi-value');
+      if (valueEl) valueEl.textContent = memPct + '%';
+      const noteEl = memEl.querySelector('.admin-kpi-note');
+      if (noteEl) noteEl.textContent = `${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)}`;
+      const fill = memEl.querySelector('.admin-progress-fill');
+      if (fill) {
+        fill.style.width = memPct + '%';
+        fill.style.background = _progressColor(memPct);
+      }
     }
   } catch (e) {
     // Silently ignore live update failures
@@ -282,22 +496,235 @@ function _renderBatchSection(jobs) {
 // --- Users section ---
 
 function _renderUsersSection(users) {
-  const rows = users.map(u => `
+  const rows = _renderAdminUserRows(users);
+  return `
+    <div class="admin-section" id="adminUsersSection">
+      <h3>사용자 관리 <span class="admin-sub">${users.length}명 · 삭제/롤 변경/프로필 수정</span></h3>
+      <div class="admin-user-toolbar">
+        <div class="admin-toolbar-left">
+          <input class="admin-search-input" id="adminUserSearch" placeholder="사용자 검색: 이름, 이메일, google_sub"
+                 oninput="filterAdminUsers()" style="min-width:300px;">
+          <select class="admin-select" id="adminRoleFilter" onchange="filterAdminUsers()">
+            <option value="all">전체 역할</option>
+            <option value="admin">관리자</option>
+            <option value="user">일반</option>
+          </select>
+        </div>
+        <div class="admin-toolbar-right">
+          <input class="admin-search-input" id="adminPortfolioSearch" placeholder="포트폴리오 검색: 종목명, 코드, 그룹"
+                 onkeydown="if(event.key==='Enter')searchAdminPortfolios()" style="min-width:300px;">
+          <button class="admin-btn admin-btn-primary" onclick="searchAdminPortfolios()" type="button">검색</button>
+        </div>
+      </div>
+      <div id="adminUserMessage" class="admin-sub" style="margin-bottom:8px;"></div>
+      <div id="adminUserEditor"></div>
+      <div id="adminPortfolioSearchResult"></div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr><th>사용자</th><th>역할</th><th>포트폴리오</th><th>최근 로그인</th><th>가입일</th><th>작업</th></tr></thead>
+          <tbody id="adminUsersBody">${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderAdminUserRows(users) {
+  return (users || []).map(u => {
+    const subArg = encodeURIComponent(u.google_sub || '');
+    const pic = u.picture
+      ? `<img class="admin-avatar" src="${_esc(u.picture)}" alt="">`
+      : `<div class="admin-avatar-fallback">${_esc(_userInitial(u))}</div>`;
+    const portfolioCount = Number(u.portfolio_count || 0);
+    const portfolioUrl = `/api/admin/users/${subArg}/portfolio.html`;
+    return `
     <tr>
-      <td>${_esc(u.name)}</td>
-      <td>${_esc(u.email)}</td>
-      <td>${u.is_admin ? '관리자' : '일반'}</td>
-      <td>${u.last_login_at ? u.last_login_at.slice(0, 16).replace('T', ' ') : '-'}</td>
-      <td>${u.created_at ? u.created_at.slice(0, 10) : '-'}</td>
+      <td>
+        <div class="admin-user-cell">
+          ${pic}
+          <div class="admin-user-main">
+            <strong>${_esc(u.name)}</strong>
+            <span>${_esc(u.email)}</span>
+            <span><code>${_esc(u.google_sub)}</code></span>
+          </div>
+        </div>
+      </td>
+      <td>
+        <select class="admin-select" onchange="changeAdminUserRole('${subArg}', this.value === 'admin')">
+          <option value="user" ${u.is_admin ? '' : 'selected'}>일반</option>
+          <option value="admin" ${u.is_admin ? 'selected' : ''}>관리자</option>
+        </select>
+      </td>
+      <td>
+        <span class="admin-badge">${portfolioCount.toLocaleString()}종목</span>
+        <a class="admin-link-button" href="${portfolioUrl}" target="_blank" rel="noopener" style="margin-left:6px;">내부망 포트폴리오</a>
+      </td>
+      <td>${u.last_login_at ? _esc(u.last_login_at.slice(0, 16).replace('T', ' ')) : '-'}</td>
+      <td>${u.created_at ? _esc(u.created_at.slice(0, 10)) : '-'}</td>
+      <td>
+        <button class="admin-btn admin-btn-secondary" onclick="editAdminUser('${subArg}')" type="button">프로필 수정</button>
+        <button class="admin-btn admin-btn-danger" onclick="deleteAdminUser('${subArg}')" type="button">삭제</button>
+      </td>
+    </tr>
+    `;
+  }).join('') || '<tr><td class="admin-muted-row" colspan="6">표시할 사용자가 없습니다.</td></tr>';
+}
+
+function _userInitial(u) {
+  return String(u?.name || u?.email || '?').trim().slice(0, 1).toUpperCase() || '?';
+}
+
+function filterAdminUsers() {
+  const q = String(document.getElementById('adminUserSearch')?.value || '').trim().toLowerCase();
+  const role = document.getElementById('adminRoleFilter')?.value || 'all';
+  const filtered = (_adminUsers || []).filter(u => {
+    const haystack = [u.name, u.email, u.google_sub].join(' ').toLowerCase();
+    const roleOk = role === 'all' || (role === 'admin' ? !!u.is_admin : !u.is_admin);
+    return roleOk && (!q || haystack.includes(q));
+  });
+  const body = document.getElementById('adminUsersBody');
+  if (body) body.innerHTML = _renderAdminUserRows(filtered);
+}
+
+function _showAdminUserMessage(message, isError = false) {
+  const el = document.getElementById('adminUserMessage');
+  if (el) el.innerHTML = `<span class="${isError ? 'admin-status-fail' : 'admin-status-ok'}">${_esc(message)}</span>`;
+}
+
+function editAdminUser(encodedSub) {
+  const googleSub = decodeURIComponent(encodedSub || '');
+  const u = (_adminUsers || []).find(row => row.google_sub === googleSub);
+  const root = document.getElementById('adminUserEditor');
+  if (!u || !root) return;
+  root.innerHTML = `
+    <form class="admin-section" style="box-shadow:none;margin:0 0 12px;padding:14px;background:color-mix(in srgb,var(--surface) 94%,var(--bg));"
+          onsubmit="event.preventDefault(); saveAdminUserProfile('${encodedSub}');">
+      <h3 style="margin-bottom:10px;">프로필 수정 <span class="admin-sub">${_esc(u.email)}</span></h3>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px;align-items:center;">
+        <input class="admin-field" id="adminEditName" value="${_esc(u.name)}" placeholder="이름">
+        <input class="admin-field" id="adminEditEmail" value="${_esc(u.email)}" placeholder="이메일">
+        <input class="admin-field" id="adminEditPicture" value="${_esc(u.picture || '')}" placeholder="프로필 이미지 URL">
+        <label class="admin-sub" style="display:flex;gap:6px;align-items:center;">
+          <input id="adminEditVerified" type="checkbox" ${u.email_verified ? 'checked' : ''}> 이메일 확인됨
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="admin-btn admin-btn-primary" type="submit">저장</button>
+        <button class="admin-btn admin-btn-secondary" type="button" onclick="document.getElementById('adminUserEditor').innerHTML=''">닫기</button>
+      </div>
+    </form>
+  `;
+  root.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+async function saveAdminUserProfile(encodedSub) {
+  const googleSub = decodeURIComponent(encodedSub || '');
+  try {
+    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(googleSub)}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name: document.getElementById('adminEditName')?.value || '',
+        email: document.getElementById('adminEditEmail')?.value || '',
+        picture: document.getElementById('adminEditPicture')?.value || '',
+        email_verified: !!document.getElementById('adminEditVerified')?.checked,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText || '프로필 저장 실패');
+    _showAdminUserMessage('프로필을 저장했습니다.');
+    await refreshAdminUsers();
+    document.getElementById('adminUserEditor').innerHTML = '';
+  } catch (e) {
+    _showAdminUserMessage(e.message, true);
+  }
+}
+
+async function changeAdminUserRole(encodedSub, isAdmin) {
+  const googleSub = decodeURIComponent(encodedSub || '');
+  try {
+    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(googleSub)}/role`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({is_admin: isAdmin}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText || '역할 변경 실패');
+    _showAdminUserMessage('역할을 변경했습니다.');
+    await refreshAdminUsers();
+  } catch (e) {
+    _showAdminUserMessage(e.message, true);
+    await refreshAdminUsers();
+  }
+}
+
+async function deleteAdminUser(encodedSub) {
+  const googleSub = decodeURIComponent(encodedSub || '');
+  const u = (_adminUsers || []).find(row => row.google_sub === googleSub);
+  if (!u) return;
+  if (!confirm(`${u.name || u.email} 사용자를 삭제할까요?\n포트폴리오와 세션 데이터도 함께 삭제됩니다.`)) return;
+  try {
+    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(googleSub)}`, {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText || '삭제 실패');
+    _showAdminUserMessage('사용자를 삭제했습니다.');
+    await refreshAdminUsers();
+  } catch (e) {
+    _showAdminUserMessage(e.message, true);
+  }
+}
+
+async function refreshAdminUsers() {
+  const res = await apiFetch('/api/admin/users');
+  if (!res.ok) throw new Error(`사용자 목록 갱신 실패 (${res.status})`);
+  _adminUsers = await res.json();
+  filterAdminUsers();
+}
+
+async function searchAdminPortfolios() {
+  const q = String(document.getElementById('adminPortfolioSearch')?.value || '').trim();
+  const root = document.getElementById('adminPortfolioSearchResult');
+  if (!root) return;
+  if (!q) {
+    root.innerHTML = '<div class="admin-sub" style="margin-bottom:10px;">검색어를 입력하세요.</div>';
+    return;
+  }
+  root.innerHTML = '<div class="admin-sub" style="margin-bottom:10px;">포트폴리오 검색 중...</div>';
+  try {
+    const res = await apiFetch(`/api/admin/portfolio-search?q=${encodeURIComponent(q)}&limit=80`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText || '포트폴리오 검색 실패');
+    root.innerHTML = _renderPortfolioSearchResult(data.rows || [], q);
+  } catch (e) {
+    root.innerHTML = `<div class="admin-sub admin-status-fail" style="margin-bottom:10px;">${_esc(e.message)}</div>`;
+  }
+}
+
+function _renderPortfolioSearchResult(rows, query) {
+  const body = rows.map(r => `
+    <tr>
+      <td>
+        <strong>${_esc(r.stock_name || r.stock_code)}</strong>
+        <div class="admin-sub"><code>${_esc(r.stock_code)}</code> · ${_esc(r.group_name || '-')}</div>
+      </td>
+      <td>${_esc(r.name)}<div class="admin-sub">${_esc(r.email)}</div></td>
+      <td class="admin-num">${Number(r.quantity || 0).toLocaleString()}</td>
+      <td class="admin-num">${Number(r.avg_price || 0).toLocaleString()} ${_esc(r.currency || '')}</td>
+      <td><a class="admin-link-button" href="${_esc(r.portfolio_url || '#')}" target="_blank" rel="noopener">내부망 포트폴리오</a></td>
     </tr>
   `).join('');
   return `
-    <div class="admin-section">
-      <h3>사용자 <span class="admin-sub">${users.length}명</span></h3>
-      <table class="admin-table">
-        <thead><tr><th>이름</th><th>이메일</th><th>역할</th><th>최근 로그인</th><th>가입일</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+    <div style="margin:0 0 12px;">
+      <div class="admin-sub" style="margin:0 0 8px;">포트폴리오 검색 "${_esc(query)}" · ${rows.length}건</div>
+      <div class="admin-table-wrap">
+        <table class="admin-table admin-table-compact">
+          <thead><tr><th>종목</th><th>사용자</th><th class="admin-num">수량</th><th class="admin-num">평균단가</th><th>링크</th></tr></thead>
+          <tbody>${body || '<tr><td class="admin-muted-row" colspan="5">검색 결과가 없습니다.</td></tr>'}</tbody>
+        </table>
+      </div>
     </div>
   `;
 }
