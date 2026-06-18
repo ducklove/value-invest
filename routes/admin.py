@@ -135,11 +135,23 @@ def _strip_host_port(value: str | None) -> str:
     host = str(value or "").strip()
     if not host:
         return ""
+    host = host.split(",", 1)[0].strip()
     if host.startswith("[") and "]" in host:
         return host[1:host.index("]")]
     if host.count(":") == 1 and "." in host:
         return host.split(":", 1)[0]
     return host
+
+
+def _is_internal_network_host(host: str | None) -> bool:
+    host = _strip_host_port(host).lower()
+    if host in _LOCAL_OR_TEST_HOSTS:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(ip in network for network in _INTERNAL_NETWORKS)
 
 
 def _effective_client_host(request: Request) -> str:
@@ -163,14 +175,17 @@ def _effective_client_host(request: Request) -> str:
 
 
 def _is_internal_network_request(request: Request) -> bool:
-    host = _effective_client_host(request).lower()
-    if host in _LOCAL_OR_TEST_HOSTS:
-        return True
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return any(ip in network for network in _INTERNAL_NETWORKS)
+    return _is_internal_network_host(_effective_client_host(request))
+
+
+def _request_host_is_internal_network(request: Request) -> bool:
+    host = (
+        request.headers.get("x-forwarded-host", "")
+        or request.headers.get("host", "")
+        or request.url.hostname
+        or ""
+    )
+    return _is_internal_network_host(host)
 
 
 def _admin_portfolio_url(google_sub: str) -> str:
@@ -183,6 +198,17 @@ async def _require_internal_admin(request: Request) -> dict:
     if not _is_internal_network_request(request):
         raise HTTPException(status_code=403, detail="내부 네트워크에서만 열 수 있는 관리자 링크입니다.")
     return user
+
+
+async def _require_internal_portfolio_viewer(request: Request) -> dict:
+    if not _is_internal_network_request(request) or not _request_host_is_internal_network(request):
+        raise HTTPException(status_code=403, detail="Internal network portfolio access only.")
+    if _STANDALONE_MODE:
+        return {"google_sub": "admin", "is_admin": True}
+    user = await get_current_user(request)
+    if user and user.get("is_admin"):
+        return user
+    return {"google_sub": "internal-network", "email": "internal-network", "is_admin": False}
 
 
 async def _require_admin_mutation(request: Request) -> dict:
@@ -642,7 +668,7 @@ def _render_admin_portfolio_page(user: dict, items: list[dict], *, actor: dict) 
 
 @router.get("/users/{google_sub}/portfolio.html", response_class=Response)
 async def user_portfolio_page(google_sub: str, request: Request):
-    actor = await _require_internal_admin(request)
+    actor = await _require_internal_portfolio_viewer(request)
     user = await users_repo.get_user(google_sub)
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")

@@ -143,7 +143,7 @@ class AdminUserManagementTests(TempDbMixin):
         admin_user = {"google_sub": "admin", "email": "admin@example.com", "is_admin": True}
         public_request = _request(
             "/api/admin/users/u2/portfolio.html",
-            headers={"X-Forwarded-For": "203.0.113.10"},
+            headers={"Host": "192.168.68.67:3691", "X-Forwarded-For": "203.0.113.10"},
             client_host="127.0.0.1",
         )
         with patch("routes.admin.get_current_user", AsyncMock(return_value=admin_user)):
@@ -151,15 +151,26 @@ class AdminUserManagementTests(TempDbMixin):
                 await admin_route.user_portfolio_page("u2", public_request)
         self.assertEqual(exc_info.exception.status_code, 403)
 
-        lan_request = _request(
+        public_host_request = _request(
             "/api/admin/users/u2/portfolio.html",
-            headers={"X-Forwarded-For": "192.168.0.25"},
+            headers={"Host": "cantabile.tplinkdns.com:3691"},
             client_host="127.0.0.1",
         )
         with patch("routes.admin.get_current_user", AsyncMock(return_value=admin_user)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await admin_route.user_portfolio_page("u2", public_host_request)
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+        lan_request = _request(
+            "/api/admin/users/u2/portfolio.html",
+            headers={"Host": "192.168.68.67:3691", "X-Forwarded-For": "192.168.0.25"},
+            client_host="127.0.0.1",
+        )
+        with patch("routes.admin.get_current_user", AsyncMock(return_value=None)):
             response = await admin_route.user_portfolio_page("u2", lan_request)
         body = response.body.decode("utf-8")
         self.assertIn("내부망 전용", body)
+        self.assertIn("internal-network", body)
         self.assertIn("삼성전자", body)
 
 
