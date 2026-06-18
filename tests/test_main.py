@@ -230,6 +230,37 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[5], "KRW")
         foreign_name.assert_not_awaited()
 
+    async def test_portfolio_save_foreign_ticker_uses_fast_currency_inference(self):
+        request = _request_with_headers("/api/portfolio/AAPL")
+        saver = AsyncMock(return_value={"stock_code": "AAPL"})
+        detect_currency = AsyncMock(side_effect=AssertionError("save should not block on currency discovery"))
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("services.portfolio.foreign.resolve_domestic_code_alias", new=AsyncMock(return_value=None)), \
+             patch("services.portfolio.foreign.detect_currency", new=detect_currency), \
+             patch("repositories.portfolio.save_portfolio_item", new=saver), \
+             patch("repositories.foreign_dividends.get_foreign_dividend", new=AsyncMock(return_value={"dps_krw": 0})):
+            await portfolio.save_portfolio_item(
+                "AAPL",
+                request,
+                {"stock_name": "Apple Inc.", "quantity": 1, "avg_price": 0},
+            )
+
+        saver.assert_awaited_once()
+        args = saver.await_args.args
+        self.assertEqual(args[1], "AAPL")
+        self.assertEqual(args[2], "Apple Inc.")
+        self.assertEqual(args[5], "USD")
+        detect_currency.assert_not_awaited()
+
+    async def test_portfolio_foreign_search_endpoint_returns_suggestions(self):
+        suggestions = [{"stock_code": "AAPL", "stock_name": "Apple Inc.", "currency": "USD"}]
+        search = AsyncMock(return_value=suggestions)
+        with patch("routes.portfolio.foreign.search_foreign_tickers", new=search):
+            response = await portfolio.search_foreign(q="apple", limit=5)
+
+        self.assertEqual(response, suggestions)
+        search.assert_awaited_once_with("apple", limit=5)
+
     def test_portfolio_today_baseline_resets_at_22(self):
         self.assertEqual(
             portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 21, 59, 59)),

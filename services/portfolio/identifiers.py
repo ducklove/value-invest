@@ -44,6 +44,21 @@ STATIC_FOREIGN_TICKERS: dict[str, dict[str, Any]] = {
         "name": "Berkshire Hathaway Inc. Class A",
         "currency": "USD",
     },
+    "BRK-B": {
+        "ticker": "BRK-B",
+        "name": "Berkshire Hathaway Inc. Class B",
+        "currency": "USD",
+    },
+    "BRK.B": {
+        "ticker": "BRK-B",
+        "name": "Berkshire Hathaway Inc. Class B",
+        "currency": "USD",
+    },
+    "BRK/B": {
+        "ticker": "BRK-B",
+        "name": "Berkshire Hathaway Inc. Class B",
+        "currency": "USD",
+    },
     "A200": {
         "ticker": "A200.AX",
         "name": "BetaShares Australia 200 ETF",

@@ -375,45 +375,22 @@ function pfInitPortfolioTextSearch() {
 
       pfSearchTimeout = setTimeout(async () => {
         try {
-          // Special asset matching
-          const specialAssets = [
-            { code: 'KRX_GOLD', name: 'KRX 금현물', keywords: ['금', '금현물', 'krx금', 'krx_gold', 'gold'] },
-            { code: 'CRYPTO_BTC', name: '비트코인', keywords: ['btc', '비트코인', 'bitcoin'] },
-            { code: 'CRYPTO_ETH', name: '이더리움', keywords: ['eth', '이더리움', 'ethereum'] },
-            { code: 'CRYPTO_USDT', name: '테더', keywords: ['usdt', '테더', 'tether'] },
-            { code: 'CASH_KRW', name: '원화', keywords: ['krw', '원화', '현금', '원'] },
-            { code: 'CASH_USD', name: '미국 달러', keywords: ['usd', '달러', '미국달러', 'dollar'] },
-            { code: 'CASH_EUR', name: '유로', keywords: ['eur', '유로', 'euro'] },
-            { code: 'CASH_JPY', name: '일본 엔', keywords: ['jpy', '엔', '일본엔', 'yen'] },
-            { code: 'CASH_CNY', name: '중국 위안', keywords: ['cny', '위안', '중국위안', 'yuan'] },
-            { code: 'CASH_HKD', name: '홍콩 달러', keywords: ['hkd', '홍콩달러'] },
-            { code: 'CASH_GBP', name: '영국 파운드', keywords: ['gbp', '파운드', 'pound'] },
-            { code: 'CASH_AUD', name: '호주 달러', keywords: ['aud', '호주달러'] },
-            { code: 'CASH_CAD', name: '캐나다 달러', keywords: ['cad', '캐나다달러'] },
-            { code: 'CASH_CHF', name: '스위스 프랑', keywords: ['chf', '프랑', '스위스프랑'] },
-            { code: 'CASH_VND', name: '베트남 동', keywords: ['vnd', '베트남동', '동'] },
-            { code: 'CASH_TWD', name: '대만 달러', keywords: ['twd', '대만달러'] },
-          ];
-          const qLower = raw.toLowerCase();
-          const matchedSpecial = specialAssets.filter(a => a.keywords.some(k => qLower.includes(k)) || a.code.toLowerCase() === qLower);
-
-          const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
-          const results = await resp.json();
-          if (!results.length && !matchedSpecial.length) {
-            // No domestic results — try as foreign ticker
-            if (/^[A-Z0-9]/i.test(raw) && /[A-Z]/i.test(raw)) {
-              const r2 = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(raw.trim())}`);
-              const d = await r2.json();
-              if (d.stock_name) {
-                const resolvedCode = d.stock_code || raw.trim();
-                dropdown.innerHTML = `<div class="dropdown-item" data-code="${resolvedCode}" data-name="${escapeHtml(d.stock_name)}">${escapeHtml(d.stock_name)} <span style="color:var(--text-secondary)">${resolvedCode}</span></div>`;
-                dropdown.classList.add('show');
-                dropdown.querySelectorAll('.dropdown-item').forEach(el => {
-                  el.addEventListener('click', () => pfAddFromSearch(el.dataset.code, el.dataset.name));
-                });
-                return;
-              }
-            }
+          const matchedSpecial = pfMatchedSpecialAssets(raw);
+          const [domesticRaw, foreignRaw] = await Promise.all([
+            pfFetchJson(`/api/search?q=${encodeURIComponent(q)}`, []),
+            pfIsForeignSearchQuery(raw)
+              ? pfFetchJson(`/api/portfolio/search-foreign?q=${encodeURIComponent(raw)}&limit=8`, [], { timeoutMs: 5000 })
+              : Promise.resolve([]),
+          ]);
+          const results = Array.isArray(domesticRaw) ? domesticRaw : [];
+          const foreignItems = (Array.isArray(foreignRaw) ? foreignRaw : [])
+            .map(pfForeignSearchItem)
+            .filter(Boolean);
+          const directTicker = pfCanonicalDirectTicker(raw);
+          if (!results.length && !matchedSpecial.length && !foreignItems.length && directTicker) {
+            foreignItems.push({ code: directTicker, name: directTicker, saveName: directTicker, currency: pfInferTickerCurrency(directTicker) });
+          }
+          if (!results.length && !matchedSpecial.length && !foreignItems.length) {
             dropdown.classList.remove('show'); return;
           }
 
@@ -439,17 +416,8 @@ function pfInitPortfolioTextSearch() {
             items = results.map(r => ({ code: r.stock_code, name: r.corp_name }));
           }
 
-          // Prepend matched special assets
-          const specialItems = matchedSpecial.map(a => ({ code: a.code, name: a.name }));
-          items = [...specialItems, ...items.filter(i => !specialItems.some(s => s.code === i.code))];
-          if (!items.length) { dropdown.classList.remove('show'); return; }
-          dropdown.innerHTML = items.map(r =>
-            `<div class="dropdown-item" data-code="${r.code}" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)} <span style="color:var(--text-secondary)">${r.code}</span></div>`
-          ).join('');
-          dropdown.classList.add('show');
-          dropdown.querySelectorAll('.dropdown-item').forEach(el => {
-            el.addEventListener('click', () => pfAddFromSearch(el.dataset.code, el.dataset.name));
-          });
+          const specialItems = matchedSpecial.map(a => ({ code: a.code, name: a.name, saveName: a.name, currency: '' }));
+          pfRenderAddDropdown(dropdown, [...specialItems, ...items, ...foreignItems]);
         } catch (e) { console.warn(e); }
       }, 200);
     });
@@ -462,8 +430,25 @@ function pfInitPortfolioTextSearch() {
       dropdown.classList.remove('show');
       const q = input.value.trim();
       if (!q) return;
-      const resp = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(q)}`);
-      const data = await resp.json();
+      const exactSpecial = pfMatchedSpecialAssets(q).find(a => a.code.toLowerCase() === q.toLowerCase());
+      if (exactSpecial) {
+        pfAddFromSearch(exactSpecial.code, exactSpecial.name);
+        return;
+      }
+      const directTicker = pfCanonicalDirectTicker(q);
+      if (directTicker) {
+        pfAddFromSearch(directTicker, directTicker, pfInferTickerCurrency(directTicker));
+        return;
+      }
+      if (pfIsForeignSearchQuery(q)) {
+        const foreignRaw = await pfFetchJson(`/api/portfolio/search-foreign?q=${encodeURIComponent(q)}&limit=5`, [], { timeoutMs: 5000 });
+        const foreignItem = (Array.isArray(foreignRaw) ? foreignRaw : []).map(pfForeignSearchItem).filter(Boolean)[0];
+        if (foreignItem) {
+          pfAddFromSearch(foreignItem.code, foreignItem.saveName || foreignItem.name, foreignItem.currency || '');
+          return;
+        }
+      }
+      const data = await pfFetchJson(`/api/portfolio/resolve-name?code=${encodeURIComponent(q)}`, {}, { timeoutMs: 5000 });
       const resolvedCode = data.stock_code || q;
       pfAddFromSearch(resolvedCode, data.stock_name || q);
     };
@@ -486,19 +471,22 @@ function pfInitPortfolioTextSearch() {
   });
 })();
 
-async function pfAddFromSearch(code, name) {
+async function pfAddFromSearch(code, name, currency = '') {
   document.getElementById('pfDropdown').classList.remove('show');
   document.getElementById('pfAddInput').value = '';
   pfSetAddPanelOpen(false);
   let resolvedCode = String(code || '').trim();
   let resolvedName = String(name || '').trim();
-  try {
-    const r = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}`);
-    const d = await r.json();
-    if (d.stock_code) resolvedCode = d.stock_code;
-    if (d.stock_name) resolvedName = d.stock_name;
-  } catch (e) {
-    console.warn('portfolio code canonicalization failed', e);
+  let resolvedCurrency = String(currency || '').trim().toUpperCase();
+  if (!resolvedCurrency) {
+    try {
+      const r = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}`, { timeoutMs: 5000 });
+      const d = await r.json();
+      if (d.stock_code) resolvedCode = d.stock_code;
+      if (d.stock_name) resolvedName = d.stock_name;
+    } catch (e) {
+      console.warn('portfolio code canonicalization failed', e);
+    }
   }
   const existing = PfStore.items.find(i => i.stock_code === resolvedCode);
   if (existing) {
@@ -507,17 +495,23 @@ async function pfAddFromSearch(code, name) {
   }
   try {
     // Save the canonical code so aliases like KCC cannot create a foreign ticker row.
+    const body = { stock_name: resolvedName, quantity: 1, avg_price: 0 };
+    if (resolvedCurrency) body.currency = resolvedCurrency;
     const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(resolvedCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stock_name: resolvedName, quantity: 1, avg_price: 0 }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
       throw new Error(d.detail || `HTTP ${resp.status}`);
     }
-    PfStore.edit.code = resolvedCode;
-    await loadPortfolio();
+    const saved = await resp.json().catch(() => ({}));
+    pfApplySavedPortfolioItem(saved, resolvedCode, resolvedName, resolvedCurrency);
+    startPortfolioEdit(saved.stock_code || resolvedCode);
+    setTimeout(() => {
+      loadPortfolio({ force: true }).catch(e => reportApiError(e, '포트폴리오 동기화', { silent: true }));
+    }, 0);
   } catch (e) { reportApiError(e, '추가'); }
 }
 

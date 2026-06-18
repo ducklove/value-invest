@@ -29,6 +29,17 @@ async def test_static_foreign_ticker_short_circuits_discovery():
     assert resolved["stock_name"]
 
 
+async def test_berkshire_class_b_alias_resolves_to_yahoo_ticker():
+    with patch.object(foreign, "resolve_foreign_reuters", new=AsyncMock(side_effect=AssertionError("no discovery"))):
+        resolved = await names.resolve_portfolio_name("BRK.B")
+
+    assert resolved == {
+        "stock_code": "BRK-B",
+        "stock_name": "Berkshire Hathaway Inc. Class B",
+        "reuters_code": "BRK-B",
+    }
+
+
 async def test_korean_stock_uses_domestic_resolver():
     resolver = AsyncMock(return_value="삼성전자")
     with patch.object(foreign, "resolve_name", new=resolver):

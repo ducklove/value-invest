@@ -5,7 +5,7 @@
   "description": "jsdom behavior tests for the static/ frontend (gradual replacement of the Python string-presence checks).",
   "type": "module",
   "scripts": {
-    "test": "node --test \"tests/js/*.test.mjs\""
+    "test": "node --test tests/js"
   },
   "devDependencies": {
     "jsdom": "^24.1.0"

@@ -252,6 +252,19 @@ function openIntegration(key, path = '', query = {}) {
 // 중단한다. 호출별로 { timeoutMs: n } 으로 조정(0/null 이면 비활성).
 const API_FETCH_TIMEOUT_MS = 20000;
 
+function _apiTimeoutError(timeoutMs) {
+  const seconds = Math.round(Number(timeoutMs || 0) / 1000);
+  const message = seconds > 0
+    ? `요청 시간이 ${seconds}초를 초과했습니다.`
+    : '요청 시간이 초과되었습니다.';
+  if (typeof DOMException === 'function') {
+    return new DOMException(message, 'TimeoutError');
+  }
+  const err = new Error(message);
+  err.name = 'TimeoutError';
+  return err;
+}
+
 function apiFetch(path, options = {}) {
   const { stream = false, timeoutMs = API_FETCH_TIMEOUT_MS, ...fetchOptions } = options;
   const method = String(fetchOptions.method || 'GET').toUpperCase();
@@ -274,7 +287,7 @@ function apiFetch(path, options = {}) {
     return fetch(buildApiUrl(path), init);
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(_apiTimeoutError(timeoutMs)), timeoutMs);
   init.signal = controller.signal;
   return fetch(buildApiUrl(path), init).finally(() => clearTimeout(timer));
 }

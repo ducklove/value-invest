@@ -44,7 +44,7 @@ function installRecordingFetch(w) {
       call.resolve = resolve;
       if (init.signal) {
         init.signal.addEventListener("abort", () => {
-          reject(Object.assign(new Error("The operation was aborted."), { name: "AbortError" }));
+          reject(init.signal.reason || Object.assign(new Error("The operation was aborted."), { name: "AbortError" }));
         });
       }
     });
@@ -58,16 +58,17 @@ function toastTexts(w) {
   );
 }
 
-test("apiFetch aborts with AbortError after the timeout", async () => {
+test("apiFetch aborts with TimeoutError after the timeout", async () => {
   const w = loadUtils();
   const calls = installRecordingFetch(w);
   await assert.rejects(
     w.apiFetch("/api/portfolio", { timeoutMs: 20 }),
-    (err) => err.name === "AbortError",
+    (err) => err.name === "TimeoutError",
   );
   assert.equal(calls.length, 1);
   assert.ok(calls[0].init.signal, "a timeout signal must be attached");
   assert.equal(calls[0].init.signal.aborted, true);
+  assert.equal(calls[0].init.signal.reason.name, "TimeoutError");
 });
 
 test("apiFetch resolves normally before the timeout and clears the timer", async () => {

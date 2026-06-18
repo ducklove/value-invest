@@ -179,6 +179,36 @@ def test_yfinance_candidates_strip_reuters_suffixes():
     assert foreign._yfinance_candidates("BRK.B") == ["BRK.B", "BRK-B"]
 
 
+def test_foreign_search_normalizes_yahoo_quotes_to_portfolio_items():
+    item = foreign._normalize_yahoo_search_quote({
+        "symbol": "aapl",
+        "shortname": "Apple Inc.",
+        "quoteType": "EQUITY",
+        "exchDisp": "NASDAQ",
+        "currency": "USD",
+    })
+
+    assert item == {
+        "stock_code": "AAPL",
+        "ticker": "AAPL",
+        "stock_name": "Apple Inc.",
+        "exchange": "NASDAQ",
+        "quote_type": "EQUITY",
+        "currency": "USD",
+        "source": "yahoo",
+    }
+    assert foreign._normalize_yahoo_search_quote({"symbol": "^GSPC", "quoteType": "INDEX"}) is None
+    assert foreign._normalize_yahoo_search_quote({"symbol": "EURUSD=X", "quoteType": "CURRENCY"}) is None
+
+
+def test_foreign_search_direct_fallback_uses_yahoo_ticker_format():
+    fallback = foreign._foreign_search_fallback("BRK.B")
+
+    assert fallback["stock_code"] == "BRK-B"
+    assert fallback["currency"] == "USD"
+    assert foreign._foreign_search_fallback("apple") is None
+
+
 @pytest.mark.asyncio
 async def test_kis_foreign_quote_timeout_returns_empty_for_fallback():
     async def slow_quote(*args, **kwargs):
@@ -191,6 +221,20 @@ async def test_kis_foreign_quote_timeout_returns_empty_for_fallback():
         result = await foreign.kis_fetch_foreign_quote("DAX")
 
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_berkshire_class_b_quote_uses_static_yahoo_ticker():
+    fast = AsyncMock(return_value={"price": 12345, "change": 10, "change_pct": 0.1})
+    kis = AsyncMock(side_effect=AssertionError("KIS should not run for BRK.B alias"))
+
+    with patch.object(foreign, "yfinance_fetch_quote_fast", new=fast), \
+         patch.object(foreign, "kis_fetch_foreign_quote", new=kis):
+        result = await foreign.fetch_foreign_quote("BRK.B")
+
+    assert result["price"] == 12345
+    fast.assert_awaited_once_with("BRK-B")
+    kis.assert_not_awaited()
 
 
 @pytest.mark.asyncio

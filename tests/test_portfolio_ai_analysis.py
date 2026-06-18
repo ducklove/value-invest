@@ -263,6 +263,9 @@ async def test_stream_analysis_success_events_and_usage():
     assert (done["input_tokens"], done["output_tokens"], done["cost"]) == (100, 20, 0.01)
     assert done["model"] == "m-bal"
     assert done["model_profile"] == "balanced"
+    assert done["truncated"] is False
+    assert done["finish_reason"] is None
+    assert done["max_tokens"] == ai_analysis.AI_MAX_TOKENS
     assert done["wiki_used"] == 2
     assert done["context_holdings"] == ai_analysis.WIKI_HOLDING_LIMIT
     assert done["context_reports_per_holding"] == ai_analysis.WIKI_ENTRY_LIMIT
@@ -278,6 +281,31 @@ async def test_stream_analysis_success_events_and_usage():
     assert payload["max_tokens"] == ai_analysis.AI_MAX_TOKENS
     assert payload["messages"][0] == {"role": "system", "content": ai_analysis.SYSTEM_PROMPT}
     assert payload["messages"][1] == {"role": "user", "content": "프롬프트"}
+
+
+async def test_stream_analysis_marks_length_finish_as_truncated():
+    resp = _FakeResp(200, lines=[
+        'data: {"choices":[{"delta":{"content":"본문"}}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":100,"completion_tokens":8000,"cost":0.02}}',
+        "data: [DONE]",
+    ])
+    record = AsyncMock()
+    with patch.object(ai_analysis.ai_client, "stream_chat_completion", _fake_stream(resp)), \
+         patch.object(ai_analysis.ai_config, "record_usage", record):
+        events = [e async for e in ai_analysis.stream_analysis(
+            _ctx(), is_disconnected=AsyncMock(return_value=False),
+        )]
+
+    assert events[0] == {"content": "본문"}
+    assert events[1] == {"content": ai_analysis.TRUNCATION_NOTICE}
+    done = events[-1]
+    assert done["done"] is True
+    assert done["truncated"] is True
+    assert done["finish_reason"] == "length"
+    assert done["max_tokens"] == ai_analysis.AI_MAX_TOKENS
+    kwargs = record.await_args.kwargs
+    assert kwargs["ok"] is False
+    assert kwargs["error"] == "finish_reason_length"
 
 
 async def test_stream_analysis_http_error_yields_error_and_done():
