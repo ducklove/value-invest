@@ -245,7 +245,17 @@ def test_admin_split_files_keep_feature_homes():
     assert "function _renderSubsystemSummary(" in observability
     # 데이터 품질 카드: event-summary 의 data_quality(check_summary) 한 행으로 렌더.
     assert "function _renderDataQualitySection(" in observability
-    assert "_renderDataQualitySection(summary.data_quality)" in observability
+    assert "_renderUsersSection(users)" in admin
+    assert "_renderDataQualitySection(summary.data_quality)" in admin
+    assert admin.index("_renderUsersSection(users)") < admin.index("_renderDataQualitySection(summary.data_quality)")
+    assert 'details class="admin-section admin-collapsible" id="httpMetricsSection"' in observability
+    assert 'details class="admin-section admin-collapsible" id="dbStatsSection"' in observability
+    assert 'details class="admin-section admin-collapsible" id="eventsSection"' in observability
+    assert 'details class="admin-section admin-collapsible" id="dataSyncSection"' in linked
+    assert "function _adminPortfolioUrl(" in observability
+    assert "https://192.168.68.67:3691/api/admin/users/" in observability
+    assert ">포트폴리오</a>" in observability
+    assert "내부망 포트폴리오" not in observability
     assert "async function triggerJob(" in observability
     assert "async function runWikiDiag()" in observability
     # 연결 프로젝트 config + 우선주/해외 배당 관리.

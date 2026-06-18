@@ -134,7 +134,10 @@ class AdminUserManagementTests(TempDbMixin):
         with patch("routes.admin.get_current_user", AsyncMock(return_value={"google_sub": "admin", "is_admin": True})):
             out = await admin_route.search_portfolios(_request(), q="삼성", limit=10)
         self.assertEqual(len(out["rows"]), 1)
-        self.assertIn("/api/admin/users/u2/portfolio.html", out["rows"][0]["portfolio_url"])
+        self.assertEqual(
+            out["rows"][0]["portfolio_url"],
+            "https://192.168.68.67:3691/api/admin/users/u2/portfolio.html",
+        )
 
     async def test_internal_portfolio_page_requires_lan_client(self):
         admin_user = {"google_sub": "admin", "email": "admin@example.com", "is_admin": True}

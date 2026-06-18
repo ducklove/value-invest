@@ -31,16 +31,21 @@ function _renderHttpMetricsSection(httpMetrics) {
       </tr>`;
   }).join('');
   return `
-    <div class="admin-section">
-      <h3>HTTP 성능 <span class="admin-sub">느린 요청·에러 / 최근 ${hours}시간 (ms)</span>
-        <button class="admin-btn admin-btn-secondary" onclick="loadAdminView()" style="float:right;">새로고침</button>
-      </h3>
-      <p class="admin-sub" style="margin:0 0 8px;">느린 요청(≥SLOW_REQUEST_MS)과 5xx 만 기록됩니다. 정상·빠른 요청은 집계에 없습니다.</p>
-      <table class="admin-table admin-table-compact">
-        <thead><tr><th>경로</th><th style="text-align:right;">건수</th><th style="text-align:right;">에러</th><th style="text-align:right;">평균</th><th style="text-align:right;">최대</th><th>최근</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">기록된 느린 요청/에러 없음</td></tr>'}</tbody>
-      </table>
-    </div>
+    <details class="admin-section admin-collapsible" id="httpMetricsSection">
+      ${_adminCollapsibleSummary('HTTP 성능', `느린 요청·에러 / 최근 ${hours}시간 (ms)`, `${endpoints.length}개 경로`)}
+      <div class="admin-collapsible-body">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+          <p class="admin-sub" style="margin:0;">느린 요청(≥SLOW_REQUEST_MS)과 5xx 만 기록됩니다. 정상·빠른 요청은 집계에 없습니다.</p>
+          <button class="admin-btn admin-btn-secondary" onclick="loadAdminView()" type="button">새로고침</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table-compact">
+            <thead><tr><th>경로</th><th style="text-align:right;">건수</th><th style="text-align:right;">에러</th><th style="text-align:right;">평균</th><th style="text-align:right;">최대</th><th>최근</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">기록된 느린 요청/에러 없음</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </details>
   `;
 }
 
@@ -333,7 +338,7 @@ function _renderAdminUserRows(users) {
       ? `<img class="admin-avatar" src="${_esc(u.picture)}" alt="">`
       : `<div class="admin-avatar-fallback">${_esc(_userInitial(u))}</div>`;
     const portfolioCount = Number(u.portfolio_count || 0);
-    const portfolioUrl = `/api/admin/users/${subArg}/portfolio.html`;
+    const portfolioUrl = _adminPortfolioUrl(subArg);
     return `
     <tr>
       <td>
@@ -354,7 +359,7 @@ function _renderAdminUserRows(users) {
       </td>
       <td>
         <span class="admin-badge">${portfolioCount.toLocaleString()}종목</span>
-        <a class="admin-link-button" href="${portfolioUrl}" target="_blank" rel="noopener" style="margin-left:6px;">내부망 포트폴리오</a>
+        <a class="admin-link-button" href="${portfolioUrl}" target="_blank" rel="noopener" style="margin-left:6px;">포트폴리오</a>
       </td>
       <td>${u.last_login_at ? _esc(u.last_login_at.slice(0, 16).replace('T', ' ')) : '-'}</td>
       <td>${u.created_at ? _esc(u.created_at.slice(0, 10)) : '-'}</td>
@@ -369,6 +374,10 @@ function _renderAdminUserRows(users) {
 
 function _userInitial(u) {
   return String(u?.name || u?.email || '?').trim().slice(0, 1).toUpperCase() || '?';
+}
+
+function _adminPortfolioUrl(encodedSub) {
+  return `https://192.168.68.67:3691/api/admin/users/${encodedSub}/portfolio.html`;
 }
 
 function filterAdminUsers() {
@@ -510,7 +519,7 @@ function _renderPortfolioSearchResult(rows, query) {
       <td>${_esc(r.name)}<div class="admin-sub">${_esc(r.email)}</div></td>
       <td class="admin-num">${Number(r.quantity || 0).toLocaleString()}</td>
       <td class="admin-num">${Number(r.avg_price || 0).toLocaleString()} ${_esc(r.currency || '')}</td>
-      <td><a class="admin-link-button" href="${_esc(r.portfolio_url || '#')}" target="_blank" rel="noopener">내부망 포트폴리오</a></td>
+      <td><a class="admin-link-button" href="${_esc(r.portfolio_url || '#')}" target="_blank" rel="noopener">포트폴리오</a></td>
     </tr>
   `).join('');
   return `
@@ -532,13 +541,17 @@ function _renderDbSection(db) {
   const tables = Object.entries(db.tables || {}).sort((a, b) => b[1] - a[1]);
   const rows = tables.map(([name, count]) => `<tr><td>${name}</td><td class="admin-num">${count.toLocaleString()}</td></tr>`).join('');
   return `
-    <div class="admin-section">
-      <h3>데이터베이스 <span class="admin-sub">${_fmtBytes(db.db_size_bytes || 0)}</span></h3>
-      <table class="admin-table admin-table-compact">
-        <thead><tr><th>테이블</th><th>행 수</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
+    <details class="admin-section admin-collapsible" id="dbStatsSection">
+      ${_adminCollapsibleSummary('데이터베이스', _fmtBytes(db.db_size_bytes || 0), `${tables.length}개 테이블`)}
+      <div class="admin-collapsible-body">
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table-compact">
+            <thead><tr><th>테이블</th><th>행 수</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </details>
   `;
 }
 
@@ -691,7 +704,6 @@ function _renderSubsystemSummary(summary) {
       <h3>서브시스템 상태 <span class="admin-sub">최근 24시간</span></h3>
       <div class="admin-cards">${tiles}</div>
     </div>
-    ${_renderDataQualitySection(summary.data_quality)}
   `;
 }
 
@@ -803,15 +815,20 @@ function _renderEventsSection(events) {
     `;
   }).join('');
   return `
-    <div class="admin-section">
-      <h3>최근 이벤트 <span class="admin-sub">${events.length}건</span>
-        <button class="admin-btn admin-btn-secondary" onclick="loadAdminView()" style="float:right;">새로고침</button>
-      </h3>
-      <table class="admin-table admin-table-compact">
-        <thead><tr><th>시각</th><th>레벨</th><th>소스</th><th>종류</th><th>종목</th><th>상세</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">이벤트 없음</td></tr>'}</tbody>
-      </table>
-    </div>
+    <details class="admin-section admin-collapsible" id="eventsSection">
+      ${_adminCollapsibleSummary('최근 이벤트', '시스템 이벤트 피드', `${events.length}건`)}
+      <div class="admin-collapsible-body">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+          <button class="admin-btn admin-btn-secondary" onclick="loadAdminView()" type="button">새로고침</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table-compact">
+            <thead><tr><th>시각</th><th>레벨</th><th>소스</th><th>종류</th><th>종목</th><th>상세</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">이벤트 없음</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </details>
   `;
 }
 
@@ -822,15 +839,17 @@ function _renderEventsSection(events) {
 
 function _renderDiagSection() {
   return `
-    <div class="admin-section">
-      <h3>위키 진단 <span class="admin-sub">종목별 파이프라인 funnel</span></h3>
-      <form id="diagWikiForm" onsubmit="event.preventDefault(); runWikiDiag();" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-        <input id="diagWikiCode" type="text" placeholder="종목코드 (예: 051910)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text-primary);font-family:monospace;width:140px;">
-        <button class="admin-btn" type="submit">진단 실행</button>
-        <span class="admin-sub">Naver 응답·화이트리스트·DB 상태를 한 번에 확인합니다.</span>
-      </form>
-      <div id="diagWikiResult"></div>
-    </div>
+    <details class="admin-section admin-collapsible" id="diagWikiSection">
+      ${_adminCollapsibleSummary('위키 진단', '종목별 파이프라인 funnel')}
+      <div class="admin-collapsible-body">
+        <form id="diagWikiForm" onsubmit="event.preventDefault(); runWikiDiag();" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+          <input id="diagWikiCode" type="text" placeholder="종목코드 (예: 051910)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text-primary);font-family:monospace;width:140px;">
+          <button class="admin-btn" type="submit">진단 실행</button>
+          <span class="admin-sub">Naver 응답·화이트리스트·DB 상태를 한 번에 확인합니다.</span>
+        </form>
+        <div id="diagWikiResult"></div>
+      </div>
+    </details>
   `;
 }
 

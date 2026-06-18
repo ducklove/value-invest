@@ -69,12 +69,11 @@ function _renderAdmin(deploy, batch, server, db, users, summary, events, httpMet
         ${_renderBatchSection(batch)}
         ${_renderSubsystemSummary(summary)}
       </div>
-      <div class="admin-grid-two">
-        ${_renderHttpMetricsSection(httpMetrics)}
-        ${_renderDbSection(db)}
-      </div>
-      ${_renderEventsSection(events)}
       ${_renderUsersSection(users)}
+      ${_renderDataQualitySection(summary.data_quality)}
+      ${_renderHttpMetricsSection(httpMetrics)}
+      ${_renderDbSection(db)}
+      ${_renderEventsSection(events)}
       ${_renderDataSyncSection()}
       ${_renderAiConfigSection(aiConfig)}
       ${_renderLinkedProjectConfigSection(linkedConfigs)}
@@ -180,6 +179,21 @@ function _renderKpi(label, value, note, progress, id) {
   `;
 }
 
+function _adminCollapsibleSummary(title, subtitle = '', count = '') {
+  return `
+    <summary class="admin-collapsible-summary">
+      <span>
+        <span class="admin-collapsible-title">${_esc(title)}</span>
+        ${subtitle ? `<span class="admin-sub">${_esc(subtitle)}</span>` : ''}
+      </span>
+      <span class="admin-collapsible-meta">
+        ${count ? `<span class="admin-badge">${_esc(count)}</span>` : ''}
+        <span class="admin-collapsible-icon" aria-hidden="true"></span>
+      </span>
+    </summary>
+  `;
+}
+
 function toggleAdminTheme() {
   const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
@@ -197,10 +211,12 @@ try {
 function _renderAiConfigSection(config) {
   if (!config) {
     return `
-      <div class="admin-section">
-        <h3>AI 운영 관리</h3>
-        <div class="admin-sub admin-status-fail">AI 설정을 불러오지 못했습니다.</div>
-      </div>
+      <details class="admin-section admin-collapsible" id="aiConfigSection">
+        ${_adminCollapsibleSummary('AI 운영 관리', '키·기능별 모델·사용량')}
+        <div class="admin-collapsible-body">
+          <div class="admin-sub admin-status-fail">AI 설정을 불러오지 못했습니다.</div>
+        </div>
+      </details>
     `;
   }
   const key = config.openrouter || {};
@@ -227,42 +243,48 @@ function _renderAiConfigSection(config) {
     </tr>
   `).join('');
   return `
-    <div class="admin-section" id="aiConfigSection">
-      <h3>AI 운영 관리 <span class="admin-sub">키·기능별 모델·사용량</span></h3>
-      <div id="aiConfigResult" class="admin-sub" style="margin-bottom:8px;"></div>
-      <div class="admin-cards">
-        <div class="admin-card">
-          <div class="admin-card-label">OpenRouter API Key</div>
-          <div class="admin-card-value">${keyStatus}</div>
-          <div class="admin-sub">${_esc(key.updated_at || '')} ${_esc(key.updated_by || '')}</div>
+    <details class="admin-section admin-collapsible" id="aiConfigSection">
+      ${_adminCollapsibleSummary('AI 운영 관리', '키·기능별 모델·사용량', `${config.features?.length || 0}개 기능`)}
+      <div class="admin-collapsible-body">
+        <div id="aiConfigResult" class="admin-sub" style="margin-bottom:8px;"></div>
+        <div class="admin-cards">
+          <div class="admin-card">
+            <div class="admin-card-label">OpenRouter API Key</div>
+            <div class="admin-card-value">${keyStatus}</div>
+            <div class="admin-sub">${_esc(key.updated_at || '')} ${_esc(key.updated_by || '')}</div>
+          </div>
+          <div class="admin-card">
+            <div class="admin-card-label">최근 ${config.usage?.days || 30}일 AI 비용</div>
+            <div class="admin-card-value">$${_sumAiCost(config).toFixed(4)}</div>
+          </div>
         </div>
-        <div class="admin-card">
-          <div class="admin-card-label">최근 ${config.usage?.days || 30}일 AI 비용</div>
-          <div class="admin-card-value">$${_sumAiCost(config).toFixed(4)}</div>
+        <div style="display:flex;gap:8px;align-items:center;margin:12px 0;flex-wrap:wrap;">
+          <input id="aiOpenRouterKey" type="password" placeholder="새 OpenRouter API key"
+                 style="${_adminInputStyle()}min-width:320px;">
+          <button class="admin-btn" onclick="saveAiKey()">키 저장/교체</button>
+          <button class="admin-btn admin-btn-secondary" onclick="deleteAiKey()">DB 저장 키 삭제</button>
+          <span class="admin-sub">화면에는 마스킹만 표시됩니다. env/keys.txt 키는 삭제하지 않습니다.</span>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table-compact">
+            <thead><tr><th>기능</th><th>사용 모델</th></tr></thead>
+            <tbody>${featureRows}</tbody>
+          </table>
+        </div>
+        <div style="margin-top:8px;">
+          <button class="admin-btn" onclick="saveAiModels()">기능별 모델 저장</button>
+        </div>
+        <div style="margin-top:16px;">
+          <strong>사용량</strong>
+          <div class="admin-table-wrap" style="margin-top:4px;">
+            <table class="admin-table admin-table-compact">
+              <thead><tr><th>기능</th><th>모델</th><th>호출</th><th>입력/출력 토큰</th><th>비용</th><th>평균 지연</th><th>오류</th></tr></thead>
+              <tbody>${usageRows || '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">아직 기록된 AI 사용량이 없습니다.</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;margin:12px 0;flex-wrap:wrap;">
-        <input id="aiOpenRouterKey" type="password" placeholder="새 OpenRouter API key"
-               style="${_adminInputStyle()}min-width:320px;">
-        <button class="admin-btn" onclick="saveAiKey()">키 저장/교체</button>
-        <button class="admin-btn admin-btn-secondary" onclick="deleteAiKey()">DB 저장 키 삭제</button>
-        <span class="admin-sub">화면에는 마스킹만 표시됩니다. env/keys.txt 키는 삭제하지 않습니다.</span>
-      </div>
-      <table class="admin-table admin-table-compact">
-        <thead><tr><th>기능</th><th>사용 모델</th></tr></thead>
-        <tbody>${featureRows}</tbody>
-      </table>
-      <div style="margin-top:8px;">
-        <button class="admin-btn" onclick="saveAiModels()">기능별 모델 저장</button>
-      </div>
-      <div style="margin-top:16px;">
-        <strong>사용량</strong>
-        <table class="admin-table admin-table-compact" style="margin-top:4px;">
-          <thead><tr><th>기능</th><th>모델</th><th>호출</th><th>입력/출력 토큰</th><th>비용</th><th>평균 지연</th><th>오류</th></tr></thead>
-          <tbody>${usageRows || '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">아직 기록된 AI 사용량이 없습니다.</td></tr>'}</tbody>
-        </table>
-      </div>
-    </div>
+    </details>
   `;
 }
 

@@ -15,21 +15,23 @@ let _preferredDividendRows = [];
 
 function _renderDataSyncSection() {
   return `
-    <div class="admin-section">
-      <h3>외부 데이터 동기화 <span class="admin-sub">관리자 수동 반영</span></h3>
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-        <button class="admin-btn" id="refreshPrefDivBtn" onclick="refreshPreferredDividends()">우선주 배당 시트 새로고침</button>
-        <span class="admin-sub">Google Sheet Data!AI 컬럼</span>
+    <details class="admin-section admin-collapsible" id="dataSyncSection">
+      ${_adminCollapsibleSummary('외부 데이터 동기화', '관리자 수동 반영')}
+      <div class="admin-collapsible-body">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+          <button class="admin-btn" id="refreshPrefDivBtn" onclick="refreshPreferredDividends()">우선주 배당 시트 새로고침</button>
+          <span class="admin-sub">Google Sheet Data!AI 컬럼</span>
+        </div>
+        <div id="prefDivResult"></div>
+        <div id="prefDivCoverageSection" style="margin-top:16px;"></div>
+        <div style="display:flex;gap:10px;align-items:center;margin:16px 0 8px;flex-wrap:wrap;">
+          <button class="admin-btn" id="refreshFgnDivBtn" onclick="refreshForeignDividends()">해외 배당 yfinance 새로고침</button>
+          <span class="admin-sub">trailingAnnualDividendRate → KRW 환산. 수동 입력(아래) 은 덮어쓰지 않음.</span>
+        </div>
+        <div id="fgnDivResult"></div>
+        <div id="fgnDivManualSection" style="margin-top:16px;"></div>
       </div>
-      <div id="prefDivResult"></div>
-      <div id="prefDivCoverageSection" style="margin-top:16px;"></div>
-      <div style="display:flex;gap:10px;align-items:center;margin:16px 0 8px;flex-wrap:wrap;">
-        <button class="admin-btn" id="refreshFgnDivBtn" onclick="refreshForeignDividends()">해외 배당 yfinance 새로고침</button>
-        <span class="admin-sub">trailingAnnualDividendRate → KRW 환산. 수동 입력(아래) 은 덮어쓰지 않음.</span>
-      </div>
-      <div id="fgnDivResult"></div>
-      <div id="fgnDivManualSection" style="margin-top:16px;"></div>
-    </div>
+    </details>
   `;
 }
 
@@ -486,13 +488,15 @@ function _renderProjectConfigDrift(project) {
 function _renderLinkedProjectConfigSection(configs) {
   const map = _linkedProjectConfigMap(configs);
   return `
-    <div class="admin-section" id="linkedProjectConfigSection">
-      <h3>서브프로젝트 설정 관리 <span class="admin-sub">config.json 원천 목록 편집</span></h3>
-      <div id="linkedConfigResult" class="admin-sub" style="margin-bottom:8px;"></div>
-      ${_renderPreferredConfigManager(map.preferredSpread)}
-      ${_renderHoldingConfigManager(map.holdingValue)}
-      ${_renderGoldConfigManager(map.goldGap)}
-    </div>
+    <details class="admin-section admin-collapsible" id="linkedProjectConfigSection">
+      ${_adminCollapsibleSummary('서브프로젝트 설정 관리', 'config.json 원천 목록 편집', `${configs.length}개 프로젝트`)}
+      <div class="admin-collapsible-body">
+        <div id="linkedConfigResult" class="admin-sub" style="margin-bottom:8px;"></div>
+        ${_renderPreferredConfigManager(map.preferredSpread)}
+        ${_renderHoldingConfigManager(map.holdingValue)}
+        ${_renderGoldConfigManager(map.goldGap)}
+      </div>
+    </details>
   `;
 }
 

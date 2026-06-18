@@ -9,7 +9,7 @@ import os
 import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
@@ -28,6 +28,10 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 _STANDALONE_MODE = False  # Set True when running as separate admin server
+_INTERNAL_PORTFOLIO_BASE_URL = os.getenv(
+    "ADMIN_INTERNAL_PORTFOLIO_BASE_URL",
+    "https://192.168.68.67:3691",
+).rstrip("/")
 
 
 async def _require_admin(request: Request) -> dict:
@@ -167,6 +171,11 @@ def _is_internal_network_request(request: Request) -> bool:
     except ValueError:
         return False
     return any(ip in network for network in _INTERNAL_NETWORKS)
+
+
+def _admin_portfolio_url(google_sub: str) -> str:
+    encoded_sub = quote(str(google_sub or ""), safe="")
+    return f"{_INTERNAL_PORTFOLIO_BASE_URL}/api/admin/users/{encoded_sub}/portfolio.html"
 
 
 async def _require_internal_admin(request: Request) -> dict:
@@ -548,7 +557,7 @@ async def search_portfolios(
     await _require_admin(request)
     rows = await users_repo.search_user_portfolios(q, limit=limit)
     for row in rows:
-        row["portfolio_url"] = f"/api/admin/users/{row['google_sub']}/portfolio.html"
+        row["portfolio_url"] = _admin_portfolio_url(row["google_sub"])
     return {"query": q, "rows": rows}
 
 
