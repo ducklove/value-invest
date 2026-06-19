@@ -214,7 +214,7 @@ async function renderTreemap() {
     const q = item.quote || {};
     const price = quotePriceOrNull(q);
     const qty = item.quantity;
-    const mv = price !== null ? qty * price : qty * item.avg_price;
+    const mv = price !== null ? qty * price : qty * pfAvgPriceKrw(item);
     if (mv <= 0) return;
     const changePct = price !== null ? (q.change_pct ?? null) : null;
     groups[gn].push({

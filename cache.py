@@ -150,6 +150,7 @@ async def init_db():
             stock_name TEXT NOT NULL,
             quantity INTEGER NOT NULL DEFAULT 0,
             avg_price REAL NOT NULL DEFAULT 0,
+            avg_price_currency TEXT NOT NULL DEFAULT 'KRW',
             sort_order INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -663,6 +664,7 @@ async def init_db():
     await _ensure_column(db, "user_stock_preferences", "sort_order", "INTEGER")
     await _ensure_column(db, "user_stock_preferences", "starred_order", "INTEGER")
     await _ensure_column(db, "user_portfolio", "currency", "TEXT DEFAULT 'KRW'")
+    await _ensure_column(db, "user_portfolio", "avg_price_currency", "TEXT NOT NULL DEFAULT 'KRW'")
     await _ensure_column(db, "user_portfolio", "group_name", "TEXT")
     await _ensure_column(db, "user_portfolio", "benchmark_code", "TEXT")
     # 목표가 (수동 override). NULL + target_price_disabled=0 → 자동 계산
@@ -673,6 +675,22 @@ async def init_db():
     await _ensure_column(db, "user_portfolio", "target_price_disabled", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "user_portfolio", "target_price_formula", "TEXT")
     await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(db, "users", "password_hash", "TEXT")
+    await _ensure_column(db, "users", "password_updated_at", "TEXT")
+    await _ensure_column(db, "users", "google_identity_sub", "TEXT")
+    await db.execute(
+        """
+        UPDATE users
+        SET google_identity_sub = google_sub
+        WHERE google_identity_sub IS NULL
+          AND google_sub NOT LIKE 'local:%'
+        """
+    )
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_identity_sub "
+        "ON users(google_identity_sub) WHERE google_identity_sub IS NOT NULL"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users(lower(email))")
     # Per-holding edge-trigger state for blanket (all_stocks) alert rules.
     await _ensure_column(db, "portfolio_alerts", "state_json", "TEXT NOT NULL DEFAULT '{}'")
     # 중요 알림 표시 — 발송 시 강조 헤더로 더 눈에 띄게 보낸다.

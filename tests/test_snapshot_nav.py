@@ -49,6 +49,40 @@ async def test_fetch_total_value_forces_rest_for_korean_stocks():
 
 
 @pytest.mark.asyncio
+async def test_fetch_total_value_converts_avg_price_currency_to_krw():
+    today = snapshot_nav._today_kst().isoformat()
+    with patch.object(
+        snapshot_nav.portfolio_repo,
+        "get_portfolio",
+        new=AsyncMock(return_value=[
+            {"stock_code": "AAPL", "quantity": 2, "avg_price": 100, "avg_price_currency": "USD", "group_name": "US"},
+        ]),
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "get_stock_snapshots_before_date",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "is_korean_stock",
+        return_value=False,
+    ), patch.object(
+        snapshot_nav.portfolio_quotes,
+        "fetch_quote",
+        new=AsyncMock(return_value={"price": 150000}),
+    ), patch.object(
+        snapshot_nav.fx,
+        "price_to_krw",
+        new=AsyncMock(return_value=140000),
+    ) as price_to_krw:
+        total_value, total_invested, per_stock = await snapshot_nav._fetch_total_value("u1", today)
+
+    price_to_krw.assert_awaited_once_with(100, "USD")
+    assert total_value == 300000
+    assert total_invested == 280000
+    assert per_stock == [{"stock_code": "AAPL", "market_value": 300000, "group_name": "US"}]
+
+
+@pytest.mark.asyncio
 async def test_fetch_total_value_uses_historical_close_for_past_korean_snapshot():
     with patch.object(
         snapshot_nav.portfolio_repo,

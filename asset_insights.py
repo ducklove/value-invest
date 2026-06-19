@@ -112,11 +112,12 @@ def calculate_position(item: dict[str, Any], quote: dict[str, Any] | None) -> di
     quote = quote or {}
     qty = safe_float(item.get("quantity")) or 0.0
     avg_price = safe_float(item.get("avg_price")) or 0.0
+    avg_price_krw = safe_float(item.get("avg_price_krw")) or avg_price
     current_price = safe_float(quote.get("price"))
     change = safe_float(quote.get("change"))
     change_pct = safe_float(quote.get("change_pct"))
 
-    invested = qty * avg_price
+    invested = qty * avg_price_krw
     market_value = qty * current_price if current_price is not None else None
     pnl = market_value - invested if market_value is not None else None
     return_pct = percent_change(market_value, invested) if invested else None
@@ -125,6 +126,8 @@ def calculate_position(item: dict[str, Any], quote: dict[str, Any] | None) -> di
     return {
         "quantity": qty,
         "avgPrice": avg_price,
+        "avgPriceKrw": avg_price_krw,
+        "avgPriceCurrency": item.get("avg_price_currency") or "KRW",
         "currentPrice": current_price,
         "invested": round(invested, 2),
         "marketValue": round(market_value, 2) if market_value is not None else None,

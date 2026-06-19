@@ -70,11 +70,13 @@ function trackEvent(name, params = {}) {
       <div id="googleSignInButton"></div>
       <a class="auth-login-link" id="authLoginLink" href="https://cantabile.tplinkdns.com:3691/login">로그인 페이지 열기</a>
       <div class="auth-user" id="authUser" style="display:none;">
-        <img class="auth-avatar" id="authAvatar" alt="프로필">
-        <div class="auth-user-copy">
-          <div class="auth-user-name" id="authUserName"></div>
-          <div class="auth-user-email" id="authUserEmail"></div>
-        </div>
+        <button class="auth-user-main" id="authUserProfileBtn" type="button" onclick="openProfileModal()" title="프로필 열기">
+          <img class="auth-avatar" id="authAvatar" alt="프로필">
+          <span class="auth-user-copy">
+            <span class="auth-user-name" id="authUserName"></span>
+            <span class="auth-user-email" id="authUserEmail"></span>
+          </span>
+        </button>
         <button class="auth-logout" id="logoutBtn" type="button" onclick="logout()">로그아웃</button>
       </div>
     </div>
@@ -102,10 +104,10 @@ function trackEvent(name, params = {}) {
       <button class="nav-btn" data-view="nps" onclick="switchView('nps')">국민연금</button>
     </nav>
     <div class="wiki-stats" id="wikiStats" title="LLM 위키 누적 수집량"></div>
-    <div class="mobile-auth-status" id="mobileAuthStatus">
+    <div class="mobile-auth-status" id="mobileAuthStatus" role="button" tabindex="0" onclick="openProfileModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProfileModal();}">
       <img class="mobile-auth-avatar" id="mobileAuthAvatar" alt="">
       <span class="mobile-auth-name" id="mobileAuthName"></span>
-      <button class="mobile-auth-logout" onclick="logout()">로그아웃</button>
+      <button class="mobile-auth-logout" onclick="event.stopPropagation(); logout()">로그아웃</button>
     </div>
     <a class="mobile-login" id="mobileLoginBtn" href="#" style="display:none;">로그인</a>
     <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환">🌓</button>
@@ -624,6 +626,42 @@ function trackEvent(name, params = {}) {
     </div>
   </div>
 
+</div>
+
+<div class="profile-modal-overlay" id="profileModal" style="display:none;" onclick="if(event.target===this)closeProfileModal()" role="dialog" aria-modal="true" aria-labelledby="profileModalTitle">
+  <div class="profile-modal">
+    <div class="profile-modal-header">
+      <h3 id="profileModalTitle">프로필</h3>
+      <button class="profile-modal-close" type="button" onclick="closeProfileModal()" aria-label="닫기">&times;</button>
+    </div>
+    <div class="profile-modal-body">
+      <div class="profile-head">
+        <img class="profile-avatar" id="profileAvatar" alt="프로필">
+        <div class="profile-copy">
+          <strong id="profileName"></strong>
+          <span id="profileEmail"></span>
+          <div class="profile-badges">
+            <span class="profile-badge" id="profileGoogleBadge">Google 연결</span>
+            <span class="profile-badge" id="profilePasswordBadge">ID/PW 미등록</span>
+          </div>
+        </div>
+      </div>
+      <form class="profile-password-form" id="profilePasswordForm" onsubmit="saveProfilePassword(event)">
+        <div class="profile-form-title" id="profilePasswordTitle">비밀번호 등록</div>
+        <label id="profileCurrentPasswordGroup">현재 비밀번호
+          <input id="profileCurrentPassword" type="password" autocomplete="current-password">
+        </label>
+        <label>새 비밀번호
+          <input id="profileNewPassword" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <label>새 비밀번호 확인
+          <input id="profileConfirmPassword" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <button class="profile-save-btn" id="profilePasswordSaveBtn" type="submit">저장</button>
+        <div class="profile-status" id="profilePasswordStatus" aria-live="polite"></div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <nav class="mobile-tabbar" id="mobileTabbar" aria-label="주요 메뉴">

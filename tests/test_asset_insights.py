@@ -26,6 +26,19 @@ def test_classify_asset_treats_alphanumeric_krx_etf_as_domestic():
     assert asset_insights.classify_asset("0074K0", "KoAct K수출핵심기업TOP30액티브", "KRW")["assetClass"] == "korean_stock"
 
 
+def test_calculate_position_uses_krw_avg_price_basis():
+    position = asset_insights.calculate_position(
+        {"quantity": 2, "avg_price": 100, "avg_price_currency": "USD", "avg_price_krw": 140000},
+        {"price": 150000, "change": 1000, "change_pct": 0.67},
+    )
+
+    assert position["avgPrice"] == 100
+    assert position["avgPriceKrw"] == 140000
+    assert position["avgPriceCurrency"] == "USD"
+    assert position["invested"] == 280000
+    assert position["marketValue"] == 300000
+
+
 def test_calculate_history_metrics_returns_risk_and_window_stats():
     values = list(range(100, 400))
     metrics = asset_insights.calculate_history_metrics(_rows(values))

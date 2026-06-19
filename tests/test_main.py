@@ -261,6 +261,37 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response, suggestions)
         search.assert_awaited_once_with("apple", limit=5)
 
+    async def test_portfolio_save_foreign_avg_price_currency_returns_krw_basis(self):
+        request = _request_with_headers("/api/portfolio/AAPL")
+        saver = AsyncMock(return_value={
+            "stock_code": "AAPL",
+            "stock_name": "Apple Inc.",
+            "quantity": 2,
+            "avg_price": 100,
+            "avg_price_currency": "USD",
+            "currency": "USD",
+        })
+
+        async def annotate(items):
+            items[0]["avg_price_krw"] = 140000
+            return items
+
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("services.portfolio.foreign.resolve_domestic_code_alias", new=AsyncMock(return_value=None)), \
+             patch("routes.portfolio.fx.price_to_krw", new=AsyncMock(return_value=140000)), \
+             patch("routes.portfolio.fx.annotate_avg_price_krw", new=AsyncMock(side_effect=annotate)), \
+             patch("repositories.portfolio.save_portfolio_item", new=saver), \
+             patch("repositories.foreign_dividends.get_foreign_dividend", new=AsyncMock(return_value={"dps_krw": 0})):
+            response = await portfolio.save_portfolio_item(
+                "AAPL",
+                request,
+                {"stock_name": "Apple Inc.", "quantity": 2, "avg_price": 100, "avg_price_currency": "USD"},
+            )
+
+        self.assertEqual(response["avg_price_currency"], "USD")
+        self.assertEqual(response["avg_price_krw"], 140000)
+        self.assertEqual(saver.await_args.kwargs["avg_price_currency"], "USD")
+
     def test_portfolio_today_baseline_resets_at_22(self):
         self.assertEqual(
             portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 21, 59, 59)),

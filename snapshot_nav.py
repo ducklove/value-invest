@@ -11,6 +11,7 @@ from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from repositories import user_settings as user_settings_repo
+from services.portfolio import fx
 from services.portfolio import runtime_quotes as portfolio_quotes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -115,7 +116,8 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
     for item in items:
         qty = item["quantity"]
         avg_price = item["avg_price"]
-        total_invested += qty * avg_price
+        avg_price_krw = await fx.price_to_krw(avg_price, item.get("avg_price_currency"))
+        total_invested += qty * avg_price_krw
         try:
             if portfolio_quotes.is_korean_stock(item["stock_code"]):
                 if date.fromisoformat(snap_date) < _today_kst():

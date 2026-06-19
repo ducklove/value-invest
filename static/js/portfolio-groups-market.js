@@ -103,7 +103,7 @@ function renderGroupModalBody() {
     const price = quotePriceOrNull(q);
     const change = price !== null ? (q.change ?? 0) : 0;
     const qty = i.quantity;
-    const avgPrice = i.avg_price;
+    const avgPrice = pfAvgPriceKrw(i);
     s.cnt++;
     s.invested += qty * avgPrice;
     if (price !== null) {

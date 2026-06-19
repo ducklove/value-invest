@@ -80,6 +80,9 @@ def serialize_user(user: dict | None) -> dict | None:
         "name": user["name"],
         "picture": user.get("picture") or "",
         "email_verified": bool(user.get("email_verified")),
+        "password_set": bool(user.get("password_set") or user.get("password_hash")),
+        "google_linked": bool(user.get("google_identity_sub"))
+            or (not str(user.get("google_sub") or "").startswith("local:")),
     }
     if user.get("is_admin"):
         result["is_admin"] = True

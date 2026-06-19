@@ -142,6 +142,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   const editRow = _pfFindEditRow(stockCode, row);
   const qtyEl = editRow?.querySelector('.js-pf-edit-qty') || document.getElementById('pfEditQty');
   const priceEl = editRow?.querySelector('.js-pf-edit-price') || document.getElementById('pfEditPrice');
+  const priceCurrencyEl = editRow?.querySelector('.js-pf-edit-price-currency') || document.getElementById('pfEditPriceCurrency');
   if (!editRow || !qtyEl || !priceEl) {
     showToast('편집 행을 찾지 못했습니다. 다시 수정해 주세요.');
     return;
@@ -163,7 +164,8 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   // 는 YYYY-MM-DD 또는 빈 문자열을 돌려주므로 그대로 전달.
   const createdAtEl = editRow.querySelector('.js-pf-edit-created-at') || document.getElementById('pfEditCreatedAt');
   const createdAt = createdAtEl ? createdAtEl.value.trim() : '';
-  const body = { stock_name: stockName, quantity: qty, avg_price: price };
+  const avgPriceCurrency = priceCurrencyEl ? pfAvgPriceCurrency({ avg_price_currency: priceCurrencyEl.value }) : (existingItem?.avg_price_currency || 'KRW');
+  const body = { stock_name: stockName, quantity: qty, avg_price: price, avg_price_currency: avgPriceCurrency };
   if (createdAt) body.created_at = createdAt;
   // 목표가 input — 기존 목표가/수식이 있던 값을 비우면 "표시 안 함"
   // 으로 저장한다. 처음부터 자동 목표가였던 빈 input 은 수량/매입가
@@ -216,6 +218,8 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     if (item) {
       item.quantity = qty;
       item.avg_price = price;
+      item.avg_price_currency = data.avg_price_currency || avgPriceCurrency;
+      item.avg_price_krw = Number.isFinite(Number(data.avg_price_krw)) ? Number(data.avg_price_krw) : pfAvgPriceKrw(item);
       item.stock_name = stockName;
       // Server may have normalized or kept created_at — trust its echo.
       if (data.created_at) item.created_at = data.created_at;
@@ -601,7 +605,7 @@ function _targetFormulaUses(item, variableName) {
   return String(item?.target_price_formula || '').includes(variableName);
 }
 
-function _targetFormulaVariables(item, allItems) {
+let _targetFormulaVariables = function(item, allItems) {
   const metrics = item.target_metrics || {};
   const numberOrNull = (v) => {
     if (v === null || v === undefined || v === '') return null;
@@ -616,7 +620,25 @@ function _targetFormulaVariables(item, allItems) {
     '본주가격': _isPreferredStock(item.stock_code) ? _preferredCommonPriceForItem(item, allItems) : null,
     '매입가': numberOrNull(item.avgPrice ?? item.avg_price),
   };
-}
+};
+
+_targetFormulaVariables = function(item, allItems) {
+  const metrics = item.target_metrics || {};
+  const numberOrNull = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const variables = {
+    BPS: numberOrNull(metrics.bps),
+    EPS: numberOrNull(metrics.eps),
+    DPS: numberOrNull(metrics.dps ?? item.trailingDps),
+  };
+  variables['\ubcf4\uc720\uc9c0\ubd84'] = _holdingValueForItem(item, allItems);
+  variables['\ubcf8\uc8fc\uac00\uaca9'] = _isPreferredStock(item.stock_code) ? _preferredCommonPriceForItem(item, allItems) : null;
+  variables['\ub9e4\uc785\uac00'] = numberOrNull(item.avgPriceKrw ?? item.avg_price_krw ?? item.avg_price);
+  return variables;
+};
 
 function _evaluateTargetFormula(formula, variables) {
   const text = String(formula || '').trim();
@@ -709,14 +731,14 @@ function _computeTargetPrice(item, allItems) {
   if (item.target_price != null) return Number(item.target_price);
 
   if (_isPreferredStock(code)) {
-    return _preferredCommonPriceForItem(item, allItems) ?? item.avg_price * 1.3;
+    return _preferredCommonPriceForItem(item, allItems) ?? pfAvgPriceKrw(item) * 1.3;
   }
 
   if (_HOLDING_META[code]) {
-    return _holdingValueForItem(item, allItems) ?? item.avg_price * 1.3;
+    return _holdingValueForItem(item, allItems) ?? pfAvgPriceKrw(item) * 1.3;
   }
 
-  return item.avg_price * 1.3;
+  return pfAvgPriceKrw(item) * 1.3;
 }
 
 function _targetPriceSource(item) {

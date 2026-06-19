@@ -20,6 +20,7 @@ from deps import get_current_user
 from services import stock_quotes
 from services.portfolio import ai_analysis
 from services.portfolio import foreign
+from services.portfolio import fx
 from services.portfolio import insights
 from services.portfolio import quote_service
 from services.portfolio.identifiers import (
@@ -219,6 +220,7 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
     if not item:
         raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
 
+    await fx.annotate_avg_price_krw([item])
     quote_task = asyncio.create_task(insights.fetch_quote_for_insight(stock_code))
     asset_history_task = asyncio.create_task(insights.asset_history_for_insight(stock_code, item))
     effective_benchmark = await insights.resolve_insight_benchmark(item)
@@ -560,6 +562,17 @@ def _require_user(user):
     return user
 
 
+def _parse_avg_price_currency(raw: object) -> str | None:
+    if raw is None:
+        return None
+    currency = str(raw or "").strip().upper()
+    if not currency:
+        return "KRW"
+    if currency not in fx.SUPPORTED_PRICE_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 단가 통화입니다: {currency}")
+    return currency
+
+
 @router.get("/api/portfolio")
 async def get_portfolio(request: Request):
     started = time.perf_counter()
@@ -587,6 +600,7 @@ async def get_portfolio(request: Request):
         portfolio_repo.get_portfolio_target_metrics(metric_codes),
     )
     await _supplement_target_metrics(items, target_metrics_map)
+    await fx.annotate_avg_price_krw(items)
     for it in items:
         code = it["stock_code"]
         metrics = dict(target_metrics_map.get(code) or {})
@@ -706,6 +720,14 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
             currency = "KRW"
         else:
             currency = foreign.infer_yf_currency(foreign.yfinance_direct_ticker(stock_code))
+    elif _is_cash_asset(stock_code):
+        currency = stock_code.replace("CASH_", "")
+    elif _is_korean_stock(stock_code) or _is_special_asset(stock_code):
+        currency = "KRW"
+    avg_price_currency = _parse_avg_price_currency(payload.get("avg_price_currency"))
+    if avg_price_currency and (_is_cash_asset(stock_code) or _is_korean_stock(stock_code) or _is_special_asset(stock_code)):
+        avg_price_currency = "KRW"
+    avg_price_krw = await fx.price_to_krw(avg_price, avg_price_currency or "KRW")
     group_name = str(payload.get("group_name") or "").strip() or None
     if group_name:
         groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
@@ -745,7 +767,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
             target_price_kwarg["target_price"] = await _resolve_target_formula_price(
                 stock_code,
                 parsed_target.formula,
-                avg_price,
+                avg_price_krw,
             )
     elif "target_price" in payload:
         raw_tp = payload.get("target_price")
@@ -771,8 +793,10 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     result = await portfolio_repo.save_portfolio_item(
         user["google_sub"], stock_code, stock_name, quantity, avg_price,
         currency, group_name, benchmark_code, created_at,
+        avg_price_currency=avg_price_currency,
         **target_price_kwarg,
     )
+    await fx.annotate_avg_price_krw([result])
 
     # 신규 해외 종목이면 yfinance 배당을 백그라운드로 fetch. 기존 동일
     # 코드에 대해 이미 foreign_dividends row 가 있으면 (auto/manual 무관)

@@ -606,6 +606,9 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     assert "pf-save-spinner" in render
     assert 'class="pf-edit-input js-pf-edit-qty"' in render
     assert 'class="pf-edit-input js-pf-edit-price"' in render
+    assert 'class="pf-price-currency-select js-pf-edit-price-currency"' in render
+    assert "function pfAvgPriceKrw" in render
+    assert "pfFmtAvgPriceCell(r, _fp)" in render
     assert 'class="pf-edit-input js-pf-edit-target"' in render
     assert "savePortfolioEdit(code, undefined, el.closest('tr[data-code]'))" in events
     assert "function _pfFindEditRow(stockCode, row)" in actions
@@ -614,6 +617,8 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     assert "_pfSetEditSaving(stockCode, true, editRow)" in actions
     assert "editRow?.querySelector('.js-pf-edit-qty')" in actions
     assert "editRow?.querySelector('.js-pf-edit-price')" in actions
+    assert "editRow?.querySelector('.js-pf-edit-price-currency')" in actions
+    assert "avg_price_currency: avgPriceCurrency" in actions
     assert "const hadExplicitTarget = !!(" in actions
     assert "const targetUnchanged = !!existingItem && (" in actions
     assert "Do not resend an unchanged target/formula." in actions

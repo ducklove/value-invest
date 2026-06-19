@@ -223,6 +223,106 @@ async function savePreferenceNote() {
   await saveUserPreference({ note }, '메모를 저장했습니다.');
 }
 
+function userHasPassword(user = currentUser) {
+  return Boolean(user?.password_set);
+}
+
+function userHasGoogleLink(user = currentUser) {
+  return Boolean(user?.google_linked);
+}
+
+function openProfileModal() {
+  if (!currentUser) {
+    window.location.href = buildLoginPageUrl();
+    return;
+  }
+  const modal = document.getElementById('profileModal');
+  if (!modal) return;
+  const blankAvatar = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+  const passwordSet = userHasPassword();
+  const googleLinked = userHasGoogleLink();
+
+  document.getElementById('profileAvatar').src = currentUser.picture || blankAvatar;
+  document.getElementById('profileName').textContent = currentUser.name || currentUser.email || '사용자';
+  document.getElementById('profileEmail').textContent = currentUser.email || '';
+
+  const googleBadge = document.getElementById('profileGoogleBadge');
+  googleBadge.textContent = googleLinked ? 'Google 연결됨' : 'Google 미연결';
+  googleBadge.classList.toggle('active', googleLinked);
+
+  const passwordBadge = document.getElementById('profilePasswordBadge');
+  passwordBadge.textContent = passwordSet ? 'ID/PW 사용 가능' : 'ID/PW 미등록';
+  passwordBadge.classList.toggle('active', passwordSet);
+
+  document.getElementById('profilePasswordTitle').textContent = passwordSet ? '비밀번호 변경' : '비밀번호 등록';
+  document.getElementById('profileCurrentPasswordGroup').style.display = passwordSet ? 'grid' : 'none';
+  document.getElementById('profileCurrentPassword').required = passwordSet;
+  document.getElementById('profileCurrentPassword').value = '';
+  document.getElementById('profileNewPassword').value = '';
+  document.getElementById('profileConfirmPassword').value = '';
+  setProfilePasswordStatus('');
+
+  modal.style.display = 'flex';
+  document.getElementById('profileNewPassword').focus();
+}
+
+function closeProfileModal() {
+  const modal = document.getElementById('profileModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function setProfilePasswordStatus(message, tone = '') {
+  const status = document.getElementById('profilePasswordStatus');
+  if (!status) return;
+  status.className = 'profile-status';
+  if (tone) status.classList.add(tone);
+  status.textContent = message || '';
+}
+
+async function saveProfilePassword(event) {
+  event.preventDefault();
+  if (!currentUser) return;
+  const currentPassword = document.getElementById('profileCurrentPassword').value;
+  const newPassword = document.getElementById('profileNewPassword').value;
+  const confirmPassword = document.getElementById('profileConfirmPassword').value;
+  const saveBtn = document.getElementById('profilePasswordSaveBtn');
+
+  if (newPassword.length < 8) {
+    setProfilePasswordStatus('비밀번호는 8자 이상이어야 합니다.', 'error');
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    setProfilePasswordStatus('새 비밀번호 확인이 일치하지 않습니다.', 'error');
+    return;
+  }
+
+  saveBtn.disabled = true;
+  setProfilePasswordStatus('저장 중...');
+  try {
+    const resp = await apiFetch('/api/auth/me/password', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(data.detail || '비밀번호를 저장하지 못했습니다.');
+    }
+    currentUser = data.user || { ...currentUser, password_set: true };
+    renderAuthState();
+    openProfileModal();
+    setProfilePasswordStatus(userHasPassword() ? '비밀번호를 저장했습니다.' : '비밀번호가 등록되었습니다.', 'success');
+    showToast('비밀번호를 저장했습니다.', 'success');
+  } catch (error) {
+    setProfilePasswordStatus(error.message || '비밀번호를 저장하지 못했습니다.', 'error');
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
 function scheduleGoogleButtonRender() {
   if (googleButtonRetryTimer !== null) return;
   googleButtonRetryTimer = window.setTimeout(() => {
@@ -269,7 +369,8 @@ function renderGoogleButton() {
   const container = document.getElementById('googleSignInButton');
   if (!container) return;
 
-  if (currentUser || !authConfig?.enabled || !authConfig?.googleClientId) {
+  const googleEnabled = Boolean(authConfig?.googleEnabled ?? authConfig?.googleClientId);
+  if (currentUser || !googleEnabled || !authConfig?.googleClientId) {
     container.innerHTML = '';
     return;
   }
@@ -346,7 +447,7 @@ function renderAuthState() {
 
   if (currentUser) {
     statusTitle.textContent = '내 계정으로 최근 분석을 저장 중입니다';
-    statusDetail.textContent = '최근 검색, 관심종목, 개인 메모가 내 Google 계정 기준으로 저장됩니다.';
+    statusDetail.textContent = '최근 검색, 관심종목, 개인 메모가 내 계정 기준으로 저장됩니다. 사용자를 누르면 프로필을 열 수 있습니다.';
     authUser.style.display = 'grid';
     loginLink.style.display = 'none';
     avatar.src = currentUser.picture || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
@@ -356,12 +457,13 @@ function renderAuthState() {
     statusTitle.textContent = '로그인해 최근 분석을 저장하세요';
     statusDetail.textContent = IS_GITHUB_PAGES_SITE
       ? 'GitHub Pages에서는 서버 버전으로 이동해 로그인한 뒤 개인화 기능을 사용할 수 있습니다.'
-      : 'Google로 로그인하면 최근 검색, 관심종목, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
+      : '이메일/비밀번호 또는 Google로 로그인하면 최근 검색, 관심종목, 개인 메모를 내 계정 기준으로 관리할 수 있습니다.';
     authUser.style.display = 'none';
     loginLink.href = buildLoginPageUrl();
+    loginLink.textContent = '로그인 / 가입';
     loginLink.style.display = 'inline-flex';
   } else {
-    statusTitle.textContent = 'Google 로그인이 아직 설정되지 않았습니다';
+    statusTitle.textContent = '로그인 시스템이 아직 설정되지 않았습니다';
     statusDetail.textContent = '서버 설정이 완료되면 계정별 최근 분석 저장을 사용할 수 있습니다.';
     authUser.style.display = 'none';
     loginLink.style.display = 'none';
@@ -383,9 +485,10 @@ async function logout() {
       window.google.accounts.id.disableAutoSelect();
     }
     currentUser = null;
+    closeProfileModal();
     renderAuthState();
     refreshActivePreference();
-    trackEvent('logout', { provider: 'google' });
+    trackEvent('logout', { provider: 'account' });
     loadRecentList();
   }
 }

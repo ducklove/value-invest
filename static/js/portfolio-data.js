@@ -280,7 +280,7 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
   const change = price !== null ? (q.change ?? 0) : 0;
   const changePct = price !== null ? (q.change_pct ?? null) : null;
   const qty = item.quantity;
-  const avgPrice = item.avg_price;
+  const avgPrice = pfAvgPriceKrw(item);
   const marketValue = price !== null ? qty * price : null;
   const rawReturn = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
   const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;

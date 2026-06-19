@@ -43,7 +43,22 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(items[0]["stock_code"], "005930")
         self.assertEqual(items[0]["quantity"], 100)
         self.assertEqual(items[0]["avg_price"], 65000)
+        self.assertEqual(items[0]["avg_price_currency"], "KRW")
         self.assertEqual(items[0]["tags"], [])
+
+    async def test_avg_price_currency_roundtrip_and_preserve(self):
+        await portfolio_repo.save_portfolio_item(
+            "u1", "AAPL", "Apple", 2, 100, "USD", avg_price_currency="USD"
+        )
+        item = (await portfolio_repo.get_portfolio("u1"))[0]
+        self.assertEqual(item["currency"], "USD")
+        self.assertEqual(item["avg_price"], 100)
+        self.assertEqual(item["avg_price_currency"], "USD")
+
+        await portfolio_repo.save_portfolio_item("u1", "AAPL", "Apple", 3, 110, "USD")
+        item = (await portfolio_repo.get_portfolio("u1"))[0]
+        self.assertEqual(item["avg_price"], 110)
+        self.assertEqual(item["avg_price_currency"], "USD")
 
     async def test_alphanumeric_krx_etf_gets_domestic_default_group(self):
         await portfolio_repo.save_portfolio_item("u1", "0074K0", "KoAct K ETF", 10, 21000)

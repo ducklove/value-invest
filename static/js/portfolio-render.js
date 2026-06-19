@@ -1,5 +1,45 @@
 // Portfolio holdings table rendering, formatting helpers, sparklines, benchmark labels.
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
+const PF_AVG_PRICE_CURRENCIES = ['KRW', 'USD', 'EUR', 'JPY', 'CNY', 'HKD', 'GBP', 'AUD', 'CAD', 'CHF', 'TWD', 'VND'];
+
+function pfAvgPriceCurrency(item) {
+  const currency = String(item?.avg_price_currency || 'KRW').trim().toUpperCase();
+  return PF_AVG_PRICE_CURRENCIES.includes(currency) ? currency : 'KRW';
+}
+
+function pfAvgPriceKrw(item) {
+  const converted = Number(item?.avg_price_krw);
+  if (Number.isFinite(converted)) return converted;
+  const raw = Number(item?.avg_price || 0);
+  return Number.isFinite(raw) ? raw : 0;
+}
+
+function pfCanEditAvgPriceCurrency(stockCode) {
+  const code = String(stockCode || '').toUpperCase();
+  if (!code || code.startsWith('CASH_')) return false;
+  if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(code)) return false;
+  return !/^[0-9][0-9A-Z]{5}$/.test(code);
+}
+
+function pfAvgPriceCurrencyOptions(selected) {
+  const current = pfAvgPriceCurrency({ avg_price_currency: selected });
+  return PF_AVG_PRICE_CURRENCIES.map(currency =>
+    `<option value="${currency}"${currency === current ? ' selected' : ''}>${currency}</option>`
+  ).join('');
+}
+
+function pfFmtNativeAvgPrice(value, currency) {
+  const n = Number(value || 0);
+  const digits = currency === 'KRW' ? 0 : (Math.abs(n) >= 100 ? 2 : 4);
+  return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: digits }) : '-';
+}
+
+function pfFmtAvgPriceCell(row, formatter = pfFmtPortfolioValue) {
+  const main = formatter(row.avgPriceKrw);
+  if (row.avgPriceCurrency === 'KRW') return main;
+  return `${main}<span class="pf-native-price">${escapeHtml(row.avgPriceCurrency)} ${escapeHtml(pfFmtNativeAvgPrice(row.avgPrice, row.avgPriceCurrency))}</span>`;
+}
+
 function renderPortfolio(options = {}) {
   const summaryOnly = !!(options && options.summaryOnly);
   _pfRenderColToggles();
@@ -78,10 +118,12 @@ function renderPortfolio(options = {}) {
     const change = price !== null ? (q.change ?? 0) : 0;
     const changePct = price !== null ? (q.change_pct ?? null) : null;
     const qty = item.quantity;
-    const avgPrice = item.avg_price; // already in KRW
-    const invested = qty * avgPrice;
+    const avgPrice = Number(item.avg_price || 0);
+    const avgPriceCurrency = pfAvgPriceCurrency(item);
+    const avgPriceKrw = pfAvgPriceKrw(item);
+    const invested = qty * avgPriceKrw;
     const marketValue = price !== null ? qty * price : null;
-    const rawReturn = avgPrice > 0 && price !== null ? ((price - avgPrice) / avgPrice * 100) : null;
+    const rawReturn = avgPriceKrw > 0 && price !== null ? ((price - avgPriceKrw) / avgPriceKrw * 100) : null;
     const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;
     const dailyPnl = price !== null ? qty * change : 0;
     // Derived columns added on the client so sorting and live edits use
@@ -113,7 +155,7 @@ function renderPortfolio(options = {}) {
       : null;
     const createdAtSort = item.created_at ? item.created_at.slice(0, 10) : '';
     return {
-      ...item, cur, price, change, changePct, qty, avgPrice,
+      ...item, cur, price, change, changePct, qty, avgPrice, avgPriceCurrency, avgPriceKrw,
       invested, marketValue, returnPct, dailyPnl,
       tradingValue,
       trailingDps, dividendAmount, dividendYield, createdAtSort,
@@ -462,7 +504,7 @@ function renderPortfolio(options = {}) {
   // DB 값으로 덮어써지는 문제가 있었다. 목표가 × 버튼으로 input 을
   // 비워도 즉시 '자동 계산 값' 으로 복원되던 증상이 대표적.
   // 따라서 DOM 교체 전에 현재 값을 snapshot 하고, 교체 후에 복원한다.
-  const _editInputIds = ['pfEditPrice', 'pfEditTarget', 'pfEditQty', 'pfEditCreatedAt'];
+  const _editInputIds = ['pfEditPrice', 'pfEditPriceCurrency', 'pfEditTarget', 'pfEditQty', 'pfEditCreatedAt'];
   const _preservedEdit = PfStore.edit.code ? {} : null;
   if (_preservedEdit) {
     for (const id of _editInputIds) {
@@ -503,6 +545,10 @@ function renderPortfolio(options = {}) {
     const editAttrs = isSaving ? ' disabled' : '';
     const saveAttrs = isSaving ? ' disabled aria-busy="true"' : '';
     const rowClass = isSaving ? ' class="pf-row-saving" aria-busy="true"' : '';
+    const canEditAvgPriceCurrency = pfCanEditAvgPriceCurrency(r.stock_code);
+    const avgPriceCurrencyControl = canEditAvgPriceCurrency
+      ? `<select class="pf-price-currency-select js-pf-edit-price-currency" id="pfEditPriceCurrency"${editAttrs}>${pfAvgPriceCurrencyOptions(r.avgPriceCurrency)}</select>`
+      : `<span class="pf-price-currency-lock">${escapeHtml(r.avgPriceCurrency)}</span>`;
     const saveContent = isSaving
       ? '<span class="pf-save-spinner" aria-hidden="true"></span><span class="pf-save-label">저장중</span>'
       : '✓';
@@ -520,7 +566,7 @@ function renderPortfolio(options = {}) {
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
-        <td class="pf-col-num pf-col-buyprice"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="1"${editAttrs}></td>
+        <td class="pf-col-num pf-col-buyprice"><span class="pf-price-edit-wrap"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="any"${editAttrs}>${avgPriceCurrencyControl}</span></td>
         <td class="pf-col-num pf-col-target"${targetTitle}><span class="pf-target-edit-wrap"><input class="pf-edit-input js-pf-edit-target" id="pfEditTarget" value="${escapeHtml(targetInputValue)}" type="text" inputmode="decimal" placeholder="자동 또는 BPS*0.4+DPS*10" title="${escapeHtml(targetHelp)}"${editAttrs}><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 표시 안 함 (- 로 고정)"${editAttrs}>×</button></span></td>
         <td class="pf-col-num pf-col-achiev"${targetTitle}>${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
@@ -543,7 +589,7 @@ function renderPortfolio(options = {}) {
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
-      <td class="pf-col-num pf-col-buyprice">${_fp(r.avgPrice)}</td>
+      <td class="pf-col-num pf-col-buyprice">${pfFmtAvgPriceCell(r, _fp)}</td>
       <td class="pf-col-num pf-col-target"${targetTitle}>${r.targetPrice !== null ? _fp(r.targetPrice) : '-'}</td>
       <td class="pf-col-num pf-col-achiev"${targetTitle}>${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
       <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>

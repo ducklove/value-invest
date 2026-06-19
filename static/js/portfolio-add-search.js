@@ -109,6 +109,8 @@ function pfApplySavedPortfolioItem(saved, fallbackCode, fallbackName, fallbackCu
     stock_name: String(saved?.stock_name || fallbackName || stockCode).trim(),
     quantity: Number(saved?.quantity ?? 1),
     avg_price: Number(saved?.avg_price ?? 0),
+    avg_price_currency: String(saved?.avg_price_currency || 'KRW').trim().toUpperCase(),
+    avg_price_krw: Number(saved?.avg_price_krw ?? saved?.avg_price ?? 0),
     currency,
     group_name: saved?.group_name || null,
     benchmark_code: saved?.benchmark_code || null,

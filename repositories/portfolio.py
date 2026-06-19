@@ -80,7 +80,9 @@ async def get_portfolio(google_sub: str) -> list[dict]:
     # the SELECT list — the column existed server-side but was invisible.
     cursor = await db.execute(
         """
-        SELECT stock_code, stock_name, quantity, avg_price, sort_order,
+        SELECT stock_code, stock_name, quantity, avg_price,
+               COALESCE(avg_price_currency, 'KRW') AS avg_price_currency,
+               sort_order,
                COALESCE(currency, 'KRW') AS currency, group_name, benchmark_code,
                created_at, target_price,
                COALESCE(target_price_disabled, 0) AS target_price_disabled,
@@ -497,7 +499,7 @@ async def list_preferred_dividends() -> list[dict]:
 async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT stock_code, stock_name, quantity, avg_price, COALESCE(currency, 'KRW') AS currency, group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+        "SELECT stock_code, stock_name, quantity, avg_price, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, COALESCE(currency, 'KRW') AS currency, group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
         (google_sub, stock_code),
     )
     row = await cursor.fetchone()
@@ -515,12 +517,13 @@ async def update_portfolio_quantity(google_sub: str, stock_code: str, new_quanti
 
 async def add_portfolio_item(
     google_sub: str, stock_code: str, stock_name: str, avg_price: float, quantity: int, currency: str = "KRW",
+    avg_price_currency: str = "KRW",
 ):
     db = await get_db()
     now = datetime.now().isoformat()
     await db.execute(
-        "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, currency, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (google_sub, stock_code, stock_name, avg_price, quantity, currency, now),
+        "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, avg_price_currency, quantity, currency, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (google_sub, stock_code, stock_name, avg_price, avg_price_currency, quantity, currency, now),
     )
     await db.commit()
 
@@ -534,6 +537,8 @@ async def save_portfolio_item(
     google_sub: str, stock_code: str, stock_name: str, quantity: float, avg_price: float,
     currency: str = "KRW", group_name: str | None = None, benchmark_code: str | None = None,
     created_at: str | None = None,
+    *,
+    avg_price_currency: str | None = None,
     target_price=_TARGET_PRICE_UNCHANGED,
     target_price_disabled=_TARGET_DISABLED_UNCHANGED,
     target_price_formula=_TARGET_FORMULA_UNCHANGED,
@@ -560,7 +565,7 @@ async def save_portfolio_item(
         # date). Only overwrite created_at when the caller explicitly passes
         # one — that's how the UI's 등록일자 edit gets through.
         cursor = await db.execute(
-            "SELECT sort_order, group_name, benchmark_code, created_at, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            "SELECT sort_order, group_name, benchmark_code, created_at, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
             (google_sub, stock_code),
         )
         existing = await cursor.fetchone()
@@ -572,6 +577,8 @@ async def save_portfolio_item(
                 group_name = await _resolve_default_group_name(db, google_sub, stock_code)
         if benchmark_code is None and existing:
             benchmark_code = existing["benchmark_code"]
+        if avg_price_currency is None:
+            avg_price_currency = existing["avg_price_currency"] if existing else "KRW"
 
         # Preserve existing created_at unless overridden; for brand-new rows
         # use `now`. This ordering means an explicit `created_at=None` on an
@@ -617,12 +624,13 @@ async def save_portfolio_item(
 
         await db.execute(
             """
-            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(google_sub, stock_code) DO UPDATE SET
                 stock_name = excluded.stock_name,
                 quantity = excluded.quantity,
                 avg_price = excluded.avg_price,
+                avg_price_currency = excluded.avg_price_currency,
                 currency = excluded.currency,
                 group_name = excluded.group_name,
                 benchmark_code = excluded.benchmark_code,
@@ -632,11 +640,11 @@ async def save_portfolio_item(
                 target_price_formula = excluded.target_price_formula,
                 updated_at = excluded.updated_at
             """,
-            (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula_db, now),
+            (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula_db, now),
         )
     return {
         "stock_code": stock_code, "stock_name": stock_name,
-        "quantity": quantity, "avg_price": avg_price, "currency": currency,
+        "quantity": quantity, "avg_price": avg_price, "avg_price_currency": avg_price_currency, "currency": currency,
         "group_name": group_name, "benchmark_code": benchmark_code,
         "created_at": created_at,
         "target_price": target_price,
@@ -667,9 +675,9 @@ async def replace_portfolio(google_sub: str, items: list[dict]):
             for i, it in enumerate(items):
                 group_name = await _resolve_default_group_name(db, google_sub, it["stock_code"])
                 await db.execute(
-                    """INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, sort_order, currency, group_name, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (google_sub, it["stock_code"], it["stock_name"], it["quantity"], it["avg_price"], i, it.get("currency", "KRW"), group_name, now, now),
+                    """INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (google_sub, it["stock_code"], it["stock_name"], it["quantity"], it["avg_price"], it.get("avg_price_currency", "KRW"), i, it.get("currency", "KRW"), group_name, now, now),
                 )
         except Exception:
             await db.rollback()

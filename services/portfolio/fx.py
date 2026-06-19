@@ -8,6 +8,7 @@ preserved verbatim from the original implementation.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -23,6 +24,7 @@ _FX_DAILY_CACHE_TTL = 300
 
 _fx_cache = MemoryTTLCache("portfolio.fx_rates", None)
 _fx_daily_cache = MemoryTTLCache("portfolio.fx_daily", _FX_DAILY_CACHE_TTL)
+SUPPORTED_PRICE_CURRENCIES = frozenset({"KRW", *currencies.CURRENCY_TO_FX_CODE.keys()})
 
 
 async def get_fx_rates() -> dict[str, float]:
@@ -117,6 +119,42 @@ async def fx_rate_for_currency(currency: str | None) -> float:
         return 1.0
     rate = await fx_rate_for_code(fx_code)
     return rate if rate and rate > 0 else 1.0
+
+
+def normalize_price_currency(currency: str | None, *, default: str = "KRW") -> str:
+    normalized = (currency or default or "KRW").strip().upper()
+    return normalized if normalized in SUPPORTED_PRICE_CURRENCIES else (default or "KRW")
+
+
+async def price_to_krw(amount: float, currency: str | None) -> float:
+    rate = await fx_rate_for_currency(normalize_price_currency(currency))
+    return float(amount or 0) * rate
+
+
+async def annotate_avg_price_krw(items: list[dict]) -> list[dict]:
+    currencies_needed = {
+        normalize_price_currency(item.get("avg_price_currency"))
+        for item in items
+        if normalize_price_currency(item.get("avg_price_currency")) != "KRW"
+    }
+    rates: dict[str, float] = {"KRW": 1.0}
+    if currencies_needed:
+        resolved = await asyncio.gather(
+            *(fx_rate_for_currency(currency) for currency in currencies_needed),
+            return_exceptions=True,
+        )
+        for currency, rate in zip(currencies_needed, resolved):
+            rates[currency] = float(rate) if isinstance(rate, (int, float)) and rate > 0 else 1.0
+
+    for item in items:
+        currency = normalize_price_currency(item.get("avg_price_currency"))
+        item["avg_price_currency"] = currency
+        try:
+            avg_price = float(item.get("avg_price") or 0)
+        except (TypeError, ValueError):
+            avg_price = 0.0
+        item["avg_price_krw"] = avg_price * rates.get(currency, 1.0)
+    return items
 
 
 async def fx_to_krw(nation: str, amount: float) -> float:
