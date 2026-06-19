@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import binascii
 import hashlib
 import hmac
 import os
@@ -147,7 +148,7 @@ def verify_password(password: str, stored_hash: str | None) -> bool:
         iterations = int(iterations_raw)
         salt = _b64decode(salt_raw)
         expected = _b64decode(digest_raw)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, binascii.Error):
         return False
     digest = hashlib.pbkdf2_hmac(
         "sha256",
