@@ -81,9 +81,7 @@ function _mdIndexFrameHtml(code, label) {
   const index = MD_INDEX_FRAME_CODES[code];
   if (!index) return '';
   const url = _mdIndexFrameUrl(index);
-  const description = MD_INDEX_DESCRIPTIONS[code] || `${label} 실시간 그래프`;
   return '<div class="md-index-frame-wrap">'
-    + `<div class="md-index-frame-label" title="${escapeHtml(description)}">${escapeHtml(label)}</div>`
     + `<iframe class="md-index-frame" src="${escapeHtml(url)}" `
     + `data-md-frame-index="${escapeHtml(index)}" `
     + `data-md-frame-period="${escapeHtml(MD_INDEX_FRAME_DEFAULT_PERIOD)}" `
