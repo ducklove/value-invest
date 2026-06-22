@@ -40,12 +40,14 @@ logger = logging.getLogger(__name__)
 
 FEATURE = "daily_briefing"
 OPT_IN_KEY = "daily_briefing_enabled"
+CUSTOM_INSTRUCTIONS_KEY = "daily_briefing_custom_instructions"
 
 MAX_TOKENS = 1200  # 10~15줄 요약이면 충분 — 폭주 방지 상한.
 MOVER_COUNT = 3
 CALENDAR_EVENT_LIMIT = 6
 FEED_ITEM_LIMIT = 5
 MIN_USABLE_AI_LINES = 3
+MAX_CUSTOM_INSTRUCTIONS_CHARS = 1200
 
 SYSTEM_PROMPT = """당신은 개인 투자자를 위한 아침 브리핑 작성자입니다.
 규칙:
@@ -74,6 +76,23 @@ async def set_enabled(google_sub: str, enabled: bool) -> None:
 
 async def opted_in_users() -> list[str]:
     return await user_settings_repo.get_users_with_setting(OPT_IN_KEY, "true")
+
+
+def normalize_custom_instructions(value: object) -> str:
+    """User-supplied briefing guidance, bounded before it enters the LLM prompt."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return text[:MAX_CUSTOM_INSTRUCTIONS_CHARS]
+
+
+async def get_custom_instructions(google_sub: str) -> str:
+    value = await user_settings_repo.get_user_setting(google_sub, CUSTOM_INSTRUCTIONS_KEY)
+    return normalize_custom_instructions(value)
+
+
+async def set_custom_instructions(google_sub: str, instructions: object) -> str:
+    text = normalize_custom_instructions(instructions)
+    await user_settings_repo.set_user_setting(google_sub, CUSTOM_INSTRUCTIONS_KEY, text)
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -440,13 +459,23 @@ def render_template_briefing(context: dict) -> str:
     return "\n".join([f"🌅 데일리 브리핑 ({context.get('date')})", *body])
 
 
-def build_prompt(context: dict) -> str:
+def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
     data = "\n".join(_context_lines(context)) or "(데이터 없음)"
+    custom = normalize_custom_instructions(custom_instructions)
+    custom_block = ""
+    if custom:
+        custom_block = f"""
+사용자 추가 지시:
+{custom}
+
+위 추가 지시는 제공 데이터와 시스템 규칙을 벗어나지 않는 범위에서 반영하세요.
+"""
     return f"""오늘 날짜: {context.get('date')}
 
 아래는 한 투자자의 포트폴리오 데이터입니다.
 
 {data}
+{custom_block}
 
 위 데이터로 아침 데일리 브리핑을 작성하세요.
 - 첫 줄: "🌅 데일리 브리핑 ({context.get('date')})"
@@ -468,6 +497,7 @@ async def generate_briefing(google_sub: str) -> dict:
     LLM 텍스트를 못 얻으면 템플릿 렌더로 폴백 — 발송 자체는 항상 가능하다.
     """
     context = await build_briefing_context(google_sub)
+    custom_instructions = await get_custom_instructions(google_sub)
     fallback_text = render_template_briefing(context)
     try:
         model = await ai_config.get_model_for_feature(FEATURE)
@@ -475,7 +505,7 @@ async def generate_briefing(google_sub: str) -> dict:
             "model": model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_prompt(context)},
+                {"role": "user", "content": build_prompt(context, custom_instructions)},
             ],
             "max_tokens": MAX_TOKENS,
             **ai_config.openrouter_reasoning_controls(model, effort="low"),
@@ -497,6 +527,7 @@ async def generate_briefing(google_sub: str) -> dict:
                     "model": result.get("model") or model,
                     "context": context,
                     "stats": _briefing_stats(context, text),
+                    "custom_instructions": bool(custom_instructions),
                 }
             logger.warning(
                 "daily briefing LLM too short user=%s lines=%s",
@@ -510,6 +541,7 @@ async def generate_briefing(google_sub: str) -> dict:
                 "fallback_reason": "ai_too_short",
                 "context": context,
                 "stats": _briefing_stats(context, fallback_text),
+                "custom_instructions": bool(custom_instructions),
             }
         logger.warning("daily briefing LLM returned empty content user=%s", google_sub[:8])
     except Exception as exc:
@@ -521,7 +553,15 @@ async def generate_briefing(google_sub: str) -> dict:
         "fallback_reason": "ai_failed_or_empty",
         "context": context,
         "stats": _briefing_stats(context, fallback_text),
+        "custom_instructions": bool(custom_instructions),
     }
+
+
+async def generate_test_message(google_sub: str) -> dict:
+    """Build the exact one-off message used by the UI's test-send button."""
+    briefing = await generate_briefing(google_sub)
+    text = "🧪 데일리 브리핑 테스트 발송\n" + briefing["text"]
+    return {**briefing, "text": text}
 
 
 # ---------------------------------------------------------------------------

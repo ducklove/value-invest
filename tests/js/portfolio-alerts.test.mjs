@@ -117,6 +117,11 @@ test("채널: 텔레그램 연결됨 행 + 카카오 등록 폼", () => {
   w.PfAlerts.channels = {
     telegram: { connected: true, enabled: true, username: "mybot" },
     kakao: { connected: false, redirect_uri: "https://x.test/api/notifications/kakao/callback" },
+    daily_briefing: {
+      enabled: true,
+      custom_instructions: "환율 영향부터",
+      max_custom_instructions_chars: 1200,
+    },
   };
   w.pfAlertsRenderChannels();
   const html = w.document.getElementById("pfAlertChannels").innerHTML;
@@ -124,6 +129,9 @@ test("채널: 텔레그램 연결됨 행 + 카카오 등록 폼", () => {
   assert.match(html, /테스트/);                 // 텔레그램 연결됨 -> 테스트 버튼
   assert.ok(html.includes('id="pfKkKey"'));     // 카카오 미연결 -> REST 키 입력
   assert.match(html, /kakao\/callback/);        // Redirect URI 안내
+  assert.match(html, /데일리 브리핑/);
+  assert.match(html, /테스트 발송/);
+  assert.equal(w.document.getElementById("pfBriefingInstructions").value, "환율 영향부터");
 });
 
 test("텔레그램 미연결 행은 봇 토큰 등록 폼을 보인다", () => {

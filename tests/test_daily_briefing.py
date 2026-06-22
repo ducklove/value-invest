@@ -252,6 +252,29 @@ class GenerateBriefingTests(DailyBriefingHarness):
         self.assertEqual(rows[0]["input_tokens"], 120)
         self.assertEqual(rows[0]["output_tokens"], 45)
 
+    async def test_custom_instructions_are_added_to_llm_prompt(self):
+        await self._seed_user("u1")
+        await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
+        await daily_briefing.set_custom_instructions("u1", "환율 영향과 반도체 업황을 우선해서 짚어줘.")
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "model": "test/model",
+            "choices": [{"message": {"content": "🌅 데일리 브리핑\n환율 영향을 먼저 봅니다.\n반도체 업황을 점검하세요."}}],
+            "usage": {"prompt_tokens": 140, "completion_tokens": 40, "cost": 0.001},
+        }
+        post = AsyncMock(return_value=resp)
+        with patch.object(daily_briefing, "build_briefing_context", new=AsyncMock(return_value=self._minimal_context())), \
+             patch.object(httpx.AsyncClient, "post", new=post):
+            briefing = await daily_briefing.generate_briefing("u1")
+
+        payload = post.await_args.kwargs["json"]
+        user_prompt = payload["messages"][1]["content"]
+        self.assertIn("사용자 추가 지시", user_prompt)
+        self.assertIn("환율 영향과 반도체 업황", user_prompt)
+        self.assertEqual(briefing["source"], "ai")
+        self.assertTrue(briefing["custom_instructions"])
+
     async def test_too_short_llm_response_falls_back_to_template(self):
         await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
         resp = MagicMock()
@@ -354,6 +377,12 @@ class OptInSettingTests(DailyBriefingHarness):
         raw = await user_settings_repo.get_user_setting("u1", daily_briefing.OPT_IN_KEY)
         self.assertEqual(raw, "false")
 
+    async def test_custom_instructions_roundtrip(self):
+        await self._seed_user("u1")
+        text = await daily_briefing.set_custom_instructions("u1", "배당 일정 중심\n숫자는 짧게")
+        self.assertEqual(text, "배당 일정 중심\n숫자는 짧게")
+        self.assertEqual(await daily_briefing.get_custom_instructions("u1"), text)
+
 
 class BriefingRouteTests(DailyBriefingHarness):
     """옵트인 GET/PUT 라우트 — 채널 미연결 시 409, 켜고 끄기 왕복."""
@@ -399,24 +428,63 @@ class BriefingRouteTests(DailyBriefingHarness):
         resp = await self.client.get("/api/notifications/briefing")
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json()["enabled"])
+        self.assertEqual(resp.json()["custom_instructions"], "")
 
     async def test_put_requires_active_channel(self):
         resp = await self.client.put("/api/notifications/briefing", json={"enabled": True})
         self.assertEqual(resp.status_code, 409)
         self.assertFalse(await daily_briefing.is_enabled("u1"))
 
+    async def test_put_custom_instructions_without_channel(self):
+        resp = await self.client.put(
+            "/api/notifications/briefing",
+            json={"custom_instructions": "배당과 환율 중심으로 짧게"},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertFalse(body["enabled"])
+        self.assertEqual(body["custom_instructions"], "배당과 환율 중심으로 짧게")
+        self.assertEqual(await daily_briefing.get_custom_instructions("u1"), "배당과 환율 중심으로 짧게")
+
     async def test_put_roundtrip_with_channel(self):
         await self._connect_telegram()
-        resp = await self.client.put("/api/notifications/briefing", json={"enabled": True})
+        resp = await self.client.put(
+            "/api/notifications/briefing",
+            json={"enabled": True, "custom_instructions": "리스크 요인을 먼저"},
+        )
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertTrue(await daily_briefing.is_enabled("u1"))
+        self.assertEqual(await daily_briefing.get_custom_instructions("u1"), "리스크 요인을 먼저")
         # /channels 응답에도 실려 알림 설정 모달이 한 번에 그린다
         channels_resp = await self.client.get("/api/notifications/channels")
         self.assertTrue(channels_resp.json()["daily_briefing"]["enabled"])
+        self.assertEqual(channels_resp.json()["daily_briefing"]["custom_instructions"], "리스크 요인을 먼저")
         # 끄기는 채널 유무와 무관하게 항상 가능
         resp = await self.client.put("/api/notifications/briefing", json={"enabled": False})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(await daily_briefing.is_enabled("u1"))
+
+    async def test_test_send_requires_active_channel(self):
+        resp = await self.client.post("/api/notifications/briefing/test")
+        self.assertEqual(resp.status_code, 409)
+
+    async def test_test_send_generates_and_dispatches(self):
+        await self._connect_telegram()
+        generated = {
+            "text": "🧪 데일리 브리핑 테스트 발송\n🌅 데일리 브리핑\n본문",
+            "source": "ai",
+            "model": "test/model",
+            "stats": {"text_lines": 3},
+        }
+        from routes import notifications as notif_route
+        with patch.object(daily_briefing, "generate_test_message", new=AsyncMock(return_value=generated)) as gen, \
+             patch.object(notif_route.channels, "dispatch", new=AsyncMock(return_value=1)) as dispatch:
+            resp = await self.client.post("/api/notifications/briefing/test")
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["source"], "ai")
+        gen.assert_awaited_once_with("u1")
+        dispatch.assert_awaited_once_with("u1", generated["text"])
 
 
 class InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
