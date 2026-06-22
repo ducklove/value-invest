@@ -2873,6 +2873,7 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 .pf-alert-channel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .pf-alert-channel-name { font-weight: 600; min-width: 64px; }
 .pf-alert-channel-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.pf-alert-briefing-list { display: flex; flex-direction: column; gap: 10px; }
 .pf-alert-briefing-card { align-items: stretch; flex-direction: column; gap: 8px; }
 .pf-alert-briefing-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pf-alert-briefing-input {

@@ -1,7 +1,7 @@
-"""AI 데일리 브리핑 — 아침 배치로 미리 생성해 메신저로 푸시한다.
+"""AI 브리핑 — 예약 배치로 미리 생성해 메신저로 푸시한다.
 
-철학: '기다리지 않는 화면'. 사용자가 접속해 생성을 기다리는 대신, 평일 아침
-(daily-briefing.timer, 08:20 KST) 배치가 어제 결산 데이터로 브리핑을 만들어
+철학: '기다리지 않는 화면'. 사용자가 접속해 생성을 기다리는 대신, 정해진 시각의
+systemd timer 배치가 결산 데이터로 브리핑을 만들어
 이미 연결된 알림 채널(텔레그램/카카오)로 보낸다.
 
 구성:
@@ -27,7 +27,9 @@ from datetime import date, timedelta
 
 import ai_config
 import close_price_client
+import market_indicators
 from repositories import dart_review as dart_review_repo
+from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from repositories import user_settings as user_settings_repo
@@ -41,6 +43,7 @@ logger = logging.getLogger(__name__)
 FEATURE = "daily_briefing"
 OPT_IN_KEY = "daily_briefing_enabled"
 CUSTOM_INSTRUCTIONS_KEY = "daily_briefing_custom_instructions"
+DEFAULT_BRIEFING_TYPE = "morning"
 
 MAX_TOKENS = 1200  # 10~15줄 요약이면 충분 — 폭주 방지 상한.
 MOVER_COUNT = 3
@@ -48,8 +51,40 @@ CALENDAR_EVENT_LIMIT = 6
 FEED_ITEM_LIMIT = 5
 MIN_USABLE_AI_LINES = 3
 MAX_CUSTOM_INSTRUCTIONS_CHARS = 1200
+OVERSEAS_GROUP_LIMIT = 3
 
-SYSTEM_PROMPT = """당신은 개인 투자자를 위한 아침 브리핑 작성자입니다.
+BRIEFING_PROFILES: dict[str, dict[str, str]] = {
+    "morning": {
+        "name": "모닝 브리핑",
+        "title": "🌅 모닝 브리핑",
+        "schedule_label": "평일 07:30",
+        "description": "개장 전, 전일 결산과 오늘 확인할 이벤트를 정리합니다.",
+        "focus": "개장 전 의사결정에 필요한 전일 포트폴리오 변화, 해외/야간 변수, 오늘 일정을 우선합니다.",
+        "enabled_key": OPT_IN_KEY,
+        "instructions_key": CUSTOM_INSTRUCTIONS_KEY,
+    },
+    "market_close": {
+        "name": "클로징 브리핑",
+        "title": "🔔 클로징 브리핑",
+        "schedule_label": "평일 15:35",
+        "description": "정규장 마감 직후, 당일 국내장 흐름과 보유 종목 변동을 정리합니다.",
+        "focus": "정규장 마감 직후 확인해야 할 당일 급등락, 보유 종목 기여, 공시/리포트 변화를 우선합니다.",
+        "enabled_key": "daily_briefing_market_close_enabled",
+        "instructions_key": "daily_briefing_market_close_custom_instructions",
+    },
+    "night": {
+        "name": "나이트 브리핑",
+        "title": "🌙 나이트 브리핑",
+        "schedule_label": "평일 22:20",
+        "description": "밤 시간대, 해외장 초반·야간선물·하루 결산 포인트를 정리합니다.",
+        "focus": "밤 시간대 확인할 해외장 초반 흐름, 야간선물, 환율, 하루 결산 포인트를 우선합니다.",
+        "enabled_key": "daily_briefing_night_enabled",
+        "instructions_key": "daily_briefing_night_custom_instructions",
+    },
+}
+BRIEFING_ORDER = tuple(BRIEFING_PROFILES.keys())
+
+SYSTEM_PROMPT = """당신은 개인 투자자를 위한 포트폴리오 브리핑 작성자입니다.
 규칙:
 - 제공된 데이터에만 근거하고, 없는 수치를 꾸며내지 마세요.
 - 메신저(텔레그램/카카오) plain text 로 전송되므로 마크다운·HTML 없이
@@ -63,19 +98,47 @@ SYSTEM_PROMPT = """당신은 개인 투자자를 위한 아침 브리핑 작성�
 # ---------------------------------------------------------------------------
 
 
-async def is_enabled(google_sub: str) -> bool:
-    value = await user_settings_repo.get_user_setting(google_sub, OPT_IN_KEY)
+def normalize_briefing_type(value: object = None) -> str:
+    kind = str(value or DEFAULT_BRIEFING_TYPE).strip().lower().replace("-", "_")
+    if kind in {"daily", "daily_briefing", "am"}:
+        kind = DEFAULT_BRIEFING_TYPE
+    if kind in {"close", "closing", "marketclose"}:
+        kind = "market_close"
+    if kind not in BRIEFING_PROFILES:
+        raise ValueError(f"지원하지 않는 브리핑 유형입니다: {value}")
+    return kind
+
+
+def briefing_profile(briefing_type: object = None) -> dict[str, str]:
+    kind = normalize_briefing_type(briefing_type)
+    return {"kind": kind, **BRIEFING_PROFILES[kind]}
+
+
+def briefing_profiles() -> list[dict[str, str]]:
+    return [briefing_profile(kind) for kind in BRIEFING_ORDER]
+
+
+def _enabled_key(briefing_type: object = None) -> str:
+    return BRIEFING_PROFILES[normalize_briefing_type(briefing_type)]["enabled_key"]
+
+
+def _instructions_key(briefing_type: object = None) -> str:
+    return BRIEFING_PROFILES[normalize_briefing_type(briefing_type)]["instructions_key"]
+
+
+async def is_enabled(google_sub: str, briefing_type: object = None) -> bool:
+    value = await user_settings_repo.get_user_setting(google_sub, _enabled_key(briefing_type))
     return (value or "").strip().lower() == "true"
 
 
-async def set_enabled(google_sub: str, enabled: bool) -> None:
+async def set_enabled(google_sub: str, enabled: bool, briefing_type: object = None) -> None:
     await user_settings_repo.set_user_setting(
-        google_sub, OPT_IN_KEY, "true" if enabled else "false"
+        google_sub, _enabled_key(briefing_type), "true" if enabled else "false"
     )
 
 
-async def opted_in_users() -> list[str]:
-    return await user_settings_repo.get_users_with_setting(OPT_IN_KEY, "true")
+async def opted_in_users(briefing_type: object = None) -> list[str]:
+    return await user_settings_repo.get_users_with_setting(_enabled_key(briefing_type), "true")
 
 
 def normalize_custom_instructions(value: object) -> str:
@@ -84,15 +147,54 @@ def normalize_custom_instructions(value: object) -> str:
     return text[:MAX_CUSTOM_INSTRUCTIONS_CHARS]
 
 
-async def get_custom_instructions(google_sub: str) -> str:
-    value = await user_settings_repo.get_user_setting(google_sub, CUSTOM_INSTRUCTIONS_KEY)
+async def get_custom_instructions(google_sub: str, briefing_type: object = None) -> str:
+    value = await user_settings_repo.get_user_setting(google_sub, _instructions_key(briefing_type))
     return normalize_custom_instructions(value)
 
 
-async def set_custom_instructions(google_sub: str, instructions: object) -> str:
+async def set_custom_instructions(google_sub: str, instructions: object, briefing_type: object = None) -> str:
     text = normalize_custom_instructions(instructions)
-    await user_settings_repo.set_user_setting(google_sub, CUSTOM_INSTRUCTIONS_KEY, text)
+    await user_settings_repo.set_user_setting(google_sub, _instructions_key(briefing_type), text)
     return text
+
+
+async def briefing_setting(google_sub: str, briefing_type: object = None) -> dict:
+    profile = briefing_profile(briefing_type)
+    return {
+        "kind": profile["kind"],
+        "name": profile["name"],
+        "title": profile["title"],
+        "schedule_label": profile["schedule_label"],
+        "description": profile["description"],
+        "enabled": await is_enabled(google_sub, profile["kind"]),
+        "custom_instructions": await get_custom_instructions(google_sub, profile["kind"]),
+        "max_custom_instructions_chars": MAX_CUSTOM_INSTRUCTIONS_CHARS,
+    }
+
+
+async def briefing_settings(google_sub: str) -> list[dict]:
+    return [await briefing_setting(google_sub, kind) for kind in BRIEFING_ORDER]
+
+
+def _instruction_preferences(custom_instructions: str | None) -> dict[str, bool]:
+    """Detect template sections explicitly requested by the user."""
+    text = normalize_custom_instructions(custom_instructions)
+    lower = text.lower()
+    return {
+        "has_custom": bool(text),
+        "overseas_groups": (
+            any(token in text for token in ("해외", "해외 그룹", "해외주식", "미국", "글로벌"))
+            or any(token in lower for token in ("foreign", "overseas", "global"))
+        ),
+        "night_futures": (
+            any(token in text for token in ("야간선물", "야간 선물", "나이트선물"))
+            or any(token in lower for token in ("night futures", "overnight futures"))
+        ),
+        "calendar_alerts": (
+            "캘린더" in text and any(token in text for token in ("알림", "알람", "켜"))
+        )
+        or ("calendar" in lower and any(token in lower for token in ("alert", "alarm", "enabled"))),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -254,21 +356,131 @@ def _movers(
     return {"top": top, "bottom": bottom}
 
 
-async def build_briefing_context(google_sub: str) -> dict:
+def _is_overseas_group_name(group_name: str | None) -> bool:
+    text = str(group_name or "").strip()
+    lower = text.lower()
+    return (
+        any(token in text for token in ("해외", "미국", "글로벌"))
+        or any(token in lower for token in ("foreign", "overseas", "global"))
+        or lower in {"us", "usa", "international", "intl"}
+    )
+
+
+def _overseas_group_performance(rows: list[dict]) -> list[dict]:
+    candidates = [r for r in rows if _is_overseas_group_name(r.get("group_name")) and r.get("date")]
+    if not candidates:
+        return []
+    latest_date = max(str(r["date"]) for r in candidates)
+    latest_rows = [r for r in candidates if str(r.get("date")) == latest_date]
+    by_group: dict[str, list[dict]] = {}
+    for row in candidates:
+        by_group.setdefault(str(row.get("group_name") or "해외"), []).append(row)
+
+    out: list[dict] = []
+    for row in latest_rows:
+        name = str(row.get("group_name") or "해외")
+        value = _safe_float(row.get("market_value"))
+        history = sorted(by_group.get(name) or [], key=lambda r: str(r.get("date") or ""))
+        prev = None
+        for hist in reversed(history):
+            if str(hist.get("date") or "") < latest_date:
+                prev = hist
+                break
+        prev_value = _safe_float((prev or {}).get("market_value"))
+        change_krw = None
+        change_pct = None
+        if value is not None and prev_value is not None and prev_value > 0:
+            change_krw = value - prev_value
+            change_pct = change_krw / prev_value * 100.0
+        out.append(
+            {
+                "group_name": name,
+                "date": latest_date,
+                "market_value": value,
+                "prev_date": (prev or {}).get("date"),
+                "prev_value": prev_value,
+                "change_krw": change_krw,
+                "change_pct": change_pct,
+                "weight_pct": _safe_float(row.get("weight_pct")),
+                "stock_count": int(row.get("stock_count") or 0),
+            }
+        )
+    out.sort(key=lambda item: abs(item.get("change_krw") or 0), reverse=True)
+    return out[:OVERSEAS_GROUP_LIMIT]
+
+
+async def _fetch_overseas_groups(google_sub: str) -> list[dict]:
+    rows = await snapshots_repo.get_group_weight_history(google_sub)
+    return _overseas_group_performance(rows)
+
+
+def _signed_indicator_value(value: str | None, direction: str | None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith(("+", "-")):
+        return text
+    if direction == "up":
+        return f"+{text}"
+    if direction == "down":
+        return f"-{text}"
+    return text
+
+
+async def _fetch_night_futures_block() -> dict | None:
+    data = (await market_indicators.fetch_indicators(["NIGHT_FUTURES"])).get("NIGHT_FUTURES") or {}
+    if not data.get("value"):
+        return None
+    direction = data.get("direction") or ""
+    return {
+        "value": data.get("value") or "",
+        "change": _signed_indicator_value(data.get("change"), direction),
+        "change_pct": _signed_indicator_value(data.get("change_pct"), direction),
+        "direction": direction,
+        "_stale": bool(data.get("_stale")),
+    }
+
+
+async def _today_calendar_alerts(google_sub: str, today_iso: str) -> list[dict]:
+    subs = await notifications_repo.list_calendar_subscriptions(google_sub, pending_only=True)
+    return [
+        {
+            "time": s.get("event_datetime") or "",
+            "country_name": s.get("country_name") or s.get("country") or "",
+            "event": s.get("event") or "",
+            "importance": s.get("importance") or "",
+            "forecast": s.get("forecast") or "",
+            "previous": s.get("previous") or "",
+        }
+        for s in subs
+        if str(s.get("event_date") or "") == today_iso
+    ][:CALENDAR_EVENT_LIMIT]
+
+
+async def build_briefing_context(google_sub: str, briefing_type: object = None) -> dict:
     """브리핑 입력 데이터를 모아 dict 로 돌려준다 — LLM 없이 테스트 가능.
 
     각 소스는 독립적으로 best-effort: 하나가 비거나 실패해도 나머지로 브리핑을
     만든다 (모두 기존 저장 데이터 — 새 외부 수집 없음).
     """
+    profile = briefing_profile(briefing_type)
     today = date.today()
     context: dict = {
         "google_sub": google_sub,
         "date": today.isoformat(),
+        "briefing_type": profile["kind"],
+        "briefing_name": profile["name"],
+        "briefing_title": profile["title"],
+        "briefing_schedule": profile["schedule_label"],
+        "briefing_focus": profile["focus"],
         "nav": None,
         "movers": {"top": [], "bottom": []},
+        "overseas_groups": [],
         "filings": [],
         "reports": [],
         "calendar": [],
+        "calendar_alerts": [],
+        "night_futures": None,
         "market": [],
     }
 
@@ -311,6 +523,12 @@ async def build_briefing_context(google_sub: str) -> dict:
     except Exception as exc:
         logger.warning("briefing NAV block failed user=%s: %s", google_sub[:8], exc)
 
+    # --- 해외 그룹 성과 (그룹 스냅샷 기반) ---
+    try:
+        context["overseas_groups"] = await _fetch_overseas_groups(google_sub)
+    except Exception as exc:
+        logger.warning("briefing overseas group block failed user=%s: %s", google_sub[:8], exc)
+
     # --- 신규 공시 리뷰 / 증권사 리포트 (어제 이후 수집분, 보유 종목만) ---
     try:
         holdings = await portfolio_repo.get_portfolio(google_sub=google_sub)
@@ -346,6 +564,18 @@ async def build_briefing_context(google_sub: str) -> dict:
     except Exception as exc:
         logger.warning("briefing calendar block failed: %s", exc)
 
+    # --- 오늘 알림이 켜져 있는 캘린더 이벤트 ---
+    try:
+        context["calendar_alerts"] = await _today_calendar_alerts(google_sub, today.isoformat())
+    except Exception as exc:
+        logger.warning("briefing calendar alert block failed user=%s: %s", google_sub[:8], exc)
+
+    # --- 야간선물 일간 상승률/하락률 ---
+    try:
+        context["night_futures"] = await _fetch_night_futures_block()
+    except Exception as exc:
+        logger.warning("briefing night futures block failed: %s", exc)
+
     # --- 시장 지표 (ai_analysis 의 헬퍼 재사용 — 실패 시 안내 한 줄) ---
     context["market"] = await ai_analysis.market_summary_lines()
     return context
@@ -368,7 +598,46 @@ def _fmt_mover(mover: dict) -> str:
     return f"{mover['stock_name']} {_fmt_signed_krw(mover['change_krw'])}{pct_text}"
 
 
-def _context_lines(context: dict) -> list[str]:
+def _fmt_overseas_group(group: dict) -> str:
+    value = group.get("market_value")
+    value_text = ai_analysis.fmt_krw(value) if value is not None else "-"
+    change = group.get("change_krw")
+    pct = group.get("change_pct")
+    weight = group.get("weight_pct")
+    parts = [f"{group.get('group_name') or '해외'} {value_text}"]
+    if change is not None:
+        pct_text = f", {pct:+.2f}%" if pct is not None else ""
+        parts.append(f"{_fmt_signed_krw(change)}{pct_text}")
+    if weight is not None:
+        parts.append(f"비중 {weight:.1f}%")
+    return " (".join([parts[0], " · ".join(parts[1:]) + ")"]) if len(parts) > 1 else parts[0]
+
+
+def _fmt_calendar_alert(item: dict) -> str:
+    event = item.get("event") or "일정"
+    head = " ".join(p for p in (item.get("time"), item.get("country_name")) if p)
+    details = " / ".join(
+        f"{label} {value}"
+        for label, value in (("예상", item.get("forecast")), ("이전", item.get("previous")))
+        if value
+    )
+    text = f"{head} {event}".strip()
+    return f"{text} ({details})" if details else text
+
+
+def _requested_missing_context_lines(context: dict, custom_instructions: str | None) -> list[str]:
+    requested = _instruction_preferences(custom_instructions)
+    lines: list[str] = []
+    if requested["overseas_groups"] and not context.get("overseas_groups"):
+        lines.append("🌏 해외 그룹 성과: 최근 그룹 스냅샷에서 해외 그룹 데이터를 찾지 못했습니다.")
+    if requested["calendar_alerts"] and not context.get("calendar_alerts"):
+        lines.append("🔔 오늘 알림 켜진 캘린더: 오늘 예정된 알림 설정 이벤트가 없습니다.")
+    if requested["night_futures"] and not context.get("night_futures"):
+        lines.append("🌙 야간선물: 현재 조회 가능한 값이 없습니다.")
+    return lines
+
+
+def _context_lines(context: dict, custom_instructions: str | None = None) -> list[str]:
     """컨텍스트를 사람이 읽을 수 있는 줄들로 변환 — 템플릿 폴백 본문이자
     LLM 프롬프트의 데이터 섹션."""
     lines: list[str] = []
@@ -390,6 +659,11 @@ def _context_lines(context: dict) -> list[str]:
         parts = ", ".join(_fmt_mover(m) for m in movers["bottom"])
         lines.append(f"📉 하락 기여: {parts}")
 
+    overseas_groups = context.get("overseas_groups") or []
+    if overseas_groups:
+        parts = ", ".join(_fmt_overseas_group(g) for g in overseas_groups)
+        lines.append(f"🌏 해외 그룹 성과: {parts}")
+
     for f in context.get("filings") or []:
         name = f.get("corp_name") or f.get("stock_code")
         lines.append(f"📑 새 공시 리뷰: [{name}] {f.get('report_name') or ''}".rstrip())
@@ -405,19 +679,33 @@ def _context_lines(context: dict) -> list[str]:
         )
         lines.append(f"📅 오늘 주요 일정: {parts}")
 
+    alerts = context.get("calendar_alerts") or []
+    if alerts:
+        parts = ", ".join(_fmt_calendar_alert(item) for item in alerts)
+        lines.append(f"🔔 오늘 알림 켜진 캘린더: {parts}")
+
+    night = context.get("night_futures")
+    if night:
+        move = " ".join(p for p in (night.get("change"), night.get("change_pct")) if p)
+        stale = " · 이전값" if night.get("_stale") else ""
+        if move:
+            lines.append(f"🌙 야간선물: {night.get('value')} ({move}{stale})")
+        else:
+            lines.append(f"🌙 야간선물: {night.get('value')}{stale}")
+
     market = context.get("market") or []
     if market:
         lines.append("🌐 시장 지표:")
         lines.extend(market)
-    return lines
+    return lines + _requested_missing_context_lines(context, custom_instructions)
 
 
 def _nonempty_lines(text: str) -> list[str]:
     return [line.strip() for line in (text or "").splitlines() if line.strip()]
 
 
-def _template_body_lines(context: dict) -> list[str]:
-    body = _context_lines(context)
+def _template_body_lines(context: dict, custom_instructions: str | None = None) -> list[str]:
+    body = _context_lines(context, custom_instructions)
     if not body:
         body = ["오늘은 요약할 새 데이터가 없습니다."]
     movers = context.get("movers") or {}
@@ -432,36 +720,44 @@ def _ai_text_is_usable(text: str) -> bool:
     lines = _nonempty_lines(text)
     if len(lines) < MIN_USABLE_AI_LINES:
         return False
-    return any("데일리 브리핑" in line for line in lines[:2])
+    return any("브리핑" in line for line in lines[:2])
 
 
 def _briefing_stats(context: dict, text: str) -> dict:
     movers = context.get("movers") or {}
     mover_rows = (movers.get("top") or []) + (movers.get("bottom") or [])
     return {
+        "briefing_type": context.get("briefing_type") or DEFAULT_BRIEFING_TYPE,
         "text_lines": len(_nonempty_lines(text)),
         "context_lines": len(_context_lines(context)),
         "has_nav": bool(context.get("nav")),
         "mover_top": len(movers.get("top") or []),
         "mover_bottom": len(movers.get("bottom") or []),
         "mover_value_fallbacks": sum(1 for m in mover_rows if m.get("basis") == "market_value"),
+        "overseas_groups": len(context.get("overseas_groups") or []),
+        "has_night_futures": bool(context.get("night_futures")),
         "filings": len(context.get("filings") or []),
         "reports": len(context.get("reports") or []),
         "calendar": len(context.get("calendar") or []),
+        "calendar_alerts": len(context.get("calendar_alerts") or []),
         "market": len(context.get("market") or []),
         **(context.get("diagnostics") or {}),
     }
 
 
-def render_template_briefing(context: dict) -> str:
+def render_template_briefing(context: dict, custom_instructions: str | None = None) -> str:
     """LLM 없이 컨텍스트만으로 만든 브리핑 — OpenRouter 장애 시에도 발송된다."""
-    body = _template_body_lines(context)
-    return "\n".join([f"🌅 데일리 브리핑 ({context.get('date')})", *body])
+    body = _template_body_lines(context, custom_instructions)
+    title = context.get("briefing_title") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["title"]
+    return "\n".join([f"{title} ({context.get('date')})", *body])
 
 
 def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
-    data = "\n".join(_context_lines(context)) or "(데이터 없음)"
+    data = "\n".join(_context_lines(context, custom_instructions)) or "(데이터 없음)"
     custom = normalize_custom_instructions(custom_instructions)
+    title = context.get("briefing_title") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["title"]
+    name = context.get("briefing_name") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["name"]
+    focus = context.get("briefing_focus") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["focus"]
     custom_block = ""
     if custom:
         custom_block = f"""
@@ -477,11 +773,14 @@ def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
 {data}
 {custom_block}
 
-위 데이터로 아침 데일리 브리핑을 작성하세요.
-- 첫 줄: "🌅 데일리 브리핑 ({context.get('date')})"
-- 이어서: 어제 포트폴리오 변동 요약(원·%), 기여 상위/하위 종목, 새 공시·리포트가
-  있으면 한 줄씩, 오늘 주요 경제 일정, 마지막으로 오늘 확인할 포인트 1~2개.
-- 데이터가 없는 섹션은 건너뛰세요. 전체 10~15줄."""
+위 데이터로 {name}을 작성하세요.
+- 첫 줄: "{title} ({context.get('date')})"
+- 브리핑 성격: {focus}
+- 이어서: 어제 포트폴리오 변동 요약(원·%), 기여 상위/하위 종목, 해외 그룹 성과,
+  야간선물 일간 변동, 오늘 알림 켜진 캘린더 이벤트, 새 공시·리포트가 있으면 한 줄씩,
+  오늘 주요 경제 일정, 마지막으로 오늘 확인할 포인트 1~2개.
+- 사용자 추가 지시가 요구한 섹션은 데이터가 없더라도 '대상 없음' 또는 '현재 조회 불가'로 짧게 표시하세요.
+- 그 외 데이터가 없는 섹션은 건너뛰세요. 전체 10~15줄."""
 
 
 # ---------------------------------------------------------------------------
@@ -489,16 +788,17 @@ def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def generate_briefing(google_sub: str) -> dict:
+async def generate_briefing(google_sub: str, briefing_type: object = None) -> dict:
     """한 사용자의 브리핑 텍스트 생성.
 
     LLM 경로는 ai_client.post_chat_completion 을 쓰므로 usage ledger
     (feature='daily_briefing') 기록은 성공/실패 모두 자동이다. 어떤 이유로든
     LLM 텍스트를 못 얻으면 템플릿 렌더로 폴백 — 발송 자체는 항상 가능하다.
     """
-    context = await build_briefing_context(google_sub)
-    custom_instructions = await get_custom_instructions(google_sub)
-    fallback_text = render_template_briefing(context)
+    profile = briefing_profile(briefing_type)
+    context = await build_briefing_context(google_sub, profile["kind"])
+    custom_instructions = await get_custom_instructions(google_sub, profile["kind"])
+    fallback_text = render_template_briefing(context, custom_instructions)
     try:
         model = await ai_config.get_model_for_feature(FEATURE)
         payload = {
@@ -527,6 +827,8 @@ async def generate_briefing(google_sub: str) -> dict:
                     "model": result.get("model") or model,
                     "context": context,
                     "stats": _briefing_stats(context, text),
+                    "briefing_type": profile["kind"],
+                    "briefing_name": profile["name"],
                     "custom_instructions": bool(custom_instructions),
                 }
             logger.warning(
@@ -541,6 +843,8 @@ async def generate_briefing(google_sub: str) -> dict:
                 "fallback_reason": "ai_too_short",
                 "context": context,
                 "stats": _briefing_stats(context, fallback_text),
+                "briefing_type": profile["kind"],
+                "briefing_name": profile["name"],
                 "custom_instructions": bool(custom_instructions),
             }
         logger.warning("daily briefing LLM returned empty content user=%s", google_sub[:8])
@@ -553,14 +857,17 @@ async def generate_briefing(google_sub: str) -> dict:
         "fallback_reason": "ai_failed_or_empty",
         "context": context,
         "stats": _briefing_stats(context, fallback_text),
+        "briefing_type": profile["kind"],
+        "briefing_name": profile["name"],
         "custom_instructions": bool(custom_instructions),
     }
 
 
-async def generate_test_message(google_sub: str) -> dict:
+async def generate_test_message(google_sub: str, briefing_type: object = None) -> dict:
     """Build the exact one-off message used by the UI's test-send button."""
-    briefing = await generate_briefing(google_sub)
-    text = "🧪 데일리 브리핑 테스트 발송\n" + briefing["text"]
+    profile = briefing_profile(briefing_type)
+    briefing = await generate_briefing(google_sub, profile["kind"])
+    text = f"🧪 {profile['name']} 테스트 발송\n" + briefing["text"]
     return {**briefing, "text": text}
 
 
@@ -569,13 +876,14 @@ async def generate_test_message(google_sub: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def send_briefings() -> dict:
+async def send_briefings(briefing_type: object = None) -> dict:
     """옵트인 사용자 전체에 브리핑 생성·발송. 사용자별 결과는 system_events
     (source='daily_briefing')에 남고, 한 사용자의 실패가 다음 사용자를 막지
     않는다."""
     import observability
 
-    users = await opted_in_users()
+    profile = briefing_profile(briefing_type)
+    users = await opted_in_users(profile["kind"])
     sent = failed = skipped = 0
     for google_sub in users:
         try:
@@ -584,11 +892,16 @@ async def send_briefings() -> dict:
                 await observability.record_event(
                     "daily_briefing",
                     "send_skipped",
-                    details={"user": google_sub[:8], "reason": "no_active_channel"},
+                    details={
+                        "user": google_sub[:8],
+                        "briefing_type": profile["kind"],
+                        "briefing_name": profile["name"],
+                        "reason": "no_active_channel",
+                    },
                     wait=True,
                 )
                 continue
-            briefing = await generate_briefing(google_sub)
+            briefing = await generate_briefing(google_sub, profile["kind"])
             delivered = await channels.dispatch(google_sub, briefing["text"])
             if delivered > 0:
                 sent += 1
@@ -598,6 +911,8 @@ async def send_briefings() -> dict:
                     "send_ok",
                     details={
                         "user": google_sub[:8],
+                        "briefing_type": profile["kind"],
+                        "briefing_name": profile["name"],
                         "source": briefing["source"],
                         "model": briefing.get("model"),
                         "fallback_reason": briefing.get("fallback_reason"),
@@ -612,7 +927,12 @@ async def send_briefings() -> dict:
                     "daily_briefing",
                     "send_fail",
                     level="warning",
-                    details={"user": google_sub[:8], "reason": "no_channel_delivered"},
+                    details={
+                        "user": google_sub[:8],
+                        "briefing_type": profile["kind"],
+                        "briefing_name": profile["name"],
+                        "reason": "no_channel_delivered",
+                    },
                     wait=True,
                 )
         except Exception as exc:
@@ -623,9 +943,21 @@ async def send_briefings() -> dict:
                     "daily_briefing",
                     "send_fail",
                     level="error",
-                    details={"user": google_sub[:8], "error": str(exc)[:300]},
+                    details={
+                        "user": google_sub[:8],
+                        "briefing_type": profile["kind"],
+                        "briefing_name": profile["name"],
+                        "error": str(exc)[:300],
+                    },
                     wait=True,
                 )
             except Exception:
                 pass
-    return {"users": len(users), "sent": sent, "failed": failed, "skipped": skipped}
+    return {
+        "briefing_type": profile["kind"],
+        "briefing_name": profile["name"],
+        "users": len(users),
+        "sent": sent,
+        "failed": failed,
+        "skipped": skipped,
+    }

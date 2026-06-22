@@ -203,15 +203,18 @@ async def run_data_quality_check(request: Request):
 async def run_daily_briefing_send(request: Request):
     """AI 데일리 브리핑 배치 발송 한 사이클. Loopback-only.
 
-    daily-briefing.timer (평일 08:20 KST) 가 구동한다. 옵트인
-    (user_settings.daily_briefing_enabled='true') 사용자에게만 생성·발송하고,
+    daily-briefing*.timer 가 구동한다. kind 기본값은 morning이며,
+    각 슬롯의 옵트인(user_settings daily_briefing_*_enabled='true') 사용자에게만 생성·발송하고,
     사용자별 결과는 system_events(source='daily_briefing') 에 남는다.
     """
     _require_loopback(request)
     from services import daily_briefing
     try:
-        result = await daily_briefing.send_briefings()
+        kind = request.query_params.get("kind") or request.query_params.get("briefing_type")
+        result = await daily_briefing.send_briefings(kind)
         return {"ok": True, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("daily briefing send failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

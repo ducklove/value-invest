@@ -141,52 +141,86 @@ function pfAlertsKakaoBlock(kk) {
   </div>`;
 }
 
-// 데일리 브리핑(아침 배치 푸시) 옵트인 — 채널과 같은 모달에서 켜고 끈다.
+// AI 브리핑 슬롯 옵트인 — 채널과 같은 모달에서 켜고 끈다.
 // 서버 기본값 OFF. 발송은 연결된 채널(텔레그램/카카오)을 그대로 탄다.
-function pfAlertsBriefingBlock(br) {
-  const enabled = !!(br && br.enabled);
-  const instructions = (br && br.custom_instructions) || '';
+function pfAlertsBriefingItems(br) {
   const maxLen = Number((br && br.max_custom_instructions_chars) || 1200);
-  const onoff = enabled
-    ? '<span class="pf-alert-badge on">켜짐</span>'
-    : '<span class="pf-alert-badge off">꺼짐</span>';
-  return `<div class="pf-alert-channel pf-alert-briefing-card" title="평일 아침 08:20, 연결된 채널로 어제 포트폴리오 요약·새 공시/리포트·오늘 일정을 담은 AI 브리핑을 보냅니다">
-    <div class="pf-alert-briefing-head">
-      <span class="pf-alert-channel-name">🌅 데일리 브리핑</span>${onoff}
-      <span class="pf-alert-who">평일 08:20 발송</span>
-      <span class="pf-alert-channel-actions">
-        <button class="pf-alert-btn" type="button" onclick="pfAlertsSaveBriefingInstructions()">저장</button>
-        <button class="pf-alert-btn" type="button" onclick="pfAlertsTestBriefing()">테스트 발송</button>
-        <button class="pf-alert-btn" type="button" onclick="pfAlertsToggleBriefing(${enabled ? 'false' : 'true'})">${enabled ? '끄기' : '켜기'}</button>
-      </span>
-    </div>
-    <textarea class="pf-modal-input pf-alert-briefing-input" id="pfBriefingInstructions" maxlength="${isFinite(maxLen) ? maxLen : 1200}" placeholder="추가 지시: 배당·환율·반도체 비중 중심으로, 숫자는 보수적으로">${escapeHtml(instructions)}</textarea>
-    <div class="pf-alert-hint" id="pfBriefingHint"></div>
-  </div>`;
+  if (br && Array.isArray(br.briefings) && br.briefings.length) return br.briefings;
+  return [{
+    kind: 'morning',
+    name: '모닝 브리핑',
+    schedule_label: '평일 07:30',
+    description: '개장 전, 전일 결산과 오늘 확인할 이벤트를 정리합니다.',
+    enabled: !!(br && br.enabled),
+    custom_instructions: (br && br.custom_instructions) || '',
+    max_custom_instructions_chars: maxLen,
+  }];
 }
 
-async function pfAlertsToggleBriefing(enabled) {
+function pfBriefingInputId(kind) {
+  return kind === 'morning' ? 'pfBriefingInstructions' : `pfBriefingInstructions_${kind}`;
+}
+
+function pfBriefingHintId(kind) {
+  return kind === 'morning' ? 'pfBriefingHint' : `pfBriefingHint_${kind}`;
+}
+
+function pfAlertsBriefingBlock(br) {
+  const cards = pfAlertsBriefingItems(br).map((item) => {
+    const kind = item.kind || 'morning';
+    const enabled = !!item.enabled;
+    const instructions = item.custom_instructions || '';
+    const maxLen = Number(item.max_custom_instructions_chars || (br && br.max_custom_instructions_chars) || 1200);
+    const onoff = enabled
+      ? '<span class="pf-alert-badge on">켜짐</span>'
+      : '<span class="pf-alert-badge off">꺼짐</span>';
+    return `<div class="pf-alert-channel pf-alert-briefing-card" title="${escapeHtml(item.description || '')}">
+      <div class="pf-alert-briefing-head">
+        <span class="pf-alert-channel-name">${escapeHtml(item.name || '브리핑')}</span>${onoff}
+        <span class="pf-alert-who">${escapeHtml(item.schedule_label || '')} 발송</span>
+        <span class="pf-alert-channel-actions">
+          <button class="pf-alert-btn" type="button" onclick="pfAlertsSaveBriefingInstructions('${kind}')">저장</button>
+          <button class="pf-alert-btn" type="button" onclick="pfAlertsTestBriefing('${kind}')">테스트 발송</button>
+          <button class="pf-alert-btn" type="button" onclick="pfAlertsToggleBriefing('${kind}', ${enabled ? 'false' : 'true'})">${enabled ? '끄기' : '켜기'}</button>
+        </span>
+      </div>
+      <textarea class="pf-modal-input pf-alert-briefing-input" id="${pfBriefingInputId(kind)}" maxlength="${isFinite(maxLen) ? maxLen : 1200}" placeholder="추가 지시: 배당·환율·반도체 비중 중심으로, 숫자는 보수적으로">${escapeHtml(instructions)}</textarea>
+      <div class="pf-alert-hint" id="${pfBriefingHintId(kind)}"></div>
+    </div>`;
+  });
+  return `<div class="pf-alert-briefing-list">${cards.join('')}</div>`;
+}
+
+async function pfAlertsToggleBriefing(kind = 'morning', enabled) {
+  if (typeof kind === 'boolean' && enabled === undefined) {
+    enabled = kind;
+    kind = 'morning';
+  }
   try {
-    const instructionsEl = document.getElementById('pfBriefingInstructions');
+    const instructionsEl = document.getElementById(pfBriefingInputId(kind));
     const custom_instructions = instructionsEl ? instructionsEl.value : undefined;
-    const resp = await pfAlertsApi('/briefing', { method: 'PUT', body: JSON.stringify({ enabled, custom_instructions }) });
+    const resp = await pfAlertsApi('/briefing', { method: 'PUT', body: JSON.stringify({ kind, enabled, custom_instructions }) });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
   } catch (e) {
-    reportApiError(e, '데일리 브리핑 설정');
+    reportApiError(e, '브리핑 설정');
   } finally {
     pfAlertsLoadChannels();
   }
 }
 
-async function pfAlertsSaveBriefingInstructions(options = {}) {
-  const hint = document.getElementById('pfBriefingHint');
-  const custom_instructions = ((document.getElementById('pfBriefingInstructions') || {}).value || '');
+async function pfAlertsSaveBriefingInstructions(kind = 'morning', options = {}) {
+  if (kind && typeof kind === 'object') {
+    options = kind;
+    kind = 'morning';
+  }
+  const hint = document.getElementById(pfBriefingHintId(kind));
+  const custom_instructions = ((document.getElementById(pfBriefingInputId(kind)) || {}).value || '');
   if (hint) hint.textContent = '저장 중…';
   try {
     const resp = await pfAlertsApi('/briefing', {
       method: 'PUT',
-      body: JSON.stringify({ custom_instructions }),
+      body: JSON.stringify({ kind, custom_instructions }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
@@ -199,18 +233,18 @@ async function pfAlertsSaveBriefingInstructions(options = {}) {
   }
 }
 
-async function pfAlertsTestBriefing() {
-  const hint = document.getElementById('pfBriefingHint');
+async function pfAlertsTestBriefing(kind = 'morning') {
+  const hint = document.getElementById(pfBriefingHintId(kind));
   try {
-    await pfAlertsSaveBriefingInstructions({ rethrow: true });
+    await pfAlertsSaveBriefingInstructions(kind, { rethrow: true });
     if (hint) hint.textContent = '브리핑 생성 및 발송 중…';
-    const resp = await pfAlertsApi('/briefing/test', { method: 'POST', body: '{}' });
+    const resp = await pfAlertsApi('/briefing/test', { method: 'POST', body: JSON.stringify({ kind }) });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     const source = data.source === 'ai' ? 'AI' : '템플릿';
     if (hint) hint.textContent = `테스트 브리핑을 보냈습니다. (${source}, ${data.sent || 0}개 채널)`;
   } catch (e) {
-    reportApiError(e, '데일리 브리핑 테스트 발송');
+    reportApiError(e, '브리핑 테스트 발송');
   }
 }
 

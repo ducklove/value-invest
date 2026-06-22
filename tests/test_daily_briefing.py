@@ -124,6 +124,7 @@ class BriefingContextTests(DailyBriefingHarness):
         }
         with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value=calendar_payload)), \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=["- KOSPI: 2900 (+0.5%)"])), \
+             patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
             ctx = await daily_briefing.build_briefing_context("u1")
 
@@ -155,7 +156,7 @@ class BriefingContextTests(DailyBriefingHarness):
 
         # 템플릿 렌더도 핵심 수치를 담는다 (LLM 폴백 본문)
         text = daily_briefing.render_template_briefing(ctx)
-        self.assertTrue(text.startswith("🌅 데일리 브리핑"))
+        self.assertTrue(text.startswith("🌅 모닝 브리핑"))
         self.assertIn("삼성전자", text)
         self.assertIn("+5.00%", text)
         self.assertIn("가격 +2.0%", text)
@@ -165,6 +166,7 @@ class BriefingContextTests(DailyBriefingHarness):
         await self._seed_snapshots()
         with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value={})):
             ctx = await daily_briefing.build_briefing_context("u1")
 
@@ -182,12 +184,91 @@ class BriefingContextTests(DailyBriefingHarness):
     async def test_context_with_empty_db_is_safe(self):
         await self._seed_user("u-empty")
         with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
+             patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])):
             ctx = await daily_briefing.build_briefing_context("u-empty")
         self.assertIsNone(ctx["nav"])
         self.assertEqual(ctx["movers"], {"top": [], "bottom": []})
         text = daily_briefing.render_template_briefing(ctx)
-        self.assertIn("데일리 브리핑", text)
+        self.assertIn("모닝 브리핑", text)
+
+    async def test_template_reflects_requested_custom_sections_with_data(self):
+        ctx = {
+            "date": "2026-06-23",
+            "nav": None,
+            "movers": {"top": [], "bottom": []},
+            "overseas_groups": [
+                {
+                    "group_name": "해외주식",
+                    "market_value": 1_100_000,
+                    "change_krw": 100_000,
+                    "change_pct": 10.0,
+                    "weight_pct": 22.0,
+                }
+            ],
+            "calendar_alerts": [
+                {
+                    "time": "21:30",
+                    "country_name": "미국",
+                    "event": "소비자물가지수(CPI)",
+                    "forecast": "3.1%",
+                    "previous": "3.0%",
+                }
+            ],
+            "night_futures": {"value": "431.20", "change": "+1.20", "change_pct": "+0.28%"},
+            "filings": [],
+            "reports": [],
+            "calendar": [],
+            "market": [],
+        }
+        instructions = "해외 그룹의 성과를 요약해줘. 야간선물 일간 상승률을 알려줘. 오늘 알람이 켜져있는 캘린더 이벤트 알려줘."
+
+        text = daily_briefing.render_template_briefing(ctx, instructions)
+
+        self.assertIn("해외 그룹 성과", text)
+        self.assertIn("해외주식", text)
+        self.assertIn("+10.00%", text)
+        self.assertIn("야간선물", text)
+        self.assertIn("+0.28%", text)
+        self.assertIn("오늘 알림 켜진 캘린더", text)
+        self.assertIn("소비자물가지수(CPI)", text)
+
+    async def test_template_marks_requested_custom_sections_when_data_missing(self):
+        ctx = {
+            "date": "2026-06-23",
+            "nav": None,
+            "movers": {"top": [], "bottom": []},
+            "overseas_groups": [],
+            "calendar_alerts": [],
+            "night_futures": None,
+            "filings": [],
+            "reports": [],
+            "calendar": [],
+            "market": [],
+        }
+        instructions = "해외 그룹의 성과를 요약해줘. 야간선물 일간 상승률을 알려줘. 오늘 알람이 켜져있는 캘린더 이벤트 알려줘."
+
+        text = daily_briefing.render_template_briefing(ctx, instructions)
+
+        self.assertIn("해외 그룹 데이터를 찾지 못했습니다", text)
+        self.assertIn("야간선물: 현재 조회 가능한 값이 없습니다", text)
+        self.assertIn("오늘 예정된 알림 설정 이벤트가 없습니다", text)
+
+    async def test_template_uses_briefing_profile_title(self):
+        ctx = {
+            "date": "2026-06-23",
+            "briefing_type": "market_close",
+            "briefing_name": "클로징 브리핑",
+            "briefing_title": "🔔 클로징 브리핑",
+            "nav": None,
+            "movers": {"top": [], "bottom": []},
+            "filings": [],
+            "reports": [],
+            "calendar": [],
+            "market": [],
+        }
+        text = daily_briefing.render_template_briefing(ctx)
+        self.assertTrue(text.startswith("🔔 클로징 브리핑"))
 
 
 class GenerateBriefingTests(DailyBriefingHarness):
@@ -198,6 +279,9 @@ class GenerateBriefingTests(DailyBriefingHarness):
             "nav": {"date": "2026-06-09", "prev_date": "2026-06-08", "total_value": 1_050_000,
                     "prev_value": 1_000_000, "change_krw": 50_000, "change_pct": 5.0},
             "movers": {"top": [], "bottom": []},
+            "overseas_groups": [],
+            "calendar_alerts": [],
+            "night_futures": None,
             "filings": [], "reports": [], "calendar": [], "market": [],
         }
 
@@ -214,8 +298,24 @@ class GenerateBriefingTests(DailyBriefingHarness):
              patch.dict("os.environ", {}, clear=True):
             briefing = await daily_briefing.generate_briefing("u1")
         self.assertEqual(briefing["source"], "template")
-        self.assertTrue(briefing["text"].startswith("🌅 데일리 브리핑"))
+        self.assertTrue(briefing["text"].startswith("🌅 모닝 브리핑"))
         self.assertIn("+5.00%", briefing["text"])
+
+    async def test_template_fallback_uses_saved_custom_instructions(self):
+        await self._seed_user("u1")
+        await daily_briefing.set_custom_instructions(
+            "u1",
+            "해외 그룹의 성과를 요약해줘. 야간선물 일간 상승률을 알려줘. 오늘 알람이 켜져있는 캘린더 이벤트 알려줘.",
+        )
+        with patch.object(daily_briefing, "build_briefing_context", new=AsyncMock(return_value=self._minimal_context())), \
+             patch.dict("os.environ", {}, clear=True):
+            briefing = await daily_briefing.generate_briefing("u1")
+
+        self.assertEqual(briefing["source"], "template")
+        self.assertTrue(briefing["custom_instructions"])
+        self.assertIn("해외 그룹 데이터를 찾지 못했습니다", briefing["text"])
+        self.assertIn("야간선물: 현재 조회 가능한 값이 없습니다", briefing["text"])
+        self.assertIn("오늘 예정된 알림 설정 이벤트가 없습니다", briefing["text"])
 
     async def test_llm_failure_falls_back_and_records_usage(self):
         await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
@@ -289,7 +389,7 @@ class GenerateBriefingTests(DailyBriefingHarness):
             briefing = await daily_briefing.generate_briefing("u1")
         self.assertEqual(briefing["source"], "template")
         self.assertEqual(briefing["fallback_reason"], "ai_too_short")
-        self.assertTrue(briefing["text"].startswith("🌅 데일리 브리핑"))
+        self.assertTrue(briefing["text"].startswith("🌅 모닝 브리핑"))
         self.assertGreaterEqual(briefing["stats"]["text_lines"], 3)
         rows = await self._usage_rows()
         self.assertEqual(rows[0]["ok"], 1)
@@ -310,8 +410,18 @@ class SendBriefingsTests(DailyBriefingHarness):
              patch.object(daily_briefing.channels, "dispatch", new=dispatch):
             result = await daily_briefing.send_briefings()
 
-        self.assertEqual(result, {"users": 1, "sent": 1, "failed": 0, "skipped": 0})
-        generate.assert_awaited_once_with("u1")
+        self.assertEqual(
+            result,
+            {
+                "briefing_type": "morning",
+                "briefing_name": "모닝 브리핑",
+                "users": 1,
+                "sent": 1,
+                "failed": 0,
+                "skipped": 0,
+            },
+        )
+        generate.assert_awaited_once_with("u1", "morning")
         dispatch.assert_awaited_once_with("u1", "본문")
         events = await system_events_repo.get_system_events(source="daily_briefing")
         self.assertEqual(len(events), 1)
@@ -333,7 +443,7 @@ class SendBriefingsTests(DailyBriefingHarness):
             await self._seed_user(sub)
             await daily_briefing.set_enabled(sub, True)
 
-        async def _generate(google_sub):
+        async def _generate(google_sub, briefing_type="morning"):
             if google_sub == "u1":
                 raise RuntimeError("LLM/DB exploded")
             return {"text": "본문", "source": "ai", "model": "m"}
@@ -376,6 +486,20 @@ class OptInSettingTests(DailyBriefingHarness):
         # K/V 저장 확인 — 별도 테이블 없이 user_settings 를 쓴다
         raw = await user_settings_repo.get_user_setting("u1", daily_briefing.OPT_IN_KEY)
         self.assertEqual(raw, "false")
+
+    async def test_additional_briefing_slots_are_independent(self):
+        await self._seed_user("u1")
+        await daily_briefing.set_enabled("u1", True, "market_close")
+        await daily_briefing.set_custom_instructions("u1", "마감 수급 중심", "market_close")
+
+        self.assertFalse(await daily_briefing.is_enabled("u1"))
+        self.assertTrue(await daily_briefing.is_enabled("u1", "market_close"))
+        self.assertEqual(await daily_briefing.opted_in_users(), [])
+        self.assertEqual(await daily_briefing.opted_in_users("market_close"), ["u1"])
+        self.assertEqual(
+            await daily_briefing.get_custom_instructions("u1", "market_close"),
+            "마감 수급 중심",
+        )
 
     async def test_custom_instructions_roundtrip(self):
         await self._seed_user("u1")
@@ -427,8 +551,11 @@ class BriefingRouteTests(DailyBriefingHarness):
     async def test_get_briefing_defaults_off(self):
         resp = await self.client.get("/api/notifications/briefing")
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(resp.json()["enabled"])
-        self.assertEqual(resp.json()["custom_instructions"], "")
+        body = resp.json()
+        self.assertFalse(body["enabled"])
+        self.assertEqual(body["custom_instructions"], "")
+        self.assertEqual([item["kind"] for item in body["briefings"]], ["morning", "market_close", "night"])
+        self.assertEqual(body["briefings"][1]["name"], "클로징 브리핑")
 
     async def test_put_requires_active_channel(self):
         resp = await self.client.put("/api/notifications/briefing", json={"enabled": True})
@@ -459,10 +586,32 @@ class BriefingRouteTests(DailyBriefingHarness):
         channels_resp = await self.client.get("/api/notifications/channels")
         self.assertTrue(channels_resp.json()["daily_briefing"]["enabled"])
         self.assertEqual(channels_resp.json()["daily_briefing"]["custom_instructions"], "리스크 요인을 먼저")
+        self.assertEqual(len(channels_resp.json()["daily_briefing"]["briefings"]), 3)
         # 끄기는 채널 유무와 무관하게 항상 가능
         resp = await self.client.put("/api/notifications/briefing", json={"enabled": False})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(await daily_briefing.is_enabled("u1"))
+
+    async def test_put_additional_slot_roundtrip_with_channel(self):
+        await self._connect_telegram()
+        resp = await self.client.put(
+            "/api/notifications/briefing",
+            json={
+                "kind": "night",
+                "enabled": True,
+                "custom_instructions": "해외장과 야간선물 먼저",
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertFalse(await daily_briefing.is_enabled("u1"))
+        self.assertTrue(await daily_briefing.is_enabled("u1", "night"))
+        self.assertEqual(
+            await daily_briefing.get_custom_instructions("u1", "night"),
+            "해외장과 야간선물 먼저",
+        )
+        night = next(item for item in resp.json()["briefings"] if item["kind"] == "night")
+        self.assertTrue(night["enabled"])
+        self.assertEqual(night["custom_instructions"], "해외장과 야간선물 먼저")
 
     async def test_test_send_requires_active_channel(self):
         resp = await self.client.post("/api/notifications/briefing/test")
@@ -471,7 +620,9 @@ class BriefingRouteTests(DailyBriefingHarness):
     async def test_test_send_generates_and_dispatches(self):
         await self._connect_telegram()
         generated = {
-            "text": "🧪 데일리 브리핑 테스트 발송\n🌅 데일리 브리핑\n본문",
+            "text": "🧪 나이트 브리핑 테스트 발송\n🌙 나이트 브리핑\n본문",
+            "briefing_type": "night",
+            "briefing_name": "나이트 브리핑",
             "source": "ai",
             "model": "test/model",
             "stats": {"text_lines": 3},
@@ -479,11 +630,12 @@ class BriefingRouteTests(DailyBriefingHarness):
         from routes import notifications as notif_route
         with patch.object(daily_briefing, "generate_test_message", new=AsyncMock(return_value=generated)) as gen, \
              patch.object(notif_route.channels, "dispatch", new=AsyncMock(return_value=1)) as dispatch:
-            resp = await self.client.post("/api/notifications/briefing/test")
+            resp = await self.client.post("/api/notifications/briefing/test", json={"kind": "night"})
 
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["source"], "ai")
-        gen.assert_awaited_once_with("u1")
+        self.assertEqual(resp.json()["briefing_type"], "night")
+        gen.assert_awaited_once_with("u1", "night")
         dispatch.assert_awaited_once_with("u1", generated["text"])
 
 
@@ -512,6 +664,24 @@ class InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
              patch.object(daily_briefing, "send_briefings", new=AsyncMock(return_value=payload)):
             result = await internal.run_daily_briefing_send(request)
         self.assertEqual(result, {"ok": True, **payload})
+
+    async def test_loopback_passes_briefing_kind(self):
+        request = _request("/api/internal/daily-briefing/send")
+        request.scope["query_string"] = b"kind=market_close"
+        payload = {
+            "briefing_type": "market_close",
+            "briefing_name": "클로징 브리핑",
+            "users": 1,
+            "sent": 1,
+            "failed": 0,
+            "skipped": 0,
+        }
+        send = AsyncMock(return_value=payload)
+        with patch.dict("os.environ", {}, clear=True), \
+             patch.object(daily_briefing, "send_briefings", new=send):
+            result = await internal.run_daily_briefing_send(request)
+        self.assertEqual(result, {"ok": True, **payload})
+        send.assert_awaited_once_with("market_close")
 
     async def test_internal_token_accepted_behind_proxy(self):
         request = _request(

@@ -1,0 +1,21 @@
+[Unit]
+Description=Value Invest AI market close briefing push
+After=network.target
+OnFailure=value-invest-notify@%n.service
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+# 클로징 브리핑 배치 — 정규장 마감 직후 옵트인 사용자에게 국내장 마감 흐름과
+# 보유 종목 변동을 요약한다. 웹 프로세스 안(loopback 내부 엔드포인트)에서
+# 실행되어 따뜻한 캐시·동일한 DB 기준을 공유한다.
+ExecStart=/usr/bin/curl -fsSk --max-time 600 -X POST https://127.0.0.1:3691/api/internal/daily-briefing/send?kind=market_close
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+MemoryMax=100M
+CPUQuota=30%
+TasksMax=20

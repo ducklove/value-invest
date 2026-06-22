@@ -121,6 +121,35 @@ test("채널: 텔레그램 연결됨 행 + 카카오 등록 폼", () => {
       enabled: true,
       custom_instructions: "환율 영향부터",
       max_custom_instructions_chars: 1200,
+      briefings: [
+        {
+          kind: "morning",
+          name: "모닝 브리핑",
+          schedule_label: "평일 07:30",
+          description: "개장 전",
+          enabled: true,
+          custom_instructions: "환율 영향부터",
+          max_custom_instructions_chars: 1200,
+        },
+        {
+          kind: "market_close",
+          name: "클로징 브리핑",
+          schedule_label: "평일 15:35",
+          description: "장마감",
+          enabled: false,
+          custom_instructions: "",
+          max_custom_instructions_chars: 1200,
+        },
+        {
+          kind: "night",
+          name: "나이트 브리핑",
+          schedule_label: "평일 22:20",
+          description: "밤",
+          enabled: false,
+          custom_instructions: "",
+          max_custom_instructions_chars: 1200,
+        },
+      ],
     },
   };
   w.pfAlertsRenderChannels();
@@ -129,9 +158,13 @@ test("채널: 텔레그램 연결됨 행 + 카카오 등록 폼", () => {
   assert.match(html, /테스트/);                 // 텔레그램 연결됨 -> 테스트 버튼
   assert.ok(html.includes('id="pfKkKey"'));     // 카카오 미연결 -> REST 키 입력
   assert.match(html, /kakao\/callback/);        // Redirect URI 안내
-  assert.match(html, /데일리 브리핑/);
+  assert.match(html, /모닝 브리핑/);
+  assert.match(html, /클로징 브리핑/);
+  assert.match(html, /나이트 브리핑/);
   assert.match(html, /테스트 발송/);
   assert.equal(w.document.getElementById("pfBriefingInstructions").value, "환율 영향부터");
+  assert.ok(w.document.getElementById("pfBriefingInstructions_market_close"));
+  assert.ok(w.document.getElementById("pfBriefingInstructions_night"));
 });
 
 test("텔레그램 미연결 행은 봇 토큰 등록 폼을 보인다", () => {

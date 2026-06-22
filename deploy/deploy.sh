@@ -34,6 +34,10 @@ REPO_UNITS=(
   "data-quality.timer"
   "daily-briefing.service"
   "daily-briefing.timer"
+  "daily-briefing-market-close.service"
+  "daily-briefing-market-close.timer"
+  "daily-briefing-night.service"
+  "daily-briefing-night.timer"
   "deploy/value-invest.service"
 )
 

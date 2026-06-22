@@ -37,6 +37,22 @@ def _require_user(user):
     return user
 
 
+async def _briefing_payload(daily_briefing, google_sub: str, *, ok: bool | None = None) -> dict:
+    settings = await daily_briefing.briefing_settings(google_sub)
+    primary = next(
+        (item for item in settings if item["kind"] == daily_briefing.DEFAULT_BRIEFING_TYPE),
+        settings[0],
+    )
+    payload = {
+        **primary,
+        "briefings": settings,
+        "max_custom_instructions_chars": daily_briefing.MAX_CUSTOM_INSTRUCTIONS_CHARS,
+    }
+    if ok is not None:
+        payload["ok"] = ok
+    return payload
+
+
 # --- Channels ---------------------------------------------------------------
 
 @router.get("/channels")
@@ -62,16 +78,10 @@ async def get_channels(request: Request):
             })
     # 데일리 브리핑 옵트인도 같은 응답에 실어 알림 설정 모달이 한 번에 그린다.
     from services import daily_briefing
-    briefing_enabled = await daily_briefing.is_enabled(user["google_sub"])
-    briefing_instructions = await daily_briefing.get_custom_instructions(user["google_sub"])
     return {
         "telegram": telegram_status,
         "kakao": kakao_status,
-        "daily_briefing": {
-            "enabled": briefing_enabled,
-            "custom_instructions": briefing_instructions,
-            "max_custom_instructions_chars": daily_briefing.MAX_CUSTOM_INSTRUCTIONS_CHARS,
-        },
+        "daily_briefing": await _briefing_payload(daily_briefing, user["google_sub"]),
     }
 
 
@@ -81,16 +91,12 @@ async def get_channels(request: Request):
 async def get_briefing_setting(request: Request):
     user = _require_user(await get_current_user(request))
     from services import daily_briefing
-    return {
-        "enabled": await daily_briefing.is_enabled(user["google_sub"]),
-        "custom_instructions": await daily_briefing.get_custom_instructions(user["google_sub"]),
-        "max_custom_instructions_chars": daily_briefing.MAX_CUSTOM_INSTRUCTIONS_CHARS,
-    }
+    return await _briefing_payload(daily_briefing, user["google_sub"])
 
 
 @router.put("/briefing")
 async def put_briefing_setting(request: Request, payload: dict = Body(...)):
-    """아침 데일리 브리핑 설정.
+    """AI 브리핑 슬롯 설정.
 
     켤 때는 받을 채널이 있어야 의미가 있으므로 활성 채널이 없으면 409
     (캘린더 구독과 동일한 규칙). 추가 지시문은 채널 연결 전에도 저장 가능하다.
@@ -98,10 +104,16 @@ async def put_briefing_setting(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
     from services import daily_briefing
     sub = user["google_sub"]
+    try:
+        briefing_type = daily_briefing.normalize_briefing_type(
+            payload.get("kind") or payload.get("briefing_type")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if "enabled" in payload:
         enabled = bool(payload.get("enabled"))
     else:
-        enabled = await daily_briefing.is_enabled(sub)
+        enabled = await daily_briefing.is_enabled(sub, briefing_type)
 
     if "enabled" in payload and enabled and not await channels.has_active_channel(sub):
         raise HTTPException(
@@ -109,35 +121,38 @@ async def put_briefing_setting(request: Request, payload: dict = Body(...)):
             detail="브리핑을 받으려면 먼저 텔레그램 또는 카카오톡을 연결하세요.",
         )
     if "custom_instructions" in payload:
-        await daily_briefing.set_custom_instructions(sub, payload.get("custom_instructions"))
+        await daily_briefing.set_custom_instructions(sub, payload.get("custom_instructions"), briefing_type)
     if "enabled" in payload:
-        await daily_briefing.set_enabled(sub, enabled)
-    return {
-        "ok": True,
-        "enabled": await daily_briefing.is_enabled(sub),
-        "custom_instructions": await daily_briefing.get_custom_instructions(sub),
-        "max_custom_instructions_chars": daily_briefing.MAX_CUSTOM_INSTRUCTIONS_CHARS,
-    }
+        await daily_briefing.set_enabled(sub, enabled, briefing_type)
+    return await _briefing_payload(daily_briefing, sub, ok=True)
 
 
 @router.post("/briefing/test")
-async def test_daily_briefing(request: Request):
+async def test_daily_briefing(request: Request, payload: dict = Body(default={})):
     """Generate today's briefing for this user and send it to active channels."""
     user = _require_user(await get_current_user(request))
     from services import daily_briefing
     sub = user["google_sub"]
+    try:
+        briefing_type = daily_briefing.normalize_briefing_type(
+            (payload or {}).get("kind") or (payload or {}).get("briefing_type")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not await channels.has_active_channel(sub):
         raise HTTPException(
             status_code=409,
             detail="테스트 발송을 하려면 먼저 텔레그램 또는 카카오톡을 연결하세요.",
         )
-    briefing = await daily_briefing.generate_test_message(sub)
+    briefing = await daily_briefing.generate_test_message(sub, briefing_type)
     delivered = await channels.dispatch(sub, briefing["text"])
     if delivered <= 0:
         raise HTTPException(status_code=502, detail="연결된 채널로 브리핑을 보내지 못했습니다.")
     return {
         "ok": True,
         "sent": delivered,
+        "briefing_type": briefing.get("briefing_type"),
+        "briefing_name": briefing.get("briefing_name"),
         "source": briefing.get("source"),
         "model": briefing.get("model"),
         "fallback_reason": briefing.get("fallback_reason"),
