@@ -2836,8 +2836,9 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   background: var(--primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 
-/* 조건 알림 모달 — 기존 .pf-modal 위에 얹는 폼/리스트 전용 스타일. */
-.pf-alerts-modal { max-width: 600px; }
+/* 조건 알림 모달 — 브리핑 슬롯과 규칙이 늘어나 넓은 작업면을 쓴다. */
+.pf-alerts-modal { width: min(96vw, 920px); max-width: 920px; }
+.pf-alerts-modal .pf-modal-body { max-height: min(78vh, 760px); }
 .pf-alert-section { padding: 4px 0 14px; }
 .pf-alert-section + .pf-alert-section { border-top: 1px solid var(--border); padding-top: 14px; }
 .pf-alert-section h4 { margin: 0 0 10px; font-size: 13px; color: var(--text-secondary); font-weight: 600; }
@@ -2942,6 +2943,12 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 .sa-toggle-row { align-items: center; }
 .sa-toggle.on { background: rgba(34,197,94,0.14); color: #16a34a; border-color: #16a34a; }
 .pf-alert-form-row .sa-feed-select { flex: 0 0 auto; min-width: 150px; }
+
+@media (max-width: 700px) {
+  .pf-alerts-modal { width: 98vw; min-width: 0; }
+  .pf-alerts-modal .pf-modal-body { max-height: 82vh; padding-left: 14px; padding-right: 14px; }
+  .pf-alert-channel-actions { margin-left: 0; width: 100%; }
+}
 
 /* 영역지도 전용 모달 — 반드시 위의 .pf-modal / .pf-modal-body 정의들
    뒤에 위치해야 함. CSS 는 같은 specificity 일 때 뒤에 선언된 규칙이

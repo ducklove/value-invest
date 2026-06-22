@@ -209,10 +209,42 @@ def performance_lines(nav_history: list[dict]) -> list[str]:
     return perf_lines
 
 
+MARKET_SUMMARY_LABELS = {
+    "USD_KRW": "환율",
+    "US10Y": "미국10년물",
+    "OIL_CL": "유가",
+}
+
+
+def _market_summary_label(code: str, item: dict) -> str:
+    return MARKET_SUMMARY_LABELS.get(code) or item.get("label") or code
+
+
+def _market_summary_change(item: dict) -> str:
+    raw = str(item.get("change_pct") or item.get("change") or "").strip()
+    if not raw:
+        return ""
+    raw = raw.removeprefix("up").removeprefix("down").strip()
+    direction = str(item.get("direction") or "").strip().lower()
+    if direction == "up":
+        return f"▲{raw.lstrip('+-')}"
+    if direction == "down":
+        return f"▼{raw.lstrip('+-')}"
+    return raw
+
+
 async def market_summary_lines() -> list[str]:
     try:
         market = await market_indicators.fetch_indicators(["KOSPI", "KOSDAQ", "USD_KRW", "SPX", "US10Y", "OIL_CL"])
-        return [f"- {k}: {v.get('value','')} ({v.get('direction','')}{v.get('change_pct','')})" for k, v in market.items()]
+        lines = []
+        for code, item in market.items():
+            value = item.get("value", "")
+            if value in (None, ""):
+                continue
+            change = _market_summary_change(item)
+            suffix = f" ({change})" if change else ""
+            lines.append(f"- {_market_summary_label(code, item)}: {value}{suffix}")
+        return lines
     except Exception:
         return ["시장 데이터를 가져올 수 없습니다."]
 

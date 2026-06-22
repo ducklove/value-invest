@@ -110,6 +110,22 @@ def test_holdings_summary_missing_quote_keeps_line_without_value():
     assert total == 0
 
 
+async def test_market_summary_lines_use_readable_labels_and_direction_marks():
+    payload = {
+        "USD_KRW": {"value": "1,380.50", "change_pct": "0.12%", "direction": "down"},
+        "US10Y": {"value": "4.25", "change_pct": "0.03%", "direction": "up"},
+        "OIL_CL": {"value": "75.20", "change_pct": "+1.10%", "direction": ""},
+    }
+    with patch.object(ai_analysis.market_indicators, "fetch_indicators", new=AsyncMock(return_value=payload)):
+        lines = await ai_analysis.market_summary_lines()
+
+    assert lines == [
+        "- 환율: 1,380.50 (▼0.12%)",
+        "- 미국10년물: 4.25 (▲0.03%)",
+        "- 유가: 75.20 (+1.10%)",
+    ]
+
+
 def test_performance_lines_short_history_nav_only():
     assert ai_analysis.performance_lines([]) == []
     lines = ai_analysis.performance_lines([

@@ -195,6 +195,17 @@ test("규칙 목록: 블랭킷/포트폴리오 라벨", () => {
   assert.match(html, /보유 전 종목 — 상한가·하한가 도달 시/);
 });
 
+test("규칙 목록: 총평가액 라벨에는 원 suffix가 없다", () => {
+  const w = loadAlerts([SAMSUNG]);
+  w.PfAlerts.alerts = [
+    { id: 9, alert_type: "nav_above", scope: "portfolio", threshold: 100000000, enabled: 1, armed: 1, note: "" },
+  ];
+  w.pfAlertsRenderList();
+  const html = w.document.getElementById("pfAlertList").innerHTML;
+  assert.match(html, /총평가액 100,000,000 이상/);
+  assert.doesNotMatch(html, /100,000,000원/);
+});
+
 test("카테고리에 신규 공시/리포트(전체) 옵션 + 목록 라벨", () => {
   const w = loadAlerts([SAMSUNG]);
   w.pfAlertsSetCategory("target");

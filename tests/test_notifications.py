@@ -635,6 +635,14 @@ class AlertEngineHarness(TempDbMixin):
         self.assertIn("+1.00%", captured["text"])
         self.assertNotIn("e+", captured["text"].lower())  # 비정상 거대값 아님
 
+    async def test_portfolio_nav_message_omits_won_suffix(self):
+        msg = engine._format_portfolio_message(
+            {"alert_type": "nav_above", "threshold": 100000000, "note": ""},
+            101000000,
+        )
+        self.assertIn("현재 101,000,000 (기준 100,000,000 이상)", msg)
+        self.assertNotIn("원", msg)
+
     async def test_portfolio_daily_change_excludes_cashflow(self):
         db = await cache.get_db()
         await db.execute(

@@ -128,7 +128,7 @@ class BriefingContextTests(DailyBriefingHarness):
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
             ctx = await daily_briefing.build_briefing_context("u1")
 
-        # 어제 NAV 변화 (원·%)
+        # 어제 NAV 변화 (금액·%)
         self.assertEqual(ctx["nav"]["date"], d_last)
         self.assertEqual(ctx["nav"]["prev_date"], d_prev)
         self.assertAlmostEqual(ctx["nav"]["change_krw"], 50_000)
@@ -150,6 +150,7 @@ class BriefingContextTests(DailyBriefingHarness):
         # 신규 공시 리뷰 / 리포트
         self.assertEqual(ctx["filings"][0]["report_name"], "분기보고서 (2026.03)")
         self.assertEqual(ctx["reports"][0]["title"], "HBM 사이클 점검")
+        self.assertEqual(ctx["reports"][0]["stock_name"], "SK하이닉스")
         # 오늘 경제 일정 + 시장 지표
         self.assertEqual(ctx["calendar"][0]["event"], "소비자물가지수(CPI)")
         self.assertIn("- KOSPI: 2900 (+0.5%)", ctx["market"])
@@ -158,6 +159,10 @@ class BriefingContextTests(DailyBriefingHarness):
         text = daily_briefing.render_template_briefing(ctx)
         self.assertTrue(text.startswith("🌅 모닝 브리핑"))
         self.assertIn("삼성전자", text)
+        self.assertIn("SK하이닉스", text)
+        self.assertNotIn("[000660]", text)
+        self.assertIn("총평가 1,050,000", text)
+        self.assertNotIn("총평가 1,050,000원", text)
         self.assertIn("+5.00%", text)
         self.assertIn("가격 +2.0%", text)
 
@@ -230,7 +235,7 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertIn("+10.00%", text)
         self.assertIn("야간선물", text)
         self.assertIn("+0.28%", text)
-        self.assertIn("오늘 알림 켜진 캘린더", text)
+        self.assertIn("오늘의 일정", text)
         self.assertIn("소비자물가지수(CPI)", text)
 
     async def test_template_marks_requested_custom_sections_when_data_missing(self):
@@ -372,6 +377,7 @@ class GenerateBriefingTests(DailyBriefingHarness):
         user_prompt = payload["messages"][1]["content"]
         self.assertIn("사용자 추가 지시", user_prompt)
         self.assertIn("환율 영향과 반도체 업황", user_prompt)
+        self.assertIn("금액은 숫자만 표시하고 통화 단위 '원'은 붙이지 마세요.", user_prompt)
         self.assertEqual(briefing["source"], "ai")
         self.assertTrue(briefing["custom_instructions"])
 

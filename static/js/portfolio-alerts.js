@@ -394,7 +394,7 @@ function pfAlertsRenderForm() {
       + '<span class="pf-alert-form-note">이상 등락 시</span>';
   } else if (cat === 'nav') {
     valueField = pfAlertsDirSelect()
-      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="총평가액(원)">';
+      + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="총평가액">';
   } else { // daily (포트폴리오 전체)
     valueField = pfAlertsDirSelect()
       + '<input class="pf-modal-input pf-alert-threshold" id="pfAlertThreshold" type="number" step="any" placeholder="등락률(%)">';
@@ -516,7 +516,7 @@ function pfAlertsLabel(rule) {
     return `${escapeHtml(pfAlertsStockName(rule.stock_code))} 현재가 ${pfFmtNum(rule.threshold)} ${dir}`;
   }
   if (t === 'nav_above' || t === 'nav_below') {
-    return `총평가액 ${pfFmtNum(rule.threshold)}원 ${dir}`;
+    return `총평가액 ${pfFmtNum(rule.threshold)} ${dir}`;
   }
   // daily_change_above / below (포트폴리오 전체)
   return `포트폴리오 일간 등락률 ${Number(rule.threshold).toFixed(2)}% ${dir}`;

@@ -533,13 +533,21 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
     try:
         holdings = await portfolio_repo.get_portfolio(google_sub=google_sub)
         codes = [it["stock_code"] for it in holdings if not it["stock_code"].startswith("CASH_")]
+        holding_names = {
+            it["stock_code"]: it.get("stock_name") or it["stock_code"]
+            for it in holdings
+        }
         since = (today - timedelta(days=1)).isoformat()
         context["filings"] = await dart_review_repo.list_recent_reviews(
             codes, since, limit=FEED_ITEM_LIMIT
         )
-        context["reports"] = await wiki_repo.list_recent_entries(
+        reports = await wiki_repo.list_recent_entries(
             codes, since, limit=FEED_ITEM_LIMIT
         )
+        context["reports"] = [
+            {**report, "stock_name": holding_names.get(report.get("stock_code"), report.get("stock_code"))}
+            for report in reports
+        ]
     except Exception as exc:
         logger.warning("briefing feed block failed user=%s: %s", google_sub[:8], exc)
 
@@ -586,9 +594,16 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
 # ---------------------------------------------------------------------------
 
 
+def _fmt_money(value: float | None) -> str:
+    if value is None:
+        return "-"
+    text = ai_analysis.fmt_krw(value)
+    return text[:-1] if text.endswith("원") else text
+
+
 def _fmt_signed_krw(value: float) -> str:
     sign = "+" if value >= 0 else "-"
-    return f"{sign}{ai_analysis.fmt_krw(abs(value))}"
+    return f"{sign}{_fmt_money(abs(value))}"
 
 
 def _fmt_mover(mover: dict) -> str:
@@ -600,7 +615,7 @@ def _fmt_mover(mover: dict) -> str:
 
 def _fmt_overseas_group(group: dict) -> str:
     value = group.get("market_value")
-    value_text = ai_analysis.fmt_krw(value) if value is not None else "-"
+    value_text = _fmt_money(value) if value is not None else "-"
     change = group.get("change_krw")
     pct = group.get("change_pct")
     weight = group.get("weight_pct")
@@ -631,7 +646,7 @@ def _requested_missing_context_lines(context: dict, custom_instructions: str | N
     if requested["overseas_groups"] and not context.get("overseas_groups"):
         lines.append("🌏 해외 그룹 성과: 최근 그룹 스냅샷에서 해외 그룹 데이터를 찾지 못했습니다.")
     if requested["calendar_alerts"] and not context.get("calendar_alerts"):
-        lines.append("🔔 오늘 알림 켜진 캘린더: 오늘 예정된 알림 설정 이벤트가 없습니다.")
+        lines.append("📅 오늘의 일정: 오늘 예정된 알림 설정 이벤트가 없습니다.")
     if requested["night_futures"] and not context.get("night_futures"):
         lines.append("🌙 야간선물: 현재 조회 가능한 값이 없습니다.")
     return lines
@@ -645,11 +660,11 @@ def _context_lines(context: dict, custom_instructions: str | None = None) -> lis
     if nav:
         if nav.get("change_krw") is not None:
             lines.append(
-                f"📊 어제({nav['date']}) 총평가 {ai_analysis.fmt_krw(nav['total_value'])} "
+                f"📊 어제({nav['date']}) 총평가 {_fmt_money(nav['total_value'])} "
                 f"({_fmt_signed_krw(nav['change_krw'])}, {nav['change_pct']:+.2f}%)"
             )
         else:
-            lines.append(f"📊 어제({nav['date']}) 총평가 {ai_analysis.fmt_krw(nav['total_value'])}")
+            lines.append(f"📊 어제({nav['date']}) 총평가 {_fmt_money(nav['total_value'])}")
 
     movers = context.get("movers") or {}
     if movers.get("top"):
@@ -668,8 +683,9 @@ def _context_lines(context: dict, custom_instructions: str | None = None) -> lis
         name = f.get("corp_name") or f.get("stock_code")
         lines.append(f"📑 새 공시 리뷰: [{name}] {f.get('report_name') or ''}".rstrip())
     for r in context.get("reports") or []:
+        name = r.get("stock_name") or r.get("stock_code")
         head = " · ".join(p for p in (r.get("firm"), r.get("title")) if p)
-        lines.append(f"📈 새 리포트: [{r.get('stock_code')}] {head}".rstrip())
+        lines.append(f"📈 새 리포트: [{name}] {head}".rstrip())
 
     cal = context.get("calendar") or []
     if cal:
@@ -682,7 +698,7 @@ def _context_lines(context: dict, custom_instructions: str | None = None) -> lis
     alerts = context.get("calendar_alerts") or []
     if alerts:
         parts = ", ".join(_fmt_calendar_alert(item) for item in alerts)
-        lines.append(f"🔔 오늘 알림 켜진 캘린더: {parts}")
+        lines.append(f"📅 오늘의 일정: {parts}")
 
     night = context.get("night_futures")
     if night:
@@ -776,9 +792,10 @@ def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
 위 데이터로 {name}을 작성하세요.
 - 첫 줄: "{title} ({context.get('date')})"
 - 브리핑 성격: {focus}
-- 이어서: 어제 포트폴리오 변동 요약(원·%), 기여 상위/하위 종목, 해외 그룹 성과,
-  야간선물 일간 변동, 오늘 알림 켜진 캘린더 이벤트, 새 공시·리포트가 있으면 한 줄씩,
+- 이어서: 어제 포트폴리오 변동 요약(금액·%), 기여 상위/하위 종목, 해외 그룹 성과,
+  야간선물 일간 변동, 오늘의 일정, 새 공시·리포트가 있으면 한 줄씩,
   오늘 주요 경제 일정, 마지막으로 오늘 확인할 포인트 1~2개.
+- 금액은 숫자만 표시하고 통화 단위 '원'은 붙이지 마세요.
 - 사용자 추가 지시가 요구한 섹션은 데이터가 없더라도 '대상 없음' 또는 '현재 조회 불가'로 짧게 표시하세요.
 - 그 외 데이터가 없는 섹션은 건너뛰세요. 전체 10~15줄."""
 

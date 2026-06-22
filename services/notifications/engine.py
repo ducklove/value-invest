@@ -73,7 +73,7 @@ def _condition_met(alert_type: str, metric: float, threshold: float) -> bool:
 
 
 def _fmt_num(value: float | None) -> str:
-    """원/가격 표시: 한국 주식·금액은 정수 원이므로 소숫점 없이 반올림."""
+    """가격/금액 표시: 정수 단위는 소숫점 없이 반올림하고 통화 suffix는 붙이지 않는다."""
     if value is None:
         return "-"
     try:
@@ -250,7 +250,7 @@ def _format_portfolio_message(rule: dict, metric: float) -> str:
     if alert_type in NAV_TYPES:
         return (
             f"🔔 포트폴리오 총평가액 알림\n"
-            f"현재 {_fmt_num(metric)}원 (기준 {_fmt_num(threshold)}원 {direction})"
+            f"현재 {_fmt_num(metric)} (기준 {_fmt_num(threshold)} {direction})"
             f"{_note_suffix(rule)}"
         )
     return (
