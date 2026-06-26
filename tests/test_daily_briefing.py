@@ -275,6 +275,119 @@ class BriefingContextTests(DailyBriefingHarness):
         text = daily_briefing.render_template_briefing(ctx)
         self.assertTrue(text.startswith("🔔 클로징 브리핑"))
 
+    async def test_today_portfolio_block_uses_live_value_and_excludes_cashflow(self):
+        await self._seed_user()
+        _, d_last = await self._seed_snapshots()
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, created_at)"
+            " VALUES ('u1', ?, 'deposit', 10000, ?)",
+            (date.today().isoformat(), f"{d_last}T23:00:00"),
+        )
+        await db.commit()
+
+        with patch("snapshot_intraday._fetch_total_value", new=AsyncMock(return_value=1_110_000)):
+            block = await daily_briefing._fetch_today_portfolio_block("u1", date.today().isoformat())
+
+        self.assertEqual(block["source"], "live")
+        self.assertEqual(block["total_value"], 1_110_000)
+        self.assertEqual(block["prev_value"], 1_050_000)
+        self.assertEqual(block["net_cashflow"], 10_000)
+        self.assertAlmostEqual(block["change_krw"], 50_000)
+        self.assertAlmostEqual(block["change_pct"], 50_000 / 1_050_000 * 100)
+
+    async def test_closing_template_prioritizes_domestic_market_flows_and_today_performance(self):
+        ctx = {
+            "date": "2026-06-23",
+            "briefing_type": "market_close",
+            "briefing_title": "🔔 클로징 브리핑",
+            "portfolio_today": {
+                "date": "2026-06-23",
+                "total_value": 1_110_000,
+                "prev_value": 1_050_000,
+                "change_krw": 50_000,
+                "change_pct": 4.76,
+                "net_cashflow": 10_000,
+                "source": "live",
+            },
+            "nav": {"date": "2026-06-22", "total_value": 1_050_000, "change_krw": 50_000, "change_pct": 5.0},
+            "domestic_market": ["코스피 2,900 (▲0.50%)", "코스닥 850 (▼0.20%)"],
+            "market_flows": ["코스피(26.06.23) 개인 +100억 / 외국인 -50억 / 기관 +20억"],
+            "movers": {"top": [], "bottom": []},
+            "overseas_groups": [],
+            "filings": [],
+            "reports": [],
+            "calendar": [],
+            "calendar_alerts": [],
+            "night_futures": None,
+            "market": [],
+        }
+
+        lines = daily_briefing.render_template_briefing(ctx).splitlines()
+
+        self.assertTrue(lines[1].startswith("🇰🇷 국내 지수"))
+        self.assertTrue(lines[2].startswith("💰 수급 동향"))
+        self.assertTrue(lines[3].startswith("📊 오늘"))
+        text = "\n".join(lines)
+        self.assertIn("입출금 제외", text)
+        self.assertNotIn("어제(", text)
+
+    async def test_night_template_prioritizes_after_close_today_and_tomorrow_outlook(self):
+        ctx = {
+            "date": "2026-06-23",
+            "briefing_type": "night",
+            "briefing_title": "🌙 나이트 브리핑",
+            "portfolio_today": {
+                "date": "2026-06-23",
+                "total_value": 1_110_000,
+                "prev_value": 1_050_000,
+                "change_krw": 60_000,
+                "change_pct": 5.71,
+                "net_cashflow": 0,
+                "source": "settlement",
+            },
+            "nav": None,
+            "domestic_market": ["코스피 2,900 (▲0.50%)"],
+            "market_flows": ["코스피(26.06.23) 개인 +100억 / 외국인 -50억 / 기관 +20억"],
+            "movers": {"top": [], "bottom": []},
+            "overseas_groups": [],
+            "filings": [],
+            "reports": [{"stock_code": "000660", "stock_name": "SK하이닉스", "firm": "한국증권", "title": "HBM 점검"}],
+            "calendar": [],
+            "tomorrow_calendar": [{"time": "21:30", "flag": "🇺🇸", "event": "고용지표"}],
+            "calendar_alerts": [],
+            "night_futures": {"value": "431.20", "change": "+1.20", "change_pct": "+0.28%"},
+            "market": [],
+        }
+
+        lines = daily_briefing.render_template_briefing(ctx).splitlines()
+
+        self.assertTrue(lines[1].startswith("🕘 장 마감 이후 리포트"))
+        self.assertTrue(lines[2].startswith("📊 오늘"))
+        text = "\n".join(lines)
+        self.assertIn("내일 주요 일정", text)
+        self.assertIn("내일 시장 전망", text)
+        self.assertNotIn("어제(", text)
+
+    async def test_night_context_uses_after_close_feed_window(self):
+        await self._seed_user()
+        reviews = AsyncMock(return_value=[])
+        entries = AsyncMock(return_value=[])
+        with patch.object(daily_briefing, "_fetch_today_portfolio_block", new=AsyncMock(return_value=None)), \
+             patch.object(daily_briefing, "_fetch_overseas_groups", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing, "_fetch_night_futures_block", new=AsyncMock(return_value=None)), \
+             patch.object(daily_briefing, "_fetch_domestic_market_block", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing, "_fetch_market_flow_block", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.dart_review_repo, "list_recent_reviews", new=reviews), \
+             patch.object(daily_briefing.wiki_repo, "list_recent_entries", new=entries), \
+             patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
+            await daily_briefing.build_briefing_context("u1", "night")
+
+        expected_since = f"{date.today().isoformat()}T15:30:00"
+        self.assertEqual(reviews.await_args.args[1], expected_since)
+        self.assertEqual(entries.await_args.args[1], expected_since)
+
 
 class GenerateBriefingTests(DailyBriefingHarness):
     def _minimal_context(self) -> dict:
@@ -380,6 +493,23 @@ class GenerateBriefingTests(DailyBriefingHarness):
         self.assertIn("금액은 숫자만 표시하고 통화 단위 '원'은 붙이지 마세요.", user_prompt)
         self.assertEqual(briefing["source"], "ai")
         self.assertTrue(briefing["custom_instructions"])
+
+    async def test_llm_prompt_uses_briefing_type_specific_outline(self):
+        ctx = self._minimal_context()
+        profile = daily_briefing.briefing_profile("market_close")
+        ctx.update(
+            briefing_type=profile["kind"],
+            briefing_name=profile["name"],
+            briefing_title=profile["title"],
+            briefing_focus=profile["focus"],
+            briefing_outline=profile["outline"],
+        )
+
+        prompt = daily_briefing.build_prompt(ctx)
+
+        self.assertIn("코스피·코스닥 지수와 수급 동향", prompt)
+        self.assertIn("오늘 포트폴리오 성과", prompt)
+        self.assertNotIn("어제 포트폴리오 변동 요약", prompt)
 
     async def test_too_short_llm_response_falls_back_to_template(self):
         await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)

@@ -26,8 +26,10 @@ import logging
 from datetime import date, timedelta
 
 import ai_config
+import cache
 import close_price_client
 import market_indicators
+import market_movers
 from repositories import dart_review as dart_review_repo
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
@@ -52,6 +54,10 @@ FEED_ITEM_LIMIT = 5
 MIN_USABLE_AI_LINES = 3
 MAX_CUSTOM_INSTRUCTIONS_CHARS = 1200
 OVERSEAS_GROUP_LIMIT = 3
+DOMESTIC_INDEX_LABELS = {"KOSPI": "코스피", "KOSDAQ": "코스닥"}
+FLOW_MARKET_LABELS = {"kospi": "코스피", "kosdaq": "코스닥"}
+FLOW_INVESTOR_LABELS = {"individual": "개인", "foreign": "외국인", "institution": "기관"}
+TODAY_PORTFOLIO_BRIEFING_TYPES = {"market_close", "night"}
 
 BRIEFING_PROFILES: dict[str, dict[str, str]] = {
     "morning": {
@@ -60,6 +66,11 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
         "schedule_label": "평일 07:30",
         "description": "개장 전, 전일 결산과 오늘 확인할 이벤트를 정리합니다.",
         "focus": "개장 전 의사결정에 필요한 전일 포트폴리오 변화, 해외/야간 변수, 오늘 일정을 우선합니다.",
+        "outline": (
+            "전일 포트폴리오 변동 요약(금액·%), 기여 상위/하위 종목, 해외 그룹 성과, "
+            "야간선물 일간 변동, 오늘의 일정, 새 공시·리포트, 오늘 주요 경제 일정, "
+            "오늘 확인할 포인트 1~2개."
+        ),
         "enabled_key": OPT_IN_KEY,
         "instructions_key": CUSTOM_INSTRUCTIONS_KEY,
     },
@@ -68,7 +79,11 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
         "title": "🔔 클로징 브리핑",
         "schedule_label": "평일 15:35",
         "description": "정규장 마감 직후, 당일 국내장 흐름과 보유 종목 변동을 정리합니다.",
-        "focus": "정규장 마감 직후 확인해야 할 당일 급등락, 보유 종목 기여, 공시/리포트 변화를 우선합니다.",
+        "focus": "정규장 마감 직후 코스피·코스닥 지수, 투자자 수급, 오늘 포트폴리오 성과를 우선합니다.",
+        "outline": (
+            "코스피·코스닥 지수와 수급 동향을 먼저 요약하고, 이어서 오늘 포트폴리오 성과, "
+            "기여 상위/하위 종목, 새 공시·리포트, 마감 후 확인할 포인트 1~2개."
+        ),
         "enabled_key": "daily_briefing_market_close_enabled",
         "instructions_key": "daily_briefing_market_close_custom_instructions",
     },
@@ -77,7 +92,12 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
         "title": "🌙 나이트 브리핑",
         "schedule_label": "평일 22:20",
         "description": "밤 시간대, 해외장 초반·야간선물·하루 결산 포인트를 정리합니다.",
-        "focus": "밤 시간대 확인할 해외장 초반 흐름, 야간선물, 환율, 하루 결산 포인트를 우선합니다.",
+        "focus": "장 마감 이후 변경 내용, 오늘 포트폴리오 성과, 내일 시장 전망 재료를 우선합니다.",
+        "outline": (
+            "장 마감 이후 새 공시·리포트와 해외/야간 변수 변화를 먼저 정리하고, "
+            "오늘 포트폴리오 성과, 야간선물·환율·미국장 등 내일 시장 전망 재료, "
+            "내일 확인할 포인트 1~2개."
+        ),
         "enabled_key": "daily_briefing_night_enabled",
         "instructions_key": "daily_briefing_night_custom_instructions",
     },
@@ -414,6 +434,125 @@ async def _fetch_overseas_groups(google_sub: str) -> list[dict]:
     return _overseas_group_performance(rows)
 
 
+def _indicator_change_text(item: dict) -> str:
+    raw = str(item.get("change_pct") or item.get("change") or "").strip()
+    if not raw:
+        return ""
+    raw = raw.removeprefix("up").removeprefix("down").strip()
+    direction = str(item.get("direction") or "").strip().lower()
+    if direction == "up":
+        return f"▲{raw.lstrip('+-')}"
+    if direction == "down":
+        return f"▼{raw.lstrip('+-')}"
+    return raw
+
+
+def _format_domestic_index(code: str, item: dict | None) -> str | None:
+    if not item or not item.get("value"):
+        return None
+    change = _indicator_change_text(item)
+    suffix = f" ({change})" if change else ""
+    return f"{DOMESTIC_INDEX_LABELS.get(code, code)} {item.get('value')}{suffix}"
+
+
+async def _fetch_domestic_market_block() -> list[str]:
+    data = await market_indicators.fetch_indicators(["KOSPI", "KOSDAQ"])
+    rows: list[str] = []
+    for code in ("KOSPI", "KOSDAQ"):
+        line = _format_domestic_index(code, data.get(code) or {})
+        if line:
+            rows.append(line)
+    return rows
+
+
+def _format_flow_value(value: str | None, direction: str | None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    if direction == "up" and not text.startswith(("+", "-")):
+        text = f"+{text}"
+    return f"{text}억"
+
+
+def _format_market_flow(market: str, row: dict | None) -> str | None:
+    if not row:
+        return None
+    parts: list[str] = []
+    for key, label in FLOW_INVESTOR_LABELS.items():
+        item = row.get(key) or {}
+        parts.append(f"{label} {_format_flow_value(item.get('value'), item.get('direction'))}")
+    date_text = f"({row.get('date')})" if row.get("date") else ""
+    return f"{FLOW_MARKET_LABELS.get(market, market)}{date_text} " + " / ".join(parts)
+
+
+async def _fetch_market_flow_block() -> list[str]:
+    flows = await market_movers.fetch_investor_flows()
+    rows: list[str] = []
+    for market in ("kospi", "kosdaq"):
+        line = _format_market_flow(market, flows.get(market))
+        if line:
+            rows.append(line)
+    return rows
+
+
+async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None) -> float:
+    if not snap_date:
+        return 0.0
+    db = await cache.get_db()
+    cursor = await db.execute(
+        "SELECT type, amount FROM portfolio_cashflows"
+        " WHERE google_sub = ? AND created_at > ?",
+        (google_sub, f"{snap_date}T22:00:00"),
+    )
+    net = 0.0
+    for row in await cursor.fetchall():
+        amount = _safe_float(row["amount"]) or 0.0
+        if row["type"] == "deposit":
+            net += amount
+        elif row["type"] == "withdrawal":
+            net -= amount
+    return net
+
+
+async def _fetch_today_portfolio_block(google_sub: str, today_iso: str) -> dict | None:
+    """Today-card style portfolio performance for closing/night briefings.
+
+    Before the 22:00 settlement exists, value the current portfolio with live
+    quotes. After the settlement exists, use that snapshot. In both cases,
+    compare against the previous settlement and remove same-day cashflows from
+    the performance delta.
+    """
+    prev = await snapshots_repo.get_latest_snapshot_before_date(google_sub, today_iso)
+    if not prev or not prev.get("total_value"):
+        return None
+
+    today_snapshot = await snapshots_repo.get_snapshot_by_date(google_sub, today_iso)
+    source = "settlement" if today_snapshot and today_snapshot.get("total_value") else "live"
+    if source == "settlement":
+        total_value = _safe_float(today_snapshot.get("total_value"))
+    else:
+        import snapshot_intraday
+
+        total_value = await snapshot_intraday._fetch_total_value(google_sub, today_iso)
+
+    prev_value = _safe_float(prev.get("total_value"))
+    if total_value is None or total_value <= 0 or prev_value is None or prev_value <= 0:
+        return None
+
+    net_cashflow = await _net_cashflow_since_settlement(google_sub, prev.get("date"))
+    investment_change = total_value - net_cashflow - prev_value
+    return {
+        "date": today_iso,
+        "prev_date": prev.get("date"),
+        "total_value": total_value,
+        "prev_value": prev_value,
+        "change_krw": investment_change,
+        "change_pct": investment_change / prev_value * 100.0,
+        "net_cashflow": net_cashflow,
+        "source": source,
+    }
+
+
 def _signed_indicator_value(value: str | None, direction: str | None) -> str:
     text = str(value or "").strip()
     if not text:
@@ -473,14 +612,19 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
         "briefing_title": profile["title"],
         "briefing_schedule": profile["schedule_label"],
         "briefing_focus": profile["focus"],
+        "briefing_outline": profile["outline"],
         "nav": None,
+        "portfolio_today": None,
         "movers": {"top": [], "bottom": []},
         "overseas_groups": [],
         "filings": [],
         "reports": [],
         "calendar": [],
+        "tomorrow_calendar": [],
         "calendar_alerts": [],
         "night_futures": None,
+        "domestic_market": [],
+        "market_flows": [],
         "market": [],
     }
 
@@ -523,13 +667,20 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
     except Exception as exc:
         logger.warning("briefing NAV block failed user=%s: %s", google_sub[:8], exc)
 
+    # --- 오늘 포트폴리오 성과 (클로징/나이트: 현재 평가액 vs 전일 결산, 입출금 제외) ---
+    if profile["kind"] in TODAY_PORTFOLIO_BRIEFING_TYPES:
+        try:
+            context["portfolio_today"] = await _fetch_today_portfolio_block(google_sub, today.isoformat())
+        except Exception as exc:
+            logger.warning("briefing today portfolio block failed user=%s: %s", google_sub[:8], exc)
+
     # --- 해외 그룹 성과 (그룹 스냅샷 기반) ---
     try:
         context["overseas_groups"] = await _fetch_overseas_groups(google_sub)
     except Exception as exc:
         logger.warning("briefing overseas group block failed user=%s: %s", google_sub[:8], exc)
 
-    # --- 신규 공시 리뷰 / 증권사 리포트 (어제 이후 수집분, 보유 종목만) ---
+    # --- 신규 공시 리뷰 / 증권사 리포트 (보유 종목만) ---
     try:
         holdings = await portfolio_repo.get_portfolio(google_sub=google_sub)
         codes = [it["stock_code"] for it in holdings if not it["stock_code"].startswith("CASH_")]
@@ -537,7 +688,11 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
             it["stock_code"]: it.get("stock_name") or it["stock_code"]
             for it in holdings
         }
-        since = (today - timedelta(days=1)).isoformat()
+        since = (
+            f"{today.isoformat()}T15:30:00"
+            if profile["kind"] == "night"
+            else (today - timedelta(days=1)).isoformat()
+        )
         context["filings"] = await dart_review_repo.list_recent_reviews(
             codes, since, limit=FEED_ITEM_LIMIT
         )
@@ -572,6 +727,29 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
     except Exception as exc:
         logger.warning("briefing calendar block failed: %s", exc)
 
+    # --- 내일 주요 일정 (나이트 브리핑 전망 재료) ---
+    if profile["kind"] == "night":
+        try:
+            import economic_calendar
+
+            tomorrow = today + timedelta(days=1)
+            data = await economic_calendar.fetch_economic_calendar(
+                start_date=tomorrow.isoformat(),
+                end_date=tomorrow.isoformat(),
+                importance=["high"],
+            )
+            context["tomorrow_calendar"] = [
+                {
+                    "time": e.get("time") or "",
+                    "country_name": e.get("country_name") or "",
+                    "flag": e.get("flag") or "",
+                    "event": e.get("event") or "",
+                }
+                for e in (data.get("events") or [])[:CALENDAR_EVENT_LIMIT]
+            ]
+        except Exception as exc:
+            logger.warning("briefing tomorrow calendar block failed: %s", exc)
+
     # --- 오늘 알림이 켜져 있는 캘린더 이벤트 ---
     try:
         context["calendar_alerts"] = await _today_calendar_alerts(google_sub, today.isoformat())
@@ -583,6 +761,17 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
         context["night_futures"] = await _fetch_night_futures_block()
     except Exception as exc:
         logger.warning("briefing night futures block failed: %s", exc)
+
+    # --- 국내 지수 + 투자자 수급 (클로징/나이트 브리핑 핵심 입력) ---
+    if profile["kind"] in {"market_close", "night"}:
+        try:
+            context["domestic_market"] = await _fetch_domestic_market_block()
+        except Exception as exc:
+            logger.warning("briefing domestic market block failed: %s", exc)
+        try:
+            context["market_flows"] = await _fetch_market_flow_block()
+        except Exception as exc:
+            logger.warning("briefing market flow block failed: %s", exc)
 
     # --- 시장 지표 (ai_analysis 의 헬퍼 재사용 — 실패 시 안내 한 줄) ---
     context["market"] = await ai_analysis.market_summary_lines()
@@ -640,6 +829,63 @@ def _fmt_calendar_alert(item: dict) -> str:
     return f"{text} ({details})" if details else text
 
 
+def _fmt_nav_line(nav: dict, label: str) -> str:
+    prefix = f"📊 {label}({nav['date']}) 총평가 {_fmt_money(nav['total_value'])}"
+    if nav.get("change_krw") is None:
+        return prefix
+    return f"{prefix} ({_fmt_signed_krw(nav['change_krw'])}, {nav['change_pct']:+.2f}%)"
+
+
+def _fmt_today_portfolio_line(today: dict) -> str:
+    line = _fmt_nav_line(today, "오늘")
+    if today.get("net_cashflow"):
+        line += " · 입출금 제외"
+    if today.get("source") == "live":
+        line += " · 실시간"
+    return line
+
+
+def _feed_lines(context: dict, *, night_prefix: bool = False) -> list[str]:
+    lines: list[str] = []
+    for f in context.get("filings") or []:
+        name = f.get("corp_name") or f.get("stock_code")
+        prefix = "🕘 장 마감 이후 공시 리뷰" if night_prefix else "📑 새 공시 리뷰"
+        lines.append(f"{prefix}: [{name}] {f.get('report_name') or ''}".rstrip())
+    for r in context.get("reports") or []:
+        name = r.get("stock_name") or r.get("stock_code")
+        head = " · ".join(p for p in (r.get("firm"), r.get("title")) if p)
+        prefix = "🕘 장 마감 이후 리포트" if night_prefix else "📈 새 리포트"
+        lines.append(f"{prefix}: [{name}] {head}".rstrip())
+    return lines
+
+
+def _calendar_line(label: str, events: list[dict]) -> str | None:
+    if not events:
+        return None
+    parts = ", ".join(
+        " ".join(p for p in (e.get("time"), e.get("flag"), e.get("event")) if p)
+        for e in events
+    )
+    return f"📅 {label}: {parts}"
+
+
+def _night_futures_line(night: dict | None) -> str | None:
+    if not night:
+        return None
+    move = " ".join(p for p in (night.get("change"), night.get("change_pct")) if p)
+    stale = " · 이전값" if night.get("_stale") else ""
+    if move:
+        return f"🌙 야간선물: {night.get('value')} ({move}{stale})"
+    return f"🌙 야간선물: {night.get('value')}{stale}"
+
+
+def _market_context_lines(context: dict) -> list[str]:
+    market = context.get("market") or []
+    if not market:
+        return []
+    return ["🌐 시장 지표:", *market]
+
+
 def _requested_missing_context_lines(context: dict, custom_instructions: str | None) -> list[str]:
     requested = _instruction_preferences(custom_instructions)
     lines: list[str] = []
@@ -656,15 +902,29 @@ def _context_lines(context: dict, custom_instructions: str | None = None) -> lis
     """컨텍스트를 사람이 읽을 수 있는 줄들로 변환 — 템플릿 폴백 본문이자
     LLM 프롬프트의 데이터 섹션."""
     lines: list[str] = []
+    kind = context.get("briefing_type") or DEFAULT_BRIEFING_TYPE
+
+    domestic_market = context.get("domestic_market") or []
+    if kind == "market_close" and domestic_market:
+        lines.append(f"🇰🇷 국내 지수: {', '.join(domestic_market)}")
+
+    market_flows = context.get("market_flows") or []
+    if kind == "market_close" and market_flows:
+        lines.append(f"💰 수급 동향: {', '.join(market_flows)}")
+
+    if kind == "night":
+        feed = _feed_lines(context, night_prefix=True)
+        lines.extend(feed if feed else ["🕘 장 마감 이후 변경: 새 공시·리포트 없음"])
+
+    portfolio_today = context.get("portfolio_today")
+    if kind in TODAY_PORTFOLIO_BRIEFING_TYPES and portfolio_today:
+        lines.append(_fmt_today_portfolio_line(portfolio_today))
+
     nav = context.get("nav")
-    if nav:
-        if nav.get("change_krw") is not None:
-            lines.append(
-                f"📊 어제({nav['date']}) 총평가 {_fmt_money(nav['total_value'])} "
-                f"({_fmt_signed_krw(nav['change_krw'])}, {nav['change_pct']:+.2f}%)"
-            )
-        else:
-            lines.append(f"📊 어제({nav['date']}) 총평가 {_fmt_money(nav['total_value'])}")
+    if nav and kind not in TODAY_PORTFOLIO_BRIEFING_TYPES:
+        lines.append(_fmt_nav_line(nav, "어제"))
+    elif nav and kind in TODAY_PORTFOLIO_BRIEFING_TYPES and not portfolio_today:
+        lines.append(_fmt_nav_line(nav, "최근 결산"))
 
     movers = context.get("movers") or {}
     if movers.get("top"):
@@ -679,40 +939,34 @@ def _context_lines(context: dict, custom_instructions: str | None = None) -> lis
         parts = ", ".join(_fmt_overseas_group(g) for g in overseas_groups)
         lines.append(f"🌏 해외 그룹 성과: {parts}")
 
-    for f in context.get("filings") or []:
-        name = f.get("corp_name") or f.get("stock_code")
-        lines.append(f"📑 새 공시 리뷰: [{name}] {f.get('report_name') or ''}".rstrip())
-    for r in context.get("reports") or []:
-        name = r.get("stock_name") or r.get("stock_code")
-        head = " · ".join(p for p in (r.get("firm"), r.get("title")) if p)
-        lines.append(f"📈 새 리포트: [{name}] {head}".rstrip())
+    if kind != "night":
+        lines.extend(_feed_lines(context))
 
-    cal = context.get("calendar") or []
-    if cal:
-        parts = ", ".join(
-            " ".join(p for p in (e.get("time"), e.get("flag"), e.get("event")) if p)
-            for e in cal
-        )
-        lines.append(f"📅 오늘 주요 일정: {parts}")
+    cal_line = _calendar_line("오늘 주요 일정", context.get("calendar") or [])
+    if cal_line:
+        lines.append(cal_line)
 
     alerts = context.get("calendar_alerts") or []
     if alerts:
         parts = ", ".join(_fmt_calendar_alert(item) for item in alerts)
         lines.append(f"📅 오늘의 일정: {parts}")
 
-    night = context.get("night_futures")
-    if night:
-        move = " ".join(p for p in (night.get("change"), night.get("change_pct")) if p)
-        stale = " · 이전값" if night.get("_stale") else ""
-        if move:
-            lines.append(f"🌙 야간선물: {night.get('value')} ({move}{stale})")
-        else:
-            lines.append(f"🌙 야간선물: {night.get('value')}{stale}")
+    night_line = _night_futures_line(context.get("night_futures"))
+    if night_line:
+        lines.append(night_line)
 
-    market = context.get("market") or []
-    if market:
-        lines.append("🌐 시장 지표:")
-        lines.extend(market)
+    tomorrow_line = _calendar_line("내일 주요 일정", context.get("tomorrow_calendar") or [])
+    if tomorrow_line:
+        lines.append(tomorrow_line)
+
+    if kind == "night":
+        lines.append("🔎 내일 시장 전망: 야간선물·환율·미국장 흐름과 내일 주요 일정을 함께 점검하세요.")
+        if domestic_market:
+            lines.append(f"🇰🇷 국내 지수: {', '.join(domestic_market)}")
+        if market_flows:
+            lines.append(f"💰 수급 동향: {', '.join(market_flows)}")
+
+    lines.extend(_market_context_lines(context))
     return lines + _requested_missing_context_lines(context, custom_instructions)
 
 
@@ -774,6 +1028,7 @@ def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
     title = context.get("briefing_title") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["title"]
     name = context.get("briefing_name") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["name"]
     focus = context.get("briefing_focus") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["focus"]
+    outline = context.get("briefing_outline") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["outline"]
     custom_block = ""
     if custom:
         custom_block = f"""
@@ -792,9 +1047,7 @@ def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
 위 데이터로 {name}을 작성하세요.
 - 첫 줄: "{title} ({context.get('date')})"
 - 브리핑 성격: {focus}
-- 이어서: 어제 포트폴리오 변동 요약(금액·%), 기여 상위/하위 종목, 해외 그룹 성과,
-  야간선물 일간 변동, 오늘의 일정, 새 공시·리포트가 있으면 한 줄씩,
-  오늘 주요 경제 일정, 마지막으로 오늘 확인할 포인트 1~2개.
+- 구성 순서: {outline}
 - 금액은 숫자만 표시하고 통화 단위 '원'은 붙이지 마세요.
 - 사용자 추가 지시가 요구한 섹션은 데이터가 없더라도 '대상 없음' 또는 '현재 조회 불가'로 짧게 표시하세요.
 - 그 외 데이터가 없는 섹션은 건너뛰세요. 전체 10~15줄."""
