@@ -69,50 +69,46 @@ function _pfTagSummaryCard(label, value, sub, cls = '') {
     </div>`;
 }
 
-function _pfTagSummaryColor(index) {
-  const palette = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#0891b2', '#be185d', '#4f46e5'];
-  return palette[index % palette.length];
+function _pfTagSummaryHeatmapColor(changePct) {
+  const value = _pfNumberOrNull(changePct);
+  if (value === null) return 'rgba(148, 163, 184, 0.16)';
+  const clamped = Math.max(-6, Math.min(6, value));
+  const alpha = 0.10 + (Math.abs(clamped) / 6) * 0.30;
+  if (clamped > 0) return `rgba(220, 38, 38, ${alpha.toFixed(3)})`;
+  if (clamped < 0) return `rgba(37, 99, 235, ${alpha.toFixed(3)})`;
+  return 'rgba(148, 163, 184, 0.12)';
 }
 
-function _pfRenderTagSummaryPie(rows, tagStats, portfolioWeight) {
+function _pfRenderTagSummaryHeatmap(rows, tagStats, portfolioWeight) {
   const pricedRows = rows
     .filter(row => Number.isFinite(row.marketValue) && row.marketValue > 0)
     .sort((a, b) => b.marketValue - a.marketValue);
   const tagTotal = tagStats.marketValue;
-  const hasData = tagTotal > 0 && pricedRows.length > 0;
-  let cursor = 0;
-  const stops = [];
-  if (hasData) {
-    pricedRows.forEach((row, idx) => {
-      const pct = row.marketValue / tagTotal * 100;
-      const next = idx === pricedRows.length - 1 ? 100 : Math.min(100, cursor + pct);
-      stops.push(`${_pfTagSummaryColor(idx)} ${cursor.toFixed(2)}% ${next.toFixed(2)}%`);
-      cursor = next;
-    });
-  }
-  const pieBackground = hasData ? `conic-gradient(${stops.join(', ')})` : 'var(--border)';
-  const legendRows = pricedRows.slice(0, 6).map((row, idx) => {
+  const heatmapTiles = pricedRows.map(row => {
     const pct = tagTotal > 0 ? row.marketValue / tagTotal * 100 : null;
+    const flexGrow = pct !== null ? Math.max(10, pct) : 10;
+    const changeText = row.changePct !== null ? fmtPct(row.changePct) : '-';
     return `
-      <div class="pf-tag-summary-legend-row">
-        <span class="pf-tag-summary-swatch" style="background:${_pfTagSummaryColor(idx)}"></span>
-        <span class="pf-tag-summary-legend-name">${escapeHtml(row.stock_name || row.stock_code || '-')}</span>
-        <strong>${pct !== null ? fmtPct(pct, false) : '-'}</strong>
+      <div class="pf-tag-summary-heatmap-tile" style="flex:${flexGrow.toFixed(2)} 1 120px; background:${_pfTagSummaryHeatmapColor(row.changePct)}">
+        <div class="pf-tag-summary-heatmap-main">
+          <strong>${escapeHtml(row.stock_name || row.stock_code || '-')}</strong>
+          <span>${escapeHtml(row.stock_code || '')}</span>
+        </div>
+        <div class="pf-tag-summary-heatmap-metrics">
+          <span class="${returnClass(row.changePct)}">${changeText}</span>
+          <strong>${pct !== null ? fmtPct(pct, false) : '-'}</strong>
+        </div>
       </div>`;
   }).join('');
 
   return `
-    <div class="pf-tag-summary-pie-panel">
-      <div class="pf-tag-summary-section-title">태그 비중</div>
-      <div class="pf-tag-summary-pie-wrap">
-        <div class="pf-tag-summary-pie" style="background:${pieBackground}" role="img" aria-label="태그 비중 파이 차트"></div>
-        <div class="pf-tag-summary-pie-center">
-          <strong>${portfolioWeight !== null ? fmtPct(portfolioWeight, false) : '-'}</strong>
-          <span>포트폴리오</span>
-        </div>
+    <div class="pf-tag-summary-heatmap-panel">
+      <div class="pf-tag-summary-heatmap-head">
+        <div class="pf-tag-summary-section-title">태그 히트맵</div>
+        <strong>${portfolioWeight !== null ? fmtPct(portfolioWeight, false) : '-'}</strong>
       </div>
-      <div class="pf-tag-summary-legend">
-        ${legendRows || '<div class="pf-tag-summary-empty small">평가금액 데이터가 없습니다.</div>'}
+      <div class="pf-tag-summary-heatmap" role="img" aria-label="태그 평가금액 비중과 일간 등락률 히트맵">
+        ${heatmapTiles || '<div class="pf-tag-summary-empty small">평가금액 데이터가 없습니다.</div>'}
       </div>
     </div>`;
 }
@@ -160,7 +156,7 @@ function _pfRenderTagSummaryComposition(rows, tagStats, portfolioWeight) {
   if (!rows.length) return _pfRenderTagSummaryRows(rows, tagStats);
   return `
     <div class="pf-tag-summary-composition">
-      ${_pfRenderTagSummaryPie(rows, tagStats, portfolioWeight)}
+      ${_pfRenderTagSummaryHeatmap(rows, tagStats, portfolioWeight)}
       <div class="pf-tag-summary-list-panel">
         <div class="pf-tag-summary-section-title">목록</div>
         ${_pfRenderTagSummaryRows(rows, tagStats)}

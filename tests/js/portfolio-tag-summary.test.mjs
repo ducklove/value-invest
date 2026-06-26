@@ -85,7 +85,9 @@ test("tag modal shows value total under portfolio weight and renders composition
   assert.equal(weightCard.querySelector(".pf-tag-summary-sub").textContent, "1,000원");
   assert.equal(weightCard.textContent.includes("2종목"), false);
   assert.ok(modal.querySelector(".pf-tag-summary-composition"));
-  assert.ok(modal.querySelector(".pf-tag-summary-pie"));
+  assert.ok(modal.querySelector(".pf-tag-summary-heatmap"));
+  assert.equal(modal.querySelectorAll(".pf-tag-summary-heatmap-tile").length, 2);
+  assert.equal(modal.querySelector(".pf-tag-summary-pie"), null);
   assert.ok(modal.querySelector(".pf-tag-summary-table"));
   assert.ok(modal.textContent.includes("평가금액 합 추세"));
   assert.ok(modal.textContent.includes("포트폴리오 비중 추세"));
