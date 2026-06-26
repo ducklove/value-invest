@@ -1074,6 +1074,12 @@ async def get_group_constituent_history(request: Request, group: str = Query(...
     return await snapshots_repo.get_group_constituent_history(user["google_sub"], group.strip())
 
 
+@router.get("/api/portfolio/tag-history")
+async def get_tag_history(request: Request, tag: str = Query(..., min_length=1)):
+    user = _require_user(await get_current_user(request))
+    return await snapshots_repo.get_tag_history(user["google_sub"], tag.strip())
+
+
 @router.get("/api/portfolio/benchmark-history")
 async def get_benchmark_history(code: str = Query(...), start: str = Query(...)):
     """Return daily close prices for a benchmark index, served from the

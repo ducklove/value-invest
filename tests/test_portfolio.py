@@ -900,6 +900,51 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(by_code["005930"]["group_value"], 1000)
         self.assertEqual(by_code["000660"]["stock_name"], "SK하이닉스")
 
+    async def test_tag_history_uses_current_tag_membership(self):
+        await portfolio_repo.save_portfolio_item(
+            "u1", "005930", "삼성전자", 10, 1000,
+            group_name="반도체",
+        )
+        await portfolio_repo.save_portfolio_item(
+            "u1", "000660", "SK하이닉스", 10, 1000,
+            group_name="반도체",
+        )
+        await portfolio_repo.save_portfolio_item(
+            "u1", "035420", "NAVER", 10, 1000,
+            group_name="인터넷",
+        )
+        await portfolio_repo.set_portfolio_tags("u1", "005930", ["AI"])
+        await portfolio_repo.set_portfolio_tags("u1", "000660", ["AI"])
+        await snapshots_repo.save_snapshot("u1", "2026-01-02", 2000, 1500, 1000, 2, 1400)
+        await snapshots_repo.save_stock_snapshots(
+            "u1",
+            "2026-01-02",
+            [
+                {"stock_code": "005930", "market_value": 300},
+                {"stock_code": "000660", "market_value": 700},
+                {"stock_code": "035420", "market_value": 1000},
+            ],
+        )
+        await snapshots_repo.save_snapshot("u1", "2026-01-03", 2000, 1500, 1000, 2, 1410)
+        await snapshots_repo.save_stock_snapshots(
+            "u1",
+            "2026-01-03",
+            [
+                {"stock_code": "005930", "market_value": 400},
+                {"stock_code": "000660", "market_value": 600},
+                {"stock_code": "035420", "market_value": 1000},
+            ],
+        )
+
+        rows = await snapshots_repo.get_tag_history("u1", "#ai")
+
+        self.assertEqual([row["date"] for row in rows], ["2026-01-02", "2026-01-03"])
+        self.assertEqual(rows[0]["tag_value"], 1000)
+        self.assertEqual(rows[0]["total_value"], 2000)
+        self.assertEqual(rows[0]["stock_count"], 2)
+        self.assertAlmostEqual(rows[0]["weight_pct"], 50.0)
+        self.assertEqual(rows[1]["fx_usdkrw"], 1410)
+
     async def test_group_weight_history_normalizes_to_stock_snapshot_total(self):
         await portfolio_repo.save_portfolio_item(
             "u1", "AAA", "Alpha", 10, 1000,

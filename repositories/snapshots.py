@@ -315,6 +315,68 @@ async def get_group_constituent_history(google_sub: str, group_name: str) -> lis
     return [dict(row) for row in await cursor.fetchall()]
 
 
+async def get_tag_history(google_sub: str, tag: str) -> list[dict]:
+    """Return daily value/portfolio-weight trend for the current tag membership."""
+    tag_key = str(tag or "").strip().lstrip("#")
+    if not tag_key:
+        return []
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        WITH tag_codes AS (
+            SELECT DISTINCT stock_code
+            FROM portfolio_tags
+            WHERE google_sub = ?
+              AND lower(trim(tag)) = lower(trim(?))
+        ),
+        tagged_rows AS (
+            SELECT
+                ps.date,
+                ps.stock_code,
+                ps.market_value
+            FROM portfolio_stock_snapshots ps
+            JOIN tag_codes tc
+              ON tc.stock_code = ps.stock_code
+            WHERE ps.google_sub = ?
+        ),
+        tag_totals AS (
+            SELECT
+                date,
+                SUM(market_value) AS tag_value,
+                COUNT(DISTINCT stock_code) AS stock_count
+            FROM tagged_rows
+            GROUP BY date
+        ),
+        day_totals AS (
+            SELECT date, SUM(market_value) AS total_value
+            FROM portfolio_stock_snapshots
+            WHERE google_sub = ?
+            GROUP BY date
+        )
+        SELECT
+            tt.date,
+            tt.tag_value,
+            tt.stock_count,
+            dt.total_value,
+            ps.fx_usdkrw,
+            CASE
+                WHEN dt.total_value != 0
+                THEN tt.tag_value * 100.0 / dt.total_value
+                ELSE NULL
+            END AS weight_pct
+        FROM tag_totals tt
+        JOIN day_totals dt
+          ON dt.date = tt.date
+        LEFT JOIN portfolio_snapshots ps
+          ON ps.google_sub = ?
+         AND ps.date = tt.date
+        ORDER BY tt.date ASC
+        """,
+        (google_sub, tag_key, google_sub, google_sub, google_sub),
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
 async def get_cashflows(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
