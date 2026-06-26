@@ -69,7 +69,7 @@ function _pfTagSummaryCard(label, value, sub, cls = '') {
     </div>`;
 }
 
-function _pfTagSummaryHeatmapColor(changePct) {
+function _pfTagSummaryTileColor(changePct) {
   const value = _pfNumberOrNull(changePct);
   if (value === null) return 'rgba(148, 163, 184, 0.16)';
   const clamped = Math.max(-6, Math.min(6, value));
@@ -79,36 +79,84 @@ function _pfTagSummaryHeatmapColor(changePct) {
   return 'rgba(148, 163, 184, 0.12)';
 }
 
-function _pfRenderTagSummaryHeatmap(rows, tagStats, portfolioWeight) {
+function _pfTagSummaryTreemapLayout(items, x = 0, y = 0, width = 100, height = 100) {
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  if (!items.length || total <= 0 || width <= 0 || height <= 0) return [];
+  if (items.length === 1) return [{ ...items[0], x, y, width, height }];
+
+  const half = total / 2;
+  let acc = 0;
+  let split = 1;
+  for (let i = 0; i < items.length - 1; i += 1) {
+    const next = acc + items[i].value;
+    if (i > 0 && Math.abs(half - acc) < Math.abs(half - next)) break;
+    acc = next;
+    split = i + 1;
+  }
+
+  const first = items.slice(0, split);
+  const second = items.slice(split);
+  const firstTotal = first.reduce((sum, item) => sum + item.value, 0);
+  const ratio = firstTotal / total;
+
+  if (width >= height) {
+    const firstWidth = width * ratio;
+    return [
+      ..._pfTagSummaryTreemapLayout(first, x, y, firstWidth, height),
+      ..._pfTagSummaryTreemapLayout(second, x + firstWidth, y, width - firstWidth, height),
+    ];
+  }
+  const firstHeight = height * ratio;
+  return [
+    ..._pfTagSummaryTreemapLayout(first, x, y, width, firstHeight),
+    ..._pfTagSummaryTreemapLayout(second, x, y + firstHeight, width, height - firstHeight),
+  ];
+}
+
+function _pfTreemapTileStyle(tile) {
+  return [
+    `left:${tile.x.toFixed(4)}%`,
+    `top:${tile.y.toFixed(4)}%`,
+    `width:${tile.width.toFixed(4)}%`,
+    `height:${tile.height.toFixed(4)}%`,
+    `background:${_pfTagSummaryTileColor(tile.row.changePct)}`,
+  ].join(';');
+}
+
+function _pfRenderTagSummaryTreemap(rows, tagStats, portfolioWeight) {
   const pricedRows = rows
     .filter(row => Number.isFinite(row.marketValue) && row.marketValue > 0)
     .sort((a, b) => b.marketValue - a.marketValue);
   const tagTotal = tagStats.marketValue;
-  const heatmapTiles = pricedRows.map(row => {
-    const pct = tagTotal > 0 ? row.marketValue / tagTotal * 100 : null;
-    const flexGrow = pct !== null ? Math.max(10, pct) : 10;
+  const layout = _pfTagSummaryTreemapLayout(pricedRows.map(row => ({
+    row,
+    value: row.marketValue,
+    pct: tagTotal > 0 ? row.marketValue / tagTotal * 100 : null,
+  })));
+  const treemapTiles = layout.map(tile => {
+    const row = tile.row;
     const changeText = row.changePct !== null ? fmtPct(row.changePct) : '-';
     return `
-      <div class="pf-tag-summary-heatmap-tile" style="flex:${flexGrow.toFixed(2)} 1 120px; background:${_pfTagSummaryHeatmapColor(row.changePct)}">
-        <div class="pf-tag-summary-heatmap-main">
+      <div class="pf-tag-summary-treemap-tile" style="${_pfTreemapTileStyle(tile)}">
+        <div class="pf-tag-summary-treemap-main">
           <strong>${escapeHtml(row.stock_name || row.stock_code || '-')}</strong>
           <span>${escapeHtml(row.stock_code || '')}</span>
         </div>
-        <div class="pf-tag-summary-heatmap-metrics">
+        <div class="pf-tag-summary-treemap-metrics">
           <span class="${returnClass(row.changePct)}">${changeText}</span>
-          <strong>${pct !== null ? fmtPct(pct, false) : '-'}</strong>
+          <strong>${tile.pct !== null ? fmtPct(tile.pct, false) : '-'}</strong>
         </div>
       </div>`;
   }).join('');
 
   return `
-    <div class="pf-tag-summary-heatmap-panel">
-      <div class="pf-tag-summary-heatmap-head">
-        <div class="pf-tag-summary-section-title">태그 히트맵</div>
+    <div class="pf-tag-summary-treemap-panel">
+      <div class="pf-tag-summary-treemap-head">
+        <div class="pf-tag-summary-section-title">태그 영역지도</div>
         <strong>${portfolioWeight !== null ? fmtPct(portfolioWeight, false) : '-'}</strong>
       </div>
-      <div class="pf-tag-summary-heatmap" role="img" aria-label="태그 평가금액 비중과 일간 등락률 히트맵">
-        ${heatmapTiles || '<div class="pf-tag-summary-empty small">평가금액 데이터가 없습니다.</div>'}
+      <div class="pf-tag-summary-treemap" role="img" aria-label="태그 평가금액 비중만큼 면적을 할당한 영역지도">
+        ${treemapTiles || '<div class="pf-tag-summary-empty small">평가금액 데이터가 없습니다.</div>'}
       </div>
     </div>`;
 }
@@ -156,7 +204,7 @@ function _pfRenderTagSummaryComposition(rows, tagStats, portfolioWeight) {
   if (!rows.length) return _pfRenderTagSummaryRows(rows, tagStats);
   return `
     <div class="pf-tag-summary-composition">
-      ${_pfRenderTagSummaryHeatmap(rows, tagStats, portfolioWeight)}
+      ${_pfRenderTagSummaryTreemap(rows, tagStats, portfolioWeight)}
       <div class="pf-tag-summary-list-panel">
         <div class="pf-tag-summary-section-title">목록</div>
         ${_pfRenderTagSummaryRows(rows, tagStats)}

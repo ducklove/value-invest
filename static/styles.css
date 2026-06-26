@@ -3624,7 +3624,7 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   align-items: stretch;
   margin-bottom: 16px;
 }
-.pf-tag-summary-heatmap-panel,
+.pf-tag-summary-treemap-panel,
 .pf-tag-summary-list-panel,
 .pf-tag-summary-trend-panel {
   min-width: 0;
@@ -3632,7 +3632,7 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   border-radius: 8px;
   background: var(--surface);
 }
-.pf-tag-summary-heatmap-panel {
+.pf-tag-summary-treemap-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
@@ -3646,53 +3646,53 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   font-size: 12px;
   font-weight: 800;
 }
-.pf-tag-summary-heatmap-head {
+.pf-tag-summary-treemap-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
-.pf-tag-summary-heatmap-head strong {
+.pf-tag-summary-treemap-head strong {
   font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
-.pf-tag-summary-heatmap {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-content: stretch;
+.pf-tag-summary-treemap {
+  position: relative;
   min-height: 258px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--border) 42%, transparent);
 }
-.pf-tag-summary-heatmap-tile {
+.pf-tag-summary-treemap-tile {
+  position: absolute;
+  box-sizing: border-box;
   display: grid;
   align-content: space-between;
   gap: 12px;
-  min-width: 118px;
-  min-height: 96px;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border: 2px solid var(--surface);
   border-radius: 8px;
   overflow: hidden;
 }
-.pf-tag-summary-heatmap-main {
+.pf-tag-summary-treemap-main {
   min-width: 0;
 }
-.pf-tag-summary-heatmap-main strong,
-.pf-tag-summary-heatmap-main span {
+.pf-tag-summary-treemap-main strong,
+.pf-tag-summary-treemap-main span {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pf-tag-summary-heatmap-main strong {
+.pf-tag-summary-treemap-main strong {
   font-size: 13px;
 }
-.pf-tag-summary-heatmap-main span {
+.pf-tag-summary-treemap-main span {
   margin-top: 3px;
   color: var(--text-secondary);
   font-size: 11px;
 }
-.pf-tag-summary-heatmap-metrics {
+.pf-tag-summary-treemap-metrics {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -3700,7 +3700,7 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.pf-tag-summary-heatmap-metrics strong {
+.pf-tag-summary-treemap-metrics strong {
   font-size: 14px;
 }
 .pf-tag-summary-table-wrap {
@@ -3783,12 +3783,8 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   .pf-tag-summary-trends {
     grid-template-columns: 1fr;
   }
-  .pf-tag-summary-heatmap {
+  .pf-tag-summary-treemap {
     min-height: 220px;
-  }
-  .pf-tag-summary-heatmap-tile {
-    min-width: 128px;
-    min-height: 86px;
   }
   .pf-tag-summary-chart {
     height: 220px;
