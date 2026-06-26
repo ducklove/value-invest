@@ -597,6 +597,7 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
     assert 'type="button" class="pf-row-btn save js-pf-save"' in render
     # Edit state lives in PfStore.edit (portfolio-store.js).
@@ -604,6 +605,9 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     assert "const isSaving = PfStore.edit.savingCode === r.stock_code" in render
     assert 'class="pf-row-saving" aria-busy="true"' in render
     assert "pf-save-spinner" in render
+    assert 'class="pf-edit-input pf-stock-name-edit js-pf-edit-name"' in render
+    assert 'id="pfEditName"' in render
+    assert "pf-stock-cell-editing" in render
     assert 'class="pf-edit-input js-pf-edit-qty"' in render
     assert 'class="pf-edit-input js-pf-edit-price"' in render
     assert 'class="pf-price-currency-select js-pf-edit-price-currency"' in render
@@ -615,6 +619,11 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     assert "function _pfSetEditSaving(stockCode, saving, row)" in actions
     assert "if (PfStore.edit.savingCode) return;" in actions
     assert "_pfSetEditSaving(stockCode, true, editRow)" in actions
+    assert ".pf-stock-name-edit" in styles
+    assert ".pf-stock-cell-editing" in styles
+    assert "const nameEl = editRow?.querySelector('.js-pf-edit-name')" in actions
+    assert "stockName = nameEl ? nameEl.value.trim()" in actions
+    assert "showToast('종목명을 입력해 주세요.');" in actions
     assert "editRow?.querySelector('.js-pf-edit-qty')" in actions
     assert "editRow?.querySelector('.js-pf-edit-price')" in actions
     assert "editRow?.querySelector('.js-pf-edit-price-currency')" in actions

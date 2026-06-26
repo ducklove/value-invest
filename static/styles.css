@@ -3475,6 +3475,9 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   cursor: pointer;
   min-width: 0;
 }
+.pf-stock-cell-editing {
+  cursor: default;
+}
 .pf-stock-cell-with-drag {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
@@ -3496,6 +3499,15 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   gap: 4px;
   min-width: 0;
   max-width: 100%;
+}
+.pf-stock-edit-main {
+  width: min(220px, 100%);
+}
+.pf-stock-name-edit {
+  width: 100%;
+  min-width: 120px;
+  margin-bottom: 3px;
+  text-align: left;
 }
 .pf-row-drag-handle {
   margin: 1px 0 0;

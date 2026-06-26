@@ -557,10 +557,11 @@ function renderPortfolio(options = {}) {
       : '';
     const safeName = escapeHtml(r.stock_name);
     const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</span>${tagHtml}</span>`;
+    const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</span>${tagHtml}</span>`;
     const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
     if (isEditing) {
       return `<tr data-code="${safeCode}"${rowClass}>
-        <td class="pf-stock-cell js-pf-analyze">${stockIdentity}</td>
+        <td class="pf-stock-cell pf-stock-cell-editing">${stockEditIdentity}</td>
         <td class="pf-col-group"><select class="pf-group-select js-pf-group"${editAttrs}>${groupOpts}</select></td>
         <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>

@@ -94,8 +94,11 @@ function startPortfolioEdit(stockCode) {
   if (PfStore.edit.savingCode) return;
   PfStore.edit.code = stockCode;
   renderPortfolio();
-  const priceInput = document.getElementById('pfEditPrice');
-  if (priceInput) priceInput.focus();
+  const focusInput = document.getElementById('pfEditName') || document.getElementById('pfEditPrice');
+  if (focusInput) {
+    focusInput.focus();
+    if (focusInput.select) focusInput.select();
+  }
 }
 
 function cancelPortfolioEdit() {
@@ -140,6 +143,7 @@ function _pfSetEditSaving(stockCode, saving, row) {
 async function savePortfolioEdit(stockCode, stockName, row) {
   if (PfStore.edit.savingCode) return;
   const editRow = _pfFindEditRow(stockCode, row);
+  const nameEl = editRow?.querySelector('.js-pf-edit-name') || document.getElementById('pfEditName');
   const qtyEl = editRow?.querySelector('.js-pf-edit-qty') || document.getElementById('pfEditQty');
   const priceEl = editRow?.querySelector('.js-pf-edit-price') || document.getElementById('pfEditPrice');
   const priceCurrencyEl = editRow?.querySelector('.js-pf-edit-price-currency') || document.getElementById('pfEditPriceCurrency');
@@ -153,12 +157,13 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     showToast('수량과 매입가를 올바르게 입력해 주세요.');
     return;
   }
-  // When called from the delegated handler the name is looked up locally
-  // rather than smuggled through the DOM as a JS-string literal.
   if (stockName === undefined) {
-    const existing = PfStore.items.find(i => i.stock_code === stockCode);
-    stockName = existing ? existing.stock_name : '';
+    const existing = nameEl ? null : PfStore.items.find(i => i.stock_code === stockCode);
+    stockName = nameEl ? nameEl.value.trim() : (existing ? existing.stock_name : '');
+  } else {
+    stockName = String(stockName || '').trim();
   }
+  if (!stockName) { showToast('종목명을 입력해 주세요.'); nameEl?.focus(); return; }
   const existingItem = PfStore.items.find(i => i.stock_code === stockCode);
   // 등록일자는 optional — 비워두면 서버가 기존 값 유지. Input[type=date]
   // 는 YYYY-MM-DD 또는 빈 문자열을 돌려주므로 그대로 전달.
@@ -220,7 +225,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
       item.avg_price = price;
       item.avg_price_currency = data.avg_price_currency || avgPriceCurrency;
       item.avg_price_krw = Number.isFinite(Number(data.avg_price_krw)) ? Number(data.avg_price_krw) : pfAvgPriceKrw(item);
-      item.stock_name = stockName;
+      item.stock_name = data.stock_name || stockName;
       // Server may have normalized or kept created_at — trust its echo.
       if (data.created_at) item.created_at = data.created_at;
       // target_price 도 server 응답을 trust — null/숫자 그대로.

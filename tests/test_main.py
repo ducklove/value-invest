@@ -230,6 +230,36 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[5], "KRW")
         foreign_name.assert_not_awaited()
 
+    async def test_portfolio_save_keeps_manual_stock_name(self):
+        request = _request_with_headers("/api/portfolio/005930")
+        saver = AsyncMock(return_value={
+            "stock_code": "005930",
+            "stock_name": "삼전",
+            "quantity": 10,
+            "avg_price": 70000,
+            "currency": "KRW",
+        })
+        resolver = AsyncMock(side_effect=AssertionError("manual stock_name should not be resolved again"))
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("routes.portfolio.foreign.resolve_domestic_code_alias", new=AsyncMock(return_value=None)), \
+             patch("routes.portfolio.foreign.resolve_name", new=resolver), \
+             patch("repositories.portfolio.save_portfolio_item", new=saver), \
+             patch("routes.portfolio.fx.price_to_krw", new=AsyncMock(return_value=70000)), \
+             patch("routes.portfolio.fx.annotate_avg_price_krw", new=AsyncMock()), \
+             patch("routes.portfolio.dividends.schedule_for_portfolio"):
+            response = await portfolio.save_portfolio_item(
+                "005930",
+                request,
+                {"stock_name": "삼전", "quantity": 10, "avg_price": 70000},
+            )
+
+        saver.assert_awaited_once()
+        args = saver.await_args.args
+        self.assertEqual(args[1], "005930")
+        self.assertEqual(args[2], "삼전")
+        self.assertEqual(response["stock_name"], "삼전")
+        resolver.assert_not_awaited()
+
     async def test_portfolio_save_foreign_ticker_uses_fast_currency_inference(self):
         request = _request_with_headers("/api/portfolio/AAPL")
         saver = AsyncMock(return_value={"stock_code": "AAPL"})
