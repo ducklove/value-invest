@@ -82,7 +82,7 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
         "focus": "정규장 마감 직후 코스피·코스닥 지수, 투자자 수급, 오늘 포트폴리오 성과를 우선합니다.",
         "outline": (
             "코스피·코스닥 지수와 수급 동향을 먼저 요약하고, 이어서 오늘 포트폴리오 성과, "
-            "기여 상위/하위 종목, 새 공시·리포트, 마감 후 확인할 포인트 1~2개."
+            "새 공시·리포트, 마감 후 확인할 포인트 1~2개."
         ),
         "enabled_key": "daily_briefing_market_close_enabled",
         "instructions_key": "daily_briefing_market_close_custom_instructions",
@@ -629,43 +629,46 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
     }
 
     # --- 어제 NAV 변화 + 기여 종목 (결산 스냅샷 기반) ---
-    try:
-        latest = await snapshots_repo.get_latest_snapshot(google_sub)
-        if latest:
-            prev = await snapshots_repo.get_latest_snapshot_before_date(google_sub, latest["date"])
-            context["nav"] = _nav_block(latest, prev)
-            curr_rows = await snapshots_repo.get_stock_snapshots_by_date(google_sub, latest["date"])
-            prev_rows = await snapshots_repo.get_stock_snapshots_before_date(google_sub, latest["date"])
-            names = {
-                r["stock_code"]: r.get("stock_name") or r["stock_code"]
-                for r in await snapshots_repo.get_latest_stock_snapshot_rows(google_sub)
-            }
-            prev_codes = {r["stock_code"] for r in prev_rows}
-            mover_codes = sorted(
-                row["stock_code"]
-                for row in curr_rows
-                if row["stock_code"] in prev_codes and not row["stock_code"].startswith("CASH_")
-            )
-            price_changes = await _daily_price_changes_by_code(
-                mover_codes,
-                prev.get("date") if prev else None,
-                latest["date"],
-            )
-            context["movers"] = _movers(
-                curr_rows,
-                prev_rows,
-                names,
-                price_changes,
-                allow_value_fallback=True,
-            )
-            movers = (context["movers"].get("top") or []) + (context["movers"].get("bottom") or [])
-            context["diagnostics"] = {
-                "mover_candidates": len(mover_codes),
-                "price_change_codes": len(price_changes),
-                "mover_value_fallbacks": sum(1 for m in movers if m.get("basis") == "market_value"),
-            }
-    except Exception as exc:
-        logger.warning("briefing NAV block failed user=%s: %s", google_sub[:8], exc)
+    # 클로징 브리핑은 당일 장 마감 직후 메시지라 전일/최근 결산 스냅샷 기반
+    # 데이터가 섞이지 않도록 이 블록을 수집하지 않는다.
+    if profile["kind"] != "market_close":
+        try:
+            latest = await snapshots_repo.get_latest_snapshot(google_sub)
+            if latest:
+                prev = await snapshots_repo.get_latest_snapshot_before_date(google_sub, latest["date"])
+                context["nav"] = _nav_block(latest, prev)
+                curr_rows = await snapshots_repo.get_stock_snapshots_by_date(google_sub, latest["date"])
+                prev_rows = await snapshots_repo.get_stock_snapshots_before_date(google_sub, latest["date"])
+                names = {
+                    r["stock_code"]: r.get("stock_name") or r["stock_code"]
+                    for r in await snapshots_repo.get_latest_stock_snapshot_rows(google_sub)
+                }
+                prev_codes = {r["stock_code"] for r in prev_rows}
+                mover_codes = sorted(
+                    row["stock_code"]
+                    for row in curr_rows
+                    if row["stock_code"] in prev_codes and not row["stock_code"].startswith("CASH_")
+                )
+                price_changes = await _daily_price_changes_by_code(
+                    mover_codes,
+                    prev.get("date") if prev else None,
+                    latest["date"],
+                )
+                context["movers"] = _movers(
+                    curr_rows,
+                    prev_rows,
+                    names,
+                    price_changes,
+                    allow_value_fallback=True,
+                )
+                movers = (context["movers"].get("top") or []) + (context["movers"].get("bottom") or [])
+                context["diagnostics"] = {
+                    "mover_candidates": len(mover_codes),
+                    "price_change_codes": len(price_changes),
+                    "mover_value_fallbacks": sum(1 for m in movers if m.get("basis") == "market_value"),
+                }
+        except Exception as exc:
+            logger.warning("briefing NAV block failed user=%s: %s", google_sub[:8], exc)
 
     # --- 오늘 포트폴리오 성과 (클로징/나이트: 현재 평가액 vs 전일 결산, 입출금 제외) ---
     if profile["kind"] in TODAY_PORTFOLIO_BRIEFING_TYPES:
@@ -675,10 +678,11 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
             logger.warning("briefing today portfolio block failed user=%s: %s", google_sub[:8], exc)
 
     # --- 해외 그룹 성과 (그룹 스냅샷 기반) ---
-    try:
-        context["overseas_groups"] = await _fetch_overseas_groups(google_sub)
-    except Exception as exc:
-        logger.warning("briefing overseas group block failed user=%s: %s", google_sub[:8], exc)
+    if profile["kind"] != "market_close":
+        try:
+            context["overseas_groups"] = await _fetch_overseas_groups(google_sub)
+        except Exception as exc:
+            logger.warning("briefing overseas group block failed user=%s: %s", google_sub[:8], exc)
 
     # --- 신규 공시 리뷰 / 증권사 리포트 (보유 종목만) ---
     try:
@@ -757,10 +761,11 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
         logger.warning("briefing calendar alert block failed user=%s: %s", google_sub[:8], exc)
 
     # --- 야간선물 일간 상승률/하락률 ---
-    try:
-        context["night_futures"] = await _fetch_night_futures_block()
-    except Exception as exc:
-        logger.warning("briefing night futures block failed: %s", exc)
+    if profile["kind"] != "market_close":
+        try:
+            context["night_futures"] = await _fetch_night_futures_block()
+        except Exception as exc:
+            logger.warning("briefing night futures block failed: %s", exc)
 
     # --- 국내 지수 + 투자자 수급 (클로징/나이트 브리핑 핵심 입력) ---
     if profile["kind"] in {"market_close", "night"}:
@@ -888,12 +893,13 @@ def _market_context_lines(context: dict) -> list[str]:
 
 def _requested_missing_context_lines(context: dict, custom_instructions: str | None) -> list[str]:
     requested = _instruction_preferences(custom_instructions)
+    kind = context.get("briefing_type") or DEFAULT_BRIEFING_TYPE
     lines: list[str] = []
-    if requested["overseas_groups"] and not context.get("overseas_groups"):
+    if kind != "market_close" and requested["overseas_groups"] and not context.get("overseas_groups"):
         lines.append("🌏 해외 그룹 성과: 최근 그룹 스냅샷에서 해외 그룹 데이터를 찾지 못했습니다.")
     if requested["calendar_alerts"] and not context.get("calendar_alerts"):
         lines.append("📅 오늘의 일정: 오늘 예정된 알림 설정 이벤트가 없습니다.")
-    if requested["night_futures"] and not context.get("night_futures"):
+    if kind != "market_close" and requested["night_futures"] and not context.get("night_futures"):
         lines.append("🌙 야간선물: 현재 조회 가능한 값이 없습니다.")
     return lines
 
@@ -923,19 +929,19 @@ def _context_lines(context: dict, custom_instructions: str | None = None) -> lis
     nav = context.get("nav")
     if nav and kind not in TODAY_PORTFOLIO_BRIEFING_TYPES:
         lines.append(_fmt_nav_line(nav, "어제"))
-    elif nav and kind in TODAY_PORTFOLIO_BRIEFING_TYPES and not portfolio_today:
+    elif nav and kind == "night" and not portfolio_today:
         lines.append(_fmt_nav_line(nav, "최근 결산"))
 
     movers = context.get("movers") or {}
-    if movers.get("top"):
+    if kind != "market_close" and movers.get("top"):
         parts = ", ".join(_fmt_mover(m) for m in movers["top"])
         lines.append(f"📈 상승 기여: {parts}")
-    if movers.get("bottom"):
+    if kind != "market_close" and movers.get("bottom"):
         parts = ", ".join(_fmt_mover(m) for m in movers["bottom"])
         lines.append(f"📉 하락 기여: {parts}")
 
     overseas_groups = context.get("overseas_groups") or []
-    if overseas_groups:
+    if kind != "market_close" and overseas_groups:
         parts = ", ".join(_fmt_overseas_group(g) for g in overseas_groups)
         lines.append(f"🌏 해외 그룹 성과: {parts}")
 
@@ -951,7 +957,7 @@ def _context_lines(context: dict, custom_instructions: str | None = None) -> lis
         parts = ", ".join(_fmt_calendar_alert(item) for item in alerts)
         lines.append(f"📅 오늘의 일정: {parts}")
 
-    night_line = _night_futures_line(context.get("night_futures"))
+    night_line = _night_futures_line(context.get("night_futures")) if kind != "market_close" else None
     if night_line:
         lines.append(night_line)
 
@@ -979,7 +985,8 @@ def _template_body_lines(context: dict, custom_instructions: str | None = None) 
     if not body:
         body = ["오늘은 요약할 새 데이터가 없습니다."]
     movers = context.get("movers") or {}
-    if context.get("nav") and not movers.get("top") and not movers.get("bottom"):
+    kind = context.get("briefing_type") or DEFAULT_BRIEFING_TYPE
+    if kind != "market_close" and context.get("nav") and not movers.get("top") and not movers.get("bottom"):
         body.append("기여 종목: 종목별 종가 데이터가 비어 있어 세부 기여는 생략했습니다.")
     if len(body) < MIN_USABLE_AI_LINES:
         body.append("오늘 확인: 큰 변동의 원인을 종목별 가격·환율·현금흐름으로 나눠 점검하세요.")

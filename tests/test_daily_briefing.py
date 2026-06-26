@@ -313,17 +313,23 @@ class BriefingContextTests(DailyBriefingHarness):
             "nav": {"date": "2026-06-22", "total_value": 1_050_000, "change_krw": 50_000, "change_pct": 5.0},
             "domestic_market": ["코스피 2,900 (▲0.50%)", "코스닥 850 (▼0.20%)"],
             "market_flows": ["코스피(26.06.23) 개인 +100억 / 외국인 -50억 / 기관 +20억"],
-            "movers": {"top": [], "bottom": []},
-            "overseas_groups": [],
+            "movers": {
+                "top": [{"stock_name": "삼성전자", "change_krw": 10_000, "change_pct": 1.2, "basis": "price"}],
+                "bottom": [{"stock_name": "SK하이닉스", "change_krw": -5_000, "change_pct": -0.5, "basis": "price"}],
+            },
+            "overseas_groups": [
+                {"group_name": "해외", "market_value": 300_000, "change_krw": -10_000, "change_pct": -3.2}
+            ],
             "filings": [],
             "reports": [],
             "calendar": [],
             "calendar_alerts": [],
-            "night_futures": None,
+            "night_futures": {"value": "431.20", "change": "+1.20", "change_pct": "+0.28%"},
             "market": [],
         }
 
-        lines = daily_briefing.render_template_briefing(ctx).splitlines()
+        instructions = "해외 그룹의 성과와 야간선물 일간 상승률을 추가해줘."
+        lines = daily_briefing.render_template_briefing(ctx, instructions).splitlines()
 
         self.assertTrue(lines[1].startswith("🇰🇷 국내 지수"))
         self.assertTrue(lines[2].startswith("💰 수급 동향"))
@@ -331,6 +337,37 @@ class BriefingContextTests(DailyBriefingHarness):
         text = "\n".join(lines)
         self.assertIn("입출금 제외", text)
         self.assertNotIn("어제(", text)
+        self.assertNotIn("최근 결산", text)
+        self.assertNotIn("상승 기여", text)
+        self.assertNotIn("하락 기여", text)
+        self.assertNotIn("기여 종목", text)
+        self.assertNotIn("해외 그룹 성과", text)
+        self.assertNotIn("야간선물", text)
+
+    async def test_closing_context_skips_stale_snapshot_overseas_and_night_inputs(self):
+        await self._seed_user()
+        latest_snapshot = AsyncMock(return_value={"date": "2026-06-22"})
+        overseas = AsyncMock(return_value=[{"group_name": "해외"}])
+        night_futures = AsyncMock(return_value={"value": "431.20"})
+        with patch.object(daily_briefing.snapshots_repo, "get_latest_snapshot", new=latest_snapshot), \
+             patch.object(daily_briefing, "_fetch_today_portfolio_block", new=AsyncMock(return_value=None)), \
+             patch.object(daily_briefing, "_fetch_overseas_groups", new=overseas), \
+             patch.object(daily_briefing, "_fetch_night_futures_block", new=night_futures), \
+             patch.object(daily_briefing, "_fetch_domestic_market_block", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing, "_fetch_market_flow_block", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.dart_review_repo, "list_recent_reviews", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.wiki_repo, "list_recent_entries", new=AsyncMock(return_value=[])), \
+             patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
+            ctx = await daily_briefing.build_briefing_context("u1", "market_close")
+
+        latest_snapshot.assert_not_awaited()
+        overseas.assert_not_awaited()
+        night_futures.assert_not_awaited()
+        self.assertIsNone(ctx["nav"])
+        self.assertEqual(ctx["movers"], {"top": [], "bottom": []})
+        self.assertEqual(ctx["overseas_groups"], [])
+        self.assertIsNone(ctx["night_futures"])
 
     async def test_night_template_prioritizes_after_close_today_and_tomorrow_outlook(self):
         ctx = {
@@ -510,6 +547,9 @@ class GenerateBriefingTests(DailyBriefingHarness):
         self.assertIn("코스피·코스닥 지수와 수급 동향", prompt)
         self.assertIn("오늘 포트폴리오 성과", prompt)
         self.assertNotIn("어제 포트폴리오 변동 요약", prompt)
+        self.assertNotIn("기여 상위/하위", prompt)
+        self.assertNotIn("해외 그룹 성과", prompt)
+        self.assertNotIn("야간선물", prompt)
 
     async def test_too_short_llm_response_falls_back_to_template(self):
         await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
