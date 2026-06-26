@@ -12,6 +12,7 @@ import io
 import json as _json
 import os
 import re
+import urllib.request
 import zipfile
 from datetime import datetime, timedelta
 from urllib.parse import urljoin
@@ -51,7 +52,8 @@ CATALOG: dict[str, dict] = {
     "AUD_KRW": {"label": "호주달러/원", "category": "환율"},
     "VND_KRW": {"label": "베트남동/원", "category": "환율"},
     "USD_IDX": {"label": "달러지수", "category": "환율"},
-    # 국채 — country(KR/US/기타)·maturity(년, overnight=0)로 프론트가 yield curve·국가비교 구성
+    # 국채 — country(KR/US/기타)·maturity(년, 기준금리=-1, overnight=0)로 프론트가 yield curve·국가비교 구성
+    "US_BASE": {"label": "미국 기준금리", "category": "국채", "country": "US", "maturity": -1},
     "US_SOFR": {"label": "미국 SOFR", "category": "국채", "country": "US", "maturity": 0},
     "US3M":   {"label": "미국3개월", "category": "국채", "country": "US", "maturity": 0.25},
     "US6M":   {"label": "미국6개월", "category": "국채", "country": "US", "maturity": 0.5},
@@ -62,6 +64,7 @@ CATALOG: dict[str, dict] = {
     "US10Y":  {"label": "미국10년물", "category": "국채", "country": "US", "maturity": 10},
     "US20Y":  {"label": "미국20년물", "category": "국채", "country": "US", "maturity": 20},
     "US30Y":  {"label": "미국30년물", "category": "국채", "country": "US", "maturity": 30},
+    "KR_BASE": {"label": "한국 기준금리", "category": "국채", "country": "KR", "maturity": -1},
     "KOFR":     {"label": "KOFR",     "category": "국채", "country": "KR", "maturity": 0},
     "KR_CD91":  {"label": "한국 CD(91일)", "category": "국채", "country": "KR", "maturity": 0.25},
     "KR_KORIBOR6M": {"label": "한국 KORIBOR(6개월)", "category": "국채", "country": "KR", "maturity": 0.5},
@@ -73,6 +76,7 @@ CATALOG: dict[str, dict] = {
     "KR20Y":  {"label": "한국20년물", "category": "국채", "country": "KR", "maturity": 20},
     "KR30Y":  {"label": "한국30년물", "category": "국채", "country": "KR", "maturity": 30},
     "KR50Y":  {"label": "한국50년물", "category": "국채", "country": "KR", "maturity": 50},
+    "JP_BASE": {"label": "일본 기준금리", "category": "국채", "country": "JP", "maturity": -1},
     "JP_TONA": {"label": "일본 TONA", "category": "국채", "country": "JP", "maturity": 0},
     "JP3M":   {"label": "일본3개월", "category": "국채", "country": "JP", "maturity": 0.25},
     "JP6M":   {"label": "일본6개월", "category": "국채", "country": "JP", "maturity": 0.5},
@@ -90,8 +94,11 @@ CATALOG: dict[str, dict] = {
     "AU10Y":  {"label": "호주10년물", "category": "국채", "country": "AU", "maturity": 10},
     "CN10Y":  {"label": "중국10년물", "category": "국채", "country": "CN", "maturity": 10},
     "IT10Y":  {"label": "이탈리아10년물", "category": "국채", "country": "IT", "maturity": 10},
+    "ES10Y":  {"label": "스페인10년물", "category": "국채", "country": "ES", "maturity": 10},
     "CA10Y":  {"label": "캐나다10년물", "category": "국채", "country": "CA", "maturity": 10},
+    "RU10Y":  {"label": "러시아10년물", "category": "국채", "country": "RU", "maturity": 10},
     "IN10Y":  {"label": "인도10년물", "category": "국채", "country": "IN", "maturity": 10},
+    "ID10Y":  {"label": "인도네시아10년물", "category": "국채", "country": "ID", "maturity": 10},
     "BR10Y":  {"label": "브라질10년물", "category": "국채", "country": "BR", "maturity": 10},
     # 야간선물
     "NIGHT_FUTURES": {"label": "야간선물", "category": "야간선물"},
@@ -695,8 +702,11 @@ _CNBC_BOND_MAP = {
     "AU10Y": "AU10Y-AU",
     "CN10Y": "CN10Y-CN",
     "IT10Y": "IT10Y-IT",
+    "ES10Y": "ES10Y-ES",
     "CA10Y": "CA10Y-CA",
+    "RU10Y": "RU10Y-RU",
     "IN10Y": "IN10Y-IN",
+    "ID10Y": "ID10Y-ID",
     "BR10Y": "BR10Y-BR",
 }
 
@@ -800,6 +810,163 @@ def _quote_from_current_prev(current: float, prev: float | None, decimals: int =
         "change_pct": f"{abs(diff) / prev * 100:.2f}%" if prev else "",
         "direction": "up" if diff > 0 else "down",
     }
+
+
+_POLICY_RATE_CODES = {"US_BASE", "KR_BASE", "JP_BASE"}
+
+
+def _parse_fred_policy_csv(text: str) -> dict:
+    rows = list(csv.DictReader(io.StringIO(text)))
+    pts: list[tuple[str, float]] = []
+    for row in rows:
+        date = (row.get("observation_date") or "").strip()
+        raw = (row.get("DFEDTARU") or "").strip()
+        if not date or raw in ("", "."):
+            continue
+        try:
+            pts.append((date, float(raw)))
+        except ValueError:
+            continue
+    if not pts:
+        return dict(_EMPTY)
+    current = pts[-1][1]
+    prev = pts[-2][1] if len(pts) >= 2 else None
+    return _quote_from_current_prev(current, prev, decimals=2)
+
+
+def _fed_policy_level_value(raw: str) -> float | None:
+    vals = re.findall(r"\d+(?:\.\d+)?", raw)
+    if not vals:
+        return None
+    try:
+        return max(float(v) for v in vals)
+    except ValueError:
+        return None
+
+
+def _parse_fed_openmarket_page(html: str) -> dict:
+    year_match = re.search(r"<h4>\s*20\d{2}\s*</h4>(.*?)(?=<h4>\s*20\d{2}\s*</h4>|$)", html, re.DOTALL)
+    if not year_match:
+        return dict(_EMPTY)
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", year_match.group(1), re.DOTALL)
+    values: list[float] = []
+    for row in rows:
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+        if len(cells) < 4:
+            continue
+        level = re.sub(r"<[^>]+>", " ", cells[-1])
+        val = _fed_policy_level_value(level)
+        if val is not None:
+            values.append(val)
+    if not values:
+        return dict(_EMPTY)
+    return _quote_from_current_prev(values[0], values[1] if len(values) >= 2 else None, decimals=2)
+
+
+async def _fetch_us_policy_rate(client: httpx.AsyncClient) -> dict:
+    """Fetch the Fed funds target range upper bound from official public sources."""
+    try:
+        r = await client.get(
+            "https://www.federalreserve.gov/monetarypolicy/openmarket.htm",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code == 200:
+            parsed = _parse_fed_openmarket_page(r.text)
+            if _indicator_has_value(parsed):
+                return parsed
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        blob = await asyncio.to_thread(lambda: urllib.request.urlopen(req, timeout=6).read())
+        return _parse_fred_policy_csv(blob.decode("utf-8", errors="ignore"))
+    except Exception:
+        return dict(_EMPTY)
+
+
+def _parse_bok_base_rate_page(html: str) -> dict:
+    m = re.search(r"var\s+chartObj2_s\s*=\s*\[(.*?)\]\s*(?:/\*|var|\$)", html, re.DOTALL)
+    if not m:
+        return dict(_EMPTY)
+    pts: list[tuple[str, float]] = []
+    for date, raw in re.findall(r'\["([^"]+)",\s*([-+]?\d+(?:\.\d+)?)\]', m.group(1)):
+        try:
+            pts.append((date.strip(), float(raw)))
+        except ValueError:
+            continue
+    if not pts:
+        return dict(_EMPTY)
+    current = pts[-1][1]
+    prev = pts[-2][1] if len(pts) >= 2 else None
+    return _quote_from_current_prev(current, prev, decimals=2)
+
+
+async def _fetch_kr_policy_rate(client: httpx.AsyncClient) -> dict:
+    """Fetch the Bank of Korea Base Rate from BOK's public policy-rate page."""
+    try:
+        r = await client.get(
+            "https://www.bok.or.kr/eng/singl/baseRate/progress.do",
+            params={"dataSeCd": "01", "menuNo": "400016"},
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code != 200:
+            return dict(_EMPTY)
+        return _parse_bok_base_rate_page(r.text)
+    except Exception:
+        return dict(_EMPTY)
+
+
+def _parse_boj_policy_rate_page(html: str) -> dict:
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text)
+    patterns = [
+        r"uncollateralized overnight call rate to remain at around\s+([-+]?\d+(?:\.\d+)?)\s+percent",
+        r"Interest Rate Applied to the Complementary Deposit Facility\s+([-+]?\d+(?:\.\d+)?)\s*%",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if not m:
+            continue
+        try:
+            return _quote_from_current_prev(float(m.group(1)), None, decimals=2)
+        except ValueError:
+            continue
+    return dict(_EMPTY)
+
+
+async def _fetch_jp_policy_rate(client: httpx.AsyncClient) -> dict:
+    """Fetch BOJ's policy guideline rate from the public English homepage."""
+    try:
+        r = await client.get("https://www.boj.or.jp/en/", headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return dict(_EMPTY)
+        return _parse_boj_policy_rate_page(r.text)
+    except Exception:
+        return dict(_EMPTY)
+
+
+async def _fetch_policy_rates(client: httpx.AsyncClient, codes: list[str]) -> dict[str, dict]:
+    out = {code: dict(_EMPTY) for code in codes}
+    tasks = []
+    task_codes = []
+    if "US_BASE" in codes:
+        tasks.append(_fetch_us_policy_rate(client))
+        task_codes.append("US_BASE")
+    if "KR_BASE" in codes:
+        tasks.append(_fetch_kr_policy_rate(client))
+        task_codes.append("KR_BASE")
+    if "JP_BASE" in codes:
+        tasks.append(_fetch_jp_policy_rate(client))
+        task_codes.append("JP_BASE")
+    if not tasks:
+        return out
+    fetched = await asyncio.gather(*tasks, return_exceptions=True)
+    for code, result in zip(task_codes, fetched):
+        out[code] = dict(_EMPTY) if isinstance(result, Exception) else result
+    return out
 
 
 def _xlsx_cell_values(blob: bytes) -> dict[str, str]:
@@ -1134,6 +1301,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     fx_daily_items = []   # AUD/VND — exchangeDailyQuote, one request each
     cnbc_bond_items = []  # government bonds — one batched CNBC request
     ecos_bond_items = []  # Korean bonds — one batched ECOS request
+    policy_rate_items = []  # central bank policy rates — one batched fan-out
     mof_jgb_items = []  # Japan MOF JGB current data
     us10y_needed = False
     sofr_needed = False
@@ -1160,6 +1328,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             cnbc_bond_items.append(code)
         elif code in _ECOS_BOND_MAP:
             ecos_bond_items.append(code)
+        elif code in _POLICY_RATE_CODES:
+            policy_rate_items.append(code)
         elif code in _MOF_JGB_MAP:
             mof_jgb_items.append(code)
         elif code in _WORLD_DAILY_CODES:
@@ -1218,6 +1388,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
         if ecos_bond_items:
             tasks.append(_fetch_ecos_bonds(client, ecos_bond_items))
             task_keys.append(("ecos_bonds", None))
+
+        # Central bank policy rates — public official sources, fetched in parallel
+        if policy_rate_items:
+            tasks.append(_fetch_policy_rates(client, policy_rate_items))
+            task_keys.append(("policy_rates", None))
 
         # Japan MOF JGB current data — one CSV request covers all requested maturities
         if mof_jgb_items:
@@ -1286,6 +1461,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             elif kind == "ecos_bonds":
                 if isinstance(result, dict):
                     for c in ecos_bond_items:
+                        if c in result:
+                            results[c] = result[c]
+            elif kind == "policy_rates":
+                if isinstance(result, dict):
+                    for c in policy_rate_items:
                         if c in result:
                             results[c] = result[c]
             elif kind == "mof_jgb_bonds":

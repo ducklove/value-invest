@@ -9,6 +9,10 @@ function _pfNormalizeTagKey(tag) {
   return String(tag || '').trim().replace(/^#/, '').toLowerCase();
 }
 
+function _pfNormalizeGroupKey(group) {
+  return String(group || '').trim().toLowerCase();
+}
+
 function _pfNumberOrNull(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
@@ -123,7 +127,7 @@ function _pfTreemapTileStyle(tile) {
   ].join(';');
 }
 
-function _pfRenderTagSummaryTreemap(rows, tagStats, portfolioWeight) {
+function _pfRenderTagSummaryTreemap(rows, tagStats, portfolioWeight, scopeLabel = '태그') {
   const pricedRows = rows
     .filter(row => Number.isFinite(row.marketValue) && row.marketValue > 0)
     .sort((a, b) => b.marketValue - a.marketValue);
@@ -152,18 +156,18 @@ function _pfRenderTagSummaryTreemap(rows, tagStats, portfolioWeight) {
   return `
     <div class="pf-tag-summary-treemap-panel">
       <div class="pf-tag-summary-treemap-head">
-        <div class="pf-tag-summary-section-title">태그 영역지도</div>
+        <div class="pf-tag-summary-section-title">${scopeLabel} 영역지도</div>
         <strong>${portfolioWeight !== null ? fmtPct(portfolioWeight, false) : '-'}</strong>
       </div>
-      <div class="pf-tag-summary-treemap" role="img" aria-label="태그 평가금액 비중만큼 면적을 할당한 영역지도">
+      <div class="pf-tag-summary-treemap" role="img" aria-label="${scopeLabel} 평가금액 비중만큼 면적을 할당한 영역지도">
         ${treemapTiles || '<div class="pf-tag-summary-empty small">평가금액 데이터가 없습니다.</div>'}
       </div>
     </div>`;
 }
 
-function _pfRenderTagSummaryRows(rows, tagStats) {
+function _pfRenderTagSummaryRows(rows, tagStats, scopeLabel = '태그') {
   if (!rows.length) {
-    return '<div class="pf-tag-summary-empty">해당 태그가 붙은 종목이 없습니다.</div>';
+    return `<div class="pf-tag-summary-empty">해당 ${scopeLabel}에 속한 종목이 없습니다.</div>`;
   }
   const body = rows.map(row => {
     const rowWeight = tagStats.marketValue > 0 && Number.isFinite(row.marketValue)
@@ -192,7 +196,7 @@ function _pfRenderTagSummaryRows(rows, tagStats) {
             <th>일간</th>
             <th>손익</th>
             <th>평가금액</th>
-            <th>태그 비중</th>
+            <th>${scopeLabel} 비중</th>
           </tr>
         </thead>
         <tbody>${body}</tbody>
@@ -200,14 +204,14 @@ function _pfRenderTagSummaryRows(rows, tagStats) {
     </div>`;
 }
 
-function _pfRenderTagSummaryComposition(rows, tagStats, portfolioWeight) {
-  if (!rows.length) return _pfRenderTagSummaryRows(rows, tagStats);
+function _pfRenderTagSummaryComposition(rows, tagStats, portfolioWeight, scopeLabel = '태그') {
+  if (!rows.length) return _pfRenderTagSummaryRows(rows, tagStats, scopeLabel);
   return `
     <div class="pf-tag-summary-composition">
-      ${_pfRenderTagSummaryTreemap(rows, tagStats, portfolioWeight)}
+      ${_pfRenderTagSummaryTreemap(rows, tagStats, portfolioWeight, scopeLabel)}
       <div class="pf-tag-summary-list-panel">
         <div class="pf-tag-summary-section-title">목록</div>
-        ${_pfRenderTagSummaryRows(rows, tagStats)}
+        ${_pfRenderTagSummaryRows(rows, tagStats, scopeLabel)}
       </div>
     </div>`;
 }
@@ -443,6 +447,37 @@ async function _pfLoadTagSummaryTrends(tag) {
   }
 }
 
+async function _pfLoadGroupSummaryTrends(groupName) {
+  const loadSeq = ++_pfTagSummaryLoadSeq;
+  const groupKey = _pfNormalizeGroupKey(groupName);
+  _pfSetTagSummaryTrendMessage('그룹 추세 데이터를 불러오는 중입니다...');
+  try {
+    const fetchJson = typeof _pfFetchJson === 'function'
+      ? _pfFetchJson
+      : async path => {
+          const resp = await apiFetch(path);
+          if (!resp.ok) throw new Error(`Group history request failed (${resp.status})`);
+          return await resp.json();
+        };
+    const rows = await fetchJson('/api/portfolio/group-weight-history', 'Group weight history');
+    if (loadSeq !== _pfTagSummaryLoadSeq || !document.getElementById('pfTagSummaryModal')) return;
+    const groupRows = (Array.isArray(rows) ? rows : [])
+      .filter(row => _pfNormalizeGroupKey(row?.group_name) === groupKey)
+      .map(row => ({
+        date: row.date,
+        tag_value: row.market_value,
+        weight_pct: row.weight_pct,
+        fx_usdkrw: row.fx_usdkrw,
+      }));
+    await _pfRenderTagSummaryTrendCharts(groupRows);
+  } catch (err) {
+    if (loadSeq !== _pfTagSummaryLoadSeq) return;
+    const message = err?.message || '그룹 추세 데이터를 불러오지 못했습니다.';
+    _pfSetTagSummaryTrendMessage(message);
+    if (err?.status !== 401) console.warn(err);
+  }
+}
+
 function pfCloseTagSummary() {
   _pfTagSummaryLoadSeq += 1;
   _pfDisposeTagSummaryCharts();
@@ -450,23 +485,24 @@ function pfCloseTagSummary() {
   if (modal) modal.remove();
 }
 
-function pfOpenTagSummary(tag) {
-  const tagKey = _pfNormalizeTagKey(tag);
-  if (!tagKey) return;
+function _pfOpenPortfolioSliceSummary({
+  displayName,
+  title,
+  scopeLabel,
+  rows,
+  loadTrends,
+}) {
+  if (!displayName) return;
   const allRows = _pfTagSummaryRows();
-  const taggedRows = allRows
-    .filter(row => row.tags.some(t => _pfNormalizeTagKey(t) === tagKey))
+  const selectedRows = rows(allRows)
     .sort((a, b) => Math.abs(b.marketValue || 0) - Math.abs(a.marketValue || 0));
-  const displayTag = taggedRows
-    .flatMap(row => row.tags)
-    .find(t => _pfNormalizeTagKey(t) === tagKey) || tag;
   const allStats = _pfDailyWeightedStats(allRows);
-  const tagStats = _pfDailyWeightedStats(taggedRows);
-  const spreadPct = tagStats.dailyReturnPct !== null && allStats.dailyReturnPct !== null
-    ? tagStats.dailyReturnPct - allStats.dailyReturnPct
+  const sliceStats = _pfDailyWeightedStats(selectedRows);
+  const spreadPct = sliceStats.dailyReturnPct !== null && allStats.dailyReturnPct !== null
+    ? sliceStats.dailyReturnPct - allStats.dailyReturnPct
     : null;
   const portfolioWeight = allStats.marketValue > 0
-    ? tagStats.marketValue / allStats.marketValue * 100
+    ? sliceStats.marketValue / allStats.marketValue * 100
     : null;
 
   pfCloseTagSummary();
@@ -479,17 +515,17 @@ function pfOpenTagSummary(tag) {
   overlay.innerHTML = `
     <div class="pf-modal pf-tag-summary-modal">
       <div class="pf-modal-header">
-        <h3 id="pfTagSummaryTitle">#${escapeHtml(displayTag)}</h3>
+        <h3 id="pfTagSummaryTitle">${escapeHtml(title)}</h3>
         <button type="button" class="pf-modal-close" onclick="pfCloseTagSummary()" aria-label="닫기">&times;</button>
       </div>
       <div class="pf-modal-body pf-tag-summary-body">
         <div class="pf-tag-summary-grid">
-          ${_pfTagSummaryCard('태그 일간', fmtPct(tagStats.dailyReturnPct), fmtSignedKrw(tagStats.dailyPnl), returnClass(tagStats.dailyReturnPct))}
+          ${_pfTagSummaryCard(`${scopeLabel} 일간`, fmtPct(sliceStats.dailyReturnPct), fmtSignedKrw(sliceStats.dailyPnl), returnClass(sliceStats.dailyReturnPct))}
           ${_pfTagSummaryCard('전체 일간', fmtPct(allStats.dailyReturnPct), fmtSignedKrw(allStats.dailyPnl), returnClass(allStats.dailyReturnPct))}
           ${_pfTagSummaryCard('초과', fmtPct(spreadPct), 'vs 전체', returnClass(spreadPct))}
-          ${_pfTagSummaryCard('전체 비중', portfolioWeight !== null ? fmtPct(portfolioWeight, false) : '-', pfFmtPortfolioValue(tagStats.marketValue), '')}
+          ${_pfTagSummaryCard('전체 비중', portfolioWeight !== null ? fmtPct(portfolioWeight, false) : '-', pfFmtPortfolioValue(sliceStats.marketValue), '')}
         </div>
-        ${_pfRenderTagSummaryComposition(taggedRows, tagStats, portfolioWeight)}
+        ${_pfRenderTagSummaryComposition(selectedRows, sliceStats, portfolioWeight, scopeLabel)}
         ${_pfRenderTagSummaryTrendShell()}
       </div>
     </div>`;
@@ -498,7 +534,40 @@ function pfOpenTagSummary(tag) {
   });
   document.body.appendChild(overlay);
   overlay.querySelector('.pf-modal-close')?.focus();
-  void _pfLoadTagSummaryTrends(displayTag);
+  void loadTrends(displayName);
+}
+
+function pfOpenTagSummary(tag) {
+  const tagKey = _pfNormalizeTagKey(tag);
+  if (!tagKey) return;
+  const allRows = _pfTagSummaryRows();
+  const displayTag = allRows
+    .filter(row => row.tags.some(t => _pfNormalizeTagKey(t) === tagKey))
+    .flatMap(row => row.tags)
+    .find(t => _pfNormalizeTagKey(t) === tagKey) || tag;
+  _pfOpenPortfolioSliceSummary({
+    displayName: displayTag,
+    title: `#${displayTag}`,
+    scopeLabel: '태그',
+    rows: rows => rows.filter(row => row.tags.some(t => _pfNormalizeTagKey(t) === tagKey)),
+    loadTrends: _pfLoadTagSummaryTrends,
+  });
+}
+
+function pfOpenGroupSummary(groupName) {
+  const groupKey = _pfNormalizeGroupKey(groupName);
+  if (!groupKey) return;
+  const allRows = _pfTagSummaryRows();
+  const displayGroup = allRows
+    .map(row => pfGetGroup(row))
+    .find(name => _pfNormalizeGroupKey(name) === groupKey) || groupName;
+  _pfOpenPortfolioSliceSummary({
+    displayName: displayGroup,
+    title: displayGroup,
+    scopeLabel: '그룹',
+    rows: rows => rows.filter(row => _pfNormalizeGroupKey(pfGetGroup(row)) === groupKey),
+    loadTrends: _pfLoadGroupSummaryTrends,
+  });
 }
 
 (function initPfTagSummaryKeys() {

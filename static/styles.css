@@ -2779,6 +2779,28 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 }
 .pf-group-select:hover { color: var(--text); }
 .pf-group-select:focus { outline: none; color: var(--text); }
+.pf-group-chip {
+  display: inline-flex;
+  max-width: 96px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 84%, var(--hover-bg));
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-group-chip:hover,
+.pf-group-chip:focus {
+  border-color: var(--primary);
+  color: var(--text);
+  outline: none;
+}
 /* Benchmark column */
 .pf-col-benchmark { min-width: 70px; }
 .pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }

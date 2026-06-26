@@ -24,7 +24,7 @@ const MD_INDEX_DESCRIPTIONS = {
 const MD_INDEX_FRAME_DEFAULT_PERIOD = '1D';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
-const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', CA: '캐나다', IN: '인도', BR: '브라질' };
+const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', ES: '스페인', CA: '캐나다', RU: '러시아', IN: '인도', ID: '인도네시아', BR: '브라질' };
 const BOND_CURVE_COLORS = { KR: '#2563eb', US: '#e11d48', JP: '#16a34a' };
 let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
 
@@ -360,6 +360,7 @@ function _bondChangePctText(d) {
 }
 
 function _bondMatLabel(m) {
+  if (m === -1) return '기준';
   if (m === 0) return '1D';  // 익일물(overnight): 한국=KOFR, 미국=SOFR
   if (m < 1) return Math.round(m * 12) + 'M';  // 0.25 → 3M
   return m + 'Y';
@@ -398,12 +399,19 @@ function _mdBondCurve(codes, catalog, dataMap) {
 
 // 국가별 10년물(maturity===10) 비교, 금리 내림차순.
 function _mdBondCountries(codes, catalog, dataMap) {
+  const policyByCountry = new Map(
+    codes
+      .filter((c) => (catalog[c] || {}).maturity === -1)
+      .map((c) => [(catalog[c] || {}).country, _bondVal(dataMap ? dataMap[c] : null)])
+      .filter((x) => x[0] && x[1] != null)
+  );
   return codes
     .filter((c) => (catalog[c] || {}).maturity === 10)
     .map((c) => ({
       country: catalog[c].country,
       name: BOND_COUNTRY_NAMES[catalog[c].country] || catalog[c].country,
       value: _bondVal(dataMap ? dataMap[c] : null),
+      baseValue: policyByCountry.has(catalog[c].country) ? policyByCountry.get(catalog[c].country) : null,
       changePct: _bondChangePctText(dataMap ? dataMap[c] : null),
     }))
     .filter((x) => x.value != null)
@@ -519,7 +527,8 @@ function _drawBondCountryChart(countries) {
   const ordered = countries.slice().reverse();
   const names = ordered.map((c) => c.name);
   ec.setOption({
-    grid: { left: 48, right: 44, top: 8, bottom: 8 },
+    grid: { left: 48, right: 44, top: 30, bottom: 8 },
+    legend: { data: ['10년물', '기준금리'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 8 },
     xAxis: { type: 'value', scale: true, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
     yAxis: { type: 'category', data: names, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 11 } },
     tooltip: {
@@ -528,10 +537,13 @@ function _drawBondCountryChart(countries) {
       formatter(ps) {
         const row = ordered[ps[0].dataIndex];
         const pct = row && row.changePct ? ` (${row.changePct})` : '';
-        return `${ps[0].name}: ${Number(ps[0].value).toFixed(2)}%${pct}`;
+        let h = `${ps[0].name}: 10년물 ${Number(row.value).toFixed(2)}%${pct}`;
+        if (row.baseValue != null) h += `<br/>기준금리 ${Number(row.baseValue).toFixed(2)}%`;
+        return h;
       },
     },
     series: [{
+      name: '10년물',
       type: 'bar', barWidth: '55%',
       data: ordered.map((c) => ({
         value: c.value,
@@ -548,6 +560,15 @@ function _drawBondCountryChart(countries) {
           return `${Number(p.value).toFixed(2)}${pct}`;
         },
       },
+    }, {
+      name: '기준금리',
+      type: 'bar',
+      barWidth: '24%',
+      barGap: '-70%',
+      data: ordered.map((c) => (c.baseValue == null ? '-' : {
+        value: c.baseValue,
+        itemStyle: { color: '#f97316', borderRadius: [0, 3, 3, 0], opacity: 0.86 },
+      })),
     }],
   });
   _bondTrackChart(el, ec);

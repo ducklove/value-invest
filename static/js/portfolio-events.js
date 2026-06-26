@@ -29,6 +29,7 @@
         '.pf-pref-menu',
         '.pf-target-edit-wrap',
         '.pf-stock-tag',
+        '.pf-group-chip',
       ].join(','));
     };
     document.addEventListener('pointerdown', (e) => {
@@ -78,6 +79,10 @@
         e.preventDefault();
         e.stopPropagation();
         pfOpenTagSummary(el.dataset.tag || '');
+      } else if ((el = t.closest('.js-pf-open-group-summary'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        pfOpenGroupSummary(el.dataset.group || '');
       } else if ((el = t.closest('.js-pf-open-insight'))) {
         e.preventDefault();
         const code = codeFromTr(el);

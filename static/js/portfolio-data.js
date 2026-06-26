@@ -245,6 +245,12 @@ function _renderPortfolioRowTags(tags) {
   }).join('')}${more}</div>`;
 }
 
+function _renderPortfolioRowGroup(item) {
+  const groupName = pfGetGroup(item);
+  const safeGroup = escapeHtml(groupName);
+  return `<button type="button" class="pf-group-chip js-pf-open-group-summary" data-group="${safeGroup}" title="${safeGroup} 그룹 요약">${safeGroup}</button>`;
+}
+
 function pfToggleGroupFilter(groupName) {
   if (PfStore.filters.group === null) {
     PfStore.filters.group = new Set([groupName]);

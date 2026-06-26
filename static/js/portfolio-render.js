@@ -541,6 +541,7 @@ function renderPortfolio(options = {}) {
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     const safeCode = escapeHtml(r.stock_code);
     const tagHtml = _renderPortfolioRowTags(pfGetTags(r));
+    const groupHtml = _renderPortfolioRowGroup(r);
     const isSaving = PfStore.edit.savingCode === r.stock_code;
     const editAttrs = isSaving ? ' disabled' : '';
     const saveAttrs = isSaving ? ' disabled aria-busy="true"' : '';
@@ -585,7 +586,7 @@ function renderPortfolio(options = {}) {
     }
     return `<tr data-code="${safeCode}">
       <td class="${stockCellClass}">${dragHandle}${stockIdentity}</td>
-      <td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>
+      <td class="pf-col-group">${groupHtml}</td>
       <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>

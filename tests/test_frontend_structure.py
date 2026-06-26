@@ -527,15 +527,23 @@ def test_portfolio_tag_summary_popup_uses_weighted_daily_return():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     source = (JS / "portfolio-tag-summary.js").read_text(encoding="utf-8")
 
     assert html.find("./js/portfolio-tag-summary.js") < html.find("./js/portfolio-events.js")
     assert "js-pf-open-tag-summary" in data
     assert "data-tag=\"${safeTag}\"" in data
+    assert "js-pf-open-group-summary" in data
+    assert '<td class="pf-col-group">${groupHtml}</td>' in render
+    assert '<td class="pf-col-group"><select class="pf-group-select js-pf-group"${editAttrs}>${groupOpts}</select></td>' in render
+    assert '<td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>' not in render
     assert "pfOpenTagSummary(el.dataset.tag || '')" in events
+    assert "pfOpenGroupSummary(el.dataset.group || '')" in events
     assert "function pfOpenTagSummary(tag)" in source
+    assert "function pfOpenGroupSummary(groupName)" in source
+    assert "/api/portfolio/group-weight-history" in source
     assert "baseValue > 0 ? dailyPnl / baseValue * 100 : null" in source
-    assert "tagStats.dailyReturnPct - allStats.dailyReturnPct" in source
+    assert "sliceStats.dailyReturnPct - allStats.dailyReturnPct" in source
     assert "pf-tag-summary-table" in source
 
 
