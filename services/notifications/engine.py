@@ -34,6 +34,7 @@ from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from services.krx_limits import krx_lower_limit, krx_upper_limit
 from services.notifications import channels
+from services.portfolio import foreign
 from services.portfolio import runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_preferred_stock
 from services.portfolio.target_resolver import resolve_formula_target
@@ -108,16 +109,49 @@ def _to_float(value) -> float | None:
         return None
 
 
-async def _safe_quote(code: str) -> dict:
+def _quote_change_pct(quote: dict) -> float | None:
+    return _to_float((quote or {}).get("change_pct"))
+
+
+async def _regular_daily_quote(code: str) -> dict:
+    """Regular-session daily quote for foreign stock daily-change alerts."""
+    try:
+        await foreign.ensure_ticker_map()
+        ticker = foreign._ticker_map.get(code) or foreign.yfinance_direct_ticker(code)
+        quote = await foreign.yfinance_fetch_quote_fast(ticker)
+        if not quote:
+            resolved = await foreign.resolve_foreign_reuters(code)
+            if resolved and resolved != ticker:
+                await foreign.save_ticker(code, resolved)
+                quote = await foreign.yfinance_fetch_quote_fast(resolved)
+        return quote or {}
+    except Exception as exc:
+        logger.info("regular daily quote failed for %s: %s", code, exc)
+        return {}
+
+
+async def _safe_quote(code: str, *, regular_daily_change: bool = False) -> dict:
     """Fetch a quote dict ({price, change_pct, ...}) or {} on any failure."""
     try:
         if runtime_quotes.is_korean_stock(code):
             quote = await runtime_quotes.fetch_quote(code, force_refresh=True, use_ws_cache=False)
         else:
-            quote = await runtime_quotes.fetch_quote(code)
+            quote = await runtime_quotes.fetch_quote(
+                code,
+                force_refresh=regular_daily_change,
+                use_ws_cache=not regular_daily_change,
+            )
     except Exception as exc:
         logger.warning("alert quote fetch failed for %s: %s", code, exc)
         return {}
+    if not quote or quote.get("_stale") is True:
+        quote = {}
+    if regular_daily_change and not runtime_quotes.is_korean_stock(code):
+        daily_quote = await _regular_daily_quote(code)
+        daily_change_pct = _quote_change_pct(daily_quote)
+        if daily_change_pct is not None:
+            quote = dict(quote or daily_quote)
+            quote["change_pct"] = daily_change_pct
     if not quote or quote.get("_stale") is True:
         return {}
     return quote
@@ -125,10 +159,6 @@ async def _safe_quote(code: str) -> dict:
 
 def _quote_price(quote: dict) -> float | None:
     return _to_float((quote or {}).get("price"))
-
-
-def _quote_change_pct(quote: dict) -> float | None:
-    return _to_float((quote or {}).get("change_pct"))
 
 
 async def _effective_target(item: dict, common_price: float | None) -> float | None:
@@ -665,10 +695,17 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
         r["stock_code"] for r in rules
         if r["alert_type"] in (PRICE_TYPES | STOCK_DAILY_ABS_TYPES) and r.get("stock_code")
     }
+    daily_metric_codes = {
+        r["stock_code"] for r in rules
+        if r["alert_type"] in STOCK_DAILY_ABS_TYPES and r.get("stock_code")
+    }
     has_quote_blanket = any(r["alert_type"] in BLANKET_QUOTE_TYPES for r in rules)
+    has_daily_blanket = any(r["alert_type"] in DAILY_ABS_TYPES for r in rules)
     needed: set[str] = set(metric_codes)
     if has_quote_blanket:
         needed |= set(items_by_code)
+    if has_daily_blanket:
+        daily_metric_codes |= set(items_by_code)
     # 전체 신규 공시/리포트(blanket feed)가 있으면, 개별 규칙이 걸린 종목은 그 종목의
     # 개별 설정(켜짐/꺼짐)이 우선하므로 blanket 평가에서 제외한다(enabled 무관 조회).
     override_disc: set[str] = set()
@@ -690,7 +727,10 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
 
     quote_map: dict[str, dict] = {}
     for code in needed:
-        quote_map[code] = await _safe_quote(code)
+        if code in daily_metric_codes:
+            quote_map[code] = await _safe_quote(code, regular_daily_change=True)
+        else:
+            quote_map[code] = await _safe_quote(code)
         await asyncio.sleep(0.1)
 
     needs_nav = any(r["alert_type"] in NAV_TYPES for r in rules)

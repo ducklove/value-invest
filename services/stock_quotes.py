@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 
@@ -211,6 +211,12 @@ def _remember(stock: Stock | None) -> Stock | None:
     return stock
 
 
+def _stale_copy(stock: Stock | None) -> Stock | None:
+    if stock is None:
+        return None
+    return stock if stock.stale else replace(stock, stale=True)
+
+
 def remember_quote(code: str | None, quote: dict[str, Any] | None) -> Stock | None:
     return _remember(stock_from_quote(_normalize_code(code), quote))
 
@@ -267,7 +273,7 @@ async def get_stock(
             if ws_stock:
                 return _remember(ws_stock)
         if _dead_stock_cache.get(normalized):
-            return _last_known.get(normalized)
+            return _stale_copy(_last_known.get(normalized))
 
     lock = await _lock_for(normalized)
     async with lock:
@@ -280,7 +286,7 @@ async def get_stock(
                 if ws_stock:
                     return _remember(ws_stock)
             if _dead_stock_cache.get(normalized):
-                return _last_known.get(normalized)
+                return _stale_copy(_last_known.get(normalized))
 
         quote = await _fetch_upstream_quote(
             normalized,
@@ -291,7 +297,7 @@ async def get_stock(
         if stock and not stock.stale:
             return _remember(stock)
         _dead_stock_cache.set(normalized, True)
-        return _last_known.get(normalized) or stock
+        return _stale_copy(_last_known.get(normalized)) or stock
 
 
 async def get_quote_snapshot(code: str, **kwargs: Any) -> dict[str, Any]:

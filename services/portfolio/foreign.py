@@ -645,7 +645,9 @@ async def yfinance_fetch_quote_fast(ticker: str) -> dict:
             return {}
         meta = payload.get("meta") or {}
         price = float(meta.get("regularMarketPrice") or values[-1])
-        prev = float(meta.get("chartPreviousClose") or (values[-2] if len(values) >= 2 else values[-1]))
+        # For multi-day chart ranges Yahoo's chartPreviousClose is the close
+        # before the requested range, not the previous trading day's close.
+        prev = float(values[-2] if len(values) >= 2 else meta.get("chartPreviousClose") or values[-1])
         if price is None:
             return {}
         change = round(price - prev, 4) if prev else 0

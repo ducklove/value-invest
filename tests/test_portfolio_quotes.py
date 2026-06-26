@@ -224,6 +224,30 @@ async def test_kis_foreign_quote_timeout_returns_empty_for_fallback():
 
 
 @pytest.mark.asyncio
+async def test_yfinance_fast_quote_uses_adjacent_daily_close_as_previous_close():
+    payload = {
+        "rows": [
+            {"date": "2026-06-23", "close": 58.58},
+            {"date": "2026-06-24", "close": 54.42},
+            {"date": "2026-06-25", "close": 55.01},
+        ],
+        "currency": "USD",
+        "meta": {
+            "regularMarketPrice": 55.01,
+            "chartPreviousClose": 63.69,
+        },
+    }
+
+    with patch.object(foreign, "fetch_yahoo_chart", new=AsyncMock(return_value=payload)), \
+         patch.object(foreign.fx, "fx_rate_for_currency", new=AsyncMock(return_value=1.0)):
+        result = await foreign.yfinance_fetch_quote_fast("SIVR")
+
+    assert result["price"] == 55
+    assert result["change"] == 1
+    assert result["change_pct"] == 1.08
+
+
+@pytest.mark.asyncio
 async def test_berkshire_class_b_quote_uses_static_yahoo_ticker():
     fast = AsyncMock(return_value={"price": 12345, "change": 10, "change_pct": 0.1})
     kis = AsyncMock(side_effect=AssertionError("KIS should not run for BRK.B alias"))

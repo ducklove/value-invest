@@ -461,7 +461,7 @@ class AlertEngineHarness(TempDbMixin):
         q = {"price": 80000.0}  # above
         db = await cache.get_db()
 
-        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
+        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
             self.assertEqual(await engine.evaluate_user("u1"), 1)  # fires
             self.assertEqual(disp.await_count, 1)
@@ -552,7 +552,7 @@ class AlertEngineHarness(TempDbMixin):
         q = {"price": 80000.0, "change_pct": 7.0}  # |+7| >= 5 -> fire
         db = await cache.get_db()
 
-        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
+        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
             self.assertEqual(await engine.evaluate_user("u1"), 1)
             self.assertEqual(disp.await_count, 1)
@@ -579,7 +579,7 @@ class AlertEngineHarness(TempDbMixin):
         q = {"price": 13000.0, "previous_close": 10000.0}  # 상한가 정확 도달
         db = await cache.get_db()
 
-        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
+        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
             self.assertEqual(await engine.evaluate_user("u1"), 1)  # 상한가 발화
             q["price"] = 12990.0  # 1틱 아래 → 재무장
@@ -666,7 +666,7 @@ class AlertEngineHarness(TempDbMixin):
         await self._rule(scope="stock", alert_type="stock_daily_abs", threshold=5.0, stock_code="005930")
         disp = AsyncMock()
         q = {"price": 80000.0, "change_pct": 7.0}  # |7| >= 5 → 발화
-        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code: dict(q))), \
+        with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
             self.assertEqual(await engine.evaluate_user("u1"), 1)
             self.assertEqual(disp.await_count, 1)
@@ -675,6 +675,20 @@ class AlertEngineHarness(TempDbMixin):
             q["change_pct"] = -9.0  # 같은 날 재돌파 → 하루1회로 미발송
             self.assertEqual(await engine.evaluate_user("u1"), 0)
             self.assertEqual(disp.await_count, 1)
+
+    async def test_stock_daily_abs_foreign_uses_regular_daily_change(self):
+        await self._add_holding("SIVR", "abrdn Physical Silver Shares ETF")
+        await self._rule(scope="stock", alert_type="stock_daily_abs", threshold=1.0, stock_code="SIVR")
+        base_quote = {"price": 85039.0, "change_pct": 0.55}
+        daily_quote = {"price": 84578.0, "change": 906.0, "change_pct": 1.08}
+
+        with patch.object(engine.runtime_quotes, "fetch_quote", new=AsyncMock(return_value=base_quote)) as fetch_quote, \
+             patch.object(engine, "_regular_daily_quote", new=AsyncMock(return_value=daily_quote)), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+
+        fetch_quote.assert_awaited_once_with("SIVR", force_refresh=True, use_ws_cache=False)
+        self.assertEqual(disp.await_count, 1)
 
     async def test_disclosure_new_baseline_then_fire(self):
         await self._rule(scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="005930")

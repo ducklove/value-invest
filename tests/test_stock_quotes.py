@@ -150,6 +150,27 @@ async def test_get_stock_negative_caches_empty_quote():
 
 
 @pytest.mark.asyncio
+async def test_get_stock_marks_last_known_fallback_stale_after_fetch_failure():
+    stock_quotes._last_known["005930"] = stock_quotes.Stock(
+        code="005930",
+        current_price=70100,
+        previous_close=69500,
+        volume=None,
+        created_at=datetime(2026, 5, 28, 9, 2),
+        source="rest",
+    )
+    with patch.object(stock_quotes.kis_ws_manager, "ws_cache_matches_rest_market", return_value=False), \
+         patch.object(stock_quotes.stock_price, "fetch_quote_snapshot", new=AsyncMock(return_value={})):
+        stock = await stock_quotes.get_stock("005930", force_refresh=True, use_ws_cache=False)
+
+    assert stock is not None
+    assert stock.current_price == 70100
+    assert stock.stale is True
+    assert stock_quotes._last_known["005930"].stale is False
+    assert stock_quotes.stock_to_quote(stock)["_stale"] is True
+
+
+@pytest.mark.asyncio
 async def test_get_quote_snapshot_derives_change_from_previous_close():
     stock = stock_quotes.Stock(
         code="005930",

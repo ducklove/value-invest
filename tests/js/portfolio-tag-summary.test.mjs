@@ -90,3 +90,35 @@ test("tag modal shows value total under portfolio weight and renders composition
   assert.ok(modal.textContent.includes("평가금액 합 추세"));
   assert.ok(modal.textContent.includes("포트폴리오 비중 추세"));
 });
+
+test("tag trend charts start their y-axis from zero", async () => {
+  const w = loadTagSummary();
+  const createdOptions = [];
+  w.PortfolioTrendChart = {
+    create(_container, option) {
+      createdOptions.push(option);
+      return {
+        dispose() {},
+        resize() {},
+        on() {},
+        setOption() {},
+        getOption() { return option; },
+      };
+    },
+  };
+  w.document.body.innerHTML = `
+    <div id="pfTagValueTrend" class="pf-tag-summary-chart"></div>
+    <div id="pfTagWeightTrend" class="pf-tag-summary-chart"></div>
+    <span id="pfTagValueRange"></span>
+    <span id="pfTagWeightRange"></span>
+  `;
+
+  await w._pfRenderTagSummaryTrendCharts([
+    { date: "2026-01-01", tag_value: 1000, weight_pct: 12.5 },
+    { date: "2026-01-02", tag_value: 1200, weight_pct: 15.0 },
+  ]);
+
+  assert.equal(createdOptions.length, 2);
+  assert.equal(createdOptions[0].yAxis.min, 0);
+  assert.equal(createdOptions[1].yAxis.min, 0);
+});

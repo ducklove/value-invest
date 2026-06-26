@@ -362,6 +362,7 @@ async function _pfRenderTagSummaryTrendCharts(rows) {
     title: '평가금액 합',
     color: valueColor,
     axisFormatter: v => `${valueSymbol}${(v / valueDiv).toFixed(PfStore.currency.unit === 'USD' ? 2 : 1)}${valueUnit}`,
+    yZero: true,
   });
   _pfTagWeightChartInstance = await _pfCreateTagTrendChart({
     containerId: 'pfTagWeightTrend',
