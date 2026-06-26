@@ -16,6 +16,9 @@ window.APP_CONFIG = {
     spacHunter: {
       baseUrl: "https://ducklove.github.io/spac-hunter"
     },
+    buybacks: {
+      baseUrl: "https://ducklove.github.io/buybacks"
+    },
     goldGap: {
       baseUrl: "https://ducklove.github.io/gold_gap",
       configUrl: "https://ducklove.github.io/gold_gap/config.json",

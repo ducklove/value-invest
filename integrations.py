@@ -11,6 +11,7 @@ DEFAULT_BASE_URLS = {
     "holdingValue": "https://ducklove.github.io/holding_value",
     "preferredSpread": "https://ducklove.github.io/common_preferred_spread",
     "spacHunter": "https://ducklove.github.io/spac-hunter",
+    "buybacks": "https://ducklove.github.io/buybacks",
     "goldGap": "https://ducklove.github.io/gold_gap",
     "npsTracker": "https://ducklove.github.io/nps-tracker",
     "kisProxy": "http://cantabile.tplinkdns.com:3288",
@@ -48,6 +49,7 @@ def build_public_integrations(workspace_root: Path | None = None) -> dict[str, A
         "holdingValue": _holding_value_config(root),
         "preferredSpread": _preferred_spread_config(root),
         "spacHunter": _spac_hunter_config(),
+        "buybacks": _buybacks_config(),
         "goldGap": _gold_gap_config(root),
         "npsTracker": _nps_tracker_config(),
         "kisProxy": _kis_proxy_config(),
@@ -276,6 +278,12 @@ def _spac_hunter_config() -> dict[str, Any]:
     # spac-hunter 는 별도 서브 프로젝트(SPA)로, 종목 코드를 ?code= 쿼리로만
     # 받는다. 로컬 config 를 읽을 필요가 없어 baseUrl 만 노출한다.
     return {"baseUrl": _base_url("spacHunter", "SPAC_HUNTER_BASE_URL")}
+
+
+def _buybacks_config() -> dict[str, Any]:
+    # buybacks 는 자사주 매입·처분·소각 분석용 정적 SPA다. 분석 도구 요약은
+    # external_tools 가 published JSON 을 읽고, 브라우저에는 baseUrl 만 노출한다.
+    return {"baseUrl": _base_url("buybacks", "BUYBACKS_BASE_URL")}
 
 
 def _nps_tracker_config() -> dict[str, Any]:

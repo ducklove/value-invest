@@ -10,6 +10,7 @@ public JSON을 읽어, 투자정보 대시보드의 허브 위젯과 종목분�
 - spac-hunter           : 국내 스팩 현재가/공모가·연환산 기대수익률
 - nps-tracker           : 국민연금 국내주식 포트폴리오(비중 상위·NAV·총평가액)
 - eiayn                 : ETF 평가(AIYN 점수) — 오늘의 추천 ETF(TOP 100 일일 추첨 5선)
+- buybacks              : 자사주 매입·처분·소각 분석(자사주 보유비중 상위)
 
 데이터는 raw.githubusercontent 에서 받아 길게 캐시한다(배치가 분 단위로만 갱신).
 각 도구 fetch는 서로 독립적으로 실패를 허용해, 하나가 죽어도 나머지는 표시된다.
@@ -39,6 +40,7 @@ SITE = {
     "spac": "https://ducklove.github.io/spac-hunter/",
     "nps": "https://ducklove.github.io/nps-tracker/",
     "etf": "https://ducklove.github.io/eiayn/",
+    "buybacks": "https://ducklove.github.io/buybacks/",
 }
 
 _TTL = 900  # 15분 — 배치 갱신 주기에 맞춤
@@ -124,6 +126,16 @@ async def _get_json(url: str):
 def _code(ticker: str) -> str:
     """'005930.KS' -> '005930'."""
     return (ticker or "").split(".", 1)[0]
+
+
+def _num(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n == n else None
 
 
 def _summarize_holding(current: dict, config: list, top_n: int = 5) -> dict:
@@ -301,6 +313,76 @@ def _summarize_nps(current: dict, top_n: int = 5) -> dict:
     }
 
 
+def _buyback_kind_key(row: dict) -> str:
+    kind = str(row.get("stock_kind") or "").strip().replace(" ", "").lower()
+    if "보통" in kind or "common" in kind:
+        return "common"
+    if "우선" in kind or "preferred" in kind:
+        return f"preferred:{kind}"
+    return kind or "unknown"
+
+
+def _buyback_is_common(row: dict) -> bool:
+    return _buyback_kind_key(row) == "common"
+
+
+def _buyback_completeness(row: dict) -> int:
+    return sum(row.get(k) is not None for k in ("treasury_ratio", "ending_qty", "issued_shares", "floating_shares"))
+
+
+def _buyback_is_newer(row: dict, current: dict) -> bool:
+    row_date = str(row.get("as_of_date") or "")
+    cur_date = str(current.get("as_of_date") or "")
+    if row_date != cur_date:
+        return row_date > cur_date
+    row_quality = _buyback_completeness(row)
+    cur_quality = _buyback_completeness(current)
+    if row_quality != cur_quality:
+        return row_quality > cur_quality
+    return str(row.get("report_code") or "") > str(current.get("report_code") or "")
+
+
+def _summarize_buybacks(holdings: list, top_n: int = 5) -> dict:
+    """자사주: 최신 보통주 스냅샷 기준 treasury_ratio 내림차순 TOP."""
+    latest: dict[tuple[str, str], dict] = {}
+    for h in holdings or []:
+        if not isinstance(h, dict):
+            continue
+        code = str(h.get("stock_code") or "").strip().upper()
+        if not code:
+            continue
+        key = (code, _buyback_kind_key(h))
+        current = latest.get(key)
+        if current is None or _buyback_is_newer(h, current):
+            latest[key] = h
+
+    rows = []
+    for h in latest.values():
+        if not _buyback_is_common(h):
+            continue
+        ratio = _num(h.get("treasury_ratio"))
+        if ratio is None:
+            continue
+        rows.append({
+            "name": h.get("corp_name") or h.get("stock_code"),
+            "code": h.get("stock_code"),
+            "asOf": h.get("as_of_date"),
+            "stockKind": h.get("stock_kind"),
+            "treasuryRatio": ratio,
+            "treasuryRatioPct": ratio * 100,
+            "endingQty": h.get("ending_qty"),
+            "issuedShares": h.get("issued_shares"),
+        })
+    rows.sort(key=lambda r: r["treasuryRatioPct"], reverse=True)
+    dates = [r["asOf"] for r in rows if r.get("asOf")]
+    return {
+        "asOf": max(dates) if dates else None,
+        "count": len(rows),
+        "top": rows[:top_n],
+        "url": SITE["buybacks"],
+    }
+
+
 async def _load_pair(repo: str) -> tuple[dict, list]:
     """(current, config) 원본을 받아 캐시. 요약과 deep-link가 함께 쓴다."""
     cached = _raw_cache.get(repo)
@@ -375,18 +457,23 @@ async def _nps_summary() -> dict | None:
     return _summarize_nps(data)
 
 
+async def _buybacks_summary() -> dict | None:
+    data = await _get_json(f"{SITE['buybacks']}data/buybacks/holding_snapshots.json")
+    return _summarize_buybacks(data)
+
+
 async def fetch_external_insights() -> dict:
-    """다섯 도구 요약을 한 번에. 도구별 독립 실패 허용 + 길게 캐시."""
+    """외부 도구 요약을 한 번에. 도구별 독립 실패 허용 + 길게 캐시."""
     cached = _cache.get("insights")
     if cached is not None:
         return cached
 
     results = await asyncio.gather(
         _holding_summary(), _spread_summary(), _gold_summary(), _spac_summary(), _nps_summary(),
-        _etf_picks_summary(),
+        _etf_picks_summary(), _buybacks_summary(),
         return_exceptions=True,
     )
-    keys = ("holding", "spread", "goldGap", "spac", "nps", "etfPicks")
+    keys = ("holding", "spread", "goldGap", "spac", "nps", "etfPicks", "buybacks")
     out: dict = {}
     for key, res in zip(keys, results):
         if isinstance(res, Exception) or res is None:

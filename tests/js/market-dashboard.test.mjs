@@ -420,6 +420,30 @@ test("_extRender adds a SPAC card (after spread) showing 현재가 with ?code= d
   assert.ok(!root.innerHTML.includes("<b>x</b>"));
 });
 
+test("_extRender adds buybacks card showing top treasury holding ratios", () => {
+  const w = load();
+  const root = w.document.getElementById("externalTools");
+  w._extRender(root, {
+    buybacks: {
+      url: "https://ducklove.github.io/buybacks/",
+      asOf: "2025-12-31",
+      top: [
+        { name: "동화약품", code: "000020", treasuryRatioPct: 42.0 },
+        { name: "<b>x</b>", code: "111111", treasuryRatioPct: 20.123 },
+      ],
+    },
+  });
+  const cards = root.querySelectorAll(".ext-card");
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].innerHTML, /자사주/);
+  assert.match(cards[0].innerHTML, /2025-12-31 기준/);
+  const rows = cards[0].querySelectorAll(".ext-row");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].getAttribute("href"), "https://ducklove.github.io/buybacks/?theme=light");
+  assert.equal(rows[0].querySelector(".ext-val").textContent, "42.0%");
+  assert.ok(!cards[0].innerHTML.includes("<b>x</b>"));
+});
+
 test("_extRender adds 오늘의 추천 ETF card with realtime daily change and deep-links", () => {
   const w = load();
   const root = w.document.getElementById("externalTools");

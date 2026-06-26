@@ -11,6 +11,7 @@ URLs or server-side environment variables instead of copying their code.
 | `holdingValue` | `https://github.com/ducklove/holding_value` | `../hodling-value` or `../holding_value` | Loads `api/holdings.json` and links holding-company rows to the dashboard. |
 | `preferredSpread` | `https://github.com/ducklove/common_preferred_spread` | `../common_preferred_spread` | Links preferred-stock rows to the spread dashboard. |
 | `spacHunter` | `https://github.com/ducklove/spac-hunter` | `../spac-hunter` | Links SPAC portfolio rows to the spac dashboard via `?code=`. Exposes `baseUrl` only (no local `config.json`). |
+| `buybacks` | `https://github.com/ducklove/buybacks` | — | Links the analysis-tools card to the buybacks dashboard and summarizes published holding snapshots by treasury-stock holding ratio. Exposes `baseUrl` only. |
 | `goldGap` | `https://github.com/ducklove/gold_gap` | `../gold_gap` | Links `KRX_GOLD` and `CRYPTO_BTC` portfolio rows to the gold/bitcoin gap dashboard. |
 | `npsTracker` | `https://github.com/ducklove/nps-tracker` | — | Embeds the NPS domestic-equity portfolio dashboard in the NPS tab via iframe and summarizes `current.json` for the 투자정보 insight card. Exposes `baseUrl` only. |
 | `kisProxy` | `https://github.com/ducklove/kis-proxy` | `../kis-proxy` | Used server-side by `kis_proxy_client.py` through `KIS_PROXY_BASE_URL`. |
@@ -61,6 +62,7 @@ Results are cached ~15 minutes and each fetch fails independently:
 - `goldGap`: `data.json` — gap per asset.
 - `spacHunter`: `current.json` (branch `main`) — deepest discount-to-offer SPACs.
 - `npsTracker`: `current.json` (branch `main`) — National Pension Service domestic-equity holdings by portfolio weight (top), NAV, and total value.
+- `buybacks`: `data/buybacks/holding_snapshots.json` — latest common-stock treasury holding ratios (top).
 
 This path needs neither local config nor the `/admin.html` config writer; it only
 needs each dashboard's public GitHub Pages / raw content to be reachable.

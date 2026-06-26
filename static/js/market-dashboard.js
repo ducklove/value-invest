@@ -835,6 +835,11 @@ function _extRender(root, data) {
     const sub = s.averageSpread != null ? `평균 괴리율 ${_extPct(s.averageSpread)}` : '우선주 괴리율';
     cards.push(_extCard('우선주 괴리율', s.url, sub, _extLinkRows(s.top, 'spread', s.url, false)));
   }
+  const bb = data && data.buybacks;
+  if (bb && (bb.top || []).length) {
+    const sub = bb.asOf ? `${bb.asOf} 기준 · 보유비중 상위` : '보유비중 상위';
+    cards.push(_extCard('자사주', bb.url, sub, _extLinkRows(bb.top, 'treasuryRatioPct', bb.url, false)));
+  }
   const p = data && data.spac;
   if (p && (p.top || []).length) {
     // 현재가가 낮은(공모가 대비 할인 큰) 순. spac-hunter 는 ?code= deep-link 지원.

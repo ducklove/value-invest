@@ -87,6 +87,8 @@ def test_build_public_integrations_reads_sibling_project_configs(tmp_path):
     preferred = public_config["preferredSpread"]
     assert preferred["pairsByPreferredCode"]["005935"]["commonCode"] == "005930"
 
+    assert public_config["buybacks"]["baseUrl"] == "https://ducklove.github.io/buybacks"
+
     gold = public_config["goldGap"]
     assert gold["assetByPortfolioCode"]["KRX_GOLD"] == "gold"
     assert gold["assets"]["gold"]["latestGapPct"] == 4.25
@@ -98,3 +100,4 @@ def test_public_integrations_do_not_expose_local_paths(tmp_path):
 
     assert str(tmp_path) not in json.dumps(config)
     assert config["integrations"]["holdingValue"]["settings"]["source"] == "remote-fallback"
+    assert config["integrations"]["buybacks"]["baseUrl"] == "https://ducklove.github.io/buybacks"

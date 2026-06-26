@@ -50,6 +50,29 @@ class ExternalSummaryTests(unittest.TestCase):
         self.assertEqual(out["top"][0]["name"], "삼성전자")
         self.assertEqual(out["url"], external_tools.SITE["nps"])
 
+    def test_summarize_buybacks_uses_latest_common_snapshot_and_pct(self):
+        holdings = [
+            {"stock_code": "005930", "corp_name": "삼성전자", "stock_kind": "보통주",
+             "as_of_date": "2024-12-31", "treasury_ratio": 0.55, "ending_qty": 55, "issued_shares": 100},
+            {"stock_code": "005930", "corp_name": "삼성전자", "stock_kind": "보통주",
+             "as_of_date": "2025-12-31", "treasury_ratio": 0.10, "ending_qty": 10, "issued_shares": 100},
+            {"stock_code": "000020", "corp_name": "동화약품", "stock_kind": "보통주",
+             "as_of_date": "2025-12-31", "treasury_ratio": 0.42, "ending_qty": 42, "issued_shares": 100},
+            {"stock_code": "111111", "corp_name": "A", "stock_kind": "common",
+             "as_of_date": "2025-06-30", "treasury_ratio": 0.20},
+            {"stock_code": "000025", "corp_name": "삼성물산우", "stock_kind": "우선주",
+             "as_of_date": "2025-12-31", "treasury_ratio": 0.80},
+            {"stock_code": "222222", "corp_name": "B", "stock_kind": "보통주",
+             "as_of_date": "2025-12-31", "treasury_ratio": None},
+        ]
+        out = external_tools._summarize_buybacks(holdings, top_n=3)
+        self.assertEqual(out["count"], 3)
+        self.assertEqual(out["asOf"], "2025-12-31")
+        self.assertEqual([r["code"] for r in out["top"]], ["000020", "111111", "005930"])
+        self.assertEqual(out["top"][0]["treasuryRatio"], 0.42)
+        self.assertEqual(out["top"][0]["treasuryRatioPct"], 42.0)
+        self.assertEqual(out["url"], external_tools.SITE["buybacks"])
+
     def test_summarize_spread_keeps_only_config_pairs(self):
         current = {
             "averageSpread": 48.28,
@@ -277,7 +300,8 @@ class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
              patch.object(external_tools, "_gold_summary", new=AsyncMock(return_value={"assets": [], "url": "u"})), \
              patch.object(external_tools, "_spac_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
              patch.object(external_tools, "_nps_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
-             patch.object(external_tools, "_etf_picks_summary", new=AsyncMock(return_value={"top": [], "url": "u"})):
+             patch.object(external_tools, "_etf_picks_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
+             patch.object(external_tools, "_buybacks_summary", new=AsyncMock(return_value={"top": [], "url": "u"})):
             out = await external_tools.fetch_external_insights()
         self.assertNotIn("holding", out)
         self.assertIn("spread", out)
@@ -285,6 +309,7 @@ class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("spac", out)
         self.assertIn("nps", out)
         self.assertIn("etfPicks", out)
+        self.assertIn("buybacks", out)
 
 
 if __name__ == "__main__":
