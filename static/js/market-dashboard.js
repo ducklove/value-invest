@@ -24,7 +24,7 @@ const MD_INDEX_DESCRIPTIONS = {
 const MD_INDEX_FRAME_DEFAULT_PERIOD = '1D';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
-const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', ES: '스페인', CA: '캐나다', RU: '러시아', IN: '인도', ID: '인도네시아', BR: '브라질' };
+const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', ES: '스페인', CH: '스위스', CA: '캐나다', RU: '러시아', IN: '인도', ID: '인도네시아', BR: '브라질' };
 const BOND_CURVE_COLORS = { KR: '#2563eb', US: '#e11d48', JP: '#16a34a' };
 let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
 
@@ -521,13 +521,14 @@ function _drawBondCurveChart(curve) {
 function _drawBondCountryChart(countries) {
   const el = document.getElementById('bondCountryCompare');
   if (!el || !window.echarts || !countries.length) return;
+  el.style.height = `${Math.max(360, countries.length * 26 + 72)}px`;
   const t = _bondChartTheme();
   const ec = echarts.init(el);
   // 가로 막대: 금리 높은 국가가 위로 오도록 역순(echarts y-category는 아래부터).
   const ordered = countries.slice().reverse();
   const names = ordered.map((c) => c.name);
   ec.setOption({
-    grid: { left: 48, right: 44, top: 30, bottom: 8 },
+    grid: { left: 70, right: 44, top: 30, bottom: 8 },
     legend: { data: ['10년물', '기준금리'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 8 },
     xAxis: { type: 'value', scale: true, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
     yAxis: { type: 'category', data: names, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 11 } },

@@ -88,17 +88,31 @@ CATALOG: dict[str, dict] = {
     "JP20Y":  {"label": "일본20년물", "category": "국채", "country": "JP", "maturity": 20},
     "JP30Y":  {"label": "일본30년물", "category": "국채", "country": "JP", "maturity": 30},
     "JP40Y":  {"label": "일본40년물", "category": "국채", "country": "JP", "maturity": 40},
+    "DE_BASE": {"label": "독일 기준금리(ECB)", "category": "국채", "country": "DE", "maturity": -1},
     "DE10Y":  {"label": "독일10년물", "category": "국채", "country": "DE", "maturity": 10},
+    "FR_BASE": {"label": "프랑스 기준금리(ECB)", "category": "국채", "country": "FR", "maturity": -1},
     "FR10Y":  {"label": "프랑스10년물", "category": "국채", "country": "FR", "maturity": 10},
+    "GB_BASE": {"label": "영국 기준금리", "category": "국채", "country": "GB", "maturity": -1},
     "GB10Y":  {"label": "영국10년물", "category": "국채", "country": "GB", "maturity": 10},
+    "AU_BASE": {"label": "호주 기준금리", "category": "국채", "country": "AU", "maturity": -1},
     "AU10Y":  {"label": "호주10년물", "category": "국채", "country": "AU", "maturity": 10},
+    "CN_BASE": {"label": "중국 기준금리", "category": "국채", "country": "CN", "maturity": -1},
     "CN10Y":  {"label": "중국10년물", "category": "국채", "country": "CN", "maturity": 10},
+    "IT_BASE": {"label": "이탈리아 기준금리(ECB)", "category": "국채", "country": "IT", "maturity": -1},
     "IT10Y":  {"label": "이탈리아10년물", "category": "국채", "country": "IT", "maturity": 10},
+    "ES_BASE": {"label": "스페인 기준금리(ECB)", "category": "국채", "country": "ES", "maturity": -1},
     "ES10Y":  {"label": "스페인10년물", "category": "국채", "country": "ES", "maturity": 10},
+    "CH_BASE": {"label": "스위스 기준금리", "category": "국채", "country": "CH", "maturity": -1},
+    "CH10Y":  {"label": "스위스10년물", "category": "국채", "country": "CH", "maturity": 10},
+    "CA_BASE": {"label": "캐나다 기준금리", "category": "국채", "country": "CA", "maturity": -1},
     "CA10Y":  {"label": "캐나다10년물", "category": "국채", "country": "CA", "maturity": 10},
+    "RU_BASE": {"label": "러시아 기준금리", "category": "국채", "country": "RU", "maturity": -1},
     "RU10Y":  {"label": "러시아10년물", "category": "국채", "country": "RU", "maturity": 10},
+    "IN_BASE": {"label": "인도 기준금리", "category": "국채", "country": "IN", "maturity": -1},
     "IN10Y":  {"label": "인도10년물", "category": "국채", "country": "IN", "maturity": 10},
+    "ID_BASE": {"label": "인도네시아 기준금리", "category": "국채", "country": "ID", "maturity": -1},
     "ID10Y":  {"label": "인도네시아10년물", "category": "국채", "country": "ID", "maturity": 10},
+    "BR_BASE": {"label": "브라질 기준금리", "category": "국채", "country": "BR", "maturity": -1},
     "BR10Y":  {"label": "브라질10년물", "category": "국채", "country": "BR", "maturity": 10},
     # 야간선물
     "NIGHT_FUTURES": {"label": "야간선물", "category": "야간선물"},
@@ -703,6 +717,7 @@ _CNBC_BOND_MAP = {
     "CN10Y": "CN10Y-CN",
     "IT10Y": "IT10Y-IT",
     "ES10Y": "ES10Y-ES",
+    "CH10Y": "CH10Y-CH",
     "CA10Y": "CA10Y-CA",
     "RU10Y": "RU10Y-RU",
     "IN10Y": "IN10Y-IN",
@@ -812,7 +827,22 @@ def _quote_from_current_prev(current: float, prev: float | None, decimals: int =
     }
 
 
-_POLICY_RATE_CODES = {"US_BASE", "KR_BASE", "JP_BASE"}
+_BIS_POLICY_RATE_MAP = {
+    "GB_BASE": "GB",
+    "AU_BASE": "AU",
+    "CN_BASE": "CN",
+    "DE_BASE": "XM",
+    "FR_BASE": "XM",
+    "IT_BASE": "XM",
+    "ES_BASE": "XM",
+    "CH_BASE": "CH",
+    "CA_BASE": "CA",
+    "RU_BASE": "RU",
+    "IN_BASE": "IN",
+    "ID_BASE": "ID",
+    "BR_BASE": "BR",
+}
+_POLICY_RATE_CODES = {"US_BASE", "KR_BASE", "JP_BASE", *_BIS_POLICY_RATE_MAP.keys()}
 
 
 def _parse_fred_policy_csv(text: str) -> dict:
@@ -829,6 +859,28 @@ def _parse_fred_policy_csv(text: str) -> dict:
             continue
     if not pts:
         return dict(_EMPTY)
+    current = pts[-1][1]
+    prev = pts[-2][1] if len(pts) >= 2 else None
+    return _quote_from_current_prev(current, prev, decimals=2)
+
+
+def _parse_bis_policy_csv(text: str, ref_area: str) -> dict:
+    rows = list(csv.DictReader(io.StringIO(text)))
+    pts: list[tuple[str, float]] = []
+    for row in rows:
+        if (row.get("REF_AREA") or "").strip() != ref_area:
+            continue
+        date = (row.get("TIME_PERIOD") or "").strip()
+        raw = (row.get("OBS_VALUE") or "").strip()
+        if not date or raw in ("", "."):
+            continue
+        try:
+            pts.append((date, float(raw)))
+        except ValueError:
+            continue
+    if not pts:
+        return dict(_EMPTY)
+    pts.sort(key=lambda x: x[0])
     current = pts[-1][1]
     prev = pts[-2][1] if len(pts) >= 2 else None
     return _quote_from_current_prev(current, prev, decimals=2)
@@ -948,6 +1000,22 @@ async def _fetch_jp_policy_rate(client: httpx.AsyncClient) -> dict:
         return dict(_EMPTY)
 
 
+async def _fetch_bis_policy_rate(client: httpx.AsyncClient, ref_area: str) -> dict:
+    """Fetch monthly central bank policy rates from the BIS CBPOL dataset."""
+    start_year = max(1990, datetime.utcnow().year - 1)
+    try:
+        r = await client.get(
+            f"https://stats.bis.org/api/v2/data/dataflow/BIS/WS_CBPOL/1.0/M.{ref_area}",
+            params={"startPeriod": f"{start_year}-01", "format": "csvfile"},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "text/csv,*/*"},
+        )
+        if r.status_code != 200:
+            return dict(_EMPTY)
+        return _parse_bis_policy_csv(r.text, ref_area)
+    except Exception:
+        return dict(_EMPTY)
+
+
 async def _fetch_policy_rates(client: httpx.AsyncClient, codes: list[str]) -> dict[str, dict]:
     out = {code: dict(_EMPTY) for code in codes}
     tasks = []
@@ -961,11 +1029,24 @@ async def _fetch_policy_rates(client: httpx.AsyncClient, codes: list[str]) -> di
     if "JP_BASE" in codes:
         tasks.append(_fetch_jp_policy_rate(client))
         task_codes.append("JP_BASE")
+    bis_ref_to_codes: dict[str, list[str]] = {}
+    for code in codes:
+        ref_area = _BIS_POLICY_RATE_MAP.get(code)
+        if ref_area:
+            bis_ref_to_codes.setdefault(ref_area, []).append(code)
+    for ref_area in bis_ref_to_codes:
+        tasks.append(_fetch_bis_policy_rate(client, ref_area))
+        task_codes.append(("BIS", ref_area))
     if not tasks:
         return out
     fetched = await asyncio.gather(*tasks, return_exceptions=True)
     for code, result in zip(task_codes, fetched):
-        out[code] = dict(_EMPTY) if isinstance(result, Exception) else result
+        if isinstance(code, tuple) and code[0] == "BIS":
+            quote = dict(_EMPTY) if isinstance(result, Exception) else result
+            for mapped_code in bis_ref_to_codes.get(code[1], []):
+                out[mapped_code] = dict(quote)
+        else:
+            out[code] = dict(_EMPTY) if isinstance(result, Exception) else result
     return out
 
 

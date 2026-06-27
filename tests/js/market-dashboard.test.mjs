@@ -560,9 +560,15 @@ test("_mdBondCountries lists 10Y by yield desc, incl KR/US/JP/CN", () => {
 test("_mdBondCountries maps additional countries to Korean names, yield desc", () => {
   const w = load();
   const cat = {
+    US_BASE: { category: "국채", country: "US", maturity: -1 },
+    ES_BASE: { category: "국채", country: "ES", maturity: -1 },
+    CH_BASE: { category: "국채", country: "CH", maturity: -1 },
+    ID_BASE: { category: "국채", country: "ID", maturity: -1 },
+    BR_BASE: { category: "국채", country: "BR", maturity: -1 },
     US10Y: { category: "국채", country: "US", maturity: 10 },
     IT10Y: { category: "국채", country: "IT", maturity: 10 },
     ES10Y: { category: "국채", country: "ES", maturity: 10 },
+    CH10Y: { category: "국채", country: "CH", maturity: 10 },
     CA10Y: { category: "국채", country: "CA", maturity: 10 },
     RU10Y: { category: "국채", country: "RU", maturity: 10 },
     IN10Y: { category: "국채", country: "IN", maturity: 10 },
@@ -570,13 +576,20 @@ test("_mdBondCountries maps additional countries to Korean names, yield desc", (
     BR10Y: { category: "국채", country: "BR", maturity: 10 },
   };
   const data = {
+    US_BASE: { value: "4.50" }, ES_BASE: { value: "2.00" },
+    CH_BASE: { value: "0.00" },
+    ID_BASE: { value: "4.75" }, BR_BASE: { value: "14.50" },
     US10Y: { value: "4.45" }, IT10Y: { value: "3.83" }, ES10Y: { value: "3.35" },
-    CA10Y: { value: "3.53" }, RU10Y: { value: "" }, IN10Y: { value: "6.91" },
+    CH10Y: { value: "0.24" }, CA10Y: { value: "3.53" }, RU10Y: { value: "" }, IN10Y: { value: "6.91" },
     ID10Y: { value: "7.18" }, BR10Y: { value: "14.76" },
   };
   const cs = w._mdBondCountries(Object.keys(cat), cat, data);
   // 금리 내림차순 + BOND_COUNTRY_NAMES 한글 매핑.
-  assert.deepEqual([...cs.map((c) => c.name)], ["브라질", "인도네시아", "인도", "미국", "이탈리아", "캐나다", "스페인"]);
+  assert.deepEqual([...cs.map((c) => c.name)], ["브라질", "인도네시아", "인도", "미국", "이탈리아", "캐나다", "스페인", "스위스"]);
+  assert.equal(cs[0].baseValue, 14.50);
+  assert.equal(cs[1].baseValue, 4.75);
+  assert.equal(cs[6].baseValue, 2.00);
+  assert.equal(cs[7].baseValue, 0.00);
 });
 
 test("_drawBondCountryChart uses one color for every 10Y bar and separate color for base rates", () => {
@@ -601,6 +614,8 @@ test("_drawBondCountryChart uses one color for every 10Y bar and separate color 
   ]);
 
   assert.ok(option, "echarts option captured");
+  assert.equal(el.style.height, "360px");
+  assert.equal(option.grid.left, 70);
   assert.deepEqual(
     option.series[0].data.map((row) => row.itemStyle.color),
     ["#2563eb", "#2563eb", "#2563eb"],

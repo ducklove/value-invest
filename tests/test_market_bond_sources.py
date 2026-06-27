@@ -10,11 +10,19 @@ def test_japan_short_bond_catalog_entries_exist():
     assert mi.CATALOG["JP1Y"]["maturity"] == 1
     assert mi._CNBC_BOND_MAP["JP3M"] == "JP3M-JP"
     assert mi.CATALOG["ES10Y"]["country"] == "ES"
+    assert mi.CATALOG["CH10Y"]["country"] == "CH"
     assert mi.CATALOG["RU10Y"]["country"] == "RU"
     assert mi.CATALOG["ID10Y"]["country"] == "ID"
     assert mi._CNBC_BOND_MAP["ES10Y"] == "ES10Y-ES"
+    assert mi._CNBC_BOND_MAP["CH10Y"] == "CH10Y-CH"
     assert mi._CNBC_BOND_MAP["RU10Y"] == "RU10Y-RU"
     assert mi._CNBC_BOND_MAP["ID10Y"] == "ID10Y-ID"
+    for code in ["GB_BASE", "AU_BASE", "CN_BASE", "DE_BASE", "FR_BASE", "IT_BASE", "ES_BASE", "CH_BASE", "CA_BASE", "RU_BASE", "IN_BASE", "ID_BASE", "BR_BASE"]:
+        assert mi.CATALOG[code]["maturity"] == -1
+        assert code in mi._POLICY_RATE_CODES
+    assert mi._BIS_POLICY_RATE_MAP["DE_BASE"] == "XM"
+    assert mi._BIS_POLICY_RATE_MAP["CH_BASE"] == "CH"
+    assert mi._BIS_POLICY_RATE_MAP["ID_BASE"] == "ID"
 
 
 def test_parse_mof_jgb_csv_ignores_footer_and_uses_latest_data_row():
@@ -44,6 +52,21 @@ def test_parse_fred_policy_csv_uses_latest_nonblank_observation():
     out = mi._parse_fred_policy_csv(csv_text)
 
     assert out["value"] == "4.75"
+    assert out["change"] == "0.25"
+    assert out["direction"] == "up"
+
+
+def test_parse_bis_policy_csv_uses_latest_matching_ref_area():
+    csv_text = (
+        "FREQ,REF_AREA,TIME_PERIOD,OBS_VALUE\n"
+        "M,ID,2026-01,4.75\n"
+        "M,GB,2026-01,4.00\n"
+        "M,ID,2026-02,5.00\n"
+    )
+
+    out = mi._parse_bis_policy_csv(csv_text, "ID")
+
+    assert out["value"] == "5.00"
     assert out["change"] == "0.25"
     assert out["direction"] == "up"
 
