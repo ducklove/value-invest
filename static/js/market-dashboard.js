@@ -453,7 +453,7 @@ function _mdBondSectionHtml() {
     + '<div class="md-bond-sub">기간별 금리 (Yield Curve · 변동=전일대비 %p)</div>'
     + '<div class="md-bond-chart" id="bondYieldCurve"></div>'
     + '<div class="md-bond-table" id="bondCurveTable"></div>'
-    + '<div class="md-bond-sub">국가별 10년물</div>'
+    + '<div class="md-bond-sub">국가별 금리</div>'
     + '<div class="md-bond-chart md-bond-chart-sm" id="bondCountryCompare"></div>'
     + '</section>';
 }
@@ -547,7 +547,7 @@ function _drawBondCountryChart(countries) {
       type: 'bar', barWidth: '55%',
       data: ordered.map((c) => ({
         value: c.value,
-        itemStyle: { color: (c.country === 'KR' || c.country === 'US') ? '#2563eb' : '#94a3b8', borderRadius: [0, 3, 3, 0] },
+        itemStyle: { color: '#2563eb', borderRadius: [0, 3, 3, 0] },
       })),
       label: {
         show: true,

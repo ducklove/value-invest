@@ -92,6 +92,25 @@ class InvestorFlowsParserTests(unittest.TestCase):
         self.assertIsNone(market_movers._parse_investor_trend("<table class='type_1'></table>"))
 
 
+class MarketSummaryRouteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_market_summary_keeps_full_dashboard_catalog_request(self):
+        captured = []
+
+        async def fake_fetch_indicators(codes):
+            captured.extend(codes)
+            return {code: {"value": "1.00"} for code in codes}
+
+        codes = [f"C{i:03d}" for i in range(70)] + ["JP_BASE", "ES10Y", "ID10Y", "BR10Y"]
+        with patch("market_indicators.fetch_indicators", new=AsyncMock(side_effect=fake_fetch_indicators)):
+            result = await stocks_route.market_summary(",".join(codes))
+
+        self.assertIn("JP_BASE", captured)
+        self.assertIn("ES10Y", captured)
+        self.assertIn("ID10Y", captured)
+        self.assertIn("BR10Y", captured)
+        self.assertEqual(result["BR10Y"]["value"], "1.00")
+
+
 class MarketNewsParserTests(unittest.TestCase):
     def _news_html(self) -> str:
         return (FIXTURES / "naver_mainnews.html").read_text(encoding="utf-8")

@@ -579,6 +579,36 @@ test("_mdBondCountries maps additional countries to Korean names, yield desc", (
   assert.deepEqual([...cs.map((c) => c.name)], ["브라질", "인도네시아", "인도", "미국", "이탈리아", "캐나다", "스페인"]);
 });
 
+test("_drawBondCountryChart uses one color for every 10Y bar and separate color for base rates", () => {
+  const w = load();
+  let option = null;
+  w.echarts = {
+    init() {
+      return {
+        setOption(o) { option = o; },
+        resize() {},
+      };
+    },
+  };
+  const el = w.document.createElement("div");
+  el.id = "bondCountryCompare";
+  w.document.body.appendChild(el);
+
+  w._drawBondCountryChart([
+    { country: "US", name: "미국", value: 4.45, baseValue: 4.50 },
+    { country: "ES", name: "스페인", value: 3.35, baseValue: null },
+    { country: "JP", name: "일본", value: 2.57, baseValue: 1.00 },
+  ]);
+
+  assert.ok(option, "echarts option captured");
+  assert.deepEqual(
+    option.series[0].data.map((row) => row.itemStyle.color),
+    ["#2563eb", "#2563eb", "#2563eb"],
+  );
+  assert.equal(option.series[1].data[0].itemStyle.color, "#f97316");
+  assert.equal(option.series[1].data[1], "-");
+});
+
 test("_bondMatLabel maps overnight(0) to 1D, sub-year to months, else years", () => {
   const w = load();
   assert.equal(w._bondMatLabel(-1), "기준");
@@ -597,6 +627,7 @@ test("_mdRenderDashboard renders 국채 chart containers + yield-curve table", (
   const curveTbl = main.querySelector("#bondCurveTable .bond-tbl");
   assert.ok(curveTbl && /기준/.test(curveTbl.textContent), "curve table filled");
   assert.ok(/일본/.test(curveTbl.textContent), "curve table has 일본 column");
+  assert.match(main.textContent, /국가별 금리/);
   // 국가별 10년물은 그래프만 두고 텍스트 표는 제거됨.
   assert.equal(main.querySelector("#bondCountryTable"), null, "country table removed");
 });
