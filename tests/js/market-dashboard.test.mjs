@@ -614,8 +614,8 @@ test("_drawBondCountryChart uses one color for every 10Y bar and separate color 
   ]);
 
   assert.ok(option, "echarts option captured");
-  assert.equal(el.style.height, "360px");
-  assert.equal(option.grid.left, 70);
+  assert.equal(el.style.height, "390px");
+  assert.equal(option.grid.left, 76);
   assert.deepEqual(
     option.series[0].data.map((row) => row.itemStyle.color),
     ["#2563eb", "#2563eb", "#2563eb"],
@@ -639,6 +639,8 @@ test("_mdRenderDashboard renders 국채 chart containers + yield-curve table", (
   const main = w.document.getElementById("mdIndMain");
   assert.ok(main.querySelector("#bondYieldCurve"), "yield curve container");
   assert.ok(main.querySelector("#bondCountryCompare"), "country compare container");
+  assert.equal(main.querySelectorAll(".md-bond-panel").length, 2);
+  assert.ok(main.querySelector(".md-bond-head"), "bond section header");
   const curveTbl = main.querySelector("#bondCurveTable .bond-tbl");
   assert.ok(curveTbl && /기준/.test(curveTbl.textContent), "curve table filled");
   assert.ok(/일본/.test(curveTbl.textContent), "curve table has 일본 column");

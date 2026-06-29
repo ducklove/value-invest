@@ -449,12 +449,16 @@ function _mdBondSectionHtml() {
   // 국가별 10년물은 비교 그래프(bondCountryCompare)가 모든 국가를 막대로 보여주므로
   // 별도 수치 표는 생략한다. 기간별 금리는 곡선이 한·미·일이라 표를 함께 둔다.
   return '<section class="md-section md-bond-section">'
-    + '<h3 class="md-section-title">국채</h3>'
-    + '<div class="md-bond-sub">기간별 금리 (Yield Curve · 변동=전일대비 %p)</div>'
+    + '<div class="md-bond-head"><h3 class="md-section-title">국채</h3><span>기준금리 · 수익률 곡선 · 10년물 비교</span></div>'
+    + '<div class="md-bond-panel md-bond-panel-curve">'
+    + '<div class="md-bond-panel-head"><div><strong>한·미·일 기간별 금리</strong><span>Yield Curve · 기준금리 포함</span></div><em>변동: 전일대비 %p</em></div>'
     + '<div class="md-bond-chart" id="bondYieldCurve"></div>'
     + '<div class="md-bond-table" id="bondCurveTable"></div>'
-    + '<div class="md-bond-sub">국가별 금리</div>'
+    + '</div>'
+    + '<div class="md-bond-panel">'
+    + '<div class="md-bond-panel-head"><div><strong>국가별 금리</strong><span>10년물과 기준금리 오버레이</span></div><em>높은 10년물 순</em></div>'
     + '<div class="md-bond-chart md-bond-chart-sm" id="bondCountryCompare"></div>'
+    + '</div>'
     + '</section>';
 }
 
@@ -491,11 +495,12 @@ function _drawBondCurveChart(curve) {
   const mkSeries = (name, data, color) => ({
     name, type: 'line', data: data.map((v) => (v == null ? '-' : v)),
     smooth: 0.2, symbol: 'circle', symbolSize: 5, connectNulls: true,
-    lineStyle: { color, width: 2 }, itemStyle: { color },
+    lineStyle: { color, width: 2.5 }, itemStyle: { color },
+    emphasis: { focus: 'series' },
   });
   ec.setOption({
-    grid: { left: 46, right: 14, top: 28, bottom: 24 },
-    legend: { data: ['한국', '미국', '일본'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 2 },
+    grid: { left: 44, right: 14, top: 32, bottom: 28 },
+    legend: { data: ['한국', '미국', '일본'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 3 },
     xAxis: { type: 'category', data: curve.labels, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 10 }, splitLine: { show: false } },
     yAxis: { type: 'value', min: 0, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) + '%' }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
     tooltip: {
@@ -521,14 +526,14 @@ function _drawBondCurveChart(curve) {
 function _drawBondCountryChart(countries) {
   const el = document.getElementById('bondCountryCompare');
   if (!el || !window.echarts || !countries.length) return;
-  el.style.height = `${Math.max(360, countries.length * 26 + 72)}px`;
+  el.style.height = `${Math.max(390, countries.length * 28 + 76)}px`;
   const t = _bondChartTheme();
   const ec = echarts.init(el);
   // 가로 막대: 금리 높은 국가가 위로 오도록 역순(echarts y-category는 아래부터).
   const ordered = countries.slice().reverse();
   const names = ordered.map((c) => c.name);
   ec.setOption({
-    grid: { left: 70, right: 44, top: 30, bottom: 8 },
+    grid: { left: 76, right: 54, top: 34, bottom: 10 },
     legend: { data: ['10년물', '기준금리'], top: 0, right: 0, textStyle: { color: t.text, fontSize: 11 }, itemWidth: 18, itemHeight: 8 },
     xAxis: { type: 'value', scale: true, axisLine: { show: false }, axisLabel: { color: t.text, fontSize: 10, formatter: (v) => v.toFixed(1) }, splitLine: { lineStyle: { color: t.grid, width: 0.5 } } },
     yAxis: { type: 'category', data: names, axisLine: { lineStyle: { color: t.grid } }, axisLabel: { color: t.text, fontSize: 11 } },
@@ -545,7 +550,7 @@ function _drawBondCountryChart(countries) {
     },
     series: [{
       name: '10년물',
-      type: 'bar', barWidth: '55%',
+      type: 'bar', barWidth: '50%',
       data: ordered.map((c) => ({
         value: c.value,
         itemStyle: { color: '#2563eb', borderRadius: [0, 3, 3, 0] },
@@ -564,8 +569,8 @@ function _drawBondCountryChart(countries) {
     }, {
       name: '기준금리',
       type: 'bar',
-      barWidth: '24%',
-      barGap: '-70%',
+      barWidth: '22%',
+      barGap: '-68%',
       data: ordered.map((c) => (c.baseValue == null ? '-' : {
         value: c.baseValue,
         itemStyle: { color: '#f97316', borderRadius: [0, 3, 3, 0], opacity: 0.86 },
