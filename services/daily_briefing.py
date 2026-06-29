@@ -993,11 +993,27 @@ def _template_body_lines(context: dict, custom_instructions: str | None = None) 
     return body
 
 
-def _ai_text_is_usable(text: str) -> bool:
+_INCOMPLETE_LINE_SUFFIXES = ("(", "[", "{", "+", "-", "/", "·", ",", ":", "(+", "(-")
+
+
+def _ai_text_rejection_reason(text: str, finish_reason: str | None = None) -> str | None:
+    if finish_reason == "length":
+        return "finish_reason_length"
     lines = _nonempty_lines(text)
     if len(lines) < MIN_USABLE_AI_LINES:
-        return False
-    return any("브리핑" in line for line in lines[:2])
+        return "too_short"
+    if not any("브리핑" in line for line in lines[:2]):
+        return "missing_title"
+    last = lines[-1].strip()
+    if last.endswith(_INCOMPLETE_LINE_SUFFIXES):
+        return "incomplete_tail"
+    if text.count("(") > text.count(")") or text.count("[") > text.count("]"):
+        return "unbalanced_delimiter"
+    return None
+
+
+def _ai_text_is_usable(text: str, finish_reason: str | None = None) -> bool:
+    return _ai_text_rejection_reason(text, finish_reason) is None
 
 
 def _briefing_stats(context: dict, text: str) -> dict:
@@ -1097,7 +1113,8 @@ async def generate_briefing(google_sub: str, briefing_type: object = None) -> di
         )
         text = (result.get("content") or "").strip()
         if text:
-            if _ai_text_is_usable(text):
+            rejection_reason = _ai_text_rejection_reason(text, result.get("finish_reason"))
+            if rejection_reason is None:
                 return {
                     "text": text,
                     "source": "ai",
@@ -1109,15 +1126,17 @@ async def generate_briefing(google_sub: str, briefing_type: object = None) -> di
                     "custom_instructions": bool(custom_instructions),
                 }
             logger.warning(
-                "daily briefing LLM too short user=%s lines=%s",
+                "daily briefing LLM unusable user=%s reason=%s lines=%s finish_reason=%s",
                 google_sub[:8],
+                rejection_reason,
                 len(_nonempty_lines(text)),
+                result.get("finish_reason"),
             )
             return {
                 "text": fallback_text,
                 "source": "template",
                 "model": None,
-                "fallback_reason": "ai_too_short",
+                "fallback_reason": f"ai_{rejection_reason}",
                 "context": context,
                 "stats": _briefing_stats(context, fallback_text),
                 "briefing_type": profile["kind"],

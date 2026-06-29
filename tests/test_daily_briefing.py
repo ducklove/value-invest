@@ -570,6 +570,50 @@ class GenerateBriefingTests(DailyBriefingHarness):
         rows = await self._usage_rows()
         self.assertEqual(rows[0]["ok"], 1)
 
+    async def test_incomplete_llm_response_falls_back_to_template(self):
+        await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "model": "test/model",
+            "choices": [{
+                "message": {
+                    "content": "🌙 나이트 브리핑 (2026-06-29)\n🔔 장 마감 후 새 공시·리포트 없음\n🌏 해외 포트 10.34억 (+"
+                }
+            }],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 45, "cost": 0.0001},
+        }
+        ctx = self._minimal_context()
+        ctx.update(briefing_type="night", briefing_title="🌙 나이트 브리핑", briefing_name="나이트 브리핑")
+        with patch.object(daily_briefing, "build_briefing_context", new=AsyncMock(return_value=ctx)), \
+             patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=resp)):
+            briefing = await daily_briefing.generate_briefing("u1", "night")
+        self.assertEqual(briefing["source"], "template")
+        self.assertEqual(briefing["fallback_reason"], "ai_incomplete_tail")
+        self.assertNotIn("해외 포트 10.34억 (+", briefing["text"])
+
+    async def test_length_finish_reason_falls_back_to_template(self):
+        await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "model": "test/model",
+            "choices": [{
+                "finish_reason": "length",
+                "message": {
+                    "content": "🌙 나이트 브리핑 (2026-06-29)\n1\n2\n3\n4"
+                },
+            }],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 1200, "cost": 0.0001},
+        }
+        ctx = self._minimal_context()
+        ctx.update(briefing_type="night", briefing_title="🌙 나이트 브리핑", briefing_name="나이트 브리핑")
+        with patch.object(daily_briefing, "build_briefing_context", new=AsyncMock(return_value=ctx)), \
+             patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=resp)):
+            briefing = await daily_briefing.generate_briefing("u1", "night")
+        self.assertEqual(briefing["source"], "template")
+        self.assertEqual(briefing["fallback_reason"], "ai_finish_reason_length")
+
 
 class SendBriefingsTests(DailyBriefingHarness):
     async def test_opt_in_filtering_default_off(self):

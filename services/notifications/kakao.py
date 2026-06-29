@@ -116,10 +116,39 @@ async def fetch_nickname(access_token: str) -> str | None:
         return None
 
 
+def split_memo_text(text: str, limit: int = MEMO_TEXT_MAX) -> list[str]:
+    """Split Kakao text templates without cutting normal briefing lines."""
+    src = str(text or "").strip()
+    if not src:
+        return []
+    chunks: list[str] = []
+    current = ""
+    for line in src.splitlines():
+        line = line.rstrip()
+        if not line:
+            continue
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        candidate = line if not current else f"{current}\n{line}"
+        if len(candidate) <= limit:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = line
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 async def _send_memo(access_token: str, text: str) -> int:
     template = {
         "object_type": "text",
-        "text": text[:MEMO_TEXT_MAX],
+        "text": text,
         "link": {"web_url": _APP_URL, "mobile_web_url": _APP_URL},
     }
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -129,6 +158,17 @@ async def _send_memo(access_token: str, text: str) -> int:
             data={"template_object": json.dumps(template, ensure_ascii=False)},
         )
     return resp.status_code
+
+
+async def _send_memos(access_token: str, text: str) -> int:
+    chunks = split_memo_text(text)
+    if not chunks:
+        return 400
+    for chunk in chunks:
+        status = await _send_memo(access_token, chunk)
+        if status != 200:
+            return status
+    return 200
 
 
 def _expired(expires_at) -> bool:
@@ -175,11 +215,11 @@ async def send_to_user(google_sub: str, channel: dict, text: str) -> bool:
         if _expired(config.get("access_expires_at")) or not config.get("access_token"):
             if not await _refresh_into(google_sub, config, enabled):
                 return False
-        status = await _send_memo(config["access_token"], text)
+        status = await _send_memos(config["access_token"], text)
         if status == 401:
             if not await _refresh_into(google_sub, config, enabled):
                 return False
-            status = await _send_memo(config["access_token"], text)
+            status = await _send_memos(config["access_token"], text)
         if status != 200:
             logger.warning("kakao memo failed status=%s user=%s", status, google_sub[:8])
             return False

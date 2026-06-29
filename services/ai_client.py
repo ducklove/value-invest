@@ -81,6 +81,14 @@ def message_content_from_response(data: dict[str, Any] | None) -> str:
     return str(content or "").strip()
 
 
+def finish_reason_from_response(data: dict[str, Any] | None) -> str | None:
+    try:
+        reason = ((data or {}).get("choices") or [{}])[0].get("finish_reason")
+    except Exception:
+        return None
+    return str(reason) if reason else None
+
+
 async def post_chat_completion(
     *,
     feature: str,
@@ -127,6 +135,7 @@ async def post_chat_completion(
             )
         data = resp.json()
         content = message_content_from_response(data)
+        finish_reason = finish_reason_from_response(data)
         usage = usage_from_response(data, cost_estimator=cost_estimator)
         used_model = data.get("model") or resolved_model
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -147,6 +156,7 @@ async def post_chat_completion(
         return {
             "data": data,
             "content": content,
+            "finish_reason": finish_reason,
             "model": used_model,
             "latency_ms": latency_ms,
             **usage,

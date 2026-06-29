@@ -898,6 +898,22 @@ class KakaoChannelTests(TempDbMixin):
     async def seed(self) -> None:
         await _seed_user_and_holding()
 
+    async def test_split_memo_text_preserves_lines_under_kakao_limit(self):
+        text = "\n".join([
+            "🌙 나이트 브리핑 (2026-06-29)",
+            "🔔 장 마감 후 새 공시·리포트 없음",
+            "🌏 해외 포트 10.34억 (+1.23%)",
+            "📊 오늘 포트폴리오 +2.10%",
+            "🔎 내일 시장 전망 점검",
+        ])
+
+        chunks = kakao.split_memo_text(text, limit=80)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(chunk) <= 80 for chunk in chunks))
+        self.assertEqual("\n".join(chunks), text)
+        self.assertTrue(all(not chunk.endswith("(+") for chunk in chunks))
+
     async def test_send_ok_with_fresh_token(self):
         channel = {
             "enabled": True,
@@ -907,6 +923,20 @@ class KakaoChannelTests(TempDbMixin):
             ok = await kakao.send_to_user("u1", channel, "hi")
         self.assertTrue(ok)
         send.assert_awaited_once()
+
+    async def test_send_long_message_as_multiple_kakao_memos(self):
+        channel = {
+            "enabled": True,
+            "config": {"access_token": "a", "access_expires_at": time.time() + 3600, "refresh_token": "r"},
+        }
+        text = "\n".join(f"라인 {i}: {'x' * 40}" for i in range(1, 8))
+        with patch.object(kakao, "_send_memo", new=AsyncMock(return_value=200)) as send:
+            ok = await kakao.send_to_user("u1", channel, text)
+        self.assertTrue(ok)
+        self.assertGreater(send.await_count, 1)
+        sent_text = "\n".join(call.args[1] for call in send.await_args_list)
+        self.assertEqual(sent_text, text)
+        self.assertTrue(all(len(call.args[1]) <= kakao.MEMO_TEXT_MAX for call in send.await_args_list))
 
     async def test_refresh_on_401_then_retry(self):
         await notifications_repo.upsert_notification_channel(
