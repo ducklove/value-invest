@@ -312,6 +312,44 @@ async def set_portfolio_alert_state(
     await db.commit()
 
 
+async def claim_notification_delivery(
+    channel: str,
+    target_key: str,
+    dedupe_key: str,
+    sent_date: str,
+) -> bool:
+    """Atomically reserve one physical delivery. False means duplicate."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        INSERT OR IGNORE INTO notification_delivery_dedupe
+            (channel, target_key, dedupe_key, sent_date, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (channel, target_key, dedupe_key, sent_date, _now()),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def release_notification_delivery(
+    channel: str,
+    target_key: str,
+    dedupe_key: str,
+    sent_date: str,
+) -> None:
+    """Release a reservation when the physical send failed."""
+    db = await get_db()
+    await db.execute(
+        """
+        DELETE FROM notification_delivery_dedupe
+         WHERE channel = ? AND target_key = ? AND dedupe_key = ? AND sent_date = ?
+        """,
+        (channel, target_key, dedupe_key, sent_date),
+    )
+    await db.commit()
+
+
 # --- Economic calendar subscriptions ---------------------------------------
 
 _ECON_SUB_COLUMNS = (

@@ -597,6 +597,18 @@ async def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_portfolio_alerts_user ON portfolio_alerts(google_sub, enabled);
 
+        -- Physical-delivery de-duplication. Alert state is per user/rule, but
+        -- migrated or duplicate accounts can point at the same real chat/app.
+        -- This suppresses the same semantic alert to the same target per day.
+        CREATE TABLE IF NOT EXISTS notification_delivery_dedupe (
+            channel TEXT NOT NULL,
+            target_key TEXT NOT NULL,
+            dedupe_key TEXT NOT NULL,
+            sent_date TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (channel, target_key, dedupe_key, sent_date)
+        );
+
         -- 경제캘린더 이벤트 구독: 사용자가 특정 지표 발표(zeroin index_id)에 대해
         -- '결과치(actual) 발표 시 알림'을 신청한 것. fired=1 로 엣지 트리거(결과
         -- 발표 시 1회만 발송). event_date 는 폴링 윈도우·스테일 정리에 쓴다.

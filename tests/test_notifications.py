@@ -9,6 +9,7 @@ Kakao HTTP calls stubbed so the logic is exercised deterministically.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import unittest
 from datetime import date
@@ -545,6 +546,18 @@ class AlertEngineHarness(TempDbMixin):
         with patch.object(engine, "resolve_formula_target", new=AsyncMock(return_value=None)):
             self.assertEqual(await engine._effective_target(item, None), 260000.0)
 
+    async def test_preferred_target_does_not_fall_back_to_avg_price(self):
+        item = {
+            "stock_code": "00781K",
+            "target_price_formula": "",
+            "avg_price": 13889,
+            "target_price": None,
+            "target_price_disabled": 0,
+        }
+
+        self.assertIsNone(await engine._effective_target(item, None))
+        self.assertEqual(await engine._effective_target(item, 91000), 91000)
+
     async def test_daily_abs_blanket_once_per_day(self):
         import json as _json
         rid = await self._rule(scope="all_stocks", alert_type="daily_change_abs", threshold=5.0, stock_code=None)
@@ -751,6 +764,83 @@ class AlertEngineHarness(TempDbMixin):
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:
             await engine.evaluate_all()
         self.assertGreaterEqual(disp.await_count, 1)  # u2 발화(80000 >= 72000)
+
+    async def test_daily_abs_dedupes_same_physical_channel_across_users(self):
+        db = await cache.get_db()
+        await db.execute(
+            "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
+            " VALUES ('u2','e2@x','U2','',1,'t','t')"
+        )
+        await db.execute(
+            "INSERT OR IGNORE INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, created_at, updated_at)"
+            " VALUES ('u2', '005930', '삼성전자', 10, 1000, 't', 't')"
+        )
+        await db.commit()
+        await notifications_repo.upsert_notification_channel(
+            "u1", "telegram", config={"chat_id": 777, "bot_token": "T"}, enabled=True, verified=True
+        )
+        await notifications_repo.upsert_notification_channel(
+            "u2", "telegram", config={"chat_id": 777, "bot_token": "T"}, enabled=True, verified=True
+        )
+        await notifications_repo.create_portfolio_alert(
+            "u1", scope="all_stocks", alert_type="daily_change_abs", threshold=5.0
+        )
+        await notifications_repo.create_portfolio_alert(
+            "u2", scope="all_stocks", alert_type="daily_change_abs", threshold=5.0
+        )
+
+        with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 80000.0, "change_pct": -6.0})), \
+             patch.object(telegram, "send_message", new=AsyncMock(return_value=True)) as send:
+            await engine.evaluate_all()
+
+        self.assertEqual(send.await_count, 1)
+
+    async def test_dispatch_dedupe_claim_is_atomic_for_parallel_sends(self):
+        await notifications_repo.upsert_notification_channel(
+            "u1", "telegram", config={"chat_id": 777, "bot_token": "T"}, enabled=True, verified=True
+        )
+
+        with patch.object(telegram, "send_message", new=AsyncMock(return_value=True)) as send:
+            await asyncio.gather(
+                channels.dispatch("u1", "same", dedupe_key="alert:daily_abs:005930:5"),
+                channels.dispatch("u1", "same", dedupe_key="alert:daily_abs:005930:5"),
+            )
+
+        self.assertEqual(send.await_count, 1)
+
+    async def test_daily_abs_dedupe_keeps_distinct_alert_types(self):
+        await notifications_repo.upsert_notification_channel(
+            "u1", "telegram", config={"chat_id": 777, "bot_token": "T"}, enabled=True, verified=True
+        )
+        await self._rule(scope="all_stocks", alert_type="daily_change_abs", threshold=5.0, stock_code=None)
+        await notifications_repo.create_portfolio_alert(
+            "u1", scope="stock", alert_type="stock_daily_abs", threshold=5.0, stock_code="005930"
+        )
+
+        with patch.object(engine, "_safe_quote", new=AsyncMock(return_value={"price": 80000.0, "change_pct": -6.0})), \
+             patch.object(telegram, "send_message", new=AsyncMock(return_value=True)) as send:
+            await engine.evaluate_user("u1")
+
+        self.assertEqual(send.await_count, 2)
+
+    async def test_evaluate_all_skips_when_previous_pass_is_running(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_users():
+            started.set()
+            await release.wait()
+            return []
+
+        with patch.object(engine.snapshots_repo, "get_all_users_with_portfolio", new=slow_users), \
+             patch.object(engine.notifications_repo, "get_all_users_with_alerts", new=AsyncMock(return_value=[])):
+            first = asyncio.create_task(engine.evaluate_all())
+            await started.wait()
+            second = await engine.evaluate_all()
+            release.set()
+            await first
+
+        self.assertEqual(second["skipped"], "already_running")
 
     async def test_blanket_disclosure_feed_baseline_then_fire(self):
         await self._add_holding("000660", "SK하이닉스")

@@ -42,6 +42,7 @@ from services.portfolio.time_windows import portfolio_today_baseline_date
 
 
 logger = logging.getLogger(__name__)
+_evaluate_all_lock = asyncio.Lock()
 
 PRICE_TYPES = frozenset({"price_above", "price_below"})            # scope=stock
 NAV_TYPES = frozenset({"nav_above", "nav_below"})                  # scope=portfolio
@@ -98,6 +99,10 @@ def _fmt_thresh(value: float | None) -> str:
         return f"{float(value):g}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _daily_abs_dedupe_key(alert_type: str, code: str, threshold: float | None) -> str:
+    return f"alert:{alert_type}:{code}:{_fmt_thresh(threshold)}"
 
 
 def _to_float(value) -> float | None:
@@ -181,8 +186,8 @@ async def _effective_target(item: dict, common_price: float | None) -> float | N
     if saved is not None and saved > 0:
         return saved
     code = item.get("stock_code") or ""
-    if is_preferred_stock(code) and common_price and common_price > 0:
-        return common_price
+    if is_preferred_stock(code):
+        return common_price if common_price and common_price > 0 else None
     avg = _to_float(item.get("avg_price"))
     return avg * 1.3 if avg and avg > 0 else None
 
@@ -479,7 +484,15 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
             message = (text or "") + _note_suffix(rule)
             if rule.get("important"):
                 message = _emphasize(message)
-            await channels.dispatch(google_sub, message)
+            dedupe_key = (
+                _daily_abs_dedupe_key(alert_type, code, threshold)
+                if alert_type in DAILY_ABS_TYPES
+                else None
+            )
+            if dedupe_key:
+                await channels.dispatch(google_sub, message, dedupe_key=dedupe_key)
+            else:
+                await channels.dispatch(google_sub, message)
             state[code] = {"armed": False, "fired": today_str}
             changed = True
             sent += 1
@@ -793,7 +806,15 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
                 text = _format_portfolio_message(rule, metric)
             if rule.get("important"):
                 text = _emphasize(text)
-            await channels.dispatch(google_sub, text)
+            dedupe_key = (
+                _daily_abs_dedupe_key(alert_type, rule.get("stock_code") or "", rule["threshold"])
+                if alert_type in STOCK_DAILY_ABS_TYPES
+                else None
+            )
+            if dedupe_key:
+                await channels.dispatch(google_sub, text, dedupe_key=dedupe_key)
+            else:
+                await channels.dispatch(google_sub, text)
             await notifications_repo.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
             sent += 1
         elif not condition and not armed:
@@ -810,21 +831,25 @@ async def evaluate_all() -> dict:
     알림 규칙이 하나라도 있는 사용자도 평가 대상에 포함한다. 같은 공시/리포트
     종목을 여러 사용자가 구독해도 외부 API 를 한 번만 치도록 feed_cache 를 공유한다.
     """
-    users = set(await snapshots_repo.get_all_users_with_portfolio())
-    try:
-        users |= set(await notifications_repo.get_all_users_with_alerts())
-    except Exception:
-        pass
-    feed_cache: dict = {}
-    total_sent = 0
-    evaluated = 0
-    for google_sub in users:
+    if _evaluate_all_lock.locked():
+        logger.info("alert evaluation skipped: previous pass still running")
+        return {"users": 0, "evaluated": 0, "sent": 0, "skipped": "already_running"}
+    async with _evaluate_all_lock:
+        users = set(await snapshots_repo.get_all_users_with_portfolio())
         try:
-            total_sent += await evaluate_user(google_sub, feed_cache=feed_cache)
-            evaluated += 1
-        except Exception as exc:
-            logger.warning("alert evaluation failed for %s: %s", google_sub[:8], exc)
-    return {"users": len(users), "evaluated": evaluated, "sent": total_sent}
+            users |= set(await notifications_repo.get_all_users_with_alerts())
+        except Exception:
+            pass
+        feed_cache: dict = {}
+        total_sent = 0
+        evaluated = 0
+        for google_sub in users:
+            try:
+                total_sent += await evaluate_user(google_sub, feed_cache=feed_cache)
+                evaluated += 1
+            except Exception as exc:
+                logger.warning("alert evaluation failed for %s: %s", google_sub[:8], exc)
+        return {"users": len(users), "evaluated": evaluated, "sent": total_sent}
 
 
 # --- Economic calendar event result alerts ---------------------------------
