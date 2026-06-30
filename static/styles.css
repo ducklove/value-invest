@@ -2334,6 +2334,152 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-link-menu .pf-pref-item:hover span { color: rgba(255,255,255,0.82); }
 
+/* Portfolio action board */
+.pf-action-board {
+  margin: 10px 0 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.pf-action-board-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+.pf-action-board-head h3 { margin: 0 0 2px; font-size: 15px; }
+.pf-action-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.pf-action-summary span {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+}
+.pf-action-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+.pf-action-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-secondary);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.pf-action-card.high { border-left-color: var(--danger); }
+.pf-action-card.watch { border-left-color: var(--warning); }
+.pf-action-card.info { border-left-color: var(--primary); }
+.pf-action-card.done,
+.pf-action-card.dismissed { opacity: 0.72; }
+.pf-action-card-main { min-width: 0; }
+.pf-action-card-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.pf-action-card h4 { margin: 0; font-size: 13px; line-height: 1.35; }
+.pf-action-card p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.pf-action-severity,
+.pf-action-status,
+.pf-action-source,
+.pf-action-stock {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.pf-action-severity { color: var(--danger); border-color: rgba(220, 38, 38, 0.28); }
+.pf-action-status { margin-left: auto; }
+.pf-action-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: stretch;
+}
+.pf-action-btn {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 64px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.pf-action-btn.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+.pf-action-resolved {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.pf-action-resolved summary { cursor: pointer; margin-bottom: 8px; }
+.pf-linked-signal-badges {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.pf-linked-signal-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 72px;
+  min-height: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pf-linked-signal-badge.high { color: var(--danger); border-color: rgba(220, 38, 38, 0.35); }
+.pf-linked-signal-badge.watch { color: var(--warning); border-color: rgba(245, 158, 11, 0.45); }
+.pf-linked-signal-badge.info { color: var(--primary); border-color: rgba(37, 99, 235, 0.35); }
+.pf-linked-signal-badge.more { color: var(--text-secondary); }
+@media (max-width: 720px) {
+  .pf-action-board { padding: 10px; }
+  .pf-action-card { grid-template-columns: minmax(0, 1fr); }
+  .pf-action-card-actions { flex-direction: row; flex-wrap: wrap; }
+}
+
 /* Portfolio tab bar */
 .pf-tab-bar {
   display: flex;

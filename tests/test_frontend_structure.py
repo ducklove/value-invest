@@ -12,6 +12,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-order.js",
     "portfolio-sparklines.js",
     "portfolio-render.js",
+    "portfolio-action-board.js",
     "portfolio-add-search.js",
     "portfolio-actions.js",
     "portfolio-insights.js",
@@ -942,6 +943,35 @@ def test_performance_tab_includes_rebalance_panel():
     assert ".pf-rebal-table" in styles
     assert ".pf-rebal-editor-row" in styles
     assert ".pf-rebal-editor-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+
+
+def test_portfolio_includes_action_board_and_linked_signal_badges():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    action_board = (JS / "portfolio-action-board.js").read_text(encoding="utf-8")
+
+    # 액션 보드는 포트폴리오 요약 바로 다음에 위치한다.
+    assert 'id="pfActionBoard"' in html
+    assert 'id="pfActionBoardContent"' in html
+    assert html.find('id="pfSummary"') < html.find('id="pfActionBoard"')
+    assert html.find('id="pfActionBoard"') < html.find('class="pf-tab-bar"')
+    assert "./js/portfolio-render.js" in html
+    assert html.find("./js/portfolio-render.js") < html.find("./js/portfolio-action-board.js")
+
+    # 포트폴리오 데이터 로드 후 자동으로 오늘 액션을 갱신한다.
+    assert "void pfLoadActionBoard({ force: true });" in data
+    assert "/api/portfolio/action-board" in action_board
+    assert "/api/portfolio/action-board/queue/" in action_board
+    assert "function pfActionBoardBadgesForCode(" in action_board
+    assert "PfActionBoard.signalsByCode" in action_board
+
+    # 연결 프로젝트 신호는 보유종목 행의 종목명 옆 배지로도 노출된다.
+    assert "pfActionBoardBadgesForCode(r.stock_code)" in render
+    assert ".pf-action-board" in styles
+    assert ".pf-action-card" in styles
+    assert ".pf-linked-signal-badge" in styles
 
 
 def test_performance_tab_includes_dividend_calendar_panel():

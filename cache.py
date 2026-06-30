@@ -669,6 +669,24 @@ async def init_db():
             FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_investment_journal_user_stock ON investment_journal(google_sub, stock_code);
+
+        -- 포트폴리오 액션 보드 검토 큐: 서버가 매번 재계산하는 액션
+        -- (리밸런싱 이탈, 연결 프로젝트 신호 등)에 대해 사용자가
+        -- 처리완료/무시/다시검토 상태를 남긴다. 액션 본문은 파생 데이터라
+        -- 저장하지 않고 안정 키만 보관한다.
+        CREATE TABLE IF NOT EXISTS portfolio_action_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            google_sub TEXT NOT NULL,
+            action_key TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(google_sub, action_key),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_portfolio_action_reviews_user_status
+            ON portfolio_action_reviews(google_sub, status, updated_at DESC);
     """)
     await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
     await _ensure_column(db, "financial_data", "report_date", "TEXT")

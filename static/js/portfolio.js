@@ -10,6 +10,7 @@
     'portfolio-data.js',
     'portfolio-order.js',
     'portfolio-render.js',
+    'portfolio-action-board.js',
     'portfolio-actions.js',
     'portfolio-insights.js',
     'portfolio-groups-market.js',
