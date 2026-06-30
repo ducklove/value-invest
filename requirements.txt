@@ -1,4 +1,10 @@
-fastapi>=0.129.0,<1.0
+# Cap below 0.136 — FastAPI 0.136+ wraps include_router() targets in a
+# _IncludedRouter and flattens app.routes differently, which breaks the
+# route-ordering contract test (test_app_factory) and changes how mounted
+# routers surface in app.routes. 0.135.x is the last verified-compatible
+# line. Bump the cap only after auditing that test and any runtime code
+# that walks app.routes.
+fastapi>=0.129.0,<0.136
 uvicorn[standard]>=0.41.0,<1.0
 aiosqlite>=0.22.1,<1.0
 httpx>=0.28.1,<1.0
