@@ -530,6 +530,197 @@ def _match_holding(code: str, current: dict, config: list) -> dict | None:
     return None
 
 
+def _match_buyback(code: str, holdings: list) -> dict | None:
+    """Return the latest common-stock buyback snapshot for one code."""
+    latest: dict | None = None
+    for row in holdings or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("stock_code") or "").strip().upper() != code:
+            continue
+        if not _buyback_is_common(row):
+            continue
+        if _num(row.get("treasury_ratio")) is None:
+            continue
+        if latest is None or _buyback_is_newer(row, latest):
+            latest = row
+    if latest is None:
+        return None
+    ratio = _num(latest.get("treasury_ratio"))
+    if ratio is None:
+        return None
+    return {
+        "name": latest.get("corp_name") or code,
+        "asOf": latest.get("as_of_date"),
+        "stockKind": latest.get("stock_kind"),
+        "treasuryRatio": ratio,
+        "treasuryRatioPct": ratio * 100,
+        "endingQty": latest.get("ending_qty"),
+        "issuedShares": latest.get("issued_shares"),
+        "url": SITE["buybacks"],
+    }
+
+
+def _match_gold_gap_asset(code: str, summary: dict) -> dict | None:
+    asset_key_by_code = {
+        "KRX_GOLD": "gold",
+        "CRYPTO_BTC": "bitcoin",
+        "CRYPTO_ETH": "eth",
+        "CRYPTO_USDT": "usdt",
+    }
+    asset_key = asset_key_by_code.get(str(code or "").strip().upper())
+    if not asset_key:
+        return None
+    for asset in summary.get("assets") or []:
+        if asset.get("key") == asset_key:
+            return {
+                "name": asset.get("label") or asset_key,
+                "gap": asset.get("gap"),
+                "date": asset.get("date"),
+                "url": asset.get("link") or summary.get("url") or SITE["goldGap"],
+            }
+    return None
+
+
+def _signal(kind: str, title: str, detail: str, url: str, *, severity: str = "info", metric=None, short_label: str = "") -> dict:
+    return {
+        "kind": kind,
+        "title": title,
+        "detail": detail,
+        "url": url,
+        "severity": severity,
+        "metric": metric,
+        "short_label": short_label or kind,
+    }
+
+
+async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
+    """Linked-dashboard signals keyed by portfolio stock code.
+
+    This is intentionally best-effort. Each external dashboard is independent;
+    one stale/failed source should not block the action board.
+    """
+    normalized = []
+    for code in codes or []:
+        norm = str(code or "").strip().upper()
+        if norm and norm not in normalized:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    out: dict[str, list[dict]] = {code: [] for code in normalized}
+
+    try:
+        cur, cfg = await _load_pair("common_preferred_spread")
+        for code in normalized:
+            pref = _match_preferred(code, cur, cfg)
+            if not pref:
+                continue
+            spread = _num(pref.get("spread"))
+            severity = "high" if spread is not None and spread >= 50 else "watch"
+            detail = f"우선주 괴리율 {spread:.1f}%" if spread is not None else "우선주 괴리율 신호"
+            out[code].append(_signal(
+                "preferred",
+                f"{pref.get('name') or code} 우선주 괴리",
+                detail,
+                SITE["spread"] + f"?code={code}",
+                severity=severity,
+                metric=spread,
+                short_label="우선주",
+            ))
+    except Exception as exc:
+        logger.warning("portfolio signal preferred lookup failed: %s", exc)
+
+    try:
+        cur, cfg = await _load_pair("holding_value")
+        for code in normalized:
+            hold = _match_holding(code, cur, cfg)
+            if not hold:
+                continue
+            ratio = _num(hold.get("ratio"))
+            severity = "high" if ratio is not None and ratio >= 150 else "watch"
+            detail = f"보유지분가치/시총 {ratio:.1f}%" if ratio is not None else "지주사 NAV 신호"
+            out[code].append(_signal(
+                "holding",
+                f"{hold.get('name') or code} 지주사 NAV",
+                detail,
+                hold.get("url") or (SITE["holding"] + f"?code={code}"),
+                severity=severity,
+                metric=ratio,
+                short_label="지주사",
+            ))
+    except Exception as exc:
+        logger.warning("portfolio signal holding lookup failed: %s", exc)
+
+    try:
+        universe = await fetch_etf_universe()
+        if universe:
+            for code in normalized:
+                base = code.split(".", 1)[0]
+                matched = code if code in universe else (base if base in universe else None)
+                if not matched:
+                    continue
+                out[code].append(_signal(
+                    "etf",
+                    f"{matched} ETF 상세",
+                    "ETF 평가 대시보드에서 최신 순위와 구성 정보를 확인할 수 있습니다.",
+                    etf_deep_link(matched),
+                    severity="info",
+                    short_label="ETF",
+                ))
+    except Exception as exc:
+        logger.warning("portfolio signal etf lookup failed: %s", exc)
+
+    try:
+        data = await _get_json(f"{SITE['buybacks']}data/buybacks/holding_snapshots.json")
+        for code in normalized:
+            buyback = _match_buyback(code, data)
+            if not buyback:
+                continue
+            ratio_pct = _num(buyback.get("treasuryRatioPct"))
+            severity = "high" if ratio_pct is not None and ratio_pct >= 20 else "watch"
+            detail = f"자사주 보유비중 {ratio_pct:.1f}%" if ratio_pct is not None else "자사주 데이터 신호"
+            if buyback.get("asOf"):
+                detail += f" · {buyback['asOf']} 기준"
+            out[code].append(_signal(
+                "buybacks",
+                f"{buyback.get('name') or code} 자사주",
+                detail,
+                SITE["buybacks"] + f"?code={code}",
+                severity=severity,
+                metric=ratio_pct,
+                short_label="자사주",
+            ))
+    except Exception as exc:
+        logger.warning("portfolio signal buybacks lookup failed: %s", exc)
+
+    try:
+        gold_summary = await _gold_summary()
+        if gold_summary:
+            for code in normalized:
+                asset = _match_gold_gap_asset(code, gold_summary)
+                if not asset:
+                    continue
+                gap = _num(asset.get("gap"))
+                severity = "watch" if gap is not None and abs(gap) >= 2 else "info"
+                detail = f"국내외 갭 {gap:+.2f}%" if gap is not None else "국내외 가격 갭 신호"
+                if asset.get("date"):
+                    detail += f" · {asset['date']}"
+                out[code].append(_signal(
+                    "goldGap",
+                    f"{asset.get('name') or code} 갭",
+                    detail,
+                    asset.get("url") or SITE["goldGap"],
+                    severity=severity,
+                    metric=gap,
+                    short_label="갭",
+                ))
+    except Exception as exc:
+        logger.warning("portfolio signal gold-gap lookup failed: %s", exc)
+
+    return {code: signals for code, signals in out.items() if signals}
+
+
 async def fetch_stock_links(code: str) -> dict:
     """종목분석 deep-link 카드용 — 이 종목코드에 해당하는 우선주/지주사 정보.
 

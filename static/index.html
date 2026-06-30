@@ -276,6 +276,18 @@ function trackEvent(name, params = {}) {
 
   <div id="portfolioView" style="display:none;">
     <div class="pf-summary" id="pfSummary" aria-live="polite" aria-label="포트폴리오 요약: 총 평가액·NAV·수익률"></div>
+    <section class="pf-action-board" id="pfActionBoard" hidden>
+      <div class="pf-action-board-head">
+        <div>
+          <h3>오늘의 투자 액션</h3>
+          <span id="pfActionBoardMeta" class="pf-chart-note">포트폴리오를 열면 확인할 항목을 불러옵니다.</span>
+        </div>
+        <button class="pf-mini-btn" type="button" id="pfActionBoardRefresh" title="액션 보드 새로고침">새로고침</button>
+      </div>
+      <div id="pfActionBoardContent" class="pf-action-board-content">
+        <div class="pf-risk-empty">액션 보드를 불러오는 중입니다.</div>
+      </div>
+    </section>
 
     <div class="pf-tab-bar">
       <button class="pf-tab active" data-tab="holdings" onclick="pfSwitchTab('holdings')">보유종목</button>
@@ -436,6 +448,27 @@ function trackEvent(name, params = {}) {
           <span>NAV · 리스크 · 리밸런싱 · 현금흐름</span>
         </div>
         <div class="pf-deep-meta">스냅샷 기준</div>
+      </div>
+
+      <div class="pf-nav-chart-wrap pf-analysis-card pf-period-report-card" id="pfPeriodReportWrap">
+        <div class="pf-nav-header pf-period-report-head">
+          <div>
+            <h3>기간 투자 보고서</h3>
+            <span class="pf-chart-note">월간·연간 포트폴리오 변동 데이터 축적</span>
+          </div>
+          <div class="pf-period-report-controls">
+            <select id="pfPeriodReportType" onchange="pfPeriodReportTypeChanged(this.value)" aria-label="보고서 유형">
+              <option value="monthly">월간</option>
+              <option value="annual">연간</option>
+            </select>
+            <select id="pfPeriodReportKey" onchange="pfPeriodReportKeyChanged(this.value)" aria-label="보고서 기간"></select>
+            <button class="pf-mini-btn" type="button" id="pfPeriodReportGenerateBtn" onclick="pfGeneratePeriodReport()">생성/갱신</button>
+          </div>
+        </div>
+        <div class="pf-period-report-status" id="pfPeriodReportStatus">성과 탭을 열면 기간 목록을 불러옵니다.</div>
+        <div id="pfPeriodReportContent" class="pf-period-report-content">
+          <div class="pf-risk-empty">저장된 기간 보고서가 여기에 표시됩니다.</div>
+        </div>
       </div>
 
       <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary">
@@ -770,11 +803,13 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-order.js" defer></script>
 <script src="./js/portfolio-sparklines.js" defer></script>
 <script src="./js/portfolio-render.js" defer></script>
+<script src="./js/portfolio-action-board.js" defer></script>
 <script src="./js/portfolio-add-search.js" defer></script>
 <script src="./js/portfolio-actions.js" defer></script>
 <script src="./js/portfolio-insights.js" defer></script>
 <script src="./js/portfolio-groups-market.js" defer></script>
 <script src="./js/portfolio-ai.js" defer></script>
+<script src="./js/portfolio-reports.js" defer></script>
 <script src="./js/portfolio-performance.js" defer></script>
 <script src="./js/portfolio-risk.js" defer></script>
 <script src="./js/portfolio-rebalance.js" defer></script>

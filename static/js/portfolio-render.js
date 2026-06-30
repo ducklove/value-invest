@@ -557,8 +557,11 @@ function renderPortfolio(options = {}) {
       ? '<button type="button" class="pf-row-drag-handle js-pf-row-drag" draggable="true" title="드래그하여 순서 변경" aria-label="드래그하여 순서 변경">&#x2630;</button>'
       : '';
     const safeName = escapeHtml(r.stock_name);
-    const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</span>${tagHtml}</span>`;
-    const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}</span>${tagHtml}</span>`;
+    const signalBadgeHtml = typeof pfActionBoardBadgesForCode === 'function'
+      ? pfActionBoardBadgesForCode(r.stock_code)
+      : '';
+    const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
+    const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
     if (isEditing) {
       return `<tr data-code="${safeCode}"${rowClass}>
