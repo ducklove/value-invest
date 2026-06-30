@@ -57,6 +57,8 @@ function pfSwitchTab(tab) {
   if (tab === 'performance') {
     loadPerformanceData();
     _loadAiModels();
+    // 기간 투자 보고서 카드도 성과 탭에서만 lazy 로드(portfolio-reports.js).
+    if (typeof pfLoadPeriodReportsPanel === 'function') pfLoadPeriodReportsPanel();
     // 리스크 카드도 성과 탭이 보일 때만 lazy 로드(portfolio-risk.js).
     if (typeof pfLoadRiskPanel === 'function') pfLoadRiskPanel();
     // 리밸런싱 카드 동일 패턴(portfolio-rebalance.js).

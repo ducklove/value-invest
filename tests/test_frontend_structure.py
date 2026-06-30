@@ -18,6 +18,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-insights.js",
     "portfolio-groups-market.js",
     "portfolio-ai.js",
+    "portfolio-reports.js",
     "portfolio-performance.js",
     "portfolio-risk.js",
     "portfolio-rebalance.js",
@@ -403,6 +404,32 @@ def test_cashflow_history_renders_before_nav_charts_finish():
     assert "renderCashflows(cfData, cachedNav || PfStore.navHistory || _navChartData);" in source
     assert source.find("void cashflowPromise.then(cfData =>") < source.find("const navData = await navPromise;")
     assert "renderCashflows(cfData, navData);" in source
+
+
+def test_performance_tab_includes_period_report_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    reports = (JS / "portfolio-reports.js").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+
+    assert 'id="pfPeriodReportWrap"' in html
+    assert 'id="pfPeriodReportType"' in html
+    assert 'id="pfPeriodReportKey"' in html
+    assert 'id="pfPeriodReportGenerateBtn"' in html
+    assert html.find('id="pfPeriodReportWrap"') < html.find('id="pfNavChart"')
+    assert "./js/portfolio-ai.js" in html
+    assert html.find("./js/portfolio-ai.js") < html.find("./js/portfolio-reports.js")
+    assert html.find("./js/portfolio-reports.js") < html.find("./js/portfolio-performance.js")
+    assert "if (typeof pfLoadPeriodReportsPanel === 'function') pfLoadPeriodReportsPanel();" in performance
+    assert "async function pfLoadPeriodReportsPanel(" in reports
+    assert "async function pfGeneratePeriodReport()" in reports
+    assert "/api/portfolio/period-reports/periods" in reports
+    assert "/api/portfolio/period-reports/generate" in reports
+    assert "schema v" in reports
+    assert "pfDownloadPeriodReportMarkdown" in reports
+    assert ".pf-period-report-card" in styles
+    assert ".pf-period-report-table" in styles
+    assert ".pf-period-note" in styles
 
 
 def test_cashflow_mutations_refresh_today_and_holdings_before_rerender():
