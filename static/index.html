@@ -450,27 +450,6 @@ function trackEvent(name, params = {}) {
         <div class="pf-deep-meta">스냅샷 기준</div>
       </div>
 
-      <div class="pf-nav-chart-wrap pf-analysis-card pf-period-report-card" id="pfPeriodReportWrap">
-        <div class="pf-nav-header pf-period-report-head">
-          <div>
-            <h3>기간 투자 보고서</h3>
-            <span class="pf-chart-note">월간·연간 포트폴리오 변동 데이터 축적</span>
-          </div>
-          <div class="pf-period-report-controls">
-            <select id="pfPeriodReportType" onchange="pfPeriodReportTypeChanged(this.value)" aria-label="보고서 유형">
-              <option value="monthly">월간</option>
-              <option value="annual">연간</option>
-            </select>
-            <select id="pfPeriodReportKey" onchange="pfPeriodReportKeyChanged(this.value)" aria-label="보고서 기간"></select>
-            <button class="pf-mini-btn" type="button" id="pfPeriodReportGenerateBtn" onclick="pfGeneratePeriodReport()">생성/갱신</button>
-          </div>
-        </div>
-        <div class="pf-period-report-status" id="pfPeriodReportStatus">성과 탭을 열면 기간 목록을 불러옵니다.</div>
-        <div id="pfPeriodReportContent" class="pf-period-report-content">
-          <div class="pf-risk-empty">저장된 기간 보고서가 여기에 표시됩니다.</div>
-        </div>
-      </div>
-
       <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary">
         <div class="pf-nav-header">
           <h3>NAV 기준가 추이</h3>
@@ -809,7 +788,6 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-insights.js" defer></script>
 <script src="./js/portfolio-groups-market.js" defer></script>
 <script src="./js/portfolio-ai.js" defer></script>
-<script src="./js/portfolio-reports.js" defer></script>
 <script src="./js/portfolio-performance.js" defer></script>
 <script src="./js/portfolio-risk.js" defer></script>
 <script src="./js/portfolio-rebalance.js" defer></script>

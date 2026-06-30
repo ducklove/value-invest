@@ -473,26 +473,6 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_ai_usage_ts ON ai_usage_events(ts DESC);
         CREATE INDEX IF NOT EXISTS idx_ai_usage_feature_ts ON ai_usage_events(feature, ts DESC);
 
-        CREATE TABLE IF NOT EXISTS portfolio_period_reports (
-            google_sub TEXT NOT NULL,
-            period_type TEXT NOT NULL,
-            period_key TEXT NOT NULL,
-            schema_version INTEGER NOT NULL,
-            start_date TEXT NOT NULL,
-            end_date TEXT NOT NULL,
-            baseline_date TEXT,
-            report_json TEXT NOT NULL,
-            report_md TEXT NOT NULL DEFAULT '',
-            source_hash TEXT NOT NULL,
-            generated_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (google_sub, period_type, period_key),
-            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_portfolio_period_reports_user_updated
-            ON portfolio_period_reports(google_sub, updated_at DESC);
-
         -- Cached daily market briefs. Public briefs use google_sub='public';
         -- authenticated rows are per user because the 관심목록/portfolio
         -- evidence bundle is user-specific.
