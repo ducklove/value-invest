@@ -589,6 +589,48 @@ async def get_stock_snapshots_by_date(google_sub: str, date: str) -> list[dict]:
     return [dict(r) for r in await cursor.fetchall()]
 
 
+async def get_stock_snapshot_rows_on_or_before(google_sub: str, date: str) -> list[dict]:
+    """Detailed per-stock snapshot rows on or before a date.
+
+    Used by period reports where the report needs a stable historical
+    allocation table, not just the stock_code -> market_value map. Current
+    holdings are used only to fill display names/groups when the historical
+    snapshot row does not already carry them.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT MAX(date) AS snap_date
+        FROM portfolio_stock_snapshots
+        WHERE google_sub = ? AND date <= ?
+        """,
+        (google_sub, date),
+    )
+    row = await cursor.fetchone()
+    snap_date = row["snap_date"] if row else None
+    if not snap_date:
+        return []
+    cursor = await db.execute(
+        """
+        SELECT
+            ps.date,
+            ps.stock_code,
+            COALESCE(up.stock_name, ps.stock_code) AS stock_name,
+            COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
+            ps.market_value
+        FROM portfolio_stock_snapshots ps
+        LEFT JOIN user_portfolio up
+          ON up.google_sub = ps.google_sub
+         AND up.stock_code = ps.stock_code
+        WHERE ps.google_sub = ?
+          AND ps.date = ?
+        ORDER BY ps.market_value DESC
+        """,
+        (google_sub, snap_date),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
 async def get_stock_snapshots_before_date(google_sub: str, date: str) -> list[dict]:
     """Get per-stock snapshots strictly before a date (latest available)."""
     db = await get_db()
