@@ -1,9 +1,9 @@
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
 import pytest
 
 import snapshot_nav
-
 
 ROOT = Path(__file__).resolve().parents[1]
 

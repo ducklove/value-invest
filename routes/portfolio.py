@@ -12,38 +12,56 @@ from fastapi.responses import StreamingResponse
 
 import asset_insights
 import cache
+from deps import get_current_user
 from repositories import benchmark_daily as benchmark_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
-from deps import get_current_user
 from services import stock_quotes
-from services.portfolio import ai_analysis
-from services.portfolio import foreign
-from services.portfolio import fx
-from services.portfolio import insights
-from services.portfolio import quote_service
-from services.portfolio.identifiers import (
-    SPECIAL_ASSETS as _SPECIAL_ASSETS,
-    common_stock_code as _common_stock_code,
-    is_cash_asset as _is_cash_asset,
-    is_korean_stock as _is_korean_stock,
-    is_preferred_stock as _is_preferred_stock,
-    is_special_asset as _is_special_asset,
-    normalize_portfolio_code as _normalize_portfolio_code,
+from services.portfolio import (
+    ai_analysis,
+    benchmarks,
+    dividends,
+    foreign,
+    fx,
+    insights,
+    names,
+    quote_service,
+    target_resolver,
 )
-from services.portfolio import target_resolver
-from services.portfolio.targets import parse_target_input as _parse_target_input
-from services.portfolio.target_metrics import supplement_target_metrics as _supplement_target_metrics
-from services.portfolio import benchmarks
 from services.portfolio.benchmarks import (
     BENCHMARK_ENDPOINT_ITEM_TIMEOUT as _BENCHMARK_ENDPOINT_ITEM_TIMEOUT,
 )
-from services.portfolio import dividends
-from services.portfolio import names
+from services.portfolio.identifiers import (
+    SPECIAL_ASSETS as _SPECIAL_ASSETS,
+)
+from services.portfolio.identifiers import (
+    common_stock_code as _common_stock_code,
+)
+from services.portfolio.identifiers import (
+    is_cash_asset as _is_cash_asset,
+)
+from services.portfolio.identifiers import (
+    is_korean_stock as _is_korean_stock,
+)
+from services.portfolio.identifiers import (
+    is_preferred_stock as _is_preferred_stock,
+)
+from services.portfolio.identifiers import (
+    is_special_asset as _is_special_asset,
+)
+from services.portfolio.identifiers import (
+    normalize_portfolio_code as _normalize_portfolio_code,
+)
+from services.portfolio.target_metrics import supplement_target_metrics as _supplement_target_metrics
+from services.portfolio.targets import parse_target_input as _parse_target_input
 from services.portfolio.time_windows import (
     intraday_axis_window as _intraday_axis_window,
+)
+from services.portfolio.time_windows import (
     portfolio_today_baseline_date as _portfolio_today_baseline_date,
+)
+from services.portfolio.time_windows import (
     settlement_marker_seconds as _settlement_marker_seconds,
 )
 

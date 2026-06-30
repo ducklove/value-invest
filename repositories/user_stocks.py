@@ -5,11 +5,10 @@ Extracted verbatim from cache.py; re-exported as ``cache.<fn>``.
 
 from __future__ import annotations
 
-from datetime import datetime
 import json
+from datetime import datetime
 
 from repositories.db import get_db
-
 
 USER_RECENT_MAX = 20
 

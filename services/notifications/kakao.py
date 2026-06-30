@@ -26,7 +26,6 @@ import httpx
 
 from repositories import notifications as notifications_repo
 
-
 logger = logging.getLogger(__name__)
 
 AUTH_BASE = "https://kauth.kakao.com"

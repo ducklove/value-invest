@@ -11,7 +11,6 @@ import pytest
 
 import market_indicators as mi
 
-
 SUMMARY_UP = {
     "symbol": "A01609",
     "name": "F 202609",

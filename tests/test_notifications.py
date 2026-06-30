@@ -16,13 +16,13 @@ from datetime import date
 from unittest.mock import AsyncMock, patch
 
 import httpx
+from _harness import TempDbMixin
 
 import cache
-from _harness import TempDbMixin
-from repositories import notifications as notifications_repo
 import economic_calendar
 from core.app_factory import create_app
-from core.config import AppSettings, PROJECT_ROOT
+from core.config import PROJECT_ROOT, AppSettings
+from repositories import notifications as notifications_repo
 from routes import notifications as notif_route
 from services.notifications import channels, engine, kakao, telegram
 

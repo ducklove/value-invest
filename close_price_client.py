@@ -10,7 +10,6 @@ import httpx
 
 from core.errors import ExternalServiceError
 
-
 logger = logging.getLogger(__name__)
 
 BASE_URL = os.getenv("CLOSE_PRICE_API_BASE_URL", "http://192.168.68.84:8400").rstrip("/")

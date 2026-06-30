@@ -6,16 +6,15 @@ import time
 from datetime import datetime
 
 import cache
-from repositories import financial as financial_repo
 import dart_client
 import stock_price
+from repositories import financial as financial_repo
 from services.portfolio.identifiers import (
     common_stock_code,
     is_korean_stock,
     is_preferred_stock,
     normalize_portfolio_code,
 )
-
 
 logger = logging.getLogger(__name__)
 

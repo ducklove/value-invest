@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import cache
+from deps import get_current_user
 from repositories import user_settings as user_settings_repo
 from repositories import user_stocks as user_stocks_repo
-from deps import get_current_user
 from services import stock_quotes
 
 router = APIRouter()

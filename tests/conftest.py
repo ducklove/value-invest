@@ -8,7 +8,6 @@ import os
 import tempfile
 
 import pytest
-
 from _harness import close_temp_db, open_temp_db
 
 # 테스트는 외부 엔드포인트에 닿지 않는다. 운영 기본값(KIS 프록시,

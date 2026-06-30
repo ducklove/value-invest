@@ -10,7 +10,6 @@ from typing import Any
 from repositories import ai_usage as ai_usage_repo
 from repositories import app_settings as app_settings_repo
 
-
 OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
 DEFAULT_PORTFOLIO_AI_MODEL = "~google/gemini-flash-latest"
 DEFAULT_WIKI_QA_MODEL = "moonshotai/kimi-k2.6"

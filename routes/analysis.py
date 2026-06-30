@@ -6,13 +6,8 @@ from fastapi.responses import StreamingResponse
 
 import analyzer
 import cache
-from repositories import analysis as analysis_repo
-from repositories import benchmark_daily as benchmark_repo
-from repositories import financial as financial_repo
-from repositories import user_stocks as user_stocks_repo
 import dart_client
 import stock_price
-from services import stock_quotes
 from deps import (
     ANALYSIS_SEMAPHORE,
     analysis_snapshot_is_stale,
@@ -21,6 +16,11 @@ from deps import (
     get_current_user,
     sse_event,
 )
+from repositories import analysis as analysis_repo
+from repositories import benchmark_daily as benchmark_repo
+from repositories import financial as financial_repo
+from repositories import user_stocks as user_stocks_repo
+from services import stock_quotes
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -295,6 +295,7 @@ async def get_stock_beta(stock_code: str):
     beta=null (UI 는 'N/A' 표기).
     """
     from datetime import date, timedelta
+
     import benchmark_history
 
     # 베타는 1년 일봉 회귀라 일중 변동 의미가 없어 월 1회만 갱신한다. 캐시 hit 시

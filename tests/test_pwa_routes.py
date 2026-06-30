@@ -7,7 +7,7 @@
 import unittest
 
 from core.app_factory import create_app
-from core.config import AppSettings, PROJECT_ROOT
+from core.config import PROJECT_ROOT, AppSettings
 
 
 def _settings() -> AppSettings:

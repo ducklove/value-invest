@@ -1,5 +1,5 @@
-import unittest
 import time
+import unittest
 from unittest.mock import patch
 
 import market_indicators

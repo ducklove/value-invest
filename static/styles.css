@@ -4777,3 +4777,47 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 /* 헤더 높이를 참조하는 포트폴리오 간편모드의 sticky 탭바 오프셋을
    변수와 동기화 (아래 pf-tab-bar/landscape 규칙에서 사용). */
 body.pf-mobile-simple .pf-tab-bar { top: var(--m-header-h, 42px); }
+
+/* ── 접근성: 모션 최소화 (ST-05) ─────────────────────────────────────
+   OS 가 "동작 줄이기(prefers-reduced-motion: reduce)" 를 켜면, 전정계 질환
+   사용자에게 불편을 주는 무한 스크롤·펄스·회전·플래시 애니메이션을 끈다.
+   - 시황 테이프 무한 스크롤(marketTapeScroll): 정지 — 트랙이 첫 화면에
+     보이는 종목들로 고정되고, 새로고침 버튼으로 갱신.
+   - 차트 펄스(chartDotPulse): 점이 깜빡이지 않고 고정.
+   - 스피너(spin): 360도 회전 대신 정지 표시.
+   - fadeIn/flash-update: 즉시 최종 상태로.
+   - transition 은 매우 짧게(거의 즉시) 유지해 시각적 피드백을 완전히
+     없애지 않고 부드럽게만 줄인다.
+   출처: WCAG 2.3.3 Animation from Interactions. 토글된 수동 테마에는
+   영향을 주지 않는다(OS 설정 기반). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* 무한 스크롤은 iteration-count:1 로도 멈추지만, 명시적으로 정지시켜
+     트랙이 빈 영역으로 사라지지 않게 한다. */
+  .market-tape-track { animation: none !important; }
+  /* 펄스 점은 깜빡임 없이 고정 채색. */
+  .chart-dot-pulse, [style*="chartDotPulse"] { animation: none !important; }
+}
+
+/* ── 접근성: 차트 대체 표 (ST-05) ─────────────────────────────────────
+   describeChart() 가 echarts canvas 옆에 넣는 숨김 데이터 표. 시각적으로는
+   보이지 않지만 스크린 리더는 읽는다(clip 패턴 — display:none 은 일부
+   보조기기가 무시하므로 클리핑으로 숨긴다). */
+.sr-only-chart-table {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

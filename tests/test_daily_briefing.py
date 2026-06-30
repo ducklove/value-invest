@@ -16,17 +16,17 @@ from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-from _harness import TempDbMixin
 from repositories import app_settings as app_settings_repo
+from repositories import dart_review as dart_review_repo
 from repositories import snapshots as snapshots_repo
 from repositories import system_events as system_events_repo
 from repositories import user_settings as user_settings_repo
 from repositories import wiki as wiki_repo
-from repositories import dart_review as dart_review_repo
 from routes import internal
 from services import daily_briefing
 
@@ -735,7 +735,7 @@ class BriefingRouteTests(DailyBriefingHarness):
         await super().asyncSetUp()
         await self._seed_user("u1")
         from core.app_factory import create_app
-        from core.config import AppSettings, PROJECT_ROOT
+        from core.config import PROJECT_ROOT, AppSettings
         from routes import notifications as notif_route
 
         self.user = {"google_sub": "u1", "email": "e@x", "name": "U"}

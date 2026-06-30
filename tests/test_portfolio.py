@@ -1,17 +1,15 @@
 import time
 from unittest.mock import AsyncMock, patch
 
-import cache
 from _harness import TempDbMixin, seed_corp_codes, seed_user
+
+import cache
 from repositories import financial as financial_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from routes import portfolio as portfolio_route
-from services.portfolio import dividends
-from services.portfolio import foreign
-from services.portfolio import fx
+from services.portfolio import dividends, foreign, fx, target_resolver
 from services.portfolio import target_metrics as target_metrics_service
-from services.portfolio import target_resolver
 
 
 class PortfolioTests(TempDbMixin):

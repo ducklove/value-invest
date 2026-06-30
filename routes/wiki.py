@@ -17,10 +17,10 @@ from fastapi.responses import StreamingResponse
 
 import ai_config
 import cache
-from repositories import dart_review as dart_review_repo
-from repositories import wiki as wiki_repo
 from cache_layer import MemoryTTLCache
 from deps import get_current_user
+from repositories import dart_review as dart_review_repo
+from repositories import wiki as wiki_repo
 from services import ai_client
 from services.portfolio import runtime_quotes as portfolio_quotes
 
@@ -320,8 +320,9 @@ async def _fetch_recent_news(stock_code: str, limit: int = 6) -> list[dict]:
     if cached is not None:
         return cached.value[:limit]
     try:
-        import httpx
         import re as _re
+
+        import httpx
         url = f"https://finance.naver.com/item/news_news.naver?code={stock_code}&page=1"
         async with httpx.AsyncClient(timeout=8.0, headers={
             "User-Agent": "Mozilla/5.0",

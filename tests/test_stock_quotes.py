@@ -7,7 +7,6 @@ import pytest
 
 from services import stock_quotes
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -5,14 +5,13 @@ import zipfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin
 from fastapi import HTTPException
 
 import cache
-
-from _harness import TempDbMixin
+import dart_report_review
 from repositories import dart_review as dart_review_repo
 from repositories import wiki as wiki_repo
-import dart_report_review
 from routes import dart_review as dart_review_route
 
 

@@ -6,7 +6,6 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
-
 NAVER_RESEARCH_LIST = "https://finance.naver.com/research/company_list.naver"
 NAVER_RESEARCH_READ = "https://finance.naver.com/research/company_read.naver"
 

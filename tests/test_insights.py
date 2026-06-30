@@ -1,11 +1,11 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-from _harness import TempDbMixin
 from repositories import insight_posts as insight_posts_repo
 from routes import insights
 

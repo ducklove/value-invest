@@ -19,11 +19,10 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 
+from deps import get_current_user
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
-from deps import get_current_user
 from services.notifications import channels, engine, kakao, telegram
-
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 logger = logging.getLogger(__name__)

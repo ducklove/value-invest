@@ -1,5 +1,6 @@
 import unittest
-from analyzer import analyze, _safe_div, _to_eok_won
+
+from analyzer import _safe_div, _to_eok_won, analyze
 
 
 class SafeDivTests(unittest.TestCase):

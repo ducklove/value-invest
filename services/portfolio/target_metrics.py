@@ -7,7 +7,6 @@ from services.portfolio.identifiers import common_stock_code, is_korean_stock, i
 from services.portfolio.time_windows import today_kst_date
 from services.portfolio.valuation import fetch_valuation_basis_map
 
-
 logger = logging.getLogger(__name__)
 
 _TARGET_FINANCIAL_VARS_RE = re.compile(r"\b(BPS|EPS)\b")

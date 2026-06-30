@@ -18,7 +18,6 @@ from urllib.request import Request, urlopen
 
 import integrations
 
-
 PROJECT_SPECS: dict[str, dict[str, Any]] = {
     "holdingValue": {
         "label": "지주사 목록",

@@ -4,8 +4,7 @@ from unittest.mock import AsyncMock, patch
 import close_price_client
 import kis_proxy_client
 from routes import portfolio as pf
-from services.portfolio import foreign
-from services.portfolio import insights
+from services.portfolio import foreign, insights
 
 
 class PortfolioAssetInsightTests(unittest.IsolatedAsyncioTestCase):

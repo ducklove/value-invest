@@ -19,14 +19,13 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 import ai_config
 import cache  # corp-code 헬퍼(get_corp_code/get_corp_name)는 아직 cache 소유
+import dart_client
+import observability
+from cache_layer import MemoryTTLCache
 from repositories import dart_review as dart_review_repo
 from repositories import financial as financial_repo
 from repositories import wiki as wiki_repo
-from cache_layer import MemoryTTLCache
-import dart_client
-import observability
 from services import ai_client
-
 
 logger = logging.getLogger(__name__)
 

@@ -20,6 +20,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,10 @@ _HTTP_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 async def _get_html(url: str) -> str:
     """Fetch a Naver finance page and decode EUC-KR. Bounded by _SEM/timeout."""
     async with _SEM:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            resp.raise_for_status()
+        # 공유 "naver" 클라이언트(풀 재사용)에서 per-request timeout 적용.
+        client = await get_http_client("naver")
+        resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=_HTTP_TIMEOUT)
+        resp.raise_for_status()
     return resp.content.decode("euc-kr", errors="replace")
 
 

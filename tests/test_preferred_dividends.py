@@ -15,11 +15,11 @@ they succeeded).
 """
 import unittest
 
+from _harness import TempDbMixin
+
 import cache
 import preferred_dividends as pd_mod
-from _harness import TempDbMixin
 from repositories import portfolio as portfolio_repo
-
 
 # Minimal CSV that mirrors the real sheet's layout. Column count matches
 # the header so the parser's slicing logic is exercised. AI column
@@ -98,7 +98,8 @@ class ParseSheetCsvTests(unittest.TestCase):
     def test_header_missing_year_column_returns_empty(self):
         """AI (우선주 연도) 컬럼 자체가 없으면 안전하게 빈 리스트."""
         broken_header = _HEADER_COLS[:34]  # drop all 우 year columns
-        import csv as _csv, io as _io
+        import csv as _csv
+        import io as _io
         buf = _io.StringIO()
         w = _csv.writer(buf)
         w.writerow(broken_header)

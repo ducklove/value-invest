@@ -12,9 +12,9 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from repositories import insight_posts as insight_posts_repo
 import observability
 from deps import get_current_user
+from repositories import insight_posts as insight_posts_repo
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 

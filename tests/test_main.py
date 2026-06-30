@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import deps
-from routes import cache_mgmt, auth, internal, portfolio, admin
+from routes import admin, auth, cache_mgmt, internal, portfolio
 
 
 def _request(path: str = "/") -> Request:

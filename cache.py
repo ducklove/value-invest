@@ -1,6 +1,7 @@
-import aiosqlite
 import json
 from datetime import datetime
+
+import aiosqlite
 
 from cache_layer import (
     CACHE_NS_LATEST_REPORT,
@@ -752,11 +753,12 @@ async def init_db():
 
 
 async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, definition: str):
-    cursor = await db.execute(f"PRAGMA table_info({table})")
-    rows = await cursor.fetchall()
-    columns = {row["name"] for row in rows}
-    if column not in columns:
-        await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    # 구현은 repositories.schema.ensure_column 으로 이관(ST-01). 동작은 동일하되
+    # 식별자 allowlist 검증이 추가됐다 — 호출부는 모두 하드코딩 상수이므로 정상
+    # 경로에선 영향 없고, 외부 값이 섞여 들어오는 실수를 방어한다.
+    from repositories.schema import ensure_column
+
+    await ensure_column(db, table, column, definition)
 
 
 async def _backfill_legacy_cache_values(db: aiosqlite.Connection) -> None:

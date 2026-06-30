@@ -459,8 +459,8 @@ async def inspect_stock(
     import asyncio
 
     import cache
-    from repositories import financial as financial_repo
     import stock_price
+    from repositories import financial as financial_repo
 
     corp_name = await cache.get_corp_name(stock_code) or stock_code
     corp_code = await cache.get_corp_code(stock_code)

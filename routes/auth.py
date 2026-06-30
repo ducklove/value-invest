@@ -6,7 +6,6 @@ from fastapi import APIRouter, Body, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 import auth_service
-from repositories import users as users_repo
 from deps import (
     SESSION_COOKIE_NAME,
     TRUSTED_RETURN_ORIGINS,
@@ -15,6 +14,7 @@ from deps import (
     serialize_user,
     set_session_cookie,
 )
+from repositories import users as users_repo
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

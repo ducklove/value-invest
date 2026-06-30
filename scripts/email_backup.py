@@ -9,9 +9,9 @@ Environment variables required:
 Exits non-zero on any failure so systemd OnFailure= can alert.
 """
 import os
-import sys
 import smtplib
 import ssl
+import sys
 from email.message import EmailMessage
 from pathlib import Path
 

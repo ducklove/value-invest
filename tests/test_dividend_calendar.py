@@ -11,11 +11,11 @@ import unittest
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin, seed_user
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-from _harness import TempDbMixin, seed_user
 from routes import dividend_calendar as dividend_calendar_route
 from services import dividend_calendar
 

@@ -3,3 +3,6 @@ pytest
 pytest-asyncio
 pytest-cov
 ruff>=0.8,<1.0
+# ST-07: gradual 타입 검사. 배포 게이트가 아님 — 정보성 도구.
+# pyproject.toml [tool.pyright] 가 basic 모드로 core/·repositories/ 만 검사.
+pyright>=1.1,<2.0

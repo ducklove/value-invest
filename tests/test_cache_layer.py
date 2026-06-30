@@ -1,8 +1,9 @@
 import time
 import unittest
 
-import cache
 from _harness import TempDbMixin
+
+import cache
 from cache_layer import MemoryTTLCache
 
 

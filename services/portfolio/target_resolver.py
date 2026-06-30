@@ -17,15 +17,14 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from repositories import portfolio as portfolio_repo
 import integrations
+from repositories import portfolio as portfolio_repo
 from services import stock_quotes
 from services.portfolio import runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_korean_stock, is_preferred_stock
 from services.portfolio.targets import evaluate_target_formula, extract_target_variables
 from services.portfolio.time_windows import today_kst_date
 from services.portfolio.valuation import fetch_valuation_basis
-
 
 logger = logging.getLogger(__name__)
 

@@ -13,15 +13,15 @@ from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
+import ai_config
 import cache
+import linked_project_admin
+import observability
+from deps import TRUSTED_RETURN_ORIGINS, get_current_user
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from repositories import system_events as system_events_repo
 from repositories import users as users_repo
-import ai_config
-import linked_project_admin
-import observability
-from deps import TRUSTED_RETURN_ORIGINS, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])

@@ -32,10 +32,10 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 import httpx
 
 import ai_config
+import market_indicators
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from repositories import wiki as wiki_repo
-import market_indicators
 from services import ai_client
 from services.portfolio import quote_service
 

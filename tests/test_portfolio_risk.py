@@ -9,11 +9,11 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin, seed_user
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-from _harness import TempDbMixin, seed_user
 from repositories import benchmark_daily as benchmark_daily_repo
 from routes import portfolio_risk as portfolio_risk_route
 from services.portfolio import risk

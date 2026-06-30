@@ -1,16 +1,14 @@
 import asyncio
+import time
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
-import time
 
 import pytest
 
 from repositories import portfolio as portfolio_repo
 from routes import portfolio as portfolio_route
 from services import stock_quotes
-from services.portfolio import foreign
-from services.portfolio import quote_service
-from services.portfolio import quotes
+from services.portfolio import foreign, quote_service, quotes
 
 
 def test_quote_from_ws_normalizes_realtime_payload():

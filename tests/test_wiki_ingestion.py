@@ -7,11 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import cache
 from _harness import TempDbMixin
+
+import cache
+import wiki_ingestion
 from repositories import system_events as system_events_repo
 from repositories import wiki as wiki_repo
-import wiki_ingestion
 
 
 class PerStockLimitEnvTests(unittest.TestCase):

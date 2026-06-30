@@ -9,7 +9,6 @@ import logging
 from core.app_factory import create_app
 from core.config import get_settings, load_environment
 
-
 logging.basicConfig(level=logging.INFO)
 
 load_environment()

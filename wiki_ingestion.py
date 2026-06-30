@@ -31,11 +31,11 @@ import httpx
 
 import ai_config
 import cache  # corp-code/리포트목록 캐시(get_corp_name/get_report_list)는 아직 cache 소유
-from repositories import wiki as wiki_repo
 import observability
 import report_client
-from services import ai_client
+from repositories import wiki as wiki_repo
 from routes.reports import _is_allowed_report_pdf_url
+from services import ai_client
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +106,7 @@ def parse_pdf_bytes(data: bytes) -> str:
     """Extract text from PDF bytes. Returns a best-effort string; empty
     string for image-only PDFs (pypdf doesn't OCR)."""
     import io
+
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(data))
     chunks: list[str] = []

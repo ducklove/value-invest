@@ -3,10 +3,11 @@ and doesn't explode when wiki is empty."""
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
+
+from _harness import TempDbMixin
 from starlette.requests import Request
 
 import cache
-from _harness import TempDbMixin
 from repositories import wiki as wiki_repo
 from routes import portfolio as pf
 

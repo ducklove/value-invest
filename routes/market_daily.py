@@ -5,10 +5,9 @@ from datetime import datetime
 
 from fastapi import APIRouter, Query, Request
 
-from repositories import market_brief as market_brief_repo
 import market_daily
 from deps import get_current_user
-
+from repositories import market_brief as market_brief_repo
 
 router = APIRouter()
 

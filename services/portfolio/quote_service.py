@@ -19,14 +19,14 @@ from __future__ import annotations
 from typing import Any
 
 from services import stock_quotes
-from services.portfolio import currencies
-from services.portfolio import foreign
-from services.portfolio import fx
-from services.portfolio import runtime_quotes
-from services.portfolio import special_assets
+from services.portfolio import currencies, foreign, fx, runtime_quotes, special_assets
 from services.portfolio.identifiers import (
     CASH_FX_CODE as _CASH_FX_CODE,
+)
+from services.portfolio.identifiers import (
     is_cash_asset as _is_cash_asset,
+)
+from services.portfolio.identifiers import (
     is_korean_stock as _is_korean_stock,
 )
 

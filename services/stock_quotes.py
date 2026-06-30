@@ -30,11 +30,10 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 
-from cache_layer import MemoryTTLCache
 import kis_ws_manager
 import stock_price
+from cache_layer import MemoryTTLCache
 from services.portfolio.quotes import should_accept_quote_snapshot
-
 
 STOCK_CACHE_TTL_SECONDS = 60
 DEAD_STOCK_TTL_SECONDS = 300

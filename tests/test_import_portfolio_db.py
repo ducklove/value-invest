@@ -3,7 +3,6 @@ import importlib.util
 import sqlite3
 from pathlib import Path
 
-
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "import_portfolio_db.py"
 spec = importlib.util.spec_from_file_location("import_portfolio_db", SCRIPT_PATH)
 import_portfolio_db = importlib.util.module_from_spec(spec)

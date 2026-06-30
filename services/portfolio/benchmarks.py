@@ -8,10 +8,7 @@ import httpx
 
 import market_indicators
 from cache_layer import MemoryTTLCache
-
-from services.portfolio import foreign
-from services.portfolio import fx
-from services.portfolio import quote_service
+from services.portfolio import foreign, fx, quote_service
 from services.portfolio.identifiers import (
     CASH_FX_CODE,
     SPECIAL_ASSETS,

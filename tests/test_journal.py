@@ -13,11 +13,11 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import httpx
+from _harness import TempDbMixin
 
 import cache
-from _harness import TempDbMixin
 from core.app_factory import create_app
-from core.config import AppSettings, PROJECT_ROOT
+from core.config import PROJECT_ROOT, AppSettings
 from repositories import journal as journal_repo
 from routes import journal as journal_route
 from services import stock_quotes

@@ -16,7 +16,6 @@ import os
 
 import httpx
 
-
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.telegram.org"

@@ -6,7 +6,6 @@ from typing import Any
 
 from cache_layer import MemoryTTLCache
 
-
 QUOTE_CACHE_TTL = 60
 
 # 같은 거래일 안에서 낮은 랭크 소스(naver/rest)가 높은 랭크(ws) 시세를 덮지

@@ -5,7 +5,6 @@ from fastapi import APIRouter, Body, HTTPException, Request
 import dart_report_review
 from deps import get_current_user
 
-
 logger = logging.getLogger(__name__)
 router = APIRouter()
 

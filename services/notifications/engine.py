@@ -34,12 +34,10 @@ from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from services.krx_limits import krx_lower_limit, krx_upper_limit
 from services.notifications import channels
-from services.portfolio import foreign
-from services.portfolio import runtime_quotes
+from services.portfolio import foreign, runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_preferred_stock
 from services.portfolio.target_resolver import resolve_formula_target
 from services.portfolio.time_windows import portfolio_today_baseline_date, settlement_marker_seconds
-
 
 logger = logging.getLogger(__name__)
 _evaluate_all_lock = asyncio.Lock()
@@ -914,9 +912,10 @@ async def evaluate_calendar_all() -> dict:
     by zeroin ``index_id``, then notify each user whose subscribed event now has
     an ``actual`` value. Edge-triggered via the ``fired`` flag (one send each).
     """
-    import economic_calendar
     from collections import defaultdict
     from datetime import date, timedelta
+
+    import economic_calendar
 
     pending = await notifications_repo.list_pending_calendar_subscriptions()
     if not pending:

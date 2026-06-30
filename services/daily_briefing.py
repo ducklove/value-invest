@@ -38,8 +38,7 @@ from repositories import user_settings as user_settings_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
 from services.notifications import channels
-from services.portfolio import ai_analysis
-from services.portfolio import time_windows
+from services.portfolio import ai_analysis, time_windows
 
 logger = logging.getLogger(__name__)
 

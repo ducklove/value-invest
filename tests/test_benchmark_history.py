@@ -12,8 +12,9 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
 
-import benchmark_history
 from _harness import TempDbMixin
+
+import benchmark_history
 from repositories import benchmark_daily as benchmark_repo
 from routes import portfolio as pf
 

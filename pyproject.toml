@@ -7,9 +7,32 @@ extend-exclude = ["static", "docs"]
 # 시작은 실제 결함 위주(F: pyflakes, E9: 런타임 오류 직결 규칙)로 좁게 간다.
 # 배포 게이트(deploy.sh)가 이 설정을 그대로 쓰므로, 규칙 확대는 위반 0을
 # 확인한 커밋에서만 한다.
-select = ["F", "E9"]
+#
+# I (isort)는 2026-06-30 추가 — 122건을 --fix 로 정렬한 뒤 위반 0 확인.
+# UP/B 는 위반 수가 많아(B008 의도적 false positive 다수) 별도 검토 후 추가.
+select = ["F", "E9", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 "core/__init__.py" = ["F401"]
 "repositories/__init__.py" = ["F401"]
 "services/__init__.py" = ["F401"]
+
+[tool.pyright]
+# Gradual 타입 검사 도입 (ST-07). basic 모드부터 시작해 게이트가 아닌
+# 정보성 도구로 운영 — repositories/·core/ 를 우선 대상으로 잡고, 위반을
+# 점진적으로 줄인 뒤 strict 게이트로 전환한다.
+# pyright 가 설치되지 않은 환경에서는 이 설정이 무시된다(게이트 아님).
+include = ["core", "repositories"]
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    "static",
+    "docs",
+]
+typeCheckingMode = "basic"
+reportMissingImports = "warning"
+reportMissingTypeStubs = "none"
+# basic 단계에서는 너무 시끄러운 규칙을 경고로 낮춰 정보성으로만 활용.
+reportGeneralTypeIssues = "warning"
+reportOptionalMemberAccess = "warning"
+reportArgumentType = "warning"

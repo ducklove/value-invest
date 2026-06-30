@@ -20,7 +20,8 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, time as dtime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+from datetime import time as dtime
 from typing import Any
 
 import websockets
@@ -183,7 +184,7 @@ def mark_nxt_unsupported(code: str) -> None:
 def _flush_stale_cache() -> None:
     """Clear the entire WS quote cache when the KST date rolls over."""
     global _quote_cache_date
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     kst = timezone(timedelta(hours=9))
     today = datetime.now(kst).strftime("%Y%m%d")
     if _quote_cache_date and _quote_cache_date != today:

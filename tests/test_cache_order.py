@@ -1,5 +1,6 @@
-import cache
 from _harness import TempDbMixin, seed_user
+
+import cache
 from repositories import user_stocks as user_stocks_repo
 
 

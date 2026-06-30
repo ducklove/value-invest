@@ -9,16 +9,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
 import foreign_dividends
-from _harness import TempDbMixin
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from routes import admin as admin_route
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,7 +52,8 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
 
     def _patch_yf(self, info: dict):
         """yf.Ticker(...).info 가 주어진 dict 를 반환하도록 패치하는 헬퍼."""
-        from unittest.mock import MagicMock, patch as _patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
         fake_ticker = MagicMock()
         fake_ticker.info = info
         fake_yf = MagicMock()
@@ -122,8 +122,10 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
         """`.O`, `.K` 같은 Reuters 접미사는 yfinance 에서 404. 파이프라인이
         접미사 제거 후 재시도해서 DAX.O → DAX 로 resolve 해야 함 (회귀
         가드)."""
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
         import foreign_dividends as fd
-        from unittest.mock import MagicMock, patch as _patch
 
         def make_ticker_factory():
             call_log = []
@@ -159,9 +161,12 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
     def test_dividends_series_fallback_when_info_fields_missing(self):
         """EUN2.DE 처럼 info 는 정상이지만 배당 관련 필드 전부 None 인
         경우 ticker.dividends Series 최근 365일 합을 사용."""
-        import foreign_dividends as fd
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
         import pandas as pd
-        from unittest.mock import MagicMock, patch as _patch
+
+        import foreign_dividends as fd
 
         # 최근 1년 내 4회 지급 (총 1.4874)
         now = pd.Timestamp.now(tz="UTC")
@@ -199,8 +204,10 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
     def test_invalid_ticker_returns_none(self):
         """접미사 strip 후에도 여전히 빈 info 면 None. auto-refresh 가
         이 ticker 를 DB 에 0 으로 쓰는 것 대신 failures 리스트에 넣음."""
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
         import foreign_dividends as fd
-        from unittest.mock import MagicMock, patch as _patch
         fake_ticker = MagicMock()
         fake_ticker.info = {}
         fake_yf = MagicMock()

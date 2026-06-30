@@ -12,15 +12,17 @@ import asyncio
 import logging
 import re
 
-import httpx
-
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 from services.portfolio import currencies
 
 logger = logging.getLogger(__name__)
 
 _FX_CACHE_TTL = 300  # 5 minutes
 _FX_DAILY_CACHE_TTL = 300
+# FX 조회는 Naver marketindex 페이지 — 공유 "naver" 클라이언트(기본 8s)에서
+# per-request 5s timeout 적용.
+_FX_HTTP_TIMEOUT = 5.0
 
 _fx_cache = MemoryTTLCache("portfolio.fx_rates", None)
 _fx_daily_cache = MemoryTTLCache("portfolio.fx_daily", _FX_DAILY_CACHE_TTL)
@@ -33,21 +35,22 @@ async def get_fx_rates() -> dict[str, float]:
         return cached
     try:
         rates: dict[str, float] = {}
-        async with httpx.AsyncClient(timeout=5) as c:
-            for page in (1, 2):
-                r = await c.get(
-                    f"https://finance.naver.com/marketindex/exchangeList.naver?page={page}",
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                rows = re.findall(
-                    r'marketindexCd=(\w+)"[^>]*>[^<]*</a>.*?<td class="sale">([^<]+)',
-                    r.text, re.DOTALL,
-                )
-                for code, val in rows:
-                    try:
-                        rates[code] = float(val.strip().replace(",", ""))
-                    except ValueError:
-                        pass
+        client = await get_http_client("naver")
+        for page in (1, 2):
+            r = await client.get(
+                f"https://finance.naver.com/marketindex/exchangeList.naver?page={page}",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=_FX_HTTP_TIMEOUT,
+            )
+            rows = re.findall(
+                r'marketindexCd=(\w+)"[^>]*>[^<]*</a>.*?<td class="sale">([^<]+)',
+                r.text, re.DOTALL,
+            )
+            for code, val in rows:
+                try:
+                    rates[code] = float(val.strip().replace(",", ""))
+                except ValueError:
+                    pass
         if rates:
             _fx_cache.set("rates", rates, ttl_seconds=_FX_CACHE_TTL)
     except Exception:
@@ -65,30 +68,31 @@ async def fetch_fx_daily_change(fx_code: str) -> dict:
     if cached is not None and cached.fresh:
         return dict(cached.value)
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(
-                f"https://finance.naver.com/marketindex/exchangeDailyQuote.naver?marketindexCd={fx_code}",
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            html = resp.content.decode("euc-kr", errors="ignore")
-            rows = re.findall(
-                r'<tr class="(?:up|down)">\s*<td class="date">[^<]+</td>\s*<td class="num">([\d,\.]+)</td>',
-                html,
-            )
-            if len(rows) >= 2:
-                price = float(rows[0].replace(",", ""))
-                prev = float(rows[1].replace(",", ""))
-                change = price - prev
-                change_pct = round(change / prev * 100, 2) if prev else 0.0
-                result = {"price": price, "change": change, "change_pct": change_pct}
-                _fx_daily_cache.set(fx_code, result)
-                return result
-            if rows:
-                # Only one row available (first listing day?) — no delta.
-                price = float(rows[0].replace(",", ""))
-                result = {"price": price, "change": 0.0, "change_pct": 0.0}
-                _fx_daily_cache.set(fx_code, result)
-                return result
+        client = await get_http_client("naver")
+        resp = await client.get(
+            f"https://finance.naver.com/marketindex/exchangeDailyQuote.naver?marketindexCd={fx_code}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=_FX_HTTP_TIMEOUT,
+        )
+        html = resp.content.decode("euc-kr", errors="ignore")
+        rows = re.findall(
+            r'<tr class="(?:up|down)">\s*<td class="date">[^<]+</td>\s*<td class="num">([\d,\.]+)</td>',
+            html,
+        )
+        if len(rows) >= 2:
+            price = float(rows[0].replace(",", ""))
+            prev = float(rows[1].replace(",", ""))
+            change = price - prev
+            change_pct = round(change / prev * 100, 2) if prev else 0.0
+            result = {"price": price, "change": change, "change_pct": change_pct}
+            _fx_daily_cache.set(fx_code, result)
+            return result
+        if rows:
+            # Only one row available (first listing day?) — no delta.
+            price = float(rows[0].replace(",", ""))
+            result = {"price": price, "change": 0.0, "change_pct": 0.0}
+            _fx_daily_cache.set(fx_code, result)
+            return result
     except Exception as e:
         logger.warning("FX daily fetch failed for %s: %s", fx_code, e)
     if cached is not None:

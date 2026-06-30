@@ -792,3 +792,62 @@ function updateAnalyticsAuthState() {
     login_state: currentUser ? 'logged_in' : 'guest',
   });
 }
+
+// ── 접근성: 차트 대체 텍스트 (ST-05) ─────────────────────────────────
+// echarts 는 canvas 로 렌더링하므로 스크린 리더가 내용을 읽지 못한다.
+// describeChart() 는 차트 컨테이너에 role="img" + aria-label(요약 문구)을
+// 붙이고, 선택적으로 핵심 데이터를 숨김 표(.sr-only-chart-table)로 제공해
+// 보조기기가 수치까지 읽을 수 있게 한다. 텍스트/표는 이미 차트가 그려진
+// 컨테이너의 자식으로 들어가므로 시각적 렌더링에 영향을 주지 않는다(sr-only).
+const CHART_A11Y_TABLE_CLASS = 'sr-only-chart-table';
+
+function describeChart(container, label, options) {
+  if (!container) return;
+  // canvas 자체는 보조기기가 무시하도록 aria-hidden. 대체 텍스트는 컨테이너에.
+  const canvas = container.querySelector('canvas, svg');
+  if (canvas) canvas.setAttribute('aria-hidden', 'true');
+  container.setAttribute('role', 'img');
+  if (label) container.setAttribute('aria-label', label);
+
+  // 핵심 데이터를 숨김 표로 제공(옵션). 이미 있으면 갱신.
+  const rows = (options && options.rows) || null;
+  let table = container.querySelector('.' + CHART_A11Y_TABLE_CLASS);
+  if (!rows) {
+    if (table) table.remove();
+    return;
+  }
+  if (!table) {
+    table = document.createElement('table');
+    table.className = CHART_A11Y_TABLE_CLASS;
+    container.appendChild(table);
+  }
+  // 헤더 + 본문을 안전하게 구성(모든 값을 텍스트 노드로).
+  table.replaceChildren();
+  if (options && options.caption) {
+    const cap = document.createElement('caption');
+    cap.textContent = options.caption;
+    table.appendChild(cap);
+  }
+  if (options && options.headers && options.headers.length) {
+    const thead = document.createElement('thead');
+    const tr = document.createElement('tr');
+    for (const h of options.headers) {
+      const th = document.createElement('th');
+      th.textContent = String(h ?? '');
+      tr.appendChild(th);
+    }
+    thead.appendChild(tr);
+    table.appendChild(thead);
+  }
+  const tbody = document.createElement('tbody');
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    for (const cell of row) {
+      const td = document.createElement('td');
+      td.textContent = String(cell ?? '');
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+}

@@ -275,7 +275,7 @@ function trackEvent(name, params = {}) {
   </div><!-- /analysisView -->
 
   <div id="portfolioView" style="display:none;">
-    <div class="pf-summary" id="pfSummary"></div>
+    <div class="pf-summary" id="pfSummary" aria-live="polite" aria-label="포트폴리오 요약: 총 평가액·NAV·수익률"></div>
 
     <div class="pf-tab-bar">
       <button class="pf-tab active" data-tab="holdings" onclick="pfSwitchTab('holdings')">보유종목</button>

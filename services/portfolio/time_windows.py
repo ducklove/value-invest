@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-
 KST = ZoneInfo("Asia/Seoul")
 SETTLEMENT_HOUR = 20
 SETTLEMENT_MINUTE = 0

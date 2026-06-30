@@ -25,16 +25,23 @@ from urllib.parse import quote
 import httpx
 
 import cache
-from repositories import ticker_map as ticker_map_repo
 import kis_proxy_client
 from cache_layer import MemoryTTLCache
-from services.portfolio import currencies
-from services.portfolio import fx
+from repositories import ticker_map as ticker_map_repo
+from services.portfolio import currencies, fx
 from services.portfolio.identifiers import (
     CASH_NAMES as _CASH_NAMES,
+)
+from services.portfolio.identifiers import (
     is_korean_stock as _is_korean_stock,
+)
+from services.portfolio.identifiers import (
     is_special_asset as _is_special_asset,
+)
+from services.portfolio.identifiers import (
     normalize_portfolio_code as _normalize_portfolio_code,
+)
+from services.portfolio.identifiers import (
     static_foreign_ticker as _static_foreign_ticker,
 )
 

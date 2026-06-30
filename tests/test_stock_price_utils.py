@@ -4,15 +4,20 @@ from unittest.mock import patch
 
 import stock_price
 from stock_price import (
-    _safe_float, _safe_div, _get_first,
-    _group_close_by_year, _group_dividends_by_year,
-    _forward_fill_year_values, _parse_date, _parse_year,
-    _estimate_price_adjustment_factors,
     _adjust_dividends_by_price_factors,
     _build_dividend_events,
+    _estimate_price_adjustment_factors,
+    _forward_fill_year_values,
+    _get_first,
     _get_history_close_series,
+    _group_close_by_year,
+    _group_dividends_by_year,
     _naver_quote_from_block,
+    _parse_date,
     _parse_naver_bulk_entry,
+    _parse_year,
+    _safe_div,
+    _safe_float,
     pd,
 )
 
@@ -32,13 +37,13 @@ class KrxLimitTests(unittest.TestCase):
         self.assertEqual(krx_tick_size(500000), 1000)
 
     def test_clean_multiples_are_exactly_30pct(self):
-        from services.krx_limits import krx_upper_limit, krx_lower_limit
+        from services.krx_limits import krx_lower_limit, krx_upper_limit
         for base in (1000, 10000, 50000, 100000, 200000, 500000):
             self.assertEqual(krx_upper_limit(base), base * 1.3)
             self.assertEqual(krx_lower_limit(base), base * 0.7)
 
     def test_tick_rounding_band_crossing(self):
-        from services.krx_limits import krx_upper_limit, krx_lower_limit
+        from services.krx_limits import krx_lower_limit, krx_upper_limit
         # 기준가 89,600 → 상한가 116,400(=tick100 내림, +29.91%), 하한가 62,800.
         self.assertEqual(krx_upper_limit(89600), 116400)
         self.assertEqual(krx_lower_limit(89600), 62800)
@@ -46,7 +51,7 @@ class KrxLimitTests(unittest.TestCase):
         self.assertEqual(krx_upper_limit(19010), 24700)
 
     def test_none_for_invalid_base(self):
-        from services.krx_limits import krx_upper_limit, krx_lower_limit
+        from services.krx_limits import krx_lower_limit, krx_upper_limit
         self.assertIsNone(krx_upper_limit(None))
         self.assertIsNone(krx_lower_limit(0))
 

@@ -4,7 +4,6 @@ import ast
 import re
 from dataclasses import dataclass
 
-
 TARGET_VARIABLES = frozenset({"BPS", "EPS", "DPS", "보유지분", "본주가격", "매입가"})
 _NUMBER_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$")
 

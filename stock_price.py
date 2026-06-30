@@ -18,11 +18,10 @@ except ImportError:  # pragma: no cover - optional dependency
 
 import httpx
 
+import close_price_client
+import dart_client
 import kis_proxy_client
 import kis_ws_manager
-import dart_client
-import close_price_client
-
 
 logger = logging.getLogger(__name__)
 

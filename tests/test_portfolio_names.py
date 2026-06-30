@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-from services.portfolio import foreign
-from services.portfolio import names
+from services.portfolio import foreign, names
 
 
 async def test_cash_asset_uses_static_label():

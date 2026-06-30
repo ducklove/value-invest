@@ -13,7 +13,6 @@ from datetime import datetime
 from repositories import notifications as notifications_repo
 from services.notifications import kakao, telegram
 
-
 logger = logging.getLogger(__name__)
 
 

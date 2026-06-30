@@ -1,5 +1,5 @@
-import unittest
 import time
+import unittest
 from unittest.mock import AsyncMock, patch
 
 import stock_price

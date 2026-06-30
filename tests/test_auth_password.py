@@ -1,11 +1,11 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin
 from fastapi import HTTPException, Response
 from starlette.requests import Request
 
 import auth_service
-from _harness import TempDbMixin
 from repositories import users as users_repo
 from routes import auth as auth_route
 

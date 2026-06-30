@@ -4,11 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import ai_config
 from _harness import TempDbMixin
+
+import ai_config
+import linked_project_admin
 from repositories import app_settings as app_settings_repo
 from repositories import portfolio as portfolio_repo
-import linked_project_admin
 
 
 class LinkedProjectAdminTests(unittest.TestCase):

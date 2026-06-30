@@ -30,13 +30,13 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 import cache
-from repositories import portfolio as portfolio_repo
-from repositories import system_events as system_events_repo
-import repositories.db
 import observability
+import repositories.db
 from core import app_factory
 from core.app_factory import create_app
-from core.config import AppSettings, PROJECT_ROOT
+from core.config import PROJECT_ROOT, AppSettings
+from repositories import portfolio as portfolio_repo
+from repositories import system_events as system_events_repo
 from routes import portfolio as portfolio_route
 from services.portfolio import dividends
 

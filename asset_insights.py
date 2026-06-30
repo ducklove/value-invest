@@ -6,7 +6,6 @@ from typing import Any
 
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
-
 RETURN_WINDOWS = {
     "1m": 21,
     "3m": 63,

@@ -11,7 +11,6 @@ from datetime import datetime
 import auth_service
 from repositories.db import get_db
 
-
 _USER_COLUMNS = """
     google_sub, email, name, picture, email_verified, is_admin,
     created_at, last_login_at, password_updated_at, google_identity_sub,

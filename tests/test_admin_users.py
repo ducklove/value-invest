@@ -3,11 +3,11 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-from _harness import TempDbMixin
 from repositories import system_events as system_events_repo
 from routes import admin as admin_route
 

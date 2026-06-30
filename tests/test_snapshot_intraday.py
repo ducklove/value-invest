@@ -5,7 +5,6 @@ import pytest
 
 import snapshot_intraday
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

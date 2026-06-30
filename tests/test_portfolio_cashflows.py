@@ -1,4 +1,5 @@
 from _harness import TempDbMixin, seed_user
+
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 

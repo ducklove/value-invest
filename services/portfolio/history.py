@@ -7,12 +7,11 @@ from urllib.parse import quote
 
 import httpx
 
-from cache_layer import MemoryTTLCache
 import close_price_client
 import kis_proxy_client
 import stock_price
+from cache_layer import MemoryTTLCache
 from services.portfolio.identifiers import is_korean_stock
-
 
 logger = logging.getLogger(__name__)
 

@@ -2,11 +2,11 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin, seed_corp_codes, seed_user
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
-from _harness import TempDbMixin, seed_corp_codes, seed_user
 from repositories import wiki as wiki_repo
 from routes import wiki as wiki_route
 

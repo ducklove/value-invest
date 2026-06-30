@@ -3,12 +3,11 @@ from __future__ import annotations
 import re
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Callable, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import httpx
 
 import ai_config
-
 
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 

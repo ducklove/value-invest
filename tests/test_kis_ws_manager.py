@@ -1,7 +1,6 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import kis_ws_manager
-
 
 KST = timezone(timedelta(hours=9))
 

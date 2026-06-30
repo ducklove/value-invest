@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -48,9 +50,19 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off", ""}
 
 
+def _legacy_warnings_silenced() -> bool:
+    """Operator opt-out for legacy-config deprecation logs.
+
+    Set SILENCE_LEGACY_CONFIG_WARNINGS=1 to quiet the warnings once an operator
+    has audited the legacy files. Default is to warn so drift is visible.
+    """
+    return os.getenv("SILENCE_LEGACY_CONFIG_WARNINGS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _load_keys_file(path: Path, *, override: bool = False) -> None:
     if not path.exists():
         return
+    applied: list[str] = []
     for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -60,6 +72,16 @@ def _load_keys_file(path: Path, *, override: bool = False) -> None:
         value = value.strip()
         if key and (override or key not in os.environ):
             os.environ[key] = value
+            applied.append(key)
+    if applied and not _legacy_warnings_silenced():
+        # keys.txt is a legacy secret fallback (see load_environment). Log which
+        # keys came from it so operators can migrate them into .env.<profile>
+        # and then delete the file. Values are never logged (secrets).
+        logger.warning(
+            "legacy config: keys.txt applied %d key(s): %s — migrate to .env.<profile> and remove keys.txt",
+            len(applied),
+            ", ".join(applied),
+        )
 
 
 def load_environment(project_root: Path | None = None, *, force: bool = False) -> str:
@@ -73,6 +95,12 @@ def load_environment(project_root: Path | None = None, *, force: bool = False) -
 
     The default profile is production so current deployments keep their
     behavior unless `VALUE_INVEST_ENV` / `APP_ENV` is set explicitly.
+
+    Deprecation: sources 3 and 4 are legacy. They remain for operational
+    compatibility (deploy/value-invest.service still references .kis.env during
+    the migration) but emit a warning naming the keys they contributed, so the
+    drift toward the profile-env single source is visible. Silence with
+    SILENCE_LEGACY_CONFIG_WARNINGS=1 once audited.
     """
     global _LOADED_ROOT, _SETTINGS
 
@@ -90,7 +118,18 @@ def load_environment(project_root: Path | None = None, *, force: bool = False) -
 
     legacy_env = root / ".kis.env"
     if legacy_env.exists():
+        # Track which keys the legacy .kis.env contributed (values not logged).
+        before = set(os.environ.keys())
         load_dotenv(legacy_env, override=True)
+        if not _legacy_warnings_silenced():
+            contributed = sorted(set(os.environ.keys()) - before)
+            if contributed:
+                logger.warning(
+                    "legacy config: .kis.env applied %d key(s): %s — migrate to .env.%s and remove .kis.env",
+                    len(contributed),
+                    ", ".join(contributed),
+                    env,
+                )
 
     _load_keys_file(root / "keys.txt", override=False)
     _LOADED_ROOT = root

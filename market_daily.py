@@ -14,14 +14,13 @@ import httpx
 
 import ai_config
 import cache  # corp-code 헬퍼(get_corp_code)는 아직 cache 소유
-from cache_layer import MemoryTTLCache
 import dart_client
 import market_indicators
 import market_movers
 import market_news
 import market_sessions
+from cache_layer import MemoryTTLCache
 from services import ai_client
-
 
 logger = logging.getLogger(__name__)
 

@@ -13,10 +13,10 @@ import json as _json
 import os
 import re
 import urllib.request
+import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timedelta
 from urllib.parse import urljoin
-import xml.etree.ElementTree as ET
 
 import httpx
 

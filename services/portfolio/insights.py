@@ -25,15 +25,18 @@ import asset_insights
 import integrations
 import market_indicators
 from cache_layer import MemoryTTLCache
-
-from services.portfolio import benchmarks
-from services.portfolio import foreign
+from services.portfolio import benchmarks, foreign, quote_service
 from services.portfolio import history as portfolio_history
-from services.portfolio import quote_service
 from services.portfolio.identifiers import (
     CASH_FX_CODE as _CASH_FX_CODE,
+)
+from services.portfolio.identifiers import (
     is_cash_asset as _is_cash_asset,
+)
+from services.portfolio.identifiers import (
     is_korean_stock as _is_korean_stock,
+)
+from services.portfolio.identifiers import (
     static_foreign_ticker as _static_foreign_ticker,
 )
 from services.portfolio.time_windows import today_kst_date

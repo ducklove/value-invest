@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from core.config import AppSettings, load_environment
 from core.runtime import RuntimeState, sd_notify, watchdog_loop
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -26,17 +25,23 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
 
     import ai_config
     import cache
-    from repositories import users as users_repo
     import close_price_client
     import dart_client
     import kis_key_manager
     import kis_proxy_client
     import kis_ws_manager
     import observability
+
+    # 공유 httpx 클라이언트 매니저 — ``async with httpx.AsyncClient()`` 패턴을
+    # 쓰던 외부 호출이 core/http.get_http_client() 로 전환한다. kis_proxy/
+    # close_price 는 자체 rate-limit 회로를 가진 싱글톤을 유지한다.
+    from core import http as http_manager
+    from repositories import users as users_repo
     from services.portfolio import insights as portfolio_insights
 
     kis_key_manager.load_keys()
 
+    await http_manager.init_http_clients()
     await kis_proxy_client.init_client()
     await close_price_client.init_client()
     await cache.init_db()
@@ -171,5 +176,6 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         await kis_ws_manager.stop_all()
         await kis_proxy_client.close_client()
         await close_price_client.close_client()
+        await http_manager.close_http_clients()
         await cache.close_db()
 
