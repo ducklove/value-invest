@@ -44,6 +44,7 @@ from services.portfolio import names
 from services.portfolio.time_windows import (
     intraday_axis_window as _intraday_axis_window,
     portfolio_today_baseline_date as _portfolio_today_baseline_date,
+    settlement_marker_seconds as _settlement_marker_seconds,
 )
 
 _OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
@@ -965,7 +966,7 @@ async def get_prev_day_snapshot(request: Request):
     user = _require_user(await get_current_user(request))
     baseline_date = _portfolio_today_baseline_date()
     db = await cache.get_db()
-    # Latest 22:00 settlement snapshot for the active Today window.
+    # Latest 20:00 settlement snapshot for the active Today window.
     cursor = await db.execute(
         "SELECT date, total_value, fx_usdkrw, nav FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (user["google_sub"], baseline_date),
@@ -978,11 +979,11 @@ async def get_prev_day_snapshot(request: Request):
     stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], baseline_date)
     stock_values = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
     # Net cashflow not yet reflected in snapshot. Use created_at > snapshot
-    # date 22:00 (snapshot runs at 22:00) to catch cashflows entered after
+    # settlement boundary to catch cashflows entered after
     # the snapshot was taken, regardless of their nominal date.
     snap_date = snap_row["date"] if snap_row else None
     if snap_date:
-        created_after = f"{snap_date}T22:00:00"
+        created_after = _settlement_marker_seconds(snap_date)
     else:
         created_after = baseline_date
     cursor2 = await db.execute(
@@ -1120,7 +1121,7 @@ async def get_intraday(request: Request):
     axis_start, axis_end = _intraday_axis_window()
     baseline_date = axis_start[:10]
     points = await snapshots_repo.get_intraday_snapshots_between(user["google_sub"], axis_start, axis_end)
-    # Prepend the active 22:00 settlement snapshot as the zero baseline.
+    # Prepend the active 20:00 settlement snapshot as the zero baseline.
     # The frontend maps x by elapsed time from this timestamp, so the API
     # should expose the real axis start instead of a synthetic midnight marker.
     db = await cache.get_db()

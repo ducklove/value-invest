@@ -709,7 +709,7 @@ function _renderSubsystemSummary(summary) {
 
 // --- 데이터 품질 점검 -----------------------------------------------------
 //
-// data-quality.timer 가 매일 22:30(KST) 돌리는 정기 점검의 최신 결과.
+// data-quality.timer 가 매일 20:30(KST) 돌리는 정기 점검의 최신 결과.
 // /api/admin/event-summary 가 내려주는 check_summary 이벤트 하나
 // (source='data_quality') 의 details(counts + results)로 전체를 그린다.
 // 비정상(warn/error) 점검만 표로 노출 — 전부 정상이면 카운트 한 줄.
@@ -732,7 +732,7 @@ function _renderDataQualitySection(dq) {
   if (!dq) {
     return `
       <div class="admin-section">
-        <h3>데이터 품질 <span class="admin-sub">매일 22:30 자동 점검</span></h3>
+        <h3>데이터 품질 <span class="admin-sub">매일 20:30 자동 점검</span></h3>
         <div class="admin-sub" style="padding:8px 0;">아직 점검 기록이 없습니다 — data-quality.timer 첫 실행 후 표시됩니다.</div>
       </div>
     `;
@@ -759,7 +759,7 @@ function _renderDataQualitySection(dq) {
   }).join('');
   return `
     <div class="admin-section">
-      <h3>데이터 품질 <span class="admin-sub">최근 점검 ${_fmtRelTime(dq.ts)} · 매일 22:30 자동</span></h3>
+      <h3>데이터 품질 <span class="admin-sub">최근 점검 ${_fmtRelTime(dq.ts)} · 매일 20:30 자동</span></h3>
       <div class="admin-card-value ${headCls}" style="margin-bottom:8px;">${headIcon} 정상 ${okCount} · 주의 ${warn} · 오류 ${err}</div>
       ${failing.length ? `
       <table class="admin-table admin-table-compact">

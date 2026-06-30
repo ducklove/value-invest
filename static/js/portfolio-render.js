@@ -327,7 +327,7 @@ function renderPortfolio(options = {}) {
   };
 
   // Historical baseline for the current filter. For filtered cards, use the
-  // exact per-stock 22:00 snapshot sum for the visible rows, not
+  // exact per-stock 20:00 snapshot sum for the visible rows, not
   // `whole snapshot total × group ratio`. The latter mixes cash/other assets
   // into the selected group and makes TODAY drift away from the settlement
   // baseline.
@@ -405,13 +405,13 @@ function renderPortfolio(options = {}) {
     totalDailyPnlDisplay -= _fxConv(PfStore.snapshots.prevDay.today_net_cashflow, null);
   }
   if (!isFiltered && _dailyBaseValue && _dailyBaseValue > 0) {
-    // Keep the headline % and amount on the same 22:00 settlement basis.
-    // After the 22:00 snapshot, latestSnap.nav equals the baseline NAV, so a
+    // Keep the headline % and amount on the same 20:00 settlement basis.
+    // After the 20:00 snapshot, latestSnap.nav equals the baseline NAV, so a
     // pure snapshot NAV comparison stays at 0.00% even while live ticks move
     // the amount. Use the cashflow-adjusted live PnL over the same base value.
     dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;
   }
-  // Table footer is quote-session math; TODAY stays on the 22:00 NAV snapshot.
+  // Table footer is quote-session math; TODAY stays on the 20:00 NAV snapshot.
   const tableDailyBaseValue = totalMarketValue - totalDailyPnl;
   const dailyReturnPct = tableDailyBaseValue > 0 ? (totalDailyPnl / tableDailyBaseValue * 100) : null;
 
@@ -430,11 +430,11 @@ function renderPortfolio(options = {}) {
   // Date labels for summary cards
   const _now = new Date();
   const _timeLabel = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
-  // Today compares against the previous 22:00 KST settlement snapshot.
+  // Today compares against the previous 20:00 KST settlement snapshot.
   const _todayBaseDate = PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.date;
   // Slice YYYY-MM-DD directly to avoid timezone-off-by-one browser parsing.
   const _todayLabel = _todayBaseDate
-    ? `${_todayBaseDate.slice(5, 7)}/${_todayBaseDate.slice(8, 10)} 22시 기준`
+    ? `${_todayBaseDate.slice(5, 7)}/${_todayBaseDate.slice(8, 10)} 20시 정산 기준`
     : '기준 없음';
   const _mtdLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}`;
   const _ytdLabel = `${_now.getFullYear()}`;
@@ -709,8 +709,8 @@ function _sparkLocalMinuteValue(ts) {
   ) / 60000;
 }
 
-// TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축으로 그린다. 결산창(직전 22:00→
-// 다음 22:00)의 야간 빈 구간을 잘라 장전·장중·장후 활성 시간대만 보여준다.
+// TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축으로 그린다. 결산창(직전 20:00→
+// 다음 20:00)의 야간 빈 구간을 잘라 장전·장중·장후 활성 시간대만 보여준다.
 const SPARK_DAILY_START_HOUR = 8;
 const SPARK_DAILY_END_HOUR = 20;
 // 세션일 = intraday 최신 점의 날짜(주말·공휴일에도 장중 점이 몰리지 않음). 없으면 현재 KST.
@@ -832,7 +832,7 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparklinePoints('sparkMonthly', [], '#dc2626', 31);
   }
 
-  // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 22:00 결산(prevClose)
+  // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 20:00 결산(prevClose)
   // 대비 등락%. 축은 _sparkDailyAxis() 가 세션일 기준으로 만든다(now 까지 그려지고
   // 우측 빈 구간은 미래 시간).
   const _prevClose = (PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.total_value > 0)

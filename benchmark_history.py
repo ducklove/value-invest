@@ -15,7 +15,7 @@ We now persist daily closes in the `benchmark_daily` table keyed by
 
 * `update_benchmark_today(codes)` — nightly incremental. Called at the end
   of `snapshot_nav.run_all_snapshots()` so daily closes flow in for free on
-  the 22:00 KST timer. Best-effort: a yfinance outage just means that one
+  the 20:05 KST timer. Best-effort: a yfinance outage just means that one
   day's row arrives later, never breaks the snapshot itself.
 
 The yfinance call is kept in an executor so asyncio isn't blocked for the

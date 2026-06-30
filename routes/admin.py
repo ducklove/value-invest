@@ -245,8 +245,8 @@ async def _require_admin_mutation(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 
 _TIMERS = [
-    {"name": "portfolio-snapshot", "label": "포트폴리오 일일정산", "schedule": "매일 22:00"},
-    {"name": "portfolio-intraday", "label": "포트폴리오 장중", "schedule": "09:00~21:30 (30분)"},
+    {"name": "portfolio-snapshot", "label": "포트폴리오 일일정산", "schedule": "매일 20:05"},
+    {"name": "portfolio-intraday", "label": "포트폴리오 장중", "schedule": "08:00~20:00 (10분)"},
 ]
 
 
@@ -353,11 +353,11 @@ def _compute_staleness(job_name: str, latest_data_date: str | None) -> dict:
     it a looser treatment.
     """
     today = date.today()
-    # Expected latest date = last trading day <= today. The 22:00 KST
+    # Expected latest date = last trading day <= today. The 20:00 KST
     # daily jobs write for the same day, so if today is a weekday after
-    # 22:00 we'd expect today; before 22:00 we'd expect yesterday. Use
+    # 20:00 we'd expect today; before 20:00 we'd expect yesterday. Use
     # yesterday as the conservative expectation so the dashboard doesn't
-    # cry "stale" between 09:00–22:00.
+    # cry "stale" between 09:00–20:00.
     probe = today - timedelta(days=1) if today.weekday() < 5 else today
     while probe.weekday() >= 5:
         probe -= timedelta(days=1)

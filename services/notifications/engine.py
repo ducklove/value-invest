@@ -38,7 +38,7 @@ from services.portfolio import foreign
 from services.portfolio import runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_preferred_stock
 from services.portfolio.target_resolver import resolve_formula_target
-from services.portfolio.time_windows import portfolio_today_baseline_date
+from services.portfolio.time_windows import portfolio_today_baseline_date, settlement_marker_seconds
 
 
 logger = logging.getLogger(__name__)
@@ -228,7 +228,7 @@ async def _prev_close_value(google_sub: str) -> tuple[float | None, str | None]:
 
 
 async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None) -> float:
-    """결산(22:00) 이후 입금(+)·출금(-) 순합. Today 카드와 동일한 보정으로,
+    """결산(20:00) 이후 입금(+)·출금(-) 순합. Today 카드와 동일한 보정으로,
     오늘 들어온/나간 현금을 수익률에서 제외한다."""
     if not snap_date:
         return 0.0
@@ -236,7 +236,7 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
     cursor = await db.execute(
         "SELECT type, amount FROM portfolio_cashflows"
         " WHERE google_sub = ? AND created_at > ?",
-        (google_sub, f"{snap_date}T22:00:00"),
+        (google_sub, settlement_marker_seconds(snap_date)),
     )
     net = 0.0
     for row in await cursor.fetchall():

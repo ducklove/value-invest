@@ -143,7 +143,7 @@ test("채널: 텔레그램 연결됨 행 + 카카오 등록 폼", () => {
         {
           kind: "night",
           name: "나이트 브리핑",
-          schedule_label: "평일 22:20",
+          schedule_label: "평일 20:40",
           description: "밤",
           enabled: false,
           custom_instructions: "",

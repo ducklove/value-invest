@@ -24,6 +24,14 @@ def test_rest_market_keeps_nxt_after_websocket_session_closes():
     assert kis_ws_manager.ws_cache_matches_rest_market(_dt(21, 10)) is False
 
 
+def test_websocket_nxt_session_closes_at_20_but_rest_keeps_final_nxt():
+    assert kis_ws_manager._active_tr_id(_dt(19, 59)) == "H0NXCNT0"
+    assert kis_ws_manager.ws_cache_matches_rest_market(_dt(19, 59)) is True
+    assert kis_ws_manager._active_tr_id(_dt(20, 5)) == "H0STCNT0"
+    assert kis_ws_manager.active_market_code(_dt(20, 5)) == "NX"
+    assert kis_ws_manager.ws_cache_matches_rest_market(_dt(20, 5)) is False
+
+
 def test_rest_market_uses_nxt_before_regular_open():
     assert kis_ws_manager.active_market_code(_dt(8, 30)) == "NX"
     assert kis_ws_manager.ws_cache_matches_rest_market(_dt(8, 30)) is True

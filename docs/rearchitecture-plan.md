@@ -58,7 +58,7 @@ flowchart TD
 
 - `services/portfolio/identifiers.py`: 포트폴리오 코드 정규화, 국내/우선주/현금성/특수자산 판정 분리 완료.
 - `services/portfolio/benchmarks.py`: 기본 벤치마크, 벤치마크 표시명, 지표 등락률 변환, quote cache 분리 완료.
-- `services/portfolio/time_windows.py`: 22시 결산 기준 Today window, intraday baseline timestamp 분리 완료.
+- `services/portfolio/time_windows.py`: 20시 결산 기준 Today window, intraday baseline timestamp 분리 완료.
 - `services/portfolio/dividends.py`: 배당 워밍업 대상 선정, 우선주 본주 동시 예열, TTL/running 중복 방지 규칙 분리 완료.
 - `services/portfolio/runtime_quotes.py`: 배치/wiki/외국배당 코드가 `routes.portfolio` private 함수에 직접 의존하지 않도록 quote provider seam 추가 완료. 실제 구현은 아직 route runtime에 있으므로 다음 단계에서 `QuoteService`로 이동 필요.
 - `services/stock_quotes.py`: 현재가의 단일 진입점 완료 — 국내 주식에 더해 해외 주식·특수자산(현금/금/암호화폐)은 `quote_service`가 주입한 외부 fetcher로, 국내 다건은 `get_bulk_quote_snapshots`(네이버 벌크 1회 호출)로 같은 캐시를 공유한다. `Stock(code, current_price, previous_close, volume, created_at)` 모델, 1회 조회(`get_stock`/`getStock`), 지속 구독(`get_stock_cont`/`getStockCont`), 내부 캐시, WS 우선/REST fallback을 이 모듈에 모았다. API/배치의 현재가 조회는 `stock_price.fetch_quote_snapshot`/`fetch_bulk_quotes_kr`을 직접 호출하지 않고 이 service를 거친다(테스트가 경계 강제). 폴백 정책은 모듈 docstring에 명문화.

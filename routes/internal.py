@@ -185,7 +185,7 @@ async def run_calendar_notifications_evaluate(request: Request):
 async def run_data_quality_check(request: Request):
     """데이터 품질 정기 점검 한 사이클 실행. Loopback-only.
 
-    data-quality.timer (매일 22:30 KST — 22:00 NAV 스냅샷/벤치마크 증분이
+    data-quality.timer (매일 20:30 KST — 20:05 NAV 스냅샷/벤치마크 증분이
     끝난 뒤) 가 구동한다. 점검 결과는 system_events(source='data_quality')
     에 기록되고 관리자 패널 '데이터 품질' 카드가 이를 읽는다.
     """

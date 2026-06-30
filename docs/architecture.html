@@ -231,7 +231,7 @@
     <div class="card"><h4>dividends</h4><p>배당 워밍업 대상 선정, 우선주-본주 동시 예열, TTL/중복 방지</p></div>
     <div class="card"><h4>history</h4><p>NAV/평가금액/비중 추이 조회, Yahoo 차트</p></div>
     <div class="card"><h4>targets · target_metrics</h4><p>목표가 수식 평가, 메트릭 보강</p></div>
-    <div class="card"><h4>time_windows</h4><p>22시 결산 기준 Today window, intraday baseline</p></div>
+    <div class="card"><h4>time_windows</h4><p>20시 결산 기준 Today window, intraday baseline</p></div>
     <div class="card"><h4>valuation</h4><p>밸류에이션 보조 계산</p></div>
     <div class="card"><h4>runtime_quotes · quote_service ✦</h4><p>배치/외부 코드가 라우터 private에 의존하지 않게 하는 provider seam <span class="badge b-done">정상화 완료</span>. quote 구현(현재가/현금/외부자산 디스패처/provider)을 <code>quote_service</code>로 이동, <code>_get_provider</code>의 routes 역import 제거. 라우터는 patch용 얇은 위임자만 유지.</p></div>
     <div class="card"><h4>stock_quotes (services/)</h4><p>국내 시세 단일 진입점: WS 캐시 우선 → REST fallback, dead-stock 처리, 지속 구독</p></div>

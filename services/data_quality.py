@@ -3,7 +3,7 @@
 scripts/check_data_quality.py 의 일회성 점검을 서비스로 승격한 모듈.
 두 종류의 점검이 산다:
 
-* **정기 점검 (run_all_checks)** — data-quality.timer 가 매일 22:30(KST)
+* **정기 점검 (run_all_checks)** — data-quality.timer 가 매일 20:30(KST)
   POST /api/internal/data-quality/check 로 구동. 기존 테이블에 대한
   소수의 집계 쿼리만 수행하고(외부 API 호출 없음) 결과를
   system_events(source='data_quality') 에 기록한다. 임계 초과 시
@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 SOURCE = "data_quality"
 SUMMARY_KIND = "check_summary"
 
-# NAV 스냅샷(22:00)·벤치마크 증분이 끝난 뒤 22:30 점검이 도는 전제 —
-# 평일 22:10 이후에만 '당일' 데이터를 기대한다. 그 전(수동 실행 등)에는
+# NAV 스냅샷(20:05)·벤치마크 증분이 끝난 뒤 20:30 점검이 도는 전제 —
+# 평일 20:10 이후에만 '당일' 데이터를 기대한다. 그 전(수동 실행 등)에는
 # 직전 거래일까지만 기대해 거짓 경보를 막는다.
-SETTLED_MINUTES = 22 * 60 + 10
+SETTLED_MINUTES = 20 * 60 + 10
 # 장중 스냅샷은 09:00 장 시작 이후에만 의미가 있다 — 그 전엔 검사 생략.
 _INTRADAY_CHECK_FROM_MINUTES = 10 * 60
 

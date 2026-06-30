@@ -39,6 +39,7 @@ from repositories import wiki as wiki_repo
 from services import ai_client
 from services.notifications import channels
 from services.portfolio import ai_analysis
+from services.portfolio import time_windows
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +91,8 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
     "night": {
         "name": "나이트 브리핑",
         "title": "🌙 나이트 브리핑",
-        "schedule_label": "평일 22:20",
-        "description": "밤 시간대, 해외장 초반·야간선물·하루 결산 포인트를 정리합니다.",
+        "schedule_label": "평일 20:40",
+        "description": "정산 직후, 장후 변화·하루 결산·내일 포인트를 정리합니다.",
         "focus": "장 마감 이후 변경 내용, 오늘 포트폴리오 성과, 내일 시장 전망 재료를 우선합니다.",
         "outline": (
             "장 마감 이후 새 공시·리포트와 해외/야간 변수 변화를 먼저 정리하고, "
@@ -502,7 +503,7 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
     cursor = await db.execute(
         "SELECT type, amount FROM portfolio_cashflows"
         " WHERE google_sub = ? AND created_at > ?",
-        (google_sub, f"{snap_date}T22:00:00"),
+        (google_sub, time_windows.settlement_marker_seconds(snap_date)),
     )
     net = 0.0
     for row in await cursor.fetchall():
@@ -517,7 +518,7 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
 async def _fetch_today_portfolio_block(google_sub: str, today_iso: str) -> dict | None:
     """Today-card style portfolio performance for closing/night briefings.
 
-    Before the 22:00 settlement exists, value the current portfolio with live
+    Before the 20:00 settlement exists, value the current portfolio with live
     quotes. After the settlement exists, use that snapshot. In both cases,
     compare against the previous settlement and remove same-day cashflows from
     the performance delta.

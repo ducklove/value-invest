@@ -1,8 +1,8 @@
 [Unit]
-Description=Run portfolio snapshot daily at 22:00 KST
+Description=Run portfolio snapshot daily at 20:05 KST
 
 [Timer]
-OnCalendar=*-*-* 22:00:00
+OnCalendar=*-*-* 20:05:00
 Persistent=true
 
 [Install]

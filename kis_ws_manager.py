@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 WS_URI = "ws://ops.koreainvestment.com:21000"
 # H0STCNT0 = KRX 정규시장 실시간 체결가 (09:00~15:30)
-# H0NXCNT0 = NXT(넥스트레이드) 실시간 체결가 (08:00~09:00 프리, 15:30~21:00 애프터)
+# H0NXCNT0 = NXT(넥스트레이드) 실시간 체결가 (08:00~08:50 프리, 15:40~20:00 애프터)
 # 두 TR은 동일 와이어 포맷이며, 한 시점에는 둘 중 하나만 활성이므로 시간대별로
 # 단일 TR을 구독하여 종목당 1슬롯만 사용한다(통합 H0UNCNT0는 권한 이슈로 미사용).
 _ACCEPTED_TR_IDS = {"H0STCNT0", "H0NXCNT0", "H0UNCNT0"}
@@ -45,13 +45,13 @@ MAX_SUBSCRIPTIONS = 40  # KIS hard limit ~41
 KST = timezone(timedelta(hours=9))
 _KRX_OPEN = dtime(9, 0)
 _KRX_CLOSE = dtime(15, 30)
-_NXT_AFTER_CLOSE = dtime(21, 0)
+_NXT_AFTER_CLOSE = dtime(20, 0)
 
 
 def active_market_code(now: datetime | None = None) -> str:
     """KIS REST FID_COND_MRKT_DIV_CODE for quote snapshots.
 
-    WebSocket subscriptions stop using NXT after 21:00 because no more live
+    WebSocket subscriptions stop using NXT after 20:00 because no more live
     ticks arrive, but REST can still return the final NXT after-market price.
     Keep REST on NX outside regular KRX hours so stale/missing WS quotes do
     not fall back to the 15:30 close until the next regular session opens.
@@ -88,9 +88,9 @@ def _active_tr_id(now: datetime | None = None) -> str:
     cur = _kst_clock_time(now)
     if _KRX_OPEN <= cur < _KRX_CLOSE:
         return "H0STCNT0"
-    if cur < _NXT_AFTER_CLOSE:  # 00:00~09:00 또는 15:30~21:00 → NXT
+    if cur < _NXT_AFTER_CLOSE:  # 00:00~09:00 또는 15:30~20:00 → NXT
         return "H0NXCNT0"
-    return "H0STCNT0"  # 21:00 이후는 어차피 데이터 없음 — 기본값
+    return "H0STCNT0"  # 20:00 이후는 어차피 데이터 없음 — 기본값
 
 
 def _seconds_until_next_boundary(now: datetime | None = None) -> float:

@@ -340,7 +340,7 @@ def test_portfolio_ai_result_has_framed_output_contract():
 def test_today_card_does_not_fallback_to_quote_session_return():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     forbidden = "totalDailyPnl / prevMV"
-    assert forbidden not in source, "TODAY card must stay on the 22:00 settlement baseline, not quote-session math"
+    assert forbidden not in source, "TODAY card must stay on the 20:00 settlement baseline, not quote-session math"
 
 
 def test_today_card_percent_uses_same_settlement_base_as_amount():
@@ -375,7 +375,7 @@ def test_today_sparkline_uses_8_to_20_session_axis():
     assert "const _dailyAxisHours = SPARK_DAILY_END_HOUR - SPARK_DAILY_START_HOUR;" in source
     assert "_sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs)" in source
     assert "_sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs)" in source
-    # y 는 직전 22:00 결산(prevClose) 대비 등락% 유지(축만 바뀜).
+    # y 는 직전 20:00 결산(prevClose) 대비 등락% 유지(축만 바뀜).
     assert "const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);" in source
     assert "adjustedTotal / _prevClose - 1" in source
     assert "_drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', _dailyAxisHours);" in source

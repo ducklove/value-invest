@@ -24,10 +24,10 @@ from services import data_quality
 
 
 # 고정 기준 시각들 — 2026-06-10 은 수요일, 06-13/14 는 주말.
-WED_LATE = datetime(2026, 6, 10, 22, 30)    # 평일, 22:00 스냅샷 이후
+WED_LATE = datetime(2026, 6, 10, 20, 30)    # 평일, 20:05 스냅샷 이후
 WED_MORNING = datetime(2026, 6, 10, 9, 0)   # 평일, 스냅샷 전·장 시작 직후
-SAT_LATE = datetime(2026, 6, 13, 22, 30)    # 토요일
-SUN_LATE = datetime(2026, 6, 14, 22, 30)    # 일요일
+SAT_LATE = datetime(2026, 6, 13, 20, 30)    # 토요일
+SUN_LATE = datetime(2026, 6, 14, 20, 30)    # 일요일
 MON_MORNING = datetime(2026, 6, 8, 9, 0)    # 월요일 아침
 
 
@@ -142,7 +142,7 @@ class NavSnapshotFreshnessTests(_SeededDbTestCase):
         self.assertEqual(result["value"], 4)
 
     async def test_weekend_run_accepts_friday_snapshot(self):
-        # 토요일 22:30 점검 — 금요일 스냅샷이면 신선(주말은 거래일 아님).
+        # 토요일 20:30 점검 — 금요일 스냅샷이면 신선(주말은 거래일 아님).
         await self._seed_user_with_holdings()
         await self._seed_snapshot("2026-06-12")
         result = await data_quality.check_nav_snapshot_freshness(now=SAT_LATE)

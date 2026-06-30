@@ -1,4 +1,4 @@
-"""Daily portfolio snapshot + NAV calculation. Run via cron at 22:00 KST."""
+"""Daily portfolio snapshot + NAV calculation. Run via systemd timer at 20:05 KST."""
 
 import asyncio
 import logging

@@ -84,7 +84,7 @@ async function loadPortfolio({ force = false } = {}) {
         PfStore.benchmarkQuotes[k] = { ...(PfStore.benchmarkQuotes[k] || {}), name: v };
       }
     } catch (e) { console.warn(e); }
-    // Refresh the 22:00 settlement baseline before the fresh portfolio render.
+    // Refresh the 20:00 settlement baseline before the fresh portfolio render.
     // Cashflows mutate CASH_KRW immediately, so Today must combine the fresh
     // holdings and the fresh cashflow-adjusted baseline in the same paint.
     const todayStatePromise = pfRefreshTodayState({ force: true, render: false }).catch(() => ({ updated: false }));
