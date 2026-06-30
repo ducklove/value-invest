@@ -276,6 +276,18 @@ function trackEvent(name, params = {}) {
 
   <div id="portfolioView" style="display:none;">
     <div class="pf-summary" id="pfSummary" aria-live="polite" aria-label="포트폴리오 요약: 총 평가액·NAV·수익률"></div>
+    <section class="pf-action-board" id="pfActionBoard" hidden>
+      <div class="pf-action-board-head">
+        <div>
+          <h3>오늘의 투자 액션</h3>
+          <span id="pfActionBoardMeta" class="pf-chart-note">포트폴리오를 열면 확인할 항목을 불러옵니다.</span>
+        </div>
+        <button class="pf-mini-btn" type="button" id="pfActionBoardRefresh" title="액션 보드 새로고침">새로고침</button>
+      </div>
+      <div id="pfActionBoardContent" class="pf-action-board-content">
+        <div class="pf-risk-empty">액션 보드를 불러오는 중입니다.</div>
+      </div>
+    </section>
 
     <div class="pf-tab-bar">
       <button class="pf-tab active" data-tab="holdings" onclick="pfSwitchTab('holdings')">보유종목</button>
@@ -770,6 +782,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-order.js" defer></script>
 <script src="./js/portfolio-sparklines.js" defer></script>
 <script src="./js/portfolio-render.js" defer></script>
+<script src="./js/portfolio-action-board.js" defer></script>
 <script src="./js/portfolio-add-search.js" defer></script>
 <script src="./js/portfolio-actions.js" defer></script>
 <script src="./js/portfolio-insights.js" defer></script>

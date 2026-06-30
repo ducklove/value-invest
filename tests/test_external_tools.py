@@ -228,6 +228,29 @@ class StockLinkMatchTests(unittest.TestCase):
         self.assertIn("?code=000670", m["url"])
         self.assertIsNone(external_tools._match_holding("999999", self.HOLD_CUR, self.HOLD_CFG))
 
+    def test_match_buyback_latest_common_snapshot(self):
+        rows = [
+            {"stock_code": "005930", "corp_name": "삼성전자", "stock_kind": "보통주",
+             "as_of_date": "2024-12-31", "treasury_ratio": 0.30},
+            {"stock_code": "005930", "corp_name": "삼성전자", "stock_kind": "보통주",
+             "as_of_date": "2025-12-31", "treasury_ratio": 0.12},
+            {"stock_code": "005930", "corp_name": "삼성전자우", "stock_kind": "우선주",
+             "as_of_date": "2026-01-01", "treasury_ratio": 0.90},
+        ]
+        m = external_tools._match_buyback("005930", rows)
+        self.assertEqual(m["treasuryRatioPct"], 12.0)
+        self.assertEqual(m["asOf"], "2025-12-31")
+        self.assertIsNone(external_tools._match_buyback("000660", rows))
+
+    def test_match_gold_gap_asset_for_special_assets(self):
+        summary = {"assets": [
+            {"key": "gold", "label": "금", "gap": -2.4, "date": "2026-06-30", "link": "u"},
+        ]}
+        m = external_tools._match_gold_gap_asset("KRX_GOLD", summary)
+        self.assertEqual(m["gap"], -2.4)
+        self.assertEqual(m["url"], "u")
+        self.assertIsNone(external_tools._match_gold_gap_asset("005930", summary))
+
 
 class StockLinkFetchTests(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_stock_links_combines_tools_and_etf(self):
@@ -257,6 +280,39 @@ class StockLinkFetchTests(unittest.IsolatedAsyncioTestCase):
             empty = await external_tools.fetch_stock_links("035720")
             self.assertEqual(empty, {})
             self.assertEqual(await external_tools.fetch_stock_links(""), {})
+
+
+class PortfolioSignalFetchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_portfolio_signals_combines_sources(self):
+        async def fake_load(repo):
+            if repo == "common_preferred_spread":
+                return StockLinkMatchTests.SPREAD_CUR, StockLinkMatchTests.SPREAD_CFG
+            return StockLinkMatchTests.HOLD_CUR, StockLinkMatchTests.HOLD_CFG
+
+        async def fake_get_json(url):
+            if "buybacks" in url:
+                return [
+                    {"stock_code": "005930", "corp_name": "삼성전자", "stock_kind": "보통주",
+                     "as_of_date": "2025-12-31", "treasury_ratio": 0.12},
+                ]
+            return {
+                "gold": {"dates": ["2026-06-30"], "gap_pct": [-2.4]},
+                "updated_at": "2026-06-30",
+            }
+
+        with patch.object(external_tools, "_load_pair", new=AsyncMock(side_effect=fake_load)), \
+             patch.object(external_tools, "fetch_etf_universe", new=AsyncMock(return_value={"VOO"})), \
+             patch.object(external_tools, "_get_json", new=AsyncMock(side_effect=fake_get_json)):
+            out = await external_tools.fetch_portfolio_signals(["005930", "000670", "VOO", "KRX_GOLD"])
+
+        self.assertEqual(
+            {sig["kind"] for sig in out["005930"]},
+            {"preferred", "buybacks"},
+        )
+        self.assertEqual(out["000670"][0]["kind"], "holding")
+        self.assertEqual(out["VOO"][0]["kind"], "etf")
+        self.assertEqual(out["KRX_GOLD"][0]["kind"], "goldGap")
+        self.assertIn("?code=005930", out["005930"][0]["url"])
 
 
 class EtfLinkTests(unittest.IsolatedAsyncioTestCase):
