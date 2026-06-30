@@ -106,6 +106,12 @@ async def post_chat_completion(
     request_payload = dict(payload)
     resolved_model = model or str(request_payload.get("model") or await ai_config.get_model_for_feature(feature))
     request_payload["model"] = resolved_model
+    # Budget guard (ST-11): raise BudgetExceededError (-> 429) if the user or
+    # site-wide daily USD cap is already hit. No-op when caps are 0 (default).
+    # Only enforced when usage will be recorded — internal/system calls that
+    # pass record_usage=False skip the guard.
+    if record_usage:
+        await ai_config.enforce_budget_caps(google_sub)
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

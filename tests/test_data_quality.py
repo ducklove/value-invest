@@ -15,6 +15,7 @@ from starlette.requests import Request
 
 import cache
 import observability
+from core.errors import AppError
 from repositories import benchmark_daily as benchmark_repo
 from repositories import snapshots as snapshots_repo
 from repositories import system_events as system_events_repo
@@ -383,12 +384,16 @@ class InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out["results"], fake["results"])
 
     async def test_failure_maps_to_500(self):
+        # Internal batch failures now raise AppError (-> HTTP 500 via the
+        # registered exception handler) instead of HTTPException directly.
+        # The status code contract (500) is unchanged.
         request = _request("/api/internal/data-quality/check")
         with patch.dict("os.environ", {}, clear=True), \
              patch("services.data_quality.run_all_checks", AsyncMock(side_effect=RuntimeError("db locked"))):
-            with self.assertRaises(HTTPException) as exc_info:
+            with self.assertRaises(AppError) as exc_info:
                 await internal_route.run_data_quality_check(request)
         self.assertEqual(exc_info.exception.status_code, 500)
+        self.assertIn("db locked", str(exc_info.exception))
 
 
 class AdminEventSummaryDataQualityTests(_SeededDbTestCase):

@@ -7,7 +7,7 @@ import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import httpx
+from core.http import get_http_client
 
 API_KEY = os.getenv("OPENDART_API_KEY", "")
 BASE_URL = "https://opendart.fss.or.kr/api"
@@ -41,11 +41,11 @@ load_api_key()
 
 async def fetch_corp_codes() -> list[dict]:
     """DART에서 고유번호 XML을 다운로드하여 상장사 목록 반환."""
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{BASE_URL}/corpCode.xml", params={"crtfc_key": API_KEY}
-        )
-        resp.raise_for_status()
+    client = await get_http_client("dart")
+    resp = await client.get(
+        f"{BASE_URL}/corpCode.xml", params={"crtfc_key": API_KEY}, timeout=30
+    )
+    resp.raise_for_status()
 
     codes = []
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -131,16 +131,17 @@ async def fetch_common_stock_share_status(corp_code: str | None, year: int) -> d
     """Fetch common-share count status from DART annual report data."""
     if not corp_code or not API_KEY:
         return {}
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{BASE_URL}/stockTotqySttus.json",
-            params={
-                "crtfc_key": API_KEY,
-                "corp_code": corp_code,
-                "bsns_year": str(int(year)),
-                "reprt_code": "11011",
-            },
-        )
+    client = await get_http_client("dart")
+    resp = await client.get(
+        f"{BASE_URL}/stockTotqySttus.json",
+        params={
+            "crtfc_key": API_KEY,
+            "corp_code": corp_code,
+            "bsns_year": str(int(year)),
+            "reprt_code": "11011",
+        },
+        timeout=10,
+    )
     if resp.status_code != 200:
         return {}
     try:
@@ -225,25 +226,26 @@ async def fetch_dividend_per_share_by_year(
         return {}
 
     out: dict[int, float] = {}
-    async with httpx.AsyncClient(timeout=15) as client:
-        for report_year in range(latest_report_year, start_year - 1, -3):
-            resp = await client.get(
-                f"{BASE_URL}/alotMatter.json",
-                params={
-                    "crtfc_key": API_KEY,
-                    "corp_code": corp_code,
-                    "bsns_year": str(report_year),
-                    "reprt_code": "11011",
-                },
-            )
-            if resp.status_code != 200:
-                continue
-            try:
-                data = resp.json()
-            except ValueError:
-                continue
-            out.update(parse_dividend_per_share_by_year(data, start_year, end_year))
-            await asyncio.sleep(0.15)
+    client = await get_http_client("dart")
+    for report_year in range(latest_report_year, start_year - 1, -3):
+        resp = await client.get(
+            f"{BASE_URL}/alotMatter.json",
+            params={
+                "crtfc_key": API_KEY,
+                "corp_code": corp_code,
+                "bsns_year": str(report_year),
+                "reprt_code": "11011",
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            continue
+        try:
+            data = resp.json()
+        except ValueError:
+            continue
+        out.update(parse_dividend_per_share_by_year(data, start_year, end_year))
+        await asyncio.sleep(0.15)
 
     return out
 
@@ -262,10 +264,10 @@ async def fetch_financial_statement(
             "reprt_code": "11011",  # 사업보고서(연간)
             "fs_div": report_code,
         }
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                f"{BASE_URL}/fnlttSinglAcnt.json", params=params
-            )
+        client = await get_http_client("dart")
+        resp = await client.get(
+            f"{BASE_URL}/fnlttSinglAcnt.json", params=params, timeout=15
+        )
 
         if resp.status_code != 200:
             continue
@@ -313,8 +315,8 @@ async def fetch_annual_report_dates(
         "page_count": "100",
     }
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(f"{BASE_URL}/list.json", params=params)
+    client = await get_http_client("dart")
+    resp = await client.get(f"{BASE_URL}/list.json", params=params, timeout=20)
 
     if resp.status_code != 200:
         return {}
@@ -381,8 +383,8 @@ async def fetch_recent_disclosures(corp_code: str, *, days: int = 30, page_count
         "page_no": "1",
         "page_count": str(page_count),
     }
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(f"{BASE_URL}/list.json", params=params)
+    client = await get_http_client("dart")
+    resp = await client.get(f"{BASE_URL}/list.json", params=params, timeout=15)
     if resp.status_code != 200:
         return []
     try:

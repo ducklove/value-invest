@@ -18,8 +18,24 @@ import os
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
+from core.errors import AppError
+
 router = APIRouter(prefix="/api/internal", include_in_schema=False)
 logger = logging.getLogger(__name__)
+
+
+def _job_failed(kind: str, exc: Exception) -> AppError:
+    """Standardize internal-batch failures into AppError (-> HTTP 500).
+
+    Before this helper, each route repeated the same three lines:
+    ``logger.exception(...); raise HTTPException(500, str(exc)) from exc``.
+    Centralizing it keeps the log message format consistent and routes
+    AppError through the registered exception handler (single response shape).
+    The original exception is preserved via ``__cause__`` and logged with full
+    traceback, so root-cause visibility is unchanged.
+    """
+    logger.exception("%s failed", kind)
+    return AppError(f"{kind} failed: {exc}")
 
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -67,8 +83,7 @@ async def run_nav_snapshot(request: Request):
         await snapshot_nav.run_all_snapshots(manage_db=False)
         return {"ok": True, "kind": "nav"}
     except Exception as exc:
-        logger.exception("nav snapshot failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _job_failed("nav snapshot", exc) from exc
 
 
 @router.post("/snapshot/intraday")
@@ -79,8 +94,7 @@ async def run_intraday_snapshot(request: Request):
         await snapshot_intraday.run(manage_db=False)
         return {"ok": True, "kind": "intraday"}
     except Exception as exc:
-        logger.exception("intraday snapshot failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _job_failed("intraday snapshot", exc) from exc
 
 
 @router.post("/notifications/evaluate")
@@ -97,8 +111,7 @@ async def run_notifications_evaluate(request: Request):
         result = await engine.evaluate_all()
         return {"ok": True, **result}
     except Exception as exc:
-        logger.exception("notification evaluate failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _job_failed("notification evaluate", exc) from exc
 
 
 # 텔레그램 메시지 한도(4096) 아래에서 제목/출처 표기와 채널별 오버헤드 여유분.
@@ -177,8 +190,7 @@ async def run_calendar_notifications_evaluate(request: Request):
         result = await engine.evaluate_calendar_all()
         return {"ok": True, **result}
     except Exception as exc:
-        logger.exception("calendar notification evaluate failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _job_failed("calendar notification evaluate", exc) from exc
 
 
 @router.post("/data-quality/check")
@@ -195,8 +207,7 @@ async def run_data_quality_check(request: Request):
         result = await data_quality.run_all_checks()
         return {"ok": True, **result}
     except Exception as exc:
-        logger.exception("data quality check failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _job_failed("data quality check", exc) from exc
 
 
 @router.post("/daily-briefing/send")
@@ -216,8 +227,7 @@ async def run_daily_briefing_send(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("daily briefing send failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _job_failed("daily briefing send", exc) from exc
 
 
 @router.post("/wiki/ingest")
@@ -245,8 +255,7 @@ async def run_wiki_ingest(request: Request, payload: dict = Body(default={})):
         )
         return {"ok": True, **result}
     except Exception as exc:
-        logger.exception("wiki ingest failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _job_failed("wiki ingest", exc) from exc
 
 
 @router.post("/dart-review/ingest")
@@ -284,5 +293,4 @@ async def run_dart_review_ingest(request: Request, payload: dict = Body(default=
         )
         return {"ok": True, **result}
     except Exception as exc:
-        logger.exception("DART review ingest failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _job_failed("DART review ingest", exc) from exc

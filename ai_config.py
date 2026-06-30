@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from core.errors import RateLimitError
 from repositories import ai_usage as ai_usage_repo
 from repositories import app_settings as app_settings_repo
 
@@ -360,3 +361,69 @@ async def record_usage(
         ok=ok,
         error=error,
     )
+
+
+# --- Daily budget caps (ST-11) ---------------------------------------------
+# Prevents runaway OpenRouter spend: a per-user AND a site-wide daily USD cap,
+# enforced BEFORE a completion call. Both default to 0 (disabled) so existing
+# behavior is unchanged unless an operator sets the env var. This is a soft
+# guard — it only stops *new* calls; already-running calls finish.
+
+def _budget_env_float(name: str, default: float = 0.0) -> float:
+    """Read a non-negative USD budget from env. 0 = cap disabled."""
+    try:
+        value = float(os.getenv(name, "") or default)
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+class BudgetExceededError(RateLimitError):
+    """Raised when a daily AI cost cap would be exceeded (ST-11).
+
+    Subclassing core.errors.RateLimitError makes AppError's exception handler
+    map it to HTTP 429 automatically — callers see a clean "rate limited"
+    response instead of a bare 500. ``__cause__`` is preserved so logs keep the
+    original traceback.
+    """
+
+    def __init__(self, scope: str, spent: float, cap: float):
+        self.scope = scope
+        self.spent = spent
+        self.cap = cap
+        super().__init__(
+            f"daily AI cost cap reached for {scope}: "
+            f"${spent:.4f} >= ${cap:.4f} (try again tomorrow KST)"
+        )
+
+
+async def enforce_budget_caps(google_sub: str | None) -> dict | None:
+    """Raise BudgetExceededError if the user or site-wide daily cap is hit.
+
+    Returns a small summary dict when within budget (useful for logging/admin),
+    or None when caps are disabled. Called by the AI client before posting a
+    completion. Best-effort: a DB read failure is swallowed to never block a
+    legitimate call (the cost is tracked regardless after the call).
+    """
+    site_cap = _budget_env_float("AI_DAILY_BUDGET_USD")
+    user_cap = _budget_env_float("AI_USER_DAILY_BUDGET_USD")
+    if site_cap <= 0 and user_cap <= 0:
+        return None
+    try:
+        if user_cap > 0 and google_sub:
+            spent = await ai_usage_repo.get_daily_cost_usd(google_sub)
+            if spent >= user_cap:
+                raise BudgetExceededError(f"user:{google_sub}", spent, user_cap)
+        if site_cap > 0:
+            spent = await ai_usage_repo.get_daily_cost_usd(None)
+            if spent >= site_cap:
+                raise BudgetExceededError("site", spent, site_cap)
+    except BudgetExceededError:
+        raise
+    except Exception:  # noqa: BLE001 — never block on a guard read failure
+        return None
+    return {
+        "site_cap": site_cap or None,
+        "user_cap": user_cap or None,
+        "google_sub": google_sub,
+    }

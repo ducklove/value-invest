@@ -360,6 +360,27 @@ async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, ti
     };
     charts[key] = createLineChart(innerDiv, chartOpts);
 
+    // 접근성(ST-05): echarts canvas 는 스크린 리더가 읽지 못하므로, 차트 컨테이너에
+    // role=img + 요약 aria-label 을 붙이고 핵심 데이터(연도/값)를 숨김 표로 제공.
+    // 보조기기 사용자가 "어떤 지표인지, 최근 값과 추세가 어떤지"를 인지 가능.
+    const _latestIdx = values.length - 1;
+    const _latestLabel = displayLabels[_latestIdx] || '';
+    const _latestVal = rawValues[_latestIdx];
+    const _valText = _latestVal == null ? '-' : (isKrwKey ? fmtKrw(_latestVal) : _latestVal);
+    const _prevVal = rawValues[_latestIdx - 1];
+    const _trend = (_latestVal == null || _prevVal == null || _prevVal === 0)
+      ? ''
+      : (_latestVal > _prevVal ? ' (전년 대비 상승)' : _latestVal < _prevVal ? ' (전년 대비 하락)' : ' (보합)');
+    const _rows = displayLabels.map((lbl, idx) => {
+      const v = rawValues[idx];
+      return [lbl, v == null ? '-' : (isKrwKey ? fmtKrw(v) : v)];
+    });
+    describeChart(innerDiv, `${key} 차트: 최근 ${_latestLabel} ${_valText}${_trend}`, {
+      caption: `${key} 연도별 추이`,
+      headers: ['연도', key],
+      rows: _rows,
+    });
+
     // Click to open modal
     card.addEventListener('click', () => openChartModal(key, chartOpts));
   });
