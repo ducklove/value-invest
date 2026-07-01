@@ -227,7 +227,7 @@ function _renderScreenerResults(data) {
                 <td class="num">${_scFmtPct(r.roe)}</td>
                 <td class="num">${_scFmtPct(r.dividend_yield)}</td>
                 <td class="num">${_scFmtPct(r.operating_margin)}</td>
-                <td class="num">${_scFmtNum(r.debt_ratio)}</td>
+                <td class="num">${_scFmtPct(r.debt_ratio)}</td>
                 <td class="num">${_scFmtMarketCap(r.market_cap)}</td>
               </tr>
             `).join('')}
