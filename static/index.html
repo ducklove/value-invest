@@ -282,7 +282,10 @@ function trackEvent(name, params = {}) {
           <h3>오늘의 투자 액션</h3>
           <span id="pfActionBoardMeta" class="pf-chart-note">포트폴리오를 열면 확인할 항목을 불러옵니다.</span>
         </div>
-        <button class="pf-mini-btn" type="button" id="pfActionBoardRefresh" title="액션 보드 새로고침">새로고침</button>
+        <div class="pf-action-board-actions">
+          <button class="pf-mini-btn" type="button" id="pfActionBoardRefresh" title="액션 보드 새로고침">새로고침</button>
+          <button class="pf-mini-btn" type="button" id="pfActionBoardHide" title="액션 보드 숨기기">숨기기</button>
+        </div>
       </div>
       <div id="pfActionBoardContent" class="pf-action-board-content">
         <div class="pf-risk-empty">액션 보드를 불러오는 중입니다.</div>
@@ -292,6 +295,7 @@ function trackEvent(name, params = {}) {
     <div class="pf-tab-bar">
       <button class="pf-tab active" data-tab="holdings" onclick="pfSwitchTab('holdings')">보유종목</button>
       <button class="pf-tab" data-tab="performance" onclick="pfSwitchTab('performance')">심층 분석</button>
+      <button class="pf-action-toggle" id="pfActionBoardToggle" type="button" aria-pressed="false" aria-controls="pfActionBoard" onclick="pfToggleActionBoard()" title="오늘의 투자 액션 보드 표시">액션</button>
       <button class="pf-simple-toggle" id="pfSimpleToggle" type="button" aria-pressed="false" onclick="pfToggleSimpleMode()" title="모바일 간편 보기">간편</button>
       <div class="pf-currency-toggle">
         <button class="pf-currency-btn active" data-currency="KRW" onclick="pfSetCurrency('KRW')">₩</button>

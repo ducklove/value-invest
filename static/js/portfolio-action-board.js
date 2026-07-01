@@ -4,12 +4,73 @@ const PfActionBoard = {
   data: null,
   signalsByCode: {},
   loadingSeq: 0,
+  enabled: false,
 };
+const PF_ACTION_BOARD_ENABLED_KEY = 'valueInvest.portfolio.actionBoard.enabled';
 
 if (typeof window !== 'undefined') window.PfActionBoard = PfActionBoard;
 
 function _pfActionBoardEl() { return document.getElementById('pfActionBoard'); }
 function _pfActionBoardContentEl() { return document.getElementById('pfActionBoardContent'); }
+function _pfActionBoardToggleEl() { return document.getElementById('pfActionBoardToggle'); }
+
+function pfActionBoardIsEnabled() {
+  return !!PfActionBoard.enabled;
+}
+
+function _pfActionBoardReadEnabled() {
+  try {
+    return localStorage.getItem(PF_ACTION_BOARD_ENABLED_KEY) === '1';
+  } catch (e) {
+    console.warn(e);
+    return false;
+  }
+}
+
+function _pfActionBoardPersistEnabled(enabled) {
+  try {
+    localStorage.setItem(PF_ACTION_BOARD_ENABLED_KEY, enabled ? '1' : '0');
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+function _pfActionBoardSetToggleState(enabled) {
+  const toggle = _pfActionBoardToggleEl();
+  if (!toggle) return;
+  toggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  toggle.classList.toggle('active', enabled);
+  toggle.title = enabled ? '오늘의 투자 액션 보드 숨기기' : '오늘의 투자 액션 보드 표시';
+}
+
+function _pfActionBoardClear() {
+  const board = _pfActionBoardEl();
+  const content = _pfActionBoardContentEl();
+  const meta = document.getElementById('pfActionBoardMeta');
+  PfActionBoard.data = null;
+  PfActionBoard.signalsByCode = {};
+  if (board) board.hidden = true;
+  if (meta) meta.textContent = '액션 버튼을 누르면 확인할 항목을 불러옵니다.';
+  if (content) content.innerHTML = '<div class="pf-risk-empty">액션 보드를 불러오는 중입니다.</div>';
+}
+
+function _pfActionBoardApplyEnabled(enabled, { persist = true, load = true } = {}) {
+  PfActionBoard.enabled = !!enabled;
+  _pfActionBoardSetToggleState(PfActionBoard.enabled);
+  if (persist) _pfActionBoardPersistEnabled(PfActionBoard.enabled);
+  if (!PfActionBoard.enabled) {
+    PfActionBoard.loadingSeq += 1;
+    _pfActionBoardClear();
+    if (typeof renderPortfolio === 'function' && PfStore.items.length) renderPortfolio();
+    return;
+  }
+  if (load) void pfLoadActionBoard({ force: false });
+}
+
+function pfToggleActionBoard(enabled) {
+  const nextEnabled = typeof enabled === 'boolean' ? enabled : !PfActionBoard.enabled;
+  _pfActionBoardApplyEnabled(nextEnabled);
+}
 
 function _pfActionSeverityLabel(severity) {
   if (severity === 'high') return '중요';
@@ -24,6 +85,7 @@ function _pfActionStatusLabel(status) {
 }
 
 function _pfActionMsg(message) {
+  if (!pfActionBoardIsEnabled()) return;
   const board = _pfActionBoardEl();
   const el = _pfActionBoardContentEl();
   if (board) board.hidden = false;
@@ -42,6 +104,7 @@ function _pfActionBuildSignalsByCode(data) {
 }
 
 function pfActionBoardBadgesForCode(code) {
+  if (!pfActionBoardIsEnabled()) return '';
   const signals = PfActionBoard.signalsByCode[String(code || '').trim().toUpperCase()] || [];
   if (!signals.length) return '';
   const shown = signals.slice(0, 3);
@@ -88,6 +151,7 @@ function _pfActionCardHtml(item) {
 }
 
 function _pfRenderActionBoard(data) {
+  if (!pfActionBoardIsEnabled()) return;
   const board = _pfActionBoardEl();
   const content = _pfActionBoardContentEl();
   const meta = document.getElementById('pfActionBoardMeta');
@@ -129,6 +193,10 @@ function _pfRenderActionBoard(data) {
 async function pfLoadActionBoard({ force = false } = {}) {
   const board = _pfActionBoardEl();
   if (!board) return;
+  if (!pfActionBoardIsEnabled()) {
+    _pfActionBoardClear();
+    return;
+  }
   if (!force && PfActionBoard.data) {
     _pfRenderActionBoard(PfActionBoard.data);
     return;
@@ -157,6 +225,7 @@ async function pfLoadActionBoard({ force = false } = {}) {
 }
 
 async function pfActionBoardSetStatus(actionKey, status) {
+  if (!pfActionBoardIsEnabled()) return;
   try {
     const resp = await apiFetch(`/api/portfolio/action-board/queue/${encodeURIComponent(actionKey)}`, {
       method: 'PUT',
@@ -186,8 +255,11 @@ async function pfActionBoardSetStatus(actionKey, status) {
 
 (function initPfActionBoard() {
   const onReady = () => {
+    _pfActionBoardApplyEnabled(_pfActionBoardReadEnabled(), { persist: false, load: false });
     const refresh = document.getElementById('pfActionBoardRefresh');
     if (refresh) refresh.addEventListener('click', () => pfLoadActionBoard({ force: true }));
+    const hide = document.getElementById('pfActionBoardHide');
+    if (hide) hide.addEventListener('click', () => pfToggleActionBoard(false));
     document.addEventListener('click', (e) => {
       const badge = e.target.closest && e.target.closest('.pf-linked-signal-badge');
       if (badge) e.stopPropagation();
@@ -216,5 +288,7 @@ if (typeof window !== 'undefined') {
     pfLoadActionBoard,
     pfActionBoardSetStatus,
     pfActionBoardBadgesForCode,
+    pfActionBoardIsEnabled,
+    pfToggleActionBoard,
   });
 }

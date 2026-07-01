@@ -2350,6 +2350,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   margin-bottom: 10px;
 }
 .pf-action-board-head h3 { margin: 0 0 2px; font-size: 15px; }
+.pf-action-board-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .pf-action-summary {
   display: flex;
   flex-wrap: wrap;
@@ -2519,6 +2526,29 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 }
 .pf-simple-toggle:hover { color: var(--text); border-color: var(--primary); }
 .pf-simple-toggle.active { background: var(--text); border-color: var(--text); color: var(--surface); }
+.pf-action-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pf-action-toggle:hover { color: var(--text); border-color: var(--primary); }
+.pf-action-toggle.active,
+.pf-action-toggle[aria-pressed="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
 
 /* Currency toggle */
 .pf-currency-toggle { display: flex; gap: 0; margin-left: auto; }

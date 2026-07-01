@@ -134,7 +134,11 @@ async function loadPortfolio({ force = false } = {}) {
     await todayStatePromise;
     _savePortfolioSnapshot(PfStore.items);
     renderPortfolio();
-    if (typeof pfLoadActionBoard === 'function') {
+    if (
+      typeof pfLoadActionBoard === 'function'
+      && typeof pfActionBoardIsEnabled === 'function'
+      && pfActionBoardIsEnabled()
+    ) {
       void pfLoadActionBoard({ force: true });
     }
     _updateQuoteSubscriptions();

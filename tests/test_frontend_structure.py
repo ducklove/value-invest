@@ -983,24 +983,34 @@ def test_portfolio_includes_action_board_and_linked_signal_badges():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     action_board = (JS / "portfolio-action-board.js").read_text(encoding="utf-8")
 
-    # 액션 보드는 포트폴리오 요약 바로 다음에 위치한다.
+    # 액션 보드는 opt-in: 기본 hidden 상태이고 탭 바의 작은 버튼으로만 연다.
     assert 'id="pfActionBoard"' in html
     assert 'id="pfActionBoardContent"' in html
+    assert 'id="pfActionBoardToggle"' in html
+    assert 'aria-controls="pfActionBoard"' in html
     assert html.find('id="pfSummary"') < html.find('id="pfActionBoard"')
     assert html.find('id="pfActionBoard"') < html.find('class="pf-tab-bar"')
     assert "./js/portfolio-render.js" in html
     assert html.find("./js/portfolio-render.js") < html.find("./js/portfolio-action-board.js")
 
-    # 포트폴리오 데이터 로드 후 자동으로 오늘 액션을 갱신한다.
+    # 포트폴리오 데이터 로드 후에도 사용자가 켠 경우에만 오늘 액션을 갱신한다.
+    assert "typeof pfActionBoardIsEnabled === 'function'" in data
+    assert "&& pfActionBoardIsEnabled()" in data
     assert "void pfLoadActionBoard({ force: true });" in data
     assert "/api/portfolio/action-board" in action_board
     assert "/api/portfolio/action-board/queue/" in action_board
+    assert "PF_ACTION_BOARD_ENABLED_KEY" in action_board
+    assert "function pfToggleActionBoard(" in action_board
+    assert "function pfActionBoardIsEnabled(" in action_board
+    assert "board.hidden = true;" in action_board
     assert "function pfActionBoardBadgesForCode(" in action_board
     assert "PfActionBoard.signalsByCode" in action_board
 
-    # 연결 프로젝트 신호는 보유종목 행의 종목명 옆 배지로도 노출된다.
+    # 연결 프로젝트 신호 배지도 보드 opt-in 후에만 보유종목 행 옆에 노출된다.
+    assert "if (!pfActionBoardIsEnabled()) return '';" in action_board
     assert "pfActionBoardBadgesForCode(r.stock_code)" in render
     assert ".pf-action-board" in styles
+    assert ".pf-action-toggle" in styles
     assert ".pf-action-card" in styles
     assert ".pf-linked-signal-badge" in styles
 
