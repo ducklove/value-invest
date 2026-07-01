@@ -454,6 +454,23 @@ function trackEvent(name, params = {}) {
         <div class="pf-deep-meta">스냅샷 기준</div>
       </div>
 
+      <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary">
+        <div class="pf-nav-header">
+          <h3>NAV 기준가 추이</h3>
+          <div class="pf-analysis-actions">
+            <label class="pf-bench-chip"><input type="checkbox" value="KOSPI" onchange="onBenchToggle()"><span>코스피</span></label>
+            <label class="pf-bench-chip"><input type="checkbox" value="SP500" onchange="onBenchToggle()"><span>S&P 500</span></label>
+            <label class="pf-bench-chip"><input type="checkbox" value="GOLD" onchange="onBenchToggle()"><span>금</span></label>
+            <label class="pf-bench-chip"><input type="checkbox" id="pfNavYZero" onchange="onNavYZeroToggle()"><span>Y축 0부터</span></label>
+          </div>
+        </div>
+        <div class="pf-nav-chart-container pf-nav-tall">
+          <div id="pfNavChart" style="width:100%;height:100%;"></div>
+        </div>
+        <div class="pf-chart-range" id="pfNavRange"></div>
+        <div class="pf-nav-returns" id="pfNavReturns"></div>
+      </div>
+
       <div class="pf-nav-chart-wrap pf-analysis-card pf-period-report-card" id="pfPeriodReportWrap">
         <div class="pf-nav-header pf-period-report-head">
           <div>
@@ -473,23 +490,6 @@ function trackEvent(name, params = {}) {
         <div id="pfPeriodReportContent" class="pf-period-report-content">
           <div class="pf-risk-empty">저장된 기간 보고서가 여기에 표시됩니다.</div>
         </div>
-      </div>
-
-      <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary">
-        <div class="pf-nav-header">
-          <h3>NAV 기준가 추이</h3>
-          <div class="pf-analysis-actions">
-            <label class="pf-bench-chip"><input type="checkbox" value="KOSPI" onchange="onBenchToggle()"><span>코스피</span></label>
-            <label class="pf-bench-chip"><input type="checkbox" value="SP500" onchange="onBenchToggle()"><span>S&P 500</span></label>
-            <label class="pf-bench-chip"><input type="checkbox" value="GOLD" onchange="onBenchToggle()"><span>금</span></label>
-            <label class="pf-bench-chip"><input type="checkbox" id="pfNavYZero" onchange="onNavYZeroToggle()"><span>Y축 0부터</span></label>
-          </div>
-        </div>
-        <div class="pf-nav-chart-container pf-nav-tall">
-          <div id="pfNavChart" style="width:100%;height:100%;"></div>
-        </div>
-        <div class="pf-chart-range" id="pfNavRange"></div>
-        <div class="pf-nav-returns" id="pfNavReturns"></div>
       </div>
 
       <div class="pf-analysis-grid pf-analysis-grid-compact">

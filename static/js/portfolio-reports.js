@@ -58,6 +58,7 @@ function _pfCompositionActivityLabel(activity) {
     closed_position: '전량 매도',
     increased_position: '추가 매수',
     reduced_position: '부분 매도',
+    futures_short: '선물 매도',
     unchanged_position: '수량 유지',
     value_only_increase: '평가액 증가',
     value_only_decrease: '평가액 감소',

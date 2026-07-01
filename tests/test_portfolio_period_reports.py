@@ -115,6 +115,87 @@ async def test_monthly_period_report_builds_change_snapshot(temp_db):
     assert report["source_hash"]
 
 
+def test_composition_changes_classifies_negative_quantity_as_futures_short():
+    composition = period_reports._composition_changes(
+        [
+            {
+                "stock_code": "BASE",
+                "stock_name": "Base",
+                "group_name": "기타",
+                "market_value": 1_000_000,
+                "quantity": 1,
+                "unit_price": 1_000_000,
+            },
+        ],
+        [
+            {
+                "stock_code": "BASE",
+                "stock_name": "Base",
+                "group_name": "기타",
+                "market_value": 1_000_000,
+                "quantity": 1,
+                "unit_price": 1_000_000,
+            },
+            {
+                "stock_code": "FUT1",
+                "stock_name": "선물",
+                "group_name": "파생",
+                "market_value": 0,
+                "quantity": -100,
+                "unit_price": 5_000,
+            },
+        ],
+    )
+
+    short = composition["top_sells"][0]
+    assert short["stock_code"] == "FUT1"
+    assert short["activity"] == "futures_short"
+    assert short["quantity_change"] == -100
+    assert short["trade_value_estimate"] == -500_000
+    assert short["end_weight_pct"] < 0
+    assert composition["summary"]["futures_short_positions"] == 1
+    assert composition["summary"]["sell_like_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_period_report_resolves_preferred_stock_snapshot_names(temp_db):
+    await seed_user("u1", "user@example.com", "User")
+    db = await cache.get_db()
+    await db.executemany(
+        """
+        INSERT INTO portfolio_snapshots
+        (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("u1", "2026-05-31", 100_000, 90_000, 1000.0, 100.0, 1300.0),
+            ("u1", "2026-06-30", 120_000, 90_000, 1100.0, 100.0, 1300.0),
+        ],
+    )
+    await db.executemany(
+        """
+        INSERT INTO portfolio_stock_snapshots
+        (google_sub, date, stock_code, market_value, group_name, quantity, unit_price, avg_price_krw, cost_basis)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("u1", "2026-05-31", "005935", 100_000, "한국주식", 10, 10_000, 9_000, 90_000),
+            ("u1", "2026-06-30", "005935", 120_000, "한국주식", 10, 12_000, 9_000, 90_000),
+        ],
+    )
+    await db.commit()
+
+    resolver = AsyncMock(return_value="삼성전자우")
+    with patch.object(period_reports.foreign, "resolve_name", new=resolver), \
+            patch.object(period_reports, "today_kst_date", return_value=date(2026, 7, 1)):
+        report = await period_reports.build_period_report("u1", "monthly", "2026-06")
+
+    row = report["composition_changes"]["all"][0]
+    assert row["stock_code"] == "005935"
+    assert row["stock_name"] == "삼성전자우"
+    resolver.assert_awaited_with("005935")
+
+
 @pytest.mark.asyncio
 async def test_period_report_save_list_and_route_contract(temp_db):
     await _seed_period_fixture()

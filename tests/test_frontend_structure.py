@@ -416,7 +416,7 @@ def test_performance_tab_includes_period_report_panel():
     assert 'id="pfPeriodReportType"' in html
     assert 'id="pfPeriodReportKey"' in html
     assert 'id="pfPeriodReportGenerateBtn"' in html
-    assert html.find('id="pfPeriodReportWrap"') < html.find('id="pfNavChart"')
+    assert html.find('id="pfNavChart"') < html.find('id="pfPeriodReportWrap"')
     assert "./js/portfolio-ai.js" in html
     assert html.find("./js/portfolio-ai.js") < html.find("./js/portfolio-reports.js")
     assert html.find("./js/portfolio-reports.js") < html.find("./js/portfolio-performance.js")
@@ -427,6 +427,7 @@ def test_performance_tab_includes_period_report_panel():
     assert "/api/portfolio/period-reports/generate" in reports
     assert "report.composition_changes || {}" in reports
     assert "function _pfCompositionActivityLabel" in reports
+    assert "futures_short: '선물 매도'" in reports
     assert "매수·편입 구성 변화" in reports
     assert "매도·축소 구성 변화" in reports
     assert "schema v" in reports
@@ -1255,4 +1256,3 @@ def test_screener_labs_view_is_wired_as_deep_linkable_panel():
     assert ".screener-filters" in styles
     assert ".screener-table" in styles
     assert ".screener-pager" in styles
-

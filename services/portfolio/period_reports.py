@@ -17,7 +17,7 @@ from typing import Any
 
 from repositories import portfolio_reports as reports_repo
 from repositories import snapshots as snapshots_repo
-from services.portfolio import risk
+from services.portfolio import foreign, identifiers, risk
 from services.portfolio.time_windows import today_kst_date
 
 SCHEMA_VERSION = 2
@@ -91,6 +91,7 @@ def _activity_label(activity: str | None) -> str:
         "closed_position": "전량 매도",
         "increased_position": "추가 매수",
         "reduced_position": "부분 매도",
+        "futures_short": "선물 매도",
         "unchanged_position": "수량 유지",
         "value_only_increase": "평가액 증가",
         "value_only_decrease": "평가액 감소",
@@ -316,6 +317,72 @@ def _trade_unit_price(start_price: float | None, end_price: float | None) -> flo
     return None
 
 
+def _position_value_for_weight(row: dict | None) -> float:
+    if not row:
+        return 0.0
+    value = _float_or_none(row.get("market_value")) or 0.0
+    qty = _row_quantity(row)
+    if qty is not None and qty < 0:
+        if value < 0:
+            return value
+        unit_price = _row_unit_price(row)
+        if unit_price is None or unit_price <= 0:
+            unit_price = _float_or_none(row.get("avg_price_krw"))
+        if unit_price is not None and unit_price > 0:
+            return qty * unit_price
+        if value > 0:
+            return -abs(value)
+    return value
+
+
+def _portfolio_total_for_weight(rows: list[dict]) -> float:
+    total = sum(float(r.get("market_value") or 0) for r in rows)
+    if total > 0:
+        return total
+    return sum(abs(_position_value_for_weight(r)) for r in rows)
+
+
+def _weight_pct(position_value: float, portfolio_total: float) -> float:
+    if portfolio_total <= 0 or abs(position_value) <= 1e-12:
+        return 0.0
+    return _round(position_value / portfolio_total * 100.0) or 0.0
+
+
+def _needs_snapshot_name_resolution(row: dict) -> bool:
+    code = str(row.get("stock_code") or "").strip()
+    name = str(row.get("stock_name") or "").strip()
+    if not code or (name and name != code):
+        return False
+    return (
+        identifiers.is_korean_stock(code)
+        or identifiers.is_cash_asset(code)
+        or identifiers.is_special_asset(code)
+        or identifiers.static_foreign_ticker(code) is not None
+    )
+
+
+async def _enrich_snapshot_names(rows: list[dict]) -> list[dict]:
+    codes = sorted({str(row.get("stock_code") or "").strip() for row in rows if _needs_snapshot_name_resolution(row)})
+    if not codes:
+        return rows
+    resolved: dict[str, str] = {}
+    for code in codes:
+        try:
+            name = await foreign.resolve_name(code)
+        except Exception:
+            name = None
+        clean = str(name or "").strip()
+        if clean and clean != code:
+            resolved[code] = clean
+    if not resolved:
+        return rows
+    for row in rows:
+        code = str(row.get("stock_code") or "").strip()
+        if code in resolved and _needs_snapshot_name_resolution(row):
+            row["stock_name"] = resolved[code]
+    return rows
+
+
 def _concentration(rows: list[dict]) -> dict[str, Any]:
     values = sorted([float(r.get("market_value") or 0) for r in rows if float(r.get("market_value") or 0) > 0], reverse=True)
     total = sum(values)
@@ -334,7 +401,7 @@ def _concentration(rows: list[dict]) -> dict[str, Any]:
 def _holding_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[str, Any]:
     start_by = _rows_by_code(start_rows)
     end_by = _rows_by_code(end_rows)
-    total_end = sum(float(r.get("market_value") or 0) for r in end_rows)
+    total_end = _portfolio_total_for_weight(end_rows)
     changes = []
     counts = {"added": 0, "removed": 0, "increased": 0, "decreased": 0, "unchanged": 0}
     for code in sorted(set(start_by) | set(end_by)):
@@ -363,7 +430,7 @@ def _holding_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[str, 
             "end_value": _round(ev, 2),
             "change_value": _round(delta, 2),
             "change_pct": _pct_change(sv, ev),
-            "end_weight_pct": _round(ev / total_end * 100.0) if total_end > 0 and ev > 0 else 0.0,
+            "end_weight_pct": _weight_pct(_position_value_for_weight(e), total_end),
         })
     return {
         "counts": counts,
@@ -376,14 +443,15 @@ def _holding_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[str, 
 def _composition_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[str, Any]:
     start_by = _rows_by_code(start_rows)
     end_by = _rows_by_code(end_rows)
-    total_start = sum(float(r.get("market_value") or 0) for r in start_rows)
-    total_end = sum(float(r.get("market_value") or 0) for r in end_rows)
+    total_start = _portfolio_total_for_weight(start_rows)
+    total_end = _portfolio_total_for_weight(end_rows)
     avg_portfolio_value = max(1.0, (total_start + total_end) / 2.0)
     counts = {
         "new_positions": 0,
         "closed_positions": 0,
         "increased_positions": 0,
         "reduced_positions": 0,
+        "futures_short_positions": 0,
         "unchanged_positions": 0,
         "value_only_changes": 0,
     }
@@ -394,6 +462,8 @@ def _composition_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[s
         e = end_by.get(code)
         sv = float((s or {}).get("market_value") or 0)
         ev = float((e or {}).get("market_value") or 0)
+        signed_sv = _position_value_for_weight(s)
+        signed_ev = _position_value_for_weight(e)
         value_delta = ev - sv
         sq_raw = _row_quantity(s)
         eq_raw = _row_quantity(e)
@@ -409,7 +479,10 @@ def _composition_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[s
         confidence = "quantity_delta" if has_quantity_basis else "value_only"
 
         if has_quantity_basis and qty_delta is not None:
-            if sv <= 0 and ev > 0 and eq and eq > 0:
+            if eq is not None and eq < 0 and qty_delta < -1e-9:
+                activity = "futures_short"
+                counts["futures_short_positions"] += 1
+            elif sv <= 0 and ev > 0 and eq and eq > 0:
                 activity = "new_position"
                 counts["new_positions"] += 1
             elif sv > 0 and ev <= 0 and sq and sq > 0:
@@ -464,8 +537,8 @@ def _composition_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[s
             "start_value": _round(sv, 2),
             "end_value": _round(ev, 2),
             "value_change": _round(value_delta, 2),
-            "start_weight_pct": _round(sv / total_start * 100.0) if total_start > 0 and sv > 0 else 0.0,
-            "end_weight_pct": _round(ev / total_end * 100.0) if total_end > 0 and ev > 0 else 0.0,
+            "start_weight_pct": _weight_pct(signed_sv, total_start),
+            "end_weight_pct": _weight_pct(signed_ev, total_end),
         }
         row["weight_change_ppt"] = _round((row["end_weight_pct"] or 0) - (row["start_weight_pct"] or 0))
         rows.append(row)
@@ -482,6 +555,8 @@ def _composition_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[s
             "net_trade_value_estimate": 0.0,
             "start_value": 0.0,
             "end_value": 0.0,
+            "start_weight_value": 0.0,
+            "end_weight_value": 0.0,
             "buy_count": 0,
             "sell_count": 0,
         })
@@ -495,11 +570,13 @@ def _composition_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[s
         item["net_trade_value_estimate"] += tv
         item["start_value"] += float(row.get("start_value") or 0)
         item["end_value"] += float(row.get("end_value") or 0)
+        item["start_weight_value"] += _position_value_for_weight(start_by.get(row["stock_code"]))
+        item["end_weight_value"] += _position_value_for_weight(end_by.get(row["stock_code"]))
     group_rows = []
     for item in by_group.values():
         item["value_change"] = item["end_value"] - item["start_value"]
-        item["start_weight_pct"] = item["start_value"] / total_start * 100.0 if total_start > 0 and item["start_value"] > 0 else 0.0
-        item["end_weight_pct"] = item["end_value"] / total_end * 100.0 if total_end > 0 and item["end_value"] > 0 else 0.0
+        item["start_weight_pct"] = _weight_pct(item["start_weight_value"], total_start)
+        item["end_weight_pct"] = _weight_pct(item["end_weight_value"], total_end)
         item["weight_change_ppt"] = item["end_weight_pct"] - item["start_weight_pct"]
         group_rows.append({
             "group_name": item["group_name"],
@@ -524,7 +601,7 @@ def _composition_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[s
         "summary": {
             **counts,
             "buy_like_count": counts["new_positions"] + counts["increased_positions"],
-            "sell_like_count": counts["closed_positions"] + counts["reduced_positions"],
+            "sell_like_count": counts["closed_positions"] + counts["reduced_positions"] + counts["futures_short_positions"],
             "gross_buy_value_estimate": _round(gross_buy, 2),
             "gross_sell_value_estimate": _round(gross_sell, 2),
             "net_trade_value_estimate": _round(gross_buy - gross_sell, 2),
@@ -785,6 +862,8 @@ async def build_period_report(
     cashflows = _cashflow_summary(cashflows_all, period["start_date"], period["end_date"])
     start_rows = await snapshots_repo.get_stock_snapshot_rows_on_or_before(google_sub, str(baseline["date"]))
     end_rows = await snapshots_repo.get_stock_snapshot_rows_on_or_before(google_sub, str(end_snapshot["date"]))
+    await _enrich_snapshot_names(start_rows)
+    await _enrich_snapshot_names(end_rows)
     holding_changes = _holding_changes(start_rows, end_rows)
     composition_changes = _composition_changes(start_rows, end_rows)
     allocation = _group_changes(start_rows, end_rows)
