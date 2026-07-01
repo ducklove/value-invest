@@ -305,7 +305,7 @@ async def ingest_pdf_for_report(
 
     # Step 3: parse
     try:
-        text = parse_pdf_bytes(pdf_bytes)
+        text = await asyncio.to_thread(parse_pdf_bytes, pdf_bytes)
         parse_status = "parsed" if text.strip() else "parse_failed"
         parse_error = None if text.strip() else "empty text extraction (image-only PDF?)"
     except Exception as exc:

@@ -24,6 +24,14 @@ def _request(path: str = "/api/auth/register") -> Request:
 
 
 class PasswordAuthTests(TempDbMixin):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        auth_route._AUTH_RATE_LIMIT_BUCKETS.clear()
+
+    async def asyncTearDown(self):
+        auth_route._AUTH_RATE_LIMIT_BUCKETS.clear()
+        await super().asyncTearDown()
+
     async def test_register_and_login_with_email_password(self):
         with patch("auth_service.session_secret", return_value="test-secret"):
             response = Response()
@@ -113,6 +121,31 @@ class PasswordAuthTests(TempDbMixin):
             )
 
         self.assertEqual(logged_in["user"]["google_sub"], user["google_sub"])
+
+    async def test_password_login_rate_limits_repeated_failures(self):
+        with patch("auth_service.session_secret", return_value="test-secret"):
+            await users_repo.create_local_user(
+                email="limited@example.com",
+                name="Limited User",
+                password_hash=auth_service.hash_password("correct-pass"),
+            )
+
+            for _ in range(auth_route._AUTH_RATE_LIMIT_MAX_ATTEMPTS):
+                with self.assertRaises(HTTPException) as exc_info:
+                    await auth_route.auth_password_login(
+                        _request("/api/auth/password/login"),
+                        Response(),
+                        {"email": "limited@example.com", "password": "wrong-pass"},
+                    )
+                self.assertEqual(exc_info.exception.status_code, 401)
+
+            with self.assertRaises(HTTPException) as exc_info:
+                await auth_route.auth_password_login(
+                    _request("/api/auth/password/login"),
+                    Response(),
+                    {"email": "limited@example.com", "password": "correct-pass"},
+                )
+            self.assertEqual(exc_info.exception.status_code, 429)
 
     async def test_signup_cannot_claim_existing_google_email(self):
         with patch("auth_service.session_secret", return_value="test-secret"):

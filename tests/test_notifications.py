@@ -537,6 +537,19 @@ class AlertEngineHarness(TempDbMixin):
         self.assertIn("목표가 달성", captured["text"])
         self.assertIn("삼성전자", captured["text"])
 
+    async def test_blanket_alert_skips_when_portfolio_load_fails(self):
+        await self._rule(scope="all_stocks", alert_type="target_reached", threshold=0.0, stock_code=None)
+
+        with patch.object(engine.portfolio_repo, "get_portfolio", new=AsyncMock(side_effect=RuntimeError("db down"))), \
+             patch.object(engine, "_safe_quote", new=AsyncMock()) as quote, \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            with self.assertLogs(engine.logger, level="WARNING") as logs:
+                self.assertEqual(await engine.evaluate_user("u1"), 0)
+
+        quote.assert_not_awaited()
+        disp.assert_not_awaited()
+        self.assertTrue(any("portfolio alert load failed" in line for line in logs.output))
+
     async def test_effective_target_prefers_live_formula(self):
         # 삼성생명류: 수식 목표가가 있으면 매입가×1.3 자동값이 아니라 라이브 수식 결과.
         item = {"stock_code": "005930", "target_price_formula": "BPS*0.5", "avg_price": 200000}

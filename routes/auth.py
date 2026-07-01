@@ -1,5 +1,8 @@
+import html
 import json
 import logging
+import time
+from collections import deque
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
 from fastapi import APIRouter, Body, HTTPException, Request, Response
@@ -19,9 +22,15 @@ from repositories import users as users_repo
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_AUTH_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
+_AUTH_RATE_LIMIT_MAX_ATTEMPTS = 8
+_AUTH_RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
+
 
 def _normalize_return_to(value: str | None) -> str:
     if not value:
+        return "/"
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value) or any(ch in value for ch in "<>`\\"):
         return "/"
     parsed = urlparse(value)
     if not parsed.scheme and not parsed.netloc and value.startswith("/"):
@@ -30,6 +39,69 @@ def _normalize_return_to(value: str | None) -> str:
     if origin in TRUSTED_RETURN_ORIGINS:
         return value
     return "/"
+
+
+def _json_for_inline_script(value: str) -> str:
+    return (
+        json.dumps(value, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
+def _client_rate_identity(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        first_forwarded = forwarded_for.split(",", 1)[0].strip()
+        if first_forwarded:
+            return first_forwarded
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else "unknown"
+
+
+def _auth_rate_keys(request: Request, email: str | None = None) -> tuple[str, ...]:
+    keys = [f"ip:{_client_rate_identity(request)}"]
+    if email and auth_service.validate_email(email):
+        keys.append(f"account:{email}")
+    return tuple(keys)
+
+
+def _trim_auth_rate_bucket(bucket: deque[float], now: float) -> None:
+    cutoff = now - _AUTH_RATE_LIMIT_WINDOW_SECONDS
+    while bucket and bucket[0] < cutoff:
+        bucket.popleft()
+
+
+def _check_auth_rate_limit(request: Request, email: str | None = None) -> None:
+    now = time.monotonic()
+    for key in _auth_rate_keys(request, email):
+        bucket = _AUTH_RATE_LIMIT_BUCKETS.get(key)
+        if not bucket:
+            continue
+        _trim_auth_rate_bucket(bucket, now)
+        if not bucket:
+            _AUTH_RATE_LIMIT_BUCKETS.pop(key, None)
+            continue
+        if len(bucket) >= _AUTH_RATE_LIMIT_MAX_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+
+
+def _record_auth_failure(request: Request, email: str | None = None) -> None:
+    now = time.monotonic()
+    for key in _auth_rate_keys(request, email):
+        bucket = _AUTH_RATE_LIMIT_BUCKETS.setdefault(key, deque())
+        _trim_auth_rate_bucket(bucket, now)
+        bucket.append(now)
+
+
+def _clear_auth_failures(request: Request, email: str | None = None) -> None:
+    for key in _auth_rate_keys(request, email):
+        _AUTH_RATE_LIMIT_BUCKETS.pop(key, None)
 
 
 def _append_query_value(url: str, key: str, value: str) -> str:
@@ -64,14 +136,14 @@ def _clean_name(value: str | None, fallback_email: str) -> str:
 
 def _render_login_page(return_to: str | None) -> str:
     normalized_return_to = _normalize_return_to(return_to)
-    escaped_return_to = json.dumps(normalized_return_to, ensure_ascii=False)
+    escaped_return_to = _json_for_inline_script(normalized_return_to)
     config = auth_service.public_config()
-    escaped_google_client_id = json.dumps(config["google_client_id"], ensure_ascii=False)
+    escaped_google_client_id = _json_for_inline_script(config["google_client_id"])
     google_enabled = json.dumps(bool(config["google_enabled"]))
-    google_auth_url = json.dumps("/api/auth/google", ensure_ascii=False)
-    password_login_url = json.dumps("/api/auth/password/login", ensure_ascii=False)
-    register_url = json.dumps("/api/auth/register", ensure_ascii=False)
-    home_url = json.dumps(normalized_return_to or "/", ensure_ascii=False)
+    google_auth_url = _json_for_inline_script("/api/auth/google")
+    password_login_url = _json_for_inline_script("/api/auth/password/login")
+    register_url = _json_for_inline_script("/api/auth/register")
+    home_url = html.escape(normalized_return_to or "/", quote=True)
     return f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -264,7 +336,7 @@ def _render_login_page(return_to: str | None) -> str:
     </div>
 
     <div class="actions">
-      <a class="back-link" href={home_url}>분석 화면으로 돌아가기</a>
+      <a class="back-link" href="{home_url}">분석 화면으로 돌아가기</a>
     </div>
   </main>
   <script>
@@ -447,19 +519,24 @@ async def auth_google(request: Request, response: Response, payload: dict = Body
     if not auth_service.is_google_enabled():
         raise HTTPException(status_code=503, detail="Google 로그인이 아직 설정되지 않았습니다.")
 
+    _check_auth_rate_limit(request)
     credential = str((payload or {}).get("credential") or "").strip()
     if not credential:
+        _record_auth_failure(request)
         raise HTTPException(status_code=400, detail="Google 로그인 토큰이 없습니다.")
 
     try:
         user = await auth_service.verify_google_credential(credential)
     except ValueError as exc:
+        _record_auth_failure(request)
         raise HTTPException(status_code=401, detail="Google 로그인 검증에 실패했습니다.") from exc
     except Exception as exc:
+        _record_auth_failure(request)
         logger.warning("Google 로그인 검증 실패: %s", exc)
         raise HTTPException(status_code=502, detail="Google 인증 서버를 확인하지 못했습니다.") from exc
 
     stored_user = await users_repo.upsert_user(user)
+    _clear_auth_failures(request)
     await _sign_in_user(request, response, stored_user)
     return {"ok": True, "user": serialize_user(stored_user)}
 
@@ -471,16 +548,21 @@ async def auth_register(request: Request, response: Response, payload: dict = Bo
 
     email = auth_service.normalize_email((payload or {}).get("email"))
     password = str((payload or {}).get("password") or "")
+    _check_auth_rate_limit(request, email)
     if not auth_service.validate_email(email):
+        _record_auth_failure(request, email)
         raise HTTPException(status_code=400, detail="올바른 이메일을 입력해 주세요.")
     password_error = auth_service.validate_password(password)
     if password_error:
+        _record_auth_failure(request, email)
         raise HTTPException(status_code=400, detail=password_error)
 
     existing = await users_repo.get_user_by_email(email)
     if existing and existing.get("password_set"):
+        _record_auth_failure(request, email)
         raise HTTPException(status_code=409, detail="이미 가입된 이메일입니다. 로그인해 주세요.")
     if existing:
+        _record_auth_failure(request, email)
         raise HTTPException(
             status_code=409,
             detail="이미 Google 계정으로 사용 중인 이메일입니다. Google로 로그인한 뒤 프로필에서 비밀번호를 등록해 주세요.",
@@ -502,14 +584,18 @@ async def auth_password_login(request: Request, response: Response, payload: dic
 
     email = auth_service.normalize_email((payload or {}).get("email"))
     password = str((payload or {}).get("password") or "")
+    _check_auth_rate_limit(request, email)
     if not auth_service.validate_email(email) or not password:
+        _record_auth_failure(request, email)
         raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
 
     user = await users_repo.get_password_user_by_email(email)
     if not user or not auth_service.verify_password(password, user.get("password_hash")):
+        _record_auth_failure(request, email)
         raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
 
     user = await users_repo.touch_user_login(user["google_sub"]) or user
+    _clear_auth_failures(request, email)
     await _sign_in_user(request, response, user)
     return {"ok": True, "user": serialize_user(user)}
 
@@ -565,21 +651,29 @@ async def auth_google_callback(request: Request):
     if not auth_service.is_google_enabled():
         return RedirectResponse(_append_query_value(return_to, "auth_error", "not_configured"), status_code=303)
 
+    try:
+        _check_auth_rate_limit(request)
+    except HTTPException:
+        return RedirectResponse(_append_query_value(return_to, "auth_error", "rate_limited"), status_code=303)
+
     form = await _read_post_fields(request)
     credential = str(form.get("credential") or "").strip()
     csrf_cookie = str(request.cookies.get("g_csrf_token") or "").strip()
     csrf_form = str(form.get("g_csrf_token") or "").strip()
 
     if not credential or not csrf_cookie or csrf_cookie != csrf_form:
+        _record_auth_failure(request)
         return RedirectResponse(_append_query_value(return_to, "auth_error", "csrf"), status_code=303)
 
     try:
         user = await auth_service.verify_google_credential(credential)
     except Exception as exc:
+        _record_auth_failure(request)
         logger.warning("Google redirect login verification failed: %s", exc)
         return RedirectResponse(_append_query_value(return_to, "auth_error", "google"), status_code=303)
 
     stored_user = await users_repo.upsert_user(user)
+    _clear_auth_failures(request)
 
     redirect_target = _append_query_value(return_to, "auth", "success")
     response = RedirectResponse(redirect_target, status_code=303)

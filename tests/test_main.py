@@ -67,6 +67,19 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(auth._normalize_return_to("//evil.example/path"), "/")
         self.assertEqual(auth._normalize_return_to("/portfolio"), "/portfolio")
 
+    def test_return_to_rejects_script_breakout_chars(self):
+        self.assertEqual(auth._normalize_return_to("/</script><script>alert(1)</script>"), "/")
+        self.assertEqual(auth._normalize_return_to("/portfolio\\evil"), "/")
+
+    def test_login_page_escapes_return_to_in_script_and_href(self):
+        safe_json = auth._json_for_inline_script("/</script><script>alert(1)</script>")
+        self.assertIn("\\u003c/script\\u003e", safe_json)
+        self.assertNotIn("</script>", safe_json.lower())
+
+        body = auth._render_login_page('/portfolio?name="x"&tab=1')
+        self.assertIn('href="/portfolio?name=&quot;x&quot;&amp;tab=1"', body)
+        self.assertIn('const RETURN_TO = "/portfolio?name=\\"x\\"\\u0026tab=1";', body)
+
     def test_internal_rejects_forwarded_loopback_without_token(self):
         request = _request_with_headers(
             "/api/internal/snapshot/nav",

@@ -5,6 +5,27 @@ let _pfTodayStatePromise = null;
 const _PF_PORTFOLIO_SNAPSHOT_KEY = 'valueInvestPortfolioSnapshot:v2';
 const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;
 
+function _pfSetLoadStatus(message = '', state = 'error') {
+  const status = document.getElementById('pfLoadStatus');
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.state = state;
+  status.style.display = message ? 'block' : 'none';
+}
+
+function _pfShowPortfolioLoadFailure(message) {
+  _pfSetLoadStatus(message, 'error');
+  if (!PfStore.items.length) {
+    const empty = document.getElementById('pfEmpty');
+    const table = document.getElementById('pfTable');
+    if (empty) {
+      empty.textContent = message;
+      empty.style.display = 'block';
+    }
+    if (table) table.style.display = 'none';
+  }
+}
+
 async function pfLoadNavHistory({ force = false } = {}) {
   if (!force && Array.isArray(PfStore.navHistory) && PfStore.navHistory.length) return PfStore.navHistory;
   if (_pfNavHistoryPromise) return _pfNavHistoryPromise;
@@ -64,13 +85,19 @@ async function loadPortfolio({ force = false } = {}) {
     const resp = await apiFetch('/api/portfolio');
     if (!resp.ok) {
       if (resp.status === 401) {
+        _pfSetLoadStatus('');
         document.getElementById('pfEmpty').textContent = '로그인이 필요합니다.';
         document.getElementById('pfEmpty').style.display = 'block';
         document.getElementById('pfTable').style.display = 'none';
         return;
       }
+      const err = new Error(`포트폴리오 요청 실패 (${resp.status})`);
+      err.status = resp.status;
+      _pfShowPortfolioLoadFailure('포트폴리오를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      reportApiError(err, '포트폴리오', { silent: true });
       return;
     }
+    _pfSetLoadStatus('');
     const freshItems = await resp.json();
     // Load groups (fast), restore cached benchmark names from localStorage
     try {
@@ -142,7 +169,10 @@ async function loadPortfolio({ force = false } = {}) {
       void pfLoadActionBoard({ force: true });
     }
     _updateQuoteSubscriptions();
-  } catch (e) { console.warn(e); } finally {
+  } catch (e) {
+    _pfShowPortfolioLoadFailure('포트폴리오를 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.');
+    reportApiError(e, '포트폴리오', { silent: true });
+  } finally {
     PfStore.loading = false;
   }
 }

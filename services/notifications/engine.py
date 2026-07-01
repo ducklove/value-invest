@@ -687,8 +687,13 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
     try:
         for item in await portfolio_repo.get_portfolio(google_sub):
             items_by_code[item["stock_code"]] = item
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("portfolio alert load failed user=%s: %s", str(google_sub)[:8], exc)
+        if any(r["alert_type"] in BLANKET_TYPES for r in rules):
+            logger.warning("skipping blanket portfolio alerts after portfolio load failure user=%s", str(google_sub)[:8])
+            rules = [r for r in rules if r["alert_type"] not in BLANKET_TYPES]
+            if not rules:
+                return 0
 
     async def _name(code: str | None) -> str:
         item = items_by_code.get(code or "")

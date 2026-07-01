@@ -40,8 +40,50 @@ function pfFmtAvgPriceCell(row, formatter = pfFmtPortfolioValue) {
   return `${main}<span class="pf-native-price">${escapeHtml(row.avgPriceCurrency)} ${escapeHtml(pfFmtNativeAvgPrice(row.avgPrice, row.avgPriceCurrency))}</span>`;
 }
 
+function _pfInitSortableHeaders() {
+  document.querySelectorAll('.pf-sortable').forEach(th => {
+    if (!th.dataset.sort) return;
+    th.setAttribute('scope', 'col');
+    th.setAttribute('tabindex', '0');
+    if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+    if (th.dataset.keyboardBound) return;
+    th.dataset.keyboardBound = '1';
+    th.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      pfSort(th.dataset.sort);
+    });
+  });
+}
+
+function _pfUpdateSortableHeaders() {
+  document.querySelectorAll('.pf-sortable').forEach(th => {
+    const key = th.dataset.sort;
+    const existing = th.querySelector('.pf-sort-arrow');
+    if (existing) existing.remove();
+    const isActive = key === 'group' ? PfStore.sort.groupSort : PfStore.sort.key === key;
+    th.setAttribute('aria-sort', 'none');
+    if (isActive) {
+      const arrow = document.createElement('span');
+      arrow.className = 'pf-sort-arrow';
+      arrow.textContent = key === 'group' ? ' \u25BC' : (PfStore.sort.asc ? ' \u25B2' : ' \u25BC');
+      th.appendChild(arrow);
+      th.setAttribute('aria-sort', key === 'group' || PfStore.sort.asc ? 'ascending' : 'descending');
+    }
+  });
+}
+
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _pfInitSortableHeaders, { once: true });
+  } else {
+    _pfInitSortableHeaders();
+  }
+}
+
 function renderPortfolio(options = {}) {
   const summaryOnly = !!(options && options.summaryOnly);
+  if (!summaryOnly) _pfInitSortableHeaders();
   _pfRenderColToggles();
   const tbody = document.getElementById('pfBody');
   const tfoot = document.getElementById('pfFoot');
@@ -285,18 +327,7 @@ function renderPortfolio(options = {}) {
 
   // Update sort arrows in header
   if (!summaryOnly) {
-    document.querySelectorAll('.pf-sortable').forEach(th => {
-      const key = th.dataset.sort;
-      const existing = th.querySelector('.pf-sort-arrow');
-      if (existing) existing.remove();
-      const isActive = key === 'group' ? PfStore.sort.groupSort : PfStore.sort.key === key;
-      if (isActive) {
-        const arrow = document.createElement('span');
-        arrow.className = 'pf-sort-arrow';
-        arrow.textContent = key === 'group' ? ' \u25BC' : (PfStore.sort.asc ? ' \u25B2' : ' \u25BC');
-        th.appendChild(arrow);
-      }
-    });
+    _pfUpdateSortableHeaders();
   }
 
   // FX helper: convert KRW value using a specific snapshot's FX rate, or current rate

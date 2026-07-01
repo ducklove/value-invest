@@ -3,6 +3,7 @@
 Uses the same isolated-DB fixture pattern as test_portfolio.py. All LLM
 and HTTP calls are monkeypatched — no network."""
 import os
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -305,6 +306,36 @@ class WikiIngestionTests(TempDbMixin):
         self.assertEqual(e["firm"], "미래에셋")
         self.assertEqual(e["target_price"], 95000.0)
         self.assertIn("핵심 요약", e["summary_md"])
+
+    async def test_ingest_offloads_pdf_parse_to_worker_thread(self):
+        stock = "005930"
+        report = {
+            "pdf_url": "https://stock.pstatic.net/stock-research/threaded.pdf",
+            "date": "2026-04-01", "firm": "미래에셋", "title": "Q1 리뷰",
+            "recommendation": "Buy", "target_price": "95,000",
+            "stock_name": "삼성전자",
+        }
+        fake_summary = {
+            "summary_md": "### 핵심 요약\n본문\n### 주요 포인트\n- a\n",
+            "key_points_md": "- a",
+            "tokens_in": 10, "tokens_out": 5, "model": "test-model",
+        }
+        caller_thread = threading.get_ident()
+        parse_threads: list[int] = []
+
+        def fake_parse(data: bytes) -> str:
+            self.assertEqual(data, SAMPLE_PDF_BYTES)
+            parse_threads.append(threading.get_ident())
+            return "본문 추출 성공"
+
+        with patch.object(wiki_ingestion, "download_pdf", AsyncMock(return_value=SAMPLE_PDF_BYTES)), \
+             patch.object(wiki_ingestion, "parse_pdf_bytes", side_effect=fake_parse), \
+             patch.object(wiki_ingestion, "summarize_report", AsyncMock(return_value=fake_summary)):
+            result = await wiki_ingestion.ingest_pdf_for_report(stock, report)
+
+        self.assertTrue(result.get("ok"), msg=f"unexpected result: {result}")
+        self.assertTrue(parse_threads)
+        self.assertNotEqual(parse_threads[0], caller_thread)
 
     async def test_ingest_marks_download_failure(self):
         stock = "005930"

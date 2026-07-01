@@ -10,6 +10,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from _harness import TempDbMixin
 from fastapi.testclient import TestClient
 
 from core.app_factory import create_app
@@ -173,7 +174,7 @@ class ScreenerRepoTests(unittest.TestCase):
 
 
 
-class ScreenerServiceTests(unittest.IsolatedAsyncioTestCase):
+class ScreenerServiceTests(TempDbMixin):
     """services/screener.py — 검증 + finance-pi 호출 mock."""
 
     async def test_normalize_filters_rejects_unknown_metric(self):
@@ -273,8 +274,15 @@ class ScreenerRouteTests(unittest.TestCase):
 
     def test_spec_endpoint_returns_filter_definitions(self):
         # spec 은 coverage 를 finance-pi 에서 가져오지만, 캐시가 비어있으면
-        # 빈 스냅샷으로 폴백한다 — 여기서는 필터 정의가 반환되는지만 검증.
-        resp = self.client.get("/api/screener/spec")
+        # service mock 으로 HTTP 계약만 검증한다.
+        with patch.object(screener_service, "get_filter_specs", new=AsyncMock(
+            return_value={
+                "filters": screener_service.FILTER_SPECS,
+                "sorts": screener_service.ALLOWED_SORTS,
+                "coverage": {"universe": 4, "valued": 4, "fundamentals": 3},
+            }
+        )):
+            resp = self.client.get("/api/screener/spec")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertIn("per", data["filters"])
