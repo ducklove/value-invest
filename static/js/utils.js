@@ -292,6 +292,48 @@ function apiFetch(path, options = {}) {
   return fetch(buildApiUrl(path), init).finally(() => clearTimeout(timer));
 }
 
+function _stringifyApiErrorDetail(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map(item => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object') {
+        return item.msg || item.message || item.detail || '';
+      }
+      return '';
+    }).filter(Boolean).join('; ');
+  }
+  if (value && typeof value === 'object') {
+    return value.msg || value.message || JSON.stringify(value);
+  }
+  return '';
+}
+
+function _apiErrorMessageFromBody(body) {
+  if (!body || typeof body !== 'object') return '';
+  return _stringifyApiErrorDetail(body.detail ?? body.message ?? body.error);
+}
+
+async function apiFetchJson(path, options = {}) {
+  const { errorMessage = '', ...fetchOptions } = options || {};
+  const resp = await apiFetch(path, fetchOptions);
+  let data = null;
+  try {
+    data = await resp.json();
+  } catch (_) {
+    data = null;
+  }
+  if (!resp.ok) {
+    const message = _apiErrorMessageFromBody(data) || errorMessage || resp.statusText || `HTTP ${resp.status}`;
+    const error = new Error(message);
+    error.status = resp.status;
+    error.payload = data;
+    error.response = resp;
+    throw error;
+  }
+  return data;
+}
+
 function _isAbortError(error) {
   return !!error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 }

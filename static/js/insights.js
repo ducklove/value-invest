@@ -9,9 +9,9 @@ async function loadInsightsBoard({ force = false } = {}) {
   if (_insightsLoaded && !force) return;
   list.innerHTML = '<div class="insight-board-empty">인사이트를 불러오는 중...</div>';
   try {
-    const resp = await apiFetch('/api/insights?limit=50');
-    if (!resp.ok) throw new Error('인사이트 목록을 불러오지 못했습니다.');
-    _insightPosts = await resp.json();
+    _insightPosts = await apiFetchJson('/api/insights?limit=50', {
+      errorMessage: '인사이트 목록을 불러오지 못했습니다.',
+    });
     _insightsLoaded = true;
     renderInsightPosts();
   } catch (err) {
@@ -124,13 +124,12 @@ async function submitInsightPost() {
     tags: (document.getElementById('insightTags')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
   };
   try {
-    const resp = await apiFetch('/api/insights', {
+    await apiFetchJson('/api/insights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      errorMessage: '등록 실패',
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || '등록 실패');
     if (msg) {
       msg.textContent = '등록되었습니다.';
       msg.className = 'insight-form-message ok';
@@ -214,11 +213,10 @@ function renderInsightPostCard(post) {
 async function deleteInsightPost(id) {
   if (!confirm('이 인사이트 글을 삭제할까요?')) return;
   try {
-    const resp = await apiFetch(`/api/insights/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      throw new Error(data.detail || '삭제 실패');
-    }
+    await apiFetchJson(`/api/insights/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      errorMessage: '삭제 실패',
+    });
     await loadInsightsBoard({ force: true });
   } catch (err) {
     alert(err.message);

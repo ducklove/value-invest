@@ -89,12 +89,12 @@ async function addCashflow() {
   const memo = document.getElementById('pfCfMemo').value.trim();
   if (!amount || amount <= 0) { showToast('금액을 입력해 주세요.'); return; }
   try {
-    const resp = await apiFetch('/api/portfolio/cashflows', {
+    await apiFetchJson('/api/portfolio/cashflows', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, date: date || undefined, amount, memo: memo || undefined }),
+      errorMessage: '입출금을 등록하지 못했습니다.',
     });
-    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`); }
     document.getElementById('pfCfAmount').value = '';
     document.getElementById('pfCfMemo').value = '';
     await refreshPortfolioAfterCashflowMutation();
@@ -104,8 +104,10 @@ async function addCashflow() {
 async function deleteCashflow(id) {
   if (!confirm('이 입출금 내역을 삭제할까요?')) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/cashflows/${id}`, { method: 'DELETE' });
-    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`); }
+    await apiFetchJson(`/api/portfolio/cashflows/${id}`, {
+      method: 'DELETE',
+      errorMessage: '입출금을 삭제하지 못했습니다.',
+    });
     await refreshPortfolioAfterCashflowMutation();
   } catch (e) { reportApiError(e, '입출금 삭제'); }
 }

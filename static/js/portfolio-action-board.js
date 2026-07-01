@@ -227,13 +227,12 @@ async function pfLoadActionBoard({ force = false } = {}) {
 async function pfActionBoardSetStatus(actionKey, status) {
   if (!pfActionBoardIsEnabled()) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/action-board/queue/${encodeURIComponent(actionKey)}`, {
+    const data = await apiFetchJson(`/api/portfolio/action-board/queue/${encodeURIComponent(actionKey)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
+      errorMessage: '액션 검토 상태를 변경하지 못했습니다.',
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     if (PfActionBoard.data && Array.isArray(PfActionBoard.data.actions)) {
       PfActionBoard.data.actions = PfActionBoard.data.actions.map((item) => (
         item.key === actionKey ? { ...item, status, review: data.review || item.review } : item

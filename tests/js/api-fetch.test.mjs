@@ -108,6 +108,56 @@ test("apiFetch timeoutMs: 0 disables the timeout", async () => {
   assert.equal(calls[0].init.signal, undefined);
 });
 
+test("apiFetchJson returns parsed JSON and forwards fetch options", async () => {
+  const w = loadUtils();
+  w.fetch = async (url, init = {}) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ url, method: init.method, body: init.body }),
+  });
+  const data = await w.apiFetchJson("/api/demo", {
+    method: "POST",
+    body: JSON.stringify({ ok: true }),
+    errorMessage: "should not leak to fetch",
+  });
+  assert.equal(data.url, "/api/demo");
+  assert.equal(data.method, "POST");
+  assert.equal(data.body, '{"ok":true}');
+});
+
+test("apiFetchJson throws parsed FastAPI detail and attaches response metadata", async () => {
+  const w = loadUtils();
+  w.fetch = async () => ({
+    ok: false,
+    status: 422,
+    statusText: "Unprocessable Entity",
+    json: async () => ({ detail: [{ msg: "field required" }] }),
+  });
+  await assert.rejects(
+    w.apiFetchJson("/api/demo", { errorMessage: "저장 실패" }),
+    (err) => {
+      assert.equal(err.message, "field required");
+      assert.equal(err.status, 422);
+      assert.deepEqual(err.payload, { detail: [{ msg: "field required" }] });
+      return true;
+    },
+  );
+});
+
+test("apiFetchJson uses fallback message when error body is not JSON", async () => {
+  const w = loadUtils();
+  w.fetch = async () => ({
+    ok: false,
+    status: 500,
+    statusText: "Internal Server Error",
+    json: async () => { throw new Error("not json"); },
+  });
+  await assert.rejects(
+    w.apiFetchJson("/api/demo", { errorMessage: "저장 실패" }),
+    /저장 실패/,
+  );
+});
+
 test("reportApiError shows a Korean '<context> 실패: ...' toast for user actions", () => {
   const w = loadUtils();
   w.reportApiError(new Error("재고가 없습니다"), "저장");
