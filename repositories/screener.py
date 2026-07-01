@@ -1,97 +1,84 @@
-"""Value screener — cross-ticker filtering over fundamentals + market data.
+"""Value screener — in-memory filtering over a finance-pi universe snapshot.
 
 The screener answers "which stocks in the universe satisfy these value
-conditions today?". It runs purely over two existing tables:
-
-* ``financial_data`` — revenue / operating_profit / net_income / total_*
-  fundamentals (per stock_code × year, sourced from DART).
-* ``market_data`` — per / pbr / eps / bps / dividend_per_share /
-  dividend_yield / market_cap / close_price (per stock_code × year).
-
-Derived metrics that are not columns elsewhere (ROE, debt ratio, operating
-margin — see ``analyzer.py:53-55``) are computed in SQL here, so the whole
-screener is one round-trip with no per-row Python.
+conditions today?". It no longer queries the local ``market_data`` /
+``financial_data`` tables (which only cover stocks a user has analyzed).
+Instead the service layer fetches a full KOSPI/KOSDAQ snapshot from
+finance-pi (``/api/fundamentals/screener``) and this module filters/sorts/
+paginates that snapshot in memory.
 
 Design notes:
 
-* **Latest-year-per-ticker selection** reuses the self-join pattern from
-  ``repositories/portfolio.py:342-358`` (``(stock_code, year) IN (SELECT
-  stock_code, MAX(year) ...)``). We pick the latest year independently for
-  fundamentals and valuation, because DART statements and year-end price
-  snapshots arrive on different cadences.
-* **Whitelist-only filtering.`` Filter keys are validated against
-  ``ALLOWED_FILTERS``; values flow through ``?`` placeholders. There is no
-  string interpolation of user input into SQL, mirroring the identifier
-  allowlist discipline in ``repositories/schema.py``.
-* **Universe join.`` ``corp_codes`` supplies the name and makes the result
-  readable even when fundamentals are sparse. A ``LEFT JOIN`` keeps tickers
-  whose valuation is known but fundamentals aren't (the screener then just
-  can't match ROE-style filters for them).
+* **Whitelist-only filtering.** Filter keys are validated against
+  ``ALLOWED_FILTERS``; the finance-pi snapshot row uses matching field names.
+  The service layer validates values before calling here.
+* **finance-pi field names** map 1:1 to the screener filters, except the
+  historical ``stock_code``/``corp_name`` (now ``ticker``/``name``) and
+  ``close_price`` (now ``close``). ``ALLOWED_SORTS`` keeps the sort keys the
+  UI already uses and resolves them to snapshot field names.
+* **No persistence.** Nothing is written to the local DB — the snapshot is
+  fetched live and optionally cached by the service layer. This matches the
+  project decision to keep universe valuation data in finance-pi only.
 """
 
 from __future__ import annotations
 
-from repositories.db import get_db
-
-# Columns the screener may filter/sort on, with the SQL expression to evaluate.
-# Derived metrics (roe / debt_ratio / operating_margin) are computed inline so
-# callers can filter on them without a persisted column. Keep this dict the
-# single source of truth for what the API accepts — anything not here is
-# rejected by the service layer before we reach SQL.
+# Metrics the screener may filter/sort on. The keys are the API filter names
+# (matching services/screener.py FILTER_SPECS); the values are the
+# corresponding field names in a finance-pi screener snapshot row.
 ALLOWED_FILTERS: dict[str, str] = {
-    "per": "m.per",
-    "pbr": "m.pbr",
-    "dividend_yield": "m.dividend_yield",
-    "market_cap": "m.market_cap",
-    "eps": "m.eps",
-    "bps": "m.bps",
-    "roe": "CASE WHEN f.total_equity NOT NULL AND f.total_equity != 0 "
-    "THEN f.net_income * 1.0 / f.total_equity * 100 END",
-    "debt_ratio": "CASE WHEN f.total_equity NOT NULL AND f.total_equity != 0 "
-    "THEN f.total_liabilities * 1.0 / f.total_equity * 100 END",
-    "operating_margin": "CASE WHEN f.revenue NOT NULL AND f.revenue != 0 "
-    "THEN f.operating_profit * 1.0 / f.revenue * 100 END",
+    "per": "per",
+    "pbr": "pbr",
+    "dividend_yield": "dividend_yield",
+    "market_cap": "market_cap",
+    "roe": "roe",
+    "debt_ratio": "debt_ratio",
+    "operating_margin": "operating_margin",
 }
 
-# Sort keys mirror the filter whitelist (plus ticker/name) so the UI can order
-# by any visible metric. Each maps to an ORDER BY expression.
+# Sort keys. The UI sends these names; they resolve to snapshot fields.
+# ``stock_code``/``corp_name``/``close_price`` are kept as aliases so the
+# frontend sort control does not change, even though the snapshot uses
+# ``ticker``/``name``/``close``.
 ALLOWED_SORTS: dict[str, str] = {
     **ALLOWED_FILTERS,
-    "stock_code": "c.stock_code",
-    "corp_name": "c.corp_name",
-    "close_price": "m.close_price",
-    "year": "COALESCE(m.year, f.year)",
+    "stock_code": "ticker",
+    "corp_name": "name",
+    "close_price": "close",
+    "market_cap": "market_cap",
 }
 
-# Metrics returned per match. Defined up front so the service layer and tests
-# agree on the row shape, and so we project only what we need.
-_RESULT_COLUMNS = (
-    "c.stock_code",
-    "c.corp_name",
-    "COALESCE(m.year, f.year) AS year",
-    "m.close_price",
-    "m.per",
-    "m.pbr",
-    "m.eps",
-    "m.bps",
-    "m.dividend_per_share",
-    "m.dividend_yield",
-    "m.market_cap",
-    "f.revenue",
-    "f.operating_profit",
-    "f.net_income",
-    "f.total_equity",
-    "f.total_liabilities",
-    "CASE WHEN f.total_equity NOT NULL AND f.total_equity != 0 "
-    "THEN f.net_income * 1.0 / f.total_equity * 100 END AS roe",
-    "CASE WHEN f.total_equity NOT NULL AND f.total_equity != 0 "
-    "THEN f.total_liabilities * 1.0 / f.total_equity * 100 END AS debt_ratio",
-    "CASE WHEN f.revenue NOT NULL AND f.revenue != 0 "
-    "THEN f.operating_profit * 1.0 / f.revenue * 100 END AS operating_margin",
-)
+# Snapshot row fields projected in screener results, with friendly aliases for
+# the frontend (which still expects stock_code/corp_name/close_price from the
+# original SQL-based implementation).
+_ROW_FIELD_ALIASES = {
+    "ticker": "stock_code",
+    "name": "corp_name",
+    "close": "close_price",
+}
 
 
-async def screen_stocks(
+def _row_value(row: dict, key: str) -> float | None:
+    """Read a numeric filter/sort field from a snapshot row, tolerating None."""
+    field = ALLOWED_FILTERS.get(key, key)
+    value = row.get(field)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _meets_filter(row: dict, key: str, op: str, target: float) -> bool:
+    value = _row_value(row, key)
+    if value is None:
+        return False
+    return value > target if op == "min" else value < target
+
+
+def screen_snapshot(
+    rows: list[dict],
     filters: dict[str, tuple],
     *,
     sort_by: str = "market_cap",
@@ -99,99 +86,73 @@ async def screen_stocks(
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[dict], int]:
-    """Run the screener, returning (rows, total_match_count).
+    """Filter/sort/paginate an in-memory finance-pi snapshot.
 
     ``filters`` maps a whitelisted metric name to ``(op, value)`` where ``op``
-    is one of ``min`` / ``max``. The caller (service layer) is responsible for
-    validating keys/ops/values — this function trusts its arguments and only
-    guards against empty input to avoid a malformed WHERE.
+    is one of ``min`` / ``max``. The caller (service layer) validates keys/
+    ops/values — this function trusts its arguments.
 
-    Pagination is applied after computing the total, so the caller can render
-    "N matches" without a second round-trip.
+    Returns ``(page_rows, total_match_count)``. Each result row is a copy of
+    the snapshot row with stock_code/corp_name/close_price aliases added so
+    the frontend contract (portfolio-render-style field names) is unchanged.
     """
-    if limit <= 0:
+    if limit <= 0 or not rows:
         return [], 0
 
-    where_parts: list[str] = []
-    params: list = []
+    # Apply filters (AND across all active filters).
+    matched = rows
     for key, (op, value) in filters.items():
-        expr = ALLOWED_FILTERS[key]
-        sql_op = ">" if op == "min" else "<"
-        where_parts.append(f"({expr} IS NOT NULL AND {expr} {sql_op} ?)")
-        params.append(value)
+        field = ALLOWED_FILTERS.get(key, key)
+        matched = [
+            r for r in matched
+            if r.get(field) is not None and _meets_filter(r, key, op, float(value))
+        ]
 
-    # Require at least one filter — an unfiltered universe scan is almost
-    # certainly a caller mistake and would return thousands of sparse rows.
-    where_clause = " AND ".join(where_parts) if where_parts else "1=1"
-
-    sort_expr = ALLOWED_SORTS.get(sort_by, ALLOWED_SORTS["market_cap"])
-    if sort_dir.lower() == "asc":
-        sort_sql = f"{sort_expr} ASC"
-    else:
-        sort_sql = f"{sort_expr} DESC"
-    # Secondary sort keeps ordering stable when the primary metric is NULL.
-    sort_sql += ", c.stock_code ASC"
-
-    select_clause = ", ".join(_RESULT_COLUMNS)
-
-    # Latest-year selection, independent per source table. The subqueries pick
-    # the max year with a non-null key metric so a ticker that has 2025 per
-    # but only 2024 fundamentals still resolves to its newest available data.
-    base = f"""
-        FROM corp_codes c
-        LEFT JOIN (
-            SELECT md.* FROM market_data md
-            JOIN (
-                SELECT stock_code, MAX(year) AS y
-                FROM market_data
-                GROUP BY stock_code
-            ) lm ON lm.stock_code = md.stock_code AND lm.y = md.year
-        ) m ON m.stock_code = c.stock_code
-        LEFT JOIN (
-            SELECT fd.* FROM financial_data fd
-            JOIN (
-                SELECT stock_code, MAX(year) AS y
-                FROM financial_data
-                GROUP BY stock_code
-            ) lf ON lf.stock_code = fd.stock_code AND lf.y = fd.year
-        ) f ON f.stock_code = c.stock_code
-        WHERE c.stock_code != '' AND {where_clause}
-    """
-
-    db = await get_db()
-
-    count_cursor = await db.execute(f"SELECT COUNT(*) {base}", params)
-    total = (await count_cursor.fetchone())[0]
+    total = len(matched)
     if total == 0:
         return [], 0
 
-    page_cursor = await db.execute(
-        f"SELECT {select_clause} {base} ORDER BY {sort_sql} LIMIT ? OFFSET ?",
-        [*params, limit, offset],
-    )
-    rows = [dict(r) for r in await page_cursor.fetchall()]
-    return rows, total
+    # Sort. None values sort last regardless of direction so the user always
+    # sees rows that have the sort metric populated first.
+    sort_field = ALLOWED_SORTS.get(sort_by, ALLOWED_SORTS["market_cap"])
+    reverse = sort_dir.lower() != "asc"
+
+    def _sort_key(row: dict):
+        v = row.get(sort_field)
+        # (has_value, value): has_value=False sorts before when reverse, so
+        # None rows go to the end on desc and to the start on asc — we flip by
+        # pushing them to the bottom in both cases via a sentinel.
+        try:
+            return (0, float(v)) if v is not None else (1, 0.0)
+        except (TypeError, ValueError):
+            return (1, 0.0)
+
+    matched.sort(key=_sort_key, reverse=reverse)
+
+    page = matched[offset:offset + limit]
+    result = []
+    for row in page:
+        out = dict(row)
+        for src, dst in _ROW_FIELD_ALIASES.items():
+            if src in out and dst not in out:
+                out[dst] = out[src]
+        result.append(out)
+    return result, total
 
 
-async def screener_coverage() -> dict[str, int]:
-    """Quick stats on how much of the universe the screener can actually see.
+def snapshot_coverage(rows: list[dict]) -> dict[str, int]:
+    """Coverage stats derived from a finance-pi snapshot.
 
-    Surfaced in the UI so users understand *why* a scan returns few hits: the
-    valuation/fundamentals tables are filled lazily (only for stocks someone
-    has analyzed), not for the whole KRX universe. This is diagnostic only.
+    The snapshot already excludes ETFs/preferred/SPACs/REITs, so ``universe``
+    is the snapshot size (the investable KOSPI/KOSDAQ set), and the per-metric
+    counts show how many rows actually carry each value (e.g. PBR is null for
+    tickers without equity data).
     """
-    db = await get_db()
-    cursor = await db.execute(
-        """
-        SELECT
-          (SELECT COUNT(*) FROM corp_codes) AS universe,
-          (SELECT COUNT(DISTINCT stock_code) FROM market_data) AS valued,
-          (SELECT COUNT(DISTINCT stock_code) FROM financial_data) AS fundamentals
-        """
-    )
-    row = await cursor.fetchone()
+    universe = len(rows)
+    valued = sum(1 for r in rows if r.get("close") is not None)
+    fundamentals = sum(1 for r in rows if r.get("equity") is not None)
     return {
-        "universe": int(row["universe"] or 0),
-        "valued": int(row["valued"] or 0),
-        "fundamentals": int(row["fundamentals"] or 0),
+        "universe": universe,
+        "valued": valued,
+        "fundamentals": fundamentals,
     }
