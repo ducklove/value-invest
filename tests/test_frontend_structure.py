@@ -417,6 +417,7 @@ def test_performance_tab_includes_period_report_panel():
     assert 'id="pfPeriodReportKey"' in html
     assert 'id="pfPeriodReportGenerateBtn"' in html
     assert html.find('id="pfNavChart"') < html.find('id="pfPeriodReportWrap"')
+    assert html.find('id="pfRiskWrap"') < html.find('id="pfPeriodReportWrap"')
     assert "./js/portfolio-ai.js" in html
     assert html.find("./js/portfolio-ai.js") < html.find("./js/portfolio-reports.js")
     assert html.find("./js/portfolio-reports.js") < html.find("./js/portfolio-performance.js")
@@ -942,13 +943,13 @@ def test_performance_tab_includes_rebalance_panel():
     rebalance = (JS / "portfolio-rebalance.js").read_text(encoding="utf-8")
     alerts = (JS / "portfolio-alerts.js").read_text(encoding="utf-8")
 
-    # '리밸런싱' 카드는 성과 탭의 리스크 카드(#pfRiskWrap) 바로 다음,
-    # 평가금액 추이 앞에 산다. 에디터는 모달이 아닌 인라인 리스트.
+    # '리밸런싱' 카드는 기간 보고서 다음, 평가금액 추이 앞에 산다.
+    # 에디터는 모달이 아닌 인라인 리스트.
     assert 'id="pfRebalanceWrap"' in html
     assert 'id="pfRebalanceContent"' in html
     assert 'id="pfRebalanceEditor"' in html
     assert 'id="pfRebalanceAlertCb"' in html
-    assert html.find('id="pfRiskWrap"') < html.find('id="pfRebalanceWrap"')
+    assert html.find('id="pfPeriodReportWrap"') < html.find('id="pfRebalanceWrap"')
     assert html.find('id="pfRebalanceWrap"') < html.find('id="pfValueChart"')
     # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
     assert "if (typeof pfLoadRebalancePanel === 'function') pfLoadRebalancePanel();" in performance
