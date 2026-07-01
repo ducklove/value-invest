@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -458,6 +459,13 @@ def test_trade_value_column_uses_two_decimal_compact_format():
     assert "function fmtTradingValueKrw(n)" in source
     assert "return fmtKrw(n, 2);" in source
     assert "fmtKrw(r.tradingValue)" not in source
+
+
+def test_stylesheet_defines_all_css_variables_it_uses():
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+    used = set(re.findall(r"var\(--([A-Za-z0-9_-]+)", css))
+    defined = set(re.findall(r"--([A-Za-z0-9_-]+)\s*:", css))
+    assert used - defined == set()
 
 
 def test_portfolio_actions_support_alphanumeric_krx_codes():
