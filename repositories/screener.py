@@ -79,7 +79,7 @@ def _meets_filter(row: dict, key: str, op: str, target: float) -> bool:
 
 def screen_snapshot(
     rows: list[dict],
-    filters: dict[str, tuple],
+    filters: dict[str, list[tuple]],
     *,
     sort_by: str = "market_cap",
     sort_dir: str = "desc",
@@ -88,25 +88,27 @@ def screen_snapshot(
 ) -> tuple[list[dict], int]:
     """Filter/sort/paginate an in-memory finance-pi snapshot.
 
-    ``filters`` maps a whitelisted metric name to ``(op, value)`` where ``op``
-    is one of ``min`` / ``max``. The caller (service layer) validates keys/
-    ops/values — this function trusts its arguments.
+    ``filters`` maps a whitelisted metric name to a list of ``(op, value)``
+    pairs. A metric may carry both ``min`` and ``max`` (range). All active
+    constraints are AND-ed. The caller (service layer) validates keys/ops/
+    values — this function trusts its arguments.
 
     Returns ``(page_rows, total_match_count)``. Each result row is a copy of
     the snapshot row with stock_code/corp_name/close_price aliases added so
-    the frontend contract (portfolio-render-style field names) is unchanged.
+    the frontend contract is unchanged.
     """
     if limit <= 0 or not rows:
         return [], 0
 
-    # Apply filters (AND across all active filters).
+    # Apply filters (AND across all metrics, AND within a metric's min/max).
     matched = rows
-    for key, (op, value) in filters.items():
-        field = ALLOWED_FILTERS.get(key, key)
-        matched = [
-            r for r in matched
-            if r.get(field) is not None and _meets_filter(r, key, op, float(value))
-        ]
+    for key, pairs in filters.items():
+        for op, value in pairs:
+            field = ALLOWED_FILTERS.get(key, key)
+            matched = [
+                r for r in matched
+                if r.get(field) is not None and _meets_filter(r, key, op, float(value))
+            ]
 
     total = len(matched)
     if total == 0:

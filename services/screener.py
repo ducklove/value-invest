@@ -84,19 +84,20 @@ def _coerce_number(key: str, op: str, raw: Any) -> float:
     return value
 
 
-def normalize_filters(raw: dict[str, Any]) -> dict[str, tuple[str, float]]:
-    """Turn the API payload into a trusted ``(op, value)`` map.
+def normalize_filters(raw: dict[str, Any]) -> dict[str, list[tuple[str, float]]]:
+    """Turn the API payload into a trusted ``{metric: [(op, value), ...]}`` map.
 
     Input shape (each optional, both directions independent)::
 
         {"per": {"min": 3, "max": 15}, "roe": {"min": 10}, ...}
 
-    A metric with neither ``min`` nor ``max`` is dropped silently. Unknown
-    metric names are rejected so the API surface stays explicit.
+    A metric may carry both ``min`` and ``max`` simultaneously (range filter).
+    A metric with neither is dropped silently. Unknown metric names are
+    rejected so the API surface stays explicit.
     """
     if not isinstance(raw, dict):
         raise ScreenerError("필터는 object 형태여야 합니다.")
-    filters: dict[str, tuple[str, float]] = {}
+    filters: dict[str, list[tuple[str, float]]] = {}
     for key, bounds in raw.items():
         if key not in FILTER_SPECS:
             raise ScreenerError(f"알 수 없는 필터 항목입니다: {key}")
@@ -104,7 +105,7 @@ def normalize_filters(raw: dict[str, Any]) -> dict[str, tuple[str, float]]:
             raise ScreenerError(f"{key} 필터는 object(min/max) 형태여야 합니다.")
         for op in ("min", "max"):
             if op in bounds and bounds[op] is not None:
-                filters[key] = (op, _coerce_number(key, op, bounds[op]))
+                filters.setdefault(key, []).append((op, _coerce_number(key, op, bounds[op])))
     return filters
 
 
@@ -156,7 +157,12 @@ def _format_row(row: dict) -> dict:
 
 
 async def _get_snapshot() -> list[dict]:
-    """Fetch (or reuse cached) finance-pi screener snapshot rows."""
+    """Fetch (or reuse cached) finance-pi screener snapshot rows.
+
+    finance-pi returns ``market_cap`` in KRW (원). The UI filter label and the
+    display formatter both assume 억원 (100M KRW), so we normalize once here
+    — the cached snapshot and every downstream filter/display see 억원.
+    """
     cached = await cache.get_cache_value_entry(_SNAPSHOT_CACHE_NS, "latest")
     if cached is not None and isinstance(cached.value, list):
         return cached.value
@@ -165,6 +171,11 @@ async def _get_snapshot() -> list[dict]:
     except ClosePriceClientError as exc:
         raise ExternalServiceError("스크리너 데이터를 불러오지 못했습니다.") from exc
     rows = payload.get("rows") or []
+    for row in rows:
+        mc = row.get("market_cap")
+        if isinstance(mc, (int, float)) and mc != 0:
+            # 원 → 억원. 0/None 은 그대로 둔다(데이터 없음).
+            row["market_cap"] = round(mc / 1e8, 2)
     await cache.set_cache_value(_SNAPSHOT_CACHE_NS, "latest", rows, ttl_seconds=_SNAPSHOT_CACHE_TTL)
     return rows
 
@@ -210,7 +221,10 @@ async def run_screen(
     )
 
     result = {
-        "filters": {k: {"op": v[0], "value": v[1]} for k, v in filters.items()},
+        "filters": {
+            k: [{"op": op, "value": val} for op, val in pairs]
+            for k, pairs in filters.items()
+        },
         "sort_by": sort_by,
         "sort_dir": sort_dir,
         "limit": limit,
