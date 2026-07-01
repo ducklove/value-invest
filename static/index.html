@@ -640,6 +640,12 @@ function trackEvent(name, params = {}) {
           <p>외부 실험 결과와 수동 메모를 남기는 기록장입니다. 향후 포트폴리오/종목 분석 맥락으로 흡수할 예정입니다.</p>
           <strong>열기 →</strong>
         </a>
+        <a class="lab-card" href="/screener">
+          <span class="lab-pill">유니버스 스캔</span>
+          <h3>밸류 스크리너</h3>
+          <p>P/E·P/B·ROE·배당수익률 등 조건으로 종목을 거르는 스크리너입니다. 분석 이력이 쌓인 종목만 검색 대상입니다.</p>
+          <strong>열기 →</strong>
+        </a>
       </div>
     </div>
   </div>
@@ -660,6 +666,39 @@ function trackEvent(name, params = {}) {
       <div class="insight-board-list" id="insightPostList">
         <div class="insight-board-empty">불러오는 중...</div>
       </div>
+    </div>
+  </div>
+
+  <div id="screenerView" style="display:none;">
+    <div class="screener-page">
+      <div class="lab-inline-banner">
+        <span>실험 기능</span>
+        <strong>분석 이력이 쌓인 종목만 검색 대상입니다.</strong>
+        <a href="/labs">실험실로 돌아가기</a>
+      </div>
+      <h2>밸류 스크리너</h2>
+      <div class="screener-coverage" id="screenerCoverage" aria-live="polite"></div>
+      <div class="screener-filters" id="screenerFilters"></div>
+      <div class="screener-controls">
+        <button class="bt-run" id="screenerRunBtn" type="button">스크린 실행</button>
+        <button class="sc-btn-ghost" id="screenerResetBtn" type="button">초기화</button>
+        <label class="screener-sort">
+          정렬
+          <select id="screenerSortBy"></select>
+        </label>
+        <label class="screener-sort-dir">
+          방향
+          <select id="screenerSortDir">
+            <option value="desc">내림차순</option>
+            <option value="asc">오름차순</option>
+          </select>
+        </label>
+      </div>
+      <div class="screener-status" id="screenerStatus" aria-live="polite"></div>
+      <div class="screener-results" id="screenerResults">
+        <div class="screener-empty">조건을 설정하고 '스크린 실행'을 누르세요.</div>
+      </div>
+      <div class="screener-pager" id="screenerPager"></div>
     </div>
   </div>
 
@@ -828,6 +867,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-tag-summary.js" defer></script>
 <script src="./js/portfolio-events.js" defer></script>
 <script src="./js/insights.js" defer></script>
+<script src="./js/screener.js" defer></script>
 <script src="./js/app-main.js" defer></script>
 </body>
 </html>

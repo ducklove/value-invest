@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 import integrations
 from core.config import AppSettings
 
-SPA_PATHS = ("/analysis", "/portfolio", "/nps", "/labs", "/insights")
+SPA_PATHS = ("/analysis", "/portfolio", "/nps", "/labs", "/insights", "/screener")
 
 
 StaticHandlers = dict[str, Callable[[], Awaitable[Response]]]

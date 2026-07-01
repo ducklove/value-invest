@@ -243,17 +243,20 @@ function switchView(view, options = {}) {
   const npsView = document.getElementById('npsView');
   const labsView = document.getElementById('labsView');
   const insightsView = document.getElementById('insightsView');
+  const screenerView = document.getElementById('screenerView');
   if (investingView) investingView.style.display = view === 'investing' ? 'block' : 'none';
   analysisView.style.display = view === 'analysis' ? 'block' : 'none';
   portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
   if (npsView) npsView.style.display = view === 'nps' ? 'block' : 'none';
   if (labsView) labsView.style.display = view === 'labs' ? 'block' : 'none';
   if (insightsView) insightsView.style.display = view === 'insights' ? 'block' : 'none';
+  if (screenerView) screenerView.style.display = view === 'screener' ? 'block' : 'none';
   const activeEl = view === 'investing' ? investingView
                   : view === 'analysis' ? analysisView
                   : view === 'portfolio' ? portfolioView
                   : view === 'labs' ? labsView
                   : view === 'insights' ? insightsView
+                  : view === 'screener' ? screenerView
                   : npsView;
   if (activeEl) {
     activeEl.classList.remove('fade-in');
@@ -268,6 +271,8 @@ function switchView(view, options = {}) {
     loadNpsView();
   } else if (view === 'insights' && typeof loadInsightsBoard === 'function') {
     loadInsightsBoard();
+  } else if (view === 'screener' && typeof loadScreener === 'function') {
+    loadScreener();
   }
   _updateQuoteSubscriptions();
   // 모바일에서 탭 전환 시 이전 뷰의 스크롤 위치가 남아 본문이 중간에서 시작하는

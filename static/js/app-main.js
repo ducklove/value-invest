@@ -172,6 +172,7 @@ async function initApp() {
   //   /nps                   → 국민연금 탭
   //   /labs                  → 실험실 허브 (메인 탭에서는 숨김)
   //   /insights              → 실험실 인사이트 보드 (직접 URL)
+  //   /screener              → 실험실 밸류 스크리너 (직접 URL)
   //   /?code=005930          → (기존 호환) 분석 탭 + 자동 분석
   // 서버가 이 path 들을 모두 index.html 로 서빙하므로 SPA 진입 후
   // pathname 만 보고 탭을 정하면 됨.
@@ -185,6 +186,7 @@ async function initApp() {
     '/nps': 'nps',
     '/labs': 'labs',
     '/insights': 'insights',
+    '/screener': 'screener',
   };
   const viewFromPath = PATH_TO_VIEW[path];
   if (viewFromPath) {
