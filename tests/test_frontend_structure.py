@@ -1209,3 +1209,50 @@ def test_mobile_simple_mode_is_read_only_and_nav_uses_bottom_tabbar():
     assert "body.pf-mobile-simple .pf-add-bar" in styles
     assert "body.pf-mobile-simple .pf-col-toggle-wrap" in styles
     assert "body.pf-mobile-simple .pf-col-act" in styles
+
+
+def test_screener_labs_view_is_wired_as_deep_linkable_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    app_main = (JS / "app-main.js").read_text(encoding="utf-8")
+    screener = (JS / "screener.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    # 뷰 컨테이너는 다른 Labs 뷰(insightsView) 다음에 산다.
+    assert 'id="screenerView"' in html
+    assert html.find('id="insightsView"') < html.find('id="screenerView"')
+    # Labs 허브(/labs) 카드로 진입한다(인사이트 보드 카드와 같은 패턴).
+    assert 'href="/screener"' in html
+    assert '밸류 스크리너' in html
+    # 스크립트는 insights.js 다음, app-main.js 이전에 로드된다(계약 순서).
+    assert html.find("./js/insights.js") < html.find("./js/screener.js")
+    assert html.find("./js/screener.js") < html.find("./js/app-main.js")
+    # SPA 직접 URL — 서버가 index.html 로 서빙(core/static_routes.py SPA_PATHS).
+    assert "/screener" in (STATIC / ".." / "core" / "static_routes.py").resolve().read_text(encoding="utf-8")
+
+    # switchView 가 screener 뷰를 토글하고 진입 시 loadScreener 를 부른다.
+    assert "screenerView" in shell
+    assert "view === 'screener'" in shell
+    assert "typeof loadScreener === 'function'" in shell
+    # app-main.js PATH_TO_VIEW 가 /screener → 'screener' 매핑을 갖는다.
+    assert "'/screener': 'screener'" in app_main
+
+    # 기능 홈: spec 로드, 필터 렌더, 실행/페이징은 screener.js.
+    assert "async function loadScreener(" in screener
+    assert "/api/screener/spec" in screener
+    assert "/api/screener/run" in screener
+    assert "function _renderScreenerFilters(" in screener
+    assert "function _runScreener(" in screener
+    assert "function _renderScreenerResults(" in screener
+    # 독립 뷰이므로 portfolio-render.js 전역(fmtKrw/fmtPct)에 의존하지 않는다.
+    assert "function fmtKrw(" not in screener
+    assert "function fmtPct(" not in screener
+    # 커버리지 안내(검색 대상 = 분석 이력 보유 종목)가 표시된다.
+    assert "screenerCoverage" in html
+
+    # 스타일: 페이지/필터 그리드/테이블/페이저.
+    assert ".screener-page" in styles
+    assert ".screener-filters" in styles
+    assert ".screener-table" in styles
+    assert ".screener-pager" in styles
+

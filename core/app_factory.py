@@ -31,6 +31,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         notifications_router,
         portfolio_router,
         reports_router,
+        screener_router,
         stocks_router,
         ws_quotes_router,
     )
@@ -63,6 +64,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         notifications_router,
         internal_router,
         wiki_router,
+        screener_router,
         admin_router,
     ):
         app.include_router(router)

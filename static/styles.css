@@ -5221,3 +5221,80 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   .market-tape-track { animation: none !important; }
   .flash-update, .market-tape.flash-update::after { animation: none !important; }
 }
+
+/* === 밸류 스크리너 (Labs /screener) === */
+.screener-page {
+  max-width: 1180px; margin: 0 auto; padding: 12px 0 40px;
+}
+.screener-page h2 { margin: 4px 0 8px; font-size: 22px; }
+.screener-coverage {
+  margin-bottom: 14px; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface);
+}
+.screener-coverage-row {
+  display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline;
+  font-size: 13px; color: var(--text);
+}
+.screener-coverage-row strong { color: var(--primary); }
+.screener-coverage-muted { color: var(--text-secondary); font-size: 12px; }
+.screener-coverage-hint { margin-top: 4px; font-size: 12px; color: var(--text-secondary); }
+.screener-filters {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+.screener-filter-card {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.screener-filter-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+.screener-filter-inputs { display: flex; align-items: center; gap: 6px; }
+.screener-filter-inputs input {
+  width: 100%; min-width: 0; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--text); font-size: 13px;
+}
+.screener-filter-inputs input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.screener-filter-sep { color: var(--text-secondary); font-size: 12px; }
+.screener-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px;
+}
+.screener-controls .bt-run { margin-left: 0; }
+.sc-btn-ghost {
+  padding: 8px 14px; background: transparent; color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s;
+}
+.sc-btn-ghost:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+.screener-sort, .screener-sort-dir {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);
+}
+.screener-sort select, .screener-sort-dir select {
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); font-size: 13px;
+}
+.screener-status { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+.screener-empty { padding: 24px; text-align: center; color: var(--text-secondary); font-size: 14px; }
+.screener-empty.error { color: #dc2626; }
+.screener-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.screener-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); }
+.screener-table th, .screener-table td {
+  padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.screener-table th {
+  text-align: left; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  background: var(--bg); position: sticky; top: 0;
+}
+.screener-table td.num, .screener-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.screener-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--surface)); }
+.screener-table .mono { font-family: var(--font-mono, monospace); }
+.screener-code-link { color: var(--primary); text-decoration: none; font-weight: 500; }
+.screener-code-link:hover { text-decoration: underline; }
+.screener-pager {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 6px; margin-top: 14px;
+}
+.screener-pager-info { font-size: 12px; color: var(--text-secondary); padding: 0 6px; }
+@media (max-width: 640px) {
+  .screener-filter-inputs { flex-wrap: wrap; }
+  .screener-filter-inputs input { flex: 1 1 80px; }
+}
