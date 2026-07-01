@@ -41,14 +41,14 @@ async def _seed_period_fixture():
     await db.executemany(
         """
         INSERT INTO portfolio_stock_snapshots
-        (google_sub, date, stock_code, market_value, group_name)
-        VALUES (?, ?, ?, ?, ?)
+        (google_sub, date, stock_code, market_value, group_name, quantity, unit_price, avg_price_krw, cost_basis)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("u1", "2026-05-31", "AAA", 700_000, "한국주식"),
-            ("u1", "2026-05-31", "BBB", 300_000, "해외주식"),
-            ("u1", "2026-06-30", "AAA", 800_000, "한국주식"),
-            ("u1", "2026-06-30", "CCC", 600_000, "해외주식"),
+            ("u1", "2026-05-31", "AAA", 700_000, "한국주식", 7, 100_000, 90_000, 630_000),
+            ("u1", "2026-05-31", "BBB", 300_000, "해외주식", 3, 100_000, 80_000, 240_000),
+            ("u1", "2026-06-30", "AAA", 900_000, "한국주식", 9, 100_000, 90_000, 810_000),
+            ("u1", "2026-06-30", "CCC", 500_000, "해외주식", 5, 100_000, 100_000, 500_000),
         ],
     )
     await db.executemany(
@@ -72,7 +72,7 @@ async def test_monthly_period_report_builds_change_snapshot(temp_db):
     with patch.object(period_reports, "today_kst_date", return_value=date(2026, 7, 1)):
         report = await period_reports.build_period_report("u1", "monthly", "2026-06")
 
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == 2
     assert report["period"]["type"] == "monthly"
     assert report["period"]["key"] == "2026-06"
     assert report["period"]["baseline_date"] == "2026-05-31"
@@ -84,6 +84,24 @@ async def test_monthly_period_report_builds_change_snapshot(temp_db):
     assert report["cashflows"]["count"] == 2
     assert report["risk"]["points"] == 3
     assert report["data_quality"]["status"] == "ok"
+
+    composition = report["composition_changes"]
+    comp_summary = composition["summary"]
+    assert comp_summary["new_positions"] == 1
+    assert comp_summary["closed_positions"] == 1
+    assert comp_summary["increased_positions"] == 1
+    assert comp_summary["buy_like_count"] == 2
+    assert comp_summary["sell_like_count"] == 1
+    assert comp_summary["gross_buy_value_estimate"] == 700_000
+    assert comp_summary["gross_sell_value_estimate"] == 300_000
+    assert comp_summary["net_trade_value_estimate"] == 400_000
+    assert comp_summary["quantity_basis_count"] == 3
+    assert composition["top_buys"][0]["stock_code"] == "CCC"
+    assert composition["top_buys"][0]["activity"] == "new_position"
+    assert composition["top_buys"][1]["stock_code"] == "AAA"
+    assert composition["top_buys"][1]["quantity_change"] == 2
+    assert composition["top_sells"][0]["stock_code"] == "BBB"
+    assert composition["top_sells"][0]["activity"] == "closed_position"
 
     counts = report["holdings"]["changes"]["counts"]
     assert counts["added"] == 1
@@ -108,7 +126,9 @@ async def test_period_report_save_list_and_route_contract(temp_db):
     assert saved["period_type"] == "monthly"
     assert saved["period_key"] == "2026-06"
     assert saved["report"]["summary"]["nav_return_pct"] == 10.0
+    assert saved["report"]["composition_changes"]["summary"]["net_trade_value_estimate"] == 400_000
     assert "# 포트폴리오 기간 보고서" in saved["report_md"]
+    assert "## 매수/매도 구성 변화" in saved["report_md"]
 
     listed = await period_reports.list_saved_period_reports("u1")
     assert listed[0]["period_key"] == "2026-06"

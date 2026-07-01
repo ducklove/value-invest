@@ -425,6 +425,10 @@ def test_performance_tab_includes_period_report_panel():
     assert "async function pfGeneratePeriodReport()" in reports
     assert "/api/portfolio/period-reports/periods" in reports
     assert "/api/portfolio/period-reports/generate" in reports
+    assert "report.composition_changes || {}" in reports
+    assert "function _pfCompositionActivityLabel" in reports
+    assert "매수·편입 구성 변화" in reports
+    assert "매도·축소 구성 변화" in reports
     assert "schema v" in reports
     assert "pfDownloadPeriodReportMarkdown" in reports
     assert ".pf-period-report-card" in styles

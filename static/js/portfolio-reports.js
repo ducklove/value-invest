@@ -46,6 +46,34 @@ function _pfReportPct(v, signed = true) {
   return typeof fmtPct === 'function' ? fmtPct(v, signed) : _pfReportNum(v, 2) + '%';
 }
 
+function _pfReportQty(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '-';
+  return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+}
+
+function _pfCompositionActivityLabel(activity) {
+  const labels = {
+    new_position: '신규 매수',
+    closed_position: '전량 매도',
+    increased_position: '추가 매수',
+    reduced_position: '부분 매도',
+    unchanged_position: '수량 유지',
+    value_only_increase: '평가액 증가',
+    value_only_decrease: '평가액 감소',
+  };
+  return labels[activity] || activity || '-';
+}
+
+function _pfCompositionConfidenceLabel(confidence) {
+  const labels = {
+    quantity_delta: '수량 기준',
+    position_boundary: '편입/제거 기준',
+    value_only: '평가액 기준',
+  };
+  return labels[confidence] || confidence || '-';
+}
+
 function _pfReportCard(label, value, sub = '', cls = '') {
   return `<div class="pf-nav-ret-card">
     <div class="pf-nav-ret-label">${escapeHtml(label)}</div>
@@ -90,6 +118,8 @@ function _pfRenderPeriodReport(saved) {
   const period = report.period || {};
   const summary = report.summary || {};
   const cash = report.cashflows || {};
+  const composition = report.composition_changes || {};
+  const compSummary = composition.summary || {};
   const risk = report.risk || {};
   const allocation = report.allocation || {};
   const holdings = report.holdings || {};
@@ -106,13 +136,23 @@ function _pfRenderPeriodReport(saved) {
     _pfReportCard('NAV 수익률', _pfReportPct(summary.nav_return_pct), `${summary.baseline_date || '-'} → ${summary.ending_date || '-'}`, navCls),
     _pfReportCard('평가금액 변화', _pfReportKrw(summary.value_change), `${_pfReportKrw(summary.starting_value)} → ${_pfReportKrw(summary.ending_value)}`, valueCls),
     _pfReportCard('순입출금', _pfReportKrw(cash.net_cashflow), `입금 ${_pfReportKrw(cash.total_deposit)} · 출금 ${_pfReportKrw(cash.total_withdrawal)}`),
+    _pfReportCard('순 구성 변화', _pfReportKrw(compSummary.net_trade_value_estimate), `매수/증가 ${compSummary.buy_like_count || 0} · 매도/축소 ${compSummary.sell_like_count || 0}`),
     _pfReportCard('종목 변동', `${(counts.added || 0) + (counts.removed || 0) + (counts.increased || 0) + (counts.decreased || 0)}개`, `추가 ${counts.added || 0} · 제거 ${counts.removed || 0} · 증가 ${counts.increased || 0} · 감소 ${counts.decreased || 0}`),
     _pfReportCard('MDD', _pfReportPct(risk.max_drawdown_pct, false), risk.max_drawdown_trough_date || ''),
     _pfReportCard('집중도 Top5', _pfReportPct(allocation.concentration?.end?.top5_weight_pct, false), `HHI ${_pfReportNum(allocation.concentration?.end?.hhi, 4)}`),
   ];
+  const buyRows = (composition.top_buys || []).slice(0, 8);
+  const sellRows = (composition.top_sells || []).slice(0, 8);
   const incRows = (changes.top_increases || []).slice(0, 6);
   const decRows = (changes.top_decreases || []).slice(0, 6);
   const groupRows = (allocation.groups || []).slice(0, 8);
+  const compositionCols = [
+    { label: '종목', render: r => `${escapeHtml(r.stock_name || r.stock_code)}<div class="pf-risk-sub">${escapeHtml(r.stock_code || '')}</div>` },
+    { label: '구분', render: r => `${escapeHtml(_pfCompositionActivityLabel(r.activity))}<div class="pf-risk-sub">${escapeHtml(_pfCompositionConfidenceLabel(r.confidence))}</div>` },
+    { label: '수량 변화', render: r => escapeHtml(_pfReportQty(r.quantity_change)) },
+    { label: '거래 추정', render: r => `<span class="${returnClass(r.trade_value_estimate)}">${escapeHtml(_pfReportKrw(r.trade_value_estimate))}</span>` },
+    { label: '비중', render: r => `${escapeHtml(_pfReportPct(r.start_weight_pct, false))} → ${escapeHtml(_pfReportPct(r.end_weight_pct, false))}<div class="pf-risk-sub">${escapeHtml(_pfReportPct(r.weight_change_ppt, true))}p</div>` },
+  ];
   const holdingCols = [
     { label: '종목', render: r => `${escapeHtml(r.stock_name || r.stock_code)}<div class="pf-risk-sub">${escapeHtml(r.stock_code || '')}</div>` },
     { label: '상태', render: r => escapeHtml(r.status || '') },
@@ -139,6 +179,14 @@ function _pfRenderPeriodReport(saved) {
     ${warnHtml}
     <div class="pf-risk-grid pf-period-report-grid">${cards.join('')}</div>
     <div class="pf-period-report-sections">
+      <section>
+        <h4>매수·편입 구성 변화</h4>
+        ${_pfRenderReportTable(buyRows, compositionCols)}
+      </section>
+      <section>
+        <h4>매도·축소 구성 변화</h4>
+        ${_pfRenderReportTable(sellRows, compositionCols)}
+      </section>
       <section>
         <h4>평가액 증가 상위</h4>
         ${_pfRenderReportTable(incRows, holdingCols)}

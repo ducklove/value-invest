@@ -147,10 +147,20 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
                 missing.append(item["stock_code"])
                 continue
         total_value += mv
+        unit_price = price
+        if unit_price is None:
+            try:
+                unit_price = mv / qty if qty else None
+            except (TypeError, ValueError, ZeroDivisionError):
+                unit_price = None
         per_stock.append({
             "stock_code": item["stock_code"],
             "market_value": mv,
             "group_name": item.get("group_name"),
+            "quantity": qty,
+            "unit_price": unit_price,
+            "avg_price_krw": avg_price_krw,
+            "cost_basis": qty * avg_price_krw,
         })
         await asyncio.sleep(0.25)  # rate limit
     if missing:

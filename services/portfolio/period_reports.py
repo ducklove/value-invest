@@ -20,7 +20,7 @@ from repositories import snapshots as snapshots_repo
 from services.portfolio import risk
 from services.portfolio.time_windows import today_kst_date
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 VALID_PERIOD_TYPES = {"monthly", "annual"}
 MONTHLY_KEY_RE = re.compile(r"^\d{4}-\d{2}$")
 ANNUAL_KEY_RE = re.compile(r"^\d{4}$")
@@ -52,6 +52,16 @@ def _pct_change(start: float | None, end: float | None) -> float | None:
     return _round((e / s - 1.0) * 100.0)
 
 
+def _float_or_none(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(out):
+        return None
+    return out
+
+
 def _iso_now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -73,6 +83,19 @@ def _fmt_pct(value: float | None) -> str:
         return "-"
     sign = "+" if value > 0 else ""
     return f"{sign}{value:.2f}%"
+
+
+def _activity_label(activity: str | None) -> str:
+    labels = {
+        "new_position": "신규 매수",
+        "closed_position": "전량 매도",
+        "increased_position": "추가 매수",
+        "reduced_position": "부분 매도",
+        "unchanged_position": "수량 유지",
+        "value_only_increase": "평가액 증가",
+        "value_only_decrease": "평가액 감소",
+    }
+    return labels.get(str(activity or ""), str(activity or "-"))
 
 
 def normalize_period_type(period_type: str) -> str:
@@ -265,6 +288,34 @@ def _rows_by_code(rows: list[dict]) -> dict[str, dict]:
     return {str(r.get("stock_code") or ""): r for r in rows if r.get("stock_code")}
 
 
+def _row_quantity(row: dict | None) -> float | None:
+    if not row:
+        return None
+    return _float_or_none(row.get("quantity"))
+
+
+def _row_unit_price(row: dict | None) -> float | None:
+    if not row:
+        return None
+    direct = _float_or_none(row.get("unit_price"))
+    if direct is not None and direct > 0:
+        return direct
+    qty = _row_quantity(row)
+    value = _float_or_none(row.get("market_value"))
+    if qty is None or abs(qty) <= 1e-12 or value is None:
+        return None
+    return value / qty
+
+
+def _trade_unit_price(start_price: float | None, end_price: float | None) -> float | None:
+    prices = [p for p in (start_price, end_price) if p is not None and p > 0]
+    if len(prices) == 2:
+        return sum(prices) / 2.0
+    if prices:
+        return prices[0]
+    return None
+
+
 def _concentration(rows: list[dict]) -> dict[str, Any]:
     values = sorted([float(r.get("market_value") or 0) for r in rows if float(r.get("market_value") or 0) > 0], reverse=True)
     total = sum(values)
@@ -319,6 +370,172 @@ def _holding_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[str, 
         "top_increases": sorted(changes, key=lambda r: r["change_value"], reverse=True)[:8],
         "top_decreases": sorted(changes, key=lambda r: r["change_value"])[:8],
         "all": sorted(changes, key=lambda r: abs(r["change_value"]), reverse=True),
+    }
+
+
+def _composition_changes(start_rows: list[dict], end_rows: list[dict]) -> dict[str, Any]:
+    start_by = _rows_by_code(start_rows)
+    end_by = _rows_by_code(end_rows)
+    total_start = sum(float(r.get("market_value") or 0) for r in start_rows)
+    total_end = sum(float(r.get("market_value") or 0) for r in end_rows)
+    avg_portfolio_value = max(1.0, (total_start + total_end) / 2.0)
+    counts = {
+        "new_positions": 0,
+        "closed_positions": 0,
+        "increased_positions": 0,
+        "reduced_positions": 0,
+        "unchanged_positions": 0,
+        "value_only_changes": 0,
+    }
+    rows: list[dict[str, Any]] = []
+
+    for code in sorted(set(start_by) | set(end_by)):
+        s = start_by.get(code)
+        e = end_by.get(code)
+        sv = float((s or {}).get("market_value") or 0)
+        ev = float((e or {}).get("market_value") or 0)
+        value_delta = ev - sv
+        sq_raw = _row_quantity(s)
+        eq_raw = _row_quantity(e)
+        has_quantity_basis = ((s is None) or sq_raw is not None) and ((e is None) or eq_raw is not None)
+        sq = sq_raw if sq_raw is not None else (0.0 if has_quantity_basis else None)
+        eq = eq_raw if eq_raw is not None else (0.0 if has_quantity_basis else None)
+        qty_delta = (eq - sq) if sq is not None and eq is not None else None
+        start_price = _row_unit_price(s)
+        end_price = _row_unit_price(e)
+        unit_for_trade = _trade_unit_price(start_price, end_price)
+        trade_value_estimate: float | None = None
+        price_effect_value: float | None = None
+        confidence = "quantity_delta" if has_quantity_basis else "value_only"
+
+        if has_quantity_basis and qty_delta is not None:
+            if sv <= 0 and ev > 0 and eq and eq > 0:
+                activity = "new_position"
+                counts["new_positions"] += 1
+            elif sv > 0 and ev <= 0 and sq and sq > 0:
+                activity = "closed_position"
+                counts["closed_positions"] += 1
+            elif abs(qty_delta) <= 1e-9:
+                activity = "unchanged_position"
+                counts["unchanged_positions"] += 1
+            elif qty_delta > 0:
+                activity = "increased_position"
+                counts["increased_positions"] += 1
+            else:
+                activity = "reduced_position"
+                counts["reduced_positions"] += 1
+            if abs(qty_delta) > 1e-9 and unit_for_trade is not None:
+                trade_value_estimate = qty_delta * unit_for_trade
+                price_effect_value = value_delta - trade_value_estimate
+        elif sv <= 0 and ev > 0:
+            activity = "new_position"
+            counts["new_positions"] += 1
+            trade_value_estimate = ev
+            price_effect_value = 0.0
+            confidence = "position_boundary"
+        elif sv > 0 and ev <= 0:
+            activity = "closed_position"
+            counts["closed_positions"] += 1
+            trade_value_estimate = -sv
+            price_effect_value = 0.0
+            confidence = "position_boundary"
+        elif abs(value_delta) < 1:
+            activity = "unchanged_position"
+            counts["unchanged_positions"] += 1
+        else:
+            activity = "value_only_increase" if value_delta > 0 else "value_only_decrease"
+            counts["value_only_changes"] += 1
+
+        group_name = (e or {}).get("group_name") or (s or {}).get("group_name") or "기타"
+        row = {
+            "stock_code": code,
+            "stock_name": (e or {}).get("stock_name") or (s or {}).get("stock_name") or code,
+            "group_name": group_name,
+            "activity": activity,
+            "confidence": confidence,
+            "start_quantity": _round(sq, 6) if sq is not None else None,
+            "end_quantity": _round(eq, 6) if eq is not None else None,
+            "quantity_change": _round(qty_delta, 6) if qty_delta is not None else None,
+            "start_unit_price": _round(start_price, 4),
+            "end_unit_price": _round(end_price, 4),
+            "trade_unit_price": _round(unit_for_trade, 4),
+            "trade_value_estimate": _round(trade_value_estimate, 2),
+            "price_effect_value": _round(price_effect_value, 2),
+            "start_value": _round(sv, 2),
+            "end_value": _round(ev, 2),
+            "value_change": _round(value_delta, 2),
+            "start_weight_pct": _round(sv / total_start * 100.0) if total_start > 0 and sv > 0 else 0.0,
+            "end_weight_pct": _round(ev / total_end * 100.0) if total_end > 0 and ev > 0 else 0.0,
+        }
+        row["weight_change_ppt"] = _round((row["end_weight_pct"] or 0) - (row["start_weight_pct"] or 0))
+        rows.append(row)
+
+    gross_buy = sum(float(r.get("trade_value_estimate") or 0) for r in rows if float(r.get("trade_value_estimate") or 0) > 0)
+    gross_sell = -sum(float(r.get("trade_value_estimate") or 0) for r in rows if float(r.get("trade_value_estimate") or 0) < 0)
+    by_group: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        group = row["group_name"] or "기타"
+        item = by_group.setdefault(group, {
+            "group_name": group,
+            "gross_buy_value_estimate": 0.0,
+            "gross_sell_value_estimate": 0.0,
+            "net_trade_value_estimate": 0.0,
+            "start_value": 0.0,
+            "end_value": 0.0,
+            "buy_count": 0,
+            "sell_count": 0,
+        })
+        tv = float(row.get("trade_value_estimate") or 0)
+        if tv > 0:
+            item["gross_buy_value_estimate"] += tv
+            item["buy_count"] += 1
+        elif tv < 0:
+            item["gross_sell_value_estimate"] += abs(tv)
+            item["sell_count"] += 1
+        item["net_trade_value_estimate"] += tv
+        item["start_value"] += float(row.get("start_value") or 0)
+        item["end_value"] += float(row.get("end_value") or 0)
+    group_rows = []
+    for item in by_group.values():
+        item["value_change"] = item["end_value"] - item["start_value"]
+        item["start_weight_pct"] = item["start_value"] / total_start * 100.0 if total_start > 0 and item["start_value"] > 0 else 0.0
+        item["end_weight_pct"] = item["end_value"] / total_end * 100.0 if total_end > 0 and item["end_value"] > 0 else 0.0
+        item["weight_change_ppt"] = item["end_weight_pct"] - item["start_weight_pct"]
+        group_rows.append({
+            "group_name": item["group_name"],
+            "gross_buy_value_estimate": _round(item["gross_buy_value_estimate"], 2),
+            "gross_sell_value_estimate": _round(item["gross_sell_value_estimate"], 2),
+            "net_trade_value_estimate": _round(item["net_trade_value_estimate"], 2),
+            "start_value": _round(item["start_value"], 2),
+            "end_value": _round(item["end_value"], 2),
+            "value_change": _round(item["value_change"], 2),
+            "start_weight_pct": _round(item["start_weight_pct"]),
+            "end_weight_pct": _round(item["end_weight_pct"]),
+            "weight_change_ppt": _round(item["weight_change_ppt"]),
+            "buy_count": item["buy_count"],
+            "sell_count": item["sell_count"],
+        })
+
+    buy_rows = [r for r in rows if float(r.get("trade_value_estimate") or 0) > 0]
+    sell_rows = [r for r in rows if float(r.get("trade_value_estimate") or 0) < 0]
+    exact_rows = [r for r in rows if r.get("confidence") == "quantity_delta"]
+    return {
+        "basis": "quantity_delta_when_available_else_position_boundary",
+        "summary": {
+            **counts,
+            "buy_like_count": counts["new_positions"] + counts["increased_positions"],
+            "sell_like_count": counts["closed_positions"] + counts["reduced_positions"],
+            "gross_buy_value_estimate": _round(gross_buy, 2),
+            "gross_sell_value_estimate": _round(gross_sell, 2),
+            "net_trade_value_estimate": _round(gross_buy - gross_sell, 2),
+            "estimated_turnover_pct": _round((gross_buy + gross_sell) / avg_portfolio_value * 100.0),
+            "quantity_basis_count": len(exact_rows),
+            "quantity_basis_ratio_pct": _round(len(exact_rows) / len(rows) * 100.0) if rows else None,
+        },
+        "top_buys": sorted(buy_rows, key=lambda r: float(r.get("trade_value_estimate") or 0), reverse=True)[:10],
+        "top_sells": sorted(sell_rows, key=lambda r: float(r.get("trade_value_estimate") or 0))[:10],
+        "by_group": sorted(group_rows, key=lambda r: abs(float(r.get("net_trade_value_estimate") or 0)), reverse=True),
+        "all": sorted(rows, key=lambda r: abs(float(r.get("trade_value_estimate") or r.get("value_change") or 0)), reverse=True),
     }
 
 
@@ -396,6 +613,12 @@ def _data_quality(
         notes.append("시작 종목별 스냅샷이 없어 종목 변화가 제한적으로 표시됩니다.")
     if not end_rows:
         notes.append("종료 종목별 스냅샷이 없어 종목 변화가 제한적으로 표시됩니다.")
+    stock_rows = [*start_rows, *end_rows]
+    quantity_rows = [row for row in stock_rows if row.get("quantity") is not None]
+    if stock_rows and not quantity_rows:
+        notes.append("종목별 스냅샷에 수량 정보가 없어 매수/매도 구성 변화는 신규·제거와 평가액 변화 중심으로 제한 표시됩니다.")
+    elif stock_rows and len(quantity_rows) < len(stock_rows):
+        notes.append("일부 종목별 스냅샷에 수량 정보가 없어 매수/매도 구성 변화의 일부는 추정치입니다.")
     return {
         "status": "warning" if notes else "ok",
         "warnings": notes,
@@ -435,6 +658,7 @@ def _saved_meta(row: dict[str, Any]) -> dict[str, Any]:
 def _build_notes(report: dict[str, Any]) -> list[dict[str, str]]:
     summary = report.get("summary") or {}
     holdings = report.get("holdings") or {}
+    composition = report.get("composition_changes") or {}
     groups = report.get("allocation") or {}
     quality = report.get("data_quality") or {}
     notes: list[dict[str, str]] = []
@@ -445,6 +669,17 @@ def _build_notes(report: dict[str, Any]) -> list[dict[str, str]]:
             "category": "performance",
             "level": "info",
             "message": f"기간 NAV는 {_fmt_pct(nav_ret)} {direction}했습니다.",
+        })
+    comp_summary = composition.get("summary") or {}
+    if comp_summary:
+        notes.append({
+            "category": "composition",
+            "level": "info",
+            "message": (
+                f"매수/증가 {comp_summary.get('buy_like_count', 0)}개, "
+                f"매도/축소 {comp_summary.get('sell_like_count', 0)}개, "
+                f"순 구성 변화 추정 {_fmt_krw(comp_summary.get('net_trade_value_estimate'))}입니다."
+            ),
         })
     counts = (holdings.get("changes") or {}).get("counts") or {}
     changed = sum(int(counts.get(k) or 0) for k in ("added", "removed", "increased", "decreased"))
@@ -475,6 +710,7 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     period = report.get("period") or {}
     summary = report.get("summary") or {}
     cash = report.get("cashflows") or {}
+    composition = report.get("composition_changes") or {}
     holdings = (report.get("holdings") or {}).get("changes") or {}
     allocation = report.get("allocation") or {}
     lines = [
@@ -486,8 +722,26 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         f"- 평가금액: {_fmt_krw(summary.get('starting_value'))} -> {_fmt_krw(summary.get('ending_value'))}",
         f"- 순입출금: {_fmt_krw(cash.get('net_cashflow'))} (입금 {_fmt_krw(cash.get('total_deposit'))}, 출금 {_fmt_krw(cash.get('total_withdrawal'))})",
         "",
-        "## 종목 변동",
+        "## 매수/매도 구성 변화",
     ]
+    comp_summary = composition.get("summary") or {}
+    lines.append(
+        f"- 매수/증가 {comp_summary.get('buy_like_count', 0)} · 매도/축소 {comp_summary.get('sell_like_count', 0)} · 순 구성 변화 추정 {_fmt_krw(comp_summary.get('net_trade_value_estimate'))}"
+    )
+    for row in (composition.get("top_buys") or [])[:5]:
+        lines.append(
+            f"- {_activity_label(row.get('activity'))}: {row['stock_name']} {row['stock_code']} "
+            f"{_fmt_krw(row.get('trade_value_estimate'))} / 비중 {_fmt_pct(row.get('start_weight_pct'))} -> {_fmt_pct(row.get('end_weight_pct'))}"
+        )
+    for row in (composition.get("top_sells") or [])[:5]:
+        lines.append(
+            f"- {_activity_label(row.get('activity'))}: {row['stock_name']} {row['stock_code']} "
+            f"{_fmt_krw(row.get('trade_value_estimate'))} / 비중 {_fmt_pct(row.get('start_weight_pct'))} -> {_fmt_pct(row.get('end_weight_pct'))}"
+        )
+    lines.extend([
+        "",
+        "## 종목 변동",
+    ])
     counts = holdings.get("counts") or {}
     lines.append(
         f"- 추가 {counts.get('added', 0)} · 제거 {counts.get('removed', 0)} · 증가 {counts.get('increased', 0)} · 감소 {counts.get('decreased', 0)}"
@@ -532,6 +786,7 @@ async def build_period_report(
     start_rows = await snapshots_repo.get_stock_snapshot_rows_on_or_before(google_sub, str(baseline["date"]))
     end_rows = await snapshots_repo.get_stock_snapshot_rows_on_or_before(google_sub, str(end_snapshot["date"]))
     holding_changes = _holding_changes(start_rows, end_rows)
+    composition_changes = _composition_changes(start_rows, end_rows)
     allocation = _group_changes(start_rows, end_rows)
     daily = _daily_metrics(points)
 
@@ -573,6 +828,7 @@ async def build_period_report(
         },
         "summary": summary,
         "cashflows": cashflows,
+        "composition_changes": composition_changes,
         "risk": daily,
         "allocation": {
             **allocation,
@@ -604,6 +860,7 @@ async def build_period_report(
         "cashflows": cashflows["rows"],
         "start_rows": start_rows,
         "end_rows": end_rows,
+        "composition_changes": composition_changes,
         "schema_version": SCHEMA_VERSION,
     }
     report["source_hash"] = _source_hash(source_payload)

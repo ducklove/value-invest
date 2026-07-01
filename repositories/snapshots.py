@@ -548,8 +548,8 @@ async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
             await db.executemany(
                 """
                 INSERT OR REPLACE INTO portfolio_stock_snapshots
-                (google_sub, date, stock_code, market_value, group_name)
-                VALUES (?, ?, ?, ?, ?)
+                (google_sub, date, stock_code, market_value, group_name, quantity, unit_price, avg_price_krw, cost_basis)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -558,6 +558,10 @@ async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
                         it["stock_code"],
                         it["market_value"],
                         it.get("group_name"),
+                        it.get("quantity"),
+                        it.get("unit_price"),
+                        it.get("avg_price_krw"),
+                        it.get("cost_basis"),
                     )
                     for it in items
                 ],
@@ -617,7 +621,11 @@ async def get_stock_snapshot_rows_on_or_before(google_sub: str, date: str) -> li
             ps.stock_code,
             COALESCE(up.stock_name, ps.stock_code) AS stock_name,
             COALESCE(ps.group_name, up.group_name, '기타') AS group_name,
-            ps.market_value
+            ps.market_value,
+            ps.quantity,
+            ps.unit_price,
+            ps.avg_price_krw,
+            ps.cost_basis
         FROM portfolio_stock_snapshots ps
         LEFT JOIN user_portfolio up
           ON up.google_sub = ps.google_sub

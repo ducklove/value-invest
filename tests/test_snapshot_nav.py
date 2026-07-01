@@ -45,7 +45,15 @@ async def test_fetch_total_value_forces_rest_for_korean_stocks():
     )
     assert total_value == 4000
     assert total_invested == 2000
-    assert per_stock == [{"stock_code": "005930", "market_value": 4000, "group_name": "KR"}]
+    assert per_stock == [{
+        "stock_code": "005930",
+        "market_value": 4000,
+        "group_name": "KR",
+        "quantity": 2,
+        "unit_price": 2000,
+        "avg_price_krw": 1000,
+        "cost_basis": 2000,
+    }]
 
 
 @pytest.mark.asyncio
@@ -79,7 +87,15 @@ async def test_fetch_total_value_converts_avg_price_currency_to_krw():
     price_to_krw.assert_awaited_once_with(100, "USD")
     assert total_value == 300000
     assert total_invested == 280000
-    assert per_stock == [{"stock_code": "AAPL", "market_value": 300000, "group_name": "US"}]
+    assert per_stock == [{
+        "stock_code": "AAPL",
+        "market_value": 300000,
+        "group_name": "US",
+        "quantity": 2,
+        "unit_price": 150000,
+        "avg_price_krw": 140000,
+        "cost_basis": 280000,
+    }]
 
 
 @pytest.mark.asyncio

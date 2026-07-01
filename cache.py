@@ -208,6 +208,10 @@ async def init_db():
             date TEXT NOT NULL,
             stock_code TEXT NOT NULL,
             market_value REAL NOT NULL DEFAULT 0,
+            quantity REAL,
+            unit_price REAL,
+            avg_price_krw REAL,
+            cost_basis REAL,
             PRIMARY KEY (google_sub, date, stock_code),
             FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
         );
@@ -748,6 +752,10 @@ async def init_db():
     await _ensure_column(db, "portfolio_alerts", "important", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
     await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
+    await _ensure_column(db, "portfolio_stock_snapshots", "quantity", "REAL")
+    await _ensure_column(db, "portfolio_stock_snapshots", "unit_price", "REAL")
+    await _ensure_column(db, "portfolio_stock_snapshots", "avg_price_krw", "REAL")
+    await _ensure_column(db, "portfolio_stock_snapshots", "cost_basis", "REAL")
     await _backfill_legacy_cache_values(db)
     await db.execute("CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_group_date ON portfolio_stock_snapshots(google_sub, group_name, date)")
     cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_group_snapshots")
