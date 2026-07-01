@@ -511,3 +511,44 @@ async def get_basic_fundamentals(
         if item:
             normalized[code] = item
     return normalized
+
+
+async def get_screener_snapshot(
+    *,
+    as_of: date | datetime | str | None = None,
+) -> dict[str, Any]:
+    """전 KOSPI/KOSDAQ 유니버스 가치 지표 스냅샷을 finance-pi 에서 가져온다.
+
+    finance-pi 의 ``/api/fundamentals/screener`` 가 최신 거래일 기준으로
+    PER/PBR/ROE/배당수익률/영업이익률/부채비율/시가총액/종가를 계산해 반환한다.
+    value-invest 는 이 결과를 저장하지 않고 매 호출 시 라이브로 가져온다.
+
+    응답 형태: ``{as_of, count, rows: [{ticker, name, close, per, pbr, roe,
+    market_cap, dividend_yield, operating_margin, debt_ratio, ...}]}``.
+    """
+    if not ENABLED or _cooldown_active():
+        return {"as_of": None, "count": 0, "rows": []}
+
+    params: dict[str, Any] = {}
+    as_of_iso = _iso(as_of)
+    if as_of_iso:
+        params["as_of"] = as_of_iso
+
+    try:
+        # 전 유니버스 조인은 단일 ticker 조회보다 느릴 수 있다 — 여유 timeout.
+        payload = await _get_json("/api/fundamentals/screener", params, timeout=30.0)
+    except Exception as exc:
+        logger.warning("internal screener API failed: %s", exc)
+        raise ClosePriceClientError("internal screener API failed") from exc
+
+    if not isinstance(payload, dict):
+        return {"as_of": None, "count": 0, "rows": []}
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        rows = []
+    return {
+        "as_of": payload.get("as_of"),
+        "count": payload.get("count") or len(rows),
+        "rows": rows,
+    }
+

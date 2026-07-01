@@ -1,16 +1,20 @@
-"""Value screener service — validation, normalization, caching.
+"""Value screener service — validation, snapshot fetch, in-memory filtering.
 
 Sits between ``routes/screener.py`` (HTTP) and ``repositories/screener.py``
-(SQL). Responsibilities:
+(in-memory filter). Responsibilities:
 
 * Validate and normalize the filter spec coming from the API so the repo only
-  ever sees trusted (key, op, value) tuples — the SQL builder trusts its args.
+  ever sees trusted (key, op, value) tuples.
+* Fetch the full-universe snapshot from finance-pi and cache *the snapshot*
+  (not the filtered result) so repeated screens with different filters reuse
+  one fetch — finance-pi is the single source of truth and we store nothing.
 * Round numbers sensibly for display.
-* Cache a page of results keyed by the filter spec so repeat navigations don't
-  re-hit SQLite; short TTL because fundamentals move only quarterly.
 
-The cache is keyed on a stable hash of (filters, sort, pagination), so two
-identical requests share an entry but a changed filter bypasses it.
+Two cache layers:
+* ``screener.snapshot`` — the finance-pi snapshot itself (10 min TTL). This is
+  the expensive call; filters run over the cached snapshot in memory.
+* ``screener.results`` — the final paginated response (2 min TTL), keyed by
+  (filters, sort, pagination), for instant re-navigation.
 """
 
 from __future__ import annotations
@@ -20,12 +24,16 @@ import json
 from typing import Any
 
 import cache
-from core.errors import AppError
+from close_price_client import ClosePriceClientError, get_screener_snapshot
+from core.errors import AppError, ExternalServiceError
 from repositories import screener as screener_repo
 
 # Which metrics may be filtered, with a human label and sane bounds. Bounds
-# exist to reject nonsense (e.g. P/E of 1e9) that would still run as SQL but
-# produce a useless result. Kept intentionally loose — value screens vary.
+# exist to reject nonsense (e.g. P/E of 1e9) that would still run but produce
+# a useless result. Kept intentionally loose — value screens vary.
+# finance-pi snapshot fields: per, pbr, dividend_yield, market_cap, roe,
+# debt_ratio, operating_margin. (eps/bps were dropped — the snapshot does not
+# carry per-share values, only the computed multiples.)
 FILTER_SPECS: dict[str, dict[str, Any]] = {
     "per": {"label": "P/E (배)", "min": -1000, "max": 1000},
     "pbr": {"label": "P/B (배)", "min": -100, "max": 100},
@@ -34,28 +42,28 @@ FILTER_SPECS: dict[str, dict[str, Any]] = {
     "roe": {"label": "ROE (%)", "min": -500, "max": 1000},
     "debt_ratio": {"label": "부채비율 (%)", "min": -100, "max": 1e6},
     "operating_margin": {"label": "영업이익률 (%)", "min": -500, "max": 500},
-    "eps": {"label": "EPS (원)", "min": -1e7, "max": 1e7},
-    "bps": {"label": "BPS (원)", "min": -1e7, "max": 1e7},
 }
 
 ALLOWED_SORTS = tuple(screener_repo.ALLOWED_SORTS.keys())
 DEFAULT_SORT = "market_cap"
 DEFAULT_SORT_DIR = "desc"
 
-# Short cache window — fundamentals are quarterly, but the user may re-run a
-# screen after adjusting filters and should see fresh pagination counts fast.
-_CACHE_TTL_SECONDS = 5 * 60
-_CACHE_NAMESPACE = "screener.results"
+# Snapshot cache — the expensive finance-pi call. 10 min keeps it fresh enough
+# for intraday use without hammering finance-pi on every screen.
+_SNAPSHOT_CACHE_TTL = 10 * 60
+_SNAPSHOT_CACHE_NS = "screener.snapshot"
+# Result cache — the final paginated response. 2 min for instant re-navigation.
+_RESULT_CACHE_TTL = 2 * 60
+_RESULT_CACHE_NS = "screener.results"
 
 MAX_LIMIT = 200
 
 
 class ScreenerError(AppError):
-    """User-facing screener input error (maps to HTTP 400 via AppError? — see note).
+    """User-facing screener input error (maps to HTTP 400).
 
     AppError defaults to 500; we override status_code to 400 so bad filter
-    input comes back as a client error, consistent with the routes' use of
-    HTTPException(400) elsewhere.
+    input comes back as a client error.
     """
 
     status_code = 400
@@ -77,7 +85,7 @@ def _coerce_number(key: str, op: str, raw: Any) -> float:
 
 
 def normalize_filters(raw: dict[str, Any]) -> dict[str, tuple[str, float]]:
-    """Turn the API payload into a trusted ``(op, value)`` map for the repo.
+    """Turn the API payload into a trusted ``(op, value)`` map.
 
     Input shape (each optional, both directions independent)::
 
@@ -100,15 +108,13 @@ def normalize_filters(raw: dict[str, Any]) -> dict[str, tuple[str, float]]:
     return filters
 
 
-def _cache_key(
+def _result_cache_key(
     filters: dict[str, tuple[str, float]],
     sort_by: str,
     sort_dir: str,
     limit: int,
     offset: int,
 ) -> str:
-    # Sorted items make the key order-independent, so {"per":{"min":3}} and a
-    # re-serialized equivalent share a cache entry.
     payload = json.dumps(
         {
             "filters": sorted(filters.items()),
@@ -133,23 +139,34 @@ def _format_row(row: dict) -> dict:
     """Round float metrics for display; keep None as None."""
     float_keys = {
         "close_price",
+        "close",
         "per",
         "pbr",
-        "eps",
-        "bps",
-        "dividend_per_share",
         "dividend_yield",
         "market_cap",
-        "revenue",
-        "operating_profit",
-        "net_income",
-        "total_equity",
-        "total_liabilities",
         "roe",
         "debt_ratio",
         "operating_margin",
+        "revenue",
+        "operating_profit",
+        "net_income",
+        "equity",
     }
     return {k: (_round_metric(v) if k in float_keys else v) for k, v in row.items()}
+
+
+async def _get_snapshot() -> list[dict]:
+    """Fetch (or reuse cached) finance-pi screener snapshot rows."""
+    cached = await cache.get_cache_value_entry(_SNAPSHOT_CACHE_NS, "latest")
+    if cached is not None and isinstance(cached.value, list):
+        return cached.value
+    try:
+        payload = await get_screener_snapshot()
+    except ClosePriceClientError as exc:
+        raise ExternalServiceError("스크리너 데이터를 불러오지 못했습니다.") from exc
+    rows = payload.get("rows") or []
+    await cache.set_cache_value(_SNAPSHOT_CACHE_NS, "latest", rows, ttl_seconds=_SNAPSHOT_CACHE_TTL)
+    return rows
 
 
 async def run_screen(
@@ -161,7 +178,7 @@ async def run_screen(
     offset: int = 0,
     use_cache: bool = True,
 ) -> dict[str, Any]:
-    """Validate inputs, hit the repo (or cache), and shape the API response."""
+    """Validate inputs, fetch snapshot, filter in memory, shape the response."""
     if sort_by not in ALLOWED_SORTS:
         raise ScreenerError(f"정렬 기준은 {', '.join(ALLOWED_SORTS)} 중 하나여야 합니다.")
     if sort_dir not in ("asc", "desc"):
@@ -173,17 +190,18 @@ async def run_screen(
 
     filters = normalize_filters(filters_raw)
     if not filters:
-        # 빈 필터 전수 스캔은 의도치 않은 호출(수천 건의 sparse 행 반환)이므로
-        # 거부한다. UI 는 최소 한 개의 필터를 설정해야 실행한다.
+        # 빈 필터 전수 스캔은 의도치 않은 호출(수천 건 행 반환)이므로 거부한다.
         raise ScreenerError("최소 한 개 이상의 필터 조건을 설정하세요.")
 
-    key = _cache_key(filters, sort_by, sort_dir, limit, offset)
+    key = _result_cache_key(filters, sort_by, sort_dir, limit, offset)
     if use_cache:
-        cached = await cache.get_cache_value_entry(_CACHE_NAMESPACE, key)
+        cached = await cache.get_cache_value_entry(_RESULT_CACHE_NS, key)
         if cached is not None:
             return cached.value
 
-    rows, total = await screener_repo.screen_stocks(
+    snapshot = await _get_snapshot()
+    rows, total = screener_repo.screen_snapshot(
+        snapshot,
         filters,
         sort_by=sort_by,
         sort_dir=sort_dir,
@@ -201,13 +219,14 @@ async def run_screen(
         "rows": [_format_row(r) for r in rows],
     }
     if use_cache:
-        await cache.set_cache_value(_CACHE_NAMESPACE, key, result, ttl_seconds=_CACHE_TTL_SECONDS)
+        await cache.set_cache_value(_RESULT_CACHE_NS, key, result, ttl_seconds=_RESULT_CACHE_TTL)
     return result
 
 
 async def get_filter_specs() -> dict[str, Any]:
-    """Static-ish description of available filters, for the UI to render controls."""
-    coverage = await screener_repo.screener_coverage()
+    """Available filters/sorts + current coverage, for the UI to render."""
+    snapshot = await _get_snapshot()
+    coverage = screener_repo.snapshot_coverage(snapshot)
     return {
         "filters": FILTER_SPECS,
         "sorts": ALLOWED_SORTS,
