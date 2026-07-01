@@ -711,6 +711,20 @@ async def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_portfolio_action_reviews_user_status
             ON portfolio_action_reviews(google_sub, status, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS portfolio_accounts (
+            account_id TEXT PRIMARY KEY,
+            google_sub TEXT NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'general',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(google_sub, name),
+            FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_portfolio_accounts_user
+            ON portfolio_accounts(google_sub, sort_order);
     """)
     await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
     await _ensure_column(db, "financial_data", "report_date", "TEXT")
@@ -767,6 +781,11 @@ async def init_db():
     if stock_weight_snapshot_count == 0:
         await _refresh_stock_weight_snapshots(db)
     await _ensure_column(db, "portfolio_groups", "default_type", "TEXT")
+    # Multi-account phase 1: optional account_id on holdings (nullable → defaults
+    # to the user's single "default" account via backfill below). Kept out of the
+    # PK on purpose — SQLite can't ALTER a PK, so uniqueness across (user, account,
+    # ticker) is enforced in app code until a later table-rebuild phase.
+    await _ensure_column(db, "user_portfolio", "account_id", "TEXT")
     # Backfill default_type for existing default groups by sort_order
     _type_by_order = {0: "kr", 1: "foreign", 2: "etc"}
     for order, dtype in _type_by_order.items():
@@ -783,6 +802,12 @@ async def init_db():
     subs = [row["google_sub"] for row in await cursor.fetchall()]
     for sub in subs:
         await _ensure_default_groups(db, sub)
+        # Multi-account phase 1: ensure each user has a "default" account and all
+        # holdings point at it. Idempotent — skips users who already have an
+        # account row. The default account is the single bucket until the user
+        # creates more; existing queries (WHERE google_sub = ?) keep working
+        # unchanged because account_id is nullable and out of the PK.
+        await _ensure_default_account(db, sub)
         await db.execute("""
             UPDATE user_portfolio SET group_name = '기타'
             WHERE google_sub = ? AND group_name IS NULL AND stock_code IN ('KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT')
@@ -805,6 +830,46 @@ async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, defi
     from repositories.schema import ensure_column
 
     await ensure_column(db, table, column, definition)
+
+
+# 멀티계좌 phase 1 default 계좌 account_id 접두사. 사용자별 고유 id 는
+# google_sub 해시 접미사로 만들어 전역 충돌을 피한다.
+_DEFAULT_ACCOUNT_PREFIX = "default"
+
+
+async def _ensure_default_account(db: aiosqlite.Connection, google_sub: str) -> None:
+    """사용자에게 기본 계좌 하나를 보장하고, account_id 가 비어 있는 보유
+    종목을 모두 그 계좌로 귀속시킨다. 멱등 — 이미 계좌가 있으면 건너뛴다.
+
+    account_id 는 nullable 이고 PK 에서 빠져 있으므로, 이 백핀이 끝나면
+    모든 기존 쿼리(WHERE google_sub = ?)가 account_id 없이도 그대로 동작한다.
+    """
+    import hashlib
+
+    from cache_layer import now_iso
+
+    cursor = await db.execute(
+        "SELECT account_id FROM portfolio_accounts WHERE google_sub = ? ORDER BY sort_order LIMIT 1",
+        (google_sub,),
+    )
+    row = await cursor.fetchone()
+    if row is not None:
+        account_id = row["account_id"]
+    else:
+        suffix = hashlib.sha256(google_sub.encode("utf-8")).hexdigest()[:12]
+        account_id = f"{_DEFAULT_ACCOUNT_PREFIX}-{suffix}"
+        now = now_iso()
+        await db.execute(
+            "INSERT OR IGNORE INTO portfolio_accounts "
+            "(account_id, google_sub, name, type, sort_order, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'general', 0, ?, ?)",
+            (account_id, google_sub, "기본 계좌", now, now),
+        )
+    # account_id 가 NULL 인 보유 종목을 이 사용자의 default 계좌로 귀속.
+    await db.execute(
+        "UPDATE user_portfolio SET account_id = ? WHERE google_sub = ? AND account_id IS NULL",
+        (account_id, google_sub),
+    )
 
 
 async def _backfill_legacy_cache_values(db: aiosqlite.Connection) -> None:
