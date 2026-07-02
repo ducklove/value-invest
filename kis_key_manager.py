@@ -21,7 +21,7 @@ import logging
 import os
 import time
 
-import httpx
+from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +51,10 @@ class KeySlot:
             "appkey": self.app_key,
             "secretkey": self.app_secret,
         }
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        client = await get_http_client("kis")
+        resp = await client.post(url, json=payload, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
 
         key = data.get("approval_key", "")
         if not key:

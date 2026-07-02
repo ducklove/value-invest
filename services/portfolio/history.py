@@ -11,6 +11,7 @@ import close_price_client
 import kis_proxy_client
 import stock_price
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 from services.portfolio.identifiers import is_korean_stock
 
 logger = logging.getLogger(__name__)
@@ -56,13 +57,14 @@ async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = 
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(ticker, safe='')}"
     try:
         async with YAHOO_SEM:
-            async with httpx.AsyncClient(timeout=YAHOO_HTTP_TIMEOUT, follow_redirects=True) as client:
-                resp = await client.get(
-                    url,
-                    params={"range": range_, "interval": interval, "includePrePost": "false"},
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                resp.raise_for_status()
+            client = await get_http_client("yahoo")
+            resp = await client.get(
+                url,
+                params={"range": range_, "interval": interval, "includePrePost": "false"},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=YAHOO_HTTP_TIMEOUT,
+            )
+            resp.raise_for_status()
         result = (((resp.json() or {}).get("chart") or {}).get("result") or [None])[0]
         if not result:
             return {"rows": [], "currency": None, "meta": {}}

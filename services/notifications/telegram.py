@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 
-import httpx
+from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,9 @@ async def _api(token: str, method: str, payload: dict | None = None, *, timeout:
     if not token:
         raise RuntimeError("telegram bot token missing")
     url = f"{API_BASE}/bot{token}/{method}"
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, json=payload or {})
-        data = resp.json()
+    client = await get_http_client("telegram")
+    resp = await client.post(url, json=payload or {}, timeout=timeout)
+    data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"telegram {method} failed: {data.get('description') or data}")
     return data.get("result")

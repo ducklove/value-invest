@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 import ai_config
+from core.http import get_http_client
 
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -114,25 +115,27 @@ async def post_chat_completion(
         await ai_config.enforce_budget_caps(google_sub)
     started = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        client = await get_http_client("openrouter")
+        resp = await client.post(
+            OPENROUTER_CHAT_COMPLETIONS_URL,
+            headers=openrouter_headers(openrouter_key),
+            json=request_payload,
+            timeout=timeout,
+        )
+        if (
+            retry_without_reasoning
+            and resp.status_code in {400, 422}
+            and ("reasoning" in request_payload or "include_reasoning" in request_payload)
+        ):
+            retry_payload = dict(request_payload)
+            retry_payload.pop("reasoning", None)
+            retry_payload.pop("include_reasoning", None)
             resp = await client.post(
                 OPENROUTER_CHAT_COMPLETIONS_URL,
                 headers=openrouter_headers(openrouter_key),
-                json=request_payload,
+                json=retry_payload,
+                timeout=timeout,
             )
-            if (
-                retry_without_reasoning
-                and resp.status_code in {400, 422}
-                and ("reasoning" in request_payload or "include_reasoning" in request_payload)
-            ):
-                retry_payload = dict(request_payload)
-                retry_payload.pop("reasoning", None)
-                retry_payload.pop("include_reasoning", None)
-                resp = await client.post(
-                    OPENROUTER_CHAT_COMPLETIONS_URL,
-                    headers=openrouter_headers(openrouter_key),
-                    json=retry_payload,
-                )
         if resp.status_code != 200:
             raise OpenRouterError(
                 f"OpenRouter HTTP {resp.status_code}: {_sanitize_secret_text(resp.text[:300])}",

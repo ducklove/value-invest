@@ -254,13 +254,6 @@ def test_admin_split_files_stay_below_maintenance_ceiling():
         assert len(lines) < 1000, f"{name} grew to {len(lines)} lines; split it before extending"
 
 
-def test_portfolio_default_sort_is_unset():
-    # Sort state lives in PfStore (portfolio-store.js), not bare shell globals.
-    source = (JS / "portfolio-store.js").read_text(encoding="utf-8")
-
-    assert "sort: { key: null, asc: false, groupSort: false }," in source
-
-
 def test_market_tape_is_bottom_frame_outside_main():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")

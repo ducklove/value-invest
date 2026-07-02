@@ -50,3 +50,10 @@ test("benchmarkQuotes is a single mutable store others can share", () => {
   const w2 = loadStore();
   assert.equal(Object.keys(w2.PfStore.benchmarkQuotes).length, 0);
 });
+
+test("PfStore starts with no active portfolio sort", () => {
+  const w = loadStore();
+  assert.equal(w.PfStore.sort.key, null);
+  assert.equal(w.PfStore.sort.asc, false);
+  assert.equal(w.PfStore.sort.groupSort, false);
+});

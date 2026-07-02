@@ -22,6 +22,7 @@ import cache  # corp-code 헬퍼(get_corp_code/get_corp_name)는 아직 cache �
 import dart_client
 import observability
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 from repositories import dart_review as dart_review_repo
 from repositories import financial as financial_repo
 from repositories import wiki as wiki_repo
@@ -121,8 +122,8 @@ async def fetch_periodic_filings(corp_code: str, *, limit: int = 8) -> list[dict
         "page_no": "1",
         "page_count": "100",
     }
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.get(f"{dart_client.BASE_URL}/list.json", params=params)
+    client = await get_http_client("dart")
+    resp = await client.get(f"{dart_client.BASE_URL}/list.json", params=params, timeout=20.0)
     resp.raise_for_status()
     data = resp.json()
     status = str(data.get("status") or "")
@@ -214,11 +215,12 @@ async def fetch_document_text(rcept_no: str) -> str:
     api_key = _dart_key()
     if not api_key:
         raise DartReportReviewError("OPENDART_API_KEY가 설정되어 있지 않습니다.")
-    async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-        resp = await client.get(
-            f"{dart_client.BASE_URL}/document.xml",
-            params={"crtfc_key": api_key, "rcept_no": rcept_no},
-        )
+    client = await get_http_client("dart")
+    resp = await client.get(
+        f"{dart_client.BASE_URL}/document.xml",
+        params={"crtfc_key": api_key, "rcept_no": rcept_no},
+        timeout=45.0,
+    )
     resp.raise_for_status()
     content = resp.content
     if not zipfile.is_zipfile(io.BytesIO(content)):

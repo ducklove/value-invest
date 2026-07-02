@@ -2,11 +2,11 @@ import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
 
 import cache
 import report_client
+from core.http import get_http_client
 from deps import LATEST_REPORT_CACHE_TTL_MINUTES, REPORT_LIST_CACHE_TTL_MINUTES
 from services.report_url_policy import is_allowed_report_pdf_url
 
@@ -116,8 +116,8 @@ async def proxy_report_pdf(url: str = Query(..., min_length=1)):
         raise HTTPException(status_code=400, detail="허용되지 않은 리포트 URL입니다.")
 
     try:
-        async with httpx.AsyncClient(timeout=30, headers=report_client.HEADERS, follow_redirects=True) as client:
-            resp = await client.get(url)
+        client = await get_http_client("report")
+        resp = await client.get(url, headers=report_client.HEADERS, timeout=30)
     except Exception as e:
         logger.error(f"리포트 PDF 프록시 실패: {e}")
         raise HTTPException(status_code=502, detail="리포트 원문을 불러오지 못했습니다.") from e

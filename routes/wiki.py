@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 import ai_config
 import cache
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from repositories import dart_review as dart_review_repo
@@ -325,13 +326,16 @@ async def _fetch_recent_news(stock_code: str, limit: int = 6) -> list[dict]:
     try:
         import re as _re
 
-        import httpx
         url = f"https://finance.naver.com/item/news_news.naver?code={stock_code}&page=1"
-        async with httpx.AsyncClient(timeout=8.0, headers={
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://finance.naver.com/",
-        }) as client:
-            resp = await client.get(url)
+        client = await get_http_client("naver")
+        resp = await client.get(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://finance.naver.com/",
+            },
+            timeout=8.0,
+        )
         html = resp.content.decode("euc-kr", errors="ignore")
         # Rows look like: <td class="title"><a ...>제목</a></td>
         # <td class="info">언론사</td><td class="date">2026.04.17 09:30</td>
