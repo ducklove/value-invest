@@ -32,7 +32,9 @@
 | 완료 | 공용 HTTP 클라이언트 상위 호출부 전환 | `market_indicators.py`, `stock_price.py`, `market_daily.py`; 해당 3파일 직접 `httpx.AsyncClient` 생성 제거 |
 | 완료 | 공용 HTTP 클라이언트 잔여 일반 호출부 전환 | 리포트/PDF/DART/알림/위키뉴스/포트폴리오 Naver·Yahoo·Upbit·Gold/OpenRouter 비스트림 호출 전환; 남은 직접 생성 4곳은 자체 싱글톤·SSE 스트림 예외 |
 | 완료 | 의존성 lock/pinning 정책 정리 | `requirements-dev.txt` dev 의존성 상한 추가, `docs/dependency-policy.md`, `tests/test_dependency_policy.py` |
-| 완료 | 최종 실서버 배포 및 헬스체크 | GitHub Actions run `28588345220`, `/healthz` `asset_version=65660ba` |
+| 완료 | 이전 실서버 배포 및 헬스체크 | GitHub Actions run `28588345220`, `/healthz` `asset_version=65660ba` |
+| 완료 | 포트폴리오 필터/편집 기본 상태 계약을 jsdom 테스트로 이관 | `tests/js/portfolio-store.test.mjs`, `tests/test_frontend_structure.py` 문자열 검사 2건 제거 |
+| 완료 | `cache.py` `init_db` 컬럼 마이그레이션 1차 분리 | `repositories/schema.py` `CORE_COLUMN_MIGRATIONS`, `ensure_columns`, `apply_core_column_migrations` |
 
 ## 다음 작업 후보
 
@@ -40,7 +42,7 @@
 | --- | --- | --- | --- |
 | P1 | 완료 | `apiFetchJson` 헬퍼로 JSON API 오류 처리 공통화 | 파일 단위 전환 완료, raw 예외는 SSE/외부 fetch/헬퍼 내부 |
 | P1 | 완료 | 토스트/로딩 상태의 `aria-live` 적용 범위 확대 | 접근성 즉시 개선 항목 |
-| P1 | 진행중 | string-presence 테스트를 jsdom 동작 테스트로 점진 이관 | 경제 캘린더 알림 체크박스와 포트폴리오 기본 정렬 상태 이관 완료, 남은 구조 계약은 순차 이관 |
+| P1 | 진행중 | string-presence 테스트를 jsdom 동작 테스트로 점진 이관 | 경제 캘린더 알림 체크박스, 포트폴리오 기본 정렬, 필터/편집 초기 상태 이관 완료; 남은 구조 계약은 순차 이관 |
 | P1 | 완료 | 공통 모달/상태 표현과 포커스 트랩 | 주요 정적/동적 모달에 focus trap, Escape, focus restore 적용 |
 | P1 | 완료 | `wiki_ingestion` → `routes` 역참조 제거 | PDF URL 허용 정책을 `services/report_url_policy.py`로 이동 |
 | P1 | 완료 | 알림 엔진 silent pass 제거 | `get_all_users_with_alerts`, stale calendar cleanup 실패를 warning 로그로 기록 |
@@ -50,7 +52,7 @@
 | P2 | 완료 | 공용 HTTP 클라이언트 채택 확대 | 일반 호출부 전환 완료, 남은 직접 생성 4곳은 `close_price_client`·`kis_proxy_client` 자체 싱글톤과 wiki/portfolio AI SSE 스트림 예외 |
 | P2 | 완료 | `deploy.sh` 과거 리페어 블록 분리 | one-time repair 스크립트 5개와 shared lock runner로 분리 |
 | P2 | 완료 | 의존성 lock/pinning 정책 정리 | Python direct dependency 하한/상한 정책과 JS `package-lock.json`/`npm ci` 경로를 테스트로 고정 |
-| P3 | 대기 | `cache.py` `init_db` 분해와 마이그레이션 체계화 | 중기 구조 과제 |
+| P3 | 진행중 | `cache.py` `init_db` 분해와 마이그레이션 체계화 | ADD COLUMN 마이그레이션은 `repositories/schema.py`로 1차 분리 완료, 테이블 생성/백필 분리는 후속 |
 | P3 | 대기 | 배치 실행 원장과 SLO 대시보드 | 장기 운영 관측성 과제 |
 
 ## 검증 로그
@@ -104,3 +106,11 @@
 | 2026-07-02 | `node --check tests/js/portfolio-store.test.mjs` | 통과 |
 | 2026-07-02 | `python -m ruff check .` | 통과 |
 | 2026-07-02 | `python -m pytest -q` | 1092 passed |
+| 2026-07-02 | `python -m pytest tests/test_repositories_schema.py tests/test_accounts.py tests/test_cache_layer.py -q` | 37 passed |
+| 2026-07-02 | `python -m pytest tests/test_frontend_structure.py -q` | 60 passed |
+| 2026-07-02 | `npm test` | 189 passed |
+| 2026-07-02 | `python -m ruff check cache.py repositories/schema.py tests/test_repositories_schema.py tests/test_frontend_structure.py` | 통과 |
+| 2026-07-02 | `python -m pytest -q` | 1100 passed |
+| 2026-07-02 | `npm test` | 189 passed |
+| 2026-07-02 | `python -m ruff check .` | 통과 |
+| 2026-07-02 | `git diff --check` | 통과 |

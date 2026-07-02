@@ -48,6 +48,36 @@ async def test_ensure_column_noop_when_present(tmp_path):
         await db.close()
 
 
+@pytest.mark.asyncio
+async def test_ensure_columns_applies_multiple_specs_in_order():
+    import aiosqlite
+
+    db = await aiosqlite.connect(":memory:")
+    await db.execute("CREATE TABLE t (a TEXT)")
+    await db.commit()
+    try:
+        await schema_mod.ensure_columns(
+            db,
+            (
+                ("t", "b", "TEXT DEFAULT 'b'"),
+                ("t", "c", "INTEGER NOT NULL DEFAULT 3"),
+            ),
+        )
+        cur = await db.execute("PRAGMA table_info(t)")
+        names = [row[1] for row in await cur.fetchall()]
+        assert names == ["a", "b", "c"]
+    finally:
+        await db.close()
+
+
+def test_core_column_migrations_cover_known_late_columns():
+    columns = {(table, column) for table, column, _ in schema_mod.CORE_COLUMN_MIGRATIONS}
+    assert ("user_portfolio", "target_price") in columns
+    assert ("user_portfolio", "account_id") in columns
+    assert ("portfolio_alerts", "state_json") in columns
+    assert ("portfolio_stock_snapshots", "cost_basis") in columns
+
+
 def test_validate_identifier_accepts_valid():
     assert schema_mod._validate_identifier("corp_codes", kind="table") == "corp_codes"
     assert schema_mod._validate_identifier("_under_score99", kind="column") == "_under_score99"

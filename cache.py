@@ -11,6 +11,7 @@ from cache_layer import (
     parse_iso,
 )
 from repositories import db as _db
+from repositories import schema as schema_repo
 
 # 커넥션 싱글톤의 원본은 repositories/db.py 로 이동했다. 아래는 기존
 # ``cache.get_db()`` / ``cache.DB_PATH`` 호출부(레거시 모듈, deploy.sh
@@ -726,27 +727,7 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_portfolio_accounts_user
             ON portfolio_accounts(google_sub, sort_order);
     """)
-    await _ensure_column(db, "corp_codes", "modify_date", "TEXT")
-    await _ensure_column(db, "financial_data", "report_date", "TEXT")
-    await _ensure_column(db, "market_data", "dividend_per_share", "REAL")
-    await _ensure_column(db, "analysis_meta", "payload_json", "TEXT")
-    await _ensure_column(db, "user_stock_preferences", "sort_order", "INTEGER")
-    await _ensure_column(db, "user_stock_preferences", "starred_order", "INTEGER")
-    await _ensure_column(db, "user_portfolio", "currency", "TEXT DEFAULT 'KRW'")
-    await _ensure_column(db, "user_portfolio", "avg_price_currency", "TEXT NOT NULL DEFAULT 'KRW'")
-    await _ensure_column(db, "user_portfolio", "group_name", "TEXT")
-    await _ensure_column(db, "user_portfolio", "benchmark_code", "TEXT")
-    # 목표가 (수동 override). NULL + target_price_disabled=0 → 자동 계산
-    # (우선주 → 본주, 지주사 → NAV per share, 그 외 → avg_price × 1.3).
-    # 숫자 → 그 값이 고정 override. target_price_disabled=1 → '-' 로
-    # 표시, 자동 계산도 bypass (사용자가 × 버튼으로 명시 비움).
-    await _ensure_column(db, "user_portfolio", "target_price", "REAL")
-    await _ensure_column(db, "user_portfolio", "target_price_disabled", "INTEGER NOT NULL DEFAULT 0")
-    await _ensure_column(db, "user_portfolio", "target_price_formula", "TEXT")
-    await _ensure_column(db, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
-    await _ensure_column(db, "users", "password_hash", "TEXT")
-    await _ensure_column(db, "users", "password_updated_at", "TEXT")
-    await _ensure_column(db, "users", "google_identity_sub", "TEXT")
+    await schema_repo.apply_core_column_migrations(db)
     await db.execute(
         """
         UPDATE users
@@ -760,16 +741,6 @@ async def init_db():
         "ON users(google_identity_sub) WHERE google_identity_sub IS NOT NULL"
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users(lower(email))")
-    # Per-holding edge-trigger state for blanket (all_stocks) alert rules.
-    await _ensure_column(db, "portfolio_alerts", "state_json", "TEXT NOT NULL DEFAULT '{}'")
-    # 중요 알림 표시 — 발송 시 강조 헤더로 더 눈에 띄게 보낸다.
-    await _ensure_column(db, "portfolio_alerts", "important", "INTEGER NOT NULL DEFAULT 0")
-    await _ensure_column(db, "portfolio_snapshots", "fx_usdkrw", "REAL")
-    await _ensure_column(db, "portfolio_stock_snapshots", "group_name", "TEXT")
-    await _ensure_column(db, "portfolio_stock_snapshots", "quantity", "REAL")
-    await _ensure_column(db, "portfolio_stock_snapshots", "unit_price", "REAL")
-    await _ensure_column(db, "portfolio_stock_snapshots", "avg_price_krw", "REAL")
-    await _ensure_column(db, "portfolio_stock_snapshots", "cost_basis", "REAL")
     await _backfill_legacy_cache_values(db)
     await db.execute("CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_group_date ON portfolio_stock_snapshots(google_sub, group_name, date)")
     cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_group_snapshots")
@@ -780,12 +751,6 @@ async def init_db():
     stock_weight_snapshot_count = (await cursor.fetchone())["n"]
     if stock_weight_snapshot_count == 0:
         await _refresh_stock_weight_snapshots(db)
-    await _ensure_column(db, "portfolio_groups", "default_type", "TEXT")
-    # Multi-account phase 1: optional account_id on holdings (nullable → defaults
-    # to the user's single "default" account via backfill below). Kept out of the
-    # PK on purpose — SQLite can't ALTER a PK, so uniqueness across (user, account,
-    # ticker) is enforced in app code until a later table-rebuild phase.
-    await _ensure_column(db, "user_portfolio", "account_id", "TEXT")
     # Backfill default_type for existing default groups by sort_order
     _type_by_order = {0: "kr", 1: "foreign", 2: "etc"}
     for order, dtype in _type_by_order.items():

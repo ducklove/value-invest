@@ -580,8 +580,6 @@ def test_portfolio_search_and_registration_are_separate_controls():
     assert 'id="pfAddToggle"' in html
     assert 'id="pfAddPanel"' in html
     assert html.find('id="pfAddToggle"') < html.find('id="pfCsvToggle"')
-    # Search text lives in PfStore.filters (portfolio-store.js).
-    assert "filters: { group: null, searchText: '' }," in (JS / "portfolio-store.js").read_text(encoding="utf-8")
     assert "PfStore.filters.searchText" in shell or "PfStore.filters.searchText" in data
     assert "function pfRowMatchesSearch" in data
     assert "...pfGetTags(item)" in data
@@ -615,8 +613,6 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
     assert 'type="button" class="pf-row-btn save js-pf-save"' in render
-    # Edit state lives in PfStore.edit (portfolio-store.js).
-    assert "edit: { code: null, savingCode: null }," in (JS / "portfolio-store.js").read_text(encoding="utf-8")
     assert "const isSaving = PfStore.edit.savingCode === r.stock_code" in render
     assert 'class="pf-row-saving" aria-busy="true"' in render
     assert "pf-save-spinner" in render

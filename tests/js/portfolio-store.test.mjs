@@ -57,3 +57,11 @@ test("PfStore starts with no active portfolio sort", () => {
   assert.equal(w.PfStore.sort.asc, false);
   assert.equal(w.PfStore.sort.groupSort, false);
 });
+
+test("PfStore starts with neutral filters and no active row edit", () => {
+  const w = loadStore();
+  assert.equal(w.PfStore.filters.group, null);
+  assert.equal(w.PfStore.filters.searchText, "");
+  assert.equal(w.PfStore.edit.code, null);
+  assert.equal(w.PfStore.edit.savingCode, null);
+});
