@@ -336,11 +336,8 @@ function _ecRenderShell() {
 async function _ecLoadSubs() {
   if (_ecSubsLoaded || !currentUser) return;
   try {
-    const r = await apiFetch('/api/notifications/calendar');
-    if (r.ok) {
-      const d = await r.json();
-      _ecSubs = new Set(d.event_ids || []);
-    }
+    const d = await apiFetchJson('/api/notifications/calendar', { fallback: { event_ids: [] } });
+    _ecSubs = new Set(d.event_ids || []);
   } catch (e) {
     console.warn('calendar subscriptions load failed', e);
   } finally {
@@ -371,7 +368,7 @@ async function _ecToggleSubscription(cb) {
     // 별도 클라이언트 사전체크는 오판(이미 연결됐는데 연결하라는 팝업) 위험이 있어 제거.
     const ev = _ecEventById[eid] || {};
     try {
-      const r = await apiFetch('/api/notifications/calendar', {
+      await apiFetchJson('/api/notifications/calendar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -385,13 +382,11 @@ async function _ecToggleSubscription(cb) {
           forecast: ev.forecast || '',
           previous: ev.previous || '',
         }),
+        errorMessage: 'subscribe failed',
       });
-      if (!r.ok) {
-        if (r.status === 409) { cb.checked = false; _ecPromptChannel(); return; }
-        throw new Error('subscribe failed');
-      }
       _ecSubs.add(eid);
     } catch (e) {
+      if (e?.status === 409) { cb.checked = false; _ecPromptChannel(); return; }
       cb.checked = false;
       console.warn('calendar subscribe failed', e);
     }
@@ -421,9 +416,8 @@ async function loadEconomicCalendar() {
   const reqKey = params.toString();
   _ecInFlight = reqKey;
   try {
-    const r = await apiFetch('/api/market/economic-calendar?' + reqKey);
+    const data = await apiFetchJson('/api/market/economic-calendar?' + reqKey, { fallback: { events: [] } });
     if (_ecInFlight !== reqKey) return; // 더 최신 요청이 진행 중이면 폐기
-    const data = r.ok ? await r.json() : { events: [] };
     _ecRenderBody(data);
   } catch (e) {
     console.warn('economic calendar load failed', e);

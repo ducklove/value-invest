@@ -431,11 +431,7 @@ async function _pfLoadTagSummaryTrends(tag) {
   try {
     const fetchJson = typeof _pfFetchJson === 'function'
       ? _pfFetchJson
-      : async path => {
-          const resp = await apiFetch(path);
-          if (!resp.ok) throw new Error(`Tag history request failed (${resp.status})`);
-          return await resp.json();
-        };
+      : async (path, label = 'Tag history') => apiFetchJson(path, { errorMessage: `${label} request failed` });
     const rows = await fetchJson(`/api/portfolio/tag-history?tag=${encodeURIComponent(tag)}`, 'Tag history');
     if (loadSeq !== _pfTagSummaryLoadSeq || !document.getElementById('pfTagSummaryModal')) return;
     await _pfRenderTagSummaryTrendCharts(rows);
@@ -454,11 +450,7 @@ async function _pfLoadGroupSummaryTrends(groupName) {
   try {
     const fetchJson = typeof _pfFetchJson === 'function'
       ? _pfFetchJson
-      : async path => {
-          const resp = await apiFetch(path);
-          if (!resp.ok) throw new Error(`Group history request failed (${resp.status})`);
-          return await resp.json();
-        };
+      : async (path, label = 'Group history') => apiFetchJson(path, { errorMessage: `${label} request failed` });
     const rows = await fetchJson('/api/portfolio/group-weight-history', 'Group weight history');
     if (loadSeq !== _pfTagSummaryLoadSeq || !document.getElementById('pfTagSummaryModal')) return;
     const groupRows = (Array.isArray(rows) ? rows : [])
@@ -482,7 +474,7 @@ function pfCloseTagSummary() {
   _pfTagSummaryLoadSeq += 1;
   _pfDisposeTagSummaryCharts();
   const modal = document.getElementById('pfTagSummaryModal');
-  if (modal) modal.remove();
+  if (modal) closeManagedModal(modal, { remove: true });
 }
 
 function _pfOpenPortfolioSliceSummary({
@@ -533,7 +525,10 @@ function _pfOpenPortfolioSliceSummary({
     if (e.target === overlay) pfCloseTagSummary();
   });
   document.body.appendChild(overlay);
-  overlay.querySelector('.pf-modal-close')?.focus();
+  openManagedModal(overlay, {
+    initialFocus: '.pf-modal-close',
+    onEscape: pfCloseTagSummary,
+  });
   void loadTrends(displayName);
 }
 
@@ -569,11 +564,3 @@ function pfOpenGroupSummary(groupName) {
     loadTrends: _pfLoadGroupSummaryTrends,
   });
 }
-
-(function initPfTagSummaryKeys() {
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && document.getElementById('pfTagSummaryModal')) {
-      pfCloseTagSummary();
-    }
-  });
-})();

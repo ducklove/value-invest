@@ -65,15 +65,12 @@ async function pfFlushManualOrderSave() {
       const orderCodes = PfStore.manualOrder.pendingCodes.slice();
       const orderRevision = PfStore.manualOrder.revision;
       try {
-        const resp = await apiFetch('/api/portfolio/order', {
+        await apiFetchJson('/api/portfolio/order', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ stock_codes: orderCodes }),
+          errorMessage: 'Portfolio order save failed',
         });
-        if (!resp.ok) {
-          const data = await resp.json().catch(() => ({}));
-          throw new Error(data.detail || 'Portfolio order save failed');
-        }
       } catch (e) {
         if (_pfSameOrderCodes(PfStore.manualOrder.pendingCodes, orderCodes) && PfStore.manualOrder.revision === orderRevision) {
           PfStore.manualOrder.pendingCodes = null;

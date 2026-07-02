@@ -34,8 +34,8 @@ import cache  # corp-code/리포트목록 캐시(get_corp_name/get_report_list)�
 import observability
 import report_client
 from repositories import wiki as wiki_repo
-from routes.reports import _is_allowed_report_pdf_url
 from services import ai_client
+from services.report_url_policy import is_allowed_report_pdf_url
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +82,9 @@ def _ensure_cache_dir() -> None:
 
 
 async def download_pdf(url: str, timeout: float = 30.0) -> bytes:
-    """Fetch the PDF bytes. Honors the same whitelist as routes.reports to
+    """Fetch the PDF bytes. Honors the shared whitelist policy to
     avoid being used as an SSRF proxy."""
-    if not _is_allowed_report_pdf_url(url):
+    if not is_allowed_report_pdf_url(url):
         raise ValueError(f"URL not in allowed list: {url}")
     async with _DOWNLOAD_SEMAPHORE:
         async with httpx.AsyncClient(
@@ -264,7 +264,7 @@ async def ingest_pdf_for_report(
     #                         bug we should fix, not a dataset limit.
     if not pdf_url:
         return {"skipped": "no_pdf_url"}
-    if not _is_allowed_report_pdf_url(pdf_url):
+    if not is_allowed_report_pdf_url(pdf_url):
         return {"skipped": "rejected_by_whitelist", "pdf_url": pdf_url}
 
     _ensure_cache_dir()

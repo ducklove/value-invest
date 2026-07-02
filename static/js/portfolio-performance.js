@@ -15,16 +15,16 @@ function _pfSetChartMessage(ids, message) {
 }
 
 async function _pfFetchJson(path, label) {
-  const resp = await apiFetch(path);
-  if (!resp.ok) {
-    const message = resp.status === 401
-      ? '로그인 후 심층 분석 데이터를 확인할 수 있습니다.'
-      : `${label} request failed (${resp.status})`;
-    const err = new Error(message);
-    err.status = resp.status;
+  try {
+    return await apiFetchJson(path, { errorMessage: `${label} request failed` });
+  } catch (err) {
+    if (err?.status === 401) {
+      const authErr = new Error('로그인 후 심층 분석 데이터를 확인할 수 있습니다.');
+      authErr.status = err.status;
+      throw authErr;
+    }
     throw err;
   }
-  return await resp.json();
 }
 
 async function pfLoadGroupWeightHistory({ force = false } = {}) {
@@ -76,7 +76,10 @@ function pfSwitchTab(tab) {
 function pfOpenTreemap() {
   const modal = document.getElementById('pfTreemapModal');
   if (!modal) return;
-  modal.style.display = 'flex';
+  openManagedModal(modal, {
+    initialFocus: '.pf-modal-close',
+    onEscape: pfCloseTreemap,
+  });
   // ECharts 는 컨테이너가 화면에 보여진 뒤 init/resize 해야 크기를 맞게
   // 측정함. display 전환 → 레이아웃 확정 → 측정 순서 보장 위해 두 번째
   // rAF 에서 렌더 (첫 rAF 는 style flush, 두 번째에 실제 크기가 확정).
@@ -85,23 +88,17 @@ function pfOpenTreemap() {
       if (!USE_UPLOT) renderTreemap();
     });
   });
-  document.addEventListener('keydown', _pfTreemapEscHandler);
 }
 
 function pfCloseTreemap() {
   const modal = document.getElementById('pfTreemapModal');
   if (!modal) return;
-  modal.style.display = 'none';
-  document.removeEventListener('keydown', _pfTreemapEscHandler);
+  closeManagedModal(modal);
   // ECharts 인스턴스 해제 — 다음 open 에서 다시 그림. 메모리 관리 겸
   // 닫은 뒤 브라우저 창 리사이즈 때 hidden 컨테이너에 대고 resize 가
   // 호출되지 않도록. ResizeObserver 도 함께 해제.
   if (_treemapInstance) { _treemapInstance.dispose(); _treemapInstance = null; }
   if (_treemapResizeObserver) { _treemapResizeObserver.disconnect(); _treemapResizeObserver = null; }
-}
-
-function _pfTreemapEscHandler(e) {
-  if (e.key === 'Escape') pfCloseTreemap();
 }
 
 async function loadPerformanceData() {

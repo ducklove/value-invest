@@ -149,17 +149,17 @@ async function pfLoadJournalPanel({ force = false } = {}) {
   const seq = ++_pfJournalLoadSeq;
   _pfJournalMsg(el, '투자 일지를 불러오는 중입니다...');
   try {
-    const resp = await apiFetch('/api/portfolio/journal');
-    if (resp.status === 401) {
-      if (seq === _pfJournalLoadSeq) _pfJournalMsg(el, '로그인 후 이용할 수 있습니다.');
-      return;
-    }
-    if (!resp.ok) throw new Error(`투자 일지 요청 실패 (${resp.status})`);
-    const data = await resp.json();
+    const data = await apiFetchJson('/api/portfolio/journal', {
+      errorMessage: '투자 일지 요청 실패',
+    });
     if (seq !== _pfJournalLoadSeq) return;
     _pfJournalEntries = Array.isArray(data.entries) ? data.entries : [];
     _pfJournalRenderPanel();
   } catch (e) {
+    if (e?.status === 401) {
+      if (seq === _pfJournalLoadSeq) _pfJournalMsg(el, '로그인 후 이용할 수 있습니다.');
+      return;
+    }
     reportApiError(e, '투자 일지', { silent: true });
     if (seq === _pfJournalLoadSeq) {
       _pfJournalMsg(el, '투자 일지를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
@@ -206,20 +206,20 @@ async function loadStockJournal(stockCode) {
   const seq = ++_stockJournalLoadSeq;
   _pfJournalMsg(listEl, '투자 일지를 불러오는 중입니다...');
   try {
-    const resp = await apiFetch(`/api/portfolio/journal?stock_code=${encodeURIComponent(stockCode)}`);
-    if (resp.status === 401) {
-      if (seq !== _stockJournalLoadSeq) return;
-      formEl.innerHTML = '';
-      _pfJournalMsg(listEl, '로그인하면 이 종목의 매수·매도 판단을 기록하고 복기할 수 있습니다.');
-      return;
-    }
-    if (!resp.ok) throw new Error(`투자 일지 요청 실패 (${resp.status})`);
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/portfolio/journal?stock_code=${encodeURIComponent(stockCode)}`, {
+      errorMessage: '투자 일지 요청 실패',
+    });
     if (seq !== _stockJournalLoadSeq) return;
     formEl.innerHTML = _stockJournalFormHtml();
     _stockJournalEntries = Array.isArray(data.entries) ? data.entries : [];
     _stockJournalRenderList();
   } catch (e) {
+    if (e?.status === 401) {
+      if (seq !== _stockJournalLoadSeq) return;
+      formEl.innerHTML = '';
+      _pfJournalMsg(listEl, '로그인하면 이 종목의 매수·매도 판단을 기록하고 복기할 수 있습니다.');
+      return;
+    }
     reportApiError(e, '투자 일지', { silent: true });
     if (seq === _stockJournalLoadSeq) {
       _pfJournalMsg(listEl, '투자 일지를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
@@ -242,13 +242,12 @@ async function stockJournalSubmit() {
   const stockName = nameText.split(' (')[0].trim();
   if (stockName) body.stock_name = stockName;
   try {
-    const resp = await apiFetch('/api/portfolio/journal', {
+    await apiFetchJson('/api/portfolio/journal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      errorMessage: '투자 일지 기록에 실패했습니다.',
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     const noteEl = document.getElementById('stockJournalNote');
     const qtyEl = document.getElementById('stockJournalQty');
     if (noteEl) noteEl.value = '';
@@ -290,13 +289,12 @@ async function pfJournalSaveNote(entryId) {
   const note = (input?.value || '').trim();
   if (!note) { showToast('판단 이유를 입력해 주세요.'); return; }
   try {
-    const resp = await apiFetch(`/api/portfolio/journal/${id}`, {
+    const data = await apiFetchJson(`/api/portfolio/journal/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note }),
+      errorMessage: '투자 일지 수정에 실패했습니다.',
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     _pfJournalApply((entries) => entries.map((e) => (
       Number(e.id) === id ? { ...e, note: data.note ?? note, updated_at: data.updated_at || e.updated_at } : e
     )));
@@ -311,9 +309,10 @@ async function pfJournalDelete(entryId) {
   const id = Number(entryId);
   if (!window.confirm('이 일지 항목을 삭제할까요? 복기 기록은 복구할 수 없습니다.')) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/journal/${id}`, { method: 'DELETE' });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    await apiFetchJson(`/api/portfolio/journal/${id}`, {
+      method: 'DELETE',
+      errorMessage: '투자 일지 삭제에 실패했습니다.',
+    });
     if (_pfJournalEditing === id) _pfJournalEditing = null;
     _pfJournalApply((entries) => entries.filter((e) => Number(e.id) !== id));
     _pfJournalRerenderSurfaces();

@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 import ai_config
 import cache
 from cache_layer import MemoryTTLCache
+from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from repositories import dart_review as dart_review_repo
 from repositories import wiki as wiki_repo
@@ -30,6 +31,8 @@ router = APIRouter()
 
 # Per-user daily quota — prevents runaway cost and accidental loops.
 QA_DAILY_LIMIT = int(os.environ.get("WIKI_QA_DAILY_LIMIT", "20"))
+QA_BURST_LIMIT = int(os.environ.get("WIKI_QA_BURST_LIMIT", "6"))
+QA_BURST_WINDOW_SECONDS = int(os.environ.get("WIKI_QA_BURST_WINDOW_SECONDS", "600"))
 # Max question length; reasonable investor questions fit easily in 1k chars.
 QA_MAX_QUESTION_CHARS = 1000
 # Hard cap on key_points length per entry in the prompt — keeps total
@@ -635,6 +638,14 @@ async def ask_stock(
             status_code=429,
             detail=f"오늘의 질문 한도({QA_DAILY_LIMIT}회)를 모두 사용했습니다.",
         )
+    enforce_rate_limit(
+        request,
+        scope="wiki_qa",
+        user=user,
+        max_requests=QA_BURST_LIMIT,
+        window_seconds=QA_BURST_WINDOW_SECONDS,
+        detail="질문 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+    )
 
     # Optional admin model override via payload.
     req_model = payload.get("model") if isinstance(payload, dict) else None

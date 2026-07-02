@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from core import rate_limit
 from repositories import wiki as wiki_repo
 from routes import wiki as wiki_route
 
@@ -91,6 +92,10 @@ class WikiAskRouteTests(TempDbMixin):
         # Seed a user; Q&A gate needs authenticated.
         await seed_user("u1", "u1@e.com", "U")
 
+    async def asyncTearDown(self):
+        rate_limit.reset_rate_limits()
+        await super().asyncTearDown()
+
     async def test_ask_requires_login(self):
         with patch("routes.wiki.get_current_user", new=AsyncMock(return_value=None)):
             with self.assertRaises(HTTPException) as exc_info:
@@ -120,6 +125,24 @@ class WikiAskRouteTests(TempDbMixin):
              patch.object(wiki_route, "_today_kst_iso", return_value="2099-01-01T00:00:00"):
             with self.assertRaises(HTTPException) as exc_info:
                 await wiki_route.ask_stock("005930", _mk_request(), {"question": "hi"})
+        self.assertEqual(exc_info.exception.status_code, 429)
+
+    async def test_ask_enforces_burst_rate_limit_before_llm(self):
+        user = {"google_sub": "u1", "is_admin": False}
+        rate_limit.reset_rate_limits()
+        for _ in range(wiki_route.QA_BURST_LIMIT):
+            rate_limit.enforce_rate_limit(
+                _mk_request(),
+                scope="wiki_qa",
+                user=user,
+                max_requests=wiki_route.QA_BURST_LIMIT,
+                window_seconds=wiki_route.QA_BURST_WINDOW_SECONDS,
+                detail="limited",
+            )
+        with patch("routes.wiki.get_current_user", new=AsyncMock(return_value=user)), \
+             patch.object(wiki_route, "_try_shortcut", new=AsyncMock(return_value=None)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await wiki_route.ask_stock("005930", _mk_request(), {"question": "전망은?"})
         self.assertEqual(exc_info.exception.status_code, 429)
 
     def test_build_qa_context_formats_entries(self):

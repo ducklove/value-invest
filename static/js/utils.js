@@ -315,7 +315,8 @@ function _apiErrorMessageFromBody(body) {
 }
 
 async function apiFetchJson(path, options = {}) {
-  const { errorMessage = '', ...fetchOptions } = options || {};
+  const hasFallback = options && Object.prototype.hasOwnProperty.call(options, 'fallback');
+  const { errorMessage = '', fallback = null, ...fetchOptions } = options || {};
   const resp = await apiFetch(path, fetchOptions);
   let data = null;
   try {
@@ -324,6 +325,7 @@ async function apiFetchJson(path, options = {}) {
     data = null;
   }
   if (!resp.ok) {
+    if (hasFallback) return fallback;
     const message = _apiErrorMessageFromBody(data) || errorMessage || resp.statusText || `HTTP ${resp.status}`;
     const error = new Error(message);
     error.status = resp.status;
@@ -332,6 +334,122 @@ async function apiFetchJson(path, options = {}) {
     throw error;
   }
   return data;
+}
+
+const MANAGED_MODAL_FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+const _managedModalStack = [];
+let _managedModalBodyOverflow = null;
+
+function _managedModalElement(modalOrId) {
+  if (!modalOrId) return null;
+  if (typeof modalOrId === 'string') return document.getElementById(modalOrId);
+  return modalOrId;
+}
+
+function _managedModalFocusable(modal) {
+  return [...modal.querySelectorAll(MANAGED_MODAL_FOCUSABLE_SELECTOR)]
+    .filter(el => {
+      if (!el || typeof el.focus !== 'function') return false;
+      const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+      return !style || (style.visibility !== 'hidden' && style.display !== 'none');
+    });
+}
+
+function _managedModalResolveFocus(modal, target) {
+  if (typeof target === 'string') return modal.querySelector(target) || document.querySelector(target);
+  if (target && typeof target.focus === 'function') return target;
+  return _managedModalFocusable(modal)[0] || modal;
+}
+
+function _managedModalFocus(entry) {
+  const target = _managedModalResolveFocus(entry.modal, entry.initialFocus);
+  if (!target || typeof target.focus !== 'function') return;
+  if (target === entry.modal && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+  try {
+    target.focus({ preventScroll: true });
+  } catch (_) {
+    target.focus();
+  }
+}
+
+function _managedModalKeydown(event) {
+  const entry = _managedModalStack[_managedModalStack.length - 1];
+  if (!entry) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    if (typeof entry.onEscape === 'function') entry.onEscape(event);
+    else closeManagedModal(entry.modal);
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = _managedModalFocusable(entry.modal);
+  if (!focusable.length) {
+    event.preventDefault();
+    _managedModalFocus(entry);
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (event.shiftKey && (!entry.modal.contains(active) || active === first)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function openManagedModal(modalOrId, options = {}) {
+  const modal = _managedModalElement(modalOrId);
+  if (!modal) return null;
+  const existingIndex = _managedModalStack.findIndex(entry => entry.modal === modal);
+  if (existingIndex >= 0) _managedModalStack.splice(existingIndex, 1);
+  if (!_managedModalStack.length) {
+    document.addEventListener('keydown', _managedModalKeydown);
+    _managedModalBodyOverflow = document.body.style.overflow || '';
+    if (options.lockScroll !== false) document.body.style.overflow = 'hidden';
+  }
+  const entry = {
+    modal,
+    previousFocus: document.activeElement,
+    initialFocus: options.initialFocus || null,
+    onEscape: options.onEscape || null,
+  };
+  _managedModalStack.push(entry);
+  modal.style.display = options.display || 'flex';
+  modal.dataset.managedModalOpen = 'true';
+  _managedModalFocus(entry);
+  return modal;
+}
+
+function closeManagedModal(modalOrId, options = {}) {
+  const modal = _managedModalElement(modalOrId);
+  if (!modal) return;
+  const index = _managedModalStack.findIndex(entry => entry.modal === modal);
+  const [entry] = index >= 0 ? _managedModalStack.splice(index, 1) : [{ modal, previousFocus: null }];
+  if (!options.remove) modal.style.display = 'none';
+  modal.removeAttribute('data-managed-modal-open');
+  if (!_managedModalStack.length) {
+    document.removeEventListener('keydown', _managedModalKeydown);
+    if (_managedModalBodyOverflow !== null) document.body.style.overflow = _managedModalBodyOverflow;
+    _managedModalBodyOverflow = null;
+  }
+  if (options.remove) modal.remove();
+  if (options.restoreFocus !== false && entry.previousFocus && typeof entry.previousFocus.focus === 'function' && document.contains(entry.previousFocus)) {
+    try {
+      entry.previousFocus.focus({ preventScroll: true });
+    } catch (_) {
+      entry.previousFocus.focus();
+    }
+  }
 }
 
 function _isAbortError(error) {

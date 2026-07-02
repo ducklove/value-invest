@@ -108,18 +108,18 @@ async function pfLoadRiskPanel({ force = false } = {}) {
   const seq = ++_pfRiskLoadSeq;
   _pfRiskMsg('리스크 지표를 불러오는 중입니다...');
   try {
-    const resp = await apiFetch(`/api/portfolio/risk?window=${encodeURIComponent(win)}`);
-    if (resp.status === 401) {
-      if (seq === _pfRiskLoadSeq && win === _pfRiskWindow) _pfRiskMsg('로그인 후 이용할 수 있습니다.');
-      return;
-    }
-    if (!resp.ok) throw new Error(`리스크 지표 요청 실패 (${resp.status})`);
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/portfolio/risk?window=${encodeURIComponent(win)}`, {
+      errorMessage: '리스크 지표 요청 실패',
+    });
     _pfRiskCache[win] = data;
     // 윈도를 빠르게 전환했을 때 늦게 도착한 응답은 그리지 않는다(메모만 갱신).
     if (seq !== _pfRiskLoadSeq || win !== _pfRiskWindow) return;
     _pfRenderRiskPanel(data);
   } catch (e) {
+    if (e.status === 401) {
+      if (seq === _pfRiskLoadSeq && win === _pfRiskWindow) _pfRiskMsg('로그인 후 이용할 수 있습니다.');
+      return;
+    }
     // 백그라운드 로드 — 토스트 없이 콘솔 기록만 남기고 패널 안에 안내.
     reportApiError(e, '리스크 지표', { silent: true });
     if (seq === _pfRiskLoadSeq && win === _pfRiskWindow) {

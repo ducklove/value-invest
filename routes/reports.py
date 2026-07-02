@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 import cache
 import report_client
 from deps import LATEST_REPORT_CACHE_TTL_MINUTES, REPORT_LIST_CACHE_TTL_MINUTES
+from services.report_url_policy import is_allowed_report_pdf_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,17 +24,7 @@ def _is_allowed_report_pdf_url(url: str) -> bool:
     all on ssl.pstatic.net/imgstock/upload/research/…). Both hosts are
     *.pstatic.net (Naver's CDN) so the security posture is unchanged.
     """
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.path.endswith(".pdf"):
-        return False
-    # CDN #1 — research portal PDFs.
-    if parsed.netloc == "stock.pstatic.net" and parsed.path.startswith("/stock-research/"):
-        return True
-    # CDN #2 — image/research upload bucket where many firms that publish
-    # through Naver Research actually land.
-    if parsed.netloc == "ssl.pstatic.net" and parsed.path.startswith("/imgstock/upload/research/"):
-        return True
-    return False
+    return is_allowed_report_pdf_url(url)
 
 
 def _report_signature(report: dict | None) -> tuple:

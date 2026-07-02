@@ -841,8 +841,8 @@ async def evaluate_all() -> dict:
         users = set(await snapshots_repo.get_all_users_with_portfolio())
         try:
             users |= set(await notifications_repo.get_all_users_with_alerts())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("alert rule user discovery failed: %s", exc)
         feed_cache: dict = {}
         total_sent = 0
         evaluated = 0
@@ -969,8 +969,8 @@ async def evaluate_calendar_all() -> dict:
 
     try:
         await notifications_repo.delete_stale_calendar_subscriptions(stale_cutoff)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("calendar stale subscription cleanup failed: %s", exc)
     return {"subs": len(pending), "sent": sent}
 
 

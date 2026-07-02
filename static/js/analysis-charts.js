@@ -223,8 +223,10 @@ async function _openTargetPriceModal(dates, prices, targetLine, scatterData, lab
   const titleEl = document.getElementById('chartModalTitle');
   const canvas = document.getElementById('chartModalCanvas');
   titleEl.textContent = '증권사 목표가';
-  modal.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
+  openManagedModal(modal, {
+    initialFocus: '.chart-modal-close',
+    onEscape: closeChartModal,
+  });
 
   if (_modalChart) { _modalChart.dispose(); _modalChart = null; }
 
@@ -394,8 +396,10 @@ function openChartModal(title, opts) {
   const titleEl = document.getElementById('chartModalTitle');
   const canvas = document.getElementById('chartModalCanvas');
   titleEl.textContent = title;
-  modal.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
+  openManagedModal(modal, {
+    initialFocus: '.chart-modal-close',
+    onEscape: closeChartModal,
+  });
 
   if (_modalChart) { _modalChart.dispose(); _modalChart = null; }
 
@@ -454,8 +458,7 @@ function openChartModal(title, opts) {
 }
 
 function closeChartModal() {
-  document.getElementById('chartModal').style.display = 'none';
-  document.body.style.overflow = '';
+  closeManagedModal('chartModal');
   if (_modalChart) { _modalChart.dispose(); _modalChart = null; }
 }
 
@@ -477,8 +480,7 @@ async function switchValuationPeriod(period) {
     let daily = _dailyCache[stockCode];
     if (!daily) {
       try {
-        const resp = await apiFetch(`/api/analyze/${stockCode}/daily`);
-        daily = await resp.json();
+        daily = await apiFetchJson(`/api/analyze/${stockCode}/daily`);
         _dailyCache[stockCode] = daily;
       } catch (e) {
         console.error('Daily fetch failed', e);

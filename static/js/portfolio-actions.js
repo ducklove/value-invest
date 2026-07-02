@@ -6,7 +6,7 @@ async function pfChangeGroup(stockCode, groupName) {
   const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
+    await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -15,8 +15,8 @@ async function pfChangeGroup(stockCode, groupName) {
         avg_price: item.avg_price,
         group_name: groupName,
       }),
+      errorMessage: '그룹 변경에 실패했습니다.',
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     item.group_name = groupName;
     renderPortfolio();
   } catch (e) { reportApiError(e, '그룹 변경'); }
@@ -72,13 +72,12 @@ async function pfSetBenchmark(stockCode, benchmarkCode) {
   const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}/benchmark`, {
+    const data = await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}/benchmark`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ benchmark_code: benchmarkCode || null }),
+      errorMessage: '벤치마크 변경에 실패했습니다.',
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
     item.benchmark_code = data.effective_benchmark;
     if (data.benchmark_quote || data.benchmark_name) {
       pfMergeBenchmarkQuote(data.effective_benchmark, {
@@ -208,16 +207,12 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   }
   _pfSetEditSaving(stockCode, true, editRow);
   try {
-    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
+    const data = await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      errorMessage: '저장에 실패했습니다.',
     });
-    if (!resp.ok) {
-      const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || `HTTP ${resp.status}`);
-    }
-    const data = await resp.json().catch(() => ({}));
     // Update local item without full reload
     const item = PfStore.items.find(i => i.stock_code === stockCode);
     if (item) {
@@ -256,7 +251,7 @@ async function clearPortfolioTargetPrice(stockCode) {
     return;
   }
   try {
-    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
+    const data = await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -267,12 +262,8 @@ async function clearPortfolioTargetPrice(stockCode) {
         target_price_formula: null,
         target_price_disabled: true,
       }),
+      errorMessage: '목표가 초기화에 실패했습니다.',
     });
-    if (!resp.ok) {
-      const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || `HTTP ${resp.status}`);
-    }
-    const data = await resp.json().catch(() => ({}));
     if ('target_price' in data) item.target_price = data.target_price;
     else item.target_price = null;
     if ('target_price_disabled' in data) item.target_price_disabled = !!data.target_price_disabled;
@@ -301,11 +292,10 @@ async function deletePortfolioItem(stockCode) {
     : stockCode;
   if (!confirm(`"${displayName}" 를 포트폴리오에서 삭제할까요?`)) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}`, { method: 'DELETE' });
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      throw new Error(data.detail || `HTTP ${resp.status}`);
-    }
+    await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
+      method: 'DELETE',
+      errorMessage: '삭제에 실패했습니다.',
+    });
     PfStore.items = PfStore.items.filter(i => i.stock_code !== stockCode);
     renderPortfolio();
     await loadPortfolio();
@@ -414,8 +404,7 @@ function pfInitPortfolioTextSearch() {
             const resolved = await Promise.all(
               prefCodes.map(async c => {
                 try {
-                  const r2 = await apiFetch(`/api/portfolio/resolve-name?code=${c}`);
-                  const d = await r2.json();
+                  const d = await apiFetchJson(`/api/portfolio/resolve-name?code=${c}`, { fallback: {} });
                   return d.stock_name ? { code: c, name: d.stock_name } : null;
                 } catch { return null; }
               })
@@ -489,8 +478,10 @@ async function pfAddFromSearch(code, name, currency = '') {
   let resolvedCurrency = String(currency || '').trim().toUpperCase();
   if (!resolvedCurrency) {
     try {
-      const r = await apiFetch(`/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}`, { timeoutMs: 5000 });
-      const d = await r.json();
+      const d = await apiFetchJson(`/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}`, {
+        timeoutMs: 5000,
+        fallback: {},
+      });
       if (d.stock_code) resolvedCode = d.stock_code;
       if (d.stock_name) resolvedName = d.stock_name;
     } catch (e) {
@@ -506,16 +497,12 @@ async function pfAddFromSearch(code, name, currency = '') {
     // Save the canonical code so aliases like KCC cannot create a foreign ticker row.
     const body = { stock_name: resolvedName, quantity: 1, avg_price: 0 };
     if (resolvedCurrency) body.currency = resolvedCurrency;
-    const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(resolvedCode)}`, {
+    const saved = await apiFetchJson(`/api/portfolio/${encodeURIComponent(resolvedCode)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      errorMessage: '추가에 실패했습니다.',
     });
-    if (!resp.ok) {
-      const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || `HTTP ${resp.status}`);
-    }
-    const saved = await resp.json().catch(() => ({}));
     pfApplySavedPortfolioItem(saved, resolvedCode, resolvedName, resolvedCurrency);
     startPortfolioEdit(saved.stock_code || resolvedCode);
     setTimeout(() => {
@@ -558,13 +545,13 @@ async function _ensureExternalQuotes(codes) {
   if (!needed.size) return;
   _externalFetchInflight = true;
   try {
-    const resp = await apiFetch('/api/asset-quotes', {
+    const data = await apiFetchJson('/api/asset-quotes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ codes: [...needed] }),
+      fallback: null,
     });
-    if (!resp.ok) return;
-    const data = await resp.json();
+    if (!data) return;
     for (const [code, q] of Object.entries(data)) {
       if (quoteIsUsable(q)) {
         _EXTERNAL_QUOTE_CACHE[code] = { price: Number(q.price), ts: Date.now() };

@@ -493,8 +493,8 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     assert "PfStore.manualOrder.saveInFlight = true;" in order
     assert "_pfSetPortfolioSortOrder(orderCodes);" in order
     assert "_savePortfolioSnapshot(PfStore.items);" in order
-    assert "if (!resp.ok)" in order
-    assert "throw new Error(data.detail || 'Portfolio order save failed');" in order
+    assert "await apiFetchJson('/api/portfolio/order', {" in order
+    assert "errorMessage: 'Portfolio order save failed'," in order
     assert "await loadPortfolio({ force: true });" in order
     assert "async function pfDropRow" not in actions
     assert "const canManualDrag = PfStore.filters.group === null && !PfStore.sort.key && !PfStore.sort.groupSort && !searchText && currentUser && !PfStore.edit.code;" in render
@@ -565,7 +565,7 @@ def test_portfolio_insight_modal_renders_valuation_cards():
     source = (JS / "portfolio-insights.js").read_text(encoding="utf-8")
 
     assert "/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}?_=${Date.now()}" in source
-    assert "{ cache: 'no-store' }" in source
+    assert "cache: 'no-store'," in source
     assert "const valuation = data.valuation || {}" in source
     assert "function _fmtInsightMultiple(value)" in source
     assert "_renderInsightCard('PBR'" in source
@@ -690,7 +690,7 @@ def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
     assert "const QUOTE_MANAGER_STALE_WS_MS = 55_000;" in source
     assert "lastWsQuoteAt: {}" in source
     assert "_markWsQuoteFresh(msg.code)" in source
-    rest_fetch_loop = source.split("const data = await resp.json();", 1)[1].split("} catch", 1)[0]
+    rest_fetch_loop = source.split("const data = await apiFetchJson('/api/asset-quotes',", 1)[1].split("} catch", 1)[0]
     assert "_markWsQuoteFresh" not in rest_fetch_loop
     assert "async _pollAll()" in source
     assert "this._getStaleWsCodes().forEach(c => allCodes.add(c));" in source

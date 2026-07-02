@@ -96,17 +96,17 @@ async function pfLoadRebalancePanel({ force = false } = {}) {
   const seq = ++_pfRebalLoadSeq;
   _pfRebalMsg('리밸런싱 현황을 불러오는 중입니다...');
   try {
-    const resp = await apiFetch('/api/portfolio/rebalance');
-    if (resp.status === 401) {
-      if (seq === _pfRebalLoadSeq) _pfRebalMsg('로그인 후 이용할 수 있습니다.');
-      return;
-    }
-    if (!resp.ok) throw new Error(`리밸런싱 현황 요청 실패 (${resp.status})`);
-    const data = await resp.json();
+    const data = await apiFetchJson('/api/portfolio/rebalance', {
+      errorMessage: '리밸런싱 현황 요청 실패',
+    });
     _pfRebalData = data;
     if (seq !== _pfRebalLoadSeq) return;
     _pfRenderRebalanceReport(data);
   } catch (e) {
+    if (e?.status === 401) {
+      if (seq === _pfRebalLoadSeq) _pfRebalMsg('로그인 후 이용할 수 있습니다.');
+      return;
+    }
     // 백그라운드 로드 — 토스트 없이 콘솔 기록만 남기고 패널 안에 안내.
     reportApiError(e, '리밸런싱 현황', { silent: true });
     if (seq === _pfRebalLoadSeq) {
@@ -199,14 +199,12 @@ async function pfRebalanceSave() {
     targets.push(t);
   }
   try {
-    const resp = await apiFetch('/api/portfolio/rebalance/targets', {
+    await apiFetchJson('/api/portfolio/rebalance/targets', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ targets }),
+      errorMessage: '리밸런싱 목표 저장에 실패했습니다.',
     });
-    const data = await resp.json().catch(() => ({}));
-    // 검증 오류(비중 범위/합 100% 초과/중복)는 서버 detail 그대로 토스트로.
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     const editor = document.getElementById('pfRebalanceEditor');
     if (editor) editor.style.display = 'none';
     await pfLoadRebalancePanel({ force: true });
@@ -220,9 +218,7 @@ async function pfRebalanceSave() {
 // 켜고 끌 수 있도록 최소한의 로컬 호출만 둔다(규칙 목록 UI 는 알림 모달 몫).
 
 async function _pfRebalFetchAlertRule() {
-  const resp = await apiFetch('/api/notifications/alerts');
-  if (!resp.ok) return null;
-  const rules = await resp.json();
+  const rules = await apiFetchJson('/api/notifications/alerts', { fallback: [] });
   return (Array.isArray(rules) ? rules : []).find((r) => r.alert_type === 'rebalance_drift') || null;
 }
 
@@ -242,24 +238,22 @@ async function pfRebalanceToggleAlert(checked) {
   try {
     if (checked) {
       // 사용자당 singleton — 재POST 는 기존 규칙을 갱신(재활성화)한다.
-      const resp = await apiFetch('/api/notifications/alerts', {
+      const data = await apiFetchJson('/api/notifications/alerts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ alert_type: 'rebalance_drift' }),
+        errorMessage: '리밸런싱 이탈 알림 설정에 실패했습니다.',
       });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
       _pfRebalAlertRule = data;
     } else {
       if (!_pfRebalAlertRule) _pfRebalAlertRule = await _pfRebalFetchAlertRule();
       if (_pfRebalAlertRule && _pfRebalAlertRule.id != null) {
-        const resp = await apiFetch(`/api/notifications/alerts/${_pfRebalAlertRule.id}`, {
+        await apiFetchJson(`/api/notifications/alerts/${_pfRebalAlertRule.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled: false }),
+          errorMessage: '리밸런싱 이탈 알림 해제에 실패했습니다.',
         });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         _pfRebalAlertRule = { ..._pfRebalAlertRule, enabled: false };
       }
     }

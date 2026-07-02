@@ -6,7 +6,7 @@ let pfAssetInsightActions = [];
 
 function pfCloseAssetInsight() {
   const modal = document.getElementById('pfAssetInsightModal');
-  if (modal) modal.style.display = 'none';
+  if (modal) closeManagedModal(modal);
   pfAssetInsightCode = null;
   pfAssetInsightData = null;
   pfAssetInsightActions = [];
@@ -20,9 +20,12 @@ async function pfOpenAssetInsight(stockCode) {
   pfAssetInsightCode = stockCode;
   pfAssetInsightData = null;
   pfAssetInsightActions = [];
-  modal.style.display = 'flex';
   if (title) title.textContent = '투자 인사이트';
   body.innerHTML = '<div class="pf-insight-loading">자산 데이터를 불러오는 중입니다...</div>';
+  openManagedModal(modal, {
+    initialFocus: '.pf-modal-close',
+    onEscape: pfCloseAssetInsight,
+  });
 
   const slowNoticeId = setTimeout(() => {
     if (pfAssetInsightCode !== stockCode) return;
@@ -33,16 +36,10 @@ async function pfOpenAssetInsight(stockCode) {
     body.innerHTML = '<div class="pf-insight-loading">외부 데이터 응답이 늦습니다. 요청은 끊지 않고 계속 기다리는 중입니다...</div>';
   }, 30000);
   try {
-    const resp = await apiFetch(`/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}?_=${Date.now()}`, { cache: 'no-store' });
-    if (!resp.ok) {
-      let detail = '';
-      try {
-        const err = await resp.json();
-        detail = err.detail || err.message || '';
-      } catch (e) {}
-      throw new Error(detail || `인사이트 로드 실패 (${resp.status})`);
-    }
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/portfolio/asset-insight/${encodeURIComponent(stockCode)}?_=${Date.now()}`, {
+      cache: 'no-store',
+      errorMessage: '인사이트 로드 실패',
+    });
     if (pfAssetInsightCode !== stockCode) return;
     pfAssetInsightData = data;
     const profile = data.profile || {};
@@ -245,16 +242,12 @@ function _updateAssetInsightModalBody() {
 
 async function pfSaveAssetTags(stockCode, tags) {
   const normalizedTags = _normalizeInsightTags(tags);
-  const resp = await apiFetch(`/api/portfolio/${encodeURIComponent(stockCode)}/tags`, {
+  const data = await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}/tags`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tags: normalizedTags }),
+    errorMessage: '태그 저장에 실패했습니다.',
   });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.detail || err.message || '태그 저장에 실패했습니다.');
-  }
-  const data = await resp.json();
   const savedTags = _normalizeInsightTags(data.tags || normalizedTags);
   const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (item) item.tags = savedTags;

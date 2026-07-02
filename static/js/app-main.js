@@ -252,30 +252,13 @@ window.addEventListener('orientationchange', () => {
   [120, 350, 650].forEach(delay => setTimeout(_resizeAllCharts, delay));
 });
 
-// Esc closes any visible modal. Iterates in display order so the top-most
-// one closes first; after that a second Esc press can close the one behind.
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  const chartModal = document.getElementById('chartModal');
-  if (chartModal && chartModal.style.display !== 'none') {
-    if (typeof closeChartModal === 'function') closeChartModal();
-    return;
-  }
-  const groupModal = document.getElementById('pfGroupModal');
-  if (groupModal && groupModal.style.display !== 'none') {
-    if (typeof closeGroupModal === 'function') closeGroupModal();
-    return;
-  }
-});
-
 // --- Wiki stats badge in the top header --------------------------------
 async function loadWikiStats() {
   const el = document.getElementById('wikiStats');
   if (!el) return;
   try {
-    const resp = await apiFetch('/api/wiki/stats');
-    if (!resp.ok) return;
-    const d = await resp.json();
+    const d = await apiFetchJson('/api/wiki/stats', { fallback: null });
+    if (!d) return;
     const stocks = Number(d.stocks_covered || 0);
     const entries = Number(d.total_entries || 0);
     if (stocks === 0 && entries === 0) {

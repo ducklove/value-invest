@@ -59,6 +59,7 @@ _TIMEOUT_PROFILES: dict[str, float] = {
     "external_tools_etf": 20.0,
     "economic_calendar": 8.0,
     "preferred_dividends": 30.0,
+    "market_indicators": 8.0,
     "default": 30.0,
 }
 

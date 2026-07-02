@@ -5,9 +5,11 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin
+from fastapi import HTTPException
 from starlette.requests import Request
 
 import cache
+from core import rate_limit
 from repositories import wiki as wiki_repo
 from routes import portfolio as pf
 
@@ -71,8 +73,26 @@ class PortfolioAIWikiTests(TempDbMixin):
         pf._OPENROUTER_KEY = "test-key"
 
     async def asyncTearDown(self):
+        rate_limit.reset_rate_limits()
         pf._OPENROUTER_KEY = self._orig_key
         await super().asyncTearDown()
+
+    async def test_ai_analysis_enforces_burst_rate_limit(self):
+        user = {"google_sub": "u1", "is_admin": False}
+        rate_limit.reset_rate_limits()
+        for _ in range(pf.AI_ANALYSIS_BURST_LIMIT):
+            rate_limit.enforce_rate_limit(
+                _mk_request(),
+                scope="portfolio_ai_analysis",
+                user=user,
+                max_requests=pf.AI_ANALYSIS_BURST_LIMIT,
+                window_seconds=pf.AI_ANALYSIS_BURST_WINDOW_SECONDS,
+                detail="limited",
+            )
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value=user)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await pf.ai_portfolio_analysis(_mk_request(), {})
+        self.assertEqual(exc_info.exception.status_code, 429)
 
     async def _run_and_capture_prompt(self):
         """Invoke ai_portfolio_analysis with an HTTP mock that records the

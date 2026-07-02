@@ -16,34 +16,19 @@ async function loadAdminView() {
     // deploy-status answers the "did my push land" question at a glance,
     // so it sits right next to the other meta-status calls and renders
     // at the top of the page.
-    const [deployRes, batchRes, serverRes, dbRes, usersRes, summaryRes, eventsRes, httpRes, timelineRes, linkedConfigsRes, aiConfigRes] = await Promise.all([
-      apiFetch('/api/admin/deploy-status'),
-      apiFetch('/api/admin/batch-status'),
-      apiFetch('/api/admin/server-stats'),
-      apiFetch('/api/admin/db-stats'),
-      apiFetch('/api/admin/users'),
-      apiFetch('/api/admin/event-summary?hours=24'),
-      apiFetch('/api/admin/events?limit=50'),
-      apiFetch('/api/admin/http-metrics?hours=24'),
-      apiFetch('/api/admin/timeseries?hours=24'),
-      apiFetch('/api/admin/linked-project-configs'),
-      apiFetch('/api/admin/ai-config'),
+    const [deploy, batch, server, db, users, summary, events, httpMetrics, timeline, linkedConfigs, aiConfig] = await Promise.all([
+      apiFetchJson('/api/admin/deploy-status', { fallback: null }),
+      apiFetchJson('/api/admin/batch-status'),
+      apiFetchJson('/api/admin/server-stats'),
+      apiFetchJson('/api/admin/db-stats'),
+      apiFetchJson('/api/admin/users'),
+      apiFetchJson('/api/admin/event-summary?hours=24', { fallback: {by_source: {}, latest: {}} }),
+      apiFetchJson('/api/admin/events?limit=50', { fallback: [] }),
+      apiFetchJson('/api/admin/http-metrics?hours=24', { fallback: {endpoints: []} }),
+      apiFetchJson('/api/admin/timeseries?hours=24', { fallback: {hours: 24, events: [], http: []} }),
+      apiFetchJson('/api/admin/linked-project-configs', { fallback: [] }),
+      apiFetchJson('/api/admin/ai-config', { fallback: null }),
     ]);
-    // deploy-status may 404 on servers that haven't picked up this build
-    // yet — which is, ironically, exactly the state this card is built
-    // to warn about. Fall back to an empty object so the rest of the
-    // dashboard still renders.
-    const deploy = deployRes.ok ? await deployRes.json() : null;
-    const batch = await batchRes.json();
-    const server = await serverRes.json();
-    const db = await dbRes.json();
-    const users = await usersRes.json();
-    const summary = summaryRes.ok ? await summaryRes.json() : {by_source: {}, latest: {}};
-    const events = eventsRes.ok ? await eventsRes.json() : [];
-    const httpMetrics = httpRes.ok ? await httpRes.json() : {endpoints: []};
-    const timeline = timelineRes.ok ? await timelineRes.json() : {hours: 24, events: [], http: []};
-    _linkedProjectConfigs = linkedConfigsRes.ok ? await linkedConfigsRes.json() : [];
-    _aiAdminConfig = aiConfigRes.ok ? await aiConfigRes.json() : null;
     _adminUsers = Array.isArray(users) ? users : [];
     container.innerHTML = _renderAdmin(deploy, batch, server, db, _adminUsers, summary, events, httpMetrics, timeline, _linkedProjectConfigs, _aiAdminConfig);
     _adminLoaded = true;
@@ -300,9 +285,9 @@ function _showAiConfigMessage(message, isError) {
 }
 
 async function _refreshAiConfigSection() {
-  const res = await apiFetch('/api/admin/ai-config');
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) throw new Error(data?.detail || res.statusText || 'AI 설정 갱신 실패');
+  const data = await apiFetchJson('/api/admin/ai-config', {
+    errorMessage: 'AI 설정 갱신 실패',
+  });
   _aiAdminConfig = data;
   const section = document.getElementById('aiConfigSection');
   if (section) section.outerHTML = _renderAiConfigSection(_aiAdminConfig);
@@ -315,13 +300,12 @@ async function saveAiKey() {
     return;
   }
   try {
-    const res = await apiFetch('/api/admin/ai-config/key', {
+    const data = await apiFetchJson('/api/admin/ai-config/key', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ openrouter_api_key: key }),
+      errorMessage: '키 저장 실패',
     });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data?.detail || res.statusText || '키 저장 실패');
     _aiAdminConfig = data;
     document.getElementById('aiConfigSection').outerHTML = _renderAiConfigSection(_aiAdminConfig);
     _showAiConfigMessage('AI API key를 저장했습니다.', false);
@@ -333,9 +317,10 @@ async function saveAiKey() {
 async function deleteAiKey() {
   if (!confirm('DB에 저장된 OpenRouter key를 삭제할까요? env/keys.txt 값은 그대로 둡니다.')) return;
   try {
-    const res = await apiFetch('/api/admin/ai-config/key', { method: 'DELETE' });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data?.detail || res.statusText || '키 삭제 실패');
+    const data = await apiFetchJson('/api/admin/ai-config/key', {
+      method: 'DELETE',
+      errorMessage: '키 삭제 실패',
+    });
     _aiAdminConfig = data;
     document.getElementById('aiConfigSection').outerHTML = _renderAiConfigSection(_aiAdminConfig);
     _showAiConfigMessage('DB 저장 key를 삭제했습니다.', false);
@@ -350,13 +335,12 @@ async function saveAiModels() {
     models[input.getAttribute('data-ai-feature')] = input.value.trim();
   });
   try {
-    const res = await apiFetch('/api/admin/ai-config/models', {
+    const data = await apiFetchJson('/api/admin/ai-config/models', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ models }),
+      errorMessage: '모델 저장 실패',
     });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data?.detail || res.statusText || '모델 저장 실패');
     _aiAdminConfig = data;
     document.getElementById('aiConfigSection').outerHTML = _renderAiConfigSection(_aiAdminConfig);
     _showAiConfigMessage('기능별 모델을 저장했습니다.', false);

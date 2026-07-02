@@ -39,8 +39,7 @@ async function onBenchToggle() {
   });
   if (toFetch.length) {
     const results = await Promise.all(toFetch.map(c =>
-      apiFetch(`/api/portfolio/benchmark-history?code=${encodeURIComponent(c)}&start=${encodeURIComponent(startDate)}`)
-        .then(r => r.ok ? r.json() : [])
+      apiFetchJson(`/api/portfolio/benchmark-history?code=${encodeURIComponent(c)}&start=${encodeURIComponent(startDate)}`, { fallback: [] })
         // 실패 종목은 아래 failed 집계가 한 번에 토스트하므로 여기선 로그만.
         .catch(e => { reportApiError(e, '비교지수 히스토리', { silent: true }); return []; })
     ));

@@ -222,9 +222,9 @@ async function _pfLoadSavedPeriodReport() {
   }
   _pfPeriodReportStatus('저장된 보고서를 불러오는 중입니다...', 'loading');
   try {
-    const resp = await apiFetch(`/api/portfolio/period-reports/${encodeURIComponent(_pfPeriodReportType)}/${encodeURIComponent(_pfPeriodReportKey)}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/portfolio/period-reports/${encodeURIComponent(_pfPeriodReportType)}/${encodeURIComponent(_pfPeriodReportKey)}`, {
+      errorMessage: '저장된 보고서를 불러오지 못했습니다.',
+    });
     _pfRenderPeriodReport(data);
     _pfPeriodReportStatus(`마지막 생성 ${data.generated_at || data.updated_at || ''}`, 'done');
   } catch (e) {
@@ -239,22 +239,20 @@ async function pfLoadPeriodReportsPanel({ force = false } = {}) {
   _pfPeriodReportLoaded = true;
   _pfPeriodReportStatus('기간 목록을 불러오는 중입니다...', 'loading');
   try {
-    const resp = await apiFetch('/api/portfolio/period-reports/periods');
-    if (!resp.ok) {
-      if (resp.status === 401) {
-        _pfPeriodReportStatus('로그인 후 이용할 수 있습니다.', 'error');
-        _pfPeriodReportContent('<div class="pf-risk-empty">로그인 후 기간 보고서를 생성할 수 있습니다.</div>');
-        return;
-      }
-      throw new Error(`HTTP ${resp.status}`);
-    }
-    _pfPeriodReportOptions = await resp.json();
+    _pfPeriodReportOptions = await apiFetchJson('/api/portfolio/period-reports/periods', {
+      errorMessage: '기간 목록을 불러오지 못했습니다.',
+    });
     if (!_pfPeriodReportKey) {
       _pfPeriodReportKey = _pfPeriodReportOptions.defaults?.[_pfPeriodReportType] || '';
     }
     _pfRenderPeriodSelects();
     await _pfLoadSavedPeriodReport();
   } catch (e) {
+    if (e?.status === 401) {
+      _pfPeriodReportStatus('로그인 후 이용할 수 있습니다.', 'error');
+      _pfPeriodReportContent('<div class="pf-risk-empty">로그인 후 기간 보고서를 생성할 수 있습니다.</div>');
+      return;
+    }
     reportApiError(e, '기간 투자 보고서', { silent: true });
     _pfPeriodReportStatus('기간 목록을 불러오지 못했습니다.', 'error');
   }
@@ -282,14 +280,13 @@ async function pfGeneratePeriodReport() {
   }
   _pfPeriodReportStatus('보고서 데이터를 생성하고 저장하는 중입니다...', 'loading');
   try {
-    const resp = await apiFetch('/api/portfolio/period-reports/generate', {
+    const data = await apiFetchJson('/api/portfolio/period-reports/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ period_type: _pfPeriodReportType, period_key: _pfPeriodReportKey }),
       timeoutMs: 60000,
+      errorMessage: '보고서 생성에 실패했습니다.',
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     _pfRenderPeriodReport(data);
     _pfPeriodReportStatus(`저장 완료 ${data.generated_at || data.updated_at || ''}`, 'done');
     if (typeof showToast === 'function') showToast('기간 투자 보고서를 저장했습니다.', 'success');

@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 import asset_insights
 import cache
+from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from repositories import benchmark_daily as benchmark_repo
 from repositories import foreign_dividends as foreign_dividends_repo
@@ -74,6 +75,9 @@ if _keys_file.exists():
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+AI_ANALYSIS_BURST_LIMIT = int(os.environ.get("PORTFOLIO_AI_BURST_LIMIT", "6"))
+AI_ANALYSIS_BURST_WINDOW_SECONDS = int(os.environ.get("PORTFOLIO_AI_BURST_WINDOW_SECONDS", "600"))
 
 
 async def _fetch_cash_quote(stock_code: str) -> dict:
@@ -1235,6 +1239,14 @@ async def ai_model_list(request: Request):
 @router.post("/api/portfolio/ai-analysis")
 async def ai_portfolio_analysis(request: Request, payload: dict = Body(default={})):
     user = _require_user(await get_current_user(request))
+    enforce_rate_limit(
+        request,
+        scope="portfolio_ai_analysis",
+        user=user,
+        max_requests=AI_ANALYSIS_BURST_LIMIT,
+        window_seconds=AI_ANALYSIS_BURST_WINDOW_SECONDS,
+        detail="AI 분석 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+    )
     try:
         ctx = await ai_analysis.prepare_analysis(payload, user)
     except ai_analysis.MissingAPIKeyError:

@@ -221,12 +221,10 @@ async function loadFilingReview(stockCode) {
   }
 
   try {
-    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/filing-review`, {
+    const data = await apiFetchJson(`/api/analysis/${encodeURIComponent(stockCode)}/filing-review`, {
       timeoutMs: FILING_REVIEW_STATUS_TIMEOUT_MS,
+      errorMessage: 'DART 리뷰 상태를 불러오지 못했습니다.',
     });
-    if (loadId !== _filingReviewLoadId) return;
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     if (loadId !== _filingReviewLoadId) return;
     if (data.status === 'ready' && data.review) {
       renderFilingReview(data.review, { cached: true });
@@ -255,14 +253,13 @@ async function generateFilingReview(stockCode, { force = true } = {}) {
   }
 
   try {
-    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(code)}/filing-review`, {
+    const data = await apiFetchJson(`/api/analysis/${encodeURIComponent(code)}/filing-review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ force }),
       timeoutMs: FILING_REVIEW_GENERATE_TIMEOUT_MS,
+      errorMessage: 'DART AI 리뷰 생성에 실패했습니다.',
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     if (data.status === 'ready' && data.review) {
       renderFilingReview(data.review, { cached: !data.generated });
       showToast(data.generated ? '공시 AI 리뷰를 생성했습니다.' : '캐시된 공시 AI 리뷰를 불러왔습니다.', 'success');
@@ -419,8 +416,7 @@ async function loadReports(stockCode) {
   }
 
   try {
-    const latestResp = await apiFetch(`/api/reports/${stockCode}/latest`);
-    const latestData = await latestResp.json();
+    const latestData = await apiFetchJson(`/api/reports/${stockCode}/latest`, { fallback: {} });
     if (requestId !== reportsRequestId) return;
     const networkLatest = latestData.report || null;
     const latestChanged = latestData.changed ?? !sameReport(latestReport, networkLatest);
@@ -452,8 +448,7 @@ async function loadReports(stockCode) {
       return;
     }
 
-    const resp = await apiFetch(`/api/reports/${stockCode}`);
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/reports/${stockCode}`, { fallback: { reports: [] } });
     if (requestId !== reportsRequestId) return;
 
     allReports = data.reports || [];
@@ -514,10 +509,9 @@ async function loadWiki(stockCode) {
   if (prevMeta) prevMeta.textContent = '';
 
   try {
-    const resp = await apiFetch(`/api/analysis/${encodeURIComponent(stockCode)}/wiki?limit=100`);
+    const data = await apiFetchJson(`/api/analysis/${encodeURIComponent(stockCode)}/wiki?limit=100`, { fallback: null });
     if (myId !== _wikiLoadId) return;
-    if (!resp.ok) return;
-    const data = await resp.json();
+    if (!data) return;
     if (myId !== _wikiLoadId) return;
     const entries = data.entries || [];
     entries.forEach(e => {

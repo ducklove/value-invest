@@ -157,8 +157,7 @@ async function loadInvestorFlows() {
   if (_flowsInFlight) return;
   _flowsInFlight = true;
   try {
-    const r = await apiFetch('/api/market/investor-flows');
-    const data = r.ok ? await r.json() : {};
+    const data = await apiFetchJson('/api/market/investor-flows', { fallback: {} });
     _mdFlows = data.flows || null;
     document.querySelectorAll('.md-card-flow[data-flow-code]').forEach((el) => {
       const f = _mdFlows ? _mdFlows[String(el.dataset.flowCode).toLowerCase()] : null;
@@ -312,9 +311,8 @@ async function _mdLiveRefresh() {
   if (!_mdCatalog || !_mdLastDataMap || !_mdLiveActive()) return;
   let live;
   try {
-    const r = await apiFetch('/api/market/live?codes=' + encodeURIComponent(MD_LIVE_CODES.join(',')));
-    if (!r.ok) return;
-    live = await r.json();
+    live = await apiFetchJson('/api/market/live?codes=' + encodeURIComponent(MD_LIVE_CODES.join(',')), { fallback: null });
+    if (!live) return;
   } catch (e) {
     return;
   }
@@ -647,14 +645,12 @@ async function loadInvestingDashboard(refresh = false) {
   _mdInFlight = (async () => {
     try {
       if (!_mdCatalog || refresh) {
-        const cr = await apiFetch('/api/market-indicators');
-        if (cr.ok) _mdCatalog = await cr.json();
+        _mdCatalog = await apiFetchJson('/api/market-indicators', { fallback: _mdCatalog || {} });
       }
       const catalog = _mdCatalog || {};
       const codes = Object.keys(catalog);
       if (!codes.length) return;
-      const sr = await apiFetch('/api/market-summary?codes=' + encodeURIComponent(codes.join(',')));
-      const dataMap = sr.ok ? await sr.json() : {};
+      const dataMap = await apiFetchJson('/api/market-summary?codes=' + encodeURIComponent(codes.join(',')), { fallback: {} });
       _mdRenderDashboard(catalog, dataMap);
       _mdLoadedOnce = true;
       _mdStartLiveRefresh();  // 바이낸스 10초 라이브 갱신 시작(1회만)
@@ -756,8 +752,7 @@ async function loadSectors() {
   if (!root || _secInFlight) return;
   _secInFlight = true;
   try {
-    const r = await apiFetch('/api/market/sectors?limit=12');
-    const data = r.ok ? await r.json() : { sectors: [] };
+    const data = await apiFetchJson('/api/market/sectors?limit=12', { fallback: { sectors: [] } });
     _secRenderRows(root, data.sectors || []);
   } catch (e) {
     console.warn('sectors load failed', e);
@@ -923,8 +918,7 @@ async function loadExternalInsights() {
   if (!root || _extInFlight) return;
   _extInFlight = true;
   try {
-    const r = await apiFetch('/api/external/insights');
-    const data = r.ok ? await r.json() : {};
+    const data = await apiFetchJson('/api/external/insights', { fallback: {} });
     _extRender(root, data);
   } catch (e) {
     console.warn('external insights load failed', e);
@@ -963,8 +957,7 @@ async function loadMarketNews() {
   if (!root || _newsInFlight) return;
   _newsInFlight = true;
   try {
-    const r = await apiFetch('/api/market/news?limit=8');
-    const data = r.ok ? await r.json() : { news: [] };
+    const data = await apiFetchJson('/api/market/news?limit=8', { fallback: { news: [] } });
     _newsRender(root, data.news || []);
   } catch (e) {
     console.warn('market news load failed', e);
@@ -979,8 +972,7 @@ async function loadMarketMovers() {
   _mvInFlight = true;
   _mvRenderShell(root);
   try {
-    const r = await apiFetch(`/api/market/movers?kind=${encodeURIComponent(_mvKind)}&market=${encodeURIComponent(_mvMarket)}&limit=10`);
-    const data = r.ok ? await r.json() : { items: [] };
+    const data = await apiFetchJson(`/api/market/movers?kind=${encodeURIComponent(_mvKind)}&market=${encodeURIComponent(_mvMarket)}&limit=10`, { fallback: { items: [] } });
     _mvRenderRows(root, data.items || []);
   } catch (e) {
     console.warn('market movers load failed', e);
