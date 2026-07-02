@@ -174,6 +174,7 @@ async function saveUserPreference(changes, successMessage) {
     renderUserPreference();
     setPreferenceStatus(successMessage, 'saved');
     loadRecentList();
+    if (typeof invalidateSearchStarredChipsCache === 'function') invalidateSearchStarredChipsCache();
   } catch (error) {
     renderUserPreference();
     setPreferenceStatus(error.message || '개인화 설정을 저장하지 못했습니다.', 'warning');

@@ -1317,3 +1317,25 @@ def test_switch_view_syncs_browser_history():
     # popstate(뒤로/앞으로가기) 리스너가 등록되어 URL을 다시 화면 상태로 되돌린다.
     assert "addEventListener('popstate'" in app_main
     assert "PF_PATH_TO_VIEW[path] || 'investing'" in app_main
+
+
+def test_mobile_search_shows_recent_and_starred_chips_on_empty_focus():
+    search = (JS / "search.js").read_text(encoding="utf-8")
+    auth = (JS / "auth.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    # ≤900px는 사이드바(최근 검색/관심 목록)가 숨겨져 재진입 경로가 없다 — 검색창을
+    # 빈 채로 포커스하면 같은 데이터를 드롭다운 칩으로 보여준다(UX 감사 P1③).
+    # isCompactMobileViewport 로 데스크톱에서는 켜지지 않게 막는다.
+    assert "function showRecentStarredSearchPanel()" in search
+    assert "if (!isCompactMobileViewport()) return;" in search
+    assert "searchInput.addEventListener('focus'" in search
+    # 최근 검색은 이미 로드돼 있는 recentListItems 를 재사용 — 별도 fetch 없음.
+    assert "recentListItems.slice(0, 8)" in search
+    # 관심 목록은 sidebar 탭 전환(desktop 전용)에 의존하지 않고 직접 가져와 캐시한다.
+    assert "/api/cache/list?tab=starred" in search
+    assert "_searchStarredChipsCache" in search
+    # 관심종목 토글 직후 캐시를 무효화해 다음에 열 때 최신 상태를 반영한다.
+    assert "invalidateSearchStarredChipsCache" in search
+    assert "invalidateSearchStarredChipsCache" in auth
+    assert ".dropdown-section-label" in styles

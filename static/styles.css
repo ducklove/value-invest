@@ -844,6 +844,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .dropdown-item:hover, .dropdown-item.active { background: var(--surface-muted); }
 .dropdown-item:first-child { border-radius:10px 10px 0 0; }
 .dropdown-item:last-child { border-radius:0 0 10px 10px; }
+/* 검색창을 비운 채 포커스했을 때 최근 검색/관심 목록을 보여주는 구간 라벨.
+   모바일은 사이드바가 숨겨져 있어(≤900px) 이 재진입 경로가 없으면 해당 목록에
+   접근할 방법이 아예 없다(UX 감사 P1③). */
+.dropdown-section-label {
+  padding:8px 16px 4px; font-size:11px; font-weight:700; color:var(--text-secondary);
+  text-transform:uppercase; letter-spacing:.03em;
+}
+.dropdown-section-label:not(:first-child) { border-top:1px solid var(--border); margin-top:4px; padding-top:10px; }
 
 /* === 투자정보 (Investing dashboard) — public market overview grid === */
 .market-dashboard-section {
