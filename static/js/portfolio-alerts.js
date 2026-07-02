@@ -1,6 +1,10 @@
 // Portfolio condition alerts: notification channels (텔레그램 + 카카오톡) + rules.
 //
-// Opens from the 🔔 알림 button in the portfolio toolbar.
+// 포트폴리오 🔔 알림 버튼과 프로필 모달의 '내 알림' 양쪽에서 연다(UX 감사 P2⑧) —
+// pfAlertsLoadList()가 stock_code 필터 없이 /api/notifications/alerts 를 불러오므로
+// 종목 알림(stock-alerts.js 가 등록한 price_*/stock_daily_abs/disclosure_new/
+// report_new)까지 이미 같은 목록에 섞여 나온다. 별도 "내 알림" 렌더러를 새로 만들
+// 필요 없이 이 모달 하나가 전체 규칙의 단일 진입점이다.
 // 채널: 텔레그램(봇 딥링크 + getUpdates 폴링) / 카카오톡(OAuth "나에게 보내기").
 // 규칙: 종목 지정가 / 종목 목표가 달성 / 종목 일간등락률 /
 //       포트폴리오 총평가액 / 포트폴리오 일간등락률. 엣지 트리거(서버측).
@@ -42,6 +46,36 @@ function pfOpenAlerts() {
   pfAlertsRenderForm();
   pfAlertsLoadChannels();
   pfAlertsLoadList();
+  pfAlertsLoadCalendarSummary();
+}
+
+// 경제캘린더 결과 알림 구독 요약 — 서버가 event_id만 저장하고 제목/일자는 저장하지
+// 않으므로(경제캘린더 조회 시 최신 데이터와 대조하는 설계) 여기서 개별 항목을 나열하는
+// 대신 구독 수만 보여주고, 실제 확인·해지는 체크박스 UI가 있는 캘린더 섹션으로 보낸다.
+async function pfAlertsLoadCalendarSummary() {
+  const el = document.getElementById('pfAlertCalendarSummary');
+  if (!el) return;
+  el.textContent = '확인 중…';
+  try {
+    const resp = await pfAlertsApi('/calendar');
+    const data = await resp.json();
+    const count = (data.event_ids || []).length;
+    const label = count > 0
+      ? `발표 대기 중인 경제지표 <strong>${count}</strong>건의 결과 알림을 구독하고 있습니다.`
+      : '구독 중인 경제지표 결과 알림이 없습니다.';
+    el.innerHTML = `<span>${label}</span><button class="pf-alert-btn" type="button" onclick="pfAlertsGoToCalendar()">경제 캘린더에서 확인</button>`;
+  } catch (e) {
+    el.textContent = '불러오지 못했습니다.';
+  }
+}
+
+function pfAlertsGoToCalendar() {
+  pfCloseAlerts();
+  switchView('investing');
+  requestAnimationFrame(() => {
+    const section = document.getElementById('econCalSection');
+    if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 }
 
 function pfCloseAlerts() {

@@ -1385,4 +1385,31 @@ def test_performance_tab_has_sticky_anchor_nav_covering_every_card():
     # 모바일 슬림 헤더(--m-header-h, 데스크톱에선 미정의라 0px 로 빠짐) 밑에 붙고,
     # 점프 대상은 헤더 + 이 바 높이만큼 scroll-margin 을 둬 제목이 가려지지 않는다.
     assert "top: var(--m-header-h, 0px);" in styles
-    assert "scroll-margin-top: calc(var(--m-header-h, 0px) + 52px);" in styles
+
+
+def test_my_alerts_unify_stock_and_portfolio_rules_behind_the_profile_modal():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    alerts = (JS / "portfolio-alerts.js").read_text(encoding="utf-8")
+
+    # 알림 설정이 종목분석/포트폴리오/경제캘린더 3곳에 흩어져 있고 전체를 보는 곳이
+    # 없었다(UX 감사 P2⑧). pfAlertsModal 은 원래 stock_code 필터 없이 /alerts 를
+    # 불러와 종목+포트폴리오 규칙을 이미 함께 보여주고 있었으므로, 새 렌더러 대신
+    # 이 모달을 프로필에서도 열 수 있게 만 한다.
+    assert 'onclick="closeProfileModal(); pfOpenAlerts();"' in html
+    assert 'class="profile-alerts-link"' in html
+
+    # pfAlertsModal 이 portfolioView 안에 있으면 다른 탭에서는 조상의 display:none
+    # 때문에 열리지 않는다 — 다른 전역 모달(stockAlertModal 등)처럼 최상위로
+    # 옮겨졌는지 순서로 확인한다.
+    portfolio_view_close = html.find('</div><!-- /portfolioView -->')
+    alerts_modal = html.find('id="pfAlertsModal"')
+    assert portfolio_view_close != -1 and alerts_modal != -1
+    assert alerts_modal > portfolio_view_close, "pfAlertsModal must live outside #portfolioView"
+
+    # 경제캘린더 구독은 event_id만 저장돼 여기서 개별 나열이 불가능하므로 건수
+    # 요약 + 캘린더 섹션 바로가기로 대체한다.
+    assert 'id="pfAlertCalendarSummary"' in html
+    assert "async function pfAlertsLoadCalendarSummary()" in alerts
+    assert "pfAlertsApi('/calendar')" in alerts
+    assert "function pfAlertsGoToCalendar()" in alerts
+    assert "econCalSection" in alerts

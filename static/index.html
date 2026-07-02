@@ -409,53 +409,6 @@ function trackEvent(name, params = {}) {
         <div class="pf-modal-body pf-insight-body" id="pfAssetInsightBody"></div>
       </div>
     </div>
-
-    <!-- 조건 알림 설정 모달. 텔레그램 연결 + 알림 규칙(지정가/총평가액/일간등락률).
-         기존 .pf-modal-overlay/.pf-modal 패턴 재사용. 동적 부분은
-         portfolio-alerts.js 가 채운다. -->
-    <div class="pf-modal-overlay" id="pfAlertsModal" style="display:none;" onclick="if(event.target===this)pfCloseAlerts()" role="dialog" aria-modal="true" aria-labelledby="pfAlertsTitle">
-      <div class="pf-modal pf-alerts-modal">
-        <div class="pf-modal-header">
-          <h3 id="pfAlertsTitle">🔔 포트폴리오 조건 알림</h3>
-          <button class="pf-modal-close" type="button" onclick="pfCloseAlerts()" aria-label="닫기">&times;</button>
-        </div>
-        <div class="pf-modal-body pf-alerts-body">
-          <section class="pf-alert-section">
-            <h4>알림 채널
-              <button class="pf-alert-help-toggle" type="button" onclick="pfAlertsToggleHelp()" aria-expanded="false" aria-controls="pfAlertHelp">연결 방법 ▾</button>
-            </h4>
-            <div class="pf-alert-help" id="pfAlertHelp" hidden>
-              <p class="pf-alert-help-intro">포트폴리오 조건(지정가·목표가 달성·등락률·총평가액)을 만족하면 메신저로 알려드립니다. 받을 채널을 <b>본인 계정</b>으로 연결한 뒤, 아래 ‘알림 규칙’에서 조건을 추가하세요. 연결·규칙은 모두 본인에게만 적용됩니다.</p>
-              <div class="pf-alert-help-block">
-                <strong>① 텔레그램 — 내 봇 토큰으로 등록</strong>
-                <ol>
-                  <li>텔레그램에서 <b>@BotFather</b>를 열고 <b>/newbot</b>으로 봇을 만든 뒤 <b>봇 토큰</b>(예: <code>123456:ABC-...</code>)을 복사합니다.</li>
-                  <li>아래 ‘텔레그램’ 칸에 토큰을 붙여넣고 <b>[연결]</b>을 누릅니다.</li>
-                  <li>방금 만든 봇과 대화를 열어 <b>아무 메시지나</b> 보낸 뒤 다시 <b>[연결]</b>을 누르면 chat_id가 자동 감지됩니다.<br><span class="pf-alert-help-sub">원하면 chat_id를 직접 입력해도 됩니다(@userinfobot로 확인). 텔레그램 계정이 없으면 먼저 가입하세요.</span></li>
-                  <li>연결되면 <b>[테스트]</b>로 실제 수신을 확인하세요.</li>
-                </ol>
-              </div>
-              <div class="pf-alert-help-block">
-                <strong>② 카카오톡 — 내 카카오 앱으로 등록</strong>
-                <ol>
-                  <li><b>developers.kakao.com</b>에서 앱을 만들고 <b>REST API 키</b>를 복사합니다. <span class="pf-alert-help-sub">본인 앱이면 본인이 관리자라 ‘나에게 보내기’가 검수 없이 됩니다.</span></li>
-                  <li>그 앱에서 <b>카카오 로그인 활성화</b>, 동의항목 <b>‘카카오톡 메시지 전송’</b> 사용 설정, <b>Redirect URI</b>에 아래 카카오 칸에 표시되는 주소를 등록합니다.</li>
-                  <li>아래 ‘카카오톡’ 칸에 REST 키를 붙여넣고 <b>[카카오 연결]</b> → 카카오 로그인·동의.</li>
-                  <li>연결되면 <b>[테스트]</b>로 확인하세요.</li>
-                </ol>
-              </div>
-              <p class="pf-alert-help-foot">· 텔레그램과 카카오를 모두 연결하면 양쪽으로 동시에 받습니다. · 각 줄의 버튼으로 임시 끄기·해제를 언제든 할 수 있습니다. · 입력한 토큰/키는 본인 계정에만 저장되어 본인에게 보내는 데만 쓰입니다.</p>
-            </div>
-            <div class="pf-alert-channels" id="pfAlertChannels">상태 확인 중…</div>
-          </section>
-          <section class="pf-alert-section">
-            <h4>알림 규칙</h4>
-            <div class="pf-alert-form" id="pfAlertForm"></div>
-            <div class="pf-alert-list" id="pfAlertList"></div>
-          </section>
-        </div>
-      </div>
-    </div>
     </div><!-- /pfHoldingsTab -->
 
     <div id="pfPerformanceTab" style="display:none;">
@@ -757,6 +710,13 @@ function trackEvent(name, params = {}) {
           </div>
         </div>
       </div>
+      <!-- 종목 알림·포트폴리오 조건 알림이 예전엔 각자 화면에서만 보였다 — 여기서
+           전 종류를 한 목록으로 열람·삭제한다(UX 감사 P2⑧). pfAlertsModal 자체를
+           재사용하므로(주석 참조) 별도 렌더러가 없다. -->
+      <button class="profile-alerts-link" type="button" onclick="closeProfileModal(); pfOpenAlerts();">
+        <span class="profile-alerts-link-title">🔔 내 알림 관리</span>
+        <span class="profile-alerts-link-hint">종목·포트폴리오 알림 규칙을 한 곳에서 확인하고 끄거나 삭제하세요</span>
+      </button>
       <form class="profile-password-form" id="profilePasswordForm" onsubmit="saveProfilePassword(event)">
         <div class="profile-form-title" id="profilePasswordTitle">비밀번호 등록</div>
         <label id="profileCurrentPasswordGroup">현재 비밀번호
@@ -803,6 +763,62 @@ function trackEvent(name, params = {}) {
   </div>
   <button class="market-tape-refresh" id="marketTapeRefreshBtn" type="button" onclick="loadMarketTape(true)" title="시황 테이프 새로고침">↻</button>
 </section>
+
+<!-- 조건 알림 설정 모달. 텔레그램 연결 + 알림 규칙(지정가/총평가액/일간등락률).
+     기존 .pf-modal-overlay/.pf-modal 패턴 재사용. 동적 부분은 portfolio-alerts.js 가
+     채운다. 포트폴리오 🔔 알림 버튼과 프로필 모달의 '내 알림' 양쪽에서 여는 공용
+     모달이라 portfolioView 밖(document 최상위)에 둔다 — 그 안에 있으면 다른 뷰에
+     있을 때 조상의 display:none 때문에 열리지 않는다(UX 감사 P2⑧). -->
+<div class="pf-modal-overlay" id="pfAlertsModal" style="display:none;" onclick="if(event.target===this)pfCloseAlerts()" role="dialog" aria-modal="true" aria-labelledby="pfAlertsTitle">
+  <div class="pf-modal pf-alerts-modal">
+    <div class="pf-modal-header">
+      <h3 id="pfAlertsTitle">🔔 포트폴리오 조건 알림</h3>
+      <button class="pf-modal-close" type="button" onclick="pfCloseAlerts()" aria-label="닫기">&times;</button>
+    </div>
+    <div class="pf-modal-body pf-alerts-body">
+      <section class="pf-alert-section">
+        <h4>알림 채널
+          <button class="pf-alert-help-toggle" type="button" onclick="pfAlertsToggleHelp()" aria-expanded="false" aria-controls="pfAlertHelp">연결 방법 ▾</button>
+        </h4>
+        <div class="pf-alert-help" id="pfAlertHelp" hidden>
+          <p class="pf-alert-help-intro">포트폴리오 조건(지정가·목표가 달성·등락률·총평가액)을 만족하면 메신저로 알려드립니다. 받을 채널을 <b>본인 계정</b>으로 연결한 뒤, 아래 ‘알림 규칙’에서 조건을 추가하세요. 연결·규칙은 모두 본인에게만 적용됩니다.</p>
+          <div class="pf-alert-help-block">
+            <strong>① 텔레그램 — 내 봇 토큰으로 등록</strong>
+            <ol>
+              <li>텔레그램에서 <b>@BotFather</b>를 열고 <b>/newbot</b>으로 봇을 만든 뒤 <b>봇 토큰</b>(예: <code>123456:ABC-...</code>)을 복사합니다.</li>
+              <li>아래 ‘텔레그램’ 칸에 토큰을 붙여넣고 <b>[연결]</b>을 누릅니다.</li>
+              <li>방금 만든 봇과 대화를 열어 <b>아무 메시지나</b> 보낸 뒤 다시 <b>[연결]</b>을 누르면 chat_id가 자동 감지됩니다.<br><span class="pf-alert-help-sub">원하면 chat_id를 직접 입력해도 됩니다(@userinfobot로 확인). 텔레그램 계정이 없으면 먼저 가입하세요.</span></li>
+              <li>연결되면 <b>[테스트]</b>로 실제 수신을 확인하세요.</li>
+            </ol>
+          </div>
+          <div class="pf-alert-help-block">
+            <strong>② 카카오톡 — 내 카카오 앱으로 등록</strong>
+            <ol>
+              <li><b>developers.kakao.com</b>에서 앱을 만들고 <b>REST API 키</b>를 복사합니다. <span class="pf-alert-help-sub">본인 앱이면 본인이 관리자라 ‘나에게 보내기’가 검수 없이 됩니다.</span></li>
+              <li>그 앱에서 <b>카카오 로그인 활성화</b>, 동의항목 <b>‘카카오톡 메시지 전송’</b> 사용 설정, <b>Redirect URI</b>에 아래 카카오 칸에 표시되는 주소를 등록합니다.</li>
+              <li>아래 ‘카카오톡’ 칸에 REST 키를 붙여넣고 <b>[카카오 연결]</b> → 카카오 로그인·동의.</li>
+              <li>연결되면 <b>[테스트]</b>로 확인하세요.</li>
+            </ol>
+          </div>
+          <p class="pf-alert-help-foot">· 텔레그램과 카카오를 모두 연결하면 양쪽으로 동시에 받습니다. · 각 줄의 버튼으로 임시 끄기·해제를 언제든 할 수 있습니다. · 입력한 토큰/키는 본인 계정에만 저장되어 본인에게 보내는 데만 쓰입니다.</p>
+        </div>
+        <div class="pf-alert-channels" id="pfAlertChannels">상태 확인 중…</div>
+      </section>
+      <section class="pf-alert-section">
+        <h4>알림 규칙</h4>
+        <div class="pf-alert-form" id="pfAlertForm"></div>
+        <div class="pf-alert-list" id="pfAlertList"></div>
+      </section>
+      <!-- 경제캘린더 결과 알림은 이벤트 id만 저장돼(제목/일자 비정규화 없음) 여기서
+           전체를 나열하지 않고, 이미 완성된 체크박스 UI가 있는 캘린더 섹션으로
+           바로가기만 제공한다(UX 감사 P2⑧ "원 화면 바로가기"). -->
+      <section class="pf-alert-section">
+        <h4>경제지표 결과 알림</h4>
+        <div class="pf-alert-calendar-summary" id="pfAlertCalendarSummary">확인 중…</div>
+      </section>
+    </div>
+  </div>
+</div>
 
 <!-- 종목 분석 화면 — 개별 종목 알림 모달. 내용은 stock-alerts.js 가 채운다. -->
 <div class="pf-modal-overlay" id="stockAlertModal" style="display:none;" onclick="if(event.target===this)closeStockAlerts()" role="dialog" aria-modal="true" aria-labelledby="stockAlertTitle">

@@ -33,6 +33,31 @@ const MODAL_HTML = `
     </div>
   </div>`;
 
+// pfAlertCalendarSummary/econCalSection are omitted from MODAL_HTML above so the
+// existing pfOpenAlerts() test keeps its no-fetch DOM untouched (the function
+// no-ops when the element is missing). The calendar-summary tests below build
+// their own DOM that includes both.
+const MODAL_HTML_WITH_CALENDAR = `
+  ${MODAL_HTML}
+  <div id="pfAlertCalendarSummary"></div>
+  <section id="econCalSection"></section>`;
+
+function loadAlertsWithCalendar(items = []) {
+  const dom = new JSDOM(`<!doctype html><html><body>${MODAL_HTML_WITH_CALENDAR}</body></html>`, {
+    runScripts: "dangerously",
+    url: "https://app.example.com/",
+  });
+  const { window } = dom;
+  window.fetch = () => Promise.reject(new Error("no fetch in test"));
+  for (const src of SOURCES) {
+    const script = window.document.createElement("script");
+    script.textContent = src;
+    window.document.body.appendChild(script);
+  }
+  window.PfStore.items = items;
+  return window;
+}
+
 function loadAlerts(items = []) {
   const dom = new JSDOM(`<!doctype html><html><body>${MODAL_HTML}</body></html>`, {
     runScripts: "dangerously",
@@ -252,4 +277,66 @@ test("연결 방법 안내는 토글로 열고 닫힌다", () => {
   assert.equal(btn.getAttribute("aria-expanded"), "true");
   w.pfAlertsToggleHelp();
   assert.ok(help.hasAttribute("hidden"), "다시 토글하면 숨김");
+});
+
+// 경제캘린더 결과 알림 (UX 감사 P2⑧) — 서버가 event_id만 저장해 제목/일자를
+// 여기서 나열할 수 없으므로, 구독 수 요약 + 캘린더 섹션으로 바로가기만 제공한다.
+
+test("경제캘린더 구독이 있으면 건수와 바로가기 버튼을 보여준다", async () => {
+  const w = loadAlertsWithCalendar();
+  w.apiFetch = async (path) => {
+    assert.equal(path, "/api/notifications/calendar");
+    return { ok: true, json: async () => ({ event_ids: ["us-cpi-2026-08", "kr-bok-rate-2026-08"] }) };
+  };
+  await w.pfAlertsLoadCalendarSummary();
+  const html = w.document.getElementById("pfAlertCalendarSummary").innerHTML;
+  assert.match(html, /<strong>2<\/strong>건/);
+  assert.match(html, /경제 캘린더에서 확인/);
+});
+
+test("경제캘린더 구독이 없으면 안내 문구를 보여준다", async () => {
+  const w = loadAlertsWithCalendar();
+  w.apiFetch = async () => ({ ok: true, json: async () => ({ event_ids: [] }) });
+  await w.pfAlertsLoadCalendarSummary();
+  const html = w.document.getElementById("pfAlertCalendarSummary").innerHTML;
+  assert.match(html, /구독 중인 경제지표 결과 알림이 없습니다/);
+});
+
+test("경제캘린더 구독 조회 실패 시 오류 문구로 대체된다 (throw 하지 않음)", async () => {
+  const w = loadAlertsWithCalendar();
+  w.apiFetch = async () => { throw new Error("network down"); };
+  await assert.doesNotReject(w.pfAlertsLoadCalendarSummary());
+  assert.match(w.document.getElementById("pfAlertCalendarSummary").textContent, /불러오지 못했습니다/);
+});
+
+test("pfAlertsGoToCalendar 는 알림 모달을 닫고 투자정보 탭의 캘린더 섹션으로 스크롤한다", () => {
+  const w = loadAlertsWithCalendar();
+  w.document.getElementById("pfAlertsModal").style.display = "flex";
+  const switchViewCalls = [];
+  w.switchView = (view) => switchViewCalls.push(view);
+  let scrolledInto = false;
+  w.document.getElementById("econCalSection").scrollIntoView = () => { scrolledInto = true; };
+  // jsdom doesn't implement requestAnimationFrame by default; run callbacks immediately.
+  const rafCallbacks = [];
+  w.requestAnimationFrame = (cb) => rafCallbacks.push(cb);
+
+  w.pfAlertsGoToCalendar();
+
+  assert.equal(w.document.getElementById("pfAlertsModal").style.display, "none");
+  assert.deepEqual(switchViewCalls, ["investing"]);
+  assert.equal(rafCallbacks.length, 1);
+  rafCallbacks[0]();
+  assert.ok(scrolledInto, "econCalSection.scrollIntoView should have been called");
+});
+
+test("pfOpenAlerts 는 경제캘린더 구독 요약도 함께 불러온다", async () => {
+  const w = loadAlertsWithCalendar();
+  let called = false;
+  w.apiFetch = async (path) => {
+    if (path === "/api/notifications/calendar") called = true;
+    return { ok: true, json: async () => ({ event_ids: [] }) };
+  };
+  w.pfOpenAlerts();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(called, true);
 });
