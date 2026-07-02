@@ -55,6 +55,10 @@ _TIMEOUT_PROFILES: dict[str, float] = {
     "kakao": 15.0,
     "telegram": 10.0,
     "wiki": 60.0,
+    "external_tools": 8.0,
+    "external_tools_etf": 20.0,
+    "economic_calendar": 8.0,
+    "preferred_dividends": 30.0,
     "default": 30.0,
 }
 

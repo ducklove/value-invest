@@ -5,15 +5,16 @@ Covered:
     blanks, non-numeric cells)
   * Dynamic column discovery — parser must find "2025우" wherever it
     lives, not a fixed offset
+  * fetch_csv uses the shared HTTP client registry
   * portfolio_repo.upsert_preferred_dividends idempotency
   * portfolio_repo.get_trailing_dividends resolution priority:
       exact market_data > preferred_dividends > common-stock fallback
 
-No network. fetch_csv / refresh loop is not unit-tested — those are
-integration paths exercised manually (the Pi startup log shows whether
-they succeeded).
+No network. refresh loop is an integration path exercised manually (the
+Pi startup log shows whether it succeeded).
 """
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin
 
@@ -123,6 +124,33 @@ class ParseSheetCsvTests(unittest.TestCase):
         out = pd_mod.parse_sheet_csv(_make_csv(row))
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["stock_code"], "00088K")
+
+
+class FetchCsvTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_csv_reuses_shared_http_client(self):
+        class Resp:
+            text = "stock_code,dividend\n005935,1444\n"
+
+            def raise_for_status(self):
+                pass
+
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            async def get(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return Resp()
+
+        client = Client()
+        fake_get_client = AsyncMock(return_value=client)
+        with patch.object(pd_mod, "get_http_client", new=fake_get_client):
+            csv_text = await pd_mod.fetch_csv(timeout=12.5)
+
+        self.assertIn("005935", csv_text)
+        fake_get_client.assert_awaited_once_with("preferred_dividends")
+        self.assertEqual(client.calls[0][0], pd_mod._build_url())
+        self.assertEqual(client.calls[0][1]["timeout"], 12.5)
 
 
 class UpsertAndLookupTests(TempDbMixin):

@@ -26,6 +26,7 @@ import logging
 import httpx
 
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -175,19 +176,20 @@ async def fetch_economic_calendar(
 
     try:
         async with _SEM:
-            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=True) as client:
-                resp = await client.get(
-                    _DATA_URL,
-                    params={
-                        "start_date": start_date,
-                        "end_date": end_date,
-                        "str_nation": nation,
-                        "str_natcd": natcd,
-                        "str_importance": str_importance,
-                    },
-                    headers={"User-Agent": "Mozilla/5.0", "Referer": _REFERER},
-                )
-                resp.raise_for_status()
+            client = await get_http_client("economic_calendar")
+            resp = await client.get(
+                _DATA_URL,
+                params={
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "str_nation": nation,
+                    "str_natcd": natcd,
+                    "str_importance": str_importance,
+                },
+                headers={"User-Agent": "Mozilla/5.0", "Referer": _REFERER},
+                timeout=_HTTP_TIMEOUT,
+            )
+            resp.raise_for_status()
         raw = resp.content
         try:
             text = raw.decode("utf-8")

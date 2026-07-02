@@ -22,6 +22,8 @@
 | 완료 | 토스트/로딩 상태 `aria-live` 적용 범위 확대 | `static/index.html`, `static/js/utils.js`, `static/js/analysis.js`, 접근성 회귀 테스트 |
 | 완료 | 보안 헤더 미들웨어 + CSP Report-Only 추가 | `core/app_factory.py`, `tests/test_app_factory.py` |
 | 완료 | 앱 셸 `main` 랜드마크·숨김 `h1`·스킵 링크 추가 | `static/index.html`, `static/styles.css`, `static/js/utils.js`, 동작 테스트 |
+| 완료 | 경제 캘린더 알림 체크박스 계약을 jsdom 동작 테스트로 이관 | `tests/js/economic-calendar.test.mjs`, 기존 Python 문자열 검사 제거 |
+| 완료 | 외부 fetch 일부를 공용 HTTP 클라이언트로 전환 | `external_tools.py`, `economic_calendar.py`, `preferred_dividends.py`, `core/http.py` |
 
 ## 다음 작업 후보
 
@@ -29,10 +31,10 @@
 | --- | --- | --- | --- |
 | P1 | 완료 | `apiFetchJson` 헬퍼로 JSON API 오류 처리 공통화 | 30일 계획의 `apiFetchJson 헬퍼`; 대표 호출부 전환 완료 |
 | P1 | 완료 | 토스트/로딩 상태의 `aria-live` 적용 범위 확대 | 접근성 즉시 개선 항목 |
-| P1 | 대기 | string-presence 테스트를 jsdom 동작 테스트로 점진 이관 | 90일 계획 |
+| P1 | 진행중 | string-presence 테스트를 jsdom 동작 테스트로 점진 이관 | 경제 캘린더 알림 체크박스 계약 1건 이관 완료, 남은 구조 계약은 순차 이관 |
 | P2 | 완료 | 보안 헤더 미들웨어 + CSP Report-Only | XSS 방어층 강화 |
 | P2 | 완료 | 앱 셸 `main` 랜드마크·숨김 `h1`·스킵 링크 | 접근성 문서 구조 개선 |
-| P2 | 대기 | 공용 HTTP 클라이언트 채택 확대 | `httpx.AsyncClient` 직접 생성 축소 |
+| P2 | 진행중 | 공용 HTTP 클라이언트 채택 확대 | 외부 도구·경제캘린더·우선주 배당 fetch 전환, 남은 직접 생성 호출부 순차 전환 |
 | P2 | 대기 | 공통 모달/상태 표현과 포커스 트랩 | UX/접근성 구조 개선 |
 | P2 | 대기 | `deploy.sh` 과거 리페어 블록 분리 | 배포 스크립트 유지보수 개선 |
 | P2 | 대기 | 의존성 lock/pinning 정책 정리 | 배포 버전 드리프트 완화 |
@@ -57,3 +59,10 @@
 | 2026-07-02 | `python -m pytest tests/test_app_factory.py tests/test_frontend_structure.py -q` | 61 passed |
 | 2026-07-02 | `npm test` | 163 passed |
 | 2026-07-02 | `node --check static/js/utils.js; node --check static/js/analysis.js` | 통과 |
+| 2026-07-02 | `python -m pytest tests/test_economic_calendar.py tests/test_external_tools.py tests/test_preferred_dividends.py -q` | 53 passed |
+| 2026-07-02 | `npm test` | 166 passed |
+| 2026-07-02 | `node --check tests/js/economic-calendar.test.mjs` | 통과 |
+| 2026-07-02 | `python -m ruff check external_tools.py economic_calendar.py preferred_dividends.py tests/test_economic_calendar.py tests/test_external_tools.py tests/test_preferred_dividends.py` | 통과 |
+| 2026-07-02 | `python -m pytest -q` | 1088 passed |
+| 2026-07-02 | `python -m ruff check .` | 통과 |
+| 2026-07-02 | `git diff --check` | 통과 |

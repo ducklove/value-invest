@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +66,13 @@ async def fetch_etf_universe() -> set[str]:
         return cached
     try:
         async with _SEM:
-            async with httpx.AsyncClient(timeout=_ETF_TIMEOUT, follow_redirects=True) as client:
-                resp = await client.get(_ETF_DATA_URL, headers={"User-Agent": "value-invest/1.0"})
-                resp.raise_for_status()
+            client = await get_http_client("external_tools_etf")
+            resp = await client.get(
+                _ETF_DATA_URL,
+                headers={"User-Agent": "value-invest/1.0"},
+                timeout=_ETF_TIMEOUT,
+            )
+            resp.raise_for_status()
         data = resp.json()
         universe = {
             str(c).strip().upper()
@@ -117,9 +122,13 @@ _GOLD_LINK = {
 
 async def _get_json(url: str):
     async with _SEM:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "value-invest/1.0"})
-            resp.raise_for_status()
+        client = await get_http_client("external_tools")
+        resp = await client.get(
+            url,
+            headers={"User-Agent": "value-invest/1.0"},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
     return resp.json()
 
 

@@ -100,3 +100,67 @@ test("⚙ 설정 버튼이 필터 패널의 hidden 속성을 토글한다", () =
   toggle.click();
   assert.ok(panel.hasAttribute("hidden"), "다시 클릭하면 숨겨짐");
 });
+
+test("결과 알림 체크박스는 미래 미발표 추적 이벤트에만 렌더된다", () => {
+  const w = load(12, 0);
+  w._ecRenderShell();
+  w._ecRenderBody({
+    events: [
+      { date: TODAY, datetime: `${TODAY} 14:00:00`, time: "14:00", event: "미래", index_id: "future-1" },
+      { date: TODAY, datetime: `${TODAY} 10:00:00`, time: "10:00", event: "과거", index_id: "past-1" },
+      { date: TODAY, datetime: `${TODAY} 15:00:00`, time: "15:00", event: "ID 없음" },
+      { date: TODAY, datetime: `${TODAY} 16:00:00`, time: "16:00", event: "발표됨", index_id: "actual-1", actual: "3.1" },
+    ],
+  });
+
+  const checks = [...w.document.querySelectorAll(".ec-bell-cb")];
+  assert.equal(checks.length, 1);
+  assert.equal(checks[0].dataset.eid, "future-1");
+});
+
+test("구독한 일정의 결과가 나오면 완료 마커와 행 강조를 렌더한다", () => {
+  const w = load(12, 0);
+  w.eval("_ecSubs = new Set(['done-1'])");
+  w._ecRenderShell();
+  w._ecRenderBody({
+    events: [
+      { date: TODAY, datetime: `${TODAY} 11:00:00`, time: "11:00", event: "발표됨", index_id: "done-1", actual: "2.0" },
+    ],
+  });
+
+  const row = w.document.querySelector(".ec-row");
+  assert.ok(row.classList.contains("ec-row-alerted"));
+  assert.equal(row.querySelector(".ec-bell-done").textContent, "🔔");
+  assert.equal(row.querySelector(".ec-bell-cb"), null);
+});
+
+test("결과 알림 토글은 로그인과 채널 게이트를 실제 동작으로 처리한다", async () => {
+  const w = load(12, 0);
+  w._ecRenderShell();
+  w._ecRenderBody({
+    events: [
+      { date: TODAY, datetime: `${TODAY} 14:00:00`, time: "14:00", event: "미래", index_id: "future-1" },
+    ],
+  });
+  const cb = w.document.querySelector(".ec-bell-cb");
+
+  const confirms = [];
+  w.confirm = (message) => { confirms.push(message); return false; };
+  cb.checked = true;
+  await w._ecToggleSubscription(cb);
+  assert.equal(cb.checked, false);
+  assert.match(confirms[0], /로그인 후 이용/);
+
+  w.eval("currentUser = { email: 'user@example.com' }");
+  let posted = null;
+  w.apiFetch = async (url, init) => {
+    posted = { url, init };
+    return { ok: false, status: 409 };
+  };
+  cb.checked = true;
+  await w._ecToggleSubscription(cb);
+  assert.equal(cb.checked, false);
+  assert.match(confirms.at(-1), /텔레그램 또는 카카오톡 연결/);
+  assert.equal(posted.url, "/api/notifications/calendar");
+  assert.equal(JSON.parse(posted.init.body).event_id, "future-1");
+});

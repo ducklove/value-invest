@@ -334,6 +334,33 @@ class EtfLinkTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_json_reuses_shared_http_client(self):
+        class Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"ok": True}
+
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            async def get(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return Resp()
+
+        client = Client()
+        fake_get_client = AsyncMock(return_value=client)
+        with patch.object(external_tools, "get_http_client", new=fake_get_client):
+            out = await external_tools._get_json("https://example.test/data.json")
+
+        self.assertEqual(out, {"ok": True})
+        fake_get_client.assert_awaited_once_with("external_tools")
+        self.assertEqual(client.calls[0][0], "https://example.test/data.json")
+        self.assertEqual(client.calls[0][1]["headers"]["User-Agent"], "value-invest/1.0")
+        self.assertIs(client.calls[0][1]["timeout"], external_tools._TIMEOUT)
+
     async def test_insights_endpoint_passthrough(self):
         payload = {"holding": {"top": []}, "spread": {"top": []}, "goldGap": {"assets": []}}
         fake = AsyncMock(return_value=payload)

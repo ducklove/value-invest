@@ -126,6 +126,42 @@ class CalendarEndpointTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FetchByLevelTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        economic_calendar._cache.clear()
+
+    async def test_fetch_calendar_uses_shared_http_client(self):
+        class Resp:
+            content = json.dumps(_fixture(), ensure_ascii=False).encode("utf-8")
+
+            def raise_for_status(self):
+                pass
+
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            async def get(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return Resp()
+
+        client = Client()
+        fake_get_client = AsyncMock(return_value=client)
+        economic_calendar._cache.clear()
+        with patch.object(economic_calendar, "get_http_client", new=fake_get_client):
+            result = await economic_calendar.fetch_economic_calendar(
+                start_date="2026-06-01",
+                end_date="2026-06-07",
+                countries=["kr", "us"],
+                importance=["high"],
+            )
+
+        self.assertTrue(result["events"])
+        fake_get_client.assert_awaited_once_with("economic_calendar")
+        self.assertEqual(client.calls[0][0], economic_calendar._DATA_URL)
+        self.assertEqual(client.calls[0][1]["headers"]["Referer"], economic_calendar._REFERER)
+        self.assertIs(client.calls[0][1]["timeout"], economic_calendar._HTTP_TIMEOUT)
+        self.assertEqual(client.calls[0][1]["params"]["str_natcd"], "kr|us")
+
     @staticmethod
     async def _fake_fetch(*, start_date, end_date, countries, importance):
         # (country, level) 조합마다 한 건씩 — 그룹핑/병합 검증용.

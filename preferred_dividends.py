@@ -30,8 +30,7 @@ import os
 import re
 from datetime import datetime
 
-import httpx
-
+from core.http import get_http_client
 from repositories import portfolio as portfolio_repo
 
 logger = logging.getLogger(__name__)
@@ -153,10 +152,10 @@ def parse_sheet_csv(csv_text: str) -> list[dict]:
 async def fetch_csv(timeout: float = 30.0) -> str:
     """Download the public CSV export. Raises on non-2xx."""
     url = _build_url()
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        return r.text
+    client = await get_http_client("preferred_dividends")
+    r = await client.get(url, timeout=timeout)
+    r.raise_for_status()
+    return r.text
 
 
 async def refresh_preferred_dividends() -> dict:
