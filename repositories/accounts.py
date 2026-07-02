@@ -3,7 +3,7 @@
 A user may hold positions across several accounts (일반계좌 / ISA / 퇴직연금 /
 배우자). Phase 1 introduces the ``portfolio_accounts`` table and an optional
 ``account_id`` on ``user_portfolio`` (nullable, defaulting to a per-user
-"default" account via ``cache._ensure_default_account``). Existing queries that
+"default" account via ``ensure_default_account``). Existing queries that
 filter by ``google_sub`` alone keep working unchanged.
 
 Design notes:
@@ -11,7 +11,7 @@ Design notes:
 * **account_id shape.`` A caller-supplied stable id (e.g. ``"isa"``) is hashed
   with the user's ``google_sub`` so the stored PK is globally unique without
   leaking a raw user key — mirroring the default-account id scheme in
-  ``cache._ensure_default_account``.
+  ``ensure_default_account``.
 * **Soft uniqueness.`` The DB UNIQUE(google_sub, name) prevents duplicate names,
   but (google_sub, account_id, stock_code) uniqueness on holdings is enforced in
   app code for now — SQLite can't add it via ALTER TABLE (deferred to a later
@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import hashlib
 
+import aiosqlite
+
 from cache_layer import now_iso
 from core.errors import AppError
 from repositories.db import get_db
@@ -34,6 +36,7 @@ from repositories.db import get_db
 ALLOWED_ACCOUNT_TYPES = {"general", "isa", "pension", "spouse", "cash", "other"}
 
 MAX_NAME_LENGTH = 40
+DEFAULT_ACCOUNT_PREFIX = "default"
 
 
 class AccountError(AppError):
@@ -47,6 +50,36 @@ def _make_account_id(google_sub: str, key: str) -> str:
     """Stable, globally-unique account id from user + caller key."""
     digest = hashlib.sha256(f"{google_sub}:{key}".encode("utf-8")).hexdigest()[:16]
     return f"acc-{digest}"
+
+
+def _make_default_account_id(google_sub: str) -> str:
+    """Stable default-account id for init_db's legacy holdings backfill."""
+    suffix = hashlib.sha256(google_sub.encode("utf-8")).hexdigest()[:12]
+    return f"{DEFAULT_ACCOUNT_PREFIX}-{suffix}"
+
+
+async def ensure_default_account(db: aiosqlite.Connection, google_sub: str) -> None:
+    """Ensure one default account exists and attach NULL-account holdings to it."""
+    cursor = await db.execute(
+        "SELECT account_id FROM portfolio_accounts WHERE google_sub = ? ORDER BY sort_order LIMIT 1",
+        (google_sub,),
+    )
+    row = await cursor.fetchone()
+    if row is not None:
+        account_id = row["account_id"]
+    else:
+        account_id = _make_default_account_id(google_sub)
+        now = now_iso()
+        await db.execute(
+            "INSERT OR IGNORE INTO portfolio_accounts "
+            "(account_id, google_sub, name, type, sort_order, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'general', 0, ?, ?)",
+            (account_id, google_sub, "기본 계좌", now, now),
+        )
+    await db.execute(
+        "UPDATE user_portfolio SET account_id = ? WHERE google_sub = ? AND account_id IS NULL",
+        (account_id, google_sub),
+    )
 
 
 async def list_accounts(google_sub: str) -> list[dict]:

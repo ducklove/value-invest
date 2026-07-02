@@ -4,8 +4,7 @@ Stock-name resolution, the holdings list (get_portfolio), per-stock tags +
 suggestions, target-metric / market-valuation rows, and preferred/trailing
 dividends. Extracted verbatim from cache.py; cache.py re-exports these as
 ``cache.<fn>`` so routes/services are unchanged. The default-group helpers
-(_resolve_default_group_name 등) live here; cache.py re-imports them for
-init_db's migration pass and legacy ``cache._<fn>`` callers.
+(_resolve_default_group_name 등) and portfolio default backfills live here.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from datetime import datetime
 
 import aiosqlite
 
+from repositories import accounts as accounts_repo
 from repositories import db as db_module
 from repositories.db import get_db, transaction
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
@@ -69,6 +69,62 @@ async def _ensure_default_groups(db: aiosqlite.Connection, google_sub: str):
         await db.execute(
             "INSERT OR IGNORE INTO portfolio_groups (google_sub, group_name, sort_order, is_default, default_type) VALUES (?, ?, ?, ?, ?)",
             (google_sub, name, order, is_default, dtype),
+        )
+
+
+async def backfill_portfolio_defaults(db: aiosqlite.Connection) -> None:
+    """Apply init_db's legacy portfolio group/account default backfills."""
+    type_by_order = {0: "kr", 1: "foreign", 2: "etc"}
+    for order, dtype in type_by_order.items():
+        await db.execute(
+            "UPDATE portfolio_groups "
+            "SET default_type = ? "
+            "WHERE is_default = 1 AND sort_order = ? AND default_type IS NULL",
+            (dtype, order),
+        )
+    await db.execute(
+        "UPDATE portfolio_groups SET default_type = 'kr' "
+        "WHERE is_default = 1 AND default_type IS NULL AND group_name LIKE '%한국%'"
+    )
+    await db.execute(
+        "UPDATE portfolio_groups SET default_type = 'foreign' "
+        "WHERE is_default = 1 AND default_type IS NULL AND group_name LIKE '%해외%'"
+    )
+    await db.execute(
+        "UPDATE portfolio_groups SET default_type = 'etc' "
+        "WHERE is_default = 1 AND default_type IS NULL"
+    )
+
+    cursor = await db.execute("SELECT DISTINCT google_sub FROM user_portfolio")
+    subs = [row["google_sub"] for row in await cursor.fetchall()]
+    for sub in subs:
+        await _ensure_default_groups(db, sub)
+        await accounts_repo.ensure_default_account(db, sub)
+        await db.execute(
+            """
+            UPDATE user_portfolio SET group_name = '기타'
+            WHERE google_sub = ?
+              AND group_name IS NULL
+              AND stock_code IN ('KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT')
+            """,
+            (sub,),
+        )
+        await db.execute(
+            """
+            UPDATE user_portfolio SET group_name = '한국주식'
+            WHERE google_sub = ?
+              AND group_name IS NULL
+              AND length(stock_code) = 6
+              AND substr(stock_code, 1, 5) GLOB '[0-9][0-9][0-9][0-9][0-9]'
+            """,
+            (sub,),
+        )
+        await db.execute(
+            """
+            UPDATE user_portfolio SET group_name = '해외주식'
+            WHERE google_sub = ? AND group_name IS NULL
+            """,
+            (sub,),
         )
 
 

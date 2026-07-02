@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 import cache
 from core.app_factory import create_app
 from repositories import accounts as accounts_repo
+from repositories import portfolio as portfolio_repo
 
 SUB = "u1"
 
@@ -67,6 +68,51 @@ class AccountMigrationTests(TempDbMixin):
         accounts = await accounts_repo.list_accounts(SUB)
         # _seed_user_with_holdings 로 SUB 는 보유종목이 있으므로 1개.
         self.assertEqual(len(accounts), 1)
+
+    async def test_default_account_backfill_function_is_idempotent(self):
+        db = await cache.get_db()
+        await db.execute(
+            "UPDATE user_portfolio SET account_id = NULL WHERE google_sub = ? AND stock_code = '005930'",
+            (SUB,),
+        )
+        await accounts_repo.ensure_default_account(db, SUB)
+        accounts = await accounts_repo.list_accounts(SUB)
+        self.assertEqual(len(accounts), 1)
+
+        cursor = await db.execute(
+            "SELECT account_id FROM user_portfolio WHERE google_sub = ? AND stock_code = '005930'",
+            (SUB,),
+        )
+        row = await cursor.fetchone()
+        self.assertEqual(row["account_id"], accounts[0]["account_id"])
+
+    async def test_portfolio_defaults_backfill_function_restores_groups_and_account(self):
+        db = await cache.get_db()
+        await db.execute("DELETE FROM portfolio_groups WHERE google_sub = ?", (SUB,))
+        await db.execute("DELETE FROM portfolio_accounts WHERE google_sub = ?", (SUB,))
+        await db.execute(
+            "UPDATE user_portfolio SET group_name = NULL, account_id = NULL WHERE google_sub = ?",
+            (SUB,),
+        )
+        await portfolio_repo.backfill_portfolio_defaults(db)
+
+        accounts = await accounts_repo.list_accounts(SUB)
+        self.assertEqual(len(accounts), 1)
+        cursor = await db.execute(
+            "SELECT group_name, COUNT(*) AS n FROM portfolio_groups WHERE google_sub = ? GROUP BY group_name",
+            (SUB,),
+        )
+        groups = {row["group_name"]: row["n"] for row in await cursor.fetchall()}
+        self.assertEqual(groups, {"한국주식": 1, "해외주식": 1, "기타": 1})
+
+        cursor = await db.execute(
+            "SELECT stock_code, group_name, account_id FROM user_portfolio WHERE google_sub = ?",
+            (SUB,),
+        )
+        holdings = {row["stock_code"]: dict(row) for row in await cursor.fetchall()}
+        self.assertEqual(holdings["005930"]["group_name"], "한국주식")
+        self.assertEqual(holdings["AAPL"]["group_name"], "해외주식")
+        self.assertTrue(all(row["account_id"] == accounts[0]["account_id"] for row in holdings.values()))
 
 
 class AccountsRepoTests(TempDbMixin):

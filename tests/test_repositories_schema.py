@@ -4,7 +4,26 @@ from __future__ import annotations
 
 import pytest
 
+from cache_layer import CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST
 from repositories import schema as schema_mod
+
+
+@pytest.mark.asyncio
+async def test_create_core_schema_creates_representative_tables():
+    import aiosqlite
+
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+    try:
+        await schema_mod.create_core_schema(db)
+        cursor = await db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?)",
+            ("users", "user_portfolio", "portfolio_accounts", "cache_values"),
+        )
+        names = {row["name"] for row in await cursor.fetchall()}
+        assert names == {"users", "user_portfolio", "portfolio_accounts", "cache_values"}
+    finally:
+        await db.close()
 
 
 @pytest.mark.asyncio
@@ -76,6 +95,67 @@ def test_core_column_migrations_cover_known_late_columns():
     assert ("user_portfolio", "account_id") in columns
     assert ("portfolio_alerts", "state_json") in columns
     assert ("portfolio_stock_snapshots", "cost_basis") in columns
+
+
+@pytest.mark.asyncio
+async def test_backfill_legacy_cache_values_promotes_report_tables_idempotently():
+    import aiosqlite
+
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+    await db.executescript(
+        """
+        CREATE TABLE latest_report_cache (
+            stock_code TEXT PRIMARY KEY,
+            report_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL
+        );
+        CREATE TABLE report_list_cache (
+            stock_code TEXT PRIMARY KEY,
+            reports_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL
+        );
+        CREATE TABLE cache_values (
+            namespace TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value_json TEXT NOT NULL,
+            cached_at TEXT NOT NULL,
+            expires_at TEXT,
+            ttl_seconds INTEGER,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (namespace, key)
+        );
+        """
+    )
+    await db.execute(
+        "INSERT INTO latest_report_cache (stock_code, report_json, fetched_at) VALUES ('005930', '{\"a\":1}', '2026-01-01T00:00:00')"
+    )
+    await db.execute(
+        "INSERT INTO report_list_cache (stock_code, reports_json, fetched_at) VALUES ('005930', '[1]', '2026-01-02T00:00:00')"
+    )
+    try:
+        await schema_mod.backfill_legacy_cache_values(db)
+        await schema_mod.backfill_legacy_cache_values(db)
+        cursor = await db.execute(
+            "SELECT namespace, key, value_json, cached_at FROM cache_values ORDER BY namespace"
+        )
+        rows = [dict(row) for row in await cursor.fetchall()]
+        assert rows == [
+            {
+                "namespace": CACHE_NS_LATEST_REPORT,
+                "key": "005930",
+                "value_json": '{"a":1}',
+                "cached_at": "2026-01-01T00:00:00",
+            },
+            {
+                "namespace": CACHE_NS_REPORT_LIST,
+                "key": "005930",
+                "value_json": "[1]",
+                "cached_at": "2026-01-02T00:00:00",
+            },
+        ]
+    finally:
+        await db.close()
 
 
 def test_validate_identifier_accepts_valid():

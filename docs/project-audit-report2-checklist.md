@@ -35,6 +35,7 @@
 | 완료 | 이전 실서버 배포 및 헬스체크 | GitHub Actions run `28588345220`, `/healthz` `asset_version=65660ba` |
 | 완료 | 포트폴리오 필터/편집 기본 상태 계약을 jsdom 테스트로 이관 | `tests/js/portfolio-store.test.mjs`, `tests/test_frontend_structure.py` 문자열 검사 2건 제거 |
 | 완료 | `cache.py` `init_db` 컬럼 마이그레이션 1차 분리 | `repositories/schema.py` `CORE_COLUMN_MIGRATIONS`, `ensure_columns`, `apply_core_column_migrations` |
+| 완료 | `cache.py` `init_db` DDL/백필 오케스트레이션 분리 | `init_db` 716줄 → 29줄, DDL은 `repositories/schema.py`, 계정/포트폴리오/스냅샷 백필은 각 repository 소유 |
 
 ## 다음 작업 후보
 
@@ -52,7 +53,7 @@
 | P2 | 완료 | 공용 HTTP 클라이언트 채택 확대 | 일반 호출부 전환 완료, 남은 직접 생성 4곳은 `close_price_client`·`kis_proxy_client` 자체 싱글톤과 wiki/portfolio AI SSE 스트림 예외 |
 | P2 | 완료 | `deploy.sh` 과거 리페어 블록 분리 | one-time repair 스크립트 5개와 shared lock runner로 분리 |
 | P2 | 완료 | 의존성 lock/pinning 정책 정리 | Python direct dependency 하한/상한 정책과 JS `package-lock.json`/`npm ci` 경로를 테스트로 고정 |
-| P3 | 진행중 | `cache.py` `init_db` 분해와 마이그레이션 체계화 | ADD COLUMN 마이그레이션은 `repositories/schema.py`로 1차 분리 완료, 테이블 생성/백필 분리는 후속 |
+| P3 | 완료 | `cache.py` `init_db` 분해와 마이그레이션 체계화 | DDL, ADD COLUMN, legacy cache 백필, 포트폴리오/계정/스냅샷 백필을 repository 경계로 분리 |
 | P3 | 대기 | 배치 실행 원장과 SLO 대시보드 | 장기 운영 관측성 과제 |
 
 ## 검증 로그
@@ -111,6 +112,13 @@
 | 2026-07-02 | `npm test` | 189 passed |
 | 2026-07-02 | `python -m ruff check cache.py repositories/schema.py tests/test_repositories_schema.py tests/test_frontend_structure.py` | 통과 |
 | 2026-07-02 | `python -m pytest -q` | 1100 passed |
+| 2026-07-02 | `npm test` | 189 passed |
+| 2026-07-02 | `python -m ruff check .` | 통과 |
+| 2026-07-02 | `git diff --check` | 통과 |
+| 2026-07-02 | `python -m pytest tests/test_repositories_schema.py tests/test_accounts.py tests/test_cache_layer.py tests/test_portfolio.py -q` | 105 passed |
+| 2026-07-02 | `python -m ruff check cache.py repositories/accounts.py repositories/portfolio.py repositories/schema.py repositories/snapshots.py tests/test_accounts.py tests/test_repositories_schema.py tests/test_portfolio.py` | 통과 |
+| 2026-07-02 | `git diff --check` | 통과 |
+| 2026-07-02 | `python -m pytest -q` | 1105 passed |
 | 2026-07-02 | `npm test` | 189 passed |
 | 2026-07-02 | `python -m ruff check .` | 통과 |
 | 2026-07-02 | `git diff --check` | 통과 |

@@ -1009,3 +1009,31 @@ class PortfolioTests(TempDbMixin):
         self.assertAlmostEqual(by_code["BBB"]["weight_pct"], 70.0)
         self.assertAlmostEqual(by_code["AAA"]["portfolio_weight_pct"], 30.0)
         self.assertEqual(by_code["AAA"]["stock_name"], "Alpha")
+
+    async def test_initial_snapshot_backfill_rebuilds_empty_aggregate_tables(self):
+        await portfolio_repo.save_portfolio_item(
+            "u1", "AAA", "Alpha", 10, 1000,
+            group_name="Core",
+        )
+        await portfolio_repo.save_portfolio_item(
+            "u1", "BBB", "Beta", 10, 1000,
+            group_name="Core",
+        )
+        await snapshots_repo.save_stock_snapshots(
+            "u1",
+            "2026-01-02",
+            [
+                {"stock_code": "AAA", "market_value": 300, "group_name": "Core"},
+                {"stock_code": "BBB", "market_value": 700, "group_name": "Core"},
+            ],
+        )
+        db = await cache.get_db()
+        await db.execute("DELETE FROM portfolio_group_snapshots")
+        await db.execute("DELETE FROM portfolio_stock_weight_snapshots")
+
+        await snapshots_repo.ensure_initial_snapshot_backfills(db)
+
+        cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_group_snapshots")
+        self.assertEqual((await cursor.fetchone())["n"], 1)
+        cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_stock_weight_snapshots")
+        self.assertEqual((await cursor.fetchone())["n"], 2)

@@ -4,8 +4,8 @@ Daily + intraday snapshots, NAV/group-weight/constituent history, and the
 cashflow transactions (incl. the atomic add/delete_cashflow_and_sync_cash that
 keep CASH_KRW in step). Extracted verbatim from cache.py; cache.py re-exports
 these as ``cache.<fn>``. The atomic paths open their own aiosqlite connection
-against repositories.db.DB_PATH; the group/stock weight rebuild helpers live
-here too (cache.init_db's one-time backfill re-imports them via the facade).
+against repositories.db.DB_PATH; the group/stock weight rebuild helpers and
+init-time snapshot backfills live here too.
 """
 
 from __future__ import annotations
@@ -178,6 +178,19 @@ async def _refresh_stock_weight_snapshots(db: aiosqlite.Connection, google_sub: 
         """,
         tuple(params),
     )
+
+
+async def ensure_initial_snapshot_backfills(db: aiosqlite.Connection) -> None:
+    """Run init_db's one-time aggregate snapshot rebuilds when target tables are empty."""
+    cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_group_snapshots")
+    group_snapshot_count = (await cursor.fetchone())["n"]
+    if group_snapshot_count == 0:
+        await _refresh_group_snapshots(db)
+
+    cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_stock_weight_snapshots")
+    stock_weight_snapshot_count = (await cursor.fetchone())["n"]
+    if stock_weight_snapshot_count == 0:
+        await _refresh_stock_weight_snapshots(db)
 
 
 async def get_latest_snapshot(google_sub: str) -> dict | None:
