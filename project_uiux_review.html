@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Value Compass · UI/메뉴 구성 UX 검토 보고서 · 2026-07-02</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --text: #1c2430; --muted: #5b6472;
+    --border: #e3e7ee; --accent: #2563eb; --accent-soft: #eff4ff;
+    --good: #15803d; --good-soft: #ecfdf3;
+    --p1: #b91c1c; --p1-soft: #fef2f2;
+    --p2: #b45309; --p2-soft: #fffbeb;
+    --p3: #475569; --p3-soft: #f1f5f9;
+    --code-bg: #f1f4f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10141b; --surface: #171d27; --text: #e6ebf2; --muted: #9aa5b4;
+      --border: #2a3342; --accent: #6a9bff; --accent-soft: #1b2536;
+      --good: #4ade80; --good-soft: #12261a;
+      --p1: #f87171; --p1-soft: #2b1516;
+      --p2: #fbbf24; --p2-soft: #2a2110;
+      --p3: #94a3b8; --p3-soft: #1c2430;
+      --code-bg: #1e2632;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Pretendard", "Noto Sans KR", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 32px 20px 80px; }
+  header.hero { padding: 28px 0 8px; }
+  .hero h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.5px; }
+  .hero .sub { color: var(--muted); font-size: 14px; }
+  .hero .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .hero .meta b { color: var(--text); font-weight: 600; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px 26px; margin-top: 22px; }
+  h2 { font-size: 19px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); letter-spacing: -0.3px; }
+  h2 .no { color: var(--accent); margin-right: 8px; font-weight: 800; }
+  h3 { font-size: 15.5px; margin: 22px 0 8px; }
+  p { margin: 8px 0; }
+  ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px; font-size: 12.5px; font-family: Consolas, "D2Coding", monospace; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; white-space: nowrap; }
+  .badge { display: inline-block; font-size: 11.5px; font-weight: 700; border-radius: 20px; padding: 2px 10px; vertical-align: 1px; margin-right: 6px; white-space: nowrap; }
+  .b-p1 { background: var(--p1-soft); color: var(--p1); }
+  .b-p2 { background: var(--p2-soft); color: var(--p2); }
+  .b-p3 { background: var(--p3-soft); color: var(--p3); }
+  .b-good { background: var(--good-soft); color: var(--good); }
+  .b-accent { background: var(--accent-soft); color: var(--accent); }
+  .verdict { display: grid; grid-template-columns: 120px 1fr; gap: 14px; align-items: center;
+    background: var(--accent-soft); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin: 14px 0; }
+  .verdict .score { font-size: 30px; font-weight: 800; color: var(--accent); text-align: center; line-height: 1.2; }
+  .verdict .score small { display: block; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .finding { border: 1px solid var(--border); border-left: 4px solid var(--p3); border-radius: 8px; padding: 14px 16px; margin: 12px 0; }
+  .finding.p1 { border-left-color: var(--p1); }
+  .finding.p2 { border-left-color: var(--p2); }
+  .finding h4 { margin: 0 0 6px; font-size: 14.5px; }
+  .finding .evidence { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .finding .fix { background: var(--good-soft); border-radius: 6px; padding: 8px 12px; margin-top: 8px; font-size: 13.5px; }
+  .finding .fix b { color: var(--good); }
+  .tree { background: var(--code-bg); border-radius: 8px; padding: 14px 18px; font-family: Consolas, "D2Coding", monospace; font-size: 12.5px; line-height: 1.8; overflow-x: auto; white-space: pre; }
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .cols2 { grid-template-columns: 1fr; } .verdict { grid-template-columns: 1fr; } }
+  .note { font-size: 13px; color: var(--muted); }
+  .arrow { color: var(--accent); font-weight: 700; }
+  footer { margin-top: 30px; text-align: center; font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>Value Compass · UI / 메뉴 구성 UX 검토 보고서</h1>
+  <div class="sub">현재 내비게이션·정보 구조(IA)가 합리적인지에 대한 진단과 사용자 경험 관점의 개선 제안</div>
+  <div class="meta">
+    <span>작성일 <b>2026-07-02</b></span>
+    <span>기준 브랜치 <b>codex/project-audit-report2-fixes</b> (커밋 <b>726ed5c2</b>)</span>
+    <span>검토 범위 <b>static/index.html · portfolio-shell.js · app-main.js · 관련 뷰 JS/CSS</b></span>
+    <span>방법 <b>정적 코드 분석 (읽기 전용)</b></span>
+  </div>
+</header>
+
+<!-- ================================================================ -->
+<section>
+  <h2><span class="no">1</span>종합 판정</h2>
+  <div class="verdict">
+    <div class="score">합리적<small>단, 3개 구조 결함</small></div>
+    <div>
+      <p style="margin:0;">
+        <b>골격은 잘 잡혀 있다.</b> 최상위 4탭(투자정보·종목분석·포트폴리오·국민연금)의 평평한 구조는 이 제품의 사용 사이클
+        (시장 훑기 → 종목 파기 → 내 자산 관리)과 일치하고, 모바일 하단 탭바 셸과 뷰별 책임 분리도 수준급이다.
+        문제는 메뉴의 "모양"이 아니라 <b>(a) 만들어 놓고 숨겨둔 기능의 발견가능성</b>,
+        <b>(b) URL·뒤로가기와 단절된 내비게이션 상태</b>, <b>(c) 4번째 탭(국민연금)의 자리 낭비</b> 세 가지다.
+        셋 다 구조 재설계 없이 소규모 수정으로 해소된다.
+      </p>
+    </div>
+  </div>
+  <ul>
+    <li><span class="badge b-p1">P1</span>밸류 스크리너·인사이트 보드는 완성된 기능인데 <b>앱 내 진입점이 0개</b> — URL을 아는 사람만 쓸 수 있다.</li>
+    <li><span class="badge b-p1">P1</span>탭 전환이 URL/히스토리에 반영되지 않아 <b>뒤로가기 = 앱 이탈</b>, 새로고침 = 탭 초기화.</li>
+    <li><span class="badge b-p1">P1</span>모바일에서는 사이드바가 통째로 사라져 <b>최근 검색·관심 목록을 볼 방법이 없다</b>.</li>
+    <li><span class="badge b-p2">P2</span>국민연금(외부 iframe 1장)이 최상위 탭 1/4을 차지 — "도구" 허브 탭으로 교체하면 위 P1 두 건이 함께 풀린다.</li>
+  </ul>
+</section>
+
+<!-- ================================================================ -->
+<section>
+  <h2><span class="no">2</span>현재 정보 구조(IA) 맵</h2>
+  <p class="note">코드에서 직접 확인한 실제 구조. <code>static/index.html</code>, <code>portfolio-shell.js:234 switchView()</code>, <code>app-main.js:182 PATH_TO_VIEW</code> 기준.</p>
+<div class="tree">헤더(항상) ─ 로고 · [투자정보 | 종목분석 | 포트폴리오 | 국민연금] · 위키수집 배지 · 테마 🌓
+사이드바(데스크톱 전용) ─ 로그인 패널 · 시세 바 · [최근 검색 | 관심 목록]
+모바일(≤900px) ─ 하단 탭바 4개(투자정보·종목분석·포트폴리오·연금) · 사이드바 없음
+
+① 투자정보  /investing (기본 뷰)
+   ├─ 시장 지표 대시보드 (지표 · 분석 도구 카드 7종+ · 뉴스 · 급등락 · 섹터)
+   ├─ 금일 시황 (AI 브리핑)
+   └─ 경제 캘린더 (국가·중요도 필터 · 🔔 결과 알림)
+② 종목분석  /analysis?code=…
+   ├─ 검색 → 기업정보(관심 · 🔔 알림 · 메모 · 위키 Q&A · 📝 투자 일지)
+   ├─ 밸류에이션(1y/3y/전체) → 연간 지표
+   └─ DART AI 리뷰 → 증권사 리포트(+LLM 요약)
+③ 포트폴리오  /portfolio
+   ├─ 요약 · [액션 보드(opt-in)] · 탭바(보유종목 | 심층 분석 | 액션 · 간편 · ₩/$)
+   ├─ 보유종목: 검색 · 개별/일괄 등록 · 🗺️영역지도(모달) · 🔔알림(모달) · 테이블
+   └─ 심층 분석: NAV → 리스크 → 기간 보고서 → 리밸런싱 → 배당 캘린더
+                 → 투자 일지 → 평가금액 → 그룹 비중 → 자금 입출금 → AI 분석  (10개 카드 단일 스크롤)
+④ 국민연금  /nps ─ nps-tracker iframe 임베드 (탭 진입마다 재로드)
+
+<b>숨은 뷰 (앱 내 링크 없음 · URL 직접 입력만)</b>
+⑤ /labs      투자 실험실 허브 → 인사이트 보드·스크리너 카드 2장
+⑥ /insights  인사이트 보드 (백테스트·실험 기록장)
+⑦ /screener  밸류 스크리너 (finance-pi full-universe, 조건 필터·정렬·페이저)
+
+별도 페이지: /login (독립 HTML) · admin.html (관리자 콘솔)
+모달 9종: 프로필 · 종목알림 · 차트확대 · 그룹관리 · 영역지도 · 인사이트 · 포트폴리오알림 · 태그요약 · 자산인사이트</div>
+</section>
+
+<!-- ================================================================ -->
+<section>
+  <h2><span class="no">3</span>잘 된 점 — 유지해야 할 결정들</h2>
+  <table>
+    <tr><th style="width:220px;">항목</th><th>평가</th></tr>
+    <tr><td><span class="badge b-good">GOOD</span>평평한 4탭 구조</td>
+      <td>2단 이상 중첩 메뉴가 없다. "시장 → 종목 → 내 자산"이라는 사용 흐름과 탭 순서가 일치하고, 모바일 탭바 권장 개수(3~5)에 부합한다.</td></tr>
+    <tr><td><span class="badge b-good">GOOD</span>모바일 셸 설계</td>
+      <td>≤900px에서 하단 탭바 + 슬림 헤더 + 아이콘/레이블 병기, 로그인 시 포트폴리오 기본 진입(<code>app-main.js:200-206</code>), 탭 전환 시 스크롤 최상단 보정. 데스크톱 축소판이 아닌 별도 셸로 설계된 점이 우수하다.</td></tr>
+    <tr><td><span class="badge b-good">GOOD</span>딥링크 수용</td>
+      <td><code>/analysis?code=005930</code>, <code>/portfolio</code> 등 경로 → 뷰 매핑이 정리돼 있어(<code>app-main.js:182-190</code>) 외부 도구·알림 메시지에서 특정 화면으로 바로 연결된다.</td></tr>
+    <tr><td><span class="badge b-good">GOOD</span>맥락 내 개인화</td>
+      <td>관심·메모·알림·일지가 별도 "설정 화면"이 아니라 종목/포트폴리오 화면 안에 붙어 있다. 흐름을 끊지 않는 올바른 배치다.</td></tr>
+    <tr><td><span class="badge b-good">GOOD</span>실험 기능 격리 원칙</td>
+      <td>미검증 기능을 "실험실"로 분리하고 배너로 신뢰 수준을 고지하는 정책 자체는 옳다(문제는 4장에서 다룰 "입구 없음"이다).</td></tr>
+    <tr><td><span class="badge b-good">GOOD</span>점진 공개(Progressive disclosure)</td>
+      <td>포트폴리오의 액션 보드 opt-in, 간편 모드, 컬럼 토글, CSV 패널 접기 등 고급 기능이 기본 화면을 어지럽히지 않는다.</td></tr>
+    <tr><td><span class="badge b-good">GOOD</span>접근성 기반 (최근 개선)</td>
+      <td>스킵 링크·main 랜드마크·sr-only h1, 정렬 헤더 키보드 조작, 토스트/로딩 aria-live, 탭바 <code>aria-label="주요 메뉴"</code> 반영 완료.</td></tr>
+  </table>
+</section>
+
+<!-- ================================================================ -->
+<section>
+  <h2><span class="no">4</span>문제점과 개선 제안</h2>
+
+  <h3>구조 문제 (P1) — 메뉴가 기능을 못 따라간다</h3>
+
+  <div class="finding p1">
+    <h4><span class="badge b-p1">P1</span>① 스크리너·인사이트 보드로 가는 문이 앱 어디에도 없다</h4>
+    <p>밸류 스크리너는 최근 full-universe 전환·범위 필터까지 넣은 사실상의 주력 기능인데, 진입 경로가
+      "<code>/labs</code> 카드 → <code>/screener</code>"뿐이고 정작 <b>/labs로 가는 링크가 앱에 없다</b>.
+      스크리너·인사이트·실험실 3개 뷰 전부 URL을 외운 사람만 쓸 수 있다. 기능 투자 대비 회수가 0에 수렴하는 상태.</p>
+    <div class="evidence">근거: <code>index.html:641-652</code>(labs 카드), <code>screener.js:2</code>("/labs 카드 → /screener 직접 URL" 주석),
+      전역 grep 결과 <code>/labs</code> 링크는 labs 뷰 내부의 "돌아가기" 2곳뿐.</div>
+    <div class="fix"><b>제안:</b> 5장의 "도구 탭" 개편이 정공법. 최소 수정만 원하면 투자정보의 <b>분석 도구 카드 그리드에
+      '밸류 스크리너'·'인사이트 보드' 내부 카드 2장 추가</b>(외부 도구 카드와 동일한 <code>_extCard</code> 패턴, 0.5일).
+      실험 기능 배너는 그대로 유지해 신뢰 수준 고지를 지킨다.</div>
+  </div>
+
+  <div class="finding p1">
+    <h4><span class="badge b-p1">P1</span>② 탭 전환이 브라우저 히스토리와 단절 — 뒤로가기가 앱을 종료시킨다</h4>
+    <p><code>switchView()</code>가 DOM 표시만 바꾸고 <code>history.pushState</code>를 호출하지 않는다.
+      포트폴리오 → 종목분석 → 투자정보로 이동한 뒤 뒤로가기를 누르면 이전 탭이 아니라 <b>앱 밖으로 나간다</b>.
+      모바일(안드로이드 백 제스처)에서 특히 치명적이고, 새로고침하면 보던 탭이 사라진다.
+      딥링크 해석(<code>PATH_TO_VIEW</code>)은 이미 있으므로 "읽기"만 되고 "쓰기"가 없는 반쪽 상태다.</p>
+    <div class="evidence">근거: <code>portfolio-shell.js:234-283 switchView()</code> — history API 호출 없음. 감사 보고서 P2 지적과 동일.</div>
+    <div class="fix"><b>제안:</b> switchView에 <code>history.pushState(null,'', '/'+view)</code> 한 줄 +
+      <code>popstate</code> 리스너에서 <code>PATH_TO_VIEW</code> 재사용(재귀 방지용 <code>fromPopstate</code> 옵션). 종목분석은
+      <code>?code=</code>까지 동기화하면 "이 종목 보던 화면"도 복원된다. 예상 규모 ~30줄, 1일.</div>
+  </div>
+
+  <div class="finding p1">
+    <h4><span class="badge b-p1">P1</span>③ 모바일에서 최근 검색·관심 목록이 완전히 사라진다</h4>
+    <p>사이드바가 ≤900px에서 <code>display:none !important</code>로 제거되는데 대체 진입점이 없다.
+      "관심종목 등록" 버튼은 모바일에서도 보이지만 <b>등록한 목록을 볼 곳이 없어</b> 기능이 반쪽이 된다.
+      재방문 사용자의 핵심 재진입 경로(어제 보던 종목)가 모바일에서만 끊긴다.</p>
+    <div class="evidence">근거: <code>styles.css:5179</code> <code>.sidebar { display:none !important; }</code>,
+      모바일 대체 UI grep 결과 없음. 관심 등록 버튼은 <code>index.html:182</code>.</div>
+    <div class="fix"><b>제안:</b> 종목분석 뷰의 검색창 포커스 시(입력 전) 드롭다운에 <b>"최근 검색 / 관심 목록" 칩 리스트</b>를 보여주는 방식이
+      가장 자연스럽다(검색 UX 관례, 신규 화면 불요). 데이터·렌더 함수는 사이드바용이 이미 있으므로 재사용. 1~2일.</div>
+  </div>
+
+  <div class="finding p1">
+    <h4><span class="badge b-p1">P1</span>④ 스크리너 안내 문구가 현재 동작과 다르다 (스테일 카피)</h4>
+    <p>스크리너는 finance-pi full-universe 스냅샷으로 전환됐는데(#12), 화면에는 여전히
+      "분석 이력이 쌓인 종목만 검색 대상입니다"(배너), "종목을 분석할 때마다 스크리너 대상에 추가됩니다"(커버리지 힌트),
+      labs 카드 설명까지 3곳에 옛 동작 설명이 남아 있다. 사용자가 기능 범위를 실제보다 좁게 오해하게 만드는 카피다.</p>
+    <div class="evidence">근거: <code>index.html:680</code>, <code>index.html:650</code>, <code>screener.js:65,71</code>
+      vs 커밋 <code>2857d5d2</code> "Switch screener to live finance-pi full-universe snapshot".</div>
+    <div class="fix"><b>제안:</b> 문구 3곳을 "전체 상장 유니버스 대상, 재무 데이터 보유 종목 기준" 계열로 교체. 0.5시간.</div>
+  </div>
+
+  <h3>배치·구성 문제 (P2)</h3>
+
+  <div class="finding p2">
+    <h4><span class="badge b-p2">P2</span>⑤ 국민연금이 최상위 탭일 이유가 약하다</h4>
+    <p>4번째 탭은 외부 정적 대시보드(nps-tracker) iframe 1장이 전부다. 게다가 투자정보의 분석 도구 그리드에
+      <b>이미 국민연금 요약 카드가 있다</b>(자산배분/보유 상위). 앱에서 가장 비싼 자리(모바일 탭바 1/4)를
+      단일 외부 임베드가 차지하는 동안, 자체 기능인 스크리너는 입구조차 없는 역전 상태다.</p>
+    <div class="evidence">근거: <code>index.html:626-628</code>(iframe 전용 뷰), <code>market-dashboard.js:895-902</code>(중복 요약 카드),
+      <code>portfolio-shell.js:296-299</code>("허브는 iframe 임베드만" 주석).</div>
+    <div class="fix"><b>제안:</b> 5장 참조 — 4번째 탭을 <b>"도구" 허브</b>로 교체하고 국민연금은 그 안의 첫 카드로.
+      기존 <code>/nps</code> 딥링크는 유지(하위 호환).</div>
+  </div>
+
+  <div class="finding p2">
+    <h4><span class="badge b-p2">P2</span>⑥ 포트폴리오 "심층 분석" — 10개 카드 단일 스크롤, 이정표 없음</h4>
+    <p>NAV·리스크·기간 보고서·리밸런싱·배당·일지·평가금액·그룹 비중·자금 입출금·AI 분석이 한 페이지에 세로로 이어진다.
+      부제("NAV · 리스크 · 리밸런싱 · 현금흐름")가 목차 역할을 흉내 내지만 클릭되지 않고,
+      모바일에서 특정 카드(예: 배당 캘린더)까지 도달하려면 상당한 스크롤이 필요하다.
+      성격이 다른 <b>입력 폼(자금 입출금)</b>이 조회용 차트 사이에 끼어 있는 것도 어색하다.</p>
+    <div class="evidence">근거: <code>index.html:452-624</code> (pfPerformanceTab 전체).</div>
+    <div class="fix"><b>제안:</b> 탭 분할보다 <b>상단 고정(sticky) 앵커 칩 내비</b>(NAV·리스크·보고서·리밸런싱·배당·일지·현금흐름·AI)가
+      적합 — 카드 간 비교 스크롤은 유지하면서 점프만 추가. 자금 입출금은 맨 아래 또는 접힘 기본으로 이동. 1~2일.</div>
+  </div>
+
+  <div class="finding p2">
+    <h4><span class="badge b-p2">P2</span>⑦ 종목분석 — 핵심 데이터가 개인화 블록에 밀려 내려간다</h4>
+    <p>종목을 선택하면 기업정보 → <b>메모 입력창 → 위키 Q&A → 투자 일지 폼</b>이 먼저 나오고,
+      정작 이 제품의 정체성인 <b>밸류에이션 차트는 그 아래</b>에 있다. 매번 쓰는 요소(차트)보다 가끔 쓰는 입력 폼 3종이
+      첫 화면(above the fold)을 차지하는 우선순위 역전이다. 모바일에서 특히 체감이 크다.</p>
+    <div class="evidence">근거: <code>index.html:180-214</code>(개인화·Q&A·일지) → <code>index.html:222-233</code>(밸류에이션·연간 지표) 순서.</div>
+    <div class="fix"><b>제안:</b> 위키 Q&A와 투자 일지를 <code>&lt;details&gt;</code> 접힘(제목 줄만 노출) 또는
+      밸류에이션 아래로 이동. 메모는 1줄 요약 + 클릭 시 확장. 마크업 이동 위주 0.5~1일.</div>
+  </div>
+
+  <div class="finding p2">
+    <h4><span class="badge b-p2">P2</span>⑧ 알림 설정이 3곳에 흩어져 있고 전체를 보는 곳이 없다</h4>
+    <p>종목 알림(종목분석 🔔), 포트폴리오 조건 알림(포트폴리오 🔔), 경제지표 결과 알림(캘린더 🔔)은 각자 맥락에 잘 붙어 있지만,
+      "내가 지금 무슨 알림을 걸어뒀지?"에 답하는 <b>통합 목록이 없다</b>. 알림이 늘수록 잊힌 규칙·중복 규칙이 쌓이고,
+      해지하려면 원래 화면을 다시 찾아가야 한다.</p>
+    <div class="evidence">근거: <code>index.html:183</code>(종목), <code>index.html:324</code>(포트폴리오), 경제캘린더 구독 체크박스(economic-calendar.js).</div>
+    <div class="fix"><b>제안:</b> 프로필 모달에 <b>"내 알림" 섹션</b>(전 종류 규칙 나열 + 개별 삭제 + 원 화면 바로가기).
+      백엔드는 이미 규칙이 테이블로 있으므로 조회 API 조합이면 된다. 2~3일.</div>
+  </div>
+
+  <div class="finding p2">
+    <h4><span class="badge b-p2">P2</span>⑨ 포트폴리오 탭바에 성격이 다른 컨트롤 5종 혼재</h4>
+    <p>한 줄에 뷰 전환 탭(보유종목/심층 분석) + 패널 토글(액션) + 표시 모드(간편) + 단위 설정(₩/$)이 나란히 있다.
+      모두 "누르는 것"처럼 보이지만 하나는 화면 전환, 하나는 패널 표시, 하나는 밀도, 하나는 통화라 학습 비용이 생기고,
+      모바일에서 이 줄이 비좁다.</p>
+    <div class="evidence">근거: <code>index.html:298-307</code>.</div>
+    <div class="fix"><b>제안:</b> 탭 2개는 좌측 유지, 액션·간편·통화는 우측에 시각적으로 분리(구분선 또는 아이콘 버튼 그룹).
+      스타일 조정 수준 0.5일. (간편 토글은 이미 모바일 전용 노출이라 로직 변경 불요.)</div>
+  </div>
+
+  <h3>다듬기 (P3)</h3>
+  <table>
+    <tr><th style="width:46%;">문제</th><th>제안</th></tr>
+    <tr>
+      <td><span class="badge b-p3">P3</span>헤더의 "위키 수집량" 배지(<code>index.html:109</code>)는 운영 지표라 일반 사용자에게 소음이다.</td>
+      <td>admin 콘솔로 이동하거나 프로필 모달 하단으로 강등.</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-p3">P3</span>테마가 <code>prefers-color-scheme</code>을 무시하고 🌓 버튼은 <code>title</code>만 있다.</td>
+      <td>최초 방문 시 OS 테마 따라가기 + <code>aria-label="테마 전환"</code> 추가. 0.5일.</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-p3">P3</span>국민연금 iframe이 탭 진입마다 nonce로 전체 재로드돼(<code>portfolio-shell.js:291</code>) 스크롤·상태가 매번 초기화된다.</td>
+      <td>세션 내 최초 1회 로드 + "새로고침" 버튼 제공(신선도는 수동 갱신으로).</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-p3">P3</span>로딩·빈·에러 상태가 동일한 회색 한 줄(<code>.md-loading</code> 재사용)이라 에러를 로딩으로 오인한다. (감사 P2 재확인)</td>
+      <td>상태 공통 클래스 3종(스피너/빈/에러+재시도) 도입 — 기존 감사 개선 계획과 병합.</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-p3">P3</span>전역 종목 검색이 없다 — 검색은 종목분석 뷰 안에만 있어, 다른 탭에서 종목을 찾으려면 탭 이동이 선행돼야 한다.</td>
+      <td>단기: 현행 유지(탭 이동 1회는 수용 가능). 중기: 헤더 검색 아이콘 → 종목분석 검색 포커스 딥링크.</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-p3">P3</span>모달 9종의 Esc·포커스 동작 불일치. (감사 P1, 미착수 확인)</td>
+      <td>공통 <code>openModal/closeModal</code> 유틸 + 포커스 트랩 — 기존 감사 체크리스트 P1과 동일 항목이므로 그쪽 일정으로 처리.</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ================================================================ -->
+<section>
+  <h2><span class="no">5</span>제안 IA 개편안 — "국민연금 탭" → "도구 허브 탭"</h2>
+  <p>위 P1 ①(입구 없음)과 P2 ⑤(탭 낭비)를 한 번에 푸는 개편. 최상위 탭 개수는 4개 그대로 유지해
+    모바일 탭바와 학습된 습관을 보존한다.</p>
+  <div class="cols2">
+    <div>
+      <h3>현재</h3>
+      <div class="tree">투자정보 | 종목분석 | 포트폴리오 | <b>국민연금</b>
+
+숨김: /labs · /insights · /screener
+중복: 국민연금 요약 카드가
+      투자정보에 이미 존재</div>
+    </div>
+    <div>
+      <h3>제안</h3>
+      <div class="tree">투자정보 | 종목분석 | 포트폴리오 | <b>도구</b>
+
+도구 허브(기존 labsView 확장):
+ ├─ 밸류 스크리너        [검증됨]
+ ├─ 국민연금 대시보드     (iframe)
+ ├─ 인사이트 보드        [실험]
+ └─ 외부 대시보드 딥링크 (지주사·우선주·스팩…)
+
+/nps · /screener · /insights 딥링크 유지</div>
+    </div>
+  </div>
+  <ul>
+    <li><b>구현 규모:</b> labsView를 "도구" 뷰로 개명·확장(카드 4종), 탭 버튼 2곳(<code>main-nav</code>, <code>mobile-tabbar</code>) 교체,
+      <code>PATH_TO_VIEW</code>에 <code>/tools</code> 추가. 기존 뷰·딥링크는 전부 그대로 동작. <b>1~2일.</b></li>
+    <li><b>실험/검증 구분:</b> 카드에 [검증됨]/[실험] 필을 달아 실험실 격리 원칙을 계승한다 — 별도 "실험실" 공간이 사라지는 게 아니라
+      허브 안의 등급 표시로 흡수된다.</li>
+    <li><b>대안(더 보수적):</b> 탭 구성을 못 바꾸겠다면 최소한 투자정보 분석 도구 그리드에 스크리너·인사이트 카드 2장만이라도 추가(P1 ①의 최소 수정안).</li>
+  </ul>
+</section>
+
+<!-- ================================================================ -->
+<section>
+  <h2><span class="no">6</span>실행 우선순위</h2>
+  <table>
+    <tr><th>순서</th><th>작업</th><th>노력</th><th>효과</th></tr>
+    <tr><td>1</td><td><span class="badge b-p1">P1④</span>스크리너 스테일 카피 3곳 수정</td><td>0.5시간</td><td>기능 범위 오해 제거</td></tr>
+    <tr><td>2</td><td><span class="badge b-p1">P1①</span>+<span class="badge b-p2">P2⑤</span>"도구" 탭 개편 (또는 최소안: 분석 도구 카드 2장)</td><td>1~2일 (최소안 0.5일)</td><td>숨은 기능 발견가능성 확보 — <b>최대 효과</b></td></tr>
+    <tr><td>3</td><td><span class="badge b-p1">P1②</span>switchView pushState/popstate 동기화</td><td>1일</td><td>뒤로가기·새로고침·공유 URL 정상화</td></tr>
+    <tr><td>4</td><td><span class="badge b-p1">P1③</span>모바일 검색창에 최근/관심 칩</td><td>1~2일</td><td>모바일 재방문 흐름 복구</td></tr>
+    <tr><td>5</td><td><span class="badge b-p2">P2⑦</span>종목분석 Q&A·일지 접기/재배치</td><td>0.5~1일</td><td>핵심 차트 도달 시간 단축</td></tr>
+    <tr><td>6</td><td><span class="badge b-p2">P2⑥</span>심층 분석 sticky 앵커 칩</td><td>1~2일</td><td>장스크롤 탐색성</td></tr>
+    <tr><td>7</td><td><span class="badge b-p2">P2⑧</span>프로필 모달 "내 알림" 통합 뷰</td><td>2~3일</td><td>알림 관리 신뢰성</td></tr>
+    <tr><td>8</td><td><span class="badge b-p2">P2⑨</span>+<span class="badge b-p3">P3</span> 나머지 다듬기 (탭바 정리·테마·상태 표현·모달 공통화)</td><td>감사 개선 트랙과 병행</td><td>완성도</td></tr>
+  </table>
+  <p class="note">1~4번만 끝내도 "메뉴 구성이 합리적인가"라는 질문의 남은 감점 요인이 대부분 사라진다.
+    5번 이후는 기존 감사 보고서(project_audit_report2.html)의 UI/UX·접근성 개선 트랙과 겹치므로 그 체크리스트에 합류시키는 편이 관리에 유리하다.</p>
+</section>
+
+<footer>
+  Value Compass UI/메뉴 UX 검토 · 2026-07-02 · 정적 코드 분석 기반 (읽기 전용) · 기준 커밋 726ed5c2
+</footer>
+
+</div>
+</body>
+</html>
