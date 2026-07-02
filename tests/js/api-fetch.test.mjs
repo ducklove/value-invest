@@ -158,6 +158,19 @@ test("apiFetchJson uses fallback message when error body is not JSON", async () 
   );
 });
 
+test("apiFetchJson returns explicit fallback for expected non-ok responses", async () => {
+  const w = loadUtils();
+  w.fetch = async () => ({
+    ok: false,
+    status: 404,
+    statusText: "Not Found",
+    json: async () => ({ detail: "missing" }),
+  });
+  const fallback = { items: [] };
+  const data = await w.apiFetchJson("/api/demo", { fallback });
+  assert.equal(data, fallback);
+});
+
 test("reportApiError shows a Korean '<context> 실패: ...' toast for user actions", () => {
   const w = loadUtils();
   w.reportApiError(new Error("재고가 없습니다"), "저장");
@@ -208,6 +221,46 @@ test("skip link moves focus to the main content for click and keyboard users", (
   assert.equal(w.document.activeElement, main);
   assert.equal(w.location.hash, "#mainContent");
   assert.equal(scrollCount, 2);
+});
+
+test("managed modals trap focus, close on Escape, and restore focus", () => {
+  const w = loadUtils();
+  w.document.body.innerHTML = `
+    <button id="before">before</button>
+    <div id="demoModal" style="display:none;" role="dialog" aria-modal="true">
+      <button id="first">first</button>
+      <button id="last">last</button>
+    </div>`;
+  const before = w.document.getElementById("before");
+  const modal = w.document.getElementById("demoModal");
+  const first = w.document.getElementById("first");
+  const last = w.document.getElementById("last");
+  let closed = 0;
+
+  before.focus();
+  w.openManagedModal(modal, {
+    onEscape: () => {
+      closed += 1;
+      w.closeManagedModal(modal);
+    },
+  });
+
+  assert.equal(modal.style.display, "flex");
+  assert.equal(w.document.activeElement, first);
+  assert.equal(w.document.body.style.overflow, "hidden");
+
+  last.focus();
+  last.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  assert.equal(w.document.activeElement, first);
+
+  first.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+  assert.equal(w.document.activeElement, last);
+
+  modal.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal(closed, 1);
+  assert.equal(modal.style.display, "none");
+  assert.equal(w.document.activeElement, before);
+  assert.equal(w.document.body.style.overflow, "");
 });
 
 test("reportApiError maps timeout aborts to a friendly Korean message", () => {

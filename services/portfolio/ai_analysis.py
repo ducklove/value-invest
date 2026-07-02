@@ -33,6 +33,7 @@ import httpx
 
 import ai_config
 import market_indicators
+from core.http import get_http_client
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from repositories import wiki as wiki_repo
@@ -112,21 +113,21 @@ async def list_models() -> dict:
     if not openrouter_key:
         return {"models": [], "default": profiles["balanced"], "profiles": profiles}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get("https://openrouter.ai/api/v1/models")
-            data = resp.json().get("data", [])
-            models = []
-            for m in data:
-                p = m.get("pricing", {})
-                models.append({
-                    "id": m["id"],
-                    "name": m.get("name", m["id"]),
-                    "prompt_price": float(p.get("prompt", 0)) * 1e6,
-                    "completion_price": float(p.get("completion", 0)) * 1e6,
-                    "context": m.get("context_length", 0),
-                })
-            models.sort(key=lambda x: x["id"])
-            return {"models": models, "default": profiles["balanced"], "profiles": profiles}
+        client = await get_http_client("openrouter")
+        resp = await client.get("https://openrouter.ai/api/v1/models", timeout=10.0)
+        data = resp.json().get("data", [])
+        models = []
+        for m in data:
+            p = m.get("pricing", {})
+            models.append({
+                "id": m["id"],
+                "name": m.get("name", m["id"]),
+                "prompt_price": float(p.get("prompt", 0)) * 1e6,
+                "completion_price": float(p.get("completion", 0)) * 1e6,
+                "context": m.get("context_length", 0),
+            })
+        models.sort(key=lambda x: x["id"])
+        return {"models": models, "default": profiles["balanced"], "profiles": profiles}
     except Exception as exc:
         logger.warning("Failed to fetch OpenRouter models: %s", exc)
         return {"models": [], "default": profiles["balanced"], "profiles": profiles}

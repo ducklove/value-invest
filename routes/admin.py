@@ -1233,7 +1233,7 @@ async def diag_wiki(request: Request, code: str = ""):
         raise HTTPException(status_code=400, detail="code is required")
 
     import report_client
-    from routes.reports import _is_allowed_report_pdf_url
+    from services.report_url_policy import is_allowed_report_pdf_url
 
     # --- Naver funnel -----------------------------------------------------
     # Naver can be slow or unreliable from the Pi; the endpoint used to
@@ -1251,7 +1251,7 @@ async def diag_wiki(request: Request, code: str = ""):
         naver_err = str(exc)[:300]
 
     with_pdf = [r for r in reports if r.get("pdf_url")]
-    allowed = [r for r in with_pdf if _is_allowed_report_pdf_url(r["pdf_url"])]
+    allowed = [r for r in with_pdf if is_allowed_report_pdf_url(r["pdf_url"])]
 
     sample_limit = 10
     samples = []
@@ -1259,7 +1259,7 @@ async def diag_wiki(request: Request, code: str = ""):
         pdf = r.get("pdf_url")
         if not pdf:
             reason = "no_pdf_url"
-        elif not _is_allowed_report_pdf_url(pdf):
+        elif not is_allowed_report_pdf_url(pdf):
             reason = "rejected_by_whitelist"
         else:
             reason = "ok"

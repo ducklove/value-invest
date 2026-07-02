@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 import cache  # init_db/close_db(스키마·연결 수명)는 아직 cache 소유
 import close_price_client
 import kis_proxy_client
+from core.http import batch_http_client
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -227,8 +228,7 @@ async def take_snapshot(google_sub: str, snap_date: str):
 async def _save_gold_close():
     """Save current XAU spot price as prev close for tomorrow's market bar."""
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with batch_http_client(name="gold_api", timeout=10) as client:
             r = await client.get("https://api.gold-api.com/price/XAU/USD", headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code == 200:
                 price = r.json().get("price")

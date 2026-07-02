@@ -86,8 +86,7 @@ document.addEventListener('click', (e) => {
 async function doSearchAndAnalyze(q) {
   try {
     requireApiConfiguration();
-    const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/search?q=${encodeURIComponent(q)}`);
     if (data.length > 0) {
       searchInput.value = data[0].corp_name;
       trackEvent('stock_select', { stock_code: data[0].stock_code, source: 'enter' });
@@ -101,8 +100,7 @@ async function doSearchAndAnalyze(q) {
 async function doSearch(q) {
   try {
     requireApiConfiguration();
-    const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/search?q=${encodeURIComponent(q)}`);
     dropdown.innerHTML = '';
     if (data.length === 0) {
       dropdown.innerHTML = '<div class="dropdown-item" style="color:var(--text-secondary)">검색 결과 없음</div>';

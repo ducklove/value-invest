@@ -45,9 +45,9 @@ async function loadScreener({ force = false } = {}) {
   if (!root) return;
   if (_screenerLoaded && !force) return;
   try {
-    const resp = await apiFetch('/api/screener/spec');
-    if (!resp.ok) throw new Error('스크리너 설정을 불러오지 못했습니다.');
-    _screenerSpec = await resp.json();
+    _screenerSpec = await apiFetchJson('/api/screener/spec', {
+      errorMessage: '스크리너 설정을 불러오지 못했습니다.',
+    });
     _screenerLoaded = true;
     _renderScreenerCoverage();
     _renderScreenerFilters();
@@ -167,16 +167,12 @@ async function _runScreener() {
     offset: String(_screenerPage * _SCREENER_PAGE_SIZE),
   });
   try {
-    const resp = await apiFetch(`/api/screener/run?${params.toString()}`, {
+    const data = await apiFetchJson(`/api/screener/run?${params.toString()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filters }),
+      errorMessage: '스크리닝에 실패했습니다.',
     });
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      throw new Error(data.detail || `스크리닝에 실패했습니다. (${resp.status})`);
-    }
-    const data = await resp.json();
     _renderScreenerResults(data);
   } catch (err) {
     results.innerHTML = `<div class="screener-empty error">${escapeHtml(err.message)}</div>`;

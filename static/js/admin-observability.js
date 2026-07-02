@@ -178,8 +178,7 @@ function _startLiveUpdates() {
 
 async function _updateLiveStats() {
   try {
-    const res = await apiFetch('/api/admin/server-stats');
-    const s = await res.json();
+    const s = await apiFetchJson('/api/admin/server-stats');
     _pushServerSample(s);
     _renderServerTimeline();
 
@@ -426,7 +425,7 @@ function editAdminUser(encodedSub) {
 async function saveAdminUserProfile(encodedSub) {
   const googleSub = decodeURIComponent(encodedSub || '');
   try {
-    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(googleSub)}`, {
+    await apiFetchJson(`/api/admin/users/${encodeURIComponent(googleSub)}`, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -435,9 +434,8 @@ async function saveAdminUserProfile(encodedSub) {
         picture: document.getElementById('adminEditPicture')?.value || '',
         email_verified: !!document.getElementById('adminEditVerified')?.checked,
       }),
+      errorMessage: '프로필 저장 실패',
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || res.statusText || '프로필 저장 실패');
     _showAdminUserMessage('프로필을 저장했습니다.');
     await refreshAdminUsers();
     document.getElementById('adminUserEditor').innerHTML = '';
@@ -449,13 +447,12 @@ async function saveAdminUserProfile(encodedSub) {
 async function changeAdminUserRole(encodedSub, isAdmin) {
   const googleSub = decodeURIComponent(encodedSub || '');
   try {
-    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(googleSub)}/role`, {
+    await apiFetchJson(`/api/admin/users/${encodeURIComponent(googleSub)}/role`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({is_admin: isAdmin}),
+      errorMessage: '역할 변경 실패',
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || res.statusText || '역할 변경 실패');
     _showAdminUserMessage('역할을 변경했습니다.');
     await refreshAdminUsers();
   } catch (e) {
@@ -470,12 +467,11 @@ async function deleteAdminUser(encodedSub) {
   if (!u) return;
   if (!confirm(`${u.name || u.email} 사용자를 삭제할까요?\n포트폴리오와 세션 데이터도 함께 삭제됩니다.`)) return;
   try {
-    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(googleSub)}`, {
+    await apiFetchJson(`/api/admin/users/${encodeURIComponent(googleSub)}`, {
       method: 'DELETE',
       headers: {'Content-Type': 'application/json'},
+      errorMessage: '삭제 실패',
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || res.statusText || '삭제 실패');
     _showAdminUserMessage('사용자를 삭제했습니다.');
     await refreshAdminUsers();
   } catch (e) {
@@ -484,9 +480,9 @@ async function deleteAdminUser(encodedSub) {
 }
 
 async function refreshAdminUsers() {
-  const res = await apiFetch('/api/admin/users');
-  if (!res.ok) throw new Error(`사용자 목록 갱신 실패 (${res.status})`);
-  _adminUsers = await res.json();
+  _adminUsers = await apiFetchJson('/api/admin/users', {
+    errorMessage: '사용자 목록 갱신 실패',
+  });
   filterAdminUsers();
 }
 
@@ -500,9 +496,9 @@ async function searchAdminPortfolios() {
   }
   root.innerHTML = '<div class="admin-sub" style="margin-bottom:10px;">포트폴리오 검색 중...</div>';
   try {
-    const res = await apiFetch(`/api/admin/portfolio-search?q=${encodeURIComponent(q)}&limit=80`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || res.statusText || '포트폴리오 검색 실패');
+    const data = await apiFetchJson(`/api/admin/portfolio-search?q=${encodeURIComponent(q)}&limit=80`, {
+      errorMessage: '포트폴리오 검색 실패',
+    });
     root.innerHTML = _renderPortfolioSearchResult(data.rows || [], q);
   } catch (e) {
     root.innerHTML = `<div class="admin-sub admin-status-fail" style="margin-bottom:10px;">${_esc(e.message)}</div>`;
@@ -559,16 +555,12 @@ function _renderDbSection(db) {
 
 async function triggerJob(jobName) {
   try {
-    const res = await apiFetch(`/api/admin/trigger/${jobName}`, {
+    const data = await apiFetchJson(`/api/admin/trigger/${jobName}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
+      errorMessage: '실행 실패',
     });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.detail || '실행 실패');
-      return;
-    }
     alert(data.message || '실행 시작');
     setTimeout(loadAdminView, 2000);
   } catch (e) {
@@ -584,16 +576,12 @@ async function triggerJobWithDate(jobName) {
     return;
   }
   try {
-    const res = await apiFetch(`/api/admin/trigger/${jobName}`, {
+    const data = await apiFetchJson(`/api/admin/trigger/${jobName}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({date: dateStr}),
+      errorMessage: '실행 실패',
     });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.detail || '실행 실패');
-      return;
-    }
     alert(`${data.message} (${dateStr})`);
     setTimeout(loadAdminView, 2000);
   } catch (e) {
@@ -864,20 +852,14 @@ async function runWikiDiag() {
   result.innerHTML = '<div style="color:var(--text-secondary);padding:8px;">진단 중... (Naver 스크랩 포함하여 최대 15초 정도 소요)</div>';
   try {
     // Naver 스크랩 포함 최대 15초+ 걸릴 수 있어 기본 20초 타임아웃을 늘린다.
-    const res = await apiFetch(`/api/admin/diag/wiki?code=${encodeURIComponent(code)}`, { timeoutMs: 60000 });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      const detail = data.detail || res.statusText || '';
-      // Surface the HTTP status too — "진단 실패" 단독으론 원인 파악이
-      // 어려웠음. 401/403 = 세션 문제, 404 = 엔드포인트 누락 (옛 배포),
-      // 500/502/504 = 서버 내부/프록시 문제 등 상태코드 하나로 분류 가능.
-      result.innerHTML = `<div style="color:var(--color-danger)">진단 실패 (HTTP ${res.status}): ${_esc(detail)}</div>`;
-      return;
-    }
-    const data = await res.json();
+    const data = await apiFetchJson(`/api/admin/diag/wiki?code=${encodeURIComponent(code)}`, {
+      timeoutMs: 60000,
+      errorMessage: '진단 실패',
+    });
     result.innerHTML = _renderWikiDiagResult(data);
   } catch (e) {
-    result.innerHTML = `<div style="color:var(--color-danger)">진단 요청 실패: ${_esc(e.name + ': ' + e.message)}</div>`;
+    const status = e?.status ? `HTTP ${e.status}: ` : '';
+    result.innerHTML = `<div style="color:var(--color-danger)">진단 요청 실패: ${_esc(status + e.name + ': ' + e.message)}</div>`;
   }
 }
 

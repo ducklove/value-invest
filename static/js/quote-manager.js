@@ -135,13 +135,13 @@ const QuoteManager = {
   async _fetchQuoteBatch(codes, { fresh = true } = {}) {
     codes.forEach(code => this.inflightCodes.add(code));
     try {
-      const resp = await apiFetch('/api/asset-quotes', {
+      const data = await apiFetchJson('/api/asset-quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ codes, fresh }),
+        fallback: null,
       });
-      if (!resp.ok) return;
-      const data = await resp.json();
+      if (!data) return;
       for (const [code, q] of Object.entries(data || {})) {
         if (q && q.price != null) {
           if (this.onQuote) this.onQuote(code, { code, ...q });

@@ -374,23 +374,23 @@ class WikiIngestionTests(TempDbMixin):
         # The second Naver CDN path — previously silently rejected.
         # Don't call through ingest_pdf_for_report (would try to download
         # a real URL); just probe the whitelist directly.
-        from routes.reports import _is_allowed_report_pdf_url
-        self.assertTrue(_is_allowed_report_pdf_url(
+        from services.report_url_policy import is_allowed_report_pdf_url
+        self.assertTrue(is_allowed_report_pdf_url(
             "https://ssl.pstatic.net/imgstock/upload/research/company/1714620534417.pdf"
         ))
-        self.assertTrue(_is_allowed_report_pdf_url(
+        self.assertTrue(is_allowed_report_pdf_url(
             "https://stock.pstatic.net/stock-research/company/16/20260130_company_915186000.pdf"
         ))
         # Non-Naver host still rejected.
-        self.assertFalse(_is_allowed_report_pdf_url(
+        self.assertFalse(is_allowed_report_pdf_url(
             "https://evil.example.com/research/x.pdf"
         ))
         # Wrong path prefix on the allowed host still rejected.
-        self.assertFalse(_is_allowed_report_pdf_url(
+        self.assertFalse(is_allowed_report_pdf_url(
             "https://ssl.pstatic.net/some-other-path/x.pdf"
         ))
         # Missing .pdf extension rejected even on allowed host/path.
-        self.assertFalse(_is_allowed_report_pdf_url(
+        self.assertFalse(is_allowed_report_pdf_url(
             "https://stock.pstatic.net/stock-research/company/x.html"
         ))
 

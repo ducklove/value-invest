@@ -101,9 +101,9 @@ async function pfShowGroupComposition(groupName) {
   container.innerHTML = '<div class="pf-chart-message">종목 비중 데이터를 불러오는 중입니다...</div>';
 
   try {
-    const resp = await apiFetch(`/api/portfolio/group-constituent-history?group=${encodeURIComponent(groupName)}`);
-    if (!resp.ok) throw new Error(`종목 비중 데이터를 불러오지 못했습니다. (${resp.status})`);
-    const rows = await resp.json();
+    const rows = await apiFetchJson(`/api/portfolio/group-constituent-history?group=${encodeURIComponent(groupName)}`, {
+      errorMessage: '종목 비중 데이터를 불러오지 못했습니다.',
+    });
     if (requestSeq !== _groupCompositionRequestSeq || _groupCompositionSelected !== groupName) return;
     await renderGroupCompositionChart(groupName, rows);
   } catch (err) {

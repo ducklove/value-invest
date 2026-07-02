@@ -137,17 +137,17 @@ async function pfLoadDividendCalendarPanel({ force = false } = {}) {
   const seq = ++_pfDivCalLoadSeq;
   _pfDivCalMsg('배당 캘린더를 불러오는 중입니다...');
   try {
-    const resp = await apiFetch('/api/portfolio/dividend-calendar?months=12');
-    if (resp.status === 401) {
-      if (seq === _pfDivCalLoadSeq) _pfDivCalMsg('로그인 후 이용할 수 있습니다.');
-      return;
-    }
-    if (!resp.ok) throw new Error(`배당 캘린더 요청 실패 (${resp.status})`);
-    const data = await resp.json();
+    const data = await apiFetchJson('/api/portfolio/dividend-calendar?months=12', {
+      errorMessage: '배당 캘린더 요청 실패',
+    });
     _pfDivCalData = data;
     if (seq !== _pfDivCalLoadSeq) return;
     _pfRenderDividendCalendar(data);
   } catch (e) {
+    if (e.status === 401) {
+      if (seq === _pfDivCalLoadSeq) _pfDivCalMsg('로그인 후 이용할 수 있습니다.');
+      return;
+    }
     // 백그라운드 로드 — 토스트 없이 콘솔 기록만 남기고 패널 안에 안내.
     reportApiError(e, '배당 캘린더', { silent: true });
     if (seq === _pfDivCalLoadSeq) {

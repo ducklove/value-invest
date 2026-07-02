@@ -16,6 +16,14 @@ function saApi(path, options = {}) {
   return apiFetch(`/api/notifications${path}`, init);
 }
 
+function saApiJson(path, options = {}) {
+  const init = { ...options };
+  if (options.body !== undefined) {
+    init.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  }
+  return apiFetchJson(`/api/notifications${path}`, init);
+}
+
 function saFmtNum(value) {
   if (value === null || value === undefined || value === '') return '-';
   const n = Number(value);
@@ -57,29 +65,25 @@ function openStockAlerts() {
   StockAlerts.name = (nameEl && nameEl.textContent) ? nameEl.textContent.trim() : code;
   const modal = document.getElementById('stockAlertModal');
   if (!modal) return;
-  modal.style.display = 'flex';
   StockAlerts.alerts = [];
   saRender();        // 즉시 빈 폼 표시
+  openManagedModal(modal, {
+    initialFocus: '.sa-feed-select, .sa-price-dir, .pf-modal-close',
+    onEscape: closeStockAlerts,
+  });
   saLoadList();      // 서버 상태로 갱신
 }
 
 function closeStockAlerts() {
   const modal = document.getElementById('stockAlertModal');
-  if (modal) modal.style.display = 'none';
+  if (modal) closeManagedModal(modal);
 }
-
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  const modal = document.getElementById('stockAlertModal');
-  if (modal && modal.style.display !== 'none') closeStockAlerts();
-});
 
 // --- Load + render ----------------------------------------------------------
 
 async function saLoadList() {
   try {
-    const resp = await saApi(`/alerts?stock_code=${encodeURIComponent(StockAlerts.code)}`);
-    StockAlerts.alerts = await resp.json();
+    StockAlerts.alerts = await saApiJson(`/alerts?stock_code=${encodeURIComponent(StockAlerts.code)}`, { fallback: [] });
   } catch (e) {
     StockAlerts.alerts = [];
   }
@@ -167,9 +171,11 @@ function saRenderList() {
 async function saCreate(extra) {
   const payload = { stock_code: StockAlerts.code, source: 'analysis', ...extra };
   try {
-    const resp = await saApi('/alerts', { method: 'POST', body: JSON.stringify(payload) });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || '설정 실패');
+    await saApiJson('/alerts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      errorMessage: '설정 실패',
+    });
     const v = document.getElementById('saPriceVal'); if (v) v.value = '';
     saLoadList();
   } catch (e) {

@@ -4,10 +4,9 @@ import asyncio
 import logging
 from typing import Any
 
-import httpx
-
 import market_indicators
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 from services.portfolio import foreign, fx, quote_service
 from services.portfolio.identifiers import (
     CASH_FX_CODE,
@@ -142,12 +141,12 @@ async def detect_market_type(code: str) -> str:
         return market_type_cache[code]
     try:
         async with foreign._NAVER_SEM:
-            async with httpx.AsyncClient(timeout=foreign._NAVER_HTTP_TIMEOUT) as client:
-                resp = await client.get(
-                    f"https://finance.naver.com/item/main.naver?code={code}",
-                    headers={"User-Agent": "Mozilla/5.0"},
-                    follow_redirects=True,
-                )
+            client = await get_http_client("naver")
+            resp = await client.get(
+                f"https://finance.naver.com/item/main.naver?code={code}",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=foreign._NAVER_HTTP_TIMEOUT,
+            )
         if "코스닥" in resp.text[:30000]:
             market_type_cache.set(code, "KOSDAQ")
         else:

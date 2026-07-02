@@ -22,8 +22,7 @@ import os
 import time
 from urllib.parse import urlencode
 
-import httpx
-
+from core.http import get_http_client
 from repositories import notifications as notifications_repo
 
 logger = logging.getLogger(__name__)
@@ -84,9 +83,9 @@ async def exchange_code(rest_key: str, code: str, redirect: str) -> dict:
         "redirect_uri": redirect,
         "code": code,
     }
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(f"{AUTH_BASE}/oauth/token", data=data)
-        payload = resp.json()
+    client = await get_http_client("kakao")
+    resp = await client.post(f"{AUTH_BASE}/oauth/token", data=data, timeout=15.0)
+    payload = resp.json()
     if "access_token" not in payload:
         raise RuntimeError(f"kakao token exchange failed: {payload}")
     return _store_format(payload)
@@ -94,9 +93,9 @@ async def exchange_code(rest_key: str, code: str, redirect: str) -> dict:
 
 async def _refresh_token(rest_key: str, refresh: str) -> dict:
     data = {"grant_type": "refresh_token", "client_id": rest_key, "refresh_token": refresh}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(f"{AUTH_BASE}/oauth/token", data=data)
-        payload = resp.json()
+    client = await get_http_client("kakao")
+    resp = await client.post(f"{AUTH_BASE}/oauth/token", data=data, timeout=15.0)
+    payload = resp.json()
     if "access_token" not in payload:
         raise RuntimeError(f"kakao refresh failed: {payload}")
     return _store_format(payload)
@@ -104,12 +103,13 @@ async def _refresh_token(rest_key: str, refresh: str) -> dict:
 
 async def fetch_nickname(access_token: str) -> str | None:
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{API_BASE}/v2/user/me",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            data = resp.json()
+        client = await get_http_client("kakao")
+        resp = await client.get(
+            f"{API_BASE}/v2/user/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10.0,
+        )
+        data = resp.json()
         return ((data.get("properties") or {}).get("nickname")) or None
     except Exception:
         return None
@@ -150,12 +150,13 @@ async def _send_memo(access_token: str, text: str) -> int:
         "text": text,
         "link": {"web_url": _APP_URL, "mobile_web_url": _APP_URL},
     }
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(
-            f"{API_BASE}/v2/api/talk/memo/default/send",
-            headers={"Authorization": f"Bearer {access_token}"},
-            data={"template_object": json.dumps(template, ensure_ascii=False)},
-        )
+    client = await get_http_client("kakao")
+    resp = await client.post(
+        f"{API_BASE}/v2/api/talk/memo/default/send",
+        headers={"Authorization": f"Bearer {access_token}"},
+        data={"template_object": json.dumps(template, ensure_ascii=False)},
+        timeout=15.0,
+    )
     return resp.status_code
 
 

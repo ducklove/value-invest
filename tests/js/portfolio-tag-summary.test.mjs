@@ -70,6 +70,17 @@ function loadTagSummary() {
   window.pfFxUnit = () => "억";
   window.pfFxSymbol = () => "";
   window.apiFetch = async () => ({ ok: true, json: async () => [] });
+  window.apiFetchJson = async () => [];
+  window.openManagedModal = (modal, options = {}) => {
+    modal.style.display = options.display || "flex";
+    const target = options.initialFocus ? modal.querySelector(options.initialFocus) : modal.querySelector("button");
+    target?.focus();
+    return modal;
+  };
+  window.closeManagedModal = (modal, options = {}) => {
+    if (options.remove) modal.remove();
+    else modal.style.display = "none";
+  };
   const script = window.document.createElement("script");
   script.textContent = TAG_SUMMARY_SRC;
   window.document.body.appendChild(script);

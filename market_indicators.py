@@ -15,13 +15,16 @@ import re
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from typing import AsyncIterator
 from urllib.parse import urljoin
 
 import httpx
 
 import kis_proxy_client
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 
 # ---------------------------------------------------------------------------
 # Catalog
@@ -126,6 +129,11 @@ CATALOG: dict[str, dict] = {
 _EMPTY = {"value": "", "change": "", "change_pct": "", "direction": ""}
 
 _HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+
+@asynccontextmanager
+async def _market_indicators_client() -> AsyncIterator[httpx.AsyncClient]:
+    yield await get_http_client("market_indicators")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1428,7 +1436,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
 
     need_marketindex_page = len(marketindex_items) > 0
 
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with _market_indicators_client() as client:
         tasks = []
         task_keys = []
 
@@ -1629,7 +1637,7 @@ async def fetch_indicators_live(codes: list[str]) -> dict[str, dict]:
 
     results: dict[str, dict] = {}
     binance_items = [c for c in wanted if c in _BINANCE_MAP]
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with _market_indicators_client() as client:
         tasks = []
         task_kinds = []
         if binance_items:

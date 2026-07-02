@@ -9,8 +9,7 @@ async function loadAuthConfig() {
   }
 
   try {
-    const resp = await apiFetch('/api/auth/config');
-    authConfig = await resp.json();
+    authConfig = await apiFetchJson('/api/auth/config');
   } catch (error) {
     // 네트워크 오류는 "설정 안 됨"의 근거가 아니다 — 이미 받아둔 설정이
     // 있으면 유지해 일시적 연결 불안정이 로그인 UI를 끄지 않게 한다.
@@ -28,18 +27,12 @@ async function loadCurrentUser() {
   }
 
   try {
-    const resp = await apiFetch('/api/auth/me');
-    if (!resp.ok) {
-      // 4xx만 "비인증"의 명확한 판정으로 취급한다. 5xx는 서버 장애일 뿐
-      // 세션이 풀렸다는 뜻이 아니므로 직전 로그인 상태를 유지한다.
-      if (resp.status < 500) {
-        currentUser = null;
-      }
-      return currentUser;
-    }
-    const data = await resp.json();
+    const data = await apiFetchJson('/api/auth/me');
     currentUser = data.user || null;
   } catch (error) {
+    if (error?.status && error.status < 500) {
+      currentUser = null;
+    }
     // 네트워크 오류/타임아웃 — 인증 여부를 알 수 없는 상태. 여기서 null로
     // 덮으면 DDNS 순단 같은 일시 장애마다 로그인이 풀린 것처럼 깜빡인다.
   }
@@ -140,11 +133,9 @@ async function refreshActivePreference() {
   }
 
   try {
-    const resp = await apiFetch(`/api/preferences/${activeStockCode}`);
-    if (!resp.ok) {
-      throw new Error('개인화 설정을 불러오지 못했습니다.');
-    }
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/preferences/${activeStockCode}`, {
+      errorMessage: '개인화 설정을 불러오지 못했습니다.',
+    });
     currentUserPreference = normalizeUserPreference(data.user_preference);
     setPreferenceStatus('');
   } catch (error) {
@@ -161,15 +152,12 @@ async function saveUserPreference(changes, successMessage) {
   setPreferenceStatus('저장 중...');
 
   try {
-    const resp = await apiFetch(`/api/preferences/${activeStockCode}`, {
+    const data = await apiFetchJson(`/api/preferences/${activeStockCode}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(changes),
+      errorMessage: '개인화 설정을 저장하지 못했습니다.',
     });
-    const data = await resp.json();
-    if (!resp.ok) {
-      throw new Error(data.detail || '개인화 설정을 저장하지 못했습니다.');
-    }
     currentUserPreference = normalizeUserPreference(data.user_preference);
     renderUserPreference();
     setPreferenceStatus(successMessage, 'saved');
@@ -201,13 +189,13 @@ async function toggleFavorite() {
 async function autoStarCurrentStock() {
   if (!currentUser || !activeStockCode) return;
   try {
-    const resp = await apiFetch(`/api/preferences/${activeStockCode}`, {
+    const data = await apiFetchJson(`/api/preferences/${activeStockCode}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_starred: true }),
+      fallback: null,
     });
-    if (resp.ok) {
-      const data = await resp.json();
+    if (data) {
       currentUserPreference = normalizeUserPreference(data.user_preference);
       renderUserPreference();
     }
@@ -263,13 +251,15 @@ function openProfileModal() {
   document.getElementById('profileConfirmPassword').value = '';
   setProfilePasswordStatus('');
 
-  modal.style.display = 'flex';
-  document.getElementById('profileNewPassword').focus();
+  openManagedModal(modal, {
+    initialFocus: '#profileNewPassword',
+    onEscape: closeProfileModal,
+  });
 }
 
 function closeProfileModal() {
   const modal = document.getElementById('profileModal');
-  if (modal) modal.style.display = 'none';
+  if (modal) closeManagedModal(modal);
 }
 
 function setProfilePasswordStatus(message, tone = '') {
@@ -300,18 +290,15 @@ async function saveProfilePassword(event) {
   saveBtn.disabled = true;
   setProfilePasswordStatus('저장 중...');
   try {
-    const resp = await apiFetch('/api/auth/me/password', {
+    const data = await apiFetchJson('/api/auth/me/password', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         current_password: currentPassword,
         new_password: newPassword,
       }),
+      errorMessage: '비밀번호를 저장하지 못했습니다.',
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      throw new Error(data.detail || '비밀번호를 저장하지 못했습니다.');
-    }
     currentUser = data.user || { ...currentUser, password_set: true };
     renderAuthState();
     openProfileModal();
@@ -334,15 +321,12 @@ function scheduleGoogleButtonRender() {
 }
 
 async function submitGoogleCredential(credential) {
-  const resp = await apiFetch('/api/auth/google', {
+  const data = await apiFetchJson('/api/auth/google', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ credential }),
+    errorMessage: 'Google 로그인에 실패했습니다.',
   });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Google 로그인에 실패했습니다.');
-  }
   currentUser = data.user || null;
   return data;
 }

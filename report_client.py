@@ -6,6 +6,8 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from core.http import get_http_client
+
 NAVER_RESEARCH_LIST = "https://finance.naver.com/research/company_list.naver"
 NAVER_RESEARCH_READ = "https://finance.naver.com/research/company_read.naver"
 
@@ -75,7 +77,7 @@ def _parse_row_report(row) -> dict | None:
 
 async def _fetch_report_detail(client: httpx.AsyncClient, source_url: str) -> dict:
     try:
-        resp = await client.get(source_url)
+        resp = await client.get(source_url, headers=HEADERS, timeout=15.0)
         if resp.status_code != 200:
             return {}
     except Exception:
@@ -98,28 +100,30 @@ async def _fetch_report_detail(client: httpx.AsyncClient, source_url: str) -> di
 
 
 async def fetch_latest_report(stock_code: str) -> dict | None:
-    async with httpx.AsyncClient(timeout=15, headers=HEADERS, follow_redirects=True) as client:
-        resp = await client.get(
-            NAVER_RESEARCH_LIST,
-            params={
-                "searchType": "itemCode",
-                "itemCode": stock_code,
-                "page": "1",
-            },
-        )
-        if resp.status_code != 200:
-            return None
+    client = await get_http_client("report")
+    resp = await client.get(
+        NAVER_RESEARCH_LIST,
+        params={
+            "searchType": "itemCode",
+            "itemCode": stock_code,
+            "page": "1",
+        },
+        headers=HEADERS,
+        timeout=15.0,
+    )
+    if resp.status_code != 200:
+        return None
 
-        soup = BeautifulSoup(_decode_html(resp), "html.parser")
-        for row in soup.select("table.type_1 tr"):
-            report = _parse_row_report(row)
-            if report is None:
-                continue
-            if report["source_url"]:
-                detail = await _fetch_report_detail(client, report["source_url"])
-                if detail:
-                    report.update({key: value for key, value in detail.items() if value})
-            return report
+    soup = BeautifulSoup(_decode_html(resp), "html.parser")
+    for row in soup.select("table.type_1 tr"):
+        report = _parse_row_report(row)
+        if report is None:
+            continue
+        if report["source_url"]:
+            detail = await _fetch_report_detail(client, report["source_url"])
+            if detail:
+                report.update({key: value for key, value in detail.items() if value})
+        return report
     return None
 
 
@@ -156,46 +160,48 @@ async def fetch_reports(stock_code: str, max_pages: int = 5, per_page: int = 20)
     reports = []
     detail_limit = asyncio.Semaphore(6)
 
-    async with httpx.AsyncClient(timeout=15, headers=HEADERS, follow_redirects=True) as client:
-        for page in range(1, max_pages + 1):
-            resp = await client.get(
-                NAVER_RESEARCH_LIST,
-                params={
-                    "searchType": "itemCode",
-                    "itemCode": stock_code,
-                    "page": str(page),
-                },
-            )
-            if resp.status_code != 200:
-                break
+    client = await get_http_client("report")
+    for page in range(1, max_pages + 1):
+        resp = await client.get(
+            NAVER_RESEARCH_LIST,
+            params={
+                "searchType": "itemCode",
+                "itemCode": stock_code,
+                "page": str(page),
+            },
+            headers=HEADERS,
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            break
 
-            soup = BeautifulSoup(_decode_html(resp), "html.parser")
-            rows = soup.select("table.type_1 tr")
-            page_reports = []
+        soup = BeautifulSoup(_decode_html(resp), "html.parser")
+        rows = soup.select("table.type_1 tr")
+        page_reports = []
 
-            for row in rows:
-                report = _parse_row_report(row)
-                if report is None:
-                    continue
+        for row in rows:
+            report = _parse_row_report(row)
+            if report is None:
+                continue
 
-                date_str = report["date"]
-                if date_str and int(date_str[:4]) < cutoff_year:
-                    return reports
+            date_str = report["date"]
+            if date_str and int(date_str[:4]) < cutoff_year:
+                return reports
 
-                page_reports.append(report)
+            page_reports.append(report)
 
-            if not page_reports:
-                break
+        if not page_reports:
+            break
 
-            async def enrich(report: dict) -> dict:
-                if not report["source_url"]:
-                    return report
-                async with detail_limit:
-                    detail = await _fetch_report_detail(client, report["source_url"])
-                if detail:
-                    report.update({key: value for key, value in detail.items() if value})
+        async def enrich(report: dict) -> dict:
+            if not report["source_url"]:
                 return report
+            async with detail_limit:
+                detail = await _fetch_report_detail(client, report["source_url"])
+            if detail:
+                report.update({key: value for key, value in detail.items() if value})
+            return report
 
-            reports.extend(await asyncio.gather(*(enrich(report) for report in page_reports)))
+        reports.extend(await asyncio.gather(*(enrich(report) for report in page_reports)))
 
     return _dedupe_reports(reports)

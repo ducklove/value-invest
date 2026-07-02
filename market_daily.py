@@ -7,8 +7,9 @@ import json
 import logging
 import os
 import re
+from contextlib import asynccontextmanager
 from datetime import date, datetime
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -20,6 +21,7 @@ import market_movers
 import market_news
 import market_sessions
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 from services import ai_client
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,11 @@ NEWS_PER_STOCK = int(os.environ.get("MARKET_DAILY_NEWS_PER_STOCK", "4"))
 MARKET_DAILY_MAX_TOKENS = int(os.environ.get("MARKET_DAILY_MAX_TOKENS", "1800"))
 # 일시 오류(타임아웃·빈 응답)가 실패 본문으로 굳지 않게 LLM 호출을 짧게 재시도.
 MARKET_DAILY_LLM_ATTEMPTS = int(os.environ.get("MARKET_DAILY_LLM_ATTEMPTS", "2"))
+
+
+@asynccontextmanager
+async def _market_daily_client(name: str) -> AsyncIterator[httpx.AsyncClient]:
+    yield await get_http_client(name)
 # 시황 브리프 evidence 상한 — 업종 등락 / 시장 전반 뉴스 / 시장 전체 급등락(프롬프트 압축용)
 BRIEF_SECTOR_LIMIT = int(os.environ.get("MARKET_DAILY_SECTOR_LIMIT", "12"))
 BRIEF_MARKET_NEWS_LIMIT = int(os.environ.get("MARKET_DAILY_MARKET_NEWS_LIMIT", "8"))
@@ -359,7 +366,7 @@ async def _fetch_dart_disclosures(interests: list[dict[str, Any]], brief_date: s
     semaphore = asyncio.Semaphore(max(1, DISCLOSURE_CONCURRENCY))
     disclosures: list[dict[str, Any]] = []
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with _market_daily_client("dart") as client:
         async def fetch_one(item: dict[str, Any], corp_code: str) -> None:
             async with semaphore:
                 params = {
@@ -370,7 +377,7 @@ async def _fetch_dart_disclosures(interests: list[dict[str, Any]], brief_date: s
                     "page_count": "20",
                 }
                 try:
-                    resp = await client.get(f"{dart_client.BASE_URL}/list.json", params=params)
+                    resp = await client.get(f"{dart_client.BASE_URL}/list.json", params=params, timeout=10.0)
                     if resp.status_code != 200:
                         warnings.append(f"{item['stock_code']} DART HTTP {resp.status_code}")
                         return
@@ -467,11 +474,12 @@ async def _fetch_stock_news(stock_code: str, limit: int = NEWS_PER_STOCK) -> lis
 
     try:
         url = NAVER_MOBILE_NEWS_API.format(code=stock_code, size=max(limit, 1) * 2)
-        async with httpx.AsyncClient(
-            timeout=8.0,
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://m.stock.naver.com/"},
-        ) as client:
-            resp = await client.get(url)
+        async with _market_daily_client("naver") as client:
+            resp = await client.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://m.stock.naver.com/"},
+                timeout=8.0,
+            )
         news: list[dict[str, Any]] = []
         for item in _flatten_news_payload(resp.json()):
             mapped = _map_news_item(item, stock_code)
@@ -520,11 +528,12 @@ async def _fetch_investor_flow(stock_code: str) -> dict[str, Any] | None:
     if cached is not None:
         return cached.value
     try:
-        async with httpx.AsyncClient(
-            timeout=8.0,
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"},
-        ) as client:
-            resp = await client.get(NAVER_FRGN_URL.format(code=stock_code))
+        async with _market_daily_client("naver") as client:
+            resp = await client.get(
+                NAVER_FRGN_URL.format(code=stock_code),
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"},
+                timeout=8.0,
+            )
         parsed = _parse_investor_flow(resp.content.decode("euc-kr", errors="ignore"))
         result = {"stock_code": stock_code, **parsed} if parsed else None
         _FLOW_CACHE.set(stock_code, result)

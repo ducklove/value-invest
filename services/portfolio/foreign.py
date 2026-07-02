@@ -27,6 +27,7 @@ import httpx
 import cache
 import kis_proxy_client
 from cache_layer import MemoryTTLCache
+from core.http import get_http_client
 from repositories import ticker_map as ticker_map_repo
 from services.portfolio import currencies, fx
 from services.portfolio.identifiers import (
@@ -91,11 +92,11 @@ _ticker_map_loaded = False
 async def fetch_naver_stock_name(stock_code: str) -> str | None:
     try:
         async with _NAVER_SEM:
-            async with httpx.AsyncClient(timeout=_NAVER_HTTP_TIMEOUT) as client:
-                resp = await client.get(
-                    f"https://finance.naver.com/item/main.naver?code={stock_code}",
-                    follow_redirects=True,
-                )
+            client = await get_http_client("naver")
+            resp = await client.get(
+                f"https://finance.naver.com/item/main.naver?code={stock_code}",
+                timeout=_NAVER_HTTP_TIMEOUT,
+            )
         m = re.search(r"<title>\s*(.+?)\s*:\s*N", resp.text)
         return m.group(1).strip() if m else None
     except Exception:
@@ -138,11 +139,12 @@ async def fetch_naver_world_stock(reuters_code: str) -> dict | None:
     """Fetch foreign stock info from Naver world stock API."""
     try:
         async with _NAVER_SEM:
-            async with httpx.AsyncClient(timeout=_NAVER_HTTP_TIMEOUT) as client:
-                resp = await client.get(
-                    f"https://api.stock.naver.com/stock/{reuters_code}/basic",
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
+            client = await get_http_client("naver")
+            resp = await client.get(
+                f"https://api.stock.naver.com/stock/{reuters_code}/basic",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=_NAVER_HTTP_TIMEOUT,
+            )
         if resp.status_code != 200:
             return None
         d = resp.json()
@@ -563,18 +565,19 @@ async def search_foreign_tickers(query: str, *, limit: int = 8) -> list[dict]:
 
     try:
         async with _YAHOO_SEM:
-            async with httpx.AsyncClient(timeout=_YAHOO_SEARCH_TIMEOUT, follow_redirects=True) as client:
-                resp = await client.get(
-                    "https://query1.finance.yahoo.com/v1/finance/search",
-                    params={
-                        "q": raw,
-                        "quotesCount": max(12, limit * 3),
-                        "newsCount": 0,
-                        "enableFuzzyQuery": "true",
-                    },
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                resp.raise_for_status()
+            client = await get_http_client("yahoo")
+            resp = await client.get(
+                "https://query1.finance.yahoo.com/v1/finance/search",
+                params={
+                    "q": raw,
+                    "quotesCount": max(12, limit * 3),
+                    "newsCount": 0,
+                    "enableFuzzyQuery": "true",
+                },
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=_YAHOO_SEARCH_TIMEOUT,
+            )
+            resp.raise_for_status()
         for quote_row in (resp.json() or {}).get("quotes") or []:
             item = _normalize_yahoo_search_quote(quote_row)
             if item:
@@ -606,13 +609,14 @@ async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = 
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(ticker, safe='')}"
     try:
         async with _YAHOO_SEM:
-            async with httpx.AsyncClient(timeout=_YAHOO_HTTP_TIMEOUT, follow_redirects=True) as client:
-                resp = await client.get(
-                    url,
-                    params={"range": range_, "interval": interval, "includePrePost": "false"},
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                resp.raise_for_status()
+            client = await get_http_client("yahoo")
+            resp = await client.get(
+                url,
+                params={"range": range_, "interval": interval, "includePrePost": "false"},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=_YAHOO_HTTP_TIMEOUT,
+            )
+            resp.raise_for_status()
         result = (((resp.json() or {}).get("chart") or {}).get("result") or [None])[0]
         if not result:
             return {"rows": [], "currency": None, "meta": {}}

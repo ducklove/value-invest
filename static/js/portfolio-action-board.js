@@ -204,19 +204,20 @@ async function pfLoadActionBoard({ force = false } = {}) {
   const seq = ++PfActionBoard.loadingSeq;
   _pfActionMsg('오늘의 투자 액션을 불러오는 중입니다...');
   try {
-    const resp = await apiFetch('/api/portfolio/action-board', { cache: 'no-store' });
-    if (resp.status === 401) {
-      board.hidden = true;
-      return;
-    }
-    if (!resp.ok) throw new Error(`액션 보드 요청 실패 (${resp.status})`);
-    const data = await resp.json();
+    const data = await apiFetchJson('/api/portfolio/action-board', {
+      cache: 'no-store',
+      errorMessage: '액션 보드 요청 실패',
+    });
     if (seq !== PfActionBoard.loadingSeq) return;
     PfActionBoard.data = data;
     _pfActionBuildSignalsByCode(data);
     _pfRenderActionBoard(data);
     if (typeof renderPortfolio === 'function' && PfStore.items.length) renderPortfolio();
   } catch (e) {
+    if (e?.status === 401) {
+      board.hidden = true;
+      return;
+    }
     reportApiError(e, '액션 보드', { silent: true });
     if (seq === PfActionBoard.loadingSeq) {
       _pfActionMsg('액션 보드를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');

@@ -30,16 +30,19 @@ async function pfLoadNavHistory({ force = false } = {}) {
   if (!force && Array.isArray(PfStore.navHistory) && PfStore.navHistory.length) return PfStore.navHistory;
   if (_pfNavHistoryPromise) return _pfNavHistoryPromise;
   _pfNavHistoryPromise = (async () => {
-    const resp = await apiFetch('/api/portfolio/nav-history');
-    if (!resp.ok) {
-      const message = resp.status === 401
-        ? '로그인 후 심층 분석 데이터를 확인할 수 있습니다.'
-        : `NAV history request failed (${resp.status})`;
-      const err = new Error(message);
-      err.status = resp.status;
+    let rows;
+    try {
+      rows = await apiFetchJson('/api/portfolio/nav-history', {
+        errorMessage: 'NAV history request failed',
+      });
+    } catch (err) {
+      if (err?.status === 401) {
+        const authErr = new Error('로그인 후 심층 분석 데이터를 확인할 수 있습니다.');
+        authErr.status = err.status;
+        throw authErr;
+      }
       throw err;
     }
-    const rows = await resp.json();
     PfStore.navHistory = Array.isArray(rows) ? rows : [];
     return PfStore.navHistory;
   })().finally(() => {
@@ -52,16 +55,16 @@ async function pfRefreshTodayState({ force = false, render = true } = {}) {
   if (_pfTodayStatePromise && !force) return _pfTodayStatePromise;
   _pfTodayStatePromise = (async () => {
     const [snapshotResult, intradayResult] = await Promise.allSettled([
-      apiFetch('/api/portfolio/prev-day-snapshot', { cache: 'no-store' }),
-      apiFetch('/api/portfolio/intraday', { cache: 'no-store' }),
+      apiFetchJson('/api/portfolio/prev-day-snapshot', { cache: 'no-store', fallback: null }),
+      apiFetchJson('/api/portfolio/intraday', { cache: 'no-store', fallback: null }),
     ]);
     let updated = false;
-    if (snapshotResult.status === 'fulfilled' && snapshotResult.value.ok) {
-      PfStore.snapshots.prevDay = await snapshotResult.value.json();
+    if (snapshotResult.status === 'fulfilled' && snapshotResult.value) {
+      PfStore.snapshots.prevDay = snapshotResult.value;
       updated = true;
     }
-    if (intradayResult.status === 'fulfilled' && intradayResult.value.ok) {
-      PfStore.snapshots.intraday = await intradayResult.value.json();
+    if (intradayResult.status === 'fulfilled' && intradayResult.value) {
+      PfStore.snapshots.intraday = intradayResult.value;
       updated = true;
     }
     if (updated && render) renderPortfolio();
@@ -82,27 +85,30 @@ async function loadPortfolio({ force = false } = {}) {
   PfStore.loading = true;
   try {
     _restorePortfolioSnapshotForFastPaint();
-    const resp = await apiFetch('/api/portfolio');
-    if (!resp.ok) {
-      if (resp.status === 401) {
+    let freshItems;
+    try {
+      freshItems = await apiFetchJson('/api/portfolio', {
+        errorMessage: '포트폴리오 요청 실패',
+      });
+    } catch (err) {
+      if (err?.status === 401) {
         _pfSetLoadStatus('');
         document.getElementById('pfEmpty').textContent = '로그인이 필요합니다.';
         document.getElementById('pfEmpty').style.display = 'block';
         document.getElementById('pfTable').style.display = 'none';
         return;
       }
-      const err = new Error(`포트폴리오 요청 실패 (${resp.status})`);
-      err.status = resp.status;
-      _pfShowPortfolioLoadFailure('포트폴리오를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      const message = err?.status
+        ? '포트폴리오를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'
+        : '포트폴리오를 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.';
+      _pfShowPortfolioLoadFailure(message);
       reportApiError(err, '포트폴리오', { silent: true });
       return;
     }
     _pfSetLoadStatus('');
-    const freshItems = await resp.json();
     // Load groups (fast), restore cached benchmark names from localStorage
     try {
-      const gResp = await apiFetch('/api/portfolio/groups');
-      if (gResp.ok) PfStore.groups = await gResp.json();
+      PfStore.groups = await apiFetchJson('/api/portfolio/groups', { fallback: PfStore.groups || [] });
     } catch (e) { console.warn(e); }
     // Restore benchmark names from localStorage cache for instant display
     try {
@@ -115,16 +121,14 @@ async function loadPortfolio({ force = false } = {}) {
     // Cashflows mutate CASH_KRW immediately, so Today must combine the fresh
     // holdings and the fresh cashflow-adjusted baseline in the same paint.
     const todayStatePromise = pfRefreshTodayState({ force: true, render: false }).catch(() => ({ updated: false }));
-    apiFetch('/api/portfolio/month-end-value').then(async r => {
-      if (!r.ok) return;
-      const snap = await r.json();
+    apiFetchJson('/api/portfolio/month-end-value', { fallback: null }).then(snap => {
+      if (!snap) return;
       PfStore.snapshots.monthEnd = snap && snap.total_value ? snap : null;
       PfStore.snapshots.monthEndStockValues = snap.stock_values || {};
       renderPortfolio();
     }).catch(e => reportApiError(e, '월말 평가액', { silent: true }));
-    apiFetch('/api/portfolio/year-start-value').then(async r => {
-      if (!r.ok) return;
-      const snap = await r.json();
+    apiFetchJson('/api/portfolio/year-start-value', { fallback: null }).then(snap => {
+      if (!snap) return;
       PfStore.snapshots.yearStart = snap && snap.total_value ? snap : null;
       PfStore.snapshots.yearStartStockValues = (snap && snap.stock_values) || {};
       renderPortfolio();
@@ -132,9 +136,8 @@ async function loadPortfolio({ force = false } = {}) {
     pfLoadNavHistory({ force: true }).then(() => {
       renderPortfolio();
     }).catch(e => reportApiError(e, 'NAV 히스토리', { silent: true }));
-    apiFetch('/api/portfolio/benchmark-quotes').then(async r => {
-      if (!r.ok) return;
-      const fresh = await r.json();
+    apiFetchJson('/api/portfolio/benchmark-quotes', { fallback: null }).then(fresh => {
+      if (!fresh) return;
       for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);
       // Save names to localStorage
       const names = {};

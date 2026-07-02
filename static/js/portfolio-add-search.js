@@ -61,9 +61,7 @@ function pfInferTickerCurrency(ticker) {
 
 async function pfFetchJson(path, fallback = [], options = {}) {
   try {
-    const resp = await apiFetch(path, options);
-    if (!resp.ok) return fallback;
-    return await resp.json();
+    return await apiFetchJson(path, { ...(options || {}), fallback });
   } catch {
     return fallback;
   }

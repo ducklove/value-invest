@@ -73,12 +73,7 @@ async function loadDailyMarketBrief(refresh = false) {
 
   try {
     const url = `/api/market/daily-brief${refresh ? '?refresh=true' : ''}`;
-    const resp = await apiFetch(url);
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${resp.status}`);
-    }
-    const data = await resp.json();
+    const data = await apiFetchJson(url, { errorMessage: '금일 시황을 불러오지 못했습니다.' });
     const markdown = data.markdown || '';
     if (body) {
       body.innerHTML = markdown
@@ -333,9 +328,8 @@ function _renderCoverage() {
 
 async function loadStockExternalLinks(stockCode) {
   try {
-    const resp = await apiFetch(`/api/external/stock/${encodeURIComponent(stockCode)}`);
-    if (!resp.ok) return;
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/external/stock/${encodeURIComponent(stockCode)}`, { fallback: null });
+    if (!data) return;
     if (activeStockCode !== stockCode) return;  // 종목이 바뀌었으면 무시
     _currentStockLinks = (data && (data.preferred || data.holding || data.etf)) ? data : null;
     _renderCoverage();
@@ -348,9 +342,9 @@ async function loadBeta(stockCode) {
   // 새 분석이 시작되면 이전 베타는 날려 플레이스홀더 '…' 로 표시되게.
   _currentBeta = null;
   try {
-    const resp = await apiFetch(`/api/analyze/${encodeURIComponent(stockCode)}/beta`);
-    if (!resp.ok) throw new Error('beta fetch failed');
-    _currentBeta = await resp.json();
+    _currentBeta = await apiFetchJson(`/api/analyze/${encodeURIComponent(stockCode)}/beta`, {
+      errorMessage: 'beta fetch failed',
+    });
   } catch (e) {
     _currentBeta = { beta: null, sample_size: 0, benchmark: 'KOSPI' };
   }
@@ -363,9 +357,8 @@ async function loadBeta(stockCode) {
 async function loadStockDr(stockCode) {
   _currentDr = null;
   try {
-    const resp = await apiFetch(`/api/analyze/${encodeURIComponent(stockCode)}/dr`);
-    if (!resp.ok) return;
-    const data = await resp.json();
+    const data = await apiFetchJson(`/api/analyze/${encodeURIComponent(stockCode)}/dr`, { fallback: null });
+    if (!data) return;
     if (activeStockCode !== stockCode) return;  // 종목이 바뀌었으면 무시
     _currentDr = (data && Array.isArray(data.drs) && data.drs.length) ? data.drs : null;
     _renderCoverage();
@@ -686,8 +679,7 @@ async function loadRecentList() {
     const tab = currentUser ? activeTab : 'recent';
 
     if (currentUser) {
-      const resp = await apiFetch(`/api/cache/list?include_quotes=true&tab=${tab}`);
-      const data = await resp.json();
+      const data = await apiFetchJson(`/api/cache/list?include_quotes=true&tab=${tab}`, { fallback: [] });
       recentListItems = Array.isArray(data) ? data.slice() : [];
     } else {
       recentListItems = getGuestRecent();
@@ -820,11 +812,10 @@ function refreshRecentList() {
 
 async function deleteCache(stockCode) {
   try {
-    const resp = await apiFetch(`/api/cache/${stockCode}?tab=${activeTab}`, { method: 'DELETE' });
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      throw new Error(data.detail || '삭제하지 못했습니다.');
-    }
+    await apiFetchJson(`/api/cache/${stockCode}?tab=${activeTab}`, {
+      method: 'DELETE',
+      errorMessage: '삭제하지 못했습니다.',
+    });
     loadRecentList();
   } catch (e) {
     showToast(e.message || '삭제하지 못했습니다.');
@@ -832,15 +823,12 @@ async function deleteCache(stockCode) {
 }
 
 async function saveRecentOrder(stockCodes) {
-  const resp = await apiFetch('/api/cache/order', {
+  await apiFetchJson('/api/cache/order', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ stock_codes: stockCodes, tab: activeTab }),
+    errorMessage: '순서를 저장하지 못했습니다.',
   });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(data.detail || '순서를 저장하지 못했습니다.');
-  }
 }
 
 async function moveRecentItem(index, delta) {

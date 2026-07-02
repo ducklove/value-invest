@@ -328,6 +328,36 @@
 async function apiFetch(url, opts) {
   return fetch(url, { credentials: 'include', ...(opts || {}) });
 }
+
+function _adminApiErrorMessage(body) {
+  const value = body && (body.detail ?? body.message ?? body.error);
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map(item => typeof item === 'string' ? item : (item && (item.msg || item.message || item.detail)) || '').filter(Boolean).join('; ');
+  }
+  if (value && typeof value === 'object') return value.msg || value.message || JSON.stringify(value);
+  return '';
+}
+
+async function apiFetchJson(url, opts = {}) {
+  const hasFallback = Object.prototype.hasOwnProperty.call(opts || {}, 'fallback');
+  const { fallback = null, errorMessage = '', ...fetchOpts } = opts || {};
+  const res = await apiFetch(url, fetchOpts);
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (_) {
+    data = null;
+  }
+  if (!res.ok) {
+    if (hasFallback) return fallback;
+    const err = new Error(_adminApiErrorMessage(data) || errorMessage || res.statusText || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.payload = data;
+    throw err;
+  }
+  return data;
+}
 </script>
 <!-- 의존 순서: admin.js 가 공용 헬퍼(_esc, _adminInputStyle)와 부트스트랩을
      제공하므로 가장 먼저. 패널 모듈은 그 뒤에 로드된다. -->

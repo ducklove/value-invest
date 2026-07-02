@@ -2,12 +2,13 @@ import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
 
 import cache
 import report_client
+from core.http import get_http_client
 from deps import LATEST_REPORT_CACHE_TTL_MINUTES, REPORT_LIST_CACHE_TTL_MINUTES
+from services.report_url_policy import is_allowed_report_pdf_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,17 +24,7 @@ def _is_allowed_report_pdf_url(url: str) -> bool:
     all on ssl.pstatic.net/imgstock/upload/research/…). Both hosts are
     *.pstatic.net (Naver's CDN) so the security posture is unchanged.
     """
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.path.endswith(".pdf"):
-        return False
-    # CDN #1 — research portal PDFs.
-    if parsed.netloc == "stock.pstatic.net" and parsed.path.startswith("/stock-research/"):
-        return True
-    # CDN #2 — image/research upload bucket where many firms that publish
-    # through Naver Research actually land.
-    if parsed.netloc == "ssl.pstatic.net" and parsed.path.startswith("/imgstock/upload/research/"):
-        return True
-    return False
+    return is_allowed_report_pdf_url(url)
 
 
 def _report_signature(report: dict | None) -> tuple:
@@ -125,8 +116,8 @@ async def proxy_report_pdf(url: str = Query(..., min_length=1)):
         raise HTTPException(status_code=400, detail="허용되지 않은 리포트 URL입니다.")
 
     try:
-        async with httpx.AsyncClient(timeout=30, headers=report_client.HEADERS, follow_redirects=True) as client:
-            resp = await client.get(url)
+        client = await get_http_client("report")
+        resp = await client.get(url, headers=report_client.HEADERS, timeout=30)
     except Exception as e:
         logger.error(f"리포트 PDF 프록시 실패: {e}")
         raise HTTPException(status_code=502, detail="리포트 원문을 불러오지 못했습니다.") from e

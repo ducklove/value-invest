@@ -44,16 +44,11 @@ async function refreshForeignDividends() {
   if (btn) btn.disabled = true;
   result.innerHTML = '<div style="color:var(--text-secondary);padding:6px 0;">yfinance 호출 중... (종목당 ~1초)</div>';
   try {
-    const res = await apiFetch('/api/admin/refresh-foreign-dividends', {
+    const data = await apiFetchJson('/api/admin/refresh-foreign-dividends', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      errorMessage: '해외 배당 새로고침 실패',
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      result.innerHTML = `<div style="color:var(--color-danger)">실패 (HTTP ${res.status}): ${_esc(data.detail || res.statusText)}</div>`;
-      return;
-    }
-    const data = await res.json();
     if (!data.ok) {
       result.innerHTML = `<div style="color:var(--color-danger)">실패: ${_esc(data.error || '알 수 없음')}</div>`;
       return;
@@ -95,12 +90,9 @@ async function loadForeignDividendsList() {
   const root = document.getElementById('fgnDivManualSection');
   if (!root) return;
   try {
-    const res = await apiFetch('/api/admin/foreign-dividends');
-    if (!res.ok) {
-      root.innerHTML = `<div class="admin-sub" style="color:var(--color-danger)">목록 조회 실패 (HTTP ${res.status})</div>`;
-      return;
-    }
-    const rows = await res.json();
+    const rows = await apiFetchJson('/api/admin/foreign-dividends', {
+      errorMessage: '목록 조회 실패',
+    });
     root.innerHTML = _renderForeignDivTable(rows);
   } catch (e) {
     root.innerHTML = `<div class="admin-sub" style="color:var(--color-danger)">목록 조회 에러: ${_esc(e.message)}</div>`;
@@ -162,16 +154,12 @@ async function submitForeignDividend() {
     return;
   }
   try {
-    const res = await apiFetch('/api/admin/foreign-dividend', {
+    const data = await apiFetchJson('/api/admin/foreign-dividend', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stock_code: code, dps_krw: parseFloat(dpsStr), note: note || null }),
+      errorMessage: '해외 배당 저장 실패',
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      if (result) result.innerHTML = `<span style="color:var(--color-danger)">실패 (HTTP ${res.status}): ${_esc(data.detail || res.statusText)}</span>`;
-      return;
-    }
     if (result) result.innerHTML = `<span style="color:var(--color-success)">${_esc(data.stock_code)} 저장됨 (${data.dps_krw} 원)</span>`;
     document.getElementById('fgnDivCode').value = '';
     document.getElementById('fgnDivDps').value = '';
@@ -185,12 +173,10 @@ async function submitForeignDividend() {
 async function deleteForeignDividend(code) {
   if (!confirm(`"${code}" 배당 항목을 삭제할까요?\n(자동 refresh 가 다시 채울 수 있음)`)) return;
   try {
-    const res = await apiFetch(`/api/admin/foreign-dividend/${encodeURIComponent(code)}`, { method: 'DELETE' });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      showToast(`삭제 실패: ${data.detail || res.statusText}`);
-      return;
-    }
+    await apiFetchJson(`/api/admin/foreign-dividend/${encodeURIComponent(code)}`, {
+      method: 'DELETE',
+      errorMessage: '삭제 실패',
+    });
     await loadForeignDividendsList();
   } catch (e) {
     reportApiError(e, '삭제');
@@ -204,16 +190,11 @@ async function refreshPreferredDividends() {
   if (btn) btn.disabled = true;
   result.innerHTML = '<div style="color:var(--text-secondary);padding:6px 0;">새로고침 중... (시트 다운로드 + 파싱 + upsert)</div>';
   try {
-    const res = await apiFetch('/api/admin/refresh-preferred-dividends', {
+    const data = await apiFetchJson('/api/admin/refresh-preferred-dividends', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      errorMessage: '우선주 배당 새로고침 실패',
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      result.innerHTML = `<div style="color:var(--color-danger)">실패 (HTTP ${res.status}): ${_esc(data.detail || res.statusText)}</div>`;
-      return;
-    }
-    const data = await res.json();
     if (!data.ok) {
       result.innerHTML = `<div style="color:var(--color-danger)">실패: ${_esc(data.error || '알 수 없음')}</div>`;
       return;
@@ -250,12 +231,9 @@ async function loadPreferredDividendsList() {
   const root = document.getElementById('prefDivCoverageSection');
   if (!root) return;
   try {
-    const res = await apiFetch('/api/admin/preferred-dividends');
-    if (!res.ok) {
-      root.innerHTML = `<div class="admin-sub" style="color:var(--color-danger)">우선주 배당 목록 조회 실패 (HTTP ${res.status})</div>`;
-      return;
-    }
-    _preferredDividendRows = await res.json();
+    _preferredDividendRows = await apiFetchJson('/api/admin/preferred-dividends', {
+      errorMessage: '우선주 배당 목록 조회 실패',
+    });
     root.innerHTML = _renderPreferredDividendCoverage(_preferredDividendRows);
   } catch (e) {
     root.innerHTML = `<div class="admin-sub" style="color:var(--color-danger)">우선주 배당 목록 조회 에러: ${_esc(e.message)}</div>`;
@@ -645,15 +623,12 @@ function _renderGoldConfigManager(project) {
 }
 
 async function saveLinkedProjectConfig(projectKey, config) {
-  const res = await apiFetch(`/api/admin/linked-project-configs/${encodeURIComponent(projectKey)}`, {
+  const data = await apiFetchJson(`/api/admin/linked-project-configs/${encodeURIComponent(projectKey)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ config }),
+    errorMessage: '저장 실패',
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.detail || res.statusText || '저장 실패');
-  }
   const idx = _linkedProjectConfigs.findIndex(p => p.key === projectKey);
   if (idx >= 0) _linkedProjectConfigs[idx] = data;
   else _linkedProjectConfigs.push(data);

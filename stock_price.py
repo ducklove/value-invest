@@ -22,6 +22,7 @@ import close_price_client
 import dart_client
 import kis_proxy_client
 import kis_ws_manager
+from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +137,12 @@ def _parse_naver_bulk_entry(entry: dict) -> tuple[str, dict] | None:
 
 async def _fetch_naver_bulk_chunk(codes: list[str]) -> dict[str, dict]:
     async with _NAVER_BULK_SEM:
-        async with httpx.AsyncClient(timeout=_NAVER_BULK_TIMEOUT) as client:
-            resp = await client.get(
-                _NAVER_BULK_URL + ",".join(codes),
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
+        client = await get_http_client("naver_bulk")
+        resp = await client.get(
+            _NAVER_BULK_URL + ",".join(codes),
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=_NAVER_BULK_TIMEOUT,
+        )
     if resp.status_code != 200:
         return {}
     out: dict[str, dict] = {}

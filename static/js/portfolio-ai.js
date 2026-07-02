@@ -96,9 +96,8 @@ async function _loadAiModels() {
   if (!picker) return;
   picker.style.display = '';
   try {
-    const resp = await apiFetch('/api/portfolio/ai-models');
-    if (!resp.ok) return;
-    const data = await resp.json();
+    const data = await apiFetchJson('/api/portfolio/ai-models', { fallback: null });
+    if (!data) return;
     const input = document.getElementById('pfAiModelInput');
     const datalist = document.getElementById('pfAiModelList');
     input.value = data.default || '';

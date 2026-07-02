@@ -2,12 +2,15 @@
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 // --- Group management modal ---
 function openGroupModal() {
-  document.getElementById('pfGroupModal').style.display = 'flex';
+  openManagedModal('pfGroupModal', {
+    initialFocus: '#pfNewGroupInput',
+    onEscape: closeGroupModal,
+  });
   renderGroupModalBody();
 }
 
 function closeGroupModal() {
-  document.getElementById('pfGroupModal').style.display = 'none';
+  closeManagedModal('pfGroupModal');
 }
 
 const _PIE_COLORS = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
@@ -168,10 +171,11 @@ function renderGroupModalBody() {
       renderGroupModalBody();
       renderPortfolio();
       try {
-        await apiFetch('/api/portfolio/groups-order', {
+        await apiFetchJson('/api/portfolio/groups-order', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ group_names: PfStore.groups.map(g => g.group_name) }),
+          fallback: null,
         });
       } catch (e) { console.warn(e); }
     });
@@ -187,16 +191,12 @@ async function addNewGroup() {
   const name = input.value.trim();
   if (!name) return;
   try {
-    const resp = await apiFetch('/api/portfolio/groups', {
+    const result = await apiFetchJson('/api/portfolio/groups', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
+      errorMessage: '그룹 추가에 실패했습니다.',
     });
-    if (!resp.ok) {
-      const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || `HTTP ${resp.status}`);
-    }
-    const result = await resp.json();
     PfStore.groups.push(result);
     input.value = '';
     renderGroupModalBody();
@@ -212,15 +212,12 @@ async function renameGroup(inputEl) {
     return;
   }
   try {
-    const resp = await apiFetch(`/api/portfolio/groups/${encodeURIComponent(orig)}`, {
+    await apiFetchJson(`/api/portfolio/groups/${encodeURIComponent(orig)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ new_name: newName }),
+      errorMessage: '그룹 이름 변경에 실패했습니다.',
     });
-    if (!resp.ok) {
-      const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || `HTTP ${resp.status}`);
-    }
     const g = PfStore.groups.find(g => g.group_name === orig);
     if (g) g.group_name = newName;
     PfStore.items.forEach(i => { if (i.group_name === orig) i.group_name = newName; });
@@ -245,11 +242,10 @@ async function deleteGroup(groupName) {
   const cnt = counts[groupName] || 0;
   if (cnt > 0 && !confirm(`"${groupName}" 그룹에 ${cnt}개 종목이 있습니다. 삭제하면 기본 그룹으로 이동합니다. 삭제할까요?`)) return;
   try {
-    const resp = await apiFetch(`/api/portfolio/groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
-    if (!resp.ok) {
-      const d = await resp.json().catch(() => ({}));
-      throw new Error(d.detail || `HTTP ${resp.status}`);
-    }
+    await apiFetchJson(`/api/portfolio/groups/${encodeURIComponent(groupName)}`, {
+      method: 'DELETE',
+      errorMessage: '그룹 삭제에 실패했습니다.',
+    });
     PfStore.groups = PfStore.groups.filter(g => g.group_name !== groupName);
     if (PfStore.filters.group) PfStore.filters.group.delete(groupName);
     await loadPortfolio();
@@ -275,21 +271,20 @@ function _mbGetCodes() {
 function _mbSaveCodes() {
   localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes));
   // localStorage 가 1차 저장소 — 서버 동기화는 best-effort 라 조용히 로그만.
-  if (currentUser) apiFetch('/api/settings/market-bar', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes: mbCodes }) }).catch(e => reportApiError(e, '시장바 설정 저장', { silent: true }));
+  if (currentUser) apiFetchJson('/api/settings/market-bar', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes: mbCodes }), fallback: null }).catch(e => reportApiError(e, '시장바 설정 저장', { silent: true }));
 }
 async function _mbLoadCodes() {
   if (currentUser) {
     try {
-      const resp = await apiFetch('/api/settings/market-bar');
-      if (resp.ok) { const d = await resp.json(); if (d.codes) { mbCodes = d.codes; localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes)); return; } }
+      const d = await apiFetchJson('/api/settings/market-bar', { fallback: null });
+      if (d?.codes) { mbCodes = d.codes; localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes)); return; }
     } catch (e) { console.warn(e); }
   }
   mbCodes = _mbGetCodes() || MB_DEFAULT_CODES.slice();
 }
 async function _mbLoadCatalog() {
   try {
-    const resp = await apiFetch('/api/market-indicators');
-    if (resp.ok) mbCatalog = await resp.json();
+    mbCatalog = await apiFetchJson('/api/market-indicators', { fallback: mbCatalog || {} });
   } catch (e) { console.warn(e); }
 }
 
@@ -523,9 +518,8 @@ async function loadMarketTape(refresh = false) {
   if (btn) btn.disabled = true;
   try {
     const url = `/api/market/tape${refresh ? '?refresh=true' : ''}`;
-    const resp = await apiFetch(url);
-    if (!resp.ok) return;
-    const data = await resp.json();
+    const data = await apiFetchJson(url, { fallback: null });
+    if (!data) return;
     marketTapeLastRefresh = Date.now();
     renderMarketTape(data);
   } catch (e) {
@@ -538,18 +532,16 @@ async function loadMarketTape(refresh = false) {
 async function loadMarketSummary() {
   try {
     if (!mbCodes.length) await _mbLoadCodes();
-    const resp = await apiFetch(`/api/market-summary?codes=${mbCodes.join(',')}`);
-    if (!resp.ok) return;
-    const dataMap = await resp.json();
+    const dataMap = await apiFetchJson(`/api/market-summary?codes=${mbCodes.join(',')}`, { fallback: null });
+    if (!dataMap) return;
     _mbRenderBar(_mbMergeDataMap(dataMap));
   } catch (e) { console.warn(e); }
 }
 
 async function _pollBenchmarkQuotes() {
   try {
-    const r = await apiFetch('/api/portfolio/benchmark-quotes');
-    if (!r.ok) return;
-    const fresh = await r.json();
+    const fresh = await apiFetchJson('/api/portfolio/benchmark-quotes', { fallback: null });
+    if (!fresh) return;
     for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);
     // 전체 재렌더 대신 벤치마크 셀만 업데이트 — 이래야 WS tick 으로 in-
     // place 갱신된 다른 셀들이 60초 polling 때마다 뒤집히지 않음.
@@ -593,14 +585,13 @@ async function submitCsv(mode) {
   btns.forEach(b => b.disabled = true);
 
   try {
-    const resp = await apiFetch('/api/portfolio/bulk', {
+    const data = await apiFetchJson('/api/portfolio/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode, items }),
       timeoutMs: 60000, // 대량 등록은 기본 20초보다 오래 걸릴 수 있다
+      errorMessage: 'CSV 등록에 실패했습니다.',
     });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
     document.getElementById('pfCsvInput').value = '';
     document.getElementById('pfCsvPanel').style.display = 'none';
     showToast(`${data.imported}개 종목이 ${mode === 'replace' ? '교체' : '추가'} 등록되었습니다.`, 'success');
@@ -624,9 +615,8 @@ function pfFxDivisor() { return PfStore.currency.unit === 'USD' ? 1e6 : 1e8; }
 async function _ensureFxRate() {
   if (PfStore.currency.fxRate) return;
   try {
-    const resp = await apiFetch('/api/asset-quote/CASH_USD');
-    if (resp.ok) {
-      const d = await resp.json();
+    const d = await apiFetchJson('/api/asset-quote/CASH_USD', { fallback: null });
+    if (d) {
       if (d.price) PfStore.currency.fxRate = d.price; // KRW per 1 USD
     }
   } catch (e) { console.warn(e); }
