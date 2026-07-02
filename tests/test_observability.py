@@ -291,6 +291,23 @@ class BatchStatusDataFreshnessTests(TempDbMixin):
         self.assertEqual(result["level"], "stale")
         self.assertIsNone(result["trading_days_behind"])
 
+    def test_batch_slo_breaches_on_stale_data_even_when_systemd_success(self):
+        slo = admin_route._compute_batch_slo(
+            "portfolio-snapshot",
+            {"status": "success"},
+            {"level": "stale", "note": "거래일 3일 지연"},
+        )
+        self.assertEqual(slo["level"], "breach")
+        self.assertIn("거래일 3일 지연", slo["note"])
+
+    def test_batch_slo_ok_when_process_and_data_are_healthy(self):
+        slo = admin_route._compute_batch_slo(
+            "portfolio-snapshot",
+            {"status": "success"},
+            {"level": "ok", "note": "최신"},
+        )
+        self.assertEqual(slo["level"], "ok")
+
     async def test_batch_status_attaches_staleness_per_job(self):
         admin_user = {"google_sub": "u1", "email": "a@b.c", "is_admin": True}
         db = await cache.get_db()
@@ -320,6 +337,7 @@ class BatchStatusDataFreshnessTests(TempDbMixin):
         # The dashboard now shows both so the operator can spot the
         # mismatch instead of trusting the green check alone.
         self.assertEqual(row["status"], "success")
+        self.assertEqual(row["slo"]["level"], "breach")
 
 
 class DeployStatusRouteTests(TempDbMixin):

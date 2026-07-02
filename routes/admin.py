@@ -390,6 +390,23 @@ def _compute_staleness(job_name: str, latest_data_date: str | None) -> dict:
             "note": f"최신 {latest_data_date} — 거래일 {gap}일 지연"}
 
 
+def _compute_batch_slo(job_name: str, timer_status: dict, staleness: dict) -> dict:
+    """Classify batch SLO from process status plus downstream data freshness."""
+    status = timer_status.get("status")
+    stale_level = staleness.get("level")
+    target = f"{job_name}: systemd 실패 없음 + 예상 최신 데이터 존재"
+
+    if status in {"failed", "error"}:
+        return {"level": "breach", "target": target, "note": "실행 실패"}
+    if stale_level in {"missing", "stale"}:
+        return {"level": "breach", "target": target, "note": staleness.get("note") or "데이터 지연"}
+    if status == "running":
+        return {"level": "watch", "target": target, "note": "실행 중"}
+    if status not in {"success", "idle"}:
+        return {"level": "watch", "target": target, "note": f"상태 확인 필요 ({status or 'unknown'})"}
+    return {"level": "ok", "target": target, "note": "SLO 충족"}
+
+
 @router.get("/batch-status")
 async def batch_status(request: Request):
     await _require_admin(request)
@@ -402,10 +419,12 @@ async def batch_status(request: Request):
         # operator cares whether 4/17 got written to portfolio_snapshots.
         latest_data_date = await _latest_data_date_for(t["name"])
         staleness = _compute_staleness(t["name"], latest_data_date)
+        slo = _compute_batch_slo(t["name"], info, staleness)
         jobs.append({
             **t, **info,
             "latest_data_date": latest_data_date,
             "staleness": staleness,
+            "slo": slo,
         })
     return jobs
 

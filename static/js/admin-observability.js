@@ -260,12 +260,20 @@ function _renderBatchSection(jobs) {
     } else {
       dataCell = `<span class="admin-status-ok">${_esc(stale.note || j.latest_data_date || '-')}</span>`;
     }
+    const slo = j.slo || {};
+    const sloClass = slo.level === 'breach' ? 'admin-status-fail'
+                   : slo.level === 'watch' ? 'admin-status-run'
+                   : 'admin-status-ok';
+    const sloLabel = slo.level === 'breach' ? '위반'
+                   : slo.level === 'watch' ? '주의'
+                   : '정상';
 
     return `
       <tr>
         <td><strong>${j.label}</strong><div class="admin-sub">${j.schedule}</div></td>
         <td class="${statusClass}">${statusIcon} ${_statusLabel(j.status)}</td>
         <td>${dataCell}</td>
+        <td class="${sloClass}">${sloLabel}<div class="admin-sub">${_esc(slo.note || '')}</div></td>
         <td>${lastRun}</td>
         <td>${nextRun}</td>
         <td>
@@ -278,12 +286,13 @@ function _renderBatchSection(jobs) {
 
   return `
     <div class="admin-section">
-      <h3>배치 작업 <span class="admin-sub">실행 상태 ≠ 데이터 상태 — 둘 다 확인</span></h3>
+      <h3>배치 작업 <span class="admin-sub">실행 상태·데이터 상태·SLO를 함께 확인</span></h3>
       <table class="admin-table">
         <thead><tr>
           <th>작업</th>
           <th>실행 상태</th>
           <th>최신 데이터</th>
+          <th>SLO</th>
           <th>최근 실행</th>
           <th>다음 실행</th>
           <th>수동 실행</th>
