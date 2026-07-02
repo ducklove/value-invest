@@ -1359,3 +1359,30 @@ def test_analysis_wiki_qa_and_journal_are_collapsed_by_default():
     assert '<label for="wikiQaInput" class="wiki-qa-label sr-only">' in html
     assert "list-style: none" in styles
     assert "::-webkit-details-marker" in styles
+
+
+def test_performance_tab_has_sticky_anchor_nav_covering_every_card():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    # 심층 분석 탭이 카드 10개짜리 단일 스크롤이라 탐색성이 낮았다(UX 감사 P2⑥).
+    # 순수 <a href="#id"> 앵커라 JS 없이 동작 — 대상 id 10개가 전부 존재해야 한다.
+    anchor_targets = [
+        "pfNavWrap", "pfRiskWrap", "pfPeriodReportWrap", "pfRebalanceWrap",
+        "pfDivCalWrap", "pfJournalWrap", "pfValueWrap", "pfGroupWeightWrap",
+        "pfCashflowWrap", "pfAiWrap",
+    ]
+    nav_start = html.find('<nav class="pf-deep-anchors"')
+    nav_end = html.find("</nav>", nav_start)
+    assert nav_start != -1 and nav_end != -1
+    anchor_block = html[nav_start:nav_end]
+    for target_id in anchor_targets:
+        assert f'href="#{target_id}"' in anchor_block, f"missing anchor link for #{target_id}"
+        assert f'id="{target_id}"' in html, f"missing scroll target #{target_id}"
+    # 점프 내비는 앵커 바보다 먼저, 첫 카드(NAV)보다는 앞에 온다.
+    assert html.find('id="pfNavWrap"') > nav_end
+
+    # 모바일 슬림 헤더(--m-header-h, 데스크톱에선 미정의라 0px 로 빠짐) 밑에 붙고,
+    # 점프 대상은 헤더 + 이 바 높이만큼 scroll-margin 을 둬 제목이 가려지지 않는다.
+    assert "top: var(--m-header-h, 0px);" in styles
+    assert "scroll-margin-top: calc(var(--m-header-h, 0px) + 52px);" in styles

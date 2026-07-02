@@ -467,7 +467,23 @@ function trackEvent(name, params = {}) {
         <div class="pf-deep-meta">스냅샷 기준</div>
       </div>
 
-      <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary">
+      <!-- 카드 10개가 한 화면에 이어지는 장스크롤을 완화하는 점프 내비 — 순수 앵커
+           링크라 JS 없이도 동작한다(UX 감사 P2⑥). 각 대상 카드의 scroll-margin-top 이
+           고정 헤더/이 바 자체의 높이만큼 여유를 둬 점프 후 제목이 가려지지 않는다. -->
+      <nav class="pf-deep-anchors" aria-label="심층 분석 섹션 바로가기">
+        <a class="pf-deep-anchor-link" href="#pfNavWrap">NAV</a>
+        <a class="pf-deep-anchor-link" href="#pfRiskWrap">리스크</a>
+        <a class="pf-deep-anchor-link" href="#pfPeriodReportWrap">보고서</a>
+        <a class="pf-deep-anchor-link" href="#pfRebalanceWrap">리밸런싱</a>
+        <a class="pf-deep-anchor-link" href="#pfDivCalWrap">배당</a>
+        <a class="pf-deep-anchor-link" href="#pfJournalWrap">일지</a>
+        <a class="pf-deep-anchor-link" href="#pfValueWrap">평가금액</a>
+        <a class="pf-deep-anchor-link" href="#pfGroupWeightWrap">그룹비중</a>
+        <a class="pf-deep-anchor-link" href="#pfCashflowWrap">현금흐름</a>
+        <a class="pf-deep-anchor-link" href="#pfAiWrap">AI</a>
+      </nav>
+
+      <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary" id="pfNavWrap">
         <div class="pf-nav-header">
           <h3>NAV 기준가 추이</h3>
           <div class="pf-analysis-actions">
@@ -554,7 +570,7 @@ function trackEvent(name, params = {}) {
       </div>
 
       <div class="pf-analysis-grid pf-analysis-grid-trends">
-      <div class="pf-nav-chart-wrap pf-analysis-card">
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfValueWrap">
         <div class="pf-nav-header">
           <h3>평가금액 추이</h3>
           <label class="pf-bench-chip"><input type="checkbox" id="pfValueYZero" onchange="onValueYZeroToggle()"><span>Y축 0부터</span></label>
@@ -566,7 +582,7 @@ function trackEvent(name, params = {}) {
         <div class="pf-nav-returns" id="pfValueStats"></div>
       </div>
 
-      <div class="pf-nav-chart-wrap pf-analysis-card">
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfGroupWeightWrap">
         <div class="pf-nav-header">
           <h3>그룹 비중 추이</h3>
           <span class="pf-chart-note">100% 누적 면적 차트 · 일별 스냅샷 기준</span>
@@ -591,7 +607,7 @@ function trackEvent(name, params = {}) {
       </div>
 
       <div class="pf-analysis-grid pf-analysis-grid-flow">
-      <div class="pf-cashflow-section pf-analysis-card">
+      <div class="pf-cashflow-section pf-analysis-card" id="pfCashflowWrap">
         <h3>자금 입출금</h3>
         <div class="pf-cf-form">
           <select id="pfCfType">
