@@ -179,35 +179,37 @@ async function initApp() {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
-  const PATH_TO_VIEW = {
-    '/investing': 'investing',
-    '/analysis': 'analysis',
-    '/portfolio': 'portfolio',
-    '/nps': 'nps',
-    '/labs': 'labs',
-    '/tools': 'labs',
-    '/insights': 'insights',
-    '/screener': 'screener',
-  };
-  const viewFromPath = PATH_TO_VIEW[path];
+  // 경로 ↔ 뷰 매핑은 portfolio-shell.js 의 PF_PATH_TO_VIEW 하나를 공유한다
+  // (switchView 의 history.pushState 도 같은 표의 역방향을 쓴다).
+  const viewFromPath = PF_PATH_TO_VIEW[path];
+  // 최초 진입 시점의 라우팅은 브라우저가 이미 이 URL에 있으므로 history 를 다시 쓰지 않는다
+  // (안 그러면 code= 같은 쿼리가 pushState 로 지워지거나 새로고침마다 히스토리가 쌓인다).
   if (viewFromPath) {
-    switchView(viewFromPath);
+    switchView(viewFromPath, { skipHistory: true });
   }
   if (code) {
     // code 가 있으면 분석 대상. path 와 무관하게 분석 탭으로 이동해
     // 종목을 로드 — '/portfolio?code=...' 같은 조합도 자연스럽게 동작.
-    switchView('analysis');
+    switchView('analysis', { skipHistory: true });
     analyzeStock(code.trim());
   } else if (!viewFromPath && currentUser && window.innerWidth <= 900) {
     // Mobile + logged in → default to portfolio (경로가 명시된 경우
     // 이 기본값은 덮지 않음).
-    switchView('portfolio');
+    switchView('portfolio', { skipHistory: true });
     // 포트폴리오 데이터가 비동기로 채워진 뒤에도 화면을 최상단에서 시작하도록 보정.
     requestAnimationFrame(() => window.scrollTo(0, 0));
   }
 }
 
 initApp();
+
+// 뒤로/앞으로가기 복원. switchView 가 매 전환마다 pushState 하므로, 브라우저가 URL을
+// 이미 바꾼 뒤 이 리스너는 화면만 그 URL에 맞춰 동기화한다(skipHistory 로 재-push 방지).
+window.addEventListener('popstate', () => {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  const view = PF_PATH_TO_VIEW[path] || 'investing';
+  switchView(view, { skipHistory: true, allowMobileLockOverride: true });
+});
 
 window.addEventListener('pageshow', () => {
   syncAuthState({ refreshRecentList: true, refreshPreference: true });

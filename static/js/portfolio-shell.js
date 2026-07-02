@@ -9,6 +9,28 @@
 const PF_QUOTE_REFRESH_MS = 60_000;
 // "도구" 허브(labsView)와 그 하위 딥링크 화면들 — switchView 의 상단 탭 활성 표시를 묶는 데 쓰인다.
 const PF_TOOLS_HUB_VIEWS = new Set(['labs', 'nps', 'insights', 'screener']);
+// view ↔ URL 경로 매핑. switchView 의 history.pushState(정방향)와 app-main.js 의 최초 진입
+// 라우팅·popstate 복원(역방향)이 이 표 하나를 공유한다 — 표가 두 곳에 따로 있으면 한쪽만
+// 고치고 잊는 사고가 나기 쉽다(예: 새 뷰 추가 시 pushState 는 되는데 새로고침 복원은 안 되는 식).
+const PF_VIEW_PATHS = {
+  investing: '/investing',
+  analysis: '/analysis',
+  portfolio: '/portfolio',
+  nps: '/nps',
+  labs: '/labs',
+  insights: '/insights',
+  screener: '/screener',
+};
+const PF_PATH_TO_VIEW = {
+  '/investing': 'investing',
+  '/analysis': 'analysis',
+  '/portfolio': 'portfolio',
+  '/nps': 'nps',
+  '/labs': 'labs',
+  '/tools': 'labs',
+  '/insights': 'insights',
+  '/screener': 'screener',
+};
 let _pfPointerGuardUntil = 0;
 const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
 // 컴팩트 보기: 종목명을 한 줄로, 태그·순서이동 핸들을 숨기고 행 간격을 좁힌다.
@@ -237,6 +259,16 @@ function switchView(view, options = {}) {
   const lockedView = options.allowMobileLockOverride ? null : _mobileFixedView();
   if (lockedView && view !== lockedView) view = lockedView;
   PfStore.activeView = view;
+  // 브라우저 히스토리 동기화 — 이게 없으면 탭 전환은 DOM 만 바뀌고 URL/히스토리는 그대로라
+  // 뒤로가기를 누르면 이전 탭이 아니라 앱 밖으로 나가버린다. skipHistory 는 (a) 최초 진입
+  // 라우팅(app-main.js initApp, 이미 그 URL에 있으므로 다시 쓸 필요 없음)과 (b) popstate
+  // 핸들러 자신(브라우저가 이미 URL을 바꿨으므로 여기서 또 pushState 하면 안 됨) 에서 쓴다.
+  if (!options.skipHistory) {
+    const path = PF_VIEW_PATHS[view] || '/investing';
+    if (window.location.pathname.replace(/\/+$/, '') !== path) {
+      history.pushState({ pfView: view }, '', path);
+    }
+  }
   // 데스크톱 상단 탭(.nav-btn)과 모바일 하단 탭바(.mnav-btn) 활성 상태를 함께 동기화.
   // 국민연금/인사이트 보드/스크리너는 최상위 탭이 아니라 "도구" 허브의 하위 화면이므로
   // 이 화면들에 있을 때도 "도구" 탭(data-view="labs")이 활성으로 표시된다.

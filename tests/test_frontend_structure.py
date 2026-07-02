@@ -1274,8 +1274,10 @@ def test_screener_labs_view_is_wired_as_deep_linkable_panel():
     assert "screenerView" in shell
     assert "view === 'screener'" in shell
     assert "typeof loadScreener === 'function'" in shell
-    # app-main.js PATH_TO_VIEW 가 /screener → 'screener' 매핑을 갖는다.
-    assert "'/screener': 'screener'" in app_main
+    # 경로↔뷰 매핑은 portfolio-shell.js 의 PF_PATH_TO_VIEW 하나를 공유하며
+    # (app-main.js 의 최초 라우팅과 popstate 복원이 이를 재사용), /screener → 'screener' 를 갖는다.
+    assert "'/screener': 'screener'" in shell
+    assert "PF_PATH_TO_VIEW" in app_main
 
     # 기능 홈: spec 로드, 필터 렌더, 실행/페이징은 screener.js.
     assert "async function loadScreener(" in screener
@@ -1295,3 +1297,23 @@ def test_screener_labs_view_is_wired_as_deep_linkable_panel():
     assert ".screener-filters" in styles
     assert ".screener-table" in styles
     assert ".screener-pager" in styles
+
+
+def test_switch_view_syncs_browser_history():
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    app_main = (JS / "app-main.js").read_text(encoding="utf-8")
+
+    # switchView 는 브라우저 히스토리를 쓴다(옛날엔 DOM 만 바뀌고 URL은 그대로라
+    # 뒤로가기가 앱을 이탈시켰다 — UX 감사 P1②). skipHistory 로만 우회한다.
+    assert "if (!options.skipHistory)" in shell
+    assert "history.pushState({ pfView: view }, '', path)" in shell
+
+    # 최초 진입 라우팅(이미 그 URL에 있음)과 popstate 복원(브라우저가 이미 URL을 바꿈)은
+    # 둘 다 재-push 하면 안 되므로 skipHistory 를 명시한다.
+    assert "switchView(viewFromPath, { skipHistory: true })" in app_main
+    assert "switchView('analysis', { skipHistory: true })" in app_main
+    assert "switchView('portfolio', { skipHistory: true })" in app_main
+
+    # popstate(뒤로/앞으로가기) 리스너가 등록되어 URL을 다시 화면 상태로 되돌린다.
+    assert "addEventListener('popstate'" in app_main
+    assert "PF_PATH_TO_VIEW[path] || 'investing'" in app_main
