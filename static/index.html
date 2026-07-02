@@ -104,7 +104,7 @@ function trackEvent(name, params = {}) {
       <button class="nav-btn active" data-view="investing" onclick="switchView('investing')">투자정보</button>
       <button class="nav-btn" data-view="analysis" onclick="switchView('analysis')">종목분석</button>
       <button class="nav-btn" data-view="portfolio" onclick="switchView('portfolio')">포트폴리오</button>
-      <button class="nav-btn" data-view="nps" onclick="switchView('nps')">국민연금</button>
+      <button class="nav-btn" data-view="labs" onclick="switchView('labs')">도구</button>
     </nav>
     <div class="wiki-stats" id="wikiStats" title="LLM 위키 누적 수집량"></div>
     <div class="mobile-auth-status" id="mobileAuthStatus" role="button" tabindex="0" onclick="openProfileModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProfileModal();}">
@@ -630,24 +630,30 @@ function trackEvent(name, params = {}) {
   <div id="labsView" style="display:none;">
     <div class="lab-page">
       <div class="lab-hero">
-        <span class="lab-eyebrow">Experimental</span>
-        <h2>투자 실험실</h2>
+        <span class="lab-eyebrow">Tools</span>
+        <h2>도구</h2>
         <p>
-          아직 핵심 투자 화면만큼 검증되지 않은 기능을 모아둔 공간입니다.
-          결과는 참고용으로만 보고, 실제 판단은 분석/포트폴리오 화면의 검증된 데이터와 함께 확인하세요.
+          핵심 화면(투자정보·종목분석·포트폴리오) 밖에 있는 보조 도구 모음입니다.
+          스크리너·국민연금 대시보드는 바로 쓸 수 있는 기능이고, 인사이트 보드는 아직 참고용 실험 기록장입니다.
         </p>
       </div>
       <div class="lab-grid">
-        <a class="lab-card" href="/insights">
-          <span class="lab-pill">기록 보존</span>
-          <h3>인사이트 보드</h3>
-          <p>외부 실험 결과와 수동 메모를 남기는 기록장입니다. 향후 포트폴리오/종목 분석 맥락으로 흡수할 예정입니다.</p>
-          <strong>열기 →</strong>
-        </a>
-        <a class="lab-card" href="/screener">
+        <a class="lab-card" href="/screener" onclick="event.preventDefault(); switchView('screener');">
           <span class="lab-pill">유니버스 스캔</span>
           <h3>밸류 스크리너</h3>
-          <p>P/E·P/B·ROE·배당수익률 등 조건으로 종목을 거르는 스크리너입니다. 분석 이력이 쌓인 종목만 검색 대상입니다.</p>
+          <p>P/E·P/B·ROE·배당수익률 등 조건으로 KOSPI/KOSDAQ 투자가능 유니버스 전체를 거르는 스크리너입니다.</p>
+          <strong>열기 →</strong>
+        </a>
+        <a class="lab-card" href="/nps" onclick="event.preventDefault(); switchView('nps');">
+          <span class="lab-pill">외부 연동</span>
+          <h3>국민연금 포트폴리오</h3>
+          <p>국민연금 국내주식 보유 종목과 자산배분 목표 비중을 별도 대시보드(nps-tracker)에서 확인합니다.</p>
+          <strong>열기 →</strong>
+        </a>
+        <a class="lab-card" href="/insights" onclick="event.preventDefault(); switchView('insights');">
+          <span class="lab-pill">기록 보존 · 실험</span>
+          <h3>인사이트 보드</h3>
+          <p>외부 실험 결과와 수동 메모를 남기는 기록장입니다. 향후 포트폴리오/종목 분석 맥락으로 흡수할 예정입니다.</p>
           <strong>열기 →</strong>
         </a>
       </div>
@@ -659,7 +665,7 @@ function trackEvent(name, params = {}) {
       <div class="lab-inline-banner">
         <span>실험 기능</span>
         <strong>메인 탭에서 제외된 연구 노트입니다.</strong>
-        <a href="/labs">실험실로 돌아가기</a>
+        <a href="/labs" onclick="event.preventDefault(); switchView('labs');">도구로 돌아가기</a>
       </div>
       <h2>인사이트 보드</h2>
       <div class="insight-board-note">
@@ -676,9 +682,9 @@ function trackEvent(name, params = {}) {
   <div id="screenerView" style="display:none;">
     <div class="screener-page">
       <div class="lab-inline-banner">
-        <span>실험 기능</span>
-        <strong>분석 이력이 쌓인 종목만 검색 대상입니다.</strong>
-        <a href="/labs">실험실로 돌아가기</a>
+        <span>도구</span>
+        <strong>검색 대상 등 상세 안내는 아래 커버리지를 확인하세요.</strong>
+        <a href="/labs" onclick="event.preventDefault(); switchView('labs');">도구로 돌아가기</a>
       </div>
       <h2>밸류 스크리너</h2>
       <div class="screener-coverage" id="screenerCoverage" aria-live="polite"></div>
@@ -757,9 +763,9 @@ function trackEvent(name, params = {}) {
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
     <span>포트폴리오</span>
   </button>
-  <button class="mnav-btn" data-view="nps" onclick="switchView('nps')">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 3 20 7.5 4 7.5"/><line x1="6" y1="10" x2="6" y2="17"/><line x1="10" y1="10" x2="10" y2="17"/><line x1="14" y1="10" x2="14" y2="17"/><line x1="18" y1="10" x2="18" y2="17"/><line x1="3.5" y1="20.5" x2="20.5" y2="20.5"/></svg>
-    <span>연금</span>
+  <button class="mnav-btn" data-view="labs" onclick="switchView('labs')">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+    <span>도구</span>
   </button>
 </nav>
 

@@ -1287,7 +1287,7 @@ def test_screener_labs_view_is_wired_as_deep_linkable_panel():
     # 독립 뷰이므로 portfolio-render.js 전역(fmtKrw/fmtPct)에 의존하지 않는다.
     assert "function fmtKrw(" not in screener
     assert "function fmtPct(" not in screener
-    # 커버리지 안내(검색 대상 = 분석 이력 보유 종목)가 표시된다.
+    # 커버리지 안내(검색 대상 = finance-pi full-universe 스냅샷)가 표시된다.
     assert "screenerCoverage" in html
 
     # 스타일: 페이지/필터 그리드/테이블/페이저.

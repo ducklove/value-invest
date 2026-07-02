@@ -7,6 +7,8 @@
 // Only file-local UI plumbing (timers, style element refs, pointer guards)
 // stays as top-level declarations in the owning split file.
 const PF_QUOTE_REFRESH_MS = 60_000;
+// "도구" 허브(labsView)와 그 하위 딥링크 화면들 — switchView 의 상단 탭 활성 표시를 묶는 데 쓰인다.
+const PF_TOOLS_HUB_VIEWS = new Set(['labs', 'nps', 'insights', 'screener']);
 let _pfPointerGuardUntil = 0;
 const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
 // 컴팩트 보기: 종목명을 한 줄로, 태그·순서이동 핸들을 숨기고 행 간격을 좁힌다.
@@ -236,7 +238,10 @@ function switchView(view, options = {}) {
   if (lockedView && view !== lockedView) view = lockedView;
   PfStore.activeView = view;
   // 데스크톱 상단 탭(.nav-btn)과 모바일 하단 탭바(.mnav-btn) 활성 상태를 함께 동기화.
-  document.querySelectorAll('.nav-btn, .mnav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
+  // 국민연금/인사이트 보드/스크리너는 최상위 탭이 아니라 "도구" 허브의 하위 화면이므로
+  // 이 화면들에 있을 때도 "도구" 탭(data-view="labs")이 활성으로 표시된다.
+  const navHighlightView = PF_TOOLS_HUB_VIEWS.has(view) ? 'labs' : view;
+  document.querySelectorAll('.nav-btn, .mnav-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === navHighlightView));
   const investingView = document.getElementById('investingView');
   const analysisView = document.getElementById('analysisView');
   const portfolioView = document.getElementById('portfolioView');

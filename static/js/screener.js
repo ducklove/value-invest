@@ -1,5 +1,5 @@
-// 밸류 스크리너 — P/E·P/B·ROE·배당수익률 등 조건으로 종목을 거르는 실험실 패널.
-// 인사이트 보드와 동일한 Labs 진입 패턴을 따른다: /labs 카드 → /screener 직접 URL.
+// 밸류 스크리너 — P/E·P/B·ROE·배당수익률 등 조건으로 종목을 거르는 패널.
+// "도구" 허브(/labs 카드) 또는 /screener 직접 URL로 진입한다.
 // 포맷터는 portfolio-render.js 의 전역(fmtKrw/fmtPct)에 의존하지 않는다 —
 // 스크리너는 독립 뷰이므로 로드 순서 계약에 묶이지 않는 자체 헬퍼를 쓴다.
 
@@ -62,13 +62,13 @@ function _renderScreenerCoverage() {
   const el = document.getElementById('screenerCoverage');
   if (!el || !_screenerSpec) return;
   const c = _screenerSpec.coverage || {};
-  // 분석 이력이 쌓인 종목만 검색 대상임을 명시 — 허위 기대를 막는다.
+  // finance-pi full-universe 스냅샷 전체가 검색 대상 — 개별 종목 분석 이력과 무관하다.
   el.innerHTML = `
     <div class="screener-coverage-row">
-      <span>검색 대상: <strong>${_scFmtNum(c.valued || 0, 0)}</strong>개 종목 (시세 데이터 보유)</span>
-      <span class="screener-coverage-muted">전체 상장 ${_scFmtNum(c.universe || 0, 0)}개 중 / 재무 데이터 ${_scFmtNum(c.fundamentals || 0, 0)}개</span>
+      <span>검색 대상: <strong>${_scFmtNum(c.universe || 0, 0)}</strong>개 종목 (KOSPI/KOSDAQ 투자가능 유니버스 전체)</span>
+      <span class="screener-coverage-muted">시세 데이터 보유 ${_scFmtNum(c.valued || 0, 0)}개 / 재무 데이터 보유 ${_scFmtNum(c.fundamentals || 0, 0)}개</span>
     </div>
-    <div class="screener-coverage-hint">종목을 분석(종목분석 탭)할 때마다 해당 종목이 스크리너 대상에 추가됩니다.</div>
+    <div class="screener-coverage-hint">재무 데이터가 없는 종목은 해당 필터 조건에서 자동 제외됩니다.</div>
   `;
 }
 

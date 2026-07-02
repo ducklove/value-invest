@@ -169,10 +169,10 @@ async function initApp() {
   // 외부 사이트에서 특정 탭·종목으로 바로 연결 가능하도록 URL 을 해석.
   //   /analysis?code=005930  → 분석 탭 + 005930 자동 분석
   //   /portfolio             → 포트폴리오 탭
-  //   /nps                   → 국민연금 탭
-  //   /labs                  → 실험실 허브 (메인 탭에서는 숨김)
-  //   /insights              → 실험실 인사이트 보드 (직접 URL)
-  //   /screener              → 실험실 밸류 스크리너 (직접 URL)
+  //   /labs, /tools          → 도구 허브 (국민연금·스크리너·인사이트 보드 카드)
+  //   /nps                   → 도구 허브의 국민연금 대시보드 (직접 URL, 메인 탭 아님)
+  //   /insights              → 도구 허브의 인사이트 보드 (직접 URL, 실험)
+  //   /screener              → 도구 허브의 밸류 스크리너 (직접 URL)
   //   /?code=005930          → (기존 호환) 분석 탭 + 자동 분석
   // 서버가 이 path 들을 모두 index.html 로 서빙하므로 SPA 진입 후
   // pathname 만 보고 탭을 정하면 됨.
@@ -185,6 +185,7 @@ async function initApp() {
     '/portfolio': 'portfolio',
     '/nps': 'nps',
     '/labs': 'labs',
+    '/tools': 'labs',
     '/insights': 'insights',
     '/screener': 'screener',
   };
