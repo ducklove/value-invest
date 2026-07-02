@@ -29,6 +29,7 @@
 | 완료 | 공통 모달 유틸 + 포커스 트랩 | `static/js/utils.js` `openManagedModal`/`closeManagedModal`, 주요 모달 호출부 전환, jsdom focus-trap 테스트 |
 | 완료 | P1 잔여 정리 | `wiki_ingestion`의 `routes` 역참조 제거, 알림 엔진 silent pass 2곳 warning 로그화, AI/wiki burst 레이트리밋 추가 |
 | 완료 | 공용 HTTP 클라이언트 상위 호출부 전환 | `market_indicators.py`, `stock_price.py`, `market_daily.py`; 해당 3파일 직접 `httpx.AsyncClient` 생성 제거 |
+| 완료 | 최종 실서버 배포 및 헬스체크 | GitHub Actions run `28588345220`, `/healthz` `asset_version=65660ba` |
 
 ## 다음 작업 후보
 
@@ -75,6 +76,7 @@
 | 2026-07-02 | `python -m ruff check .` | 통과 |
 | 2026-07-02 | `git diff --check` | 통과 |
 | 2026-07-02 | `node --check` 변경 JS/MJS | 통과 |
+| 2026-07-02 | 실서버 `/healthz` | `status=ok`, `asset_version=65660ba` |
 | 2026-07-02 | `python -m pytest tests/test_frontend_structure.py -q` | 55 passed |
 | 2026-07-02 | `npm test` | 167 passed |
 | 2026-07-02 | `bash -n deploy/deploy.sh deploy/repairs/run_one_time_repairs.sh deploy/repairs/repair_2026_05_18_nav_v3.sh` | 통과 |
