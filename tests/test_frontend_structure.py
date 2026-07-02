@@ -1339,3 +1339,23 @@ def test_mobile_search_shows_recent_and_starred_chips_on_empty_focus():
     assert "invalidateSearchStarredChipsCache" in search
     assert "invalidateSearchStarredChipsCache" in auth
     assert ".dropdown-section-label" in styles
+
+
+def test_analysis_wiki_qa_and_journal_are_collapsed_by_default():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    # 위키 Q&A·투자 일지는 매번 쓰는 요소가 아니라 밸류에이션 차트보다 화면 우선순위가
+    # 낮다(UX 감사 P2⑦). <details> 는 JS 없이 접힌 채로 시작하고, 내부 id 는 그대로라
+    # 기존 스크립트(wiki.js/portfolio-journal.js)가 값을 읽고 쓰는 데 영향이 없다.
+    assert '<details class="analysis-collapsible" id="wikiQaDetails">' in html
+    assert '<details class="analysis-collapsible" id="stockJournalDetails">' in html
+    assert '<summary class="analysis-collapsible-summary">💬 이 종목에 대해 질문하기</summary>' in html
+    assert '<summary class="analysis-collapsible-summary">📝 투자 일지</summary>' in html
+    assert 'id="wikiQa"' in html
+    assert 'id="stockJournalSection"' in html
+    # 순서 계약은 기존 테스트(investment_journal)가 이미 지킨다 — 여기서는 접힘 래퍼
+    # 자체와, summary 로 대체된 라벨이 접근성 이름으로는 남아있는지만 확인한다.
+    assert '<label for="wikiQaInput" class="wiki-qa-label sr-only">' in html
+    assert "list-style: none" in styles
+    assert "::-webkit-details-marker" in styles

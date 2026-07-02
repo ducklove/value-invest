@@ -188,30 +188,39 @@ function trackEvent(name, params = {}) {
     </div>
     <div class="coverage" id="coverageNote"></div>
 
-    <div class="wiki-qa" id="wikiQa">
-      <div class="wiki-qa-head">
-        <label for="wikiQaInput" class="wiki-qa-label">이 종목에 대해 질문하기</label>
-        <div class="wiki-qa-hint" id="wikiQaHint">로그인하면 DART 공시 리뷰, 증권사 리포트, 재무/시세 정보를 근거로 LLM이 답변합니다.</div>
+    <!-- 위키 Q&A·투자 일지는 매번 쓰는 요소가 아니라 밸류에이션 차트보다 아래로
+         우선순위를 낮췄다(UX 감사 P2⑦) — <details> 는 JS 없이도 접힘 상태로 시작하고,
+         내부 폼/입력 요소는 열림 여부와 무관하게 그대로 DOM에 남아 기존 스크립트가
+         id 로 값을 읽고 쓰는 데 영향이 없다. -->
+    <details class="analysis-collapsible" id="wikiQaDetails">
+      <summary class="analysis-collapsible-summary">💬 이 종목에 대해 질문하기</summary>
+      <div class="wiki-qa" id="wikiQa">
+        <div class="wiki-qa-head">
+          <label for="wikiQaInput" class="wiki-qa-label sr-only">이 종목에 대해 질문하기</label>
+          <div class="wiki-qa-hint" id="wikiQaHint">로그인하면 DART 공시 리뷰, 증권사 리포트, 재무/시세 정보를 근거로 LLM이 답변합니다.</div>
+        </div>
+        <textarea id="wikiQaInput" class="wiki-qa-input" rows="2"
+          placeholder="예: 최근 분기보고서 기준 주요 변화와 리스크는 무엇인가요?"></textarea>
+        <div class="wiki-qa-actions">
+          <button id="wikiQaSubmit" class="wiki-qa-btn" type="button">질문</button>
+          <span class="wiki-qa-status" id="wikiQaStatus" role="status" aria-live="polite"></span>
+        </div>
+        <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
+        <div class="wiki-qa-meta" id="wikiQaMeta"></div>
       </div>
-      <textarea id="wikiQaInput" class="wiki-qa-input" rows="2"
-        placeholder="예: 최근 분기보고서 기준 주요 변화와 리스크는 무엇인가요?"></textarea>
-      <div class="wiki-qa-actions">
-        <button id="wikiQaSubmit" class="wiki-qa-btn" type="button">질문</button>
-        <span class="wiki-qa-status" id="wikiQaStatus" role="status" aria-live="polite"></span>
-      </div>
-      <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
-      <div class="wiki-qa-meta" id="wikiQaMeta"></div>
-    </div>
+    </details>
 
     <!-- 투자 일지 — 이 종목에 대한 매수/매도/메모 판단 기록. portfolio-journal.js 가 채운다. -->
-    <div class="stock-journal" id="stockJournalSection">
-      <div class="stock-journal-head">
-        <span class="stock-journal-label">📝 투자 일지</span>
-        <span class="stock-journal-hint">매수·매도 판단의 이유를 기록하고, 나중에 당시 가격 대비 수익률과 함께 복기하세요.</span>
+    <details class="analysis-collapsible" id="stockJournalDetails">
+      <summary class="analysis-collapsible-summary">📝 투자 일지</summary>
+      <div class="stock-journal" id="stockJournalSection">
+        <div class="stock-journal-head">
+          <span class="stock-journal-hint">매수·매도 판단의 이유를 기록하고, 나중에 당시 가격 대비 수익률과 함께 복기하세요.</span>
+        </div>
+        <div id="stockJournalForm"></div>
+        <div id="stockJournalList"></div>
       </div>
-      <div id="stockJournalForm"></div>
-      <div id="stockJournalList"></div>
-    </div>
+    </details>
   </div>
 
   <div id="emptyState" class="empty-state">

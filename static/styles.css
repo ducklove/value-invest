@@ -3093,7 +3093,7 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
    #pfJournalWrap 두 표면이 같은 카드 스타일을 공유한다. 빈 상태는
    .pf-risk-empty 재사용, 색은 모두 CSS 변수 기반. */
 .stock-journal {
-  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+  margin-top: 8px;
 }
 .stock-journal-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .stock-journal-label { font-weight: 700; font-size: 13.5px; }
@@ -4996,6 +4996,25 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 .report-summary-body li { margin: 3px 0; }
 .report-summary-body p { margin: 6px 0; }
 .report-summary-body strong { color: var(--text); }
+
+/* 위키 Q&A/투자 일지 접힘 래퍼 — <details> 는 JS 없이 접힌 채로 시작해 매번
+   쓰지 않는 입력 폼이 밸류에이션 차트보다 먼저 화면을 차지하지 않게 한다(UX 감사 P2⑦). */
+.analysis-collapsible { margin: 16px 0 0; }
+.analysis-collapsible + .analysis-collapsible { margin-top: 8px; }
+.analysis-collapsible-summary {
+  cursor: pointer; list-style: none; font-size: 13.5px; font-weight: 700; color: var(--text);
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  user-select: none;
+}
+.analysis-collapsible-summary::-webkit-details-marker { display: none; }
+.analysis-collapsible-summary::before {
+  content: '▸'; display: inline-block; margin-right: 6px; color: var(--text-secondary);
+  transition: transform 0.15s ease;
+}
+.analysis-collapsible[open] > .analysis-collapsible-summary::before { transform: rotate(90deg); }
+.analysis-collapsible-summary:hover { background: var(--surface-muted); }
+.analysis-collapsible-summary:focus-visible { outline: none; box-shadow: var(--ring); }
 
 /* === Wiki Q&A === */
 .wiki-qa {
