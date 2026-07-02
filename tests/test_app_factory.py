@@ -1,5 +1,7 @@
 import unittest
 
+import httpx
+
 from core.app_factory import create_app
 from core.config import PROJECT_ROOT, AppSettings
 
@@ -53,4 +55,22 @@ class AppFactoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(
             put_paths.index("/api/portfolio/order"),
             put_paths.index("/api/portfolio/{stock_code}"),
+        )
+
+    async def test_security_headers_are_attached_to_http_responses(self):
+        app = create_app(self._settings(environment="production", enable_docs=False))
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="https://testserver") as client:
+            response = await client.get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(response.headers["x-frame-options"], "DENY")
+        self.assertEqual(response.headers["referrer-policy"], "strict-origin-when-cross-origin")
+        self.assertIn("camera=()", response.headers["permissions-policy"])
+        self.assertIn("default-src 'self'", response.headers["content-security-policy-report-only"])
+        self.assertIn("https://accounts.google.com", response.headers["content-security-policy-report-only"])
+        self.assertEqual(
+            response.headers["strict-transport-security"],
+            "max-age=31536000; includeSubDomains",
         )

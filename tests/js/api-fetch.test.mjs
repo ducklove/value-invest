@@ -164,6 +164,52 @@ test("reportApiError shows a Korean '<context> 실패: ...' toast for user actio
   assert.deepEqual(toastTexts(w), ["저장 실패: 재고가 없습니다"]);
 });
 
+test("showToast exposes toast messages to assistive tech", () => {
+  const w = loadUtils();
+  w.showToast("저장되었습니다.", "success");
+  const container = w.document.getElementById("toastContainer");
+  const toast = container.querySelector("div");
+  assert.equal(container.getAttribute("aria-live"), "polite");
+  assert.equal(container.getAttribute("aria-atomic"), "false");
+  assert.equal(toast.getAttribute("role"), "status");
+  assert.equal(toast.getAttribute("aria-live"), "polite");
+});
+
+test("showToast uses assertive announcements for error and warning toasts", () => {
+  const w = loadUtils();
+  w.showToast("저장 실패", "error");
+  const toast = w.document.querySelector("#toastContainer div");
+  assert.equal(toast.getAttribute("role"), "alert");
+  assert.equal(toast.getAttribute("aria-live"), "assertive");
+});
+
+test("skip link moves focus to the main content for click and keyboard users", () => {
+  const w = loadUtils();
+  w.document.body.innerHTML = `
+    <a class="skip-link" href="#mainContent">본문으로 바로가기</a>
+    <main class="main" id="mainContent" tabindex="-1"></main>
+  `;
+  let scrollCount = 0;
+  const main = w.document.getElementById("mainContent");
+  main.scrollIntoView = () => { scrollCount += 1; };
+  w.document.dispatchEvent(new w.Event("DOMContentLoaded"));
+
+  const skip = w.document.querySelector(".skip-link");
+  const clickEvent = new w.MouseEvent("click", { bubbles: true, cancelable: true });
+  skip.dispatchEvent(clickEvent);
+  assert.equal(clickEvent.defaultPrevented, true);
+  assert.equal(w.document.activeElement, main);
+  assert.equal(w.location.hash, "#mainContent");
+
+  w.history.replaceState(null, "", "/");
+  const keyEvent = new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  skip.dispatchEvent(keyEvent);
+  assert.equal(keyEvent.defaultPrevented, true);
+  assert.equal(w.document.activeElement, main);
+  assert.equal(w.location.hash, "#mainContent");
+  assert.equal(scrollCount, 2);
+});
+
 test("reportApiError maps timeout aborts to a friendly Korean message", () => {
   const w = loadUtils();
   const abortErr = Object.assign(new Error("The operation was aborted."), { name: "AbortError" });

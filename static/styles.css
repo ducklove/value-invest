@@ -127,6 +127,33 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.skip-link {
+  position: fixed;
+  top: 8px; left: 8px;
+  transform: translateY(-140%);
+  z-index: 10001;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: #fff;
+  text-decoration: none;
+  box-shadow: var(--shadow-md);
+}
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: none;
+  box-shadow: var(--ring), var(--shadow-md);
+}
+
 /* === Sidebar === */
 .sidebar {
   width: 340px; background: var(--sidebar-bg); border-right: 1px solid var(--border);

@@ -295,11 +295,12 @@ def test_market_tape_is_bottom_frame_outside_main():
 
     # 하단 탭바(.mobile-tabbar)와 시황 테이프는 모두 .main 바깥(아래)에 위치하고,
     # 차트 모달보다 앞선다. 탭바는 main 의 닫는 </div> 바로 뒤에 온다.
-    main_open = html.index('<div class="main">')
+    main_open = html.index('<main class="main" id="mainContent" tabindex="-1">')
     tabbar_pos = html.index('id="mobileTabbar"')
     tape_pos = html.index('id="marketTape"')
     chart_modal_pos = html.index('id="chartModal"')
     assert main_open < tabbar_pos < tape_pos < chart_modal_pos
+    assert "</main>\n\n<div class=\"profile-modal-overlay\"" in html
     assert "</div>\n\n<nav class=\"mobile-tabbar\"" in html
     assert "position: fixed;" in styles
     assert "bottom: 0;" in styles
@@ -1175,6 +1176,63 @@ def test_pwa_service_worker_keeps_conservative_cache_contract():
     assert "staleWhileRevalidate" not in sw
     navigate_branch = sw.split("request.mode === 'navigate'", 1)[1]
     assert "cache.put" not in navigate_branch
+
+
+def test_status_and_loading_feedback_are_announced_to_assistive_tech():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+
+    def tag_for(node_id: str) -> str:
+        match = re.search(rf'<[^>]*\bid="{re.escape(node_id)}"[^>]*>', html)
+        assert match, f"{node_id} tag missing"
+        return match.group(0)
+
+    for node_id in (
+        "dailyMarketStatus",
+        "econCalContent",
+        "preferenceStatus",
+        "wikiQaStatus",
+        "filingReviewStatus",
+        "reportsLoading",
+        "pfPeriodReportStatus",
+        "npsContent",
+    ):
+        tag = tag_for(node_id)
+        assert 'role="status"' in tag
+        assert 'aria-live="polite"' in tag
+
+    loading = tag_for("loadingOverlay")
+    assert 'role="status"' in loading
+    assert 'aria-live="polite"' in loading
+    assert 'aria-busy="false"' in loading
+    progress = tag_for("progressBar")
+    assert 'role="progressbar"' in progress
+    assert 'aria-label="분석 진행률"' in progress
+    assert 'aria-valuemin="0"' in progress
+    assert 'aria-valuemax="100"' in progress
+    assert 'aria-valuenow="0"' in progress
+    assert "function setAnalysisProgress(percent)" in analysis
+    assert "progressBar.setAttribute('aria-valuenow', String(value));" in analysis
+    assert "overlay.setAttribute('aria-busy', 'true');" in analysis
+    assert "overlay.setAttribute('aria-busy', 'false');" in analysis
+
+
+def test_app_shell_has_main_landmark_h1_and_skip_link():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    utils = (JS / "utils.js").read_text(encoding="utf-8")
+
+    assert '<a class="skip-link" href="#mainContent">본문으로 바로가기</a>' in html
+    assert '<main class="main" id="mainContent" tabindex="-1">' in html
+    assert '<h1 class="sr-only">Value Compass</h1>' in html
+    assert "</main>" in html
+    assert ".sr-only" in styles
+    assert ".skip-link" in styles
+    assert ".skip-link:focus-visible" in styles
+    assert "function initSkipLink()" in utils
+    assert "function focusMainContent()" in utils
+    assert "document.addEventListener('DOMContentLoaded', initSkipLink);" in utils
+    assert "skipLink.addEventListener('keydown'" in utils
 
 
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():

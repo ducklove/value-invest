@@ -410,9 +410,17 @@ function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
 }
 
 function resetProgress() {
-  document.getElementById('progressBar').style.width = '0%';
+  setAnalysisProgress(0);
   document.getElementById('progressSteps').innerHTML = '';
   document.getElementById('loadingDetail').textContent = '';
+}
+
+function setAnalysisProgress(percent) {
+  const value = Math.max(0, Math.min(100, Number(percent) || 0));
+  const progressBar = document.getElementById('progressBar');
+  if (!progressBar) return;
+  progressBar.style.width = `${value}%`;
+  progressBar.setAttribute('aria-valuenow', String(value));
 }
 
 function addStep(text, cls) {
@@ -453,10 +461,10 @@ async function analyzeStock(stockCode) {
   const overlay = document.getElementById('loadingOverlay');
   const loadingText = document.getElementById('loadingText');
   const loadingDetail = document.getElementById('loadingDetail');
-  const progressBar = document.getElementById('progressBar');
   const cancelBtn = document.getElementById('cancelBtn');
 
   overlay.classList.add('show');
+  overlay.setAttribute('aria-busy', 'true');
   cancelBtn.style.display = 'inline-block';
   resetProgress();
   loadingText.textContent = '데이터를 분석하고 있습니다...';
@@ -515,32 +523,32 @@ async function analyzeStock(stockCode) {
 
             if (step === 'financial_start') {
               markLastStepDone();
-              progressBar.style.width = '30%';
+              setAnalysisProgress(30);
               addStep(payload.message, 'active');
             } else if (step === 'financial_done' || step === 'financial_error') {
               markLastStepDone();
-              progressBar.style.width = '60%';
+              setAnalysisProgress(60);
               addStep(payload.message, step === 'financial_done' ? 'done' : '');
             } else if (step === 'market_start') {
               markLastStepDone();
-              progressBar.style.width = '65%';
+              setAnalysisProgress(65);
               addStep(payload.message, 'active');
             } else if (step === 'market_done' || step === 'market_error') {
               markLastStepDone();
-              progressBar.style.width = '85%';
+              setAnalysisProgress(85);
               addStep(payload.message, step === 'market_done' ? 'done' : '');
             } else if (step === 'saving') {
-              progressBar.style.width = '90%';
+              setAnalysisProgress(90);
               addStep(payload.message, 'active');
             } else if (step === 'analyzing') {
               markLastStepDone();
-              progressBar.style.width = '95%';
+              setAnalysisProgress(95);
               addStep(payload.message, 'active');
             } else if (step === 'start') {
               addStep(payload.message, 'active');
             }
           } else if (eventType === 'result') {
-            progressBar.style.width = '100%';
+            setAnalysisProgress(100);
             markLastStepDone();
             addStep('분석 완료!', 'done');
             resultData = payload;
@@ -586,6 +594,7 @@ async function analyzeStock(stockCode) {
   } finally {
     currentAbortController = null;
     overlay.classList.remove('show');
+    overlay.setAttribute('aria-busy', 'false');
   }
 }
 

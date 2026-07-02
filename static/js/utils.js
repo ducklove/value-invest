@@ -416,17 +416,54 @@ function requireApiConfiguration() {
   }
 }
 
+function focusMainContent() {
+  const mainContent = document.getElementById('mainContent');
+  if (!mainContent) return;
+  try {
+    mainContent.focus({ preventScroll: true });
+  } catch (_) {
+    mainContent.focus();
+  }
+  mainContent.scrollIntoView({ block: 'start' });
+  if (window.history?.replaceState) {
+    window.history.replaceState(null, '', '#mainContent');
+  } else {
+    window.location.hash = 'mainContent';
+  }
+}
+
+function initSkipLink() {
+  const skipLink = document.querySelector('.skip-link');
+  if (!skipLink) return;
+  skipLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    focusMainContent();
+  });
+  skipLink.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    focusMainContent();
+  });
+}
+
+document.addEventListener('DOMContentLoaded', initSkipLink);
+
 // --- Toast notification system ---
 function showToast(message, type = 'error', duration = 4000) {
   let container = document.getElementById('toastContainer');
   if (!container) {
     container = document.createElement('div');
     container.id = 'toastContainer';
+    container.setAttribute('aria-live', 'polite');
+    container.setAttribute('aria-atomic', 'false');
     container.style.cssText = 'position:fixed;top:16px;right:16px;z-index:10000;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
     document.body.appendChild(container);
   }
   const toast = document.createElement('div');
   const colors = { error: '#dc2626', success: '#059669', warning: '#d97706', info: '#2563eb' };
+  const liveType = type === 'error' || type === 'warning' ? 'alert' : 'status';
+  toast.setAttribute('role', liveType);
+  toast.setAttribute('aria-live', liveType === 'alert' ? 'assertive' : 'polite');
   toast.style.cssText = `background:${colors[type] || colors.error};color:white;padding:10px 16px;border-radius:8px;font-size:13px;max-width:360px;box-shadow:0 4px 12px rgba(0,0,0,0.15);pointer-events:auto;cursor:pointer;opacity:0;transition:opacity 0.2s;`;
   toast.textContent = message;
   toast.addEventListener('click', () => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 200); });

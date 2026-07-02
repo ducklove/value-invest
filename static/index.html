@@ -60,6 +60,8 @@ function trackEvent(name, params = {}) {
   </div>
 </noscript>
 
+<a class="skip-link" href="#mainContent">본문으로 바로가기</a>
+
 <aside class="sidebar">
   <div class="auth-panel" id="authPanel">
     <div class="auth-copy">
@@ -91,7 +93,8 @@ function trackEvent(name, params = {}) {
   </div>
 </aside>
 
-<div class="main">
+<main class="main" id="mainContent" tabindex="-1">
+  <h1 class="sr-only">Value Compass</h1>
   <div class="header">
     <div class="mobile-brand" role="button" tabindex="0" onclick="switchView('investing')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchView('investing');}">
       <span class="mobile-brand-mark" aria-hidden="true">V</span>
@@ -120,7 +123,7 @@ function trackEvent(name, params = {}) {
       </div>
       <div class="md-grid" id="marketDashboard">
         <div class="md-main">
-          <div id="mdIndMain"><div class="md-loading">시장 지표를 불러오는 중입니다...</div></div>
+          <div id="mdIndMain" role="status" aria-live="polite"><div class="md-loading">시장 지표를 불러오는 중입니다...</div></div>
           <div id="externalTools"></div>
           <div id="marketNews"></div>
         </div>
@@ -140,7 +143,7 @@ function trackEvent(name, params = {}) {
         </div>
         <button class="daily-market-refresh" id="dailyMarketRefreshBtn" type="button" onclick="loadDailyMarketBrief(true)">새로고침</button>
       </div>
-      <div class="daily-market-status" id="dailyMarketStatus">시황을 불러오는 중입니다...</div>
+      <div class="daily-market-status" id="dailyMarketStatus" role="status" aria-live="polite">시황을 불러오는 중입니다...</div>
       <div class="daily-market-body" id="dailyMarketBody"></div>
       <div class="daily-market-meta" id="dailyMarketMeta"></div>
     </section>
@@ -154,7 +157,7 @@ function trackEvent(name, params = {}) {
         <button class="econ-cal-refresh" type="button" onclick="loadEconomicCalendar()">새로고침</button>
       </div>
       <div class="econ-cal-note">주요 경제지표 발표 일정과 실제·예상·이전치를 국가·중요도·기간으로 확인하세요. (출처: 제로인/한경 경제캘린더 피드)</div>
-      <div id="econCalContent"><div class="md-loading">경제 일정을 불러오는 중입니다...</div></div>
+      <div id="econCalContent" role="status" aria-live="polite"><div class="md-loading">경제 일정을 불러오는 중입니다...</div></div>
     </section>
   </div><!-- /investingView -->
 
@@ -181,7 +184,7 @@ function trackEvent(name, params = {}) {
         <button class="personalization-btn primary" id="saveNoteBtn" type="button" onclick="savePreferenceNote()">메모 저장</button>
       </div>
       <textarea class="personalization-note" id="preferenceNote" rows="3" placeholder="이 종목에 대한 내 메모를 남겨보세요."></textarea>
-      <div class="personalization-status" id="preferenceStatus"></div>
+      <div class="personalization-status" id="preferenceStatus" role="status" aria-live="polite"></div>
     </div>
     <div class="coverage" id="coverageNote"></div>
 
@@ -194,7 +197,7 @@ function trackEvent(name, params = {}) {
         placeholder="예: 최근 분기보고서 기준 주요 변화와 리스크는 무엇인가요?"></textarea>
       <div class="wiki-qa-actions">
         <button id="wikiQaSubmit" class="wiki-qa-btn" type="button">질문</button>
-        <span class="wiki-qa-status" id="wikiQaStatus"></span>
+        <span class="wiki-qa-status" id="wikiQaStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="wiki-qa-answer" id="wikiQaAnswer" style="display:none;"></div>
       <div class="wiki-qa-meta" id="wikiQaMeta"></div>
@@ -241,7 +244,7 @@ function trackEvent(name, params = {}) {
         <a class="filing-review-source" id="filingReviewSource" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">DART 원문</a>
       </div>
     </div>
-    <div class="filing-review-status" id="filingReviewStatus"></div>
+    <div class="filing-review-status" id="filingReviewStatus" role="status" aria-live="polite"></div>
     <div class="filing-review-cards" id="filingReviewCards"></div>
     <div class="filing-review-body" id="filingReviewBody"></div>
     <div class="filing-review-trends" id="filingReviewTrends"></div>
@@ -256,7 +259,7 @@ function trackEvent(name, params = {}) {
     <div class="report-note">제목을 누르면 네이버 금융 리서치의 공개 PDF 원문이 열립니다. 각 행의 <strong>요약 내용 보기</strong>를 누르면 LLM이 생성한 한국어 요약이 펼쳐집니다.</div>
 
     <div class="reports-table-wrap">
-      <div class="reports-loading" id="reportsLoading">리포트를 불러오는 중...</div>
+      <div class="reports-loading" id="reportsLoading" role="status" aria-live="polite">리포트를 불러오는 중...</div>
       <table class="reports-table" id="reportsTable" style="display:none;">
         <thead>
           <tr>
@@ -497,7 +500,7 @@ function trackEvent(name, params = {}) {
             <button class="pf-mini-btn" type="button" id="pfPeriodReportGenerateBtn" onclick="pfGeneratePeriodReport()">생성/갱신</button>
           </div>
         </div>
-        <div class="pf-period-report-status" id="pfPeriodReportStatus">성과 탭을 열면 기간 목록을 불러옵니다.</div>
+        <div class="pf-period-report-status" id="pfPeriodReportStatus" role="status" aria-live="polite">성과 탭을 열면 기간 목록을 불러옵니다.</div>
         <div id="pfPeriodReportContent" class="pf-period-report-content">
           <div class="pf-risk-empty">저장된 기간 보고서가 여기에 표시됩니다.</div>
         </div>
@@ -621,7 +624,7 @@ function trackEvent(name, params = {}) {
   </div><!-- /portfolioView -->
 
   <div id="npsView" style="display:none;">
-    <div id="npsContent" class="nps-embed">국민연금 포트폴리오 대시보드를 불러오는 중...</div>
+    <div id="npsContent" class="nps-embed" role="status" aria-live="polite">국민연금 포트폴리오 대시보드를 불러오는 중...</div>
   </div>
 
   <div id="labsView" style="display:none;">
@@ -703,7 +706,7 @@ function trackEvent(name, params = {}) {
     </div>
   </div>
 
-</div>
+</main>
 
 <div class="profile-modal-overlay" id="profileModal" style="display:none;" onclick="if(event.target===this)closeProfileModal()" role="dialog" aria-modal="true" aria-labelledby="profileModalTitle">
   <div class="profile-modal">
@@ -803,12 +806,12 @@ function trackEvent(name, params = {}) {
   </div>
 </div>
 
-<div class="loading-overlay" id="loadingOverlay">
-  <div class="spinner"></div>
+<div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite" aria-busy="false" aria-labelledby="loadingText">
+  <div class="spinner" aria-hidden="true"></div>
   <div class="loading-content">
     <div class="loading-text" id="loadingText">데이터를 분석하고 있습니다...</div>
     <div class="loading-detail" id="loadingDetail"></div>
-    <div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+    <div class="progress-bar-container"><div class="progress-bar" id="progressBar" role="progressbar" aria-label="분석 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
     <div class="progress-steps" id="progressSteps"></div>
     <button class="cancel-btn" id="cancelBtn" onclick="cancelAnalysis()">분석 취소</button>
   </div>

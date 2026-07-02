@@ -83,6 +83,62 @@ def _slow_request_threshold_ms() -> float:
         return 1000.0
 
 
+_CSP_REPORT_ONLY = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+    "https://accounts.google.com https://www.googletagmanager.com "
+    "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+    "img-src 'self' data: https:; "
+    "font-src 'self' data: https:; "
+    "connect-src 'self' https: wss: ws:; "
+    "frame-src https:; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+
+_SECURITY_HEADERS = {
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()",
+    "content-security-policy-report-only": _CSP_REPORT_ONLY,
+}
+
+
+class _SecurityHeadersMiddleware:
+    """Attach baseline browser security headers without buffering responses."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                existing = {name.lower() for name, _ in message.get("headers", [])}
+                headers = list(message.get("headers", []))
+                for name, value in _SECURITY_HEADERS.items():
+                    raw_name = name.encode("latin-1")
+                    if raw_name not in existing:
+                        headers.append((raw_name, value.encode("latin-1")))
+                if scope.get("scheme") == "https" and b"strict-transport-security" not in existing:
+                    headers.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+def _register_security_headers(app: FastAPI) -> None:
+    app.add_middleware(_SecurityHeadersMiddleware)
+
+
 class _RequestLatencyMiddleware:
     """Record slow `/api/*` calls and 5xx responses to the in-app event log.
 
@@ -197,6 +253,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     )
 
     register_exception_handlers(app)
+    _register_security_headers(app)
     _register_latency_observer(app)
     _register_feature_routers(app)
 
