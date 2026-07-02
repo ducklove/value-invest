@@ -2014,6 +2014,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 #btChart { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
 
 /* === 국민연금 탭 — 분리된 nps-tracker 대시보드를 iframe 으로 임베드 === */
+.nps-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.nps-header h2 { margin: 0; font-size: 20px; line-height: 1.25; }
+.nps-refresh {
+  flex: 0 0 auto; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface); color: var(--text); padding: 7px 12px;
+  font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.nps-refresh:hover { border-color: var(--primary); color: var(--primary); }
 .nps-embed { padding: 32px 16px; text-align: center; color: var(--text-secondary); }
 .nps-embed.is-frame { padding: 0; text-align: initial; }
 .nps-frame {
@@ -2596,6 +2604,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   justify-content: center;
   min-height: 34px;
   padding: 0 12px;
+  margin-left: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -2604,7 +2613,21 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  position: relative;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+/* 뷰 전환 탭(보유종목/심층 분석)과 표시 옵션(액션/간편/통화)을 시각적으로
+   분리하는 구분선 — 별도 래퍼 없이 첫 옵션 버튼 앞에 얇은 선만 그린다
+   (UX 감사 P2⑨). */
+.pf-action-toggle::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  transform: translateY(-50%);
 }
 .pf-action-toggle:hover { color: var(--text); border-color: var(--primary); }
 .pf-action-toggle.active,
@@ -4711,8 +4734,7 @@ body.pf-mobile-simple .nav-btn {
   padding: 7px 10px;
   font-size: 12px;
 }
-body.pf-mobile-simple .mobile-auth-name,
-body.pf-mobile-simple .wiki-stats {
+body.pf-mobile-simple .mobile-auth-name {
   display: none !important;
 }
 body.pf-mobile-simple .pf-summary {
@@ -5023,7 +5045,16 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
 .wiki-stats:empty { display: none; }
 .wiki-stats .ws-sep { opacity: 0.5; margin: 0 4px; }
 .wiki-stats .ws-num { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-@media (max-width: 640px) { .wiki-stats { display: none; } }
+/* 운영 지표라 헤더에서 프로필 모달 하단으로 옮겼다(UX 감사 P3) — 헤더용 알약
+   모양(margin-left:auto 로 우측 정렬) 대신 조용한 footnote 로 재배치. */
+.profile-wiki-stats {
+  margin: 4px 0 0;
+  padding: 10px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  text-align: center;
+}
 
 /* === Wiki count chip shown inside reports section header === */
 .wiki-count {
@@ -5254,8 +5285,8 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
   .mobile-brand { display: flex; flex: 1 1 auto; }
   /* 상단 가로 탭은 하단 탭바로 대체 */
   .main-nav { display: none; }
-  /* 헤더에는 브랜드 + (테마/로그인/프로필)만 남긴다 */
-  .wiki-stats { display: none; }
+  /* 헤더에는 브랜드 + (테마/로그인/프로필)만 남긴다. wiki-stats 는 이제 헤더에
+     없다 — 프로필 모달로 옮겨졌다(UX 감사 P3). */
   .theme-toggle { flex: 0 0 auto; }
 
   /* 콘텐츠 위에 쌓이던 사이드바, 그리고 하단에 겹치는 시황 테이프 제거 */

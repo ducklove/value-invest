@@ -1413,3 +1413,31 @@ def test_my_alerts_unify_stock_and_portfolio_rules_behind_the_profile_modal():
     assert "pfAlertsApi('/calendar')" in alerts
     assert "function pfAlertsGoToCalendar()" in alerts
     assert "econCalSection" in alerts
+
+
+def test_ux_polish_theme_wiki_badge_and_nps_reload_and_tab_bar_divider():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    search = (JS / "search.js").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+
+    # P3: 테마 버튼 aria-label (아이콘만 있고 접근 가능한 이름이 없었다).
+    assert '<button class="theme-toggle" onclick="toggleTheme()" title="테마 전환" aria-label="테마 전환">' in html
+
+    # P3: 저장된 선택이 없으면 OS 다크모드 설정을 따른다.
+    assert "prefers-color-scheme: dark" in search
+
+    # P3: 위키 누적 수집량 배지는 운영 지표라 헤더(전 사용자 노출)에서
+    # 프로필 모달 하단으로 내려갔다 — id는 유지해 loadWikiStats() 무변경.
+    # main-nav 바로 다음(옛 헤더 위치)엔 더는 없고, profileModal 안에만 한 번 있다.
+    assert html.count('id="wikiStats"') == 1
+    assert 'class="wiki-stats profile-wiki-stats" id="wikiStats"' in html
+    assert html.find('id="profileModal"') < html.find('id="wikiStats"') < html.find('id="stockAlertModal"')
+
+    # P3: 국민연금 iframe — 세션 내 1회 로드 + 수동 새로고침 버튼.
+    assert 'onclick="loadNpsView({ force: true })"' in html
+    assert "function loadNpsView({ force = false } = {})" in shell
+    assert "if (existing && !force) return;" in shell
+
+    # P2⑨: 뷰 전환 탭(보유종목/심층 분석)과 표시 옵션(액션/간편/통화) 사이의 구분선.
+    assert ".pf-action-toggle::before" in styles

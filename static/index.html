@@ -106,14 +106,13 @@ function trackEvent(name, params = {}) {
       <button class="nav-btn" data-view="portfolio" onclick="switchView('portfolio')">포트폴리오</button>
       <button class="nav-btn" data-view="labs" onclick="switchView('labs')">도구</button>
     </nav>
-    <div class="wiki-stats" id="wikiStats" title="LLM 위키 누적 수집량"></div>
     <div class="mobile-auth-status" id="mobileAuthStatus" role="button" tabindex="0" onclick="openProfileModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProfileModal();}">
       <img class="mobile-auth-avatar" id="mobileAuthAvatar" alt="">
       <span class="mobile-auth-name" id="mobileAuthName"></span>
       <button class="mobile-auth-logout" onclick="event.stopPropagation(); logout()">로그아웃</button>
     </div>
     <a class="mobile-login" id="mobileLoginBtn" href="#" style="display:none;">로그인</a>
-    <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환">🌓</button>
+    <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환" aria-label="테마 전환">🌓</button>
   </div>
 
   <div id="investingView">
@@ -602,6 +601,17 @@ function trackEvent(name, params = {}) {
   </div><!-- /portfolioView -->
 
   <div id="npsView" style="display:none;">
+    <div class="lab-inline-banner">
+      <span>도구</span>
+      <strong>국민연금 국내주식 포트폴리오 — 별도 대시보드(nps-tracker) 임베드</strong>
+      <a href="/labs" onclick="event.preventDefault(); switchView('labs');">도구로 돌아가기</a>
+    </div>
+    <div class="nps-header">
+      <h2>국민연금 포트폴리오</h2>
+      <!-- 탭을 열 때마다 매번 다시 로드하면 스크롤 위치가 초기화됐다 — 세션 내
+           최초 1회만 로드하고, 최신화는 이 버튼으로만(UX 감사 P3). -->
+      <button class="nps-refresh" type="button" onclick="loadNpsView({ force: true })">새로고침</button>
+    </div>
     <div id="npsContent" class="nps-embed" role="status" aria-live="polite">국민연금 포트폴리오 대시보드를 불러오는 중...</div>
   </div>
 
@@ -731,6 +741,10 @@ function trackEvent(name, params = {}) {
         <button class="profile-save-btn" id="profilePasswordSaveBtn" type="submit">저장</button>
         <div class="profile-status" id="profilePasswordStatus" aria-live="polite"></div>
       </form>
+      <!-- 위키 누적 수집량은 운영 지표라 일반 사용자 화면(헤더)에서는 소음이었다 —
+           프로필 하단으로 강등한다(UX 감사 P3). id 는 그대로라 loadWikiStats()
+           (app-main.js)가 수정 없이 이 새 위치를 채운다. -->
+      <div class="wiki-stats profile-wiki-stats" id="wikiStats" title="LLM 위키 누적 수집량"></div>
     </div>
   </div>
 </div>

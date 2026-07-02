@@ -327,10 +327,14 @@ function _npsFrameSrc() {
   // _=nonce: 부모 새로고침·탭 전환 시 iframe HTML 도 새로 받아 GitHub Pages 캐시로 인한 stale 방지.
   return base.replace(/\/+$/, '') + '/?embed=true&theme=' + theme + '&_=' + Date.now();
 }
-function loadNpsView() {
+function loadNpsView({ force = false } = {}) {
   const container = document.getElementById('npsContent');
   if (!container) return;
-  // 탭을 열 때마다 새 nonce 로 다시 로드해 항상 최신 데이터를 보장한다(1회-로드 캐시 금지).
+  // 탭을 열 때마다 새 nonce 로 다시 로드하면 스크롤 위치가 매번 초기화됐다 —
+  // 세션 내 최초 1회만 로드하고, 이후는 명시적 새로고침 버튼(force)에서만
+  // 다시 받는다(UX 감사 P3). 테마 토글(syncNpsFrameTheme)은 별도로 항상 갱신.
+  const existing = container.querySelector('iframe.nps-frame');
+  if (existing && !force) return;
   // 국민연금 포트폴리오는 별도 정적 대시보드(nps-tracker)로 분리됐다. 허브는
   // 이를 iframe 으로 임베드만 하고, 요약은 투자정보 '분석 도구' 카드가 보여준다.
   const iframe = document.createElement('iframe');

@@ -11,7 +11,15 @@ function toggleTheme() {
 }
 (function initTheme() {
   const saved = localStorage.getItem('theme');
-  if (saved) document.documentElement.setAttribute('data-theme', saved);
+  if (saved) {
+    document.documentElement.setAttribute('data-theme', saved);
+    return;
+  }
+  // 사용자가 명시적으로 고른 적이 없으면 OS 다크모드 설정을 따른다(UX 감사 P3).
+  // localStorage 에 저장하지 않아 OS 설정이 바뀌면 다음 방문에도 계속 따라간다.
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
 })();
 
 // Search
