@@ -18,6 +18,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import kis_key_manager
 import kis_ws_manager
 from core.config import get_settings
+from deps import get_current_user
 from services import stock_quotes
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,31 @@ class _Session:
 # Ordered dict (insertion order) — oldest session is first
 _sessions: dict[WebSocket, _Session] = {}
 _sessions_lock = asyncio.Lock()
+
+
+def _can_takeover(user: dict | None) -> bool:
+    return bool(user and user.get("is_admin"))
+
+
+def _ws_status_payload(
+    user: dict | None,
+    *,
+    active: bool = False,
+    session: _Session | None = None,
+    **extra,
+) -> dict:
+    payload = {
+        "type": "ws_status",
+        "occupied": kis_key_manager.available_count() == 0,
+        "active": active,
+        "can_takeover": _can_takeover(user),
+        "slots_total": kis_key_manager.total_count(),
+        "slots_available": kis_key_manager.available_count(),
+    }
+    if session is not None:
+        payload["slots_active"] = len(session.conns)
+    payload.update(extra)
+    return payload
 
 
 async def _send_json(websocket: WebSocket, session: _Session, payload: dict) -> None:
@@ -221,11 +247,7 @@ async def _ensure_session_capacity(
     while len(session.conns) < desired:
         key_slot = await kis_key_manager.acquire()
         if key_slot is None:
-            if not await _evict_oldest_session(exclude=session):
-                break
-            key_slot = await kis_key_manager.acquire()
-            if key_slot is None:
-                break
+            break
         await _start_connection(websocket, session, key_slot)
 
     await _trim_extra_connections(session, min(desired, len(session.conns)))
@@ -259,6 +281,7 @@ async def ws_quotes(websocket: WebSocket):
         return
     await websocket.accept()
     session = _Session()
+    current_user = await get_current_user(websocket)  # WebSocket exposes the same cookie mapping as Request.
 
     try:
         # Send cached WS quotes only when the active WS market matches the
@@ -275,12 +298,7 @@ async def ws_quotes(websocket: WebSocket):
                 await _send_json(websocket, session, payload)
 
         # Report slot availability
-        await _send_json(websocket, session, {
-            "type": "ws_status",
-            "occupied": kis_key_manager.available_count() == 0,
-            "slots_total": kis_key_manager.total_count(),
-            "slots_available": kis_key_manager.available_count(),
-        })
+        await _send_json(websocket, session, _ws_status_payload(current_user))
 
         while True:
             raw = await websocket.receive_text()
@@ -295,47 +313,37 @@ async def ws_quotes(websocket: WebSocket):
                 await _send_json(websocket, session, {"type": "pong"})
 
             elif action == "takeover":
+                if not _can_takeover(current_user):
+                    await _send_json(
+                        websocket,
+                        session,
+                        _ws_status_payload(current_user, active=False, forbidden=True),
+                    )
+                    continue
+
                 if session.is_active:
                     await _send_json(
                         websocket,
                         session,
-                        {
-                            "type": "ws_status",
-                            "occupied": False,
-                            "active": True,
-                            "slots_active": len(session.conns),
-                        },
+                        _ws_status_payload(current_user, active=True, session=session, occupied=False),
                     )
                     continue
 
                 # Try to acquire a free key slot
                 key_slot = await kis_key_manager.acquire()
 
-                # If none available, kick the oldest session to free a slot
+                # If none available, an explicit admin request may kick the
+                # oldest session to free one slot. Passive clients and
+                # subscription expansion never call this path.
                 if key_slot is None:
-                    async with _sessions_lock:
-                        if _sessions:
-                            oldest_ws, old_session = next(iter(_sessions.items()))
-                            old_session.kicked = True
-                            del _sessions[oldest_ws]
-                        else:
-                            oldest_ws, old_session = None, None
-
-                    if old_session is not None:
-                        await _stop_session(old_session)
-                        try:
-                            await _send_json(oldest_ws, old_session, {"type": "ws_taken_over"})
-                            await oldest_ws.close(code=4001, reason="taken_over")
-                        except Exception:
-                            pass
-
+                    await _evict_oldest_session(exclude=session)
                     key_slot = await kis_key_manager.acquire()
 
                 if key_slot is None:
                     await _send_json(
                         websocket,
                         session,
-                        {"type": "ws_status", "occupied": True, "active": False},
+                        _ws_status_payload(current_user, active=False, occupied=True),
                     )
                     continue
 
@@ -349,14 +357,18 @@ async def ws_quotes(websocket: WebSocket):
                 await _send_json(
                     websocket,
                     session,
-                    {
-                        "type": "ws_status",
-                        "occupied": False,
-                        "active": True,
-                        "slots_active": len(session.conns),
-                        "slots_total": kis_key_manager.total_count(),
-                        "slots_available": kis_key_manager.available_count(),
-                    },
+                    _ws_status_payload(current_user, active=True, session=session, occupied=False),
+                )
+
+            elif action == "release":
+                if session.is_active:
+                    async with _sessions_lock:
+                        _sessions.pop(websocket, None)
+                    await _stop_session(session)
+                await _send_json(
+                    websocket,
+                    session,
+                    _ws_status_payload(current_user, active=False, released=True),
                 )
 
             elif action == "subscribe":

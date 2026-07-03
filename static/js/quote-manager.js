@@ -9,6 +9,7 @@ const QUOTE_MANAGER_RETRY_MS = 5_000;
 const QUOTE_MANAGER_BATCH_SIZE = 30;
 const QUOTE_MANAGER_BATCH_PARALLEL = 1;
 const QUOTE_MANAGER_PRIORITY_CODES = new Set(['A200', 'A200.AX', 'EUN2', 'EUN2.DE']);
+const QUOTE_MANAGER_MANUAL_WS_KEY = 'quote_manager_manual_ws_enabled';
 
 const QuoteManager = {
   ws: null,
@@ -21,17 +22,60 @@ const QuoteManager = {
   overflowTimer: null,
   generalPollTimer: null,
   wsActive: false,      // true when this session owns the active WS slot
+  desiredActive: false,
+  manualControlAllowed: false,
+  serverCanTakeover: null,
+  lastStatus: 'offline',
+  lastSlotMeta: null,
   onQuote: null,
   inflightCodes: new Set(),
 
+  _loadDesiredActive() {
+    try { return sessionStorage.getItem(QUOTE_MANAGER_MANUAL_WS_KEY) === '1'; } catch { return false; }
+  },
+
+  _saveDesiredActive() {
+    try {
+      if (this.desiredActive) sessionStorage.setItem(QUOTE_MANAGER_MANUAL_WS_KEY, '1');
+      else sessionStorage.removeItem(QUOTE_MANAGER_MANUAL_WS_KEY);
+    } catch (e) {}
+  },
+
+  setManualControlAllowed(allowed) {
+    const nextAllowed = !!allowed;
+    this.manualControlAllowed = nextAllowed;
+    if (nextAllowed) {
+      this.desiredActive = this._loadDesiredActive();
+    } else {
+      const shouldRelease = this.wsActive || this.desiredActive;
+      this.desiredActive = false;
+      this._saveDesiredActive();
+      if (shouldRelease && this.connected && this.ws) {
+        try { this.ws.send(JSON.stringify({ action: 'release' })); } catch (e) {}
+      }
+      this._deactivateWsSlot();
+    }
+    this._syncControlUi();
+  },
+
   connect() {
-    if (this.ws) return;
+    if (this.manualControlAllowed && this._loadDesiredActive()) {
+      this.desiredActive = true;
+    }
+    if (this.ws) {
+      this._syncControlUi();
+      return;
+    }
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${location.host}/ws/quotes`;
     try { this.ws = new WebSocket(url); } catch { this._scheduleReconnect(); return; }
+    this.lastStatus = this.desiredActive ? 'connecting' : 'polling';
+    this._syncControlUi();
     this.ws.onopen = () => {
       this.connected = true;
-      this.ws.send(JSON.stringify({ action: 'takeover' }));
+      this.lastStatus = this.desiredActive ? 'connecting' : 'polling';
+      this._syncControlUi();
+      if (this.desiredActive) this._requestActiveSlot();
     };
     this.ws.onmessage = (event) => {
       try {
@@ -46,23 +90,52 @@ const QuoteManager = {
           this._fetchInitialQuotes(allCodes);
           this._startOverflowPolling();
         } else if (msg.type === 'ws_status') {
+          this.lastSlotMeta = msg;
+          this.serverCanTakeover = msg.can_takeover !== false;
           if (msg.active) {
             this.wsActive = true;
+            this.lastStatus = 'active';
+            if (this.manualControlAllowed) {
+              this.desiredActive = true;
+              this._saveDesiredActive();
+            }
             this._sendSubscriptions();
-          } else if (msg.occupied && this.connected && this.ws) {
-            this.ws.send(JSON.stringify({ action: 'takeover' }));
+          } else {
+            this._deactivateWsSlot();
+            if (msg.released || msg.forbidden) {
+              this.desiredActive = false;
+              this._saveDesiredActive();
+            }
+            this.lastStatus = msg.forbidden ? 'forbidden'
+              : this.desiredActive && msg.occupied ? 'occupied'
+              : this.connected ? 'polling'
+              : 'offline';
           }
+          this._syncControlUi();
         } else if (msg.type === 'ws_taken_over') {
-          this.wsActive = false;
+          this.desiredActive = false;
+          this._saveDesiredActive();
+          this._deactivateWsSlot();
+          this.lastStatus = 'taken_over';
+          this._syncControlUi();
           this._showTakenOverBanner();
         }
       } catch (e) { console.warn(e); }
     };
     this.ws.onclose = (ev) => {
       this.connected = false;
-      this.wsActive = false;
+      this._deactivateWsSlot();
       this.ws = null;
-      if (ev.code === 4001) return;
+      this.serverCanTakeover = null;
+      if (ev.code === 4001) {
+        this.desiredActive = false;
+        this._saveDesiredActive();
+        this.lastStatus = 'taken_over';
+        this._syncControlUi();
+        return;
+      }
+      this.lastStatus = 'reconnecting';
+      this._syncControlUi();
       this._scheduleReconnect();
     };
     this.ws.onerror = () => {};
@@ -80,17 +153,20 @@ const QuoteManager = {
       this.ws.close();
       this.ws = null;
     }
+    this.desiredActive = false;
+    this._saveDesiredActive();
     this.connected = false;
-    this.wsActive = false;
-    this.wsCodes = new Set();
-    this.overflowCodes = [];
-    this.lastWsQuoteAt = {};
+    this._deactivateWsSlot();
+    this.serverCanTakeover = null;
+    this.lastStatus = 'offline';
     this.inflightCodes.clear();
+    this._syncControlUi();
   },
 
   _scheduleReconnect() {
     if (this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, 5000);
+    this._syncControlUi();
   },
 
   _showTakenOverBanner() {
@@ -103,14 +179,117 @@ const QuoteManager = {
 
   isLive(code) { return this.wsActive && this.wsCodes.has(code); },
 
+  requestActive() {
+    if (!this.manualControlAllowed) {
+      this.desiredActive = false;
+      this._saveDesiredActive();
+      this.lastStatus = 'forbidden';
+      this._syncControlUi();
+      return;
+    }
+    this.desiredActive = true;
+    this._saveDesiredActive();
+    this.lastStatus = this.wsActive ? 'active' : 'connecting';
+    if (this.ws && this.serverCanTakeover === false) {
+      this.ws.onclose = null;
+      try { this.ws.close(); } catch (e) {}
+      this.ws = null;
+      this.connected = false;
+      this.serverCanTakeover = null;
+    }
+    this.connect();
+    if (this.connected) this._requestActiveSlot();
+    this._syncControlUi();
+  },
+
+  releaseActive() {
+    this.desiredActive = false;
+    this._saveDesiredActive();
+    if (this.connected && this.ws) {
+      try { this.ws.send(JSON.stringify({ action: 'release' })); } catch (e) {}
+    }
+    this._deactivateWsSlot();
+    this.lastStatus = this.connected ? 'polling' : 'offline';
+    this._syncControlUi();
+    this._pollAll();
+  },
+
+  toggleActive() {
+    if (this.wsActive || this.desiredActive) this.releaseActive();
+    else this.requestActive();
+  },
+
   updateSubscriptions(requested) {
     this.subscriptions = requested;
     this._sendSubscriptions();
   },
 
+  _requestActiveSlot() {
+    if (!this.connected || !this.ws || !this.desiredActive || !this.manualControlAllowed) return;
+    try {
+      this.ws.send(JSON.stringify({ action: 'takeover' }));
+      this.lastStatus = this.wsActive ? 'active' : 'connecting';
+    } catch (e) {
+      this.lastStatus = 'reconnecting';
+    }
+    this._syncControlUi();
+  },
+
   _sendSubscriptions() {
     if (!this.connected || !this.ws || !this.wsActive) return;
     this.ws.send(JSON.stringify({ action: 'subscribe', requested: this.subscriptions }));
+  },
+
+  _deactivateWsSlot() {
+    this.wsActive = false;
+    this.wsCodes = new Set();
+    this.overflowCodes = [];
+    this.lastWsQuoteAt = {};
+    if (this.overflowTimer) {
+      clearInterval(this.overflowTimer);
+      this.overflowTimer = null;
+    }
+  },
+
+  _controlStatusText() {
+    if (this.wsActive) {
+      const slots = this.lastSlotMeta?.slots_active;
+      return slots ? `실시간 ${slots}슬롯` : '실시간 연결됨';
+    }
+    if (this.lastStatus === 'connecting') return '연결 중';
+    if (this.lastStatus === 'reconnecting') return '재연결 중';
+    if (this.lastStatus === 'occupied') return '다른 세션 사용 중';
+    if (this.lastStatus === 'forbidden') return '관리자 전용';
+    if (this.lastStatus === 'taken_over') return '폴링 전환됨';
+    if (this.connected) return '폴링';
+    return '오프라인';
+  },
+
+  _syncControlUi() {
+    const button = document.getElementById('pfWsToggle');
+    const status = document.getElementById('pfWsStatus');
+    const visible = !!this.manualControlAllowed;
+    if (button) {
+      button.hidden = !visible;
+      if (visible) {
+        const activeOrPending = this.wsActive || this.desiredActive;
+        button.textContent = activeOrPending ? '웹소켓 해제' : '웹소켓 연결';
+        button.classList.toggle('active', activeOrPending);
+        button.setAttribute('aria-pressed', activeOrPending ? 'true' : 'false');
+        button.disabled = this.desiredActive && !this.connected && !!this.reconnectTimer;
+        button.title = activeOrPending ? '실시간 웹소켓 연결 해제' : '실시간 웹소켓 연결';
+      }
+    }
+    if (status) {
+      status.hidden = !visible;
+      if (visible) {
+        status.textContent = this._controlStatusText();
+        status.dataset.state = this.wsActive ? 'active'
+          : this.lastStatus === 'forbidden' || this.lastStatus === 'occupied' ? 'warning'
+          : this.lastStatus === 'reconnecting' || this.lastStatus === 'connecting' ? 'pending'
+          : 'polling';
+      }
+    }
   },
 
   _retryTimer: null,
@@ -238,3 +417,7 @@ const QuoteManager = {
     if (allCodes.size) await this._fetchQuotes([...allCodes]);
   },
 };
+
+function toggleQuoteWebSocket() {
+  QuoteManager.toggleActive();
+}

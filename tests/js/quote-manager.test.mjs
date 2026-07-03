@@ -124,7 +124,7 @@ function createHarness({ wsThrows = false, quotes = {} } = {}) {
   return { w, qm, clock, MockWebSocket, wsAttempts, fetchCalls, ticks };
 }
 
-test("connect: ws:// URL, takeover on open, general poll interval armed", () => {
+test("connect: ws:// URL, passive open, general poll interval armed", () => {
   const { qm, clock, MockWebSocket } = createHarness();
   qm.connect();
   assert.equal(MockWebSocket.instances.length, 1);
@@ -135,11 +135,28 @@ test("connect: ws:// URL, takeover on open, general poll interval armed", () => 
 
   ws.onopen();
   assert.equal(qm.connected, true);
-  assert.deepEqual(ws.sent, [{ action: "takeover" }]);
+  assert.deepEqual(ws.sent, []);
 
   // connect() while a socket exists is a no-op.
   qm.connect();
   assert.equal(MockWebSocket.instances.length, 1);
+  qm.disconnect();
+});
+
+test("requestActive: admin control sends the only takeover and persists tab intent", () => {
+  const { w, qm, MockWebSocket } = createHarness();
+  qm.setManualControlAllowed(true);
+  qm.requestActive();
+  assert.equal(MockWebSocket.instances.length, 1);
+  assert.equal(qm.desiredActive, true);
+  assert.equal(w.sessionStorage.getItem("quote_manager_manual_ws_enabled"), "1");
+
+  const ws = MockWebSocket.instances[0];
+  ws.onopen();
+  assert.deepEqual(ws.sent, [{ action: "takeover" }]);
+  qm.connect();
+  assert.equal(MockWebSocket.instances.length, 1);
+  assert.deepEqual(ws.sent, [{ action: "takeover" }]);
   qm.disconnect();
 });
 
@@ -149,7 +166,8 @@ test("ws_status active → subscribe message with the requested map; isLive per 
     AAPL: { price: 201.5, previous_close: 200, source: "rest", date: "20260610" },
   };
   const { qm, clock, MockWebSocket, fetchCalls, ticks } = createHarness({ quotes });
-  qm.connect();
+  qm.setManualControlAllowed(true);
+  qm.requestActive();
   const ws = MockWebSocket.instances[0];
   ws.onopen();
 
@@ -188,14 +206,27 @@ test("ws_status active → subscribe message with the requested map; isLive per 
   qm.disconnect();
 });
 
-test("ws_status occupied (not granted) → client re-sends takeover", () => {
+test("ws_status occupied (not granted) → passive client does not steal the slot", () => {
   const { qm, MockWebSocket } = createHarness();
   qm.connect();
   const ws = MockWebSocket.instances[0];
   ws.onopen();
   ws.onmessage({ data: JSON.stringify({ type: "ws_status", active: false, occupied: true }) });
   assert.equal(qm.wsActive, false);
-  assert.deepEqual(ws.sent, [{ action: "takeover" }, { action: "takeover" }]);
+  assert.deepEqual(ws.sent, []);
+  qm.disconnect();
+});
+
+test("ws_status occupied after explicit request → client does not loop takeover", () => {
+  const { qm, MockWebSocket } = createHarness();
+  qm.setManualControlAllowed(true);
+  qm.requestActive();
+  const ws = MockWebSocket.instances[0];
+  ws.onopen();
+  ws.onmessage({ data: JSON.stringify({ type: "ws_status", active: false, occupied: true }) });
+  assert.equal(qm.wsActive, false);
+  assert.equal(qm.desiredActive, true);
+  assert.deepEqual(ws.sent, [{ action: "takeover" }]);
   qm.disconnect();
 });
 
@@ -226,7 +257,8 @@ test("quote message → onQuote with the parsed tick; null price still dispatche
 
 test("ws_taken_over → wsActive false + banner that auto-removes after 5s", async () => {
   const { w, qm, clock, MockWebSocket } = createHarness();
-  qm.connect();
+  qm.setManualControlAllowed(true);
+  qm.requestActive();
   const ws = MockWebSocket.instances[0];
   ws.onopen();
   ws.onmessage({ data: JSON.stringify({ type: "ws_status", active: true }) });
@@ -234,6 +266,8 @@ test("ws_taken_over → wsActive false + banner that auto-removes after 5s", asy
 
   ws.onmessage({ data: JSON.stringify({ type: "ws_taken_over" }) });
   assert.equal(qm.wsActive, false);
+  assert.equal(qm.desiredActive, false);
+  assert.equal(w.sessionStorage.getItem("quote_manager_manual_ws_enabled"), null);
   const banner = [...w.document.body.querySelectorAll("div")]
     .find((el) => /다른 세션이 실시간 시세 연결을 가져갔습니다/.test(el.textContent));
   assert.ok(banner, "takeover banner must be shown");
@@ -252,11 +286,28 @@ test("unexpected close → reconnect after 5s; close code 4001 (replaced) → no
 
   await clock.tick(5_000);
   assert.equal(MockWebSocket.instances.length, 2, "must reconnect after the backoff");
+  MockWebSocket.instances[1].onopen();
+  assert.deepEqual(MockWebSocket.instances[1].sent, []);
 
   // Server-initiated replacement (4001) must NOT reconnect.
   MockWebSocket.instances[1].onclose({ code: 4001 });
   await clock.tick(30_000);
   assert.equal(MockWebSocket.instances.length, 2);
+  qm.disconnect();
+});
+
+test("unexpected close with manual active intent → reconnect claims the slot again", async () => {
+  const { qm, clock, MockWebSocket } = createHarness();
+  qm.setManualControlAllowed(true);
+  qm.requestActive();
+  MockWebSocket.instances[0].onopen();
+  assert.deepEqual(MockWebSocket.instances[0].sent, [{ action: "takeover" }]);
+
+  MockWebSocket.instances[0].onclose({ code: 1006 });
+  await clock.tick(5_000);
+  assert.equal(MockWebSocket.instances.length, 2);
+  MockWebSocket.instances[1].onopen();
+  assert.deepEqual(MockWebSocket.instances[1].sent, [{ action: "takeover" }]);
   qm.disconnect();
 });
 
@@ -365,8 +416,9 @@ test("batching: 32 codes split 30 + 2, priority code leads the first batch", asy
 });
 
 test("disconnect clears every timer and resets state", () => {
-  const { qm, clock, MockWebSocket } = createHarness();
-  qm.connect();
+  const { w, qm, clock, MockWebSocket } = createHarness();
+  qm.setManualControlAllowed(true);
+  qm.requestActive();
   const ws = MockWebSocket.instances[0];
   ws.onopen();
   ws.onmessage({ data: JSON.stringify({ type: "ws_status", active: true }) });
@@ -379,6 +431,8 @@ test("disconnect clears every timer and resets state", () => {
   assert.equal(qm.ws, null);
   assert.equal(qm.connected, false);
   assert.equal(qm.wsActive, false);
+  assert.equal(qm.desiredActive, false);
+  assert.equal(w.sessionStorage.getItem("quote_manager_manual_ws_enabled"), null);
   assert.equal(qm.wsCodes.size, 0);
   assert.equal(qm.overflowCodes.length, 0); // realm-safe empty check
 });

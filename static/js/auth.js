@@ -429,6 +429,9 @@ function renderAuthState() {
 
   updateSidebarTabs();
   updateAnalyticsAuthState();
+  if (typeof QuoteManager !== 'undefined' && QuoteManager.setManualControlAllowed) {
+    QuoteManager.setManualControlAllowed(Boolean(currentUser?.is_admin));
+  }
 
   if (currentUser) {
     statusTitle.textContent = '내 계정으로 최근 분석을 저장 중입니다';

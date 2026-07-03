@@ -308,6 +308,8 @@ function trackEvent(name, params = {}) {
       <button class="pf-tab" data-tab="performance" onclick="pfSwitchTab('performance')">심층 분석</button>
       <button class="pf-action-toggle" id="pfActionBoardToggle" type="button" aria-pressed="false" aria-controls="pfActionBoard" onclick="pfToggleActionBoard()" title="오늘의 투자 액션 보드 표시">액션</button>
       <button class="pf-simple-toggle" id="pfSimpleToggle" type="button" aria-pressed="false" onclick="pfToggleSimpleMode()" title="모바일 간편 보기">간편</button>
+      <button class="pf-ws-toggle" id="pfWsToggle" type="button" aria-pressed="false" onclick="toggleQuoteWebSocket()" title="실시간 웹소켓 연결" hidden>웹소켓 연결</button>
+      <span class="pf-ws-status" id="pfWsStatus" role="status" aria-live="polite" hidden>오프라인</span>
       <div class="pf-currency-toggle">
         <button class="pf-currency-btn active" data-currency="KRW" onclick="pfSetCurrency('KRW')">₩</button>
         <button class="pf-currency-btn" data-currency="USD" onclick="pfSetCurrency('USD')">$</button>
