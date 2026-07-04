@@ -1467,6 +1467,11 @@ def test_masters_labs_view_is_wired_as_deep_linkable_panel():
     assert "function _renderMastersCompare(" in masters
     assert "async function _runMastersSimulation(" in masters
     assert "function _mastersAllocationBar(" in masters
+    # 시뮬레이션은 대가 1명 지정 + 상품(ETF) 단위 실행 포트폴리오.
+    assert "mastersSimStrategy" in masters
+    assert "mastersSimAmount" in masters
+    assert "function _mastersPortfolioTable(" in masters
+    assert "function _mastersSelectMaster(" in masters
     # 전략 내용은 서버 카탈로그가 단일 소스 — JS 에 전략 본문을 하드코딩하지 않는다.
     assert "워런 버핏" not in masters
     assert "올웨더" not in masters
@@ -1481,6 +1486,7 @@ def test_masters_labs_view_is_wired_as_deep_linkable_panel():
     assert ".masters-compare-table" in styles
     assert ".masters-sim-card" in styles
     assert ".masters-bar" in styles
+    assert ".masters-portfolio-table" in styles
 
 
 def test_masters_feature_files_stay_below_maintenance_ceiling():

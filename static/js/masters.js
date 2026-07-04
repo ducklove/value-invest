@@ -26,6 +26,11 @@ function _mastersAssetColor(asset) {
   return _MASTERS_ASSET_COLORS[asset] || _MASTERS_ASSET_FALLBACK_COLOR;
 }
 
+function _maFmtKrw(n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return '-';
+  return Math.round(Number(n)).toLocaleString('ko-KR') + '원';
+}
+
 function _mastersRiskDots(level) {
   const filled = Math.max(0, Math.min(5, Number(level) || 0));
   let html = '';
@@ -86,16 +91,23 @@ function _renderMastersCards() {
   `).join('');
   root.querySelectorAll('button[data-strategy]').forEach(btn => {
     btn.addEventListener('click', () => {
-      _mastersSelectedId = btn.dataset.strategy;
-      root.querySelectorAll('button[data-strategy]').forEach(b =>
-        b.classList.toggle('active', b.dataset.strategy === _mastersSelectedId));
-      _renderMasterDetail();
+      _mastersSelectMaster(btn.dataset.strategy);
       const detail = document.getElementById('mastersDetail');
       if (detail && typeof detail.scrollIntoView === 'function') {
         detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     });
   });
+}
+
+// 카드 클릭·시뮬 폼의 대가 select 어느 쪽에서 골라도 선택 상태를 한 곳으로 동기화.
+function _mastersSelectMaster(strategyId) {
+  _mastersSelectedId = strategyId;
+  document.querySelectorAll('#mastersCards button[data-strategy]').forEach(b =>
+    b.classList.toggle('active', b.dataset.strategy === _mastersSelectedId));
+  const select = document.getElementById('mastersSimStrategy');
+  if (select && select.value !== strategyId) select.value = strategyId;
+  _renderMasterDetail();
 }
 
 // 배분 목록 → 100% 누적 가로 막대 + 범례. 카드 상세와 시뮬레이션 결과가 공유한다.
@@ -206,17 +218,26 @@ function _renderMastersSimForm() {
   if (!root || !_mastersCatalog) return;
   const options = _mastersCatalog.profile_options || {};
   const groups = _mastersCatalog.asset_groups || {};
+  const strategies = _mastersCatalog.strategies || [];
   const selectOptions = key => (options[key] || []).map((o, i) =>
     `<option value="${escapeHtml(o.id)}"${i === (key === 'risk' ? 1 : 2) ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+  const strategyOptions = strategies.map(s =>
+    `<option value="${escapeHtml(s.id)}"${s.id === _mastersSelectedId ? ' selected' : ''}>${escapeHtml(s.master)} — ${escapeHtml(s.title)}</option>`).join('');
   const groupChecks = Object.entries(groups).map(([id, g]) =>
     `<label class="masters-sim-check"><input type="checkbox" class="js-masters-group" value="${escapeHtml(id)}" checked> ${escapeHtml(g.label)}</label>`).join('');
   root.innerHTML = `
     <div class="masters-sim-row">
+      <label>대가 선택
+        <select id="mastersSimStrategy">${strategyOptions}</select>
+      </label>
       <label>위험 성향
         <select id="mastersSimRisk">${selectOptions('risk')}</select>
       </label>
       <label>투자 기간
         <select id="mastersSimHorizon">${selectOptions('horizon')}</select>
+      </label>
+      <label>투자금액 (선택)
+        <input type="number" id="mastersSimAmount" min="0" step="100000" placeholder="예: 10000000">
       </label>
       <div class="masters-sim-groups">
         <span>선호 자산군</span>
@@ -224,25 +245,44 @@ function _renderMastersSimForm() {
       </div>
       <button class="bt-run" id="mastersSimRunBtn" type="button">시뮬레이션</button>
     </div>
-    <p class="masters-muted">선택한 성향·기간·자산군에 맞춰 각 전략의 예시 배분을 조정해 보여줍니다. 결과는 참고용 시뮬레이션입니다.</p>
+    <p class="masters-muted">선택한 대가의 예시 배분을 내 성향·기간·자산군에 맞춰 조정하고, 자산군별 대표 ETF 로 옮긴 참고용 포트폴리오를 보여줍니다. 금액을 입력하면 상품별 배정 금액과 대략 주수까지 계산합니다.</p>
   `;
   const runBtn = document.getElementById('mastersSimRunBtn');
   if (runBtn && !runBtn.dataset.wired) {
     runBtn.dataset.wired = '1';
     runBtn.addEventListener('click', () => { _runMastersSimulation(); });
   }
+  const strategySelect = document.getElementById('mastersSimStrategy');
+  if (strategySelect && !strategySelect.dataset.wired) {
+    strategySelect.dataset.wired = '1';
+    strategySelect.addEventListener('change', () => { _mastersSelectMaster(strategySelect.value); });
+  }
 }
 
 async function _runMastersSimulation() {
   const results = document.getElementById('mastersSimResults');
   if (!results) return;
+  const strategyId = document.getElementById('mastersSimStrategy')?.value;
   const risk = document.getElementById('mastersSimRisk')?.value;
   const horizon = document.getElementById('mastersSimHorizon')?.value;
+  const amountRaw = document.getElementById('mastersSimAmount')?.value?.trim();
   const assetGroups = Array.from(document.querySelectorAll('#mastersSimForm .js-masters-group:checked'))
     .map(el => el.value);
   if (!assetGroups.length) {
     results.innerHTML = '<div class="masters-empty error">선호 자산군을 최소 1개 선택해 주세요.</div>';
     return;
+  }
+  const body = {
+    strategy_id: strategyId,
+    profile: { risk, horizon, asset_groups: assetGroups },
+  };
+  if (amountRaw) {
+    const amount = Number(amountRaw);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      results.innerHTML = '<div class="masters-empty error">투자금액은 양수로 입력해 주세요.</div>';
+      return;
+    }
+    body.amount = amount;
   }
   const seq = ++_mastersSimSeq;
   results.innerHTML = '<div class="masters-empty">시뮬레이션 중...</div>';
@@ -250,7 +290,7 @@ async function _runMastersSimulation() {
     const data = await apiFetchJson('/api/masters/simulate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profile: { risk, horizon, asset_groups: assetGroups } }),
+      body: JSON.stringify(body),
       errorMessage: '시뮬레이션에 실패했습니다.',
     });
     if (seq !== _mastersSimSeq) return; // 더 최근 요청이 있음
@@ -261,36 +301,79 @@ async function _runMastersSimulation() {
   }
 }
 
+// 상품 단위 포트폴리오 표 — 금액 입력 시 배정 금액/현재가/대략 주수 열이 추가된다.
+function _mastersPortfolioTable(portfolio, amountSummary, quotesIncomplete) {
+  const hasAmount = !!amountSummary;
+  const headExtra = hasAmount ? '<th class="num">배정 금액</th><th class="num">현재가</th><th class="num">대략 주수</th>' : '';
+  const rows = portfolio.map(r => {
+    const inst = r.instrument || {};
+    const note = inst.note ? `<div class="masters-inst-note">${escapeHtml(inst.note)}</div>` : '';
+    const amountCells = hasAmount
+      ? `<td class="num">${_maFmtKrw(r.amount)}</td>`
+        + `<td class="num">${r.price != null ? _maFmtKrw(r.price) : '-'}</td>`
+        + `<td class="num">${r.shares != null ? Number(r.shares).toLocaleString('ko-KR') + '주' : '-'}</td>`
+      : '';
+    return `
+      <tr>
+        <td>
+          <span class="masters-inst-name">${escapeHtml(inst.name || '')}</span>
+          <span class="masters-inst-code">${escapeHtml(inst.code || '')} · ${escapeHtml(inst.type || '')}</span>
+          ${note}
+        </td>
+        <td>${escapeHtml(r.asset_label || '')}</td>
+        <td class="num">${Number(r.weight)}%</td>
+        ${amountCells}
+      </tr>
+    `;
+  }).join('');
+  let summaryHtml = '';
+  if (hasAmount) {
+    const residual = amountSummary.residual_cash != null
+      ? `잔여 현금 ${_maFmtKrw(amountSummary.residual_cash)}`
+      : '일부 상품 시세를 못 받아 잔여 현금은 계산하지 않았습니다';
+    summaryHtml = `<p class="masters-muted">총 ${_maFmtKrw(amountSummary.total)} 중 약 ${_maFmtKrw(amountSummary.invested)} 배정 · ${residual}. 주수는 현재가 기준 단순 계산(수수료·호가 미반영)입니다.</p>`;
+  }
+  const staleNote = quotesIncomplete ? '<p class="masters-muted">일부 상품의 시세 조회에 실패해 주수 계산이 빠졌습니다.</p>' : '';
+  return `
+    <div class="masters-portfolio-wrap">
+      <table class="masters-portfolio-table">
+        <thead><tr><th>상품</th><th>자산군</th><th class="num">비중</th>${headExtra}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    ${summaryHtml}${staleNote}
+  `;
+}
+
 function _renderMastersSimResults(data) {
   const root = document.getElementById('mastersSimResults');
   if (!root) return;
-  const items = data.results || [];
-  const cards = items.map((r, idx) => {
-    const badge = idx === 0 ? '<span class="masters-chip best">내 성향과 가장 근접</span>' : '';
-    const reasons = (r.fit_reasons || []).map(t => `<li>${escapeHtml(t)}</li>`).join('');
-    const adjustments = (r.adjustments || []).length
-      ? `<ul class="masters-adjustments">${r.adjustments.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`
-      : '';
-    const body = r.allocation
-      ? _mastersAllocationBar(r.allocation) + adjustments
-      : `<div class="masters-empty">${escapeHtml(r.note || '이 조합으로는 배분을 구성할 수 없습니다.')}</div>`;
-    return `
-      <div class="masters-sim-card">
-        <div class="masters-sim-card-head">
-          <strong>${escapeHtml(r.master)} — ${escapeHtml(r.title)}</strong>
-          <span class="masters-fit-score" title="성향 부합도 (교육용 점수)">부합도 ${Number(r.fit_score) || 0}</span>
-          ${badge}
-        </div>
-        ${body}
-        <details class="masters-sim-why">
-          <summary>왜 이 점수인가</summary>
-          <ul class="masters-list">${reasons}</ul>
-        </details>
-      </div>
-    `;
-  }).join('');
+  const strategy = data.strategy || {};
+  const reasons = (data.fit_reasons || []).map(t => `<li>${escapeHtml(t)}</li>`).join('');
+  const adjustments = (data.adjustments || []).length
+    ? `<ul class="masters-adjustments">${data.adjustments.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`
+    : '';
+  const implementationNote = data.implementation_note
+    ? `<p class="masters-impl-note">${escapeHtml(data.implementation_note)} `
+      + `<a href="/screener" onclick="event.preventDefault(); switchView('screener');">밸류 스크리너 열기 →</a></p>`
+    : '';
+  const body = data.portfolio
+    ? _mastersAllocationBar(data.allocation)
+      + _mastersPortfolioTable(data.portfolio, data.amount, data.quotes_incomplete)
+      + adjustments + implementationNote
+    : `<div class="masters-empty">${escapeHtml(data.note || '이 조합으로는 포트폴리오를 구성할 수 없습니다.')}</div>`;
   root.innerHTML = `
     <div class="masters-disclaimer">${escapeHtml(data.disclaimer || '')}</div>
-    ${cards}
+    <div class="masters-sim-card">
+      <div class="masters-sim-card-head">
+        <strong>${escapeHtml(strategy.master || '')} — ${escapeHtml(strategy.title || '')}</strong>
+        <span class="masters-fit-score" title="성향 부합도 (교육용 점수)">부합도 ${Number(data.fit_score) || 0}</span>
+      </div>
+      ${body}
+      <details class="masters-sim-why">
+        <summary>부합도 근거</summary>
+        <ul class="masters-list">${reasons}</ul>
+      </details>
+    </div>
   `;
 }

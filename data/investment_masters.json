@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "disclaimer": "본 화면은 투자 대가들의 공개된 철학·저서를 요약한 교육용 자료입니다. 예시 자산배분은 투자 조언이 아닌 참고용 시뮬레이션이며, 특정 종목·상품의 매수 추천이 아닙니다. 실제 투자 판단과 결과에 대한 책임은 투자자 본인에게 있습니다.",
+  "disclaimer": "본 화면은 투자 대가들의 공개된 철학·저서를 요약한 교육용 자료입니다. 예시 자산배분과 상품 구성은 투자 조언이 아닌 참고용 시뮬레이션이며, 상품은 각 자산군을 대표하는 국내 상장 ETF를 기계적으로 연결한 예시일 뿐 특정 종목·상품의 매수 추천이 아닙니다. 실제 투자 판단과 결과에 대한 책임은 투자자 본인에게 있습니다.",
   "asset_groups": {
     "equity": { "label": "주식" },
     "bond": { "label": "채권" },
@@ -27,6 +27,33 @@
       { "id": "short", "label": "3년 미만", "description": "가까운 시점에 쓸 자금입니다." },
       { "id": "mid", "label": "3~10년", "description": "중기 목표 자금입니다." },
       { "id": "long", "label": "10년 이상", "description": "장기 복리를 노리는 자금입니다." }
+    ]
+  },
+  "instruments": {
+    "equity_kr": [
+      { "code": "069500", "name": "KODEX 200", "type": "ETF", "note": "KOSPI200 추종 — 국내 대형주 대표" }
+    ],
+    "equity_global": [
+      { "code": "360750", "name": "TIGER 미국S&P500", "type": "ETF", "note": "S&P500 추종(환노출) — 글로벌 주식 근사" }
+    ],
+    "bond_long": [
+      { "code": "439870", "name": "KODEX 국고채30년액티브", "type": "ETF", "note": "국고채 30년 — 장기 금리 듀레이션" }
+    ],
+    "bond_mid": [
+      { "code": "148070", "name": "KIWOOM 국고채10년", "type": "ETF", "note": "국고채 10년 — 중기 안정 축" }
+    ],
+    "bond_short": [
+      { "code": "153130", "name": "KODEX 단기채권", "type": "ETF", "note": "단기 채권 — 현금성 대기 자금" }
+    ],
+    "gold": [
+      { "code": "411060", "name": "ACE KRX금현물", "type": "ETF", "note": "KRX 금현물 — 실물 금 가격 추종" }
+    ],
+    "commodities": [
+      { "code": "130680", "name": "TIGER 원유선물Enhanced(H)", "type": "ETF", "note": "원자재는 국내 상장 ETF 한계로 원유 선물로 근사" },
+      { "code": "271060", "name": "KODEX 3대농산물선물(H)", "type": "ETF", "note": "대안: 농산물 선물" }
+    ],
+    "reits": [
+      { "code": "329200", "name": "TIGER 리츠부동산인프라", "type": "ETF", "note": "국내 리츠·인프라 — 배당 중심" }
     ]
   },
   "personalization": {
@@ -72,6 +99,7 @@
         { "asset": "bond_short", "weight": 10, "note": "하락장에서 기회를 잡기 위한 유동성 버퍼" }
       ],
       "allocation_basis": "버핏이 일반 투자자를 위해 공개적으로 권한 90/10 지침(주주서한, 2013)을 자산군 수준으로 옮긴 교육용 예시입니다.",
+      "implementation_note": "원전략은 소수 우량주 집중 보유입니다. 실행 포트폴리오는 지수 ETF로 근사했으며, 개별 우량주를 직접 고르려면 밸류 스크리너에서 ROE·영업이익률 상위 + 적정 P/E 조건으로 걸러 보세요.",
       "rebalancing": {
         "frequency": "연 1회",
         "band_pct": 5,
@@ -120,6 +148,7 @@
         { "asset": "bond_short", "weight": 15, "note": "기회 대기 자금 겸 완충재" }
       ],
       "allocation_basis": "'현명한 투자자'의 방어적 투자자용 50:50 지침을 자산군 수준으로 옮긴 교육용 예시입니다.",
+      "implementation_note": "그레이엄식 개별 종목 선별을 원하면 밸류 스크리너에서 저P/B·저부채비율·배당수익률 조건을 조합해 보세요. ETF 구성은 그 대체 근사입니다.",
       "rebalancing": {
         "frequency": "반기 1회",
         "band_pct": 10,
@@ -166,6 +195,7 @@
         { "asset": "bond_short", "weight": 10, "note": "새 아이디어를 위한 대기 자금" }
       ],
       "allocation_basis": "린치는 장기 자금이라면 주식 중심을 권했습니다. 주식 내 유형 분산을 자산군 수준으로 단순화한 교육용 예시입니다.",
+      "implementation_note": "린치 전략의 핵심은 직접 발굴한 개별 성장주입니다. ETF 구성은 출발점일 뿐이며, 밸류 스크리너에서 성장 대비 저평가(P/E·ROE) 조건으로 후보를 찾아 직접 조사해 보세요.",
       "rebalancing": {
         "frequency": "수시 (스토리 점검 기준)",
         "band_pct": 10,

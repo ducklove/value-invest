@@ -26,6 +26,10 @@ const CATALOG_FIXTURE = {
     equity_kr: { label: "국내 주식", group: "equity" },
     bond_mid: { label: "중기 국채", group: "bond" },
   },
+  instruments: {
+    equity_kr: [{ code: "069500", name: "KODEX 200", type: "ETF", note: "국내 대형주" }],
+    bond_mid: [{ code: "148070", name: "KIWOOM 국고채10년", type: "ETF", note: "중기 국채" }],
+  },
   profile_options: {
     risk: [
       { id: "conservative", label: "안정형" },
@@ -82,35 +86,31 @@ const CATALOG_FIXTURE = {
 const SIMULATE_FIXTURE = {
   disclaimer: CATALOG_FIXTURE.disclaimer,
   profile: { risk: "conservative", horizon: "short", asset_groups: ["equity", "bond"] },
-  results: [
+  strategy: { id: "alpha", master: "대가 알파", title: "전략 알파" },
+  fit_score: 40,
+  fit_reasons: ["기간이 짧습니다."],
+  adjustments: ["주식 비중 25%p 를 채권·현금성으로 옮겼습니다."],
+  note: null,
+  allocation: [
+    { asset: "bond_mid", label: "중기 국채", group: "bond", weight: 55, note: "" },
+    { asset: "equity_kr", label: "국내 주식", group: "equity", weight: 45, note: "" },
+  ],
+  portfolio: [
     {
-      strategy_id: "beta",
-      master: "대가 베타",
-      title: "전략 베타",
-      fit_score: 90,
-      fit_reasons: ["성향이 잘 맞습니다."],
-      allocation: [
-        { asset: "bond_mid", label: "중기 국채", group: "bond", weight: 100, note: "" },
-      ],
-      adjustments: [],
-      note: null,
-      rebalancing: { frequency: "반기 1회", ideas: [] },
+      asset: "bond_mid", asset_label: "중기 국채", group: "bond", weight: 55,
+      instrument: { code: "148070", name: "KIWOOM 국고채10년", type: "ETF", note: "중기 국채" },
+      amount: 5500000, price: 100000, shares: 55, est_cost: 5500000,
     },
     {
-      strategy_id: "alpha",
-      master: "대가 알파",
-      title: "전략 알파",
-      fit_score: 40,
-      fit_reasons: ["기간이 짧습니다."],
-      allocation: [
-        { asset: "equity_kr", label: "국내 주식", group: "equity", weight: 45, note: "" },
-        { asset: "bond_mid", label: "중기 국채", group: "bond", weight: 55, note: "" },
-      ],
-      adjustments: ["주식 비중 25%p 를 채권·현금성으로 옮겼습니다."],
-      note: null,
-      rebalancing: { frequency: "연 1회", ideas: [] },
+      asset: "equity_kr", asset_label: "국내 주식", group: "equity", weight: 45,
+      instrument: { code: "069500", name: "KODEX 200", type: "ETF", note: "국내 대형주" },
+      amount: 4500000, price: 130000, shares: 34, est_cost: 4420000,
     },
   ],
+  amount: { total: 10000000, invested: 9920000, residual_cash: 80000 },
+  implementation_note: "개별 종목은 밸류 스크리너로.",
+  rebalancing: { frequency: "연 1회", ideas: [] },
+  quotes_incomplete: false,
 };
 
 function appendScript(w, source) {
@@ -177,7 +177,13 @@ test("loadMasters 는 disclaimer·전략 카드·상세·비교표·시뮬 폼�
   const form = w.document.getElementById("mastersSimForm");
   assert.ok(form.querySelector("#mastersSimRisk"));
   assert.ok(form.querySelector("#mastersSimHorizon"));
+  assert.ok(form.querySelector("#mastersSimAmount"));
   assert.equal(form.querySelectorAll(".js-masters-group").length, 2);
+  // 대가 선택 select — 기본값은 현재 선택된 카드(첫 전략)와 동기화된다.
+  const strategySelect = form.querySelector("#mastersSimStrategy");
+  assert.ok(strategySelect);
+  assert.equal(strategySelect.querySelectorAll("option").length, 2);
+  assert.equal(strategySelect.value, "alpha");
 });
 
 test("force 없이 다시 부르면 카탈로그를 다시 받지 않는다", async () => {
@@ -188,7 +194,7 @@ test("force 없이 다시 부르면 카탈로그를 다시 받지 않는다", as
   assert.equal(calls.length, 1);
 });
 
-test("카드를 클릭하면 상세가 해당 전략으로 바뀐다", async () => {
+test("카드를 클릭하면 상세와 시뮬 폼의 대가 선택이 함께 바뀐다", async () => {
   const w = buildDom();
   installApiStub(w);
   await w.loadMasters();
@@ -199,30 +205,69 @@ test("카드를 클릭하면 상세가 해당 전략으로 바뀐다", async () 
   const detail = w.document.getElementById("mastersDetail");
   assert.match(detail.textContent, /베타 원칙 1/);
   assert.ok(betaCard.classList.contains("active"));
+  assert.equal(w.document.getElementById("mastersSimStrategy").value, "beta");
 });
 
-test("시뮬레이션은 선택값을 profile 로 보내고 결과·조정 내역·disclaimer 를 렌더한다", async () => {
+test("시뮬 폼에서 대가를 바꾸면 카드 선택·상세도 따라간다", async () => {
+  const w = buildDom();
+  installApiStub(w);
+  await w.loadMasters();
+
+  const select = w.document.getElementById("mastersSimStrategy");
+  select.value = "beta";
+  select.dispatchEvent(new w.Event("change", { bubbles: true }));
+
+  assert.match(w.document.getElementById("mastersDetail").textContent, /베타 원칙 1/);
+  const betaCard = w.document.querySelector('#mastersCards button[data-strategy="beta"]');
+  assert.ok(betaCard.classList.contains("active"));
+});
+
+test("시뮬레이션은 대가·성향·금액을 보내고 상품 단위 포트폴리오를 렌더한다", async () => {
   const w = buildDom();
   const calls = installApiStub(w);
   await w.loadMasters();
 
+  w.document.getElementById("mastersSimStrategy").value = "alpha";
   w.document.getElementById("mastersSimRisk").value = "conservative";
   w.document.getElementById("mastersSimHorizon").value = "short";
+  w.document.getElementById("mastersSimAmount").value = "10000000";
   await w._runMastersSimulation();
 
   const simCall = calls.find(c => c.path === "/api/masters/simulate");
   assert.ok(simCall, "simulate should be called");
   const body = JSON.parse(simCall.options.body);
+  assert.equal(body.strategy_id, "alpha");
+  assert.equal(body.amount, 10000000);
   assert.deepEqual(body.profile, { risk: "conservative", horizon: "short", asset_groups: ["equity", "bond"] });
 
   const results = w.document.getElementById("mastersSimResults");
   assert.match(results.textContent, /참고용 시뮬레이션/);
+  // 단일 대가 카드 하나 + 상품 테이블(코드·주수·잔여 현금).
   const simCards = results.querySelectorAll(".masters-sim-card");
-  assert.equal(simCards.length, 2);
-  // fit_score 상위가 먼저, 최상위에는 배지가 붙는다.
-  assert.match(simCards[0].textContent, /대가 베타/);
-  assert.ok(simCards[0].querySelector(".masters-chip.best"));
-  assert.match(simCards[1].textContent, /주식 비중 25%p/);
+  assert.equal(simCards.length, 1);
+  assert.match(simCards[0].textContent, /대가 알파/);
+  const table = simCards[0].querySelector(".masters-portfolio-table");
+  assert.ok(table, "portfolio table should render");
+  assert.equal(table.querySelectorAll("tbody tr").length, 2);
+  assert.match(table.textContent, /KODEX 200/);
+  assert.match(table.textContent, /069500/);
+  assert.match(table.textContent, /34주/);
+  assert.match(simCards[0].textContent, /잔여 현금 80,000원/);
+  assert.match(simCards[0].textContent, /주식 비중 25%p/);
+  assert.match(simCards[0].textContent, /밸류 스크리너/);
+});
+
+test("금액 없이 돌리면 amount 를 보내지 않는다", async () => {
+  const w = buildDom();
+  const calls = installApiStub(w);
+  await w.loadMasters();
+
+  await w._runMastersSimulation();
+
+  const simCall = calls.find(c => c.path === "/api/masters/simulate");
+  assert.ok(simCall);
+  const body = JSON.parse(simCall.options.body);
+  assert.equal(body.amount, undefined);
 });
 
 test("선호 자산군을 모두 끄면 요청 없이 안내만 보여준다", async () => {

@@ -58,6 +58,16 @@ def _validate_catalog(raw: dict[str, Any]) -> dict[str, Any]:
         _require(isinstance(spec.get("label"), str), f"asset_classes.{asset_id}.label 누락")
         _require(spec.get("group") in groups, f"asset_classes.{asset_id}.group '{spec.get('group')}' 미정의")
 
+    instruments = raw.get("instruments")
+    _require(isinstance(instruments, dict), "instruments 가 비어 있습니다")
+    for asset_id in assets:
+        rows = instruments.get(asset_id)
+        _require(isinstance(rows, list) and len(rows) > 0, f"instruments.{asset_id} 누락 — 모든 자산군에 대표 상품이 필요합니다")
+        for inst in rows:
+            _require(isinstance(inst.get("code"), str) and len(inst["code"]) == 6, f"instruments.{asset_id}.code 는 6자리 코드여야 합니다")
+            _require(isinstance(inst.get("name"), str) and inst["name"].strip() != "", f"instruments.{asset_id}.name 누락")
+            _require(isinstance(inst.get("type"), str) and inst["type"].strip() != "", f"instruments.{asset_id}.type 누락")
+
     options = raw.get("profile_options", {})
     risk_ids = {o["id"] for o in options.get("risk", [])}
     horizon_ids = {o["id"] for o in options.get("horizon", [])}
@@ -121,6 +131,7 @@ def get_catalog_payload() -> dict[str, Any]:
         "disclaimer": catalog["disclaimer"],
         "asset_groups": catalog["asset_groups"],
         "asset_classes": catalog["asset_classes"],
+        "instruments": catalog["instruments"],
         "profile_options": catalog["profile_options"],
         "strategies": catalog["strategies"],
     }
@@ -312,7 +323,7 @@ def _strategy_result(
 
 
 def personalize(profile: dict[str, Any]) -> dict[str, Any]:
-    """POST /api/masters/simulate — 성향 기반 전략별 참고용 배분."""
+    """성향 기반 전략별 참고용 배분 — 전 전략 계산 엔진(테스트·내부용)."""
     catalog = load_catalog()
     risk, horizon, preferred = _parse_profile(profile, catalog)
     results = [
@@ -324,4 +335,115 @@ def personalize(profile: dict[str, Any]) -> dict[str, Any]:
         "disclaimer": catalog["disclaimer"],
         "profile": {"risk": risk, "horizon": horizon, "asset_groups": sorted(preferred)},
         "results": results,
+    }
+
+
+# 시뮬 금액 상식 범위 — 입력 실수(0, 음수, 천문학적 값)를 초기에 걸러낸다.
+_MIN_AMOUNT_KRW = 100_000
+_MAX_AMOUNT_KRW = 1_000_000_000_000
+
+
+def _parse_amount(raw: Any) -> float | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        amount = float(raw)
+    except (TypeError, ValueError):
+        raise MastersError("amount 는 숫자여야 합니다.") from None
+    if not (_MIN_AMOUNT_KRW <= amount <= _MAX_AMOUNT_KRW):
+        raise MastersError(f"amount 는 {_MIN_AMOUNT_KRW:,}원 이상 {_MAX_AMOUNT_KRW:,}원 이하여야 합니다.")
+    return amount
+
+
+async def _fetch_prices(codes: list[str]) -> dict[str, float]:
+    """상품 현재가 best-effort 조회 — 실패해도 포트폴리오 구성은 계속한다."""
+    from services import stock_quotes  # 순환 import 방지 겸 지연 로드
+
+    try:
+        quotes = await stock_quotes.get_bulk_quote_snapshots(codes)
+    except Exception:
+        return {}
+    prices: dict[str, float] = {}
+    for code, quote in (quotes or {}).items():
+        price = quote.get("price") if isinstance(quote, dict) else None
+        if isinstance(price, (int, float)) and price > 0:
+            prices[code] = float(price)
+    return prices
+
+
+async def build_portfolio(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/masters/simulate — 지정한 대가 1명의 상품 단위 참고용 포트폴리오.
+
+    자산군 배분(_personalize_strategy)을 카탈로그 instruments 의 대표 상품
+    (자산군별 첫 항목)으로 옮기고, 투자금액이 오면 상품별 배정 금액과
+    현재가 기준 대략 주수까지 계산한다. 시세는 best-effort — 조회가 빠진
+    상품은 금액만 표시된다(quotes_incomplete 로 전달).
+    """
+    if not isinstance(payload, dict):
+        raise MastersError("요청 본문이 올바르지 않습니다.")
+    catalog = load_catalog()
+    profile = payload.get("profile")
+    risk, horizon, preferred = _parse_profile(profile if isinstance(profile, dict) else {}, catalog)
+
+    strategy_id = payload.get("strategy_id")
+    strategy = next((s for s in catalog["strategies"] if s["id"] == strategy_id), None)
+    if strategy is None:
+        raise MastersError(f"strategy_id 가 올바르지 않습니다: {strategy_id!r}")
+    amount = _parse_amount(payload.get("amount"))
+
+    result = _personalize_strategy(strategy, risk, horizon, preferred, catalog)
+
+    portfolio: list[dict[str, Any]] | None = None
+    amount_summary: dict[str, Any] | None = None
+    quotes_incomplete = False
+    if result["allocation"] is not None:
+        rows = [
+            {
+                "asset": row["asset"],
+                "asset_label": row["label"],
+                "group": row["group"],
+                "weight": row["weight"],
+                # 자산군별 대표 상품 = instruments 목록의 첫 항목. 교체·추가는
+                # data/investment_masters.json 에서 한다(코드 수정 불필요).
+                "instrument": dict(catalog["instruments"][row["asset"]][0]),
+                "allocation_note": row["note"],
+            }
+            for row in result["allocation"]
+        ]
+        if amount is not None:
+            prices = await _fetch_prices([r["instrument"]["code"] for r in rows])
+            invested = 0.0
+            for r in rows:
+                r["amount"] = round(amount * r["weight"] / 100)
+                price = prices.get(r["instrument"]["code"])
+                if price is None:
+                    quotes_incomplete = True
+                    r["price"] = r["shares"] = r["est_cost"] = None
+                    continue
+                r["price"] = price
+                r["shares"] = int(r["amount"] // price)
+                r["est_cost"] = round(r["shares"] * price)
+                invested += r["est_cost"]
+            amount_summary = {
+                "total": round(amount),
+                "invested": round(invested),
+                # 잔여 현금은 모든 상품 시세가 있을 때만 의미가 있다.
+                "residual_cash": round(amount - invested) if not quotes_incomplete else None,
+            }
+        portfolio = rows
+
+    return {
+        "disclaimer": catalog["disclaimer"],
+        "profile": {"risk": risk, "horizon": horizon, "asset_groups": sorted(preferred)},
+        "strategy": {"id": strategy["id"], "master": strategy["master"], "title": strategy["title"]},
+        "fit_score": result["fit_score"],
+        "fit_reasons": result["fit_reasons"],
+        "adjustments": result["adjustments"],
+        "note": result["note"],
+        "allocation": result["allocation"],
+        "portfolio": portfolio,
+        "amount": amount_summary,
+        "implementation_note": strategy.get("implementation_note"),
+        "rebalancing": strategy["rebalancing"],
+        "quotes_incomplete": quotes_incomplete,
     }

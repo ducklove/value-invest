@@ -8,6 +8,7 @@
 
 import itertools
 import unittest
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -39,6 +40,15 @@ class CatalogTests(unittest.TestCase):
         for s in im.load_catalog()["strategies"]:
             total = sum(row["weight"] for row in s["base_allocation"])
             self.assertAlmostEqual(total, 100.0, places=2, msg=s["id"])
+
+    def test_every_asset_class_has_representative_instrument(self):
+        catalog = im.load_catalog()
+        for asset_id in catalog["asset_classes"]:
+            rows = catalog["instruments"].get(asset_id)
+            self.assertTrue(rows, msg=f"instruments.{asset_id} 누락")
+            for inst in rows:
+                self.assertRegex(inst["code"], r"^[0-9A-Z]{6}$", msg=asset_id)
+                self.assertTrue(inst["name"], msg=asset_id)
 
     def test_validation_rejects_bad_weight_sum(self):
         broken = {
@@ -155,6 +165,78 @@ class PersonalizeTests(unittest.TestCase):
                 im.personalize(bad)
 
 
+class BuildPortfolioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_portfolio_maps_allocation_to_catalog_instruments(self):
+        out = await im.build_portfolio({
+            "strategy_id": "dalio",
+            "profile": {"risk": "balanced", "horizon": "mid"},
+        })
+        self.assertEqual(out["strategy"]["id"], "dalio")
+        self.assertIsNotNone(out["portfolio"])
+        catalog = im.load_catalog()
+        for row in out["portfolio"]:
+            expected = catalog["instruments"][row["asset"]][0]
+            self.assertEqual(row["instrument"]["code"], expected["code"])
+            self.assertEqual(row["instrument"]["name"], expected["name"])
+        # 금액이 없으면 시세 조회도, 금액 요약도 없다.
+        self.assertIsNone(out["amount"])
+        self.assertNotIn("shares", out["portfolio"][0])
+
+    async def test_amount_computes_shares_and_residual_cash(self):
+        prices = {"360750": 30_000.0, "153130": 100_000.0}
+        with patch.object(im, "_fetch_prices", AsyncMock(return_value=prices)):
+            out = await im.build_portfolio({
+                "strategy_id": "buffett",
+                "profile": {"risk": "balanced", "horizon": "long"},
+                "amount": 10_000_000,
+            })
+        rows = {r["instrument"]["code"]: r for r in out["portfolio"]}
+        # balanced+long → +5%p 주식 이동: 90/10 → 95/5
+        equity = rows["360750"]
+        self.assertEqual(equity["amount"], 9_500_000)
+        self.assertEqual(equity["shares"], 9_500_000 // 30_000)
+        self.assertEqual(equity["est_cost"], equity["shares"] * 30_000)
+        cash = rows["153130"]
+        self.assertEqual(cash["amount"], 500_000)
+        self.assertEqual(cash["shares"], 5)
+        invested = equity["est_cost"] + cash["est_cost"]
+        self.assertEqual(out["amount"]["invested"], invested)
+        self.assertEqual(out["amount"]["residual_cash"], 10_000_000 - invested)
+        self.assertFalse(out["quotes_incomplete"])
+
+    async def test_missing_quotes_degrade_gracefully(self):
+        with patch.object(im, "_fetch_prices", AsyncMock(return_value={})):
+            out = await im.build_portfolio({
+                "strategy_id": "buffett",
+                "profile": {"risk": "balanced", "horizon": "mid"},
+                "amount": 1_000_000,
+            })
+        self.assertTrue(out["quotes_incomplete"])
+        self.assertIsNone(out["amount"]["residual_cash"])
+        for row in out["portfolio"]:
+            self.assertIsNotNone(row["amount"])
+            self.assertIsNone(row["shares"])
+
+    async def test_all_assets_excluded_returns_note_without_portfolio(self):
+        out = await im.build_portfolio({
+            "strategy_id": "buffett",
+            "profile": {"risk": "balanced", "horizon": "mid", "asset_groups": ["alternative"]},
+        })
+        self.assertIsNone(out["portfolio"])
+        self.assertTrue(out["note"])
+
+    async def test_invalid_strategy_or_amount_raises(self):
+        for payload in (
+            {"profile": {"risk": "balanced", "horizon": "mid"}},
+            {"strategy_id": "unknown", "profile": {"risk": "balanced", "horizon": "mid"}},
+            {"strategy_id": "buffett", "profile": {"risk": "balanced", "horizon": "mid"}, "amount": -1},
+            {"strategy_id": "buffett", "profile": {"risk": "balanced", "horizon": "mid"}, "amount": 1},
+            {"strategy_id": "buffett", "profile": {"risk": "balanced", "horizon": "mid"}, "amount": "abc"},
+        ):
+            with self.assertRaises(im.MastersError, msg=payload):
+                await im.build_portfolio(payload)
+
+
 class MastersApiTests(unittest.IsolatedAsyncioTestCase):
     def _settings(self) -> AppSettings:
         return AppSettings(
@@ -181,31 +263,62 @@ class MastersApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("asset_classes", data)
         self.assertIn("profile_options", data)
 
-    async def test_simulate_endpoint_personalizes_and_keeps_disclaimer(self):
+    async def test_simulate_endpoint_returns_single_master_portfolio(self):
         async with await self._client() as client:
             resp = await client.post(
                 "/api/masters/simulate",
-                json={"profile": {"risk": "conservative", "horizon": "short"}},
+                json={
+                    "strategy_id": "dalio",
+                    "profile": {"risk": "conservative", "horizon": "short"},
+                },
             )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertIn("참고용", data["disclaimer"])
-        scores = [r["fit_score"] for r in data["results"]]
-        self.assertEqual(scores, sorted(scores, reverse=True))
-        for result in data["results"]:
-            if result["allocation"] is not None:
-                self.assertAlmostEqual(
-                    sum(r["weight"] for r in result["allocation"]), 100.0, places=6,
-                )
+        self.assertEqual(data["strategy"]["id"], "dalio")
+        self.assertAlmostEqual(sum(r["weight"] for r in data["allocation"]), 100.0, places=6)
+        # 상품 단위 구성 — 모든 행에 6자리 코드의 실제 상품이 붙는다.
+        self.assertEqual(len(data["portfolio"]), len(data["allocation"]))
+        for row in data["portfolio"]:
+            self.assertRegex(row["instrument"]["code"], r"^[0-9A-Z]{6}$")
+            self.assertTrue(row["instrument"]["name"])
 
-    async def test_simulate_rejects_invalid_profile_with_400(self):
+    async def test_simulate_with_amount_returns_share_counts(self):
+        prices = {
+            "360750": 30_000.0, "439870": 90_000.0, "148070": 100_000.0,
+            "411060": 28_000.0, "130680": 5_000.0,
+        }
+        with patch.object(im, "_fetch_prices", AsyncMock(return_value=prices)):
+            async with await self._client() as client:
+                resp = await client.post(
+                    "/api/masters/simulate",
+                    json={
+                        "strategy_id": "dalio",
+                        "profile": {"risk": "balanced", "horizon": "mid"},
+                        "amount": 10_000_000,
+                    },
+                )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data["quotes_incomplete"])
+        for row in data["portfolio"]:
+            self.assertGreaterEqual(row["shares"], 0)
+            self.assertEqual(row["est_cost"], row["shares"] * row["price"])
+        self.assertEqual(
+            data["amount"]["residual_cash"],
+            data["amount"]["total"] - data["amount"]["invested"],
+        )
+
+    async def test_simulate_rejects_invalid_input_with_400(self):
+        cases = [
+            {"strategy_id": "dalio", "profile": {"risk": "yolo", "horizon": "long"}},
+            {"profile": {"risk": "balanced", "horizon": "long"}},
+            {"strategy_id": "nobody", "profile": {"risk": "balanced", "horizon": "long"}},
+        ]
         async with await self._client() as client:
-            resp = await client.post(
-                "/api/masters/simulate",
-                json={"profile": {"risk": "yolo", "horizon": "long"}},
-            )
-        self.assertEqual(resp.status_code, 400)
-        self.assertIn("risk", resp.json()["detail"])
+            for body in cases:
+                resp = await client.post("/api/masters/simulate", json=body)
+                self.assertEqual(resp.status_code, 400, msg=body)
 
     async def test_masters_spa_path_serves_index_html(self):
         async with await self._client() as client:
