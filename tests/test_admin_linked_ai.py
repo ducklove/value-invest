@@ -119,7 +119,12 @@ class AiAdminConfigTests(TempDbMixin):
             )
             self.assertEqual(
                 await ai_config.get_model_for_feature("portfolio_fast"),
-                "~google/gemini-flash-latest",
+                "google/gemini-3.5-flash",
+            )
+            # 대가 포트폴리오 진단은 gemini-3.5-flash 고정 기본값.
+            self.assertEqual(
+                await ai_config.get_model_for_feature("masters_review"),
+                "google/gemini-3.5-flash",
             )
 
             await ai_config.save_feature_models({"wiki_qa": "openai/gpt-5.5"}, "admin@example.com")
@@ -153,9 +158,9 @@ class AiAdminConfigTests(TempDbMixin):
             result = await ai_config.migrate_legacy_model_defaults()
 
             self.assertTrue(result["migrated"])
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_fast"), "~google/gemini-flash-latest")
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "~google/gemini-flash-latest")
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_premium"), "~google/gemini-flash-latest")
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_fast"), "google/gemini-3.5-flash")
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "google/gemini-3.5-flash")
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_premium"), "google/gemini-3.5-flash")
 
             await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
             result = await ai_config.migrate_legacy_model_defaults()
@@ -176,7 +181,32 @@ class AiAdminConfigTests(TempDbMixin):
 
             self.assertTrue(result["migrated"])
             self.assertTrue(result["portfolio_qwen_flash"]["migrated"])
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "~google/gemini-flash-latest")
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "google/gemini-3.5-flash")
+
+    async def test_migrates_gemini3_flash_and_latest_alias_to_35_once(self):
+        with patch.dict("os.environ", {}, clear=True):
+            # 구 별칭(포트폴리오)과 gemini-3-flash 직접 지정(시황) — 둘 다 3.5로.
+            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "~google/gemini-flash-latest", updated_by="admin@example.com")
+            await app_settings_repo.set_app_setting("AI_MODEL::market_daily", "google/gemini-3-flash", updated_by="admin@example.com")
+            # 타 계열 수동 설정은 건드리지 않는다.
+            await app_settings_repo.set_app_setting("AI_MODEL::wiki_qa", "openai/gpt-5.5", updated_by="admin@example.com")
+
+            result = await ai_config.migrate_legacy_model_defaults()
+
+            self.assertTrue(result["gemini35_flash"]["migrated"])
+            self.assertEqual(
+                sorted(result["gemini35_flash"]["features"]),
+                ["market_daily", "portfolio_balanced"],
+            )
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "google/gemini-3.5-flash")
+            self.assertEqual(await ai_config.get_model_for_feature("market_daily"), "google/gemini-3.5-flash")
+            self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "openai/gpt-5.5")
+
+            # 마커가 찍힌 뒤에는 같은 값이 다시 저장돼도 재실행하지 않는다.
+            await app_settings_repo.set_app_setting("AI_MODEL::market_daily", "google/gemini-3-flash", updated_by="admin@example.com")
+            result = await ai_config.migrate_legacy_model_defaults()
+            self.assertFalse(result["gemini35_flash"]["migrated"])
+            self.assertEqual(await ai_config.get_model_for_feature("market_daily"), "google/gemini-3-flash")
 
     async def test_usage_summary_groups_by_feature_and_model(self):
         await ai_config.record_usage(
@@ -199,12 +229,12 @@ class AiAdminConfigTests(TempDbMixin):
         self.assertAlmostEqual(row["cost_usd"], 0.12)
 
     def test_reasoning_controls_accept_feature_specific_effort(self):
-        controls = ai_config.openrouter_reasoning_controls("~google/gemini-flash-latest", effort="low")
+        controls = ai_config.openrouter_reasoning_controls("google/gemini-3.5-flash", effort="low")
 
         self.assertEqual(controls["reasoning"], {"effort": "low", "exclude": True})
         self.assertFalse(controls["include_reasoning"])
 
-        fallback = ai_config.openrouter_reasoning_controls("~google/gemini-flash-latest", effort="wild")
+        fallback = ai_config.openrouter_reasoning_controls("google/gemini-3.5-flash", effort="wild")
         self.assertEqual(fallback["reasoning"], {"effort": "minimal", "exclude": True})
 
     async def test_preferred_dividend_rows_are_listed_for_admin_coverage(self):

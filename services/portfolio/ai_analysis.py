@@ -42,7 +42,7 @@ from services.portfolio import quote_service
 
 logger = logging.getLogger(__name__)
 
-PORTFOLIO_AI_DEFAULT_MODEL = "~google/gemini-flash-latest"
+PORTFOLIO_AI_DEFAULT_MODEL = "google/gemini-3.5-flash"
 AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", PORTFOLIO_AI_DEFAULT_MODEL)
 AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", PORTFOLIO_AI_DEFAULT_MODEL)
 AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", AI_DEFAULT_MODEL)

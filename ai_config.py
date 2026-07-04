@@ -12,7 +12,11 @@ from repositories import ai_usage as ai_usage_repo
 from repositories import app_settings as app_settings_repo
 
 OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
-DEFAULT_PORTFOLIO_AI_MODEL = "~google/gemini-flash-latest"
+# gemini-3-flash 로 해석되던 '~google/gemini-flash-latest' 별칭을 버리고
+# 3.5 플래시를 명시한다 — 별칭은 OpenRouter 쪽 해석이 바뀌면 모델도 몰래
+# 바뀌는 문제가 있었다. 저장된 구모델 설정은 _migrate_gemini3_flash_models 가 옮긴다.
+GEMINI_35_FLASH = "google/gemini-3.5-flash"
+DEFAULT_PORTFOLIO_AI_MODEL = GEMINI_35_FLASH
 DEFAULT_WIKI_QA_MODEL = "moonshotai/kimi-k2.6"
 _MODEL_SETTING_PREFIX = "AI_MODEL::"
 _WIKI_QA_KIMI_MIGRATION_KEY = "AI_MIGRATION::wiki_qa_kimi_k2_6"
@@ -27,6 +31,13 @@ _PORTFOLIO_LEGACY_DEFAULT_MODELS: dict[str, set[str]] = {
 _PORTFOLIO_QWEN_FLASH_LEGACY_MODELS = {
     "qwen/qwen3.6-flash",
     "qwen/qwen3.6-plus",
+}
+_GEMINI35_FLASH_MIGRATION_KEY = "AI_MIGRATION::gemini_3_flash_to_3_5_flash"
+# '~...flash-latest' 별칭(당시 gemini-3-flash 해석)과 gemini-3-flash 직접 지정
+# 둘 다 3.5 플래시로 올린다. 같은 계열 업그레이드만 — 타 계열 수동 설정은 불변.
+_GEMINI3_FLASH_LEGACY_MODELS = {
+    "~google/gemini-flash-latest",
+    "google/gemini-3-flash",
 }
 
 MODEL_FEATURES: dict[str, dict[str, str]] = {
@@ -65,7 +76,7 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
     "market_daily": {
         "label": "금일 시황",
         "env": "AI_MARKET_DAILY_MODEL",
-        "default": "google/gemini-3.5-flash",
+        "default": GEMINI_35_FLASH,
     },
     "daily_briefing": {
         # 아침 배치 푸시용 짧은 요약 — 빠르고 싼 모델이면 충분해서
@@ -77,10 +88,10 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
     },
     "masters_review": {
         # 도구 탭 '투자 대가의 전략' — 대가 관점 포트폴리오 진단.
+        # 기본은 gemini-3.5-flash 고정(요청사항) — 포트폴리오 체인을 따르지 않는다.
         "label": "투자 대가 포트폴리오 진단",
         "env": "AI_MASTERS_REVIEW_MODEL",
-        "default_env": "AI_DEFAULT_MODEL",
-        "default": DEFAULT_PORTFOLIO_AI_MODEL,
+        "default": GEMINI_35_FLASH,
     },
 }
 
@@ -256,20 +267,55 @@ async def _migrate_qwen_flash_portfolio_overrides() -> dict[str, Any]:
     return {"migrated": False, "reason": "no_legacy_value"}
 
 
+async def _migrate_gemini3_flash_models() -> dict[str, Any]:
+    """저장된 gemini-3-flash 계열(구 '~flash-latest' 별칭 포함)을 3.5 플래시로.
+
+    모든 피처를 훑되 같은 계열 값만 올린다 — 관리자가 타 계열로 수동 설정한
+    값은 건드리지 않는다.
+    """
+    marker = await app_settings_repo.get_app_setting(_GEMINI35_FLASH_MIGRATION_KEY)
+    if marker:
+        return {"migrated": False, "reason": "already_marked"}
+
+    migrated: list[str] = []
+    for feature in MODEL_FEATURES:
+        stored = await app_settings_repo.get_app_setting(_model_setting_key(feature))
+        stored_value = str((stored or {}).get("value") or "").strip().lower()
+        if stored_value in _GEMINI3_FLASH_LEGACY_MODELS and stored_value != GEMINI_35_FLASH:
+            await app_settings_repo.set_app_setting(
+                _model_setting_key(feature),
+                GEMINI_35_FLASH,
+                updated_by="system:migration",
+            )
+            migrated.append(feature)
+
+    await app_settings_repo.set_app_setting(
+        _GEMINI35_FLASH_MIGRATION_KEY,
+        ",".join(migrated) if migrated else "skipped",
+        updated_by="system:migration",
+    )
+    if migrated:
+        return {"migrated": True, "features": migrated, "to": GEMINI_35_FLASH}
+    return {"migrated": False, "reason": "no_legacy_value"}
+
+
 async def migrate_legacy_model_defaults() -> dict[str, Any]:
     """One-shot migrations for model defaults that were persisted in admin DB."""
     wiki = await _migrate_legacy_wiki_qa_default()
     portfolio = await _migrate_legacy_portfolio_model_defaults()
     portfolio_qwen_flash = await _migrate_qwen_flash_portfolio_overrides()
+    gemini35_flash = await _migrate_gemini3_flash_models()
     return {
         "migrated": bool(
             wiki.get("migrated")
             or portfolio.get("migrated")
             or portfolio_qwen_flash.get("migrated")
+            or gemini35_flash.get("migrated")
         ),
         "wiki_qa": wiki,
         "portfolio": portfolio,
         "portfolio_qwen_flash": portfolio_qwen_flash,
+        "gemini35_flash": gemini35_flash,
     }
 
 
