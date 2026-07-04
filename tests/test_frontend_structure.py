@@ -1430,3 +1430,59 @@ def test_ux_polish_theme_wiki_badge_and_nps_reload_and_tab_bar_divider():
 
     # P2⑨: 뷰 전환 탭(보유종목/심층 분석)과 표시 옵션(액션/간편/통화) 사이의 구분선.
     assert ".pf-action-toggle::before" in styles
+
+
+def test_masters_labs_view_is_wired_as_deep_linkable_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    masters = (JS / "masters.js").read_text(encoding="utf-8")
+    static_routes = (ROOT / "core" / "static_routes.py").read_text(encoding="utf-8")
+
+    # 뷰 컨테이너는 스크리너 다음, main 닫힘 전에 산다.
+    assert 'id="mastersView"' in html
+    assert html.find('id="screenerView"') < html.find('id="mastersView"')
+    # Labs 허브(/labs) 카드로 진입한다(스크리너/인사이트 카드와 같은 패턴).
+    assert 'href="/masters"' in html
+    # 스크립트는 screener.js 다음, 부트스트랩(app-main.js) 앞.
+    assert html.find("./js/screener.js") < html.find("./js/masters.js")
+    assert html.find("./js/masters.js") < html.find("./js/app-main.js")
+    # 직접 URL(/masters) 새로고침이 SPA 로 라우트된다.
+    assert '"/masters"' in static_routes
+
+    # switchView 가 masters 뷰를 토글하고 진입 시 loadMasters 를 부른다.
+    assert "mastersView" in shell
+    assert "view === 'masters'" in shell
+    assert "masters: '/masters'" in shell
+    assert "'/masters': 'masters'" in shell
+    # 도구 허브 하위 화면 — 상단 탭은 "도구"가 활성으로 남는다.
+    assert "'labs', 'nps', 'insights', 'screener', 'masters'" in shell
+
+    # 기능 홈: 카탈로그 로드, 카드/상세/비교표, 성향 시뮬레이션은 masters.js.
+    assert "async function loadMasters(" in masters
+    assert "/api/masters/strategies" in masters
+    assert "/api/masters/simulate" in masters
+    assert "function _renderMastersCards(" in masters
+    assert "function _renderMasterDetail(" in masters
+    assert "function _renderMastersCompare(" in masters
+    assert "async function _runMastersSimulation(" in masters
+    assert "function _mastersAllocationBar(" in masters
+    # 전략 내용은 서버 카탈로그가 단일 소스 — JS 에 전략 본문을 하드코딩하지 않는다.
+    assert "워런 버핏" not in masters
+    assert "올웨더" not in masters
+
+    # 교육·참고용 고지: 카탈로그 데이터가 단일 소스이고 화면 컨테이너가 존재한다.
+    catalog = json.loads((ROOT / "data" / "investment_masters.json").read_text(encoding="utf-8"))
+    assert "투자 조언이 아닌 참고용" in catalog["disclaimer"]
+    assert 'id="mastersDisclaimer"' in html
+
+    assert ".masters-page" in styles
+    assert ".masters-cards" in styles
+    assert ".masters-compare-table" in styles
+    assert ".masters-sim-card" in styles
+    assert ".masters-bar" in styles
+
+
+def test_masters_feature_files_stay_below_maintenance_ceiling():
+    lines = (JS / "masters.js").read_text(encoding="utf-8").splitlines()
+    assert len(lines) < 1000, f"masters.js grew to {len(lines)} lines; split it before extending"

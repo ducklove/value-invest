@@ -646,6 +646,12 @@ function trackEvent(name, params = {}) {
           <p>외부 실험 결과와 수동 메모를 남기는 기록장입니다. 향후 포트폴리오/종목 분석 맥락으로 흡수할 예정입니다.</p>
           <strong>열기 →</strong>
         </a>
+        <a class="lab-card" href="/masters" onclick="event.preventDefault(); switchView('masters');">
+          <span class="lab-pill">교육 · 참고용</span>
+          <h3>투자 대가의 전략</h3>
+          <p>버핏·그레이엄·린치·달리오 등 대표 투자 철학을 비교하고, 내 성향에 맞춘 참고용 자산배분을 시뮬레이션합니다.</p>
+          <strong>열기 →</strong>
+        </a>
       </div>
     </div>
   </div>
@@ -699,6 +705,31 @@ function trackEvent(name, params = {}) {
         <div class="screener-empty">조건을 설정하고 '스크린 실행'을 누르세요.</div>
       </div>
       <div class="screener-pager" id="screenerPager"></div>
+    </div>
+  </div>
+
+  <div id="mastersView" style="display:none;">
+    <div class="masters-page">
+      <div class="lab-inline-banner">
+        <span>도구</span>
+        <strong>투자 대가들의 철학 요약과 참고용 자산배분 시뮬레이션</strong>
+        <a href="/labs" onclick="event.preventDefault(); switchView('labs');">도구로 돌아가기</a>
+      </div>
+      <h2>투자 대가의 전략</h2>
+      <div class="masters-disclaimer" id="mastersDisclaimer" aria-live="polite"></div>
+      <div class="masters-cards" id="mastersCards">
+        <div class="masters-empty">전략 카탈로그를 불러오는 중...</div>
+      </div>
+      <div class="masters-detail" id="mastersDetail"></div>
+      <h3 class="masters-section-title">전략 한눈 비교</h3>
+      <div class="masters-compare" id="mastersCompare"></div>
+      <h3 class="masters-section-title">내 성향으로 시뮬레이션</h3>
+      <div class="masters-sim" id="mastersSim">
+        <div class="masters-sim-form" id="mastersSimForm"></div>
+        <div class="masters-sim-results" id="mastersSimResults">
+          <div class="masters-empty">성향을 고르고 '시뮬레이션'을 누르면 전략별 참고용 배분이 표시됩니다.</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -935,6 +966,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-events.js" defer></script>
 <script src="./js/insights.js" defer></script>
 <script src="./js/screener.js" defer></script>
+<script src="./js/masters.js" defer></script>
 <script src="./js/app-main.js" defer></script>
 </body>
 </html>

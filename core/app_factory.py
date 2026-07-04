@@ -28,6 +28,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         dart_review_router,
         insights_router,
         market_daily_router,
+        masters_router,
         notifications_router,
         portfolio_router,
         reports_router,
@@ -67,6 +68,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         internal_router,
         wiki_router,
         screener_router,
+        masters_router,
         admin_router,
     ):
         app.include_router(router)

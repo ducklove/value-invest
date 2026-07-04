@@ -5539,3 +5539,117 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   .screener-filter-inputs { flex-wrap: wrap; }
   .screener-filter-inputs input { flex: 1 1 80px; }
 }
+
+/* === 투자 대가의 전략 (masters) — /labs 하위 교육용 패널 === */
+.masters-page { max-width: 1040px; margin: 0 auto; padding: 8px 0 40px; }
+.masters-page h2 { margin-bottom: 10px; }
+.masters-section-title { margin: 26px 0 10px; font-size: 16px; }
+.masters-disclaimer {
+  margin: 10px 0 16px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5;
+  color: var(--text-secondary); background: var(--warning-tint);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.masters-empty { padding: 24px; text-align: center; color: var(--text-secondary); font-size: 14px; }
+.masters-empty.error { color: var(--danger); }
+.masters-muted { font-size: 12px; color: var(--text-secondary); font-weight: 400; }
+
+.masters-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.masters-card {
+  display: flex; flex-direction: column; gap: 6px; text-align: left; cursor: pointer;
+  padding: 12px 14px; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  font: inherit; transition: border-color .15s, box-shadow .15s;
+}
+.masters-card:hover { border-color: var(--primary); box-shadow: var(--shadow-md); }
+.masters-card.active { border-color: var(--primary); box-shadow: var(--ring); }
+.masters-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.masters-card-title { font-size: 12.5px; font-weight: 600; color: var(--primary); }
+.masters-card-tagline { font-size: 12.5px; color: var(--text-secondary); line-height: 1.4; }
+
+.masters-dots { display: inline-flex; gap: 3px; align-items: center; }
+.masters-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--surface-muted); border: 1px solid var(--border);
+}
+.masters-dot.on { background: var(--primary); border-color: var(--primary); }
+
+.masters-detail { margin-top: 14px; }
+.masters-detail-card {
+  padding: 16px 18px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.masters-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.masters-detail-head h3 { margin: 0 0 4px; font-size: 17px; }
+.masters-detail-tagline { color: var(--text-secondary); font-size: 13px; }
+.masters-detail-meta { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.masters-detail-summary { font-size: 13.5px; line-height: 1.6; }
+.masters-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.masters-detail-card h4 { margin: 0 0 6px; font-size: 13px; }
+.masters-list { margin: 0 0 10px; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+.masters-list.pros li::marker { color: var(--success); }
+.masters-list.cons li::marker { color: var(--danger); }
+.masters-fit-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.masters-chip {
+  display: inline-block; padding: 2px 8px; font-size: 11.5px; border-radius: 999px;
+  background: var(--surface-muted); color: var(--text-secondary); border: 1px solid var(--border);
+}
+.masters-chip.best { background: var(--success-tint); color: var(--success); border-color: var(--success); }
+.masters-references { font-size: 11.5px; color: var(--text-secondary); }
+
+.masters-bar {
+  display: flex; height: 18px; border-radius: 999px; overflow: hidden;
+  border: 1px solid var(--border); margin: 6px 0 8px;
+}
+.masters-bar-seg { display: block; height: 100%; }
+.masters-legend { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.masters-legend li { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; flex-wrap: wrap; }
+.masters-legend-swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; align-self: center; }
+.masters-legend-weight { font-variant-numeric: var(--font-numeric); }
+.masters-legend-note { color: var(--text-secondary); font-size: 12px; }
+
+.masters-compare-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.masters-compare-table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--surface); }
+.masters-compare-table th, .masters-compare-table td {
+  padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top;
+  min-width: 130px; text-align: left; line-height: 1.5;
+}
+.masters-compare-table thead th { background: var(--bg); font-size: 12px; position: sticky; top: 0; }
+.masters-compare-table tbody th {
+  font-size: 12px; color: var(--text-secondary); white-space: nowrap; min-width: 72px;
+  background: var(--bg); position: sticky; left: 0;
+}
+.masters-compare-sub { display: block; font-weight: 400; color: var(--text-secondary); font-size: 11.5px; }
+
+.masters-sim-form {
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); margin-bottom: 14px;
+}
+.masters-sim-row { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.masters-sim-row > label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.masters-sim-row select {
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--input-bg); color: var(--text); font-size: 13px;
+}
+.masters-sim-groups { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); }
+.masters-sim-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--text); }
+.masters-sim-results { display: flex; flex-direction: column; gap: 12px; }
+.masters-sim-card {
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+}
+.masters-sim-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.masters-fit-score {
+  font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
+  background: var(--surface-muted); color: var(--text-secondary); border: 1px solid var(--border);
+  font-variant-numeric: var(--font-numeric);
+}
+.masters-adjustments { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.masters-sim-why { margin-top: 6px; font-size: 12.5px; }
+.masters-sim-why summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .masters-cards { grid-template-columns: 1fr; }
+  .masters-detail-grid { grid-template-columns: 1fr; }
+  .masters-detail-meta { flex-direction: row; gap: 12px; }
+}
