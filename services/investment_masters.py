@@ -58,11 +58,13 @@ def _validate_catalog(raw: dict[str, Any]) -> dict[str, Any]:
         _require(isinstance(spec.get("label"), str), f"asset_classes.{asset_id}.label 누락")
         _require(spec.get("group") in groups, f"asset_classes.{asset_id}.group '{spec.get('group')}' 미정의")
 
+    # instruments 는 "전략 배분에 등장하는" 자산군에만 필수 — 진단(breakdown)
+    # 분류 전용 자산군(예: crypto)은 대표 상품 없이 존재할 수 있다.
     instruments = raw.get("instruments")
     _require(isinstance(instruments, dict), "instruments 가 비어 있습니다")
-    for asset_id in assets:
-        rows = instruments.get(asset_id)
-        _require(isinstance(rows, list) and len(rows) > 0, f"instruments.{asset_id} 누락 — 모든 자산군에 대표 상품이 필요합니다")
+    for asset_id, rows in instruments.items():
+        _require(asset_id in assets, f"instruments 의 자산 '{asset_id}' 이 asset_classes 에 없습니다")
+        _require(isinstance(rows, list) and len(rows) > 0, f"instruments.{asset_id} 가 비어 있습니다")
         for inst in rows:
             _require(isinstance(inst.get("code"), str) and len(inst["code"]) == 6, f"instruments.{asset_id}.code 는 6자리 코드여야 합니다")
             _require(isinstance(inst.get("name"), str) and inst["name"].strip() != "", f"instruments.{asset_id}.name 누락")
@@ -108,6 +110,7 @@ def _validate_catalog(raw: dict[str, Any]) -> dict[str, Any]:
         for row in allocation:
             asset = row.get("asset")
             _require(asset in assets, f"{sid} 배분의 자산 '{asset}' 이 asset_classes 에 없습니다")
+            _require(asset in instruments, f"{sid} 배분의 자산 '{asset}' 에 대표 상품(instruments)이 없습니다")
             _require(asset not in alloc_assets, f"{sid} 배분에 자산 '{asset}' 중복")
             alloc_assets.add(asset)
             weight = row.get("weight")

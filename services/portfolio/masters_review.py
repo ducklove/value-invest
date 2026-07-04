@@ -19,15 +19,17 @@ sibling quote_service. routes 를 import 하지 않는다.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
 
 import ai_config
 from repositories import portfolio as portfolio_repo
-from services import ai_client, investment_masters
-from services.portfolio import quote_service
+from services import ai_client, investment_masters, stock_quotes
+from services.portfolio import quote_service, special_assets
 from services.portfolio.ai_analysis import fmt_krw
+from services.portfolio.identifiers import is_cash_asset, is_korean_stock
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,13 @@ REVIEW_MAX_TOKENS = int(os.getenv("MASTERS_REVIEW_MAX_TOKENS", "3500"))
 REVIEW_TIMEOUT_S = float(os.getenv("MASTERS_REVIEW_TIMEOUT_S", "120"))
 # 프롬프트에 넣는 보유 종목 상한 — 초과분은 비중 하위부터 잘라 요약 한 줄로.
 HOLDINGS_LIMIT = int(os.getenv("MASTERS_REVIEW_HOLDINGS_LIMIT", "40"))
+# 캐시에 없는 종목의 시세를 개별 조회할 때의 상한 — 해외/특수자산 소스가 느릴
+# 수 있어 종목당 타임아웃과 동시성 상한을 함께 건다.
+QUOTE_FETCH_TIMEOUT_S = float(os.getenv("MASTERS_REVIEW_QUOTE_TIMEOUT_S", "12"))
+QUOTE_FETCH_CONCURRENCY = int(os.getenv("MASTERS_REVIEW_QUOTE_CONCURRENCY", "6"))
+# 시세 채우기 단계 전체 상한 — 일부 소스가 늘어져도 진단 요청이 이 이상
+# 붙들리지 않는다. 못 채운 종목은 unpriced 로 표기되고 진단은 계속된다.
+QUOTE_FILL_TOTAL_TIMEOUT_S = float(os.getenv("MASTERS_REVIEW_QUOTE_TOTAL_TIMEOUT_S", "45"))
 
 
 class EmptyPortfolioError(RuntimeError):
@@ -44,20 +53,91 @@ class EmptyPortfolioError(RuntimeError):
 def classify_holding(name: str, code: str, currency: str | None = None) -> str:
     """보유 종목 → 자산군(asset class) 휴리스틱 분류.
 
-    카탈로그 asset_class_patterns 를 위에서부터 이름 부분일치로 적용하고,
+    특수자산 코드(현금/금현물/암호자산)는 코드로 확정 분류하고, 나머지는
+    카탈로그 asset_class_patterns 를 위에서부터 이름 부분일치로 적용한다.
     해외 통화/알파벳 시작 티커는 글로벌 주식, 나머지는 fallback(국내 주식).
     """
     catalog = investment_masters.load_catalog()
+    norm_code = (code or "").strip().upper()
+    # 포트폴리오의 특수자산 코드 체계 — 이름 패턴보다 코드가 확실하다.
+    if is_cash_asset(norm_code):
+        return "bond_short"
+    if norm_code == "KRX_GOLD":
+        return "gold"
+    if special_assets.is_crypto_asset(norm_code):
+        return "crypto"
     text = (name or "").upper()
     for rule in catalog.get("asset_class_patterns", []):
         if rule["match"].upper() in text:
             return rule["asset"]
     if currency and str(currency).upper() not in ("KRW", ""):
         return "equity_global"
-    norm_code = (code or "").strip().upper()
-    if norm_code and not norm_code[:1].isdigit():
+    # 해외 티커: 알파벳 시작(AAPL) 또는 거래소 접미사(83199.HK, FUEVFVND.HM).
+    if norm_code and (not norm_code[:1].isdigit() or "." in norm_code):
         return "equity_global"
     return catalog.get("asset_class_fallback", "equity_kr")
+
+
+async def enrich_with_quotes(items: list[dict]) -> list[dict]:
+    """보유 종목에 원화 시세를 붙인다 — 캐시 우선, 빠진 것은 개별 조회.
+
+    기존 cached-only 방식은 콜드 상태(재시작 직후 등)에서 국내 주식(WS 캐시)
+    만 남아 자산군 비중이 심하게 왜곡됐다. 스냅샷 배치가 쓰는 것과 같은
+    ``quote_service.fetch_quote`` 경로(해외/현금/금/암호자산 모두 KRW 환산)로
+    빠진 시세를 채운다. 실패한 종목은 unpriced 로 넘어가 UI 에 표기된다.
+    """
+    enriched = await quote_service.enrich_with_cached_quotes(items)
+    missing = [it for it in enriched if not (it.get("quote") or {}).get("price")]
+    if not missing:
+        return enriched
+
+    # 1) 국내 코드는 Naver 벌크 API 한 번으로 — 개별 KIS 경로보다 훨씬 빠르고
+    #    콜드 상태에서도 안정적이다(스크리너·시뮬레이션이 이미 쓰는 경로).
+    kr_missing = [it for it in missing if is_korean_stock(it["stock_code"])]
+    if kr_missing:
+        try:
+            bulk = await stock_quotes.get_bulk_quote_snapshots([it["stock_code"] for it in kr_missing])
+        except Exception as exc:
+            logger.info("masters review bulk quote fetch failed: %s", exc)
+            bulk = {}
+        for item in kr_missing:
+            quote = bulk.get(str(item["stock_code"]).strip().upper())
+            if quote and quote.get("price"):
+                item["quote"] = quote
+        missing = [it for it in missing if not (it.get("quote") or {}).get("price")]
+        if not missing:
+            return enriched
+
+    # 2) 나머지(해외/특수자산/벌크 미해석)는 개별 조회 — 종목당 타임아웃.
+    sem = asyncio.Semaphore(QUOTE_FETCH_CONCURRENCY)
+
+    async def _fill(item: dict) -> None:
+        async with sem:
+            try:
+                quote = await asyncio.wait_for(
+                    quote_service.fetch_quote(item["stock_code"]),
+                    timeout=QUOTE_FETCH_TIMEOUT_S,
+                )
+            except (Exception, asyncio.CancelledError) as exc:
+                # CancelledError 포함 — 업스트림 타임아웃 취소가 개별 종목을
+                # 넘어 배치 전체(gather)를 무너뜨리지 않게 종목 단위로 흡수한다.
+                logger.info("masters review quote fetch failed (%s): %s", item.get("stock_code"), exc)
+                return
+            if quote and quote.get("price"):
+                item["quote"] = quote
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(_fill(item) for item in missing), return_exceptions=True),
+            timeout=QUOTE_FILL_TOTAL_TIMEOUT_S,
+        )
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        still_missing = [it["stock_code"] for it in missing if not (it.get("quote") or {}).get("price")]
+        logger.warning(
+            "masters review quote fill timed out after %.0fs (%d unfilled: %s)",
+            QUOTE_FILL_TOTAL_TIMEOUT_S, len(still_missing), ",".join(still_missing[:8]),
+        )
+    return enriched
 
 
 def portfolio_breakdown(enriched: list[dict]) -> dict[str, Any]:
@@ -197,7 +277,7 @@ async def generate_review(payload: dict[str, Any], user: dict[str, Any]) -> dict
     items = await portfolio_repo.get_portfolio(google_sub=user["google_sub"])
     if not items:
         raise EmptyPortfolioError("portfolio is empty")
-    enriched = await quote_service.enrich_with_cached_quotes(items)
+    enriched = await enrich_with_quotes(items)
     breakdown = portfolio_breakdown(enriched)
     if not breakdown["holdings"]:
         raise EmptyPortfolioError("no priced holdings")

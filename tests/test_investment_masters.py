@@ -41,20 +41,33 @@ class CatalogTests(unittest.TestCase):
             total = sum(row["weight"] for row in s["base_allocation"])
             self.assertAlmostEqual(total, 100.0, places=2, msg=s["id"])
 
-    def test_every_asset_class_has_representative_instrument(self):
+    def test_every_strategy_allocation_asset_has_representative_instrument(self):
+        # instruments 는 전략 배분에 등장하는 자산군에만 필수 — 진단 분류 전용
+        # 자산군(crypto 등)은 대표 상품 없이 존재할 수 있다.
         catalog = im.load_catalog()
-        for asset_id in catalog["asset_classes"]:
+        used_assets = {
+            row["asset"]
+            for s in catalog["strategies"]
+            for row in s["base_allocation"]
+        }
+        for asset_id in used_assets:
             rows = catalog["instruments"].get(asset_id)
             self.assertTrue(rows, msg=f"instruments.{asset_id} 누락")
             for inst in rows:
                 self.assertRegex(inst["code"], r"^[0-9A-Z]{6}$", msg=asset_id)
                 self.assertTrue(inst["name"], msg=asset_id)
 
+    def test_breakdown_only_asset_classes_are_allowed_without_instruments(self):
+        catalog = im.load_catalog()
+        self.assertIn("crypto", catalog["asset_classes"])
+        self.assertNotIn("crypto", catalog["instruments"])
+
     def test_validation_rejects_bad_weight_sum(self):
         broken = {
             "disclaimer": "참고용",
             "asset_groups": {"equity": {"label": "주식"}},
             "asset_classes": {"equity_kr": {"label": "국내 주식", "group": "equity"}},
+            "instruments": {"equity_kr": [{"code": "069500", "name": "KODEX 200", "type": "ETF"}]},
             "profile_options": {
                 "risk": [{"id": "balanced", "label": "중립형"}],
                 "horizon": [{"id": "long", "label": "장기"}],

@@ -15,7 +15,8 @@
     "bond_short": { "label": "단기 채권·현금성", "group": "cash" },
     "gold": { "label": "금", "group": "alternative" },
     "commodities": { "label": "원자재", "group": "alternative" },
-    "reits": { "label": "리츠·부동산", "group": "alternative" }
+    "reits": { "label": "리츠·부동산", "group": "alternative" },
+    "crypto": { "label": "암호자산", "group": "alternative" }
   },
   "profile_options": {
     "risk": [
@@ -62,10 +63,17 @@
     { "match": "단기채", "asset": "bond_short" },
     { "match": "머니마켓", "asset": "bond_short" },
     { "match": "CD금리", "asset": "bond_short" },
+    { "match": "물가채", "asset": "bond_mid" },
+    { "match": "TIPS", "asset": "bond_mid" },
+    { "match": "국채", "asset": "bond_mid" },
+    { "match": "BOND", "asset": "bond_mid" },
     { "match": "채권", "asset": "bond_mid" },
     { "match": "회사채", "asset": "bond_mid" },
     { "match": "금현물", "asset": "gold" },
     { "match": "골드", "asset": "gold" },
+    { "match": "GOLD", "asset": "gold" },
+    { "match": "SILVER", "asset": "commodities" },
+    { "match": "PLATINUM", "asset": "commodities" },
     { "match": "리츠", "asset": "reits" },
     { "match": "부동산", "asset": "reits" },
     { "match": "원유", "asset": "commodities" },
