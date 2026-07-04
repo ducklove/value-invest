@@ -119,6 +119,26 @@ function appendScript(w, source) {
   w.document.body.appendChild(script);
 }
 
+const REVIEW_FIXTURE = {
+  disclaimer: CATALOG_FIXTURE.disclaimer,
+  strategy: { id: "alpha", master: "대가 알파", title: "전략 알파" },
+  markdown: "## 총평\n- 집중도가 높습니다.",
+  breakdown: {
+    total_value: 10000000, holdings_count: 2, top3_weight: 100,
+    asset_weights: [
+      { asset: "equity_kr", label: "국내 주식", group: "equity", weight: 70 },
+      { asset: "bond_mid", label: "중기 국채", group: "bond", weight: 30 },
+    ],
+    unpriced: [],
+  },
+  gap: [
+    { asset: "equity_kr", label: "국내 주식", mine: 70, target: 70, diff: 0 },
+    { asset: "bond_mid", label: "중기 국채", mine: 30, target: 30, diff: 0 },
+  ],
+  model: "test/model",
+  truncated: false,
+};
+
 function buildDom() {
   const dom = new JSDOM(`<!doctype html><html><body>
     <div id="mastersDisclaimer"></div>
@@ -127,6 +147,8 @@ function buildDom() {
     <div id="mastersCompare"></div>
     <div id="mastersSimForm"></div>
     <div id="mastersSimResults"></div>
+    <div id="mastersReviewControls"></div>
+    <div id="mastersReviewResult"></div>
   </body></html>`, {
     runScripts: "dangerously",
     url: "https://app.example.com/masters",
@@ -139,12 +161,13 @@ function buildDom() {
   return w;
 }
 
-function installApiStub(w, { simulate = SIMULATE_FIXTURE } = {}) {
+function installApiStub(w, { simulate = SIMULATE_FIXTURE, review = REVIEW_FIXTURE } = {}) {
   const calls = [];
   w.apiFetchJson = async (path, options = {}) => {
     calls.push({ path, options });
     if (path === "/api/masters/strategies") return structuredClone(CATALOG_FIXTURE);
     if (path === "/api/masters/simulate") return structuredClone(simulate);
+    if (path === "/api/masters/review") return structuredClone(review);
     throw new Error(`unexpected path: ${path}`);
   };
   return calls;
@@ -280,4 +303,56 @@ test("선호 자산군을 모두 끄면 요청 없이 안내만 보여준다", a
 
   assert.ok(!calls.some(c => c.path === "/api/masters/simulate"));
   assert.match(w.document.getElementById("mastersSimResults").textContent, /최소 1개/);
+});
+
+test("로그인 없으면 진단 섹션은 안내만 보여준다", async () => {
+  const w = buildDom();
+  installApiStub(w);
+  await w.loadMasters();
+
+  const controls = w.document.getElementById("mastersReviewControls");
+  assert.match(controls.textContent, /로그인하면/);
+  assert.equal(controls.querySelector("#mastersReviewRunBtn"), null);
+});
+
+test("로그인 상태에서 진단 실행 — strategy_id 전송, 갭 표와 마크다운 폴백 렌더", async () => {
+  const w = buildDom();
+  const calls = installApiStub(w);
+  // currentUser 는 utils.js 의 전역 let 바인딩 — window 프로퍼티 대입은 가려지므로
+  // 실제 auth.js 처럼 바인딩에 직접 대입한다.
+  w.eval('currentUser = { google_sub: "u1", name: "tester" };');
+  await w.loadMasters();
+
+  const btn = w.document.getElementById("mastersReviewRunBtn");
+  assert.ok(btn, "review button should render when logged in");
+  assert.match(btn.textContent, /대가 알파/);
+
+  await w._runMastersReview();
+
+  const reviewCall = calls.find(c => c.path === "/api/masters/review");
+  assert.ok(reviewCall, "review should be called");
+  assert.equal(JSON.parse(reviewCall.options.body).strategy_id, "alpha");
+  assert.ok(reviewCall.options.timeoutMs >= 60000, "LLM call needs a long timeout");
+
+  const result = w.document.getElementById("mastersReviewResult");
+  assert.match(result.textContent, /참고용 시뮬레이션/);
+  assert.match(result.textContent, /상위3 집중도 100%/);
+  const gapTable = result.querySelector(".masters-portfolio-table");
+  assert.ok(gapTable, "gap table should render");
+  assert.match(gapTable.textContent, /국내 주식/);
+  // jsdom 에는 marked/DOMPurify 가 없으므로 이스케이프 폴백으로 렌더된다.
+  const md = result.querySelector(".masters-review-md-plain");
+  assert.ok(md, "markdown fallback should render without marked");
+  assert.match(md.textContent, /총평/);
+});
+
+test("카드에서 대가를 바꾸면 진단 버튼 라벨도 따라간다", async () => {
+  const w = buildDom();
+  installApiStub(w);
+  w.eval('currentUser = { google_sub: "u1" };');
+  await w.loadMasters();
+
+  w.document.querySelector('#mastersCards button[data-strategy="beta"]').click();
+
+  assert.match(w.document.getElementById("mastersReviewRunBtn").textContent, /대가 베타/);
 });

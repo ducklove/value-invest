@@ -64,6 +64,7 @@ async function loadMasters({ force = false } = {}) {
     _renderMasterDetail();
     _renderMastersCompare();
     _renderMastersSimForm();
+    _renderMastersReviewControls();
   } catch (err) {
     root.innerHTML = `<div class="masters-empty error">${escapeHtml(err.message)}</div>`;
   }
@@ -108,6 +109,7 @@ function _mastersSelectMaster(strategyId) {
   const select = document.getElementById('mastersSimStrategy');
   if (select && select.value !== strategyId) select.value = strategyId;
   _renderMasterDetail();
+  _renderMastersReviewControls();
 }
 
 // 배분 목록 → 100% 누적 가로 막대 + 범례. 카드 상세와 시뮬레이션 결과가 공유한다.
@@ -342,6 +344,114 @@ function _mastersPortfolioTable(portfolio, amountSummary, quotesIncomplete) {
       </table>
     </div>
     ${summaryHtml}${staleNote}
+  `;
+}
+
+// ---- 대가의 시선 포트폴리오 진단 (LLM) ----
+
+let _mastersReviewBusy = false;
+
+function _mastersCurrentStrategy() {
+  return (_mastersCatalog?.strategies || []).find(s => s.id === _mastersSelectedId) || null;
+}
+
+function _renderMastersReviewControls() {
+  const root = document.getElementById('mastersReviewControls');
+  if (!root || !_mastersCatalog) return;
+  const loggedIn = typeof currentUser !== 'undefined' && !!currentUser;
+  if (!loggedIn) {
+    root.innerHTML = '<div class="masters-empty">로그인하면 내 포트폴리오를 선택한 대가의 관점으로 진단할 수 있습니다.</div>';
+    return;
+  }
+  const strategy = _mastersCurrentStrategy();
+  const master = strategy ? strategy.master : '';
+  root.innerHTML = `
+    <p class="masters-muted">위에서 선택한 대가(<strong>${escapeHtml(master)}</strong>)의 철학과 내 실제 보유 비중을 함께 LLM 에 보내 관점 진단을 생성합니다. 1~2분 걸릴 수 있고, 결과는 투자 조언이 아닌 참고용입니다.</p>
+    <button class="bt-run" id="mastersReviewRunBtn" type="button"${_mastersReviewBusy ? ' disabled' : ''}>${escapeHtml(master)}의 시선으로 진단</button>
+  `;
+  const btn = document.getElementById('mastersReviewRunBtn');
+  if (btn) btn.addEventListener('click', () => { _runMastersReview(); });
+}
+
+// marked+DOMPurify(전역 로드)가 있으면 마크다운 렌더, 없으면 이스케이프 텍스트 폴백.
+function _mastersRenderMarkdown(md) {
+  const text = String(md || '');
+  if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+    try {
+      return `<div class="masters-review-md">${DOMPurify.sanitize(marked.parse(text))}</div>`;
+    } catch (e) { /* 폴백으로 */ }
+  }
+  return `<div class="masters-review-md masters-review-md-plain">${escapeHtml(text)}</div>`;
+}
+
+function _mastersGapTable(gap) {
+  const rows = (gap || []).map(r => `
+    <tr>
+      <td>${escapeHtml(r.label)}</td>
+      <td class="num">${Number(r.mine)}%</td>
+      <td class="num">${Number(r.target)}%</td>
+      <td class="num">${Number(r.diff) > 0 ? '+' : ''}${Number(r.diff)}%p</td>
+    </tr>
+  `).join('');
+  return `
+    <div class="masters-portfolio-wrap">
+      <table class="masters-portfolio-table">
+        <thead><tr><th>자산군</th><th class="num">내 비중</th><th class="num">대가 예시</th><th class="num">차이</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="masters-muted">내 비중은 종목명 기반 자산군 근사치입니다 (시세 미확보 종목 제외).</p>
+  `;
+}
+
+async function _runMastersReview() {
+  const result = document.getElementById('mastersReviewResult');
+  if (!result || _mastersReviewBusy) return;
+  const strategy = _mastersCurrentStrategy();
+  if (!strategy) return;
+  _mastersReviewBusy = true;
+  _renderMastersReviewControls();
+  result.innerHTML = `<div class="masters-empty">${escapeHtml(strategy.master)}의 관점으로 진단 중... (최대 2분)</div>`;
+  try {
+    const data = await apiFetchJson('/api/masters/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strategy_id: strategy.id }),
+      timeoutMs: 180000,
+      errorMessage: '진단 생성에 실패했습니다.',
+    });
+    _renderMastersReviewResult(data);
+  } catch (err) {
+    result.innerHTML = `<div class="masters-empty error">${escapeHtml(err.message)}</div>`;
+  } finally {
+    _mastersReviewBusy = false;
+    _renderMastersReviewControls();
+  }
+}
+
+function _renderMastersReviewResult(data) {
+  const root = document.getElementById('mastersReviewResult');
+  if (!root) return;
+  const strategy = data.strategy || {};
+  const b = data.breakdown || {};
+  const chips = `
+    <p class="masters-fit-chips">
+      <span class="masters-chip">${Number(b.holdings_count) || 0}종목</span>
+      <span class="masters-chip">상위3 집중도 ${Number(b.top3_weight) || 0}%</span>
+      ${data.model ? `<span class="masters-chip">${escapeHtml(String(data.model))}</span>` : ''}
+      ${data.truncated ? '<span class="masters-chip">출력 잘림 — 다시 실행 권장</span>' : ''}
+    </p>
+  `;
+  root.innerHTML = `
+    <div class="masters-disclaimer">${escapeHtml(data.disclaimer || '')}</div>
+    <div class="masters-sim-card">
+      <div class="masters-sim-card-head">
+        <strong>${escapeHtml(strategy.master || '')} — ${escapeHtml(strategy.title || '')} 시선의 진단</strong>
+      </div>
+      ${chips}
+      ${_mastersGapTable(data.gap)}
+      ${_mastersRenderMarkdown(data.markdown)}
+    </div>
   `;
 }
 

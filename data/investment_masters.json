@@ -56,6 +56,32 @@
       { "code": "329200", "name": "TIGER 리츠부동산인프라", "type": "ETF", "note": "국내 리츠·인프라 — 배당 중심" }
     ]
   },
+  "asset_class_patterns": [
+    { "match": "국고채30", "asset": "bond_long" },
+    { "match": "국고채", "asset": "bond_mid" },
+    { "match": "단기채", "asset": "bond_short" },
+    { "match": "머니마켓", "asset": "bond_short" },
+    { "match": "CD금리", "asset": "bond_short" },
+    { "match": "채권", "asset": "bond_mid" },
+    { "match": "회사채", "asset": "bond_mid" },
+    { "match": "금현물", "asset": "gold" },
+    { "match": "골드", "asset": "gold" },
+    { "match": "리츠", "asset": "reits" },
+    { "match": "부동산", "asset": "reits" },
+    { "match": "원유", "asset": "commodities" },
+    { "match": "원자재", "asset": "commodities" },
+    { "match": "농산물", "asset": "commodities" },
+    { "match": "S&P", "asset": "equity_global" },
+    { "match": "나스닥", "asset": "equity_global" },
+    { "match": "미국", "asset": "equity_global" },
+    { "match": "글로벌", "asset": "equity_global" },
+    { "match": "선진국", "asset": "equity_global" },
+    { "match": "신흥국", "asset": "equity_global" },
+    { "match": "차이나", "asset": "equity_global" },
+    { "match": "일본", "asset": "equity_global" },
+    { "match": "인도", "asset": "equity_global" }
+  ],
+  "asset_class_fallback": "equity_kr",
   "personalization": {
     "risk_equity_shift_pt": { "conservative": -15, "balanced": 0, "aggressive": 10 },
     "horizon_equity_shift_pt": { "short": -10, "mid": 0, "long": 5 },

@@ -1472,6 +1472,14 @@ def test_masters_labs_view_is_wired_as_deep_linkable_panel():
     assert "mastersSimAmount" in masters
     assert "function _mastersPortfolioTable(" in masters
     assert "function _mastersSelectMaster(" in masters
+    # 대가의 시선 포트폴리오 진단(LLM) — 로그인 필수, 장타임아웃, 마크다운 폴백.
+    assert 'id="mastersReviewControls"' in html
+    assert 'id="mastersReviewResult"' in html
+    assert "/api/masters/review" in masters
+    assert "async function _runMastersReview(" in masters
+    assert "function _renderMastersReviewControls(" in masters
+    assert "function _mastersRenderMarkdown(" in masters
+    assert "timeoutMs: 180000" in masters
     # 전략 내용은 서버 카탈로그가 단일 소스 — JS 에 전략 본문을 하드코딩하지 않는다.
     assert "워런 버핏" not in masters
     assert "올웨더" not in masters
@@ -1487,6 +1495,7 @@ def test_masters_labs_view_is_wired_as_deep_linkable_panel():
     assert ".masters-sim-card" in styles
     assert ".masters-bar" in styles
     assert ".masters-portfolio-table" in styles
+    assert ".masters-review-md" in styles
 
 
 def test_masters_feature_files_stay_below_maintenance_ceiling():

@@ -75,6 +75,13 @@ MODEL_FEATURES: dict[str, dict[str, str]] = {
         "default_env": "AI_FAST_MODEL",
         "default": DEFAULT_PORTFOLIO_AI_MODEL,
     },
+    "masters_review": {
+        # 도구 탭 '투자 대가의 전략' — 대가 관점 포트폴리오 진단.
+        "label": "투자 대가 포트폴리오 진단",
+        "env": "AI_MASTERS_REVIEW_MODEL",
+        "default_env": "AI_DEFAULT_MODEL",
+        "default": DEFAULT_PORTFOLIO_AI_MODEL,
+    },
 }
 
 

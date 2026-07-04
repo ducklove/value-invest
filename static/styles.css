@@ -5675,3 +5675,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .masters-impl-note a { color: var(--primary); text-decoration: none; font-weight: 500; }
 .masters-impl-note a:hover { text-decoration: underline; }
+
+/* masters — 대가의 시선 포트폴리오 진단 (LLM) */
+.masters-review-controls { margin-bottom: 12px; }
+.masters-review-controls .bt-run { margin-top: 6px; }
+.masters-review-result { display: flex; flex-direction: column; gap: 12px; }
+.masters-review-md { font-size: 13.5px; line-height: 1.65; margin-top: 10px; }
+.masters-review-md h2 { font-size: 15px; margin: 14px 0 6px; }
+.masters-review-md h3 { font-size: 13.5px; margin: 12px 0 4px; }
+.masters-review-md ul, .masters-review-md ol { padding-left: 20px; margin: 6px 0; }
+.masters-review-md table { border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
+.masters-review-md th, .masters-review-md td { border: 1px solid var(--border); padding: 5px 8px; }
+.masters-review-md-plain { white-space: pre-wrap; }
