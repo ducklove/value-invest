@@ -224,13 +224,14 @@ async def get_latest_snapshot_before_date(google_sub: str, snap_date: str) -> di
 
 
 async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float, fx_usdkrw: float | None = None):
-    db = await get_db()
-    await db.execute(
-        """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw),
-    )
-    await db.commit()
+    # 단문이지만 공유 커넥션 위의 맨 commit 은 다른 task 의 진행 중 쓰기를
+    # 같이 커밋할 수 있어 transaction() 으로 통일한다 (이하 쓰기 헬퍼 동일).
+    async with transaction() as db:
+        await db.execute(
+            """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw),
+        )
 
 
 async def get_month_end_snapshot(google_sub: str) -> dict | None:
@@ -406,17 +407,6 @@ class CashflowBalanceError(ValueError):
         super().__init__(f"insufficient CASH_KRW balance: {balance} < {amount}")
 
 
-async def add_cashflow(google_sub: str, date: str, cf_type: str, amount: float, memo: str | None, nav_at_time: float | None, units_change: float | None) -> dict:
-    db = await get_db()
-    now = datetime.now().isoformat()
-    cursor = await db.execute(
-        "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (google_sub, date, cf_type, amount, nav_at_time, units_change, memo, now),
-    )
-    await db.commit()
-    return {"id": cursor.lastrowid, "date": date, "type": cf_type, "amount": amount, "nav_at_time": nav_at_time, "units_change": units_change, "memo": memo, "created_at": now}
-
-
 async def add_cashflow_and_sync_cash(
     google_sub: str,
     date: str,
@@ -511,21 +501,6 @@ async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
         except Exception:
             await db.rollback()
             raise
-
-async def get_cashflow(google_sub: str, cf_id: int) -> dict | None:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT id, type, amount FROM portfolio_cashflows WHERE id = ? AND google_sub = ?",
-        (cf_id, google_sub),
-    )
-    row = await cursor.fetchone()
-    return dict(row) if row else None
-
-
-async def delete_cashflow(google_sub: str, cf_id: int):
-    db = await get_db()
-    await db.execute("DELETE FROM portfolio_cashflows WHERE id = ? AND google_sub = ?", (cf_id, google_sub))
-    await db.commit()
 
 async def get_all_users_with_portfolio() -> list[str]:
     db = await get_db()
@@ -705,12 +680,11 @@ async def get_latest_stock_snapshot_rows(google_sub: str) -> list[dict]:
 
 
 async def save_intraday_snapshot(google_sub: str, ts: str, total_value: float):
-    db = await get_db()
-    await db.execute(
-        "INSERT OR REPLACE INTO portfolio_intraday (google_sub, ts, total_value) VALUES (?, ?, ?)",
-        (google_sub, ts, total_value),
-    )
-    await db.commit()
+    async with transaction() as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO portfolio_intraday (google_sub, ts, total_value) VALUES (?, ?, ?)",
+            (google_sub, ts, total_value),
+        )
 
 
 async def get_intraday_snapshots(google_sub: str, date: str) -> list[dict]:
@@ -748,6 +722,5 @@ async def delete_old_intraday(days_to_keep: int = 7):
     """Remove intraday data older than N days."""
     from datetime import date, timedelta
     cutoff = (date.today() - timedelta(days=days_to_keep)).isoformat()
-    db = await get_db()
-    await db.execute("DELETE FROM portfolio_intraday WHERE ts < ?", (cutoff + "T00:00",))
-    await db.commit()
+    async with transaction() as db:
+        await db.execute("DELETE FROM portfolio_intraday WHERE ts < ?", (cutoff + "T00:00",))

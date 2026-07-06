@@ -258,20 +258,22 @@ async def upsert_market_target_metrics(rows: list[dict]) -> int:
     if not values:
         return 0
 
-    db = await get_db()
-    await db.executemany(
-        """INSERT INTO market_data (stock_code, year, close_price, per, pbr, eps, bps, market_cap)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(stock_code, year) DO UPDATE SET
-             close_price = COALESCE(excluded.close_price, market_data.close_price),
-             per = COALESCE(excluded.per, market_data.per),
-             pbr = COALESCE(excluded.pbr, market_data.pbr),
-             eps = COALESCE(excluded.eps, market_data.eps),
-             bps = COALESCE(excluded.bps, market_data.bps),
-             market_cap = COALESCE(excluded.market_cap, market_data.market_cap)""",
-        values,
-    )
-    await db.commit()
+    # 벌크 upsert 는 전부 반영되거나 전부 취소돼야 한다 — 공유 커넥션에서
+    # 명시 트랜잭션 없이 commit 하면 다른 task 의 진행 중 쓰기까지 함께
+    # 커밋될 수 있어 transaction() 으로 직렬화한다.
+    async with transaction() as db:
+        await db.executemany(
+            """INSERT INTO market_data (stock_code, year, close_price, per, pbr, eps, bps, market_cap)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(stock_code, year) DO UPDATE SET
+                 close_price = COALESCE(excluded.close_price, market_data.close_price),
+                 per = COALESCE(excluded.per, market_data.per),
+                 pbr = COALESCE(excluded.pbr, market_data.pbr),
+                 eps = COALESCE(excluded.eps, market_data.eps),
+                 bps = COALESCE(excluded.bps, market_data.bps),
+                 market_cap = COALESCE(excluded.market_cap, market_data.market_cap)""",
+            values,
+        )
     return len(values)
 
 
@@ -498,33 +500,33 @@ async def upsert_preferred_dividends(rows: list[dict]) -> int:
     if not rows:
         return 0
     now = datetime.now().isoformat(timespec="seconds")
-    db = await get_db()
     written = 0
-    for r in rows:
-        code = (r.get("stock_code") or "").strip()
-        if not code:
-            continue
-        await db.execute(
-            """INSERT INTO preferred_dividends
-               (stock_code, dividend_per_share, source_name, common_code, sheet_year, fetched_at)
-               VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(stock_code) DO UPDATE SET
-                   dividend_per_share = excluded.dividend_per_share,
-                   source_name = excluded.source_name,
-                   common_code = excluded.common_code,
-                   sheet_year = excluded.sheet_year,
-                   fetched_at = excluded.fetched_at""",
-            (
-                code,
-                r.get("dividend_per_share"),
-                r.get("source_name"),
-                r.get("common_code"),
-                r.get("sheet_year"),
-                now,
-            ),
-        )
-        written += 1
-    await db.commit()
+    # 시트 재임포트가 절반만 반영된 채 남지 않도록 한 트랜잭션으로 묶는다.
+    async with transaction() as db:
+        for r in rows:
+            code = (r.get("stock_code") or "").strip()
+            if not code:
+                continue
+            await db.execute(
+                """INSERT INTO preferred_dividends
+                   (stock_code, dividend_per_share, source_name, common_code, sheet_year, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(stock_code) DO UPDATE SET
+                       dividend_per_share = excluded.dividend_per_share,
+                       source_name = excluded.source_name,
+                       common_code = excluded.common_code,
+                       sheet_year = excluded.sheet_year,
+                       fetched_at = excluded.fetched_at""",
+                (
+                    code,
+                    r.get("dividend_per_share"),
+                    r.get("source_name"),
+                    r.get("common_code"),
+                    r.get("sheet_year"),
+                    now,
+                ),
+            )
+            written += 1
     return written
 
 
@@ -559,28 +561,6 @@ async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
     )
     row = await cursor.fetchone()
     return dict(row) if row else None
-
-
-async def update_portfolio_quantity(google_sub: str, stock_code: str, new_quantity: int):
-    db = await get_db()
-    await db.execute(
-        "UPDATE user_portfolio SET quantity = ? WHERE google_sub = ? AND stock_code = ?",
-        (new_quantity, google_sub, stock_code),
-    )
-    await db.commit()
-
-
-async def add_portfolio_item(
-    google_sub: str, stock_code: str, stock_name: str, avg_price: float, quantity: int, currency: str = "KRW",
-    avg_price_currency: str = "KRW",
-):
-    db = await get_db()
-    now = datetime.now().isoformat()
-    await db.execute(
-        "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, avg_price_currency, quantity, currency, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (google_sub, stock_code, stock_name, avg_price, avg_price_currency, quantity, currency, now),
-    )
-    await db.commit()
 
 
 _TARGET_PRICE_UNCHANGED = object()
@@ -755,31 +735,39 @@ async def delete_portfolio_item(google_sub: str, stock_code: str) -> bool:
 
 
 async def update_portfolio_benchmark(google_sub: str, stock_code: str, benchmark_code: str | None):
-    db = await get_db()
-    cursor = await db.execute(
-        "UPDATE user_portfolio SET benchmark_code = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
-        (benchmark_code, datetime.now().isoformat(), google_sub, stock_code),
-    )
-    await db.commit()
+    async with transaction() as db:
+        cursor = await db.execute(
+            "UPDATE user_portfolio SET benchmark_code = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
+            (benchmark_code, datetime.now().isoformat(), google_sub, stock_code),
+        )
     return cursor.rowcount > 0
 
 
 async def save_portfolio_order(google_sub: str, ordered_stock_codes: list[str]):
-    db = await get_db()
-    await db.executemany(
-        "UPDATE user_portfolio SET sort_order = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
-        [
-            (index, datetime.now().isoformat(), google_sub, code)
-            for index, code in enumerate(ordered_stock_codes)
-        ],
-    )
-    await db.commit()
+    # 순서 재배치가 절반만 반영되면 목록이 뒤섞인다 — 전 행을 한 단위로.
+    async with transaction() as db:
+        await db.executemany(
+            "UPDATE user_portfolio SET sort_order = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
+            [
+                (index, datetime.now().isoformat(), google_sub, code)
+                for index, code in enumerate(ordered_stock_codes)
+            ],
+        )
 
 
 async def get_portfolio_groups(google_sub: str) -> list[dict]:
     db = await get_db()
-    await _ensure_default_groups(db, google_sub)
-    await db.commit()
+    # 읽기 경로에서 매번 쓰기 락을 잡지 않도록, 기본 그룹이 모자랄 때만
+    # transaction() 으로 들어가 보충한다 (_ensure_default_groups 가 락 안에서
+    # 카운트를 재확인하므로 바깥 검사와의 경합은 무해).
+    cursor = await db.execute(
+        "SELECT COUNT(*) AS cnt FROM portfolio_groups WHERE google_sub = ? AND is_default = 1",
+        (google_sub,),
+    )
+    row = await cursor.fetchone()
+    if row["cnt"] < len(_DEFAULT_GROUPS):
+        async with transaction() as txn:
+            await _ensure_default_groups(txn, google_sub)
     cursor = await db.execute(
         "SELECT group_name, sort_order, is_default FROM portfolio_groups WHERE google_sub = ? ORDER BY sort_order ASC",
         (google_sub,),
@@ -788,18 +776,19 @@ async def get_portfolio_groups(google_sub: str) -> list[dict]:
 
 
 async def add_portfolio_group(google_sub: str, group_name: str) -> dict:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT MAX(sort_order) AS mx FROM portfolio_groups WHERE google_sub = ?",
-        (google_sub,),
-    )
-    row = await cursor.fetchone()
-    next_order = (row["mx"] or 0) + 1
-    await db.execute(
-        "INSERT INTO portfolio_groups (google_sub, group_name, sort_order, is_default) VALUES (?, ?, ?, 0)",
-        (google_sub, group_name, next_order),
-    )
-    await db.commit()
+    # MAX(sort_order) 조회와 INSERT 사이에 다른 task 가 끼어들면 sort_order
+    # 가 중복된다 — 한 트랜잭션으로 직렬화.
+    async with transaction() as db:
+        cursor = await db.execute(
+            "SELECT MAX(sort_order) AS mx FROM portfolio_groups WHERE google_sub = ?",
+            (google_sub,),
+        )
+        row = await cursor.fetchone()
+        next_order = (row["mx"] or 0) + 1
+        await db.execute(
+            "INSERT INTO portfolio_groups (google_sub, group_name, sort_order, is_default) VALUES (?, ?, ?, 0)",
+            (google_sub, group_name, next_order),
+        )
     return {"group_name": group_name, "sort_order": next_order, "is_default": 0}
 
 
@@ -838,9 +827,8 @@ async def delete_portfolio_group(google_sub: str, group_name: str):
 
 
 async def save_portfolio_groups_order(google_sub: str, group_names: list[str]):
-    db = await get_db()
-    await db.executemany(
-        "UPDATE portfolio_groups SET sort_order = ? WHERE google_sub = ? AND group_name = ?",
-        [(i, google_sub, name) for i, name in enumerate(group_names)],
-    )
-    await db.commit()
+    async with transaction() as db:
+        await db.executemany(
+            "UPDATE portfolio_groups SET sort_order = ? WHERE google_sub = ? AND group_name = ?",
+            [(i, google_sub, name) for i, name in enumerate(group_names)],
+        )
