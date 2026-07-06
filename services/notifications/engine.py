@@ -28,7 +28,8 @@ import json
 import logging
 from datetime import datetime
 
-import cache
+from repositories import corp_codes
+from repositories import db as db_repo
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -210,7 +211,7 @@ async def _prev_close_value(google_sub: str) -> tuple[float | None, str | None]:
     버그를 막는다.
     """
     baseline = portfolio_today_baseline_date()
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     cursor = await db.execute(
         "SELECT date, total_value, nav FROM portfolio_snapshots"
         " WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
@@ -230,7 +231,7 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
     오늘 들어온/나간 현금을 수익률에서 제외한다."""
     if not snap_date:
         return 0.0
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     cursor = await db.execute(
         "SELECT type, amount FROM portfolio_cashflows"
         " WHERE google_sub = ? AND created_at > ?",
@@ -532,7 +533,7 @@ def _is_excluded_disclosure(report_nm: str) -> bool:
 async def _fetch_latest_disclosure(code: str) -> dict | None:
     import dart_client
     try:
-        corp_code = await cache.get_corp_code(code)
+        corp_code = await corp_codes.get_corp_code(code)
         if not corp_code:
             return None
         items = await dart_client.fetch_recent_disclosures(corp_code)
@@ -701,7 +702,7 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
         if nm:
             return nm
         try:  # 비보유 종목(분석 화면 알림)은 corp_codes 표에서 이름 보강
-            return (await cache.get_corp_name(code)) or code or ""
+            return (await corp_codes.get_corp_name(code)) or code or ""
         except Exception:
             return code or ""
 

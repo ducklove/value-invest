@@ -12,8 +12,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import cache  # noqa: E402
 import repositories.db  # noqa: E402
+from repositories import bootstrap  # noqa: E402
 
 USER_TABLES = [
     "portfolio_groups",
@@ -83,14 +83,14 @@ def _backup_sqlite(source: Path, backup_path: Path) -> None:
 
 
 async def _ensure_target_schema(target: Path) -> None:
-    # 커넥션이 읽는 경로의 원본은 repositories.db.DB_PATH 다 (cache.DB_PATH
-    # 는 읽기 전용 별칭이라 대입해도 효과 없음).
+    # 커넥션이 읽는 경로의 원본은 repositories.db.DB_PATH 다 — get_db() 가
+    # 호출 시점에 이 전역을 읽으므로 임시로 바꿔치기한다.
     original_db_path = repositories.db.DB_PATH
     try:
         repositories.db.DB_PATH = target
-        await cache.close_db()
-        await cache.init_db()
-        await cache.close_db()
+        await bootstrap.close_db()
+        await bootstrap.init_db()
+        await bootstrap.close_db()
     finally:
         repositories.db.DB_PATH = original_db_path
 

@@ -18,11 +18,11 @@ import httpx
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 import ai_config
-import cache  # corp-code 헬퍼(get_corp_code/get_corp_name)는 아직 cache 소유
 import dart_client
 import observability
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from repositories import corp_codes
 from repositories import dart_review as dart_review_repo
 from repositories import financial as financial_repo
 from repositories import wiki as wiki_repo
@@ -532,10 +532,10 @@ async def _call_openrouter(
 
 
 async def latest_review_status(stock_code: str) -> dict[str, Any]:
-    corp_code = await cache.get_corp_code(stock_code)
+    corp_code = await corp_codes.get_corp_code(stock_code)
     if not corp_code:
         raise DartReportReviewError("종목코드를 찾을 수 없습니다.")
-    corp_name = await cache.get_corp_name(stock_code) or stock_code
+    corp_name = await corp_codes.get_corp_name(stock_code) or stock_code
     filings = await fetch_periodic_filings(corp_code)
     if not filings:
         return {
@@ -580,10 +580,10 @@ async def latest_review_status(stock_code: str) -> dict[str, Any]:
 
 
 async def generate_review(stock_code: str, *, google_sub: str | None, force: bool = False) -> dict[str, Any]:
-    corp_code = await cache.get_corp_code(stock_code)
+    corp_code = await corp_codes.get_corp_code(stock_code)
     if not corp_code:
         raise DartReportReviewError("종목코드를 찾을 수 없습니다.")
-    corp_name = await cache.get_corp_name(stock_code) or stock_code
+    corp_name = await corp_codes.get_corp_name(stock_code) or stock_code
 
     filings = await fetch_periodic_filings(corp_code)
     if not filings:
@@ -686,7 +686,7 @@ async def review_stock(
     if not code:
         return {"stock_code": code, "status": "skipped", "reason": "invalid_stock_code"}
 
-    corp_code = await cache.get_corp_code(code)
+    corp_code = await corp_codes.get_corp_code(code)
     if not corp_code:
         return {"stock_code": code, "status": "skipped", "reason": "no_corp_code"}
 

@@ -1,8 +1,8 @@
 """tests 공용 temp-DB 하니스.
 
 여러 테스트 파일이 똑같이 반복하던 수명주기 —
-TemporaryDirectory → repositories.db.DB_PATH 패치 → cache.close_db()
-→ cache.init_db() (+ teardown 역순) — 를 한 곳으로 모았다.
+TemporaryDirectory → repositories.db.DB_PATH 패치 → bootstrap.close_db()
+→ bootstrap.init_db() (+ teardown 역순) — 를 한 곳으로 모았다.
 
 unittest.IsolatedAsyncioTestCase 는 pytest fixture 를 주입받을 수 없으므로
 (인스턴스 생성/실행을 unittest 러너가 소유) 클래스 기반 테스트는
@@ -14,8 +14,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import cache
 import repositories.db
+from repositories import bootstrap
 
 
 async def open_temp_db(tmp: tempfile.TemporaryDirectory) -> tuple[Path, object]:
@@ -26,16 +26,17 @@ async def open_temp_db(tmp: tempfile.TemporaryDirectory) -> tuple[Path, object]:
     db_path = Path(tmp.name) / "cache.db"
     db_patch = patch.object(repositories.db, "DB_PATH", db_path)
     db_patch.start()
-    # Previous test may have left cache._conn pointing at a now-deleted
-    # temp DB or a closed handle. close_db() is idempotent and resets
-    # the singleton so init_db() opens a fresh conn on the patched path.
-    await cache.close_db()
-    await cache.init_db()
+    # Previous test may have left the shared connection pointing at a
+    # now-deleted temp DB or a closed handle. close_db() is idempotent and
+    # resets the singleton (+ corp_codes 메모리 테이블) so init_db() opens a
+    # fresh conn on the patched path.
+    await bootstrap.close_db()
+    await bootstrap.init_db()
     return db_path, db_patch
 
 
 async def close_temp_db(tmp: tempfile.TemporaryDirectory, db_patch) -> None:
-    await cache.close_db()
+    await bootstrap.close_db()
     db_patch.stop()
     tmp.cleanup()
 
@@ -65,7 +66,7 @@ class TempDbMixin(unittest.IsolatedAsyncioTestCase):
 
 async def seed_user(sub: str = "u1", email: str = "user@example.com", name: str = "User") -> None:
     """users 테이블에 기본 사용자 1행을 삽입한다."""
-    db = await cache.get_db()
+    db = await repositories.db.get_db()
     await db.execute(
         "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -76,7 +77,7 @@ async def seed_user(sub: str = "u1", email: str = "user@example.com", name: str 
 
 async def seed_corp_codes(rows: list[tuple[str, str, str, str]]) -> None:
     """corp_codes 삽입. rows: (stock_code, corp_code, corp_name, updated_at)."""
-    db = await cache.get_db()
+    db = await repositories.db.get_db()
     await db.executemany(
         "INSERT INTO corp_codes (stock_code, corp_code, corp_name, updated_at) VALUES (?, ?, ?, ?)",
         rows,

@@ -18,10 +18,11 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from _harness import TempDbMixin
 
-import cache
 import economic_calendar
 from core.app_factory import create_app
 from core.config import PROJECT_ROOT, AppSettings
+from repositories import corp_codes
+from repositories import db as db_repo
 from repositories import notifications as notifications_repo
 from routes import notifications as notif_route
 from services.notifications import channels, engine, kakao, telegram
@@ -39,7 +40,7 @@ def _test_settings() -> AppSettings:
 
 
 async def _seed_user_and_holding(google_sub="u1", code="005930", name="삼성전자"):
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     await db.execute(
         "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
         " VALUES (?, 'e@x', 'U', '', 1, 't', 't')",
@@ -54,7 +55,7 @@ async def _seed_user_and_holding(google_sub="u1", code="005930", name="삼성전
 
 
 async def _set_target_price(google_sub, code, target):
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     await db.execute(
         "UPDATE user_portfolio SET target_price = ? WHERE google_sub = ? AND stock_code = ?",
         (target, google_sub, code),
@@ -440,7 +441,7 @@ class AlertEngineHarness(TempDbMixin):
         return await notifications_repo.create_portfolio_alert("u1", **defaults)
 
     async def _add_holding(self, code, name):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT OR IGNORE INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, created_at, updated_at)"
             " VALUES ('u1', ?, ?, 10, 1000, 't', 't')",
@@ -460,7 +461,7 @@ class AlertEngineHarness(TempDbMixin):
         alert_id = await self._rule(threshold=72000.0)
         disp = AsyncMock()
         q = {"price": 80000.0}  # above
-        db = await cache.get_db()
+        db = await db_repo.get_db()
 
         with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
@@ -576,7 +577,7 @@ class AlertEngineHarness(TempDbMixin):
         rid = await self._rule(scope="all_stocks", alert_type="daily_change_abs", threshold=5.0, stock_code=None)
         disp = AsyncMock()
         q = {"price": 80000.0, "change_pct": 7.0}  # |+7| >= 5 -> fire
-        db = await cache.get_db()
+        db = await db_repo.get_db()
 
         with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
@@ -603,7 +604,7 @@ class AlertEngineHarness(TempDbMixin):
         rid = await self._rule(scope="all_stocks", alert_type="limit_reached", threshold=0.0, stock_code=None)
         disp = AsyncMock()
         q = {"price": 13000.0, "previous_close": 10000.0}  # 상한가 정확 도달
-        db = await cache.get_db()
+        db = await db_repo.get_db()
 
         with patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: dict(q))), \
              patch.object(channels, "dispatch", new=disp):
@@ -641,7 +642,7 @@ class AlertEngineHarness(TempDbMixin):
     async def test_portfolio_daily_change_uses_total_value_scale(self):
         # 전일 결산: total_value 1억, nav(per-unit) 1,500. 일간등락은 total_value
         # 끼리 비교해야 함(per-unit nav 와 비교하면 수억 % 버그).
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units)"
             " VALUES ('u1', '2020-01-01', 100000000, 100000000, 1500, 66666.0)"
@@ -670,7 +671,7 @@ class AlertEngineHarness(TempDbMixin):
         self.assertNotIn("원", msg)
 
     async def test_portfolio_daily_change_excludes_cashflow(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units)"
             " VALUES ('u1', '2020-01-01', 100000000, 100000000, 1500, 66666.0)"
@@ -740,7 +741,7 @@ class AlertEngineHarness(TempDbMixin):
             {"rcept_no": "300", "report_nm": "증권발행실적보고서", "rcept_dt": "20260103", "corp_name": "삼성전자"},
             {"rcept_no": "299", "report_nm": "주요사항보고서(자기주식취득결정)", "rcept_dt": "20260102", "corp_name": "삼성전자"},
         ]
-        with patch.object(cache, "get_corp_code", new=AsyncMock(return_value="00126380")), \
+        with patch.object(corp_codes, "get_corp_code", new=AsyncMock(return_value="00126380")), \
              patch("dart_client.fetch_recent_disclosures", new=AsyncMock(return_value=raw)):
             latest = await engine._fetch_latest_disclosure("005930")
         self.assertIsNotNone(latest)
@@ -764,7 +765,7 @@ class AlertEngineHarness(TempDbMixin):
 
     async def test_evaluate_all_includes_alert_only_user(self):
         # 포트폴리오는 없고 알림 규칙만 있는 사용자(u2)도 평가 대상에 포함.
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
             " VALUES ('u2','e2@x','U2','',1,'t','t')"
@@ -779,7 +780,7 @@ class AlertEngineHarness(TempDbMixin):
         self.assertGreaterEqual(disp.await_count, 1)  # u2 발화(80000 >= 72000)
 
     async def test_daily_abs_dedupes_same_physical_channel_across_users(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
             " VALUES ('u2','e2@x','U2','',1,'t','t')"

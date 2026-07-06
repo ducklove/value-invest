@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from _harness import TempDbMixin
 
-import cache
 from core.app_factory import create_app
 from core.config import PROJECT_ROOT, AppSettings
+from repositories import db as db_repo
 from repositories import notifications as notifications_repo
 from repositories import rebalance_targets as targets_repo
 from repositories import snapshots as snapshots_repo
@@ -37,7 +37,7 @@ def _test_settings() -> AppSettings:
 
 
 async def _seed_user(google_sub="u1"):
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     await db.execute(
         "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
         " VALUES (?, 'e@x', 'U', '', 1, 't', 't')",
@@ -47,7 +47,7 @@ async def _seed_user(google_sub="u1"):
 
 
 async def _seed_holding(google_sub, code, name, qty, group):
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     await db.execute(
         "INSERT OR IGNORE INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, group_name, created_at, updated_at)"
         " VALUES (?, ?, ?, ?, 1000, ?, 't', 't')",
@@ -367,7 +367,7 @@ class RebalanceAlertEngineTests(TempDbHarness):
             self.assertEqual(len(captured), 1)
 
             # 다음 날(fired 가 어제) → 다시 1회 발화
-            db = await cache.get_db()
+            db = await db_repo.get_db()
             await db.execute(
                 "UPDATE portfolio_alerts SET state_json = ? WHERE id = ?",
                 (json.dumps({"stock:005930": {"armed": True, "fired": "2020-01-01"}}), alert_id),

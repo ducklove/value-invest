@@ -3,8 +3,8 @@ import unittest
 
 from _harness import TempDbMixin
 
-import cache
 from cache_layer import MemoryTTLCache
+from repositories import cache_values
 
 
 class MemoryTTLCacheTests(unittest.TestCase):
@@ -42,9 +42,9 @@ class MemoryTTLCacheTests(unittest.TestCase):
 
 class PersistentCacheValueTests(TempDbMixin):
     async def test_persistent_cache_uses_single_entry_shape(self):
-        await cache.set_cache_value("test.persistent", "alpha", {"value": 1})
+        await cache_values.set_cache_value("test.persistent", "alpha", {"value": 1})
 
-        entry = await cache.get_cache_value_entry(
+        entry = await cache_values.get_cache_value_entry(
             "test.persistent",
             "alpha",
             ttl_seconds=60,
@@ -56,7 +56,7 @@ class PersistentCacheValueTests(TempDbMixin):
         self.assertIsNotNone(entry.expires_at)
 
         entry.value["value"] = 2
-        reread = await cache.get_cache_value_entry(
+        reread = await cache_values.get_cache_value_entry(
             "test.persistent",
             "alpha",
             ttl_seconds=60,
@@ -64,16 +64,16 @@ class PersistentCacheValueTests(TempDbMixin):
         self.assertEqual(reread.value, {"value": 1})
 
     async def test_persistent_cache_honors_stale_policy(self):
-        await cache.set_cache_value("test.persistent", "alpha", {"value": 1})
+        await cache_values.set_cache_value("test.persistent", "alpha", {"value": 1})
 
         self.assertIsNone(
-            await cache.get_cache_value_entry(
+            await cache_values.get_cache_value_entry(
                 "test.persistent",
                 "alpha",
                 ttl_seconds=0,
             )
         )
-        stale = await cache.get_cache_value_entry(
+        stale = await cache_values.get_cache_value_entry(
             "test.persistent",
             "alpha",
             ttl_seconds=0,
@@ -83,14 +83,14 @@ class PersistentCacheValueTests(TempDbMixin):
         self.assertTrue(stale.stale)
 
     async def test_report_cache_wrappers_expose_cache_metadata(self):
-        await cache.save_latest_report("005930", {"title": "report"})
+        await cache_values.save_latest_report("005930", {"title": "report"})
 
-        report = await cache.get_latest_report("005930", ttl_minutes=15)
+        report = await cache_values.get_latest_report("005930", ttl_minutes=15)
         self.assertEqual(report["title"], "report")
         self.assertFalse(report["_stale"])
         self.assertIsNotNone(report["_cached_at"])
         self.assertIsNotNone(report["_expires_at"])
 
-        self.assertIsNone(await cache.get_latest_report("005930", ttl_minutes=0))
-        stale_report = await cache.get_latest_report("005930", ttl_minutes=None)
+        self.assertIsNone(await cache_values.get_latest_report("005930", ttl_minutes=0))
+        stale_report = await cache_values.get_latest_report("005930", ttl_minutes=None)
         self.assertEqual(stale_report["title"], "report")

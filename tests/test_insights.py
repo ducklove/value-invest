@@ -5,7 +5,7 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
+from repositories import db as db_repo
 from repositories import insight_posts as insight_posts_repo
 from routes import insights
 
@@ -26,7 +26,7 @@ def _request(method: str = "GET", path: str = "/api/insights") -> Request:
 
 class InsightRouteTests(TempDbMixin):
     async def seed(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             """
             INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at, is_admin)

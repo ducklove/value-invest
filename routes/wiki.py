@@ -16,12 +16,13 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 import ai_config
-import cache
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
+from repositories import corp_codes
 from repositories import dart_review as dart_review_repo
+from repositories import db as db_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
 from services.portfolio import runtime_quotes as portfolio_quotes
@@ -203,7 +204,7 @@ async def _load_stock_summary(stock_code: str) -> str:
     Uses the analysis DB rows plus a live quote fetch. Kept small enough
     (~600 tokens for a typical stock) so it plays nicely with the wiki
     context block."""
-    db = await cache.get_db()
+    db = await db_repo.get_db()
 
     # 5-year history (was 3 — extra two years help the model reason about
     # trends and cyclicality without exploding prompt size).
@@ -223,7 +224,7 @@ async def _load_stock_summary(stock_code: str) -> str:
         (stock_code,),
     )
     mkt_rows = [dict(r) for r in await mkt_cur.fetchall()]
-    corp_name = await cache.get_corp_name(stock_code) or ""
+    corp_name = await corp_codes.get_corp_name(stock_code) or ""
 
     # Live quote — uses the warm quote cache populated by portfolio/WS.
     live_line = ""
@@ -394,8 +395,8 @@ async def _try_shortcut(stock_code: str, question: str) -> str | None:
         return any(n in q_norm for n in needles)
 
     # Pre-fetch common data lazily (only when we're about to match).
-    corp_name = await cache.get_corp_name(stock_code) or stock_code
-    db = await cache.get_db()
+    corp_name = await corp_codes.get_corp_name(stock_code) or stock_code
+    db = await db_repo.get_db()
     # Pull last 5 rows so we can look past the current (partial / empty)
     # year for each field independently. A 2026 row typically has
     # close_price + market_cap but nulls for EPS / PER / dividend until

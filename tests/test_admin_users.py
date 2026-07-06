@@ -7,7 +7,7 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
+from repositories import db as db_repo
 from repositories import system_events as system_events_repo
 from routes import admin as admin_route
 
@@ -48,7 +48,7 @@ def _mutation_request(path: str = "/api/admin/users/u1") -> Request:
 
 class AdminUserManagementTests(TempDbMixin):
     async def seed(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.executemany(
             """
             INSERT INTO users
@@ -126,7 +126,7 @@ class AdminUserManagementTests(TempDbMixin):
                 ),
             )
         self.assertTrue(deleted["ok"])
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         cursor = await db.execute("SELECT COUNT(*) AS n FROM user_portfolio WHERE google_sub = 'u2'")
         self.assertEqual((await cursor.fetchone())["n"], 0)
 

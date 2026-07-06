@@ -28,10 +28,10 @@ from datetime import datetime
 from pathlib import Path
 
 import ai_config
-import cache  # corp-code/리포트목록 캐시(get_corp_name/get_report_list)는 아직 cache 소유
 import observability
 import report_client
 from core.http import get_http_client
+from repositories import cache_values, corp_codes
 from repositories import wiki as wiki_repo
 from services import ai_client
 from services.report_url_policy import is_allowed_report_pdf_url
@@ -383,7 +383,7 @@ async def ingest_stock(
     """
     # Use the cached report list when available (fast, respects TTL),
     # fall back to a live scrape if empty.
-    cached = await cache.get_report_list(stock_code, ttl_minutes=24 * 60)
+    cached = await cache_values.get_report_list(stock_code, ttl_minutes=24 * 60)
     reports: list[dict]
     if cached and cached.get("reports"):
         reports = cached["reports"]
@@ -391,7 +391,7 @@ async def ingest_stock(
         try:
             reports = await report_client.fetch_reports(stock_code)
             if reports:
-                await cache.save_report_list(stock_code, reports)
+                await cache_values.save_report_list(stock_code, reports)
         except Exception as exc:
             logger.warning("fetch_reports failed for %s: %s", stock_code, exc)
             reports = []
@@ -408,7 +408,7 @@ async def ingest_stock(
     reports = [r for r in reports if r.get("pdf_url")][:limit]
     # Attach corp_name so the summary prompt can include it.
     try:
-        corp_name = await cache.get_corp_name(stock_code) or ""
+        corp_name = await corp_codes.get_corp_name(stock_code) or ""
     except Exception:
         corp_name = ""
     for r in reports:

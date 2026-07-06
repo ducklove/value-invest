@@ -1,13 +1,13 @@
 from _harness import TempDbMixin, seed_user
 
-import cache
+from repositories import db as db_repo
 from repositories import user_stocks as user_stocks_repo
 
 
 class CacheOrderTests(TempDbMixin):
     async def seed(self):
         await seed_user()
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.executemany(
             "INSERT INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
             [
@@ -48,7 +48,7 @@ class CacheOrderTests(TempDbMixin):
         self.assertEqual(items[0]["stock_code"], "333333")
 
     async def test_overflow_trims_oldest(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         codes = [f"{i:06d}" for i in range(100, 125)]
         await db.executemany(
             "INSERT OR IGNORE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",

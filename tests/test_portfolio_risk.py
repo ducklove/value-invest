@@ -13,8 +13,8 @@ from _harness import TempDbMixin, seed_user
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
 from repositories import benchmark_daily as benchmark_daily_repo
+from repositories import db as db_repo
 from routes import portfolio_risk as portfolio_risk_route
 from services.portfolio import risk
 from services.portfolio.time_windows import today_kst_date
@@ -185,7 +185,7 @@ class PortfolioRiskRouteTests(TempDbMixin):
         portfolio_risk_route._risk_cache.clear()
 
         await seed_user()
-        db = await cache.get_db()
+        db = await db_repo.get_db()
 
         # 오늘(KST) 기준 과거 100일치 일별 스냅샷 — 포트폴리오 수익률은
         # +2% / -1% 교대, 벤치마크는 정확히 그 절반 → beta=2, corr=1.
@@ -253,7 +253,7 @@ class PortfolioRiskRouteTests(TempDbMixin):
         with patch("routes.portfolio_risk.get_current_user", AsyncMock(return_value=user)):
             first = await portfolio_risk_route.get_portfolio_risk(_request(), window="1M", benchmark=None)
             # 스냅샷을 모두 지워도 TTL 캐시가 같은 결과를 돌려준다
-            db = await cache.get_db()
+            db = await db_repo.get_db()
             await db.execute("DELETE FROM portfolio_snapshots")
             await db.commit()
             second = await portfolio_risk_route.get_portfolio_risk(_request(), window="1M", benchmark=None)

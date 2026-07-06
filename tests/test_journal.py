@@ -15,9 +15,9 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from _harness import TempDbMixin
 
-import cache
 from core.app_factory import create_app
 from core.config import PROJECT_ROOT, AppSettings
+from repositories import db as db_repo
 from repositories import journal as journal_repo
 from routes import journal as journal_route
 from services import stock_quotes
@@ -35,7 +35,7 @@ def _test_settings() -> AppSettings:
 
 
 async def _seed_user(google_sub="u1"):
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     await db.execute(
         "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
         " VALUES (?, 'e@x', 'U', '', 1, 't', 't')",
@@ -52,7 +52,7 @@ async def _seed_holding(
     target_price=None,
     target_price_disabled=0,
 ):
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     await db.execute(
         "INSERT OR IGNORE INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price,"
         " target_price, target_price_disabled, created_at, updated_at)"

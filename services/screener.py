@@ -23,9 +23,9 @@ import hashlib
 import json
 from typing import Any
 
-import cache
 from close_price_client import ClosePriceClientError, get_screener_snapshot
 from core.errors import AppError, ExternalServiceError
+from repositories import cache_values
 from repositories import screener as screener_repo
 
 # Which metrics may be filtered, with a human label and sane bounds. Bounds
@@ -163,7 +163,7 @@ async def _get_snapshot() -> list[dict]:
     display formatter both assume 억원 (100M KRW), so we normalize once here
     — the cached snapshot and every downstream filter/display see 억원.
     """
-    cached = await cache.get_cache_value_entry(_SNAPSHOT_CACHE_NS, "latest")
+    cached = await cache_values.get_cache_value_entry(_SNAPSHOT_CACHE_NS, "latest")
     if cached is not None and isinstance(cached.value, list):
         return cached.value
     try:
@@ -176,7 +176,7 @@ async def _get_snapshot() -> list[dict]:
         if isinstance(mc, (int, float)) and mc != 0:
             # 원 → 억원. 0/None 은 그대로 둔다(데이터 없음).
             row["market_cap"] = round(mc / 1e8, 2)
-    await cache.set_cache_value(_SNAPSHOT_CACHE_NS, "latest", rows, ttl_seconds=_SNAPSHOT_CACHE_TTL)
+    await cache_values.set_cache_value(_SNAPSHOT_CACHE_NS, "latest", rows, ttl_seconds=_SNAPSHOT_CACHE_TTL)
     return rows
 
 
@@ -206,7 +206,7 @@ async def run_screen(
 
     key = _result_cache_key(filters, sort_by, sort_dir, limit, offset)
     if use_cache:
-        cached = await cache.get_cache_value_entry(_RESULT_CACHE_NS, key)
+        cached = await cache_values.get_cache_value_entry(_RESULT_CACHE_NS, key)
         if cached is not None:
             return cached.value
 
@@ -233,7 +233,7 @@ async def run_screen(
         "rows": [_format_row(r) for r in rows],
     }
     if use_cache:
-        await cache.set_cache_value(_RESULT_CACHE_NS, key, result, ttl_seconds=_RESULT_CACHE_TTL)
+        await cache_values.set_cache_value(_RESULT_CACHE_NS, key, result, ttl_seconds=_RESULT_CACHE_TTL)
     return result
 
 

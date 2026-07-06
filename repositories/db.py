@@ -1,18 +1,18 @@
 """Shared aiosqlite connection ownership for the data layer.
 
-cache.py 의 god-module 결합을 끊는 첫 단계: 커넥션 싱글톤(DB_PATH /
-get_db / close_db)과 트랜잭션 원자성 헬퍼(transaction)가 여기 산다.
-repositories/* 는 cache 를 import 하지 않고 이 모듈만 본다. cache.py 는
-하위 호환을 위해 get_db/close_db/DB_PATH 를 얇게 재수출한다.
+커넥션 싱글톤(DB_PATH / get_db / close_db)과 트랜잭션 원자성 헬퍼
+(transaction)가 여기 산다. repositories/* 와 라우트/서비스가 모두 이
+모듈만 본다 (과거 cache.py 재수출 경유는 Phase 2 해체로 제거됨).
 
 테스트는 ``patch.object(repositories.db, "DB_PATH", ...)`` 로 경로를
 바꾼다 — get_db() 가 호출 시점에 모듈 전역 DB_PATH 를 읽으므로 패치가
-즉시 반영된다 (cache.DB_PATH 는 읽기 전용 별칭일 뿐, 패치 대상이 아님).
+즉시 반영된다.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -107,3 +107,16 @@ async def transaction():
             await db.commit()
         finally:
             _txn_owner = None
+
+
+async def get_db_stats() -> dict:
+    """Admin 진단용 — 테이블별 행 수와 DB 파일 크기."""
+    db = await get_db()
+    tables = {}
+    cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    for row in await cursor.fetchall():
+        tname = row["name"]
+        cnt = await db.execute(f"SELECT COUNT(*) as c FROM [{tname}]")
+        tables[tname] = (await cnt.fetchone())["c"]
+    db_size = os.path.getsize(DB_PATH) if DB_PATH.exists() else 0
+    return {"tables": tables, "db_size_bytes": db_size}

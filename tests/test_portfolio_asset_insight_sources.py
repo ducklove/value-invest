@@ -91,7 +91,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
             patch.object(portfolio_repo, "get_portfolio", new=AsyncMock(return_value=[
                 {"stock_code": "005930", "stock_name": "삼성전자", "benchmark_code": "IDX_KOSPI"}
             ])),
-            patch.object(pf.cache, "load_corp_code_table", new=AsyncMock(return_value={})),
+            patch.object(pf.corp_codes, "load_corp_code_table", new=AsyncMock(return_value={})),
             patch.object(pf, "_fetch_benchmark_quote", new=AsyncMock(side_effect=asyncio.CancelledError())),
         ):
             result = await pf.get_benchmark_quotes(object())

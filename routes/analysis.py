@@ -5,7 +5,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 import analyzer
-import cache
 import dart_client
 import stock_price
 from deps import (
@@ -18,6 +17,7 @@ from deps import (
 )
 from repositories import analysis as analysis_repo
 from repositories import benchmark_daily as benchmark_repo
+from repositories import cache_values, corp_codes
 from repositories import financial as financial_repo
 from repositories import user_stocks as user_stocks_repo
 from services import stock_quotes
@@ -300,7 +300,7 @@ async def get_stock_beta(stock_code: str):
 
     # 베타는 1년 일봉 회귀라 일중 변동 의미가 없어 월 1회만 갱신한다. 캐시 hit 시
     # KIS 일봉/KOSPI 재조회 없이 즉시 반환(종목분석 재방문 속도 개선).
-    _beta_cached = await cache.get_cache_value_entry("stock_beta", stock_code)
+    _beta_cached = await cache_values.get_cache_value_entry("stock_beta", stock_code)
     if _beta_cached is not None:
         return _beta_cached.value
 
@@ -354,7 +354,7 @@ async def get_stock_beta(stock_code: str):
     }
     # 유효한 beta 만 30일 캐시(실패=null 은 다음 방문에 재시도).
     if result["beta"] is not None:
-        await cache.set_cache_value("stock_beta", stock_code, result, ttl_seconds=30 * 24 * 3600)
+        await cache_values.set_cache_value("stock_beta", stock_code, result, ttl_seconds=30 * 24 * 3600)
     return result
 
 
@@ -372,7 +372,7 @@ async def get_stock_dr(stock_code: str):
     if not drs:
         return {"stock_code": stock_code, "drs": []}
 
-    cached = await cache.get_cache_value_entry("stock_dr", stock_code)
+    cached = await cache_values.get_cache_value_entry("stock_dr", stock_code)
     if cached is not None:
         return cached.value
 
@@ -398,7 +398,7 @@ async def get_stock_dr(stock_code: str):
     drs_out = [q for q in quoted if q]
     payload = {"stock_code": stock_code, "drs": drs_out}
     if drs_out:
-        await cache.set_cache_value("stock_dr", stock_code, payload, ttl_seconds=300)
+        await cache_values.set_cache_value("stock_dr", stock_code, payload, ttl_seconds=300)
     return payload
 
 
@@ -416,7 +416,7 @@ async def analyze_stock(stock_code: str, request: Request):
 
     meta = await analysis_repo.get_analysis_meta(stock_code)
     if meta:
-        corp_code = await cache.get_corp_code(stock_code)
+        corp_code = await corp_codes.get_corp_code(stock_code)
         payload = await _load_cached_analysis_payload(
             stock_code,
             corp_code,
@@ -426,11 +426,11 @@ async def analyze_stock(stock_code: str, request: Request):
         await _remember_recent_analysis(current_user, stock_code)
         return await _decorate_analysis_payload(payload, current_user)
 
-    corp_code = await cache.get_corp_code(stock_code)
+    corp_code = await corp_codes.get_corp_code(stock_code)
     if not corp_code:
         raise HTTPException(status_code=404, detail="종목코드를 찾을 수 없습니다.")
 
-    corp_name = await cache.get_corp_name(stock_code)
+    corp_name = await corp_codes.get_corp_name(stock_code)
 
     async def stream():
         stock_lock = await _get_analysis_lock(stock_code)

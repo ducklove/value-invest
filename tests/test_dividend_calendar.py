@@ -15,7 +15,7 @@ from _harness import TempDbMixin, seed_user
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
+from repositories import db as db_repo
 from routes import dividend_calendar as dividend_calendar_route
 from services import dividend_calendar
 
@@ -105,7 +105,7 @@ class _SeededDbTestCase(TempDbMixin):
         dividend_calendar_route._calendar_cache.clear()
 
         await seed_user()
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         holdings = [
             ("u1", "005930", "삼성전자", 10, 70000.0),
             ("u1", "005935", "삼성전자우", 3, 60000.0),
@@ -192,7 +192,7 @@ class BuildCalendarTests(_SeededDbTestCase):
         self.assertEqual(aapl["amount_per_share"], 0.25)     # native 표시는 그대로
 
     async def test_confirmed_brief_events_excluded_from_monthly_totals(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         payload = {
             "upcoming_events": [
                 # 보유 중 + 윈도 내 → 확정(ex_date) 이벤트로 노출.
@@ -228,7 +228,7 @@ class BuildCalendarTests(_SeededDbTestCase):
         self.assertEqual(out["summary"]["confirmed_count"], 1)
 
     async def test_empty_portfolio_returns_empty_events_with_full_month_grid(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute("DELETE FROM user_portfolio")
         await db.commit()
         out = await self._build()
@@ -291,7 +291,7 @@ class DividendCalendarRouteTests(_SeededDbTestCase):
     async def test_result_is_cached_per_user_and_months(self):
         first = await self._get(months=12)
         # 보유 종목을 모두 지워도 TTL 캐시가 같은 결과를 돌려준다.
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute("DELETE FROM user_portfolio")
         await db.commit()
         second = await self._get(months=12)

@@ -20,9 +20,9 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
 from repositories import app_settings as app_settings_repo
 from repositories import dart_review as dart_review_repo
+from repositories import db as db_repo
 from repositories import snapshots as snapshots_repo
 from repositories import system_events as system_events_repo
 from repositories import user_settings as user_settings_repo
@@ -51,7 +51,7 @@ def _request(path: str = "/", headers: dict[str, str] | None = None, client_host
 
 class DailyBriefingHarness(TempDbMixin):
     async def _seed_user(self, sub: str = "u1") -> None:
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
             " VALUES (?, 'e@x', 'U', '', 1, 't', 't')",
@@ -278,7 +278,7 @@ class BriefingContextTests(DailyBriefingHarness):
     async def test_today_portfolio_block_uses_live_value_and_excludes_cashflow(self):
         await self._seed_user()
         _, d_last = await self._seed_snapshots()
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, created_at)"
             " VALUES ('u1', ?, 'deposit', 10000, ?)",
@@ -441,7 +441,7 @@ class GenerateBriefingTests(DailyBriefingHarness):
         }
 
     async def _usage_rows(self) -> list[dict]:
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         cursor = await db.execute(
             "SELECT feature, model_profile, input_tokens, output_tokens, ok, error FROM ai_usage_events"
         )

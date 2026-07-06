@@ -14,7 +14,6 @@ from typing import Any, AsyncIterator
 import httpx
 
 import ai_config
-import cache  # corp-code 헬퍼(get_corp_code)는 아직 cache 소유
 import dart_client
 import market_indicators
 import market_movers
@@ -22,6 +21,7 @@ import market_news
 import market_sessions
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from repositories import corp_codes
 from services import ai_client
 
 logger = logging.getLogger(__name__)
@@ -356,7 +356,7 @@ async def _fetch_dart_disclosures(interests: list[dict[str, Any]], brief_date: s
     corp_rows: list[tuple[dict[str, Any], str]] = []
     for item in interests:
         try:
-            corp_code = await cache.get_corp_code(item["stock_code"])
+            corp_code = await corp_codes.get_corp_code(item["stock_code"])
         except Exception:
             corp_code = None
         if corp_code:

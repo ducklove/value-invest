@@ -8,8 +8,8 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
 from core import rate_limit
+from repositories import db as db_repo
 from repositories import wiki as wiki_repo
 from routes import portfolio as pf
 
@@ -57,7 +57,7 @@ async def _consume_stream(response) -> tuple[str, list[dict]]:
 
 class PortfolioAIWikiTests(TempDbMixin):
     async def seed(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ("u1", "u@e.com", "U", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00", 0),

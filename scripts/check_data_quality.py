@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import cache
+from repositories import bootstrap
+from repositories import db as db_repo
 from repositories import user_stocks as user_stocks_repo
 from services import data_quality
 
@@ -22,7 +23,7 @@ async def _get_target_codes(args: argparse.Namespace) -> list[str]:
         return sorted(set(args.stock_code))
 
     if args.all:
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         try:
             cursor = await db.execute("SELECT stock_code FROM corp_codes ORDER BY stock_code LIMIT ?", (args.limit,))
             rows = await cursor.fetchall()
@@ -67,7 +68,7 @@ def _print_human(results: list[dict]) -> None:
 
 
 async def async_main(args: argparse.Namespace) -> int:
-    await cache.init_db()
+    await bootstrap.init_db()
     codes = await _get_target_codes(args)
     if not codes:
         print("검사할 종목이 없습니다. --stock-code 또는 캐시된 종목을 사용하세요.")

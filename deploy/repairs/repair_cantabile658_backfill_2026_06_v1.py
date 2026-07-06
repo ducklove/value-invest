@@ -16,7 +16,9 @@ from core.config import load_environment  # noqa: E402
 
 load_environment(ROOT, force=True)
 
-import cache  # noqa: E402
+from repositories import bootstrap
+
+from repositories import db as db_repo
 import snapshot_nav  # noqa: E402
 from repositories import snapshots as snapshots_repo  # noqa: E402
 
@@ -181,8 +183,8 @@ async def clear_generated_snapshots(db, target_sub: str) -> None:
 
 async def main() -> None:
     backup_path = backup_db()
-    await cache.init_db()
-    db = await cache.get_db()
+    await bootstrap.init_db()
+    db = await db_repo.get_db()
 
     source_sub = await find_source_sub(db)
     target_sub, created_user = await ensure_target_user(db)
@@ -236,7 +238,7 @@ async def main() -> None:
             written_dates.append(snap_date)
         current += timedelta(days=1)
 
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     latest = await fetchone(
         db,
         """
@@ -271,7 +273,7 @@ async def main() -> None:
         "latest": latest,
         "counts": counts,
     }, ensure_ascii=False, indent=2))
-    await cache.close_db()
+    await bootstrap.close_db()
 
 
 asyncio.run(main())

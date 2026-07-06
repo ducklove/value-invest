@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-import cache  # init_db/close_db(스키마·연결 수명)는 아직 cache 소유
+from repositories import bootstrap
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from services.portfolio import runtime_quotes as portfolio_quotes
@@ -80,7 +80,7 @@ async def _fetch_total_value(google_sub: str, snap_date: str | None = None) -> f
 
 async def run(manage_db: bool = True):
     if manage_db:
-        await cache.init_db()
+        await bootstrap.init_db()
     await snapshots_repo.delete_old_intraday(days_to_keep=7)
     ts = datetime.now(KST).strftime("%Y-%m-%dT%H:%M")
     users = await snapshots_repo.get_all_users_with_portfolio()
@@ -111,7 +111,7 @@ async def run(manage_db: bool = True):
     except Exception:
         pass
     if manage_db:
-        await cache.close_db()
+        await bootstrap.close_db()
 
 
 if __name__ == "__main__":

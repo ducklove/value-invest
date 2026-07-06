@@ -13,10 +13,10 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
 import observability
 from core.errors import AppError
 from repositories import benchmark_daily as benchmark_repo
+from repositories import db as db_repo
 from repositories import snapshots as snapshots_repo
 from repositories import system_events as system_events_repo
 from routes import admin as admin_route
@@ -99,7 +99,7 @@ class _SeededDbTestCase(TempDbMixin):
         stock_code: str = "005930",
         stock_name: str = "삼성전자",
     ):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (sub, "a@b.c", "A", None, 1, "2026-01-01", "2026-01-01"),
@@ -111,7 +111,7 @@ class _SeededDbTestCase(TempDbMixin):
         await db.commit()
 
     async def _seed_snapshot(self, snap_date: str, sub: str = "u1"):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units) VALUES (?, ?, ?, ?, ?, ?)",
             (sub, snap_date, 1_000_000, 900_000, 1100.0, 1000.0),
@@ -200,7 +200,7 @@ class PortfolioStockSnapshotFreshnessTests(_SeededDbTestCase):
 
     async def test_stale_dotted_foreign_code_is_kept_in_detail_examples(self):
         await self._seed_user_with_holdings(stock_code="000001", stock_name="A")
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         for code in ("000002", "000003", "000004", "000005", "000006", "DAX.O"):
             await db.execute(
                 "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

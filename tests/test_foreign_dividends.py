@@ -13,8 +13,8 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
 import foreign_dividends
+from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from routes import admin as admin_route
@@ -354,7 +354,7 @@ class GetTrailingDividendsResolutionTests(TempDbMixin):
         여전히 최상위라 override 가 덮어쓰지 못함 — 별도 테스트에서 보장.
         """
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         # 채권 ETF (273130 = KODEX 종합채권) — 파이프라인이 0 으로 저장.
         await db.execute(
@@ -377,7 +377,7 @@ class GetTrailingDividendsResolutionTests(TempDbMixin):
         과 달리 혹시 한국 보통주가 들어가도 authoritative 한 DART/KRX
         파이프라인 값을 이기진 못함."""
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)

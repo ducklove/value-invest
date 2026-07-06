@@ -207,22 +207,3 @@ async def test_ensure_column_rejects_invalid_column_identifier():
         await db.close()
 
 
-@pytest.mark.asyncio
-async def test_cache_ensure_column_delegates_to_schema(tmp_path):
-    """cache._ensure_column 이 repositories.schema.ensure_column 과 동일 동작."""
-    import aiosqlite
-
-    import cache
-
-    db = await aiosqlite.connect(":memory:")
-    db.row_factory = aiosqlite.Row
-    await db.execute("CREATE TABLE my_table (a TEXT)")
-    await db.commit()
-    try:
-        await cache._ensure_column(db, "my_table", "new_col", "TEXT DEFAULT 'z'")
-        await db.commit()
-        cur = await db.execute("PRAGMA table_info(my_table)")
-        names = {row[1] for row in await cur.fetchall()}
-        assert "new_col" in names
-    finally:
-        await db.close()

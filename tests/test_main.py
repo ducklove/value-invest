@@ -211,7 +211,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_portfolio_resolve_name_uses_domestic_search_alias_before_foreign(self):
         resolver = AsyncMock(return_value={"stock_code": "002380", "corp_name": "케이씨씨"})
         foreign = AsyncMock(side_effect=AssertionError("KCC alias should not fall through to foreign lookup"))
-        with patch("routes.portfolio.cache.resolve_corp_search_query", new=resolver), \
+        with patch("repositories.corp_codes.resolve_corp_search_query", new=resolver), \
              patch("services.portfolio.foreign.resolve_foreign_reuters", new=foreign):
             response = await portfolio.resolve_name(code="KCC")
 
@@ -226,7 +226,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         saver = AsyncMock(return_value={"stock_code": "002380"})
         foreign_name = AsyncMock(side_effect=AssertionError("KCC alias should not be saved as a foreign ticker"))
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
-             patch("routes.portfolio.cache.resolve_corp_search_query", new=AsyncMock(return_value=alias)), \
+             patch("repositories.corp_codes.resolve_corp_search_query", new=AsyncMock(return_value=alias)), \
              patch("repositories.portfolio.save_portfolio_item", new=saver), \
              patch("services.portfolio.foreign.resolve_foreign_name", new=foreign_name), \
              patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={"price": 1000})):

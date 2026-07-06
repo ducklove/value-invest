@@ -3,7 +3,7 @@
 Per-user notification config lives here so routes/services stay thin and the
 data path matches the other repositories. Re-exported as ``cache.<fn>``.
 
-Three tables (created in ``cache.init_db``):
+Three tables (created in ``repositories.bootstrap.init_db``):
 * ``notification_channels`` — delivery targets (telegram now, kakao later).
 * ``notification_links``     — one-shot ``/start <code>`` handshake codes.
 * ``portfolio_alerts``       — alert rules + edge-trigger (``armed``) state.

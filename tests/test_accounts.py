@@ -12,9 +12,10 @@ import unittest
 from _harness import TempDbMixin, seed_user
 from fastapi.testclient import TestClient
 
-import cache
 from core.app_factory import create_app
 from repositories import accounts as accounts_repo
+from repositories import bootstrap
+from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 
 SUB = "u1"
@@ -23,7 +24,7 @@ SUB = "u1"
 async def _seed_user_with_holdings(sub: str = SUB) -> None:
     """사용자 1명 + 보유 종목 2개(account_id 없이) — 백필 전 상태를 모방."""
     await seed_user(sub=sub)
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     now = "2026-01-01T00:00:00"
     await db.executemany(
         "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price,"
@@ -43,7 +44,7 @@ class AccountMigrationTests(TempDbMixin):
         # init_db 직후(빈 스키마)에 사용자+보유종목을 넣고, 그 다음 init_db 를
         # 다시 호출해 백핀 로직이 동작하는지 검증한다.
         await _seed_user_with_holdings()
-        await cache.init_db()  # idempotent — 백핀 재실행
+        await bootstrap.init_db()  # idempotent — 백핀 재실행
 
     async def test_default_account_created_for_existing_user(self):
         accounts = await accounts_repo.list_accounts(SUB)
@@ -54,7 +55,7 @@ class AccountMigrationTests(TempDbMixin):
     async def test_holdings_backfilled_to_default_account(self):
         default_id = await accounts_repo.get_default_account_id(SUB)
         self.assertIsNotNone(default_id)
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         cursor = await db.execute(
             "SELECT account_id FROM user_portfolio WHERE google_sub = ?", (SUB,)
         )
@@ -70,7 +71,7 @@ class AccountMigrationTests(TempDbMixin):
         self.assertEqual(len(accounts), 1)
 
     async def test_default_account_backfill_function_is_idempotent(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "UPDATE user_portfolio SET account_id = NULL WHERE google_sub = ? AND stock_code = '005930'",
             (SUB,),
@@ -87,7 +88,7 @@ class AccountMigrationTests(TempDbMixin):
         self.assertEqual(row["account_id"], accounts[0]["account_id"])
 
     async def test_portfolio_defaults_backfill_function_restores_groups_and_account(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute("DELETE FROM portfolio_groups WHERE google_sub = ?", (SUB,))
         await db.execute("DELETE FROM portfolio_accounts WHERE google_sub = ?", (SUB,))
         await db.execute(
@@ -119,7 +120,7 @@ class AccountsRepoTests(TempDbMixin):
     async def seed(self):
         await _seed_user_with_holdings()
         # init_db 백핀을 트리거해 default 계좌를 보장한다(마이그레이션 재실행).
-        await cache.init_db()
+        await bootstrap.init_db()
 
     async def test_create_account_assigns_sort_order(self):
         # 기본 계좌가 이미 sort_order=0 으로 존재. 새 계좌는 1.
@@ -165,7 +166,7 @@ class AccountsRepoTests(TempDbMixin):
         default_id = await accounts_repo.get_default_account_id(SUB)
         # 보유 종목 하나를 새 계좌로 이동
         isa = await accounts_repo.create_account(SUB, name="ISA", type="isa")
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "UPDATE user_portfolio SET account_id = ? WHERE google_sub = ? AND stock_code = '005930'",
             (isa["account_id"], SUB),

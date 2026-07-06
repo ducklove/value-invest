@@ -24,7 +24,6 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     load_environment(settings.project_root)
 
     import ai_config
-    import cache
     import close_price_client
     import dart_client
     import kis_key_manager
@@ -36,6 +35,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     # 쓰던 외부 호출이 core/http.get_http_client() 로 전환한다. kis_proxy/
     # close_price 는 자체 rate-limit 회로를 가진 싱글톤을 유지한다.
     from core import http as http_manager
+    from repositories import bootstrap, corp_codes
     from repositories import users as users_repo
     from services.portfolio import insights as portfolio_insights
 
@@ -44,13 +44,13 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     await http_manager.init_http_clients()
     await kis_proxy_client.init_client()
     await close_price_client.init_client()
-    await cache.init_db()
+    await bootstrap.init_db()
     await ai_config.migrate_legacy_model_defaults()
     await users_repo.delete_expired_sessions()
 
     (settings.project_root / "data" / "pdf_cache").mkdir(parents=True, exist_ok=True)
     try:
-        needs_corp_refresh = not await cache.is_corp_codes_loaded() or await cache.corp_codes_need_refresh()
+        needs_corp_refresh = not await corp_codes.is_corp_codes_loaded() or await corp_codes.corp_codes_need_refresh()
     except Exception as exc:
         logger.error("corp_codes status check failed: %s", exc)
         needs_corp_refresh = False
@@ -58,7 +58,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         logger.info("Refreshing corp_codes from DART")
         try:
             codes = await asyncio.wait_for(dart_client.fetch_corp_codes(), timeout=45)
-            await cache.save_corp_codes(codes)
+            await corp_codes.save_corp_codes(codes)
             logger.info("Saved %d corp codes", len(codes))
         except asyncio.TimeoutError:
             logger.error("corp_codes download timed out; continuing with cached data")
@@ -177,5 +177,5 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         await kis_proxy_client.close_client()
         await close_price_client.close_client()
         await http_manager.close_http_clients()
-        await cache.close_db()
+        await bootstrap.close_db()
 

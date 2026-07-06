@@ -4,7 +4,7 @@
 target_key=그룹명) 단위로 설정한 목표 비중과 허용 오차(tolerance)를 보관한다.
 (google_sub, scope, target_key) 당 한 행 — 같은 키로 다시 저장하면 갱신.
 
-스키마는 다른 테이블처럼 ``cache.init_db`` 가 만들고, 이 모듈은 CRUD 만 담당.
+스키마는 다른 테이블처럼 ``repositories.bootstrap.init_db`` 가 만들고, 이 모듈은 CRUD 만 담당.
 전체 목록 교체(replace_all_targets)는 DELETE + INSERT 멀티-스테이트먼트라
 ``repositories.db.transaction()`` 으로 원자성을 보장한다.
 """

@@ -4,10 +4,10 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-import cache  # init_db/close_db(스키마·연결 수명)는 아직 cache 소유
 import close_price_client
 import kis_proxy_client
 from core.http import batch_http_client
+from repositories import bootstrap
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -274,7 +274,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     so we don't close the shared aiosqlite connection out from under it.
     """
     if manage_db:
-        await cache.init_db()
+        await bootstrap.init_db()
     if snap_date is None:
         snap_date = _today_kst().isoformat()
     if date.fromisoformat(snap_date).weekday() >= 5:
@@ -285,7 +285,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
             level="info", details={"date": snap_date}, wait=True,
         )
         if manage_db:
-            await cache.close_db()
+            await bootstrap.close_db()
         return
     await _fetch_fx_usdkrw()
     users = await snapshots_repo.get_all_users_with_portfolio()
@@ -318,7 +318,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
         wait=True,
     )
     if manage_db:
-        await cache.close_db()
+        await bootstrap.close_db()
 
 
 if __name__ == "__main__":

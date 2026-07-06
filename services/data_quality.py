@@ -458,12 +458,12 @@ async def inspect_stock(
     """
     import asyncio
 
-    import cache
     import stock_price
+    from repositories import corp_codes
     from repositories import financial as financial_repo
 
-    corp_name = await cache.get_corp_name(stock_code) or stock_code
-    corp_code = await cache.get_corp_code(stock_code)
+    corp_name = await corp_codes.get_corp_name(stock_code) or stock_code
+    corp_code = await corp_codes.get_corp_code(stock_code)
     if end_year is None:
         end_year = datetime.now().year
     financial_data = await financial_repo.get_financial_data(stock_code)

@@ -16,7 +16,9 @@ from core.config import load_environment  # noqa: E402
 
 load_environment(ROOT, force=True)
 
-import cache  # noqa: E402
+from repositories import bootstrap
+
+from repositories import db as db_repo
 from services.portfolio import period_reports  # noqa: E402
 
 PERIOD_TYPE = "monthly"
@@ -46,8 +48,8 @@ async def fetchall(db, sql: str, params: tuple = ()) -> list[dict]:
 
 async def main() -> None:
     backup_path = backup_db()
-    await cache.init_db()
-    db = await cache.get_db()
+    await bootstrap.init_db()
+    db = await db_repo.get_db()
     users = await fetchall(
         db,
         """
@@ -93,7 +95,7 @@ async def main() -> None:
         "target_saved_reports": len(users),
         "regenerated_reports": regenerated_reports,
     }, ensure_ascii=False, indent=2))
-    await cache.close_db()
+    await bootstrap.close_db()
     if errors:
         raise SystemExit(1)
 

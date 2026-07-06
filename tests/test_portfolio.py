@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin, seed_corp_codes, seed_user
 
-import cache
+from repositories import corp_codes
+from repositories import db as db_repo
 from repositories import financial as financial_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -100,7 +101,7 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(items[0]["target_price"], 100000)
         self.assertIsNone(items[0]["target_price_formula"])
 
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         cursor = await db.execute(
             "SELECT target_price_formula FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
             ("u1", "005930"),
@@ -189,7 +190,7 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(target_price, 12345.67)
 
     async def test_portfolio_target_metrics_use_latest_positive_values(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.executemany(
             """INSERT INTO market_data (stock_code, year, eps, bps, dividend_per_share)
                VALUES (?, ?, ?, ?, ?)""",
@@ -205,7 +206,7 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(metrics["005930"], {"eps": 1000, "bps": 50000, "dps": 1500})
 
     async def test_latest_market_valuation_joins_financial_data(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             """INSERT INTO market_data
                (stock_code, year, close_price, per, pbr, eps, bps, market_cap)
@@ -369,7 +370,7 @@ class PortfolioTests(TempDbMixin):
                 {"stock_code": "AGG", "market_value": 600_000, "group_name": "현금/채권"},
             ],
         )
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             """
             INSERT INTO portfolio_cashflows
@@ -560,7 +561,7 @@ class PortfolioTests(TempDbMixin):
         0 또는 NULL 인 해는 건너뛰고, 올해는 아직 공시 전일 수 있으므로
         제외 (stock_price.py 의 dividend fallback 과 동일한 원칙)."""
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.executemany(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
@@ -615,7 +616,7 @@ class PortfolioTests(TempDbMixin):
     async def test_dividend_warmup_skips_when_trailing_dps_exists(self):
         from datetime import datetime
 
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
@@ -636,7 +637,7 @@ class PortfolioTests(TempDbMixin):
     async def test_dividend_warmup_overwrites_stale_latest_dps_from_dart(self):
         from datetime import datetime
 
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
@@ -667,7 +668,7 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(dividends.dividend_warmup_targets("AAPL"), [])
 
     async def test_search_kcc_alias_prefers_parent_company(self):
-        results = await cache.search_corp("KCC")
+        results = await corp_codes.search_corp("KCC")
 
         self.assertGreaterEqual(len(results), 2)
         self.assertEqual(results[0]["stock_code"], "002380")
@@ -675,7 +676,7 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(results[1]["stock_code"], "021320")
 
     async def test_resolve_corp_search_query_accepts_kcc_alias(self):
-        resolved = await cache.resolve_corp_search_query("KCC")
+        resolved = await corp_codes.resolve_corp_search_query("KCC")
 
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved["stock_code"], "002380")
@@ -686,7 +687,7 @@ class PortfolioTests(TempDbMixin):
         없는 경우가 대부분이므로 해당 보통주 (005930, 000880) 의 값으로
         근사하도록 fallback. 이게 없으면 우선주는 배당액이 전부 0 으로 표시됨."""
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.executemany(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
@@ -713,7 +714,7 @@ class PortfolioTests(TempDbMixin):
         """우선주 자체 row 가 DB 에 있으면 그 값이 우선. 즉 실제 우선주
         배당 프리미엄이 정확히 기록된 경우 fallback 을 건너뛴다."""
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.executemany(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
@@ -777,12 +778,12 @@ class PortfolioTests(TempDbMixin):
     # --- Preferred stock name resolution ---
 
     async def test_resolve_common_stock(self):
-        name = await cache.resolve_stock_name("005930")
+        name = await corp_codes.resolve_stock_name("005930")
         self.assertEqual(name, "삼성전자")
 
     async def test_resolve_returns_none_for_preferred(self):
         """Preferred stocks are not in corp_codes; resolve returns None (Naver fallback in route)."""
-        name = await cache.resolve_stock_name("005935")
+        name = await corp_codes.resolve_stock_name("005935")
         self.assertIsNone(name)
 
     # --- Bulk / clear ---
@@ -817,7 +818,7 @@ class PortfolioTests(TempDbMixin):
         self.assertIn("000660", [i["stock_code"] for i in items])
 
     async def test_resolve_unknown_stock(self):
-        name = await cache.resolve_stock_name("999999")
+        name = await corp_codes.resolve_stock_name("999999")
         self.assertIsNone(name)
 
     async def test_group_weight_history_uses_snapshot_values(self):
@@ -991,7 +992,7 @@ class PortfolioTests(TempDbMixin):
             ],
         )
 
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         cursor = await db.execute(
             "SELECT group_name, market_value, stock_count, weight_pct FROM portfolio_group_snapshots WHERE google_sub = ?",
             ("u1",),
@@ -1027,7 +1028,7 @@ class PortfolioTests(TempDbMixin):
                 {"stock_code": "BBB", "market_value": 700, "group_name": "Core"},
             ],
         )
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute("DELETE FROM portfolio_group_snapshots")
         await db.execute("DELETE FROM portfolio_stock_weight_snapshots")
 

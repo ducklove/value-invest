@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin
 
-import cache
 import wiki_ingestion
+from repositories import db as db_repo
 from repositories import system_events as system_events_repo
 from repositories import wiki as wiki_repo
 
@@ -121,7 +121,7 @@ class WikiIngestionTests(TempDbMixin):
     async def test_select_target_stocks_union(self):
         from datetime import datetime, timedelta
 
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("u1", "u1@e.com", "U", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
@@ -164,7 +164,7 @@ class WikiIngestionTests(TempDbMixin):
         analysis_meta had the stock, per-user bookkeeping did not, and
         the pipeline skipped it entirely."""
         from datetime import datetime, timedelta
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         # Fresh analysis, no per-user signal anywhere.
         recent_ts = datetime.now().isoformat()
         await db.execute(
@@ -188,7 +188,7 @@ class WikiIngestionTests(TempDbMixin):
         DISTINCT is load-bearing because run_pipeline iterates the list
         and a duplicate would double the LLM calls for that stock."""
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("u2", "u2@e.com", "U", "", 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
@@ -232,7 +232,7 @@ class WikiIngestionTests(TempDbMixin):
         # Upsert with different URL but same sha1 → still one row.
         row2 = dict(row, pdf_url="https://stock.pstatic.net/stock-research/different.pdf")
         await wiki_repo.save_pdf_cache_row(row2)
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         cursor = await db.execute("SELECT COUNT(*) AS n, pdf_url FROM report_pdf_cache WHERE pdf_sha1 = ?", (row["pdf_sha1"],))
         r = await cursor.fetchone()
         self.assertEqual(r["n"], 1)
@@ -343,7 +343,7 @@ class WikiIngestionTests(TempDbMixin):
         with patch.object(wiki_ingestion, "download_pdf", AsyncMock(side_effect=RuntimeError("boom"))):
             result = await wiki_ingestion.ingest_pdf_for_report(stock, report)
         self.assertEqual(result.get("failed"), "download")
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         cursor = await db.execute("SELECT parse_status FROM report_pdf_cache WHERE stock_code = ?", (stock,))
         rows = await cursor.fetchall()
         self.assertEqual(len(rows), 1)

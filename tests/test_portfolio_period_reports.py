@@ -5,7 +5,7 @@ import pytest
 from _harness import seed_user
 from starlette.requests import Request
 
-import cache
+from repositories import db as db_repo
 from routes import portfolio_reports as reports_route
 from services.portfolio import period_reports
 
@@ -25,7 +25,7 @@ def _request(path: str = "/api/portfolio/period-reports") -> Request:
 
 async def _seed_period_fixture():
     await seed_user("u1", "user@example.com", "User")
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     await db.executemany(
         """
         INSERT INTO portfolio_snapshots
@@ -160,7 +160,7 @@ def test_composition_changes_classifies_negative_quantity_as_futures_short():
 @pytest.mark.asyncio
 async def test_period_report_resolves_preferred_stock_snapshot_names(temp_db):
     await seed_user("u1", "user@example.com", "User")
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     await db.executemany(
         """
         INSERT INTO portfolio_snapshots

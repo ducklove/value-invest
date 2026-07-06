@@ -29,12 +29,12 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-import cache
 import observability
 import repositories.db
 from core import app_factory
 from core.app_factory import create_app
 from core.config import PROJECT_ROOT, AppSettings
+from repositories import bootstrap
 from repositories import portfolio as portfolio_repo
 from repositories import system_events as system_events_repo
 from routes import portfolio as portfolio_route
@@ -63,9 +63,9 @@ class IntegrationAppHarness(unittest.IsolatedAsyncioTestCase):
         self.db_path = Path(self.temp_dir.name) / "cache.db"
         self.db_patch = patch.object(repositories.db, "DB_PATH", self.db_path)
         self.db_patch.start()
-        # A prior test may have left cache._conn pointing at a deleted temp DB.
-        await cache.close_db()
-        await cache.init_db()
+        # A prior test may have left the shared conn pointing at a deleted temp DB.
+        await bootstrap.close_db()
+        await bootstrap.init_db()
 
         # Background warmups fan out to DART / AI and must not fire in tests.
         dividends.reset_warmup_state()
@@ -76,7 +76,7 @@ class IntegrationAppHarness(unittest.IsolatedAsyncioTestCase):
         for p in self._patches:
             p.start()
 
-        db = await cache.get_db()
+        db = await repositories.db.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -108,7 +108,7 @@ class IntegrationAppHarness(unittest.IsolatedAsyncioTestCase):
         self.auth_patch.stop()
         for p in self._patches:
             p.stop()
-        await cache.close_db()
+        await bootstrap.close_db()
         self.db_patch.stop()
         self.temp_dir.cleanup()
 

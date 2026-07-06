@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-import cache
 from deps import get_current_user
+from repositories import corp_codes
 from repositories import user_settings as user_settings_repo
 from repositories import user_stocks as user_stocks_repo
 from services import stock_quotes
@@ -181,7 +181,7 @@ async def set_market_bar_setting(request: Request, payload: dict = Body(...)):
 
 @router.get("/api/search")
 async def search(q: str = Query(..., min_length=1)):
-    results = await cache.search_corp(q)
+    results = await corp_codes.search_corp(q)
     return results
 
 
@@ -220,7 +220,7 @@ async def update_stock_preference(stock_code: str, request: Request, payload: di
 
 @router.get("/api/quote/{stock_code}")
 async def quote_snapshot(stock_code: str):
-    corp_code = await cache.get_corp_code(stock_code)
+    corp_code = await corp_codes.get_corp_code(stock_code)
     if not corp_code:
         raise HTTPException(status_code=404, detail="종목코드를 찾을 수 없습니다.")
     return await stock_quotes.get_quote_snapshot(stock_code)

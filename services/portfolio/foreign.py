@@ -24,10 +24,10 @@ from urllib.parse import quote
 
 import httpx
 
-import cache
 import kis_proxy_client
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from repositories import corp_codes
 from repositories import ticker_map as ticker_map_repo
 from services.portfolio import currencies, fx
 from services.portfolio.identifiers import (
@@ -113,7 +113,7 @@ async def resolve_name(stock_code: str) -> str | None:
     if static:
         return static["name"]
     if _is_korean_stock(stock_code):
-        name = await cache.resolve_stock_name(stock_code)
+        name = await corp_codes.resolve_stock_name(stock_code)
         if name:
             return name
         return await fetch_naver_stock_name(stock_code)
@@ -132,7 +132,7 @@ async def resolve_domestic_code_alias(stock_code: str) -> dict | None:
         or _static_foreign_ticker(stock_code)
     ):
         return None
-    return await cache.resolve_corp_search_query(stock_code)
+    return await corp_codes.resolve_corp_search_query(stock_code)
 
 
 async def fetch_naver_world_stock(reuters_code: str) -> dict | None:

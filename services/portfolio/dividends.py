@@ -5,9 +5,9 @@ import logging
 import time
 from datetime import datetime
 
-import cache
 import dart_client
 import stock_price
+from repositories import corp_codes
 from repositories import financial as financial_repo
 from services.portfolio.identifiers import (
     common_stock_code,
@@ -71,7 +71,7 @@ _warmup_tasks: dict[str, asyncio.Task] = {}
 
 
 async def refresh_domestic_dividend_from_dart(code: str) -> int:
-    corp_code = await cache.get_corp_code(code)
+    corp_code = await corp_codes.get_corp_code(code)
     if not corp_code:
         return 0
     current_year = datetime.now().year
@@ -94,7 +94,7 @@ async def warm_market_data_for_dividend(code: str) -> None:
         if latest_dividend_years.get(code, 0) >= datetime.now().year - 1:
             return
         fin_data = await financial_repo.get_financial_data(code)
-        corp_code = await cache.get_corp_code(code)
+        corp_code = await corp_codes.get_corp_code(code)
         refreshed = await stock_price.fetch_market_data(code, fin_data, corp_code=corp_code)
         if refreshed:
             await financial_repo.save_market_data(code, refreshed)

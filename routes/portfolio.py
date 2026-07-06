@@ -11,10 +11,11 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 import asset_insights
-import cache
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from repositories import benchmark_daily as benchmark_repo
+from repositories import corp_codes
+from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -864,7 +865,7 @@ async def update_benchmark(stock_code: str, request: Request, payload: dict = Bo
         bq = await asyncio.wait_for(_fetch_benchmark_quote(effective), timeout=_BENCHMARK_ENDPOINT_ITEM_TIMEOUT)
     except Exception:
         bq = _cached_benchmark_quote(effective, allow_stale=True) or {}
-    corp_code_table = await cache.load_corp_code_table()
+    corp_code_table = await corp_codes.load_corp_code_table()
     name = _resolve_benchmark_name_from_code_table(effective, None, corp_code_table)
     return {"ok": True, "benchmark_code": benchmark_code, "effective_benchmark": effective, "benchmark_name": name, "benchmark_quote": bq}
 
@@ -879,7 +880,7 @@ async def get_benchmark_quotes(request: Request):
         bc = item.get("benchmark_code") or _resolve_default_benchmark_fast(item["stock_code"])
         if bc:
             benchmark_codes.add(bc)
-    corp_code_table = await cache.load_corp_code_table()
+    corp_code_table = await corp_codes.load_corp_code_table()
 
     async def _fetch_one(bc):
         name = _resolve_benchmark_name_from_code_table(bc, items, corp_code_table)
@@ -987,7 +988,7 @@ async def search_foreign(q: str = Query(..., min_length=1), limit: int = Query(8
 async def get_prev_day_snapshot(request: Request):
     user = _require_user(await get_current_user(request))
     baseline_date = _portfolio_today_baseline_date()
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     # Latest 20:00 settlement snapshot for the active Today window.
     cursor = await db.execute(
         "SELECT date, total_value, fx_usdkrw, nav FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
@@ -1146,7 +1147,7 @@ async def get_intraday(request: Request):
     # Prepend the active 20:00 settlement snapshot as the zero baseline.
     # The frontend maps x by elapsed time from this timestamp, so the API
     # should expose the real axis start instead of a synthetic midnight marker.
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     cursor = await db.execute(
         "SELECT total_value FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (user["google_sub"], baseline_date),

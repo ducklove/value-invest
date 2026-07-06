@@ -4,10 +4,10 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-import cache
 import report_client
 from core.http import get_http_client
 from deps import LATEST_REPORT_CACHE_TTL_MINUTES, REPORT_LIST_CACHE_TTL_MINUTES
+from repositories import cache_values
 from services.report_url_policy import is_allowed_report_pdf_url
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ async def get_reports(stock_code: str, refresh: bool = False):
     """증권사 리포트 목록 (네이버 금융, 최근 3년)."""
     try:
         if not refresh:
-            cached_reports = await cache.get_report_list(stock_code, REPORT_LIST_CACHE_TTL_MINUTES)
+            cached_reports = await cache_values.get_report_list(stock_code, REPORT_LIST_CACHE_TTL_MINUTES)
             if cached_reports:
                 return {
                     "stock_code": stock_code,
@@ -62,9 +62,9 @@ async def get_reports(stock_code: str, refresh: bool = False):
                 }
 
         reports = await report_client.fetch_reports(stock_code)
-        await cache.save_report_list(stock_code, reports)
+        await cache_values.save_report_list(stock_code, reports)
         if reports:
-            await cache.save_latest_report(stock_code, reports[0])
+            await cache_values.save_latest_report(stock_code, reports[0])
         return {"stock_code": stock_code, "reports": reports, "cached": False}
     except Exception as e:
         logger.error(f"증권사 리포트 조회 실패: {e}")
@@ -74,7 +74,7 @@ async def get_reports(stock_code: str, refresh: bool = False):
 @router.get("/api/reports/{stock_code}/latest")
 async def get_latest_report(stock_code: str, refresh: bool = False):
     try:
-        cached_report = await cache.get_latest_report(
+        cached_report = await cache_values.get_latest_report(
             stock_code,
             None if refresh else LATEST_REPORT_CACHE_TTL_MINUTES,
         )
@@ -92,7 +92,7 @@ async def get_latest_report(stock_code: str, refresh: bool = False):
         report = await report_client.fetch_latest_report(stock_code)
         if report:
             changed = _report_signature(cached_report) != _report_signature(report)
-            await cache.save_latest_report(stock_code, report)
+            await cache_values.save_latest_report(stock_code, report)
             return {"stock_code": stock_code, "report": report, "cached": False, "changed": changed}
         if cached_report:
             cached_at, expires_at, _ = _pop_cache_meta(cached_report)

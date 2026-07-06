@@ -14,10 +14,10 @@ from urllib.parse import quote, urlparse
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
 import ai_config
-import cache
 import linked_project_admin
 import observability
 from deps import TRUSTED_RETURN_ORIGINS, get_current_user
+from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from repositories import system_events as system_events_repo
@@ -312,7 +312,7 @@ async def _latest_data_date_for(job_name: str) -> str | None:
     anything — a weekend-skip or a post-failure-retry that gave up can
     both end in exit 0. Querying the downstream table is the only way
     to know whether the operator should actually trust a 'success'."""
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     if job_name == "portfolio-snapshot":
         # Any user's most recent NAV snapshot date.
         cursor = await db.execute("SELECT MAX(date) AS d FROM portfolio_snapshots")
@@ -922,7 +922,7 @@ async def server_stats(request: Request):
 @router.get("/db-stats")
 async def db_stats(request: Request):
     await _require_admin(request)
-    return await cache.get_db_stats()
+    return await db_repo.get_db_stats()
 
 
 # ---------------------------------------------------------------------------
@@ -1291,7 +1291,7 @@ async def diag_wiki(request: Request, code: str = ""):
         })
 
     # --- DB state ---------------------------------------------------------
-    db = await cache.get_db()
+    db = await db_repo.get_db()
     cursor = await db.execute(
         "SELECT COUNT(*) AS n FROM stock_wiki_entries WHERE stock_code = ?",
         (code,),

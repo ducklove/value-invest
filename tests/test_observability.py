@@ -14,8 +14,8 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
 import observability
+from repositories import db as db_repo
 from repositories import system_events as system_events_repo
 from repositories import wiki as wiki_repo
 from routes import admin as admin_route
@@ -225,7 +225,7 @@ class BatchStatusDataFreshnessTests(TempDbMixin):
     table, not from systemd state."""
 
     async def test_latest_data_date_for_portfolio_reads_from_table(self):
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("u1", "a@b.c", "A", None, 1, "2026-01-01", "2026-01-01"),
@@ -310,7 +310,7 @@ class BatchStatusDataFreshnessTests(TempDbMixin):
 
     async def test_batch_status_attaches_staleness_per_job(self):
         admin_user = {"google_sub": "u1", "email": "a@b.c", "is_admin": True}
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             "INSERT INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("u1", "a@b.c", "A", None, 1, "2026-01-01", "2026-01-01"),

@@ -6,8 +6,8 @@ from _harness import TempDbMixin, seed_corp_codes, seed_user
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import cache
 from core import rate_limit
+from repositories import db as db_repo
 from repositories import wiki as wiki_repo
 from routes import wiki as wiki_route
 
@@ -227,7 +227,7 @@ class ShortcutTests(TempDbMixin):
 
     async def seed(self):
         await seed_corp_codes([("005930", "00126380", "삼성전자", "2026-01-01")])
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, per, pbr, eps, bps,
                 dividend_per_share, dividend_yield, market_cap)

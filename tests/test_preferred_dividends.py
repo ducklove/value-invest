@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin
 
-import cache
 import preferred_dividends as pd_mod
+from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 
 # Minimal CSV that mirrors the real sheet's layout. Column count matches
@@ -173,7 +173,7 @@ class UpsertAndLookupTests(TempDbMixin):
           3. 보통주 market_data — 자동 근사치.
         """
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.executemany(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
@@ -214,7 +214,7 @@ class UpsertAndLookupTests(TempDbMixin):
         해야 한다. 시트 관리자의 확정 값이므로 보통주 fallback 으로
         가로채면 안 됨 ('이미 공시 다 끝났는데 0 원으로 결정됐다' 는 경우)."""
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
@@ -235,7 +235,7 @@ class UpsertAndLookupTests(TempDbMixin):
         """시트에 row 자체가 없는 우선주는 기존처럼 보통주 fallback.
         (sheet NULL vs sheet 0 구분 — 전자만 fallback)"""
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)
@@ -251,7 +251,7 @@ class UpsertAndLookupTests(TempDbMixin):
         """보통주(끝자리 0) 에는 시트 우선 조회 자체가 적용되지 않음.
         market_data 경로만 본다."""
         from datetime import datetime
-        db = await cache.get_db()
+        db = await db_repo.get_db()
         current_year = datetime.now().year
         await db.execute(
             """INSERT INTO market_data (stock_code, year, close_price, dividend_per_share)

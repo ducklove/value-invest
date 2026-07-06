@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 from _harness import TempDbMixin
 from fastapi import HTTPException
 
-import cache
 import dart_report_review
+from repositories import corp_codes
 from repositories import dart_review as dart_review_repo
 from repositories import wiki as wiki_repo
 from routes import dart_review as dart_review_route
@@ -137,8 +137,8 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
             "period": "2026.03",
         }]
         return [
-            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
-            patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
+            patch.object(corp_codes, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(corp_codes, "get_corp_name", AsyncMock(return_value="삼성전자")),
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
             patch.object(dart_report_review, "fetch_document_text", AsyncMock(return_value="원문 텍스트")),
             patch.object(dart_report_review, "_financial_context", AsyncMock(return_value="재무 컨텍스트")),
@@ -197,8 +197,8 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
         }
         filings = [{"rcept_no": "r1", "report_name": "분기보고서 (2026.03)", "report_date": "2026-04-01"}]
         with (
-            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
-            patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
+            patch.object(corp_codes, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(corp_codes, "get_corp_name", AsyncMock(return_value="삼성전자")),
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
             patch.object(dart_review_repo, "get_dart_report_review", AsyncMock(return_value=broken_cached)),
         ):
@@ -211,8 +211,8 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
         good_cached = {"review": {"summary_md": "# 정상"}, "review_md": "# 정상"}
         filings = [{"rcept_no": "r1", "report_name": "분기보고서 (2026.03)", "report_date": "2026-04-01"}]
         with (
-            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
-            patch.object(cache, "get_corp_name", AsyncMock(return_value="삼성전자")),
+            patch.object(corp_codes, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(corp_codes, "get_corp_name", AsyncMock(return_value="삼성전자")),
             patch.object(dart_report_review, "fetch_periodic_filings", AsyncMock(return_value=filings)),
             patch.object(dart_review_repo, "get_dart_report_review", AsyncMock(return_value=good_cached)),
         ):
@@ -265,7 +265,7 @@ class DartReportReviewPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(wiki_repo, "select_wiki_target_stocks", AsyncMock(return_value=["005930", "000660", "000660"])),
-            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(corp_codes, "get_corp_code", AsyncMock(return_value="00126380")),
             patch.object(dart_report_review, "latest_review_status", side_effect=fake_status),
             patch.object(dart_report_review, "generate_review", side_effect=fake_generate),
         ):
@@ -285,7 +285,7 @@ class DartReportReviewPipelineTests(unittest.IsolatedAsyncioTestCase):
             return {"stock_code": stock_code, "rcept_no": stock_code, "model": "test-model"}
 
         with (
-            patch.object(cache, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(corp_codes, "get_corp_code", AsyncMock(return_value="00126380")),
             patch.object(dart_report_review, "latest_review_status", side_effect=fake_status),
             patch.object(dart_report_review, "generate_review", side_effect=fake_generate),
         ):

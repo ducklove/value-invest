@@ -98,6 +98,24 @@ flowchart TD
 4. `cache.py` repository 분리와 transaction helper. (완료 — 2026-06-10)
 5. 프론트 portfolio store 도입. (완료 — 2026-06-10)
 
+## 2026-07-06 진행 기록 — cache.py 완전 해체
+
+- **cache.py 삭제 완료**: 잔존하던 기능을 목적별 모듈로 이관하고 파일을 제거.
+  - corp-code 참조 테이블(검색·별칭·인메모리 코드표) → `repositories/corp_codes.py`
+  - DB 영속 K/V 캐시(cache_values) + 리포트 캐시 래퍼 → `repositories/cache_values.py`
+  - `init_db()`/`close_db()` 수명주기 오케스트레이션 → `repositories/bootstrap.py`
+  - `get_db_stats()` → `repositories/db.py`
+- 소비자 전환: 프로덕션 모듈 22개 + deploy repair 4개 + 테스트 30여 개가
+  `import cache` 대신 새 모듈을 직접 import. 재수출 shim 없음.
+- **쓰기 원자성 마무리**: repositories/portfolio.py·snapshots.py 의 직접
+  `db.commit()` 쓰기 헬퍼를 전부 `transaction()` 경유로 통일(공유 커넥션
+  위 맨 commit 이 다른 task 의 진행 중 쓰기를 함께 커밋하는 위험 제거).
+  호출자 없는 데드 쓰기 헬퍼(update_portfolio_quantity, add_portfolio_item,
+  단순 add/delete/get_cashflow)는 삭제.
+- **배포 게이트 봉합**: deploy.sh 의 JS 테스트가 node 부재 시 조용히 skip
+  되던 구멍을 하드 게이트로 전환(`SKIP_JS_TESTS=1` 탈출구). 게이트 3종
+  (pytest/npm test/healthz 롤백)을 `tests/test_dependency_policy.py` 로 고정.
+
 ## 2026-06-11 진행 기록
 
 리팩토링 리뷰(`docs/refactoring-review-2026-06.html`) Phase 2 잔여 2건 처리:
