@@ -118,11 +118,14 @@ log "Running tests"
 python3 -m pytest -q
 
 # --- JS tests ----------------------------------------------------------------
-# Blocking when node is available: the jsdom behaviour tests are the growing
+# Blocking, exactly like pytest: the jsdom behaviour tests are the growing
 # replacement for the Python string-presence checks, so a red run must stop
-# the deploy exactly like pytest. If the runner has no node yet, warn loudly
-# instead of bricking deploys — install node to turn this into a hard gate.
-if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+# the deploy. A runner without node is a broken gate, not a pass — fail the
+# deploy (checkout rolls back via the ERR trap; the running service is
+# untouched). Escape hatch for a deliberate skip: SKIP_JS_TESTS=1.
+if [[ "${SKIP_JS_TESTS:-0}" == "1" ]]; then
+  log "SKIP_JS_TESTS=1 — JS tests skipped by explicit request."
+elif command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
   if [[ ! -d node_modules ]] || grep -qE '^package(-lock)?\.json$' <<<"$CHANGED_FILES"; then
     log "Installing JS dev dependencies (npm ci)"
     npm ci --no-audit --no-fund
@@ -130,7 +133,11 @@ if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
   log "Running JS tests"
   npm test
 else
-  log "WARNING: node/npm not found on runner — JS tests SKIPPED. Install node to enforce this gate."
+  log "ERROR: node/npm not found on runner — JS test gate cannot run."
+  log "Install node (e.g. apt install nodejs npm) or set SKIP_JS_TESTS=1 to bypass once."
+  # `exit` bypasses the ERR trap, so roll the checkout back explicitly.
+  rollback
+  exit 1
 fi
 
 # Past this point, rolling the checkout back would desync from a restarted

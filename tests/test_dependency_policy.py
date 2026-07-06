@@ -41,3 +41,26 @@ def test_ci_and_deploy_use_locked_install_paths():
     assert "-r requirements-dev.txt" in deploy
     assert "npm ci --no-audit --no-fund" in deploy
     assert (ROOT / "package-lock.json").exists()
+
+
+def test_ci_runs_both_test_suites():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "python -m pytest -q" in ci
+    assert "npm test" in ci
+
+
+def test_deploy_gates_block_bad_deploys():
+    """deploy.sh 의 3대 게이트가 무력화되지 않았는지 문자열로 고정한다.
+
+    - JS 테스트: node 부재 시 조용히 skip 하던 구멍을 막았다 — 명시적
+      SKIP_JS_TESTS=1 없이는 하드 게이트.
+    - healthz: 실패 시 OLD_SHA 로 되돌리고 exit 1 로 배포를 차단한다.
+    """
+    deploy = (ROOT / "deploy" / "deploy.sh").read_text(encoding="utf-8")
+
+    assert "npm test" in deploy
+    assert "SKIP_JS_TESTS" in deploy
+    assert "JS tests SKIPPED" not in deploy  # 과거 soft-skip 경고 문구의 부활 방지
+
+    assert "wait_for_healthz" in deploy
+    assert 'git reset --hard "$OLD_SHA"' in deploy
