@@ -39,8 +39,8 @@ main.py               ASGI 진입점 (조립은 core.app_factory)
 core/                 config(env 프로파일)·app factory·lifespan·정적 라우트
 routes/               HTTP/WS 핸들러 (포트폴리오·분석·알림·관리자·위키 …)
 services/             도메인 로직 (portfolio/*, notifications/*, stock_quotes)
-repositories/         SQLite 접근 (테이블별 모듈)
-cache.py              [축소 중] DB 연결 + 스키마 + 레거시 재수출 허브
+repositories/         SQLite 접근 (테이블별 모듈; db=커넥션/transaction,
+                      bootstrap=init_db/close_db, schema=스키마·마이그레이션)
 stock_price.py 등     [레거시] 시세·시장 데이터 수집 모듈 — services로 이전 중
 static/               빌드 없는 vanilla JS SPA (로드 순서가 계약)
 scripts/, deploy/     운영 스크립트, 배포 스크립트, systemd 유닛(저장소 루트)
