@@ -98,6 +98,17 @@ flowchart TD
 4. `cache.py` repository 분리와 transaction helper. (완료 — 2026-06-10)
 5. 프론트 portfolio store 도입. (완료 — 2026-06-10)
 
+## 2026-07-07 진행 기록 — 병렬 작업·온보딩 개선
+
+- **CLAUDE.md 신설**: 에이전트/신규 개발자 온보딩 — 계층 지도, 철칙(transaction·
+  http 클라이언트·캐시 계층), 프론트 계약, 기능 추가 레시피 3종, 병렬 작업 가이드.
+- **styles.css 분할**: 최근 150커밋 중 48회 수정된 최대 충돌 핫스팟을
+  `static/css/` 8개 화면별 파일로 연속 분할(캐스케이드 보존). `<link>` 순서가
+  계약이며 구조 테스트로 고정.
+- **test_frontend_structure.py 분할**: 두 번째 핫스팟(43회)을 화면별 5개 파일로
+  분할, 공용 헬퍼는 `tests/_frontend_structure.py`.
+- 루트의 서버 로그 잔해 73개 정리.
+
 ## 2026-07-06 진행 기록 — cache.py 완전 해체
 
 - **cache.py 삭제 완료**: 잔존하던 기능을 목적별 모듈로 이관하고 파일을 제거.
