@@ -1,0 +1,177 @@
+/* admin-wiki.css — 관리자 대시보드 + 위키 칩/LLM 인라인 요약/위키 Q&A
+ *
+ * styles.css(5,689줄 단일 파일)를 2026-07-07 화면별로 분할.
+ * 캐스케이드 보존을 위한 '연속 분할'이다: index.html/admin.html 의
+ * <link> 순서 = 원본 파일 순서가 계약이므로, 파일 간 규칙 이동이나
+ * 로드 순서 변경은 동시 수정으로만 한다. 새 규칙은 해당 화면 파일
+ * 끝에 추가한다 (전 화면 공통이면 base.css).
+ */
+/* === Admin Dashboard === */
+.admin-dashboard { max-width: 960px; margin: 0 auto; }
+.admin-title { font-size: 20px; font-weight: 700; margin-bottom: 24px; color: var(--text-primary); }
+.admin-section { margin-bottom: 32px; }
+.admin-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary); }
+.admin-sub { font-size: 12px; font-weight: 400; color: var(--text-secondary); margin-left: 4px; }
+
+.admin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.admin-card {
+  background: var(--card-bg, #fff); border: 1px solid var(--border, #e5e7eb);
+  border-radius: var(--radius-md); padding: 14px 16px;
+}
+.admin-card-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.admin-card-value { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+
+.admin-progress { height: 4px; background: var(--border, #e5e7eb); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.admin-progress-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+
+.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.admin-table th { text-align: left; font-weight: 600; color: var(--text-secondary); padding: 8px 12px; border-bottom: 2px solid var(--border, #e5e7eb); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.admin-table td { padding: 10px 12px; border-bottom: 1px solid var(--border, #e5e7eb); color: var(--text-primary); }
+.admin-table-compact td { padding: 6px 12px; }
+.admin-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.admin-status-ok { color: var(--color-success, #27ae60); font-weight: 600; }
+.admin-status-fail { color: var(--color-danger, #e74c3c); font-weight: 600; }
+.admin-status-run { color: var(--color-warning, #f39c12); font-weight: 600; }
+
+.admin-btn {
+  padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border, #e5e7eb);
+  background: var(--card-bg, #fff); color: var(--text-primary); font-size: 12px;
+  cursor: pointer; transition: background 0.15s;
+}
+.admin-btn:hover { background: var(--hover-bg, #f3f4f6); }
+.admin-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.admin-btn-secondary { margin-left: 4px; font-size: 11px; color: var(--text-secondary); }
+
+/* === Wiki stats chip in the top header === */
+.wiki-stats {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  white-space: nowrap;
+  margin-left: auto;
+}
+.wiki-stats:empty { display: none; }
+.wiki-stats .ws-sep { opacity: 0.5; margin: 0 4px; }
+.wiki-stats .ws-num { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+/* 운영 지표라 헤더에서 프로필 모달 하단으로 옮겼다(UX 감사 P3) — 헤더용 알약
+   모양(margin-left:auto 로 우측 정렬) 대신 조용한 footnote 로 재배치. */
+.profile-wiki-stats {
+  margin: 4px 0 0;
+  padding: 10px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  text-align: center;
+}
+
+/* === Wiki count chip shown inside reports section header === */
+.wiki-count {
+  font-size: 12px; color: var(--text-secondary); font-weight: normal;
+  margin-left: 4px;
+}
+
+/* === Inline LLM summary (expanded under a broker-report row) === */
+.report-link-sep { opacity: 0.5; }
+.report-summary-toggle {
+  color: var(--accent, #2563eb); text-decoration: none; font-weight: 500;
+}
+.report-summary-toggle:hover { text-decoration: underline; }
+.report-summary-row > td {
+  padding: 14px 18px;
+  background: rgba(148, 163, 184, 0.08);
+  border-top: 1px dashed var(--border);
+}
+.report-summary-body { font-size: 13px; line-height: 1.6; }
+.report-summary-body h1, .report-summary-body h2 { font-size: 14px; margin: 10px 0 4px; }
+.report-summary-body h3 {
+  font-size: 13px; margin: 10px 0 4px; color: var(--text-secondary);
+  font-weight: 700;
+}
+.report-summary-body ul { margin: 6px 0 6px 18px; padding: 0; }
+.report-summary-body li { margin: 3px 0; }
+.report-summary-body p { margin: 6px 0; }
+.report-summary-body strong { color: var(--text); }
+
+/* 위키 Q&A/투자 일지 접힘 래퍼 — <details> 는 JS 없이 접힌 채로 시작해 매번
+   쓰지 않는 입력 폼이 밸류에이션 차트보다 먼저 화면을 차지하지 않게 한다(UX 감사 P2⑦). */
+.analysis-collapsible { margin: 16px 0 0; }
+.analysis-collapsible + .analysis-collapsible { margin-top: 8px; }
+.analysis-collapsible-summary {
+  cursor: pointer; list-style: none; font-size: 13.5px; font-weight: 700; color: var(--text);
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  user-select: none;
+}
+.analysis-collapsible-summary::-webkit-details-marker { display: none; }
+.analysis-collapsible-summary::before {
+  content: '▸'; display: inline-block; margin-right: 6px; color: var(--text-secondary);
+  transition: transform 0.15s ease;
+}
+.analysis-collapsible[open] > .analysis-collapsible-summary::before { transform: rotate(90deg); }
+.analysis-collapsible-summary:hover { background: var(--surface-muted); }
+.analysis-collapsible-summary:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* === Wiki Q&A === */
+.wiki-qa {
+  margin: 8px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card-bg, transparent);
+}
+.company-info .wiki-qa {
+  margin: 16px 0 0;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+.wiki-qa-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.wiki-qa-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.wiki-qa-hint { font-size: 11px; color: var(--text-secondary); }
+.wiki-qa-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text);
+  resize: vertical;
+}
+.wiki-qa-input:disabled { opacity: 0.5; cursor: not-allowed; }
+.wiki-qa-actions {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wiki-qa-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--accent, #2563eb);
+  color: #fff;
+  cursor: pointer;
+}
+.wiki-qa-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.wiki-qa-status { font-size: 11px; color: var(--text-secondary); }
+.wiki-qa-answer {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.wiki-qa-answer h1, .wiki-qa-answer h2, .wiki-qa-answer h3 { font-size: 13px; margin: 8px 0 4px; }
+.wiki-qa-answer ul { margin: 4px 0 4px 18px; padding: 0; }
+.wiki-qa-answer p { margin: 4px 0; }
+.wiki-qa-meta {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+

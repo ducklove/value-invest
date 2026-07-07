@@ -5,6 +5,38 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "static"
 JS = STATIC / "js"
+CSS = STATIC / "css"
+
+# 구 styles.css 의 연속 분할 결과 — index.html/admin.html <link> 순서와
+# 동일해야 한다 (캐스케이드 계약). test_css_split_files_load_in_contract_order
+# 가 강제한다.
+CSS_SPLIT_FILES = [
+    "base.css",
+    "dashboard.css",
+    "analysis.css",
+    "portfolio.css",
+    "mobile-overrides.css",
+    "admin-wiki.css",
+    "mobile-shell.css",
+    "labs.css",
+]
+
+
+def _all_css() -> str:
+    """분할된 CSS 를 로드 순서대로 이어붙여 반환 (구 styles.css 등가물)."""
+    return "\n".join((CSS / name).read_text(encoding="utf-8") for name in CSS_SPLIT_FILES)
+
+
+def test_css_split_files_load_in_contract_order():
+    for html_name, prefix in (("index.html", "./css/"), ("admin.html", "/css/")):
+        html = (STATIC / html_name).read_text(encoding="utf-8")
+        positions = []
+        for name in CSS_SPLIT_FILES:
+            needle = f'href="{prefix}{name}"'
+            assert needle in html, f"{html_name}: {needle} 링크 누락"
+            positions.append(html.index(needle))
+        assert positions == sorted(positions), f"{html_name}: CSS 로드 순서가 계약과 다름"
+    assert not (STATIC / "styles.css").exists(), "styles.css 는 분할로 제거됨 — 부활 금지"
 
 
 PORTFOLIO_SPLIT_FILES = [
@@ -56,7 +88,7 @@ def test_economic_calendar_section_and_script_present():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     js = (JS / "economic-calendar.js").read_text(encoding="utf-8")
     dashboard = (JS / "market-dashboard.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     # 투자정보 뷰 안, 금일 시황 섹션 다음의 풀폭 섹션으로 산다.
     assert 'id="econCalSection"' in html
@@ -73,7 +105,7 @@ def test_economic_calendar_section_and_script_present():
 
 def test_economic_calendar_filter_is_dates_plus_per_importance_settings():
     js = (JS / "economic-calendar.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     # 기간은 시작/종료일 입력 + 기본 이번 주. 빠른 범위 버튼(오늘/이번주/다음주)은 제거.
     assert "function _ecThisWeek()" in js
@@ -256,7 +288,7 @@ def test_admin_split_files_stay_below_maintenance_ceiling():
 
 def test_market_tape_is_bottom_frame_outside_main():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     # 하단 탭바(.mobile-tabbar)와 시황 테이프는 모두 .main 바깥(아래)에 위치하고,
     # 차트 모달보다 앞선다. 탭바는 main 의 닫는 </div> 바로 뒤에 온다.
@@ -274,7 +306,7 @@ def test_market_tape_is_bottom_frame_outside_main():
 
 
 def test_market_tape_down_events_have_blue_alert_background():
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     assert ".market-tape-item.breaking.down" in styles
     assert ".market-tape-item.alert.down" in styles
@@ -284,7 +316,7 @@ def test_market_tape_down_events_have_blue_alert_background():
 
 def test_portfolio_ai_result_has_framed_output_contract():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     source = (JS / "portfolio-ai.js").read_text(encoding="utf-8")
 
     assert 'id="pfAiOutput"' in html
@@ -375,7 +407,7 @@ def test_cashflow_history_renders_before_nav_charts_finish():
 
 def test_performance_tab_includes_period_report_panel():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     reports = (JS / "portfolio-reports.js").read_text(encoding="utf-8")
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
 
@@ -428,7 +460,7 @@ def test_trade_value_column_uses_two_decimal_compact_format():
 
 
 def test_stylesheet_defines_all_css_variables_it_uses():
-    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+    css = _all_css()
     used = set(re.findall(r"var\(--([A-Za-z0-9_-]+)", css))
     defined = set(re.findall(r"--([A-Za-z0-9_-]+)\s*:", css))
     assert used - defined == set()
@@ -464,7 +496,7 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     order = (JS / "portfolio-order.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     assert "manualOrder: { pendingCodes: null, revision: 0, saveInFlight: false }," in store
     assert "const loadOrderRevision = PfStore.manualOrder.revision;" in data
@@ -500,7 +532,7 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
 
 def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
 
     assert 'const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight"' in render
@@ -610,7 +642,7 @@ def test_portfolio_edit_save_is_row_scoped_and_safe():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     assert 'type="button" class="pf-row-btn save js-pf-save"' in render
     assert "const isSaving = PfStore.edit.savingCode === r.stock_code" in render
@@ -752,7 +784,7 @@ def test_benchmark_picker_only_opens_in_edit_mode():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     assert '<td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">' in render
     assert '<td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">' in render
@@ -765,7 +797,7 @@ def test_benchmark_picker_only_opens_in_edit_mode():
 def test_nav_chart_shows_selected_benchmark_beta_overlay():
     benchmark = (JS / "portfolio-trends-benchmark.js").read_text(encoding="utf-8")
     trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     # beta/R² 통계와 오버레이 정의는 portfolio-trends-benchmark.js 가 기능 홈.
     assert "function _computeReturnStats" in benchmark
@@ -827,7 +859,7 @@ def test_trends_split_files_keep_feature_homes():
 
 def test_performance_tab_includes_group_weight_trend():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     trends = (JS / "portfolio-trends.js").read_text(encoding="utf-8")
@@ -873,7 +905,7 @@ def test_performance_tab_includes_group_weight_trend():
 
 def test_performance_tab_includes_risk_panel():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     risk = (JS / "portfolio-risk.js").read_text(encoding="utf-8")
 
@@ -908,7 +940,7 @@ def test_performance_tab_includes_risk_panel():
 
 def test_performance_tab_includes_rebalance_panel():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     rebalance = (JS / "portfolio-rebalance.js").read_text(encoding="utf-8")
     alerts = (JS / "portfolio-alerts.js").read_text(encoding="utf-8")
@@ -950,7 +982,7 @@ def test_performance_tab_includes_rebalance_panel():
 
 def test_portfolio_includes_action_board_and_linked_signal_badges():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     action_board = (JS / "portfolio-action-board.js").read_text(encoding="utf-8")
@@ -989,7 +1021,7 @@ def test_portfolio_includes_action_board_and_linked_signal_badges():
 
 def test_performance_tab_includes_dividend_calendar_panel():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     divcal = (JS / "portfolio-dividends-calendar.js").read_text(encoding="utf-8")
 
@@ -1026,7 +1058,7 @@ def test_performance_tab_includes_dividend_calendar_panel():
 
 def test_investment_journal_lives_in_analysis_view_and_performance_tab():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     analysis = (JS / "analysis.js").read_text(encoding="utf-8")
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     journal = (JS / "portfolio-journal.js").read_text(encoding="utf-8")
@@ -1180,7 +1212,7 @@ def test_status_and_loading_feedback_are_announced_to_assistive_tech():
 
 def test_app_shell_has_main_landmark_h1_and_skip_link():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     utils = (JS / "utils.js").read_text(encoding="utf-8")
 
     assert '<a class="skip-link" href="#mainContent">본문으로 바로가기</a>' in html
@@ -1212,7 +1244,7 @@ def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
 
 def test_mobile_simple_mode_is_read_only_and_nav_uses_bottom_tabbar():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
     auth = (JS / "auth.js").read_text(encoding="utf-8")
 
@@ -1245,7 +1277,7 @@ def test_screener_labs_view_is_wired_as_deep_linkable_panel():
     shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
     app_main = (JS / "app-main.js").read_text(encoding="utf-8")
     screener = (JS / "screener.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     # 뷰 컨테이너는 다른 Labs 뷰(insightsView) 다음에 산다.
     assert 'id="screenerView"' in html
@@ -1311,7 +1343,7 @@ def test_switch_view_syncs_browser_history():
 def test_mobile_search_shows_recent_and_starred_chips_on_empty_focus():
     search = (JS / "search.js").read_text(encoding="utf-8")
     auth = (JS / "auth.js").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     # ≤900px는 사이드바(최근 검색/관심 목록)가 숨겨져 재진입 경로가 없다 — 검색창을
     # 빈 채로 포커스하면 같은 데이터를 드롭다운 칩으로 보여준다(UX 감사 P1③).
@@ -1332,7 +1364,7 @@ def test_mobile_search_shows_recent_and_starred_chips_on_empty_focus():
 
 def test_analysis_wiki_qa_and_journal_are_collapsed_by_default():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     # 위키 Q&A·투자 일지는 매번 쓰는 요소가 아니라 밸류에이션 차트보다 화면 우선순위가
     # 낮다(UX 감사 P2⑦). <details> 는 JS 없이 접힌 채로 시작하고, 내부 id 는 그대로라
@@ -1352,7 +1384,7 @@ def test_analysis_wiki_qa_and_journal_are_collapsed_by_default():
 
 def test_performance_tab_has_sticky_anchor_nav_covering_every_card():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
 
     # 심층 분석 탭이 카드 10개짜리 단일 스크롤이라 탐색성이 낮았다(UX 감사 P2⑥).
     # 순수 <a href="#id"> 앵커라 JS 없이 동작 — 대상 id 10개가 전부 존재해야 한다.
@@ -1406,7 +1438,7 @@ def test_my_alerts_unify_stock_and_portfolio_rules_behind_the_profile_modal():
 
 def test_ux_polish_theme_wiki_badge_and_nps_reload_and_tab_bar_divider():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     search = (JS / "search.js").read_text(encoding="utf-8")
     shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
 
@@ -1434,7 +1466,7 @@ def test_ux_polish_theme_wiki_badge_and_nps_reload_and_tab_bar_divider():
 
 def test_masters_labs_view_is_wired_as_deep_linkable_panel():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    styles = _all_css()
     shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
     masters = (JS / "masters.js").read_text(encoding="utf-8")
     static_routes = (ROOT / "core" / "static_routes.py").read_text(encoding="utf-8")

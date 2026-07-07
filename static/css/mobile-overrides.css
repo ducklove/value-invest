@@ -1,0 +1,443 @@
+/* mobile-overrides.css — 모바일 오버라이드(≤900px·가로 짧은 화면) (+밸류에이션 필 탭·차트 모달·세로폰 컬럼 숨김)
+ *
+ * styles.css(5,689줄 단일 파일)를 2026-07-07 화면별로 분할.
+ * 캐스케이드 보존을 위한 '연속 분할'이다: index.html/admin.html 의
+ * <link> 순서 = 원본 파일 순서가 계약이므로, 파일 간 규칙 이동이나
+ * 로드 순서 변경은 동시 수정으로만 한다. 새 규칙은 해당 화면 파일
+ * 끝에 추가한다 (전 화면 공통이면 base.css).
+ */
+/* === Mobile overrides (≤900px · short landscape) === */
+@media (max-width:900px) {
+  body {
+    display: block;
+  }
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  /* Hide sidebar when logged in on mobile */
+  body.mobile-auth .sidebar { display: none; }
+  /* 모바일에선 영역지도 버튼 숨김 — 작은 화면에서 treemap 은 가독성이
+     떨어지고, add-bar 가 한 줄에 들어가는 것도 방해. */
+  .pf-treemap-btn { display: none; }
+  .pf-add-bar { align-items: stretch; flex-wrap: wrap; gap: 8px; }
+  .pf-search-wrap { flex: 1 1 100%; max-width: none; }
+  .pf-add-toggle { margin-left: 0; }
+  .pf-add-toggle,
+  .pf-csv-toggle { flex: 1 1 calc(50% - 8px); text-align: center; }
+  .pf-add-panel { max-width: none; }
+  .pf-add-panel-form { flex-wrap: wrap; }
+  .pf-add-panel-form .pf-add-input { flex: 1 1 100%; }
+  .pf-add-panel-form .pf-add-btn { width: 100%; }
+  .pf-table { font-size: 12px; }
+  .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 8px 6px; }
+  .pf-summary {
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .pf-summary-card {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+    padding: 10px 12px;
+    align-items: flex-start;
+    gap: 0;
+  }
+  .pf-summary-text {
+    width: 100%;
+  }
+  .pf-summary-side,
+  .pf-sparkline,
+  .pf-summary-date,
+  .pf-summary-sub {
+    display: none !important;
+  }
+  .pf-summary-label {
+    font-size: 10px;
+    line-height: 1.2;
+    letter-spacing: 0.03em;
+  }
+  .pf-summary-value {
+    margin-top: 3px;
+    font-size: 18px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #pfPerformanceTab {
+    gap: 12px;
+  }
+  .pf-deep-head {
+    align-items: flex-start;
+    padding: 13px 14px;
+  }
+  .pf-deep-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .pf-deep-title h2 {
+    font-size: 18px;
+  }
+  .pf-deep-title span {
+    white-space: normal;
+  }
+  .pf-deep-meta {
+    display: none;
+  }
+  .pf-analysis-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .pf-analysis-card {
+    padding: 12px;
+  }
+  .pf-period-report-head {
+    flex-direction: column;
+  }
+  .pf-period-report-controls {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .pf-period-report-controls select,
+  .pf-period-report-controls button {
+    flex: 1 1 calc(33.333% - 8px);
+    min-width: 0;
+  }
+  .pf-period-report-sections {
+    grid-template-columns: 1fr;
+  }
+  .pf-period-note {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .pf-nav-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .pf-chart-note {
+    width: 100%;
+    text-align: left;
+  }
+  /* 심층 분석 차트 높이 축소 — PC 600/300 은 폰에서 한 화면을 가득
+     채워 스크롤 낭비 + init 타이밍 문제로 NAV 가 안 그려지는 증상. */
+  .pf-nav-chart-container { height: 240px; }
+  .pf-nav-chart-container.pf-nav-tall { height: 320px; }
+  .pf-nav-chart-container.pf-nav-short { height: 320px; }
+  .pf-nav-chart-container.pf-group-weight { height: 280px; }
+  .pf-nav-chart-container.pf-group-composition { height: 260px; }
+  .pf-nav-chart-wrap .pf-bench-chip,
+  #pfNavReturns .pf-nav-ret-card[data-zoom-days],
+  #pfValueStats .pf-nav-ret-card[data-zoom-days] {
+    display: none !important;
+  }
+}
+
+@media (max-width: 900px), (max-height: 520px) and (max-width: 1180px) {
+  body {
+    display: block;
+  }
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  body.mobile-auth .sidebar { display: none; }
+  body.mobile-fixed-portfolio .main-nav .nav-btn:not([data-view="portfolio"]),
+  body.mobile-fixed-analysis .main-nav .nav-btn:not([data-view="analysis"]) {
+    display: none;
+  }
+  .pf-simple-toggle { display: inline-flex; }
+}
+
+body.pf-mobile-simple .main {
+  padding: 8px 10px 12px;
+}
+body.pf-mobile-simple .header {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  margin: 0 0 8px;
+  padding: 6px 0;
+  background: var(--bg);
+}
+body.pf-mobile-simple .main-nav {
+  min-width: 0;
+}
+body.pf-mobile-simple .nav-btn {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+body.pf-mobile-simple .mobile-auth-name {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+body.pf-mobile-simple .pf-summary-card {
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: var(--radius-md);
+  gap: 0;
+}
+body.pf-mobile-simple .pf-summary-text {
+  width: 100%;
+}
+body.pf-mobile-simple .pf-summary-side,
+body.pf-mobile-simple .pf-sparkline,
+body.pf-mobile-simple .pf-summary-date,
+body.pf-mobile-simple .pf-summary-sub {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-summary-label {
+  font-size: 9px;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+body.pf-mobile-simple .pf-summary-value {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.pf-mobile-simple .pf-tab-bar {
+  position: sticky;
+  top: 42px;
+  z-index: 50;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 4px 0;
+  background: var(--bg);
+}
+body.pf-mobile-simple .pf-tab {
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+body.pf-mobile-simple .pf-tab[data-tab="performance"] {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-currency-toggle {
+  margin-left: 0;
+}
+body.pf-mobile-simple .pf-ws-toggle {
+  min-height: 28px;
+  max-width: 84px;
+  padding: 4px 7px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.pf-mobile-simple .pf-ws-status {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-currency-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+body.pf-mobile-simple .pf-filter-bar {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-add-bar,
+body.pf-mobile-simple .pf-add-panel,
+body.pf-mobile-simple .pf-csv-panel,
+body.pf-mobile-simple .pf-col-toggle-wrap {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-table-wrap {
+  /* 100dvh 에서 위쪽 크롬(헤더+요약+탭 ≈ 125px)과 하단 탭바(≈53px)를 제외해
+     테이블 박스가 하단 탭바 바로 위까지 정확히 채우도록 한다. 값이 과하면 박스
+     아래 공백이 생기고, 모자라면 페이지가 스크롤된다(100dvh 라 화면 높이에 자동 맞춤). */
+  max-height: calc(100dvh - 182px);
+  overflow: auto;
+  border-radius: var(--radius-md);
+  overscroll-behavior: contain;
+}
+body.pf-mobile-simple .pf-table {
+  min-width: 0;
+  /* fixed 레이아웃으로 컬럼 폭을 명시 — auto + max-width:0 트릭은 모바일 Safari 에서
+     종목명 칸이 0 으로 접혀 이름이 사라지는 문제가 있어 쓰지 않는다. */
+  table-layout: fixed;
+  font-size: 11px;
+}
+body.pf-mobile-simple .pf-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+body.pf-mobile-simple .pf-table thead th,
+body.pf-mobile-simple .pf-table tbody td,
+body.pf-mobile-simple .pf-table tfoot td {
+  /* 가로 패딩을 줄여(5→3) 종목명에 줄 폭을 더 확보. 숫자 컬럼 내용은 그대로 들어간다. */
+  padding: 6px 3px;
+}
+body.pf-mobile-simple .pf-col-group,
+body.pf-mobile-simple .pf-col-benchmark,
+body.pf-mobile-simple .pf-col-invested,
+body.pf-mobile-simple .pf-col-buyprice,
+body.pf-mobile-simple .pf-col-target,
+body.pf-mobile-simple .pf-col-achiev,
+body.pf-mobile-simple .pf-col-qty,
+body.pf-mobile-simple .pf-col-dividend,
+body.pf-mobile-simple .pf-col-divyield,
+body.pf-mobile-simple .pf-col-weight,
+body.pf-mobile-simple .pf-col-date,
+body.pf-mobile-simple .pf-col-act {
+  display: none !important;
+}
+/* 종목명은 폭을 고정하지 않고 나머지 공간을 흡수(width:auto), 긴 이름은 말줄임.
+   숫자 컬럼은 흔한 값이 안 잘릴 만큼 고정 px — 평가금액은 십억대("1,234,567,890"≈66px)
+   까지 들어가도록 80px, 등락률은 두 자릿수%("+15.04%")까지 56px. */
+body.pf-mobile-simple .pf-table thead th.pf-col-name,
+body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
+  width: auto;
+}
+body.pf-mobile-simple .pf-col-changepct { width: 56px; }
+body.pf-mobile-simple .pf-col-curprice { width: 64px; }
+body.pf-mobile-simple .pf-col-return { width: 56px; }
+body.pf-mobile-simple .pf-col-mktval { width: 80px; }
+body.pf-mobile-simple .pf-stock-cell {
+  min-width: 0;
+  white-space: normal;
+}
+body.pf-mobile-simple .pf-stock-cell-with-drag {
+  display: block;
+}
+body.pf-mobile-simple .pf-table tbody td:not(.pf-stock-cell),
+body.pf-mobile-simple .pf-table tfoot td:not(:first-child) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.pf-mobile-simple .pf-stock-link strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 간편모드: 종목명만 한 줄로 보이도록 종목코드와 실시간(웹소켓) 표시를 숨기고
+   줄바꿈을 막는다. 종목명 strong 이 셀 폭을 모두 쓰고 넘치면 말줄임 처리된다. */
+body.pf-mobile-simple .pf-stock-code,
+body.pf-mobile-simple .ws-live-dot {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-stock-line {
+  flex-wrap: nowrap;
+}
+body.pf-mobile-simple .pf-stock-main {
+  max-width: 100%;
+  min-width: 0;
+}
+body.pf-mobile-simple .pf-stock-tags,
+body.pf-mobile-simple .pf-row-drag-handle {
+  display: none !important;
+}
+body.pf-mobile-simple .pf-nav-chart-wrap {
+  margin-bottom: 12px;
+}
+body.pf-mobile-simple .pf-nav-header {
+  margin-bottom: 6px;
+}
+body.pf-mobile-simple .pf-nav-chart-container.pf-nav-tall,
+body.pf-mobile-simple .pf-nav-chart-container.pf-nav-short {
+  height: min(320px, calc(100dvh - 136px));
+}
+body.pf-mobile-simple .pf-nav-chart-container.pf-group-weight {
+  height: min(280px, calc(100dvh - 136px));
+}
+body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
+  height: min(260px, calc(100dvh - 136px));
+}
+
+@media (max-height: 520px) and (max-width: 1180px) {
+  /* 가로(landscape) 짧은 화면에선 헤더 높이를 더 줄인다 — 하단 탭바 오프셋 변수도 축소. */
+  body { --m-header-h: 38px; }
+  body.pf-mobile-simple .header {
+    margin-bottom: 4px;
+    padding: 4px 0;
+  }
+  body.pf-mobile-simple .pf-summary {
+    margin-bottom: 6px;
+  }
+  body.pf-mobile-simple .pf-summary-card {
+    padding: 5px 7px;
+  }
+  body.pf-mobile-simple .pf-tab-bar {
+    margin-bottom: 6px;
+  }
+  body.pf-mobile-simple .pf-filter-bar {
+    display: none !important;
+  }
+  body.pf-mobile-simple .pf-table-wrap {
+    max-height: calc(100dvh - 150px);
+  }
+  body.pf-mobile-simple .pf-nav-chart-container.pf-nav-tall,
+  body.pf-mobile-simple .pf-nav-chart-container.pf-nav-short,
+  body.pf-mobile-simple .pf-nav-chart-container.pf-group-weight,
+  body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
+    height: min(230px, calc(100dvh - 98px));
+  }
+}
+
+/* === Valuation period buttons — pill tabs === */
+.section-heading-row { display: flex; align-items: baseline; gap: 12px; }
+.section-heading-row .section-heading { margin: 0; }
+.valuation-period-btns { display: inline-flex; gap: 2px; }
+.vp-btn {
+  padding: 2px 10px; border: none; border-radius: var(--radius-lg);
+  background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s; line-height: 1.6;
+}
+.vp-btn:hover { color: var(--text-primary); }
+.vp-btn.active { background: var(--text-secondary); color: var(--bg); opacity: 0.85; }
+[data-theme="dark"] .vp-btn.active { background: var(--text-secondary); color: var(--bg); }
+
+/* === Chart modal === */
+.chart-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.chart-modal {
+  background: var(--card-bg, #fff); border-radius: 12px; width: 90vw; max-width: 1100px;
+  height: 70vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.chart-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.chart-modal-header h3 { margin: 0; font-size: 16px; color: var(--text-primary); }
+.chart-modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); padding: 0 4px; }
+.chart-modal-body { flex: 1; padding: 12px; min-height: 0; }
+
+/* Make chart cards clickable */
+.charts-grid .chart-card { cursor: pointer; transition: box-shadow 0.15s; }
+.charts-grid .chart-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+
+/* === Portrait phone — hide non-essential columns === */
+@media (max-width:600px) {
+  .pf-col-group,
+  .pf-col-benchmark,
+  .pf-col-buyprice,
+  .pf-col-weight,
+  /* New secondary columns also drop on mobile — they were added for
+     desktop analysis workflows, so the phone layout stays focused on
+     종목명 · 등락률 · 수익률 · 평가금액. */
+  .pf-col-invested,
+  .pf-col-dividend,
+  .pf-col-divyield,
+  .pf-col-target,
+  .pf-col-achiev,
+  .pf-col-date,
+  .pf-col-act { display: none !important; }
+  .pf-table { font-size: 11px; }
+  .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 6px 4px; }
+}
+

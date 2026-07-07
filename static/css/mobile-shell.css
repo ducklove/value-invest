@@ -1,0 +1,234 @@
+/* mobile-shell.css — 모바일 셸(하단 탭바·슬림 헤더) + 접근성 보강
+ *
+ * styles.css(5,689줄 단일 파일)를 2026-07-07 화면별로 분할.
+ * 캐스케이드 보존을 위한 '연속 분할'이다: index.html/admin.html 의
+ * <link> 순서 = 원본 파일 순서가 계약이므로, 파일 간 규칙 이동이나
+ * 로드 순서 변경은 동시 수정으로만 한다. 새 규칙은 해당 화면 파일
+ * 끝에 추가한다 (전 화면 공통이면 base.css).
+ */
+/* === 모바일 셸 (≤900px) — 하단 탭바 + 슬림 고정 헤더 ===
+   - 데스크톱 사이드바(로그인/시장바/최근목록)가 콘텐츠 위에 쌓이던
+     구조를 걷어내고, 앱처럼 하단 탭바 + 상단 슬림 헤더로 재구성한다.
+   - 아래 컴포넌트들은 기본적으로 숨겨두고 모바일 미디어쿼리에서만 노출. */
+.mobile-brand,
+.mobile-login,
+.mobile-tabbar { display: none; }
+
+/* 하단 고정 탭바 */
+.mobile-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 880;
+  grid-template-columns: repeat(4, 1fr);
+  background: color-mix(in srgb, var(--surface) 97%, var(--bg));
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 22px rgba(15, 23, 42, 0.08);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+[data-theme="dark"] .mobile-tabbar {
+  box-shadow: 0 -6px 22px rgba(0, 0, 0, 0.4);
+}
+.mnav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 4px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s ease;
+}
+.mnav-btn svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mnav-btn.active { color: var(--primary); }
+.mnav-btn.active svg { stroke-width: 2.3; }
+
+/* 슬림 헤더용 브랜드 워드마크 */
+.mobile-brand {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+}
+.mobile-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+.mobile-brand-name {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 헤더 로그인 진입 버튼 (비로그인 모바일) */
+.mobile-login {
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.mobile-login:hover { filter: brightness(0.96); }
+
+@media (max-width: 900px) {
+  /* 시황 테이프를 숨기므로 그 보정용 body 하단 패딩(52px)은 모바일에서 불필요 —
+     하단 탭바 여백은 .main 의 padding-bottom 으로 처리한다. */
+  body { --m-header-h: 50px; padding-bottom: 0; }
+
+  /* 슬림 고정 헤더 */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 820;
+    min-height: var(--m-header-h);
+    margin-bottom: 12px;
+    padding: 6px 0;
+    gap: 10px;
+    background: var(--bg);
+    box-sizing: border-box;
+  }
+  .mobile-brand { display: flex; flex: 1 1 auto; }
+  /* 상단 가로 탭은 하단 탭바로 대체 */
+  .main-nav { display: none; }
+  /* 헤더에는 브랜드 + (테마/로그인/프로필)만 남긴다. wiki-stats 는 이제 헤더에
+     없다 — 프로필 모달로 옮겨졌다(UX 감사 P3). */
+  .theme-toggle { flex: 0 0 auto; }
+
+  /* 콘텐츠 위에 쌓이던 사이드바, 그리고 하단에 겹치는 시황 테이프 제거 */
+  .sidebar { display: none !important; }
+  .market-tape { display: none !important; }
+
+  /* 본문 여백을 좁히고(가독 폭 확보) 하단 탭바 높이만큼 패딩 확보 */
+  .main {
+    padding: 12px 14px;
+    padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* 하단 탭바 노출 */
+  .mobile-tabbar { display: grid; }
+
+  /* 섹션 카드 패딩 축소 — 좁은 화면에서 내부 콘텐츠 폭을 더 확보 */
+  .daily-market-section {
+    padding: 14px;
+  }
+
+  /* 시장 랭킹: 컬럼이 많아 종목명이 한 글자로 잘리던 문제 해결.
+     말미의 거래량/시총 보조 수치(.mv-metric)를 숨겨 이름 폭을 확보하고,
+     변화율 칼럼 최소폭도 줄인다. */
+  .mv-metric { display: none; }
+  .mv-chg { min-width: 56px; }
+  .mv-row { gap: 6px; padding: 8px 2px; font-size: 13.5px; }
+  .mv-name { font-weight: 600; }
+}
+
+/* 헤더 높이를 참조하는 포트폴리오 간편모드의 sticky 탭바 오프셋을
+   변수와 동기화 (아래 pf-tab-bar/landscape 규칙에서 사용). */
+body.pf-mobile-simple .pf-tab-bar { top: var(--m-header-h, 42px); }
+
+/* ── 접근성: 모션 최소화 (ST-05) ─────────────────────────────────────
+   OS 가 "동작 줄이기(prefers-reduced-motion: reduce)" 를 켜면, 전정계 질환
+   사용자에게 불편을 주는 무한 스크롤·펄스·회전·플래시 애니메이션을 끈다.
+   - 시황 테이프 무한 스크롤(marketTapeScroll): 정지 — 트랙이 첫 화면에
+     보이는 종목들로 고정되고, 새로고침 버튼으로 갱신.
+   - 차트 펄스(chartDotPulse): 점이 깜빡이지 않고 고정.
+   - 스피너(spin): 360도 회전 대신 정지 표시.
+   - fadeIn/flash-update: 즉시 최종 상태로.
+   - transition 은 매우 짧게(거의 즉시) 유지해 시각적 피드백을 완전히
+     없애지 않고 부드럽게만 줄인다.
+   출처: WCAG 2.3.3 Animation from Interactions. 토글된 수동 테마에는
+   영향을 주지 않는다(OS 설정 기반). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* 무한 스크롤은 iteration-count:1 로도 멈추지만, 명시적으로 정지시켜
+     트랙이 빈 영역으로 사라지지 않게 한다. */
+  .market-tape-track { animation: none !important; }
+  /* 펄스 점은 깜빡임 없이 고정 채색. */
+  .chart-dot-pulse, [style*="chartDotPulse"] { animation: none !important; }
+}
+
+/* ── 접근성: 차트 대체 표 (ST-05) ─────────────────────────────────────
+   describeChart() 가 echarts canvas 옆에 넣는 숨김 데이터 표. 시각적으로는
+   보이지 않지만 스크린 리더는 읽는다(clip 패턴 — display:none 은 일부
+   보조기기가 무시하므로 클리핑으로 숨긴다). */
+.sr-only-chart-table {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* === 접근성 보강 (키보드 포커스 + 모션 민감성) ===
+   :focus-visible 전역 기본 — 마우스 클릭에는 나타나지 않고 키보드 탐색에만
+   일관된 링을 보여준다. 컴포넌트별 box-shadow(var(--ring)) 를 쓰는 입력은
+   그대로 유지되고, 버튼/링크처럼 outline 만 쓰던 요소가 통일된다. */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+/* box-shadow 로 포커스 링을 구성하는 입력은 outline 중복을 피한다. */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+}
+/* 모션 민감 사용자: 깜빡임·스크롤 애니메이션·transition 을 최소화.
+   기존 전환은 모두 0.12~0.2s 의 짧은 값이라 영향이 미미하며, flash-update
+   (가격 갱신 알림) 와 시황 테이프 스크롤만 의미 있게 무력화된다. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .market-tape-track { animation: none !important; }
+  .flash-update, .market-tape.flash-update::after { animation: none !important; }
+}
+

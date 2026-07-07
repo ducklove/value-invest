@@ -50,7 +50,15 @@ function trackEvent(name, params = {}) {
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <!-- echarts loaded lazily on first chart render -->
-<link rel="stylesheet" href="./styles.css">
+<!-- CSS 로드 순서 = 구 styles.css 의 원본 순서(캐스케이드 계약) — 순서 변경 금지 -->
+<link rel="stylesheet" href="./css/base.css">
+<link rel="stylesheet" href="./css/dashboard.css">
+<link rel="stylesheet" href="./css/analysis.css">
+<link rel="stylesheet" href="./css/portfolio.css">
+<link rel="stylesheet" href="./css/mobile-overrides.css">
+<link rel="stylesheet" href="./css/admin-wiki.css">
+<link rel="stylesheet" href="./css/mobile-shell.css">
+<link rel="stylesheet" href="./css/labs.css">
 </head>
 <body>
 <noscript>

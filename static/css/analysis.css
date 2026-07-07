@@ -1,0 +1,519 @@
+/* analysis.css — 종목분석 — 기업 정보·차트 그리드·로딩 오버레이·리포트 섹션
+ *
+ * styles.css(5,689줄 단일 파일)를 2026-07-07 화면별로 분할.
+ * 캐스케이드 보존을 위한 '연속 분할'이다: index.html/admin.html 의
+ * <link> 순서 = 원본 파일 순서가 계약이므로, 파일 간 규칙 이동이나
+ * 로드 순서 변경은 동시 수정으로만 한다. 새 규칙은 해당 화면 파일
+ * 끝에 추가한다 (전 화면 공통이면 base.css).
+ */
+/* === Company info === */
+.company-info {
+  background: var(--surface); border-radius:var(--radius-xl); padding:20px 24px;
+  margin-bottom:24px; border:1px solid var(--border); display:none;
+}
+.company-info h2 { font-size:22px; margin-bottom:4px; }
+.company-info .meta { color:var(--text-secondary); font-size:14px; }
+.company-info .header-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+}
+.company-info .quote {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+}
+.company-info .quote-price {
+  font-size: 22px; font-weight: 700; color: var(--text);
+}
+.company-info .quote-change {
+  font-size: 14px; font-weight: 700; padding: 4px 8px; border-radius: 999px;
+}
+.company-info .quote-change.up { color: var(--up); background: #fee2e2; }
+.company-info .quote-change.down { color: var(--down); background: #dbeafe; }
+.company-info .quote-change.flat { color: var(--text-secondary); background: var(--sidebar-bg); }
+.company-info .quote-date {
+  font-size: 12px; color: var(--text-secondary);
+}
+[data-theme="dark"] .company-info .quote-change.up { background: rgba(127,29,29,0.45); }
+[data-theme="dark"] .company-info .quote-change.down { background: rgba(30,64,175,0.45); }
+[data-theme="dark"] .company-info .quote-change.flat { background: rgba(51,65,85,0.9); }
+.personalization-panel {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(15,23,42,0.02), rgba(15,23,42,0.01));
+}
+.personalization-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.personalization-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.personalization-btn:hover {
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
+.personalization-btn.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(37,99,235,0.08);
+}
+.personalization-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+.personalization-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.personalization-note {
+  width: 100%;
+  margin-top: 10px;
+  resize: vertical;
+  min-height: 88px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+}
+.personalization-note:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--ring);
+}
+.personalization-status {
+  margin-top: 8px;
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.personalization-status.saved {
+  color: var(--success);
+}
+.personalization-status.warning {
+  color: var(--warning);
+}
+.company-info .coverage {
+  margin-top: 14px;
+  display: grid;
+  /* 기본: PER/PBR/배당/베타 4개 → 4열 한 줄(베타 외톨이 방지). */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+/* 외부 카드가 붙어 5·6개가 되면 3열로(3+2 / 3×3)— 외톨이 없이 정렬. */
+.company-info .coverage[data-count="5"],
+.company-info .coverage[data-count="6"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+/* 기본 7개(PER/PBR/ROE/배당/시총/목표가/베타)는 4열(4+3). 외부·DR 로 9개면 3열(3×3). */
+.company-info .coverage[data-count="9"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.valuation-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 5%, transparent), color-mix(in srgb, var(--primary) 1%, transparent));
+}
+.valuation-card.is-link { text-decoration: none; display: block; transition: border-color .12s; }
+.valuation-card.is-link:hover { border-color: var(--accent, #2563eb); }
+.valuation-sub {
+  display: block; margin-top: 5px; font-size: 11px; line-height: 1.35;
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.valuation-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+.valuation-value {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width:900px) {
+  .company-info .coverage,
+  .company-info .coverage[data-count="5"],
+  .company-info .coverage[data-count="6"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .market-tape {
+    min-height: 48px;
+    padding: 8px 10px;
+    align-items: center;
+  }
+  .market-tape-head {
+    display: none;
+  }
+  .market-tape-viewport {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .market-tape-track {
+    animation: none;
+    min-width: max-content;
+  }
+  .market-tape-item {
+    max-width: 280px;
+  }
+}
+
+.section-heading {
+  font-size: 17px; margin: 8px 0 12px; color: var(--text);
+  padding-left: 12px; border-left: 3px solid var(--primary);
+}
+
+/* === Charts grid === */
+.charts-grid {
+  display:grid; grid-template-columns: repeat(2, 1fr); gap:20px;
+}
+@media (max-width:900px) { .charts-grid { grid-template-columns:1fr; } }
+.chart-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-xl); padding:16px 20px;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  /* 차트가 넓게 그려진 뒤(가로보기) 화면이 좁아질 때(세로보기) 그리드 칸이
+     min-content 로 늘어나 축소가 막히는 것을 방지 — 칸이 컨테이너보다 커지지 않게. */
+  min-width: 0;
+}
+.chart-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary);
+}
+.chart-card h3 { font-size:15px; margin-bottom:12px; color:var(--text-secondary); }
+.chart-canvas-wrap {
+  position: relative;
+  height: 220px;
+  min-width: 0;
+  overflow: hidden;
+}
+.chart-note {
+  margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.4;
+}
+.chart-card canvas, .chart-card > div > div { display:block; width:100%!important; height:100%!important; }
+
+/* === Loading overlay === */
+.loading-overlay {
+  position:fixed; inset:0; background:var(--loading-bg);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  display:none; align-items:center; justify-content:center; z-index:999;
+  flex-direction: column; gap: 20px;
+}
+.loading-overlay.show { display:flex; }
+.spinner {
+  width:48px; height:48px; border:4px solid var(--border);
+  border-top-color:var(--primary); border-radius:50%;
+  animation: spin 0.8s linear infinite;
+  box-shadow: var(--shadow-md);
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+.loading-content { text-align:center; max-width:400px; }
+.loading-text { font-size:16px; color:var(--text); margin-bottom:12px; }
+.loading-detail { font-size:13px; color:var(--text-secondary); margin-bottom:12px; }
+.progress-bar-container {
+  width:300px; height:6px; background:var(--border); border-radius:3px; overflow:hidden;
+}
+.progress-bar {
+  height:100%; background:var(--primary); border-radius:3px;
+  transition: width 0.3s ease;
+  width:0%;
+}
+.progress-steps {
+  margin-top:16px; text-align:left; font-size:13px; color:var(--text-secondary);
+  line-height:1.8;
+}
+.progress-steps .done { color:var(--primary); }
+.progress-steps .active { color:var(--text); font-weight:600; }
+.cancel-btn {
+  margin-top: 16px; padding: 8px 24px; border: 1px solid var(--border);
+  border-radius: var(--radius-md); background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; font-size: 13px; transition: all 0.15s;
+}
+.cancel-btn:hover { border-color: var(--danger); color: var(--danger); }
+
+/* === Reports section === */
+.reports-section {
+  margin-top: 32px; display: none;
+}
+.filing-review-section {
+  margin-top: 32px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.12), transparent 30%),
+    var(--surface);
+}
+.filing-review-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.filing-review-eyebrow {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.filing-review-header h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.filing-review-header p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 720px;
+}
+.filing-review-count {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.filing-review-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.filing-review-btn,
+.filing-review-source {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.filing-review-btn {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.filing-review-btn.secondary,
+.filing-review-source {
+  background: var(--bg);
+  color: var(--primary);
+  border-color: var(--border);
+}
+.filing-review-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.filing-review-status {
+  min-height: 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.filing-review-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.filing-review-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+}
+.filing-review-card span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.filing-review-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.25;
+}
+.filing-review-card p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.filing-review-card.good { border-color: rgba(22, 163, 74, 0.45); }
+.filing-review-card.watch { border-color: rgba(245, 158, 11, 0.5); }
+.filing-review-card.bad { border-color: rgba(220, 38, 38, 0.45); }
+.filing-review-body {
+  font-size: 13px;
+  line-height: 1.75;
+}
+/* 핵심 지표 변화 — before/after 비교 막대 차트 */
+.filing-review-trends:empty { display: none; }
+.mt-wrap {
+  margin-top: 16px; padding: 14px 16px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-muted, rgba(148,163,184,.05));
+}
+.mt-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+.mt-item { margin-bottom: 14px; }
+.mt-item:last-child { margin-bottom: 0; }
+.mt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.mt-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.mt-note { font-size: 11px; color: var(--text-secondary); }
+.mt-bar-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.mt-when { flex: 0 0 78px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+.mt-track {
+  flex: 1; height: 16px; border-radius: 5px;
+  background: var(--border, rgba(148,163,184,.25)); overflow: hidden;
+}
+.mt-fill { display: block; height: 100%; border-radius: 5px; min-width: 2px; transition: width .3s ease; }
+.mt-fill.mt-before { background: var(--text-secondary, #94a3b8); opacity: .55; }
+.mt-fill.mt-after { background: var(--accent, #2563eb); }
+.mt-val {
+  flex: 0 0 auto; min-width: 60px; text-align: right;
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text);
+}
+.filing-review-body h1,
+.filing-review-body h2,
+.filing-review-body h3 {
+  font-size: 15px;
+  margin: 14px 0 6px;
+}
+.filing-review-body p { margin: 0 0 8px; }
+.filing-review-body ul,
+.filing-review-body ol { margin: 0 0 10px; padding-left: 20px; }
+.filing-review-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.filing-review-body th,
+.filing-review-body td {
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+/* 첫 컬럼(구분/부문)은 좌측, 나머지 숫자 컬럼은 우측 + 자릿수 폭 균일로 정렬을 맞춘다.
+   marked 가 표 정렬 구문을 인라인 align 으로 넣어 셀마다 어긋나는 것을 막기 위해
+   !important 로 강제한다. */
+.filing-review-body th:first-child,
+.filing-review-body td:first-child { text-align: left !important; }
+.filing-review-body th:not(:first-child),
+.filing-review-body td:not(:first-child) {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.filing-review-body th {
+  background: var(--sidebar-bg, var(--bg));
+  font-weight: 700;
+}
+.filing-review-body td:first-child { font-weight: 600; }
+.filing-review-details {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.filing-review-details summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-weight: 700;
+}
+.filing-review-details ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.filing-review-details a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.filing-review-runtime {
+  margin-top: 6px;
+  font-size: 11px;
+}
+.lab-page { max-width: 1040px; margin: 0 auto; padding: 12px 0 40px; }
+.lab-hero {
+  position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 22px;
+  padding: 28px; margin-bottom: 18px; background:
+    radial-gradient(circle at 12% 20%, rgba(37,99,235,0.16), transparent 32%),
+    linear-gradient(135deg, var(--surface), var(--sidebar-bg, var(--bg)));
+}
+.lab-hero h2 { font-size: 24px; margin: 8px 0; }
+.lab-hero p { max-width: 720px; color: var(--text-secondary); line-height: 1.7; margin: 0; font-size: 14px; }
+.lab-eyebrow, .lab-pill {
+  display: inline-flex; align-items: center; width: fit-content; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; font-weight: 800;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.lab-eyebrow { padding: 5px 9px; background: var(--bg); }
+.lab-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.lab-card {
+  display: grid; gap: 8px; text-decoration: none; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 18px; padding: 20px;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.lab-card:hover {
+  transform: translateY(-2px); border-color: var(--primary);
+  box-shadow: 0 14px 30px rgba(15,23,42,0.08);
+}
+.lab-card h3 { margin: 0; font-size: 18px; }
+.lab-card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
+.lab-card strong { color: var(--primary); font-size: 13px; }
+.lab-pill { padding: 4px 8px; background: var(--sidebar-bg, var(--bg)); }
+.lab-inline-banner {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px;
+  padding: 10px 12px; border: 1px dashed var(--border); border-radius: 12px;
+  background: var(--surface); color: var(--text-secondary); font-size: 12px;
+}
+.lab-inline-banner span {
+  padding: 3px 7px; border-radius: 999px; background: var(--sidebar-bg, var(--bg));
+  border: 1px solid var(--border); font-weight: 800; color: var(--text);
+}
+.lab-inline-banner strong { color: var(--text); }
+.lab-inline-banner a { margin-left: auto; color: var(--primary); text-decoration: none; font-weight: 700; }
+/* 레거시 백테스트 화면에서 쓰던 .bt-* 중 .bt-run 만 남긴다 — 포트폴리오 AI
+   분석 실행 버튼(#pfAiBtn)이 이 버튼 스타일을 재사용한다. */
+.bt-run {
+  margin-left: auto; padding: 8px 18px; background: var(--primary); color: #fff;
+  border: 0; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.bt-run:hover { background: var(--primary-hover); }
+#btChart { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
+

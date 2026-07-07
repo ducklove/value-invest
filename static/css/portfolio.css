@@ -1,0 +1,2628 @@
+/* portfolio.css — 포트폴리오 — 테이블/탭/알림/모달·NAV 차트·현금흐름·컴팩트 보기 (+NPS 탭·pf-ai·인사이트 보드·브로커 리포트 배지)
+ *
+ * styles.css(5,689줄 단일 파일)를 2026-07-07 화면별로 분할.
+ * 캐스케이드 보존을 위한 '연속 분할'이다: index.html/admin.html 의
+ * <link> 순서 = 원본 파일 순서가 계약이므로, 파일 간 규칙 이동이나
+ * 로드 순서 변경은 동시 수정으로만 한다. 새 규칙은 해당 화면 파일
+ * 끝에 추가한다 (전 화면 공통이면 base.css).
+ */
+/* === 국민연금 탭 — 분리된 nps-tracker 대시보드를 iframe 으로 임베드 === */
+.nps-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.nps-header h2 { margin: 0; font-size: 20px; line-height: 1.25; }
+.nps-refresh {
+  flex: 0 0 auto; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface); color: var(--text); padding: 7px 12px;
+  font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.nps-refresh:hover { border-color: var(--primary); color: var(--primary); }
+.nps-embed { padding: 32px 16px; text-align: center; color: var(--text-secondary); }
+.nps-embed.is-frame { padding: 0; text-align: initial; }
+.nps-frame {
+  width: 100%; height: calc(100vh - 96px); min-height: 480px;
+  border: 0; display: block; background: var(--surface); border-radius: var(--radius-md);
+}
+@media (max-width: 900px) {
+  .nps-frame { height: calc(100vh - 128px); min-height: 360px; border-radius: 0; }
+}
+/* === Portfolio AI analysis (.pf-ai-*) === */
+.pf-ai-output {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  overflow: hidden;
+}
+.pf-ai-output.is-loading {
+  border-color: color-mix(in srgb, var(--primary) 36%, var(--border));
+}
+.pf-ai-output-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.pf-ai-status {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.pf-ai-status[data-state="loading"] {
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+  color: var(--primary);
+}
+.pf-ai-status[data-state="done"] {
+  border-color: color-mix(in srgb, var(--color-positive, #059669) 36%, var(--border));
+  color: var(--color-positive, #059669);
+}
+.pf-ai-status[data-state="error"] {
+  border-color: color-mix(in srgb, var(--color-danger, #dc2626) 36%, var(--border));
+  color: var(--color-danger, #dc2626);
+}
+.pf-ai-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+.pf-ai-result {
+  min-height: 96px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+  padding: 4px 14px 12px;
+}
+.pf-ai-result:not(.pf-ai-empty) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+.pf-ai-result.pf-ai-empty {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  padding: 18px 14px;
+}
+.pf-ai-section {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.pf-ai-group-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px -2px;
+  color: var(--text);
+  font-weight: 800;
+}
+.pf-ai-group-heading::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--primary);
+  flex: 0 0 auto;
+}
+.pf-ai-result .pf-ai-group-heading h1,
+.pf-ai-result .pf-ai-group-heading h2,
+.pf-ai-result .pf-ai-group-heading h3,
+.pf-ai-result .pf-ai-group-heading h4 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.pf-ai-section[data-kind="summary"],
+.pf-ai-section[data-kind="visual"],
+.pf-ai-section[data-kind="action"] {
+  grid-column: 1 / -1;
+}
+.pf-ai-section[data-kind="summary"] {
+  border-left-color: var(--primary);
+  background: color-mix(in srgb, var(--surface) 92%, var(--primary));
+}
+.pf-ai-section[data-kind="portfolio"] {
+  border-left-color: #0891b2;
+}
+.pf-ai-section[data-kind="rationale"] {
+  border-left-color: #7c3aed;
+}
+.pf-ai-section[data-kind="risk"] {
+  border-left-color: var(--warning);
+}
+.pf-ai-section[data-kind="visual"] {
+  border-left-color: #4f46e5;
+}
+.pf-ai-section[data-kind="action"] {
+  border-left-color: var(--success);
+}
+.pf-ai-section[data-kind="data"] {
+  border-left-color: #64748b;
+}
+.pf-ai-section-title h1,
+.pf-ai-section-title h2,
+.pf-ai-section-title h3,
+.pf-ai-section-title h4,
+.pf-ai-result h1,
+.pf-ai-result h2,
+.pf-ai-result h3,
+.pf-ai-result h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.pf-ai-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.pf-ai-section-title::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  color: var(--primary);
+  flex: 0 0 auto;
+}
+.pf-ai-section[data-kind="portfolio"] .pf-ai-section-title::before { color: #0891b2; }
+.pf-ai-section[data-kind="rationale"] .pf-ai-section-title::before { color: #7c3aed; }
+.pf-ai-section[data-kind="risk"] .pf-ai-section-title::before { color: var(--warning); }
+.pf-ai-section[data-kind="visual"] .pf-ai-section-title::before { color: #4f46e5; }
+.pf-ai-section[data-kind="action"] .pf-ai-section-title::before { color: var(--success); }
+.pf-ai-section[data-kind="data"] .pf-ai-section-title::before { color: #64748b; }
+.pf-ai-result h3,
+.pf-ai-result h4 {
+  font-size: 13px;
+}
+.pf-ai-result p { margin: 0 0 8px; }
+.pf-ai-result ul, .pf-ai-result ol { margin: 0 0 8px; padding-left: 20px; }
+.pf-ai-result li { margin: 2px 0; }
+.pf-ai-result li::marker { color: var(--primary); font-weight: 700; }
+.pf-ai-result strong { color: var(--text); }
+.pf-ai-result code { background: var(--border); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.pf-ai-result table { border-collapse: collapse; font-size: 12px; margin: 8px 0; width: 100%; }
+.pf-ai-result th, .pf-ai-result td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+.pf-ai-result th { background: var(--sidebar-bg); font-weight: 600; }
+.pf-ai-result blockquote { border-left: 3px solid var(--primary); margin: 8px 0; padding: 4px 12px; color: var(--text-secondary); }
+@media (max-width: 900px) {
+  .pf-ai-result:not(.pf-ai-empty) {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* === Insight board === */
+.insight-board-page { max-width: 980px; margin: 0 auto; padding: 8px 0 40px; }
+.insight-board-page h2 { font-size: 20px; margin-bottom: 8px; }
+.insight-board-note { color: var(--text-secondary); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+.insight-board-compose, .insight-post-card, .insight-login-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+}
+.insight-board-compose { margin-bottom: 18px; }
+.insight-login-card { padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.insight-login-card span { color: var(--text-secondary); font-size: 13px; }
+.insight-form { padding: 16px; display: grid; gap: 10px; }
+.insight-form-row { display: grid; grid-template-columns: 1fr 140px 120px; gap: 8px; }
+.insight-form-row.bottom { grid-template-columns: 1fr auto; align-items: center; }
+.insight-result-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.insight-input, .insight-textarea {
+  width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg); color: var(--text); padding: 9px 10px; font-size: 13px;
+}
+.insight-textarea { min-height: 120px; resize: vertical; line-height: 1.6; }
+.insight-textarea.raw { min-height: 90px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.insight-raw { color: var(--text-secondary); font-size: 13px; }
+.insight-raw summary { cursor: pointer; margin-bottom: 8px; }
+.insight-submit, .insight-delete {
+  border: 0; border-radius: var(--radius-md); cursor: pointer; font-size: 13px; font-weight: 700;
+}
+.insight-submit { padding: 9px 18px; background: var(--primary); color: #fff; }
+.insight-delete { padding: 6px 10px; background: transparent; color: var(--negative, #dc2626); border: 1px solid var(--border); }
+.insight-form-message { min-height: 18px; font-size: 13px; color: var(--text-secondary); }
+.insight-form-message.ok { color: var(--positive, #16a34a); }
+.insight-form-message.error, .insight-board-empty.error { color: var(--negative, #dc2626); }
+.insight-board-list { display: grid; gap: 12px; }
+.insight-board-empty { padding: 24px; color: var(--text-secondary); text-align: center; border: 1px dashed var(--border); border-radius: 14px; }
+.insight-post-card { padding: 16px; }
+.insight-post-card header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.insight-post-card h3 { margin: 4px 0 0; font-size: 16px; }
+.insight-post-meta { color: var(--text-secondary); font-size: 12px; }
+.insight-private { margin-left: 6px; color: var(--warning, #f59e0b); font-weight: 700; }
+.insight-summary-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+.insight-summary-chips span, .insight-tag {
+  display: inline-flex; gap: 5px; align-items: center; padding: 4px 8px; border-radius: 999px;
+  background: var(--sidebar-bg, var(--bg)); border: 1px solid var(--border); font-size: 12px; color: var(--text-secondary);
+}
+.insight-summary-chips b { color: var(--text); }
+.insight-post-body { font-size: 13px; line-height: 1.7; color: var(--text); }
+.insight-post-body p { margin: 0 0 8px; }
+.insight-post-body ul, .insight-post-body ol { margin: 0 0 8px; padding-left: 20px; }
+.insight-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+@media (max-width: 780px) {
+  .lab-grid { grid-template-columns: 1fr; }
+  .lab-inline-banner a { margin-left: 0; }
+  .insight-form-row, .insight-form-row.bottom, .insight-result-grid { grid-template-columns: 1fr; }
+  .filing-review-header { flex-direction: column; }
+  .filing-review-actions { justify-content: flex-start; }
+}
+
+/* === Broker reports table & badges === */
+.reports-section h2 {
+  font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+}
+.reports-section .report-count {
+  font-size: 13px; color: var(--text-secondary); font-weight: normal;
+}
+.report-note {
+  margin: -8px 0 12px; color: var(--text-secondary); font-size: 12px; line-height: 1.5;
+}
+.reports-table-wrap {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden;
+}
+.reports-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.reports-table thead th {
+  background: var(--sidebar-bg); padding: 10px 12px; text-align: left;
+  font-weight: 600; color: var(--text-secondary); font-size: 12px;
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.reports-table tbody td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.reports-table tbody tr:last-child td { border-bottom: none; }
+.reports-table tbody tr { transition: background 0.15s ease; }
+.reports-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
+.report-title a {
+  color: var(--primary); text-decoration: none; font-weight: 500;
+}
+.report-title a:hover { text-decoration: underline; }
+.report-link-note {
+  margin-top: 4px; font-size: 11px; color: var(--text-secondary);
+}
+.report-link-note a {
+  color: var(--primary); text-decoration: none;
+}
+.report-link-note a:hover { text-decoration: underline; }
+.report-summary {
+  color: var(--text-secondary); font-size: 12px; margin-top: 4px;
+  line-height: 1.4; max-width: 400px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.badge-buy { background: #dcfce7; color: #166534; }
+.badge-hold { background: #fef9c3; color: #854d0e; }
+.badge-sell { background: #fee2e2; color: #991b1b; }
+[data-theme="dark"] .badge-buy { background: #14532d; color: #86efac; }
+[data-theme="dark"] .badge-hold { background: #713f12; color: #fde047; }
+[data-theme="dark"] .badge-sell { background: #7f1d1d; color: #fca5a5; }
+.report-target { font-weight: 600; white-space: nowrap; }
+.report-date { white-space: nowrap; color: var(--text-secondary); }
+.report-firm { white-space: nowrap; }
+.reports-more {
+  display: block; width: 100%; padding: 12px; border: none;
+  background: var(--sidebar-bg); color: var(--primary); cursor: pointer;
+  font-size: 13px; font-weight: 500; border-top: 1px solid var(--border);
+}
+.reports-more:hover { background: var(--border); }
+.reports-loading {
+  text-align: center; padding: 24px; color: var(--text-secondary); font-size: 14px;
+}
+@media (max-width:900px) {
+  .reports-table { font-size: 12px; }
+  .reports-table thead th, .reports-table tbody td { padding: 8px 6px; }
+  .report-summary { display: none; }
+}
+
+/* === Empty state === */
+.empty-state {
+  text-align:center; margin-top:80px; color:var(--text-secondary);
+}
+.empty-state::before {
+  content: ''; display: block; width: 64px; height: 64px; margin: 0 auto 20px;
+  border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+  opacity: 0.12;
+}
+.empty-state h2 { font-size:20px; margin-bottom:8px; color:var(--text); }
+
+/* === Portfolio (table · tabs · alerts · modals) === */
+.pf-summary {
+  display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;
+}
+.pf-summary-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 12px 16px; min-width: 140px; flex: 1;
+  display: flex; align-items: center; gap: 10px;
+}
+.pf-summary-text { flex: 1; min-width: 0; }
+.pf-sparkline { width: 64px; height: 32px; flex-shrink: 0; }
+.pf-summary-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.pf-summary-date { font-weight: 400; opacity: 0.7; font-size: 10px; margin-left: 4px; }
+.pf-summary-value { font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.pf-summary-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pf-summary-side {
+  flex-shrink: 0;
+  min-width: 66px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  text-align: right;
+}
+.pf-summary-side-value {
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+/* Preferred stock popup menu */
+.pf-pref-menu {
+  position: fixed; z-index: 1001; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+  min-width: 200px; overflow: hidden;
+  max-height: calc(100vh - 16px);
+  overscroll-behavior: contain;
+}
+.pf-link-menu { min-width: 240px; }
+.pf-pref-item {
+  padding: 10px 16px; cursor: pointer; font-size: 13px; color: var(--text);
+}
+.pf-pref-item:hover { background: var(--primary); color: white; }
+.pf-link-menu .pf-pref-item strong,
+.pf-link-menu .pf-pref-item span {
+  display: block;
+}
+.pf-link-menu .pf-pref-item span {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.pf-link-menu .pf-pref-item:hover span { color: rgba(255,255,255,0.82); }
+
+/* Portfolio action board */
+.pf-action-board {
+  margin: 10px 0 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.pf-action-board-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+.pf-action-board-head h3 { margin: 0 0 2px; font-size: 15px; }
+.pf-action-board-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.pf-action-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.pf-action-summary span {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+}
+.pf-action-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+.pf-action-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-secondary);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.pf-action-card.high { border-left-color: var(--danger); }
+.pf-action-card.watch { border-left-color: var(--warning); }
+.pf-action-card.info { border-left-color: var(--primary); }
+.pf-action-card.done,
+.pf-action-card.dismissed { opacity: 0.72; }
+.pf-action-card-main { min-width: 0; }
+.pf-action-card-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.pf-action-card h4 { margin: 0; font-size: 13px; line-height: 1.35; }
+.pf-action-card p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.pf-action-severity,
+.pf-action-status,
+.pf-action-source,
+.pf-action-stock {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.pf-action-severity { color: var(--danger); border-color: rgba(220, 38, 38, 0.28); }
+.pf-action-status { margin-left: auto; }
+.pf-action-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: stretch;
+}
+.pf-action-btn {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 64px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.pf-action-btn.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+.pf-action-resolved {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.pf-action-resolved summary { cursor: pointer; margin-bottom: 8px; }
+.pf-linked-signal-badges {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.pf-linked-signal-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 72px;
+  min-height: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pf-linked-signal-badge.high { color: var(--danger); border-color: rgba(220, 38, 38, 0.35); }
+.pf-linked-signal-badge.watch { color: var(--warning); border-color: rgba(245, 158, 11, 0.45); }
+.pf-linked-signal-badge.info { color: var(--primary); border-color: rgba(37, 99, 235, 0.35); }
+.pf-linked-signal-badge.more { color: var(--text-secondary); }
+@media (max-width: 720px) {
+  .pf-action-board { padding: 10px; }
+  .pf-action-card { grid-template-columns: minmax(0, 1fr); }
+  .pf-action-card-actions { flex-direction: row; flex-wrap: wrap; }
+}
+
+/* Portfolio tab bar */
+.pf-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 82%, var(--bg));
+}
+.pf-tab {
+  min-height: 34px; padding: 0 16px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pf-tab:hover { color: var(--text); }
+.pf-tab.active {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+.pf-simple-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pf-simple-toggle:hover { color: var(--text); border-color: var(--primary); }
+.pf-simple-toggle.active { background: var(--text); border-color: var(--text); color: var(--surface); }
+.pf-action-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  margin-left: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+/* 뷰 전환 탭(보유종목/심층 분석)과 표시 옵션(액션/간편/통화)을 시각적으로
+   분리하는 구분선 — 별도 래퍼 없이 첫 옵션 버튼 앞에 얇은 선만 그린다
+   (UX 감사 P2⑨). */
+.pf-action-toggle::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  transform: translateY(-50%);
+}
+.pf-action-toggle:hover { color: var(--text); border-color: var(--primary); }
+.pf-action-toggle.active,
+.pf-action-toggle[aria-pressed="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.pf-ws-toggle[hidden],
+.pf-ws-status[hidden] {
+  display: none !important;
+}
+.pf-ws-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pf-ws-toggle:hover { color: var(--text); border-color: var(--primary); }
+.pf-ws-toggle.active,
+.pf-ws-toggle[aria-pressed="true"] {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--surface);
+}
+.pf-ws-toggle:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.pf-ws-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--surface) 70%, var(--bg));
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pf-ws-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-secondary);
+  opacity: 0.75;
+}
+.pf-ws-status[data-state="active"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 38%, var(--border)); }
+.pf-ws-status[data-state="active"]::before { background: var(--success); }
+.pf-ws-status[data-state="pending"] { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
+.pf-ws-status[data-state="pending"]::before { background: var(--primary); }
+.pf-ws-status[data-state="warning"] { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, var(--border)); }
+.pf-ws-status[data-state="warning"]::before { background: var(--warning); }
+@media (max-width: 720px) {
+  .pf-ws-status { display: none; }
+}
+
+/* Currency toggle */
+.pf-currency-toggle { display: flex; gap: 0; margin-left: auto; }
+.pf-currency-btn {
+  min-height: 28px; padding: 0 10px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.pf-currency-btn:first-child { border-radius: 6px 0 0 6px; }
+.pf-currency-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+.pf-currency-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
+
+/* 편집 모드의 목표가 input + clear 버튼 — 사용자가 '빈값 = 자동
+   계산으로 복귀' 를 직관적으로 알 수 있도록 input 우측에 작은 × 버튼
+   을 둔다. 버튼 클릭만으로는 저장 안 되고 (✓ 클릭 필요) 그냥 input 값
+   을 '' 로 비운다. */
+.pf-target-edit-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.pf-target-edit-wrap .pf-edit-input { width: 80px; }
+.pf-target-clear {
+  width: 18px; height: 18px; padding: 0; line-height: 1;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; font-size: 11px;
+}
+.pf-target-clear:hover { background: var(--hover-bg); color: var(--text); }
+
+/* 영역지도 진입 버튼 — add-bar 오른쪽 끝. 평범한 보조 액션 톤. */
+.pf-treemap-btn {
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text-secondary);
+  font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.pf-treemap-btn:hover { background: var(--hover-bg); color: var(--text); }
+
+/* === NAV chart === */
+#pfPerformanceTab {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+}
+.pf-deep-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--surface) 94%, var(--primary)), var(--surface));
+}
+.pf-deep-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.pf-deep-title h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 800;
+}
+.pf-deep-title span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pf-deep-meta {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 심층 분석 카드 10개를 넘나드는 점프 내비 (UX 감사 P2⑥). --m-header-h 는 모바일
+   슬림 헤더 높이(≤900px 에서만 정의)라 데스크톱에선 기본값 0px 로 자연히 빠진다 —
+   같은 규칙을 두 뷰포트에 그대로 써도 된다. */
+.pf-deep-anchors {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 2px;
+  margin: 0 0 14px;
+  position: sticky;
+  top: var(--m-header-h, 0px);
+  z-index: 40;
+  background: var(--bg);
+  scrollbar-width: none;
+}
+.pf-deep-anchors::-webkit-scrollbar { display: none; }
+.pf-deep-anchor-link {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.pf-deep-anchor-link:hover { color: var(--text); border-color: color-mix(in srgb, var(--text-secondary) 40%, var(--border)); }
+.pf-deep-anchor-link:focus-visible { outline: none; box-shadow: var(--ring); }
+/* 점프 대상 카드 — 고정 헤더 + 이 바 자체의 높이만큼 scroll-margin 을 둬서
+   점프 직후 카드 제목이 바 밑에 가려지지 않게 한다. */
+.pf-nav-chart-wrap, .pf-cashflow-section { scroll-margin-top: calc(var(--m-header-h, 0px) + 52px); }
+.pf-analysis-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.pf-analysis-grid-flow {
+  align-items: start;
+}
+.pf-analysis-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 96%, var(--bg));
+  box-shadow: var(--shadow-sm);
+}
+.pf-analysis-card-primary { padding: 16px; }
+.pf-nav-chart-wrap { margin-bottom: 24px; }
+.pf-period-report-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pf-period-report-head {
+  align-items: flex-start;
+}
+.pf-period-report-head > div:first-child {
+  min-width: 0;
+}
+.pf-period-report-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pf-period-report-controls select {
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.pf-period-report-status {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.pf-period-report-status[data-state="error"] { color: var(--danger); }
+.pf-period-report-status[data-state="done"] { color: var(--success); }
+.pf-period-report-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.pf-period-report-meta span {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 3px 7px;
+}
+.pf-period-report-grid {
+  margin-top: 10px;
+}
+.pf-period-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.pf-period-warnings span {
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  color: var(--text-secondary);
+  padding: 7px 9px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.pf-period-report-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.pf-period-report-sections section {
+  min-width: 0;
+}
+.pf-period-report-sections h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 800;
+}
+.pf-period-report-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.pf-period-report-table {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.pf-period-report-table th,
+.pf-period-report-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.pf-period-report-table th {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+  font-weight: 800;
+}
+.pf-period-report-table tr:last-child td { border-bottom: none; }
+.pf-period-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.pf-period-note {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 8px 9px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.pf-period-note strong {
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.pf-period-note.warning {
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+#pfPerformanceTab .pf-nav-chart-wrap,
+#pfPerformanceTab .pf-cashflow-section {
+  margin: 0;
+}
+/* NAV/평가금액 차트 컨테이너 — 반응형 높이. 수정자 클래스로 구분:
+     .pf-nav-tall  → NAV 기준가 (PC 600px, 폰 320px)
+     .pf-nav-short → 평가금액 (PC 600px, 폰 320px)
+   수정자 없으면 기본 300px (legacy fallback). 과거에 #pfNavChart 에
+   'min-height:600px !important' 가 걸려 있어서 폰 화면을 가득 채우고
+   media query override 도 불가능했던 문제를 여기서 해결. */
+.pf-nav-chart-container { position: relative; height: 300px; }
+.pf-nav-chart-container.pf-nav-tall { height: 460px; }
+.pf-nav-chart-container.pf-nav-short { height: 330px; }
+.pf-nav-chart-container.pf-group-weight { height: 330px; }
+.pf-nav-chart-container.pf-group-composition { height: 300px; }
+.pf-nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.pf-nav-header h3 { margin: 0; font-size: 15px; line-height: 1.25; font-weight: 800; }
+.pf-nav-header h4 { margin: 0; font-size: 14px; line-height: 1.3; font-weight: 800; }
+.pf-chart-note {
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: right;
+}
+.pf-analysis-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+.pf-group-composition-wrap {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+.pf-mini-btn {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-secondary);
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pf-mini-btn:hover { border-color: var(--primary); color: var(--primary); }
+.pf-nav-ret-card.is-active { border-color: var(--primary); background: var(--hover); }
+#pfNavChart,
+#pfValueChart,
+#pfGroupWeightChart,
+#pfGroupCompositionChart {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.pf-chart-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 18px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pf-nav-beta-overlay {
+  position: absolute; z-index: 5; top: 6px; left: 58px; right: 210px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  pointer-events: none;
+}
+.pf-nav-beta-chip {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 20px;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--beta-color) 36%, var(--border));
+  background: color-mix(in srgb, var(--surface) 88%, var(--beta-color));
+  color: var(--text); font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+.pf-nav-beta-dot {
+  width: 7px; height: 7px; border-radius: 999px;
+  background: var(--beta-color);
+}
+.pf-bench-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  cursor: pointer;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  user-select: none;
+  transition: all .15s;
+}
+.pf-bench-chip input { display: none; }
+.pf-bench-chip:has(input:checked) { background: var(--primary); color: #fff; border-color: var(--primary); }
+.pf-nav-returns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+#pfPerformanceTab .pf-nav-returns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+}
+.pf-chart-range {
+  margin-top: 8px; color: var(--text-secondary); font-size: 12px; line-height: 1.4;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.pf-chart-range strong { color: var(--text); font-weight: 700; }
+.pf-nav-ret-card {
+  flex: 1; min-width: 80px; padding: 8px 12px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-md); text-align: center;
+}
+#pfPerformanceTab .pf-nav-ret-card {
+  min-width: 0;
+  padding: 9px 10px;
+  text-align: left;
+  background: var(--surface);
+}
+.pf-nav-ret-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
+.pf-nav-ret-value { font-size: 16px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pf-nav-ret-card[data-zoom-days]:hover, .pf-nav-ret-card[onclick]:hover {
+  border-color: var(--primary); background: var(--hover);
+}
+
+/* Risk panel (성과 탭 '리스크' 카드) — 타일은 .pf-nav-ret-card 를 재사용하고,
+   flex 대신 grid 로 깔아 좁은 화면에서 2열로 접는다. 색·테두리는 모두
+   CSS 변수 기반이라 다크 테마도 그대로 따라간다. */
+.pf-risk-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px; margin-top: 12px;
+}
+.pf-risk-grid .pf-nav-ret-card { min-width: 0; }
+.pf-risk-sub {
+  font-size: 10px; color: var(--text-secondary); margin-top: 2px;
+  line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.pf-risk-empty {
+  margin-top: 12px; padding: 24px 12px; text-align: center;
+  color: var(--text-secondary); font-size: 13px;
+  border: 1px dashed var(--border); border-radius: var(--radius-md);
+}
+#pfPerformanceTab .pf-risk-empty {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+  padding: 18px 12px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+  line-height: 1.5;
+}
+@media (max-width: 760px) {
+  .pf-risk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Rebalancing card (성과 탭 '리밸런싱') — 빈 상태는 .pf-risk-empty,
+   버튼·입력은 .pf-mini-btn/.pf-alert-btn/.pf-modal-input 을 재사용한다.
+   색은 모두 CSS 변수 기반이라 다크 테마를 그대로 따른다. */
+.pf-rebal-header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.pf-rebal-alert-toggle {
+  display: inline-flex; gap: 5px; align-items: center; min-height: 28px; font-size: 12px;
+  color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+  padding: 0 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+}
+.pf-rebal-table-wrap { margin-top: 12px; overflow-x: auto; }
+.pf-rebal-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
+.pf-rebal-table th {
+  text-align: right; padding: 6px 8px; font-size: 11px; font-weight: 600;
+  color: var(--text-secondary); border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.pf-rebal-table th:first-child { text-align: left; }
+.pf-rebal-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.pf-rebal-label { text-align: left; }
+.pf-rebal-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-rebal-sub { font-size: 11px; color: var(--text-secondary); }
+.pf-rebal-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px;
+  font-weight: 700; background: var(--hover); color: var(--text-secondary);
+  border: 1px solid var(--border); vertical-align: middle;
+}
+.pf-rebal-badge.group { color: var(--primary); border-color: var(--primary); background: transparent; }
+.pf-rebal-drift.breached { font-weight: 800; }
+tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
+.pf-rebal-breached-count { color: var(--danger); }
+.pf-rebal-editor {
+  margin-top: 12px; padding: 12px; border: 1px dashed var(--border);
+  border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 8px;
+}
+.pf-rebal-editor-head { font-size: 12px; color: var(--text-secondary); }
+.pf-rebal-editor-row {
+  display: grid; grid-template-columns: 84px minmax(0, 1fr) 96px 110px 34px;
+  gap: 6px; align-items: center;
+}
+.pf-rebal-editor-row .pf-modal-input { min-width: 0; }
+.pf-rebal-editor-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  /* 모바일은 2열로 접는다(.pf-risk-grid 패턴) — 구분/대상, 목표/오차+삭제. */
+  .pf-rebal-editor-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Dividend calendar card (성과 탭 '배당 캘린더') — 빈 상태는 .pf-risk-empty
+   재사용, 색은 모두 CSS 변수 기반. 예상 이벤트는 점선+흐림으로 확정과 구분. */
+.pf-divcal-list { margin-top: 12px; }
+.pf-divcal-month {
+  display: flex; align-items: center; gap: 8px; padding: 8px 6px;
+  border-bottom: 1px solid var(--border); font-size: 13px; cursor: pointer;
+  user-select: none;
+}
+.pf-divcal-month.empty { cursor: default; color: var(--text-secondary); }
+.pf-divcal-month.now { background: var(--hover); border-radius: var(--radius-sm); }
+.pf-divcal-month-label { font-weight: 600; }
+.pf-divcal-month.empty .pf-divcal-month-label { font-weight: 400; }
+.pf-divcal-month-total {
+  margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.pf-divcal-caret { width: 14px; text-align: center; color: var(--text-secondary); font-size: 11px; }
+.pf-divcal-events { padding: 2px 6px 8px 28px; }
+.pf-divcal-event {
+  display: grid; grid-template-columns: 86px minmax(0, 1fr) auto;
+  gap: 2px 10px; align-items: center; padding: 6px 0; font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.pf-divcal-event:last-child { border-bottom: none; }
+.pf-divcal-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-divcal-stock { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pf-divcal-stock-name { font-weight: 600; }
+.pf-divcal-sub { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
+.pf-divcal-amount {
+  text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600;
+}
+/* 예상 이벤트 — 확정 대비 흐리게(추정치임을 시각적으로 강조). */
+.pf-divcal-event.pf-divcal-est .pf-divcal-stock-name,
+.pf-divcal-event.pf-divcal-est .pf-divcal-amount { color: var(--text-secondary); font-weight: 500; }
+/* 다가오는(오늘 이후) 이벤트 — 날짜를 강조해 임박 일정이 한눈에 띄게. */
+.pf-divcal-event.pf-divcal-upcoming .pf-divcal-date { color: var(--primary); font-weight: 700; }
+.pf-divcal-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px;
+  font-weight: 700; background: transparent; color: var(--text-secondary);
+  border: 1px dashed var(--border); vertical-align: middle;
+}
+.pf-divcal-badge.confirmed { color: var(--primary); border: 1px solid var(--primary); }
+.pf-divcal-note { margin-top: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+@media (max-width: 760px) {
+  /* 모바일은 2열로 접는다(.pf-risk-grid 패턴) — 날짜/금액, 종목은 풀폭. */
+  .pf-divcal-event { grid-template-columns: minmax(0, 1fr) auto; }
+  .pf-divcal-event .pf-divcal-stock { grid-column: 1 / -1; }
+  .pf-divcal-events { padding-left: 16px; }
+}
+
+/* Investment journal (투자 일지) — 분석 화면 #stockJournalSection 과 성과 탭
+   #pfJournalWrap 두 표면이 같은 카드 스타일을 공유한다. 빈 상태는
+   .pf-risk-empty 재사용, 색은 모두 CSS 변수 기반. */
+.stock-journal {
+  margin-top: 8px;
+}
+.stock-journal-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.stock-journal-label { font-weight: 700; font-size: 13.5px; }
+.stock-journal-hint { font-size: 11.5px; color: var(--text-secondary); }
+.pf-journal-form { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.pf-journal-form-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pf-journal-form-row .pf-modal-input { min-width: 0; }
+.pf-journal-form-row #stockJournalQty { width: 120px; }
+.pf-journal-note-input {
+  width: 100%; box-sizing: border-box; resize: vertical; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 13px;
+  background: var(--surface); color: var(--text-primary); font-family: inherit;
+}
+.pf-journal-form-hint { font-size: 11px; color: var(--text-secondary); }
+.pf-journal-form-actions { display: flex; gap: 6px; margin-top: 4px; }
+.pf-journal-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pf-journal-card {
+  border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 10px;
+  font-size: 12.5px; background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+}
+.pf-journal-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf-journal-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+  font-weight: 700; border: 1px solid var(--border); color: var(--text-secondary);
+}
+.pf-journal-badge.buy { color: var(--up); border-color: var(--up); }
+.pf-journal-badge.sell { color: var(--down); border-color: var(--down); }
+.pf-journal-stock { font-weight: 700; color: var(--text-primary); text-decoration: none; }
+.pf-journal-stock:hover { text-decoration: underline; }
+.pf-journal-date { color: var(--text-secondary); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.pf-journal-actions { margin-left: auto; display: flex; gap: 2px; }
+.pf-journal-icon-btn {
+  border: none; background: transparent; cursor: pointer; font-size: 13px;
+  padding: 2px 4px; border-radius: var(--radius-sm); line-height: 1;
+}
+.pf-journal-icon-btn:hover { background: var(--hover); }
+.pf-journal-prices { margin-top: 6px; font-variant-numeric: tabular-nums; }
+.pf-journal-sub { font-size: 11px; color: var(--text-secondary); }
+.pf-journal-note { margin-top: 6px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }
+.pf-journal-edit { margin-top: 6px; }
+.pf-journal-foot { margin-top: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+@media (max-width: 760px) {
+  /* 모바일 — 폼 컨트롤은 풀폭으로 접고(.pf-rebal-editor-row 패턴), 카드의
+     액션 버튼은 헤더 줄바꿈을 허용한다. */
+  .pf-journal-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pf-journal-form-row #stockJournalQty { width: auto; }
+}
+
+/* === Cashflow section === */
+.pf-cashflow-section {
+  margin-top: 24px;
+  overflow-x: auto;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 96%, var(--bg));
+}
+.pf-cashflow-section h3 { font-size: 15px; line-height: 1.25; margin: 0 0 12px; font-weight: 800; }
+.pf-cf-form {
+  display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.pf-cf-form select, .pf-cf-form input {
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface); color: var(--text); font-size: 13px;
+}
+.pf-cf-form input[type="number"] { width: 140px; }
+.pf-cf-form input[type="text"] { width: 120px; }
+.pf-cf-form button {
+  padding: 8px 16px; border: none; border-radius: var(--radius-md);
+  background: var(--primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.pf-cf-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  font-size: 12px;
+  table-layout: fixed;
+}
+.pf-cf-table th {
+  text-align: left;
+  padding: 0 10px 4px;
+  border-bottom: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.pf-cf-table td {
+  padding: 10px;
+  border-bottom: none;
+  background: var(--surface);
+  white-space: nowrap;
+  vertical-align: middle;
+  box-shadow: 0 1px 0 var(--border), 0 -1px 0 var(--border);
+}
+.pf-cf-table td:first-child {
+  border-radius: 10px 0 0 10px;
+  box-shadow: -1px 0 0 var(--border), 0 1px 0 var(--border), 0 -1px 0 var(--border);
+}
+.pf-cf-table td:last-child {
+  border-radius: 0 10px 10px 0;
+  box-shadow: 1px 0 0 var(--border), 0 1px 0 var(--border), 0 -1px 0 var(--border);
+}
+.pf-cf-table th:nth-child(1), .pf-cf-table td:nth-child(1) { width: 88px; }
+.pf-cf-table th:nth-child(2), .pf-cf-table td:nth-child(2) { width: 64px; }
+.pf-cf-table th:nth-child(3), .pf-cf-table td:nth-child(3) { width: 104px; text-align: right; }
+.pf-cf-table th:nth-child(4), .pf-cf-table td:nth-child(4) { width: 92px; text-align: right; }
+.pf-cf-table th:nth-child(5), .pf-cf-table td:nth-child(5) { width: 96px; text-align: right; }
+.pf-cf-table th:nth-child(6), .pf-cf-table td:nth-child(6) { width: 102px; text-align: right; }
+.pf-cf-table th:nth-child(7), .pf-cf-table td:nth-child(7) {
+  width: auto;
+  min-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-cf-table th:nth-child(8), .pf-cf-table td:nth-child(8) { width: 38px; text-align: center; }
+.pf-cf-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pf-cf-type.deposit {
+  color: var(--up);
+  background: var(--up-tint);
+}
+.pf-cf-type.withdrawal {
+  color: var(--down);
+  background: var(--down-tint);
+}
+.pf-cf-amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pf-cf-table .pf-row-btn.delete {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+}
+.pf-cf-table .pf-row-btn.delete:hover {
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.pf-filter-bar {
+  display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 16px;
+}
+.pf-filter-btn {
+  padding: 7px 14px; border: none; border-bottom: 2px solid transparent;
+  margin-bottom: -2px; background: none; color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.pf-filter-btn:hover { color: var(--text); }
+.pf-filter-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+.pf-filter-btn .pf-filter-cnt { font-weight: 400; opacity: 0.6; font-size: 11px; }
+.pf-filter-btn.active .pf-filter-cnt { opacity: 0.7; }
+.pf-group-manage-btn { font-size: 14px !important; padding: 7px 8px !important; color: var(--text-secondary) !important; border-bottom-color: transparent !important; }
+.pf-col-group { min-width: 80px; }
+.pf-group-select {
+  padding: 3px 6px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer;
+  text-align-last: right;
+}
+.pf-group-select:hover { color: var(--text); }
+.pf-group-select:focus { outline: none; color: var(--text); }
+.pf-group-chip {
+  display: inline-flex;
+  max-width: 96px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 84%, var(--hover-bg));
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-group-chip:hover,
+.pf-group-chip:focus {
+  border-color: var(--primary);
+  color: var(--text);
+  outline: none;
+}
+/* Benchmark column */
+.pf-col-benchmark { min-width: 70px; }
+.pf-col-benchmark.js-pf-bench-picker { cursor: pointer; }
+.pf-benchmark-val { font-size: 12px; opacity: 0.6; }
+.pf-benchmark-name { display: block; font-size: 10px; opacity: 0.45; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; }
+.pf-benchmark-picker {
+  position: absolute; right: 0; top: 100%; z-index: 100;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md); min-width: 140px; padding: 4px 0;
+}
+.pf-bm-option {
+  padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.pf-bm-option:hover { background: var(--bg); }
+.pf-bm-option.selected { color: var(--primary); font-weight: 600; }
+.pf-bm-reset { color: var(--text-secondary); font-size: 12px; border-top: 1px solid var(--border); }
+.pf-bm-custom { padding: 4px 8px; }
+.pf-bm-input {
+  width: 100%; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--text); font-size: 12px;
+}
+/* Group management modal */
+.pf-modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--overlay-bg); z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+}
+.pf-grp-layout { display: flex; gap: 16px; align-items: flex-start; }
+.pf-grp-table-wrap { flex: 1; overflow-x: auto; }
+.pf-grp-pie-wrap { flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+@media (max-width: 600px) { .pf-grp-layout { flex-direction: column; } .pf-grp-pie-wrap { align-self: center; } }
+.pf-modal {
+  background: var(--surface); border-radius: var(--radius-xl); padding: 0;
+  min-width: 340px; max-width: 1100px; width: 95%; box-shadow: var(--shadow-lg);
+}
+.pf-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.pf-modal-header h3 { margin: 0; font-size: 16px; }
+.pf-modal-close {
+  background: none; border: none; font-size: 22px; cursor: pointer;
+  color: var(--text-secondary); line-height: 1;
+}
+.pf-modal-body { padding: 12px 20px; max-height: 480px; overflow-y: auto; }
+.pf-modal-footer {
+  display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border);
+}
+.pf-modal-input {
+  flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg); color: var(--text); font-size: 13px;
+}
+.pf-modal-add-btn {
+  padding: 8px 16px; border: none; border-radius: var(--radius-md);
+  background: var(--primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+
+/* 조건 알림 모달 — 브리핑 슬롯과 규칙이 늘어나 넓은 작업면을 쓴다. */
+.pf-alerts-modal { width: min(96vw, 920px); max-width: 920px; }
+.pf-alerts-modal .pf-modal-body { max-height: min(78vh, 760px); }
+.pf-alert-section { padding: 4px 0 14px; }
+.pf-alert-section + .pf-alert-section { border-top: 1px solid var(--border); padding-top: 14px; }
+.pf-alert-section h4 { margin: 0 0 10px; font-size: 13px; color: var(--text-secondary); font-weight: 600; }
+.pf-alert-help-toggle {
+  margin-left: 8px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer;
+  vertical-align: middle;
+}
+.pf-alert-help-toggle:hover { background: var(--hover-bg); }
+.pf-alert-help {
+  margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius-lg); background: var(--bg); font-size: 12.5px; line-height: 1.6;
+}
+.pf-alert-help-intro { margin: 0 0 10px; color: var(--text-secondary); }
+.pf-alert-help-block { margin: 0 0 10px; }
+.pf-alert-help-block strong { display: block; margin-bottom: 4px; font-size: 13px; }
+.pf-alert-help-block ol { margin: 0; padding-left: 18px; }
+.pf-alert-help-block li { margin: 2px 0; }
+.pf-alert-help-sub { color: var(--text-secondary); font-size: 11.5px; }
+.pf-alert-help-foot { margin: 6px 0 0; color: var(--text-secondary); font-size: 11.5px; }
+.pf-alert-channels { display: flex; flex-direction: column; gap: 12px; }
+.pf-alert-channel-reg {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg);
+}
+.pf-alert-channel-reg-head { display: flex; align-items: center; gap: 8px; }
+.pf-alert-reg-form { display: flex; gap: 6px; flex-wrap: wrap; }
+.pf-alert-reg-form .pf-modal-input { flex: 1; min-width: 140px; }
+.pf-alert-redirect {
+  display: inline-block; margin-top: 2px; padding: 3px 6px; border-radius: var(--radius-sm);
+  background: var(--hover-bg); font-size: 11px; word-break: break-all; user-select: all;
+}
+.pf-alert-channel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.pf-alert-channel-name { font-weight: 600; min-width: 64px; }
+.pf-alert-channel-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.pf-alert-briefing-list { display: flex; flex-direction: column; gap: 10px; }
+.pf-alert-briefing-card { align-items: stretch; flex-direction: column; gap: 8px; }
+.pf-alert-briefing-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf-alert-briefing-input {
+  min-height: 76px;
+  resize: vertical;
+  line-height: 1.45;
+  font-family: inherit;
+}
+.pf-alert-badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pf-alert-badge.on { background: var(--success-tint); color: var(--success); }
+.pf-alert-badge.off { background: var(--hover-bg); color: var(--text-secondary); }
+.pf-alert-who { color: var(--text-secondary); font-size: 12px; }
+.pf-alert-hint { color: var(--text-secondary); font-size: 12px; }
+.pf-alert-hint code { background: var(--hover-bg); padding: 1px 5px; border-radius: 4px; }
+.pf-alert-btn {
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg); color: var(--text); font-size: 12px; cursor: pointer;
+}
+.pf-alert-btn:hover { background: var(--hover-bg); }
+.pf-alert-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.pf-alert-btn.danger:hover { background: var(--danger-tint); color: var(--danger); border-color: var(--danger); }
+.pf-alert-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.pf-alert-form-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.pf-alert-form-row .pf-modal-input { flex: 1; min-width: 90px; }
+.pf-alert-form-row .pf-alert-stock { flex: 2; min-width: 140px; }
+.pf-alert-form-row .pf-alert-dir { flex: 0 0 80px; min-width: 70px; }
+.pf-alert-form-note { flex: 1; align-self: center; font-size: 12px; color: var(--text-secondary); }
+.pf-alert-list { display: flex; flex-direction: column; gap: 6px; }
+.pf-alert-empty { color: var(--text-secondary); font-size: 13px; padding: 8px 0; }
+.pf-alert-rule {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg);
+}
+.pf-alert-rule.disabled { opacity: 0.55; }
+.pf-alert-rule-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pf-alert-rule-label { font-size: 13px; color: var(--text); }
+.pf-alert-rule-note { font-size: 11px; color: var(--text-secondary); }
+.pf-alert-rule-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.pf-alert-state { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+.pf-alert-state.armed { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
+.pf-alert-state.fired { background: var(--warning-tint); color: var(--warning); }
+.pf-alert-state.off { background: var(--hover-bg); color: var(--text-secondary); }
+/* 중요 알림: 폼 체크박스 · 목록 카드 강조 · 배지 · 별 토글 */
+.pf-alert-important-check {
+  display: flex; align-items: center; gap: 4px; align-self: center; flex: 0 0 auto;
+  font-size: 12px; color: var(--text-secondary); white-space: nowrap; cursor: pointer;
+}
+.pf-alert-important-check input { cursor: pointer; margin: 0; }
+.pf-alert-rule.important {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  box-shadow: inset 3px 0 0 var(--danger);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+}
+.pf-alert-flag {
+  display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px;
+  background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); font-size: 11px; font-weight: 700;
+  vertical-align: middle;
+}
+.pf-alert-star { padding: 6px 9px; font-size: 13px; line-height: 1; }
+.pf-alert-star.on { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+/* 종목 분석 화면 — 개별 종목 알림 모달 */
+.sa-field-label { flex: 0 0 76px; align-self: center; font-size: 13px; font-weight: 600; color: var(--text); }
+.sa-note { flex: 1; align-self: center; font-size: 11px; color: var(--text-secondary); min-width: 0; }
+.pf-alert-form-row .sa-price-dir { flex: 0 0 72px; min-width: 60px; }
+.pf-alert-form-row .sa-price-val, .pf-alert-form-row .sa-daily-val { flex: 1; min-width: 90px; }
+.sa-toggle-row { align-items: center; }
+.sa-toggle.on { background: var(--success-tint); color: var(--success); border-color: var(--success); }
+.pf-alert-form-row .sa-feed-select { flex: 0 0 auto; min-width: 150px; }
+
+@media (max-width: 700px) {
+  .pf-alerts-modal { width: 98vw; min-width: 0; }
+  .pf-alerts-modal .pf-modal-body { max-height: 82vh; padding-left: 14px; padding-right: 14px; }
+  .pf-alert-channel-actions { margin-left: 0; width: 100%; }
+}
+
+/* 영역지도 전용 모달 — 반드시 위의 .pf-modal / .pf-modal-body 정의들
+   뒤에 위치해야 함. CSS 는 같은 specificity 일 때 뒤에 선언된 규칙이
+   이기므로, 여기가 앞에 있으면 기존 모달 규칙 (width:95%, max-width:
+   1100px, max-height:480px 등) 이 덮어써 treemap 영역이 축소되는
+   버그가 생긴다 (실제로 한 번 발생했음).
+
+   크기: viewport 90vw × 88vh 로 화면을 가득 채우지 않되 충분히 크게.
+   ECharts treemap 은 내부 #pfTreemap 이 height 100% 를 요구하므로
+   body 를 flex 컨테이너로 만들어 공간 확보. ResizeObserver 가
+   container 크기 변화를 감지해 즉시 ec.resize() 호출. */
+.pf-treemap-modal {
+  width: 90vw; height: 88vh;
+  max-width: none; max-height: none;
+  display: flex; flex-direction: column;
+  padding: 0;
+}
+.pf-treemap-body {
+  flex: 1;
+  max-height: none;        /* .pf-modal-body 의 480px cap 제거 */
+  padding: 8px;
+  overflow: hidden;        /* treemap 이 자체 스크롤 관리 */
+  min-height: 0;           /* flex child 가 실제로 shrink 되도록 */
+}
+.pf-treemap-body #pfTreemap {
+  width: 100%; height: 100%;
+}
+
+.pf-insight-modal {
+  width: min(980px, 95vw);
+  max-width: none;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pf-insight-body {
+  max-height: none;
+  padding: 18px;
+  overflow-y: auto;
+}
+.pf-insight-loading,
+.pf-insight-error,
+.pf-insight-empty {
+  padding: 28px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.pf-insight-error {
+  color: var(--danger);
+}
+.pf-insight-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(34, 197, 94, 0.14), transparent 32%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.04), rgba(59, 130, 246, 0.07));
+}
+.pf-insight-kicker,
+.pf-insight-section-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.pf-insight-hero h4 {
+  margin: 4px 0 6px;
+  font-size: 22px;
+}
+.pf-insight-hero p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.pf-insight-chips {
+  display: flex;
+  align-content: flex-start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 220px;
+}
+.pf-insight-chips span {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pf-insight-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.pf-insight-link-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 128px;
+  padding: 9px 12px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  box-shadow: var(--shadow-sm);
+}
+.pf-insight-link-action:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+.pf-insight-link-action strong {
+  font-size: 12px;
+}
+.pf-insight-link-action span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.pf-insight-tag-panel {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 94% 0%, rgba(34, 197, 94, 0.12), transparent 28%),
+    var(--surface);
+}
+.pf-insight-tag-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.pf-insight-tag-head strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+}
+.pf-insight-tag-head > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.pf-insight-tag-list,
+.pf-insight-tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.pf-insight-tag-chip,
+.pf-insight-tag-suggestion {
+  border: 1px solid rgba(34, 197, 94, 0.24);
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.09);
+  color: #166534;
+  cursor: pointer;
+  font-size: 12px;
+}
+.pf-insight-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px 6px 10px;
+}
+.pf-insight-tag-chip b {
+  font-size: 13px;
+  line-height: 1;
+}
+.pf-insight-tag-chip:hover,
+.pf-insight-tag-suggestion:hover {
+  border-color: var(--success);
+  background: var(--success-tint);
+}
+.pf-insight-tag-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.pf-insight-tag-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pf-insight-tag-input {
+  flex: 1;
+  min-width: 180px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg);
+  color: var(--text);
+}
+.pf-insight-tag-input:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: var(--ring);
+}
+.pf-insight-tag-add-btn {
+  border: none;
+  border-radius: 11px;
+  padding: 0 14px;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+.pf-insight-tag-suggestions {
+  margin-top: 9px;
+}
+.pf-insight-tag-suggestion {
+  padding: 5px 9px;
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: var(--text-secondary);
+}
+.pf-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.pf-insight-card,
+.pf-insight-section,
+.pf-insight-gold-gap {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.pf-insight-card {
+  padding: 13px;
+}
+.pf-insight-card-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.pf-insight-card-value {
+  margin-top: 7px;
+  font-size: 20px;
+  font-weight: 800;
+}
+.pf-insight-card-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.pf-insight-two-col {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+.pf-insight-section {
+  padding: 14px;
+}
+.pf-insight-section-title {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.pf-insight-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.pf-insight-table th,
+.pf-insight-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+.pf-insight-table th:first-child,
+.pf-insight-table td:first-child {
+  text-align: left;
+  color: var(--text-secondary);
+}
+.pf-insight-signals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pf-insight-signal {
+  padding: 10px 11px;
+  border-radius: var(--radius-xl);
+  background: rgba(148, 163, 184, 0.12);
+}
+.pf-insight-signal strong,
+.pf-insight-signal span {
+  display: block;
+}
+.pf-insight-signal strong {
+  font-size: 12px;
+}
+.pf-insight-signal span {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.pf-insight-signal.warning { background: rgba(245, 158, 11, 0.14); }
+.pf-insight-signal.positive { background: rgba(34, 197, 94, 0.14); }
+.pf-insight-signal.info { background: rgba(59, 130, 246, 0.13); }
+.pf-insight-macro {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.pf-insight-macro-item {
+  padding: 10px;
+  border-radius: var(--radius-xl);
+  background: var(--bg);
+}
+.pf-insight-macro-item span,
+.pf-insight-macro-item em {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-style: normal;
+}
+.pf-insight-macro-item strong {
+  display: block;
+  margin: 4px 0 2px;
+  font-size: 13px;
+}
+.pf-insight-gold-gap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(251, 191, 36, 0.06));
+}
+.pf-insight-gold-gap p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.pf-insight-link {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .pf-insight-hero,
+  .pf-insight-gold-gap {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pf-insight-chips {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+  .pf-insight-grid,
+  .pf-insight-two-col,
+  .pf-insight-macro {
+    grid-template-columns: 1fr;
+  }
+  .pf-insight-tag-add {
+    flex-direction: column;
+  }
+  .pf-insight-tag-add-btn {
+    padding: 9px 14px;
+  }
+}
+.pf-grp-name {
+  flex: 1; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text); font-size: 14px;
+}
+.pf-grp-name:focus { border-color: var(--primary); background: var(--bg); outline: none; }
+.pf-grp-del {
+  background: none; border: none; color: var(--text-secondary); font-size: 18px;
+  cursor: pointer; line-height: 1; padding: 2px 6px;
+}
+.pf-grp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pf-grp-table th {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary); text-align: right;
+  padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.pf-grp-table th:nth-child(2) { text-align: left; }
+.pf-grp-td-drag { width: 24px; text-align: center; }
+.pf-grp-td-name { text-align: left; }
+.pf-grp-td-num { text-align: right; padding: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pf-grp-td-act { width: 28px; text-align: center; }
+.pf-grp-tr { border-bottom: 1px solid var(--border); }
+.pf-grp-drag {
+  cursor: grab; color: var(--text-secondary); font-size: 14px; user-select: none; padding: 2px 4px;
+}
+.pf-grp-tr.dragging { opacity: 0.4; }
+.pf-grp-tr.drag-over { outline: 2px solid var(--primary); }
+.pf-grp-del:hover { color: #e74c3c; }
+.pf-add-bar {
+  position: relative; margin-bottom: 16px;
+  display: flex; align-items: center; gap: 10px;
+}
+.pf-search-wrap {
+  flex: 1; max-width: 560px; position: relative;
+}
+.pf-search-input {
+  width: 100%; padding: 10px 42px 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  font-size: 14px; background: var(--input-bg); color: var(--text); outline: none;
+}
+.pf-search-input:focus { border-color: var(--primary); box-shadow: var(--ring); }
+.pf-search-clear {
+  position: absolute; right: 8px; top: 7px; width: 26px; height: 26px; align-items: center; justify-content: center;
+  border: none; border-radius: 999px; background: transparent; color: var(--text-secondary); cursor: pointer; display: none;
+  font-size: 16px; line-height: 1;
+}
+.pf-search-clear:hover { background: var(--surface-muted); color: var(--text); }
+.pf-search-meta {
+  position: absolute; left: 2px; top: calc(100% + 3px); font-size: 11px; color: var(--text-secondary);
+}
+.pf-add-input {
+  flex: 1; max-width: 500px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  font-size: 14px; background: var(--input-bg); color: var(--text); outline: none;
+}
+.pf-add-input:focus { border-color: var(--primary); box-shadow: var(--ring); }
+.pf-add-toggle,
+.pf-csv-toggle {
+  margin-left: auto; padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: color 0.15s; white-space: nowrap; flex-shrink: 0;
+}
+.pf-add-toggle { margin-left: auto; }
+.pf-csv-toggle { margin-left: 0; }
+.pf-add-toggle:hover,
+.pf-csv-toggle:hover,
+.pf-add-toggle.active { color: var(--text); border-color: var(--primary); }
+/* Primary "등록" button — sits right after the add-input so users don't
+   have to rely on Enter or clicking a dropdown item. margin-left auto is
+   NOT applied here so this button stays adjacent to the input; csv
+   toggle still floats right via its own margin-left:auto. */
+.pf-add-btn {
+  padding: 8px 16px; border: 1px solid var(--primary); border-radius: var(--radius-md);
+  background: var(--primary); color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.pf-add-btn:hover { opacity: 0.88; }
+.pf-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.pf-add-panel {
+  margin: -6px 0 14px; padding: 14px; border: 1px solid var(--border); border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--primary) 8%);
+  max-width: 680px;
+}
+.pf-add-panel-head {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.pf-add-panel-head strong { font-size: 13px; color: var(--text); }
+.pf-add-panel-head span { font-size: 12px; color: var(--text-secondary); }
+.pf-add-panel-form {
+  position: relative; display: flex; align-items: center; gap: 8px;
+}
+.pf-add-panel-form .pf-add-input { max-width: none; }
+.pf-csv-panel {
+  margin-top: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); max-width: 500px;
+}
+.pf-csv-input {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  font-family: monospace; font-size: 13px; background: var(--input-bg); color: var(--text);
+  resize: vertical; line-height: 1.5;
+}
+.pf-csv-input:focus { border-color: var(--primary); outline: none; }
+.pf-csv-actions { display: flex; gap: 8px; margin-top: 10px; }
+.pf-csv-btn {
+  padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--primary); color: white; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: opacity 0.15s;
+}
+.pf-csv-btn:hover { opacity: 0.85; }
+.pf-csv-btn:disabled { opacity: 0.5; cursor: wait; }
+.pf-csv-btn.danger { background: var(--danger); border-color: var(--danger); }
+.pf-csv-btn.cancel { background: var(--surface); color: var(--text-secondary); }
+.pf-csv-btn.cancel:hover { color: var(--text); }
+.pf-dropdown { max-width: 500px; }
+.pf-table-wrap {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); overflow: hidden;
+}
+.pf-load-status {
+  margin: 8px 0 10px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--warning-tint);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.pf-load-status[data-state="error"] {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: var(--danger-tint);
+}
+.pf-table {
+  width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.pf-table thead th {
+  background: var(--sidebar-bg); padding: 10px 12px;
+  font-weight: 700; color: var(--text-secondary); font-size: 12px;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid var(--border); white-space: nowrap;
+  position: sticky; top: 0; z-index: 1;
+}
+.pf-table thead th.pf-col-name, .pf-table tbody td.pf-col-name { text-align: left; }
+.pf-table thead th.pf-col-num { text-align: right; }
+.pf-table thead th.pf-col-act { text-align: center; }
+.pf-table tbody td, .pf-table tfoot td {
+  padding: 10px 12px; vertical-align: middle;
+}
+/* transition 제거 — renderPortfolio() 가 tbody 를 재생성할 때 새 tr 에
+   :hover 가 즉시 적용되는데, background transition 이 있으면 그 0.15s
+   이 '깜빡임' 으로 보임. transition 없으면 hover 배경 즉시 적용 →
+   시각적 깜빡임 없음. (WS tick 마다 전체 재렌더 유지해도 문제 안 됨.) */
+/* .pf-table tbody tr { transition: background 0.15s ease; } */
+.pf-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--border) 15%, var(--surface)); }
+.pf-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
+.pf-table tfoot td { font-weight: 700; background: var(--sidebar-bg); border-top: 2px solid var(--border); position: sticky; bottom: 0; z-index: 1; }
+.pf-col-num { text-align: right; }
+.pf-col-act { width: 36px; text-align: center; }
+.pf-sortable { cursor: pointer; user-select: none; outline: none; }
+.pf-sortable:hover { color: var(--text); }
+.pf-sortable:focus-visible {
+  color: var(--text);
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+.pf-sortable .pf-sort-arrow { font-size: 10px; margin-left: 3px; }
+.pf-table tbody tr.dragging { opacity: 0.4; }
+.pf-table tbody tr.drag-over-before td { border-top: 2px solid var(--primary); }
+.pf-table tbody tr.drag-over-after td { border-bottom: 2px solid var(--primary); }
+.pf-stock-cell {
+  cursor: pointer;
+  min-width: 0;
+}
+.pf-stock-cell-editing {
+  cursor: default;
+}
+.pf-stock-cell-with-drag {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 6px;
+  align-items: start;
+}
+.pf-stock-main {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: top;
+}
+.pf-stock-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.pf-stock-edit-main {
+  width: min(220px, 100%);
+}
+.pf-stock-name-edit {
+  width: 100%;
+  min-width: 120px;
+  margin-bottom: 3px;
+  text-align: left;
+}
+.pf-row-drag-handle {
+  margin: 1px 0 0;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: grab;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: 1px;
+}
+.pf-row-drag-handle:hover {
+  border-color: var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.pf-row-drag-handle:active {
+  cursor: grabbing;
+}
+.pf-stock-link {
+  color: var(--text);
+  text-decoration: none;
+  min-width: 0;
+}
+.pf-stock-link strong {
+  /* 종목명이 길면(예: 영문 ETF 풀네임) 한 줄로 말줄임. 전체 이름은 title hover.
+     table-layout:auto 라 셀이 내용따라 늘어나므로 max-width(%가 아닌 고정값)로
+     상한을 둬야 말줄임이 실제로 걸린다. */
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.pf-stock-link:hover { color: var(--primary); }
+.pf-stock-code { font-size: 11px; color: var(--text-secondary); }
+.pf-stock-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.pf-stock-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 92px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.10);
+  color: #166534;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.25;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-stock-tag:hover {
+  background: rgba(34, 197, 94, 0.16);
+  color: #15803d;
+}
+.pf-stock-tag.more {
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--text-secondary);
+  cursor: default;
+}
+.pf-tag-summary-modal {
+  width: min(1040px, 95vw);
+  max-width: none;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pf-tag-summary-body {
+  max-height: none;
+  overflow-y: auto;
+}
+.pf-tag-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.pf-tag-summary-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.pf-tag-summary-label,
+.pf-tag-summary-sub {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.pf-tag-summary-value {
+  margin-top: 5px;
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pf-tag-summary-composition {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.28fr);
+  gap: 14px;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+.pf-tag-summary-treemap-panel,
+.pf-tag-summary-list-panel,
+.pf-tag-summary-trend-panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.pf-tag-summary-treemap-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+}
+.pf-tag-summary-list-panel {
+  padding: 12px;
+}
+.pf-tag-summary-section-title {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+.pf-tag-summary-treemap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pf-tag-summary-treemap-head strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.pf-tag-summary-treemap {
+  position: relative;
+  min-height: 258px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--border) 42%, transparent);
+}
+.pf-tag-summary-treemap-tile {
+  position: absolute;
+  box-sizing: border-box;
+  display: grid;
+  align-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 2px solid var(--surface);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.pf-tag-summary-treemap-main {
+  min-width: 0;
+}
+.pf-tag-summary-treemap-main strong,
+.pf-tag-summary-treemap-main span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-tag-summary-treemap-main strong {
+  font-size: 13px;
+}
+.pf-tag-summary-treemap-main span {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.pf-tag-summary-treemap-metrics {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pf-tag-summary-treemap-metrics strong {
+  font-size: 14px;
+}
+.pf-tag-summary-table-wrap {
+  overflow-x: auto;
+}
+.pf-tag-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pf-tag-summary-table th,
+.pf-tag-summary-table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+.pf-tag-summary-table th:first-child,
+.pf-tag-summary-table td:first-child {
+  text-align: left;
+  min-width: 170px;
+}
+.pf-tag-summary-table td strong,
+.pf-tag-summary-table td span {
+  display: block;
+}
+.pf-tag-summary-table td span {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.pf-tag-summary-empty {
+  padding: 24px 10px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.pf-tag-summary-empty.small {
+  padding: 8px 0;
+  font-size: 12px;
+  text-align: left;
+}
+.pf-tag-summary-trends {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.pf-tag-summary-trend-panel {
+  padding: 12px;
+}
+.pf-tag-summary-trend-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.pf-tag-summary-trend-head strong {
+  font-size: 13px;
+}
+.pf-tag-summary-trend-head span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.pf-tag-summary-chart {
+  position: relative;
+  height: 250px;
+  min-height: 220px;
+}
+@media (max-width: 760px) {
+  .pf-tag-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pf-tag-summary-value {
+    font-size: 16px;
+  }
+  .pf-tag-summary-composition,
+  .pf-tag-summary-trends {
+    grid-template-columns: 1fr;
+  }
+  .pf-tag-summary-treemap {
+    min-height: 220px;
+  }
+  .pf-tag-summary-chart {
+    height: 220px;
+    min-height: 200px;
+  }
+  .pf-tag-summary-trend-head {
+    display: grid;
+    gap: 3px;
+  }
+}
+.pf-return.positive { color: var(--up); }
+.pf-return.negative { color: var(--down); }
+.pf-edit-input {
+  width: 80px; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 13px; text-align: right; background: var(--input-bg); color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.pf-edit-input:focus { border-color: var(--primary); outline: none; }
+.pf-price-edit-wrap {
+  display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px;
+  min-width: 138px;
+}
+.pf-price-edit-wrap .pf-edit-input { width: 76px; }
+.pf-price-currency-select {
+  width: 58px; padding: 4px 4px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--input-bg); color: var(--text); font-size: 12px;
+}
+.pf-price-currency-select:focus { border-color: var(--primary); outline: none; }
+.pf-price-currency-lock,
+.pf-native-price {
+  display: block; color: var(--text-secondary); font-size: 11px; line-height: 1.2;
+}
+.pf-price-currency-lock { min-width: 34px; text-align: left; }
+
+/* Column visibility — toggled via JS, applied globally via <style> tag */
+.pf-col-toggle-wrap {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;
+}
+.pf-col-toggle-wrap label {
+  font-size: 12px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; user-select: none;
+}
+.pf-col-toggle-wrap input[type="checkbox"] { margin: 0; accent-color: var(--primary); }
+/* 컴팩트 보기 토글 (컬럼 토글 줄 맨 앞) */
+.pf-compact-toggle { font-weight: 600; color: var(--text); }
+.pf-col-toggle-sep {
+  align-self: stretch; width: 1px; min-height: 14px;
+  background: var(--border); margin: 0 4px;
+}
+/* === 컴팩트 보기 (body.pf-compact-rows) ===
+   태그·순서이동 핸들을 숨기고 종목명을 한 줄(말줄임)로, 행 위아래 간격을
+   좁혀 한 화면에 더 많은 종목을 본다. 데스크톱·모바일 공통 옵션. */
+body.pf-compact-rows .pf-stock-tags,
+body.pf-compact-rows .pf-row-drag-handle {
+  display: none !important;
+}
+body.pf-compact-rows .pf-stock-cell-with-drag {
+  /* td 를 본래의 table-cell 로 되돌려 vertical-align:middle 이 살아나게 한다.
+     display:block 이면 셀이 행 높이를 못 따라가(그룹 select·벤치마크 2줄 등으로
+     행이 높을 때) 종목명이 위로 붙는다. grid 가 풀리므로 드래그 핸들(숨김)이
+     차지하던 16px 들여쓰기도 함께 사라져 종목명이 셀 왼쪽부터 시작한다. */
+  display: table-cell;
+}
+body.pf-compact-rows .pf-stock-line {
+  flex-wrap: nowrap;
+}
+body.pf-compact-rows .pf-stock-main {
+  max-width: 100%;
+  min-width: 0;
+}
+body.pf-compact-rows .pf-table tbody td,
+body.pf-compact-rows .pf-table tfoot td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.pf-row-actions { display: flex; gap: 4px; justify-content: center; }
+.pf-row-btn {
+  border: none; background: none; cursor: pointer; color: var(--text-secondary);
+  font-size: 14px; padding: 2px 4px; border-radius: 4px; transition: color 0.15s;
+}
+.pf-row-btn:disabled { cursor: wait; opacity: 0.75; }
+.pf-row-btn:hover { color: var(--primary); }
+.pf-row-btn.delete:hover { color: var(--danger); }
+.pf-empty {
+  text-align: center; padding: 40px; color: var(--text-secondary); font-size: 14px;
+}
+
+/* Fade-in animation for view/tab transitions */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.22s ease-out; }
+
+/* Focus-visible for interactive elements */
+.nav-btn:focus-visible, .sidebar-tab:focus-visible, .pf-tab:focus-visible,
+.pf-filter-btn:focus-visible, .theme-toggle:focus-visible,
+.personalization-btn:focus-visible, .pf-row-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Portfolio summary card accent border */
+.pf-summary-card {
+  border-left: 3px solid transparent;
+  transition: border-color 0.2s ease;
+}
+.pf-summary-card:has(.positive) { border-left-color: var(--up); }
+.pf-summary-card:has(.negative) { border-left-color: var(--down); }
+
+/* Action button icon styles */
+.pf-row-btn.edit { font-size: 15px; }
+.pf-row-btn.save { color: var(--success); font-size: 16px; font-weight: 700; }
+.pf-row-btn.save:hover { color: var(--success); filter: brightness(0.92); }
+.pf-row-btn.save[aria-busy="true"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 54px;
+  justify-content: center;
+  color: var(--primary);
+}
+.pf-save-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.pf-save-label { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pf-row-saving td { background: color-mix(in srgb, var(--primary) 7%, var(--surface)); }
+.pf-row-saving .pf-edit-input,
+.pf-row-saving .pf-group-select,
+.pf-row-saving .pf-price-currency-select {
+  opacity: 0.72;
+  cursor: wait;
+}
+.pf-row-btn.cancel { font-size: 15px; }
+.pf-row-btn.cancel:hover { color: var(--danger); }
+
+/* === Mobile auth indicator — hidden by default, shown via JS on mobile+logged-in === */
+.mobile-auth-status {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.mobile-auth-status:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: var(--radius-md);
+}
+.mobile-auth-avatar {
+  width: 24px; height: 24px; border-radius: 50%; object-fit: cover;
+}
+.mobile-auth-name {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;
+}
+.mobile-auth-logout {
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-secondary); font-size: 11px; padding: 2px 6px; cursor: pointer;
+}
+
