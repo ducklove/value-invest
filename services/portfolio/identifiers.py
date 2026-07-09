@@ -1,9 +1,30 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
-SPECIAL_ASSETS = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
+from domain.portfolio_codes import (
+    SPECIAL_ASSETS,
+    common_stock_code,
+    is_cash_asset,
+    is_korean_stock,
+    is_preferred_stock,
+    is_special_asset,
+    normalize_portfolio_code,
+)
+
+__all__ = [
+    "CASH_FX_CODE",
+    "CASH_NAMES",
+    "SPECIAL_ASSETS",
+    "STATIC_FOREIGN_TICKERS",
+    "common_stock_code",
+    "is_cash_asset",
+    "is_korean_stock",
+    "is_preferred_stock",
+    "is_special_asset",
+    "normalize_portfolio_code",
+    "static_foreign_ticker",
+]
 
 CASH_NAMES = {
     "CASH_KRW": "원화",
@@ -80,35 +101,5 @@ STATIC_FOREIGN_TICKERS: dict[str, dict[str, Any]] = {
     },
 }
 
-_KRX_CODE_RE = re.compile(r"^[0-9][0-9A-Z]{5}$")
-_KRX_PREFERRED_CODE_RE = re.compile(r"^\d{5}[1-9A-Z]$")
-
-
-def normalize_portfolio_code(code: str | None) -> str:
-    return (code or "").strip().upper()
-
-
 def static_foreign_ticker(code: str | None) -> dict[str, Any] | None:
     return STATIC_FOREIGN_TICKERS.get(normalize_portfolio_code(code))
-
-
-def is_cash_asset(code: str | None) -> bool:
-    return normalize_portfolio_code(code).startswith("CASH_")
-
-
-def is_special_asset(code: str | None) -> bool:
-    normalized = normalize_portfolio_code(code)
-    return normalized in SPECIAL_ASSETS or is_cash_asset(normalized)
-
-
-def is_korean_stock(code: str | None) -> bool:
-    return bool(_KRX_CODE_RE.fullmatch(normalize_portfolio_code(code)))
-
-
-def is_preferred_stock(code: str | None) -> bool:
-    return bool(_KRX_PREFERRED_CODE_RE.fullmatch(normalize_portfolio_code(code)))
-
-
-def common_stock_code(code: str | None) -> str:
-    normalized = normalize_portfolio_code(code)
-    return normalized[:5] + "0"

@@ -12,6 +12,7 @@ import kis_proxy_client
 import stock_price
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from services.portfolio.currencies import infer_yf_currency
 from services.portfolio.identifiers import is_korean_stock
 
 logger = logging.getLogger(__name__)
@@ -29,25 +30,6 @@ LOCAL_BENCHMARK_INDEX_SERIES = {
 LOCAL_BENCHMARK_COMMODITIES = {
     "GOLD": "gold",
 }
-
-
-def infer_yf_currency(ticker: str) -> str:
-    ticker = (ticker or "").upper()
-    if ticker.endswith(".T"):
-        return "JPY"
-    if ticker.endswith(".HK"):
-        return "HKD"
-    if ticker.endswith(".SS") or ticker.endswith(".SZ"):
-        return "CNY"
-    if ticker.endswith(".L"):
-        return "GBP"
-    if ticker.endswith(".AX"):
-        return "AUD"
-    if ticker.endswith(".TO"):
-        return "CAD"
-    if ticker.endswith((".DE", ".F", ".PA", ".AS", ".MI", ".MC")):
-        return "EUR"
-    return "USD"
 
 
 async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = "1d") -> dict:

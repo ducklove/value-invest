@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,3 +65,17 @@ def test_deploy_gates_block_bad_deploys():
 
     assert "wait_for_healthz" in deploy
     assert 'git reset --hard "$OLD_SHA"' in deploy
+
+
+def test_repositories_do_not_import_service_layer():
+    violations: list[str] = []
+    for path in (ROOT / "repositories").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".", 1)[0] == "services":
+                violations.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".", 1)[0] == "services":
+                        violations.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert violations == []

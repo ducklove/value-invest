@@ -63,3 +63,23 @@ NATION_TO_FX: dict[str, str] = {
 
 # FX codes quoted per 100 units rather than per 1.
 FX_UNIT: dict[str, int] = {"FX_JPYKRW": 100, "FX_VNDKRW": 100}
+
+
+def infer_yf_currency(ticker: str) -> str:
+    """Infer Yahoo Finance quote currency from an exchange suffix."""
+    ticker = (ticker or "").upper()
+    if ticker.endswith(".T"):
+        return "JPY"
+    if ticker.endswith(".HK"):
+        return "HKD"
+    if ticker.endswith((".SS", ".SZ")):
+        return "CNY"
+    if ticker.endswith(".L"):
+        return "GBP"
+    if ticker.endswith(".AX"):
+        return "AUD"
+    if ticker.endswith(".TO"):
+        return "CAD"
+    if ticker.endswith((".DE", ".F", ".PA", ".AS", ".MI", ".MC")):
+        return "EUR"
+    return "USD"

@@ -38,6 +38,7 @@ from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.market.formatting import format_indicator_change as _market_summary_change
 from services.portfolio import quote_service
 
 logger = logging.getLogger(__name__)
@@ -219,19 +220,6 @@ MARKET_SUMMARY_LABELS = {
 
 def _market_summary_label(code: str, item: dict) -> str:
     return MARKET_SUMMARY_LABELS.get(code) or item.get("label") or code
-
-
-def _market_summary_change(item: dict) -> str:
-    raw = str(item.get("change_pct") or item.get("change") or "").strip()
-    if not raw:
-        return ""
-    raw = raw.removeprefix("up").removeprefix("down").strip()
-    direction = str(item.get("direction") or "").strip().lower()
-    if direction == "up":
-        return f"▲{raw.lstrip('+-')}"
-    if direction == "down":
-        return f"▼{raw.lstrip('+-')}"
-    return raw
 
 
 async def market_summary_lines() -> list[str]:

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 import auth_service
+from core.rate_limit import client_identity as _client_rate_identity
 from deps import (
     SESSION_COOKIE_NAME,
     TRUSTED_RETURN_ORIGINS,
@@ -50,18 +51,6 @@ def _json_for_inline_script(value: str) -> str:
         .replace("\u2028", "\\u2028")
         .replace("\u2029", "\\u2029")
     )
-
-
-def _client_rate_identity(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    if forwarded_for:
-        first_forwarded = forwarded_for.split(",", 1)[0].strip()
-        if first_forwarded:
-            return first_forwarded
-    real_ip = request.headers.get("x-real-ip", "").strip()
-    if real_ip:
-        return real_ip
-    return request.client.host if request.client else "unknown"
 
 
 def _auth_rate_keys(request: Request, email: str | None = None) -> tuple[str, ...]:

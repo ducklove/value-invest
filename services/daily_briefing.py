@@ -37,6 +37,7 @@ from repositories import snapshots as snapshots_repo
 from repositories import user_settings as user_settings_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.market.formatting import format_indicator_change as _indicator_change_text
 from services.notifications import channels
 from services.portfolio import ai_analysis, time_windows
 
@@ -432,19 +433,6 @@ def _overseas_group_performance(rows: list[dict]) -> list[dict]:
 async def _fetch_overseas_groups(google_sub: str) -> list[dict]:
     rows = await snapshots_repo.get_group_weight_history(google_sub)
     return _overseas_group_performance(rows)
-
-
-def _indicator_change_text(item: dict) -> str:
-    raw = str(item.get("change_pct") or item.get("change") or "").strip()
-    if not raw:
-        return ""
-    raw = raw.removeprefix("up").removeprefix("down").strip()
-    direction = str(item.get("direction") or "").strip().lower()
-    if direction == "up":
-        return f"▲{raw.lstrip('+-')}"
-    if direction == "down":
-        return f"▼{raw.lstrip('+-')}"
-    return raw
 
 
 def _format_domestic_index(code: str, item: dict | None) -> str | None:

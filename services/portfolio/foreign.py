@@ -48,6 +48,10 @@ from services.portfolio.identifiers import (
 
 logger = logging.getLogger(__name__)
 
+# Backward-compatible module export; the rule itself lives with the other
+# currency mappings so history and quote paths cannot drift apart.
+infer_yf_currency = currencies.infer_yf_currency
+
 
 _SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "CRYPTO_BTC": "비트코인", "CRYPTO_ETH": "이더리움", "CRYPTO_USDT": "테더"}
 
@@ -439,25 +443,6 @@ async def yfinance_fetch_quote(ticker: str) -> dict:
         logger.warning("yfinance 시세 조회 실패(%s): %s", ticker, exc)
         yf_mark_failed(ticker)
         return {}
-
-
-def infer_yf_currency(ticker: str) -> str:
-    ticker = (ticker or "").upper()
-    if ticker.endswith(".T"):
-        return "JPY"
-    if ticker.endswith(".HK"):
-        return "HKD"
-    if ticker.endswith(".SS") or ticker.endswith(".SZ"):
-        return "CNY"
-    if ticker.endswith(".L"):
-        return "GBP"
-    if ticker.endswith(".AX"):
-        return "AUD"
-    if ticker.endswith(".TO"):
-        return "CAD"
-    if ticker.endswith((".DE", ".F", ".PA", ".AS", ".MI", ".MC")):
-        return "EUR"
-    return "USD"
 
 
 def yfinance_direct_ticker(code: str) -> str:

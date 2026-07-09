@@ -13,10 +13,10 @@ from datetime import datetime
 
 import aiosqlite
 
+from domain.portfolio_codes import is_korean_stock as _is_portfolio_korean_stock
 from repositories import accounts as accounts_repo
 from repositories import db as db_module
 from repositories.db import get_db, transaction
-from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
 _DEFAULT_GROUPS = [
     ("한국주식", 0, 1, "kr"),

@@ -22,7 +22,7 @@ select = ["F", "E9", "I"]
 # 정보성 도구로 운영 — repositories/·core/ 를 우선 대상으로 잡고, 위반을
 # 점진적으로 줄인 뒤 strict 게이트로 전환한다.
 # pyright 가 설치되지 않은 환경에서는 이 설정이 무시된다(게이트 아님).
-include = ["core", "repositories"]
+include = ["core", "domain", "repositories"]
 exclude = [
     "**/__pycache__",
     "**/.venv",
