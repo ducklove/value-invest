@@ -8,7 +8,6 @@ it is exposed to the UI.
 
 from __future__ import annotations
 
-
 ASSET_CATEGORIES = {
     "real_estate": {"label": "부동산", "kind": "asset", "retirement_default": False},
     "cash": {"label": "현금·예적금", "kind": "asset", "retirement_default": True},

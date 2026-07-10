@@ -6,7 +6,6 @@ from datetime import datetime
 
 from repositories import db as db_repo
 
-
 # Repository layer deliberately stays below services (dependency policy).  The
 # values mirror the schema defaults; the service owns source labels/metadata.
 _DEFAULT_RETIREMENT_PROFILE = {

@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import unittest
 
+from _harness import TempDbMixin, seed_user
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from _harness import TempDbMixin, seed_user
 from core.app_factory import create_app
 from repositories import household_assets as household_repo
 from routes.household_assets import normalize_payload
 from services.household_assets import RETIREMENT_REFERENCE, WEALTH_DISTRIBUTION, reference_payload
-
 
 SUB = "household-user"
 
