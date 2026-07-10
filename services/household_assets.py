@@ -71,7 +71,17 @@ WEALTH_DISTRIBUTION = {
         "scale": 512_396_544.4154327,
         "calibration": "official P80, P90 and top-quintile mean",
     },
-    "source_url": "https://mods.go.kr/board.es?act=view&bid=215&list_no=439535&mid=a10301010000",
+    # Appendix tables 2-4, all-household averages.  Shares use total assets as
+    # the denominator, so financial + real estate + other physical = 100%.
+    "asset_composition": {
+        "total_assets": 566_775_030,
+        "financial_assets": {"amount": 136_898_461, "share_pct": 24.15},
+        "real_estate": {"amount": 402_983_360, "share_pct": 71.10},
+        "other_physical_assets": {"amount": 26_893_209, "share_pct": 4.74},
+        "as_of": "2025-03-31",
+        "source_note": "부록 통계표 2~4의 전체가구 평균",
+    },
+    "source_url": "https://www.mods.go.kr/board.es?act=view&bid=215&list_no=439535&mid=a10301040300",
     "source_note": "부록 통계표 12의 2025년 순자산 분위 경계값",
 }
 
@@ -101,6 +111,12 @@ def reference_payload() -> dict:
             **WEALTH_DISTRIBUTION,
             "official_percentiles": [dict(row) for row in WEALTH_DISTRIBUTION["official_percentiles"]],
             "estimated_tail": dict(WEALTH_DISTRIBUTION["estimated_tail"]),
+            "asset_composition": {
+                **WEALTH_DISTRIBUTION["asset_composition"],
+                "financial_assets": dict(WEALTH_DISTRIBUTION["asset_composition"]["financial_assets"]),
+                "real_estate": dict(WEALTH_DISTRIBUTION["asset_composition"]["real_estate"]),
+                "other_physical_assets": dict(WEALTH_DISTRIBUTION["asset_composition"]["other_physical_assets"]),
+            },
         },
         "retirement_reference": {
             **RETIREMENT_REFERENCE,

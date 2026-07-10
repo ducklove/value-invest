@@ -634,13 +634,19 @@ function trackEvent(name, params = {}) {
                 <span class="pf-hh-eyebrow">전국 가구 비교</span>
                 <h3>내 순자산은 상위 몇 %일까?</h3>
               </div>
-              <div id="pfHouseholdRankBadge" class="pf-hh-rank-badge">계산 중</div>
+              <div class="pf-hh-wealth-head-actions">
+                <div id="pfHouseholdWealthViewToggle" class="pf-hh-wealth-toggle" role="group" aria-label="자산분포 보기 범위">
+                  <button type="button" data-view="overview" onclick="pfHouseholdSetWealthView('overview')">전체 분포</button>
+                  <button type="button" data-view="top1" onclick="pfHouseholdSetWealthView('top1')">상위 1% 확대</button>
+                </div>
+                <div id="pfHouseholdRankBadge" class="pf-hh-rank-badge">계산 중</div>
+              </div>
             </div>
             <div id="pfHouseholdWealthChart" class="pf-hh-wealth-chart"></div>
             <div id="pfHouseholdThresholds" class="pf-hh-thresholds"></div>
             <p class="pf-hh-footnote">
               공식 백분위 경계는 국가데이터처 <a id="pfHouseholdWealthSource" href="#" target="_blank" rel="noopener">가계금융복지조사</a> 기준입니다.
-              분위 사이와 상위 10% 내부 위치는 공식 경계값을 이용한 추정치이며, 표본조사·자산가격 시차로 실제 위치와 다를 수 있습니다.
+              분위 사이와 상위 10% 내부 위치(상위 1% 확대 포함)는 공식 경계값을 이용한 추정치이며, 표본조사·자산가격 시차로 실제 위치와 다를 수 있습니다.
             </p>
           </article>
 
@@ -648,7 +654,7 @@ function trackEvent(name, params = {}) {
             <div class="pf-hh-card-head">
               <div>
                 <span class="pf-hh-eyebrow">BALANCE</span>
-                <h3>자산 구성과 부채 부담</h3>
+                <h3>자산군 비중과 부채 부담</h3>
               </div>
             </div>
             <div id="pfHouseholdMix"></div>
@@ -694,16 +700,16 @@ function trackEvent(name, params = {}) {
                 <input id="pfHrPlanToAge" type="number" min="50" max="110" oninput="pfHouseholdRetirementChanged()">
               </label>
               <label>월 노후생활비
-                <div class="pf-hh-input-unit"><input id="pfHrMonthlySpending" type="number" min="0" step="10000" oninput="pfHouseholdRetirementChanged()"><span>원</span></div>
+                <div class="pf-hh-input-unit"><input id="pfHrMonthlySpending" class="pf-hh-money-input" type="text" inputmode="numeric" autocomplete="off" oninput="pfHouseholdMoneyInputChanged(this)"><span>원</span></div>
               </label>
               <label>월 공적연금 예상액
-                <div class="pf-hh-input-unit"><input id="pfHrPublicPension" type="number" min="0" step="10000" oninput="pfHouseholdRetirementChanged()"><span>원</span></div>
+                <div class="pf-hh-input-unit"><input id="pfHrPublicPension" class="pf-hh-money-input" type="text" inputmode="numeric" autocomplete="off" oninput="pfHouseholdMoneyInputChanged(this)"><span>원</span></div>
               </label>
               <label>월 기타 노후소득
-                <div class="pf-hh-input-unit"><input id="pfHrOtherIncome" type="number" min="0" step="10000" oninput="pfHouseholdRetirementChanged()"><span>원</span></div>
+                <div class="pf-hh-input-unit"><input id="pfHrOtherIncome" class="pf-hh-money-input" type="text" inputmode="numeric" autocomplete="off" oninput="pfHouseholdMoneyInputChanged(this)"><span>원</span></div>
               </label>
               <label>은퇴 전 월 추가저축
-                <div class="pf-hh-input-unit"><input id="pfHrContribution" type="number" min="0" step="10000" oninput="pfHouseholdRetirementChanged()"><span>원</span></div>
+                <div class="pf-hh-input-unit"><input id="pfHrContribution" class="pf-hh-money-input" type="text" inputmode="numeric" autocomplete="off" oninput="pfHouseholdMoneyInputChanged(this)"><span>원</span></div>
               </label>
               <label>연 기대수익률
                 <div class="pf-hh-input-unit"><input id="pfHrReturn" type="number" min="-10" max="30" step="0.1" oninput="pfHouseholdRetirementChanged()"><span>%</span></div>

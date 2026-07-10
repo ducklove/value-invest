@@ -9,6 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..');
 const householdSrc = readFileSync(join(root, 'static', 'js', 'portfolio-household.js'), 'utf8');
 const performanceSrc = readFileSync(join(root, 'static', 'js', 'portfolio-performance.js'), 'utf8');
+const indexSrc = readFileSync(join(root, 'static', 'index.html'), 'utf8');
 
 const distribution = {
   official_percentiles: [
@@ -50,6 +51,37 @@ test('official percentile points and the estimated upper tail round-trip', () =>
   assert.ok(Math.abs(w.pfHouseholdEstimatePercentile(p95Amount, distribution) - 95) < 0.001);
   assert.equal(w._pfHouseholdOfficialBracket(800_000_000, distribution), '상위 10~20% 구간');
   assert.equal(w._pfHouseholdOfficialBracket(1_200_000_000, distribution), '상위 10% 이내');
+});
+
+test('top-one-percent milestones expose the upper tail through top 0.01%', () => {
+  const w = householdWindow();
+  const milestones = w._pfHouseholdTopMilestones(distribution);
+
+  assert.deepEqual(Array.from(milestones, item => item.topShare), [1, 0.5, 0.1, 0.05, 0.01]);
+  assert.ok(milestones[0].amount > 3_550_000_000 && milestones[0].amount < 3_570_000_000);
+  assert.ok(milestones[2].amount > 9_440_000_000 && milestones[2].amount < 9_480_000_000);
+  assert.ok(milestones[4].amount > 23_600_000_000 && milestones[4].amount < 23_650_000_000);
+  for (const item of milestones) {
+    assert.ok(Math.abs(w.pfHouseholdEstimatePercentile(item.amount, distribution) - item.percentile) < 0.001);
+  }
+  assert.equal(w._pfHouseholdRankText(99.9), '추정 상위 0.1%');
+  assert.equal(w._pfHouseholdRankText(99.95), '추정 상위 0.05%');
+});
+
+test('retirement money inputs format thousands separators and still parse numerically', () => {
+  const w = householdWindow();
+  const input = w.document.createElement('input');
+  input.id = 'pfHrMonthlySpending';
+  input.value = '2981000';
+  w.document.body.appendChild(input);
+  input.setSelectionRange(7, 7);
+
+  w.pfHouseholdMoneyInputChanged(input);
+
+  assert.equal(input.value, '2,981,000');
+  assert.equal(w._pfHouseholdFormNumber('pfHrMonthlySpending'), 2_981_000);
+  assert.match(indexSrc, /id="pfHrMonthlySpending"[^>]+type="text"[^>]+inputmode="numeric"/);
+  assert.match(indexSrc, /id="pfHrPublicPension"[^>]+type="text"[^>]+inputmode="numeric"/);
 });
 
 test('retirement calculator improves when monthly contributions are added', () => {

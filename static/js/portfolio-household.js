@@ -15,6 +15,7 @@ const PfHousehold = {
   retirementReference: null,
   portfolioValue: 0,
   updatedAt: null,
+  wealthView: null,
 };
 
 const PF_HH_COLORS = {
@@ -72,12 +73,19 @@ function _pfHouseholdSummaryData() {
       if (item.retirement_eligible) retirementCapital += amount;
     }
   }
+  const broadAssets = {
+    financial: (byCategory.portfolio || 0) + (byCategory.cash || 0)
+      + (byCategory.pension || 0) + (byCategory.insurance || 0),
+    realEstate: byCategory.real_estate || 0,
+    other: (byCategory.business || 0) + (byCategory.vehicle || 0) + (byCategory.other || 0),
+  };
   return {
     assets,
     liabilities,
     netWorth: assets - liabilities,
     retirementCapital,
     byCategory,
+    broadAssets,
     debtRatio: assets > 0 ? liabilities / assets * 100 : 0,
   };
 }
@@ -128,7 +136,7 @@ function pfHouseholdEstimatePercentile(value, distribution = PfHousehold.distrib
 }
 
 function _pfHouseholdQuantile(percentile, distribution = PfHousehold.distribution) {
-  const p = Math.max(0, Math.min(99.9, Number(percentile || 0)));
+  const p = Math.max(0, Math.min(99.99, Number(percentile || 0)));
   const points = distribution?.official_percentiles || [];
   if (!points.length || p <= 0) return 0;
   if (p <= points[0].percentile) return points[0].amount * p / points[0].percentile;
@@ -154,11 +162,19 @@ function _pfHouseholdQuantile(percentile, distribution = PfHousehold.distributio
   return points[points.length - 1].amount;
 }
 
+function _pfHouseholdTopMilestones(distribution = PfHousehold.distribution) {
+  return [1, 0.5, 0.1, 0.05, 0.01].map(topShare => ({
+    topShare,
+    percentile: 100 - topShare,
+    amount: _pfHouseholdQuantile(100 - topShare, distribution),
+  }));
+}
+
 function _pfHouseholdRankText(percentile) {
   if (percentile <= 0) return '순자산 입력 필요';
   const top = Math.max(0.01, 100 - percentile);
-  if (top < 0.1) return '추정 상위 0.1% 이내';
-  if (top < 1) return `추정 상위 ${top.toFixed(1)}%`;
+  if (top <= 0.01) return '추정 상위 0.01% 이내';
+  if (top < 1) return `추정 상위 ${top.toFixed(2).replace(/0$/, '')}%`;
   return `추정 상위 ${top.toFixed(top < 10 ? 1 : 0)}%`;
 }
 
@@ -173,16 +189,7 @@ function _pfHouseholdRenderSummary(summary) {
     <article><span>전국 위치</span><strong>${escapeHtml(_pfHouseholdRankText(percentile))}</strong><small>${escapeHtml(_pfHouseholdOfficialBracket(summary.netWorth))} · 가구 기준</small></article>`;
 }
 
-function _pfHouseholdRenderWealth(summary) {
-  const chart = document.getElementById('pfHouseholdWealthChart');
-  const badge = document.getElementById('pfHouseholdRankBadge');
-  const thresholds = document.getElementById('pfHouseholdThresholds');
-  const distribution = PfHousehold.distribution;
-  if (!chart || !badge || !thresholds || !distribution) return;
-  const percentile = pfHouseholdEstimatePercentile(summary.netWorth, distribution);
-  badge.textContent = _pfHouseholdRankText(percentile);
-  badge.dataset.tone = percentile >= 90 ? 'top' : percentile >= 50 ? 'middle' : 'base';
-
+function _pfHouseholdOverviewWealthMarkup(summary, percentile, distribution) {
   const width = 760, height = 274, left = 54, right = 734, top = 18, bottom = 220;
   const x = p => left + (right - left) * p / 100;
   const userValue = Math.max(0, summary.netWorth);
@@ -208,7 +215,7 @@ function _pfHouseholdRenderWealth(summary) {
   const xTicks = [0, 20, 40, 60, 80, 90, 100].map(p =>
     `<text x="${x(p)}" y="${bottom + 24}" text-anchor="middle" class="pf-hh-chart-axis">P${p}</text>`
   ).join('');
-  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="전국 가구 순자산 백분위 곡선에서 우리 가구의 위치">
+  const chart = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="전국 가구 순자산 백분위 곡선에서 우리 가구의 위치">
     <defs><linearGradient id="pfHhWealthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f46e5" stop-opacity=".34"/><stop offset="1" stop-color="#4f46e5" stop-opacity=".02"/></linearGradient></defs>
     ${grids}<path d="${areaPath}" fill="url(#pfHhWealthFill)"/><path d="${linePath}" class="pf-hh-wealth-line"/>
     ${officialDots}${xTicks}
@@ -218,11 +225,88 @@ function _pfHouseholdRenderWealth(summary) {
   </svg>`;
 
   const lookup = p => distribution.official_percentiles.find(row => row.percentile === p)?.amount || 0;
-  thresholds.innerHTML = `
+  const thresholds = `
     <div><span>중위 가구 P50</span><strong>${_pfHouseholdMoney(lookup(50))}</strong></div>
     <div><span>상위 20% 진입 P80</span><strong>${_pfHouseholdMoney(lookup(80))}</strong></div>
     <div><span>상위 10% 진입 P90</span><strong>${_pfHouseholdMoney(lookup(90))}</strong></div>
     <div><span>조사 기준</span><strong>${escapeHtml(distribution.as_of)} 현재</strong></div>`;
+  return { chart, thresholds };
+}
+
+function _pfHouseholdTopOneWealthMarkup(summary, percentile, distribution) {
+  const milestones = _pfHouseholdTopMilestones(distribution);
+  const width = 760, height = 274, left = 72, right = 730, top = 20, bottom = 218;
+  const minValue = milestones[0].amount;
+  const maxValue = milestones[milestones.length - 1].amount;
+  const x = topShare => left + (right - left) * Math.log10(1 / Math.max(0.01, Math.min(1, topShare))) / 2;
+  const y = value => {
+    const clamped = Math.max(minValue, Math.min(maxValue, Number(value || 0)));
+    const ratio = (Math.log(clamped) - Math.log(minValue)) / (Math.log(maxValue) - Math.log(minValue));
+    return bottom - (bottom - top) * ratio;
+  };
+  const curvePoints = [];
+  for (let step = 0; step <= 80; step += 1) {
+    const topShare = Math.pow(10, -2 * step / 80);
+    curvePoints.push([x(topShare), y(_pfHouseholdQuantile(100 - topShare, distribution))]);
+  }
+  const linePath = curvePoints.map((point, index) => `${index ? 'L' : 'M'}${point[0].toFixed(1)},${point[1].toFixed(1)}`).join(' ');
+  const areaPath = `${linePath} L${right},${bottom} L${left},${bottom} Z`;
+  const actualTopShare = Math.max(0.01, 100 - percentile);
+  const markerTopShare = Math.max(0.01, Math.min(1, actualTopShare));
+  const markerValue = Math.max(minValue, Math.min(maxValue, Number(summary.netWorth || 0)));
+  const markerX = x(markerTopShare);
+  const markerY = y(markerValue);
+  const grids = milestones.map(item => `<line x1="${left}" x2="${right}" y1="${y(item.amount)}" y2="${y(item.amount)}" class="pf-hh-chart-grid" />
+    <text x="${left - 9}" y="${y(item.amount) + 4}" text-anchor="end" class="pf-hh-chart-axis">${escapeHtml(_pfHouseholdMoney(item.amount).replace('원', ''))}</text>`).join('');
+  const ticks = milestones.map(item => `<line x1="${x(item.topShare)}" x2="${x(item.topShare)}" y1="${top}" y2="${bottom}" class="pf-hh-top1-guide" />
+    <circle cx="${x(item.topShare)}" cy="${y(item.amount)}" r="3" class="pf-hh-estimated-dot"><title>추정 상위 ${item.topShare}% 경계 ${_pfHouseholdMoney(item.amount)}</title></circle>
+    <text x="${x(item.topShare)}" y="${bottom + 24}" text-anchor="middle" class="pf-hh-chart-axis">상위 ${item.topShare}%</text>`).join('');
+  const label = actualTopShare <= 0.01 ? '상위 0.01% 이내' : `상위 ${actualTopShare.toFixed(2).replace(/0$/, '')}%`;
+  const next = milestones.find(item => item.topShare < actualTopShare - 1e-8);
+  const insight = next
+    ? `<strong>다음 기준: 추정 상위 ${next.topShare}%</strong><span>${_pfHouseholdMoney(Math.max(0, next.amount - summary.netWorth))} 더 필요 · 경계 ${_pfHouseholdMoney(next.amount)}</span>`
+    : '<strong>확대 범위의 최상단입니다</strong><span>추정 상위 0.01%보다 더 세밀한 구간은 표시하지 않습니다.</span>';
+  const chart = `<div class="pf-hh-top1-insight"><div><small>현재 위치</small><b>${escapeHtml(label)}</b></div><div>${insight}</div></div>
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="추정 상위 1퍼센트부터 0.01퍼센트까지 확대 순자산 분포에서 우리 가구의 위치">
+      <defs><linearGradient id="pfHhTopOneFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7c3aed" stop-opacity=".32"/><stop offset="1" stop-color="#7c3aed" stop-opacity=".02"/></linearGradient></defs>
+      ${grids}${ticks}<path d="${areaPath}" fill="url(#pfHhTopOneFill)"/><path d="${linePath}" class="pf-hh-wealth-line pf-hh-top1-line"/>
+      <line x1="${markerX}" x2="${markerX}" y1="${markerY}" y2="${bottom}" class="pf-hh-user-line"/>
+      <circle cx="${markerX}" cy="${markerY}" r="7" class="pf-hh-user-dot"><title>내 순자산 ${_pfHouseholdMoney(summary.netWorth)}</title></circle>
+      <g transform="translate(${Math.min(right - 138, Math.max(left + 4, markerX - 66))},${Math.max(top + 4, markerY - 42)})"><rect width="132" height="30" rx="15" class="pf-hh-user-label-bg"/><text x="66" y="20" text-anchor="middle" class="pf-hh-user-label">내 위치 ${escapeHtml(label)}</text></g>
+    </svg>`;
+  const thresholds = milestones.map(item => `<div><span>추정 상위 ${item.topShare}% 경계</span><strong>${_pfHouseholdMoney(item.amount)}</strong></div>`).join('');
+  return { chart, thresholds };
+}
+
+function pfHouseholdSetWealthView(view) {
+  if (!['overview', 'top1'].includes(view)) return;
+  PfHousehold.wealthView = view;
+  if (PfHousehold.loaded) _pfHouseholdRenderWealth(_pfHouseholdSummaryData());
+}
+
+function _pfHouseholdRenderWealth(summary) {
+  const chart = document.getElementById('pfHouseholdWealthChart');
+  const badge = document.getElementById('pfHouseholdRankBadge');
+  const thresholds = document.getElementById('pfHouseholdThresholds');
+  const toggle = document.getElementById('pfHouseholdWealthViewToggle');
+  const distribution = PfHousehold.distribution;
+  if (!chart || !badge || !thresholds || !distribution) return;
+  const percentile = pfHouseholdEstimatePercentile(summary.netWorth, distribution);
+  badge.textContent = _pfHouseholdRankText(percentile);
+  badge.dataset.tone = percentile >= 90 ? 'top' : percentile >= 50 ? 'middle' : 'base';
+  if (!PfHousehold.wealthView) PfHousehold.wealthView = percentile >= 99 ? 'top1' : 'overview';
+  toggle?.querySelectorAll('button').forEach(button => {
+    const active = button.dataset.view === PfHousehold.wealthView;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  const markup = PfHousehold.wealthView === 'top1'
+    ? _pfHouseholdTopOneWealthMarkup(summary, percentile, distribution)
+    : _pfHouseholdOverviewWealthMarkup(summary, percentile, distribution);
+  chart.dataset.view = PfHousehold.wealthView;
+  thresholds.dataset.view = PfHousehold.wealthView;
+  chart.innerHTML = markup.chart;
+  thresholds.innerHTML = markup.thresholds;
 }
 
 function _pfHouseholdRenderMix(summary) {
@@ -247,10 +331,27 @@ function _pfHouseholdRenderMix(summary) {
   const legend = parts.length ? parts.map(part => `
     <div class="pf-hh-mix-row"><span class="pf-hh-mix-dot" style="background:${part.color}"></span><span>${escapeHtml(part.label)}</span><strong>${_pfHouseholdMoney(part.amount)}</strong><em>${summary.assets > 0 ? (part.amount / summary.assets * 100).toFixed(1) : '0.0'}%</em></div>`).join('')
     : '<div class="pf-risk-empty">자산을 입력하면 구성이 표시됩니다.</div>';
-  root.innerHTML = `<div class="pf-hh-donut-wrap">
+  const official = PfHousehold.distribution?.asset_composition;
+  const broadRows = [
+    { key: 'financial', label: '금융자산', color: PF_HH_COLORS.portfolio, national: Number(official?.financial_assets?.share_pct || 0) },
+    { key: 'realEstate', label: '부동산', color: PF_HH_COLORS.real_estate, national: Number(official?.real_estate?.share_pct || 0) },
+    { key: 'other', label: '기타 실물자산', color: PF_HH_COLORS.business, national: Number(official?.other_physical_assets?.share_pct || 0) },
+  ];
+  const broadComparison = official ? broadRows.map(row => {
+    const mine = summary.assets > 0 ? Number(summary.broadAssets?.[row.key] || 0) / summary.assets * 100 : 0;
+    const delta = mine - row.national;
+    return `<div class="pf-hh-broad-row">
+      <div><span><i style="background:${row.color}"></i>${escapeHtml(row.label)}</span><strong>내 비중 ${mine.toFixed(1)}%</strong><em>전국 ${row.national.toFixed(1)}% · ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%p</em></div>
+      <div class="pf-hh-broad-track"><i style="width:${Math.min(100, mine)}%;background:${row.color}"></i><b style="left:${Math.min(100, row.national)}%" title="전국 평균 ${row.national.toFixed(1)}%"></b></div>
+    </div>`;
+  }).join('') : '<div class="pf-risk-empty">전국 자산구성 자료가 없습니다.</div>';
+  const sourceUrl = PfHousehold.distribution?.source_url || '#';
+  root.innerHTML = `<div class="pf-hh-broad-compare"><div class="pf-hh-broad-title"><strong>내 자산군 vs 전국 평균</strong><span>총자산 기준 · ${escapeHtml(official?.as_of || '')}</span></div>${broadComparison}
+      <p><i></i>막대는 내 비중, 세로선은 전국 평균 · <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">2025 가계금융복지조사</a></p></div>
+    <div class="pf-hh-mix-body"><div class="pf-hh-donut-wrap">
       <div class="pf-hh-donut" style="background:${segments.length ? `conic-gradient(${segments.join(',')})` : 'var(--border)'}"><div><strong>${_pfHouseholdMoney(summary.netWorth)}</strong><span>순자산</span></div></div>
       <div class="pf-hh-debt-meter"><span><b>부채비율</b><strong>${summary.debtRatio.toFixed(1)}%</strong></span><div><i style="width:${Math.min(100, summary.debtRatio)}%"></i></div></div>
-    </div><div class="pf-hh-mix-list">${legend}</div>`;
+    </div><div class="pf-hh-mix-list">${legend}</div></div>`;
 }
 
 function _pfHouseholdCategoryOptions(selected) {
@@ -346,6 +447,33 @@ function pfHouseholdNormalizeAmount(input, index) {
   input.value = amount.toLocaleString('ko-KR');
 }
 
+const PF_HH_RETIREMENT_MONEY_IDS = new Set([
+  'pfHrMonthlySpending', 'pfHrPublicPension', 'pfHrOtherIncome', 'pfHrContribution',
+]);
+
+function _pfHouseholdFormatInteger(value) {
+  const digits = String(value ?? '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  return digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '';
+}
+
+function pfHouseholdMoneyInputChanged(input) {
+  if (!input) return;
+  const raw = String(input.value || '');
+  const selection = input.selectionStart;
+  const digitsBeforeCursor = selection === null ? null : raw.slice(0, selection).replace(/\D/g, '').length;
+  input.value = _pfHouseholdFormatInteger(raw);
+  if (digitsBeforeCursor !== null && typeof input.setSelectionRange === 'function') {
+    let cursor = 0;
+    let seen = 0;
+    while (cursor < input.value.length && seen < digitsBeforeCursor) {
+      if (/\d/.test(input.value[cursor])) seen += 1;
+      cursor += 1;
+    }
+    input.setSelectionRange(cursor, cursor);
+  }
+  pfHouseholdRetirementChanged();
+}
+
 function _pfHouseholdFillRetirementForm() {
   const p = PfHousehold.retirement || {};
   const values = {
@@ -362,14 +490,16 @@ function _pfHouseholdFillRetirementForm() {
   };
   Object.entries(values).forEach(([id, value]) => {
     const input = document.getElementById(id);
-    if (input) input.value = value;
+    if (input) input.value = PF_HH_RETIREMENT_MONEY_IDS.has(id)
+      ? _pfHouseholdFormatInteger(value)
+      : value;
   });
 }
 
 function _pfHouseholdFormNumber(id, fallback = 0, nullable = false) {
   const raw = document.getElementById(id)?.value;
   if ((raw === '' || raw === undefined) && nullable) return null;
-  const number = Number(raw);
+  const number = Number(String(raw).replace(/,/g, ''));
   return Number.isFinite(number) ? number : fallback;
 }
 
@@ -396,7 +526,7 @@ function pfHouseholdApplyRetirementReference() {
   const amount = PfHousehold.retirementReference?.adequate_monthly_spending?.[type];
   const input = document.getElementById('pfHrMonthlySpending');
   if (!amount || !input) return;
-  input.value = amount;
+  input.value = _pfHouseholdFormatInteger(amount);
   pfHouseholdRetirementChanged();
   if (typeof showToast === 'function') showToast(`최신 적정 노후생활비 ${_pfHouseholdMoney(amount)}을 적용했습니다.`, 'success');
 }

@@ -118,6 +118,11 @@ class HouseholdAssetsValidationTests(unittest.TestCase):
         self.assertEqual(points[80], 693_800_000)
         self.assertEqual(points[90], 1_100_200_000)
         self.assertEqual(WEALTH_DISTRIBUTION["as_of"], "2025-03-31")
+        composition = data["distribution"]["asset_composition"]
+        self.assertEqual(composition["financial_assets"]["amount"], 136_898_461)
+        self.assertAlmostEqual(composition["financial_assets"]["share_pct"], 24.15)
+        self.assertAlmostEqual(composition["real_estate"]["share_pct"], 71.10)
+        self.assertAlmostEqual(composition["other_physical_assets"]["share_pct"], 4.74)
         self.assertEqual(RETIREMENT_REFERENCE["adequate_monthly_spending"]["couple"], 2_981_000)
 
 

@@ -2636,6 +2636,7 @@ body.pf-compact-rows .pf-table tfoot td {
 #portfolioView.pf-household-active .pf-currency-toggle { display: none !important; }
 .pf-household-tab {
   --hh-indigo: #4f46e5;
+  --hh-purple: #7c3aed;
   --hh-teal: #0f766e;
   --hh-rose: #e11d48;
   max-width: 1480px;
@@ -2724,10 +2725,15 @@ body.pf-compact-rows .pf-table tfoot td {
 .pf-hh-summary-primary > strong { color: var(--hh-indigo) !important; }
 .pf-hh-grid { display: grid; gap: 14px; margin-bottom: 14px; }
 .pf-hh-grid-wealth { grid-template-columns: minmax(0, 1.6fr) minmax(320px, .9fr); }
-.pf-hh-card { border: 1px solid var(--border); border-radius: 17px; background: var(--surface); box-shadow: 0 10px 30px rgba(15, 23, 42, .045); }
+.pf-hh-card { min-width: 0; border: 1px solid var(--border); border-radius: 17px; background: var(--surface); box-shadow: 0 10px 30px rgba(15, 23, 42, .045); }
 .pf-hh-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px 22px 10px; }
 .pf-hh-card-head h3 { margin: 4px 0 0; font-size: 18px; letter-spacing: -.025em; }
 .pf-hh-card-head p { margin: 5px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.pf-hh-wealth-head-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 9px; }
+.pf-hh-wealth-toggle { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+.pf-hh-wealth-toggle button { padding: 6px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 10px; font-weight: 750; cursor: pointer; }
+.pf-hh-wealth-toggle button.active { background: var(--surface); color: var(--hh-indigo); box-shadow: 0 2px 8px rgba(15, 23, 42, .09); }
+.pf-hh-wealth-toggle button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .pf-hh-rank-badge { padding: 8px 12px; border-radius: 999px; background: var(--surface-muted); color: var(--text-secondary); font-size: 12px; font-weight: 800; white-space: nowrap; }
 .pf-hh-rank-badge[data-tone="top"] { background: color-mix(in srgb, var(--hh-indigo) 13%, var(--surface)); color: var(--hh-indigo); }
 .pf-hh-rank-badge[data-tone="middle"] { background: color-mix(in srgb, var(--hh-teal) 13%, var(--surface)); color: var(--hh-teal); }
@@ -2736,12 +2742,23 @@ body.pf-compact-rows .pf-table tfoot td {
 .pf-hh-chart-grid { stroke: color-mix(in srgb, var(--border) 72%, transparent); stroke-width: 1; stroke-dasharray: 3 5; }
 .pf-hh-chart-axis { fill: var(--text-secondary); font-size: 9px; }
 .pf-hh-wealth-line { fill: none; stroke: var(--hh-indigo); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.pf-hh-top1-line { stroke: var(--hh-purple); }
 .pf-hh-official-dot { fill: var(--surface); stroke: var(--hh-indigo); stroke-width: 2; }
+.pf-hh-estimated-dot { fill: var(--surface); stroke: var(--hh-purple); stroke-width: 2; }
+.pf-hh-top1-guide { stroke: color-mix(in srgb, var(--hh-purple) 20%, transparent); stroke-width: 1; stroke-dasharray: 2 6; }
 .pf-hh-user-line { stroke: var(--hh-rose); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .pf-hh-user-dot { fill: var(--hh-rose); stroke: var(--surface); stroke-width: 3; filter: drop-shadow(0 3px 5px rgba(225, 29, 72, .28)); }
 .pf-hh-user-label-bg { fill: var(--text); }
 .pf-hh-user-label { fill: var(--surface); font-size: 10px; font-weight: 800; }
+.pf-hh-top1-insight { display: grid; grid-template-columns: minmax(130px, .55fr) minmax(0, 1.45fr); gap: 12px; margin: 4px 20px 2px; }
+.pf-hh-top1-insight > div { min-width: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--hh-purple) 28%, var(--border)); border-radius: 11px; background: color-mix(in srgb, var(--hh-purple) 6%, var(--surface)); }
+.pf-hh-top1-insight small, .pf-hh-top1-insight b, .pf-hh-top1-insight strong, .pf-hh-top1-insight span { display: block; }
+.pf-hh-top1-insight small { color: var(--text-secondary); font-size: 9px; }
+.pf-hh-top1-insight b { margin-top: 3px; color: var(--hh-purple); font-size: 15px; }
+.pf-hh-top1-insight strong { font-size: 11px; }
+.pf-hh-top1-insight span { margin-top: 4px; color: var(--text-secondary); font-size: 9px; line-height: 1.45; }
 .pf-hh-thresholds { display: grid; grid-template-columns: repeat(4, 1fr); margin: 2px 22px 0; border-top: 1px solid var(--border); }
+.pf-hh-thresholds[data-view="top1"] { grid-template-columns: repeat(5, 1fr); }
 .pf-hh-thresholds div { padding: 12px 10px; border-right: 1px solid var(--border); }
 .pf-hh-thresholds div:last-child { border-right: 0; }
 .pf-hh-thresholds span, .pf-hh-thresholds strong { display: block; }
@@ -2749,7 +2766,24 @@ body.pf-compact-rows .pf-table tfoot td {
 .pf-hh-thresholds strong { margin-top: 4px; font-size: 12px; }
 .pf-hh-footnote { margin: 12px 22px 18px; color: var(--text-secondary); font-size: 10px; line-height: 1.55; }
 .pf-hh-footnote a { color: var(--primary); font-weight: 700; }
-#pfHouseholdMix { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; align-items: center; padding: 14px 20px 22px; }
+#pfHouseholdMix { padding: 10px 20px 22px; }
+.pf-hh-broad-compare { padding: 10px 12px 13px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--surface-muted) 56%, var(--surface)); }
+.pf-hh-broad-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.pf-hh-broad-title strong { font-size: 11px; }
+.pf-hh-broad-title span { color: var(--text-secondary); font-size: 8px; }
+.pf-hh-broad-row { padding: 7px 0; }
+.pf-hh-broad-row > div:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 7px; align-items: center; font-size: 9px; }
+.pf-hh-broad-row span { display: inline-flex; align-items: center; gap: 5px; font-weight: 750; }
+.pf-hh-broad-row span i { width: 7px; height: 7px; border-radius: 50%; }
+.pf-hh-broad-row strong { font-size: 9px; }
+.pf-hh-broad-row em { grid-column: 2; color: var(--text-secondary); font-size: 8px; font-style: normal; text-align: right; }
+.pf-hh-broad-track { position: relative; overflow: visible; height: 6px; margin-top: 5px; border-radius: 99px; background: var(--surface); }
+.pf-hh-broad-track i { display: block; height: 100%; border-radius: inherit; opacity: .82; }
+.pf-hh-broad-track b { position: absolute; top: -3px; width: 2px; height: 12px; transform: translateX(-1px); border-radius: 2px; background: var(--text); box-shadow: 0 0 0 1px var(--surface); }
+.pf-hh-broad-compare > p { margin: 6px 0 0; color: var(--text-secondary); font-size: 8px; line-height: 1.4; }
+.pf-hh-broad-compare > p > i { display: inline-block; width: 2px; height: 9px; margin-right: 5px; background: var(--text); vertical-align: -1px; }
+.pf-hh-broad-compare a { color: var(--primary); font-weight: 700; }
+.pf-hh-mix-body { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; align-items: center; margin-top: 12px; }
 .pf-hh-donut-wrap { display: grid; justify-items: center; gap: 18px; }
 .pf-hh-donut { display: grid; place-items: center; width: 132px; height: 132px; border-radius: 50%; }
 .pf-hh-donut > div { display: grid; place-items: center; width: 82px; height: 82px; padding: 8px; border-radius: 50%; background: var(--surface); text-align: center; }
@@ -2826,7 +2860,7 @@ body.pf-compact-rows .pf-table tfoot td {
 
 @media (max-width: 1120px) {
   .pf-hh-grid-wealth { grid-template-columns: 1fr; }
-  #pfHouseholdMix { grid-template-columns: 180px minmax(0, 1fr); }
+  .pf-hh-mix-body { grid-template-columns: 180px minmax(0, 1fr); }
   .pf-hh-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pf-hh-asset-head, .pf-hh-asset-row { grid-template-columns: 1fr 1.25fr .72fr 1fr .72fr 44px; }
   .pf-hh-retirement-layout { grid-template-columns: 1fr; }
@@ -2841,14 +2875,18 @@ body.pf-compact-rows .pf-table tfoot td {
   .pf-hh-summary article > strong { font-size: 17px; }
   .pf-hh-card { border-radius: 14px; }
   .pf-hh-card-head { align-items: stretch; flex-direction: column; padding: 17px 16px 9px; }
+  .pf-hh-wealth-head-actions { align-items: flex-start; }
   .pf-hh-rank-badge { align-self: flex-start; }
   .pf-hh-wealth-chart { min-height: 238px; padding: 0; overflow-x: auto; }
   .pf-hh-wealth-chart svg { width: 680px; height: 246px; }
-  .pf-hh-thresholds { grid-template-columns: repeat(2, 1fr); margin: 0 16px; }
-  .pf-hh-thresholds div:nth-child(2) { border-right: 0; }
-  .pf-hh-thresholds div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .pf-hh-thresholds, .pf-hh-thresholds[data-view="top1"] { grid-template-columns: repeat(2, 1fr); margin: 0 16px; }
+  .pf-hh-thresholds div { border-bottom: 1px solid var(--border); }
+  .pf-hh-thresholds div:nth-child(even) { border-right: 0; }
+  .pf-hh-thresholds div:last-child { border-right: 0; border-bottom: 0; }
+  .pf-hh-thresholds[data-view="top1"] div:last-child { grid-column: 1 / -1; }
   .pf-hh-footnote { margin: 12px 16px 16px; }
-  #pfHouseholdMix { grid-template-columns: 1fr; padding: 10px 16px 18px; }
+  #pfHouseholdMix { padding: 10px 16px 18px; }
+  .pf-hh-mix-body { grid-template-columns: 1fr; }
   .pf-hh-donut-wrap { grid-template-columns: 132px minmax(110px, 1fr); align-items: center; }
   .pf-hh-assets { padding: 3px 12px 16px; }
   .pf-hh-asset-head { display: none; }
