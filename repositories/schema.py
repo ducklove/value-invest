@@ -712,6 +712,41 @@ CREATE TABLE IF NOT EXISTS portfolio_accounts (
 );
 CREATE INDEX IF NOT EXISTS idx_portfolio_accounts_user
     ON portfolio_accounts(google_sub, sort_order);
+
+-- 가계 단위 통합 자산. 주식 포트폴리오는 실시간 평가액을 중복 저장하지
+-- 않고 프런트에서 자동 합산하며, 이 표에는 부동산·예적금·연금·부채 등
+-- 포트폴리오 밖의 자산만 보관한다.
+CREATE TABLE IF NOT EXISTS household_assets (
+    asset_id TEXT PRIMARY KEY,
+    google_sub TEXT NOT NULL,
+    category TEXT NOT NULL,
+    name TEXT NOT NULL,
+    owner TEXT NOT NULL DEFAULT 'household',
+    amount INTEGER NOT NULL DEFAULT 0,
+    retirement_eligible INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_household_assets_user
+    ON household_assets(google_sub, sort_order);
+
+CREATE TABLE IF NOT EXISTS household_retirement_profiles (
+    google_sub TEXT PRIMARY KEY,
+    household_type TEXT NOT NULL DEFAULT 'couple',
+    current_age INTEGER,
+    retirement_age INTEGER NOT NULL DEFAULT 65,
+    plan_to_age INTEGER NOT NULL DEFAULT 90,
+    monthly_spending INTEGER NOT NULL DEFAULT 2981000,
+    monthly_public_pension INTEGER NOT NULL DEFAULT 0,
+    monthly_other_income INTEGER NOT NULL DEFAULT 0,
+    monthly_contribution INTEGER NOT NULL DEFAULT 0,
+    annual_return_pct REAL NOT NULL DEFAULT 4.0,
+    inflation_pct REAL NOT NULL DEFAULT 2.0,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
+);
 """
 
 

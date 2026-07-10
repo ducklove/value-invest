@@ -112,7 +112,9 @@ function _pfApplySimpleMode(enabled, { persist = false } = {}) {
   const active = compactViewport && !!enabled;
   PfStore.prefs.simpleMode = active;
   document.body.classList.toggle('pf-mobile-simple', active);
-  if (active && typeof pfSwitchTab === 'function' && typeof pfActiveTab !== 'undefined' && pfActiveTab !== 'holdings') {
+  // 간편 모드에서는 무거운 심층 분석만 보유종목으로 되돌린다. 가계 자산
+  // 통합관리는 모바일 레이아웃을 따로 제공하므로 회전/리사이즈 때 유지한다.
+  if (active && typeof pfSwitchTab === 'function' && typeof pfActiveTab !== 'undefined' && pfActiveTab === 'performance') {
     pfSwitchTab('holdings');
   }
   if (persist) _pfSaveSimpleModePreference(active);

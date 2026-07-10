@@ -150,6 +150,7 @@ function renderPortfolio(options = {}) {
       empty.textContent = '포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.';
     }
     summary.innerHTML = '';
+    if (typeof pfHouseholdPortfolioValueChanged === 'function') pfHouseholdPortfolioValueChanged(0);
     return;
   }
 
@@ -525,6 +526,9 @@ function renderPortfolio(options = {}) {
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;
   _renderSummarySparklines(_l ? _liveNavValueKrw : null);
+  if (typeof pfHouseholdPortfolioValueChanged === 'function') {
+    pfHouseholdPortfolioValueChanged(grandTotalMarketValue);
+  }
   if (summaryOnly) return;
 
   // Table body — apply FX conversion to price columns

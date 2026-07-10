@@ -43,13 +43,23 @@ async function pfLoadGroupWeightHistory({ force = false } = {}) {
 }
 
 function pfSwitchTab(tab) {
+  if (!['holdings', 'performance', 'household'].includes(tab)) tab = 'holdings';
   pfActiveTab = tab;
-  document.querySelectorAll('.pf-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+  document.querySelectorAll('.pf-tab').forEach(btn => {
+    const active = btn.dataset.tab === tab;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
   const holdingsTab = document.getElementById('pfHoldingsTab');
   const performanceTab = document.getElementById('pfPerformanceTab');
+  const householdTab = document.getElementById('pfHouseholdTab');
   holdingsTab.style.display = tab === 'holdings' ? '' : 'none';
   performanceTab.style.display = tab === 'performance' ? '' : 'none';
-  const activeEl = tab === 'holdings' ? holdingsTab : performanceTab;
+  if (householdTab) householdTab.style.display = tab === 'household' ? '' : 'none';
+  const portfolioView = document.getElementById('portfolioView');
+  if (portfolioView) portfolioView.classList.toggle('pf-household-active', tab === 'household');
+  const activeEl = tab === 'holdings' ? holdingsTab : tab === 'performance' ? performanceTab : householdTab;
+  if (!activeEl) return;
   activeEl.classList.remove('fade-in');
   void activeEl.offsetWidth;
   activeEl.classList.add('fade-in');
@@ -67,6 +77,8 @@ function pfSwitchTab(tab) {
     if (typeof pfLoadDividendCalendarPanel === 'function') pfLoadDividendCalendarPanel();
     // 투자 일지 카드 동일 패턴(portfolio-journal.js).
     if (typeof pfLoadJournalPanel === 'function') pfLoadJournalPanel();
+  } else if (tab === 'household' && typeof pfLoadHouseholdAssets === 'function') {
+    pfLoadHouseholdAssets();
   }
 }
 

@@ -312,8 +312,9 @@ function trackEvent(name, params = {}) {
     </section>
 
     <div class="pf-tab-bar">
-      <button class="pf-tab active" data-tab="holdings" onclick="pfSwitchTab('holdings')">보유종목</button>
-      <button class="pf-tab" data-tab="performance" onclick="pfSwitchTab('performance')">심층 분석</button>
+      <button class="pf-tab active" data-tab="holdings" aria-controls="pfHoldingsTab" aria-selected="true" onclick="pfSwitchTab('holdings')">보유종목</button>
+      <button class="pf-tab" data-tab="performance" aria-controls="pfPerformanceTab" aria-selected="false" onclick="pfSwitchTab('performance')">심층 분석</button>
+      <button class="pf-tab" data-tab="household" aria-controls="pfHouseholdTab" aria-selected="false" onclick="pfSwitchTab('household')">자산 통합관리</button>
       <button class="pf-action-toggle" id="pfActionBoardToggle" type="button" aria-pressed="false" aria-controls="pfActionBoard" onclick="pfToggleActionBoard()" title="오늘의 투자 액션 보드 표시">액션</button>
       <button class="pf-simple-toggle" id="pfSimpleToggle" type="button" aria-pressed="false" onclick="pfToggleSimpleMode()" title="모바일 간편 보기">간편</button>
       <button class="pf-ws-toggle" id="pfWsToggle" type="button" aria-pressed="false" onclick="toggleQuoteWebSocket()" title="실시간 웹소켓 연결" hidden>웹소켓 연결</button>
@@ -608,6 +609,118 @@ function trackEvent(name, params = {}) {
       </div>
       </div>
     </div><!-- /pfPerformanceTab -->
+
+    <div id="pfHouseholdTab" class="pf-household-tab" style="display:none;">
+      <section class="pf-hh-hero">
+        <div>
+          <div class="pf-hh-kicker">HOUSEHOLD BALANCE SHEET</div>
+          <h2>우리 집 전체 자산을 한눈에</h2>
+          <p>투자 포트폴리오는 자동 합산하고, 부동산·여유자금·연금·부채를 더해 가구 순자산과 노후 준비 수준을 함께 봅니다.</p>
+        </div>
+        <div class="pf-hh-hero-actions">
+          <span id="pfHouseholdSaveStatus" class="pf-hh-save-status" role="status" aria-live="polite"></span>
+          <button class="pf-hh-primary-btn" id="pfHouseholdSaveBtn" type="button" onclick="pfSaveHouseholdAssets()">전체 저장</button>
+        </div>
+      </section>
+
+      <div id="pfHouseholdLoadState" class="pf-hh-load-state" role="status" aria-live="polite">자산 정보를 불러오는 중입니다.</div>
+      <div id="pfHouseholdContent" style="display:none;">
+        <section id="pfHouseholdSummary" class="pf-hh-summary" aria-label="가계 자산 요약"></section>
+
+        <section class="pf-hh-grid pf-hh-grid-wealth">
+          <article class="pf-hh-card pf-hh-wealth-card">
+            <div class="pf-hh-card-head">
+              <div>
+                <span class="pf-hh-eyebrow">전국 가구 비교</span>
+                <h3>내 순자산은 상위 몇 %일까?</h3>
+              </div>
+              <div id="pfHouseholdRankBadge" class="pf-hh-rank-badge">계산 중</div>
+            </div>
+            <div id="pfHouseholdWealthChart" class="pf-hh-wealth-chart"></div>
+            <div id="pfHouseholdThresholds" class="pf-hh-thresholds"></div>
+            <p class="pf-hh-footnote">
+              공식 백분위 경계는 국가데이터처 <a id="pfHouseholdWealthSource" href="#" target="_blank" rel="noopener">가계금융복지조사</a> 기준입니다.
+              분위 사이와 상위 10% 내부 위치는 공식 경계값을 이용한 추정치이며, 표본조사·자산가격 시차로 실제 위치와 다를 수 있습니다.
+            </p>
+          </article>
+
+          <article class="pf-hh-card pf-hh-mix-card">
+            <div class="pf-hh-card-head">
+              <div>
+                <span class="pf-hh-eyebrow">BALANCE</span>
+                <h3>자산 구성과 부채 부담</h3>
+              </div>
+            </div>
+            <div id="pfHouseholdMix"></div>
+          </article>
+        </section>
+
+        <section class="pf-hh-card pf-hh-assets-card">
+          <div class="pf-hh-card-head pf-hh-assets-head">
+            <div>
+              <span class="pf-hh-eyebrow">ASSET REGISTER</span>
+              <h3>포트폴리오 밖의 재산 입력</h3>
+              <p>시가 기준으로 입력하세요. ‘노후재원’을 켠 항목만 노후 준비자금에 포함됩니다.</p>
+            </div>
+            <button class="pf-hh-secondary-btn" type="button" onclick="pfHouseholdAddAsset()">+ 자산 추가</button>
+          </div>
+          <div id="pfHouseholdAssets" class="pf-hh-assets"></div>
+        </section>
+
+        <section class="pf-hh-card pf-hh-retirement-card">
+          <div class="pf-hh-card-head">
+            <div>
+              <span class="pf-hh-eyebrow">RETIREMENT READINESS</span>
+              <h3>노후 준비는 충분한가?</h3>
+              <p>현재 가치 기준 생활비와 연금소득의 차이를 메우는 데 필요한 자금을 계산합니다.</p>
+            </div>
+            <button class="pf-hh-secondary-btn" type="button" onclick="pfHouseholdApplyRetirementReference()">최신 통계 생활비 적용</button>
+          </div>
+          <div class="pf-hh-retirement-layout">
+            <form class="pf-hh-retirement-form" id="pfHouseholdRetirementForm" onsubmit="return false;">
+              <label>가구 유형
+                <select id="pfHrHouseholdType" onchange="pfHouseholdRetirementChanged()">
+                  <option value="couple">부부 가구</option>
+                  <option value="single">1인 가구</option>
+                </select>
+              </label>
+              <label>현재 나이
+                <input id="pfHrCurrentAge" type="number" min="18" max="100" placeholder="예: 45" oninput="pfHouseholdRetirementChanged()">
+              </label>
+              <label>은퇴 나이
+                <input id="pfHrRetirementAge" type="number" min="40" max="90" oninput="pfHouseholdRetirementChanged()">
+              </label>
+              <label>계획 수명
+                <input id="pfHrPlanToAge" type="number" min="50" max="110" oninput="pfHouseholdRetirementChanged()">
+              </label>
+              <label>월 노후생활비
+                <div class="pf-hh-input-unit"><input id="pfHrMonthlySpending" type="number" min="0" step="10000" oninput="pfHouseholdRetirementChanged()"><span>원</span></div>
+              </label>
+              <label>월 공적연금 예상액
+                <div class="pf-hh-input-unit"><input id="pfHrPublicPension" type="number" min="0" step="10000" oninput="pfHouseholdRetirementChanged()"><span>원</span></div>
+              </label>
+              <label>월 기타 노후소득
+                <div class="pf-hh-input-unit"><input id="pfHrOtherIncome" type="number" min="0" step="10000" oninput="pfHouseholdRetirementChanged()"><span>원</span></div>
+              </label>
+              <label>은퇴 전 월 추가저축
+                <div class="pf-hh-input-unit"><input id="pfHrContribution" type="number" min="0" step="10000" oninput="pfHouseholdRetirementChanged()"><span>원</span></div>
+              </label>
+              <label>연 기대수익률
+                <div class="pf-hh-input-unit"><input id="pfHrReturn" type="number" min="-10" max="30" step="0.1" oninput="pfHouseholdRetirementChanged()"><span>%</span></div>
+              </label>
+              <label>연 물가상승률
+                <div class="pf-hh-input-unit"><input id="pfHrInflation" type="number" min="-10" max="30" step="0.1" oninput="pfHouseholdRetirementChanged()"><span>%</span></div>
+              </label>
+            </form>
+            <div id="pfHouseholdRetirementResult" class="pf-hh-retirement-result"></div>
+          </div>
+          <p class="pf-hh-footnote">
+            기본 생활비는 국민연금연구원의 <a id="pfHouseholdRetirementSource" href="#" target="_blank" rel="noopener">2024년 국민노후보장패널 부가조사</a>
+            적정 노후생활비를 사용합니다. 세금·건강 악화·간병비·연금 수급변동은 별도 점검이 필요하며 투자 자문이 아닙니다.
+          </p>
+        </section>
+      </div>
+    </div><!-- /pfHouseholdTab -->
   </div><!-- /portfolioView -->
 
   <div id="npsView" style="display:none;">
@@ -969,6 +1082,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-rebalance.js" defer></script>
 <script src="./js/portfolio-dividends-calendar.js" defer></script>
 <script src="./js/portfolio-journal.js" defer></script>
+<script src="./js/portfolio-household.js" defer></script>
 <script src="./js/portfolio-trends-benchmark.js" defer></script>
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-trends-group-weight.js" defer></script>
