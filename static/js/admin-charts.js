@@ -45,15 +45,40 @@ function _pushServerSample(s) {
   }
 }
 
+// 차트 색은 전부 admin.html 의 CSS 토큰에서 읽는다(하드코딩 금지) — 다크
+// 전환 시 toggleAdminTheme → _renderAdminCharts 재렌더로 색이 함께 갱신된다.
+// fallback 은 라이트 테마 토큰과 동일한 값(토큰 미정의 문서 방어용).
+function _adminChartToken(name, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
 function _adminChartTextColor() {
-  return getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#64748b';
+  return _adminChartToken('--text-secondary', '#64748b');
 }
 
 function _adminChartGridColor() {
-  return getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#dbe3ee';
+  return _adminChartToken('--border', '#dbe3ee');
 }
 
+function _adminChartSeriesColors() {
+  return {
+    cpu: _adminChartToken('--accent-blue', '#2563eb'),
+    memory: _adminChartToken('--primary', '#0f766e'),
+    disk: _adminChartToken('--color-warning', '#d97706'),
+    info: _adminChartToken('--primary', '#0f766e'),
+    warning: _adminChartToken('--color-warning', '#d97706'),
+    error: _adminChartToken('--color-danger', '#dc2626'),
+    http: _adminChartToken('--accent-blue', '#2563eb'),
+    httpError: _adminChartToken('--color-danger', '#dc2626'),
+  };
+}
+
+// 이벤트/HTTP 차트의 마지막 timeline 데이터 — 테마 토글 재렌더용.
+let _adminTimelineData = null;
+
 function _renderTimelineSection(server, timeline) {
+  _adminTimelineData = timeline || null;
   // server-stats 실패(null)로 부트되면 0% 가짜 샘플 대신 빈 상태를 그린다.
   // 5초 라이브 갱신(_updateLiveStats)이 성공하는 순간부터 채워진다.
   const seeded = _adminServerSeries.length
@@ -78,7 +103,7 @@ function _renderTimelineSection(server, timeline) {
             <div class="admin-chart-sub">최근 ${timeline?.hours || 24}시간 · info/warn/error</div>
           </div>
         </div>
-        <div class="admin-chart">${_renderEventChartSvg(timeline?.events || [])}</div>
+        <div class="admin-chart" id="adminEventChart">${_renderEventChartSvg(timeline?.events || [])}</div>
       </div>
       <div class="admin-chart-panel">
         <div class="admin-chart-head">
@@ -87,7 +112,7 @@ function _renderTimelineSection(server, timeline) {
             <div class="admin-chart-sub">느린 요청/5xx tail · HTTP 관측</div>
           </div>
         </div>
-        <div class="admin-chart">${_renderHttpChartSvg(timeline?.http || [])}</div>
+        <div class="admin-chart" id="adminHttpChart">${_renderHttpChartSvg(timeline?.http || [])}</div>
       </div>
     </section>
   `;
@@ -96,6 +121,17 @@ function _renderTimelineSection(server, timeline) {
 function _renderServerTimeline() {
   const el = document.getElementById('adminServerChart');
   if (el) el.innerHTML = _renderServerChartSvg(_adminServerSeries);
+}
+
+// 세 차트 전부 재렌더 — 색을 CSS 토큰에서 다시 읽어야 하는 테마 토글
+// (toggleAdminTheme, admin.js) 경로용. 5초 라이브 갱신은 데이터가 변하는
+// 서버 차트만 _renderServerTimeline 으로 갱신한다.
+function _renderAdminCharts() {
+  _renderServerTimeline();
+  const eventEl = document.getElementById('adminEventChart');
+  if (eventEl) eventEl.innerHTML = _renderEventChartSvg(_adminTimelineData?.events || []);
+  const httpEl = document.getElementById('adminHttpChart');
+  if (httpEl) httpEl.innerHTML = _renderHttpChartSvg(_adminTimelineData?.http || []);
 }
 
 function _chartBaseSvg(inner, {maxLabel = '100%', minLabel = '0'} = {}) {
@@ -132,18 +168,19 @@ function _polyline(points, key, color, maxValue = 100) {
 function _renderServerChartSvg(points) {
   const data = (points || []).filter(Boolean);
   if (!data.length) return '<div class="admin-chart-empty">서버 샘플 대기 중</div>';
+  const color = _adminChartSeriesColors();
   const last = data[data.length - 1] || {};
   const legend = `
     <g transform="translate(44,198)" font-size="11">
-      <circle cx="0" cy="-4" r="4" fill="#2563eb"/><text x="10" y="0" fill="${_adminChartTextColor()}">CPU ${Math.round(last.cpu || 0)}%</text>
-      <circle cx="92" cy="-4" r="4" fill="#0f766e"/><text x="102" y="0" fill="${_adminChartTextColor()}">Memory ${Math.round(last.memory || 0)}%</text>
-      <circle cx="214" cy="-4" r="4" fill="#d97706"/><text x="224" y="0" fill="${_adminChartTextColor()}">Disk ${Math.round(last.disk || 0)}%</text>
+      <circle cx="0" cy="-4" r="4" fill="${color.cpu}"/><text x="10" y="0" fill="${_adminChartTextColor()}">CPU ${Math.round(last.cpu || 0)}%</text>
+      <circle cx="92" cy="-4" r="4" fill="${color.memory}"/><text x="102" y="0" fill="${_adminChartTextColor()}">Memory ${Math.round(last.memory || 0)}%</text>
+      <circle cx="214" cy="-4" r="4" fill="${color.disk}"/><text x="224" y="0" fill="${_adminChartTextColor()}">Disk ${Math.round(last.disk || 0)}%</text>
     </g>
   `;
   return _chartBaseSvg(`
-    ${_polyline(data, 'cpu', '#2563eb')}
-    ${_polyline(data, 'memory', '#0f766e')}
-    ${_polyline(data, 'disk', '#d97706')}
+    ${_polyline(data, 'cpu', color.cpu)}
+    ${_polyline(data, 'memory', color.memory)}
+    ${_polyline(data, 'disk', color.disk)}
     ${legend}
   `);
 }
@@ -159,15 +196,16 @@ function _renderEventChartSvg(rows) {
   const data = (rows || []).filter(r => r && r.bucket);
   if (!data.length) return '<div class="admin-chart-empty">이벤트 기록 없음</div>';
   const max = Math.max(1, ...data.map(r => Number(r.total || 0)));
+  const color = _adminChartSeriesColors();
   const barW = Math.max(4, Math.min(28, 452 / data.length));
   const gap = data.length > 1 ? Math.max(2, (496 - data.length * barW) / (data.length - 1)) : 0;
   const bars = data.map((r, idx) => {
     const x = 44 + idx * (barW + gap);
     let y = 176;
     const parts = [
-      ['info', '#0f766e'],
-      ['warning', '#d97706'],
-      ['error', '#dc2626'],
+      ['info', color.info],
+      ['warning', color.warning],
+      ['error', color.error],
     ];
     const rects = parts.map(([key, color]) => {
       const h = (Number(r[key] || 0) / max) * 156;
@@ -187,6 +225,7 @@ function _renderHttpChartSvg(rows) {
   const data = (rows || []).filter(r => r && r.bucket);
   if (!data.length) return '<div class="admin-chart-empty">느린 요청/5xx 기록 없음</div>';
   const max = Math.max(1, ...data.map(r => Number(r.count || 0)));
+  const color = _adminChartSeriesColors();
   const barW = Math.max(4, Math.min(28, 452 / data.length));
   const gap = data.length > 1 ? Math.max(2, (496 - data.length * barW) / (data.length - 1)) : 0;
   const bars = data.map((r, idx) => {
@@ -199,8 +238,8 @@ function _renderHttpChartSvg(rows) {
       ? `<text x="${x.toFixed(1)}" y="192" fill="${_adminChartTextColor()}" font-size="10">${_bucketLabel(r.bucket)}</text>`
       : '';
     return `
-      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${totalH.toFixed(1)}" fill="#2563eb" opacity="0.78" rx="2"/>
-      ${errH > 0 ? `<rect x="${x.toFixed(1)}" y="${errY.toFixed(1)}" width="${barW.toFixed(1)}" height="${errH.toFixed(1)}" fill="#dc2626" rx="2"/>` : ''}
+      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${totalH.toFixed(1)}" fill="${color.http}" opacity="0.78" rx="2"/>
+      ${errH > 0 ? `<rect x="${x.toFixed(1)}" y="${errY.toFixed(1)}" width="${barW.toFixed(1)}" height="${errH.toFixed(1)}" fill="${color.httpError}" rx="2"/>` : ''}
       ${label}
     `;
   }).join('');

@@ -201,7 +201,9 @@ function toggleAdminTheme() {
   const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   try { localStorage.setItem(ADMIN_THEME_KEY, next); } catch (_) {}
-  if (typeof _renderServerTimeline === 'function') _renderServerTimeline();
+  // SVG 차트는 렌더 시점의 CSS 토큰 색을 인라인으로 굽는다 — 테마가 바뀌면
+  // 세 차트(서버/이벤트/HTTP)를 다시 그려 새 토큰 색을 반영한다(admin-charts.js).
+  if (typeof _renderAdminCharts === 'function') _renderAdminCharts();
 }
 
 try {

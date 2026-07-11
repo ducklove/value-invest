@@ -247,16 +247,23 @@ test("adminConfirm: 확인 → true, 취소 → false, 모달 DOM 은 닫히며 
   });
 });
 
-test("adminPromptDate: 입력값 확인 → 값, 취소 → null", async () => {
+test("adminPromptDate: 네이티브 date 입력 + 오늘 기본값, 확인 → 값, 취소 → null", async () => {
   await withDom(async (w) => {
     const p1 = w.adminPromptDate("실행할 날짜를 입력하세요 (YYYY-MM-DD)");
     const input = w.document.querySelector(".admin-dialog-overlay input");
     assert.ok(input, "date input should render");
+    // 자유 텍스트가 아닌 <input type="date"> — 값 형식(YYYY-MM-DD)은
+    // 브라우저 date picker 가 보장한다. 기본값은 오늘 날짜.
+    assert.equal(input.type, "date");
+    assert.match(input.value, /^\d{4}-\d{2}-\d{2}$/);
     input.value = "2026-07-01";
     w.document.querySelector("[data-admin-dialog-confirm]").click();
     assert.equal(await p1, "2026-07-01");
 
-    const p2 = w.adminPromptDate("날짜?");
+    // defaultValue 를 주면 오늘 대신 그 날짜가 초기값이 된다.
+    const p2 = w.adminPromptDate("날짜?", "2026-01-15");
+    const input2 = w.document.querySelector(".admin-dialog-overlay input");
+    assert.equal(input2.value, "2026-01-15");
     w.document.querySelector("[data-admin-dialog-cancel]").click();
     assert.equal(await p2, null);
     assert.equal(w.document.querySelector(".admin-dialog-overlay"), null);
