@@ -1,8 +1,9 @@
 // jsdom behavior tests for the analysis view scripts — focused on the
-// external-tool deep-link cards (analysis.js) and the DART filing review
-// rendering helpers (analysis-filings.js). Loads utils.js (escapeHtml) plus
+// external-tool deep-link cards (analysis.js), the DART filing review
+// rendering helpers (analysis-filings.js), and the analyzeStock SSE stream
+// parsing (progress/result 이벤트 버퍼링). Loads utils.js (escapeHtml) plus
 // the analysis split files in index.html order. Network-bound
-// loadStockExternalLinks() and the heavy analyze flow are not exercised here.
+// loadStockExternalLinks() is not exercised here.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -106,4 +107,76 @@ test("_renderMetricTrends returns empty string when no trends", () => {
   const w = load();
   assert.equal(w._renderMetricTrends([]), "");
   assert.equal(w._renderMetricTrends(null), "");
+});
+
+// --- analyzeStock SSE 스트림 파싱 ---
+// apiFetch 를 가짜 SSE 응답으로 바꿔치기해 실제 파서(줄 버퍼링, event/data
+// 시퀀스 처리)를 브라우저 없이 구동한다. 무거운 renderResult 는 스파이로 대체.
+function loadForAnalyze(chunks) {
+  const dom = new JSDOM(`<!doctype html><html><body>
+    <div id="loadingOverlay">
+      <div id="loadingText"></div>
+      <div id="loadingDetail"></div>
+      <div id="progressBar"></div>
+      <div id="progressSteps"></div>
+      <button id="cancelBtn"></button>
+    </div>
+  </body></html>`, { runScripts: "dangerously", url: "https://app.example.com/" });
+  const w = dom.window;
+  w.TextDecoder = TextDecoder; // jsdom window 에는 없음 — Node 전역 주입
+  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis.js")]) {
+    const s = w.document.createElement("script");
+    s.textContent = src;
+    w.document.body.appendChild(s);
+  }
+  // 함수 선언은 window 프로퍼티가 되므로 로드 후 덮어쓰면 호출 시 스파이가 이긴다.
+  w.requireApiConfiguration = () => {};
+  w.trackEvent = () => {};
+  w.loadRecentList = () => {};
+  w.saveGuestRecent = () => {};
+  w.currentUser = null; // auth.js 미로드
+  const rendered = [];
+  w.renderResult = (data) => rendered.push(data);
+  const encoder = new TextEncoder();
+  w.apiFetch = async () => ({
+    ok: true,
+    headers: { get: () => "text/event-stream" },
+    body: {
+      getReader() {
+        let i = 0;
+        return {
+          read: async () => (i < chunks.length
+            ? { done: false, value: encoder.encode(chunks[i++]) }
+            : { done: true, value: undefined }),
+          cancel: () => {},
+        };
+      },
+    },
+  });
+  return { w, rendered };
+}
+
+test("analyzeStock: SSE 청크가 줄/JSON 경계와 무관하게 파싱돼 진행 표시와 최종 결과를 만든다", async () => {
+  // result 의 JSON 을 청크 중간에서 잘라 버퍼링 로직까지 검증한다.
+  const { w, rendered } = loadForAnalyze([
+    'event: progress\ndata: {"step":"start","message":"분석 시작"}\n\n',
+    'event: progress\ndata: {"step":"financial_start","message":"재무제표 수집"}\n\nevent: result\ndata: {"stock_code":"005930","corp_',
+    'name":"삼성전자"}\n\n',
+  ]);
+  await w.analyzeStock("005930");
+
+  assert.equal(rendered.length, 1, "result 이벤트가 renderResult 로 전달돼야 함");
+  // jsdom realm 에서 JSON.parse 된 객체는 프로토타입이 달라 스프레드로 복사해 비교.
+  assert.deepEqual({ ...rendered[0] }, { stock_code: "005930", corp_name: "삼성전자" });
+
+  // 진행 스텝: start 는 완료(✓) 처리되고, financial_start 후 '분석 완료!' 가 붙는다.
+  const steps = [...w.document.getElementById("progressSteps").children].map((el) => el.textContent);
+  assert.deepEqual(steps, ["✓ 분석 시작", "✓ 재무제표 수집", "분석 완료!"]);
+  assert.equal(w.document.getElementById("loadingText").textContent, "재무제표 수집");
+  assert.equal(w.document.getElementById("progressBar").getAttribute("aria-valuenow"), "100");
+
+  // 스트림 종료 후 오버레이는 닫힌다.
+  const overlay = w.document.getElementById("loadingOverlay");
+  assert.equal(overlay.classList.contains("show"), false);
+  assert.equal(overlay.getAttribute("aria-busy"), "false");
 });

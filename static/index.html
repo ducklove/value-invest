@@ -170,8 +170,10 @@ function trackEvent(name, params = {}) {
 
   <div id="analysisView" style="display:none;">
   <div class="search-container">
-    <input class="search-input" id="searchInput" placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930)" autocomplete="off">
-    <div class="dropdown" id="dropdown"></div>
+    <!-- ARIA 1.2 combobox 패턴 — aria-expanded/aria-activedescendant 상태는 search.js 가 동기화 -->
+    <input class="search-input" id="searchInput" placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930)" autocomplete="off"
+           role="combobox" aria-expanded="false" aria-controls="dropdown" aria-autocomplete="list" aria-haspopup="listbox" aria-label="종목 검색">
+    <div class="dropdown" id="dropdown" role="listbox" aria-label="종목 검색 결과"></div>
   </div>
 
   <div class="company-info" id="companyInfo">

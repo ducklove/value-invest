@@ -274,7 +274,11 @@
 }
 .reports-table-wrap {
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-  overflow: hidden;
+  /* 좁은 화면에서 테이블이 컨테이너보다 넓어지면 잘라내지 않고 가로 스크롤을
+     허용한다(구 overflow:hidden 은 모바일에서 목표가·투자의견 열이 잘렸음).
+     둥근 모서리 클리핑은 overflow-x:auto 로도 유지된다. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .reports-table {
   width: 100%; border-collapse: collapse; font-size: 13px;

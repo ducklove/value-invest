@@ -200,6 +200,13 @@
   box-shadow: var(--shadow-md);
   border-color: var(--primary);
 }
+/* 카드가 role=button(키보드로 모달 확대)이 되면서 포커스 링 필요 —
+   허브/포트폴리오와 동일한 var(--ring) 패턴. */
+.chart-card:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-color: var(--primary);
+}
 .chart-card h3 { font-size:15px; margin-bottom:12px; color:var(--text-secondary); }
 .chart-canvas-wrap {
   position: relative;

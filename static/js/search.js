@@ -26,11 +26,27 @@ function toggleTheme() {
 const searchInput = document.getElementById('searchInput');
 const dropdown = document.getElementById('dropdown');
 
+// 검색창은 combobox(ARIA 1.2) — 정적 role/aria-controls 는 index.html 이 갖고,
+// 열림/닫힘 상태(aria-expanded)와 활성 옵션(aria-activedescendant)만 여기서
+// 동기화한다. 열 때는 항상 새 목록이 렌더된 직후라 활성 옵션을 초기화한다.
+function setSearchDropdownExpanded(open) {
+  dropdown.classList.toggle('show', open);
+  searchInput.setAttribute('aria-expanded', open ? 'true' : 'false');
+  searchInput.removeAttribute('aria-activedescendant');
+}
+
 function updateActiveItem() {
   const items = dropdown.querySelectorAll('.dropdown-item[data-stock]');
-  items.forEach((el, i) => el.classList.toggle('active', i === selectedIdx));
+  items.forEach((el, i) => {
+    el.classList.toggle('active', i === selectedIdx);
+    el.setAttribute('aria-selected', i === selectedIdx ? 'true' : 'false');
+    if (!el.id) el.id = `searchOption-${i}`;
+  });
   if (selectedIdx >= 0 && items[selectedIdx]) {
+    searchInput.setAttribute('aria-activedescendant', items[selectedIdx].id);
     items[selectedIdx].scrollIntoView({ block: 'nearest' });
+  } else {
+    searchInput.removeAttribute('aria-activedescendant');
   }
 }
 
@@ -39,7 +55,7 @@ searchInput.addEventListener('input', () => {
   selectedIdx = -1;
   const q = searchInput.value.trim();
   if (q.length < 1) {
-    dropdown.classList.remove('show'); // 검색 결과 지우기 — 칩 패널이 적용되면(모바일) 아래에서 다시 켠다.
+    setSearchDropdownExpanded(false); // 검색 결과 지우기 — 칩 패널이 적용되면(모바일) 아래에서 다시 켠다.
     showRecentStarredSearchPanel();
     return;
   }
@@ -53,7 +69,7 @@ searchInput.addEventListener('focus', () => { showRecentStarredSearchPanel(); })
 
 searchInput.addEventListener('keydown', (e) => {
   const items = dropdown.querySelectorAll('.dropdown-item[data-stock]');
-  if (e.key === 'Escape') { dropdown.classList.remove('show'); selectedIdx = -1; return; }
+  if (e.key === 'Escape') { setSearchDropdownExpanded(false); selectedIdx = -1; return; }
   if (e.key === 'ArrowDown') {
     e.preventDefault();
     if (items.length > 0) { selectedIdx = Math.min(selectedIdx + 1, items.length - 1); updateActiveItem(); }
@@ -66,7 +82,7 @@ searchInput.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Enter') {
     e.preventDefault();
-    dropdown.classList.remove('show');
+    setSearchDropdownExpanded(false);
     if (selectedIdx >= 0 && items[selectedIdx]) {
       items[selectedIdx].click();
     } else if (items.length > 0) {
@@ -80,7 +96,7 @@ searchInput.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.search-container')) dropdown.classList.remove('show');
+  if (!e.target.closest('.search-container')) setSearchDropdownExpanded(false);
 });
 
 async function doSearchAndAnalyze(q) {
@@ -109,6 +125,8 @@ async function doSearch(q) {
         const div = document.createElement('div');
         div.className = 'dropdown-item';
         div.dataset.stock = item.stock_code;
+        div.setAttribute('role', 'option');
+        div.setAttribute('aria-selected', 'false');
         const name = document.createElement('span');
         name.textContent = item.corp_name;
         const code = document.createElement('span');
@@ -116,7 +134,7 @@ async function doSearch(q) {
         code.textContent = item.stock_code;
         div.append(name, code);
         div.addEventListener('click', () => {
-          dropdown.classList.remove('show');
+          setSearchDropdownExpanded(false);
           searchInput.value = item.corp_name;
           trackEvent('stock_select', { stock_code: item.stock_code, source: 'dropdown' });
           analyzeStock(item.stock_code);
@@ -125,10 +143,10 @@ async function doSearch(q) {
       });
     }
     trackEvent('search_results', { result_count: data.length });
-    dropdown.classList.add('show');
+    setSearchDropdownExpanded(true);
   } catch (error) {
     dropdown.innerHTML = `<div class="dropdown-item" style="color:var(--text-secondary)">${escapeHtml(error.message || '검색 중 오류가 발생했습니다.')}</div>`;
-    dropdown.classList.add('show');
+    setSearchDropdownExpanded(true);
   }
 }
 
@@ -164,6 +182,8 @@ function _dropdownStockChip(item, source) {
   const div = document.createElement('div');
   div.className = 'dropdown-item';
   div.dataset.stock = item.stock_code;
+  div.setAttribute('role', 'option');
+  div.setAttribute('aria-selected', 'false');
   const name = document.createElement('span');
   name.textContent = item.corp_name;
   const code = document.createElement('span');
@@ -171,7 +191,7 @@ function _dropdownStockChip(item, source) {
   code.textContent = item.stock_code;
   div.append(name, code);
   div.addEventListener('click', () => {
-    dropdown.classList.remove('show');
+    setSearchDropdownExpanded(false);
     searchInput.value = item.corp_name;
     trackEvent('stock_select', { stock_code: item.stock_code, source });
     switchView('analysis');
@@ -195,11 +215,12 @@ async function showRecentStarredSearchPanel() {
     if (items.length === 0) return;
     const heading = document.createElement('div');
     heading.className = 'dropdown-section-label';
+    heading.setAttribute('role', 'presentation'); // listbox 안의 비옵션 구분 라벨
     heading.textContent = label;
     dropdown.appendChild(heading);
     items.forEach(item => dropdown.appendChild(_dropdownStockChip(item, source)));
   };
   addSection('최근 검색', recent, 'search_chip_recent');
   addSection('관심 목록', starred.slice(0, 8), 'search_chip_starred');
-  dropdown.classList.add('show');
+  setSearchDropdownExpanded(true);
 }
