@@ -356,9 +356,15 @@
 }
 .pf-summary-card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  /* 액션트 보더(구 파일 말미 중복 블록에서 병합) — border 축약 뒤에 둬야
+     좌변만 3px 투명으로 남는다(캐스케이드 의미 동일). */
+  border-left: 3px solid transparent;
+  transition: border-color 0.2s ease;
   padding: 12px 16px; min-width: 140px; flex: 1;
   display: flex; align-items: center; gap: 10px;
 }
+.pf-summary-card:has(.positive) { border-left-color: var(--up); }
+.pf-summary-card:has(.negative) { border-left-color: var(--down); }
 .pf-summary-text { flex: 1; min-width: 0; }
 .pf-sparkline { width: 64px; height: 32px; flex-shrink: 0; }
 .pf-summary-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
@@ -2566,13 +2572,7 @@ body.pf-compact-rows .pf-table tfoot td {
   outline-offset: 2px;
 }
 
-/* Portfolio summary card accent border */
-.pf-summary-card {
-  border-left: 3px solid transparent;
-  transition: border-color 0.2s ease;
-}
-.pf-summary-card:has(.positive) { border-left-color: var(--up); }
-.pf-summary-card:has(.negative) { border-left-color: var(--down); }
+/* Portfolio summary card accent border — 기본 .pf-summary-card 정의(§23)로 병합됨. */
 
 /* Action button icon styles */
 .pf-row-btn.edit { font-size: 15px; }
@@ -2919,4 +2919,22 @@ body.pf-compact-rows .pf-table tfoot td {
   .pf-hh-summary { grid-template-columns: 1fr; }
   .pf-hh-retirement-form { grid-template-columns: 1fr; }
   .pf-hh-retire-stats { grid-template-columns: 1fr; }
+}
+
+/* === AI 포트폴리오 분석 카드 — index.html 인라인 스타일에서 이전(시각 동일) ===
+   .pf-ai-run-btn 은 analysis.css 의 .bt-run(패딩 8px 18px·13px)을 재사용하면서
+   이 카드에서만 작게 줄인다 — portfolio.css 가 analysis.css 뒤에 로드되므로
+   동일 특이도에서 이 규칙이 이긴다(종전 인라인 스타일과 같은 결과). */
+.pf-ai-model-picker { margin-left: 8px; }
+.pf-ai-model-input {
+  width: 260px; padding: 4px 8px; font-size: 12px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--input-bg); color: var(--text);
+}
+.pf-ai-run-btn { margin-left: auto; padding: 6px 14px; font-size: 12px; }
+.pf-ai-query {
+  width: 100%; margin: 8px 0 4px; padding: 8px 10px; font-size: 12px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--input-bg); color: var(--text);
+  resize: vertical; font-family: inherit;
 }

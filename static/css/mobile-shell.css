@@ -173,7 +173,10 @@ body.pf-mobile-simple .pf-tab-bar { top: var(--m-header-h, 42px); }
    - transition 은 매우 짧게(거의 즉시) 유지해 시각적 피드백을 완전히
      없애지 않고 부드럽게만 줄인다.
    출처: WCAG 2.3.3 Animation from Interactions. 토글된 수동 테마에는
-   영향을 주지 않는다(OS 설정 기반). */
+   영향을 주지 않는다(OS 설정 기반).
+   (같은 미디어쿼리 블록이 이 파일에 2회 있던 것을 통합 — 전역 * 선언은
+   완전 동일했고, 각 블록에만 있던 선택자(.chart-dot-pulse / .flash-update)는
+   합집합으로 보존해 computed 결과 불변.) */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -188,6 +191,8 @@ body.pf-mobile-simple .pf-tab-bar { top: var(--m-header-h, 42px); }
   .market-tape-track { animation: none !important; }
   /* 펄스 점은 깜빡임 없이 고정 채색. */
   .chart-dot-pulse, [style*="chartDotPulse"] { animation: none !important; }
+  /* flash-update(가격 갱신 알림 깜빡임)도 즉시 최종 상태로. */
+  .flash-update, .market-tape.flash-update::after { animation: none !important; }
 }
 
 /* ── 접근성: 차트 대체 표 (ST-05) ─────────────────────────────────────
@@ -218,17 +223,5 @@ body.pf-mobile-simple .pf-tab-bar { top: var(--m-header-h, 42px); }
 input:focus-visible, textarea:focus-visible, select:focus-visible {
   outline: none;
 }
-/* 모션 민감 사용자: 깜빡임·스크롤 애니메이션·transition 을 최소화.
-   기존 전환은 모두 0.12~0.2s 의 짧은 값이라 영향이 미미하며, flash-update
-   (가격 갱신 알림) 와 시황 테이프 스크롤만 의미 있게 무력화된다. */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
-  .market-tape-track { animation: none !important; }
-  .flash-update, .market-tape.flash-update::after { animation: none !important; }
-}
+/* 모션 최소화(prefers-reduced-motion) 규칙은 위 ST-05 블록에 통합됐다. */
 

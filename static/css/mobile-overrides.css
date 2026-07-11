@@ -8,16 +8,10 @@
  */
 /* === Mobile overrides (≤900px · short landscape) === */
 @media (max-width:900px) {
-  body {
-    display: block;
-  }
-  .sidebar {
-    width: 100%;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  /* Hide sidebar when logged in on mobile */
-  body.mobile-auth .sidebar { display: none; }
+  /* body 블록화·사이드바 전폭·로그인 시 사이드바 숨김 규칙은 아래
+     (max-width:900px), (max-height:520px) 복합 미디어쿼리 블록에 있다 —
+     그 쿼리가 이 블록(≤900px)을 포함하는 상위집합이라 여기 중복이던 것을
+     제거해도 모든 뷰포트에서 동일하게 적용된다. */
   /* 모바일에선 영역지도 버튼 숨김 — 작은 화면에서 treemap 은 가독성이
      떨어지고, add-bar 가 한 줄에 들어가는 것도 방해. */
   .pf-treemap-btn { display: none; }

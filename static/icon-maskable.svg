@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Value Compass">
+  <!-- maskable 아이콘: 배경은 풀블리드(라운드 모서리 없음 — 모양은 런처 마스크가
+       만든다), 나침반 콘텐츠는 safe zone(중심 반지름 40% = 25.6px) 안쪽에 담는다.
+       favicon.svg 의 마크를 0.9배로 중심 축소(최대 반경 ≈ 19.8px < 25.6px). -->
+  <defs>
+    <linearGradient id="vcBgMask" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" fill="url(#vcBgMask)"/>
+  <g transform="translate(32 32) scale(0.9) translate(-32 -32)">
+    <!-- 나침반 베젤 -->
+    <circle cx="32" cy="32" r="21" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="2"/>
+    <!-- 나침반 바늘: 북쪽(위·성장 방향)으로 살짝 기울여 가치 상승을 암시 -->
+    <g transform="rotate(20 32 32)">
+      <path d="M32 11 L38.5 33 L32 31 L25.5 33 Z" fill="#ffffff"/>
+      <path d="M32 53 L38.5 31 L32 33 L25.5 31 Z" fill="#ffffff" fill-opacity="0.5"/>
+    </g>
+    <!-- 중심 피벗 -->
+    <circle cx="32" cy="32" r="3.4" fill="#ffffff"/>
+    <circle cx="32" cy="32" r="3.4" fill="none" stroke="#1d4ed8" stroke-width="1.2"/>
+  </g>
+</svg>

@@ -104,6 +104,48 @@ test('retirement calculator improves when monthly contributions are added', () =
   assert.equal(w.pfHouseholdCalculateRetirement(summary, { ...base, current_age: null }), null);
 });
 
+test('palette reads CSS --hh-* tokens at render time with hardcoded fallback', () => {
+  const w = householdWindow();
+  // jsdom 에는 스타일시트가 없어 토큰이 비어 있다 -> 종전 라이트 팔레트 폴백.
+  assert.equal(w.pfHhColor('portfolio'), '#4f46e5');
+  assert.equal(w.pfHhColor('real_estate'), '#0f766e');
+  assert.equal(w.pfHhColor('unknown-category'), '#94a3b8');
+  // 토큰이 정의되면(테마 전환 포함) 렌더 시점 값이 그대로 쓰인다.
+  w.getComputedStyle = () => ({
+    getPropertyValue: name => (name === '--hh-real-estate' ? ' #2dd4bf ' : ''),
+  });
+  assert.equal(w.pfHhColor('real_estate'), '#2dd4bf');
+  assert.equal(w.pfHhColor('portfolio'), '#4f46e5');
+});
+
+test('data-theme change re-renders household insights with current token colors', async () => {
+  const w = householdWindow();
+  for (const id of ['pfHouseholdSummary', 'pfHouseholdMix']) {
+    const el = w.document.createElement('div');
+    el.id = id;
+    w.document.body.appendChild(el);
+  }
+  w._pfHouseholdApplyPayload({
+    items: [{ asset_id: 'a1', category: 'cash', name: '여유자금', owner: 'household', amount: 1_000_000, retirement_eligible: true }],
+    retirement: {},
+    categories: { cash: { label: '현금성', kind: 'asset' } },
+    owners: {},
+  });
+  const mix = w.document.getElementById('pfHouseholdMix');
+  assert.match(mix.innerHTML, /#0891b2/, '초기 렌더는 라이트 폴백 색');
+
+  // 다크 테마 토큰이 보이는 상태에서 data-theme 만 바꾸면 재렌더가 일어나
+  // 차트 색이 토큰 값으로 갱신된다(MutationObserver 경로).
+  w.getComputedStyle = () => ({
+    getPropertyValue: name => (name === '--hh-cash' ? '#22d3ee' : ''),
+  });
+  w.document.documentElement.setAttribute('data-theme', 'dark');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.match(mix.innerHTML, /#22d3ee/, '다크 전환 후 토큰 색으로 재렌더');
+  assert.doesNotMatch(mix.innerHTML, /#0891b2/);
+});
+
 test('portfolio tab switch exposes household view and lazy-loads it', () => {
   const dom = new JSDOM(`<!doctype html><html><body>
     <div id="portfolioView">

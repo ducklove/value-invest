@@ -47,6 +47,54 @@ def test_portfolio_ai_result_has_framed_output_contract():
     assert ".pf-ai-result:not(.pf-ai-empty)" in styles
     assert "repeat(auto-fit" in styles
 
+def test_portfolio_ai_card_uses_css_classes_instead_of_inline_styles():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = _all_css()
+
+    # 긴 인라인 스타일은 portfolio.css 클래스로 이전(시각 동일) —
+    # pfAiModelPicker 의 display:none 만 JS 계약(portfolio-ai.js 가
+    # style.display='' 로 해제)이라 인라인에 남는다.
+    assert 'id="pfAiModelPicker" class="pf-ai-model-picker" style="display:none;"' in html
+    assert 'id="pfAiModelInput" class="pf-ai-model-input"' in html
+    assert 'class="bt-run pf-ai-run-btn"' in html
+    assert 'id="pfAiQuery" class="pf-ai-query"' in html
+    assert "width:260px" not in html
+    assert "resize:vertical" not in html
+    assert ".pf-ai-model-picker { margin-left: 8px; }" in styles
+    assert ".pf-ai-model-input" in styles
+    assert ".pf-ai-run-btn { margin-left: auto; padding: 6px 14px; font-size: 12px; }" in styles
+    assert ".pf-ai-query" in styles
+
+def test_portfolio_summary_card_has_single_merged_definition():
+    # 기본 정의(§23)와 파일 말미 액션트 보더 블록의 이중 정의를 병합 —
+    # border 축약 '뒤'에 border-left 가 와야 캐스케이드 의미가 보존된다.
+    portfolio_css = (ROOT / "static" / "css" / "portfolio.css").read_text(encoding="utf-8")
+    assert portfolio_css.count(".pf-summary-card {") == 1
+    base_block = portfolio_css.split(".pf-summary-card {", 1)[1].split("}", 1)[0]
+    assert "border: 1px solid var(--border)" in base_block
+    assert base_block.find("border: 1px solid var(--border)") < base_block.find("border-left: 3px solid transparent")
+    assert "transition: border-color 0.2s ease" in base_block
+    assert ".pf-summary-card:has(.positive) { border-left-color: var(--up); }" in portfolio_css
+    assert ".pf-summary-card:has(.negative) { border-left-color: var(--down); }" in portfolio_css
+
+def test_household_palette_reads_css_tokens_with_fallback():
+    source = (JS / "portfolio-household.js").read_text(encoding="utf-8")
+    styles = _all_css()
+
+    # 색은 하드코딩 대신 CSS 토큰(--hh-*)을 렌더 시점에 읽는 pfHhColor 를 쓴다
+    # (_sparkTrendColor 선례). 토큰 미정의 시 종전 팔레트 폴백.
+    assert "function pfHhColor" in source
+    assert "PF_HH_COLOR_FALLBACKS" in source
+    assert "PF_HH_COLORS" not in source
+    assert "`--hh-${" in source
+    # 라이트/다크 쌍이 base.css 에 정의돼 있다.
+    assert styles.count("--hh-portfolio:") == 2
+    assert styles.count("--hh-liability:") == 2
+    assert "--hh-real-estate:" in styles
+    # 다크 전환 시 재렌더 경로 — data-theme 를 관찰해 인사이트를 다시 그린다.
+    assert "attributeFilter: ['data-theme']" in source
+    assert "_pfHouseholdRenderInsights();" in source
+
 def test_today_card_does_not_fallback_to_quote_session_return():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     forbidden = "totalDailyPnl / prevMV"

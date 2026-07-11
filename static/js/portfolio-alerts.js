@@ -36,13 +36,13 @@ function pfAlertsApiJson(path, options = {}) {
   return apiFetchJson(`/api/notifications${path}`, init);
 }
 
+// 숫자 표기 — utils.js 공용 fmtNum 위임(중복 구현 제거). 알림 임계값은
+// ''/비수치 문자열이 올 수 있어 '-' 가드만 여기 남긴다
+// (fmtNum('')==='0', fmtNum('abc')==='NaN' 이라 그대로 쓰면 표기가 깨진다).
 function pfFmtNum(value) {
   if (value === null || value === undefined || value === '') return '-';
   const n = Number(value);
-  if (!isFinite(n)) return '-';
-  return Math.abs(n - Math.round(n)) < 1e-9
-    ? Math.round(n).toLocaleString()
-    : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return isFinite(n) ? fmtNum(n) : '-';
 }
 
 // --- Modal open/close -------------------------------------------------------

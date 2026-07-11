@@ -75,6 +75,38 @@ def test_pwa_manifest_declares_installable_app():
     assert icons["/favicon.svg"]["sizes"] == "any"
     assert icons["/static/icon-640.jpg"]["type"] == "image/jpeg"
     assert icons["/static/icon-640.jpg"]["sizes"] == "640x640"
+    # maskable 설치 아이콘 — 풀블리드 배경 + safe zone(반지름 40%) 안 콘텐츠.
+    assert icons["/static/icon-maskable.svg"]["type"] == "image/svg+xml"
+    assert icons["/static/icon-maskable.svg"]["purpose"] == "maskable"
+    maskable = (STATIC / "icon-maskable.svg").read_text(encoding="utf-8")
+    assert '<rect width="64" height="64"' in maskable, "maskable 배경은 풀블리드(rx 없는 전체 rect)"
+    assert "scale(0.9)" in maskable, "콘텐츠는 safe zone 안으로 축소"
+
+def test_base_font_stack_includes_korean_fallbacks():
+    # Windows/구형 macOS 에서 시스템 UI 폰트 다음 폴백이 브라우저 기본(굴림/바탕
+    # 계열)으로 빠지지 않게 한글 폰트를 명시한다. 시스템 폰트 뒤·sans-serif 앞.
+    base = (STATIC / "css" / "base.css").read_text(encoding="utf-8")
+    assert (
+        "--font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', "
+        "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;"
+    ) in base
+
+def test_reduced_motion_rules_are_merged_into_single_block():
+    # mobile-shell.css 에 같은 @media 블록이 2회 있던 것을 통합 — 전역 * 선언은
+    # 동일했고 블록별 고유 선택자는 합집합으로 보존한다.
+    shell_css = (STATIC / "css" / "mobile-shell.css").read_text(encoding="utf-8")
+    assert shell_css.count("@media (prefers-reduced-motion: reduce)") == 1
+    assert ".market-tape-track { animation: none !important; }" in shell_css
+    assert '.chart-dot-pulse, [style*="chartDotPulse"] { animation: none !important; }' in shell_css
+    assert ".flash-update, .market-tape.flash-update::after { animation: none !important; }" in shell_css
+
+def test_mobile_sidebar_overrides_live_only_in_superset_media_block():
+    # mobile-overrides.css 의 body/사이드바 규칙은 (≤900px)+(가로 짧은 화면)
+    # 복합 미디어쿼리 블록 한 곳에만 산다 — ≤900px 블록의 중복은 제거됨.
+    css = (STATIC / "css" / "mobile-overrides.css").read_text(encoding="utf-8")
+    assert css.count("body.mobile-auth .sidebar { display: none; }") == 1
+    assert css.count("border-right: none;") == 1
+    assert css.count("width: 100%;\n    border-right: none;") == 1
 
 def test_pwa_service_worker_keeps_conservative_cache_contract():
     sw = (STATIC / "sw.js").read_text(encoding="utf-8")

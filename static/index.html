@@ -593,13 +593,14 @@ function trackEvent(name, params = {}) {
       <div class="pf-nav-chart-wrap pf-analysis-card" id="pfAiWrap">
         <div class="pf-nav-header pf-ai-toolbar">
           <h3>AI 포트폴리오 분석</h3>
-          <div id="pfAiModelPicker" style="display:none;margin-left:8px;">
-            <input list="pfAiModelList" id="pfAiModelInput" placeholder="모델 선택/입력" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);width:260px;">
+          <!-- display:none 인라인은 계약: portfolio-ai.js 가 style.display='' 로 해제한다. -->
+          <div id="pfAiModelPicker" class="pf-ai-model-picker" style="display:none;">
+            <input list="pfAiModelList" id="pfAiModelInput" class="pf-ai-model-input" placeholder="모델 선택/입력">
             <datalist id="pfAiModelList"></datalist>
           </div>
-          <button class="bt-run" onclick="runAiAnalysis()" id="pfAiBtn" style="margin-left:auto;padding:6px 14px;font-size:12px;">분석 실행</button>
+          <button class="bt-run pf-ai-run-btn" onclick="runAiAnalysis()" id="pfAiBtn">분석 실행</button>
         </div>
-        <textarea id="pfAiQuery" placeholder="AI에게 추가로 묻고 싶은 내용이 있으면 입력하세요 (선택). 예: 금리 인상 가능성을 고려해 포트폴리오를 평가해줘." rows="2" style="width:100%;margin:8px 0 4px;padding:8px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);resize:vertical;font-family:inherit;"></textarea>
+        <textarea id="pfAiQuery" class="pf-ai-query" placeholder="AI에게 추가로 묻고 싶은 내용이 있으면 입력하세요 (선택). 예: 금리 인상 가능성을 고려해 포트폴리오를 평가해줘." rows="2"></textarea>
         <div class="pf-ai-output" id="pfAiOutput" aria-live="polite">
           <div class="pf-ai-output-head">
             <span>AI 분석 결과</span>

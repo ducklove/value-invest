@@ -93,10 +93,16 @@
   /* 체계: 간격 */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
   --space-5: 20px; --space-6: 24px;
-  /* 체계: 타이포 */
-  --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* 체계: 타이포 — 한글 폰트를 명시해 시스템별 폴백 편차(궁서/굴림 등)를 막는다.
+     시스템 UI 폰트(-apple-system 계열) 뒤, sans-serif 앞 (gold_gap R7 선례). */
+  --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-numeric: tabular-nums;
   --loading-bg: rgba(255,255,255,0.85);
+  /* 가계자산(household) 차트 팔레트 — portfolio-household.js 의 pfHhColor() 가
+     getComputedStyle 로 읽는다. 다크 테마 쌍과 함께 유지할 것. */
+  --hh-portfolio: #4f46e5; --hh-real-estate: #0f766e; --hh-cash: #0891b2;
+  --hh-pension: #7c3aed; --hh-insurance: #2563eb; --hh-business: #d97706;
+  --hh-vehicle: #64748b; --hh-other: #94a3b8; --hh-liability: #e11d48;
 }
 [data-theme="dark"] {
   --bg: #0f172a; --surface: #1e293b; --text: #e2e8f0; --text-secondary: #94a3b8;
@@ -117,6 +123,10 @@
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.50);
   --shadow-overlay: 0 20px 60px rgba(0, 0, 0, 0.55);
   --loading-bg: rgba(15,23,42,0.85);
+  /* 가계자산 팔레트 다크 쌍 — 어두운 표면 위에서 채도·명도를 한 단계 올린다. */
+  --hh-portfolio: #818cf8; --hh-real-estate: #2dd4bf; --hh-cash: #22d3ee;
+  --hh-pension: #a78bfa; --hh-insurance: #60a5fa; --hh-business: #fbbf24;
+  --hh-vehicle: #94a3b8; --hh-other: #cbd5e1; --hh-liability: #fb7185;
 }
 
 /* === Base & reset === */

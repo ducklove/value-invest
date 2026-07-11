@@ -76,6 +76,21 @@ function loadAlerts(items = []) {
 
 const SAMSUNG = { stock_code: "005930", stock_name: "삼성전자", quote: { price: 72000 } };
 
+test("pfFmtNum 은 utils.js fmtNum 에 위임하고 빈 값/비수치는 '-' 가드한다", () => {
+  const w = loadAlerts();
+  assert.equal(w.pfFmtNum(70000), "70,000");
+  assert.equal(w.pfFmtNum(2.5), "2.5");
+  assert.equal(w.pfFmtNum(0), "0");
+  assert.equal(w.pfFmtNum("72000"), "72,000");
+  // fmtNum 을 그대로 쓰면 ''->'0', 'abc'->'NaN' 이 되므로 가드가 '-' 를 유지한다.
+  assert.equal(w.pfFmtNum(null), "-");
+  assert.equal(w.pfFmtNum(undefined), "-");
+  assert.equal(w.pfFmtNum(""), "-");
+  assert.equal(w.pfFmtNum("abc"), "-");
+  // 위임 계약: 유효 숫자는 공용 fmtNum 과 결과가 항상 같다.
+  assert.equal(w.pfFmtNum(1234567.5), w.fmtNum(1234567.5));
+});
+
 test("카테고리 -> {alert_type} 매핑", () => {
   const w = loadAlerts();
   // {...} 로 현재 realm 객체로 복사해 cross-realm prototype 차이 회피.

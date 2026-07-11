@@ -18,7 +18,9 @@ const PfHousehold = {
   wealthView: null,
 };
 
-const PF_HH_COLORS = {
+// 가계자산 차트 팔레트 — 하드코딩 대신 CSS 토큰(base.css --hh-*)을 렌더 시점에
+// 읽어 다크 테마와 톤을 맞춘다(_sparkTrendColor 선례). 토큰이 없으면 종전 색 폴백.
+const PF_HH_COLOR_FALLBACKS = {
   portfolio: '#4f46e5',
   real_estate: '#0f766e',
   cash: '#0891b2',
@@ -29,6 +31,13 @@ const PF_HH_COLORS = {
   other: '#94a3b8',
   liability: '#e11d48',
 };
+
+function pfHhColor(category) {
+  const key = String(category || 'other');
+  const token = `--hh-${key.replace(/_/g, '-')}`;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  return value || PF_HH_COLOR_FALLBACKS[key] || PF_HH_COLOR_FALLBACKS.other;
+}
 
 function _pfHouseholdMoney(value) {
   const amount = Number(value || 0);
@@ -216,7 +225,7 @@ function _pfHouseholdOverviewWealthMarkup(summary, percentile, distribution) {
     `<text x="${x(p)}" y="${bottom + 24}" text-anchor="middle" class="pf-hh-chart-axis">P${p}</text>`
   ).join('');
   const chart = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="전국 가구 순자산 백분위 곡선에서 우리 가구의 위치">
-    <defs><linearGradient id="pfHhWealthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f46e5" stop-opacity=".34"/><stop offset="1" stop-color="#4f46e5" stop-opacity=".02"/></linearGradient></defs>
+    <defs><linearGradient id="pfHhWealthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${pfHhColor('portfolio')}" stop-opacity=".34"/><stop offset="1" stop-color="${pfHhColor('portfolio')}" stop-opacity=".02"/></linearGradient></defs>
     ${grids}<path d="${areaPath}" fill="url(#pfHhWealthFill)"/><path d="${linePath}" class="pf-hh-wealth-line"/>
     ${officialDots}${xTicks}
     <line x1="${markerX}" x2="${markerX}" y1="${markerY}" y2="${bottom}" class="pf-hh-user-line"/>
@@ -268,7 +277,7 @@ function _pfHouseholdTopOneWealthMarkup(summary, percentile, distribution) {
     : '<strong>확대 범위의 최상단입니다</strong><span>추정 상위 0.01%보다 더 세밀한 구간은 표시하지 않습니다.</span>';
   const chart = `<div class="pf-hh-top1-insight"><div><small>현재 위치</small><b>${escapeHtml(label)}</b></div><div>${insight}</div></div>
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="추정 상위 1퍼센트부터 0.01퍼센트까지 확대 순자산 분포에서 우리 가구의 위치">
-      <defs><linearGradient id="pfHhTopOneFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7c3aed" stop-opacity=".32"/><stop offset="1" stop-color="#7c3aed" stop-opacity=".02"/></linearGradient></defs>
+      <defs><linearGradient id="pfHhTopOneFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${pfHhColor('pension')}" stop-opacity=".32"/><stop offset="1" stop-color="${pfHhColor('pension')}" stop-opacity=".02"/></linearGradient></defs>
       ${grids}${ticks}<path d="${areaPath}" fill="url(#pfHhTopOneFill)"/><path d="${linePath}" class="pf-hh-wealth-line pf-hh-top1-line"/>
       <line x1="${markerX}" x2="${markerX}" y1="${markerY}" y2="${bottom}" class="pf-hh-user-line"/>
       <circle cx="${markerX}" cy="${markerY}" r="7" class="pf-hh-user-dot"><title>내 순자산 ${_pfHouseholdMoney(summary.netWorth)}</title></circle>
@@ -318,7 +327,7 @@ function _pfHouseholdRenderMix(summary) {
       category,
       amount,
       label: category === 'portfolio' ? '투자 포트폴리오' : (PfHousehold.categories[category]?.label || category),
-      color: PF_HH_COLORS[category] || '#94a3b8',
+      color: pfHhColor(category),
     }))
     .sort((a, b) => b.amount - a.amount);
   let offset = 0;
@@ -333,9 +342,9 @@ function _pfHouseholdRenderMix(summary) {
     : '<div class="pf-risk-empty">자산을 입력하면 구성이 표시됩니다.</div>';
   const official = PfHousehold.distribution?.asset_composition;
   const broadRows = [
-    { key: 'financial', label: '금융자산', color: PF_HH_COLORS.portfolio, national: Number(official?.financial_assets?.share_pct || 0) },
-    { key: 'realEstate', label: '부동산', color: PF_HH_COLORS.real_estate, national: Number(official?.real_estate?.share_pct || 0) },
-    { key: 'other', label: '기타 실물자산', color: PF_HH_COLORS.business, national: Number(official?.other_physical_assets?.share_pct || 0) },
+    { key: 'financial', label: '금융자산', color: pfHhColor('portfolio'), national: Number(official?.financial_assets?.share_pct || 0) },
+    { key: 'realEstate', label: '부동산', color: pfHhColor('real_estate'), national: Number(official?.real_estate?.share_pct || 0) },
+    { key: 'other', label: '기타 실물자산', color: pfHhColor('business'), national: Number(official?.other_physical_assets?.share_pct || 0) },
   ];
   const broadComparison = official ? broadRows.map(row => {
     const mine = summary.assets > 0 ? Number(summary.broadAssets?.[row.key] || 0) / summary.assets * 100 : 0;
@@ -370,12 +379,12 @@ function _pfHouseholdRenderAssets() {
   const root = document.getElementById('pfHouseholdAssets');
   if (!root) return;
   const portfolioRow = `<div class="pf-hh-asset-row pf-hh-asset-fixed">
-    <span class="pf-hh-asset-type"><i style="background:${PF_HH_COLORS.portfolio}"></i>투자 포트폴리오</span>
+    <span class="pf-hh-asset-type"><i style="background:${pfHhColor('portfolio')}"></i>투자 포트폴리오</span>
     <span>보유종목 자동 합산</span><span>가구 공동</span><strong>${_pfHouseholdMoney(PfHousehold.portfolioValue)}</strong>
     <label class="pf-hh-retire-check"><input type="checkbox" checked disabled> 포함</label><span></span>
   </div>`;
   const rows = PfHousehold.items.map((item, index) => {
-    const color = PF_HH_COLORS[item.category] || '#94a3b8';
+    const color = pfHhColor(item.category);
     return `<div class="pf-hh-asset-row" data-index="${index}">
       <label><span class="pf-hh-mobile-label">분류</span><select aria-label="자산 분류" onchange="pfHouseholdUpdateItem(${index},'category',this.value)">${_pfHouseholdCategoryOptions(item.category)}</select></label>
       <label><span class="pf-hh-mobile-label">이름</span><input aria-label="자산 이름" maxlength="60" value="${escapeHtml(item.name || '')}" oninput="pfHouseholdUpdateItem(${index},'name',this.value)"></label>
@@ -707,3 +716,13 @@ window.addEventListener('beforeunload', event => {
   event.preventDefault();
   event.returnValue = '';
 });
+
+// 다크 전환 시 가계자산 차트를 --hh-* 토큰 색으로 다시 그린다 — toggleTheme
+// (search.js)은 echarts resize 만 하므로, DOM/SVG 기반인 이 화면은 data-theme
+// 변화를 직접 관찰해 재렌더한다. 자산 입력 목록(_pfHouseholdRenderAssets)은
+// 입력 중 포커스를 잃지 않도록 다시 그리지 않는다(색 점은 다음 렌더에 갱신).
+if (typeof MutationObserver === 'function') {
+  new MutationObserver(() => {
+    if (PfHousehold.loaded) _pfHouseholdRenderInsights();
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}

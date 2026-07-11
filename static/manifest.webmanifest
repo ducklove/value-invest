@@ -20,6 +20,12 @@
       "sizes": "640x640",
       "type": "image/jpeg",
       "purpose": "any"
+    },
+    {
+      "src": "/static/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }
