@@ -91,7 +91,7 @@ flowchart TB
     DART["DART 공시 API"]
     Naver["Naver Finance / Reports"]
     Yahoo["Yahoo Finance / yfinance"]
-    Crypto["Upbit / Bithumb / Binance<br/>gold.org"]
+    Crypto["Upbit / Bithumb / Hyperliquid<br/>gold.org"]
     KIS["Korea Investment Securities API"]
     OpenRouter["OpenRouter AI Gateway"]
   end

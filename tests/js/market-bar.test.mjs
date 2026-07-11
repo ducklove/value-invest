@@ -66,3 +66,34 @@ test("market bar renders signed 전일대비 when present", () => {
   assert.match(chg.textContent, /-0\.02/);
   assert.match(chg.textContent, /-0\.39%/);
 });
+
+test("legacy Binance market-bar codes migrate to Hyperliquid without duplicates", () => {
+  const w = load();
+  const normalized = w._mbNormalizeCodes([
+    "KOSPI",
+    "BNB_EWY",
+    "HL_EWY",
+    "BNB_SAMSUNG",
+    "BNB_SKHYNIX",
+    "BNB_HYUNDAI",
+    "",
+    null,
+  ]);
+  assert.deepEqual(
+    [...normalized],
+    ["KOSPI", "HL_EWY", "HL_SAMSUNG", "HL_SKHYNIX", "HL_HYUNDAI"],
+  );
+});
+
+test("local and server market-bar settings are normalized when loaded", async () => {
+  const w = load();
+  w.localStorage.setItem("market_bar_codes", JSON.stringify(["BNB_EWY", "USD_KRW"]));
+  assert.deepEqual([...w._mbGetCodes()], ["HL_EWY", "USD_KRW"]);
+
+  w.__settingsApi = async () => ({ codes: ["BNB_SKHYNIX", "HL_SKHYNIX", "BNB_HYUNDAI"] });
+  w.eval("currentUser = { google_sub: 'user-1' }; apiFetchJson = window.__settingsApi;");
+  await w._mbLoadCodes();
+  const loaded = JSON.parse(w.eval("JSON.stringify(mbCodes)"));
+  assert.deepEqual(loaded, ["HL_SKHYNIX", "HL_HYUNDAI"]);
+  assert.equal(w.localStorage.getItem("market_bar_codes"), JSON.stringify(loaded));
+});

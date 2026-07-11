@@ -24,7 +24,7 @@ async def market_summary(codes: str = ""):
 
 @router.get("/api/market/live")
 async def market_live(codes: str = ""):
-    """야간선물·바이낸스 등 빠르게 변하는 지표만 짧은 TTL 로 조회(박스 단위 갱신)."""
+    """야간선물·Hyperliquid의 짧은 TTL REST 폴백을 제공한다."""
     import market_indicators
 
     code_list = [c.strip()[:30] for c in codes.split(",") if c.strip()][:10]

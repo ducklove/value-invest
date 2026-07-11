@@ -119,11 +119,11 @@ CATALOG: dict[str, dict] = {
     "BR10Y":  {"label": "브라질10년물", "category": "국채", "country": "BR", "maturity": 10},
     # 야간선물
     "NIGHT_FUTURES": {"label": "야간선물", "category": "야간선물"},
-    # 바이낸스 USDⓈ-M 선물 (토큰화 주식 무기한) — USDT 가격·24h 등락
-    "BNB_EWY":     {"label": "EWY",        "category": "바이낸스"},
-    "BNB_SAMSUNG": {"label": "삼성전자",   "category": "바이낸스"},
-    "BNB_SKHYNIX": {"label": "SK하이닉스", "category": "바이낸스"},
-    "BNB_HYUNDAI": {"label": "현대차",     "category": "바이낸스"},
+    # Hyperliquid XYZ HIP-3 perpetuals — USD price and previous-day change
+    "HL_EWY":     {"label": "EWY",        "category": "하이퍼리퀴드", "symbol": "xyz:EWY"},
+    "HL_SAMSUNG": {"label": "삼성전자",   "category": "하이퍼리퀴드", "symbol": "xyz:SMSN"},
+    "HL_SKHYNIX": {"label": "SK하이닉스", "category": "하이퍼리퀴드", "symbol": "xyz:SKHX"},
+    "HL_HYUNDAI": {"label": "현대차",     "category": "하이퍼리퀴드", "symbol": "xyz:HYUNDAI"},
 }
 
 _EMPTY = {"value": "", "change": "", "change_pct": "", "direction": ""}
@@ -336,58 +336,95 @@ async def _fetch_foreign_index(client: httpx.AsyncClient, symbol: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Binance USDⓈ-M Futures (tokenized stock perps) — 한 번의 배치 요청
+# Hyperliquid XYZ HIP-3 perpetuals — one metadata/context request
 # ---------------------------------------------------------------------------
-_BINANCE_MAP = {
-    "BNB_EWY":     "EWYUSDT",
-    "BNB_SAMSUNG": "SAMSUNGUSDT",
-    "BNB_SKHYNIX": "SKHYNIXUSDT",
-    "BNB_HYUNDAI": "HYUNDAIUSDT",
+_HYPERLIQUID_MAP = {
+    "HL_EWY":     "xyz:EWY",
+    "HL_SAMSUNG": "xyz:SMSN",
+    "HL_SKHYNIX": "xyz:SKHX",
+    "HL_HYUNDAI": "xyz:HYUNDAI",
 }
+_HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
 
 
-async def _fetch_binance_tickers(client: httpx.AsyncClient, codes: list[str]) -> dict:
-    """바이낸스 USDⓈ-M 선물 24h 티커(배치). {code: {value, change, change_pct, direction}}.
-
-    값은 USDT 가격, change 는 절대 변동(부호 제외, 프론트가 direction 으로 부호 표시).
-    실패·결측은 _EMPTY 로 안전 폴백한다.
-    """
-    out: dict[str, dict] = {}
-    symbols = [_BINANCE_MAP[c] for c in codes if c in _BINANCE_MAP]
-    if not symbols:
-        return out
+def _finite_float(value) -> float | None:
     try:
-        r = await client.get(
-            "https://fapi.binance.com/fapi/v1/ticker/24hr",
-            params={"symbols": _json.dumps(symbols, separators=(",", ":"))},
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
+
+
+def _parse_hyperliquid_context(ctx: dict) -> dict:
+    """Convert a Hyperliquid asset context to the dashboard quote contract."""
+    if not isinstance(ctx, dict):
+        return dict(_EMPTY)
+
+    price = next(
+        (
+            parsed
+            for parsed in (
+                _finite_float(ctx.get("midPx")),
+                _finite_float(ctx.get("markPx")),
+                _finite_float(ctx.get("oraclePx")),
+            )
+            if parsed is not None
+        ),
+        None,
+    )
+    if price is None:
+        return dict(_EMPTY)
+
+    result = {**_EMPTY, "value": _fmt(price)}
+    previous = _finite_float(ctx.get("prevDayPx"))
+    if previous in (None, 0):
+        return result
+
+    change = price - previous
+    change_pct = change / previous * 100
+    result.update(
+        {
+            "change": _fmt(abs(change)),
+            "change_pct": f"{abs(change_pct):.2f}%",
+            "direction": "up" if change > 0 else ("down" if change < 0 else "flat"),
+        }
+    )
+    return result
+
+
+async def _fetch_hyperliquid_tickers(
+    client: httpx.AsyncClient,
+    codes: list[str],
+) -> dict[str, dict]:
+    """Fetch XYZ HIP-3 prices and previous-day changes in one public request."""
+    wanted = {code: _HYPERLIQUID_MAP[code] for code in codes if code in _HYPERLIQUID_MAP}
+    out = {code: dict(_EMPTY) for code in wanted}
+    if not wanted:
+        return out
+
+    try:
+        response = await client.post(
+            _HYPERLIQUID_INFO_URL,
+            json={"type": "metaAndAssetCtxs", "dex": "xyz"},
             headers=_HEADERS,
         )
-        rows = r.json()
-        by_symbol = {
-            row.get("symbol"): row for row in rows if isinstance(row, dict)
-        } if isinstance(rows, list) else {}
-        for code in codes:
-            row = by_symbol.get(_BINANCE_MAP.get(code))
-            if not row:
-                out[code] = dict(_EMPTY)
-                continue
-            try:
-                last = float(row.get("lastPrice"))
-                chg = float(row.get("priceChange"))
-                pct = float(row.get("priceChangePercent"))
-            except (TypeError, ValueError):
-                out[code] = dict(_EMPTY)
-                continue
-            direction = "up" if pct > 0 else ("down" if pct < 0 else "")
-            out[code] = {
-                "value": _fmt(last),
-                "change": _fmt(abs(chg)),
-                "change_pct": f"{abs(pct):.2f}%",
-                "direction": direction,
-            }
-    except Exception:
-        for code in codes:
-            out.setdefault(code, dict(_EMPTY))
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list) or len(payload) < 2:
+            return out
+        meta, contexts = payload[0], payload[1]
+        universe = meta.get("universe") if isinstance(meta, dict) else None
+        if not isinstance(universe, list) or not isinstance(contexts, list):
+            return out
+
+        by_symbol = {symbol: code for code, symbol in wanted.items()}
+        for asset, ctx in zip(universe, contexts):
+            symbol = asset.get("name") if isinstance(asset, dict) else None
+            code = by_symbol.get(symbol)
+            if code:
+                out[code] = _parse_hyperliquid_context(ctx)
+    except (httpx.HTTPError, TypeError, ValueError, AttributeError):
+        pass
     return out
 
 
@@ -1398,7 +1435,7 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     night_futures_needed = False
     gold_needed = False
     wti_needed = False
-    binance_items = []  # 바이낸스 선물 — one batched request
+    hyperliquid_items = []  # Hyperliquid XYZ perps — one batched request
 
     for code in fetch_codes:
         if code == "CMDT_GC":
@@ -1431,8 +1468,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             jp_tona_needed = True
         elif code == "NIGHT_FUTURES":
             night_futures_needed = True
-        elif code in _BINANCE_MAP:
-            binance_items.append(code)
+        elif code in _HYPERLIQUID_MAP:
+            hyperliquid_items.append(code)
 
     need_marketindex_page = len(marketindex_items) > 0
 
@@ -1516,10 +1553,10 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(_fetch_night_futures())
             task_keys.append(("night_futures", None))
 
-        # Binance USDⓈ-M futures — one batched request covers all symbols
-        if binance_items:
-            tasks.append(_fetch_binance_tickers(client, binance_items))
-            task_keys.append(("binance", None))
+        # Hyperliquid XYZ perpetuals — one request covers all requested symbols
+        if hyperliquid_items:
+            tasks.append(_fetch_hyperliquid_tickers(client, hyperliquid_items))
+            task_keys.append(("hyperliquid", None))
 
         # Run all in parallel
         fetched = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1574,10 +1611,10 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 results["JP_TONA"] = result
             elif kind == "night_futures":
                 results["NIGHT_FUTURES"] = result
-            elif kind == "binance":
+            elif kind == "hyperliquid":
                 # result is {code: data}; copy only requested codes.
                 if isinstance(result, dict):
-                    for c in binance_items:
+                    for c in hyperliquid_items:
                         if c in result:
                             results[c] = result[c]
 
@@ -1614,15 +1651,15 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# 박스 단위 라이브 갱신 — 야간선물·바이낸스처럼 빠르게 변하는 지표만 짧은 TTL 로.
+# 박스 단위 REST 폴백 — 야간선물·Hyperliquid 지표만 짧은 TTL 로.
 # ---------------------------------------------------------------------------
 _LIVE_TTL = 8  # seconds — 클라이언트 10초 폴링보다 짧게(동시·연속 폴링 합치기)
 _live_cache = MemoryTTLCache("market_indicators.live", _LIVE_TTL)
-_LIVE_CODES = {"NIGHT_FUTURES", *_BINANCE_MAP}
+_LIVE_CODES = {"NIGHT_FUTURES", *_HYPERLIQUID_MAP}
 
 
 async def fetch_indicators_live(codes: list[str]) -> dict[str, dict]:
-    """야간선물·바이낸스만 짧은 TTL 로 조회한다(박스 단위 갱신용).
+    """야간선물·Hyperliquid만 짧은 TTL 로 조회한다(WebSocket 폴백용).
 
     60초 batch/item 캐시를 거치지 않고 해당 fetcher 를 직접 호출하되, 8초
     캐시로 동시/연속 폴링을 합쳐 외부 부하를 막는다. 지원하지 않는 코드는 무시.
@@ -1636,13 +1673,13 @@ async def fetch_indicators_live(codes: list[str]) -> dict[str, dict]:
         return dict(cached)
 
     results: dict[str, dict] = {}
-    binance_items = [c for c in wanted if c in _BINANCE_MAP]
+    hyperliquid_items = [c for c in wanted if c in _HYPERLIQUID_MAP]
     async with _market_indicators_client() as client:
         tasks = []
         task_kinds = []
-        if binance_items:
-            tasks.append(_fetch_binance_tickers(client, binance_items))
-            task_kinds.append("binance")
+        if hyperliquid_items:
+            tasks.append(_fetch_hyperliquid_tickers(client, hyperliquid_items))
+            task_kinds.append("hyperliquid")
         if "NIGHT_FUTURES" in wanted:
             tasks.append(_fetch_night_futures())
             task_kinds.append("night")
@@ -1650,7 +1687,7 @@ async def fetch_indicators_live(codes: list[str]) -> dict[str, dict]:
         for kind, res in zip(task_kinds, fetched):
             if isinstance(res, Exception):
                 continue
-            if kind == "binance" and isinstance(res, dict):
+            if kind == "hyperliquid" and isinstance(res, dict):
                 results.update(res)
             elif kind == "night":
                 results["NIGHT_FUTURES"] = res

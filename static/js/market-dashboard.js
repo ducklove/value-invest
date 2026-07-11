@@ -13,7 +13,7 @@ let _mdLoadedOnce = false;
 let _mdInFlight = null;
 
 // Display order for category groups; unknown categories fall to the end.
-const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '바이낸스'];
+const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '하이퍼리퀴드'];
 const MD_INDEX_FRAME_BASE_URL = 'https://cantabile.tplinkdns.com:3358/';
 const MD_INDEX_FRAME_CODES = { KOSPI: 'ekospi', KOSDAQ: 'kosdaq' };
 const MD_INDEX_DISPLAY_LABELS = { KOSPI: 'eKOSPI', KOSDAQ: 'KOSDAQ' };
@@ -217,92 +217,107 @@ function _mdKospiFuturesSectionHtml() {
     + '</div></section>';
 }
 
-// --- 바이낸스 섹션: USDT↔원화 토글(기본 원화) ---
-// 값은 바이낸스 USDT 선물가. 원화 모드면 USD_KRW 환율로 환산해 표시한다.
-// (등락%·방향은 통화와 무관하므로 그대로 둔다.)
-let _bnbCcy = null;  // 'KRW' | 'USDT' — lazy init(localStorage)
+// --- Hyperliquid 섹션: USD↔원화 토글(기본 원화) ---
+// XYZ HIP-3의 USD 표시 가격을 원화 모드에서 USD_KRW 환율로 환산한다.
+let _hlCcy = null;  // 'KRW' | 'USD' — lazy init(localStorage)
 
-function _bnbCurrentCcy() {
-  if (_bnbCcy == null) {
-    _bnbCcy = 'KRW';
-    try { if (localStorage.getItem('bnbCcy') === 'USDT') _bnbCcy = 'USDT'; } catch (e) { /* noop */ }
+function _hlCurrentCcy() {
+  if (_hlCcy == null) {
+    _hlCcy = 'KRW';
+    try {
+      const saved = localStorage.getItem('hlCcy');
+      // 기존 바이낸스 USDT 선택도 한 번 이어받아 사용자 설정을 보존한다.
+      if (saved === 'USD' || (!saved && localStorage.getItem('bnbCcy') === 'USDT')) _hlCcy = 'USD';
+    } catch (e) { /* noop */ }
   }
-  return _bnbCcy;
+  return _hlCcy;
 }
 
-function _bnbParseNum(s) {
-  if (s == null) return null;
-  const n = Number(String(s).replace(/,/g, ''));
-  return isFinite(n) ? n : null;
+function _hlParseNum(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const parsed = Number(String(value).replace(/,/g, ''));
+  return isFinite(parsed) ? parsed : null;
 }
 
-function _bnbUsdKrwRate(dataMap) {
-  return _bnbParseNum(dataMap && dataMap.USD_KRW ? dataMap.USD_KRW.value : null);
+function _hlUsdKrwRate(dataMap) {
+  return _hlParseNum(dataMap && dataMap.USD_KRW ? dataMap.USD_KRW.value : null);
 }
 
-function _bnbFmtKrw(n) {
-  return Math.round(n).toLocaleString('en-US');
+function _hlFmtKrw(value) {
+  return Math.round(value).toLocaleString('en-US');
 }
 
-function _bnbRowsHtml(codes, catalog, dataMap) {
-  const useKrw = _bnbCurrentCcy() === 'KRW';
-  const rate = _bnbUsdKrwRate(dataMap);
-  // 원화 모드 + 환율이 있으면 value/change 를 환산한 view 로 기존 행 렌더러 재사용.
+function _hlFmtUsd(value) {
+  return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function _hlRowsHtml(codes, catalog, dataMap) {
+  const useKrw = _hlCurrentCcy() === 'KRW';
+  const rate = _hlUsdKrwRate(dataMap);
   const view = {};
-  for (const c of codes) {
-    const d = dataMap && dataMap[c] ? dataMap[c] : {};
+  for (const code of codes) {
+    const data = dataMap && dataMap[code] ? dataMap[code] : {};
     if (useKrw && rate) {
-      const v = _bnbParseNum(d.value);
-      const ch = _bnbParseNum(d.change);
-      view[c] = Object.assign({}, d, {
-        value: v != null ? _bnbFmtKrw(v * rate) : d.value,
-        change: ch != null ? _bnbFmtKrw(ch * rate) : d.change,
+      const value = _hlParseNum(data.value);
+      const change = _hlParseNum(data.change);
+      view[code] = Object.assign({}, data, {
+        value: value != null ? _hlFmtKrw(value * rate) : data.value,
+        change: change != null ? _hlFmtKrw(change * rate) : data.change,
       });
     } else {
-      view[c] = d;
+      view[code] = data;
     }
   }
-  return codes.map((c) => _mdCardHtml(c, catalog, view, 'list')).join('');
+  return codes.map((code) => _mdCardHtml(code, catalog, view, 'list')).join('');
 }
 
-function _mdBinanceSectionHtml(codes, catalog, dataMap) {
-  const ccy = _bnbCurrentCcy();
+function _mdHyperliquidSectionHtml(codes, catalog, dataMap) {
+  const ccy = _hlCurrentCcy();
   const btn = (key, label) =>
-    `<button class="mv-mkt${ccy === key ? ' active' : ''}" data-bnb-ccy="${key}">${label}</button>`;
-  return '<section class="md-section bnb-section" id="mdBinanceSection">'
-    + '<div class="mv-head"><h3 class="md-section-title">바이낸스</h3>'
-    + `<div class="mv-mkts">${btn('KRW', '원화')}${btn('USDT', 'USDT')}</div></div>`
-    + `<div class="md-rows">${_bnbRowsHtml(codes, catalog, dataMap)}</div></section>`;
+    `<button class="mv-mkt${ccy === key ? ' active' : ''}" data-hl-ccy="${key}">${label}</button>`;
+  return '<section class="md-section hl-section" id="mdHyperliquidSection">'
+    + '<div class="mv-head"><div class="hl-head-title"><h3 class="md-section-title">하이퍼리퀴드</h3>'
+    + '<span class="hl-live-status is-connecting" id="hlLiveStatus" aria-live="polite">연결 중</span></div>'
+    + `<div class="mv-mkts">${btn('KRW', '원화')}${btn('USD', 'USD')}</div></div>`
+    + `<div class="md-rows">${_hlRowsHtml(codes, catalog, dataMap)}</div></section>`;
 }
 
-function _mdWireBinanceToggle(catalog, dataMap) {
-  const sec = document.getElementById('mdBinanceSection');
-  if (!sec) return;
+function _mdWireHyperliquidToggle(catalog, dataMap) {
+  const section = document.getElementById('mdHyperliquidSection');
+  if (!section) return;
   const codes = Object.keys(catalog || {}).filter(
-    (c) => (catalog[c] || {}).category === '바이낸스'
+    (code) => (catalog[code] || {}).category === '하이퍼리퀴드'
   );
-  sec.querySelectorAll('[data-bnb-ccy]').forEach((b) =>
-    b.addEventListener('click', () => {
-      const ccy = b.dataset.bnbCcy === 'USDT' ? 'USDT' : 'KRW';
-      if (ccy === _bnbCurrentCcy()) return;
-      _bnbCcy = ccy;
-      try { localStorage.setItem('bnbCcy', ccy); } catch (e) { /* noop */ }
-      // 버튼은 유지(리스너 보존)하고 active 표시 + 행만 다시 그린다.
-      sec.querySelectorAll('[data-bnb-ccy]').forEach((x) =>
-        x.classList.toggle('active', x.dataset.bnbCcy === ccy));
-      const rowsEl = sec.querySelector('.md-rows');
-      if (rowsEl) rowsEl.innerHTML = _bnbRowsHtml(codes, catalog, dataMap);
+  section.querySelectorAll('[data-hl-ccy]').forEach((button) =>
+    button.addEventListener('click', () => {
+      const ccy = button.dataset.hlCcy === 'USD' ? 'USD' : 'KRW';
+      if (ccy === _hlCurrentCcy()) return;
+      _hlCcy = ccy;
+      try { localStorage.setItem('hlCcy', ccy); } catch (e) { /* noop */ }
+      section.querySelectorAll('[data-hl-ccy]').forEach((item) =>
+        item.classList.toggle('active', item.dataset.hlCcy === ccy));
+      const rowsEl = section.querySelector('.md-rows');
+      if (rowsEl) rowsEl.innerHTML = _hlRowsHtml(codes, catalog, dataMap);
     })
   );
 }
 
-// --- 박스 단위 라이브 갱신: 바이낸스만 10초마다(가볍게) ---
-// 전용 엔드포인트(/api/market/live, 서버 8초 캐시)로 필요한 코드만 받아 해당
-// 섹션 행만 교체한다(전체 재렌더·차트 재init 없음). 숨겨진 뷰/백그라운드 탭은 스킵.
-const MD_LIVE_CODES = ['BNB_EWY', 'BNB_SAMSUNG', 'BNB_SKHYNIX', 'BNB_HYUNDAI'];
-const MD_LIVE_INTERVAL_MS = 10000;
+// --- Hyperliquid real-time stream ---
+// activeAssetCtx gives mid/mark/previous-day prices. A short REST poll remains
+// only as a fallback while the direct WebSocket is unavailable.
+const HL_WS_URL = 'wss://api.hyperliquid.xyz/ws';
+const HL_HEARTBEAT_MS = 45000;
+const HL_RECONNECT_BASE_MS = 1000;
+const HL_RECONNECT_MAX_MS = 30000;
+const HL_FALLBACK_INTERVAL_MS = 10000;
 let _mdLastDataMap = null;
-let _mdLiveTimer = null;
+let _hlSocket = null;
+let _hlHeartbeatTimer = null;
+let _hlReconnectTimer = null;
+let _hlFallbackTimer = null;
+let _hlReconnectAttempt = 0;
+let _hlStopped = false;
+let _hlLifecycleWired = false;
 
 function _mdLiveActive() {
   if (typeof document === 'undefined' || document.hidden) return false;
@@ -311,30 +326,192 @@ function _mdLiveActive() {
   return !!document.getElementById('mdIndRail');
 }
 
-async function _mdLiveRefresh() {
+function _hlEntries() {
+  return Object.entries(_mdCatalog || {}).filter(
+    ([, meta]) => meta && meta.category === '하이퍼리퀴드' && typeof meta.symbol === 'string'
+  );
+}
+
+function _hlSetStatus(kind, text) {
+  const el = document.getElementById('hlLiveStatus');
+  if (!el) return;
+  el.className = `hl-live-status is-${kind}`;
+  el.textContent = text;
+}
+
+function _hlRenderRows() {
+  if (!_mdCatalog || !_mdLastDataMap) return;
+  const section = document.getElementById('mdHyperliquidSection');
+  const rows = section && section.querySelector('.md-rows');
+  if (!rows) return;
+  const codes = _hlEntries().map(([code]) => code);
+  rows.innerHTML = _hlRowsHtml(codes, _mdCatalog, _mdLastDataMap);
+}
+
+function _hlIndicatorFromContext(ctx) {
+  if (!ctx || typeof ctx !== 'object') return null;
+  const value = [_hlParseNum(ctx.midPx), _hlParseNum(ctx.markPx), _hlParseNum(ctx.oraclePx)]
+    .find((candidate) => candidate != null);
+  if (value == null) return null;
+  const result = { value: _hlFmtUsd(value), change: '', change_pct: '', direction: '' };
+  const previous = _hlParseNum(ctx.prevDayPx);
+  if (previous == null || previous === 0) return result;
+  const change = value - previous;
+  result.change = _hlFmtUsd(Math.abs(change));
+  result.change_pct = `${Math.abs(change / previous * 100).toFixed(2)}%`;
+  result.direction = change > 0 ? 'up' : (change < 0 ? 'down' : 'flat');
+  return result;
+}
+
+function _hlApplyContext(coin, ctx) {
+  if (!_mdLastDataMap) return false;
+  const entry = _hlEntries().find(([, meta]) => meta.symbol === coin);
+  const indicator = _hlIndicatorFromContext(ctx);
+  if (!entry || !indicator) return false;
+  _mdLastDataMap[entry[0]] = indicator;
+  _hlRenderRows();
+  _hlSetStatus('live', '실시간');
+  return true;
+}
+
+function _hlHandleMessage(event) {
+  let message;
+  try { message = JSON.parse(event.data); } catch (e) { return; }
+  if (!message || !['activeAssetCtx', 'activeSpotAssetCtx'].includes(message.channel)) return;
+  const data = message.data;
+  if (!data || typeof data.coin !== 'string') return;
+  _hlApplyContext(data.coin, data.ctx);
+}
+
+function _hlClearHeartbeat() {
+  if (_hlHeartbeatTimer) clearInterval(_hlHeartbeatTimer);
+  _hlHeartbeatTimer = null;
+}
+
+function _hlStartHeartbeat(socket) {
+  _hlClearHeartbeat();
+  _hlHeartbeatTimer = setInterval(() => {
+    if (_hlSocket !== socket || socket.readyState !== 1) return;
+    try { socket.send(JSON.stringify({ method: 'ping' })); } catch (e) { /* reconnect handles it */ }
+  }, HL_HEARTBEAT_MS);
+}
+
+function _hlScheduleReconnect() {
+  if (_hlStopped || _hlReconnectTimer || !_mdLiveActive()) return;
+  const base = Math.min(HL_RECONNECT_MAX_MS, HL_RECONNECT_BASE_MS * (2 ** _hlReconnectAttempt));
+  const delay = Math.min(HL_RECONNECT_MAX_MS, base + Math.floor(Math.random() * 500));
+  _hlReconnectAttempt += 1;
+  _hlSetStatus('reconnecting', '재연결 중');
+  _hlReconnectTimer = setTimeout(() => {
+    _hlReconnectTimer = null;
+    _hlConnect();
+  }, delay);
+}
+
+function _hlConnect() {
+  if (_hlStopped || !_mdCatalog || !_mdLiveActive()) return;
+  if (_hlSocket && (_hlSocket.readyState === 0 || _hlSocket.readyState === 1)) {
+    _hlSetStatus(_hlSocket.readyState === 1 ? 'live' : 'connecting', _hlSocket.readyState === 1 ? '실시간' : '연결 중');
+    return;
+  }
+  if (typeof WebSocket === 'undefined') {
+    _hlSetStatus('fallback', 'REST 폴백');
+    _hlRestFallbackRefresh();
+    return;
+  }
+
+  if (_hlReconnectTimer) clearTimeout(_hlReconnectTimer);
+  _hlReconnectTimer = null;
+  _hlSetStatus('connecting', '연결 중');
+  let socket;
+  try { socket = new WebSocket(HL_WS_URL); } catch (e) { _hlScheduleReconnect(); return; }
+  _hlSocket = socket;
+
+  socket.onopen = () => {
+    if (_hlSocket !== socket) return;
+    _hlReconnectAttempt = 0;
+    for (const [, meta] of _hlEntries()) {
+      socket.send(JSON.stringify({
+        method: 'subscribe',
+        subscription: { type: 'activeAssetCtx', coin: meta.symbol },
+      }));
+    }
+    _hlStartHeartbeat(socket);
+    _hlSetStatus('live', '실시간');
+  };
+  socket.onmessage = _hlHandleMessage;
+  socket.onerror = () => {
+    if (_hlSocket !== socket) return;
+    try { socket.close(); } catch (e) { _hlScheduleReconnect(); }
+  };
+  socket.onclose = () => {
+    if (_hlSocket !== socket) return;
+    _hlSocket = null;
+    _hlClearHeartbeat();
+    _hlScheduleReconnect();
+  };
+}
+
+async function _hlRestFallbackRefresh() {
   if (!_mdCatalog || !_mdLastDataMap || !_mdLiveActive()) return;
+  if (_hlSocket && _hlSocket.readyState === 1) return;
+  const codes = _hlEntries().map(([code]) => code);
+  if (!codes.length) return;
   let live;
   try {
-    live = await apiFetchJson('/api/market/live?codes=' + encodeURIComponent(MD_LIVE_CODES.join(',')), { fallback: null });
+    live = await apiFetchJson('/api/market/live?codes=' + encodeURIComponent(codes.join(',')), { fallback: null });
     if (!live) return;
   } catch (e) {
     return;
   }
   if (!live || typeof live !== 'object') return;
-  // 최신값만 머지(USD_KRW 등 환산 기준은 그대로 유지).
   Object.assign(_mdLastDataMap, live);
-  // 바이낸스: 통화 토글 상태 반영해 행만 교체(토글 버튼/리스너는 유지).
-  const bnb = document.getElementById('mdBinanceSection');
-  const bnbRows = bnb && bnb.querySelector('.md-rows');
-  if (bnbRows) {
-    const codes = Object.keys(_mdCatalog).filter((c) => (_mdCatalog[c] || {}).category === '바이낸스');
-    bnbRows.innerHTML = _bnbRowsHtml(codes, _mdCatalog, _mdLastDataMap);
+  _hlRenderRows();
+  _hlSetStatus('fallback', 'REST 폴백');
+}
+
+function _hlCloseSocket() {
+  const socket = _hlSocket;
+  _hlSocket = null;
+  _hlClearHeartbeat();
+  if (!socket) return;
+  socket.onclose = null;
+  try { socket.close(); } catch (e) { /* noop */ }
+}
+
+function _hlHandleVisibilityChange() {
+  if (_mdLiveActive()) {
+    _hlStopped = false;
+    _hlConnect();
+    _hlRestFallbackRefresh();
+  } else {
+    if (_hlReconnectTimer) clearTimeout(_hlReconnectTimer);
+    _hlReconnectTimer = null;
+    _hlCloseSocket();
+    _hlSetStatus('paused', '일시정지');
   }
 }
 
-function _mdStartLiveRefresh() {
-  if (_mdLiveTimer || typeof setInterval === 'undefined') return;
-  _mdLiveTimer = setInterval(_mdLiveRefresh, MD_LIVE_INTERVAL_MS);
+function _hlStartStream() {
+  _hlStopped = false;
+  if (!_hlFallbackTimer && typeof setInterval !== 'undefined') {
+    _hlFallbackTimer = setInterval(_hlRestFallbackRefresh, HL_FALLBACK_INTERVAL_MS);
+  }
+  if (!_hlLifecycleWired) {
+    document.addEventListener('visibilitychange', _hlHandleVisibilityChange);
+    if (typeof window !== 'undefined') window.addEventListener('beforeunload', _hlStopStream);
+    _hlLifecycleWired = true;
+  }
+  _hlConnect();
+}
+
+function _hlStopStream() {
+  _hlStopped = true;
+  if (_hlReconnectTimer) clearTimeout(_hlReconnectTimer);
+  if (_hlFallbackTimer) clearInterval(_hlFallbackTimer);
+  _hlReconnectTimer = null;
+  _hlFallbackTimer = null;
+  _hlCloseSocket();
 }
 
 // --- 국채 (yield curve + 국가별 10년물 비교) ---
@@ -636,9 +813,9 @@ function _mdRenderDashboard(catalog, dataMap) {
       main.push(_mdBondSectionHtml());  // 차트 컨테이너 + 수치 리스트 자리
       continue;
     }
-    if (category === '바이낸스') {
-      // 우측 rail 에 통화 토글(원화/USDT) 포함 섹션으로 렌더.
-      rail.push(_mdBinanceSectionHtml(codes, catalog, dataMap));
+    if (category === '하이퍼리퀴드') {
+      // 우측 rail 에 통화 토글(원화/USD)과 실시간 연결 상태를 함께 렌더.
+      rail.push(_mdHyperliquidSectionHtml(codes, catalog, dataMap));
       continue;
     }
     const isHero = MD_HERO_CATEGORIES.includes(category);
@@ -647,7 +824,7 @@ function _mdRenderDashboard(catalog, dataMap) {
   }
   mainEl.innerHTML = main.join('');
   railEl.innerHTML = rail.join('');
-  _mdWireBinanceToggle(catalog, dataMap);
+  _mdWireHyperliquidToggle(catalog, dataMap);
   if (bondCodes) _mdRenderBonds(bondCodes, catalog, dataMap);
 }
 
@@ -671,7 +848,7 @@ async function loadInvestingDashboard(refresh = false) {
       const dataMap = await apiFetchJson('/api/market-summary?codes=' + encodeURIComponent(codes.join(',')), { fallback: {} });
       _mdRenderDashboard(catalog, dataMap);
       _mdLoadedOnce = true;
-      _mdStartLiveRefresh();  // 바이낸스 10초 라이브 갱신 시작(1회만)
+      _hlStartStream();  // Hyperliquid WebSocket + REST fallback (single connection)
       // 수급 슬롯은 hero 섹션과 함께 생성되므로 렌더 직후 채운다.
       if (typeof loadInvestorFlows === 'function') loadInvestorFlows();
     } catch (e) {

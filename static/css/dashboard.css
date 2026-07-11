@@ -256,6 +256,18 @@
 .mv-mkts { display: inline-flex; gap: 4px; }
 .mv-mkt { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 11px; padding: 3px 10px; border-radius: 999px; cursor: pointer; }
 .mv-mkt.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.hl-head-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.hl-live-status {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  padding: 2px 6px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  color: var(--text-secondary); background: var(--surface-muted, rgba(148, 163, 184, .12));
+}
+.hl-live-status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.hl-live-status.is-live { color: var(--success); background: var(--success-tint); }
+.hl-live-status.is-connecting,
+.hl-live-status.is-reconnecting { color: var(--warning); background: var(--warning-tint); }
+.hl-live-status.is-paused,
+.hl-live-status.is-fallback { color: var(--text-secondary); }
 .mv-tabs { display: flex; gap: 4px; margin: 10px 0 6px; flex-wrap: wrap; }
 .mv-tab { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 12px; padding: 5px 11px; border-radius: var(--radius-md); cursor: pointer; }
 .mv-tab.active { background: var(--surface-muted, rgba(148,163,184,.12)); color: var(--text); border-color: var(--primary); font-weight: 700; }
@@ -636,4 +648,3 @@
   .ec-val { align-items: flex-start; }
   .ec-bell-cell { grid-area: bell; align-self: center; }
 }
-

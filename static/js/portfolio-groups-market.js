@@ -257,6 +257,12 @@ async function deleteGroup(groupName) {
 const MB_DEFAULT_CODES = ['KOSPI', 'KOSDAQ', 'USD_KRW', 'CMDT_GC', 'NIGHT_FUTURES'];
 const MB_MAX = 10;
 const MB_LS_KEY = 'market_bar_codes';
+const MB_CODE_ALIASES = {
+  BNB_EWY: 'HL_EWY',
+  BNB_SAMSUNG: 'HL_SAMSUNG',
+  BNB_SKHYNIX: 'HL_SKHYNIX',
+  BNB_HYUNDAI: 'HL_HYUNDAI',
+};
 let mbCodes = [];
 let mbCatalog = {};
 let mbLoaded = false;
@@ -264,11 +270,27 @@ let mbPickerOpen = false;
 let mbDragFrom = -1;
 let mbLastDataMap = {};
 
+function _mbNormalizeCodes(codes) {
+  if (!Array.isArray(codes)) return [];
+  const normalized = [];
+  for (const rawCode of codes) {
+    if (typeof rawCode !== 'string' || !rawCode.trim()) continue;
+    const code = MB_CODE_ALIASES[rawCode.trim()] || rawCode.trim();
+    if (!normalized.includes(code)) normalized.push(code);
+    if (normalized.length >= MB_MAX) break;
+  }
+  return normalized;
+}
+
 function _mbGetCodes() {
-  try { const v = JSON.parse(localStorage.getItem(MB_LS_KEY)); if (Array.isArray(v)) return v; } catch (e) { console.warn(e); }
+  try {
+    const value = JSON.parse(localStorage.getItem(MB_LS_KEY));
+    if (Array.isArray(value)) return _mbNormalizeCodes(value);
+  } catch (e) { console.warn(e); }
   return null;
 }
 function _mbSaveCodes() {
+  mbCodes = _mbNormalizeCodes(mbCodes);
   localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes));
   // localStorage 가 1차 저장소 — 서버 동기화는 best-effort 라 조용히 로그만.
   if (currentUser) apiFetchJson('/api/settings/market-bar', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes: mbCodes }), fallback: null }).catch(e => reportApiError(e, '시장바 설정 저장', { silent: true }));
@@ -277,7 +299,11 @@ async function _mbLoadCodes() {
   if (currentUser) {
     try {
       const d = await apiFetchJson('/api/settings/market-bar', { fallback: null });
-      if (d?.codes) { mbCodes = d.codes; localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes)); return; }
+      if (d?.codes) {
+        mbCodes = _mbNormalizeCodes(d.codes);
+        localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes));
+        return;
+      }
     } catch (e) { console.warn(e); }
   }
   mbCodes = _mbGetCodes() || MB_DEFAULT_CODES.slice();
