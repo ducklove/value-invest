@@ -171,7 +171,7 @@ async function submitForeignDividend() {
 }
 
 async function deleteForeignDividend(code) {
-  if (!confirm(`"${code}" 배당 항목을 삭제할까요?\n(자동 refresh 가 다시 채울 수 있음)`)) return;
+  if (!(await adminConfirm(`"${code}" 배당 항목을 삭제할까요?\n(자동 refresh 가 다시 채울 수 있음)`))) return;
   try {
     await apiFetchJson(`/api/admin/foreign-dividend/${encodeURIComponent(code)}`, {
       method: 'DELETE',
@@ -697,7 +697,7 @@ async function savePreferredConfigItem() {
 async function deletePreferredConfigItem(index) {
   const rows = [..._currentPreferredRows()];
   const row = rows[index];
-  if (!row || !confirm(`${row.preferredName || row.preferredTicker} 항목을 삭제할까요?`)) return;
+  if (!row || !(await adminConfirm(`${row.preferredName || row.preferredTicker} 항목을 삭제할까요?`))) return;
   rows.splice(index, 1);
   try {
     await saveLinkedProjectConfig('preferredSpread', rows);
@@ -765,7 +765,7 @@ async function saveHoldingConfigItem() {
 async function deleteHoldingConfigItem(index) {
   const rows = [..._currentHoldingRows()];
   const row = rows[index];
-  if (!row || !confirm(`${row.holdingName || row.holdingTicker} 항목을 삭제할까요?`)) return;
+  if (!row || !(await adminConfirm(`${row.holdingName || row.holdingTicker} 항목을 삭제할까요?`))) return;
   rows.splice(index, 1);
   try {
     await saveLinkedProjectConfig('holdingValue', rows);

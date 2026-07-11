@@ -16,12 +16,16 @@ async function loadAdminView() {
     // deploy-status answers the "did my push land" question at a glance,
     // so it sits right next to the other meta-status calls and renders
     // at the top of the page.
+    // 모든 호출에 fallback 을 줘서 패널 하나의 HTTP 실패가 페이지 전체를
+    // 무너뜨리지 않게 한다. null/빈 fallback 을 받은 렌더러는 해당 패널에
+    // 인라인 오류 문구를 그리고 나머지 패널은 정상 렌더된다. 바깥 catch 는
+    // 네트워크 단절처럼 전부 실패한 경우만 담당한다.
     const [deploy, batch, server, db, users, summary, events, httpMetrics, timeline, linkedConfigs, aiConfig] = await Promise.all([
       apiFetchJson('/api/admin/deploy-status', { fallback: null }),
-      apiFetchJson('/api/admin/batch-status'),
-      apiFetchJson('/api/admin/server-stats'),
-      apiFetchJson('/api/admin/db-stats'),
-      apiFetchJson('/api/admin/users'),
+      apiFetchJson('/api/admin/batch-status', { fallback: null }),
+      apiFetchJson('/api/admin/server-stats', { fallback: null }),
+      apiFetchJson('/api/admin/db-stats', { fallback: null }),
+      apiFetchJson('/api/admin/users', { fallback: null }),
       apiFetchJson('/api/admin/event-summary?hours=24', { fallback: {by_source: {}, latest: {}} }),
       apiFetchJson('/api/admin/events?limit=50', { fallback: [] }),
       apiFetchJson('/api/admin/http-metrics?hours=24', { fallback: {endpoints: []} }),
@@ -30,9 +34,13 @@ async function loadAdminView() {
       apiFetchJson('/api/admin/ai-config', { fallback: null }),
     ]);
     _adminUsers = Array.isArray(users) ? users : [];
-    container.innerHTML = _renderAdmin(deploy, batch, server, db, _adminUsers, summary, events, httpMetrics, timeline, _linkedProjectConfigs, _aiAdminConfig);
+    _linkedProjectConfigs = Array.isArray(linkedConfigs) ? linkedConfigs : [];
+    _aiAdminConfig = aiConfig;
+    // users 는 실패(null)와 빈 목록([])을 구분해야 하므로 fetch 결과를
+    // 그대로 넘긴다. _adminUsers 는 검색/필터 등 후속 동작용 배열 사본.
+    container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events, httpMetrics, timeline, _linkedProjectConfigs, _aiAdminConfig);
     _adminLoaded = true;
-    if (typeof _seedServerSeries === 'function') _seedServerSeries(server);
+    if (server && typeof _seedServerSeries === 'function') _seedServerSeries(server);
     if (typeof _renderServerTimeline === 'function') _renderServerTimeline();
     _startLiveUpdates();
     // 해외 배당 목록은 섹션 HTML 삽입 후에만 컨테이너가 존재 — 별도
@@ -104,6 +112,10 @@ function _renderOperationsOverview(deploy, server, db, users, summary, httpMetri
   const commit = deploy?.build?.short_sha || '-';
   const runner = deploy?.actions_runner?.active ? '동작 중' : '중지';
   const runnerCls = deploy?.actions_runner?.active ? 'admin-status-ok' : 'admin-status-fail';
+  // server/users 가 null(fallback) 이면 0% 같은 가짜 수치 대신 '-' 와
+  // 조회 실패 문구를 보여준다 — 아래 개별 패널의 인라인 오류와 짝.
+  const serverOk = !!server;
+  const usersOk = Array.isArray(users);
   const portfolioUsers = (users || []).filter(u => Number(u.portfolio_count || 0) > 0).length;
   return `
     <section class="admin-hero">
@@ -117,10 +129,10 @@ function _renderOperationsOverview(deploy, server, db, users, summary, httpMetri
         </div>
         <div class="admin-kpi-grid">
           ${_renderKpi('현재 커밋', `<code>${_esc(commit)}</code>`, _esc(deploy?.build?.subject || runner), '')}
-          ${_renderKpi('CPU 사용률', `${cpuPct}%`, server?.cpu_temp != null ? `CPU ${server.cpu_temp.toFixed(1)}°C` : '실시간 샘플', _progressBar(cpuPct), 'adminCpuLoad')}
-          ${_renderKpi('메모리', `${memPct}%`, `${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)}`, _progressBar(memPct), 'adminMemory')}
-          ${_renderKpi('디스크', `${diskPct}%`, `${_fmtBytes(diskUsed)} / ${_fmtBytes(diskTotal)}`, _progressBar(diskPct))}
-          ${_renderKpi('사용자', `${(users || []).length.toLocaleString()}명`, `포트폴리오 ${portfolioUsers.toLocaleString()}명`, '')}
+          ${_renderKpi('CPU 사용률', serverOk ? `${cpuPct}%` : '-', serverOk ? (server?.cpu_temp != null ? `CPU ${server.cpu_temp.toFixed(1)}°C` : '실시간 샘플') : '서버 상태 조회 실패', serverOk ? _progressBar(cpuPct) : '', 'adminCpuLoad')}
+          ${_renderKpi('메모리', serverOk ? `${memPct}%` : '-', serverOk ? `${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)}` : '서버 상태 조회 실패', serverOk ? _progressBar(memPct) : '', 'adminMemory')}
+          ${_renderKpi('디스크', serverOk ? `${diskPct}%` : '-', serverOk ? `${_fmtBytes(diskUsed)} / ${_fmtBytes(diskTotal)}` : '서버 상태 조회 실패', serverOk ? _progressBar(diskPct) : '')}
+          ${_renderKpi('사용자', usersOk ? `${users.length.toLocaleString()}명` : '-', usersOk ? `포트폴리오 ${portfolioUsers.toLocaleString()}명` : '사용자 조회 실패', '')}
         </div>
       </div>
       <div class="admin-status-panel">
@@ -144,8 +156,8 @@ function _renderOperationsOverview(deploy, server, db, users, summary, httpMetri
           </div>
           <div class="admin-card">
             <div class="admin-card-label">DB 크기</div>
-            <div class="admin-card-value">${_fmtBytes(db?.db_size_bytes || 0)}</div>
-            <div class="admin-sub">${Object.keys(db?.tables || {}).length} tables</div>
+            <div class="admin-card-value">${db ? _fmtBytes(db.db_size_bytes || 0) : '-'}</div>
+            <div class="admin-sub">${db ? `${Object.keys(db.tables || {}).length} tables` : 'DB 상태 조회 실패'}</div>
           </div>
         </div>
       </div>
@@ -179,15 +191,29 @@ function _adminCollapsibleSummary(title, subtitle = '', count = '') {
   `;
 }
 
+// 테마는 생태계 공통 'theme' 키를 쓴다(index.html 의 search.js 와 동일).
+// 과거 admin 전용 'valueInvestAdminTheme' 키는 읽기 폴백 후 'theme' 으로
+// 이전(마이그레이션)하고 제거한다.
+const ADMIN_THEME_KEY = 'theme';
+const ADMIN_LEGACY_THEME_KEY = 'valueInvestAdminTheme';
+
 function toggleAdminTheme() {
   const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
-  try { localStorage.setItem('valueInvestAdminTheme', next); } catch (_) {}
+  try { localStorage.setItem(ADMIN_THEME_KEY, next); } catch (_) {}
   if (typeof _renderServerTimeline === 'function') _renderServerTimeline();
 }
 
 try {
-  const savedAdminTheme = localStorage.getItem('valueInvestAdminTheme');
+  let savedAdminTheme = localStorage.getItem(ADMIN_THEME_KEY);
+  if (!savedAdminTheme) {
+    const legacyTheme = localStorage.getItem(ADMIN_LEGACY_THEME_KEY);
+    if (legacyTheme) {
+      savedAdminTheme = legacyTheme;
+      localStorage.setItem(ADMIN_THEME_KEY, legacyTheme);
+    }
+  }
+  localStorage.removeItem(ADMIN_LEGACY_THEME_KEY);
   if (savedAdminTheme) document.documentElement.setAttribute('data-theme', savedAdminTheme);
 } catch (_) {}
 
@@ -315,7 +341,7 @@ async function saveAiKey() {
 }
 
 async function deleteAiKey() {
-  if (!confirm('DB에 저장된 OpenRouter key를 삭제할까요? env/keys.txt 값은 그대로 둡니다.')) return;
+  if (!(await adminConfirm('DB에 저장된 OpenRouter key를 삭제할까요?\nenv/keys.txt 값은 그대로 둡니다.'))) return;
   try {
     const data = await apiFetchJson('/api/admin/ai-config/key', {
       method: 'DELETE',
@@ -350,6 +376,110 @@ async function saveAiModels() {
 }
 
 // --- Shared helpers (used by all admin-* modules) ---
+
+// 부트 부분 실패용 패널 대체 — 해당 패널만 인라인 오류 문구로 그리고
+// 나머지 패널은 정상 렌더된다(loadAdminView 의 fallback: null 과 짝).
+function _adminPanelError(title, message) {
+  return `
+    <div class="admin-section">
+      <h3>${_esc(title)}</h3>
+      <div class="admin-sub admin-status-fail" style="padding:8px 0;">${_esc(message)}</div>
+    </div>
+  `;
+}
+
+// --- 관리형 다이얼로그 (window.confirm/prompt 대체) ----------------------
+//
+// utils.js 의 openManagedModal/closeManagedModal 이 포커스 트랩·Escape·
+// 스크롤 잠금·포커스 복원을 처리한다. DOM 은 호출 시 동적 생성하고 닫힐 때
+// 제거한다. 스타일은 admin.html 의 .admin-dialog-* 참고.
+
+function _adminDialog({ message, input = null, confirmLabel = '확인', cancelLabel = '취소', danger = false }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'admin-dialog-overlay';
+    const box = document.createElement('div');
+    box.className = 'admin-dialog';
+    box.setAttribute('role', input ? 'dialog' : 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    const msg = document.createElement('div');
+    msg.className = 'admin-dialog-message';
+    msg.textContent = message;
+    box.appendChild(msg);
+    let inputEl = null;
+    if (input) {
+      const row = document.createElement('div');
+      row.className = 'admin-dialog-input-row';
+      inputEl = document.createElement('input');
+      inputEl.className = 'admin-field';
+      inputEl.type = input.type || 'text';
+      if (input.placeholder) inputEl.placeholder = input.placeholder;
+      inputEl.value = input.value || '';
+      row.appendChild(inputEl);
+      box.appendChild(row);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'admin-dialog-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'admin-btn admin-btn-secondary';
+    cancelBtn.setAttribute('data-admin-dialog-cancel', '');
+    cancelBtn.textContent = cancelLabel;
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = `admin-btn ${danger ? 'admin-btn-danger' : 'admin-btn-primary'}`;
+    confirmBtn.setAttribute('data-admin-dialog-confirm', '');
+    confirmBtn.textContent = confirmLabel;
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    let settled = false;
+    const close = (confirmed) => {
+      if (settled) return;
+      settled = true;
+      const value = inputEl ? inputEl.value : null;
+      closeManagedModal(overlay, { remove: true });
+      resolve({ confirmed, value });
+    };
+    cancelBtn.addEventListener('click', () => close(false));
+    confirmBtn.addEventListener('click', () => close(true));
+    if (inputEl) {
+      inputEl.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); close(true); }
+      });
+    }
+    overlay.addEventListener('mousedown', (event) => {
+      if (event.target === overlay) close(false);
+    });
+    openManagedModal(overlay, {
+      onEscape: () => close(false),
+      initialFocus: inputEl || confirmBtn,
+    });
+  });
+}
+
+// window.confirm 대체. 확인이면 true, 취소/Escape/바깥 클릭이면 false.
+function adminConfirm(message, options = {}) {
+  return _adminDialog({
+    message,
+    confirmLabel: options.confirmLabel || '확인',
+    cancelLabel: options.cancelLabel || '취소',
+    danger: options.danger === undefined ? true : !!options.danger,
+  }).then(result => result.confirmed);
+}
+
+// window.prompt 대체 — 날짜(YYYY-MM-DD) 하나를 입력받는다. 취소하면 null.
+function adminPromptDate(message, defaultValue = '') {
+  const initial = defaultValue || new Date().toISOString().slice(0, 10);
+  return _adminDialog({
+    message,
+    input: { type: 'date', value: initial, placeholder: 'YYYY-MM-DD' },
+    danger: false,
+  }).then(result => (result.confirmed ? String(result.value || '').trim() : null));
+}
 
 function _adminInputStyle() {
   return 'min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-primary);font:inherit;font-size:13px;';

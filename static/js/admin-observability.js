@@ -1,6 +1,7 @@
-// Admin observability dashboard: deploy/server/batch/users/db/events/HTTP
-// panels, the 5s live refresh loop, manual job triggers, and the wiki
-// diagnostic form. Split from static/js/admin.js to keep panels maintainable.
+// Admin observability dashboard: batch/users/db/events/HTTP panels, the 5s
+// live refresh loop, manual job triggers, and the wiki diagnostic form.
+// Split from static/js/admin.js to keep panels maintainable. (배포/서버
+// 카드는 admin.js 의 운영 콘솔 KPI + admin-charts.js 타임라인으로 대체됨.)
 
 let _liveInterval = null;
 
@@ -46,126 +47,6 @@ function _renderHttpMetricsSection(httpMetrics) {
         </div>
       </div>
     </details>
-  `;
-}
-
-// --- Deploy status ------------------------------------------------------
-//
-// Shows the commit SHA currently running in this process, when the
-// service started, and whether the auto-deploy runner is alive. The
-// whole reason this exists is so that "did my push reach prod?" is
-// answerable without SSH'ing in.
-
-function _renderDeployCard(d) {
-  if (!d) {
-    // Endpoint 404 — either the deploy hasn't reached this release yet
-    // (old binary), or the route is genuinely missing. Either way the
-    // operator learns something useful: this card IS the canary.
-    return `
-      <div class="admin-section">
-        <h3>배포 상태 <span class="admin-sub admin-status-fail">엔드포인트 없음 — 자동 배포 미반영 또는 브라우저 캐시</span></h3>
-        <div class="admin-sub" style="padding:8px 0;">
-          최신 배포가 반영됐다면 이 카드에 커밋 SHA 가 보여야 합니다.
-          Ctrl+Shift+R 로 강제 새로고침 후에도 안 보이면 자동 배포 파이프라인 점검이 필요합니다.
-        </div>
-      </div>
-    `;
-  }
-  const b = d.build || {};
-  const runner = d.actions_runner || {};
-  const runnerCls = runner.active ? 'admin-status-ok' : 'admin-status-fail';
-  const runnerIcon = runner.active ? '✓' : '✗';
-  return `
-    <div class="admin-section">
-      <h3>배포 상태</h3>
-      <div class="admin-cards">
-        <div class="admin-card">
-          <div class="admin-card-label">현재 커밋</div>
-          <div class="admin-card-value"><code>${_esc(b.short_sha || '-')}</code></div>
-          <div class="admin-sub" title="${_esc(b.sha || '')}">${_esc(b.subject || '')}</div>
-        </div>
-        <div class="admin-card">
-          <div class="admin-card-label">커밋 시각</div>
-          <div class="admin-card-value">${_esc(_fmtBuildTime(b.committed_at))}</div>
-        </div>
-        <div class="admin-card">
-          <div class="admin-card-label">서비스 시작</div>
-          <div class="admin-card-value">${_esc(_fmtBuildTime(d.service_started))}</div>
-        </div>
-        <div class="admin-card">
-          <div class="admin-card-label">자동 배포 러너</div>
-          <div class="admin-card-value ${runnerCls}">${runnerIcon} ${runner.active ? '동작 중' : '중지됨'}</div>
-          <div class="admin-sub">${_esc(runner.name || '')}</div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function _fmtBuildTime(s) {
-  if (!s) return '-';
-  try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;  // raw pass-through if not ISO
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mn = String(d.getMinutes()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd} ${hh}:${mn}`;
-  } catch (_) { return s; }
-}
-
-function _renderServerCard(s) {
-  const memTotal = s.memory?.MemTotal || 0;
-  const memAvail = s.memory?.MemAvailable || 0;
-  const memUsed = memTotal - memAvail;
-  const memPct = memTotal ? Math.round(memUsed / memTotal * 100) : 0;
-  const diskTotal = s.disk?.total || 0;
-  const diskUsed = s.disk?.used || 0;
-  const diskPct = diskTotal ? Math.round(diskUsed / diskTotal * 100) : 0;
-
-  // True CPU utilization (server samples /proc/stat); fall back to loadavg
-  // estimate only if cpu_pct is missing.
-  let loadPct;
-  if (typeof s.cpu_pct === 'number') {
-    loadPct = Math.round(s.cpu_pct);
-  } else {
-    const loadParts = (s.load_avg || '').split(' ');
-    const load1m = parseFloat(loadParts[0]) || 0;
-    loadPct = Math.round(load1m / 4 * 100);
-  }
-
-  return `
-    <div class="admin-section">
-      <h3>서버 상태</h3>
-      <div class="admin-cards">
-        <div class="admin-card">
-          <div class="admin-card-label">가동 시간</div>
-          <div class="admin-card-value">${s.uptime || '-'}</div>
-        </div>
-        <div class="admin-card" id="adminCpuTemp">
-          <div class="admin-card-label">CPU Temp</div>
-          <div class="admin-card-value">${s.cpu_temp != null ? s.cpu_temp.toFixed(1) + '°C' : '-'}</div>
-          ${s.cpu_temp != null ? _progressBar(Math.round(s.cpu_temp / 85 * 100)) : ''}
-        </div>
-        <div class="admin-card" id="adminCpuLoad">
-          <div class="admin-card-label">CPU 사용률</div>
-          <div class="admin-card-value">${loadPct}%</div>
-          ${_progressBar(loadPct)}
-        </div>
-        <div class="admin-card" id="adminMemory">
-          <div class="admin-card-label">메모리</div>
-          <div class="admin-card-value">${_fmtBytes(memUsed)} / ${_fmtBytes(memTotal)} (${memPct}%)</div>
-          ${_progressBar(memPct)}
-        </div>
-        <div class="admin-card">
-          <div class="admin-card-label">디스크</div>
-          <div class="admin-card-value">${_fmtBytes(diskUsed)} / ${_fmtBytes(diskTotal)}</div>
-          ${_progressBar(diskPct)}
-        </div>
-      </div>
-    </div>
   `;
 }
 
@@ -239,6 +120,9 @@ function _progressColor(pct) {
 // --- Batch section ---
 
 function _renderBatchSection(jobs) {
+  if (!Array.isArray(jobs)) {
+    return _adminPanelError('배치 작업', '배치 상태를 불러오지 못했습니다. 새로고침으로 다시 시도하세요.');
+  }
   const rows = jobs.map(j => {
     // Execution status = "did systemd exit 0". Kept for visibility into
     // the process layer (did the script even run?), but it no longer
@@ -306,6 +190,9 @@ function _renderBatchSection(jobs) {
 // --- Users section ---
 
 function _renderUsersSection(users) {
+  if (!Array.isArray(users)) {
+    return _adminPanelError('사용자 관리', '사용자 목록을 불러오지 못했습니다. 새로고침으로 다시 시도하세요.');
+  }
   const rows = _renderAdminUserRows(users);
   return `
     <div class="admin-section" id="adminUsersSection">
@@ -474,7 +361,7 @@ async function deleteAdminUser(encodedSub) {
   const googleSub = decodeURIComponent(encodedSub || '');
   const u = (_adminUsers || []).find(row => row.google_sub === googleSub);
   if (!u) return;
-  if (!confirm(`${u.name || u.email} 사용자를 삭제할까요?\n포트폴리오와 세션 데이터도 함께 삭제됩니다.`)) return;
+  if (!(await adminConfirm(`${u.name || u.email} 사용자를 삭제할까요?\n포트폴리오와 세션 데이터도 함께 삭제됩니다.`))) return;
   try {
     await apiFetchJson(`/api/admin/users/${encodeURIComponent(googleSub)}`, {
       method: 'DELETE',
@@ -543,6 +430,9 @@ function _renderPortfolioSearchResult(rows, query) {
 // --- DB section ---
 
 function _renderDbSection(db) {
+  if (!db) {
+    return _adminPanelError('데이터베이스', 'DB 상태를 불러오지 못했습니다. 새로고침으로 다시 시도하세요.');
+  }
   const tables = Object.entries(db.tables || {}).sort((a, b) => b[1] - a[1]);
   const rows = tables.map(([name, count]) => `<tr><td>${name}</td><td class="admin-num">${count.toLocaleString()}</td></tr>`).join('');
   return `
@@ -570,7 +460,7 @@ async function triggerJob(jobName) {
       body: JSON.stringify({}),
       errorMessage: '실행 실패',
     });
-    alert(data.message || '실행 시작');
+    showToast(data.message || '실행 시작', 'success');
     setTimeout(loadAdminView, 2000);
   } catch (e) {
     reportApiError(e, '실행 요청');
@@ -578,10 +468,10 @@ async function triggerJob(jobName) {
 }
 
 async function triggerJobWithDate(jobName) {
-  const dateStr = prompt('실행할 날짜를 입력하세요 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
+  const dateStr = await adminPromptDate('실행할 날짜를 입력하세요 (YYYY-MM-DD)');
   if (!dateStr) return;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    alert('올바른 날짜 형식이 아닙니다.');
+    showToast('올바른 날짜 형식이 아닙니다.', 'warning');
     return;
   }
   try {
@@ -591,7 +481,7 @@ async function triggerJobWithDate(jobName) {
       body: JSON.stringify({date: dateStr}),
       errorMessage: '실행 실패',
     });
-    alert(`${data.message} (${dateStr})`);
+    showToast(`${data.message} (${dateStr})`, 'success');
     setTimeout(loadAdminView, 2000);
   } catch (e) {
     reportApiError(e, '실행 요청');

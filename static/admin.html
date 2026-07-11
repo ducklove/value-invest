@@ -302,6 +302,31 @@
   .admin-collapsible[open] .admin-collapsible-icon::before { content: '-'; }
   .admin-collapsible[open] .admin-collapsible-summary { border-bottom: 1px solid var(--border); }
   .admin-collapsible-body { padding: 14px 16px 16px; }
+  /* 관리형 다이얼로그(adminConfirm/adminPromptDate — admin.js). display 는
+     openManagedModal 이 flex 로 켠다. */
+  .admin-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9500;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(15, 23, 42, 0.45);
+  }
+  .admin-dialog {
+    width: min(420px, 100%);
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-soft);
+  }
+  .admin-dialog-message { font-size: 14px; line-height: 1.55; white-space: pre-line; }
+  .admin-dialog-input-row { margin-top: 12px; }
+  .admin-dialog-input-row .admin-field { width: 100%; }
+  .admin-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   @media (max-width: 1180px) {
     .admin-hero,
     .admin-chart-grid,

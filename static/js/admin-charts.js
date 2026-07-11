@@ -54,7 +54,11 @@ function _adminChartGridColor() {
 }
 
 function _renderTimelineSection(server, timeline) {
-  const seeded = _adminServerSeries.length ? _adminServerSeries : [_serverSample(server)];
+  // server-stats 실패(null)로 부트되면 0% 가짜 샘플 대신 빈 상태를 그린다.
+  // 5초 라이브 갱신(_updateLiveStats)이 성공하는 순간부터 채워진다.
+  const seeded = _adminServerSeries.length
+    ? _adminServerSeries
+    : (server ? [_serverSample(server)] : []);
   return `
     <section class="admin-chart-grid">
       <div class="admin-chart-panel">

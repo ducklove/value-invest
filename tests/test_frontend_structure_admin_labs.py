@@ -3,6 +3,7 @@
 # 새 화면 계약 테스트는 해당 화면 파일에 추가한다. 공용 경로/상수/헬퍼는
 # tests/_frontend_structure.py 에 있다.
 import json
+import re
 
 from _frontend_structure import ADMIN_SPLIT_FILES, JS, ROOT, STATIC, _all_css
 
@@ -40,10 +41,12 @@ def test_admin_split_files_keep_feature_homes():
     assert "async function saveAiModels()" in admin
     assert "function _esc(" in admin
     assert "function _adminInputStyle()" in admin
-    # 관측성: 배포/서버/배치/사용자/DB/이벤트/HTTP 패널 + 5초 라이브 갱신 +
+    # 관측성: 배치/사용자/DB/이벤트/HTTP 패널 + 5초 라이브 갱신 +
     # 수동 작업 실행 + 위키 진단 폼.
-    assert "function _renderDeployCard(" in observability
-    assert "function _renderServerCard(" in observability
+    # 배포/서버 카드는 admin.js 운영 콘솔 KPI 로 대체되어 2026-07-11 제거 —
+    # 호출부 없는 죽은 코드가 다시 생기지 않는다.
+    assert "function _renderDeployCard(" not in observability
+    assert "function _renderServerCard(" not in observability
     assert "function _startLiveUpdates()" in observability
     assert "async function _updateLiveStats()" in observability
     assert "function _renderBatchSection(" in observability
@@ -81,6 +84,12 @@ def test_admin_split_files_keep_feature_homes():
     # 오류 보고는 reportApiError 헬퍼 경유를 유지한다(765d8a5).
     assert "reportApiError(e, '실행 요청');" in observability
     assert "reportApiError(e, '삭제');" in linked
+    # 원시 다이얼로그(alert/confirm/prompt) 금지 — showToast 와 관리형 모달
+    # 헬퍼(adminConfirm/adminPromptDate, admin.js) 경유(2026-07-11).
+    assert "function adminConfirm(" in admin
+    assert "function adminPromptDate(" in admin
+    for src in (admin, observability, linked):
+        assert not re.search(r"(?<!\w)(alert|confirm|prompt)\(", src)
 
 def test_admin_split_files_stay_below_maintenance_ceiling():
     for name in ADMIN_SPLIT_FILES:
