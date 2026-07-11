@@ -524,3 +524,22 @@
 .bt-run:hover { background: var(--primary-hover); }
 #btChart { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
 
+
+/* === 리포트 Buy/Hold 의미색 토큰 === */
+/* 목표가 차트의 스캐터·범례(analysis-charts.js _recommScatterColors)가
+   getComputedStyle 로 읽는다. 리포트 배지(badge-buy: 초록 계열)와 같은
+   의미색 체계를 쓰되, 국내 시세 등락 규약(빨강=상승/파랑=하락, --up/--down)과
+   겹치지 않는 초록(Buy)/중립 회색(Hold)을 쓴다. Hold 를 배지처럼 노랑 계열로
+   두면 같은 차트의 목표가 점선(#f59e0b)과 혼동되므로 중립 회색을 유지한다. */
+:root {
+  --recomm-buy: #16a34a;
+  --recomm-buy-strong: #15803d;
+  --recomm-hold: #6b7280;
+  --recomm-hold-strong: #4b5563;
+}
+[data-theme="dark"] {
+  --recomm-buy: #4ade80;
+  --recomm-buy-strong: #86efac;
+  --recomm-hold: #9ca3af;
+  --recomm-hold-strong: #d1d5db;
+}

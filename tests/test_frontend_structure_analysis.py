@@ -2,7 +2,7 @@
 # 구 test_frontend_structure.py(1,500줄 단일 파일)를 2026-07-07 화면별로 분할.
 # 새 화면 계약 테스트는 해당 화면 파일에 추가한다. 공용 경로/상수/헬퍼는
 # tests/_frontend_structure.py 에 있다.
-from _frontend_structure import ANALYSIS_SPLIT_FILES, JS, STATIC, _all_css
+from _frontend_structure import ANALYSIS_SPLIT_FILES, CSS, JS, STATIC, _all_css
 
 
 def test_etf_deep_links_to_eiayn_in_analysis_and_portfolio():
@@ -116,6 +116,32 @@ def test_investment_journal_lives_in_analysis_view_and_performance_tab():
     assert ".pf-journal-badge.buy" in styles
     assert ".stock-journal" in styles
     assert ".pf-journal-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+
+def test_reports_scatter_buy_color_uses_semantic_tokens():
+    """Buy 의미색 이원화 해소 — 스캐터/범례는 배지(badge-buy 초록)와 같은 CSS 토큰."""
+    charts = (JS / "analysis-charts.js").read_text(encoding="utf-8")
+    analysis_css = (CSS / "analysis.css").read_text(encoding="utf-8")
+
+    # Buy=빨강(#dc2626) 하드코딩 금지 — 국내 시세 규약(빨강=상승)과 혼동된다.
+    assert "#dc2626" not in charts
+    assert "function _recommScatterColors()" in charts
+    assert "params.data.buy ? recomm.buy : recomm.hold" in charts
+    # 토큰은 analysis.css 에 라이트/다크 쌍으로 정의된다.
+    assert "--recomm-buy:" in analysis_css
+    assert "--recomm-hold:" in analysis_css
+    dark = analysis_css[analysis_css.rfind('[data-theme="dark"]'):]
+    assert "--recomm-buy:" in dark and "--recomm-hold:" in dark
+
+def test_reports_table_headers_get_col_scope_at_render():
+    """리포트 테이블 thead 는 index.html 정적 마크업 — 렌더 시점 scope=col 보강."""
+    filings = (JS / "analysis-filings.js").read_text(encoding="utf-8")
+    assert "th.setAttribute('scope', 'col')" in filings
+
+def test_analysis_number_formatting_pins_ko_kr_locale():
+    """toLocaleString 로케일 혼재(ko-KR vs 미지정) 금지 — analysis.js 는 ko-KR 통일."""
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+    assert ".toLocaleString()" not in analysis
+    assert "toLocaleString(undefined" not in analysis
 
 def test_analysis_wiki_qa_and_journal_are_collapsed_by_default():
     html = (STATIC / "index.html").read_text(encoding="utf-8")

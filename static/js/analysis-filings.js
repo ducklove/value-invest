@@ -291,6 +291,12 @@ function getRecommBadge(recomm) {
 
 function renderReportsTable(reports, limit) {
   const tbody = document.getElementById('reportsBody');
+  // 접근성: 리포트 테이블 머리글(th)은 index.html 정적 마크업이라 렌더 시점에
+  // scope="col" 을 보강한다(idempotent — 이미 지정돼 있으면 건너뜀).
+  const table = tbody ? tbody.closest('table') : null;
+  if (table) {
+    table.querySelectorAll('thead th:not([scope])').forEach(th => th.setAttribute('scope', 'col'));
+  }
   const slice = reports.slice(0, limit);
   tbody.innerHTML = slice.map((r, idx) => {
     const safeTitle = escapeHtml(r.title);

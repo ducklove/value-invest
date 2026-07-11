@@ -109,6 +109,43 @@ test("_renderMetricTrends returns empty string when no trends", () => {
   assert.equal(w._renderMetricTrends(null), "");
 });
 
+// --- 숫자 포맷 로케일(ko-KR) 고정 ---
+// toLocaleString 로케일 혼재(ko-KR vs 미지정)를 'ko-KR' 명시로 통일 — 호스트
+// 로케일과 무관하게 1,234,567 형태의 그룹핑이 나오는지 표시 결과를 고정한다.
+function loadForQuote() {
+  const dom = new JSDOM(`<!doctype html><html><body>
+    <div id="coverageNote"></div>
+    <div id="quoteSummary" style="display:none">
+      <span id="quotePrice"></span><span id="quoteChange"></span><span id="quoteDate"></span>
+    </div>
+  </body></html>`, { runScripts: "dangerously", url: "https://app.example.com/" });
+  const w = dom.window;
+  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis.js")]) {
+    const s = w.document.createElement("script");
+    s.textContent = src;
+    w.document.body.appendChild(s);
+  }
+  // renderQuoteSnapshot 이 참조하는 다른 파일 소유 전역들.
+  w.QuoteManager = { isLive: () => false };
+  w.activeStockCode = "005930";
+  w.activeIndicators = {};
+  w._renderCoverage = () => {};
+  return w;
+}
+
+test("숫자 포맷은 ko-KR 로케일로 고정된다 (formatMetricNumber / renderQuoteSnapshot)", () => {
+  const w = loadForQuote();
+
+  assert.equal(w.formatMetricNumber(1234.5), "1,234.50");
+  assert.equal(w.formatMetricNumber(12.3456, "%"), "12.35%");
+  assert.equal(w.formatMetricNumber(null), "N/A");
+
+  w.renderQuoteSnapshot({ price: 1234567, change: 1234, change_pct: 1.23, date: "2026-07-10" }, {});
+  assert.equal(w.document.getElementById("quotePrice").textContent, "1,234,567원");
+  assert.equal(w.document.getElementById("quoteChange").textContent, "+1,234원 (+1.23%)");
+  assert.equal(w.document.getElementById("quoteDate").textContent, "2026-07-10 기준");
+});
+
 // --- analyzeStock SSE 스트림 파싱 ---
 // apiFetch 를 가짜 SSE 응답으로 바꿔치기해 실제 파서(줄 버퍼링, event/data
 // 시퀀스 처리)를 브라우저 없이 구동한다. 무거운 renderResult 는 스파이로 대체.

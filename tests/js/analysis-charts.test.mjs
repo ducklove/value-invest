@@ -21,8 +21,8 @@ function appendScript(w, source) {
   w.document.body.appendChild(script);
 }
 
-function buildWindow() {
-  const dom = new JSDOM(`<!doctype html><html><body>
+function buildWindow({ style = "", theme = "" } = {}) {
+  const dom = new JSDOM(`<!doctype html><html${theme ? ` data-theme="${theme}"` : ""}><head>${style ? `<style>${style}</style>` : ""}</head><body>
     <div id="weeklyChartsGrid" style="display:none"></div>
     <div id="chartModal">
       <h3 id="chartModalTitle"></h3>
@@ -140,6 +140,58 @@ test("목표가 카드는 role=button 이고 Enter 키로 모달을 연다", asy
   card.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(setOptions.length, 2, "Enter 로 모달 차트가 그려져야 함");
+});
+
+// --- 리포트 스캐터 Buy/Hold 의미색 (CSS 토큰) ---
+// Buy 배지(badge-buy: 초록)와 목표가 스캐터의 Buy 색이 이원화돼 있던 것을
+// --recomm-* 토큰(analysis.css)으로 통일했는지 검증. 토큰이 없으면(jsdom 에
+// CSS 미로드) 라이트 팔레트 폴백을 쓴다.
+
+// analysis.css 의 토큰 사본 — jsdom 은 <style> 의 커스텀 프로퍼티 캐스케이드를
+// getComputedStyle 로 해석한다(admin-charts.test.mjs 와 동일 패턴).
+const RECOMM_TOKEN_STYLE = `
+  :root {
+    --recomm-buy: #16a34a; --recomm-buy-strong: #15803d;
+    --recomm-hold: #6b7280; --recomm-hold-strong: #4b5563;
+  }
+  [data-theme="dark"] {
+    --recomm-buy: #4ade80; --recomm-buy-strong: #86efac;
+    --recomm-hold: #9ca3af; --recomm-hold-strong: #d1d5db;
+  }
+`;
+
+test("리포트 스캐터 Buy 는 배지와 같은 초록 의미색을 쓰고 빨강(#dc2626) 하드코딩이 없다", async () => {
+  const { w, setOptions } = buildWindow();
+  await runOverlay(w);
+  const inline = setOptions[0];
+  const scatter = inline.series[2];
+
+  // 포인트 색: Buy=초록 / Hold=중립 회색 (토큰 미로드 시 폴백 값).
+  assert.equal(scatter.itemStyle.color({ data: { buy: true } }), "#16a34a");
+  assert.equal(scatter.itemStyle.color({ data: { buy: false } }), "#6b7280");
+  assert.equal(scatter.itemStyle.borderColor({ data: { buy: true } }), "#15803d");
+  assert.equal(scatter.itemStyle.borderColor({ data: { buy: false } }), "#4b5563");
+
+  // 범례 아이콘도 대표 의미색(Buy 초록)으로 고정 — 팔레트색으로 빠지지 않는다.
+  const legendReport = Array.from(inline.legend.data).find((d) => d.name === "리포트");
+  assert.ok(legendReport, "범례에 리포트 항목이 있어야 함");
+  assert.equal(legendReport.itemStyle.color, "#16a34a");
+
+  // 툴팁의 Buy 라벨 색도 동일 토큰 — 상승색(#dc2626)과 혼동 금지.
+  const html = inline.tooltip.formatter([
+    { seriesName: "리포트", data: { value: [1, 90000], firm: "증권A", buy: true } },
+  ]);
+  assert.match(html, /#16a34a/);
+  assert.ok(!html.includes("#dc2626"), "Buy 에 상승 빨강을 쓰지 않는다");
+});
+
+test("리포트 스캐터 의미색은 다크 테마 토큰(--recomm-*)을 따라간다", async () => {
+  const { w, setOptions } = buildWindow({ style: RECOMM_TOKEN_STYLE, theme: "dark" });
+  await runOverlay(w);
+  const scatter = setOptions[0].series[2];
+  assert.equal(scatter.itemStyle.color({ data: { buy: true } }), "#4ade80");
+  assert.equal(scatter.itemStyle.color({ data: { buy: false } }), "#9ca3af");
+  assert.equal(scatter.itemStyle.borderColor({ data: { buy: true } }), "#86efac");
 });
 
 test("차트 그리드 카드: Enter/Space 로 openChartModal, 그 외 키는 무시, 클릭도 유지", async () => {

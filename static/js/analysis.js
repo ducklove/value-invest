@@ -140,7 +140,7 @@ function getLatestPositiveValue(series) {
 function formatMetricNumber(value, suffix = '') {
   return value === null || value === undefined || !Number.isFinite(value)
     ? 'N/A'
-    : `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
+    : `${value.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
 }
 
 function getLatestDerivedBps(indicators) {
@@ -377,12 +377,12 @@ function renderQuoteSnapshot(quoteSnapshot, indicators = activeIndicators) {
 
   if (quote.price !== null && quote.price !== undefined) {
     quoteSummary.style.display = 'flex';
-    quotePrice.textContent = `${Number(quote.price).toLocaleString()}원`;
+    quotePrice.textContent = `${Number(quote.price).toLocaleString('ko-KR')}원`;
     const change = Number(quote.change || 0);
     const changePct = quote.change_pct;
     const changePrefix = change > 0 ? '+' : '';
     quoteChange.textContent = changePct !== null && changePct !== undefined
-      ? `${changePrefix}${change.toLocaleString()}원 (${changePrefix}${Number(changePct).toLocaleString()}%)`
+      ? `${changePrefix}${change.toLocaleString('ko-KR')}원 (${changePrefix}${Number(changePct).toLocaleString('ko-KR')}%)`
       : '변동 정보 없음';
     quoteChange.className = 'quote-change';
     quoteChange.classList.add(change > 0 ? 'up' : change < 0 ? 'down' : 'flat');
@@ -771,7 +771,7 @@ async function loadRecentList() {
       quoteChange.className = 'quote-change';
 
       if (quote.price !== null && quote.price !== undefined) {
-        quotePrice.textContent = Number(quote.price).toLocaleString();
+        quotePrice.textContent = Number(quote.price).toLocaleString('ko-KR');
         const change = Number(quote.change || 0);
         const changePct = quote.change_pct;
         const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';

@@ -45,16 +45,42 @@ function formatWeeklyTickLabel(value) {
 
 let _lastWeeklyIndicators = null;
 
+// 리포트 스캐터의 Buy/Hold 의미색 — 하드코딩 대신 CSS 토큰(--recomm-buy/
+// --recomm-hold, analysis.css)에서 읽어 리포트 배지(badge-buy: 초록 계열)와
+// 같은 의미색 체계 + 다크 팔레트를 따른다(_sparkTrendColor 와 같은 패턴,
+// 토큰이 없으면 라이트 팔레트 폴백). 종전의 Buy=빨강 하드코딩은 국내 시세
+// 규약(빨강=상승/파랑=하락)과 겹쳐 '상승 표시'로 오독될 수 있어 초록으로 통일.
+function _recommScatterColors() {
+  const styles = getComputedStyle(document.documentElement);
+  const token = (name, fallback) => (styles.getPropertyValue(name).trim() || fallback);
+  return {
+    buy: token('--recomm-buy', '#16a34a'),
+    buyBorder: token('--recomm-buy-strong', '#15803d'),
+    hold: token('--recomm-hold', '#6b7280'),
+    holdBorder: token('--recomm-hold-strong', '#4b5563'),
+  };
+}
+
 // 목표가 차트 echarts 옵션 빌더 — 인라인 카드와 모달이 공유한다(중복 제거).
 // 두 경로의 차이는 여백·축 글꼴·심볼 크기와 dataZoom(모달 전용)뿐이므로
 // modal 플래그 하나로 분기한다. echarts 가 로드된 뒤(loadEcharts) 호출할 것.
 function buildTargetPriceChartOption({ dates, prices, targetLine, scatterData, labels, textColor, gridColor, modal = false }) {
   const axisFontSize = modal ? 11 : 10;
+  const recomm = _recommScatterColors();
   const option = {
     grid: modal
       ? { left: 60, right: 20, top: 28, bottom: 60 }
       : { left: 55, right: 12, top: 28, bottom: 24 },
-    legend: { show: true, top: 0, right: 0, textStyle: { color: textColor, fontSize: 11 } },
+    legend: {
+      show: true, top: 0, right: 0, textStyle: { color: textColor, fontSize: 11 },
+      // itemStyle.color 가 함수인 scatter 는 범례 아이콘이 팔레트색으로 빠지므로
+      // 대표 의미색(Buy 초록)을 명시해 배지와 같은 색 체계로 고정한다.
+      data: [
+        { name: '주가' },
+        { name: '목표가' },
+        { name: '리포트', itemStyle: { color: recomm.buy, borderColor: recomm.buyBorder } },
+      ],
+    },
     xAxis: {
       type: 'category', data: labels,
       axisLine: { lineStyle: { color: gridColor } },
@@ -80,7 +106,7 @@ function buildTargetPriceChartOption({ dates, prices, targetLine, scatterData, l
           } else if (p.seriesName === '리포트') {
             const d = p.data;
             const label = d.buy ? 'Buy' : 'Hold';
-            const c = d.buy ? '#dc2626' : '#6b7280';
+            const c = d.buy ? recomm.buy : recomm.hold;
             html += `<br/><span style="color:${c}">◆ ${Number(d.value[1]).toLocaleString()}원 [${label}]</span> <span style="font-size:11px;color:#999">(${d.firm})</span>`;
           }
         }
@@ -112,8 +138,8 @@ function buildTargetPriceChartOption({ dates, prices, targetLine, scatterData, l
         data: scatterData,
         symbol: 'diamond', symbolSize: modal ? 10 : 8,
         itemStyle: {
-          color: (params) => params.data.buy ? '#dc2626' : '#6b7280',
-          borderColor: (params) => params.data.buy ? '#b91c1c' : '#4b5563',
+          color: (params) => params.data.buy ? recomm.buy : recomm.hold,
+          borderColor: (params) => params.data.buy ? recomm.buyBorder : recomm.holdBorder,
           borderWidth: 1,
         },
         z: 10,
