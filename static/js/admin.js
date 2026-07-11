@@ -9,6 +9,10 @@ let _adminUsers = [];
 async function loadAdminView() {
   const container = document.getElementById('adminContent');
   if (!container) return;
+  // 수동 새로고침은 전체 innerHTML 교체라 열려 있던 collapsible(details[open])과
+  // 스크롤 위치가 초기화된다 — 재렌더 전 상태를 수집해 재렌더 후 복원한다.
+  // (패널 단위 diff 렌더는 스코프 밖 — 여기서는 상태 스냅샷/복원만 한다.)
+  const uiState = _adminLoaded ? _captureAdminUiState(container) : null;
   if (!_adminLoaded) {
     container.innerHTML = '<div style="color:var(--text-secondary);text-align:center;padding:40px;">로딩 중...</div>';
   }
@@ -40,6 +44,7 @@ async function loadAdminView() {
     // 그대로 넘긴다. _adminUsers 는 검색/필터 등 후속 동작용 배열 사본.
     container.innerHTML = _renderAdmin(deploy, batch, server, db, users, summary, events, httpMetrics, timeline, _linkedProjectConfigs, _aiAdminConfig);
     _adminLoaded = true;
+    if (uiState) _restoreAdminUiState(uiState);
     if (server && typeof _seedServerSeries === 'function') _seedServerSeries(server);
     if (typeof _renderServerTimeline === 'function') _renderServerTimeline();
     _startLiveUpdates();
@@ -378,6 +383,26 @@ async function saveAiModels() {
 }
 
 // --- Shared helpers (used by all admin-* modules) ---
+
+// 재렌더 전 UI 상태 스냅샷 — 열려 있는 collapsible 의 id 목록과 스크롤
+// 위치. innerHTML 전체 교체 후 _restoreAdminUiState 로 되돌린다.
+// id 없는 details 는 재렌더 후 동일 노드를 특정할 수 없어 제외한다.
+function _captureAdminUiState(container) {
+  const openSections = [...container.querySelectorAll('details[open]')]
+    .map(d => d.id)
+    .filter(Boolean);
+  return { openSections, scrollY: window.scrollY || 0 };
+}
+
+function _restoreAdminUiState(uiState) {
+  for (const id of uiState.openSections || []) {
+    const el = document.getElementById(id);
+    if (el && typeof el.open === 'boolean') el.open = true;
+  }
+  if (typeof window.scrollTo === 'function') {
+    try { window.scrollTo(0, uiState.scrollY || 0); } catch (_) {}
+  }
+}
 
 // 부트 부분 실패용 패널 대체 — 해당 패널만 인라인 오류 문구로 그리고
 // 나머지 패널은 정상 렌더된다(loadAdminView 의 fallback: null 과 짝).

@@ -348,6 +348,43 @@
       white-space: nowrap;
     }
     .admin-chart { height: 190px; }
+    /* 모바일 카드 변환(M14): 행당 카드 레이아웃. 렌더러(admin-observability.js)가
+       td 에 data-label 을 넣은 표(.admin-table-cards — 배치 작업·사용자·HTTP 성능)만
+       thead 를 숨기고 tr 을 2열 grid 카드로 재배치한다. CSS content 는 DOM 텍스트가
+       아니므로 정렬·버튼·기존 테스트 동작 불변.
+       카드화가 어색한 넓은 표(이벤트 피드 상세 프리뷰, AI 사용량 7열 수치 매트릭스,
+       2열뿐인 DB 통계 등)는 기존 가로 스크롤(.admin-table-wrap)을 유지한다. */
+    .admin-table.admin-table-cards { display: block; white-space: normal; }
+    .admin-table.admin-table-cards thead { display: none; }
+    .admin-table.admin-table-cards tbody { display: block; }
+    .admin-table.admin-table-cards tr {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px 12px;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .admin-table.admin-table-cards tr:last-child { border-bottom: 0; }
+    .admin-table.admin-table-cards td {
+      display: block;
+      min-width: 0;
+      padding: 0;
+      border-bottom: 0;
+      text-align: left;
+    }
+    .admin-table.admin-table-cards td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      margin-bottom: 3px;
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .admin-table.admin-table-cards td.admin-cell-full,
+    .admin-table.admin-table-cards td[colspan] { grid-column: 1 / -1; }
+    .admin-table.admin-table-cards td[colspan] { text-align: center; }
     /* 모바일 터치 타겟: 시각 크기(32/36px)는 유지하고 투명 의사요소로
        히트 영역만 40px 이상으로 확장한다 (버튼 gap 8px과 상쇄되어 겹침 없음). */
     .admin-btn,

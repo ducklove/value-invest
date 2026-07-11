@@ -91,6 +91,37 @@ def test_admin_split_files_keep_feature_homes():
     for src in (admin, observability, linked):
         assert not re.search(r"(?<!\w)(alert|confirm|prompt)\(", src)
 
+def test_admin_mobile_card_tables_and_rerender_state_contract():
+    """M14(모바일 테이블) 해소 계약 + 수동 새로고침 상태 보존 계약.
+
+    ≤720px 에서 카드화 대상 3표(배치 작업·사용자·HTTP 성능)는 renderer 가
+    td 에 data-label 을 넣고 admin.html 의 .admin-table-cards CSS 가 행당
+    카드(2열 grid + ::before 라벨)로 재배치한다. 넓은 표(이벤트 피드 상세
+    프리뷰, AI 사용량 7열, 2열뿐인 DB 통계)는 가로 스크롤을 유지한다.
+    """
+    html = (STATIC / "admin.html").read_text(encoding="utf-8")
+    admin = (JS / "admin.js").read_text(encoding="utf-8")
+    observability = (JS / "admin-observability.js").read_text(encoding="utf-8")
+
+    # 카드 변환 CSS 는 모바일 블록에만 산다 — data-label ::before + grid 재배치.
+    assert ".admin-table.admin-table-cards td[data-label]::before" in html
+    assert "content: attr(data-label)" in html
+    assert html.find("@media (max-width: 720px)") < html.find(".admin-table.admin-table-cards")
+    # 카드화 대상 3표(배치/사용자/HTTP)만 admin-table-cards 클래스를 갖는다
+    # (class 속성이 admin-table-cards 로 끝나는 <table> 3개 — 주석 언급 제외).
+    assert observability.count('admin-table-cards">') == 3
+    assert 'data-label="실행 상태"' in observability
+    assert 'data-label="역할"' in observability
+    assert 'data-label="건수"' in observability
+    # 수치 우측 정렬은 inline style 이 아닌 admin-num 클래스 — inline style 은
+    # 모바일 카드 변환의 text-align 재정의를 막는다.
+    assert 'td style="text-align:right;"' not in observability
+    # 수동 새로고침 상태 보존 — 열린 collapsible id + 스크롤 위치 스냅샷/복원.
+    assert "function _captureAdminUiState(" in admin
+    assert "function _restoreAdminUiState(" in admin
+    assert "_restoreAdminUiState(uiState)" in admin
+
+
 def test_admin_split_files_stay_below_maintenance_ceiling():
     for name in ADMIN_SPLIT_FILES:
         lines = (JS / name).read_text(encoding="utf-8").splitlines()

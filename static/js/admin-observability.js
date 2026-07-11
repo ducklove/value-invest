@@ -21,14 +21,16 @@ function _renderHttpMetricsSection(httpMetrics) {
                  : (e.max_ms != null && e.max_ms >= 1000) ? 'admin-status-run'
                  : '';
     const fmt = (v) => (v == null ? '-' : Math.round(v).toLocaleString());
+    // 수치 정렬은 admin-num 클래스(inline style 은 모바일 카드 변환의
+    // text-align 재정의를 막아서 금지), data-label 은 카드 라벨용.
     return `
       <tr>
-        <td><code>${_esc(e.path || '(unknown)')}</code></td>
-        <td style="text-align:right;">${e.count || 0}</td>
-        <td style="text-align:right;" class="${errCls}">${e.errors || 0}</td>
-        <td style="text-align:right;">${fmt(e.avg_ms)}</td>
-        <td style="text-align:right;" class="${maxCls}">${fmt(e.max_ms)}</td>
-        <td><span class="admin-sub">${e.last_ts ? _fmtRelTime(e.last_ts) : '-'}</span></td>
+        <td class="admin-cell-full"><code>${_esc(e.path || '(unknown)')}</code></td>
+        <td data-label="건수" class="admin-num">${e.count || 0}</td>
+        <td data-label="에러" class="admin-num ${errCls}">${e.errors || 0}</td>
+        <td data-label="평균 (ms)" class="admin-num">${fmt(e.avg_ms)}</td>
+        <td data-label="최대 (ms)" class="admin-num ${maxCls}">${fmt(e.max_ms)}</td>
+        <td data-label="최근"><span class="admin-sub">${e.last_ts ? _fmtRelTime(e.last_ts) : '-'}</span></td>
       </tr>`;
   }).join('');
   return `
@@ -40,7 +42,7 @@ function _renderHttpMetricsSection(httpMetrics) {
           <button class="admin-btn admin-btn-secondary" onclick="loadAdminView()" type="button">새로고침</button>
         </div>
         <div class="admin-table-wrap">
-          <table class="admin-table admin-table-compact">
+          <table class="admin-table admin-table-compact admin-table-cards">
             <thead><tr><th>경로</th><th style="text-align:right;">건수</th><th style="text-align:right;">에러</th><th style="text-align:right;">평균</th><th style="text-align:right;">최대</th><th>최근</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">기록된 느린 요청/에러 없음</td></tr>'}</tbody>
           </table>
@@ -152,15 +154,17 @@ function _renderBatchSection(jobs) {
                    : slo.level === 'watch' ? '주의'
                    : '정상';
 
+    // data-label 은 모바일(≤720px) 카드 변환 시 CSS ::before 라벨로 쓰인다
+    // (admin.html .admin-table-cards). 작업명·버튼 셀은 라벨 없이 전체 폭.
     return `
       <tr>
-        <td><strong>${j.label}</strong><div class="admin-sub">${j.schedule}</div></td>
-        <td class="${statusClass}">${statusIcon} ${_statusLabel(j.status)}</td>
-        <td>${dataCell}</td>
-        <td class="${sloClass}">${sloLabel}<div class="admin-sub">${_esc(slo.note || '')}</div></td>
-        <td>${lastRun}</td>
-        <td>${nextRun}</td>
-        <td>
+        <td class="admin-cell-full"><strong>${j.label}</strong><div class="admin-sub">${j.schedule}</div></td>
+        <td data-label="실행 상태" class="${statusClass}">${statusIcon} ${_statusLabel(j.status)}</td>
+        <td data-label="최신 데이터">${dataCell}</td>
+        <td data-label="SLO" class="${sloClass}">${sloLabel}<div class="admin-sub">${_esc(slo.note || '')}</div></td>
+        <td data-label="최근 실행">${lastRun}</td>
+        <td data-label="다음 실행">${nextRun}</td>
+        <td class="admin-cell-full">
           <button class="admin-btn" onclick="triggerJob('${j.name}')" ${j.status === 'running' ? 'disabled' : ''}>실행</button>
           <button class="admin-btn admin-btn-secondary" onclick="triggerJobWithDate('${j.name}')">날짜 지정</button>
         </td>
@@ -171,7 +175,7 @@ function _renderBatchSection(jobs) {
   return `
     <div class="admin-section">
       <h3>배치 작업 <span class="admin-sub">실행 상태·데이터 상태·SLO를 함께 확인</span></h3>
-      <table class="admin-table">
+      <table class="admin-table admin-table-cards">
         <thead><tr>
           <th>작업</th>
           <th>실행 상태</th>
@@ -217,7 +221,7 @@ function _renderUsersSection(users) {
       <div id="adminUserEditor"></div>
       <div id="adminPortfolioSearchResult"></div>
       <div class="admin-table-wrap">
-        <table class="admin-table">
+        <table class="admin-table admin-table-cards">
           <thead><tr><th>사용자</th><th>역할</th><th>포트폴리오</th><th>최근 로그인</th><th>가입일</th><th>작업</th></tr></thead>
           <tbody id="adminUsersBody">${rows}</tbody>
         </table>
@@ -234,9 +238,11 @@ function _renderAdminUserRows(users) {
       : `<div class="admin-avatar-fallback">${_esc(_userInitial(u))}</div>`;
     const portfolioCount = Number(u.portfolio_count || 0);
     const portfolioUrl = _adminPortfolioUrl(subArg);
+    // data-label = 모바일 카드 변환용(admin.html .admin-table-cards).
+    // 사용자 셀·작업 버튼 셀은 라벨 없이 카드 전체 폭을 쓴다.
     return `
     <tr>
-      <td>
+      <td class="admin-cell-full">
         <div class="admin-user-cell">
           ${pic}
           <div class="admin-user-main">
@@ -246,19 +252,19 @@ function _renderAdminUserRows(users) {
           </div>
         </div>
       </td>
-      <td>
+      <td data-label="역할">
         <select class="admin-select" onchange="changeAdminUserRole('${subArg}', this.value === 'admin')">
           <option value="user" ${u.is_admin ? '' : 'selected'}>일반</option>
           <option value="admin" ${u.is_admin ? 'selected' : ''}>관리자</option>
         </select>
       </td>
-      <td>
+      <td data-label="포트폴리오">
         <span class="admin-badge">${portfolioCount.toLocaleString()}종목</span>
         <a class="admin-link-button" href="${portfolioUrl}" target="_blank" rel="noopener" style="margin-left:6px;">포트폴리오</a>
       </td>
-      <td>${u.last_login_at ? _esc(u.last_login_at.slice(0, 16).replace('T', ' ')) : '-'}</td>
-      <td>${u.created_at ? _esc(u.created_at.slice(0, 10)) : '-'}</td>
-      <td>
+      <td data-label="최근 로그인">${u.last_login_at ? _esc(u.last_login_at.slice(0, 16).replace('T', ' ')) : '-'}</td>
+      <td data-label="가입일">${u.created_at ? _esc(u.created_at.slice(0, 10)) : '-'}</td>
+      <td class="admin-cell-full">
         <button class="admin-btn admin-btn-secondary" onclick="editAdminUser('${subArg}')" type="button">프로필 수정</button>
         <button class="admin-btn admin-btn-danger" onclick="deleteAdminUser('${subArg}')" type="button">삭제</button>
       </td>
@@ -641,7 +647,7 @@ function _renderDataQualitySection(dq) {
         <td>${_esc(_dqCheckLabel(r.check))}<div class="admin-sub"><code>${_esc(r.check)}</code></div></td>
         <td class="${cls}">${icon} ${_esc(r.status)}</td>
         <td>${_esc(r.detail || '')}</td>
-        <td style="text-align:right;">${r.value != null ? _esc(String(r.value)) : '-'}</td>
+        <td class="admin-num">${r.value != null ? _esc(String(r.value)) : '-'}</td>
       </tr>`;
   }).join('');
   return `
