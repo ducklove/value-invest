@@ -452,6 +452,44 @@ function closeManagedModal(modalOrId, options = {}) {
   }
 }
 
+// 공용 확인 모달 — 네이티브 confirm() 을 대체한다. Promise<boolean> 을 돌려주고,
+// 확인=true, 취소·배경 클릭·Escape=false 로 resolve 한다. openManagedModal 을
+// 재사용하므로 Escape/포커스 트랩/스크롤 잠금은 관리 모달 스택이 처리한다.
+// 스타일은 자체 포함(inline + CSS 변수 폴백)이라 별도 CSS 로드에 의존하지 않는다.
+function confirmModal(message, options = {}) {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined') { resolve(false); return; }
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:11000;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,0.55);';
+    const box = document.createElement('div');
+    box.className = 'confirm-modal-box';
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    box.style.cssText = 'max-width:360px;width:100%;background:var(--surface,#fff);color:var(--text,#111);border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,0.3);';
+    box.innerHTML =
+      (options.title ? `<div class="confirm-modal-title" style="font-weight:700;font-size:15px;margin-bottom:8px;">${escapeHtml(options.title)}</div>` : '')
+      + `<div class="confirm-modal-msg" style="font-size:14px;line-height:1.6;">${escapeHtml(String(message ?? ''))}</div>`
+      + '<div class="confirm-modal-actions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">'
+      + `<button type="button" class="confirm-modal-cancel" style="padding:7px 14px;border-radius:8px;border:1px solid var(--border,#d1d5db);background:transparent;color:var(--text,#111);font-size:13px;font-weight:600;cursor:pointer;">${escapeHtml(options.cancelText || '취소')}</button>`
+      + `<button type="button" class="confirm-modal-ok" style="padding:7px 14px;border-radius:8px;border:1px solid var(--primary,#2563eb);background:var(--primary,#2563eb);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">${escapeHtml(options.confirmText || '확인')}</button>`
+      + '</div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      closeManagedModal(overlay, { remove: true });
+      resolve(result);
+    };
+    box.querySelector('.confirm-modal-ok').addEventListener('click', () => finish(true));
+    box.querySelector('.confirm-modal-cancel').addEventListener('click', () => finish(false));
+    overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) finish(false); });
+    openManagedModal(overlay, { initialFocus: '.confirm-modal-ok', onEscape: () => finish(false) });
+  });
+}
+
 function _isAbortError(error) {
   return !!error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 }
@@ -474,7 +512,17 @@ function reportApiError(error, context, options = {}) {
 // 스케일링, 퍼센트는 소수 2자리가 생태계 규약이다. 화면 전용 파생 포맷터
 // (예: fmtTradingValueKrw, pfFmtPortfolioValue)는 각 화면 파일에 남는다.
 // 2026-07-11 portfolio-render.js 에서 승격 — 동작 불변.
-function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
+// options.maxDecimals(정수)를 주면 소수 자릿수를 그 값으로 상한한다(하위호환:
+// 미지정이면 기존 toLocaleString 기본 동작). 종목 알림 임계값처럼 소수 2자리로
+// 잘라야 하는 화면 포맷터가 이 옵션으로 흡수된다.
+function fmtNum(n, options = {}) {
+  if (n === null || n === undefined) return '-';
+  const maxDecimals = options && options.maxDecimals;
+  if (Number.isFinite(maxDecimals)) {
+    return Number(n).toLocaleString(undefined, { maximumFractionDigits: Math.max(0, maxDecimals) });
+  }
+  return Number(n).toLocaleString();
+}
 function fmtKrw(n, maxDecimals = null) {
   if (n === null || n === undefined) return '-';
   const a = Math.abs(n);
@@ -490,10 +538,12 @@ function fmtSignedKrw(n) {
 // signed=false 면 양수에 '+' 를 붙이지 않는다. 달성률·배당수익률·비중
 // 같은 '절대 퍼센트' 는 +가 어색하고, 수익률·변동률 같은 '변화 퍼센트'
 // 만 +를 보여준다. 기본값은 true(기존 동작) — 호출부에서 명시.
-function fmtPct(n, signed = true) {
+// decimals 로 소수 자릿수를 조정한다(기본 2 = 기존 동작; 대시보드 도구 요약의
+// 1자리 퍼센트 같은 화면 규칙을 이 옵션으로 흡수).
+function fmtPct(n, signed = true, decimals = 2) {
   if (n === null || n === undefined) return '-';
   const prefix = signed && n > 0 ? '+' : '';
-  return prefix + n.toFixed(2) + '%';
+  return prefix + n.toFixed(decimals) + '%';
 }
 
 function escapeHtml(value) {

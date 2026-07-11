@@ -346,14 +346,14 @@ async function _ecLoadSubs() {
   }
 }
 
-function _ecPromptLogin() {
-  if (confirm('경제지표 결과 알림은 로그인 후 이용할 수 있습니다. 로그인 페이지로 이동할까요?')) {
+async function _ecPromptLogin() {
+  if (await confirmModal('경제지표 결과 알림은 로그인 후 이용할 수 있습니다. 로그인 페이지로 이동할까요?')) {
     if (typeof buildLoginPageUrl === 'function') window.location.href = buildLoginPageUrl();
   }
 }
 
-function _ecPromptChannel() {
-  if (confirm('알림을 받으려면 텔레그램 또는 카카오톡 연결이 필요합니다. 포트폴리오 > 알림 설정으로 이동할까요?')) {
+async function _ecPromptChannel() {
+  if (await confirmModal('알림을 받으려면 텔레그램 또는 카카오톡 연결이 필요합니다. 포트폴리오 > 알림 설정으로 이동할까요?')) {
     if (typeof switchView === 'function') switchView('portfolio');
     if (typeof pfOpenAlerts === 'function') setTimeout(pfOpenAlerts, 80);
   }

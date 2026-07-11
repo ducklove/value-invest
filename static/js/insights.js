@@ -165,10 +165,15 @@ function renderInsightPosts() {
   list.innerHTML = _insightPosts.map(renderInsightPostCard).join('');
 }
 
+// 백테스트 지표 칩 — 숫자 포맷은 공용 fmtPct(부호 있는 2자리)로 위임한다.
+// fmtPct 는 양수에만 '+'를 붙이지만, 이 화면은 0 도 +0.00 으로 보이던 관례라
+// 0 일 때만 '+'를 보정한다. 값 없음/숫자 아님은 null(칩 생략용).
 function _fmtInsightMetric(value, suffix = '%') {
   if (value == null || !Number.isFinite(Number(value))) return null;
   const n = Number(value);
-  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}${suffix}`;
+  const zeroSign = n === 0 ? '+' : '';
+  if (suffix === '%') return zeroSign + fmtPct(n, true);
+  return zeroSign + fmtPct(n, true).replace(/%$/, '') + suffix;
 }
 
 function _summaryChips(summary) {

@@ -164,7 +164,8 @@ test("결과 알림 토글은 로그인과 채널 게이트를 실제 동작으�
   const cb = w.document.querySelector(".ec-bell-cb");
 
   const confirms = [];
-  w.confirm = (message) => { confirms.push(message); return false; };
+  // 네이티브 confirm() → utils.js 의 confirmModal(Promise<boolean>) 로 교체됨.
+  w.confirmModal = (message) => { confirms.push(message); return Promise.resolve(false); };
   cb.checked = true;
   await w._ecToggleSubscription(cb);
   assert.equal(cb.checked, false);
@@ -182,4 +183,20 @@ test("결과 알림 토글은 로그인과 채널 게이트를 실제 동작으�
   assert.match(confirms.at(-1), /텔레그램 또는 카카오톡 연결/);
   assert.equal(posted.url, "/api/notifications/calendar");
   assert.equal(JSON.parse(posted.init.body).event_id, "future-1");
+});
+
+test("confirmModal 은 확인=true / 취소=false 를 Promise 로 돌려준다", async () => {
+  const w = load(12, 0);
+  const okPromise = w.confirmModal("진행할까요?");
+  const okBtn = w.document.querySelector(".confirm-modal .confirm-modal-ok");
+  assert.ok(okBtn, "확인 버튼 렌더");
+  assert.match(w.document.querySelector(".confirm-modal .confirm-modal-msg").textContent, /진행할까요/);
+  okBtn.click();
+  assert.equal(await okPromise, true);
+  // 확인 후 오버레이는 DOM 에서 제거된다.
+  assert.equal(w.document.querySelector(".confirm-modal"), null);
+
+  const cancelPromise = w.confirmModal("진행할까요?");
+  w.document.querySelector(".confirm-modal .confirm-modal-cancel").click();
+  assert.equal(await cancelPromise, false);
 });

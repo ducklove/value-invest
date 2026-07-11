@@ -401,7 +401,7 @@
   line-height: 1.5;
 }
 .daily-market-status.error {
-  color: #b91c1c;
+  color: var(--danger);
 }
 .daily-market-body {
   margin-top: 10px;
@@ -647,4 +647,58 @@
   .ec-vals { grid-area: vals; justify-content: flex-start; margin-top: 2px; }
   .ec-val { align-items: flex-start; }
   .ec-bell-cell { grid-area: bell; align-self: center; }
+}
+
+/* === 차트/자산 색 토큰 ===
+ * echarts/막대/자산배분 색은 JS 가 getComputedStyle 로 이 토큰들을 읽어 그린다
+ * (market-dashboard.js·masters.js 에 동일한 hex 폴백이 있어 CSS 미로드 시에도
+ * 동작). 다크 전환 시 국채 차트는 재렌더 경로에서 다크 토큰을 다시 읽는다. */
+:root {
+  --chart-bond-kr: #2563eb;
+  --chart-bond-us: #e11d48;
+  --chart-bond-jp: #16a34a;
+  --chart-bond-bar: #2563eb;
+  --chart-bond-base: #f97316;
+  --masters-asset-equity_kr: #1d4ed8;
+  --masters-asset-equity_global: #60a5fa;
+  --masters-asset-bond_long: #047857;
+  --masters-asset-bond_mid: #10b981;
+  --masters-asset-bond_short: #94a3b8;
+  --masters-asset-gold: #f59e0b;
+  --masters-asset-commodities: #b45309;
+  --masters-asset-reits: #8b5cf6;
+}
+:root[data-theme="dark"] {
+  /* 다크 배경에서 대비를 위해 국채 곡선/막대 색을 밝게 조정 */
+  --chart-bond-kr: #60a5fa;
+  --chart-bond-us: #fb7185;
+  --chart-bond-jp: #34d399;
+  --chart-bond-bar: #60a5fa;
+  --chart-bond-base: #fb923c;
+}
+
+/* === 모바일 터치 타겟 ===
+ * 소형 필/토글 버튼(ec-chip·mv-mkt·mv-tab·ec-settings-toggle)은 시각 크기는
+ * 그대로 두고, 투명 ::after 로 히트 영역을 44px(권장 최소, ≥40px)로 넓힌다. */
+@media (max-width: 900px) {
+  .ec-chip,
+  .mv-mkt,
+  .mv-tab,
+  .ec-settings-toggle {
+    position: relative;
+  }
+  .ec-chip::after,
+  .mv-mkt::after,
+  .mv-tab::after,
+  .ec-settings-toggle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    min-width: 44px;
+    min-height: 44px;
+    transform: translate(-50%, -50%);
+  }
 }

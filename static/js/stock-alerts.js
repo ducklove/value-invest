@@ -24,13 +24,13 @@ function saApiJson(path, options = {}) {
   return apiFetchJson(`/api/notifications${path}`, init);
 }
 
+// 임계값(가격·등락률) 표기 — 공용 fmtNum 으로 위임하되, 빈값/숫자아님은 '-' 로
+// 막고 소수는 2자리 상한(정수면 자동으로 소수 없음)을 준다.
 function saFmtNum(value) {
   if (value === null || value === undefined || value === '') return '-';
   const n = Number(value);
   if (!isFinite(n)) return '-';
-  return Math.abs(n - Math.round(n)) < 1e-9
-    ? Math.round(n).toLocaleString()
-    : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return fmtNum(n, { maxDecimals: 2 });
 }
 
 function saFindAlert(type) {

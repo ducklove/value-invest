@@ -675,6 +675,42 @@ test("_drawBondCountryChart는 describeChart 로 role=img + sr-only 데이터 �
   assert.deepEqual(rows, [["미국", "4.45", "4.50"], ["일본", "2.57", "-"]]);
 });
 
+test("_drawBondCountryChart tooltip escapes API-derived country name", () => {
+  const w = load();
+  let option = null;
+  w.echarts = { init() { return { setOption(o) { option = o; }, resize() {} }; } };
+  const el = w.document.createElement("div");
+  el.id = "bondCountryCompare";
+  w.document.body.appendChild(el);
+
+  const hostile = "<img src=x onerror=alert(1)>";
+  w._drawBondCountryChart([{ country: "US", name: hostile, value: 4.45, baseValue: 4.50 }]);
+  // echarts 툴팁은 HTML 을 렌더하므로 카탈로그 유래 국가명은 escape 되어야 한다.
+  const html = option.tooltip.formatter([{ name: hostile, dataIndex: 0 }]);
+  assert.ok(!/<img/.test(html), "hostile country name must not appear raw in tooltip HTML");
+  assert.match(html, /&lt;img/);
+});
+
+test("국채 차트 막대색은 CSS 토큰에서 소싱하고(없으면 폴백) 토큰이 있으면 그 값을 쓴다", () => {
+  const w = load();
+  let option = null;
+  w.echarts = { init() { return { setOption(o) { option = o; }, resize() {} }; } };
+  // getComputedStyle 을 스텁해 토큰 값을 주입 — 다크 재렌더 경로가 토큰을 읽는지 검증.
+  w.getComputedStyle = () => ({
+    getPropertyValue: (name) => ({
+      "--chart-bond-bar": "#111111",
+      "--chart-bond-base": "#222222",
+    })[String(name).trim()] || "",
+  });
+  const el = w.document.createElement("div");
+  el.id = "bondCountryCompare";
+  w.document.body.appendChild(el);
+
+  w._drawBondCountryChart([{ country: "US", name: "미국", value: 4.45, baseValue: 4.50 }]);
+  assert.equal(option.series[0].data[0].itemStyle.color, "#111111");
+  assert.equal(option.series[1].data[0].itemStyle.color, "#222222");
+});
+
 test("_bondMatLabel maps overnight(0) to 1D, sub-year to months, else years", () => {
   const w = load();
   assert.equal(w._bondMatLabel(-1), "기준");

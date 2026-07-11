@@ -25,8 +25,31 @@ const MD_INDEX_FRAME_DEFAULT_PERIOD = '1D';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
 const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', ES: '스페인', CH: '스위스', CA: '캐나다', RU: '러시아', IN: '인도', ID: '인도네시아', BR: '브라질' };
-const BOND_CURVE_COLORS = { KR: '#2563eb', US: '#e11d48', JP: '#16a34a' };
 let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
+
+// 차트 색은 dashboard.css 의 CSS 토큰에서 소싱한다(다크 전환 시 재렌더로 갱신).
+// 토큰이 비어 있으면(jsdom·CSS 미로드) 폴백 hex 를 쓴다 — 폴백은 토큰 정의와 동일.
+function _mdCssColor(varName, fallback) {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+    return v || fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+function _bondCurveColors() {
+  return {
+    KR: _mdCssColor('--chart-bond-kr', '#2563eb'),
+    US: _mdCssColor('--chart-bond-us', '#e11d48'),
+    JP: _mdCssColor('--chart-bond-jp', '#16a34a'),
+  };
+}
+function _bondBarColors() {
+  return {
+    tenYear: _mdCssColor('--chart-bond-bar', '#2563eb'),
+    base: _mdCssColor('--chart-bond-base', '#f97316'),
+  };
+}
 
 function _mdChange(d) {
   // Mirror the market-bar contract: direction up/down/flat, change_pct like "1.23%".
@@ -670,6 +693,7 @@ function _drawBondCurveChart(curve) {
   const el = document.getElementById('bondYieldCurve');
   if (!el || !window.echarts || !curve.labels.length) return;
   const t = _bondChartTheme();
+  const curveColors = _bondCurveColors();
   const ec = echarts.init(el);
   const mkSeries = (name, data, color) => ({
     name, type: 'line', data: data.map((v) => (v == null ? '-' : v)),
@@ -694,9 +718,9 @@ function _drawBondCurveChart(curve) {
       },
     },
     series: [
-      mkSeries('한국', curve.kr, BOND_CURVE_COLORS.KR),
-      mkSeries('미국', curve.us, BOND_CURVE_COLORS.US),
-      mkSeries('일본', curve.jp, BOND_CURVE_COLORS.JP),
+      mkSeries('한국', curve.kr, curveColors.KR),
+      mkSeries('미국', curve.us, curveColors.US),
+      mkSeries('일본', curve.jp, curveColors.JP),
     ],
   });
   _bondTrackChart(el, ec);
@@ -707,6 +731,7 @@ function _drawBondCountryChart(countries) {
   if (!el || !window.echarts || !countries.length) return;
   el.style.height = `${Math.max(390, countries.length * 28 + 76)}px`;
   const t = _bondChartTheme();
+  const barColors = _bondBarColors();
   const ec = echarts.init(el);
   // 가로 막대: 금리 높은 국가가 위로 오도록 역순(echarts y-category는 아래부터).
   const ordered = countries.slice().reverse();
@@ -721,8 +746,10 @@ function _drawBondCountryChart(countries) {
       axisPointer: { type: 'shadow' },
       formatter(ps) {
         const row = ordered[ps[0].dataIndex];
-        const pct = row && row.changePct ? ` (${row.changePct})` : '';
-        let h = `${ps[0].name}: 10년물 ${Number(row.value).toFixed(2)}%${pct}`;
+        const pct = row && row.changePct ? ` (${escapeHtml(row.changePct)})` : '';
+        // ps[0].name(국가명)은 /api/market-indicators 카탈로그 유래 문자열이라
+        // echarts HTML 툴팁에 그대로 넣지 않고 escape 한다.
+        let h = `${escapeHtml(String(ps[0].name))}: 10년물 ${Number(row.value).toFixed(2)}%${pct}`;
         if (row.baseValue != null) h += `<br/>기준금리 ${Number(row.baseValue).toFixed(2)}%`;
         return h;
       },
@@ -732,7 +759,7 @@ function _drawBondCountryChart(countries) {
       type: 'bar', barWidth: '50%',
       data: ordered.map((c) => ({
         value: c.value,
-        itemStyle: { color: '#2563eb', borderRadius: [0, 3, 3, 0] },
+        itemStyle: { color: barColors.tenYear, borderRadius: [0, 3, 3, 0] },
       })),
       label: {
         show: true,
@@ -752,7 +779,7 @@ function _drawBondCountryChart(countries) {
       barGap: '-68%',
       data: ordered.map((c) => (c.baseValue == null ? '-' : {
         value: c.baseValue,
-        itemStyle: { color: '#f97316', borderRadius: [0, 3, 3, 0], opacity: 0.86 },
+        itemStyle: { color: barColors.base, borderRadius: [0, 3, 3, 0], opacity: 0.86 },
       })),
     }],
   });
@@ -785,6 +812,25 @@ function _mdRenderBonds(codes, catalog, dataMap) {
       _drawBondCountryChart(countries);
     }).catch((e) => console.warn('bond charts load failed', e));
   }
+}
+
+// 다크/라이트 전환 시 국채 차트를 CSS 토큰 색으로 다시 그린다. toggleTheme
+// (search.js)은 echarts resize 만 하므로 색·축 텍스트가 갱신되지 않는다 —
+// portfolio-household.js 와 같은 패턴으로 data-theme 변화를 관찰해 재렌더한다.
+function _mdRedrawBondsForTheme() {
+  if (typeof document === 'undefined' || !_mdCatalog || !_mdLastDataMap) return;
+  // 국채 섹션이 실제로 렌더돼 있고 echarts 가 이미 로드된 경우에만(추가 로드 없이).
+  if (!document.getElementById('bondYieldCurve') && !document.getElementById('bondCountryCompare')) return;
+  if (typeof window === 'undefined' || !window.echarts) return;
+  const bondCodes = Object.keys(_mdCatalog).filter((c) => (_mdCatalog[c] || {}).category === '국채');
+  if (!bondCodes.length) return;
+  _disposeBondCharts();
+  _mdRenderBonds(bondCodes, _mdCatalog, _mdLastDataMap);
+}
+
+if (typeof MutationObserver === 'function' && typeof document !== 'undefined' && document.documentElement) {
+  new MutationObserver(() => _mdRedrawBondsForTheme())
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 }
 
 function _mdRenderDashboard(catalog, dataMap) {
@@ -982,11 +1028,14 @@ function _extHref(url) {
   return _extSafeUrl(_withTheme(url));
 }
 
+// 도구 요약의 퍼센트 표기 — 숫자 포맷은 공용 fmtPct 로 위임하고, 이 화면 고유의
+// 입력 가드(빈값→'-', 숫자 아님→원문 escape)와 표기 규칙(부호 있으면 2자리,
+// 없으면 1자리)만 여기서 처리한다.
 function _extPct(v, signed) {
   if (v === null || v === undefined || v === '') return '-';
   const n = Number(v);
   if (!isFinite(n)) return escapeHtml(String(v));
-  return (signed && n > 0 ? '+' : '') + n.toFixed(signed ? 2 : 1) + '%';
+  return fmtPct(n, !!signed, signed ? 2 : 1);
 }
 
 function _extLinkRows(rows, valKey, baseUrl, useCode) {
