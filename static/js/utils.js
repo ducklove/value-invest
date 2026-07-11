@@ -469,6 +469,33 @@ function reportApiError(error, context, options = {}) {
   showToast(`${label} 실패: ${detail}`);
 }
 
+// --- 공용 숫자 포맷터 ---------------------------------------------------
+// 화면 전반(포트폴리오·대시보드·도구)이 공유하는 표준 표기. 원화는 억/조
+// 스케일링, 퍼센트는 소수 2자리가 생태계 규약이다. 화면 전용 파생 포맷터
+// (예: fmtTradingValueKrw, pfFmtPortfolioValue)는 각 화면 파일에 남는다.
+// 2026-07-11 portfolio-render.js 에서 승격 — 동작 불변.
+function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
+function fmtKrw(n, maxDecimals = null) {
+  if (n === null || n === undefined) return '-';
+  const a = Math.abs(n);
+  const clampDigits = d => Number.isFinite(maxDecimals) ? Math.min(d, Math.max(0, maxDecimals)) : d;
+  if (a >= 1e12) { const v = n / 1e12; const d = clampDigits(a >= 1e15 ? 0 : a >= 1e14 ? 1 : a >= 1e13 ? 2 : 3); return v.toFixed(d) + '조'; }
+  if (a >= 1e8)  { const v = n / 1e8;  const d = clampDigits(a >= 1e11 ? 0 : a >= 1e10 ? 1 : a >= 1e9 ? 2 : 3);  return v.toFixed(d) + '억'; }
+  return Number(Math.round(n)).toLocaleString();
+}
+function fmtSignedKrw(n) {
+  if (n === null) return '-';
+  return (n > 0 ? '+' : '') + fmtKrw(n);
+}
+// signed=false 면 양수에 '+' 를 붙이지 않는다. 달성률·배당수익률·비중
+// 같은 '절대 퍼센트' 는 +가 어색하고, 수익률·변동률 같은 '변화 퍼센트'
+// 만 +를 보여준다. 기본값은 true(기존 동작) — 호출부에서 명시.
+function fmtPct(n, signed = true) {
+  if (n === null || n === undefined) return '-';
+  const prefix = signed && n > 0 ? '+' : '';
+  return prefix + n.toFixed(2) + '%';
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')

@@ -20,7 +20,7 @@ const SOURCES = [
   read("static", "app-config.js"),
   read("static", "js", "utils.js"),
   read("static", "js", "portfolio-store.js"),
-  read("static", "js", "portfolio-render.js"), // fmtPct/returnClass 의 홈
+  read("static", "js", "portfolio-render.js"), // returnClass 의 홈 (fmtPct 는 utils.js)
   read("static", "js", "portfolio-journal.js"),
 ];
 

@@ -901,15 +901,9 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', _dailyAxisHours);
   }
 }
-function fmtNum(n) { return n !== null && n !== undefined ? Number(n).toLocaleString() : '-'; }
-function fmtKrw(n, maxDecimals = null) {
-  if (n === null || n === undefined) return '-';
-  const a = Math.abs(n);
-  const clampDigits = d => Number.isFinite(maxDecimals) ? Math.min(d, Math.max(0, maxDecimals)) : d;
-  if (a >= 1e12) { const v = n / 1e12; const d = clampDigits(a >= 1e15 ? 0 : a >= 1e14 ? 1 : a >= 1e13 ? 2 : 3); return v.toFixed(d) + '조'; }
-  if (a >= 1e8)  { const v = n / 1e8;  const d = clampDigits(a >= 1e11 ? 0 : a >= 1e10 ? 1 : a >= 1e9 ? 2 : 3);  return v.toFixed(d) + '억'; }
-  return Number(Math.round(n)).toLocaleString();
-}
+// 공용 숫자 포맷터(fmtNum/fmtKrw/fmtSignedKrw/fmtPct)는 utils.js 로 승격됨
+// (CLAUDE.md 의 "공용 헬퍼는 utils.js" 계약과 일치). 여기엔 포트폴리오
+// 상태(PfStore)에 의존하거나 이 화면 전용인 파생 포맷터만 남는다.
 function fmtTradingValueKrw(n) {
   return fmtKrw(n, 2);
 }
@@ -919,18 +913,6 @@ function pfFmtPortfolioValue(value) {
   return PfStore.currency.unit === 'USD'
     ? '$' + Number(converted).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
     : fmtNum(Math.round(converted));
-}
-function fmtSignedKrw(n) {
-  if (n === null) return '-';
-  return (n > 0 ? '+' : '') + fmtKrw(n);
-}
-// signed=false 면 양수에 '+' 를 붙이지 않는다. 달성률·배당수익률·비중
-// 같은 '절대 퍼센트' 는 +가 어색하고, 수익률·변동률 같은 '변화 퍼센트'
-// 만 +를 보여준다. 기본값은 true(기존 동작) — 호출부에서 명시.
-function fmtPct(n, signed = true) {
-  if (n === null || n === undefined) return '-';
-  const prefix = signed && n > 0 ? '+' : '';
-  return prefix + n.toFixed(2) + '%';
 }
 const _BENCHMARK_PRESETS = [
   {code: 'IDX_KOSPI', name: '코스피'},

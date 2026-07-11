@@ -21,7 +21,7 @@ const SOURCES = [
   read("static", "app-config.js"),
   read("static", "js", "utils.js"),
   read("static", "js", "portfolio-store.js"),
-  read("static", "js", "portfolio-render.js"), // fmtKrw 의 홈
+  read("static", "js", "portfolio-render.js"), // fmtKrw 는 utils.js 로 승격됨
   read("static", "js", "portfolio-dividends-calendar.js"),
 ];
 
