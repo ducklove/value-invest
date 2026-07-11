@@ -62,11 +62,13 @@ function _adminChartGridColor() {
 }
 
 function _adminChartSeriesColors() {
+  // --primary 가 허브 블루로 통일되며 --accent-blue 와 같아졌으므로, cpu/http
+  // (블루)와 구분이 필요한 memory/info 시리즈는 --color-success 토큰을 쓴다.
   return {
     cpu: _adminChartToken('--accent-blue', '#2563eb'),
-    memory: _adminChartToken('--primary', '#0f766e'),
+    memory: _adminChartToken('--color-success', '#059669'),
     disk: _adminChartToken('--color-warning', '#d97706'),
-    info: _adminChartToken('--primary', '#0f766e'),
+    info: _adminChartToken('--color-success', '#059669'),
     warning: _adminChartToken('--color-warning', '#d97706'),
     error: _adminChartToken('--color-danger', '#dc2626'),
     http: _adminChartToken('--accent-blue', '#2563eb'),

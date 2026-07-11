@@ -26,8 +26,8 @@
     --border: #dbe3ee;
     --border-strong: #c8d3e1;
     --hover-bg: #f1f5f9;
-    --primary: #0f766e;
-    --primary-hover: #0d5f59;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
     --accent-blue: #2563eb;
     --color-success: #059669;
     --color-warning: #d97706;
@@ -44,8 +44,8 @@
     --border: #243244;
     --border-strong: #334155;
     --hover-bg: #182235;
-    --primary: #2dd4bf;
-    --primary-hover: #5eead4;
+    --primary: #60a5fa;
+    --primary-hover: #93c5fd;
     --accent-blue: #60a5fa;
     --color-success: #34d399;
     --color-warning: #f59e0b;
@@ -348,6 +348,22 @@
       white-space: nowrap;
     }
     .admin-chart { height: 190px; }
+    /* 모바일 터치 타겟: 시각 크기(32/36px)는 유지하고 투명 의사요소로
+       히트 영역만 40px 이상으로 확장한다 (버튼 gap 8px과 상쇄되어 겹침 없음). */
+    .admin-btn,
+    .admin-link-button,
+    .theme-toggle { position: relative; }
+    .admin-btn::after,
+    .admin-link-button::after,
+    .theme-toggle::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: max(100%, 40px);
+      height: max(100%, 40px);
+      transform: translate(-50%, -50%);
+    }
   }
 </style>
 </head>

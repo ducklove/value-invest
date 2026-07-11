@@ -637,14 +637,14 @@ def _render_admin_portfolio_page(user: dict, items: list[dict], *, actor: dict) 
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{safe_name} 포트폴리오</title>
   <style>
-    :root {{ color-scheme: light; --bg:#f6f8fb; --surface:#fff; --line:#dbe2ea; --text:#111827; --muted:#64748b; --accent:#0f766e; }}
+    :root {{ color-scheme: light; --bg:#f6f8fb; --surface:#fff; --line:#dbe2ea; --text:#111827; --muted:#64748b; --accent:#2563eb; }}
     * {{ box-sizing:border-box; }}
     body {{ margin:0; min-height:100vh; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }}
     main {{ width:min(1120px, calc(100% - 32px)); margin:0 auto; padding:28px 0 48px; }}
     header {{ display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:18px; }}
     h1 {{ margin:0; font-size:24px; line-height:1.2; letter-spacing:0; }}
     .sub {{ color:var(--muted); font-size:13px; margin-top:6px; }}
-    .badge {{ display:inline-flex; align-items:center; min-height:24px; padding:0 10px; border:1px solid rgba(15,118,110,.25); border-radius:6px; color:var(--accent); background:rgba(15,118,110,.08); font-size:12px; font-weight:700; }}
+    .badge {{ display:inline-flex; align-items:center; min-height:24px; padding:0 10px; border:1px solid rgba(37,99,235,.25); border-radius:6px; color:var(--accent); background:rgba(37,99,235,.08); font-size:12px; font-weight:700; }}
     .summary {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:16px; }}
     .metric {{ background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }}
     .metric span {{ display:block; color:var(--muted); font-size:12px; margin-bottom:6px; }}
