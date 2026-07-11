@@ -12,104 +12,102 @@ from repositories import ai_usage as ai_usage_repo
 from repositories import app_settings as app_settings_repo
 
 OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
-# gemini-3-flash 로 해석되던 '~google/gemini-flash-latest' 별칭을 버리고
-# 3.5 플래시를 명시한다 — 별칭은 OpenRouter 쪽 해석이 바뀌면 모델도 몰래
-# 바뀌는 문제가 있었다. 저장된 구모델 설정은 _migrate_gemini3_flash_models 가 옮긴다.
-GEMINI_35_FLASH = "google/gemini-3.5-flash"
-DEFAULT_PORTFOLIO_AI_MODEL = GEMINI_35_FLASH
-DEFAULT_WIKI_QA_MODEL = "moonshotai/kimi-k2.6"
-_MODEL_SETTING_PREFIX = "AI_MODEL::"
-_WIKI_QA_KIMI_MIGRATION_KEY = "AI_MIGRATION::wiki_qa_kimi_k2_6"
-_WIKI_QA_LEGACY_DEFAULT_MODELS = {"google/gemma-4-31b-it"}
-_PORTFOLIO_FLASH_MIGRATION_KEY = "AI_MIGRATION::portfolio_gemini_flash_latest"
-_PORTFOLIO_QWEN_FLASH_MIGRATION_KEY = "AI_MIGRATION::portfolio_qwen_flash_to_gemini_flash_latest"
-_PORTFOLIO_LEGACY_DEFAULT_MODELS: dict[str, set[str]] = {
-    "portfolio_fast": {"google/gemma-4-31b-it"},
-    "portfolio_balanced": {"qwen/qwen3.6-plus"},
-    "portfolio_premium": {"qwen/qwen3.6-plus"},
-}
-_PORTFOLIO_QWEN_FLASH_LEGACY_MODELS = {
-    "qwen/qwen3.6-flash",
-    "qwen/qwen3.6-plus",
-}
-_GEMINI35_FLASH_MIGRATION_KEY = "AI_MIGRATION::gemini_3_flash_to_3_5_flash"
-# '~...flash-latest' 별칭(당시 gemini-3-flash 해석)과 gemini-3-flash 직접 지정
-# 둘 다 3.5 플래시로 올린다. 같은 계열 업그레이드만 — 타 계열 수동 설정은 불변.
-_GEMINI3_FLASH_LEGACY_MODELS = {
-    "~google/gemini-flash-latest",
-    "google/gemini-3-flash",
+# OpenRouter 별칭 대신 명시적 모델 ID를 등급 기본값으로 둔다. 실제 운영값은
+# 관리자 DB 설정 또는 등급별 환경변수로 재정의할 수 있다.
+LIGHT_MODEL = "qwen/qwen3.6-flash"
+BALANCED_MODEL = "google/gemini-3.5-flash"
+PREMIUM_MODEL = "openai/gpt-5.6-terra"
+GEMINI_35_FLASH = BALANCED_MODEL
+DEFAULT_PORTFOLIO_AI_MODEL = BALANCED_MODEL
+_TIER_MODEL_SETTING_PREFIX = "AI_TIER_MODEL::"
+
+# 모델 ID는 기능별로 흩어 두지 않고 등급 설정 한 곳에서 관리한다. DB에 저장된
+# 관리자 설정이 최우선이고, 그 다음 새 등급 env, 기존 호환 env, 코드 기본값 순이다.
+MODEL_TIERS: dict[str, dict[str, Any]] = {
+    "LOCAL": {
+        "label": "LOCAL",
+        "description": "외부 LLM을 호출하지 않는 규칙/템플릿 모드",
+        "external": False,
+    },
+    "LIGHT": {
+        "label": "LIGHT",
+        "description": "대량·저비용 요약과 Q&A",
+        "env": "AI_LIGHT_MODEL",
+        "legacy_envs": ("AI_FAST_MODEL",),
+        "default": LIGHT_MODEL,
+        "external": True,
+    },
+    "BALANCED": {
+        "label": "BALANCED",
+        "description": "일반 금융 분석과 기본 포트폴리오 분석",
+        "env": "AI_BALANCED_MODEL",
+        "legacy_envs": ("AI_DEFAULT_MODEL",),
+        "default": BALANCED_MODEL,
+        "external": True,
+    },
+    "PREMIUM": {
+        "label": "PREMIUM",
+        "description": "사용자가 명시적으로 실행하는 고급 분석",
+        "env": "AI_PREMIUM_MODEL",
+        "legacy_envs": (),
+        "default": PREMIUM_MODEL,
+        "external": True,
+    },
 }
 
 MODEL_FEATURES: dict[str, dict[str, str]] = {
     "portfolio_fast": {
         "label": "포트폴리오 인사이트 빠름",
-        "env": "AI_FAST_MODEL",
-        "default": DEFAULT_PORTFOLIO_AI_MODEL,
+        "tier": "LIGHT",
     },
     "portfolio_balanced": {
         "label": "포트폴리오 인사이트 균형",
-        "env": "AI_DEFAULT_MODEL",
-        "default": DEFAULT_PORTFOLIO_AI_MODEL,
+        "tier": "BALANCED",
     },
     "portfolio_premium": {
         "label": "포트폴리오 인사이트 고급",
-        "env": "AI_PREMIUM_MODEL",
-        "default_env": "AI_DEFAULT_MODEL",
-        "default": DEFAULT_PORTFOLIO_AI_MODEL,
+        "tier": "PREMIUM",
     },
     "wiki_qa": {
         "label": "종목 위키 Q&A",
-        "env": "WIKI_QA_MODEL",
-        "default": DEFAULT_WIKI_QA_MODEL,
+        "tier": "LIGHT",
     },
     "wiki_ingestion": {
         "label": "리포트 위키 요약",
-        "env": "WIKI_MODEL",
-        "default_env": "AI_DEFAULT_MODEL",
-        "default": "qwen/qwen3.6-plus",
+        "tier": "LIGHT",
     },
     "dart_report_review": {
         "label": "DART 정기보고서 리뷰",
-        "env": "AI_DART_REVIEW_MODEL",
-        "default": "deepseek/deepseek-v4-flash",
+        "tier": "BALANCED",
     },
     "market_daily": {
         "label": "금일 시황",
-        "env": "AI_MARKET_DAILY_MODEL",
-        "default": GEMINI_35_FLASH,
+        "tier": "BALANCED",
     },
     "daily_briefing": {
-        # 아침 배치 푸시용 짧은 요약 — 빠르고 싼 모델이면 충분해서
-        # 포트폴리오 '빠름' 모델 체인을 기본값으로 따라간다.
         "label": "AI 데일리 브리핑",
-        "env": "AI_DAILY_BRIEFING_MODEL",
-        "default_env": "AI_FAST_MODEL",
-        "default": DEFAULT_PORTFOLIO_AI_MODEL,
+        "tier": "LIGHT",
     },
     "masters_review": {
-        # 도구 탭 '투자 대가의 전략' — 대가 관점 포트폴리오 진단.
-        # 기본은 gemini-3.5-flash 고정(요청사항) — 포트폴리오 체인을 따르지 않는다.
         "label": "투자 대가 포트폴리오 진단",
-        "env": "AI_MASTERS_REVIEW_MODEL",
-        "default": GEMINI_35_FLASH,
+        "tier": "BALANCED",
     },
 }
 
 
-def _model_setting_key(feature: str) -> str:
-    return f"{_MODEL_SETTING_PREFIX}{feature}"
+def _tier_model_setting_key(tier: str) -> str:
+    return f"{_TIER_MODEL_SETTING_PREFIX}{tier}"
 
 
-def _configured_default_model(spec: dict[str, str]) -> str:
-    value = os.getenv(spec["env"])
+def _configured_tier_model(spec: dict[str, Any]) -> str:
+    value = os.getenv(str(spec["env"]))
     if value:
         return value
-    chained_env = spec.get("default_env")
-    if chained_env:
-        chained = os.getenv(chained_env)
-        if chained:
-            return chained
-    return spec["default"]
+    for legacy_env in spec.get("legacy_envs", ()):
+        legacy_value = os.getenv(str(legacy_env))
+        if legacy_value:
+            return legacy_value
+    return str(spec["default"])
 
 
 def _load_key_from_file(name: str) -> str:
@@ -178,145 +176,34 @@ async def delete_openrouter_key():
     await app_settings_repo.delete_app_setting(OPENROUTER_KEY_SETTING)
 
 
+async def get_model_for_tier(tier: str) -> str:
+    normalized = str(tier or "").strip().upper()
+    spec = MODEL_TIERS.get(normalized)
+    if not spec:
+        raise ValueError(f"Unknown AI tier: {tier}")
+    if not spec.get("external"):
+        return ""
+    stored = await app_settings_repo.get_app_setting(_tier_model_setting_key(normalized))
+    if stored and stored.get("value"):
+        return str(stored["value"])
+    return _configured_tier_model(spec)
+
+
 async def get_model_for_feature(feature: str) -> str:
     spec = MODEL_FEATURES.get(feature)
     if not spec:
         raise ValueError(f"Unknown AI feature: {feature}")
-    stored = await app_settings_repo.get_app_setting(_model_setting_key(feature))
-    if stored and stored.get("value"):
-        return str(stored["value"])
-    return _configured_default_model(spec)
-
-
-async def _migrate_legacy_wiki_qa_default() -> dict[str, Any]:
-    feature = "wiki_qa"
-    setting_key = _model_setting_key(feature)
-    marker = await app_settings_repo.get_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY)
-    if marker:
-        return {"migrated": False, "reason": "already_marked"}
-
-    stored = await app_settings_repo.get_app_setting(setting_key)
-    stored_value = str((stored or {}).get("value") or "").strip()
-    target = _configured_default_model(MODEL_FEATURES[feature])
-    if stored_value in _WIKI_QA_LEGACY_DEFAULT_MODELS and stored_value != target:
-        await app_settings_repo.set_app_setting(setting_key, target, updated_by="system:migration")
-        await app_settings_repo.set_app_setting(_WIKI_QA_KIMI_MIGRATION_KEY, target, updated_by="system:migration")
-        return {"migrated": True, "feature": feature, "from": stored_value, "to": target}
-
-    await app_settings_repo.set_app_setting(
-        _WIKI_QA_KIMI_MIGRATION_KEY,
-        "skipped",
-        updated_by="system:migration",
-    )
-    return {"migrated": False, "reason": "no_legacy_value"}
-
-
-async def _migrate_legacy_portfolio_model_defaults() -> dict[str, Any]:
-    marker = await app_settings_repo.get_app_setting(_PORTFOLIO_FLASH_MIGRATION_KEY)
-    if marker:
-        return {"migrated": False, "reason": "already_marked"}
-
-    migrated: list[str] = []
-    for feature, legacy_values in _PORTFOLIO_LEGACY_DEFAULT_MODELS.items():
-        stored = await app_settings_repo.get_app_setting(_model_setting_key(feature))
-        stored_value = str((stored or {}).get("value") or "").strip()
-        target = _configured_default_model(MODEL_FEATURES[feature])
-        if stored_value in legacy_values and stored_value != target:
-            await app_settings_repo.set_app_setting(
-                _model_setting_key(feature),
-                target,
-                updated_by="system:migration",
-            )
-            migrated.append(feature)
-
-    await app_settings_repo.set_app_setting(
-        _PORTFOLIO_FLASH_MIGRATION_KEY,
-        ",".join(migrated) if migrated else "skipped",
-        updated_by="system:migration",
-    )
-    if migrated:
-        return {"migrated": True, "features": migrated, "to": DEFAULT_PORTFOLIO_AI_MODEL}
-    return {"migrated": False, "reason": "no_legacy_value"}
-
-
-async def _migrate_qwen_flash_portfolio_overrides() -> dict[str, Any]:
-    marker = await app_settings_repo.get_app_setting(_PORTFOLIO_QWEN_FLASH_MIGRATION_KEY)
-    if marker:
-        return {"migrated": False, "reason": "already_marked"}
-
-    migrated: list[str] = []
-    for feature in ("portfolio_fast", "portfolio_balanced", "portfolio_premium"):
-        stored = await app_settings_repo.get_app_setting(_model_setting_key(feature))
-        stored_value = str((stored or {}).get("value") or "").strip().lower()
-        target = _configured_default_model(MODEL_FEATURES[feature])
-        if stored_value in _PORTFOLIO_QWEN_FLASH_LEGACY_MODELS and stored_value != target.lower():
-            await app_settings_repo.set_app_setting(
-                _model_setting_key(feature),
-                target,
-                updated_by="system:migration",
-            )
-            migrated.append(feature)
-
-    await app_settings_repo.set_app_setting(
-        _PORTFOLIO_QWEN_FLASH_MIGRATION_KEY,
-        ",".join(migrated) if migrated else "skipped",
-        updated_by="system:migration",
-    )
-    if migrated:
-        return {"migrated": True, "features": migrated, "to": DEFAULT_PORTFOLIO_AI_MODEL}
-    return {"migrated": False, "reason": "no_legacy_value"}
-
-
-async def _migrate_gemini3_flash_models() -> dict[str, Any]:
-    """저장된 gemini-3-flash 계열(구 '~flash-latest' 별칭 포함)을 3.5 플래시로.
-
-    모든 피처를 훑되 같은 계열 값만 올린다 — 관리자가 타 계열로 수동 설정한
-    값은 건드리지 않는다.
-    """
-    marker = await app_settings_repo.get_app_setting(_GEMINI35_FLASH_MIGRATION_KEY)
-    if marker:
-        return {"migrated": False, "reason": "already_marked"}
-
-    migrated: list[str] = []
-    for feature in MODEL_FEATURES:
-        stored = await app_settings_repo.get_app_setting(_model_setting_key(feature))
-        stored_value = str((stored or {}).get("value") or "").strip().lower()
-        if stored_value in _GEMINI3_FLASH_LEGACY_MODELS and stored_value != GEMINI_35_FLASH:
-            await app_settings_repo.set_app_setting(
-                _model_setting_key(feature),
-                GEMINI_35_FLASH,
-                updated_by="system:migration",
-            )
-            migrated.append(feature)
-
-    await app_settings_repo.set_app_setting(
-        _GEMINI35_FLASH_MIGRATION_KEY,
-        ",".join(migrated) if migrated else "skipped",
-        updated_by="system:migration",
-    )
-    if migrated:
-        return {"migrated": True, "features": migrated, "to": GEMINI_35_FLASH}
-    return {"migrated": False, "reason": "no_legacy_value"}
+    return await get_model_for_tier(spec["tier"])
 
 
 async def migrate_legacy_model_defaults() -> dict[str, Any]:
-    """One-shot migrations for model defaults that were persisted in admin DB."""
-    wiki = await _migrate_legacy_wiki_qa_default()
-    portfolio = await _migrate_legacy_portfolio_model_defaults()
-    portfolio_qwen_flash = await _migrate_qwen_flash_portfolio_overrides()
-    gemini35_flash = await _migrate_gemini3_flash_models()
-    return {
-        "migrated": bool(
-            wiki.get("migrated")
-            or portfolio.get("migrated")
-            or portfolio_qwen_flash.get("migrated")
-            or gemini35_flash.get("migrated")
-        ),
-        "wiki_qa": wiki,
-        "portfolio": portfolio,
-        "portfolio_qwen_flash": portfolio_qwen_flash,
-        "gemini35_flash": gemini35_flash,
-    }
+    """Compatibility hook retained for startup after switching to tier routing.
+
+    Legacy ``AI_MODEL::<feature>`` rows intentionally remain untouched for audit
+    history, but no longer participate in runtime resolution. Tier settings are
+    the single source of truth from this release onward.
+    """
+    return {"migrated": False, "reason": "tier_routing_active"}
 
 
 async def model_profiles() -> dict[str, str]:
@@ -328,35 +215,54 @@ async def model_profiles() -> dict[str, str]:
 
 
 async def ai_admin_config(days: int = 30) -> dict[str, Any]:
-    features = []
-    for key, spec in MODEL_FEATURES.items():
-        stored = await app_settings_repo.get_app_setting(_model_setting_key(key))
-        model = await get_model_for_feature(key)
-        features.append(
+    tiers = []
+    for key, spec in MODEL_TIERS.items():
+        stored = await app_settings_repo.get_app_setting(_tier_model_setting_key(key))
+        model = await get_model_for_tier(key)
+        tiers.append(
             {
                 "key": key,
                 "label": spec["label"],
+                "description": spec["description"],
                 "model": model,
+                "external": bool(spec.get("external")),
                 "source": "admin-db" if stored and stored.get("value") else "env/default",
                 "updated_at": stored.get("updated_at") if stored else None,
                 "updated_by": stored.get("updated_by") if stored else None,
             }
         )
+    features = []
+    for key, spec in MODEL_FEATURES.items():
+        model = await get_model_for_feature(key)
+        features.append(
+            {
+                "key": key,
+                "label": spec["label"],
+                "tier": spec["tier"],
+                "model": model,
+                "source": f"tier:{spec['tier']}",
+            }
+        )
     return {
         "openrouter": await openrouter_key_status(),
+        "tiers": tiers,
         "features": features,
         "usage": await ai_usage_repo.summarize_ai_usage(days=days),
     }
 
 
-async def save_feature_models(models: dict[str, Any], actor: str | None):
-    for feature, value in models.items():
-        if feature not in MODEL_FEATURES:
-            raise ValueError(f"Unknown AI feature: {feature}")
+async def save_tier_models(models: dict[str, Any], actor: str | None):
+    for raw_tier, value in models.items():
+        tier = str(raw_tier or "").strip().upper()
+        spec = MODEL_TIERS.get(tier)
+        if not spec:
+            raise ValueError(f"Unknown AI tier: {raw_tier}")
+        if not spec.get("external"):
+            raise ValueError(f"{tier} does not use an external model.")
         model = str(value or "").strip()
         if not model:
-            raise ValueError(f"{feature} model is required.")
-        await app_settings_repo.set_app_setting(_model_setting_key(feature), model, updated_by=actor)
+            raise ValueError(f"{tier} model is required.")
+        await app_settings_repo.set_app_setting(_tier_model_setting_key(tier), model, updated_by=actor)
 
 
 def openrouter_reasoning_controls(model: str, *, effort: str | None = None) -> dict[str, Any]:

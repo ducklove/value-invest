@@ -115,11 +115,11 @@ class AiAdminConfigTests(TempDbMixin):
             self.assertNotIn("test-secret", status["masked"])
             self.assertEqual(
                 await ai_config.get_model_for_feature("wiki_qa"),
-                "moonshotai/kimi-k2.6",
+                "qwen/qwen3.6-flash",
             )
             self.assertEqual(
                 await ai_config.get_model_for_feature("portfolio_fast"),
-                "google/gemini-3.5-flash",
+                "qwen/qwen3.6-flash",
             )
             # 대가 포트폴리오 진단은 gemini-3.5-flash 고정 기본값.
             self.assertEqual(
@@ -127,86 +127,54 @@ class AiAdminConfigTests(TempDbMixin):
                 "google/gemini-3.5-flash",
             )
 
-            await ai_config.save_feature_models({"wiki_qa": "openai/gpt-5.5"}, "admin@example.com")
+            await ai_config.save_tier_models({"light": "openai/gpt-5.5"}, "admin@example.com")
             self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "openai/gpt-5.5")
+            self.assertEqual(await ai_config.get_model_for_feature("daily_briefing"), "openai/gpt-5.5")
             self.assertEqual(
                 await ai_config.get_model_for_feature("dart_report_review"),
-                "deepseek/deepseek-v4-flash",
+                "google/gemini-3.5-flash",
             )
 
-    async def test_migrates_legacy_wiki_qa_default_once(self):
+    async def test_feature_routing_uses_three_configurable_external_tiers(self):
         with patch.dict("os.environ", {}, clear=True):
-            await app_settings_repo.set_app_setting("AI_MODEL::wiki_qa", "google/gemma-4-31b-it", updated_by="admin@example.com")
+            expected = {
+                "portfolio_fast": "LIGHT",
+                "portfolio_balanced": "BALANCED",
+                "portfolio_premium": "PREMIUM",
+                "wiki_qa": "LIGHT",
+                "wiki_ingestion": "LIGHT",
+                "dart_report_review": "BALANCED",
+                "market_daily": "BALANCED",
+                "daily_briefing": "LIGHT",
+                "masters_review": "BALANCED",
+            }
+            self.assertEqual(
+                {key: spec["tier"] for key, spec in ai_config.MODEL_FEATURES.items()},
+                expected,
+            )
+            self.assertEqual(await ai_config.get_model_for_feature("portfolio_premium"), "openai/gpt-5.6-terra")
 
-            result = await ai_config.migrate_legacy_model_defaults()
+            await ai_config.save_tier_models(
+                {"LIGHT": "vendor/light", "BALANCED": "vendor/balanced", "PREMIUM": "vendor/premium"},
+                "admin@example.com",
+            )
+            config = await ai_config.ai_admin_config()
+            self.assertEqual([row["key"] for row in config["tiers"]], ["LOCAL", "LIGHT", "BALANCED", "PREMIUM"])
+            self.assertEqual(
+                {row["key"]: row["model"] for row in config["features"]},
+                {key: f"vendor/{tier.lower()}" for key, tier in expected.items()},
+            )
 
-            self.assertTrue(result["migrated"])
-            self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "moonshotai/kimi-k2.6")
-
-            await app_settings_repo.set_app_setting("AI_MODEL::wiki_qa", "google/gemma-4-31b-it", updated_by="admin@example.com")
-            result = await ai_config.migrate_legacy_model_defaults()
-
-            self.assertFalse(result["migrated"])
-            self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "google/gemma-4-31b-it")
-
-    async def test_migrates_legacy_portfolio_defaults_once(self):
-        with patch.dict("os.environ", {}, clear=True):
-            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_fast", "google/gemma-4-31b-it", updated_by="admin@example.com")
-            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
-            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_premium", "qwen/qwen3.6-plus", updated_by="admin@example.com")
-
-            result = await ai_config.migrate_legacy_model_defaults()
-
-            self.assertTrue(result["migrated"])
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_fast"), "google/gemini-3.5-flash")
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "google/gemini-3.5-flash")
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_premium"), "google/gemini-3.5-flash")
-
-            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-plus", updated_by="admin@example.com")
-            result = await ai_config.migrate_legacy_model_defaults()
-
-            self.assertFalse(result["migrated"])
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "qwen/qwen3.6-plus")
-
-    async def test_migrates_qwen_flash_portfolio_override_even_after_first_marker(self):
+    async def test_legacy_feature_overrides_no_longer_bypass_tier_routing(self):
         with patch.dict("os.environ", {}, clear=True):
             await app_settings_repo.set_app_setting(
-                "AI_MIGRATION::portfolio_gemini_flash_latest",
-                "skipped",
-                updated_by="system:migration",
+                "AI_MODEL::wiki_qa",
+                "legacy/custom-model",
+                updated_by="admin@example.com",
             )
-            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "qwen/qwen3.6-flash", updated_by="admin@example.com")
-
             result = await ai_config.migrate_legacy_model_defaults()
-
-            self.assertTrue(result["migrated"])
-            self.assertTrue(result["portfolio_qwen_flash"]["migrated"])
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "google/gemini-3.5-flash")
-
-    async def test_migrates_gemini3_flash_and_latest_alias_to_35_once(self):
-        with patch.dict("os.environ", {}, clear=True):
-            # 구 별칭(포트폴리오)과 gemini-3-flash 직접 지정(시황) — 둘 다 3.5로.
-            await app_settings_repo.set_app_setting("AI_MODEL::portfolio_balanced", "~google/gemini-flash-latest", updated_by="admin@example.com")
-            await app_settings_repo.set_app_setting("AI_MODEL::market_daily", "google/gemini-3-flash", updated_by="admin@example.com")
-            # 타 계열 수동 설정은 건드리지 않는다.
-            await app_settings_repo.set_app_setting("AI_MODEL::wiki_qa", "openai/gpt-5.5", updated_by="admin@example.com")
-
-            result = await ai_config.migrate_legacy_model_defaults()
-
-            self.assertTrue(result["gemini35_flash"]["migrated"])
-            self.assertEqual(
-                sorted(result["gemini35_flash"]["features"]),
-                ["market_daily", "portfolio_balanced"],
-            )
-            self.assertEqual(await ai_config.get_model_for_feature("portfolio_balanced"), "google/gemini-3.5-flash")
-            self.assertEqual(await ai_config.get_model_for_feature("market_daily"), "google/gemini-3.5-flash")
-            self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "openai/gpt-5.5")
-
-            # 마커가 찍힌 뒤에는 같은 값이 다시 저장돼도 재실행하지 않는다.
-            await app_settings_repo.set_app_setting("AI_MODEL::market_daily", "google/gemini-3-flash", updated_by="admin@example.com")
-            result = await ai_config.migrate_legacy_model_defaults()
-            self.assertFalse(result["gemini35_flash"]["migrated"])
-            self.assertEqual(await ai_config.get_model_for_feature("market_daily"), "google/gemini-3-flash")
+            self.assertEqual(result, {"migrated": False, "reason": "tier_routing_active"})
+            self.assertEqual(await ai_config.get_model_for_feature("wiki_qa"), "qwen/qwen3.6-flash")
 
     async def test_usage_summary_groups_by_feature_and_model(self):
         await ai_config.record_usage(

@@ -43,12 +43,13 @@ from services.portfolio import quote_service
 
 logger = logging.getLogger(__name__)
 
-PORTFOLIO_AI_DEFAULT_MODEL = "google/gemini-3.5-flash"
-AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", PORTFOLIO_AI_DEFAULT_MODEL)
-AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", PORTFOLIO_AI_DEFAULT_MODEL)
-AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", AI_DEFAULT_MODEL)
+PORTFOLIO_AI_DEFAULT_MODEL = ai_config.BALANCED_MODEL
+AI_DEFAULT_MODEL = os.getenv("AI_BALANCED_MODEL", os.getenv("AI_DEFAULT_MODEL", ai_config.BALANCED_MODEL))
+AI_FAST_MODEL = os.getenv("AI_LIGHT_MODEL", os.getenv("AI_FAST_MODEL", ai_config.LIGHT_MODEL))
+AI_PREMIUM_MODEL = os.getenv("AI_PREMIUM_MODEL", ai_config.PREMIUM_MODEL)
 AI_MAX_TOKENS = int(os.getenv("PORTFOLIO_AI_MAX_TOKENS", "8000"))
 AI_REASONING_EFFORT = os.getenv("PORTFOLIO_AI_REASONING_EFFORT", "low").strip().lower()
+AI_PREMIUM_REASONING_EFFORT = os.getenv("PORTFOLIO_AI_PREMIUM_REASONING_EFFORT", "medium").strip().lower()
 WIKI_HOLDING_LIMIT = int(os.getenv("PORTFOLIO_AI_WIKI_HOLDING_LIMIT", "15"))
 WIKI_ENTRY_LIMIT = int(os.getenv("PORTFOLIO_AI_WIKI_ENTRY_LIMIT", "3"))
 WIKI_KEYPOINT_CHARS = int(os.getenv("PORTFOLIO_AI_WIKI_KEYPOINT_CHARS", "600"))
@@ -350,6 +351,7 @@ class AnalysisContext:
     openrouter_key: str
     google_sub: str
     started_at: float
+    reasoning_effort: str
 
 
 async def prepare_analysis(payload: dict, user: dict) -> AnalysisContext:
@@ -397,6 +399,11 @@ async def prepare_analysis(payload: dict, user: dict) -> AnalysisContext:
         openrouter_key=openrouter_key,
         google_sub=google_sub,
         started_at=started_at,
+        reasoning_effort=(
+            AI_PREMIUM_REASONING_EFFORT
+            if model_profile == "premium"
+            else AI_REASONING_EFFORT
+        ),
     )
 
 
@@ -416,7 +423,7 @@ def _done_event(
         "model_profile": ctx.model_profile,
         "cost": cost,
         "wiki_used": ctx.wiki_used_count,
-        "reasoning_effort": AI_REASONING_EFFORT,
+        "reasoning_effort": ctx.reasoning_effort,
         "context_holdings": WIKI_HOLDING_LIMIT,
         "context_reports_per_holding": WIKI_ENTRY_LIMIT,
         "finish_reason": finish_reason,
@@ -451,7 +458,7 @@ async def stream_analysis(
             ],
             "max_tokens": AI_MAX_TOKENS,
             "stream": True,
-            **ai_config.openrouter_reasoning_controls(ctx.model, effort=AI_REASONING_EFFORT),
+            **ai_config.openrouter_reasoning_controls(ctx.model, effort=ctx.reasoning_effort),
         }
         async with ai_client.stream_chat_completion(
             client,

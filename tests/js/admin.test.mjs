@@ -88,7 +88,21 @@ function fixtures() {
     "/api/admin/http-metrics": { hours: 24, endpoints: [] },
     "/api/admin/timeseries": { hours: 24, events: [], http: [] },
     "/api/admin/linked-project-configs": [],
-    "/api/admin/ai-config": { openrouter: { configured: false }, features: [], usage: { by_feature: [], days: 30 } },
+    "/api/admin/ai-config": {
+      openrouter: { configured: false },
+      tiers: [
+        { key: "LOCAL", label: "LOCAL", description: "외부 LLM 미사용", model: "", external: false, source: "env/default" },
+        { key: "LIGHT", label: "LIGHT", description: "저비용 요약", model: "qwen/qwen3.6-flash", external: true, source: "env/default" },
+        { key: "BALANCED", label: "BALANCED", description: "기본 분석", model: "google/gemini-3.5-flash", external: true, source: "env/default" },
+        { key: "PREMIUM", label: "PREMIUM", description: "고급 분석", model: "openai/gpt-5.6-terra", external: true, source: "env/default" },
+      ],
+      features: [
+        { key: "daily_briefing", label: "AI 데일리 브리핑", tier: "LIGHT", model: "qwen/qwen3.6-flash" },
+        { key: "portfolio_balanced", label: "포트폴리오 기본 분석", tier: "BALANCED", model: "google/gemini-3.5-flash" },
+        { key: "portfolio_premium", label: "포트폴리오 고급 분석", tier: "PREMIUM", model: "openai/gpt-5.6-terra" },
+      ],
+      usage: { by_feature: [], days: 30 },
+    },
     "/api/admin/preferred-dividends": [],
     "/api/admin/foreign-dividends": [],
   };
@@ -134,6 +148,23 @@ test("부트: batch-status 실패 시 배치 패널만 오류 문구, 나머지 
     assert.ok(w.document.getElementById("dbStatsSection"));
     assert.ok(w.document.getElementById("eventsSection"));
     assert.match(container.textContent, /abc1234/); // 배포 KPI 도 정상
+  });
+});
+
+test("AI 운영: 등급 모델 입력과 읽기 전용 기능 라우팅을 분리한다", async () => {
+  await withDom(async (w) => {
+    installFetch(w);
+    await w.loadAdminView();
+
+    const section = w.document.getElementById("aiConfigSection");
+    assert.ok(section);
+    assert.match(section.textContent, /등급별 모델 설정/);
+    assert.match(section.textContent, /기능 라우팅/);
+    assert.equal(section.querySelectorAll("[data-ai-tier]").length, 3);
+    assert.equal(section.querySelectorAll("[data-ai-feature]").length, 0);
+    assert.equal(section.querySelector('[data-ai-tier="LIGHT"]').value, "qwen/qwen3.6-flash");
+    assert.match(section.textContent, /openai\/gpt-5\.6-terra/);
+    assert.match(section.textContent, /외부 모델 미사용/);
   });
 });
 

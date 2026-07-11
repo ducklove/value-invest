@@ -595,12 +595,16 @@ function trackEvent(name, params = {}) {
           <h3>AI 포트폴리오 분석</h3>
           <!-- display:none 인라인은 계약: portfolio-ai.js 가 style.display='' 로 해제한다. -->
           <div id="pfAiModelPicker" class="pf-ai-model-picker" style="display:none;">
-            <input list="pfAiModelList" id="pfAiModelInput" class="pf-ai-model-input" placeholder="모델 선택/입력">
+            <input list="pfAiModelList" id="pfAiModelInput" class="pf-ai-model-input" placeholder="관리자 모델 재정의 (선택)">
             <datalist id="pfAiModelList"></datalist>
           </div>
-          <button class="bt-run pf-ai-run-btn" onclick="runAiAnalysis()" id="pfAiBtn">분석 실행</button>
+          <div class="pf-ai-actions">
+            <button class="bt-run pf-ai-run-btn" onclick="runAiAnalysis('balanced')" id="pfAiBtn">기본 분석</button>
+            <button class="bt-run pf-ai-run-btn pf-ai-premium-btn" onclick="runAiAnalysis('premium')" id="pfAiPremiumBtn" title="PREMIUM 모델로 더 깊게 분석합니다">고급 분석 · PREMIUM</button>
+          </div>
         </div>
         <textarea id="pfAiQuery" class="pf-ai-query" placeholder="AI에게 추가로 묻고 싶은 내용이 있으면 입력하세요 (선택). 예: 금리 인상 가능성을 고려해 포트폴리오를 평가해줘." rows="2"></textarea>
+        <div class="pf-ai-tier-help">기본 분석은 BALANCED, 고급 분석은 PREMIUM 모델과 중간 수준 추론을 사용합니다.</div>
         <div class="pf-ai-output" id="pfAiOutput" aria-live="polite">
           <div class="pf-ai-output-head">
             <span>AI 분석 결과</span>

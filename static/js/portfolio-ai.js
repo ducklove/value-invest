@@ -100,7 +100,10 @@ async function _loadAiModels() {
     if (!data) return;
     const input = document.getElementById('pfAiModelInput');
     const datalist = document.getElementById('pfAiModelList');
-    input.value = data.default || '';
+    // 비워 두면 사용자가 누른 기본/고급 버튼의 등급 모델을 사용한다.
+    // 관리자가 명시적으로 입력한 경우에만 요청 단위 모델 재정의가 적용된다.
+    input.value = '';
+    input.placeholder = `관리자 모델 재정의 (선택 · 기본 ${data.default || '-'})`;
     datalist.innerHTML = data.models.map(m =>
       `<option value="${m.id}">${m.name} ($${m.prompt_price.toFixed(2)}/$${m.completion_price.toFixed(2)} per 1M)</option>`
     ).join('');
@@ -108,17 +111,21 @@ async function _loadAiModels() {
   } catch {}
 }
 
-async function runAiAnalysis() {
+async function runAiAnalysis(profile = 'balanced') {
+  const selectedProfile = String(profile || '').toLowerCase() === 'premium' ? 'premium' : 'balanced';
   _loadAiModels();
   _ensureFxRate();
   const btn = document.getElementById('pfAiBtn');
+  const premiumBtn = document.getElementById('pfAiPremiumBtn');
+  const activeBtn = selectedProfile === 'premium' ? premiumBtn : btn;
   const result = document.getElementById('pfAiResult');
   const tokens = document.getElementById('pfAiTokens');
   const output = document.getElementById('pfAiOutput');
-  btn.disabled = true;
-  btn.textContent = '분석 중...';
+  if (btn) btn.disabled = true;
+  if (premiumBtn) premiumBtn.disabled = true;
+  if (activeBtn) activeBtn.textContent = selectedProfile === 'premium' ? '고급 분석 중...' : '기본 분석 중...';
   if (output) output.classList.add('is-loading');
-  _setPfAiStatus('분석 중', 'loading');
+  _setPfAiStatus(selectedProfile === 'premium' ? 'PREMIUM 분석 중' : 'BALANCED 분석 중', 'loading');
   _renderPfAiMarkdown(result, '', { emptyText: '분석 결과를 생성하고 있습니다...' });
   if (tokens) tokens.textContent = '';
 
@@ -126,7 +133,7 @@ async function runAiAnalysis() {
   const selectedModel = modelInput ? modelInput.value.trim() : '';
   const queryInput = document.getElementById('pfAiQuery');
   const userQuery = queryInput ? queryInput.value.trim() : '';
-  const payload = {};
+  const payload = { profile: selectedProfile };
   if (selectedModel) payload.model = selectedModel;
   if (userQuery) payload.query = userQuery;
   const body = JSON.stringify(payload);
@@ -161,6 +168,7 @@ async function runAiAnalysis() {
             _renderPfAiMarkdown(result, mdText);
           }
           if (d.done) {
+            const profileTag = d.model_profile ? ` · ${String(d.model_profile).toUpperCase()}` : '';
             const model = d.model ? ` · ${d.model}` : '';
             const costUsd = Number(d.cost || 0);
             const costKrw = costUsd && PfStore.currency.fxRate ? Math.round(costUsd * PfStore.currency.fxRate) : null;
@@ -173,7 +181,7 @@ async function runAiAnalysis() {
             const context = contextN ? ` · 컨텍스트 상위 ${contextN}종목${reportsN ? `×${reportsN}리포트` : ''}` : '';
             const truncated = d.truncated ? ` · 응답 잘림${d.max_tokens ? `(${Number(d.max_tokens).toLocaleString()} 토큰 한도)` : ''}` : '';
             const finish = d.finish_reason && d.finish_reason !== 'stop' ? ` · 종료 ${d.finish_reason}` : '';
-            if (tokens) tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${cost}${model}${wikiTag}${reasoning}${context}${truncated}${finish}`;
+            if (tokens) tokens.textContent = `입력 ${d.input_tokens?.toLocaleString() || '?'} / 출력 ${d.output_tokens?.toLocaleString() || '?'} 토큰${profileTag}${cost}${model}${wikiTag}${reasoning}${context}${truncated}${finish}`;
             _setPfAiStatus(d.truncated ? '토큰 한도 도달' : '완료', d.truncated ? 'warning' : 'done');
           }
         } catch {}
@@ -189,6 +197,12 @@ async function runAiAnalysis() {
     _setPfAiStatus('오류', 'error');
   }
   if (output) output.classList.remove('is-loading');
-  btn.disabled = false;
-  btn.textContent = '분석 실행';
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = '기본 분석';
+  }
+  if (premiumBtn) {
+    premiumBtn.disabled = false;
+    premiumBtn.textContent = '고급 분석 · PREMIUM';
+  }
 }

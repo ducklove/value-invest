@@ -29,16 +29,11 @@ Environment="VALUE_INVEST_ENV=production"
 EnvironmentFile=-/home/cantabile/Works/value_invest/.env.production
 
 # --- App configuration ---------------------------------------------------
-# Bulk wiki PDF summarization uses a non-reasoning instruct model — the
-# default _AI_DEFAULT_MODEL (Qwen 3.6 Plus) has always-on chain-of-thought,
-# which is wasted on "read this report and emit bullets". Gemma 4 31B
-# instruct: 140+ language support, 256K context, ~70% cheaper, dense
-# (predictable) architecture.
-Environment="WIKI_MODEL=google/gemma-4-31b-it"
-# Per-stock Q&A ("이 종목에 대해 질문하기") uses Kimi K2.6. It handles
-# Korean RAG-style answers well while staying independent from the
-# portfolio insight fast model.
-Environment="WIKI_QA_MODEL=moonshotai/kimi-k2.6"
+# AI model IDs are configured once per tier. Admin DB settings override these
+# deployment defaults; features only reference LOCAL/LIGHT/BALANCED/PREMIUM.
+Environment="AI_LIGHT_MODEL=qwen/qwen3.6-flash"
+Environment="AI_BALANCED_MODEL=google/gemini-3.5-flash"
+Environment="AI_PREMIUM_MODEL=openai/gpt-5.6-terra"
 
 # How many reports per stock the wiki pipeline tries to backfill on each
 # tick. Default in code is 50 — set here explicitly so the knob is visible

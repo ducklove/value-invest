@@ -57,13 +57,22 @@ def test_portfolio_ai_card_uses_css_classes_instead_of_inline_styles():
     assert 'id="pfAiModelPicker" class="pf-ai-model-picker" style="display:none;"' in html
     assert 'id="pfAiModelInput" class="pf-ai-model-input"' in html
     assert 'class="bt-run pf-ai-run-btn"' in html
+    assert 'id="pfAiPremiumBtn"' in html
+    assert "runAiAnalysis('balanced')" in html
+    assert "runAiAnalysis('premium')" in html
     assert 'id="pfAiQuery" class="pf-ai-query"' in html
     assert "width:260px" not in html
     assert "resize:vertical" not in html
     assert ".pf-ai-model-picker { margin-left: 8px; }" in styles
     assert ".pf-ai-model-input" in styles
-    assert ".pf-ai-run-btn { margin-left: auto; padding: 6px 14px; font-size: 12px; }" in styles
+    assert ".pf-ai-actions { margin-left: auto;" in styles
+    assert ".pf-ai-premium-btn" in styles
     assert ".pf-ai-query" in styles
+
+    source = (JS / "portfolio-ai.js").read_text(encoding="utf-8")
+    assert "const payload = { profile: selectedProfile };" in source
+    assert "AI_PREMIUM" not in source
+    assert "input.value = '';" in source
 
 def test_portfolio_summary_card_has_single_merged_definition():
     # 기본 정의(§23)와 파일 말미 액션트 보더 블록의 이중 정의를 병합 —

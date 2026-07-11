@@ -241,12 +241,22 @@ function _renderAiConfigSection(config) {
   const keyStatus = key.configured
     ? `<span class="admin-status-ok">설정됨</span> <code>${_esc(key.masked || '')}</code> <span class="admin-sub">${_esc(key.source || '')}</span>`
     : '<span class="admin-status-fail">미설정</span>';
+  const tierRows = (config.tiers || []).map(t => `
+    <tr>
+      <td><strong>${_esc(t.label || t.key)}</strong><div class="admin-sub">${_esc(t.description || '')}</div></td>
+      <td>
+        ${t.external
+          ? `<input data-ai-tier="${_esc(t.key)}" value="${_esc(t.model)}" style="${_adminInputStyle()}width:100%;font-family:monospace;">`
+          : '<span class="admin-sub">외부 모델 미사용</span>'}
+        <div class="admin-sub">${_esc(t.source || '')}</div>
+      </td>
+    </tr>
+  `).join('');
   const featureRows = (config.features || []).map(f => `
     <tr>
-      <td>${_esc(f.label)}<div class="admin-sub"><code>${_esc(f.key)}</code> · ${_esc(f.source)}</div></td>
-      <td>
-        <input data-ai-feature="${_esc(f.key)}" value="${_esc(f.model)}" style="${_adminInputStyle()}width:100%;font-family:monospace;">
-      </td>
+      <td>${_esc(f.label)}<div class="admin-sub"><code>${_esc(f.key)}</code></div></td>
+      <td><strong>${_esc(f.tier)}</strong></td>
+      <td><code>${_esc(f.model)}</code></td>
     </tr>
   `).join('');
   const usageRows = (config.usage?.by_feature || []).map(row => `
@@ -262,7 +272,7 @@ function _renderAiConfigSection(config) {
   `).join('');
   return `
     <details class="admin-section admin-collapsible" id="aiConfigSection">
-      ${_adminCollapsibleSummary('AI 운영 관리', '키·기능별 모델·사용량', `${config.features?.length || 0}개 기능`)}
+      ${_adminCollapsibleSummary('AI 운영 관리', '키·등급 모델·기능 라우팅·사용량', `${config.tiers?.length || 0}개 등급`)}
       <div class="admin-collapsible-body">
         <div id="aiConfigResult" class="admin-sub" style="margin-bottom:8px;"></div>
         <div class="admin-cards">
@@ -283,14 +293,22 @@ function _renderAiConfigSection(config) {
           <button class="admin-btn admin-btn-secondary" onclick="deleteAiKey()">DB 저장 키 삭제</button>
           <span class="admin-sub">화면에는 마스킹만 표시됩니다. env/keys.txt 키는 삭제하지 않습니다.</span>
         </div>
+        <div style="margin-top:16px;"><strong>등급별 모델 설정</strong></div>
         <div class="admin-table-wrap">
           <table class="admin-table admin-table-compact">
-            <thead><tr><th>기능</th><th>사용 모델</th></tr></thead>
-            <tbody>${featureRows}</tbody>
+            <thead><tr><th>등급</th><th>모델 ID</th></tr></thead>
+            <tbody>${tierRows}</tbody>
           </table>
         </div>
         <div style="margin-top:8px;">
-          <button class="admin-btn" onclick="saveAiModels()">기능별 모델 저장</button>
+          <button class="admin-btn" onclick="saveAiModels()">등급 모델 저장</button>
+        </div>
+        <div style="margin-top:16px;"><strong>기능 라우팅</strong><div class="admin-sub">기능은 모델명이 아니라 등급을 참조합니다.</div></div>
+        <div class="admin-table-wrap" style="margin-top:4px;">
+          <table class="admin-table admin-table-compact">
+            <thead><tr><th>기능</th><th>등급</th><th>현재 모델</th></tr></thead>
+            <tbody>${featureRows}</tbody>
+          </table>
         </div>
         <div style="margin-top:16px;">
           <strong>사용량</strong>
@@ -363,20 +381,20 @@ async function deleteAiKey() {
 }
 
 async function saveAiModels() {
-  const models = {};
-  document.querySelectorAll('[data-ai-feature]').forEach(input => {
-    models[input.getAttribute('data-ai-feature')] = input.value.trim();
+  const tiers = {};
+  document.querySelectorAll('[data-ai-tier]').forEach(input => {
+    tiers[input.getAttribute('data-ai-tier')] = input.value.trim();
   });
   try {
     const data = await apiFetchJson('/api/admin/ai-config/models', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ models }),
+      body: JSON.stringify({ tiers }),
       errorMessage: '모델 저장 실패',
     });
     _aiAdminConfig = data;
     document.getElementById('aiConfigSection').outerHTML = _renderAiConfigSection(_aiAdminConfig);
-    _showAiConfigMessage('기능별 모델을 저장했습니다.', false);
+    _showAiConfigMessage('등급별 모델을 저장했습니다.', false);
   } catch (e) {
     _showAiConfigMessage(e.message, true);
   }

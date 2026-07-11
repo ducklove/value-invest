@@ -788,11 +788,11 @@ async def delete_ai_key(request: Request):
 @router.put("/ai-config/models")
 async def save_ai_models(request: Request, payload: dict = Body(...)):
     user = await _require_admin_mutation(request)
-    models = payload.get("models") if isinstance(payload, dict) else None
-    if not isinstance(models, dict):
-        raise HTTPException(status_code=400, detail="models object is required.")
+    tiers = payload.get("tiers") if isinstance(payload, dict) else None
+    if not isinstance(tiers, dict):
+        raise HTTPException(status_code=400, detail="tiers object is required.")
     try:
-        await ai_config.save_feature_models(models, user.get("email") or user.get("google_sub"))
+        await ai_config.save_tier_models(tiers, user.get("email") or user.get("google_sub"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await observability.record_event(
@@ -801,7 +801,7 @@ async def save_ai_models(request: Request, payload: dict = Body(...)):
         level="info",
         details={
             "actor": user.get("email") or user.get("google_sub"),
-            "features": sorted(models),
+            "tiers": sorted(str(key).upper() for key in tiers),
         },
         wait=True,
     )

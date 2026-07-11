@@ -2931,7 +2931,21 @@ body.pf-compact-rows .pf-table tfoot td {
   border: 1px solid var(--border); border-radius: 6px;
   background: var(--input-bg); color: var(--text);
 }
-.pf-ai-run-btn { margin-left: auto; padding: 6px 14px; font-size: 12px; }
+.pf-ai-toolbar { flex-wrap: wrap; }
+.pf-ai-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pf-ai-run-btn { padding: 6px 14px; font-size: 12px; }
+.pf-ai-premium-btn {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 88%, #fff), var(--accent));
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.pf-ai-tier-help { margin: 0 0 8px; color: var(--text-secondary); font-size: 11px; }
+@media (max-width: 600px) {
+  .pf-ai-model-picker { width: 100%; margin-left: 0; }
+  .pf-ai-model-input { width: 100%; }
+  .pf-ai-actions { width: 100%; margin-left: 0; }
+  .pf-ai-actions .pf-ai-run-btn { flex: 1 1 150px; }
+}
 .pf-ai-query {
   width: 100%; margin: 8px 0 4px; padding: 8px 10px; font-size: 12px;
   border: 1px solid var(--border); border-radius: 6px;

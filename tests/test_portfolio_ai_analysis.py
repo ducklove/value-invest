@@ -213,10 +213,26 @@ async def test_prepare_analysis_builds_context_and_clamps_query():
     assert ctx.google_sub == "u1"
     assert ctx.openrouter_key == "k"
     assert ctx.wiki_used_count == 1
+    assert ctx.reasoning_effort == ai_analysis.AI_REASONING_EFFORT
     assert "삼성전자 (005930)" in ctx.prompt
     # User query is hard-capped at USER_QUERY_MAX_CHARS.
     assert "ㅁ" * ai_analysis.USER_QUERY_MAX_CHARS in ctx.prompt
     assert "ㅁ" * (ai_analysis.USER_QUERY_MAX_CHARS + 1) not in ctx.prompt
+
+
+async def test_prepare_analysis_uses_medium_reasoning_for_premium_profile():
+    item = {"stock_code": "005930", "stock_name": "삼성전자", "quantity": 1, "avg_price": 70000}
+    with patch.object(ai_analysis.ai_config, "get_openrouter_key", new=AsyncMock(return_value="k")), \
+         patch.object(ai_analysis, "resolve_model", new=AsyncMock(return_value=("openai/gpt-5.6-terra", "premium"))), \
+         patch.object(portfolio_repo, "get_portfolio", new=AsyncMock(return_value=[item])), \
+         patch.object(ai_analysis.quote_service, "enrich_with_cached_quotes", new=AsyncMock(return_value=[{**item, "quote": {}}])), \
+         patch.object(snapshots_repo, "get_nav_history", new=AsyncMock(return_value=[])), \
+         patch.object(ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
+         patch.object(ai_analysis, "wiki_research_lines", new=AsyncMock(return_value=([], 0))):
+        ctx = await ai_analysis.prepare_analysis({"profile": "premium"}, {"google_sub": "u1"})
+
+    assert ctx.model_profile == "premium"
+    assert ctx.reasoning_effort == ai_analysis.AI_PREMIUM_REASONING_EFFORT == "medium"
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +249,7 @@ def _ctx() -> ai_analysis.AnalysisContext:
         openrouter_key="k",
         google_sub="u1",
         started_at=0.0,
+        reasoning_effort="low",
     )
 
 
@@ -285,6 +302,7 @@ async def test_stream_analysis_success_events_and_usage():
     assert done["wiki_used"] == 2
     assert done["context_holdings"] == ai_analysis.WIKI_HOLDING_LIMIT
     assert done["context_reports_per_holding"] == ai_analysis.WIKI_ENTRY_LIMIT
+    assert done["reasoning_effort"] == "low"
     record.assert_awaited_once()
     kwargs = record.await_args.kwargs
     assert kwargs["ok"] is True
@@ -297,6 +315,7 @@ async def test_stream_analysis_success_events_and_usage():
     assert payload["max_tokens"] == ai_analysis.AI_MAX_TOKENS
     assert payload["messages"][0] == {"role": "system", "content": ai_analysis.SYSTEM_PROMPT}
     assert payload["messages"][1] == {"role": "user", "content": "프롬프트"}
+    assert payload["reasoning"] == {"effort": "low", "exclude": True}
 
 
 async def test_stream_analysis_marks_length_finish_as_truncated():
