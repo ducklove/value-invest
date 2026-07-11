@@ -605,7 +605,9 @@
 
 /* 🔔 결과 알림 구독 토글 */
 .ec-bell-cell { display: inline-flex; justify-content: center; align-items: center; }
-.ec-bell { cursor: pointer; display: inline-flex; align-items: center; line-height: 1; }
+/* 터치 타겟: 아이콘(15px)은 그대로 두고 라벨 패딩으로 히트 영역을 ~41px 로
+   확장한다. 음수 마진이 패딩을 상쇄해 눈에 보이는 레이아웃은 변하지 않는다. */
+.ec-bell { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; line-height: 1; padding: 13px; margin: -13px; }
 .ec-bell-cb { position: absolute; opacity: 0; width: 0; height: 0; }
 .ec-bell-ico {
   font-size: 15px;

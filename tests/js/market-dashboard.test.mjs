@@ -326,6 +326,34 @@ test("_secRenderRows shows empty state when no sectors", () => {
   assert.match(root.innerHTML, /표시할 업종이 없습니다/);
 });
 
+test("loadSectors: 네트워크 예외 시 빈 컨테이너 대신 인라인 실패 안내를 렌더한다", async () => {
+  const w = load();
+  w.fetch = () => Promise.reject(new Error("network down"));
+  await w.loadSectors();
+  const root = w.document.getElementById("marketSectors");
+  assert.match(root.querySelector(".md-section-title").textContent, /업종별 등락/);
+  assert.match(root.querySelector(".md-loading").textContent, /불러오지 못했습니다/);
+});
+
+test("loadMarketNews: 네트워크 예외 시 빈 컨테이너 대신 인라인 실패 안내를 렌더한다", async () => {
+  const w = load();
+  w.fetch = () => Promise.reject(new Error("network down"));
+  await w.loadMarketNews();
+  const root = w.document.getElementById("marketNews");
+  assert.match(root.querySelector(".md-section-title").textContent, /주요 뉴스/);
+  assert.match(root.querySelector(".md-loading").textContent, /불러오지 못했습니다/);
+});
+
+test("hero 섹션 제목 설명은 hover title 과 aria-label 로 병행 제공된다", () => {
+  const w = load();
+  w._mdRenderDashboard(CATALOG, {});
+  const h3 = w.document.getElementById("mdIndMain").querySelector(".md-section-title");
+  const tooltip = h3.getAttribute("title");
+  assert.ok(tooltip, "hover 설명(title) 존재");
+  // 스크린리더는 제목 + 설명을 하나의 라벨로 읽는다.
+  assert.equal(h3.getAttribute("aria-label"), `국내지수 (eKOSPI) — ${tooltip}`);
+});
+
 test("_newsRender renders external links with title/meta and escapes hostile fields", () => {
   const w = load();
   const root = w.document.getElementById("marketNews");
@@ -622,6 +650,29 @@ test("_drawBondCountryChart uses one color for every 10Y bar and separate color 
   );
   assert.equal(option.series[1].data[0].itemStyle.color, "#f97316");
   assert.equal(option.series[1].data[1], "-");
+});
+
+test("_drawBondCountryChart는 describeChart 로 role=img + sr-only 데이터 표를 붙인다", () => {
+  const w = load();
+  w.echarts = { init() { return { setOption() {}, resize() {} }; } };
+  const el = w.document.createElement("div");
+  el.id = "bondCountryCompare";
+  w.document.body.appendChild(el);
+
+  w._drawBondCountryChart([
+    { country: "US", name: "미국", value: 4.45, baseValue: 4.50 },
+    { country: "JP", name: "일본", value: 2.57, baseValue: null },
+  ]);
+
+  // 컨테이너가 이미지 역할 + 요약 aria-label 을 갖는다(스크린리더용).
+  assert.equal(el.getAttribute("role"), "img");
+  assert.match(el.getAttribute("aria-label"), /국가별 금리 차트: 2개국/);
+  assert.match(el.getAttribute("aria-label"), /미국 4\.45%/);
+  // 핵심 수치는 숨김 표(국가/10년물/기준금리)로 제공된다.
+  const table = el.querySelector(".sr-only-chart-table");
+  assert.ok(table, "sr-only 데이터 표 존재");
+  const rows = [...table.querySelectorAll("tbody tr")].map((tr) => [...tr.children].map((td) => td.textContent));
+  assert.deepEqual(rows, [["미국", "4.45", "4.50"], ["일본", "2.57", "-"]]);
 });
 
 test("_bondMatLabel maps overnight(0) to 1D, sub-year to months, else years", () => {

@@ -825,15 +825,23 @@ function _diffLocalDays(start, end) {
   return Math.round((end.getTime() - start.getTime()) / 86400000);
 }
 
+// 스파크라인 상승/하락 색 — 하드코딩 대신 CSS 토큰(--up/--down)에서 읽어
+// 다크모드에서도 테마 팔레트와 톤이 맞게 한다(토큰이 없으면 종전 색 폴백).
+function _sparkTrendColor(isUp) {
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(isUp ? '--up' : '--down').trim();
+  return value || (isUp ? '#dc2626' : '#2563eb');
+}
+
 function _renderSummarySparklines(currentTotalValue) {
   // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
   if (PfStore.navHistory.length > 1) {
     const last365 = PfStore.navHistory.slice(-365);
     const returnPcts = last365.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
     const lastReturn = returnPcts[returnPcts.length - 1] || 0;
-    _drawSparkline('sparkTotalReturn', returnPcts, lastReturn >= 0 ? '#dc2626' : '#2563eb', 252, 'right');
+    _drawSparkline('sparkTotalReturn', returnPcts, _sparkTrendColor(lastReturn >= 0), 252, 'right');
   } else {
-    _drawSparkline('sparkTotalReturn', [], '#dc2626', 252, 'right');
+    _drawSparkline('sparkTotalReturn', [], _sparkTrendColor(true), 252, 'right');
   }
 
   // MTD sparkline: fixed previous-month-end -> current-month-end axis.
@@ -865,9 +873,9 @@ function _renderSummarySparklines(currentTotalValue) {
       });
     }
     const lastPct = monthPoints.length ? monthPoints[monthPoints.length - 1].y : 0;
-    _drawSparklinePoints('sparkMonthly', monthPoints, lastPct >= 0 ? '#dc2626' : '#2563eb', axisDays);
+    _drawSparklinePoints('sparkMonthly', monthPoints, _sparkTrendColor(lastPct >= 0), axisDays);
   } else {
-    _drawSparklinePoints('sparkMonthly', [], '#dc2626', 31);
+    _drawSparklinePoints('sparkMonthly', [], _sparkTrendColor(true), 31);
   }
 
   // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 20:00 결산(prevClose)
@@ -881,7 +889,7 @@ function _renderSummarySparklines(currentTotalValue) {
   const axisEndTs = _dailyAxis.end;
   const _dailyAxisHours = SPARK_DAILY_END_HOUR - SPARK_DAILY_START_HOUR;
   if (!_prevClose) {
-    _drawSparklinePoints('sparkDaily', [], '#dc2626', _dailyAxisHours);
+    _drawSparklinePoints('sparkDaily', [], _sparkTrendColor(true), _dailyAxisHours);
   } else {
     const raw = [{ x: 0, y: 0 }];
     for (const d of PfStore.snapshots.intraday) {
@@ -898,7 +906,7 @@ function _renderSummarySparklines(currentTotalValue) {
       }
     }
     const lastPct = raw.length ? raw[raw.length - 1].y : 0;
-    _drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', _dailyAxisHours);
+    _drawSparklinePoints('sparkDaily', raw, _sparkTrendColor(lastPct >= 0), _dailyAxisHours);
   }
 }
 // 공용 숫자 포맷터(fmtNum/fmtKrw/fmtSignedKrw/fmtPct)는 utils.js 로 승격됨

@@ -86,7 +86,9 @@ def test_today_sparkline_uses_8_to_20_session_axis():
     # y 는 직전 20:00 결산(prevClose) 대비 등락% 유지(축만 바뀜).
     assert "const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);" in source
     assert "adjustedTotal / _prevClose - 1" in source
-    assert "_drawSparklinePoints('sparkDaily', raw, lastPct >= 0 ? '#dc2626' : '#2563eb', _dailyAxisHours);" in source
+    # 색은 하드코딩 대신 CSS 토큰(--up/--down)을 읽는 _sparkTrendColor 를 쓴다.
+    assert "function _sparkTrendColor" in source
+    assert "_drawSparklinePoints('sparkDaily', raw, _sparkTrendColor(lastPct >= 0), _dailyAxisHours);" in source
     assert "raw.filter(p => p.y" not in source
     # 24시간 결산창 축은 제거됨.
     assert "_sparkAxisEndTs" not in source

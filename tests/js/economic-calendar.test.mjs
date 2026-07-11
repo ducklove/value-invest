@@ -134,6 +134,25 @@ test("구독한 일정의 결과가 나오면 완료 마커와 행 강조를 렌
   assert.equal(row.querySelector(".ec-bell-cb"), null);
 });
 
+test("결과 알림 토글·완료 마커는 hover title 외에 aria-label 로도 읽힌다", () => {
+  const w = load(12, 0);
+  w.eval("_ecSubs = new Set(['done-1'])");
+  w._ecRenderShell();
+  w._ecRenderBody({
+    events: [
+      { date: TODAY, datetime: `${TODAY} 14:00:00`, time: "14:00", event: "미래", index_id: "future-1" },
+      { date: TODAY, datetime: `${TODAY} 11:00:00`, time: "11:00", event: "발표됨", index_id: "done-1", actual: "2.0" },
+    ],
+  });
+  // 체크박스는 이름 없는 컨트롤이 되지 않도록 aria-label 을 갖는다.
+  const cb = w.document.querySelector(".ec-bell-cb");
+  assert.equal(cb.getAttribute("aria-label"), "결과 발표 시 알림 받기");
+  // 완료 마커(🔔)는 title 전용이 아니라 role=img + aria-label 로도 전달된다.
+  const done = w.document.querySelector(".ec-bell-done");
+  assert.equal(done.getAttribute("role"), "img");
+  assert.equal(done.getAttribute("aria-label"), "구독한 일정의 결과가 발표됨");
+});
+
 test("결과 알림 토글은 로그인과 채널 게이트를 실제 동작으로 처리한다", async () => {
   const w = load(12, 0);
   w._ecRenderShell();

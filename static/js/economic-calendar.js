@@ -131,14 +131,15 @@ function _ecBellCell(ev) {
   // 구독했던 이벤트의 결과가 나오면 🔔 마커를 남겨(행 배경 강조와 함께) 눈에 띄게 한다.
   if (hasActual) {
     if (eid && _ecSubs.has(eid)) {
-      return '<span class="ec-bell-cell"><span class="ec-bell-done" title="구독한 일정의 결과가 발표됨">🔔</span></span>';
+      // title 은 hover 전용이라 role=img + aria-label 을 병행(터치·스크린리더).
+      return '<span class="ec-bell-cell"><span class="ec-bell-done" role="img" title="구독한 일정의 결과가 발표됨" aria-label="구독한 일정의 결과가 발표됨">🔔</span></span>';
     }
     return '<span class="ec-bell-cell"></span>';
   }
   if (!eid || _ecIsPast(ev)) return '<span class="ec-bell-cell"></span>';
   const checked = _ecSubs.has(eid) ? ' checked' : '';
   return `<span class="ec-bell-cell"><label class="ec-bell" title="결과 발표 시 알림 받기">`
-    + `<input type="checkbox" class="ec-bell-cb" data-eid="${escapeHtml(eid)}"${checked}>`
+    + `<input type="checkbox" class="ec-bell-cb" aria-label="결과 발표 시 알림 받기" data-eid="${escapeHtml(eid)}"${checked}>`
     + `<span class="ec-bell-ico" aria-hidden="true">🔔</span></label></span>`;
 }
 

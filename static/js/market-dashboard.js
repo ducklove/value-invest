@@ -195,7 +195,11 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
     : `<div class="md-rows">${codes.map((c) => _mdCardHtml(c, catalog, dataMap, 'list')).join('')}</div>`;
   const title = _mdSectionTitle(category, codes, variant);
   const titleTooltip = _mdSectionTitleTooltip(category, codes, variant);
-  const titleAttr = titleTooltip ? ` title="${escapeHtml(titleTooltip)}"` : '';
+  // title 속성은 hover 전용이라 터치·스크린리더에 전달되지 않는다.
+  // aria-label(제목 + 설명)을 병행해 보조기기에서도 같은 설명을 읽게 한다.
+  const titleAttr = titleTooltip
+    ? ` title="${escapeHtml(titleTooltip)}" aria-label="${escapeHtml(`${title} — ${titleTooltip}`)}"`
+    : '';
   return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}" data-md-cat="${escapeHtml(category)}">`
     + `<h3 class="md-section-title"${titleAttr}>${escapeHtml(title)}</h3>${body}</section>`;
 }
@@ -576,6 +580,20 @@ function _drawBondCountryChart(countries) {
     }],
   });
   _bondTrackChart(el, ec);
+
+  // 접근성(ST-05): echarts canvas 는 스크린 리더가 읽지 못하므로 컨테이너에
+  // role=img + 요약 aria-label 을 붙이고 핵심 수치(국가/10년물/기준금리)를
+  // 숨김 표로 제공한다 (analysis-charts.js 의 describeChart 사용례와 동일).
+  const top = countries[0];
+  describeChart(el, `국가별 금리 차트: ${countries.length}개국 10년물·기준금리 비교, 최고 ${top.name} ${Number(top.value).toFixed(2)}%`, {
+    caption: '국가별 10년물 금리와 기준금리',
+    headers: ['국가', '10년물(%)', '기준금리(%)'],
+    rows: countries.map((c) => [
+      c.name,
+      Number(c.value).toFixed(2),
+      c.baseValue == null ? '-' : Number(c.baseValue).toFixed(2),
+    ]),
+  });
 }
 
 function _mdRenderBonds(codes, catalog, dataMap) {
@@ -755,7 +773,10 @@ async function loadSectors() {
     const data = await apiFetchJson('/api/market/sectors?limit=12', { fallback: { sectors: [] } });
     _secRenderRows(root, data.sectors || []);
   } catch (e) {
+    // 네트워크 예외 시 빈 컨테이너 대신 인라인 실패 안내(시장 랭킹과 동일 패턴).
     console.warn('sectors load failed', e);
+    root.innerHTML = '<section class="md-section"><h3 class="md-section-title">업종별 등락</h3>'
+      + '<div class="md-loading">불러오지 못했습니다.</div></section>';
   } finally {
     _secInFlight = false;
   }
@@ -960,7 +981,10 @@ async function loadMarketNews() {
     const data = await apiFetchJson('/api/market/news?limit=8', { fallback: { news: [] } });
     _newsRender(root, data.news || []);
   } catch (e) {
+    // 네트워크 예외 시 빈 컨테이너 대신 인라인 실패 안내(시장 랭킹과 동일 패턴).
     console.warn('market news load failed', e);
+    root.innerHTML = '<section class="md-section"><h3 class="md-section-title">주요 뉴스</h3>'
+      + '<div class="md-loading">불러오지 못했습니다.</div></section>';
   } finally {
     _newsInFlight = false;
   }
