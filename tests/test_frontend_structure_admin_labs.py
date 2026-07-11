@@ -17,9 +17,13 @@ def test_admin_page_loads_admin_split_scripts_in_contract_order():
         assert pos != -1, f"{name} is not loaded by admin.html"
         positions.append(pos)
     assert positions == sorted(positions), "admin split script order changed"
-    # 인라인 apiFetch 헬퍼(credentials:'include')는 모든 admin 스크립트보다 먼저.
-    assert html.find("async function apiFetch(") != -1
-    assert html.find("async function apiFetch(") < positions[0]
+    # 공용 헬퍼는 utils.js 단일 소스(apiFetchJson/reportApiError/showToast) —
+    # 모든 admin 스크립트보다 먼저 로드된다. 인라인 apiFetch 사본은 드리프트
+    # (timeoutMs no-op, reportApiError ReferenceError)를 낳아 금지.
+    utils_pos = html.find('/js/utils.js')
+    assert utils_pos != -1, "admin.html must load utils.js"
+    assert utils_pos < positions[0]
+    assert "async function apiFetch(" not in html, "inline apiFetch copy must not come back"
     # 부트스트랩 호출(loadAdminView)은 모든 스크립트가 로드된 뒤에 실행된다.
     assert positions[-1] < html.find("loadAdminView();")
 
