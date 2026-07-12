@@ -241,7 +241,8 @@ function _mdKospiFuturesSectionHtml() {
 }
 
 // --- Hyperliquid 섹션: USD↔원화 토글(기본 원화) ---
-// XYZ HIP-3의 USD 표시 가격을 원화 모드에서 USD_KRW 환율로 환산한다.
+// USD 기반 종목은 원화 모드에서 환산한다. KRW 기반 KR200은 원화 모드에서
+// 원값을 유지하고 USD 모드에서만 USD_KRW로 나눈다.
 let _hlCcy = null;  // 'KRW' | 'USD' — lazy init(localStorage)
 
 function _hlCurrentCcy() {
@@ -280,9 +281,15 @@ function _hlRowsHtml(codes, catalog, dataMap) {
   const view = {};
   for (const code of codes) {
     const data = dataMap && dataMap[code] ? dataMap[code] : {};
-    if (useKrw && rate) {
-      const value = _hlParseNum(data.value);
-      const change = _hlParseNum(data.change);
+    const quoteCurrency = String((catalog[code] || {}).quote_currency || 'USD').toUpperCase();
+    const value = _hlParseNum(data.value);
+    const change = _hlParseNum(data.change);
+    if (quoteCurrency === 'KRW' && !useKrw && rate) {
+      view[code] = Object.assign({}, data, {
+        value: value != null ? _hlFmtUsd(value / rate) : data.value,
+        change: change != null ? _hlFmtUsd(change / rate) : data.change,
+      });
+    } else if (quoteCurrency !== 'KRW' && useKrw && rate) {
       view[code] = Object.assign({}, data, {
         value: value != null ? _hlFmtKrw(value * rate) : data.value,
         change: change != null ? _hlFmtKrw(change * rate) : data.change,

@@ -120,10 +120,11 @@ CATALOG: dict[str, dict] = {
     # 야간선물
     "NIGHT_FUTURES": {"label": "야간선물", "category": "야간선물"},
     # Hyperliquid XYZ HIP-3 perpetuals — USD price and previous-day change
-    "HL_EWY":     {"label": "EWY",        "category": "하이퍼리퀴드", "symbol": "xyz:EWY"},
+    "HL_KR200":   {"label": "KR200",      "category": "하이퍼리퀴드", "symbol": "xyz:KR200", "quote_currency": "KRW"},
     "HL_SAMSUNG": {"label": "삼성전자",   "category": "하이퍼리퀴드", "symbol": "xyz:SMSN"},
     "HL_SKHYNIX": {"label": "SK하이닉스", "category": "하이퍼리퀴드", "symbol": "xyz:SKHX"},
     "HL_HYUNDAI": {"label": "현대차",     "category": "하이퍼리퀴드", "symbol": "xyz:HYUNDAI"},
+    "HL_GOLD":    {"label": "GOLD",       "category": "하이퍼리퀴드", "symbol": "xyz:GOLD"},
 }
 
 _EMPTY = {"value": "", "change": "", "change_pct": "", "direction": ""}
@@ -339,10 +340,11 @@ async def _fetch_foreign_index(client: httpx.AsyncClient, symbol: str) -> dict:
 # Hyperliquid XYZ HIP-3 perpetuals — one metadata/context request
 # ---------------------------------------------------------------------------
 _HYPERLIQUID_MAP = {
-    "HL_EWY":     "xyz:EWY",
+    "HL_KR200":   "xyz:KR200",
     "HL_SAMSUNG": "xyz:SMSN",
     "HL_SKHYNIX": "xyz:SKHX",
     "HL_HYUNDAI": "xyz:HYUNDAI",
+    "HL_GOLD":    "xyz:GOLD",
 }
 _HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
 

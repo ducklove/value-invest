@@ -12,18 +12,20 @@ const DASHBOARD = read("market-dashboard.js");
 
 const CATALOG = {
   USD_KRW: { label: "달러/원", category: "환율" },
-  HL_EWY: { label: "EWY", category: "하이퍼리퀴드", symbol: "xyz:EWY" },
+  HL_KR200: { label: "KR200", category: "하이퍼리퀴드", symbol: "xyz:KR200", quote_currency: "KRW" },
   HL_SAMSUNG: { label: "삼성전자", category: "하이퍼리퀴드", symbol: "xyz:SMSN" },
   HL_SKHYNIX: { label: "SK하이닉스", category: "하이퍼리퀴드", symbol: "xyz:SKHX" },
   HL_HYUNDAI: { label: "현대차", category: "하이퍼리퀴드", symbol: "xyz:HYUNDAI" },
+  HL_GOLD: { label: "GOLD", category: "하이퍼리퀴드", symbol: "xyz:GOLD" },
 };
 
 const SUMMARY = {
   USD_KRW: { value: "1,300.00", change: "", change_pct: "", direction: "" },
-  HL_EWY: { value: "90.00", change: "1.00", change_pct: "1.12%", direction: "up" },
+  HL_KR200: { value: "1,200.00", change: "10.00", change_pct: "0.84%", direction: "up" },
   HL_SAMSUNG: { value: "80.00", change: "1.00", change_pct: "1.27%", direction: "up" },
   HL_SKHYNIX: { value: "95.00", change: "5.00", change_pct: "5.56%", direction: "up" },
   HL_HYUNDAI: { value: "70.00", change: "1.00", change_pct: "1.45%", direction: "up" },
+  HL_GOLD: { value: "4,100.00", change: "20.00", change_pct: "0.49%", direction: "up" },
 };
 
 class MockWebSocket {
@@ -84,7 +86,7 @@ function findRow(window, label) {
     .find((row) => row.querySelector(".md-row-label")?.textContent === label);
 }
 
-test("Hyperliquid section opens one socket and subscribes to the four XYZ asset contexts", async () => {
+test("Hyperliquid section opens one socket and subscribes to the five XYZ asset contexts", async () => {
   const window = load();
   try {
     await window.loadInvestingDashboard();
@@ -97,7 +99,7 @@ test("Hyperliquid section opens one socket and subscribes to the four XYZ asset 
     socket.open();
     assert.deepEqual(
       socket.sent.map((message) => message.subscription?.coin),
-      ["xyz:EWY", "xyz:SMSN", "xyz:SKHX", "xyz:HYUNDAI"],
+      ["xyz:KR200", "xyz:SMSN", "xyz:SKHX", "xyz:HYUNDAI", "xyz:GOLD"],
     );
     assert.ok(socket.sent.every((message) => (
       message.method === "subscribe" && message.subscription.type === "activeAssetCtx"
@@ -140,6 +142,22 @@ test("activeAssetCtx updates only the matching row and preserves the USD toggle"
   }
 });
 
+test("KR200 keeps its native value in KRW mode and only converts for USD mode", async () => {
+  const window = load();
+  try {
+    await window.loadInvestingDashboard();
+    assert.equal(findRow(window, "KR200").querySelector(".md-row-val").textContent, "1,200.00");
+    assert.equal(findRow(window, "GOLD").querySelector(".md-row-val").textContent, "5,330,000");
+
+    window.document.querySelector('[data-hl-ccy="USD"]').click();
+    assert.equal(findRow(window, "KR200").querySelector(".md-row-val").textContent, "0.92");
+    assert.equal(findRow(window, "GOLD").querySelector(".md-row-val").textContent, "4,100.00");
+  } finally {
+    window._hlStopStream();
+    window.close();
+  }
+});
+
 test("unexpected close schedules an exponential reconnect and re-subscribes once", async () => {
   const window = load();
   let scheduled = null;
@@ -162,7 +180,7 @@ test("unexpected close schedules an exponential reconnect and re-subscribes once
 
     const second = MockWebSocket.instances[1];
     second.open();
-    assert.equal(second.sent.filter((message) => message.method === "subscribe").length, 4);
+    assert.equal(second.sent.filter((message) => message.method === "subscribe").length, 5);
     window._hlStartStream();
     assert.equal(MockWebSocket.instances.length, 2, "open socket is reused");
   } finally {

@@ -81,14 +81,14 @@ test("legacy Binance market-bar codes migrate to Hyperliquid without duplicates"
   ]);
   assert.deepEqual(
     [...normalized],
-    ["KOSPI", "HL_EWY", "HL_SAMSUNG", "HL_SKHYNIX", "HL_HYUNDAI"],
+    ["KOSPI", "HL_KR200", "HL_SAMSUNG", "HL_SKHYNIX", "HL_HYUNDAI"],
   );
 });
 
 test("local and server market-bar settings are normalized when loaded", async () => {
   const w = load();
   w.localStorage.setItem("market_bar_codes", JSON.stringify(["BNB_EWY", "USD_KRW"]));
-  assert.deepEqual([...w._mbGetCodes()], ["HL_EWY", "USD_KRW"]);
+  assert.deepEqual([...w._mbGetCodes()], ["HL_KR200", "USD_KRW"]);
 
   w.__settingsApi = async () => ({ codes: ["BNB_SKHYNIX", "HL_SKHYNIX", "BNB_HYUNDAI"] });
   w.eval("currentUser = { google_sub: 'user-1' }; apiFetchJson = window.__settingsApi;");

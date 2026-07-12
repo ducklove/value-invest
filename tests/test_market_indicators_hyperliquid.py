@@ -5,19 +5,21 @@ import pytest
 
 import market_indicators
 
-HL_CODES = ["HL_EWY", "HL_SAMSUNG", "HL_SKHYNIX", "HL_HYUNDAI"]
+HL_CODES = ["HL_KR200", "HL_SAMSUNG", "HL_SKHYNIX", "HL_HYUNDAI", "HL_GOLD"]
 
 
 def test_hyperliquid_catalog_and_symbol_map():
     assert market_indicators._HYPERLIQUID_MAP == {
-        "HL_EWY": "xyz:EWY",
+        "HL_KR200": "xyz:KR200",
         "HL_SAMSUNG": "xyz:SMSN",
         "HL_SKHYNIX": "xyz:SKHX",
         "HL_HYUNDAI": "xyz:HYUNDAI",
+        "HL_GOLD": "xyz:GOLD",
     }
     assert {
         code: market_indicators.CATALOG[code]["category"] for code in HL_CODES
     } == dict.fromkeys(HL_CODES, "하이퍼리퀴드")
+    assert market_indicators.CATALOG["HL_KR200"]["quote_currency"] == "KRW"
 
 
 def test_parse_hyperliquid_context_prefers_mid_price():
@@ -57,13 +59,15 @@ async def test_fetch_hyperliquid_tickers_posts_xyz_meta_and_aligns_contexts():
         {
             "universe": [
                 {"name": "xyz:SKHX"},
-                {"name": "xyz:EWY"},
+                {"name": "xyz:KR200"},
+                {"name": "xyz:GOLD"},
                 {"name": "xyz:IGNORED"},
             ]
         },
         [
             {"midPx": "180", "prevDayPx": "200"},
-            {"midPx": "80", "prevDayPx": "100"},
+            {"midPx": "1200", "prevDayPx": "1000"},
+            {"midPx": "4100", "prevDayPx": "4000"},
             {"midPx": "1", "prevDayPx": "1"},
         ],
     ]
@@ -74,7 +78,7 @@ async def test_fetch_hyperliquid_tickers_posts_xyz_meta_and_aligns_contexts():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await market_indicators._fetch_hyperliquid_tickers(
-            client, ["HL_EWY", "HL_SKHYNIX", "HL_HYUNDAI"]
+            client, ["HL_KR200", "HL_SKHYNIX", "HL_HYUNDAI", "HL_GOLD"]
         )
 
     assert seen == {
@@ -82,15 +86,17 @@ async def test_fetch_hyperliquid_tickers_posts_xyz_meta_and_aligns_contexts():
         "url": "https://api.hyperliquid.xyz/info",
         "body": {"type": "metaAndAssetCtxs", "dex": "xyz"},
     }
-    assert result["HL_EWY"] == {
-        "value": "80.00",
-        "change": "20.00",
+    assert result["HL_KR200"] == {
+        "value": "1,200.00",
+        "change": "200.00",
         "change_pct": "20.00%",
-        "direction": "down",
+        "direction": "up",
     }
     assert result["HL_SKHYNIX"]["value"] == "180.00"
     assert result["HL_SKHYNIX"]["change_pct"] == "10.00%"
     assert result["HL_HYUNDAI"] == market_indicators._EMPTY
+    assert result["HL_GOLD"]["value"] == "4,100.00"
+    assert result["HL_GOLD"]["change_pct"] == "2.50%"
 
 
 @pytest.mark.asyncio
@@ -100,15 +106,15 @@ async def test_fetch_hyperliquid_tickers_empty_fallback_for_malformed_payload(pa
         return httpx.Response(200, json=payload)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await market_indicators._fetch_hyperliquid_tickers(client, ["HL_EWY", "HL_SAMSUNG"])
+        result = await market_indicators._fetch_hyperliquid_tickers(client, ["HL_KR200", "HL_SAMSUNG"])
 
-    assert result == {code: market_indicators._EMPTY for code in ["HL_EWY", "HL_SAMSUNG"]}
+    assert result == {code: market_indicators._EMPTY for code in ["HL_KR200", "HL_SAMSUNG"]}
 
 
 @pytest.mark.asyncio
 async def test_fetch_hyperliquid_tickers_empty_fallback_for_http_error():
     valid_payload = [
-        {"universe": [{"name": "xyz:EWY"}]},
+        {"universe": [{"name": "xyz:KR200"}]},
         [{"midPx": "105", "prevDayPx": "100"}],
     ]
 
@@ -116,6 +122,6 @@ async def test_fetch_hyperliquid_tickers_empty_fallback_for_http_error():
         return httpx.Response(503, json=valid_payload)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await market_indicators._fetch_hyperliquid_tickers(client, ["HL_EWY"])
+        result = await market_indicators._fetch_hyperliquid_tickers(client, ["HL_KR200"])
 
-    assert result == {"HL_EWY": market_indicators._EMPTY}
+    assert result == {"HL_KR200": market_indicators._EMPTY}
