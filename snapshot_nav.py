@@ -119,6 +119,10 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
         avg_price = item["avg_price"]
         avg_price_krw = await fx.price_to_krw(avg_price, item.get("avg_price_currency"))
         total_invested += qty * avg_price_krw
+        price = None
+        # 이 종목의 평가액을 라이브/과거 종가가 아니라 직전 스냅샷 값으로
+        # 채웠는지 여부 — 정산이 '이전 값 복사본'으로 얼마나 오염됐는지의 단위.
+        used_fallback = False
         try:
             if portfolio_quotes.is_korean_stock(item["stock_code"]):
                 if date.fromisoformat(snap_date) < _today_kst():
@@ -136,14 +140,18 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
                 mv = qty * price
             elif item["stock_code"] in prev_stock_map:
                 mv = prev_stock_map[item["stock_code"]]
+                used_fallback = True
                 logger.warning("Quote unavailable for %s, using previous stock snapshot %.0f", item["stock_code"], mv)
             else:
                 missing.append(item["stock_code"])
                 continue
         except Exception as e:
             logger.warning("Quote fetch failed for %s: %s", item["stock_code"], e)
+            price = None
             if item["stock_code"] in prev_stock_map:
                 mv = prev_stock_map[item["stock_code"]]
+                used_fallback = True
+                logger.warning("Quote fetch failed for %s, using previous stock snapshot %.0f", item["stock_code"], mv)
             else:
                 missing.append(item["stock_code"])
                 continue
@@ -162,6 +170,7 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
             "unit_price": unit_price,
             "avg_price_krw": avg_price_krw,
             "cost_basis": qty * avg_price_krw,
+            "priced_from_fallback": used_fallback,
         })
         await asyncio.sleep(0.25)  # rate limit
     if missing:
@@ -171,12 +180,19 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
     return total_value, total_invested, per_stock
 
 
-async def take_snapshot(google_sub: str, snap_date: str):
-    """Take a daily snapshot and compute NAV for one user."""
+async def take_snapshot(google_sub: str, snap_date: str) -> int:
+    """Take a daily snapshot and compute NAV for one user.
+
+    Returns the number of holdings whose value was carried forward from the
+    previous snapshot because a fresh/historical quote was unavailable. 0 means
+    the whole portfolio was valued from real quotes; a positive count means the
+    snapshot is partly (or wholly) a copy of the prior settlement and the caller
+    should surface it rather than record an unqualified success.
+    """
     total_value, total_invested, per_stock = await _fetch_total_value(google_sub, snap_date)
     if total_value == 0:
         logger.info("Skipping %s: portfolio value is 0", google_sub)
-        return
+        return 0
 
     existing = await snapshots_repo.get_snapshot_by_date(google_sub, snap_date)
     prev = existing or await snapshots_repo.get_latest_snapshot_before_date(google_sub, snap_date)
@@ -222,7 +238,12 @@ async def take_snapshot(google_sub: str, snap_date: str):
     await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
     if per_stock:
         await snapshots_repo.save_stock_snapshots(google_sub, snap_date, per_stock)
-    logger.info("Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f stocks=%d fx=%.1f", google_sub[:8], snap_date, total_value, nav, total_units, len(per_stock), _fx_usdkrw or 0)
+    fallback_count = sum(1 for s in per_stock if s.get("priced_from_fallback"))
+    logger.info(
+        "Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f stocks=%d fallback=%d fx=%.1f",
+        google_sub[:8], snap_date, total_value, nav, total_units, len(per_stock), fallback_count, _fx_usdkrw or 0,
+    )
+    return fallback_count
 
 
 async def _save_gold_close():
@@ -292,10 +313,15 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     logger.info("Taking snapshots for %d users on %s", len(users), snap_date)
     success_count = 0
     failed_users: list[str] = []
+    fallback_users: list[str] = []
+    fallback_holdings = 0
     for google_sub in users:
         try:
-            await take_snapshot(google_sub, snap_date)
+            fallback_count = await take_snapshot(google_sub, snap_date)
             success_count += 1
+            if fallback_count:
+                fallback_users.append(google_sub[:8])
+                fallback_holdings += fallback_count
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", google_sub[:8], e)
             failed_users.append(google_sub[:8])
@@ -303,16 +329,25 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     await _update_benchmark_history()
     # Record tick outcome for the dashboard. `wait=True` because this is
     # a batch script that's about to close the DB handle — can't detach.
+    #
+    # A user whose whole portfolio was carried forward from the previous
+    # settlement (quote source outage at 20:05) still "succeeds", so we must
+    # not paint the tick green on fallback alone — otherwise a stale copy of
+    # yesterday reads as a healthy settlement. Degrade to tick_partial/warning
+    # whenever any holding was fallback-priced, and expose the breakdown.
+    degraded = bool(failed_users) or bool(fallback_users)
     import observability
     await observability.record_event(
         "snapshot_nav",
-        "tick_ok" if not failed_users else "tick_partial",
-        level="info" if not failed_users else "warning",
+        "tick_ok" if not degraded else "tick_partial",
+        level="info" if not degraded else "warning",
         details={
             "date": snap_date,
             "users_total": len(users),
             "users_ok": success_count,
             "users_failed": failed_users,
+            "fallback_users": fallback_users,
+            "fallback_holdings": fallback_holdings,
             "fx_usdkrw": _fx_usdkrw,
         },
         wait=True,

@@ -141,6 +141,11 @@ async def check_portfolio_stock_snapshot_freshness(now: datetime | None = None) 
     전체 NAV 최신성만 보면 한 종목의 가격 조회가 실패해 이전값으로 묻히는
     문제를 놓칠 수 있다. 현재 보유 중인 비현금 종목마다
     portfolio_stock_snapshots 의 최신 날짜를 확인한다.
+
+    이때 priced_from_fallback=1 (정산 시각 시세 실패로 직전 값을 복사한 행)은
+    '최신'으로 세지 않는다 — 그 행은 오늘 날짜를 달고 있어도 실제로는 직전
+    거래일 값이라, 세어버리면 시세 소스가 죽은 날의 가짜 최신을 통과시킨다.
+    최신 실측(non-fallback) 날짜만으로 지연을 판정한다.
     """
     check = "portfolio_stock_snapshot_freshness"
     now = now or datetime.now()
@@ -158,6 +163,7 @@ async def check_portfolio_stock_snapshot_freshness(now: datetime | None = None) 
         latest AS (
             SELECT google_sub, stock_code, MAX(date) AS latest_date
             FROM portfolio_stock_snapshots
+            WHERE COALESCE(priced_from_fallback, 0) = 0
             GROUP BY google_sub, stock_code
         )
         SELECT h.google_sub, h.stock_code, l.latest_date

@@ -785,6 +785,9 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     ("portfolio_stock_snapshots", "unit_price", "REAL"),
     ("portfolio_stock_snapshots", "avg_price_krw", "REAL"),
     ("portfolio_stock_snapshots", "cost_basis", "REAL"),
+    # 정산 시각에 시세를 못 받아 직전 스냅샷 값으로 채운 행 표시. 이 플래그가
+    # 있어야 신선도 점검이 '오늘 날짜의 이전값 복사본'을 최신으로 오인하지 않는다.
+    ("portfolio_stock_snapshots", "priced_from_fallback", "INTEGER NOT NULL DEFAULT 0"),
     ("portfolio_groups", "default_type", "TEXT"),
     # Multi-account phase 1. Nullable by design; uniqueness across
     # (google_sub, account_id, stock_code) is deferred to a later table rebuild.

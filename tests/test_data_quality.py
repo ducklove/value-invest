@@ -198,6 +198,34 @@ class PortfolioStockSnapshotFreshnessTests(_SeededDbTestCase):
         self.assertEqual(result["value"], 1)
         self.assertIn("DAX.O", result["detail"])
 
+    async def test_fallback_priced_today_row_does_not_mask_staleness(self):
+        # 정산 시각 시세 장애로 오늘 날짜에 '직전 값 복사'(priced_from_fallback=1)
+        # 행이 찍혀도, 실측 최신은 06-04 라 04→10 의 지연이 그대로 드러나야 한다.
+        await self._seed_user_with_holdings(stock_code="DAX.O", stock_name="Global X DAX Germany ETF")
+        await snapshots_repo.save_stock_snapshots("u1", "2026-06-04", [
+            {"stock_code": "DAX.O", "market_value": 665_950, "priced_from_fallback": False},
+        ])
+        await snapshots_repo.save_stock_snapshots("u1", "2026-06-10", [
+            {"stock_code": "DAX.O", "market_value": 665_950, "priced_from_fallback": True},
+        ])
+        result = await data_quality.check_portfolio_stock_snapshot_freshness(now=WED_LATE)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["value"], 4)
+        self.assertIn("DAX.O", result["detail"])
+
+    async def test_fresh_real_row_overrides_older_fallback_row(self):
+        # 반대로 오늘 실측이 있으면(폴백 여부 무관) 신선으로 통과.
+        await self._seed_user_with_holdings(stock_code="DAX.O", stock_name="Global X DAX Germany ETF")
+        await snapshots_repo.save_stock_snapshots("u1", "2026-06-04", [
+            {"stock_code": "DAX.O", "market_value": 665_950, "priced_from_fallback": True},
+        ])
+        await snapshots_repo.save_stock_snapshots("u1", "2026-06-10", [
+            {"stock_code": "DAX.O", "market_value": 687_050, "priced_from_fallback": False},
+        ])
+        result = await data_quality.check_portfolio_stock_snapshot_freshness(now=WED_LATE)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["value"], 0)
+
     async def test_stale_dotted_foreign_code_is_kept_in_detail_examples(self):
         await self._seed_user_with_holdings(stock_code="000001", stock_name="A")
         db = await db_repo.get_db()

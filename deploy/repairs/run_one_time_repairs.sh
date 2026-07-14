@@ -64,3 +64,8 @@ run_repair \
   ".deploy-repair-2026-06-period-report-short-names-v1.done" \
   "Regenerating saved 2026-06 period reports for short-position semantics and names" \
   python3 deploy/repairs/repair_2026_06_period_report_short_names_v1.py
+
+run_repair \
+  ".deploy-repair-2026-07-13-nav-stale-fallback-v1.done" \
+  "Re-settling 2026-07-13 NAV snapshot polluted by quote-outage fallback" \
+  python3 deploy/repairs/repair_2026_07_13_nav_stale_fallback_v1.py
