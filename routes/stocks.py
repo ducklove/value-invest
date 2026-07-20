@@ -218,6 +218,14 @@ async def update_stock_preference(stock_code: str, request: Request, payload: di
     }
 
 
+@router.get("/api/stocks/{stock_code}/daily-candles")
+async def get_stock_daily_candles(stock_code: str, days: int = Query(60, ge=20, le=120)):
+    """Public — hover 캔들 툴팁용 일봉 OHLC. 특수자산은 supported=False 빈 응답."""
+    from services import stock_candles
+
+    return await stock_candles.get_daily_candles(stock_code.strip(), days=days)
+
+
 @router.get("/api/quote/{stock_code}")
 async def quote_snapshot(stock_code: str):
     corp_code = await corp_codes.get_corp_code(stock_code)
