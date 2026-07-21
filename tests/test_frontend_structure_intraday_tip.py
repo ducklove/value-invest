@@ -1,4 +1,4 @@
-"""종목 hover 일봉 캔들 툴팁 구조 계약 — 스크립트 등록 순서·데스크톱 가드·표면 커버리지."""
+"""종목 hover 당일 일중 그래프 툴팁 구조 계약 — 스크립트 등록 순서·데스크톱 가드·표면 커버리지."""
 from _frontend_structure import CSS, JS, STATIC
 
 
@@ -23,16 +23,21 @@ def test_hover_tooltip_is_desktop_only_and_covers_stock_surfaces():
     assert "'#recentList .sidebar-item[data-code]'" in js
     assert "'.mv-row[data-code]'" in js
 
-    # 특수자산은 gold_gap 일봉 API 연결 전까지 요청 자체를 걸러낸다.
+    # 특수자산은 gold_gap 일중 API 연결 전까지 요청 자체를 걸러낸다.
     assert "/^(CASH_|KRX_GOLD$|CRYPTO_)/" in js
     assert "/api/stocks/" in js
-    assert "daily-candles" in js
+    assert "/intraday" in js
+
+    # 당일 그래프 계약: 전일종가 기준선을 스케일에 포함하고, x 축은 정규장
+    # 시간 비례(장중엔 진행률만큼만 차오른다).
+    assert "prevClose" in js
+    assert "session" in js
 
 
 def test_tooltip_styles_live_in_base_css_and_never_capture_pointer():
     base = (CSS / "base.css").read_text(encoding="utf-8")
-    block_start = base.index(".stock-candle-tip {")
+    block_start = base.index(".stock-hover-tip {")
     block = base[block_start:base.index("}", block_start)]
     assert "position: fixed;" in block
     assert "pointer-events: none;" in block
-    assert ".stock-candle-tip.visible { display: block; }" in base
+    assert ".stock-hover-tip.visible { display: block; }" in base

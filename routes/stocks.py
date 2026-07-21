@@ -218,12 +218,12 @@ async def update_stock_preference(stock_code: str, request: Request, payload: di
     }
 
 
-@router.get("/api/stocks/{stock_code}/daily-candles")
-async def get_stock_daily_candles(stock_code: str, days: int = Query(60, ge=20, le=120)):
-    """Public — hover 캔들 툴팁용 일봉 OHLC. 특수자산은 supported=False 빈 응답."""
-    from services import stock_candles
+@router.get("/api/stocks/{stock_code}/intraday")
+async def get_stock_intraday(stock_code: str):
+    """Public — hover 툴팁용 당일 일중(1일) 시세. 특수자산은 supported=False 빈 응답."""
+    from services import stock_intraday
 
-    return await stock_candles.get_daily_candles(stock_code.strip(), days=days)
+    return await stock_intraday.get_intraday(stock_code.strip())
 
 
 @router.get("/api/quote/{stock_code}")

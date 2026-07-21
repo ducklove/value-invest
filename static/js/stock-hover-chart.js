@@ -1,4 +1,4 @@
-// 종목 hover 일봉 캔들 툴팁 — 데스크톱 전용 기본 동작.
+// 종목 hover 당일 일중(1일) 그래프 툴팁 — 데스크톱 전용 기본 동작.
 //
 // document 레벨 이벤트 위임 하나로 종목이 나열되는 표면 전체를 커버한다:
 //   - 포트폴리오 보유종목 테이블 (#pfBody tr[data-code] 이름 셀)
@@ -8,13 +8,13 @@
 //
 // 터치 기기는 hover 가 없고 탭은 이미 다른 행동(분석 이동/인사이트)에 쓰여
 // (hover: hover) and (pointer: fine) 환경에서만 동작한다.
-// 데이터는 GET /api/stocks/{code}/daily-candles — 특수자산(현금/금/암호화폐)은
-// supported=false 로 내려오며 툴팁을 띄우지 않는다(gold_gap 일봉 API 연결 전까지).
+// 데이터는 GET /api/stocks/{code}/intraday — 당일 분 단위 가격 + 전일종가.
+// 특수자산(현금/금/암호화폐)은 supported=false 로 내려오며 툴팁을 띄우지
+// 않는다(gold_gap 일중 API 연결 전까지).
 
 const SCHC_SHOW_DELAY_MS = (typeof window !== 'undefined' && window.STOCK_CANDLE_TIP_DELAY_MS) ?? 300;
-const SCHC_CACHE_TTL_MS = 5 * 60 * 1000;
+const SCHC_CACHE_TTL_MS = 60 * 1000; // 일중 데이터라 짧게 캐시
 const SCHC_FAIL_TTL_MS = 60 * 1000;
-const SCHC_DAYS = 60;
 
 const SCHC_HOVER_SELECTOR = [
   '[data-candle-code]',
@@ -57,10 +57,10 @@ async function _schcData(code) {
   if (cached && Date.now() - cached.ts < cached.ttl) return cached.data;
   if (_schcInflight.has(code)) return _schcInflight.get(code);
   const p = apiFetchJson(
-    `/api/stocks/${encodeURIComponent(code)}/daily-candles?days=${SCHC_DAYS}`,
+    `/api/stocks/${encodeURIComponent(code)}/intraday`,
     { fallback: null },
   ).catch(() => null).then(data => {
-    const usable = data && data.supported && Array.isArray(data.candles) && data.candles.length >= 2 ? data : null;
+    const usable = data && data.supported && Array.isArray(data.points) && data.points.length >= 2 ? data : null;
     _schcCache.set(code, { ts: Date.now(), ttl: usable ? SCHC_CACHE_TTL_MS : SCHC_FAIL_TTL_MS, data: usable });
     _schcInflight.delete(code);
     return usable;
@@ -70,11 +70,11 @@ async function _schcData(code) {
 }
 
 function _schcEnsureTip() {
-  let tip = document.getElementById('stockCandleTip');
+  let tip = document.getElementById('stockHoverTip');
   if (!tip) {
     tip = document.createElement('div');
-    tip.id = 'stockCandleTip';
-    tip.className = 'stock-candle-tip';
+    tip.id = 'stockHoverTip';
+    tip.className = 'stock-hover-tip';
     tip.setAttribute('aria-hidden', 'true');
     document.body.appendChild(tip);
   }
@@ -97,15 +97,21 @@ function _schcCssColor(name, fallback) {
   }
 }
 
-function _schcHasOhlc(candles) {
-  let ok = 0;
-  for (const c of candles) {
-    if (c.open != null && c.high != null && c.low != null) ok++;
-  }
-  return ok >= candles.length * 0.8;
+// 전일종가 파싱 — null/undefined 는 null 유지 (Number(null)===0 함정 방지).
+function _schcPrevClose(data) {
+  if (data.prevClose === null || data.prevClose === undefined) return null;
+  const n = Number(data.prevClose);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function _schcDrawChart(canvas, candles, hasOhlc) {
+// "HH:MM" → 분. 형식이 아니면 null.
+function _schcMinutes(t) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t || '');
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+function _schcDrawChart(canvas, data) {
   let ctx = null;
   try {
     ctx = typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
@@ -121,73 +127,89 @@ function _schcDrawChart(canvas, candles, hasOhlc) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
 
-  const upColor = _schcCssColor('--up', '#b91c1c');
-  const downColor = _schcCssColor('--down', '#1d4ed8');
+  const points = data.points;
+  const prevClose = _schcPrevClose(data);
   const pad = 3;
   let min = Infinity;
   let max = -Infinity;
-  candles.forEach(c => {
-    const lo = hasOhlc ? (c.low ?? c.close) : c.close;
-    const hi = hasOhlc ? (c.high ?? c.close) : c.close;
-    if (lo < min) min = lo;
-    if (hi > max) max = hi;
+  points.forEach(p => {
+    if (p.p < min) min = p.p;
+    if (p.p > max) max = p.p;
   });
+  // 전일종가 기준선이 항상 보이도록 스케일에 포함.
+  if (prevClose !== null) {
+    if (prevClose < min) min = prevClose;
+    if (prevClose > max) max = prevClose;
+  }
   if (!(max > min)) max = min + 1;
   const yFor = v => pad + (1 - (v - min) / (max - min)) * (h - pad * 2);
 
-  if (hasOhlc) {
-    const slot = w / candles.length;
-    const bodyW = Math.max(1, Math.min(8, slot * 0.62));
-    candles.forEach((c, i) => {
-      const x = slot * i + slot / 2;
-      const open = c.open ?? c.close;
-      const up = c.close >= open;
-      ctx.strokeStyle = ctx.fillStyle = up ? upColor : downColor;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, yFor(c.high ?? Math.max(open, c.close)));
-      ctx.lineTo(x, yFor(c.low ?? Math.min(open, c.close)));
-      ctx.stroke();
-      const yTop = yFor(Math.max(open, c.close));
-      const yBot = yFor(Math.min(open, c.close));
-      ctx.fillRect(x - bodyW / 2, yTop, bodyW, Math.max(1, yBot - yTop));
-    });
-  } else {
+  // x 축은 정규장 시간에 비례 — 장중엔 그래프가 진행률만큼만 차오른다.
+  const sessStart = _schcMinutes(data.session && data.session.start);
+  const sessEnd = _schcMinutes(data.session && data.session.end);
+  const useSession = sessStart !== null && sessEnd !== null && sessEnd > sessStart;
+  const xFor = (p, i) => {
+    if (useSession) {
+      const t = _schcMinutes(p.t);
+      if (t !== null) {
+        return Math.max(0, Math.min(1, (t - sessStart) / (sessEnd - sessStart))) * w;
+      }
+    }
+    return points.length > 1 ? (i / (points.length - 1)) * w : w / 2;
+  };
+
+  if (prevClose !== null) {
+    const y = yFor(prevClose);
+    ctx.save();
     ctx.beginPath();
-    ctx.strokeStyle = _schcCssColor('--chart-line', '#2563eb');
-    ctx.lineWidth = 1.5;
-    ctx.lineJoin = 'round';
-    candles.forEach((c, i) => {
-      const x = candles.length > 1 ? (i / (candles.length - 1)) * w : w / 2;
-      const y = yFor(c.close);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
+    ctx.strokeStyle = _schcCssColor('--text-secondary', '#666');
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
     ctx.stroke();
+    ctx.restore();
   }
+
+  const last = points[points.length - 1].p;
+  const lineColor = prevClose === null
+    ? _schcCssColor('--chart-line', '#2563eb')
+    : last >= prevClose ? _schcCssColor('--up', '#b91c1c') : _schcCssColor('--down', '#1d4ed8');
+  ctx.beginPath();
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  points.forEach((p, i) => {
+    const x = xFor(p, i);
+    const y = yFor(p.p);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
 }
 
 function _schcRender(tip, info, data) {
-  const candles = data.candles;
-  const last = candles[candles.length - 1];
-  const prev = candles[candles.length - 2];
-  const chgPct = prev && prev.close ? (last.close / prev.close - 1) * 100 : null;
+  const points = data.points;
+  const last = points[points.length - 1];
+  const prevClose = _schcPrevClose(data);
+  const chgPct = prevClose ? (last.p / prevClose - 1) * 100 : null;
   const chgCls = chgPct === null || chgPct === 0 ? '' : chgPct > 0 ? 'sct-up' : 'sct-down';
   const chgText = chgPct === null ? '' : `${chgPct > 0 ? '+' : ''}${chgPct.toFixed(2)}%`;
-  const hasOhlc = _schcHasOhlc(candles);
-  const rangeText = `${candles[0].date} ~ ${last.date} · ${candles.length}거래일${hasOhlc ? '' : ' · 종가 라인'}`;
+  const footParts = [`${data.date || ''} 일중`, `${last.t} 기준`];
+  if (prevClose !== null) footParts.push(`전일종가 ${_schcFmtPrice(prevClose, data.currency)}`);
 
   tip.innerHTML = `
     <div class="sct-head">
       <span class="sct-name">${escapeHtml(info.name || info.code)}</span>
       <span class="sct-code">${escapeHtml(info.code)}</span>
     </div>
-    <div class="sct-price">${escapeHtml(_schcFmtPrice(last.close, data.currency))}${data.currency && data.currency !== 'KRW' ? ` <span class="sct-code">${escapeHtml(data.currency)}</span>` : ''}
+    <div class="sct-price">${escapeHtml(_schcFmtPrice(last.p, data.currency))}${data.currency && data.currency !== 'KRW' ? ` <span class="sct-code">${escapeHtml(data.currency)}</span>` : ''}
       <span class="sct-chg ${chgCls}">${escapeHtml(chgText)}</span>
     </div>
     <canvas class="sct-canvas" width="264" height="120"></canvas>
-    <div class="sct-foot">${escapeHtml(rangeText)}</div>`;
-  _schcDrawChart(tip.querySelector('canvas'), candles, hasOhlc);
+    <div class="sct-foot">${escapeHtml(footParts.join(' · '))}</div>`;
+  _schcDrawChart(tip.querySelector('canvas'), data);
 }
 
 function _schcPosition(tip, anchorRect) {
@@ -212,7 +234,7 @@ function _schcHide() {
     clearTimeout(_schcShowTimer);
     _schcShowTimer = null;
   }
-  const tip = document.getElementById('stockCandleTip');
+  const tip = document.getElementById('stockHoverTip');
   if (tip) tip.classList.remove('visible');
 }
 

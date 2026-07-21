@@ -892,28 +892,28 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .dropdown-section-label:not(:first-child) { border-top:1px solid var(--border); margin-top:4px; padding-top:10px; }
 
 
-/* === 종목 hover 일봉 캔들 툴팁 (stock-hover-chart.js, 데스크톱 전용) === */
-.stock-candle-tip {
+/* === 종목 hover 당일 일중 그래프 툴팁 (stock-hover-chart.js, 데스크톱 전용) === */
+.stock-hover-tip {
   position: fixed; z-index: 3000; display: none; width: 288px;
   padding: 10px 12px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg); pointer-events: none;
 }
-.stock-candle-tip.visible { display: block; }
-.stock-candle-tip .sct-head {
+.stock-hover-tip.visible { display: block; }
+.stock-hover-tip .sct-head {
   display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; min-width: 0;
 }
-.stock-candle-tip .sct-name {
+.stock-hover-tip .sct-name {
   font-size: 13px; font-weight: 700; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.stock-candle-tip .sct-code { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
-.stock-candle-tip .sct-price {
+.stock-hover-tip .sct-code { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+.stock-hover-tip .sct-price {
   font-size: 13px; color: var(--text); font-variant-numeric: var(--font-numeric);
   margin-bottom: 6px;
 }
-.stock-candle-tip .sct-chg { font-size: 12px; margin-left: 4px; }
-.stock-candle-tip .sct-chg.sct-up { color: var(--up); }
-.stock-candle-tip .sct-chg.sct-down { color: var(--down); }
-.stock-candle-tip .sct-canvas { display: block; width: 264px; height: 120px; }
-.stock-candle-tip .sct-foot { margin-top: 6px; font-size: 10px; color: var(--text-secondary); }
+.stock-hover-tip .sct-chg { font-size: 12px; margin-left: 4px; }
+.stock-hover-tip .sct-chg.sct-up { color: var(--up); }
+.stock-hover-tip .sct-chg.sct-down { color: var(--down); }
+.stock-hover-tip .sct-canvas { display: block; width: 264px; height: 120px; }
+.stock-hover-tip .sct-foot { margin-top: 6px; font-size: 10px; color: var(--text-secondary); }

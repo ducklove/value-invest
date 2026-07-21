@@ -1,4 +1,4 @@
-// jsdom tests for the stock hover candle tooltip (stock-hover-chart.js).
+// jsdom tests for the stock hover intraday tooltip (stock-hover-chart.js).
 //
 // The script is a document-level delegated handler, desktop-only via
 // matchMedia('(hover: hover) and (pointer: fine)'). Tests stub matchMedia and
@@ -20,13 +20,16 @@ const SCRIPT = readFileSync(
 
 const FIXTURE = {
   code: "005930",
-  days: 60,
   currency: "KRW",
-  source: "kis",
+  source: "naver",
   supported: true,
-  candles: [
-    { date: "2026-07-16", open: 1100, high: 1250, low: 1080, close: 1200 },
-    { date: "2026-07-17", open: 1210, high: 1330, low: 1190, close: 1300 },
+  date: "2026-07-21",
+  prevClose: 244000,
+  session: { start: "09:00", end: "15:30" },
+  points: [
+    { t: "09:00", p: 247000 },
+    { t: "09:01", p: 248500 },
+    { t: "09:02", p: 246000 },
   ],
 };
 
@@ -71,20 +74,22 @@ function unhover(w, el) {
   el.dispatchEvent(new w.MouseEvent("mouseout", { bubbles: true }));
 }
 
-test("hovering a portfolio stock cell fetches candles once and shows the tooltip", async () => {
+test("hovering a portfolio stock cell fetches intraday once and shows the tooltip", async () => {
   const { w, calls } = load();
   const strong = w.document.querySelector('tr[data-code="005930"] strong');
   hover(w, strong);
   await tick();
 
-  assert.deepEqual(calls, ["/api/stocks/005930/daily-candles?days=60"]);
-  const tip = w.document.getElementById("stockCandleTip");
+  assert.deepEqual(calls, ["/api/stocks/005930/intraday"]);
+  const tip = w.document.getElementById("stockHoverTip");
   assert.ok(tip, "tooltip element created");
   assert.ok(tip.classList.contains("visible"));
   assert.match(tip.textContent, /삼성전자/);
   assert.match(tip.textContent, /005930/);
-  assert.match(tip.textContent, /2026-07-16 ~ 2026-07-17 · 2거래일/);
-  assert.match(tip.textContent, /\+8\.33%/);
+  // 마지막 체결가 + 전일종가 대비 일간 등락률(246,000 vs 244,000 → +0.82%).
+  assert.match(tip.textContent, /246,000/);
+  assert.match(tip.textContent, /\+0\.82%/);
+  assert.match(tip.textContent, /2026-07-21 일중 · 09:02 기준 · 전일종가 244,000/);
   assert.ok(tip.querySelector("canvas.sct-canvas"));
 
   // mouseout hides; re-hover reuses the cache (no second fetch).
@@ -101,7 +106,7 @@ test("special asset codes are skipped without any fetch", async () => {
   hover(w, w.document.querySelector('tr[data-code="CASH_KRW"] strong'));
   await tick();
   assert.equal(calls.length, 0);
-  const tip = w.document.getElementById("stockCandleTip");
+  const tip = w.document.getElementById("stockHoverTip");
   assert.ok(!tip || !tip.classList.contains("visible"));
 });
 
@@ -112,37 +117,54 @@ test("non-hover environments (touch) do nothing", async () => {
   assert.equal(calls.length, 0);
 });
 
-test("data-candle-code opt-in surface works and close-only data falls back to a line", async () => {
+test("data-candle-code opt-in surface works with foreign intraday payloads", async () => {
   const fixture = {
     code: "AAPL",
-    days: 60,
     currency: "USD",
     source: "yahoo",
     supported: true,
-    candles: [
-      { date: "2026-07-16", close: 10.0 },
-      { date: "2026-07-17", close: 10.5 },
+    date: "2026-07-20",
+    prevClose: 9.8,
+    session: { start: "09:30", end: "16:00" },
+    points: [
+      { t: "09:30", p: 10.0 },
+      { t: "09:35", p: 10.5 },
     ],
   };
   const { w, calls } = load({ fixture });
   hover(w, w.document.getElementById("anySurface"));
   await tick();
 
-  assert.deepEqual(calls, ["/api/stocks/AAPL/daily-candles?days=60"]);
-  const tip = w.document.getElementById("stockCandleTip");
+  assert.deepEqual(calls, ["/api/stocks/AAPL/intraday"]);
+  const tip = w.document.getElementById("stockHoverTip");
   assert.ok(tip.classList.contains("visible"));
   assert.match(tip.textContent, /Apple/);
-  assert.match(tip.textContent, /종가 라인/);
   assert.match(tip.textContent, /USD/);
+  assert.match(tip.textContent, /\+7\.14%/);
+  assert.match(tip.textContent, /2026-07-20 일중/);
+});
+
+test("prevClose 없이도 렌더된다 (등락률·기준선 생략)", async () => {
+  const fixture = {
+    ...FIXTURE,
+    prevClose: null,
+  };
+  const { w } = load({ fixture });
+  hover(w, w.document.querySelector('tr[data-code="005930"] strong'));
+  await tick();
+  const tip = w.document.getElementById("stockHoverTip");
+  assert.ok(tip.classList.contains("visible"));
+  assert.ok(!/%/.test(tip.querySelector(".sct-chg").textContent));
+  assert.ok(!/전일종가/.test(tip.textContent));
 });
 
 test("unsupported or empty responses never show a tooltip", async () => {
-  const fixture = { code: "XXX", days: 60, currency: null, source: null, supported: false, candles: [] };
+  const fixture = { code: "XXX", currency: null, source: null, supported: false, points: [] };
   const { w } = load({ fixture });
   const el = w.document.getElementById("anySurface");
   el.dataset.candleCode = "XXX";
   hover(w, el);
   await tick();
-  const tip = w.document.getElementById("stockCandleTip");
+  const tip = w.document.getElementById("stockHoverTip");
   assert.ok(!tip || !tip.classList.contains("visible"));
 });

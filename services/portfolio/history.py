@@ -54,24 +54,15 @@ async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = 
         timestamps = result.get("timestamp") or []
         quote_data = (((result.get("indicators") or {}).get("quote") or [{}])[0] or {})
         closes = quote_data.get("close") or []
-        opens = quote_data.get("open") or []
-        highs = quote_data.get("high") or []
-        lows = quote_data.get("low") or []
         rows = []
-        for i, (ts, close) in enumerate(zip(timestamps, closes)):
+        for ts, close in zip(timestamps, closes):
             try:
                 if close is None:
                     continue
-                row = {
+                rows.append({
                     "date": datetime.fromtimestamp(int(ts), tz=timezone.utc).date().isoformat(),
                     "close": round(float(close), 6),
-                }
-                # 일봉 캔들(hover 툴팁)용 OHLC — close 만 읽는 기존 소비자와 호환.
-                for key, series in (("open", opens), ("high", highs), ("low", lows)):
-                    value = series[i] if i < len(series) else None
-                    if value is not None:
-                        row[key] = round(float(value), 6)
-                rows.append(row)
+                })
             except Exception:
                 continue
         return {

@@ -9,7 +9,7 @@
 `static/index.html`은 아래 순서로 포트폴리오 기능을 로드한다. 순서가 곧 의존성 계약이므로 임의로 바꾸지 않는다.
 
 1. `utils.js`: 공통 API fetch, 포맷, 앱 설정, markdown 렌더링.
-2. `stock-hover-chart.js`: 종목 hover 일봉 캔들 툴팁 — utils.js(`apiFetchJson`, `escapeHtml`)만 의존하는 전 화면 공통 위임 핸들러. 새 표면은 요소에 `data-candle-code`를 붙이면 자동 적용.
+2. `stock-hover-chart.js`: 종목 hover 당일 일중(1일) 그래프 툴팁 — utils.js(`apiFetchJson`, `escapeHtml`)만 의존하는 전 화면 공통 위임 핸들러. 새 표면은 요소에 `data-candle-code`를 붙이면 자동 적용.
 3. `portfolio-trend-chart.js`: NAV/평가금액 추이용 canvas chart adapter.
 4. `quote-manager.js`: WebSocket 시세와 polling fallback lifecycle.
 5. `auth.js`: 로그인, 세션, 사용자 상태.
