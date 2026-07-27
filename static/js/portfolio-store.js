@@ -45,8 +45,9 @@ const PfStore = {
   },
   // unit: 'KRW' or 'USD'; fxRate: USD/KRW rate.
   currency: { unit: 'KRW', fxRate: null },
-  // localStorage-backed view preferences (persisted by portfolio-shell.js).
-  prefs: { simpleMode: false, compactRows: false },
+  // localStorage-backed view preferences (persisted by portfolio-shell.js;
+  // heatMode by portfolio-heat.js).
+  prefs: { simpleMode: false, compactRows: false, heatMode: true },
 };
 
 // Expose explicitly for tests and any late-bound access.

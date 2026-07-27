@@ -118,6 +118,9 @@
       } else if ((el = t.closest('.js-pf-value-zoom'))) {
         const days = Number(el.dataset.zoomDays);
         if (!isNaN(days)) _valueZoomToDays(days);
+      } else if (t.closest('.js-pf-heat-toggle')) {
+        e.preventDefault();
+        pfToggleHeatMode();
       } else if ((el = t.closest('.js-pf-target-clear'))) {
         const code = codeFromTr(el);
         if (code) {

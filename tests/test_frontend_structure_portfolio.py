@@ -787,6 +787,62 @@ def test_performance_tab_includes_dividend_calendar_panel():
     assert ".pf-divcal-event.pf-divcal-upcoming .pf-divcal-date" in styles
     assert ".pf-divcal-event { grid-template-columns: minmax(0, 1fr) auto; }" in styles
 
+def test_color_heat_mode_shares_one_state_source_across_render_and_tick():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = _all_css()
+    store = (JS / "portfolio-store.js").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    heat = (JS / "portfolio-heat.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
+
+    # 등락률 셀 렌더 경로가 둘(전체 재렌더 / WS tick in-place)이라 상태 계산은
+    # portfolio-heat.js 한 곳에 모으고 양쪽이 같은 진입점을 쓴다.
+    assert html.find("./js/portfolio-heat.js") < html.find("./js/portfolio-render.js")
+    assert "heatMode: true" in store
+    assert "function pfHeatRowState" in heat
+    assert "function pfChangeCellHtml" in heat
+    assert "function pfHeatRowAttrs" in heat
+    assert "function pfHeatApplyRow" in heat
+    assert "const changeCell = pfChangeCellHtml(r);" in render
+    assert "const heatAttrs = pfHeatRowAttrs(r);" in render
+    assert '<td class="pf-col-num pf-col-changepct">${changeCell}</td>' in render
+    assert 'return `<tr data-code="${safeCode}"${heatAttrs}>' in render
+    assert "setHtml('.pf-col-changepct', pfChangeCellHtml(heatRow));" in data
+    assert "pfHeatApplyRow(tr, heatRow);" in data
+
+    # 게이지 분모는 "지금 보이는 행들"의 최대 등락률 — 필터/검색마다 다시 잡는다.
+    assert "pfHeatSetScale(rows);" in render
+    assert "pfHeatUpdateSummary(rows);" in render
+
+    # 상/하한가는 근사 ±30% 가 아니라 호가단위에 정렬된 정확한 값으로 판정한다
+    # (services/krx_limits.py 와 동일 규칙).
+    assert "function pfKrxTickSize" in heat
+    assert "function pfKrxUpperLimit" in heat
+    assert "function pfKrxLowerLimit" in heat
+    assert "const PF_KRX_TICK_BANDS" in heat
+    assert "^[0-9][0-9A-Z]{5}$" in heat
+
+    # 토글은 컬럼 토글 줄 맨 앞 버튼 + 오늘의 급등/급락 요약.
+    assert 'id="pfHeatToggle"' in shell
+    assert 'id="pfHeatSummary"' in shell
+    assert "wrap.innerHTML = heatToggle + compactToggle + colToggles;" in shell
+    assert "pfToggleHeatMode();" in events
+    assert "const PF_HEAT_MODE_KEY = 'pf_heat_mode';" in heat
+
+    # 스타일: 행 틴트는 background-image 라 zebra/flash 를 죽이지 않고,
+    # 상/하한가에서만 애니메이션을 과장하며, 동작 줄이기 설정을 존중한다.
+    assert "body.pf-heat-mode" in styles
+    assert 'body.pf-heat-mode .pf-table tbody tr[data-heat-dir] {\n  background-image: linear-gradient(' in styles
+    assert 'body.pf-heat-mode .pf-table tbody tr[data-heat-limit] {' in styles
+    assert "@keyframes pfHeatSweep" in styles
+    assert "@keyframes pfHeatRowGlow" in styles
+    assert ".pf-heat-gauge" in styles
+    assert "calc(var(--pf-heat-ratio, 0) * 100%)" in styles
+    reduced = styles[styles.find("@media (prefers-reduced-motion: reduce)", styles.find(".pf-heat-toggle")):]
+    assert "animation: none !important;" in reduced
+
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
     app = (JS / "app-main.js").read_text(encoding="utf-8")
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")

@@ -2952,3 +2952,260 @@ body.pf-compact-rows .pf-table tfoot td {
   background: var(--input-bg); color: var(--text);
   resize: vertical; font-family: inherit;
 }
+
+/* ===========================================================================
+   § 컬러 모드 (body.pf-heat-mode) — 일간 등락 강도 히트맵
+   ---------------------------------------------------------------------------
+   portfolio-heat.js 가 <tr> 에 data-heat-dir / data-heat-level(0~5) /
+   data-heat-limit 을, 등락률 셀에 .pf-heat-cell 을 붙인다. 여기선 그 등급을
+   색 농도 · 좌측 엣지 두께 · 배지 크기 · 애니메이션으로 번역만 한다.
+
+   색 관행(base.css 계약): 상승=빨강 / 하락=파랑, 반전 금지.
+   행 틴트는 background-color 가 아니라 background-image(그라디언트)로 준다 —
+   짝수행 zebra(.pf-table tbody tr:nth-child(even))와 시세 갱신 flash
+   (.flash-update 가 background-color 를 애니메이션)를 죽이지 않기 위해서다.
+   =========================================================================== */
+body.pf-heat-mode {
+  --pf-heat-up-rgb: 220, 38, 38;
+  --pf-heat-down-rgb: 37, 99, 235;
+  --pf-heat-flat-rgb: 148, 163, 184;
+  /* 상/하한가 배지는 흰 글씨를 얹으므로 다크에서도 채도를 유지하는 솔리드 색. */
+  --pf-heat-solid-up: #dc2626;
+  --pf-heat-solid-down: #2563eb;
+}
+[data-theme="dark"] body.pf-heat-mode {
+  /* 어두운 표면 위에선 같은 알파라도 탁해 보여 한 단계 밝은 쌍을 쓴다. */
+  --pf-heat-up-rgb: 248, 113, 113;
+  --pf-heat-down-rgb: 96, 165, 250;
+  --pf-heat-solid-up: #e11d48;
+  --pf-heat-solid-down: #3b82f6;
+}
+
+/* --- 등급 → 강도 매핑 (레벨 0 = 1% 미만 = 무처리) --- */
+body.pf-heat-mode .pf-table tbody tr[data-heat-dir] { --pf-heat-a: 0; --pf-heat-edge: 0px; }
+body.pf-heat-mode .pf-table tbody tr[data-heat-level="1"] { --pf-heat-a: 0.07; --pf-heat-edge: 2px; }
+body.pf-heat-mode .pf-table tbody tr[data-heat-level="2"] { --pf-heat-a: 0.13; --pf-heat-edge: 3px; }
+body.pf-heat-mode .pf-table tbody tr[data-heat-level="3"] { --pf-heat-a: 0.20; --pf-heat-edge: 4px; }
+body.pf-heat-mode .pf-table tbody tr[data-heat-level="4"] { --pf-heat-a: 0.28; --pf-heat-edge: 5px; }
+body.pf-heat-mode .pf-table tbody tr[data-heat-level="5"] { --pf-heat-a: 0.38; --pf-heat-edge: 7px; }
+body.pf-heat-mode .pf-table tbody tr[data-heat-dir="up"] { --pf-heat-rgb: var(--pf-heat-up-rgb); }
+body.pf-heat-mode .pf-table tbody tr[data-heat-dir="down"] { --pf-heat-rgb: var(--pf-heat-down-rgb); }
+body.pf-heat-mode .pf-table tbody tr[data-heat-dir="flat"] { --pf-heat-rgb: var(--pf-heat-flat-rgb); }
+
+/* 왼쪽이 진한 그라디언트 — 눈이 행 머리(종목명)부터 훑게 만든다. */
+body.pf-heat-mode .pf-table tbody tr[data-heat-dir] {
+  background-image: linear-gradient(
+    90deg,
+    rgba(var(--pf-heat-rgb), calc(var(--pf-heat-a) * 1.2)) 0%,
+    rgba(var(--pf-heat-rgb), var(--pf-heat-a)) 45%,
+    rgba(var(--pf-heat-rgb), calc(var(--pf-heat-a) * 0.28)) 100%
+  );
+}
+body.pf-heat-mode .pf-table tbody tr[data-heat-dir] > td:first-child {
+  box-shadow: inset var(--pf-heat-edge) 0 0 rgb(var(--pf-heat-rgb));
+}
+
+/* --- 등락률 셀: 게이지(목록 내 상대 크기) + 값 배지(절대 강도) --- */
+.pf-heat-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 22px;
+  --pf-heat-rgb: var(--pf-heat-up-rgb);
+  --pf-heat-solid: var(--pf-heat-solid-up);
+  /* 실제 값은 portfolio-heat.js 가 인라인 style 로 덮어쓴다. 여기 기본값은
+     JS 가 비율을 못 넣은 경우의 안전한 바닥(막대 없음). */
+  --pf-heat-ratio: 0;
+}
+.pf-heat-cell[data-heat-dir="down"] {
+  --pf-heat-rgb: var(--pf-heat-down-rgb);
+  --pf-heat-solid: var(--pf-heat-solid-down);
+}
+.pf-heat-cell[data-heat-dir="flat"] { --pf-heat-rgb: var(--pf-heat-flat-rgb); }
+/* 폭 = |등락률| ÷ 현재 목록의 최댓값. "이 화면에서 제일 크게 움직인 종목"이
+   항상 꽉 찬 막대로 나와 상대 비교가 바로 된다. */
+.pf-heat-gauge {
+  position: absolute;
+  top: 1px; bottom: 1px; right: 0;
+  width: calc(var(--pf-heat-ratio, 0) * 100%);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, rgba(var(--pf-heat-rgb), 0.02), rgba(var(--pf-heat-rgb), 0.28));
+  pointer-events: none;
+}
+.pf-heat-val {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  white-space: nowrap;
+  color: rgb(var(--pf-heat-rgb));
+  background: rgba(var(--pf-heat-rgb), 0.10);
+  box-shadow: inset 0 0 0 1px rgba(var(--pf-heat-rgb), 0.22);
+}
+/* 레벨 0(1% 미만)은 배지 없이 예전 표시 그대로 — 잔잔한 날 화면이 시끄러워지지
+   않게. 상승/하락 색은 유지(정보 손실 없음), 알약 배경과 테두리만 뺀다. */
+.pf-heat-cell[data-heat-level="0"] .pf-heat-val {
+  padding: 2px 0;
+  font-weight: 600;
+  background: none;
+  box-shadow: none;
+}
+.pf-heat-cell[data-heat-dir="flat"] .pf-heat-val { color: var(--text-secondary); }
+.pf-heat-cell[data-heat-level="3"] .pf-heat-val { font-size: 14px; background: rgba(var(--pf-heat-rgb), 0.14); }
+.pf-heat-cell[data-heat-level="4"] .pf-heat-val {
+  font-size: 15px;
+  background: rgba(var(--pf-heat-rgb), 0.20);
+  box-shadow: inset 0 0 0 1px rgba(var(--pf-heat-rgb), 0.38);
+}
+.pf-heat-cell[data-heat-level="5"] .pf-heat-val {
+  font-size: 16px;
+  background: rgba(var(--pf-heat-rgb), 0.26);
+  box-shadow: inset 0 0 0 1px rgba(var(--pf-heat-rgb), 0.5), 0 0 12px rgba(var(--pf-heat-rgb), 0.32);
+  animation: pfHeatThrob 2.2s ease-in-out infinite;
+}
+.pf-heat-icon {
+  display: inline-block;
+  font-size: 12px;
+  animation: pfHeatIconFloat 2s ease-in-out infinite;
+}
+
+/* --- 상/하한가: 여기서만 과장한다 (솔리드 배지 + 스윕 + 행 글로우) --- */
+.pf-heat-cell[data-heat-limit] .pf-heat-val {
+  color: #fff;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+  background-image: linear-gradient(
+    100deg,
+    var(--pf-heat-solid) 0%,
+    color-mix(in srgb, var(--pf-heat-solid) 55%, #fff) 42%,
+    var(--pf-heat-solid) 100%
+  );
+  background-color: var(--pf-heat-solid);
+  background-size: 260% 100%;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pf-heat-solid) 70%, transparent),
+              0 0 18px color-mix(in srgb, var(--pf-heat-solid) 55%, transparent);
+  animation: pfHeatSweep 2.4s linear infinite, pfHeatThrob 1.5s ease-in-out infinite;
+}
+.pf-heat-cell[data-heat-limit] .pf-heat-icon { font-size: 13px; animation: pfHeatLaunch 1.4s ease-in-out infinite; }
+.pf-heat-cell[data-heat-limit="down"] .pf-heat-icon { animation: pfHeatSink 1.8s ease-in-out infinite; }
+.pf-heat-limit-tag {
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.26);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+body.pf-heat-mode .pf-table tbody tr[data-heat-limit] {
+  animation: pfHeatRowGlow 2.6s ease-in-out infinite;
+}
+body.pf-heat-mode .pf-table tbody tr[data-heat-limit] > td:first-child {
+  animation: pfHeatEdgePulse 1.3s ease-in-out infinite;
+}
+
+@keyframes pfHeatThrob {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.055); }
+}
+@keyframes pfHeatIconFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes pfHeatLaunch {
+  0%, 100% { transform: translateY(1px) rotate(-4deg); }
+  50% { transform: translateY(-4px) rotate(6deg); }
+}
+@keyframes pfHeatSink {
+  0%, 100% { transform: translateY(-1px); }
+  50% { transform: translateY(3px); }
+}
+@keyframes pfHeatSweep {
+  0% { background-position: 140% 0; }
+  100% { background-position: -40% 0; }
+}
+@keyframes pfHeatRowGlow {
+  0%, 100% {
+    background-image: linear-gradient(
+      90deg,
+      rgba(var(--pf-heat-rgb), 0.34) 0%,
+      rgba(var(--pf-heat-rgb), 0.20) 45%,
+      rgba(var(--pf-heat-rgb), 0.06) 100%
+    );
+  }
+  50% {
+    background-image: linear-gradient(
+      90deg,
+      rgba(var(--pf-heat-rgb), 0.58) 0%,
+      rgba(var(--pf-heat-rgb), 0.34) 45%,
+      rgba(var(--pf-heat-rgb), 0.14) 100%
+    );
+  }
+}
+@keyframes pfHeatEdgePulse {
+  0%, 100% { box-shadow: inset 7px 0 0 rgb(var(--pf-heat-rgb)); }
+  50% { box-shadow: inset 12px 0 0 rgb(var(--pf-heat-rgb)); }
+}
+
+/* --- 토글 버튼 + 오늘의 급등/급락 요약 (컬럼 토글 줄 맨 앞) --- */
+.pf-heat-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pf-heat-toggle:hover { color: var(--text); border-color: var(--primary); }
+.pf-heat-toggle.active {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(100deg, var(--pf-heat-solid-down, #2563eb), var(--pf-heat-solid-up, #dc2626));
+  box-shadow: 0 2px 10px rgba(220, 38, 38, 0.28);
+}
+.pf-heat-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.pf-heat-summary b { font-weight: 700; }
+.pf-heat-summary b.up { color: var(--up); }
+.pf-heat-summary b.down { color: var(--down); }
+.pf-heat-summary-sep { color: var(--border); }
+.pf-heat-calm { opacity: 0.65; }
+
+/* --- 좁은 화면 --- */
+@media (max-width: 760px) {
+  .pf-heat-cell[data-heat-level="4"] .pf-heat-val,
+  .pf-heat-cell[data-heat-level="5"] .pf-heat-val,
+  .pf-heat-cell[data-heat-limit] .pf-heat-val { font-size: 13px; }
+  .pf-heat-val { padding: 2px 5px; }
+  .pf-heat-limit-tag { display: none; }
+}
+/* 간편 보기는 등락률 칸이 56px 고정이라 배지가 잘린다 — 컬러 모드에서만 넓힌다. */
+body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
+
+/* 동작 줄이기: 색·크기 대비는 그대로 두고 반복 애니메이션만 끈다. */
+@media (prefers-reduced-motion: reduce) {
+  .pf-heat-val,
+  .pf-heat-icon,
+  body.pf-heat-mode .pf-table tbody tr[data-heat-limit],
+  body.pf-heat-mode .pf-table tbody tr[data-heat-limit] > td:first-child {
+    animation: none !important;
+  }
+}

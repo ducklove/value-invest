@@ -248,6 +248,15 @@ function _pfRenderColToggles() {
   if (_pfColTogglesRendered) return;
   const wrap = document.getElementById('pfColToggles');
   if (!wrap) return;
+  // 컬러 모드는 체크박스가 아니라 버튼 — 화면을 크게 바꾸는 보기 모드라
+  // 컬럼 on/off 체크박스들과 구분되게 두고, 옆에 오늘의 급등/급락 요약을 붙인다.
+  const heatOn = !!PfStore.prefs.heatMode;
+  const heatToggle =
+    `<button type="button" class="pf-heat-toggle js-pf-heat-toggle${heatOn ? ' active' : ''}" id="pfHeatToggle"`
+    + ` aria-pressed="${heatOn ? 'true' : 'false'}"`
+    + ` title="일간 등락 폭을 색·크기·애니메이션으로 강조 (상/하한가는 별도 표시)">🔥 컬러</button>`
+    + `<span class="pf-heat-summary" id="pfHeatSummary" role="status" aria-live="polite"${heatOn ? '' : ' hidden'}></span>`
+    + `<span class="pf-col-toggle-sep" aria-hidden="true"></span>`;
   const compactToggle =
     `<label class="pf-compact-toggle" title="태그·순서이동 아이콘을 숨기고 종목명을 한 줄로, 행 간격을 좁게 표시">`
     + `<input type="checkbox" id="pfCompactToggle" class="js-pf-compact-toggle"${PfStore.prefs.compactRows ? ' checked' : ''}> 컴팩트</label>`
@@ -255,7 +264,7 @@ function _pfRenderColToggles() {
   const colToggles = PF_COL_DEFS.map(c =>
     `<label><input type="checkbox" class="js-pf-col-toggle" data-col-key="${escapeHtml(c.key)}" ${vis[c.key] ? 'checked' : ''}> ${c.label}</label>`
   ).join('');
-  wrap.innerHTML = compactToggle + colToggles;
+  wrap.innerHTML = heatToggle + compactToggle + colToggles;
   _pfColTogglesRendered = true;
 }
 

@@ -36,6 +36,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-data.js",
     "portfolio-order.js",
     "portfolio-sparklines.js",
+    "portfolio-heat.js",
     "portfolio-render.js",
     "portfolio-action-board.js",
     "portfolio-add-search.js",

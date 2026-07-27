@@ -558,6 +558,11 @@ function renderPortfolio(options = {}) {
 
   const canManualDrag = PfStore.filters.group === null && !PfStore.sort.key && !PfStore.sort.groupSort && !searchText && currentUser && !PfStore.edit.code;
 
+  // 컬러 모드 게이지의 분모는 "지금 보이는 행들의 최대 |등락률|" — 필터/검색
+  // 결과에 맞춰 매 렌더 다시 잡아야 한 화면 안의 상대 크기가 의미를 가진다.
+  pfHeatSetScale(rows);
+  pfHeatUpdateSummary(rows);
+
   tbody.innerHTML = rows.map((r, i) => {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = PfStore.edit.code === r.stock_code;
@@ -598,11 +603,13 @@ function renderPortfolio(options = {}) {
     const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
+    const heatAttrs = pfHeatRowAttrs(r);
+    const changeCell = pfChangeCellHtml(r);
     if (isEditing) {
-      return `<tr data-code="${safeCode}"${rowClass}>
+      return `<tr data-code="${safeCode}"${rowClass}${heatAttrs}>
         <td class="pf-stock-cell pf-stock-cell-editing">${stockEditIdentity}</td>
         <td class="pf-col-group"><select class="pf-group-select js-pf-group"${editAttrs}>${groupOpts}</select></td>
-        <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
+        <td class="pf-col-num pf-col-changepct">${changeCell}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
@@ -622,10 +629,10 @@ function renderPortfolio(options = {}) {
         </div></td>
       </tr>`;
     }
-    return `<tr data-code="${safeCode}">
+    return `<tr data-code="${safeCode}"${heatAttrs}>
       <td class="${stockCellClass}">${dragHandle}${stockIdentity}</td>
       <td class="pf-col-group">${groupHtml}</td>
-      <td class="pf-col-num pf-col-changepct">${fmtChangePct(r.changePct, r.change)}</td>
+      <td class="pf-col-num pf-col-changepct">${changeCell}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
