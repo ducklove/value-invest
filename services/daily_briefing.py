@@ -23,6 +23,7 @@ systemd timer 배치가 결산 데이터로 브리핑을 만들어
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, timedelta
 
 import ai_config
@@ -48,7 +49,7 @@ OPT_IN_KEY = "daily_briefing_enabled"
 CUSTOM_INSTRUCTIONS_KEY = "daily_briefing_custom_instructions"
 DEFAULT_BRIEFING_TYPE = "morning"
 
-MAX_TOKENS = 1200  # 10~15줄 요약이면 충분 — 폭주 방지 상한.
+MAX_TOKENS = 1600  # 섹션·항목 줄나눔까지 담을 여유 — 폭주 방지 상한.
 MOVER_COUNT = 3
 CALENDAR_EVENT_LIMIT = 6
 FEED_ITEM_LIMIT = 5
@@ -109,8 +110,10 @@ SYSTEM_PROMPT = """당신은 개인 투자자를 위한 포트폴리오 브리�
 규칙:
 - 제공된 데이터에만 근거하고, 없는 수치를 꾸며내지 마세요.
 - 메신저(텔레그램/카카오) plain text 로 전송되므로 마크다운·HTML 없이
-  이모지와 줄바꿈만으로 구성하세요.
-- 전체 10~15줄, 한 줄은 짧게. 한국어로 작성하세요.
+  이모지와 줄바꿈만으로 구성하세요. (*, #, - 같은 기호 금지 — 항목 앞은 "• ")
+- 한 줄에는 한 가지 정보만 담고, 여러 항목을 쉼표로 이어 붙이지 마세요.
+- 금액은 천 단위마다 콤마를 넣어 읽기 쉽게 쓰세요 (예: 1,234,567 / 10.34억).
+- 전체 20줄 이내, 한 줄은 짧게. 한국어로 작성하세요.
 - 단정적 매수/매도 권유 대신 확인할 포인트를 제시하세요."""
 
 
@@ -772,8 +775,43 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
 
 
 # ---------------------------------------------------------------------------
-# Rendering (template fallback + LLM prompt share the same line builders)
+# Rendering (template fallback + LLM prompt share the same section builders)
+#
+# 메신저 가독성 규칙: 섹션 제목 한 줄 + "• " 항목 줄, 섹션 사이 빈 줄, 금액은
+# 천 단위 콤마(1억 이상은 억/조). 템플릿은 이 규칙대로 렌더하고, LLM 출력은
+# 같은 규칙을 프롬프트로 요구한 뒤 normalize_message_text 로 마지막에 다듬는다.
 # ---------------------------------------------------------------------------
+
+BULLET = "• "
+
+# 콤마가 빠진 큰 정수만 잡는다 — 소수(0.12345)·이미 찍힌 콤마·시각(21:30)·
+# 경로(/12345)는 앞뒤 문자로, 종목코드(005930)는 선두 0으로 걸러진다. 날짜
+# (2026-06-23)는 5자리 연속 숫자가 없어 애초에 걸리지 않는다. 1만 미만은
+# 콤마 없이도 읽히므로 5자리부터.
+_BARE_NUMBER_RE = re.compile(r"(?<![\d,:/])(?<!\d\.)([1-9]\d{4,})(?![\d,:/])(?!\.\d)")
+_LIST_MARKER_RE = re.compile(r"^\s*[-*–—]\s+")
+_BLANK_RUN_RE = re.compile(r"\n{3,}")
+
+
+def format_thousands(text: str) -> str:
+    """콤마 없이 나온 큰 숫자에 천 단위 구분을 넣는다 (LLM 출력 방어)."""
+    return _BARE_NUMBER_RE.sub(lambda m: f"{int(m.group(1)):,}", text)
+
+
+def normalize_message_text(text: str) -> str:
+    """발송 직전 마지막 정리 — 목록 기호·빈 줄·큰 숫자 표기를 통일한다."""
+    lines = [_LIST_MARKER_RE.sub(BULLET, line).rstrip() for line in (text or "").splitlines()]
+    return _BLANK_RUN_RE.sub("\n\n", format_thousands("\n".join(lines))).strip()
+
+
+def _bullets(items) -> list[str]:
+    return [f"{BULLET}{str(item).strip()}" for item in items if str(item or "").strip()]
+
+
+def _section(header: str, items) -> list[str]:
+    """제목 + 항목 줄들. 항목이 하나도 없으면 섹션 자체를 만들지 않는다."""
+    rows = _bullets(items)
+    return [header, *rows] if rows else []
 
 
 def _fmt_money(value: float | None) -> str:
@@ -791,23 +829,23 @@ def _fmt_signed_krw(value: float) -> str:
 def _fmt_mover(mover: dict) -> str:
     pct = mover.get("change_pct")
     label = "가격" if mover.get("basis") == "price" else "평가액"
-    pct_text = f"({label} {pct:+.1f}%)" if pct is not None else ""
+    pct_text = f" ({label} {pct:+.1f}%)" if pct is not None else ""
     return f"{mover['stock_name']} {_fmt_signed_krw(mover['change_krw'])}{pct_text}"
 
 
 def _fmt_overseas_group(group: dict) -> str:
     value = group.get("market_value")
-    value_text = _fmt_money(value) if value is not None else "-"
+    head = f"{group.get('group_name') or '해외'} {_fmt_money(value) if value is not None else '-'}"
     change = group.get("change_krw")
     pct = group.get("change_pct")
     weight = group.get("weight_pct")
-    parts = [f"{group.get('group_name') or '해외'} {value_text}"]
+    parts: list[str] = []
     if change is not None:
         pct_text = f", {pct:+.2f}%" if pct is not None else ""
         parts.append(f"{_fmt_signed_krw(change)}{pct_text}")
     if weight is not None:
         parts.append(f"비중 {weight:.1f}%")
-    return " (".join([parts[0], " · ".join(parts[1:]) + ")"]) if len(parts) > 1 else parts[0]
+    return f"{head} ({' · '.join(parts)})" if parts else head
 
 
 def _fmt_calendar_alert(item: dict) -> str:
@@ -822,44 +860,65 @@ def _fmt_calendar_alert(item: dict) -> str:
     return f"{text} ({details})" if details else text
 
 
-def _fmt_nav_line(nav: dict, label: str) -> str:
-    prefix = f"📊 {label}({nav['date']}) 총평가 {_fmt_money(nav['total_value'])}"
-    if nav.get("change_krw") is None:
-        return prefix
-    return f"{prefix} ({_fmt_signed_krw(nav['change_krw'])}, {nav['change_pct']:+.2f}%)"
+def _nav_section(nav: dict, label: str, notes: list[str] | None = None) -> list[str]:
+    items = [f"총평가 {_fmt_money(nav.get('total_value'))}"]
+    if nav.get("change_krw") is not None:
+        pct = nav.get("change_pct")
+        pct_text = f" ({pct:+.2f}%)" if pct is not None else ""
+        items.append(f"전일 대비 {_fmt_signed_krw(nav['change_krw'])}{pct_text}")
+    items.extend(notes or [])
+    return _section(f"📊 {label} ({nav.get('date')})", items)
 
 
-def _fmt_today_portfolio_line(today: dict) -> str:
-    line = _fmt_nav_line(today, "오늘")
-    if today.get("net_cashflow"):
-        line += " · 입출금 제외"
+def _today_portfolio_section(today: dict) -> list[str]:
+    notes = []
     if today.get("source") == "live":
-        line += " · 실시간"
-    return line
+        notes.append("실시간 평가액 기준")
+    if today.get("net_cashflow"):
+        notes.append("입출금 제외")
+    return _nav_section(today, "오늘", [" · ".join(notes)] if notes else None)
 
 
-def _feed_lines(context: dict, *, night_prefix: bool = False) -> list[str]:
-    lines: list[str] = []
-    for f in context.get("filings") or []:
-        name = f.get("corp_name") or f.get("stock_code")
-        prefix = "🕘 장 마감 이후 공시 리뷰" if night_prefix else "📑 새 공시 리뷰"
-        lines.append(f"{prefix}: [{name}] {f.get('report_name') or ''}".rstrip())
+def _filing_items(context: dict) -> list[str]:
+    return [
+        f"[{f.get('corp_name') or f.get('stock_code')}] {f.get('report_name') or ''}".rstrip()
+        for f in context.get("filings") or []
+    ]
+
+
+def _report_items(context: dict) -> list[str]:
+    items = []
     for r in context.get("reports") or []:
-        name = r.get("stock_name") or r.get("stock_code")
         head = " · ".join(p for p in (r.get("firm"), r.get("title")) if p)
-        prefix = "🕘 장 마감 이후 리포트" if night_prefix else "📈 새 리포트"
-        lines.append(f"{prefix}: [{name}] {head}".rstrip())
-    return lines
+        items.append(f"[{r.get('stock_name') or r.get('stock_code')}] {head}".rstrip())
+    return items
 
 
-def _calendar_line(label: str, events: list[dict]) -> str | None:
-    if not events:
-        return None
-    parts = ", ".join(
-        " ".join(p for p in (e.get("time"), e.get("flag"), e.get("event")) if p)
-        for e in events
+def _feed_sections(context: dict, *, night: bool) -> list[list[str]]:
+    filings = _filing_items(context)
+    reports = _report_items(context)
+    if night:
+        # 나이트 브리핑은 '장 마감 이후 변경'을 한 섹션으로 모아 첫머리에 둔다.
+        items = [f"공시 {t}" for t in filings] + [f"리포트 {t}" for t in reports]
+        return [["🕘 장 마감 이후 변경", *(_bullets(items) or [f"{BULLET}새 공시·리포트 없음"])]]
+    return [
+        section
+        for section in (
+            _section("📑 새 공시 리뷰", filings),
+            _section("📈 새 리포트", reports),
+        )
+        if section
+    ]
+
+
+def _calendar_section(label: str, events: list[dict]) -> list[str]:
+    return _section(
+        f"📅 {label}",
+        [
+            " ".join(p for p in (e.get("time"), e.get("flag"), e.get("event")) if p)
+            for e in events
+        ],
     )
-    return f"📅 {label}: {parts}"
 
 
 def _night_futures_line(night: dict | None) -> str | None:
@@ -872,11 +931,13 @@ def _night_futures_line(night: dict | None) -> str | None:
     return f"🌙 야간선물: {night.get('value')}{stale}"
 
 
-def _market_context_lines(context: dict) -> list[str]:
-    market = context.get("market") or []
-    if not market:
-        return []
-    return ["🌐 시장 지표:", *market]
+def _market_section(context: dict) -> list[str]:
+    # market_summary_lines 는 "- KOSPI: 2,900 (+0.5%)" 형태 — 목록 기호를 벗겨
+    # 다른 섹션과 같은 불릿으로 맞춘다.
+    return _section(
+        "🌐 시장 지표",
+        [_LIST_MARKER_RE.sub("", str(line or "")).strip() for line in context.get("market") or []],
+    )
 
 
 def _requested_missing_context_lines(context: dict, custom_instructions: str | None) -> list[str]:
@@ -892,96 +953,106 @@ def _requested_missing_context_lines(context: dict, custom_instructions: str | N
     return lines
 
 
-def _context_lines(context: dict, custom_instructions: str | None = None) -> list[str]:
-    """컨텍스트를 사람이 읽을 수 있는 줄들로 변환 — 템플릿 폴백 본문이자
+def _context_sections(context: dict, custom_instructions: str | None = None) -> list[list[str]]:
+    """컨텍스트를 섹션(제목 줄 + 항목 줄들) 목록으로 — 템플릿 폴백 본문이자
     LLM 프롬프트의 데이터 섹션."""
-    lines: list[str] = []
+    sections: list[list[str]] = []
     kind = context.get("briefing_type") or DEFAULT_BRIEFING_TYPE
 
-    domestic_market = context.get("domestic_market") or []
-    if kind == "market_close" and domestic_market:
-        lines.append(f"🇰🇷 국내 지수: {', '.join(domestic_market)}")
+    def add(section: list[str]) -> None:
+        if section:
+            sections.append(section)
 
+    domestic_market = context.get("domestic_market") or []
     market_flows = context.get("market_flows") or []
-    if kind == "market_close" and market_flows:
-        lines.append(f"💰 수급 동향: {', '.join(market_flows)}")
+
+    if kind == "market_close":
+        add(_section("🇰🇷 국내 지수", domestic_market))
+        add(_section("💰 수급 동향", market_flows))
 
     if kind == "night":
-        feed = _feed_lines(context, night_prefix=True)
-        lines.extend(feed if feed else ["🕘 장 마감 이후 변경: 새 공시·리포트 없음"])
+        for section in _feed_sections(context, night=True):
+            add(section)
 
     portfolio_today = context.get("portfolio_today")
     if kind in TODAY_PORTFOLIO_BRIEFING_TYPES and portfolio_today:
-        lines.append(_fmt_today_portfolio_line(portfolio_today))
+        add(_today_portfolio_section(portfolio_today))
 
     nav = context.get("nav")
     if nav and kind not in TODAY_PORTFOLIO_BRIEFING_TYPES:
-        lines.append(_fmt_nav_line(nav, "어제"))
+        add(_nav_section(nav, "어제"))
     elif nav and kind == "night" and not portfolio_today:
-        lines.append(_fmt_nav_line(nav, "최근 결산"))
+        add(_nav_section(nav, "최근 결산"))
 
     movers = context.get("movers") or {}
-    if kind != "market_close" and movers.get("top"):
-        parts = ", ".join(_fmt_mover(m) for m in movers["top"])
-        lines.append(f"📈 상승 기여: {parts}")
-    if kind != "market_close" and movers.get("bottom"):
-        parts = ", ".join(_fmt_mover(m) for m in movers["bottom"])
-        lines.append(f"📉 하락 기여: {parts}")
-
-    overseas_groups = context.get("overseas_groups") or []
-    if kind != "market_close" and overseas_groups:
-        parts = ", ".join(_fmt_overseas_group(g) for g in overseas_groups)
-        lines.append(f"🌏 해외 그룹 성과: {parts}")
+    if kind != "market_close":
+        add(_section("📈 상승 기여", [_fmt_mover(m) for m in movers.get("top") or []]))
+        add(_section("📉 하락 기여", [_fmt_mover(m) for m in movers.get("bottom") or []]))
+        add(_section(
+            "🌏 해외 그룹 성과",
+            [_fmt_overseas_group(g) for g in context.get("overseas_groups") or []],
+        ))
 
     if kind != "night":
-        lines.extend(_feed_lines(context))
+        for section in _feed_sections(context, night=False):
+            add(section)
 
-    cal_line = _calendar_line("오늘 주요 일정", context.get("calendar") or [])
-    if cal_line:
-        lines.append(cal_line)
+    add(_calendar_section("오늘 주요 일정", context.get("calendar") or []))
+    add(_section(
+        "📅 오늘의 일정",
+        [_fmt_calendar_alert(item) for item in context.get("calendar_alerts") or []],
+    ))
 
-    alerts = context.get("calendar_alerts") or []
-    if alerts:
-        parts = ", ".join(_fmt_calendar_alert(item) for item in alerts)
-        lines.append(f"📅 오늘의 일정: {parts}")
+    if kind != "market_close":
+        night_line = _night_futures_line(context.get("night_futures"))
+        if night_line:
+            add([night_line])
 
-    night_line = _night_futures_line(context.get("night_futures")) if kind != "market_close" else None
-    if night_line:
-        lines.append(night_line)
-
-    tomorrow_line = _calendar_line("내일 주요 일정", context.get("tomorrow_calendar") or [])
-    if tomorrow_line:
-        lines.append(tomorrow_line)
+    add(_calendar_section("내일 주요 일정", context.get("tomorrow_calendar") or []))
 
     if kind == "night":
-        lines.append("🔎 내일 시장 전망: 야간선물·환율·미국장 흐름과 내일 주요 일정을 함께 점검하세요.")
-        if domestic_market:
-            lines.append(f"🇰🇷 국내 지수: {', '.join(domestic_market)}")
-        if market_flows:
-            lines.append(f"💰 수급 동향: {', '.join(market_flows)}")
+        add(["🔎 내일 시장 전망: 야간선물·환율·미국장 흐름과 내일 주요 일정을 함께 점검하세요."])
+        add(_section("🇰🇷 국내 지수", domestic_market))
+        add(_section("💰 수급 동향", market_flows))
 
-    lines.extend(_market_context_lines(context))
-    return lines + _requested_missing_context_lines(context, custom_instructions)
+    add(_market_section(context))
+
+    for line in _requested_missing_context_lines(context, custom_instructions):
+        add([line])
+    return sections
+
+
+def _sections_text(sections: list[list[str]]) -> str:
+    """섹션 사이에 빈 줄 하나 — 메신저에서 덩어리로 읽히게."""
+    return "\n\n".join("\n".join(section) for section in sections)
+
+
+def _context_lines(context: dict, custom_instructions: str | None = None) -> list[str]:
+    return [
+        line
+        for section in _context_sections(context, custom_instructions)
+        for line in section
+    ]
 
 
 def _nonempty_lines(text: str) -> list[str]:
     return [line.strip() for line in (text or "").splitlines() if line.strip()]
 
 
-def _template_body_lines(context: dict, custom_instructions: str | None = None) -> list[str]:
-    body = _context_lines(context, custom_instructions)
-    if not body:
-        body = ["오늘은 요약할 새 데이터가 없습니다."]
+def _template_body_sections(context: dict, custom_instructions: str | None = None) -> list[list[str]]:
+    sections = _context_sections(context, custom_instructions)
+    if not sections:
+        sections = [["오늘은 요약할 새 데이터가 없습니다."]]
     movers = context.get("movers") or {}
     kind = context.get("briefing_type") or DEFAULT_BRIEFING_TYPE
     if kind != "market_close" and context.get("nav") and not movers.get("top") and not movers.get("bottom"):
-        body.append("기여 종목: 종목별 종가 데이터가 비어 있어 세부 기여는 생략했습니다.")
-    if len(body) < MIN_USABLE_AI_LINES:
-        body.append("오늘 확인: 큰 변동의 원인을 종목별 가격·환율·현금흐름으로 나눠 점검하세요.")
-    return body
+        sections.append(["기여 종목: 종목별 종가 데이터가 비어 있어 세부 기여는 생략했습니다."])
+    if sum(len(section) for section in sections) < MIN_USABLE_AI_LINES:
+        sections.append(["오늘 확인: 큰 변동의 원인을 종목별 가격·환율·현금흐름으로 나눠 점검하세요."])
+    return sections
 
 
-_INCOMPLETE_LINE_SUFFIXES = ("(", "[", "{", "+", "-", "/", "·", ",", ":", "(+", "(-")
+_INCOMPLETE_LINE_SUFFIXES = ("(", "[", "{", "+", "-", "/", "·", "•", ",", ":", "(+", "(-")
 
 
 def _ai_text_rejection_reason(text: str, finish_reason: str | None = None) -> str | None:
@@ -1028,13 +1099,14 @@ def _briefing_stats(context: dict, text: str) -> dict:
 
 def render_template_briefing(context: dict, custom_instructions: str | None = None) -> str:
     """LLM 없이 컨텍스트만으로 만든 브리핑 — OpenRouter 장애 시에도 발송된다."""
-    body = _template_body_lines(context, custom_instructions)
+    sections = _template_body_sections(context, custom_instructions)
     title = context.get("briefing_title") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["title"]
-    return "\n".join([f"{title} ({context.get('date')})", *body])
+    header = f"{title} ({context.get('date')})"
+    return normalize_message_text(f"{header}\n\n{_sections_text(sections)}")
 
 
 def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
-    data = "\n".join(_context_lines(context, custom_instructions)) or "(데이터 없음)"
+    data = _sections_text(_context_sections(context, custom_instructions)) or "(데이터 없음)"
     custom = normalize_custom_instructions(custom_instructions)
     title = context.get("briefing_title") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["title"]
     name = context.get("briefing_name") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["name"]
@@ -1056,12 +1128,18 @@ def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
 {custom_block}
 
 위 데이터로 {name}을 작성하세요.
-- 첫 줄: "{title} ({context.get('date')})"
+- 첫 줄: "{title} ({context.get('date')})" — 그 다음은 빈 줄.
 - 브리핑 성격: {focus}
 - 구성 순서: {outline}
-- 금액은 숫자만 표시하고 통화 단위 '원'은 붙이지 마세요.
+- 형식: 섹션마다 "이모지 + 섹션 제목" 한 줄을 쓰고, 세부 항목은 다음 줄부터
+  "{BULLET}"로 시작하는 한 줄씩 나열하세요. 섹션과 섹션 사이에는 빈 줄 하나.
+- 한 줄에 여러 항목을 쉼표로 이어 붙이지 말고, 한 줄은 40자 이내로 짧게.
+- 숫자: 금액은 천 단위마다 콤마(예: 1,234,567), 1억 이상은 억/조 단위(예: 10.34억).
+  금액은 숫자만 표시하고 통화 단위 '원'은 붙이지 마세요.
+  등락률은 부호와 소수 둘째 자리까지(예: +1.23%).
+- 위 데이터의 숫자 표기를 그대로 옮기세요. 임의로 반올림하거나 단위를 바꾸지 마세요.
 - 사용자 추가 지시가 요구한 섹션은 데이터가 없더라도 '대상 없음' 또는 '현재 조회 불가'로 짧게 표시하세요.
-- 그 외 데이터가 없는 섹션은 건너뛰세요. 전체 10~15줄."""
+- 그 외 데이터가 없는 섹션은 건너뛰세요. 빈 줄을 빼고 전체 20줄 이내."""
 
 
 # ---------------------------------------------------------------------------
@@ -1099,7 +1177,9 @@ async def generate_briefing(google_sub: str, briefing_type: object = None) -> di
             model_profile=FEATURE,
             ok_if_content=True,
         )
-        text = (result.get("content") or "").strip()
+        # 목록 기호·빈 줄·천 단위 콤마는 여기서 통일 — 프롬프트만으로는 매번
+        # 같은 표기가 나오지 않는다.
+        text = normalize_message_text(result.get("content") or "")
         if text:
             rejection_reason = _ai_text_rejection_reason(text, result.get("finish_reason"))
             if rejection_reason is None:
@@ -1151,7 +1231,7 @@ async def generate_test_message(google_sub: str, briefing_type: object = None) -
     """Build the exact one-off message used by the UI's test-send button."""
     profile = briefing_profile(briefing_type)
     briefing = await generate_briefing(google_sub, profile["kind"])
-    text = f"🧪 {profile['name']} 테스트 발송\n" + briefing["text"]
+    text = f"🧪 {profile['name']} 테스트 발송\n\n{briefing['text']}"
     return {**briefing, "text": text}
 
 

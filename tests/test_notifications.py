@@ -928,6 +928,29 @@ class KakaoChannelTests(TempDbMixin):
         self.assertEqual("\n".join(chunks), text)
         self.assertTrue(all(not chunk.endswith("(+") for chunk in chunks))
 
+    async def test_split_memo_text_breaks_between_briefing_sections(self):
+        text = "\n\n".join([
+            "🌅 모닝 브리핑 (2026-07-29)",
+            "📊 어제 (2026-07-28)\n• 총평가 1,234,567\n• 전일 대비 +50,000 (+4.23%)",
+            "📈 상승 기여\n• 삼성전자 +1,234,567 (가격 +2.1%)\n• SK하이닉스 +812,345 (가격 +1.2%)",
+            "🌐 시장 지표\n• KOSPI: 2,900.12 (+0.5%)",
+        ])
+
+        chunks = kakao.split_memo_text(text, limit=120)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(chunk) <= 120 for chunk in chunks))
+        # 섹션 제목이 앞 메모 끝에 홀로 남지 않는다 — 항목과 같은 메모에 붙는다
+        for chunk in chunks:
+            self.assertFalse(chunk.splitlines()[-1].startswith(("📊", "📈", "🌐")))
+            self.assertTrue(chunk.strip() == chunk)
+        # 섹션 구분 빈 줄은 메모 안에서 유지된다
+        self.assertTrue(any("\n\n" in chunk for chunk in chunks))
+        self.assertEqual(
+            [line for chunk in chunks for line in chunk.splitlines() if line],
+            [line for line in text.splitlines() if line],
+        )
+
     async def test_send_ok_with_fresh_token(self):
         channel = {
             "enabled": True,

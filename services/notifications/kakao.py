@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from urllib.parse import urlencode
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 AUTH_BASE = "https://kauth.kakao.com"
 API_BASE = "https://kapi.kakao.com"
 MEMO_TEXT_MAX = 200  # Kakao default text template limit.
+_BLOCK_SPLIT_RE = re.compile(r"\n\s*\n")  # 빈 줄 = 브리핑 섹션 경계
 _APP_URL = "https://cantabile.tplinkdns.com:3691"
 
 
@@ -115,17 +117,10 @@ async def fetch_nickname(access_token: str) -> str | None:
         return None
 
 
-def split_memo_text(text: str, limit: int = MEMO_TEXT_MAX) -> list[str]:
-    """Split Kakao text templates without cutting normal briefing lines."""
-    src = str(text or "").strip()
-    if not src:
-        return []
-    chunks: list[str] = []
-    current = ""
-    for line in src.splitlines():
-        line = line.rstrip()
-        if not line:
-            continue
+def _pack_lines(block: str, limit: int, chunks: list[str], current: str) -> str:
+    """Last resort for a section too long for one memo — pack it line by line."""
+    for raw in block.splitlines():
+        line = raw.rstrip()
         while len(line) > limit:
             if current:
                 chunks.append(current)
@@ -139,6 +134,34 @@ def split_memo_text(text: str, limit: int = MEMO_TEXT_MAX) -> list[str]:
             if current:
                 chunks.append(current)
             current = line
+    return current
+
+
+def split_memo_text(text: str, limit: int = MEMO_TEXT_MAX) -> list[str]:
+    """Split Kakao text templates without cutting normal briefing lines.
+
+    Blank lines are the briefing's section separators, so we break between
+    sections first — a section header never ends up alone at the bottom of one
+    memo with its items in the next. Blank lines survive inside a chunk but not
+    at its edges, where the next memo bubble is the break.
+    """
+    src = str(text or "").strip()
+    if not src:
+        return []
+    chunks: list[str] = []
+    current = ""
+    for raw_block in _BLOCK_SPLIT_RE.split(src):
+        block = raw_block.strip("\n")
+        if not block.strip():
+            continue
+        candidate = block if not current else f"{current}\n\n{block}"
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+            current = ""
+        current = block if len(block) <= limit else _pack_lines(block, limit, chunks, current)
     if current:
         chunks.append(current)
     return chunks

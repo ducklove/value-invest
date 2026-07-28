@@ -31,6 +31,15 @@ from routes import internal
 from services import daily_briefing
 
 
+def _section_headers(text: str) -> list[str]:
+    """제목 줄만 추린다 — 첫 줄(브리핑 타이틀)과 '• ' 항목 줄, 빈 줄은 제외."""
+    return [
+        line
+        for line in text.splitlines()[1:]
+        if line.strip() and not line.startswith(daily_briefing.BULLET)
+    ]
+
+
 def _request(path: str = "/", headers: dict[str, str] | None = None, client_host: str = "127.0.0.1") -> Request:
     encoded = [
         (k.lower().encode("latin-1"), v.encode("latin-1"))
@@ -329,14 +338,14 @@ class BriefingContextTests(DailyBriefingHarness):
         }
 
         instructions = "해외 그룹의 성과와 야간선물 일간 상승률을 추가해줘."
-        lines = daily_briefing.render_template_briefing(ctx, instructions).splitlines()
+        text = daily_briefing.render_template_briefing(ctx, instructions)
 
-        self.assertTrue(lines[1].startswith("🇰🇷 국내 지수"))
-        self.assertTrue(lines[2].startswith("💰 수급 동향"))
-        self.assertTrue(lines[3].startswith("📊 오늘"))
-        text = "\n".join(lines)
+        self.assertEqual(
+            _section_headers(text)[:3],
+            ["🇰🇷 국내 지수", "💰 수급 동향", "📊 오늘 (2026-06-23)"],
+        )
         self.assertIn("입출금 제외", text)
-        self.assertNotIn("어제(", text)
+        self.assertNotIn("📊 어제", text)
         self.assertNotIn("최근 결산", text)
         self.assertNotIn("상승 기여", text)
         self.assertNotIn("하락 기여", text)
@@ -397,14 +406,16 @@ class BriefingContextTests(DailyBriefingHarness):
             "market": [],
         }
 
-        lines = daily_briefing.render_template_briefing(ctx).splitlines()
+        text = daily_briefing.render_template_briefing(ctx)
 
-        self.assertTrue(lines[1].startswith("🕘 장 마감 이후 리포트"))
-        self.assertTrue(lines[2].startswith("📊 오늘"))
-        text = "\n".join(lines)
+        self.assertEqual(
+            _section_headers(text)[:2],
+            ["🕘 장 마감 이후 변경", "📊 오늘 (2026-06-23)"],
+        )
+        self.assertIn("• 리포트 [SK하이닉스] 한국증권 · HBM 점검", text)
         self.assertIn("내일 주요 일정", text)
         self.assertIn("내일 시장 전망", text)
-        self.assertNotIn("어제(", text)
+        self.assertNotIn("📊 어제", text)
 
     async def test_night_context_uses_after_close_feed_window(self):
         await self._seed_user()
@@ -424,6 +435,79 @@ class BriefingContextTests(DailyBriefingHarness):
         expected_since = f"{date.today().isoformat()}T15:30:00"
         self.assertEqual(reviews.await_args.args[1], expected_since)
         self.assertEqual(entries.await_args.args[1], expected_since)
+
+
+class BriefingFormattingTests(unittest.TestCase):
+    """메신저 가독성 계약 — 섹션 줄나눔 + 큰 숫자 천 단위 콤마."""
+
+    def _context(self) -> dict:
+        return {
+            "date": "2026-07-29",
+            "briefing_type": "morning",
+            "briefing_title": "🌅 모닝 브리핑",
+            "nav": {"date": "2026-07-28", "total_value": 12_345_678,
+                    "change_krw": -234_567, "change_pct": -1.86},
+            "movers": {
+                "top": [
+                    {"stock_name": "삼성전자", "change_krw": 1_234_567, "change_pct": 2.1, "basis": "price"},
+                    {"stock_name": "SK하이닉스", "change_krw": 812_345, "change_pct": 1.2, "basis": "price"},
+                ],
+                "bottom": [{"stock_name": "현대차", "change_krw": -987_654, "change_pct": -1.4, "basis": "price"}],
+            },
+            "overseas_groups": [],
+            "filings": [],
+            "reports": [],
+            "calendar": [
+                {"time": "21:30", "flag": "🇺🇸", "event": "소비자물가지수(CPI)"},
+                {"time": "23:00", "flag": "🇺🇸", "event": "ISM 제조업"},
+            ],
+            "calendar_alerts": [],
+            "night_futures": None,
+            "market": ["- KOSPI: 2,900.12 (+0.5%)"],
+        }
+
+    def test_items_get_one_line_each_under_a_section_header(self):
+        text = daily_briefing.render_template_briefing(self._context())
+
+        self.assertIn("📈 상승 기여\n• 삼성전자 +1,234,567 (가격 +2.1%)\n• SK하이닉스 +812,345 (가격 +1.2%)", text)
+        self.assertIn("📊 어제 (2026-07-28)\n• 총평가 12,345,678\n• 전일 대비 -234,567 (-1.86%)", text)
+        self.assertIn("📅 오늘 주요 일정\n• 21:30 🇺🇸 소비자물가지수(CPI)\n• 23:00 🇺🇸 ISM 제조업", text)
+        # 시장 지표는 원본의 "- " 목록 기호 대신 같은 불릿으로 통일
+        self.assertIn("🌐 시장 지표\n• KOSPI: 2,900.12 (+0.5%)", text)
+        # 한 줄에 여러 종목/일정을 쉼표로 이어 붙이지 않는다
+        self.assertFalse([line for line in text.splitlines() if line.count("•") > 1])
+
+    def test_sections_are_separated_by_one_blank_line(self):
+        lines = daily_briefing.render_template_briefing(self._context()).splitlines()
+
+        self.assertEqual(lines[1], "")  # 타이틀 다음 줄
+        self.assertNotIn("", [lines[0], lines[-1]])
+        for index, line in enumerate(lines[:-1]):
+            if not line:  # 빈 줄 다음은 항상 섹션 제목 (연속 빈 줄 없음)
+                self.assertTrue(lines[index + 1])
+                self.assertFalse(lines[index + 1].startswith(daily_briefing.BULLET))
+
+    def test_format_thousands_only_touches_bare_large_integers(self):
+        cases = {
+            "총평가 123456789": "총평가 123,456,789",
+            "변동 -2345678": "변동 -2,345,678",
+            "매수 +1234567원": "매수 +1,234,567원",
+            "어제(2026-06-23) 21:30": "어제(2026-06-23) 21:30",
+            "종목 005930": "종목 005930",
+            "비율 0.12345": "비율 0.12345",
+            "이미 1,234,567": "이미 1,234,567",
+            "지수 2900": "지수 2900",
+        }
+        for source, expected in cases.items():
+            self.assertEqual(daily_briefing.format_thousands(source), expected, source)
+
+    def test_normalize_message_text_unifies_markdown_bullets_and_blank_runs(self):
+        raw = "🌅 모닝 브리핑\n- 총평가 123456789   \n\n\n* 전일 대비 -2345678\n"
+
+        self.assertEqual(
+            daily_briefing.normalize_message_text(raw),
+            "🌅 모닝 브리핑\n• 총평가 123,456,789\n\n• 전일 대비 -2,345,678",
+        )
 
 
 class GenerateBriefingTests(DailyBriefingHarness):
@@ -506,6 +590,33 @@ class GenerateBriefingTests(DailyBriefingHarness):
         self.assertEqual(rows[0]["ok"], 1)
         self.assertEqual(rows[0]["input_tokens"], 120)
         self.assertEqual(rows[0]["output_tokens"], 45)
+
+    async def test_llm_text_is_normalized_before_send(self):
+        """모델이 마크다운 목록·콤마 없는 숫자를 뱉어도 발송본은 규칙을 지킨다."""
+        await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "model": "test/model",
+            "choices": [{"message": {"content": (
+                "🌅 모닝 브리핑 (2026-06-09)\n"
+                "📊 어제 (2026-06-08)\n"
+                "- 총평가 1050000\n"
+                "- 전일 대비 +50000 (+5.00%)\n\n\n"
+                "🔎 오늘 확인: 환율 흐름 점검   "
+            )}}],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 45, "cost": 0.001},
+        }
+        with patch.object(daily_briefing, "build_briefing_context", new=AsyncMock(return_value=self._minimal_context())), \
+             patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=resp)):
+            briefing = await daily_briefing.generate_briefing("u1")
+
+        self.assertEqual(briefing["source"], "ai")
+        self.assertIn("• 총평가 1,050,000", briefing["text"])
+        self.assertIn("• 전일 대비 +50,000 (+5.00%)", briefing["text"])
+        self.assertNotIn("- 총평가", briefing["text"])
+        self.assertNotIn("\n\n\n", briefing["text"])
+        self.assertFalse(briefing["text"].endswith(" "))
 
     async def test_custom_instructions_are_added_to_llm_prompt(self):
         await self._seed_user("u1")
