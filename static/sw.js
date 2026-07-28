@@ -14,6 +14,8 @@
  * - /api/*: network-only — the SW never intercepts or caches API responses.
  * - ?v=-stamped static assets: cache-first. These URLs are immutable by
  *   construction (the hash changes on deploy, so a new URL is fetched).
+ *   배포마다 URL 이 통째로 바뀌므로 캐시는 최근 MAX_CACHED_ASSETS 개만 남기고,
+ *   저장 실패(용량 초과)는 응답에 영향을 주지 않는다 — 아래 cacheFirst 참고.
  * - manifest + icons: cache-first (small, safe to refresh via new cache
  *   name when this file changes).
  * - Everything else: passed through to the network untouched.
@@ -25,7 +27,13 @@
  */
 'use strict';
 
-const CACHE_NAME = 'vc-static-v1';
+const CACHE_NAME = 'vc-static-v2';
+
+// ?v= URL 은 배포마다 통째로 바뀐다 — 캐시에 계속 쌓기만 하면(배포 1회 = 자산 55개,
+// 약 1.1MB) 오리진 저장 용량이 작은 모바일에서 결국 한도를 넘고, 그때부터 cache.put
+// 이 실패한다. 그 실패가 응답까지 깨뜨리면 렌더 차단 CSS/JS 가 네트워크 오류로
+// 떨어져 흰 화면이 된다. 그래서 (1) 저장 실패는 삼키고 (2) 최근 N개만 남긴다.
+const MAX_CACHED_ASSETS = 120; // ≈ 최근 배포 2회분
 
 // Small, stable shell extras worth precaching for the install prompt.
 const PRECACHE_URLS = [
@@ -72,13 +80,26 @@ function isPrecachedShellExtra(url) {
   return url.origin === self.location.origin && PRECACHE_URLS.includes(url.pathname);
 }
 
+// 오래된 항목부터 버려 캐시 크기를 묶어 둔다(cache.keys() 는 삽입 순서).
+async function trimCache(cache) {
+  const keys = await cache.keys();
+  const excess = keys.length - MAX_CACHED_ASSETS;
+  if (excess <= 0) return;
+  await Promise.all(keys.slice(0, excess).map((key) => cache.delete(key)));
+}
+
 async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) return cached;
   const response = await fetch(request);
+  // 캐싱은 부가 기능이다 — 용량 초과 등으로 실패해도 응답은 그대로 돌려준다.
+  // (여기서 예외가 새면 respondWith 가 거부되면서 그 자산이 통째로 로드 실패한다.)
   if (response && response.ok) {
-    const cache = await caches.open(CACHE_NAME);
-    await cache.put(request, response.clone());
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, response.clone());
+      await trimCache(cache);
+    } catch (e) { /* 캐시 저장 실패는 무시 */ }
   }
   return response;
 }

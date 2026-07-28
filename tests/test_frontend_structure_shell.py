@@ -170,6 +170,13 @@ def test_pwa_service_worker_keeps_conservative_cache_contract():
     # Versioned cache name + activate-time cleanup of old caches.
     assert "const CACHE_NAME = 'vc-static-v" in sw
     assert "keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))" in sw
+    # ?v= URL 은 배포마다 새로 생기므로 캐시는 반드시 상한이 있어야 하고, 저장 실패가
+    # 응답을 깨뜨리면 안 된다 — 렌더 차단 자산이 통째로 로드 실패해 흰 화면이 된다.
+    assert "MAX_CACHED_ASSETS" in sw
+    assert "trimCache" in sw
+    cache_first_body = sw.split("async function cacheFirst(", 1)[1].split("\n}", 1)[0]
+    assert "try {" in cache_first_body and "catch" in cache_first_body
+    assert cache_first_body.index("try {") < cache_first_body.index("cache.put")
     # Guard against strategy regressions: no stale-while-revalidate, no
     # caching inside the navigation branch.
     assert "staleWhileRevalidate" not in sw
