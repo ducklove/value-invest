@@ -108,6 +108,41 @@ def test_mobile_sidebar_overrides_live_only_in_superset_media_block():
     assert css.count("border-right: none;") == 1
     assert css.count("width: 100%;\n    border-right: none;") == 1
 
+def test_mobile_portfolio_touch_targets_and_tablet_table_scroll_contract():
+    shell_css = (STATIC / "css" / "mobile-shell.css").read_text(encoding="utf-8")
+
+    assert ".pf-currency-btn," in shell_css
+    assert ".pf-target-clear," in shell_css
+    assert "min-height: 44px" in shell_css
+    assert "@media (min-width: 761px) and (max-width: 900px)" in shell_css
+    assert ".pf-table-wrap { overflow-x: auto; }" in shell_css
+    assert ".pf-table { min-width: 1180px; }" in shell_css
+
+def test_simple_mode_table_height_is_measured_not_a_constant():
+    # 간편 모드 표 박스가 화면보다 길면 페이지가 스크롤되면서 맨 위 요약 카드가
+    # 밀려 올라간다. 위 크롬 높이는 터치영역·safe-area 로 달라져 상수로 못 맞추므로
+    # JS 실측값(--pf-simple-table-max)이 우선하고 calc 는 폴백으로만 남는다.
+    css = (STATIC / "css" / "mobile-overrides.css").read_text(encoding="utf-8")
+    shell_js = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+
+    assert "--pf-simple-table-max: calc(100dvh - 182px);" in css
+    assert "max-height: var(--pf-simple-table-max);" in css
+    assert "function pfSyncSimpleTableHeight()" in shell_js
+    assert "--pf-simple-table-max" in shell_js
+    # 리사이즈·회전·탭 복귀 뒤에도 다시 재도록 예약 훅이 걸려 있어야 한다.
+    assert shell_js.count("pfScheduleSimpleTableHeightSync()") >= 2
+
+def test_mobile_initial_entry_holds_page_scroll_at_top():
+    # 로그인 상태 모바일 첫 진입에서 요약(집계 숫자)이 가려지지 않으려면, 데이터가
+    # 채워진 뒤의 늦은 위치 복원까지 되돌려야 한다(scrollRestoration 만으로는 부족).
+    app_main = (JS / "app-main.js").read_text(encoding="utf-8")
+    shell_js = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+
+    assert "function holdPageScrollTop()" in shell_js
+    assert "history.scrollRestoration = 'manual'" in app_main
+    assert "holdPageScrollTop()" in app_main
+    assert "event.persisted" in app_main
+
 def test_pwa_service_worker_keeps_conservative_cache_contract():
     sw = (STATIC / "sw.js").read_text(encoding="utf-8")
     app_main = (JS / "app-main.js").read_text(encoding="utf-8")

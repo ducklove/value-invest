@@ -83,6 +83,9 @@ if (typeof document !== 'undefined') {
 
 function renderPortfolio(options = {}) {
   const summaryOnly = !!(options && options.summaryOnly);
+  // 요약 카드가 채워지면 표 박스의 시작 위치가 바뀐다 — 간편 모드 높이를 다시 실측
+  // (다음 프레임에 한 번만 도므로 어느 경로로 빠져나가든 안전하다).
+  if (typeof pfScheduleSimpleTableHeightSync === 'function') pfScheduleSimpleTableHeightSync();
   if (!summaryOnly) _pfInitSortableHeaders();
   _pfRenderColToggles();
   const tbody = document.getElementById('pfBody');

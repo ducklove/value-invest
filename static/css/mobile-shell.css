@@ -156,6 +156,26 @@
   .mv-chg { min-width: 56px; }
   .mv-row { gap: 6px; padding: 8px 2px; font-size: 13.5px; }
   .mv-name { font-weight: 600; }
+
+  /* 손가락 조작이 잦은 포트폴리오 전환·표시 옵션은 최소 44px 터치 영역을
+     확보한다. 표 안의 작은 삭제 버튼도 실제 영역을 키워 오조작을 줄인다. */
+  .pf-tab,
+  .pf-simple-toggle,
+  .pf-action-toggle,
+  .pf-ws-toggle,
+  .pf-currency-btn,
+  .pf-target-clear,
+  .pf-search-clear {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* 761~900px 태블릿은 모바일 간편 모드가 강제되지 않는다. 17열 표를 숨김
+   overflow 안에 가두지 않고 컨테이너 내부에서 명시적으로 스크롤시킨다. */
+@media (min-width: 761px) and (max-width: 900px) {
+  .pf-table-wrap { overflow-x: auto; }
+  .pf-table { min-width: 1180px; }
 }
 
 /* 헤더 높이를 참조하는 포트폴리오 간편모드의 sticky 탭바 오프셋을
@@ -224,4 +244,3 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   outline: none;
 }
 /* 모션 최소화(prefers-reduced-motion) 규칙은 위 ST-05 블록에 통합됐다. */
-

@@ -58,6 +58,10 @@ function pfSwitchTab(tab) {
   if (householdTab) householdTab.style.display = tab === 'household' ? '' : 'none';
   const portfolioView = document.getElementById('portfolioView');
   if (portfolioView) portfolioView.classList.toggle('pf-household-active', tab === 'household');
+  // 보유종목 탭이 다시 보이면 간편 모드 표 박스 높이를 재실측(숨은 동안엔 0×0).
+  if (tab === 'holdings' && typeof pfScheduleSimpleTableHeightSync === 'function') {
+    pfScheduleSimpleTableHeightSync();
+  }
   const activeEl = tab === 'holdings' ? holdingsTab : tab === 'performance' ? performanceTab : householdTab;
   if (!activeEl) return;
   activeEl.classList.remove('fade-in');

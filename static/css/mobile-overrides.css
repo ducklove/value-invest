@@ -246,10 +246,14 @@ body.pf-mobile-simple .pf-col-toggle-wrap {
   display: none !important;
 }
 body.pf-mobile-simple .pf-table-wrap {
-  /* 100dvh 에서 위쪽 크롬(헤더+요약+탭 ≈ 125px)과 하단 탭바(≈53px)를 제외해
-     테이블 박스가 하단 탭바 바로 위까지 정확히 채우도록 한다. 값이 과하면 박스
-     아래 공백이 생기고, 모자라면 페이지가 스크롤된다(100dvh 라 화면 높이에 자동 맞춤). */
-  max-height: calc(100dvh - 182px);
+  /* 테이블 박스는 하단 탭바 바로 위까지만 채워야 한다. 값이 과하면 박스 아래 공백이
+     생기고, 모자라면 마지막 행이 탭바에 가리면서 페이지 자체가 스크롤돼 맨 위 요약
+     카드가 밀려 올라간다. 위쪽 크롬(헤더+요약+탭바) 높이는 터치영역·글꼴·safe-area 로
+     달라져 상수로는 못 맞춘다 — portfolio-shell.js 의 pfSyncSimpleTableHeight 가
+     실측해 --pf-simple-table-max 를 인라인으로 덮어쓰고, 여기 calc 는 그 전/실패 시의
+     폴백 기본값이다. */
+  --pf-simple-table-max: calc(100dvh - 182px);
+  max-height: var(--pf-simple-table-max);
   overflow: auto;
   border-radius: var(--radius-md);
   overscroll-behavior: contain;
@@ -371,7 +375,10 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
     display: none !important;
   }
   body.pf-mobile-simple .pf-table-wrap {
-    max-height: calc(100dvh - 150px);
+    /* 폴백 상수만 가로 화면용으로 낮춘다 — max-height 선언 자체는 위 간편 모드
+       규칙 한 곳에 두고(실측값 --pf-simple-table-max 를 인라인으로 덮어씀),
+       여기서 상수를 또 max-height 로 선언하면 실측값이 덮여버린다. */
+    --pf-simple-table-max: calc(100dvh - 150px);
   }
   body.pf-mobile-simple .pf-nav-chart-container.pf-nav-tall,
   body.pf-mobile-simple .pf-nav-chart-container.pf-nav-short,

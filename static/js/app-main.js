@@ -238,6 +238,8 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     syncAuthState({ refreshRecentList: true, refreshPreference: true });
     _refreshActivePortfolioTodayState();
+    // 숨어 있는 동안에는 요소 크기를 잴 수 없어 간편 모드 표 높이가 CSS 폴백 상태다.
+    if (typeof pfScheduleSimpleTableHeightSync === 'function') pfScheduleSimpleTableHeightSync();
   }
 });
 

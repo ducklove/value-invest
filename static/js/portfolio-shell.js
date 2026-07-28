@@ -127,6 +127,58 @@ function _pfApplySimpleMode(enabled, { persist = false } = {}) {
     toggle.textContent = active ? '일반' : '간편';
     toggle.title = active ? '일반 보기' : '모바일 간편 보기';
   }
+  pfScheduleSimpleTableHeightSync();
+}
+
+// 간편 모드 표 박스는 화면 하단(고정 탭바 바로 위)까지만 차야 한다. 남으면 표 아래에
+// 빈 띠가 생기고, 넘치면 마지막 행이 탭바에 가리는 동시에 페이지 자체에 몇십 px 짜리
+// 스크롤이 생겨 맨 위 요약 카드(집계 숫자)가 밀려 올라간다.
+// CSS 상수(calc(100dvh - 182px))만으로는 위/아래 크롬 높이 변화 — 터치영역 44px 확보로
+// 커진 pf-tab-bar, iOS safe-area 만큼 두꺼워지는 하단 탭바 — 를 따라가지 못해 실제로
+// 60px 가까이 어긋났다. 그래서 실측값을 CSS 변수로 넣고 상수는 폴백으로만 둔다.
+// 하한은 "가로모드에서도 실측값이 그대로 쓰일 만큼" 낮게 둔다 — 하한이 실측값보다
+// 크면 그만큼 표가 하단 탭바에 다시 가린다(가로 375px 기준 실측 ≈ 144px).
+const PF_SIMPLE_TABLE_MIN_PX = 120;
+const PF_SIMPLE_TABLE_GAP_PX = 4;     // 하단 탭바와 맞닿지 않을 만큼의 여백
+let _pfSimpleTableSyncFrame = 0;
+
+function _pfVisibleRect(el) {
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  // display:none 인 요소는 0×0 — 숨은 탭/데스크톱 폭에서의 오측정을 여기서 걸러낸다.
+  return (rect.width > 0 || rect.height > 0) ? rect : null;
+}
+
+function pfSyncSimpleTableHeight() {
+  const wrap = document.querySelector('#pfHoldingsTab .pf-table-wrap');
+  if (!wrap) return;
+  const rect = PfStore.prefs.simpleMode ? _pfVisibleRect(wrap) : null;
+  if (!rect) {
+    wrap.style.removeProperty('--pf-simple-table-max');
+    return;
+  }
+  const tabbar = _pfVisibleRect(document.querySelector('.mobile-tabbar'));
+  const top = rect.top + (window.scrollY || window.pageYOffset || 0);
+  const available = Math.round(window.innerHeight - top - (tabbar ? tabbar.height : 0) - PF_SIMPLE_TABLE_GAP_PX);
+  wrap.style.setProperty('--pf-simple-table-max', `${Math.max(PF_SIMPLE_TABLE_MIN_PX, available)}px`);
+}
+
+// 호출부는 DOM 을 막 바꾼 직후일 수 있어 레이아웃이 잡힌 다음에 한 번만 실측한다
+// (같은 프레임의 여러 호출은 하나로 합쳐진다). 숨은 탭에서는 rAF 가 돌지 않으므로
+// 타이머로 대신한다 — 그때는 rect 가 0 이라 CSS 폴백으로 돌아갔다가, 화면에 다시
+// 나타날 때(visibilitychange) 재실측된다.
+function pfScheduleSimpleTableHeightSync() {
+  if (_pfSimpleTableSyncFrame) return;
+  _pfSimpleTableSyncFrame = 1;
+  const run = () => {
+    _pfSimpleTableSyncFrame = 0;
+    pfSyncSimpleTableHeight();
+  };
+  if (typeof requestAnimationFrame === 'function' && !document.hidden) {
+    requestAnimationFrame(run);
+  } else {
+    setTimeout(run, 0);
+  }
 }
 
 function pfSyncSimpleModeForViewport() {
@@ -319,6 +371,8 @@ function switchView(view, options = {}) {
   if (view === 'investing' && typeof loadInvestingDashboard === 'function') {
     loadInvestingDashboard();
   } else if (view === 'portfolio') {
+    // 숨어 있던 동안에는 실측이 불가능(0×0)했으므로 보이게 된 지금 다시 잰다.
+    pfScheduleSimpleTableHeightSync();
     loadPortfolio();
   } else if (view === 'nps') {
     loadNpsView();
