@@ -337,6 +337,37 @@ function switchView(view, options = {}) {
   }
 }
 
+// 진입 직후 몇 차례에 걸쳐 최상단을 유지할 시점(ms).
+const PF_SCROLL_TOP_HOLD_STEPS_MS = [60, 200, 500, 1000];
+
+// 모바일 첫 진입은 반드시 최상단에서 시작해야 한다 — 포트폴리오 요약(집계 숫자)이
+// 화면 맨 위라 조금만 밀려도 가장 먼저 가려진다.
+//
+// scrollTo(0, 0) 한 번으로는 부족했다. 진입 시점에는 표가 아직 비어 있어 문서가
+// 화면보다 짧고(=스크롤할 여지가 없어 호출이 사실상 무의미), 정작 데이터가 채워져
+// 문서가 길어진 뒤에 모바일 브라우저의 위치 복원(탭 되살리기·bfcache·iOS 백그라운드
+// 복귀)이 이전 스크롤을 되살린다. history.scrollRestoration='manual' 은 새로고침·
+// 히스토리 이동만 막을 뿐 이 경로들은 막지 못한다.
+//
+// 그래서 짧은 구간 동안 몇 번 더 되돌리되, 사용자가 먼저 손을 대면(스크롤·터치·키)
+// 즉시 물러난다 — 의도적으로 내려본 화면을 도로 끌어올리지 않기 위해서다.
+function holdPageScrollTop() {
+  if (typeof window === 'undefined' || typeof window.scrollTo !== 'function') return;
+  const events = ['touchstart', 'wheel', 'pointerdown', 'keydown'];
+  const timers = [];
+  const release = () => {
+    while (timers.length) clearTimeout(timers.pop());
+    events.forEach(type => window.removeEventListener(type, release));
+  };
+  const toTop = () => {
+    if ((window.scrollY || window.pageYOffset || 0) !== 0) window.scrollTo(0, 0);
+  };
+  events.forEach(type => window.addEventListener(type, release, { passive: true }));
+  toTop();
+  PF_SCROLL_TOP_HOLD_STEPS_MS.forEach(delay => timers.push(setTimeout(toTop, delay)));
+  timers.push(setTimeout(release, PF_SCROLL_TOP_HOLD_STEPS_MS[PF_SCROLL_TOP_HOLD_STEPS_MS.length - 1] + 1));
+}
+
 // nps-tracker 임베드 URL — 임베드 모드(embed=true) + 현재 앱 테마를 쿼리로 전달.
 function _npsFrameSrc() {
   const cfg = window.APP_CONFIG && window.APP_CONFIG.integrations && window.APP_CONFIG.integrations.npsTracker;

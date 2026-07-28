@@ -196,8 +196,13 @@ async function initApp() {
     // Mobile + logged in → default to portfolio (경로가 명시된 경우
     // 이 기본값은 덮지 않음).
     switchView('portfolio', { skipHistory: true });
-    // 포트폴리오 데이터가 비동기로 채워진 뒤에도 화면을 최상단에서 시작하도록 보정.
-    requestAnimationFrame(() => window.scrollTo(0, 0));
+  }
+  // 모바일 첫 진입은 최상단에서 — 포트폴리오 요약(집계 숫자)이 화면 맨 위라
+  // 조금만 밀려 있어도 가장 먼저 가려진다. 기본값 진입과 경로 진입(/portfolio)
+  // 모두 대상이고, 데이터가 채워진 뒤의 뒤늦은 위치 복원까지 되돌린다
+  // (holdPageScrollTop 주석 참고). code= 딥링크는 분석 결과로 가는 흐름이라 제외.
+  if (!code && typeof isCompactMobileViewport === 'function' && isCompactMobileViewport()) {
+    holdPageScrollTop();
   }
 }
 
@@ -211,9 +216,17 @@ window.addEventListener('popstate', () => {
   switchView(view, { skipHistory: true, allowMobileLockOverride: true });
 });
 
-window.addEventListener('pageshow', () => {
+window.addEventListener('pageshow', (event) => {
   syncAuthState({ refreshRecentList: true, refreshPreference: true });
   _refreshActivePortfolioTodayState();
+  // bfcache 로 되살아난 페이지는 브라우저가 이전 스크롤 위치를 그대로 안고 돌아온다
+  // (문서를 새로 만들지 않으므로 scrollRestoration='manual' 이 개입하지 못한다).
+  // 앱 내 탭 이동은 switchView 가 이미 최상단으로 보내므로, 여기선 외부에서 되돌아온
+  // 경우만 맞춘다 — 모바일에서 요약이 가려진 채 열리는 마지막 경로.
+  if (event && event.persisted
+      && typeof isCompactMobileViewport === 'function' && isCompactMobileViewport()) {
+    holdPageScrollTop();
+  }
 });
 
 window.addEventListener('focus', () => {
