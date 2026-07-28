@@ -14,6 +14,7 @@ URLs or server-side environment variables instead of copying their code.
 | `buybacks` | `https://github.com/ducklove/buybacks` | — | Links the analysis-tools card to the buybacks dashboard and summarizes published holding snapshots by treasury-stock holding ratio. Exposes `baseUrl` only. |
 | `goldGap` | `https://github.com/ducklove/gold_gap` | `../gold_gap` | Links `KRX_GOLD` and `CRYPTO_BTC` portfolio rows to the gold/bitcoin gap dashboard. |
 | `npsTracker` | `https://github.com/ducklove/nps-tracker` | — | Embeds the NPS domestic-equity portfolio dashboard in the NPS tab via iframe and summarizes `current.json` for the 투자정보 insight card. Exposes `baseUrl` only. |
+| `eiayn` | `https://github.com/ducklove/eiayn` | `../eiayn` | Links ETF rows and the daily recommendation card to ETF analysis via `?code=` and summarizes `data/rankings.json`. Visual theme uses `?theme=light|dark`; ETF category filters use `?etf_theme=`. |
 | `kisProxy` | `https://github.com/ducklove/kis-proxy` | `../kis-proxy` | Used server-side by `kis_proxy_client.py` through `KIS_PROXY_BASE_URL`. |
 
 > `finance-pi` (`../finance-pi`, Raspberry Pi 데이터레이크 `:8400`)는 위 integration
@@ -49,6 +50,7 @@ URLs or server-side environment variables instead of copying their code.
 - SPAC stocks open `spacHunter` with `?code=<spac-code>`.
 - `KRX_GOLD` opens `goldGap` with `?asset=gold`.
 - `CRYPTO_BTC` opens `goldGap` with `?asset=bitcoin`.
+- Covered domestic and foreign ETFs open `eiayn` with `?code=<ticker>`.
 
 ## Server-side External Insights
 
@@ -63,6 +65,7 @@ Results are cached ~15 minutes and each fetch fails independently:
 - `spacHunter`: `current.json` (branch `main`) — deepest discount-to-offer SPACs.
 - `npsTracker`: `current.json` (branch `main`) — National Pension Service domestic-equity holdings by portfolio weight (top), NAV, and total value.
 - `buybacks`: `data/buybacks/holding_snapshots.json` — latest common-stock treasury holding ratios (top).
+- `eiayn`: `data/rankings.json` — deterministic daily picks from the AIYN top-100 universe, enriched with daily quote changes by the hub.
 
 This path needs neither local config nor the `/admin.html` config writer; it only
 needs each dashboard's public GitHub Pages / raw content to be reachable.
