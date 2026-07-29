@@ -324,6 +324,11 @@ function switchView(view, options = {}) {
   const lockedView = options.allowMobileLockOverride ? null : _mobileFixedView();
   if (lockedView && view !== lockedView) view = lockedView;
   PfStore.activeView = view;
+  // 모달을 연 채로 화면을 바꾸는 경로가 여럿 있다(인사이트 모달의 "분석 화면"
+  // 버튼, 투자일지 카드의 종목 링크 등). 모달 마크업은 자기 화면 안에 있어
+  // 화면과 함께 가려지지만 body 의 스크롤 잠금은 남아 새 화면에서 휠·스크롤바가
+  // 모두 죽는다. 전환 시점에 모달 상태를 확실히 되감는다.
+  if (typeof closeAllManagedModals === 'function') closeAllManagedModals();
   // 브라우저 히스토리 동기화 — 이게 없으면 탭 전환은 DOM 만 바뀌고 URL/히스토리는 그대로라
   // 뒤로가기를 누르면 이전 탭이 아니라 앱 밖으로 나가버린다. skipHistory 는 (a) 최초 진입
   // 라우팅(app-main.js initApp, 이미 그 URL에 있으므로 다시 쓸 필요 없음)과 (b) popstate

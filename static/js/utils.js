@@ -411,8 +411,13 @@ function openManagedModal(modalOrId, options = {}) {
   const modal = _managedModalElement(modalOrId);
   if (!modal) return null;
   const existingIndex = _managedModalStack.findIndex(entry => entry.modal === modal);
-  if (existingIndex >= 0) _managedModalStack.splice(existingIndex, 1);
-  if (!_managedModalStack.length) {
+  // 이미 열려 있는 모달을 다시 여는 경우(같은 모달 재사용 — 예: 차트 카드를 바꿔가며
+  // 확대) 는 "첫 모달" 취급을 하면 안 된다. 아래에서 스택에서 빼는 순간 길이가 0 이
+  // 되므로, 그 상태로 body.style.overflow 를 다시 저장하면 이미 잠긴 'hidden' 이
+  // "원래 값" 으로 굳어 닫아도 스크롤이 살아나지 않는다.
+  const wasAlreadyOpen = existingIndex >= 0;
+  if (wasAlreadyOpen) _managedModalStack.splice(existingIndex, 1);
+  if (!_managedModalStack.length && !wasAlreadyOpen) {
     document.addEventListener('keydown', _managedModalKeydown);
     _managedModalBodyOverflow = document.body.style.overflow || '';
     if (options.lockScroll !== false) document.body.style.overflow = 'hidden';
@@ -448,6 +453,30 @@ function closeManagedModal(modalOrId, options = {}) {
       entry.previousFocus.focus({ preventScroll: true });
     } catch (_) {
       entry.previousFocus.focus();
+    }
+  }
+}
+
+// 열려 있는 모달을 전부 닫는다 — 화면(뷰) 자체가 바뀔 때 쓴다.
+//
+// 모달 마크업은 대부분 자기 화면 컨테이너 안에 있어(예: #pfAssetInsightModal 은
+// #portfolioView 안), 화면을 전환하면 조상이 display:none 이 되며 눈앞에서는
+// 사라진다. 하지만 openManagedModal 이 걸어둔 body.style.overflow='hidden' 과
+// 스택/키다운 핸들러는 그대로 남는다 — 결과적으로 새 화면에서 휠도 스크롤바도
+// 죽는다(모달 안의 "분석 화면" 버튼 → 종목분석 이동이 실제 재현 경로였다).
+// 화면 전환은 사용자가 모달을 떠난다는 뜻이므로 포커스는 되돌리지 않는다.
+function closeAllManagedModals() {
+  // closeManagedModal 이 스택을 못 줄이는 상황(예: 이미 제거된 모달)에서도
+  // 무한 루프에 빠지지 않도록 길이가 줄지 않으면 중단한다.
+  while (_managedModalStack.length) {
+    const before = _managedModalStack.length;
+    closeManagedModal(_managedModalStack[before - 1].modal, { restoreFocus: false });
+    if (_managedModalStack.length >= before) {
+      _managedModalStack.length = 0;
+      document.removeEventListener('keydown', _managedModalKeydown);
+      if (_managedModalBodyOverflow !== null) document.body.style.overflow = _managedModalBodyOverflow;
+      _managedModalBodyOverflow = null;
+      break;
     }
   }
 }
