@@ -67,20 +67,57 @@ async def _save_time_quote_price(stock_code: str) -> float | None:
     return _num((quote or {}).get("price"))
 
 
-async def _holding_value_per_share(stock_code: str, *, quote_price=None) -> float | None:
-    """지주/보유지분 NAV per share — snapshot value or live subsidiary quotes."""
-    fetch_price = quote_price or _quote_price
-    meta = (integrations.build_public_integrations().get("holdingValue") or {}).get("meta") or {}
-    item = meta.get(stock_code)
-    if not isinstance(item, dict):
-        return None
-    snap = _num(item.get("holdingValuePerShare"))
-    if snap is not None and snap > 0:
-        return snap
+def holding_value_meta_map() -> dict[str, dict]:
+    """holdingValue 연계 프로젝트의 종목별 메타(자회사·주식수·스냅샷).
 
-    subsidiaries = item.get("subsidiaries") or []
-    if not subsidiaries:
+    ``build_public_integrations`` 는 연계 프로젝트 파일을 매번 읽으므로, 여러
+    종목을 훑는 쪽(알림 평가 패스)은 이 맵을 한 번만 받아 재사용한다.
+    """
+    try:
+        meta = (integrations.build_public_integrations().get("holdingValue") or {}).get("meta") or {}
+    except Exception as exc:
+        logger.info("holding value meta unavailable: %s", exc)
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def holding_value_meta(stock_code: str) -> dict | None:
+    item = holding_value_meta_map().get(stock_code)
+    return item if isinstance(item, dict) else None
+
+
+async def holding_value_per_share(
+    stock_code: str,
+    *,
+    meta: dict | None = None,
+    quote_price=None,
+    prefer_snapshot: bool = False,
+) -> float | None:
+    """지주/보유지분 NAV per share — 자회사 라이브 시세 우선, 스냅샷 폴백.
+
+    화면(portfolio-actions.js ``_holdingValueForItem``)과 같은 우선순위다.
+    스냅샷(연계 프로젝트 current.json)은 마지막 배치 시각의 값이라 장중에는
+    화면값과 어긋나므로, 자회사 시세를 모두 얻을 수 있으면 그쪽을 쓴다.
+
+    ``prefer_snapshot`` 은 저장 시점 폴백용 — 편집 저장을 자회사 시세 조회로
+    붙잡지 않으려고 스냅샷이 있으면 그대로 쓴다(화면이 곧 라이브로 재평가).
+    """
+    item = meta if isinstance(meta, dict) else holding_value_meta(stock_code)
+    if not item:
         return None
+    snapshot = _num(item.get("holdingValuePerShare"))
+    snapshot = snapshot if snapshot and snapshot > 0 else None
+    if prefer_snapshot and snapshot is not None:
+        return snapshot
+
+    total_shares = _num(item.get("totalShares"))
+    treasury = _num(item.get("treasuryShares")) or 0
+    free_shares = (total_shares or 0) - treasury
+    subsidiaries = item.get("subsidiaries") or []
+    if not subsidiaries or free_shares <= 0:
+        return snapshot
+
+    fetch_price = quote_price or _quote_price
 
     async def _sub_value(sub: dict) -> float | None:
         code = str(sub.get("code") or "").strip()
@@ -92,12 +129,9 @@ async def _holding_value_per_share(stock_code: str, *, quote_price=None) -> floa
 
     values = await asyncio.gather(*(_sub_value(s) for s in subsidiaries))
     if any(v is None for v in values):
-        return None
-    total_shares = _num(item.get("totalShares"))
-    treasury = _num(item.get("treasuryShares")) or 0
-    free_shares = (total_shares or 0) - treasury
+        return snapshot
     sub_total = sum(float(v) for v in values if v is not None)
-    return sub_total / free_shares if free_shares > 0 and sub_total > 0 else None
+    return sub_total / free_shares if sub_total > 0 else snapshot
 
 
 async def resolve_formula_target(stock_code: str, formula: str, avg_price) -> float | None:
@@ -129,7 +163,7 @@ async def resolve_formula_target(stock_code: str, formula: str, avg_price) -> fl
         if "EPS" in variables:
             values["EPS"] = _num(basis.get("eps"))
     if "보유지분" in variables:
-        values["보유지분"] = await _holding_value_per_share(stock_code)
+        values["보유지분"] = await holding_value_per_share(stock_code)
     if "본주가격" in variables:
         common = (
             common_stock_code(stock_code)
@@ -184,8 +218,8 @@ async def resolve_formula_target_at_save(stock_code: str, formula: str, avg_pric
             values["EPS"] = _num(basis.get("eps"))
 
     if "보유지분" in variables:
-        values["보유지분"] = await _holding_value_per_share(
-            stock_code, quote_price=_save_time_quote_price
+        values["보유지분"] = await holding_value_per_share(
+            stock_code, quote_price=_save_time_quote_price, prefer_snapshot=True
         )
 
     if "본주가격" in variables:

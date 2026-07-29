@@ -95,6 +95,43 @@ def test_build_public_integrations_reads_sibling_project_configs(tmp_path):
     assert gold["updatedAt"] == "2026-04-25 09:00 KST"
 
 
+def test_holding_value_snapshot_reads_current_json(tmp_path):
+    """hodling-value 는 현재 스냅샷을 current.json 으로 낸다 — 구 current.js 만
+    읽으면 지분가치 스냅샷이 통째로 비어 목표가 폴백이 사라진다."""
+    holding_dir = tmp_path / "hodling-value"
+    holding_dir.mkdir()
+    (holding_dir / "config.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "samsung_life",
+                    "holdingName": "삼성생명",
+                    "holdingTicker": "032830.KS",
+                    "holdingTotalShares": 200_000_000,
+                    "holdingTreasuryShares": 0,
+                    "subsidiaries": [{"name": "삼성전자", "ticker": "005930.KS", "sharesHeld": 503_905_000}],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (holding_dir / "current.json").write_text(
+        json.dumps(
+            {
+                "lastUpdated": "2026-07-29 09:12:11",
+                "pairs": [{"id": "samsung_life", "holdingValue": 1_557_567.8, "quoteSource": "kis_proxy"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    holding = integrations.build_public_integrations(workspace_root=tmp_path)["holdingValue"]
+
+    # 1,557,567.8억원 / 2억주 = 778,783.9원
+    assert holding["meta"]["032830"]["holdingValuePerShare"] == 778_783.9
+    assert holding["meta"]["032830"]["holdingValueUpdatedAt"] == "2026-07-29 09:12:11"
+
+
 def test_public_integrations_do_not_expose_local_paths(tmp_path):
     config = integrations.build_app_config(workspace_root=tmp_path)
 

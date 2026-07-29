@@ -43,6 +43,37 @@ class ResolveFormulaTargetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value, 700000)
 
 
+class HoldingValuePerShareTests(unittest.IsolatedAsyncioTestCase):
+    """지분가치/주 — 자회사 라이브 시세 우선, 연계 프로젝트 스냅샷 폴백(화면과 동일)."""
+
+    META = {
+        "subsidiaries": [{"code": "005930", "sharesHeld": 100}],
+        "totalShares": 10,
+        "treasuryShares": 0,
+        "holdingValuePerShare": 500000.0,
+    }
+
+    async def test_live_subsidiary_quotes_win_over_snapshot(self):
+        with patch.object(tr, "_quote_price", new=AsyncMock(return_value=70000.0)):
+            value = await tr.holding_value_per_share("032830", meta=self.META)
+        self.assertEqual(value, 700000)  # 스냅샷 500,000 이 아니라 라이브
+
+    async def test_snapshot_is_used_when_a_subsidiary_quote_is_missing(self):
+        with patch.object(tr, "_quote_price", new=AsyncMock(return_value=None)):
+            value = await tr.holding_value_per_share("032830", meta=self.META)
+        self.assertEqual(value, 500000.0)
+
+    async def test_none_when_neither_live_nor_snapshot_available(self):
+        meta = {**self.META, "holdingValuePerShare": None}
+        with patch.object(tr, "_quote_price", new=AsyncMock(return_value=None)):
+            self.assertIsNone(await tr.holding_value_per_share("032830", meta=meta))
+
+    async def test_unknown_code_has_no_meta(self):
+        with patch.object(tr.integrations, "build_public_integrations", return_value={}):
+            self.assertIsNone(tr.holding_value_meta("005930"))
+            self.assertIsNone(await tr.holding_value_per_share("005930"))
+
+
 class ResolveFormulaTargetAtSaveTests(unittest.IsolatedAsyncioTestCase):
     """Save-time resolution (moved from routes/portfolio.py)."""
 

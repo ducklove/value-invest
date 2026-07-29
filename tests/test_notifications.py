@@ -26,6 +26,7 @@ from repositories import db as db_repo
 from repositories import notifications as notifications_repo
 from routes import notifications as notif_route
 from services.notifications import channels, engine, kakao, telegram
+from services.portfolio import target_resolver
 
 
 def _test_settings() -> AppSettings:
@@ -538,6 +539,72 @@ class AlertEngineHarness(TempDbMixin):
         self.assertIn("목표가 달성", captured["text"])
         self.assertIn("삼성전자", captured["text"])
 
+    async def _add_holding_company(self) -> dict:
+        """지분가치(hodling-value) 종목 하나 + 그 meta. 목표가는 별도 지정 없음."""
+        await self._add_holding("032830", "삼성생명")
+        db = await db_repo.get_db()
+        await db.execute(
+            "UPDATE user_portfolio SET avg_price = 100000 WHERE google_sub = 'u1' AND stock_code = '032830'"
+        )
+        await db.commit()
+        return {"032830": {
+            "subsidiaries": [{"code": "005930", "sharesHeld": 100}],
+            "totalShares": 10,
+            "treasuryShares": 0,
+            "holdingValuePerShare": None,
+        }}
+
+    async def test_holding_company_target_alert_uses_stake_value_not_avg_price(self):
+        """삼성생명 회귀: 지분가치 자동 목표가 종목에 매입가×1.3 오알림이 나가면 안 된다.
+
+        목표가를 따로 지정하지 않은 지주/보유지분 종목은 화면이 '지분가치/주'를
+        목표가로 보여준다(삼성생명 ~78만). 엔진이 이를 모른 채 매입가×1.3
+        (~13만)으로 계산하면 이미 그 위에 있는 현재가가 곧바로 '목표가 달성'이
+        된다 — 실제로 발생했던 오알림.
+        """
+        meta = await self._add_holding_company()
+        await self._rule(scope="all_stocks", alert_type="target_reached", threshold=0.0, stock_code=None)
+        prices = {"005930": 800.0, "032830": 340500.0}  # 005930 은 매입가 1000×1.3=1300 미만
+
+        # 지분가치/주 = 100주 × 70,000 / 10주 = 700,000 > 현재가 340,500 -> 발송 없음
+        with patch.object(engine, "holding_value_meta_map", return_value=meta), \
+             patch.object(target_resolver, "_quote_price", new=AsyncMock(return_value=70000.0)), \
+             patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: {"price": prices[code]})), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+        disp.assert_not_awaited()
+
+        # 지분가치가 목표가를 넘어서면 그때 발송하고, 메시지의 목표가도 지분가치다
+        captured = {}
+
+        async def capture(google_sub, text):
+            captured["text"] = text
+            return 1
+
+        with patch.object(engine, "holding_value_meta_map", return_value=meta), \
+             patch.object(target_resolver, "_quote_price", new=AsyncMock(return_value=30000.0)), \
+             patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: {"price": prices[code]})), \
+             patch.object(channels, "dispatch", new=capture):
+            self.assertEqual(await engine.evaluate_user("u1"), 1)
+        self.assertIn("삼성생명", captured["text"])
+        self.assertIn("목표가 300,000", captured["text"])
+
+    async def test_holding_company_target_skipped_when_stake_value_unavailable(self):
+        """자회사 시세도 스냅샷도 없으면 매입가×1.3 으로 떨어지지 않고 건너뛴다."""
+        meta = await self._add_holding_company()
+        await self._rule(scope="all_stocks", alert_type="target_reached", threshold=0.0, stock_code=None)
+        prices = {"005930": 800.0, "032830": 340500.0}
+        engine._unresolved_target_logged.pop("032830", None)
+
+        with patch.object(engine, "holding_value_meta_map", return_value=meta), \
+             patch.object(target_resolver, "_quote_price", new=AsyncMock(return_value=None)), \
+             patch.object(engine, "_safe_quote", new=AsyncMock(side_effect=lambda code, **_: {"price": prices[code]})), \
+             patch.object(channels, "dispatch", new=AsyncMock()) as disp:
+            with self.assertLogs(engine.logger, level="WARNING") as logs:
+                self.assertEqual(await engine.evaluate_user("u1"), 0)
+        disp.assert_not_awaited()
+        self.assertTrue(any("target alert skipped for 032830" in line for line in logs.output))
+
     async def test_blanket_alert_skips_when_portfolio_load_fails(self):
         await self._rule(scope="all_stocks", alert_type="target_reached", threshold=0.0, stock_code=None)
 
@@ -556,9 +623,38 @@ class AlertEngineHarness(TempDbMixin):
         item = {"stock_code": "005930", "target_price_formula": "BPS*0.5", "avg_price": 200000}
         with patch.object(engine, "resolve_formula_target", new=AsyncMock(return_value=926044.0)):
             self.assertEqual(await engine._effective_target(item, None), 926044.0)
-        # 라이브 변수를 못 얻어 수식이 None 이면 매입가×1.3 자동값으로 폴백.
+
+    async def test_formula_target_never_falls_back_to_stale_or_auto_value(self):
+        """수식 목표가를 라이브로 못 구하면 폴백하지 않고 건너뛴다.
+
+        저장된 target_price(수식의 저장 시점 값)나 매입가×1.3 자동값으로 떨어지면
+        이미 지나온 가격에 '목표가 달성' 오알림이 나간다 — 실제 삼성생명 사례.
+        """
+        item = {
+            "stock_code": "032830",
+            "target_price_formula": "보유지분",
+            "target_price": 130000.0,  # 저장 시점 폴백값
+            "avg_price": 200000,
+        }
         with patch.object(engine, "resolve_formula_target", new=AsyncMock(return_value=None)):
-            self.assertEqual(await engine._effective_target(item, None), 260000.0)
+            with self.assertLogs(engine.logger, level="WARNING") as logs:
+                engine._unresolved_target_logged.pop("032830", None)
+                self.assertIsNone(await engine._effective_target(item, None))
+        self.assertTrue(any("target alert skipped for 032830" in line for line in logs.output))
+
+    async def test_holding_company_auto_target_uses_stake_value_not_avg_price(self):
+        """수식 없이도 지주/보유지분 종목은 지분가치/주가 자동 목표가 — 화면과 동일."""
+        item = {"stock_code": "032830", "target_price_formula": "", "avg_price": 100000}
+        meta = {"subsidiaries": [{"code": "005930", "sharesHeld": 100}], "totalShares": 10, "treasuryShares": 0}
+
+        with patch.object(engine, "holding_value_per_share", new=AsyncMock(return_value=778783.0)):
+            self.assertEqual(await engine._effective_target(item, None, meta), 778783.0)
+        # 자회사 시세를 못 얻으면 매입가×1.3 (=130,000) 이 아니라 건너뛴다
+        with patch.object(engine, "holding_value_per_share", new=AsyncMock(return_value=None)):
+            engine._unresolved_target_logged.pop("032830", None)
+            self.assertIsNone(await engine._effective_target(item, None, meta))
+        # 보유지분 종목이 아니면 종전대로 매입가×1.3
+        self.assertEqual(await engine._effective_target(item, None, {}), 130000.0)
 
     async def test_preferred_target_does_not_fall_back_to_avg_price(self):
         item = {

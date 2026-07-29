@@ -160,7 +160,12 @@ def _holding_value_config(root: Path) -> dict[str, Any]:
 
 
 def _holding_value_current(project_dir: Path | None) -> dict[str, Any]:
-    data = _read_js_object(project_dir / "current.js" if project_dir else None, "CURRENT_DATA")
+    # hodling-value 는 현재 스냅샷을 current.json 으로 낸다(구버전은 current.js
+    # 의 CURRENT_DATA). json 을 먼저 보고 없으면 js 로 폴백 — 둘 다 없으면 빈
+    # 스냅샷이라 보유지분 목표가는 자회사 라이브 시세로만 계산된다.
+    data = _read_json(project_dir / "current.json" if project_dir else None)
+    if not isinstance(data, dict):
+        data = _read_js_object(project_dir / "current.js" if project_dir else None, "CURRENT_DATA")
     if not isinstance(data, dict):
         return {"updatedAt": None, "pairs": {}}
     pairs = data.get("pairs") if isinstance(data.get("pairs"), list) else []

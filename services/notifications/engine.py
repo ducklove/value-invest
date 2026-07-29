@@ -16,7 +16,9 @@ Rule shapes:
 
 Data sources are reused so alerts agree with what the UI shows:
 * per-stock price / daily change → ``runtime_quotes.fetch_quote``
-* effective 목표가 → ``target_price`` column, else 우선주 본주가, else 매입가×1.3
+* effective 목표가 → 수식이면 라이브 평가, else ``target_price`` column, else
+  우선주 본주가, else 지주사 지분가치/주, else 매입가×1.3. 동적(수식·보유지분)
+  목표가를 라이브로 못 구하면 폴백 없이 건너뛴다 — ``_effective_target`` 참고
 * portfolio NAV → ``snapshot_intraday._fetch_total_value``
 * prev-close NAV → latest ``portfolio_snapshots`` row (the Today baseline)
 """
@@ -37,7 +39,12 @@ from services.krx_limits import krx_lower_limit, krx_upper_limit
 from services.notifications import channels
 from services.portfolio import foreign, runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_preferred_stock
-from services.portfolio.target_resolver import resolve_formula_target
+from services.portfolio.target_resolver import (
+    holding_value_meta,
+    holding_value_meta_map,
+    holding_value_per_share,
+    resolve_formula_target,
+)
 from services.portfolio.time_windows import portfolio_today_baseline_date, settlement_marker_seconds
 
 logger = logging.getLogger(__name__)
@@ -165,28 +172,59 @@ def _quote_price(quote: dict) -> float | None:
     return _to_float((quote or {}).get("price"))
 
 
-async def _effective_target(item: dict, common_price: float | None) -> float | None:
-    """Resolve the 목표가 the UI shows.
+# 동적 목표가를 못 구해 건너뛴 종목 — 평가 패스마다 반복되므로 종목별 하루 1회만
+# 경고한다. 조용히 알림이 빠지는 상황을 로그로는 볼 수 있게.
+_unresolved_target_logged: dict[str, str] = {}
 
-    Order: 수식이면 라이브 데이터로 직접 평가(보유지분·BPS 등) → 저장된 숫자 목표가
-    → 우선주 본주가 → 매입가×1.3. 비활성(×)이면 None.
-    수식 평가가 핵심: 저장된 target_price 폴백은 stale 하거나(보유지분 수식은) 비어
-    있어 화면값(예: 삼성생명 ~926,044)과 크게 달라질 수 있다.
+
+def _warn_unresolved_target(code: str, source: str) -> None:
+    today = _today_str()
+    if _unresolved_target_logged.get(code) == today:
+        return
+    _unresolved_target_logged[code] = today
+    logger.warning(
+        "target alert skipped for %s: %s 를 라이브로 평가하지 못했습니다 (폴백 없음)",
+        code,
+        source,
+    )
+
+
+async def _effective_target(
+    item: dict, common_price: float | None, holding_meta: dict | None = None
+) -> float | None:
+    """Resolve the 목표가 the UI shows — 화면과 같은 우선순위로, 라이브로.
+
+    순서: 수식이면 라이브 평가 → 저장된 숫자 목표가 → 우선주 본주가 →
+    지주/보유지분 종목이면 지분가치/주 → 매입가×1.3. 비활성(×)이면 None.
+
+    **동적 목표가는 폴백하지 않는다.** 수식(보유지분·BPS 등)이나 보유지분
+    자동 목표가를 라이브로 못 구하면 그 종목은 이번 패스를 건너뛴다(None).
+    저장된 target_price 는 수식의 '저장 시점' 값이고 매입가×1.3 자동값은 실제
+    목표가보다 훨씬 낮을 수 있어(삼성생명: 자동 ~13만 vs 실제 ~78만), 폴백하면
+    이미 지나온 가격에 '목표가 달성' 오알림이 나간다. 화면
+    (portfolio-actions.js ``_computeTargetPrice``)도 수식이면 자동값으로
+    떨어지지 않는다.
     """
     if item.get("target_price_disabled"):
         return None
+    code = item.get("stock_code") or ""
     formula = (item.get("target_price_formula") or "").strip()
     if formula:
-        resolved = await resolve_formula_target(item["stock_code"], formula, item.get("avg_price"))
-        if resolved is not None:
-            return resolved
-        # 라이브 변수(보유지분 등)를 못 얻으면 저장 폴백/자동값으로.
+        resolved = await resolve_formula_target(code, formula, item.get("avg_price"))
+        if resolved is None:
+            _warn_unresolved_target(code, f"수식 '{formula}'")
+        return resolved
     saved = _to_float(item.get("target_price"))
     if saved is not None and saved > 0:
         return saved
-    code = item.get("stock_code") or ""
     if is_preferred_stock(code):
         return common_price if common_price and common_price > 0 else None
+    meta = holding_meta if holding_meta is not None else holding_value_meta(code)
+    if meta:
+        resolved = await holding_value_per_share(code, meta=meta)
+        if resolved is None:
+            _warn_unresolved_target(code, "보유지분 자동 목표가")
+        return resolved
     avg = _to_float(item.get("avg_price"))
     return avg * 1.3 if avg and avg > 0 else None
 
@@ -426,6 +464,8 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
     today_str = _today_str()
     sent = 0
     changed = False
+    # 연계 프로젝트 파일을 종목마다 다시 읽지 않도록 패스당 1회만 받는다.
+    holding_meta_map = holding_value_meta_map() if alert_type in TARGET_TYPES else {}
 
     for code, item in items_by_code.items():
         quote = quote_map.get(code, {})
@@ -438,7 +478,7 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
             if price is None:
                 continue
             common_price = _quote_price(quote_map.get(common_stock_code(code), {}))
-            target = await _effective_target(item, common_price)
+            target = await _effective_target(item, common_price, holding_meta_map.get(code) or {})
             if target is None:
                 continue
             condition = price >= target
