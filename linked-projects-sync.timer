@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync linked project data files hourly
+
+[Timer]
+# hodling-value 는 장중 한 시간 남짓 간격으로 current.json 을 갱신한다.
+# 매시 05분에 따라가고, Persistent 로 꺼져 있던 시간도 부팅 후 한 번 따라잡는다.
+OnCalendar=*-*-* *:05:00
+Persistent=true
+RandomizedDelaySec=3m
+
+[Install]
+WantedBy=timers.target

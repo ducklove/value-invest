@@ -42,6 +42,13 @@ URLs or server-side environment variables instead of copying their code.
   default path.
 - Use `scripts/sync-linked-projects.ps1` to clone missing sibling repos and fetch
   their latest remote state without touching dirty worktrees.
+- 운영 서버에서는 `linked-projects-sync.timer`(매시 05분)가
+  `scripts/sync_linked_projects.sh` 를 돌려 형제 저장소의 **데이터 파일만**
+  업스트림에서 당겨온다 (`hodling-value/current.json`, `gold_gap/data.json`).
+  배포(`deploy/deploy.sh`)는 value-invest 체크아웃만 갱신하므로 이게 없으면
+  지분가치 스냅샷 같은 로컬 읽기 데이터가 몇 달씩 멈춘다. `config.json` 은
+  `/admin.html` 이 서버 위에서 직접 편집하는 파일이라 동기화 대상에서 제외한다
+  — 그래서 `git pull` 이 아니라 파일 단위 덮어쓰기다.
 
 ## Current Frontend Links
 

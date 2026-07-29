@@ -67,6 +67,36 @@ def test_deploy_gates_block_bad_deploys():
     assert 'git reset --hard "$OLD_SHA"' in deploy
 
 
+def test_all_repo_units_are_installed_by_deploy():
+    """저장소 루트의 systemd 유닛은 전부 deploy.sh 의 REPO_UNITS 에 있어야 한다.
+
+    등록을 빠뜨리면 파일만 커밋되고 서버에는 영영 설치되지 않는다 — 조용히
+    안 도는 타이머가 된다.
+    """
+    deploy = (ROOT / "deploy" / "deploy.sh").read_text(encoding="utf-8")
+    units = sorted(p.name for p in ROOT.glob("*.service")) + sorted(p.name for p in ROOT.glob("*.timer"))
+
+    assert units, "루트에 유닛 파일이 하나도 없다 — 글롭이 깨졌는지 확인"
+    missing = [unit for unit in units if f'"{unit}"' not in deploy]
+    assert missing == []
+
+
+def test_linked_project_sync_never_overwrites_admin_edited_config():
+    """연계 프로젝트 동기화는 데이터 파일만 덮는다.
+
+    config.json 은 /admin.html 이 서버 위에서 직접 편집하는 파일이라 pull/merge
+    나 config.json 덮어쓰기가 들어오면 관리자 편집이 날아간다.
+    """
+    script = (ROOT / "scripts" / "sync_linked_projects.sh").read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in script.splitlines() if line.strip() and not line.lstrip().startswith("#")
+    )
+
+    assert "config.json" not in code
+    assert "git pull" not in code
+    assert "reset --hard" not in code
+
+
 def test_repositories_do_not_import_service_layer():
     violations: list[str] = []
     for path in (ROOT / "repositories").rglob("*.py"):

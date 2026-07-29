@@ -32,6 +32,8 @@ REPO_UNITS=(
   "notify-calendar.timer"
   "data-quality.service"
   "data-quality.timer"
+  "linked-projects-sync.service"
+  "linked-projects-sync.timer"
   "daily-briefing.service"
   "daily-briefing.timer"
   "daily-briefing-market-close.service"

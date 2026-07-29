@@ -1,0 +1,24 @@
+[Unit]
+Description=Value Invest linked project data sync
+After=network.target
+OnFailure=value-invest-notify@%n.service
+
+[Service]
+Type=oneshot
+User=cantabile
+Group=cantabile
+WorkingDirectory=/home/cantabile/Works/value_invest
+# 형제 저장소(hodling-value·gold_gap)의 데이터 파일만 업스트림에서 당겨온다.
+# 배포는 value-invest 체크아웃만 갱신하므로 이게 없으면 지분가치 스냅샷 같은
+# 로컬 읽기 데이터가 몇 달씩 멈춘다. config.json(관리자 편집분)은 건드리지 않는다.
+ExecStart=/bin/bash scripts/sync_linked_projects.sh
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# 형제 프로젝트 체크아웃에 데이터 파일을 써야 한다.
+ReadWritePaths=/home/cantabile/Works
+RestrictSUIDSGID=yes
+MemoryMax=200M
+CPUQuota=40%
+TasksMax=20
