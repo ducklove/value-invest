@@ -39,10 +39,10 @@ const PANEL_HTML = `
     </div>
     <div class="pf-period-report-status" id="pfPeriodReportStatus"></div>
     <div id="pfPeriodReportContent" class="pf-period-report-content"></div>
-    <div class="pf-period-perf" id="pfPeriodPerformanceWrap">
-      <h4>연간 실적</h4>
-      <div id="pfPeriodPerformanceContent" class="pf-period-perf-content"></div>
-    </div>
+  </div>
+  <div class="pf-nav-chart-wrap pf-analysis-card pf-period-perf" id="pfPeriodPerformanceWrap">
+    <div class="pf-nav-header"><h3>연간 실적</h3></div>
+    <div id="pfPeriodPerformanceContent" class="pf-period-perf-content"></div>
   </div>`;
 
 const PERIODS = {
@@ -186,6 +186,10 @@ test("연간 실적 목록 — 최근 연도만 펼친 채로 그린다", async 
   await w.pfLoadPeriodReportsPanel();
 
   assert.ok(calls.includes("/api/portfolio/period-reports/performance"));
+  // 목록은 보고서 카드 밖의 독립 카드에 그려진다.
+  const perfWrap = w.document.getElementById("pfPeriodPerformanceWrap");
+  assert.equal(perfWrap.closest("#pfPeriodReportWrap"), null);
+  assert.ok(perfWrap.classList.contains("pf-analysis-card"));
 
   const years = perfRows(w, ".pf-perf-year-row");
   assert.deepEqual(years.map((r) => rowKey(r)), ["2026진행 중", "2025"]);

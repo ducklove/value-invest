@@ -46,9 +46,11 @@ function _pfRiskNum(v, digits = 2) {
   return (v === null || v === undefined) ? '-' : Number(v).toFixed(digits);
 }
 
-function _pfRiskTile(label, value, cls = '', sub = '') {
+// cardCls 는 타일 자체의 수정자(현재는 .pf-risk-tile-wide — 서브라벨이 긴
+// MDD 처럼 그리드 한 칸으로는 날짜가 잘리는 타일에 두 칸을 준다).
+function _pfRiskTile(label, value, cls = '', sub = '', cardCls = '') {
   const subHtml = sub ? `<div class="pf-risk-sub">${sub}</div>` : '';
-  return `<div class="pf-nav-ret-card"><div class="pf-nav-ret-label">${label}</div><div class="pf-nav-ret-value ${cls}">${value}</div>${subHtml}</div>`;
+  return `<div class="pf-nav-ret-card ${cardCls}"><div class="pf-nav-ret-label">${label}</div><div class="pf-nav-ret-value ${cls}">${value}</div>${subHtml}</div>`;
 }
 
 function _pfRenderRiskPanel(data) {
@@ -72,16 +74,13 @@ function _pfRenderRiskPanel(data) {
   const bestMonth = m.best_month || null;
   const worstMonth = m.worst_month || null;
   const benchSub = benchName ? `vs ${escapeHtml(benchName)}` : '';
-  // 월 서브라벨: 그 달 수익률을 잰 구간(직전 달 마지막 → 그 달 마지막 스냅샷).
-  const monthSub = (row) => (row?.start_date && row?.end_date)
-    ? `${escapeHtml(row.start_date)} → ${escapeHtml(row.end_date)}`
-    : '';
 
   const tiles = [
     _pfRiskTile('누적 수익률', pct(m.cumulative_return_pct), returnClass(m.cumulative_return_pct)),
     _pfRiskTile('연환산 수익률', pct(m.annualized_return_pct), returnClass(m.annualized_return_pct)),
     _pfRiskTile('변동성 (연환산)', pct(m.annualized_volatility_pct, false)),
-    _pfRiskTile('최대 낙폭 (MDD)', pct(m.max_drawdown_pct), returnClass(m.max_drawdown_pct), mddSub),
+    // 고점→저점 날짜가 한 칸에 안 들어가 잘리므로 두 칸 폭을 준다.
+    _pfRiskTile('최대 낙폭 (MDD)', pct(m.max_drawdown_pct), returnClass(m.max_drawdown_pct), mddSub, 'pf-risk-tile-wide'),
     _pfRiskTile('현재 낙폭', pct(m.current_drawdown_pct), returnClass(m.current_drawdown_pct)),
     _pfRiskTile('샤프 지수', _pfRiskNum(m.sharpe_ratio)),
   ];
@@ -97,8 +96,8 @@ function _pfRenderRiskPanel(data) {
   tiles.push(
     _pfRiskTile('최고 일간', best ? pct(best.return_pct) : '-', returnClass(best?.return_pct), best?.date ? escapeHtml(best.date) : ''),
     _pfRiskTile('최악 일간', worst ? pct(worst.return_pct) : '-', returnClass(worst?.return_pct), worst?.date ? escapeHtml(worst.date) : ''),
-    _pfRiskTile('최고 월간', bestMonth ? pct(bestMonth.return_pct) : '-', returnClass(bestMonth?.return_pct), bestMonth ? `${escapeHtml(bestMonth.month)} · ${monthSub(bestMonth)}` : ''),
-    _pfRiskTile('최악 월간', worstMonth ? pct(worstMonth.return_pct) : '-', returnClass(worstMonth?.return_pct), worstMonth ? `${escapeHtml(worstMonth.month)} · ${monthSub(worstMonth)}` : ''),
+    _pfRiskTile('최고 월간', bestMonth ? pct(bestMonth.return_pct) : '-', returnClass(bestMonth?.return_pct), bestMonth?.month ? escapeHtml(bestMonth.month) : ''),
+    _pfRiskTile('최악 월간', worstMonth ? pct(worstMonth.return_pct) : '-', returnClass(worstMonth?.return_pct), worstMonth?.month ? escapeHtml(worstMonth.month) : ''),
   );
 
   const rangeText = (data.start_date && data.end_date)

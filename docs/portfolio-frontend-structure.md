@@ -27,7 +27,7 @@
 17. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
 18. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
 19. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
-20. `portfolio-reports.js`: 월간/연간 기간 투자 보고서 목록·생성·렌더링. v2 보고서의 매수/매도 기반 `composition_changes` 블록과 v3의 기간 종료 스냅샷(`holdings.end_snapshot`, 기본 접힘)을 보여주고, 카드 아래에는 저장 여부와 무관하게 NAV에서 계산한 연간 실적 목록(연도 행 클릭 → 월간 펼침)을 그린다.
+20. `portfolio-reports.js`: 월간/연간 기간 투자 보고서 목록·생성·렌더링. v2 보고서의 매수/매도 기반 `composition_changes` 블록과 v3의 기간 종료 스냅샷(`holdings.end_snapshot`, 기본 접힘)을 보여주고, 바로 아래의 독립 카드 `#pfPeriodPerformanceWrap`에는 저장 여부와 무관하게 NAV에서 계산한 연간 실적 목록(연도 행 클릭 → 월간 펼침)을 그린다.
 21. `portfolio-performance.js`: 심층 분석 탭 shell, 영역지도, 성과 데이터 로딩.
 22. `portfolio-trends-benchmark.js`: NAV 차트 비교지수 선택/캐시, beta·R² 통계와 beta 오버레이.
 23. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화, 공용 차트 헬퍼.

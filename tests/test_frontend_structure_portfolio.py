@@ -208,10 +208,13 @@ def test_performance_tab_includes_period_report_panel():
     assert ".pf-period-report-sections .pf-period-report-wide" in styles
     assert ".pf-period-snapshot-group" in styles
 
-    # 연간 실적 목록(보고서 카드 아래) — 연도 행 클릭으로 월간 목록 펼침.
-    assert 'id="pfPeriodPerformanceWrap"' in html
+    # 연간 실적 목록 — 보고서 카드 '안'이 아니라 바로 아래의 독립 카드다.
+    assert 'class="pf-nav-chart-wrap pf-analysis-card pf-period-perf" id="pfPeriodPerformanceWrap"' in html
     assert 'id="pfPeriodPerformanceContent"' in html
     assert html.find('id="pfPeriodReportContent"') < html.find('id="pfPeriodPerformanceWrap"')
+    assert html.find('id="pfPeriodPerformanceWrap"') < html.find('id="pfRebalanceWrap"')
+    # 점프 내비에도 독립 섹션으로 올라간다.
+    assert '<a class="pf-deep-anchor-link" href="#pfPeriodPerformanceWrap">연간실적</a>' in html
     assert "/api/portfolio/period-reports/performance" in reports
     assert "function pfTogglePerformanceYear(" in reports
     assert "async function pfSelectPeriodFromPerformance(" in reports
@@ -693,6 +696,9 @@ def test_performance_tab_includes_risk_panel():
     assert ".pf-risk-grid" in styles
     assert ".pf-risk-empty" in styles
     assert ".pf-risk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in styles
+    # 서브라벨이 긴 MDD 타일은 두 칸 폭(날짜 잘림 방지).
+    assert ".pf-risk-grid .pf-risk-tile-wide { grid-column: span 2; }" in styles
+    assert "'pf-risk-tile-wide'" in risk
 
 def test_performance_tab_includes_rebalance_panel():
     html = (STATIC / "index.html").read_text(encoding="utf-8")

@@ -125,15 +125,16 @@ test("리스크 타일 — 공용 포맷터(fmtPct/returnClass) 기반 포맷과
   // 최고/최악 일간 + 날짜 서브라벨.
   assert.equal(valueOf("최고 일간").textContent, "+10.00%");
   assert.equal(tileByLabel("최악 일간").querySelector(".pf-risk-sub").textContent, "2026-06-03");
-  // 최고/최악 월간 — 값 + '월 · 측정구간' 서브라벨.
+  // 최고/최악 월간 — 값 + 월 서브라벨(측정구간 날짜는 표기하지 않는다).
   assert.equal(valueOf("최고 월간").textContent, "+6.50%");
   assert.ok(valueOf("최고 월간").className.includes("positive"));
-  assert.equal(
-    tileByLabel("최고 월간").querySelector(".pf-risk-sub").textContent,
-    "2026-03 · 2026-02-27 → 2026-03-31",
-  );
+  assert.equal(tileByLabel("최고 월간").querySelector(".pf-risk-sub").textContent, "2026-03");
   assert.equal(valueOf("최악 월간").textContent, "-4.25%");
   assert.ok(valueOf("최악 월간").className.includes("negative"));
+  assert.equal(tileByLabel("최악 월간").querySelector(".pf-risk-sub").textContent, "2026-04");
+  // MDD 타일만 두 칸 폭 — 고점→저점 날짜가 잘리지 않게.
+  assert.ok(tileByLabel("최대 낙폭 (MDD)").classList.contains("pf-risk-tile-wide"));
+  assert.ok(!tileByLabel("최고 월간").classList.contains("pf-risk-tile-wide"));
   // 기간/벤치마크 메타 라인.
   const range = content.querySelector(".pf-chart-range");
   assert.match(range.textContent, /2025-06-10 ~ 2026-06-09/);
