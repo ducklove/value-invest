@@ -3,6 +3,7 @@
 //
 // 설계 원칙
 //  - 잔잔한 날은 평소 화면 그대로: |등락률| < 1% 는 레벨 0 이라 아무 장식도 없다.
+//  - 실제 보유분(수량 > 0)에만 건다. 관심종목처럼 수량 0 인 행은 종전 표시.
 //  - 강도는 절대 등락률(레벨 0~5)로, 게이지 길이는 "현재 보이는 목록 안에서의
 //    상대 크기"로 준다. 둘을 섞으면 5% 하나뿐인 날에도 화면이 벌겋게 되거나
 //    반대로 전 종목 20% 인 날 아무 차이가 안 보인다.
@@ -29,6 +30,20 @@ try { PfStore.prefs.heatMode = localStorage.getItem(PF_HEAT_MODE_KEY) !== '0'; }
 
 function pfHeatEnabled() {
   return !!(typeof PfStore !== 'undefined' && PfStore.prefs && PfStore.prefs.heatMode);
+}
+
+// 컬러 모드는 "실제 보유분"에만 건다. 수량 0(관심종목만 담아 둔 행)이나 음수
+// 포지션까지 벌겋게 물들면 정작 내 돈이 움직인 행이 묻힌다. 행 틴트·게이지·
+// 요약 집계·전면 이펙트가 모두 이 판정을 공유한다.
+// 렌더 경로마다 필드가 달라(전체 재렌더는 qty, tick 은 item 의 quantity) 둘 다 본다.
+function pfHeatQty(row) {
+  if (!row) return 0;
+  const qty = Number(row.quantity !== undefined && row.quantity !== null ? row.quantity : row.qty);
+  return Number.isFinite(qty) ? qty : 0;
+}
+
+function pfHeatAppliesTo(row) {
+  return pfHeatEnabled() && pfHeatQty(row) > 0;
 }
 
 function pfHeatLevel(pct) {
@@ -105,9 +120,12 @@ function pfHeatRowState(row) {
 }
 
 // renderPortfolio() 가 보이는 행 전체를 넘겨 게이지 분모를 다시 잡는다.
+// 게이지가 안 붙는 행(수량 0)은 분모에서도 빼야 "보이는 막대들"의 상대 비교가
+// 어긋나지 않는다.
 function pfHeatSetScale(rows) {
   let max = 0;
   for (const row of rows || []) {
+    if (pfHeatQty(row) <= 0) continue;
     const abs = Math.abs(Number(row && row.changePct));
     if (Number.isFinite(abs) && abs > max) max = abs;
   }
@@ -116,7 +134,7 @@ function pfHeatSetScale(rows) {
 }
 
 function pfHeatRowAttrs(row) {
-  if (!pfHeatEnabled()) return '';
+  if (!pfHeatAppliesTo(row)) return '';
   const state = pfHeatRowState(row);
   if (!state || (!state.level && !state.limit)) return '';
   let attrs = ` data-heat-dir="${state.dir}" data-heat-level="${state.level}"`;
@@ -127,7 +145,7 @@ function pfHeatRowAttrs(row) {
 // WS tick 경로: tbody 재생성 없이 <tr> 의 히트 속성만 맞춘다.
 function pfHeatApplyRow(tr, row) {
   if (!tr) return;
-  const state = pfHeatEnabled() ? pfHeatRowState(row) : null;
+  const state = pfHeatAppliesTo(row) ? pfHeatRowState(row) : null;
   if (state) pfHeatTrackLimit(row, state);
   if (!state || (!state.level && !state.limit)) {
     tr.removeAttribute('data-heat-dir');
@@ -148,12 +166,22 @@ function _pfHeatIcon(state) {
   return '';
 }
 
+// 상/하한가는 부호를 화살표로 바꿔 적는다(+29.91% → ↑29.91%). 색·배지·애니메이션이
+// 없는 곳(컬러 모드 off, 수량 0 행, 색각 이상·흑백)에서도 글자만으로 도달 여부가
+// 구분되게 — 국내 HTS 관행과 같은 표기(상승 +, 상한 ↑).
+function pfLimitPctText(pct, limit) {
+  const text = fmtPct(pct);
+  if (limit === 'up') return text.replace(/^\+?/, '↑');
+  if (limit === 'down') return text.replace(/^-?/, '↓');
+  return text;
+}
+
 function pfHeatChangeCell(row) {
   const state = pfHeatRowState(row);
   if (!state) return '-';
   const icon = _pfHeatIcon(state);
   const iconHtml = icon ? `<span class="pf-heat-icon" aria-hidden="true">${icon}</span>` : '';
-  const pct = fmtPct(state.pct);
+  const pct = pfLimitPctText(state.pct, state.limit);
   // 상/하한 라벨은 등락률 옆에 덧붙이지 않고 같은 자리에서 교대로 보여 준다.
   // 두 글자를 같은 그리드 셀에 겹쳐 두므로 칸 폭은 둘 중 넓은 쪽(=등락률)
   // 그대로고, 라벨 때문에 등락률 칸이 넓어지지 않는다.
@@ -172,9 +200,19 @@ function pfHeatChangeCell(row) {
     + '</span>';
 }
 
+// 컬러 모드가 안 걸리는 행(모드 off / 수량 0)의 종전 표시. 상/하한가만은
+// 여기서도 화살표로 남긴다 — 컬러 모드는 강조 수단이지 유일한 전달 수단이 아니다.
+function pfPlainChangeCell(row) {
+  const limit = pfHeatLimitState(row);
+  if (!limit) return fmtChangePct(row.changePct, row.change);
+  const title = limit === 'up' ? '상한가 도달' : '하한가 도달';
+  return `<span class="pf-return ${limit === 'up' ? 'positive' : 'negative'} pf-limit-mark"`
+    + ` title="${title}">${pfLimitPctText(row.changePct, limit)}</span>`;
+}
+
 // 등락률 셀의 단일 진입점 — 컬러 모드가 꺼져 있으면 종전 표시 그대로.
 function pfChangeCellHtml(row) {
-  if (!pfHeatEnabled()) return fmtChangePct(row.changePct, row.change);
+  if (!pfHeatAppliesTo(row)) return pfPlainChangeCell(row);
   return pfHeatChangeCell(row);
 }
 
@@ -208,7 +246,7 @@ function pfFxAllowed() {
 
 // 두 렌더 경로(전체 재렌더 / WS tick)가 모두 여기로 상태를 흘려보내 엣지를 잡는다.
 function pfHeatTrackLimit(row, state) {
-  if (!pfHeatEnabled() || !row) return;
+  if (!pfHeatAppliesTo(row)) return;
   const code = String(row.stock_code || '');
   if (!code) return;
   const limit = (state && state.limit) || null;
@@ -284,6 +322,9 @@ function pfHeatUpdateSummary(rows) {
   if (!pfHeatEnabled()) { el.textContent = ''; el.hidden = true; return; }
   let limitUp = 0, limitDown = 0, spikeUp = 0, spikeDown = 0;
   for (const row of rows || []) {
+    // 수량 0 행은 컬러 모드 자체가 안 걸리므로 집계·이펙트에서도 뺀다.
+    // (게이지 분모를 키우지 않도록 상태 계산 전에 거른다.)
+    if (pfHeatQty(row) <= 0) continue;
     const state = pfHeatRowState(row);
     if (!state) continue;
     pfHeatTrackLimit(row, state);

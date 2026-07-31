@@ -45,11 +45,20 @@ function loadHeatDom() {
 
 const holding = (overrides = {}) => ({
   stock_code: "005930",
+  quantity: 10,
   changePct: 0,
   change: 0,
   price: null,
   quote: {},
   ...overrides,
+});
+
+// 상/하한가 판정이 서는 최소 조합 (기준가 10,000 → 상한 13,000 / 하한 7,000).
+const limitUpRow = (overrides = {}) => holding({
+  changePct: 29.91, price: 13000, quote: { previous_close: 10000 }, ...overrides,
+});
+const limitDownRow = (overrides = {}) => holding({
+  changePct: -29.9, price: 7000, quote: { previous_close: 10000 }, ...overrides,
 });
 
 test("등락률 강도는 1/2/4/7/15% 경계에서 한 단계씩 오른다", () => {
@@ -118,10 +127,10 @@ test("컬러 모드 셀은 방향·등급·상한가 상태를 마크업으로 �
   assert.match(html, /data-heat-limit="up"/);
   assert.match(html, /상한/);
   assert.match(html, /--pf-heat-ratio:1\.000/);
-  assert.match(html, /\+29\.91%/);
+  assert.match(html, /↑29\.91%/);
   // 상한 라벨은 등락률 옆에 덧붙는 게 아니라 같은 칸에서 교대로 뜬다(폭 증가 0).
   assert.match(html, /<span class="pf-heat-swap">/);
-  assert.match(html, /pf-heat-swap-pct">\+29\.91%<\/span>/);
+  assert.match(html, /pf-heat-swap-pct">↑29\.91%<\/span>/);
   assert.match(html, /pf-heat-swap-tag"[^>]*>상한가<\/span>/);
   assert.doesNotMatch(html, /pf-heat-limit-tag/);
 
@@ -129,6 +138,48 @@ test("컬러 모드 셀은 방향·등급·상한가 상태를 마크업으로 �
   assert.match(calm, /data-heat-level="0"/);
   assert.doesNotMatch(calm, /data-heat-limit/);
   assert.doesNotMatch(calm, /pf-heat-icon/);
+});
+
+test("상/하한가는 부호 대신 화살표로 적어 컬러 모드 없이도 구분된다", () => {
+  const w = loadHeatDom();
+  w.pfHeatSetScale([limitUpRow()]);
+  assert.match(w.pfChangeCellHtml(limitUpRow()), /↑29\.91%/);
+  assert.match(w.pfChangeCellHtml(limitDownRow()), /↓29\.90%/);
+  // 상/하한이 아니면 종전 부호 그대로.
+  assert.doesNotMatch(w.pfChangeCellHtml(holding({ changePct: 12 })), /[↑↓]/);
+
+  // 컬러 모드를 꺼도 화살표·툴팁은 남는다(색·배지만 사라진다).
+  w.pfToggleHeatMode();
+  const off = w.pfChangeCellHtml(limitUpRow());
+  assert.match(off, /↑29\.91%/);
+  assert.match(off, /pf-limit-mark/);
+  assert.match(off, /title="상한가 도달"/);
+  assert.doesNotMatch(off, /pf-heat-cell/);
+  assert.match(w.pfChangeCellHtml(limitDownRow()), /pf-return negative/);
+  assert.equal(w.pfChangeCellHtml(holding({ changePct: 9.5 })), "plain:9.5");
+});
+
+test("컬러 모드는 수량 0 이하 행에는 걸리지 않는다", () => {
+  const w = loadHeatDom();
+  const watchOnly = holding({ stock_code: "035420", quantity: 0, changePct: -8 });
+  const shortPos = holding({ stock_code: "035720", quantity: -5, changePct: 6 });
+  const owned = holding({ quantity: 3, changePct: 4 });
+
+  assert.equal(w.pfHeatRowAttrs(watchOnly), "");
+  assert.equal(w.pfHeatRowAttrs(shortPos), "");
+  assert.match(w.pfHeatRowAttrs(owned), /data-heat-level="3"/);
+  assert.equal(w.pfChangeCellHtml(watchOnly), "plain:-8");
+  assert.match(w.pfChangeCellHtml(owned), /pf-heat-cell/);
+
+  const tr = w.document.querySelector("tr[data-code]");
+  w.pfHeatApplyRow(tr, watchOnly);
+  assert.equal(tr.hasAttribute("data-heat-dir"), false);
+
+  // 수량 0 행은 게이지 분모(스케일)도 키우지 않는다 — 보유분끼리 상대 비교.
+  assert.equal(w.pfHeatSetScale([watchOnly, owned]), 4);
+  assert.equal(w.pfHeatRowState(owned).ratio, 1);
+  // 상/하한가라도 수량이 0 이면 화살표 표기만 남는다(행 강조·이펙트 없음).
+  assert.match(w.pfChangeCellHtml(limitUpRow({ quantity: 0 })), /pf-limit-mark/);
 });
 
 test("컬러 모드를 끄면 등락률 셀과 행 속성이 종전 표시로 돌아간다", () => {

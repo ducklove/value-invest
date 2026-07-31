@@ -2483,6 +2483,9 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 }
 .pf-return.positive { color: var(--up); }
 .pf-return.negative { color: var(--down); }
+/* 상/하한가는 컬러 모드가 아닐 때도 부호 대신 화살표(↑/↓)로 적어 색 없이도
+   구분되게 한다(portfolio-heat.js pfLimitPctText). 여기선 굵기만 한 단계. */
+.pf-limit-mark { font-weight: 800; }
 .pf-edit-input {
   width: 80px; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm);
   font-size: 13px; text-align: right; background: var(--input-bg); color: var(--text);

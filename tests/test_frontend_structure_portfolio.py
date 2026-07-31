@@ -839,6 +839,15 @@ def test_color_heat_mode_shares_one_state_source_across_render_and_tick():
     assert "@keyframes pfHeatSwapPct" in styles
     assert "@keyframes pfHeatSwapTag" in styles
 
+    # 컬러 모드는 실제 보유분(수량 > 0)에만 걸고, 상/하한가는 컬러 모드 밖에서도
+    # 부호 대신 화살표로 구분된다.
+    assert "function pfHeatAppliesTo" in heat
+    assert "function pfHeatQty" in heat
+    assert "function pfLimitPctText" in heat
+    assert "function pfPlainChangeCell" in heat
+    assert "if (!pfHeatAppliesTo(row)) return pfPlainChangeCell(row);" in heat
+    assert ".pf-limit-mark" in styles
+
     # 도달 순간엔 전면 이펙트 한 번 — 엣지 트리거(머무는 동안 재발화 없음).
     assert "function pfHeatTrackLimit" in heat
     assert "function pfHeatCelebrate" in heat
