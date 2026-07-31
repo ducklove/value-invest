@@ -831,6 +831,21 @@ def test_color_heat_mode_shares_one_state_source_across_render_and_tick():
     assert "pfToggleHeatMode();" in events
     assert "const PF_HEAT_MODE_KEY = 'pf_heat_mode';" in heat
 
+    # 상/하한 라벨은 등락률 옆에 덧붙이지 않고 같은 칸에서 교대로 뜬다 —
+    # 칸 폭이 라벨 때문에 넓어지지 않게(겹친 그리드 + 교대 애니메이션).
+    assert '<span class="pf-heat-swap">' in heat
+    assert "pf-heat-limit-tag" not in heat
+    assert ".pf-heat-swap {\n  display: inline-grid;" in styles
+    assert "@keyframes pfHeatSwapPct" in styles
+    assert "@keyframes pfHeatSwapTag" in styles
+
+    # 도달 순간엔 전면 이펙트 한 번 — 엣지 트리거(머무는 동안 재발화 없음).
+    assert "function pfHeatTrackLimit" in heat
+    assert "function pfHeatCelebrate" in heat
+    assert "pfHeatTrackLimit(row, state);" in heat
+    assert "pointer-events: none;" in styles[styles.find(".pf-fx {"):styles.find(".pf-fx-veil")]
+    assert "@keyframes pfFxFall" in styles
+
     # 스타일: 행 틴트는 background-image 라 zebra/flash 를 죽이지 않고,
     # 상/하한가에서만 애니메이션을 과장하며, 동작 줄이기 설정을 존중한다.
     assert "body.pf-heat-mode" in styles

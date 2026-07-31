@@ -119,6 +119,11 @@ test("컬러 모드 셀은 방향·등급·상한가 상태를 마크업으로 �
   assert.match(html, /상한/);
   assert.match(html, /--pf-heat-ratio:1\.000/);
   assert.match(html, /\+29\.91%/);
+  // 상한 라벨은 등락률 옆에 덧붙는 게 아니라 같은 칸에서 교대로 뜬다(폭 증가 0).
+  assert.match(html, /<span class="pf-heat-swap">/);
+  assert.match(html, /pf-heat-swap-pct">\+29\.91%<\/span>/);
+  assert.match(html, /pf-heat-swap-tag"[^>]*>상한가<\/span>/);
+  assert.doesNotMatch(html, /pf-heat-limit-tag/);
 
   const calm = w.pfChangeCellHtml(holding({ changePct: 0.4 }));
   assert.match(calm, /data-heat-level="0"/);
@@ -171,4 +176,46 @@ test("요약 스트립은 상/하한가와 급등·급락 종목 수를 집계�
 
   w.pfHeatUpdateSummary([holding({ changePct: 0.3 })]);
   assert.match(summary.textContent, /잔잔/);
+});
+
+test("상한가에 새로 닿은 순간에만 전면 이펙트가 한 번 뜬다", async () => {
+  const w = loadHeatDom();
+  const limitUp = holding({
+    stock_code: "005930",
+    stock_name: "삼성전자",
+    changePct: 29.91,
+    price: 13000,
+    quote: { previous_close: 10000 },
+  });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 160));
+
+  w.pfHeatUpdateSummary([limitUp]);
+  await tick();
+  const layers = w.document.querySelectorAll(".pf-fx");
+  assert.equal(layers.length, 1);
+  assert.equal(layers[0].getAttribute("data-fx"), "up");
+  assert.equal(layers[0].querySelector(".pf-fx-names").textContent, "삼성전자");
+  assert.ok(layers[0].querySelectorAll(".pf-fx-p").length > 10);
+
+  // 상한가에 머무는 동안엔 렌더가 몇 번을 돌아도 다시 뿌리지 않는다.
+  w.pfHeatUpdateSummary([limitUp]);
+  w.pfHeatApplyRow(w.document.querySelector("tr[data-code]"), limitUp);
+  await tick();
+  assert.equal(w.document.querySelectorAll(".pf-fx").length, 1);
+
+  // 풀렸다가 다시 닿으면 그때는 새 사건.
+  w.pfHeatUpdateSummary([holding({ stock_code: "005930", changePct: 12 })]);
+  w.pfHeatUpdateSummary([limitUp]);
+  await tick();
+  assert.equal(w.document.querySelectorAll(".pf-fx").length, 2);
+});
+
+test("전면 이펙트는 하한가 색을 따로 쓰고 종목명을 textContent 로만 넣는다", async () => {
+  const w = loadHeatDom();
+  const layer = w.pfHeatCelebrate("down", ["<img onerror=x>", "카카오", "네이버", "LG화학"]);
+  assert.equal(layer.getAttribute("data-fx"), "down");
+  assert.equal(layer.getAttribute("aria-hidden"), "true");
+  assert.equal(layer.querySelector("img"), null);
+  assert.match(layer.querySelector(".pf-fx-names").textContent, /외 1$/);
+  assert.equal(layer.querySelector(".pf-fx-title").textContent, "🧊 하한가");
 });

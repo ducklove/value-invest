@@ -3094,14 +3094,35 @@ body.pf-heat-mode .pf-table tbody tr[data-heat-dir] > td:first-child {
 }
 .pf-heat-cell[data-heat-limit] .pf-heat-icon { font-size: 13px; animation: pfHeatLaunch 1.4s ease-in-out infinite; }
 .pf-heat-cell[data-heat-limit="down"] .pf-heat-icon { animation: pfHeatSink 1.8s ease-in-out infinite; }
-.pf-heat-limit-tag {
-  margin-left: 2px;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.26);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+/* 상/하한 라벨은 등락률 옆이 아니라 같은 자리에서 교대로 뜬다(플립보드).
+   두 글자를 같은 그리드 셀에 겹쳐 두므로 칸 폭 = 둘 중 넓은 쪽 = 등락률 —
+   라벨이 추가 폭을 전혀 먹지 않는다. */
+.pf-heat-swap {
+  display: inline-grid;
+  align-items: center;
+  justify-items: center;
+  overflow: hidden;
+}
+.pf-heat-swap > span {
+  grid-area: 1 / 1;
+  animation: pfHeatSwapPct 4.4s ease-in-out infinite;
+}
+.pf-heat-swap > .pf-heat-swap-tag {
+  font-size: 0.86em;
+  letter-spacing: 0.04em;
+  animation-name: pfHeatSwapTag;
+}
+@keyframes pfHeatSwapPct {
+  0%, 44%  { opacity: 1; transform: translateY(0); }
+  50%      { opacity: 0; transform: translateY(-70%); }
+  /* 보이지 않는 동안 아래로 되돌려 놔야 다음 바퀴도 같은 방향으로 굴러 올라간다. */
+  51%, 94% { opacity: 0; transform: translateY(70%); }
+  100%     { opacity: 1; transform: translateY(0); }
+}
+@keyframes pfHeatSwapTag {
+  0%, 44%  { opacity: 0; transform: translateY(70%); }
+  50%, 94% { opacity: 1; transform: translateY(0); }
+  100%     { opacity: 0; transform: translateY(-70%); }
 }
 body.pf-heat-mode .pf-table tbody tr[data-heat-limit] {
   animation: pfHeatRowGlow 2.6s ease-in-out infinite;
@@ -3153,6 +3174,94 @@ body.pf-heat-mode .pf-table tbody tr[data-heat-limit] > td:first-child {
   50% { box-shadow: inset 12px 0 0 rgb(var(--pf-heat-rgb)); }
 }
 
+/* --- 전면 이펙트: 새로 상/하한가에 닿은 순간 한 번 (portfolio-heat.js) ---
+   화면 전체 오버레이라 pointer-events 를 끄고 모달(z-index 1001) 위에 얹는다.
+   파티클 좌표·속도는 JS 가 인라인 커스텀 프로퍼티로 넣는다. */
+.pf-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  overflow: hidden;
+  pointer-events: none;
+  --pf-fx-rgb: 220, 38, 38;
+  --pf-fx-solid: var(--pf-heat-solid-up, #dc2626);
+}
+.pf-fx[data-fx="down"] {
+  --pf-fx-rgb: 37, 99, 235;
+  --pf-fx-solid: var(--pf-heat-solid-down, #2563eb);
+}
+[data-theme="dark"] .pf-fx { --pf-fx-rgb: 248, 113, 113; }
+[data-theme="dark"] .pf-fx[data-fx="down"] { --pf-fx-rgb: 96, 165, 250; }
+
+.pf-fx-veil {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(130% 70% at 50% 0%, rgba(var(--pf-fx-rgb), 0.30), transparent 68%);
+  animation: pfFxVeil 2.8s ease-out forwards;
+}
+.pf-fx-p {
+  position: absolute;
+  top: -14vh;
+  line-height: 1;
+  opacity: 0;
+  will-change: transform, opacity;
+  /* 파티클마다 다른 실제 값은 portfolio-heat.js 가 인라인 style 로 덮어쓴다.
+     여기 기본값은 JS 가 못 넣은 경우의 안전한 바닥(한가운데로 곧게 낙하). */
+  --pf-fx-x: 50%;
+  --pf-fx-size: 16px;
+  --pf-fx-drift: 0px;
+  --pf-fx-spin: 0deg;
+  --pf-fx-dur: 4s;
+  --pf-fx-delay: 0s;
+  left: var(--pf-fx-x);
+  font-size: var(--pf-fx-size);
+  animation: pfFxFall var(--pf-fx-dur) linear var(--pf-fx-delay) forwards;
+}
+.pf-fx-banner {
+  position: absolute;
+  left: 50%;
+  top: 24%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 28px;
+  border-radius: 18px;
+  background: var(--pf-fx-solid);
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 14px 44px rgba(var(--pf-fx-rgb), 0.45);
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0;
+  animation: pfFxBanner 3.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.pf-fx-title { font-size: 30px; font-weight: 900; letter-spacing: 0.02em; }
+.pf-fx-names { font-size: 13px; font-weight: 700; opacity: 0.92; }
+
+@keyframes pfFxVeil {
+  0% { opacity: 0; }
+  18% { opacity: 1; }
+  100% { opacity: 0; }
+}
+/* 좌우로 흔들리며 떨어지는 꽃잎 — 낙하는 등속, 흔들림·회전은 구간별로 준다. */
+@keyframes pfFxFall {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg); }
+  6% { opacity: 1; }
+  25% { transform: translate3d(calc(var(--pf-fx-drift) * 0.5), 30vh, 0) rotate(calc(var(--pf-fx-spin) * 0.25)); }
+  50% { transform: translate3d(calc(var(--pf-fx-drift) * -0.45), 60vh, 0) rotate(calc(var(--pf-fx-spin) * 0.5)); }
+  75% { transform: translate3d(calc(var(--pf-fx-drift) * 0.8), 90vh, 0) rotate(calc(var(--pf-fx-spin) * 0.75)); }
+  88% { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(0, 124vh, 0) rotate(var(--pf-fx-spin)); }
+}
+@keyframes pfFxBanner {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  12% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  20% { transform: translate(-50%, -50%) scale(1); }
+  76% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -58%) scale(0.96); }
+}
+
 /* --- 토글 버튼 + 오늘의 급등/급락 요약 (컬럼 토글 줄 맨 앞) --- */
 .pf-heat-toggle {
   display: inline-flex;
@@ -3195,7 +3304,8 @@ body.pf-heat-mode .pf-table tbody tr[data-heat-limit] > td:first-child {
   .pf-heat-cell[data-heat-level="5"] .pf-heat-val,
   .pf-heat-cell[data-heat-limit] .pf-heat-val { font-size: 13px; }
   .pf-heat-val { padding: 2px 5px; }
-  .pf-heat-limit-tag { display: none; }
+  .pf-fx-title { font-size: 22px; }
+  .pf-fx-banner { padding: 11px 20px; }
 }
 /* 간편 보기는 등락률 칸이 56px 고정이라 배지가 잘린다 — 컬러 모드에서만 넓힌다. */
 body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
@@ -3204,8 +3314,22 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 @media (prefers-reduced-motion: reduce) {
   .pf-heat-val,
   .pf-heat-icon,
+  .pf-heat-swap > span,
   body.pf-heat-mode .pf-table tbody tr[data-heat-limit],
   body.pf-heat-mode .pf-table tbody tr[data-heat-limit] > td:first-child {
     animation: none !important;
   }
+  /* 교대 표시는 움직임 자체가 전달 수단이라, 멈춰 세우면 두 글자가 겹친다.
+     이때만 종전처럼 작은 라벨을 옆에 붙여 둘 다 읽히게 한다. */
+  .pf-heat-swap { display: inline-flex; gap: 3px; }
+  .pf-heat-swap > .pf-heat-swap-tag {
+    padding: 0 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.26);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+  }
+  /* 전면 이펙트는 JS 가 아예 만들지 않지만, 혹시 남아도 정지시킨다. */
+  .pf-fx { display: none !important; }
 }
