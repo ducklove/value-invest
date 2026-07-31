@@ -22,6 +22,14 @@ async def get_period_report_periods(request: Request):
     return await period_reports.available_periods(user["google_sub"])
 
 
+@router.get("/api/portfolio/period-reports/performance")
+async def get_period_report_performance(request: Request):
+    """연도별 실적 + 각 연도의 월별 실적. 저장된 보고서와 무관하게 NAV
+    스냅샷에서 매번 계산한다(보고서를 생성하지 않은 기간도 보인다)."""
+    user = _require_user(await get_current_user(request))
+    return await period_reports.period_performance(user["google_sub"])
+
+
 @router.get("/api/portfolio/period-reports")
 async def list_period_reports(
     request: Request,

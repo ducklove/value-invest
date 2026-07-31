@@ -200,6 +200,24 @@ def test_performance_tab_includes_period_report_panel():
     assert ".pf-period-report-table" in styles
     assert ".pf-period-note" in styles
 
+    # 기간 종료 스냅샷(보고서 안, 기본 접힘) — 행이 많아 2열 그리드에서 풀폭.
+    assert "기간 종료 스냅샷" in reports
+    assert "function _pfEndSnapshotSection(" in reports
+    assert "function pfTogglePeriodEndSnapshot()" in reports
+    assert 'id="pfPeriodEndSnapshotBody"' in reports
+    assert ".pf-period-report-sections .pf-period-report-wide" in styles
+    assert ".pf-period-snapshot-group" in styles
+
+    # 연간 실적 목록(보고서 카드 아래) — 연도 행 클릭으로 월간 목록 펼침.
+    assert 'id="pfPeriodPerformanceWrap"' in html
+    assert 'id="pfPeriodPerformanceContent"' in html
+    assert html.find('id="pfPeriodReportContent"') < html.find('id="pfPeriodPerformanceWrap"')
+    assert "/api/portfolio/period-reports/performance" in reports
+    assert "function pfTogglePerformanceYear(" in reports
+    assert "async function pfSelectPeriodFromPerformance(" in reports
+    assert ".pf-perf-year" in styles
+    assert ".pf-perf-month-row" in styles
+
 def test_cashflow_mutations_refresh_today_and_holdings_before_rerender():
     data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
     cashflows = (JS / "portfolio-cashflows.js").read_text(encoding="utf-8")
@@ -663,6 +681,10 @@ def test_performance_tab_includes_risk_panel():
     assert "reportApiError(e, '리스크 지표', { silent: true });" in risk
     # 데이터 부족 시 친절한 빈 상태 문구.
     assert "데이터가 부족합니다" in risk
+    # 최고/최악 월간 타일 + 값 없는 베타·상관은 빈 타일 대신 생략.
+    assert "'최고 월간'" in risk
+    assert "'최악 월간'" in risk
+    assert "베타·상관계수는 생략" in risk
     # 포맷터는 portfolio-render.js / utils.js 공용 헬퍼 재사용(중복 정의 금지).
     assert "function fmtPct(" not in risk
     assert "function returnClass(" not in risk

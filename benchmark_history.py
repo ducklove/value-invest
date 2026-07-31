@@ -39,6 +39,15 @@ YF_TICKER: dict[str, str] = {
     "GOLD":  "GC=F",
 }
 
+# 포트폴리오 쪽 벤치마크 코드(services.portfolio.benchmarks 의 IDX_* 계열)와
+# benchmark_daily 에 저장되는 시리즈 코드(YF_TICKER 키)는 이름이 다르다.
+# 이 매핑 없이 IDX_KOSPI 로 조회하면 행이 0개라 지표가 조용히 비어버린다.
+SERIES_CODE_ALIASES: dict[str, str] = {
+    "IDX_KOSPI": "KOSPI",
+    "IDX_SP500": "SP500",
+    "IDX_GOLD": "GOLD",
+}
+
 # How far back lazy backfill will try to reach on first request. Ten years
 # is plenty for any period button on the NAV chart and still < 3000 rows
 # per code.
@@ -75,6 +84,18 @@ def _download_sync(ticker: str, start: str, end: str) -> list[dict]:
             continue
         out.append({"date": d.strftime("%Y-%m-%d"), "close": round(float(v), 4)})
     return out
+
+
+def series_code(code: str | None) -> str | None:
+    """벤치마크 코드 → benchmark_daily 에 실제로 저장된 시리즈 코드.
+
+    IDX_KOSPI 같은 포트폴리오 코드는 별칭으로 흡수하고, 추적하지 않는
+    코드(IDX_KOSDAQ, FX_* 등)는 None 을 돌려준다 — 호출부는 None 이면
+    "벤치마크 비교 불가"로 처리해야 한다.
+    """
+    up = (code or "").strip().upper()
+    up = SERIES_CODE_ALIASES.get(up, up)
+    return up if up in YF_TICKER else None
 
 
 async def _download(ticker: str, start: str, end: str) -> list[dict]:
@@ -193,7 +214,9 @@ async def update_benchmark_today(codes: list[str] | None = None) -> dict[str, in
 
 
 __all__ = [
+    "SERIES_CODE_ALIASES",
     "YF_TICKER",
     "backfill_benchmark",
+    "series_code",
     "update_benchmark_today",
 ]

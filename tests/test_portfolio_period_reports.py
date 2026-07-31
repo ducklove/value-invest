@@ -72,7 +72,7 @@ async def test_monthly_period_report_builds_change_snapshot(temp_db):
     with patch.object(period_reports, "today_kst_date", return_value=date(2026, 7, 1)):
         report = await period_reports.build_period_report("u1", "monthly", "2026-06")
 
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert report["period"]["type"] == "monthly"
     assert report["period"]["key"] == "2026-06"
     assert report["period"]["baseline_date"] == "2026-05-31"
@@ -113,6 +113,94 @@ async def test_monthly_period_report_builds_change_snapshot(temp_db):
     assert removed[0]["stock_code"] == "BBB"
     assert report["allocation"]["groups"][0]["group_name"] in {"한국주식", "해외주식"}
     assert report["source_hash"]
+
+
+@pytest.mark.asyncio
+async def test_period_report_includes_end_of_period_snapshot(temp_db):
+    await _seed_period_fixture()
+
+    with patch.object(period_reports, "today_kst_date", return_value=date(2026, 7, 1)):
+        report = await period_reports.build_period_report("u1", "monthly", "2026-06")
+
+    snapshot = report["holdings"]["end_snapshot"]
+    assert snapshot["date"] == "2026-06-30"
+    assert snapshot["position_count"] == 2
+    assert snapshot["total_market_value"] == 1_400_000
+    assert snapshot["total_cost_basis"] == 1_310_000
+    assert snapshot["total_gain_value"] == 90_000
+
+    # 평가액 내림차순 + 비중/손익까지 한 행에서 읽을 수 있어야 한다.
+    codes = [row["stock_code"] for row in snapshot["positions"]]
+    assert codes == ["AAA", "CCC"]
+    top = snapshot["positions"][0]
+    assert top["market_value"] == 900_000
+    assert top["quantity"] == 9
+    assert top["weight_pct"] == pytest.approx(64.2857, abs=1e-3)
+    assert top["gain_value"] == 90_000
+    assert top["gain_pct"] == pytest.approx(11.1111, abs=1e-3)
+    assert snapshot["positions"][1]["gain_value"] == 0
+
+    groups = {row["group_name"]: row for row in snapshot["groups"]}
+    assert groups["한국주식"]["market_value"] == 900_000
+    assert groups["해외주식"]["stock_count"] == 1
+
+    md = period_reports.render_report_markdown(report)
+    assert "## 기간 종료 스냅샷 (2026-06-30)" in md
+
+
+@pytest.mark.asyncio
+async def test_period_performance_breaks_years_into_months(temp_db):
+    await seed_user("u1", "user@example.com", "User")
+    db = await db_repo.get_db()
+    await db.executemany(
+        """
+        INSERT INTO portfolio_snapshots
+        (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("u1", "2025-11-28", 1_000_000, 1_000_000, 1000.0, 1000.0, 1300.0),
+            ("u1", "2025-12-31", 1_100_000, 1_000_000, 1100.0, 1000.0, 1300.0),
+            ("u1", "2026-01-30", 1_210_000, 1_000_000, 1210.0, 1000.0, 1300.0),
+            ("u1", "2026-02-27", 1_089_000, 1_000_000, 1089.0, 1000.0, 1300.0),
+        ],
+    )
+    await db.commit()
+
+    with patch.object(period_reports, "today_kst_date", return_value=date(2026, 3, 5)):
+        out = await period_reports.period_performance("u1")
+
+    years = {row["key"]: row for row in out["years"]}
+    assert [row["key"] for row in out["years"]] == ["2026", "2025"]
+
+    # 2026: 기준은 전년도 마지막 스냅샷(12-31) → 1089/1100 - 1 = -1%
+    assert years["2026"]["baseline_date"] == "2025-12-31"
+    assert years["2026"]["baseline_mode"] == "previous_close"
+    assert years["2026"]["return_pct"] == pytest.approx(-1.0, abs=1e-6)
+    assert years["2026"]["is_complete"] is False
+    assert [m["key"] for m in years["2026"]["months"]] == ["2026-02", "2026-01"]
+    assert years["2026"]["months"][1]["return_pct"] == pytest.approx(10.0, abs=1e-6)
+    assert years["2026"]["months"][0]["return_pct"] == pytest.approx(-10.0, abs=1e-6)
+
+    # 2025: 시작 전 스냅샷이 없어 기간 내 첫 스냅샷 기준(11-28) → +10%
+    assert years["2025"]["baseline_mode"] == "first_snapshot_in_period"
+    assert years["2025"]["return_pct"] == pytest.approx(10.0, abs=1e-6)
+    assert years["2025"]["is_complete"] is True
+    assert [m["key"] for m in years["2025"]["months"]] == ["2025-12", "2025-11"]
+    assert years["2025"]["months"][0]["return_pct"] == pytest.approx(10.0, abs=1e-6)
+    # 11월은 기준이 없어 기간 내 첫 스냅샷 자기 자신 → 0%
+    assert years["2025"]["months"][1]["return_pct"] == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_period_performance_route_returns_empty_without_snapshots(temp_db):
+    await seed_user("u1", "user@example.com", "User")
+    user = {"google_sub": "u1", "email": "user@example.com"}
+
+    with patch("routes.portfolio_reports.get_current_user", AsyncMock(return_value=user)):
+        out = await reports_route.get_period_report_performance(_request())
+
+    assert out["years"] == []
 
 
 def test_composition_changes_classifies_negative_quantity_as_futures_short():

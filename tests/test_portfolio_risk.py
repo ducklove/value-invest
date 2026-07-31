@@ -130,6 +130,36 @@ class RiskMathTests(unittest.TestCase):
         self.assertEqual(out_1y["points"], 6)
         self.assertFalse(out_1y["insufficient"])
 
+    def test_monthly_returns_use_month_end_points(self):
+        # 12-31 기준 → 1월 +10%, 2월 -10%, 3월 +20%
+        series = _series([
+            ("2025-12-31", 100.0),
+            ("2026-01-15", 105.0),
+            ("2026-01-30", 110.0),
+            ("2026-02-27", 99.0),
+            ("2026-03-31", 118.8),
+        ])
+        months = risk.monthly_returns(risk.clean_series(series, "nav"))
+        # 기준(직전 달 마지막 포인트)이 없는 2025-12 는 목록에서 빠진다.
+        self.assertEqual([m["month"] for m in months], ["2026-01", "2026-02", "2026-03"])
+        self.assertAlmostEqual(months[0]["return_pct"], 10.0, places=3)
+        self.assertEqual(months[0]["start_date"], "2025-12-31")
+        self.assertEqual(months[0]["end_date"], "2026-01-30")
+        self.assertAlmostEqual(months[1]["return_pct"], -10.0, places=3)
+        self.assertAlmostEqual(months[2]["return_pct"], 20.0, places=3)
+
+        m = risk.compute_risk_metrics(series, "ALL", today=date(2026, 4, 5))["metrics"]
+        self.assertEqual(m["best_month"]["month"], "2026-03")
+        self.assertAlmostEqual(m["best_month"]["return_pct"], 20.0, places=3)
+        self.assertEqual(m["worst_month"]["month"], "2026-02")
+        self.assertAlmostEqual(m["worst_month"]["return_pct"], -10.0, places=3)
+
+    def test_monthly_metrics_null_when_single_month(self):
+        # SERIES_A 는 2026-06 한 달뿐 — 비교 기준 달이 없어 월간 지표는 null
+        out = risk.compute_risk_metrics(SERIES_A, "ALL", today=ANCHOR_A)
+        self.assertIsNone(out["metrics"]["best_month"])
+        self.assertIsNone(out["metrics"]["worst_month"])
+
     def test_month_end_clamp(self):
         self.assertEqual(risk._shift_months(date(2026, 3, 31), 1), date(2026, 2, 28))
         self.assertEqual(risk._shift_months(date(2026, 1, 15), 12), date(2025, 1, 15))
@@ -204,7 +234,9 @@ class PortfolioRiskRouteTests(TempDbMixin):
             snap_rows,
         )
         await db.commit()
-        await benchmark_daily_repo.save_benchmark_rows("IDX_KOSPI", bench_rows)
+        # 실제 수집기(benchmark_history.YF_TICKER)가 쓰는 코드는 "KOSPI" 다 —
+        # 라우트가 IDX_KOSPI 를 이 코드로 정규화하지 못하면 베타가 비어버린다.
+        await benchmark_daily_repo.save_benchmark_rows("KOSPI", bench_rows)
 
     async def asyncTearDown(self):
         portfolio_risk_route._risk_cache.clear()
@@ -233,12 +265,37 @@ class PortfolioRiskRouteTests(TempDbMixin):
         self.assertLessEqual(m["max_drawdown_pct"], 0)
         self.assertEqual(m["best_day"]["return_pct"], 2.0)
         self.assertEqual(m["worst_day"]["return_pct"], -1.0)
+        # 3M 윈도면 비교 기준이 되는 직전 달 마지막 포인트가 반드시 있다.
+        self.assertIsNotNone(m["best_month"])
+        self.assertRegex(m["best_month"]["month"], r"^\d{4}-\d{2}$")
+        self.assertGreaterEqual(m["best_month"]["return_pct"], m["worst_month"]["return_pct"])
 
         bench = out["benchmark"]
         self.assertEqual(bench["code"], "IDX_KOSPI")
         self.assertEqual(bench["name"], "코스피")
         self.assertAlmostEqual(bench["beta"], 2.0, places=3)
         self.assertAlmostEqual(bench["correlation"], 1.0, places=3)
+
+    async def test_benchmark_falls_back_to_raw_code_rows(self):
+        # 정규화 코드(KOSPI)에 행이 없고 요청 코드 그대로 저장돼 있어도 찾는다.
+        db = await db_repo.get_db()
+        await db.execute("DELETE FROM benchmark_daily WHERE code = 'KOSPI'")
+        await db.commit()
+        rows = await benchmark_daily_repo.get_benchmark_rows("KOSPI")
+        self.assertEqual(rows, [])
+
+        today = today_kst_date()
+        close = 300.0
+        legacy_rows = []
+        for i in range(100):
+            legacy_rows.append({"date": (today - timedelta(days=100 - i)).isoformat(), "close": close})
+            close *= 1 + (0.02 if i % 2 == 0 else -0.01) / 2
+        await benchmark_daily_repo.save_benchmark_rows("IDX_KOSPI", legacy_rows)
+
+        user = {"google_sub": "u1"}
+        with patch("routes.portfolio_risk.get_current_user", AsyncMock(return_value=user)):
+            out = await portfolio_risk_route.get_portfolio_risk(_request(), window="3M", benchmark=None)
+        self.assertAlmostEqual(out["benchmark"]["beta"], 2.0, places=3)
 
     async def test_benchmark_without_rows_is_null(self):
         user = {"google_sub": "u1"}

@@ -1,11 +1,18 @@
 // Monthly/annual portfolio period report panel.
 // The saved server artifact is a versioned JSON snapshot; this file only
 // selects a period, triggers generation, and renders that stable payload.
+//
+// 카드 아래의 '연간 실적' 목록만 예외로 저장된 보고서가 아니라
+// GET /api/portfolio/period-reports/performance (NAV 스냅샷에서 매번 계산)
+// 을 그린다 — 보고서를 생성하지 않은 기간도 실적은 보여야 하기 때문.
 let _pfPeriodReportOptions = { monthly: [], annual: [], defaults: {}, saved: [] };
 let _pfPeriodReportType = 'monthly';
 let _pfPeriodReportKey = '';
 let _pfPeriodReportLoaded = false;
 let _pfPeriodReportBusy = false;
+let _pfPeriodPerformance = null;
+// 펼쳐 둔 연도 키. 화면 재렌더(보고서 재생성 등) 후에도 유지된다.
+const _pfPeriodPerfExpanded = new Set();
 
 function _pfPeriodReportStatus(text, state = 'idle') {
   const el = document.getElementById('pfPeriodReportStatus');
@@ -114,6 +121,69 @@ function _pfRenderReportTable(rows, columns) {
   </table></div>`;
 }
 
+// 기간 종료 시점의 포트폴리오 전체 스냅샷(schema v3~). 행이 많을 수 있어
+// 기본은 접어 두고, 요약(기준일·종목 수·평가액·손익·그룹 비중)만 보여준다.
+function _pfEndSnapshotSection(snapshot) {
+  const positions = (snapshot && snapshot.positions) || [];
+  if (!positions.length) {
+    return `<section class="pf-period-report-wide">
+      <h4>기간 종료 스냅샷</h4>
+      <div class="pf-risk-empty">이 보고서에는 종료 시점 스냅샷이 없습니다. 생성/갱신을 누르면 최신 형식으로 다시 만들어집니다.</div>
+    </section>`;
+  }
+  const gainCls = typeof returnClass === 'function' ? returnClass(snapshot.total_gain_value) : '';
+  const chips = [
+    `기준일 ${escapeHtml(snapshot.date || '-')}`,
+    `보유 ${Number(snapshot.position_count || positions.length).toLocaleString()}종목`,
+    `평가액 ${_pfReportKrw(snapshot.total_market_value)}`,
+  ];
+  if (snapshot.total_gain_value !== null && snapshot.total_gain_value !== undefined) {
+    chips.push(`평가손익 ${_pfReportKrw(snapshot.total_gain_value)} (${_pfReportPct(snapshot.total_gain_pct)})`);
+  }
+  const groupChips = (snapshot.groups || []).map(g =>
+    `<span class="pf-period-snapshot-group">${escapeHtml(g.group_name || '기타')} <b>${escapeHtml(_pfReportPct(g.weight_pct, false))}</b></span>`
+  ).join('');
+  const cols = [
+    { label: '종목', render: r => `${escapeHtml(r.stock_name || r.stock_code)}<div class="pf-risk-sub">${escapeHtml(r.stock_code || '')}</div>` },
+    { label: '그룹', render: r => escapeHtml(r.group_name || '기타') },
+    { label: '수량', render: r => escapeHtml(_pfReportQty(r.quantity)) },
+    { label: '평가액', render: r => escapeHtml(_pfReportKrw(r.market_value)) },
+    { label: '비중', render: r => escapeHtml(_pfReportPct(r.weight_pct, false)) },
+    {
+      label: '평가손익',
+      render: r => (r.gain_value === null || r.gain_value === undefined)
+        ? '-'
+        : `<span class="${returnClass(r.gain_value)}">${escapeHtml(_pfReportKrw(r.gain_value))}</span><div class="pf-risk-sub">${escapeHtml(_pfReportPct(r.gain_pct))}</div>`,
+    },
+  ];
+  return `<section class="pf-period-report-wide">
+    <h4>기간 종료 스냅샷</h4>
+    <div class="pf-period-snapshot-head">
+      <div class="pf-period-report-meta">
+        ${chips.map(c => `<span class="${c.startsWith('평가손익') ? escapeHtml(gainCls) : ''}">${escapeHtml(c)}</span>`).join('')}
+      </div>
+      <button class="pf-mini-btn" type="button" id="pfPeriodEndSnapshotToggle"
+              aria-expanded="false" aria-controls="pfPeriodEndSnapshotBody"
+              onclick="pfTogglePeriodEndSnapshot()">보유 종목 보기</button>
+    </div>
+    ${groupChips ? `<div class="pf-period-snapshot-groups">${groupChips}</div>` : ''}
+    <div id="pfPeriodEndSnapshotBody" hidden>${_pfRenderReportTable(positions, cols)}</div>
+  </section>`;
+}
+
+function pfTogglePeriodEndSnapshot() {
+  const body = document.getElementById('pfPeriodEndSnapshotBody');
+  const btn = document.getElementById('pfPeriodEndSnapshotToggle');
+  if (!body) return;
+  const opening = body.hasAttribute('hidden');
+  if (opening) body.removeAttribute('hidden');
+  else body.setAttribute('hidden', '');
+  if (btn) {
+    btn.textContent = opening ? '접기' : '보유 종목 보기';
+    btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  }
+}
+
 function _pfRenderPeriodReport(saved) {
   const report = saved?.report || {};
   const period = report.period || {};
@@ -180,6 +250,7 @@ function _pfRenderPeriodReport(saved) {
     ${warnHtml}
     <div class="pf-risk-grid pf-period-report-grid">${cards.join('')}</div>
     <div class="pf-period-report-sections">
+      ${_pfEndSnapshotSection(holdings.end_snapshot)}
       <section>
         <h4>매수·편입 구성 변화</h4>
         ${_pfRenderReportTable(buyRows, compositionCols)}
@@ -207,6 +278,108 @@ function _pfRenderPeriodReport(saved) {
     </div>
   `);
   window._pfCurrentPeriodReportMarkdown = saved.report_md || '';
+}
+
+// ── 연간/월간 실적 목록 ────────────────────────────────────────────────
+// 연도 행을 누르면 그 해의 월간 실적이 펼쳐진다. 월 행을 누르면 위 셀렉트가
+// 그 달로 옮겨가 해당 월 보고서를 띄운다(저장된 기간에 한해서만 클릭 가능).
+
+function _pfPerfContent(html) {
+  const el = document.getElementById('pfPeriodPerformanceContent');
+  if (el) el.innerHTML = html;
+}
+
+function _pfPerfBaselineNote(entry) {
+  return entry.baseline_mode === 'first_snapshot_in_period'
+    ? ' · 기간 내 첫 스냅샷 기준'
+    : '';
+}
+
+function _pfPerfValueMeta(entry) {
+  const start = _pfReportKrw(entry.starting_value);
+  const end = _pfReportKrw(entry.ending_value);
+  return `${start} → ${end}`;
+}
+
+function _pfPerfRowInner(entry, caret) {
+  const cls = typeof returnClass === 'function' ? returnClass(entry.return_pct) : '';
+  const tag = entry.is_complete ? '' : '<span class="pf-perf-tag">진행 중</span>';
+  const sub = `${escapeHtml(entry.baseline_date || '')} → ${escapeHtml(entry.ending_date || '')}${escapeHtml(_pfPerfBaselineNote(entry))}`;
+  return `${caret}
+    <span class="pf-perf-key">${escapeHtml(entry.key)}${tag}</span>
+    <span class="pf-perf-value ${cls}">${escapeHtml(_pfReportPct(entry.return_pct))}</span>
+    <span class="pf-perf-meta">${escapeHtml(_pfPerfValueMeta(entry))}<span class="pf-risk-sub">${sub}</span></span>`;
+}
+
+function _pfPerfMonthRow(entry) {
+  const selectable = (_pfPeriodReportOptions.monthly || []).some(p => p.key === entry.key);
+  const attrs = selectable
+    ? ` onclick="pfSelectPeriodFromPerformance('monthly', '${escapeHtml(entry.key)}')" title="${escapeHtml(entry.key)} 보고서 보기"`
+    : ' disabled';
+  return `<button type="button" class="pf-perf-row pf-perf-month-row"${attrs}>
+    ${_pfPerfRowInner(entry, '<span class="pf-perf-caret" aria-hidden="true"></span>')}
+  </button>`;
+}
+
+function _pfPerfYearBlock(entry) {
+  const expanded = _pfPeriodPerfExpanded.has(entry.key);
+  const months = entry.months || [];
+  const caret = `<span class="pf-perf-caret" aria-hidden="true">${expanded ? '▾' : '▸'}</span>`;
+  return `<div class="pf-perf-year">
+    <button type="button" class="pf-perf-row pf-perf-year-row" aria-expanded="${expanded ? 'true' : 'false'}"
+            onclick="pfTogglePerformanceYear('${escapeHtml(entry.key)}')">
+      ${_pfPerfRowInner(entry, caret)}
+    </button>
+    <div class="pf-perf-months"${expanded ? '' : ' hidden'}>
+      ${months.length ? months.map(_pfPerfMonthRow).join('') : '<div class="pf-risk-empty">월간 스냅샷이 없습니다.</div>'}
+    </div>
+  </div>`;
+}
+
+function _pfRenderPeriodPerformance() {
+  const years = (_pfPeriodPerformance && _pfPeriodPerformance.years) || [];
+  if (!years.length) {
+    _pfPerfContent('<div class="pf-risk-empty">NAV 스냅샷이 쌓이면 연도별 실적이 여기에 표시됩니다.</div>');
+    return;
+  }
+  _pfPerfContent(`<div class="pf-perf-list">${years.map(_pfPerfYearBlock).join('')}</div>`);
+}
+
+function pfTogglePerformanceYear(key) {
+  const year = String(key || '');
+  if (_pfPeriodPerfExpanded.has(year)) _pfPeriodPerfExpanded.delete(year);
+  else _pfPeriodPerfExpanded.add(year);
+  _pfRenderPeriodPerformance();
+}
+
+async function pfSelectPeriodFromPerformance(type, key) {
+  _pfPeriodReportType = type === 'annual' ? 'annual' : 'monthly';
+  _pfPeriodReportKey = String(key || '');
+  _pfRenderPeriodSelects();
+  const wrap = document.getElementById('pfPeriodReportWrap');
+  if (wrap && typeof wrap.scrollIntoView === 'function') {
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  await _pfLoadSavedPeriodReport();
+}
+
+async function _pfLoadPeriodPerformance() {
+  try {
+    _pfPeriodPerformance = await apiFetchJson('/api/portfolio/period-reports/performance', {
+      errorMessage: '연간 실적을 불러오지 못했습니다.',
+    });
+    // 첫 로드에서는 가장 최근 연도만 펼쳐 둔다.
+    const years = _pfPeriodPerformance?.years || [];
+    if (!_pfPeriodPerfExpanded.size && years.length) _pfPeriodPerfExpanded.add(years[0].key);
+    _pfRenderPeriodPerformance();
+  } catch (e) {
+    if (e?.status === 401) {
+      _pfPerfContent('<div class="pf-risk-empty">로그인 후 연간 실적을 볼 수 있습니다.</div>');
+      return;
+    }
+    reportApiError(e, '연간 실적', { silent: true });
+    _pfPerfContent('<div class="pf-risk-empty">연간 실적을 불러오지 못했습니다.</div>');
+  }
 }
 
 async function _pfLoadSavedPeriodReport() {
@@ -247,10 +420,12 @@ async function pfLoadPeriodReportsPanel({ force = false } = {}) {
     }
     _pfRenderPeriodSelects();
     await _pfLoadSavedPeriodReport();
+    await _pfLoadPeriodPerformance();
   } catch (e) {
     if (e?.status === 401) {
       _pfPeriodReportStatus('로그인 후 이용할 수 있습니다.', 'error');
       _pfPeriodReportContent('<div class="pf-risk-empty">로그인 후 기간 보고서를 생성할 수 있습니다.</div>');
+      _pfPerfContent('<div class="pf-risk-empty">로그인 후 연간 실적을 볼 수 있습니다.</div>');
       return;
     }
     reportApiError(e, '기간 투자 보고서', { silent: true });

@@ -494,6 +494,14 @@ function trackEvent(name, params = {}) {
         <div id="pfPeriodReportContent" class="pf-period-report-content">
           <div class="pf-risk-empty">저장된 기간 보고서가 여기에 표시됩니다.</div>
         </div>
+        <!-- 보고서 저장 여부와 무관하게 NAV 스냅샷에서 계산하는 실적 목록.
+             연도 행을 누르면 그 해의 월간 실적이 펼쳐진다(portfolio-reports.js). -->
+        <div class="pf-period-perf" id="pfPeriodPerformanceWrap">
+          <h4>연간 실적</h4>
+          <div id="pfPeriodPerformanceContent" class="pf-period-perf-content">
+            <div class="pf-risk-empty">성과 탭을 열면 연도별 실적을 불러옵니다.</div>
+          </div>
+        </div>
       </div>
 
       <div class="pf-analysis-grid pf-analysis-grid-compact">

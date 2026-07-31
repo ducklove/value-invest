@@ -20,7 +20,8 @@ from repositories import snapshots as snapshots_repo
 from services.portfolio import foreign, identifiers, risk
 from services.portfolio.time_windows import today_kst_date
 
-SCHEMA_VERSION = 2
+# v3: holdings.end_snapshot(기간 종료 시점 전체 보유 스냅샷) 추가.
+SCHEMA_VERSION = 3
 VALID_PERIOD_TYPES = {"monthly", "annual"}
 MONTHLY_KEY_RE = re.compile(r"^\d{4}-\d{2}$")
 ANNUAL_KEY_RE = re.compile(r"^\d{4}$")
@@ -191,6 +192,113 @@ def _period_keys_from_nav(nav_history: list[dict], *, today: date | None = None)
         "annual": sorted(years.values(), key=lambda p: p["key"], reverse=True),
         "defaults": {"monthly": default_month, "annual": current_year},
     }
+
+
+def _nav_points(nav_history: list[dict], anchor: date) -> list[dict[str, Any]]:
+    """NAV 히스토리 → 날짜 오름차순 [{date, nav, total_value}] (앵커 이후 제외).
+
+    nav 가 0/음수/결측인 행은 수익률을 왜곡하므로 버린다
+    (services.portfolio.risk.clean_series 와 같은 규약).
+    """
+    out: list[dict[str, Any]] = []
+    anchor_iso = anchor.isoformat()
+    for row in nav_history or []:
+        d = str(row.get("date") or "")[:10]
+        if len(d) < 10 or d > anchor_iso:
+            continue
+        nav = _float_or_none(row.get("nav"))
+        if nav is None or nav <= 0:
+            continue
+        out.append({"date": d, "nav": nav, "total_value": _float_or_none(row.get("total_value"))})
+    out.sort(key=lambda r: r["date"])
+    return out
+
+
+def _performance_entry(
+    points: list[dict[str, Any]],
+    period: dict[str, Any],
+) -> dict[str, Any] | None:
+    """한 기간(월/연)의 실적 행. 기간 안에 스냅샷이 없으면 None.
+
+    수익률은 기간 보고서와 같은 NAV 기준(입출금 중립) — 기준점은 기간 시작
+    직전 마지막 스냅샷이고, 그게 없으면 기간 내 첫 스냅샷이다(그 경우
+    baseline_mode=first_snapshot_in_period 로 표시해 해석에 쓰게 한다).
+    """
+    start_date = period["start_date"]
+    end_date = period["end_date"]
+    inside = [p for p in points if start_date <= p["date"] <= end_date]
+    if not inside:
+        return None
+    before = [p for p in points if p["date"] < start_date]
+    baseline = before[-1] if before else inside[0]
+    ending = inside[-1]
+    return {
+        "type": period["type"],
+        "key": period["key"],
+        "start_date": start_date,
+        "end_date": end_date,
+        "is_complete": period["is_complete"],
+        "baseline_date": baseline["date"],
+        "ending_date": ending["date"],
+        "baseline_mode": "previous_close" if before else "first_snapshot_in_period",
+        "return_pct": _pct_change(baseline["nav"], ending["nav"]),
+        "starting_nav": _round(baseline["nav"]),
+        "ending_nav": _round(ending["nav"]),
+        "starting_value": _round(baseline["total_value"], 2),
+        "ending_value": _round(ending["total_value"], 2),
+        "value_change": _round(
+            (ending["total_value"] or 0) - (baseline["total_value"] or 0), 2
+        ) if ending["total_value"] is not None and baseline["total_value"] is not None else None,
+        "snapshot_count": len(inside),
+    }
+
+
+def build_period_performance(
+    nav_history: list[dict],
+    *,
+    today: date | None = None,
+) -> dict[str, Any]:
+    """연도별 실적 + 각 연도의 월별 실적(연도 행을 펼쳤을 때 보여줄 목록).
+
+    순수 함수 — NAV 히스토리만 있으면 계산된다(저장된 보고서와 무관하게
+    항상 최신 스냅샷 기준으로 나온다).
+    """
+    anchor = today or today_kst_date()
+    points = _nav_points(nav_history, anchor)
+    if not points:
+        return {"years": [], "anchor_date": anchor.isoformat()}
+
+    year_keys = sorted({p["date"][:4] for p in points}, reverse=True)
+    years: list[dict[str, Any]] = []
+    for year_key in year_keys:
+        try:
+            year_period = period_bounds("annual", year_key, today=anchor)
+        except PeriodReportError:
+            continue
+        entry = _performance_entry(points, year_period)
+        if not entry:
+            continue
+        month_keys = sorted(
+            {p["date"][:7] for p in points if p["date"][:4] == year_key},
+            reverse=True,
+        )
+        months: list[dict[str, Any]] = []
+        for month_key in month_keys:
+            try:
+                month_period = period_bounds("monthly", month_key, today=anchor)
+            except PeriodReportError:
+                continue
+            month_entry = _performance_entry(points, month_period)
+            if month_entry:
+                months.append(month_entry)
+        entry["months"] = months
+        years.append(entry)
+    return {"years": years, "anchor_date": anchor.isoformat()}
+
+
+async def period_performance(google_sub: str) -> dict[str, Any]:
+    nav_history = await snapshots_repo.get_nav_history(google_sub)
+    return build_period_performance(nav_history)
 
 
 async def available_periods(google_sub: str) -> dict[str, Any]:
@@ -669,6 +777,68 @@ def _top_holdings(rows: list[dict], limit: int = 10) -> list[dict]:
     ]
 
 
+def _end_snapshot(rows: list[dict], snapshot_date: str | None) -> dict[str, Any]:
+    """기간 종료 시점의 포트폴리오 전체 스냅샷(보유 종목 전량 + 그룹 집계).
+
+    top_holdings_end 는 상위 10개만 담는 요약이라, "그 기간이 끝났을 때 내
+    포트폴리오가 어떤 모습이었나"를 그대로 보려면 전체 행이 필요하다.
+    """
+    weight_total = _portfolio_total_for_weight(rows)
+    positions: list[dict[str, Any]] = []
+    total_value = 0.0
+    total_cost = 0.0
+    has_cost = False
+    for row in sorted(rows, key=lambda r: float(r.get("market_value") or 0), reverse=True):
+        market_value = _float_or_none(row.get("market_value")) or 0.0
+        cost_basis = _float_or_none(row.get("cost_basis"))
+        gain_value = (market_value - cost_basis) if cost_basis is not None else None
+        total_value += market_value
+        if cost_basis is not None:
+            total_cost += cost_basis
+            has_cost = True
+        positions.append({
+            "stock_code": row.get("stock_code"),
+            "stock_name": row.get("stock_name") or row.get("stock_code"),
+            "group_name": row.get("group_name") or "기타",
+            "quantity": _round(_row_quantity(row), 6),
+            "unit_price": _round(_row_unit_price(row), 4),
+            "avg_price_krw": _round(_float_or_none(row.get("avg_price_krw")), 4),
+            "market_value": _round(market_value, 2),
+            "cost_basis": _round(cost_basis, 2),
+            "gain_value": _round(gain_value, 2),
+            "gain_pct": _round(gain_value / cost_basis * 100.0) if (cost_basis or 0) > 0 and gain_value is not None else None,
+            "weight_pct": _weight_pct(_position_value_for_weight(row), weight_total),
+        })
+
+    groups: dict[str, dict[str, Any]] = {}
+    for position in positions:
+        name = position["group_name"]
+        item = groups.setdefault(name, {"group_name": name, "market_value": 0.0, "stock_count": 0})
+        item["market_value"] += float(position["market_value"] or 0)
+        item["stock_count"] += 1
+    group_rows = [
+        {
+            "group_name": item["group_name"],
+            "market_value": _round(item["market_value"], 2),
+            "stock_count": item["stock_count"],
+            "weight_pct": _round(item["market_value"] / total_value * 100.0) if total_value > 0 else None,
+        }
+        for item in sorted(groups.values(), key=lambda g: g["market_value"], reverse=True)
+    ]
+
+    total_gain = (total_value - total_cost) if has_cost else None
+    return {
+        "date": snapshot_date,
+        "position_count": len(positions),
+        "total_market_value": _round(total_value, 2),
+        "total_cost_basis": _round(total_cost, 2) if has_cost else None,
+        "total_gain_value": _round(total_gain, 2),
+        "total_gain_pct": _round(total_gain / total_cost * 100.0) if has_cost and total_cost > 0 and total_gain is not None else None,
+        "groups": group_rows,
+        "positions": positions,
+    }
+
+
 def _data_quality(
     *,
     warnings: list[str],
@@ -832,6 +1002,22 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         lines.append(
             f"- {row['group_name']}: {_fmt_pct(row.get('start_weight_pct'))} -> {_fmt_pct(row.get('end_weight_pct'))} ({_fmt_pct(row.get('weight_change_ppt'))}p)"
         )
+    end_snapshot = (report.get("holdings") or {}).get("end_snapshot") or {}
+    positions = end_snapshot.get("positions") or []
+    if positions:
+        lines.extend([
+            "",
+            f"## 기간 종료 스냅샷 ({end_snapshot.get('date') or '-'})",
+            f"- 보유 {end_snapshot.get('position_count', len(positions))}종목 · 평가액 {_fmt_krw(end_snapshot.get('total_market_value'))}"
+            + (f" · 평가손익 {_fmt_krw(end_snapshot.get('total_gain_value'))} ({_fmt_pct(end_snapshot.get('total_gain_pct'))})"
+               if end_snapshot.get("total_gain_value") is not None else ""),
+        ])
+        for row in positions:
+            lines.append(
+                f"- {row['stock_name']} {row['stock_code']}: {_fmt_krw(row.get('market_value'))} "
+                f"(비중 {_fmt_pct(row.get('weight_pct'))}, 손익 {_fmt_pct(row.get('gain_pct'))})"
+            )
+
     notes = report.get("review_notes") or []
     if notes:
         lines.extend(["", "## 검토 메모"])
@@ -921,6 +1107,7 @@ async def build_period_report(
             "gross_value_change": _round(gross_change, 2),
             "turnover_proxy_pct": _round(gross_change / turnover_base * 100.0),
             "changes": holding_changes,
+            "end_snapshot": _end_snapshot(end_rows, end_rows[0]["date"] if end_rows else end_snapshot.get("date")),
         },
         "data_quality": _data_quality(
             warnings=warnings,

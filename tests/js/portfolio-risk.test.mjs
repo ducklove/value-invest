@@ -51,6 +51,8 @@ const FULL_PAYLOAD = {
     sharpe_ratio: 1.45,
     best_day: { date: "2026-06-02", return_pct: 10.0 },
     worst_day: { date: "2026-06-03", return_pct: -10.0 },
+    best_month: { month: "2026-03", return_pct: 6.5, start_date: "2026-02-27", end_date: "2026-03-31" },
+    worst_month: { month: "2026-04", return_pct: -4.25, start_date: "2026-03-31", end_date: "2026-04-30" },
   },
   benchmark: { code: "IDX_KOSPI", name: "코스피", beta: 1.1, correlation: 0.8, overlap_returns: 240 },
   insufficient: false,
@@ -94,7 +96,7 @@ test("리스크 타일 — 공용 포맷터(fmtPct/returnClass) 기반 포맷과
 
   const content = w.document.getElementById("pfRiskContent");
   const tiles = [...content.querySelectorAll(".pf-nav-ret-card")];
-  assert.equal(tiles.length, 10);
+  assert.equal(tiles.length, 12);
 
   const tileByLabel = (label) =>
     tiles.find((t) => t.querySelector(".pf-nav-ret-label").textContent === label);
@@ -123,10 +125,43 @@ test("리스크 타일 — 공용 포맷터(fmtPct/returnClass) 기반 포맷과
   // 최고/최악 일간 + 날짜 서브라벨.
   assert.equal(valueOf("최고 일간").textContent, "+10.00%");
   assert.equal(tileByLabel("최악 일간").querySelector(".pf-risk-sub").textContent, "2026-06-03");
+  // 최고/최악 월간 — 값 + '월 · 측정구간' 서브라벨.
+  assert.equal(valueOf("최고 월간").textContent, "+6.50%");
+  assert.ok(valueOf("최고 월간").className.includes("positive"));
+  assert.equal(
+    tileByLabel("최고 월간").querySelector(".pf-risk-sub").textContent,
+    "2026-03 · 2026-02-27 → 2026-03-31",
+  );
+  assert.equal(valueOf("최악 월간").textContent, "-4.25%");
+  assert.ok(valueOf("최악 월간").className.includes("negative"));
   // 기간/벤치마크 메타 라인.
   const range = content.querySelector(".pf-chart-range");
   assert.match(range.textContent, /2025-06-10 ~ 2026-06-09/);
   assert.match(range.textContent, /벤치마크 코스피/);
+});
+
+test("베타·상관계수는 값이 없으면 빈 타일 대신 생략하고 이유를 적는다", async () => {
+  // 벤치마크 종가와 겹치는 표본이 모자라면 서버가 beta/correlation 을 null 로 준다.
+  const noBeta = {
+    ...FULL_PAYLOAD,
+    benchmark: { code: "IDX_KOSPI", name: "코스피", beta: null, correlation: null, overlap_returns: 3 },
+  };
+  const { w } = loadRiskPanel({ "1Y": noBeta });
+  await w.pfLoadRiskPanel();
+
+  const content = w.document.getElementById("pfRiskContent");
+  const labels = [...content.querySelectorAll(".pf-nav-ret-label")].map((el) => el.textContent);
+  assert.ok(!labels.includes("베타"));
+  assert.ok(!labels.includes("상관계수"));
+  assert.equal(labels.filter((l) => l === "최고 월간").length, 1);
+  assert.match(content.querySelector(".pf-chart-range").textContent, /표본이 부족해 베타·상관계수는 생략/);
+
+  // 벤치마크 자체가 없을 때도 마찬가지.
+  const { w: w2 } = loadRiskPanel({ "1Y": { ...FULL_PAYLOAD, benchmark: null } });
+  await w2.pfLoadRiskPanel();
+  const content2 = w2.document.getElementById("pfRiskContent");
+  assert.equal(content2.querySelectorAll(".pf-nav-ret-card").length, 10);
+  assert.match(content2.querySelector(".pf-chart-range").textContent, /벤치마크 종가 데이터가 없어/);
 });
 
 test("데이터 부족(insufficient) — 친절한 빈 상태 문구", async () => {

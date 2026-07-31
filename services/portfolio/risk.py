@@ -22,6 +22,9 @@ repositories.benchmark_daily.get_benchmark_rows() 결과([{date, close}])를
   /100 해서 넘긴다.
 * MDD: 누적 최고점(running peak) 대비 최대 낙폭(음수 %). peak/trough 날짜 포함.
   current drawdown 은 마지막 포인트의 running peak 대비 낙폭.
+* 월간 수익률: 각 달의 마지막 포인트를 그 달의 종가로 보고 직전 달 마지막
+  포인트 대비 수익률. 윈도 안 첫 달은 기준점이 없어 건너뛴다(윈도 base 가
+  전월 말 스냅샷이면 그 다음 달부터 온전히 계산된다).
 * beta / correlation: 날짜 교집합 위에서 연속 페어 수익률의 Cov/Var(표본),
   Pearson 상관. 겹치는 수익률 표본이 MIN_BENCHMARK_RETURNS 미만이면 null.
 
@@ -57,6 +60,8 @@ _EMPTY_METRICS: dict = {
     "sharpe_ratio": None,
     "best_day": None,
     "worst_day": None,
+    "best_month": None,
+    "worst_month": None,
 }
 
 
@@ -148,6 +153,41 @@ def simple_returns(points: list[tuple[str, float]]) -> list[tuple[str, float]]:
         if prev <= 0:  # clean_series 가 거르지만 방어적으로 한 번 더
             continue
         out.append((points[i][0], cur / prev - 1.0))
+    return out
+
+
+def month_end_points(points: list[tuple[str, float]]) -> list[tuple[str, str, float]]:
+    """각 달의 마지막 포인트 [(YYYY-MM, 날짜, 값)] — 날짜 오름차순 입력 전제."""
+    out: list[tuple[str, str, float]] = []
+    for d, v in points:
+        month = str(d)[:7]
+        if out and out[-1][0] == month:
+            out[-1] = (month, d, v)
+        else:
+            out.append((month, d, v))
+    return out
+
+
+def monthly_returns(points: list[tuple[str, float]]) -> list[dict]:
+    """월별 수익률 [{month, return_pct, start_date, end_date}].
+
+    직전 달 마지막 포인트 → 그 달 마지막 포인트의 단순 수익률이라, 스냅샷이
+    있는 첫 달은 기준이 없어 빠진다. 마지막 달은 아직 진행 중일 수 있다
+    (달 마지막 포인트가 곧 시리즈 마지막 포인트).
+    """
+    ends = month_end_points(points)
+    out: list[dict] = []
+    for i in range(1, len(ends)):
+        _, prev_date, prev_value = ends[i - 1]
+        month, cur_date, cur_value = ends[i]
+        if prev_value <= 0:
+            continue
+        out.append({
+            "month": month,
+            "return_pct": _round((cur_value / prev_value - 1.0) * 100.0),
+            "start_date": prev_date,
+            "end_date": cur_date,
+        })
     return out
 
 
@@ -304,6 +344,11 @@ def compute_risk_metrics(
             worst = min(rets, key=lambda r: r[1])
             metrics["best_day"] = {"date": best[0], "return_pct": _round(best[1] * 100.0)}
             metrics["worst_day"] = {"date": worst[0], "return_pct": _round(worst[1] * 100.0)}
+
+        months = monthly_returns(points)
+        if months:
+            metrics["best_month"] = max(months, key=lambda r: r["return_pct"])
+            metrics["worst_month"] = min(months, key=lambda r: r["return_pct"])
 
     benchmark_out: dict | None = None
     bench_points = clean_series(benchmark_rows, "close")

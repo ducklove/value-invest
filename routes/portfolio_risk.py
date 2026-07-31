@@ -16,6 +16,7 @@ import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+import benchmark_history
 from cache_layer import MemoryTTLCache
 from deps import get_current_user
 from repositories import benchmark_daily as benchmark_daily_repo
@@ -81,9 +82,16 @@ async def get_portfolio_risk(
     bench_rows: list[dict] = []
     if nav_series:
         # NAV 시리즈 시작일 이후 구간만 읽는다(교집합 밖 데이터는 쓸 일 없음).
-        bench_rows = await benchmark_daily_repo.get_benchmark_rows(
-            bench_code, start=str(nav_series[0].get("date") or "") or None
-        )
+        start = str(nav_series[0].get("date") or "") or None
+        # benchmark_daily 는 KOSPI/SP500/GOLD 로 저장되고 포트폴리오 쪽 코드는
+        # IDX_KOSPI 계열이다 — 정규화하지 않으면 행이 0개라 베타·상관이 조용히
+        # 비어버린다. 정규화 코드로 못 찾으면 원래 코드로 한 번 더 시도한다.
+        for code in dict.fromkeys([benchmark_history.series_code(bench_code), bench_code]):
+            if not code:
+                continue
+            bench_rows = await benchmark_daily_repo.get_benchmark_rows(code, start=start)
+            if bench_rows:
+                break
 
     result = risk.compute_risk_metrics(
         nav_series,

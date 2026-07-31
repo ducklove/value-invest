@@ -2,7 +2,7 @@
 //
 // GET /api/portfolio/risk?window=… (routes/portfolio_risk.py) 를 소비해
 // 누적/연환산 수익률, 변동성, MDD(기간), 현재 낙폭, 샤프, 베타·상관
-// (vs 벤치마크), 최고/최악 일간 타일을 렌더링한다.
+// (vs 벤치마크), 최고/최악 일간·월간 타일을 렌더링한다.
 //
 // - lazy: 성과 탭이 처음 보일 때 pfSwitchTab(portfolio-performance.js)이
 //   pfLoadRiskPanel() 을 호출한다. 앱 시작 시에는 아무것도 조회하지 않음.
@@ -69,7 +69,13 @@ function _pfRenderRiskPanel(data) {
     : '';
   const best = m.best_day || null;
   const worst = m.worst_day || null;
+  const bestMonth = m.best_month || null;
+  const worstMonth = m.worst_month || null;
   const benchSub = benchName ? `vs ${escapeHtml(benchName)}` : '';
+  // 월 서브라벨: 그 달 수익률을 잰 구간(직전 달 마지막 → 그 달 마지막 스냅샷).
+  const monthSub = (row) => (row?.start_date && row?.end_date)
+    ? `${escapeHtml(row.start_date)} → ${escapeHtml(row.end_date)}`
+    : '';
 
   const tiles = [
     _pfRiskTile('누적 수익률', pct(m.cumulative_return_pct), returnClass(m.cumulative_return_pct)),
@@ -78,18 +84,35 @@ function _pfRenderRiskPanel(data) {
     _pfRiskTile('최대 낙폭 (MDD)', pct(m.max_drawdown_pct), returnClass(m.max_drawdown_pct), mddSub),
     _pfRiskTile('현재 낙폭', pct(m.current_drawdown_pct), returnClass(m.current_drawdown_pct)),
     _pfRiskTile('샤프 지수', _pfRiskNum(m.sharpe_ratio)),
-    _pfRiskTile('베타', _pfRiskNum(bench?.beta), '', benchSub),
-    _pfRiskTile('상관계수', _pfRiskNum(bench?.correlation), '', benchSub),
+  ];
+  // 베타·상관계수는 벤치마크 일별 종가와 겹치는 표본이 20일 이상이어야 나온다.
+  // 값이 없을 때 '-' 타일을 남기면 "왜 있는지 모를 빈 칸"이 되므로 아예 빼고,
+  // 이유는 아래 메타 줄에 적는다.
+  if (bench && bench.beta !== null && bench.beta !== undefined) {
+    tiles.push(_pfRiskTile('베타', _pfRiskNum(bench.beta), '', benchSub));
+  }
+  if (bench && bench.correlation !== null && bench.correlation !== undefined) {
+    tiles.push(_pfRiskTile('상관계수', _pfRiskNum(bench.correlation), '', benchSub));
+  }
+  tiles.push(
     _pfRiskTile('최고 일간', best ? pct(best.return_pct) : '-', returnClass(best?.return_pct), best?.date ? escapeHtml(best.date) : ''),
     _pfRiskTile('최악 일간', worst ? pct(worst.return_pct) : '-', returnClass(worst?.return_pct), worst?.date ? escapeHtml(worst.date) : ''),
-  ];
+    _pfRiskTile('최고 월간', bestMonth ? pct(bestMonth.return_pct) : '-', returnClass(bestMonth?.return_pct), bestMonth ? `${escapeHtml(bestMonth.month)} · ${monthSub(bestMonth)}` : ''),
+    _pfRiskTile('최악 월간', worstMonth ? pct(worstMonth.return_pct) : '-', returnClass(worstMonth?.return_pct), worstMonth ? `${escapeHtml(worstMonth.month)} · ${monthSub(worstMonth)}` : ''),
+  );
 
   const rangeText = (data.start_date && data.end_date)
     ? `기간 <strong>${escapeHtml(data.start_date)} ~ ${escapeHtml(data.end_date)}</strong> · 스냅샷 ${Number(data.points || 0).toLocaleString()}개`
     : '';
-  const benchText = bench
-    ? ` · 벤치마크 ${escapeHtml(benchName)}${bench.overlap_returns ? ` (표본 ${Number(bench.overlap_returns).toLocaleString()}일)` : ''}`
-    : '';
+  let benchText = '';
+  if (bench) {
+    benchText = ` · 벤치마크 ${escapeHtml(benchName)}${bench.overlap_returns ? ` (표본 ${Number(bench.overlap_returns).toLocaleString()}일)` : ''}`;
+    if (bench.beta === null || bench.beta === undefined) {
+      benchText += ' — 겹치는 표본이 부족해 베타·상관계수는 생략';
+    }
+  } else {
+    benchText = ' · 벤치마크 종가 데이터가 없어 베타·상관계수는 생략';
+  }
 
   el.innerHTML = `<div class="pf-risk-grid">${tiles.join('')}</div>`
     + (rangeText ? `<div class="pf-chart-range">${rangeText}${benchText}</div>` : '');

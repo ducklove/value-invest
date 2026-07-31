@@ -966,6 +966,121 @@
 .pf-period-note.warning {
   border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
 }
+/* 기간 종료 스냅샷 — 2열 섹션 그리드 안에서 표가 좁아지지 않게 풀폭. */
+.pf-period-report-sections .pf-period-report-wide {
+  grid-column: 1 / -1;
+}
+.pf-period-snapshot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.pf-period-snapshot-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.pf-period-snapshot-group {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  padding: 3px 9px;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.pf-period-snapshot-group b { color: var(--text); }
+/* 연간/월간 실적 목록 — 연도 행을 누르면 월 행이 펼쳐진다. */
+.pf-period-perf {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+.pf-period-perf h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 800;
+}
+.pf-perf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pf-perf-year {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+.pf-perf-row {
+  display: grid;
+  grid-template-columns: 18px minmax(72px, auto) minmax(84px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--text);
+  padding: 9px 10px;
+  text-align: left;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.pf-perf-row:hover:not(:disabled) { background: var(--hover); }
+.pf-perf-row:disabled { cursor: default; opacity: 0.75; }
+.pf-perf-year-row { font-weight: 800; }
+.pf-perf-caret {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.pf-perf-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.pf-perf-tag {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.pf-perf-value {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pf-perf-meta {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: right;
+}
+.pf-perf-meta .pf-risk-sub { text-align: right; }
+.pf-perf-months {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.pf-perf-month-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  padding-left: 18px;
+}
+.pf-perf-months > .pf-perf-month-row:last-child { border-bottom: none; }
+@media (max-width: 768px) {
+  /* 폰에서는 평가액 메타를 접고 기간·수익률만 남긴다. */
+  .pf-perf-row { grid-template-columns: 16px minmax(0, 1fr) auto; }
+  .pf-perf-meta { display: none; }
+}
 #pfPerformanceTab .pf-nav-chart-wrap,
 #pfPerformanceTab .pf-cashflow-section {
   margin: 0;
