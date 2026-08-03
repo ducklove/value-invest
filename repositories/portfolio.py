@@ -141,7 +141,8 @@ async def get_portfolio(google_sub: str) -> list[dict]:
                COALESCE(currency, 'KRW') AS currency, group_name, benchmark_code,
                created_at, target_price,
                COALESCE(target_price_disabled, 0) AS target_price_disabled,
-               NULLIF(target_price_formula, '') AS target_price_formula
+               NULLIF(target_price_formula, '') AS target_price_formula,
+               pair_long_code
         FROM user_portfolio
         WHERE google_sub = ?
         ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, created_at ASC
@@ -155,8 +156,21 @@ async def get_portfolio(google_sub: str) -> list[dict]:
     tags_by_code: dict[str, list[str]] = {}
     for row in tag_rows:
         tags_by_code.setdefault(row["stock_code"], []).append(row["tag"])
+    # 롱숏 페어: 숏은 롱의 그룹을 읽기 시점에도 따라간다 (쓰기 시점 동기화의
+    # 보강). 롱이 삭제되는 등 링크가 끊긴 pair_long_code 는 없는 것으로 노출.
+    by_code = {item["stock_code"]: item for item in items}
     for item in items:
-        item["tags"] = tags_by_code.get(item["stock_code"], [])
+        long_code = item.get("pair_long_code")
+        if not long_code:
+            continue
+        long_item = by_code.get(long_code)
+        if long_item is None or long_item is item:
+            item["pair_long_code"] = None
+            continue
+        item["group_name"] = long_item["group_name"]
+    for item in items:
+        # 페어된 숏은 태그를 가질 수 없다 (서버 차단의 표시-측 방어).
+        item["tags"] = [] if item.get("pair_long_code") else tags_by_code.get(item["stock_code"], [])
     return items
 
 
@@ -556,7 +570,7 @@ async def list_preferred_dividends() -> list[dict]:
 async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT stock_code, stock_name, quantity, avg_price, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, COALESCE(currency, 'KRW') AS currency, group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+        "SELECT stock_code, stock_name, quantity, avg_price, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, COALESCE(currency, 'KRW') AS currency, group_name, pair_long_code FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
         (google_sub, stock_code),
     )
     row = await cursor.fetchone()
@@ -600,11 +614,20 @@ async def save_portfolio_item(
         # date). Only overwrite created_at when the caller explicitly passes
         # one — that's how the UI's 등록일자 edit gets through.
         cursor = await db.execute(
-            "SELECT sort_order, group_name, benchmark_code, created_at, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            "SELECT sort_order, group_name, benchmark_code, created_at, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula, pair_long_code FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
             (google_sub, stock_code),
         )
         existing = await cursor.fetchone()
         sort_order = existing["sort_order"] if existing else None
+        # 페어된 숏은 그룹을 직접 바꿀 수 없다 — 항상 롱의 현재 그룹을 따른다.
+        if existing and existing["pair_long_code"]:
+            cursor = await db.execute(
+                "SELECT group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+                (google_sub, existing["pair_long_code"]),
+            )
+            long_row = await cursor.fetchone()
+            if long_row:
+                group_name = long_row["group_name"]
         if group_name is None:
             if existing:
                 group_name = existing["group_name"]
@@ -677,6 +700,12 @@ async def save_portfolio_item(
             """,
             (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula_db, now),
         )
+        # 이 종목(롱)을 가리키는 페어 숏들의 그룹을 함께 이동 — 스냅샷 등
+        # user_portfolio.group_name 을 직접 읽는 경로와의 일관성 유지.
+        await db.execute(
+            "UPDATE user_portfolio SET group_name = ?, updated_at = ? WHERE google_sub = ? AND pair_long_code = ?",
+            (group_name, now, google_sub, stock_code),
+        )
     return {
         "stock_code": stock_code, "stock_name": stock_name,
         "quantity": quantity, "avg_price": avg_price, "avg_price_currency": avg_price_currency, "currency": currency,
@@ -727,11 +756,54 @@ async def delete_portfolio_item(google_sub: str, stock_code: str) -> bool:
             "DELETE FROM portfolio_tags WHERE google_sub = ? AND stock_code = ?",
             (google_sub, stock_code),
         )
+        # 삭제되는 롱을 가리키던 페어 숏의 링크 해제 (dangling 포인터 방지).
+        await db.execute(
+            "UPDATE user_portfolio SET pair_long_code = NULL, updated_at = ? WHERE google_sub = ? AND pair_long_code = ?",
+            (datetime.now().isoformat(), google_sub, stock_code),
+        )
         cursor = await db.execute(
             "DELETE FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
             (google_sub, stock_code),
         )
     return cursor.rowcount > 0
+
+
+async def set_portfolio_pair(google_sub: str, short_code: str, long_code: str | None) -> dict | None:
+    """숏 행의 롱숏 페어 링크를 설정/해제한다.
+
+    설정 시 숏의 그룹을 롱의 그룹으로 물리 동기화하고 (스냅샷 등 직접 SQL
+    경로 일관성), 숏의 기존 태그를 삭제한다 (페어 숏은 태그 금지 규칙).
+    반환: 갱신된 필드 dict, 숏 행이 없으면 None. 검증(수량 부호, 체인 금지
+    등)은 route 계층 책임.
+    """
+    now = datetime.now().isoformat()
+    async with transaction() as db:
+        if long_code:
+            cursor = await db.execute(
+                "SELECT group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+                (google_sub, long_code),
+            )
+            long_row = await cursor.fetchone()
+            if not long_row:
+                return None
+            await db.execute(
+                "DELETE FROM portfolio_tags WHERE google_sub = ? AND stock_code = ?",
+                (google_sub, short_code),
+            )
+            cursor = await db.execute(
+                "UPDATE user_portfolio SET pair_long_code = ?, group_name = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
+                (long_code, long_row["group_name"], now, google_sub, short_code),
+            )
+            if cursor.rowcount == 0:
+                return None
+            return {"pair_long_code": long_code, "group_name": long_row["group_name"]}
+        cursor = await db.execute(
+            "UPDATE user_portfolio SET pair_long_code = NULL, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
+            (now, google_sub, short_code),
+        )
+        if cursor.rowcount == 0:
+            return None
+    return {"pair_long_code": None}
 
 
 async def update_portfolio_benchmark(google_sub: str, stock_code: str, benchmark_code: str | None):

@@ -41,6 +41,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-action-board.js",
     "portfolio-add-search.js",
     "portfolio-actions.js",
+    "portfolio-pair.js",
     "portfolio-insights.js",
     "portfolio-groups-market.js",
     "portfolio-ai.js",

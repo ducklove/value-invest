@@ -1038,3 +1038,116 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual((await cursor.fetchone())["n"], 1)
         cursor = await db.execute("SELECT COUNT(*) AS n FROM portfolio_stock_weight_snapshots")
         self.assertEqual((await cursor.fetchone())["n"], 2)
+
+    # --- 롱숏 페어 ---
+
+    async def test_pair_set_inherits_group_and_clears_tags(self):
+        await portfolio_repo.add_portfolio_group("u1", "증권주")
+        await portfolio_repo.save_portfolio_item(
+            "u1", "006800", "미래에셋증권", 100, 10000, group_name="증권주",
+        )
+        await portfolio_repo.save_portfolio_item("u1", "MIRAE_FUT", "미래에셋 선물매도", -100, 11000)
+        await portfolio_repo.set_portfolio_tags("u1", "MIRAE_FUT", ["헤지"])
+
+        result = await portfolio_repo.set_portfolio_pair("u1", "MIRAE_FUT", "006800")
+        self.assertEqual(result, {"pair_long_code": "006800", "group_name": "증권주"})
+
+        items = {i["stock_code"]: i for i in await portfolio_repo.get_portfolio("u1")}
+        short = items["MIRAE_FUT"]
+        self.assertEqual(short["pair_long_code"], "006800")
+        self.assertEqual(short["group_name"], "증권주")
+        self.assertEqual(short["tags"], [])
+        self.assertEqual(await portfolio_repo.get_portfolio_tags("u1", "MIRAE_FUT"), [])
+        # 롱 쪽은 페어 정보가 없다 (숏 → 롱 단방향 포인터).
+        self.assertIsNone(items["006800"]["pair_long_code"])
+
+    async def test_pair_group_follows_long_group_change(self):
+        await portfolio_repo.add_portfolio_group("u1", "증권주")
+        await portfolio_repo.add_portfolio_group("u1", "헤지북")
+        await portfolio_repo.save_portfolio_item(
+            "u1", "006800", "미래에셋증권", 100, 10000, group_name="증권주",
+        )
+        await portfolio_repo.save_portfolio_item("u1", "MIRAE_FUT", "미래에셋 선물매도", -100, 11000)
+        await portfolio_repo.set_portfolio_pair("u1", "MIRAE_FUT", "006800")
+
+        # 롱 그룹 이동 → 숏 그룹도 물리적으로 따라간다 (스냅샷 경로 일관성).
+        await portfolio_repo.save_portfolio_item(
+            "u1", "006800", "미래에셋증권", 100, 10000, group_name="헤지북",
+        )
+        db = await db_repo.get_db()
+        cursor = await db.execute(
+            "SELECT group_name FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            ("u1", "MIRAE_FUT"),
+        )
+        self.assertEqual((await cursor.fetchone())["group_name"], "헤지북")
+
+        # 페어된 숏 자신을 저장하며 그룹을 바꿔도 롱의 그룹으로 강제된다.
+        await portfolio_repo.save_portfolio_item(
+            "u1", "MIRAE_FUT", "미래에셋 선물매도", -100, 11000, group_name="증권주",
+        )
+        items = {i["stock_code"]: i for i in await portfolio_repo.get_portfolio("u1")}
+        self.assertEqual(items["MIRAE_FUT"]["group_name"], "헤지북")
+
+    async def test_pair_cleared_when_long_deleted(self):
+        await portfolio_repo.save_portfolio_item("u1", "006800", "미래에셋증권", 100, 10000)
+        await portfolio_repo.save_portfolio_item("u1", "MIRAE_FUT", "미래에셋 선물매도", -100, 11000)
+        await portfolio_repo.set_portfolio_pair("u1", "MIRAE_FUT", "006800")
+
+        await portfolio_repo.delete_portfolio_item("u1", "006800")
+
+        db = await db_repo.get_db()
+        cursor = await db.execute(
+            "SELECT pair_long_code FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            ("u1", "MIRAE_FUT"),
+        )
+        self.assertIsNone((await cursor.fetchone())["pair_long_code"])
+        items = {i["stock_code"]: i for i in await portfolio_repo.get_portfolio("u1")}
+        self.assertIsNone(items["MIRAE_FUT"]["pair_long_code"])
+
+    async def test_pair_clear_roundtrip(self):
+        await portfolio_repo.save_portfolio_item("u1", "006800", "미래에셋증권", 100, 10000)
+        await portfolio_repo.save_portfolio_item("u1", "MIRAE_FUT", "미래에셋 선물매도", -100, 11000)
+        await portfolio_repo.set_portfolio_pair("u1", "MIRAE_FUT", "006800")
+
+        result = await portfolio_repo.set_portfolio_pair("u1", "MIRAE_FUT", None)
+        self.assertEqual(result, {"pair_long_code": None})
+        items = {i["stock_code"]: i for i in await portfolio_repo.get_portfolio("u1")}
+        self.assertIsNone(items["MIRAE_FUT"]["pair_long_code"])
+
+    async def test_pair_set_missing_rows_returns_none(self):
+        await portfolio_repo.save_portfolio_item("u1", "006800", "미래에셋증권", 100, 10000)
+        self.assertIsNone(await portfolio_repo.set_portfolio_pair("u1", "NOPE", "006800"))
+        self.assertIsNone(await portfolio_repo.set_portfolio_pair("u1", "006800", "NOPE"))
+
+    async def test_pair_route_validations_and_tag_block(self):
+        from fastapi import HTTPException
+
+        await portfolio_repo.save_portfolio_item("u1", "006800", "미래에셋증권", 100, 10000)
+        await portfolio_repo.save_portfolio_item("u1", "MIRAE_FUT", "미래에셋 선물매도", -100, 11000)
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):
+            # 양수 수량 행에는 페어 설정 불가
+            with self.assertRaises(HTTPException) as ctx:
+                await portfolio_route.update_portfolio_pair("006800", None, {"long_code": "MIRAE_FUT"})
+            self.assertEqual(ctx.exception.status_code, 400)
+
+            # 자기 자신과 페어 불가
+            with self.assertRaises(HTTPException) as ctx:
+                await portfolio_route.update_portfolio_pair("MIRAE_FUT", None, {"long_code": "MIRAE_FUT"})
+            self.assertEqual(ctx.exception.status_code, 400)
+
+            # 정상 설정
+            response = await portfolio_route.update_portfolio_pair(
+                "MIRAE_FUT", None, {"long_code": "006800"},
+            )
+            self.assertTrue(response["ok"])
+            self.assertEqual(response["pair_long_code"], "006800")
+
+            # 페어된 숏에는 태그를 달 수 없다
+            with self.assertRaises(HTTPException) as ctx:
+                await portfolio_route.update_portfolio_tags("MIRAE_FUT", None, {"tags": ["헤지"]})
+            self.assertEqual(ctx.exception.status_code, 400)
+
+            # 해제
+            response = await portfolio_route.update_portfolio_pair("MIRAE_FUT", None, {"long_code": None})
+            self.assertTrue(response["ok"])
+            self.assertIsNone(response["pair_long_code"])

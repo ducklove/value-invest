@@ -792,6 +792,9 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     # Multi-account phase 1. Nullable by design; uniqueness across
     # (google_sub, account_id, stock_code) is deferred to a later table rebuild.
     ("user_portfolio", "account_id", "TEXT"),
+    # 롱숏 페어: 숏(음수 수량) 행이 같은 사용자의 롱 종목 코드를 가리킨다.
+    # 페어된 숏은 롱의 그룹을 따라가고 자체 태그를 가질 수 없다.
+    ("user_portfolio", "pair_long_code", "TEXT"),
 )
 
 

@@ -583,7 +583,8 @@ function renderPortfolio(options = {}) {
 
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     const safeCode = escapeHtml(r.stock_code);
-    const tagHtml = _renderPortfolioRowTags(pfGetTags(r));
+    const pairLongCode = pfPairLongCode(r);
+    const tagHtml = _renderPortfolioRowTags(pfGetTags(r)) + _renderPortfolioRowPairChip(r);
     const groupHtml = _renderPortfolioRowGroup(r);
     const isSaving = PfStore.edit.savingCode === r.stock_code;
     const editAttrs = isSaving ? ' disabled' : '';
@@ -608,10 +609,21 @@ function renderPortfolio(options = {}) {
     const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
     const heatAttrs = pfHeatRowAttrs(r);
     const changeCell = pfChangeCellHtml(r);
+    // 편집 모드 그룹 셀: 숏(음수 수량) 행에는 롱숏 페어 선택 박스를 함께
+    // 노출한다. 페어가 걸린 숏의 그룹은 롱을 따라가므로 그룹 select 잠금.
+    let groupEditCell = `<select class="pf-group-select js-pf-group"${editAttrs}${pairLongCode ? ' disabled title="페어 롱 종목의 그룹을 따릅니다"' : ''}>${groupOpts}</select>`;
+    if (r.qty < 0) {
+      const pairOpts = ['<option value="">페어 없음</option>'].concat(
+        PfStore.items
+          .filter(i => i.stock_code !== r.stock_code && Number(i.quantity) > 0 && !i.stock_code.startsWith('CASH_'))
+          .map(i => `<option value="${escapeHtml(i.stock_code)}"${i.stock_code === pairLongCode ? ' selected' : ''}>${escapeHtml(i.stock_name)}</option>`)
+      ).join('');
+      groupEditCell += `<select class="pf-pair-select js-pf-pair" title="롱숏 페어 — 묶을 롱 종목 선택"${editAttrs}>${pairOpts}</select>`;
+    }
     if (isEditing) {
       return `<tr data-code="${safeCode}"${rowClass}${heatAttrs}>
         <td class="pf-stock-cell pf-stock-cell-editing">${stockEditIdentity}</td>
-        <td class="pf-col-group"><select class="pf-group-select js-pf-group"${editAttrs}>${groupOpts}</select></td>
+        <td class="pf-col-group">${groupEditCell}</td>
         <td class="pf-col-num pf-col-changepct">${changeCell}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>

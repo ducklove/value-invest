@@ -320,6 +320,8 @@ async def update_portfolio_tags(stock_code: str, request: Request, payload: dict
     item = await portfolio_repo.get_portfolio_item(user["google_sub"], stock_code)
     if not item:
         raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
+    if item.get("pair_long_code"):
+        raise HTTPException(status_code=400, detail="롱숏 페어의 숏 종목에는 태그를 달 수 없습니다. 롱 종목에 태그를 관리하세요.")
     tags = _normalize_portfolio_tags((payload or {}).get("tags"))
     saved = await portfolio_repo.set_portfolio_tags(user["google_sub"], stock_code, tags)
     return {
@@ -848,6 +850,49 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
 
     dividends.schedule_for_portfolio([stock_code])
     return {"ok": True, **result}
+
+
+@router.put("/api/portfolio/{stock_code}/pair")
+async def update_portfolio_pair(stock_code: str, request: Request, payload: dict = Body(...)):
+    """롱숏 페어 설정/해제. payload: {"long_code": "006800"} 또는 {"long_code": null}.
+
+    규칙: 페어는 숏(음수 수량) 행에만 걸 수 있고, 대상 롱은 같은 포트폴리오의
+    양수 수량 행이어야 한다. 롱이 또 다른 페어의 숏이면 (체인) 거부. 설정 시
+    숏의 그룹은 롱을 따라가고 숏의 기존 태그는 제거된다.
+    """
+    user = _require_user(await get_current_user(request))
+    stock_code = _normalize_portfolio_code(stock_code)
+    long_code = _normalize_portfolio_code(str((payload or {}).get("long_code") or "")) or None
+
+    item = await portfolio_repo.get_portfolio_item(user["google_sub"], stock_code)
+    if not item:
+        raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
+
+    if long_code:
+        if long_code == stock_code:
+            raise HTTPException(status_code=400, detail="자기 자신과는 페어를 맺을 수 없습니다.")
+        try:
+            short_qty = float(item.get("quantity") or 0)
+        except (TypeError, ValueError):
+            short_qty = 0.0
+        if short_qty >= 0:
+            raise HTTPException(status_code=400, detail="페어는 숏(음수 수량) 종목에만 설정할 수 있습니다.")
+        long_item = await portfolio_repo.get_portfolio_item(user["google_sub"], long_code)
+        if not long_item:
+            raise HTTPException(status_code=400, detail=f"포트폴리오에 없는 롱 종목입니다: {long_code}")
+        try:
+            long_qty = float(long_item.get("quantity") or 0)
+        except (TypeError, ValueError):
+            long_qty = 0.0
+        if long_qty <= 0:
+            raise HTTPException(status_code=400, detail="롱 종목은 수량이 양수여야 합니다.")
+        if long_item.get("pair_long_code"):
+            raise HTTPException(status_code=400, detail="이미 다른 페어의 숏인 종목은 롱으로 지정할 수 없습니다.")
+
+    result = await portfolio_repo.set_portfolio_pair(user["google_sub"], stock_code, long_code)
+    if result is None:
+        raise HTTPException(status_code=404, detail="페어를 저장하지 못했습니다.")
+    return {"ok": True, "stock_code": stock_code, **result}
 
 
 @router.put("/api/portfolio/{stock_code}/benchmark")

@@ -250,6 +250,74 @@ function pfGetTags(item) {
   return Array.isArray(item?.tags) ? item.tags : [];
 }
 
+// --- 롱숏 페어 -------------------------------------------------------------
+// 숏(음수 수량) 행은 pair_long_code 로 같은 포트폴리오의 롱 행을 가리킨다.
+// 그룹은 롱을 따라가고(서버 강제) 태그는 가질 수 없다. 여기 헬퍼들은 DOM
+// 없이 동작하는 순수 함수라 jsdom 테스트 대상.
+
+function pfPairLongCode(item) {
+  const code = item && item.pair_long_code ? String(item.pair_long_code).trim() : '';
+  return code || null;
+}
+
+function pfPairShortsForLong(longCode, items = PfStore.items) {
+  return (Array.isArray(items) ? items : []).filter(i => pfPairLongCode(i) === longCode);
+}
+
+// 페어 합산 통계. 투자액은 수량 × 평단(KRW 환산)이라 숏은 자연히 음수 —
+// 순투자액 = 롱 투자액 + 숏 투자액. 시세가 하나라도 없으면 평가액/손익은
+// null (부분 합산으로 오해 방지).
+function pfPairStats(longItem, shortItems) {
+  const legs = [];
+  let netInvested = 0;
+  let netMarketValue = 0;
+  let totalPnl = 0;
+  let allPriced = true;
+  for (const item of [longItem, ...(Array.isArray(shortItems) ? shortItems : [])]) {
+    if (!item) continue;
+    const qty = Number(item.quantity) || 0;
+    const avgKrwRaw = Number(item.avg_price_krw);
+    const avgKrw = Number.isFinite(avgKrwRaw) ? avgKrwRaw : (Number(item.avg_price) || 0);
+    const invested = qty * avgKrw;
+    const price = quotePriceOrNull(item.quote || {});
+    const marketValue = price !== null ? qty * price : null;
+    netInvested += invested;
+    if (marketValue === null) {
+      allPriced = false;
+    } else {
+      netMarketValue += marketValue;
+      totalPnl += marketValue - invested;
+    }
+    legs.push({
+      code: item.stock_code,
+      name: item.stock_name,
+      qty,
+      invested,
+      marketValue,
+    });
+  }
+  return {
+    legs,
+    netInvested,
+    netMarketValue: allPriced ? netMarketValue : null,
+    totalPnl: allPriced ? totalPnl : null,
+    allPriced,
+  };
+}
+
+// 페어 칩 — 숏 행에는 "⇄ 롱 종목명", 롱 행에는 "⇄ 롱숏". 클릭하면 순투자액
+// 요약 팝오버(pfShowPairSummary). 페어와 무관한 행은 빈 문자열.
+function _renderPortfolioRowPairChip(item, items = PfStore.items) {
+  const longCode = pfPairLongCode(item);
+  if (longCode) {
+    const longItem = (Array.isArray(items) ? items : []).find(i => i.stock_code === longCode);
+    const label = `⇄ ${longItem && longItem.stock_name ? longItem.stock_name : longCode}`;
+    return `<div class="pf-stock-tags"><button type="button" class="pf-stock-tag pf-pair-chip js-pf-open-pair-summary" data-long-code="${escapeHtml(longCode)}" title="롱숏 페어 — 클릭하면 순투자액 요약">${escapeHtml(label)}</button></div>`;
+  }
+  if (!pfPairShortsForLong(item.stock_code, items).length) return '';
+  return `<div class="pf-stock-tags"><button type="button" class="pf-stock-tag pf-pair-chip js-pf-open-pair-summary" data-long-code="${escapeHtml(item.stock_code)}" title="롱숏 페어 — 클릭하면 순투자액 요약">⇄ 롱숏</button></div>`;
+}
+
 function pfNormalizeSearchText(value) {
   return String(value || '').trim().toLowerCase().replace(/^#/, '');
 }

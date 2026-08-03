@@ -344,7 +344,10 @@ def test_portfolio_tag_summary_popup_uses_weighted_daily_return():
     assert "data-tag=\"${safeTag}\"" in data
     assert "js-pf-open-group-summary" in data
     assert '<td class="pf-col-group">${groupHtml}</td>' in render
-    assert '<td class="pf-col-group"><select class="pf-group-select js-pf-group"${editAttrs}>${groupOpts}</select></td>' in render
+    # 편집 모드 그룹 셀은 groupEditCell 로 조립 — 그룹 select + (숏 행이면)
+    # 롱숏 페어 select. 페어된 숏은 그룹이 롱을 따라가므로 select 잠금.
+    assert '<td class="pf-col-group">${groupEditCell}</td>' in render
+    assert 'let groupEditCell = `<select class="pf-group-select js-pf-group"${editAttrs}' in render
     assert '<td class="pf-col-group"><select class="pf-group-select js-pf-group">${groupOpts}</select></td>' not in render
     assert "pfOpenTagSummary(el.dataset.tag || '')" in events
     assert "pfOpenGroupSummary(el.dataset.group || '')" in events
@@ -354,6 +357,39 @@ def test_portfolio_tag_summary_popup_uses_weighted_daily_return():
     assert "baseValue > 0 ? dailyPnl / baseValue * 100 : null" in source
     assert "sliceStats.dailyReturnPct - allStats.dailyReturnPct" in source
     assert "pf-tag-summary-table" in source
+
+def test_portfolio_long_short_pair_contract():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    data = (JS / "portfolio-data.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
+    pair = (JS / "portfolio-pair.js").read_text(encoding="utf-8")
+    styles = _all_css()
+
+    # 페어 액션 파일은 actions 뒤 · events(클릭 위임이 참조) 앞에 로드.
+    assert html.find("./js/portfolio-actions.js") < html.find("./js/portfolio-pair.js") < html.find("./js/portfolio-events.js")
+    # 순수 헬퍼는 portfolio-data.js 홈 (jsdom 테스트 대상).
+    assert "function pfPairLongCode(item)" in data
+    assert "function pfPairStats(longItem, shortItems)" in data
+    assert "function pfPairShortsForLong(longCode" in data
+    assert "function _renderPortfolioRowPairChip(item" in data
+    # 렌더: 양쪽 다리에 페어 칩, 숏(음수 수량) 행 편집 모드에 페어 select.
+    assert "_renderPortfolioRowPairChip(r)" in render
+    assert "js-pf-pair" in render
+    assert "pf-pair-select" in render
+    # 위임 핸들러 — 칩 클릭(요약 팝오버)과 select 변경(저장).
+    assert "pfShowPairSummary(el.dataset.longCode || '', e)" in events
+    assert "pfChangePair(host.dataset.code, el.value || null)" in events
+    # 페어 액션 파일: API 계약과 순투자액 요약.
+    assert "async function pfChangePair(stockCode, longCode)" in pair
+    assert "function pfShowPairSummary(longCode, e)" in pair
+    assert "/api/portfolio/${encodeURIComponent(stockCode)}/pair" in pair
+    assert "순투자액" in pair
+    # 스타일 홈: portfolio.css.
+    assert ".pf-pair-chip" in styles
+    assert ".pf-pair-select" in styles
+    assert ".pf-pair-menu" in styles
+
 
 def test_portfolio_insight_modal_renders_valuation_cards():
     source = (JS / "portfolio-insights.js").read_text(encoding="utf-8")

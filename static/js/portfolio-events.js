@@ -83,6 +83,10 @@
         e.preventDefault();
         e.stopPropagation();
         pfOpenGroupSummary(el.dataset.group || '');
+      } else if ((el = t.closest('.js-pf-open-pair-summary'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        pfShowPairSummary(el.dataset.longCode || '', e);
       } else if ((el = t.closest('.js-pf-open-insight'))) {
         e.preventDefault();
         const code = codeFromTr(el);
@@ -140,6 +144,9 @@
       if ((el = t.closest('.js-pf-group'))) {
         const host = el.closest('[data-code]');
         if (host) pfChangeGroup(host.dataset.code, el.value);
+      } else if ((el = t.closest('.js-pf-pair'))) {
+        const host = el.closest('[data-code]');
+        if (host) pfChangePair(host.dataset.code, el.value || null);
       } else if ((el = t.closest('.js-pf-col-toggle'))) {
         pfToggleCol(el.dataset.colKey, el.checked);
       } else if ((el = t.closest('.js-pf-compact-toggle'))) {
