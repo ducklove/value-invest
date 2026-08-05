@@ -17,6 +17,13 @@ const UTILS_SRC = read("static", "js", "utils.js");
 const STORE_SRC = read("static", "js", "portfolio-store.js");
 const HEAT_SRC = read("static", "js", "portfolio-heat.js");
 
+// utils.js 의 최상위 함수 하나만 잘라 온다(닫는 중괄호가 0 열인 지점까지).
+function extractFn(name) {
+  const from = UTILS_SRC.indexOf(`function ${name}(`);
+  const src = UTILS_SRC.slice(from);
+  return src.slice(0, src.indexOf("\n}") + 2);
+}
+
 function appendScript(w, source) {
   const script = w.document.createElement("script");
   script.textContent = source;
@@ -33,15 +40,25 @@ function loadHeatDom() {
     url: "https://app.example.com/",
   });
   const { window: w } = dom;
-  // utils.js 는 앱 부팅 side effect 가 많아 필요한 포맷터만 이식한다.
-  const fmtPctSrc = UTILS_SRC.slice(UTILS_SRC.indexOf("function fmtPct("));
-  appendScript(w, fmtPctSrc.slice(0, fmtPctSrc.indexOf("\n}") + 2));
+  // jsdom 기본 visibilityState 는 'prerender'(= document.hidden true) 라
+  // 전면 이펙트가 "안 보는 화면"으로 걸러진다. 보이는 탭으로 맞춰 둔다.
+  Object.defineProperty(w.document, "visibilityState", { value: "visible", configurable: true });
+  Object.defineProperty(w.document, "hidden", { value: false, configurable: true });
+  // utils.js 는 앱 부팅 side effect 가 많아 실제로 쓰는 함수만 이식한다.
+  appendScript(w, extractFn("fmtPct"));
+  appendScript(w, extractFn("quoteSnapshotDateValue"));
   appendScript(w, STORE_SRC);
   appendScript(w, HEAT_SRC);
   // 컬러 모드 off 경로에서만 쓰이는 종전 포맷터.
   w.fmtChangePct = (pct) => (pct === null || pct === undefined ? "-" : `plain:${pct}`);
   return w;
 }
+
+// 상/하한 판정은 "오늘(KST) 거래일 스냅샷"에만 선다 — 지난 스냅샷은 버린다.
+const kstDate = (offsetDays = 0) => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date(Date.now() + offsetDays * 86400000));
+const quoteToday = (previousClose) => ({ previous_close: previousClose, date: kstDate() });
 
 const holding = (overrides = {}) => ({
   stock_code: "005930",
@@ -55,10 +72,10 @@ const holding = (overrides = {}) => ({
 
 // 상/하한가 판정이 서는 최소 조합 (기준가 10,000 → 상한 13,000 / 하한 7,000).
 const limitUpRow = (overrides = {}) => holding({
-  changePct: 29.91, price: 13000, quote: { previous_close: 10000 }, ...overrides,
+  changePct: 29.91, price: 13000, quote: quoteToday(10000), ...overrides,
 });
 const limitDownRow = (overrides = {}) => holding({
-  changePct: -29.9, price: 7000, quote: { previous_close: 10000 }, ...overrides,
+  changePct: -29.9, price: 7000, quote: quoteToday(10000), ...overrides,
 });
 
 test("등락률 강도는 1/2/4/7/15% 경계에서 한 단계씩 오른다", () => {
@@ -78,17 +95,17 @@ test("상/하한가는 ±30% 근사가 아니라 호가단위에 정렬된 정�
   // 기준가 3,333원 → 4,332.9 를 호가 5원으로 내림 = 4,330 (근사 30% 아님)
   assert.equal(w.pfKrxUpperLimit(3333), 4330);
 
-  const atLimit = holding({ price: 13000, quote: { previous_close: 10000 } });
-  const nearLimit = holding({ price: 12995, quote: { previous_close: 10000 } });
+  const atLimit = holding({ price: 13000, quote: quoteToday(10000) });
+  const nearLimit = holding({ price: 12995, quote: quoteToday(10000) });
   assert.equal(w.pfHeatLimitState(atLimit), "up");
   assert.equal(w.pfHeatLimitState(nearLimit), null);
-  assert.equal(w.pfHeatLimitState(holding({ price: 7000, quote: { previous_close: 10000 } })), "down");
+  assert.equal(w.pfHeatLimitState(holding({ price: 7000, quote: quoteToday(10000) })), "down");
 });
 
 test("국내 주식 코드가 아닌 자산은 가격제한폭 판정 대상이 아니다", () => {
   const w = loadHeatDom();
   for (const code of ["CASH_KRW", "KRX_GOLD", "CRYPTO_BTC", "AAPL"]) {
-    const row = holding({ stock_code: code, price: 13000, quote: { previous_close: 10000 } });
+    const row = holding({ stock_code: code, price: 13000, quote: quoteToday(10000) });
     assert.equal(w.pfHeatLimitState(row), null, `${code} should have no KRX limit state`);
   }
 });
@@ -120,7 +137,7 @@ test("컬러 모드 셀은 방향·등급·상한가 상태를 마크업으로 �
   const html = w.pfChangeCellHtml(holding({
     changePct: 29.91,
     price: 13000,
-    quote: { previous_close: 10000 },
+    quote: quoteToday(10000),
   }));
   assert.match(html, /data-heat-dir="up"/);
   assert.match(html, /data-heat-level="5"/);
@@ -138,6 +155,32 @@ test("컬러 모드 셀은 방향·등급·상한가 상태를 마크업으로 �
   assert.match(calm, /data-heat-level="0"/);
   assert.doesNotMatch(calm, /data-heat-limit/);
   assert.doesNotMatch(calm, /pf-heat-icon/);
+});
+
+test("지난 거래일 스냅샷의 상한가는 판정 자체를 버린다(며칠 뒤 접속 축포 방지)", async () => {
+  const w = loadHeatDom();
+  // price / previous_close 는 며칠이 지나도 함께 멈춰 있어 가격 비교만으로는
+  // 여전히 상한가로 보인다 — 거래일이 오늘이 아니면 그 판정을 쓰지 않는다.
+  const staleLimit = limitUpRow({ quote: { previous_close: 10000, date: kstDate(-3) } });
+  const noDate = limitUpRow({ quote: { previous_close: 10000 } });
+  assert.equal(w.pfHeatLimitState(staleLimit), null);
+  assert.equal(w.pfHeatLimitState(noDate), null);
+  assert.equal(w.pfHeatLimitState(limitUpRow()), "up");
+  assert.equal(w.pfHeatRowState(staleLimit).limit, null);
+
+  // 표기·강조·행 속성 어디에도 상한가가 남지 않는다.
+  w.pfHeatSetScale([staleLimit]);
+  const html = w.pfChangeCellHtml(staleLimit);
+  assert.doesNotMatch(html, /data-heat-limit/);
+  assert.doesNotMatch(html, /상한가/);
+  assert.doesNotMatch(html, /[↑↓]/);
+  assert.doesNotMatch(w.pfHeatRowAttrs(staleLimit), /data-heat-limit/);
+
+  // 축포도 터지지 않는다.
+  w.pfHeatUpdateSummary([staleLimit]);
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  assert.equal(w.document.querySelectorAll(".pf-fx").length, 0);
+  assert.doesNotMatch(w.document.getElementById("pfHeatSummary").innerHTML, /상한가/);
 });
 
 test("상/하한가는 부호 대신 화살표로 적어 컬러 모드 없이도 구분된다", () => {
@@ -212,8 +255,8 @@ test("요약 스트립은 상/하한가와 급등·급락 종목 수를 집계�
   const w = loadHeatDom();
   const summary = w.document.getElementById("pfHeatSummary");
   w.pfHeatUpdateSummary([
-    holding({ stock_code: "005930", changePct: 29.91, price: 13000, quote: { previous_close: 10000 } }),
-    holding({ stock_code: "000660", changePct: -29.9, price: 7000, quote: { previous_close: 10000 } }),
+    holding({ stock_code: "005930", changePct: 29.91, price: 13000, quote: quoteToday(10000) }),
+    holding({ stock_code: "000660", changePct: -29.9, price: 7000, quote: quoteToday(10000) }),
     holding({ stock_code: "035420", changePct: 5.2 }),
     holding({ stock_code: "035720", changePct: 4.4 }),
     holding({ stock_code: "051910", changePct: -6.1 }),
@@ -229,36 +272,49 @@ test("요약 스트립은 상/하한가와 급등·급락 종목 수를 집계�
   assert.match(summary.textContent, /잔잔/);
 });
 
-test("상한가에 새로 닿은 순간에만 전면 이펙트가 한 번 뜬다", async () => {
+test("전면 이펙트는 보고 있는 동안 상한가로 넘어가는 순간에만 뜬다", () => {
   const w = loadHeatDom();
   const limitUp = holding({
     stock_code: "005930",
     stock_name: "삼성전자",
     changePct: 29.91,
     price: 13000,
-    quote: { previous_close: 10000 },
+    quote: quoteToday(10000),
   });
-  const tick = () => new Promise((resolve) => setTimeout(resolve, 160));
+  const rising = holding({ stock_code: "005930", stock_name: "삼성전자", changePct: 12 });
+  const layers = () => w.document.querySelectorAll(".pf-fx");
 
+  // 첫 관찰이 이미 상한가면 축포는 없다 — 지금 일어난 일이라는 근거가 없다.
   w.pfHeatUpdateSummary([limitUp]);
-  await tick();
-  const layers = w.document.querySelectorAll(".pf-fx");
-  assert.equal(layers.length, 1);
-  assert.equal(layers[0].getAttribute("data-fx"), "up");
-  assert.equal(layers[0].querySelector(".pf-fx-names").textContent, "삼성전자");
-  assert.ok(layers[0].querySelectorAll(".pf-fx-p").length > 10);
+  w.pfHeatUpdateSummary([limitUp]);
+  assert.equal(layers().length, 0);
+
+  // 보고 있는 동안 상한가로 넘어가면 그 순간 바로 뜬다(큐잉·지연 없음).
+  const fresh = loadHeatDom();
+  fresh.pfHeatUpdateSummary([rising]);
+  assert.equal(fresh.document.querySelectorAll(".pf-fx").length, 0);
+  fresh.pfHeatUpdateSummary([limitUp]);
+  const layer = fresh.document.querySelector(".pf-fx");
+  assert.equal(layer.getAttribute("data-fx"), "up");
+  assert.equal(layer.querySelector(".pf-fx-names").textContent, "삼성전자");
+  assert.ok(layer.querySelectorAll(".pf-fx-p").length > 10);
 
   // 상한가에 머무는 동안엔 렌더가 몇 번을 돌아도 다시 뿌리지 않는다.
-  w.pfHeatUpdateSummary([limitUp]);
-  w.pfHeatApplyRow(w.document.querySelector("tr[data-code]"), limitUp);
-  await tick();
-  assert.equal(w.document.querySelectorAll(".pf-fx").length, 1);
+  fresh.pfHeatUpdateSummary([limitUp]);
+  fresh.pfHeatApplyRow(fresh.document.querySelector("tr[data-code]"), limitUp);
+  assert.equal(fresh.document.querySelectorAll(".pf-fx").length, 1);
 
-  // 풀렸다가 다시 닿으면 그때는 새 사건.
-  w.pfHeatUpdateSummary([holding({ stock_code: "005930", changePct: 12 })]);
-  w.pfHeatUpdateSummary([limitUp]);
-  await tick();
-  assert.equal(w.document.querySelectorAll(".pf-fx").length, 2);
+  // 이미 떠 있는 동안 다른 전이가 생기면 쌓아 두지 않고 버린다.
+  fresh.pfHeatUpdateSummary([rising]);
+  fresh.pfHeatUpdateSummary([limitUp]);
+  assert.equal(fresh.document.querySelectorAll(".pf-fx").length, 1);
+});
+
+test("안 보는 탭에서는 이펙트를 만들지 않고 버린다", () => {
+  const w = loadHeatDom();
+  Object.defineProperty(w.document, "hidden", { value: true, configurable: true });
+  assert.equal(w.pfHeatCelebrate("up", ["삼성전자"]), null);
+  assert.equal(w.document.querySelectorAll(".pf-fx").length, 0);
 });
 
 test("전면 이펙트는 하한가 색을 따로 쓰고 종목명을 textContent 로만 넣는다", async () => {

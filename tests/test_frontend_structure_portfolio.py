@@ -888,6 +888,15 @@ def test_color_heat_mode_shares_one_state_source_across_render_and_tick():
     assert "const PF_KRX_TICK_BANDS" in heat
     assert "^[0-9][0-9A-Z]{5}$" in heat
 
+    # 상/하한가는 오늘(KST) 거래일 스냅샷에만 선다 — 며칠 지난 시세는
+    # price/previous_close 가 함께 멈춰 있어 가격 비교만으로는 계속 상한가로
+    # 보이고, 며칠 뒤 첫 접속에 축포가 터진다. 판정은 utils.js 의 날짜
+    # 파서를 쓰므로 로드 순서(utils → heat)가 계약이다.
+    assert "function pfHeatQuoteIsToday" in heat
+    assert "if (!pfHeatQuoteIsToday(row)) return null;" in heat
+    assert "quoteSnapshotDateValue(row && row.quote)" in heat
+    assert html.find("./js/utils.js") < html.find("./js/portfolio-heat.js")
+
     # 토글은 컬럼 토글 줄 맨 앞 버튼 + 오늘의 급등/급락 요약.
     assert 'id="pfHeatToggle"' in shell
     assert 'id="pfHeatSummary"' in shell
@@ -912,10 +921,16 @@ def test_color_heat_mode_shares_one_state_source_across_render_and_tick():
     assert "if (!pfHeatAppliesTo(row)) return pfPlainChangeCell(row);" in heat
     assert ".pf-limit-mark" in styles
 
-    # 도달 순간엔 전면 이펙트 한 번 — 엣지 트리거(머무는 동안 재발화 없음).
+    # 축포는 "보고 있는 동안 상한가로 넘어가는 순간"에만 — 첫 관찰(이미 상한가로
+    # 마감한 종목·지난 스냅샷)은 상태만 기억하고 넘어가고, 그 순간에 못 띄우면
+    # (안 보는 탭 / 이미 떠 있음) 큐에 쌓지 않고 버린다.
     assert "function pfHeatTrackLimit" in heat
     assert "function pfHeatCelebrate" in heat
     assert "pfHeatTrackLimit(row, state);" in heat
+    assert "if (!known || !limit) return;" in heat
+    assert "if (document.hidden) return false;" in heat
+    assert "if (document.querySelector('.pf-fx')) return false;" in heat
+    assert "setTimeout" not in heat[heat.find("function pfHeatTrackLimit"):heat.find("function _pfFxBannerNames")]
     assert "pointer-events: none;" in styles[styles.find(".pf-fx {"):styles.find(".pf-fx-veil")]
     assert "@keyframes pfFxFall" in styles
 

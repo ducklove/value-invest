@@ -7,8 +7,9 @@
 //  - 강도는 절대 등락률(레벨 0~5)로, 게이지 길이는 "현재 보이는 목록 안에서의
 //    상대 크기"로 준다. 둘을 섞으면 5% 하나뿐인 날에도 화면이 벌겋게 되거나
 //    반대로 전 종목 20% 인 날 아무 차이가 안 보인다.
-//  - 상/하한가는 별도 등급: 정확한 KRX 가격제한폭(호가단위 정렬)에 실제로 닿았을
-//    때만 붙이고, 이때는 표현을 과장한다(솔리드 배지 + 스윕 + 행 글로우).
+//  - 상/하한가는 별도 등급: 오늘(KST) 시세로 정확한 KRX 가격제한폭(호가단위
+//    정렬)에 실제로 닿았을 때만 붙이고, 이때는 표현을 과장한다
+//    (솔리드 배지 + 스윕 + 행 글로우). 지난 거래일 스냅샷이면 판정 자체를 버린다.
 //    단 "상한가" 라벨은 등락률 옆에 덧붙이지 않고 같은 자리에서 교대로 띄운다 —
 //    칸 폭을 한 글자도 더 먹지 않게. 대신 도달 순간엔 전면 이펙트로 크게 알린다.
 //  - 색은 한국 시장 관행(상승=빨강 / 하락=파랑) 고정. base.css 계약과 동일.
@@ -86,12 +87,46 @@ function pfKrxLowerLimit(basePrice) {
   return Math.ceil(Number(raw.toFixed(4)) / tick) * tick;
 }
 
+// 상/하한가는 "오늘 일어난 사건"이다. 그런데 시세 스냅샷은 며칠 지나도
+// price 와 previous_close 가 함께 멈춰 있어 가격 비교만으로는 판정이 그대로
+// 성립한다 — 며칠 만에 접속해도 지난 상한가가 살아 있는 것처럼 보이고
+// 축포까지 터진다. 그래서 스냅샷 거래일이 오늘(KST)이 아니면 판정을 버린다.
+const PF_KST_DATE_FMT = (() => {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+  } catch (e) { return null; }
+})();
+
+// 렌더 한 번에 행 수만큼 불리므로 값을 잠깐 캐시한다(자정을 넘겨도 1분 안에 따라감).
+let _pfKstToday = { at: 0, value: null };
+
+function pfKstTodayValue() {
+  const now = Date.now();
+  if (_pfKstToday.value !== null && now - _pfKstToday.at < 60_000) return _pfKstToday.value;
+  // quoteSnapshotDateValue 와 같은 기준(YYYY-MM-DD → UTC 자정)으로 맞춘다.
+  const ymd = PF_KST_DATE_FMT ? PF_KST_DATE_FMT.format(new Date()) : new Date().toISOString().slice(0, 10);
+  const value = Date.parse(ymd);
+  _pfKstToday = { at: now, value: Number.isFinite(value) ? value : null };
+  return _pfKstToday.value;
+}
+
+// 날짜를 모르는 스냅샷은 "오늘 것"으로 치지 않는다 — 지난 상한가로 축포가
+// 터지는 쪽이, 오늘 상한가를 한 번 못 알리는 쪽보다 나쁘다.
+function pfHeatQuoteIsToday(row) {
+  const snapshot = quoteSnapshotDateValue(row && row.quote);
+  const today = pfKstTodayValue();
+  return snapshot !== null && today !== null && snapshot === today;
+}
+
 // 국내 주식 코드만 대상. 현금/금/크립토/해외 티커는 가격제한폭 개념이 없고,
 // KONEX(±15%)·상장일·정리매매 종목은 밴드가 달라 여기선 "미도달"로 빠진다.
 function pfHeatLimitState(row) {
   if (!row) return null;
   const code = String(row.stock_code || '').toUpperCase();
   if (!/^[0-9][0-9A-Z]{5}$/.test(code)) return null;
+  if (!pfHeatQuoteIsToday(row)) return null;
   const price = Number(row.price);
   const base = Number(row.quote && row.quote.previous_close);
   if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(base) || base <= 0) return null;
@@ -216,16 +251,17 @@ function pfChangeCellHtml(row) {
   return pfHeatChangeCell(row);
 }
 
-// --- 전면 이펙트 (상/하한가 도달 순간) --------------------------------------
-// 배지 하나로는 "오늘 상한가"라는 사건의 크기가 안 산다. 새로 닿은 순간에만
-// 화면 전체에 꽃잎(상한) / 눈보라(하한)를 한 번 뿌린다.
-//  - 엣지 트리거: 같은 종목이 상한가에 머무는 동안엔 다시 뿌리지 않고, 풀렸다가
-//    다시 닿으면 그때는 새 사건으로 본다.
-//  - 같은 렌더에서 여러 종목이 걸리면 한 번으로 합친다(화면 겹침 방지).
-//  - prefers-reduced-motion 이면 아예 만들지 않는다.
+// --- 전면 이펙트 (상/하한가로 전이하는 순간) --------------------------------
+// 배지 하나로는 "지금 막 상한가"라는 사건의 크기가 안 산다. 보고 있는 동안
+// 상한가로 넘어가는 순간에만 화면 전체에 꽃잎(상한) / 눈보라(하한)를 뿌린다.
+//  - 축포는 "지금 일어난 일"에만 붙는다. 첫 관찰(페이지 로드·화면 진입 시점에
+//    이미 상한가)은 기록만 하고 넘어간다 — 이미 상한가로 마감한 종목이나 지난
+//    거래일 스냅샷으로 축포가 터지면, 축포가 사건이 아니라 소음이 된다.
+//  - 상한가에 머무는 동안엔 다시 뿌리지 않고, 풀렸다가 다시 닿으면 새 사건이다.
+//  - 이벤트를 쌓아 뒀다 나중에 재생하지 않는다. 전이하는 그 순간에 못 띄우면
+//    (안 보는 탭 / 이미 이펙트가 떠 있음 / 동작 줄이기) 그냥 버린다.
 const PF_FX_PARTICLES = 42;      // 오버레이 1회당 파티클 수 — DOM 부담 상한
 const PF_FX_LIFETIME_MS = 6200;  // 가장 늦게 출발하는 파티클이 화면을 벗어날 때까지 + 여유
-const PF_FX_COALESCE_MS = 90;    // 이 시간 안에 걸린 종목들은 오버레이 하나로
 const PF_FX_NAME_LIMIT = 3;      // 배너에 이름을 몇 개까지 적나
 const PF_FX_GLYPHS = {
   up: ['🌸', '🌸', '🌷', '🎉', '✨', '💮'],
@@ -233,40 +269,29 @@ const PF_FX_GLYPHS = {
 };
 
 const _pfFxLimitSeen = new Map();  // stock_code → 'up' | 'down' | null
-let _pfFxPending = null;           // { up: [이름…], down: [이름…] }
-let _pfFxTimer = null;
 
 function pfFxAllowed() {
   if (typeof document === 'undefined' || !document.body) return false;
+  if (document.hidden) return false;                       // 안 보는 화면엔 띄우지 않는다
+  if (document.querySelector('.pf-fx')) return false;      // 이미 떠 있으면 겹치지 않게 버린다
   try {
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
   } catch (e) {}
   return true;
 }
 
-// 두 렌더 경로(전체 재렌더 / WS tick)가 모두 여기로 상태를 흘려보내 엣지를 잡는다.
+// 두 렌더 경로(전체 재렌더 / WS tick)가 모두 여기로 상태를 흘려보내 전이를 잡는다.
 function pfHeatTrackLimit(row, state) {
   if (!pfHeatAppliesTo(row)) return;
   const code = String(row.stock_code || '');
   if (!code) return;
   const limit = (state && state.limit) || null;
-  if (limit === (_pfFxLimitSeen.get(code) || null)) return;
+  const known = _pfFxLimitSeen.has(code);
+  if (known && limit === _pfFxLimitSeen.get(code)) return;
   _pfFxLimitSeen.set(code, limit);
-  if (limit) _pfFxQueue(limit, row.stock_name || code);
-}
-
-function _pfFxQueue(dir, name) {
-  if (!_pfFxPending) _pfFxPending = { up: [], down: [] };
-  if (!_pfFxPending[dir].includes(name)) _pfFxPending[dir].push(name);
-  if (_pfFxTimer) return;
-  _pfFxTimer = setTimeout(() => {
-    const pending = _pfFxPending;
-    _pfFxPending = null;
-    _pfFxTimer = null;
-    if (!pending) return;
-    if (pending.up.length) pfHeatCelebrate('up', pending.up);
-    if (pending.down.length) pfHeatCelebrate('down', pending.down);
-  }, PF_FX_COALESCE_MS);
+  // 첫 관찰은 "지금 닿았다"는 근거가 없다 — 상태만 기억하고 축포는 생략.
+  if (!known || !limit) return;
+  pfHeatCelebrate(limit, row.stock_name || code);
 }
 
 function _pfFxBannerNames(names) {
