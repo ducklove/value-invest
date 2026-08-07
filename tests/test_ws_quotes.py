@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -5,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import kis_ws_manager
+from core.config import DEFAULT_CORS_ORIGINS
 from routes import ws_quotes
 
 
@@ -32,6 +34,21 @@ def test_multi_connection_plan_splits_live_codes_by_connection_capacity():
     assert result["rest"] == []
     assert first.requested == {"portfolio": codes[:kis_ws_manager.MAX_SUBSCRIPTIONS]}
     assert second.requested == {"portfolio": codes[kis_ws_manager.MAX_SUBSCRIPTIONS:]}
+
+
+def test_origin_allowed_accepts_local_dev_preview_port(monkeypatch):
+    """launch.json 개발 서버(8021)에서 뜬 SPA의 웹소켓 핸드셰이크가 기본 허용 목록에 막히지 않는다."""
+    monkeypatch.setattr(
+        ws_quotes,
+        "get_settings",
+        lambda: SimpleNamespace(cors_allowed_origins=DEFAULT_CORS_ORIGINS),
+    )
+
+    assert ws_quotes._origin_allowed("http://localhost:8021") is True
+    assert ws_quotes._origin_allowed("http://127.0.0.1:8021") is True
+    assert ws_quotes._origin_allowed("http://localhost:8000") is True
+    assert ws_quotes._origin_allowed("http://evil.example") is False
+    assert ws_quotes._origin_allowed(None) is False
 
 
 def test_can_takeover_requires_admin_user():

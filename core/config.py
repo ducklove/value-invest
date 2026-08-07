@@ -18,6 +18,10 @@ DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:8000",
     "http://localhost:8010",
     "http://127.0.0.1:8010",
+    # 로컬 개발 프리뷰(.claude/launch.json)의 uvicorn 포트 — 없으면 /ws/quotes
+    # 핸드셰이크가 오리진 검사에서 1008로 거부된다.
+    "http://localhost:8021",
+    "http://127.0.0.1:8021",
     "https://ducklove.github.io",
     "https://cantabile.tplinkdns.com:3691",
 )
