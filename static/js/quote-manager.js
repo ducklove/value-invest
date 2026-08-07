@@ -3,6 +3,7 @@ const QUOTE_MANAGER_STALE_WS_MS = 55_000;
 const QUOTE_MANAGER_GENERAL_POLL_MS = 60_000;
 const QUOTE_MANAGER_OVERFLOW_POLL_MS = 30_000;
 const QUOTE_MANAGER_RETRY_MS = 5_000;
+const QUOTE_MANAGER_PING_TIMEOUT_MS = 4_000;
 // The backend /api/asset-quotes pulls all domestic (KRX) codes in one bulk
 // upstream call, so larger client batches mean fewer round-trips (≈ one
 // request for a typical portfolio) instead of one request per 4 codes.
@@ -29,6 +30,7 @@ const QuoteManager = {
   lastSlotMeta: null,
   onQuote: null,
   inflightCodes: new Set(),
+  _pingTimer: null,
 
   _loadDesiredActive() {
     try { return sessionStorage.getItem(QUOTE_MANAGER_MANUAL_WS_KEY) === '1'; } catch { return false; }
@@ -112,6 +114,8 @@ const QuoteManager = {
               : 'offline';
           }
           this._syncControlUi();
+        } else if (msg.type === 'pong') {
+          this._clearPingTimer();
         } else if (msg.type === 'ws_taken_over') {
           this.desiredActive = false;
           this._saveDesiredActive();
@@ -123,6 +127,7 @@ const QuoteManager = {
       } catch (e) { console.warn(e); }
     };
     this.ws.onclose = (ev) => {
+      this._clearPingTimer();
       this.connected = false;
       this._deactivateWsSlot();
       this.ws = null;
@@ -143,6 +148,7 @@ const QuoteManager = {
   },
 
   disconnect() {
+    this._clearPingTimer();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.overflowTimer) { clearInterval(this.overflowTimer); this.overflowTimer = null; }
     if (this.generalPollTimer) { clearInterval(this.generalPollTimer); this.generalPollTimer = null; }
@@ -169,6 +175,65 @@ const QuoteManager = {
     this._syncControlUi();
   },
 
+  // --- 포그라운드 복귀 시 연결 생사 검증 ---------------------------------
+  // 백그라운드에서 OS/브라우저가 소켓을 끊으면 close 이벤트가 전달되지 않아
+  // (half-open) readyState 가 OPEN 인 채로 '실시간 연결됨' 표시가 남는다.
+  // 복귀 시점에 실제 상태를 확인해 죽은 연결이면 즉시 재접속한다 —
+  // desiredActive 의도는 유지되므로 활성 슬롯도 자동으로 재청구된다.
+  verifyConnection() {
+    if (!this.ws) {
+      // 재접속 대기 중이었다면 5초 백오프를 기다리지 않고 즉시 시도.
+      // 타이머도 없이 ws 가 없는 상태(초기화 전·명시적 disconnect·taken_over)는
+      // 의도된 상태이므로 여기서 되살리지 않는다.
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+        this.connect();
+      }
+      return;
+    }
+    const state = this.ws.readyState;
+    if (state === 0 /* CONNECTING */) return; // onopen/onclose 가 곧 판정한다
+    if (state !== 1 /* OPEN */) { this._forceReconnect(); return; }
+    this._sendPing();
+  },
+
+  _sendPing() {
+    if (this._pingTimer) return; // 이미 검증 진행 중
+    try {
+      this.ws.send(JSON.stringify({ action: 'ping' }));
+    } catch (e) {
+      this._forceReconnect();
+      return;
+    }
+    this._pingTimer = setTimeout(() => {
+      this._pingTimer = null;
+      this._forceReconnect();
+    }, QUOTE_MANAGER_PING_TIMEOUT_MS);
+  },
+
+  _clearPingTimer() {
+    if (this._pingTimer) { clearTimeout(this._pingTimer); this._pingTimer = null; }
+  },
+
+  _forceReconnect() {
+    this._clearPingTimer();
+    if (this.ws) {
+      // 죽은 소켓의 뒤늦은 close 이벤트가 새 연결의 재접속 경로를 건드리지
+      // 않도록 핸들러를 떼고 닫는다 (disconnect 와 같은 이유).
+      this.ws.onclose = null;
+      try { this.ws.close(); } catch (e) {}
+      this.ws = null;
+    }
+    this.connected = false;
+    this._deactivateWsSlot();
+    this.serverCanTakeover = null;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    this.lastStatus = 'reconnecting';
+    this._syncControlUi();
+    this.connect();
+  },
+
   _showTakenOverBanner() {
     const banner = document.createElement('div');
     banner.textContent = '다른 세션이 실시간 시세 연결을 가져갔습니다. 1분 간격 폴링으로 전환합니다.';
@@ -191,6 +256,7 @@ const QuoteManager = {
     this._saveDesiredActive();
     this.lastStatus = this.wsActive ? 'active' : 'connecting';
     if (this.ws && this.serverCanTakeover === false) {
+      this._clearPingTimer();
       this.ws.onclose = null;
       try { this.ws.close(); } catch (e) {}
       this.ws = null;

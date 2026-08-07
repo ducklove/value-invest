@@ -88,12 +88,15 @@ function createHarness({ wsThrows = false, quotes = {} } = {}) {
       this.url = url;
       this.sent = [];
       this.closed = false;
+      // Mock에는 실제 핸드셰이크가 없으므로 open 상태가 필요한 테스트는
+      // ws.onopen() 호출과 함께 readyState = 1 을 직접 세팅한다.
+      this.readyState = 0; // CONNECTING
       MockWebSocket.instances.push(this);
     }
     send(data) { this.sent.push(JSON.parse(data)); }
     // Like the browser, close() does NOT fire onclose synchronously; tests
     // deliver the close event explicitly via instance.onclose(...).
-    close() { this.closed = true; }
+    close() { this.closed = true; this.readyState = 3; }
   }
   MockWebSocket.instances = [];
   w.WebSocket = MockWebSocket;
@@ -413,6 +416,98 @@ test("batching: 32 codes split 30 + 2, priority code leads the first batch", asy
   assert.equal(fetchCalls[0].body.codes.length, 30);
   assert.equal(fetchCalls[1].body.codes.length, 2);
   assert.equal(fetchCalls[0].body.codes[0], "A200");
+});
+
+// --- 포그라운드 복귀 검증 (verifyConnection) --------------------------------
+// 백그라운드에서 OS가 소켓을 끊어도 close 이벤트가 오지 않는 half-open 상태가
+// 흔하다. 복귀 시 verifyConnection 이 실제 생사를 판별해 UI 표시를 맞춘다.
+
+test("verifyConnection: readyState CLOSED(close 미전달) → 즉시 재접속하며 슬롯 재청구", () => {
+  const { qm, MockWebSocket } = createHarness();
+  qm.setManualControlAllowed(true);
+  qm.requestActive();
+  const ws = MockWebSocket.instances[0];
+  ws.readyState = 1;
+  ws.onopen();
+  ws.onmessage({ data: JSON.stringify({ type: "ws_status", active: true }) });
+  assert.equal(qm.wsActive, true);
+
+  // 백그라운드에서 소켓이 죽었지만 close 이벤트는 전달되지 않았다.
+  ws.readyState = 3;
+  qm.verifyConnection();
+  assert.equal(qm.wsActive, false, "죽은 연결은 즉시 비활성으로 반영");
+  assert.equal(ws.onclose, null, "죽은 소켓의 뒤늦은 close 가 새 연결을 건드리면 안 됨");
+  assert.equal(MockWebSocket.instances.length, 2, "백오프 없이 즉시 재접속");
+
+  const ws2 = MockWebSocket.instances[1];
+  ws2.readyState = 1;
+  ws2.onopen();
+  assert.deepEqual(ws2.sent, [{ action: "takeover" }], "수동 활성 의도는 유지되어 재청구");
+  qm.disconnect();
+});
+
+test("verifyConnection: OPEN 소켓은 ping 으로 검증 — pong 수신 시 유지, 중복 ping 없음", async () => {
+  const { qm, clock, MockWebSocket } = createHarness();
+  qm.connect();
+  const ws = MockWebSocket.instances[0];
+  ws.readyState = 1;
+  ws.onopen();
+
+  qm.verifyConnection();
+  assert.deepEqual(ws.sent, [{ action: "ping" }]);
+  qm.verifyConnection(); // 검증 진행 중 재호출은 ping 을 다시 보내지 않는다
+  assert.equal(ws.sent.length, 1);
+
+  ws.onmessage({ data: JSON.stringify({ type: "pong" }) });
+  await clock.tick(4_000); // = QUOTE_MANAGER_PING_TIMEOUT_MS
+  assert.equal(MockWebSocket.instances.length, 1, "pong 을 받았으면 재접속하지 않는다");
+  assert.equal(qm.connected, true);
+  qm.disconnect();
+});
+
+test("verifyConnection: OPEN 이지만 pong 없음(half-open) → 타임아웃 후 강제 재접속", async () => {
+  const { qm, clock, MockWebSocket } = createHarness();
+  qm.setManualControlAllowed(true);
+  qm.requestActive();
+  const ws = MockWebSocket.instances[0];
+  ws.readyState = 1;
+  ws.onopen();
+  ws.onmessage({ data: JSON.stringify({ type: "ws_status", active: true }) });
+  assert.equal(qm.wsActive, true);
+
+  qm.verifyConnection();
+  await clock.tick(4_000); // = QUOTE_MANAGER_PING_TIMEOUT_MS
+  assert.equal(MockWebSocket.instances.length, 2, "pong 미수신 → 강제 재접속");
+  assert.equal(ws.closed, true);
+  assert.equal(qm.wsActive, false);
+
+  const ws2 = MockWebSocket.instances[1];
+  ws2.readyState = 1;
+  ws2.onopen();
+  assert.deepEqual(ws2.sent, [{ action: "takeover" }]);
+  qm.disconnect();
+});
+
+test("verifyConnection: 재접속 대기 중엔 백오프 생략, 연결 이력 없거나 끊은 상태는 no-op", async () => {
+  const { qm, clock, MockWebSocket } = createHarness();
+  qm.verifyConnection(); // 초기화 전 — 연결을 만들지 않는다
+  assert.equal(MockWebSocket.instances.length, 0);
+
+  qm.connect();
+  const ws = MockWebSocket.instances[0];
+  ws.readyState = 1;
+  ws.onopen();
+  ws.onclose({ code: 1006 }); // 백그라운드에서 닫힘 → 5초 백오프 대기
+  assert.equal(MockWebSocket.instances.length, 1);
+
+  qm.verifyConnection();
+  assert.equal(MockWebSocket.instances.length, 2, "포그라운드 복귀 즉시 재접속");
+  await clock.tick(10_000);
+  assert.equal(MockWebSocket.instances.length, 2, "기존 백오프 타이머는 해제되어 중복 접속 없음");
+
+  qm.disconnect();
+  qm.verifyConnection(); // 명시적 disconnect 후에도 되살리지 않는다
+  assert.equal(MockWebSocket.instances.length, 2);
 });
 
 test("disconnect clears every timer and resets state", () => {

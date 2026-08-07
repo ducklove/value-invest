@@ -515,6 +515,35 @@ def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
     assert "async _pollAll()" in source
     assert "this._getStaleWsCodes().forEach(c => allCodes.add(c));" in source
 
+def test_foreground_return_revalidates_websocket_connection():
+    """포그라운드 복귀 시 죽은 웹소켓이 '연결됨'으로 남지 않는 계약.
+
+    백그라운드에서 OS/브라우저가 소켓을 끊어도 close 이벤트가 오지 않는
+    half-open 상태가 흔하다. 복귀 시 verifyConnection 이 readyState 확인 +
+    서버 ping/pong(routes/ws_quotes.py 의 action=ping 계약)으로 생사를
+    판별해 죽었으면 즉시 재접속·상태 표시를 맞춘다.
+    """
+    quote_manager = (JS / "quote-manager.js").read_text(encoding="utf-8")
+    app_main = (JS / "app-main.js").read_text(encoding="utf-8")
+
+    assert "const QUOTE_MANAGER_PING_TIMEOUT_MS = 4_000;" in quote_manager
+    assert "verifyConnection() {" in quote_manager
+    assert "JSON.stringify({ action: 'ping' })" in quote_manager
+    assert "} else if (msg.type === 'pong') {" in quote_manager
+    assert "_forceReconnect() {" in quote_manager
+
+    # visibilitychange(백그라운드→포그라운드)에서 항상 검증한다.
+    vis_section = app_main.split(
+        "document.addEventListener('visibilitychange'", 1
+    )[1].split("function _refreshActivePortfolioTodayState", 1)[0]
+    assert "QuoteManager.verifyConnection();" in vis_section
+    # pageshow 는 bfcache 복귀(persisted)에만 — 최초 로드는 initApp 이 담당.
+    pageshow_section = app_main.split(
+        "window.addEventListener('pageshow'", 1
+    )[1].split("window.addEventListener('focus'", 1)[0]
+    assert "if (event && event.persisted) QuoteManager.verifyConnection();" in pageshow_section
+
+
 def test_frontend_displays_stale_quotes_but_keeps_refreshing_them():
     utils = (JS / "utils.js").read_text(encoding="utf-8")
     quote_manager = (JS / "quote-manager.js").read_text(encoding="utf-8")
