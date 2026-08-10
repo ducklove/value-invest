@@ -142,15 +142,15 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertEqual(ctx["nav"]["prev_date"], d_prev)
         self.assertAlmostEqual(ctx["nav"]["change_krw"], 50_000)
         self.assertAlmostEqual(ctx["nav"]["change_pct"], 5.0)
-        # 기여 상위/하위 — 현금성 코드 제외
+        # 기여 상위/하위 — 현금성 코드 제외, 기여액 = 보유 수량(mv/price) × 주당 일 변동
         top_codes = [m["stock_code"] for m in ctx["movers"]["top"]]
         bottom_codes = [m["stock_code"] for m in ctx["movers"]["bottom"]]
         self.assertEqual(top_codes, ["005930"])
         self.assertEqual(bottom_codes, ["000660"])
         self.assertEqual(ctx["movers"]["top"][0]["stock_name"], "삼성전자")
-        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_krw"], 10_000)
+        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_krw"], 570_000 * 20 / 1020)
         self.assertAlmostEqual(ctx["movers"]["top"][0]["change_pct"], 2.0)
-        self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_krw"], -9_000)
+        self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_krw"], 280_000 * -30 / 970)
         self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_pct"], -3.0)
         self.assertNotIn("CASH_KRW", top_codes + bottom_codes)
         self.assertEqual(set(prices.await_args.args[0]), {"005930", "000660"})
@@ -174,6 +174,42 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertNotIn("총평가 1,050,000원", text)
         self.assertIn("+5.00%", text)
         self.assertIn("가격 +2.0%", text)
+
+    async def test_movers_reflect_trades_via_current_quantity(self):
+        """기여액은 당일 보유 수량 기준 — 매도분은 줄고, 신규 매수 종목도 포함된다."""
+        await self._seed_user()
+        d_prev = (date.today() - timedelta(days=2)).isoformat()
+        d_last = (date.today() - timedelta(days=1)).isoformat()
+        await snapshots_repo.save_snapshot("u1", d_prev, 1_000_000, 900_000, 1000.0, 1000.0)
+        await snapshots_repo.save_snapshot("u1", d_last, 1_050_000, 900_000, 1050.0, 1000.0)
+        # 005930 은 대부분 매도(500주 → 50주), 000660 은 어제 신규 매수(1,000주).
+        await snapshots_repo.save_stock_snapshots("u1", d_prev, [
+            {"stock_code": "005930", "market_value": 500_000},
+        ])
+        await snapshots_repo.save_stock_snapshots("u1", d_last, [
+            {"stock_code": "005930", "market_value": 51_000},
+            {"stock_code": "000660", "market_value": 970_000},
+        ])
+        price_rows = {
+            "005930": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 1020}],
+            "000660": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 970}],
+        }
+        with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
+             patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
+             patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
+            ctx = await daily_briefing.build_briefing_context("u1")
+
+        # 신규 매수 종목도 종가 조회 대상에 포함된다 (전일 스냅샷 존재 조건 없음).
+        self.assertEqual(set(prices.await_args.args[0]), {"005930", "000660"})
+        top = ctx["movers"]["top"]
+        bottom = ctx["movers"]["bottom"]
+        # 매도 후 남은 50주(51,000/1,020) × +20원 = +1,000 — 전일 평가액(500주) 기준 +10,000 이 아니다.
+        self.assertEqual([m["stock_code"] for m in top], ["005930"])
+        self.assertAlmostEqual(top[0]["change_krw"], 1_000)
+        # 신규 매수 1,000주(970,000/970) × -30원 = -30,000 이 하락 기여로 잡힌다.
+        self.assertEqual([m["stock_code"] for m in bottom], ["000660"])
+        self.assertAlmostEqual(bottom[0]["change_krw"], -30_000)
 
     async def test_movers_fall_back_to_market_value_when_daily_prices_empty(self):
         await self._seed_user()
@@ -396,7 +432,9 @@ class BriefingContextTests(DailyBriefingHarness):
             "domestic_market": ["코스피 2,900 (▲0.50%)"],
             "market_flows": ["코스피(26.06.23) 개인 +100억 / 외국인 -50억 / 기관 +20억"],
             "movers": {"top": [], "bottom": []},
-            "overseas_groups": [],
+            "overseas_groups": [
+                {"group_name": "해외", "market_value": 300_000, "change_krw": -10_000, "change_pct": -3.2}
+            ],
             "filings": [],
             "reports": [{"stock_code": "000660", "stock_name": "SK하이닉스", "firm": "한국증권", "title": "HBM 점검"}],
             "calendar": [],
@@ -416,13 +454,16 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertIn("내일 주요 일정", text)
         self.assertIn("내일 시장 전망", text)
         self.assertNotIn("📊 어제", text)
+        # 나이트 브리핑은 해외 그룹 성과를 싣지 않는다 (컨텍스트에 있어도 제외).
+        self.assertNotIn("해외 그룹 성과", text)
 
     async def test_night_context_uses_after_close_feed_window(self):
         await self._seed_user()
         reviews = AsyncMock(return_value=[])
         entries = AsyncMock(return_value=[])
+        overseas = AsyncMock(return_value=[{"group_name": "해외"}])
         with patch.object(daily_briefing, "_fetch_today_portfolio_block", new=AsyncMock(return_value=None)), \
-             patch.object(daily_briefing, "_fetch_overseas_groups", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing, "_fetch_overseas_groups", new=overseas), \
              patch.object(daily_briefing, "_fetch_night_futures_block", new=AsyncMock(return_value=None)), \
              patch.object(daily_briefing, "_fetch_domestic_market_block", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing, "_fetch_market_flow_block", new=AsyncMock(return_value=[])), \
@@ -430,11 +471,14 @@ class BriefingContextTests(DailyBriefingHarness):
              patch.object(daily_briefing.dart_review_repo, "list_recent_reviews", new=reviews), \
              patch.object(daily_briefing.wiki_repo, "list_recent_entries", new=entries), \
              patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
-            await daily_briefing.build_briefing_context("u1", "night")
+            ctx = await daily_briefing.build_briefing_context("u1", "night")
 
         expected_since = f"{date.today().isoformat()}T15:30:00"
         self.assertEqual(reviews.await_args.args[1], expected_since)
         self.assertEqual(entries.await_args.args[1], expected_since)
+        # 나이트 브리핑은 해외 그룹 성과를 수집하지 않는다 (모닝 전용).
+        overseas.assert_not_awaited()
+        self.assertEqual(ctx["overseas_groups"], [])
 
 
 class BriefingFormattingTests(unittest.TestCase):

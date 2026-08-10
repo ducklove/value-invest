@@ -327,12 +327,14 @@ def _movers(
     *,
     allow_value_fallback: bool = False,
 ) -> dict:
-    """종목별 가격 변동률로 가격 기여 상위/하위를 계산한다.
+    """종목별 일 변동액(주당 가격 변동 × 보유 수량)으로 기여 상위/하위를 계산한다.
 
-    평가액 증감률은 수량 변경의 영향을 받으므로 퍼센트와 기여액 모두 종가의
-    일간 변동률을 기준으로 잡는다. 두 날짜 모두 존재하고 가격을 확인할 수
-    있는 종목만 우선 비교하며, 현금성 코드는 제외한다. 일별 종가 API가 비거나
-    특정 코드만 빠진 날에는 브리핑이 NAV 한 줄로 축소되지 않도록 평가액 변화
+    전일 평가액 × 변동률은 스냅샷 사이의 매매(수량 변경)를 반영하지 못해
+    비중을 줄인 종목이 과대, 늘린 종목이 과소 집계된다. 그래서 기여액은
+    당일 스냅샷 평가액에서 역산한 보유 수량(mv/price) × 주당 일 변동액으로
+    잡는다 — 새로 매수한 종목도 포함되고, 숏(음수 평가액)은 부호가 반대로
+    잡혀 자연히 맞는다. 현금성 코드는 제외한다. 일별 종가 API가 비거나 특정
+    코드만 빠진 날에는 브리핑이 NAV 한 줄로 축소되지 않도록 평가액 변화
     기준 폴백을 쓴다. 이 폴백은 종목별 설명에 "평가액"으로 표시한다.
     """
     prev_by_code = {r["stock_code"]: float(r.get("market_value") or 0) for r in prev_rows}
@@ -342,20 +344,19 @@ def _movers(
         code = row["stock_code"]
         if code.startswith("CASH_"):
             continue
+        mv = float(row.get("market_value") or 0)
         prev_mv = prev_by_code.get(code)
-        if prev_mv is None or prev_mv <= 0:
-            continue
         price_change = price_changes.get(code)
-        if price_change:
+        if price_change and mv:
+            price = price_change["price"]
+            change = mv * (price - price_change["prev_price"]) / price
             change_pct = price_change["change_pct"]
-            change = prev_mv * change_pct / 100.0
             basis = "price"
             extra = {
-                "price": price_change["price"],
+                "price": price,
                 "prev_price": price_change["prev_price"],
             }
-        elif allow_value_fallback:
-            mv = float(row.get("market_value") or 0)
+        elif allow_value_fallback and prev_mv is not None and prev_mv > 0:
             change = mv - prev_mv
             if change == 0:
                 continue
@@ -634,11 +635,11 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
                     r["stock_code"]: r.get("stock_name") or r["stock_code"]
                     for r in await snapshots_repo.get_latest_stock_snapshot_rows(google_sub)
                 }
-                prev_codes = {r["stock_code"] for r in prev_rows}
+                # 신규 매수 종목(전일 스냅샷에 없음)도 일 변동 기여에 포함한다.
                 mover_codes = sorted(
                     row["stock_code"]
                     for row in curr_rows
-                    if row["stock_code"] in prev_codes and not row["stock_code"].startswith("CASH_")
+                    if not row["stock_code"].startswith("CASH_")
                 )
                 price_changes = await _daily_price_changes_by_code(
                     mover_codes,
@@ -668,8 +669,8 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
         except Exception as exc:
             logger.warning("briefing today portfolio block failed user=%s: %s", google_sub[:8], exc)
 
-    # --- 해외 그룹 성과 (그룹 스냅샷 기반) ---
-    if profile["kind"] != "market_close":
+    # --- 해외 그룹 성과 (그룹 스냅샷 기반 — 모닝 전용, 나이트는 당일 성과에 집중) ---
+    if profile["kind"] == "morning":
         try:
             context["overseas_groups"] = await _fetch_overseas_groups(google_sub)
         except Exception as exc:
@@ -944,7 +945,7 @@ def _requested_missing_context_lines(context: dict, custom_instructions: str | N
     requested = _instruction_preferences(custom_instructions)
     kind = context.get("briefing_type") or DEFAULT_BRIEFING_TYPE
     lines: list[str] = []
-    if kind != "market_close" and requested["overseas_groups"] and not context.get("overseas_groups"):
+    if kind == "morning" and requested["overseas_groups"] and not context.get("overseas_groups"):
         lines.append("🌏 해외 그룹 성과: 최근 그룹 스냅샷에서 해외 그룹 데이터를 찾지 못했습니다.")
     if requested["calendar_alerts"] and not context.get("calendar_alerts"):
         lines.append("📅 오늘의 일정: 오늘 예정된 알림 설정 이벤트가 없습니다.")
@@ -988,6 +989,7 @@ def _context_sections(context: dict, custom_instructions: str | None = None) -> 
     if kind != "market_close":
         add(_section("📈 상승 기여", [_fmt_mover(m) for m in movers.get("top") or []]))
         add(_section("📉 하락 기여", [_fmt_mover(m) for m in movers.get("bottom") or []]))
+    if kind == "morning":
         add(_section(
             "🌏 해외 그룹 성과",
             [_fmt_overseas_group(g) for g in context.get("overseas_groups") or []],
