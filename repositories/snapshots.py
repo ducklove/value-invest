@@ -260,6 +260,38 @@ async def get_year_start_snapshot(google_sub: str) -> dict | None:
     return dict(row) if row else None
 
 
+async def get_snapshot_on_or_before(google_sub: str, snap_date: str) -> dict | None:
+    """정산일 이하의 최신 스냅샷 — Today 카드의 기준선.
+
+    ``get_latest_snapshot_before_date`` 는 date < 인 반면 이쪽은 date <= 다.
+    20:00 정산 경계에서 당일 스냅샷이 이미 찍혔다면 그것이 기준이어야 한다.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw "
+        "FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+        (google_sub, snap_date),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def get_cashflows_created_after(google_sub: str, created_after: str) -> list[dict]:
+    """스냅샷 이후 입력된 입출금 — 아직 정산에 반영되지 않은 것들.
+
+    date 가 아니라 created_at 으로 자르는 이유는 정산 뒤에 소급 입력된
+    입출금도 잡아야 하기 때문이다 (routes/portfolio.py 의 prev-day 경로와 동일).
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT id, type, amount, nav_at_time, units_change, created_at "
+        "FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ? "
+        "ORDER BY created_at ASC, id ASC",
+        (google_sub, created_after),
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
 async def get_nav_history(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
