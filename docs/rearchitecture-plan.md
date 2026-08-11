@@ -11,7 +11,7 @@
 - `routes/portfolio.py`는 API 라우터, 외부 시세, 배당, 목표가, AI 인사이트, 벤치마크, 현금흐름까지 섞여 있다.
 - 프론트엔드는 파일이 나뉘었지만 전역 상태(`portfolioItems`, `pfBenchmarkQuotes`, `pfNavHistory`)에 강하게 의존한다.
 - 배치 작업과 웹 앱이 같은 모듈을 직접 import하며, 일부 설정은 import 시점에 고정된다.
-- 운영 설정이 `.kis.env`, `keys.txt`, systemd `Environment`, 코드 기본값에 분산되어 있다.
+- ~~운영 설정이 `.kis.env`, `keys.txt`, systemd `Environment`, 코드 기본값에 분산되어 있다.~~ → 2026-08-12 `.env` 단일화 완료.
 
 ## 목표 구조
 
@@ -33,9 +33,8 @@ flowchart TD
 ### 1. 설정과 실행환경 분리
 
 - `core.config`를 단일 환경 로딩 진입점으로 사용한다.
-- 환경 파일은 `.env`, `.env.development`, `.env.production` 순서로 분리한다.
-- 기존 `.kis.env`와 `keys.txt`는 마이그레이션 기간 동안 유지하되, 새 설정은 profile env 파일로 이동한다.
-- systemd에는 `VALUE_INVEST_ENV=production`을 명시한다.
+- 환경 파일은 `.env` 하나다(2026-08-12). 프로파일은 그 안의 `VALUE_INVEST_ENV` 값으로 구분한다.
+- `.kis.env`·`keys.txt`·프로필별 env 파일은 제거했고, systemd 유닛은 `EnvironmentFile=-.../.env` 한 줄만 둔다.
 
 ### 2. 앱 조립부 분리
 

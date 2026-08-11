@@ -6,11 +6,12 @@ __pycache__/
 cache.db
 cache.db-shm
 cache.db-wal
-keys.txt
+# 설정·시크릿 단일 소스. 예제만 추적한다.
 *.env
 .env*
 !.env.example
-!.env.*.example
+# 단일화 이전 레거시 파일 — 남아 있어도 커밋되지 않게 유지.
+keys.txt
 *.log
 server.log
 .deploy-repair-*.done

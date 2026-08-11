@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 from typing import Any
 
 from core.errors import RateLimitError
@@ -110,20 +109,6 @@ def _configured_tier_model(spec: dict[str, Any]) -> str:
     return str(spec["default"])
 
 
-def _load_key_from_file(name: str) -> str:
-    keys_path = Path(__file__).parent / "keys.txt"
-    if not keys_path.exists():
-        return ""
-    for raw_line in keys_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        if key.strip() == name:
-            return value.strip()
-    return ""
-
-
 def _mask_secret(value: str) -> str:
     if not value:
         return ""
@@ -136,9 +121,9 @@ async def get_openrouter_key() -> str:
     stored = await app_settings_repo.get_app_setting(OPENROUTER_KEY_SETTING)
     if stored and stored.get("value"):
         return str(stored["value"])
-    env_or_file = os.getenv(OPENROUTER_KEY_SETTING, "") or _load_key_from_file(OPENROUTER_KEY_SETTING)
-    if env_or_file:
-        return env_or_file
+    from_env = os.getenv(OPENROUTER_KEY_SETTING, "")
+    if from_env:
+        return from_env
     # Compatibility for tests/legacy modules that patched the previous
     # routes.portfolio module global. Runtime config still uses DB/env first.
     pf_mod = sys.modules.get("routes.portfolio")
@@ -159,9 +144,6 @@ async def openrouter_key_status() -> dict[str, Any]:
     env_value = os.getenv(OPENROUTER_KEY_SETTING, "")
     if env_value:
         return {"configured": True, "source": "env", "masked": _mask_secret(env_value)}
-    file_value = _load_key_from_file(OPENROUTER_KEY_SETTING)
-    if file_value:
-        return {"configured": True, "source": "keys.txt", "masked": _mask_secret(file_value)}
     return {"configured": False, "source": "missing", "masked": ""}
 
 

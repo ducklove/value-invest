@@ -26,6 +26,10 @@ DEFAULT_CORS_ORIGINS = (
     "https://cantabile.tplinkdns.com:3691",
 )
 
+# 단일화 이전에 쓰이던 설정 파일들. 더 이상 읽지 않으며, 남아 있으면 값이
+# 조용히 무시되는 상태이므로 시작 시 한 번 경고한다.
+RETIRED_CONFIG_FILES = (".env.development", ".env.production", ".env.local", ".kis.env", "keys.txt")
+
 _LOADED_ROOT: Path | None = None
 _SETTINGS: "AppSettings | None" = None
 
@@ -54,91 +58,43 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off", ""}
 
 
-def _legacy_warnings_silenced() -> bool:
-    """Operator opt-out for legacy-config deprecation logs.
-
-    Set SILENCE_LEGACY_CONFIG_WARNINGS=1 to quiet the warnings once an operator
-    has audited the legacy files. Default is to warn so drift is visible.
-    """
-    return os.getenv("SILENCE_LEGACY_CONFIG_WARNINGS", "").strip().lower() in {"1", "true", "yes", "on"}
+def _current_env() -> str:
+    return _normalize_env(os.getenv("VALUE_INVEST_ENV") or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT"))
 
 
-def _load_keys_file(path: Path, *, override: bool = False) -> None:
-    if not path.exists():
-        return
-    applied: list[str] = []
-    for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if key and (override or key not in os.environ):
-            os.environ[key] = value
-            applied.append(key)
-    if applied and not _legacy_warnings_silenced():
-        # keys.txt is a legacy secret fallback (see load_environment). Log which
-        # keys came from it so operators can migrate them into .env.<profile>
-        # and then delete the file. Values are never logged (secrets).
+def _warn_retired_config_files(root: Path) -> None:
+    """Name any leftover pre-consolidation config file — they are not read."""
+    leftovers = [name for name in RETIRED_CONFIG_FILES if (root / name).exists()]
+    if leftovers:
         logger.warning(
-            "legacy config: keys.txt applied %d key(s): %s — migrate to .env.<profile> and remove keys.txt",
-            len(applied),
-            ", ".join(applied),
+            "retired config file(s) present but ignored: %s — 값을 .env 로 옮기고 파일은 삭제하세요.",
+            ", ".join(leftovers),
         )
 
 
 def load_environment(project_root: Path | None = None, *, force: bool = False) -> str:
-    """Load env files before modules freeze import-time settings.
+    """Load `.env` before modules freeze import-time settings.
 
-    Order:
-    1. `.env` for shared local defaults.
-    2. `.env.<environment>` for profile-specific values.
-    3. `.kis.env` as the legacy production file, with override preserved.
-    4. `keys.txt` as a legacy secret fallback that never overrides env vars.
+    설정과 시크릿의 단일 소스는 프로젝트 루트의 `.env` 하나다. 이미 프로세스
+    환경변수로 들어와 있는 값(systemd `Environment=`, 쉘 export, 테스트의
+    `patch.dict`)이 우선하고, `.env`는 비어 있는 키만 채운다.
 
-    The default profile is production so current deployments keep their
-    behavior unless `VALUE_INVEST_ENV` / `APP_ENV` is set explicitly.
-
-    Deprecation: sources 3 and 4 are legacy. They remain for operational
-    compatibility (deploy/value-invest.service still references .kis.env during
-    the migration) but emit a warning naming the keys they contributed, so the
-    drift toward the profile-env single source is visible. Silence with
-    SILENCE_LEGACY_CONFIG_WARNINGS=1 once audited.
+    프로필은 파일이 아니라 `.env` 안의 `VALUE_INVEST_ENV` 값으로 구분한다.
+    기본값은 `production`이라 env를 명시하지 않은 배포는 동작이 바뀌지 않는다.
     """
     global _LOADED_ROOT, _SETTINGS
 
     root = Path(project_root or PROJECT_ROOT)
     if _LOADED_ROOT == root and not force:
-        return _normalize_env(os.getenv("VALUE_INVEST_ENV") or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT"))
+        return _current_env()
 
     load_dotenv(root / ".env", override=False)
-    env = _normalize_env(os.getenv("VALUE_INVEST_ENV") or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT"))
-    os.environ.setdefault("VALUE_INVEST_ENV", env)
+    os.environ.setdefault("VALUE_INVEST_ENV", _current_env())
+    _warn_retired_config_files(root)
 
-    env_file = root / f".env.{env}"
-    if env_file.exists():
-        load_dotenv(env_file, override=True)
-
-    legacy_env = root / ".kis.env"
-    if legacy_env.exists():
-        # Track which keys the legacy .kis.env contributed (values not logged).
-        before = set(os.environ.keys())
-        load_dotenv(legacy_env, override=True)
-        if not _legacy_warnings_silenced():
-            contributed = sorted(set(os.environ.keys()) - before)
-            if contributed:
-                logger.warning(
-                    "legacy config: .kis.env applied %d key(s): %s — migrate to .env.%s and remove .kis.env",
-                    len(contributed),
-                    ", ".join(contributed),
-                    env,
-                )
-
-    _load_keys_file(root / "keys.txt", override=False)
     _LOADED_ROOT = root
     _SETTINGS = None
-    return _normalize_env(os.getenv("VALUE_INVEST_ENV") or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT"))
+    return _current_env()
 
 
 @dataclass(frozen=True)

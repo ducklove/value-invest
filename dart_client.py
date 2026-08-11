@@ -5,11 +5,9 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from core.http import get_http_client
 
-API_KEY = os.getenv("OPENDART_API_KEY", "")
 BASE_URL = "https://opendart.fss.or.kr/api"
 DART_ANNUAL_DATA_START_YEAR = 2015
 
@@ -24,26 +22,21 @@ ACCOUNT_NAMES = {
 }
 
 
-def load_api_key():
-    global API_KEY
-    if API_KEY:
-        return
-    keys_path = Path(__file__).parent / "keys.txt"
-    if keys_path.exists():
-        for line in keys_path.read_text().strip().splitlines():
-            if line.startswith("OPENDART_API_KEY="):
-                API_KEY = line.split("=", 1)[1].strip()
-                break
+def api_key() -> str:
+    """OPENDART_API_KEY를 호출 시점에 읽는다.
 
-
-load_api_key()
+    main.py가 앱 팩토리를 먼저 import 하므로 이 모듈은 보통
+    ``core.config.load_environment()`` 보다 먼저 로드된다. import 시점에 값을
+    고정하면 `.env` 로만 키를 주는 환경에서 조용히 빈 키가 된다.
+    """
+    return os.getenv("OPENDART_API_KEY", "")
 
 
 async def fetch_corp_codes() -> list[dict]:
     """DART에서 고유번호 XML을 다운로드하여 상장사 목록 반환."""
     client = await get_http_client("dart")
     resp = await client.get(
-        f"{BASE_URL}/corpCode.xml", params={"crtfc_key": API_KEY}, timeout=30
+        f"{BASE_URL}/corpCode.xml", params={"crtfc_key": api_key()}, timeout=30
     )
     resp.raise_for_status()
 
@@ -129,13 +122,13 @@ def parse_common_stock_share_status(payload: dict) -> dict:
 
 async def fetch_common_stock_share_status(corp_code: str | None, year: int) -> dict:
     """Fetch common-share count status from DART annual report data."""
-    if not corp_code or not API_KEY:
+    if not corp_code or not api_key():
         return {}
     client = await get_http_client("dart")
     resp = await client.get(
         f"{BASE_URL}/stockTotqySttus.json",
         params={
-            "crtfc_key": API_KEY,
+            "crtfc_key": api_key(),
             "corp_code": corp_code,
             "bsns_year": str(int(year)),
             "reprt_code": "11011",
@@ -213,7 +206,7 @@ async def fetch_dividend_per_share_by_year(
     end_year: int | None = None,
 ) -> dict[int, float]:
     """Fetch common-stock cash DPS from DART annual allotment matters."""
-    if not corp_code or not API_KEY:
+    if not corp_code or not api_key():
         return {}
     if end_year is None:
         end_year = datetime.now().year - 1
@@ -231,7 +224,7 @@ async def fetch_dividend_per_share_by_year(
         resp = await client.get(
             f"{BASE_URL}/alotMatter.json",
             params={
-                "crtfc_key": API_KEY,
+                "crtfc_key": api_key(),
                 "corp_code": corp_code,
                 "bsns_year": str(report_year),
                 "reprt_code": "11011",
@@ -258,7 +251,7 @@ async def fetch_financial_statement(
 
     for report_code in ["CFS", "OFS"]:
         params = {
-            "crtfc_key": API_KEY,
+            "crtfc_key": api_key(),
             "corp_code": corp_code,
             "bsns_year": str(year),
             "reprt_code": "11011",  # 사업보고서(연간)
@@ -306,7 +299,7 @@ async def fetch_annual_report_dates(
         end_year = datetime.now().year - 1
 
     params = {
-        "crtfc_key": API_KEY,
+        "crtfc_key": api_key(),
         "corp_code": corp_code,
         "bgn_de": f"{start_year + 1}0101",
         "end_de": f"{end_year + 1}1231",
@@ -369,12 +362,12 @@ async def fetch_recent_disclosures(corp_code: str, *, days: int = 30, page_count
     보고서명 필터(저신호 제외 등)는 호출 측 책임이다. 반환 항목:
     ``{rcept_no, report_nm, rcept_dt, corp_name}``. 접수일 내림차순(최신 우선).
     """
-    if not corp_code or not API_KEY:
+    if not corp_code or not api_key():
         return []
     end = datetime.now()
     start = end - timedelta(days=days)
     params = {
-        "crtfc_key": API_KEY,
+        "crtfc_key": api_key(),
         "corp_code": corp_code,
         "bgn_de": start.strftime("%Y%m%d"),
         "end_de": end.strftime("%Y%m%d"),

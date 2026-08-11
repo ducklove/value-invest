@@ -55,8 +55,7 @@ class DartReportReviewError(RuntimeError):
 
 
 def _dart_key() -> str:
-    dart_client.load_api_key()
-    return dart_client.API_KEY
+    return dart_client.api_key()
 
 
 def _iso_date(value: str | None) -> str:

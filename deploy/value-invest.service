@@ -22,24 +22,13 @@ RestartSec=3
 # take ~45s before the first ready/ping arrives).
 TimeoutStartSec=90s
 
-Environment="VALUE_INVEST_ENV=production"
-# Optional profile file for non-secret production settings. Secrets can remain
-# in .kis.env during the migration, but new knobs should move into
-# .env.production over time.
-EnvironmentFile=-/home/cantabile/Works/value_invest/.env.production
-
 # --- App configuration ---------------------------------------------------
-# AI model IDs are configured once per tier. Admin DB settings override these
-# deployment defaults; features only reference LOCAL/LIGHT/BALANCED/PREMIUM.
-Environment="AI_LIGHT_MODEL=qwen/qwen3.6-flash"
-Environment="AI_BALANCED_MODEL=google/gemini-3.5-flash"
-Environment="AI_PREMIUM_MODEL=openai/gpt-5.6-terra"
-
-# How many reports per stock the wiki pipeline tries to backfill on each
-# tick. Default in code is 50 — set here explicitly so the knob is visible
-# alongside the other WIKI_* settings. Raise to widen history, lower to
-# throttle OpenRouter spend during the first-deploy catch-up pass.
-Environment="WIKI_PER_STOCK_LIMIT=50"
+# Single source for settings and secrets: the app's own .env. Nothing is
+# duplicated here — AI tier models, WIKI_*, VALUE_INVEST_ENV and every other
+# knob live in that file (see .env.example). The app also loads .env itself,
+# so this line only matters for keys that must be in the process environment
+# before Python starts.
+EnvironmentFile=-/home/cantabile/Works/value_invest/.env
 
 # --- Security hardening ---------------------------------------------------
 # A runaway WebSocket loop or yfinance retry storm must not OOM the Pi and

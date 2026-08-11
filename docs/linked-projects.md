@@ -97,7 +97,7 @@ POST /api/internal/notify
 ```
 
 인증은 다른 `/api/internal/*` 와 동일: 같은 호스트는 loopback 으로 충분하고,
-다른 호스트(finance-pi 등)는 `.env.production` 의 `INTERNAL_API_TOKEN` 값을
+다른 호스트(finance-pi 등)는 `.env` 의 `INTERNAL_API_TOKEN` 값을
 `X-Internal-Token` 헤더로 보낸다.
 
 ```bash
@@ -156,7 +156,7 @@ The main admin console also owns runtime AI configuration:
 
 - OpenRouter key: stored server-side only when saved from admin, shown masked in
   the UI. If no DB value exists, the app falls back to `OPENROUTER_API_KEY` from
-  process env or `keys.txt`.
+  process env or `.env`.
 - Feature model registry:
   - `portfolio_fast`
   - `portfolio_balanced`

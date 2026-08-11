@@ -13,13 +13,13 @@ finance-pi)는 독립 배포를 유지하고, 이 허브는 딥링크·published
 
 ```bash
 pip install -r requirements-dev.txt   # requirements.txt 포함
-cp .env.development.example .env.development
-VALUE_INVEST_ENV=development python3 -m uvicorn main:app --reload --port 8000
+cp .env.example .env      # 시크릿·설정 단일 파일. VALUE_INVEST_ENV=development 로 조정.
+python3 -m uvicorn main:app --reload --port 8000
 ```
 
 - Windows는 `scripts/run-dev.ps1` 사용.
-- 환경 프로파일/로드 순서: [docs/environment-profiles.md](docs/environment-profiles.md)
-- 시크릿(.env.production, `.kis.env`, `keys.txt`)은 저장소에 커밋하지 않는다.
+- 설정·시크릿은 `.env` 하나로 단일화되어 있다: [docs/environment-profiles.md](docs/environment-profiles.md)
+- `.env`는 저장소에 커밋하지 않는다(추적 대상은 `.env.example`뿐).
 
 ## 테스트 / 린트
 
@@ -80,7 +80,7 @@ scripts/, deploy/     운영 스크립트, 배포 스크립트, systemd 유닛(�
 | rearchitecture-plan.md | 단계별 재설계 계획 (진행 상태 포함) |
 | project-architecture-graph.md | 허브·서브프로젝트·외부 소스 전체 그래프 |
 | linked-projects.md | 서브프로젝트 연동 방식·환경변수 |
-| environment-profiles.md | env 프로파일 로드 순서 |
+| environment-profiles.md | `.env` 단일 설정 소스·프로파일 |
 | project-health-review.md | 2026-04 전체 점검 기록 |
 | nps-separation-plan.md | NPS 분리 계획 (대시보드 분리 완료) |
 | nav-trend-performance.md | NAV 차트 성능 개선 기록 |

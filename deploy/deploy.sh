@@ -167,6 +167,12 @@ for dead in "${RETIRED_UNITS[@]}"; do
 done
 (( RETIRED_ANY )) && sudo /bin/systemctl daemon-reload
 
+# --- Config consolidation ---------------------------------------------------
+# The app reads `.env` only. Fold any leftover .env.<profile>/.kis.env/keys.txt
+# into it BEFORE the unit sync and restart below, so the service never comes up
+# with secrets that stopped being loaded. No-op once nothing legacy remains.
+bash deploy/migrate_env_to_single_file.sh
+
 # --- systemd unit sync ------------------------------------------------------
 UNITS_TO_RELOAD=()
 for src in "${REPO_UNITS[@]}"; do

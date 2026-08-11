@@ -185,7 +185,7 @@
   <h2><span class="n">3</span> 런타임 · 배포</h2>
   <h3>부팅 (core.lifespan)</h3>
   <ul>
-    <li><code>load_environment()</code> → <code>.env</code> → <code>.env.&lt;profile&gt;</code> → <code>.kis.env</code> → <code>keys.txt</code> 순으로 설정 로드</li>
+    <li><code>load_environment()</code> → 프로세스 환경변수 &gt; <code>.env</code> (단일 설정 소스) 로 설정 로드</li>
     <li>KIS 키 로드, KIS 프록시/close price 클라이언트 init, <code>cache.init_db()</code>, corp_codes 갱신 점검</li>
     <li>백그라운드 루프: watchdog(sd_notify), wiki ingestion, DART 리뷰, observability prune, (옵션) insight 워밍업</li>
     <li>종료 시 백그라운드 태스크 취소·대기, WS 정리, 클라이언트/DB close</li>

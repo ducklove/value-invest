@@ -6,7 +6,6 @@ import hmac
 import os
 import secrets
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -17,45 +16,15 @@ PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_HASH_ITERATIONS = 260_000
 
 
-def _load_keys() -> dict[str, str]:
-    keys_path = Path(__file__).parent / "keys.txt"
-    values: dict[str, str] = {}
-    if not keys_path.exists():
-        return values
-
-    for raw_line in keys_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        name, value = line.split("=", 1)
-        values[name.strip()] = value.strip()
-    return values
-
-
-_KEYS_CACHE: dict[str, str] | None = None
-
-
-def _keys() -> dict[str, str]:
-    """Lazily read keys.txt once.
-
-    keys.txt is a static file so caching it is fine. The point of reading
-    lazily is os.getenv: values loaded by core.config.load_environment()
-    (e.g. .env.production) must be seen instead of being frozen at import
-    time — otherwise importing this module before load_environment() (batch
-    scripts, tests) silently disables auth.
-    """
-    global _KEYS_CACHE
-    if _KEYS_CACHE is None:
-        _KEYS_CACHE = _load_keys()
-    return _KEYS_CACHE
-
-
+# 값은 호출 시점에 읽는다. core.config.load_environment()가 이 모듈보다 늦게
+# 실행될 수 있어(배치 스크립트·테스트), import 시점에 고정하면 .env 값이 반영되지
+# 않아 인증이 조용히 꺼진다.
 def google_client_id() -> str:
-    return os.getenv("GOOGLE_CLIENT_ID") or _keys().get("GOOGLE_CLIENT_ID", "")
+    return os.getenv("GOOGLE_CLIENT_ID", "")
 
 
 def session_secret() -> str:
-    return os.getenv("SESSION_SECRET") or _keys().get("SESSION_SECRET", "")
+    return os.getenv("SESSION_SECRET", "")
 
 
 def is_enabled() -> bool:

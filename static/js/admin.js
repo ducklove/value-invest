@@ -291,7 +291,7 @@ function _renderAiConfigSection(config) {
                  style="${_adminInputStyle()}min-width:320px;">
           <button class="admin-btn" onclick="saveAiKey()">키 저장/교체</button>
           <button class="admin-btn admin-btn-secondary" onclick="deleteAiKey()">DB 저장 키 삭제</button>
-          <span class="admin-sub">화면에는 마스킹만 표시됩니다. env/keys.txt 키는 삭제하지 않습니다.</span>
+          <span class="admin-sub">화면에는 마스킹만 표시됩니다. .env 값은 삭제하지 않습니다.</span>
         </div>
         <div style="margin-top:16px;"><strong>등급별 모델 설정</strong></div>
         <div class="admin-table-wrap">
@@ -366,7 +366,7 @@ async function saveAiKey() {
 }
 
 async function deleteAiKey() {
-  if (!(await adminConfirm('DB에 저장된 OpenRouter key를 삭제할까요?\nenv/keys.txt 값은 그대로 둡니다.'))) return;
+  if (!(await adminConfirm('DB에 저장된 OpenRouter key를 삭제할까요?\n.env 값은 그대로 둡니다.'))) return;
   try {
     const data = await apiFetchJson('/api/admin/ai-config/key', {
       method: 'DELETE',

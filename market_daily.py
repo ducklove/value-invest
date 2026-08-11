@@ -350,7 +350,7 @@ async def _tape_movers() -> list[dict[str, Any]]:
 
 async def _fetch_dart_disclosures(interests: list[dict[str, Any]], brief_date: str) -> tuple[list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
-    if not dart_client.API_KEY:
+    if not dart_client.api_key():
         return [], ["OPENDART_API_KEY가 없어 관심종목 공시 조회를 건너뜀"]
 
     corp_rows: list[tuple[dict[str, Any], str]] = []
@@ -370,7 +370,7 @@ async def _fetch_dart_disclosures(interests: list[dict[str, Any]], brief_date: s
         async def fetch_one(item: dict[str, Any], corp_code: str) -> None:
             async with semaphore:
                 params = {
-                    "crtfc_key": dart_client.API_KEY,
+                    "crtfc_key": dart_client.api_key(),
                     "corp_code": corp_code,
                     "bgn_de": yyyymmdd,
                     "end_de": yyyymmdd,

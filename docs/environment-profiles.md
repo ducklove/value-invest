@@ -1,59 +1,65 @@
-# 개발/운영 환경 분리
+# 설정과 환경 프로파일
 
-## 프로필
+## 단일 소스: `.env`
 
-- `VALUE_INVEST_ENV=development`: 로컬 개발용. 무거운 배치 루프는 기본 비활성화하고 로컬 브라우저 CORS를 허용한다.
-- `VALUE_INVEST_ENV=production`: 실서비스용. systemd timer를 기준으로 운영하고 공개 도메인만 CORS에 둔다.
-- 기본값은 `production`이다. 기존 서버가 별도 env 없이 동작하던 것을 깨지 않기 위한 호환 정책이다.
+설정과 시크릿은 **프로젝트 루트의 `.env` 한 파일**에만 둔다. 로컬·운영 모두 같은
+파일 하나를 쓴다.
 
-## 파일 로딩 순서
+우선순위는 두 단계뿐이다.
 
-1. `.env`
-2. `.env.<VALUE_INVEST_ENV>`
-3. `.kis.env` *(legacy)*
-4. `keys.txt` *(legacy)*
+1. **프로세스 환경변수** — systemd `Environment=`, 쉘 export, 테스트의 `patch.dict`
+2. **`.env`** — 위에서 비어 있는 키만 채운다 (`load_dotenv(override=False)`)
 
-`.kis.env`는 기존 운영 호환을 위해 override를 유지한다. `keys.txt`는 마지막 fallback이며 이미 존재하는 환경변수는 덮어쓰지 않는다.
+`core.config.load_environment()`가 앱 시작 시(그리고 배치/테스트 진입점에서) 한 번
+로드한다. 새 키는 `.env.example`에 먼저 문서화한 뒤 `.env`에 채운다.
 
-### Legacy 경로 deprecation (3·4단계)
+## 프로파일
 
-`.kis.env`와 `keys.txt`는 레거시다. 운영 호환성 때문에 당장 제거하지 못하지만
-(예: `deploy/value-invest.service`가 `.kis.env`를 아직 참조), 프로필 env
-(`.env.<profile>`)을 단일 소스로 수렴하기 위해 2026-06-30부터 **deprecation
-경고**를 로깅한다.
+프로파일은 별도 파일이 아니라 `.env` 안의 `VALUE_INVEST_ENV` 값으로 구분한다.
 
-- `load_environment()`가 `.kis.env`·`keys.txt`에서 **적용한 키 이름**을
-  `core.config` 로거(WARNING 레벨)에 기록한다. **값은 절대 로그에 찍지 않는다.**
-- 목표: 경고에 나타난 키를 `.env.<profile>`로 옮긴 뒤, legacy 파일에서
-  제거하고, 빈 파일이 되면 삭제한다.
-- 운영자가 감사를 마친 뒤 경고를 끄려면 `SILENCE_LEGACY_CONFIG_WARNINGS=1`
-  환경변수를 설정한다(기본은 경고). 단, 이 플래그는 경고만 끌 뿐 로드 동작은
-  그대로 유지한다.
+- `development`: 무거운 배치 루프를 끄고(`*_INTERVAL_S=0`), 로컬 브라우저 CORS를
+  허용하고, `/docs`를 연다.
+- `production`: systemd timer 기준으로 운영하고 공개 도메인만 CORS에 둔다.
+- 기본값은 `production`이다. env를 명시하지 않던 기존 배포 호환 정책이다.
 
-
-## 권장 사용법
+## 사용법
 
 로컬:
 
 ```powershell
 Copy-Item .env.example .env
-Copy-Item .env.development.example .env.development
-$env:VALUE_INVEST_ENV = "development"
+# .env 에서 VALUE_INVEST_ENV=development 로 바꾸고 시크릿을 채운다.
 python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-운영:
+운영(라즈베리파이):
 
 ```bash
-cp .env.production.example .env.production
-# Fill non-secret production settings in .env.production.
-# Keep real secrets in systemd env, .kis.env, or another untracked secret source.
+cp .env.example .env    # 최초 1회. 이후 키 추가는 .env 를 직접 편집.
+chmod 600 .env
 sudo systemctl restart value-invest.service
 ```
 
+`deploy/value-invest.service`는 `EnvironmentFile=-.../.env` 한 줄만 두고 값을
+중복 정의하지 않는다.
+
+## 단일화 이전 파일들 (2026-08-12 제거)
+
+`.env.<프로필>`, `.kis.env`, `keys.txt`, 그리고 유닛 파일의 중복
+`Environment=` 라인은 더 이상 읽지 않는다.
+
+- 남아 있는 파일이 감지되면 `core.config`가 **파일 이름만** WARNING으로 남긴다
+  (값은 절대 로그에 찍지 않는다). 경고가 보이면 값을 `.env`로 옮기고 파일을 지운다.
+- 서버 체크아웃은 `deploy/migrate_env_to_single_file.sh`가 배포 중(재시작 전)
+  자동으로 병합한다. 옛 로드 순서를 그대로 재현해
+  `.kis.env` > `.env.<프로필>` > `.env` > `keys.txt` 우선순위로 합치고, 원본은
+  `.config-migrated-<timestamp>/`에 백업한 뒤 삭제한다. 이미 정리된 체크아웃에서는
+  아무 일도 하지 않는다.
+
 ## 마이그레이션 원칙
 
-- 새 설정은 코드 기본값에 흩뿌리지 말고 `.env.*.example`에 먼저 문서화한다.
+- 새 설정은 코드 기본값에만 흩뿌리지 말고 `.env.example`에 먼저 문서화한다.
 - 새 모듈은 `core.config.get_settings()`를 통해 app-level 설정을 읽는다.
-- 외부 client의 timeout/base URL은 다음 단계에서 `services/*`로 옮기며 import-time 전역 설정을 줄인다.
-
+- 시크릿은 import 시점에 고정하지 말고 **호출 시점에** `os.getenv`로 읽는다.
+  `main.py`가 앱 팩토리를 먼저 import 하므로 모듈 전역에 굳히면 `.env` 값이
+  반영되지 않는다(`auth_service.session_secret()`, `dart_client.api_key()` 참고).

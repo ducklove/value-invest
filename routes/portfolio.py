@@ -5,7 +5,6 @@ import os
 import re
 import time
 from datetime import date, timedelta
-from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
@@ -68,11 +67,6 @@ from services.portfolio.time_windows import (
 )
 
 _OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
-_keys_file = Path(__file__).parent.parent / "keys.txt"
-if _keys_file.exists():
-    for line in _keys_file.read_text().splitlines():
-        if line.startswith("OPENROUTER_API_KEY="):
-            _OPENROUTER_KEY = line.split("=", 1)[1].strip()
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
