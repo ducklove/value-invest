@@ -8,16 +8,16 @@
 긁지 않고 웹 화면과 같은 캐시 경로(``quote_service.enrich_with_cached_quotes``)를
 쓴다 — 기기는 수 분 간격으로 폴링하므로 강제 갱신을 걸면 종목 수만큼
 업스트림 rate limit 을 태우게 된다.
+
+평가액은 ``qty * quote.price`` 다 — **환율을 곱하지 않는다.** 시세 계층이
+이미 원화로 환산해서 내려주기 때문이다 (``foreign.fetch_foreign_quote`` 가
+``fx.fx_to_krw`` 를 거친다). 원금만 ``avg_price_currency`` 기준이라 별도로
+환산한다.
 """
 from __future__ import annotations
 
-import asyncio
-import logging
-
 from repositories import portfolio as portfolio_repo
 from services.portfolio import fx, quote_service
-
-logger = logging.getLogger(__name__)
 
 #: 세로 480x800 화면에 행 높이를 줄이지 않고 들어가는 최대 행 수.
 DEFAULT_TOP_N = 12
@@ -37,31 +37,6 @@ def _pct(numerator: float, denominator: float) -> float | None:
     if not denominator:
         return None
     return round(numerator / denominator * 100, 2)
-
-
-async def _fx_rates_for(items: list[dict]) -> dict[str, float]:
-    """거래통화별 원화 환산율. KRW 는 조회하지 않는다."""
-    needed = {
-        fx.normalize_price_currency(item.get("currency"))
-        for item in items
-    } - {"KRW"}
-    rates: dict[str, float] = {"KRW": 1.0}
-    if not needed:
-        return rates
-    ordered = sorted(needed)
-    resolved = await asyncio.gather(
-        *(fx.fx_rate_for_currency(currency) for currency in ordered),
-        return_exceptions=True,
-    )
-    for currency, rate in zip(ordered, resolved):
-        if isinstance(rate, (int, float)) and rate > 0:
-            rates[currency] = float(rate)
-        else:
-            # 환율 실패는 치명적이지 않다 — 1.0 으로 두면 해당 종목만
-            # 원화 환산이 틀리고, stale 플래그로 기기에 드러난다.
-            logger.warning("device summary: fx rate unavailable for %s", currency)
-            rates[currency] = 1.0
-    return rates
 
 
 async def build_summary(google_sub: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
@@ -88,7 +63,6 @@ async def build_summary(google_sub: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
 
     enriched = await quote_service.enrich_with_cached_quotes(items)
     await fx.annotate_avg_price_krw(enriched)
-    rates = await _fx_rates_for(enriched)
 
     total_value = 0.0
     total_invested = 0.0
@@ -99,7 +73,6 @@ async def build_summary(google_sub: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
 
     for item in enriched:
         qty = _safe_float(item.get("quantity")) or 0.0
-        rate = rates.get(fx.normalize_price_currency(item.get("currency")), 1.0)
         cost_krw = qty * (_safe_float(item.get("avg_price_krw")) or 0.0)
 
         quote = item.get("quote") or {}
@@ -113,12 +86,16 @@ async def build_summary(google_sub: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
             unpriced += 1
             continue
 
-        value_krw = qty * price * rate
+        # 시세는 이미 원화다 — foreign.fetch_foreign_quote 가 fx.fx_to_krw 로
+        # 환산해서 price/change 를 내려준다. 여기서 환율을 한 번 더 곱하면
+        # 해외 종목 평가액이 환율 배수만큼 부풀어 오른다.
+        # snapshot_nav._fetch_total_value 도 같은 이유로 qty * price 만 쓴다.
+        value_krw = qty * price
         change = _safe_float(quote.get("change")) or 0.0
 
         total_value += value_krw
         total_invested += cost_krw
-        day_pnl += qty * change * rate
+        day_pnl += qty * change
 
         rows.append({
             "code": item.get("stock_code"),

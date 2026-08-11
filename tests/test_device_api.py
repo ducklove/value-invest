@@ -29,6 +29,7 @@ def _items() -> list[dict]:
     return [
         {"stock_code": "A", "stock_name": "가나전자", "quantity": 10,
          "avg_price": 1000, "avg_price_currency": "KRW", "currency": "KRW"},
+        # 해외 종목: 원금은 USD 로 입력돼 있지만 시세는 이미 원화로 온다.
         {"stock_code": "B", "stock_name": "Beta Corp", "quantity": 2,
          "avg_price": 100, "avg_price_currency": "USD", "currency": "USD"},
         {"stock_code": "C", "stock_name": "시세없음", "quantity": 5,
@@ -39,7 +40,8 @@ def _items() -> list[dict]:
 def _enriched(items: list[dict]) -> list[dict]:
     quotes = {
         "A": {"price": 1200, "change": 20, "change_pct": 1.69},
-        "B": {"price": 150, "change": -5, "change_pct": -3.23},
+        # price/change 는 foreign.fetch_foreign_quote 가 fx_to_krw 로 환산한 값.
+        "B": {"price": 200_000, "change": 2_000, "change_pct": 1.01},
         "C": {},  # 시세 미확보 — 합계에서 빠져야 한다
     }
     for item in items:
@@ -118,20 +120,31 @@ class DeviceSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["holdings"], [])
         self.assertIsNone(result["total_pnl_pct"])
 
-    async def test_totals_convert_foreign_holdings_to_krw(self):
+    async def test_market_value_does_not_reapply_fx_to_the_quote(self):
+        """회귀 방지: 시세는 이미 원화다.
+
+        여기에 환율을 한 번 더 곱하면 해외 종목이 환율 배수만큼 부풀어
+        총액이 조 단위로, 수익률이 수만 %로 튄다 (실제로 그렇게 겪었다).
+        """
         result = await self._build(_items())
-        # A: 10주 x 1200원 = 12,000 / B: 2주 x $150 x 1300 = 390,000
-        self.assertEqual(result["total_value"], 402_000)
-        # A: 10 x 1000 = 10,000 / B: 2 x $100 x 1300 = 260,000
+        # B 평가액 = 2주 x 200,000원 = 400,000. 1300 을 곱하면 5.2억이 된다.
+        beta = next(row for row in result["holdings"] if row["code"] == "B")
+        self.assertEqual(beta["value"], 400_000)
+
+    async def test_totals_use_krw_quotes_and_fx_converted_cost(self):
+        result = await self._build(_items())
+        # A: 10주 x 1,200원 = 12,000 / B: 2주 x 200,000원 = 400,000
+        self.assertEqual(result["total_value"], 412_000)
+        # 원금만 통화 환산: A 10 x 1,000 = 10,000 / B 2 x ($100 x 1300) = 260,000
         self.assertEqual(result["total_invested"], 270_000)
-        self.assertEqual(result["total_pnl"], 132_000)
-        self.assertEqual(result["total_pnl_pct"], 48.89)
+        self.assertEqual(result["total_pnl"], 142_000)
+        self.assertEqual(result["total_pnl_pct"], 52.59)
 
     async def test_day_pnl_uses_per_share_change_in_krw(self):
         result = await self._build(_items())
-        # A: 10 x 20 = +200 / B: 2 x -5 x 1300 = -13,000
-        self.assertEqual(result["day_pnl"], -12_800)
-        self.assertEqual(result["day_pnl_pct"], -3.09)
+        # A: 10 x 20 = +200 / B: 2 x 2,000 = +4,000
+        self.assertEqual(result["day_pnl"], 4_200)
+        self.assertEqual(result["day_pnl_pct"], 1.03)
 
     async def test_unpriced_holding_is_excluded_and_counted(self):
         result = await self._build(_items())
@@ -143,9 +156,9 @@ class DeviceSummaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_holdings_sorted_by_value_with_weights(self):
         result = await self._build(_items())
         self.assertEqual([row["code"] for row in result["holdings"]], ["B", "A"])
-        self.assertEqual(result["holdings"][0]["weight_pct"], 97.01)
-        self.assertEqual(result["holdings"][1]["weight_pct"], 2.99)
-        self.assertEqual(result["holdings"][0]["pnl_pct"], 50.0)
+        self.assertEqual(result["holdings"][0]["weight_pct"], 97.09)
+        self.assertEqual(result["holdings"][1]["weight_pct"], 2.91)
+        self.assertEqual(result["holdings"][0]["pnl_pct"], 53.85)
         self.assertEqual(result["holdings"][1]["pnl_pct"], 20.0)
 
     async def test_top_n_truncates_holdings_but_not_the_count(self):
