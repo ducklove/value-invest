@@ -38,6 +38,7 @@ def _register_feature_routers(app: FastAPI) -> None:
     )
     from routes.accounts import router as accounts_router
     from routes.action_board import router as action_board_router
+    from routes.device import router as device_router
     from routes.dividend_calendar import router as dividend_calendar_router
     from routes.household_assets import router as household_assets_router
     from routes.internal import router as internal_router
@@ -68,6 +69,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         dart_review_router,
         notifications_router,
         internal_router,
+        device_router,
         wiki_router,
         screener_router,
         masters_router,
