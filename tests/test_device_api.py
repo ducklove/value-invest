@@ -187,6 +187,20 @@ class DeviceSummaryTests(unittest.IsolatedAsyncioTestCase):
         # 좌수 정보가 없으면 평가액에서 빼고 기존 좌수로 나눈다: 400,000/100 = 4,000
         self.assertEqual(result["day_pnl_pct"], 0.0)
 
+    async def test_ytd_amount_is_the_value_difference_even_when_it_opposes_the_percent(self):
+        """수익률과 금액은 정의가 다르다 — 부호가 갈려도 오류가 아니다.
+
+        연중 출금이 있으면 평가액은 줄어도 NAV 성과는 플러스일 수 있다.
+        수익률은 NAV 비교(성과), 금액은 평가액 차이(잔고 변화)를 뜻하고 웹도
+        같은 정의를 쓴다. 여기서 금액을 NAV 로 환산해 부호를 맞추면 실제
+        잔고가 얼마나 줄었는지가 화면에서 사라진다.
+        """
+        # 연초 평가액이 지금보다 큰 계좌(그 사이 출금)인데 NAV 는 올랐다.
+        year_start = {"date": "2025-12-30", "total_value": 900_000, "nav": 3000.0}
+        result = await self._build(year_start=year_start)
+        self.assertEqual(result["ytd_pnl_pct"], 37.33)     # NAV 기준 성과
+        self.assertEqual(result["ytd_pnl"], -488_000)      # 412,000 - 900,000
+
     async def test_missing_snapshots_leave_returns_blank_not_zero(self):
         result = await self._build(baseline=None, year_start=None, latest=None)
         self.assertIsNone(result["day_pnl"])

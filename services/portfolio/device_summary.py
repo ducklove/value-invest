@@ -201,7 +201,13 @@ async def build_summary(google_sub: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
     year_start = await snapshots_repo.get_year_start_snapshot(google_sub)
 
     def period(snapshot: dict | None, *, subtract_cashflow: bool) -> tuple[float | None, float | None]:
-        """(손익, 수익률%). 수익률은 NAV 비교, 손익은 평가액 차이."""
+        """(손익, 수익률%).
+
+        수익률은 NAV 비교 — 입출금이 성과로 잡히지 않는다.
+        금액은 평가액 차이 그대로다 (웹과 같은 정의). 그래서 기간 중 출금이
+        크면 수익률은 플러스인데 금액은 마이너스로 나올 수 있다. 두 값의
+        의미가 다를 뿐 오류가 아니다.
+        """
         if not snapshot:
             return None, None
         base_value = _safe_float(snapshot.get("total_value"))
