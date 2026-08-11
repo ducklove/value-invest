@@ -69,9 +69,11 @@ class DeviceTokenTests(unittest.IsolatedAsyncioTestCase):
                    new=AsyncMock(return_value={"google_sub": "sub-1"})), \
              patch("services.portfolio.device_summary.build_summary",
                    new=AsyncMock(return_value=summary)) as build:
-            result = await device.device_portfolio(_request({"X-Device-Token": "right"}), top=5)
+            result = await device.device_portfolio(
+                _request({"X-Device-Token": "right"}), top=5, movers=8
+            )
 
-        build.assert_awaited_once_with("sub-1", top_n=5)
+        build.assert_awaited_once_with("sub-1", top_n=5, movers_n=8)
         self.assertEqual(result["total_value"], 1)
         self.assertIn("generated_at", result)
 
@@ -81,10 +83,10 @@ class DeviceTokenTests(unittest.IsolatedAsyncioTestCase):
 KR = "005930"
 US = "AAPL"
 ITEMS = [
-    {"stock_code": KR, "stock_name": "삼성전자", "quantity": 10},
-    {"stock_code": US, "stock_name": "Apple Inc.", "quantity": 2},
-    {"stock_code": "IDX_KOSPI", "stock_name": "코스피", "quantity": 0},
-    {"stock_code": "NOQUOTE", "stock_name": "시세없음", "quantity": 5},
+    {"stock_code": KR, "stock_name": "삼성전자", "quantity": 10, "group_name": "한국주식"},
+    {"stock_code": US, "stock_name": "Apple Inc.", "quantity": 2, "group_name": "해외주식"},
+    {"stock_code": "IDX_KOSPI", "stock_name": "코스피", "quantity": 0, "group_name": "참조"},
+    {"stock_code": "NOQUOTE", "stock_name": "시세없음", "quantity": 5, "group_name": "한국주식"},
 ]
 
 # price/change_pct 는 시세 계층이 이미 원화로 환산해 내려준 값이다.
@@ -96,10 +98,10 @@ BASELINE = {"date": "2026-08-10", "total_value": 400_000, "nav": 4000.0}
 YEAR_START = {"date": "2025-12-30", "total_value": 300_000, "nav": 3000.0}
 
 
-class DeviceSummaryTests(unittest.IsolatedAsyncioTestCase):
+class BuildSummaryMixin:
     async def _build(self, *, items=None, cashflows=(), latest=LATEST,
                      baseline=BASELINE, year_start=YEAR_START, top_n=10,
-                     stale_quote=None):
+                     movers_n=10, stale_quote=None, bulk=None):
         """stale_quote 를 주면 개별 조회까지 실패한 코드가 낡은 캐시로 채워진다."""
         async def fetch_quote(code, **kwargs):
             return PER_CODE.get(code, {})
@@ -107,7 +109,7 @@ class DeviceSummaryTests(unittest.IsolatedAsyncioTestCase):
         with patch("repositories.portfolio.get_portfolio",
                    new=AsyncMock(return_value=list(items if items is not None else ITEMS))), \
              patch("services.stock_quotes.get_bulk_quote_snapshots",
-                   new=AsyncMock(return_value=dict(BULK))), \
+                   new=AsyncMock(return_value=dict(BULK if bulk is None else bulk))), \
              patch("services.portfolio.quote_service.fetch_quote", new=fetch_quote), \
              patch("services.stock_quotes.get_stock_cached",
                    return_value=object() if stale_quote else None), \
@@ -121,8 +123,12 @@ class DeviceSummaryTests(unittest.IsolatedAsyncioTestCase):
                    new=AsyncMock(return_value=latest)), \
              patch("repositories.snapshots.get_year_start_snapshot",
                    new=AsyncMock(return_value=year_start)):
-            return await device_summary.build_summary("sub-1", top_n=top_n)
+            return await device_summary.build_summary(
+                "sub-1", top_n=top_n, movers_n=movers_n
+            )
 
+
+class DeviceSummaryTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
     async def test_empty_portfolio_returns_zeroed_summary(self):
         with patch("repositories.portfolio.get_portfolio", new=AsyncMock(return_value=[])):
             result = await device_summary.build_summary("sub-1")
@@ -219,6 +225,91 @@ class DeviceSummaryTests(unittest.IsolatedAsyncioTestCase):
         result = await self._build(top_n=1)
         self.assertEqual([row["code"] for row in result["holdings"]], [KR])
         self.assertEqual(result["holdings_count"], 2)
+
+
+class GroupAndMoverTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
+    """그룹 합계와 '오늘 움직인 종목'.
+
+    두 값 모두 화면이 종목 전체를 담지 못해서 대신 넣는 것이므로, ``top_n`` 으로
+    잘리기 전 전체 행에서 계산돼야 한다.
+    """
+
+    async def test_day_pnl_is_reconstructed_from_the_change_percent(self):
+        # 12,000 이 +1.69% 오른 값이므로 전일은 11,800.57, 변동액은 199.
+        result = await self._build()
+        by_code = {row["code"]: row for row in result["holdings"]}
+        self.assertEqual(by_code[KR]["day_pnl"], 199)
+        self.assertEqual(by_code[US]["day_pnl"], -2010)
+
+    async def test_groups_follow_the_holding_order_and_sum_the_whole_portfolio(self):
+        result = await self._build()
+        groups = {g["name"]: g for g in result["groups"]}
+        self.assertEqual([g["name"] for g in result["groups"]], ["한국주식", "해외주식"])
+        self.assertEqual(groups["한국주식"]["value"], 12_000)
+        self.assertEqual(groups["해외주식"]["value"], 400_000)
+        self.assertEqual(groups["해외주식"]["weight_pct"], 97.09)
+
+    async def test_group_count_only_covers_rows_that_have_a_price(self):
+        """시세를 못 구한 종목은 평가액에 없으니 개수에도 넣지 않는다.
+
+        넣으면 '한국주식(2) 1.2만' 처럼 개수와 금액의 근거가 어긋난다.
+        미확보 건수는 푸터의 unpriced 로 따로 보여준다.
+        """
+        result = await self._build()
+        groups = {g["name"]: g for g in result["groups"]}
+        self.assertEqual(groups["한국주식"]["count"], 1)   # NOQUOTE 는 빠진다
+        self.assertEqual(result["unpriced"], 1)
+        self.assertNotIn("참조", groups)                   # IDX_ 행도 마찬가지
+
+    async def test_group_percent_round_trips_back_to_the_quote(self):
+        """그룹에 한 종목뿐이면 그룹 등락률은 그 종목의 등락률과 같아야 한다."""
+        result = await self._build()
+        groups = {g["name"]: g for g in result["groups"]}
+        self.assertEqual(groups["한국주식"]["day_pct"], 1.69)
+        self.assertEqual(groups["해외주식"]["day_pct"], -0.5)
+
+    async def test_ungrouped_holdings_fall_into_one_bucket(self):
+        result = await self._build(
+            items=[{"stock_code": KR, "stock_name": "삼성전자", "quantity": 10}]
+        )
+        self.assertEqual([g["name"] for g in result["groups"]], [device_summary.UNGROUPED])
+
+    async def test_movers_are_picked_by_size_then_ordered_by_sign(self):
+        """절대값으로 뽑아야 큰 하락을 놓치지 않고, 부호 순으로 내보내야
+        화면 위쪽이 상승 아래쪽이 하락으로 갈린다."""
+        result = await self._build()
+        self.assertEqual([row["code"] for row in result["movers"]], [KR, US])
+        self.assertEqual(result["movers"][0]["day_pnl"], 199)
+        self.assertEqual(result["movers"][-1]["day_pnl"], -2010)
+
+    async def test_movers_limit_keeps_the_biggest_move_not_the_first_row(self):
+        result = await self._build(movers_n=1)
+        self.assertEqual([row["code"] for row in result["movers"]], [US])
+
+    async def test_groups_and_movers_ignore_the_holdings_cutoff(self):
+        result = await self._build(top_n=1)
+        self.assertEqual(len(result["holdings"]), 1)
+        self.assertEqual(len(result["groups"]), 2)
+        self.assertEqual(len(result["movers"]), 2)
+
+    async def test_flat_holdings_are_not_movers(self):
+        """0% 는 '움직인 종목' 이 아니다 — 자리를 차지하면 안 된다."""
+        result = await self._build(
+            items=[{"stock_code": KR, "stock_name": "삼성전자", "quantity": 10}],
+            bulk={KR: {"price": 1200, "change_pct": 0.0}},
+        )
+        self.assertEqual(result["movers"], [])
+        self.assertEqual(result["groups"][0]["day_pct"], 0.0)
+
+    async def test_missing_change_percent_leaves_the_group_percent_blank(self):
+        """등락률이 없으면 0% 가 아니라 '모름' 이다."""
+        result = await self._build(
+            items=[{"stock_code": KR, "stock_name": "삼성전자", "quantity": 10}],
+            bulk={KR: {"price": 1200}},
+        )
+        self.assertIsNone(result["groups"][0]["day_pnl"])
+        self.assertIsNone(result["groups"][0]["day_pct"])
+        self.assertEqual(result["groups"][0]["value"], 12_000)
 
 
 if __name__ == "__main__":

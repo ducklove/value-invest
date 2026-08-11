@@ -52,10 +52,17 @@ async def _resolve_device_user() -> dict:
 async def device_portfolio(
     request: Request,
     top: int = Query(device_summary.DEFAULT_TOP_N, ge=1, le=30),
+    movers: int = Query(device_summary.DEFAULT_MOVERS_N, ge=0, le=30),
 ) -> dict:
-    """기기 화면 한 장 분량의 포트폴리오 요약."""
+    """기기 화면 한 장 분량의 포트폴리오 요약.
+
+    ``top`` 은 보유 종목 목록, ``movers`` 는 오늘 크게 움직인 종목의 개수다.
+    그룹 합계는 잘리지 않고 항상 전 종목 기준으로 들어간다.
+    """
     _require_device_token(request)
     user = await _resolve_device_user()
-    summary = await device_summary.build_summary(user["google_sub"], top_n=top)
+    summary = await device_summary.build_summary(
+        user["google_sub"], top_n=top, movers_n=movers
+    )
     summary["generated_at"] = datetime.now(KST).isoformat(timespec="seconds")
     return summary

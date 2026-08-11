@@ -19,6 +19,16 @@
 
 종목 순서는 사용자가 서비스에서 정한 순서(``sort_order``)를 그대로 쓴다.
 평가액 순으로 다시 정렬하지 않는다.
+
+화면에는 종목 전체가 들어가지 않으므로 두 갈래로 접어서 내려준다:
+
+* ``groups`` — 그룹별 합계. **전 종목** 기준이라 상위 몇 개만 잘라 보내도 화면의
+  합이 실제 포트폴리오와 어긋나지 않는다.
+* ``movers`` — 오늘 평가액이 가장 크게 움직인 종목. 평가액 상위 목록은 매일
+  거의 그대로라 자주 갱신되는 화면에서 볼 이유가 없다. 변동액 절대값으로 뽑고
+  부호 내림차순으로 정렬해 내려준다.
+
+둘 다 ``top_n`` 으로 자르기 **전** 의 전체 행에서 계산한다.
 """
 from __future__ import annotations
 
@@ -35,8 +45,14 @@ logger = logging.getLogger(__name__)
 #: 세로 480x800 화면에 행 높이를 줄이지 않고 들어가는 최대 행 수.
 DEFAULT_TOP_N = 12
 
+#: 화면 아래쪽 '움직인 종목' 칸에 들어가는 최대 행 수.
+DEFAULT_MOVERS_N = 12
+
 #: 시세가 존재하지 않는 참조용 행 (지수/환율). 보유가 아니므로 미확보로 세지 않는다.
 NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
+
+#: 그룹이 지정되지 않은 종목이 모이는 이름.
+UNGROUPED = "기타"
 
 _QUOTE_CONCURRENCY = 2
 _QUOTE_ITEM_TIMEOUT = 20.0
@@ -55,6 +71,84 @@ def _pct(numerator: float, denominator: float) -> float | None:
     if not denominator:
         return None
     return round(numerator / denominator * 100, 2)
+
+
+def _day_pnl(value: float, day_pct: float | None) -> float | None:
+    """등락률에서 오늘 변동액을 되돌린다.
+
+    시세 계층은 종목별 전일 종가를 따로 주지 않고 등락률만 준다. 지금 평가액이
+    전일 대비 ``day_pct`` % 오른 값이므로 전일 평가액은 ``value / (1 + r)`` 이고
+    변동액은 그 차이다. ``day_pct`` 가 -100% 면 전일 평가액이 0 이라 되돌릴 수
+    없으므로 비워 둔다.
+    """
+    if day_pct is None:
+        return None
+    denominator = 100.0 + day_pct
+    if denominator == 0:
+        return None
+    return value * day_pct / denominator
+
+
+def _change_pct(value: float, day_pnl: float | None) -> float | None:
+    """합계 평가액과 합계 변동액에서 그룹 등락률을 되돌린다."""
+    if day_pnl is None:
+        return None
+    return _pct(day_pnl, value - day_pnl)
+
+
+def _group_rows(rows: list[dict], total_value: float) -> list[dict]:
+    """그룹별 합계. 순서는 종목 순서에서 그룹이 처음 나온 순서를 따른다.
+
+    사용자가 서비스에서 정한 정렬을 그대로 물려받는 것이라 화면과 웹의 그룹
+    순서가 같아진다.
+    """
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        name = row.get("group") or UNGROUPED
+        bucket = buckets.setdefault(
+            name, {"name": name, "count": 0, "value": 0.0, "day_pnl": None}
+        )
+        bucket["count"] += 1
+        bucket["value"] += row["value"]
+        day_pnl = row.get("day_pnl")
+        if day_pnl is not None:
+            bucket["day_pnl"] = (bucket["day_pnl"] or 0.0) + day_pnl
+
+    groups = []
+    for bucket in buckets.values():
+        day_pnl = bucket["day_pnl"]
+        groups.append({
+            "name": bucket["name"],
+            "count": bucket["count"],
+            "value": round(bucket["value"]),
+            "weight_pct": _pct(bucket["value"], total_value),
+            "day_pnl": round(day_pnl) if day_pnl is not None else None,
+            "day_pct": _change_pct(bucket["value"], day_pnl),
+        })
+    return groups
+
+
+def _movers(rows: list[dict], limit: int) -> list[dict]:
+    """오늘 가장 크게 움직인 종목 — 절대값으로 뽑고 부호 내림차순으로 준다.
+
+    뽑을 때는 절대값이라 큰 하락도 놓치지 않고, 내보낼 때는 부호 순이라 화면
+    위쪽이 상승, 아래쪽이 하락으로 갈린다.
+    """
+    if limit <= 0:
+        return []
+    movable = [row for row in rows if row.get("day_pnl")]
+    picked = sorted(movable, key=lambda row: abs(row["day_pnl"]), reverse=True)[:limit]
+    picked.sort(key=lambda row: row["day_pnl"], reverse=True)
+    return [
+        {
+            "code": row["code"],
+            "name": row["name"],
+            "value": row["value"],
+            "day_pnl": row["day_pnl"],
+            "day_pct": row["day_pct"],
+        }
+        for row in picked
+    ]
 
 
 async def _complete_quotes(codes: list[str]) -> dict[str, dict]:
@@ -156,12 +250,16 @@ def _empty_summary() -> dict:
         "ytd_pnl_pct": None,
         "holdings": [],
         "holdings_count": 0,
+        "groups": [],
+        "movers": [],
         "unpriced": 0,
         "stale": False,
     }
 
 
-async def build_summary(google_sub: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
+async def build_summary(
+    google_sub: str, *, top_n: int = DEFAULT_TOP_N, movers_n: int = DEFAULT_MOVERS_N
+) -> dict:
     items = await portfolio_repo.get_portfolio(google_sub)
     if not items:
         return _empty_summary()
@@ -186,11 +284,15 @@ async def build_summary(google_sub: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
             continue
         value = qty * price
         total_value += value
+        day_pct = _safe_float(quote.get("change_pct"))
+        day_pnl = _day_pnl(value, day_pct)
         rows.append({
             "code": code,
             "name": item.get("stock_name") or code,
+            "group": item.get("group_name") or UNGROUPED,
             "value": round(value),
-            "day_pct": _safe_float(quote.get("change_pct")),
+            "day_pct": day_pct,
+            "day_pnl": round(day_pnl) if day_pnl is not None else None,
         })
 
     for row in rows:
@@ -233,6 +335,9 @@ async def build_summary(google_sub: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
         "ytd_pnl_pct": ytd_pct,
         "holdings": rows[:top_n] if top_n and top_n > 0 else rows,
         "holdings_count": len(rows),
+        # 그룹과 movers 는 잘리기 전 전체 행에서 계산한다.
+        "groups": _group_rows(rows, total_value),
+        "movers": _movers(rows, movers_n),
         "unpriced": unpriced,
         "stale": stale,
     }
