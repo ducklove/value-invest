@@ -624,6 +624,9 @@ def _derive_normalized_financial_rows(
         bps = None
         net_income = _safe_float(item.get("net_income"), zero_as_none=False)
         total_equity = _safe_float(item.get("total_equity"), zero_as_none=False)
+        total_liabilities = _safe_float(item.get("total_liabilities"), zero_as_none=False)
+        revenue = _safe_float(item.get("revenue"), zero_as_none=False)
+        operating_profit = _safe_float(item.get("operating_profit"), zero_as_none=False)
         if shares and shares > 0:
             if net_income is not None:
                 eps = round(net_income / shares, 2)
@@ -633,6 +636,13 @@ def _derive_normalized_financial_rows(
             "eps": eps,
             "bps": bps,
             "shares_outstanding": shares,
+            # KIS financials 가 죽으면 주간 ROE/부채비율/영업이익률이 통째로
+            # 비어버리므로, DART 재무데이터로도 같은 비율을 계산해 폴백으로 둔다.
+            # (analyzer 의 연간 지표와 동일한 산식 — 단위는 비율에서 상쇄된다.
+            #  KIS 값이 있으면 _merge_normalized_financial_rows 가 우선한다.)
+            "roe": _safe_div(net_income, total_equity, 100),
+            "debt_ratio": _safe_div(total_liabilities, total_equity, 100),
+            "operating_margin": _safe_div(operating_profit, revenue, 100),
         }
     return normalized
 

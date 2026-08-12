@@ -199,21 +199,30 @@ async def get_daily_data(stock_code: str):
     end_date = date.today()
     start_date = end_date - timedelta(days=365)
 
-    financials_payload, dividends_payload, history_payload = await asyncio.gather(
+    financials_payload, dividends_payload, history_payload, fin_data = await asyncio.gather(
         stock_price.kis_proxy_client.get_financials(stock_code),
         stock_price.kis_proxy_client.get_dividends(stock_code, start_date=start_date, end_date=end_date),
         stock_price.kis_proxy_client.get_history(stock_code, start_date=start_date, end_date=end_date, period="D", adjusted=True),
+        financial_repo.get_financial_data(stock_code),
         return_exceptions=True,
     )
     if isinstance(financials_payload, Exception):
         financials_payload = {}
     if isinstance(dividends_payload, Exception):
         dividends_payload = {}
+    if isinstance(fin_data, Exception):
+        logger.warning(f"일간 재무데이터 조회 실패({stock_code}): {fin_data}")
+        fin_data = []
     if isinstance(history_payload, Exception):
         raise HTTPException(status_code=500, detail="일봉 데이터 조회 실패")
 
-    normalized = stock_price._normalize_financial_rows(financials_payload, None)
-    financial_timeline = stock_price._financial_timeline(None, normalized)
+    # KIS financials 가 죽어도 ROE/부채비율/영업이익률은 DART 재무데이터로
+    # 채운다 — 주간(fetch_weekly_market_data)과 같은 병합 규칙(KIS 우선).
+    normalized = stock_price._merge_normalized_financial_rows(
+        stock_price._normalize_financial_rows(financials_payload, None),
+        stock_price._derive_normalized_financial_rows(fin_data, None),
+    )
+    financial_timeline = stock_price._financial_timeline(fin_data, normalized)
     kis_dividend_events = stock_price._build_dividend_events(dividends_payload.get("items"))
 
     results = []

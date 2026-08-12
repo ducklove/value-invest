@@ -352,3 +352,57 @@ class ParseTests(unittest.TestCase):
 
     def test_parse_year_empty(self):
         self.assertIsNone(_parse_year(""))
+
+
+class DerivedFinancialFallbackTests(unittest.TestCase):
+    """KIS financials 장애 시 DART 재무데이터로 비율을 채우는 폴백."""
+
+    FIN_DATA = [
+        {
+            "year": 2025,
+            "net_income": 3200.0,
+            "total_equity": 40000.0,
+            "total_liabilities": 10000.0,
+            "revenue": 80000.0,
+            "operating_profit": 8000.0,
+        }
+    ]
+
+    def test_derives_ratios_from_dart_financials(self):
+        rows = stock_price._derive_normalized_financial_rows(self.FIN_DATA, None)
+
+        self.assertEqual(rows[2025]["roe"], 8.0)
+        self.assertEqual(rows[2025]["debt_ratio"], 25.0)
+        self.assertEqual(rows[2025]["operating_margin"], 10.0)
+
+    def test_missing_inputs_stay_none(self):
+        rows = stock_price._derive_normalized_financial_rows(
+            [{"year": 2025, "net_income": 3200.0}], None
+        )
+
+        self.assertIsNone(rows[2025]["roe"])
+        self.assertIsNone(rows[2025]["debt_ratio"])
+        self.assertIsNone(rows[2025]["operating_margin"])
+
+    def test_kis_values_win_over_dart_fallback(self):
+        merged = stock_price._merge_normalized_financial_rows(
+            {2025: {"roe": 11.5, "debt_ratio": None, "operating_margin": None}},
+            stock_price._derive_normalized_financial_rows(self.FIN_DATA, None),
+        )
+
+        self.assertEqual(merged[2025]["roe"], 11.5)
+        # KIS 가 못 준 항목만 DART 로 메운다.
+        self.assertEqual(merged[2025]["debt_ratio"], 25.0)
+        self.assertEqual(merged[2025]["operating_margin"], 10.0)
+
+    def test_empty_kis_payload_still_yields_ratios(self):
+        merged = stock_price._merge_normalized_financial_rows(
+            stock_price._normalize_financial_rows({}, None),
+            stock_price._derive_normalized_financial_rows(self.FIN_DATA, None),
+        )
+
+        self.assertEqual(merged[2025]["operating_margin"], 10.0)
+
+
+if __name__ == "__main__":
+    unittest.main()
