@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date, timedelta
 
+from repositories import market_brief as market_brief_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from services import stock_quotes
@@ -53,6 +55,12 @@ NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
 
 #: 그룹이 지정되지 않은 종목이 모이는 이름.
 UNGROUPED = "기타"
+
+#: 시황 브리프는 포트폴리오와 무관한 시장 기준이라 모든 사용자가 하나를 공유한다
+#: (routes/market_daily.py 의 _BRIEF_CACHE_SUB 와 같은 값이어야 한다).
+MARKET_BRIEF_SUB = "public"
+#: 기기 화면의 코멘트 한 칸을 쓰는 재료다. 원문을 통째로 실어 보낼 이유가 없다.
+MARKET_BRIEF_CHARS = 1800
 
 _QUOTE_CONCURRENCY = 2
 _QUOTE_ITEM_TIMEOUT = 20.0
@@ -128,15 +136,56 @@ def _group_rows(rows: list[dict], total_value: float) -> list[dict]:
     return groups
 
 
+def _merge_pairs(rows: list[dict]) -> list[dict]:
+    """롱숏 페어를 한 줄로 합친다.
+
+    숏 행은 ``pair_long_code`` 로 같은 포트폴리오의 롱 행을 가리킨다(웹의
+    ``pfPairStats`` 와 같은 관계). 두 다리를 따로 세우면 헤지의 한쪽만 보고
+    '오늘 크게 빠진 종목' 으로 읽히므로, 합쳐서 순손익 한 줄로 만든다.
+
+    **합친 줄에는 등락률을 주지 않는다.** 순평가액이 0 근처면 비율이 발산하고,
+    그럴듯한 분모를 여기서 새로 만들면 웹 화면의 숫자와 어긋난다. 금액은 정의가
+    분명하므로 그것만 남기고 ``pair`` 로 표시해 화면이 달리 그리게 한다.
+    """
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        key = row.get("pair_long_code") or row["code"]
+        bucket = merged.get(key)
+        if bucket is None:
+            bucket = {**row, "_legs": 1, "_is_long": row["code"] == key}
+            merged[key] = bucket
+            order.append(key)
+            continue
+        bucket["_legs"] += 1
+        bucket["value"] += row["value"]
+        if row.get("day_pnl") is not None:
+            bucket["day_pnl"] = (bucket.get("day_pnl") or 0) + row["day_pnl"]
+        # 이름은 롱 다리를 따른다 — 세트를 부르는 이름은 롱 쪽이다.
+        if row["code"] == key:
+            bucket["code"], bucket["name"], bucket["_is_long"] = row["code"], row["name"], True
+
+    out = []
+    for key in order:
+        bucket = merged[key]
+        legs = bucket.pop("_legs")
+        bucket.pop("_is_long", None)
+        if legs > 1:
+            bucket["day_pct"] = None
+            bucket["pair"] = True
+        out.append(bucket)
+    return out
+
+
 def _movers(rows: list[dict], limit: int) -> list[dict]:
     """오늘 가장 크게 움직인 종목 — 절대값으로 뽑고 부호 내림차순으로 준다.
 
     뽑을 때는 절대값이라 큰 하락도 놓치지 않고, 내보낼 때는 부호 순이라 화면
-    위쪽이 상승, 아래쪽이 하락으로 갈린다.
+    위쪽이 상승, 아래쪽이 하락으로 갈린다. 롱숏 페어는 합쳐진 뒤에 겨룬다.
     """
     if limit <= 0:
         return []
-    movable = [row for row in rows if row.get("day_pnl")]
+    movable = [row for row in _merge_pairs(rows) if row.get("day_pnl")]
     picked = sorted(movable, key=lambda row: abs(row["day_pnl"]), reverse=True)[:limit]
     picked.sort(key=lambda row: row["day_pnl"], reverse=True)
     return [
@@ -146,6 +195,7 @@ def _movers(rows: list[dict], limit: int) -> list[dict]:
             "value": row["value"],
             "day_pnl": row["day_pnl"],
             "day_pct": row["day_pct"],
+            "pair": bool(row.get("pair")),
         }
         for row in picked
     ]
@@ -193,6 +243,42 @@ async def _complete_quotes(codes: list[str]) -> dict[str, dict]:
     for code, quote in await asyncio.gather(*(one(c) for c in remaining)):
         results[code] = quote
     return results
+
+
+async def _market_brief() -> dict | None:
+    """오늘(없으면 어제) 만들어진 시황 브리프. **여기서 새로 만들지는 않는다.**
+
+    생성은 LLM 호출이라 비싸고 느리다. 기기 폴링이 그것을 촉발하면 30초 안에
+    끝나야 하는 화면 갱신이 시황 생성을 기다리게 되므로 캐시에 있는 것만 쓴다.
+
+    아침에는 오늘 브리프가 아직 없다 — 그때는 어제 것이 '지금 알려진 마지막
+    시장 상태'라 더 쓸모 있다. 언제 것인지는 ``is_today`` 로 알려 준다.
+    """
+    today = date.today()
+    for offset in (0, 1):
+        brief_date = (today - timedelta(days=offset)).isoformat()
+        try:
+            brief = await market_brief_repo.get_daily_market_brief(MARKET_BRIEF_SUB, brief_date)
+        except Exception as exc:
+            logger.warning("device summary: 시황 조회 실패: %s", exc)
+            return None
+        text = ((brief or {}).get("markdown") or "").strip()
+        if not text:
+            continue
+        payload = (brief or {}).get("payload") or {}
+        return {
+            "date": brief_date,
+            "is_today": offset == 0,
+            "indices": [
+                {
+                    "label": row.get("label") or row.get("code"),
+                    "change_pct": _safe_float(row.get("change_pct")),
+                }
+                for row in (payload.get("market") or [])[:6]
+            ],
+            "text": text[:MARKET_BRIEF_CHARS],
+        }
+    return None
 
 
 async def _current_nav(google_sub: str, total_value: float, baseline: dict) -> float | None:
@@ -252,6 +338,7 @@ def _empty_summary() -> dict:
         "holdings_count": 0,
         "groups": [],
         "movers": [],
+        "market": None,
         "unpriced": 0,
         "stale": False,
     }
@@ -290,6 +377,8 @@ async def build_summary(
             "code": code,
             "name": item.get("stock_name") or code,
             "group": item.get("group_name") or UNGROUPED,
+            # 숏 다리는 이것으로 자기 롱을 가리킨다. movers 를 합칠 때 쓴다.
+            "pair_long_code": item.get("pair_long_code"),
             "value": round(value),
             "day_pct": day_pct,
             "day_pnl": round(day_pnl) if day_pnl is not None else None,
@@ -338,6 +427,8 @@ async def build_summary(
         # 그룹과 movers 는 잘리기 전 전체 행에서 계산한다.
         "groups": _group_rows(rows, total_value),
         "movers": _movers(rows, movers_n),
+        # 화면에 직접 그리지는 않는다 — 아래 코멘트 한 칸을 쓰는 재료다.
+        "market": await _market_brief(),
         "unpriced": unpriced,
         "stale": stale,
     }

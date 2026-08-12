@@ -101,7 +101,7 @@ YEAR_START = {"date": "2025-12-30", "total_value": 300_000, "nav": 3000.0}
 class BuildSummaryMixin:
     async def _build(self, *, items=None, cashflows=(), latest=LATEST,
                      baseline=BASELINE, year_start=YEAR_START, top_n=10,
-                     movers_n=10, stale_quote=None, bulk=None):
+                     movers_n=10, stale_quote=None, bulk=None, brief=None):
         """stale_quote 를 주면 개별 조회까지 실패한 코드가 낡은 캐시로 채워진다."""
         async def fetch_quote(code, **kwargs):
             return PER_CODE.get(code, {})
@@ -121,6 +121,8 @@ class BuildSummaryMixin:
                    new=AsyncMock(return_value=list(cashflows))), \
              patch("repositories.snapshots.get_latest_snapshot",
                    new=AsyncMock(return_value=latest)), \
+             patch("repositories.market_brief.get_daily_market_brief",
+                   new=brief if callable(brief) else AsyncMock(return_value=brief)), \
              patch("repositories.snapshots.get_year_start_snapshot",
                    new=AsyncMock(return_value=year_start)):
             return await device_summary.build_summary(
@@ -301,6 +303,59 @@ class GroupAndMoverTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["movers"], [])
         self.assertEqual(result["groups"][0]["day_pct"], 0.0)
 
+    async def test_long_short_pairs_become_one_row(self):
+        """헤지의 한쪽만 세우면 '오늘 크게 빠진 종목' 으로 읽힌다.
+
+        숏 다리는 수량이 음수라 평가액도 변동액도 자연히 음수다 — 합치면
+        그대로 세트의 순손익이 된다.
+        """
+        items = [
+            {"stock_code": KR, "stock_name": "두산", "quantity": 10, "group_name": "국내"},
+            {"stock_code": US, "stock_name": "두산2우B", "quantity": -2,
+             "group_name": "국내", "pair_long_code": KR},
+        ]
+        result = await self._build(items=items)
+        self.assertEqual([m["name"] for m in result["movers"]], ["두산"])
+        # 롱 +199, 숏 -2 x 200,000 = -400,000 이 -0.5% → +2010
+        self.assertEqual(result["movers"][0]["day_pnl"], 199 + 2010)
+        self.assertTrue(result["movers"][0]["pair"])
+
+    async def test_a_merged_pair_has_no_percent(self):
+        """순평가액이 0 근처면 비율이 발산한다. 웹에 없는 분모를 여기서 만들면
+        같은 세트가 두 화면에서 다른 숫자로 보인다."""
+        items = [
+            {"stock_code": KR, "stock_name": "두산", "quantity": 10},
+            {"stock_code": US, "stock_name": "두산2우B", "quantity": -2, "pair_long_code": KR},
+        ]
+        result = await self._build(items=items)
+        self.assertIsNone(result["movers"][0]["day_pct"])
+
+    async def test_unpaired_holdings_keep_their_own_percent(self):
+        result = await self._build()
+        self.assertEqual([m["pair"] for m in result["movers"]], [False, False])
+        self.assertEqual(result["movers"][0]["day_pct"], 1.69)
+
+    async def test_pair_legs_still_count_separately_in_their_group(self):
+        """합치는 것은 movers 목록뿐이다 — 그룹 합계는 두 다리 모두 반영한다."""
+        items = [
+            {"stock_code": KR, "stock_name": "두산", "quantity": 10, "group_name": "국내"},
+            {"stock_code": US, "stock_name": "두산2우B", "quantity": -2,
+             "group_name": "국내", "pair_long_code": KR},
+        ]
+        result = await self._build(items=items)
+        self.assertEqual(result["groups"][0]["count"], 2)
+        self.assertEqual(result["groups"][0]["value"], 12_000 - 400_000)
+
+    async def test_a_pair_pointing_at_a_missing_long_is_left_alone(self):
+        """롱이 시세를 못 구해 빠지면 남은 숏은 그냥 한 종목이다."""
+        items = [
+            {"stock_code": "NOQUOTE", "stock_name": "롱", "quantity": 1},
+            {"stock_code": US, "stock_name": "숏", "quantity": -2, "pair_long_code": "NOQUOTE"},
+        ]
+        result = await self._build(items=items)
+        self.assertEqual([m["name"] for m in result["movers"]], ["숏"])
+        self.assertFalse(result["movers"][0]["pair"])
+
     async def test_missing_change_percent_leaves_the_group_percent_blank(self):
         """등락률이 없으면 0% 가 아니라 '모름' 이다."""
         result = await self._build(
@@ -310,6 +365,57 @@ class GroupAndMoverTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["groups"][0]["day_pnl"])
         self.assertIsNone(result["groups"][0]["day_pct"])
         self.assertEqual(result["groups"][0]["value"], 12_000)
+
+
+BRIEF = {
+    "brief_date": "2026-08-12",
+    "markdown": "### 금일 시황\n\n반도체가 지수를 끌어올렸다." + "가" * 3000,
+    "payload": {"market": [{"label": "KOSPI", "change_pct": 0.82},
+                           {"code": "KOSDAQ", "change_pct": -0.31}]},
+}
+
+
+class MarketBriefTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
+    """시황은 화면에 직접 그리지 않는다 — 기기 코멘트 한 칸을 쓰는 재료다."""
+
+    async def test_brief_is_attached_when_one_is_cached(self):
+        result = await self._build(brief=BRIEF)
+        self.assertEqual(result["market"]["date"], "2026-08-12")
+        self.assertTrue(result["market"]["is_today"])
+        self.assertEqual(
+            [i["label"] for i in result["market"]["indices"]], ["KOSPI", "KOSDAQ"]
+        )
+
+    async def test_brief_text_is_trimmed(self):
+        """원문을 통째로 실어 보낼 이유가 없다 — 한 칸을 쓰는 재료일 뿐이다."""
+        result = await self._build(brief=BRIEF)
+        self.assertEqual(len(result["market"]["text"]), device_summary.MARKET_BRIEF_CHARS)
+
+    async def test_no_brief_is_not_an_error(self):
+        result = await self._build(brief=None)
+        self.assertIsNone(result["market"])
+        self.assertEqual(result["total_value"], 412_000)
+
+    async def test_a_broken_brief_table_does_not_take_down_the_summary(self):
+        """시황 하나 때문에 화면이 통째로 못 뜨게 할 이유는 없다."""
+        with patch("repositories.market_brief.get_daily_market_brief",
+                   new=AsyncMock(side_effect=RuntimeError("no such table"))):
+            result = await self._build(brief=None)
+        self.assertIsNone(result["market"])
+        self.assertEqual(result["holdings_count"], 2)
+
+    async def test_yesterdays_brief_is_flagged_as_not_today(self):
+        """아침에는 오늘 브리프가 아직 없다 — 어제 것이 마지막으로 알려진 시장이다."""
+        async def only_yesterday(sub, brief_date, **kwargs):
+            today = device_summary.date.today().isoformat()
+            return None if brief_date == today else BRIEF
+
+        result = await self._build(brief=only_yesterday)
+        self.assertFalse(result["market"]["is_today"])
+        self.assertEqual(
+            result["market"]["date"],
+            (device_summary.date.today() - device_summary.timedelta(days=1)).isoformat(),
+        )
 
 
 if __name__ == "__main__":
