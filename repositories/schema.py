@@ -795,6 +795,9 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     # 롱숏 페어: 숏(음수 수량) 행이 같은 사용자의 롱 종목 코드를 가리킨다.
     # 페어된 숏은 롱의 그룹을 따라가고 자체 태그를 가질 수 없다.
     ("user_portfolio", "pair_long_code", "TEXT"),
+    # 보유종목 표의 자유 메모 (기본 숨김 컬럼). 종목별 투자일지
+    # (investment_journal) 와 달리 한 줄짜리 표시용 메모다.
+    ("user_portfolio", "memo", "TEXT"),
 )
 
 

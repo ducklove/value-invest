@@ -2257,6 +2257,23 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 .pf-table tfoot td { font-weight: 700; background: var(--sidebar-bg); border-top: 2px solid var(--border); position: sticky; bottom: 0; z-index: 1; }
 .pf-col-num { text-align: right; }
 .pf-col-act { width: 36px; text-align: center; }
+/* 메모 — 기본 숨김 컬럼(PF_COL_DEFS). 표의 다른 칸은 한 줄 유지가
+   중요하지만 메모는 폭이 부족하면 셀 안에서 줄바꿈시켜 행 높이만
+   늘어나게 한다 (가로 스크롤을 메모 때문에 더 늘리지 않는다). */
+.pf-col-memo {
+  text-align: left;
+  min-width: 120px;
+  max-width: 260px;
+  white-space: normal;
+  word-break: break-word;
+}
+.pf-memo-text {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.pf-table tbody td.pf-col-memo .pf-memo-edit { width: 100%; min-width: 110px; }
 .pf-sortable { cursor: pointer; user-select: none; outline: none; }
 .pf-sortable:hover { color: var(--text); }
 .pf-sortable:focus-visible {

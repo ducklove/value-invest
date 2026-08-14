@@ -287,6 +287,7 @@ body.pf-mobile-simple .pf-col-dividend,
 body.pf-mobile-simple .pf-col-divyield,
 body.pf-mobile-simple .pf-col-weight,
 body.pf-mobile-simple .pf-col-date,
+body.pf-mobile-simple .pf-col-memo,
 body.pf-mobile-simple .pf-col-act {
   display: none !important;
 }
@@ -440,5 +441,8 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
   .pf-col-act { display: none !important; }
   .pf-table { font-size: 11px; }
   .pf-table thead th, .pf-table tbody td, .pf-table tfoot td { padding: 6px 4px; }
+  /* 메모는 위 목록에서 뺀다 — 기본이 숨김이라 켜는 건 명시적 선택이고,
+     좁은 폭에서는 셀 안에서 여러 줄로 접히게 두는 편이 낫다. */
+  .pf-col-memo { min-width: 88px; max-width: 140px; }
 }
 

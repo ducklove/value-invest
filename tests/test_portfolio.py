@@ -494,6 +494,32 @@ class PortfolioTests(TempDbMixin):
         items = await portfolio_repo.get_portfolio("u1")
         self.assertEqual(items[0]["created_at"], explicit)
 
+    async def test_memo_roundtrip_and_preserve(self):
+        """보유종목 메모: 저장 → 조회 왕복, 미전달이면 기존 값 유지, 빈 값이면 삭제."""
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)
+        self.assertIsNone((await portfolio_repo.get_portfolio("u1"))[0]["memo"])
+
+        await portfolio_repo.save_portfolio_item(
+            "u1", "005930", "삼성전자", 100, 65000, memo="  배당 재투자용  ",
+        )
+        self.assertEqual((await portfolio_repo.get_portfolio("u1"))[0]["memo"], "배당 재투자용")
+
+        # 수량/매입가만 편집 → 메모 보존
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 200, 70000)
+        self.assertEqual((await portfolio_repo.get_portfolio("u1"))[0]["memo"], "배당 재투자용")
+
+        # 빈 문자열 → 삭제 (get_portfolio 는 NULLIF 로 None 노출)
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 200, 70000, memo="")
+        self.assertIsNone((await portfolio_repo.get_portfolio("u1"))[0]["memo"])
+
+    async def test_memo_is_truncated_to_max_len(self):
+        await portfolio_repo.save_portfolio_item(
+            "u1", "005930", "삼성전자", 100, 65000,
+            memo="가" * (portfolio_repo.MEMO_MAX_LEN + 50),
+        )
+        items = await portfolio_repo.get_portfolio("u1")
+        self.assertEqual(len(items[0]["memo"]), portfolio_repo.MEMO_MAX_LEN)
+
     async def test_target_price_default_null(self):
         """신규 등록 시 target_price 미전달이면 NULL → 프론트에서 자동 계산 경로."""
         await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 100, 65000)

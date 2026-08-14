@@ -223,6 +223,7 @@ const PF_COL_DEFS = [
   { key: 'divyield',  cls: 'pf-col-divyield',   label: '배당수익률' },
   { key: 'weight',    cls: 'pf-col-weight',      label: '비중' },
   { key: 'date',      cls: 'pf-col-date',       label: '등록일자',  defaultVisible: false },
+  { key: 'memo',      cls: 'pf-col-memo',       label: '메모',      defaultVisible: false },
 ];
 let _pfColStyleEl = null;
 

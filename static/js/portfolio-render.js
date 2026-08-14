@@ -542,7 +542,7 @@ function renderPortfolio(options = {}) {
   // DB 값으로 덮어써지는 문제가 있었다. 목표가 × 버튼으로 input 을
   // 비워도 즉시 '자동 계산 값' 으로 복원되던 증상이 대표적.
   // 따라서 DOM 교체 전에 현재 값을 snapshot 하고, 교체 후에 복원한다.
-  const _editInputIds = ['pfEditPrice', 'pfEditPriceCurrency', 'pfEditTarget', 'pfEditQty', 'pfEditCreatedAt'];
+  const _editInputIds = ['pfEditPrice', 'pfEditPriceCurrency', 'pfEditTarget', 'pfEditQty', 'pfEditCreatedAt', 'pfEditMemo'];
   const _preservedEdit = PfStore.edit.code ? {} : null;
   if (_preservedEdit) {
     for (const id of _editInputIds) {
@@ -609,6 +609,12 @@ function renderPortfolio(options = {}) {
     const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
     const heatAttrs = pfHeatRowAttrs(r);
     const changeCell = pfChangeCellHtml(r);
+    // 메모 — 기본 숨김 컬럼. 폭이 부족하면 셀 안에서 줄바꿈되도록
+    // .pf-col-memo 만 white-space: normal (다른 셀은 nowrap 유지).
+    const memoText = String(r.memo || '');
+    const memoCell = memoText
+      ? `<span class="pf-memo-text" title="${escapeHtml(memoText)}">${escapeHtml(memoText)}</span>`
+      : '-';
     // 편집 모드 그룹 셀: 숏(음수 수량) 행에는 롱숏 페어 선택 박스를 함께
     // 노출한다. 페어가 걸린 숏의 그룹은 롱을 따라가므로 그룹 select 잠금.
     let groupEditCell = `<select class="pf-group-select js-pf-group"${editAttrs}${pairLongCode ? ' disabled title="페어 롱 종목의 그룹을 따릅니다"' : ''}>${groupOpts}</select>`;
@@ -638,6 +644,7 @@ function renderPortfolio(options = {}) {
         <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield, false) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
         <td class="pf-col-date"><input class="pf-edit-input js-pf-edit-created-at" id="pfEditCreatedAt" value="${r.createdAtSort || ''}" type="date"${editAttrs}></td>
+        <td class="pf-col-memo"><input class="pf-edit-input pf-memo-edit js-pf-edit-memo" id="pfEditMemo" value="${escapeHtml(memoText)}" type="text" maxlength="500" placeholder="메모" autocomplete="off"${editAttrs}></td>
         <td class="pf-col-act"><div class="pf-row-actions">
           <button type="button" class="pf-row-btn save js-pf-save" title="${isSaving ? '저장 중입니다' : '저장'}"${saveAttrs}>${saveContent}</button>
           <button type="button" class="pf-row-btn cancel js-pf-cancel" title="취소"${editAttrs}>✕</button>
@@ -661,6 +668,7 @@ function renderPortfolio(options = {}) {
       <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield, false) : '-'}</td>
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
+      <td class="pf-col-memo">${memoCell}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
         <button type="button" class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
         <button type="button" class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
@@ -690,10 +698,10 @@ function renderPortfolio(options = {}) {
     <td>합계</td>
     <td class="pf-col-group"></td>
     <td class="pf-col-num pf-col-changepct">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
+    <td class="pf-col-curprice"></td>
     <td class="pf-col-benchmark"></td>
     <td class="pf-col-invested"></td>
     <td class="pf-col-num pf-col-buyprice"></td>
-    <td class="pf-col-curprice"></td>
     <td class="pf-col-target"></td>
     <td class="pf-col-achiev"></td>
     <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
@@ -703,6 +711,7 @@ function renderPortfolio(options = {}) {
     <td class="pf-col-num pf-col-divyield">${totalDividend > 0 && totalMarketValue > 0 ? fmtPct(totalDividend / totalMarketValue * 100, false) : '-'}</td>
     <td class="pf-col-num pf-col-weight">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
     <td class="pf-col-date"></td>
+    <td class="pf-col-memo"></td>
     <td class="pf-col-act"></td>
   </tr>`;
 
@@ -751,186 +760,10 @@ function returnClass(val) {
   return val > 0 ? 'pf-return positive' : val < 0 ? 'pf-return negative' : '';
 }
 
-// _drawSparkline / _drawSparklinePoints — pure canvas-drawing primitives —
-// live in static/js/portfolio-sparklines.js (loaded before this file). The
-// data-preparation helpers below stay here, coupled to portfolio settlement state.
-function _sparkLocalMinuteValue(ts) {
-  const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d+(?:\.\d+)?))?/);
-  if (!m) return null;
-  const seconds = Number(m[6] || 0);
-  return Date.UTC(
-    Number(m[1]),
-    Number(m[2]) - 1,
-    Number(m[3]),
-    Number(m[4]),
-    Number(m[5]),
-    Math.floor(seconds),
-    Math.round((seconds % 1) * 1000),
-  ) / 60000;
-}
+// 요약 카드 스파크라인은 그리기(_drawSparkline*)와 데이터 준비
+// (_renderSummarySparklines + _spark* 결산축 헬퍼)가 모두
+// static/js/portfolio-sparklines.js 로 옮겨졌다 (이 파일이 상한에 닿아서).
 
-// TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축으로 그린다. 결산창(직전 20:00→
-// 다음 20:00)의 야간 빈 구간을 잘라 장전·장중·장후 활성 시간대만 보여준다.
-const SPARK_DAILY_START_HOUR = 8;
-const SPARK_DAILY_END_HOUR = 20;
-// 세션일 = intraday 최신 점의 날짜(주말·공휴일에도 장중 점이 몰리지 않음). 없으면 현재 KST.
-function _sparkDailyAxis() {
-  const ints = Array.isArray(PfStore.snapshots.intraday) ? PfStore.snapshots.intraday : [];
-  let maxTs = null;
-  for (const d of ints) {
-    if (d && d.ts && (maxTs === null || d.ts > maxTs)) maxTs = d.ts;
-  }
-  const m = maxTs && /^(\d{4})-(\d{2})-(\d{2})T/.exec(maxTs);
-  const ymd = m ? `${m[1]}-${m[2]}-${m[3]}` : _sparkNowKstIsoMinute().slice(0, 10);
-  const pad = (n) => String(n).padStart(2, '0');
-  return { start: `${ymd}T${pad(SPARK_DAILY_START_HOUR)}:00`, end: `${ymd}T${pad(SPARK_DAILY_END_HOUR)}:00` };
-}
-
-function _sparkNowKstIsoMinute() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date()).reduce((acc, part) => {
-    if (part.type !== 'literal') acc[part.type] = part.value;
-    return acc;
-  }, {});
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
-}
-
-function _sparkAxisHoursFromTs(ts, axisStartTs, axisEndTs) {
-  const start = _sparkLocalMinuteValue(axisStartTs);
-  const end = _sparkLocalMinuteValue(axisEndTs);
-  const value = _sparkLocalMinuteValue(ts);
-  if (start === null || end === null || value === null || end <= start) return null;
-  const hours = (value - start) / 60;
-  const maxHours = (end - start) / 60;
-  return Math.max(0, Math.min(maxHours, hours));
-}
-
-function _sparkTodayCashflowThroughTs(ts) {
-  const target = _sparkLocalMinuteValue(ts);
-  if (target === null) return 0;
-  const cashflows = Array.isArray(PfStore.snapshots.prevDay?.today_cashflows)
-    ? PfStore.snapshots.prevDay.today_cashflows
-    : [];
-  let total = 0;
-  for (const cf of cashflows) {
-    const cfTime = _sparkLocalMinuteValue(cf?.created_at);
-    if (cfTime === null || cfTime > target) continue;
-    if (cf.signed_amount !== undefined && cf.signed_amount !== null) {
-      total += Number(cf.signed_amount || 0);
-    } else if (cf.type === 'deposit') {
-      total += Number(cf.amount || 0);
-    } else if (cf.type === 'withdrawal') {
-      total -= Number(cf.amount || 0);
-    }
-  }
-  return total;
-}
-
-function _formatLocalYmd(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function _parseLocalYmd(ymd) {
-  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-}
-
-function _diffLocalDays(start, end) {
-  return Math.round((end.getTime() - start.getTime()) / 86400000);
-}
-
-// 스파크라인 상승/하락 색 — 하드코딩 대신 CSS 토큰(--up/--down)에서 읽어
-// 다크모드에서도 테마 팔레트와 톤이 맞게 한다(토큰이 없으면 종전 색 폴백).
-function _sparkTrendColor(isUp) {
-  const value = getComputedStyle(document.documentElement)
-    .getPropertyValue(isUp ? '--up' : '--down').trim();
-  return value || (isUp ? '#dc2626' : '#2563eb');
-}
-
-function _renderSummarySparklines(currentTotalValue) {
-  // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
-  if (PfStore.navHistory.length > 1) {
-    const last365 = PfStore.navHistory.slice(-365);
-    const returnPcts = last365.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
-    const lastReturn = returnPcts[returnPcts.length - 1] || 0;
-    _drawSparkline('sparkTotalReturn', returnPcts, _sparkTrendColor(lastReturn >= 0), 252, 'right');
-  } else {
-    _drawSparkline('sparkTotalReturn', [], _sparkTrendColor(true), 252, 'right');
-  }
-
-  // MTD sparkline: fixed previous-month-end -> current-month-end axis.
-  // The first point is always previous month-end at 0%, so the shape is
-  // stable even before the first daily snapshot of the month exists.
-  if (PfStore.snapshots.monthEnd?.total_value && PfStore.snapshots.monthEnd?.total_value > 0) {
-    const now = new Date();
-    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const monthStartYmd = _formatLocalYmd(thisMonthStart);
-    const monthEndYmd = _formatLocalYmd(thisMonthEnd);
-    const axisDays = Math.max(1, _diffLocalDays(prevMonthEnd, thisMonthEnd));
-    const monthPoints = [{ x: 0, y: 0 }];
-    const monthData = PfStore.navHistory.filter(d => d.date >= monthStartYmd && d.date <= monthEndYmd);
-    for (const d of monthData) {
-      if (!d || !d.total_value) continue;
-      const dt = _parseLocalYmd(d.date);
-      if (!dt) continue;
-      monthPoints.push({
-        x: Math.max(0, Math.min(axisDays, _diffLocalDays(prevMonthEnd, dt))),
-        y: ((d.total_value / PfStore.snapshots.monthEnd.total_value) - 1) * 100,
-      });
-    }
-    if (currentTotalValue) {
-      monthPoints.push({
-        x: Math.max(0, Math.min(axisDays, _diffLocalDays(prevMonthEnd, now))),
-        y: ((currentTotalValue / PfStore.snapshots.monthEnd.total_value) - 1) * 100,
-      });
-    }
-    const lastPct = monthPoints.length ? monthPoints[monthPoints.length - 1].y : 0;
-    _drawSparklinePoints('sparkMonthly', monthPoints, _sparkTrendColor(lastPct >= 0), axisDays);
-  } else {
-    _drawSparklinePoints('sparkMonthly', [], _sparkTrendColor(true), 31);
-  }
-
-  // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 20:00 결산(prevClose)
-  // 대비 등락%. 축은 _sparkDailyAxis() 가 세션일 기준으로 만든다(now 까지 그려지고
-  // 우측 빈 구간은 미래 시간).
-  const _prevClose = (PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.total_value > 0)
-    ? PfStore.snapshots.prevDay.total_value
-    : null;
-  const _dailyAxis = _sparkDailyAxis();
-  const axisStartTs = _dailyAxis.start;
-  const axisEndTs = _dailyAxis.end;
-  const _dailyAxisHours = SPARK_DAILY_END_HOUR - SPARK_DAILY_START_HOUR;
-  if (!_prevClose) {
-    _drawSparklinePoints('sparkDaily', [], _sparkTrendColor(true), _dailyAxisHours);
-  } else {
-    const raw = [{ x: 0, y: 0 }];
-    for (const d of PfStore.snapshots.intraday) {
-      if (!d || !d.total_value) continue;
-      const x = _sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs);
-      if (x === null) continue;
-      const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);
-      raw.push({ x, y: (adjustedTotal / _prevClose - 1) * 100 });
-    }
-    if (currentTotalValue) {
-      const x = _sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs);
-      if (x !== null) {
-        raw.push({ x, y: (currentTotalValue / _prevClose - 1) * 100 });
-      }
-    }
-    const lastPct = raw.length ? raw[raw.length - 1].y : 0;
-    _drawSparklinePoints('sparkDaily', raw, _sparkTrendColor(lastPct >= 0), _dailyAxisHours);
-  }
-}
 // 공용 숫자 포맷터(fmtNum/fmtKrw/fmtSignedKrw/fmtPct)는 utils.js 로 승격됨
 // (CLAUDE.md 의 "공용 헬퍼는 utils.js" 계약과 일치). 여기엔 포트폴리오
 // 상태(PfStore)에 의존하거나 이 화면 전용인 파생 포맷터만 남는다.

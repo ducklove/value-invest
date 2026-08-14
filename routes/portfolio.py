@@ -810,11 +810,27 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         if bool(raw_d):
             target_price_kwarg["target_price_formula"] = None
 
+    # 메모 — 키가 없으면 기존 값 유지, 빈 문자열이면 삭제. 표에 한 칸으로
+    # 들어가는 짧은 메모라 길이 상한을 두고 초과는 400 으로 거절한다.
+    memo_kwarg: dict = {}
+    if "memo" in payload:
+        raw_memo = payload.get("memo")
+        if raw_memo is not None and not isinstance(raw_memo, str):
+            raise HTTPException(status_code=400, detail="메모는 문자열이어야 합니다.")
+        memo_value = str(raw_memo or "").strip()
+        if len(memo_value) > portfolio_repo.MEMO_MAX_LEN:
+            raise HTTPException(
+                status_code=400,
+                detail=f"메모는 {portfolio_repo.MEMO_MAX_LEN}자 이하여야 합니다.",
+            )
+        memo_kwarg["memo"] = memo_value or None
+
     result = await portfolio_repo.save_portfolio_item(
         user["google_sub"], stock_code, stock_name, quantity, avg_price,
         currency, group_name, benchmark_code, created_at,
         avg_price_currency=avg_price_currency,
         **target_price_kwarg,
+        **memo_kwarg,
     )
     await fx.annotate_avg_price_krw([result])
 

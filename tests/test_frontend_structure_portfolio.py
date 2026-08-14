@@ -124,7 +124,11 @@ def test_today_card_percent_uses_same_settlement_base_as_amount():
     assert "_renderSummarySparklines(_l ? _liveNavValueKrw : null);" in source
 
 def test_today_sparkline_uses_8_to_20_session_axis():
-    source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    # 스파크라인은 그리기·데이터준비 모두 portfolio-sparklines.js 로 모였다
+    # (portfolio-render.js 가 유지보수 상한 1,000줄에 닿아 2026-08-14 이동).
+    source = (JS / "portfolio-sparklines.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    assert "function _renderSummarySparklines" not in render
 
     assert "function _sparkAxisHoursFromTs" in source
     assert "function _sparkNowKstIsoMinute" in source
@@ -974,6 +978,40 @@ def test_color_heat_mode_shares_one_state_source_across_render_and_tick():
     assert "calc(var(--pf-heat-ratio, 0) * 100%)" in styles
     reduced = styles[styles.find("@media (prefers-reduced-motion: reduce)", styles.find(".pf-heat-toggle")):]
     assert "animation: none !important;" in reduced
+
+def test_portfolio_memo_column_is_last_and_hidden_by_default():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
+    actions = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+    styles = _all_css()
+
+    # 메모는 데이터 컬럼 중 마지막 — 액션 버튼 칸 바로 앞.
+    assert '<th class="pf-col-memo" scope="col">메모</th>\n            <th class="pf-col-act">' in html
+    # 다른 컬럼과 같은 토글 대상이되 기본은 숨김.
+    assert "{ key: 'memo',      cls: 'pf-col-memo',       label: '메모',      defaultVisible: false }," in shell
+
+    # 행 3종(읽기/편집/합계) 모두에 셀이 있어야 컬럼을 숨겼을 때 열이 안 밀린다.
+    assert '<td class="pf-col-memo">${memoCell}</td>' in render
+    assert 'id="pfEditMemo"' in render
+    assert '<td class="pf-col-memo"></td>' in render
+    # 편집 중 재렌더에도 입력값이 보존되는 input 목록에 포함.
+    assert "'pfEditCreatedAt', 'pfEditMemo'" in render
+
+    # tfoot 셀 순서는 thead/tbody 와 같아야 한다 — 어긋나면 컬럼을 숨겼을 때
+    # 합계행만 한 칸씩 밀린다.
+    foot = render[render.find("tfoot.innerHTML = `<tr>"):]
+    foot = foot[:foot.find("</tr>`")]
+    order = [c for c in ("pf-col-curprice", "pf-col-benchmark", "pf-col-invested", "pf-col-buyprice")]
+    assert sorted(order, key=foot.find) == order
+
+    # 저장은 값이 바뀐 경우에만 payload 에 실는다 (미전달 = 기존값 유지).
+    assert "if (memo !== String(existingItem?.memo || '')) body.memo = memo;" in actions
+    assert "if ('memo' in data) item.memo = data.memo;" in actions
+
+    # 폭이 부족하면 메모 칸 안에서만 줄바꿈 — 다른 칸은 한 줄 유지.
+    assert ".pf-col-memo {" in styles
+    assert "white-space: normal;" in styles[styles.find(".pf-col-memo {"):]
 
 def test_portfolio_quote_ticks_refresh_summary_without_debouncing_forever():
     app = (JS / "app-main.js").read_text(encoding="utf-8")

@@ -171,6 +171,14 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   const avgPriceCurrency = priceCurrencyEl ? pfAvgPriceCurrency({ avg_price_currency: priceCurrencyEl.value }) : (existingItem?.avg_price_currency || 'KRW');
   const body = { stock_name: stockName, quantity: qty, avg_price: price, avg_price_currency: avgPriceCurrency };
   if (createdAt) body.created_at = createdAt;
+  // 메모는 값이 바뀐 경우에만 payload 에 실는다 — 메모 컬럼을 숨겨둔
+  // 사용자가 수량만 고쳐도 input 이 렌더되긴 하므로, 변경분만 보내면
+  // 서버의 "미전달 = 기존값 유지" 규칙과 자연스럽게 맞물린다.
+  const memoEl = editRow.querySelector('.js-pf-edit-memo') || document.getElementById('pfEditMemo');
+  if (memoEl) {
+    const memo = memoEl.value.trim();
+    if (memo !== String(existingItem?.memo || '')) body.memo = memo;
+  }
   // 목표가 input — 기존 목표가/수식이 있던 값을 비우면 "표시 안 함"
   // 으로 저장한다. 처음부터 자동 목표가였던 빈 input 은 수량/매입가
   // 편집만으로 자동 목표가가 사라지지 않도록 payload 를 보내지 않는다.
@@ -227,6 +235,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
       if ('target_price' in data) item.target_price = data.target_price;
       if ('target_price_disabled' in data) item.target_price_disabled = !!data.target_price_disabled;
       if ('target_price_formula' in data) item.target_price_formula = data.target_price_formula;
+      if ('memo' in data) item.memo = data.memo;
     }
     PfStore.edit.savingCode = null;
     PfStore.edit.code = null;

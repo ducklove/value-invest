@@ -142,7 +142,8 @@ async def get_portfolio(google_sub: str) -> list[dict]:
                created_at, target_price,
                COALESCE(target_price_disabled, 0) AS target_price_disabled,
                NULLIF(target_price_formula, '') AS target_price_formula,
-               pair_long_code
+               pair_long_code,
+               NULLIF(memo, '') AS memo
         FROM user_portfolio
         WHERE google_sub = ?
         ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, created_at ASC
@@ -580,6 +581,9 @@ async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
 _TARGET_PRICE_UNCHANGED = object()
 _TARGET_DISABLED_UNCHANGED = object()
 _TARGET_FORMULA_UNCHANGED = object()
+_MEMO_UNCHANGED = object()
+
+MEMO_MAX_LEN = 500
 
 
 async def save_portfolio_item(
@@ -591,6 +595,7 @@ async def save_portfolio_item(
     target_price=_TARGET_PRICE_UNCHANGED,
     target_price_disabled=_TARGET_DISABLED_UNCHANGED,
     target_price_formula=_TARGET_FORMULA_UNCHANGED,
+    memo=_MEMO_UNCHANGED,
 ) -> dict:
     """target_price 인자의 의미:
       - 인자 미전달 (sentinel) → 기존 값 그대로 유지 (수량/매입가만 편집할 때)
@@ -601,6 +606,11 @@ async def save_portfolio_item(
       - 미전달             → 기존 값 보존
       - True/1             → 자동 계산도 bypass, UI 에서 '-' 로 표시
       - False/0            → 자동 계산 활성화 (기본값)
+
+    memo:
+      - 미전달             → 기존 값 보존
+      - None / 빈 문자열   → 메모 삭제
+      - 문자열             → 저장 (MEMO_MAX_LEN 로 잘림)
     """
     target_price_provided = target_price is not _TARGET_PRICE_UNCHANGED
     target_formula_provided = target_price_formula is not _TARGET_FORMULA_UNCHANGED
@@ -614,7 +624,7 @@ async def save_portfolio_item(
         # date). Only overwrite created_at when the caller explicitly passes
         # one — that's how the UI's 등록일자 edit gets through.
         cursor = await db.execute(
-            "SELECT sort_order, group_name, benchmark_code, created_at, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula, pair_long_code FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            "SELECT sort_order, group_name, benchmark_code, created_at, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula, pair_long_code, memo FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
             (google_sub, stock_code),
         )
         existing = await cursor.fetchone()
@@ -671,6 +681,13 @@ async def save_portfolio_item(
             target_price_formula = None
         target_price_formula_db = target_price_formula or ""
 
+        # 메모: 미전달이면 기존 값 보존, 빈 값이면 삭제. 표 셀 한 칸에
+        # 들어가는 짧은 메모라 길이는 서버에서 잘라 저장한다.
+        if memo is _MEMO_UNCHANGED:
+            memo = existing["memo"] if existing else None
+        memo = str(memo or "").strip()[:MEMO_MAX_LEN] or None
+        memo_db = memo or ""
+
         if sort_order is None and not existing:
             cursor = await db.execute(
                 "SELECT MIN(sort_order) AS mn FROM user_portfolio WHERE google_sub = ? AND sort_order IS NOT NULL",
@@ -682,8 +699,8 @@ async def save_portfolio_item(
 
         await db.execute(
             """
-            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula, memo, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(google_sub, stock_code) DO UPDATE SET
                 stock_name = excluded.stock_name,
                 quantity = excluded.quantity,
@@ -696,9 +713,10 @@ async def save_portfolio_item(
                 target_price = excluded.target_price,
                 target_price_disabled = excluded.target_price_disabled,
                 target_price_formula = excluded.target_price_formula,
+                memo = excluded.memo,
                 updated_at = excluded.updated_at
             """,
-            (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula_db, now),
+            (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, benchmark_code, created_at, target_price, target_price_disabled, target_price_formula_db, memo_db, now),
         )
         # 이 종목(롱)을 가리키는 페어 숏들의 그룹을 함께 이동 — 스냅샷 등
         # user_portfolio.group_name 을 직접 읽는 경로와의 일관성 유지.
@@ -714,6 +732,7 @@ async def save_portfolio_item(
         "target_price": target_price,
         "target_price_disabled": target_price_disabled,
         "target_price_formula": target_price_formula,
+        "memo": memo,
     }
 
 
