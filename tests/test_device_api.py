@@ -367,8 +367,10 @@ class GroupAndMoverTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["groups"][0]["value"], 12_000)
 
 
+# _market_brief() 는 조회한 날짜(오늘 → 어제 순)를 그대로 date 로 돌려주고
+# 행의 brief_date 는 읽지 않는다. 그래서 여기에 날짜를 박아 두면 그날 하루만
+# 통과하는 테스트가 된다 — 실제로 2026-08-12 이후 계속 깨져 있었다.
 BRIEF = {
-    "brief_date": "2026-08-12",
     "markdown": "### 금일 시황\n\n반도체가 지수를 끌어올렸다." + "가" * 3000,
     "payload": {"market": [{"label": "KOSPI", "change_pct": 0.82},
                            {"code": "KOSDAQ", "change_pct": -0.31}]},
@@ -380,7 +382,11 @@ class MarketBriefTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
 
     async def test_brief_is_attached_when_one_is_cached(self):
         result = await self._build(brief=BRIEF)
-        self.assertEqual(result["market"]["date"], "2026-08-12")
+        # 캐시에 오늘 것이 있으면 오늘 날짜 — 어제 폴백을 다루는 쪽은
+        # test_yesterdays_brief_is_flagged_as_not_today 가 맡는다.
+        self.assertEqual(
+            result["market"]["date"], device_summary.date.today().isoformat()
+        )
         self.assertTrue(result["market"]["is_today"])
         self.assertEqual(
             [i["label"] for i in result["market"]["indices"]], ["KOSPI", "KOSDAQ"]
