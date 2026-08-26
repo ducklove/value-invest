@@ -5,17 +5,20 @@ applied_snapshot_date 도입(2026-08) 이전 정산은 '정산일 == date 정확
 20:05 정산 이후 입력분, 소급 입력분은 total_units 에 영구 누락돼 다음
 정산에서 NAV 가 입금액만큼 가짜 상승(출금은 하락)했다.
 
-스냅샷의 total_value 시계열은 시세 기반 원장(ground truth)이고 유닛·NAV 는
-파생값이므로, 입출금 원장과 함께 유닛 시계열을 결정적으로 재구성한다:
+주의: 전체 이력을 원장에서 재구성하지 **않는다**. 입출금 추적(2026-04)
+이전의 유닛 성장은 스냅샷 시계열에만 존재하고 원장에는 없으므로, 저장된
+유닛 시계열을 기본 진실로 두고 **기록된 입출금만 검증**한다:
 
-- 첫 스냅샷의 (total_units, nav) 는 앵커로 신뢰한다. date <= 첫 스냅샷
-  날짜인 입출금은 이미 유닛에 녹아 있는 것으로 간주(반영 완료 마킹만).
 - 각 입출금은 date <= 정산일 인 **첫** 스냅샷에 귀속된다.
-- units_change 가 기록된 행은 그 값을 그대로 쓴다 (당시 정산·구 라우트가
-  계산한 값 — 과거 정책을 소급 재해석하지 않는다). NULL 인 행만 해당
-  정산의 ex-cashflow NAV 로 새로 계산한다.
-- 재구성한 유닛이 저장값과 다른 스냅샷만 total_units·nav 를 갱신하고,
-  모든 입출금의 applied_snapshot_date 를 귀속 정산일로 교정한다.
+- 그 정산의 저장 유닛 델타(stored_units - 직전 stored_units)와 귀속
+  입출금의 units_change 합을 대조한다. 차이가 유의하면(절대 5유닛 초과
+  그리고 합의 1% 초과) 누락으로 판단, 그 시점부터 누적 보정치에 더한다.
+- 보정치가 붙은 스냅샷만 total_units += 보정, nav = total_value/유닛
+  으로 갱신한다. 원장 밖의 유닛 변화(추적 이전 시대·백필 잔떨림)는
+  건드리지 않는다.
+- units_change 가 NULL 인 행(신규 라우트 입력, 아직 미정산)은 손대지
+  않는다 — 수정된 정산이 다음 실행에서 집어간다.
+- 검증한 입출금의 applied_snapshot_date 를 귀속 정산일로 교정한다.
 
 사용:
     python3 scripts/repair_nav_history.py            # dry-run (기본)
@@ -46,31 +49,28 @@ def _signed(cf: dict) -> float:
 
 
 def rebuild_user_units(snapshots: list[dict], cashflows: list[dict]) -> dict:
-    """유닛 시계열 재구성 (순수 함수 — 테스트 대상).
+    """기록된 입출금의 유닛이 스냅샷 시계열에 반영됐는지 검증·보정 (순수 함수).
 
     Returns {
       "snapshot_updates": [{date, old_units, new_units, old_nav, new_nav}],
       "cashflow_updates": [{id, applied_snapshot_date, units_change, nav_at_time}],
     }
-    스냅샷이 없으면 빈 결과.
+    스냅샷이 없으면 빈 결과. units_change 가 NULL 인 입출금은 미정산
+    상태 그대로 두고 결과에 포함하지 않는다.
     """
     result = {"snapshot_updates": [], "cashflow_updates": []}
     if not snapshots:
         return result
     snaps = sorted(snapshots, key=lambda s: s["date"])
-    flows = sorted(cashflows, key=lambda c: (c["date"], c.get("created_at") or "", c["id"]))
+    flows = sorted(
+        [cf for cf in cashflows if cf["units_change"] is not None],
+        key=lambda c: (c["date"], c.get("created_at") or "", c["id"]),
+    )
 
     first = snaps[0]
-    units = float(first["total_units"] or 0)
-    if units <= 0:
-        units = float(first["total_value"]) / BASE_NAV
-        result["snapshot_updates"].append({
-            "date": first["date"],
-            "old_units": first["total_units"], "new_units": units,
-            "old_nav": first["nav"], "new_nav": BASE_NAV,
-        })
     fi = 0
-    # 첫 스냅샷 이전/당일 입출금: 유닛에 이미 반영된 것으로 간주.
+    # 첫 스냅샷 이전/당일 입출금: 유닛에 이미 녹아 있는 것으로 간주 —
+    # 마킹만 교정하고 시계열은 건드리지 않는다.
     while fi < len(flows) and flows[fi]["date"] <= first["date"]:
         result["cashflow_updates"].append({
             "id": flows[fi]["id"],
@@ -80,48 +80,38 @@ def rebuild_user_units(snapshots: list[dict], cashflows: list[dict]) -> dict:
         })
         fi += 1
 
-    prev_nav = float(first["nav"] or BASE_NAV)
+    correction = 0.0
+    prev_stored = float(first["total_units"] or 0)
     for snap in snaps[1:]:
-        pending = []
+        assigned = []
         while fi < len(flows) and flows[fi]["date"] <= snap["date"]:
-            pending.append(flows[fi])
+            assigned.append(flows[fi])
             fi += 1
-        total_value = float(snap["total_value"])
-        net_fresh = sum(_signed(cf) for cf in pending if cf["units_change"] is None)
-        issue_nav = prev_nav
-        if units > 0:
-            candidate = (total_value - net_fresh) / units
-            if candidate > 0:
-                issue_nav = candidate
-        for cf in pending:
-            if cf["units_change"] is not None:
-                delta = float(cf["units_change"])
-                nav_at = cf["nav_at_time"]
-            elif issue_nav > 0:
-                delta = _signed(cf) / issue_nav
-                nav_at = issue_nav
-            else:
-                delta = 0.0
-                nav_at = cf["nav_at_time"]
-            units += delta
-            result["cashflow_updates"].append({
-                "id": cf["id"],
-                "applied_snapshot_date": snap["date"],
-                "units_change": delta if cf["units_change"] is None else cf["units_change"],
-                "nav_at_time": nav_at,
-            })
-        if units > 0:
-            new_nav = total_value / units
-        else:
-            new_nav = BASE_NAV
-            units = total_value / BASE_NAV if total_value > 0 else 0.0
-        if abs(units - float(snap["total_units"] or 0)) > UNITS_EPS:
+        stored = float(snap["total_units"] or 0)
+        if assigned:
+            expected = sum(float(cf["units_change"]) for cf in assigned)
+            actual_delta = stored - prev_stored
+            missing = expected - actual_delta
+            # 백필 시대의 저장 유닛에는 ±수 유닛 잔떨림이 있다 — 유의미한
+            # 누락만 보정한다.
+            if abs(missing) > max(5.0, 0.01 * abs(expected)):
+                correction += missing
+            for cf in assigned:
+                result["cashflow_updates"].append({
+                    "id": cf["id"],
+                    "applied_snapshot_date": snap["date"],
+                    "units_change": cf["units_change"],
+                    "nav_at_time": cf["nav_at_time"],
+                })
+        if abs(correction) > UNITS_EPS:
+            new_units = stored + correction
+            new_nav = float(snap["total_value"]) / new_units if new_units > 0 else snap["nav"]
             result["snapshot_updates"].append({
                 "date": snap["date"],
-                "old_units": snap["total_units"], "new_units": units,
+                "old_units": stored, "new_units": new_units,
                 "old_nav": snap["nav"], "new_nav": new_nav,
             })
-        prev_nav = new_nav
+        prev_stored = stored
 
     # 마지막 스냅샷 이후 date 의 입출금은 아직 미반영이 정상 — 건드리지
     # 않는다 (다음 정산이 집어간다).

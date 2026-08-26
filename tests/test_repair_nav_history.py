@@ -1,7 +1,9 @@
-"""scripts/repair_nav_history.py 의 유닛 시계열 재구성 로직 테스트.
+"""scripts/repair_nav_history.py 의 유닛 검증·보정 로직 테스트.
 
-과거 정산이 놓친 입출금(주말/정산 후/소급 입력)의 유닛을 스냅샷 이력
-replay 로 찾아 교정하는 순수 함수 rebuild_user_units 를 고정한다.
+전체 이력을 원장에서 재구성하지 않는다 — 입출금 추적 이전 시대의 유닛
+성장은 원장에 없으므로 저장 시계열이 진실이다. 기록된 입출금의
+units_change 가 스냅샷 유닛 델타에 나타나는지만 대조하고, 누락분을 그
+시점부터 누적 보정한다.
 """
 
 import importlib.util
@@ -28,76 +30,97 @@ def _cf(id, date, type_, amount, units_change=None, nav_at_time=None, created_at
     }
 
 
-def test_lost_legacy_deposit_units_are_restored_into_later_snapshots():
-    """구버전에서 유실된 주말 입금: units_change 는 기록돼 있지만(라우트가
-    미리 계산) 정산 분모에는 들어가지 못한 케이스 — 그 값 그대로 복원."""
+def test_lost_deposit_units_are_restored_into_later_snapshots():
+    """정산이 놓친 주말 입금: units_change 는 기록돼 있지만(구 라우트가
+    미리 계산) 분모에 들어가지 못한 케이스 — 그 시점부터 누적 보정."""
     snapshots = [
-        _snap("2026-05-15", 10000, 1000.0, 10.0),
-        # 토요일 입금 1000 (units_change=1.0 기록)이 유실된 월요일 정산:
-        # 저장된 units 10 그대로, nav 가 1200 으로 가짜 상승했다.
-        _snap("2026-05-18", 12000, 1200.0, 10.0),
+        _snap("2026-05-15", 10_000_000, 1000.0, 10_000),
+        # 토요일 입금(+1,000 유닛)이 유실된 월요일: 유닛 그대로, NAV 가짜 상승
+        _snap("2026-05-18", 12_000_000, 1200.0, 10_000),
+        _snap("2026-05-19", 12_100_000, 1210.0, 10_000),
     ]
-    cashflows = [_cf(1, "2026-05-16", "deposit", 1000, units_change=1.0, nav_at_time=1000.0)]
+    cashflows = [_cf(1, "2026-05-16", "deposit", 1_000_000, units_change=1000.0, nav_at_time=1000.0)]
 
     plan = rebuild_user_units(snapshots, cashflows)
 
-    assert len(plan["snapshot_updates"]) == 1
+    assert [u["date"] for u in plan["snapshot_updates"]] == ["2026-05-18", "2026-05-19"]
     fix = plan["snapshot_updates"][0]
-    assert fix["date"] == "2026-05-18"
-    assert abs(fix["new_units"] - 11.0) < 1e-9
-    assert abs(fix["new_nav"] - 12000 / 11.0) < 1e-9
+    assert abs(fix["new_units"] - 11_000) < 1e-6
+    assert abs(fix["new_nav"] - 12_000_000 / 11_000) < 1e-9
+    # 이후 날짜에도 보정이 누적 유지된다.
+    assert abs(plan["snapshot_updates"][1]["new_units"] - 11_000) < 1e-6
     assert plan["cashflow_updates"][0]["applied_snapshot_date"] == "2026-05-18"
     # 기록된 units_change 는 소급 재해석하지 않는다.
-    assert plan["cashflow_updates"][0]["units_change"] == 1.0
+    assert plan["cashflow_updates"][0]["units_change"] == 1000.0
 
 
-def test_null_units_cashflow_is_issued_at_ex_cashflow_nav():
+def test_applied_cashflow_matching_stored_delta_needs_no_fix():
     snapshots = [
-        _snap("2026-05-15", 10000, 1000.0, 10.0),
-        _snap("2026-05-18", 12100, 1210.0, 10.0),  # 입금 1100 유실 상태
+        _snap("2026-05-15", 10_000_000, 1000.0, 10_000),
+        _snap("2026-05-18", 12_100_000, 1100.0, 11_000),  # 델타 +1,000 = 반영됨
     ]
-    cashflows = [_cf(1, "2026-05-16", "deposit", 1100)]
-
-    plan = rebuild_user_units(snapshots, cashflows)
-
-    # 발행 NAV = (12100-1100)/10 = 1100 → 1.0 unit
-    cu = plan["cashflow_updates"][0]
-    assert abs(cu["units_change"] - 1.0) < 1e-9
-    assert abs(cu["nav_at_time"] - 1100.0) < 1e-9
-    fix = plan["snapshot_updates"][0]
-    assert abs(fix["new_units"] - 11.0) < 1e-9
-    assert abs(fix["new_nav"] - 1100.0) < 1e-9
-
-
-def test_correct_history_produces_no_snapshot_updates():
-    snapshots = [
-        _snap("2026-05-15", 10000, 1000.0, 10.0),
-        _snap("2026-05-18", 12100, 1100.0, 11.0),  # 이미 올바르게 반영됨
-    ]
-    cashflows = [_cf(1, "2026-05-16", "deposit", 1100, units_change=1.0, nav_at_time=1100.0)]
+    cashflows = [_cf(1, "2026-05-16", "deposit", 1_100_000, units_change=1000.0, nav_at_time=1100.0)]
 
     plan = rebuild_user_units(snapshots, cashflows)
 
     assert plan["snapshot_updates"] == []
-    # 귀속 정산일 마킹은 여전히 교정된다.
     assert plan["cashflow_updates"][0]["applied_snapshot_date"] == "2026-05-18"
 
 
+def test_pre_ledger_unit_growth_is_left_alone():
+    """입출금 추적 이전 시대: 원장 없이 유닛이 성장한 구간은 저장 시계열이
+    진실 — 재구성하거나 보정하면 안 된다. (실데이터에서 112만→669만 성장)"""
+    snapshots = [
+        _snap("2019-03-13", 359_000_000, 319.46, 1_122_686),
+        _snap("2020-06-01", 900_000_000, 450.0, 2_000_000),
+        _snap("2021-01-04", 2_100_000_000, 700.0, 3_000_000),
+    ]
+    plan = rebuild_user_units(snapshots, [])
+    assert plan["snapshot_updates"] == []
+
+
+def test_backfill_jitter_below_tolerance_is_ignored():
+    """백필 시대 저장 유닛의 ±수 유닛 잔떨림은 누락이 아니다."""
+    snapshots = [
+        _snap("2019-03-13", 359_000_000, 319.46, 1_122_686.64),
+        _snap("2019-03-14", 359_100_000, 319.94, 1_122_688.27),  # +1.6 유닛 잔떨림
+        _snap("2019-03-16", 360_100_000, 320.0, 1_122_690.00),
+    ]
+    # 3/15 입금이 정상 반영됐고 저장 델타(+1.73)와 units_change(+3.0)가
+    # 잔떨림 수준(<5)에서만 어긋나는 경우 — 보정하지 않는다.
+    cashflows = [_cf(1, "2019-03-15", "deposit", 1_000, units_change=3.0, nav_at_time=320.0)]
+    plan = rebuild_user_units(snapshots, cashflows)
+    assert plan["snapshot_updates"] == []
+
+
+def test_null_units_cashflow_is_left_pending():
+    """신규 라우트 입력(units 미정) 행은 미정산 상태 그대로 — 수정된
+    정산이 다음 실행에서 집어간다. 스크립트가 손대면 안 된다."""
+    snapshots = [
+        _snap("2026-05-15", 10_000_000, 1000.0, 10_000),
+        _snap("2026-05-18", 12_100_000, 1210.0, 10_000),
+    ]
+    cashflows = [_cf(1, "2026-05-16", "deposit", 1_100_000)]  # units_change None
+
+    plan = rebuild_user_units(snapshots, cashflows)
+
+    assert plan["snapshot_updates"] == []
+    assert plan["cashflow_updates"] == []
+
+
 def test_cashflows_before_first_snapshot_are_marked_but_not_issued():
-    snapshots = [_snap("2026-05-15", 10000, 1000.0, 10.0)]
-    cashflows = [_cf(1, "2026-05-10", "deposit", 5000)]
+    snapshots = [_snap("2026-05-15", 10_000_000, 1000.0, 10_000)]
+    cashflows = [_cf(1, "2026-05-10", "deposit", 5_000_000, units_change=5000.0, nav_at_time=1000.0)]
 
     plan = rebuild_user_units(snapshots, cashflows)
 
     assert plan["snapshot_updates"] == []
     assert plan["cashflow_updates"][0]["applied_snapshot_date"] == "2026-05-15"
-    # 첫 스냅샷 유닛(value/BASE_NAV)에 이미 녹아 있으므로 발행 없음.
-    assert plan["cashflow_updates"][0]["units_change"] is None
 
 
 def test_cashflow_after_last_snapshot_stays_pending():
-    snapshots = [_snap("2026-05-15", 10000, 1000.0, 10.0)]
-    cashflows = [_cf(1, "2026-05-20", "deposit", 1000)]
+    snapshots = [_snap("2026-05-15", 10_000_000, 1000.0, 10_000)]
+    cashflows = [_cf(1, "2026-05-20", "deposit", 1_000_000, units_change=1000.0)]
 
     plan = rebuild_user_units(snapshots, cashflows)
 
@@ -105,18 +128,15 @@ def test_cashflow_after_last_snapshot_stays_pending():
     assert plan["cashflow_updates"] == []  # 다음 정산의 몫
 
 
-def test_withdrawal_units_are_negative():
+def test_lost_withdrawal_units_are_clawed_back():
     snapshots = [
-        _snap("2026-05-15", 10000, 1000.0, 10.0),
-        _snap("2026-05-18", 8900, 890.0, 10.0),  # 출금 1100 유실
+        _snap("2026-05-15", 10_000_000, 1000.0, 10_000),
+        _snap("2026-05-18", 8_900_000, 890.0, 10_000),  # 출금 유닛 미회수 → NAV 가짜 하락
     ]
-    cashflows = [_cf(1, "2026-05-16", "withdrawal", 1100)]
+    cashflows = [_cf(1, "2026-05-16", "withdrawal", 1_100_000, units_change=-1100.0, nav_at_time=1000.0)]
 
     plan = rebuild_user_units(snapshots, cashflows)
 
-    cu = plan["cashflow_updates"][0]
-    # 발행 NAV = (8900+1100)/10 = 1000 → -1.1 units
-    assert abs(cu["units_change"] + 1.1) < 1e-9
     fix = plan["snapshot_updates"][0]
-    assert abs(fix["new_units"] - 8.9) < 1e-9
+    assert abs(fix["new_units"] - 8_900) < 1e-6
     assert abs(fix["new_nav"] - 1000.0) < 1e-9
