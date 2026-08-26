@@ -399,6 +399,69 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(cashflow["created_at"], "2026-05-22T22:30:00")
         self.assertIn("id", cashflow)
 
+    async def _insert_cashflow(self, google_sub, date, cf_type, amount, created_at):
+        db = await db_repo.get_db()
+        await db.execute(
+            """
+            INSERT INTO portfolio_cashflows
+            (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at)
+            VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)
+            """,
+            (google_sub, date, cf_type, amount, created_at),
+        )
+        await db.commit()
+
+    async def test_month_end_value_reports_net_cashflow_since_baseline(self):
+        from datetime import date as _date
+        from datetime import timedelta as _td
+        month_end = (_date.today().replace(day=1) - _td(days=1)).isoformat()
+        in_month = _date.today().isoformat()
+        await snapshots_repo.save_snapshot("u1", month_end, 1_000_000, 900_000, 100.0, 10_000, 1300.0)
+        # 기간 내 입금 70k, 출금 20k → net +50k
+        await self._insert_cashflow("u1", in_month, "deposit", 70_000, f"{in_month}T10:00:00")
+        await self._insert_cashflow("u1", in_month, "withdrawal", 20_000, f"{in_month}T11:00:00")
+        # 기준일 이전 입금은 제외
+        await self._insert_cashflow("u1", "2000-01-05", "deposit", 999_000, "2000-01-05T10:00:00")
+
+        with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):
+            result = await portfolio_route.get_month_end_value(object())
+
+        self.assertEqual(result["net_cashflow"], 50_000)
+        self.assertEqual(result["cashflows_by_stock"], {"CASH_KRW": 50_000})
+
+    async def test_month_end_value_counts_baseline_date_cashflow_only_after_settlement(self):
+        from datetime import date as _date
+        from datetime import timedelta as _td
+        month_end = (_date.today().replace(day=1) - _td(days=1)).isoformat()
+        await snapshots_repo.save_snapshot("u1", month_end, 1_000_000, 900_000, 100.0, 10_000, 1300.0)
+        # 기준일 당일이라도 20:00 정산 이후 입력분은 스냅샷에 없으므로 포함
+        await self._insert_cashflow("u1", month_end, "deposit", 30_000, f"{month_end}T22:00:00")
+        # 정산 전 입력분은 스냅샷에 이미 반영 → 제외
+        await self._insert_cashflow("u1", month_end, "deposit", 40_000, f"{month_end}T12:00:00")
+
+        with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):
+            result = await portfolio_route.get_month_end_value(object())
+
+        self.assertEqual(result["net_cashflow"], 30_000)
+
+    async def test_year_start_value_reports_net_cashflow_since_baseline(self):
+        from datetime import date as _date
+        year_end = _date(_date.today().year - 1, 12, 31).isoformat()
+        in_year = _date.today().isoformat()
+        await snapshots_repo.save_snapshot("u1", year_end, 2_000_000, 1_500_000, 120.0, 16_000, 1300.0)
+        await self._insert_cashflow("u1", in_year, "deposit", 100_000, f"{in_year}T09:00:00")
+
+        with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):
+            result = await portfolio_route.get_year_start_value(object())
+
+        self.assertEqual(result["net_cashflow"], 100_000)
+        self.assertEqual(result["cashflows_by_stock"], {"CASH_KRW": 100_000})
+
+    async def test_year_start_value_without_snapshot_has_no_cashflow_fields(self):
+        with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):
+            result = await portfolio_route.get_year_start_value(object())
+        self.assertNotIn("net_cashflow", result)
+
     async def test_cash_and_foreign_quotes_share_daily_fx_source(self):
         with patch.object(
             fx,

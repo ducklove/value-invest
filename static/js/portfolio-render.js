@@ -381,31 +381,35 @@ function renderPortfolio(options = {}) {
 
   const _periodCashflowValue = (snap) => {
     if (!snap || !isFiltered) return 0;
-    const byStock = snap.today_cashflows_by_stock || {};
+    const byStock = snap.today_cashflows_by_stock || snap.cashflows_by_stock || {};
     let total = 0;
     for (const r of rows) total += Number(byStock[r.stock_code] || 0);
     return total ? _fxConv(total, null) : 0;
   };
 
-  // Helper: compute return % and PnL for a period, group-aware
+  // Helper: compute return % / PnL / raw value change for a period, group-aware.
+  // pnl = 입출금 차감 손익 (%와 같은 의미축), valueChange = 평가액 변동(입금 포함).
   const _periodReturn = (snap, navField) => {
-    if (!snap) return { pct: null, pnl: null };
+    if (!snap) return { pct: null, pnl: null, valueChange: null };
     const baseVal = _periodBaseValue(snap);
     if (isFiltered) {
       // Under a filter, if exact historical per-stock data is unavailable for
       // this reference date, return null so the card renders "-" instead
       // of falling through to whole-portfolio NAV (which would misleadingly
       // show the entire portfolio's return for the filtered view).
-      if (baseVal === null) return { pct: null, pnl: null };
-      const pnl = (_currentFxVal - _periodCashflowValue(snap)) - baseVal;
+      if (baseVal === null) return { pct: null, pnl: null, valueChange: null };
+      const valueChange = _currentFxVal - baseVal;
+      const pnl = valueChange - _periodCashflowValue(snap);
       const pct = baseVal > 0 ? (pnl / baseVal * 100) : null;
-      return { pct, pnl };
+      return { pct, pnl, valueChange };
     }
-    // Whole portfolio: NAV-based % + total value PnL
+    // Whole portfolio: NAV-based % + cashflow-adjusted PnL
     const nav = _navAdj(snap[navField || 'nav'], snap.fx_usdkrw);
     const pct = nav && curNav ? ((curNav / nav - 1) * 100) : null;
-    const pnl = baseVal != null ? _currentFxVal - baseVal : null;
-    return { pct, pnl };
+    const valueChange = baseVal != null ? _currentFxVal - baseVal : null;
+    const netCf = Number(snap.today_net_cashflow ?? snap.net_cashflow ?? 0) || 0;
+    const pnl = valueChange != null ? valueChange - _fxConv(netCf, null) : null;
+    return { pct, pnl, valueChange };
   };
 
   // --- Compute current NAV ---
@@ -435,10 +439,7 @@ function renderPortfolio(options = {}) {
   const _daily = _periodReturn(PfStore.snapshots.prevDay, 'nav');
   let dailyNavPct = _daily.pct;
   let totalDailyPnlDisplay = _daily.pnl ?? 0;
-  // Subtract cashflow for daily (whole portfolio only)
-  if (!isFiltered && PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.today_net_cashflow) {
-    totalDailyPnlDisplay -= _fxConv(PfStore.snapshots.prevDay.today_net_cashflow, null);
-  }
+  const _dailyValueChange = _daily.valueChange;
   if (!isFiltered && _dailyBaseValue && _dailyBaseValue > 0) {
     // Keep the headline % and amount on the same 20:00 settlement basis.
     // After the 20:00 snapshot, latestSnap.nav equals the baseline NAV, so a
@@ -454,6 +455,7 @@ function renderPortfolio(options = {}) {
   const _mtd = _periodReturn(PfStore.snapshots.monthEnd, 'nav');
   const monthlyNavPct = _mtd.pct;
   const _mtdPnl = _mtd.pnl;
+  const _mtdValueChange = _mtd.valueChange;
   const monthlyReturnPct = monthlyNavPct;
 
   // --- YTD return ---
@@ -461,6 +463,7 @@ function renderPortfolio(options = {}) {
   const _ytd = _periodReturn(yearStartSnap, 'nav');
   const ytdReturnPct = _ytd.pct;
   const _ytdPnl = _ytd.pnl;
+  const _ytdValueChange = _ytd.valueChange;
 
   // Date labels for summary cards
   const _now = new Date();
@@ -491,6 +494,16 @@ function renderPortfolio(options = {}) {
   };
   // Today's daily PnL in selected currency
   const _dailyPnlFx = PfStore.currency.unit === 'USD' ? pfFx(totalDailyPnl) : totalDailyPnl;
+  // 기간 카드 보조 줄: 손익(입출금 차감, 손익색)이 주 금액, 평가액 변동(입금
+  // 포함)은 손익과 다를 때만 중립색으로 병기 — 입출금 없으면 한 줄만 남는다.
+  const _subPair = (pnl, valueChange) => {
+    if (pnl === null || pnl === undefined) return '<div class="pf-summary-sub">-</div>';
+    let html = `<div class="pf-summary-sub ${returnClass(pnl)}">손익 ${_fsv(pnl)}</div>`;
+    if (valueChange !== null && valueChange !== undefined && Math.round(valueChange) !== Math.round(pnl)) {
+      html += `<div class="pf-summary-sub pf-summary-sub-flow">평가액 ${_fsv(valueChange)}</div>`;
+    }
+    return html;
+  };
 
   summary.innerHTML = `
     <div class="pf-summary-card">
@@ -508,7 +521,7 @@ function renderPortfolio(options = {}) {
       <div class="pf-summary-text">
         <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(dailyNavPct) : ''}">${_l ? (dailyNavPct !== null ? fmtPct(dailyNavPct) : '-') : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(totalDailyPnlDisplay) : ''}">${_l && dailyNavPct !== null ? _fsv(totalDailyPnlDisplay) : ''}</div>
+        ${_l && dailyNavPct !== null ? _subPair(totalDailyPnlDisplay, _dailyValueChange) : '<div class="pf-summary-sub"></div>'}
       </div>
       <canvas class="pf-sparkline" id="sparkDaily"></canvas>
     </div>
@@ -516,7 +529,7 @@ function renderPortfolio(options = {}) {
       <div class="pf-summary-text">
         <div class="pf-summary-label">MTD <span class="pf-summary-date">${_mtdLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(monthlyNavPct) : ''}">${_l ? (monthlyNavPct !== null ? fmtPct(monthlyNavPct) : '-') : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(_mtdPnl) : ''}">${_l ? (_mtdPnl !== null ? _fsv(_mtdPnl) : '-') : ''}</div>
+        ${_l ? _subPair(_mtdPnl, _mtdValueChange) : '<div class="pf-summary-sub"></div>'}
       </div>
       <canvas class="pf-sparkline" id="sparkMonthly"></canvas>
     </div>
@@ -524,7 +537,7 @@ function renderPortfolio(options = {}) {
       <div class="pf-summary-text">
         <div class="pf-summary-label">YTD <span class="pf-summary-date">${_ytdLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(ytdReturnPct) : ''}">${_l ? (ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-') : '-'}</div>
-        <div class="pf-summary-sub ${_l ? returnClass(_ytdPnl) : ''}">${_l ? (_ytdPnl !== null ? _fsv(_ytdPnl) : '-') : ''}</div>
+        ${_l ? _subPair(_ytdPnl, _ytdValueChange) : '<div class="pf-summary-sub"></div>'}
       </div>
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
     </div>`;

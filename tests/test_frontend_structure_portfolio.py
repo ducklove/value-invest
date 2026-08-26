@@ -161,9 +161,11 @@ def test_filtered_today_card_excludes_attributed_cashflows():
     source = (JS / "portfolio-render.js").read_text(encoding="utf-8")
 
     assert "const _periodCashflowValue = (snap) =>" in source
-    assert "snap.today_cashflows_by_stock || {}" in source
+    # Today 는 today_cashflows_by_stock, MTD/YTD 는 서버가 내려주는
+    # cashflows_by_stock — 필터 카드가 두 스냅샷 계약을 모두 지원해야 한다.
+    assert "snap.today_cashflows_by_stock || snap.cashflows_by_stock || {}" in source
     assert "for (const r of rows) total += Number(byStock[r.stock_code] || 0);" in source
-    assert "const pnl = (_currentFxVal - _periodCashflowValue(snap)) - baseVal;" in source
+    assert "const pnl = valueChange - _periodCashflowValue(snap);" in source
 
 def test_cashflow_history_renders_before_nav_charts_finish():
     source = (JS / "portfolio-performance.js").read_text(encoding="utf-8")

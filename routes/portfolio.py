@@ -1111,6 +1111,35 @@ async def get_prev_day_snapshot(request: Request):
     }
 
 
+async def _net_cashflow_since_snapshot(google_sub: str, snap_date: str) -> tuple[float, dict[str, float]]:
+    """Net deposit-withdrawal that hit the portfolio after `snap_date`'s 20:00
+    settlement. Period cards (MTD/YTD) subtract this from the raw value change
+    so the colored number is investment PnL, not cash movement.
+
+    Nominal-date first (a cashflow dated inside the period counts), with the
+    settlement `created_at` marker breaking the tie for same-day rows entered
+    after the snapshot was taken — the same boundary the Today card uses.
+    """
+    db = await db_repo.get_db()
+    marker = _settlement_marker_seconds(snap_date)
+    cursor = await db.execute(
+        "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? "
+        "AND (date > ? OR (date = ? AND created_at > ?))",
+        (google_sub, snap_date, snap_date, marker),
+    )
+    net = 0.0
+    for row in await cursor.fetchall():
+        if row["type"] == "deposit":
+            net += row["amount"]
+        elif row["type"] == "withdrawal":
+            net -= row["amount"]
+    # Cashflow mutations are materialized through CASH_KRW (see
+    # /prev-day-snapshot) — expose the same attribution shape so filtered
+    # cards can strip cash movement from group returns.
+    by_stock = {"CASH_KRW": net} if net else {}
+    return net, by_stock
+
+
 @router.get("/api/portfolio/month-end-value")
 async def get_month_end_value(request: Request):
     user = _require_user(await get_current_user(request))
@@ -1119,6 +1148,10 @@ async def get_month_end_value(request: Request):
     stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], month_end)
     result = dict(snapshot) if snapshot else {}
     result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
+    if snapshot and snapshot.get("date"):
+        net, by_stock = await _net_cashflow_since_snapshot(user["google_sub"], str(snapshot["date"]))
+        result["net_cashflow"] = net
+        result["cashflows_by_stock"] = by_stock
     return result
 
 
@@ -1130,6 +1163,9 @@ async def get_year_start_value(request: Request):
     if snapshot and snapshot.get("date"):
         stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], snapshot["date"])
         result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
+        net, by_stock = await _net_cashflow_since_snapshot(user["google_sub"], str(snapshot["date"]))
+        result["net_cashflow"] = net
+        result["cashflows_by_stock"] = by_stock
     else:
         result["stock_values"] = {}
     return result
