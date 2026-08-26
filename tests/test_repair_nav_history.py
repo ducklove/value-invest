@@ -140,3 +140,50 @@ def test_lost_withdrawal_units_are_clawed_back():
     fix = plan["snapshot_updates"][0]
     assert abs(fix["new_units"] - 8_900) < 1e-6
     assert abs(fix["new_nav"] - 1000.0) < 1e-9
+
+
+def test_backdated_lost_deposit_corrects_from_entry_settlement_not_nominal_date():
+    """소급 입력 유실분(8/24 자로 적고 8/26 에 입력): 현금이 평가액에 들어온
+    건 입력 시점 이후 첫 정산이므로 보정도 거기부터 — 명목일부터 걸면
+    그 사이 NAV 가 반대로 과소 왜곡된다."""
+    snapshots = [
+        _snap("2026-08-21", 6_477_000_000, 969.15, 6_682_900),
+        _snap("2026-08-24", 6_470_000_000, 968.21, 6_682_900),
+        _snap("2026-08-25", 6_500_000_000, 972.59, 6_682_900),
+        _snap("2026-08-26", 6_914_000_000, 1034.57, 6_682_900),  # 입금액 유입 + 유닛 유실
+    ]
+    cashflows = [_cf(
+        1, "2026-08-24", "deposit", 383_962_000,
+        units_change=394_781.22, nav_at_time=972.59,
+        created_at="2026-08-26T14:24:00",
+    )]
+
+    plan = rebuild_user_units(snapshots, cashflows)
+
+    # 8/24·8/25 는 건드리지 않고 8/26 만 보정.
+    assert [u["date"] for u in plan["snapshot_updates"]] == ["2026-08-26"]
+    fix = plan["snapshot_updates"][0]
+    assert abs(fix["new_units"] - (6_682_900 + 394_781.22)) < 1e-6
+    assert plan["cashflow_updates"][0]["applied_snapshot_date"] == "2026-08-26"
+
+
+def test_lost_flow_entered_after_last_settlement_is_reset_to_pending():
+    """마지막 정산 이후 입력된 유실 행: 현금이 아직 어떤 스냅샷에도 평가되지
+    않았으므로 보정 대상이 아니다 — 미정산으로 되돌려 다음 정산이 발행."""
+    snapshots = [
+        _snap("2026-08-25", 6_500_000_000, 972.59, 6_682_900),
+        _snap("2026-08-26", 6_510_000_000, 974.09, 6_682_900),
+    ]
+    cashflows = [_cf(
+        1, "2026-08-26", "deposit", 100_000_000,
+        units_change=102_800.0, nav_at_time=972.59,
+        created_at="2026-08-26T22:30:00",  # 20:00 정산 이후
+    )]
+
+    plan = rebuild_user_units(snapshots, cashflows)
+
+    assert plan["snapshot_updates"] == []
+    cu = plan["cashflow_updates"][0]
+    assert cu["applied_snapshot_date"] is None
+    assert cu["units_change"] is None
+    assert cu["nav_at_time"] is None

@@ -48,6 +48,16 @@ def _signed(cf: dict) -> float:
     return cf["amount"] if cf["type"] == "deposit" else -cf["amount"]
 
 
+def _created_settlement_date(snaps: list[dict], created_at: str) -> str | None:
+    """created_at 시점의 현금이 처음 평가된 정산일 — 20:00 마커 이전 입력이면
+    그날 정산, 이후면 다음 정산. 해당 스냅샷이 아직 없으면 None."""
+    created = str(created_at or "")
+    for snap in snaps:
+        if created <= f"{snap['date']}T20:00:00":
+            return snap["date"]
+    return None
+
+
 def rebuild_user_units(snapshots: list[dict], cashflows: list[dict]) -> dict:
     """기록된 입출금의 유닛이 스냅샷 시계열에 반영됐는지 검증·보정 (순수 함수).
 
@@ -57,6 +67,13 @@ def rebuild_user_units(snapshots: list[dict], cashflows: list[dict]) -> dict:
     }
     스냅샷이 없으면 빈 결과. units_change 가 NULL 인 입출금은 미정산
     상태 그대로 두고 결과에 포함하지 않는다.
+
+    유실분 귀속: 명목 date 가 아니라 **created_at 기준 정산일**에 보정을
+    건다. 소급 입력(입금은 8/24 자로 적었지만 8/26 에 입력)이면 현금이
+    평가액에 들어온 것도 입력 시점 이후 첫 정산이므로, 명목일부터
+    보정하면 그 사이 NAV 가 반대로 왜곡된다. created_at 기준 정산이
+    아직 없으면(마지막 스냅샷 이후 입력) 행을 미정산으로 되돌려 다음
+    정산이 정상 발행하게 한다.
     """
     result = {"snapshot_updates": [], "cashflow_updates": []}
     if not snapshots:
@@ -80,7 +97,8 @@ def rebuild_user_units(snapshots: list[dict], cashflows: list[dict]) -> dict:
         })
         fi += 1
 
-    correction = 0.0
+    # 1단계: 명목 date 귀속으로 정산별 반영 여부 판정.
+    corrections: dict[str, float] = {}
     prev_stored = float(first["total_units"] or 0)
     for snap in snaps[1:]:
         assigned = []
@@ -92,29 +110,70 @@ def rebuild_user_units(snapshots: list[dict], cashflows: list[dict]) -> dict:
             expected = sum(float(cf["units_change"]) for cf in assigned)
             actual_delta = stored - prev_stored
             missing = expected - actual_delta
-            # 백필 시대의 저장 유닛에는 ±수 유닛 잔떨림이 있다 — 유의미한
-            # 누락만 보정한다.
-            if abs(missing) > max(5.0, 0.01 * abs(expected)):
-                correction += missing
-            for cf in assigned:
-                result["cashflow_updates"].append({
-                    "id": cf["id"],
-                    "applied_snapshot_date": snap["date"],
-                    "units_change": cf["units_change"],
-                    "nav_at_time": cf["nav_at_time"],
-                })
-        if abs(correction) > UNITS_EPS:
-            new_units = stored + correction
+            tol = max(5.0, 0.01 * abs(expected))
+            if abs(missing) <= tol:
+                # 반영 완료 — 마킹만 교정.
+                for cf in assigned:
+                    result["cashflow_updates"].append({
+                        "id": cf["id"],
+                        "applied_snapshot_date": snap["date"],
+                        "units_change": cf["units_change"],
+                        "nav_at_time": cf["nav_at_time"],
+                    })
+            elif abs(actual_delta) <= tol:
+                # 전부 유실 — created_at 기준 정산일(현금이 처음 평가된
+                # 정산)로 재귀속. 소급 입력이면 명목일보다 뒤가 된다.
+                for cf in assigned:
+                    target = _created_settlement_date(snaps, cf.get("created_at") or f"{cf['date']}T00:00:00")
+                    if target is not None and target < snap["date"]:
+                        # 선입력 소급(미래 date)은 명목 정산 기준 유지.
+                        target = snap["date"]
+                    if target is None:
+                        # 현금이 평가된 정산이 아직 없다(마지막 스냅샷 이후
+                        # 입력) — 미정산으로 되돌려 다음 정산이 정상 발행.
+                        result["cashflow_updates"].append({
+                            "id": cf["id"],
+                            "applied_snapshot_date": None,
+                            "units_change": None,
+                            "nav_at_time": None,
+                        })
+                        continue
+                    corrections[target] = corrections.get(target, 0.0) + float(cf["units_change"])
+                    result["cashflow_updates"].append({
+                        "id": cf["id"],
+                        "applied_snapshot_date": target,
+                        "units_change": cf["units_change"],
+                        "nav_at_time": cf["nav_at_time"],
+                    })
+            else:
+                # 부분 반영(같은 정산에 여러 건 중 일부 유실) — 잔여분을
+                # 명목 정산일에 일괄 보정. 개별 귀속은 불가.
+                corrections[snap["date"]] = corrections.get(snap["date"], 0.0) + missing
+                for cf in assigned:
+                    result["cashflow_updates"].append({
+                        "id": cf["id"],
+                        "applied_snapshot_date": snap["date"],
+                        "units_change": cf["units_change"],
+                        "nav_at_time": cf["nav_at_time"],
+                    })
+        prev_stored = stored
+
+    # 2단계: 보정 누적 적용.
+    cum = 0.0
+    for snap in snaps[1:]:
+        cum += corrections.get(snap["date"], 0.0)
+        if abs(cum) > UNITS_EPS:
+            stored = float(snap["total_units"] or 0)
+            new_units = stored + cum
             new_nav = float(snap["total_value"]) / new_units if new_units > 0 else snap["nav"]
             result["snapshot_updates"].append({
                 "date": snap["date"],
                 "old_units": stored, "new_units": new_units,
                 "old_nav": snap["nav"], "new_nav": new_nav,
             })
-        prev_stored = stored
 
-    # 마지막 스냅샷 이후 date 의 입출금은 아직 미반영이 정상 — 건드리지
-    # 않는다 (다음 정산이 집어간다).
+    # 마지막 스냅샷 이후 date 의 입출금(위 flows 소진 후 잔여)은 아직
+    # 미반영이 정상 — 건드리지 않는다 (다음 정산이 집어간다).
     return result
 
 
