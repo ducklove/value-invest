@@ -40,6 +40,18 @@ async def init_db():
     await db.execute("CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_group_date ON portfolio_stock_snapshots(google_sub, group_name, date)")
     await ensure_initial_snapshot_backfills(db)
     await backfill_portfolio_defaults(db)
+    # applied_snapshot_date 도입(2026-08) 이전 행 백필: 당시 라우트가
+    # units_change 를 입력 시점에 미리 채웠으므로 값 존재 = 반영 완료로
+    # 간주해 다음 정산의 이중 반영을 막는다. 실제로 유실된 행(정산이
+    # 집어가지 못한 유닛)은 scripts/repair_nav_history.py 가 스냅샷
+    # 이력 replay 로 찾아 교정한다.
+    await db.execute(
+        """
+        UPDATE portfolio_cashflows
+        SET applied_snapshot_date = date
+        WHERE applied_snapshot_date IS NULL AND units_change IS NOT NULL
+        """
+    )
     await db.commit()
 
 

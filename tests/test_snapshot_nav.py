@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -207,6 +208,9 @@ async def test_fetch_total_value_refuses_avg_price_fallback_without_snapshot():
 
 @pytest.mark.asyncio
 async def test_take_snapshot_rerun_preserves_existing_units():
+    """재실행: 미반영 입출금이 없으면 기존 유닛 그대로. pending 조회는
+    이제 재실행에서도 수행한다 — 첫 정산 이후 입력된 입출금을 흡수하기
+    위해서고, 이중 반영은 applied_snapshot_date 마킹이 막는다."""
     with patch.object(
         snapshot_nav,
         "_fetch_total_value",
@@ -222,7 +226,7 @@ async def test_take_snapshot_rerun_preserves_existing_units():
     ) as get_before, patch.object(
         snapshot_nav.snapshots_repo,
         "get_pending_cashflows",
-        new=AsyncMock(),
+        new=AsyncMock(return_value=[]),
     ) as get_cashflows, patch.object(
         snapshot_nav.snapshots_repo,
         "save_snapshot",
@@ -235,13 +239,24 @@ async def test_take_snapshot_rerun_preserves_existing_units():
         await snapshot_nav.take_snapshot("u1", "2026-05-18")
 
     get_before.assert_not_awaited()
-    get_cashflows.assert_not_awaited()
+    get_cashflows.assert_awaited_once_with("u1", "2026-05-18")
     save_snapshot.assert_awaited_once_with("u1", "2026-05-18", 12000, 8000, 1200, 10, snapshot_nav._fx_usdkrw)
 
 
 @pytest.mark.asyncio
 async def test_take_snapshot_applies_same_day_cashflow_units_to_nav_denominator():
+    """미반영 입출금은 당일 ex-cashflow NAV 로 유닛 전환 + 반영 마킹.
+
+    total_value 12000 에는 순입출금 +1000 이 이미 현금으로 들어 있으므로
+    발행 NAV = (12000-1000)/10 = 1100 — 전일 NAV(1000)가 아니다. 전일
+    NAV 발행은 당일 시장 변동만큼 수익률을 왜곡했다 (하락일 손실 희석).
+    """
     fake_db = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_txn():
+        yield fake_db
+
     with patch.object(
         snapshot_nav,
         "_fetch_total_value",
@@ -263,8 +278,8 @@ async def test_take_snapshot_applies_same_day_cashflow_units_to_nav_denominator(
         ]),
     ), patch.object(
         snapshot_nav.db_repo,
-        "get_db",
-        new=AsyncMock(return_value=fake_db),
+        "transaction",
+        new=fake_txn,
     ), patch.object(
         snapshot_nav.snapshots_repo,
         "save_snapshot",
@@ -276,16 +291,125 @@ async def test_take_snapshot_applies_same_day_cashflow_units_to_nav_denominator(
     ):
         await snapshot_nav.take_snapshot("u1", "2026-05-18")
 
+    issue_nav = (12000 - 1000) / 10  # 1100.0
     assert fake_db.execute.await_count == 2
     fake_db.execute.assert_any_await(
-        "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
-        (1000, 2.0, 1),
+        "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ?, applied_snapshot_date = ? WHERE id = ?",
+        (issue_nav, 2000 / issue_nav, "2026-05-18", 1),
     )
     fake_db.execute.assert_any_await(
-        "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
-        (1000, -1.0, 2),
+        "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ?, applied_snapshot_date = ? WHERE id = ?",
+        (issue_nav, -(1000 / issue_nav), "2026-05-18", 2),
     )
-    save_snapshot.assert_awaited_once_with("u1", "2026-05-18", 12000, 8000, 12000 / 11, 11, snapshot_nav._fx_usdkrw)
+    expected_units = 10 + 2000 / issue_nav - 1000 / issue_nav  # 10.909090...
+    save_snapshot.assert_awaited_once_with(
+        "u1", "2026-05-18", 12000, 8000, 12000 / expected_units, expected_units, snapshot_nav._fx_usdkrw,
+    )
+
+
+@pytest.mark.asyncio
+async def test_take_snapshot_marks_preset_units_applied_without_reissuing():
+    """units_change 가 미리 정해진 행(구버전 라우트·임포트)은 그 값 그대로
+    분모에 더하고 반영 마킹만 한다 — 재발행하지 않는다."""
+    fake_db = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_txn():
+        yield fake_db
+
+    with patch.object(
+        snapshot_nav,
+        "_fetch_total_value",
+        new=AsyncMock(return_value=(12000, 8000, [{"stock_code": "005930", "market_value": 12000}])),
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "get_snapshot_by_date",
+        new=AsyncMock(return_value=None),
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "get_latest_snapshot_before_date",
+        new=AsyncMock(return_value={"date": "2026-05-17", "nav": 1000, "total_units": 10}),
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "get_pending_cashflows",
+        new=AsyncMock(return_value=[
+            {"id": 7, "type": "deposit", "amount": 500, "units_change": 0.5},
+        ]),
+    ), patch.object(
+        snapshot_nav.db_repo,
+        "transaction",
+        new=fake_txn,
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "save_snapshot",
+        new=AsyncMock(),
+    ) as save_snapshot, patch.object(
+        snapshot_nav.snapshots_repo,
+        "save_stock_snapshots",
+        new=AsyncMock(),
+    ):
+        await snapshot_nav.take_snapshot("u1", "2026-05-18")
+
+    fake_db.execute.assert_awaited_once_with(
+        "UPDATE portfolio_cashflows SET applied_snapshot_date = ? WHERE id = ?",
+        ("2026-05-18", 7),
+    )
+    save_snapshot.assert_awaited_once_with(
+        "u1", "2026-05-18", 12000, 8000, 12000 / 10.5, 10.5, snapshot_nav._fx_usdkrw,
+    )
+
+
+@pytest.mark.asyncio
+async def test_take_snapshot_first_snapshot_marks_cashflows_without_issuing():
+    """첫 스냅샷은 total_value/BASE_NAV 로 유닛을 만들므로 그 이전 입출금은
+    이미 유닛에 녹아 있다 — 마킹만 하고 발행하면 안 된다 (이중 반영)."""
+    fake_db = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_txn():
+        yield fake_db
+
+    with patch.object(
+        snapshot_nav,
+        "_fetch_total_value",
+        new=AsyncMock(return_value=(5000, 5000, [{"stock_code": "005930", "market_value": 5000}])),
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "get_snapshot_by_date",
+        new=AsyncMock(return_value=None),
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "get_latest_snapshot_before_date",
+        new=AsyncMock(return_value=None),
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "get_pending_cashflows",
+        new=AsyncMock(return_value=[
+            {"id": 3, "type": "deposit", "amount": 5000, "units_change": None},
+        ]),
+    ), patch.object(
+        snapshot_nav.db_repo,
+        "transaction",
+        new=fake_txn,
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "save_snapshot",
+        new=AsyncMock(),
+    ) as save_snapshot, patch.object(
+        snapshot_nav.snapshots_repo,
+        "save_stock_snapshots",
+        new=AsyncMock(),
+    ):
+        await snapshot_nav.take_snapshot("u1", "2026-05-18")
+
+    fake_db.execute.assert_awaited_once_with(
+        "UPDATE portfolio_cashflows SET applied_snapshot_date = ? WHERE id = ?",
+        ("2026-05-18", 3),
+    )
+    # 5000/1000 = 5 units, nav = BASE_NAV — 입금 유닛이 또 발행되지 않는다.
+    save_snapshot.assert_awaited_once_with(
+        "u1", "2026-05-18", 5000, 5000, 1000.0, 5.0, snapshot_nav._fx_usdkrw,
+    )
 
 
 @pytest.mark.asyncio
@@ -304,6 +428,10 @@ async def test_take_snapshot_returns_fallback_holding_count():
         snapshot_nav.snapshots_repo,
         "get_snapshot_by_date",
         new=AsyncMock(return_value={"date": "2026-05-18", "nav": 1000, "total_units": 10}),
+    ), patch.object(
+        snapshot_nav.snapshots_repo,
+        "get_pending_cashflows",
+        new=AsyncMock(return_value=[]),
     ), patch.object(
         snapshot_nav.snapshots_repo,
         "save_snapshot",

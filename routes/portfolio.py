@@ -1275,13 +1275,12 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
 
     google_sub = user["google_sub"]
 
-    # Get latest NAV for units calculation
-    latest = await snapshots_repo.get_latest_snapshot(google_sub)
-    nav_at_time = latest["nav"] if latest else 1000.0
-    units_change = amount / nav_at_time
-    if cf_type == "withdrawal":
-        units_change = -units_change
-
+    # units_change/nav_at_time 은 여기서 미리 채우지 않는다 — 유닛 발행은
+    # 정산(snapshot_nav)이 당일 ex-cashflow NAV 로 단일 계산하고
+    # applied_snapshot_date 를 마킹한다. 입력 시점에 미리 채우면 "미반영"
+    # 판별이 불가능해져 주말/정산 후/소급 입력분 유닛이 유실됐었다.
+    # 반영 전 구간의 라이브 NAV 는 프론트가 평가액에서 현금흐름을 빼는
+    # 방식으로 이미 동일한 수학을 쓴다 (portfolio-render._liveNavValueKrw).
     try:
         result = await snapshots_repo.add_cashflow_and_sync_cash(
             google_sub,
@@ -1289,8 +1288,8 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
             cf_type,
             amount,
             memo,
-            nav_at_time,
-            units_change,
+            None,
+            None,
         )
     except snapshots_repo.CashflowBalanceError as exc:
         raise HTTPException(

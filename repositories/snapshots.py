@@ -426,7 +426,7 @@ async def get_tag_history(google_sub: str, tag: str) -> list[dict]:
 async def get_cashflows(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT id, date, type, amount, nav_at_time, units_change, memo, created_at FROM portfolio_cashflows WHERE google_sub = ? ORDER BY date DESC, created_at DESC",
+        "SELECT id, date, type, amount, nav_at_time, units_change, applied_snapshot_date, memo, created_at FROM portfolio_cashflows WHERE google_sub = ? ORDER BY date DESC, created_at DESC",
         (google_sub,),
     )
     return [dict(row) for row in await cursor.fetchall()]
@@ -506,7 +506,7 @@ async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
         await db.execute("BEGIN IMMEDIATE")
         try:
             cursor = await db.execute(
-                "SELECT id, type, amount FROM portfolio_cashflows WHERE id = ? AND google_sub = ?",
+                "SELECT id, type, amount, units_change, applied_snapshot_date FROM portfolio_cashflows WHERE id = ? AND google_sub = ?",
                 (cf_id, google_sub),
             )
             cf = await cursor.fetchone()
@@ -515,6 +515,27 @@ async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
                 return False
 
             await db.execute("DELETE FROM portfolio_cashflows WHERE id = ? AND google_sub = ?", (cf_id, google_sub))
+
+            # 이미 정산에 반영된 유닛은 그 날짜 이후 모든 스냅샷의 분모에서
+            # 회수하고 NAV 를 재계산한다. 빼지 않으면 입금 삭제 시 평가액
+            # (CASH_KRW)만 줄고 유닛은 남아 NAV 가 영구 하락한다.
+            if cf["applied_snapshot_date"] and cf["units_change"]:
+                await db.execute(
+                    """
+                    UPDATE portfolio_snapshots
+                    SET total_units = total_units - :delta,
+                        nav = CASE
+                            WHEN (total_units - :delta) > 0 THEN total_value / (total_units - :delta)
+                            ELSE nav
+                        END
+                    WHERE google_sub = :sub AND date >= :applied
+                    """,
+                    {
+                        "delta": cf["units_change"],
+                        "sub": google_sub,
+                        "applied": cf["applied_snapshot_date"],
+                    },
+                )
             cash_cursor = await db.execute(
                 "SELECT quantity FROM user_portfolio WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
                 (google_sub,),
@@ -541,10 +562,17 @@ async def get_all_users_with_portfolio() -> list[str]:
 
 
 async def get_pending_cashflows(google_sub: str, date: str) -> list[dict]:
-    """Get cashflows for a specific date that haven't been applied to snapshots yet."""
+    """Cashflows not yet folded into any snapshot's total_units, up to `date`.
+
+    date <= 정산일 이면 전부 대상이다 — 주말 입금(토·일 date, 월요일 정산),
+    20:05 정산 이후 입력분(당일 date, 다음 정산), 소급 입력분이 모두 여기로
+    들어온다. 과거에는 `date = 정산일` 정확 일치라 이들 유닛이 영구 유실돼
+    다음 정산에서 NAV 가 입금액만큼 가짜 상승했다.
+    """
     db = await get_db()
     cursor = await db.execute(
-        "SELECT id, type, amount, units_change FROM portfolio_cashflows WHERE google_sub = ? AND date = ?",
+        "SELECT id, type, amount, units_change FROM portfolio_cashflows "
+        "WHERE google_sub = ? AND date <= ? AND applied_snapshot_date IS NULL",
         (google_sub, date),
     )
     return [dict(row) for row in await cursor.fetchall()]

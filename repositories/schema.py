@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS portfolio_cashflows (
     amount REAL NOT NULL,
     nav_at_time REAL,
     units_change REAL,
+    applied_snapshot_date TEXT,
     memo TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
@@ -779,6 +780,11 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     # Notification edge-trigger and priority flags.
     ("portfolio_alerts", "state_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("portfolio_alerts", "important", "INTEGER NOT NULL DEFAULT 0"),
+    # 이 입출금의 유닛이 어느 날짜 정산의 total_units 에 반영됐는지.
+    # NULL = 미반영 (다음 정산이 date <= 정산일 조건으로 집어간다).
+    # 없던 시절에는 '정산일 == date 정확 일치 + 그날 첫 정산'에서만 유닛이
+    # 반영돼 주말/정산 후/소급 입력분이 영구 유실됐다 (NAV 가짜 점프).
+    ("portfolio_cashflows", "applied_snapshot_date", "TEXT"),
     ("portfolio_snapshots", "fx_usdkrw", "REAL"),
     ("portfolio_stock_snapshots", "group_name", "TEXT"),
     ("portfolio_stock_snapshots", "quantity", "REAL"),

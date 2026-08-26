@@ -205,28 +205,65 @@ async def take_snapshot(google_sub: str, snap_date: str) -> int:
         nav = prev["nav"]
         total_units = prev["total_units"]
 
-    # On rerun, preserve the already-materialized units for that date. If this
-    # is the first snapshot for snap_date, apply same-day cashflows once.
-    if existing is None:
-        cashflows = await snapshots_repo.get_pending_cashflows(google_sub, snap_date)
-        for cf in cashflows:
-            if cf["units_change"] is not None:
-                # Already applied (e.g., imported data or a previous run).
-                total_units += cf["units_change"]
-                continue
-            amt = cf["amount"]
-            if nav > 0:
-                units_delta = amt / nav
-                if cf["type"] == "withdrawal":
-                    units_delta = -units_delta
-                total_units += units_delta
-                # Update cashflow record with nav and units
-                db = await db_repo.get_db()
-                await db.execute(
-                    "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ? WHERE id = ?",
-                    (nav, units_delta, cf["id"]),
-                )
-                await db.commit()
+    # 미반영 입출금을 유닛으로 전환한다. 재실행(existing 존재) 시에도
+    # 새로 입력된 미반영분은 처리한다 — applied_snapshot_date 마킹이
+    # 이중 반영을 막으므로 "첫 정산에서만" 제한이 더는 필요 없다.
+    # (existing 의 total_units 에는 이미 반영된 유닛이 들어 있다.)
+    cashflows = await snapshots_repo.get_pending_cashflows(google_sub, snap_date)
+    if prev is None:
+        # 첫 스냅샷: total_units = total_value/BASE_NAV 로 만들므로 지금까지의
+        # 입출금은 이미 유닛에 녹아 있다. 발행 없이 반영 완료로만 마킹해
+        # 다음 정산의 이중 발행을 막는다.
+        if cashflows:
+            async with db_repo.transaction() as db:
+                for cf in cashflows:
+                    await db.execute(
+                        "UPDATE portfolio_cashflows SET applied_snapshot_date = ? WHERE id = ?",
+                        (snap_date, cf["id"]),
+                    )
+        cashflows = []
+    preset = [cf for cf in cashflows if cf["units_change"] is not None]
+    fresh = [cf for cf in cashflows if cf["units_change"] is None]
+
+    # 발행 기준 NAV = 이번 정산의 ex-cashflow NAV. total_value 에는 입금이
+    # 이미 CASH_KRW 로 들어와 있으므로, 순입출금을 빼고 직전 유닛으로 나누면
+    # "입출금 직전의 오늘 NAV"가 된다. 전일 NAV 로 발행하면 당일 시장
+    # 변동만큼 신규 유닛이 과소/과대 발행돼 수익률이 왜곡된다 (하락일에
+    # 손실 희석). 유닛이 없거나 값이 무의미하면 직전 NAV 로 폴백.
+    net_fresh = sum(
+        cf["amount"] if cf["type"] == "deposit" else -cf["amount"] for cf in fresh
+    )
+    issue_nav = nav
+    if total_units > 0:
+        candidate = (total_value - net_fresh) / total_units
+        if candidate > 0:
+            issue_nav = candidate
+
+    # 유닛 전환량을 먼저 계산해 마킹 문장으로 모은다 (아래에서 스냅샷
+    # 저장과 한 트랜잭션으로 커밋).
+    marking_updates: list[tuple] = []
+    for cf in preset:
+        # units 가 미리 정해진 행 (구버전 라우트 입력분·DB 임포트).
+        total_units += cf["units_change"]
+        marking_updates.append((
+            "UPDATE portfolio_cashflows SET applied_snapshot_date = ? WHERE id = ?",
+            (snap_date, cf["id"]),
+        ))
+    for cf in fresh:
+        if issue_nav <= 0:
+            logger.warning(
+                "Cashflow %s skipped: no positive NAV to issue units (user=%s)",
+                cf["id"], google_sub[:8],
+            )
+            continue
+        units_delta = cf["amount"] / issue_nav
+        if cf["type"] == "withdrawal":
+            units_delta = -units_delta
+        total_units += units_delta
+        marking_updates.append((
+            "UPDATE portfolio_cashflows SET nav_at_time = ?, units_change = ?, applied_snapshot_date = ? WHERE id = ?",
+            (issue_nav, units_delta, snap_date, cf["id"]),
+        ))
 
     # Compute new NAV
     if total_units > 0:
@@ -235,7 +272,19 @@ async def take_snapshot(google_sub: str, snap_date: str) -> int:
         nav = BASE_NAV
         total_units = total_value / BASE_NAV if total_value > 0 else 0
 
-    await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
+    if marking_updates:
+        # 마킹과 스냅샷 저장은 한 트랜잭션 — 둘이 갈라지면 어느 쪽이든
+        # 유닛이 유실(마킹만 커밋)되거나 이중 반영(스냅샷만 커밋 후 재실행)
+        # 된다. save_snapshot 내부 transaction() 은 재진입이라 여기 합류.
+        # save_stock_snapshots 는 전용 커넥션(BEGIN IMMEDIATE)을 쓰므로 이
+        # 블록 안에 넣으면 자기 자신과 데드락 — 커밋 후에 호출한다. 그쪽은
+        # 표시용 per-stock 데이터라 유닛 회계와 원자성이 필요 없다.
+        async with db_repo.transaction() as db:
+            for sql, params in marking_updates:
+                await db.execute(sql, params)
+            await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
+    else:
+        await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
     if per_stock:
         await snapshots_repo.save_stock_snapshots(google_sub, snap_date, per_stock)
     fallback_count = sum(1 for s in per_stock if s.get("priced_from_fallback"))
