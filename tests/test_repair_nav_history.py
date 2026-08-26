@@ -187,3 +187,25 @@ def test_lost_flow_entered_after_last_settlement_is_reset_to_pending():
     assert cu["applied_snapshot_date"] is None
     assert cu["units_change"] is None
     assert cu["nav_at_time"] is None
+
+
+def test_repair_is_idempotent_after_created_at_reassignment():
+    """교정 1회차가 유실분을 created_at 정산(8/26)에 반영하고 나면, 2회차는
+    applied_snapshot_date 기준으로 그 정산의 델타(+394,781)를 확인하고
+    아무것도 제안하지 않아야 한다 — 명목일(8/24) 델타 0 을 또 유실로
+    오판하면 이중 보정으로 데이터가 망가진다."""
+    snapshots = [
+        _snap("2026-08-24", 6_470_000_000, 992.92, 6_516_624.50),
+        _snap("2026-08-25", 6_500_000_000, 997.41, 6_516_624.50),
+        _snap("2026-08-26", 6_914_000_000, 1000.36, 6_516_624.50 + 394_781.22),
+    ]
+    cf = _cf(
+        1, "2026-08-24", "deposit", 383_962_000,
+        units_change=394_781.22, nav_at_time=972.59,
+        created_at="2026-08-26T14:09:54",
+    )
+    cf["applied_snapshot_date"] = "2026-08-26"  # 1회차 교정 결과
+
+    plan = rebuild_user_units(snapshots, [cf])
+
+    assert plan["snapshot_updates"] == []

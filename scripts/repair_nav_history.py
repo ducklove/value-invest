@@ -79,16 +79,23 @@ def rebuild_user_units(snapshots: list[dict], cashflows: list[dict]) -> dict:
     if not snapshots:
         return result
     snaps = sorted(snapshots, key=lambda s: s["date"])
+
+    # 검증 귀속일: applied_snapshot_date 가 있으면 그 정산(이미 반영·교정된
+    # 위치), 없으면 명목 date. 이걸 안 쓰면 교정 후 재실행이 명목일 델타
+    # (정당하게 0)를 또 유실로 오판해 이중 보정한다 — 멱등성의 핵심.
+    def _eff(cf: dict) -> str:
+        return str(cf.get("applied_snapshot_date") or cf["date"])
+
     flows = sorted(
         [cf for cf in cashflows if cf["units_change"] is not None],
-        key=lambda c: (c["date"], c.get("created_at") or "", c["id"]),
+        key=lambda c: (_eff(c), c.get("created_at") or "", c["id"]),
     )
 
     first = snaps[0]
     fi = 0
     # 첫 스냅샷 이전/당일 입출금: 유닛에 이미 녹아 있는 것으로 간주 —
     # 마킹만 교정하고 시계열은 건드리지 않는다.
-    while fi < len(flows) and flows[fi]["date"] <= first["date"]:
+    while fi < len(flows) and _eff(flows[fi]) <= first["date"]:
         result["cashflow_updates"].append({
             "id": flows[fi]["id"],
             "applied_snapshot_date": first["date"],
@@ -102,7 +109,7 @@ def rebuild_user_units(snapshots: list[dict], cashflows: list[dict]) -> dict:
     prev_stored = float(first["total_units"] or 0)
     for snap in snaps[1:]:
         assigned = []
-        while fi < len(flows) and flows[fi]["date"] <= snap["date"]:
+        while fi < len(flows) and _eff(flows[fi]) <= snap["date"]:
             assigned.append(flows[fi])
             fi += 1
         stored = float(snap["total_units"] or 0)
