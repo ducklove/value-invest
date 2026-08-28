@@ -193,14 +193,19 @@ async def _persist_market_target_metrics(source_code: str, basis: dict) -> None:
         year = int(year)
     except (TypeError, ValueError):
         return
+    # close_price 는 절대 쓰지 않는다. basis["closePrice"] 는
+    # _apply_market_cache_fallback 이 "가장 최신 연도" 행에서 에코해 온 값이라,
+    # fiscalYear(회계연도) 행에 기록하면 다른 연도의 종가가 섞인다. 실제로
+    # 현대차 2025 행에 2026년 3월 시세가 박혀 per/pbr 와 자기모순인 행이
+    # 만들어졌고, 종목분석 카드 PBR 이 0.5 로 왜곡됐다 (2026-08). 연간 종가의
+    # 단일 소유자는 stock_price.fetch_market_data 다.
     row = {
         "stock_code": source_code,
         "year": year,
-        "close_price": basis.get("closePrice"),
         "eps": basis.get("eps"),
         "bps": basis.get("bps"),
     }
-    if row["eps"] is None and row["bps"] is None and row["close_price"] is None:
+    if row["eps"] is None and row["bps"] is None:
         return
     try:
         await portfolio_repo.upsert_market_target_metrics([row])

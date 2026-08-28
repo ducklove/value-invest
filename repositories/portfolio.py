@@ -262,7 +262,6 @@ async def upsert_market_target_metrics(rows: list[dict]) -> int:
             (
                 stock_code,
                 year,
-                row.get("close_price"),
                 row.get("per"),
                 row.get("pbr"),
                 row.get("eps"),
@@ -276,17 +275,23 @@ async def upsert_market_target_metrics(rows: list[dict]) -> int:
     # 벌크 upsert 는 전부 반영되거나 전부 취소돼야 한다 — 공유 커넥션에서
     # 명시 트랜잭션 없이 commit 하면 다른 task 의 진행 중 쓰기까지 함께
     # 커밋될 수 있어 transaction() 으로 직렬화한다.
+    # 이 upsert 는 "빈 칸 채우기" 전용이다(COALESCE 에서 기존값 우선).
+    # market_data 행의 소유자는 stock_price.fetch_market_data 이고, 그 행은
+    # close ≈ per×eps ≈ pbr×bps 로 한 번에 계산돼 내부 정합이 보장된다.
+    # 다른 소스(finance-pi fundamentals)가 일부 컬럼만 덮어쓰면 행이
+    # 자기모순이 되고(2026-08 카드 PBR 0.5 왜곡 사고), needs_refresh 의
+    # 정합 검사와 맞물려 재계산이 무한 반복될 수 있다. close_price 는 아예
+    # 받지도 않는다.
     async with transaction() as db:
         await db.executemany(
-            """INSERT INTO market_data (stock_code, year, close_price, per, pbr, eps, bps, market_cap)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO market_data (stock_code, year, per, pbr, eps, bps, market_cap)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(stock_code, year) DO UPDATE SET
-                 close_price = COALESCE(excluded.close_price, market_data.close_price),
-                 per = COALESCE(excluded.per, market_data.per),
-                 pbr = COALESCE(excluded.pbr, market_data.pbr),
-                 eps = COALESCE(excluded.eps, market_data.eps),
-                 bps = COALESCE(excluded.bps, market_data.bps),
-                 market_cap = COALESCE(excluded.market_cap, market_data.market_cap)""",
+                 per = COALESCE(market_data.per, excluded.per),
+                 pbr = COALESCE(market_data.pbr, excluded.pbr),
+                 eps = COALESCE(market_data.eps, excluded.eps),
+                 bps = COALESCE(market_data.bps, excluded.bps),
+                 market_cap = COALESCE(market_data.market_cap, excluded.market_cap)""",
             values,
         )
     return len(values)

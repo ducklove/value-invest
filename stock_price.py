@@ -765,6 +765,31 @@ def _sum_trailing_dividends(
     return round(total, 2) if total else None
 
 
+# fetch_market_data 는 per=close/eps, pbr=close/bps 를 한 번에 계산하므로
+# 정상 행은 close ≈ per×eps ≈ pbr×bps 가 성립한다(반올림 오차뿐). 과거
+# valuation 캐시 경로가 close_price 만 다른 연도 값으로 덮어써 행 내부가
+# 모순인 오염 행이 생겼는데(현대차 2025: close 538,000 vs per×eps 301,696),
+# 그런 행을 감지하면 전체 재계산을 트리거해 캐시가 스스로 낫게 한다.
+_ROW_CONSISTENCY_TOLERANCE = 0.30
+
+
+def _market_row_is_inconsistent(row: dict) -> bool:
+    close = row.get("close_price")
+    if close is None or close <= 0:
+        return False
+    for ratio_key, base_key in (("per", "eps"), ("pbr", "bps")):
+        ratio = row.get(ratio_key)
+        base = row.get(base_key)
+        # 0.05 미만 배수는 저장 반올림(소수 2자리)만으로 30% 넘게 어긋날 수
+        # 있어 판정에서 제외한다(실존하지 않는 수준의 극단값이기도 하다).
+        if ratio is None or base is None or ratio < 0.05 or base <= 0:
+            continue
+        implied_close = ratio * base
+        if implied_close > 0 and abs(close - implied_close) / implied_close > _ROW_CONSISTENCY_TOLERANCE:
+            return True
+    return False
+
+
 def market_data_needs_refresh(data: list[dict]) -> bool:
     if not data:
         return True
@@ -773,6 +798,8 @@ def market_data_needs_refresh(data: list[dict]) -> bool:
         for row in data
         if row.get("year") is not None and row.get("year") <= datetime.now().year
     ):
+        return True
+    if any(_market_row_is_inconsistent(row) for row in data):
         return True
     keys = ("per", "pbr", "eps", "bps", "dividend_per_share", "dividend_yield", "market_cap")
     if not any(row.get(key) is not None for row in data for key in keys):
