@@ -702,3 +702,28 @@
     transform: translate(-50%, -50%);
   }
 }
+
+/* bond-mate(형제 프로젝트) 딥링크 — 국채·환율 섹션 머리의 "히스토리 ↗".
+ * 히스토리와 전 만기·회사채는 bond-mate 가 관리하므로 그쪽으로 넘긴다. */
+.md-ext-link {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 6px);
+}
+.md-ext-link:hover {
+  color: var(--accent, #2563eb);
+  background: var(--surface-muted, rgba(148, 163, 184, 0.12));
+}
+/* 일반 섹션(환율)은 제목이 h3 하나라 링크를 오른쪽으로 밀려면 flex 로 세운다. */
+.md-section-title:has(.md-ext-link) {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+/* 국채 섹션은 제목·설명·링크 3단 — 설명까지 왼쪽에 붙이고 링크만 오른쪽으로. */
+.md-bond-head span { margin-right: auto; }

@@ -42,6 +42,7 @@ SITE = {
     "nps": "https://ducklove.github.io/nps-tracker/",
     "etf": "https://ducklove.github.io/eiayn/",
     "buybacks": "https://ducklove.github.io/buybacks/",
+    "bondMate": "https://ducklove.github.io/bond-mate/",
 }
 
 _TTL = 900  # 15분 — 배치 갱신 주기에 맞춤
@@ -471,6 +472,53 @@ async def _buybacks_summary() -> dict | None:
     return _summarize_buybacks(data)
 
 
+def _summarize_bond_mate(current: dict) -> dict:
+    """채권 시황: 장단기 스프레드·주요 금리·신용 스프레드·최근 회사채 발행.
+
+    bond-mate 가 이미 계산해 둔 highlights 를 그대로 쓰고, AI 인사이트가
+    문장으로 풀기 좋은 최소한만 골라 담는다."""
+    highlights = current.get("highlights") or {}
+    rates = current.get("rates") or {}
+    fx = current.get("fx") or {}
+
+    def quote(container: dict, key: str) -> dict | None:
+        row = container.get(key)
+        if not isinstance(row, dict) or row.get("value") is None:
+            return None
+        return {"value": row.get("value"), "change": row.get("change"), "asOf": row.get("date")}
+
+    credit = current.get("credit") or {}
+    spreads = {
+        rating: round(meta["oas"]["value"] * 100, 1)
+        for rating, meta in credit.items()
+        if isinstance(meta, dict)
+        and isinstance(meta.get("oas"), dict)
+        and meta["oas"].get("value") is not None
+    }
+
+    return {
+        "asOf": current.get("generated_at"),
+        "us10y": quote(rates, "US10Y"),
+        "us2y": quote(rates, "US2Y"),
+        "kr10y": quote(rates, "KR10Y"),
+        "kr3y": quote(rates, "KR3Y"),
+        "usBase": quote(rates, "US_BASE"),
+        "krBase": quote(rates, "KR_BASE"),
+        "usdKrw": quote(fx, "USD_KRW"),
+        "usCurveSpreadBp": highlights.get("us_curve_spread_bp"),
+        "usCurveInverted": highlights.get("us_curve_inverted"),
+        "krCurveSpreadBp": highlights.get("kr_curve_spread_bp"),
+        "creditSpreadBp": spreads,
+        "latestOffering": highlights.get("latest_offering"),
+        "url": SITE["bondMate"],
+    }
+
+
+async def _bond_mate_summary() -> dict | None:
+    data = await _get_json(f"{SITE['bondMate']}data/current.json")
+    return _summarize_bond_mate(data)
+
+
 async def fetch_external_insights() -> dict:
     """외부 도구 요약을 한 번에. 도구별 독립 실패 허용 + 길게 캐시."""
     cached = _cache.get("insights")
@@ -479,10 +527,10 @@ async def fetch_external_insights() -> dict:
 
     results = await asyncio.gather(
         _holding_summary(), _spread_summary(), _gold_summary(), _spac_summary(), _nps_summary(),
-        _etf_picks_summary(), _buybacks_summary(),
+        _etf_picks_summary(), _buybacks_summary(), _bond_mate_summary(),
         return_exceptions=True,
     )
-    keys = ("holding", "spread", "goldGap", "spac", "nps", "etfPicks", "buybacks")
+    keys = ("holding", "spread", "goldGap", "spac", "nps", "etfPicks", "buybacks", "bondMate")
     out: dict = {}
     for key, res in zip(keys, results):
         if isinstance(res, Exception) or res is None:

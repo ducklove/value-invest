@@ -223,8 +223,10 @@ function _mdSectionHtml(category, codes, catalog, dataMap, variant) {
   const titleAttr = titleTooltip
     ? ` title="${escapeHtml(titleTooltip)}" aria-label="${escapeHtml(`${title} — ${titleTooltip}`)}"`
     : '';
+  // 환율은 bond-mate 가 히스토리를 들고 있어 섹션 머리에 링크를 함께 둔다.
+  const extLink = category === '환율' ? _mdBondMateLinkHtml('fx', '히스토리') : '';
   return `<section class="md-section${variant === 'hero' ? ' md-hero-section' : ''}" data-md-cat="${escapeHtml(category)}">`
-    + `<h3 class="md-section-title"${titleAttr}>${escapeHtml(title)}</h3>${body}</section>`;
+    + `<h3 class="md-section-title"${titleAttr}>${escapeHtml(title)}${extLink}</h3>${body}</section>`;
 }
 
 function _mdKospiFuturesSectionHtml() {
@@ -654,11 +656,19 @@ function _bondCurveTableHtml(curve) {
     + `<tbody>${rows}</tbody></table>`;
 }
 
+// 히스토리·전 만기·회사채는 bond-mate 가 관리한다 — 섹션 머리에 링크를 둔다.
+function _mdBondMateLinkHtml(view, text) {
+  const href = typeof bondMateLink === 'function' ? bondMateLink(view) : '';
+  if (!href) return '';
+  return `<a class="md-ext-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(text)} ↗</a>`;
+}
+
 function _mdBondSectionHtml() {
   // 국가별 10년물은 비교 그래프(bondCountryCompare)가 모든 국가를 막대로 보여주므로
   // 별도 수치 표는 생략한다. 기간별 금리는 곡선이 한·미·일이라 표를 함께 둔다.
   return '<section class="md-section md-bond-section">'
-    + '<div class="md-bond-head"><h3 class="md-section-title">국채</h3><span>기준금리 · 수익률 곡선 · 10년물 비교</span></div>'
+    + '<div class="md-bond-head"><h3 class="md-section-title">국채</h3><span>기준금리 · 수익률 곡선 · 10년물 비교</span>'
+    + _mdBondMateLinkHtml('government', '히스토리') + '</div>'
     + '<div class="md-bond-panel md-bond-panel-curve">'
     + '<div class="md-bond-panel-head"><div><strong>한·미·일 기간별 금리</strong><span>Yield Curve · 기준금리 포함</span></div><em>변동: 전일대비 %p</em></div>'
     + '<div class="md-bond-chart" id="bondYieldCurve"></div>'
@@ -898,8 +908,18 @@ async function loadInvestingDashboard(refresh = false) {
       const catalog = _mdCatalog || {};
       const codes = Object.keys(catalog);
       if (!codes.length) return;
-      const dataMap = await apiFetchJson('/api/market-summary?codes=' + encodeURIComponent(codes.join(',')), { fallback: {} });
-      _mdRenderDashboard(catalog, dataMap);
+      // 국채·환율의 카탈로그와 히스토리는 bond-mate 가 관리한다(source of record).
+      // 로컬 라이브 시세와 병렬로 받아 bond-mate 로 판을 깔고 라이브를 덮는다 —
+      // bond-mate 에 닿지 못하면 병합이 통째로 생략돼 기존 동작 그대로다.
+      const [dataMap, bondMate] = await Promise.all([
+        apiFetchJson('/api/market-summary?codes=' + encodeURIComponent(codes.join(',')), { fallback: {} }),
+        typeof loadBondMateSnapshot === 'function' ? loadBondMateSnapshot() : Promise.resolve(null),
+      ]);
+      const merged = typeof mergeBondMate === 'function'
+        ? mergeBondMate(catalog, dataMap, bondMate)
+        : { catalog, dataMap };
+      _mdCatalog = merged.catalog;
+      _mdRenderDashboard(merged.catalog, merged.dataMap);
       _mdLoadedOnce = true;
       _hlStartStream();  // Hyperliquid WebSocket + REST fallback (single connection)
       // 수급 슬롯은 hero 섹션과 함께 생성되므로 렌더 직후 채운다.
@@ -1157,6 +1177,35 @@ function _extRender(root, data) {
       ? `NAV ${Number(nps.nav).toFixed(1)} · 비중 상위`
       : '포트폴리오 비중 상위';
     cards.push(_extCard('국민연금', nps.url, sub, _extLinkRows(nps.top, 'weight', nps.url, false)));
+  }
+  const bm = data && data.bondMate;
+  if (bm) {
+    // 금리 국면을 한 줄로: 장단기 스프레드(역전 여부)·주요 금리·신용 스프레드.
+    const rows = [];
+    const push = (name, text, cls) => rows.push(
+      `<div class="ext-row"><span class="ext-name">${escapeHtml(name)}</span>`
+      + `<span class="ext-val ${cls || 'md-flat'}">${escapeHtml(text)}</span></div>`
+    );
+    if (bm.usCurveSpreadBp != null) {
+      push('미국 10Y−2Y', `${bm.usCurveSpreadBp > 0 ? '+' : ''}${Math.round(bm.usCurveSpreadBp)}bp`,
+        bm.usCurveInverted ? 'md-down' : 'md-flat');
+    }
+    if (bm.krCurveSpreadBp != null) {
+      push('한국 10Y−3Y', `${bm.krCurveSpreadBp > 0 ? '+' : ''}${Math.round(bm.krCurveSpreadBp)}bp`);
+    }
+    const bbb = bm.creditSpreadBp && bm.creditSpreadBp.BBB;
+    if (bbb != null) push('BBB 스프레드', `+${Math.round(bbb)}bp`);
+    const offering = bm.latestOffering;
+    if (offering && offering.issuer_name) {
+      const amount = offering.total_amount != null
+        ? '$' + (offering.total_amount / 1e9).toFixed(1) + 'B'
+        : '';
+      push(`최근 발행 · ${offering.issuer_name}`, amount);
+    }
+    if (rows.length) {
+      const sub = bm.usCurveInverted ? '장단기 역전 중' : '금리·신용 스프레드';
+      cards.push(_extCard('채권 시황', bm.url, sub, rows.join('')));
+    }
   }
   if (!cards.length) {
     root.innerHTML = '';

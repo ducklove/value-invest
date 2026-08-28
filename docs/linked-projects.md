@@ -15,6 +15,7 @@ URLs or server-side environment variables instead of copying their code.
 | `goldGap` | `https://github.com/ducklove/gold_gap` | `../gold_gap` | Links `KRX_GOLD` and `CRYPTO_BTC` portfolio rows to the gold/bitcoin gap dashboard. |
 | `npsTracker` | `https://github.com/ducklove/nps-tracker` | — | Embeds the NPS domestic-equity portfolio dashboard in the NPS tab via iframe and summarizes `current.json` for the 투자정보 insight card. Exposes `baseUrl` only. |
 | `eiayn` | `https://github.com/ducklove/eiayn` | `../eiayn` | Links ETF rows and the daily recommendation card to ETF analysis via `?code=` and summarizes `data/rankings.json`. Visual theme uses `?theme=light|dark`; ETF category filters use `?etf_theme=`. |
+| `bondMate` | `https://github.com/ducklove/bond-mate` | `../bond-mate` | Source of record for the 투자정보 국채·환율 panels: the browser merges its `data/current.json` into the indicator catalog and links out for history. Exposes `baseUrl`/`dataUrl`/`embedUrl` only. |
 | `kisProxy` | `https://github.com/ducklove/kis-proxy` | `../kis-proxy` | Used server-side by `kis_proxy_client.py` through `KIS_PROXY_BASE_URL`. |
 
 > `finance-pi` (`../finance-pi`, Raspberry Pi 데이터레이크 `:8400`)는 위 integration
@@ -58,6 +59,7 @@ URLs or server-side environment variables instead of copying their code.
 - `KRX_GOLD` opens `goldGap` with `?asset=gold`.
 - `CRYPTO_BTC` opens `goldGap` with `?asset=bitcoin`.
 - Covered domestic and foreign ETFs open `eiayn` with `?code=<ticker>`.
+- 투자정보 국채·환율 섹션의 "히스토리 ↗" 는 `bondMate` 를 `?tab=government|fx` 로 연다.
 
 ## Server-side External Insights
 
@@ -72,6 +74,7 @@ Results are cached ~15 minutes and each fetch fails independently:
 - `spacHunter`: `current.json` (branch `main`) — deepest discount-to-offer SPACs.
 - `npsTracker`: `current.json` (branch `main`) — National Pension Service domestic-equity holdings by portfolio weight (top), NAV, and total value.
 - `buybacks`: `data/buybacks/holding_snapshots.json` — latest common-stock treasury holding ratios (top).
+- `bondMate`: `data/current.json` — 장단기 스프레드(역전 여부), 주요국 금리·달러/원, 등급별 신용 스프레드, 최근 회사채 발행 한 건.
 - `eiayn`: `data/rankings.json` — deterministic daily picks from the AIYN top-100 universe, enriched with daily quote changes by the hub.
 
 This path needs neither local config nor the `/admin.html` config writer; it only
@@ -141,6 +144,7 @@ Public base URLs can be overridden with:
 - `SPAC_HUNTER_BASE_URL`
 - `GOLD_GAP_BASE_URL`
 - `NPS_TRACKER_BASE_URL`
+- `BOND_MATE_BASE_URL`
 - `KIS_PROXY_BASE_URL`
 - `KIS_PROXY_TOKEN` (optional, sent as `X-KIS-Proxy-Token` when the proxy is
   configured with `KIS_PROXY_PUBLIC_TOKENS`)

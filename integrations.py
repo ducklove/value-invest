@@ -13,6 +13,7 @@ DEFAULT_BASE_URLS = {
     "buybacks": "https://ducklove.github.io/buybacks",
     "goldGap": "https://ducklove.github.io/gold_gap",
     "npsTracker": "https://ducklove.github.io/nps-tracker",
+    "bondMate": "https://ducklove.github.io/bond-mate",
     "kisProxy": "http://cantabile.tplinkdns.com:3288",
 }
 
@@ -51,6 +52,7 @@ def build_public_integrations(workspace_root: Path | None = None) -> dict[str, A
         "buybacks": _buybacks_config(),
         "goldGap": _gold_gap_config(root),
         "npsTracker": _nps_tracker_config(),
+        "bondMate": _bond_mate_config(),
         "kisProxy": _kis_proxy_config(),
     }
 
@@ -295,6 +297,21 @@ def _nps_tracker_config() -> dict[str, Any]:
     # 허브 NPS 탭은 이를 iframe 으로 임베드하고, 인사이트 요약은 external_tools
     # 가 current.json 을 직접 읽는다. 여기선 임베드용 baseUrl 만 노출한다.
     return {"baseUrl": _base_url("npsTracker", "NPS_TRACKER_BASE_URL")}
+
+
+def _bond_mate_config() -> dict[str, Any]:
+    # bond-mate 는 전 세계 금리·환율·국채·회사채 대시보드(별도 정적 SPA)이고,
+    # 투자정보 탭의 국채·환율 패널이 쓰는 데이터의 source of record 다.
+    # 브라우저는 published JSON 을 직접 읽고(dataUrl) 필요하면 화면을 통째로
+    # iframe 임베드한다(?embed=<탭>) — 로컬 config 는 필요 없다.
+    base_url = _base_url("bondMate", "BOND_MATE_BASE_URL")
+    return {
+        "baseUrl": base_url,
+        "dataUrl": f"{base_url}/data/current.json",
+        "embedUrl": f"{base_url}/?embed=",
+        # 임베드·딥링크에 쓰는 화면 키. bond-mate 쪽 계약이라 임의로 바꾸지 않는다.
+        "views": ["overview", "government", "policy", "fx", "credit", "issuance"],
+    }
 
 
 def _gold_gap_config(root: Path) -> dict[str, Any]:

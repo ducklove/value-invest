@@ -138,3 +138,26 @@ def test_public_integrations_do_not_expose_local_paths(tmp_path):
     assert str(tmp_path) not in json.dumps(config)
     assert config["integrations"]["holdingValue"]["settings"]["source"] == "remote-fallback"
     assert config["integrations"]["buybacks"]["baseUrl"] == "https://ducklove.github.io/buybacks"
+
+
+def test_bond_mate_exposes_data_and_embed_urls():
+    """bond-mate 는 로컬 config 없이 baseUrl 계열만 노출한다.
+
+    브라우저가 published JSON 을 직접 읽고(dataUrl), 필요하면 화면을 통째로
+    iframe 임베드한다(embedUrl + views). 키 이름은 프론트가 의존하는 계약이다.
+    """
+    config = integrations.build_public_integrations()["bondMate"]
+
+    assert config["baseUrl"] == "https://ducklove.github.io/bond-mate"
+    assert config["dataUrl"] == "https://ducklove.github.io/bond-mate/data/current.json"
+    assert config["embedUrl"] == "https://ducklove.github.io/bond-mate/?embed="
+    assert "government" in config["views"]
+    assert "fx" in config["views"]
+
+
+def test_bond_mate_base_url_is_overridable(monkeypatch):
+    monkeypatch.setenv("BOND_MATE_BASE_URL", "http://127.0.0.1:8731/")
+    config = integrations.build_public_integrations()["bondMate"]
+
+    assert config["baseUrl"] == "http://127.0.0.1:8731"
+    assert config["dataUrl"] == "http://127.0.0.1:8731/data/current.json"

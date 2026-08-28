@@ -50,6 +50,55 @@ class ExternalSummaryTests(unittest.TestCase):
         self.assertEqual(out["top"][0]["name"], "삼성전자")
         self.assertEqual(out["url"], external_tools.SITE["nps"])
 
+    def test_summarize_bond_mate_picks_curve_credit_and_latest_offering(self):
+        """채권 시황 요약: bond-mate 가 계산해 둔 highlights + 대표 금리만 추린다."""
+        current = {
+            "generated_at": "2026-08-29T02:05:00+00:00",
+            "rates": {
+                "US10Y": {"value": 4.73, "change": 0.06, "date": "2026-08-28"},
+                "KR10Y": {"value": 4.274, "change": 0.036, "date": "2026-08-28"},
+                "US_BASE": {"value": 3.75, "change": 0.0, "date": "2026-08-28"},
+                "US20Y": {"value": 5.21, "change": 0.03, "date": "2026-08-28"},
+            },
+            "fx": {"USD_KRW": {"value": 1380.5, "change": -1.5, "date": "2026-08-28"}},
+            "credit": {
+                "BBB": {"oas": {"value": 0.98}},
+                "CCC": {"oas": {"value": 10.31}},
+                "AAA": {"oas": {"value": None}},
+            },
+            "highlights": {
+                "us_curve_spread_bp": 37.0,
+                "us_curve_inverted": False,
+                "kr_curve_spread_bp": 48.6,
+                "latest_offering": {
+                    "issuer": "GOOGL",
+                    "issuer_name": "알파벳(구글)",
+                    "total_amount": 25_000_000_000,
+                    "tranches": 10,
+                },
+            },
+        }
+
+        summary = external_tools._summarize_bond_mate(current)
+
+        self.assertEqual(summary["us10y"], {"value": 4.73, "change": 0.06, "asOf": "2026-08-28"})
+        self.assertEqual(summary["usdKrw"]["value"], 1380.5)
+        self.assertEqual(summary["usCurveSpreadBp"], 37.0)
+        self.assertFalse(summary["usCurveInverted"])
+        self.assertEqual(summary["latestOffering"]["issuer_name"], "알파벳(구글)")
+        # OAS 는 %p 로 오므로 bp 로 환산해 담는다. 값이 없는 등급은 뺀다.
+        self.assertEqual(summary["creditSpreadBp"], {"BBB": 98.0, "CCC": 1031.0})
+        # 카드에 안 쓰는 만기는 싣지 않는다(페이로드를 좁게 유지).
+        self.assertNotIn("us20y", summary)
+
+    def test_summarize_bond_mate_survives_empty_snapshot(self):
+        """배포 직후 빈 스냅샷이어도 요약이 터지지 않아야 한다."""
+        summary = external_tools._summarize_bond_mate({})
+
+        self.assertIsNone(summary["us10y"])
+        self.assertIsNone(summary["usCurveSpreadBp"])
+        self.assertEqual(summary["creditSpreadBp"], {})
+
     def test_summarize_buybacks_uses_latest_common_snapshot_and_pct(self):
         holdings = [
             {"stock_code": "005930", "corp_name": "삼성전자", "stock_kind": "보통주",
