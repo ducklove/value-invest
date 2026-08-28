@@ -20,7 +20,7 @@ function load() {
     "<!doctype html><html><body><div id='coverageNote'></div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
   );
-  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis.js")]) {
+  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis-valuation.js"), read("analysis.js")]) {
     const s = dom.window.document.createElement("script");
     s.textContent = src;
     dom.window.document.body.appendChild(s);
@@ -67,6 +67,68 @@ test("_externalValuationCards returns [] when no links", () => {
   const w = load();
   assert.deepEqual([...w._externalValuationCards(null)], []);
   assert.deepEqual([...w._externalValuationCards({})], []);
+});
+
+// --- valuation 카드 지표 소스 ---
+// 2026-08 사고 회귀: 연간 market_data 캐시가 교차연도 close_price 오염으로
+// 카드 PBR 0.5(실측 0.91)·배당수익률 0.63%(TTM 2.51%)로 왜곡됐다. 카드는
+// 주간 시계열(그래프와 같은 소스)을 우선해야 한다.
+test("valuation 카드는 주간 시계열(최신 BPS·TTM 배당)을 우선한다 — 오염된 연간 캐시 무시", () => {
+  const w = load();
+  const indicators = {
+    // 오염된 연간 캐시 재현(현대차 2025 행): close 538,000 / pbr 0.67 →
+    // 역산 BPS 802,985. 연간 2026 DPS 는 분기배당 부분합 2,500.
+    "주가 (원)": [{ year: 2025, value: 538000 }],
+    "PBR": [{ year: 2025, value: 0.67 }],
+    "EPS (원)": [{ year: 2025, value: 36088 }],
+    "주당배당금 (원)": [{ year: 2025, value: 10000 }, { year: 2026, value: 2500 }],
+    "ROE (%)": [{ year: 2025, value: 9.99 }],
+  };
+  const weekly = {
+    "주가": [{ date: "2026-08-18", value: 421000 }, { date: "2026-08-24", value: 398600 }],
+    "PBR": [{ date: "2026-08-18", value: 0.96 }, { date: "2026-08-24", value: 0.91 }],
+    "EPS (원)": [{ date: "2026-08-24", value: 35331 }],
+    "주당배당금 (원)": [{ date: "2026-08-24", value: 10000 }],
+    "ROE (%)": [{ date: "2026-08-24", value: 8.12 }],
+  };
+  const m = w.getCurrentValuationMetrics(indicators, weekly, { price: 399000 });
+
+  // BPS = 398,600/0.91 = 438,022 → PBR = 399,000/438,022 ≈ 0.91 (연간 역산이면 0.50)
+  assert.ok(Math.abs(m.pbr - 0.911) < 0.01, `pbr=${m.pbr}`);
+  // 배당수익률 = TTM 10,000/399,000 = 2.51% (연간 최신 양수 2,500 이면 0.63%)
+  assert.ok(Math.abs(m.dividendYield - 2.506) < 0.01, `dy=${m.dividendYield}`);
+  assert.ok(Math.abs(m.per - 399000 / 35331) < 0.01, `per=${m.per}`);
+  assert.equal(m.roe, 8.12);
+});
+
+test("valuation 카드: 주간 시계열이 비면 기존 연간 규칙으로 폴백한다", () => {
+  const w = load();
+  const indicators = {
+    "주가 (원)": [{ year: 2025, value: 100000 }],
+    "PBR": [{ year: 2025, value: 1.0 }],
+    "EPS (원)": [{ year: 2025, value: 10000 }],
+    "주당배당금 (원)": [{ year: 2024, value: 3000 }, { year: 2025, value: 0 }],
+    "ROE (%)": [{ year: 2025, value: 10 }],
+  };
+  const m = w.getCurrentValuationMetrics(indicators, {}, { price: 120000 });
+
+  assert.ok(Math.abs(m.pbr - 1.2) < 0.001);           // 연간 역산 BPS 100,000
+  assert.ok(Math.abs(m.per - 12) < 0.001);
+  assert.ok(Math.abs(m.dividendYield - 2.5) < 0.001); // 연간 최신 양수 DPS 3,000
+  assert.equal(m.roe, 10);
+});
+
+test("valuation 카드: 주간 TTM 배당 0 은 실측 0.00% 로 표시된다", () => {
+  const w = load();
+  const weekly = {
+    "주가": [{ date: "2026-08-24", value: 50000 }],
+    "PBR": [{ date: "2026-08-24", value: 2.0 }],
+    "주당배당금 (원)": [{ date: "2026-08-24", value: 0 }],
+  };
+  const m = w.getCurrentValuationMetrics({}, weekly, { price: 50000 });
+
+  assert.equal(m.dividendYield, 0);
+  assert.ok(Math.abs(m.pbr - 2.0) < 0.001);
 });
 
 test("_stripBlockBars removes unicode block-bar glyphs but keeps text", () => {
@@ -120,7 +182,7 @@ function loadForQuote() {
     </div>
   </body></html>`, { runScripts: "dangerously", url: "https://app.example.com/" });
   const w = dom.window;
-  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis.js")]) {
+  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis-valuation.js"), read("analysis.js")]) {
     const s = w.document.createElement("script");
     s.textContent = src;
     w.document.body.appendChild(s);
@@ -161,7 +223,7 @@ function loadForAnalyze(chunks) {
   </body></html>`, { runScripts: "dangerously", url: "https://app.example.com/" });
   const w = dom.window;
   w.TextDecoder = TextDecoder; // jsdom window 에는 없음 — Node 전역 주입
-  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis.js")]) {
+  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis-valuation.js"), read("analysis.js")]) {
     const s = w.document.createElement("script");
     s.textContent = src;
     w.document.body.appendChild(s);

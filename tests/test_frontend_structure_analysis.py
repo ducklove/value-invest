@@ -6,13 +6,13 @@ from _frontend_structure import ANALYSIS_SPLIT_FILES, CSS, JS, STATIC, _all_css
 
 
 def test_etf_deep_links_to_eiayn_in_analysis_and_portfolio():
-    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+    valuation = (JS / "analysis-valuation.js").read_text(encoding="utf-8")
     insights = (JS / "portfolio-insights.js").read_text(encoding="utf-8")
 
     # 분석뷰 밸류에이션 그리드: ETF면 외부 카드 합류(우선주/지주사와 동일 패턴).
-    assert "const e = links.etf;" in analysis
-    assert "ETF 상세" in analysis
-    assert "data.preferred || data.holding || data.etf" in analysis
+    assert "const e = links.etf;" in valuation
+    assert "ETF 상세" in valuation
+    assert "data.preferred || data.holding || data.etf" in valuation
     # 포트폴리오 인사이트 모달: ETF 액션 링크(eiayn 새 탭).
     assert "function _etfInfoAction(etf)" in insights
     assert "_renderInsightActionLinks(code, goldGap, holding, etf)" in insights
@@ -35,6 +35,7 @@ def test_index_loads_analysis_split_scripts_in_contract_order():
 def test_analysis_split_files_keep_feature_homes():
     charts = (JS / "analysis-charts.js").read_text(encoding="utf-8")
     filings = (JS / "analysis-filings.js").read_text(encoding="utf-8")
+    valuation = (JS / "analysis-valuation.js").read_text(encoding="utf-8")
     analysis = (JS / "analysis.js").read_text(encoding="utf-8")
 
     # 차트: 주간/연간 그리드, 목표가 오버레이, 차트 모달, 기간 전환.
@@ -50,6 +51,12 @@ def test_analysis_split_files_keep_feature_homes():
     assert "const FILING_REVIEW_GENERATE_TIMEOUT_MS = 10 * 60 * 1000;" in filings
     assert "function renderReportsTable(" in filings
     assert "async function loadWiki(" in filings
+    # 밸류에이션 카드: #coverageNote 그리드 — 지표 계산(주간 우선), 외부/DR 카드.
+    assert "function getCurrentValuationMetrics(" in valuation
+    assert "function getLatestWeeklyBps(" in valuation
+    assert "function renderCurrentValuationSummary(" in valuation
+    assert "function _renderCoverage()" in valuation
+    assert "function _externalValuationCards(" in valuation
     # 본체: 분석 SSE 오케스트레이션, 시세 요약, 위키 Q&A.
     assert "async function analyzeStock(" in analysis
     assert "async function renderResult(" in analysis

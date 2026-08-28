@@ -41,7 +41,7 @@ function buildWindow() {
     </div>
   </body></html>`, { runScripts: "dangerously", url: "https://app.example.com/" });
   const w = dom.window;
-  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis.js")]) {
+  for (const src of [read("utils.js"), read("analysis-charts.js"), read("analysis-filings.js"), read("analysis-valuation.js"), read("analysis.js")]) {
     const s = w.document.createElement("script");
     s.textContent = src;
     w.document.body.appendChild(s);

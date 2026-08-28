@@ -61,10 +61,12 @@ PORTFOLIO_SPLIT_FILES = [
 ]
 
 # Dependencies-first: charts and filings define globals (chart state,
-# allReports, loadWiki, ...) that analysis.js orchestrates at runtime.
+# allReports, loadWiki, ...) that valuation cards and analysis.js use at
+# runtime; valuation defines the #coverageNote card grid analysis.js rerenders.
 ANALYSIS_SPLIT_FILES = [
     "analysis-charts.js",
     "analysis-filings.js",
+    "analysis-valuation.js",
     "analysis.js",
 ]
 

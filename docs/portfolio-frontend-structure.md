@@ -16,28 +16,29 @@
 6. `search.js`: 종목 검색 UI.
 7. `analysis-charts.js`: 주간/연간 가치평가 차트 렌더, 기간 전환, 목표가 오버레이, 차트 모달.
 8. `analysis-filings.js`: DART AI 리뷰 카드/상세, 리포트 테이블, 위키 요약 로딩.
-9. `analysis.js`: 단일 종목 분석 본체 — 검색, 기업 헤더, 개인화, analyze SSE, 위키 Q&A.
-10. `portfolio-store.js`: `PfStore` — 파일 간 공유 포트폴리오 상태의 단일 컨테이너.
-11. `portfolio-shell.js`: 컬럼 표시 설정, 뷰 전환, NPS 탭(nps-tracker iframe) 진입점, 파일 로컬 plumbing.
-12. `portfolio-data.js`: 포트폴리오 API 로딩, 정렬/필터 상태, 실시간 quote row 업데이트.
-13. `portfolio-order.js`: 보유종목 drag/drop 정렬과 저장.
-14. `portfolio-heat.js`: 컬러 모드(일간 등락 히트맵) — 강도 등급, KRX 상/하한가 판정, 등락률 셀 HTML, 요약 스트립. `portfolio-render.js`와 `portfolio-data.js`(WS tick)가 공유하므로 둘보다 먼저 로드된다.
-15. `portfolio-render.js`: 보유종목 테이블/카드 렌더링, 숫자 포맷, sparkline, benchmark 표시.
-16. `portfolio-actions.js`: 그룹/benchmark/편집/삭제/검색/목표가/외부 링크 액션.
-17. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
-18. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
-19. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
-20. `portfolio-reports.js`: 월간/연간 기간 투자 보고서 목록·생성·렌더링. v2 보고서의 매수/매도 기반 `composition_changes` 블록과 v3의 기간 종료 스냅샷(`holdings.end_snapshot`, 기본 접힘)을 보여주고, 바로 아래의 독립 카드 `#pfPeriodPerformanceWrap`에는 저장 여부와 무관하게 NAV에서 계산한 연간 실적 목록(연도 행 클릭 → 월간 펼침)을 그린다.
-21. `portfolio-performance.js`: 심층 분석 탭 shell, 영역지도, 성과 데이터 로딩.
-22. `portfolio-trends-benchmark.js`: NAV 차트 비교지수 선택/캐시, beta·R² 통계와 beta 오버레이.
-23. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화, 공용 차트 헬퍼.
-24. `portfolio-trends-group-weight.js`: 그룹 비중 100% 누적 면적 차트와 drill-down 진입(`_GROUP_WEIGHT_COLORS` 공급).
-25. `portfolio-group-composition.js`: 그룹 구성 추이 drill-down.
-26. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
-27. `portfolio-tag-summary.js`: 태그 요약 UI.
-28. `portfolio-events.js`: document-level delegated event handlers.
-29. `insights.js`: 인사이트 목록 UI.
-30. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
+9. `analysis-valuation.js`: 밸류에이션 요약 카드 그리드(#coverageNote) — PER/PBR/배당 등 지표 계산(주간 시계열 우선), 베타/외부 도구/DR 카드.
+10. `analysis.js`: 단일 종목 분석 본체 — 검색, 기업 헤더, 개인화, analyze SSE, 위키 Q&A.
+11. `portfolio-store.js`: `PfStore` — 파일 간 공유 포트폴리오 상태의 단일 컨테이너.
+12. `portfolio-shell.js`: 컬럼 표시 설정, 뷰 전환, NPS 탭(nps-tracker iframe) 진입점, 파일 로컬 plumbing.
+13. `portfolio-data.js`: 포트폴리오 API 로딩, 정렬/필터 상태, 실시간 quote row 업데이트.
+14. `portfolio-order.js`: 보유종목 drag/drop 정렬과 저장.
+15. `portfolio-heat.js`: 컬러 모드(일간 등락 히트맵) — 강도 등급, KRX 상/하한가 판정, 등락률 셀 HTML, 요약 스트립. `portfolio-render.js`와 `portfolio-data.js`(WS tick)가 공유하므로 둘보다 먼저 로드된다.
+16. `portfolio-render.js`: 보유종목 테이블/카드 렌더링, 숫자 포맷, sparkline, benchmark 표시.
+17. `portfolio-actions.js`: 그룹/benchmark/편집/삭제/검색/목표가/외부 링크 액션.
+18. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
+19. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
+20. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
+21. `portfolio-reports.js`: 월간/연간 기간 투자 보고서 목록·생성·렌더링. v2 보고서의 매수/매도 기반 `composition_changes` 블록과 v3의 기간 종료 스냅샷(`holdings.end_snapshot`, 기본 접힘)을 보여주고, 바로 아래의 독립 카드 `#pfPeriodPerformanceWrap`에는 저장 여부와 무관하게 NAV에서 계산한 연간 실적 목록(연도 행 클릭 → 월간 펼침)을 그린다.
+22. `portfolio-performance.js`: 심층 분석 탭 shell, 영역지도, 성과 데이터 로딩.
+23. `portfolio-trends-benchmark.js`: NAV 차트 비교지수 선택/캐시, beta·R² 통계와 beta 오버레이.
+24. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화, 공용 차트 헬퍼.
+25. `portfolio-trends-group-weight.js`: 그룹 비중 100% 누적 면적 차트와 drill-down 진입(`_GROUP_WEIGHT_COLORS` 공급).
+26. `portfolio-group-composition.js`: 그룹 구성 추이 drill-down.
+27. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
+28. `portfolio-tag-summary.js`: 태그 요약 UI.
+29. `portfolio-events.js`: document-level delegated event handlers.
+30. `insights.js`: 인사이트 목록 UI.
+31. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
 
 ## Legacy Entrypoint
 
