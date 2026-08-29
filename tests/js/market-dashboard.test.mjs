@@ -506,6 +506,39 @@ test("_extRender adds 오늘의 추천 ETF card with realtime daily change and d
   assert.ok(!cards[0].innerHTML.includes("<b>x</b>"));
 });
 
+test("_extRender adds 채권 시황 card: 기준금리 → 커브 → 신용 → 최근 발행", () => {
+  const w = load();
+  const root = w.document.getElementById("externalTools");
+  w._extRender(root, {
+    bondMate: {
+      url: "https://ducklove.github.io/bond-mate/",
+      // BIS CBPOL 연동 이후 정책금리가 주요국까지 채워졌다 — 카드도 이를 먼저 보여준다.
+      usBase: { value: 3.75, change: 0, asOf: "2026-08-28" },
+      krBase: { value: 3, change: 0.25, asOf: "2026-08-27" },
+      usCurveSpreadBp: 37,
+      usCurveInverted: false,
+      krCurveSpreadBp: 48.6,
+      creditSpreadBp: { BBB: 152.4 },
+      latestOffering: { issuer_name: "알파벳(구글)", total_amount: 25e9 },
+    },
+  });
+  const cards = root.querySelectorAll(".ext-card");
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].innerHTML, /채권 시황/);
+  const rows = [...cards[0].querySelectorAll(".ext-row")].map((r) => [
+    r.querySelector(".ext-name").textContent,
+    r.querySelector(".ext-val").textContent,
+  ]);
+  assert.deepEqual(rows, [
+    ["미국 기준금리", "3.75%"],
+    ["한국 기준금리", "3.00%"],
+    ["미국 10Y−2Y", "+37bp"],
+    ["한국 10Y−3Y", "+49bp"],
+    ["BBB 스프레드", "+152bp"],
+    ["최근 발행 · 알파벳(구글)", "$25.0B"],
+  ]);
+});
+
 test("_extRender renders empty when no data", () => {
   const w = load();
   const root = w.document.getElementById("externalTools");

@@ -15,7 +15,7 @@ URLs or server-side environment variables instead of copying their code.
 | `goldGap` | `https://github.com/ducklove/gold_gap` | `../gold_gap` | Links `KRX_GOLD` and `CRYPTO_BTC` portfolio rows to the gold/bitcoin gap dashboard. |
 | `npsTracker` | `https://github.com/ducklove/nps-tracker` | — | Embeds the NPS domestic-equity portfolio dashboard in the NPS tab via iframe and summarizes `current.json` for the 투자정보 insight card. Exposes `baseUrl` only. |
 | `eiayn` | `https://github.com/ducklove/eiayn` | `../eiayn` | Links ETF rows and the daily recommendation card to ETF analysis via `?code=` and summarizes `data/rankings.json`. Visual theme uses `?theme=light|dark`; ETF category filters use `?etf_theme=`. |
-| `bondMate` | `https://github.com/ducklove/bond-mate` | `../bond-mate` | Source of record for the 투자정보 국채·환율 panels: the browser merges its `data/current.json` into the indicator catalog and links out for history. Exposes `baseUrl`/`dataUrl`/`embedUrl` only. |
+| `bondMate` | `https://github.com/ducklove/bond-mate` | `../bond-mate` | Source of record for the 투자정보 국채·환율 panels: the browser merges its `data/current.json` into the indicator catalog and links out for history. The 도구 허브 `/bonds` view also embeds its screens (`?embed=<tab>`) so 기준금리·신용·발행 stay on the original dashboard. Exposes `baseUrl`/`dataUrl`/`embedUrl`/`views` only. |
 | `kisProxy` | `https://github.com/ducklove/kis-proxy` | `../kis-proxy` | Used server-side by `kis_proxy_client.py` through `KIS_PROXY_BASE_URL`. |
 
 > `finance-pi` (`../finance-pi`, Raspberry Pi 데이터레이크 `:8400`)는 위 integration
@@ -60,6 +60,7 @@ URLs or server-side environment variables instead of copying their code.
 - `CRYPTO_BTC` opens `goldGap` with `?asset=bitcoin`.
 - Covered domestic and foreign ETFs open `eiayn` with `?code=<ticker>`.
 - 투자정보 국채·환율 섹션의 "히스토리 ↗" 는 `bondMate` 를 `?tab=government|fx` 로 연다.
+- 도구 허브의 "채권·금리"(`/bonds`) 는 `bondMate` 를 `?embed=<탭>&theme=` 로 iframe 임베드한다 (탭: overview·government·policy·fx·credit·issuance — 서버 `integrations.bondMate.views` 가 목록의 주인).
 
 ## Server-side External Insights
 

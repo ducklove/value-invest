@@ -773,7 +773,7 @@ function trackEvent(name, params = {}) {
         <h2>도구</h2>
         <p>
           핵심 화면(투자정보·종목분석·포트폴리오) 밖에 있는 보조 도구 모음입니다.
-          스크리너·국민연금 대시보드는 바로 쓸 수 있는 기능이고, 인사이트 보드는 아직 참고용 실험 기록장입니다.
+          스크리너·국민연금·채권 대시보드는 바로 쓸 수 있는 기능이고, 인사이트 보드는 아직 참고용 실험 기록장입니다.
         </p>
       </div>
       <div class="lab-grid">
@@ -787,6 +787,12 @@ function trackEvent(name, params = {}) {
           <span class="lab-pill">외부 연동</span>
           <h3>국민연금 포트폴리오</h3>
           <p>국민연금 국내주식 보유 종목과 자산배분 목표 비중을 별도 대시보드(nps-tracker)에서 확인합니다.</p>
+          <strong>열기 →</strong>
+        </a>
+        <a class="lab-card" href="/bonds" onclick="event.preventDefault(); switchView('bonds');">
+          <span class="lab-pill">외부 연동</span>
+          <h3>채권·금리</h3>
+          <p>전 세계 국채 커브·기준금리·환율과 등급별 회사채 스프레드·최근 발행을 별도 대시보드(bond-mate)에서 확인합니다.</p>
           <strong>열기 →</strong>
         </a>
         <a class="lab-card" href="/insights" onclick="event.preventDefault(); switchView('insights');">
@@ -884,6 +890,29 @@ function trackEvent(name, params = {}) {
         <div class="masters-review-controls" id="mastersReviewControls"></div>
         <div class="masters-review-result" id="mastersReviewResult"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- 채권·금리 (도구 허브 하위 화면) — bond-mate 를 화면 단위로 iframe 임베드한다.
+       투자정보 탭은 bond-mate 의 국채·환율 "값"만 병합해 쓰지만(market-bond-mate.js),
+       히스토리·기준금리·신용 스프레드·회사채 발행은 원본 화면이 훨씬 낫다.
+       탭 목록과 임베드 URL 은 서버가 주는 integrations.bondMate(views/embedUrl) 계약. -->
+  <div id="bondsView" style="display:none;">
+    <div class="bonds-page">
+      <div class="lab-inline-banner">
+        <span>외부 연동</span>
+        <strong>전 세계 금리·환율·회사채 대시보드(bond-mate)를 그대로 임베드합니다.</strong>
+        <a href="/labs" onclick="event.preventDefault(); switchView('labs');">도구로 돌아가기</a>
+      </div>
+      <div class="bonds-header">
+        <h2>채권·금리</h2>
+        <div class="bonds-actions">
+          <a class="bonds-open" id="bondsOpenLink" href="#" target="_blank" rel="noopener">새 창 ↗</a>
+          <button class="bonds-refresh" type="button" onclick="loadBondsView({ force: true })">새로고침</button>
+        </div>
+      </div>
+      <div class="bonds-tabs" id="bondsTabs" role="tablist"></div>
+      <div id="bondsContent" class="bonds-embed" role="status" aria-live="polite">채권·금리 대시보드를 불러오는 중...</div>
     </div>
   </div>
 

@@ -190,12 +190,108 @@ function mergeBondMate(catalog, dataMap, snapshot) {
   return { catalog: nextCatalog, dataMap: nextData, merged: true };
 }
 
+// --- 도구 허브의 '채권·금리' 화면 — bond-mate 를 화면 단위로 임베드 ---
+//
+// 투자정보 탭은 bond-mate 의 "값"만 병합해 쓴다(위 mergeBondMate). 하지만
+// 히스토리·기준금리·등급별 신용 스프레드·회사채 발행은 원본 화면이 훨씬
+// 낫고 그쪽이 계속 확장된다 — 그래서 옮겨 그리지 않고 iframe 으로 가져온다.
+// bond-mate 는 `?embed=<탭>` 으로 헤더·탭·푸터를 걷어낸 화면 하나를 준다
+// (bond-mate README 의 임베드 계약, 탭 키는 서버 integrations.bondMate.views).
+
+const BM_VIEW_LABELS = {
+  overview: '개요',
+  government: '국채',
+  policy: '기준금리',
+  fx: '환율',
+  credit: '신용',
+  issuance: '발행',
+};
+// 서버가 views 를 주지 않는 경우의 폴백(= integrations.py 의 기본 목록과 같은 순서).
+const BM_DEFAULT_VIEWS = ['overview', 'government', 'policy', 'fx', 'credit', 'issuance'];
+let _bmEmbedView = 'overview';
+
+/** 임베드로 보여줄 화면 목록 [{key,label}]. 계약의 주인은 서버 config 다. */
+function bondMateEmbedViews() {
+  const cfg = _bmConfig();
+  const views = (cfg && Array.isArray(cfg.views) && cfg.views.length) ? cfg.views : BM_DEFAULT_VIEWS;
+  return views.filter((v) => BM_VIEW_LABELS[v]).map((v) => ({ key: v, label: BM_VIEW_LABELS[v] }));
+}
+
+/** 임베드 URL — 앱 테마를 넘기고, nonce 로 GitHub Pages 캐시의 stale 을 피한다. */
+function bondMateEmbedSrc(view) {
+  const cfg = _bmConfig();
+  const base = bondMateBaseUrl();
+  const embed = (cfg && cfg.embedUrl) || (base ? base + '/?embed=' : '');
+  if (!embed) return '';
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  return embed + encodeURIComponent(view || 'overview') + '&theme=' + theme + '&_=' + Date.now();
+}
+
+function _bmRenderTabs(active) {
+  const wrap = document.getElementById('bondsTabs');
+  if (wrap) {
+    wrap.innerHTML = bondMateEmbedViews().map((v) => {
+      const on = v.key === active;
+      return `<button type="button" class="bonds-tab${on ? ' active' : ''}" role="tab"`
+        + ` aria-selected="${on ? 'true' : 'false'}" data-bm-view="${escapeHtml(v.key)}"`
+        + ` onclick="loadBondsView({ view: '${escapeHtml(v.key)}' })">${escapeHtml(v.label)}</button>`;
+    }).join('');
+  }
+  const link = document.getElementById('bondsOpenLink');
+  const href = bondMateLink(active);
+  if (link && href) link.href = href;
+}
+
+/**
+ * 도구 허브 '채권·금리' 화면을 그린다.
+ *
+ * 재로딩 정책은 국민연금 임베드(loadNpsView)와 같다 — 탭을 다시 열 때마다 새로
+ * 받으면 스크롤 위치가 매번 초기화된다. 최초 1회 + 명시적 새로고침(force) +
+ * 화면 전환(view 변경) 에서만 다시 받는다.
+ */
+function loadBondsView({ force = false, view = null } = {}) {
+  const container = document.getElementById('bondsContent');
+  if (!container) return;
+  const next = (view && BM_VIEW_LABELS[view]) ? view : _bmEmbedView;
+  const changed = next !== _bmEmbedView;
+  _bmEmbedView = next;
+  _bmRenderTabs(next);
+  const existing = container.querySelector('iframe.bonds-frame');
+  if (existing && !force && !changed) return;
+
+  const src = bondMateEmbedSrc(next);
+  if (!src) {
+    container.classList.remove('is-frame');
+    container.textContent = 'bond-mate 대시보드 주소를 찾지 못했습니다.';
+    return;
+  }
+  const iframe = document.createElement('iframe');
+  iframe.src = src;
+  iframe.title = 'bond-mate 채권·금리 대시보드';
+  iframe.loading = 'lazy';
+  iframe.className = 'bonds-frame';
+  iframe.setAttribute('referrerpolicy', 'no-referrer');
+  container.classList.add('is-frame');
+  container.innerHTML = '';
+  container.appendChild(iframe);
+}
+
+/** 테마 토글 시 임베드도 같은 테마로 다시 로드한다(nps 임베드와 같은 처리). */
+function syncBondsFrameTheme() {
+  const ifr = document.querySelector('#bondsContent iframe.bonds-frame');
+  if (ifr) ifr.src = bondMateEmbedSrc(_bmEmbedView);
+}
+
 // jsdom 테스트에서 모듈 단위로 부르기 위해 export (브라우저에서는 무시된다).
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     BM_CODE_ALIASES,
     bondMateBaseUrl,
     bondMateLink,
+    bondMateEmbedViews,
+    bondMateEmbedSrc,
+    loadBondsView,
+    syncBondsFrameTheme,
     loadBondMateSnapshot,
     mergeBondMate,
     _bmQuote,

@@ -1186,6 +1186,14 @@ function _extRender(root, data) {
       `<div class="ext-row"><span class="ext-name">${escapeHtml(name)}</span>`
       + `<span class="ext-val ${cls || 'md-flat'}">${escapeHtml(text)}</span></div>`
     );
+    // 정책금리(기준금리)를 먼저 — bond-mate 가 BIS CBPOL 로 주요국 정책금리를
+    // 채우면서 커브를 읽는 기준점이 됐다. 서버 요약은 미국·한국만 담아 온다.
+    const pushBase = (name, q) => {
+      if (!q || q.value == null || !isFinite(Number(q.value))) return;
+      push(name, Number(q.value).toFixed(2) + '%');
+    };
+    pushBase('미국 기준금리', bm.usBase);
+    pushBase('한국 기준금리', bm.krBase);
     if (bm.usCurveSpreadBp != null) {
       push('미국 10Y−2Y', `${bm.usCurveSpreadBp > 0 ? '+' : ''}${Math.round(bm.usCurveSpreadBp)}bp`,
         bm.usCurveInverted ? 'md-down' : 'md-flat');

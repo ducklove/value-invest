@@ -8,7 +8,7 @@
 // stays as top-level declarations in the owning split file.
 const PF_QUOTE_REFRESH_MS = 60_000;
 // "도구" 허브(labsView)와 그 하위 딥링크 화면들 — switchView 의 상단 탭 활성 표시를 묶는 데 쓰인다.
-const PF_TOOLS_HUB_VIEWS = new Set(['labs', 'nps', 'insights', 'screener', 'masters']);
+const PF_TOOLS_HUB_VIEWS = new Set(['labs', 'nps', 'insights', 'screener', 'masters', 'bonds']);
 // view ↔ URL 경로 매핑. switchView 의 history.pushState(정방향)와 app-main.js 의 최초 진입
 // 라우팅·popstate 복원(역방향)이 이 표 하나를 공유한다 — 표가 두 곳에 따로 있으면 한쪽만
 // 고치고 잊는 사고가 나기 쉽다(예: 새 뷰 추가 시 pushState 는 되는데 새로고침 복원은 안 되는 식).
@@ -21,6 +21,7 @@ const PF_VIEW_PATHS = {
   insights: '/insights',
   screener: '/screener',
   masters: '/masters',
+  bonds: '/bonds',
 };
 const PF_PATH_TO_VIEW = {
   '/investing': 'investing',
@@ -32,6 +33,7 @@ const PF_PATH_TO_VIEW = {
   '/insights': 'insights',
   '/screener': 'screener',
   '/masters': 'masters',
+  '/bonds': 'bonds',
 };
 let _pfPointerGuardUntil = 0;
 const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
@@ -353,6 +355,7 @@ function switchView(view, options = {}) {
   const insightsView = document.getElementById('insightsView');
   const screenerView = document.getElementById('screenerView');
   const mastersView = document.getElementById('mastersView');
+  const bondsView = document.getElementById('bondsView');
   if (investingView) investingView.style.display = view === 'investing' ? 'block' : 'none';
   analysisView.style.display = view === 'analysis' ? 'block' : 'none';
   portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
@@ -361,6 +364,7 @@ function switchView(view, options = {}) {
   if (insightsView) insightsView.style.display = view === 'insights' ? 'block' : 'none';
   if (screenerView) screenerView.style.display = view === 'screener' ? 'block' : 'none';
   if (mastersView) mastersView.style.display = view === 'masters' ? 'block' : 'none';
+  if (bondsView) bondsView.style.display = view === 'bonds' ? 'block' : 'none';
   const activeEl = view === 'investing' ? investingView
                   : view === 'analysis' ? analysisView
                   : view === 'portfolio' ? portfolioView
@@ -368,6 +372,7 @@ function switchView(view, options = {}) {
                   : view === 'insights' ? insightsView
                   : view === 'screener' ? screenerView
                   : view === 'masters' ? mastersView
+                  : view === 'bonds' ? bondsView
                   : npsView;
   if (activeEl) {
     activeEl.classList.remove('fade-in');
@@ -388,6 +393,8 @@ function switchView(view, options = {}) {
     loadScreener();
   } else if (view === 'masters' && typeof loadMasters === 'function') {
     loadMasters();
+  } else if (view === 'bonds' && typeof loadBondsView === 'function') {
+    loadBondsView();
   }
   _updateQuoteSubscriptions();
   // 모바일에서 탭 전환 시 이전 뷰의 스크롤 위치가 남아 본문이 중간에서 시작하는

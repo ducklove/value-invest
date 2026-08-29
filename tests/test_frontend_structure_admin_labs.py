@@ -242,3 +242,47 @@ def test_masters_labs_view_is_wired_as_deep_linkable_panel():
 def test_masters_feature_files_stay_below_maintenance_ceiling():
     lines = (JS / "masters.js").read_text(encoding="utf-8").splitlines()
     assert len(lines) < 1000, f"masters.js grew to {len(lines)} lines; split it before extending"
+
+
+def test_bonds_labs_view_embeds_bond_mate_as_deep_linkable_panel():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    bond_mate = (JS / "market-bond-mate.js").read_text(encoding="utf-8")
+    search = (JS / "search.js").read_text(encoding="utf-8")
+    static_routes = (ROOT / "core" / "static_routes.py").read_text(encoding="utf-8")
+    styles = _all_css()
+
+    # 뷰 컨테이너는 마지막 Labs 뷰(mastersView) 다음에 산다.
+    assert 'id="bondsView"' in html
+    assert html.find('id="mastersView"') < html.find('id="bondsView"')
+    # Labs 허브(/labs) 카드로 진입한다(국민연금 임베드 카드와 같은 패턴).
+    assert 'href="/bonds"' in html
+    assert "채권·금리" in html
+    # 직접 URL(/bonds) 새로고침이 SPA 로 라우트된다.
+    assert '"/bonds"' in static_routes
+
+    # switchView 가 bonds 뷰를 토글하고 진입 시 loadBondsView 를 부른다.
+    assert "bondsView" in shell
+    assert "view === 'bonds'" in shell
+    assert "bonds: '/bonds'" in shell
+    assert "'/bonds': 'bonds'" in shell
+    # 도구 허브 하위 화면 — 상단 탭은 "도구"가 활성으로 남는다.
+    assert "'screener', 'masters', 'bonds'" in shell
+
+    # 기능 홈은 bond-mate 연동 파일 하나 — 임베드 URL·탭·재로딩 정책이 여기 있다.
+    assert "function loadBondsView(" in bond_mate
+    assert "function bondMateEmbedViews(" in bond_mate
+    assert "function bondMateEmbedSrc(" in bond_mate
+    # 탭 키·파라미터는 bond-mate 쪽 계약(?embed=<탭>&theme=)이라 임의로 바꾸지 않는다.
+    assert "'/?embed='" in bond_mate
+    assert "'&theme=' + theme" in bond_mate
+    for view in ("overview", "government", "policy", "fx", "credit", "issuance"):
+        assert view in bond_mate
+    # 테마 토글 시 임베드도 함께 갱신된다(nps 임베드와 같은 처리).
+    assert "function syncBondsFrameTheme(" in bond_mate
+    assert "syncBondsFrameTheme()" in search
+
+    # 스타일: 페이지/탭/임베드 프레임.
+    assert ".bonds-page" in styles
+    assert ".bonds-tab" in styles
+    assert ".bonds-frame" in styles

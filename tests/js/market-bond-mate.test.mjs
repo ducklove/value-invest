@@ -190,3 +190,88 @@ test("같은 코드끼리는 지워지지 않는다", () => {
   assert.equal(merged.US10Y.label, "미국10년물");
   assert.equal(mergedData.US10Y.value, "4.75", "로컬 라이브 값이 유지돼야 한다");
 });
+
+// --- 도구 허브 '채권·금리' 임베드 (loadBondsView) ---
+//
+// 값 병합과 달리 이 화면은 bond-mate 원본을 그대로 iframe 으로 가져온다.
+// 계약은 세 가지 — 탭 목록은 서버 config(views), URL 은 ?embed=<탭>&theme=,
+// 재로딩은 최초 1회 + force + 탭 전환에서만(스크롤 보존).
+
+const BOND_MATE_EMBED_CONFIG = {
+  bondMate: {
+    baseUrl: "https://ducklove.github.io/bond-mate",
+    dataUrl: "https://ducklove.github.io/bond-mate/data/current.json",
+    embedUrl: "https://ducklove.github.io/bond-mate/?embed=",
+    views: ["overview", "government", "policy", "fx", "credit", "issuance"],
+  },
+};
+
+function loadWithBondsView(integrations) {
+  const win = load(integrations);
+  win.document.body.innerHTML = '<a id="bondsOpenLink" href="#"></a>'
+    + '<div class="bonds-tabs" id="bondsTabs"></div>'
+    + '<div id="bondsContent" class="bonds-embed"></div>';
+  return win;
+}
+
+test("임베드 탭 목록은 서버 config 의 views 계약을 따른다", () => {
+  const win = loadWithBondsView(BOND_MATE_EMBED_CONFIG);
+  assert.deepEqual(win.bondMateEmbedViews().map((v) => v.key),
+    ["overview", "government", "policy", "fx", "credit", "issuance"]);
+  assert.deepEqual(win.bondMateEmbedViews().map((v) => v.label),
+    ["개요", "국채", "기준금리", "환율", "신용", "발행"]);
+
+  // 서버가 모르는 키를 주면 무시한다(라벨 없는 탭은 그리지 않는다).
+  const partial = loadWithBondsView({ bondMate: { baseUrl: "https://x/", views: ["credit", "nope"] } });
+  assert.deepEqual(partial.bondMateEmbedViews().map((v) => v.key), ["credit"]);
+});
+
+test("첫 진입은 개요 화면을 임베드하고 탭·새 창 링크를 그린다", () => {
+  const win = loadWithBondsView(BOND_MATE_EMBED_CONFIG);
+  win.loadBondsView();
+
+  const frame = win.document.querySelector("#bondsContent iframe.bonds-frame");
+  assert.ok(frame, "iframe 이 만들어져야 한다");
+  assert.ok(frame.src.startsWith("https://ducklove.github.io/bond-mate/?embed=overview&theme=light"),
+    `unexpected src: ${frame.src}`);
+  assert.equal(win.document.querySelectorAll("#bondsTabs .bonds-tab").length, 6);
+  assert.equal(win.document.querySelector("#bondsTabs .bonds-tab.active").textContent, "개요");
+  assert.equal(win.document.getElementById("bondsOpenLink").href,
+    "https://ducklove.github.io/bond-mate/?tab=overview");
+});
+
+test("같은 탭 재진입은 iframe 을 재사용하고, 탭 전환·새로고침만 다시 받는다", () => {
+  const win = loadWithBondsView(BOND_MATE_EMBED_CONFIG);
+  win.loadBondsView();
+  const first = win.document.querySelector("#bondsContent iframe.bonds-frame");
+
+  win.loadBondsView();   // 탭 재방문 — 스크롤 보존을 위해 그대로 둔다
+  assert.equal(win.document.querySelector("#bondsContent iframe.bonds-frame"), first);
+
+  win.loadBondsView({ view: "credit" });
+  const second = win.document.querySelector("#bondsContent iframe.bonds-frame");
+  assert.notEqual(second, first, "탭을 바꾸면 새로 받아야 한다");
+  assert.ok(second.src.includes("?embed=credit&"), `unexpected src: ${second.src}`);
+  assert.equal(win.document.querySelector("#bondsTabs .bonds-tab.active").textContent, "신용");
+
+  win.loadBondsView({ force: true });
+  assert.notEqual(win.document.querySelector("#bondsContent iframe.bonds-frame"), second);
+});
+
+test("테마를 바꾸면 임베드도 같은 테마로 다시 로드된다", () => {
+  const win = loadWithBondsView(BOND_MATE_EMBED_CONFIG);
+  win.loadBondsView({ view: "policy" });
+  win.document.documentElement.setAttribute("data-theme", "dark");
+  win.syncBondsFrameTheme();
+
+  const frame = win.document.querySelector("#bondsContent iframe.bonds-frame");
+  assert.ok(frame.src.includes("?embed=policy&theme=dark"), `unexpected src: ${frame.src}`);
+});
+
+test("bond-mate 설정이 없으면 안내만 남기고 iframe 을 만들지 않는다", () => {
+  const win = loadWithBondsView({});
+  win.loadBondsView();
+
+  assert.equal(win.document.querySelector("#bondsContent iframe.bonds-frame"), null);
+  assert.match(win.document.getElementById("bondsContent").textContent, /찾지 못했습니다/);
+});
