@@ -12,7 +12,7 @@ from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from repositories import user_settings as user_settings_repo
-from services.portfolio import fx
+from services.portfolio import fx, snapshot_attribution
 from services.portfolio import runtime_quotes as portfolio_quotes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -171,6 +171,7 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
             "avg_price_krw": avg_price_krw,
             "cost_basis": qty * avg_price_krw,
             "priced_from_fallback": used_fallback,
+            **await snapshot_attribution.metadata(item, stale=used_fallback, snap_date=snap_date, today=_today_kst().isoformat()),
         })
         await asyncio.sleep(0.25)  # rate limit
     if missing:

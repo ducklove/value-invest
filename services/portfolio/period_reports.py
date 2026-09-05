@@ -17,11 +17,11 @@ from typing import Any
 
 from repositories import portfolio_reports as reports_repo
 from repositories import snapshots as snapshots_repo
-from services.portfolio import foreign, identifiers, risk
+from services.portfolio import attribution, foreign, identifiers, risk
 from services.portfolio.time_windows import today_kst_date
 
 # v3: holdings.end_snapshot(기간 종료 시점 전체 보유 스냅샷) 추가.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 VALID_PERIOD_TYPES = {"monthly", "annual"}
 MONTHLY_KEY_RE = re.compile(r"^\d{4}-\d{2}$")
 ANNUAL_KEY_RE = re.compile(r"^\d{4}$")
@@ -1018,6 +1018,12 @@ def render_report_markdown(report: dict[str, Any]) -> str:
                 f"(비중 {_fmt_pct(row.get('weight_pct'))}, 손익 {_fmt_pct(row.get('gain_pct'))})"
             )
 
+    breakdown = report.get("attribution") or {}
+    if breakdown.get("available"):
+        lines.extend(["", "## 수익 원인 분해", f"- 기준일: {breakdown['baseline_date']} → {breakdown['ending_date']}"])
+        for component in breakdown["components"]:
+            lines.append(f"- {component['label']}: {_fmt_krw(component['amount'])}")
+        lines.extend(f"- {note}" for note in breakdown.get("notes", []))
     notes = report.get("review_notes") or []
     if notes:
         lines.extend(["", "## 검토 메모"])
@@ -1120,6 +1126,7 @@ async def build_period_report(
         ),
     }
     report["review_notes"] = _build_notes(report)
+    report["attribution"] = await attribution.build_attribution(google_sub, period["start_date"], period["end_date"])
     source_payload = {
         "period": report["period"],
         "summary_inputs": {"baseline": baseline, "end": end_snapshot, "points": points},
@@ -1128,6 +1135,7 @@ async def build_period_report(
         "end_rows": end_rows,
         "composition_changes": composition_changes,
         "schema_version": SCHEMA_VERSION,
+        "attribution": report["attribution"],
     }
     report["source_hash"] = _source_hash(source_payload)
     return report

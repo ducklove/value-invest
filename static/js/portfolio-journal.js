@@ -118,6 +118,7 @@ function _pfJournalCardHtml(entry, { showStock = false } = {}) {
     </div>
     <div class="pf-journal-prices">${_pfJournalPriceLine(entry)} ${_pfJournalMetaLine(entry)}</div>
     ${_pfJournalNoteHtml(entry)}
+    <button type="button" class="pf-mini-btn" onclick="pfThesisFromJournal(${id})">투자 논거로 추적</button>
   </div>`;
 }
 

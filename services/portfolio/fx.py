@@ -144,6 +144,23 @@ async def fx_rate_for_currency(currency: str | None) -> float:
     return rate
 
 
+def cached_rate_for_currency(currency: str) -> float | None:
+    """정산 메타데이터용 신선한 캐시 읽기. 추가 HTTP 요청을 만들지 않는다."""
+    if currency == "KRW":
+        return 1.0
+    code = currencies.CURRENCY_TO_FX_CODE.get(currency)
+    if not code:
+        return None
+    daily = _fx_daily_cache.get(code)
+    rates = _fx_cache.get("rates") or {}
+    value = daily.get("price") if daily and not daily.get("_stale") else rates.get(code)
+    try:
+        rate = float(value) / currencies.FX_UNIT.get(code, 1)
+        return rate if math.isfinite(rate) and rate > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_price_currency(currency: str | None, *, default: str = "KRW") -> str:
     normalized = (currency or default or "KRW").strip().upper()
     return normalized if normalized in SUPPORTED_PRICE_CURRENCIES else (default or "KRW")

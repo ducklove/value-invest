@@ -4,6 +4,7 @@ import asyncio
 import os
 import tempfile
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -18,9 +19,10 @@ import auth_service
 from core.config import PROJECT_ROOT, AppSettings
 from core.static_routes import register_static_routes
 from deps import get_current_user
-from repositories import bootstrap, db, users
+from repositories import bootstrap, db, financial, snapshots, users
 from repositories import portfolio as holdings
-from routes import auth, portfolio
+from routes import auth, investment_insights, portfolio
+from services.portfolio.time_windows import today_kst_date
 
 
 @asynccontextmanager
@@ -30,6 +32,13 @@ async def lifespan(app):
         await bootstrap.init_db()
         user = await users.create_local_user(email="browser@example.com", name="브라우저 검증", password_hash=auth_service.hash_password("browser-test-password"))
         await holdings.save_portfolio_item(user["google_sub"], "005930", "삼성전자", 10, 70000)
+        today = today_kst_date()
+        await financial.save_financial_data("005930", [{"year": today.year-1, "revenue": 100, "operating_profit": 9}])
+        for age, price in ((5, 70000), (1, 75000)):
+            day = (today-timedelta(days=age)).isoformat()
+            await snapshots.save_snapshot(user["google_sub"], day, price*10, 700000, price/70, 700)
+            await snapshots.save_stock_snapshots(user["google_sub"], day, [{"stock_code": "005930", "quantity": 10,
+                "market_value": price*10, "unit_price": price, "currency": "KRW", "fx_rate": 1}])
         try:
             yield
         finally:
@@ -38,6 +47,7 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(auth.router)
+app.include_router(investment_insights.router)
 
 
 @app.get("/healthz")

@@ -55,6 +55,7 @@ async def test_fetch_total_value_forces_rest_for_korean_stocks():
         "avg_price_krw": 1000,
         "cost_basis": 2000,
         "priced_from_fallback": False,
+        "currency": "KRW", "fx_rate": 1.0,
     }]
 
 
@@ -98,6 +99,7 @@ async def test_fetch_total_value_converts_avg_price_currency_to_krw():
         "avg_price_krw": 140000,
         "cost_basis": 280000,
         "priced_from_fallback": False,
+        "currency": None, "fx_rate": None,
     }]
 
 

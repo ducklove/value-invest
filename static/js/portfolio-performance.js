@@ -70,6 +70,8 @@ function pfSwitchTab(tab) {
   if (tab !== 'performance') _performanceLoadSeq += 1;
   if (tab === 'performance') {
     loadPerformanceData();
+    if (typeof pfLoadAttribution === 'function') pfLoadAttribution();
+    if (typeof pfLoadTheses === 'function') pfLoadTheses();
     _loadAiModels();
     // 기간 투자 보고서 카드도 성과 탭에서만 lazy 로드(portfolio-reports.js).
     if (typeof pfLoadPeriodReportsPanel === 'function') pfLoadPeriodReportsPanel();

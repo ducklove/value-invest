@@ -596,8 +596,8 @@ async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
             await db.executemany(
                 """
                 INSERT OR REPLACE INTO portfolio_stock_snapshots
-                (google_sub, date, stock_code, market_value, group_name, quantity, unit_price, avg_price_krw, cost_basis, priced_from_fallback)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (google_sub, date, stock_code, market_value, group_name, quantity, unit_price, avg_price_krw, cost_basis, priced_from_fallback, currency, fx_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -611,6 +611,8 @@ async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
                         it.get("avg_price_krw"),
                         it.get("cost_basis"),
                         1 if it.get("priced_from_fallback") else 0,
+                        it.get("currency"),
+                        it.get("fx_rate"),
                     )
                     for it in items
                 ],

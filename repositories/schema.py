@@ -754,11 +754,54 @@ CREATE TABLE IF NOT EXISTS household_retirement_profiles (
 async def create_core_schema(db: aiosqlite.Connection) -> None:
     """Create the core application tables and indexes if they do not exist."""
     await db.executescript(CORE_SCHEMA_SQL)
+    await db.executescript(INVESTMENT_INSIGHTS_SCHEMA_SQL)
+
+
+INVESTMENT_INSIGHTS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS investment_theses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    journal_entry_id INTEGER REFERENCES investment_journal(id) ON DELETE SET NULL,
+    stock_code TEXT NOT NULL,
+    thesis TEXT NOT NULL,
+    invalidation TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    threshold REAL,
+    deadline TEXT,
+    evidence_url TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_theses_user ON investment_theses(google_sub, archived);
+CREATE TABLE IF NOT EXISTS investment_thesis_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thesis_id INTEGER NOT NULL REFERENCES investment_theses(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    checked_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_thesis_checks ON investment_thesis_checks(thesis_id, id DESC);
+CREATE TABLE IF NOT EXISTS portfolio_income_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    stock_code TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL CHECK(kind IN ('dividend', 'fee')),
+    amount_krw REAL NOT NULL CHECK(amount_krw > 0),
+    memo TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_income_events_user_date ON portfolio_income_events(google_sub, date);
+"""
 
 # Columns that were added after the original CREATE TABLE definitions. Keeping
 # the list here makes init_db's migration surface explicit while the larger
 # table-creation script is still being split out of cache.py.
 CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
+    ("portfolio_stock_snapshots", "currency", "TEXT"),
+    ("portfolio_stock_snapshots", "fx_rate", "REAL"),
     ("corp_codes", "modify_date", "TEXT"),
     ("financial_data", "report_date", "TEXT"),
     ("market_data", "dividend_per_share", "REAL"),

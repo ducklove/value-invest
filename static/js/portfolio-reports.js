@@ -250,6 +250,7 @@ function _pfRenderPeriodReport(saved) {
     ${warnHtml}
     <div class="pf-risk-grid pf-period-report-grid">${cards.join('')}</div>
     <div class="pf-period-report-sections">
+      ${report.attribution && typeof pfAttributionHtml === 'function' ? `<section><h4>수익 원인 분해</h4>${pfAttributionHtml(report.attribution)}</section>` : ''}
       ${_pfEndSnapshotSection(holdings.end_snapshot)}
       <section>
         <h4>매수·편입 구성 변화</h4>

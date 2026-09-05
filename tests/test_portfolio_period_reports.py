@@ -72,7 +72,7 @@ async def test_monthly_period_report_builds_change_snapshot(temp_db):
     with patch.object(period_reports, "today_kst_date", return_value=date(2026, 7, 1)):
         report = await period_reports.build_period_report("u1", "monthly", "2026-06")
 
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     assert report["period"]["type"] == "monthly"
     assert report["period"]["key"] == "2026-06"
     assert report["period"]["baseline_date"] == "2026-05-31"

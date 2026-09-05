@@ -18,6 +18,7 @@ import external_tools
 from repositories import action_reviews as reviews_repo
 from repositories import portfolio as portfolio_repo
 from services.portfolio import rebalance as rebalance_service
+from services.portfolio import theses
 
 KST = timezone(timedelta(hours=9))
 
@@ -153,6 +154,7 @@ async def build_action_board(google_sub: str) -> dict:
     signals_by_code = await external_tools.fetch_portfolio_signals(codes)
 
     actions = _rebalance_actions(rebalance_report) + _signal_actions(holdings, signals_by_code)
+    actions += await theses.actions(google_sub)
     reviews = await reviews_repo.list_reviews(google_sub, [item["key"] for item in actions])
     actions = _sort_actions(_merge_review_state(actions, reviews))
 

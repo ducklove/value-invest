@@ -264,10 +264,11 @@ async function pfActionBoardSetStatus(actionKey, status) {
       const badge = e.target.closest && e.target.closest('.pf-linked-signal-badge');
       if (badge) e.stopPropagation();
       const open = e.target.closest && e.target.closest('[data-pf-action-open]');
-      if (open && open.getAttribute('href') === '#pfRebalanceWrap') {
+      if (open && ['#pfRebalanceWrap', '#pfThesisWrap'].includes(open.getAttribute('href'))) {
         e.preventDefault();
+        if (open.getAttribute('href') === '#pfThesisWrap' && document.body.classList.contains('pf-mobile-simple') && typeof pfToggleSimpleMode === 'function') pfToggleSimpleMode();
         if (typeof pfSwitchTab === 'function') pfSwitchTab('performance');
-        document.getElementById('pfRebalanceWrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.querySelector(open.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
       const btn = e.target.closest && e.target.closest('[data-pf-action-key][data-pf-action-status]');

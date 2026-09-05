@@ -439,6 +439,8 @@ function trackEvent(name, params = {}) {
       <nav class="pf-deep-anchors" aria-label="심층 분석 섹션 바로가기">
         <a class="pf-deep-anchor-link" href="#pfNavWrap">NAV</a>
         <a class="pf-deep-anchor-link" href="#pfRiskWrap">리스크</a>
+        <a class="pf-deep-anchor-link" href="#pfAttributionWrap">수익 분해</a>
+        <a class="pf-deep-anchor-link" href="#pfThesisWrap">투자 논거</a>
         <a class="pf-deep-anchor-link" href="#pfPeriodReportWrap">보고서</a>
         <a class="pf-deep-anchor-link" href="#pfPeriodPerformanceWrap">연간실적</a>
         <a class="pf-deep-anchor-link" href="#pfRebalanceWrap">리밸런싱</a>
@@ -476,6 +478,44 @@ function trackEvent(name, params = {}) {
           <div class="pf-risk-empty">성과 탭을 열면 리스크 지표를 불러옵니다.</div>
         </div>
       </div>
+
+      <section class="pf-nav-chart-wrap pf-analysis-card" id="pfAttributionWrap" aria-labelledby="pfAttributionTitle">
+        <div class="pf-nav-header"><div><h3 id="pfAttributionTitle">수익 원인 분해</h3><span class="pf-chart-note">가격 · 환율 · 배당 · 순입출금과 미분류 금액</span></div></div>
+        <form class="pf-insight-controls" onsubmit="event.preventDefault(); pfLoadAttribution()">
+          <label>시작일 <input type="date" id="pfAttributionStart" required></label>
+          <label>종료일 <input type="date" id="pfAttributionEnd" required></label>
+          <button class="pf-mini-btn" type="submit">분해 조회</button>
+        </form>
+        <div id="pfAttributionContent" aria-live="polite">심층 분석을 열면 수익 원인을 불러옵니다.</div>
+        <details class="pf-insight-method"><summary>실제 배당·비용 분류 기록</summary>
+          <p class="pf-insight-notice">이미 포트폴리오 잔고에 반영한 세후 배당 또는 수수료·세금을 기록하세요. 이 입력은 분류용이며 현금 잔고·입출금 내역을 변경하지 않습니다. 같은 금액을 중복 입력하지 마세요.</p>
+          <form class="pf-insight-form" id="pfIncomeForm" onsubmit="pfAddIncome(event)">
+            <label>잔고 반영일 <input name="date" type="date" required></label>
+            <label>분류 <select name="kind"><option value="dividend">배당 (세후 수령액)</option><option value="fee">수수료·세금</option></select></label>
+            <label>종목 코드 (선택) <input name="stock_code" maxlength="24" placeholder="005930 또는 AAPL"></label>
+            <label>실제 원화 금액 <input name="amount_krw" type="number" min="0.01" max="1000000000000" step="0.01" required></label>
+            <label>메모 (선택) <input name="memo" maxlength="500"></label>
+            <button type="submit" class="pf-mini-btn">분류 기록</button>
+          </form><div id="pfIncomeEvents"></div>
+        </details>
+      </section>
+
+      <section class="pf-nav-chart-wrap pf-analysis-card" id="pfThesisWrap" aria-labelledby="pfThesisTitle">
+        <div class="pf-nav-header"><div><h3 id="pfThesisTitle">투자 논거 · 반증 조건</h3><span class="pf-chart-note">저장된 연간 재무자료 기준 · 조건 충족은 재검토 신호</span></div><button type="button" class="pf-mini-btn" onclick="pfLoadTheses()">다시 점검</button></div>
+        <details id="pfThesisEditor"><summary>투자 논거 등록·수정</summary>
+          <form class="pf-insight-form" id="pfThesisForm" onsubmit="pfSubmitThesis(event)">
+            <label>종목 코드 <input name="stock_code" maxlength="24" required placeholder="005930 또는 AAPL"></label>
+            <label class="pf-insight-wide">투자 논거 <textarea name="thesis" rows="2" maxlength="2000" required placeholder="이 종목을 보유하는 이유"></textarea></label>
+            <label class="pf-insight-wide">반증 조건 <textarea name="invalidation" rows="2" maxlength="2000" required placeholder="어떤 변화가 생기면 이 판단을 다시 검토할까요?"></textarea></label>
+            <label>자동 점검 지표 <select name="metric"><option value="manual">직접 확인</option><option value="revenue_growth_pct">매출 전년 대비 증감률 (%)</option><option value="operating_margin_pct">영업이익률 (%)</option><option value="debt_ratio_pct">부채비율 (%)</option></select></label>
+            <label>반증 조건이 되는 비교 <select name="operator"><option value="lt">기준값 미만</option><option value="lte">기준값 이하</option><option value="gt">기준값 초과</option><option value="gte">기준값 이상</option></select></label>
+            <label>기준값 (%) <input name="threshold" type="number" step="any" placeholder="직접 확인이면 생략"></label>
+            <label>검토 기한 (선택) <input name="deadline" type="date"></label>
+            <label class="pf-insight-wide">근거 원문 링크 (선택) <input name="evidence_url" type="url" maxlength="2000" placeholder="https://"></label>
+            <div class="pf-thesis-buttons"><button type="submit" class="pf-mini-btn">논거 저장</button><button type="button" class="pf-mini-btn" onclick="pfEditThesis()">새 논거로 초기화</button></div>
+          </form>
+        </details><div id="pfThesisContent" aria-live="polite">심층 분석을 열면 투자 논거를 점검합니다.</div>
+      </section>
 
       <div class="pf-nav-chart-wrap pf-analysis-card pf-period-report-card" id="pfPeriodReportWrap">
         <div class="pf-nav-header pf-period-report-head">
@@ -1138,6 +1178,8 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-insights.js" defer></script>
 <script src="./js/portfolio-groups-market.js" defer></script>
 <script src="./js/portfolio-ai.js" defer></script>
+<script src="./js/portfolio-attribution.js" defer></script>
+<script src="./js/portfolio-theses.js" defer></script>
 <script src="./js/portfolio-reports.js" defer></script>
 <script src="./js/portfolio-performance.js" defer></script>
 <script src="./js/portfolio-risk.js" defer></script>

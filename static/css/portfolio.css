@@ -3527,3 +3527,33 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
   justify-content: space-between;
   font-size: 12px;
 }
+/* 투자 논거와 수익 원인 분해 */
+.pf-insight-controls,.pf-thesis-buttons,.pf-thesis-links { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0; }
+.pf-insight-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+.pf-insight-form label,.pf-insight-controls label { display:flex; flex-direction:column; gap:5px; font-size:12px; }
+.pf-insight-form input,.pf-insight-form select,.pf-insight-form textarea,.pf-insight-controls input { font:inherit; color:inherit; background:var(--input-bg,#fff); border:1px solid var(--border,#bbb); border-radius:6px; padding:8px; min-width:0; }
+.pf-insight-wide { grid-column:1/-1; }
+.pf-insight-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:18px 0; }
+.pf-insight-summary strong { display:block; font-size:21px; margin-top:6px; }
+.pf-attribution-row { display:grid; grid-template-columns:140px minmax(30px,1fr) 145px; gap:12px; align-items:center; margin:12px 0; font-size:13px; }
+.pf-attribution-row strong { text-align:right; font-variant-numeric:tabular-nums; }
+.pf-attribution-track { background:var(--border,#ddd); height:12px; border-radius:3px; overflow:hidden; }
+.pf-attribution-track i { display:block; height:100%; background:var(--up,#b91c1c); }
+.pf-attribution-track i.negative { background:var(--down,#1d4ed8); }
+.pf-insight-notice { padding:10px; border-left:3px solid #b45309; font-size:12px; line-height:1.65; }
+.pf-insight-method { margin-top:18px; font-size:13px; }
+.pf-insight-method summary,#pfThesisEditor summary { cursor:pointer; padding:10px 0; }
+.pf-insight-table-scroll { overflow-x:auto; }
+.pf-insight-table { width:100%; border-collapse:collapse; font-size:12px; }
+.pf-insight-table td,.pf-insight-table th { padding:9px; text-align:right; border-bottom:1px solid var(--border,#ddd); white-space:nowrap; }
+.pf-insight-table th:first-child { text-align:left; }
+.pf-thesis-card { border:1px solid var(--border,#bbb); border-radius:8px; padding:16px; margin-top:14px; }
+.pf-thesis-card.breached { border-color:#b45309; }
+.pf-thesis-text { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.65; }
+.pf-thesis-history { border-top:1px solid var(--border,#ccc); padding-top:12px; margin-top:12px; }
+.pf-income-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--border,#ddd); font-size:12px; }
+@media(max-width:600px) {
+  .pf-insight-form { grid-template-columns:minmax(0,1fr); }
+  .pf-attribution-row { grid-template-columns:110px minmax(15px,1fr) 105px; gap:6px; font-size:11px; }
+  .pf-insight-summary strong { font-size:17px; }
+}

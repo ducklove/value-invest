@@ -75,3 +75,7 @@ defer로 로드한다. CDN의 가변 버전 대신 저장소에 포함한 고정
 `static/admin.html`은 inline `apiFetch` → `admin.js`(부트스트랩·AI 설정·공용 헬퍼) →
 `admin-observability.js`(관측성 패널·라이브 갱신·수동 잡) →
 `admin-linked-projects.js`(연결 프로젝트 config·외국/우선주 배당 관리) 순서로 로드한다.
+
+## 투자 판단 도구
+
+`portfolio-attribution.js`(수익 분해·배당 분류)와 `portfolio-theses.js`(논거 CRUD·변경 이력)를 `portfolio-reports.js` 앞에 로드한다. 심층 분석 탭에서 각각 독립 요청으로 불러오며, 기간 보고서는 같은 수익 분해 렌더러를 재사용한다. 투자일지의 연결 버튼과 액션 보드의 논거 항목은 해당 카드로 이동한다. 상세 계약은 [investment-insights.md](investment-insights.md)에 정리한다.
