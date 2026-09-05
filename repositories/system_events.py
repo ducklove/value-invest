@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def insert_system_event(
@@ -23,16 +23,15 @@ async def insert_system_event(
     """Append a structured event row. `details` should be a JSON string —
     callers (via observability.record_event) serialize their payload once
     to avoid a redundant json.loads at read time."""
-    db = await get_db()
-    if ts is None:
-        ts = datetime.now().isoformat(timespec="seconds")
-    cursor = await db.execute(
-        """INSERT INTO system_events (ts, level, source, kind, stock_code, details)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (ts, level, source, kind, stock_code, details),
-    )
-    await db.commit()
-    return cursor.lastrowid
+    async with transaction() as db:
+        if ts is None:
+            ts = datetime.now().isoformat(timespec="seconds")
+        cursor = await db.execute(
+            """INSERT INTO system_events (ts, level, source, kind, stock_code, details)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (ts, level, source, kind, stock_code, details),
+        )
+        return cursor.lastrowid
 
 
 async def get_system_events(
@@ -93,29 +92,28 @@ async def prune_system_events(max_age_days: int = 30, max_rows: int = 100_000) -
     """Best-effort cleanup: drop events older than `max_age_days`, then if
     still above `max_rows` trim the oldest until under the cap. Returns
     rows deleted (0 if table was already small)."""
-    db = await get_db()
-    # Age-based trim.
-    cursor = await db.execute(
-        "DELETE FROM system_events WHERE ts < datetime('now', ?)",
-        (f"-{int(max_age_days)} days",),
-    )
-    age_deleted = cursor.rowcount or 0
-    # Row-count trim as a safety net. Count only if there's risk of being
-    # over — skip when obviously fine.
-    cursor = await db.execute("SELECT COUNT(*) AS n FROM system_events")
-    row = await cursor.fetchone()
-    total = int(row["n"]) if row else 0
-    overflow_deleted = 0
-    if total > max_rows:
-        excess = total - max_rows
+    async with transaction() as db:
+        # Age-based trim.
         cursor = await db.execute(
-            "DELETE FROM system_events WHERE id IN "
-            "(SELECT id FROM system_events ORDER BY ts ASC, id ASC LIMIT ?)",
-            (excess,),
+            "DELETE FROM system_events WHERE ts < datetime('now', ?)",
+            (f"-{int(max_age_days)} days",),
         )
-        overflow_deleted = cursor.rowcount or 0
-    await db.commit()
-    return age_deleted + overflow_deleted
+        age_deleted = cursor.rowcount or 0
+        # Row-count trim as a safety net. Count only if there's risk of being
+        # over — skip when obviously fine.
+        cursor = await db.execute("SELECT COUNT(*) AS n FROM system_events")
+        row = await cursor.fetchone()
+        total = int(row["n"]) if row else 0
+        overflow_deleted = 0
+        if total > max_rows:
+            excess = total - max_rows
+            cursor = await db.execute(
+                "DELETE FROM system_events WHERE id IN "
+                "(SELECT id FROM system_events ORDER BY ts ASC, id ASC LIMIT ?)",
+                (excess,),
+            )
+            overflow_deleted = cursor.rowcount or 0
+        return age_deleted + overflow_deleted
 
 
 async def summarize_http_metrics(since_iso: str, *, limit: int = 100) -> list[dict]:

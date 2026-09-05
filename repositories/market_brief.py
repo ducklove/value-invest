@@ -1,6 +1,6 @@
 """Per-user daily market brief cache.
 
-Extracted verbatim from cache.py; re-exported as ``cache.<fn>``.
+테이블별 접근을 소유한다. 공유 연결의 쓰기는 transaction()을 사용한다.
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def get_daily_market_brief(
@@ -58,49 +58,48 @@ async def save_daily_market_brief(
     tokens_out: int | None = None,
     cost_usd: float | None = None,
 ) -> dict:
-    db = await get_db()
-    now = datetime.now().isoformat()
-    await db.execute(
-        """
-        INSERT INTO daily_market_briefs
-            (google_sub, brief_date, source_hash, payload_json, markdown,
-             model, tokens_in, tokens_out, cost_usd, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(google_sub, brief_date) DO UPDATE SET
-            source_hash = excluded.source_hash,
-            payload_json = excluded.payload_json,
-            markdown = excluded.markdown,
-            model = excluded.model,
-            tokens_in = excluded.tokens_in,
-            tokens_out = excluded.tokens_out,
-            cost_usd = excluded.cost_usd,
-            updated_at = excluded.updated_at
-        """,
-        (
-            google_sub,
-            brief_date,
-            source_hash,
-            json.dumps(payload, ensure_ascii=False),
-            markdown,
-            model,
-            int(tokens_in or 0) if tokens_in is not None else None,
-            int(tokens_out or 0) if tokens_out is not None else None,
-            float(cost_usd or 0) if cost_usd is not None else None,
-            now,
-            now,
-        ),
-    )
-    await db.commit()
-    return await get_daily_market_brief(google_sub, brief_date) or {
-        "google_sub": google_sub,
-        "brief_date": brief_date,
-        "source_hash": source_hash,
-        "payload": payload,
-        "markdown": markdown,
-        "model": model,
-        "tokens_in": tokens_in,
-        "tokens_out": tokens_out,
-        "cost_usd": cost_usd,
-        "created_at": now,
-        "updated_at": now,
-    }
+    async with transaction() as db:
+        now = datetime.now().isoformat()
+        await db.execute(
+            """
+            INSERT INTO daily_market_briefs
+                (google_sub, brief_date, source_hash, payload_json, markdown,
+                 model, tokens_in, tokens_out, cost_usd, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(google_sub, brief_date) DO UPDATE SET
+                source_hash = excluded.source_hash,
+                payload_json = excluded.payload_json,
+                markdown = excluded.markdown,
+                model = excluded.model,
+                tokens_in = excluded.tokens_in,
+                tokens_out = excluded.tokens_out,
+                cost_usd = excluded.cost_usd,
+                updated_at = excluded.updated_at
+            """,
+            (
+                google_sub,
+                brief_date,
+                source_hash,
+                json.dumps(payload, ensure_ascii=False),
+                markdown,
+                model,
+                int(tokens_in or 0) if tokens_in is not None else None,
+                int(tokens_out or 0) if tokens_out is not None else None,
+                float(cost_usd or 0) if cost_usd is not None else None,
+                now,
+                now,
+            ),
+        )
+        return await get_daily_market_brief(google_sub, brief_date) or {
+            "google_sub": google_sub,
+            "brief_date": brief_date,
+            "source_hash": source_hash,
+            "payload": payload,
+            "markdown": markdown,
+            "model": model,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "cost_usd": cost_usd,
+            "created_at": now,
+            "updated_at": now,
+        }

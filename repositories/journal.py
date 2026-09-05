@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -73,34 +73,34 @@ async def insert_entry(
     target_price_at_entry: float | None = None,
 ) -> dict:
     """단건 작성 — 작성 시점 스냅샷 포함. 저장된 행을 그대로 돌려준다."""
-    if entry_type not in ENTRY_TYPES:
-        raise ValueError(f"entry_type 은 {ENTRY_TYPES} 중 하나여야 합니다: {entry_type!r}")
-    db = await get_db()
-    now = _now()
-    cursor = await db.execute(
-        """
-        INSERT INTO investment_journal
-            (google_sub, stock_code, stock_name, entry_type, note,
-             price_at_entry, quantity, target_price_at_entry, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            google_sub,
-            stock_code,
-            stock_name,
-            entry_type,
-            note,
-            price_at_entry,
-            quantity,
-            target_price_at_entry,
-            now,
-            now,
-        ),
-    )
-    await db.commit()
-    entry = await get_entry(google_sub, cursor.lastrowid)
-    assert entry is not None
-    return entry
+    async with transaction():
+        if entry_type not in ENTRY_TYPES:
+            raise ValueError(f"entry_type 은 {ENTRY_TYPES} 중 하나여야 합니다: {entry_type!r}")
+        db = await get_db()
+        now = _now()
+        cursor = await db.execute(
+            """
+            INSERT INTO investment_journal
+                (google_sub, stock_code, stock_name, entry_type, note,
+                 price_at_entry, quantity, target_price_at_entry, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                google_sub,
+                stock_code,
+                stock_name,
+                entry_type,
+                note,
+                price_at_entry,
+                quantity,
+                target_price_at_entry,
+                now,
+                now,
+            ),
+        )
+        entry = await get_entry(google_sub, cursor.lastrowid)
+        assert entry is not None
+        return entry
 
 
 async def get_holding_snapshot(google_sub: str, stock_code: str) -> dict | None:
@@ -124,21 +124,19 @@ async def get_holding_snapshot(google_sub: str, stock_code: str) -> dict | None:
 
 async def update_note(google_sub: str, entry_id: int, note: str) -> bool:
     """note 만 수정 가능 — 스냅샷(가격/목표가/유형)은 복기 기록이라 불변."""
-    db = await get_db()
-    cursor = await db.execute(
-        "UPDATE investment_journal SET note = ?, updated_at = ?"
-        " WHERE google_sub = ? AND id = ?",
-        (note, _now(), google_sub, entry_id),
-    )
-    await db.commit()
-    return cursor.rowcount > 0
+    async with transaction() as db:
+        cursor = await db.execute(
+            "UPDATE investment_journal SET note = ?, updated_at = ?"
+            " WHERE google_sub = ? AND id = ?",
+            (note, _now(), google_sub, entry_id),
+        )
+        return cursor.rowcount > 0
 
 
 async def delete_entry(google_sub: str, entry_id: int) -> bool:
-    db = await get_db()
-    cursor = await db.execute(
-        "DELETE FROM investment_journal WHERE google_sub = ? AND id = ?",
-        (google_sub, entry_id),
-    )
-    await db.commit()
-    return cursor.rowcount > 0
+    async with transaction() as db:
+        cursor = await db.execute(
+            "DELETE FROM investment_journal WHERE google_sub = ? AND id = ?",
+            (google_sub, entry_id),
+        )
+        return cursor.rowcount > 0

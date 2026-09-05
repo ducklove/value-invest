@@ -1,6 +1,6 @@
 """Community insight-post feed (CRUD + visibility).
 
-Extracted verbatim from cache.py; re-exported as ``cache.<fn>``.
+테이블별 접근을 소유한다. 공유 연결의 쓰기는 transaction()을 사용한다.
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def create_insight_post(
@@ -22,32 +22,31 @@ async def create_insight_post(
     tags: list[str] | None = None,
     visibility: str = "public",
 ) -> dict:
-    db = await get_db()
-    now = datetime.now().isoformat()
-    await db.execute(
-        """
-        INSERT INTO insight_posts
-            (google_sub, title, insight_md, source_type, result_summary_json, result_payload_json, tags_json, visibility, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            google_sub,
-            title,
-            insight_md,
-            source_type,
-            json.dumps(result_summary or {}, ensure_ascii=False),
-            json.dumps(result_payload, ensure_ascii=False) if result_payload is not None else None,
-            json.dumps(tags or [], ensure_ascii=False),
-            visibility,
-            now,
-            now,
-        ),
-    )
-    await db.commit()
-    cursor = await db.execute("SELECT last_insert_rowid() AS id")
-    post_id = int((await cursor.fetchone())["id"])
-    post = await get_insight_post(post_id, viewer_google_sub=google_sub)
-    return post or {"id": post_id}
+    async with transaction() as db:
+        now = datetime.now().isoformat()
+        await db.execute(
+            """
+            INSERT INTO insight_posts
+                (google_sub, title, insight_md, source_type, result_summary_json, result_payload_json, tags_json, visibility, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                google_sub,
+                title,
+                insight_md,
+                source_type,
+                json.dumps(result_summary or {}, ensure_ascii=False),
+                json.dumps(result_payload, ensure_ascii=False) if result_payload is not None else None,
+                json.dumps(tags or [], ensure_ascii=False),
+                visibility,
+                now,
+                now,
+            ),
+        )
+        cursor = await db.execute("SELECT last_insert_rowid() AS id")
+        post_id = int((await cursor.fetchone())["id"])
+        post = await get_insight_post(post_id, viewer_google_sub=google_sub)
+        return post or {"id": post_id}
 
 
 def _parse_json_field(value: str | None, fallback):
@@ -130,13 +129,12 @@ async def get_insight_post(post_id: int, *, viewer_google_sub: str | None = None
 
 
 async def delete_insight_post(post_id: int, *, google_sub: str, is_admin: bool = False) -> bool:
-    db = await get_db()
-    if is_admin:
-        cursor = await db.execute("DELETE FROM insight_posts WHERE id = ?", (post_id,))
-    else:
-        cursor = await db.execute(
-            "DELETE FROM insight_posts WHERE id = ? AND google_sub = ?",
-            (post_id, google_sub),
-        )
-    await db.commit()
-    return cursor.rowcount > 0
+    async with transaction() as db:
+        if is_admin:
+            cursor = await db.execute("DELETE FROM insight_posts WHERE id = ?", (post_id,))
+        else:
+            cursor = await db.execute(
+                "DELETE FROM insight_posts WHERE id = ? AND google_sub = ?",
+                (post_id, google_sub),
+            )
+        return cursor.rowcount > 0

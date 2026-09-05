@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import re
 from dataclasses import dataclass
 
@@ -26,8 +27,8 @@ def parse_target_input(value: object) -> TargetInput:
     numeric_candidate = raw.replace(",", "")
     if _NUMBER_RE.fullmatch(numeric_candidate):
         price = float(numeric_candidate)
-        if price < 0:
-            raise ValueError("목표가는 0 이상이어야 합니다.")
+        if not math.isfinite(price) or not 0 <= price <= 1_000_000_000_000:
+            raise ValueError("목표가는 0 이상 1조 이하의 유한한 숫자여야 합니다.")
         return TargetInput(price=price, formula=None)
 
     formula = normalize_target_formula(raw)
@@ -68,7 +69,7 @@ def evaluate_target_formula(formula: str, variables: dict[str, float | int | Non
         value = float(value)
     except (TypeError, ValueError):
         return None
-    return value if value >= 0 else None
+    return value if math.isfinite(value) and 0 <= value <= 1_000_000_000_000 else None
 
 
 def _validate_node(node: ast.AST) -> None:

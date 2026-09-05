@@ -4,14 +4,17 @@
 
 작은 UI/데이터 수정이 포트폴리오 로딩, 실시간 시세, 배치 스냅샷, 관리자 기능까지 흔드는 현재 구조를 끊어낸다. 이번 리팩토링은 기능을 한 번에 갈아엎는 작업이 아니라, 운영 안정성을 유지하면서 결합도를 낮추는 단계적 재설계다.
 
-## 현재 핵심 문제
+## 현재 상태 (2026-09-05)
 
-- `main.py`가 환경 로딩, 앱 생성, CORS, 라우터 연결, 라이프사이클 작업, 정적 파일 서빙까지 모두 담당한다.
-- `cache.py`는 DB 스키마, 마이그레이션, repository, 일부 비즈니스 규칙을 모두 가진 단일 허브다.
-- `routes/portfolio.py`는 API 라우터, 외부 시세, 배당, 목표가, AI 인사이트, 벤치마크, 현금흐름까지 섞여 있다.
-- 프론트엔드는 파일이 나뉘었지만 전역 상태(`portfolioItems`, `pfBenchmarkQuotes`, `pfNavHistory`)에 강하게 의존한다.
-- 배치 작업과 웹 앱이 같은 모듈을 직접 import하며, 일부 설정은 import 시점에 고정된다.
-- ~~운영 설정이 `.kis.env`, `keys.txt`, systemd `Environment`, 코드 기본값에 분산되어 있다.~~ → 2026-08-12 `.env` 단일화 완료.
+- 앱 조립은 `core.app_factory`, DB는 `repositories`로 분리했고 `cache.py`는 삭제됐다.
+- 시세 구현은 `services/stock_quotes.py`와 `services/portfolio/quote_service.py`가 소유한다.
+- 공유 DB 연결의 요청 쓰기는 모두 `transaction()`으로 직렬화한다. 초기 스키마 부트스트랩과
+  별도 연결을 사용하는 현금흐름·스냅샷·전체 교체는 각 연결에서 원자성을 보장한다.
+- 포트폴리오 공유 상태는 `PfStore`로 통합했다. 최초 URL 화면은 부가 데이터 로딩보다 먼저 연다.
+- 입력 모델이 유한수·범위·날짜·불리언을 검증한다. 환율이 없거나 만료되면 환산을 보류한다.
+- 해시 고정 Python 환경, 정적 라이브러리 자체 제공, 배포 실패 주입 테스트와 Chromium 검증을 도입했다.
+- 남은 구조 개선은 변경이 잦은 기능부터 수행한다. 파일 길이만을 기준으로 분할하거나 전체
+  프레임워크·DB를 교체하지 않는다. 광역 예외는 외부 장애 처리와 내부 결함을 구분하며 점진적으로 교체한다.
 
 ## 목표 구조
 
@@ -59,16 +62,16 @@ flowchart TD
 - `services/portfolio/benchmarks.py`: 기본 벤치마크, 벤치마크 표시명, 지표 등락률 변환, quote cache 분리 완료.
 - `services/portfolio/time_windows.py`: 20시 결산 기준 Today window, intraday baseline timestamp 분리 완료.
 - `services/portfolio/dividends.py`: 배당 워밍업 대상 선정, 우선주 본주 동시 예열, TTL/running 중복 방지 규칙 분리 완료.
-- `services/portfolio/runtime_quotes.py`: 배치/wiki/외국배당 코드가 `routes.portfolio` private 함수에 직접 의존하지 않도록 quote provider seam 추가 완료. 실제 구현은 아직 route runtime에 있으므로 다음 단계에서 `QuoteService`로 이동 필요.
+- `services/portfolio/runtime_quotes.py`: 배치/wiki/외국배당 코드가 HTTP 라우터를 역참조하지 않는 provider 경계. 실제 구현도 `quote_service.py`로 이동 완료.
 - `services/stock_quotes.py`: 현재가의 단일 진입점 완료 — 국내 주식에 더해 해외 주식·특수자산(현금/금/암호화폐)은 `quote_service`가 주입한 외부 fetcher로, 국내 다건은 `get_bulk_quote_snapshots`(네이버 벌크 1회 호출)로 같은 캐시를 공유한다. `Stock(code, current_price, previous_close, volume, created_at)` 모델, 1회 조회(`get_stock`/`getStock`), 지속 구독(`get_stock_cont`/`getStockCont`), 내부 캐시, WS 우선/REST fallback을 이 모듈에 모았다. API/배치의 현재가 조회는 `stock_price.fetch_quote_snapshot`/`fetch_bulk_quotes_kr`을 직접 호출하지 않고 이 service를 거친다(테스트가 경계 강제). 폴백 정책은 모듈 docstring에 명문화.
-- `cache.add_cashflow_and_sync_cash`, `cache.delete_cashflow_and_sync_cash`: 현금흐름과 `CASH_KRW` 잔액 갱신을 단일 transaction으로 묶는 1차 DB 경계 정리 완료.
+- `repositories.snapshots.add_cashflow_and_sync_cash`, `delete_cashflow_and_sync_cash`: 현금흐름과 `CASH_KRW` 잔액을 별도 연결의 단일 트랜잭션으로 갱신한다.
 
 위 "다음 후보"였던 항목들은 모두 완료됐다:
 
 - `services/stock_quotes.py` 해외·특수자산 확장 + 국내 벌크 경로 흡수 (2026-06-11).
 - `services/portfolio/names.py`, `targets.py`(+`target_resolver.py`/`target_metrics.py`), `history.py` 분리 완료.
 
-남은 것: `routes/portfolio.py`는 1,195줄로 목표(1,000줄 미만)에 아직 못 미친다 — 다음 추출 후보를 정할 때 갱신할 것.
+입력 계약은 `domain/portfolio_inputs.py`로 추출했다. 다음 분리는 변경 빈도와 실제 결합도를 기준으로 정한다.
 
 ### 4. DB 계층 정리
 

@@ -62,159 +62,133 @@ wait_for_healthz() {
 }
 
 cd "$APP_DIR"
-
 log "Fetching latest from origin/master"
 git fetch --prune origin
 OLD_SHA="$(git rev-parse HEAD)"
-git reset --hard origin/master
-NEW_SHA="$(git rev-parse HEAD)"
+NEW_SHA="$(git rev-parse origin/master)"
+STATE_DIR="$APP_DIR/.deploy-state/$(date +%s)-$$"
+mkdir -p "$STATE_DIR/units"
+chmod 700 "$STATE_DIR"
+OLD_VENV="$(readlink "$APP_DIR/.venv-current" || true)"
+[[ ! -f .env ]] || cp -p .env "$STATE_DIR/env"
 
-if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
-  log "No new commits ($NEW_SHA). Restarting $SERVICE so the process matches the checkout."
-  sudo /bin/systemctl restart "$SERVICE"
-  wait_for_healthz
-  exit 0
-fi
+# 설치된 유닛과 타이머 상태를 보존한다. 코드만 되돌려서는 재시작 실패를 복구할 수 없다.
+for src in "${REPO_UNITS[@]}"; do
+  unit="$(basename "$src")"
+  if [[ -f "$UNIT_DST/$unit" ]]; then
+    cp -p "$UNIT_DST/$unit" "$STATE_DIR/units/$unit"
+  fi
+  if [[ "$unit" == *.timer ]]; then
+    sudo /bin/systemctl is-enabled "$unit" >"$STATE_DIR/$unit.enabled" 2>/dev/null || true
+    sudo /bin/systemctl is-active "$unit" >"$STATE_DIR/$unit.active" 2>/dev/null || true
+  fi
+done
+MUTATED_UNITS=()
+RUNTIME_CHANGED=0
+
+rollback() {
+  failure="${1:-1}"
+  trap - ERR
+  set +e
+  log "Deploy failed — rolling back to $OLD_SHA"
+  cd "$APP_DIR"
+  git reset --hard "$OLD_SHA"
+  if [[ -n "$OLD_VENV" ]]; then
+    ln -sfn "$OLD_VENV" "$APP_DIR/.venv-current.rollback"
+    mv -Tf "$APP_DIR/.venv-current.rollback" "$APP_DIR/.venv-current"
+  else
+    rm -f "$APP_DIR/.venv-current"
+  fi
+  if [[ -f "$STATE_DIR/env" ]]; then cp -p "$STATE_DIR/env" .env; fi
+  for unit in "${MUTATED_UNITS[@]}"; do
+    if [[ -f "$STATE_DIR/units/$unit" ]]; then
+      sudo cp "$STATE_DIR/units/$unit" "$UNIT_DST/$unit"
+    else
+      sudo /bin/systemctl disable --now "$unit" 2>/dev/null
+      sudo rm -f "$UNIT_DST/$unit"
+    fi
+  done
+  if (( ${#MUTATED_UNITS[@]} > 0 )); then
+    sudo /bin/systemctl daemon-reload
+    for unit in "${MUTATED_UNITS[@]}"; do
+      [[ "$unit" == *.timer ]] || continue
+      if grep -qx enabled "$STATE_DIR/$unit.enabled"; then
+        sudo /bin/systemctl enable "$unit"
+      else
+        sudo /bin/systemctl disable "$unit"
+      fi
+      if grep -qx active "$STATE_DIR/$unit.active"; then
+        sudo /bin/systemctl restart "$unit"
+      else
+        sudo /bin/systemctl stop "$unit"
+      fi
+    done
+  fi
+  if (( RUNTIME_CHANGED )); then
+    sudo /bin/systemctl restart "$SERVICE"
+    wait_for_healthz || log "Rollback health check failed — manual intervention required"
+  fi
+  exit "$failure"
+}
+trap 'rollback $?' ERR
 
 log "Deploying $OLD_SHA -> $NEW_SHA"
-git --no-pager log --oneline "$OLD_SHA..$NEW_SHA"
+STAGED_DIR="$STATE_DIR/source"
+mkdir -p "$STAGED_DIR"
+git archive "$NEW_SHA" | tar -x -C "$STAGED_DIR"
+cd "$STAGED_DIR"
 
-CHANGED_FILES="$(git diff --name-only "$OLD_SHA" "$NEW_SHA")"
-
-# Roll the checkout back to OLD_SHA if anything below fails, so the running
-# service keeps matching what's on disk if it restarts for any reason.
-rollback() {
-  log "Deploy failed — rolling back to $OLD_SHA"
-  git reset --hard "$OLD_SHA" >/dev/null
-}
-trap rollback ERR
-
-# pip flags — Raspberry Pi OS Bookworm enforces PEP 668, so we need
-# --break-system-packages to install into the user site where the running
-# service (system python3) already picks deps up from.
-PIP_FLAGS=(--user --break-system-packages)
-
-# --- Python deps (only if requirements changed) -----------------------------
-if grep -qE '^requirements(-dev)?\.txt$' <<<"$CHANGED_FILES"; then
-  log "requirements changed — installing"
-  python3 -m pip install "${PIP_FLAGS[@]}" --upgrade -r requirements.txt
-  # Log resolved versions so drift between machines/days is visible in CI.
-  log "installed versions:"
-  python3 -m pip list 2>/dev/null | grep -iE '^(fastapi|uvicorn|aiosqlite|httpx|beautifulsoup4|yfinance|google-auth|python-dotenv|websockets)\b' || true
+# 운영 site-packages를 수정하지 않는다. 검사와 서비스가 동일한 해시 고정 환경을 쓴다.
+NEW_VENV="$APP_DIR/.venvs/$NEW_SHA"
+if [[ ! -f "$NEW_VENV/.installed" ]]; then
+  python3 -m venv "$NEW_VENV"
+  "$NEW_VENV/bin/python" -m pip install --quiet --require-hashes -r requirements-dev.lock
+  touch "$NEW_VENV/.installed"
 fi
+log "Running Python gates"
+"$NEW_VENV/bin/python" -m ruff check .
+"$NEW_VENV/bin/python" -m pytest -q
 
-# --- Lint -------------------------------------------------------------------
-# Blocking like the tests below. The ruleset lives in pyproject.toml and is
-# intentionally conservative (real defects, not style churn); widen it there.
-log "Installing dev dependencies"
-python3 -m pip install "${PIP_FLAGS[@]}" --quiet -r requirements-dev.txt
-log "Running ruff"
-python3 -m ruff check .
-
-# --- Tests ------------------------------------------------------------------
-# Blocking: a test failure aborts the deploy via the ERR trap, which rolls
-# the checkout back to OLD_SHA. The previous non-blocking behaviour was a
-# stopgap while the `_conn` singleton leak in the test fixtures made 32
-# tests spuriously fail; that's been fixed.
-log "Running tests"
-python3 -m pytest -q
-
-# --- JS tests ----------------------------------------------------------------
-# Blocking, exactly like pytest: the jsdom behaviour tests are the growing
-# replacement for the Python string-presence checks, so a red run must stop
-# the deploy. A runner without node is a broken gate, not a pass — fail the
-# deploy (checkout rolls back via the ERR trap; the running service is
-# untouched). Escape hatch for a deliberate skip: SKIP_JS_TESTS=1.
 if [[ "${SKIP_JS_TESTS:-0}" == "1" ]]; then
   log "SKIP_JS_TESTS=1 — JS tests skipped by explicit request."
 elif command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-  if [[ ! -d node_modules ]] || grep -qE '^package(-lock)?\.json$' <<<"$CHANGED_FILES"; then
-    log "Installing JS dev dependencies (npm ci)"
-    npm ci --no-audit --no-fund
-  fi
-  log "Running JS tests"
+  npm ci --no-audit --no-fund
   npm test
 else
-  log "ERROR: node/npm not found on runner — JS test gate cannot run."
-  log "Install node (e.g. apt install nodejs npm) or set SKIP_JS_TESTS=1 to bypass once."
-  # `exit` bypasses the ERR trap, so roll the checkout back explicitly.
-  rollback
-  exit 1
+  log "ERROR: node/npm missing — JS gate cannot run"
+  rollback 1
 fi
 
-# Past this point, rolling the checkout back would desync from a restarted
-# service, so clear the trap. The health check below has its own explicit
-# rollback path instead.
-trap - ERR
-
-# --- Retire units no longer maintained in-repo ------------------------------
-# Deleting a .timer/.service from the repo doesn't remove an already-installed,
-# enabled copy on the host. Explicitly stop+disable+delete retired units so a
-# stale timer can't keep POSTing a route that no longer exists (e.g. the NPS
-# snapshot timer after the nps-tracker split). Idempotent: a no-op once gone.
-RETIRED_UNITS=(
-  "nps-snapshot.timer"
-  "nps-snapshot.service"
-)
-RETIRED_ANY=0
-for dead in "${RETIRED_UNITS[@]}"; do
-  if [[ -f "$UNIT_DST/$dead" ]]; then
-    log "Retiring unit: $dead"
-    sudo /bin/systemctl disable --now "$dead" 2>/dev/null || true
-    sudo rm -f "$UNIT_DST/$dead"
-    RETIRED_ANY=1
-  fi
-done
-(( RETIRED_ANY )) && sudo /bin/systemctl daemon-reload
-
-# --- Config consolidation ---------------------------------------------------
-# The app reads `.env` only. Fold any leftover .env.<profile>/.kis.env/keys.txt
-# into it BEFORE the unit sync and restart below, so the service never comes up
-# with secrets that stopped being loaded. No-op once nothing legacy remains.
+cd "$APP_DIR"
+git reset --hard "$NEW_SHA"
 bash deploy/migrate_env_to_single_file.sh
-
-# --- systemd unit sync ------------------------------------------------------
-UNITS_TO_RELOAD=()
 for src in "${REPO_UNITS[@]}"; do
   [[ -f "$src" ]] || continue
-  dst="$UNIT_DST/$(basename "$src")"
-  if ! sudo cmp -s "$src" "$dst" 2>/dev/null; then
-    log "Unit changed: $(basename "$src")"
-    sudo cp "$src" "$dst"
-    UNITS_TO_RELOAD+=("$(basename "$src")")
+  unit="$(basename "$src")"
+  if ! sudo cmp -s "$src" "$UNIT_DST/$unit" 2>/dev/null; then
+    MUTATED_UNITS+=("$unit")
+    RUNTIME_CHANGED=1
+    sudo cp "$src" "$UNIT_DST/$unit"
   fi
 done
-
-if (( ${#UNITS_TO_RELOAD[@]} > 0 )); then
-  log "daemon-reload"
+if (( ${#MUTATED_UNITS[@]} > 0 )); then
   sudo /bin/systemctl daemon-reload
-  for unit in "${UNITS_TO_RELOAD[@]}"; do
-    # Re-enable timers so changed schedules take effect
+  for unit in "${MUTATED_UNITS[@]}"; do
     if [[ "$unit" == *.timer ]]; then
       sudo /bin/systemctl enable --now "$unit"
     fi
   done
 fi
 
-# --- Restart main app service ----------------------------------------------
-log "Restarting $SERVICE"
+# 환경 선택은 원자적으로 바꾼다. 실패하면 이전 유닛/환경/코드로 함께 복구한다.
+ln -sfn "$NEW_VENV" "$APP_DIR/.venv-current.next"
+mv -Tf "$APP_DIR/.venv-current.next" "$APP_DIR/.venv-current"
+RUNTIME_CHANGED=1
 sudo /bin/systemctl restart "$SERVICE"
+wait_for_healthz
+curl -fsSk --max-time 10 "${HEALTH_URL%/healthz}/readyz" >/dev/null
+trap - ERR
 
-# --- Health check -----------------------------------------------------------
-# Blocking: if the new code doesn't come up healthy, roll the checkout back
-# to OLD_SHA and restart so the service returns to the last good state
-# instead of staying down. pip deps upgraded above are left in place — the
-# version ranges that satisfied OLD_SHA still apply, and downgrading live
-# site-packages mid-incident is riskier than leaving them.
-if ! wait_for_healthz; then
-  log "Healthz failed on $NEW_SHA — rolling back to $OLD_SHA and restarting"
-  git reset --hard "$OLD_SHA"
-  sudo /bin/systemctl restart "$SERVICE"
-  wait_for_healthz || log "Healthz still failing after rollback — manual intervention required"
-  exit 1
-fi
-
-# --- One-time repairs -------------------------------------------------------
-bash deploy/repairs/run_one_time_repairs.sh
-
+# 데이터 보정은 되돌릴 수 있는 코드 배포와 별개다. 실패 시 새 서비스는 유지한다.
+PATH="$NEW_VENV/bin:$PATH" bash deploy/repairs/run_one_time_repairs.sh
 log "Deploy complete: $NEW_SHA"

@@ -407,6 +407,9 @@ class InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict("os.environ", {}, clear=True), \
              patch("services.data_quality.run_all_checks", AsyncMock(return_value=fake)):
             out = await internal_route.run_data_quality_check(request)
+        import json
+        self.assertEqual(out.status_code, 200)
+        out = json.loads(out.body)
         self.assertTrue(out["ok"])
         self.assertEqual(out["counts"], fake["counts"])
         self.assertEqual(out["results"], fake["results"])

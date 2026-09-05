@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def upsert_foreign_dividends_auto(rows: list[dict]) -> int:
@@ -23,31 +23,31 @@ async def upsert_foreign_dividends_auto(rows: list[dict]) -> int:
         "dps_krw": 1320.0,
     }, ...]
     """
-    if not rows:
-        return 0
-    now = datetime.now().isoformat(timespec="seconds")
-    db = await get_db()
-    written = 0
-    for r in rows:
-        code = (r.get("stock_code") or "").strip()
-        if not code:
-            continue
-        await db.execute(
-            """INSERT INTO foreign_dividends
-               (stock_code, dps_native, currency, dps_krw, source, manual_note, fetched_at)
-               VALUES (?, ?, ?, ?, 'yfinance', NULL, ?)
-               ON CONFLICT(stock_code) DO UPDATE SET
-                   dps_native = excluded.dps_native,
-                   currency   = excluded.currency,
-                   dps_krw    = excluded.dps_krw,
-                   source     = 'yfinance',
-                   fetched_at = excluded.fetched_at
-               WHERE foreign_dividends.source != 'manual'""",
-            (code, r.get("dps_native"), r.get("currency"), r.get("dps_krw"), now),
-        )
-        written += 1
-    await db.commit()
-    return written
+    async with transaction():
+        if not rows:
+            return 0
+        now = datetime.now().isoformat(timespec="seconds")
+        db = await get_db()
+        written = 0
+        for r in rows:
+            code = (r.get("stock_code") or "").strip()
+            if not code:
+                continue
+            await db.execute(
+                """INSERT INTO foreign_dividends
+                   (stock_code, dps_native, currency, dps_krw, source, manual_note, fetched_at)
+                   VALUES (?, ?, ?, ?, 'yfinance', NULL, ?)
+                   ON CONFLICT(stock_code) DO UPDATE SET
+                       dps_native = excluded.dps_native,
+                       currency   = excluded.currency,
+                       dps_krw    = excluded.dps_krw,
+                       source     = 'yfinance',
+                       fetched_at = excluded.fetched_at
+                   WHERE foreign_dividends.source != 'manual'""",
+                (code, r.get("dps_native"), r.get("currency"), r.get("dps_krw"), now),
+            )
+            written += 1
+        return written
 
 
 async def upsert_foreign_dividend_manual(
@@ -58,41 +58,41 @@ async def upsert_foreign_dividend_manual(
     """Admin-entered override. Unconditionally overwrites whatever's there
     (yfinance value or previous manual). Doesn't track native currency
     because the admin enters the KRW-equivalent directly — simpler UI."""
-    code = (stock_code or "").strip()
-    if not code:
-        raise ValueError("stock_code is required")
-    now = datetime.now().isoformat(timespec="seconds")
-    db = await get_db()
-    await db.execute(
-        """INSERT INTO foreign_dividends
-           (stock_code, dps_native, currency, dps_krw, source, manual_note, fetched_at)
-           VALUES (?, NULL, 'KRW', ?, 'manual', ?, ?)
-           ON CONFLICT(stock_code) DO UPDATE SET
-               dps_native  = NULL,
-               currency    = 'KRW',
-               dps_krw     = excluded.dps_krw,
-               source      = 'manual',
-               manual_note = excluded.manual_note,
-               fetched_at  = excluded.fetched_at""",
-        (code, float(dps_krw), note, now),
-    )
-    await db.commit()
+    async with transaction():
+        code = (stock_code or "").strip()
+        if not code:
+            raise ValueError("stock_code is required")
+        now = datetime.now().isoformat(timespec="seconds")
+        db = await get_db()
+        await db.execute(
+            """INSERT INTO foreign_dividends
+               (stock_code, dps_native, currency, dps_krw, source, manual_note, fetched_at)
+               VALUES (?, NULL, 'KRW', ?, 'manual', ?, ?)
+               ON CONFLICT(stock_code) DO UPDATE SET
+                   dps_native  = NULL,
+                   currency    = 'KRW',
+                   dps_krw     = excluded.dps_krw,
+                   source      = 'manual',
+                   manual_note = excluded.manual_note,
+                   fetched_at  = excluded.fetched_at""",
+            (code, float(dps_krw), note, now),
+        )
 
 
 async def delete_foreign_dividend(stock_code: str) -> bool:
     """Remove a row entirely — used both for "clear this override" (so
     the next auto refresh can repopulate) and for cleanup of stocks no
     longer in any portfolio. Returns True if a row was removed."""
-    code = (stock_code or "").strip()
-    if not code:
-        return False
-    db = await get_db()
-    cursor = await db.execute(
-        "DELETE FROM foreign_dividends WHERE stock_code = ?",
-        (code,),
-    )
-    await db.commit()
-    return (cursor.rowcount or 0) > 0
+    async with transaction():
+        code = (stock_code or "").strip()
+        if not code:
+            return False
+        db = await get_db()
+        cursor = await db.execute(
+            "DELETE FROM foreign_dividends WHERE stock_code = ?",
+            (code,),
+        )
+        return (cursor.rowcount or 0) > 0
 
 
 async def list_foreign_dividends() -> list[dict]:

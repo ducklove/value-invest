@@ -1,6 +1,6 @@
 """Analysis meta + snapshot cache (per stock).
 
-Extracted verbatim from cache.py; re-exported as ``cache.<fn>``.
+테이블별 접근을 소유한다. 공유 연결의 쓰기는 transaction()을 사용한다.
 """
 
 from __future__ import annotations
@@ -9,43 +9,41 @@ import json
 from datetime import datetime
 
 from cache_layer import CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def save_analysis_meta(stock_code: str, corp_name: str):
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT payload_json FROM analysis_meta WHERE stock_code = ?",
-        (stock_code,),
-    )
-    row = await cursor.fetchone()
-    await db.execute(
-        "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
-        (
-            stock_code,
-            corp_name,
-            datetime.now().isoformat(),
-            row["payload_json"] if row else None,
-        ),
-    )
-    await db.commit()
+    async with transaction() as db:
+        cursor = await db.execute(
+            "SELECT payload_json FROM analysis_meta WHERE stock_code = ?",
+            (stock_code,),
+        )
+        row = await cursor.fetchone()
+        await db.execute(
+            "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+            (
+                stock_code,
+                corp_name,
+                datetime.now().isoformat(),
+                row["payload_json"] if row else None,
+            ),
+        )
 
 
 async def save_analysis_snapshot(stock_code: str, corp_name: str, payload: dict):
-    db = await get_db()
-    analyzed_at = payload.get("analyzed_at") or datetime.now().isoformat()
-    snapshot = dict(payload)
-    snapshot["analyzed_at"] = analyzed_at
-    await db.execute(
-        "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
-        (
-            stock_code,
-            corp_name,
-            analyzed_at,
-            json.dumps(snapshot, ensure_ascii=False),
-        ),
-    )
-    await db.commit()
+    async with transaction() as db:
+        analyzed_at = payload.get("analyzed_at") or datetime.now().isoformat()
+        snapshot = dict(payload)
+        snapshot["analyzed_at"] = analyzed_at
+        await db.execute(
+            "INSERT OR REPLACE INTO analysis_meta (stock_code, corp_name, analyzed_at, payload_json) VALUES (?, ?, ?, ?)",
+            (
+                stock_code,
+                corp_name,
+                analyzed_at,
+                json.dumps(snapshot, ensure_ascii=False),
+            ),
+        )
 
 
 async def get_analysis_meta(stock_code: str) -> dict | None:
@@ -82,15 +80,14 @@ async def get_analysis_snapshot(stock_code: str) -> dict | None:
 
 
 async def delete_analysis(stock_code: str):
-    db = await get_db()
-    await db.execute("DELETE FROM financial_data WHERE stock_code = ?", (stock_code,))
-    await db.execute("DELETE FROM market_data WHERE stock_code = ?", (stock_code,))
-    await db.execute("DELETE FROM analysis_meta WHERE stock_code = ?", (stock_code,))
-    await db.execute("DELETE FROM latest_report_cache WHERE stock_code = ?", (stock_code,))
-    await db.execute("DELETE FROM report_list_cache WHERE stock_code = ?", (stock_code,))
-    await db.execute(
-        "DELETE FROM cache_values WHERE namespace IN (?, ?) AND key = ?",
-        (CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST, stock_code),
-    )
-    await db.execute("DELETE FROM dart_report_reviews WHERE stock_code = ?", (stock_code,))
-    await db.commit()
+    async with transaction() as db:
+        await db.execute("DELETE FROM financial_data WHERE stock_code = ?", (stock_code,))
+        await db.execute("DELETE FROM market_data WHERE stock_code = ?", (stock_code,))
+        await db.execute("DELETE FROM analysis_meta WHERE stock_code = ?", (stock_code,))
+        await db.execute("DELETE FROM latest_report_cache WHERE stock_code = ?", (stock_code,))
+        await db.execute("DELETE FROM report_list_cache WHERE stock_code = ?", (stock_code,))
+        await db.execute(
+            "DELETE FROM cache_values WHERE namespace IN (?, ?) AND key = ?",
+            (CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST, stock_code),
+        )
+        await db.execute("DELETE FROM dart_report_reviews WHERE stock_code = ?", (stock_code,))

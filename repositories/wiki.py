@@ -7,7 +7,7 @@ these as ``cache.<fn>`` so wiki_ingestion and the wiki routes are unchanged.
 
 from __future__ import annotations
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def get_pdf_cache_by_sha1(pdf_sha1: str) -> dict | None:
@@ -21,20 +21,19 @@ async def get_pdf_cache_by_sha1(pdf_sha1: str) -> dict | None:
 
 async def save_pdf_cache_row(row: dict) -> None:
     """Upsert a row into report_pdf_cache. `row` must contain pdf_sha1."""
-    db = await get_db()
-    cols = [
-        "pdf_sha1", "stock_code", "pdf_url", "file_path", "file_bytes",
-        "parsed_text", "parse_status", "parse_error", "downloaded_at", "parsed_at",
-    ]
-    vals = [row.get(c) for c in cols]
-    placeholders = ",".join("?" for _ in cols)
-    set_clause = ",".join(f"{c}=excluded.{c}" for c in cols if c != "pdf_sha1")
-    await db.execute(
-        f"INSERT INTO report_pdf_cache ({','.join(cols)}) VALUES ({placeholders}) "
-        f"ON CONFLICT(pdf_sha1) DO UPDATE SET {set_clause}",
-        vals,
-    )
-    await db.commit()
+    async with transaction() as db:
+        cols = [
+            "pdf_sha1", "stock_code", "pdf_url", "file_path", "file_bytes",
+            "parsed_text", "parse_status", "parse_error", "downloaded_at", "parsed_at",
+        ]
+        vals = [row.get(c) for c in cols]
+        placeholders = ",".join("?" for _ in cols)
+        set_clause = ",".join(f"{c}=excluded.{c}" for c in cols if c != "pdf_sha1")
+        await db.execute(
+            f"INSERT INTO report_pdf_cache ({','.join(cols)}) VALUES ({placeholders}) "
+            f"ON CONFLICT(pdf_sha1) DO UPDATE SET {set_clause}",
+            vals,
+        )
 
 
 async def pdf_is_already_summarized(stock_code: str, pdf_sha1: str) -> bool:
@@ -51,22 +50,21 @@ async def save_wiki_entry(entry: dict) -> int:
     """Insert a wiki entry. Returns the new row id. Enforces UNIQUE via
     ON CONFLICT — duplicate (stock, source_type, source_ref) replaces
     the prior summary so re-summarizing with a better model overwrites."""
-    db = await get_db()
-    cols = [
-        "stock_code", "source_type", "source_ref", "report_date", "firm",
-        "title", "recommendation", "target_price", "summary_md", "key_points_md",
-        "model", "tokens_in", "tokens_out", "created_at",
-    ]
-    vals = [entry.get(c) for c in cols]
-    placeholders = ",".join("?" for _ in cols)
-    set_clause = ",".join(f"{c}=excluded.{c}" for c in cols if c not in ("stock_code", "source_type", "source_ref"))
-    cursor = await db.execute(
-        f"INSERT INTO stock_wiki_entries ({','.join(cols)}) VALUES ({placeholders}) "
-        f"ON CONFLICT(stock_code, source_type, source_ref) DO UPDATE SET {set_clause}",
-        vals,
-    )
-    await db.commit()
-    return cursor.lastrowid
+    async with transaction() as db:
+        cols = [
+            "stock_code", "source_type", "source_ref", "report_date", "firm",
+            "title", "recommendation", "target_price", "summary_md", "key_points_md",
+            "model", "tokens_in", "tokens_out", "created_at",
+        ]
+        vals = [entry.get(c) for c in cols]
+        placeholders = ",".join("?" for _ in cols)
+        set_clause = ",".join(f"{c}=excluded.{c}" for c in cols if c not in ("stock_code", "source_type", "source_ref"))
+        cursor = await db.execute(
+            f"INSERT INTO stock_wiki_entries ({','.join(cols)}) VALUES ({placeholders}) "
+            f"ON CONFLICT(stock_code, source_type, source_ref) DO UPDATE SET {set_clause}",
+            vals,
+        )
+        return cursor.lastrowid
 
 
 async def get_wiki_entries(stock_code: str, limit: int = 20) -> list[dict]:
@@ -166,19 +164,18 @@ async def qa_count_since(google_sub: str, since_iso: str) -> int:
 
 
 async def save_qa_entry(entry: dict) -> int:
-    db = await get_db()
-    cols = [
-        "google_sub", "stock_code", "question", "answer_md", "source_ids",
-        "model", "tokens_in", "tokens_out", "cost_usd", "created_at",
-    ]
-    vals = [entry.get(c) for c in cols]
-    placeholders = ",".join("?" for _ in cols)
-    cursor = await db.execute(
-        f"INSERT INTO stock_qa_history ({','.join(cols)}) VALUES ({placeholders})",
-        vals,
-    )
-    await db.commit()
-    return cursor.lastrowid
+    async with transaction() as db:
+        cols = [
+            "google_sub", "stock_code", "question", "answer_md", "source_ids",
+            "model", "tokens_in", "tokens_out", "cost_usd", "created_at",
+        ]
+        vals = [entry.get(c) for c in cols]
+        placeholders = ",".join("?" for _ in cols)
+        cursor = await db.execute(
+            f"INSERT INTO stock_qa_history ({','.join(cols)}) VALUES ({placeholders})",
+            vals,
+        )
+        return cursor.lastrowid
 
 
 async def get_wiki_stats() -> dict:

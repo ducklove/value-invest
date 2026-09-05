@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Awaitable, Callable
@@ -94,7 +95,8 @@ def _safe_float(value: Any) -> float | None:
     if value in (None, ""):
         return None
     try:
-        return float(str(value).replace(",", "").strip())
+        number = float(str(value).replace(",", "").strip())
+        return number if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
 

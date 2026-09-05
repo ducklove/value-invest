@@ -1,6 +1,12 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-review/
+.venvs/
+.venv-current
+.deploy-state/
+test-results/
+playwright-report/
 .claude/
 .pytest_cache/
 cache.db

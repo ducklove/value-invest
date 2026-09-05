@@ -9,14 +9,8 @@ _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 
 
 def client_identity(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    if forwarded_for:
-        first_forwarded = forwarded_for.split(",", 1)[0].strip()
-        if first_forwarded:
-            return first_forwarded
-    real_ip = request.headers.get("x-real-ip", "").strip()
-    if real_ip:
-        return real_ip
+    # Uvicorn이 신뢰 프록시(--forwarded-allow-ips)에서 온 헤더만 검증해
+    # scope.client에 반영한다. 원시 헤더를 다시 읽으면 직접 접속자가 위조할 수 있다.
     return request.client.host if request.client else "unknown"
 
 

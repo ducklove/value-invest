@@ -1,13 +1,13 @@
 """AI usage events + rolling usage summary.
 
-Extracted verbatim from cache.py; re-exported as ``cache.<fn>``.
+테이블별 접근을 소유한다. 공유 연결의 쓰기는 transaction()을 사용한다.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def insert_ai_usage_event(
@@ -23,28 +23,27 @@ async def insert_ai_usage_event(
     ok: bool = True,
     error: str | None = None,
 ):
-    db = await get_db()
-    await db.execute(
-        """
-        INSERT INTO ai_usage_events
-            (ts, google_sub, feature, model, model_profile, input_tokens, output_tokens, cost_usd, latency_ms, ok, error)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            datetime.now().isoformat(),
-            google_sub,
-            feature,
-            model,
-            model_profile,
-            int(input_tokens or 0),
-            int(output_tokens or 0),
-            float(cost_usd or 0),
-            latency_ms,
-            1 if ok else 0,
-            (error or "")[:500] if error else None,
-        ),
-    )
-    await db.commit()
+    async with transaction() as db:
+        await db.execute(
+            """
+            INSERT INTO ai_usage_events
+                (ts, google_sub, feature, model, model_profile, input_tokens, output_tokens, cost_usd, latency_ms, ok, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                datetime.now().isoformat(),
+                google_sub,
+                feature,
+                model,
+                model_profile,
+                int(input_tokens or 0),
+                int(output_tokens or 0),
+                float(cost_usd or 0),
+                latency_ms,
+                1 if ok else 0,
+                (error or "")[:500] if error else None,
+            ),
+        )
 
 
 async def summarize_ai_usage(days: int = 30) -> dict:

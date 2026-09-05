@@ -5,6 +5,7 @@
 # line. Bump the cap only after auditing that test and any runtime code
 # that walks app.routes.
 fastapi>=0.129.0,<0.136
+pydantic>=2.11,<3.0
 uvicorn[standard]>=0.41.0,<1.0
 aiosqlite>=0.22.1,<1.0
 httpx>=0.28.1,<1.0

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def save_benchmark_rows(code: str, rows: list[dict], source: str = "yfinance") -> int:
@@ -18,22 +18,22 @@ async def save_benchmark_rows(code: str, rows: list[dict], source: str = "yfinan
     Returns number of rows written. Safe to call with overlapping ranges —
     the (code, date) PK makes each call idempotent.
     """
-    if not rows:
-        return 0
-    # Match the rest of this module — plain local-time ISO (no TZ suffix).
-    fetched_at = datetime.now().isoformat(timespec="seconds")
-    db = await get_db()
-    await db.executemany(
-        """INSERT INTO benchmark_daily (code, date, close, source, fetched_at)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(code, date) DO UPDATE SET
-               close=excluded.close,
-               source=excluded.source,
-               fetched_at=excluded.fetched_at""",
-        [(code, r["date"], float(r["close"]), source, fetched_at) for r in rows if r.get("close") is not None],
-    )
-    await db.commit()
-    return len(rows)
+    async with transaction():
+        if not rows:
+            return 0
+        # Match the rest of this module — plain local-time ISO (no TZ suffix).
+        fetched_at = datetime.now().isoformat(timespec="seconds")
+        db = await get_db()
+        await db.executemany(
+            """INSERT INTO benchmark_daily (code, date, close, source, fetched_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(code, date) DO UPDATE SET
+                   close=excluded.close,
+                   source=excluded.source,
+                   fetched_at=excluded.fetched_at""",
+            [(code, r["date"], float(r["close"]), source, fetched_at) for r in rows if r.get("close") is not None],
+        )
+        return len(rows)
 
 
 async def get_benchmark_rows(code: str, start: str | None = None, end: str | None = None) -> list[dict]:

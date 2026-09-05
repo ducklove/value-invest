@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 
 async def get_user_setting(google_sub: str, key: str) -> str | None:
@@ -35,11 +35,10 @@ async def get_users_with_setting(key: str, value: str) -> list[str]:
 
 
 async def set_user_setting(google_sub: str, key: str, value: str):
-    db = await get_db()
-    await db.execute(
-        """INSERT INTO user_settings (google_sub, key, value, updated_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(google_sub, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
-        (google_sub, key, value, datetime.now().isoformat()),
-    )
-    await db.commit()
+    async with transaction() as db:
+        await db.execute(
+            """INSERT INTO user_settings (google_sub, key, value, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(google_sub, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+            (google_sub, key, value, datetime.now().isoformat()),
+        )

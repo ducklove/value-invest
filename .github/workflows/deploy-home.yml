@@ -13,7 +13,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, linux, home-server]
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Run deploy script
         run: |

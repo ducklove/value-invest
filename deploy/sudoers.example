@@ -1,41 +1,227 @@
-# Value Invest — tight sudoers for the self-hosted runner user.
-#
-# Install:
-#   sudo visudo -f /etc/sudoers.d/value-invest-deploy
-# then paste the content BELOW THIS HEADER. Remove the old catch-all
-# rule (cantabile ALL=(root) NOPASSWD: /bin/systemctl, /usr/bin/cp, ...)
-# that the initial setup used.
-#
-# Rationale: the previous catch-all let anyone who pushes to master
-# install arbitrary systemd units or cp over any root-owned file.
-# These rules restrict to exactly what deploy.sh and the install path
-# actually need.
-#
-# ---8<---
+# value-invest 배포 계정용 sudoers 예제.
+# sudo visudo -f /etc/sudoers.d/value-invest-deploy 로 설치하고 sudo visudo -c 로 확인한다.
+# 실제 배포 경로와 계정에 맞게 조정할 것. 이 파일은 자동 설치하지 않는다.
+# 유닛 설치 권한은 master 작성자를 신뢰한다는 뜻이며 권한 격리 수단이 아니다.
+# 설치 전 기존 유닛을 백업하고, 실패 시 해당 파일과 타이머 상태를 복구한다.
 cantabile ALL=(root) NOPASSWD: /bin/systemctl daemon-reload
 cantabile ALL=(root) NOPASSWD: /bin/systemctl restart value-invest.service
-cantabile ALL=(root) NOPASSWD: /bin/systemctl status value-invest.service
 cantabile ALL=(root) NOPASSWD: /bin/systemctl --no-pager status value-invest.service
-cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now value-invest-backup.timer
-cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now nps-snapshot.timer
-cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/value-invest-notify@.service /etc/systemd/system/value-invest-notify@.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/value-invest-notify@.service /etc/systemd/system/value-invest-notify@.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/value-invest-notify@.service /etc/systemd/system/value-invest-notify@.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/value-invest-notify@.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now value-invest-notify@.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/portfolio-intraday.service /etc/systemd/system/portfolio-intraday.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/portfolio-intraday.service /etc/systemd/system/portfolio-intraday.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/portfolio-intraday.service /etc/systemd/system/portfolio-intraday.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/portfolio-intraday.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now portfolio-intraday.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/portfolio-intraday.timer /etc/systemd/system/portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/portfolio-intraday.timer /etc/systemd/system/portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/portfolio-intraday.timer /etc/systemd/system/portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active portfolio-intraday.timer
 cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now portfolio-intraday.timer
-# Systemd timers and services must be copied to /etc/systemd/system/.
-# Wildcard on source (our repo path), fixed dst prefix. An attacker
-# can't reach any path outside /etc/systemd/system/ via these rules,
-# and the service files themselves are rendered by deploy.sh from
-# master-controlled content (which is a separate trust boundary).
-cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/*.service /etc/systemd/system/*
-cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/*.timer /etc/systemd/system/*
-cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/deploy/*.service /etc/systemd/system/*
-# cmp -s is a read-only compare used by deploy.sh to detect unit drift.
-cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/*.service /etc/systemd/system/*
-cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/*.timer /etc/systemd/system/*
-cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/deploy/*.service /etc/systemd/system/*
-# ---8<---
-#
-# After saving, run:
-#   sudo visudo -c   # syntax check
-# and test with:
-#   sudo -n systemctl daemon-reload   # must succeed without password
-#   sudo -n ls /                       # must FAIL (no longer granted)
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop portfolio-intraday.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/portfolio-snapshot.service /etc/systemd/system/portfolio-snapshot.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/portfolio-snapshot.service /etc/systemd/system/portfolio-snapshot.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/portfolio-snapshot.service /etc/systemd/system/portfolio-snapshot.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/portfolio-snapshot.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now portfolio-snapshot.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/portfolio-snapshot.timer /etc/systemd/system/portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/portfolio-snapshot.timer /etc/systemd/system/portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/portfolio-snapshot.timer /etc/systemd/system/portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop portfolio-snapshot.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/value-invest-backup.service /etc/systemd/system/value-invest-backup.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/value-invest-backup.service /etc/systemd/system/value-invest-backup.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/value-invest-backup.service /etc/systemd/system/value-invest-backup.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/value-invest-backup.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now value-invest-backup.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/value-invest-backup.timer /etc/systemd/system/value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/value-invest-backup.timer /etc/systemd/system/value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/value-invest-backup.timer /etc/systemd/system/value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop value-invest-backup.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/dart-review-ingestion.service /etc/systemd/system/dart-review-ingestion.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/dart-review-ingestion.service /etc/systemd/system/dart-review-ingestion.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/dart-review-ingestion.service /etc/systemd/system/dart-review-ingestion.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/dart-review-ingestion.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now dart-review-ingestion.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/dart-review-ingestion.timer /etc/systemd/system/dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/dart-review-ingestion.timer /etc/systemd/system/dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/dart-review-ingestion.timer /etc/systemd/system/dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop dart-review-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/wiki-ingestion.service /etc/systemd/system/wiki-ingestion.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/wiki-ingestion.service /etc/systemd/system/wiki-ingestion.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/wiki-ingestion.service /etc/systemd/system/wiki-ingestion.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/wiki-ingestion.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now wiki-ingestion.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/wiki-ingestion.timer /etc/systemd/system/wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/wiki-ingestion.timer /etc/systemd/system/wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/wiki-ingestion.timer /etc/systemd/system/wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop wiki-ingestion.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/notify-alerts.service /etc/systemd/system/notify-alerts.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/notify-alerts.service /etc/systemd/system/notify-alerts.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/notify-alerts.service /etc/systemd/system/notify-alerts.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/notify-alerts.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now notify-alerts.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/notify-alerts.timer /etc/systemd/system/notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/notify-alerts.timer /etc/systemd/system/notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/notify-alerts.timer /etc/systemd/system/notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop notify-alerts.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/notify-calendar.service /etc/systemd/system/notify-calendar.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/notify-calendar.service /etc/systemd/system/notify-calendar.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/notify-calendar.service /etc/systemd/system/notify-calendar.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/notify-calendar.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now notify-calendar.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/notify-calendar.timer /etc/systemd/system/notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/notify-calendar.timer /etc/systemd/system/notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/notify-calendar.timer /etc/systemd/system/notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop notify-calendar.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/data-quality.service /etc/systemd/system/data-quality.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/data-quality.service /etc/systemd/system/data-quality.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/data-quality.service /etc/systemd/system/data-quality.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/data-quality.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now data-quality.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/data-quality.timer /etc/systemd/system/data-quality.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/data-quality.timer /etc/systemd/system/data-quality.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/data-quality.timer /etc/systemd/system/data-quality.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/data-quality.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now data-quality.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled data-quality.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active data-quality.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now data-quality.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable data-quality.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable data-quality.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart data-quality.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop data-quality.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/linked-projects-sync.service /etc/systemd/system/linked-projects-sync.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/linked-projects-sync.service /etc/systemd/system/linked-projects-sync.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/linked-projects-sync.service /etc/systemd/system/linked-projects-sync.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/linked-projects-sync.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now linked-projects-sync.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/linked-projects-sync.timer /etc/systemd/system/linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/linked-projects-sync.timer /etc/systemd/system/linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/linked-projects-sync.timer /etc/systemd/system/linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop linked-projects-sync.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/daily-briefing.service /etc/systemd/system/daily-briefing.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/daily-briefing.service /etc/systemd/system/daily-briefing.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/daily-briefing.service /etc/systemd/system/daily-briefing.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/daily-briefing.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now daily-briefing.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/daily-briefing.timer /etc/systemd/system/daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/daily-briefing.timer /etc/systemd/system/daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/daily-briefing.timer /etc/systemd/system/daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop daily-briefing.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/daily-briefing-market-close.service /etc/systemd/system/daily-briefing-market-close.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/daily-briefing-market-close.service /etc/systemd/system/daily-briefing-market-close.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/daily-briefing-market-close.service /etc/systemd/system/daily-briefing-market-close.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/daily-briefing-market-close.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now daily-briefing-market-close.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/daily-briefing-market-close.timer /etc/systemd/system/daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/daily-briefing-market-close.timer /etc/systemd/system/daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/daily-briefing-market-close.timer /etc/systemd/system/daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop daily-briefing-market-close.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/daily-briefing-night.service /etc/systemd/system/daily-briefing-night.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/daily-briefing-night.service /etc/systemd/system/daily-briefing-night.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/daily-briefing-night.service /etc/systemd/system/daily-briefing-night.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/daily-briefing-night.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now daily-briefing-night.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/daily-briefing-night.timer /etc/systemd/system/daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/daily-briefing-night.timer /etc/systemd/system/daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/daily-briefing-night.timer /etc/systemd/system/daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-enabled daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl is-active daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable --now daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl enable daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl restart daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /bin/systemctl stop daily-briefing-night.timer
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/deploy/value-invest.service /etc/systemd/system/value-invest.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/deploy/value-invest.service /etc/systemd/system/value-invest.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/value-invest.service /etc/systemd/system/value-invest.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/value-invest.service
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now value-invest.service
+cantabile ALL=(root) NOPASSWD: /usr/bin/cmp -s /home/cantabile/Works/value_invest/$NEW_VENV/bin/python /etc/systemd/system/python
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/$NEW_VENV/bin/python /etc/systemd/system/python
+cantabile ALL=(root) NOPASSWD: /usr/bin/cp /home/cantabile/Works/value_invest/.deploy-state/*/units/python /etc/systemd/system/python
+cantabile ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/python
+cantabile ALL=(root) NOPASSWD: /bin/systemctl disable --now python

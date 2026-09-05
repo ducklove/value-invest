@@ -12,7 +12,7 @@ finance-pi)는 독립 배포를 유지하고, 이 허브는 딥링크·published
 ## 빠른 시작 (로컬 개발)
 
 ```bash
-pip install -r requirements-dev.txt   # requirements.txt 포함
+pip install --require-hashes -r requirements-dev.lock
 cp .env.example .env      # 시크릿·설정 단일 파일. VALUE_INVEST_ENV=development 로 조정.
 python3 -m uvicorn main:app --reload --port 8000
 ```
@@ -26,6 +26,8 @@ python3 -m uvicorn main:app --reload --port 8000
 ```bash
 python3 -m pytest -q          # Python 전체 (배포 게이트와 동일)
 npm ci && npm test            # JS jsdom 행위 테스트 (tests/js/)
+npx playwright install chromium
+npm run test:e2e              # 실제 브라우저 로그인·저장·재접속
 python3 -m ruff check .       # 린트 — 규칙은 pyproject.toml (F, E9 시작)
 python3 -m pytest --cov=. -q  # 커버리지 측정 (게이트 아님)
 ```
@@ -55,11 +57,23 @@ scripts/, deploy/     운영 스크립트, 배포 스크립트, systemd 유닛(�
 
 `master` push → self-hosted runner가 `deploy/deploy.sh` 실행:
 
-1. 프로덕션 체크아웃을 origin/master로 reset
-2. requirements 변경 시에만 pip 설치
-3. **ruff → pytest → JS 테스트** (하나라도 실패하면 OLD_SHA로 롤백)
-4. systemd 유닛 동기화 → 서비스 재시작
-5. **healthz 검사 — 실패 시 OLD_SHA로 롤백 후 재기동**
+1. 새 커밋을 별도 임시 체크아웃에 풀고 `.venvs/<커밋>` 환경에 해시 고정 의존성 설치
+2. 임시 체크아웃에서 **ruff → pytest → JS 테스트** 실행 (실패하면 운영 파일 유지)
+3. 검증된 코드 반영 → systemd 유닛 동기화 → `.venv-current` 전환 → 서비스 재시작
+4. **healthz·readyz 검사**. 재시작 자체를 포함한 실패 시 이전 코드·유닛·Python 환경 복구
+
+`requirements*.txt`는 의존성 범위의 원본이고 `requirements*.lock`은 실제 설치 버전과
+배포 파일 해시다. 갱신 시 아래 명령으로 두 파일을 재생성하고 전체 테스트를 실행한다.
+
+```bash
+uv pip compile --universal --python-version 3.11 --generate-hashes -o requirements.lock requirements.txt
+uv pip compile --universal --python-version 3.11 --generate-hashes -c requirements.lock -o requirements-dev.lock requirements-dev.txt
+```
+
+Markdown 라이브러리는 `package-lock.json`과 일치하는 파일을 `static/js/vendor/`에
+포함한다. 버전을 바꿀 때 `npm run vendor` 후 라이선스와 원본 일치 테스트를 함께 확인한다.
+운영 호스트에는 `python3-venv`, Node/npm이 필요하다. `.venvs/`와 `.deploy-state/`에는
+복구용 환경·유닛·설정이 보존되므로 현재/이전 배포를 제외한 오래된 항목만 정리한다.
 
 ## 운영 메모
 
@@ -71,6 +85,11 @@ scripts/, deploy/     운영 스크립트, 배포 스크립트, systemd 유닛(�
 - 운영 이벤트/슬로우 요청은 `system_events` 테이블(30일 TTL)에 기록되고
   `/admin.html` 관측성 패널에서 본다.
 - 장애 시 systemd `OnFailure` 훅이 ntfy.sh로 알림을 보낸다.
+- `/healthz`는 프로세스 응답, `/readyz`는 필수 DB 테이블 조회 가능 여부를 확인한다.
+  외부 시세 신선도는 데이터 품질 점검으로 구분한다. 해당 점검의 오류는 HTTP 503으로
+  전달되어 timer의 `curl -f`와 `OnFailure`까지 이어진다.
+- 신뢰 프록시를 쓰는 경우 Uvicorn의 `--forwarded-allow-ips`를 해당 프록시 주소로 제한한다.
+  IP별 요청 제한은 검증된 연결 주소를 사용하며 원시 전달 헤더를 신뢰하지 않는다.
 
 ## 문서 색인 (docs/)
 

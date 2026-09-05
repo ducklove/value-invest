@@ -5,9 +5,14 @@
   "description": "jsdom behavior tests for the static/ frontend (gradual replacement of the Python string-presence checks).",
   "type": "module",
   "scripts": {
-    "test": "node tests/js/run-tests.mjs"
+    "test": "node tests/js/run-tests.mjs",
+    "vendor": "node scripts/vendor_frontend.mjs",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "jsdom": "^24.1.0"
+    "@playwright/test": "1.63.0",
+    "dompurify": "3.4.14",
+    "jsdom": "^24.1.0",
+    "marked": "18.0.11"
   }
 }

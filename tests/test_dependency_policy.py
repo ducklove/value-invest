@@ -37,11 +37,13 @@ def test_ci_and_deploy_use_locked_install_paths():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     deploy = (ROOT / "deploy" / "deploy.sh").read_text(encoding="utf-8")
 
-    assert "python -m pip install -r requirements-dev.txt" in ci
+    assert "python -m pip install --require-hashes -r requirements-dev.lock" in ci
     assert "npm ci" in ci
-    assert "-r requirements-dev.txt" in deploy
+    assert "--require-hashes -r requirements-dev.lock" in deploy
     assert "npm ci --no-audit --no-fund" in deploy
     assert (ROOT / "package-lock.json").exists()
+    assert (ROOT / "requirements.lock").exists()
+    assert (ROOT / "requirements-dev.lock").exists()
 
 
 def test_ci_runs_both_test_suites():
@@ -108,4 +110,20 @@ def test_repositories_do_not_import_service_layer():
                 for alias in node.names:
                     if alias.name.split(".", 1)[0] == "services":
                         violations.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert violations == []
+
+
+def test_shared_connection_writers_never_commit_directly():
+    violations = []
+    for path in (ROOT / "repositories").glob("*.py"):
+        # 부트스트랩은 요청 수락 전 스키마를 만들고, db가 트랜잭션을 소유한다.
+        if path.name in {"bootstrap.py", "db.py"}:
+            continue
+        source = path.read_text(encoding="utf-8")
+        for function in ast.parse(source).body:
+            if not isinstance(function, ast.AsyncFunctionDef):
+                continue
+            body = ast.get_source_segment(source, function)
+            if "get_db()" in body and ".commit()" in body:
+                violations.append(f"{path.name}:{function.name}")
     assert violations == []

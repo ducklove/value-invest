@@ -52,6 +52,7 @@ async def fetch_cash_quote(stock_code: str) -> dict:
             "price": round(price, 2),
             "change": round(change, 4),
             "change_pct": daily["change_pct"],
+            "_stale": bool(daily.get("_stale")),
         }
     # Fallback: exchangeList scrape — current rate only, no change.
     rate = await fx.fx_rate_for_code(fx_code)

@@ -15,7 +15,7 @@ WatchdogSec=30s
 User=cantabile
 Group=cantabile
 WorkingDirectory=/home/cantabile/Works/value_invest
-ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 3691 --ssl-keyfile /etc/letsencrypt/live/cantabile.tplinkdns.com/privkey.pem --ssl-certfile /etc/letsencrypt/live/cantabile.tplinkdns.com/fullchain.pem
+ExecStart=/bin/bash /home/cantabile/Works/value_invest/deploy/run_app.sh
 Restart=always
 RestartSec=3
 # Give the watchdog a grace window during startup (corp_codes refresh can

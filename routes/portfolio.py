@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 import asset_insights
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
+from domain.portfolio_inputs import CashflowInput, HoldingInput, validate_input
 from repositories import benchmark_daily as benchmark_repo
 from repositories import corp_codes
 from repositories import db as db_repo
@@ -696,6 +697,7 @@ async def save_portfolio_order(request: Request, payload: dict = Body(...)):
 @router.put("/api/portfolio/{stock_code}")
 async def save_portfolio_item(stock_code: str, request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
+    payload = validate_input(HoldingInput, payload)
     stock_code = _normalize_portfolio_code(stock_code)
 
     stock_name = str(payload.get("stock_name") or "").strip()
@@ -747,7 +749,12 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     avg_price_currency = _parse_avg_price_currency(payload.get("avg_price_currency"))
     if avg_price_currency and (_is_cash_asset(stock_code) or _is_korean_stock(stock_code) or _is_special_asset(stock_code)):
         avg_price_currency = "KRW"
-    avg_price_krw = await fx.price_to_krw(avg_price, avg_price_currency or "KRW")
+    if avg_price_currency is None:
+        existing_item = await portfolio_repo.get_portfolio_item(user["google_sub"], stock_code)
+        avg_price_currency = fx.normalize_price_currency((existing_item or {}).get("avg_price_currency"))
+    # 저장 전에 필요한 환율을 한 번만 확인한다. 저장 후 환율 장애로 실패를
+    # 응답하거나, 통화 미전달 시 기존 외화 매입가를 원화로 오인하지 않는다.
+    avg_price_krw = await fx.price_to_krw(avg_price, avg_price_currency)
     group_name = str(payload.get("group_name") or "").strip() or None
     if group_name:
         groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
@@ -832,7 +839,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         **target_price_kwarg,
         **memo_kwarg,
     )
-    await fx.annotate_avg_price_krw([result])
+    result["avg_price_krw"] = avg_price_krw
 
     # 신규 해외 종목이면 yfinance 배당을 백그라운드로 fetch. 기존 동일
     # 코드에 대해 이미 foreign_dividends row 가 있으면 (auto/manual 무관)
@@ -977,9 +984,17 @@ async def delete_portfolio_item(stock_code: str, request: Request):
 async def bulk_import(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
     mode = str(payload.get("mode", "add")).strip()
+    if mode not in ("add", "replace"):
+        raise HTTPException(status_code=400, detail="등록 방식은 add 또는 replace여야 합니다.")
     rows = payload.get("items")
     if not isinstance(rows, list) or not rows:
         raise HTTPException(status_code=400, detail="등록할 종목이 없습니다.")
+    if len(rows) > 500:
+        raise HTTPException(status_code=400, detail="한 번에 500개 종목까지 등록할 수 있습니다.")
+    for row in rows:
+        if not isinstance(row, dict):
+            raise HTTPException(status_code=400, detail="종목 행은 객체여야 합니다.")
+        validate_input(HoldingInput, row)
 
     # Validate all rows first
     parsed = []
@@ -1018,10 +1033,11 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
     if mode == "replace":
         await portfolio_repo.replace_portfolio(user["google_sub"], resolved)
     else:
-        for item in resolved:
-            await portfolio_repo.save_portfolio_item(
-                user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], item["currency"],
-            )
+        async with db_repo.transaction():
+            for item in resolved:
+                await portfolio_repo.save_portfolio_item(
+                    user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], item["currency"],
+                )
     dividends.schedule_for_portfolio([item["stock_code"] for item in resolved])
 
     return {"ok": True, "imported": len(resolved), "mode": mode}
@@ -1258,6 +1274,7 @@ async def get_cashflows(request: Request):
 @router.post("/api/portfolio/cashflows")
 async def add_cashflow(request: Request, payload: dict = Body(...)):
     user = _require_user(await get_current_user(request))
+    payload = validate_input(CashflowInput, payload)
     cf_type = str(payload.get("type") or "").strip()
     if cf_type not in ("deposit", "withdrawal"):
         raise HTTPException(status_code=400, detail="type은 deposit 또는 withdrawal이어야 합니다.")

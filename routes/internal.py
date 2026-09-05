@@ -205,7 +205,10 @@ async def run_data_quality_check(request: Request):
     from services import data_quality
     try:
         result = await data_quality.run_all_checks()
-        return {"ok": True, **result}
+        from fastapi.responses import JSONResponse
+
+        healthy = result.get("counts", {}).get("error", 0) == 0
+        return JSONResponse({"ok": healthy, **result}, status_code=200 if healthy else 503)
     except Exception as exc:
         raise _job_failed("data quality check", exc) from exc
 

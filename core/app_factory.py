@@ -275,4 +275,23 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         })
 
     app.state.static_handlers = register_static_routes(app, settings, asset_version)
+
+    @app.get("/readyz")
+    async def readyz():
+        import asyncio
+        import sqlite3
+
+        from repositories.db import get_db
+
+        async def probe():
+            db = await get_db()
+            await (await db.execute("SELECT google_sub FROM users LIMIT 1")).fetchone()
+            await (await db.execute("SELECT stock_code FROM user_portfolio LIMIT 1")).fetchone()
+
+        try:
+            await asyncio.wait_for(probe(), timeout=2)
+        except (sqlite3.Error, OSError, asyncio.TimeoutError):
+            return JSONResponse({"status": "unavailable", "database": "unavailable"}, status_code=503)
+        return JSONResponse({"status": "ok", "database": "ok", "asset_version": asset_version})
+
     return app

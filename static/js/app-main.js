@@ -147,25 +147,6 @@ async function initApp() {
     try { history.scrollRestoration = 'manual'; } catch (e) {}
   }
   await initAuth();
-  await loadRecentList();
-  await _mbLoadCatalog();
-  await _mbLoadCodes();
-  loadMarketSummary();
-  loadMarketTape();
-  if (typeof loadInvestingDashboard === 'function') loadInvestingDashboard();
-  loadDailyMarketBrief();
-  loadWikiStats();
-  setInterval(loadMarketSummary, 60_000);
-  setInterval(() => loadMarketTape(false), 45_000);
-  setInterval(_pollBenchmarkQuotes, 60_000);
-  setInterval(_refreshActivePortfolioTodayState, 5 * 60_000);
-  // Refresh wiki stats every 5 minutes so the badge reflects ongoing
-  // background ingestion without needing a reload.
-  setInterval(loadWikiStats, 5 * 60_000);
-  QuoteManager.connect();
-  _updateQuoteSubscriptions();
-  trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
-
   // 외부 사이트에서 특정 탭·종목으로 바로 연결 가능하도록 URL 을 해석.
   //   /analysis?code=005930  → 분석 탭 + 005930 자동 분석
   //   /portfolio             → 포트폴리오 탭
@@ -204,6 +185,25 @@ async function initApp() {
   if (!code && typeof isCompactMobileViewport === 'function' && isCompactMobileViewport()) {
     holdPageScrollTop();
   }
+  // URL에 맞는 화면과 필수 데이터부터 시작하고 부가 데이터는 독립적으로 준비한다.
+  await Promise.allSettled([loadRecentList(), _mbLoadCatalog(), _mbLoadCodes()]);
+  loadMarketSummary();
+  loadMarketTape();
+  if (typeof loadInvestingDashboard === 'function') loadInvestingDashboard();
+  loadDailyMarketBrief();
+  loadWikiStats();
+  setInterval(loadMarketSummary, 60_000);
+  setInterval(() => loadMarketTape(false), 45_000);
+  setInterval(_pollBenchmarkQuotes, 60_000);
+  setInterval(_refreshActivePortfolioTodayState, 5 * 60_000);
+  // Refresh wiki stats every 5 minutes so the badge reflects ongoing
+  // background ingestion without needing a reload.
+  setInterval(loadWikiStats, 5 * 60_000);
+  QuoteManager.connect();
+  _updateQuoteSubscriptions();
+  trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });
+
+
 }
 
 initApp();

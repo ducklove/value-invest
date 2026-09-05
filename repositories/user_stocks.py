@@ -1,6 +1,6 @@
 """Per-user stock interactions: recent analyses, starred/preference, ordering.
 
-Extracted verbatim from cache.py; re-exported as ``cache.<fn>``.
+테이블별 접근을 소유한다. 공유 연결의 쓰기는 transaction()을 사용한다.
 """
 
 from __future__ import annotations
@@ -8,71 +8,69 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 USER_RECENT_MAX = 20
 
 
 async def touch_user_recent_analysis(google_sub: str, stock_code: str):
-    db = await get_db()
-    now = datetime.now().isoformat()
-    await db.execute(
-        """
-        INSERT OR REPLACE INTO user_recent_analyses (google_sub, stock_code, viewed_at)
-        VALUES (?, ?, ?)
-        """,
-        (google_sub, stock_code, now),
-    )
-    await db.execute(
-        """
-        UPDATE user_stock_preferences
-        SET sort_order = sort_order + 1
-        WHERE google_sub = ? AND sort_order IS NOT NULL
-        """,
-        (google_sub,),
-    )
-    await db.execute(
-        """
-        INSERT INTO user_stock_preferences (google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at)
-        VALUES (?, ?, 0, 0, 0, '', ?)
-        ON CONFLICT(google_sub, stock_code) DO UPDATE SET
-            sort_order = 0,
-            updated_at = excluded.updated_at
-        """,
-        (google_sub, stock_code, now),
-    )
-    # Remove overflow items beyond the limit (keep starred/pinned)
-    cursor = await db.execute(
-        """
-        SELECT r.stock_code
-        FROM user_recent_analyses r
-        LEFT JOIN user_stock_preferences p
-            ON p.google_sub = r.google_sub AND p.stock_code = r.stock_code
-        WHERE r.google_sub = ?
-          AND COALESCE(p.is_starred, 0) = 0
-          AND COALESCE(p.is_pinned, 0) = 0
-        ORDER BY COALESCE(p.sort_order, 999999) ASC
-        LIMIT -1 OFFSET ?
-        """,
-        (google_sub, USER_RECENT_MAX),
-    )
-    overflow = [row["stock_code"] for row in await cursor.fetchall()]
-    if overflow:
-        placeholders = ",".join("?" for _ in overflow)
+    async with transaction() as db:
+        now = datetime.now().isoformat()
         await db.execute(
-            f"DELETE FROM user_recent_analyses WHERE google_sub = ? AND stock_code IN ({placeholders})",
-            (google_sub, *overflow),
+            """
+            INSERT OR REPLACE INTO user_recent_analyses (google_sub, stock_code, viewed_at)
+            VALUES (?, ?, ?)
+            """,
+            (google_sub, stock_code, now),
         )
-    await db.commit()
+        await db.execute(
+            """
+            UPDATE user_stock_preferences
+            SET sort_order = sort_order + 1
+            WHERE google_sub = ? AND sort_order IS NOT NULL
+            """,
+            (google_sub,),
+        )
+        await db.execute(
+            """
+            INSERT INTO user_stock_preferences (google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at)
+            VALUES (?, ?, 0, 0, 0, '', ?)
+            ON CONFLICT(google_sub, stock_code) DO UPDATE SET
+                sort_order = 0,
+                updated_at = excluded.updated_at
+            """,
+            (google_sub, stock_code, now),
+        )
+        # Remove overflow items beyond the limit (keep starred/pinned)
+        cursor = await db.execute(
+            """
+            SELECT r.stock_code
+            FROM user_recent_analyses r
+            LEFT JOIN user_stock_preferences p
+                ON p.google_sub = r.google_sub AND p.stock_code = r.stock_code
+            WHERE r.google_sub = ?
+              AND COALESCE(p.is_starred, 0) = 0
+              AND COALESCE(p.is_pinned, 0) = 0
+            ORDER BY COALESCE(p.sort_order, 999999) ASC
+            LIMIT -1 OFFSET ?
+            """,
+            (google_sub, USER_RECENT_MAX),
+        )
+        overflow = [row["stock_code"] for row in await cursor.fetchall()]
+        if overflow:
+            placeholders = ",".join("?" for _ in overflow)
+            await db.execute(
+                f"DELETE FROM user_recent_analyses WHERE google_sub = ? AND stock_code IN ({placeholders})",
+                (google_sub, *overflow),
+            )
 
 
 async def delete_user_recent_analysis(google_sub: str, stock_code: str):
-    db = await get_db()
-    await db.execute(
-        "DELETE FROM user_recent_analyses WHERE google_sub = ? AND stock_code = ?",
-        (google_sub, stock_code),
-    )
-    await db.commit()
+    async with transaction() as db:
+        await db.execute(
+            "DELETE FROM user_recent_analyses WHERE google_sub = ? AND stock_code = ?",
+            (google_sub, stock_code),
+        )
 
 
 async def get_user_stock_preference(google_sub: str, stock_code: str) -> dict:
@@ -114,48 +112,48 @@ async def save_user_stock_preference(
     note: str | None = None,
     sort_order: int | None = None,
 ) -> dict:
-    current = await get_user_stock_preference(google_sub, stock_code)
-    next_pref = {
-        "is_starred": current["is_starred"] if is_starred is None else bool(is_starred),
-        "is_pinned": current["is_pinned"] if is_pinned is None else bool(is_pinned),
-        "sort_order": current["sort_order"] if sort_order is None else int(sort_order),
-        "note": current["note"] if note is None else note.strip()[:2000],
-    }
+    async with transaction():
+        current = await get_user_stock_preference(google_sub, stock_code)
+        next_pref = {
+            "is_starred": current["is_starred"] if is_starred is None else bool(is_starred),
+            "is_pinned": current["is_pinned"] if is_pinned is None else bool(is_pinned),
+            "sort_order": current["sort_order"] if sort_order is None else int(sort_order),
+            "note": current["note"] if note is None else note.strip()[:2000],
+        }
 
-    db = await get_db()
-    updated_at = datetime.now().isoformat()
-    becoming_starred = next_pref["is_starred"] and not current["is_starred"]
-    becoming_unstarred = not next_pref["is_starred"] and current["is_starred"]
+        db = await get_db()
+        updated_at = datetime.now().isoformat()
+        becoming_starred = next_pref["is_starred"] and not current["is_starred"]
+        becoming_unstarred = not next_pref["is_starred"] and current["is_starred"]
 
-    if becoming_starred:
+        if becoming_starred:
+            await db.execute(
+                "UPDATE user_stock_preferences SET starred_order = starred_order + 1 WHERE google_sub = ? AND starred_order IS NOT NULL",
+                (google_sub,),
+            )
+
         await db.execute(
-            "UPDATE user_stock_preferences SET starred_order = starred_order + 1 WHERE google_sub = ? AND starred_order IS NOT NULL",
-            (google_sub,),
+            """
+            INSERT OR REPLACE INTO user_stock_preferences (
+                google_sub, stock_code, is_starred, is_pinned, sort_order, starred_order, note, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                google_sub,
+                stock_code,
+                1 if next_pref["is_starred"] else 0,
+                1 if next_pref["is_pinned"] else 0,
+                next_pref["sort_order"],
+                0 if becoming_starred else (None if becoming_unstarred else current.get("starred_order")),
+                next_pref["note"],
+                updated_at,
+            ),
         )
 
-    await db.execute(
-        """
-        INSERT OR REPLACE INTO user_stock_preferences (
-            google_sub, stock_code, is_starred, is_pinned, sort_order, starred_order, note, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            google_sub,
-            stock_code,
-            1 if next_pref["is_starred"] else 0,
-            1 if next_pref["is_pinned"] else 0,
-            next_pref["sort_order"],
-            0 if becoming_starred else (None if becoming_unstarred else current.get("starred_order")),
-            next_pref["note"],
-            updated_at,
-        ),
-    )
-    await db.commit()
-
-    return {
-        **next_pref,
-        "updated_at": updated_at,
-    }
+        return {
+            **next_pref,
+            "updated_at": updated_at,
+        }
 
 
 async def get_cached_analyses(
@@ -229,50 +227,47 @@ async def get_cached_analyses(
 
 
 async def save_user_stock_order(google_sub: str, ordered_stock_codes: list[str]):
-    db = await get_db()
-    updated_at = datetime.now().isoformat()
-    await db.executemany(
-        """
-        INSERT INTO user_stock_preferences (
-            google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at
-        ) VALUES (?, ?, 0, 0, ?, '', ?)
-        ON CONFLICT(google_sub, stock_code) DO UPDATE SET
-            sort_order = excluded.sort_order,
-            updated_at = excluded.updated_at
-        """,
-        [
-            (google_sub, stock_code, index, updated_at)
-            for index, stock_code in enumerate(ordered_stock_codes)
-        ],
-    )
-    await db.commit()
+    async with transaction() as db:
+        updated_at = datetime.now().isoformat()
+        await db.executemany(
+            """
+            INSERT INTO user_stock_preferences (
+                google_sub, stock_code, is_starred, is_pinned, sort_order, note, updated_at
+            ) VALUES (?, ?, 0, 0, ?, '', ?)
+            ON CONFLICT(google_sub, stock_code) DO UPDATE SET
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at
+            """,
+            [
+                (google_sub, stock_code, index, updated_at)
+                for index, stock_code in enumerate(ordered_stock_codes)
+            ],
+        )
 
 
 async def save_starred_order(google_sub: str, ordered_stock_codes: list[str]):
-    db = await get_db()
-    updated_at = datetime.now().isoformat()
-    await db.executemany(
-        """
-        UPDATE user_stock_preferences
-        SET starred_order = ?, updated_at = ?
-        WHERE google_sub = ? AND stock_code = ?
-        """,
-        [
-            (index, updated_at, google_sub, stock_code)
-            for index, stock_code in enumerate(ordered_stock_codes)
-        ],
-    )
-    await db.commit()
+    async with transaction() as db:
+        updated_at = datetime.now().isoformat()
+        await db.executemany(
+            """
+            UPDATE user_stock_preferences
+            SET starred_order = ?, updated_at = ?
+            WHERE google_sub = ? AND stock_code = ?
+            """,
+            [
+                (index, updated_at, google_sub, stock_code)
+                for index, stock_code in enumerate(ordered_stock_codes)
+            ],
+        )
 
 
 async def unstar_stock(google_sub: str, stock_code: str):
-    db = await get_db()
-    await db.execute(
-        """
-        UPDATE user_stock_preferences
-        SET is_starred = 0, starred_order = NULL, updated_at = ?
-        WHERE google_sub = ? AND stock_code = ?
-        """,
-        (datetime.now().isoformat(), google_sub, stock_code),
-    )
-    await db.commit()
+    async with transaction() as db:
+        await db.execute(
+            """
+            UPDATE user_stock_preferences
+            SET is_starred = 0, starred_order = NULL, updated_at = ?
+            WHERE google_sub = ? AND stock_code = ?
+            """,
+            (datetime.now().isoformat(), google_sub, stock_code),
+        )

@@ -25,6 +25,7 @@ from core.errors import DBError
 DB_PATH = Path(__file__).resolve().parent.parent / "cache.db"
 
 _conn: aiosqlite.Connection | None = None
+_conn_lock = asyncio.Lock()
 
 # transaction() 직렬화 락. 앱 전체가 하나의 aiosqlite 커넥션을 모든
 # asyncio task 가 공유하므로, 락 없이 BEGIN/COMMIT 을 쓰면 서로 다른
@@ -39,17 +40,24 @@ _txn_owner: asyncio.Task | None = None
 async def get_db() -> aiosqlite.Connection:
     global _conn
     if _conn is None:
-        _conn = await aiosqlite.connect(DB_PATH)
-        _conn.row_factory = aiosqlite.Row
-        await _conn.execute("PRAGMA journal_mode=WAL")
-        await _conn.execute("PRAGMA busy_timeout=5000")
-        await _conn.execute("PRAGMA foreign_keys=ON")
+        async with _conn_lock:
+            if _conn is None:
+                conn = await aiosqlite.connect(DB_PATH)
+                try:
+                    conn.row_factory = aiosqlite.Row
+                    await conn.execute("PRAGMA journal_mode=WAL")
+                    await conn.execute("PRAGMA busy_timeout=5000")
+                    await conn.execute("PRAGMA foreign_keys=ON")
+                except BaseException:
+                    await conn.close()
+                    raise
+                _conn = conn
     return _conn
 
 
 async def close_db():
     """Shutdown: close the shared connection."""
-    global _conn, _txn_lock, _txn_owner
+    global _conn, _conn_lock, _txn_lock, _txn_owner
     if _conn is not None:
         await _conn.close()
         _conn = None
@@ -57,6 +65,7 @@ async def close_db():
     # (IsolatedAsyncioTestCase 처럼) 루프를 매번 새로 만들고 setUp 에서
     # close_db() 를 부르므로, 여기서 락도 새로 만들어 루프 교체에 안전하게.
     _txn_lock = asyncio.Lock()
+    _conn_lock = asyncio.Lock()
     _txn_owner = None
 
 
@@ -98,13 +107,13 @@ async def transaction():
             await db.execute("BEGIN IMMEDIATE")
             try:
                 yield db
+                await db.commit()
             except sqlite3.Error as exc:
                 await db.rollback()
                 raise DBError(str(exc)) from exc
             except BaseException:
                 await db.rollback()
                 raise
-            await db.commit()
         finally:
             _txn_owner = None
 

@@ -6,6 +6,11 @@
 
 ## Script Order
 
+2026-09-05: `utils.js`보다 먼저 `js/vendor/marked.js`·`js/vendor/purify.js`를
+defer로 로드한다. CDN의 가변 버전 대신 저장소에 포함한 고정 원본을 사용한다.
+`initApp()`은 인증 후 URL에 맞는 화면을 먼저 열고 최근 목록·시장 지표·시장바 설정을
+병렬로 준비한다. 브라우저 계약 검증은 `npm run test:e2e`로 실행한다.
+
 `static/index.html`은 아래 순서로 포트폴리오 기능을 로드한다. 순서가 곧 의존성 계약이므로 임의로 바꾸지 않는다.
 
 1. `utils.js`: 공통 API fetch, 포맷, 앱 설정, markdown 렌더링.

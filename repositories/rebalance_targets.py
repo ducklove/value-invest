@@ -61,21 +61,20 @@ async def upsert_target(
     tolerance_pct: float = DEFAULT_TOLERANCE_PCT,
 ) -> None:
     """단건 저장 — (google_sub, scope, target_key) 충돌 시 갱신."""
-    db = await get_db()
-    now = _now()
-    await db.execute(
-        """
-        INSERT INTO rebalance_targets
-            (google_sub, scope, target_key, target_weight_pct, tolerance_pct, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(google_sub, scope, target_key) DO UPDATE SET
-            target_weight_pct = excluded.target_weight_pct,
-            tolerance_pct = excluded.tolerance_pct,
-            updated_at = excluded.updated_at
-        """,
-        (google_sub, scope, target_key, target_weight_pct, tolerance_pct, now, now),
-    )
-    await db.commit()
+    async with transaction() as db:
+        now = _now()
+        await db.execute(
+            """
+            INSERT INTO rebalance_targets
+                (google_sub, scope, target_key, target_weight_pct, tolerance_pct, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(google_sub, scope, target_key) DO UPDATE SET
+                target_weight_pct = excluded.target_weight_pct,
+                tolerance_pct = excluded.tolerance_pct,
+                updated_at = excluded.updated_at
+            """,
+            (google_sub, scope, target_key, target_weight_pct, tolerance_pct, now, now),
+        )
 
 
 async def replace_all_targets(google_sub: str, targets: list[dict]) -> list[dict]:
@@ -110,10 +109,9 @@ async def replace_all_targets(google_sub: str, targets: list[dict]) -> list[dict
 
 
 async def delete_target(google_sub: str, scope: str, target_key: str) -> bool:
-    db = await get_db()
-    cursor = await db.execute(
-        "DELETE FROM rebalance_targets WHERE google_sub = ? AND scope = ? AND target_key = ?",
-        (google_sub, scope, target_key),
-    )
-    await db.commit()
-    return cursor.rowcount > 0
+    async with transaction() as db:
+        cursor = await db.execute(
+            "DELETE FROM rebalance_targets WHERE google_sub = ? AND scope = ? AND target_key = ?",
+            (google_sub, scope, target_key),
+        )
+        return cursor.rowcount > 0

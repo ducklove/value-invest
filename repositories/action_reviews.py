@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from repositories.db import get_db
+from repositories.db import get_db, transaction
 
 VALID_STATUSES = ("open", "done", "dismissed")
 
@@ -54,32 +54,32 @@ async def set_review_status(
     note: str | None = None,
 ) -> dict:
     """Upsert one review state and return the saved row."""
-    if status not in VALID_STATUSES:
-        raise ValueError(f"unsupported action review status: {status!r}")
-    key = str(action_key or "").strip()
-    if not key:
-        raise ValueError("action_key is required")
-    now = _now()
-    db = await get_db()
-    await db.execute(
-        """
-        INSERT INTO portfolio_action_reviews
-            (google_sub, action_key, status, note, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(google_sub, action_key) DO UPDATE SET
-            status = excluded.status,
-            note = excluded.note,
-            updated_at = excluded.updated_at
-        """,
-        (google_sub, key, status, note, now, now),
-    )
-    await db.commit()
-    cursor = await db.execute(
-        f"SELECT {_REVIEW_COLUMNS} FROM portfolio_action_reviews"
-        " WHERE google_sub = ? AND action_key = ?",
-        (google_sub, key),
-    )
-    row = await cursor.fetchone()
-    if row is None:
-        raise RuntimeError("saved action review was not readable")
-    return dict(row)
+    async with transaction():
+        if status not in VALID_STATUSES:
+            raise ValueError(f"unsupported action review status: {status!r}")
+        key = str(action_key or "").strip()
+        if not key:
+            raise ValueError("action_key is required")
+        now = _now()
+        db = await get_db()
+        await db.execute(
+            """
+            INSERT INTO portfolio_action_reviews
+                (google_sub, action_key, status, note, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(google_sub, action_key) DO UPDATE SET
+                status = excluded.status,
+                note = excluded.note,
+                updated_at = excluded.updated_at
+            """,
+            (google_sub, key, status, note, now, now),
+        )
+        cursor = await db.execute(
+            f"SELECT {_REVIEW_COLUMNS} FROM portfolio_action_reviews"
+            " WHERE google_sub = ? AND action_key = ?",
+            (google_sub, key),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError("saved action review was not readable")
+        return dict(row)

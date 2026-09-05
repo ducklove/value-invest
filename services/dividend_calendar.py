@@ -23,8 +23,9 @@
 이벤트 목록에만 노출한다.
 
 환산: 해외 per-share 는 services.portfolio.fx 의 실시간 환율로 KRW 환산.
-fx_rate_for_currency 는 조회 실패/미지원 통화에서 1.0 을 돌려주므로, 1.0 은
-'환율 모름'으로 보고 foreign_dividends.dps_krw(수집 시점 환산)로 폴백한다.
+fx_rate_for_currency 는 조회 실패/미지원 통화에서 FXUnavailableError 를 발생시킨다.
+이 경우 foreign_dividends.dps_krw(수집 시점 환산)로 폴백한다.
+이전 연동에서 쓰던 1.0 센티널도 호환을 위해 같은 방식으로 처리한다.
 """
 
 from __future__ import annotations
