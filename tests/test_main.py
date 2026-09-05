@@ -228,6 +228,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
              patch("repositories.corp_codes.resolve_corp_search_query", new=AsyncMock(return_value=alias)), \
              patch("repositories.portfolio.save_portfolio_item", new=saver), \
+             patch("repositories.portfolio.get_portfolio_item", new=AsyncMock(return_value=None)), \
              patch("services.portfolio.foreign.resolve_foreign_name", new=foreign_name), \
              patch("routes.portfolio._fetch_quote", new=AsyncMock(return_value={"price": 1000})):
             await portfolio.save_portfolio_item(
@@ -257,6 +258,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
              patch("routes.portfolio.foreign.resolve_domestic_code_alias", new=AsyncMock(return_value=None)), \
              patch("routes.portfolio.foreign.resolve_name", new=resolver), \
              patch("repositories.portfolio.save_portfolio_item", new=saver), \
+             patch("repositories.portfolio.get_portfolio_item", new=AsyncMock(return_value=None)), \
              patch("routes.portfolio.fx.price_to_krw", new=AsyncMock(return_value=70000)), \
              patch("routes.portfolio.fx.annotate_avg_price_krw", new=AsyncMock()), \
              patch("routes.portfolio.dividends.schedule_for_portfolio"):
@@ -281,6 +283,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
              patch("services.portfolio.foreign.resolve_domestic_code_alias", new=AsyncMock(return_value=None)), \
              patch("services.portfolio.foreign.detect_currency", new=detect_currency), \
              patch("repositories.portfolio.save_portfolio_item", new=saver), \
+             patch("repositories.portfolio.get_portfolio_item", new=AsyncMock(return_value=None)), \
              patch("repositories.foreign_dividends.get_foreign_dividend", new=AsyncMock(return_value={"dps_krw": 0})):
             await portfolio.save_portfolio_item(
                 "AAPL",
@@ -324,6 +327,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
              patch("routes.portfolio.fx.price_to_krw", new=AsyncMock(return_value=140000)), \
              patch("routes.portfolio.fx.annotate_avg_price_krw", new=AsyncMock(side_effect=annotate)), \
              patch("repositories.portfolio.save_portfolio_item", new=saver), \
+             patch("repositories.portfolio.get_portfolio_item", new=AsyncMock(return_value=None)), \
              patch("repositories.foreign_dividends.get_foreign_dividend", new=AsyncMock(return_value={"dps_krw": 0})):
             response = await portfolio.save_portfolio_item(
                 "AAPL",
