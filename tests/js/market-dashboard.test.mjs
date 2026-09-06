@@ -149,7 +149,7 @@ test("야간선물 카테고리는 야간선물 iframe 섹션으로 상시 렌�
   assert.ok(frame, "실시간 그래프 iframe 존재");
   assert.equal(
     frame.getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=24H&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=kospi-night-futures&theme=light&period=24H&headless=1",
   );
 });
 
@@ -208,11 +208,11 @@ test("hero cards embed API index frames for KOSPI/KOSDAQ only", () => {
   assert.equal(frames.length, 2);
   assert.equal(
     frames[0].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=light&period=1D&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=ekospi&theme=light&period=1D&headless=1",
   );
   assert.equal(
     frames[1].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kosdaq&theme=light&period=1D&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=kosdaq&theme=light&period=1D&headless=1",
   );
   assert.equal(main.querySelectorAll(".md-index-card .md-index-frame-label").length, 0);
   assert.equal(main.querySelector(".md-section-title").textContent, "국내지수 (eKOSPI / KOSDAQ)");
@@ -223,11 +223,11 @@ test("_mdIndexFrameHtml only emits for KOSPI/KOSDAQ", () => {
   const w = load();
   assert.equal(
     w._mdIndexFrameUrl("ekospi"),
-    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=light&period=1D&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=ekospi&theme=light&period=1D&headless=1",
   );
   assert.equal(
     w._mdIndexFrameUrl("ekospi", "dark"),
-    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=dark&period=1D&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=ekospi&theme=dark&period=1D&headless=1",
   );
   assert.match(w._mdIndexFrameHtml("KOSPI", "KOSPI"), /index=ekospi&amp;theme=light&amp;period=1D&amp;headless=1/);
   assert.match(w._mdIndexFrameHtml("KOSDAQ", "KOSDAQ"), /index=kosdaq&amp;theme=light&amp;period=1D&amp;headless=1/);
@@ -246,22 +246,22 @@ test("market dashboard iframe URLs follow data-theme and resync on theme toggle"
   assert.equal(frames.length, 2);
   assert.equal(
     frames[0].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=light&period=1D&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=ekospi&theme=light&period=1D&headless=1",
   );
   assert.equal(
     frames[1].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=light&period=24H&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=kospi-night-futures&theme=light&period=24H&headless=1",
   );
 
   w.document.documentElement.setAttribute("data-theme", "dark");
   w.syncMarketDashboardFrameTheme();
   assert.equal(
     frames[0].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=ekospi&theme=dark&period=1D&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=ekospi&theme=dark&period=1D&headless=1",
   );
   assert.equal(
     frames[1].getAttribute("src"),
-    "https://cantabile.tplinkdns.com:3358/?index=kospi-night-futures&theme=dark&period=24H&headless=1",
+    "https://ducklove.duckdns.org:3358/?index=kospi-night-futures&theme=dark&period=24H&headless=1",
   );
 });
 

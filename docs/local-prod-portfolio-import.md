@@ -17,7 +17,7 @@ SSH 접속이 가능한 환경에서 실행한다.
 
 ```powershell
 .\scripts\import-prod-portfolio-db.ps1 `
-  -Remote "pi@cantabile.tplinkdns.com" `
+  -Remote "pi@ducklove.duckdns.org" `
   -RemoteDbPath "/home/pi/value-invest/cache.db" `
   -SourceEmail "your-google-email@example.com"
 ```

@@ -14,7 +14,7 @@ DEFAULT_BASE_URLS = {
     "goldGap": "https://ducklove.github.io/gold_gap",
     "npsTracker": "https://ducklove.github.io/nps-tracker",
     "bondMate": "https://ducklove.github.io/bond-mate",
-    "kisProxy": "http://cantabile.tplinkdns.com:3288",
+    "kisProxy": "http://ducklove.duckdns.org:3288",
 }
 
 DEFAULT_GOLD_GAP_ASSETS = {

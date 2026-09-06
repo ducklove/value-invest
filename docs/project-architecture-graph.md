@@ -7,7 +7,7 @@ flowchart TB
   User["사용자<br/>Desktop / Mobile Browser"]
   Admin["관리자<br/>/admin.html"]
   GitHubPages["GitHub Pages<br/>ducklove.github.io<br/>redirect / linked dashboards"]
-  Pi["Raspberry Pi Server<br/>value-invest FastAPI<br/>cantabile.tplinkdns.com:3691"]
+  Pi["Raspberry Pi Server<br/>value-invest FastAPI<br/>ducklove.duckdns.org:3691"]
   SQLite[("SQLite cache.db<br/>users / portfolio / NAV<br/>analysis cache / AI usage<br/>wiki / DART reviews / events")]
 
   User -->|"HTTPS app"| Pi

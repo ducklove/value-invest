@@ -46,7 +46,7 @@ REPO_UNITS=(
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
 wait_for_healthz() {
-  # -k: cert is for cantabile.tplinkdns.com; localhost check skips name match.
+  # -k: cert is for ducklove.duckdns.org; localhost check skips name match.
   log "Waiting for healthz"
   for i in {1..20}; do
     if curl -fsSk --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then

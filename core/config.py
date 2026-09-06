@@ -23,7 +23,7 @@ DEFAULT_CORS_ORIGINS = (
     "http://localhost:8021",
     "http://127.0.0.1:8021",
     "https://ducklove.github.io",
-    "https://cantabile.tplinkdns.com:3691",
+    "https://ducklove.duckdns.org:3691",
 )
 
 # 단일화 이전에 쓰이던 설정 파일들. 더 이상 읽지 않으며, 남아 있으면 값이

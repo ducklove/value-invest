@@ -14,7 +14,7 @@ let _mdInFlight = null;
 
 // Display order for category groups; unknown categories fall to the end.
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '하이퍼리퀴드'];
-const MD_INDEX_FRAME_BASE_URL = 'https://cantabile.tplinkdns.com:3358/';
+const MD_INDEX_FRAME_BASE_URL = 'https://ducklove.duckdns.org:3358/';
 const MD_INDEX_FRAME_CODES = { KOSPI: 'ekospi', KOSDAQ: 'kosdaq' };
 const MD_INDEX_DISPLAY_LABELS = { KOSPI: 'eKOSPI', KOSDAQ: 'KOSDAQ' };
 const MD_INDEX_DESCRIPTIONS = {

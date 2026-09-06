@@ -117,7 +117,7 @@ import httpx
 
 def notify(text: str, *, title: str = "", source: str = "finance-pi") -> None:
     httpx.post(
-        "https://cantabile.tplinkdns.com:3691/api/internal/notify",
+        "https://ducklove.duckdns.org:3691/api/internal/notify",
         json={"text": text, "title": title, "source": source},
         headers={"X-Internal-Token": INTERNAL_API_TOKEN},
         timeout=10,

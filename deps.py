@@ -56,7 +56,7 @@ TRUSTED_RETURN_ORIGINS = {
     "http://localhost:8010",
     "http://127.0.0.1:8010",
     "https://ducklove.github.io",
-    "https://cantabile.tplinkdns.com:3691",
+    "https://ducklove.duckdns.org:3691",
 }
 
 

@@ -85,6 +85,12 @@ Markdown 라이브러리는 `package-lock.json`과 일치하는 파일을 `stati
 - 운영 이벤트/슬로우 요청은 `system_events` 테이블(30일 TTL)에 기록되고
   `/admin.html` 관측성 패널에서 본다.
 - 장애 시 systemd `OnFailure` 훅이 ntfy.sh로 알림을 보낸다.
+- 공개 주소는 `https://ducklove.duckdns.org:3691`(DuckDNS). uvicorn 이 직접 TLS 를
+  종단하며 인증서는 certbot webroot(`/srv/acme`, Caddy 가 80 포트 챌린지 경로 서빙)로
+  자동 갱신된다. 도메인을 옮기면 새 인증서 발급 → `.env` 의 `TLS_CERT_NAME` 변경 →
+  `core/config.py`·`deps.py`·`static/app-config.js` 등의 기본 origin 을 함께 바꾼다
+  (`git grep -n duckdns` 로 목록 확인). Google 로그인은 GIS 팝업 모드라 Google Cloud
+  콘솔의 "승인된 JavaScript 원본"에 새 origin(포트 포함)을 등록해야 한다.
 - `/healthz`는 프로세스 응답, `/readyz`는 필수 DB 테이블 조회 가능 여부를 확인한다.
   외부 시세 신선도는 데이터 품질 점검으로 구분한다. 해당 점검의 오류는 HTTP 503으로
   전달되어 timer의 `curl -f`와 `OnFailure`까지 이어진다.

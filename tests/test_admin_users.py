@@ -153,7 +153,7 @@ class AdminUserManagementTests(TempDbMixin):
 
         public_host_request = _request(
             "/api/admin/users/u2/portfolio.html",
-            headers={"Host": "cantabile.tplinkdns.com:3691"},
+            headers={"Host": "ducklove.duckdns.org:3691"},
             client_host="127.0.0.1",
         )
         with patch("routes.admin.get_current_user", AsyncMock(return_value=admin_user)):

@@ -32,7 +32,7 @@ AUTH_BASE = "https://kauth.kakao.com"
 API_BASE = "https://kapi.kakao.com"
 MEMO_TEXT_MAX = 200  # Kakao default text template limit.
 _BLOCK_SPLIT_RE = re.compile(r"\n\s*\n")  # 빈 줄 = 브리핑 섹션 경계
-_APP_URL = "https://cantabile.tplinkdns.com:3691"
+_APP_URL = "https://ducklove.duckdns.org:3691"
 
 
 def env_key() -> str:

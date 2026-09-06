@@ -17,15 +17,15 @@
 # and open port 443 on the home router, point DDNS there.
 #
 # Keep the old uvicorn-with-TLS setup running in parallel until you've
-# verified Caddy works, then switch. `cantabile.tplinkdns.com:3691`
+# verified Caddy works, then switch. `ducklove.duckdns.org:3691`
 # will keep working during migration; the new entry point is just
-# `cantabile.tplinkdns.com` (port 443 implicit).
+# `ducklove.duckdns.org` (port 443 implicit).
 
 # --- Main site ---
-cantabile.tplinkdns.com {
+ducklove.duckdns.org {
     # Use existing LE certs so certbot's renewal cron keeps working.
-    tls /etc/letsencrypt/live/cantabile.tplinkdns.com/fullchain.pem \
-        /etc/letsencrypt/live/cantabile.tplinkdns.com/privkey.pem
+    tls /etc/letsencrypt/live/ducklove.duckdns.org/fullchain.pem \
+        /etc/letsencrypt/live/ducklove.duckdns.org/privkey.pem
 
     # Security headers
     header {
@@ -63,6 +63,6 @@ cantabile.tplinkdns.com {
 }
 
 # --- Optional: redirect :3691 to :443 during migration ---
-# cantabile.tplinkdns.com:3691 {
-#     redir https://cantabile.tplinkdns.com{uri} permanent
+# ducklove.duckdns.org:3691 {
+#     redir https://ducklove.duckdns.org{uri} permanent
 # }

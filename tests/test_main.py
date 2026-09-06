@@ -104,7 +104,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         request = _request_with_headers(
             "/api/admin/trigger/portfolio-snapshot",
             headers={
-                "Host": "cantabile.tplinkdns.com:3691",
+                "Host": "ducklove.duckdns.org:3691",
                 "Content-Type": "application/json",
                 "Origin": "https://evil.example",
                 "X-Forwarded-Proto": "https",
@@ -120,9 +120,9 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         request = _request_with_headers(
             "/api/admin/trigger/portfolio-snapshot",
             headers={
-                "Host": "cantabile.tplinkdns.com:3691",
+                "Host": "ducklove.duckdns.org:3691",
                 "Content-Type": "text/plain",
-                "Origin": "https://cantabile.tplinkdns.com:3691",
+                "Origin": "https://ducklove.duckdns.org:3691",
                 "X-Forwarded-Proto": "https",
             },
             client_host="203.0.113.20",
@@ -136,9 +136,9 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         request = _request_with_headers(
             "/api/admin/trigger/portfolio-snapshot",
             headers={
-                "Host": "cantabile.tplinkdns.com:3691",
+                "Host": "ducklove.duckdns.org:3691",
                 "Content-Type": "application/json",
-                "Origin": "https://cantabile.tplinkdns.com:3691",
+                "Origin": "https://ducklove.duckdns.org:3691",
                 "X-Forwarded-Proto": "https",
             },
             client_host="203.0.113.20",
