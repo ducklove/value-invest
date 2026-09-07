@@ -11,7 +11,9 @@ from fastapi.staticfiles import StaticFiles
 import integrations
 from core.config import AppSettings
 
-SPA_PATHS = ("/analysis", "/portfolio", "/nps", "/labs", "/tools", "/insights", "/screener", "/masters", "/bonds")
+# switchView 가 pushState 하는 모든 경로(portfolio-shell.js PF_VIEW_PATHS)는 여기에도
+# 있어야 한다 — 빠지면 그 탭에서 새로고침·북마크 진입이 404 JSON 으로 떨어진다.
+SPA_PATHS = ("/investing", "/analysis", "/portfolio", "/nps", "/labs", "/tools", "/insights", "/screener", "/masters", "/bonds")
 
 
 StaticHandlers = dict[str, Callable[[], Awaitable[Response]]]
