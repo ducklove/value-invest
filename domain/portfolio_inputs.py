@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, StrictBool, ValidationError, field_validator
 
+from services.portfolio.time_windows import today_kst_date
+
 Quantity = Annotated[float, Field(allow_inf_nan=False, ge=-1_000_000_000, le=1_000_000_000)]
 Price = Annotated[float, Field(allow_inf_nan=False, ge=0, le=1_000_000_000_000)]
 
@@ -69,7 +71,9 @@ class CashflowInput(BaseModel):
     @field_validator("date")
     @classmethod
     def valid_date(cls, value):
-        HoldingInput.calendar_date(value)
+        parsed = HoldingInput.calendar_date(value)
+        if parsed and parsed > today_kst_date():
+            raise ValueError("입출금 날짜는 오늘 이후로 지정할 수 없습니다.")
         return value
 
 

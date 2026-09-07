@@ -1080,14 +1080,11 @@ async def get_prev_day_snapshot(request: Request):
         created_after = _settlement_marker_seconds(snap_date)
     else:
         created_after = baseline_date
-    cursor2 = await db.execute(
-        "SELECT id, type, amount, nav_at_time, units_change, created_at FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ? ORDER BY created_at ASC, id ASC",
-        (user["google_sub"], created_after),
-    )
+    cashflow_rows = await snapshots_repo.get_cashflows_created_after(user["google_sub"], created_after)
     today_net_cashflow = 0.0
     today_cashflows_by_stock: dict[str, float] = {}
     today_cashflows: list[dict] = []
-    for row in await cursor2.fetchall():
+    for row in cashflow_rows:
         signed_amount = 0.0
         if row["type"] == "deposit":
             signed_amount = row["amount"]
@@ -1102,6 +1099,7 @@ async def get_prev_day_snapshot(request: Request):
                 "nav_at_time": row["nav_at_time"],
                 "signed_amount": signed_amount,
                 "units_change": row["units_change"],
+                "applied_snapshot_date": row["applied_snapshot_date"],
                 "created_at": row["created_at"],
             })
         if signed_amount:
@@ -1128,27 +1126,9 @@ async def get_prev_day_snapshot(request: Request):
 
 
 async def _net_cashflow_since_snapshot(google_sub: str, snap_date: str) -> tuple[float, dict[str, float]]:
-    """Net deposit-withdrawal that hit the portfolio after `snap_date`'s 20:00
-    settlement. Period cards (MTD/YTD) subtract this from the raw value change
-    so the colored number is investment PnL, not cash movement.
-
-    Nominal-date first (a cashflow dated inside the period counts), with the
-    settlement `created_at` marker breaking the tie for same-day rows entered
-    after the snapshot was taken — the same boundary the Today card uses.
-    """
-    db = await db_repo.get_db()
-    marker = _settlement_marker_seconds(snap_date)
-    cursor = await db.execute(
-        "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? "
-        "AND (date > ? OR (date = ? AND created_at > ?))",
-        (google_sub, snap_date, snap_date, marker),
-    )
-    net = 0.0
-    for row in await cursor.fetchall():
-        if row["type"] == "deposit":
-            net += row["amount"]
-        elif row["type"] == "withdrawal":
-            net -= row["amount"]
+    """기준 정산 이후 실제 잔고에 반영된 순입출금 — Today와 동일한 규칙."""
+    rows = await snapshots_repo.get_cashflows_created_after(google_sub, _settlement_marker_seconds(snap_date))
+    net = sum(row["amount"] if row["type"] == "deposit" else -row["amount"] for row in rows)
     # Cashflow mutations are materialized through CASH_KRW (see
     # /prev-day-snapshot) — expose the same attribution shape so filtered
     # cards can strip cash movement from group returns.
@@ -1286,8 +1266,8 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="금액은 0보다 커야 합니다.")
     cf_date = str(payload.get("date") or "").strip()
     if not cf_date:
-        from datetime import date
-        cf_date = date.today().isoformat()
+        from services.portfolio.time_windows import today_kst_date
+        cf_date = today_kst_date().isoformat()
     memo = str(payload.get("memo") or "").strip() or None
 
     google_sub = user["google_sub"]
@@ -1308,6 +1288,8 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
             None,
             None,
         )
+    except snapshots_repo.CashflowCancellationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except snapshots_repo.CashflowBalanceError as exc:
         raise HTTPException(
             status_code=400,
@@ -1321,7 +1303,12 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
 async def delete_cashflow(cf_id: int, request: Request):
     user = _require_user(await get_current_user(request))
     google_sub = user["google_sub"]
-    deleted = await snapshots_repo.delete_cashflow_and_sync_cash(google_sub, cf_id)
+    try:
+        deleted = await snapshots_repo.delete_cashflow_and_sync_cash(google_sub, cf_id)
+    except snapshots_repo.CashflowBalanceError as exc:
+        raise HTTPException(status_code=400, detail=f"취소할 원화 잔액이 부족합니다. (잔액: {exc.balance:,.0f}원)") from exc
+    except snapshots_repo.CashflowCancellationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="현금흐름을 찾을 수 없습니다.")
 

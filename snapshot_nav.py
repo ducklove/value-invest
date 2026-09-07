@@ -182,21 +182,34 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
 
 
 async def take_snapshot(google_sub: str, snap_date: str) -> int:
-    """Take a daily snapshot and compute NAV for one user.
+    """평가 전후의 잔고·원장·정산 이력을 검증한 뒤 원자적으로 정산한다.
 
-    Returns the number of holdings whose value was carried forward from the
-    previous snapshot because a fresh/historical quote was unavailable. 0 means
-    the whole portfolio was valued from real quotes; a positive count means the
-    snapshot is partly (or wholly) a copy of the prior settlement and the caller
-    should surface it rather than record an unqualified success.
+    외부 시세를 기다리는 동안 잠금을 잡지 않는다. 입력이 바뀌면 시세를
+    포함해 재시도하므로 평가액과 입출금이 다른 시점으로 저장되지 않는다.
     """
-    total_value, total_invested, per_stock = await _fetch_total_value(google_sub, snap_date)
-    if total_value == 0:
-        logger.info("Skipping %s: portfolio value is 0", google_sub)
-        return 0
+    for attempt in range(3):
+        async with db_repo.transaction():
+            expected = await snapshots_repo.get_nav_input_state(google_sub)
+            cutoff = datetime.now(KST).replace(tzinfo=None).isoformat()
+        total_value, total_invested, per_stock = await _fetch_total_value(google_sub, snap_date)
+        async with db_repo.transaction():
+            if await snapshots_repo.get_nav_input_state(google_sub) != expected:
+                logger.info("NAV inputs changed; retry %d for %s", attempt + 1, google_sub[:8])
+                continue
+            return await _persist_snapshot(google_sub, snap_date, total_value, total_invested, per_stock, cutoff)
+    raise SnapshotIncomplete("정산 중 잔고가 계속 변경되어 저장하지 않았습니다. 다시 실행해 주세요.")
 
+
+async def _persist_snapshot(
+    google_sub: str, snap_date: str, total_value: float, total_invested: float,
+    per_stock: list[dict], cutoff: str,
+) -> int:
+    """호출자가 보유한 transaction 안에서 NAV·원장·종목을 함께 저장한다."""
     existing = await snapshots_repo.get_snapshot_by_date(google_sub, snap_date)
     prev = existing or await snapshots_repo.get_latest_snapshot_before_date(google_sub, snap_date)
+
+    if prev is None and total_value == 0:
+        return 0
 
     if prev is None:
         # First snapshot ever
@@ -235,8 +248,10 @@ async def take_snapshot(google_sub: str, snap_date: str) -> int:
         cf["amount"] if cf["type"] == "deposit" else -cf["amount"] for cf in fresh
     )
     issue_nav = nav
-    if total_units > 0:
-        candidate = (total_value - net_fresh) / total_units
+    # 이미 좌수가 정해진 과거 거래도 먼저 분모에 포함한다.
+    preset_units = sum(cf["units_change"] for cf in preset)
+    if total_units + preset_units > 0:
+        candidate = (total_value - net_fresh) / (total_units + preset_units)
         if candidate > 0:
             issue_nav = candidate
 
@@ -267,27 +282,27 @@ async def take_snapshot(google_sub: str, snap_date: str) -> int:
         ))
 
     # Compute new NAV
-    if total_units > 0:
+    if abs(total_units) < 1e-8 and abs(total_value) < 1e-6:
+        # 전액 출금도 정산한다. 재입금 시 같은 기준가로 재개한다.
+        total_units = 0.0
+        nav = issue_nav
+    elif total_units > 0:
         nav = total_value / total_units
     else:
-        nav = BASE_NAV
-        total_units = total_value / BASE_NAV if total_value > 0 else 0
+        raise SnapshotIncomplete("평가액과 정산 좌수가 일치하지 않아 저장하지 않았습니다.")
 
     if marking_updates:
         # 마킹과 스냅샷 저장은 한 트랜잭션 — 둘이 갈라지면 어느 쪽이든
         # 유닛이 유실(마킹만 커밋)되거나 이중 반영(스냅샷만 커밋 후 재실행)
         # 된다. save_snapshot 내부 transaction() 은 재진입이라 여기 합류.
-        # save_stock_snapshots 는 전용 커넥션(BEGIN IMMEDIATE)을 쓰므로 이
-        # 블록 안에 넣으면 자기 자신과 데드락 — 커밋 후에 호출한다. 그쪽은
-        # 표시용 per-stock 데이터라 유닛 회계와 원자성이 필요 없다.
+        # 종목·그룹 스냅샷 역시 바깥 transaction 에 합류한다.
         async with db_repo.transaction() as db:
             for sql, params in marking_updates:
                 await db.execute(sql, params)
-            await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
+            await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw, cashflow_cutoff_at=cutoff)
     else:
-        await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw)
-    if per_stock:
-        await snapshots_repo.save_stock_snapshots(google_sub, snap_date, per_stock)
+        await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw, cashflow_cutoff_at=cutoff)
+    await snapshots_repo.save_stock_snapshots(google_sub, snap_date, per_stock)
     fallback_count = sum(1 for s in per_stock if s.get("priced_from_fallback"))
     logger.info(
         "Snapshot saved: %s date=%s value=%.0f nav=%.2f units=%.2f stocks=%d fallback=%d fx=%.1f",

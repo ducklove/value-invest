@@ -1,12 +1,22 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
 import snapshot_nav
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def isolate_snapshot_unit_tests(monkeypatch):
+    # 이 파일은 시세/정산 단위 테스트다. 실제 DB 동시성은 별도 수명주기 테스트로 검증한다.
+    @asynccontextmanager
+    async def fake_transaction():
+        yield AsyncMock()
+    monkeypatch.setattr(snapshot_nav.db_repo, "transaction", fake_transaction)
+    monkeypatch.setattr(snapshot_nav.snapshots_repo, "get_nav_input_state", AsyncMock(return_value=()))
 
 
 def test_snapshot_nav_does_not_import_portfolio_route_private_helpers():
@@ -242,7 +252,7 @@ async def test_take_snapshot_rerun_preserves_existing_units():
 
     get_before.assert_not_awaited()
     get_cashflows.assert_awaited_once_with("u1", "2026-05-18")
-    save_snapshot.assert_awaited_once_with("u1", "2026-05-18", 12000, 8000, 1200, 10, snapshot_nav._fx_usdkrw)
+    save_snapshot.assert_awaited_once_with("u1", "2026-05-18", 12000, 8000, 1200, 10, snapshot_nav._fx_usdkrw, cashflow_cutoff_at=ANY)
 
 
 @pytest.mark.asyncio
@@ -305,7 +315,7 @@ async def test_take_snapshot_applies_same_day_cashflow_units_to_nav_denominator(
     )
     expected_units = 10 + 2000 / issue_nav - 1000 / issue_nav  # 10.909090...
     save_snapshot.assert_awaited_once_with(
-        "u1", "2026-05-18", 12000, 8000, 12000 / expected_units, expected_units, snapshot_nav._fx_usdkrw,
+        "u1", "2026-05-18", 12000, 8000, 12000 / expected_units, expected_units, snapshot_nav._fx_usdkrw, cashflow_cutoff_at=ANY,
     )
 
 
@@ -357,7 +367,7 @@ async def test_take_snapshot_marks_preset_units_applied_without_reissuing():
         ("2026-05-18", 7),
     )
     save_snapshot.assert_awaited_once_with(
-        "u1", "2026-05-18", 12000, 8000, 12000 / 10.5, 10.5, snapshot_nav._fx_usdkrw,
+        "u1", "2026-05-18", 12000, 8000, 12000 / 10.5, 10.5, snapshot_nav._fx_usdkrw, cashflow_cutoff_at=ANY,
     )
 
 
@@ -410,7 +420,7 @@ async def test_take_snapshot_first_snapshot_marks_cashflows_without_issuing():
     )
     # 5000/1000 = 5 units, nav = BASE_NAV — 입금 유닛이 또 발행되지 않는다.
     save_snapshot.assert_awaited_once_with(
-        "u1", "2026-05-18", 5000, 5000, 1000.0, 5.0, snapshot_nav._fx_usdkrw,
+        "u1", "2026-05-18", 5000, 5000, 1000.0, 5.0, snapshot_nav._fx_usdkrw, cashflow_cutoff_at=ANY,
     )
 
 

@@ -31,7 +31,6 @@ import close_price_client
 import market_indicators
 import market_movers
 from repositories import dart_review as dart_review_repo
-from repositories import db as db_repo
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -490,14 +489,9 @@ async def _fetch_market_flow_block() -> list[str]:
 async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None) -> float:
     if not snap_date:
         return 0.0
-    db = await db_repo.get_db()
-    cursor = await db.execute(
-        "SELECT type, amount FROM portfolio_cashflows"
-        " WHERE google_sub = ? AND created_at > ?",
-        (google_sub, time_windows.settlement_marker_seconds(snap_date)),
-    )
+    rows = await snapshots_repo.get_cashflows_created_after(google_sub, time_windows.settlement_marker_seconds(snap_date))
     net = 0.0
-    for row in await cursor.fetchall():
+    for row in rows:
         amount = _safe_float(row["amount"]) or 0.0
         if row["type"] == "deposit":
             net += amount

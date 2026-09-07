@@ -54,15 +54,27 @@ async def _seed_period_fixture():
     await db.executemany(
         """
         INSERT INTO portfolio_cashflows
-        (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at, applied_snapshot_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("u1", "2026-06-15", "deposit", 200_000, 1050.0, 190.476, "monthly add", "2026-06-15T12:00:00"),
-            ("u1", "2026-06-20", "withdrawal", 50_000, 1060.0, -47.169, "trim cash", "2026-06-20T12:00:00"),
+            ("u1", "2026-06-15", "deposit", 200_000, 1050.0, 190.476, "monthly add", "2026-06-15T12:00:00", "2026-06-30"),
+            ("u1", "2026-06-20", "withdrawal", 50_000, 1060.0, -47.169, "trim cash", "2026-06-20T12:00:00", "2026-06-30"),
         ],
     )
     await db.commit()
+
+
+def test_cashflow_summary_uses_settlement_month_and_excludes_pending():
+    rows = [
+        {"id": 1, "date": "2026-05-31", "type": "deposit", "amount": 200_000, "applied_snapshot_date": "2026-06-01"},
+        {"id": 2, "date": "2026-06-30", "type": "withdrawal", "amount": 50_000, "applied_snapshot_date": "2026-07-01"},
+        {"id": 3, "date": "2026-06-15", "type": "deposit", "amount": 100_000, "applied_snapshot_date": None},
+    ]
+    summary = period_reports._cashflow_summary(rows, "2026-06-01", "2026-06-30")
+    assert summary["count"] == 1
+    assert summary["net_cashflow"] == 200_000
+    assert summary["rows"][0]["applied_snapshot_date"] == "2026-06-01"
 
 
 @pytest.mark.asyncio
