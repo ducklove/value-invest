@@ -26,7 +26,7 @@ function renderCashflows(data, navData = _navChartData) {
     return Number.isFinite(value) && Number.isFinite(nav) && nav > 0 ? value / nav : null;
   };
   const compareCashflows = (a, b) => {
-    const dateCompare = String(a.date || '').localeCompare(String(b.date || ''));
+    const dateCompare = String(a.applied_snapshot_date || a.created_at || a.date || '').localeCompare(String(b.applied_snapshot_date || b.created_at || b.date || ''));
     if (dateCompare !== 0) return dateCompare;
     const createdCompare = String(a.created_at || '').localeCompare(String(b.created_at || ''));
     if (createdCompare !== 0) return createdCompare;
@@ -41,7 +41,7 @@ function renderCashflows(data, navData = _navChartData) {
   let snapshotIdx = -1;
   let activeSnapshotDate = '';
   [...data].sort(compareCashflows).forEach(cf => {
-    const cfDate = String(cf.date || '');
+    const cfDate = String(cf.applied_snapshot_date || cf.date || '');
     while (snapshotIdx + 1 < snapshots.length && snapshots[snapshotIdx + 1].date <= cfDate) {
       snapshotIdx += 1;
       runningUnits = snapshots[snapshotIdx].units;
@@ -52,7 +52,7 @@ function renderCashflows(data, navData = _navChartData) {
       const delta = Number(cf.units_change);
       if (Number.isFinite(delta)) runningUnits += delta;
     }
-    remainingUnitsById.set(String(cf.id), runningUnits);
+    remainingUnitsById.set(String(cf.id), cf.applied_snapshot_date ? runningUnits : null);
   });
   tbody.innerHTML = data.map(cf => {
     const isDeposit = cf.type === 'deposit';
@@ -64,7 +64,7 @@ function renderCashflows(data, navData = _navChartData) {
     <td class="pf-col-num">${fmtCfSignedDecimal(cf.units_change)}</td>
     <td class="pf-col-num">${fmtCfDecimal(remainingUnitsById.get(String(cf.id)))}</td>
     <td title="${escapeHtml(cf.memo || '')}">${escapeHtml(cf.memo || '')}</td>
-    <td><button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}" aria-label="입출금 삭제" title="삭제">&times;</button></td>
+    <td>${cf.cancelled_at ? '취소됨' : cf.reversal_of_id != null ? '취소 거래' : `<button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}" aria-label="입출금 취소" title="${cf.applied_snapshot_date ? '취소 거래로 되돌리기' : '삭제'}">&times;</button>`}</td>
   </tr>`;
   }).join('');
 }
@@ -102,7 +102,7 @@ async function addCashflow() {
 }
 
 async function deleteCashflow(id) {
-  if (!confirm('이 입출금 내역을 삭제할까요?')) return;
+  if (!confirm('이 입출금을 취소할까요? 정산된 내역은 취소 거래를 남기고 현재 원화 잔고를 되돌립니다.')) return;
   try {
     await apiFetchJson(`/api/portfolio/cashflows/${id}`, {
       method: 'DELETE',

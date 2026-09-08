@@ -346,10 +346,12 @@ def _select_snapshots(
 
 
 def _cashflow_summary(cashflows: list[dict], start_date: str, end_date: str) -> dict[str, Any]:
-    rows = [
-        row for row in cashflows
-        if start_date <= str(row.get("date") or "") <= end_date
-    ]
+    def effective_date(row):
+        if "applied_snapshot_date" in row:
+            return str(row.get("applied_snapshot_date") or "")
+        return str(row.get("date") or "")  # 과거 보고서/테스트 자료 호환
+
+    rows = [row for row in cashflows if start_date <= effective_date(row) <= end_date]
     deposits = [float(r.get("amount") or 0) for r in rows if r.get("type") == "deposit"]
     withdrawals = [float(r.get("amount") or 0) for r in rows if r.get("type") == "withdrawal"]
     total_deposit = sum(deposits)
@@ -368,6 +370,7 @@ def _cashflow_summary(cashflows: list[dict], start_date: str, end_date: str) -> 
                 "type": row.get("type"),
                 "amount": _round(row.get("amount"), 2),
                 "memo": row.get("memo") or "",
+                "applied_snapshot_date": row.get("applied_snapshot_date"),
             }
             for row in sorted(rows, key=lambda r: (str(r.get("date") or ""), int(r.get("id") or 0)))
         ],
@@ -860,6 +863,11 @@ def _data_quality(
         notes.append("시작 종목별 스냅샷이 없어 종목 변화가 제한적으로 표시됩니다.")
     if not end_rows:
         notes.append("종료 종목별 스냅샷이 없어 종목 변화가 제한적으로 표시됩니다.")
+    for label, snap, rows in (("시작", baseline, start_rows), ("종료", end_snapshot, end_rows)):
+        if snap and rows and rows[0].get("date") == snap.get("date"):
+            difference = sum(float(row.get("market_value") or 0) for row in rows) - float(snap.get("total_value") or 0)
+            if abs(difference) > 1:
+                notes.append(f"{label} 종목별 평가액 합계가 NAV 평가액과 {difference:,.0f}원 다릅니다. 원자료 확인이 필요합니다.")
     stock_rows = [*start_rows, *end_rows]
     quantity_rows = [row for row in stock_rows if row.get("quantity") is not None]
     if stock_rows and not quantity_rows:

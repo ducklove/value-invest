@@ -293,6 +293,9 @@ async def _current_nav(google_sub: str, total_value: float, baseline: dict) -> f
     pending_units = 0.0
     pending_cash = 0.0
     for cashflow in baseline["cashflows"]:
+        applied = cashflow.get("applied_snapshot_date")
+        if applied and applied <= latest["date"]:
+            continue
         units = _safe_float(cashflow.get("units_change"))
         if units is not None:
             pending_units += units

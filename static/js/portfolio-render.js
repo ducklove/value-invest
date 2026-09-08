@@ -418,7 +418,9 @@ function renderPortfolio(options = {}) {
   let _pendingCashflowWithoutUnits = 0;
   if (!isFiltered && Array.isArray(PfStore.snapshots.prevDay?.today_cashflows)) {
     for (const cf of PfStore.snapshots.prevDay.today_cashflows) {
-      const units = Number(cf?.units_change);
+      // Today 기준선 이후 거래라도 최신 NAV 정산에 이미 반영됐으면 제외한다.
+      if (cf.applied_snapshot_date && latestSnap && cf.applied_snapshot_date <= latestSnap.date) continue;
+      const units = cf?.units_change == null ? NaN : Number(cf?.units_change);
       if (Number.isFinite(units)) _pendingUnitsChange += units;
       else _pendingCashflowWithoutUnits += Number(cf?.signed_amount || 0);
     }

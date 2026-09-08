@@ -1,21 +1,20 @@
 """Portfolio NAV / snapshots / cashflows repository.
 
-Daily + intraday snapshots, NAV/group-weight/constituent history, and the
-cashflow transactions (incl. the atomic add/delete_cashflow_and_sync_cash that
-keep CASH_KRW in step). Extracted verbatim from cache.py; cache.py re-exports
-these as ``cache.<fn>``. The atomic paths open their own aiosqlite connection
-against repositories.db.DB_PATH; the group/stock weight rebuild helpers and
-init-time snapshot backfills live here too.
+Daily + intraday snapshots, NAV/group-weight/constituent history, and atomic
+cashflow transactions. NAV, cashflow markers and constituent snapshots share
+the repositories.db.transaction boundary.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import aiosqlite
 
-from repositories import db as db_module
 from repositories.db import get_db, transaction
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 async def _refresh_group_snapshots(db: aiosqlite.Connection, google_sub: str | None = None, snap_date: str | None = None):
@@ -223,14 +222,14 @@ async def get_latest_snapshot_before_date(google_sub: str, snap_date: str) -> di
     return dict(row) if row else None
 
 
-async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float, fx_usdkrw: float | None = None):
+async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float, fx_usdkrw: float | None = None, *, cashflow_cutoff_at: str | None = None):
     # 단문이지만 공유 커넥션 위의 맨 commit 은 다른 task 의 진행 중 쓰기를
     # 같이 커밋할 수 있어 transaction() 으로 통일한다 (이하 쓰기 헬퍼 동일).
     async with transaction() as db:
         await db.execute(
-            """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw),
+            """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw, cashflow_cutoff_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw, cashflow_cutoff_at),
         )
 
 
@@ -277,30 +276,42 @@ async def get_snapshot_on_or_before(google_sub: str, snap_date: str) -> dict | N
 
 
 async def get_cashflows_created_after(google_sub: str, created_after: str) -> list[dict]:
-    """스냅샷 이후 입력된 입출금 — 아직 정산에 반영되지 않은 것들.
+    """기준 정산 이후 잔고에 반영된 거래. 명목 날짜보다 실제 정산 귀속이 우선한다.
 
-    date 가 아니라 created_at 으로 자르는 이유는 정산 뒤에 소급 입력된
-    입출금도 잡아야 하기 때문이다 (routes/portfolio.py 의 prev-day 경로와 동일).
+    호출자는 기준일의 정산 마커를 넘긴다. 새 스냅샷은 잔고를 읽은 실제
+    시점을 쓰고, 이전 스냅샷은 20:00 마커로 호환한다. 이미 기준 정산에
+    반영된 거래는 생성 시각이 20시 이후여도 다시 보정하지 않는다.
     """
     db = await get_db()
+    snapshot_date = created_after[:10]
     cursor = await db.execute(
-        "SELECT id, type, amount, nav_at_time, units_change, created_at "
-        "FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ? "
+        "SELECT cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? AND date = ?",
+        (google_sub, snapshot_date),
+    )
+    snap = await cursor.fetchone()
+    cutoff = (snap["cashflow_cutoff_at"] if snap else None) or created_after
+    cursor = await db.execute(
+        "SELECT id, date, type, amount, nav_at_time, units_change, applied_snapshot_date, created_at "
+        "FROM portfolio_cashflows WHERE google_sub = ? AND "
+        "(applied_snapshot_date > ? OR (applied_snapshot_date IS NULL AND created_at > ?)) "
         "ORDER BY created_at ASC, id ASC",
-        (google_sub, created_after),
+        (google_sub, snapshot_date, cutoff),
     )
     return [dict(row) for row in await cursor.fetchall()]
 
 
-async def get_cashflows_since_settlement(google_sub: str, snap_date: str, marker: str) -> list[dict]:
-    """기간 내 명목일 또는 기준일 정산 뒤에 입력된 입출금."""
+async def get_nav_input_state(google_sub: str) -> tuple:
+    """짧은 트랜잭션 안에서 읽어 평가 전후의 입력 일치를 검증한다."""
     db = await get_db()
-    cursor = await db.execute(
-        "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? "
-        "AND (date > ? OR (date = ? AND created_at > ?))",
-        (google_sub, snap_date, snap_date, marker),
-    )
-    return [dict(row) for row in await cursor.fetchall()]
+    state = []
+    for sql in (
+        "SELECT * FROM user_portfolio WHERE google_sub = ? ORDER BY stock_code",
+        "SELECT * FROM portfolio_cashflows WHERE google_sub = ? ORDER BY id",
+        "SELECT * FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date DESC LIMIT 1",
+    ):
+        cursor = await db.execute(sql, (google_sub,))
+        state.append(tuple(tuple(row) for row in await cursor.fetchall()))
+    return tuple(state)
 
 
 async def get_nav_history(google_sub: str) -> list[dict]:
@@ -437,7 +448,7 @@ async def get_tag_history(google_sub: str, tag: str) -> list[dict]:
 async def get_cashflows(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT id, date, type, amount, nav_at_time, units_change, applied_snapshot_date, memo, created_at FROM portfolio_cashflows WHERE google_sub = ? ORDER BY date DESC, created_at DESC",
+        "SELECT id, date, type, amount, nav_at_time, units_change, applied_snapshot_date, reversal_of_id, cancelled_at, memo, created_at FROM portfolio_cashflows WHERE google_sub = ? ORDER BY date DESC, created_at DESC",
         (google_sub,),
     )
     return [dict(row) for row in await cursor.fetchall()]
@@ -450,121 +461,87 @@ class CashflowBalanceError(ValueError):
         super().__init__(f"insufficient CASH_KRW balance: {balance} < {amount}")
 
 
+class CashflowCancellationError(ValueError):
+    pass
+
+
+async def _sync_cash(db, google_sub: str, delta: float, now: str) -> None:
+    cursor = await db.execute(
+        "SELECT quantity FROM user_portfolio WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
+        (google_sub,),
+    )
+    cash = await cursor.fetchone()
+    balance = float(cash["quantity"]) if cash else 0.0
+    if balance + delta < 0:
+        raise CashflowBalanceError(balance, -delta)
+    if cash:
+        await db.execute(
+            "UPDATE user_portfolio SET quantity = ?, avg_price = 1.0, updated_at = ? "
+            "WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
+            (balance + delta, now, google_sub),
+        )
+    elif delta > 0:
+        await db.execute(
+            "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, currency, created_at, updated_at) "
+            "VALUES (?, 'CASH_KRW', '원화', 1.0, ?, 'KRW', ?, ?)",
+            (google_sub, delta, now, now),
+        )
+
+
 async def add_cashflow_and_sync_cash(
-    google_sub: str,
-    date: str,
-    cf_type: str,
-    amount: float,
-    memo: str | None,
-    nav_at_time: float | None,
-    units_change: float | None,
+    google_sub: str, date: str, cf_type: str, amount: float,
+    memo: str | None, nav_at_time: float | None, units_change: float | None,
 ) -> dict:
-    now = datetime.now().isoformat()
-    async with aiosqlite.connect(db_module.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("PRAGMA foreign_keys=ON")
-        await db.execute("BEGIN IMMEDIATE")
-        try:
-            cash_cursor = await db.execute(
-                "SELECT quantity, avg_price FROM user_portfolio WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
-                (google_sub,),
-            )
-            cash_item = await cash_cursor.fetchone()
-            cash_balance = (cash_item["quantity"] * cash_item["avg_price"]) if cash_item else 0
-            if cf_type == "withdrawal" and cash_balance < amount:
-                raise CashflowBalanceError(cash_balance, amount)
-
-            cursor = await db.execute(
-                "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (google_sub, date, cf_type, amount, nav_at_time, units_change, memo, now),
-            )
-
-            delta = int(amount) if cf_type == "deposit" else -int(amount)
-            if cash_item:
-                new_qty = max(0, int(cash_item["quantity"]) + delta)
-                await db.execute(
-                    "UPDATE user_portfolio SET quantity = ?, updated_at = ? WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
-                    (new_qty, now, google_sub),
-                )
-            elif cf_type == "deposit":
-                await db.execute(
-                    "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, currency, created_at, updated_at) VALUES (?, 'CASH_KRW', '원화', 1.0, ?, 'KRW', ?, ?)",
-                    (google_sub, int(amount), now, now),
-                )
-
-            await db.commit()
-            return {
-                "id": cursor.lastrowid,
-                "date": date,
-                "type": cf_type,
-                "amount": amount,
-                "nav_at_time": nav_at_time,
-                "units_change": units_change,
-                "memo": memo,
-                "created_at": now,
-            }
-        except Exception:
-            await db.rollback()
-            raise
+    now = datetime.now(KST).replace(tzinfo=None).isoformat()
+    if date > now[:10]:
+        raise CashflowCancellationError("미래 날짜의 입출금은 등록할 수 없습니다.")
+    async with transaction() as db:
+        await _sync_cash(db, google_sub, amount if cf_type == "deposit" else -amount, now)
+        cursor = await db.execute(
+            "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (google_sub, date, cf_type, amount, nav_at_time, units_change, memo, now),
+        )
+        return {
+            "id": cursor.lastrowid, "date": date, "type": cf_type, "amount": amount,
+            "nav_at_time": nav_at_time, "units_change": units_change,
+            "memo": memo, "created_at": now,
+        }
 
 
 async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
-    async with aiosqlite.connect(db_module.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("PRAGMA foreign_keys=ON")
-        await db.execute("BEGIN IMMEDIATE")
-        try:
-            cursor = await db.execute(
-                "SELECT id, type, amount, units_change, applied_snapshot_date FROM portfolio_cashflows WHERE id = ? AND google_sub = ?",
-                (cf_id, google_sub),
-            )
-            cf = await cursor.fetchone()
-            if not cf:
-                await db.commit()
-                return False
+    """미정산 거래는 제거하고, 정산된 거래는 오늘의 반대 거래로 취소한다.
 
+    과거 평가액/좌수를 고치면 이후 수익률까지 변하므로 완료된 정산은
+    보존한다. 취소 거래도 다음 정산까지 같은 미정산 보정을 받는다.
+    """
+    now = datetime.now(KST).replace(tzinfo=None).isoformat()
+    async with transaction() as db:
+        cursor = await db.execute(
+            "SELECT * FROM portfolio_cashflows WHERE id = ? AND google_sub = ?", (cf_id, google_sub),
+        )
+        cf = await cursor.fetchone()
+        if not cf:
+            return False
+        if cf["cancelled_at"]:
+            return True  # 중복 요청이 잔고를 두 번 바꾸지 않는다.
+        if cf["reversal_of_id"] is not None:
+            raise CashflowCancellationError("취소 거래는 삭제할 수 없습니다. 새 입출금으로 정정해 주세요.")
+        reverse_delta = -cf["amount"] if cf["type"] == "deposit" else cf["amount"]
+        await _sync_cash(db, google_sub, reverse_delta, now)
+        if cf["applied_snapshot_date"]:
+            await db.execute(
+                "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, memo, created_at, reversal_of_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (google_sub, now[:10],
+                 "withdrawal" if cf["type"] == "deposit" else "deposit",
+                 cf["amount"], f"입출금 취소 (원거래 #{cf_id})", now, cf_id),
+            )
+            await db.execute("UPDATE portfolio_cashflows SET cancelled_at = ? WHERE id = ?", (now, cf_id))
+        else:
             await db.execute("DELETE FROM portfolio_cashflows WHERE id = ? AND google_sub = ?", (cf_id, google_sub))
+        return True
 
-            # 이미 정산에 반영된 유닛은 그 날짜 이후 모든 스냅샷의 분모에서
-            # 회수하고 NAV 를 재계산한다. 빼지 않으면 입금 삭제 시 평가액
-            # (CASH_KRW)만 줄고 유닛은 남아 NAV 가 영구 하락한다.
-            if cf["applied_snapshot_date"] and cf["units_change"]:
-                await db.execute(
-                    """
-                    UPDATE portfolio_snapshots
-                    SET total_units = total_units - :delta,
-                        nav = CASE
-                            WHEN (total_units - :delta) > 0 THEN total_value / (total_units - :delta)
-                            ELSE nav
-                        END
-                    WHERE google_sub = :sub AND date >= :applied
-                    """,
-                    {
-                        "delta": cf["units_change"],
-                        "sub": google_sub,
-                        "applied": cf["applied_snapshot_date"],
-                    },
-                )
-            cash_cursor = await db.execute(
-                "SELECT quantity FROM user_portfolio WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
-                (google_sub,),
-            )
-            cash_item = await cash_cursor.fetchone()
-            if cash_item:
-                reverse_delta = -cf["amount"] if cf["type"] == "deposit" else cf["amount"]
-                new_qty = max(0, int(cash_item["quantity"]) + int(reverse_delta))
-                await db.execute(
-                    "UPDATE user_portfolio SET quantity = ?, updated_at = ? WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
-                    (new_qty, datetime.now().isoformat(), google_sub),
-                )
-
-            await db.commit()
-            return True
-        except Exception:
-            await db.rollback()
-            raise
 
 async def get_all_users_with_portfolio() -> list[str]:
     db = await get_db()
@@ -590,50 +567,37 @@ async def get_pending_cashflows(google_sub: str, date: str) -> list[dict]:
 
 
 async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
-    """Save per-stock market values for a date. items: [{stock_code, market_value}, ...]
-
-    The per-stock write and the two aggregate rebuilds (group + weight
-    snapshots) must succeed or fail together: each rebuild DELETEs the day's
-    rows before re-INSERTing, so a partial failure would otherwise leave the
-    aggregate tables emptied. Run them in one explicit transaction on a
-    dedicated connection and roll back on any error.
-    """
-    async with aiosqlite.connect(db_module.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("PRAGMA foreign_keys=ON")
-        await db.execute("BEGIN IMMEDIATE")
-        try:
-            await db.executemany(
-                """
-                INSERT OR REPLACE INTO portfolio_stock_snapshots
-                (google_sub, date, stock_code, market_value, group_name, quantity, unit_price, avg_price_krw, cost_basis, priced_from_fallback, currency, fx_rate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        google_sub,
-                        date,
-                        it["stock_code"],
-                        it["market_value"],
-                        it.get("group_name"),
-                        it.get("quantity"),
-                        it.get("unit_price"),
-                        it.get("avg_price_krw"),
-                        it.get("cost_basis"),
-                        1 if it.get("priced_from_fallback") else 0,
-                        it.get("currency"),
-                        it.get("fx_rate"),
-                    )
-                    for it in items
-                ],
-            )
-            await _refresh_group_snapshots(db, google_sub=google_sub, snap_date=date)
-            await _refresh_stock_weight_snapshots(db, google_sub=google_sub, snap_date=date)
-            await db.commit()
-        except Exception:
-            await db.rollback()
-            raise
+    """일별 종목·그룹·비중을 NAV와 같은 트랜잭션에서 교체한다."""
+    async with transaction() as db:
+        await db.execute(
+            "DELETE FROM portfolio_stock_snapshots WHERE google_sub = ? AND date = ?", (google_sub, date),
+        )
+        await db.executemany(
+            """
+            INSERT OR REPLACE INTO portfolio_stock_snapshots
+            (google_sub, date, stock_code, market_value, group_name, quantity, unit_price, avg_price_krw, cost_basis, priced_from_fallback, currency, fx_rate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    google_sub,
+                    date,
+                    it["stock_code"],
+                    it["market_value"],
+                    it.get("group_name"),
+                    it.get("quantity"),
+                    it.get("unit_price"),
+                    it.get("avg_price_krw"),
+                    it.get("cost_basis"),
+                    1 if it.get("priced_from_fallback") else 0,
+                    it.get("currency"),
+                    it.get("fx_rate"),
+                )
+                for it in items
+            ],
+        )
+        await _refresh_group_snapshots(db, google_sub=google_sub, snap_date=date)
+        await _refresh_stock_weight_snapshots(db, google_sub=google_sub, snap_date=date)
 
 
 async def get_stock_snapshots_exact_date(google_sub: str, snap_date: str) -> list[dict]:

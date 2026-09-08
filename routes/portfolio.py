@@ -1168,8 +1168,8 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="금액은 0보다 커야 합니다.")
     cf_date = str(payload.get("date") or "").strip()
     if not cf_date:
-        from datetime import date
-        cf_date = date.today().isoformat()
+        from services.portfolio.time_windows import today_kst_date
+        cf_date = today_kst_date().isoformat()
     memo = str(payload.get("memo") or "").strip() or None
 
     google_sub = user["google_sub"]
@@ -1190,6 +1190,8 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
             None,
             None,
         )
+    except snapshots_repo.CashflowCancellationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except snapshots_repo.CashflowBalanceError as exc:
         raise HTTPException(
             status_code=400,
@@ -1203,7 +1205,12 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
 async def delete_cashflow(cf_id: int, request: Request):
     user = _require_user(await get_current_user(request))
     google_sub = user["google_sub"]
-    deleted = await snapshots_repo.delete_cashflow_and_sync_cash(google_sub, cf_id)
+    try:
+        deleted = await snapshots_repo.delete_cashflow_and_sync_cash(google_sub, cf_id)
+    except snapshots_repo.CashflowBalanceError as exc:
+        raise HTTPException(status_code=400, detail=f"취소할 원화 잔액이 부족합니다. (잔액: {exc.balance:,.0f}원)") from exc
+    except snapshots_repo.CashflowCancellationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="현금흐름을 찾을 수 없습니다.")
 

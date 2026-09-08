@@ -828,7 +828,10 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     # 없던 시절에는 '정산일 == date 정확 일치 + 그날 첫 정산'에서만 유닛이
     # 반영돼 주말/정산 후/소급 입력분이 영구 유실됐다 (NAV 가짜 점프).
     ("portfolio_cashflows", "applied_snapshot_date", "TEXT"),
+    ("portfolio_cashflows", "reversal_of_id", "INTEGER"),
+    ("portfolio_cashflows", "cancelled_at", "TEXT"),
     ("portfolio_snapshots", "fx_usdkrw", "REAL"),
+    ("portfolio_snapshots", "cashflow_cutoff_at", "TEXT"),
     ("portfolio_stock_snapshots", "group_name", "TEXT"),
     ("portfolio_stock_snapshots", "quantity", "REAL"),
     ("portfolio_stock_snapshots", "unit_price", "REAL"),

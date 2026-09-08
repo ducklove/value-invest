@@ -269,14 +269,9 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
     오늘 들어온/나간 현금을 수익률에서 제외한다."""
     if not snap_date:
         return 0.0
-    db = await db_repo.get_db()
-    cursor = await db.execute(
-        "SELECT type, amount FROM portfolio_cashflows"
-        " WHERE google_sub = ? AND created_at > ?",
-        (google_sub, settlement_marker_seconds(snap_date)),
-    )
+    rows = await snapshots_repo.get_cashflows_created_after(google_sub, settlement_marker_seconds(snap_date))
     net = 0.0
-    for row in await cursor.fetchall():
+    for row in rows:
         amount = _to_float(row["amount"]) or 0.0
         if row["type"] == "deposit":
             net += amount

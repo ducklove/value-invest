@@ -134,7 +134,7 @@ class NavUnitsLifecycleTests(TempDbMixin):
         self.assertAlmostEqual(snap["total_units"], 11.1)
         self.assertAlmostEqual(snap["nav"], 1000.0)
 
-    async def test_delete_applied_cashflow_claws_back_units_from_snapshots(self):
+    async def test_cancel_applied_cashflow_preserves_settled_nav(self):
         await snapshots_repo.save_snapshot("u1", "2026-05-15", 10000, 8000, 1000.0, 10.0, None)
         result = await snapshots_repo.add_cashflow_and_sync_cash(
             "u1", "2026-05-16", "deposit", 1100, None, None, None,
@@ -145,10 +145,13 @@ class NavUnitsLifecycleTests(TempDbMixin):
         self.assertTrue(deleted)
 
         snap = await snapshots_repo.get_snapshot_by_date("u1", "2026-05-18")
-        # 유닛 회수: 11 - 1 = 10, NAV 재계산 12100/10 = 1210. 회수하지 않으면
-        # 평가액(CASH_KRW)만 빠지고 유닛이 남아 NAV 가 영구 하락한다.
-        self.assertAlmostEqual(snap["total_units"], 10.0)
-        self.assertAlmostEqual(snap["nav"], 1210.0)
+        # 이미 정산된 NAV는 보존하고 오늘 반대 거래를 남긴다.
+        self.assertAlmostEqual(snap["total_units"], 11.0)
+        self.assertAlmostEqual(snap["nav"], 1100.0)
+        cashflows = await snapshots_repo.get_cashflows("u1")
+        reversal = next(cf for cf in cashflows if cf["reversal_of_id"] == result["id"])
+        self.assertEqual(reversal["type"], "withdrawal")
+        self.assertIsNone(reversal["applied_snapshot_date"])
         # 정산 전 스냅샷은 건드리지 않는다.
         before = await snapshots_repo.get_snapshot_by_date("u1", "2026-05-15")
         self.assertAlmostEqual(before["total_units"], 10.0)

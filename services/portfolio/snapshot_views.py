@@ -6,7 +6,7 @@ from services.portfolio.time_windows import settlement_marker_seconds
 
 
 async def net_cashflow_since_snapshot(user: str, snap_date: str) -> tuple[float, dict[str, float]]:
-    rows = await snapshots.get_cashflows_since_settlement(user, snap_date, settlement_marker_seconds(snap_date))
+    rows = await snapshots.get_cashflows_created_after(user, settlement_marker_seconds(snap_date))
     net = sum(row["amount"] if row["type"] == "deposit" else -row["amount"]
               for row in rows if row["type"] in {"deposit", "withdrawal"})
     return net, {"CASH_KRW": net} if net else {}

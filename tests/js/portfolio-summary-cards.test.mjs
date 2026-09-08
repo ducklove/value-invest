@@ -135,3 +135,39 @@ test("net_cashflow 를 아직 안 내려주는 응답(구버전 캐시)에서도
   assert.equal(subs.length, 1);
   assert.match(subs[0].textContent, /손익\s*\+100,000/);
 });
+
+for (const amount of [2000, -2000]) {
+  test(`미정산 ${amount > 0 ? '입금' : '출금'}은 MTD/YTD 수익률도 바꾸지 않는다`, () => {
+    const w = loadSummaryDom();
+    const base = { date: '2026-08-31', nav: 1000, total_value: 10000, total_units: 10 };
+    w.PfStore.items = [{ stock_code: 'CASH_KRW', stock_name: '원화', quantity: 10000 + amount,
+      avg_price: 1, currency: 'KRW', quote: { price: 1, change: 0 } }];
+    w.PfStore.navHistory = [base];
+    w.PfStore.snapshots.prevDay = { ...base, today_net_cashflow: amount,
+      today_cashflows: [{ units_change: null, signed_amount: amount }] };
+    w.PfStore.snapshots.monthEnd = { ...base, net_cashflow: amount };
+    w.PfStore.snapshots.yearStart = { ...base, net_cashflow: amount };
+    w.renderPortfolio({ summaryOnly: true });
+    for (const label of ['Today', 'MTD', 'YTD']) {
+      assert.equal(cardByLabel(w, label).querySelector('.pf-summary-value').textContent, '0.00%');
+    }
+    w.close();
+  });
+}
+
+test('Today 기준선 이후 입금도 최신 NAV에 정산됐다면 좌수를 다시 더하지 않는다', () => {
+  const w = loadSummaryDom();
+  const base = { date: '2026-08-31', nav: 1000, total_value: 10000, total_units: 10 };
+  w.PfStore.items = [{ stock_code: 'CASH_KRW', stock_name: '원화', quantity: 12000,
+    avg_price: 1, currency: 'KRW', quote: { price: 1, change: 0 } }];
+  w.PfStore.navHistory = [{ ...base, date: '2026-09-01', total_value: 12000, total_units: 12 }];
+  w.PfStore.snapshots.prevDay = { ...base, today_net_cashflow: 2000,
+    today_cashflows: [{ units_change: 2, signed_amount: 2000, applied_snapshot_date: '2026-09-01' }] };
+  w.PfStore.snapshots.monthEnd = { ...base, net_cashflow: 2000 };
+  w.PfStore.snapshots.yearStart = { ...base, net_cashflow: 2000 };
+  w.renderPortfolio({ summaryOnly: true });
+  for (const label of ['Today', 'MTD', 'YTD']) {
+    assert.equal(cardByLabel(w, label).querySelector('.pf-summary-value').textContent, '0.00%');
+  }
+  w.close();
+});

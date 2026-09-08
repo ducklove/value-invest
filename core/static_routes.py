@@ -91,6 +91,8 @@ def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: s
     app.add_api_route("/favicon.ico", favicon, methods=["GET"])
     app.add_api_route("/manifest.webmanifest", manifest, methods=["GET"])
     app.add_api_route("/sw.js", service_worker, methods=["GET"])
+    app.add_api_route("/admin", admin_page, methods=["GET"])
+    app.add_api_route("/admin/", admin_page, methods=["GET"])
     app.add_api_route("/admin.html", admin_page, methods=["GET"])
     app.mount("/js", StaticFiles(directory=str(static_dir / "js")), name="js")
     app.mount("/css", StaticFiles(directory=str(static_dir / "css")), name="css")
@@ -105,4 +107,3 @@ def register_static_routes(app: FastAPI, settings: AppSettings, asset_version: s
         "service_worker": service_worker,
         "admin_page": admin_page,
     }
-
