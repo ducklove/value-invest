@@ -323,9 +323,16 @@ function _pfRenderColToggles() {
   _pfColTogglesRendered = true;
 }
 
+let _pfViewRequestId = 0;
 function switchView(view, options = {}) {
+  const requestId = ++_pfViewRequestId;
   const lockedView = options.allowMobileLockOverride ? null : _mobileFixedView();
   if (lockedView && view !== lockedView) view = lockedView;
+  if (typeof featureScriptsReady === 'function' && !featureScriptsReady(view)) {
+    return loadFeatureScripts(view).then(() => {
+      if (requestId === _pfViewRequestId) return switchView(view, options);
+    }).catch(error => reportApiError(error, '화면 불러오기'));
+  }
   PfStore.activeView = view;
   // 모달을 연 채로 화면을 바꾸는 경로가 여럿 있다(인사이트 모달의 "분석 화면"
   // 버튼, 투자일지 카드의 종목 링크 등). 모달 마크업은 자기 화면 안에 있어

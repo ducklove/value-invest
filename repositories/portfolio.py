@@ -16,7 +16,7 @@ import aiosqlite
 from domain.portfolio_codes import is_korean_stock as _is_portfolio_korean_stock
 from repositories import accounts as accounts_repo
 from repositories import db as db_module
-from repositories.db import get_db, transaction
+from repositories.db import get_db, read_snapshot, transaction
 
 _DEFAULT_GROUPS = [
     ("한국주식", 0, 1, "kr"),
@@ -128,6 +128,7 @@ async def backfill_portfolio_defaults(db: aiosqlite.Connection) -> None:
         )
 
 
+@read_snapshot()
 async def get_portfolio(google_sub: str) -> list[dict]:
     db = await get_db()
     # created_at is surfaced so the UI can show '등록일자' and let the

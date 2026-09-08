@@ -103,6 +103,7 @@ Markdown 라이브러리는 `package-lock.json`과 일치하는 파일을 `stati
 | --- | --- |
 | refactoring-review-2026-06.html | 전체 구조·품질 평가 + 리팩토링 로드맵 + 기능 제언 |
 | rearchitecture-plan.md | 단계별 재설계 계획 (진행 상태 포함) |
+| [architecture-improvements-2026-09.md](docs/architecture-improvements-2026-09.md) | 조회 격리·출처 검증·종료 정리·응답 계약·지연 로딩 개선 |
 | project-architecture-graph.md | 허브·서브프로젝트·외부 소스 전체 그래프 |
 | linked-projects.md | 서브프로젝트 연동 방식·환경변수 |
 | environment-profiles.md | `.env` 단일 설정 소스·프로파일 |

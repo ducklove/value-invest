@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, StrictBool, field_validator, model_valida
 from deps import get_current_user
 from repositories import investment_insights as repo
 from repositories import journal
+from routes.response_models import AttributionResponse, ThesesResponse
 from services.portfolio import attribution, theses
 from services.portfolio.time_windows import today_kst_date
 
@@ -89,7 +90,7 @@ async def owner(request: Request) -> str:
     return user["google_sub"]
 
 
-@router.get("/api/portfolio/attribution")
+@router.get("/api/portfolio/attribution", response_model=AttributionResponse, response_model_exclude_unset=True)
 async def get_attribution(request: Request, start: date | None = Query(None), end: date | None = Query(None)):
     user = await owner(request)
     ending = end or today_kst_date()
@@ -112,7 +113,7 @@ async def remove_income(request: Request, event_id: int):
     return {"ok": True}
 
 
-@router.get("/api/portfolio/theses")
+@router.get("/api/portfolio/theses", response_model=ThesesResponse, response_model_exclude_unset=True)
 async def list_theses(request: Request):
     return await theses.review_theses(await owner(request))
 

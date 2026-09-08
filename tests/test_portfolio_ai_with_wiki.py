@@ -149,10 +149,11 @@ class PortfolioAIWikiTests(TempDbMixin):
         return captured.get("payload") or {}, (dones[-1] if dones else {})
 
     async def test_prompt_skips_wiki_when_empty(self):
-        payload, done = await self._run_and_capture_prompt()
+        with patch.dict("os.environ", {"AI_BALANCED_MODEL": "test/balanced"}):
+            payload, done = await self._run_and_capture_prompt()
         messages = payload.get("messages", [])
         prompt = messages[-1].get("content", "") if messages else ""
-        self.assertEqual(payload.get("model"), "google/gemini-3.5-flash")
+        self.assertEqual(payload.get("model"), "test/balanced")
         self.assertEqual(payload.get("max_tokens"), pf.ai_analysis.AI_MAX_TOKENS)
         self.assertEqual(payload.get("reasoning"), {"effort": "low", "exclude": True})
         self.assertEqual(messages[0].get("role"), "system")

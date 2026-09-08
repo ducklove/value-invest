@@ -268,17 +268,19 @@ function _apiTimeoutError(timeoutMs) {
 function apiFetch(path, options = {}) {
   const { stream = false, timeoutMs = API_FETCH_TIMEOUT_MS, ...fetchOptions } = options;
   const method = String(fetchOptions.method || 'GET').toUpperCase();
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   const isAdminMutation = String(path || '').startsWith('/api/admin/')
-    && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    && isMutation;
   const init = {
     credentials: 'include',
     ...fetchOptions,
   };
-  if (fetchOptions.headers || isAdminMutation) {
-    init.headers = { ...(isAdminMutation ? {
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'fetch',
-    } : {}), ...(fetchOptions.headers || {}) };
+  if (fetchOptions.headers || isMutation) {
+    init.headers = {
+      ...(isAdminMutation ? { 'Content-Type': 'application/json' } : {}),
+      ...(fetchOptions.headers || {}),
+      ...(isMutation ? { 'X-Requested-With': 'fetch' } : {}),
+    };
   }
   // SSE/스트리밍 응답({ stream: true } — AI 분석, 위키 Q&A 등)은 20초보다
   // 오래 열려 있어야 하므로 타임아웃을 걸지 않는다. 호출자가 직접 signal 을

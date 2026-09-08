@@ -11,6 +11,7 @@ from math import isclose
 
 from repositories import investment_insights as repo
 from repositories import snapshots
+from repositories.db import read_snapshot
 from services.portfolio.identifiers import is_korean_stock, is_special_asset
 from services.portfolio.theses import number
 from services.portfolio.time_windows import today_kst_date
@@ -102,6 +103,7 @@ def decompose(nav: list[dict], stocks: list[dict], cashflows: list[dict], income
     }
 
 
+@read_snapshot()
 async def build_attribution(user: str, start: str, end: str) -> dict:
     today = today_kst_date()
     start_date, end_date = date.fromisoformat(start), date.fromisoformat(end)

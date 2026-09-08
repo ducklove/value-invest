@@ -1,13 +1,18 @@
 import { test, expect } from '@playwright/test';
 
 test('수익 분해·배당 분류·투자 논거 저장과 변경 이력을 실제 DB로 확인한다', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.goto('/login?return_to=/portfolio');
   await page.locator('#loginEmail').fill('browser@example.com');
   await page.locator('#loginPassword').fill('browser-test-password');
   await page.getByRole('button', { name: '이메일로 로그인' }).click();
   await expect(page).toHaveURL(/\/portfolio$/);
+  expect(await page.locator('script[src*="portfolio-attribution.js"]').count()).toBe(0);
+  expect(await page.locator('script[src*="portfolio-household.js"]').count()).toBe(0);
   await page.locator('.pf-tab[data-tab="performance"]').click();
+  await expect(page.locator('script[src*="portfolio-attribution.js"]')).toHaveCount(1);
   await page.locator('#pfAttributionStart').fill('2026-01-01');
   await page.getByRole('button', { name: '분해 조회' }).click();
   await expect(page.locator('#pfAttributionContent')).toContainText('+50,000원');
@@ -29,6 +34,7 @@ test('수익 분해·배당 분류·투자 논거 저장과 변경 이력을 실
   await thesis.locator('[name="threshold"]').fill('10');
   await thesis.getByRole('button', { name: '논거 저장' }).click();
   await expect(page.locator('#pfThesisContent')).toContainText('반증 조건 충족');
+  expect(errors).toEqual([]);
   await page.locator('#pfThesisContent').getByRole('button', { name: '변경 이력' }).click();
   await expect(page.locator('.pf-thesis-history')).toContainText('현재 9%');
   await page.reload();

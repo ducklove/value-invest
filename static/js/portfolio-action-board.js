@@ -260,14 +260,14 @@ async function pfActionBoardSetStatus(actionKey, status) {
     if (refresh) refresh.addEventListener('click', () => pfLoadActionBoard({ force: true }));
     const hide = document.getElementById('pfActionBoardHide');
     if (hide) hide.addEventListener('click', () => pfToggleActionBoard(false));
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', async (e) => {
       const badge = e.target.closest && e.target.closest('.pf-linked-signal-badge');
       if (badge) e.stopPropagation();
       const open = e.target.closest && e.target.closest('[data-pf-action-open]');
       if (open && ['#pfRebalanceWrap', '#pfThesisWrap'].includes(open.getAttribute('href'))) {
         e.preventDefault();
         if (open.getAttribute('href') === '#pfThesisWrap' && document.body.classList.contains('pf-mobile-simple') && typeof pfToggleSimpleMode === 'function') pfToggleSimpleMode();
-        if (typeof pfSwitchTab === 'function') pfSwitchTab('performance');
+        if (typeof pfSwitchTab === 'function') await pfSwitchTab('performance');
         document.querySelector(open.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }

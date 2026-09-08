@@ -17,6 +17,7 @@ os.environ["CLOSE_PRICE_API_ENABLED"] = "0"
 
 import auth_service
 from core.config import PROJECT_ROOT, AppSettings
+from core.request_security import MutationOriginMiddleware
 from core.static_routes import register_static_routes
 from deps import get_current_user
 from repositories import bootstrap, db, financial, snapshots, users
@@ -46,6 +47,7 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(MutationOriginMiddleware, allowed_origins=["http://127.0.0.1:18765"])
 app.include_router(auth.router)
 app.include_router(investment_insights.router)
 

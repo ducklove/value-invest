@@ -43,6 +43,19 @@ test("escapeHtml neutralizes HTML metacharacters", () => {
   assert.equal(w.escapeHtml(undefined), "");
 });
 
+test('변경 요청에 출처 검증용 헤더를 보내며 사용자 헤더도 보존한다', async () => {
+  const w = loadUtils();
+  try {
+    const requests = [];
+    w.fetch = async (url, options) => { requests.push(options); return { ok: true }; };
+    await w.apiFetch('/api/portfolio/005930', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    assert.equal(requests[0].headers['X-Requested-With'], 'fetch');
+    assert.equal(requests[0].headers['Content-Type'], 'application/json');
+    await w.apiFetch('/api/portfolio');
+    assert.equal(requests[1].headers?.['X-Requested-With'], undefined);
+  } finally { w.close(); }
+});
+
 test("safeExternalUrl only allows http(s) and blocks javascript:", () => {
   const w = loadUtils();
   assert.equal(w.safeExternalUrl("https://dart.fss.or.kr/x"), "https://dart.fss.or.kr/x");

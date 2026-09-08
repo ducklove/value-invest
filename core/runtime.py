@@ -32,7 +32,7 @@ def get_asset_version(project_root: Path) -> str:
         if status:
             return f"{commit}-{_static_assets_mtime(project_root)}"
         return commit
-    except Exception:
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         return str(int(time.time()))
 
 
@@ -50,15 +50,16 @@ def _static_assets_mtime(project_root: Path) -> str:
 
 def sd_notify(msg: str) -> None:
     addr = os.environ.get("NOTIFY_SOCKET")
-    if not addr:
+    family = getattr(socket, "AF_UNIX", None)
+    if not addr or family is None:
         return
     try:
         if addr[0] == "@":
             addr = "\0" + addr[1:]
-        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
             sock.connect(addr)
             sock.sendall(msg.encode("utf-8"))
-    except Exception:
+    except OSError:
         pass
 
 

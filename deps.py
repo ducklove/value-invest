@@ -63,8 +63,8 @@ TRUSTED_RETURN_ORIGINS = {
 # --- Auth / Session helpers ---
 
 def is_secure_request(request: Request) -> bool:
-    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
-    return request.url.scheme == "https" or forwarded_proto == "https"
+    # 신뢰 프록시 헤더는 Uvicorn이 scope에 반영한다. 원시 헤더를 다시 믿지 않는다.
+    return request.url.scheme == "https"
 
 
 def session_cookie_samesite(request: Request) -> str:

@@ -1151,6 +1151,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/vendor/marked.js" defer></script>
 <script src="./js/vendor/purify.js" defer></script>
 <script src="./js/utils.js" defer></script>
+<script src="./js/feature-loader.js" defer></script>
 <script src="./js/stock-hover-chart.js" defer></script>
 <script src="./js/portfolio-trend-chart.js" defer></script>
 <script src="./js/quote-manager.js" defer></script>
@@ -1178,15 +1179,15 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-insights.js" defer></script>
 <script src="./js/portfolio-groups-market.js" defer></script>
 <script src="./js/portfolio-ai.js" defer></script>
-<script src="./js/portfolio-attribution.js" defer></script>
-<script src="./js/portfolio-theses.js" defer></script>
-<script src="./js/portfolio-reports.js" defer></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-attribution.js"></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-theses.js"></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-reports.js"></script>
 <script src="./js/portfolio-performance.js" defer></script>
-<script src="./js/portfolio-risk.js" defer></script>
-<script src="./js/portfolio-rebalance.js" defer></script>
-<script src="./js/portfolio-dividends-calendar.js" defer></script>
-<script src="./js/portfolio-journal.js" defer></script>
-<script src="./js/portfolio-household.js" defer></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-risk.js"></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-rebalance.js"></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-dividends-calendar.js"></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-journal.js"></script>
+<script data-feature="portfolio-household" data-src="./js/portfolio-household.js"></script>
 <script src="./js/portfolio-trends-benchmark.js" defer></script>
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-trends-group-weight.js" defer></script>
@@ -1195,9 +1196,9 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-alerts.js" defer></script>
 <script src="./js/portfolio-tag-summary.js" defer></script>
 <script src="./js/portfolio-events.js" defer></script>
-<script src="./js/insights.js" defer></script>
-<script src="./js/screener.js" defer></script>
-<script src="./js/masters.js" defer></script>
+<script data-feature="insights" data-src="./js/insights.js"></script>
+<script data-feature="screener" data-src="./js/screener.js"></script>
+<script data-feature="masters" data-src="./js/masters.js"></script>
 <script src="./js/app-main.js" defer></script>
 </body>
 </html>

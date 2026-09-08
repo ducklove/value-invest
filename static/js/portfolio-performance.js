@@ -42,8 +42,16 @@ async function pfLoadGroupWeightHistory({ force = false } = {}) {
   return _pfGroupWeightHistoryPromise;
 }
 
+let _pfTabRequestId = 0;
 function pfSwitchTab(tab) {
+  const requestId = ++_pfTabRequestId;
   if (!['holdings', 'performance', 'household'].includes(tab)) tab = 'holdings';
+  const feature = `portfolio-${tab}`;
+  if (typeof featureScriptsReady === 'function' && !featureScriptsReady(feature)) {
+    return loadFeatureScripts(feature).then(() => {
+      if (requestId === _pfTabRequestId) return pfSwitchTab(tab);
+    }).catch(error => reportApiError(error, '포트폴리오 화면 불러오기'));
+  }
   pfActiveTab = tab;
   document.querySelectorAll('.pf-tab').forEach(btn => {
     const active = btn.dataset.tab === tab;

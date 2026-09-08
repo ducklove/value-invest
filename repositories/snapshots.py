@@ -292,6 +292,17 @@ async def get_cashflows_created_after(google_sub: str, created_after: str) -> li
     return [dict(row) for row in await cursor.fetchall()]
 
 
+async def get_cashflows_since_settlement(google_sub: str, snap_date: str, marker: str) -> list[dict]:
+    """기간 내 명목일 또는 기준일 정산 뒤에 입력된 입출금."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? "
+        "AND (date > ? OR (date = ? AND created_at > ?))",
+        (google_sub, snap_date, snap_date, marker),
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
 async def get_nav_history(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
@@ -623,6 +634,16 @@ async def save_stock_snapshots(google_sub: str, date: str, items: list[dict]):
         except Exception:
             await db.rollback()
             raise
+
+
+async def get_stock_snapshots_exact_date(google_sub: str, snap_date: str) -> list[dict]:
+    """합계와 같은 날짜의 종목별 금액만 반환한다. 누락을 다른 날짜로 채우지 않는다."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT stock_code, market_value FROM portfolio_stock_snapshots WHERE google_sub = ? AND date = ?",
+        (google_sub, snap_date),
+    )
+    return [dict(row) for row in await cursor.fetchall()]
 
 
 async def get_stock_snapshots_by_date(google_sub: str, date: str) -> list[dict]:

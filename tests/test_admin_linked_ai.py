@@ -107,7 +107,7 @@ class LinkedProjectAdminTests(unittest.TestCase):
 
 class AiAdminConfigTests(TempDbMixin):
     async def test_key_status_masks_secret_and_models_are_runtime_configurable(self):
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {"AI_BALANCED_MODEL": "test/balanced"}, clear=True):
             await ai_config.set_openrouter_key("sk-or-test-secret-123456", "admin@example.com")
             status = await ai_config.openrouter_key_status()
             self.assertTrue(status["configured"])
@@ -121,10 +121,10 @@ class AiAdminConfigTests(TempDbMixin):
                 await ai_config.get_model_for_feature("portfolio_fast"),
                 "qwen/qwen3.6-flash",
             )
-            # 대가 포트폴리오 진단은 gemini-3.5-flash 고정 기본값.
+            # 기능이 설정된 BALANCED 등급으로 연결되는지 확인한다.
             self.assertEqual(
                 await ai_config.get_model_for_feature("masters_review"),
-                "google/gemini-3.5-flash",
+                "test/balanced",
             )
 
             await ai_config.save_tier_models({"light": "openai/gpt-5.5"}, "admin@example.com")
@@ -132,7 +132,7 @@ class AiAdminConfigTests(TempDbMixin):
             self.assertEqual(await ai_config.get_model_for_feature("daily_briefing"), "openai/gpt-5.5")
             self.assertEqual(
                 await ai_config.get_model_for_feature("dart_report_review"),
-                "google/gemini-3.5-flash",
+                "test/balanced",
             )
 
     async def test_feature_routing_uses_three_configurable_external_tiers(self):

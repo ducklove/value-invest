@@ -110,3 +110,20 @@ test("nps/insights/screener sub-pages highlight the 도구 (labs) nav button, no
   assert.ok(labsButtons.length > 0);
   for (const btn of labsButtons) assert.equal(btn.classList.contains("active"), true);
 });
+
+test('늦게 끝난 화면 다운로드가 사용자의 최신 탭 선택을 덮어쓰지 않는다', async () => {
+  const w = buildDom('https://app.example.com/portfolio');
+  try {
+    let resolve;
+    let loaded = false;
+    w.featureScriptsReady = view => view !== 'screener' || loaded;
+    w.loadFeatureScripts = () => new Promise(done => { resolve = () => { loaded = true; done(); }; });
+    const pending = w.switchView('screener');
+    w.switchView('analysis');
+    resolve();
+    await pending;
+    assert.equal(w.location.pathname, '/analysis');
+    assert.equal(w.document.getElementById('analysisView').style.display, 'block');
+    assert.equal(w.document.getElementById('screenerView').style.display, 'none');
+  } finally { w.close(); }
+});

@@ -189,7 +189,6 @@ async function initApp() {
   await Promise.allSettled([loadRecentList(), _mbLoadCatalog(), _mbLoadCodes()]);
   loadMarketSummary();
   loadMarketTape();
-  if (typeof loadInvestingDashboard === 'function') loadInvestingDashboard();
   loadDailyMarketBrief();
   loadWikiStats();
   setInterval(loadMarketSummary, 60_000);

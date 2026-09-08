@@ -1,8 +1,8 @@
-"""Shared aiosqlite connection ownership for the data layer.
+"""SQLite 연결과 읽기·쓰기 트랜잭션의 소유권.
 
-커넥션 싱글톤(DB_PATH / get_db / close_db)과 트랜잭션 원자성 헬퍼
-(transaction)가 여기 산다. repositories/* 와 라우트/서비스가 모두 이
-모듈만 본다 (과거 cache.py 재수출 경유는 Phase 2 해체로 제거됨).
+일반 조회와 직렬화된 쓰기는 서로 다른 연결을 사용한다. 같은 쓰기 작업의
+중첩 호출만 쓰기 연결에 합류한다. 여러 SELECT의 기준 시점이 같아야 하는
+조회는 read_snapshot()을 사용한다. 요청 쓰기는 반드시 transaction()을 쓴다.
 
 테스트는 ``patch.object(repositories.db, "DB_PATH", ...)`` 로 경로를
 바꾼다 — get_db() 가 호출 시점에 모듈 전역 DB_PATH 를 읽으므로 패치가
@@ -14,7 +14,8 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 import aiosqlite
@@ -25,48 +26,91 @@ from core.errors import DBError
 DB_PATH = Path(__file__).resolve().parent.parent / "cache.db"
 
 _conn: aiosqlite.Connection | None = None
+_writer_conn: aiosqlite.Connection | None = None
 _conn_lock = asyncio.Lock()
+_read_scope: ContextVar[tuple[asyncio.Task, aiosqlite.Connection] | None] = ContextVar("db_read_scope", default=None)
 
-# transaction() 직렬화 락. 앱 전체가 하나의 aiosqlite 커넥션을 모든
-# asyncio task 가 공유하므로, 락 없이 BEGIN/COMMIT 을 쓰면 서로 다른
-# task 의 문장이 한 트랜잭션에 섞여 들어간다(interleave). 락이 잡힌
-# 동안만 명시 트랜잭션이 열리도록 보장한다.
+# 쓰기 연결은 transaction()을 소유한 task만 사용한다. 일반 조회 연결은
+# 분리하여 아직 커밋하지 않은 변경이 다른 요청에 노출되지 않게 한다.
 _txn_lock = asyncio.Lock()
 # 락을 잡고 있는 task — 같은 task 의 중첩 transaction() 호출(재진입)을
 # 바깥 트랜잭션에 합류시키기 위한 표식.
 _txn_owner: asyncio.Task | None = None
 
 
+async def _open_connection() -> aiosqlite.Connection:
+    conn = await aiosqlite.connect(DB_PATH)
+    try:
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA busy_timeout=5000")
+        await conn.execute("PRAGMA foreign_keys=ON")
+    except BaseException:
+        await conn.close()
+        raise
+    return conn
+
+
 async def get_db() -> aiosqlite.Connection:
-    global _conn
-    if _conn is None:
+    """현재 작업의 연결. 쓰기 소유자 외에는 미커밋 쓰기를 볼 수 없다.
+
+    기본 연결의 쓰기 접근은 시작 시 bootstrap과 테스트 시드의 호환을
+    위해 유지한다. 서비스가 시작된 후의 쓰기는 transaction()으로만 한다.
+    """
+    global _conn, _writer_conn
+    current = asyncio.current_task()
+    writing = _txn_owner is not None and _txn_owner is current
+    scope = _read_scope.get()
+    if not writing and scope is not None and scope[0] is current:
+        return scope[1]
+    conn = _writer_conn if writing else _conn
+    if conn is None:
         async with _conn_lock:
-            if _conn is None:
-                conn = await aiosqlite.connect(DB_PATH)
-                try:
-                    conn.row_factory = aiosqlite.Row
-                    await conn.execute("PRAGMA journal_mode=WAL")
-                    await conn.execute("PRAGMA busy_timeout=5000")
-                    await conn.execute("PRAGMA foreign_keys=ON")
-                except BaseException:
-                    await conn.close()
-                    raise
-                _conn = conn
-    return _conn
+            conn = _writer_conn if writing else _conn
+            if conn is None:
+                conn = await _open_connection()
+                if writing:
+                    _writer_conn = conn
+                else:
+                    _conn = conn
+    return conn
+
+
+@asynccontextmanager
+async def read_snapshot():
+    """여러 조회를 같은 커밋 상태로 묶는다. 자식 task는 연결을 상속하지 않는다."""
+    current = asyncio.current_task()
+    if current is None:
+        raise RuntimeError("읽기 트랜잭션에는 실행 중인 task가 필요합니다.")
+    scope = _read_scope.get()
+    if (_txn_owner is current) or (scope is not None and scope[0] is current):
+        yield await get_db()
+        return
+    conn = await _open_connection()
+    token = _read_scope.set((current, conn))
+    try:
+        await conn.execute("PRAGMA query_only=ON")
+        await conn.execute("BEGIN")
+        yield conn
+    finally:
+        _read_scope.reset(token)
+        await conn.close()
 
 
 async def close_db():
-    """Shutdown: close the shared connection."""
-    global _conn, _conn_lock, _txn_lock, _txn_owner
-    if _conn is not None:
-        await _conn.close()
-        _conn = None
-    # asyncio.Lock 은 처음 acquire 한 이벤트 루프에 묶인다. 테스트가
-    # (IsolatedAsyncioTestCase 처럼) 루프를 매번 새로 만들고 setUp 에서
-    # close_db() 를 부르므로, 여기서 락도 새로 만들어 루프 교체에 안전하게.
-    _txn_lock = asyncio.Lock()
-    _conn_lock = asyncio.Lock()
-    _txn_owner = None
+    """앱 소유의 조회·쓰기 연결을 모두 닫는다."""
+    global _conn, _writer_conn, _conn_lock, _txn_lock, _txn_owner
+    connections = [conn for conn in (_conn, _writer_conn) if conn is not None]
+    _conn = _writer_conn = None
+    try:
+        async with AsyncExitStack() as cleanup:
+            for conn in connections:
+                cleanup.push_async_callback(conn.close)
+    finally:
+        # 테스트의 이벤트 루프 교체에도 안전하게 연결과 잠금 소유권을 초기화한다.
+        _txn_lock = asyncio.Lock()
+        _conn_lock = asyncio.Lock()
+        _txn_owner = None
 
 
 @asynccontextmanager
@@ -80,10 +124,8 @@ async def transaction():
             await conn.execute(...)
         # 정상 종료 시 COMMIT, 예외 시 ROLLBACK
 
-    동시성: 앱은 하나의 aiosqlite 커넥션을 모든 asyncio task 가 공유한다.
-    락 없이 BEGIN/COMMIT 을 쓰면 동시에 진행되는 다른 task 의 문장이 이
-    트랜잭션에 섞여 들어가므로, 모듈 전역 asyncio.Lock 을 블록이 끝날
-    때까지 보유한 채 BEGIN IMMEDIATE 로 쓰기 트랜잭션을 연다.
+    동시성: 전용 쓰기 연결을 락으로 직렬화하고 BEGIN IMMEDIATE로 연다.
+    다른 task의 일반 조회는 별도 연결에서 마지막 커밋 상태를 읽는다.
 
     재진입: transaction() 으로 감싼 함수가 또 감싼 함수를 부르는 중첩
     호출은, 같은 task 라면 바깥 트랜잭션에 그대로 합류한다 (BEGIN/COMMIT
@@ -100,6 +142,9 @@ async def transaction():
         # 같은 task 의 중첩 호출 — 바깥 트랜잭션에 합류.
         yield await get_db()
         return
+    scope = _read_scope.get()
+    if scope is not None and scope[0] is current:
+        raise RuntimeError("읽기 스냅샷 안에서는 쓰기 트랜잭션을 시작할 수 없습니다.")
     async with _txn_lock:
         _txn_owner = current
         try:

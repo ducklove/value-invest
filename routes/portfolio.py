@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import time
-from datetime import date, timedelta
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
@@ -19,6 +18,14 @@ from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
+from routes.response_models import (
+    HoldingResponse,
+    IntradayPoint,
+    NavPoint,
+    PeriodStartResponse,
+    PreviousDayResponse,
+    QuoteResponse,
+)
 from services import stock_quotes
 from services.portfolio import (
     ai_analysis,
@@ -29,6 +36,7 @@ from services.portfolio import (
     insights,
     names,
     quote_service,
+    snapshot_views,
     target_resolver,
 )
 from services.portfolio.benchmarks import (
@@ -62,9 +70,6 @@ from services.portfolio.time_windows import (
 )
 from services.portfolio.time_windows import (
     portfolio_today_baseline_date as _portfolio_today_baseline_date,
-)
-from services.portfolio.time_windows import (
-    settlement_marker_seconds as _settlement_marker_seconds,
 )
 
 _OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
@@ -459,7 +464,7 @@ async def stream_portfolio_quotes(request: Request):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-@router.get("/api/asset-quote/{stock_code}")
+@router.get("/api/asset-quote/{stock_code}", response_model=QuoteResponse, response_model_exclude_unset=True)
 async def asset_quote(stock_code: str):
     """Fetch quote for any asset type (Korean stock, cash, gold, crypto, foreign)."""
     try:
@@ -478,7 +483,7 @@ _ASSET_QUOTES_BATCH_TIMEOUT = 45.0
 _ASSET_QUOTES_ITEM_TIMEOUT = 30.0
 _ASSET_QUOTES_CONCURRENCY = 2
 
-@router.post("/api/asset-quotes")
+@router.post("/api/asset-quotes", response_model=dict[str, QuoteResponse], response_model_exclude_unset=True)
 async def asset_quotes_batch(payload: dict = Body(...)):
     """Fetch quotes for multiple codes in one request."""
     raw_codes = payload.get("codes", [])
@@ -594,7 +599,7 @@ def _parse_avg_price_currency(raw: object) -> str | None:
     return currency
 
 
-@router.get("/api/portfolio")
+@router.get("/api/portfolio", response_model=list[HoldingResponse], response_model_exclude_unset=True)
 async def get_portfolio(request: Request):
     started = time.perf_counter()
     user = _require_user(await get_current_user(request))
@@ -1055,139 +1060,29 @@ async def search_foreign(q: str = Query(..., min_length=1), limit: int = Query(8
 
 # --- NAV / Snapshots / Cashflows ---
 
-@router.get("/api/portfolio/prev-day-snapshot")
+@router.get("/api/portfolio/prev-day-snapshot", response_model=PreviousDayResponse, response_model_exclude_unset=True)
 async def get_prev_day_snapshot(request: Request):
     user = _require_user(await get_current_user(request))
-    baseline_date = _portfolio_today_baseline_date()
-    db = await db_repo.get_db()
-    # Latest 20:00 settlement snapshot for the active Today window.
-    cursor = await db.execute(
-        "SELECT date, total_value, fx_usdkrw, nav FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
-        (user["google_sub"], baseline_date),
-    )
-    snap_row = await cursor.fetchone()
-    total_value = snap_row["total_value"] if snap_row else None
-    fx_usdkrw = snap_row["fx_usdkrw"] if snap_row else None
-    prev_nav = snap_row["nav"] if snap_row else None
-    # Per-stock snapshots
-    stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], baseline_date)
-    stock_values = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
-    # Net cashflow not yet reflected in snapshot. Use created_at > snapshot
-    # settlement boundary to catch cashflows entered after
-    # the snapshot was taken, regardless of their nominal date.
-    snap_date = snap_row["date"] if snap_row else None
-    if snap_date:
-        created_after = _settlement_marker_seconds(snap_date)
-    else:
-        created_after = baseline_date
-    cursor2 = await db.execute(
-        "SELECT id, type, amount, nav_at_time, units_change, created_at FROM portfolio_cashflows WHERE google_sub = ? AND created_at > ? ORDER BY created_at ASC, id ASC",
-        (user["google_sub"], created_after),
-    )
-    today_net_cashflow = 0.0
-    today_cashflows_by_stock: dict[str, float] = {}
-    today_cashflows: list[dict] = []
-    for row in await cursor2.fetchall():
-        signed_amount = 0.0
-        if row["type"] == "deposit":
-            signed_amount = row["amount"]
-        elif row["type"] == "withdrawal":
-            signed_amount = -row["amount"]
-        today_net_cashflow += signed_amount
-        if signed_amount:
-            today_cashflows.append({
-                "id": row["id"],
-                "type": row["type"],
-                "amount": row["amount"],
-                "nav_at_time": row["nav_at_time"],
-                "signed_amount": signed_amount,
-                "units_change": row["units_change"],
-                "created_at": row["created_at"],
-            })
-        if signed_amount:
-            # Portfolio cashflow mutations are materialized through CASH_KRW.
-            # Expose the attribution so filtered Today cards can remove
-            # deposits/withdrawals from group return instead of treating cash
-            # movement as investment performance.
-            today_cashflows_by_stock["CASH_KRW"] = today_cashflows_by_stock.get("CASH_KRW", 0.0) + signed_amount
-    return {
-        # date is the baseline the UI's Today card compares against. Was
-        # missing from the response, which made the frontend's baseline
-        # label silently fall back to "기준 없음" while the numerical
-        # value was being computed against nav/total_value anyway —
-        # label and value disagreed.
-        "date": snap_date,
-        "total_value": total_value,
-        "fx_usdkrw": fx_usdkrw,
-        "nav": prev_nav,
-        "stock_values": stock_values,
-        "today_net_cashflow": today_net_cashflow,
-        "today_cashflows_by_stock": today_cashflows_by_stock,
-        "today_cashflows": today_cashflows,
-    }
+    return await snapshot_views.previous_day(user["google_sub"], _portfolio_today_baseline_date())
 
 
 async def _net_cashflow_since_snapshot(google_sub: str, snap_date: str) -> tuple[float, dict[str, float]]:
-    """Net deposit-withdrawal that hit the portfolio after `snap_date`'s 20:00
-    settlement. Period cards (MTD/YTD) subtract this from the raw value change
-    so the colored number is investment PnL, not cash movement.
-
-    Nominal-date first (a cashflow dated inside the period counts), with the
-    settlement `created_at` marker breaking the tie for same-day rows entered
-    after the snapshot was taken — the same boundary the Today card uses.
-    """
-    db = await db_repo.get_db()
-    marker = _settlement_marker_seconds(snap_date)
-    cursor = await db.execute(
-        "SELECT type, amount FROM portfolio_cashflows WHERE google_sub = ? "
-        "AND (date > ? OR (date = ? AND created_at > ?))",
-        (google_sub, snap_date, snap_date, marker),
-    )
-    net = 0.0
-    for row in await cursor.fetchall():
-        if row["type"] == "deposit":
-            net += row["amount"]
-        elif row["type"] == "withdrawal":
-            net -= row["amount"]
-    # Cashflow mutations are materialized through CASH_KRW (see
-    # /prev-day-snapshot) — expose the same attribution shape so filtered
-    # cards can strip cash movement from group returns.
-    by_stock = {"CASH_KRW": net} if net else {}
-    return net, by_stock
+    return await snapshot_views.net_cashflow_since_snapshot(google_sub, snap_date)
 
 
-@router.get("/api/portfolio/month-end-value")
+@router.get("/api/portfolio/month-end-value", response_model=PeriodStartResponse, response_model_exclude_unset=True)
 async def get_month_end_value(request: Request):
     user = _require_user(await get_current_user(request))
-    month_end = (date.today().replace(day=1) - timedelta(days=1)).isoformat()
-    snapshot = await snapshots_repo.get_month_end_snapshot(user["google_sub"])
-    stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], month_end)
-    result = dict(snapshot) if snapshot else {}
-    result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
-    if snapshot and snapshot.get("date"):
-        net, by_stock = await _net_cashflow_since_snapshot(user["google_sub"], str(snapshot["date"]))
-        result["net_cashflow"] = net
-        result["cashflows_by_stock"] = by_stock
-    return result
+    return await snapshot_views.period_start(user["google_sub"])
 
 
-@router.get("/api/portfolio/year-start-value")
+@router.get("/api/portfolio/year-start-value", response_model=PeriodStartResponse, response_model_exclude_unset=True)
 async def get_year_start_value(request: Request):
     user = _require_user(await get_current_user(request))
-    snapshot = await snapshots_repo.get_year_start_snapshot(user["google_sub"])
-    result = dict(snapshot) if snapshot else {}
-    if snapshot and snapshot.get("date"):
-        stock_snapshots = await snapshots_repo.get_stock_snapshots_by_date(user["google_sub"], snapshot["date"])
-        result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stock_snapshots}
-        net, by_stock = await _net_cashflow_since_snapshot(user["google_sub"], str(snapshot["date"]))
-        result["net_cashflow"] = net
-        result["cashflows_by_stock"] = by_stock
-    else:
-        result["stock_values"] = {}
-    return result
+    return await snapshot_views.period_start(user["google_sub"], yearly=True)
 
 
-@router.get("/api/portfolio/nav-history")
+@router.get("/api/portfolio/nav-history", response_model=list[NavPoint], response_model_exclude_unset=True)
 async def get_nav_history(request: Request):
     user = _require_user(await get_current_user(request))
     return await snapshots_repo.get_nav_history(user["google_sub"])
@@ -1245,24 +1140,11 @@ async def get_benchmark_history(code: str = Query(...), start: str = Query(...))
     return rows
 
 
-@router.get("/api/portfolio/intraday")
+@router.get("/api/portfolio/intraday", response_model=list[IntradayPoint], response_model_exclude_unset=True)
 async def get_intraday(request: Request):
     user = _require_user(await get_current_user(request))
     axis_start, axis_end = _intraday_axis_window()
-    baseline_date = axis_start[:10]
-    points = await snapshots_repo.get_intraday_snapshots_between(user["google_sub"], axis_start, axis_end)
-    # Prepend the active 20:00 settlement snapshot as the zero baseline.
-    # The frontend maps x by elapsed time from this timestamp, so the API
-    # should expose the real axis start instead of a synthetic midnight marker.
-    db = await db_repo.get_db()
-    cursor = await db.execute(
-        "SELECT total_value FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
-        (user["google_sub"], baseline_date),
-    )
-    row = await cursor.fetchone()
-    if row and row["total_value"]:
-        points = [{"ts": axis_start, "total_value": row["total_value"]}] + points
-    return points
+    return await snapshot_views.intraday(user["google_sub"], axis_start, axis_end)
 
 
 @router.get("/api/portfolio/cashflows")

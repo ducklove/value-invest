@@ -36,6 +36,9 @@ async def open_temp_db(tmp: tempfile.TemporaryDirectory) -> tuple[Path, object]:
 
 
 async def close_temp_db(tmp: tempfile.TemporaryDirectory, db_patch) -> None:
+    import observability
+
+    await observability.flush_events()
     await bootstrap.close_db()
     db_patch.stop()
     tmp.cleanup()

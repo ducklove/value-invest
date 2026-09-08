@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from core.config import AppSettings, get_settings, load_environment
 from core.errors import register_exception_handlers
 from core.lifespan import app_lifespan
+from core.request_security import MutationOriginMiddleware
 from core.runtime import RuntimeState, get_asset_version
 from core.static_routes import register_static_routes
 
@@ -250,6 +251,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.state.runtime = runtime
     app.state.asset_version = asset_version
 
+    app.add_middleware(MutationOriginMiddleware, allowed_origins=list(settings.cors_allowed_origins))
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_allowed_origins),

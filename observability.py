@@ -38,6 +38,24 @@ logger = logging.getLogger(__name__)
 
 
 VALID_LEVELS = ("info", "warning", "error")
+_event_tasks: set[asyncio.Task] = set()
+
+
+def _event_done(task: asyncio.Task) -> None:
+    _event_tasks.discard(task)
+    if not task.cancelled():
+        task.exception()
+
+
+async def flush_events(*, timeout: float = 5.0) -> None:
+    """DB 종료 전에 대기 중인 기록을 비우고, 기한 초과 작업은 취소·회수한다."""
+    pending = [task for task in _event_tasks if not task.done()]
+    if not pending:
+        return
+    _, unfinished = await asyncio.wait(pending, timeout=timeout)
+    for task in unfinished:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
 
 
 def _sanitize_details(details: dict[str, Any] | None) -> str | None:
@@ -95,10 +113,9 @@ async def record_event(
     if wait:
         await _do_write()
     else:
-        # Detach but still attach a no-op error handler so "Task exception
-        # was never retrieved" warnings don't spam journal.
         task = asyncio.create_task(_do_write())
-        task.add_done_callback(lambda t: t.exception())
+        _event_tasks.add(task)
+        task.add_done_callback(_event_done)
 
 
 async def run_prune_loop(
