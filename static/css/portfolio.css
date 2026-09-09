@@ -3584,3 +3584,5 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 .pf-trade-history small { color:var(--text-secondary); }
 @media(max-width:600px) { .pf-trade-dialog { padding:16px; } .pf-trade-fields input,.pf-trade-fields select { font-size:16px; } }
 @media(max-width:900px) { .pf-tab-bar:has(.js-pf-trade) { flex-wrap:wrap; } }
+.pf-trade-costs { padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:6px; font-size:13px; line-height:1.7; font-variant-numeric:tabular-nums; }
+.pf-divcal-receipt { display:block; margin-top:6px; min-height:32px; }

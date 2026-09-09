@@ -206,6 +206,12 @@ async def repair(apply: bool, user_prefix: str | None) -> None:
         cashflows = [dict(r) for r in await cursor.fetchall()]
 
         plan = rebuild_user_units(snapshots, cashflows)
+        if plan["snapshot_updates"]:
+            distributed = await (await db.execute(
+                "SELECT 1 FROM portfolio_distributions WHERE google_sub=? AND applied_snapshot_date IS NOT NULL LIMIT 1", (sub,),
+            )).fetchone()
+            if distributed:
+                raise ValueError("분배금 정산 이력이 있어 좌수만 보정할 수 없습니다. 좌당 분배금·총수익 계수를 함께 검토해야 합니다.")
         if not plan["snapshot_updates"] and not any(
             cf["applied_snapshot_date"] != next(
                 (u["applied_snapshot_date"] for u in plan["cashflow_updates"] if u["id"] == cf["id"]), cf["applied_snapshot_date"]

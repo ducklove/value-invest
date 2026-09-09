@@ -275,7 +275,7 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
         amount = _to_float(row["amount"]) or 0.0
         if row["type"] == "deposit":
             net += amount
-        elif row["type"] == "withdrawal":
+        elif row["type"] in {"withdrawal", "distribution"}:
             net -= amount
     return net
 

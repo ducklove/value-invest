@@ -7,9 +7,12 @@ from services.portfolio.time_windows import settlement_marker_seconds
 
 async def net_cashflow_since_snapshot(user: str, snap_date: str) -> tuple[float, dict[str, float]]:
     rows = await snapshots.get_cashflows_created_after(user, settlement_marker_seconds(snap_date))
-    net = sum(row["amount"] if row["type"] == "deposit" else -row["amount"]
-              for row in rows if row["type"] in {"deposit", "withdrawal"})
-    return net, {"CASH_KRW": net} if net else {}
+    by_stock = {}
+    for row in rows:
+        signed = row["amount"] if row["type"] == "deposit" else -row["amount"]
+        code = row.get("cash_code", "CASH_KRW")
+        by_stock[code] = by_stock.get(code, 0) + signed
+    return sum(by_stock.values()), by_stock
 
 
 @read_snapshot()
@@ -21,17 +24,21 @@ async def previous_day(user: str, baseline_date: str) -> dict:
     rows = await snapshots.get_cashflows_created_after(user, marker)
     cashflows = []
     net = 0.0
+    by_stock = {}
     for row in rows:
-        signed = row["amount"] if row["type"] == "deposit" else -row["amount"] if row["type"] == "withdrawal" else 0
+        signed = row["amount"] if row["type"] == "deposit" else -row["amount"] if row["type"] in {"withdrawal", "distribution"} else 0
         net += signed
         if signed:
             cashflows.append({**row, "signed_amount": signed})
+            code = row.get("cash_code", "CASH_KRW")
+            by_stock[code] = by_stock.get(code, 0) + signed
     return {
         "date": snap_date, "total_value": snapshot.get("total_value"),
         "fx_usdkrw": snapshot.get("fx_usdkrw"), "nav": snapshot.get("nav"),
+        "return_nav": snapshot.get("return_nav"), "return_factor": snapshot.get("return_factor", 1),
         "stock_values": {s["stock_code"]: s["market_value"] for s in stocks},
         "today_net_cashflow": net,
-        "today_cashflows_by_stock": {"CASH_KRW": net} if cashflows else {},
+        "today_cashflows_by_stock": by_stock,
         "today_cashflows": cashflows,
     }
 

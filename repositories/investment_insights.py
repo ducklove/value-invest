@@ -91,7 +91,9 @@ async def stock_history(user: str, start: str, end: str) -> list[dict]:
 async def income_events(user: str, start: str, end: str) -> list[dict]:
     db = await get_db()
     rows = await (await db.execute(
-        "SELECT * FROM portfolio_income_events WHERE google_sub=? AND date>=? AND date<=? ORDER BY date DESC,id DESC",
+        "SELECT e.*, EXISTS(SELECT 1 FROM portfolio_dividend_receipts r WHERE r.income_event_id=e.id) AS from_receipt "
+        ", (SELECT r.applied_snapshot_date FROM portfolio_dividend_receipts r WHERE r.income_event_id=e.id) AS receipt_settled_date "
+        "FROM portfolio_income_events e WHERE google_sub=? AND date>=? AND date<=? ORDER BY date DESC,id DESC",
         (user, start, end))).fetchall()
     return [dict(row) for row in rows]
 
@@ -107,5 +109,11 @@ async def add_income(user: str, data: dict) -> int:
 
 async def delete_income(user: str, event_id: int) -> bool:
     async with transaction() as db:
+        linked = await (await db.execute(
+            "SELECT id FROM portfolio_dividend_receipts WHERE google_sub=? AND income_event_id=?", (user, event_id),
+        )).fetchone()
+        if linked:
+            from domain.portfolio_trades import TradeConflict
+            raise TradeConflict("배당 수취와 함께 기록한 분류는 따로 삭제할 수 없습니다.")
         cursor = await db.execute("DELETE FROM portfolio_income_events WHERE google_sub=? AND id=?", (user, event_id))
         return cursor.rowcount > 0

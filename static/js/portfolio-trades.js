@@ -51,7 +51,24 @@ function _pfTradeSelect(item) {
   const holding = PfStore.items.find(i => i.stock_code === item.code);
   _pfTradeEl('Currency').value = holding?.currency || item.currency || 'KRW';
   _pfTradeEl('Currency').disabled = Boolean(holding);
+  _pfTradeTaxDefaults();
   _pfTradeCurrency();
+}
+
+function _pfTradeTaxDefaults() {
+  const domesticSale = _pfTradeEl('Side').value === 'sell' && /^[0-9][0-9A-Z]{5}$/.test(_pfTrade.selected?.code || '') && _pfTradeEl('Currency').value === 'KRW';
+  _pfTradeEl('TaxRate').value = domesticSale ? '0.2' : '0';
+  _pfTradeEl('TaxAmount').value = '';
+  _pfTradeCosts();
+}
+
+function _pfTradeCosts() {
+  const currency = _pfTradeEl('Currency').value;
+  const scale = ['KRW', 'JPY', 'VND'].includes(currency) ? 1 : 100;
+  const gross = Math.round(Number(_pfTradeEl('Quantity').value) * Number(_pfTradeEl('Price').value) * scale) / scale;
+  const tax = _pfTradeEl('TaxAmount').value === '' ? Math.floor((gross * Number(_pfTradeEl('TaxRate').value) / 100) * scale + 1e-8) / scale : Number(_pfTradeEl('TaxAmount').value);
+  const fees = Number(_pfTradeEl('Fees').value);
+  _pfTradeEl('Costs').textContent = `수수료 ${_pfTradeFmt(fees)} + 세금 ${_pfTradeFmt(tax)} = 합계 ${_pfTradeFmt(fees + tax)} ${currency}`;
 }
 
 async function _pfTradeSearch() {
@@ -90,6 +107,7 @@ function _pfTradeRead() {
     side: _pfTradeEl('Side').value, currency: _pfTradeEl('Currency').value,
     quantity: _pfTradeEl('Quantity').value, price: _pfTradeEl('Price').value,
     fees: _pfTradeEl('Fees').value || '0', memo: _pfTradeEl('Memo').value.trim(),
+    tax_rate: _pfTradeEl('TaxRate').value || '0', tax_amount: _pfTradeEl('TaxAmount').value || null,
     cost_fx_rate: _pfTradeEl('FxLabel').hidden ? null : _pfTradeEl('Fx').value || null,
   };
 }
@@ -100,6 +118,7 @@ function _pfTradeRenderPreview(result) {
     <dl><dt>보유 수량</dt><dd>${number(result.quantity_before)} → ${number(result.quantity_after)}</dd>
     <dt>현금 (${escapeHtml(result.currency)})</dt><dd>${number(result.cash_before)} → ${number(result.cash_after)}</dd>
     <dt>체결 금액 / 비용</dt><dd>${number(result.gross_amount)} / ${number(result.fees)} ${escapeHtml(result.currency)}</dd>
+    <dt>수수료 / 세금</dt><dd>${number(result.commission ?? result.fees)} / ${number(result.tax_amount || 0)} ${escapeHtml(result.currency)}</dd>
     <dt>평균 매입가</dt><dd>${number(result.avg_price_after)} ${escapeHtml(result.avg_price_currency)}</dd></dl>
     <p class="pf-trade-help">${result.quantity_after === 0 ? '전량 매도하면 보유종목 목록에서 제외합니다.' : '매수 비용은 평균 매입가에 포함하고, 부분 매도는 기존 평균 매입가를 유지합니다.'}</p>`;
 }
@@ -132,7 +151,7 @@ async function pfLoadTrades() {
   try {
     const rows = await apiFetchJson('/api/portfolio/trades?limit=20', { errorMessage: '매매 내역을 불러오지 못했습니다.' });
     _pfTradeEl('History').innerHTML = rows.length ? rows.map(row => `<article><strong>${escapeHtml(row.stock_name)} · ${row.side === 'buy' ? '매수' : '매도'}</strong>
-      <p>${_pfTradeFmt(row.quantity)} × ${_pfTradeFmt(row.price)} ${escapeHtml(row.currency)} · 비용 ${_pfTradeFmt(row.fees)}</p>
+      <p>${_pfTradeFmt(row.quantity)} × ${_pfTradeFmt(row.price)} ${escapeHtml(row.currency)} · 비용 ${_pfTradeFmt(row.fees)}${row.commission !== null && row.commission !== undefined ? ` (수수료 ${_pfTradeFmt(row.commission)} + 세금 ${_pfTradeFmt(row.tax_amount || 0)})` : ''}</p>
       <small>${escapeHtml(new Date(row.created_at).toLocaleString('ko-KR'))}${row.memo ? ` · ${escapeHtml(row.memo)}` : ''}</small></article>`).join('') : '<p>아직 기록한 매매가 없습니다.</p>';
   } catch (error) { _pfTradeEl('History').textContent = error.message; }
 }
@@ -174,6 +193,7 @@ async function pfSaveTrade() {
   _pfTradeEl('Form').reset();
   _pfTradeEl('Currency').disabled = false;
   _pfTrade.selected = null;
+  _pfTradeTaxDefaults();
   _pfTrade.preview = null;
   _pfTrade.payload = null;
   _pfTradeEl('FxLabel').hidden = true;
@@ -201,7 +221,8 @@ function pfOpenTrade(code) {
   if (_pfTrade.pending) {
     const p = _pfTrade.pending;
     _pfTradeSelect({ code: p.stock_code, name: p.stock_name, currency: p.currency });
-    for (const [id, key] of [['Side', 'side'], ['Currency', 'currency'], ['Quantity', 'quantity'], ['Price', 'price'], ['Fees', 'fees'], ['Memo', 'memo'], ['Fx', 'cost_fx_rate']]) _pfTradeEl(id).value = p[key] ?? '';
+    for (const [id, key] of [['Side', 'side'], ['Currency', 'currency'], ['Quantity', 'quantity'], ['Price', 'price'], ['Fees', 'fees'], ['Memo', 'memo'], ['Fx', 'cost_fx_rate'], ['TaxRate', 'tax_rate'], ['TaxAmount', 'tax_amount']]) _pfTradeEl(id).value = p[key] ?? '';
+    _pfTradeCosts();
     _pfTradeCurrency();
     _pfTradeEl('Fields').disabled = true;
     _pfTradeEl('Save').disabled = false;
@@ -213,15 +234,16 @@ function pfOpenTrade(code) {
     const selected = _pfTrade.choices.find(i => i.code === code);
     if (selected) _pfTradeSelect(selected);
     else _pfTradeCurrency();
+    _pfTradeCosts();
   }
   if (!_pfTradeEl('Dialog').open) _pfTradeEl('Dialog').showModal();
   pfLoadTrades();
 }
 
 _pfTradeEl('Form').addEventListener('submit', pfPreviewTrade);
-_pfTradeEl('Form').addEventListener('input', _pfTradeInvalidate);
+_pfTradeEl('Form').addEventListener('input', () => { _pfTradeInvalidate(); _pfTradeCosts(); });
 _pfTradeEl('Stock').addEventListener('input', () => _pfTradeSearch().catch(error => { _pfTradeEl('Status').textContent = error.message; }));
-_pfTradeEl('Side').addEventListener('change', () => { _pfTradeInvalidate(); _pfTradeCurrency(); });
-_pfTradeEl('Currency').addEventListener('change', () => { _pfTradeInvalidate(); _pfTradeCurrency(); });
+_pfTradeEl('Side').addEventListener('change', () => { _pfTradeInvalidate(); _pfTradeCurrency(); _pfTradeTaxDefaults(); });
+_pfTradeEl('Currency').addEventListener('change', () => { _pfTradeInvalidate(); _pfTradeCurrency(); _pfTradeTaxDefaults(); });
 _pfTradeEl('Save').addEventListener('click', pfSaveTrade);
 _pfTradeEl('Close').addEventListener('click', () => _pfTradeEl('Dialog').close());

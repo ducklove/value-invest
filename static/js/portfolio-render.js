@@ -404,7 +404,7 @@ function renderPortfolio(options = {}) {
       return { pct, pnl, valueChange };
     }
     // Whole portfolio: NAV-based % + cashflow-adjusted PnL
-    const nav = _navAdj(snap[navField || 'nav'], snap.fx_usdkrw);
+    const nav = _navAdj(snap.return_nav ?? snap[navField || 'nav'], snap.fx_usdkrw);
     const pct = nav && curNav ? ((curNav / nav - 1) * 100) : null;
     const valueChange = baseVal != null ? _currentFxVal - baseVal : null;
     const netCf = Number(snap.today_net_cashflow ?? snap.net_cashflow ?? 0) || 0;
@@ -416,10 +416,12 @@ function renderPortfolio(options = {}) {
   const latestSnap = PfStore.navHistory.length ? PfStore.navHistory[PfStore.navHistory.length - 1] : null;
   let _pendingUnitsChange = 0;
   let _pendingCashflowWithoutUnits = 0;
+  let _pendingDistribution = 0;
   if (!isFiltered && Array.isArray(PfStore.snapshots.prevDay?.today_cashflows)) {
     for (const cf of PfStore.snapshots.prevDay.today_cashflows) {
       // Today 기준선 이후 거래라도 최신 NAV 정산에 이미 반영됐으면 제외한다.
       if (cf.applied_snapshot_date && latestSnap && cf.applied_snapshot_date <= latestSnap.date) continue;
+      if (cf.type === 'distribution') _pendingDistribution += Number(cf.amount || 0);
       const units = cf?.units_change == null ? NaN : Number(cf?.units_change);
       if (Number.isFinite(units)) _pendingUnitsChange += units;
       else _pendingCashflowWithoutUnits += Number(cf?.signed_amount || 0);
@@ -434,7 +436,8 @@ function renderPortfolio(options = {}) {
   const _curNavKrw = (_liveNavUnits && _liveNavUnits > 0 && _liveNavValueKrw > 0)
     ? _liveNavValueKrw / _liveNavUnits
     : (latestSnap ? latestSnap.nav : null);
-  const curNav = _navAdj(_curNavKrw, PfStore.currency.fxRate);
+  const _curReturnNav = _curNavKrw == null ? null : (_curNavKrw + (_liveNavUnits > 0 ? _pendingDistribution / _liveNavUnits : 0)) * (latestSnap?.return_factor || 1);
+  const curNav = _navAdj(_curReturnNav, PfStore.currency.fxRate);
 
   // --- Daily return ---
   const _dailyBaseValue = _periodBaseValue(PfStore.snapshots.prevDay);

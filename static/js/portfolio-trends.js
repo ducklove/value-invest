@@ -180,8 +180,9 @@ async function renderNavChart(data) {
   }
 
   const navValues = data.map(d => {
-    if (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
-    return d.nav;
+    const value = d.return_nav ?? d.nav;
+    if (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return value / d.fx_usdkrw;
+    return value;
   });
   const labels = data.map(d => d.date);
 
@@ -609,8 +610,9 @@ function renderNavReturns(data) {
   const mobileChartMode = _isMobileChartMode();
 
   const _nav = d => {
-    if (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return d.nav / d.fx_usdkrw;
-    return d.nav;
+    const value = d.return_nav ?? d.nav;
+    if (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) return value / d.fx_usdkrw;
+    return value;
   };
 
   const latest = data[data.length - 1];
@@ -637,6 +639,7 @@ function renderNavReturns(data) {
     ? ((latestNav - firstNav) / firstNav * 100) / totalYears : null;
 
   const items = [
+    { label: '실제 NAV', val: ((PfStore.currency.unit === 'USD' && latest.fx_usdkrw > 0) ? latest.nav / latest.fx_usdkrw : latest.nav).toFixed(2), role: 'unit-nav' },
     { label: '최근 7일', val: pct7 !== null ? fmtPct(pct7) : '-', cls: returnClass(pct7), days: 7 },
     { label: '최근 30일', val: pct30 !== null ? fmtPct(pct30) : '-', cls: returnClass(pct30), days: 30 },
     { label: '최근 90일', val: pct90 !== null ? fmtPct(pct90) : '-', cls: returnClass(pct90), days: 90 },
@@ -680,7 +683,7 @@ function _updateNavCagrCard(data, startIdx, endIdx) {
   }
   // Same FX-aware accessor renderNavReturns uses — keep the two in sync so
   // switching the display currency is reflected in the zoomed CAGR too.
-  const _nav = d => (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) ? d.nav / d.fx_usdkrw : d.nav;
+  const _nav = d => (PfStore.currency.unit === 'USD' && d.fx_usdkrw && d.fx_usdkrw > 0) ? (d.return_nav ?? d.nav) / d.fx_usdkrw : (d.return_nav ?? d.nav);
   const firstNav = _nav(data[startIdx]);
   const lastNav = _nav(data[endIdx]);
   const days = (new Date(data[endIdx].date) - new Date(data[startIdx].date)) / 86400000;

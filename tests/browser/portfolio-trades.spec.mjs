@@ -35,6 +35,8 @@ test('매매 기록에서 미리보기·매수·매도 후 현금과 보유 수�
   await page.locator('#pfTradeQuantity').fill('1');
   await page.locator('#pfTradePrice').fill('85000');
   await page.locator('#pfTradeFees').fill('50');
+  await expect(page.locator('#pfTradeTaxRate')).toHaveValue('0.2');
+  await expect(page.locator('#pfTradeCosts')).toContainText('세금 170 = 합계 220 KRW');
   await page.getByRole('button', { name: '변경 내용 확인' }).click();
   await expect(page.locator('#pfTradePreview')).toContainText('삼성전자 매도');
   const overflow = await dialog.evaluate(el => el.scrollWidth > el.clientWidth);
@@ -42,9 +44,9 @@ test('매매 기록에서 미리보기·매수·매도 후 현금과 보유 수�
   await dialog.screenshot({ path: testInfo.outputPath('trade-mobile.png') });
   await page.getByRole('button', { name: '매매 기록 저장' }).click();
   await expect(page.locator('#pfTradeStatus')).toContainText('저장했습니다');
-  await page.locator('.pf-trade-history summary').click();
+  await dialog.locator('.pf-trade-history summary').click();
   await expect(page.locator('#pfTradeHistory article').first()).toContainText('매도');
   const sold = await page.evaluate(async () => (await fetch('/api/portfolio')).json());
   expect(sold.find(i => i.stock_code === '005930').quantity).toBe(stockBefore.quantity + 1);
-  expect(sold.find(i => i.stock_code === 'CASH_KRW').quantity).toBe(cashBefore.quantity - 160100 + 84950);
+  expect(sold.find(i => i.stock_code === 'CASH_KRW').quantity).toBe(cashBefore.quantity - 160100 + 84780);
 });

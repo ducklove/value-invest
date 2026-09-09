@@ -207,6 +207,7 @@ function _pfRenderPeriodReport(saved) {
     _pfReportCard('NAV 수익률', _pfReportPct(summary.nav_return_pct), `${summary.baseline_date || '-'} → ${summary.ending_date || '-'}`, navCls),
     _pfReportCard('평가금액 변화', _pfReportKrw(summary.value_change), `${_pfReportKrw(summary.starting_value)} → ${_pfReportKrw(summary.ending_value)}`, valueCls),
     _pfReportCard('순입출금', _pfReportKrw(cash.net_cashflow), `입금 ${_pfReportKrw(cash.total_deposit)} · 출금 ${_pfReportKrw(cash.total_withdrawal)}`),
+    _pfReportCard('분배금 지급', _pfReportKrw(cash.total_distribution || 0), '좌수 유지 · 총수익률에 포함'),
     _pfReportCard('순 구성 변화', _pfReportKrw(compSummary.net_trade_value_estimate), `매수/증가 ${compSummary.buy_like_count || 0} · 매도/축소 ${compSummary.sell_like_count || 0}`),
     _pfReportCard('종목 변동', `${(counts.added || 0) + (counts.removed || 0) + (counts.increased || 0) + (counts.decreased || 0)}개`, `추가 ${counts.added || 0} · 제거 ${counts.removed || 0} · 증가 ${counts.increased || 0} · 감소 ${counts.decreased || 0}`),
     _pfReportCard('MDD', _pfReportPct(risk.max_drawdown_pct, false), risk.max_drawdown_trough_date || ''),

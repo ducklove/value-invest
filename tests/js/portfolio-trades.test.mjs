@@ -131,6 +131,23 @@ test('외화 추가 매수는 기존 매입가 통화가 다를 때만 체결 �
   } finally { s.dom.window.close(); }
 });
 
+test('국내 매도는 0.2% 거래세가 수수료 합계에 자동 반영되고 금액 수정과 면세도 가능하다', async () => {
+  const s = setup();
+  try {
+    s.w.pfOpenTrade('005930');
+    s.el('Side').value = 'sell';
+    s.el('Side').dispatchEvent(new s.w.Event('change'));
+    s.fill('Quantity', '2'); s.fill('Price', '80000'); s.fill('Fees', '100');
+    assert.equal(s.el('TaxRate').value, '0.2');
+    assert.match(s.el('Costs').textContent, /세금 320 = 합계 420 KRW/);
+    s.fill('TaxAmount', '300');
+    assert.match(s.el('Costs').textContent, /합계 400 KRW/);
+    s.fill('TaxAmount', ''); s.fill('TaxRate', '0');
+    assert.match(s.el('Costs').textContent, /세금 0 = 합계 100 KRW/);
+    await s.w.pfLoadTrades();
+  } finally { s.dom.window.close(); }
+});
+
 test('종목 검색은 새 종목을 선택하되 보유 수량을 미리 등록하지 않는다', async () => {
   const s = setup(path => path.startsWith('/api/search') ? [{ stock_code: '000660', corp_name: 'SK하이닉스' }] : []);
   try {

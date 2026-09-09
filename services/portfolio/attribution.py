@@ -74,21 +74,25 @@ def decompose(nav: list[dict], stocks: list[dict], cashflows: list[dict], income
     # applied_snapshot_date 도입 이전 자료는 units_change가 있을 때만 기록일을 사용한다.
     flows = [row for row in cashflows
              if (row.get("applied_snapshot_date") or row.get("units_change") is not None or "applied_snapshot_date" not in row)
+             and (row["type"] != "distribution" or row.get("applied_snapshot_date"))
              and start < str(row.get("applied_snapshot_date") or row["date"]) <= end]
     inflow = sum(float(row["amount"]) for row in flows if row["type"] == "deposit")
     outflow = sum(float(row["amount"]) for row in flows if row["type"] == "withdrawal")
-    events = [row for row in income if start < row["date"] <= end]
+    distributions = sum(float(row["amount"]) for row in flows if row["type"] == "distribution")
+    events = [row for row in income if start < row["date"] <= end and (not row.get("from_receipt") or row.get("receipt_settled_date"))]
     dividends = sum(float(row["amount_krw"]) for row in events if row["kind"] == "dividend")
     fees = sum(float(row["amount_krw"]) for row in events if row["kind"] == "fee")
     delta = round(ending - beginning, 2)
     amounts = {"external_flow": round(inflow-outflow, 2), **{key: round(value, 2) for key, value in totals.items()},
                "dividend": round(dividends, 2), "fee": -round(fees, 2)}
+    if distributions:
+        amounts["distribution"] = -round(distributions, 2)
     amounts["unclassified"] = round(delta - sum(amounts.values()), 2)
     labels = {"external_flow": "순입출금", "price": "가격 변화", "fx": "환율 변화", "combined": "가격·환율 미분리",
-              "dividend": "기록한 배당", "fee": "기록한 수수료·세금", "unclassified": "매매·기타 미분류"}
+              "dividend": "기록한 배당", "distribution": "분배금 지급", "fee": "기록한 수수료·세금", "unclassified": "매매·기타 미분류"}
     return {
         "baseline_date": start, "ending_date": end, "starting_value": beginning, "ending_value": ending,
-        "value_change": delta, "investment_pnl": round(delta-amounts["external_flow"], 2),
+        "value_change": delta, "investment_pnl": round(delta-amounts["external_flow"]+distributions, 2),
         "components": [{"key": key, "label": labels[key], "amount": value} for key, value in amounts.items()],
         "reconciliation_error": round(delta-sum(amounts.values()), 2),
         "stocks": sorted([{**row, **{key: round(row[key], 2) for key in totals},

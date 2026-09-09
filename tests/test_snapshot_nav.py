@@ -17,6 +17,8 @@ def isolate_snapshot_unit_tests(monkeypatch):
         yield AsyncMock()
     monkeypatch.setattr(snapshot_nav.db_repo, "transaction", fake_transaction)
     monkeypatch.setattr(snapshot_nav.snapshots_repo, "get_nav_input_state", AsyncMock(return_value=()))
+    monkeypatch.setattr(snapshot_nav.snapshots_repo, "get_pending_distributions", AsyncMock(return_value=[]))
+    monkeypatch.setattr(snapshot_nav.snapshots_repo, "settle_dividend_receipts", AsyncMock())
 
 
 def test_snapshot_nav_does_not_import_portfolio_route_private_helpers():

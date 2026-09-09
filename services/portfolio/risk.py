@@ -80,7 +80,7 @@ def clean_series(rows: list[dict] | None, value_key: str = "nav") -> list[tuple[
     out: list[tuple[str, float]] = []
     for row in rows or []:
         d = row.get("date")
-        v = row.get(value_key)
+        v = row.get("return_nav", row.get(value_key)) if value_key == "nav" else row.get(value_key)
         if not d or v is None:
             continue
         try:

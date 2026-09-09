@@ -805,12 +805,44 @@ CREATE TABLE IF NOT EXISTS portfolio_trades (
     UNIQUE(google_sub, request_id)
 );
 CREATE INDEX IF NOT EXISTS idx_portfolio_trades_user_id ON portfolio_trades(google_sub, id DESC);
+CREATE TABLE IF NOT EXISTS portfolio_dividend_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    source_key TEXT,
+    stock_code TEXT NOT NULL,
+    income_event_id INTEGER REFERENCES portfolio_income_events(id),
+    applied_snapshot_date TEXT,
+    fingerprint TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(google_sub, request_id),
+    UNIQUE(google_sub, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_dividend_receipts_user_id ON portfolio_dividend_receipts(google_sub, id DESC);
+CREATE TABLE IF NOT EXISTS portfolio_distributions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    amount REAL NOT NULL CHECK(amount > 0),
+    amount_krw REAL NOT NULL CHECK(amount_krw > 0),
+    applied_snapshot_date TEXT,
+    fingerprint TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(google_sub, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_distributions_user_date ON portfolio_distributions(google_sub, date);
 """
 
 # Columns that were added after the original CREATE TABLE definitions. Keeping
 # the list here makes init_db's migration surface explicit while the larger
 # table-creation script is still being split out of cache.py.
 CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
+    ("portfolio_snapshots", "distribution_per_unit", "REAL NOT NULL DEFAULT 0"),
+    ("portfolio_snapshots", "return_factor", "REAL NOT NULL DEFAULT 1"),
     ("portfolio_stock_snapshots", "currency", "TEXT"),
     ("portfolio_stock_snapshots", "fx_rate", "REAL"),
     ("corp_codes", "modify_date", "TEXT"),

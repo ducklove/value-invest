@@ -26,7 +26,7 @@ function pfAttributionHtml(data) {
 }
 
 function _pfIncomeHtml(events) {
-  return (events || []).map(row => `<div class="pf-income-row"><span>${escapeHtml(row.date)} · ${row.kind === 'dividend' ? '배당' : '비용'} · ${escapeHtml(row.stock_code || '포트폴리오')} · ${pfAttributionMoney(row.amount_krw)} ${escapeHtml(row.memo || '')}</span><button type="button" class="pf-mini-btn" onclick="pfDeleteIncome(${Number(row.id)})" aria-label="${escapeHtml(row.date)} 분류 내역 삭제">삭제</button></div>`).join('') || '<p class="pf-chart-note">선택 기간에 기록한 배당·비용이 없습니다.</p>';
+  return (events || []).map(row => `<div class="pf-income-row"><span>${escapeHtml(row.date)} · ${row.kind === 'dividend' ? '배당' : '비용'} · ${escapeHtml(row.stock_code || '포트폴리오')} · ${pfAttributionMoney(row.amount_krw)} ${escapeHtml(row.memo || '')}</span>${row.from_receipt ? '<small>배당 수취 연동</small>' : `<button type="button" class="pf-mini-btn" onclick="pfDeleteIncome(${Number(row.id)})" aria-label="${escapeHtml(row.date)} 분류 내역 삭제">삭제</button>`}</div>`).join('') || '<p class="pf-chart-note">선택 기간에 기록한 배당·비용이 없습니다.</p>';
 }
 
 async function pfLoadAttribution() {

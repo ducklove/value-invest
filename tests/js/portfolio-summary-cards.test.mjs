@@ -77,6 +77,23 @@ function cardByLabel(w, label) {
     .find((c) => c.querySelector(".pf-summary-label")?.textContent.trim().startsWith(label));
 }
 
+for (const settled of [false, true]) {
+  test(`분배금 지급은 ${settled ? '정산 후에도' : '정산 전에도'} 좌수를 유지하고 총수익률에 포함한다`, () => {
+    const w = loadSummaryDom();
+    const base = { date: '2026-08-31', nav: 1000, return_nav: 1000, total_value: 10000, total_units: 10 };
+    w.PfStore.items = [{ stock_code: 'CASH_KRW', stock_name: '원화', quantity: 10000, avg_price: 1, currency: 'KRW', quote: { price: 1, change: 0 } }];
+    w.PfStore.navHistory = [base, ...(settled ? [{ ...base, date: '2026-09-01', return_nav: 1100, return_factor: 1.1 }] : [])];
+    w.PfStore.snapshots.prevDay = { ...base, today_net_cashflow: -1000, today_cashflows: [
+      { type: 'distribution', amount: 1000, signed_amount: -1000, units_change: 0, applied_snapshot_date: settled ? '2026-09-01' : null },
+    ] };
+    w.PfStore.snapshots.monthEnd = { ...base, net_cashflow: -1000 };
+    w.PfStore.snapshots.yearStart = { ...base, net_cashflow: -1000 };
+    w.renderPortfolio({ summaryOnly: true });
+    for (const label of ['Today', 'MTD', 'YTD']) assert.equal(cardByLabel(w, label).querySelector('.pf-summary-value').textContent, '+10.00%');
+    w.close();
+  });
+}
+
 test("오늘 입금은 Today 손익에서 빠지고 평가액 줄에만 나타난다", () => {
   const w = loadSummaryDom();
   // 전일 950,000 → 현재 1,000,000, 그중 50,000 은 오늘 입금.

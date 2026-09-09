@@ -1,6 +1,6 @@
 """현물 매매 입력과 잔고·매입가 계산. 외부 시세는 체결가로 대신하지 않는다."""
 
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -11,6 +11,15 @@ from domain.portfolio_codes import is_cash_asset, is_korean_stock, is_special_as
 
 TradeCurrency = Literal["KRW", "USD", "EUR", "JPY", "CNY", "HKD", "GBP", "AUD", "CAD", "CHF", "TWD", "VND"]
 TradeNumber = Annotated[Decimal, Field(ge=0, le=1_000_000_000_000, decimal_places=8, allow_inf_nan=False)]
+TaxRate = Annotated[Decimal, Field(ge=0, le=100, decimal_places=6, allow_inf_nan=False)]
+
+
+def money_unit(currency: str) -> Decimal:
+    return Decimal(1) if currency in {"KRW", "JPY", "VND"} else Decimal("0.01")
+
+
+def withholding(gross: Decimal, rate: Decimal, currency: str) -> Decimal:
+    return (gross * rate / 100).quantize(money_unit(currency), rounding=ROUND_DOWN)
 
 
 class TradeError(AppError):
@@ -30,6 +39,9 @@ class TradeInput(BaseModel):
     quantity: Annotated[Decimal, Field(gt=0, le=1_000_000_000, decimal_places=8, allow_inf_nan=False)]
     price: Annotated[TradeNumber, Field(gt=0)]
     fees: TradeNumber = Decimal(0)
+    # 이전 클라이언트의 fees는 세금 포함 총비용이었다. 생략 시 추가 과세하지 않는다.
+    tax_rate: TaxRate = Decimal(0)
+    tax_amount: TradeNumber | None = None
     currency: TradeCurrency = "KRW"
     cost_fx_rate: Annotated[TradeNumber, Field(gt=0)] | None = None
     memo: Annotated[str, Field(max_length=500)] = ""
@@ -39,7 +51,7 @@ class TradeInput(BaseModel):
     def uppercase(cls, value):
         return value.strip().upper() if isinstance(value, str) else value
 
-    @field_validator("quantity", "price", "fees", "cost_fx_rate", mode="before")
+    @field_validator("quantity", "price", "fees", "cost_fx_rate", "tax_rate", "tax_amount", mode="before")
     @classmethod
     def reject_boolean(cls, value):
         if isinstance(value, bool):
@@ -61,6 +73,9 @@ class TradeResult(BaseModel):
     quantity: FiniteFloat
     price: FiniteFloat
     fees: FiniteFloat
+    commission: FiniteFloat | None = None
+    tax_rate: FiniteFloat = 0
+    tax_amount: FiniteFloat = 0
     gross_amount: FiniteFloat
     cash_change: FiniteFloat
     quantity_before: FiniteFloat
@@ -102,16 +117,20 @@ def calculate_trade(trade: TradeInput, holding: dict | None, cash: dict | None) 
         raise TradeError("체결 통화가 기존 종목 통화와 다릅니다.")
     if cash and cash.get("currency", "KRW") != trade.currency:
         raise TradeError("현금 항목의 통화 설정을 확인해 주세요.")
-    unit = Decimal(1) if trade.currency in {"KRW", "JPY", "VND"} else Decimal("0.01")
+    unit = money_unit(trade.currency)
     money_limit = Decimal("1000000000000000") if unit == 1 else Decimal("1000000000000")
     if trade.fees != trade.fees.quantize(unit):
         raise TradeError("수수료·세금은 해당 통화의 최소 금액 단위로 입력해 주세요.")
     gross = (trade.quantity * trade.price).quantize(unit, rounding=ROUND_HALF_UP)
     if gross <= 0 or gross > money_limit:
         raise TradeError("체결 금액이 지원 범위를 벗어났습니다.")
+    tax = trade.tax_amount if trade.tax_amount is not None else withholding(gross, trade.tax_rate, trade.currency)
+    if tax != tax.quantize(unit):
+        raise TradeError("세금은 해당 통화의 최소 금액 단위로 입력해 주세요.")
+    fees = trade.fees + tax
     avg_currency = holding.get("avg_price_currency") or trade.currency
     if trade.side == "buy":
-        change = -(gross + trade.fees)
+        change = -(gross + fees)
         after_quantity = quantity + trade.quantity
         if after_quantity > 1_000_000_000:
             raise TradeError("매수 후 보유 수량이 너무 큽니다.")
@@ -133,11 +152,11 @@ def calculate_trade(trade: TradeInput, holding: dict | None, cash: dict | None) 
     else:
         if trade.quantity > quantity:
             raise TradeError("보유 수량보다 많이 매도할 수 없습니다.")
-        if trade.fees > gross:
+        if fees > gross:
             raise TradeError("수수료·세금이 매도 금액보다 큽니다.")
         after_quantity = quantity - trade.quantity
         after_avg = avg_price if after_quantity else Decimal(0)
-        change = gross - trade.fees
+        change = gross - fees
     after_cash = balance + change
     if abs(after_cash) > money_limit:
         raise TradeError("변경 후 현금 잔고가 지원 범위를 벗어났습니다.")
@@ -147,7 +166,8 @@ def calculate_trade(trade: TradeInput, holding: dict | None, cash: dict | None) 
     return {
         "stock_code": code, "stock_name": holding.get("stock_name") or trade.stock_name,
         "side": trade.side, "currency": trade.currency, "cash_code": f"CASH_{trade.currency}",
-        "quantity": float(trade.quantity), "price": float(trade.price), "fees": float(trade.fees),
+        "quantity": float(trade.quantity), "price": float(trade.price), "fees": float(fees),
+        "commission": float(trade.fees), "tax_rate": float(trade.tax_rate), "tax_amount": float(tax),
         "gross_amount": float(gross), "cash_change": float(change),
         "quantity_before": float(quantity), "quantity_after": float(after_quantity),
         "cash_before": float(balance), "cash_after": float(after_cash),

@@ -292,10 +292,13 @@ async def _current_nav(google_sub: str, total_value: float, baseline: dict) -> f
         return None
     pending_units = 0.0
     pending_cash = 0.0
+    pending_distribution = 0.0
     for cashflow in baseline["cashflows"]:
         applied = cashflow.get("applied_snapshot_date")
         if applied and applied <= latest["date"]:
             continue
+        if cashflow.get("type") == "distribution":
+            pending_distribution += cashflow["amount"]
         units = _safe_float(cashflow.get("units_change"))
         if units is not None:
             pending_units += units
@@ -307,8 +310,8 @@ async def _current_nav(google_sub: str, total_value: float, baseline: dict) -> f
         units += pending_units
     value = total_value - pending_cash
     if units and units > 0 and value > 0:
-        return value / units
-    return _safe_float(latest.get("nav"))
+        return (value + pending_distribution) / units * latest.get("return_factor", 1)
+    return _safe_float(latest.get("return_nav", latest.get("nav")))
 
 
 async def _baseline(google_sub: str) -> dict:
@@ -322,7 +325,7 @@ async def _baseline(google_sub: str) -> dict:
     cashflows = []
     net = 0.0
     for row in rows:
-        signed = row["amount"] if row["type"] == "deposit" else -row["amount"] if row["type"] == "withdrawal" else 0.0
+        signed = row["amount"] if row["type"] == "deposit" else -row["amount"] if row["type"] in {"withdrawal", "distribution"} else 0.0
         if not signed:
             continue
         net += signed
@@ -405,7 +408,7 @@ async def build_summary(
         if not snapshot:
             return None, None
         base_value = _safe_float(snapshot.get("total_value"))
-        base_nav = _safe_float(snapshot.get("nav"))
+        base_nav = _safe_float(snapshot.get("return_nav", snapshot.get("nav")))
         pnl = None
         if base_value is not None:
             pnl = total_value - base_value

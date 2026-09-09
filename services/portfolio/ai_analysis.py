@@ -203,11 +203,11 @@ def performance_lines(nav_history: list[dict]) -> list[str]:
         first = nav_history[0]
         perf_lines.append(f"NAV: {latest['nav']:.2f} ({first['date']}~{latest['date']})")
         if len(nav_history) > 252:
-            yoy = (latest['nav'] / nav_history[-252]['nav'] - 1) * 100
+            yoy = (latest.get('return_nav', latest['nav']) / nav_history[-252].get('return_nav', nav_history[-252]['nav']) - 1) * 100
             perf_lines.append(f"YoY: {yoy:+.2f}%")
         days = (date.fromisoformat(latest['date']) - date.fromisoformat(first['date'])).days
         if days > 365:
-            cagr = ((latest['nav'] / first['nav']) ** (365 / days) - 1) * 100
+            cagr = ((latest.get('return_nav', latest['nav']) / first.get('return_nav', first['nav'])) ** (365 / days) - 1) * 100
             perf_lines.append(f"CAGR: {cagr:+.2f}%")
     return perf_lines
 

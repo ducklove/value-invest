@@ -206,7 +206,8 @@ async def _persist_snapshot(
 ) -> int:
     """호출자가 보유한 transaction 안에서 NAV·원장·종목을 함께 저장한다."""
     existing = await snapshots_repo.get_snapshot_by_date(google_sub, snap_date)
-    prev = existing or await snapshots_repo.get_latest_snapshot_before_date(google_sub, snap_date)
+    previous_day = None if existing else await snapshots_repo.get_latest_snapshot_before_date(google_sub, snap_date)
+    prev = existing or previous_day
 
     if prev is None and total_value == 0:
         return 0
@@ -250,6 +251,13 @@ async def _persist_snapshot(
     issue_nav = nav
     # 이미 좌수가 정해진 과거 거래도 먼저 분모에 포함한다.
     preset_units = sum(cf["units_change"] for cf in preset)
+    distributions = await snapshots_repo.get_pending_distributions(google_sub, snap_date)
+    distribution_units = total_units + preset_units
+    if distributions and distribution_units <= 0:
+        raise SnapshotIncomplete("분배금을 반영할 NAV 좌수가 없습니다.")
+    distribution_per_unit = (existing or {}).get("distribution_per_unit", 0)
+    if distributions:
+        distribution_per_unit += sum(row["amount_krw"] for row in distributions) / distribution_units
     if total_units + preset_units > 0:
         candidate = (total_value - net_fresh) / (total_units + preset_units)
         if candidate > 0:
@@ -291,6 +299,18 @@ async def _persist_snapshot(
     else:
         raise SnapshotIncomplete("평가액과 정산 좌수가 일치하지 않아 저장하지 않았습니다.")
 
+    # 일별 정산 기준 분배금 재투자 지수. 실제 NAV·좌수는 유지하고 수익률용
+    # 계수만 따로 저장한다. 같은 날 재실행해도 기존 좌당 분배금을 중복 가산하지 않는다.
+    if distribution_per_unit and nav <= 0:
+        raise SnapshotIncomplete("분배 후 NAV가 0 이하라 총수익률을 정산할 수 없습니다.")
+    if existing and distribution_per_unit:
+        previous_day = await snapshots_repo.get_latest_snapshot_before_date(google_sub, snap_date)
+    factor_base = previous_day if distribution_per_unit else prev
+    return_factor = (factor_base or {}).get("return_factor", 1) * (1 + distribution_per_unit / nav if nav > 0 else 1)
+    distribution_options = {"distribution_per_unit": distribution_per_unit, "return_factor": return_factor} if distribution_per_unit or return_factor != 1 else {}
+    for row in distributions:
+        marking_updates.append(("UPDATE portfolio_distributions SET applied_snapshot_date=? WHERE id=?", (snap_date, row["id"])))
+
     if marking_updates:
         # 마킹과 스냅샷 저장은 한 트랜잭션 — 둘이 갈라지면 어느 쪽이든
         # 유닛이 유실(마킹만 커밋)되거나 이중 반영(스냅샷만 커밋 후 재실행)
@@ -299,9 +319,10 @@ async def _persist_snapshot(
         async with db_repo.transaction() as db:
             for sql, params in marking_updates:
                 await db.execute(sql, params)
-            await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw, cashflow_cutoff_at=cutoff)
+            await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw, cashflow_cutoff_at=cutoff, **distribution_options)
     else:
-        await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw, cashflow_cutoff_at=cutoff)
+        await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw, cashflow_cutoff_at=cutoff, **distribution_options)
+    await snapshots_repo.settle_dividend_receipts(google_sub, snap_date)
     await snapshots_repo.save_stock_snapshots(google_sub, snap_date, per_stock)
     fallback_count = sum(1 for s in per_stock if s.get("priced_from_fallback"))
     logger.info(

@@ -64,6 +64,25 @@ class PortfolioTradeTests(TempDbMixin):
         self.assertEqual(result["avg_price_after"], 123.84)
         self.assertEqual((await portfolio.get_portfolio_item("u1", "CASH_KRW"))["quantity"], 2000)
 
+    async def test_sale_tax_is_added_to_commission_and_can_be_overridden(self):
+        request = await self.prepared(side="sell", quantity=4, price=200, fees=5, tax_rate="0.2")
+        result = await portfolio_trades.record_trade("u1", request)
+        self.assertEqual((result["commission"], result["tax_amount"], result["fees"], result["cash_change"]), (5, 1, 6, 794))
+        exempt = await self.prepared(side="sell", quantity=1, price=200, fees=5, tax_rate=0)
+        result = await portfolio_trades.record_trade("u1", exempt)
+        self.assertEqual(result["tax_amount"], 0)
+        manual = await self.prepared(side="sell", quantity=1, price=200, fees=5, tax_rate="0.2", tax_amount=3)
+        self.assertEqual((await portfolio_trades.record_trade("u1", manual))["fees"], 8)
+
+    async def test_old_request_fingerprint_still_replays_after_tax_fields_added(self):
+        request = await self.prepared()
+        await portfolio_trades.record_trade("u1", request)
+        payload = request.model_dump(mode="json", exclude={"request_id", "tax_rate", "tax_amount"})
+        db = await get_db()
+        row = await (await db.execute("SELECT fingerprint FROM portfolio_trades")).fetchone()
+        self.assertEqual(row["fingerprint"], portfolio_trades._digest(payload))
+        self.assertTrue((await portfolio_trades.record_trade("u1", request))["replayed"])
+
     async def test_foreign_sale_creates_missing_currency_cash(self):
         await portfolio.save_portfolio_item("u1", "AAPL", "Apple", 3, 120000, "USD")
         result = await portfolio_trades.record_trade("u1", await self.prepared(stock_code="AAPL", side="sell", quantity=1, price=150, fees=1, currency="USD"))

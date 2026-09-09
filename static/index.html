@@ -318,6 +318,8 @@ function trackEvent(name, params = {}) {
       <button class="pf-tab" data-tab="performance" aria-controls="pfPerformanceTab" aria-selected="false" onclick="pfSwitchTab('performance')">심층 분석</button>
       <button class="pf-tab" data-tab="household" aria-controls="pfHouseholdTab" aria-selected="false" onclick="pfSwitchTab('household')">자산 통합관리</button>
       <button class="pf-action-toggle js-pf-trade" type="button">매매 기록</button>
+      <button class="pf-action-toggle js-pf-dividend-receipt" type="button">배당금 수취</button>
+      <button class="pf-action-toggle js-pf-distribution" type="button">분배금 출금</button>
       <button class="pf-action-toggle" id="pfActionBoardToggle" type="button" aria-pressed="false" aria-controls="pfActionBoard" onclick="pfToggleActionBoard()" title="오늘의 투자 액션 보드 표시">액션</button>
       <button class="pf-simple-toggle" id="pfSimpleToggle" type="button" aria-pressed="false" onclick="pfToggleSimpleMode()" title="모바일 간편 보기">간편</button>
       <button class="pf-ws-toggle" id="pfWsToggle" type="button" aria-pressed="false" onclick="toggleQuoteWebSocket()" title="실시간 웹소켓 연결" hidden>웹소켓 연결</button>
@@ -455,7 +457,7 @@ function trackEvent(name, params = {}) {
 
       <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary" id="pfNavWrap">
         <div class="pf-nav-header">
-          <h3>NAV 기준가 추이</h3>
+          <h3>NAV 총수익 기준가 추이</h3>
           <div class="pf-analysis-actions">
             <label class="pf-bench-chip"><input type="checkbox" value="KOSPI" onchange="onBenchToggle()"><span>코스피</span></label>
             <label class="pf-bench-chip"><input type="checkbox" value="SP500" onchange="onBenchToggle()"><span>S&P 500</span></label>
@@ -467,6 +469,7 @@ function trackEvent(name, params = {}) {
           <div id="pfNavChart" style="width:100%;height:100%;"></div>
         </div>
         <div class="pf-chart-range" id="pfNavRange"></div>
+        <p class="pf-chart-note">차트·수익률은 분배금 재투자 기준입니다. 실제 NAV는 분배 시 낮아지며 좌수는 유지됩니다.</p>
         <div class="pf-nav-returns" id="pfNavReturns"></div>
       </div>
 
@@ -1204,7 +1207,11 @@ function trackEvent(name, params = {}) {
       <label>체결 통화<select id="pfTradeCurrency"><option>KRW</option><option>USD</option><option>EUR</option><option>JPY</option><option>CNY</option><option>HKD</option><option>GBP</option><option>AUD</option><option>CAD</option><option>CHF</option><option>TWD</option><option>VND</option></select></label>
       <label>수량<input id="pfTradeQuantity" type="number" min="0.00000001" max="1000000000" step="any" inputmode="decimal" required></label>
       <label>체결 단가<input id="pfTradePrice" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal" required></label>
-      <label class="pf-trade-wide">수수료·세금 합계 <span class="pf-trade-help">체결 통화 기준</span><input id="pfTradeFees" type="number" min="0" max="1000000000000" step="any" value="0" inputmode="decimal" required></label>
+      <label>매매 수수료 <span class="pf-trade-help">세금 제외</span><input id="pfTradeFees" type="number" min="0" max="1000000000000" step="any" value="0" inputmode="decimal" required></label>
+      <label>거래세율 (%)<input id="pfTradeTaxRate" type="number" min="0" max="100" step="any" value="0" inputmode="decimal" required></label>
+      <label class="pf-trade-wide">세금 직접 입력 <span class="pf-trade-help">선택 · 비우면 세율로 계산</span><input id="pfTradeTaxAmount" type="number" min="0" max="1000000000000" step="any" inputmode="decimal" placeholder="자동 계산"></label>
+      <output id="pfTradeCosts" class="pf-trade-wide pf-trade-costs" aria-live="polite"></output>
+      <p class="pf-trade-wide pf-trade-help">국내 주식 매도 기본 세율은 0.2%(농특세 포함)입니다. ETF 등 비과세 거래는 0%로 바꾸세요. 실제 공제액은 세금 직접 입력으로 맞출 수 있습니다.</p>
       <label id="pfTradeFxLabel" class="pf-trade-wide" hidden><span id="pfTradeFxText">매입가 환산 환율</span><input id="pfTradeFx" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal"></label>
       <label class="pf-trade-wide">메모 <span class="pf-trade-help">선택</span><input id="pfTradeMemo" maxlength="500"></label>
       <button id="pfTradePreviewButton" class="pf-add-btn pf-trade-wide" type="submit">변경 내용 확인</button>
@@ -1216,6 +1223,57 @@ function trackEvent(name, params = {}) {
   <details class="pf-trade-history"><summary>최근 매매 내역</summary><div id="pfTradeHistory"></div></details>
 </dialog>
 <script type="application/x-feature-script" data-feature="trades" data-src="./js/portfolio-trades.js"></script>
+<dialog id="pfDividendDialog" class="pf-trade-dialog" aria-labelledby="pfDividendTitle">
+  <div class="pf-trade-header"><h2 id="pfDividendTitle">배당금 수취</h2><button type="button" id="pfDividendClose" aria-label="배당금 수취 닫기">×</button></div>
+  <p class="pf-trade-help">배당 스케줄로 입력을 준비하고, 실제 수취한 세후 금액을 현금에 더합니다. 외부 입금·NAV 좌수에는 포함하지 않습니다.</p>
+  <div id="pfDividendTotals" class="pf-trade-costs" aria-live="polite"></div>
+  <button class="pf-mini-btn js-pf-distribution" type="button">누적 배당금 분배하기</button>
+  <form id="pfDividendForm">
+    <fieldset id="pfDividendFields" class="pf-trade-fields">
+      <label class="pf-trade-wide">배당 스케줄<select id="pfDividendSchedule"><option value="">직접 입력</option></select></label>
+      <p id="pfDividendScheduleNote" class="pf-trade-wide pf-trade-help" aria-live="polite">스케줄을 불러오고 있습니다…</p>
+      <label class="pf-trade-wide">보유 종목<select id="pfDividendHolding"><option value="">직접 입력 (매도한 종목 등)</option></select></label>
+      <label>종목 코드<input id="pfDividendCode" maxlength="24" placeholder="005930 / AAPL" required></label>
+      <label>종목명<input id="pfDividendName" maxlength="80" required></label>
+      <label>배당 과세 국가<select id="pfDividendCountry"><option value="KR">국내 · 15.4%</option><option value="US">미국 · 15%</option><option value="CN">중국 · 14.4%</option><option value="HK">홍콩 · 15.4%</option><option value="OTHER">기타 · 직접 설정</option></select></label>
+      <label>수취 통화<select id="pfDividendCurrency"><option>KRW</option><option>USD</option><option>EUR</option><option>JPY</option><option>CNY</option><option>HKD</option><option>GBP</option><option>AUD</option><option>CAD</option><option>CHF</option><option>TWD</option><option>VND</option></select></label>
+      <label>실제 수취일<input id="pfDividendDate" type="date" required></label>
+      <label>배당금 입력 방식<select id="pfDividendMode"><option value="shares">주당 배당금 × 수량</option><option value="total">세전 총액</option></select></label>
+      <label id="pfDividendPerShareLabel">주당 배당금<input id="pfDividendPerShare" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal" required></label>
+      <label id="pfDividendQuantityLabel">배당 대상 수량<input id="pfDividendQuantity" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal" required></label>
+      <label id="pfDividendGrossLabel" class="pf-trade-wide" hidden>세전 배당 총액<input id="pfDividendGross" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal"></label>
+      <label>원천징수율 (%)<input id="pfDividendTaxRate" type="number" min="0" max="100" step="any" value="15.4" inputmode="decimal" required></label>
+      <label>공제 금액 직접 입력 <span class="pf-trade-help">선택</span><input id="pfDividendTaxAmount" type="number" min="0" max="1000000000000" step="any" inputmode="decimal" placeholder="비우면 세율로 계산"></label>
+      <output id="pfDividendAmounts" class="pf-trade-wide pf-trade-costs" aria-live="polite"></output>
+      <label id="pfDividendFxLabel" class="pf-trade-wide" hidden><span id="pfDividendFxText">수취 환율 (1 외화당 KRW)</span><input id="pfDividendFx" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal"></label>
+      <p class="pf-trade-wide pf-trade-help">세율과 공제액은 증권사 입금 내역에 맞게 수정할 수 있습니다. 현재 현금에 반영하며 과거 NAV는 다시 계산하지 않습니다.</p>
+      <label class="pf-trade-wide">메모 <span class="pf-trade-help">선택</span><input id="pfDividendMemo" maxlength="500"></label>
+      <button class="pf-add-btn pf-trade-wide" type="submit">수취 내용 확인</button>
+    </fieldset>
+  </form>
+  <div id="pfDividendPreview" class="pf-trade-preview" aria-live="polite"></div>
+  <p id="pfDividendStatus" role="status"></p>
+  <button id="pfDividendSave" class="pf-add-btn pf-trade-save" type="button" disabled>배당금 수취 저장</button>
+  <details class="pf-trade-history"><summary>최근 배당 수취 내역</summary><div id="pfDividendHistory"></div></details>
+</dialog>
+<script type="application/x-feature-script" data-feature="dividend-receipts" data-src="./js/portfolio-dividend-receipts.js"></script>
+<dialog id="pfDistributionDialog" class="pf-trade-dialog" aria-labelledby="pfDistributionTitle">
+  <div class="pf-trade-header"><h2 id="pfDistributionTitle">분배금 출금</h2><button id="pfDistributionClose" type="button" aria-label="분배금 출금 닫기">×</button></div>
+  <p class="pf-trade-help">수취한 세후 배당 누적액에서 분배금을 지급합니다. 현금과 실제 NAV는 줄고 좌수는 유지됩니다. 총수익률에는 지급한 분배금을 포함합니다.</p>
+  <form id="pfDistributionForm"><fieldset id="pfDistributionFields" class="pf-trade-fields">
+    <label class="pf-trade-wide">출금 통화<select id="pfDistributionCurrency"><option>KRW</option><option>USD</option><option>EUR</option><option>JPY</option><option>CNY</option><option>HKD</option><option>GBP</option><option>AUD</option><option>CAD</option><option>CHF</option><option>TWD</option><option>VND</option></select></label>
+    <output id="pfDistributionBalance" class="pf-trade-wide pf-trade-costs" aria-live="polite"></output>
+    <label class="pf-trade-wide">분배금 출금액<input id="pfDistributionAmount" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal" required></label>
+    <label id="pfDistributionFxLabel" class="pf-trade-wide" hidden><span id="pfDistributionFxText">분배 환율 (1 외화당 KRW)</span><input id="pfDistributionFx" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal"></label>
+    <label class="pf-trade-wide">메모 <span class="pf-trade-help">선택</span><input id="pfDistributionMemo" maxlength="500"></label>
+    <button class="pf-add-btn pf-trade-wide" type="submit">분배 내용 확인</button>
+  </fieldset></form>
+  <div id="pfDistributionPreview" class="pf-trade-preview" aria-live="polite"></div>
+  <p id="pfDistributionStatus" role="status"></p>
+  <button id="pfDistributionSave" class="pf-add-btn pf-trade-save" type="button" disabled>분배금 출금 저장</button>
+  <details class="pf-trade-history"><summary>최근 분배금 출금 내역</summary><div id="pfDistributionHistory"></div></details>
+</dialog>
+<script type="application/x-feature-script" data-feature="distributions" data-src="./js/portfolio-distributions.js"></script>
 <script src="./js/portfolio-cashflows.js" defer></script>
 <script src="./js/portfolio-alerts.js" defer></script>
 <script src="./js/portfolio-tag-summary.js" defer></script>

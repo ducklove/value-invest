@@ -238,7 +238,7 @@ def _nav_block(latest: dict | None, prev: dict | None) -> dict | None:
     }
     prev_value = float(prev["total_value"]) if prev and prev.get("total_value") else None
     if prev_value and prev_value > 0:
-        change = block["total_value"] - prev_value
+        change = block["total_value"] - prev_value + float(latest.get("distribution_amount") or 0)
         block.update(
             prev_date=prev.get("date"),
             prev_value=prev_value,
@@ -495,7 +495,7 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
         amount = _safe_float(row["amount"]) or 0.0
         if row["type"] == "deposit":
             net += amount
-        elif row["type"] == "withdrawal":
+        elif row["type"] in {"withdrawal", "distribution"}:
             net -= amount
     return net
 
@@ -622,6 +622,8 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
             latest = await snapshots_repo.get_latest_snapshot(google_sub)
             if latest:
                 prev = await snapshots_repo.get_latest_snapshot_before_date(google_sub, latest["date"])
+                latest["distribution_amount"] = sum(row["amount"] for row in await snapshots_repo.get_distribution_flows(google_sub)
+                                                      if row["applied_snapshot_date"] == latest["date"])
                 context["nav"] = _nav_block(latest, prev)
                 curr_rows = await snapshots_repo.get_stock_snapshots_by_date(google_sub, latest["date"])
                 prev_rows = await snapshots_repo.get_stock_snapshots_before_date(google_sub, latest["date"])

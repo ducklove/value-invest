@@ -34,6 +34,9 @@ class HoldingResponse(ExtensibleResponse):
 class NavPoint(BaseModel):
     date: str
     nav: FiniteFloat
+    return_nav: FiniteFloat | None = None
+    return_factor: FiniteFloat = 1
+    distribution_per_unit: FiniteFloat = 0
     total_value: FiniteFloat
     total_invested: FiniteFloat
     total_units: FiniteFloat
@@ -42,12 +45,14 @@ class NavPoint(BaseModel):
 
 class CashflowDelta(BaseModel):
     id: int
-    type: Literal["deposit", "withdrawal"]
+    type: Literal["deposit", "withdrawal", "distribution"]
     amount: FiniteFloat
     signed_amount: FiniteFloat
     nav_at_time: FiniteFloat | None
     units_change: FiniteFloat | None
     created_at: str
+    applied_snapshot_date: str | None = None
+    cash_code: str = "CASH_KRW"
 
 
 class PreviousDayResponse(BaseModel):
@@ -55,6 +60,8 @@ class PreviousDayResponse(BaseModel):
     total_value: FiniteFloat | None
     fx_usdkrw: FiniteFloat | None
     nav: FiniteFloat | None
+    return_nav: FiniteFloat | None = None
+    return_factor: FiniteFloat = 1
     stock_values: dict[str, FiniteFloat]
     today_net_cashflow: FiniteFloat
     today_cashflows_by_stock: dict[str, FiniteFloat]
@@ -87,7 +94,7 @@ class IncomeEvent(ExtensibleResponse):
 
 
 class AttributionComponent(BaseModel):
-    key: Literal["external_flow", "price", "fx", "combined", "dividend", "fee", "unclassified"]
+    key: Literal["external_flow", "distribution", "price", "fx", "combined", "dividend", "fee", "unclassified"]
     label: str
     amount: FiniteFloat
 

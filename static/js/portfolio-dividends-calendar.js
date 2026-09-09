@@ -57,7 +57,7 @@ function _pfDivCalEventHtml(ev, todayIso) {
       <span class="pf-divcal-stock-name">${escapeHtml(ev.stock_name || ev.stock_code)} ${_pfDivCalBadge(ev)}</span>
       <span class="pf-divcal-sub">${escapeHtml(ev.label || '')} · 주당 ${_pfDivCalPerShare(ev)} × ${shares.toLocaleString()}주</span>
     </span>
-    <span class="pf-divcal-amount">${amount}</span>
+    <span class="pf-divcal-amount">${amount}<button type="button" class="pf-mini-btn pf-divcal-receipt js-pf-dividend-receipt" data-dividend-source="${escapeHtml(`${ev.stock_code}:${ev.type}:${ev.date}`)}">수취 입력</button></span>
   </div>`;
 }
 

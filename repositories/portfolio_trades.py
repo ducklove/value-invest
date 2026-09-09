@@ -34,7 +34,12 @@ async def preview_trade(google_sub: str, trade: TradeInput) -> dict:
 
 async def record_trade(google_sub: str, trade: TradeCreate) -> dict:
     request_id = str(trade.request_id)
-    fingerprint = _digest(trade.model_dump(mode="json", exclude={"request_id"}))
+    payload = trade.model_dump(mode="json", exclude={"request_id"})
+    # 배포 전 저장했으나 응답이 유실된 요청도 같은 지문으로 재확인한다.
+    if trade.tax_rate == 0 and trade.tax_amount is None:
+        payload.pop("tax_rate")
+        payload.pop("tax_amount")
+    fingerprint = _digest(payload)
     async with transaction() as db:
         existing = await (await db.execute(
             "SELECT fingerprint, result_json FROM portfolio_trades WHERE google_sub = ? AND request_id = ?",

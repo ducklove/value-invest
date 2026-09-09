@@ -206,7 +206,7 @@ def _nav_points(nav_history: list[dict], anchor: date) -> list[dict[str, Any]]:
         d = str(row.get("date") or "")[:10]
         if len(d) < 10 or d > anchor_iso:
             continue
-        nav = _float_or_none(row.get("nav"))
+        nav = _float_or_none(row.get("return_nav", row.get("nav")))
         if nav is None or nav <= 0:
             continue
         out.append({"date": d, "nav": nav, "total_value": _float_or_none(row.get("total_value"))})
@@ -354,14 +354,17 @@ def _cashflow_summary(cashflows: list[dict], start_date: str, end_date: str) -> 
     rows = [row for row in cashflows if start_date <= effective_date(row) <= end_date]
     deposits = [float(r.get("amount") or 0) for r in rows if r.get("type") == "deposit"]
     withdrawals = [float(r.get("amount") or 0) for r in rows if r.get("type") == "withdrawal"]
+    distributions = [float(r.get("amount") or 0) for r in rows if r.get("type") == "distribution"]
     total_deposit = sum(deposits)
     total_withdrawal = sum(withdrawals)
     return {
         "count": len(rows),
         "deposit_count": len(deposits),
         "withdrawal_count": len(withdrawals),
+        "distribution_count": len(distributions),
         "total_deposit": _round(total_deposit, 2),
         "total_withdrawal": _round(total_withdrawal, 2),
+        "total_distribution": _round(sum(distributions), 2),
         "net_cashflow": _round(total_deposit - total_withdrawal, 2),
         "rows": [
             {
@@ -976,6 +979,7 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         f"- NAV 수익률: {_fmt_pct(summary.get('nav_return_pct'))}",
         f"- 평가금액: {_fmt_krw(summary.get('starting_value'))} -> {_fmt_krw(summary.get('ending_value'))}",
         f"- 순입출금: {_fmt_krw(cash.get('net_cashflow'))} (입금 {_fmt_krw(cash.get('total_deposit'))}, 출금 {_fmt_krw(cash.get('total_withdrawal'))})",
+        f"- 분배금 지급: {_fmt_krw(cash.get('total_distribution') or 0)} (좌수 유지)",
         "",
         "## 매수/매도 구성 변화",
     ]
@@ -1074,7 +1078,7 @@ async def build_period_report(
         "ending_date": end_snapshot.get("date"),
         "starting_nav": _round(baseline.get("nav")),
         "ending_nav": _round(end_snapshot.get("nav")),
-        "nav_return_pct": _pct_change(baseline.get("nav"), end_snapshot.get("nav")),
+        "nav_return_pct": _pct_change(baseline.get("return_nav", baseline.get("nav")), end_snapshot.get("return_nav", end_snapshot.get("nav"))),
         "starting_value": _round(baseline.get("total_value"), 2),
         "ending_value": _round(end_snapshot.get("total_value"), 2),
         "value_change": _round(float(end_snapshot.get("total_value") or 0) - float(baseline.get("total_value") or 0), 2),

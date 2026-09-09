@@ -58,13 +58,13 @@ function renderCashflows(data, navData = _navChartData) {
     const isDeposit = cf.type === 'deposit';
     return `<tr>
     <td>${escapeHtml(cf.date || '')}</td>
-    <td><span class="pf-cf-type ${isDeposit ? 'deposit' : 'withdrawal'}">${isDeposit ? '입금' : '출금'}</span></td>
+    <td><span class="pf-cf-type ${isDeposit ? 'deposit' : 'withdrawal'}">${isDeposit ? '입금' : cf.type === 'distribution' ? '분배금' : '출금'}</span></td>
     <td class="pf-col-num pf-cf-amount ${isDeposit ? 'deposit' : 'withdrawal'}">${fmtNum(Math.round(cf.amount))}원</td>
     <td class="pf-col-num">${fmtCfDecimal(cf.nav_at_time)}</td>
     <td class="pf-col-num">${fmtCfSignedDecimal(cf.units_change)}</td>
     <td class="pf-col-num">${fmtCfDecimal(remainingUnitsById.get(String(cf.id)))}</td>
     <td title="${escapeHtml(cf.memo || '')}">${escapeHtml(cf.memo || '')}</td>
-    <td>${cf.cancelled_at ? '취소됨' : cf.reversal_of_id != null ? '취소 거래' : `<button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}" aria-label="입출금 취소" title="${cf.applied_snapshot_date ? '취소 거래로 되돌리기' : '삭제'}">&times;</button>`}</td>
+    <td>${cf.type === 'distribution' ? '좌수 유지' : cf.cancelled_at ? '취소됨' : cf.reversal_of_id != null ? '취소 거래' : `<button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}" aria-label="입출금 취소" title="${cf.applied_snapshot_date ? '취소 거래로 되돌리기' : '삭제'}">&times;</button>`}</td>
   </tr>`;
   }).join('');
 }
