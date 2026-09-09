@@ -576,7 +576,8 @@ function trackEvent(name, params = {}) {
       <div class="pf-nav-chart-wrap pf-analysis-card" id="pfDivCalWrap">
         <div class="pf-nav-header">
           <h3>배당 캘린더</h3>
-          <span class="pf-chart-note">월별 예상 배당 현금흐름 · 보유수량 × 주당 배당</span>
+          <span class="pf-chart-note">공시 지급일 · 배당락일 · 종목별 예상 일정</span>
+          <button type="button" class="pf-mini-btn" onclick="pfLoadDividendCalendarPanel({force:true})">다시 불러오기</button>
         </div>
         <div id="pfDivCalContent" class="pf-divcal-content">
           <div class="pf-risk-empty">성과 탭을 열면 배당 캘린더를 불러옵니다.</div>

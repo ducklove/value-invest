@@ -118,7 +118,7 @@ test("월 행 렌더 — 합계는 fmtKrw 포맷, 이번 달 강조 + 기본 펼
   const range = content.querySelector(".pf-chart-range");
   assert.match(range.textContent, /2026-04 ~ 2027-04/);
   assert.match(range.textContent, /16,750원/);
-  assert.match(range.textContent, /확정 1건 \/ 예상 2건/);
+  assert.match(range.textContent, /공시 1건 \/ 예상 2건/);
   // 추정 휴리스틱 + 기준일 제외 안내문.
   assert.match(content.querySelector(".pf-divcal-note").textContent, /월 합계에서 제외/);
 });
@@ -142,7 +142,7 @@ test("이벤트 행 — 확정/예상 배지, 주당 × 수량 = 금액, 예상�
   // 삼성전자 확정 행: confirmed 배지 + est 클래스 없음.
   const ssec = june.find((row) => /배당기준일/.test(row.textContent));
   assert.ok(!ssec.classList.contains("pf-divcal-est"));
-  assert.equal(ssec.querySelector(".pf-divcal-badge").textContent, "확정");
+  assert.equal(ssec.querySelector(".pf-divcal-badge").textContent, "공시");
   assert.ok(ssec.querySelector(".pf-divcal-badge").classList.contains("confirmed"));
   assert.match(ssec.textContent, /주당 361원 × 10주/);
   assert.match(ssec.querySelector(".pf-divcal-amount").textContent, /3,610원/);
@@ -191,4 +191,39 @@ test("요청 실패 시 토스트 없이 패널 안 안내 문구만 보인다(s
 
   assert.match(w.document.getElementById("pfDivCalContent").textContent, /불러오지 못했습니다/);
   assert.equal(toasts, 0);
+});
+
+test('공시 지급일·배당락일·출처와 이전 자료를 표시하고 예상 수취 입력을 숨긴다', async () => {
+  const payload = structuredClone(FULL_PAYLOAD);
+  Object.assign(payload.events[1], { date_precision: 'approximate', receiptable: false, basis_date: '2025-06-14' });
+  Object.assign(payload.events[2], { type: 'payment', date_kind: 'payment', pay_date: '2026-06-26', ex_date: '2026-06-01',
+    record_date: '2026-06-01', source: '공식 배당 이력', source_url: 'https://example.com/dividends',
+    fetched_at: '2026-06-01T23:00:00Z', data_status: 'stale', source_key: '005930:ex_date:2026-06-01' });
+  const { w } = loadPanel(payload);
+  await w.pfLoadDividendCalendarPanel();
+  const rows = [...w.document.querySelectorAll('[data-month-events="2026-06"] .pf-divcal-event')];
+  assert.match(rows[0].textContent, /2026-06-15 전후/);
+  assert.equal(rows[0].querySelectorAll('button').length, 0);
+  assert.match(rows[1].textContent, /배당락 2026-06-01/);
+  assert.match(rows[1].textContent, /확인 2026-06-02.*갱신 실패/);
+  assert.equal(rows[1].querySelector('a').href, 'https://example.com/dividends');
+  assert.equal(rows[1].querySelector('button').dataset.dividendSource, '005930:ex_date:2026-06-01');
+});
+
+test('일정 수집이 실패해도 누락 종목을 빈 배당으로 숨기지 않는다', async () => {
+  const payload = { ...EMPTY_PAYLOAD, coverage: [{ stock_code: 'SCHP', stock_name: 'SCHP', frequency_label: '비정기·자료 부족', status: 'unavailable', has_payment_dates: false }],
+    summary: { unknown_payment_count: 1, stale_count: 1 } };
+  const { w } = loadPanel(payload);
+  await w.pfLoadDividendCalendarPanel();
+  const content = w.document.getElementById('pfDivCalContent');
+  assert.match(content.textContent, /지급일 미확인 1종목/);
+  assert.match(content.textContent, /SCHP.*갱신 필요/);
+});
+
+test('수량 변경 뒤 캘린더를 열면 기존 합계 캐시를 다시 사용하지 않는다', async () => {
+  const { w, calls } = loadPanel();
+  await w.pfLoadDividendCalendarPanel();
+  w.PfStore.items = [{ stock_code: 'AGNC', quantity: 20 }];
+  await w.pfLoadDividendCalendarPanel();
+  assert.equal(calls.length, 2);
 });

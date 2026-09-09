@@ -86,15 +86,16 @@ function _pfDividendSelectSchedule() {
   _pfDividendSetStock(event.stock_code, event.stock_name, event.currency || 'KRW');
   _pfDividendEl('Mode').value = 'shares';
   _pfDividendEl('PerShare').value = event.amount_per_share > 0 ? event.amount_per_share : '';
-  _pfDividendEl('Date').value = event.type !== 'ex_date' && event.date <= _pfDividendToday() ? event.date : '';
+  const isPayment = event.date_kind ? event.date_kind === 'payment' : event.type !== 'ex_date';
+  _pfDividendEl('Date').value = isPayment && event.date <= _pfDividendToday() ? event.date : '';
   const base = Number(event.amount_per_share) * Number(event.shares);
   if (event.currency !== 'KRW' && base > 0 && event.expected_amount_krw > 0) {
     _pfDividendEl('Fx').value = Number((event.expected_amount_krw / base).toFixed(8));
     _pfDividendEl('FxText').textContent = `수취 환율: 1 ${event.currency} = ? KRW · 스케줄 참고 환율, 실제 수취 환율 확인`;
   }
-  _pfDividendEl('ScheduleNote').textContent = event.type === 'ex_date'
-    ? `${event.date}는 배당기준일입니다. 실제 수취일을 입력하세요. 수량은 현재 보유 수량이므로 배당 대상 수량을 확인하세요.`
-    : `${event.date} 지급 예상 · 과거 실적 기반 주당 배당금과 현재 보유 수량을 채웠습니다. 실제 수취일·금액·배당 대상 수량을 확인하세요.`;
+  _pfDividendEl('ScheduleNote').textContent = !isPayment
+    ? `${event.date}는 ${event.date_kind === 'ex_date' ? '배당락일' : '배당기준일'}입니다. 실제 수취일을 입력하세요. 수량은 현재 보유 수량이므로 배당 대상 수량을 확인하세요.`
+    : `${event.date} ${event.confirmed ? '공시 지급일' : '지급 예상'} · 주당 배당금과 현재 보유 수량을 채웠습니다. 증권사 실제 입금일·금액·배당 대상 수량을 확인하세요.`;
   _pfDividendAmounts();
 }
 
@@ -247,7 +248,7 @@ async function pfOpenDividendReceipt(sourceKey) {
     const data = await apiFetchJson('/api/portfolio/dividend-receipts/candidates', { errorMessage: '배당 스케줄을 불러오지 못했습니다.' });
     if (generation !== _pfDividend.generation) return;
     _pfDividend.events = (data.events || []).slice().sort((a, b) => b.date.localeCompare(a.date));
-    _pfDividendEl('Schedule').innerHTML += _pfDividend.events.map(ev => `<option value="${escapeHtml(ev.source_key)}"${ev.received ? ' disabled' : ''}>${escapeHtml(ev.date)} · ${escapeHtml(ev.stock_name)} · ${ev.type === 'ex_date' ? '배당기준일' : '예상 지급'}${ev.received ? ' · 수취 완료' : ''}</option>`).join('');
+    _pfDividendEl('Schedule').innerHTML += _pfDividend.events.map(ev => `<option value="${escapeHtml(ev.source_key)}"${ev.received ? ' disabled' : ''}>${escapeHtml(ev.date)} · ${escapeHtml(ev.stock_name)} · ${escapeHtml(ev.label || (ev.type === 'ex_date' ? '배당기준일' : '예상 지급'))}${ev.received ? (ev.legacy_receipt_match ? ' · 기존 수취 내역 확인' : ' · 수취 완료') : ''}</option>`).join('');
     if (!_pfDividend.dirty && !_pfDividend.pending && !_pfDividend.busy) {
       const selected = _pfDividend.events.find(ev => ev.source_key === sourceKey && !ev.received);
       if (selected) { _pfDividendEl('Schedule').value = sourceKey; _pfDividendSelectSchedule(); }

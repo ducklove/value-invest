@@ -93,6 +93,22 @@ test('배당기준일은 실제 수취일로 쓰지 않으며 미수집 주당 �
   } finally { s.dom.window.close(); }
 });
 
+test('공시 지급일은 수취일에 채우고 배당락일은 권리일로 안내한다', async () => {
+  const key = 'AAPL:ex_date:2026-01-02';
+  const event = { stock_code: 'AAPL', stock_name: 'Apple', date: '2026-01-10', type: 'payment', date_kind: 'payment',
+    confirmed: true, amount_per_share: 0.25, currency: 'USD', shares: 2, source_key: key, received: false };
+  const s = setup(path => path.endsWith('/candidates') ? { events: [event] } : undefined);
+  try {
+    await s.w.pfOpenDividendReceipt(key);
+    assert.equal(s.el('Date').value, '2026-01-10');
+    assert.match(s.el('ScheduleNote').textContent, /공시 지급일/);
+    event.type = 'ex_date'; event.date_kind = 'ex_date'; event.date = '2026-01-02';
+    await s.w.pfOpenDividendReceipt(key);
+    assert.equal(s.el('Date').value, '');
+    assert.match(s.el('ScheduleNote').textContent, /배당락일/);
+  } finally { await new Promise(resolve => setImmediate(resolve)); s.dom.window.close(); }
+});
+
 test('배당 수취 응답 유실은 다시 열어도 동일 요청으로 복구하고 수취 스케줄을 잠근다', async () => {
   let attempts = 0;
   const s = setup((path, options) => {

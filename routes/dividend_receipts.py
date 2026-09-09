@@ -26,8 +26,12 @@ async def candidates(request: Request) -> dict:
     received = await repo.received_source_keys(user)
     events = []
     for event in calendar["events"]:
-        key = f"{event['stock_code']}:{event['type']}:{event['date']}"
-        events.append({**event, "source_key": key, "received": key in received})
+        if event.get("receiptable") is False:
+            continue
+        key = event.get("source_key") or f"{event['stock_code']}:{event['type']}:{event['date']}"
+        legacy_match = any(alias in received for alias in event.get("source_aliases", []))
+        events.append({**event, "source_key": key, "received": key in received or legacy_match,
+                       "legacy_receipt_match": legacy_match})
     return {"as_of": calendar["as_of"], "events": events}
 
 

@@ -1,11 +1,6 @@
-"""services/dividend_calendar.py + routes/dividend_calendar.py 테스트.
+"""공시 지급일·권리일·예상 일정의 의미와 합계, 수취 연결을 검증한다."""
 
-서비스 수학(환산·월별 합계·추정 휴리스틱)은 시드한 임시 DB
-(repositories.db.DB_PATH 패치) + 고정 환율 모킹으로 손계산 기대값을 검증한다.
-추정 일정 규약(국내 4/15 연 1회, USD 분기 15일, 기타 반기 15일)이 바뀌면
-여기 기대값도 의도적으로 함께 바꿔야 한다.
-"""
-
+import copy
 import json
 import unittest
 from datetime import date
@@ -15,291 +10,183 @@ from _harness import TempDbMixin, seed_user
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from repositories import db as db_repo
-from routes import dividend_calendar as dividend_calendar_route
-from services import dividend_calendar
+from domain.dividend_schedule import calendar_event, frequency_of, project_events
+from repositories import portfolio
+from repositories.db import transaction
+from routes import dividend_calendar as route
+from routes import dividend_receipts as receipts
+from services import dividend_calendar as cal
+from services.portfolio.fx import FXUnavailableError
 
-FIXED_TODAY = date(2026, 6, 10)
-FX_USD = 1400.0
-
-
-class WindowHelperTests(unittest.TestCase):
-    def test_shift_month_across_year_boundaries(self):
-        self.assertEqual(dividend_calendar._shift_month(2026, 1, -2), (2025, 11))
-        self.assertEqual(dividend_calendar._shift_month(2026, 12, 1), (2027, 1))
-        self.assertEqual(dividend_calendar._shift_month(2026, 6, 0), (2026, 6))
-
-    def test_window_months_inclusive_range(self):
-        months = dividend_calendar.window_months(FIXED_TODAY, 2, 10)
-        self.assertEqual(len(months), 13)
-        self.assertEqual(months[0], (2026, 4))
-        self.assertEqual(months[-1], (2027, 4))
+TODAY = date(2026, 9, 10)
 
 
-class EstimatedEventHeuristicTests(unittest.TestCase):
-    """순수 함수 — 통화별 추정 케이던스(연/분기/반기)와 금액 분할."""
-
-    MONTHS = dividend_calendar.window_months(FIXED_TODAY, 2, 10)
-
-    def test_korean_stock_annual_april(self):
-        item = {"stock_code": "005930", "stock_name": "삼성전자", "quantity": 10}
-        events = dividend_calendar.estimated_events_for_holding(item, 1500.0, None, self.MONTHS)
-        self.assertEqual([e["date"] for e in events], ["2026-04-15", "2027-04-15"])
-        for e in events:
-            self.assertEqual(e["type"], "estimated")
-            self.assertFalse(e["confirmed"])
-            self.assertEqual(e["currency"], "KRW")
-            self.assertEqual(e["amount_per_share"], 1500.0)
-            self.assertEqual(e["expected_amount_krw"], 15000)
-            self.assertEqual(e["label"], "연간 배당 (예상)")
-
-    def test_usd_foreign_quarterly_split(self):
-        item = {"stock_code": "AAPL", "stock_name": "Apple", "quantity": 5}
-        frow = {"stock_code": "AAPL", "dps_native": 1.0, "currency": "USD", "dps_krw": 1300.0}
-        events = dividend_calendar.estimated_events_for_holding(item, 1400.0, frow, self.MONTHS)
-        self.assertEqual(
-            [e["date"] for e in events],
-            ["2026-06-15", "2026-09-15", "2026-12-15", "2027-03-15"],
-        )
-        for e in events:
-            self.assertEqual(e["currency"], "USD")
-            self.assertEqual(e["amount_per_share"], 0.25)  # 연간 1.0 의 1/4
-            self.assertEqual(e["expected_amount_krw"], 1750)  # 1400/4 × 5주
-            self.assertEqual(e["label"], "분기 배당 (예상)")
-
-    def test_non_usd_foreign_semiannual_split(self):
-        item = {"stock_code": "0005.HK", "stock_name": "HSBC", "quantity": 100}
-        frow = {"stock_code": "0005.HK", "dps_native": 4.0, "currency": "HKD", "dps_krw": 700.0}
-        events = dividend_calendar.estimated_events_for_holding(item, 720.0, frow, self.MONTHS)
-        self.assertEqual([e["date"] for e in events], ["2026-06-15", "2026-12-15"])
-        self.assertEqual(events[0]["amount_per_share"], 2.0)
-        self.assertEqual(events[0]["expected_amount_krw"], 36000)  # 720/2 × 100주
-        self.assertEqual(events[0]["label"], "반기 배당 (예상)")
-
-    def test_manual_krw_override_falls_back_to_krw_display(self):
-        # 관리자 수동 override 행은 dps_native 가 없다 — KRW 로 표시 + 반기.
-        item = {"stock_code": "SCHP", "stock_name": "SCHP", "quantity": 2}
-        frow = {"stock_code": "SCHP", "dps_native": None, "currency": "KRW", "dps_krw": 800.0}
-        events = dividend_calendar.estimated_events_for_holding(item, 800.0, frow, self.MONTHS)
-        self.assertEqual(len(events), 2)
-        self.assertEqual(events[0]["currency"], "KRW")
-        self.assertEqual(events[0]["amount_per_share"], 400.0)
-
-    def test_no_events_for_zero_dps_cash_or_empty_quantity(self):
-        months = self.MONTHS
-        zero = dividend_calendar.estimated_events_for_holding(
-            {"stock_code": "000660", "quantity": 10}, 0.0, None, months)
-        none = dividend_calendar.estimated_events_for_holding(
-            {"stock_code": "000660", "quantity": 10}, None, None, months)
-        cash = dividend_calendar.estimated_events_for_holding(
-            {"stock_code": "CASH_KRW", "quantity": 100}, 100.0, None, months)
-        sold = dividend_calendar.estimated_events_for_holding(
-            {"stock_code": "005930", "quantity": 0}, 1500.0, None, months)
-        self.assertEqual([zero, none, cash, sold], [[], [], [], []])
+def payment(day, amount=0.12, **extra):
+    return {"pay_date": day, "ex_date": None, "record_date": None, "currency": "USD", "amount_per_share": amount, **extra}
 
 
-class _SeededDbTestCase(TempDbMixin):
-    """임시 DB 시드: 국내/우선주/해외/무배당/현금 보유 + 배당 테이블."""
+def monthly_history():
+    return [payment(f"{y}-{m:02d}-10") for y in (2025, 2026) for m in range(1, 13) if (y, m) <= (2026, 9)]
 
+
+def feed(events, **extra):
+    return {"events": events, "status": "fresh", "official": True, "fetched_at": "2026-09-10T00:00:00+00:00", **extra}
+
+
+def request():
+    return Request({"type": "http", "method": "GET", "path": "/api/portfolio/dividend-calendar", "headers": [], "query_string": b""})
+
+
+class PatternTests(unittest.TestCase):
+    def test_windows_cross_years(self):
+        self.assertEqual(cal._shift_month(2026, 1, -2), (2025, 11))
+        self.assertEqual(cal.window_months(TODAY, 2, 10)[-1], (2027, 7))
+
+    def test_frequency_comes_from_history_not_currency(self):
+        for currency in ("USD", "HKD", "KRW"):
+            self.assertEqual(frequency_of([{**e, "currency": currency} for e in monthly_history()], TODAY), "monthly")
+        quarterly = [payment(f"{y}-{m:02d}-20") for y in (2025, 2026) for m in (2, 5, 8)]
+        self.assertEqual(frequency_of(quarterly, TODAY), "quarterly")
+        self.assertEqual(frequency_of([payment("2026-09-01")], TODAY), "irregular")
+        self.assertEqual(frequency_of([payment("2025-04-20"), payment("2026-04-17")], TODAY), "annual")
+
+    def test_monthly_has_twelve_future_payments_without_past_fabrication(self):
+        result = project_events(monthly_history(), TODAY, date(2027, 10, 1), "monthly")
+        self.assertEqual(len(result), 12)
+        self.assertEqual(len({e["pay_date"][:7] for e in result}), 12)
+        self.assertTrue(all(e["pay_date"] > TODAY.isoformat() and e["estimated"] for e in result))
+
+    def test_domestic_quarterly_uses_record_period_despite_delayed_annual_payment(self):
+        history = [payment(p, record_date=r) for r, p in (("2024-12-31", "2025-04-18"), ("2025-03-31", "2025-05-20"),
+                  ("2025-06-30", "2025-08-20"), ("2025-09-30", "2025-11-19"), ("2025-12-31", "2026-04-17"),
+                  ("2026-03-31", "2026-05-20"), ("2026-06-30", "2026-08-20"))]
+        self.assertEqual(frequency_of(history, TODAY), "quarterly")
+
+    def test_official_payment_replaces_nearby_projection(self):
+        history = monthly_history() + [payment("2026-10-09", ex_date="2026-09-30")]
+        result = project_events(history, TODAY, date(2026, 12, 1), "monthly")
+        self.assertEqual([e["pay_date"] for e in result], ["2026-11-10"])
+
+    def test_schp_omitted_months_and_two_december_payments_are_preserved(self):
+        history = [payment(f"{y}-{m:02d}-07", 0.09) for y in (2025, 2026) for m in range(3, 13) if (y, m) <= (2026, 9)]
+        history.append(payment("2025-12-26", 0.17))
+        result = project_events(history, TODAY, date(2027, 4, 1), "monthly")
+        self.assertEqual(sum(e["pay_date"].startswith("2026-12") for e in result), 2)
+        self.assertFalse(any(e["pay_date"].startswith(("2027-01", "2027-02")) for e in result))
+
+    def test_moving_annual_boundary_does_not_duplicate_quarter(self):
+        history = [payment(d) for d in ("2024-08-10", "2024-11-10", "2025-02-10", "2025-05-10", "2025-08-11", "2025-11-10", "2026-02-10", "2026-05-10", "2026-08-10")]
+        result = project_events(history, TODAY, date(2027, 9, 10), "quarterly")
+        self.assertEqual(len(result), 4)
+
+    def test_insufficient_irregular_or_suspended_history_is_not_projected(self):
+        for history, freq in ((monthly_history()[:4], "monthly"), (monthly_history(), "irregular"), (monthly_history()[-2:], "monthly")):
+            self.assertEqual(project_events(history, TODAY, date(2027, 9, 1), freq), [])
+
+    def test_receipt_identity_survives_pay_date_enrichment(self):
+        holding = {"stock_code": "AGNC", "quantity": 10}
+        raw = payment(None, ex_date="2026-08-31")
+        before = calendar_event(holding, raw, 1400, "monthly", feed([raw], official=False))
+        after = calendar_event(holding, {**raw, "pay_date": "2026-09-10"}, 1400, "monthly", feed([raw]))
+        self.assertEqual(before["source_key"], after["source_key"])
+        self.assertFalse(before["cashflow"])
+        self.assertTrue(after["cashflow"])
+
+
+class CalendarTests(TempDbMixin):
     async def seed(self):
-        dividend_calendar_route._calendar_cache.clear()
-
         await seed_user()
-        db = await db_repo.get_db()
-        holdings = [
-            ("u1", "005930", "삼성전자", 10, 70000.0),
-            ("u1", "005935", "삼성전자우", 3, 60000.0),
-            ("u1", "AAPL", "Apple", 5, 180.0),
-            ("u1", "000660", "SK하이닉스", 7, 200000.0),  # dps=0 → 이벤트 없음
-            ("u1", "CASH_KRW", "원화", 1000000, 1.0),      # 현금 → 제외
-        ]
-        await db.executemany(
-            "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')",
-            holdings,
-        )
-        # 국내 연간 DPS — 전년도(2025) 행이 trailing 값으로 쓰인다.
-        await db.executemany(
-            "INSERT INTO market_data (stock_code, year, dividend_per_share) VALUES (?, ?, ?)",
-            [("005930", 2025, 1500.0), ("000660", 2025, 0.0)],
-        )
-        # 우선주 — 수기 시트 값이 보통주 fallback 보다 우선.
-        await db.execute(
-            "INSERT INTO preferred_dividends (stock_code, dividend_per_share, source_name, common_code, sheet_year, fetched_at) VALUES (?, ?, ?, ?, ?, ?)",
-            ("005935", 1600.0, "삼성전자우", "005930", 2025, "2026-06-01T00:00:00"),
-        )
-        # 해외 — yfinance trailing 연간 DPS (native + 수집 시점 KRW 환산).
-        await db.execute(
-            "INSERT INTO foreign_dividends (stock_code, dps_native, currency, dps_krw, source, manual_note, fetched_at) VALUES (?, ?, ?, ?, 'yfinance', NULL, ?)",
-            ("AAPL", 1.0, "USD", 1300.0, "2026-06-01T00:00:00"),
-        )
-        await db.commit()
-
-    async def asyncTearDown(self):
-        dividend_calendar_route._calendar_cache.clear()
-        await super().asyncTearDown()
-
-
-class BuildCalendarTests(_SeededDbTestCase):
-    async def _build(self, fx_rate=FX_USD, **kwargs):
-        with patch(
-            "services.portfolio.fx.fx_rate_for_currency",
-            AsyncMock(return_value=fx_rate),
-        ):
-            return await dividend_calendar.build_calendar("u1", today=FIXED_TODAY, **kwargs)
-
-    async def test_events_fx_conversion_and_monthly_aggregation(self):
-        out = await self._build()
-
-        self.assertEqual(out["as_of"], "2026-06-10")
-        self.assertEqual(out["start_month"], "2026-04")
-        self.assertEqual(out["end_month"], "2027-04")
-
-        events = out["events"]
-        # 국내 2종목 × 2회(4월) + AAPL 분기 4회 = 8. 무배당/현금은 0.
-        self.assertEqual(len(events), 8)
-        self.assertTrue(all(ev["type"] == "estimated" and not ev["confirmed"] for ev in events))
-        codes = {ev["stock_code"] for ev in events}
-        self.assertEqual(codes, {"005930", "005935", "AAPL"})
-
-        by_key = {(ev["stock_code"], ev["date"]): ev for ev in events}
-        # 국내: 1500 × 10주, 우선주 시트: 1600 × 3주.
-        self.assertEqual(by_key[("005930", "2026-04-15")]["expected_amount_krw"], 15000)
-        self.assertEqual(by_key[("005935", "2026-04-15")]["expected_amount_krw"], 4800)
-        # AAPL: 실시간 환율(1400) 우선 — 연간 $1.00 → 분기 $0.25 × 1400 × 5주.
-        aapl = by_key[("AAPL", "2026-06-15")]
-        self.assertEqual(aapl["currency"], "USD")
-        self.assertEqual(aapl["amount_per_share"], 0.25)
-        self.assertEqual(aapl["expected_amount_krw"], 1750)
-
-        # 월별 합계: 윈도 13개월 전부 (빈 달 포함, 0 으로).
-        monthly = {row["month"]: row for row in out["monthly"]}
-        self.assertEqual(len(out["monthly"]), 13)
-        self.assertEqual(monthly["2026-04"], {"month": "2026-04", "total_krw": 19800, "count": 2})
-        self.assertEqual(monthly["2026-06"], {"month": "2026-06", "total_krw": 1750, "count": 1})
-        self.assertEqual(monthly["2026-05"], {"month": "2026-05", "total_krw": 0, "count": 0})
-
-        # 요약: 4월 19800×2 + AAPL 1750×4 = 46600.
-        self.assertEqual(out["summary"]["total_expected_krw"], 46600)
-        self.assertEqual(out["summary"]["estimated_count"], 8)
-        self.assertEqual(out["summary"]["confirmed_count"], 0)
-
-    async def test_fx_unknown_falls_back_to_stored_dps_krw(self):
-        # fx_rate_for_currency 의 1.0 은 '환율 모름' 센티널 → 수집 시점
-        # 환산값(dps_krw=1300)으로 폴백한다.
-        out = await self._build(fx_rate=1.0)
-        aapl = [ev for ev in out["events"] if ev["stock_code"] == "AAPL"][0]
-        self.assertEqual(aapl["expected_amount_krw"], 1625)  # 1300/4 × 5주
-        self.assertEqual(aapl["amount_per_share"], 0.25)     # native 표시는 그대로
-
-    async def test_confirmed_brief_events_excluded_from_monthly_totals(self):
-        db = await db_repo.get_db()
-        payload = {
-            "upcoming_events": [
-                # 보유 중 + 윈도 내 → 확정(ex_date) 이벤트로 노출.
-                {"stock_code": "005930", "stock_name": "삼성전자", "type": "배당기준일",
-                 "date": "2026-06-26", "amount": 361},
-                # 미보유 종목 → 제외.
-                {"stock_code": "999999", "stock_name": "유령", "type": "배당기준일",
-                 "date": "2026-06-26", "amount": 100},
-                # 윈도 밖 → 제외.
-                {"stock_code": "005930", "type": "배당기준일", "date": "2030-01-01", "amount": 361},
-            ]
+        for code, qty in (("AGNC", 10), ("SCHP", 20), ("005930", 3), ("CASH_USD", 100)):
+            await portfolio.save_portfolio_item("u1", code, code, qty, 1)
+        self.data = {
+            "AGNC": feed(monthly_history() + [payment("2026-10-09", ex_date="2026-09-30")]),
+            "SCHP": feed([payment("2026-09-08", 0.0773, ex_date="2026-09-01", record_date="2026-09-01")], frequency_hint="monthly"),
+            "005930": feed([payment(None, 374, ex_date="2026-06-29", currency="KRW")], official=False),
         }
-        await db.execute(
-            "INSERT INTO daily_market_briefs (google_sub, brief_date, source_hash, payload_json, markdown, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("u1", "2026-06-10", "h", json.dumps(payload, ensure_ascii=False), "md",
-             "2026-06-10T08:00:00", "2026-06-10T08:00:00"),
-        )
-        await db.commit()
+        self.history_patch = patch("services.dividend_sources.get_histories", AsyncMock(side_effect=lambda codes: copy.deepcopy({k: v for k, v in self.data.items() if k in codes})))
+        self.history_patch.start()
+        self.addCleanup(self.history_patch.stop)
+        self.fx_patch = patch("services.portfolio.fx.fx_rate_for_currency", AsyncMock(side_effect=lambda c: 1 if c == "KRW" else 1400))
+        self.fx_patch.start()
+        self.addCleanup(self.fx_patch.stop)
+        self.today_patch = patch.object(cal, "today_kst_date", return_value=TODAY)
+        self.today_patch.start()
+        self.addCleanup(self.today_patch.stop)
 
-        out = await self._build()
-        confirmed = [ev for ev in out["events"] if ev["confirmed"]]
-        self.assertEqual(len(confirmed), 1)
-        ev = confirmed[0]
-        self.assertEqual(ev["type"], "ex_date")
-        self.assertEqual(ev["date"], "2026-06-26")
-        self.assertEqual(ev["label"], "배당기준일 (확정)")
-        self.assertEqual(ev["expected_amount_krw"], 3610)  # 361 × 10주
+    async def build(self, **kw):
+        return await cal.build_calendar("u1", today=TODAY, **kw)
 
-        # 기준일은 현금 유입이 아님 — 6월 합계는 AAPL 추정분만, count 는 2.
-        monthly = {row["month"]: row for row in out["monthly"]}
-        self.assertEqual(monthly["2026-06"]["total_krw"], 1750)
-        self.assertEqual(monthly["2026-06"]["count"], 2)
-        self.assertEqual(out["summary"]["confirmed_count"], 1)
+    async def test_official_dates_and_cash_totals(self):
+        result = await self.build(months_back=4, months_forward=3)
+        sept = next(m for m in result["monthly"] if m["month"] == "2026-09")
+        self.assertEqual(sept["total_krw"], 1680 + 2164)
+        self.assertEqual(sept["announced_krw"], sept["total_krw"])
+        june = next(m for m in result["monthly"] if m["month"] == "2026-06")
+        self.assertEqual(june["total_krw"], 1680)  # 삼성 배당락일 금액 제외
+        schp = next(e for e in result["events"] if e["stock_code"] == "SCHP")
+        self.assertEqual((schp["date"], schp["ex_date"], schp["frequency"]), ("2026-09-08", "2026-09-01", "monthly"))
+        self.assertEqual(result["summary"]["unknown_payment_count"], 1)
+        self.assertFalse(any(e["stock_code"] == "CASH_USD" for e in result["events"]))
 
-    async def test_empty_portfolio_returns_empty_events_with_full_month_grid(self):
-        db = await db_repo.get_db()
-        await db.execute("DELETE FROM user_portfolio")
-        await db.commit()
-        out = await self._build()
-        self.assertEqual(out["events"], [])
-        self.assertEqual(len(out["monthly"]), 13)
-        self.assertEqual(out["summary"]["total_expected_krw"], 0)
+    async def test_missing_fx_keeps_native_and_reports_unconverted_amount(self):
+        with patch("services.portfolio.fx.fx_rate_for_currency", AsyncMock(side_effect=FXUnavailableError("USD"))):
+            result = await self.build()
+        sept = next(m for m in result["monthly"] if m["month"] == "2026-09")
+        self.assertEqual((sept["total_krw"], sept["unconverted_count"]), (0, 2))
+        self.assertEqual(next(e for e in result["events"] if e["stock_code"] == "SCHP")["amount_per_share"], 0.0773)
 
+    async def test_stored_fx_fallback_is_marked(self):
+        async with transaction() as db:
+            await db.execute("INSERT INTO foreign_dividends(stock_code,dps_native,currency,dps_krw,source,fetched_at) VALUES ('SCHP',1,'USD',1300,'yfinance','2026-09-01')")
+        with patch("services.portfolio.fx.fx_rate_for_currency", AsyncMock(side_effect=FXUnavailableError("USD"))):
+            result = await self.build()
+        event = next(e for e in result["events"] if e["stock_code"] == "SCHP")
+        self.assertEqual((event["fx_source"], event["expected_amount_krw"]), ("stored", 2010))
 
-def _request(path: str = "/api/portfolio/dividend-calendar") -> Request:
-    scope = {
-        "type": "http",
-        "method": "GET",
-        "path": path,
-        "headers": [],
-        "query_string": b"",
-        "client": ("127.0.0.1", 12345),
-        "server": ("testserver", 80),
-        "scheme": "http",
-    }
-    return Request(scope)
+    async def test_stale_history_is_visible_but_not_projected(self):
+        self.data["AGNC"]["status"] = "stale"
+        result = await self.build()
+        self.assertFalse(any(e["type"] == "estimated" and e["stock_code"] == "AGNC" for e in result["events"]))
+        self.assertEqual(result["summary"]["stale_count"], 1)
 
+    async def test_brief_record_date_and_exclusive_end(self):
+        self.data["005930"]["official"] = True
+        async with transaction() as db:
+            await db.execute("INSERT INTO daily_market_briefs(google_sub,brief_date,source_hash,payload_json,markdown,created_at,updated_at) VALUES ('u1','2026-09-10','h',?,'','','')",
+                             (json.dumps({"upcoming_events": [{"stock_code": "005930", "date": d, "type": "배당기준일", "amount": 374} for d in ("2026-09-30", "2026-10-01")]}),))
+        result = await self.build(months_back=0, months_forward=0)
+        records = [e for e in result["events"] if e["type"] == "record_date"]
+        self.assertEqual([e["date"] for e in records], ["2026-09-30"])
+        self.assertFalse(records[0]["cashflow"])
+        self.assertFalse(records[0]["confirmed"])
 
-class DividendCalendarRouteTests(_SeededDbTestCase):
-    async def _get(self, months=12, user={"google_sub": "u1"}):
-        with patch(
-            "routes.dividend_calendar.get_current_user", AsyncMock(return_value=user)
-        ), patch(
-            "services.portfolio.fx.fx_rate_for_currency", AsyncMock(return_value=FX_USD)
-        ):
-            return await dividend_calendar_route.get_dividend_calendar(_request(), months=months)
+    async def test_missing_history_keeps_coverage_without_fabricated_dates(self):
+        self.data = {}
+        result = await self.build()
+        self.assertEqual(result["events"], [])
+        self.assertEqual(len(result["coverage"]), 3)
 
-    async def test_requires_login(self):
-        with patch("routes.dividend_calendar.get_current_user", AsyncMock(return_value=None)):
+    async def test_route_auth_validation_and_current_quantity(self):
+        with patch.object(route, "get_current_user", AsyncMock(return_value=None)):
             with self.assertRaises(HTTPException) as exc:
-                await dividend_calendar_route.get_dividend_calendar(_request(), months=12)
-        self.assertEqual(exc.exception.status_code, 401)
+                await route.get_dividend_calendar(request(), months=12)
+            self.assertEqual(exc.exception.status_code, 401)
+        with patch.object(route, "get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
+            for bad in (2, 25, "abc"):
+                with self.assertRaises(HTTPException):
+                    await route.get_dividend_calendar(request(), months=bad)
+            before = await route.get_dividend_calendar(request(), months=12)
+            await portfolio.save_portfolio_item("u1", "AGNC", "AGNC", 20, 1)
+            after = await route.get_dividend_calendar(request(), months=12)
+        first = next(e for e in before["events"] if e["stock_code"] == "AGNC")
+        changed = next(e for e in after["events"] if e["stock_code"] == "AGNC" and e["date"] == first["date"])
+        self.assertEqual(changed["expected_amount_krw"], first["expected_amount_krw"] * 2)
 
-    async def test_rejects_out_of_range_months(self):
-        for bad in (2, 25, "abc"):
-            with self.assertRaises(HTTPException) as exc:
-                await self._get(months=bad)
-            self.assertEqual(exc.exception.status_code, 400)
-
-    async def test_payload_contract(self):
-        out = await self._get(months=12)
-        for key in ("as_of", "start_month", "end_month", "events", "monthly", "summary"):
-            self.assertIn(key, out)
-        # months=12 → back 2 고정 + forward 10 → 현재 달 포함 13개 월 행.
-        self.assertEqual(len(out["monthly"]), 13)
-        self.assertGreater(len(out["events"]), 0)
-        first = out["events"][0]
-        for key in ("date", "stock_code", "stock_name", "label", "type",
-                    "amount_per_share", "currency", "shares",
-                    "expected_amount_krw", "confirmed"):
-            self.assertIn(key, first)
-        # 날짜 오름차순 정렬.
-        dates = [ev["date"] for ev in out["events"]]
-        self.assertEqual(dates, sorted(dates))
-
-    async def test_result_is_cached_per_user_and_months(self):
-        first = await self._get(months=12)
-        # 보유 종목을 모두 지워도 TTL 캐시가 같은 결과를 돌려준다.
-        db = await db_repo.get_db()
-        await db.execute("DELETE FROM user_portfolio")
-        await db.commit()
-        second = await self._get(months=12)
-        other = await self._get(months=6)  # 다른 키 → DB 재조회
-
-        self.assertEqual(first, second)
-        self.assertEqual(other["events"], [])
-
-
-if __name__ == "__main__":
-    unittest.main()
+    async def test_receipt_candidates_exclude_predictions_and_detect_legacy(self):
+        with patch.object(receipts, "get_current_user", AsyncMock(return_value={"google_sub": "u1"})), patch.object(receipts.repo, "received_source_keys", AsyncMock(return_value={"SCHP:estimated:2026-09-15"})):
+            result = await receipts.candidates(request())
+        self.assertFalse(any(e["type"] == "estimated" for e in result["events"]))
+        schp = next(e for e in result["events"] if e["stock_code"] == "SCHP")
+        self.assertTrue(schp["received"])
+        self.assertTrue(schp["legacy_receipt_match"])
+        self.assertEqual(schp["source_key"], "SCHP:ex_date:2026-09-01")

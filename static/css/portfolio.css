@@ -3590,3 +3590,16 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 .pf-cf-table th:nth-child(8), .pf-cf-table td:nth-child(8) { width:76px; }
 .pf-cf-native { display:block; margin-top:4px; color:var(--text-secondary); font-weight:400; }
 .pf-trade-fields .pf-trade-fields { margin:0; }
+
+.pf-divcal-month-total .pf-divcal-sub { display:block; text-align:right; }
+.pf-divcal-coverage { margin-top:12px; font-size:12px; line-height:1.8; }
+.pf-divcal-coverage summary { cursor:pointer; color:var(--text-secondary); }
+.pf-divcal-badge.observed { border-style:solid; }
+.pf-divcal-stock .pf-divcal-sub { overflow-wrap:anywhere; }
+@media (min-width:761px) {
+  .pf-divcal-event { grid-template-columns:128px minmax(0, 1fr) auto; }
+}
+@media (max-width:760px) {
+  .pf-divcal-date { grid-column:1; grid-row:1; }
+  .pf-divcal-amount { grid-column:2; grid-row:1; }
+}
