@@ -317,6 +317,7 @@ function trackEvent(name, params = {}) {
       <button class="pf-tab active" data-tab="holdings" aria-controls="pfHoldingsTab" aria-selected="true" onclick="pfSwitchTab('holdings')">보유종목</button>
       <button class="pf-tab" data-tab="performance" aria-controls="pfPerformanceTab" aria-selected="false" onclick="pfSwitchTab('performance')">심층 분석</button>
       <button class="pf-tab" data-tab="household" aria-controls="pfHouseholdTab" aria-selected="false" onclick="pfSwitchTab('household')">자산 통합관리</button>
+      <button class="pf-action-toggle js-pf-trade" type="button">매매 기록</button>
       <button class="pf-action-toggle" id="pfActionBoardToggle" type="button" aria-pressed="false" aria-controls="pfActionBoard" onclick="pfToggleActionBoard()" title="오늘의 투자 액션 보드 표시">액션</button>
       <button class="pf-simple-toggle" id="pfSimpleToggle" type="button" aria-pressed="false" onclick="pfToggleSimpleMode()" title="모바일 간편 보기">간편</button>
       <button class="pf-ws-toggle" id="pfWsToggle" type="button" aria-pressed="false" onclick="toggleQuoteWebSocket()" title="실시간 웹소켓 연결" hidden>웹소켓 연결</button>
@@ -1192,6 +1193,29 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-trends-group-weight.js" defer></script>
 <script src="./js/portfolio-group-composition.js" defer></script>
+<dialog id="pfTradeDialog" class="pf-trade-dialog" aria-labelledby="pfTradeTitle">
+  <div class="pf-trade-header"><h2 id="pfTradeTitle">매매 기록</h2><button type="button" id="pfTradeClose" aria-label="매매 기록 닫기">×</button></div>
+  <p class="pf-trade-help">체결 내역을 입력하면 현재 현금과 보유 수량을 함께 변경합니다.</p>
+  <form id="pfTradeForm">
+    <fieldset id="pfTradeFields" class="pf-trade-fields">
+      <label class="pf-trade-wide">종목 검색<input id="pfTradeStock" list="pfTradeStocks" autocomplete="off" placeholder="종목명 또는 코드" required><datalist id="pfTradeStocks"></datalist></label>
+      <p id="pfTradeSelected" class="pf-trade-wide pf-trade-help" aria-live="polite">보유 종목을 선택하거나 새 종목을 검색하세요.</p>
+      <label>매매 구분<select id="pfTradeSide"><option value="buy">매수</option><option value="sell">매도</option></select></label>
+      <label>체결 통화<select id="pfTradeCurrency"><option>KRW</option><option>USD</option><option>EUR</option><option>JPY</option><option>CNY</option><option>HKD</option><option>GBP</option><option>AUD</option><option>CAD</option><option>CHF</option><option>TWD</option><option>VND</option></select></label>
+      <label>수량<input id="pfTradeQuantity" type="number" min="0.00000001" max="1000000000" step="any" inputmode="decimal" required></label>
+      <label>체결 단가<input id="pfTradePrice" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal" required></label>
+      <label class="pf-trade-wide">수수료·세금 합계 <span class="pf-trade-help">체결 통화 기준</span><input id="pfTradeFees" type="number" min="0" max="1000000000000" step="any" value="0" inputmode="decimal" required></label>
+      <label id="pfTradeFxLabel" class="pf-trade-wide" hidden><span id="pfTradeFxText">매입가 환산 환율</span><input id="pfTradeFx" type="number" min="0.00000001" max="1000000000000" step="any" inputmode="decimal"></label>
+      <label class="pf-trade-wide">메모 <span class="pf-trade-help">선택</span><input id="pfTradeMemo" maxlength="500"></label>
+      <button id="pfTradePreviewButton" class="pf-add-btn pf-trade-wide" type="submit">변경 내용 확인</button>
+    </fieldset>
+  </form>
+  <div id="pfTradePreview" class="pf-trade-preview" aria-live="polite"></div>
+  <p id="pfTradeStatus" role="status"></p>
+  <button id="pfTradeSave" class="pf-add-btn pf-trade-save" type="button" disabled>매매 기록 저장</button>
+  <details class="pf-trade-history"><summary>최근 매매 내역</summary><div id="pfTradeHistory"></div></details>
+</dialog>
+<script type="application/x-feature-script" data-feature="trades" data-src="./js/portfolio-trades.js"></script>
 <script src="./js/portfolio-cashflows.js" defer></script>
 <script src="./js/portfolio-alerts.js" defer></script>
 <script src="./js/portfolio-tag-summary.js" defer></script>

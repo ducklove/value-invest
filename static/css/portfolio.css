@@ -3557,3 +3557,30 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
   .pf-attribution-row { grid-template-columns:110px minmax(15px,1fr) 105px; gap:6px; font-size:11px; }
   .pf-insight-summary strong { font-size:17px; }
 }
+
+/* 현금·현물 매매 입력 */
+.pf-trade-dialog { width:min(620px, calc(100vw - 24px)); max-height:90dvh; margin:auto; padding:24px; box-sizing:border-box; overflow:auto; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:12px; }
+.pf-trade-dialog::backdrop { background:rgb(0 0 0 / 45%); }
+.pf-trade-header { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+.pf-trade-header h2 { margin:0; font-size:20px; }
+.pf-trade-header button { min-width:44px; min-height:44px; font-size:24px; border:0; border-radius:6px; background:transparent; color:inherit; cursor:pointer; }
+.pf-trade-help { color:var(--text-secondary); font-size:12px; line-height:1.6; }
+.pf-trade-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; padding:0; margin:18px 0; border:0; min-width:0; }
+.pf-trade-fields label { font-size:13px; font-weight:600; min-width:0; }
+.pf-trade-fields input,.pf-trade-fields select { display:block; width:100%; min-width:0; min-height:42px; box-sizing:border-box; padding:9px 10px; margin-top:6px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); font:inherit; font-weight:400; }
+.pf-trade-fields [hidden] { display:none; }
+.pf-trade-wide { grid-column:1 / -1; }
+.pf-trade-preview:not(:empty) { padding:16px; margin:16px 0; border:1px solid var(--border); border-radius:8px; background:var(--bg); }
+.pf-trade-preview dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px; font-size:13px; }
+.pf-trade-preview dd { text-align:right; margin:0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.pf-trade-save { width:100%; min-height:44px; }
+.pf-trade-dialog button:disabled { opacity:.55; cursor:default; }
+.pf-trade-dialog :focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+#pfTradeStatus { font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+.pf-trade-history { margin-top:22px; font-size:13px; }
+.pf-trade-history summary { cursor:pointer; padding:10px 0; }
+.pf-trade-history article { padding:12px 0; border-top:1px solid var(--border); overflow-wrap:anywhere; }
+.pf-trade-history p { margin:6px 0; }
+.pf-trade-history small { color:var(--text-secondary); }
+@media(max-width:600px) { .pf-trade-dialog { padding:16px; } .pf-trade-fields input,.pf-trade-fields select { font-size:16px; } }
+@media(max-width:900px) { .pf-tab-bar:has(.js-pf-trade) { flex-wrap:wrap; } }

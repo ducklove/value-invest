@@ -22,7 +22,7 @@ from core.static_routes import register_static_routes
 from deps import get_current_user
 from repositories import bootstrap, db, financial, snapshots, users
 from repositories import portfolio as holdings
-from routes import auth, investment_insights, portfolio
+from routes import auth, investment_insights, portfolio, portfolio_trades
 from services.portfolio.time_windows import today_kst_date
 
 
@@ -33,6 +33,7 @@ async def lifespan(app):
         await bootstrap.init_db()
         user = await users.create_local_user(email="browser@example.com", name="브라우저 검증", password_hash=auth_service.hash_password("browser-test-password"))
         await holdings.save_portfolio_item(user["google_sub"], "005930", "삼성전자", 10, 70000)
+        await holdings.save_portfolio_item(user["google_sub"], "CASH_KRW", "원화", 1000000, 1)
         today = today_kst_date()
         await financial.save_financial_data("005930", [{"year": today.year-1, "revenue": 100, "operating_profit": 9}])
         for age, price in ((5, 70000), (1, 75000)):
@@ -50,6 +51,7 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(MutationOriginMiddleware, allowed_origins=["http://127.0.0.1:18765"])
 app.include_router(auth.router)
 app.include_router(investment_insights.router)
+app.include_router(portfolio_trades.router)
 
 
 @app.get("/healthz")
@@ -67,7 +69,8 @@ async def get_holdings(request: Request):
     user = portfolio._require_user(await get_current_user(request))
     rows = await holdings.get_portfolio(user["google_sub"])
     for row in rows:
-        row.update(avg_price_krw=row["avg_price"], quote={"price": 75000, "previous_close": 74000, "change_pct": 1.35})
+        quote = {"price": 1, "previous_close": 1, "change_pct": 0} if row["stock_code"] == "CASH_KRW" else {"price": 75000, "previous_close": 74000, "change_pct": 1.35}
+        row.update(avg_price_krw=row["avg_price"], quote=quote)
     return rows
 
 

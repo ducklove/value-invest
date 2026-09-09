@@ -14,6 +14,7 @@
 
 - 심층 분석 진입: 수익 분해, 논거, 보고서, 리스크, 리밸런싱, 배당, 투자일지 7개.
 - 가계부 진입: `portfolio-household.js`.
+- 매매 기록 열기: `portfolio-trades.js` (`trades` 그룹). 현금·현물의 원자적 변경과 재시도 계약은 [매매 기록](portfolio-trades.md)을 따른다.
 - 도구 진입: `insights.js`, `screener.js`, `masters.js`를 각 화면에서 로드.
 - `switchView()`·`pfSwitchTab()`은 필요한 파일이 준비되면 화면을 열며, 그 사이
   사용자가 다른 탭을 선택하면 이전 전환을 적용하지 않는다. 전환 후 스크롤 등

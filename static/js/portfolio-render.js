@@ -685,6 +685,7 @@ function renderPortfolio(options = {}) {
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-memo">${memoCell}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
+        ${document.getElementById('pfTradeDialog') && !r.stock_code.startsWith('CASH_') && r.qty >= 0 ? '<button type="button" class="pf-row-btn js-pf-trade" title="매수·매도 기록">매매</button>' : ''}
         <button type="button" class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
         <button type="button" class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
       </div></td>

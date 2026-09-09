@@ -55,6 +55,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-trends.js",
     "portfolio-trends-group-weight.js",
     "portfolio-group-composition.js",
+    "portfolio-trades.js",
     "portfolio-cashflows.js",
     "portfolio-tag-summary.js",
     "portfolio-events.js",

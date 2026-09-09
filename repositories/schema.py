@@ -794,6 +794,17 @@ CREATE TABLE IF NOT EXISTS portfolio_income_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_income_events_user_date ON portfolio_income_events(google_sub, date);
+CREATE TABLE IF NOT EXISTS portfolio_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    stock_code TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(google_sub, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_portfolio_trades_user_id ON portfolio_trades(google_sub, id DESC);
 """
 
 # Columns that were added after the original CREATE TABLE definitions. Keeping

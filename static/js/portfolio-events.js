@@ -59,6 +59,10 @@
       } else if (t.closest('.js-pf-cancel')) {
         e.preventDefault();
         cancelPortfolioEdit();
+      } else if ((el = t.closest('.js-pf-trade'))) {
+        e.preventDefault();
+        const code = codeFromTr(el);
+        loadFeatureScripts('trades').then(() => pfOpenTrade(code)).catch(err => reportApiError(err, '매매 기록'));
       } else if ((el = t.closest('.js-pf-edit'))) {
         e.preventDefault();
         const code = codeFromTr(el);
