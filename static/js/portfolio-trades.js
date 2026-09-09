@@ -2,6 +2,46 @@
 const _pfTrade = { selected: null, choices: [], preview: null, payload: null, pending: null, busy: false, search: 0 };
 const _pfTradeEl = id => document.getElementById(`pfTrade${id}`);
 const _pfTradeFmt = value => Number(value).toLocaleString('ko-KR', { maximumFractionDigits: 8 });
+const _pfTradeIsExchange = () => _pfTrade.selected?.code.startsWith('CASH_') || false;
+
+function _pfTradeMode() {
+  const exchange = _pfTradeIsExchange();
+  _pfTradeEl('OrderFields').hidden = _pfTradeEl('OrderFields').disabled = exchange;
+  _pfTradeEl('ExchangeFields').hidden = _pfTradeEl('ExchangeFields').disabled = !exchange;
+  _pfTradeEl('Save').textContent = exchange ? '환전 기록 저장' : '매매 기록 저장';
+}
+
+function _pfTradeExchangePair(reset = false) {
+  const from = _pfTrade.selected?.code.slice(5) || 'KRW';
+  const toSelect = _pfTradeEl('ExchangeTo');
+  for (const option of toSelect.options) option.disabled = option.value === from;
+  if (toSelect.value === from) toSelect.value = from === 'KRW' ? 'USD' : 'KRW';
+  const to = toSelect.value;
+  _pfTradeEl('ExchangeFrom').value = from;
+  _pfTradeEl('ExchangeAmountLabel').textContent = `환전 금액 (${from})`;
+  _pfTradeEl('ExchangeFeesLabel').textContent = `환전 수수료 (${from})`;
+  _pfTradeEl('ExchangeReceivedLabel').textContent = `실제 수령액 (${to})`;
+  const basis = _pfTradeEl('ExchangeBasis');
+  basis.options[0].textContent = `1 ${from} = ? ${to}`;
+  basis.options[1].textContent = `1 ${to} = ? ${from}`;
+  if (reset) {
+    basis.value = from === 'KRW' ? 'from_per_to' : 'to_per_from';
+    _pfTradeEl('ExchangeRate').value = '';
+    _pfTradeEl('ExchangeReceived').value = '';
+  }
+  _pfTradeExchangeEstimate();
+}
+
+function _pfTradeExchangeEstimate() {
+  if (!_pfTradeIsExchange()) return;
+  const from = _pfTradeEl('ExchangeFrom').value, to = _pfTradeEl('ExchangeTo').value;
+  const amount = Number(_pfTradeEl('ExchangeAmount').value), rate = Number(_pfTradeEl('ExchangeRate').value);
+  const fees = Number(_pfTradeEl('ExchangeFees').value);
+  const scale = ['KRW', 'JPY', 'VND'].includes(to) ? 1 : 100;
+  const calculated = rate > 0 ? Math.round(( _pfTradeEl('ExchangeBasis').value === 'to_per_from' ? amount * rate : amount / rate) * scale) / scale : null;
+  const received = _pfTradeEl('ExchangeReceived').value === '' ? calculated : Number(_pfTradeEl('ExchangeReceived').value);
+  _pfTradeEl('ExchangeEstimate').textContent = `차감 ${_pfTradeFmt(amount + fees)} ${from} → 수령 ${received === null || !Number.isFinite(received) ? '-' : _pfTradeFmt(received)} ${to}`;
+}
 
 function _pfTradeStorageKey() {
   const user = typeof currentUser === 'undefined' ? null : currentUser;
@@ -17,7 +57,9 @@ function _pfTradePersist(pending) {
 }
 
 function _pfTradeOptions(items) {
-  _pfTrade.choices = [...new Map(items.filter(i => !i.code.startsWith('CASH_')).map(i => [i.code, i])).values()];
+  const currencies = [..._pfTradeEl('ExchangeTo').options].map(option => option.value);
+  const cashChoices = currencies.map(currency => ({ code: `CASH_${currency}`, name: `${currency} 현금`, currency }));
+  _pfTrade.choices = [...new Map([...cashChoices, ...items].map(i => [i.code, i])).values()];
   _pfTradeEl('Stocks').innerHTML = _pfTrade.choices.map(i => `<option value="${escapeHtml(`${i.name} (${i.code})`)}"></option>`).join('');
 }
 
@@ -28,13 +70,17 @@ function _pfTradeInvalidate() {
   _pfTradeEl('Preview').textContent = '';
   _pfTradeEl('Status').textContent = '';
   _pfTradeEl('Save').disabled = true;
-  _pfTradeEl('Save').textContent = '매매 기록 저장';
+  _pfTradeEl('Save').textContent = _pfTradeIsExchange() ? '환전 기록 저장' : '매매 기록 저장';
 }
 
 function _pfTradeCurrency() {
   const selected = _pfTrade.selected;
   const holding = PfStore.items.find(i => i.stock_code === selected?.code);
   const currency = _pfTradeEl('Currency').value;
+  if (_pfTradeIsExchange()) {
+    _pfTradeEl('Selected').textContent = `${selected.name} · ${selected.code} / 잔고 ${_pfTradeFmt(holding?.quantity || 0)} ${currency} · 다른 통화로 환전`;
+    return;
+  }
   const needsFx = _pfTradeEl('Side').value === 'buy' && holding?.quantity > 0 && (holding.avg_price_currency || 'KRW') !== currency;
   _pfTradeEl('FxLabel').hidden = !needsFx;
   _pfTradeEl('Fx').required = needsFx;
@@ -46,11 +92,20 @@ function _pfTradeCurrency() {
 }
 
 function _pfTradeSelect(item) {
+  const previousCode = _pfTrade.selected?.code;
   _pfTrade.selected = item;
   _pfTradeEl('Stock').value = `${item.name} (${item.code})`;
   const holding = PfStore.items.find(i => i.stock_code === item.code);
   _pfTradeEl('Currency').value = holding?.currency || item.currency || 'KRW';
   _pfTradeEl('Currency').disabled = Boolean(holding);
+  _pfTradeMode();
+  if (_pfTradeIsExchange()) {
+    if (previousCode !== item.code) {
+      _pfTradeEl('ExchangeAmount').value = '';
+      _pfTradeEl('ExchangeFees').value = '0';
+    }
+    _pfTradeExchangePair(previousCode !== item.code);
+  }
   _pfTradeTaxDefaults();
   _pfTradeCurrency();
 }
@@ -76,6 +131,7 @@ async function _pfTradeSearch() {
   const version = ++_pfTrade.search;
   const exact = _pfTrade.choices.find(i => [i.code, i.name, `${i.name} (${i.code})`].some(v => v.toLowerCase() === query.toLowerCase()));
   _pfTrade.selected = null;
+  _pfTradeMode();
   _pfTradeEl('Currency').disabled = false;
   if (exact) { _pfTradeSelect(exact); return; }
   _pfTradeCurrency();
@@ -102,6 +158,12 @@ async function _pfTradeSearch() {
 
 function _pfTradeRead() {
   if (!_pfTrade.selected) throw new Error('검색 결과에서 종목을 먼저 선택해 주세요.');
+  if (_pfTradeIsExchange()) return {
+    side: 'exchange', from_currency: _pfTrade.selected.code.slice(5), to_currency: _pfTradeEl('ExchangeTo').value,
+    amount: _pfTradeEl('ExchangeAmount').value, rate: _pfTradeEl('ExchangeRate').value, rate_basis: _pfTradeEl('ExchangeBasis').value,
+    fees: _pfTradeEl('ExchangeFees').value || '0', received_amount: _pfTradeEl('ExchangeReceived').value || null,
+    memo: _pfTradeEl('Memo').value.trim(),
+  };
   return {
     stock_code: _pfTrade.selected.code, stock_name: _pfTrade.selected.saveName || _pfTrade.selected.name,
     side: _pfTradeEl('Side').value, currency: _pfTradeEl('Currency').value,
@@ -114,6 +176,17 @@ function _pfTradeRead() {
 
 function _pfTradeRenderPreview(result) {
   const number = _pfTradeFmt;
+  if (result.side === 'exchange') {
+    const from = escapeHtml(result.from_currency), to = escapeHtml(result.to_currency);
+    const quote = result.rate_basis === 'to_per_from' ? `1 ${from} = ${number(result.rate)} ${to}` : `1 ${to} = ${number(result.rate)} ${from}`;
+    _pfTradeEl('Preview').innerHTML = `<strong>${from} → ${to} 환전</strong><dl>
+      <dt>보내는 현금 (${from})</dt><dd>${number(result.from_before)} → ${number(result.from_after)}</dd>
+      <dt>받는 현금 (${to})</dt><dd>${number(result.to_before)} → ${number(result.to_after)}</dd>
+      <dt>환전 금액 / 수수료</dt><dd>${number(result.amount)} / ${number(result.fees)} ${from}</dd>
+      <dt>수령액${result.received_override ? ' (직접 입력)' : ''}</dt><dd>${number(result.received_amount)} ${to}</dd>
+      <dt>입력 환율</dt><dd>${quote}</dd></dl><p class="pf-trade-help">두 통화의 현금을 함께 변경하며, NAV 좌수는 유지합니다.</p>`;
+    return;
+  }
   _pfTradeEl('Preview').innerHTML = `<strong>${escapeHtml(result.stock_name)} ${result.side === 'buy' ? '매수' : '매도'}</strong>
     <dl><dt>보유 수량</dt><dd>${number(result.quantity_before)} → ${number(result.quantity_after)}</dd>
     <dt>현금 (${escapeHtml(result.currency)})</dt><dd>${number(result.cash_before)} → ${number(result.cash_after)}</dd>
@@ -150,7 +223,9 @@ async function pfPreviewTrade(event) {
 async function pfLoadTrades() {
   try {
     const rows = await apiFetchJson('/api/portfolio/trades?limit=20', { errorMessage: '매매 내역을 불러오지 못했습니다.' });
-    _pfTradeEl('History').innerHTML = rows.length ? rows.map(row => `<article><strong>${escapeHtml(row.stock_name)} · ${row.side === 'buy' ? '매수' : '매도'}</strong>
+    _pfTradeEl('History').innerHTML = rows.length ? rows.map(row => row.side === 'exchange' ? `<article><strong>${escapeHtml(row.from_currency)} → ${escapeHtml(row.to_currency)} · 환전</strong>
+      <p>${_pfTradeFmt(row.amount)} ${escapeHtml(row.from_currency)} → ${_pfTradeFmt(row.received_amount)} ${escapeHtml(row.to_currency)} · 수수료 ${_pfTradeFmt(row.fees)} ${escapeHtml(row.from_currency)}</p>
+      <small>${escapeHtml(new Date(row.created_at).toLocaleString('ko-KR'))}${row.memo ? ` · ${escapeHtml(row.memo)}` : ''}</small></article>` : `<article><strong>${escapeHtml(row.stock_name)} · ${row.side === 'buy' ? '매수' : '매도'}</strong>
       <p>${_pfTradeFmt(row.quantity)} × ${_pfTradeFmt(row.price)} ${escapeHtml(row.currency)} · 비용 ${_pfTradeFmt(row.fees)}${row.commission !== null && row.commission !== undefined ? ` (수수료 ${_pfTradeFmt(row.commission)} + 세금 ${_pfTradeFmt(row.tax_amount || 0)})` : ''}</p>
       <small>${escapeHtml(new Date(row.created_at).toLocaleString('ko-KR'))}${row.memo ? ` · ${escapeHtml(row.memo)}` : ''}</small></article>`).join('') : '<p>아직 기록한 매매가 없습니다.</p>';
   } catch (error) { _pfTradeEl('History').textContent = error.message; }
@@ -172,7 +247,8 @@ async function pfSaveTrade() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_pfTrade.pending),
       errorMessage: '저장 결과를 확인하지 못했습니다.',
     });
-    if (!saved || !Number.isFinite(saved.quantity_after) || !Number.isFinite(saved.cash_after)) throw new Error('저장 응답을 확인하지 못했습니다.');
+    const balances = saved?.side === 'exchange' ? [saved.from_after, saved.to_after] : [saved?.quantity_after, saved?.cash_after];
+    if (!saved || !balances.every(Number.isFinite)) throw new Error('저장 응답을 확인하지 못했습니다.');
   } catch (error) {
     saved = null;
     if ([400, 401, 403, 409, 422].includes(error.status)) {
@@ -193,6 +269,7 @@ async function pfSaveTrade() {
   _pfTradeEl('Form').reset();
   _pfTradeEl('Currency').disabled = false;
   _pfTrade.selected = null;
+  _pfTradeMode();
   _pfTradeTaxDefaults();
   _pfTrade.preview = null;
   _pfTrade.payload = null;
@@ -201,7 +278,7 @@ async function pfSaveTrade() {
   _pfTradeEl('Save').textContent = '매매 기록 저장';
   _pfTradeEl('Selected').textContent = '다음 매매를 기록하려면 종목을 선택하세요.';
   _pfTradeRenderPreview(saved);
-  _pfTradeEl('Status').textContent = '매매 내역과 현금·보유 수량을 저장했습니다.';
+  _pfTradeEl('Status').textContent = saved.side === 'exchange' ? '환전 내역과 두 통화의 현금 잔고를 저장했습니다.' : '매매 내역과 현금·보유 수량을 저장했습니다.';
   PfStore.edit.code = null;
   // 저장 응답과 화면 갱신 오류를 분리해, 완료된 거래를 재입력하게 만들지 않는다.
   await Promise.allSettled([loadPortfolio({ force: true }), pfLoadTrades()]);
@@ -213,6 +290,7 @@ function pfOpenTrade(code) {
   _pfTrade.search += 1;
   _pfTradeEl('Form').reset();
   _pfTrade.selected = null;
+  _pfTradeMode();
   _pfTradeEl('Fields').disabled = false;
   _pfTradeEl('Currency').disabled = false;
   _pfTradeEl('Preview').textContent = '';
@@ -220,8 +298,16 @@ function pfOpenTrade(code) {
   try { _pfTrade.pending = JSON.parse(sessionStorage.getItem(_pfTradeStorageKey()) || 'null'); } catch { /* 현재 화면의 요청 보존 */ }
   if (_pfTrade.pending) {
     const p = _pfTrade.pending;
-    _pfTradeSelect({ code: p.stock_code, name: p.stock_name, currency: p.currency });
-    for (const [id, key] of [['Side', 'side'], ['Currency', 'currency'], ['Quantity', 'quantity'], ['Price', 'price'], ['Fees', 'fees'], ['Memo', 'memo'], ['Fx', 'cost_fx_rate'], ['TaxRate', 'tax_rate'], ['TaxAmount', 'tax_amount']]) _pfTradeEl(id).value = p[key] ?? '';
+    if (p.side === 'exchange') {
+      _pfTradeSelect({ code: `CASH_${p.from_currency}`, name: `${p.from_currency} 현금`, currency: p.from_currency });
+      _pfTradeEl('ExchangeTo').value = p.to_currency;
+      _pfTradeExchangePair();
+      for (const [id, key] of [['ExchangeAmount', 'amount'], ['ExchangeRate', 'rate'], ['ExchangeBasis', 'rate_basis'], ['ExchangeFees', 'fees'], ['ExchangeReceived', 'received_amount'], ['Memo', 'memo']]) _pfTradeEl(id).value = p[key] ?? '';
+      _pfTradeExchangeEstimate();
+    } else {
+      _pfTradeSelect({ code: p.stock_code, name: p.stock_name, currency: p.currency });
+      for (const [id, key] of [['Side', 'side'], ['Currency', 'currency'], ['Quantity', 'quantity'], ['Price', 'price'], ['Fees', 'fees'], ['Memo', 'memo'], ['Fx', 'cost_fx_rate'], ['TaxRate', 'tax_rate'], ['TaxAmount', 'tax_amount']]) _pfTradeEl(id).value = p[key] ?? '';
+    }
     _pfTradeCosts();
     _pfTradeCurrency();
     _pfTradeEl('Fields').disabled = true;
@@ -241,7 +327,13 @@ function pfOpenTrade(code) {
 }
 
 _pfTradeEl('Form').addEventListener('submit', pfPreviewTrade);
-_pfTradeEl('Form').addEventListener('input', () => { _pfTradeInvalidate(); _pfTradeCosts(); });
+_pfTradeEl('Form').addEventListener('input', () => { _pfTradeInvalidate(); _pfTradeCosts(); _pfTradeExchangeEstimate(); });
+_pfTradeEl('ExchangeTo').addEventListener('change', () => { _pfTradeInvalidate(); _pfTradeExchangePair(true); });
+_pfTradeEl('ExchangeBasis').addEventListener('change', () => {
+  _pfTradeInvalidate();
+  _pfTradeEl('ExchangeRate').value = '';
+  _pfTradeExchangeEstimate();
+});
 _pfTradeEl('Stock').addEventListener('input', () => _pfTradeSearch().catch(error => { _pfTradeEl('Status').textContent = error.message; }));
 _pfTradeEl('Side').addEventListener('change', () => { _pfTradeInvalidate(); _pfTradeCurrency(); _pfTradeTaxDefaults(); });
 _pfTradeEl('Currency').addEventListener('change', () => { _pfTradeInvalidate(); _pfTradeCurrency(); _pfTradeTaxDefaults(); });

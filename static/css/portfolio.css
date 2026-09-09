@@ -3589,3 +3589,4 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 .pf-cf-table th:nth-child(2), .pf-cf-table td:nth-child(2) { width:100px; }
 .pf-cf-table th:nth-child(8), .pf-cf-table td:nth-child(8) { width:76px; }
 .pf-cf-native { display:block; margin-top:4px; color:var(--text-secondary); font-weight:400; }
+.pf-trade-fields .pf-trade-fields { margin:0; }

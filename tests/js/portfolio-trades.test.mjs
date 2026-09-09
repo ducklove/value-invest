@@ -8,6 +8,92 @@ const script = readFileSync(new URL('../../static/js/portfolio-trades.js', impor
 const result = { stock_code: '005930', stock_name: '삼성전자', side: 'buy', currency: 'KRW', quantity: 2, price: 100,
   fees: 10, gross_amount: 200, quantity_before: 10, quantity_after: 12, cash_before: 1000, cash_after: 790,
   avg_price_after: 100.83333333, avg_price_currency: 'KRW', revision: 'a'.repeat(64), created_at: '2026-09-09T01:00:00Z' };
+const exchangeResult = { side: 'exchange', stock_code: 'CASH_KRW', stock_name: 'KRW → USD', from_currency: 'KRW', to_currency: 'USD',
+  amount: 140, rate: 1400, rate_basis: 'from_per_to', fees: 1, source_debit: 141, received_amount: 0.1, received_override: false,
+  from_before: 1000, from_after: 859, to_before: 0, to_after: 0.1, revision: 'b'.repeat(64), created_at: result.created_at, memo: '' };
+
+test('현금 선택은 같은 매매 창에서 환전으로 전환하며 주식의 필수 입력을 끈다', async () => {
+  const s = setup(path => path.includes('?limit=') ? [] : exchangeResult);
+  try {
+    s.w.pfOpenTrade('CASH_KRW');
+    assert.equal(s.el('OrderFields').hidden, true);
+    assert.equal(s.el('OrderFields').disabled, true);
+    assert.equal(s.el('ExchangeFields').hidden, false);
+    assert.equal(s.el('ExchangeFrom').value, 'KRW');
+    assert.equal(s.el('ExchangeBasis').selectedOptions[0].textContent, '1 USD = ? KRW');
+    s.fill('ExchangeAmount', '140'); s.fill('ExchangeRate', '1400'); s.fill('ExchangeFees', '1');
+    assert.equal(s.el('Form').checkValidity(), true);
+    assert.match(s.el('ExchangeEstimate').textContent, /차감 141 KRW → 수령 0.1 USD/);
+    await s.w.pfPreviewTrade();
+    assert.match(s.el('Preview').textContent, /1,000 → 859/);
+    assert.match(s.el('Preview').textContent, /0 → 0.1/);
+    const payload = JSON.parse(s.calls.find(c => c.path.endsWith('/preview')).options.body);
+    assert.equal(payload.side, 'exchange');
+    assert.equal(payload.from_currency, 'KRW');
+    assert.equal(payload.stock_code, undefined);
+    s.fill('Stock', '005930');
+    assert.equal(s.el('ExchangeFields').disabled, true);
+    assert.equal(s.el('OrderFields').hidden, false);
+    assert.equal(s.el('Save').disabled, true);
+    assert.equal(s.el('Form').checkValidity(), false);
+    s.fill('Stock', 'CASH_USD');
+    assert.equal(s.el('ExchangeAmount').value, '');
+    assert.equal(s.el('ExchangeFees').value, '0');
+    assert.equal(s.el('ExchangeRate').value, '');
+    await s.w.pfLoadTrades();
+  } finally { s.dom.window.close(); }
+});
+
+test('환율 방향이나 받는 통화를 바꾸면 기존 환율과 저장 미리보기를 다시 확인한다', async () => {
+  const s = setup();
+  try {
+    s.w.pfOpenTrade('CASH_USD');
+    assert.equal(s.el('ExchangeTo').value, 'KRW');
+    assert.equal(s.el('ExchangeBasis').selectedOptions[0].textContent, '1 USD = ? KRW');
+    s.fill('ExchangeAmount', '100'); s.fill('ExchangeRate', '1400');
+    s.el('ExchangeTo').value = 'JPY';
+    s.el('ExchangeTo').dispatchEvent(new s.w.Event('change'));
+    assert.equal(s.el('ExchangeRate').value, '');
+    s.fill('ExchangeRate', '145'); s.fill('ExchangeReceived', '14499');
+    assert.match(s.el('ExchangeEstimate').textContent, /수령 14,499 JPY/);
+    s.el('ExchangeBasis').value = 'from_per_to';
+    s.el('ExchangeBasis').dispatchEvent(new s.w.Event('change'));
+    assert.equal(s.el('ExchangeRate').value, '');
+    assert.equal(s.el('Save').disabled, true);
+    await s.w.pfLoadTrades();
+  } finally { s.dom.window.close(); }
+});
+
+test('환전 응답 유실은 입력과 요청 번호를 보존하고 같은 원장의 내역으로 복구한다', async () => {
+  let writes = 0;
+  const s = setup(path => {
+    if (path.includes('?limit=')) return writes > 1 ? [exchangeResult, result] : [];
+    if (path.endsWith('/preview')) return exchangeResult;
+    if (++writes === 1) throw new Error('연결 끊김');
+    return { ...exchangeResult, replayed: true };
+  });
+  try {
+    s.w.pfOpenTrade('CASH_KRW');
+    s.fill('ExchangeAmount', '140'); s.fill('ExchangeRate', '1400'); s.fill('ExchangeFees', '1');
+    s.fill('ExchangeReceived', '0.1');
+    await s.w.pfPreviewTrade();
+    await s.w.pfSaveTrade();
+    s.w.pfOpenTrade('005930');
+    assert.equal(s.el('ExchangeFields').hidden, false);
+    assert.equal(s.el('Fields').disabled, true);
+    assert.equal(s.el('ExchangeAmount').value, '140');
+    assert.equal(s.el('ExchangeReceived').value, '0.1');
+    assert.equal(s.el('ExchangeBasis').value, 'from_per_to');
+    assert.equal(s.el('Save').textContent, '저장 결과 확인');
+    await s.w.pfSaveTrade();
+    const requests = s.calls.filter(c => c.path === '/api/portfolio/trades');
+    assert.equal(requests[0].options.body, requests[1].options.body);
+    assert.equal(s.w.sessionStorage.length, 0);
+    assert.match(s.el('History').textContent, /환전/);
+    assert.match(s.el('History').textContent, /매수/);
+    assert.match(s.el('Status').textContent, /두 통화의 현금 잔고를 저장했습니다/);
+  } finally { s.dom.window.close(); }
+});
 
 function setup(handler) {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });
