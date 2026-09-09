@@ -42,7 +42,16 @@ test('배당 스케줄 수취와 분배금 출금이 현금·누계에 반영되
   await page.getByRole('button', { name: '분배금 출금 저장', exact: true }).click();
   await expect(page.locator('#pfDistributionStatus')).toContainText('저장했습니다');
   await page.getByRole('button', { name: '분배금 출금 닫기' }).click();
+  if (await page.locator('#pfSimpleToggle').getAttribute('aria-pressed') === 'true') await page.locator('#pfSimpleToggle').click();
+  await page.locator('.pf-tab[data-tab="performance"]').click();
+  const distributionRow = page.locator('#pfCfBody tr').filter({ hasText: '분배금 출금' });
+  await expect(distributionRow).toHaveCount(1);
+  await expect(distributionRow).toContainText('846원');
+  await expect(distributionRow).toContainText('좌수 유지');
+  await expect(distributionRow.locator('.js-pf-cf-delete')).toHaveCount(0);
   await page.reload();
+  await page.locator('.pf-tab[data-tab="performance"]').click();
+  await expect(page.locator('#pfCfBody')).toContainText('분배금 출금');
   const distributed = await page.evaluate(async () => (await fetch('/api/portfolio')).json());
   expect(distributed.find(i => i.stock_code === 'CASH_KRW').quantity).toBe(cashBefore);
   expect(distributed.find(i => i.stock_code === '005930').quantity).toBe(quantity);

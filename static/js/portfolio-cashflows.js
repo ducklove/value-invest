@@ -58,10 +58,10 @@ function renderCashflows(data, navData = _navChartData) {
     const isDeposit = cf.type === 'deposit';
     return `<tr>
     <td>${escapeHtml(cf.date || '')}</td>
-    <td><span class="pf-cf-type ${isDeposit ? 'deposit' : 'withdrawal'}">${isDeposit ? '입금' : cf.type === 'distribution' ? '분배금' : '출금'}</span></td>
-    <td class="pf-col-num pf-cf-amount ${isDeposit ? 'deposit' : 'withdrawal'}">${fmtNum(Math.round(cf.amount))}원</td>
+    <td><span class="pf-cf-type ${isDeposit ? 'deposit' : 'withdrawal'}">${isDeposit ? '입금' : cf.type === 'distribution' ? '분배금 출금' : '출금'}</span></td>
+    <td class="pf-col-num pf-cf-amount ${isDeposit ? 'deposit' : 'withdrawal'}">${fmtNum(Math.round(cf.amount))}원${cf.type === 'distribution' && cf.currency && cf.currency !== 'KRW' ? `<small class="pf-cf-native">${Number(cf.native_amount).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${escapeHtml(cf.currency)}</small>` : ''}</td>
     <td class="pf-col-num">${fmtCfDecimal(cf.nav_at_time)}</td>
-    <td class="pf-col-num">${fmtCfSignedDecimal(cf.units_change)}</td>
+    <td class="pf-col-num">${cf.type === 'distribution' ? '0.00' : fmtCfSignedDecimal(cf.units_change)}</td>
     <td class="pf-col-num">${fmtCfDecimal(remainingUnitsById.get(String(cf.id)))}</td>
     <td title="${escapeHtml(cf.memo || '')}">${escapeHtml(cf.memo || '')}</td>
     <td>${cf.type === 'distribution' ? '좌수 유지' : cf.cancelled_at ? '취소됨' : cf.reversal_of_id != null ? '취소 거래' : `<button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}" aria-label="입출금 취소" title="${cf.applied_snapshot_date ? '취소 거래로 되돌리기' : '삭제'}">&times;</button>`}</td>
@@ -79,15 +79,38 @@ async function refreshPortfolioAfterCashflowMutation() {
   }
   await Promise.allSettled(tasks);
   if (typeof renderPortfolio === 'function') renderPortfolio();
-  if (typeof loadPerformanceData === 'function') loadPerformanceData();
+  if (typeof loadPerformanceData === 'function') await loadPerformanceData();
 }
 
-async function addCashflow() {
+let _pfCashflowSaving = false;
+
+function pfOpenCashflow() {
+  if (_pfCashflowSaving) return;
+  const date = document.getElementById('pfCfDate');
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date());
+  date.max = today;
+  if (!date.value) date.value = today;
+  document.getElementById('pfCfStatus').textContent = '';
+  const dialog = document.getElementById('pfCfDialog');
+  if (!dialog.open) dialog.showModal();
+  document.getElementById('pfCfAmount').focus();
+}
+
+async function addCashflow(event) {
+  event?.preventDefault();
+  if (_pfCashflowSaving || !document.getElementById('pfCfForm').reportValidity()) return;
   const type = document.getElementById('pfCfType').value;
   const date = document.getElementById('pfCfDate').value;
   const amount = parseFloat(document.getElementById('pfCfAmount').value);
   const memo = document.getElementById('pfCfMemo').value.trim();
-  if (!amount || amount <= 0) { showToast('금액을 입력해 주세요.'); return; }
+  if (!Number.isFinite(amount) || amount <= 0) { showToast('금액을 입력해 주세요.'); return; }
+  const fields = document.getElementById('pfCfFields');
+  const save = document.getElementById('pfCfSave');
+  const status = document.getElementById('pfCfStatus');
+  _pfCashflowSaving = true;
+  fields.disabled = save.disabled = true;
+  status.textContent = '입출금을 등록하고 있습니다…';
+  let saved = false;
   try {
     await apiFetchJson('/api/portfolio/cashflows', {
       method: 'POST',
@@ -97,9 +120,26 @@ async function addCashflow() {
     });
     document.getElementById('pfCfAmount').value = '';
     document.getElementById('pfCfMemo').value = '';
-    await refreshPortfolioAfterCashflowMutation();
-  } catch (e) { reportApiError(e, '입출금 등록'); }
+    saved = true;
+    document.getElementById('pfCfDialog').close();
+    showToast('입출금을 등록했습니다. 심층 분석의 자금 입출금에서 내역을 확인할 수 있습니다.');
+  } catch (e) {
+    status.textContent = e.message || '입출금을 등록하지 못했습니다.';
+    reportApiError(e, '입출금 등록');
+  } finally {
+    _pfCashflowSaving = false;
+    fields.disabled = save.disabled = false;
+  }
+  if (saved) await refreshPortfolioAfterCashflowMutation();
 }
+
+document.getElementById('pfCfForm')?.addEventListener('submit', addCashflow);
+document.getElementById('pfCfClose')?.addEventListener('click', () => {
+  if (!_pfCashflowSaving) document.getElementById('pfCfDialog').close();
+});
+document.getElementById('pfCfDialog')?.addEventListener('cancel', event => {
+  if (_pfCashflowSaving) event.preventDefault();
+});
 
 async function deleteCashflow(id) {
   if (!confirm('이 입출금을 취소할까요? 정산된 내역은 취소 거래를 남기고 현재 원화 잔고를 되돌립니다.')) return;

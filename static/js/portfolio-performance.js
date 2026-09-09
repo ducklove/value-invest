@@ -129,11 +129,6 @@ function pfCloseTreemap() {
 
 async function loadPerformanceData() {
   const loadSeq = ++_performanceLoadSeq;
-  const dateInput = document.getElementById('pfCfDate');
-  if (dateInput && !dateInput.value) {
-    const now = new Date();
-    dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-  }
   const cachedNav = Array.isArray(PfStore.navHistory) && PfStore.navHistory.length ? PfStore.navHistory : null;
   const cachedGroup = Array.isArray(_pfGroupWeightHistory) && _pfGroupWeightHistory.length ? _pfGroupWeightHistory : null;
   const navPromise = typeof pfLoadNavHistory === 'function'

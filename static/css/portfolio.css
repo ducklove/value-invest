@@ -3586,3 +3586,6 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 @media(max-width:900px) { .pf-tab-bar:has(.js-pf-trade) { flex-wrap:wrap; } }
 .pf-trade-costs { padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:6px; font-size:13px; line-height:1.7; font-variant-numeric:tabular-nums; }
 .pf-divcal-receipt { display:block; margin-top:6px; min-height:32px; }
+.pf-cf-table th:nth-child(2), .pf-cf-table td:nth-child(2) { width:100px; }
+.pf-cf-table th:nth-child(8), .pf-cf-table td:nth-child(8) { width:76px; }
+.pf-cf-native { display:block; margin-top:4px; color:var(--text-secondary); font-weight:400; }

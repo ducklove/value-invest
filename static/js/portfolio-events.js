@@ -59,6 +59,9 @@
       } else if (t.closest('.js-pf-cancel')) {
         e.preventDefault();
         cancelPortfolioEdit();
+      } else if (t.closest('.js-pf-cashflow')) {
+        e.preventDefault();
+        pfOpenCashflow();
       } else if ((el = t.closest('.js-pf-distribution'))) {
         e.preventDefault();
         loadFeatureScripts('distributions').then(() => pfOpenDistribution()).catch(err => reportApiError(err, '분배금 출금'));

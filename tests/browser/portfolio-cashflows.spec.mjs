@@ -1,0 +1,42 @@
+import { test, expect } from '@playwright/test';
+
+test('매매 기록 옆 버튼에서 입출금을 등록하고 심층 분석에서 내역만 조회한다', async ({ page }, testInfo) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
+  await page.goto('/login?return_to=/portfolio');
+  await page.locator('#loginEmail').fill('browser@example.com');
+  await page.locator('#loginPassword').fill('browser-test-password');
+  await page.getByRole('button', { name: '이메일로 로그인' }).click();
+  await expect(page.locator('#pfBody tr[data-code="005930"]')).toBeVisible();
+  const cash = () => page.evaluate(async () => (await (await fetch('/api/portfolio')).json()).find(i => i.stock_code === 'CASH_KRW').quantity);
+  const before = await cash();
+  await expect(page.locator('.js-pf-trade + .js-pf-cashflow')).toHaveText('자금 입출금');
+  await page.getByRole('button', { name: '자금 입출금', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '자금 입출금', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('#pfPerformanceTab')).toBeHidden();
+  await page.locator('#pfCfAmount').fill('2000');
+  await page.locator('#pfCfMemo').fill('상단 버튼 입금');
+  await dialog.screenshot({ path: testInfo.outputPath('cashflow-desktop.png') });
+  await page.getByRole('button', { name: '입출금 등록', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(await cash()).toBe(before + 2000);
+  await page.locator('.pf-tab[data-tab="performance"]').click();
+  await expect(page.locator('#pfCfBody')).toContainText('상단 버튼 입금');
+  await expect(page.locator('#pfCashflowWrap input, #pfCashflowWrap select, #pfCashflowWrap form')).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '자금 입출금', exact: true }).click();
+  await page.locator('#pfCfType').selectOption('withdrawal');
+  await page.locator('#pfCfAmount').fill('2000');
+  await page.locator('#pfCfMemo').fill('상단 버튼 출금');
+  expect(await dialog.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(false);
+  await dialog.screenshot({ path: testInfo.outputPath('cashflow-mobile.png') });
+  await page.getByRole('button', { name: '입출금 등록', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('#pfCfBody')).toContainText('상단 버튼 출금');
+  expect(await cash()).toBe(before);
+  expect(await page.locator('.pf-tab-bar').evaluate(el => el.scrollWidth > el.clientWidth)).toBe(false);
+  expect(errors).toEqual([]);
+});

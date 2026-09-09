@@ -91,6 +91,16 @@ async def groups(request: Request):
     return await holdings.get_portfolio_groups(user["google_sub"])
 
 
+@app.get("/api/portfolio/cashflows")
+async def cashflows(request: Request):
+    return await portfolio.get_cashflows(request)
+
+
+@app.post("/api/portfolio/cashflows")
+async def add_cashflow(request: Request, payload: dict = Body(...)):
+    return await portfolio.add_cashflow(request, payload)
+
+
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT"])
 async def auxiliary(path: str):
     if path == "market-indicators":

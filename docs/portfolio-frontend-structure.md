@@ -61,7 +61,7 @@ defer로 로드한다. CDN의 가변 버전 대신 저장소에 포함한 고정
 24. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화, 공용 차트 헬퍼.
 25. `portfolio-trends-group-weight.js`: 그룹 비중 100% 누적 면적 차트와 drill-down 진입(`_GROUP_WEIGHT_COLORS` 공급).
 26. `portfolio-group-composition.js`: 그룹 구성 추이 drill-down.
-27. `portfolio-cashflows.js`: 자금 입출금 표와 입출금 mutation.
+27. `portfolio-cashflows.js`: 상단 자금 입출금 입력 창, 심층 분석의 입출금·분배금 내역 표와 입출금 mutation.
 28. `portfolio-tag-summary.js`: 태그 요약 UI.
 29. `portfolio-events.js`: document-level delegated event handlers.
 30. `insights.js`: 인사이트 목록 UI.
