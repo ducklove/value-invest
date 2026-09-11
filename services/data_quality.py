@@ -335,6 +335,9 @@ async def run_all_checks(*, now: datetime | None = None, record: bool = True) ->
     results += await _safe("intraday_points", check_intraday_points(now=now))
     results += await _safe("benchmark_freshness", check_benchmark_freshness(now=now))
     results += await _safe("system_events_error_rate", check_system_events_error_rate(now=now))
+    from services.market import indicator_health
+
+    results += await _safe("market_indicators", indicator_health.summary())
 
     counts = {"ok": 0, "warn": 0, "error": 0}
     for r in results:

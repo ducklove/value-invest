@@ -97,3 +97,44 @@ test("local and server market-bar settings are normalized when loaded", async ()
   assert.deepEqual(loaded, ["HL_SKHYNIX", "HL_HYUNDAI"]);
   assert.equal(w.localStorage.getItem("market_bar_codes"), JSON.stringify(loaded));
 });
+
+test('오래된 지수는 지연 표시와 기준 시각을 보이고 회복하면 표시를 해제한다', () => {
+  const w = load();
+  const cat = { KOSPI: { label: 'KOSPI' } };
+  const quote = { value: '7,033.92', _stale: true, as_of: '2026-09-10T15:30:00+09:00' };
+  render(w, cat, ['KOSPI'], { KOSPI: quote });
+  assert.equal(w.document.querySelector('.mi-stale').textContent, '지연');
+  assert.match(w.document.querySelector('.mi-val').title, /갱신 지연.*시세 기준.*2026.*KST/);
+  render(w, cat, ['KOSPI'], { KOSPI: { value: '6,864.30', as_of: '2026-09-11T10:11:00+09:00' } });
+  assert.equal(w.document.querySelector('.mi-stale'), null);
+  assert.equal(w.document.querySelector('.mi-val').textContent, '6,864.30');
+  w.close();
+});
+
+test('정기 갱신 실패는 이전 숫자를 지연 상태로 보존하고 성공 응답으로 회복한다', async () => {
+  const w = load();
+  w.eval("mbCodes = ['KOSPI']; mbCatalog = { KOSPI: { label: 'KOSPI' } };");
+  const responses = [{ KOSPI: { value: '7,033.92' } }, null, { KOSPI: { value: '6,864.30' } }];
+  w.apiFetchJson = async (url, options) => {
+    assert.equal(options.cache, 'no-store');
+    return responses.shift();
+  };
+  await w.loadMarketSummary();
+  await w.loadMarketSummary();
+  assert.equal(w.document.querySelector('.mi-val').textContent, '7,033.92');
+  assert.ok(w.document.querySelector('.mi-stale'));
+  await w.loadMarketSummary();
+  assert.equal(w.document.querySelector('.mi-val').textContent, '6,864.30');
+  assert.equal(w.document.querySelector('.mi-stale'), null);
+  w.close();
+});
+
+test('대체 공급원 시세는 출처를 표시하고 이전 값 지연과 구별한다', () => {
+  const w = load();
+  render(w, { KOSPI: { label: 'KOSPI' } }, ['KOSPI'], {
+    KOSPI: { value: '6,864.30', _degraded: true, source: 'yahoo_fallback' },
+  });
+  assert.equal(w.document.querySelector('.mi-stale').textContent, '대체');
+  assert.match(w.document.querySelector('.mi-val').title, /Yahoo 대체 시세/);
+  w.close();
+});

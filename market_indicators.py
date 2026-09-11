@@ -25,6 +25,7 @@ import httpx
 import kis_proxy_client
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from services.market import naver_indicators
 
 # ---------------------------------------------------------------------------
 # Catalog
@@ -1438,9 +1439,12 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     gold_needed = False
     wti_needed = False
     hyperliquid_items = []  # Hyperliquid XYZ perps — one batched request
+    naver_json_items = []
 
     for code in fetch_codes:
-        if code == "CMDT_GC":
+        if code in naver_indicators.CODES:
+            naver_json_items.append(code)
+        elif code == "CMDT_GC":
             gold_needed = True
         elif code == "OIL_CL":
             wti_needed = True
@@ -1478,6 +1482,10 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     async with _market_indicators_client() as client:
         tasks = []
         task_keys = []
+
+        if naver_json_items:
+            tasks.append(naver_indicators.fetch_indicators(client, naver_json_items))
+            task_keys.append(("naver_json", None))
 
         # Korean indices — each needs a separate fetch
         for code in kr_indices:
@@ -1569,7 +1577,11 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             if isinstance(result, Exception):
                 result = dict(_EMPTY)
 
-            if kind == "kr":
+            if kind == "naver_json":
+                for c in naver_json_items:
+                    if c in result:
+                        results[c] = result[c]
+            elif kind == "kr":
                 results[code] = result
             elif kind == "foreign":
                 results[code] = result

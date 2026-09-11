@@ -174,5 +174,10 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
             )
             tasks.append((notify_alert_task, notify_stop))
 
+        from services.market import indicator_health
+
+        indicator_stop = asyncio.Event()
+        tasks.append((asyncio.create_task(indicator_health.run_loop(indicator_stop), name="market-indicators"), indicator_stop))
+
         sd_notify("READY=1")
         yield

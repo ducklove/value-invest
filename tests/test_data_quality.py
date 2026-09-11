@@ -350,7 +350,8 @@ class RunAllChecksTests(_SeededDbTestCase):
         await benchmark_repo.save_benchmark_rows("KOSPI", [{"date": "2026-06-10", "close": 2800.0}])
         await benchmark_repo.save_benchmark_rows("SP500", [{"date": "2026-06-09", "close": 6000.0}])
         await benchmark_repo.save_benchmark_rows("GOLD", [{"date": "2026-06-09", "close": 2400.0}])
-        out = await data_quality.run_all_checks(now=WED_LATE)
+        with patch("services.market.indicator_health.summary", AsyncMock(return_value={"check": "market_indicators", "status": "ok", "detail": "정상", "value": 0})):
+            out = await data_quality.run_all_checks(now=WED_LATE)
         self.assertEqual(out["counts"]["warn"], 0)
         self.assertEqual(out["counts"]["error"], 0)
 

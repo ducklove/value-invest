@@ -270,6 +270,7 @@ let mbLoaded = false;
 let mbPickerOpen = false;
 let mbDragFrom = -1;
 let mbLastDataMap = {};
+let mbRefreshPromise = null;
 
 function _mbNormalizeCodes(codes) {
   if (!Array.isArray(codes)) return [];
@@ -332,8 +333,8 @@ function _mbMergeDataMap(dataMap) {
   for (const [code, data] of Object.entries(dataMap || {})) {
     if (_mbIndicatorHasValue(data)) {
       merged[code] = data;
-    } else if (!merged[code]) {
-      merged[code] = data;
+    } else {
+      merged[code] = { ...(merged[code] || data), _stale: true };
     }
   }
   mbLastDataMap = merged;
@@ -349,6 +350,16 @@ function _mbRenderBar(dataMap) {
     const cat = mbCatalog[code];
     const label = cat ? cat.label : code;
     const d = dataMap ? dataMap[code] : null;
+    const stamp = d?.as_of || d?.fetched_at;
+    const parsedStamp = stamp ? new Date(stamp) : null;
+    const timeLabel = parsedStamp && !Number.isNaN(parsedStamp.getTime())
+      ? parsedStamp.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) + ' KST' : '';
+    const details = [d?._stale ? '갱신 지연 · 이전 값 표시 중' : d?._degraded ? '주 공급원 장애 · Yahoo 대체 시세 사용' : '',
+      timeLabel ? `${d?.as_of ? '시세 기준' : '마지막 수집'}: ${timeLabel}` : '',
+      Number(d?.delay_minutes) > 0 ? `제공 시세 ${Number(d.delay_minutes)}분 지연` : ''].filter(Boolean).join(' · ');
+    const title = details ? ` title="${escapeHtml(details)}"` : '';
+    const staleBadge = d?._stale ? ' <span class="mi-stale" aria-label="갱신 지연">지연</span>'
+      : d?._degraded ? ' <span class="mi-stale" aria-label="대체 시세">대체</span>' : '';
     const r = idx;  // row index
     let valHtml = '-';
     // 전일대비를 못 구한 항목도 빈칸 대신 '-' placeholder 로 표시(투자정보 화면과 동일).
@@ -365,8 +376,8 @@ function _mbRenderBar(dataMap) {
         chgHtml = `<span class="${cls}">${chgVal} ${chgPct}</span>`;
       }
     }
-    html += `<span class="mi-label" draggable="true" data-idx="${r}">${escapeHtml(label)}</span>`;
-    html += `<span class="mi-val" data-idx="${r}">${valHtml}</span>`;
+    html += `<span class="mi-label" draggable="true" data-idx="${r}"${title}>${escapeHtml(label)}${staleBadge}</span>`;
+    html += `<span class="mi-val" data-idx="${r}"${title}>${valHtml}</span>`;
     html += `<span class="mi-chg" data-idx="${r}">${chgHtml}</span>`;
     html += `<button class="mi-del" data-code="${code}" title="삭제">&times;</button>`;
   });
@@ -557,12 +568,17 @@ async function loadMarketTape(refresh = false) {
 }
 
 async function loadMarketSummary() {
-  try {
-    if (!mbCodes.length) await _mbLoadCodes();
-    const dataMap = await apiFetchJson(`/api/market-summary?codes=${mbCodes.join(',')}`, { fallback: null });
-    if (!dataMap) return;
-    _mbRenderBar(_mbMergeDataMap(dataMap));
-  } catch (e) { console.warn(e); }
+  if (mbRefreshPromise) return mbRefreshPromise;
+  mbRefreshPromise = (async () => {
+    try {
+      if (!mbCodes.length) await _mbLoadCodes();
+      const dataMap = await apiFetchJson(`/api/market-summary?codes=${mbCodes.join(',')}`, { cache: 'no-store', fallback: null });
+      // 누락된 항목이나 네트워크 실패도 이전 값을 정상 시세로 보이지 않게 한다.
+      const complete = Object.fromEntries(mbCodes.map(code => [code, dataMap?.[code] || null]));
+      _mbRenderBar(_mbMergeDataMap(complete));
+    } catch (e) { console.warn(e); }
+  })().finally(() => { mbRefreshPromise = null; });
+  return mbRefreshPromise;
 }
 
 async function _pollBenchmarkQuotes() {

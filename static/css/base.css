@@ -917,3 +917,5 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .stock-hover-tip .sct-chg.sct-down { color: var(--down); }
 .stock-hover-tip .sct-canvas { display: block; width: 264px; height: 120px; }
 .stock-hover-tip .sct-foot { margin-top: 6px; font-size: 10px; color: var(--text-secondary); }
+
+.market-bar .mi-stale { font-size: 9px; color: var(--text-secondary); border-bottom: 1px dotted currentColor; }

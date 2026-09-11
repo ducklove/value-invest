@@ -222,7 +222,10 @@ window.addEventListener('pageshow', (event) => {
   // 않는 브라우저 경로까지 여기서 한 번 더 검증한다 (ping 은 중복 방지됨).
   // 최초 로드(persisted=false)는 initApp 의 connect() 가 담당하므로 제외 —
   // 인증 초기화 전에 앞질러 연결하면 관리자 슬롯 재청구 순서가 어긋난다.
-  if (event && event.persisted) QuoteManager.verifyConnection();
+  if (event && event.persisted) {
+    QuoteManager.verifyConnection();
+    loadMarketSummary();
+  }
   // bfcache 로 되살아난 페이지는 브라우저가 이전 스크롤 위치를 그대로 안고 돌아온다
   // (문서를 새로 만들지 않으므로 scrollRestoration='manual' 이 개입하지 못한다).
   // 앱 내 탭 이동은 switchView 가 이미 최상단으로 보내므로, 여기선 외부에서 되돌아온
@@ -240,6 +243,7 @@ window.addEventListener('focus', () => {
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
+    loadMarketSummary();
     syncAuthState({ refreshRecentList: true, refreshPreference: true });
     _refreshActivePortfolioTodayState();
     // 백그라운드에서 끊긴 웹소켓이 '연결됨'으로 남지 않도록 실제 생사를 검증한다.
