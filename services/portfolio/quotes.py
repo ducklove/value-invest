@@ -121,6 +121,12 @@ def should_accept_quote_snapshot(
         if incoming_date > current_date:
             return True
 
+    from services.market.quote_policy import trade_timestamp
+
+    current_trade = trade_timestamp((current or {}).get("as_of"))
+    incoming_trade = trade_timestamp(incoming.get("as_of"))
+    if current_trade is not None and incoming_trade is not None and current_trade != incoming_trade:
+        return incoming_trade > current_trade
     current_rank = _quote_source_rank(current)
     incoming_rank = _quote_source_rank(incoming)
     if incoming_rank > current_rank:

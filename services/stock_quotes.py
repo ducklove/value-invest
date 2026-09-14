@@ -8,7 +8,7 @@
 폴백 정책 (위에서 아래로, 성공하면 멈춤):
 
 1. **메모리 캐시** (``_stock_cache``, TTL 60초) — 코드 무관 공통.
-2. **KIS WebSocket 캐시** — 국내 주식, 시장 모드(KRX/NXT)가 일치하고
+2. **KIS WebSocket 캐시** — 국내 주식, 시장 모드(KRX/NXT/통합)가 일치하고
    ``max_ws_age_seconds`` 이내일 때만.
 3. **업스트림 조회**
    - 국내 주식: ``stock_price.fetch_quote_snapshot`` — KIS proxy REST
@@ -52,6 +52,8 @@ class Stock:
     market: str | None = None
     trade_value: float | None = None
     stale: bool = False
+    as_of: str | None = None
+    quote_date: str | None = None
 
     @property
     def price(self) -> float:
@@ -152,6 +154,8 @@ def stock_from_quote(code: str, quote: dict[str, Any] | None) -> Stock | None:
         market=quote.get("market"),
         trade_value=trade_value,
         stale=quote.get("_stale") is True,
+        as_of=quote.get("as_of"),
+        quote_date=quote.get("date"),
     )
 
 
@@ -165,7 +169,7 @@ def stock_to_quote(stock: Stock | None) -> dict[str, Any]:
         change_pct = round(change / stock.previous_close * 100, 2)
     result: dict[str, Any] = {
         "code": stock.code,
-        "date": stock.created_at.date().isoformat(),
+        "date": stock.quote_date or stock.created_at.date().isoformat(),
         "price": stock.current_price,
         "previous_close": stock.previous_close,
         "change": change,
@@ -178,6 +182,8 @@ def stock_to_quote(stock: Stock | None) -> dict[str, Any]:
     }
     if stock.stale:
         result["_stale"] = True
+    if stock.as_of:
+        result["as_of"] = stock.as_of
     return result
 
 
@@ -227,6 +233,8 @@ def _get_ws_stock(code: str, *, max_age_seconds: float | None) -> Stock | None:
         return None
     quote = kis_ws_manager.get_cached_quote(code)
     if not quote or quote.get("price") is None:
+        return None
+    if quote.get("market") not in (None, kis_ws_manager.active_market_code()):
         return None
     if max_age_seconds is not None:
         try:

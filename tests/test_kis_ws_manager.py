@@ -93,3 +93,33 @@ def test_subscription_plan_can_use_combined_websocket_capacity():
 
     assert plan["ws"] == codes
     assert plan["rest"] == ["AAPL"]
+
+
+def test_krx_aftermarket_uses_integrated_quotes_including_final_close():
+    for hour, minute in ((8, 30), (9, 0), (15, 35), (16, 0), (19, 59), (20, 5), (23, 0)):
+        now = datetime(2026, 9, 14, hour, minute, tzinfo=KST)
+        assert kis_ws_manager.active_market_code(now) == "UN"
+        assert kis_ws_manager._active_tr_id(now) == "H0UNCNT0"
+        assert kis_ws_manager.ws_cache_matches_rest_market(now)
+    assert kis_ws_manager._active_tr_id(datetime(2026, 9, 11, 17, tzinfo=KST)) == "H0NXCNT0"
+
+
+def test_market_rollout_resyncs_at_midnight():
+    before = datetime(2026, 9, 13, 23, 59, tzinfo=KST)
+    assert kis_ws_manager._seconds_until_next_boundary(before) == 60
+
+
+async def test_integrated_subscription_rejection_releases_subscriptions_and_reports_polling():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    conn = kis_ws_manager.WsConnection(SimpleNamespace(slot_id=0, _approval_key="test"))
+    conn._ws = AsyncMock()
+    conn._requested = {"portfolio": ["005930"]}
+    conn._current_subs = {("005930", "H0UNCNT0")}
+    with patch.object(kis_ws_manager, "_active_tr_id", return_value="H0UNCNT0"):
+        await conn._handle_subscription_result({"header": {"tr_id": "H0UNCNT0"}, "body": {"rt_cd": "1"}})
+        await conn.sync_subscriptions()
+    assert conn._current_subs == set()
+    assert conn._ws.send.await_count == 1
+    assert (await conn.listener.get())["type"] == "stream_unavailable"

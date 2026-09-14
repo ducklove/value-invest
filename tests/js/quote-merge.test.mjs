@@ -41,6 +41,13 @@ const w = loadUtils();
 // snapshot objects into this realm before comparing.
 const plain = (o) => ({ ...o });
 
+test("실제 체결 시각이 오래된 다른 거래소 시세로 가격을 되돌리지 않는다", () => {
+  const latest = { price: 102, source: 'naver', as_of: '2026-09-14T19:59:00+09:00' };
+  const oldWs = { price: 100, source: 'ws', as_of: '2026-09-14T17:00:00+09:00', ts: Date.now() };
+  assert.equal(w.shouldAcceptQuoteSnapshot(latest, oldWs), false);
+  assert.equal(w.shouldAcceptQuoteSnapshot(oldWs, latest), true);
+});
+
 test("quoteSourceRank — ws > rest/quote > unknown > history > stale/null", () => {
   assert.equal(w.quoteSourceRank({ source: "ws" }), 4);
   assert.equal(w.quoteSourceRank({ source: "kis-ws" }), 4);

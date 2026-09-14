@@ -37,7 +37,8 @@ def test_runtime_quote_callers_use_stock_quotes_service_boundary():
 
 @pytest.mark.asyncio
 async def test_get_stock_prefers_recent_websocket_cache():
-    with patch.object(stock_quotes.kis_ws_manager, "ws_cache_matches_rest_market", return_value=True), \
+    with patch.object(stock_quotes.kis_ws_manager, "active_market_code", return_value="J"), \
+         patch.object(stock_quotes.kis_ws_manager, "ws_cache_matches_rest_market", return_value=True), \
          patch.object(stock_quotes.kis_ws_manager, "get_cached_quote", return_value={
              "code": "005930",
              "price": 70000,

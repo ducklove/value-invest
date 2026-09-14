@@ -74,6 +74,23 @@ function unhover(w, el) {
   el.dispatchEvent(new w.MouseEvent("mouseout", { bubbles: true }));
 }
 
+test("장후 분봉은 정규장 경계가 남아 있어도 서로 다른 가로 위치에 그린다", () => {
+  const { w } = load();
+  const xs = [];
+  const ctx = new Proxy({ moveTo: x => xs.push(x), lineTo: x => xs.push(x) }, {
+    get: (target, key) => target[key] || (() => {}),
+  });
+  const canvas = w.document.createElement('canvas');
+  canvas.getContext = () => ctx;
+  w._schcDrawChart(canvas, {
+    session: { start: '09:00', end: '15:30' },
+    points: [{ t: '15:30', p: 100 }, { t: '16:00', p: 101 }, { t: '19:59', p: 102 }],
+  });
+  assert.equal(xs.length, 3);
+  assert.ok(xs[0] < xs[1] && xs[1] < xs[2]);
+  w.close();
+});
+
 test("hovering a portfolio stock cell fetches intraday once and shows the tooltip", async () => {
   const { w, calls } = load();
   const strong = w.document.querySelector('tr[data-code="005930"] strong');

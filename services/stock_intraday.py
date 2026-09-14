@@ -130,9 +130,17 @@ async def _korean_intraday(code: str) -> dict:
     )
     date_iso, points = extract_latest_session_points(parse_fchart_rows(minute_text))
     prev_close = extract_prev_close(parse_fchart_rows(day_text), date_iso)
+    # 15:40~16:00 장후 종가 거래는 ETF에도 있다. 16시 이후 실제
+    # 분봉이 있을 때만 20시까지 확장하고, 그 전에는 받은 시각까지 표시한다.
+    session = dict(KR_SESSION)
+    if any(point["t"] >= "16:00" for point in points):
+        session["end"] = "20:00"
+    if points:
+        session["start"] = min(session["start"], points[0]["t"])
+        session["end"] = max(session["end"], points[-1]["t"])
     return _payload(
         code, points=points, currency="KRW", source="naver",
-        date=date_iso, prev_close=prev_close, session=dict(KR_SESSION),
+        date=date_iso, prev_close=prev_close, session=session,
     )
 
 

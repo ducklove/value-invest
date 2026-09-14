@@ -149,6 +149,9 @@ async def _start_connection(
         try:
             while True:
                 quote = await ws_conn.listener.get()
+                if quote.get("type") == "stream_unavailable":
+                    await _send_json(websocket, session, quote)
+                    continue
                 try:
                     payload = _quote_payload(quote)
                 except Exception:

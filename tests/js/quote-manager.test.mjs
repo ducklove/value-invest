@@ -127,6 +127,21 @@ function createHarness({ wsThrows = false, quotes = {} } = {}) {
   return { w, qm, clock, MockWebSocket, wsAttempts, fetchCalls, ticks };
 }
 
+test("통합 WebSocket 권한이 거절되면 슬롯을 해제하고 폴링을 유지한다", async () => {
+  const { qm, MockWebSocket } = createHarness();
+  qm.connect();
+  const ws = MockWebSocket.instances[0];
+  ws.onopen();
+  qm.wsActive = true;
+  qm.desiredActive = true;
+  ws.onmessage({ data: JSON.stringify({ type: 'stream_unavailable' }) });
+  assert.equal(qm.wsActive, false);
+  assert.equal(qm.desiredActive, false);
+  assert.ok(ws.sent.some(msg => msg.action === 'release'));
+  assert.ok(qm.generalPollTimer);
+  qm.disconnect();
+});
+
 test("connect: ws:// URL, passive open, general poll interval armed", () => {
   const { qm, clock, MockWebSocket } = createHarness();
   qm.connect();

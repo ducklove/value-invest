@@ -27,6 +27,7 @@ from typing import Any
 import websockets
 
 from cache_layer import MemoryTTLCache
+from services.market.quote_policy import integrated_market_enabled
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
 logger = logging.getLogger(__name__)
@@ -38,8 +39,8 @@ logger = logging.getLogger(__name__)
 WS_URI = "ws://ops.koreainvestment.com:21000"
 # H0STCNT0 = KRX 정규시장 실시간 체결가 (09:00~15:30)
 # H0NXCNT0 = NXT(넥스트레이드) 실시간 체결가 (08:00~08:50 프리, 15:40~20:00 애프터)
-# 두 TR은 동일 와이어 포맷이며, 한 시점에는 둘 중 하나만 활성이므로 시간대별로
-# 단일 TR을 구독하여 종목당 1슬롯만 사용한다(통합 H0UNCNT0는 권한 이슈로 미사용).
+# 2026-09-14부터 KRX/NXT가 장후에도 동시 거래하므로 통합 TR을 사용한다.
+# 통합 권한이 거절된 연결은 REST 통합 시세 폴링으로 전환한다.
 _ACCEPTED_TR_IDS = {"H0STCNT0", "H0NXCNT0", "H0UNCNT0"}
 MAX_SUBSCRIPTIONS = 40  # KIS hard limit ~41
 
@@ -50,14 +51,12 @@ _NXT_AFTER_CLOSE = dtime(20, 0)
 
 
 def active_market_code(now: datetime | None = None) -> str:
-    """KIS REST FID_COND_MRKT_DIV_CODE for quote snapshots.
+    """시행일부터 통합 시세를 사용하며 마감 후에도 마지막 체결값을 유지한다.
 
-    WebSocket subscriptions stop using NXT after 20:00 because no more live
-    ticks arrive, but REST can still return the final NXT after-market price.
-    Keep REST on NX outside regular KRX hours so stale/missing WS quotes do
-    not fall back to the 15:30 close until the next regular session opens.
-    Weekends/holidays have no regular KRX session, so prefer NX all day.
+    시행 전 날짜 재현에는 정규장 J / 장외 NX 정책을 적용한다.
     """
+    if integrated_market_enabled(now):
+        return "UN"
     current = _as_kst_datetime(now)
     cur = current.timetz().replace(tzinfo=None)
     is_weekday = current.weekday() < 5
@@ -65,7 +64,7 @@ def active_market_code(now: datetime | None = None) -> str:
 
 
 def active_ws_market_code(now: datetime | None = None) -> str:
-    return "J" if _active_tr_id(now) == "H0STCNT0" else "NX"
+    return {"H0STCNT0": "J", "H0NXCNT0": "NX", "H0UNCNT0": "UN"}[_active_tr_id(now)]
 
 
 def ws_cache_matches_rest_market(now: datetime | None = None) -> bool:
@@ -86,6 +85,8 @@ def _as_kst_datetime(now: datetime | None = None) -> datetime:
 
 def _active_tr_id(now: datetime | None = None) -> str:
     """Return the TR_ID that should be subscribed at *now* (KST)."""
+    if integrated_market_enabled(now):
+        return "H0UNCNT0"
     cur = _kst_clock_time(now)
     if _KRX_OPEN <= cur < _KRX_CLOSE:
         return "H0STCNT0"
@@ -96,14 +97,15 @@ def _active_tr_id(now: datetime | None = None) -> str:
 
 def _seconds_until_next_boundary(now: datetime | None = None) -> float:
     """Seconds until the next TR_ID switch boundary in KST."""
-    cur = now or datetime.now(KST)
+    cur = _as_kst_datetime(now).replace(tzinfo=KST)
     today = cur.date()
     boundaries = [
+        datetime.combine(today + timedelta(days=1), dtime(0), tzinfo=KST),
         datetime.combine(today, _KRX_OPEN, tzinfo=KST),
         datetime.combine(today, _KRX_CLOSE, tzinfo=KST),
         datetime.combine(today, _NXT_AFTER_CLOSE, tzinfo=KST),
     ]
-    for b in boundaries:
+    for b in sorted(boundaries):
         if b > cur:
             return (b - cur).total_seconds()
     # 다음 날 09:00
@@ -264,7 +266,12 @@ def _parse_h0stcnt0(raw: str) -> dict[str, Any] | None:
             "trade_value": trade_value,
             "business_date": business_date,
             "source": "ws",
-            "market": "NX" if tr_id == "H0NXCNT0" else "J",
+            "market": {"H0NXCNT0": "NX", "H0STCNT0": "J", "H0UNCNT0": "UN"}[tr_id],
+            "as_of": (
+                f"{business_date[:4]}-{business_date[4:6]}-{business_date[6:8]}"
+                f"T{trade_time[:2]}:{trade_time[2:4]}:{trade_time[4:6]}+09:00"
+                if len(business_date) == 8 and len(trade_time) == 6 else None
+            ),
             "ts": time.time(),
         }
     except (ValueError, IndexError) as exc:
@@ -292,6 +299,7 @@ class WsConnection:
         # 구독 단위는 (code, tr_id) — 시간대 전환 시 (code, KRX) → (code, NXT)로 교체.
         self._current_subs: set[tuple[str, str]] = set()
         self._requested: dict[str, list[str]] = {}
+        self._integrated_rejected = False
         self._boundary_task: asyncio.Task | None = None
         self.listener: asyncio.Queue = asyncio.Queue(maxsize=256)
 
@@ -316,7 +324,10 @@ class WsConnection:
             return
         plan = self._compute_plan()
         active_tr = _active_tr_id()
-        desired: set[tuple[str, str]] = {(code, active_tr) for code in plan["ws"]}
+        desired: set[tuple[str, str]] = (
+            set() if self._integrated_rejected and active_tr == "H0UNCNT0"
+            else {(code, active_tr) for code in plan["ws"]}
+        )
 
         for code, tr_id in (self._current_subs - desired):
             try:
@@ -355,6 +366,16 @@ class WsConnection:
                 }
             },
         })
+
+    async def _handle_subscription_result(self, ctrl: dict) -> None:
+        body = ctrl.get("body") or {}
+        if (ctrl.get("header", {}).get("tr_id") == "H0UNCNT0"
+                and str(body.get("rt_cd", "0")) != "0"
+                and not self._integrated_rejected):
+            self._integrated_rejected = True
+            logger.warning("통합 시세 구독 거절: REST 폴링으로 전환 (slot %d)", self.key_slot.slot_id)
+            await self.sync_subscriptions()
+            await self.listener.put({"type": "stream_unavailable", "reason": "integrated_subscription_rejected"})
 
     # -- Lifecycle --------------------------------------------------------
 
@@ -477,6 +498,7 @@ class WsConnection:
                                     "KIS ctrl (slot %d): tr_id=%s rt_cd=%s msg=%s",
                                     self.key_slot.slot_id, tr_id, rt_cd, msg1,
                                 )
+                                await self._handle_subscription_result(ctrl)
                         except (json.JSONDecodeError, KeyError):
                             pass
 

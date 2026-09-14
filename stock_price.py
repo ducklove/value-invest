@@ -100,8 +100,8 @@ def _naver_quote_from_block(price_key: str, block: dict) -> dict | None:
         "previous_close": previous_close,
         "change": change,
         "change_pct": change_pct,
-        "volume": _naver_num(block.get("accumulatedTradingVolume")),
-        "trade_value": _naver_num(block.get("accumulatedTradingValue")),
+        "volume": _naver_num(block.get("accumulatedTradingVolumeRaw") or block.get("accumulatedTradingVolume")),
+        "trade_value": _naver_num(block.get("accumulatedTradingValueRaw") or block.get("accumulatedTradingValue")),
     }
 
 
@@ -109,28 +109,43 @@ def _parse_naver_bulk_entry(entry: dict) -> tuple[str, dict] | None:
     code = str(entry.get("itemCode") or "").strip()
     if not code:
         return None
-    # Match the live KIS market selection (kis_ws_manager.active_market_code):
-    # outside regular KRX hours the after-hours/NXT price is the live one, so
-    # prefer Naver's `overPrice` (NXT, traded through ~20:00) whenever it
-    # exists. Previously this only triggered while overMarketStatus=="OPEN",
-    # so after 20:00 the bulk path reverted to the 15:30 KRX close while the
-    # KIS stream still showed NXT — the same stock flickered KRX↔NXT in 시간외.
-    # During regular hours active_market_code() is "J", so closePrice (the live
-    # regular-session price) is used as before.
+    # 통합 모드는 실제 체결 시각으로 KRX/NXT를 비교한다. 날짜만 남기거나
+    # 조회한 시각을 체결 시각으로 사용하면 장후 오래된 가격이 새 값을 덮는다.
     over = entry.get("overMarketPriceInfo")
     quote = None
     traded_at = str(entry.get("localTradedAt") or "")
-    if isinstance(over, dict) and kis_ws_manager.active_market_code() == "NX":
+    market = kis_ws_manager.active_market_code()
+    selected_market = "J"
+    from services.market.quote_policy import trade_timestamp
+
+    regular_stamp = trade_timestamp(traded_at)
+    over_stamp = trade_timestamp(over.get("localTradedAt")) if isinstance(over, dict) else None
+    use_over = market == "NX" or (
+        market == "UN" and over_stamp is not None
+        and (regular_stamp is None or over_stamp > regular_stamp)
+    )
+    if isinstance(over, dict) and use_over:
         quote = _naver_quote_from_block("overPrice", over)
         if quote is not None:
             # NXT trade time (e.g. 20:00) → correct trading day for staleness.
             traded_at = str(over.get("localTradedAt") or traded_at)
+            selected_market = "NX"
     if quote is None:
         quote = _naver_quote_from_block("closePrice", entry)
     if quote is None:
         return None
     quote["date"] = traded_at[:10] if len(traded_at) >= 10 else date.today().isoformat()
     quote["source"] = "naver"
+    quote["market"] = selected_market
+    quote["as_of"] = traded_at or None
+    # 가격은 마지막 체결, 거래량/대금은 양 거래소 합계를 사용한다.
+    integrated = entry.get("integratedPriceInfo")
+    if market == "UN" and isinstance(integrated, dict):
+        for target, source in (("volume", "accumulatedTradingVolume"), ("trade_value", "accumulatedTradingValue")):
+            value = _naver_num(integrated.get(source + "Raw") or integrated.get(source))
+            if value is not None:
+                quote[target] = value
+        quote["market"] = "UN"
     quote["fetched_at"] = datetime.now().isoformat()
     return code, quote
 
@@ -1137,6 +1152,8 @@ async def fetch_quote_snapshot(
         if use_ws_cache and kis_ws_manager.ws_cache_matches_rest_market()
         else None
     )
+    if ws_quote and ws_quote.get("market") not in (None, kis_ws_manager.active_market_code()):
+        ws_quote = None
     if (
         ws_quote
         and ws_quote.get("price") is not None
@@ -1154,6 +1171,8 @@ async def fetch_quote_snapshot(
             "trade_value": ws_quote.get("trade_value"),
             "source": "ws",
             "ts": ws_quote.get("ts"),
+            "as_of": ws_quote.get("as_of"),
+            "market": ws_quote.get("market"),
         }
 
     end_date = date.today()
@@ -1214,7 +1233,7 @@ async def fetch_quote_snapshot(
 
     latest_price = _safe_float(
         _get_first(summary, "current_price", "price", "stck_prpr"),
-        zero_as_none=False,
+        zero_as_none=market == "UN",
     )
     change = _safe_float(
         _get_first(summary, "change", "price_change", "prdy_vrss"),

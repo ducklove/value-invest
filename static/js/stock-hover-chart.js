@@ -145,8 +145,14 @@ function _schcDrawChart(canvas, data) {
   const yFor = v => pad + (1 - (v - min) / (max - min)) * (h - pad * 2);
 
   // x 축은 정규장 시간에 비례 — 장중엔 그래프가 진행률만큼만 차오른다.
-  const sessStart = _schcMinutes(data.session && data.session.start);
-  const sessEnd = _schcMinutes(data.session && data.session.end);
+  let sessStart = _schcMinutes(data.session && data.session.start);
+  let sessEnd = _schcMinutes(data.session && data.session.end);
+  // 공급원이 세션 경계를 늦게 갱신해도 장후 점들을 우측 끝에 겹치지 않는다.
+  const pointTimes = points.map(p => _schcMinutes(p.t)).filter(t => t !== null);
+  if (pointTimes.length && sessStart !== null && sessEnd !== null) {
+    sessStart = Math.min(sessStart, ...pointTimes);
+    sessEnd = Math.max(sessEnd, ...pointTimes);
+  }
   const useSession = sessStart !== null && sessEnd !== null && sessEnd > sessStart;
   const xFor = (p, i) => {
     if (useSession) {

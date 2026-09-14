@@ -114,6 +114,8 @@ const QuoteManager = {
               : 'offline';
           }
           this._syncControlUi();
+        } else if (msg.type === 'stream_unavailable') {
+          this.releaseActive();
         } else if (msg.type === 'pong') {
           this._clearPingTimer();
         } else if (msg.type === 'ws_taken_over') {

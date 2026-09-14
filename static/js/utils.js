@@ -113,6 +113,11 @@ function shouldAcceptQuoteSnapshot(current, incoming) {
     if (incomingDate < currentDate) return false;
     if (incomingDate > currentDate) return true;
   }
+  const currentTrade = Date.parse(current?.as_of || '');
+  const incomingTrade = Date.parse(incoming?.as_of || '');
+  if (Number.isFinite(currentTrade) && Number.isFinite(incomingTrade) && currentTrade !== incomingTrade) {
+    return incomingTrade > currentTrade;
+  }
   const currentRank = quoteSourceRank(current);
   const incomingRank = quoteSourceRank(incoming);
   if (incomingRank > currentRank) return true;
