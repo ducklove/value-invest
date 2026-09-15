@@ -87,6 +87,14 @@ class QuantTests(TempDbMixin):
         with self.assertRaises(quant.QuantError):
             service.verify(invalid, config())
 
+    async def test_etf_requires_its_own_engine(self):
+        c = {**config(), "strategy": "etf_switch"}
+        r = {**result(), "config": c, "config_hash": quant.digest(c)}
+        with self.assertRaises(quant.QuantError):
+            service.verify(r, c)
+        r["engine_version"] = "etf-switch-2"
+        service.verify(r, c)
+
     async def test_watch_requires_owned_completed_run_and_blocks_bad_readiness(self):
         a = await quant.create_run("u1", "watch-1", config())
         with self.assertRaises(quant.QuantError):
@@ -117,6 +125,32 @@ class QuantTests(TempDbMixin):
         await quant.set_watch("u1", a["id"], False)
         await quant.record_observation(watch, {"signal": {"date": "2026-01-02"}})
         self.assertEqual(len(await quant.observations("u1")), 1)
+
+    async def test_price_scoped_readiness_records_observation_with_its_evidence(self):
+        a = await quant.create_run("u1", "price-only-observe", config())
+        await quant.claim()
+        await quant.finish(a["id"], result())
+        await quant.set_watch("u1", a["id"], True)
+        ready = {
+            "status": "ready",
+            "scope": "pair_daily_prices",
+            "global_status": "not_ready",
+            "checks": {"latest_price_date": "2026-01-02"},
+            "unrelated_macro_failures": 1,
+        }
+        fresh = result()
+        fresh["config"]["end"] = "2026-01-02"
+        fresh["config_hash"] = quant.digest(fresh["config"])
+        fresh["signals"] = [{"date": "2026-01-02", "target": "common"}]
+        fresh["latest_signal"] = fresh["signals"][-1]
+        with (
+            patch.object(service, "completed_date", return_value=date(2026, 1, 2)),
+            patch.object(service, "fetch", AsyncMock(side_effect=[ready, fresh])),
+        ):
+            await service.observe_one((await quant.watches())[0])
+        rows = await quant.observations("u1")
+        self.assertEqual(rows[0]["payload"]["data_readiness"], ready)
+        self.assertEqual(rows[0]["payload"]["orders_sent"], 0)
 
     async def test_no_broker_calls_in_worker_failure(self):
         a = await quant.create_run("u1", "failure-1", config())

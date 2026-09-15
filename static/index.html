@@ -874,10 +874,11 @@ function trackEvent(name, params = {}) {
       <div id="quantHealth" class="quant-notice" role="status" aria-live="polite">데이터 상태를 확인하는 중입니다.</div>
       <div class="quant-layout">
         <aside class="quant-panel">
-          <h3>보통주·우선주 교체</h3>
+          <h3>상대가치 교체 연구</h3>
           <p class="quant-muted">가설과 비용을 고정하고 비교합니다. 아래 수수료·세금은 연구 가정이며 실제 계좌 요율을 확인해 입력하세요.</p>
           <form id="quantForm">
-            <label>기업·주식 쌍<select name="pair" required id="quantPair"><option value="">불러오는 중</option></select></label>
+            <label>주식·ETF 쌍<select name="pair" required id="quantPair"><option value="">불러오는 중</option></select></label>
+            <p id="quantPairHint" class="quant-muted"></p>
             <div class="quant-fields"><label>평가 시작<input type="date" name="start" required></label><label>평가 종료<input type="date" name="end" required></label></div>
             <label>가상 배정금액 (원)<input name="capital" type="number" min="10000" max="1000000000" value="10000000" required></label>
             <div class="quant-fields"><label>추정창 (관측일)<input name="window" type="number" min="20" max="252" value="126" required></label><label>최대 보유 관측일<input name="max_holding" type="number" min="1" max="252" value="40" required></label></div>
@@ -886,8 +887,8 @@ function trackEvent(name, params = {}) {
               <label>편도 수수료 (bp)<input name="commission_bps" type="number" min="0" max="100" step="0.1" value="5" required></label>
               <label>매도세 (bp)<input name="sell_tax_bps" type="number" min="0" max="100" step="0.1" value="20" required></label>
               <label>편도 체결 손실 (bp)<input name="slippage_bps" type="number" min="0" max="200" step="0.1" value="10" required></label>
-              <label>일 거래대금 참여율 (%)<input name="participation" type="number" min="0.01" max="5" step="0.01" value="1" required></label>
-              <p class="quant-muted">1bp = 0.01%. 거래대금 한도를 넘는 수량은 다음 관측일로 나뉩니다.</p>
+              <label>일 유동성 참여율 (%)<input name="participation" type="number" min="0.01" max="5" step="0.01" value="1" required></label>
+              <p class="quant-muted">1bp = 0.01%. 거래대금 누락 시 수정종가×거래량을 추정치로 사용합니다. 한도를 넘는 수량은 다음 관측일로 나뉘며 실제 체결 한도는 아닙니다.</p>
             </details>
             <button type="submit" id="quantSubmit" class="quant-primary">비교 연구 실행</button>
           </form>

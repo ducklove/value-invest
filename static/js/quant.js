@@ -7,6 +7,21 @@ let quantLoadVersion = 0;
 const QUANT_NAMES = { switch: '상대가치 교체', common: '보통주 보유', preferred: '우선주 보유', mixed: '고정 혼합' };
 const QUANT_STATUS = { queued: '대기', running: '연구 중', succeeded: '완료', failed: '실패', cancelled: '취소' };
 const quantNumber = (v, n = 2) => Number.isFinite(v) ? v.toLocaleString('ko-KR', { maximumFractionDigits: n }) : '—';
+const quantNames = config => config?.strategy === 'etf_switch'
+  ? { ...QUANT_NAMES, common: 'ETF A 보유', preferred: 'ETF B 보유' } : QUANT_NAMES;
+
+function quantPairChanged() {
+  const form = document.getElementById('quantForm');
+  const strategy = form.elements.pair.selectedOptions[0]?.dataset.strategy || 'preferred_switch';
+  if (form.dataset.strategy && form.dataset.strategy !== strategy) {
+    form.elements.sell_tax_bps.value = strategy === 'etf_switch' ? '0' : '20';
+    form.querySelector('details').open = true;
+  } else if (!form.dataset.strategy && strategy === 'etf_switch') form.elements.sell_tax_bps.value = '0';
+  form.dataset.strategy = strategy;
+  document.getElementById('quantPairHint').textContent = strategy === 'etf_switch'
+    ? 'ETF A / B 순서입니다. 과거 로그 가격비를 비교하고 왕복 교체 비용 이하의 진입은 보류합니다. 분배금·iNAV는 미반영이며 매도세 연구 기본값은 0bp입니다. 실제 비용을 확인하세요.'
+    : '보통주 / 우선주 순서입니다. 과거 할인율 분포의 확대와 복귀를 비교합니다.';
+}
 
 async function loadQuant() {
   const generation = ++quantLoadVersion;
@@ -19,6 +34,7 @@ async function loadQuant() {
     form.elements.end.max = yesterday;
     form.elements.start.value = `${Number(yesterday.slice(0, 4)) - 2}${yesterday.slice(4)}`;
     form.addEventListener('submit', quantSubmit);
+    form.elements.pair.addEventListener('change', quantPairChanged);
     document.getElementById('quantView').addEventListener('click', quantClick);
   }
   try {
@@ -27,12 +43,17 @@ async function loadQuant() {
     const health = document.getElementById('quantHealth');
     const ready = cap.readiness?.status === 'ready';
     health.textContent = cap.error || `${ready ? '수집 완료' : '수집 상태 확인 필요'} · 최근 가격 ${cap.readiness?.checks?.latest_price_date || '미확인'} · 과거 연구는 지정 기간의 자료를 별도로 검증합니다.`;
+    if (!cap.error && cap.research_readiness) health.textContent += cap.research_readiness.status === 'ready'
+      ? ' 일봉 관찰 가능 · 종목별 검증을 추가 수행합니다.' : ' 일봉 관찰 보류 · 가격 수집 상태를 확인하세요.';
     health.classList.toggle('quant-warning', !ready);
     const select = document.getElementById('quantPair');
     const previous = select.value;
-    select.innerHTML = '<option value="">종목 쌍을 선택하세요</option>' + (cap.pairs || []).map(p =>
-      `<option value="${escapeHtml(p.common + ':' + p.preferred)}">${escapeHtml(p.name)} · ${escapeHtml(p.common)} / ${escapeHtml(p.preferred)}</option>`).join('');
+    const options = (rows, strategy) => rows.map(p => `<option data-strategy="${strategy}" value="${escapeHtml(p.common + ':' + p.preferred)}">${escapeHtml(p.name)} · ${escapeHtml(p.common)} / ${escapeHtml(p.preferred)}</option>`).join('');
+    select.innerHTML = '<option value="">종목 쌍을 선택하세요</option>' +
+      `<optgroup label="보통주·우선주">${options(cap.pairs || [], 'preferred_switch')}</optgroup>` +
+      `<optgroup label="동일 지수 ETF 연구 후보">${options(cap.etf_pairs || [], 'etf_switch')}</optgroup>`;
     if ([...select.options].some(o => o.value === previous)) select.value = previous;
+    quantPairChanged();
     await quantRefresh();
   } catch (error) {
     document.getElementById('quantHealth').textContent = error.message;
@@ -46,7 +67,7 @@ async function quantSubmit(event) {
   const message = document.getElementById('quantMessage');
   if (button.disabled) return;
   const [common, preferred] = form.elements.pair.value.split(':');
-  const config = { strategy: 'preferred_switch', common, preferred,
+  const config = { strategy: form.elements.pair.selectedOptions[0]?.dataset.strategy || 'preferred_switch', common, preferred,
     start: form.elements.start.value, end: form.elements.end.value };
   for (const key of ['capital', 'window', 'max_holding', 'entry_z', 'exit_z', 'commission_bps', 'sell_tax_bps', 'slippage_bps', 'participation']) {
     config[key] = Number(form.elements[key].value);
@@ -78,7 +99,7 @@ async function quantRefresh() {
       `<button type="button" class="quant-run" data-quant-action="open" data-id="${escapeHtml(r.id)}"><strong>${escapeHtml(r.config.common)} / ${escapeHtml(r.config.preferred)}</strong><span>${escapeHtml(r.config.start)} ~ ${escapeHtml(r.config.end)} · ${QUANT_STATUS[r.status] || '확인 필요'}</span></button>`).join('') : '<p class="quant-muted">아직 저장한 실험이 없습니다.</p>';
     document.getElementById('quantObservations').innerHTML = obs.watches.length ?
       obs.watches.map(w => `<div class="quant-watch"><strong>${escapeHtml(w.run_id.slice(0, 8))} · ${w.enabled ? '관찰 중' : '관찰 중지'}</strong><span>${escapeHtml(w.error || '새로운 완료 일봉을 기다립니다.')}</span><button type="button" data-quant-action="${w.enabled ? 'stop-watch' : 'watch'}" data-id="${escapeHtml(w.run_id)}">${w.enabled ? '관찰 중지' : '다시 관찰'}</button></div>`).join('') +
-      obs.observations.map(o => `<p>${escapeHtml(o.market_date)} · ${escapeHtml(o.run_id.slice(0, 8))} · ${QUANT_NAMES[o.payload.signal.target] || '확인 필요'} · z ${quantNumber(o.payload.signal.z)} · ${escapeHtml(o.payload.signal.reason)}<small class="quant-muted"> 기록 ${escapeHtml(new Date(o.observed_at * 1000).toLocaleString('ko-KR'))}</small></p>`).join('') : '<p>보고서에서 일별 신호 관찰을 시작하세요.</p>';
+      obs.observations.map(o => `<p>${escapeHtml(o.market_date)} · ${escapeHtml(o.run_id.slice(0, 8))} · ${quantNames(o.payload.config)[o.payload.signal.target] || '확인 필요'} · z ${quantNumber(o.payload.signal.z)} · ${escapeHtml(o.payload.signal.reason)}<small class="quant-muted"> 기록 ${escapeHtml(new Date(o.observed_at * 1000).toLocaleString('ko-KR'))}</small></p>`).join('') : '<p>보고서에서 일별 신호 관찰을 시작하세요.</p>';
     if (quantSelected) await quantOpen(quantSelected);
     if (data.runs.some(r => ['queued', 'running'].includes(r.status))) {
       quantTimer = setTimeout(() => {
@@ -102,19 +123,34 @@ async function quantOpen(id) {
   }
   quantResult = row.result;
   const r = row.result, c = r.config, s = r.latest_signal;
+  const names = quantNames(c), isEtf = c.strategy === 'etf_switch';
+  const currentEngine = r.engine_version === (isEtf ? 'etf-switch-2' : 'preferred-switch-2');
   report.innerHTML = `<div class="quant-report-head"><div><span class="quant-muted">검증 보고서 · ${escapeHtml(id.slice(0, 8))}</span><h3>${escapeHtml(c.common)} / ${escapeHtml(c.preferred)}</h3></div><button type="button" data-quant-action="export">원본·결과 저장</button></div>
     <p>${escapeHtml(c.start)} ~ ${escapeHtml(c.end)} · 가상 배정 ${quantNumber(c.capital, 0)}원 · 추정창 ${c.window}일 · 진입 ${c.entry_z} / 복귀 ${c.exit_z}</p>
     <div class="quant-notice">수정주가 기준 탐색 · 실거래 전환 불가 · 가격 수익과 비용을 비교하며 현금배당은 별도 미반영</div>
-    ${quantChart(r.scenarios, c.capital)}
-    <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>전략</th><th>비용 후 수익</th><th>최대 낙폭</th><th>추정 비용</th><th>체결 건수</th></tr></thead><tbody>${r.scenarios.map(x => `<tr><th>${QUANT_NAMES[x.mode]}</th><td>${quantNumber(x.return_pct)}%</td><td>${quantNumber(x.max_drawdown_pct)}%</td><td>${quantNumber(x.cost, 0)}원</td><td>${x.trade_count}</td></tr>`).join('')}</tbody></table></div>
-    <div class="quant-metrics"><div><span>비용 2배 시 교체 수익</span><strong>${quantNumber(r.stress.return_pct)}%</strong></div><div><span>최근 할인율 · ${escapeHtml(s.date)}</span><strong>${quantNumber(s.discount * 100)}%</strong></div><div><span>최근 분포 이탈 정도</span><strong>z ${quantNumber(s.z)}</strong></div></div>
-    <h4>최근 판단</h4><p>${escapeHtml(s.reason)} · ${QUANT_NAMES[s.target]} 방향. 다음 관측일에만 집행하는 가정입니다.</p>
-    <button type="button" class="quant-primary" data-quant-action="watch" data-id="${escapeHtml(id)}">이 설정으로 일별 신호 관찰</button>
+    <p class="quant-muted">유동성 추정치를 사용한 관측일: A ${quantNumber(r.liquidity_coverage?.common?.adjusted_close_times_volume_proxy, 0)}일 / B ${quantNumber(r.liquidity_coverage?.preferred?.adjusted_close_times_volume_proxy, 0)}일. 거래대금 관측값과 구분합니다.</p>
+    ${isEtf ? '<p class="quant-muted">동일 지수 연구 후보 · ETF A / ETF B · 분배·복제 정책의 역사적 일치와 iNAV 검증 전</p>' : ''}
+    ${quantChart(r.scenarios, c.capital, names)}
+    <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>전략</th><th>비용 후 수익</th><th>최대 낙폭</th><th>추정 비용</th><th>체결 건수</th></tr></thead><tbody>${r.scenarios.map(x => `<tr><th>${names[x.mode]}</th><td>${quantNumber(x.return_pct)}%</td><td>${quantNumber(x.max_drawdown_pct)}%</td><td>${quantNumber(x.cost, 0)}원</td><td>${x.trade_count}</td></tr>`).join('')}</tbody></table></div>
+    <div class="quant-metrics"><div><span>비용 2배 시 교체 수익</span><strong>${quantNumber(r.stress.return_pct)}%</strong></div><div><span>${isEtf ? "과거 평균 대비 상대가격 이탈" : "최근 할인율"} · ${escapeHtml(s.date)}</span><strong>${quantNumber(isEtf ? s.relative_deviation_bps / 100 : s.discount * 100)}%</strong></div><div><span>최근 분포 이탈 정도</span><strong>z ${quantNumber(s.z)}</strong></div></div>
+    ${quantValidation(r)}
+    ${isEtf ? `<p class="quant-muted">왕복 교체 비용 기준 ${quantNumber(s.round_trip_cost_bps)}bp · 상대가격의 평균 복귀를 가정한 비교이며 기대수익 보장이 아닙니다.</p>` : ""}
+    <h4>최근 판단</h4><p>${escapeHtml(s.reason)} · ${names[s.target]} 방향. 다음 관측일에만 집행하는 가정입니다.</p>
+    ${currentEngine ? `<button type="button" class="quant-primary" data-quant-action="watch" data-id="${escapeHtml(id)}">이 설정으로 일별 신호 관찰</button>` : '<p class="quant-notice">이전 엔진 결과입니다. 새 연구를 실행한 후 관찰해 주세요.</p>'}
     <details><summary>검증 한계·재현 정보</summary><ul>${r.limitations.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul><p class="quant-hash">입력 ${escapeHtml(r.snapshot.snapshot_id)}<br>엔진 ${escapeHtml(r.engine_version)}<br>설정 ${escapeHtml(r.config_hash)}</p></details>
-    <details><summary>최근 가상 체결 30건 · 수정주가 기준 단위</summary><div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>체결일</th><th>신호일</th><th>자산</th><th>구분</th><th>가상수량</th><th>가격</th></tr></thead><tbody>${r.scenarios[0].trades.slice(-30).reverse().map(t => `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.signal_date)}</td><td>${t.leg === 'common' ? '보통주' : '우선주'}</td><td>${t.side === 'buy' ? '매수' : '매도'}</td><td>${quantNumber(t.quantity, 0)}</td><td>${quantNumber(t.price)}</td></tr>`).join('')}</tbody></table></div></details>`;
+    <details><summary>최근 가상 체결 30건 · 수정주가 기준 단위</summary><div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>체결일</th><th>신호일</th><th>자산</th><th>구분</th><th>가상수량</th><th>가격</th></tr></thead><tbody>${r.scenarios[0].trades.slice(-30).reverse().map(t => `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.signal_date)}</td><td>${t.leg === 'common' ? (isEtf ? 'ETF A' : '보통주') : (isEtf ? 'ETF B' : '우선주')}</td><td>${t.side === 'buy' ? '매수' : '매도'}</td><td>${quantNumber(t.quantity, 0)}</td><td>${quantNumber(t.price)}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
 
-function quantChart(scenarios, capital) {
+function quantValidation(result) {
+  const v = result.validation;
+  if (!v) return '<p class="quant-muted">이전 버전의 결과입니다. 새 연구를 실행하면 기간 분할 진단을 볼 수 있습니다.</p>';
+  if (v.status !== 'available') return '<h4>기간 분할 진단</h4><p class="quant-muted">구간당 63개, 전체 189개 이상의 관측일이 필요합니다.</p>';
+  return `<h4>기간 분할 진단 · 혼합 보유 대비 우위 ${v.positive_excess_periods}/3</h4><p class="quant-muted">${escapeHtml(v.note)}</p>
+    <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>평가 구간</th><th>교체 수익</th><th>혼합 보유</th><th>차이</th><th>최대 낙폭</th></tr></thead><tbody>${v.periods.map(p => `<tr><th>${escapeHtml(p.start)}<br>~ ${escapeHtml(p.end)}</th><td>${quantNumber(p.return_pct)}%</td><td>${quantNumber(p.benchmark_return_pct)}%</td><td>${quantNumber(p.excess_return_pct)}%p</td><td>${quantNumber(p.max_drawdown_pct)}%</td></tr>`).join('')}</tbody></table></div>
+    <p class="quant-muted">비용을 두 배로 높인 경우의 혼합 보유 대비 수익 차이: ${quantNumber(result.stress.excess_return_pct)}%p. 두 전략에 같은 비용 배수를 적용했습니다.</p>`;
+}
+
+function quantChart(scenarios, capital, names = QUANT_NAMES) {
   const colors = ['#0d9488', '#64748b', '#b45309', '#7c3aed'];
   const values = scenarios.flatMap(s => s.nav.map(p => (p.nav / capital - 1) * 100));
   if (!values.length) return '';
@@ -123,7 +159,7 @@ function quantChart(scenarios, capital) {
     const points = s.nav.map((p, i) => `${50 + i / Math.max(1, s.nav.length - 1) * 680},${205 - ((p.nav / capital - 1) * 100 - low) / span * 170}`).join(' ');
     return `<polyline fill="none" stroke="${colors[k]}" stroke-width="${k ? 1.5 : 3}" points="${points}"/>`;
   }).join('');
-  return `<figure class="quant-chart"><svg viewBox="0 0 760 245" role="img" aria-label="같은 초기 자금 기준 네 전략의 비용 후 누적 수익률"><text x="4" y="38">${quantNumber(high, 1)}%</text><text x="4" y="208">${quantNumber(low, 1)}%</text>${lines}<text x="50" y="235">${escapeHtml(scenarios[0].nav[0].date)}</text><text x="640" y="235">${escapeHtml(scenarios[0].nav.at(-1).date)}</text></svg><figcaption>${scenarios.map((s, i) => `<span style="color:${colors[i]}">● ${QUANT_NAMES[s.mode]}</span>`).join(' ')}</figcaption></figure>`;
+  return `<figure class="quant-chart"><svg viewBox="0 0 760 245" role="img" aria-label="같은 초기 자금 기준 네 전략의 비용 후 누적 수익률"><text x="4" y="38">${quantNumber(high, 1)}%</text><text x="4" y="208">${quantNumber(low, 1)}%</text>${lines}<text x="50" y="235">${escapeHtml(scenarios[0].nav[0].date)}</text><text x="640" y="235">${escapeHtml(scenarios[0].nav.at(-1).date)}</text></svg><figcaption>${scenarios.map((s, i) => `<span style="color:${colors[i]}">● ${names[s.mode]}</span>`).join(' ')}</figcaption></figure>`;
 }
 
 async function quantClick(event) {

@@ -14,7 +14,8 @@ from repositories import quant
 from services.quant.models import completed_date
 
 logger = logging.getLogger(__name__)
-EXPECTED_ENGINE = "preferred-switch-1"
+EXPECTED_ENGINE = "preferred-switch-2"
+EXPECTED_ENGINES = {"preferred_switch": EXPECTED_ENGINE, "etf_switch": "etf-switch-2"}
 
 
 async def fetch(path, params=None):
@@ -39,7 +40,7 @@ async def fetch(path, params=None):
 
 
 def verify(result, config):
-    if result.get("engine_version") != EXPECTED_ENGINE:
+    if result.get("engine_version") != EXPECTED_ENGINES.get(config["strategy"]):
         raise quant.QuantError("연구 엔진 버전이 다릅니다. 재검증이 필요합니다.")
     if result.get("config_hash") != quant.digest(config) or result.get("config") != config:
         raise quant.QuantError("요청과 다른 전략 설정의 결과를 거절했습니다.")
@@ -87,9 +88,12 @@ async def run_one():
 
 async def observe_one(watch):
     try:
-        ready = await fetch("/api/ready")
-        if ready.get("status") != "ready":
-            raise quant.QuantError("finance-pi 수집이 완전하지 않아 신규 관찰을 보류했습니다.")
+        original = json.loads(watch["result_json"])
+        if original.get("engine_version") != EXPECTED_ENGINES.get(original["config"]["strategy"]):
+            raise quant.QuantError("연구 엔진이 변경됐습니다. 새 실험으로 재검증해 주세요.")
+        ready = await fetch("/api/research/readiness")
+        if ready.get("status") != "ready" or ready.get("scope") != "pair_daily_prices":
+            raise quant.QuantError("필요한 일봉 수집이 완전하지 않아 신규 관찰을 보류했습니다.")
         config = json.loads(watch["config_json"])
         original_end = config["end"]
         config["end"] = str(completed_date())
@@ -98,7 +102,8 @@ async def observe_one(watch):
             return
         result = await fetch("/api/research/pair-analysis", config)
         verify(result, config)
-        original = json.loads(watch["result_json"])
+        if original["snapshot"].get("instrument_review") != result["snapshot"].get("instrument_review"):
+            raise quant.QuantError("ETF 상품 검토 기준이 변경됐습니다. 새 실험으로 재검증해 주세요.")
         old = {r["date"]: r for r in original["snapshot"]["bars"]}
         current = {r["date"]: r for r in result["snapshot"]["bars"]}
         if any(current.get(day) != bar for day, bar in old.items()):
@@ -115,12 +120,13 @@ async def observe_one(watch):
             {
                 "signal": signal,
                 "snapshot_id": result["snapshot"]["snapshot_id"],
-                "engine_version": EXPECTED_ENGINE,
+                "engine_version": result["engine_version"],
                 "base_snapshot_id": original["snapshot"]["snapshot_id"],
                 "config": config,
                 "input_extension": [b for b in result["snapshot"]["bars"] if b["date"] > original_end],
                 "mode": "signal_observation",
                 "orders_sent": 0,
+                "data_readiness": ready,
             },
         )
     except (ExternalServiceError, quant.QuantError, ValueError, KeyError, TypeError) as exc:
@@ -151,7 +157,15 @@ async def capabilities():
     try:
         pairs = await fetch("/api/research/pairs")
         ready = await fetch("/api/ready")
-        return {**pairs, "readiness": ready, "live_enabled": False, "mode": "research_and_observation", "error": None}
+        research_ready = await fetch("/api/research/readiness")
+        return {
+            **pairs,
+            "readiness": ready,
+            "research_readiness": research_ready,
+            "live_enabled": False,
+            "mode": "research_and_observation",
+            "error": None,
+        }
     except ExternalServiceError as exc:
         return {
             "pairs": [],

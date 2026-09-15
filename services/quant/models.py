@@ -12,7 +12,7 @@ def completed_date():
 
 class ResearchConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False, validate_default=True)
-    strategy: Literal["preferred_switch"] = "preferred_switch"
+    strategy: Literal["preferred_switch", "etf_switch"] = "preferred_switch"
     common: str = Field(pattern=r"^[0-9]{6}$")
     preferred: str = Field(pattern=r"^[0-9A-Z]{6}$")
     start: date

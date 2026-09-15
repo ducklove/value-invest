@@ -45,7 +45,13 @@ async def cancel(rid: str, request: Request):
 
 @router.post("/runs/{rid}/watch")
 async def watch(rid: str, request: Request, enabled: bool = Body(..., embed=True)):
-    await quant.set_watch(await user_id(request), rid, enabled)
+    user = await user_id(request)
+    if enabled:
+        run = await quant.get_run(user, rid)
+        expected = service.EXPECTED_ENGINES.get(run["config"]["strategy"])
+        if (run.get("result") or {}).get("engine_version") != expected:
+            raise quant.QuantError("현재 엔진으로 새 연구를 실행한 후 관찰해 주세요.")
+    await quant.set_watch(user, rid, enabled)
     return {"ok": True, "enabled": enabled, "mode": "signal_observation"}
 
 

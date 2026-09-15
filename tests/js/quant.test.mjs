@@ -70,3 +70,26 @@ test('사용자에게 표시하는 서버 오류의 HTML을 실행하지 않는�
   assert.match(dom.window.document.getElementById('quantReport').textContent, /<img/);
   dom.window.close();
 });
+
+test('ETF 선택은 별도 전략과 비용 가정을 보내며 기간 검증을 OOS로 표시하지 않는다', async () => {
+  let posted;
+  const dom = setup(async (path, options) => {
+    if (options?.method === 'POST') { posted = JSON.parse(options.body); throw new Error('검증용 중단'); }
+    if (path.endsWith('capabilities')) return { pairs: [], etf_pairs: [{common:'069500',preferred:'102110',name:'KODEX / TIGER'}] };
+    if (path.endsWith('observations')) return { watches: [], observations: [] };
+    return { runs: [] };
+  });
+  const w = dom.window;
+  await w.loadQuant();
+  const select = w.document.getElementById('quantPair');
+  select.value = '069500:102110';
+  select.dispatchEvent(new w.Event('change'));
+  w.document.getElementById('quantForm').dispatchEvent(new w.Event('submit', {bubbles:true,cancelable:true}));
+  await tick();
+  assert.equal(posted.config.strategy, 'etf_switch');
+  assert.equal(posted.config.sell_tax_bps, 0);
+  assert.match(w.document.getElementById('quantPairHint').textContent, /iNAV는 미반영/);
+  assert.match(w.quantValidation({validation:{status:'insufficient_data'}}), /189개/);
+  assert.match(w.quantValidation({}), /이전 버전/);
+  w.close();
+});

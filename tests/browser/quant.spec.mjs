@@ -1,9 +1,14 @@
 import { test, expect } from '@playwright/test';
 
-test('퀀트 연구 로그인·저장·새로고침·취소와 모바일 화면', async ({ page }) => {
+for (const sample of [
+  { strategy: 'preferred_switch', pair: '005930:005935' },
+  { strategy: 'etf_switch', pair: '069500:102110' },
+]) {
+test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모바일 화면`, async ({ page }) => {
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.route('**/api/quant/capabilities', route => route.fulfill({ json: {
     pairs: [{ common: '005930', preferred: '005935', name: '삼성전자' }],
+    etf_pairs: [{ common: '069500', preferred: '102110', name: 'KODEX 200 / TIGER 200' }],
     readiness: { status: 'ready', checks: { latest_price_date: '2026-09-14' } }, live_enabled: false,
   } }));
   expect((await page.request.get('/api/quant/runs')).status()).toBe(401);
@@ -13,7 +18,7 @@ test('퀀트 연구 로그인·저장·새로고침·취소와 모바일 화면'
   await page.getByRole('button', { name: '이메일로 로그인' }).click();
   await expect(page).toHaveURL(/\/quant$/);
   await expect(page.locator('#quantView')).toBeVisible();
-  await page.locator('#quantPair').selectOption('005930:005935');
+  await page.locator('#quantPair').selectOption(sample.pair);
   await page.locator('#quantForm [name=start]').fill('2024-01-01');
   await page.locator('#quantForm [name=end]').fill('2026-09-14');
   const response = page.waitForResponse(r => r.url().endsWith('/api/quant/runs') && r.request().method() === 'POST');
@@ -27,23 +32,36 @@ test('퀀트 연구 로그인·저장·새로고침·취소와 모바일 화면'
   await expect(page.locator('#quantReport')).toContainText('취소');
   const saved = await (await page.request.get('/api/quant/runs')).json();
   const row = saved.runs[0];
+  expect(row.config.strategy).toBe(sample.strategy);
+  if (sample.strategy === 'etf_switch') expect(row.config.sell_tax_bps).toBe(0);
   const result = {
-    config: row.config, config_hash: '검증용 설정', engine_version: 'preferred-switch-1',
+    config: row.config, config_hash: '검증용 설정', engine_version: sample.strategy === 'etf_switch' ? 'etf-switch-2' : 'preferred-switch-2',
     snapshot: { snapshot_id: '검증용 입력' },
     scenarios: ['switch', 'common', 'preferred', 'mixed'].map((mode, i) => ({
       mode, return_pct: i + 1, max_drawdown_pct: -i, cost: 10000, trade_count: 2,
       nav: [{ date: '2024-01-02', nav: 10000000 }, { date: '2026-09-14', nav: 10000000 * (1 + (i + 1) / 100) }], trades: [],
     })),
-    stress: { return_pct: 0.5 }, latest_signal: { date: '2026-09-14', discount: 0.2, z: 1.2, target: 'common', reason: '보통주 유지' },
+    stress: { return_pct: 0.5, excess_return_pct: -0.2 }, latest_signal: { date: '2026-09-14', discount: 0.2, relative_deviation_bps: 2, round_trip_cost_bps: 60, z: 1.2, target: 'common', reason: '유지' },
+    validation: {status:'available', positive_excess_periods:1, note:'사후 분할 진단 · 미관측 검증 아님', periods:[
+      {start:'2024-01-02',end:'2024-10-01',return_pct:1,benchmark_return_pct:2,excess_return_pct:-1,max_drawdown_pct:-3},
+      {start:'2024-10-02',end:'2025-09-01',return_pct:2,benchmark_return_pct:1,excess_return_pct:1,max_drawdown_pct:-2},
+      {start:'2025-09-02',end:'2026-09-14',return_pct:1,benchmark_return_pct:2,excess_return_pct:-1,max_drawdown_pct:-4},
+    ]},
     limitations: ['화면 검증용 가상 데이터입니다.'],
   };
   await page.route(`**/api/quant/runs/${row.id}`, route => route.fulfill({ json: { ...row, status: 'succeeded', result } }));
   await page.locator('#quantRuns button').first().click();
   await expect(page.locator('#quantReport svg')).toBeVisible();
   await expect(page.locator('#quantReport')).toContainText('비용 2배');
-  await page.screenshot({ path: 'test-results/quant-desktop.png', fullPage: true });
+  await expect(page.locator('#quantReport')).toContainText('기간 분할 진단');
+  if (sample.strategy === 'etf_switch') {
+    await expect(page.locator('#quantReport')).toContainText('ETF A 보유');
+    await expect(page.locator('#quantReport')).not.toContainText('최근 할인율');
+  }
+  await page.screenshot({ path: `test-results/quant-${sample.strategy}-desktop.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('#quantSubmit')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/quant-mobile.png', fullPage: true });
+  await page.screenshot({ path: `test-results/quant-${sample.strategy}-mobile.png`, fullPage: true });
 });
+}
