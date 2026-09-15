@@ -82,12 +82,16 @@ async function loadPortfolio({ force = false } = {}) {
   if (PfStore.loading) return;
   const loadOrderRevision = PfStore.manualOrder.revision;
   const preservePendingManualOrder = !!PfStore.manualOrder.pendingCodes;
+  const accountGeneration = typeof PfAccounts === 'undefined' ? 0 : (PfAccounts.generation || 0);
   PfStore.loading = true;
+  const accountSelect = document.getElementById('pfAccountSelect');
+  if (accountSelect) accountSelect.disabled = true;
   try {
+    if (typeof pfLoadAccounts === 'function') await pfLoadAccounts();
     _restorePortfolioSnapshotForFastPaint();
     let freshItems;
     try {
-      freshItems = await apiFetchJson('/api/portfolio', {
+      freshItems = await apiFetchJson('/api/portfolio' + (PfStore.accountId ? '?account_id=' + encodeURIComponent(PfStore.accountId) : ''), {
         errorMessage: '포트폴리오 요청 실패',
       });
     } catch (err) {
@@ -105,6 +109,7 @@ async function loadPortfolio({ force = false } = {}) {
       reportApiError(err, '포트폴리오', { silent: true });
       return;
     }
+    if (typeof PfAccounts !== 'undefined' && accountGeneration !== (PfAccounts.generation || 0)) return;
     _pfSetLoadStatus('');
     // Load groups (fast), restore cached benchmark names from localStorage
     try {
@@ -160,8 +165,10 @@ async function loadPortfolio({ force = false } = {}) {
     if (PfStore.manualOrder.pendingCodes && (preservePendingManualOrder || PfStore.manualOrder.revision > loadOrderRevision)) {
       nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, PfStore.manualOrder.pendingCodes);
     }
+    if (typeof PfAccounts !== 'undefined' && accountGeneration !== (PfAccounts.generation || 0)) return;
     PfStore.items = nextPortfolioItems;
     await todayStatePromise;
+    if (typeof PfAccounts !== 'undefined' && accountGeneration !== (PfAccounts.generation || 0)) { PfStore.items = []; return; }
     _savePortfolioSnapshot(PfStore.items);
     renderPortfolio();
     if (
@@ -177,14 +184,17 @@ async function loadPortfolio({ force = false } = {}) {
     reportApiError(e, '포트폴리오', { silent: true });
   } finally {
     PfStore.loading = false;
+    if (accountSelect) accountSelect.disabled = false;
   }
 }
 
 function _restorePortfolioSnapshotForFastPaint() {
+  if (PfStore.accountId) return;
   if (PfStore.items.length) return;
   try {
     const snapshot = JSON.parse(localStorage.getItem(_PF_PORTFOLIO_SNAPSHOT_KEY) || 'null');
     if (!snapshot || !Array.isArray(snapshot.items) || !snapshot.items.length) return;
+    if (typeof currentUser !== 'undefined' && (!currentUser || snapshot.userId !== currentUser.google_sub)) return;
     const savedAt = Number(snapshot.savedAt || 0);
     const quotesExpired = !savedAt || (Date.now() - savedAt) > _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS;
     PfStore.items = snapshot.items.map(item => {
@@ -197,9 +207,11 @@ function _restorePortfolioSnapshotForFastPaint() {
 }
 
 function _savePortfolioSnapshot(items) {
+  if (PfStore.accountId) return;
   try {
     localStorage.setItem(_PF_PORTFOLIO_SNAPSHOT_KEY, JSON.stringify({
       savedAt: Date.now(),
+      userId: typeof currentUser !== 'undefined' ? currentUser?.google_sub : null,
       items: Array.isArray(items) ? items.slice(0, 300) : [],
     }));
   } catch (e) { console.warn(e); }

@@ -603,7 +603,8 @@ async function submitCsv(mode) {
   const text = document.getElementById('pfCsvInput').value.trim();
   if (!text) { showToast('CSV 데이터를 입력해 주세요.'); return; }
 
-  if (mode === 'replace' && !confirm('기존 포트폴리오를 모두 삭제하고 새로 등록합니다. 계속할까요?')) return;
+  if (typeof pfAccountNeedsSelection === 'function' && pfAccountNeedsSelection()) { pfOpenAccountManager(); return; }
+  if (mode === 'replace' && !confirm('현재 계좌의 잔고를 새 목록으로 교체합니다. 계속할까요?')) return;
 
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const items = [];

@@ -3622,3 +3622,26 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 body.pf-compact-rows .pf-row-actions .js-pf-trade,
 body.pf-compact-rows .pf-row-actions .js-pf-edit,
 body.pf-compact-rows .pf-row-actions .js-pf-delete { display:none; }
+.pf-account-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.pf-account-toolbar select,.pf-account-toolbar button,.pf-account-actions button,.pf-account-create button { padding:7px 10px; border:1px solid var(--border,#d8dee8); border-radius:7px; background:var(--surface,#fff); color:inherit; }
+.pf-account-toolbar span { font-size:12px; color:var(--text-secondary,#64748b); }
+.pf-accounts-dialog { width:min(680px,94vw); max-height:88vh; overflow:auto; }
+.pf-accounts-dialog > p,.pf-accounts-dialog > div,.pf-accounts-dialog > form { margin:14px; }
+.pf-account-create { display:flex; flex-wrap:wrap; align-items:end; gap:10px; }
+.pf-account-create label { display:flex; flex-direction:column; gap:5px; }
+.pf-account-create input,.pf-account-create select { padding:8px; border:1px solid var(--border,#d8dee8); border-radius:6px; background:var(--surface,#fff); color:inherit; }
+.pf-account-card { border:1px solid var(--border,#d8dee8); border-radius:10px; margin:10px 0; padding:14px; }
+.pf-account-card h3 { margin:0 0 8px; font-size:16px; }
+.pf-account-card p,.pf-account-card small { font-size:13px; line-height:1.6; }
+.pf-account-actions { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+.pf-account-error { color:var(--negative,#b91c1c); }
+.pf-account-preview { max-height:40vh; overflow:auto; }
+.pf-account-preview table { width:100%; border-collapse:collapse; }
+.pf-account-preview th,.pf-account-preview td { padding:8px; border-bottom:1px solid var(--border,#d8dee8); text-align:right; }
+.pf-account-preview th:first-child,.pf-account-preview td:first-child { text-align:left; }
+body.pf-compact-rows .pf-row-actions .js-pf-account-detail { display:none; }
+#pfNhFields label:has(input[type="checkbox"]) { display:flex; align-items:center; gap:8px; }
+#pfNhFields input[type="checkbox"] { flex:0 0 18px; width:18px; height:18px; min-height:0; margin:0; }
+#pfNhFields button { padding:9px 12px; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--text); font:inherit; cursor:pointer; }
+#pfNhFields #pfNhSave { background:var(--primary); color:#fff; }
+#pfNhFields button:disabled { opacity:.5; cursor:default; }

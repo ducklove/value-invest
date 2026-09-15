@@ -103,6 +103,7 @@ function _pfDividendRead() {
   const perShare = _pfDividendEl('Mode').value === 'shares';
   return {
     stock_code: _pfDividendEl('Code').value.trim().toUpperCase(), stock_name: _pfDividendEl('Name').value.trim(),
+    ...(PfStore.accountId ? {account_id: PfStore.accountId} : {}),
     currency: _pfDividendEl('Currency').value, country: _pfDividendEl('Country').value,
     received_date: _pfDividendEl('Date').value,
     gross_amount: perShare ? null : _pfDividendEl('Gross').value,

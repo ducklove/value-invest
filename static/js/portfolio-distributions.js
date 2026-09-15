@@ -42,6 +42,7 @@ function _pfDistributionCurrency(fill = true) {
 
 function _pfDistributionRead() {
   return { currency: _pfDistributionEl('Currency').value, amount: _pfDistributionEl('Amount').value,
+    ...(PfStore.accountId ? {account_id: PfStore.accountId} : {}),
     fx_rate: _pfDistributionEl('FxLabel').hidden ? null : _pfDistributionEl('Fx').value || null,
     memo: _pfDistributionEl('Memo').value.trim() };
 }

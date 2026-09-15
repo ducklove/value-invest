@@ -176,7 +176,7 @@ def holdings_summary(enriched: list[dict]) -> tuple[list[str], float]:
         q = item.get("quote", {})
         price = q.get("price")
         qty = item.get("quantity", 0)
-        avg = item.get("avg_price", 0)
+        avg = item.get("avg_price_krw", item.get("avg_price", 0))
         mv = price * qty if price and qty else None
         ret = ((price - avg) / avg * 100) if price and avg and avg > 0 else None
         chg = q.get("change_pct")

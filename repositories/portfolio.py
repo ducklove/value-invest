@@ -15,7 +15,6 @@ import aiosqlite
 
 from domain.portfolio_codes import is_korean_stock as _is_portfolio_korean_stock
 from repositories import accounts as accounts_repo
-from repositories import db as db_module
 from repositories.db import get_db, read_snapshot, transaction
 
 _DEFAULT_GROUPS = [
@@ -129,7 +128,10 @@ async def backfill_portfolio_defaults(db: aiosqlite.Connection) -> None:
 
 
 @read_snapshot()
-async def get_portfolio(google_sub: str) -> list[dict]:
+async def get_portfolio(google_sub: str, account_id: str | None = None) -> list[dict]:
+    if account_id:
+        from repositories.account_holdings import require_account
+        await require_account(google_sub, account_id)
     db = await get_db()
     # created_at is surfaced so the UI can show '등록일자' and let the
     # user edit it. It was already stored on every insert but wasn't in
@@ -173,7 +175,8 @@ async def get_portfolio(google_sub: str) -> list[dict]:
     for item in items:
         # 페어된 숏은 태그를 가질 수 없다 (서버 차단의 표시-측 방어).
         item["tags"] = [] if item.get("pair_long_code") else tags_by_code.get(item["stock_code"], [])
-    return items
+    from repositories.account_holdings import annotate
+    return await annotate(google_sub, items, account_id)
 
 
 async def get_portfolio_tags_for_user(google_sub: str) -> list[dict]:
@@ -574,7 +577,11 @@ async def list_preferred_dividends() -> list[dict]:
 # --- Portfolio holdings + groups CRUD (write side) ---
 
 
-async def get_portfolio_item(google_sub: str, stock_code: str) -> dict | None:
+async def get_portfolio_item(google_sub: str, stock_code: str, account_id: str | None = None) -> dict | None:
+    from repositories.account_holdings import current, get_position
+    aid = account_id or current(google_sub)
+    if aid:
+        return await get_position(google_sub, stock_code, aid)
     db = await get_db()
     cursor = await db.execute(
         "SELECT stock_code, stock_name, quantity, avg_price, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, COALESCE(currency, 'KRW') AS currency, group_name, pair_long_code FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
@@ -593,6 +600,31 @@ MEMO_MAX_LEN = 500
 
 
 async def save_portfolio_item(
+    google_sub, stock_code, stock_name, quantity, avg_price, currency="KRW",
+    group_name=None, benchmark_code=None, created_at=None, *, account_id=None,
+    avg_price_currency=None, **metadata,
+):
+    from repositories.account_holdings import save
+    return await save(
+        google_sub, stock_code, stock_name, quantity, avg_price, currency,
+        account_id=account_id, avg_price_currency=avg_price_currency,
+        group_name=group_name, benchmark_code=benchmark_code, created_at=created_at, **metadata,
+    )
+
+
+async def delete_portfolio_item(google_sub: str, stock_code: str, account_id: str | None = None) -> bool:
+    from repositories.account_holdings import delete
+    return await delete(google_sub, stock_code, account_id)
+
+
+async def set_holding_group(google_sub: str, stock_code: str, group_name: str) -> None:
+    """종목 공통 분류만 바꾼다. 계좌별 수량·원가는 건드리지 않는다."""
+    async with transaction() as db:
+        await db.execute("UPDATE user_portfolio SET group_name=? WHERE google_sub=? AND (stock_code=? OR pair_long_code=?)",
+                         (group_name, google_sub, stock_code, stock_code))
+
+
+async def _save_portfolio_projection(
     google_sub: str, stock_code: str, stock_name: str, quantity: float, avg_price: float,
     currency: str = "KRW", group_name: str | None = None, benchmark_code: str | None = None,
     created_at: str | None = None,
@@ -747,34 +779,27 @@ async def clear_portfolio(google_sub: str):
     # 남지 않도록 원자적으로.
     async with transaction() as db:
         await db.execute("DELETE FROM portfolio_tags WHERE google_sub = ?", (google_sub,))
+        await db.execute("DELETE FROM account_holdings WHERE google_sub = ?", (google_sub,))
         await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
 
 
-async def replace_portfolio(google_sub: str, items: list[dict]):
-    """Atomic replace: delete all + insert new in one transaction."""
-    async with aiosqlite.connect(db_module.DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("PRAGMA foreign_keys=ON")
-        await db.execute("BEGIN IMMEDIATE")
-        try:
-            now = datetime.now().isoformat()
-            await db.execute("DELETE FROM portfolio_tags WHERE google_sub = ?", (google_sub,))
-            await db.execute("DELETE FROM user_portfolio WHERE google_sub = ?", (google_sub,))
-            for i, it in enumerate(items):
-                group_name = await _resolve_default_group_name(db, google_sub, it["stock_code"])
-                await db.execute(
-                    """INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, avg_price_currency, sort_order, currency, group_name, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (google_sub, it["stock_code"], it["stock_name"], it["quantity"], it["avg_price"], it.get("avg_price_currency", "KRW"), i, it.get("currency", "KRW"), group_name, now, now),
-                )
-        except Exception:
-            await db.rollback()
-            raise
-        await db.commit()
+async def replace_portfolio(google_sub: str, items: list[dict], account_id: str | None = None):
+    from repositories import account_holdings as positions
+    async with transaction() as db:
+        await positions.initialize(db, google_sub)
+        aid = account_id or await accounts_repo.get_default_account_id(google_sub)
+        await positions.require_account(google_sub, aid, writable=True)
+        codes = [r["stock_code"] for r in await positions.list_positions(google_sub, aid)]
+        await db.execute("DELETE FROM account_holdings WHERE google_sub=? AND account_id=?", (google_sub, aid))
+        for code in codes:
+            await positions.rebuild(google_sub, code)
+        for item in items:
+            await save_portfolio_item(google_sub, item["stock_code"], item["stock_name"], item["quantity"],
+                                      item["avg_price"], item.get("currency", "KRW"),
+                                      avg_price_currency=item.get("avg_price_currency", "KRW"), account_id=aid)
 
 
-async def delete_portfolio_item(google_sub: str, stock_code: str) -> bool:
+async def _delete_portfolio_projection(google_sub: str, stock_code: str) -> bool:
     # 태그 + 종목 행 삭제를 원자적으로 (부분 실패 시 고아 태그 방지).
     async with transaction() as db:
         await db.execute(

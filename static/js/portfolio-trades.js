@@ -159,6 +159,7 @@ async function _pfTradeSearch() {
 function _pfTradeRead() {
   if (!_pfTrade.selected) throw new Error('검색 결과에서 종목을 먼저 선택해 주세요.');
   if (_pfTradeIsExchange()) return {
+    ...(PfStore.accountId ? {account_id: PfStore.accountId} : {}),
     side: 'exchange', from_currency: _pfTrade.selected.code.slice(5), to_currency: _pfTradeEl('ExchangeTo').value,
     amount: _pfTradeEl('ExchangeAmount').value, rate: _pfTradeEl('ExchangeRate').value, rate_basis: _pfTradeEl('ExchangeBasis').value,
     fees: _pfTradeEl('ExchangeFees').value || '0', received_amount: _pfTradeEl('ExchangeReceived').value || null,
@@ -166,6 +167,7 @@ function _pfTradeRead() {
   };
   return {
     stock_code: _pfTrade.selected.code, stock_name: _pfTrade.selected.saveName || _pfTrade.selected.name,
+    ...(PfStore.accountId ? {account_id: PfStore.accountId} : {}),
     side: _pfTradeEl('Side').value, currency: _pfTradeEl('Currency').value,
     quantity: _pfTradeEl('Quantity').value, price: _pfTradeEl('Price').value,
     fees: _pfTradeEl('Fees').value || '0', memo: _pfTradeEl('Memo').value.trim(),

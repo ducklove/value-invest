@@ -10,6 +10,8 @@ from domain.portfolio_trades import TradeCurrency, TradeError, TradeNumber, mone
 
 
 class ExchangeInput(BaseModel):
+    account_id: str | None = Field(default=None, min_length=1, max_length=80)
+
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     side: Literal["exchange"]
@@ -41,6 +43,7 @@ class ExchangeCreate(ExchangeInput):
 
 
 class ExchangeResult(BaseModel):
+    account_id: str | None = None
     side: Literal["exchange"]
     stock_code: str
     stock_name: str

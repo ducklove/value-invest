@@ -27,3 +27,4 @@ data/db-imports/
 *.before-prod-portfolio-import.*.db
 node_modules/
 ValueInvestApp.swiftpm/
+.broker-encryption.key

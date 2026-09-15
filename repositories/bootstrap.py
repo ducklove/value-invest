@@ -53,6 +53,11 @@ async def init_db():
         """
     )
     await db.commit()
+    from repositories.account_holdings import initialize
+    async with _db.transaction() as writer:
+        rows = await (await writer.execute("SELECT DISTINCT google_sub FROM user_portfolio")).fetchall()
+        for row in rows:
+            await initialize(writer, row["google_sub"])
 
 
 async def close_db():

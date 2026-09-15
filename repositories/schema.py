@@ -714,6 +714,48 @@ CREATE TABLE IF NOT EXISTS portfolio_accounts (
 CREATE INDEX IF NOT EXISTS idx_portfolio_accounts_user
     ON portfolio_accounts(google_sub, sort_order);
 
+CREATE TABLE IF NOT EXISTS account_holdings (
+    google_sub TEXT NOT NULL,
+    account_id TEXT NOT NULL REFERENCES portfolio_accounts(account_id) ON DELETE CASCADE,
+    stock_code TEXT NOT NULL,
+    stock_name TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    avg_price REAL NOT NULL,
+    avg_price_currency TEXT NOT NULL DEFAULT 'KRW',
+    currency TEXT NOT NULL DEFAULT 'KRW',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (google_sub, account_id, stock_code)
+);
+CREATE TABLE IF NOT EXISTS account_holdings_initialized (
+    google_sub TEXT PRIMARY KEY REFERENCES users(google_sub) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS broker_credentials (
+    credential_id TEXT PRIMARY KEY,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    secret_ciphertext TEXT NOT NULL,
+    key_fingerprint TEXT NOT NULL UNIQUE,
+    token_ciphertext TEXT,
+    token_expires_at REAL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS broker_account_links (
+    account_id TEXT PRIMARY KEY REFERENCES portfolio_accounts(account_id) ON DELETE CASCADE,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    credential_id TEXT NOT NULL REFERENCES broker_credentials(credential_id),
+    account_ciphertext TEXT NOT NULL,
+    account_fingerprint TEXT NOT NULL,
+    account_mask TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    include_overseas INTEGER NOT NULL DEFAULT 1,
+    last_sync_at TEXT,
+    sync_error TEXT,
+    balances_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(credential_id, account_fingerprint, environment)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_broker_account_owner
+    ON broker_account_links(google_sub, account_fingerprint, environment);
+
 -- 가계 단위 통합 자산. 주식 포트폴리오는 실시간 평가액을 중복 저장하지
 -- 않고 프런트에서 자동 합산하며, 이 표에는 부동산·예적금·연금·부채 등
 -- 포트폴리오 밖의 자산만 보관한다.
@@ -873,6 +915,7 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     ("portfolio_cashflows", "applied_snapshot_date", "TEXT"),
     ("portfolio_cashflows", "reversal_of_id", "INTEGER"),
     ("portfolio_cashflows", "cancelled_at", "TEXT"),
+    ("portfolio_cashflows", "account_id", "TEXT"),
     ("portfolio_snapshots", "fx_usdkrw", "REAL"),
     ("portfolio_snapshots", "cashflow_cutoff_at", "TEXT"),
     ("portfolio_stock_snapshots", "group_name", "TEXT"),

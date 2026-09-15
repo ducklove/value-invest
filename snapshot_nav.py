@@ -104,6 +104,7 @@ async def _fetch_historical_korean_quote(stock_code: str, snap_date: str) -> dic
 async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, float, list[dict]]:
     """Return (total_market_value, total_invested, per_stock_values) for a user's portfolio."""
     items = await portfolio_repo.get_portfolio(google_sub)
+    await fx.annotate_avg_price_krw([item for item in items if item.get("account_positions")])
     # Load previous per-stock snapshot for fallback (avoids avg_price distortion)
     prev_stock_map = {}
     prev_stocks = await snapshots_repo.get_stock_snapshots_before_date(google_sub, snap_date)
@@ -116,8 +117,9 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
     missing: list[str] = []
     for item in items:
         qty = item["quantity"]
-        avg_price = item["avg_price"]
-        avg_price_krw = await fx.price_to_krw(avg_price, item.get("avg_price_currency"))
+        avg_price_krw = item.get("avg_price_krw")
+        if avg_price_krw is None:
+            avg_price_krw = await fx.price_to_krw(item["avg_price"], item.get("avg_price_currency"))
         total_invested += qty * avg_price_krw
         price = None
         # 이 종목의 평가액을 라이브/과거 종가가 아니라 직전 스냅샷 값으로

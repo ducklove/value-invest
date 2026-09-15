@@ -9,6 +9,7 @@
 // Loaded as a plain (non-module) script before the other portfolio scripts, so
 // `PfStore` is a shared global by the time they run.
 const PfStore = {
+  accountId: '',
   // benchmark_code -> { change_pct, name }
   benchmarkQuotes: {},
   // [{date, nav, total_value, total_invested, total_units}, ...]

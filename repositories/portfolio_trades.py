@@ -6,10 +6,13 @@ from datetime import datetime, timezone
 
 from domain.portfolio_trades import TradeConflict, TradeCreate, TradeError, TradeInput, calculate_trade
 from repositories import portfolio
+from repositories.account_holdings import account_operation, current
 from repositories.db import get_db, read_snapshot, transaction
 
 
 def _digest(value) -> str:
+    if isinstance(value, dict) and value.get("account_id") is None:
+        value = {k: v for k, v in value.items() if k != "account_id"}
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -26,15 +29,17 @@ async def _state(google_sub: str, trade: TradeInput) -> tuple:
     return holding, cash, _digest([holding, cash])
 
 
+@account_operation
 @read_snapshot()
 async def preview_trade(google_sub: str, trade: TradeInput) -> dict:
     holding, cash, revision = await _state(google_sub, trade)
     return {**calculate_trade(trade, holding, cash), "revision": revision}
 
 
+@account_operation
 async def record_trade(google_sub: str, trade: TradeCreate) -> dict:
     request_id = str(trade.request_id)
-    payload = trade.model_dump(mode="json", exclude={"request_id"})
+    payload = trade.model_dump(mode="json", exclude={"request_id"} | ({"account_id"} if not trade.account_id else set()))
     # 배포 전 저장했으나 응답이 유실된 요청도 같은 지문으로 재확인한다.
     if trade.tax_rate == 0 and trade.tax_amount is None:
         payload.pop("tax_rate")
@@ -55,24 +60,18 @@ async def record_trade(google_sub: str, trade: TradeCreate) -> dict:
         result = calculate_trade(trade, holding, cash)
         now = datetime.now(timezone.utc).isoformat()
         if result["quantity_after"] == 0:
-            await db.execute("DELETE FROM portfolio_tags WHERE google_sub = ? AND stock_code = ?", (google_sub, trade.stock_code))
-            await db.execute("DELETE FROM user_portfolio WHERE google_sub = ? AND stock_code = ?", (google_sub, trade.stock_code))
+            await portfolio.delete_portfolio_item(google_sub, trade.stock_code)
         else:
             await portfolio.save_portfolio_item(
                 google_sub, trade.stock_code, result["stock_name"], result["quantity_after"],
                 result["avg_price_after"], trade.currency, avg_price_currency=result["avg_price_currency"],
             )
-        if cash:
-            await db.execute(
-                "UPDATE user_portfolio SET quantity = ?, updated_at = ? WHERE google_sub = ? AND stock_code = ?",
-                (result["cash_after"], now, google_sub, result["cash_code"]),
-            )
-        else:
-            await portfolio.save_portfolio_item(
-                google_sub, result["cash_code"], f"{trade.currency} 현금", result["cash_after"], 1,
-                trade.currency, avg_price_currency=trade.currency,
-            )
-        result.update(request_id=request_id, created_at=now, replayed=False)
+        await portfolio.save_portfolio_item(
+            google_sub, result["cash_code"], (cash or {}).get("stock_name", f"{trade.currency} 현금"),
+            result["cash_after"], (cash or {}).get("avg_price", 1), trade.currency,
+            avg_price_currency=(cash or {}).get("avg_price_currency", trade.currency),
+        )
+        result.update(account_id=current(google_sub), request_id=request_id, created_at=now, replayed=False)
         await db.execute(
             "INSERT INTO portfolio_trades (google_sub, request_id, stock_code, fingerprint, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (google_sub, request_id, trade.stock_code, fingerprint, json.dumps(result, ensure_ascii=False), now),

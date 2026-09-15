@@ -19,6 +19,8 @@ def receipt_today() -> date:
 
 
 class DividendInput(BaseModel):
+    account_id: str | None = Field(default=None, min_length=1, max_length=80)
+
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     stock_code: Annotated[str, Field(pattern=r"^[A-Z0-9][A-Z0-9._-]{0,23}$")]
@@ -61,6 +63,7 @@ class DividendCreate(DividendInput):
 
 
 class DividendResult(BaseModel):
+    account_id: str | None = None
     stock_code: str
     stock_name: str
     currency: TradeCurrency

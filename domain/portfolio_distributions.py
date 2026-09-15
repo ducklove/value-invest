@@ -10,6 +10,8 @@ from domain.portfolio_trades import TradeCurrency, TradeError, TradeNumber, mone
 
 
 class DistributionInput(BaseModel):
+    account_id: str | None = Field(default=None, min_length=1, max_length=80)
+
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     currency: TradeCurrency = "KRW"
     amount: Annotated[TradeNumber, Field(gt=0)]
@@ -30,6 +32,7 @@ class DistributionCreate(DistributionInput):
 
 
 class DistributionResult(BaseModel):
+    account_id: str | None = None
     currency: TradeCurrency
     amount: FiniteFloat
     amount_krw: FiniteFloat

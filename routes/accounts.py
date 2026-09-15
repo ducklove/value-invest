@@ -37,6 +37,8 @@ def _require_user(user: dict | None) -> dict:
 @router.get("")
 async def list_accounts(request: Request):
     user = _require_user(await get_current_user(request))
+    from repositories.account_holdings import ensure
+    await ensure(user["google_sub"])
     return await accounts_repo.list_accounts(user["google_sub"])
 
 

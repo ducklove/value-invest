@@ -222,6 +222,10 @@ function _sparkTrendColor(isUp) {
 }
 
 function _renderSummarySparklines(currentTotalValue) {
+  if (PfStore.accountId) {
+    for (const id of ['sparkTotalReturn', 'sparkMonthly', 'sparkDaily']) _drawSparkline(id, [], _sparkTrendColor(true), 252, 'right');
+    return;
+  }
   // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
   if (PfStore.navHistory.length > 1) {
     const last365 = PfStore.navHistory.slice(-365);

@@ -105,6 +105,8 @@ def cached_quote_for_code(code: str) -> dict:
 
 async def enrich_with_cached_quotes(items: list[dict]) -> list[dict]:
     """Attach cached quotes — WebSocket cache preferred, then polling cache."""
+    if any(item.get("account_positions") and "avg_price_krw" not in item for item in items):
+        await fx.annotate_avg_price_krw(items)
     result = []
     for item in items:
         enriched = dict(item)

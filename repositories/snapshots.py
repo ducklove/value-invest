@@ -516,47 +516,40 @@ class CashflowCancellationError(ValueError):
     pass
 
 
-async def _sync_cash(db, google_sub: str, delta: float, now: str) -> None:
-    cursor = await db.execute(
-        "SELECT quantity FROM user_portfolio WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
-        (google_sub,),
-    )
-    cash = await cursor.fetchone()
+async def _sync_cash(db, google_sub: str, delta: float, now: str, account_id: str | None = None) -> str:
+    from repositories import account_holdings, accounts, portfolio
+    await account_holdings.initialize(db, google_sub)
+    aid = account_id or await accounts.get_default_account_id(google_sub)
+    await account_holdings.require_account(google_sub, aid, writable=True)
+    cash = await account_holdings.get_position(google_sub, 'CASH_KRW', aid)
     balance = float(cash["quantity"]) if cash else 0.0
     if balance + delta < 0:
         raise CashflowBalanceError(balance, -delta)
-    if cash:
-        await db.execute(
-            "UPDATE user_portfolio SET quantity = ?, avg_price = 1.0, updated_at = ? "
-            "WHERE google_sub = ? AND stock_code = 'CASH_KRW'",
-            (balance + delta, now, google_sub),
-        )
-    elif delta > 0:
-        await db.execute(
-            "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, avg_price, quantity, currency, created_at, updated_at) "
-            "VALUES (?, 'CASH_KRW', '원화', 1.0, ?, 'KRW', ?, ?)",
-            (google_sub, delta, now, now),
-        )
+    if cash or delta > 0:
+        await portfolio.save_portfolio_item(google_sub, 'CASH_KRW', (cash or {}).get('stock_name', '원화'),
+                                            balance + delta, 1, 'KRW', account_id=aid, avg_price_currency='KRW')
+    return aid
 
 
 async def add_cashflow_and_sync_cash(
     google_sub: str, date: str, cf_type: str, amount: float,
     memo: str | None, nav_at_time: float | None, units_change: float | None,
+    account_id: str | None = None,
 ) -> dict:
     now = datetime.now(KST).replace(tzinfo=None).isoformat()
     if date > now[:10]:
         raise CashflowCancellationError("미래 날짜의 입출금은 등록할 수 없습니다.")
     async with transaction() as db:
-        await _sync_cash(db, google_sub, amount if cf_type == "deposit" else -amount, now)
+        aid = await _sync_cash(db, google_sub, amount if cf_type == "deposit" else -amount, now, account_id)
         cursor = await db.execute(
-            "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (google_sub, date, cf_type, amount, nav_at_time, units_change, memo, now),
+            "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, nav_at_time, units_change, memo, created_at, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (google_sub, date, cf_type, amount, nav_at_time, units_change, memo, now, aid),
         )
         return {
             "id": cursor.lastrowid, "date": date, "type": cf_type, "amount": amount,
             "nav_at_time": nav_at_time, "units_change": units_change,
-            "memo": memo, "created_at": now,
+            "memo": memo, "created_at": now, "account_id": aid,
         }
 
 
@@ -579,14 +572,14 @@ async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
         if cf["reversal_of_id"] is not None:
             raise CashflowCancellationError("취소 거래는 삭제할 수 없습니다. 새 입출금으로 정정해 주세요.")
         reverse_delta = -cf["amount"] if cf["type"] == "deposit" else cf["amount"]
-        await _sync_cash(db, google_sub, reverse_delta, now)
+        aid = await _sync_cash(db, google_sub, reverse_delta, now, cf["account_id"])
         if cf["applied_snapshot_date"]:
             await db.execute(
-                "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, memo, created_at, reversal_of_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, memo, created_at, reversal_of_id, account_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (google_sub, now[:10],
                  "withdrawal" if cf["type"] == "deposit" else "deposit",
-                 cf["amount"], f"입출금 취소 (원거래 #{cf_id})", now, cf_id),
+                 cf["amount"], f"입출금 취소 (원거래 #{cf_id})", now, cf_id, aid),
             )
             await db.execute("UPDATE portfolio_cashflows SET cancelled_at = ? WHERE id = ?", (now, cf_id))
         else:

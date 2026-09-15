@@ -172,27 +172,26 @@ async def price_to_krw(amount: float, currency: str | None) -> float:
 
 
 async def annotate_avg_price_krw(items: list[dict]) -> list[dict]:
-    currencies_needed = {
-        normalize_price_currency(item.get("avg_price_currency"))
-        for item in items
-        if normalize_price_currency(item.get("avg_price_currency")) != "KRW"
-    }
-    rates: dict[str, float] = {"KRW": 1.0}
-    if currencies_needed:
-        resolved = await asyncio.gather(
-            *(fx_rate_for_currency(currency) for currency in currencies_needed),
-        )
-        for currency, rate in zip(currencies_needed, resolved):
-            rates[currency] = rate
-
+    components = [part for item in items for part in (item.get("account_positions") or [item])]
+    currencies_needed = {normalize_price_currency(part.get("avg_price_currency")) for part in components} - {"KRW"}
+    rates = {"KRW": 1.0}
+    resolved = await asyncio.gather(*(fx_rate_for_currency(currency) for currency in currencies_needed))
+    rates.update(zip(currencies_needed, resolved))
     for item in items:
-        currency = normalize_price_currency(item.get("avg_price_currency"))
-        item["avg_price_currency"] = currency
-        try:
-            avg_price = float(item.get("avg_price") or 0)
-        except (TypeError, ValueError):
-            avg_price = 0.0
-        item["avg_price_krw"] = avg_price * rates[currency]
+        parts = item.get("account_positions") or [item]
+        quantity = float(item.get("quantity") or 0)
+        if quantity and item.get("account_positions"):
+            cost = sum(float(part["quantity"]) * float(part["avg_price"]) * rates[normalize_price_currency(part.get("avg_price_currency"))] for part in parts)
+            item["avg_price_krw"] = cost / quantity
+            if len({part["avg_price_currency"] for part in parts}) > 1:
+                item.update(avg_price=cost / quantity, avg_price_currency="KRW", mixed_cost_currency=True)
+        else:
+            currency = normalize_price_currency(item.get("avg_price_currency"))
+            item["avg_price_currency"] = currency
+            try:
+                item["avg_price_krw"] = float(item.get("avg_price") or 0) * rates[currency]
+            except (TypeError, ValueError):
+                item["avg_price_krw"] = 0.0
     return items
 
 

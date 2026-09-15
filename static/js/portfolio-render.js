@@ -347,7 +347,7 @@ function renderPortfolio(options = {}) {
   const totalReturnPct = _currentFxInvested !== 0 ? ((_currentFxVal - _currentFxInvested) / Math.abs(_currentFxInvested) * 100) : 0;
 
   // NAV adjusted for currency mode: USD NAV = KRW NAV / FX
-  const isFiltered = PfStore.filters.group !== null || Boolean(searchText);
+  const isFiltered = PfStore.filters.group !== null || Boolean(searchText) || Boolean(PfStore.accountId);
   const _navAdj = (nav, fx) => {
     if (!_isUsd || !nav) return nav;
     const rate = fx && fx > 0 ? fx : PfStore.currency.fxRate;
@@ -367,6 +367,7 @@ function renderPortfolio(options = {}) {
   // into the selected group and makes TODAY drift away from the settlement
   // baseline.
   const _periodBaseValue = (snap) => {
+    if (PfStore.accountId) return null;
     if (!snap) return null;
     if (!isFiltered) return _snapToFxVal(snap);
     const sv = snap.stock_values || {};
@@ -437,7 +438,7 @@ function renderPortfolio(options = {}) {
     ? _liveNavValueKrw / _liveNavUnits
     : (latestSnap ? latestSnap.nav : null);
   const _curReturnNav = _curNavKrw == null ? null : (_curNavKrw + (_liveNavUnits > 0 ? _pendingDistribution / _liveNavUnits : 0)) * (latestSnap?.return_factor || 1);
-  const curNav = _navAdj(_curReturnNav, PfStore.currency.fxRate);
+  const curNav = PfStore.accountId ? null : _navAdj(_curReturnNav, PfStore.currency.fxRate);
 
   // --- Daily return ---
   const _dailyBaseValue = _periodBaseValue(PfStore.snapshots.prevDay);
@@ -666,7 +667,7 @@ function renderPortfolio(options = {}) {
         <td class="pf-col-act"><div class="pf-row-actions">
           <button type="button" class="pf-row-btn save js-pf-save" title="${isSaving ? '저장 중입니다' : '저장'}"${saveAttrs}>${saveContent}</button>
           <button type="button" class="pf-row-btn cancel js-pf-cancel" title="취소"${editAttrs}>✕</button>
-        </div></td>
+      </div></td>
       </tr>`;
     }
     return `<tr data-code="${safeCode}"${heatAttrs}>
@@ -687,10 +688,11 @@ function renderPortfolio(options = {}) {
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-memo">${memoCell}</td>
-      <td class="pf-col-act"><div class="pf-row-actions">
+      <td class="pf-col-act"><div class="pf-row-actions">${typeof pfAccountNeedsSelection === 'function' && pfAccountNeedsSelection() ? '<button type="button" class="pf-row-btn js-pf-account-detail">계좌별 보기</button>' : `
         ${document.getElementById('pfTradeDialog') && r.qty >= 0 ? `<button type="button" class="pf-row-btn js-pf-trade" title="${isCash ? '다른 통화로 환전 기록' : '매수·매도 기록'}">${isCash ? '환전' : '매매'}</button>` : ''}
         <button type="button" class="pf-row-btn edit js-pf-edit" title="보유 수량·매입가 정정 (현금 변동 없음)" aria-label="${escapeHtml(r.stock_name)} 보유 정보 편집">✎</button>
         <button type="button" class="pf-row-btn delete js-pf-delete" title="매도 또는 등록 삭제" aria-label="${escapeHtml(r.stock_name)} 보유분 정리">✕</button>
+      `}
       </div></td>
     </tr>`;
   }).join('');

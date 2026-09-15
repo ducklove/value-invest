@@ -8,6 +8,7 @@ from decimal import Decimal
 from domain.dividend_receipts import DividendCreate, DividendInput, calculate_dividend
 from domain.portfolio_trades import TradeConflict
 from repositories import investment_insights, portfolio
+from repositories.account_holdings import account_operation, current
 from repositories.db import get_db, read_snapshot, transaction
 
 
@@ -27,15 +28,17 @@ async def _state(user: str, receipt: DividendInput) -> tuple:
     return cash, _digest(cash)
 
 
+@account_operation
 @read_snapshot()
 async def preview_dividend(user: str, receipt: DividendInput) -> dict:
     cash, revision = await _state(user, receipt)
     return {**calculate_dividend(receipt, cash), "revision": revision}
 
 
+@account_operation
 async def record_dividend(user: str, receipt: DividendCreate) -> dict:
     request_id = str(receipt.request_id)
-    fingerprint = _digest(receipt.model_dump(mode="json", exclude={"request_id"}))
+    fingerprint = _digest(receipt.model_dump(mode="json", exclude={"request_id"} | ({"account_id"} if not receipt.account_id else set())))
     async with transaction() as db:
         existing = await (await db.execute(
             "SELECT fingerprint,result_json FROM portfolio_dividend_receipts WHERE google_sub=? AND request_id=?", (user, request_id),
@@ -49,21 +52,16 @@ async def record_dividend(user: str, receipt: DividendCreate) -> dict:
             raise TradeConflict("현금 잔고가 변경됐습니다. 수취 내용을 다시 확인해 주세요.")
         result = calculate_dividend(receipt, cash)
         now = datetime.now(timezone.utc).isoformat()
-        if cash:
-            await db.execute(
-                "UPDATE user_portfolio SET quantity=?, updated_at=? WHERE google_sub=? AND stock_code=?",
-                (result["cash_after"], now, user, result["cash_code"]),
-            )
-        else:
-            await portfolio.save_portfolio_item(user, result["cash_code"], f"{receipt.currency} 현금", result["cash_after"], 1,
-                                                receipt.currency, avg_price_currency=receipt.currency)
+        await portfolio.save_portfolio_item(user, result["cash_code"], (cash or {}).get("stock_name", f"{receipt.currency} 현금"),
+                                            result["cash_after"], (cash or {}).get("avg_price", 1), receipt.currency,
+                                            avg_price_currency=(cash or {}).get("avg_price_currency", receipt.currency))
         income_id = None
         if result["amount_krw"] > 0:
             income_id = await investment_insights.add_income(user, {
                 "date": result["applied_date"], "stock_code": receipt.stock_code, "kind": "dividend",
                 "amount_krw": result["amount_krw"], "memo": f"배당 수취 ({result['received_date']}) {receipt.memo}"[:500],
             })
-        result.update(request_id=request_id, created_at=now, income_event_id=income_id, replayed=False)
+        result.update(account_id=current(user), request_id=request_id, created_at=now, income_event_id=income_id, replayed=False)
         await db.execute(
             "INSERT INTO portfolio_dividend_receipts (google_sub,request_id,source_key,stock_code,income_event_id,fingerprint,result_json,created_at) "
             "VALUES (?,?,?,?,?,?,?,?)",
@@ -88,12 +86,16 @@ async def received_source_keys(user: str) -> set[str]:
     return {row["source_key"] for row in rows}
 
 
-async def receipt_totals(user: str) -> list[dict]:
+async def receipt_totals(user: str, account_id: str | None = None) -> list[dict]:
+    from repositories import accounts
+    default_id = await accounts.get_default_account_id(user) if account_id else None
     db = await get_db()
     rows = await (await db.execute("SELECT result_json FROM portfolio_dividend_receipts WHERE google_sub=?", (user,))).fetchall()
     totals = {}
     for row in rows:
         result = json.loads(row["result_json"])
+        if account_id and (result.get("account_id") or default_id) != account_id:
+            continue
         currency = result["currency"]
         total = totals.setdefault(currency, {"currency": currency, "count": 0, "net_amount": Decimal(0)})
         total["count"] += 1

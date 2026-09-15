@@ -14,6 +14,7 @@ os.environ["SESSION_SECRET"] = "browser-test-only-secret"
 os.environ["GOOGLE_CLIENT_ID"] = ""
 os.environ["KIS_PROXY_BASE_URL"] = "http://127.0.0.1:1"
 os.environ["CLOSE_PRICE_API_ENABLED"] = "0"
+os.environ["CORS_ALLOWED_ORIGINS"] = "http://127.0.0.1:18765"
 
 import auth_service
 from core.config import PROJECT_ROOT, AppSettings
@@ -23,7 +24,16 @@ from core.static_routes import register_static_routes
 from deps import get_current_user
 from repositories import bootstrap, db, financial, snapshots, users
 from repositories import portfolio as holdings
-from routes import auth, dividend_receipts, investment_insights, portfolio, portfolio_distributions, portfolio_trades
+from routes import (
+    accounts,
+    auth,
+    broker_accounts,
+    dividend_receipts,
+    investment_insights,
+    portfolio,
+    portfolio_distributions,
+    portfolio_trades,
+)
 from services.portfolio.time_windows import today_kst_date
 
 
@@ -43,7 +53,15 @@ async def lifespan(app):
             await snapshots.save_stock_snapshots(user["google_sub"], day, [{"stock_code": "005930", "quantity": 10,
                 "market_value": price*10, "unit_price": price, "currency": "KRW", "fx_rate": 1}])
         try:
-            yield
+            from services.brokers import namuh, sync
+            nh_rows = [{"stock_code": "005930", "stock_name": "삼성전자", "quantity": 3,
+                        "avg_price": 80000, "avg_price_currency": "KRW", "currency": "KRW"},
+                       {"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": 5000,
+                        "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}]
+            with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+                 patch.object(broker_accounts, "fetch_snapshot", AsyncMock(return_value=(nh_rows, {}))), \
+                 patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(nh_rows, {}))):
+                yield
         finally:
             await bootstrap.close_db()
 
@@ -52,6 +70,8 @@ app = FastAPI(lifespan=lifespan)
 register_exception_handlers(app)
 app.add_middleware(MutationOriginMiddleware, allowed_origins=["http://127.0.0.1:18765"])
 app.include_router(auth.router)
+app.include_router(accounts.router)
+app.include_router(broker_accounts.router)
 app.include_router(investment_insights.router)
 app.include_router(portfolio_trades.router)
 app.include_router(dividend_receipts.router)
@@ -71,7 +91,7 @@ async def config():
 @app.get("/api/portfolio")
 async def get_holdings(request: Request):
     user = portfolio._require_user(await get_current_user(request))
-    rows = await holdings.get_portfolio(user["google_sub"])
+    rows = await holdings.get_portfolio(user["google_sub"], request.query_params.get("account_id"))
     for row in rows:
         quote = {"price": 1, "previous_close": 1, "change_pct": 0} if row["stock_code"] == "CASH_KRW" else {"price": 75000, "previous_close": 74000, "change_pct": 1.35}
         row.update(avg_price_krw=row["avg_price"], quote=quote)

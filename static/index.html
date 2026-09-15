@@ -313,6 +313,11 @@ function trackEvent(name, params = {}) {
       </div>
     </section>
 
+    <div class="pf-account-toolbar">
+      <label for="pfAccountSelect">계좌</label><select id="pfAccountSelect"><option value="">전체 계좌 · 합산</option></select>
+      <button type="button" id="pfAccountsOpen">계좌 관리</button>
+      <span id="pfAccountState">모든 계좌의 잔고를 합산합니다.</span><span id="pfNhQuoteState" aria-live="polite"></span>
+    </div>
     <div class="pf-tab-bar">
       <button class="pf-tab active" data-tab="holdings" aria-controls="pfHoldingsTab" aria-selected="true" onclick="pfSwitchTab('holdings')">보유종목</button>
       <button class="pf-tab" data-tab="performance" aria-controls="pfPerformanceTab" aria-selected="false" onclick="pfSwitchTab('performance')">심층 분석</button>
@@ -1168,6 +1173,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/market-dashboard.js" defer></script>
 <script src="./js/economic-calendar.js" defer></script>
 <script src="./js/portfolio-store.js" defer></script>
+<script src="./js/portfolio-accounts.js" defer></script>
 <script src="./js/portfolio-shell.js" defer></script>
 <script src="./js/portfolio-data.js" defer></script>
 <script src="./js/portfolio-order.js" defer></script>
@@ -1236,6 +1242,29 @@ function trackEvent(name, params = {}) {
     <p id="pfCfStatus" class="pf-trade-help" role="status" aria-live="polite"></p>
     <button id="pfCfSave" class="pf-add-btn pf-trade-save" type="submit">입출금 등록</button>
   </form>
+</dialog>
+<dialog id="pfAccountsDialog" class="pf-trade-dialog pf-accounts-dialog" aria-labelledby="pfAccountsTitle">
+  <div class="pf-trade-header"><h2 id="pfAccountsTitle">계좌 관리</h2><button type="button" id="pfAccountsClose" aria-label="계좌 관리 닫기">×</button></div>
+  <p id="pfAccountsHelp"></p>
+  <form id="pfAccountForm" class="pf-account-create">
+    <label>계좌 이름<input id="pfAccountName" required maxlength="40" placeholder="예: NH 일반, KB ISA"></label>
+    <label>계좌 종류<select id="pfAccountType"><option value="general">일반</option><option value="isa">ISA</option><option value="pension">연금</option><option value="cash">현금</option><option value="other">기타</option></select></label>
+    <button type="submit" id="pfAccountCreate">계좌 추가</button>
+  </form>
+  <p id="pfAccountsStatus" role="status"></p><div id="pfAccountsList"></div>
+</dialog>
+<dialog id="pfNhDialog" class="pf-trade-dialog pf-accounts-dialog" aria-labelledby="pfNhTitle">
+  <div class="pf-trade-header"><h2 id="pfNhTitle">NH 계좌 연동</h2><button type="button" id="pfNhClose" aria-label="NH 연동 닫기">×</button></div>
+  <p>나무 OpenAPI 앱키로 연결 가능한 계좌를 확인합니다. 키는 서버에 암호화해 저장하며, 주문·자동매매는 실행하지 않습니다.</p>
+  <form id="pfNhForm"><fieldset id="pfNhFields" class="pf-trade-fields">
+    <label class="pf-trade-wide">나무 APP KEY<input id="pfNhKey" type="password" autocomplete="off" required maxlength="2048"></label>
+    <label class="pf-trade-wide">나무 APP SECRET<input id="pfNhSecret" type="password" autocomplete="off" required maxlength="2048"></label>
+    <button type="submit" id="pfNhVerify">앱키 확인·등록</button>
+    <label class="pf-trade-wide">NH 계좌번호<select id="pfNhChoices"><option value="">앱키 확인 후 계좌를 선택하세요</option></select></label>
+    <label class="pf-trade-wide"><input type="checkbox" id="pfNhOverseas" checked> 해외주식·외화 잔고 포함 (미국·일본·홍콩·중국)</label>
+    <button type="button" id="pfNhPreviewButton" disabled>잔고 미리보기</button><button type="button" id="pfNhSave" disabled>연결하고 잔고 가져오기</button>
+  </fieldset></form>
+  <p id="pfNhStatus" role="status"></p><div id="pfNhPreview" class="pf-account-preview"></div>
 </dialog>
 <dialog id="pfTradeDialog" class="pf-trade-dialog" aria-labelledby="pfTradeTitle">
   <div class="pf-trade-header"><h2 id="pfTradeTitle">매매 기록</h2><button type="button" id="pfTradeClose" aria-label="매매 기록 닫기">×</button></div>

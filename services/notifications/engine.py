@@ -721,7 +721,9 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
 
     items_by_code: dict[str, dict] = {}
     try:
-        for item in await portfolio_repo.get_portfolio(google_sub):
+        from services.portfolio.fx import annotate_avg_price_krw
+        for item in await annotate_avg_price_krw(await portfolio_repo.get_portfolio(google_sub)):
+            item = {**item, "avg_price": item.get("avg_price_krw", item.get("avg_price"))}
             items_by_code[item["stock_code"]] = item
     except Exception as exc:
         logger.warning("portfolio alert load failed user=%s: %s", str(google_sub)[:8], exc)

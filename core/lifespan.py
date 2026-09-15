@@ -179,5 +179,9 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         indicator_stop = asyncio.Event()
         tasks.append((asyncio.create_task(indicator_health.run_loop(indicator_stop), name="market-indicators"), indicator_stop))
 
+        from services.brokers.realtime import run as run_namuh
+        namuh_stop = asyncio.Event()
+        tasks.append((asyncio.create_task(run_namuh(namuh_stop), name="namuh-quotes"), namuh_stop))
+
         sd_notify("READY=1")
         yield

@@ -7,13 +7,10 @@ async function pfChangeGroup(stockCode, groupName) {
   const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
   try {
-    await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
+    await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}/group`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        stock_name: item.stock_name,
-        quantity: item.quantity,
-        avg_price: item.avg_price,
         group_name: groupName,
       }),
       errorMessage: '그룹 변경에 실패했습니다.',

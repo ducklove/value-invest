@@ -604,7 +604,7 @@ async def get_portfolio(request: Request):
     started = time.perf_counter()
     user = _require_user(await get_current_user(request))
     await portfolio_repo.get_portfolio_groups(user["google_sub"])  # ensure default groups
-    items = await portfolio_repo.get_portfolio(user["google_sub"])
+    items = await portfolio_repo.get_portfolio(user["google_sub"], request.query_params.get("account_id"))
     needs_resolve = [it for it in items if not it.get("benchmark_code")]
     for item in needs_resolve:
         item["benchmark_code"] = _resolve_default_benchmark_fast(item["stock_code"])
@@ -641,6 +641,12 @@ async def get_portfolio(request: Request):
             metrics["dps"] = trailing_dps
         it["target_metrics"] = metrics
     enriched = await _enrich_with_cached_quotes(items)
+    from services.brokers.realtime import quote as namuh_quote
+    from services.portfolio.quotes import should_accept_quote_snapshot
+    for item in enriched:
+        nh_quote = namuh_quote(user["google_sub"], item["stock_code"])
+        if nh_quote and should_accept_quote_snapshot(item.get("quote"), nh_quote):
+            item["quote"] = nh_quote
     await _fill_snapshot_quotes(user["google_sub"], enriched)
     insights.schedule_asset_insight_warmup(enriched)
     elapsed_ms = (time.perf_counter() - started) * 1000
@@ -755,7 +761,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
     if avg_price_currency and (_is_cash_asset(stock_code) or _is_korean_stock(stock_code) or _is_special_asset(stock_code)):
         avg_price_currency = "KRW"
     if avg_price_currency is None:
-        existing_item = await portfolio_repo.get_portfolio_item(user["google_sub"], stock_code)
+        existing_item = await portfolio_repo.get_portfolio_item(user["google_sub"], stock_code, (request.headers.get("X-Portfolio-Account") if request else None))
         avg_price_currency = fx.normalize_price_currency((existing_item or {}).get("avg_price_currency"))
     # 저장 전에 필요한 환율을 한 번만 확인한다. 저장 후 환율 장애로 실패를
     # 응답하거나, 통화 미전달 시 기존 외화 매입가를 원화로 오인하지 않는다.
@@ -841,6 +847,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         user["google_sub"], stock_code, stock_name, quantity, avg_price,
         currency, group_name, benchmark_code, created_at,
         avg_price_currency=avg_price_currency,
+        account_id=(request.headers.get("X-Portfolio-Account") if request else None),
         **target_price_kwarg,
         **memo_kwarg,
     )
@@ -872,6 +879,23 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
 
     dividends.schedule_for_portfolio([stock_code])
     return {"ok": True, **result}
+
+
+@router.put("/api/portfolio/{stock_code}/group")
+async def set_holding_group(stock_code: str, request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    code = _normalize_portfolio_code(stock_code)
+    item = await portfolio_repo.get_portfolio_item(user["google_sub"], code)
+    if not item:
+        raise HTTPException(404, "등록된 종목을 찾을 수 없습니다.")
+    if item.get("pair_long_code"):
+        raise HTTPException(400, "연결된 롱 종목의 그룹을 변경해 주세요.")
+    group = payload.get("group_name")
+    groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
+    if not isinstance(group, str) or group not in {row["group_name"] for row in groups}:
+        raise HTTPException(400, "그룹을 찾을 수 없습니다.")
+    await portfolio_repo.set_holding_group(user["google_sub"], code, group)
+    return {"ok": True}
 
 
 @router.put("/api/portfolio/{stock_code}/pair")
@@ -979,7 +1003,7 @@ async def get_benchmark_quotes(request: Request):
 async def delete_portfolio_item(stock_code: str, request: Request):
     user = _require_user(await get_current_user(request))
     stock_code = _normalize_portfolio_code(stock_code)
-    deleted = await portfolio_repo.delete_portfolio_item(user["google_sub"], stock_code)
+    deleted = await portfolio_repo.delete_portfolio_item(user["google_sub"], stock_code, (request.headers.get("X-Portfolio-Account") if request else None))
     if not deleted:
         raise HTTPException(status_code=404, detail="포트폴리오에 없는 종목입니다.")
     return {"ok": True}
@@ -1036,12 +1060,13 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
         item["currency"] = "KRW" if _is_korean_stock(code) or _is_special_asset(code) else await foreign.detect_currency(code)
 
     if mode == "replace":
-        await portfolio_repo.replace_portfolio(user["google_sub"], resolved)
+        await portfolio_repo.replace_portfolio(user["google_sub"], resolved, account_id=(request.headers.get("X-Portfolio-Account") if request else None))
     else:
         async with db_repo.transaction():
             for item in resolved:
                 await portfolio_repo.save_portfolio_item(
                     user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], item["currency"],
+                    account_id=(request.headers.get("X-Portfolio-Account") if request else None),
                 )
     dividends.schedule_for_portfolio([item["stock_code"] for item in resolved])
 
@@ -1189,6 +1214,7 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
             memo,
             None,
             None,
+            account_id=(request.headers.get("X-Portfolio-Account") if request else None),
         )
     except snapshots_repo.CashflowCancellationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

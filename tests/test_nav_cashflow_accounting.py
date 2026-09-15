@@ -133,8 +133,7 @@ class NavCashflowAccountingTests(TempDbMixin):
 
     async def test_full_withdrawal_roundoff_does_not_reset_nav_to_zero(self):
         units = 6911405.723465628
-        async with db_repo.transaction() as db:
-            await db.execute("UPDATE user_portfolio SET quantity=10000.1 WHERE google_sub='u1' AND stock_code='CASH_KRW'")
+        await portfolio_repo.save_portfolio_item("u1", "CASH_KRW", "원화", 10000.1, 1)
         await repo.save_snapshot("u1", "2026-08-31", 10000.1, 10000.1, 10000.1 / units, units)
         await repo.add_cashflow_and_sync_cash("u1", "2026-09-01", "withdrawal", 10000.1, None, None, None)
         empty = await self.settle("2026-09-01", 0)

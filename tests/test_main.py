@@ -162,7 +162,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
             response = await portfolio.delete_portfolio_item(" 004800 ", request)
 
         self.assertEqual(response, {"ok": True})
-        deleter.assert_awaited_once_with("u1", "004800")
+        deleter.assert_awaited_once_with("u1", "004800", None)
 
     async def test_delete_portfolio_item_reports_missing_row(self):
         request = _request_with_headers("/api/portfolio/004800")

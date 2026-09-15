@@ -89,7 +89,15 @@ async def list_accounts(google_sub: str) -> list[dict]:
         "FROM portfolio_accounts WHERE google_sub = ? ORDER BY sort_order, created_at",
         (google_sub,),
     )
-    return [dict(r) for r in await cursor.fetchall()]
+    result = [dict(r) for r in await cursor.fetchall()]
+    for item in result:
+        link = await (await db.execute("SELECT account_mask,environment,last_sync_at,sync_error,balances_json,include_overseas FROM broker_account_links WHERE google_sub=? AND account_id=?",
+                                      (google_sub, item["account_id"]))).fetchone()
+        item["broker"] = "namuh" if link else None
+        item["connection"] = dict(link) if link else None
+        count = await (await db.execute("SELECT COUNT(*) AS n FROM account_holdings WHERE google_sub=? AND account_id=?", (google_sub, item["account_id"]))).fetchone()
+        item["holdings_count"] = count["n"]
+    return result
 
 
 async def get_account(google_sub: str, account_id: str) -> dict | None:
@@ -232,6 +240,10 @@ async def delete_account(google_sub: str, account_id: str) -> None:
 
         db = await get_db()
         # 보유 종목을 default 계좌로 재귀속 (orphan NULL 방지).
+        held = await (await db.execute("SELECT 1 FROM account_holdings WHERE google_sub=? AND account_id=? LIMIT 1", (google_sub, account_id))).fetchone()
+        linked = await (await db.execute("SELECT 1 FROM broker_account_links WHERE google_sub=? AND account_id=?", (google_sub, account_id))).fetchone()
+        if held or linked:
+            raise AccountError("보유 잔고 또는 NH 연결이 있는 계좌는 삭제할 수 없습니다. 잔고 정리와 연결 해제를 먼저 진행해 주세요.")
         await db.execute(
             "UPDATE user_portfolio SET account_id = ? WHERE google_sub = ? AND account_id = ?",
             (default_id, google_sub, account_id),

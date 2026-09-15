@@ -1,0 +1,178 @@
+"""NH 계좌 스냅샷을 완전히 조회한 뒤 원장·합산 잔고를 원자적으로 교체한다."""
+
+import asyncio
+import json
+import math
+import re
+from datetime import datetime, timezone
+
+from repositories import account_holdings as holdings
+from repositories import brokers
+from repositories.broker_secrets import BrokerError
+from repositories.db import transaction
+from services.brokers import namuh
+
+_sync_locks: dict[str, asyncio.Lock] = {}
+
+
+def number(row: dict, key: str) -> float:
+    try:
+        raw = row[key]
+        if isinstance(raw, bool) or raw is None or raw == "":
+            raise ValueError
+        value = float(str(raw).replace(",", ""))
+        if not math.isfinite(value):
+            raise ValueError
+        return value
+    except (KeyError, TypeError, ValueError):
+        raise BrokerError("나무 잔고의 수량·금액이 누락되거나 올바르지 않아 갱신하지 않았습니다.") from None
+
+
+def summary(page: dict) -> dict:
+    block = page.get("Output_0")
+    if isinstance(block, list) and len(block) == 1:
+        block = block[0]
+    if not isinstance(block, dict) or not block:
+        raise BrokerError("나무 잔고 합계가 없어 동기화를 완료할 수 없습니다.")
+    return block
+
+
+def records(page: dict) -> list[dict]:
+    rows = page.get("Output_1", [])
+    if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
+        raise BrokerError("나무 보유종목 목록 형식이 올바르지 않습니다.")
+    return rows
+
+
+def domestic_code(raw: str) -> str:
+    code = str(raw).strip()
+    if re.fullmatch(r"KR7[0-9A-Z]{6}[0-9]{3}", code):
+        code = code[3:9]
+    if re.fullmatch(r"A[0-9A-Z]{6}", code):
+        code = code[1:]
+    if not re.fullmatch(r"[0-9][0-9A-Z]{5}", code):
+        raise BrokerError("주식 외 상품 또는 알 수 없는 NH 종목코드가 있어 자동 동기화를 보류했습니다.")
+    return code
+
+
+def foreign_code(raw: str, country: str) -> str:
+    code = str(raw).strip().upper()
+    if not re.fullmatch(r"[A-Z0-9.-]{1,16}", code):
+        raise BrokerError("해외 종목코드를 해석할 수 없습니다.")
+    suffix = {"200": "", "070": ".T", "120": ".HK", "160": ".SS", "170": ".SZ"}.get(country)
+    if suffix is None:
+        raise BrokerError("지원되지 않는 해외시장입니다.")
+    if country == "200":
+        return code.replace(".", "-")
+    if suffix and not code.endswith(suffix):
+        code = ((code.lstrip("0") or "0").zfill(4) if country in {"070", "120"} else code) + suffix
+    return code
+
+
+async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
+    cid, env, account = link["credential_id"], link["environment"], link["account_no"]
+    own_accounts = await namuh.accounts(user, cid)
+    if {"account_no": account, "environment": env} not in own_accounts:
+        raise BrokerError("앱키에서 연결 계좌를 확인할 수 없습니다. 계좌 연결을 확인해 주세요.")
+    domestic = await namuh.pages(user, cid, "/krstock/inquiry/v1/balance", {
+        "act_no": account, "bnc_bse_cd": "1", "ltg_aot_dit_cd": "9", "aet_bse": "1",
+        "qut_dit_cd": "UNT", "aly_qut_cd": "2",
+    }, env)
+    total = summary(domestic[0])
+    if any(number({key: total.get(key) or 0}, key) != 0 for key in ("fnn_amt", "rba", "lon_amt")):
+        raise BrokerError("융자·미수·대출이 있는 계좌는 자동 합산을 지원하지 않습니다. 수동 계좌로 관리해 주세요.")
+    balances = {"KRW": {key: number(total, key) for key in ("dca", "nxt_dd_dca", "nxt2_dd_dca", "orr_pbl_amt", "drn_pbl_amt")}}
+    output = []
+    for page in domestic:
+        for row in records(page):
+            qty = number(row, "itg_bnc_qty")
+            if not qty:
+                continue
+            output.append({"stock_code": domestic_code(row.get("iem_cd", "")), "stock_name": str(row.get("iem_nm") or row["iem_cd"]),
+                           "quantity": qty, "avg_price": number(row, "phs_pr"), "avg_price_currency": "KRW", "currency": "KRW"})
+    output.append({"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": balances["KRW"]["nxt2_dd_dca"],
+                   "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"})
+    if link.get("include_overseas", True):
+        for country in ("200", "070", "120", "160", "170"):
+            pages = await namuh.pages(user, cid, "/gbstock/inquiry/v1/balance", {
+                "act_no": account, "qut_iqr_dit_cd": "9", "fc_sec_trd_nat_cd": country, "cur_cd": "KRW", "xns_dit_cd": "1",
+            }, env)
+            summary(pages[0])
+            for page in pages:
+                for row in records(page):
+                    qty = number(row, "cns_bse_bnc_qty")
+                    if not qty:
+                        continue
+                    currency = str(row.get("cur_cd", "")).strip()
+                    if currency not in {"USD", "JPY", "HKD", "CNY"}:
+                        raise BrokerError("해외 잔고의 거래 통화를 확인할 수 없습니다.")
+                    output.append({"stock_code": foreign_code(row.get("iem_cd", ""), country),
+                                   "stock_name": str(row.get("iem_nm") or row.get("oss_iem_eng_nm") or row["iem_cd"]),
+                                   "quantity": qty, "avg_price": number(row, "fc_phs_uit_pr"), "avg_price_currency": currency, "currency": currency})
+        margins = await namuh.pages(user, cid, "/gbstock/inquiry/v1/margin", {"act_no": account}, env)
+        for page in margins:
+            rows = page.get("Output_0")
+            if isinstance(rows, dict):
+                rows = [rows]
+            if not isinstance(rows, list):
+                raise BrokerError("통화별 예수금 조회가 완료되지 않았습니다.")
+            for row in rows:
+                currency = str(row.get("cur_cd", "")).strip()
+                if currency == "KRW":
+                    continue
+                if currency not in {"USD", "JPY", "HKD", "CNY"}:
+                    raise BrokerError("지원되지 않는 예수금 통화입니다.")
+                if currency in balances:
+                    raise BrokerError("중복된 통화 잔고가 반환되어 갱신하지 않았습니다.")
+                balances[currency] = {key: number(row, key) for key in ("fc_dca", "stl_af_fc_dca", "fc_drn_pbl_amt")}
+                output.append({"stock_code": "CASH_" + currency, "stock_name": currency + " 현금",
+                               "quantity": balances[currency]["stl_af_fc_dca"], "avg_price": 1, "avg_price_currency": currency, "currency": currency})
+    merged = {}
+    for row in output:
+        code = row["stock_code"]
+        if not code.startswith("CASH_") and (row["quantity"] < 0 or row["avg_price"] < 0):
+            raise BrokerError("음수 보유 수량 또는 매입가가 반환되어 동기화를 보류했습니다.")
+        if code in merged:
+            before = merged[code]
+            qty = before["quantity"] + row["quantity"]
+            if before["currency"] != row["currency"] or not qty:
+                raise BrokerError("NH 잔고의 중복 종목을 합산할 수 없습니다.")
+            before["avg_price"] = (before["quantity"] * before["avg_price"] + row["quantity"] * row["avg_price"]) / qty
+            before["quantity"] = qty
+        else:
+            merged[code] = row
+    return list(merged.values()), balances
+
+
+async def sync_account(user: str, aid: str) -> dict:
+    async with _sync_locks.setdefault(aid, asyncio.Lock()):
+        link = await brokers.get_link(user, aid)
+        try:
+            rows, balances = await fetch_snapshot(user, link)
+            async with transaction() as db:
+                current = await brokers.get_link(user, aid)
+                if current["credential_id"] != link["credential_id"] or current["account_fingerprint"] != link["account_fingerprint"]:
+                    raise BrokerError("동기화 중 계좌 연결이 변경되었습니다. 다시 시도해 주세요.")
+                await holdings.initialize(db, user)
+                previous = await holdings.list_positions(user, aid)
+                other = [r for r in await holdings.list_positions(user) if r["account_id"] != aid]
+                for row in rows:
+                    if any(r["stock_code"] == row["stock_code"] and r["currency"] != row["currency"] for r in other):
+                        raise BrokerError("다른 계좌와 종목 거래 통화가 달라 동기화를 보류했습니다.")
+                    if not row["stock_code"].startswith("CASH_") and any(r["stock_code"] == row["stock_code"] and r["quantity"] * row["quantity"] < 0 for r in other):
+                        raise BrokerError("다른 계좌의 공매도 잔고와 충돌하여 동기화를 보류했습니다.")
+                now = datetime.now(timezone.utc).isoformat()
+                created = {r["stock_code"]: r["created_at"] for r in previous}
+                await db.execute("DELETE FROM account_holdings WHERE google_sub=? AND account_id=?", (user, aid))
+                for row in rows:
+                    await db.execute("INSERT INTO account_holdings VALUES (?,?,?,?,?,?,?,?,?,?)", (user, aid, row["stock_code"], row["stock_name"],
+                        row["quantity"], row["avg_price"], row["avg_price_currency"], row["currency"], created.get(row["stock_code"], now), now))
+                for code in {r["stock_code"] for r in previous + rows}:
+                    await holdings.rebuild(user, code)
+                await db.execute("UPDATE broker_account_links SET last_sync_at=?,sync_error=NULL,balances_json=? WHERE google_sub=? AND account_id=?",
+                                 (now, json.dumps(balances), user, aid))
+            return {"ok": True, "holdings_count": len(rows), "synced_at": now, "balances": balances}
+        except BrokerError as exc:
+            async with transaction() as db:
+                await db.execute("UPDATE broker_account_links SET sync_error=? WHERE google_sub=? AND account_id=?", (str(exc), user, aid))
+            raise

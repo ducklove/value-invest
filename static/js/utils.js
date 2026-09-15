@@ -322,6 +322,15 @@ function _apiErrorMessageFromBody(body) {
 }
 
 async function apiFetchJson(path, options = {}) {
+  if (typeof PfStore !== 'undefined' && PfStore.accountId && path.startsWith('/api/portfolio/') && !['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase())) {
+    options = { ...options, headers: { ...(options.headers || {}), 'X-Portfolio-Account': PfStore.accountId } };
+    if (/^\/api\/portfolio\/(trades|dividend-receipts|distributions)(\/|$)/.test(path) && options.body) {
+      const body = JSON.parse(options.body);
+      // 응답 유실 재시도에는 최초 요청의 계좌를 유지한다.
+      if (!body.account_id) body.account_id = PfStore.accountId;
+      options.body = JSON.stringify(body);
+    }
+  }
   const hasFallback = options && Object.prototype.hasOwnProperty.call(options, 'fallback');
   const { errorMessage = '', fallback = null, ...fetchOptions } = options || {};
   const resp = await apiFetch(path, fetchOptions);

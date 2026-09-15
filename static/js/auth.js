@@ -23,15 +23,18 @@ async function loadAuthConfig() {
 async function loadCurrentUser() {
   if (!hasApiConfiguration()) {
     currentUser = null;
+    if (typeof pfResetAccounts === 'function') pfResetAccounts();
     return currentUser;
   }
 
   try {
     const data = await apiFetchJson('/api/auth/me');
+    if (currentUser?.google_sub !== data.user?.google_sub && typeof pfResetAccounts === 'function') pfResetAccounts();
     currentUser = data.user || null;
   } catch (error) {
     if (error?.status && error.status < 500) {
       currentUser = null;
+      if (typeof pfResetAccounts === 'function') pfResetAccounts();
     }
     // 네트워크 오류/타임아웃 — 인증 여부를 알 수 없는 상태. 여기서 null로
     // 덮으면 DDNS 순단 같은 일시 장애마다 로그인이 풀린 것처럼 깜빡인다.
@@ -474,6 +477,7 @@ async function logout() {
     }
     currentUser = null;
     closeProfileModal();
+    if (typeof pfResetAccounts === 'function') pfResetAccounts();
     renderAuthState();
     refreshActivePreference();
     trackEvent('logout', { provider: 'account' });

@@ -1,0 +1,83 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {JSDOM} from 'jsdom';
+
+function setup() {
+  const dom = new JSDOM(readFileSync(new URL('../../static/index.html', import.meta.url), 'utf8'), {url:'https://example.test/portfolio',runScripts:'outside-only'});
+  const w = dom.window;
+  w.PfStore = {accountId:'',items:[],edit:{},manualOrder:{}};
+  w.escapeHtml = value => String(value).replaceAll('<','&lt;');
+  w.loadPortfolio = async () => {};
+  const sockets = [];
+  w.WebSocket = class { constructor() { sockets.push(this); } close() {this.closed = true;} };
+  w.QuoteManager = {onQuote: (...args) => { w.lastQuote = args; }};
+  for (const dialog of w.document.querySelectorAll('dialog')) {
+    dialog.showModal = () => {dialog.open = true;};
+    dialog.close = () => {dialog.open = false; dialog.dispatchEvent(new w.Event('close'));};
+  }
+  w.eval(readFileSync(new URL('../../static/js/portfolio-accounts.js',import.meta.url),'utf8') + '\nwindow.PfAccounts = PfAccounts;');
+  w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+  return {dom,w,sockets, el: id => w.document.getElementById(id)};
+}
+
+test('합산의 다중 계좌 편집은 계좌 선택으로 보내고 수동 계좌 선택 시 허용한다', async () => {
+  const s=setup();
+  try {
+    s.w.apiFetchJson = async () => [{account_id:'a',name:'일반'},{account_id:'b',name:'연금'}];
+    await s.w.pfLoadAccounts();
+    assert.equal(s.w.pfAccountNeedsSelection(),true);
+    s.w.eval('PfStore.accountId="b"');
+    assert.equal(Boolean(s.w.pfAccountNeedsSelection()),false);
+    s.w.eval('PfAccounts.rows[1].broker="namuh"');
+    assert.equal(Boolean(s.w.pfAccountNeedsSelection()),true);
+  } finally {s.dom.window.close();}
+});
+
+test('나무 키 확인·미리보기는 연결을 생성하지 않고 키는 확인 후 입력창에서 지운다', async () => {
+  const s=setup(), calls=[];
+  try {
+    s.w.apiFetchJson = async (path, options) => {
+      calls.push({path,body:JSON.parse(options.body)});
+      return path.endsWith('/credentials') ? {accounts:[{account_mask:'••••8901',environment:'live',selection:'opaque'}]} : {items:[]};
+    };
+    s.w.pfOpenNhConnection({account_id:'a',name:'NH'});
+    s.el('pfNhKey').value='private-key'; s.el('pfNhSecret').value='private-secret';
+    await s.w.pfNhWork('verify');
+    assert.equal(s.el('pfNhKey').value,'');
+    assert.equal(s.el('pfNhSecret').value,'');
+    await s.w.pfNhWork('preview');
+    s.el('pfNhDialog').close();
+    assert.deepEqual(calls.map(row => row.path), ['/api/portfolio/namuh/credentials','/api/portfolio/accounts/a/namuh/preview']);
+    assert.equal(s.w.localStorage.length,0);
+  } finally {s.dom.window.close();}
+});
+
+test('NH 브라우저 연결을 공유하고 사용자 상태 초기화 시 소켓·재연결·계좌 정보를 지운다', async () => {
+  const s=setup();
+  try {
+    s.w.apiFetchJson = async () => [{account_id:'a',name:'NH',broker:'namuh',connection:{}}];
+    await s.w.pfLoadAccounts(); await s.w.pfLoadAccounts(true);
+    assert.equal(s.sockets.length,1);
+    s.sockets[0].onmessage({data:JSON.stringify({type:'quote',code:'005930',price:100})});
+    assert.equal(s.w.lastQuote[0],'005930');
+    s.w.pfResetAccounts();
+    assert.equal(s.sockets[0].closed,true);
+    assert.equal(s.w.eval('PfAccounts.rows.length'),0);
+    assert.equal(s.w.eval('PfAccounts.retry'),null);
+  } finally {s.dom.window.close();}
+});
+
+test('로그아웃 후 늦게 도착한 이전 사용자의 계좌 응답으로 연결을 재개하지 않는다', async () => {
+  const s=setup();
+  try {
+    let finish;
+    s.w.apiFetchJson = () => new Promise(resolve => {finish=resolve;});
+    const pending=s.w.pfLoadAccounts();
+    s.w.pfResetAccounts();
+    finish([{account_id:'old',name:'이전 사용자',broker:'namuh'}]);
+    await pending;
+    assert.equal(s.w.eval('PfAccounts.rows.length'),0);
+    assert.equal(s.sockets.length,0);
+  } finally {s.dom.window.close();}
+});
