@@ -2,6 +2,7 @@
 // Split from static/js/portfolio.js to keep portfolio features maintainable.
 // File-local: debounce timer for the registration search box (only used here).
 let pfSearchTimeout = null;
+let _pfAddSearchVersion = 0;
 async function pfChangeGroup(stockCode, groupName) {
   const item = PfStore.items.find(i => i.stock_code === stockCode);
   if (!item) return;
@@ -289,26 +290,9 @@ async function clearPortfolioTargetPrice(stockCode) {
   }
 }
 
-async function deletePortfolioItem(stockCode) {
-  // Other destructive actions in this file (group delete, cashflow delete,
-  // CSV replace) all confirm first; this one was the outlier, so a
-  // misclick on the ✕ in a dense table silently wiped a holding. Look up
-  // the display name so the operator sees which stock they're about to
-  // remove, not just an opaque code.
+function deletePortfolioItem(stockCode) {
   const item = PfStore.items.find(i => i.stock_code === stockCode);
-  const displayName = item && item.stock_name
-    ? `${item.stock_name} (${stockCode})`
-    : stockCode;
-  if (!confirm(`"${displayName}" 를 포트폴리오에서 삭제할까요?`)) return;
-  try {
-    await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
-      method: 'DELETE',
-      errorMessage: '삭제에 실패했습니다.',
-    });
-    PfStore.items = PfStore.items.filter(i => i.stock_code !== stockCode);
-    renderPortfolio();
-    await loadPortfolio();
-  } catch (e) { reportApiError(e, '삭제'); }
+  if (item && !PfStore.edit.savingCode) pfOpenHoldingRemoval(item);
 }
 
 function pfSetAddPanelOpen(open) {
@@ -323,6 +307,8 @@ function pfSetAddPanelOpen(open) {
     toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
   if (!open) {
+    clearTimeout(pfSearchTimeout);
+    _pfAddSearchVersion += 1;
     if (dropdown) dropdown.classList.remove('show');
     if (input) input.value = '';
     return;
@@ -366,15 +352,21 @@ function pfInitPortfolioTextSearch() {
 (function initPfSearch() {
   document.addEventListener('DOMContentLoaded', () => {
     pfInitPortfolioTextSearch();
+    pfInitInitialRegistration();
+    pfInitHoldingRemoval();
     const addToggle = document.getElementById('pfAddToggle');
     if (addToggle) addToggle.addEventListener('click', pfToggleAddPanel);
 
     const input = document.getElementById('pfAddInput');
     const dropdown = document.getElementById('pfDropdown');
     if (!input || !dropdown) return;
+    document.querySelectorAll('input[name="pfAddMode"]').forEach(radio => {
+      radio.addEventListener('change', () => { _pfAddSearchVersion += 1; });
+    });
 
     input.addEventListener('input', () => {
       clearTimeout(pfSearchTimeout);
+      const version = ++_pfAddSearchVersion;
       const raw = input.value.trim();
       if (raw.length < 1) { dropdown.classList.remove('show'); return; }
 
@@ -390,6 +382,7 @@ function pfInitPortfolioTextSearch() {
               ? pfFetchJson(`/api/portfolio/search-foreign?q=${encodeURIComponent(raw)}&limit=8`, [], { timeoutMs: 5000 })
               : Promise.resolve([]),
           ]);
+          if (version !== _pfAddSearchVersion) return;
           const results = Array.isArray(domesticRaw) ? domesticRaw : [];
           const foreignItems = (Array.isArray(foreignRaw) ? foreignRaw : [])
             .map(pfForeignSearchItem)
@@ -424,16 +417,19 @@ function pfInitPortfolioTextSearch() {
           }
 
           const specialItems = matchedSpecial.map(a => ({ code: a.code, name: a.name, saveName: a.name, currency: '' }));
+          if (version !== _pfAddSearchVersion) return;
           pfRenderAddDropdown(dropdown, [...specialItems, ...items, ...foreignItems]);
         } catch (e) { console.warn(e); }
       }, 200);
     });
 
     // Submit the current input — shared by the Enter key and the
-    // explicit "등록" button. Resolves the typed text to a canonical
+    // explicit "다음" button. Resolves the typed text to a canonical
     // stock_code via the backend (so typing "삼성전자" works just as
     // well as "005930") and then falls through to pfAddFromSearch.
     const submitAdd = async () => {
+      const version = ++_pfAddSearchVersion;
+      clearTimeout(pfSearchTimeout);
       dropdown.classList.remove('show');
       const q = input.value.trim();
       if (!q) return;
@@ -449,6 +445,7 @@ function pfInitPortfolioTextSearch() {
       }
       if (pfIsForeignSearchQuery(q)) {
         const foreignRaw = await pfFetchJson(`/api/portfolio/search-foreign?q=${encodeURIComponent(q)}&limit=5`, [], { timeoutMs: 5000 });
+        if (version !== _pfAddSearchVersion) return;
         const foreignItem = (Array.isArray(foreignRaw) ? foreignRaw : []).map(pfForeignSearchItem).filter(Boolean)[0];
         if (foreignItem) {
           pfAddFromSearch(foreignItem.code, foreignItem.saveName || foreignItem.name, foreignItem.currency || '');
@@ -456,6 +453,7 @@ function pfInitPortfolioTextSearch() {
         }
       }
       const data = await pfFetchJson(`/api/portfolio/resolve-name?code=${encodeURIComponent(q)}`, {}, { timeoutMs: 5000 });
+      if (version !== _pfAddSearchVersion) return;
       const resolvedCode = data.stock_code || q;
       pfAddFromSearch(resolvedCode, data.stock_name || q);
     };
@@ -464,6 +462,8 @@ function pfInitPortfolioTextSearch() {
       if (e.key === 'Enter') {
         e.preventDefault();
         submitAdd();
+      } else if (e.key === 'Escape') {
+        pfSetAddPanelOpen(false);
       }
     });
 
@@ -479,13 +479,14 @@ function pfInitPortfolioTextSearch() {
 })();
 
 async function pfAddFromSearch(code, name, currency = '') {
+  const version = ++_pfAddSearchVersion;
+  clearTimeout(pfSearchTimeout);
+  const mode = document.querySelector('input[name="pfAddMode"]:checked')?.value || 'holding';
   document.getElementById('pfDropdown').classList.remove('show');
-  document.getElementById('pfAddInput').value = '';
-  pfSetAddPanelOpen(false);
   let resolvedCode = String(code || '').trim();
   let resolvedName = String(name || '').trim();
   let resolvedCurrency = String(currency || '').trim().toUpperCase();
-  if (!resolvedCurrency) {
+  if (!resolvedCurrency || resolvedName === resolvedCode) {
     try {
       const d = await apiFetchJson(`/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}`, {
         timeoutMs: 5000,
@@ -497,27 +498,26 @@ async function pfAddFromSearch(code, name, currency = '') {
       console.warn('portfolio code canonicalization failed', e);
     }
   }
+  if (version !== _pfAddSearchVersion) return;
+  if (resolvedCode.startsWith('CASH_')) resolvedCurrency = resolvedCode.slice(5);
+  else if (!pfCanEditAvgPriceCurrency(resolvedCode)) resolvedCurrency = 'KRW';
+  else if (!resolvedCurrency) resolvedCurrency = pfInferTickerCurrency(resolvedCode);
+  if (mode === 'buy') {
+    try {
+      await loadFeatureScripts('trades');
+      if (version !== _pfAddSearchVersion) return;
+      pfSetAddPanelOpen(false);
+      pfOpenTrade(resolvedCode, { code: resolvedCode, name: resolvedName, currency: resolvedCurrency });
+    } catch (error) { reportApiError(error, '매수 입력'); }
+    return;
+  }
+  pfSetAddPanelOpen(false);
   const existing = PfStore.items.find(i => i.stock_code === resolvedCode);
   if (existing) {
     startPortfolioEdit(resolvedCode);
     return;
   }
-  try {
-    // Save the canonical code so aliases like KCC cannot create a foreign ticker row.
-    const body = { stock_name: resolvedName, quantity: 1, avg_price: 0 };
-    if (resolvedCurrency) body.currency = resolvedCurrency;
-    const saved = await apiFetchJson(`/api/portfolio/${encodeURIComponent(resolvedCode)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      errorMessage: '추가에 실패했습니다.',
-    });
-    pfApplySavedPortfolioItem(saved, resolvedCode, resolvedName, resolvedCurrency);
-    startPortfolioEdit(saved.stock_code || resolvedCode);
-    setTimeout(() => {
-      loadPortfolio({ force: true }).catch(e => reportApiError(e, '포트폴리오 동기화', { silent: true }));
-    }, 0);
-  } catch (e) { reportApiError(e, '추가'); }
+  pfOpenInitialRegistration({ code: resolvedCode, name: resolvedName, currency: resolvedCurrency });
 }
 
 let _PREFERRED_PAIR_BY_CODE = {};

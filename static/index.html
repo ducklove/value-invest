@@ -351,12 +351,17 @@ function trackEvent(name, params = {}) {
     <div class="pf-add-panel" id="pfAddPanel" style="display:none;">
       <div class="pf-add-panel-head">
         <strong>개별 종목 등록</strong>
-        <span>종목명이나 코드를 입력하고 선택하면 기본값으로 추가한 뒤 바로 수정모드가 열립니다.</span>
+        <span>초기 잔고를 입력하거나 실제 매수를 기록하세요. 저장을 눌러야 반영됩니다.</span>
       </div>
+      <fieldset class="pf-add-modes">
+        <legend>입력 목적</legend>
+        <label><input type="radio" name="pfAddMode" value="holding" checked><span><strong>초기 등록</strong><small>종목·보유 수량 등록 · 현금 변동 없음</small></span></label>
+        <label><input type="radio" name="pfAddMode" value="buy"><span><strong>매수</strong><small>종목·매수 수량 반영 + 해당 통화 현금 차감</small></span></label>
+      </fieldset>
       <div class="pf-add-panel-form">
         <input class="pf-add-input" id="pfAddInput" placeholder="종목코드 또는 종목명 (예: 005930, 삼성전자)" autocomplete="off">
         <div class="dropdown pf-dropdown" id="pfDropdown"></div>
-        <button class="pf-add-btn" id="pfAddBtn" type="button">등록</button>
+        <button class="pf-add-btn" id="pfAddBtn" type="button">다음</button>
       </div>
     </div>
     <div class="pf-csv-panel" id="pfCsvPanel" style="display:none;">
@@ -1189,6 +1194,35 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-trends.js" defer></script>
 <script src="./js/portfolio-trends-group-weight.js" defer></script>
 <script src="./js/portfolio-group-composition.js" defer></script>
+<dialog id="pfRegisterDialog" class="pf-trade-dialog" aria-labelledby="pfRegisterTitle">
+  <div class="pf-trade-header"><h2 id="pfRegisterTitle">초기 등록</h2><button type="button" id="pfRegisterClose" aria-label="초기 등록 닫기">×</button></div>
+  <p class="pf-trade-help">포트폴리오의 시작 잔고를 입력하세요. 종목과 보유 수량만 등록하며 현금 차감이나 매매 내역은 발생하지 않습니다.</p>
+  <form id="pfRegisterForm">
+    <fieldset id="pfRegisterFields" class="pf-trade-fields">
+      <p id="pfRegisterSelected" class="pf-trade-wide pf-trade-help"></p>
+      <label class="pf-trade-wide">종목명<input id="pfRegisterName" required></label>
+      <label><span id="pfRegisterQuantityLabel">보유 수량</span><input id="pfRegisterQuantity" type="number" min="-1000000000" max="1000000000" step="any" inputmode="decimal" required></label>
+      <label id="pfRegisterPriceLabel">평균 매입가<input id="pfRegisterPrice" type="number" min="0" max="1000000000000" step="any" inputmode="decimal" required></label>
+      <label id="pfRegisterPriceCurrencyLabel">매입가 통화<select id="pfRegisterPriceCurrency"></select></label>
+      <label>등록일자 (선택)<input id="pfRegisterDate" type="date"></label>
+    </fieldset>
+    <p id="pfRegisterStatus" class="pf-trade-help" role="status" aria-live="polite"></p>
+    <div class="pf-register-actions"><button id="pfRegisterCancel" class="pf-csv-btn cancel" type="button">취소</button><button id="pfRegisterSave" class="pf-add-btn" type="submit">초기 잔고 등록</button></div>
+  </form>
+</dialog>
+
+<dialog id="pfRemoveDialog" class="pf-trade-dialog" aria-labelledby="pfRemoveTitle">
+  <div class="pf-trade-header"><h2 id="pfRemoveTitle">보유분 정리</h2><button id="pfRemoveClose" type="button" aria-label="보유분 정리 닫기">×</button></div>
+  <p id="pfRemoveSelected" class="pf-trade-help"></p>
+  <div class="pf-remove-choices">
+    <button id="pfRemoveSell" class="pf-add-btn" type="button"><strong>매도 기록</strong><span>보유 수량 감소 + 해당 통화 현금 증가</span></button>
+    <p id="pfRemoveSellHelp" class="pf-trade-help">보유 수량을 미리 채웁니다. 체결가와 비용을 입력하고 변경 내용을 확인한 뒤 저장하세요.</p>
+    <button id="pfRemoveDelete" class="pf-csv-btn danger" type="button"><strong>등록 삭제 (입력 정정)</strong><span>보유 목록에서 삭제 · 현금 변동 없음</span></button>
+    <p class="pf-trade-help">잘못 등록한 항목만 삭제하세요. 등록 삭제는 매도 내역을 만들지 않습니다.</p>
+  </div>
+  <p id="pfRemoveStatus" class="pf-trade-help" role="status" aria-live="polite"></p>
+</dialog>
+
 <dialog id="pfCfDialog" class="pf-trade-dialog" aria-labelledby="pfCfTitle">
   <div class="pf-trade-header"><h2 id="pfCfTitle">자금 입출금</h2><button type="button" id="pfCfClose" aria-label="자금 입출금 닫기">×</button></div>
   <p class="pf-trade-help">입금·출금액을 현재 원화 현금에 반영합니다. 배당금 분배는 ‘분배금 출금’을 이용하세요.</p>

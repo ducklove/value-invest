@@ -263,10 +263,10 @@ def test_group_management_daily_profit_uses_full_amount_format():
     assert "${fmtSignedKrw(dailyPnl)}" not in source
 
 def test_portfolio_delete_uses_encoded_url_and_server_reload():
-    source = (JS / "portfolio-actions.js").read_text(encoding="utf-8")
+    source = (JS / "portfolio-add-search.js").read_text(encoding="utf-8")
 
-    assert "/api/portfolio/${encodeURIComponent(stockCode)}" in source
-    assert "await loadPortfolio();" in source
+    assert "/api/portfolio/${encodeURIComponent(item.stock_code)}" in source
+    assert "loadPortfolio({ force: true }).catch" in source
 
 def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     store = (JS / "portfolio-store.js").read_text(encoding="utf-8")
@@ -492,10 +492,7 @@ def test_portfolio_add_canonicalizes_alias_before_save():
 
     assert "portfolio code canonicalization failed" in source
     assert "/api/portfolio/resolve-name?code=${encodeURIComponent(resolvedCode)}" in source
-    assert "/api/portfolio/${encodeURIComponent(resolvedCode)}" in source
-    assert "pfApplySavedPortfolioItem(saved, resolvedCode, resolvedName, resolvedCurrency)" in source
-    assert "startPortfolioEdit(saved.stock_code || resolvedCode)" in source
-    assert "loadPortfolio({ force: true }).catch" in source
+    assert "pfOpenInitialRegistration({ code: resolvedCode" in source
 
 def test_portfolio_add_has_fast_foreign_search_path():
     source = (
@@ -508,7 +505,7 @@ def test_portfolio_add_has_fast_foreign_search_path():
     assert "function pfInferTickerCurrency" in source
     assert "/api/portfolio/search-foreign?q=${encodeURIComponent(raw)}" in source
     assert "/api/portfolio/search-foreign?q=${encodeURIComponent(q)}" in source
-    assert "if (resolvedCurrency) body.currency = resolvedCurrency;" in source
+    assert "currency: resolvedCurrency" in source
 
 def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
     source = (JS / "quote-manager.js").read_text(encoding="utf-8")

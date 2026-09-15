@@ -689,8 +689,8 @@ function renderPortfolio(options = {}) {
       <td class="pf-col-memo">${memoCell}</td>
       <td class="pf-col-act"><div class="pf-row-actions">
         ${document.getElementById('pfTradeDialog') && r.qty >= 0 ? `<button type="button" class="pf-row-btn js-pf-trade" title="${isCash ? '다른 통화로 환전 기록' : '매수·매도 기록'}">${isCash ? '환전' : '매매'}</button>` : ''}
-        <button type="button" class="pf-row-btn edit js-pf-edit" title="편집">✎</button>
-        <button type="button" class="pf-row-btn delete js-pf-delete" title="삭제">✕</button>
+        <button type="button" class="pf-row-btn edit js-pf-edit" title="보유 수량·매입가 정정 (현금 변동 없음)" aria-label="${escapeHtml(r.stock_name)} 보유 정보 편집">✎</button>
+        <button type="button" class="pf-row-btn delete js-pf-delete" title="매도 또는 등록 삭제" aria-label="${escapeHtml(r.stock_name)} 보유분 정리">✕</button>
       </div></td>
     </tr>`;
   }).join('');

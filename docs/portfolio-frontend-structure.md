@@ -15,6 +15,7 @@
 - 심층 분석 진입: 수익 분해, 논거, 보고서, 리스크, 리밸런싱, 배당, 투자일지 7개.
 - 가계부 진입: `portfolio-household.js`.
 - 매매 기록 열기: `portfolio-trades.js` (`trades` 그룹). 현금·현물의 원자적 변경과 재시도 계약은 [매매 기록](portfolio-trades.md)을 따른다.
+- 개별 등록의 초기 잔고 입력·보유분 정리 선택 창: `portfolio-add-search.js`. 초안은 창 안에서만 유지하고 저장 전 보유 목록에 넣지 않는다. 매수·매도는 같은 `trades` 그룹으로 종목과 입력 기본값을 전달한다.
 - 배당 수취 / 분배금 출금: `portfolio-dividend-receipts.js` (`dividend-receipts` 그룹), `portfolio-distributions.js` (`distributions` 그룹). 캘린더 입력 준비와 NAV·총수익 분리 계약은 [배당금과 분배금](dividend-receipts.md)을 따른다.
 - 도구 진입: `insights.js`, `screener.js`, `masters.js`를 각 화면에서 로드.
 - `switchView()`·`pfSwitchTab()`은 필요한 파일이 준비되면 화면을 열며, 그 사이

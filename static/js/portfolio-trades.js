@@ -285,7 +285,7 @@ async function pfSaveTrade() {
   if (typeof pfRefreshTodayState === 'function') await Promise.allSettled([pfRefreshTodayState({ force: true, render: true })]);
 }
 
-function pfOpenTrade(code) {
+function pfOpenTrade(code, newItem = null, defaults = {}) {
   if (_pfTrade.busy) return;
   _pfTrade.search += 1;
   _pfTradeEl('Form').reset();
@@ -316,8 +316,10 @@ function pfOpenTrade(code) {
     _pfTradeEl('Status').textContent = '확인 중인 매매가 있습니다. 저장 결과를 먼저 확인해 주세요.';
   } else {
     _pfTradeInvalidate();
+    _pfTradeEl('Side').value = defaults.side || 'buy';
+    _pfTradeEl('Quantity').value = defaults.quantity ?? '';
     _pfTradeOptions(PfStore.items.map(i => ({ code: i.stock_code, name: i.stock_name, currency: i.currency })));
-    const selected = _pfTrade.choices.find(i => i.code === code);
+    const selected = _pfTrade.choices.find(i => i.code === code) || newItem;
     if (selected) _pfTradeSelect(selected);
     else _pfTradeCurrency();
     _pfTradeCosts();

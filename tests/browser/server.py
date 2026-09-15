@@ -91,6 +91,11 @@ async def groups(request: Request):
     return await holdings.get_portfolio_groups(user["google_sub"])
 
 
+@app.delete("/api/portfolio/{code}")
+async def delete_holding(code: str, request: Request):
+    return await portfolio.delete_portfolio_item(code, request)
+
+
 @app.get("/api/portfolio/cashflows")
 async def cashflows(request: Request):
     return await portfolio.get_cashflows(request)

@@ -3603,3 +3603,17 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
   .pf-divcal-date { grid-column:1; grid-row:1; }
   .pf-divcal-amount { grid-column:2; grid-row:1; }
 }
+
+/* 개별 입력: 초기 잔고 등록과 실제 매수의 현금 처리를 구분한다. */
+.pf-add-modes { display:flex; flex-wrap:wrap; gap:10px; border:0; padding:0; margin:12px 0; }
+.pf-add-modes legend { font-size:12px; color:var(--text-secondary); margin-bottom:6px; }
+.pf-add-modes label { display:flex; align-items:center; gap:8px; flex:1 1 230px; padding:10px; border:1px solid var(--border); border-radius:6px; cursor:pointer; }
+.pf-add-modes label:has(input:checked) { border-color:var(--accent); background:var(--surface); }
+.pf-add-modes strong, .pf-add-modes small { display:block; }
+.pf-add-modes strong { font-size:13px; }
+.pf-add-modes small { margin-top:4px; color:var(--text-secondary); font-size:12px; }
+.pf-register-actions { display:flex; justify-content:flex-end; gap:10px; }
+.pf-remove-choices button { display:block; width:100%; padding:12px; text-align:left; white-space:normal; }
+.pf-remove-choices button[hidden] { display:none; }
+.pf-remove-choices button strong, .pf-remove-choices button span { display:block; }
+.pf-remove-choices button span { margin-top:5px; font-size:12px; font-weight:400; }
