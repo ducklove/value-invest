@@ -157,7 +157,7 @@ function quantForward(row, currentEngine) {
   const ledger = f.payload?.ledger;
   return `${intro}<p>${f.status === 'active' ? '평가 중' : '평가 중지'} · 시작일 ${escapeHtml(f.start_date)} · 최근 확인 ${f.checked_at ? escapeHtml(new Date(f.checked_at * 1000).toLocaleString('ko-KR')) : '대기'}</p>
     ${f.error ? `<p class="quant-notice">${escapeHtml(f.error)}</p>` : ''}
-    ${ledger?.status === 'available' ? `<div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>전진 평가</th><th>비용 후 수익</th><th>최대 낙폭</th><th>가상 체결</th><th>현금</th></tr></thead><tbody>${ledger.scenarios.map(s => `<tr><th>${quantNames(row.config)[s.mode]}</th><td>${quantNumber(s.return_pct)}%</td><td>${quantNumber(s.max_drawdown_pct)}%</td><td>${s.trade_count}건</td><td>${quantNumber(s.ending_cash, 0)}원</td></tr>`).join('')}</tbody></table></div><p class="quant-muted">평가 기준일 ${escapeHtml(ledger.scenarios[0].nav.at(-1).date)} · 수정주가 단위 · 실제 주문 0건</p><button type="button" data-quant-action="export-forward" data-id="${id}">전진 원장·입력 저장</button>` : '<p class="quant-muted">시작일 이후 완료된 일봉을 기다립니다. 수익률은 아직 없습니다.</p>'}
+    ${ledger?.status === 'available' ? `<div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>전진 평가</th><th>비용 후 수익</th><th>최대 낙폭</th><th>가상 체결</th><th>현금</th></tr></thead><tbody>${ledger.scenarios.map(s => `<tr><th>${quantNames(row.config)[s.mode]}</th><td>${quantNumber(s.return_pct)}%</td><td>${quantNumber(s.max_drawdown_pct)}%</td><td>${s.trade_count}건</td><td>${quantNumber(s.ending_cash, 0)}원</td></tr>`).join('')}</tbody></table></div><p class="quant-muted">평가 기준일 ${escapeHtml(ledger.scenarios[0].nav.at(-1).date)} · 수정주가 단위 · 실제 주문 0건</p><button type="button" data-quant-action="export-forward" data-id="${id}">전진 원장·입력 저장</button>` : `<p class="quant-muted">${f.status === 'active' ? '시작일 이후 완료된 일봉을 기다립니다. 수익률은 아직 없습니다.' : '평가 자료가 쌓이기 전에 중지했습니다. 기록된 수익률은 없습니다.'}</p>`}
     ${f.status === 'active' ? `<button type="button" data-quant-action="stop-forward" data-id="${id}">전진 평가 중지</button>` : ''}`;
 }
 
@@ -205,7 +205,7 @@ async function quantClick(event) {
     if (action === 'cancel') await apiFetchJson(`/api/quant/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
     if (action === 'forward' || action === 'stop-forward') {
       await apiFetchJson(`/api/quant/runs/${encodeURIComponent(id)}/forward`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:action === 'forward'})});
-      document.getElementById('quantMessage').textContent = action === 'forward' ? '다음 한국 날짜부터 전진 평가가 고정됐습니다. 최초 체결까지 두 개의 새 일봉이 필요합니다.' : '전진 평가를 중지했습니다. 기존 원장은 보존됩니다.';
+      document.getElementById('quantMessage').textContent = action === 'forward' ? '다음 한국 날짜부터 전진 평가가 고정됐습니다. 최초 체결까지 최소 두 개의 새 일봉이 필요합니다.' : '전진 평가를 중지했습니다. 기존 원장은 보존됩니다.';
     }
     if (action === 'watch' || action === 'stop-watch') {
       await apiFetchJson(`/api/quant/runs/${encodeURIComponent(id)}/watch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: action === 'watch' }) });

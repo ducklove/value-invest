@@ -105,6 +105,8 @@ test('전진 평가 대기는 수익을 만들지 않고 중지 기록은 다시
   const stopped = dom.window.quantForward(row, true);
   assert(!stopped.includes('data-quant-action="forward"'));
   assert(!stopped.includes('stop-forward'));
+  assert.match(stopped, /자료가 쌓이기 전에 중지/);
+  assert(!stopped.includes('기다립니다'));
   dom.window.close();
 });
 
