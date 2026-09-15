@@ -3617,3 +3617,8 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 .pf-remove-choices button[hidden] { display:none; }
 .pf-remove-choices button strong, .pf-remove-choices button span { display:block; }
 .pf-remove-choices button span { margin-top:5px; font-size:12px; font-weight:400; }
+
+/* 컴팩트 보기에서도 진행 중인 편집의 저장·취소는 유지한다. */
+body.pf-compact-rows .pf-row-actions .js-pf-trade,
+body.pf-compact-rows .pf-row-actions .js-pf-edit,
+body.pf-compact-rows .pf-row-actions .js-pf-delete { display:none; }
