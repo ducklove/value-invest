@@ -12,6 +12,7 @@ test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모�
     readiness: { status: 'ready', checks: { latest_price_date: '2026-09-14' } }, live_enabled: false,
   } }));
   expect((await page.request.get('/api/quant/runs')).status()).toBe(401);
+  expect((await page.request.post('/api/quant/runs/unknown/forward', {data:{enabled:true}})).status()).toBe(401);
   await page.goto('/login?return_to=/quant');
   await page.locator('#loginEmail').fill('browser@example.com');
   await page.locator('#loginPassword').fill('browser-test-password');
@@ -32,6 +33,7 @@ test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모�
   await expect(page.locator('#quantReport')).toContainText('취소');
   const saved = await (await page.request.get('/api/quant/runs')).json();
   const row = saved.runs[0];
+  expect((await page.request.post(`/api/quant/runs/${row.id}/forward`, {data:{enabled:true},headers:{Origin:'http://127.0.0.1:18765'}})).status()).toBe(400);
   expect(row.config.strategy).toBe(sample.strategy);
   if (sample.strategy === 'etf_switch') expect(row.config.sell_tax_bps).toBe(0);
   const result = {
@@ -48,12 +50,23 @@ test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모�
       {start:'2025-09-02',end:'2026-09-14',return_pct:1,benchmark_return_pct:2,excess_return_pct:-1,max_drawdown_pct:-4},
     ]},
     limitations: ['화면 검증용 가상 데이터입니다.'],
+    liquidity_stress: {note:'신호 고정 · 비용 2배 · 참여율 축소',scenarios:[{participation_multiplier:0.1,return_pct:0.1,excess_return_pct:-1,max_drawdown_pct:-3,ending_cash:300000}]},
   };
-  await page.route(`**/api/quant/runs/${row.id}`, route => route.fulfill({ json: { ...row, status: 'succeeded', result } }));
+  let forward = null;
+  await page.route(`**/api/quant/runs/${row.id}`, route => route.fulfill({ json: { ...row, status: 'succeeded', result, forward } }));
+  await page.route(`**/api/quant/runs/${row.id}/forward`, route => {
+    forward = {status:route.request().postDataJSON().enabled ? 'active' : 'stopped',start_date:'2026-09-17',payload:null};
+    return route.fulfill({json:{forward}});
+  });
   await page.locator('#quantRuns button').first().click();
   await expect(page.locator('#quantReport svg')).toBeVisible();
   await expect(page.locator('#quantReport')).toContainText('비용 2배');
   await expect(page.locator('#quantReport')).toContainText('기간 분할 진단');
+  await expect(page.locator('#quantReport')).toContainText('비용·유동성 스트레스');
+  await page.getByRole('button', {name:'이 설정으로 전진 평가 시작',exact:true}).click();
+  await expect(page.locator('#quantReport')).toContainText('수익률은 아직 없습니다');
+  await page.getByRole('button', {name:'전진 평가 중지',exact:true}).click();
+  await expect(page.getByRole('button', {name:'이 설정으로 전진 평가 시작',exact:true})).toHaveCount(0);
   if (sample.strategy === 'etf_switch') {
     await expect(page.locator('#quantReport')).toContainText('ETF A 보유');
     await expect(page.locator('#quantReport')).not.toContainText('최근 할인율');

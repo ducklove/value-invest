@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from deps import get_current_user
-from repositories import quant
+from repositories import quant, quant_forward
 from services.quant import service
 from services.quant.models import RunRequest
 
@@ -35,7 +35,20 @@ async def create(request: Request, payload: RunRequest):
 
 @router.get("/runs/{rid}")
 async def detail(rid: str, request: Request):
-    return await quant.get_run(await user_id(request), rid)
+    user = await user_id(request)
+    return {**await quant.get_run(user, rid), "forward": await quant_forward.get(user, rid)}
+
+
+@router.post("/runs/{rid}/forward")
+async def forward(rid: str, request: Request, enabled: bool = Body(..., embed=True)):
+    user = await user_id(request)
+    if enabled:
+        run = await quant.get_run(user, rid)
+        service.verify(run.get("result") or {}, run["config"])
+        await quant_forward.start(user, rid)
+    else:
+        await quant_forward.stop(user, rid)
+    return {"forward": await quant_forward.get(user, rid)}
 
 
 @router.post("/runs/{rid}/cancel")

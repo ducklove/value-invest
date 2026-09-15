@@ -157,3 +157,27 @@ class QuantTests(TempDbMixin):
         with patch.object(service, "fetch", AsyncMock(side_effect=quant.QuantError("자료 부족"))):
             await service.run_one()
         self.assertEqual((await quant.get_run("u1", a["id"]))["status"], "failed")
+
+    async def test_observation_protects_prices_added_after_original_research(self):
+        a = await quant.create_run("u1", "protected-extension", config())
+        await quant.claim()
+        await quant.finish(a["id"], result())
+        await quant.set_watch("u1", a["id"], True)
+        watch = (await quant.watches())[0]
+        await quant.record_observation(
+            watch,
+            {"signal": {"date": "2026-01-02"}, "input_extension": [{"date": "2026-01-02", "common": {"price": 100}}]},
+        )
+        fresh = result()
+        fresh["config"]["end"] = "2026-01-05"
+        fresh["config_hash"] = quant.digest(fresh["config"])
+        fresh["signals"] = [{"date": "2026-01-05", "target": "common"}]
+        fresh["latest_signal"] = fresh["signals"][-1]
+        ready = {"status": "ready", "scope": "pair_daily_prices", "checks": {"latest_price_date": "2026-01-05"}}
+        with (
+            patch.object(service, "completed_date", return_value=date(2026, 1, 5)),
+            patch.object(service, "fetch", AsyncMock(side_effect=[ready, fresh])),
+        ):
+            await service.observe_one(watch)
+        self.assertEqual(len(await quant.observations("u1")), 1)
+        self.assertIn("수정", (await quant.watches("u1"))[0]["error"])

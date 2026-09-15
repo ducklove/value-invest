@@ -134,11 +134,31 @@ async function quantOpen(id) {
     <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>전략</th><th>비용 후 수익</th><th>최대 낙폭</th><th>추정 비용</th><th>체결 건수</th></tr></thead><tbody>${r.scenarios.map(x => `<tr><th>${names[x.mode]}</th><td>${quantNumber(x.return_pct)}%</td><td>${quantNumber(x.max_drawdown_pct)}%</td><td>${quantNumber(x.cost, 0)}원</td><td>${x.trade_count}</td></tr>`).join('')}</tbody></table></div>
     <div class="quant-metrics"><div><span>비용 2배 시 교체 수익</span><strong>${quantNumber(r.stress.return_pct)}%</strong></div><div><span>${isEtf ? "과거 평균 대비 상대가격 이탈" : "최근 할인율"} · ${escapeHtml(s.date)}</span><strong>${quantNumber(isEtf ? s.relative_deviation_bps / 100 : s.discount * 100)}%</strong></div><div><span>최근 분포 이탈 정도</span><strong>z ${quantNumber(s.z)}</strong></div></div>
     ${quantValidation(r)}
+    ${quantLiquidity(r)}
     ${isEtf ? `<p class="quant-muted">왕복 교체 비용 기준 ${quantNumber(s.round_trip_cost_bps)}bp · 상대가격의 평균 복귀를 가정한 비교이며 기대수익 보장이 아닙니다.</p>` : ""}
     <h4>최근 판단</h4><p>${escapeHtml(s.reason)} · ${names[s.target]} 방향. 다음 관측일에만 집행하는 가정입니다.</p>
     ${currentEngine ? `<button type="button" class="quant-primary" data-quant-action="watch" data-id="${escapeHtml(id)}">이 설정으로 일별 신호 관찰</button>` : '<p class="quant-notice">이전 엔진 결과입니다. 새 연구를 실행한 후 관찰해 주세요.</p>'}
+    ${quantForward(row, currentEngine)}
     <details><summary>검증 한계·재현 정보</summary><ul>${r.limitations.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul><p class="quant-hash">입력 ${escapeHtml(r.snapshot.snapshot_id)}<br>엔진 ${escapeHtml(r.engine_version)}<br>설정 ${escapeHtml(r.config_hash)}</p></details>
     <details><summary>최근 가상 체결 30건 · 수정주가 기준 단위</summary><div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>체결일</th><th>신호일</th><th>자산</th><th>구분</th><th>가상수량</th><th>가격</th></tr></thead><tbody>${r.scenarios[0].trades.slice(-30).reverse().map(t => `<tr><td>${escapeHtml(t.date)}</td><td>${escapeHtml(t.signal_date)}</td><td>${t.leg === 'common' ? (isEtf ? 'ETF A' : '보통주') : (isEtf ? 'ETF B' : '우선주')}</td><td>${t.side === 'buy' ? '매수' : '매도'}</td><td>${quantNumber(t.quantity, 0)}</td><td>${quantNumber(t.price)}</td></tr>`).join('')}</tbody></table></div></details>`;
+}
+
+function quantLiquidity(result) {
+  const stress = result.liquidity_stress;
+  if (!stress) return '';
+  return `<h4>비용·유동성 스트레스</h4><p class="quant-muted">${escapeHtml(stress.note)}</p>
+    <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>참여율 한도</th><th>교체 수익</th><th>혼합 대비 차이</th><th>최대 낙폭</th><th>종료 현금</th></tr></thead><tbody>${stress.scenarios.map(s => `<tr><th>기준의 ${quantNumber(s.participation_multiplier * 100, 0)}%</th><td>${quantNumber(s.return_pct)}%</td><td>${quantNumber(s.excess_return_pct)}%p</td><td>${quantNumber(s.max_drawdown_pct)}%</td><td>${quantNumber(s.ending_cash, 0)}원</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function quantForward(row, currentEngine) {
+  const f = row.forward, id = escapeHtml(row.id);
+  const intro = '<h4>사전 고정 전진 평가</h4><p class="quant-muted">다음 한국 날짜부터 설정과 시작일을 고정하고 새 일봉을 가상 원장으로 재생합니다. 첫 일봉은 신호만 생성하며 다음 일봉부터 집행합니다. 실제 호가 체결과 다르며 중단 기간도 재생합니다. 중지 후 재개할 수 없고 기록은 보존됩니다.</p>';
+  if (!f) return currentEngine ? `${intro}<button type="button" data-quant-action="forward" data-id="${id}">이 설정으로 전진 평가 시작</button>` : '';
+  const ledger = f.payload?.ledger;
+  return `${intro}<p>${f.status === 'active' ? '평가 중' : '평가 중지'} · 시작일 ${escapeHtml(f.start_date)} · 최근 확인 ${f.checked_at ? escapeHtml(new Date(f.checked_at * 1000).toLocaleString('ko-KR')) : '대기'}</p>
+    ${f.error ? `<p class="quant-notice">${escapeHtml(f.error)}</p>` : ''}
+    ${ledger?.status === 'available' ? `<div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>전진 평가</th><th>비용 후 수익</th><th>최대 낙폭</th><th>가상 체결</th><th>현금</th></tr></thead><tbody>${ledger.scenarios.map(s => `<tr><th>${quantNames(row.config)[s.mode]}</th><td>${quantNumber(s.return_pct)}%</td><td>${quantNumber(s.max_drawdown_pct)}%</td><td>${s.trade_count}건</td><td>${quantNumber(s.ending_cash, 0)}원</td></tr>`).join('')}</tbody></table></div><p class="quant-muted">평가 기준일 ${escapeHtml(ledger.scenarios[0].nav.at(-1).date)} · 수정주가 단위 · 실제 주문 0건</p><button type="button" data-quant-action="export-forward" data-id="${id}">전진 원장·입력 저장</button>` : '<p class="quant-muted">시작일 이후 완료된 일봉을 기다립니다. 수익률은 아직 없습니다.</p>'}
+    ${f.status === 'active' ? `<button type="button" data-quant-action="stop-forward" data-id="${id}">전진 평가 중지</button>` : ''}`;
 }
 
 function quantValidation(result) {
@@ -168,6 +188,13 @@ async function quantClick(event) {
   const action = button.dataset.quantAction, id = button.dataset.id;
   try {
     if (action === 'open') { await quantOpen(id); return; }
+    if (action === 'export-forward') {
+      const row = await apiFetchJson('/api/quant/runs/' + encodeURIComponent(id));
+      const blob = new Blob([JSON.stringify(row.forward, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = `quant-forward-${id}.json`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000); return;
+    }
     if (action === 'export' && quantResult) {
       const blob = new Blob([JSON.stringify(quantResult, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob), a = document.createElement('a');
@@ -176,6 +203,10 @@ async function quantClick(event) {
     }
     button.disabled = true;
     if (action === 'cancel') await apiFetchJson(`/api/quant/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    if (action === 'forward' || action === 'stop-forward') {
+      await apiFetchJson(`/api/quant/runs/${encodeURIComponent(id)}/forward`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:action === 'forward'})});
+      document.getElementById('quantMessage').textContent = action === 'forward' ? '다음 한국 날짜부터 전진 평가가 고정됐습니다. 최초 체결까지 두 개의 새 일봉이 필요합니다.' : '전진 평가를 중지했습니다. 기존 원장은 보존됩니다.';
+    }
     if (action === 'watch' || action === 'stop-watch') {
       await apiFetchJson(`/api/quant/runs/${encodeURIComponent(id)}/watch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: action === 'watch' }) });
       document.getElementById('quantMessage').textContent = action === 'watch' ? '신호 관찰을 시작했습니다. 실제 주문은 발생하지 않습니다.' : '신호 관찰을 중지했습니다.';

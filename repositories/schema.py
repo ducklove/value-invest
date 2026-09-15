@@ -57,6 +57,17 @@ CREATE TABLE IF NOT EXISTS quant_observations (
     payload_json TEXT NOT NULL,
     PRIMARY KEY(run_id,market_date)
 );
+CREATE TABLE IF NOT EXISTS quant_forward (
+    run_id TEXT PRIMARY KEY REFERENCES quant_runs(id) ON DELETE CASCADE,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK(status IN ('active','stopped')),
+    start_date TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    checked_at REAL,
+    stopped_at REAL,
+    payload_json TEXT,
+    error TEXT
+);
 CREATE TABLE IF NOT EXISTS corp_codes (
     stock_code TEXT PRIMARY KEY,
     corp_code TEXT NOT NULL,

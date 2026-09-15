@@ -168,6 +168,17 @@ async def observations(user):
     return [{**dict(row), "payload": json.loads(row["payload_json"])} for row in rows]
 
 
+async def latest_observation(watch):
+    db = await get_db()
+    row = await (
+        await db.execute(
+            "SELECT payload_json FROM quant_observations WHERE run_id=? AND google_sub=? ORDER BY market_date DESC LIMIT 1",
+            (watch["run_id"], watch["google_sub"]),
+        )
+    ).fetchone()
+    return json.loads(row[0]) if row else None
+
+
 async def record_observation(watch, payload=None, error=None):
     async with transaction() as db:
         active = await (

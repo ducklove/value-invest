@@ -10,7 +10,7 @@ import httpx
 import close_price_client
 from core.errors import ExternalServiceError
 from core.http import get_http_client
-from repositories import quant
+from repositories import quant, quant_forward
 from services.quant.models import completed_date
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,9 @@ async def observe_one(watch):
         if original["snapshot"].get("instrument_review") != result["snapshot"].get("instrument_review"):
             raise quant.QuantError("ETF 상품 검토 기준이 변경됐습니다. 새 실험으로 재검증해 주세요.")
         old = {r["date"]: r for r in original["snapshot"]["bars"]}
+        previous = await quant.latest_observation(watch)
+        if previous:
+            old.update({r["date"]: r for r in previous.get("input_extension", [])})
         current = {r["date"]: r for r in result["snapshot"]["bars"]}
         if any(current.get(day) != bar for day, bar in old.items()):
             raise quant.QuantError("기존 입력 자료가 수정됐습니다. 새 실험으로 재검증해 주세요.")
@@ -145,6 +148,11 @@ async def run_loop(stop):
                     if stop.is_set():
                         break
                     await observe_one(watch)
+                session = await quant_forward.due()
+                if session and not stop.is_set():
+                    from services.quant.forward import run_one as forward_one
+
+                    await forward_one(session)
         except (aiosqlite.Error, ExternalServiceError, quant.QuantError) as exc:
             logger.warning("퀀트 작업 보류: %s", type(exc).__name__)
         try:

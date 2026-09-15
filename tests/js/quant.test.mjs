@@ -93,3 +93,36 @@ test('ETF 선택은 별도 전략과 비용 가정을 보내며 기간 검증을
   assert.match(w.quantValidation({}), /이전 버전/);
   w.close();
 });
+
+test('전진 평가 대기는 수익을 만들지 않고 중지 기록은 다시 시작할 수 없다', () => {
+  const dom = setup(async () => ({}));
+  const row = {id:'sample', config:{strategy:'etf_switch'}, forward:{status:'active',start_date:'2026-09-17',error:'<script>실패</script>'}};
+  const pending = dom.window.quantForward(row, true);
+  assert.match(pending, /수익률은 아직 없습니다/);
+  assert.match(pending, /stop-forward/);
+  assert(!pending.includes('<script>'));
+  row.forward.status = 'stopped';
+  const stopped = dom.window.quantForward(row, true);
+  assert(!stopped.includes('data-quant-action="forward"'));
+  assert(!stopped.includes('stop-forward'));
+  dom.window.close();
+});
+
+test('전진 평가 시작과 중지 요청은 정확한 경로와 상태를 전달한다', async () => {
+  const posted = [];
+  const dom = setup(async (path, options) => {
+    if (options?.method === 'POST') { posted.push({path,body:JSON.parse(options.body)}); return {}; }
+    if (path.endsWith('capabilities')) return {pairs:[]};
+    if (path.endsWith('observations')) return {watches:[],observations:[]};
+    return {runs:[]};
+  });
+  await dom.window.loadQuant();
+  const report = dom.window.document.getElementById('quantReport');
+  for (const action of ['forward','stop-forward']) {
+    report.innerHTML = `<button data-quant-action="${action}" data-id="sample">평가</button>`;
+    report.querySelector('button').click();
+    await tick();
+  }
+  assert.deepEqual(posted, [{path:'/api/quant/runs/sample/forward',body:{enabled:true}}, {path:'/api/quant/runs/sample/forward',body:{enabled:false}}]);
+  dom.window.close();
+});
