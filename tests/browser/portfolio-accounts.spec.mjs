@@ -61,7 +61,7 @@ test('계좌별 등록·합산·매매 격리와 NH 미리보기 취소·연결�
   await page.locator('#pfNhKey').fill('browser-namuh-key');
   await page.locator('#pfNhSecret').fill('browser-namuh-secret');
   await page.locator('#pfNhForm button[type="submit"]').click();
-  await expect(page.locator('#pfNhChoices')).toContainText('8901');
+  await expect(page.locator('#pfNhChoices')).toContainText('12345678901');
   await expect(page.locator('#pfNhKey')).toHaveValue('');
   await page.locator('#pfNhPreviewButton').click();
   await expect(page.locator('#pfNhPreview')).toContainText('삼성전자');
@@ -78,6 +78,7 @@ test('계좌별 등록·합산·매매 격리와 NH 미리보기 취소·연결�
   await page.locator('#pfNhSave').click();
   await expect(page.locator('#pfNhDialog')).not.toBeVisible();
   await expect(card).toContainText('NH');
+  await expect(card).toContainText('12345678901');
   expect((await api('/api/portfolio')).body.find(row => row.stock_code === '005930').quantity).toBe(17);
   const denied = await api('/api/portfolio/005930', {method:'PUT', headers:{'Content-Type':'application/json','X-Portfolio-Account':nh}, body:JSON.stringify({quantity:1,avg_price:1})});
   expect(denied.status).toBe(400);

@@ -40,7 +40,7 @@ async def register(request: Request, payload: dict = Body(...)):
         raise BrokerError("나무 앱키와 시크릿을 입력해 주세요.")
     cid = await brokers.store_credential(user, key.strip(), secret.strip())
     rows = await namuh.accounts(user, cid)
-    return {"credential_id": cid, "accounts": [{"account_mask": "•••••••" + row["account_no"][-4:], "environment": row["environment"],
+    return {"credential_id": cid, "accounts": [{"account_no": row["account_no"], "account_mask": "•••••••" + row["account_no"][-4:], "environment": row["environment"],
         "selection": encrypt(json.dumps({**row, "credential_id": cid, "user": user, "expires_at": time.time() + 900}))} for row in rows]}
 
 

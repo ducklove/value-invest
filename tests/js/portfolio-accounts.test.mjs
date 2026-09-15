@@ -39,13 +39,14 @@ test('나무 키 확인·미리보기는 연결을 생성하지 않고 키는 �
   try {
     s.w.apiFetchJson = async (path, options) => {
       calls.push({path,body:JSON.parse(options.body)});
-      return path.endsWith('/credentials') ? {accounts:[{account_mask:'••••8901',environment:'live',selection:'opaque'}]} : {items:[]};
+      return path.endsWith('/credentials') ? {accounts:[{account_no:'12345678901',account_mask:'••••8901',environment:'live',selection:'opaque'}]} : {items:[]};
     };
     s.w.pfOpenNhConnection({account_id:'a',name:'NH'});
     s.el('pfNhKey').value='private-key'; s.el('pfNhSecret').value='private-secret';
     await s.w.pfNhWork('verify');
     assert.equal(s.el('pfNhKey').value,'');
     assert.equal(s.el('pfNhSecret').value,'');
+    assert.match(s.el('pfNhChoices').textContent,/12345678901/);
     await s.w.pfNhWork('preview');
     s.el('pfNhDialog').close();
     assert.deepEqual(calls.map(row => row.path), ['/api/portfolio/namuh/credentials','/api/portfolio/accounts/a/namuh/preview']);
@@ -72,7 +73,7 @@ test('NH 미리보기는 CMA RP와 현금 잔액을 별도로 표시하고 평�
   const s=setup();
   try {
     s.w.apiFetchJson = async path => path.endsWith('/credentials')
-      ? {accounts:[{account_mask:'••••8901',environment:'live',selection:'opaque'}]}
+      ? {accounts:[{account_no:'12345678901',account_mask:'••••8901',environment:'live',selection:'opaque'}]}
       : {items:[{stock_code:'CASH_KRW',stock_name:'원화 현금',quantity:80,currency:'KRW'},
           {stock_code:'CMA_RP_KRW',stock_name:'CMA 원화RP',quantity:3050,currency:'KRW'}]};
     s.w.pfOpenNhConnection({account_id:'a',name:'NH'});

@@ -91,10 +91,13 @@ async def list_accounts(google_sub: str) -> list[dict]:
     )
     result = [dict(r) for r in await cursor.fetchall()]
     for item in result:
-        link = await (await db.execute("SELECT account_mask,environment,last_sync_at,sync_error,balances_json,include_overseas FROM broker_account_links WHERE google_sub=? AND account_id=?",
+        link = await (await db.execute("SELECT account_ciphertext,account_mask,environment,last_sync_at,sync_error,balances_json,include_overseas FROM broker_account_links WHERE google_sub=? AND account_id=?",
                                       (google_sub, item["account_id"]))).fetchone()
         item["broker"] = "namuh" if link else None
         item["connection"] = dict(link) if link else None
+        if link:
+            from repositories.broker_secrets import decrypt
+            item["connection"]["account_no"] = decrypt(item["connection"].pop("account_ciphertext"))
         count = await (await db.execute("SELECT COUNT(*) AS n FROM account_holdings WHERE google_sub=? AND account_id=?", (google_sub, item["account_id"]))).fetchone()
         item["holdings_count"] = count["n"]
     return result

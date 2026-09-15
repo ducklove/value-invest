@@ -35,6 +35,13 @@ class NamuhTests(TempDbMixin):
             await brokers.get_credential("u2", self.cid)
         with self.assertRaises(BrokerError):
             await brokers.store_credential("u2", "test-namuh-app-key", "test-namuh-secret")
+        await self.link()
+        linked = next(row for row in await accounts.list_accounts("u1") if row["account_id"] == self.aid)
+        self.assertEqual(linked["connection"]["account_no"], "12345678901")
+        self.assertNotIn("account_ciphertext", linked["connection"])
+        self.assertEqual(await accounts.list_accounts("u2"), [])
+        stored = dict(await (await db.execute("SELECT * FROM broker_account_links")).fetchone())
+        self.assertNotIn("12345678901", json.dumps(stored))
 
     async def test_token_single_flight_persistent_cache_and_log_redaction(self):
         calls = []

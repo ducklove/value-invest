@@ -78,7 +78,7 @@ function pfRenderAccounts() {
     const detail = position ? `${Number(position.quantity).toLocaleString('ko-KR')}주 · 평균 ${Number(position.avg_price).toLocaleString('ko-KR')} ${position.avg_price_currency}` : `잔고 ${row.holdings_count || 0}개`;
     const error = row.connection?.sync_error;
     return `<section class="pf-account-card" data-account="${escapeHtml(row.account_id)}"><h3>${escapeHtml(row.name)}</h3>
-      <p>${escapeHtml(detail)}${row.broker ? ' · NH ' + escapeHtml(row.connection.account_mask) + (row.connection.environment === 'mock' ? ' · 모의계좌' : '') : ' · 수동 관리'}</p>
+      <p>${escapeHtml(detail)}${row.broker ? ' · NH ' + escapeHtml(row.connection.account_no) + (row.connection.environment === 'mock' ? ' · 모의계좌' : '') : ' · 수동 관리'}</p>
       ${error ? `<p class="pf-account-error">${escapeHtml(error)}</p>` : ''}
       <div class="pf-account-actions"><button type="button" data-account-action="view">이 계좌 보기</button><button type="button" data-account-action="rename">이름 수정</button>
       ${row.broker ? '<button type="button" data-account-action="sync">잔고 동기화</button><button type="button" data-account-action="disconnect">연결 해제</button>' : '<button type="button" data-account-action="connect">NH 계좌 연동</button>'}
@@ -155,7 +155,7 @@ async function pfNhWork(action) {
       const data = await apiFetchJson('/api/portfolio/namuh/credentials', { method: 'POST', timeoutMs: 60000,
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app_key: _pfAccountEl('pfNhKey').value.trim(), app_secret: _pfAccountEl('pfNhSecret').value.trim() }) });
       _pfAccountEl('pfNhKey').value = _pfAccountEl('pfNhSecret').value = '';
-      _pfAccountEl('pfNhChoices').innerHTML = data.accounts.map(row => `<option value="${escapeHtml(row.selection)}">${escapeHtml(row.account_mask)} · ${row.environment === 'mock' ? '모의계좌' : '실계좌'}</option>`).join('');
+      _pfAccountEl('pfNhChoices').innerHTML = data.accounts.map(row => `<option value="${escapeHtml(row.selection)}">${escapeHtml(row.account_no)} · ${row.environment === 'mock' ? '모의계좌' : '실계좌'}</option>`).join('');
       _pfAccountEl('pfNhPreviewButton').disabled = !data.accounts.length;
       _pfAccountEl('pfNhStatus').textContent = data.accounts.length ? '키를 확인했습니다. 연결할 계좌와 조회 범위를 선택해 주세요.' : '이 키에서 연결 가능한 계좌가 없습니다.';
       PfAccounts.previewed = false; _pfAccountEl('pfNhSave').disabled = true;
