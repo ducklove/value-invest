@@ -166,10 +166,15 @@ async def capabilities():
         pairs = await fetch("/api/research/pairs")
         ready = await fetch("/api/ready")
         research_ready = await fetch("/api/research/readiness")
+        try:
+            factor_inputs = await fetch("/api/research/factor-inputs")
+        except (ExternalServiceError, quant.QuantError) as exc:
+            factor_inputs = {"status": "unavailable", "error": str(exc)}
         return {
             **pairs,
             "readiness": ready,
             "research_readiness": research_ready,
+            "factor_inputs": factor_inputs,
             "live_enabled": False,
             "mode": "research_and_observation",
             "error": None,

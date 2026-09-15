@@ -47,6 +47,24 @@ class QuantTests(TempDbMixin):
         await seed_user()
         await seed_user("u2", "second@example.com")
 
+    async def test_factor_audit_failure_does_not_hide_pair_research(self):
+        with patch.object(
+            service,
+            "fetch",
+            AsyncMock(
+                side_effect=[
+                    {"pairs": [{"common": "005930", "preferred": "005935"}]},
+                    {"status": "not_ready"},
+                    {"status": "ready", "scope": "pair_daily_prices"},
+                    service.ExternalServiceError("입력 검사 연결 실패"),
+                ]
+            ),
+        ):
+            cap = await service.capabilities()
+        self.assertEqual(len(cap["pairs"]), 1)
+        self.assertEqual(cap["factor_inputs"]["status"], "unavailable")
+        self.assertIsNone(cap["error"])
+
     async def test_idempotency_scope_and_conflicting_payload(self):
         a, b = await asyncio.gather(
             quant.create_run("u1", "same-key", config()), quant.create_run("u1", "same-key", config())

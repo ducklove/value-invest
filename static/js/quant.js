@@ -10,6 +10,13 @@ const quantNumber = (v, n = 2) => Number.isFinite(v) ? v.toLocaleString('ko-KR',
 const quantNames = config => config?.strategy === 'etf_switch'
   ? { ...QUANT_NAMES, common: 'ETF A 보유', preferred: 'ETF B 보유' } : QUANT_NAMES;
 
+function quantFactorInputs(audit) {
+  if (!audit || audit.status === 'unavailable') return '<p>복합 팩터 입력 검사 결과를 받지 못했습니다. 기존 상대가치 연구는 별도로 사용할 수 있습니다.</p>';
+  if (audit.status === 'missing_data' || audit.status === 'missing_fields') return '<p>복합 팩터용 시점별 재무 자료 또는 필수 필드가 부족합니다.</p>';
+  const reasons = {as_of_mismatch:'평가일 불일치',unknown_or_future_publication:'공개일 불명·평가일 이후 공개',invalid_receipt:'접수번호·접수일 불일치',historical_or_unknown_provenance:'역사적 일괄 수집·출처 불명',unknown_or_foreign_units:'통화·단위 미확인 또는 외화',unknown_amount_basis:'금액 기준 미확인',invalid_amount:'유효하지 않은 금액',stale_or_future_period:'오래되거나 미래의 결산',unknown_scope:'연결·별도 범위 미확인'};
+  return `<details><summary>복합 팩터 입력 점검 · 재무 ${escapeHtml(audit.as_of)} · 추가 검증 필요</summary><p>가격 기준일 ${escapeHtml(audit.latest_price_date || '미확인')}${audit.aligned_with_latest_prices ? '' : ' · 재무 기준일과 다름'}</p><p>검사 ${quantNumber(audit.securities,0)}종목 중 행 단위 통과 ${quantNumber(audit.eligible_securities,0)}종목, 동일 보고서·범위에서 이익·자산·자본이 갖춰진 후보 ${quantNumber(audit.complete_securities,0)}종목.</p><ul>${Object.entries(audit.exclusions || {}).filter(([,count])=>count>0).map(([key,count])=>`<li>${escapeHtml(reasons[key] || key)}: ${quantNumber(count,0)}행</li>`).join('')}</ul><p>${escapeHtml(audit.note || '')}</p></details>`;
+}
+
 function quantPairChanged() {
   const form = document.getElementById('quantForm');
   const strategy = form.elements.pair.selectedOptions[0]?.dataset.strategy || 'preferred_switch';
@@ -46,6 +53,12 @@ async function loadQuant() {
     if (!cap.error && cap.research_readiness) health.textContent += cap.research_readiness.status === 'ready'
       ? ' 일봉 관찰 가능 · 종목별 검증을 추가 수행합니다.' : ' 일봉 관찰 보류 · 가격 수집 상태를 확인하세요.';
     health.classList.toggle('quant-warning', !ready);
+    let inputs = document.getElementById('quantFactorInputs');
+    if (!inputs) {
+      inputs = document.createElement('div'); inputs.id = 'quantFactorInputs';
+      inputs.className = 'quant-notice'; health.after(inputs);
+    }
+    inputs.innerHTML = quantFactorInputs(cap.factor_inputs);
     const select = document.getElementById('quantPair');
     const previous = select.value;
     const options = (rows, strategy) => rows.map(p => `<option data-strategy="${strategy}" value="${escapeHtml(p.common + ':' + p.preferred)}">${escapeHtml(p.name)} · ${escapeHtml(p.common)} / ${escapeHtml(p.preferred)}</option>`).join('');

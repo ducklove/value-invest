@@ -10,6 +10,7 @@ test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모�
     pairs: [{ common: '005930', preferred: '005935', name: '삼성전자' }],
     etf_pairs: [{ common: '069500', preferred: '102110', name: 'KODEX 200 / TIGER 200' }],
     readiness: { status: 'ready', checks: { latest_price_date: '2026-09-14' } }, live_enabled: false,
+    factor_inputs: {status:'review_required',as_of:'2026-08-28',latest_price_date:'2026-09-14',securities:2581,eligible_securities:6,complete_securities:4,exclusions:{historical_or_unknown_provenance:11567},note:'검증용 입력 감사'},
   } }));
   expect((await page.request.get('/api/quant/runs')).status()).toBe(401);
   expect((await page.request.post('/api/quant/runs/unknown/forward', {data:{enabled:true}})).status()).toBe(401);
@@ -19,6 +20,8 @@ test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모�
   await page.getByRole('button', { name: '이메일로 로그인' }).click();
   await expect(page).toHaveURL(/\/quant$/);
   await expect(page.locator('#quantView')).toBeVisible();
+  await page.locator('#quantFactorInputs summary').click();
+  await expect(page.locator('#quantFactorInputs')).toContainText('후보 4종목');
   await page.locator('#quantPair').selectOption(sample.pair);
   await page.locator('#quantForm [name=start]').fill('2024-01-01');
   await page.locator('#quantForm [name=end]').fill('2026-09-14');

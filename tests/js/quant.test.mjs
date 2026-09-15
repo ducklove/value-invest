@@ -16,6 +16,17 @@ function setup(handler) {
   return dom;
 }
 
+test('팩터 입력 검사는 후보 수와 제외 이유를 표시하고 결측을 0으로 바꾸지 않는다', () => {
+  const dom = setup(async () => ({}));
+  const html = dom.window.quantFactorInputs({status:'review_required',as_of:'2026-08-28',latest_price_date:'2026-09-15',securities:2581,eligible_securities:6,complete_securities:4,exclusions:{unknown_or_future_publication:5},note:'원공시 검증 전'});
+  assert.match(html, /후보 4종목/);
+  assert.match(html, /평가일 이후 공개: 5행/);
+  assert.match(html, /기준일과 다름/);
+  assert.match(dom.window.quantFactorInputs({status:'missing_fields'}), /필수 필드가 부족/);
+  assert(!dom.window.quantFactorInputs({status:'missing_fields'}).includes('0종목'));
+  dom.window.close();
+});
+
 test('자료 지연을 정상으로 표시하지 않고 서버 오류를 보여준다', async () => {
   const dom = setup(async path => {
     if (path.endsWith('capabilities')) return { pairs: [], error: '연결 실패', readiness: null };
