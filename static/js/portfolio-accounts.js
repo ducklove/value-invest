@@ -167,7 +167,7 @@ async function pfNhWork(action) {
       const data = await apiFetchJson(base + (action === 'preview' ? '/preview' : ''), { method: 'POST', timeoutMs: 120000,
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (action === 'preview') {
-        _pfAccountEl('pfNhPreview').innerHTML = `<p>${data.items.length}개 잔고 · 현금 추가 차감 없이 초기 잔고로 가져옵니다.</p><table><thead><tr><th>종목</th><th>수량·잔액</th><th>통화</th></tr></thead><tbody>${data.items.map(item => `<tr><td>${escapeHtml(item.stock_name)}</td><td>${Number(item.quantity).toLocaleString('ko-KR')}</td><td>${escapeHtml(item.currency)}</td></tr>`).join('')}</tbody></table><p>원화는 D+2 예수금, 외화는 결제 후 예수금 기준입니다.</p>`;
+        _pfAccountEl('pfNhPreview').innerHTML = `<p>${data.items.length}개 잔고 · 현금 추가 차감 없이 초기 잔고로 가져옵니다.</p><table><thead><tr><th>종목</th><th>수량·잔액</th><th>통화</th></tr></thead><tbody>${data.items.map(item => `<tr><td>${escapeHtml(item.stock_name)}</td><td>${Number(item.quantity).toLocaleString('ko-KR')}</td><td>${escapeHtml(item.currency)}</td></tr>`).join('')}</tbody></table><p>원화는 D+2 예수금, 외화는 결제 후 예수금 기준입니다.</p>${data.items.some(item => item.stock_code === 'CMA_RP_KRW') ? '<p>CMA 원화RP는 현금과 구분하며, 수량·잔액에 증권사 조회 시점의 평가액(원)을 표시합니다.</p>' : ''}`;
         PfAccounts.previewed = true; _pfAccountEl('pfNhSave').disabled = false;
         _pfAccountEl('pfNhStatus').textContent = '미리보기를 확인한 뒤 잔고 가져오기를 누르세요.';
       } else {

@@ -66,6 +66,9 @@ async def fetch_external_quote_for_stock_service(stock_code: str) -> dict:
         return await fetch_cash_quote(stock_code)
     elif stock_code == "KRX_GOLD":
         return await special_assets.fetch_krx_gold_quote()
+    elif stock_code == "CMA_RP_KRW":
+        # 잔고 조회 시 받은 RP 평가액을 원 단위 수량으로 저장한다.
+        return {"price": 1, "change": 0, "change_pct": 0}
     elif special_assets.is_crypto_asset(stock_code):
         return await special_assets.fetch_crypto_quote(stock_code)
     elif not _is_korean_stock(stock_code):

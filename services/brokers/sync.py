@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import math
 import re
 from datetime import datetime, timezone
@@ -11,8 +12,10 @@ from repositories import brokers
 from repositories.broker_secrets import BrokerError
 from repositories.db import transaction
 from services.brokers import namuh
+from services.portfolio.identifiers import CASH_FX_CODE
 
 _sync_locks: dict[str, asyncio.Lock] = {}
+logger = logging.getLogger(__name__)
 
 
 def number(row: dict, key: str) -> float:
@@ -25,6 +28,7 @@ def number(row: dict, key: str) -> float:
             raise ValueError
         return value
     except (KeyError, TypeError, ValueError):
+        logger.warning("NH 잔고 숫자 검증 실패: field=%s, present=%s", key, key in row)
         raise BrokerError("나무 잔고의 수량·금액이 누락되거나 올바르지 않아 갱신하지 않았습니다.") from None
 
 
@@ -46,6 +50,8 @@ def records(page: dict) -> list[dict]:
 
 def domestic_code(raw: str) -> str:
     code = str(raw).strip()
+    if code == "M04020000":
+        return "KRX_GOLD"
     if re.fullmatch(r"KR7[0-9A-Z]{6}[0-9]{3}", code):
         code = code[3:9]
     if re.fullmatch(r"A[0-9A-Z]{6}", code):
@@ -78,15 +84,31 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
         "act_no": account, "bnc_bse_cd": "1", "ltg_aot_dit_cd": "9", "aet_bse": "1",
         "qut_dit_cd": "UNT", "aly_qut_cd": "2",
     }, env)
-    total = summary(domestic[0])
+    # 연속조회에서는 마지막 합계 블록에 최종 평가금액이 채워진다.
+    total = summary(next((page for page in reversed(domestic) if page.get("Output_0")), domestic[-1]))
     if any(number({key: total.get(key) or 0}, key) != 0 for key in ("fnn_amt", "rba", "lon_amt")):
         raise BrokerError("융자·미수·대출이 있는 계좌는 자동 합산을 지원하지 않습니다. 수동 계좌로 관리해 주세요.")
-    balances = {"KRW": {key: number(total, key) for key in ("dca", "nxt_dd_dca", "nxt2_dd_dca", "orr_pbl_amt", "drn_pbl_amt")}}
+    balances = {"KRW": {key: number(total, key) for key in ("dca", "nxt_dd_dca", "nxt2_dd_dca", "drn_pbl_amt")}}
+    # 계좌에 따라 일반 주문가능액 없이 증거금률별 금액(20/30/40/100%)만 온다.
+    # 서로 다른 주문가능액을 대체하거나 예수금으로 합산하지 않는다.
+    balances["KRW"].update({key: number(total, key) for key in (
+        "orr_pbl_amt", "orr_pbl_amt1", "orr_pbl_amt2", "orr_pbl_amt3", "orr_pbl_amt4",
+    ) if key in total})
     output = []
     for page in domestic:
         for row in records(page):
             qty = number(row, "itg_bnc_qty")
             if not qty:
+                continue
+            if str(row.get("iem_cd", "")).strip() == "RKRW221":
+                # CMA RP는 수량=원금, 현재가/매입가=0으로 반환된다.
+                # 평가액을 원 단위 잔액으로 보관해 고정 단위가 1원으로 평가한다.
+                value = number(row, "eal_amt")
+                cost = value - number(row, "eal_pls_amt")
+                if value <= 0 or cost < 0 or qty < 0:
+                    raise BrokerError("CMA RP의 평가액·매입금액을 확인할 수 없어 잔고를 유지합니다.")
+                output.append({"stock_code": "CMA_RP_KRW", "stock_name": "CMA 원화RP",
+                               "quantity": value, "avg_price": cost / value, "avg_price_currency": "KRW", "currency": "KRW"})
                 continue
             output.append({"stock_code": domestic_code(row.get("iem_cd", "")), "stock_name": str(row.get("iem_nm") or row["iem_cd"]),
                            "quantity": qty, "avg_price": number(row, "phs_pr"), "avg_price_currency": "KRW", "currency": "KRW"})
@@ -118,9 +140,10 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
                 raise BrokerError("통화별 예수금 조회가 완료되지 않았습니다.")
             for row in rows:
                 currency = str(row.get("cur_cd", "")).strip()
-                if currency == "KRW":
+                # 통화별 잔고 뒤에 오는 원화 환산 합계는 실제 통화 잔고가 아니다.
+                if currency in {"KRW", "<원화환산합계>"}:
                     continue
-                if currency not in {"USD", "JPY", "HKD", "CNY"}:
+                if "CASH_" + currency not in CASH_FX_CODE:
                     raise BrokerError("지원되지 않는 예수금 통화입니다.")
                 if currency in balances:
                     raise BrokerError("중복된 통화 잔고가 반환되어 갱신하지 않았습니다.")

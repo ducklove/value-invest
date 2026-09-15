@@ -60,9 +60,11 @@ async def token(user: str, cid: str, *, force=False) -> str:
 
 
 def continuation(data: dict, headers) -> str | None:
-    if str(headers.get("cts_flag", "")).upper() == "N":
+    flag = str(headers.get("cts_flag", "")).strip().upper()
+    if flag == "N":
         return None
-    key = headers.get("cts")
+    key = str(headers.get("cts") or "").strip()
+    from_header = bool(key)
     if not key:
         for name, block in data.items():
             if not name.startswith("Output_"):
@@ -74,8 +76,12 @@ def continuation(data: dict, headers) -> str | None:
                         break
             if key:
                 break
-    if str(headers.get("cts_flag", "")).upper() == "Y" and not key:
+    if flag == "Y" and not key:
         raise BrokerError("나무 연속조회 키가 누락되어 잔고를 갱신하지 않았습니다.")
+    # 일부 API는 마지막 응답에도 헤더 키를 돌려준다. 공식 SDK와 같이
+    # 플래그가 없으면 연속조회 업무코드일 때만 헤더 키를 따라간다.
+    if from_header and not flag and str(data.get("rsp_cd")) not in {"00165", "00218"}:
+        return None
     return str(key).strip() if key else None
 
 
@@ -85,12 +91,14 @@ async def pages(user: str, cid: str, path: str, body: dict, environment="live") 
     access = await token(user, cid)
     secret = await brokers.get_credential(user, cid)
     client = await get_http_client("namuh")
-    results, seen, cts = [], set(), None
+    results, seen, cts, cts_flag = [], set(), None, None
     refreshed = False
     for _ in range(100):
         headers = {"Authorization": "Bearer " + access, "x-client-id": secret["app_key"], "x-client-secret": secret["app_secret"]}
         if cts:
             headers["cts"] = cts
+            if cts_flag:
+                headers["cts_flag"] = cts_flag
         async with lock(cid):
             await asyncio.sleep(max(0, .26 - (time.monotonic() - _last_call.get(cid, 0))))
             _last_call[cid] = time.monotonic()
@@ -117,6 +125,7 @@ async def pages(user: str, cid: str, path: str, body: dict, environment="live") 
             raise BrokerError("나무에서 조회를 처리하지 못했습니다. 계좌와 이용 권한을 확인해 주세요.")
         results.append(data)
         cts = continuation(data, response.headers)
+        cts_flag = str(response.headers.get("cts_flag", "")).strip().upper()
         if not cts:
             return results
         if cts in seen:

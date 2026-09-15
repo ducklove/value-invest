@@ -68,6 +68,27 @@ test('NH 브라우저 연결을 공유하고 사용자 상태 초기화 시 소�
   } finally {s.dom.window.close();}
 });
 
+test('NH 미리보기는 CMA RP와 현금 잔액을 별도로 표시하고 평가 시점을 설명한다', async () => {
+  const s=setup();
+  try {
+    s.w.apiFetchJson = async path => path.endsWith('/credentials')
+      ? {accounts:[{account_mask:'••••8901',environment:'live',selection:'opaque'}]}
+      : {items:[{stock_code:'CASH_KRW',stock_name:'원화 현금',quantity:80,currency:'KRW'},
+          {stock_code:'CMA_RP_KRW',stock_name:'CMA 원화RP',quantity:3050,currency:'KRW'}]};
+    s.w.pfOpenNhConnection({account_id:'a',name:'NH'});
+    s.el('pfNhKey').value='private-key'; s.el('pfNhSecret').value='private-secret';
+    await s.w.pfNhWork('verify');
+    await s.w.pfNhWork('preview');
+    const rows=s.el('pfNhPreview').querySelectorAll('tbody tr');
+    assert.equal(rows.length,2);
+    assert.match(rows[0].textContent,/원화 현금80KRW/);
+    assert.match(rows[1].textContent,/CMA 원화RP3,050KRW/);
+    assert.match(s.el('pfNhPreview').textContent,/현금과 구분/);
+    assert.match(s.el('pfNhPreview').textContent,/조회 시점의 평가액/);
+    assert.equal(s.el('pfNhSave').disabled,false);
+  } finally {s.dom.window.close();}
+});
+
 test('로그아웃 후 늦게 도착한 이전 사용자의 계좌 응답으로 연결을 재개하지 않는다', async () => {
   const s=setup();
   try {

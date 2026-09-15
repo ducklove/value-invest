@@ -23,7 +23,7 @@ _DEFAULT_GROUPS = [
     ("기타", 2, 1, "etc"),
 ]
 
-_SPECIAL_ASSETS_SET = {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
+_SPECIAL_ASSETS_SET = {"KRX_GOLD", "CMA_RP_KRW", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
 
 
 def _is_special_or_cash(code: str) -> bool:

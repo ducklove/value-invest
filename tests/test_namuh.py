@@ -86,6 +86,125 @@ class NamuhTests(TempDbMixin):
         with self.assertRaises(BrokerError):
             sync.summary({"Output_0": {}})
 
+    async def test_balance_accepts_rate_specific_order_limits_and_uses_final_summary(self):
+        total = {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "drn_pbl_amt": 600,
+                 "orr_pbl_amt1": "4000", "orr_pbl_amt2": 3000, "orr_pbl_amt3": 2000, "orr_pbl_amt4": 700}
+        domestic = [{"Output_0": {**total, "nxt2_dd_dca": 0}, "Output_1": [
+            {"iem_cd": "A005930", "iem_nm": "삼성전자", "itg_bnc_qty": 10, "phs_pr": 100}]},
+            {"Output_0": total, "Output_1": [
+                {"iem_cd": "A000660", "iem_nm": "SK하이닉스", "itg_bnc_qty": 2, "phs_pr": 200}]}]
+        with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+             patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+            rows, balances = await sync.fetch_snapshot("u1", {"credential_id": self.cid, "account_no": "12345678901", "environment": "live", "include_overseas": False})
+        self.assertEqual({r["stock_code"]: r["quantity"] for r in rows}, {"005930": 10, "000660": 2, "CASH_KRW": 800})
+        self.assertNotIn("orr_pbl_amt", balances["KRW"])
+        self.assertEqual(balances["KRW"]["orr_pbl_amt1"], 4000)
+        self.assertEqual(balances["KRW"]["orr_pbl_amt4"], 700)
+
+    async def test_currency_conversion_total_is_not_a_cash_position(self):
+        domestic = [{"Output_0": {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "drn_pbl_amt": 600}}]
+        foreign = [{"Output_0": {"fc_aet_amt": 0}, "Output_1": []}]
+        usd = {"cur_cd": "USD", "fc_dca": 100, "stl_af_fc_dca": 80, "fc_drn_pbl_amt": 60}
+        vnd = {"cur_cd": "VND", "fc_dca": 100000, "stl_af_fc_dca": 80000, "fc_drn_pbl_amt": 60000}
+        converted = {"cur_cd": "<원화환산합계>", "dca": 140000, "stl_af_dca": 112000,
+                     "fc_dca": 0, "stl_af_fc_dca": 0, "fc_drn_pbl_amt": 0}
+        for margin_rows, expected in (([usd, converted], {"CASH_KRW": 800, "CASH_USD": 80}),
+                                      ([vnd, converted], {"CASH_KRW": 800, "CASH_VND": 80000}),
+                                      ([converted], {"CASH_KRW": 800})):
+            with self.subTest(currencies=len(margin_rows)):
+                async def pages(_user, _cid, path, _body, _environment):
+                    if path.startswith("/krstock/"):
+                        return domestic
+                    if path.endswith("/margin"):
+                        return [{"Output_0": margin_rows}]
+                    return foreign
+                with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+                     patch.object(namuh, "pages", side_effect=pages):
+                    rows, balances = await sync.fetch_snapshot("u1", {"credential_id": self.cid, "account_no": "12345678901", "environment": "live"})
+                self.assertEqual({r["stock_code"]: r["quantity"] for r in rows}, expected)
+                self.assertNotIn("<원화환산합계>", balances)
+
+    async def test_gold_balance_uses_existing_gold_asset_without_changing_units(self):
+        domestic = [{"Output_0": {"dca": 100, "nxt_dd_dca": 100, "nxt2_dd_dca": 100, "drn_pbl_amt": 100},
+                     "Output_1": [{"iem_cd": "M04020000", "iem_nm": "금 99.99K", "itg_bnc_qty": 3, "phs_pr": 120000}]}]
+        with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+             patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+            rows, _ = await sync.fetch_snapshot("u1", {"credential_id": self.cid, "account_no": "12345678901", "environment": "live", "include_overseas": False})
+        self.assertEqual(rows[0]["stock_code"], "KRX_GOLD")
+        self.assertEqual(rows[0]["quantity"], 3)
+        self.assertEqual(rows[0]["avg_price"], 120000)
+
+    async def test_cma_rp_preserves_broker_valuation_and_cost_separately_from_cash(self):
+        from services.portfolio import foreign, quote_service
+
+        total = {"dca": 100, "nxt_dd_dca": 100, "nxt2_dd_dca": 80, "drn_pbl_amt": 60}
+        domestic = [{"Output_0": total, "Output_1": [
+            {"iem_cd": "RKRW221", "iem_nm": "CMA 원화RP", "itg_bnc_qty": 1000,
+             "phs_pr": 0, "now_pr": 0, "eal_amt": 1010, "eal_pls_amt": 10}]},
+            {"Output_0": total, "Output_1": [
+                {"iem_cd": "RKRW221", "iem_nm": "CMA 원화RP", "itg_bnc_qty": 2000,
+                 "phs_pr": 0, "now_pr": 0, "eal_amt": 2040, "eal_pls_amt": 40}]}]
+        await self.link()
+        with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+             patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+            await sync.sync_account("u1", self.aid)
+        positions = {row["stock_code"]: row for row in await portfolio.get_portfolio("u1")}
+        rp = positions["CMA_RP_KRW"]
+        self.assertEqual(rp["quantity"], 3050)
+        self.assertAlmostEqual(rp["quantity"] * rp["avg_price"], 3000)
+        self.assertEqual(positions["CASH_KRW"]["quantity"], 80)
+        self.assertEqual(rp["group_name"], "기타")
+        with patch.object(foreign, "fetch_foreign_quote", AsyncMock()) as foreign_quote:
+            quote = await quote_service.fetch_external_quote_for_stock_service("CMA_RP_KRW")
+        foreign_quote.assert_not_awaited()
+        self.assertEqual(rp["quantity"] * quote["price"], 3050)
+        self.assertAlmostEqual(rp["quantity"] * (quote["price"] - rp["avg_price"]), 50)
+
+    async def test_required_cash_stays_strict_and_failed_parse_preserves_holdings(self):
+        await portfolio.save_portfolio_item("u1", "005930", "삼성전자", 10, 100)
+        await self.link()
+        for raw in (None, "", "NaN", "invalid-private-value"):
+            with self.subTest(raw=raw):
+                total = {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": raw, "drn_pbl_amt": 600}
+                if raw is None:
+                    del total["nxt2_dd_dca"]
+                with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+                     patch.object(namuh, "pages", AsyncMock(return_value=[{"Output_0": total}])), \
+                     self.assertLogs("services.brokers.sync", level="WARNING") as logs:
+                    with self.assertRaises(BrokerError):
+                        await sync.sync_account("u1", self.aid)
+                self.assertIn("nxt2_dd_dca", logs.output[0])
+                self.assertNotIn("invalid-private-value", logs.output[0])
+                self.assertEqual((await portfolio.get_portfolio_item("u1", "005930"))["quantity"], 10)
+                self.assertEqual(await account_holdings.list_positions("u1", self.aid), [])
+
+    async def test_pagination_sends_both_continuation_headers_and_collects_final_page(self):
+        calls = []
+        def respond(request):
+            index = len(calls)
+            calls.append(request)
+            if index:
+                self.assertEqual(request.headers["cts"], f"page-{index}")
+                self.assertEqual(request.headers["cts_flag"], "Y")
+            else:
+                self.assertNotIn("cts", request.headers)
+                self.assertNotIn("cts_flag", request.headers)
+            return httpx.Response(200, json={"rsp_cd": "00166" if index == 3 else "00218",
+                "rsp_msg": "조회완료" if index == 3 else "계속조회", "Output_1": [{"page": index}]},
+                headers={"cts": f"page-{index + 1}", "cts_flag": "N" if index == 3 else "Y"})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(namuh, "get_http_client", AsyncMock(return_value=client)), \
+                 patch.object(namuh, "token", AsyncMock(return_value="test-token")):
+                pages = await namuh.pages("u1", self.cid, "/krstock/inquiry/v1/balance", {})
+        self.assertEqual([page["Output_1"][0]["page"] for page in pages], [0, 1, 2, 3])
+
+    async def test_continuation_ignores_terminal_header_and_keeps_incomplete_guard(self):
+        self.assertIsNone(namuh.continuation({"rsp_cd": "00166"}, {"cts": "last-page"}))
+        self.assertEqual(namuh.continuation({"rsp_cd": "00218"}, {"cts": " next-page "}), "next-page")
+        self.assertIsNone(namuh.continuation({}, {"cts": "last-page", "cts_flag": " N "}))
+        with self.assertRaises(BrokerError):
+            namuh.continuation({}, {"cts": "  ", "cts_flag": " Y "})
+
     async def test_active_key_cannot_be_overwritten_by_failed_secret_entry(self):
         await self.link()
         with self.assertRaises(BrokerError):

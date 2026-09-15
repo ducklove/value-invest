@@ -718,7 +718,7 @@ function _evaluateTargetFormula(formula, variables) {
 //   - 숫자 → 그 값. 계산 출처는 _targetPriceSource 가 별도 알려줌.
 function _computeTargetPrice(item, allItems) {
   const code = item.stock_code;
-  if (code.startsWith('CASH_')) return null;
+  if (code.startsWith('CASH_') || code === 'CMA_RP_KRW') return null;
   if (item.target_price_disabled) return null;
   if (item.target_price_formula) {
     const formulaPrice = _evaluateTargetFormula(item.target_price_formula, _targetFormulaVariables(item, allItems));
@@ -741,7 +741,7 @@ function _computeTargetPrice(item, allItems) {
 
 function _targetPriceSource(item) {
   const code = item.stock_code;
-  if (code.startsWith('CASH_')) return 'cash';
+  if (code.startsWith('CASH_') || code === 'CMA_RP_KRW') return 'cash';
   if (item.target_price_disabled) return 'disabled';
   if (item.target_price_formula) return 'formula';
   if (item.target_price != null) return 'manual';

@@ -17,7 +17,7 @@ function pfAvgPriceKrw(item) {
 function pfCanEditAvgPriceCurrency(stockCode) {
   const code = String(stockCode || '').toUpperCase();
   if (!code || code.startsWith('CASH_')) return false;
-  if (['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(code)) return false;
+  if (['KRX_GOLD', 'CMA_RP_KRW', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(code)) return false;
   return !/^[0-9][0-9A-Z]{5}$/.test(code);
 }
 
@@ -589,8 +589,9 @@ function renderPortfolio(options = {}) {
     const weight = grandTotalMarketValue > 0 && r.marketValue !== null ? (r.marketValue / grandTotalMarketValue * 100) : 0;
     const isEditing = PfStore.edit.code === r.stock_code;
     const isCash = r.stock_code.startsWith('CASH_');
-    const isSpecialFloat = ['KRX_GOLD', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(r.stock_code) || isCash;
-    const curTag = r.stock_code === 'KRX_GOLD' ? '<span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? `<span class="pf-stock-code">${r.cur}</span>` : '';
+    const isRp = r.stock_code === 'CMA_RP_KRW';
+    const isSpecialFloat = ['KRX_GOLD', 'CMA_RP_KRW', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(r.stock_code) || isCash;
+    const curTag = isRp ? '<span class="pf-stock-code" title="수량은 최근 잔고 동기화 시점의 RP 평가액(원)입니다.">평가액 · 원</span>' : r.stock_code === 'KRX_GOLD' ? '<span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? `<span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isSpecialFloat ? 'any' : '1';
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : isCash ? 2 : 8;
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;

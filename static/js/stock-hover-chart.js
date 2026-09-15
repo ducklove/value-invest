@@ -24,7 +24,7 @@ const SCHC_HOVER_SELECTOR = [
 ].join(', ');
 
 // 특수자산은 서버도 supported=false 를 주지만, 요청 자체를 아끼려 프론트에서도 거른다.
-const SCHC_SKIP_CODE_RE = /^(CASH_|KRX_GOLD$|CRYPTO_)/;
+const SCHC_SKIP_CODE_RE = /^(CASH_|KRX_GOLD$|CMA_RP_KRW$|CRYPTO_)/;
 
 const _schcCache = new Map();     // code -> { ts, ttl, data|null(실패) }
 const _schcInflight = new Map();  // code -> Promise
