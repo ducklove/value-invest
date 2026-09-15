@@ -26,6 +26,15 @@ ColumnSpec = tuple[str, str, str]
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 CORE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS quant_basis_runs (
+    id TEXT PRIMARY KEY,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    input_json TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    UNIQUE(google_sub, request_key)
+);
 CREATE TABLE IF NOT EXISTS quant_runs (
     id TEXT PRIMARY KEY,
     google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,

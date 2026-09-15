@@ -31,6 +31,7 @@ function quantPairChanged() {
 }
 
 async function loadQuant() {
+  if (typeof basisInit === 'function') basisInit();
   const generation = ++quantLoadVersion;
   const form = document.getElementById('quantForm');
   if (!form) return;

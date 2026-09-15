@@ -872,6 +872,7 @@ function trackEvent(name, params = {}) {
         <span class="quant-mode">연구 · 실주문 비활성</span>
       </header>
       <div id="quantHealth" class="quant-notice" role="status" aria-live="polite">데이터 상태를 확인하는 중입니다.</div>
+      <section id="quantBasis" class="quant-panel quant-basis" aria-label="현물 선물 차익 연구"></section>
       <div class="quant-layout">
         <aside class="quant-panel">
           <h3>상대가치 교체 연구</h3>
@@ -1409,6 +1410,7 @@ function trackEvent(name, params = {}) {
 <script data-feature="insights" data-src="./js/insights.js"></script>
 <script data-feature="screener" data-src="./js/screener.js"></script>
 <script data-feature="quant" data-src="./js/quant.js"></script>
+<script data-feature="quant" data-src="./js/quant-basis.js"></script>
 <script data-feature="masters" data-src="./js/masters.js"></script>
 <script src="./js/app-main.js" defer></script>
 </body>

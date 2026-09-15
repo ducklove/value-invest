@@ -1,13 +1,35 @@
 """로그인 사용자 전용 퀀트 연구 API. 주문 활성화 API는 제공하지 않는다."""
 
 from fastapi import APIRouter, Body, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from deps import get_current_user
-from repositories import quant, quant_forward
-from services.quant import service
+from repositories import quant, quant_basis, quant_forward
+from services.quant import basis, service
 from services.quant.models import RunRequest
 
 router = APIRouter(prefix="/api/quant")
+
+
+class BasisRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_key: str = Field(min_length=8, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+    input: dict
+
+
+@router.post("/basis/runs", status_code=201)
+async def basis_create(request: Request, payload: BasisRunRequest):
+    return await basis.run(await user_id(request), payload.request_key, payload.input)
+
+
+@router.get("/basis/runs")
+async def basis_runs(request: Request):
+    return {"runs": await quant_basis.listing(await user_id(request))}
+
+
+@router.get("/basis/runs/{rid}")
+async def basis_detail(rid: str, request: Request):
+    return await quant_basis.get(await user_id(request), rid)
 
 
 async def user_id(request):
