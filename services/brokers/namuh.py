@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import math
 import re
 import time
 
@@ -17,6 +18,8 @@ READ_PATHS = frozenset({"/n2/acctinfo", "/krstock/inquiry/v1/balance", "/gbstock
                         "/gbstock/inquiry/v1/margin", "/krstock/quote/v1/currentPrice"})
 _locks: dict[str, asyncio.Lock] = {}
 _last_call: dict[str, float] = {}
+# 실계좌 잔고의 시장별·연속 조회는 공개 SDK의 4회/초에서도 429가 발생한다.
+MIN_CALL_INTERVAL = 1.1
 
 
 class _HideTokenQuery(logging.Filter):
@@ -93,6 +96,7 @@ async def pages(user: str, cid: str, path: str, body: dict, environment="live") 
     client = await get_http_client("namuh")
     results, seen, cts, cts_flag = [], set(), None, None
     refreshed = False
+    rate_retries = 0
     for _ in range(100):
         headers = {"Authorization": "Bearer " + access, "x-client-id": secret["app_key"], "x-client-secret": secret["app_secret"]}
         if cts:
@@ -100,7 +104,7 @@ async def pages(user: str, cid: str, path: str, body: dict, environment="live") 
             if cts_flag:
                 headers["cts_flag"] = cts_flag
         async with lock(cid):
-            await asyncio.sleep(max(0, .26 - (time.monotonic() - _last_call.get(cid, 0))))
+            await asyncio.sleep(max(0, MIN_CALL_INTERVAL - (time.monotonic() - _last_call.get(cid, 0))))
             _last_call[cid] = time.monotonic()
             try:
                 response = await client.post((MOCK if environment == "mock" and path != "/n2/acctinfo" else LIVE) + path,
@@ -112,6 +116,19 @@ async def pages(user: str, cid: str, path: str, body: dict, environment="live") 
             refreshed = True
             continue
         if response.status_code == 429:
+            if rate_retries < 2:
+                rate_retries += 1
+                try:
+                    retry_after = float(response.headers.get("Retry-After", "0"))
+                except ValueError:
+                    retry_after = 0
+                if not math.isfinite(retry_after):
+                    retry_after = 0
+                delay = min(10, max(2 ** rate_retries, retry_after))
+                # 같은 키를 사용하는 다른 조회도 서버의 대기 시간을 지킨다.
+                async with lock(cid):
+                    _last_call[cid] = max(_last_call.get(cid, 0), time.monotonic() + delay - MIN_CALL_INTERVAL)
+                continue
             raise BrokerError("나무 조회 한도를 초과했습니다. 잠시 후 다시 동기화해 주세요.")
         try:
             response.raise_for_status()

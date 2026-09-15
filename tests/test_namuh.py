@@ -205,6 +205,39 @@ class NamuhTests(TempDbMixin):
         with self.assertRaises(BrokerError):
             namuh.continuation({}, {"cts": "  ", "cts_flag": " Y "})
 
+    async def test_rate_limit_retries_same_page_then_resumes_without_duplicate_holdings(self):
+        calls = []
+        def respond(request):
+            calls.append(request)
+            if len(calls) == 1:
+                return httpx.Response(200, json={"Output_1": [{"page": 1}]}, headers={"cts": "next", "cts_flag": "Y"})
+            self.assertEqual(request.headers["cts"], "next")
+            self.assertEqual(request.headers["cts_flag"], "Y")
+            if len(calls) == 2:
+                return httpx.Response(429, headers={"Retry-After": "3"})
+            return httpx.Response(200, json={"Output_1": [{"page": 2}]}, headers={"cts_flag": "N"})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(namuh, "get_http_client", AsyncMock(return_value=client)), \
+                 patch.object(namuh, "token", AsyncMock(return_value="test-token")), \
+                 patch.object(namuh.asyncio, "sleep", AsyncMock()) as sleep:
+                pages = await namuh.pages("u1", self.cid, "/krstock/inquiry/v1/balance", {})
+        self.assertEqual([p["Output_1"][0]["page"] for p in pages], [1, 2])
+        self.assertEqual(len(calls), 3)
+        self.assertGreater(sleep.await_args_list[-1].args[0], 2.8)
+
+    async def test_persistent_rate_limit_has_bounded_retries_and_returns_no_partial_snapshot(self):
+        calls = []
+        def respond(request):
+            calls.append(request)
+            return httpx.Response(429, headers={"Retry-After": "NaN"})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(namuh, "get_http_client", AsyncMock(return_value=client)), \
+                 patch.object(namuh, "token", AsyncMock(return_value="test-token")), \
+                 patch.object(namuh.asyncio, "sleep", AsyncMock()):
+                with self.assertRaisesRegex(BrokerError, "조회 한도"):
+                    await namuh.pages("u1", self.cid, "/krstock/inquiry/v1/balance", {})
+        self.assertEqual(len(calls), 3)
+
     async def test_active_key_cannot_be_overwritten_by_failed_secret_entry(self):
         await self.link()
         with self.assertRaises(BrokerError):
