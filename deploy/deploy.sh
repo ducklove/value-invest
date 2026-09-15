@@ -36,6 +36,8 @@ REPO_UNITS=(
   "linked-projects-sync.timer"
   "daily-briefing.service"
   "daily-briefing.timer"
+  "daily-briefing-valuation.service"
+  "daily-briefing-valuation.timer"
   "daily-briefing-market-close.service"
   "daily-briefing-market-close.timer"
   "daily-briefing-night.service"

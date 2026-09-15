@@ -5,7 +5,7 @@ systemd timer 배치가 결산 데이터로 브리핑을 만들어
 이미 연결된 알림 채널(텔레그램/카카오)로 보낸다.
 
 구성:
-* ``build_briefing_context``  — 순수 데이터 조립(테스트 대상). 어제 NAV 변화,
+* ``build_briefing_context``  — 모닝 07:00 평가/해외 성과, 나이트 결산 변화,
   기여 상위/하위 종목, 신규 공시·리포트, 오늘 경제 일정, 시장 지표. 모두
   기존 저장 데이터/캐시에서 읽는다 — 새 스크래핑 없음.
 * ``generate_briefing``       — 'daily_briefing' 모델 프로필로 LLM 호출
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 
 import ai_config
 import close_price_client
@@ -39,7 +39,7 @@ from repositories import wiki as wiki_repo
 from services import ai_client
 from services.market.formatting import format_indicator_change as _indicator_change_text
 from services.notifications import channels
-from services.portfolio import ai_analysis, time_windows
+from services.portfolio import ai_analysis, morning_valuation, time_windows
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,6 @@ CALENDAR_EVENT_LIMIT = 6
 FEED_ITEM_LIMIT = 5
 MIN_USABLE_AI_LINES = 3
 MAX_CUSTOM_INSTRUCTIONS_CHARS = 1200
-OVERSEAS_GROUP_LIMIT = 3
 DOMESTIC_INDEX_LABELS = {"KOSPI": "코스피", "KOSDAQ": "코스닥"}
 FLOW_MARKET_LABELS = {"kospi": "코스피", "kosdaq": "코스닥"}
 FLOW_INVESTOR_LABELS = {"individual": "개인", "foreign": "외국인", "institution": "기관"}
@@ -65,10 +64,11 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
         "name": "모닝 브리핑",
         "title": "🌅 모닝 브리핑",
         "schedule_label": "평일 07:30",
-        "description": "개장 전, 전일 결산과 오늘 확인할 이벤트를 정리합니다.",
-        "focus": "개장 전 의사결정에 필요한 전일 포트폴리오 변화, 해외/야간 변수, 오늘 일정을 우선합니다.",
+        "description": "오늘 07:00 평가와 간밤 해외그룹 성과, 개장 전 확인할 일정을 정리합니다.",
+        "focus": "오늘 07:00 KST 평가 기준으로 간밤 해외주식과 해외그룹 손익·기여 종목을 먼저 설명합니다.",
         "outline": (
-            "전일 포트폴리오 변동 요약(금액·%), 기여 상위/하위 종목, 해외 그룹 성과, "
+            "해외 그룹 성과(평가액·손익·수익률·비중, 상승/하락 수와 주요 기여 종목)를 맨 앞에, "
+            "오늘 07:00 총평가액과 직전 결산 대비 입출금 제외 성과, 간밤 해외시장 동향, "
             "야간선물 일간 변동, 오늘의 일정, 새 공시·리포트, 오늘 주요 경제 일정, "
             "오늘 확인할 포인트 1~2개."
         ),
@@ -380,64 +380,6 @@ def _movers(
     return {"top": top, "bottom": bottom}
 
 
-def _is_overseas_group_name(group_name: str | None) -> bool:
-    text = str(group_name or "").strip()
-    lower = text.lower()
-    return (
-        any(token in text for token in ("해외", "미국", "글로벌"))
-        or any(token in lower for token in ("foreign", "overseas", "global"))
-        or lower in {"us", "usa", "international", "intl"}
-    )
-
-
-def _overseas_group_performance(rows: list[dict]) -> list[dict]:
-    candidates = [r for r in rows if _is_overseas_group_name(r.get("group_name")) and r.get("date")]
-    if not candidates:
-        return []
-    latest_date = max(str(r["date"]) for r in candidates)
-    latest_rows = [r for r in candidates if str(r.get("date")) == latest_date]
-    by_group: dict[str, list[dict]] = {}
-    for row in candidates:
-        by_group.setdefault(str(row.get("group_name") or "해외"), []).append(row)
-
-    out: list[dict] = []
-    for row in latest_rows:
-        name = str(row.get("group_name") or "해외")
-        value = _safe_float(row.get("market_value"))
-        history = sorted(by_group.get(name) or [], key=lambda r: str(r.get("date") or ""))
-        prev = None
-        for hist in reversed(history):
-            if str(hist.get("date") or "") < latest_date:
-                prev = hist
-                break
-        prev_value = _safe_float((prev or {}).get("market_value"))
-        change_krw = None
-        change_pct = None
-        if value is not None and prev_value is not None and prev_value > 0:
-            change_krw = value - prev_value
-            change_pct = change_krw / prev_value * 100.0
-        out.append(
-            {
-                "group_name": name,
-                "date": latest_date,
-                "market_value": value,
-                "prev_date": (prev or {}).get("date"),
-                "prev_value": prev_value,
-                "change_krw": change_krw,
-                "change_pct": change_pct,
-                "weight_pct": _safe_float(row.get("weight_pct")),
-                "stock_count": int(row.get("stock_count") or 0),
-            }
-        )
-    out.sort(key=lambda item: abs(item.get("change_krw") or 0), reverse=True)
-    return out[:OVERSEAS_GROUP_LIMIT]
-
-
-async def _fetch_overseas_groups(google_sub: str) -> list[dict]:
-    rows = await snapshots_repo.get_group_weight_history(google_sub)
-    return _overseas_group_performance(rows)
-
-
 def _format_domestic_index(code: str, item: dict | None) -> str | None:
     if not item or not item.get("value"):
         return None
@@ -589,7 +531,7 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
     만든다 (모두 기존 저장 데이터 — 새 외부 수집 없음).
     """
     profile = briefing_profile(briefing_type)
-    today = date.today()
+    today = time_windows.today_kst_date()
     context: dict = {
         "google_sub": google_sub,
         "date": today.isoformat(),
@@ -601,6 +543,7 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
         "briefing_outline": profile["outline"],
         "nav": None,
         "portfolio_today": None,
+        "morning_valuation": None,
         "movers": {"top": [], "bottom": []},
         "overseas_groups": [],
         "filings": [],
@@ -614,10 +557,8 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
         "market": [],
     }
 
-    # --- 어제 NAV 변화 + 기여 종목 (결산 스냅샷 기반) ---
-    # 클로징 브리핑은 당일 장 마감 직후 메시지라 전일/최근 결산 스냅샷 기반
-    # 데이터가 섞이지 않도록 이 블록을 수집하지 않는다.
-    if profile["kind"] != "market_close":
+    # --- 나이트 결산 변화 + 기여 종목. 모닝의 07:00 평가와 분리한다. ---
+    if profile["kind"] == "night":
         try:
             latest = await snapshots_repo.get_latest_snapshot(google_sub)
             if latest:
@@ -665,10 +606,12 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
         except Exception as exc:
             logger.warning("briefing today portfolio block failed user=%s: %s", google_sub[:8], exc)
 
-    # --- 해외 그룹 성과 (그룹 스냅샷 기반 — 모닝 전용, 나이트는 당일 성과에 집중) ---
+    # --- 모닝은 07:00에 고정한 평가·해외 성과만 사용한다. 전일 결산으로 대체하지 않는다. ---
     if profile["kind"] == "morning":
         try:
-            context["overseas_groups"] = await _fetch_overseas_groups(google_sub)
+            valuation = await morning_valuation.load(google_sub, today.isoformat())
+            context["morning_valuation"] = valuation
+            context["overseas_groups"] = (valuation or {}).get("overseas_groups") or []
         except Exception as exc:
             logger.warning("briefing overseas group block failed user=%s: %s", google_sub[:8], exc)
 
@@ -845,6 +788,49 @@ def _fmt_overseas_group(group: dict) -> str:
     return f"{head} ({' · '.join(parts)})" if parts else head
 
 
+def _morning_sections(context: dict) -> list[list[str]]:
+    valuation = context.get("morning_valuation")
+    groups = context.get("overseas_groups") or []
+    items = []
+    if valuation:
+        stamp = valuation["as_of"][:16].replace("T", " ")
+        items.append(f"평가 기준 {stamp} KST")
+        if valuation.get("source") == "late":
+            items.append("07:00 미수집 · 실제 재평가 시각 기준")
+        if valuation.get("prev_date"):
+            items.append(f"비교: {valuation['prev_date']} 결산 · 원화 환산")
+    for group in groups:
+        items.append(_fmt_overseas_group(group))
+        if "up_count" in group:
+            items.append(f"{group['stock_count']}종목 · 상승 {group['up_count']} / 하락 {group['down_count']} / 보합 {group['flat_count']}")
+        if group.get("comparison_unavailable"):
+            items.append("수량 변경·비교자료 누락: 그룹 수익률 산출 보류")
+        for label, key in (("상승 기여", "top"), ("하락 기여", "bottom")):
+            for mover in group.get(key) or []:
+                pct = mover.get("change_pct")
+                pct_text = f" ({pct:+.2f}%)" if pct is not None else ""
+                items.append(f"{label} {mover['stock_name']} {_fmt_signed_krw(mover['change_krw'])}{pct_text}")
+        if group.get("missing"):
+            items.append("시세 미확인: " + ", ".join(group["missing"]))
+    sections = [_section("🌏 해외 그룹 성과", items)] if items else []
+    if not valuation:
+        sections.append(_section("📊 오늘 07:00 평가", ["07:00 평가 데이터 미수집 · 총평가액 확인 불가"]))
+        return sections
+    totals = []
+    if valuation.get("total_value") is not None:
+        totals.append(f"총평가 {_fmt_money(valuation['total_value'])}")
+    else:
+        totals.append("시세 누락으로 총평가액 산출 보류")
+    if valuation.get("change_krw") is not None:
+        totals.append(f"직전 결산 대비 {_fmt_signed_krw(valuation['change_krw'])} ({valuation['change_pct']:+.2f}%)")
+    if valuation.get("net_cashflow"):
+        totals.append(f"입출금 {_fmt_signed_krw(valuation['net_cashflow'])} 제외")
+    if valuation.get("missing"):
+        totals.append("시세 미확인: " + ", ".join(valuation["missing"]))
+    sections.append(_section(f"📊 총평가 ({valuation['as_of'][:16].replace('T', ' ')} KST)", totals))
+    return sections
+
+
 def _fmt_calendar_alert(item: dict) -> str:
     event = item.get("event") or "일정"
     head = " ".join(p for p in (item.get("time"), item.get("country_name")) if p)
@@ -942,7 +928,7 @@ def _requested_missing_context_lines(context: dict, custom_instructions: str | N
     kind = context.get("briefing_type") or DEFAULT_BRIEFING_TYPE
     lines: list[str] = []
     if kind == "morning" and requested["overseas_groups"] and not context.get("overseas_groups"):
-        lines.append("🌏 해외 그룹 성과: 최근 그룹 스냅샷에서 해외 그룹 데이터를 찾지 못했습니다.")
+        lines.append("🌏 해외 그룹 성과: 오늘 평가에서 해외 그룹 데이터를 찾지 못했습니다.")
     if requested["calendar_alerts"] and not context.get("calendar_alerts"):
         lines.append("📅 오늘의 일정: 오늘 예정된 알림 설정 이벤트가 없습니다.")
     if kind != "market_close" and requested["night_futures"] and not context.get("night_futures"):
@@ -971,25 +957,22 @@ def _context_sections(context: dict, custom_instructions: str | None = None) -> 
         for section in _feed_sections(context, night=True):
             add(section)
 
+    if kind == "morning":
+        for section in _morning_sections(context):
+            add(section)
+
     portfolio_today = context.get("portfolio_today")
     if kind in TODAY_PORTFOLIO_BRIEFING_TYPES and portfolio_today:
         add(_today_portfolio_section(portfolio_today))
 
     nav = context.get("nav")
-    if nav and kind not in TODAY_PORTFOLIO_BRIEFING_TYPES:
-        add(_nav_section(nav, "어제"))
-    elif nav and kind == "night" and not portfolio_today:
+    if nav and kind == "night" and not portfolio_today:
         add(_nav_section(nav, "최근 결산"))
 
     movers = context.get("movers") or {}
     if kind != "market_close":
         add(_section("📈 상승 기여", [_fmt_mover(m) for m in movers.get("top") or []]))
         add(_section("📉 하락 기여", [_fmt_mover(m) for m in movers.get("bottom") or []]))
-    if kind == "morning":
-        add(_section(
-            "🌏 해외 그룹 성과",
-            [_fmt_overseas_group(g) for g in context.get("overseas_groups") or []],
-        ))
 
     if kind != "night":
         for section in _feed_sections(context, night=False):
@@ -1081,6 +1064,10 @@ def _briefing_stats(context: dict, text: str) -> dict:
         "text_lines": len(_nonempty_lines(text)),
         "context_lines": len(_context_lines(context)),
         "has_nav": bool(context.get("nav")),
+        "has_morning_valuation": bool(context.get("morning_valuation")),
+        "valuation_as_of": (context.get("morning_valuation") or {}).get("as_of"),
+        "valuation_source": (context.get("morning_valuation") or {}).get("source"),
+        "valuation_missing": (context.get("morning_valuation") or {}).get("missing") or [],
         "mover_top": len(movers.get("top") or []),
         "mover_bottom": len(movers.get("bottom") or []),
         "mover_value_fallbacks": sum(1 for m in mover_rows if m.get("basis") == "market_value"),
@@ -1104,7 +1091,12 @@ def render_template_briefing(context: dict, custom_instructions: str | None = No
 
 
 def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
-    data = _sections_text(_context_sections(context, custom_instructions)) or "(데이터 없음)"
+    morning = (context.get("briefing_type") or DEFAULT_BRIEFING_TYPE) == "morning"
+    sections = _context_sections(context, custom_instructions)
+    if morning:
+        # 이미 확정한 평가 섹션은 LLM 입력에서도 제외해 중복·재해석을 막는다.
+        sections = [section for section in sections if not section[0].startswith(("🌏 해외 그룹 성과", "📊"))]
+    data = _sections_text(sections) or "(데이터 없음)"
     custom = normalize_custom_instructions(custom_instructions)
     title = context.get("briefing_title") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["title"]
     name = context.get("briefing_name") or BRIEFING_PROFILES[DEFAULT_BRIEFING_TYPE]["name"]
@@ -1118,6 +1110,14 @@ def build_prompt(context: dict, custom_instructions: str | None = None) -> str:
 
 위 추가 지시는 제공 데이터와 시스템 규칙을 벗어나지 않는 범위에서 반영하세요.
 """
+    if morning:
+        focus = "개장 전 필요한 간밤 해외시장 지표, 야간선물과 오늘의 일정을 설명합니다."
+        outline = (
+            "간밤 해외시장 동향, 야간선물, 오늘 일정과 확인할 포인트. "
+            "해외 그룹 성과와 총평가 섹션은 시스템이 원본 수치로 맨 앞에 붙입니다. "
+            "사용자 추가 지시의 해외그룹·포트폴리오 성과 항목은 이미 그 섹션에서 처리했습니다. "
+            "작성 본문에서는 그룹 평가액·손익·기여 종목·총평가·평가 기준 시각을 반복하지 마세요."
+        )
     return f"""오늘 날짜: {context.get('date')}
 
 아래는 한 투자자의 포트폴리오 데이터입니다.
@@ -1165,7 +1165,9 @@ async def generate_briefing(google_sub: str, briefing_type: object = None) -> di
                 {"role": "user", "content": build_prompt(context, custom_instructions)},
             ],
             "max_tokens": MAX_TOKENS,
-            **ai_config.openrouter_reasoning_controls(model, effort="low"),
+            # 모닝은 수치를 직접 렌더하므로 짧은 해설만 생성한다. 숨은 추론이
+            # 1600 토큰을 모두 소모해 본문이 비는 모델에는 기본 최소/없음 정책을 쓴다.
+            **ai_config.openrouter_reasoning_controls(model, effort=None if profile["kind"] == "morning" else "low"),
         }
         result = await ai_client.post_chat_completion(
             feature=FEATURE,
@@ -1180,6 +1182,15 @@ async def generate_briefing(google_sub: str, briefing_type: object = None) -> di
         text = normalize_message_text(result.get("content") or "")
         if text:
             rejection_reason = _ai_text_rejection_reason(text, result.get("finish_reason"))
+            if rejection_reason is None and profile["kind"] == "morning":
+                if any(word in text for word in ("총평가", "해외 그룹 성과", "평가 기준")):
+                    rejection_reason = "repeated_valuation"
+                else:
+                    body = "\n".join(text.splitlines()[1:]).strip()
+                    fixed = _sections_text(_morning_sections(context))
+                    text = normalize_message_text(
+                        f"{profile['title']} ({context['date']})\n\n{fixed}\n\n{body}"
+                    )
             if rejection_reason is None:
                 return {
                     "text": text,

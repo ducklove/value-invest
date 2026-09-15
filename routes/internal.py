@@ -213,6 +213,14 @@ async def run_data_quality_check(request: Request):
         raise _job_failed("data quality check", exc) from exc
 
 
+@router.post("/daily-briefing/morning-valuation")
+async def run_morning_valuation(request: Request):
+    _require_loopback(request)
+    from services.portfolio import morning_valuation
+
+    return {"ok": True, **await morning_valuation.capture_enabled()}
+
+
 @router.post("/daily-briefing/send")
 async def run_daily_briefing_send(request: Request):
     """AI 데일리 브리핑 배치 발송 한 사이클. Loopback-only.

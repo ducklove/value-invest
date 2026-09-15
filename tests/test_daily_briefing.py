@@ -93,10 +93,16 @@ class DailyBriefingHarness(TempDbMixin):
 
 
 class BriefingContextTests(DailyBriefingHarness):
+    async def _build_settlement_context(self):
+        with patch.object(daily_briefing, "_fetch_today_portfolio_block", new=AsyncMock(return_value=None)), \
+             patch.object(daily_briefing, "_fetch_domestic_market_block", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing, "_fetch_market_flow_block", new=AsyncMock(return_value=[])):
+            return await daily_briefing.build_briefing_context("u1", "night")
+
     async def test_context_assembly_from_seeded_db(self):
         await self._seed_user()
         d_prev, d_last = await self._seed_snapshots()
-        now = datetime.now().isoformat()
+        now = datetime.now().replace(hour=23).isoformat()
         await dart_review_repo.save_dart_report_review({
             "stock_code": "005930",
             "corp_code": "c1",
@@ -135,7 +141,7 @@ class BriefingContextTests(DailyBriefingHarness):
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=["- KOSPI: 2900 (+0.5%)"])), \
              patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
-            ctx = await daily_briefing.build_briefing_context("u1")
+            ctx = await self._build_settlement_context()
 
         # 어제 NAV 변화 (금액·%)
         self.assertEqual(ctx["nav"]["date"], d_last)
@@ -166,7 +172,7 @@ class BriefingContextTests(DailyBriefingHarness):
 
         # 템플릿 렌더도 핵심 수치를 담는다 (LLM 폴백 본문)
         text = daily_briefing.render_template_briefing(ctx)
-        self.assertTrue(text.startswith("🌅 모닝 브리핑"))
+        self.assertTrue(text.startswith("🌙 나이트 브리핑"))
         self.assertIn("삼성전자", text)
         self.assertIn("SK하이닉스", text)
         self.assertNotIn("[000660]", text)
@@ -198,7 +204,7 @@ class BriefingContextTests(DailyBriefingHarness):
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
-            ctx = await daily_briefing.build_briefing_context("u1")
+            ctx = await self._build_settlement_context()
 
         # 신규 매수 종목도 종가 조회 대상에 포함된다 (전일 스냅샷 존재 조건 없음).
         self.assertEqual(set(prices.await_args.args[0]), {"005930", "000660"})
@@ -218,7 +224,7 @@ class BriefingContextTests(DailyBriefingHarness):
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value={})):
-            ctx = await daily_briefing.build_briefing_context("u1")
+            ctx = await self._build_settlement_context()
 
         top = ctx["movers"]["top"]
         bottom = ctx["movers"]["bottom"]
@@ -396,7 +402,7 @@ class BriefingContextTests(DailyBriefingHarness):
         night_futures = AsyncMock(return_value={"value": "431.20"})
         with patch.object(daily_briefing.snapshots_repo, "get_latest_snapshot", new=latest_snapshot), \
              patch.object(daily_briefing, "_fetch_today_portfolio_block", new=AsyncMock(return_value=None)), \
-             patch.object(daily_briefing, "_fetch_overseas_groups", new=overseas), \
+             patch.object(daily_briefing.morning_valuation, "load", new=overseas), \
              patch.object(daily_briefing, "_fetch_night_futures_block", new=night_futures), \
              patch.object(daily_briefing, "_fetch_domestic_market_block", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing, "_fetch_market_flow_block", new=AsyncMock(return_value=[])), \
@@ -463,7 +469,7 @@ class BriefingContextTests(DailyBriefingHarness):
         entries = AsyncMock(return_value=[])
         overseas = AsyncMock(return_value=[{"group_name": "해외"}])
         with patch.object(daily_briefing, "_fetch_today_portfolio_block", new=AsyncMock(return_value=None)), \
-             patch.object(daily_briefing, "_fetch_overseas_groups", new=overseas), \
+             patch.object(daily_briefing.morning_valuation, "load", new=overseas), \
              patch.object(daily_briefing, "_fetch_night_futures_block", new=AsyncMock(return_value=None)), \
              patch.object(daily_briefing, "_fetch_domestic_market_block", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing, "_fetch_market_flow_block", new=AsyncMock(return_value=[])), \
@@ -489,7 +495,7 @@ class BriefingFormattingTests(unittest.TestCase):
             "date": "2026-07-29",
             "briefing_type": "morning",
             "briefing_title": "🌅 모닝 브리핑",
-            "nav": {"date": "2026-07-28", "total_value": 12_345_678,
+            "morning_valuation": {"date": "2026-07-29", "as_of": "2026-07-29T07:00:00+09:00", "total_value": 12_345_678,
                     "change_krw": -234_567, "change_pct": -1.86},
             "movers": {
                 "top": [
@@ -514,7 +520,7 @@ class BriefingFormattingTests(unittest.TestCase):
         text = daily_briefing.render_template_briefing(self._context())
 
         self.assertIn("📈 상승 기여\n• 삼성전자 +1,234,567 (가격 +2.1%)\n• SK하이닉스 +812,345 (가격 +1.2%)", text)
-        self.assertIn("📊 어제 (2026-07-28)\n• 총평가 12,345,678\n• 전일 대비 -234,567 (-1.86%)", text)
+        self.assertIn("📊 총평가 (2026-07-29 07:00 KST)\n• 총평가 12,345,678\n• 직전 결산 대비 -234,567 (-1.86%)", text)
         self.assertIn("📅 오늘 주요 일정\n• 21:30 🇺🇸 소비자물가지수(CPI)\n• 23:00 🇺🇸 ISM 제조업", text)
         # 시장 지표는 원본의 "- " 목록 기호 대신 같은 불릿으로 통일
         self.assertIn("🌐 시장 지표\n• KOSPI: 2,900.12 (+0.5%)", text)
@@ -559,7 +565,7 @@ class GenerateBriefingTests(DailyBriefingHarness):
         return {
             "google_sub": "u1",
             "date": date.today().isoformat(),
-            "nav": {"date": "2026-06-09", "prev_date": "2026-06-08", "total_value": 1_050_000,
+            "morning_valuation": {"date": "2026-06-09", "as_of": "2026-06-09T07:00:00+09:00", "prev_date": "2026-06-08", "total_value": 1_050_000,
                     "prev_value": 1_000_000, "change_krw": 50_000, "change_pct": 5.0},
             "movers": {"top": [], "bottom": []},
             "overseas_groups": [],
@@ -626,7 +632,7 @@ class GenerateBriefingTests(DailyBriefingHarness):
             briefing = await daily_briefing.generate_briefing("u1")
         self.assertEqual(briefing["source"], "ai")
         self.assertEqual(briefing["model"], "test/model")
-        self.assertIn("데일리 브리핑", briefing["text"])
+        self.assertIn("모닝 브리핑", briefing["text"])
         rows = await self._usage_rows()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["feature"], "daily_briefing")
@@ -635,7 +641,7 @@ class GenerateBriefingTests(DailyBriefingHarness):
         self.assertEqual(rows[0]["input_tokens"], 120)
         self.assertEqual(rows[0]["output_tokens"], 45)
 
-    async def test_llm_text_is_normalized_before_send(self):
+    async def test_llm_cannot_replace_saved_morning_valuation(self):
         """모델이 마크다운 목록·콤마 없는 숫자를 뱉어도 발송본은 규칙을 지킨다."""
         await app_settings_repo.set_app_setting("OPENROUTER_API_KEY", "sk-or-test", is_secret=True)
         resp = MagicMock()
@@ -655,9 +661,10 @@ class GenerateBriefingTests(DailyBriefingHarness):
              patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=resp)):
             briefing = await daily_briefing.generate_briefing("u1")
 
-        self.assertEqual(briefing["source"], "ai")
+        self.assertEqual(briefing["source"], "template")
+        self.assertEqual(briefing["fallback_reason"], "ai_repeated_valuation")
         self.assertIn("• 총평가 1,050,000", briefing["text"])
-        self.assertIn("• 전일 대비 +50,000 (+5.00%)", briefing["text"])
+        self.assertIn("• 직전 결산 대비 +50,000 (+5.00%)", briefing["text"])
         self.assertNotIn("- 총평가", briefing["text"])
         self.assertNotIn("\n\n\n", briefing["text"])
         self.assertFalse(briefing["text"].endswith(" "))
@@ -1015,6 +1022,19 @@ class BriefingRouteTests(DailyBriefingHarness):
 
 
 class InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_morning_capture_requires_loopback(self):
+        request = _request("/api/internal/daily-briefing/morning-valuation", client_host="203.0.113.10")
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(HTTPException):
+                await internal.run_morning_valuation(request)
+
+    async def test_morning_capture_runs_without_sending(self):
+        capture = AsyncMock(return_value={"users": 1, "captured": 1})
+        with patch.dict("os.environ", {}, clear=True), \
+             patch.object(daily_briefing.morning_valuation, "capture_enabled", new=capture):
+            result = await internal.run_morning_valuation(_request())
+        self.assertEqual(result, {"ok": True, "users": 1, "captured": 1})
+
     async def test_rejects_forwarded_request_without_token(self):
         request = _request(
             "/api/internal/daily-briefing/send",
