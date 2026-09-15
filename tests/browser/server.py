@@ -33,6 +33,7 @@ from routes import (
     portfolio,
     portfolio_distributions,
     portfolio_trades,
+    quant,
 )
 from services.portfolio.time_windows import today_kst_date
 
@@ -76,6 +77,7 @@ app.include_router(investment_insights.router)
 app.include_router(portfolio_trades.router)
 app.include_router(dividend_receipts.router)
 app.include_router(portfolio_distributions.router)
+app.include_router(quant.router)
 
 
 @app.get("/healthz")

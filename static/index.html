@@ -824,6 +824,12 @@ function trackEvent(name, params = {}) {
         </p>
       </div>
       <div class="lab-grid">
+        <a class="lab-card" href="/quant" onclick="event.preventDefault(); switchView('quant');">
+          <span class="lab-pill">전략 연구 · 신호 관찰</span>
+          <h3>퀀트 운용실</h3>
+          <p>보통주·우선주 교체 전략을 동일 조건의 비교전략과 검증하고, 고정한 전략의 일별 신호를 관찰합니다.</p>
+          <strong>열기 →</strong>
+        </a>
         <a class="lab-card" href="/screener" onclick="event.preventDefault(); switchView('screener');">
           <span class="lab-pill">유니버스 스캔</span>
           <h3>밸류 스크리너</h3>
@@ -855,6 +861,44 @@ function trackEvent(name, params = {}) {
           <strong>열기 →</strong>
         </a>
       </div>
+    </div>
+  </div>
+
+  <div id="quantView" style="display:none;">
+    <div class="quant-page">
+      <header class="quant-header">
+        <div><span class="lab-eyebrow">상대가치 연구</span><h2>퀀트 운용실</h2>
+          <p>가격 차이를 찾고, 비용을 검증하고, 같은 전략의 다음 신호를 관찰합니다.</p></div>
+        <span class="quant-mode">연구 · 실주문 비활성</span>
+      </header>
+      <div id="quantHealth" class="quant-notice" role="status" aria-live="polite">데이터 상태를 확인하는 중입니다.</div>
+      <div class="quant-layout">
+        <aside class="quant-panel">
+          <h3>보통주·우선주 교체</h3>
+          <p class="quant-muted">가설과 비용을 고정하고 비교합니다. 아래 수수료·세금은 연구 가정이며 실제 계좌 요율을 확인해 입력하세요.</p>
+          <form id="quantForm">
+            <label>기업·주식 쌍<select name="pair" required id="quantPair"><option value="">불러오는 중</option></select></label>
+            <div class="quant-fields"><label>평가 시작<input type="date" name="start" required></label><label>평가 종료<input type="date" name="end" required></label></div>
+            <label>가상 배정금액 (원)<input name="capital" type="number" min="10000" max="1000000000" value="10000000" required></label>
+            <div class="quant-fields"><label>추정창 (관측일)<input name="window" type="number" min="20" max="252" value="126" required></label><label>최대 보유 관측일<input name="max_holding" type="number" min="1" max="252" value="40" required></label></div>
+            <div class="quant-fields"><label>진입 z<input name="entry_z" type="number" min="0.5" max="5" step="0.1" value="2" required></label><label>복귀 z<input name="exit_z" type="number" min="-2" max="3" step="0.1" value="0.5" required></label></div>
+            <details><summary>거래비용·유동성 가정</summary>
+              <label>편도 수수료 (bp)<input name="commission_bps" type="number" min="0" max="100" step="0.1" value="5" required></label>
+              <label>매도세 (bp)<input name="sell_tax_bps" type="number" min="0" max="100" step="0.1" value="20" required></label>
+              <label>편도 체결 손실 (bp)<input name="slippage_bps" type="number" min="0" max="200" step="0.1" value="10" required></label>
+              <label>일 거래대금 참여율 (%)<input name="participation" type="number" min="0.01" max="5" step="0.01" value="1" required></label>
+              <p class="quant-muted">1bp = 0.01%. 거래대금 한도를 넘는 수량은 다음 관측일로 나뉩니다.</p>
+            </details>
+            <button type="submit" id="quantSubmit" class="quant-primary">비교 연구 실행</button>
+          </form>
+          <p id="quantMessage" role="status" aria-live="polite"></p>
+          <h3>실험 기록</h3><div id="quantRuns"></div>
+        </aside>
+        <section class="quant-panel" aria-label="전략 검증 보고서">
+          <div id="quantReport"><h3>비용을 뺀 결과부터 확인하세요</h3><p>교체 전략과 보통주 보유·우선주 보유·고정 혼합을 같은 기간과 비용으로 비교합니다.</p><p class="quant-muted">수정주가 기준 탐색 단계입니다. 원주가·배당·권리·호가 검증을 마치기 전에는 실거래로 전환되지 않습니다.</p></div>
+        </section>
+      </div>
+      <section class="quant-panel quant-observer"><h3>일별 신호 관찰</h3><p class="quant-muted">완료된 연구의 설정을 고정해 새로 도착한 일봉의 신호만 기록합니다. 가상 체결 수익이나 실제 주문이 아닙니다. 수집 실패·자료 정정 시 관찰을 보류합니다.</p><div id="quantObservations">관찰할 실험을 보고서에서 선택하세요.</div></section>
     </div>
   </div>
 
@@ -1363,6 +1407,7 @@ function trackEvent(name, params = {}) {
 <script src="./js/portfolio-events.js" defer></script>
 <script data-feature="insights" data-src="./js/insights.js"></script>
 <script data-feature="screener" data-src="./js/screener.js"></script>
+<script data-feature="quant" data-src="./js/quant.js"></script>
 <script data-feature="masters" data-src="./js/masters.js"></script>
 <script src="./js/app-main.js" defer></script>
 </body>

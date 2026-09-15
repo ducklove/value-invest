@@ -19,6 +19,15 @@ test('달러 초기 잔고에서 새 종목을 매수·매도하면 달러만 �
   await page.getByRole('button', { name: '이메일로 로그인' }).click();
   await expect(page.locator('#pfBody tr[data-code="005930"]')).toBeVisible();
   const krwBefore = (await holdings(page)).find(i => i.stock_code === 'CASH_KRW').quantity;
+  // 앞선 환전 검사의 달러 잔고가 초기 등록 시나리오에 섞이지 않게 격리한다.
+  if ((await holdings(page)).some(i => i.stock_code === 'CASH_USD')) {
+    const status = await page.evaluate(async () => (await fetch('/api/portfolio/CASH_USD', {
+      method: 'DELETE', headers: { 'X-Requested-With': 'fetch' },
+    })).status);
+    expect(status).toBe(200);
+    await page.reload();
+    await expect(page.locator('#pfBody tr[data-code="005930"]')).toBeVisible();
+  }
   await openAdd(page, 'CASH_USD');
   await page.locator('#pfRegisterQuantity').fill('1000');
   await page.locator('#pfRegisterSave').click();

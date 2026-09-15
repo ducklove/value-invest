@@ -184,4 +184,8 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         tasks.append((asyncio.create_task(run_namuh(namuh_stop), name="namuh-quotes"), namuh_stop))
 
         sd_notify("READY=1")
+        from services.quant.service import run_loop as run_quant
+
+        quant_stop = asyncio.Event()
+        tasks.append((asyncio.create_task(run_quant(quant_stop), name="quant-research"), quant_stop))
         yield

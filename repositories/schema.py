@@ -26,6 +26,37 @@ ColumnSpec = tuple[str, str, str]
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 CORE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS quant_runs (
+    id TEXT PRIMARY KEY,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed','cancelled')),
+    result_json TEXT,
+    snapshot_id TEXT,
+    error TEXT,
+    created_at REAL NOT NULL,
+    started_at REAL,
+    finished_at REAL,
+    UNIQUE(google_sub,request_key)
+);
+CREATE INDEX IF NOT EXISTS idx_quant_runs_queue ON quant_runs(status,created_at);
+CREATE TABLE IF NOT EXISTS quant_watches (
+    run_id TEXT PRIMARY KEY REFERENCES quant_runs(id) ON DELETE CASCADE,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+    created_at REAL NOT NULL,
+    checked_at REAL,
+    error TEXT
+);
+CREATE TABLE IF NOT EXISTS quant_observations (
+    run_id TEXT NOT NULL REFERENCES quant_runs(id) ON DELETE CASCADE,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    market_date TEXT NOT NULL,
+    observed_at REAL NOT NULL,
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY(run_id,market_date)
+);
 CREATE TABLE IF NOT EXISTS corp_codes (
     stock_code TEXT PRIMARY KEY,
     corp_code TEXT NOT NULL,
