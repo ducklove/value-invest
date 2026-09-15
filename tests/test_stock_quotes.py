@@ -17,6 +17,19 @@ def setup_function():
     stock_quotes._locks.clear()
 
 
+@pytest.mark.asyncio
+async def test_cash_vnd_keeps_per_unit_precision_in_daily_and_fallback_quotes():
+    from services.portfolio import fx, quote_service
+
+    with patch.object(fx, "fetch_fx_daily_change", AsyncMock(return_value={"price": 5.36, "change": .02, "change_pct": .37})):
+        daily = await quote_service.fetch_cash_quote("CASH_VND")
+    with patch.object(fx, "fetch_fx_daily_change", AsyncMock(return_value={})), \
+         patch.object(fx, "fx_rate_for_code", AsyncMock(return_value=.0536)):
+        fallback = await quote_service.fetch_cash_quote("CASH_VND")
+    assert daily["price"] == fallback["price"] == .0536
+    assert daily["price"] * 1000000 == 53600
+
+
 def test_runtime_quote_callers_use_stock_quotes_service_boundary():
     allowed = {
         ROOT / "stock_price.py",  # low-level REST/WS implementation

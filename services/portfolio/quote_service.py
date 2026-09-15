@@ -49,7 +49,7 @@ async def fetch_cash_quote(stock_code: str) -> dict:
         price = daily["price"] / unit
         change = daily["change"] / unit
         return {
-            "price": round(price, 2),
+            "price": round(price, 8),
             "change": round(change, 4),
             "change_pct": daily["change_pct"],
             "_stale": bool(daily.get("_stale")),
@@ -58,7 +58,7 @@ async def fetch_cash_quote(stock_code: str) -> dict:
     rate = await fx.fx_rate_for_code(fx_code)
     if not rate:
         return {}
-    return {"price": round(rate, 2), "change": 0, "change_pct": 0}
+    return {"price": round(rate, 8), "change": 0, "change_pct": 0}
 
 
 async def fetch_external_quote_for_stock_service(stock_code: str) -> dict:

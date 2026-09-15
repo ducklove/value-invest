@@ -24,7 +24,7 @@ def test_hover_tooltip_is_desktop_only_and_covers_stock_surfaces():
     assert "'.mv-row[data-code]'" in js
 
     # 특수자산은 gold_gap 일중 API 연결 전까지 요청 자체를 걸러낸다.
-    assert "/^(CASH_|KRX_GOLD$|CRYPTO_)/" in js
+    assert "/^(CASH_|KRX_GOLD$|CMA_RP_KRW$|CRYPTO_)/" in js
     assert "/api/stocks/" in js
     assert "/intraday" in js
 
