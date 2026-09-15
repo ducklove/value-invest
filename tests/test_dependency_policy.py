@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
+
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,6 +34,17 @@ def test_python_direct_dependencies_have_floor_and_ceiling():
 def test_dev_requirements_include_runtime_requirements():
     text = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
     assert "-r requirements.txt" in text
+
+
+def test_locks_include_compatible_versions_of_every_direct_dependency():
+    for lock_name, sources in (("requirements.lock", ("requirements.txt",)),
+                               ("requirements-dev.lock", ("requirements.txt", "requirements-dev.txt"))):
+        locked = dict(re.findall(r"^([a-zA-Z0-9_.-]+)==([^\s;\\]+)", (ROOT / lock_name).read_text(encoding="utf-8"), re.M))
+        for source in sources:
+            for line in _requirement_lines(source):
+                requirement = Requirement(line)
+                assert requirement.name in locked, f"{lock_name}: {requirement.name} 누락"
+                assert locked[requirement.name] in requirement.specifier, f"{lock_name}: {requirement.name} 버전 범위 불일치"
 
 
 def test_ci_and_deploy_use_locked_install_paths():
