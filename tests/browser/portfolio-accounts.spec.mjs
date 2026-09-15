@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 test('계좌별 등록·합산·매매 격리와 NH 미리보기 취소·연결을 실제 저장으로 확인한다', async ({ page }, testInfo) => {
+  let nhSocket;
+  await page.routeWebSocket('**/ws/namuh', socket => { nhSocket = socket; });
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.goto('/login');
   const signup = await page.request.post('/api/auth/register', { data: {email: `accounts-${Date.now()}@example.com`, name: '계좌 검증', password: 'browser-test-password'}, headers: {Origin: 'http://127.0.0.1:18765'} });
@@ -85,4 +87,18 @@ test('계좌별 등록·합산·매매 격리와 NH 미리보기 취소·연결�
   await page.setViewportSize({width:390,height:844});
   expect(await page.locator('#pfAccountsDialog').evaluate(el => el.scrollWidth > el.clientWidth)).toBe(false);
   await page.locator('#pfAccountsDialog').screenshot({path:testInfo.outputPath('accounts-mobile.png')});
+  await api('/api/portfolio/KRX_GOLD', {method:'PUT', headers:{'Content-Type':'application/json','X-Portfolio-Account':initial}, body:JSON.stringify({quantity:10,avg_price:190000,stock_name:'KRX 금현물'})});
+  await page.locator('#pfAccountsClose').click();
+  await page.locator('#pfAccountSelect').selectOption(initial);
+  const gold = page.locator('#pfBody tr[data-code="KRX_GOLD"]');
+  await expect(gold).toBeVisible();
+  await expect.poll(() => Boolean(nhSocket)).toBe(true);
+  const now = new Date();
+  const tick = {type:'quote',code:'KRX_GOLD',price:199480,previous_close:197810,change:1670,change_pct:1670/197810*100,
+    source:'namuh_ws',market:'KRX',currency:'KRW',date:now.toISOString().slice(0,10),as_of:now.toISOString(),ts:now.getTime()/1000};
+  nhSocket.send(JSON.stringify(tick));
+  await expect(gold.locator('.pf-col-curprice')).toContainText('199,480');
+  await expect(gold.locator('.pf-col-mktval')).toContainText('1,994,800');
+  nhSocket.send(JSON.stringify({...tick,price:190000,as_of:new Date(now.getTime()-10000).toISOString()}));
+  await expect.poll(() => page.evaluate(() => PfStore.items.find(row => row.stock_code === 'KRX_GOLD').quote.price)).toBe(199480);
 });

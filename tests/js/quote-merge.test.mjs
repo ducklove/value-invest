@@ -36,6 +36,21 @@ function loadUtils() {
 // The functions are pure — one shared window for the whole file.
 const w = loadUtils();
 
+test('금현물 NH 체결가를 우선 반영하고 수신이 끊기면 기존 조회 시세로 갱신한다', () => {
+  const now = Date.now();
+  const date = new Date(now).toISOString().slice(0, 10);
+  const fallback = {code:'KRX_GOLD',price:198000,source:'stock_service',date,fetched_at:new Date(now).toISOString()};
+  const live = {code:'KRX_GOLD',price:199480,source:'namuh_ws',date,ts:now/1000,
+    as_of:new Date(now).toISOString(),previous_close:197810};
+  const current = w.mergeQuoteSnapshot(fallback, live);
+  assert.equal(current.price,199480);
+  assert.equal(w.mergeQuoteSnapshot(current, fallback).price,199480);
+  const expired = {...current,ts:(now-91000)/1000,as_of:new Date(now-91000).toISOString()};
+  const recovered = w.mergeQuoteSnapshot(expired, fallback);
+  assert.equal(recovered.price,198000);
+  assert.equal(recovered.source,'stock_service');
+});
+
 // Merge results are created inside the jsdom realm, whose Object.prototype is
 // not ours — deepEqual (strict) compares prototypes, so re-spread the flat
 // snapshot objects into this realm before comparing.
