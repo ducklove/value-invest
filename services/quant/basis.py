@@ -45,7 +45,11 @@ def verify(result, payload):
 
 
 async def run(user, key, payload):
-    if len(encode(payload).encode()) > 500_000:
+    try:
+        size = len(encode(payload).encode())
+    except (ValueError, TypeError):
+        raise QuantError("현선물 입력에 유효하지 않은 숫자나 값이 있습니다.") from None
+    if size > 500_000:
         raise QuantError("입력은 500KB 이하로 제한됩니다.")
     old = await quant_basis.existing(user, key, payload)
     if old:

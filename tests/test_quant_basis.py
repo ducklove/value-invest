@@ -71,3 +71,5 @@ class BasisTests(TempDbMixin):
     async def test_oversized_request_is_rejected_before_network(self):
         with self.assertRaises(QuantError):
             await basis.run("u1", "basis-key", {"source_note": "가" * 200000})
+        with self.assertRaises(QuantError):
+            await basis.run("u1", "basis-key", {"config": {"capital": float("nan")}})
