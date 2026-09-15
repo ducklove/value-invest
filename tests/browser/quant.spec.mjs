@@ -7,8 +7,8 @@ for (const sample of [
 test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모바일 화면`, async ({ page }) => {
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.route('**/api/quant/capabilities', route => route.fulfill({ json: {
-    pairs: [{ common: '005930', preferred: '005935', name: '삼성전자' }],
-    etf_pairs: [{ common: '069500', preferred: '102110', name: 'KODEX 200 / TIGER 200' }],
+    pairs: [{ common: '005930', preferred: '005935', name: '삼성전자', catalog_snapshot_id: 'a'.repeat(64) }],
+    etf_pairs: [{ common: '069500', preferred: '102110', name: 'KODEX 200 / TIGER 200', catalog_snapshot_id: 'b'.repeat(64) }],
     readiness: { status: 'ready', checks: { latest_price_date: '2026-09-14' } }, live_enabled: false,
     factor_inputs: {status:'review_required',as_of:'2026-08-28',latest_price_date:'2026-09-14',securities:2581,eligible_securities:6,complete_securities:4,exclusions:{historical_or_unknown_provenance:11567},note:'검증용 입력 감사'},
   } }));
@@ -40,7 +40,7 @@ test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모�
   expect(row.config.strategy).toBe(sample.strategy);
   if (sample.strategy === 'etf_switch') expect(row.config.sell_tax_bps).toBe(0);
   const result = {
-    config: row.config, config_hash: '검증용 설정', engine_version: sample.strategy === 'etf_switch' ? 'etf-switch-2' : 'preferred-switch-2',
+    config: row.config, config_hash: '검증용 설정', engine_version: sample.strategy === 'etf_switch' ? 'etf-switch-3' : 'preferred-switch-3',
     snapshot: { snapshot_id: '검증용 입력' },
     scenarios: ['switch', 'common', 'preferred', 'mixed'].map((mode, i) => ({
       mode, return_pct: i + 1, max_drawdown_pct: -i, cost: 10000, trade_count: 2,

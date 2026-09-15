@@ -43,7 +43,7 @@ test('서버 응답 유실 후 같은 설정 재시도는 같은 요청 키를 �
   const posted = [];
   const dom = setup(async (path, options) => {
     if (options?.method === 'POST') { posted.push(JSON.parse(options.body)); throw new Error('응답 유실'); }
-    if (path.endsWith('capabilities')) return { pairs: [{common:'005930',preferred:'005935',name:'삼성전자우'}] };
+    if (path.endsWith('capabilities')) return { pairs: [{common:'005930',preferred:'005935',name:'삼성전자우',catalog_snapshot_id:'a'.repeat(64)}] };
     if (path.endsWith('observations')) return { watches: [], observations: [] };
     return { runs: [] };
   });
@@ -58,6 +58,7 @@ test('서버 응답 유실 후 같은 설정 재시도는 같은 요청 키를 �
   assert.equal(posted.length, 2);
   assert.equal(posted[0].request_key, posted[1].request_key);
   assert.equal(posted[0].config.participation, 0.01);
+  assert.equal(posted[0].config.catalog_snapshot_id, 'a'.repeat(64));
   assert.equal(w.document.getElementById('quantSubmit').disabled, false);
   w.close();
 });

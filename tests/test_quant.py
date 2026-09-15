@@ -11,13 +11,16 @@ from services.quant.models import ResearchConfig
 
 def config():
     return ResearchConfig(
+        catalog_snapshot_id="a" * 64,
         common="005930", preferred="005935", start=date(2024, 1, 1), end=date(2025, 12, 31)
     ).model_dump(mode="json")
 
 
 def result():
     c = config()
-    snapshot = {"common": c["common"], "preferred": c["preferred"], "bars": []}
+    snapshot = {"common": c["common"], "preferred": c["preferred"], "bars": [],
+                "catalog": {"provider": "common_preferred_spread", "catalog_snapshot_id": c["catalog_snapshot_id"],
+                            "pair": {"common": c["common"], "preferred": c["preferred"], "execution_eligible": False}}}
     return {
         "config": c,
         "config_hash": quant.digest(c),
@@ -110,8 +113,18 @@ class QuantTests(TempDbMixin):
         r = {**result(), "config": c, "config_hash": quant.digest(c)}
         with self.assertRaises(quant.QuantError):
             service.verify(r, c)
-        r["engine_version"] = "etf-switch-2"
+        r["engine_version"] = "etf-switch-3"
+        r["snapshot"]["catalog"]["provider"] = "eiayn"
+        r["snapshot"]["snapshot_id"] = quant.digest({k: v for k, v in r["snapshot"].items() if k != "snapshot_id"})
         service.verify(r, c)
+
+    async def test_catalog_provenance_is_checked_even_with_valid_snapshot_hash(self):
+        for field, wrong in (("provider", "eiayn"), ("catalog_snapshot_id", "b" * 64)):
+            r = result()
+            r["snapshot"]["catalog"][field] = wrong
+            r["snapshot"]["snapshot_id"] = quant.digest({k: v for k, v in r["snapshot"].items() if k != "snapshot_id"})
+            with self.assertRaises(quant.QuantError):
+                service.verify(r, config())
 
     async def test_watch_requires_owned_completed_run_and_blocks_bad_readiness(self):
         a = await quant.create_run("u1", "watch-1", config())

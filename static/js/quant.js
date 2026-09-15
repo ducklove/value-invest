@@ -61,7 +61,7 @@ async function loadQuant() {
     inputs.innerHTML = quantFactorInputs(cap.factor_inputs);
     const select = document.getElementById('quantPair');
     const previous = select.value;
-    const options = (rows, strategy) => rows.map(p => `<option data-strategy="${strategy}" value="${escapeHtml(p.common + ':' + p.preferred)}">${escapeHtml(p.name)} · ${escapeHtml(p.common)} / ${escapeHtml(p.preferred)}</option>`).join('');
+    const options = (rows, strategy) => rows.map(p => `<option data-strategy="${strategy}" data-catalog="${escapeHtml(p.catalog_snapshot_id || '')}" value="${escapeHtml(p.common + ':' + p.preferred)}">${escapeHtml(p.name)} · ${escapeHtml(p.common)} / ${escapeHtml(p.preferred)}</option>`).join('');
     select.innerHTML = '<option value="">종목 쌍을 선택하세요</option>' +
       `<optgroup label="보통주·우선주">${options(cap.pairs || [], 'preferred_switch')}</optgroup>` +
       `<optgroup label="동일 지수 ETF 연구 후보">${options(cap.etf_pairs || [], 'etf_switch')}</optgroup>`;
@@ -81,6 +81,7 @@ async function quantSubmit(event) {
   if (button.disabled) return;
   const [common, preferred] = form.elements.pair.value.split(':');
   const config = { strategy: form.elements.pair.selectedOptions[0]?.dataset.strategy || 'preferred_switch', common, preferred,
+    catalog_snapshot_id: form.elements.pair.selectedOptions[0]?.dataset.catalog || '',
     start: form.elements.start.value, end: form.elements.end.value };
   for (const key of ['capital', 'window', 'max_holding', 'entry_z', 'exit_z', 'commission_bps', 'sell_tax_bps', 'slippage_bps', 'participation']) {
     config[key] = Number(form.elements[key].value);
@@ -137,10 +138,11 @@ async function quantOpen(id) {
   quantResult = row.result;
   const r = row.result, c = r.config, s = r.latest_signal;
   const names = quantNames(c), isEtf = c.strategy === 'etf_switch';
-  const currentEngine = r.engine_version === (isEtf ? 'etf-switch-2' : 'preferred-switch-2');
+  const currentEngine = r.engine_version === (isEtf ? 'etf-switch-3' : 'preferred-switch-3');
   report.innerHTML = `<div class="quant-report-head"><div><span class="quant-muted">검증 보고서 · ${escapeHtml(id.slice(0, 8))}</span><h3>${escapeHtml(c.common)} / ${escapeHtml(c.preferred)}</h3></div><button type="button" data-quant-action="export">원본·결과 저장</button></div>
     <p>${escapeHtml(c.start)} ~ ${escapeHtml(c.end)} · 가상 배정 ${quantNumber(c.capital, 0)}원 · 추정창 ${c.window}일 · 진입 ${c.entry_z} / 복귀 ${c.exit_z}</p>
     <div class="quant-notice">수정주가 기준 탐색 · 실거래 전환 불가 · 가격 수익과 비용을 비교하며 현금배당은 별도 미반영</div>
+    ${r.snapshot.catalog ? `<details><summary>전문 데이터 · ${escapeHtml(r.snapshot.catalog.provider)}</summary><p>기준일 ${escapeHtml(r.snapshot.catalog.data_as_of)} · 현재 상품 검토이며 과거 시점 검증 전</p><p class="quant-hash">카탈로그 ${escapeHtml(r.snapshot.catalog.catalog_snapshot_id)}</p><p>상품·권리 정보는 전문 프로젝트에서 제공하고 가격 이력·성과 계산은 finance-pi에서 수행합니다.</p></details>` : ''}
     <p class="quant-muted">유동성 추정치를 사용한 관측일: A ${quantNumber(r.liquidity_coverage?.common?.adjusted_close_times_volume_proxy, 0)}일 / B ${quantNumber(r.liquidity_coverage?.preferred?.adjusted_close_times_volume_proxy, 0)}일. 거래대금 관측값과 구분합니다.</p>
     ${isEtf ? '<p class="quant-muted">동일 지수 연구 후보 · ETF A / ETF B · 분배·복제 정책의 역사적 일치와 iNAV 검증 전</p>' : ''}
     ${quantChart(r.scenarios, c.capital, names)}

@@ -14,8 +14,8 @@ from repositories import quant, quant_forward
 from services.quant.models import completed_date
 
 logger = logging.getLogger(__name__)
-EXPECTED_ENGINE = "preferred-switch-2"
-EXPECTED_ENGINES = {"preferred_switch": EXPECTED_ENGINE, "etf_switch": "etf-switch-2"}
+EXPECTED_ENGINE = "preferred-switch-3"
+EXPECTED_ENGINES = {"preferred_switch": EXPECTED_ENGINE, "etf_switch": "etf-switch-3"}
 
 
 async def fetch(path, params=None):
@@ -50,6 +50,15 @@ def verify(result, config):
         raise quant.QuantError("데이터 스냅샷 검증에 실패했습니다.")
     if snapshot.get("common") != config["common"] or snapshot.get("preferred") != config["preferred"]:
         raise quant.QuantError("다른 종목의 결과를 거절했습니다.")
+    catalog = snapshot.get("catalog", {})
+    provider = "eiayn" if config["strategy"] == "etf_switch" else "common_preferred_spread"
+    pair = catalog.get("pair", {})
+    if (not config.get("catalog_snapshot_id")
+            or catalog.get("catalog_snapshot_id") != config["catalog_snapshot_id"]
+            or catalog.get("provider") != provider
+            or pair.get("common") != config["common"] or pair.get("preferred") != config["preferred"]
+            or pair.get("execution_eligible") is not False):
+        raise quant.QuantError("전문 데이터의 공급자·버전·종목 검증에 실패했습니다.")
     if result.get("live_eligible") is not False or not result.get("signals"):
         raise quant.QuantError("연구 결과의 실행 제한 또는 신호가 유효하지 않습니다.")
     scenarios = result.get("scenarios", [])
@@ -102,6 +111,8 @@ async def observe_one(watch):
             return
         result = await fetch("/api/research/pair-analysis", config)
         verify(result, config)
+        if original["snapshot"].get("catalog") != result["snapshot"].get("catalog"):
+            raise quant.QuantError("전문 데이터 입력이 변경됐습니다. 새 실험으로 재검증해 주세요.")
         if original["snapshot"].get("instrument_review") != result["snapshot"].get("instrument_review"):
             raise quant.QuantError("ETF 상품 검토 기준이 변경됐습니다. 새 실험으로 재검증해 주세요.")
         old = {r["date"]: r for r in original["snapshot"]["bars"]}
@@ -179,7 +190,7 @@ async def capabilities():
             "mode": "research_and_observation",
             "error": None,
         }
-    except ExternalServiceError as exc:
+    except (ExternalServiceError, quant.QuantError) as exc:
         return {
             "pairs": [],
             "readiness": None,

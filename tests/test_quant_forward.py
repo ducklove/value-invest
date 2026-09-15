@@ -22,7 +22,7 @@ def fresh_result():
         }
         for day in ("2026-01-02", "2026-01-05")
     ]
-    snap = {"common": "005930", "preferred": "005935", "bars": bars}
+    snap = {"common": "005930", "preferred": "005935", "bars": bars, "catalog": r["snapshot"]["catalog"]}
     r["snapshot"] = {**snap, "snapshot_id": quant.digest(snap)}
     r["signals"] = [{"date": b["date"], "target": "common", "z": 0} for b in bars]
     r["latest_signal"] = r["signals"][-1]

@@ -124,6 +124,8 @@ async def run_one(session):
         old = original["snapshot"]
         previous = json.loads(session["payload_json"]) if session["payload_json"] else None
         protected = old["bars"] + (previous["input_extension"] if previous else [])
+        if old.get("catalog") != snapshot.get("catalog"):
+            raise quant.QuantError("전문 데이터 입력이 변경됐습니다. 새 연구가 필요합니다.")
         if any(current.get(b["date"]) != b for b in protected) or old.get("instrument_review") != snapshot.get(
             "instrument_review"
         ):
