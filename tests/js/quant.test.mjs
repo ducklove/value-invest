@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 
 const html = readFileSync(new URL('../../static/index.html', import.meta.url), 'utf8');
-const source = readFileSync(new URL('../../static/js/quant.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../../static/js/quant-research.js', import.meta.url), 'utf8');
 const tick = () => new Promise(resolve => setTimeout(resolve, 20));
 
 function setup(handler) {

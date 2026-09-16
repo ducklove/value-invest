@@ -93,7 +93,7 @@ ETF 선택 시 매도세 연구 기본값을 0bp로 바꾸고 비용 입력란�
 | finance-pi `/api/research/pairs`, `/api/research/pair-analysis`, `/api/research/readiness` | 기존 관리자 인증을 사용하는 읽기 전용 연구 API |
 | value-invest `services/quant` | finance-pi 연결, 엔진·설정·입력 해시 검증, 연구·관찰 작업자 |
 | `repositories/quant.py` | 사용자별 실험, 재시작 복구, 관찰 원본 및 상태 저장 |
-| `/api/quant/*`, `static/js/quant.js` | 인증된 사용자 API와 화면 |
+| `/api/quant/*`, `static/js/quant-research.js` | 인증된 사용자 API와 화면 |
 
 기존 `CLOSE_PRICE_API_ENABLED`, `CLOSE_PRICE_API_BASE_URL` 설정과 API 토큰을 재사용한다.
 실제 환경 변수명은 `close_price_client.py`가 기준이다. 새 증권사 비밀키는 요구하지 않는다.

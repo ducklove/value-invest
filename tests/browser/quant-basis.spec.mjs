@@ -3,6 +3,8 @@ import {readFileSync} from 'node:fs';
 
 test('현선물 가정·저장 기록·파일 재생·모바일 보고서',async({page})=>{
   await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+  // EasyPrivacy의 /quant.js 규칙이 켜진 환경에서도 도구에서 진입해야 한다.
+  await page.route('**/quant.js*',r=>r.abort('blockedbyclient'));
   const fixture=JSON.parse(readFileSync(new URL('../fixtures/basis-report.json',import.meta.url),'utf8'));
   let saved=null;
   await page.route('**/api/quant/capabilities',r=>r.fulfill({json:{pairs:[],readiness:null}}));
@@ -16,10 +18,11 @@ test('현선물 가정·저장 기록·파일 재생·모바일 보고서',async
   });
   await page.route('**/api/quant/basis/runs/basis-browser',r=>r.fulfill({json:saved}));
   expect((await page.request.get('/api/quant/basis/runs')).status()).toBe(401);
-  await page.goto('/login?return_to=/quant');
+  await page.goto('/login?return_to=/labs');
   await page.locator('#loginEmail').fill('browser@example.com');
   await page.locator('#loginPassword').fill('browser-test-password');
   await page.getByRole('button',{name:'이메일로 로그인'}).click();
+  await page.getByRole('link',{name:/전략 연구 · 신호 관찰 퀀트 운용실/}).click();
   await expect(page.locator('#basisForm')).toBeVisible();
   await page.locator('#basisSubmit').click();
   await expect(page.locator('#basisReport')).toContainText('가정별 손익 · 과거 실적 아님');
