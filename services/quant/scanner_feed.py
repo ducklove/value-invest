@@ -38,6 +38,8 @@ async def snapshot(user, cid, contract, env, spot_cache):
     f = pages[0].get("Output_0")
     if not isinstance(f, dict) or str(f.get("iem_cd", "")).removeprefix("K") != contract["contract"][1:]:
         raise BrokerError("선물 코드 또는 응답 블록 불일치")
+    if contract.get("expiry") and str(f.get("last_tr_date")) != contract["expiry"]:
+        raise BrokerError("최종거래일이 예정일과 다릅니다. 월물·휴장일 확인 필요")
     now = datetime.now(KST)
     future = book(f["bidp1"], f["askp1"], f["bidp_rsqn1"], f["askp_rsqn1"], f["bsop_hour"], now)
     key = contract["spot_code"]

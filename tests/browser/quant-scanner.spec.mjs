@@ -4,8 +4,8 @@ test('순회 감시가 첫 화면이고 전체 검색·설정·정지가 동작�
   await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
   await page.route('**/api/quant/capabilities',r=>r.fulfill({json:{pairs:[]}}));
   let data={accounts:[{account_id:'a1',name:'검증용 나무',environment:'mock'}],config:null,
-    progress:{total:1734,cursor:100,state:'scanning'},runtime:{watched:['KA0A6C000'],requested:2,approved:2},
-    rows:[{contract:'KA0A6C000',contract_name:'검증 선물 12월',spot_code:'005930',name:'삼성전자',observed_at:1789500000,net_bps:45,gross_bps:90,spot:{ask:70000},future:{bid:70630}},
+    progress:{total:292,source_contracts:1734,cursor:100,state:'scanning'},runtime:{watched:['KA0A6C000'],requested:2,approved:2},
+    rows:[{contract:'KA0A6C000',contract_name:'검증 선물 10월',spot_code:'005930',name:'삼성전자',expiry:'20261008',roll_on:'2026-10-06',expiry_verified:true,observed_at:1789500000,net_bps:45,gross_bps:90,spot:{ask:70000},future:{bid:70630}},
           {contract:'KA0B6C000',spot_code:'000660',name:'SK하이닉스',error:'아직 관측하지 않음'}],events:[]};
   await page.route('**/api/quant/scanner',r=>{
     if(r.request().method()==='PUT')data.config=r.request().postDataJSON();
@@ -20,10 +20,13 @@ test('순회 감시가 첫 화면이고 전체 검색·설정·정지가 동작�
   await page.getByRole('button',{name:'이메일로 로그인'}).click();
   await expect(page.locator('#quantScanner')).toBeVisible();
   await expect(page.locator('#basisForm')).not.toBeVisible();
-  await expect(page.locator('#scannerCoverage')).toContainText('전체 1734계약');
+  await expect(page.locator('#scannerCoverage')).toContainText('감시 대상 292계약 / 원본 목록 1734계약');
   await page.locator('#scannerSearch').fill('005930');
   await expect(page.locator('#scannerRows')).toContainText('삼성전자');
   await expect(page.locator('#scannerRows')).not.toContainText('SK하이닉스');
+  await expect(page.locator('#scannerRows')).toContainText('전환 2026-10-06');
+  await expect(page.locator('#scannerRows')).toContainText('최종거래일 확인');
+  await expect(page.locator('#scannerExcluded')).not.toBeVisible();
   await page.getByText('계좌·순회·감시 기준',{exact:true}).click();
   await page.locator('#scannerForm [name=account_id]').selectOption('a1');
   await page.locator('#scannerStart').click();

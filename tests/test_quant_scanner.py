@@ -5,11 +5,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from _harness import TempDbMixin, seed_user
+from test_quant_rollover import contract
 
 from repositories import quant_scanner
+from repositories.broker_secrets import BrokerError
 from repositories.quant import QuantError
 from services.brokers import namuh
-from services.quant import scanner, scanner_feed
+from services.quant import rollover, scanner, scanner_feed
 from services.quant.scanner_model import KST, ScannerConfig, book, edge, master_rows, realtime_book, watch_list
 
 NOW = datetime(2026, 9, 16, 10, 0, 0, tzinfo=KST)
@@ -109,6 +111,11 @@ class ScannerTests(TempDbMixin):
         assert call.call_args_list[1].args[3]["market_cd"] == "KRX"
         assert not any("/order/" in p for p in namuh.READ_PATHS)
 
+        with patch.object(namuh, "pages", AsyncMock(return_value=[future])) as call:
+            with self.assertRaisesRegex(BrokerError, "최종거래일"):
+                await scanner_feed.snapshot("u1", "cid", {"contract": "KA0A6C000", "spot_code": "005930", "expiry": "20261209"}, "mock", {})
+        assert call.call_count == 1
+
         # 동적 가격제한 적용 자체는 거래 정지가 아니다. 경계·누락 상태는 차단한다.
         future["Output_0"].update(dynmc_prc_lmt_yn="Y", dynmc_lwlmtprc=90, dynmc_uplmtprc=110)
         with patch.object(namuh, "pages", AsyncMock(side_effect=[[future], [spot]])):
@@ -145,7 +152,8 @@ class ScannerTests(TempDbMixin):
         socket = Socket()
         watcher = scanner.Watcher("u1", "cid", "mock", config(), "generation", {})
         watcher.selected = {"KA0A6C000": NOW.timestamp()}
-        watcher.rows = {"KA0A6C000": {"spot_code": "005930", "expiry": "20261210", "name": "검증"}}
+        watcher.rows = {"KA0A6C000": {"spot_code": "005930", "expiry": "20261210", "name": "검증",
+                                    "roll_policy": rollover.POLICY, "roll_on": "2026-12-08"}}
         with patch.object(scanner.websockets, "connect", return_value=socket) as connect, \
              patch.object(namuh, "token", AsyncMock(return_value="test-only")), \
              patch.object(scanner, "datetime") as clock, \
@@ -159,3 +167,36 @@ class ScannerTests(TempDbMixin):
         assert record.call_count == 1 and event["type"] == "opportunity"
         assert event["spot"]["ask"] == 100 and event["future"]["bid"] == 105
         assert event["live_eligible"] is False
+
+    async def test_scan_requests_only_selected_month_and_keeps_existing_config(self):
+        await quant_scanner.configure("u1", config(enabled=True).model_dump())
+        setting = (await quant_scanner.settings("u1"))[0]
+        spot = book(99, 100, 100, 100, "100000", NOW)
+        future = book(101, 102, 10, 10, "100000", NOW)
+        with patch.object(scanner_feed, "catalog", AsyncMock(return_value=[contract("202611"), contract("202610")])), \
+             patch.object(scanner_feed, "snapshot", AsyncMock(return_value=(spot, future, "20261008"))) as snapshot, \
+             patch.object(quant_scanner, "record", AsyncMock(return_value=False)) as record, \
+             patch.object(scanner, "datetime") as clock:
+            clock.now.return_value = NOW
+            await scanner.scan(setting, {"credential_id": "cid", "environment": "mock"})
+        assert snapshot.call_count == 1 and snapshot.call_args.args[2]["delivery_month"] == "202610"
+        assert record.call_args.args[2]["total"] == 1
+        assert record.call_args.kwargs["row"]["expiry_verified"] is True
+        assert (await quant_scanner.settings("u1"))[0]["generation"] == setting["generation"]
+
+    async def test_status_drops_previous_policy_rows_and_exposes_only_current_month(self):
+        await quant_scanner.configure("u1", config(enabled=True).model_dump())
+        setting = (await quant_scanner.settings("u1"))[0]
+        await quant_scanner.record("u1", setting["generation"], {"cursor": 1730, "catalog_hash": "old"},
+                                   row={**contract("202612"), "catalog_hash": "old", "net_bps": 999})
+        with patch.object(scanner_feed, "catalog", AsyncMock(return_value=[contract("202610"), contract("202611")])), \
+             patch.object(scanner, "datetime") as clock:
+            clock.now.return_value = NOW
+            with patch.dict(scanner._runtime, {"u1": {"watched": [contract("202612")["contract"]],
+                                                     "signals": [contract("202612")["contract"]]}}):
+                status = await scanner.status("u1")
+        assert len(status["rows"]) == 1 and status["rows"][0]["delivery_month"] == "202610"
+        assert status["rows"][0]["net_bps"] is None
+        assert status["progress"]["total"] == 1 and status["progress"]["source_contracts"] == 2
+        assert status["progress"]["cursor"] == 0 and status["config"]["enabled"]
+        assert status["runtime"]["watched"] == [] and status["runtime"]["signals"] == []

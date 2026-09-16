@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from repositories.quant import QuantError
+from services.quant.rollover import trading_day
 
 KST = timezone(timedelta(hours=9))
 
@@ -101,7 +102,7 @@ def realtime_book(message, now):
 
 def edge(spot, future, expiry, config, now, *, realtime=False):
     """현물 매수/선물 매도의 보수적 만기 수렴 추정. 배당 수입 0, 실주문 불가."""
-    if now.weekday() >= 5 or not ("09:00" <= now.strftime("%H:%M") < "15:20"):
+    if not trading_day(now.date()) or not ("09:00" <= now.strftime("%H:%M") < "15:20"):
         raise ValueError("동시 거래시간 밖")
     days = (datetime.strptime(expiry, "%Y%m%d").date() - now.date()).days
     if not 0 < days <= 366:

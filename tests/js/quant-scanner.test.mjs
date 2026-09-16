@@ -16,10 +16,14 @@ function setup(data, calls) {
 const tick=()=>new Promise(r=>setTimeout(r,20));
 
 test('계좌 없는 경우 실제 카탈로그를 표시하지만 감시 시작은 차단한다',async()=>{
-  const calls=[],dom=setup({accounts:[],progress:{total:1734},rows:[{contract:'KTEST0001',spot_code:'005930',name:'<img src=x>',error:'아직 관측하지 않음'}],events:[]},calls);
+  const calls=[],dom=setup({accounts:[],progress:{total:292,source_contracts:1734},rows:[{contract:'KTEST0001',spot_code:'005930',name:'<img src=x>',expiry:'20261008',roll_on:'2026-10-06',error:'아직 관측하지 않음'}],excluded:[{spot_code:'000000',name:'<img src=x>',reason:'전환 가능한 다음 월물 없음'}],events:[]},calls);
   await tick();
   assert.equal(dom.window.document.getElementById('scannerStart').disabled,true);
-  assert.match(dom.window.document.getElementById('scannerCoverage').textContent,/전체 1734계약 · 관측 0계약/);
+  assert.match(dom.window.document.getElementById('scannerCoverage').textContent,/감시 대상 292계약 \/ 원본 목록 1734계약 · 관측 0계약 · 월물 선택 제외 1종목/);
+  assert.match(dom.window.document.getElementById('scannerRows').textContent,/전환 2026-10-06/);
+  assert.match(dom.window.document.getElementById('scannerRows').textContent,/예정 · 시세 응답 대조 전/);
+  assert.equal(dom.window.document.getElementById('scannerExcluded').hidden,false);
+  assert.match(dom.window.document.getElementById('scannerExcluded').textContent,/전환 가능한 다음 월물 없음/);
   assert.equal(dom.window.document.querySelector('img'),null);
   assert.equal(calls.length,1);
   dom.window.close();

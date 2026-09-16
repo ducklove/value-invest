@@ -1,4 +1,4 @@
-"""저빈도 전 계약 순회 → 한 개 추가 세션의 후보 호가 감시. 주문 전송 없음."""
+"""종목별 근월물 순회 → 후보 호가 감시. 최종거래일 2거래일 전 월물 전환."""
 
 import asyncio
 import json
@@ -15,7 +15,7 @@ from repositories import account_holdings, brokers, quant_scanner
 from repositories.broker_secrets import BrokerError
 from repositories.quant import QuantError, digest
 from services.brokers import namuh
-from services.quant import scanner_feed
+from services.quant import rollover, scanner_feed
 from services.quant.scanner_model import KST, ScannerConfig, edge, realtime_book, watch_list
 
 logger = logging.getLogger(__name__)
@@ -36,24 +36,33 @@ async def status(user):
     observed = {r["contract"]: r for r in await quant_scanner.rows(user)}
     settings = settings[0] if settings else None
     progress = dict(settings["progress"]) if settings else {}
+    excluded = []
     try:
-        contracts = await scanner_feed.catalog()
+        selection = rollover.universe(await scanner_feed.catalog(), datetime.now(KST).date())
+        contracts, excluded = selection["contracts"], selection["excluded"]
         catalog_hash = digest(contracts)
-        data = [observed[c["contract"]] if observed.get(c["contract"], {}).get("catalog_hash") == catalog_hash
+        data = [{**c, **observed[c["contract"]]} if observed.get(c["contract"], {}).get("catalog_hash") == catalog_hash
                 else {**c, "observed_at": None, "net_bps": None, "error": "아직 관측하지 않음"} for c in contracts]
-        progress.update(total=len(contracts), underlyings=len({c["spot_code"] for c in contracts}), catalog_at=scanner_feed._master_at)
+        if progress.get("catalog_hash") != catalog_hash:
+            progress.update(cursor=0, rounds=0, last_scan_at=None, last_cycle_seconds=None)
+        progress.update({k: v for k, v in selection.items() if k not in {"contracts", "excluded"}})
+        progress.update(total=len(contracts), excluded_count=len(excluded), catalog_at=scanner_feed._master_at)
     except QuantError as exc:
-        data = list(observed.values())
-        progress["catalog_error"] = str(exc)
+        data = []
+        progress.update(total=0, cursor=0, state="degraded", catalog_error=str(exc))
     data.sort(key=lambda r: (r.get("net_bps") is not None, r.get("net_bps") if r.get("net_bps") is not None else -1e10), reverse=True)
     accounts = []
     for link in links:
         account = await account_holdings.require_account(user, link["account_id"])
         accounts.append({"account_id": link["account_id"], "environment": link["environment"], "name": account.get("name", "나무 연결 계좌")})
+    valid_codes = {r["contract"] for r in data if r.get("observed_at") and not r.get("error")}
+    runtime = dict(_runtime.get(user, {}))
+    for field in ("watched", "signals"):
+        runtime[field] = [code for code in runtime.get(field, []) if code in valid_codes]
     return {"config": settings["config"] if settings else None,
-            "progress": progress, "runtime": _runtime.get(user, {}),
+            "progress": progress, "runtime": runtime,
             "accounts": accounts,
-            "rows": data, "events": await quant_scanner.events(user),
+            "rows": data, "excluded": excluded, "events": await quant_scanner.events(user),
             "orders_sent": 0, "live_eligible": False, "market_data_environment": "live",
             "limits": {"sessions_used_for_holdings": 1, "sessions_for_scanner": 1, "registrations": 30}}
 
@@ -148,13 +157,17 @@ class Watcher:
                         self.state.update(state="receiving", last_tick_at=now.timestamp())
                         delay = 2
                         for code in list(self.selected):
-                            row = self.rows[code]
+                            row = self.rows.get(code)
+                            if row is None:
+                                continue
                             spot, future = self.books.get(("ob", row["spot_code"])), self.books.get(("vH", code[1:]))
                             try:
                                 if not spot or not future:
                                     raise ValueError("호가 대기")
+                                if not rollover.active(row, now.date()):
+                                    raise ValueError("월물 전환일 도달 또는 월물 정책 미확인")
                                 opportunity = edge(spot, future, row["expiry"], self.config, now, realtime=True)
-                            except ValueError:
+                            except (ValueError, QuantError):
                                 self.active_signals.discard(code)
                                 continue
                             crossed = opportunity["net_bps"] >= self.config.signal_bps
@@ -168,7 +181,8 @@ class Watcher:
                             if newly or (written.get(code, (0, None))[1] != stamp and now.timestamp() - written.get(code, (0, None))[0] >= 10):
                                 event = {"contract": code, "spot_code": row["spot_code"], "name": row["name"],
                                          "type": "opportunity" if crossed else "watch", "config": self.config.model_dump(),
-                                         "expiry": row["expiry"], "generation": self.generation, **opportunity}
+                                         "expiry": row["expiry"], "roll_on": row["roll_on"], "roll_policy": rollover.POLICY,
+                                         "calendar_version": rollover.CALENDAR_VERSION, "generation": self.generation, **opportunity}
                                 if not await quant_scanner.record(self.user, self.generation, self.progress, event=event):
                                     return
                                 written[code] = (now.timestamp(), stamp)
@@ -182,6 +196,26 @@ class Watcher:
                 delay = min(delay * 2, 60)
 
 
+def sync_universe(observer, selection, progress):
+    """전환 시 과거 호가·후보는 비우고, 원래 월물별 이벤트 이력은 보존한다."""
+    contracts = selection["contracts"]
+    catalog_hash = digest(contracts)
+    if progress.get("catalog_hash") != catalog_hash:
+        observer.selected = {}
+        observer.books.clear()
+        observer.active_signals.clear()
+        progress.update(cursor=0, rounds=0, catalog_hash=catalog_hash, cycle_started_at=time.time(),
+                        last_scan_at=None, last_cycle_seconds=None)
+    codes = {c["contract"] for c in contracts}
+    observer.rows = {code: row for code, row in observer.rows.items()
+                     if code in codes and row.get("catalog_hash") == catalog_hash}
+    observer.selected = {code: at for code, at in observer.selected.items() if code in observer.rows}
+    progress.update({k: v for k, v in selection.items() if k not in {"contracts", "excluded"}})
+    progress.update(total=len(contracts), excluded_count=len(selection["excluded"]), catalog_at=scanner_feed._master_at)
+    observer.public()
+    return contracts, catalog_hash
+
+
 async def scan(setting, link):
     user, generation = setting["google_sub"], setting["generation"]
     config = ScannerConfig(**setting["config"])
@@ -192,31 +226,34 @@ async def scan(setting, link):
     cached = {}
     try:
         while True:
-            now = datetime.now(KST)
-            if now.weekday() >= 5 or not ("09:00" <= now.strftime("%H:%M") < "15:20"):
-                observer.selected = {}
-                progress.update(state="market_closed", message="현물·선물 동시 거래시간에 순회를 재개합니다.")
-                if not await quant_scanner.record(user, generation, progress):
-                    return
-                await asyncio.sleep(30)
-                continue
             if watch_task.done():
                 await watch_task
                 return
             try:
-                contracts = await scanner_feed.catalog()
-                catalog_hash = digest(contracts)
-                if progress.get("catalog_hash") != catalog_hash:
-                    progress.update(cursor=0, rounds=0, catalog_hash=catalog_hash, cycle_started_at=time.time())
-                    observer.rows = {}
+                selection = rollover.universe(await scanner_feed.catalog(), datetime.now(KST).date())
+                contracts, catalog_hash = sync_universe(observer, selection, progress)
+                if not contracts:
+                    raise QuantError("감시할 근월물 없음: 다음 월물·계약 정보·달력을 확인하세요.")
+                now = datetime.now(KST)
+                if not rollover.trading_day(now.date()) or not ("09:00" <= now.strftime("%H:%M") < "15:20"):
+                    observer.selected = {}
+                    observer.public()
+                    progress.update(state="market_closed", message="휴장일·장외에는 대기합니다. 거래일 장 시작부터 근월물 순회를 재개합니다.")
+                    if not await quant_scanner.record(user, generation, progress):
+                        return
+                    await asyncio.sleep(30)
+                    continue
                 cursor = progress.get("cursor", 0) % len(contracts)
                 started = time.monotonic()
                 contract = contracts[cursor]
                 row = {**contract, "observed_at": time.time(), "catalog_hash": catalog_hash, "net_bps": None, "error": None}
                 try:
                     spot, future, expiry = await scanner_feed.snapshot(user, link["credential_id"], contract, link["environment"], cached)
-                    row.update(expiry=expiry, **edge(spot, future, expiry, config, datetime.now(KST)))
-                except (BrokerError, ValueError, TypeError, KeyError, OverflowError) as exc:
+                    quote_now = datetime.now(KST)
+                    if not rollover.active(contract, quote_now.date()):
+                        raise ValueError("월물 전환일 도달: 이전 월물 관측 제외")
+                    row.update(expiry=expiry, expiry_verified=True, **edge(spot, future, expiry, config, quote_now))
+                except (BrokerError, QuantError, ValueError, TypeError, KeyError, OverflowError) as exc:
                     row["error"] = str(exc)[:160]
                 row["observed_at"] = time.time()
                 observer.rows[row["contract"]] = row
@@ -224,7 +261,7 @@ async def scan(setting, link):
                 observer.public()
                 cursor += 1
                 progress.update(state="scanning", cursor=cursor % len(contracts), total=len(contracts),
-                                underlyings=len({c["spot_code"] for c in contracts}), last_scan_at=time.time(),
+                                last_scan_at=time.time(),
                                 requested_cycle_minutes=config.interval_minutes, message="순회 관측은 주문 신호가 아닙니다.",
                                 watched=len(observer.selected), catalog_at=scanner_feed._master_at)
                 if cursor == len(contracts):
@@ -236,6 +273,7 @@ async def scan(setting, link):
                 await asyncio.sleep(max(.1, config.interval_minutes * 60 / len(contracts) - (time.monotonic() - started)))
             except (QuantError, aiosqlite.Error, OSError) as exc:
                 observer.selected = {}
+                observer.public()
                 progress.update(state="degraded", message=str(exc)[:160])
                 if not await quant_scanner.record(user, generation, progress):
                     return
