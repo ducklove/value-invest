@@ -55,11 +55,13 @@ async def lifespan(app):
                 "market_value": price*10, "unit_price": price, "currency": "KRW", "fx_rate": 1}])
         try:
             from services.brokers import namuh, sync
+            from services.quant import scanner_feed
             nh_rows = [{"stock_code": "005930", "stock_name": "삼성전자", "quantity": 3,
                         "avg_price": 80000, "avg_price_currency": "KRW", "currency": "KRW"},
                        {"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": 5000,
                         "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}]
-            with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+            with patch.object(scanner_feed, "catalog", AsyncMock(return_value=[])), \
+                 patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
                  patch.object(broker_accounts, "fetch_snapshot", AsyncMock(return_value=(nh_rows, {}))), \
                  patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(nh_rows, {}))):
                 yield

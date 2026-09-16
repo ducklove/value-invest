@@ -15,7 +15,7 @@ from repositories.broker_secrets import BrokerError
 LIVE = "https://api.nhplug.com:8443"
 MOCK = "https://moapi.nhplug.com:8443"
 READ_PATHS = frozenset({"/n2/acctinfo", "/krstock/inquiry/v1/balance", "/gbstock/inquiry/v1/balance",
-                        "/gbstock/inquiry/v1/margin", "/krstock/quote/v1/currentPrice"})
+                        "/gbstock/inquiry/v1/margin", "/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day"})
 _locks: dict[str, asyncio.Lock] = {}
 _last_call: dict[str, float] = {}
 # 실계좌 잔고의 시장별·연속 조회는 공개 SDK의 4회/초에서도 429가 발생한다.

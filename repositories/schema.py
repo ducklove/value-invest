@@ -26,6 +26,22 @@ ColumnSpec = tuple[str, str, str]
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 CORE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS quant_scanners (
+    google_sub TEXT PRIMARY KEY REFERENCES users(google_sub) ON DELETE CASCADE,
+    config_json TEXT NOT NULL, generation TEXT NOT NULL,
+    progress_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS quant_scan_rows (
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    contract TEXT NOT NULL, payload_json TEXT NOT NULL,
+    PRIMARY KEY(google_sub, contract)
+);
+CREATE TABLE IF NOT EXISTS quant_scan_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    contract TEXT NOT NULL, observed_at REAL NOT NULL, payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scan_events_user ON quant_scan_events(google_sub, id DESC);
 CREATE TABLE IF NOT EXISTS quant_basis_runs (
     id TEXT PRIMARY KEY,
     google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,

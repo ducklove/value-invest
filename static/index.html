@@ -868,9 +868,11 @@ function trackEvent(name, params = {}) {
     <div class="quant-page">
       <header class="quant-header">
         <div><span class="lab-eyebrow">상대가치 연구</span><h2>퀀트 운용실</h2>
-          <p>가격 차이를 찾고, 비용을 검증하고, 같은 전략의 다음 신호를 관찰합니다.</p></div>
+          <p>전체 주식선물을 순회하고, 가격 차이가 커진 후보의 양쪽 호가를 집중 감시합니다.</p></div>
         <span class="quant-mode">연구 · 실주문 비활성</span>
       </header>
+      <section id="quantScanner" class="quant-panel" aria-label="현선물 시장 감시"></section>
+      <details id="quantResearchTools"><summary>전략 연구·가정 시뮬레이션</summary>
       <div id="quantHealth" class="quant-notice" role="status" aria-live="polite">데이터 상태를 확인하는 중입니다.</div>
       <section id="quantBasis" class="quant-panel quant-basis" aria-label="현물 선물 차익 연구"></section>
       <div class="quant-layout">
@@ -901,6 +903,7 @@ function trackEvent(name, params = {}) {
         </section>
       </div>
       <section class="quant-panel quant-observer"><h3>일별 신호 관찰</h3><p class="quant-muted">완료된 연구의 설정을 고정해 새로 도착한 일봉의 신호만 기록합니다. 가상 체결 수익이나 실제 주문이 아닙니다. 수집 실패·자료 정정 시 관찰을 보류합니다.</p><div id="quantObservations">관찰할 실험을 보고서에서 선택하세요.</div></section>
+      </details>
     </div>
   </div>
 
@@ -1410,6 +1413,7 @@ function trackEvent(name, params = {}) {
 <script data-feature="insights" data-src="./js/insights.js"></script>
 <script data-feature="screener" data-src="./js/screener.js"></script>
 <script data-feature="quant" data-src="./js/quant-research.js"></script>
+<script data-feature="quant" data-src="./js/quant-scanner.js"></script>
 <script data-feature="quant" data-src="./js/quant-basis.js"></script>
 <script data-feature="masters" data-src="./js/masters.js"></script>
 <script src="./js/app-main.js" defer></script>

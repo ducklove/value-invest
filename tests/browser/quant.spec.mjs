@@ -19,6 +19,7 @@ test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모�
   await page.locator('#loginPassword').fill('browser-test-password');
   await page.getByRole('button', { name: '이메일로 로그인' }).click();
   await expect(page).toHaveURL(/\/quant$/);
+  await page.getByText('전략 연구·가정 시뮬레이션',{exact:true}).click();
   await expect(page.locator('#quantView')).toBeVisible();
   await page.locator('#quantFactorInputs summary').click();
   await expect(page.locator('#quantFactorInputs')).toContainText('후보 4종목');
@@ -30,6 +31,7 @@ test(`퀀트 ${sample.strategy} 로그인·저장·새로고침·취소와 모�
   expect((await response).status()).toBe(202);
   await expect(page.locator('#quantReport')).toContainText('대기');
   await page.reload();
+  await page.getByText('전략 연구·가정 시뮬레이션',{exact:true}).click();
   await page.locator('#quantRuns button').first().click();
   await expect(page.locator('#quantReport')).toContainText('대기');
   await page.getByRole('button', { name: '연구 취소', exact: true }).click();

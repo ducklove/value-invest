@@ -23,12 +23,14 @@ test('현선물 가정·저장 기록·파일 재생·모바일 보고서',async
   await page.locator('#loginPassword').fill('browser-test-password');
   await page.getByRole('button',{name:'이메일로 로그인'}).click();
   await page.getByRole('link',{name:/전략 연구 · 신호 관찰 퀀트 운용실/}).click();
+  await page.getByText('전략 연구·가정 시뮬레이션',{exact:true}).click();
   await expect(page.locator('#basisForm')).toBeVisible();
   await page.locator('#basisSubmit').click();
   await expect(page.locator('#basisReport')).toContainText('가정별 손익 · 과거 실적 아님');
   expect(saved.input.config.capital).toBe(100000000);
   await expect(page.locator('#basisReport')).toContainText('목표 이익 청산');
   await page.reload();
+  await page.getByText('전략 연구·가정 시뮬레이션',{exact:true}).click();
   await page.getByText('저장한 현선물 연구',{exact:true}).click();
   await page.locator('#basisRuns button').first().click();
   await expect(page.locator('#basisReport')).toContainText('만기 수렴 가정');

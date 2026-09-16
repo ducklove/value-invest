@@ -188,4 +188,8 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
 
         quant_stop = asyncio.Event()
         tasks.append((asyncio.create_task(run_quant(quant_stop), name="quant-research"), quant_stop))
+        from services.quant.scanner import run_loop as run_scanner
+
+        scanner_stop = asyncio.Event()
+        tasks.append((asyncio.create_task(run_scanner(scanner_stop), name="quant-scanner"), scanner_stop))
         yield

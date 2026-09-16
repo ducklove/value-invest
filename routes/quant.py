@@ -4,11 +4,31 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from deps import get_current_user
-from repositories import quant, quant_basis, quant_forward
-from services.quant import basis, service
+from repositories import quant, quant_basis, quant_forward, quant_scanner
+from services.quant import basis, scanner, service
 from services.quant.models import RunRequest
+from services.quant.scanner_model import ScannerConfig
 
 router = APIRouter(prefix="/api/quant")
+
+
+@router.get("/scanner")
+async def scanner_status(request: Request):
+    return await scanner.status(await user_id(request))
+
+
+@router.put("/scanner")
+async def scanner_configure(request: Request, payload: ScannerConfig):
+    user = await user_id(request)
+    await scanner.configure(user, payload)
+    return await scanner.status(user)
+
+
+@router.post("/scanner/stop")
+async def scanner_stop(request: Request):
+    user = await user_id(request)
+    await quant_scanner.stop(user)
+    return await scanner.status(user)
 
 
 class BasisRunRequest(BaseModel):
