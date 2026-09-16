@@ -177,6 +177,9 @@ async function initApp() {
     // Mobile + logged in → default to portfolio (경로가 명시된 경우
     // 이 기본값은 덮지 않음).
     switchView('portfolio', { skipHistory: true });
+  } else if (!viewFromPath) {
+    // 기본 주소도 화면 진입을 실행해야 투자정보 데이터 로딩이 시작된다.
+    switchView('investing', { skipHistory: true });
   }
   // 모바일 첫 진입은 최상단에서 — 포트폴리오 요약(집계 숫자)이 화면 맨 위라
   // 조금만 밀려 있어도 가장 먼저 가려진다. 기본값 진입과 경로 진입(/portfolio)
