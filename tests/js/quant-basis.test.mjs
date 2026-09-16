@@ -25,6 +25,8 @@ test('예시임을 밝히고 손익 가정을 보내며 재시도 키를 고정�
   assert.equal(calls.length,2);
   assert.equal(calls[0].request_key,calls[1].request_key);
   assert.equal(calls[0].input.config.capital,100000000);
+  assert.equal(calls[0].input.config.spot_fee_bps,1);
+  assert.equal(calls[0].input.config.futures_fee_bps,0.6);
   assert.equal(calls[0].input.scenario.spot,70000);
   assert.equal(calls[0].input.config.borrow_confirmed,false);
   f.elements.kind.value='index_etf';f.elements.kind.dispatchEvent(new dom.window.Event('change'));

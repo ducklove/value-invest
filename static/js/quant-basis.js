@@ -12,8 +12,8 @@ const BASIS_FIELDS = [
   ['expected_dividend','기간 중 주당 세후 배당 가정 (원)',0,0,100000,0.01],
 ];
 const BASIS_ADVANCED = [
-  ['spot_fee_bps','현물 편도 수수료 (bp)',2,0,100,0.1],
-  ['futures_fee_bps','선물 편도 수수료 (bp)',0.5,0,100,0.1],
+  ['spot_fee_bps','현물 편도 수수료 (bp · 1bp = 0.01%)',1,0,100,0.1],
+  ['futures_fee_bps','선물 편도 수수료 (bp · 0.6bp = 0.006%)',0.6,0,100,0.1],
   ['sell_tax_bps','현물 매도세 가정 (bp)',20,0,100,0.1],
   ['slippage_bps','편도 슬리피지 (bp)',2,0,100,0.1],
   ['funding_pct','연 금융·기회비용 (%)',4,0,40,0.1],
@@ -53,7 +53,7 @@ function basisInit() {
         <label>가정 시작일<input name="start" type="date" value="2026-09-16" required></label>
         <label>가정 만기일<input name="expiry" type="date" value="2026-12-10" required></label>
         ${basisInputs(BASIS_FIELDS)}</div>
-        <p class="quant-muted">예시 증거금·비용은 NH 계좌의 실제 조건이 아닙니다. ETF는 지수와 정확히 같은 자산이 아니며 정수 수량과 추적 차이로 손익이 남습니다.</p>
+        <p class="quant-muted">수수료 기본값은 사용자가 알려준 나무 API 국내 현물 편도 0.01%(1bp), 선물 편도 0.006%(0.6bp)입니다. 해외 현물 편도 0.09%(9bp)는 참고 요율이며 현재 국내 전략에는 적용하지 않습니다. 증거금·세금은 별도 가정입니다. ETF는 지수와 정확히 같은 자산이 아니며 정수 수량과 추적 차이로 손익이 남습니다.</p>
         <details><summary>비용·증거금·체결·대차 가정</summary><div class="basis-grid">${basisInputs(BASIS_ADVANCED)}</div>
         <label class="basis-check"><input name="borrow_confirmed" type="checkbox"> 공매도용 대차 확보를 가정함 · 실제 대차 주문은 하지 않음</label></details>
         <button type="submit" id="basisSubmit" class="quant-primary">가정별 손익 시뮬레이션</button>
