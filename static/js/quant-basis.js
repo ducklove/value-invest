@@ -141,6 +141,7 @@ function basisRender(row) {
   const table = r.scenarios.map(s=>`<tr><th>${escapeHtml(s.name)}<small>${BASIS_STATUS[s.status] || '확인 필요'}</small></th><td>${n(s.pnl,0)}원<small>${n(s.return_on_capital_pct)}%</small></td><td>${n(s.contracts,0)}계약 / ${n(s.shares,0)}주</td><td>${n(s.max_drawdown_pct)}%</td><td>${n(s.additional_capital,0)}원</td></tr>`).join('');
   document.getElementById('basisReport').innerHTML = `<h4>${r.mode === 'scenario' ? '가정별 손익 · 과거 실적 아님' : '사용자 호가 재생 · 원천 검증 전'}</h4>
     <p>${escapeHtml(c.contract)} · 기준 투자금 ${n(c.capital,0)}원 · ${c.direction === 'cash_carry' ? '현물 매수 / 선물 매도' : '현물 공매도 / 선물 매수'}</p>
+    <p class="quant-muted">입력 출처·가정: ${escapeHtml(r.source_note || '사용자 가정')}</p>
     <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>시나리오·종료 상태</th><th>가상 순손익 / 투자금 수익률</th><th>맞춘 수량</th><th>최대 낙폭</th><th>추가 필요 자금</th></tr></thead><tbody>${table}</tbody></table></div>
     ${basisChart(r.scenarios)}
     <p class="quant-muted">한쪽만 체결된 뒤 가격이 1% 불리하게 움직일 때의 가격 손실 규모: ${n(r.scenarios[0]?.unhedged_1pct_move_loss,0)}원. 추가 청산 비용 전이며 발생 확률을 뜻하지 않습니다.</p>

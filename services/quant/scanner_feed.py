@@ -10,7 +10,7 @@ from core.http import get_http_client
 from repositories.broker_secrets import BrokerError
 from repositories.quant import QuantError
 from services.brokers import namuh
-from services.quant.scanner_model import KST, book, master_rows
+from services.quant.scanner_model import KST, book, master_rows, number
 
 _master = []
 _master_at = 0.0
@@ -51,6 +51,11 @@ async def snapshot(user, cid, contract, env, spot_cache):
             raise BrokerError("현물 코드 또는 응답 블록 불일치")
         spot = book(s["bidp1"], s["askp1"], s["bidp_rsqn1"], s["askp_rsqn1"], s["hoga_bsop_hour"], datetime.now(KST))
         spot_cache[key] = spot
-    if str(f.get("cncc_cls_code", "")) == "1" or f.get("dynmc_prc_lmt_yn") != "N":
-        raise ValueError("동시호가·가격제한 상태 또는 상태 미확인")
+    if str(f.get("cncc_cls_code", "")) != "0" or f.get("dynmc_prc_lmt_yn") not in {"Y", "N"}:
+        raise ValueError("동시호가 또는 상태 미확인")
+    # Y는 동적 가격제한 적용이다. 매매 정지를 뜻하지 않는다. 제한 경계 호가는 제외한다.
+    if f["dynmc_prc_lmt_yn"] == "Y":
+        lower, upper = number(f.get("dynmc_lwlmtprc")), number(f.get("dynmc_uplmtprc"))
+        if not 0 < lower < future["bid"] <= future["ask"] < upper:
+            raise ValueError("동적 가격제한 경계 또는 범위 미확인")
     return spot, future, str(f["last_tr_date"])

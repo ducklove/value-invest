@@ -109,6 +109,16 @@ class ScannerTests(TempDbMixin):
         assert call.call_args_list[1].args[3]["market_cd"] == "KRX"
         assert not any("/order/" in p for p in namuh.READ_PATHS)
 
+        # 동적 가격제한 적용 자체는 거래 정지가 아니다. 경계·누락 상태는 차단한다.
+        future["Output_0"].update(dynmc_prc_lmt_yn="Y", dynmc_lwlmtprc=90, dynmc_uplmtprc=110)
+        with patch.object(namuh, "pages", AsyncMock(side_effect=[[future], [spot]])):
+            _, f, _ = await scanner_feed.snapshot("u1", "cid", {"contract": "KA0A6C000", "spot_code": "005930"}, "mock", {})
+        assert f["bid"] == 105
+        future["Output_0"]["dynmc_uplmtprc"] = 106
+        with patch.object(namuh, "pages", AsyncMock(side_effect=[[future], [spot]])):
+            with self.assertRaisesRegex(ValueError, "가격제한"):
+                await scanner_feed.snapshot("u1", "cid", {"contract": "KA0A6C000", "spot_code": "005930"}, "mock", {})
+
     async def test_watcher_requires_ack_and_both_books_before_recording(self):
         messages = [
             {"header": {"rsp_cd": "00000"}, "body": {"tr_key": ["005930", "A0A6C000"]}},
@@ -136,13 +146,14 @@ class ScannerTests(TempDbMixin):
         watcher = scanner.Watcher("u1", "cid", "mock", config(), "generation", {})
         watcher.selected = {"KA0A6C000": NOW.timestamp()}
         watcher.rows = {"KA0A6C000": {"spot_code": "005930", "expiry": "20261210", "name": "검증"}}
-        with patch.object(scanner.websockets, "connect", return_value=socket), \
+        with patch.object(scanner.websockets, "connect", return_value=socket) as connect, \
              patch.object(namuh, "token", AsyncMock(return_value="test-only")), \
              patch.object(scanner, "datetime") as clock, \
              patch.object(quant_scanner, "record", AsyncMock(return_value=False)) as record:
             clock.now.return_value = NOW
             await asyncio.wait_for(watcher.run(), timeout=2)
         assert len(socket.sent) == 2
+        assert connect.call_args.args[0] == "wss://api.nhplug.com:7070/websocket"
         assert {s["body"]["tr_cd"] for s in socket.sent} == {"ob", "vH"}
         event = record.call_args.kwargs["event"]
         assert record.call_count == 1 and event["type"] == "opportunity"

@@ -81,6 +81,24 @@ class NamuhTests(TempDbMixin):
             namuh.continuation({}, {"cts_flag": "Y"})
         self.assertEqual(namuh.continuation({"Output_0": {"ctsz20": "next"}}, {}), "next")
 
+    async def test_mock_account_reads_market_data_from_live_but_balance_from_mock(self):
+        requests = []
+
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(200, json={"rsp_cd": "00000", "Output_0": {}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(namuh, "get_http_client", AsyncMock(return_value=client)), \
+                 patch.object(namuh, "token", AsyncMock(return_value="test-only")), \
+                 patch.object(namuh, "MIN_CALL_INTERVAL", 0):
+                for path in ("/krfuture/quote/v1/day", "/krstock/quote/v1/currentPrice", "/krstock/inquiry/v1/balance"):
+                    await namuh.pages("u1", self.cid, path, {}, "mock")
+                with self.assertRaises(BrokerError):
+                    await namuh.pages("u1", self.cid, "/krfuture/order/v1/order", {}, "mock")
+        self.assertEqual([r.url.host for r in requests], ["api.nhplug.com", "api.nhplug.com", "moapi.nhplug.com"])
+        self.assertTrue(all("/order/" not in r.url.path for r in requests))
+
     async def test_balance_parser_distinguishes_settlement_cash_and_combines_pages(self):
         summary = {key: str(value) for key, value in zip(("dca", "nxt_dd_dca", "nxt2_dd_dca", "orr_pbl_amt", "drn_pbl_amt"), (1000, 900, 800, 700, 600))}
         domestic = [{"Output_0": summary, "Output_1": [{"iem_cd": "KR7005930003", "iem_nm": "삼성전자", "itg_bnc_qty": "10", "phs_pr": "100"}]},

@@ -42,6 +42,7 @@ test('미청산 결과를 확정 수익으로 표시하지 않고 외부 텍스�
   assert.match(report.textContent,/청산 미확인/);
   assert.match(report.textContent,/—원/);
   assert.equal(report.querySelector('img'),null);
+  assert.match(report.textContent,/입력 출처·가정: 사용자 가정/);
   await new Promise(r=>setTimeout(r,20));
   dom.window.close();
 });

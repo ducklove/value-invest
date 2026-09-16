@@ -14,6 +14,8 @@ from repositories.broker_secrets import BrokerError
 
 LIVE = "https://api.nhplug.com:8443"
 MOCK = "https://moapi.nhplug.com:8443"
+# 모의 서버는 아래 시세 API를 IGW40023으로 거절한다. 계좌 조회 환경과 분리한다.
+MARKET_DATA_PATHS = frozenset({"/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day"})
 READ_PATHS = frozenset({"/n2/acctinfo", "/krstock/inquiry/v1/balance", "/gbstock/inquiry/v1/balance",
                         "/gbstock/inquiry/v1/margin", "/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day"})
 _locks: dict[str, asyncio.Lock] = {}
@@ -107,7 +109,8 @@ async def pages(user: str, cid: str, path: str, body: dict, environment="live") 
             await asyncio.sleep(max(0, MIN_CALL_INTERVAL - (time.monotonic() - _last_call.get(cid, 0))))
             _last_call[cid] = time.monotonic()
             try:
-                response = await client.post((MOCK if environment == "mock" and path != "/n2/acctinfo" else LIVE) + path,
+                use_mock = environment == "mock" and path != "/n2/acctinfo" and path not in MARKET_DATA_PATHS
+                response = await client.post((MOCK if use_mock else LIVE) + path,
                                              json={"Input_0": body}, headers=headers)
             except httpx.HTTPError:
                 raise BrokerError("나무 조회 서버에 연결하지 못했습니다. 기존 잔고를 유지합니다.") from None

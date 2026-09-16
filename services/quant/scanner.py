@@ -54,7 +54,7 @@ async def status(user):
             "progress": progress, "runtime": _runtime.get(user, {}),
             "accounts": accounts,
             "rows": data, "events": await quant_scanner.events(user),
-            "orders_sent": 0, "live_eligible": False,
+            "orders_sent": 0, "live_eligible": False, "market_data_environment": "live",
             "limits": {"sessions_used_for_holdings": 1, "sessions_for_scanner": 1, "registrations": 30}}
 
 
@@ -90,7 +90,8 @@ class Watcher:
                 regs.update({("vH", code[1:]), ("ob", self.rows[code]["spot_code"])})
             if len(regs) > 30:
                 raise QuantError("실시간 구독 예산 초과")
-            endpoint = "wss://moapi.nhplug.com:17070/websocket" if self.env == "mock" else "wss://api.nhplug.com:7070/websocket"
+            # 모의 시세 소켓은 ob/vH를 WSS10006으로 거절한다. 계좌·체결 통보와 별도다.
+            endpoint = "wss://api.nhplug.com:7070/websocket"
             self.books.clear()
             self.active_signals.clear()
             self.state = {"state": "connecting", "requested": len(regs), "approved": 0}

@@ -24,7 +24,7 @@ function scannerInit() {
   if (!root.dataset.bound) {
     root.dataset.bound = '1';
     root.innerHTML = `<header class="quant-report-head"><div><span class="lab-eyebrow">전체 순회 → 후보 집중 감시</span><h3>현선물 시장 감시</h3></div><span class="quant-mode">관찰 · 실제 주문 0건</span></header>
-      <p>개별주식선물의 모든 월물과 대응 현물을 순회합니다. 순회 가격에서 후보를 찾고, 실시간 양쪽 호가가 기회 기준을 넘으면 근거를 기록합니다.</p>
+      <p>개별주식선물의 모든 월물과 대응 현물을 순회합니다. 순회 가격에서 후보를 찾고, 실시간 양쪽 호가가 기회 기준을 넘으면 근거를 기록합니다. 모의 계좌도 실제 시장 시세를 조회합니다.</p>
       <div id="scannerSummary" class="scanner-summary" aria-live="polite"></div>
       <p id="scannerNotice" class="quant-notice">나무 연결 상태를 확인하는 중입니다.</p>
       <details id="scannerSettings"><summary>계좌·순회·감시 기준</summary><form id="scannerForm">
