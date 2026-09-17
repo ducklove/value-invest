@@ -51,7 +51,9 @@ async def get_reports(stock_code: str, refresh: bool = False):
     try:
         if not refresh:
             cached_reports = await cache_values.get_report_list(stock_code, REPORT_LIST_CACHE_TTL_MINUTES)
-            if cached_reports:
+            # 빈 목록은 캐시로 인정하지 않는다 — 수집기 장애(2026-09 네이버 페이지
+            # 이전) 중에 저장된 [] 가 TTL 동안 "리포트 없음" 으로 굳어 보이던 문제.
+            if cached_reports and cached_reports.get("reports"):
                 return {
                     "stock_code": stock_code,
                     "reports": cached_reports["reports"],
