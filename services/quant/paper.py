@@ -75,7 +75,8 @@ def mark(position, spot, future, now):
     funding = position["funded_per_share"] * c["funding_pct"] / 100 * held_days / 365
     gross = spot["bid"] - position["entry_spot"] + position["entry_future"] - future["ask"]
     total = position["entry_cost_per_share"] + sum(exit_cost.values()) + funding
-    return {"at": now.timestamp(), "net_pnl": shares * (gross - total), "gross_pnl": shares * gross,
+    return {"at": min(spot["at"], future["at"]), "calculated_at": now.timestamp(),
+            "net_pnl": shares * (gross - total), "gross_pnl": shares * gross,
             "total_costs": shares * total, "funding": shares * funding, "exit_costs": exit_cost,
             "spot_bid": spot["bid"], "future_ask": future["ask"], "spot": spot, "future": future}
 

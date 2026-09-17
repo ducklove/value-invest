@@ -137,6 +137,15 @@ def test_stale_position_valuation_blocks_new_capital_allocation():
     assert "평가 대기" in state["last_rejection"]["reason"]
 
 
+def test_recalculating_old_quotes_does_not_make_valuation_fresh():
+    state, _ = opened()
+    tick(state, 5, spot={"at": (NOW + timedelta(seconds=1)).timestamp()},
+         future={"at": (NOW + timedelta(seconds=1)).timestamp()})
+    position = state["positions"][ROW["contract"]]
+    assert position["mark"]["at"] == (NOW + timedelta(seconds=1)).timestamp()
+    assert paper.summary(state, NOW + timedelta(seconds=7))["stale_positions"] == 1
+
+
 def test_pinned_position_survives_catalog_roll_and_has_subscription_priority():
     state, _ = opened()
     observer = scanner.Watcher("u", "c", "mock", CONFIG, "g", {})
