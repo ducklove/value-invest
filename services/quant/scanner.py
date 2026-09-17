@@ -11,7 +11,7 @@ import aiosqlite
 import truststore
 import websockets
 
-from repositories import account_holdings, brokers, quant_scanner
+from repositories import account_holdings, brokers, quant_paper, quant_scanner
 from repositories.broker_secrets import BrokerError
 from repositories.quant import QuantError, digest
 from services.brokers import namuh
@@ -26,6 +26,7 @@ async def configure(user, config):
     links = await brokers.list_links()
     if not any(x["google_sub"] == user and x["account_id"] == config.account_id for x in links):
         raise QuantError("본인의 나무 연결 계좌를 선택하세요.")
+    await quant_paper.assert_account(user, config.account_id)
     await quant_scanner.configure(user, config.model_dump())
     _runtime.pop(user, None)
 
@@ -55,7 +56,9 @@ async def status(user):
     for link in links:
         account = await account_holdings.require_account(user, link["account_id"])
         accounts.append({"account_id": link["account_id"], "environment": link["environment"], "name": account.get("name", "나무 연결 계좌")})
+    paper_account = await quant_paper.get(user)
     valid_codes = {r["contract"] for r in data if r.get("observed_at") and not r.get("error")}
+    valid_codes.update((paper_account or {}).get("state", {}).get("positions", {}))
     runtime = dict(_runtime.get(user, {}))
     for field in ("watched", "signals"):
         runtime[field] = [code for code in runtime.get(field, []) if code in valid_codes]
@@ -63,6 +66,7 @@ async def status(user):
             "progress": progress, "runtime": runtime,
             "accounts": accounts,
             "rows": data, "excluded": excluded, "events": await quant_scanner.events(user),
+            "paper": paper_account,
             "orders_sent": 0, "live_eligible": False, "market_data_environment": "live",
             "limits": {"sessions_used_for_holdings": 1, "sessions_for_scanner": 1, "registrations": 30}}
 
@@ -75,7 +79,51 @@ class Watcher:
         self.rows = {}
         self.books = {}
         self.active_signals = set()
+        self.paper_state = None
+        self.paper_checked = {}
         self.state = {"state": "waiting", "requested": 0, "approved": 0}
+
+    def pins(self):
+        return {code: p["row"] for code, p in (self.paper_state or {}).get("positions", {}).items()}
+
+    def select(self):
+        pins = self.pins()
+        for code, row in pins.items():
+            self.rows.setdefault(code, row)
+        candidates = watch_list(list(self.rows.values()), self.selected, self.config, time.time())
+        limit = max(len(pins), self.config.max_pairs)
+        self.selected = dict(list(({code: self.selected.get(code, time.time()) for code in pins} | candidates).items())[:limit])
+
+    async def refresh(self):
+        """보유·집중감시 계약의 REST 상태를 갱신한다. 소켓 수신을 막지 않는다."""
+        while True:
+            self.paper_state = await quant_paper.process(self.user, self.generation)
+            now = datetime.now(KST)
+            if rollover.trading_day(now.date()) and "09:00" <= now.strftime("%H:%M") < "15:20":
+                self.select()
+                due = [self.rows[c] for c in self.selected if time.time() - self.rows[c].get("observed_at", 0) >= 60]
+                master = {r["contract"]: r for r in await scanner_feed.catalog()} if due else {}
+                for previous in sorted(due, key=lambda r: r.get("observed_at", 0)):
+                    code = previous["contract"]
+                    row = {**previous, "net_bps": None, "error": None}
+                    try:
+                        if code not in master or master[code]["spot_code"] != row["spot_code"]:
+                            raise QuantError("현재 마스터의 계약·현물 연결 미확인")
+                        row["contract_name"] = master[code]["contract_name"]
+                        spot, future, expiry = await scanner_feed.snapshot(self.user, self.cid, row, self.env, {})
+                        row.update(expiry=expiry, expiry_verified=True)
+                        if code not in self.pins():
+                            row.update(**edge(spot, future, expiry, self.config, datetime.now(KST)))
+                    except (BrokerError, QuantError, ValueError, KeyError, TypeError, OverflowError) as exc:
+                        row["error"] = str(exc)[:160]
+                    row["observed_at"] = time.time()
+                    if code not in self.rows:  # 갱신 중 월물 정책이 바뀐 계약은 되살리지 않는다.
+                        continue
+                    self.rows[code] = row
+                    if not await quant_scanner.record(self.user, self.generation, self.progress, row=row):
+                        return
+                self.select()
+            await asyncio.sleep(5)
 
     def public(self):
         if time.time() - self.state.get("last_tick_at", 0) > 5 and self.state.get("state") == "receiving":
@@ -161,6 +209,9 @@ class Watcher:
                             if row is None:
                                 continue
                             spot, future = self.books.get(("ob", row["spot_code"])), self.books.get(("vH", code[1:]))
+                            if spot and future and self.paper_state is not None and now.timestamp() - self.paper_checked.get(code, 0) >= 1:
+                                self.paper_checked[code] = now.timestamp()
+                                self.paper_state = await quant_paper.process(self.user, self.generation, row, spot, future, self.config, now)
                             try:
                                 if not spot or not future:
                                     raise ValueError("호가 대기")
@@ -206,10 +257,14 @@ def sync_universe(observer, selection, progress):
         observer.active_signals.clear()
         progress.update(cursor=0, rounds=0, catalog_hash=catalog_hash, cycle_started_at=time.time(),
                         last_scan_at=None, last_cycle_seconds=None)
+    pins = observer.pins() if hasattr(observer, "pins") else {}
     codes = {c["contract"] for c in contracts}
     observer.rows = {code: row for code, row in observer.rows.items()
-                     if code in codes and row.get("catalog_hash") == catalog_hash}
+                     if code in pins or code in codes and row.get("catalog_hash") == catalog_hash}
+    for code, row in pins.items():
+        observer.rows.setdefault(code, row)
     observer.selected = {code: at for code, at in observer.selected.items() if code in observer.rows}
+    observer.selected = {code: time.time() for code in pins} | observer.selected
     progress.update({k: v for k, v in selection.items() if k not in {"contracts", "excluded"}})
     progress.update(total=len(contracts), excluded_count=len(selection["excluded"]), catalog_at=scanner_feed._master_at)
     observer.public()
@@ -222,12 +277,18 @@ async def scan(setting, link):
     progress = setting["progress"]
     observer = Watcher(user, link["credential_id"], link["environment"], config, generation, progress)
     observer.rows = {r["contract"]: r for r in await quant_scanner.rows(user)}
+    saved_paper = await quant_paper.get(user, limit=0)
+    observer.paper_state = saved_paper["state"] if saved_paper else None
     watch_task = asyncio.create_task(observer.run())
+    refresh_task = asyncio.create_task(observer.refresh())
     cached = {}
     try:
         while True:
             if watch_task.done():
                 await watch_task
+                return
+            if refresh_task.done():
+                await refresh_task
                 return
             try:
                 selection = rollover.universe(await scanner_feed.catalog(), datetime.now(KST).date())
@@ -257,7 +318,7 @@ async def scan(setting, link):
                     row["error"] = str(exc)[:160]
                 row["observed_at"] = time.time()
                 observer.rows[row["contract"]] = row
-                observer.selected = watch_list(list(observer.rows.values()), observer.selected, config, time.time())
+                observer.select()
                 observer.public()
                 cursor += 1
                 progress.update(state="scanning", cursor=cursor % len(contracts), total=len(contracts),
@@ -280,7 +341,8 @@ async def scan(setting, link):
                 await asyncio.sleep(30)
     finally:
         watch_task.cancel()
-        await asyncio.gather(watch_task, return_exceptions=True)
+        refresh_task.cancel()
+        await asyncio.gather(watch_task, refresh_task, return_exceptions=True)
         _runtime.pop(user, None)
 
 
