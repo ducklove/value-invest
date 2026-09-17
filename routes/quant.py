@@ -4,8 +4,9 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from deps import get_current_user
-from repositories import quant, quant_basis, quant_forward, quant_paper, quant_scanner
+from repositories import quant, quant_basis, quant_forward, quant_scanner
 from services.quant import basis, scanner, service
+from services.quant import paper_service as quant_paper
 from services.quant.models import RunRequest
 from services.quant.paper import PaperConfig
 from services.quant.scanner_model import ScannerConfig

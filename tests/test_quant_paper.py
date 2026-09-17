@@ -7,9 +7,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from _harness import TempDbMixin, seed_user
 
-from repositories import quant_paper, quant_scanner
+from repositories import quant_scanner
 from repositories.quant import QuantError
 from services.quant import paper, rollover, scanner
+from services.quant import paper_service as quant_paper
 from services.quant.scanner_model import KST, ScannerConfig, book
 
 NOW = datetime(2026, 9, 17, 10, tzinfo=KST)

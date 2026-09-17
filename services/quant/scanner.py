@@ -11,10 +11,11 @@ import aiosqlite
 import truststore
 import websockets
 
-from repositories import account_holdings, brokers, quant_paper, quant_scanner
+from repositories import account_holdings, brokers, quant_scanner
 from repositories.broker_secrets import BrokerError
 from repositories.quant import QuantError, digest
 from services.brokers import namuh
+from services.quant import paper_service as quant_paper
 from services.quant import rollover, scanner_feed
 from services.quant.scanner_model import KST, ScannerConfig, edge, realtime_book, watch_list
 
