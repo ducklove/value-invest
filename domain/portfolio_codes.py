@@ -33,6 +33,12 @@ def is_korean_stock(code: str | None) -> bool:
     return bool(_KRX_CODE_RE.fullmatch(normalize_portfolio_code(code)))
 
 
+def is_hong_kong_rmb_counter(code: str | None) -> bool:
+    """HKEX 80000~89999는 홍콩 상장 위안화 거래 종목이다."""
+    # https://www.hkex.com.hk/Products/Securities/Stock-Code-Allocation-Plan
+    return bool(re.fullmatch(r"8[0-9]{4}\.HK", normalize_portfolio_code(code)))
+
+
 def is_preferred_stock(code: str | None) -> bool:
     return bool(_KRX_PREFERRED_CODE_RE.fullmatch(normalize_portfolio_code(code)))
 

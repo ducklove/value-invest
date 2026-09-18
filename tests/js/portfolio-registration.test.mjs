@@ -59,6 +59,21 @@ test('초기 등록 선택 후 X·취소·Escape는 보유 행이나 저장 요�
   } finally { s.dom.window.close(); }
 });
 
+test('홍콩 위안화 종목을 등록할 때 거래 통화와 초기 매입가 통화를 CNY로 정한다', async () => {
+  const s = await setup();
+  try {
+    assert.equal(s.w.pfInferTickerCurrency('08388.HK'), 'HKD');
+    assert.equal(s.w.pfInferTickerCurrency('83188.HK'), 'CNY');
+    await s.w.pfAddFromSearch('83199.HK', '위안화 채권 ETF', s.w.pfInferTickerCurrency('83199.HK'));
+    s.el('pfRegisterQuantity').value = '3';
+    s.el('pfRegisterPrice').value = '100';
+    await s.w.pfSaveInitialRegistration();
+    const body = JSON.parse(s.mutations()[0].options.body);
+    assert.equal(body.currency, 'CNY');
+    assert.equal(body.avg_price_currency, 'CNY');
+  } finally { s.dom.window.close(); }
+});
+
 test('초기 등록 확정만 입력한 수량·단가로 저장하고 현금을 유지한다', async () => {
   const s = await setup();
   try {

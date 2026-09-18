@@ -5,10 +5,22 @@ from contextvars import ContextVar
 from datetime import datetime
 from decimal import Decimal
 
+from domain.portfolio_codes import is_hong_kong_rmb_counter
 from repositories import accounts
 from repositories.db import get_db, transaction
 
 _scope: ContextVar[tuple[str, str] | None] = ContextVar("holding_account", default=None)
+
+
+async def backfill_hong_kong_rmb_currency(db) -> None:
+    """과거 .HK 일괄 추정으로 생긴 거래 통화만 교정하고 매입원가는 보존한다."""
+    for table in ("account_holdings", "user_portfolio"):
+        rows = await (await db.execute(
+            f"SELECT DISTINCT stock_code FROM {table} WHERE currency='HKD'"
+        )).fetchall()
+        codes = [(row["stock_code"],) for row in rows if is_hong_kong_rmb_counter(row["stock_code"])]
+        if codes:
+            await db.executemany(f"UPDATE {table} SET currency='CNY' WHERE stock_code=? AND currency='HKD'", codes)
 
 
 async def initialize(db, user: str) -> None:

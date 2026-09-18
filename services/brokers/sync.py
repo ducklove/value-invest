@@ -180,8 +180,10 @@ async def sync_account(user: str, aid: str) -> dict:
                 previous = await holdings.list_positions(user, aid)
                 other = [r for r in await holdings.list_positions(user) if r["account_id"] != aid]
                 for row in rows:
-                    if any(r["stock_code"] == row["stock_code"] and r["currency"] != row["currency"] for r in other):
-                        raise BrokerError("다른 계좌와 종목 거래 통화가 달라 동기화를 보류했습니다.")
+                    conflict = next((r for r in other if r["stock_code"] == row["stock_code"] and r["currency"] != row["currency"]), None)
+                    if conflict:
+                        raise BrokerError(f"{row['stock_code']}의 거래 통화가 다릅니다 "
+                                          f"(기존 계좌 {conflict['currency']}, NH {row['currency']}). 종목과 통화를 확인해 주세요.")
                     if not row["stock_code"].startswith("CASH_") and any(r["stock_code"] == row["stock_code"] and r["quantity"] * row["quantity"] < 0 for r in other):
                         raise BrokerError("다른 계좌의 공매도 잔고와 충돌하여 동기화를 보류했습니다.")
                 now = datetime.now(timezone.utc).isoformat()

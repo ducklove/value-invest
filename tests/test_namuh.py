@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from _harness import TempDbMixin, seed_user
 
-from repositories import account_holdings, accounts, brokers, portfolio
+from repositories import account_holdings, accounts, bootstrap, brokers, portfolio
 from repositories.broker_secrets import BrokerError
 from repositories.db import get_db
 from services.brokers import namuh, realtime, sync
@@ -80,6 +80,46 @@ class NamuhTests(TempDbMixin):
         with self.assertRaises(BrokerError):
             namuh.continuation({}, {"cts_flag": "Y"})
         self.assertEqual(namuh.continuation({"Output_0": {"ctsz20": "next"}}, {}), "next")
+
+    async def test_rmb_currency_backfill_allows_sync_and_preserves_original_cost(self):
+        await portfolio.save_portfolio_item("u1", "83188.HK", "위안화 ETF", 2, 100000, "HKD", avg_price_currency="KRW")
+        await portfolio.save_portfolio_item("u1", "83199.HK", "위안화 채권 ETF", 3, 150, "HKD", avg_price_currency="HKD")
+        await portfolio.save_portfolio_item("u1", "08388.HK", "홍콩달러 종목", 1, 20, "HKD", avg_price_currency="HKD")
+        before = await account_holdings.list_positions("u1")
+        await self.link()
+        rows = [{"stock_code": "83188.HK", "stock_name": "위안화 ETF", "quantity": 4,
+                 "avg_price": 50, "avg_price_currency": "CNY", "currency": "CNY"}]
+        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
+            with self.assertRaisesRegex(BrokerError, r"83188.HK.*HKD.*CNY"):
+                await sync.sync_account("u1", self.aid)
+            self.assertEqual(await account_holdings.list_positions("u1"), before)
+            await bootstrap.init_db()
+            corrected = await account_holdings.list_positions("u1")
+            for old, new in zip(before, corrected):
+                self.assertEqual(new, {**old, "currency": "CNY" if old["stock_code"] in {"83188.HK", "83199.HK"} else "HKD"})
+            await bootstrap.init_db()
+            self.assertEqual(await account_holdings.list_positions("u1"), corrected)
+            await sync.sync_account("u1", self.aid)
+            await sync.sync_account("u1", self.aid)
+        item = next(row for row in await portfolio.get_portfolio("u1") if row["stock_code"] == "83188.HK")
+        self.assertEqual((item["currency"], item["quantity"]), ("CNY", 6))
+        from services.portfolio import fx
+        with patch.object(fx, "fx_rate_for_currency", AsyncMock(return_value=200)):
+            await fx.annotate_avg_price_krw([item])
+        self.assertAlmostEqual(item["avg_price_krw"] * item["quantity"], 240000)
+        self.assertIsNone((await brokers.get_link("u1", self.aid))["sync_error"])
+
+    async def test_actual_currency_conflict_still_preserves_entire_account(self):
+        await portfolio.save_portfolio_item("u1", "AAPL", "Apple", 1, 100, "EUR")
+        await self.link()
+        before = await account_holdings.list_positions("u1")
+        rows = [{"stock_code": "AAPL", "stock_name": "Apple", "quantity": 2,
+                 "avg_price": 200, "avg_price_currency": "USD", "currency": "USD"}]
+        await bootstrap.init_db()
+        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
+            with self.assertRaisesRegex(BrokerError, "AAPL.*EUR.*USD"):
+                await sync.sync_account("u1", self.aid)
+        self.assertEqual(await account_holdings.list_positions("u1"), before)
 
     async def test_mock_account_reads_market_data_from_live_but_balance_from_mock(self):
         requests = []

@@ -48,9 +48,9 @@ function pfCanonicalDirectTicker(raw) {
 }
 
 function pfInferTickerCurrency(ticker) {
-  const code = String(ticker || '').toUpperCase();
+  const code = String(ticker || '').trim().toUpperCase();
   if (code.endsWith('.T')) return 'JPY';
-  if (code.endsWith('.HK')) return 'HKD';
+  if (code.endsWith('.HK')) return /^8\d{4}\.HK$/.test(code) ? 'CNY' : 'HKD';
   if (code.endsWith('.SS') || code.endsWith('.SZ')) return 'CNY';
   if (code.endsWith('.L')) return 'GBP';
   if (code.endsWith('.AX')) return 'AUD';

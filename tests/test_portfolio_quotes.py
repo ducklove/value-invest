@@ -222,6 +222,29 @@ async def test_kis_foreign_quote_timeout_returns_empty_for_fallback():
 
 
 @pytest.mark.asyncio
+async def test_hong_kong_rmb_quote_uses_cny_conversion_for_kis_and_naver():
+    async def convert(nation, value):
+        assert nation == "CHN"
+        return value * 200
+
+    with patch.object(foreign.kis_proxy_client, "get_overseas_quote", AsyncMock(return_value={"summary": {"price": 50, "change": 1, "change_pct": 2}})), \
+         patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=convert)):
+        result = await foreign.kis_fetch_foreign_quote("83188.HK")
+    assert result["price"] == 10000
+    assert result["change"] == 200
+
+    with patch.object(foreign, "kis_fetch_foreign_quote", AsyncMock(return_value={})), \
+         patch.object(foreign, "yfinance_fetch_quote_fast", AsyncMock(return_value={})), \
+         patch.object(foreign, "yfinance_fetch_quote", AsyncMock(return_value={})), \
+         patch.object(foreign, "fetch_naver_world_stock", AsyncMock(return_value={"closePrice": "50", "compareToPreviousClosePrice": "1", "nationType": "HKG"})), \
+         patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=convert)):
+        result = await foreign.fetch_foreign_quote("83199.HK")
+    assert result["price"] == 10000
+    assert result["change"] == 200
+    assert await foreign.detect_currency("83188.HK") == "CNY"
+
+
+@pytest.mark.asyncio
 async def test_yfinance_fast_quote_uses_adjacent_daily_close_as_previous_close():
     payload = {
         "rows": [

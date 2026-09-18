@@ -27,6 +27,7 @@ import httpx
 import kis_proxy_client
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from domain.portfolio_codes import is_hong_kong_rmb_counter
 from repositories import corp_codes
 from repositories import ticker_map as ticker_map_repo
 from services.portfolio import currencies, fx
@@ -337,6 +338,8 @@ async def kis_fetch_foreign_quote(ticker: str) -> dict:
             price = s.get("price")
             if price is not None:
                 nation = {"NAS": "USA", "NYS": "USA", "AMS": "USA", "HKS": "HKG", "TSE": "JPN", "SHS": "CHN", "SZS": "CHN"}.get(excd, "USA")
+                if is_hong_kong_rmb_counter(ticker):
+                    nation = "CHN"
                 price_krw = await fx.fx_to_krw(nation, price)
                 change = s.get("change") or 0
                 change_krw = await fx.fx_to_krw(nation, change)
@@ -399,6 +402,8 @@ async def fetch_foreign_quote(reuters_code: str) -> dict:
             change = float(change_str)
             change_pct = float(d.get("fluctuationsRatio", 0))
             nation = d.get("nationType", "")
+            if is_hong_kong_rmb_counter(reuters_code):
+                nation = "CHN"
             price_krw = await fx.fx_to_krw(nation, price)
             change_krw = await fx.fx_to_krw(nation, change)
             return {
@@ -686,6 +691,8 @@ async def save_ticker(stock_code: str, resolved: str):
 
 
 async def detect_currency(stock_code: str) -> str:
+    if is_hong_kong_rmb_counter(stock_code):
+        return "CNY"
     static = _static_foreign_ticker(stock_code)
     if static:
         return static["currency"]

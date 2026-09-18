@@ -53,11 +53,12 @@ async def init_db():
         """
     )
     await db.commit()
-    from repositories.account_holdings import initialize
+    from repositories.account_holdings import backfill_hong_kong_rmb_currency, initialize
     async with _db.transaction() as writer:
         rows = await (await writer.execute("SELECT DISTINCT google_sub FROM user_portfolio")).fetchall()
         for row in rows:
             await initialize(writer, row["google_sub"])
+        await backfill_hong_kong_rmb_currency(writer)
 
 
 async def close_db():
