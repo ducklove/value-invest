@@ -43,7 +43,7 @@ async def fetch_cash_quote(stock_code: str) -> dict:
     if not fx_code:
         return {}
     unit = currencies.FX_UNIT.get(fx_code, 1)
-    # Prefer the per-currency daily-quote scrape — gives us change vs prev close.
+    # 통화별 네이버 JSON 고시 환율과 전일 대비를 함께 사용한다.
     daily = await fx.fetch_fx_daily_change(fx_code)
     if daily.get("price"):
         price = daily["price"] / unit
@@ -54,7 +54,7 @@ async def fetch_cash_quote(stock_code: str) -> dict:
             "change_pct": daily["change_pct"],
             "_stale": bool(daily.get("_stale")),
         }
-    # Fallback: exchangeList scrape — current rate only, no change.
+    # 통화별 조회 실패 시 공유 환율 캐시를 확인한다.
     rate = await fx.fx_rate_for_code(fx_code)
     if not rate:
         return {}

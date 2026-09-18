@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import re
 
 import httpx
 
@@ -24,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 _FX_CACHE_TTL = 300  # 5 minutes
 _FX_DAILY_CACHE_TTL = 300
-# FX 조회는 Naver marketindex 페이지 — 공유 "naver" 클라이언트(기본 8s)에서
-# per-request 5s timeout 적용.
+# 2026-09 구형 환율 HTML은 HTTP 410. 시장지표와 같은 네이버 JSON을 사용한다.
 _FX_HTTP_TIMEOUT = 5.0
 
 _fx_cache = MemoryTTLCache("portfolio.fx_rates", None)
@@ -44,67 +42,57 @@ async def get_fx_rates() -> dict[str, float]:
     cached = _fx_cache.get("rates")
     if cached is not None:
         return cached
-    try:
-        rates: dict[str, float] = {}
-        client = await get_http_client("naver")
-        for page in (1, 2):
-            r = await client.get(
-                f"https://finance.naver.com/marketindex/exchangeList.naver?page={page}",
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=_FX_HTTP_TIMEOUT,
-            )
-            rows = re.findall(
-                r'marketindexCd=(\w+)"[^>]*>[^<]*</a>.*?<td class="sale">([^<]+)',
-                r.text, re.DOTALL,
-            )
-            for code, val in rows:
-                try:
-                    rates[code] = float(val.strip().replace(",", ""))
-                except ValueError:
-                    pass
-        if rates:
-            _fx_cache.set("rates", rates, ttl_seconds=_FX_CACHE_TTL)
-    except (httpx.HTTPError, UnicodeError, ValueError) as exc:
-        logger.warning("환율 목록 조회 실패: %s", exc)
+    semaphore = asyncio.Semaphore(4)
+
+    async def fetch(code):
+        async with semaphore:
+            return code, await fetch_fx_daily_change(code)
+
+    rows = await asyncio.gather(*(fetch(code) for code in currencies.CURRENCY_TO_FX_CODE.values()))
+    rates = {code: row["price"] for code, row in rows if row.get("price") and not row.get("_stale")}
+    if rates:
+        _fx_cache.set("rates", rates, ttl_seconds=_FX_CACHE_TTL)
     return _fx_cache.get("rates", allow_stale=True) or {}
 
 
-async def fetch_fx_daily_change(fx_code: str) -> dict:
-    """Today's FX rate + change vs. the previous business day, from Naver.
+def _fx_number(value) -> float:
+    if value is None or isinstance(value, bool):
+        raise ValueError("환율 숫자 누락")
+    number = float(str(value).replace(",", "").strip())
+    if not math.isfinite(number):
+        raise ValueError("환율 숫자 오류")
+    return number
 
-    Uses the per-currency daily-quote page. Returns {} on failure; callers can
-    fall back to a plain rate lookup.
-    """
+
+async def fetch_fx_daily_change(fx_code: str) -> dict:
+    """네이버 고시 환율과 전일 대비. JPY·VND는 원본의 100단위 호가를 유지한다."""
+    if fx_code not in currencies.CURRENCY_TO_FX_CODE.values():
+        return {}
     cached = _fx_daily_cache.get_entry(fx_code, allow_stale=True)
     if cached is not None and cached.fresh:
         return dict(cached.value)
     try:
         client = await get_http_client("naver")
         resp = await client.get(
-            f"https://finance.naver.com/marketindex/exchangeDailyQuote.naver?marketindexCd={fx_code}",
+            f"https://api.stock.naver.com/marketindex/exchange/{fx_code}",
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=_FX_HTTP_TIMEOUT,
         )
-        html = resp.content.decode("euc-kr", errors="ignore")
-        rows = re.findall(
-            r'<tr class="(?:up|down)">\s*<td class="date">[^<]+</td>\s*<td class="num">([\d,\.]+)</td>',
-            html,
-        )
-        if len(rows) >= 2:
-            price = float(rows[0].replace(",", ""))
-            prev = float(rows[1].replace(",", ""))
-            change = price - prev
-            change_pct = round(change / prev * 100, 2) if prev else 0.0
-            result = {"price": price, "change": change, "change_pct": change_pct}
-            _fx_daily_cache.set(fx_code, result)
-            return result
-        if rows:
-            # Only one row available (first listing day?) — no delta.
-            price = float(rows[0].replace(",", ""))
-            result = {"price": price, "change": 0.0, "change_pct": 0.0}
-            _fx_daily_cache.set(fx_code, result)
-            return result
-    except (httpx.HTTPError, UnicodeError, ValueError) as e:
+        resp.raise_for_status()
+        payload = resp.json()
+        row = payload.get("exchangeInfo") if isinstance(payload, dict) else None
+        if not isinstance(row, dict) or row.get("reutersCode") != fx_code or row.get("unit") != "KRW":
+            raise ValueError("환율 종목 또는 단위 불일치")
+        price = _fx_number(row.get("closePrice"))
+        change = _fx_number(row.get("fluctuations"))
+        change_pct = _fx_number(row.get("fluctuationsRatio"))
+        if price <= 0 or price - change <= 0:
+            raise ValueError("환율은 양수여야 합니다")
+        result = {"price": price, "change": change, "change_pct": change_pct,
+                  "source": "naver_json", "as_of": row.get("localTradedAt")}
+        _fx_daily_cache.set(fx_code, result)
+        return result
+    except (httpx.HTTPError, UnicodeError, ValueError, TypeError) as e:
         logger.warning("FX daily fetch failed for %s: %s", fx_code, e)
     if cached is not None:
         stale = dict(cached.value)
