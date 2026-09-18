@@ -69,6 +69,28 @@ test('NH 브라우저 연결을 공유하고 사용자 상태 초기화 시 소�
   } finally {s.dom.window.close();}
 });
 
+test('해외주식을 제외한 NH 미리보기에도 결제 후 원화·외화 예수금을 표시한다', async () => {
+  const s=setup();
+  try {
+    s.w.apiFetchJson = async (path, options) => {
+      if (path.endsWith('/credentials')) return {accounts:[{account_no:'12345678901',environment:'live',selection:'opaque'}]};
+      assert.equal(JSON.parse(options.body).include_overseas,false);
+      return {items:[{stock_code:'CASH_KRW',stock_name:'원화 현금',quantity:800,currency:'KRW'},
+        {stock_code:'CASH_USD',stock_name:'USD 현금',quantity:80,currency:'USD'}]};
+    };
+    s.w.pfOpenNhConnection({account_id:'a',name:'NH'});
+    await s.w.pfNhWork('verify');
+    s.el('pfNhOverseas').checked=false;
+    await s.w.pfNhWork('preview');
+    assert.match(s.el('pfNhDialog').textContent,/비상장·상장폐지 종목은 제외/);
+    assert.match(s.el('pfNhPreview').textContent,/원화 현금800KRW/);
+    assert.match(s.el('pfNhPreview').textContent,/USD 현금80USD/);
+    assert.match(s.el('pfNhPreview').textContent,/D\+2 예수금/);
+    assert.match(s.el('pfNhPreview').textContent,/외화는 결제 후 예수금/);
+    assert.equal(s.el('pfNhSave').disabled,false);
+  } finally {s.dom.window.close();}
+});
+
 test('NH 미리보기는 CMA RP와 현금 잔액을 별도로 표시하고 평가 시점을 설명한다', async () => {
   const s=setup();
   try {

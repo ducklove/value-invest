@@ -81,7 +81,8 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
     if {"account_no": account, "environment": env} not in own_accounts:
         raise BrokerError("앱키에서 연결 계좌를 확인할 수 없습니다. 계좌 연결을 확인해 주세요.")
     domestic = await namuh.pages(user, cid, "/krstock/inquiry/v1/balance", {
-        "act_no": account, "bnc_bse_cd": "1", "ltg_aot_dit_cd": "9", "aet_bse": "1",
+        # NH 상장폐지구분: 1=상장종목, 9=전체. 비상장·상장폐지 잔고는 조회에서 제외한다.
+        "act_no": account, "bnc_bse_cd": "1", "ltg_aot_dit_cd": "1", "aet_bse": "1",
         "qut_dit_cd": "UNT", "aly_qut_cd": "2",
     }, env)
     # 연속조회에서는 마지막 합계 블록에 최종 평가금액이 채워진다.
@@ -131,25 +132,26 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
                     output.append({"stock_code": foreign_code(row.get("iem_cd", ""), country),
                                    "stock_name": str(row.get("iem_nm") or row.get("oss_iem_eng_nm") or row["iem_cd"]),
                                    "quantity": qty, "avg_price": number(row, "fc_phs_uit_pr"), "avg_price_currency": currency, "currency": currency})
-        margins = await namuh.pages(user, cid, "/gbstock/inquiry/v1/margin", {"act_no": account}, env)
-        for page in margins:
-            rows = page.get("Output_0")
-            if isinstance(rows, dict):
-                rows = [rows]
-            if not isinstance(rows, list):
-                raise BrokerError("통화별 예수금 조회가 완료되지 않았습니다.")
-            for row in rows:
-                currency = str(row.get("cur_cd", "")).strip()
-                # 통화별 잔고 뒤에 오는 원화 환산 합계는 실제 통화 잔고가 아니다.
-                if currency in {"KRW", "<원화환산합계>"}:
-                    continue
-                if "CASH_" + currency not in CASH_FX_CODE:
-                    raise BrokerError("지원되지 않는 예수금 통화입니다.")
-                if currency in balances:
-                    raise BrokerError("중복된 통화 잔고가 반환되어 갱신하지 않았습니다.")
-                balances[currency] = {key: number(row, key) for key in ("fc_dca", "stl_af_fc_dca", "fc_drn_pbl_amt")}
-                output.append({"stock_code": "CASH_" + currency, "stock_name": currency + " 현금",
-                               "quantity": balances[currency]["stl_af_fc_dca"], "avg_price": 1, "avg_price_currency": currency, "currency": currency})
+    # 외화 예수금은 해외주식 조회 여부와 별개로 항상 결제 후 잔액을 가져온다.
+    margins = await namuh.pages(user, cid, "/gbstock/inquiry/v1/margin", {"act_no": account}, env)
+    for page in margins:
+        rows = page.get("Output_0")
+        if isinstance(rows, dict):
+            rows = [rows]
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise BrokerError("통화별 예수금 조회가 완료되지 않았습니다.")
+        for row in rows:
+            currency = str(row.get("cur_cd", "")).strip()
+            # 통화별 잔고 뒤에 오는 원화 환산 합계는 실제 통화 잔고가 아니다.
+            if currency in {"KRW", "<원화환산합계>"}:
+                continue
+            if "CASH_" + currency not in CASH_FX_CODE:
+                raise BrokerError("지원되지 않는 예수금 통화입니다.")
+            if currency in balances:
+                raise BrokerError("중복된 통화 잔고가 반환되어 갱신하지 않았습니다.")
+            balances[currency] = {key: number(row, key) for key in ("fc_dca", "stl_af_fc_dca", "fc_drn_pbl_amt")}
+            output.append({"stock_code": "CASH_" + currency, "stock_name": currency + " 현금",
+                           "quantity": balances[currency]["stl_af_fc_dca"], "avg_price": 1, "avg_price_currency": currency, "currency": currency})
     merged = {}
     for row in output:
         code = row["stock_code"]

@@ -144,12 +144,75 @@ class NamuhTests(TempDbMixin):
         domestic = [{"Output_0": summary, "Output_1": [{"iem_cd": "KR7005930003", "iem_nm": "삼성전자", "itg_bnc_qty": "10", "phs_pr": "100"}]},
                     {"Output_1": [{"iem_cd": "A000660", "iem_nm": "SK하이닉스", "itg_bnc_qty": "2", "phs_pr": "200"}]}]
         with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
-             patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+             patch.object(namuh, "pages", AsyncMock(side_effect=[domestic, [{"Output_0": []}]])):
             rows, balances = await sync.fetch_snapshot("u1", {"credential_id": self.cid, "account_no": "12345678901", "environment": "live", "include_overseas": False})
         self.assertEqual({r["stock_code"]: r["quantity"] for r in rows}, {"005930": 10, "000660": 2, "CASH_KRW": 800})
         self.assertEqual(balances["KRW"]["drn_pbl_amt"], 600)
         with self.assertRaises(BrokerError):
             sync.summary({"Output_0": {}})
+
+    async def test_listed_only_sync_removes_old_unlisted_positions_and_keeps_manual_account(self):
+        await portfolio.save_portfolio_item("u1", "900180", "완리", 3, 100)
+        await self.link()
+        old = [{"stock_code": code, "stock_name": name, "quantity": 2, "avg_price": 100,
+                "avg_price_currency": "KRW", "currency": "KRW"}
+               for code, name in (("900180", "완리"), ("032540", "티맥스소프트"))]
+        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(old, {}))):
+            await sync.sync_account("u1", self.aid)
+        total = {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "drn_pbl_amt": 600}
+        listed = [{"iem_cd": "A005930", "iem_nm": "상장 주식", "itg_bnc_qty": 5, "phs_pr": 100, "now_pr": 0}]
+        # 상장 여부는 증권사의 조회 구분에 맡기고, 제외 종목의 잘못된 숫자는 파싱하지 않는다.
+        excluded = [{"iem_cd": "A" + row["stock_code"], "iem_nm": row["stock_name"], "itg_bnc_qty": "", "phs_pr": ""} for row in old]
+        calls = []
+
+        async def pages(_user, _cid, path, body, _environment):
+            calls.append((path, body))
+            if path == "/krstock/inquiry/v1/balance":
+                return [{"Output_0": total, "Output_1": listed + (excluded if body["ltg_aot_dit_cd"] == "9" else [])}]
+            if path == "/gbstock/inquiry/v1/margin":
+                return [{"Output_0": [{"cur_cd": "USD", "fc_dca": 100, "stl_af_fc_dca": 80, "fc_drn_pbl_amt": 60},
+                                       {"cur_cd": "JPY", "fc_dca": 2000, "stl_af_fc_dca": 1500, "fc_drn_pbl_amt": 1000},
+                                       {"cur_cd": "<원화환산합계>", "stl_af_dca": 999999}]}]
+            self.fail("해외주식 제외 상태에서 주식 잔고를 조회했습니다.")
+
+        with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+             patch.object(namuh, "pages", side_effect=pages):
+            await sync.sync_account("u1", self.aid)
+            await sync.sync_account("u1", self.aid)
+        self.assertEqual([body["ltg_aot_dit_cd"] for path, body in calls if path.startswith("/krstock/")], ["1", "1"])
+        positions = {row["stock_code"]: row["quantity"] for row in await account_holdings.list_positions("u1", self.aid)}
+        self.assertEqual(positions, {"005930": 5, "CASH_KRW": 800, "CASH_USD": 80, "CASH_JPY": 1500})
+        self.assertEqual((await portfolio.get_portfolio_item("u1", "900180"))["quantity"], 3)
+        self.assertIsNone(await portfolio.get_portfolio_item("u1", "032540"))
+        self.assertIsNone((await brokers.get_link("u1", self.aid))["sync_error"])
+
+    async def test_foreign_cash_failure_preserves_snapshot_when_overseas_stocks_disabled(self):
+        await self.link()
+        old = [{"stock_code": "CASH_USD", "stock_name": "USD 현금", "quantity": 80, "avg_price": 1,
+                "avg_price_currency": "USD", "currency": "USD"}]
+        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(old, {}))):
+            await sync.sync_account("u1", self.aid)
+        before = await account_holdings.list_positions("u1", self.aid)
+        domestic = [{"Output_0": {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "drn_pbl_amt": 600}}]
+        for margin in (BrokerError("외화 조회 실패"), {}, {"Output_0": [None]},
+                       {"Output_0": [{"cur_cd": "USD", "fc_dca": 100, "fc_drn_pbl_amt": 60}]},
+                       {"Output_0": [{"cur_cd": "USD", "fc_dca": 100, "fc_drn_pbl_amt": 60, "stl_af_fc_dca": "NaN"}]}):
+            with self.subTest(margin=margin), \
+                 patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+                 patch.object(namuh, "pages", AsyncMock(side_effect=[domestic, margin if isinstance(margin, BrokerError) else [margin]])):
+                with self.assertRaises(BrokerError):
+                    await sync.sync_account("u1", self.aid)
+            self.assertEqual(await account_holdings.list_positions("u1", self.aid), before)
+
+    async def test_listed_only_response_still_rejects_invalid_stock_values(self):
+        await self.link()
+        domestic = [{"Output_0": {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "drn_pbl_amt": 600},
+                     "Output_1": [{"iem_cd": "A005930", "iem_nm": "삼성전자", "itg_bnc_qty": 1, "phs_pr": ""}]}]
+        with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+             patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+            with self.assertRaises(BrokerError):
+                await sync.sync_account("u1", self.aid)
+        self.assertEqual(await account_holdings.list_positions("u1", self.aid), [])
 
     async def test_balance_accepts_rate_specific_order_limits_and_uses_final_summary(self):
         total = {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "drn_pbl_amt": 600,
@@ -159,7 +222,7 @@ class NamuhTests(TempDbMixin):
             {"Output_0": total, "Output_1": [
                 {"iem_cd": "A000660", "iem_nm": "SK하이닉스", "itg_bnc_qty": 2, "phs_pr": 200}]}]
         with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
-             patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+             patch.object(namuh, "pages", AsyncMock(side_effect=[domestic, [{"Output_0": []}]])):
             rows, balances = await sync.fetch_snapshot("u1", {"credential_id": self.cid, "account_no": "12345678901", "environment": "live", "include_overseas": False})
         self.assertEqual({r["stock_code"]: r["quantity"] for r in rows}, {"005930": 10, "000660": 2, "CASH_KRW": 800})
         self.assertNotIn("orr_pbl_amt", balances["KRW"])
@@ -193,7 +256,7 @@ class NamuhTests(TempDbMixin):
         domestic = [{"Output_0": {"dca": 100, "nxt_dd_dca": 100, "nxt2_dd_dca": 100, "drn_pbl_amt": 100},
                      "Output_1": [{"iem_cd": "M04020000", "iem_nm": "금 99.99K", "itg_bnc_qty": 3, "phs_pr": 120000}]}]
         with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
-             patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+             patch.object(namuh, "pages", AsyncMock(side_effect=[domestic, [{"Output_0": []}]])):
             rows, _ = await sync.fetch_snapshot("u1", {"credential_id": self.cid, "account_no": "12345678901", "environment": "live", "include_overseas": False})
         self.assertEqual(rows[0]["stock_code"], "KRX_GOLD")
         self.assertEqual(rows[0]["quantity"], 3)
@@ -211,7 +274,7 @@ class NamuhTests(TempDbMixin):
                  "phs_pr": 0, "now_pr": 0, "eal_amt": 2040, "eal_pls_amt": 40}]}]
         await self.link()
         with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
-             patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+             patch.object(namuh, "pages", AsyncMock(side_effect=[domestic, [{"Output_0": []}]])):
             await sync.sync_account("u1", self.aid)
         positions = {row["stock_code"]: row for row in await portfolio.get_portfolio("u1")}
         rp = positions["CMA_RP_KRW"]
