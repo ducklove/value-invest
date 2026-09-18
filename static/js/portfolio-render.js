@@ -17,7 +17,7 @@ function pfAvgPriceKrw(item) {
 function pfCanEditAvgPriceCurrency(stockCode) {
   const code = String(stockCode || '').toUpperCase();
   if (!code || code.startsWith('CASH_')) return false;
-  if (['KRX_GOLD', 'CMA_RP_KRW', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(code)) return false;
+  if (['KRX_GOLD', 'CMA_RP_KRW', 'FUTURES_BASE_KRW', 'FUTURES_PNL_KRW', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(code)) return false;
   return !/^[0-9][0-9A-Z]{5}$/.test(code);
 }
 
@@ -590,8 +590,9 @@ function renderPortfolio(options = {}) {
     const isEditing = PfStore.edit.code === r.stock_code;
     const isCash = r.stock_code.startsWith('CASH_');
     const isRp = r.stock_code === 'CMA_RP_KRW';
-    const isSpecialFloat = ['KRX_GOLD', 'CMA_RP_KRW', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(r.stock_code) || isCash;
-    const curTag = isRp ? '<span class="pf-stock-code" title="수량은 최근 잔고 동기화 시점의 RP 평가액(원)입니다.">평가액 · 원</span>' : r.stock_code === 'KRX_GOLD' ? '<span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? `<span class="pf-stock-code">${r.cur}</span>` : '';
+    const isFuturesValue = ['FUTURES_BASE_KRW', 'FUTURES_PNL_KRW'].includes(r.stock_code);
+    const isSpecialFloat = ['KRX_GOLD', 'CMA_RP_KRW', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(r.stock_code) || isCash || isFuturesValue;
+    const curTag = isFuturesValue ? '<span class="pf-stock-code" title="수량 열은 원화 평가 금액입니다. 계약 수는 선물 잔고에서 확인하세요.">평가액 · 원</span>' : isRp ? '<span class="pf-stock-code" title="수량은 최근 잔고 동기화 시점의 RP 평가액(원)입니다.">평가액 · 원</span>' : r.stock_code === 'KRX_GOLD' ? '<span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? `<span class="pf-stock-code">${r.cur}</span>` : '';
     const qtyStep = isSpecialFloat ? 'any' : '1';
     const qtyDecimals = r.stock_code === 'KRX_GOLD' ? 2 : isCash ? 2 : 8;
     const fmtQty = isSpecialFloat ? (v => v !== null && v !== undefined ? Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: qtyDecimals}) : '-') : fmtNum;
@@ -638,7 +639,7 @@ function renderPortfolio(options = {}) {
     // 편집 모드 그룹 셀: 숏(음수 수량) 행에는 롱숏 페어 선택 박스를 함께
     // 노출한다. 페어가 걸린 숏의 그룹은 롱을 따라가므로 그룹 select 잠금.
     let groupEditCell = `<select class="pf-group-select js-pf-group"${editAttrs}${pairLongCode ? ' disabled title="페어 롱 종목의 그룹을 따릅니다"' : ''}>${groupOpts}</select>`;
-    if (r.qty < 0) {
+    if (r.qty < 0 && !isFuturesValue) {
       const pairOpts = ['<option value="">페어 없음</option>'].concat(
         PfStore.items
           .filter(i => i.stock_code !== r.stock_code && Number(i.quantity) > 0 && !i.stock_code.startsWith('CASH_'))
@@ -690,7 +691,7 @@ function renderPortfolio(options = {}) {
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-memo">${memoCell}</td>
       <td class="pf-col-act"><div class="pf-row-actions">${typeof pfAccountNeedsSelection === 'function' && pfAccountNeedsSelection() ? '<button type="button" class="pf-row-btn js-pf-account-detail">계좌별 보기</button>' : `
-        ${document.getElementById('pfTradeDialog') && r.qty >= 0 ? `<button type="button" class="pf-row-btn js-pf-trade" title="${isCash ? '다른 통화로 환전 기록' : '매수·매도 기록'}">${isCash ? '환전' : '매매'}</button>` : ''}
+        ${document.getElementById('pfTradeDialog') && r.qty >= 0 && !isFuturesValue ? `<button type="button" class="pf-row-btn js-pf-trade" title="${isCash ? '다른 통화로 환전 기록' : '매수·매도 기록'}">${isCash ? '환전' : '매매'}</button>` : ''}
         <button type="button" class="pf-row-btn edit js-pf-edit" title="보유 수량·매입가 정정 (현금 변동 없음)" aria-label="${escapeHtml(r.stock_name)} 보유 정보 편집">✎</button>
         <button type="button" class="pf-row-btn delete js-pf-delete" title="매도 또는 등록 삭제" aria-label="${escapeHtml(r.stock_name)} 보유분 정리">✕</button>
       `}

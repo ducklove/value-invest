@@ -3645,3 +3645,10 @@ body.pf-compact-rows .pf-row-actions .js-pf-account-detail { display:none; }
 #pfNhFields button { padding:9px 12px; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--text); font:inherit; cursor:pointer; }
 #pfNhFields #pfNhSave { background:var(--primary); color:#fff; }
 #pfNhFields button:disabled { opacity:.5; cursor:default; }
+#pfNhFields label[hidden] { display:none !important; }
+.pf-derivative-table-wrap { overflow-x:auto; }
+.pf-derivative-table-wrap table { width:100%; border-collapse:collapse; }
+.pf-derivative-table-wrap th,.pf-derivative-table-wrap td { padding:8px; border-bottom:1px solid var(--border); text-align:right; white-space:nowrap; }
+.pf-derivative-table-wrap th:first-child,.pf-derivative-table-wrap td:first-child { text-align:left; }
+.pf-derivative-balances summary { cursor:pointer; font-weight:600; }
+.pf-derivative-balances p { color:var(--text-secondary); }

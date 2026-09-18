@@ -1,5 +1,54 @@
 import { test, expect } from '@playwright/test';
 
+test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표시를 확인한다', async ({ page }, testInfo) => {
+  await page.routeWebSocket('**/ws/namuh', () => {});
+  await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
+  await page.goto('/login');
+  await page.request.post('/api/auth/register', {data:{email:`products-${Date.now()}@example.com`,name:'상품 검증',password:'browser-test-password'},headers:{Origin:'http://127.0.0.1:18765'}});
+  await page.goto('/portfolio');
+  await expect(page.locator('#pfAccountSelect option')).toHaveCount(2);
+  const key='products-'+Date.now();
+  for (const [product, accountNo] of [['gold','12345678901'],['krfuture','22222222222'],['gbfuture','33333333333']]) {
+    await page.locator('#pfAccountsOpen').click();
+    await page.locator('#pfAccountName').fill(product);
+    await page.locator('#pfAccountCreate').click();
+    await expect(page.locator('#pfAccountsStatus')).toContainText('계좌를 만들었습니다');
+    const card=page.locator('#pfAccountsList .pf-account-card').filter({has:page.locator('h3',{hasText:product})});
+    const aid=await card.getAttribute('data-account');
+    await card.locator('[data-account-action="connect"]').click();
+    await page.locator('#pfNhKey').fill(key);
+    await page.locator('#pfNhSecret').fill('test-products-secret');
+    await page.locator('#pfNhVerify').click();
+    await expect(page.locator('#pfNhChoices')).toContainText(accountNo);
+    await page.locator('#pfNhChoices').selectOption({label:accountNo+' · 실계좌'});
+    await page.locator('#pfNhProduct').selectOption(product);
+    await expect(page.locator('#pfNhOverseas')).not.toBeVisible();
+    await page.locator('#pfNhPreviewButton').click();
+    await expect(page.locator('#pfNhSave')).toBeEnabled();
+    if (product === 'gold') await expect(page.locator('#pfNhPreview')).toContainText('KRX 금현물');
+    else {
+      await expect(page.locator('#pfNhPreview')).toContainText('계약 수');
+      await expect(page.locator('#pfNhPreview')).toContainText(product === 'krfuture' ? '900원' : '1,490원');
+    }
+    await page.locator('#pfNhSave').click();
+    await expect(page.locator('#pfNhDialog')).not.toBeVisible();
+    await page.locator('#pfAccountsClose').click();
+    await page.locator('#pfAccountSelect').selectOption(aid);
+    if (product !== 'gold') {
+      const panel=page.locator('#pfDerivativeBalances');
+      await expect(panel).toBeVisible();
+      await expect(panel.locator('tbody tr')).toHaveCount(1);
+      await expect(panel).toContainText('매도');
+      await expect(page.locator('#pfBody [data-code="FUTURES_PNL_KRW"] .pf-col-mktval')).toContainText(product === 'krfuture' ? '-100' : '90');
+      if (product === 'gbfuture') {
+        await page.setViewportSize({width:390,height:844});
+        await panel.screenshot({path:testInfo.outputPath('futures-mobile.png')});
+        expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+      }
+    }
+  }
+});
+
 test('계좌별 등록·합산·매매 격리와 NH 미리보기 취소·연결을 실제 저장으로 확인한다', async ({ page }, testInfo) => {
   let nhSocket;
   await page.routeWebSocket('**/ws/namuh', socket => { nhSocket = socket; });

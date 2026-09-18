@@ -14,6 +14,7 @@ from datetime import datetime
 import aiosqlite
 
 from domain.portfolio_codes import is_korean_stock as _is_portfolio_korean_stock
+from domain.portfolio_codes import is_special_asset
 from repositories import accounts as accounts_repo
 from repositories.db import get_db, read_snapshot, transaction
 
@@ -27,7 +28,7 @@ _SPECIAL_ASSETS_SET = {"KRX_GOLD", "CMA_RP_KRW", "CRYPTO_BTC", "CRYPTO_ETH", "CR
 
 
 def _is_special_or_cash(code: str) -> bool:
-    return code in _SPECIAL_ASSETS_SET or code.startswith("CASH_")
+    return is_special_asset(code)
 
 
 def _default_type_for_code(stock_code: str) -> str:

@@ -17,7 +17,10 @@ MOCK = "https://moapi.nhplug.com:8443"
 # 모의 서버는 아래 시세 API를 IGW40023으로 거절한다. 계좌 조회 환경과 분리한다.
 MARKET_DATA_PATHS = frozenset({"/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day"})
 READ_PATHS = frozenset({"/n2/acctinfo", "/krstock/inquiry/v1/balance", "/gbstock/inquiry/v1/balance",
-                        "/gbstock/inquiry/v1/margin", "/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day"})
+                        "/gbstock/inquiry/v1/margin", "/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day",
+                        "/krgold/inquiry/v1/goldDepositAndBalance", "/krfuture/inquiry/v1/balance",
+                        "/krfuture/inquiry/v1/nightBalance", "/krfuture/inquiry/v1/margin",
+                        "/gbfuture/inquiry/v1/deposit", "/gbfuture/inquiry/v1/margin"})
 _locks: dict[str, asyncio.Lock] = {}
 _last_call: dict[str, float] = {}
 # 실계좌 잔고의 시장별·연속 조회는 공개 SDK의 4회/초에서도 429가 발생한다.

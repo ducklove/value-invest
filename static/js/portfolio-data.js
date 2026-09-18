@@ -87,7 +87,7 @@ async function loadPortfolio({ force = false } = {}) {
   const accountSelect = document.getElementById('pfAccountSelect');
   if (accountSelect) accountSelect.disabled = true;
   try {
-    if (typeof pfLoadAccounts === 'function') await pfLoadAccounts();
+    if (typeof pfLoadAccounts === 'function') await pfLoadAccounts(force);
     _restorePortfolioSnapshotForFastPaint();
     let freshItems;
     try {

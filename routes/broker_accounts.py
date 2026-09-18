@@ -7,6 +7,7 @@ import time
 from fastapi import APIRouter, Body, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from deps import get_current_user
+from domain.broker_assets import ACCOUNT_PRODUCTS
 from repositories import account_holdings, brokers
 from repositories.broker_secrets import BrokerError, decrypt, encrypt
 from services.brokers import namuh, realtime
@@ -27,6 +28,10 @@ def selection(user: str, payload: dict) -> dict:
         choice = json.loads(decrypt(str(payload.get("selection", ""))))
         if choice["user"] != user or choice["expires_at"] < time.time():
             raise ValueError
+        product = payload.get("product", "stocks")
+        if product not in ACCOUNT_PRODUCTS:
+            raise ValueError
+        choice["product"] = product
         return choice
     except (KeyError, ValueError, TypeError, BrokerError):
         raise BrokerError("계좌 선택이 만료되었거나 올바르지 않습니다. 키 확인을 다시 실행해 주세요.") from None
@@ -51,7 +56,7 @@ async def preview(account_id: str, request: Request, payload: dict = Body(...)):
     choice = selection(user, payload)
     choice["include_overseas"] = payload.get("include_overseas") is not False
     rows, balances = await fetch_snapshot(user, choice)
-    return {"items": rows, "balances": balances}
+    return {"items": rows, "balances": balances, "broker_snapshot": balances.get("_snapshot", {})}
 
 
 @router.post("/api/portfolio/accounts/{account_id}/namuh")
@@ -62,7 +67,7 @@ async def connect(account_id: str, request: Request, payload: dict = Body(...)):
     own = await namuh.accounts(user, choice["credential_id"])
     if {"account_no": choice["account_no"], "environment": choice["environment"]} not in own:
         raise BrokerError("현재 키의 계좌 목록에서 선택한 계좌를 확인하지 못했습니다.")
-    await brokers.link_account(user, account_id, choice["credential_id"], choice["account_no"], choice["environment"], payload.get("include_overseas") is not False)
+    await brokers.link_account(user, account_id, choice["credential_id"], choice["account_no"], choice["environment"], payload.get("include_overseas") is not False, choice["product"])
     return await sync_account(user, account_id)
 
 

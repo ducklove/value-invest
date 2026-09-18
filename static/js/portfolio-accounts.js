@@ -20,7 +20,29 @@ async function pfLoadAccounts(force = false) {
   if (state) state.textContent = account?.broker ? `NH 조회 연동 · ${account.connection?.last_sync_at ? '최근 동기화 ' + new Date(account.connection.last_sync_at).toLocaleString('ko-KR') : '첫 동기화 대기'}${account.connection?.sync_error ? ' · 동기화 확인 필요' : ''}` : account ? '이 계좌의 종목과 현금을 표시합니다.' : '모든 계좌의 동일 종목과 현금을 합산합니다.';
   if (state && account) state.textContent += ' NAV·기간 실적은 전체 계좌에서 확인하세요.';
   pfConnectNamuhQuotes();
+  pfRenderDerivativeBalances();
   return rows;
+}
+
+function pfBrokerSnapshotHtml(snapshot) {
+  if (!snapshot?.product?.endsWith('future')) return '';
+  const fmt = value => value === null || value === undefined ? '미제공' : Number(value).toLocaleString('ko-KR', {maximumFractionDigits: 6});
+  const positions = snapshot.positions || [];
+  const labels = {dsg_csh:'예탁현금', dsg_sba_amt:'예탁대용', drn_pbl_amt:'출금가능액', fdv_dsg_amt:'예탁금', nxt_dd_dga_rnd:'익일 예탁잔액', fdv_brg_wtm:'위탁증거금', fdv_wrw_pbl_amt:'인출가능액'};
+  return `<p>계좌 평가액 <strong>${fmt(snapshot.equity)}원</strong> · 평가손익 ${fmt(snapshot.pnl)}원</p>
+    <p>${escapeHtml(snapshot.basis || '')} · 조회일 ${escapeHtml(snapshot.as_of_date || '')}${snapshot.synced_at ? ' · 갱신 ' + escapeHtml(new Date(snapshot.synced_at).toLocaleString('ko-KR')) : ''}</p>
+    <p>${Object.entries(snapshot.details || {}).filter(([key]) => labels[key]).map(([key,value]) => `${labels[key]} ${fmt(value)}원`).join(' · ')}</p>
+    <div class="pf-derivative-table-wrap"><table><thead><tr><th>계약</th><th>방향</th><th>계약 수</th><th>통화</th><th>평균가격</th><th>현재가격</th><th>평가손익</th></tr></thead><tbody>${positions.map(row => `<tr><td>${escapeHtml(row.name)}<br><small>${escapeHtml(row.code)}</small></td><td>${escapeHtml(row.side)}</td><td>${fmt(row.quantity)}</td><td>${escapeHtml(row.currency)}</td><td>${fmt(row.average_price)}</td><td>${fmt(row.current_price)}</td><td>${fmt(row.pnl)}</td></tr>`).join('')}</tbody></table></div>
+    ${positions.length ? '' : '<p>보유 계약이 없습니다.</p>'}
+    <p>합계에는 평가기준액(계좌 평가액 − 평가손익)과 평가손익을 한 번만 반영합니다. 위 예탁금·계약금액은 다시 더하지 않습니다. ${snapshot.product === 'gbfuture' ? '해외 증거금 조회에서 제공하지 않는 개별 가격·손익은 미제공으로 표시합니다.' : ''}</p>`;
+}
+
+function pfRenderDerivativeBalances() {
+  const panel = _pfAccountEl('pfDerivativeBalances');
+  if (!panel) return;
+  const rows = PfAccounts.rows.filter(row => (!PfStore.accountId || row.account_id === PfStore.accountId) && row.broker_snapshot?.product?.endsWith('future'));
+  panel.hidden = !rows.length;
+  panel.innerHTML = rows.map(row => `<details class="pf-account-card" open><summary>${escapeHtml(row.name)} · ${row.broker_snapshot.product === 'krfuture' ? '국내' : '해외'}선물 잔고</summary>${row.connection?.sync_error ? `<p class="pf-account-error">동기화 실패 · 이전 잔고 표시: ${escapeHtml(row.connection.sync_error)}</p>` : ''}${!row.broker ? '<p>연결 해제 당시 잔고입니다. 자동 갱신되지 않습니다.</p>' : ''}${pfBrokerSnapshotHtml(row.broker_snapshot)}</details>`).join('');
 }
 
 async function pfSelectAccount(id) {
@@ -28,6 +50,7 @@ async function pfSelectAccount(id) {
   PfStore.accountId = id || '';
   PfStore.edit.code = null;
   PfStore.items = [];
+  pfRenderDerivativeBalances();
   PfStore.manualOrder.pendingCodes = null;
   _pfAccountEl('pfAccountSelect').value = PfStore.accountId;
   await pfLoadAccounts(true);
@@ -42,6 +65,7 @@ function pfResetAccounts() {
   PfAccounts.previewed = false;
   PfStore.accountId = '';
   PfStore.items = [];
+  pfRenderDerivativeBalances();
   try { localStorage.removeItem('valueInvestPortfolioSnapshot:v2'); } catch (_) { /* 저장소 사용 불가 */ }
   pfConnectNamuhQuotes();
   for (const id of ['pfNhDialog', 'pfAccountsDialog']) {
@@ -135,6 +159,7 @@ function pfOpenNhConnection(account) {
   PfAccounts.nhAccount = account.account_id;
   PfAccounts.previewed = false;
   _pfAccountEl('pfNhForm').reset();
+  pfNhProductChanged();
   _pfAccountEl('pfNhTitle').textContent = `${account.name} · NH 계좌 연동`;
   _pfAccountEl('pfNhChoices').innerHTML = '<option value="">앱키 확인 후 계좌를 선택하세요</option>';
   _pfAccountEl('pfNhPreview').textContent = '';
@@ -142,6 +167,15 @@ function pfOpenNhConnection(account) {
   _pfAccountEl('pfNhSave').disabled = true;
   _pfAccountEl('pfNhPreviewButton').disabled = true;
   _pfAccountEl('pfNhDialog').showModal();
+}
+
+function pfNhProductChanged() {
+  const product = _pfAccountEl('pfNhProduct').value;
+  _pfAccountEl('pfNhOverseas').closest('label').hidden = product !== 'stocks';
+  _pfAccountEl('pfNhProductHelp').textContent = product === 'stocks'
+    ? '국내 비상장·상장폐지 종목은 제외합니다. 원화는 D+2 예수금, 외화는 통화별 결제 후 예수금을 항상 가져옵니다.'
+    : product === 'gold' ? '금현물 전용 잔고를 조회합니다. 금은 g 단위, 원화 현금은 D+2 예수금 기준입니다.'
+      : '선물 전용 잔고를 조회합니다. 계약 수·매수·매도는 별도 표시하고, 합계에는 증권사의 계좌 평가액을 반영합니다. 잔고는 5분마다 확인합니다.';
 }
 
 async function pfNhWork(action) {
@@ -160,7 +194,7 @@ async function pfNhWork(action) {
       _pfAccountEl('pfNhStatus').textContent = data.accounts.length ? '키를 확인했습니다. 연결할 계좌와 조회 범위를 선택해 주세요.' : '이 키에서 연결 가능한 계좌가 없습니다.';
       PfAccounts.previewed = false; _pfAccountEl('pfNhSave').disabled = true;
     } else {
-      const payload = { selection: _pfAccountEl('pfNhChoices').value, include_overseas: _pfAccountEl('pfNhOverseas').checked };
+      const payload = { selection: _pfAccountEl('pfNhChoices').value, include_overseas: _pfAccountEl('pfNhOverseas').checked, product: _pfAccountEl('pfNhProduct').value };
       const base = `/api/portfolio/accounts/${encodeURIComponent(PfAccounts.nhAccount)}/namuh`;
       if (!payload.selection) throw new Error('연결할 계좌를 선택하세요.');
       if (action === 'save' && !PfAccounts.previewed) throw new Error('잔고 미리보기를 먼저 확인하세요.');
@@ -169,6 +203,9 @@ async function pfNhWork(action) {
       if (action === 'preview') {
         _pfAccountEl('pfNhPreview').innerHTML = `<p>${data.items.length}개 잔고 · 현금 추가 차감 없이 초기 잔고로 가져옵니다.</p><table><thead><tr><th>종목</th><th>수량·잔액</th><th>통화</th></tr></thead><tbody>${data.items.map(item => `<tr><td>${escapeHtml(item.stock_name)}</td><td>${Number(item.quantity).toLocaleString('ko-KR')}</td><td>${escapeHtml(item.currency)}</td></tr>`).join('')}</tbody></table><p>원화는 D+2 예수금, 외화는 결제 후 예수금 기준입니다.</p>${data.items.some(item => item.stock_code === 'CMA_RP_KRW') ? '<p>CMA 원화RP는 현금과 구분하며, 수량·잔액에 증권사 조회 시점의 평가액(원)을 표시합니다.</p>' : ''}`;
         PfAccounts.previewed = true; _pfAccountEl('pfNhSave').disabled = false;
+        if (data.broker_snapshot?.product?.endsWith('future')) {
+          _pfAccountEl('pfNhPreview').innerHTML = pfBrokerSnapshotHtml(data.broker_snapshot);
+        }
         _pfAccountEl('pfNhStatus').textContent = '미리보기를 확인한 뒤 잔고 가져오기를 누르세요.';
       } else {
         _pfAccountEl('pfNhDialog').close();
@@ -215,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _pfAccountEl('pfNhForm')?.addEventListener('submit', event => { event.preventDefault(); pfNhWork('verify'); });
   _pfAccountEl('pfNhPreviewButton')?.addEventListener('click', () => pfNhWork('preview'));
   _pfAccountEl('pfNhSave')?.addEventListener('click', () => pfNhWork('save'));
-  for (const id of ['pfNhChoices', 'pfNhOverseas']) _pfAccountEl(id)?.addEventListener('change', () => { PfAccounts.previewed = false; _pfAccountEl('pfNhSave').disabled = true; _pfAccountEl('pfNhPreview').textContent = ''; });
+  for (const id of ['pfNhChoices', 'pfNhOverseas', 'pfNhProduct']) _pfAccountEl(id)?.addEventListener('change', () => { pfNhProductChanged(); PfAccounts.previewed = false; _pfAccountEl('pfNhSave').disabled = true; _pfAccountEl('pfNhPreview').textContent = ''; });
   _pfAccountEl('pfNhDialog')?.addEventListener('cancel', event => { if (PfAccounts.busy) event.preventDefault(); });
   _pfAccountEl('pfNhDialog')?.addEventListener('close', () => { _pfAccountEl('pfNhKey').value = _pfAccountEl('pfNhSecret').value = ''; });
   document.addEventListener('click', event => {

@@ -54,16 +54,29 @@ async def lifespan(app):
             await snapshots.save_stock_snapshots(user["google_sub"], day, [{"stock_code": "005930", "quantity": 10,
                 "market_value": price*10, "unit_price": price, "currency": "KRW", "fx_rate": 1}])
         try:
-            from services.brokers import namuh, sync
+            from services.brokers import derivatives, namuh, sync
             from services.quant import scanner_feed
             nh_rows = [{"stock_code": "005930", "stock_name": "삼성전자", "quantity": 3,
                         "avg_price": 80000, "avg_price_currency": "KRW", "currency": "KRW"},
                        {"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": 5000,
                         "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}]
+            async def nh_snapshot(_user, link):
+                product = link.get("product", "stocks")
+                if product == "gold":
+                    return [{"stock_code": "KRX_GOLD", "stock_name": "KRX 금현물", "quantity": 12,
+                             "avg_price": 120000, "avg_price_currency": "KRW", "currency": "KRW"}], {}
+                if product.endswith("future"):
+                    equity, pnl = (900, -100) if product == "krfuture" else (1490, 90)
+                    return derivatives.valuation_rows(equity, pnl), {"_snapshot": {
+                        "product": product, "equity": equity, "pnl": pnl, "currency": "KRW", "as_of_date": "2026-09-18",
+                        "positions": [{"code": "101V9000" if product == "krfuture" else "ESU26", "name": "선물 계약",
+                                       "side": "매도", "quantity": 2, "currency": "KRW" if product == "krfuture" else "USD",
+                                       "average_price": 350 if product == "krfuture" else None, "current_price": None, "pnl": None}]}}
+                return nh_rows, {}
             with patch.object(scanner_feed, "catalog", AsyncMock(return_value=[])), \
-                 patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
-                 patch.object(broker_accounts, "fetch_snapshot", AsyncMock(return_value=(nh_rows, {}))), \
-                 patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(nh_rows, {}))):
+                 patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": no, "environment": "live"} for no in ("12345678901", "22222222222", "33333333333")])), \
+                 patch.object(broker_accounts, "fetch_snapshot", side_effect=nh_snapshot), \
+                 patch.object(sync, "fetch_snapshot", side_effect=nh_snapshot):
                 yield
         finally:
             await bootstrap.close_db()
@@ -97,7 +110,7 @@ async def get_holdings(request: Request):
     user = portfolio._require_user(await get_current_user(request))
     rows = await holdings.get_portfolio(user["google_sub"], request.query_params.get("account_id"))
     for row in rows:
-        quote = {"price": 1, "previous_close": 1, "change_pct": 0} if row["stock_code"] == "CASH_KRW" else {"price": 75000, "previous_close": 74000, "change_pct": 1.35}
+        quote = {"price": 1, "previous_close": 1, "change_pct": 0} if row["stock_code"] in {"CASH_KRW", "FUTURES_BASE_KRW", "FUTURES_PNL_KRW"} else {"price": 75000, "previous_close": 74000, "change_pct": 1.35}
         row.update(avg_price_krw=row["avg_price"], quote=quote)
     return rows
 

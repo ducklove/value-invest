@@ -24,6 +24,7 @@ Design notes:
 from __future__ import annotations
 
 import hashlib
+import json
 
 import aiosqlite
 
@@ -85,13 +86,14 @@ async def ensure_default_account(db: aiosqlite.Connection, google_sub: str) -> N
 async def list_accounts(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT account_id, google_sub, name, type, sort_order, created_at, updated_at "
+        "SELECT account_id, google_sub, name, type, sort_order, created_at, updated_at, broker_snapshot_json "
         "FROM portfolio_accounts WHERE google_sub = ? ORDER BY sort_order, created_at",
         (google_sub,),
     )
     result = [dict(r) for r in await cursor.fetchall()]
     for item in result:
-        link = await (await db.execute("SELECT account_ciphertext,account_mask,environment,last_sync_at,sync_error,balances_json,include_overseas FROM broker_account_links WHERE google_sub=? AND account_id=?",
+        item["broker_snapshot"] = json.loads(item.pop("broker_snapshot_json"))
+        link = await (await db.execute("SELECT account_ciphertext,account_mask,environment,last_sync_at,sync_error,balances_json,include_overseas,product FROM broker_account_links WHERE google_sub=? AND account_id=?",
                                       (google_sub, item["account_id"]))).fetchone()
         item["broker"] = "namuh" if link else None
         item["connection"] = dict(link) if link else None

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import aiosqlite
 
+from domain.broker_assets import ACCOUNT_PRODUCTS
 from repositories.broker_secrets import BrokerError, account_fingerprint, decrypt, encrypt
 from repositories.db import get_db, transaction
 
@@ -55,8 +56,10 @@ async def save_token(user: str, cid: str, token: str, expires_at: float):
                          (encrypt(token), expires_at, user, cid))
 
 
-async def link_account(user: str, aid: str, cid: str, account_no: str, environment: str, include_overseas: bool = True):
+async def link_account(user: str, aid: str, cid: str, account_no: str, environment: str, include_overseas: bool = True, product: str = "stocks"):
     from repositories.account_holdings import require_account
+    if product not in ACCOUNT_PRODUCTS:
+        raise BrokerError("지원되지 않는 NH 계좌 종류입니다.")
     async with transaction() as db:
         await require_account(user, aid)
         await get_credential(user, cid)
@@ -67,8 +70,8 @@ async def link_account(user: str, aid: str, cid: str, account_no: str, environme
         if holdings:
             raise BrokerError("잔고가 없는 계좌에 연결해 주세요. 기존 수동 잔고의 중복·덮어쓰기를 방지합니다.")
         try:
-            await db.execute("INSERT INTO broker_account_links (account_id,google_sub,credential_id,account_ciphertext,account_fingerprint,account_mask,environment,include_overseas) VALUES (?,?,?,?,?,?,?,?)",
-                             (aid, user, cid, encrypt(account_no), account_fingerprint(account_no), "•••••••" + account_no[-4:], environment, int(include_overseas)))
+            await db.execute("INSERT INTO broker_account_links (account_id,google_sub,credential_id,account_ciphertext,account_fingerprint,account_mask,environment,include_overseas,product) VALUES (?,?,?,?,?,?,?,?,?)",
+                             (aid, user, cid, encrypt(account_no), account_fingerprint(account_no), "•••••••" + account_no[-4:], environment, int(include_overseas), product))
         except aiosqlite.IntegrityError as exc:
             raise BrokerError("이미 연동한 NH 계좌입니다.") from exc
 

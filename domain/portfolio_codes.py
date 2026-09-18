@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import re
 
-SPECIAL_ASSETS = {"KRX_GOLD", "CMA_RP_KRW", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
+from domain.broker_assets import FUTURES_VALUE_CODES
+
+SPECIAL_ASSETS = {"KRX_GOLD", "CMA_RP_KRW", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"} | FUTURES_VALUE_CODES
 
 _KRX_CODE_RE = re.compile(r"^[0-9][0-9A-Z]{5}$")
 _KRX_PREFERRED_CODE_RE = re.compile(r"^\d{5}[1-9A-Z]$")

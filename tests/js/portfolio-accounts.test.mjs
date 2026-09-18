@@ -125,3 +125,50 @@ test('로그아웃 후 늦게 도착한 이전 사용자의 계좌 응답으로 
     assert.equal(s.sockets.length,0);
   } finally {s.dom.window.close();}
 });
+
+test('계좌 종류를 바꾸면 미리보기를 무효화하고 금·선물에는 주식 필터를 적용하지 않는다', async () => {
+  const s=setup();
+  try {
+    s.w.pfOpenNhConnection({account_id:'a',name:'금 계좌'});
+    s.w.PfAccounts.previewed=true;
+    s.el('pfNhSave').disabled=false;
+    s.el('pfNhProduct').value='gold';
+    s.el('pfNhProduct').dispatchEvent(new s.w.Event('change'));
+    assert.equal(s.w.PfAccounts.previewed,false);
+    assert.equal(s.el('pfNhSave').disabled,true);
+    assert.equal(s.el('pfNhOverseas').closest('label').hidden,true);
+    assert.match(s.el('pfNhProductHelp').textContent,/금현물 전용/);
+    assert.doesNotMatch(s.el('pfNhProductHelp').textContent,/비상장/);
+    s.el('pfNhChoices').innerHTML='<option value="test">계좌</option>';
+    s.w.apiFetchJson=async (_path,options) => {
+      assert.equal(JSON.parse(options.body).product,'gold');
+      return {items:[]};
+    };
+    await s.w.pfNhWork('preview');
+    assert.equal(s.el('pfNhSave').disabled,false);
+  } finally {s.dom.window.close();}
+});
+
+test('선물 계약 수·방향과 계좌 평가액을 구분하고 미제공 값·계좌 범위·로그아웃을 보존한다', async () => {
+  const s=setup();
+  try {
+    const snapshot={product:'gbfuture',equity:1490,pnl:90,currency:'KRW',as_of_date:'2026-09-18',
+      positions:[{code:'ESU26',name:'<선물>',side:'매도',quantity:2,currency:'USD',average_price:null,current_price:null,pnl:null}]};
+    s.w.apiFetchJson=async () => [{account_id:'a',name:'해외 선물',broker:'namuh',connection:{sync_error:'조회 실패'},broker_snapshot:snapshot},
+      {account_id:'b',name:'주식 계좌'}];
+    await s.w.pfLoadAccounts();
+    assert.equal(s.el('pfDerivativeBalances').hidden,false);
+    assert.match(s.el('pfDerivativeBalances').textContent,/1,490원/);
+    assert.match(s.el('pfDerivativeBalances').textContent,/매도2USD미제공미제공미제공/);
+    assert.match(s.el('pfDerivativeBalances').textContent,/이전 잔고 표시/);
+    assert.equal(s.el('pfDerivativeBalances').querySelector('선물'),null);
+    s.w.PfStore.accountId='b';
+    s.w.pfRenderDerivativeBalances();
+    assert.equal(s.el('pfDerivativeBalances').hidden,true);
+    s.w.PfStore.accountId='a';
+    s.w.pfRenderDerivativeBalances();
+    s.w.pfResetAccounts();
+    assert.equal(s.el('pfDerivativeBalances').textContent,'');
+    assert.equal(s.el('pfDerivativeBalances').hidden,true);
+  } finally {s.dom.window.close();}
+});

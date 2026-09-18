@@ -7,7 +7,10 @@ routes/portfolio.py; self-contained and behavior-preserving.
 from __future__ import annotations
 
 import logging
-import re
+import math
+from datetime import datetime
+
+import httpx
 
 from core.http import get_http_client
 
@@ -26,29 +29,38 @@ def is_crypto_asset(stock_code: str) -> bool:
 
 
 async def fetch_krx_gold_quote() -> dict:
-    """Fetch KRX gold spot price from the Naver Finance gold page."""
+    """KRX 1kg 금현물의 원/g 시세. NH 체결 미수신 시 사용하는 보조 경로."""
     try:
         client = await get_http_client("naver")
         resp = await client.get(
-            "https://finance.naver.com/marketindex/goldDailyQuote.naver",
+            "https://api.stock.naver.com/marketindex/metals/M04020000",
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=5,
         )
-        html = resp.content.decode("euc-kr", errors="ignore")
-        rows = re.findall(
-            r'<tr class="(?:up|down)">\s*<td class="date">([^<]+)</td>\s*<td class="num">([^<]+)',
-            html,
-        )
-        if len(rows) >= 2:
-            today_price = round(float(rows[0][1].replace(",", "")))
-            prev_price = round(float(rows[1][1].replace(",", "")))
-            change = today_price - prev_price
-            change_pct = round(change / prev_price * 100, 2) if prev_price else 0
-            return {"price": today_price, "change": change, "change_pct": change_pct}
-        if rows:
-            today_price = round(float(rows[0][1].replace(",", "")))
-            return {"price": today_price, "change": 0, "change_pct": 0}
-    except Exception as e:
+        resp.raise_for_status()
+        row = resp.json()
+        if not isinstance(row, dict):
+            raise ValueError("금 시세 응답 형식 오류")
+        exchange = row.get("stockExchangeType")
+        if (row.get("reutersCode") != "M04020000" or row.get("unit") != "원/g"
+                or not isinstance(exchange, dict) or exchange.get("code") != "KRX"):
+            raise ValueError("금 종목·거래소·단위 불일치")
+        price = float(str(row["closePrice"]).replace(",", ""))
+        change = float(str(row["fluctuations"]).replace(",", ""))
+        sign = {"1": 1, "2": 1, "3": 0, "4": -1, "5": -1}[row["fluctuationsType"]["code"]]
+        if not math.isfinite(price) or not math.isfinite(change) or (sign == 0 and change != 0):
+            raise ValueError("금 시세 숫자 오류")
+        change = abs(change) * sign
+        previous = price - change
+        if price <= 0 or previous <= 0:
+            raise ValueError("금 시세는 양수여야 합니다")
+        at = datetime.fromisoformat(row["localTradedAt"])
+        if at.utcoffset() is None:
+            raise ValueError("금 시세 기준시각 누락")
+        return {"price": price, "change": change, "change_pct": round(change / previous * 100, 2),
+                "source": "naver_json", "market": "KRX", "currency": "KRW", "unit": "원/g",
+                "date": at.date().isoformat(), "as_of": at.isoformat()}
+    except (httpx.HTTPError, UnicodeError, ValueError, TypeError, KeyError) as e:
         logger.warning("KRX gold quote fetch failed: %s", e)
     return {}
 
