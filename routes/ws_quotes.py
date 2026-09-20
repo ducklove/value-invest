@@ -19,6 +19,7 @@ import kis_key_manager
 import kis_ws_manager
 from core.config import get_settings
 from deps import get_current_user
+from repositories import brokers
 from services import stock_quotes
 
 logger = logging.getLogger(__name__)
@@ -315,8 +316,10 @@ async def ws_quotes(websocket: WebSocket):
             if action == "ping":
                 await _send_json(websocket, session, {"type": "pong"})
 
-            elif action == "takeover":
-                if not _can_takeover(current_user):
+            elif action in {"takeover", "acquire"}:
+                current_user = await get_current_user(websocket)
+                allowed = _can_takeover(current_user) or (action == "acquire" and current_user and await brokers.has_link(current_user["google_sub"]))
+                if not allowed:
                     await _send_json(
                         websocket,
                         session,
@@ -338,7 +341,7 @@ async def ws_quotes(websocket: WebSocket):
                 # If none available, an explicit admin request may kick the
                 # oldest session to free one slot. Passive clients and
                 # subscription expansion never call this path.
-                if key_slot is None:
+                if key_slot is None and action == "takeover":
                     await _evict_oldest_session(exclude=session)
                     key_slot = await kis_key_manager.acquire()
 

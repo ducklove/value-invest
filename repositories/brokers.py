@@ -99,3 +99,8 @@ async def list_links() -> list[dict]:
     db = await get_db()
     rows = await (await db.execute("SELECT google_sub,account_id,credential_id,environment,last_sync_at FROM broker_account_links")).fetchall()
     return [dict(r) for r in rows]
+
+
+async def has_link(user: str) -> bool:
+    db = await get_db()
+    return await (await db.execute("SELECT 1 FROM broker_account_links WHERE google_sub=? LIMIT 1", (user,))).fetchone() is not None

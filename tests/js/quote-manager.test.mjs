@@ -71,6 +71,37 @@ const flush = async () => {
   await new Promise((r) => setImmediate(r));
 };
 
+test('NH 정상 수신 종목은 KIS 구독·조회에서 제외하고 만료 시 빈 슬롯만 요청한다', async () => {
+  const {qm, MockWebSocket, fetchCalls} = createHarness();
+  qm.setNamuhLinked(true);
+  qm.subscriptions = {portfolio: ['005930', 'AAPL', 'KRX_GOLD']};
+  qm.connect();
+  const ws = MockWebSocket.instances[0];
+  ws.onopen();
+  assert.equal(ws.sent.length, 0); // NH 초기 연결 대기
+  const live = {price: 100, source: 'namuh_ws', as_of: new Date().toISOString()};
+  qm.wsActive = true;
+  for (const code of qm.subscriptions.portfolio) qm.onNamuhQuote(code, {...live, code});
+  assert.equal(qm.isLive('AAPL'), true);
+  assert.equal(qm.wsActive, false);
+  assert.equal(ws.sent.at(-1).action, 'release');
+  await qm._fetchQuotes(qm.subscriptions.portfolio);
+  assert.equal(fetchCalls.length, 0);
+  qm.namuhQuotes['005930'].as_of = new Date(Date.now() - 91_000).toISOString();
+  qm._syncNamuhFallback();
+  assert.equal(ws.sent.at(-1).action, 'acquire');
+  assert.ok(!ws.sent.some(msg => msg.action === 'takeover'));
+  ws.onmessage({data: JSON.stringify({type:'ws_status',active:true,can_takeover:false})});
+  assert.deepEqual(ws.sent.at(-1).requested, {portfolio:['005930']});
+  await qm._fetchQuotes(qm.subscriptions.portfolio);
+  assert.deepEqual(fetchCalls.at(-1).body.codes, ['005930']);
+  qm.onNamuhQuote('005930', {...live, code:'005930', as_of:new Date().toISOString()});
+  assert.equal(ws.sent.at(-1).action, 'release');
+  qm.setNamuhLinked(false);
+  assert.equal(qm.isLive('AAPL'), false);
+  qm.disconnect();
+});
+
 // quotes: code -> snapshot returned by the mocked /api/asset-quotes.
 function createHarness({ wsThrows = false, quotes = {} } = {}) {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {

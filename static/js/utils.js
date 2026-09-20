@@ -86,10 +86,18 @@ function quoteSnapshotTimeValue(q) {
 function quoteSourceRank(q) {
   if (!q || q._stale === true) return 0;
   const source = String(q.source || q._source || '').toLowerCase();
+  if (source === 'namuh_ws') return isNamuhLiveQuote(q) ? 5 : 1;
   if (source.includes('ws')) return 4;
   if (source.includes('rest') || source.includes('quote')) return 3;
   if (source.includes('history')) return 1;
   return 2;
+}
+
+function isNamuhLiveQuote(q) {
+  if (!q || q.source !== 'namuh_ws' || q._stale === true) return false;
+  const at = Date.parse(q.as_of || '');
+  const age = Date.now() - at;
+  return Number.isFinite(at) && age >= 0 && age < 90_000;
 }
 
 // 랭크 강등 보호 시간 — 서버(services/portfolio/quotes.py의
@@ -107,6 +115,8 @@ function quoteSnapshotIsRecent(q) {
 function shouldAcceptQuoteSnapshot(current, incoming) {
   if (!incoming || incoming.price === null || incoming.price === undefined) return false;
   if (incoming._stale === true && quoteIsUsable(current)) return false;
+  const currentNh = isNamuhLiveQuote(current), incomingNh = isNamuhLiveQuote(incoming);
+  if (currentNh !== incomingNh) return incomingNh;
   const currentDate = quoteSnapshotDateValue(current);
   const incomingDate = quoteSnapshotDateValue(incoming);
   if (currentDate !== null && incomingDate !== null) {
@@ -168,6 +178,11 @@ function mergeQuoteSupplementalFields(current, incoming) {
 function mergeQuoteSnapshot(current, incoming) {
   if (!shouldAcceptQuoteSnapshot(current, incoming)) return mergeQuoteSupplementalFields(current, incoming);
   const next = { ...(current || {}), ...(incoming || {}) };
+  if (current?.source === 'namuh_ws' && incoming?.source !== 'namuh_ws') {
+    for (const key of ['original_price', 'original_currency', 'fx_rate', 'market_date', 'as_of', 'received_at', 'ts']) {
+      if (!quoteValuePresent(incoming?.[key])) delete next[key];
+    }
+  }
   if (!incoming || incoming._stale !== true) delete next._stale;
   return next;
 }

@@ -31,6 +31,73 @@ const QuoteManager = {
   onQuote: null,
   inflightCodes: new Set(),
   _pingTimer: null,
+  namuhLinked: false,
+  namuhQuotes: {},
+  namuhStartedAt: 0,
+  namuhLastAcquire: 0,
+  namuhLastPlan: '',
+  namuhSuspended: false,
+  namuhAutoSlot: false,
+  namuhKisPaused: false,
+
+  setNamuhLinked(linked) {
+    if (this.namuhLinked === !!linked) return;
+    this.namuhLinked = !!linked;
+    this.namuhStartedAt = Date.now();
+    this.namuhKisPaused = false;
+    this.namuhLastPlan = '';
+    if (!linked) {
+      this.namuhUnavailable();
+      if (this.namuhAutoSlot) { this.namuhAutoSlot = false; this.releaseActive({manual:false}); }
+    }
+    this._syncControlUi();
+  },
+
+  onNamuhQuote(code, quote) {
+    if (!this.namuhLinked || !isNamuhLiveQuote(quote)) return;
+    if (!shouldAcceptQuoteSnapshot(this.namuhQuotes[code], quote)) return;
+    this.namuhQuotes[code] = quote;
+    this.onQuote?.(code, quote);
+    this._syncNamuhFallback();
+  },
+
+  namuhUnavailable() {
+    this.namuhQuotes = {};
+    this.namuhStartedAt = 0;
+    for (const item of (typeof PfStore !== 'undefined' ? PfStore.items : [])) {
+      if (item.quote?.source === 'namuh_ws') item.quote = {...item.quote, _stale: true};
+    }
+    this._syncNamuhFallback();
+  },
+
+  _hasNamuhQuote(code) { return this.namuhLinked && isNamuhLiveQuote(this.namuhQuotes[code]); },
+
+  _fallbackSubscriptions() {
+    return Object.fromEntries(Object.entries(this.subscriptions).map(([group, codes]) =>
+      [group, codes.filter(code => !this._hasNamuhQuote(code))]));
+  },
+
+  _syncNamuhFallback() {
+    if (!this.namuhLinked) return;
+    const requested = this._fallbackSubscriptions();
+    const needsKis = Object.values(requested).flat().some(code => /^[0-9][0-9A-Z]{5}$/.test(code));
+    if (!needsKis) {
+      if (this.wsActive && this.connected && this.ws) {
+        this.namuhSuspended = true;
+        this.ws.send(JSON.stringify({action: 'release'}));
+        this._deactivateWsSlot();
+      }
+    } else if (this.wsActive) {
+      if (this.namuhLastPlan !== JSON.stringify(requested)) this._sendSubscriptions();
+    } else if (!this.namuhKisPaused && this.connected && this.ws && Date.now() - this.namuhLastAcquire >= 10_000
+        && (Object.keys(this.namuhQuotes).length || Date.now() - this.namuhStartedAt >= 30_000)) {
+      // NH 연결 사용자만 빈 KIS 슬롯을 보조로 사용한다. 다른 세션을 빼앗지 않는다.
+      this.namuhLastAcquire = Date.now();
+      this.namuhAutoSlot = !this.desiredActive;
+      this.ws.send(JSON.stringify({action: 'acquire'}));
+    }
+    this._syncControlUi();
+  },
 
   _loadDesiredActive() {
     try { return sessionStorage.getItem(QUOTE_MANAGER_MANUAL_WS_KEY) === '1'; } catch { return false; }
@@ -77,7 +144,8 @@ const QuoteManager = {
       this.connected = true;
       this.lastStatus = this.desiredActive ? 'connecting' : 'polling';
       this._syncControlUi();
-      if (this.desiredActive) this._requestActiveSlot();
+      if (this.desiredActive && !this.namuhLinked) this._requestActiveSlot();
+      this._syncNamuhFallback();
     };
     this.ws.onmessage = (event) => {
       try {
@@ -97,14 +165,14 @@ const QuoteManager = {
           if (msg.active) {
             this.wsActive = true;
             this.lastStatus = 'active';
-            if (this.manualControlAllowed) {
+            if (this.manualControlAllowed && !this.namuhAutoSlot) {
               this.desiredActive = true;
               this._saveDesiredActive();
             }
             this._sendSubscriptions();
           } else {
             this._deactivateWsSlot();
-            if (msg.released || msg.forbidden) {
+            if ((msg.released && !this.namuhSuspended) || msg.forbidden) {
               this.desiredActive = false;
               this._saveDesiredActive();
             }
@@ -112,10 +180,12 @@ const QuoteManager = {
               : this.desiredActive && msg.occupied ? 'occupied'
               : this.connected ? 'polling'
               : 'offline';
+            this.namuhSuspended = false;
           }
           this._syncControlUi();
         } else if (msg.type === 'stream_unavailable') {
-          this.releaseActive();
+          if (this.namuhLinked) this.namuhLastAcquire = Date.now() + 50_000;
+          this.releaseActive({manual:false});
         } else if (msg.type === 'pong') {
           this._clearPingTimer();
         } else if (msg.type === 'ws_taken_over') {
@@ -150,6 +220,9 @@ const QuoteManager = {
   },
 
   disconnect() {
+    this.namuhLinked = false;
+    this.namuhQuotes = {};
+    this.namuhAutoSlot = false;
     this._clearPingTimer();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.overflowTimer) { clearInterval(this.overflowTimer); this.overflowTimer = null; }
@@ -244,7 +317,7 @@ const QuoteManager = {
     setTimeout(() => banner.remove(), 5000);
   },
 
-  isLive(code) { return this.wsActive && this.wsCodes.has(code); },
+  isLive(code) { return this._hasNamuhQuote(code) || (this.wsActive && this.wsCodes.has(code)); },
 
   requestActive() {
     if (!this.manualControlAllowed) {
@@ -254,6 +327,7 @@ const QuoteManager = {
       this._syncControlUi();
       return;
     }
+    this.namuhKisPaused = false;
     this.desiredActive = true;
     this._saveDesiredActive();
     this.lastStatus = this.wsActive ? 'active' : 'connecting';
@@ -270,7 +344,8 @@ const QuoteManager = {
     this._syncControlUi();
   },
 
-  releaseActive() {
+  releaseActive({manual = true} = {}) {
+    if (manual && this.namuhLinked) this.namuhKisPaused = true;
     this.desiredActive = false;
     this._saveDesiredActive();
     if (this.connected && this.ws) {
@@ -290,10 +365,12 @@ const QuoteManager = {
   updateSubscriptions(requested) {
     this.subscriptions = requested;
     this._sendSubscriptions();
+    this._syncNamuhFallback();
   },
 
   _requestActiveSlot() {
     if (!this.connected || !this.ws || !this.desiredActive || !this.manualControlAllowed) return;
+    if (this.namuhLinked) { this._syncNamuhFallback(); return; }
     try {
       this.ws.send(JSON.stringify({ action: 'takeover' }));
       this.lastStatus = this.wsActive ? 'active' : 'connecting';
@@ -305,7 +382,9 @@ const QuoteManager = {
 
   _sendSubscriptions() {
     if (!this.connected || !this.ws || !this.wsActive) return;
-    this.ws.send(JSON.stringify({ action: 'subscribe', requested: this.subscriptions }));
+    const requested = this.namuhLinked ? this._fallbackSubscriptions() : this.subscriptions;
+    this.namuhLastPlan = JSON.stringify(requested);
+    this.ws.send(JSON.stringify({ action: 'subscribe', requested }));
   },
 
   _deactivateWsSlot() {
@@ -320,6 +399,10 @@ const QuoteManager = {
   },
 
   _controlStatusText() {
+    if (this.namuhLinked && Object.keys(this.namuhQuotes).some(code => this._hasNamuhQuote(code))) {
+      return this.wsActive ? 'NH 우선 · KIS 보조' : 'NH 실시간 우선';
+    }
+    if (this.namuhLinked) return this.wsActive ? 'NH 체결 대기 · KIS 보조' : 'NH 체결 대기 · 조회 시세';
     if (this.wsActive) {
       const slots = this.lastSlotMeta?.slots_active;
       return slots ? `실시간 ${slots}슬롯` : '실시간 연결됨';
@@ -341,16 +424,16 @@ const QuoteManager = {
       button.hidden = !visible;
       if (visible) {
         const activeOrPending = this.wsActive || this.desiredActive;
-        button.textContent = activeOrPending ? '웹소켓 해제' : '웹소켓 연결';
+        button.textContent = this.namuhLinked ? (activeOrPending ? 'KIS 보조 해제' : 'KIS 보조 연결') : (activeOrPending ? '웹소켓 해제' : '웹소켓 연결');
         button.classList.toggle('active', activeOrPending);
         button.setAttribute('aria-pressed', activeOrPending ? 'true' : 'false');
         button.disabled = this.desiredActive && !this.connected && !!this.reconnectTimer;
-        button.title = activeOrPending ? '실시간 웹소켓 연결 해제' : '실시간 웹소켓 연결';
+        button.title = this.namuhLinked ? 'KIS 보조 시세 연결 제어 · NH 연결은 계좌 관리에서 설정' : activeOrPending ? '실시간 웹소켓 연결 해제' : '실시간 웹소켓 연결';
       }
     }
     if (status) {
-      status.hidden = !visible;
-      if (visible) {
+      status.hidden = !(visible || this.namuhLinked);
+      if (visible || this.namuhLinked) {
         status.textContent = this._controlStatusText();
         status.dataset.state = this.wsActive ? 'active'
           : this.lastStatus === 'forbidden' || this.lastStatus === 'occupied' ? 'warning'
@@ -403,7 +486,7 @@ const QuoteManager = {
 
   async _fetchQuotes(codes, { fresh = true, scheduleRetry = true } = {}) {
     const uniqueCodes = [...new Set((codes || []).filter(Boolean))]
-      .filter(code => !this.inflightCodes.has(code))
+      .filter(code => !this.inflightCodes.has(code) && !this._hasNamuhQuote(code))
       .sort((a, b) => this._quotePriority(a) - this._quotePriority(b));
     if (!uniqueCodes.length) return;
     const batches = [];
@@ -473,6 +556,7 @@ const QuoteManager = {
   },
 
   async _pollAll() {
+    this._syncNamuhFallback();
     const allCodes = new Set();
     if (this.wsActive) {
       this.overflowCodes.forEach(c => allCodes.add(c));

@@ -51,6 +51,8 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
 
 test('계좌별 등록·합산·매매 격리와 NH 미리보기 취소·연결을 실제 저장으로 확인한다', async ({ page }, testInfo) => {
   let nhSocket;
+  let kisSocket;
+  await page.routeWebSocket('**/ws/quotes', socket => { kisSocket = socket; });
   await page.routeWebSocket('**/ws/namuh', socket => { nhSocket = socket; });
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.goto('/login');
@@ -150,4 +152,19 @@ test('계좌별 등록·합산·매매 격리와 NH 미리보기 취소·연결�
   await expect(gold.locator('.pf-col-mktval')).toContainText('1,994,800');
   nhSocket.send(JSON.stringify({...tick,price:190000,as_of:new Date(now.getTime()-10000).toISOString()}));
   await expect.poll(() => page.evaluate(() => PfStore.items.find(row => row.stock_code === 'KRX_GOLD').quote.price)).toBe(199480);
+  await api('/api/portfolio/AAPL', {method:'PUT',headers:{'Content-Type':'application/json','X-Portfolio-Account':initial},
+    body:JSON.stringify({quantity:2,avg_price:100,avg_price_currency:'USD',stock_name:'애플'})});
+  await page.evaluate(() => loadPortfolio({force:true}));
+  const apple = page.locator('#pfBody tr[data-code="AAPL"]');
+  await expect(apple).toBeVisible();
+  const fresh = new Date();
+  const foreignTick = {...tick,code:'AAPL',price:280350,previous_close:282100,change:-1750,change_pct:-1750/282100*100,
+    original_price:200.25,original_currency:'USD',currency:'KRW',market:'NQQ',as_of:new Date(fresh.getTime()-1000).toISOString(),ts:fresh.getTime()/1000};
+  nhSocket.send(JSON.stringify(foreignTick));
+  await expect(apple.locator('.pf-col-curprice')).toContainText('280,350');
+  await expect(apple.locator('.pf-col-mktval')).toContainText('560,700');
+  kisSocket.send(JSON.stringify({...foreignTick,source:'kis_ws',price:270000,as_of:fresh.toISOString()}));
+  await expect.poll(() => page.evaluate(() => PfStore.items.find(row => row.stock_code === 'AAPL').quote.source)).toBe('namuh_ws');
+  await expect(apple.locator('.pf-col-curprice')).toContainText('280,350');
+  await apple.screenshot({path:testInfo.outputPath('nh-overseas-priority.png')});
 });

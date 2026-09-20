@@ -57,6 +57,30 @@ def test_can_takeover_requires_admin_user():
     assert ws_quotes._can_takeover(None) is False
 
 
+@pytest.mark.parametrize("linked", [False, True])
+def test_nh_fallback_can_only_acquire_free_slots_and_never_evicts(monkeypatch, linked):
+    app = FastAPI()
+    app.include_router(ws_quotes.router)
+    monkeypatch.setattr(ws_quotes, "_origin_allowed", lambda _origin: True)
+    monkeypatch.setattr(ws_quotes, "get_current_user", AsyncMock(return_value={"google_sub": "owner", "is_admin": False}))
+    monkeypatch.setattr(ws_quotes.brokers, "has_link", AsyncMock(return_value=linked))
+    monkeypatch.setattr(ws_quotes.kis_ws_manager, "get_all_cached_quotes", lambda: {})
+    monkeypatch.setattr(ws_quotes.kis_key_manager, "available_count", lambda: 0)
+    monkeypatch.setattr(ws_quotes.kis_key_manager, "total_count", lambda: 1)
+    acquire = AsyncMock(return_value=None)
+    evict = AsyncMock()
+    monkeypatch.setattr(ws_quotes.kis_key_manager, "acquire", acquire)
+    monkeypatch.setattr(ws_quotes, "_evict_oldest_session", evict)
+    with TestClient(app) as client, client.websocket_connect("/ws/quotes") as socket:
+        socket.receive_json()
+        socket.send_json({"action": "acquire"})
+        response = socket.receive_json()
+        assert not response["active"]
+        assert response.get("forbidden", False) == (not linked)
+    assert acquire.await_count == int(linked)
+    evict.assert_not_awaited()
+
+
 def test_websocket_takeover_requires_admin_session(monkeypatch):
     app = FastAPI()
     app.include_router(ws_quotes.router)

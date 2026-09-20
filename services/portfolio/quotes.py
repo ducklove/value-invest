@@ -87,6 +87,8 @@ def _quote_source_rank(quote: dict[str, Any] | None) -> int:
     if not quote or quote.get("_stale") is True:
         return 0
     source = str(quote.get("source") or quote.get("_source") or "").lower()
+    if source == "namuh_ws":
+        return 5 if is_namuh_live_quote(quote) else 1
     if "ws" in source:
         return 4
     if "rest" in source or "quote" in source:
@@ -94,6 +96,14 @@ def _quote_source_rank(quote: dict[str, Any] | None) -> int:
     if "history" in source:
         return 1
     return 2
+
+
+def is_namuh_live_quote(quote: dict[str, Any] | None) -> bool:
+    from services.market.quote_policy import trade_timestamp
+    if not quote or quote.get("source") != "namuh_ws" or quote.get("_stale") is True:
+        return False
+    at = trade_timestamp(quote.get("as_of"))
+    return at is not None and 0 <= time.time() - at < 90
 
 
 def _quote_is_recent(quote: dict[str, Any] | None) -> bool:
@@ -112,6 +122,12 @@ def should_accept_quote_snapshot(
         return False
     if incoming.get("_stale") is True and current and current.get("price") is not None:
         return False
+
+    # NH 정상 체결이 있는 동안은 KIS·조회 응답과 번갈아 덮어쓰지 않는다.
+    # 마지막 체결이 90초 이상 지연되면 기존 시세 경로로 자동 복귀한다.
+    current_nh, incoming_nh = is_namuh_live_quote(current), is_namuh_live_quote(incoming)
+    if current_nh != incoming_nh:
+        return incoming_nh
 
     current_date = _quote_date_value(current)
     incoming_date = _quote_date_value(incoming)

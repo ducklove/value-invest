@@ -11,6 +11,29 @@ from services import stock_quotes
 from services.portfolio import foreign, quote_service, quotes
 
 
+@pytest.mark.asyncio
+async def test_authenticated_asset_quotes_prefer_private_nh_without_shared_cache_pollution():
+    from repositories import brokers
+    from services.brokers import realtime
+    tick = {"price": 140000, "source": "namuh_ws"}
+    request = object()
+    with patch.object(portfolio_route, "get_current_user", AsyncMock(return_value={"google_sub": "owner"})), \
+         patch.object(brokers, "has_link", AsyncMock(return_value=True)), \
+         patch.object(realtime, "quote", side_effect=lambda user, code: tick if user == "owner" else None), \
+         patch.object(stock_quotes, "get_bulk_quote_snapshots", AsyncMock()) as bulk, \
+         patch.object(portfolio_route, "_fetch_quote", AsyncMock()) as fetch:
+        assert await portfolio_route.asset_quotes_batch({"codes": ["005930", "AAPL", "KRX_GOLD"]}, request) == dict.fromkeys(["005930", "AAPL", "KRX_GOLD"], tick)
+        assert await portfolio_route.asset_quote("AAPL", request) == tick
+        assert await portfolio_route.asset_quotes_batch({"codes": ["AAPL"], "fresh": False}, request) == {"AAPL": tick}
+        bulk.assert_not_awaited()
+        fetch.assert_not_awaited()
+    for user, linked in ((None, False), ({"google_sub": "other"}, True), ({"google_sub": "owner"}, False)):
+        with patch.object(portfolio_route, "get_current_user", AsyncMock(return_value=user)), \
+             patch.object(brokers, "has_link", AsyncMock(return_value=linked)), \
+             patch.object(realtime, "quote", side_effect=lambda user, code: tick if user == "owner" else None):
+            assert await portfolio_route._namuh_quotes_for_request(request, ["AAPL"]) == {}
+
+
 def test_quote_from_ws_normalizes_realtime_payload():
     assert quotes.quote_from_ws({
         "date": "20260509",

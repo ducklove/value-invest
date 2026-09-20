@@ -18,12 +18,12 @@ import websockets
 from cache_layer import MemoryTTLCache
 from repositories import account_holdings, brokers
 from repositories.broker_secrets import BrokerError
-from services.brokers import namuh
+from services.brokers import namuh, overseas_realtime
 from services.brokers.sync import sync_account
 from services.portfolio.quotes import should_accept_quote_snapshot
 
 _quotes = MemoryTTLCache("namuh.realtime", 90)
-_status: dict[str, dict] = {}
+_status: dict[object, dict] = {}
 _KST = timezone(timedelta(hours=9))
 logger = logging.getLogger(__name__)
 
@@ -33,13 +33,22 @@ def subscription(code: str) -> tuple[str, str] | None:
         return "g4", "M04020000"
     if re.fullmatch(r"[0-9][0-9A-Z]{5}", code):
         return "mc", code
+    info = overseas_realtime.instrument(code)
+    if info:
+        return "RC", info["gic"]
     return None
 
 
-def select_codes(rows: list[dict], limit: int) -> list[str]:
+def select_codes(rows: list[dict], limit: int, *, foreign: bool = False) -> list[str]:
     # 금현물도 동일한 등록 한도를 사용하되 국내 주식에 밀려 제외되지 않게 한다.
-    codes = {row["stock_code"] for row in rows if subscription(row["stock_code"])}
-    return sorted(codes, key=lambda code: (code != "KRX_GOLD", code))[:limit]
+    codes = {row["stock_code"] for row in rows if (pair := subscription(row["stock_code"])) and (pair[0] == "RC") == foreign}
+    selected, registrations = [], set()
+    for code in sorted(codes, key=lambda code: (code != "KRX_GOLD", code)):
+        pair = subscription(code)
+        if pair in registrations or len(registrations) < limit:
+            selected.append(code)
+            registrations.add(pair)
+    return selected
 
 
 def normalize(message: dict, now: datetime | None = None) -> dict | None:
@@ -82,34 +91,47 @@ def normalize(message: dict, now: datetime | None = None) -> dict | None:
 def quote(user: str, code: str) -> dict | None:
     result = _quotes.get((user, code))
     now = datetime.now(_KST)
-    if result and result["date"] == now.date().isoformat() and 0 <= (now - datetime.fromisoformat(result["as_of"])).total_seconds() < 90:
+    if result and 0 <= (now - datetime.fromisoformat(result["as_of"])).total_seconds() < 90:
         return dict(result)
     return None
 
 
 def status(user: str) -> dict:
-    result = dict(_status.get(user, {"state": "waiting", "message": "NH 시세 연결 대기"}))
-    if result.get("state") == "live" and (datetime.now(_KST) - datetime.fromisoformat(result["last_tick_at"])).total_seconds() >= 90:
-        result["state"] = "subscribed"
-    return result
+    parts = {}
+    for name, key in (("domestic", user), ("foreign", (user, "foreign"))):
+        if key not in _status:
+            continue
+        part = dict(_status[key])
+        if part.get("state") == "live" and (datetime.now(_KST) - datetime.fromisoformat(part["last_tick_at"])).total_seconds() >= 90:
+            part["state"] = "subscribed"
+        parts[name] = part
+    if not parts:
+        return {"state": "waiting", "message": "NH 시세 연결 대기"}
+    state = next((state for state in ("live", "subscribed", "connecting", "degraded")
+                  if any(part.get("state") == state for part in parts.values())), "waiting")
+    return {"state": state, "subscribed": sum(p.get("subscribed", 0) for p in parts.values()),
+            "requested": sum(p.get("requested", 0) for p in parts.values()), **parts}
 
 
-async def stream(user: str, cid: str, codes: list[str], environment: str):
+async def stream(user: str, cid: str, codes: list[str], environment: str, *, foreign: bool = False):
     registrations = {code: subscription(code) for code in codes if subscription(code)}
     if not registrations:
         return
     delay = 2
-    endpoint = "wss://moapi.nhplug.com:17070/websocket" if environment == "mock" else "wss://api.nhplug.com:7070/websocket"
+    endpoint = "wss://moapi.nhplug.com:17070/websocket" if environment == "mock" else f"wss://api.nhplug.com:{7080 if foreign else 7070}/websocket"
+    state_key = (user, "foreign") if foreign else user
+    infos = {code: overseas_realtime.instrument(code) for code in codes} if foreign else {}
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     while True:
         try:
             access = await namuh.token(user, cid)
-            _status[user] = {"state": "connecting", "subscribed": 0, "requested": len(codes)}
+            _status[state_key] = {"state": "connecting", "subscribed": 0, "requested": len(set(registrations.values()))}
             async with websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws:
-                for channel, key in registrations.values():
+                for channel, key in dict.fromkeys(registrations.values()):
                     await ws.send(json.dumps({"header": {"token": access, "tr_type": "1"}, "body": {"tr_cd": channel, "tr_key": key}}))
                     await asyncio.sleep(.12)
                 approved = set()
+                rejected = set()
                 async for raw in ws:
                     try:
                         message = json.loads(raw)
@@ -121,21 +143,39 @@ async def stream(user: str, cid: str, codes: list[str], environment: str):
                     if not isinstance(head, dict):
                         continue
                     if "rsp_cd" in head:
-                        if str(head["rsp_cd"]) != "00000":
-                            raise BrokerError("NH 시세 구독을 승인받지 못했습니다. 세션 한도와 권한을 확인해 주세요.")
                         body = message.get("body") or {}
                         keys = body.get("tr_key", head.get("tr_key", [])) if isinstance(body, dict) else []
                         keys = keys if isinstance(keys, list) else [keys]
+                        if str(head["rsp_cd"]) != "00000":
+                            rejected.update(keys or [pair[1] for pair in registrations.values() if pair not in approved])
+                            _status[state_key] = {"state": "degraded", "subscribed": len(approved),
+                                                  "requested": len(set(registrations.values())), "rejected": len(rejected),
+                                                  "message": "해외 실시간 시세 권한·구독 한도 확인 필요" if foreign else "NH 시세 구독 권한·한도 확인 필요"}
+                            continue
                         approved.update(pair for pair in registrations.values() if pair[1] in keys)
-                        _status[user] = {"state": "subscribed", "subscribed": len(approved), "requested": len(codes)}
+                        _status[state_key] = {"state": "subscribed", "subscribed": len(approved), "requested": len(set(registrations.values())), "rejected": len(rejected)}
                         continue
-                    tick = normalize(message)
-                    if tick and tick["code"] in registrations and should_accept_quote_snapshot(quote(user, tick["code"]), tick):
-                        _quotes.set((user, tick["code"]), tick)
-                        _status[user] = {"state": "live", "subscribed": len(approved), "requested": len(codes), "last_tick_at": tick["received_at"]}
-                        delay = 2
+                    if foreign:
+                        body = message.get("body")
+                        gic = str(body.get("gicz15") or "").strip() if isinstance(body, dict) else None
+                        ticks = []
+                        for code, info in infos.items():
+                            if info and info["gic"] == gic:
+                                tick = overseas_realtime.normalize(message, code, info, datetime.now(_KST))
+                                if tick:
+                                    tick = await overseas_realtime.to_won(tick)
+                                    if tick:
+                                        ticks.append(tick)
+                    else:
+                        ticks = [normalize(message)]
+                    for tick in ticks:
+                        if tick and tick["code"] in registrations and should_accept_quote_snapshot(quote(user, tick["code"]), tick):
+                            _quotes.set((user, tick["code"]), tick)
+                            _status[state_key] = {"state": "live", "subscribed": len(approved), "requested": len(set(registrations.values())),
+                                                  "rejected": len(rejected), "last_tick_at": tick["received_at"]}
+                            delay = 2
         except (BrokerError, OSError, websockets.exceptions.WebSocketException, TimeoutError):
-            _status[user] = {"state": "degraded", "message": "NH 시세 연결 재시도 중 · 기존 시세 경로 사용"}
+            _status[state_key] = {"state": "degraded", "message": "NH 시세 연결 재시도 중 · 기존 시세 경로 사용"}
         await asyncio.sleep(delay + random.random())
         delay = min(delay * 2, 60)
 
@@ -159,13 +199,20 @@ async def run(stop: asyncio.Event):
             try:
                 links = await brokers.list_links()
                 desired = {}
-                for link in links:
+                users = set()
+                for link in sorted(links, key=lambda row: (row["google_sub"], row["environment"] != "live", row["credential_id"])):
                     user, cid = link["google_sub"], link["credential_id"]
-                    if cid not in desired:
+                    if user not in users:
+                        users.add(user)
                         rows = await account_holdings.list_positions(user)
+                        if any(not re.fullmatch(r"[0-9][0-9A-Z]{5}", r["stock_code"]) and not r["stock_code"].startswith(("CASH_", "CRYPTO_", "FUTURES_", "CMA_", "KRX_")) for r in rows):
+                            await overseas_realtime.ensure_master()
                         codes = select_codes(rows, limit)
                         if codes:
-                            desired[cid] = (user, tuple(codes), link["environment"])
+                            desired[(cid, False)] = (user, tuple(codes), link["environment"])
+                        foreign_codes = select_codes(rows, limit, foreign=True)
+                        if foreign_codes:
+                            desired[(cid, True)] = (user, tuple(foreign_codes), link["environment"])
                     aid = link["account_id"]
                     if time.monotonic() - sync_times.get(aid, 0) > 300 and (aid not in sync_jobs or sync_jobs[aid].done()):
                         sync_times[aid] = time.monotonic()
@@ -181,10 +228,14 @@ async def run(stop: asyncio.Event):
                         task.cancel()
                         await asyncio.gather(task, return_exceptions=True)
                         jobs.pop(cid)
+                        old_user, old_codes, _ = signature
+                        for code in old_codes:
+                            _quotes.delete((old_user, code))
+                        _status.pop((old_user, "foreign") if cid[1] else old_user, None)
                 for cid, signature in desired.items():
                     if cid not in jobs:
                         user, codes, env = signature
-                        jobs[cid] = (signature, asyncio.create_task(stream(user, cid, list(codes), env)))
+                        jobs[cid] = (signature, asyncio.create_task(stream(user, cid[0], list(codes), env, **({"foreign": True} if cid[1] else {}))))
             except (aiosqlite.Error, BrokerError, ValueError) as exc:
                 logger.warning("NH 연결 목록 재확인 예정: %s", type(exc).__name__)
             try:

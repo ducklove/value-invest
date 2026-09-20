@@ -1,5 +1,5 @@
 // 계좌 선택·잔고 관리·NH 조회 연동. 자격증명은 브라우저 저장소에 보관하지 않는다.
-const PfAccounts = { rows: [], loaded: false, busy: false, focusCode: null, nhAccount: null, previewed: false, socket: null, retry: null };
+const PfAccounts = { rows: [], loaded: false, busy: false, focusCode: null, nhAccount: null, previewed: false, socket: null, retry: null, watchdog: null, lastMessageAt: 0 };
 const _pfAccountEl = id => document.getElementById(id);
 
 async function pfLoadAccounts(force = false) {
@@ -219,27 +219,54 @@ async function pfNhWork(action) {
   } finally { PfAccounts.busy = false; fields.disabled = false; _pfAccountEl('pfNhClose').disabled = false; }
 }
 
+function pfCheckNamuhConnection() {
+  if (!PfAccounts.socket || Date.now() - PfAccounts.lastMessageAt < 15_000) return;
+  const old = PfAccounts.socket;
+  old.onclose = null;
+  old.close();
+  PfAccounts.socket = null;
+  clearInterval(PfAccounts.watchdog); PfAccounts.watchdog = null;
+  QuoteManager.namuhUnavailable?.();
+  pfConnectNamuhQuotes();
+}
+
 function pfConnectNamuhQuotes() {
   const linked = PfAccounts.rows.some(row => row.broker === 'namuh');
+  QuoteManager.setNamuhLinked?.(linked);
   if (!linked) {
     clearTimeout(PfAccounts.retry); PfAccounts.retry = null;
+    clearInterval(PfAccounts.watchdog); PfAccounts.watchdog = null;
     if (PfAccounts.socket) { PfAccounts.socket.onclose = null; PfAccounts.socket.close(); PfAccounts.socket = null; }
     return;
   }
   if (PfAccounts.socket) return;
   const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/namuh`);
   PfAccounts.socket = socket;
+  PfAccounts.lastMessageAt = Date.now();
+  PfAccounts.watchdog = setInterval(pfCheckNamuhConnection, 10_000);
   socket.onmessage = event => {
+    if (PfAccounts.socket !== socket) return;
+    PfAccounts.lastMessageAt = Date.now();
     try {
       const message = JSON.parse(event.data);
-      if (message.type === 'quote') QuoteManager.onQuote?.(message.code, message);
+      if (message.type === 'quote') {
+        if (QuoteManager.onNamuhQuote) QuoteManager.onNamuhQuote(message.code, message);
+        else QuoteManager.onQuote?.(message.code, message);
+      }
       if (message.type === 'namuh_status') {
+        QuoteManager._syncNamuhFallback?.();
         const label = _pfAccountEl('pfNhQuoteState');
-        if (label) label.textContent = message.state === 'live' ? 'NH 실시간 시세 수신' : message.state === 'subscribed' ? 'NH 시세 구독 · 체결 대기' : 'NH 시세 연결 확인 중';
+        if (label) label.textContent = (message.state === 'live' ? 'NH 실시간 시세 우선 사용' : message.state === 'subscribed' ? 'NH 시세 구독 · 체결 대기' : 'NH 시세 연결 확인 중')
+          + (message.foreign?.rejected ? ' · 해외 실시간 권한·구독 한도 확인 필요, 보조 시세 사용' : '');
       }
     } catch (_) { /* 잘못된 개별 메시지는 다음 메시지에 영향을 주지 않는다. */ }
   };
-  socket.onclose = () => { PfAccounts.socket = null; PfAccounts.retry = setTimeout(pfConnectNamuhQuotes, 10000); };
+  socket.onclose = () => {
+    if (PfAccounts.socket !== socket) return;
+    clearInterval(PfAccounts.watchdog); PfAccounts.watchdog = null;
+    QuoteManager.namuhUnavailable?.(); PfAccounts.socket = null;
+    PfAccounts.retry = setTimeout(pfConnectNamuhQuotes, 10000);
+  };
 }
 
 document.addEventListener('DOMContentLoaded', () => {

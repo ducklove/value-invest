@@ -63,6 +63,23 @@ test("실제 체결 시각이 오래된 다른 거래소 시세로 가격을 되
   assert.equal(w.shouldAcceptQuoteSnapshot(oldWs, latest), true);
 });
 
+test('NH 체결을 KIS보다 우선하고 90초 만료·지연 시세는 보조 경로로 넘긴다', () => {
+  const now = Date.now();
+  const nh = {price:100, source:'namuh_ws', as_of:new Date(now-2000).toISOString(), ts:now/1000};
+  const kis = {price:101, source:'kis_ws', as_of:new Date(now).toISOString(), ts:now/1000};
+  assert.equal(w.quoteSourceRank(nh), 5);
+  assert.equal(w.shouldAcceptQuoteSnapshot(nh, kis), false);
+  assert.equal(w.shouldAcceptQuoteSnapshot(kis, nh), true);
+  assert.equal(w.shouldAcceptQuoteSnapshot({...nh,as_of:new Date(now-91_000).toISOString()}, kis), true);
+  assert.equal(w.shouldAcceptQuoteSnapshot({...nh,_stale:true}, kis), true);
+  const old = {...nh, as_of:new Date(now-91_000).toISOString(),original_price:1,original_currency:'USD',fx_rate:100};
+  const fallback = w.mergeQuoteSnapshot(old, {price:102,source:'rest',fetched_at:new Date(now).toISOString()});
+  assert.equal(fallback.price,102);
+  assert.equal(fallback.original_price,undefined);
+  assert.equal(fallback.as_of,undefined);
+  assert.equal(fallback.ts,undefined);
+});
+
 test("quoteSourceRank — ws > rest/quote > unknown > history > stale/null", () => {
   assert.equal(w.quoteSourceRank({ source: "ws" }), 4);
   assert.equal(w.quoteSourceRank({ source: "kis-ws" }), 4);

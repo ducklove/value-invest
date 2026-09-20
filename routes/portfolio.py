@@ -411,7 +411,8 @@ async def stream_portfolio_quotes(request: Request):
         # so we don't serialize here. Stream results as they arrive.
         async def _one_quote(code: str) -> tuple[str, dict]:
             try:
-                return code, await _fetch_quote(code)
+                from services.brokers.realtime import quote as namuh_quote
+                return code, namuh_quote(user["google_sub"], code) or await _fetch_quote(code)
             except Exception:
                 return code, {}
 
@@ -465,10 +466,11 @@ async def stream_portfolio_quotes(request: Request):
 
 
 @router.get("/api/asset-quote/{stock_code}", response_model=QuoteResponse, response_model_exclude_unset=True)
-async def asset_quote(stock_code: str):
+async def asset_quote(stock_code: str, request: Request = None):
     """Fetch quote for any asset type (Korean stock, cash, gold, crypto, foreign)."""
     try:
-        q = await _fetch_quote(stock_code)
+        nh = await _namuh_quotes_for_request(request, [stock_code])
+        q = nh.get(stock_code) or await _fetch_quote(stock_code)
         if not q:
             raise HTTPException(status_code=404, detail="시세를 가져올 수 없습니다.")
         return q
@@ -483,8 +485,21 @@ _ASSET_QUOTES_BATCH_TIMEOUT = 45.0
 _ASSET_QUOTES_ITEM_TIMEOUT = 30.0
 _ASSET_QUOTES_CONCURRENCY = 2
 
+
+async def _namuh_quotes_for_request(request: Request | None, codes: list[str]) -> dict[str, dict]:
+    if request is None:
+        return {}
+    user = await get_current_user(request)
+    if not user:
+        return {}
+    from repositories import brokers
+    from services.brokers.realtime import quote as namuh_quote
+    if not await brokers.has_link(user["google_sub"]):
+        return {}
+    return {code: tick for code in codes if (tick := namuh_quote(user["google_sub"], code))}
+
 @router.post("/api/asset-quotes", response_model=dict[str, QuoteResponse], response_model_exclude_unset=True)
-async def asset_quotes_batch(payload: dict = Body(...)):
+async def asset_quotes_batch(payload: dict = Body(...), request: Request = None):
     """Fetch quotes for multiple codes in one request."""
     raw_codes = payload.get("codes", [])
     if not isinstance(raw_codes, list) or len(raw_codes) > 100:
@@ -498,17 +513,19 @@ async def asset_quotes_batch(payload: dict = Body(...)):
         seen_codes.add(code)
         codes.append(code)
     fresh = bool(payload.get("fresh", True))
+    nh = await _namuh_quotes_for_request(request, codes)
     if not fresh:
-        return {code: _cached_quote_for_code(code) for code in codes}
+        return {code: nh.get(code) or _cached_quote_for_code(code) for code in codes}
 
     results: dict[str, dict] = {code: {} for code in codes}
+    results.update(nh)
 
     # Fast path: pull every domestic (KRX) code in ONE bulk upstream call
     # instead of one rate-limited KIS quote call each. This is the dominant
     # cost on initial load for a domestic-heavy portfolio. Best-effort —
     # anything the bulk source can't resolve falls through to the per-code
     # path below, so there is no regression if Naver is unavailable.
-    domestic = [code for code in codes if _is_korean_stock(code)]
+    domestic = [code for code in codes if _is_korean_stock(code) and code not in nh]
     if domestic:
         try:
             bulk = await asyncio.wait_for(

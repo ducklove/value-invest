@@ -66,6 +66,25 @@ test('NH 브라우저 연결을 공유하고 사용자 상태 초기화 시 소�
     assert.equal(s.sockets[0].closed,true);
     assert.equal(s.w.eval('PfAccounts.rows.length'),0);
     assert.equal(s.w.eval('PfAccounts.retry'),null);
+    assert.equal(s.w.eval('PfAccounts.watchdog'),null);
+    s.w.lastQuote = null;
+    s.sockets[0].onmessage({data:JSON.stringify({type:'quote',code:'005930',price:200})});
+    assert.equal(s.w.lastQuote,null);
+  } finally {s.dom.window.close();}
+});
+
+test('NH 상태 메시지가 끊긴 소켓은 닫고 재연결하며 이전 소켓의 늦은 틱을 무시한다', async () => {
+  const s=setup();
+  try {
+    s.w.apiFetchJson=async () => [{account_id:'a',broker:'namuh',name:'NH'}];
+    await s.w.pfLoadAccounts();
+    const old=s.sockets[0];
+    s.w.eval('PfAccounts.lastMessageAt=Date.now()-20_000');
+    s.w.pfCheckNamuhConnection();
+    assert.equal(old.closed,true);
+    assert.equal(s.sockets.length,2);
+    old.onmessage({data:JSON.stringify({type:'quote',code:'AAPL',price:1})});
+    assert.equal(s.w.lastQuote,undefined);
   } finally {s.dom.window.close();}
 });
 
