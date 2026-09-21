@@ -51,7 +51,7 @@ async def require_account(user: str, account_id: str, *, writable=False) -> dict
     db = await get_db()
     linked = await (await db.execute("SELECT 1 FROM broker_account_links WHERE google_sub=? AND account_id=?", (user, account_id))).fetchone()
     if writable and linked:
-        raise accounts.AccountError("NH 연동 계좌는 잔고 동기화로 갱신합니다. 수동 기록은 수동 계좌를 선택해 주세요.")
+        raise accounts.AccountError("증권사 연동 계좌는 잔고 동기화로 갱신합니다. 수동 기록은 수동 계좌를 선택해 주세요.")
     return {**account, "linked": bool(linked)}
 
 

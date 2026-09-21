@@ -2,18 +2,19 @@
 
 import asyncio
 import json
+import re
 import time
 from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from deps import get_current_user
 from domain.broker_assets import ACCOUNT_PRODUCTS
 from repositories import account_holdings, broker_activity, brokers
 from repositories.broker_secrets import BrokerError, decrypt, encrypt
-from services.brokers import namuh, notifications, realtime
+from services.brokers import kis_realtime, namuh, notifications, realtime
 from services.brokers.sync import fetch_snapshot, sync_account
 
 router = APIRouter()
@@ -26,10 +27,10 @@ async def user_id(request) -> str:
     return user["google_sub"]
 
 
-def selection(user: str, payload: dict) -> dict:
+def selection(user: str, payload: dict, provider: str = "namuh") -> dict:
     try:
         choice = json.loads(decrypt(str(payload.get("selection", ""))))
-        if choice["user"] != user or choice["expires_at"] < time.time():
+        if choice["user"] != user or choice["expires_at"] < time.time() or choice.get("provider", "namuh") != provider:
             raise ValueError
         product = payload.get("product", "stocks")
         if product not in ACCOUNT_PRODUCTS:
@@ -38,6 +39,78 @@ def selection(user: str, payload: dict) -> dict:
         return choice
     except (KeyError, ValueError, TypeError, BrokerError):
         raise BrokerError("계좌 선택이 만료되었거나 올바르지 않습니다. 키 확인을 다시 실행해 주세요.") from None
+
+
+class KisCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    app_key: Annotated[str, Field(min_length=8, max_length=2048)]
+    app_secret: Annotated[str, Field(min_length=8, max_length=2048)]
+    account_no: Annotated[str, Field(min_length=10, max_length=16)]
+    environment: Literal["live", "mock"] = "live"
+    hts_id: Annotated[str, Field(max_length=32, pattern=r"^[A-Za-z0-9_]*$")] = ""
+
+
+@router.post("/api/portfolio/kis/credentials")
+async def register_kis(request: Request, payload: object = Body(...)):
+    from services.brokers import kis
+    user = await user_id(request)
+    try:
+        payload = KisCredential.model_validate(payload)
+    except ValidationError:
+        # 기본 422의 input 필드에 키·시크릿이 재출력되지 않도록 직접 검증한다.
+        raise BrokerError("한국투자증권 앱키·시크릿·계좌번호·HTS ID 입력 형식을 확인해 주세요.") from None
+    account_no = re.sub(r"[-\s]", "", payload.account_no)
+    if not re.fullmatch(r"[0-9]{8}01", account_no):
+        raise BrokerError("한국투자증권 주식 계좌번호 8자리와 상품코드 01을 입력해 주세요.")
+    cid = await brokers.store_credential(user, payload.app_key, payload.app_secret, provider="kis",
+                                        environment=payload.environment, hts_id=payload.hts_id)
+    await kis.token(user, cid, payload.environment)
+    choice = {"account_no": account_no, "credential_id": cid, "provider": "kis", "environment": payload.environment,
+              "user": user, "expires_at": time.time() + 900}
+    # 토큰 인증만으로 계좌 소유를 확정하지 않는다. 미리보기/연결의 실제 잔고 조회가 검증한다.
+    return {"accounts": [{"account_no": account_no, "environment": payload.environment, "selection": encrypt(json.dumps(choice))}]}
+
+
+@router.post("/api/portfolio/accounts/{account_id}/kis/preview")
+async def preview_kis(account_id: str, request: Request, payload: dict = Body(...)):
+    user = await user_id(request)
+    await account_holdings.require_account(user, account_id, writable=True)
+    choice = selection(user, payload, "kis")
+    choice["include_overseas"] = payload.get("include_overseas") is not False
+    rows, balances = await fetch_snapshot(user, choice)
+    return {"items": rows, "balances": balances}
+
+
+@router.post("/api/portfolio/accounts/{account_id}/kis")
+async def connect_kis(account_id: str, request: Request, payload: dict = Body(...)):
+    user = await user_id(request)
+    await account_holdings.require_account(user, account_id, writable=True)
+    choice = selection(user, payload, "kis")
+    choice["include_overseas"] = payload.get("include_overseas") is not False
+    await fetch_snapshot(user, choice)
+    await brokers.link_account(user, account_id, choice["credential_id"], choice["account_no"], choice["environment"],
+                               choice["include_overseas"], choice["product"], provider="kis")
+    return await sync_account(user, account_id)
+
+
+async def require_provider(user: str, account_id: str, provider: str):
+    if (await brokers.get_link(user, account_id)).get("provider", "namuh") != provider:
+        raise BrokerError("계좌에 연결된 증권사가 일치하지 않습니다.")
+
+
+@router.post("/api/portfolio/accounts/{account_id}/kis/sync")
+async def sync_kis(account_id: str, request: Request):
+    user = await user_id(request)
+    await require_provider(user, account_id, "kis")
+    return await sync_account(user, account_id)
+
+
+@router.delete("/api/portfolio/accounts/{account_id}/kis")
+async def disconnect_kis(account_id: str, request: Request):
+    user = await user_id(request)
+    await require_provider(user, account_id, "kis")
+    await brokers.disconnect(user, account_id)
+    return {"ok": True}
 
 
 @router.post("/api/portfolio/namuh/credentials")
@@ -76,12 +149,16 @@ async def connect(account_id: str, request: Request, payload: dict = Body(...)):
 
 @router.post("/api/portfolio/accounts/{account_id}/namuh/sync")
 async def sync(account_id: str, request: Request):
-    return await sync_account(await user_id(request), account_id, include_activity=True)
+    user = await user_id(request)
+    await require_provider(user, account_id, "namuh")
+    return await sync_account(user, account_id, include_activity=True)
 
 
 @router.delete("/api/portfolio/accounts/{account_id}/namuh")
 async def disconnect(account_id: str, request: Request):
-    await brokers.disconnect(await user_id(request), account_id)
+    user = await user_id(request)
+    await require_provider(user, account_id, "namuh")
+    await brokers.disconnect(user, account_id)
     return {"ok": True}
 
 
@@ -110,6 +187,7 @@ async def activity_note(account_id: str, transaction_id: int, request: Request, 
 
 
 @router.websocket("/ws/namuh")
+@router.websocket("/ws/broker-accounts")
 async def quotes(websocket: WebSocket):
     from routes.ws_quotes import _origin_allowed
     if not _origin_allowed(websocket.headers.get("origin")):
@@ -137,7 +215,10 @@ async def quotes(websocket: WebSocket):
                 if tick and sent.get(code) != tick["ts"]:
                     await websocket.send_json(tick)
                     sent[code] = tick["ts"]
-            await websocket.send_json({"type": "namuh_status", **realtime.status(user), "notifications": notifications.status(user)})
+            if any(row.get("provider", "namuh") == "namuh" for row in links):
+                await websocket.send_json({"type": "namuh_status", **realtime.status(user), "notifications": notifications.status(user)})
+            if any(row.get("provider") == "kis" for row in links):
+                await websocket.send_json({"type": "kis_account_status", **kis_realtime.status(user)})
             revisions = [(link["account_id"], link["last_sync_at"], link.get("sync_error")) for link in links]
             if revisions != last_accounts:
                 await websocket.send_json({"type": "accounts_changed", "accounts": [

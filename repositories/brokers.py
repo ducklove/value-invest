@@ -16,8 +16,10 @@ def fingerprint(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-async def store_credential(user: str, app_key: str, app_secret: str) -> str:
-    digest = fingerprint(app_key)
+async def store_credential(user: str, app_key: str, app_secret: str, *, provider: str = "namuh", environment: str = "live", hts_id: str = "") -> str:
+    if provider not in {"namuh", "kis"} or environment not in {"live", "mock"}:
+        raise BrokerError("지원하지 않는 증권사 또는 투자 환경입니다.")
+    digest = fingerprint(app_key if provider == "namuh" else f"kis:{environment}:{app_key}")
     async with transaction() as db:
         row = await (await db.execute("SELECT credential_id,google_sub FROM broker_credentials WHERE key_fingerprint=?", (digest,))).fetchone()
         if row and row["google_sub"] != user:
@@ -25,16 +27,16 @@ async def store_credential(user: str, app_key: str, app_secret: str) -> str:
         cid = row["credential_id"] if row else str(uuid4())
         if row:
             old = await get_credential(user, cid)
-            if old["app_key"] == app_key and old["app_secret"] == app_secret:
+            if old["app_key"] == app_key and old["app_secret"] == app_secret and old.get("hts_id", "") == hts_id:
                 return cid
             linked = await (await db.execute("SELECT 1 FROM broker_account_links WHERE credential_id=? LIMIT 1", (cid,))).fetchone()
             if linked:
                 raise BrokerError("연결 중인 앱키의 시크릿이 다릅니다. 기존 연결을 해제한 뒤 변경해 주세요.")
-        sealed = encrypt(json.dumps({"app_key": app_key, "app_secret": app_secret}))
+        sealed = encrypt(json.dumps({"app_key": app_key, "app_secret": app_secret, "environment": environment, "hts_id": hts_id}))
         await db.execute(
-            "INSERT INTO broker_credentials (credential_id,google_sub,secret_ciphertext,key_fingerprint,created_at) VALUES (?,?,?,?,?) "
+            "INSERT INTO broker_credentials (credential_id,google_sub,secret_ciphertext,key_fingerprint,created_at,provider) VALUES (?,?,?,?,?,?) "
             "ON CONFLICT(credential_id) DO UPDATE SET secret_ciphertext=excluded.secret_ciphertext,token_ciphertext=NULL,token_expires_at=NULL",
-            (cid, user, sealed, digest, datetime.now(timezone.utc).isoformat()),
+            (cid, user, sealed, digest, datetime.now(timezone.utc).isoformat(), provider),
         )
         return cid
 
@@ -43,7 +45,7 @@ async def get_credential(user: str, cid: str) -> dict:
     db = await get_db()
     row = await (await db.execute("SELECT * FROM broker_credentials WHERE google_sub=? AND credential_id=?", (user, cid))).fetchone()
     if not row:
-        raise BrokerError("등록된 나무 앱키를 찾을 수 없습니다.")
+        raise BrokerError("등록된 증권사 앱키를 찾을 수 없습니다.")
     data = dict(row)
     data.update(json.loads(decrypt(data.pop("secret_ciphertext"))))
     data["token"] = decrypt(data["token_ciphertext"]) if data["token_ciphertext"] else None
@@ -56,13 +58,15 @@ async def save_token(user: str, cid: str, token: str, expires_at: float):
                          (encrypt(token), expires_at, user, cid))
 
 
-async def link_account(user: str, aid: str, cid: str, account_no: str, environment: str, include_overseas: bool = True, product: str = "stocks"):
+async def link_account(user: str, aid: str, cid: str, account_no: str, environment: str, include_overseas: bool = True, product: str = "stocks", *, provider: str = "namuh"):
     from repositories.account_holdings import require_account
     if product not in ACCOUNT_PRODUCTS:
         raise BrokerError("지원되지 않는 NH 계좌 종류입니다.")
     async with transaction() as db:
         await require_account(user, aid)
-        await get_credential(user, cid)
+        credential = await get_credential(user, cid)
+        if credential["provider"] != provider or (provider == "kis" and (product != "stocks" or credential["environment"] != environment)):
+            raise BrokerError("앱키의 증권사·투자 환경과 계좌가 일치하지 않습니다.")
         existing = await (await db.execute("SELECT 1 FROM broker_account_links WHERE account_id=?", (aid,))).fetchone()
         if existing:
             raise BrokerError("이미 연결된 계좌입니다. 기존 연결을 해제한 뒤 연결해 주세요.")
@@ -70,17 +74,18 @@ async def link_account(user: str, aid: str, cid: str, account_no: str, environme
         if holdings:
             raise BrokerError("잔고가 없는 계좌에 연결해 주세요. 기존 수동 잔고의 중복·덮어쓰기를 방지합니다.")
         try:
-            await db.execute("INSERT INTO broker_account_links (account_id,google_sub,credential_id,account_ciphertext,account_fingerprint,account_mask,environment,include_overseas,product) VALUES (?,?,?,?,?,?,?,?,?)",
-                             (aid, user, cid, encrypt(account_no), account_fingerprint(account_no), "•••••••" + account_no[-4:], environment, int(include_overseas), product))
+            digest = account_fingerprint(account_no if provider == "namuh" else "kis:" + account_no)
+            await db.execute("INSERT INTO broker_account_links (account_id,google_sub,credential_id,account_ciphertext,account_fingerprint,account_mask,environment,include_overseas,product,provider) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                             (aid, user, cid, encrypt(account_no), digest, "•••••••" + account_no[-4:], environment, int(include_overseas), product, provider))
         except aiosqlite.IntegrityError as exc:
-            raise BrokerError("이미 연동한 NH 계좌입니다.") from exc
+            raise BrokerError("이미 연동한 증권사 계좌입니다.") from exc
 
 
 async def get_link(user: str, aid: str) -> dict:
     db = await get_db()
     row = await (await db.execute("SELECT * FROM broker_account_links WHERE google_sub=? AND account_id=?", (user, aid))).fetchone()
     if not row:
-        raise BrokerError("NH 연결 계좌를 찾을 수 없습니다.")
+        raise BrokerError("증권사 연결 계좌를 찾을 수 없습니다.")
     result = dict(row)
     result["account_no"] = decrypt(result.pop("account_ciphertext"))
     return result
@@ -97,10 +102,10 @@ async def disconnect(user: str, aid: str):
 
 async def list_links() -> list[dict]:
     db = await get_db()
-    rows = await (await db.execute("SELECT google_sub,account_id,credential_id,environment,last_sync_at,product,include_overseas,sync_error FROM broker_account_links")).fetchall()
+    rows = await (await db.execute("SELECT google_sub,account_id,credential_id,environment,last_sync_at,product,include_overseas,sync_error,provider FROM broker_account_links")).fetchall()
     return [dict(r) for r in rows]
 
 
 async def has_link(user: str) -> bool:
     db = await get_db()
-    return await (await db.execute("SELECT 1 FROM broker_account_links WHERE google_sub=? LIMIT 1", (user,))).fetchone() is not None
+    return await (await db.execute("SELECT 1 FROM broker_account_links WHERE google_sub=? AND provider='namuh' LIMIT 1", (user,))).fetchone() is not None

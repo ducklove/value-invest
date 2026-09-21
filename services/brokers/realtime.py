@@ -238,7 +238,7 @@ async def run(stop: asyncio.Event):
         while not stop.is_set():
             wake.clear()
             try:
-                links = await brokers.list_links()
+                links = [row for row in await brokers.list_links() if row.get("provider", "namuh") == "namuh"]
                 desired, users, credentials = {}, set(), set()
                 ordered = sorted(links, key=lambda row: (row["google_sub"], row["environment"] != "live", row["credential_id"]))
                 for link in ordered:

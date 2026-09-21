@@ -21,6 +21,74 @@ function setup() {
   return {dom,w,sockets, el: id => w.document.getElementById(id)};
 }
 
+test('한국투자증권 입력·미리보기 취소는 연결하지 않고 자격증명을 브라우저에 보존하지 않는다', async () => {
+  const s=setup(), calls=[];
+  try {
+    s.w.apiFetchJson = async (path, options) => {
+      calls.push({path,body:JSON.parse(options.body)});
+      return path.endsWith('/credentials') ? {accounts:[{account_no:'1234567801',environment:'live',selection:'kis-choice'}]} : {items:[{stock_name:'달러 현금',quantity:850,currency:'USD'}],balances:{_excluded:['900180']}};
+    };
+    s.w.pfOpenNhConnection({account_id:'a',name:'한투'},'kis');
+    assert.equal(s.el('pfKisFields').hidden,false);
+    assert.match(s.el('pfNhTitle').textContent,/한국투자증권/);
+    s.el('pfNhKey').value='private-key'; s.el('pfNhSecret').value='private-secret';
+    s.el('pfKisAccount').value='12345678-01'; s.el('pfKisHts').value='my_hts';
+    await s.w.pfNhWork('verify');
+    assert.equal(calls[0].body.account_no,'12345678-01');
+    assert.equal(calls[0].body.hts_id,'my_hts');
+    assert.equal(s.el('pfNhKey').value,'');
+    assert.match(s.el('pfNhChoices').textContent,/1234567801/);
+    await s.w.pfNhWork('preview');
+    assert.match(s.el('pfNhPreview').textContent,/850/);
+    assert.match(s.el('pfNhPreview').textContent,/1개 종목은 제외/);
+    s.el('pfNhDialog').close();
+    assert.equal(s.el('pfKisHts').value,'');
+    assert.equal(s.el('pfKisAccount').value,'');
+    assert.deepEqual(calls.map(call=>call.path),['/api/portfolio/kis/credentials','/api/portfolio/accounts/a/kis/preview']);
+    assert.equal(s.w.localStorage.length,0);
+  } finally {s.dom.window.close();}
+});
+
+test('한국투자증권만 연결해도 서버 변경 통보를 받고 NH 시세 우선권을 켜지 않는다', async () => {
+  const s=setup(), linked=[];
+  try {
+    s.w.QuoteManager.setNamuhLinked=value=>linked.push(value);
+    s.w.apiFetchJson=async()=>[{account_id:'kis-a',name:'한투',broker:'kis',connection:{account_no:'1234567801'}}];
+    await s.w.pfLoadAccounts();
+    s.w.pfRenderAccounts();
+    assert.equal(s.sockets.length,1);
+    assert.deepEqual(linked,[false]);
+    assert.match(s.el('pfAccountsList').textContent,/한국투자증권 1234567801/);
+    assert.match(s.el('pfAccountsList').textContent,/자동 수집은 미지원/);
+    let refreshed=0;
+    s.w.pfRefreshChangedAccounts=()=>refreshed++;
+    s.sockets[0].onmessage({data:JSON.stringify({type:'accounts_changed',accounts:[{account_id:'kis-a'}]})});
+    assert.equal(refreshed,1);
+    s.w.pfResetAccounts();
+    assert.equal(s.sockets[0].closed,true);
+  } finally {s.dom.window.close();}
+});
+
+test('한국투자증권 계좌·환경 수정은 이전 미리보기와 선택 토큰을 무효화한다', async () => {
+  const s=setup();
+  try {
+    s.w.pfOpenNhConnection({account_id:'a',name:'한투'},'kis');
+    s.el('pfNhChoices').innerHTML='<option value="old">1234567801</option>';
+    s.el('pfNhSave').disabled=false; s.w.PfAccounts.previewed=true;
+    s.el('pfKisEnvironment').value='mock';
+    s.el('pfKisEnvironment').dispatchEvent(new s.w.Event('change'));
+    assert.equal(s.el('pfNhChoices').value,'');
+    assert.equal(s.el('pfNhSave').disabled,true);
+    assert.equal(s.el('pfNhPreviewButton').disabled,true);
+    assert.equal(s.el('pfNhOverseas').checked,false);
+    assert.equal(s.w.PfAccounts.previewed,false);
+    s.w.pfOpenNhConnection({account_id:'nh-a',name:'NH'});
+    assert.equal(s.el('pfKisFields').hidden,true);
+    assert.equal(s.el('pfKisAccount').required,false);
+    assert.equal(s.el('pfNhProduct').closest('label').hidden,false);
+  } finally {s.dom.window.close();}
+});
+
 test('합산의 다중 계좌 편집은 계좌 선택으로 보내고 수동 계좌 선택 시 허용한다', async () => {
   const s=setup();
   try {

@@ -10,8 +10,8 @@ function pfActivityDialog() {
   dialog.id = 'pfActivityDialog'; dialog.className = 'pf-trade-dialog pf-activity-dialog';
   dialog.setAttribute('aria-labelledby', 'pfActivityTitle');
   dialog.innerHTML = `<h2 id="pfActivityTitle">수입·입출금 내역</h2><button type="button" id="pfActivityClose">닫기</button>
-    <p>NH에서 확인한 실제 수입과 입출금입니다. 사유·분류를 수정해도 현금을 다시 더하지 않습니다.</p>
-    <p>주문·체결은 통보 후 재조회하며, 배당·이자·입출금은 60초마다 확인합니다. 최초 가져오기의 과거 입출금은 시작 잔고에 포함된 내역으로 보존합니다.</p>
+    <p id="pfActivityHelp">NH에서 확인한 실제 수입과 입출금입니다. 사유·분류를 수정해도 현금을 다시 더하지 않습니다.</p>
+    <p id="pfActivityPollingHelp">주문·체결은 통보 후 재조회하며, 배당·이자·입출금은 60초마다 확인합니다. 최초 가져오기의 과거 입출금은 시작 잔고에 포함된 내역으로 보존합니다.</p>
     <form id="pfActivityImport"><label>시작일 <input type="date" id="pfActivityStart" required></label><label>종료일 <input type="date" id="pfActivityEnd" required></label><button type="submit">기간 내역 가져오기</button></form>
     <p id="pfActivityStatus" role="status"></p><div id="pfActivityTotals"></div><div id="pfActivityRows"></div>
     <div class="pf-account-actions"><button type="button" id="pfActivityPrev">이전</button><button type="button" id="pfActivityNext">다음</button><button type="button" id="pfActivityReload">새로 조회</button></div>`;
@@ -39,6 +39,10 @@ async function pfOpenAccountActivity(account) {
   const dialog = pfActivityDialog();
   PfActivity.account = account; PfActivity.offset = 0;
   _pfActivityEl('pfActivityTitle').textContent = account.name + ' · 수입·입출금';
+  _pfActivityEl('pfActivityHelp').textContent = account.broker === 'kis'
+    ? '한국투자증권은 잔고 자동 동기화를 지원합니다. 배당·이자·입출금 거래내역 자동 수집은 아직 지원하지 않습니다. 기존에 보존한 내역이 있으면 아래에 표시합니다.'
+    : 'NH에서 확인한 실제 수입과 입출금입니다. 사유·분류를 수정해도 현금을 다시 더하지 않습니다.';
+  _pfActivityEl('pfActivityPollingHelp').hidden = account.broker === 'kis';
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
   _pfActivityEl('pfActivityStart').value = today.slice(0, 4) + '-01-01';
   _pfActivityEl('pfActivityEnd').value = today;

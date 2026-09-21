@@ -24,7 +24,7 @@ _runtime = {}
 
 
 async def configure(user, config):
-    links = await brokers.list_links()
+    links = [x for x in await brokers.list_links() if x.get("provider", "namuh") == "namuh"]
     if not any(x["google_sub"] == user and x["account_id"] == config.account_id for x in links):
         raise QuantError("본인의 나무 연결 계좌를 선택하세요.")
     await quant_paper.assert_account(user, config.account_id)
@@ -34,7 +34,7 @@ async def configure(user, config):
 
 async def status(user):
     settings = await quant_scanner.settings(user)
-    links = [x for x in await brokers.list_links() if x["google_sub"] == user]
+    links = [x for x in await brokers.list_links() if x["google_sub"] == user and x.get("provider", "namuh") == "namuh"]
     observed = {r["contract"]: r for r in await quant_scanner.rows(user)}
     settings = settings[0] if settings else None
     progress = dict(settings["progress"]) if settings else {}
@@ -352,7 +352,7 @@ async def run_loop(stop):
     try:
         while not stop.is_set():
             try:
-                links = {(x["google_sub"], x["account_id"]): x for x in await brokers.list_links()}
+                links = {(x["google_sub"], x["account_id"]): x for x in await brokers.list_links() if x.get("provider", "namuh") == "namuh"}
                 desired = {s["google_sub"]: s for s in await quant_scanner.settings()
                            if s["config"]["enabled"] and (s["google_sub"], s["config"]["account_id"]) in links}
                 signatures = {user: (s["generation"], links[(user, s["config"]["account_id"])]["credential_id"],

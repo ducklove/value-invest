@@ -44,6 +44,7 @@ async def test_shared_quote_socket_subscribes_empty_notification_key_and_never_b
 async def test_server_starts_notification_sockets_for_every_key_without_holdings_or_browsers():
     links = [{"google_sub": "owner", "credential_id": cid, "account_id": aid, "environment": "live", "product": product}
              for cid, aid, product in [("key1", "a1", "stocks"), ("key2", "a2", "gold"), ("key2", "a3", "krfuture"), ("key2", "a4", "gbfuture")]]
+    links.append({"google_sub": "owner", "credential_id": "kis-key", "account_id": "kis-account", "environment": "live", "product": "stocks", "provider": "kis"})
     calls = []
     stop = asyncio.Event()
 

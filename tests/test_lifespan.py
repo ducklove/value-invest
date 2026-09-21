@@ -84,7 +84,8 @@ async def test_real_app_starts_database_and_joins_all_background_tasks(lifecycle
             assert (await client.get("/healthz")).status_code == 200
             assert (await client.get("/readyz")).json()["database"] == "ok"
         assert "READY=1" in calls
-        assert len(app.state.background_tasks) == 10
+        assert len(app.state.background_tasks) == 11
+        assert any(task.get_name() == "kis-accounts" and not task.done() for task, _ in app.state.background_tasks)
         assert any(task.get_name() == "quant-scanner" for task, _ in app.state.background_tasks)
         assert any(task.get_name() == "quant-research" and not task.done() for task, _ in app.state.background_tasks)
         assert any(task.get_name() == "market-indicators" and not task.done() for task, _ in app.state.background_tasks)

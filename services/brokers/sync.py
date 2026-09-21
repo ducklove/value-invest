@@ -53,6 +53,9 @@ def foreign_code(raw: str, country: str) -> str:
 
 
 async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
+    if link.get("provider") == "kis":
+        from services.brokers.kis import fetch_snapshot as fetch_kis
+        return await fetch_kis(user, link)
     cid, env, account = link["credential_id"], link["environment"], link["account_no"]
     own_accounts = await namuh.accounts(user, cid)
     if {"account_no": account, "environment": env} not in own_accounts:
@@ -155,9 +158,12 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
 async def sync_account(user: str, aid: str, *, include_activity: bool = False, start: date | None = None, end: date | None = None) -> dict:
     async with _sync_locks.setdefault(aid, asyncio.Lock()):
         link = await brokers.get_link(user, aid)
+        import_activity = include_activity and link.get("provider", "namuh") == "namuh" and link["environment"] == "live"
+        if link.get("provider") == "kis" and (start is not None or end is not None):
+            raise BrokerError("한국투자증권 수입·입출금 거래내역 가져오기는 아직 지원하지 않습니다. 잔고는 자동 갱신됩니다.")
         try:
             entries = None
-            if include_activity and link["environment"] == "live":
+            if import_activity:
                 previous_state = await broker_activity.state(user, aid)
                 until = end or datetime.now(activity.KST).date()
                 since = start or (date.fromisoformat(previous_state["last_import_at"][:10]) - timedelta(days=7)
@@ -166,7 +172,7 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
             rows, balances = await fetch_snapshot(user, link)
             async with transaction() as db:
                 current = await brokers.get_link(user, aid)
-                if any(current.get(key) != link.get(key) for key in ("credential_id", "account_fingerprint", "product")):
+                if any(current.get(key) != link.get(key) for key in ("credential_id", "account_fingerprint", "product", "provider", "environment")):
                     raise BrokerError("동기화 중 계좌 연결이 변경되었습니다. 다시 시도해 주세요.")
                 await holdings.initialize(db, user)
                 if entries is not None:
@@ -177,7 +183,7 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     conflict = next((r for r in other if r["stock_code"] == row["stock_code"] and r["currency"] != row["currency"]), None)
                     if conflict:
                         raise BrokerError(f"{row['stock_code']}의 거래 통화가 다릅니다 "
-                                          f"(기존 계좌 {conflict['currency']}, NH {row['currency']}). 종목과 통화를 확인해 주세요.")
+                                          f"(기존 계좌 {conflict['currency']}, 증권사 {row['currency']}). 종목과 통화를 확인해 주세요.")
                     if not row["stock_code"].startswith("CASH_") and not is_futures_value(row["stock_code"]) and any(r["stock_code"] == row["stock_code"] and r["quantity"] * row["quantity"] < 0 for r in other):
                         raise BrokerError("다른 계좌의 공매도 잔고와 충돌하여 동기화를 보류했습니다.")
                 now = datetime.now(timezone.utc).isoformat()
@@ -195,7 +201,7 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                                  (now, json.dumps(balances), user, aid))
             return {"ok": True, "holdings_count": len(rows), "synced_at": now, "balances": balances}
         except BrokerError as exc:
-            if include_activity and link["environment"] == "live":
+            if import_activity:
                 await broker_activity.set_error(user, aid, str(exc))
             async with transaction() as db:
                 await db.execute("UPDATE broker_account_links SET sync_error=? WHERE google_sub=? AND account_id=?", (str(exc), user, aid))

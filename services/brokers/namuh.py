@@ -46,6 +46,8 @@ def lock(cid: str) -> asyncio.Lock:
 async def token(user: str, cid: str, *, force=False) -> str:
     async with lock(cid):
         secret = await brokers.get_credential(user, cid)
+        if secret.get("provider", "namuh") != "namuh":
+            raise BrokerError("나무 앱키에 연결된 계좌가 아닙니다.")
         if not force and secret["token"] and (secret["token_expires_at"] or 0) > time.time() + 60:
             return secret["token"]
         client = await get_http_client("namuh")

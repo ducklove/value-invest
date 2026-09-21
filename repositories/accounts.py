@@ -93,9 +93,9 @@ async def list_accounts(google_sub: str) -> list[dict]:
     result = [dict(r) for r in await cursor.fetchall()]
     for item in result:
         item["broker_snapshot"] = json.loads(item.pop("broker_snapshot_json"))
-        link = await (await db.execute("SELECT account_ciphertext,account_mask,environment,last_sync_at,sync_error,balances_json,include_overseas,product FROM broker_account_links WHERE google_sub=? AND account_id=?",
+        link = await (await db.execute("SELECT account_ciphertext,account_mask,environment,last_sync_at,sync_error,balances_json,include_overseas,product,provider FROM broker_account_links WHERE google_sub=? AND account_id=?",
                                       (google_sub, item["account_id"]))).fetchone()
-        item["broker"] = "namuh" if link else None
+        item["broker"] = link["provider"] if link else None
         item["connection"] = dict(link) if link else None
         if link:
             from repositories.broker_secrets import decrypt
@@ -249,9 +249,9 @@ async def delete_account(google_sub: str, account_id: str) -> None:
         linked = await (await db.execute("SELECT 1 FROM broker_account_links WHERE google_sub=? AND account_id=?", (google_sub, account_id))).fetchone()
         history = await (await db.execute("SELECT 1 FROM broker_transactions WHERE google_sub=? AND account_id=? LIMIT 1", (google_sub, account_id))).fetchone()
         if history:
-            raise AccountError("NH 거래내역이 있는 계좌는 기록 보존을 위해 삭제할 수 없습니다.")
+            raise AccountError("증권사 거래내역이 있는 계좌는 기록 보존을 위해 삭제할 수 없습니다.")
         if held or linked:
-            raise AccountError("보유 잔고 또는 NH 연결이 있는 계좌는 삭제할 수 없습니다. 잔고 정리와 연결 해제를 먼저 진행해 주세요.")
+            raise AccountError("보유 잔고 또는 증권사 연결이 있는 계좌는 삭제할 수 없습니다. 잔고 정리와 연결 해제를 먼저 진행해 주세요.")
         await db.execute(
             "UPDATE user_portfolio SET account_id = ? WHERE google_sub = ? AND account_id = ?",
             (default_id, google_sub, account_id),

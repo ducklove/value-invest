@@ -1,6 +1,7 @@
 // 계좌 선택·잔고 관리·NH 조회 연동. 자격증명은 브라우저 저장소에 보관하지 않는다.
 const PfAccounts = { rows: [], loaded: false, busy: false, focusCode: null, nhAccount: null, previewed: false, socket: null, retry: null, watchdog: null, lastMessageAt: 0 };
 const _pfAccountEl = id => document.getElementById(id);
+const pfBrokerName = provider => provider === 'kis' ? '한국투자증권' : 'NH';
 
 async function pfLoadAccounts(force = false) {
   if (PfAccounts.loaded && !force) return PfAccounts.rows;
@@ -12,12 +13,12 @@ async function pfLoadAccounts(force = false) {
   if (PfStore.accountId && !rows.some(row => row.account_id === PfStore.accountId)) PfStore.accountId = '';
   const select = _pfAccountEl('pfAccountSelect');
   if (select) {
-    select.innerHTML = '<option value="">전체 계좌 · 합산</option>' + rows.map(row => `<option value="${escapeHtml(row.account_id)}">${escapeHtml(row.name)}${row.broker ? ' · NH 연동' : ''}</option>`).join('');
+    select.innerHTML = '<option value="">전체 계좌 · 합산</option>' + rows.map(row => `<option value="${escapeHtml(row.account_id)}">${escapeHtml(row.name)}${row.broker ? ' · ' + pfBrokerName(row.broker) + ' 연동' : ''}</option>`).join('');
     select.value = PfStore.accountId || '';
   }
   const account = rows.find(row => row.account_id === PfStore.accountId);
   const state = _pfAccountEl('pfAccountState');
-  if (state) state.textContent = account?.broker ? `NH 조회 연동 · ${account.connection?.last_sync_at ? '최근 동기화 ' + new Date(account.connection.last_sync_at).toLocaleString('ko-KR') : '첫 동기화 대기'}${account.connection?.sync_error ? ' · 동기화 확인 필요' : ''}` : account ? '이 계좌의 종목과 현금을 표시합니다.' : '모든 계좌의 동일 종목과 현금을 합산합니다.';
+  if (state) state.textContent = account?.broker ? `${pfBrokerName(account.broker)} 조회 연동 · ${account.connection?.last_sync_at ? '최근 동기화 ' + new Date(account.connection.last_sync_at).toLocaleString('ko-KR') : '첫 동기화 대기'}${account.connection?.sync_error ? ' · 동기화 확인 필요' : ''}` : account ? '이 계좌의 종목과 현금을 표시합니다.' : '모든 계좌의 동일 종목과 현금을 합산합니다.';
   if (state && account) state.textContent += ' NAV·기간 실적은 전체 계좌에서 확인하세요.';
   pfConnectNamuhQuotes();
   pfRenderDerivativeBalances();
@@ -98,19 +99,20 @@ async function pfOpenAccountManager(code = null) {
 
 function pfRenderAccounts() {
   const item = PfStore.items.find(row => row.stock_code === PfAccounts.focusCode);
-  _pfAccountEl('pfAccountsHelp').textContent = item ? `${item.stock_name} · 계좌를 선택하면 해당 계좌의 잔고를 관리할 수 있습니다.` : '계좌별로 잔고를 등록하고, 전체 계좌 보기에서 합산합니다. NH 연동은 조회 전용입니다.';
+  _pfAccountEl('pfAccountsHelp').textContent = item ? `${item.stock_name} · 계좌를 선택하면 해당 계좌의 잔고를 관리할 수 있습니다.` : '계좌별로 잔고를 등록하고, 전체 계좌 보기에서 합산합니다. NH·한국투자증권 연동은 조회 전용입니다.';
   _pfAccountEl('pfAccountsList').innerHTML = PfAccounts.rows.map(row => {
     const position = item?.account_positions?.find(p => p.account_id === row.account_id);
     const detail = position ? `${Number(position.quantity).toLocaleString('ko-KR')}주 · 평균 ${Number(position.avg_price).toLocaleString('ko-KR')} ${position.avg_price_currency}` : `잔고 ${row.holdings_count || 0}개`;
     const error = row.connection?.sync_error;
     return `<section class="pf-account-card" data-account="${escapeHtml(row.account_id)}"><h3>${escapeHtml(row.name)}</h3>
-      <p>${escapeHtml(detail)}${row.broker ? ' · NH ' + escapeHtml(row.connection.account_no) + (row.connection.environment === 'mock' ? ' · 모의계좌' : '') : ' · 수동 관리'}</p>
+      <p>${escapeHtml(detail)}${row.broker ? ' · ' + pfBrokerName(row.broker) + ' ' + escapeHtml(row.connection.account_no) + (row.connection.environment === 'mock' ? ' · 모의계좌' : '') : ' · 수동 관리'}</p>
       ${error ? `<p class="pf-account-error">${escapeHtml(error)}</p>` : ''}
       <div class="pf-account-actions"><button type="button" data-account-action="view">이 계좌 보기</button><button type="button" data-account-action="rename">이름 수정</button>
-      ${row.broker ? '<button type="button" data-account-action="sync">잔고 동기화</button><button type="button" data-account-action="disconnect">연결 해제</button>' : '<button type="button" data-account-action="connect">NH 계좌 연동</button>'}
+      ${row.broker ? '<button type="button" data-account-action="sync">잔고 동기화</button><button type="button" data-account-action="disconnect">연결 해제</button>' : '<button type="button" data-account-action="connect">NH 계좌 연동</button><button type="button" data-account-action="connect-kis">한국투자증권 연동</button>'}
       <button type="button" data-account-action="activity">수입·입출금 내역</button>
       <button type="button" data-account-action="delete" ${row.holdings_count || row.broker || row.account_id.startsWith('default-') ? 'disabled' : ''}>계좌 삭제</button></div>
-      ${row.broker ? '<small>종목과 현금은 증권사 잔고로 갱신됩니다. 연결 해제 시 현재 잔고를 수동 계좌로 보존합니다.</small>' : ''}</section>`;
+      ${row.broker ? '<small>종목과 현금은 증권사 잔고로 갱신됩니다. 연결 해제 시 현재 잔고를 수동 계좌로 보존합니다.</small>' : ''}
+      ${row.broker === 'kis' ? '<small>한국투자증권 주식 계좌 · 60초 자동 조회 · 배당·이자·입출금 내역 자동 수집은 미지원</small>' : ''}</section>`;
   }).join('');
 }
 
@@ -137,16 +139,17 @@ async function pfAccountAction(event) {
   const action = button.dataset.accountAction;
   if (action === 'view') { _pfAccountEl('pfAccountsDialog').close(); await pfSelectAccount(aid); return; }
   if (action === 'connect') { pfOpenNhConnection(row); return; }
+  if (action === 'connect-kis') { pfOpenNhConnection(row, 'kis'); return; }
   if (action === 'activity') { await pfOpenAccountActivity(row); return; }
   let options = { method: 'DELETE' }, path = `/api/portfolio/accounts/${encodeURIComponent(aid)}`;
   if (action === 'rename') {
     const name = prompt('계좌 이름', row.name);
     if (!name?.trim() || name === row.name) return;
     options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) };
-  } else if (action === 'sync') { path += '/namuh/sync'; options = { method: 'POST', timeoutMs: 120000 }; }
+  } else if (action === 'sync') { path += `/${row.broker}/sync`; options = { method: 'POST', timeoutMs: 120000 }; }
   else if (action === 'disconnect') {
-    if (!confirm('NH 연결을 해제하고 현재 잔고를 수동 계좌로 보존할까요?')) return;
-    path += '/namuh';
+    if (!confirm(`${pfBrokerName(row.broker)} 연결을 해제하고 현재 잔고를 수동 계좌로 보존할까요?`)) return;
+    path += `/${row.broker}`;
   } else if (!confirm('비어 있는 계좌를 삭제할까요?')) return;
   PfAccounts.busy = true; button.disabled = true;
   _pfAccountEl('pfAccountsStatus').textContent = '처리 중입니다…';
@@ -159,12 +162,23 @@ async function pfAccountAction(event) {
   finally { PfAccounts.busy = false; button.disabled = false; }
 }
 
-function pfOpenNhConnection(account) {
+function pfOpenNhConnection(account, provider = 'namuh') {
+  PfAccounts.provider = provider;
   PfAccounts.nhAccount = account.account_id;
   PfAccounts.previewed = false;
   _pfAccountEl('pfNhForm').reset();
+  const isKis = provider === 'kis';
+  _pfAccountEl('pfKisFields').hidden = !isKis;
+  _pfAccountEl('pfKisAccount').required = isKis;
+  _pfAccountEl('pfNhProduct').closest('label').hidden = isKis;
+  _pfAccountEl('pfBrokerKeyLabel').textContent = `${isKis ? '한국투자증권' : '나무'} APP KEY`;
+  _pfAccountEl('pfBrokerSecretLabel').textContent = `${isKis ? '한국투자증권' : '나무'} APP SECRET`;
+  _pfAccountEl('pfNhClose').setAttribute('aria-label', `${pfBrokerName(provider)} 연동 닫기`);
+  _pfAccountEl('pfBrokerHelp').textContent = isKis
+    ? '한국투자증권 Open API에 등록한 본인 계좌와 전용 앱키를 입력하세요. HTS ID를 입력하면 서버에서 체결 통보를 받아 갱신합니다. 키는 암호화해 저장합니다.'
+    : '나무 OpenAPI 앱키로 연결 가능한 계좌를 확인합니다. 키는 서버에 암호화해 저장하며, 주문·자동매매는 실행하지 않습니다.';
   pfNhProductChanged();
-  _pfAccountEl('pfNhTitle').textContent = `${account.name} · NH 계좌 연동`;
+  _pfAccountEl('pfNhTitle').textContent = `${account.name} · ${pfBrokerName(provider)} 계좌 연동`;
   _pfAccountEl('pfNhChoices').innerHTML = '<option value="">앱키 확인 후 계좌를 선택하세요</option>';
   _pfAccountEl('pfNhPreview').textContent = '';
   _pfAccountEl('pfNhStatus').textContent = '';
@@ -174,6 +188,16 @@ function pfOpenNhConnection(account) {
 }
 
 function pfNhProductChanged() {
+  if (PfAccounts.provider === 'kis') {
+    const mock = _pfAccountEl('pfKisEnvironment').value === 'mock';
+    _pfAccountEl('pfNhProduct').value = 'stocks';
+    _pfAccountEl('pfNhOverseas').closest('label').hidden = mock;
+    if (mock) _pfAccountEl('pfNhOverseas').checked = false;
+    _pfAccountEl('pfNhProductHelp').textContent = mock
+      ? '모의계좌는 국내주식과 D+2 원화 예수금만 가져옵니다.'
+      : '주식 계좌(상품코드 01)의 국내·해외 주식과 D+2 원화·결제 반영 외화 예수금을 가져옵니다. 국내 비상장·상장폐지 종목은 제외합니다. 금·선물·연금·CMA 잔고와 수입·입출금 내역 수집은 아직 지원하지 않습니다.';
+    return;
+  }
   const product = _pfAccountEl('pfNhProduct').value;
   _pfAccountEl('pfNhOverseas').closest('label').hidden = product !== 'stocks';
   _pfAccountEl('pfNhProductHelp').textContent = product === 'stocks'
@@ -187,11 +211,18 @@ async function pfNhWork(action) {
   PfAccounts.busy = true;
   const fields = _pfAccountEl('pfNhFields'); fields.disabled = true;
   _pfAccountEl('pfNhClose').disabled = true;
-  _pfAccountEl('pfNhStatus').textContent = '나무에서 조회하고 있습니다…';
+  const provider = PfAccounts.provider || 'namuh';
+  const generation = PfAccounts.generation || 0;
+  _pfAccountEl('pfNhStatus').textContent = `${pfBrokerName(provider)}에서 조회하고 있습니다…`;
   try {
     if (action === 'verify') {
-      const data = await apiFetchJson('/api/portfolio/namuh/credentials', { method: 'POST', timeoutMs: 60000,
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app_key: _pfAccountEl('pfNhKey').value.trim(), app_secret: _pfAccountEl('pfNhSecret').value.trim() }) });
+      PfAccounts.previewed = false; _pfAccountEl('pfNhSave').disabled = true; _pfAccountEl('pfNhPreviewButton').disabled = true;
+      _pfAccountEl('pfNhChoices').innerHTML = ''; _pfAccountEl('pfNhPreview').textContent = '';
+      const credentials = { app_key: _pfAccountEl('pfNhKey').value.trim(), app_secret: _pfAccountEl('pfNhSecret').value.trim() };
+      if (provider === 'kis') Object.assign(credentials, {account_no:_pfAccountEl('pfKisAccount').value.trim(), environment:_pfAccountEl('pfKisEnvironment').value, hts_id:_pfAccountEl('pfKisHts').value.trim()});
+      const data = await apiFetchJson(`/api/portfolio/${provider}/credentials`, { method: 'POST', timeoutMs: 60000,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) });
+      if (generation !== (PfAccounts.generation || 0)) return;
       _pfAccountEl('pfNhKey').value = _pfAccountEl('pfNhSecret').value = '';
       _pfAccountEl('pfNhChoices').innerHTML = data.accounts.map(row => `<option value="${escapeHtml(row.selection)}">${escapeHtml(row.account_no)} · ${row.environment === 'mock' ? '모의계좌' : '실계좌'}</option>`).join('');
       _pfAccountEl('pfNhPreviewButton').disabled = !data.accounts.length;
@@ -199,14 +230,16 @@ async function pfNhWork(action) {
       PfAccounts.previewed = false; _pfAccountEl('pfNhSave').disabled = true;
     } else {
       const payload = { selection: _pfAccountEl('pfNhChoices').value, include_overseas: _pfAccountEl('pfNhOverseas').checked, product: _pfAccountEl('pfNhProduct').value };
-      const base = `/api/portfolio/accounts/${encodeURIComponent(PfAccounts.nhAccount)}/namuh`;
+      const base = `/api/portfolio/accounts/${encodeURIComponent(PfAccounts.nhAccount)}/${provider}`;
       if (!payload.selection) throw new Error('연결할 계좌를 선택하세요.');
       if (action === 'save' && !PfAccounts.previewed) throw new Error('잔고 미리보기를 먼저 확인하세요.');
       const data = await apiFetchJson(base + (action === 'preview' ? '/preview' : ''), { method: 'POST', timeoutMs: 120000,
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (generation !== (PfAccounts.generation || 0)) return;
       if (action === 'preview') {
         _pfAccountEl('pfNhPreview').innerHTML = `<p>${data.items.length}개 잔고 · 현금 추가 차감 없이 초기 잔고로 가져옵니다.</p><table><thead><tr><th>종목</th><th>수량·잔액</th><th>통화</th></tr></thead><tbody>${data.items.map(item => `<tr><td>${escapeHtml(item.stock_name)}</td><td>${Number(item.quantity).toLocaleString('ko-KR')}</td><td>${escapeHtml(item.currency)}</td></tr>`).join('')}</tbody></table><p>원화는 D+2 예수금, 외화는 결제 후 예수금 기준입니다.</p>${data.items.some(item => item.stock_code === 'CMA_RP_KRW') ? '<p>CMA 원화RP는 현금과 구분하며, 수량·잔액에 증권사 조회 시점의 평가액(원)을 표시합니다.</p>' : ''}`;
         PfAccounts.previewed = true; _pfAccountEl('pfNhSave').disabled = false;
+        if (data.balances?._excluded?.length) _pfAccountEl('pfNhPreview').insertAdjacentHTML('beforeend', `<p>비상장·상장폐지 ${data.balances._excluded.length}개 종목은 제외했습니다.</p>`);
         if (data.broker_snapshot?.product?.endsWith('future')) {
           _pfAccountEl('pfNhPreview').innerHTML = pfBrokerSnapshotHtml(data.broker_snapshot);
         }
@@ -214,7 +247,7 @@ async function pfNhWork(action) {
       } else {
         _pfAccountEl('pfNhDialog').close();
         await pfLoadAccounts(true); pfRenderAccounts(); await loadPortfolio({ force: true });
-        _pfAccountEl('pfAccountsStatus').textContent = 'NH 계좌를 연결했습니다. 주문·체결 통보를 받으면 갱신하며, 수입·입출금은 60초마다 확인합니다.';
+        _pfAccountEl('pfAccountsStatus').textContent = provider === 'kis' ? '한국투자증권 계좌를 연결했습니다. 잔고는 60초마다 갱신하며, HTS ID를 등록하면 체결 통보로도 갱신합니다.' : 'NH 계좌를 연결했습니다. 주문·체결 통보를 받으면 갱신하며, 수입·입출금은 60초마다 확인합니다.';
       }
     }
   } catch (error) {
@@ -256,7 +289,7 @@ function pfRefreshChangedAccounts() {
 function pfConnectNamuhQuotes() {
   const linked = PfAccounts.rows.some(row => row.broker === 'namuh');
   QuoteManager.setNamuhLinked?.(linked);
-  if (!linked) {
+  if (!PfAccounts.rows.some(row => row.broker)) {
     clearTimeout(PfAccounts.retry); PfAccounts.retry = null;
     clearInterval(PfAccounts.watchdog); PfAccounts.watchdog = null;
     if (PfAccounts.socket) { PfAccounts.socket.onclose = null; PfAccounts.socket.close(); PfAccounts.socket = null; }
@@ -288,6 +321,14 @@ function pfConnectNamuhQuotes() {
         if (label && message.notifications) label.textContent += message.notifications.state === 'subscribed'
           ? ' · 계좌 통보 연결 · 입출금 60초 확인' : ' · 계좌 통보 연결 확인 중 · 60초 조회 보완';
       }
+      if (message.type === 'kis_account_status') {
+        const state = _pfAccountEl('pfAccountState');
+        const row = PfAccounts.rows.find(account => account.account_id === PfStore.accountId);
+        if (state && row?.broker === 'kis') {
+          const suffix = message.state === 'subscribed' ? '체결 통보 연결 · 60초 조회 보완' : '60초 자동 조회 · 체결 통보 미연결';
+          state.textContent = state.textContent.split(' | ')[0] + ' | ' + suffix;
+        }
+      }
     } catch (_) { /* 잘못된 개별 메시지는 다음 메시지에 영향을 주지 않는다. */ }
   };
   socket.onclose = () => {
@@ -309,8 +350,13 @@ document.addEventListener('DOMContentLoaded', () => {
   _pfAccountEl('pfNhPreviewButton')?.addEventListener('click', () => pfNhWork('preview'));
   _pfAccountEl('pfNhSave')?.addEventListener('click', () => pfNhWork('save'));
   for (const id of ['pfNhChoices', 'pfNhOverseas', 'pfNhProduct']) _pfAccountEl(id)?.addEventListener('change', () => { pfNhProductChanged(); PfAccounts.previewed = false; _pfAccountEl('pfNhSave').disabled = true; _pfAccountEl('pfNhPreview').textContent = ''; });
+  for (const id of ['pfKisAccount', 'pfKisEnvironment', 'pfKisHts']) _pfAccountEl(id)?.addEventListener('change', () => {
+    pfNhProductChanged(); PfAccounts.previewed = false;
+    _pfAccountEl('pfNhChoices').innerHTML = ''; _pfAccountEl('pfNhSave').disabled = true; _pfAccountEl('pfNhPreviewButton').disabled = true;
+    _pfAccountEl('pfNhPreview').textContent = ''; _pfAccountEl('pfNhStatus').textContent = '변경한 계좌 정보로 앱키를 다시 확인해 주세요.';
+  });
   _pfAccountEl('pfNhDialog')?.addEventListener('cancel', event => { if (PfAccounts.busy) event.preventDefault(); });
-  _pfAccountEl('pfNhDialog')?.addEventListener('close', () => { _pfAccountEl('pfNhKey').value = _pfAccountEl('pfNhSecret').value = ''; });
+  _pfAccountEl('pfNhDialog')?.addEventListener('close', () => { for (const id of ['pfNhKey', 'pfNhSecret', 'pfKisAccount', 'pfKisHts']) _pfAccountEl(id).value = ''; });
   document.addEventListener('click', event => {
     if (event.target.closest('.js-pf-account-detail')) { event.preventDefault(); pfOpenAccountManager(event.target.closest('tr[data-code]')?.dataset.code); return; }
     if (event.target.closest('.js-pf-trade,.js-pf-edit,.js-pf-delete,.js-pf-dividend-receipt,.js-pf-distribution,.js-pf-cashflow,#pfAddToggle') && pfAccountNeedsSelection()) {
