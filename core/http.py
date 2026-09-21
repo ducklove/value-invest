@@ -59,6 +59,8 @@ _TIMEOUT_PROFILES: dict[str, float] = {
     "gold_api": 10.0,
     "kis": 15.0,
     "kis_account": 20.0,
+    "kiwoom_account": 20.0,
+    "ls_account": 20.0,
     "namuh": 15.0,
     "quant_research": 90.0,
     "external_tools": 8.0,

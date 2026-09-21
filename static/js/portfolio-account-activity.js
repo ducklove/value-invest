@@ -39,14 +39,15 @@ async function pfOpenAccountActivity(account) {
   const dialog = pfActivityDialog();
   PfActivity.account = account; PfActivity.offset = 0;
   _pfActivityEl('pfActivityTitle').textContent = account.name + ' · 수입·입출금';
-  _pfActivityEl('pfActivityHelp').textContent = account.broker === 'kis'
-    ? '한국투자증권은 잔고 자동 동기화를 지원합니다. 배당·이자·입출금 거래내역 자동 수집은 아직 지원하지 않습니다. 기존에 보존한 내역이 있으면 아래에 표시합니다.'
+  const canImport = typeof pfBrokerDefinition === 'function' ? !!pfBrokerDefinition(account.broker)?.activity : account.broker === 'namuh';
+  _pfActivityEl('pfActivityHelp').textContent = account.broker && !canImport
+    ? '이 증권사는 잔고 자동 동기화를 지원합니다. 배당·이자·입출금 거래내역 자동 수집은 아직 지원하지 않습니다. 기존에 보존한 내역이 있으면 아래에 표시합니다.'
     : 'NH에서 확인한 실제 수입과 입출금입니다. 사유·분류를 수정해도 현금을 다시 더하지 않습니다.';
-  _pfActivityEl('pfActivityPollingHelp').hidden = account.broker === 'kis';
+  _pfActivityEl('pfActivityPollingHelp').hidden = !canImport;
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
   _pfActivityEl('pfActivityStart').value = today.slice(0, 4) + '-01-01';
   _pfActivityEl('pfActivityEnd').value = today;
-  _pfActivityEl('pfActivityImport').hidden = account.broker !== 'namuh' || account.connection?.environment === 'mock';
+  _pfActivityEl('pfActivityImport').hidden = !canImport || account.connection?.environment === 'mock';
   dialog.showModal();
   await pfLoadActivity();
 }

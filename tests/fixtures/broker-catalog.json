@@ -1,0 +1,121 @@
+[
+  {
+    "id": "namuh",
+    "name": "NH",
+    "help": "나무 OpenAPI 앱키로 연결 가능한 계좌를 확인합니다. 키는 서버에 암호화해 저장하며 주문은 실행하지 않습니다.",
+    "products": [
+      {
+        "id": "stocks",
+        "label": "주식·ETF",
+        "help": "국내 비상장·상장폐지 종목은 제외합니다. 원화는 D+2 예수금, 외화는 통화별 결제 후 예수금을 항상 가져옵니다.",
+        "overseas_live": true,
+        "overseas_mock": true
+      },
+      {
+        "id": "gold",
+        "label": "금현물",
+        "help": "금현물 전용 잔고를 조회합니다. 금은 g 단위, 원화 현금은 D+2 예수금 기준입니다.",
+        "overseas_live": false,
+        "overseas_mock": false
+      },
+      {
+        "id": "krfuture",
+        "label": "국내선물·옵션",
+        "help": "계약 수·매수·매도는 별도 표시하고 합계에는 증권사의 계좌 평가액을 반영합니다.",
+        "overseas_live": false,
+        "overseas_mock": false
+      },
+      {
+        "id": "gbfuture",
+        "label": "해외선물·옵션",
+        "help": "계약 수·매수·매도는 별도 표시하고 합계에는 증권사의 계좌 평가액을 반영합니다.",
+        "overseas_live": false,
+        "overseas_mock": false
+      }
+    ],
+    "environments": [
+      "live",
+      "mock"
+    ],
+    "account_input": false,
+    "hts_id": false,
+    "activity": true,
+    "key_bound_account": false,
+    "select_environment": false
+  },
+  {
+    "id": "kis",
+    "name": "한국투자증권",
+    "help": "본인 계좌와 전용 앱키를 입력하세요. HTS ID를 입력하면 서버에서 체결 통보를 받아 갱신합니다. 키는 암호화해 저장합니다.",
+    "products": [
+      {
+        "id": "stocks",
+        "label": "주식·ETF",
+        "help": "주식 계좌(상품코드 01)의 국내·해외 주식과 D+2 원화·결제 반영 외화 예수금을 가져옵니다. 모의계좌는 국내주식만 지원합니다. 금·선물·연금·CMA 잔고는 미지원입니다.",
+        "overseas_live": true,
+        "overseas_mock": false
+      }
+    ],
+    "environments": [
+      "live",
+      "mock"
+    ],
+    "account_input": true,
+    "hts_id": true,
+    "activity": false,
+    "key_bound_account": false,
+    "select_environment": true
+  },
+  {
+    "id": "kiwoom",
+    "name": "키움증권",
+    "help": "키움 REST API 전용 앱키를 입력하세요. API에서 확인한 계좌번호를 표시합니다. 서버의 접속 IP를 키움에 등록해야 합니다. 키는 암호화해 저장합니다.",
+    "products": [
+      {
+        "id": "stocks",
+        "label": "주식·ETF",
+        "help": "국내 상장주식·ETF와 미국주식, D+2 원화·결제 반영 USD 예수금을 가져옵니다. 모의계좌는 국내주식만 지원합니다. 다른 외화·신용·대출·선물·연금은 미지원입니다.",
+        "overseas_live": true,
+        "overseas_mock": false
+      },
+      {
+        "id": "gold",
+        "label": "금현물",
+        "help": "금현물 전용 앱키의 금 1kg 종목을 g 단위로 가져옵니다. 현금은 매매 정산을 반영한 추정예수금입니다. 미니금·선물은 미지원입니다.",
+        "overseas_live": false,
+        "overseas_mock": false
+      }
+    ],
+    "environments": [
+      "live",
+      "mock"
+    ],
+    "account_input": false,
+    "hts_id": false,
+    "activity": false,
+    "key_bound_account": true,
+    "select_environment": true
+  },
+  {
+    "id": "ls",
+    "name": "LS증권",
+    "help": "LS Open API에 신청한 주식 계좌의 앱키를 입력하세요. API에서 계좌번호를 확인합니다. 키는 암호화해 저장합니다. 현재 실계좌 연결을 지원합니다.",
+    "products": [
+      {
+        "id": "stocks",
+        "label": "주식·ETF",
+        "help": "코스피·코스닥·ETF·CMA RP와 미국주식, D+2 원화·결제 반영 외화 예수금을 가져옵니다. 신용·대출·금·선물·연금은 미지원입니다.",
+        "overseas_live": true,
+        "overseas_mock": false
+      }
+    ],
+    "environments": [
+      "live"
+    ],
+    "account_input": false,
+    "hts_id": false,
+    "activity": false,
+    "key_bound_account": true,
+    "select_environment": true
+  }
+]

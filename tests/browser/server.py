@@ -1,6 +1,8 @@
 """브라우저 테스트 전용 앱. 임시 DB의 실제 인증·저장과 고정 시장 데이터를 사용한다."""
 
 import asyncio
+import copy
+import json
 import os
 import tempfile
 from contextlib import asynccontextmanager
@@ -55,12 +57,27 @@ async def lifespan(app):
                 "market_value": price*10, "unit_price": price, "currency": "KRW", "fx_rate": 1}])
         try:
             from services.brokers import activity, derivatives, kis, namuh, sync
+            from services.brokers.registry import get_adapter
             from services.quant import scanner_feed
             nh_rows = [{"stock_code": "005930", "stock_name": "삼성전자", "quantity": 3,
                         "avg_price": 80000, "avg_price_currency": "KRW", "currency": "KRW"},
                        {"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": 5000,
                         "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}]
+            fixtures = json.loads((Path(__file__).parents[1] / "fixtures/broker-api-responses.json").read_text(encoding="utf-8"))
+            async def extra_pages(provider, user, cid, env, tr, inputs):
+                if tr == "ka10100":
+                    return [{"code": inputs["stk_cd"], "marketCode": "0" if inputs["stk_cd"] == "005930" else "30", "state": "거래정지"}]
+                if tr == "ust21070":
+                    return [{"result_list": [{"stk_cd": "BRK.B", "frgn_stk_nm": "버크셔", "poss_qty": "1.5", "crnc_code": "USD", "frgn_stk_book_uv": "450.25"}]
+                             if inputs["stex_tp"] == "NY" else []}]
+                return copy.deepcopy(fixtures[provider][tr])
+            async def kiwoom_pages(*args):
+                return await extra_pages("kiwoom", *args)
+            async def ls_pages(*args):
+                return await extra_pages("ls", *args)
             async def nh_snapshot(_user, link):
+                if link.get("provider") in {"kiwoom", "ls"}:
+                    return await get_adapter(link["provider"]).fetch_snapshot(_user, link)
                 product = link.get("product", "stocks")
                 if product == "gold":
                     return [{"stock_code": "KRX_GOLD", "stock_name": "KRX 금현물", "quantity": 12,
@@ -79,6 +96,8 @@ async def lifespan(app):
                     "trd_bf_dca": "10000", "trd_af_dca": "10846", "trd_amt": "1000", "tax_sum": "154", "trd_orn_fee": "0", "int_amt": "0"}, link)
                     for i, label in enumerate(("현금배당 입금", "예탁금이용료", "이체입금"), 1)]
             with patch.object(scanner_feed, "catalog", AsyncMock(return_value=[])), \
+                 patch.object(get_adapter("kiwoom"), "pages", side_effect=kiwoom_pages), \
+                 patch.object(get_adapter("ls"), "pages", side_effect=ls_pages), \
                  patch.object(kis, "token", AsyncMock(return_value="test-kis-token")), \
                  patch.object(activity, "fetch", side_effect=nh_activity), \
                  patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": no, "environment": "live"} for no in ("12345678901", "22222222222", "33333333333")])), \

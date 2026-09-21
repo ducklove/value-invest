@@ -179,13 +179,10 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         indicator_stop = asyncio.Event()
         tasks.append((asyncio.create_task(indicator_health.run_loop(indicator_stop), name="market-indicators"), indicator_stop))
 
-        from services.brokers.realtime import run as run_namuh
-        namuh_stop = asyncio.Event()
-        tasks.append((asyncio.create_task(run_namuh(namuh_stop), name="namuh-quotes"), namuh_stop))
-
-        from services.brokers.kis_realtime import run as run_kis_accounts
-        kis_accounts_stop = asyncio.Event()
-        tasks.append((asyncio.create_task(run_kis_accounts(kis_accounts_stop), name="kis-accounts"), kis_accounts_stop))
+        from services.brokers.registry import all_adapters
+        for adapter in all_adapters():
+            broker_stop = asyncio.Event()
+            tasks.append((asyncio.create_task(adapter.run(broker_stop), name=f"{adapter.definition.id}-accounts"), broker_stop))
 
         sd_notify("READY=1")
         from services.quant.service import run_loop as run_quant

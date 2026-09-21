@@ -1,0 +1,172 @@
+{
+  "kiwoom": {
+    "ka00001": [
+      {
+        "acctNo": "1234567801"
+      }
+    ],
+    "kt00018": [
+      {
+        "tot_loan_amt": 0,
+        "tot_crd_loan_amt": 0,
+        "tot_crd_ls_amt": 0,
+        "acnt_evlt_remn_indv_tot": [
+          {
+            "stk_cd": "A005930",
+            "stk_nm": "삼성전자",
+            "rmnd_qty": "3",
+            "pur_pric": "70000"
+          },
+          {
+            "stk_cd": "A900180",
+            "stk_nm": "비상장",
+            "rmnd_qty": "4",
+            "pur_pric": "100"
+          }
+        ]
+      }
+    ],
+    "kt00001": [
+      {
+        "entr": 10000,
+        "d1_entra": 9500,
+        "d2_entra": 9000,
+        "loan_sum": 0,
+        "ls_sum": 0,
+        "ch_uncla_tot": 0,
+        "etc_loan_tot": 0,
+        "dpst_grntl_remn": 0,
+        "sell_grntl_remn": 0,
+        "stk_entr_prst": [
+          {
+            "crnc_cd": "USD",
+            "fx_entr": 999
+          }
+        ]
+      }
+    ],
+    "ust21160": [
+      {
+        "won_dfr_amt": 0,
+        "won_etc_loana": 0,
+        "d0_usd_fx_entr": 1000,
+        "d2_usd_fx_entr": 950,
+        "d4_usd_fx_entr": 800.5
+      }
+    ],
+    "kt50020": [
+      {
+        "gold_acnt_evlt_prst": [
+          {
+            "stk_cd": "M04020000",
+            "stk_nm": "금 99.99_1Kg",
+            "real_qty": "12",
+            "avg_prc": "150000"
+          }
+        ]
+      }
+    ],
+    "kt50021": [
+      {
+        "entra": 20000,
+        "prsm_entra": 10000,
+        "etc_loan_tot": 0,
+        "dly_amt": 0
+      }
+    ]
+  },
+  "ls": {
+    "CSPAQ12200": [
+      {
+        "CSPAQ12200OutBlock1": {
+          "AcntNo": "12345678901"
+        },
+        "CSPAQ12200OutBlock2": {
+          "Dps": 10000,
+          "D1Dps": 9500,
+          "D2Dps": 9000,
+          "MloanAmt": 0,
+          "DpspdgLoanAmt": 0,
+          "MnyrclAmt": 0,
+          "EtclndAmt": 0,
+          "RcvblAmt": 0
+        }
+      }
+    ],
+    "t0424": [
+      {
+        "t0424OutBlock": {
+          "cts_expcode": ""
+        },
+        "t0424OutBlock1": [
+          {
+            "expcode": "005930",
+            "hname": "삼성전자",
+            "janqty": 3,
+            "pamt": 70000,
+            "sinamt": 0
+          },
+          {
+            "expcode": "900180",
+            "hname": "비상장",
+            "janqty": 2,
+            "pamt": 100,
+            "sinamt": 0
+          },
+          {
+            "expcode": "CMARP",
+            "janqty": 1000,
+            "mamt": 1000,
+            "appamt": 1020,
+            "sinamt": 0
+          }
+        ]
+      }
+    ],
+    "t8436": [
+      {
+        "t8436OutBlock": [
+          {
+            "shcode": "005930"
+          }
+        ]
+      }
+    ],
+    "COSOQ02701": [
+      {
+        "COSOQ02701OutBlock2": [
+          {
+            "CrcyCode": "USD",
+            "PrsmptFcurrDps2": 950,
+            "PrsmptFcurrDps4": 800.5
+          },
+          {
+            "CrcyCode": "JPY",
+            "PrsmptFcurrDps2": 10,
+            "PrsmptFcurrDps4": 10
+          }
+        ]
+      }
+    ],
+    "COSOQ00201": [
+      {
+        "COSOQ00201OutBlock2": {
+          "LoanAmt": 0
+        },
+        "COSOQ00201OutBlock4": [
+          {
+            "ShtnIsuNo": "BRK.B",
+            "JpnMktHanglIsuNm": "버크셔",
+            "AstkBalQty": 1.5,
+            "AstkSettQty": 1,
+            "FcstckUprc": 450.25,
+            "CrcyCode": "USD",
+            "MktTpNm": "NYSE",
+            "LoanAmt": 0,
+            "AstkBalTpCode": "10"
+          }
+        ]
+      }
+    ]
+  }
+}

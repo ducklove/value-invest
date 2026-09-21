@@ -1,4 +1,4 @@
-"""사용자별 NH 자격증명과 계좌 연결. 외부 응답에는 비밀을 포함하지 않는다."""
+"""사용자별 증권사 자격증명과 계좌 연결. 외부 응답에는 비밀을 포함하지 않는다."""
 
 import hashlib
 import json
@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from domain.broker_assets import ACCOUNT_PRODUCTS
+from domain.broker_catalog import BROKERS
 from repositories.broker_secrets import BrokerError, account_fingerprint, decrypt, encrypt
 from repositories.db import get_db, transaction
 
@@ -17,9 +17,9 @@ def fingerprint(value: str) -> str:
 
 
 async def store_credential(user: str, app_key: str, app_secret: str, *, provider: str = "namuh", environment: str = "live", hts_id: str = "") -> str:
-    if provider not in {"namuh", "kis"} or environment not in {"live", "mock"}:
+    if provider not in BROKERS or environment not in BROKERS[provider].environments:
         raise BrokerError("지원하지 않는 증권사 또는 투자 환경입니다.")
-    digest = fingerprint(app_key if provider == "namuh" else f"kis:{environment}:{app_key}")
+    digest = fingerprint(app_key if provider == "namuh" else f"{provider}:{environment}:{app_key}")
     async with transaction() as db:
         row = await (await db.execute("SELECT credential_id,google_sub FROM broker_credentials WHERE key_fingerprint=?", (digest,))).fetchone()
         if row and row["google_sub"] != user:
@@ -60,13 +60,18 @@ async def save_token(user: str, cid: str, token: str, expires_at: float):
 
 async def link_account(user: str, aid: str, cid: str, account_no: str, environment: str, include_overseas: bool = True, product: str = "stocks", *, provider: str = "namuh"):
     from repositories.account_holdings import require_account
-    if product not in ACCOUNT_PRODUCTS:
-        raise BrokerError("지원되지 않는 NH 계좌 종류입니다.")
+    definition = BROKERS.get(provider)
+    if not definition or product not in {p.id for p in definition.products} or environment not in definition.environments:
+        raise BrokerError("지원되지 않는 증권사 계좌 종류 또는 투자 환경입니다.")
     async with transaction() as db:
         await require_account(user, aid)
         credential = await get_credential(user, cid)
-        if credential["provider"] != provider or (provider == "kis" and (product != "stocks" or credential["environment"] != environment)):
+        if credential["provider"] != provider or (provider != "namuh" and credential["environment"] != environment):
             raise BrokerError("앱키의 증권사·투자 환경과 계좌가 일치하지 않습니다.")
+        if definition.key_bound_account:
+            key_link = await (await db.execute("SELECT 1 FROM broker_account_links WHERE credential_id=? LIMIT 1", (cid,))).fetchone()
+            if key_link:
+                raise BrokerError("이미 연결한 앱키 계좌입니다. 같은 계좌를 중복 합산할 수 없습니다.")
         existing = await (await db.execute("SELECT 1 FROM broker_account_links WHERE account_id=?", (aid,))).fetchone()
         if existing:
             raise BrokerError("이미 연결된 계좌입니다. 기존 연결을 해제한 뒤 연결해 주세요.")
@@ -74,7 +79,7 @@ async def link_account(user: str, aid: str, cid: str, account_no: str, environme
         if holdings:
             raise BrokerError("잔고가 없는 계좌에 연결해 주세요. 기존 수동 잔고의 중복·덮어쓰기를 방지합니다.")
         try:
-            digest = account_fingerprint(account_no if provider == "namuh" else "kis:" + account_no)
+            digest = account_fingerprint(account_no if provider == "namuh" else provider + ":" + account_no)
             await db.execute("INSERT INTO broker_account_links (account_id,google_sub,credential_id,account_ciphertext,account_fingerprint,account_mask,environment,include_overseas,product,provider) VALUES (?,?,?,?,?,?,?,?,?,?)",
                              (aid, user, cid, encrypt(account_no), digest, "•••••••" + account_no[-4:], environment, int(include_overseas), product, provider))
         except aiosqlite.IntegrityError as exc:

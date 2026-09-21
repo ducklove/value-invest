@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 
 test('한국투자증권 미리보기 취소·연결·합산·동기화·해제와 휴대폰 화면', async ({page},testInfo)=>{
-  await page.routeWebSocket('**/ws/namuh',()=>{});
+  await page.routeWebSocket('**/ws/broker-accounts',()=>{});
   await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort());
   await page.goto('/login');
   await page.request.post('/api/auth/register',{data:{email:`kis-${Date.now()}@example.com`,name:'한국투자 검증',password:'browser-test-password'},headers:{Origin:'http://127.0.0.1:18765'}});
@@ -14,7 +14,8 @@ test('한국투자증권 미리보기 취소·연결·합산·동기화·해제�
   await expect(card).toBeVisible();
   const aid=await card.getAttribute('data-account');
   const openAndPreview=async()=>{
-    await card.locator('[data-account-action="connect-kis"]').click();
+    await card.locator('[data-account-action="connect"]').click();
+    await page.locator('#pfBrokerProvider').selectOption('kis');
     await page.locator('#pfNhKey').fill('kis-browser-'+testInfo.testId);
     await page.locator('#pfNhSecret').fill('test-kis-secret');
     await page.locator('#pfKisAccount').fill('12345678-01');
@@ -44,7 +45,7 @@ test('한국투자증권 미리보기 취소·연결·합산·동기화·해제�
   expect(before.find(row=>row.stock_code==='CASH_KRW').quantity).toBe(5000);
   page.once('dialog',dialog=>dialog.accept());
   await card.locator('[data-account-action="disconnect"]').click();
-  await expect(card.locator('[data-account-action="connect-kis"]')).toBeVisible();
+  await expect(card.locator('[data-account-action="connect"]')).toBeVisible();
   const after=await (await page.request.get('/api/portfolio?account_id='+aid)).json();
   expect(after).toEqual(before);
 });

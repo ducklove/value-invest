@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표시를 확인한다', async ({ page }, testInfo) => {
-  await page.routeWebSocket('**/ws/namuh', () => {});
+  await page.routeWebSocket('**/ws/broker-accounts', () => {});
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.goto('/login');
   await page.request.post('/api/auth/register', {data:{email:`products-${Date.now()}@example.com`,name:'상품 검증',password:'browser-test-password'},headers:{Origin:'http://127.0.0.1:18765'}});
@@ -53,7 +53,7 @@ test('계좌별 등록·합산·매매 격리와 NH 미리보기 취소·연결�
   let nhSocket;
   let kisSocket;
   await page.routeWebSocket('**/ws/quotes', socket => { kisSocket = socket; });
-  await page.routeWebSocket('**/ws/namuh', socket => { nhSocket = socket; });
+  await page.routeWebSocket('**/ws/broker-accounts', socket => { nhSocket = socket; });
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.goto('/login');
   const signup = await page.request.post('/api/auth/register', { data: {email: `accounts-${Date.now()}@example.com`, name: '계좌 검증', password: 'browser-test-password'}, headers: {Origin: 'http://127.0.0.1:18765'} });

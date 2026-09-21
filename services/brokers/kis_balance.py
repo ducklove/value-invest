@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from cache_layer import MemoryTTLCache
 from repositories.broker_secrets import BrokerError
 from services.brokers import kis
-from services.brokers.sync import foreign_code
+from services.brokers.symbols import foreign_code
 from services.portfolio.identifiers import CASH_FX_CODE
 
 _listing = MemoryTTLCache("kis_account_listing", default_ttl_seconds=3600)

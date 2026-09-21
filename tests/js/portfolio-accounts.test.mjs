@@ -17,6 +17,7 @@ function setup() {
     dialog.close = () => {dialog.open = false; dialog.dispatchEvent(new w.Event('close'));};
   }
   w.eval(readFileSync(new URL('../../static/js/portfolio-accounts.js',import.meta.url),'utf8') + '\nwindow.PfAccounts = PfAccounts;');
+  w.PfAccounts.catalog = JSON.parse(readFileSync(new URL('../fixtures/broker-catalog.json', import.meta.url), 'utf8'));
   w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
   return {dom,w,sockets, el: id => w.document.getElementById(id)};
 }
@@ -46,6 +47,55 @@ test('한국투자증권 입력·미리보기 취소는 연결하지 않고 자�
     assert.equal(s.el('pfKisAccount').value,'');
     assert.deepEqual(calls.map(call=>call.path),['/api/portfolio/kis/credentials','/api/portfolio/accounts/a/kis/preview']);
     assert.equal(s.w.localStorage.length,0);
+  } finally {s.dom.window.close();}
+});
+
+test('증권사 전환은 이전 키·미리보기를 지우고 지원 기능에 맞게 계좌 입력을 바꾼다', async () => {
+  const s=setup(), calls=[];
+  try {
+    s.w.apiFetchJson=async(path,options)=>{
+      calls.push({path,body:JSON.parse(options.body)});
+      return {accounts:[{account_no:'1234567801',environment:'live',selection:'kiwoom-choice'}]};
+    };
+    s.w.pfOpenNhConnection({account_id:'a',name:'새 계좌'},'kis');
+    s.el('pfNhKey').value='kis-private-key';
+    s.el('pfNhSecret').value='kis-private-secret';
+    s.el('pfKisAccount').value='12345678-01';
+    s.el('pfKisHts').value='private-hts';
+    s.el('pfNhChoices').innerHTML='<option value="old-choice">계좌</option>';
+    s.w.PfAccounts.previewed=true; s.el('pfNhSave').disabled=false;
+    s.el('pfBrokerProvider').value='kiwoom';
+    s.el('pfBrokerProvider').dispatchEvent(new s.w.Event('change'));
+    assert.equal(s.el('pfNhKey').value,'');
+    assert.equal(s.el('pfKisAccount').value,'');
+    assert.equal(s.el('pfKisHts').value,'');
+    assert.equal(s.el('pfNhSave').disabled,true);
+    assert.equal(s.w.PfAccounts.previewed,false);
+    assert.equal(s.el('pfKisAccount').closest('label').hidden,true);
+    assert.equal(s.el('pfKisEnvironment').closest('label').hidden,false);
+    s.el('pfNhKey').value='kiwoom-private-key'; s.el('pfNhSecret').value='kiwoom-private-secret';
+    await s.w.pfNhWork('verify');
+    assert.equal(calls[0].path,'/api/portfolio/kiwoom/credentials');
+    assert.equal(calls[0].body.account_no,undefined);
+    assert.equal(calls[0].body.hts_id,undefined);
+    s.el('pfBrokerProvider').value='ls';
+    s.el('pfBrokerProvider').dispatchEvent(new s.w.Event('change'));
+    assert.equal(s.el('pfKisFields').hidden,true);
+    assert.equal(s.el('pfNhProduct').options.length,1);
+    assert.match(s.el('pfNhProductHelp').textContent,/CMA RP/);
+  } finally {s.dom.window.close();}
+});
+
+test('서버에 새 증권사가 등록되면 카드에 버튼을 늘리지 않고 선택 목록에 나타난다', async () => {
+  const s=setup();
+  try {
+    s.w.PfAccounts.catalog.push({...s.w.PfAccounts.catalog[3],id:'another',name:'추가 증권사'});
+    s.w.PfAccounts.rows=[{account_id:'a',name:'수동 계좌'}];
+    s.w.pfRenderAccounts();
+    assert.equal(s.el('pfAccountsList').querySelectorAll('[data-account-action="connect"]').length,1);
+    s.w.pfOpenNhConnection({account_id:'a',name:'수동 계좌'},'another');
+    assert.equal(s.el('pfBrokerProvider').value,'another');
+    assert.match(s.el('pfNhTitle').textContent,/추가 증권사/);
   } finally {s.dom.window.close();}
 });
 
@@ -173,7 +223,7 @@ test('해외주식을 제외한 NH 미리보기에도 결제 후 원화·외화 
     assert.match(s.el('pfNhPreview').textContent,/원화 현금800KRW/);
     assert.match(s.el('pfNhPreview').textContent,/USD 현금80USD/);
     assert.match(s.el('pfNhPreview').textContent,/D\+2 예수금/);
-    assert.match(s.el('pfNhPreview').textContent,/외화는 결제 후 예수금/);
+    assert.match(s.el('pfNhPreview').textContent,/외화는 통화별 결제 후 예수금/);
     assert.equal(s.el('pfNhSave').disabled,false);
   } finally {s.dom.window.close();}
 });
