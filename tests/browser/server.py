@@ -54,7 +54,7 @@ async def lifespan(app):
             await snapshots.save_stock_snapshots(user["google_sub"], day, [{"stock_code": "005930", "quantity": 10,
                 "market_value": price*10, "unit_price": price, "currency": "KRW", "fx_rate": 1}])
         try:
-            from services.brokers import derivatives, namuh, sync
+            from services.brokers import activity, derivatives, namuh, sync
             from services.quant import scanner_feed
             nh_rows = [{"stock_code": "005930", "stock_name": "삼성전자", "quantity": 3,
                         "avg_price": 80000, "avg_price_currency": "KRW", "currency": "KRW"},
@@ -73,7 +73,13 @@ async def lifespan(app):
                                        "side": "매도", "quantity": 2, "currency": "KRW" if product == "krfuture" else "USD",
                                        "average_price": 350 if product == "krfuture" else None, "current_price": None, "pnl": None}]}}
                 return nh_rows, {}
+            async def nh_activity(_user, link, start, end):
+                return [activity.normalize({"act_no": link["account_no"], "trd_dt": today.strftime("%Y%m%d"),
+                    "trd_sno": str(i), "cur_cd": "KRW", "sps_cd_krl_anm": label, "iem_cd": "005930", "iem_nm": "삼성전자",
+                    "trd_bf_dca": "10000", "trd_af_dca": "10846", "trd_amt": "1000", "tax_sum": "154", "trd_orn_fee": "0", "int_amt": "0"}, link)
+                    for i, label in enumerate(("현금배당 입금", "예탁금이용료", "이체입금"), 1)]
             with patch.object(scanner_feed, "catalog", AsyncMock(return_value=[])), \
+                 patch.object(activity, "fetch", side_effect=nh_activity), \
                  patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": no, "environment": "live"} for no in ("12345678901", "22222222222", "33333333333")])), \
                  patch.object(broker_accounts, "fetch_snapshot", side_effect=nh_snapshot), \
                  patch.object(sync, "fetch_snapshot", side_effect=nh_snapshot):

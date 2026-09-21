@@ -49,6 +49,7 @@ defer로 로드한다. CDN의 가변 버전 대신 저장소에 포함한 고정
 10. `analysis.js`: 단일 종목 분석 본체 — 검색, 기업 헤더, 개인화, analyze SSE, 위키 Q&A.
 11. `portfolio-store.js`: `PfStore` — 파일 간 공유 포트폴리오 상태의 단일 컨테이너.
     바로 뒤의 `portfolio-accounts.js`는 계좌 선택·관리·NH 연결 창과 사용자 전용 시세 소켓을 담당한다. 선택 계좌는 `PfStore.accountId`, 키·시크릿은 브라우저 저장소에 보관하지 않는다.
+    그 다음 `portfolio-account-activity.js`는 NH 수입·입출금 내역과 사유 편집을 담당한다. 서버 변경 통보로 갱신하되 저장하지 않은 사유는 보존한다. [수입·통보 계약](namuh-account-activity.md).
 12. `portfolio-shell.js`: 컬럼 표시 설정, 뷰 전환, NPS 탭(nps-tracker iframe) 진입점, 파일 로컬 plumbing.
 13. `portfolio-data.js`: 포트폴리오 API 로딩, 정렬/필터 상태, 실시간 quote row 업데이트.
 14. `portfolio-order.js`: 보유종목 drag/drop 정렬과 저장.

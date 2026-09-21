@@ -85,11 +85,16 @@ def decompose(nav: list[dict], stocks: list[dict], cashflows: list[dict], income
     delta = round(ending - beginning, 2)
     amounts = {"external_flow": round(inflow-outflow, 2), **{key: round(value, 2) for key, value in totals.items()},
                "dividend": round(dividends, 2), "fee": -round(fees, 2)}
+    for kind in ("interest", "other_income"):
+        value = sum(float(row["amount_krw"]) for row in events if row["kind"] == kind)
+        if value:
+            amounts[kind] = round(value, 2)
     if distributions:
         amounts["distribution"] = -round(distributions, 2)
     amounts["unclassified"] = round(delta - sum(amounts.values()), 2)
     labels = {"external_flow": "순입출금", "price": "가격 변화", "fx": "환율 변화", "combined": "가격·환율 미분리",
-              "dividend": "기록한 배당", "distribution": "분배금 지급", "fee": "기록한 수수료·세금", "unclassified": "매매·기타 미분류"}
+              "dividend": "기록한 배당", "interest": "이자 수입", "other_income": "기타 수입",
+              "distribution": "분배금 지급", "fee": "기록한 수수료·세금", "unclassified": "매매·기타 미분류"}
     return {
         "baseline_date": start, "ending_date": end, "starting_value": beginning, "ending_value": ending,
         "value_change": delta, "investment_pnl": round(delta-amounts["external_flow"]+distributions, 2),

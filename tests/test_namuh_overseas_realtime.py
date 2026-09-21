@@ -154,5 +154,7 @@ async def test_background_uses_two_connections_with_separate_30_registration_lim
          patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=rows)), \
          patch.object(realtime, "sync_account", AsyncMock()), patch.object(realtime, "stream", side_effect=stream):
         await asyncio.wait_for(realtime.run(stop), 2)
-    assert len(calls) == 2 and all(len(codes) == 30 for codes, _ in calls)
-    assert calls[0][0][0] == "KRX_GOLD" and calls[1][1] == {"foreign": True}
+    assert len(calls) == 2 and all(len(codes) + len(options.get("notice_channels", ())) == 30 for codes, options in calls)
+    domestic = next(codes for codes, options in calls if not options.get("foreign"))
+    assert domestic[0] == "KRX_GOLD"
+    assert len(next(codes for codes, options in calls if options.get("foreign"))) == 30

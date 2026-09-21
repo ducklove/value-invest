@@ -97,7 +97,7 @@ async def disconnect(user: str, aid: str):
 
 async def list_links() -> list[dict]:
     db = await get_db()
-    rows = await (await db.execute("SELECT google_sub,account_id,credential_id,environment,last_sync_at FROM broker_account_links")).fetchall()
+    rows = await (await db.execute("SELECT google_sub,account_id,credential_id,environment,last_sync_at,product,include_overseas,sync_error FROM broker_account_links")).fetchall()
     return [dict(r) for r in rows]
 
 

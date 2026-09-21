@@ -18,7 +18,7 @@ import websockets
 from cache_layer import MemoryTTLCache
 from repositories import account_holdings, brokers
 from repositories.broker_secrets import BrokerError
-from services.brokers import namuh, overseas_realtime
+from services.brokers import namuh, notifications, overseas_realtime
 from services.brokers.sync import sync_account
 from services.portfolio.quotes import should_accept_quote_snapshot
 
@@ -113,20 +113,31 @@ def status(user: str) -> dict:
             "requested": sum(p.get("requested", 0) for p in parts.values()), **parts}
 
 
-async def stream(user: str, cid: str, codes: list[str], environment: str, *, foreign: bool = False):
+async def stream(user: str, cid: str, codes: list[str], environment: str, *, foreign: bool = False,
+                 notice_channels: tuple[str, ...] = (), changed=None):
     registrations = {code: subscription(code) for code in codes if subscription(code)}
-    if not registrations:
+    if not registrations and not notice_channels:
         return
     delay = 2
     endpoint = "wss://moapi.nhplug.com:17070/websocket" if environment == "mock" else f"wss://api.nhplug.com:{7080 if foreign else 7070}/websocket"
     state_key = (user, "foreign") if foreign else user
+    if not registrations:
+        state_key = (user, cid, "notices")
     infos = {code: overseas_realtime.instrument(code) for code in codes} if foreign else {}
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     while True:
         try:
             access = await namuh.token(user, cid)
+            if notice_channels:
+                notifications._states[(user, cid)] = {"state": "connecting", "approved": set(), "rejected": set()}
             _status[state_key] = {"state": "connecting", "subscribed": 0, "requested": len(set(registrations.values()))}
             async with websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws:
+                for channel in notice_channels:
+                    await ws.send(json.dumps({"header": {"token": access, "tr_type": "1"}, "body": {"tr_cd": channel, "tr_key": ""}}))
+                    await asyncio.sleep(.12)
+                if changed:
+                    # 재접속 동안 놓친 통보는 REST 재조회로 복구한다.
+                    changed(None)
                 for channel, key in dict.fromkeys(registrations.values()):
                     await ws.send(json.dumps({"header": {"token": access, "tr_type": "1"}, "body": {"tr_cd": channel, "tr_key": key}}))
                     await asyncio.sleep(.12)
@@ -144,6 +155,17 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                         continue
                     if "rsp_cd" in head:
                         body = message.get("body") or {}
+                        channel = head.get("tr_cd") or (body.get("tr_cd") if isinstance(body, dict) else None)
+                        if channel in notice_channels:
+                            state = notifications._states[(user, cid)]
+                            if str(head["rsp_cd"]) == "00000":
+                                state["approved"].add(channel)
+                                if len(state["approved"]) == len(notice_channels) and not state["rejected"]:
+                                    state["state"] = "subscribed"
+                            else:
+                                state["rejected"].add(channel)
+                                state["state"] = "degraded"
+                            continue
                         keys = body.get("tr_key", head.get("tr_key", [])) if isinstance(body, dict) else []
                         keys = keys if isinstance(keys, list) else [keys]
                         if str(head["rsp_cd"]) != "00000":
@@ -154,6 +176,13 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                             continue
                         approved.update(pair for pair in registrations.values() if pair[1] in keys)
                         _status[state_key] = {"state": "subscribed", "subscribed": len(approved), "requested": len(set(registrations.values())), "rejected": len(rejected)}
+                        continue
+                    if head.get("tr_cd") in notice_channels:
+                        aid = await notifications.account_for_message(user, cid, environment, message)
+                        if aid and changed:
+                            notice = notifications._states[(user, cid)]
+                            notice.update(state="degraded" if notice["rejected"] else "received", last_event_at=datetime.now(_KST).isoformat())
+                            changed(aid)
                         continue
                     if foreign:
                         body = message.get("body")
@@ -175,15 +204,17 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                                                   "rejected": len(rejected), "last_tick_at": tick["received_at"]}
                             delay = 2
         except (BrokerError, OSError, websockets.exceptions.WebSocketException, TimeoutError):
+            if notice_channels:
+                notifications._states[(user, cid)] = {"state": "degraded", "approved": set()}
             _status[state_key] = {"state": "degraded", "message": "NH 시세 연결 재시도 중 · 기존 시세 경로 사용"}
         await asyncio.sleep(delay + random.random())
         delay = min(delay * 2, 60)
 
 
 async def run(stop: asyncio.Event):
-    jobs = {}
-    sync_times = {}
-    sync_jobs = {}
+    jobs, sync_jobs, sync_times, followups = {}, {}, {}, {}
+    pending = set()
+    wake = asyncio.Event()
     try:
         limit = max(1, min(30, int(os.environ.get("NAMUH_WS_MAX_REGISTRATIONS", "30"))))
     except ValueError:
@@ -191,55 +222,84 @@ async def run(stop: asyncio.Event):
 
     async def refresh(user, aid):
         try:
-            await sync_account(user, aid)
+            await sync_account(user, aid, include_activity=True)
         except (BrokerError, aiosqlite.Error, ValueError) as exc:
-            logger.warning("NH 잔고 동기화 보류: %s", type(exc).__name__)
+            logger.warning("NH 계좌 동기화 보류: %s", type(exc).__name__)
+        finally:
+            wake.set()
+
+    def invalidate(aid, account_ids):
+        for target in ([aid] if aid else account_ids):
+            pending.add(target)
+            followups[target] = time.monotonic() + 12
+        wake.set()
+
     try:
         while not stop.is_set():
+            wake.clear()
             try:
                 links = await brokers.list_links()
-                desired = {}
-                users = set()
-                for link in sorted(links, key=lambda row: (row["google_sub"], row["environment"] != "live", row["credential_id"])):
-                    user, cid = link["google_sub"], link["credential_id"]
-                    if user not in users:
-                        users.add(user)
-                        rows = await account_holdings.list_positions(user)
-                        if any(not re.fullmatch(r"[0-9][0-9A-Z]{5}", r["stock_code"]) and not r["stock_code"].startswith(("CASH_", "CRYPTO_", "FUTURES_", "CMA_", "KRX_")) for r in rows):
-                            await overseas_realtime.ensure_master()
-                        codes = select_codes(rows, limit)
-                        if codes:
-                            desired[(cid, False)] = (user, tuple(codes), link["environment"])
-                        foreign_codes = select_codes(rows, limit, foreign=True)
-                        if foreign_codes:
-                            desired[(cid, True)] = (user, tuple(foreign_codes), link["environment"])
+                desired, users, credentials = {}, set(), set()
+                ordered = sorted(links, key=lambda row: (row["google_sub"], row["environment"] != "live", row["credential_id"]))
+                for link in ordered:
+                    user, cid, env = link["google_sub"], link["credential_id"], link["environment"]
+                    if cid not in credentials:
+                        credentials.add(cid)
+                        linked = [r for r in links if r["credential_id"] == cid and r["environment"] == env and r["google_sub"] == user]
+                        notices = notifications.channels(linked)
+                        codes = []
+                        if user not in users:
+                            users.add(user)
+                            rows = await account_holdings.list_positions(user)
+                            if any(not re.fullmatch(r"[0-9][0-9A-Z]{5}", r["stock_code"]) and not r["stock_code"].startswith(("CASH_", "CRYPTO_", "FUTURES_", "CMA_", "KRX_")) for r in rows):
+                                await overseas_realtime.ensure_master()
+                            codes = select_codes(rows, max(0, limit - len(notices)))
+                            foreign_codes = select_codes(rows, limit, foreign=True)
+                            if foreign_codes:
+                                desired[(cid, True)] = (user, tuple(foreign_codes), env, (), ())
+                        # 같은 키의 국내 시세와 모든 통보를 한 소켓에 합쳐 연결 2개 한도를 지킨다.
+                        if codes or notices:
+                            desired[(cid, False)] = (user, tuple(codes), env, notices, tuple(r["account_id"] for r in linked))
                     aid = link["account_id"]
-                    if time.monotonic() - sync_times.get(aid, 0) > 300 and (aid not in sync_jobs or sync_jobs[aid].done()):
-                        sync_times[aid] = time.monotonic()
+                    now = time.monotonic()
+                    due = now - sync_times.get(aid, -1000) >= 60 or aid in pending or now >= followups.get(aid, float("inf"))
+                    if due and now - sync_times.get(aid, -1000) >= 2 and (aid not in sync_jobs or sync_jobs[aid].done()):
+                        pending.discard(aid)
+                        if now >= followups.get(aid, float("inf")):
+                            followups.pop(aid, None)
+                        sync_times[aid] = now
                         sync_jobs[aid] = asyncio.create_task(refresh(user, aid))
                 active_accounts = {link["account_id"] for link in links}
+                pending.intersection_update(active_accounts)
                 for aid in list(sync_jobs):
                     if aid not in active_accounts:
                         sync_jobs[aid].cancel()
                         await asyncio.gather(sync_jobs.pop(aid), return_exceptions=True)
                         sync_times.pop(aid, None)
-                for cid, (signature, task) in list(jobs.items()):
-                    if desired.get(cid) != signature or task.done():
+                        followups.pop(aid, None)
+                for key, (signature, task) in list(jobs.items()):
+                    if desired.get(key) != signature or task.done():
                         task.cancel()
                         await asyncio.gather(task, return_exceptions=True)
-                        jobs.pop(cid)
-                        old_user, old_codes, _ = signature
+                        jobs.pop(key)
+                        old_user, old_codes, _, _, _ = signature
                         for code in old_codes:
                             _quotes.delete((old_user, code))
-                        _status.pop((old_user, "foreign") if cid[1] else old_user, None)
-                for cid, signature in desired.items():
-                    if cid not in jobs:
-                        user, codes, env = signature
-                        jobs[cid] = (signature, asyncio.create_task(stream(user, cid[0], list(codes), env, **({"foreign": True} if cid[1] else {}))))
+                        _status.pop((old_user, "foreign") if key[1] else old_user if old_codes else (old_user, key[0], "notices"), None)
+                        if not key[1]:
+                            notifications._states.pop((old_user, key[0]), None)
+                for key, signature in desired.items():
+                    if key not in jobs:
+                        user, codes, env, notices, aids = signature
+                        options = {"foreign": True} if key[1] else {
+                            "notice_channels": notices,
+                            "changed": lambda aid, targets=aids: invalidate(aid, targets),
+                        }
+                        jobs[key] = (signature, asyncio.create_task(stream(user, key[0], list(codes), env, **options)))
             except (aiosqlite.Error, BrokerError, ValueError) as exc:
                 logger.warning("NH 연결 목록 재확인 예정: %s", type(exc).__name__)
             try:
-                await asyncio.wait_for(stop.wait(), timeout=30)
+                await asyncio.wait_for(wake.wait(), timeout=1)
             except TimeoutError:
                 pass
     finally:
@@ -248,3 +308,4 @@ async def run(stop: asyncio.Event):
         for task in sync_jobs.values():
             task.cancel()
         await asyncio.gather(*(task for _, task in jobs.values()), *sync_jobs.values(), return_exceptions=True)
+        notifications._states.clear()

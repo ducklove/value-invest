@@ -3,14 +3,17 @@
 import asyncio
 import json
 import time
+from datetime import date
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Body, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, ConfigDict, Field
 
 from deps import get_current_user
 from domain.broker_assets import ACCOUNT_PRODUCTS
-from repositories import account_holdings, brokers
+from repositories import account_holdings, broker_activity, brokers
 from repositories.broker_secrets import BrokerError, decrypt, encrypt
-from services.brokers import namuh, realtime
+from services.brokers import namuh, notifications, realtime
 from services.brokers.sync import fetch_snapshot, sync_account
 
 router = APIRouter()
@@ -68,18 +71,42 @@ async def connect(account_id: str, request: Request, payload: dict = Body(...)):
     if {"account_no": choice["account_no"], "environment": choice["environment"]} not in own:
         raise BrokerError("현재 키의 계좌 목록에서 선택한 계좌를 확인하지 못했습니다.")
     await brokers.link_account(user, account_id, choice["credential_id"], choice["account_no"], choice["environment"], payload.get("include_overseas") is not False, choice["product"])
-    return await sync_account(user, account_id)
+    return await sync_account(user, account_id, include_activity=True)
 
 
 @router.post("/api/portfolio/accounts/{account_id}/namuh/sync")
 async def sync(account_id: str, request: Request):
-    return await sync_account(await user_id(request), account_id)
+    return await sync_account(await user_id(request), account_id, include_activity=True)
 
 
 @router.delete("/api/portfolio/accounts/{account_id}/namuh")
 async def disconnect(account_id: str, request: Request):
     await brokers.disconnect(await user_id(request), account_id)
     return {"ok": True}
+
+
+class ActivityNote(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    revision: Annotated[int, Field(ge=1, strict=True)]
+    reason: Annotated[str, Field(max_length=500)] = ""
+    kind: Literal["dividend", "interest", "other_income", "transfer", "internal", "trade", "fee", "review"]
+    fx_rate: Annotated[float, Field(gt=0, le=1e7, allow_inf_nan=False, strict=True)] | None = None
+    income_amount: Annotated[float, Field(ge=-1e15, le=1e15, allow_inf_nan=False, strict=True)] | None = None
+
+
+@router.get("/api/portfolio/accounts/{account_id}/activity")
+async def activity_history(account_id: str, request: Request, offset: Annotated[int, Query(ge=0)] = 0):
+    return await broker_activity.history(await user_id(request), account_id, offset=offset)
+
+
+@router.post("/api/portfolio/accounts/{account_id}/activity/sync")
+async def activity_sync(account_id: str, request: Request, start: date, end: date):
+    return await sync_account(await user_id(request), account_id, include_activity=True, start=start, end=end)
+
+
+@router.patch("/api/portfolio/accounts/{account_id}/activity/{transaction_id}")
+async def activity_note(account_id: str, transaction_id: int, request: Request, payload: ActivityNote):
+    return await broker_activity.annotate(await user_id(request), account_id, transaction_id, **payload.model_dump())
 
 
 @router.websocket("/ws/namuh")
@@ -95,6 +122,7 @@ async def quotes(websocket: WebSocket):
         return
     await websocket.accept()
     sent = {}
+    last_accounts = None
     try:
         while True:
             # 사용자 인증과 키 연결은 주기적으로 재확인한다.
@@ -109,7 +137,12 @@ async def quotes(websocket: WebSocket):
                 if tick and sent.get(code) != tick["ts"]:
                     await websocket.send_json(tick)
                     sent[code] = tick["ts"]
-            await websocket.send_json({"type": "namuh_status", **realtime.status(user)})
+            await websocket.send_json({"type": "namuh_status", **realtime.status(user), "notifications": notifications.status(user)})
+            revisions = [(link["account_id"], link["last_sync_at"], link.get("sync_error")) for link in links]
+            if revisions != last_accounts:
+                await websocket.send_json({"type": "accounts_changed", "accounts": [
+                    {"account_id": aid, "synced_at": at, "error": error} for aid, at, error in revisions]})
+                last_accounts = revisions
             await asyncio.sleep(1)
     except (WebSocketDisconnect, OSError, HTTPException, RuntimeError):
         pass

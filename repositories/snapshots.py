@@ -498,7 +498,9 @@ async def settle_dividend_receipts(google_sub: str, snap_date: str) -> None:
 async def get_cashflows(google_sub: str) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT id, date, type, amount, nav_at_time, units_change, applied_snapshot_date, reversal_of_id, cancelled_at, memo, created_at FROM portfolio_cashflows WHERE google_sub = ? ORDER BY date DESC, created_at DESC",
+        "SELECT id, date, type, amount, nav_at_time, units_change, applied_snapshot_date, reversal_of_id, cancelled_at, memo, created_at, "
+        "EXISTS(SELECT 1 FROM broker_cashflow_links b WHERE b.cashflow_id=portfolio_cashflows.id) AS from_broker "
+        "FROM portfolio_cashflows WHERE google_sub = ? ORDER BY date DESC, created_at DESC",
         (google_sub,),
     )
     rows = [dict(row) for row in await cursor.fetchall()] + await get_distribution_flows(google_sub)
@@ -567,6 +569,9 @@ async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
         cf = await cursor.fetchone()
         if not cf:
             return False
+        imported = await (await db.execute("SELECT 1 FROM broker_cashflow_links WHERE cashflow_id=?", (cf_id,))).fetchone()
+        if imported:
+            raise CashflowCancellationError("NH 입출금은 계좌의 수입·입출금 내역에서 분류와 사유를 수정해 주세요.")
         if cf["cancelled_at"]:
             return True  # 중복 요청이 잔고를 두 번 바꾸지 않는다.
         if cf["reversal_of_id"] is not None:

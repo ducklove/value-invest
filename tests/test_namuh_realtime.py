@@ -103,13 +103,15 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
     async def test_gold_only_account_starts_background_subscription(self):
         stop = asyncio.Event()
 
-        async def stream(*args):
+        async def stream(*args, **kwargs):
             stop.set()
 
-        link = {"google_sub": "owner", "credential_id": "credential", "account_id": "account", "environment": "live"}
+        link = {"google_sub": "owner", "credential_id": "credential", "account_id": "account", "environment": "live", "product": "gold"}
         with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=[link])), \
              patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=[{"stock_code": "KRX_GOLD"}])), \
              patch.object(realtime, "sync_account", AsyncMock()), \
              patch.object(realtime, "stream", AsyncMock(side_effect=stream)) as stream_mock:
             await asyncio.wait_for(realtime.run(stop), timeout=2)
-        stream_mock.assert_awaited_once_with("owner", "credential", ["KRX_GOLD"], "live")
+        self.assertEqual(stream_mock.await_args.args, ("owner", "credential", ["KRX_GOLD"], "live"))
+        self.assertEqual(stream_mock.await_args.kwargs["notice_channels"], ("d3", "de"))
+        self.assertTrue(callable(stream_mock.await_args.kwargs["changed"]))

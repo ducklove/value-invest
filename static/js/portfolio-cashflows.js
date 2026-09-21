@@ -64,7 +64,7 @@ function renderCashflows(data, navData = _navChartData) {
     <td class="pf-col-num">${cf.type === 'distribution' ? '0.00' : fmtCfSignedDecimal(cf.units_change)}</td>
     <td class="pf-col-num">${fmtCfDecimal(remainingUnitsById.get(String(cf.id)))}</td>
     <td title="${escapeHtml(cf.memo || '')}">${escapeHtml(cf.memo || '')}</td>
-    <td>${cf.type === 'distribution' ? '좌수 유지' : cf.cancelled_at ? '취소됨' : cf.reversal_of_id != null ? '취소 거래' : `<button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}" aria-label="입출금 취소" title="${cf.applied_snapshot_date ? '취소 거래로 되돌리기' : '삭제'}">&times;</button>`}</td>
+    <td>${cf.from_broker ? 'NH 연동' : cf.type === 'distribution' ? '좌수 유지' : cf.cancelled_at ? '취소됨' : cf.reversal_of_id != null ? '취소 거래' : `<button class="pf-row-btn delete js-pf-cf-delete" data-cf-id="${cf.id}" aria-label="입출금 취소" title="${cf.applied_snapshot_date ? '취소 거래로 되돌리기' : '삭제'}">&times;</button>`}</td>
   </tr>`;
   }).join('');
 }

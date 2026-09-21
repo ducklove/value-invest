@@ -3,14 +3,14 @@
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from domain.broker_assets import ACCOUNT_PRODUCTS, is_futures_value
 from repositories import account_holdings as holdings
-from repositories import brokers
+from repositories import broker_activity, brokers
 from repositories.broker_secrets import BrokerError
 from repositories.db import transaction
-from services.brokers import namuh
+from services.brokers import activity, namuh
 from services.brokers.parsing import number, object_block, record_block
 from services.portfolio.identifiers import CASH_FX_CODE
 
@@ -152,16 +152,25 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
     return list(merged.values()), balances
 
 
-async def sync_account(user: str, aid: str) -> dict:
+async def sync_account(user: str, aid: str, *, include_activity: bool = False, start: date | None = None, end: date | None = None) -> dict:
     async with _sync_locks.setdefault(aid, asyncio.Lock()):
         link = await brokers.get_link(user, aid)
         try:
+            entries = None
+            if include_activity and link["environment"] == "live":
+                previous_state = await broker_activity.state(user, aid)
+                until = end or datetime.now(activity.KST).date()
+                since = start or (date.fromisoformat(previous_state["last_import_at"][:10]) - timedelta(days=7)
+                                  if previous_state and previous_state["last_import_at"] else until - timedelta(days=90))
+                entries = await activity.fetch(user, link, since, until)
             rows, balances = await fetch_snapshot(user, link)
             async with transaction() as db:
                 current = await brokers.get_link(user, aid)
                 if any(current.get(key) != link.get(key) for key in ("credential_id", "account_fingerprint", "product")):
                     raise BrokerError("동기화 중 계좌 연결이 변경되었습니다. 다시 시도해 주세요.")
                 await holdings.initialize(db, user)
+                if entries is not None:
+                    await broker_activity.store(user, link, entries)
                 previous = await holdings.list_positions(user, aid)
                 other = [r for r in await holdings.list_positions(user) if r["account_id"] != aid]
                 for row in rows:
@@ -186,6 +195,8 @@ async def sync_account(user: str, aid: str) -> dict:
                                  (now, json.dumps(balances), user, aid))
             return {"ok": True, "holdings_count": len(rows), "synced_at": now, "balances": balances}
         except BrokerError as exc:
+            if include_activity and link["environment"] == "live":
+                await broker_activity.set_error(user, aid, str(exc))
             async with transaction() as db:
                 await db.execute("UPDATE broker_account_links SET sync_error=? WHERE google_sub=? AND account_id=?", (str(exc), user, aid))
             raise

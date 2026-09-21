@@ -1,0 +1,37 @@
+import {test,expect} from '@playwright/test';
+
+test('NH 수입·입출금 가져오기와 사유 보존, 서버 변경 통보 후 화면 갱신', async ({page}, testInfo) => {
+  await page.routeWebSocket('**/ws/quotes',()=>{});
+  await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
+  const headers={Origin:'http://127.0.0.1:18765'};
+  await page.request.post('/api/auth/register',{data:{email:`income-${Date.now()}@example.com`,name:'수입 검증',password:'browser-test-password'},headers});
+  const account=await (await page.request.post('/api/portfolio/accounts',{data:{name:'NH 수입'},headers})).json();
+  const key=await (await page.request.post('/api/portfolio/namuh/credentials',{data:{app_key:'income-'+Date.now(),app_secret:'income-test-secret'},headers})).json();
+  const base='/api/portfolio/accounts/'+account.account_id;
+  expect((await page.request.post(base+'/namuh',{data:{selection:key.accounts[0].selection},headers})).ok()).toBe(true);
+  await page.goto('/portfolio');
+  await expect(page.locator('#pfBody [data-code="005930"]')).toBeVisible();
+  await page.locator('#pfAccountsOpen').click();
+  await page.locator(`[data-account="${account.account_id}"] [data-account-action="activity"]`).click();
+  await expect(page.locator('#pfActivityRows form')).toHaveCount(3);
+  await expect(page.locator('#pfActivityTotals')).toContainText('이자 846 KRW');
+  const transfer=page.locator('#pfActivityRows form').filter({hasText:'이체입금'});
+  await transfer.locator('[name="reason"]').fill('생활비 <계획>');
+  await transfer.getByRole('button',{name:'사유·분류 저장'}).click();
+  await expect(page.locator('#pfActivityStatus')).toContainText('저장했습니다');
+  await page.locator('#pfActivityImport button').click();
+  await expect(page.locator('#pfActivityStatus')).toContainText('최근 확인');
+  await expect(transfer.locator('[name="reason"]')).toHaveValue('생활비 <계획>');
+  await expect(page.locator('#pfActivityRows form')).toHaveCount(3);
+  const positions=await (await page.request.get('/api/portfolio?account_id='+account.account_id)).json();
+  expect(positions.find(row=>row.stock_code==='CASH_KRW').quantity).toBe(5000);
+  await page.setViewportSize({width:390,height:844});
+  await page.locator('#pfActivityDialog').screenshot({path:testInfo.outputPath('activity-mobile.png')});
+  expect(await page.locator('#pfActivityDialog').evaluate(el=>el.scrollWidth>el.clientWidth+1)).toBe(false);
+  await page.locator('#pfActivityClose').click();
+  await page.locator('#pfAccountsClose').click();
+  await page.waitForTimeout(1500);
+  const changed=page.waitForRequest(r=>r.method()==='GET' && new URL(r.url()).pathname==='/api/portfolio');
+  expect((await page.request.post(base+'/namuh/sync',{headers})).ok()).toBe(true);
+  await changed;
+});

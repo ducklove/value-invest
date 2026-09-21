@@ -58,6 +58,8 @@ async function pfSelectAccount(id) {
 }
 
 function pfResetAccounts() {
+  if (typeof pfResetActivity === 'function') pfResetActivity();
+  clearTimeout(PfAccounts.refreshTimer); PfAccounts.refreshTimer = null;
   PfAccounts.generation = (PfAccounts.generation || 0) + 1;
   PfAccounts.rows = [];
   PfAccounts.loaded = false;
@@ -106,6 +108,7 @@ function pfRenderAccounts() {
       ${error ? `<p class="pf-account-error">${escapeHtml(error)}</p>` : ''}
       <div class="pf-account-actions"><button type="button" data-account-action="view">이 계좌 보기</button><button type="button" data-account-action="rename">이름 수정</button>
       ${row.broker ? '<button type="button" data-account-action="sync">잔고 동기화</button><button type="button" data-account-action="disconnect">연결 해제</button>' : '<button type="button" data-account-action="connect">NH 계좌 연동</button>'}
+      <button type="button" data-account-action="activity">수입·입출금 내역</button>
       <button type="button" data-account-action="delete" ${row.holdings_count || row.broker || row.account_id.startsWith('default-') ? 'disabled' : ''}>계좌 삭제</button></div>
       ${row.broker ? '<small>종목과 현금은 증권사 잔고로 갱신됩니다. 연결 해제 시 현재 잔고를 수동 계좌로 보존합니다.</small>' : ''}</section>`;
   }).join('');
@@ -134,6 +137,7 @@ async function pfAccountAction(event) {
   const action = button.dataset.accountAction;
   if (action === 'view') { _pfAccountEl('pfAccountsDialog').close(); await pfSelectAccount(aid); return; }
   if (action === 'connect') { pfOpenNhConnection(row); return; }
+  if (action === 'activity') { await pfOpenAccountActivity(row); return; }
   let options = { method: 'DELETE' }, path = `/api/portfolio/accounts/${encodeURIComponent(aid)}`;
   if (action === 'rename') {
     const name = prompt('계좌 이름', row.name);
@@ -210,7 +214,7 @@ async function pfNhWork(action) {
       } else {
         _pfAccountEl('pfNhDialog').close();
         await pfLoadAccounts(true); pfRenderAccounts(); await loadPortfolio({ force: true });
-        _pfAccountEl('pfAccountsStatus').textContent = 'NH 계좌를 연결했습니다. 잔고는 5분마다 자동으로 확인합니다.';
+        _pfAccountEl('pfAccountsStatus').textContent = 'NH 계좌를 연결했습니다. 주문·체결 통보를 받으면 갱신하며, 수입·입출금은 60초마다 확인합니다.';
       }
     }
   } catch (error) {
@@ -228,6 +232,25 @@ function pfCheckNamuhConnection() {
   clearInterval(PfAccounts.watchdog); PfAccounts.watchdog = null;
   QuoteManager.namuhUnavailable?.();
   pfConnectNamuhQuotes();
+}
+
+function pfRefreshChangedAccounts() {
+  if (PfAccounts.refreshTimer) return;
+  const generation = PfAccounts.generation || 0;
+  const refresh = async () => {
+    if (generation !== (PfAccounts.generation || 0)) return;
+    if (PfStore.loading || PfStore.edit?.code || PfStore.edit?.savingCode || PfAccounts.busy) {
+      PfAccounts.refreshTimer = setTimeout(refresh, 1000); return;
+    }
+    PfAccounts.refreshTimer = null;
+    try {
+      await pfLoadAccounts(true);
+      if (generation !== (PfAccounts.generation || 0)) return;
+      if (_pfAccountEl('pfAccountsDialog')?.open) pfRenderAccounts();
+      await loadPortfolio({ force: true });
+    } catch (_) { /* 다음 서버 갱신 또는 수동 조회로 다시 확인 */ }
+  };
+  PfAccounts.refreshTimer = setTimeout(refresh, 250);
 }
 
 function pfConnectNamuhQuotes() {
@@ -253,11 +276,17 @@ function pfConnectNamuhQuotes() {
         if (QuoteManager.onNamuhQuote) QuoteManager.onNamuhQuote(message.code, message);
         else QuoteManager.onQuote?.(message.code, message);
       }
+      if (message.type === 'accounts_changed') {
+        pfRefreshChangedAccounts();
+        if (typeof pfActivityAccountsChanged === 'function') pfActivityAccountsChanged(message.accounts || []);
+      }
       if (message.type === 'namuh_status') {
         QuoteManager._syncNamuhFallback?.();
         const label = _pfAccountEl('pfNhQuoteState');
         if (label) label.textContent = (message.state === 'live' ? 'NH 실시간 시세 우선 사용' : message.state === 'subscribed' ? 'NH 시세 구독 · 체결 대기' : 'NH 시세 연결 확인 중')
           + (message.foreign?.rejected ? ' · 해외 실시간 권한·구독 한도 확인 필요, 보조 시세 사용' : '');
+        if (label && message.notifications) label.textContent += message.notifications.state === 'subscribed'
+          ? ' · 계좌 통보 연결 · 입출금 60초 확인' : ' · 계좌 통보 연결 확인 중 · 60초 조회 보완';
       }
     } catch (_) { /* 잘못된 개별 메시지는 다음 메시지에 영향을 주지 않는다. */ }
   };

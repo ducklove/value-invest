@@ -836,6 +836,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_broker_account_owner
 -- 가계 단위 통합 자산. 주식 포트폴리오는 실시간 평가액을 중복 저장하지
 -- 않고 프런트에서 자동 합산하며, 이 표에는 부동산·예적금·연금·부채 등
 -- 포트폴리오 밖의 자산만 보관한다.
+CREATE TABLE IF NOT EXISTS broker_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    account_id TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    source_revision TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
+    baseline INTEGER NOT NULL DEFAULT 1,
+    projected_flow REAL NOT NULL DEFAULT 0,
+    income_krw REAL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(google_sub, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_broker_transactions_account ON broker_transactions(google_sub, account_id, id);
+CREATE TABLE IF NOT EXISTS broker_transaction_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL REFERENCES broker_transactions(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS broker_cashflow_links (
+    cashflow_id INTEGER PRIMARY KEY REFERENCES portfolio_cashflows(id),
+    transaction_id INTEGER NOT NULL REFERENCES broker_transactions(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS broker_activity_state (
+    account_id TEXT PRIMARY KEY,
+    google_sub TEXT NOT NULL,
+    account_fingerprint TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    last_import_at TEXT,
+    error TEXT
+);
+
 CREATE TABLE IF NOT EXISTS household_assets (
     asset_id TEXT PRIMARY KEY,
     google_sub TEXT NOT NULL,

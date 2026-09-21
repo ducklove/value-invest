@@ -3652,3 +3652,24 @@ body.pf-compact-rows .pf-row-actions .js-pf-account-detail { display:none; }
 .pf-derivative-table-wrap th:first-child,.pf-derivative-table-wrap td:first-child { text-align:left; }
 .pf-derivative-balances summary { cursor:pointer; font-weight:600; }
 .pf-derivative-balances p { color:var(--text-secondary); }
+
+/* 계좌 수입·입출금 원장 */
+.pf-activity-dialog { width: min(940px, 95vw); max-height: 90vh; overflow-y: auto; font-family: var(--font-base, sans-serif); }
+.pf-activity-dialog > h2 { display: inline-block; margin: 0 0 14px; font-size: 20px; }
+.pf-activity-dialog > p, .pf-activity-row p { color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+.pf-activity-dialog button { padding: 9px 12px; min-height: 40px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.pf-activity-dialog input, .pf-activity-dialog select { min-height: 42px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; }
+.pf-activity-dialog label { font-size: 13px; }
+#pfActivityClose { float: right; }
+.pf-activity-row { border-top: 1px solid var(--border); padding: 16px 0; display: grid; gap: 10px; }
+.pf-activity-row h3 { font-size: 14px; margin: 0; }
+.pf-activity-row label { display: grid; gap: 4px; }
+.pf-activity-row label[hidden] { display: none; }
+.pf-activity-row input, .pf-activity-row select { width: 100%; box-sizing: border-box; }
+.pf-activity-row small { color: var(--text-secondary); font-size: 12px; }
+.pf-activity-row button { justify-self: end; }
+#pfActivityImport { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+#pfActivityImport[hidden] { display: none; }
+#pfActivityTotals { padding: 12px 0; }
+#pfActivityTotals h3 { font-size: 15px; }
+@media(max-width:600px) { .pf-activity-dialog input, .pf-activity-dialog select { font-size: 16px; } }

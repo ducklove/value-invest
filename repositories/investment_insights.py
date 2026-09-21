@@ -95,7 +95,17 @@ async def income_events(user: str, start: str, end: str) -> list[dict]:
         ", (SELECT r.applied_snapshot_date FROM portfolio_dividend_receipts r WHERE r.income_event_id=e.id) AS receipt_settled_date "
         "FROM portfolio_income_events e WHERE google_sub=? AND date>=? AND date<=? ORDER BY date DESC,id DESC",
         (user, start, end))).fetchall()
-    return [dict(row) for row in rows]
+    imported = await (await db.execute(
+        "SELECT id,data_json,kind,income_krw,reason,account_id FROM broker_transactions WHERE google_sub=? "
+        "AND json_extract(data_json,'$.date')>=? AND json_extract(data_json,'$.date')<=? AND income_krw!=0",
+        (user, start, end))).fetchall()
+    events = [dict(row) for row in rows]
+    for row in imported:
+        data = json.loads(row["data_json"])
+        events.append({"id": -row["id"], "date": data["date"], "stock_code": data["stock_code"],
+                       "kind": row["kind"], "amount_krw": row["income_krw"], "account_id": row["account_id"],
+                       "memo": "NH · " + data["description"] + " · " + row["reason"], "from_broker": True})
+    return sorted(events, key=lambda row: (row["date"], row["id"]), reverse=True)
 
 
 async def add_income(user: str, data: dict) -> int:
