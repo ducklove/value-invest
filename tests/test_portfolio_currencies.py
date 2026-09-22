@@ -18,6 +18,8 @@ def test_yahoo_currency_inference_is_shared_across_quote_and_history_paths():
         "A200.AX": "AUD",
         "SHOP.TO": "CAD",
         "EUN2.DE": "EUR",
+        "FUEVFVND.HM": "VND",
+        "BVS.HN": "VND",
         "BRK-B": "USD",
     }
 

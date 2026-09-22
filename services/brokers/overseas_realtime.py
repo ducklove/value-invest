@@ -26,6 +26,7 @@ _MARKETS = {
     "SHC": (".SS", "Asia/Shanghai"), "SHZ": (".SZ", "Asia/Shanghai"),
     "ASX": (".AX", "Australia/Sydney"), "GER": (".DE", "Europe/Berlin"),
     "LSE": (".L", "Europe/London"),
+    "HSX": (".HM", "Asia/Ho_Chi_Minh"), "HNX": (".HN", "Asia/Ho_Chi_Minh"),
 }
 
 
@@ -83,6 +84,13 @@ def instrument(code: str) -> dict | None:
         return None
     alias = static_foreign_ticker(code)
     return _instruments.get(alias["ticker"] if alias else code)
+
+
+def code_for_balance(gic: str, currency: str) -> str | None:
+    if not _master.get("ready"):
+        return None
+    matches = [code for code, info in _instruments.items() if info["gic"] == gic and info["currency"] == currency]
+    return matches[0] if len(matches) == 1 else None
 
 
 def normalize(message: dict, code: str, info: dict, now: datetime) -> dict | None:

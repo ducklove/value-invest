@@ -57,6 +57,36 @@ def test_official_master_maps_exchange_class_shares_and_original_currency(monkey
             overseas.parse_master(invalid)
 
 
+def test_balance_identity_and_vietnam_subscriptions_use_gic_and_currency(monkeypatch):
+    data = master_row("AUSAAA", "AAA", "ASX", "AUD") + master_row("USAAAA", "AAA", "NYY", "USD")
+    data += master_row("VNMAAA", "AAA", "HSX", "VND") + master_row("VNMFUEVFVND", "FUEVFVND", "HSX", "VND")
+    data += master_row("VNMBVS", "BVS", "HNX", "VND")
+    monkeypatch.setattr(overseas, "_instruments", overseas.parse_master(data))
+    assert overseas.code_for_balance("AUSAAA", "AUD") == "AAA.AX"
+    assert overseas.code_for_balance("USAAAA", "USD") == "AAA"
+    assert overseas.code_for_balance("VNMAAA", "VND") == "AAA.HM"
+    assert overseas.code_for_balance("VNMFUEVFVND", "VND") == "FUEVFVND.HM"
+    assert overseas.code_for_balance("VNMFUEVFVND", "USD") is None
+    assert realtime.subscription("FUEVFVND.HM") == ("RC", "VNMFUEVFVND")
+    assert realtime.subscription("BVS.HN") == ("RC", "VNMBVS")
+    assert overseas.instrument("FUEVFVND.HM")["zone"] == "Asia/Ho_Chi_Minh"
+    overseas._master.clear()
+    assert overseas.code_for_balance("VNMFUEVFVND", "VND") is None
+
+
+@pytest.mark.asyncio
+async def test_vietnam_tick_keeps_vnd_units_and_local_trade_time(monkeypatch):
+    monkeypatch.setattr(overseas, "_instruments", overseas.parse_master(master_row("VNMFUEVFVND", "FUEVFVND", "HSX", "VND")))
+    now = datetime(2026, 9, 22, 11, 30, tzinfo=realtime._KST)
+    payload = {"header": {"tr_cd": "RC"}, "body": {"gicz15": "VNMFUEVFVND", "exch_idz3": "HSX",
+        "trade_datez8": "20260922", "trade_timez6": "093000", "trdprc_1z17": "33810", "netchng_clsz1": "2", "netchng_1z17": "100"}}
+    tick = overseas.normalize(payload, "FUEVFVND.HM", overseas.instrument("FUEVFVND.HM"), now)
+    assert tick["price"] == 33810 and datetime.fromisoformat(tick["as_of"]) == now
+    with patch.object(fx, "fx_rate_for_currency", AsyncMock(return_value=.05)):
+        won = await overseas.to_won(tick)
+    assert won["price"] == 1690.5 and won["original_currency"] == "VND"
+
+
 @pytest.mark.parametrize("at", [datetime(2026, 7, 10, 1, tzinfo=realtime._KST), datetime(2026, 1, 10, 1, tzinfo=realtime._KST)])
 def test_foreign_trade_date_timezone_and_dst(at):
     tick = overseas.normalize(message(at), "AAPL", overseas.instrument("AAPL"), at)

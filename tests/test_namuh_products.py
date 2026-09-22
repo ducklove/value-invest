@@ -36,7 +36,7 @@ class NamuhProductsTests(TempDbMixin):
 
     async def test_gold_uses_dedicated_balance_without_stock_listing_filter(self):
         page = {"Output_0": {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "drn_pbl_amt": 700},
-                "Output_1": [{"iem_cd": "M04020000", "iem_nm": "금 99.99K", "itg_bnc_qty": 12, "phs_pr": 120000}]}
+                "Output_1": [{"iem_cd": "M04020000", "iem_nm": "금 99.99K", "itg_bnc_qty": 12, "rsdl_qty": 12, "phs_pr": 120000}]}
         with self.owned(), patch.object(namuh, "pages", AsyncMock(return_value=[page])) as api:
             rows, _ = await sync.fetch_snapshot("u1", self.link_data("gold"))
         api.assert_awaited_once_with("u1", self.cid, "/krgold/inquiry/v1/goldDepositAndBalance", {"act_no": "12345678901"}, "live")
@@ -47,7 +47,7 @@ class NamuhProductsTests(TempDbMixin):
         # 운영 응답은 문서와 달리 출금가능금액을 생략한다. 주문가능액으로 대체하지 않는다.
         page = {"rsp_cd": "00166", "Output_0": {
             "dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "orr_pbl_amt4": 700},
-            "Output_1": [{"iem_cd": "M04020000", "iem_nm": "금 99.99K", "itg_bnc_qty": 12.0, "phs_pr": 120000}]}
+            "Output_1": [{"iem_cd": "M04020000", "iem_nm": "금 99.99K", "itg_bnc_qty": 12.0, "rsdl_qty": 12.0, "phs_pr": 120000}]}
         await self.link("gold")
         with self.owned(), patch.object(namuh, "pages", AsyncMock(return_value=[page])):
             result = await sync.sync_account("u1", self.aid)
@@ -61,6 +61,14 @@ class NamuhProductsTests(TempDbMixin):
             with self.assertRaises(BrokerError):
                 await sync.sync_account("u1", self.aid)
         self.assertEqual({r["stock_code"]: r for r in await account_holdings.list_positions("u1", self.aid)}, positions)
+
+    async def test_gold_uses_execution_quantity_without_adding_unsettled_twice(self):
+        page = {"Output_0": {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800},
+                "Output_1": [{"iem_cd": "M04020000", "itg_bnc_qty": 12, "ny_stl_qty": -3,
+                              "rsdl_qty": 9, "phs_pr": 120000}]}
+        with self.owned(), patch.object(namuh, "pages", AsyncMock(return_value=[page])):
+            rows, _ = await sync.fetch_snapshot("u1", self.link_data("gold"))
+        self.assertEqual({row["stock_code"]: row["quantity"] for row in rows}, {"KRX_GOLD": 9, "CASH_KRW": 800})
 
     async def test_domestic_long_short_contracts_and_equity_are_separate_and_persist_after_disconnect(self):
         await self.link("krfuture")

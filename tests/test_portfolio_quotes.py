@@ -12,6 +12,21 @@ from services.portfolio import foreign, quote_service, quotes
 
 
 @pytest.mark.asyncio
+async def test_vietnam_quote_uses_naver_and_vnd_conversion_without_yahoo_symbol_probing():
+    raw = {"closePrice": "33,810", "compareToPreviousClosePrice": "100", "fluctuationsRatio": "0.30", "nationType": "VNM", "nationName": "베트남"}
+    with patch.object(foreign, "fetch_naver_world_stock", AsyncMock(return_value=raw)) as naver, \
+         patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=lambda nation, value: value * .05)) as fx, \
+         patch.object(foreign, "yfinance_fetch_quote_fast", AsyncMock()) as yahoo, \
+         patch.object(foreign, "kis_fetch_foreign_quote", AsyncMock()) as kis:
+        quote = await foreign.fetch_foreign_quote("FUEVFVND.HM")
+    naver.assert_awaited_once_with("FUEVFVND.HM")
+    assert quote["price"] == 1690 and quote["change"] == 5
+    assert all(call.args[0] == "VNM" for call in fx.await_args_list)
+    yahoo.assert_not_awaited()
+    kis.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_authenticated_asset_quotes_prefer_private_nh_without_shared_cache_pollution():
     from repositories import brokers
     from services.brokers import realtime

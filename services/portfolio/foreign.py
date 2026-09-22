@@ -57,7 +57,7 @@ infer_yf_currency = currencies.infer_yf_currency
 _SPECIAL_ASSET_NAMES = {"KRX_GOLD": "KRX 금현물", "CMA_RP_KRW": "CMA 원화RP", "CRYPTO_BTC": "비트코인", "CRYPTO_ETH": "이더리움", "CRYPTO_USDT": "테더"}
 
 _EXCHANGE_SUFFIXES = (
-    "", ".O", ".K", ".N", ".HM", ".HK", ".T", ".SS", ".SZ", ".L", ".AX",
+    "", ".O", ".K", ".N", ".HM", ".HN", ".HK", ".T", ".SS", ".SZ", ".L", ".AX",
     ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".SW", ".ST", ".CO", ".HE",
 )
 
@@ -354,6 +354,9 @@ async def kis_fetch_foreign_quote(ticker: str) -> dict:
 
 
 async def fetch_foreign_quote(reuters_code: str) -> dict:
+    # 베트남 거래소 식별자는 Naver 형식이다. Yahoo의 미국 종목으로 재해석하지 않는다.
+    if reuters_code.upper().endswith((".HM", ".HN")):
+        return await fetch_naver_foreign_quote(reuters_code)
     static = _static_foreign_ticker(reuters_code)
     if static:
         try:
@@ -392,6 +395,10 @@ async def fetch_foreign_quote(reuters_code: str) -> dict:
         return q
 
     # 3. Naver fallback
+    return await fetch_naver_foreign_quote(reuters_code)
+
+
+async def fetch_naver_foreign_quote(reuters_code: str) -> dict:
     upper_code = reuters_code.upper()
     d = await fetch_naver_world_stock(upper_code)
     if d and d.get("closePrice"):
@@ -412,7 +419,7 @@ async def fetch_foreign_quote(reuters_code: str) -> dict:
                 "change_pct": change_pct,
                 "nation": d.get("nationName", ""),
             }
-        except Exception as exc:
+        except (TypeError, ValueError, OverflowError, fx.FXUnavailableError) as exc:
             logger.warning("해외주식 시세 파싱 실패(%s): %s", reuters_code, exc)
 
     return {}

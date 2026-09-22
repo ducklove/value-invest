@@ -2,10 +2,25 @@
 
 from domain.broker_assets import ACCOUNT_PRODUCTS
 from repositories.broker_secrets import BrokerError
-from services.brokers import namuh, namuh_listing
+from services.brokers import namuh, namuh_listing, overseas_realtime
 from services.brokers.parsing import number
 from services.brokers.symbols import domestic_code, foreign_code, records, summary
 from services.portfolio.identifiers import CASH_FX_CODE
+
+
+async def overseas_code(row: dict, currency: str) -> str:
+    country = str(row.get("fc_sec_trd_nat_cd", "")).strip()
+    symbol = str(row.get("iem_cd", "")).strip().upper()
+    # 운영 전체국가 잔고에서 확인한 NH 국가코드. 동일 심벌(예: AAA)이 여러
+    # 시장에 있으므로 호주·독일·베트남은 공식 GIC와 결제통화까지 대조한다.
+    nation = {"020": "AUS", "050": "DEU", "660": "VNM"}.get(country)
+    if nation:
+        await overseas_realtime.ensure_master()
+        code = overseas_realtime.code_for_balance(nation + symbol, currency)
+        if not code:
+            raise BrokerError("NH 해외 잔고의 거래소·통화를 확인하지 못해 기존 잔고를 유지합니다.")
+        return code
+    return foreign_code(symbol, country)
 
 
 async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
@@ -48,7 +63,9 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
                     # 비상장 잔고의 수량·매입가가 비어 있어도 다른 잔고를 가져온다.
                     excluded.add(code)
                     continue
-            qty = number(row, "itg_bnc_qty")
+            # itg_bnc_qty는 결제 잔고다. rsdl_qty에는 미결제 매수·매도(ny_stl_qty)가
+            # 반영되어 있으므로 체결 직후 잔량을 사용한다. 미결제 수량을 다시 더하지 않는다.
+            qty = number(row, "rsdl_qty")
             if not qty:
                 continue
             if code == "CMA_RP_KRW":
@@ -68,22 +85,23 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
     output.append({"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": balances["KRW"]["nxt2_dd_dca"],
                    "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"})
     if product == "stocks" and link.get("include_overseas", True):
-        for country in ("200", "070", "120", "160", "170"):
-            pages = await namuh.pages(user, cid, "/gbstock/inquiry/v1/balance", {
-                "act_no": account, "qut_iqr_dit_cd": "9", "fc_sec_trd_nat_cd": country, "cur_cd": "KRW", "xns_dit_cd": "1",
-            }, env)
-            summary(pages[0])
-            for page in pages:
-                for row in records(page):
-                    qty = number(row, "cns_bse_bnc_qty")
-                    if not qty:
-                        continue
-                    currency = str(row.get("cur_cd", "")).strip()
-                    if currency not in {"USD", "JPY", "HKD", "CNY"}:
-                        raise BrokerError("해외 잔고의 거래 통화를 확인할 수 없습니다.")
-                    output.append({"stock_code": foreign_code(row.get("iem_cd", ""), country),
-                                   "stock_name": str(row.get("iem_nm") or row.get("oss_iem_eng_nm") or row["iem_cd"]),
-                                   "quantity": qty, "avg_price": number(row, "fc_phs_uit_pr"), "avg_price_currency": currency, "currency": currency})
+        # 운영에서 000=전체국가로 확인했다. 국가를 나열하면 베트남·호주·독일 등이
+        # 조용히 누락된다. 각 행의 국가코드로 해석하며 모든 연속조회 페이지를 반영한다.
+        pages = await namuh.pages(user, cid, "/gbstock/inquiry/v1/balance", {
+            "act_no": account, "qut_iqr_dit_cd": "9", "fc_sec_trd_nat_cd": "000", "cur_cd": "KRW", "xns_dit_cd": "1",
+        }, env)
+        summary(pages[0])
+        for page in pages:
+            for row in records(page):
+                qty = number(row, "cns_bse_bnc_qty")
+                if not qty:
+                    continue
+                currency = str(row.get("cur_cd", "")).strip()
+                if "CASH_" + currency not in CASH_FX_CODE:
+                    raise BrokerError("해외 잔고의 거래 통화를 확인할 수 없습니다.")
+                output.append({"stock_code": await overseas_code(row, currency),
+                               "stock_name": str(row.get("iem_nm") or row.get("oss_iem_eng_nm") or row["iem_cd"]),
+                               "quantity": qty, "avg_price": number(row, "fc_phs_uit_pr"), "avg_price_currency": currency, "currency": currency})
     # 외화 예수금은 해외주식 조회 여부와 별개로 항상 결제 후 잔액을 가져온다.
     margins = await namuh.pages(user, cid, "/gbstock/inquiry/v1/margin", {"act_no": account}, env) if product == "stocks" else []
     for page in margins:
