@@ -1,10 +1,10 @@
 [Unit]
-Description=Evaluate portfolio condition alerts every 5 minutes (weekdays 08:00-20:00 KST)
+Description=Evaluate portfolio condition alerts every 5 minutes
 
 [Timer]
-# 08:00-20:55 covers NXT pre-market through the after-market close. Weekdays
-# only — no price moves on weekends. System clock is KST on the Pi.
-OnCalendar=Mon..Fri *-*-* 08..20:00/5
+# User quiet hours control delivery. Keep evaluating overnight for foreign
+# markets and drain deferred alerts on weekends as soon as quiet hours end.
+OnCalendar=*-*-* *:00/5
 Persistent=false
 
 [Install]

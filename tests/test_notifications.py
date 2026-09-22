@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 import unittest
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -25,7 +25,7 @@ from repositories import corp_codes
 from repositories import db as db_repo
 from repositories import notifications as notifications_repo
 from routes import notifications as notif_route
-from services.notifications import channels, engine, kakao, telegram
+from services.notifications import alert_delivery, channels, engine, kakao, telegram
 from services.portfolio import target_resolver
 
 
@@ -428,6 +428,9 @@ class AlertCrudTests(NotificationHarness):
 
 class AlertEngineHarness(TempDbMixin):
     async def seed(self) -> None:
+        clock = patch.object(alert_delivery, "now_kst", return_value=datetime(2026, 9, 23, 12, tzinfo=alert_delivery.KST))
+        clock.start()
+        self.addCleanup(clock.stop)
         await _seed_user_and_holding()
         await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 123, "username": "t"}, enabled=True, verified=True

@@ -21,7 +21,7 @@ from repositories import notifications as notifications_repo
 from repositories import rebalance_targets as targets_repo
 from repositories import snapshots as snapshots_repo
 from routes import rebalance as rebalance_route
-from services.notifications import channels, engine
+from services.notifications import alert_delivery, channels, engine
 from services.portfolio import rebalance as rebalance_service
 
 
@@ -327,6 +327,7 @@ class RebalanceRouteTests(TempDbHarness):
 class RebalanceAlertEngineTests(TempDbHarness):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
+        await alert_delivery.save_settings("u1", {**alert_delivery.DEFAULT_SETTINGS, "enabled": False})
         await _seed_snapshot_portfolio()
         await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 123, "username": "t"}, enabled=True, verified=True

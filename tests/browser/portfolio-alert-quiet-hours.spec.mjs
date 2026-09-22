@@ -1,0 +1,40 @@
+import { test, expect } from '@playwright/test';
+
+test('알림 제한 시간 저장·새로고침·제한 해제와 모바일 배치', async ({ page }, testInfo) => {
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+  });
+  await page.goto('/login?return_to=/portfolio');
+  await page.locator('#loginEmail').fill('browser@example.com');
+  await page.locator('#loginPassword').fill('browser-test-password');
+  await page.getByRole('button', { name: '이메일로 로그인' }).click();
+  await expect(page).toHaveURL(/\/portfolio$/);
+  await page.locator('.pf-alerts-btn').click();
+  await expect(page.locator('#pfQuietStart')).toHaveValue('21:00');
+  await page.locator('#pfQuietStart').fill('23:15');
+  await page.locator('#pfQuietEnd').fill('07:45');
+  await page.locator('#pfQuietMode').selectOption('defer');
+  await page.locator('#pfQuietSave').click();
+  await expect(page.locator('#pfQuietStatus')).toHaveText('저장했습니다.');
+  await page.reload();
+  await page.locator('.pf-alerts-btn').click();
+  await expect(page.locator('#pfQuietStart')).toHaveValue('23:15');
+  await expect(page.locator('#pfQuietEnd')).toHaveValue('07:45');
+  await expect(page.locator('#pfQuietMode')).toHaveValue('defer');
+  await page.locator('#pfAlertQuietHours').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('quiet-hours-desktop.png') });
+  await page.locator('#pfQuietEnabled').uncheck();
+  await expect(page.locator('#pfQuietStart')).toBeDisabled();
+  await page.locator('#pfQuietSave').click();
+  await expect(page.locator('#pfQuietStatus')).toHaveText('저장했습니다.');
+  await page.reload();
+  await page.locator('.pf-alerts-btn').click();
+  await expect(page.locator('#pfQuietEnabled')).not.toBeChecked();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#pfAlertQuietHours').scrollIntoViewIfNeeded();
+  await expect(page.locator('#pfQuietSave')).toBeVisible();
+  const fits = await page.locator('#pfAlertsModal .pf-alerts-body').evaluate(el => el.scrollWidth <= el.clientWidth);
+  expect(fits).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('quiet-hours-mobile.png') });
+});

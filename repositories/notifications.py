@@ -104,6 +104,10 @@ async def set_notification_channel_enabled(google_sub: str, channel: str, enable
 
 async def delete_notification_channel(google_sub: str, channel: str) -> bool:
     async with transaction() as db:
+        await db.execute(
+            "DELETE FROM pending_portfolio_alerts WHERE google_sub = ? AND channel = ?",
+            (google_sub, channel),
+        )
         cursor = await db.execute(
             "DELETE FROM notification_channels WHERE google_sub = ? AND channel = ?",
             (google_sub, channel),
@@ -235,6 +239,10 @@ async def update_portfolio_alert(google_sub: str, alert_id: int, **fields) -> bo
             f"UPDATE portfolio_alerts SET {', '.join(sets)} WHERE google_sub = ? AND id = ?",
             params,
         )
+        await db.execute(
+            "DELETE FROM pending_portfolio_alerts WHERE google_sub = ? AND alert_id = ?",
+            (google_sub, alert_id),
+        )
         return cursor.rowcount > 0
 
 
@@ -299,6 +307,41 @@ async def set_portfolio_alert_state(
                 "UPDATE portfolio_alerts SET armed = ?, last_value = ?, updated_at = ? WHERE id = ?",
                 (1 if armed else 0, last_value, _now(), alert_id),
             )
+
+
+async def enqueue_portfolio_alert(
+    google_sub: str, alert_id: int, message: str, event_key: str, occurred_at: str
+) -> None:
+    """One durable row per active channel, so partial sends can retry independently."""
+    async with transaction() as db:
+        await db.execute(
+            """INSERT OR IGNORE INTO pending_portfolio_alerts
+                (google_sub, alert_id, channel, event_key, message, occurred_at)
+               SELECT ?, ?, channel, ?, ?, ? FROM notification_channels
+               WHERE google_sub = ? AND enabled = 1 AND verified = 1""",
+            (google_sub, alert_id, event_key, message, occurred_at, google_sub),
+        )
+
+
+async def list_pending_portfolio_alerts(google_sub: str) -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT p.* FROM pending_portfolio_alerts p
+           JOIN portfolio_alerts a ON a.id = p.alert_id AND a.google_sub = p.google_sub
+           JOIN notification_channels c ON c.google_sub = p.google_sub AND c.channel = p.channel
+               AND c.enabled = 1 AND c.verified = 1
+           WHERE p.google_sub = ? AND a.enabled = 1 ORDER BY p.id LIMIT 500""",
+        (google_sub,),
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+async def delete_pending_portfolio_alert(google_sub: str, pending_id: int) -> None:
+    async with transaction() as db:
+        await db.execute(
+            "DELETE FROM pending_portfolio_alerts WHERE google_sub = ? AND id = ?",
+            (google_sub, pending_id),
+        )
 
 
 async def claim_notification_delivery(

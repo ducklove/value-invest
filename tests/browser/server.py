@@ -32,6 +32,7 @@ from routes import (
     broker_accounts,
     dividend_receipts,
     investment_insights,
+    notifications,
     portfolio,
     portfolio_distributions,
     portfolio_trades,
@@ -119,6 +120,7 @@ app.include_router(portfolio_trades.router)
 app.include_router(dividend_receipts.router)
 app.include_router(portfolio_distributions.router)
 app.include_router(quant.router)
+app.include_router(notifications.router)
 
 
 @app.get("/healthz")

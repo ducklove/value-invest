@@ -355,3 +355,72 @@ test("pfOpenAlerts 는 경제캘린더 구독 요약도 함께 불러온다", as
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(called, true);
 });
+
+function quietHoursForm(settings = { enabled: true, start: '21:00', end: '08:00', mode: 'skip' }) {
+  const w = loadAlerts();
+  const container = w.document.createElement('div');
+  container.id = 'pfAlertQuietHours';
+  w.document.body.appendChild(container);
+  w.pfAlertsRenderQuietHours(settings);
+  return w;
+}
+
+test('알림 시간 설정을 읽고 제한 해제 시 시간 입력을 비활성화한다', async () => {
+  const w = quietHoursForm();
+  w.apiFetchJson = async (path) => {
+    assert.equal(path, '/api/notifications/quiet-hours');
+    return { enabled: true, start: '23:15', end: '07:30', mode: 'defer' };
+  };
+  await w.pfAlertsLoadQuietHours();
+  assert.equal(w.document.getElementById('pfQuietStart').value, '23:15');
+  assert.equal(w.document.getElementById('pfQuietEnd').value, '07:30');
+  assert.equal(w.document.getElementById('pfQuietMode').value, 'defer');
+  w.document.getElementById('pfQuietEnabled').checked = false;
+  w.pfAlertsToggleQuietHours();
+  assert.equal(w.document.getElementById('pfQuietFields').disabled, true);
+});
+
+test('선택한 시간·처리 방법과 제한 해제 상태를 저장한다', async () => {
+  const w = quietHoursForm();
+  w.document.getElementById('pfQuietStart').value = '22:45';
+  w.document.getElementById('pfQuietMode').value = 'defer';
+  w.document.getElementById('pfQuietEnabled').checked = false;
+  let requests = 0;
+  w.apiFetchJson = async (path, options) => {
+    requests += 1;
+    assert.equal(path, '/api/notifications/quiet-hours');
+    assert.equal(options.method, 'PUT');
+    assert.deepEqual(JSON.parse(options.body), { enabled: false, start: '22:45', end: '08:00', mode: 'defer' });
+    return JSON.parse(options.body);
+  };
+  await w.pfAlertsSaveQuietHours();
+  assert.equal(requests, 1);
+  assert.equal(w.document.getElementById('pfQuietStatus').textContent, '저장했습니다.');
+  assert.equal(w.document.getElementById('pfQuietSave').disabled, false);
+});
+
+test('시작·종료가 같으면 요청하지 않고 안내한다', async () => {
+  const w = quietHoursForm();
+  w.document.getElementById('pfQuietEnd').value = '21:00';
+  w.apiFetchJson = async () => assert.fail('invalid settings must not be saved');
+  await w.pfAlertsSaveQuietHours();
+  assert.match(w.document.getElementById('pfQuietStatus').textContent, /다르게/);
+});
+
+test('저장 실패 시 입력을 보존하고 다시 저장할 수 있다', async () => {
+  const w = quietHoursForm();
+  w.document.getElementById('pfQuietMode').value = 'defer';
+  w.apiFetchJson = async () => { throw new Error('저장 실패'); };
+  await w.pfAlertsSaveQuietHours();
+  assert.equal(w.document.getElementById('pfQuietStatus').textContent, '저장 실패');
+  assert.equal(w.document.getElementById('pfQuietMode').value, 'defer');
+  assert.equal(w.document.getElementById('pfQuietSave').disabled, false);
+});
+
+test('조회 실패 시 기본값으로 덮어쓰는 대신 재시도 버튼을 보여준다', async () => {
+  const w = quietHoursForm();
+  w.apiFetchJson = async () => { throw new Error('network'); };
+  await w.pfAlertsLoadQuietHours();
+  assert.equal(w.document.getElementById('pfQuietSave'), null);
+  assert.match(w.document.getElementById('pfAlertQuietHours').textContent, /다시 시도/);
+});

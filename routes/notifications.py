@@ -22,7 +22,7 @@ from fastapi.responses import Response
 from deps import get_current_user
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
-from services.notifications import channels, engine, kakao, telegram
+from services.notifications import alert_delivery, channels, engine, kakao, telegram
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 logger = logging.getLogger(__name__)
@@ -353,6 +353,21 @@ async def unlink_kakao(request: Request):
 
 
 # --- Alert rules ------------------------------------------------------------
+
+@router.get("/quiet-hours")
+async def get_alert_quiet_hours(request: Request):
+    user = _require_user(await get_current_user(request))
+    return await alert_delivery.get_settings(user["google_sub"])
+
+
+@router.put("/quiet-hours")
+async def put_alert_quiet_hours(request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    try:
+        return await alert_delivery.save_settings(user["google_sub"], payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 
 async def _validate_alert_payload(google_sub: str, payload: dict) -> dict:
     alert_type = str(payload.get("alert_type") or "").strip()

@@ -66,7 +66,9 @@ async def _release_delivery(
     )
 
 
-async def dispatch(google_sub: str, text: str, *, dedupe_key: str | None = None) -> int:
+async def dispatch(
+    google_sub: str, text: str, *, dedupe_key: str | None = None, only_channel: str | None = None
+) -> int:
     """Send ``text`` to every enabled+verified channel. Returns messages sent.
 
     Never raises — a failing channel is logged and skipped so one broken target
@@ -83,6 +85,8 @@ async def dispatch(google_sub: str, text: str, *, dedupe_key: str | None = None)
         if not ch.get("enabled") or not ch.get("verified"):
             continue
         name = ch.get("channel")
+        if only_channel is not None and name != only_channel:
+            continue
         config = ch.get("config") or {}
         target_key = None
         sent_date = None

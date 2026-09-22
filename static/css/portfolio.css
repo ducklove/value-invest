@@ -3685,3 +3685,13 @@ body.pf-compact-rows .pf-row-drag-handle {
 .pf-account-sync-status { color: var(--text-secondary); }
 .pf-account-notice { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid #b7791f; border-radius: 6px; font-size: 13px; line-height: 1.6; }
 .pf-account-notice p { margin: 4px 0 0; }
+
+/* 조건 알림 발송 시간 설정 */
+.pf-alert-quiet-form { display: grid; gap: 10px; }
+.pf-alert-quiet-form fieldset { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.pf-alert-quiet-form fieldset:disabled { opacity: .55; }
+.pf-alert-quiet-form legend { color: var(--text-secondary); font-size: 12px; }
+.pf-alert-quiet-times { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.pf-alert-quiet-form label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.pf-alert-quiet-form input[type="time"], .pf-alert-quiet-form select { min-width: 0; max-width: 100%; padding: 7px 9px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+.pf-alert-quiet-form > button { justify-self: start; }

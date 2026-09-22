@@ -687,6 +687,18 @@ CREATE TABLE IF NOT EXISTS portfolio_alerts (
 );
 CREATE INDEX IF NOT EXISTS idx_portfolio_alerts_user ON portfolio_alerts(google_sub, enabled);
 
+CREATE TABLE IF NOT EXISTS pending_portfolio_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    alert_id INTEGER NOT NULL REFERENCES portfolio_alerts(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    event_key TEXT NOT NULL,
+    message TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    UNIQUE(google_sub, channel, event_key)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_portfolio_alerts_user ON pending_portfolio_alerts(google_sub, id);
+
 -- Physical-delivery de-duplication. Alert state is per user/rule, but
 -- migrated or duplicate accounts can point at the same real chat/app.
 -- This suppresses the same semantic alert to the same target per day.

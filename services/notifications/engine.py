@@ -36,7 +36,7 @@ from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from services.krx_limits import krx_lower_limit, krx_upper_limit
-from services.notifications import channels
+from services.notifications import alert_delivery, channels
 from services.portfolio import foreign, runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_preferred_stock
 from services.portfolio.target_resolver import (
@@ -438,8 +438,7 @@ async def _eval_rebalance(google_sub: str, rule: dict) -> int:
         message = _format_rebalance_message(rule, to_send)
         if rule.get("important"):
             message = _emphasize(message)
-        await channels.dispatch(google_sub, message)
-        sent = 1
+        sent = await alert_delivery.dispatch(google_sub, rule["id"], message)
     if changed:
         await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
     return sent
@@ -523,13 +522,9 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
                 if alert_type in DAILY_ABS_TYPES
                 else None
             )
-            if dedupe_key:
-                await channels.dispatch(google_sub, message, dedupe_key=dedupe_key)
-            else:
-                await channels.dispatch(google_sub, message)
+            sent += await alert_delivery.dispatch(google_sub, rule["id"], message, dedupe_key=dedupe_key)
             state[code] = {"armed": False, "fired": today_str}
             changed = True
-            sent += 1
         elif not condition and not armed:
             state[code] = {"armed": True, "fired": fired}
             changed = True
@@ -656,9 +651,9 @@ async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: d
         return 0
     if rule.get("important"):
         text = _emphasize(text)
-    await channels.dispatch(google_sub, text)
+    sent = await alert_delivery.dispatch(google_sub, rule["id"], text)
     await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
-    return 1
+    return sent
 
 
 async def _eval_blanket_feed(
@@ -701,10 +696,9 @@ async def _eval_blanket_feed(
         text = _format_disclosure_message(rule, name, latest) if kind == "disc" else _format_report_message(rule, name, latest)
         if rule.get("important"):
             text = _emphasize(text)
-        await channels.dispatch(google_sub, text)
+        sent += await alert_delivery.dispatch(google_sub, rule["id"], text)
         state[code] = ident
         changed = True
-        sent += 1
 
     if changed:
         await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps(state))
@@ -719,6 +713,8 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
     if not await channels.has_active_channel(google_sub):
         return 0
 
+    pending_sent = await alert_delivery.flush_pending(google_sub)
+
     items_by_code: dict[str, dict] = {}
     try:
         from services.portfolio.fx import annotate_avg_price_krw
@@ -731,7 +727,7 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
             logger.warning("skipping blanket portfolio alerts after portfolio load failure user=%s", str(google_sub)[:8])
             rules = [r for r in rules if r["alert_type"] not in BLANKET_TYPES]
             if not rules:
-                return 0
+                return pending_sent
 
     async def _name(code: str | None) -> str:
         item = items_by_code.get(code or "")
@@ -800,7 +796,7 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
             net_cf = await _net_cashflow_since_settlement(google_sub, prev_date)
             pf_daily_pct = (nav - net_cf - prev_total) / prev_total * 100.0
 
-    sent = 0
+    sent = pending_sent
     for rule in rules:
         alert_type = rule["alert_type"]
 
@@ -852,12 +848,8 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
                 if alert_type in STOCK_DAILY_ABS_TYPES
                 else None
             )
-            if dedupe_key:
-                await channels.dispatch(google_sub, text, dedupe_key=dedupe_key)
-            else:
-                await channels.dispatch(google_sub, text)
+            sent += await alert_delivery.dispatch(google_sub, rule["id"], text, dedupe_key=dedupe_key)
             await notifications_repo.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
-            sent += 1
         elif not condition and not armed:
             await notifications_repo.set_portfolio_alert_state(rule["id"], armed=True, last_value=metric, triggered=False)
         else:

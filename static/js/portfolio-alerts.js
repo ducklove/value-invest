@@ -58,6 +58,77 @@ function pfOpenAlerts() {
   pfAlertsLoadChannels();
   pfAlertsLoadList();
   pfAlertsLoadCalendarSummary();
+  pfAlertsLoadQuietHours();
+}
+
+async function pfAlertsLoadQuietHours() {
+  const el = document.getElementById('pfAlertQuietHours');
+  if (!el) return;
+  el.textContent = '설정 확인 중…';
+  try {
+    const settings = await pfAlertsApiJson('/quiet-hours', { errorMessage: '시간 설정을 불러오지 못했습니다.' });
+    pfAlertsRenderQuietHours(settings);
+  } catch (e) {
+    el.innerHTML = '<p role="alert">시간 설정을 불러오지 못했습니다.</p><button class="pf-alert-btn" type="button" onclick="pfAlertsLoadQuietHours()">다시 시도</button>';
+  }
+}
+
+function pfAlertsRenderQuietHours(settings) {
+  const el = document.getElementById('pfAlertQuietHours');
+  if (!el) return;
+  el.innerHTML = `<form class="pf-alert-quiet-form" onsubmit="event.preventDefault(); pfAlertsSaveQuietHours();">
+    <label><input id="pfQuietEnabled" type="checkbox" ${settings.enabled ? 'checked' : ''} onchange="pfAlertsToggleQuietHours()"> 지정한 시간에는 알림 보내지 않기</label>
+    <fieldset id="pfQuietFields" ${settings.enabled ? '' : 'disabled'}>
+      <legend>매일 · 한국 시간 (KST)</legend>
+      <div class="pf-alert-quiet-times">
+        <label>시작 <input id="pfQuietStart" type="time" required value="${escapeHtml(settings.start)}"></label>
+        <span aria-hidden="true">~</span>
+        <label>종료 <input id="pfQuietEnd" type="time" required value="${escapeHtml(settings.end)}"></label>
+      </div>
+      <label>제한 시간에 발생한 알림
+        <select id="pfQuietMode">
+          <option value="skip" ${settings.mode === 'skip' ? 'selected' : ''}>보내지 않기</option>
+          <option value="defer" ${settings.mode === 'defer' ? 'selected' : ''}>모아두었다가 보내기</option>
+        </select>
+      </label>
+    </fieldset>
+    <p class="pf-alert-hint">조건 알림과 개별 종목 알림에 적용됩니다. 시간 제한을 끄면 밤에도 받을 수 있습니다. 브리핑과 경제지표 결과 알림은 각자의 일정대로 발송됩니다.</p>
+    <p class="pf-alert-hint">‘보내지 않기’는 해당 시간에 발생한 알림을 생략합니다. ‘모아두었다가 보내기’는 종료 후 첫 확인 때(최대 약 5분 뒤) 발생 시각과 함께 순서대로 보냅니다. 이미 모아둔 알림은 설정을 바꿔도 발송하며, 규칙을 수정·끄기·삭제하면 해당 대기 알림은 취소됩니다.</p>
+    <button id="pfQuietSave" class="pf-alert-btn" type="submit">시간 설정 저장</button>
+    <span id="pfQuietStatus" role="status" aria-live="polite"></span>
+  </form>`;
+}
+
+function pfAlertsToggleQuietHours() {
+  document.getElementById('pfQuietFields').disabled = !document.getElementById('pfQuietEnabled').checked;
+}
+
+async function pfAlertsSaveQuietHours() {
+  const button = document.getElementById('pfQuietSave');
+  const status = document.getElementById('pfQuietStatus');
+  if (!button || button.disabled) return;
+  const payload = {
+    enabled: document.getElementById('pfQuietEnabled').checked,
+    start: document.getElementById('pfQuietStart').value,
+    end: document.getElementById('pfQuietEnd').value,
+    mode: document.getElementById('pfQuietMode').value,
+  };
+  if (!payload.start || !payload.end || payload.start === payload.end) {
+    status.textContent = '시작과 종료 시간을 서로 다르게 입력하세요.';
+    return;
+  }
+  button.disabled = true;
+  status.textContent = '저장 중…';
+  try {
+    await pfAlertsApiJson('/quiet-hours', {
+      method: 'PUT', body: JSON.stringify(payload), errorMessage: '시간 설정을 저장하지 못했습니다.',
+    });
+    status.textContent = '저장했습니다.';
+  } catch (e) {
+    status.textContent = e.message || '시간 설정을 저장하지 못했습니다. 다시 시도하세요.';
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // 경제캘린더 결과 알림 구독 요약 — 서버가 event_id만 저장하고 제목/일자는 저장하지
