@@ -2,7 +2,7 @@
 
 from domain.broker_assets import ACCOUNT_PRODUCTS
 from repositories.broker_secrets import BrokerError
-from services.brokers import namuh
+from services.brokers import namuh, namuh_listing
 from services.brokers.parsing import number
 from services.brokers.symbols import domestic_code, foreign_code, records, summary
 from services.portfolio.identifiers import CASH_FX_CODE
@@ -20,7 +20,7 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
         from services.brokers.derivatives import fetch_derivatives
         return await fetch_derivatives(user, link)
     domestic = await namuh.pages(user, cid, "/krstock/inquiry/v1/balance" if product == "stocks" else "/krgold/inquiry/v1/goldDepositAndBalance", {
-        # NH 상장폐지구분: 1=상장종목, 9=전체. 비상장·상장폐지 잔고는 조회에서 제외한다.
+        # NH 상장폐지구분: 1=상장종목. 비상장도 반환될 수 있어 종목마스터로 재검증한다.
         "act_no": account, "bnc_bse_cd": "1", "ltg_aot_dit_cd": "1", "aet_bse": "1",
         "qut_dit_cd": "UNT", "aly_qut_cd": "2",
     } if product == "stocks" else {"act_no": account}, env)
@@ -35,12 +35,23 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
         "drn_pbl_amt", "orr_pbl_amt", "orr_pbl_amt1", "orr_pbl_amt2", "orr_pbl_amt3", "orr_pbl_amt4",
     ) if key in total})
     output = []
+    listed = None
+    excluded = set()
     for page in domestic:
         for row in records(page):
+            raw_code = str(row.get("iem_cd", "")).strip()
+            code = "CMA_RP_KRW" if raw_code == "RKRW221" else domestic_code(raw_code)
+            if code not in {"KRX_GOLD", "CMA_RP_KRW"}:
+                if listed is None:
+                    listed = await namuh_listing.listed_codes()
+                if code not in listed:
+                    # 비상장 잔고의 수량·매입가가 비어 있어도 다른 잔고를 가져온다.
+                    excluded.add(code)
+                    continue
             qty = number(row, "itg_bnc_qty")
             if not qty:
                 continue
-            if str(row.get("iem_cd", "")).strip() == "RKRW221":
+            if code == "CMA_RP_KRW":
                 # CMA RP는 수량=원금, 현재가/매입가=0으로 반환된다.
                 # 평가액을 원 단위 잔액으로 보관해 고정 단위가 1원으로 평가한다.
                 value = number(row, "eal_amt")
@@ -50,8 +61,10 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
                 output.append({"stock_code": "CMA_RP_KRW", "stock_name": "CMA 원화RP",
                                "quantity": value, "avg_price": cost / value, "avg_price_currency": "KRW", "currency": "KRW"})
                 continue
-            output.append({"stock_code": domestic_code(row.get("iem_cd", "")), "stock_name": str(row.get("iem_nm") or row["iem_cd"]),
+            output.append({"stock_code": code, "stock_name": str(row.get("iem_nm") or row["iem_cd"]),
                            "quantity": qty, "avg_price": number(row, "phs_pr"), "avg_price_currency": "KRW", "currency": "KRW"})
+    if excluded:
+        balances["_excluded"] = sorted(excluded)
     output.append({"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": balances["KRW"]["nxt2_dd_dca"],
                    "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"})
     if product == "stocks" and link.get("include_overseas", True):
