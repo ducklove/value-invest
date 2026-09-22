@@ -1002,6 +1002,7 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     ("broker_account_links", "provider", "TEXT NOT NULL DEFAULT 'namuh'"),
     ("broker_account_links", "product", "TEXT NOT NULL DEFAULT 'stocks'"),
     ("portfolio_accounts", "broker_snapshot_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("portfolio_accounts", "holding_order_json", "TEXT"),
     ("portfolio_snapshots", "distribution_per_unit", "REAL NOT NULL DEFAULT 0"),
     ("portfolio_snapshots", "return_factor", "REAL NOT NULL DEFAULT 1"),
     ("portfolio_stock_snapshots", "currency", "TEXT"),

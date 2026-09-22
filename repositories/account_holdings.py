@@ -176,4 +176,7 @@ async def annotate(user: str, items: list[dict], account_id: str | None = None) 
         item["account_positions"] = rows
         item["account_count"] = len(rows)
         output.append(item)
+    if account_id:
+        from repositories import portfolio_order
+        return await portfolio_order.apply(user, account_id, output)
     return output

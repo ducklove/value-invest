@@ -103,12 +103,12 @@ class PortfolioMetadataTests(TempDbMixin):
         self.assertIsNone(saved["memo"])
         self.assertEqual(await account_holdings.list_positions("u1"), before)
 
-    async def test_scoped_reorder_keeps_other_account_slots_and_survives_sync(self):
+    async def test_scoped_reorder_keeps_aggregate_order_and_survives_sync(self):
         await portfolio.save_portfolio_order("u1", ["005930", "000660", "CASH_KRW"])
         before = await account_holdings.list_positions("u1")
         result = await route.save_portfolio_order(self.request(self.aid), {"stock_codes": ["CASH_KRW", "005930"]})
         self.assertEqual(result["count"], 2)
-        self.assertEqual([x["stock_code"] for x in await portfolio.get_portfolio("u1")], ["CASH_KRW", "000660", "005930"])
+        self.assertEqual([x["stock_code"] for x in await portfolio.get_portfolio("u1")], ["005930", "000660", "CASH_KRW"])
         self.assertEqual(await account_holdings.list_positions("u1"), before)
         await self.resync()
         self.assertEqual([x["stock_code"] for x in await portfolio.get_portfolio("u1", self.aid)], ["CASH_KRW", "005930"])

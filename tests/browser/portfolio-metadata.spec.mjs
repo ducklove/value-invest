@@ -34,6 +34,8 @@ test('연동 종목의 설정 편집·위치 이동은 허용하고 잔고는 �
   await expect(page.locator('#pfNhDialog')).not.toBeVisible();
   await card.locator('[data-account-action="view"]').click();
   await expect(page.locator('#pfAccountSelect')).toHaveValue(aid);
+  await expect.poll(() => page.locator('#pfBody tr').evaluateAll(rows => rows.map(row => row.dataset.code)))
+    .toEqual(['005930', 'CASH_KRW']);
   const row = page.locator('#pfBody tr[data-code="005930"]');
   await expect(row.locator('.js-pf-edit')).toBeVisible();
   await expect(row.locator('.js-pf-delete,.js-pf-trade')).toHaveCount(0);
@@ -76,7 +78,7 @@ test('연동 종목의 설정 편집·위치 이동은 허용하고 잔고는 �
   expect((await reordered).ok()).toBe(true);
   await expect(page.locator('#pfBody tr').first()).toHaveAttribute('data-code', fromCode);
   const orderAfter = (await (await page.request.get('/api/portfolio')).json()).map(x => x.stock_code);
-  expect(orderAfter.indexOf('000660')).toBe(orderBefore.indexOf('000660'));
+  expect(orderAfter).toEqual(orderBefore);
   await page.locator('#pfAccountsOpen').click();
   await card.locator('[data-account-action="sync"]').click();
   await expect(page.locator('#pfAccountsStatus')).toContainText('반영했습니다');

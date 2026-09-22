@@ -5,8 +5,9 @@ import json
 from datetime import date, datetime, timedelta, timezone
 
 from domain.broker_assets import is_futures_value
+from domain.portfolio_order import initial_order_key
 from repositories import account_holdings as holdings
-from repositories import broker_activity, brokers
+from repositories import broker_activity, brokers, portfolio_order
 from repositories.broker_secrets import BrokerError
 from repositories.db import transaction
 from services.brokers import activity
@@ -70,8 +71,12 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                 for row in rows:
                     await db.execute("INSERT INTO account_holdings VALUES (?,?,?,?,?,?,?,?,?,?)", (user, aid, row["stock_code"], row["stock_name"],
                         row["quantity"], row["avg_price"], row["avg_price_currency"], row["currency"], created.get(row["stock_code"], now), now))
-                for code in {r["stock_code"] for r in previous + rows}:
+                # 신규 합산 항목은 맨 앞에 삽입되므로 역순으로 생성한다.
+                codes = {r["stock_code"] for r in previous + rows}
+                for code in sorted(codes, key=lambda code: initial_order_key(code, link.get("product")), reverse=True):
                     await holdings.rebuild(user, code)
+                if current["last_sync_at"] is None:
+                    await portfolio_order.reset(user, aid)
                 snapshot = {**balances.get("_snapshot", {}), "synced_at": now} if "_snapshot" in balances else {}
                 await db.execute("UPDATE portfolio_accounts SET broker_snapshot_json=? WHERE google_sub=? AND account_id=?",
                                  (json.dumps(snapshot, ensure_ascii=False), user, aid))

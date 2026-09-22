@@ -13,7 +13,7 @@ from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from domain.portfolio_inputs import CashflowInput, HoldingInput, HoldingMetadataInput, validate_input
 from repositories import benchmark_daily as benchmark_repo
-from repositories import corp_codes, portfolio_metadata
+from repositories import corp_codes, portfolio_metadata, portfolio_order
 from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
@@ -720,14 +720,10 @@ async def save_portfolio_order(request: Request, payload: dict = Body(...)):
                 detail += " " + " ".join(parts)
             raise HTTPException(status_code=400, detail=detail)
 
-        ordered_codes = codes
         if account_id:
-            # 선택 계좌에 속한 슬롯만 재배치하고 다른 계좌의 종목 순서는 보존한다.
-            all_items = await portfolio_repo.get_portfolio(user["google_sub"])
-            reordered = iter(codes)
-            ordered_codes = [next(reordered) if item["stock_code"] in requested_set else item["stock_code"]
-                             for item in all_items]
-        await portfolio_repo.save_portfolio_order(user["google_sub"], ordered_codes)
+            await portfolio_order.save(user["google_sub"], account_id, codes)
+        else:
+            await portfolio_repo.save_portfolio_order(user["google_sub"], codes)
     return {"ok": True, "count": len(codes)}
 
 
