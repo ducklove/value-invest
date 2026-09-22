@@ -115,6 +115,7 @@ function pfRenderAccounts() {
     return `<section class="pf-account-card" data-account="${escapeHtml(row.account_id)}"><h3>${escapeHtml(row.name)}</h3>
       <p>${escapeHtml(detail)}${row.broker ? ' · ' + pfBrokerName(row.broker) + ' ' + escapeHtml(row.connection.account_no) + (row.connection.environment === 'mock' ? ' · 모의계좌' : '') : ' · 수동 관리'}</p>
       ${error ? `<p class="pf-account-error">${escapeHtml(error)}</p>` : ''}
+      ${row.connection?.activity_error ? `<p class="pf-account-error">수입·입출금 내역 확인 필요 · ${escapeHtml(row.connection.activity_error)}</p>` : ''}
       <div class="pf-account-actions"><button type="button" data-account-action="view">이 계좌 보기</button><button type="button" data-account-action="rename">이름 수정</button>
       ${row.broker ? '<button type="button" data-account-action="sync">잔고 동기화</button><button type="button" data-account-action="disconnect">연결 해제</button>' : '<button type="button" data-account-action="connect">증권사 계좌 연동</button>'}
       <button type="button" data-account-action="activity">수입·입출금 내역</button>
@@ -161,10 +162,10 @@ async function pfAccountAction(event) {
   PfAccounts.busy = true; button.disabled = true;
   _pfAccountEl('pfAccountsStatus').textContent = '처리 중입니다…';
   try {
-    await apiFetchJson(path, options);
+    const data = await apiFetchJson(path, options);
     await pfLoadAccounts(true); pfRenderAccounts();
     await loadPortfolio({ force: true });
-    _pfAccountEl('pfAccountsStatus').textContent = '반영했습니다.';
+    _pfAccountEl('pfAccountsStatus').textContent = data?.activity_error ? `잔고는 갱신했습니다. ${data.activity_error}` : '반영했습니다.';
   } catch (error) { _pfAccountEl('pfAccountsStatus').textContent = error.message; }
   finally { PfAccounts.busy = false; button.disabled = false; }
 }
@@ -260,7 +261,7 @@ async function pfNhWork(action) {
       } else {
         _pfAccountEl('pfNhDialog').close();
         await pfLoadAccounts(true); pfRenderAccounts(); await loadPortfolio({ force: true });
-        _pfAccountEl('pfAccountsStatus').textContent = provider === 'kis' ? '한국투자증권 계좌를 연결했습니다. 잔고는 60초마다 갱신하며, HTS ID를 등록하면 체결 통보로도 갱신합니다.' : 'NH 계좌를 연결했습니다. 주문·체결 통보를 받으면 갱신하며, 수입·입출금은 60초마다 확인합니다.';
+        _pfAccountEl('pfAccountsStatus').textContent = data.activity_error ? `계좌 연결과 잔고 가져오기를 완료했습니다. ${data.activity_error}` : provider === 'kis' ? '한국투자증권 계좌를 연결했습니다. 잔고는 60초마다 갱신하며, HTS ID를 등록하면 체결 통보로도 갱신합니다.' : 'NH 계좌를 연결했습니다. 주문·체결 통보를 받으면 갱신하며, 수입·입출금은 60초마다 확인합니다.';
       }
     }
   } catch (error) {

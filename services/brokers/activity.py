@@ -59,11 +59,14 @@ def normalize(row: dict, link: dict) -> dict:
         raise BrokerError("NH 거래내역의 계좌를 확인할 수 없습니다.")
     try:
         day = datetime.strptime(str(row["trd_dt"]).strip(), "%Y%m%d").date().isoformat()
-        serial = str(row["trd_sno"]).strip()
+        raw_serial = row["trd_sno"]
+        if not isinstance(raw_serial, (str, int)) or isinstance(raw_serial, bool):
+            raise ValueError
+        serial = str(raw_serial).strip()
         if not re.fullmatch(r"[0-9A-Za-z-]{1,40}", serial):
             raise ValueError
     except (KeyError, ValueError, TypeError):
-        raise BrokerError("NH 거래내역의 거래일자·일련번호가 없어 중복 여부를 확인할 수 없습니다.") from None
+        raise BrokerError("NH 응답의 거래일자·일련번호를 확인할 수 없어 수입·입출금 내역 가져오기를 보류했습니다.") from None
     currency = str(row.get("cur_cd") or "").strip().upper()
     if not re.fullmatch(r"[A-Z]{3}", currency):
         raise BrokerError("NH 거래내역의 통화를 확인할 수 없습니다.")

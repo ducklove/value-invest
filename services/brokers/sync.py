@@ -33,12 +33,18 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
             raise BrokerError(f"{adapter.definition.name} 수입·입출금 거래내역 가져오기는 아직 지원하지 않습니다. 잔고는 자동 갱신됩니다.")
         try:
             entries = None
+            activity_error = None
             if import_activity:
                 previous_state = await broker_activity.state(user, aid)
                 until = end or datetime.now(activity.KST).date()
                 since = start or (date.fromisoformat(previous_state["last_import_at"][:10]) - timedelta(days=7)
                                   if previous_state and previous_state["last_import_at"] else until - timedelta(days=90))
-                entries = await adapter.fetch_activity(user, link, since, until)
+                try:
+                    entries = await adapter.fetch_activity(user, link, since, until)
+                except BrokerError as exc:
+                    # NH 운영 응답에는 원장 식별 필드가 없을 수 있다. 거래를 추정하거나
+                    # 일부만 저장하지 않고, 독립적으로 검증한 잔고 조회는 계속한다.
+                    activity_error = str(exc)
             rows, balances = await fetch_snapshot(user, link)
             async with transaction() as db:
                 current = await brokers.get_link(user, aid)
@@ -47,6 +53,8 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                 await holdings.initialize(db, user)
                 if entries is not None:
                     await broker_activity.store(user, link, entries)
+                elif activity_error:
+                    await broker_activity.set_error(user, aid, activity_error)
                 previous = await holdings.list_positions(user, aid)
                 other = [r for r in await holdings.list_positions(user) if r["account_id"] != aid]
                 for row in rows:
@@ -69,7 +77,8 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                                  (json.dumps(snapshot, ensure_ascii=False), user, aid))
                 await db.execute("UPDATE broker_account_links SET last_sync_at=?,sync_error=NULL,balances_json=? WHERE google_sub=? AND account_id=?",
                                  (now, json.dumps(balances), user, aid))
-            return {"ok": True, "holdings_count": len(rows), "synced_at": now, "balances": balances}
+            return {"ok": True, "holdings_count": len(rows), "synced_at": now, "balances": balances,
+                    "activity_error": activity_error}
         except BrokerError as exc:
             if import_activity:
                 await broker_activity.set_error(user, aid, str(exc))

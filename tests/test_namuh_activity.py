@@ -114,7 +114,8 @@ class ActivityTests(TempDbMixin):
         self.assertEqual(await snapshots.get_cashflows("u1"), [])
 
     async def test_partial_fetch_invalid_payloads_and_account_isolation(self):
-        for data in (cash_row(trd_sno=""), cash_row(trd_af_dca="nan"), cash_row(act_no="99999999999")):
+        for data in (cash_row(trd_sno=""), cash_row(trd_sno=None), cash_row(trd_sno=True),
+                     cash_row(trd_af_dca="nan"), cash_row(act_no="99999999999")):
             with self.assertRaises(BrokerError):
                 activity.normalize(data, self.link)
         with self.assertRaises(accounts.AccountError):
@@ -124,6 +125,53 @@ class ActivityTests(TempDbMixin):
             with self.assertRaises(BrokerError):
                 await activity.fetch("u1", self.link, date.today(), date.today())
         self.assertIsNone(await broker_activity.state("u1", self.aid))
+
+    async def test_missing_live_activity_identity_does_not_block_initial_balance_and_recovers(self):
+        # 운영 API가 실제로 생략하는 필드를 재현한다. 임의 식별자·통화·수입을 만들지 않는다.
+        raw = cash_row(label="예탁금이용료", cur_cd="")
+        del raw["trd_sno"], raw["trd_bf_dca"]
+        rows = [{"stock_code": "CASH_KRW", "stock_name": "원화", "quantity": 10846,
+                 "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}]
+        with patch.object(activity.namuh, "pages", AsyncMock(return_value=[{"Output_0": [raw]}])), \
+             patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
+            result = await sync.sync_account("u1", self.aid, include_activity=True)
+        self.assertTrue(result["ok"])
+        self.assertIn("거래일자·일련번호", result["activity_error"])
+        self.assertEqual((await account_holdings.list_positions("u1", self.aid))[0]["quantity"], 10846)
+        history = await broker_activity.history("u1", self.aid)
+        self.assertEqual(history["items"], [])
+        self.assertIsNone(history["state"]["last_import_at"])
+        self.assertEqual(history["state"]["error"], result["activity_error"])
+        account = next(r for r in await accounts.list_accounts("u1") if r["account_id"] == self.aid)
+        self.assertIsNone(account["connection"]["sync_error"])
+        self.assertIsNotNone(account["connection"]["last_sync_at"])
+        self.assertEqual(account["connection"]["activity_error"], result["activity_error"])
+        self.assertEqual(await accounts.list_accounts("u2"), [])
+        self.assertEqual(await snapshots.get_cashflows("u1"), [])
+        with patch.object(activity, "fetch", AsyncMock(return_value=[self.normalized()])), \
+             patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
+            result = await sync.sync_account("u1", self.aid, include_activity=True)
+        self.assertIsNone(result["activity_error"])
+        history = await broker_activity.history("u1", self.aid)
+        self.assertEqual(len(history["items"]), 1)
+        self.assertIsNone(history["state"]["error"])
+        self.assertIsNotNone(history["state"]["last_import_at"])
+
+    async def test_failed_activity_preserves_existing_records_reasons_and_watermark(self):
+        await broker_activity.store("u1", self.link, [self.normalized()])
+        original = (await broker_activity.history("u1", self.aid))["items"][0]
+        await broker_activity.annotate("u1", self.aid, original["id"], revision=1, kind="dividend", reason="확인한 배당")
+        before = await broker_activity.history("u1", self.aid)
+        rows = [{"stock_code": "CASH_KRW", "stock_name": "원화", "quantity": 20846,
+                 "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}]
+        with patch.object(activity, "fetch", AsyncMock(side_effect=BrokerError("거래내역 조회 보류"))), \
+             patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
+            await sync.sync_account("u1", self.aid, include_activity=True)
+        after = await broker_activity.history("u1", self.aid)
+        self.assertEqual(after["items"], before["items"])
+        self.assertEqual(after["state"]["last_import_at"], before["state"]["last_import_at"])
+        self.assertEqual(after["state"]["started_at"], before["state"]["started_at"])
+        self.assertEqual((await account_holdings.list_positions("u1", self.aid))[0]["quantity"], 20846)
 
     async def test_snapshot_and_ledger_commit_together(self):
         data = self.normalized()

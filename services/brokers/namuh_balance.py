@@ -28,11 +28,11 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
     total = summary(next((page for page in reversed(domestic) if page.get("Output_0")), domestic[-1]))
     if any(number({key: total.get(key) or 0}, key) != 0 for key in ("fnn_amt", "rba", "lon_amt")):
         raise BrokerError("융자·미수·대출이 있는 계좌는 자동 합산을 지원하지 않습니다. 수동 계좌로 관리해 주세요.")
-    balances = {"KRW": {key: number(total, key) for key in ("dca", "nxt_dd_dca", "nxt2_dd_dca", "drn_pbl_amt")}}
+    balances = {"KRW": {key: number(total, key) for key in ("dca", "nxt_dd_dca", "nxt2_dd_dca")}}
     # 계좌에 따라 일반 주문가능액 없이 증거금률별 금액(20/30/40/100%)만 온다.
     # 서로 다른 주문가능액을 대체하거나 예수금으로 합산하지 않는다.
     balances["KRW"].update({key: number(total, key) for key in (
-        "orr_pbl_amt", "orr_pbl_amt1", "orr_pbl_amt2", "orr_pbl_amt3", "orr_pbl_amt4",
+        "drn_pbl_amt", "orr_pbl_amt", "orr_pbl_amt1", "orr_pbl_amt2", "orr_pbl_amt3", "orr_pbl_amt4",
     ) if key in total})
     output = []
     for page in domestic:

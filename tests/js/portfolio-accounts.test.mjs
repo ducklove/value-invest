@@ -22,6 +22,28 @@ function setup() {
   return {dom,w,sockets, el: id => w.document.getElementById(id)};
 }
 
+test('NH 거래내역 보류 시 계좌 연결은 완료하고 카드와 상태에 보류 사유를 표시한다', async () => {
+  const s=setup(), warning='거래일련번호가 없어 <수입> 내역 가져오기를 보류했습니다.';
+  try {
+    const linked={account_id:'a',name:'NH',broker:'namuh',holdings_count:2,
+      connection:{account_no:'12345678901',environment:'live',last_sync_at:'2026-09-22T00:00:00Z',activity_error:warning}};
+    s.w.apiFetchJson=async path => path==='/api/portfolio/accounts' ? [linked] : {ok:true,activity_error:warning};
+    s.w.pfOpenNhConnection({account_id:'a',name:'NH'});
+    s.el('pfNhChoices').innerHTML='<option value="choice">12345678901</option>';
+    s.w.PfAccounts.previewed=true;
+    await s.w.pfNhWork('save');
+    assert.equal(s.el('pfNhDialog').open,false);
+    assert.match(s.el('pfAccountsStatus').textContent,/계좌 연결과 잔고 가져오기를 완료/);
+    assert.ok(s.el('pfAccountsStatus').textContent.includes(warning));
+    assert.match(s.el('pfAccountsList').textContent,/수입·입출금 내역 확인 필요/);
+    assert.equal(s.el('pfAccountsList').querySelector('수입'),null);
+    assert.equal(s.el('pfAccountsList').querySelector('[data-account-action="connect"]'),null);
+    const button=s.el('pfAccountsList').querySelector('[data-account-action="sync"]');
+    await s.w.pfAccountAction({target:button});
+    assert.ok(s.el('pfAccountsStatus').textContent.includes(`잔고는 갱신했습니다. ${warning}`));
+  } finally {s.dom.window.close();}
+});
+
 test('한국투자증권 입력·미리보기 취소는 연결하지 않고 자격증명을 브라우저에 보존하지 않는다', async () => {
   const s=setup(), calls=[];
   try {

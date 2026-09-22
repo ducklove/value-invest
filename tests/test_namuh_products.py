@@ -43,6 +43,25 @@ class NamuhProductsTests(TempDbMixin):
         self.assertEqual({row["stock_code"]: row["quantity"] for row in rows}, {"KRX_GOLD": 12, "CASH_KRW": 800})
         self.assertEqual(rows[0]["avg_price"], 120000)
 
+    async def test_gold_live_response_without_withdrawable_cash_still_imports_d2_and_grams(self):
+        # 운영 응답은 문서와 달리 출금가능금액을 생략한다. 주문가능액으로 대체하지 않는다.
+        page = {"rsp_cd": "00166", "Output_0": {
+            "dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "orr_pbl_amt4": 700},
+            "Output_1": [{"iem_cd": "M04020000", "iem_nm": "금 99.99K", "itg_bnc_qty": 12.0, "phs_pr": 120000}]}
+        await self.link("gold")
+        with self.owned(), patch.object(namuh, "pages", AsyncMock(return_value=[page])):
+            result = await sync.sync_account("u1", self.aid)
+        positions = {r["stock_code"]: r for r in await account_holdings.list_positions("u1", self.aid)}
+        self.assertEqual(positions["KRX_GOLD"]["quantity"], 12)
+        self.assertEqual(positions["KRX_GOLD"]["avg_price"], 120000)
+        self.assertEqual(positions["CASH_KRW"]["quantity"], 800)
+        self.assertNotIn("drn_pbl_amt", result["balances"]["KRW"])
+        del page["Output_0"]["nxt2_dd_dca"]
+        with self.owned(), patch.object(namuh, "pages", AsyncMock(return_value=[page])):
+            with self.assertRaises(BrokerError):
+                await sync.sync_account("u1", self.aid)
+        self.assertEqual({r["stock_code"]: r for r in await account_holdings.list_positions("u1", self.aid)}, positions)
+
     async def test_domestic_long_short_contracts_and_equity_are_separate_and_persist_after_disconnect(self):
         await self.link("krfuture")
         for hour, suffix in ((10, "balance"), (20, "nightBalance"), (3, "nightBalance")):

@@ -100,6 +100,10 @@ async def list_accounts(google_sub: str) -> list[dict]:
         if link:
             from repositories.broker_secrets import decrypt
             item["connection"]["account_no"] = decrypt(item["connection"].pop("account_ciphertext"))
+            activity_state = await (await db.execute(
+                "SELECT error FROM broker_activity_state WHERE google_sub=? AND account_id=?",
+                (google_sub, item["account_id"]))).fetchone()
+            item["connection"]["activity_error"] = activity_state["error"] if activity_state else None
         count = await (await db.execute("SELECT COUNT(*) AS n FROM account_holdings WHERE google_sub=? AND account_id=?", (google_sub, item["account_id"]))).fetchone()
         item["holdings_count"] = count["n"]
     return result
