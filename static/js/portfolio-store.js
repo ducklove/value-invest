@@ -29,7 +29,7 @@ const PfStore = {
   // Inline row edit: code being edited / code whose save is in flight.
   edit: { code: null, savingCode: null },
   // Drag&drop manual order save pipeline (see portfolio-order.js).
-  manualOrder: { pendingCodes: null, revision: 0, saveInFlight: false },
+  manualOrder: { pendingCodes: null, revision: 0, saveInFlight: false, draggingCode: null, renderPending: false },
   snapshots: {
     // {total_value, nav, fx_usdkrw, ...} at end of previous month
     monthEnd: null,

@@ -276,7 +276,7 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     render = (JS / "portfolio-render.js").read_text(encoding="utf-8")
     styles = _all_css()
 
-    assert "manualOrder: { pendingCodes: null, revision: 0, saveInFlight: false }," in store
+    assert "manualOrder: { pendingCodes: null, revision: 0, saveInFlight: false," in store
     assert "const loadOrderRevision = PfStore.manualOrder.revision;" in data
     assert "const preservePendingManualOrder = !!PfStore.manualOrder.pendingCodes;" in data
     assert "nextPortfolioItems = pfApplyManualOrder(nextPortfolioItems, PfStore.manualOrder.pendingCodes);" in data

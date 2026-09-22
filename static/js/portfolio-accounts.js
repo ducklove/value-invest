@@ -286,7 +286,8 @@ function pfRefreshChangedAccounts() {
   const generation = PfAccounts.generation || 0;
   const refresh = async () => {
     if (generation !== (PfAccounts.generation || 0)) return;
-    if (PfStore.loading || PfStore.edit?.code || PfStore.edit?.savingCode || PfAccounts.busy) {
+    if (PfStore.loading || PfStore.edit?.code || PfStore.edit?.savingCode || PfAccounts.busy
+        || PfStore.manualOrder.draggingCode || PfStore.manualOrder.saveInFlight) {
       PfAccounts.refreshTimer = setTimeout(refresh, 1000); return;
     }
     PfAccounts.refreshTimer = null;
@@ -330,10 +331,14 @@ function pfConnectNamuhQuotes() {
       if (message.type === 'namuh_status') {
         QuoteManager._syncNamuhFallback?.();
         const label = _pfAccountEl('pfNhQuoteState');
-        if (label) label.textContent = (message.state === 'live' ? 'NH 실시간 시세 우선 사용' : message.state === 'subscribed' ? 'NH 시세 구독 · 체결 대기' : 'NH 시세 연결 확인 중')
+        if (label) label.textContent = ({live: 'NH 실시간 시세 우선 사용', subscribed: 'NH 시세 구독 · 체결 대기',
+          connecting: 'NH 시세 연결 중', degraded: 'NH 시세 연결 불안정 · 보조 시세 사용',
+          waiting: 'NH 시세 연결 대기'}[message.state] || 'NH 시세 상태 확인 중')
+          + (message.domestic?.rejected ? ' · 국내 시세 구독 권한·한도 확인 필요' : '')
           + (message.foreign?.rejected ? ' · 해외 실시간 권한·구독 한도 확인 필요, 보조 시세 사용' : '');
         if (label && message.notifications) label.textContent += message.notifications.state === 'subscribed'
-          ? ' · 계좌 통보 연결 · 입출금 60초 확인' : ' · 계좌 통보 연결 확인 중 · 60초 조회 보완';
+          ? ' · 계좌 통보 연결 · 입출금 60초 확인' : message.notifications.state === 'degraded'
+            ? ' · 계좌 통보 미연결 · 60초 조회 보완' : ' · 계좌 통보 연결 중 · 60초 조회 보완';
       }
       if (message.type === 'broker_account_status' || message.type === 'kis_account_status') {
         const state = _pfAccountEl('pfAccountState');

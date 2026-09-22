@@ -22,6 +22,55 @@ function setup() {
   return {dom,w,sockets, el: id => w.document.getElementById(id)};
 }
 
+test('NH 상태 안내는 재연결·구독 실패를 구분하고 잔고 표를 다시 불러오지 않는다', () => {
+  const s=setup();
+  try {
+    let loads=0;
+    s.w.loadPortfolio=async()=>{loads++;};
+    s.w.PfAccounts.rows=[{account_id:'a',broker:'namuh'}];
+    s.w.pfConnectNamuhQuotes();
+    const send=state=>s.sockets[0].onmessage({data:JSON.stringify({type:'namuh_status',...state})});
+    send({state:'degraded',domestic:{rejected:2},foreign:{rejected:1},notifications:{state:'degraded'}});
+    assert.match(s.el('pfNhQuoteState').textContent,/NH 시세 연결 불안정/);
+    assert.match(s.el('pfNhQuoteState').textContent,/국내 시세 구독 권한·한도/);
+    assert.match(s.el('pfNhQuoteState').textContent,/해외 실시간 권한·구독 한도/);
+    assert.match(s.el('pfNhQuoteState').textContent,/계좌 통보 미연결/);
+    send({state:'connecting'});
+    assert.equal(s.el('pfNhQuoteState').textContent,'NH 시세 연결 중');
+    send({state:'subscribed',notifications:{state:'subscribed'}});
+    assert.match(s.el('pfNhQuoteState').textContent,/NH 시세 구독 · 체결 대기/);
+    assert.doesNotMatch(s.el('pfNhQuoteState').textContent,/불안정|권한|미연결/);
+    send({state:'live'});
+    assert.equal(s.el('pfNhQuoteState').textContent,'NH 실시간 시세 우선 사용');
+    assert.equal(loads,0);
+  } finally {s.dom.window.close();}
+});
+
+test('계좌 변경 통보는 드래그와 순서 저장이 끝난 뒤 잔고를 한 번 갱신한다', async () => {
+  const s=setup();
+  try {
+    const queued=[];
+    s.w.setTimeout=fn=>{queued.push(fn);return queued.length;};
+    let loads=0;
+    s.w.pfLoadAccounts=async()=>{};
+    s.w.loadPortfolio=async()=>{loads++;};
+    s.w.PfStore.manualOrder.draggingCode='005930';
+    s.w.pfRefreshChangedAccounts();
+    s.w.pfRefreshChangedAccounts();
+    assert.equal(queued.length,1);
+    await queued.shift()();
+    assert.equal(loads,0);
+    s.w.PfStore.manualOrder.draggingCode=null;
+    s.w.PfStore.manualOrder.saveInFlight=true;
+    await queued.shift()();
+    assert.equal(loads,0);
+    s.w.PfStore.manualOrder.saveInFlight=false;
+    await queued.shift()();
+    assert.equal(loads,1);
+    assert.equal(queued.length,0);
+  } finally {s.dom.window.close();}
+});
+
 test('NH 거래내역 보류 시 계좌 연결은 완료하고 카드와 상태에 보류 사유를 표시한다', async () => {
   const s=setup(), warning='거래일련번호가 없어 <수입> 내역 가져오기를 보류했습니다.';
   try {

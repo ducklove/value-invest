@@ -1,7 +1,23 @@
 // Portfolio manual row ordering: drag placement, optimistic order, and save queue.
 // File-local: timer that keeps an optimistic manual order alive briefly after
-// a failed save (only used here; cross-file order state is PfStore.manualOrder).
+// a successful save (only used here; cross-file order state is PfStore.manualOrder).
 let pfManualOrderKeepTimer = null;
+
+function _pfStartRowDrag(code) {
+  PfStore.manualOrder.draggingCode = code;
+  // 표 밖에 놓거나 Esc로 취소해도 보호 상태를 해제한다.
+  document.addEventListener('dragend', _pfEndRowDrag, { once: true });
+}
+
+function _pfEndRowDrag() {
+  const pending = PfStore.manualOrder.renderPending;
+  PfStore.manualOrder.draggingCode = null;
+  PfStore.manualOrder.renderPending = false;
+  document.removeEventListener('dragend', _pfEndRowDrag);
+  document.querySelectorAll('#pfBody .dragging').forEach(row => row.classList.remove('dragging'));
+  _pfClearPortfolioDragOver();
+  if (pending) renderPortfolio();
+}
 
 function _pfSameOrderCodes(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
@@ -43,6 +59,9 @@ function _pfDropPositionForEvent(e, row) {
 async function pfDropRow(fromCode, toCode, dropPosition = 'before') {
   const next = _pfNextOrderAfterDrop(PfStore.items, fromCode, toCode, dropPosition);
   if (!next) return;
+  // drop이 끝난 뒤 새 순서로 한 번만 그린다. dragend는 원래 행이 제거돼도 처리한다.
+  PfStore.manualOrder.renderPending = false;
+  _pfEndRowDrag();
   const orderCodes = next.map(i => i.stock_code);
   PfStore.manualOrder.pendingCodes = orderCodes;
   PfStore.manualOrder.revision += 1;
@@ -90,7 +109,6 @@ async function pfFlushManualOrderSave() {
       PfStore.items = pfApplyManualOrder(PfStore.items, orderCodes);
       _pfSetPortfolioSortOrder(orderCodes);
       _savePortfolioSnapshot(PfStore.items);
-      renderPortfolio();
       const savedCodes = orderCodes.slice();
       pfManualOrderKeepTimer = setTimeout(() => {
         if (_pfSameOrderCodes(PfStore.manualOrder.pendingCodes, savedCodes)) PfStore.manualOrder.pendingCodes = null;
