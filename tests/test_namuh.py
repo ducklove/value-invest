@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from _harness import TempDbMixin, seed_user
 
-from repositories import account_holdings, accounts, bootstrap, brokers, portfolio
+from repositories import account_holdings, accounts, bootstrap, brokers, portfolio, portfolio_order, snapshots
 from repositories.broker_secrets import BrokerError
 from repositories.db import get_db
 from services.brokers import namuh, namuh_listing, overseas_realtime, realtime, sync
@@ -153,6 +153,64 @@ class NamuhTests(TempDbMixin):
         self.assertEqual(balances["KRW"]["drn_pbl_amt"], 600)
         with self.assertRaises(BrokerError):
             sync.summary({"Output_0": {}})
+
+    async def test_mmw_combines_with_settlement_cash_once_and_preserves_account_settings(self):
+        await portfolio.save_portfolio_item("u1", "CASH_KRW", "수동 원화", 500, 1)
+        await self.link()
+        total = {"dca": 0, "nxt_dd_dca": 65593681, "nxt2_dd_dca": 43906154}
+        first = {"iem_cd": "MMW1003", "iem_nm": "한국증권금융 예치", "rsdl_qty": 21499426, "eal_amt": 21499426}
+        second = {**first, "rsdl_qty": 20200000, "eal_amt": 20200000}
+        domestic = [{"Output_0": total, "Output_1": [
+            {"iem_cd": "", "iem_nm": "", "rsdl_qty": 0, "eal_amt": 0, "ny_stl_qty": -2},
+            {"iem_cd": "000660", "iem_nm": "SK하이닉스", "rsdl_qty": 80, "phs_pr": 100}, first,
+        ]}, {"Output_1": [second]}]
+
+        async def pages(_user, _cid, path, _body, _env):
+            if path == "/krstock/inquiry/v1/balance":
+                return domestic
+            self.assertEqual(path, "/gbstock/inquiry/v1/margin")
+            return [{"Output_0": [{"cur_cd": "USD", "fc_dca": 100, "stl_af_fc_dca": 80, "fc_drn_pbl_amt": 50}]}]
+
+        with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+             patch.object(namuh, "pages", side_effect=pages):
+            result = await sync.sync_account("u1", self.aid)
+            self.assertEqual(result["balances"]["KRW"]["nxt2_dd_dca"], 43906154)
+            self.assertEqual(result["balances"]["KRW"]["mmw_eal_amt"], 41699426)
+            order = ["CASH_USD", "CASH_KRW", "000660"]
+            await portfolio_order.save("u1", self.aid, order)
+            for _ in range(2):
+                await sync.sync_account("u1", self.aid)
+            positions = {row["stock_code"]: row["quantity"] for row in await account_holdings.list_positions("u1", self.aid)}
+            self.assertEqual(positions, {"000660": 80, "CASH_KRW": 85605580, "CASH_USD": 80})
+            self.assertEqual((await portfolio.get_portfolio_item("u1", "CASH_KRW"))["quantity"], 85606080)
+            self.assertEqual([row["stock_code"] for row in await portfolio.get_portfolio("u1", self.aid)], order)
+            # MMW 인출로 현금만 늘어도 합계는 유지한다. 누적 가산/별도 입출금 생성은 없다.
+            total["nxt2_dd_dca"] += first["eal_amt"] + second["eal_amt"]
+            first.update(rsdl_qty=0, eal_amt=0)
+            second.update(rsdl_qty=0, eal_amt=0)
+            await sync.sync_account("u1", self.aid)
+            self.assertEqual((await portfolio.get_portfolio_item("u1", "CASH_KRW"))["quantity"], 85606080)
+        self.assertEqual(await snapshots.get_cashflows("u1"), [])
+
+    async def test_ambiguous_empty_rows_and_invalid_mmw_preserve_previous_snapshot(self):
+        await self.link()
+        old = [{"stock_code": "CASH_KRW", "stock_name": "원화", "quantity": 500,
+                "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}]
+        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(old, {}))):
+            await sync.sync_account("u1", self.aid)
+        before = await account_holdings.list_positions("u1", self.aid)
+        for code, qty, value in (("", 1, 1), ("", 0, 1), ("", 0, None), ("", None, 0),
+                                 ("MMW1003", 1, None), ("MMW1003", 1, "NaN"), ("MMW1003", -1, 1),
+                                 ("MMW1003", 1, -1), ("MMW1003", 0, 1), ("MMW1003", 1, 0),
+                                 ("MMW9999", 1, 1)):
+            row = {"iem_cd": code, "iem_nm": "", "rsdl_qty": qty, "eal_amt": value}
+            domestic = [{"Output_0": {"dca": 0, "nxt_dd_dca": 100, "nxt2_dd_dca": 80}, "Output_1": [row]}]
+            with self.subTest(code=code, qty=qty, value=value), \
+                 patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "12345678901", "environment": "live"}])), \
+                 patch.object(namuh, "pages", AsyncMock(return_value=domestic)):
+                with self.assertRaises(BrokerError):
+                    await sync.sync_account("u1", self.aid)
+            self.assertEqual(await account_holdings.list_positions("u1", self.aid), before)
 
     async def test_unsettled_buy_partial_sale_and_full_sale_use_execution_balance(self):
         await portfolio.save_portfolio_item("u1", "430500", "수동 보유분", 7, 100)

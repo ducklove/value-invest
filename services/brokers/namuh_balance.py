@@ -52,9 +52,23 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
     output = []
     listed = None
     excluded = set()
+    mmw_balance = 0
     for page in domestic:
         for row in records(page):
             raw_code = str(row.get("iem_cd", "")).strip()
+            # 체결 후 NH가 이름·코드 없이 반환하는 소멸 잔고. 금액까지 0인 경우만 제외한다.
+            # 미결제 수량(ny_stl_qty)은 체결 잔량에 이미 반영되어 있어 다시 합산하지 않는다.
+            if not raw_code and not str(row.get("iem_nm") or "").strip():
+                if number(row, "rsdl_qty") == 0 and number(row, "eal_amt") == 0:
+                    continue
+            if raw_code == "MMW1003":
+                qty, value = number(row, "rsdl_qty"), number(row, "eal_amt")
+                if qty < 0 or value < 0 or (qty == 0) != (value == 0):
+                    raise BrokerError("MMW 예치금의 잔량·평가액을 확인할 수 없어 기존 잔고를 유지합니다.")
+                # NH는 MMW를 평가잔고에, D+2 예수금을 별도로 반환한다.
+                # 수시입출금 예치금은 원화 현금 한 행에 합산하고 별도 종목으로 만들지 않는다.
+                mmw_balance += value
+                continue
             code = "CMA_RP_KRW" if raw_code == "RKRW221" else domestic_code(raw_code)
             if code not in {"KRX_GOLD", "CMA_RP_KRW"}:
                 if listed is None:
@@ -82,7 +96,8 @@ async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
                            "quantity": qty, "avg_price": number(row, "phs_pr"), "avg_price_currency": "KRW", "currency": "KRW"})
     if excluded:
         balances["_excluded"] = sorted(excluded)
-    output.append({"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": balances["KRW"]["nxt2_dd_dca"],
+    balances["KRW"]["mmw_eal_amt"] = mmw_balance
+    output.append({"stock_code": "CASH_KRW", "stock_name": "원화 현금", "quantity": balances["KRW"]["nxt2_dd_dca"] + mmw_balance,
                    "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"})
     if product == "stocks" and link.get("include_overseas", True):
         # 운영에서 000=전체국가로 확인했다. 국가를 나열하면 베트남·호주·독일 등이

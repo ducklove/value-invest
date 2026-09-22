@@ -84,12 +84,19 @@ test('NH 거래내역 보류 시 계좌 연결은 완료하고 카드와 상태�
     assert.equal(s.el('pfNhDialog').open,false);
     assert.match(s.el('pfAccountsStatus').textContent,/계좌 연결과 잔고 가져오기를 완료/);
     assert.ok(s.el('pfAccountsStatus').textContent.includes(warning));
-    assert.match(s.el('pfAccountsList').textContent,/수입·입출금 내역 확인 필요/);
+    assert.match(s.el('pfAccountsList').textContent,/수입·입출금 내역 가져오기 보류/);
+    assert.match(s.el('pfAccountsList').textContent,/최근 잔고 갱신/);
+    assert.match(s.el('pfAccountsList').textContent,/잔고 갱신과는 별도로 재시도/);
+    assert.equal(s.el('pfAccountsList').querySelector('.pf-account-error'),null);
     assert.equal(s.el('pfAccountsList').querySelector('수입'),null);
     assert.equal(s.el('pfAccountsList').querySelector('[data-account-action="connect"]'),null);
     const button=s.el('pfAccountsList').querySelector('[data-account-action="sync"]');
     await s.w.pfAccountAction({target:button});
     assert.ok(s.el('pfAccountsStatus').textContent.includes(`잔고는 갱신했습니다. ${warning}`));
+    s.w.PfAccounts.rows[0].connection.sync_error='잔고 조회 실패';
+    s.w.pfRenderAccounts();
+    assert.match(s.el('pfAccountsList').querySelector('.pf-account-error').textContent,/잔고 갱신 보류 · 잔고 조회 실패/);
+    assert.ok(s.el('pfAccountsList').querySelector('.pf-account-notice').textContent.includes(warning));
   } finally {s.dom.window.close();}
 });
 

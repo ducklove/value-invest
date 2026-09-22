@@ -112,6 +112,16 @@ class ActivityTests(TempDbMixin):
                 await sync.sync_account("u1", self.aid, include_activity=True)
         self.assertEqual((await broker_activity.history("u1", self.aid))["items"], [])
         self.assertEqual(await snapshots.get_cashflows("u1"), [])
+        self.assertIsNone((await broker_activity.state("u1", self.aid))["error"])
+
+    async def test_balance_failure_does_not_overwrite_activity_error(self):
+        with patch.object(activity, "fetch", AsyncMock(side_effect=BrokerError("거래내역 일련번호 누락"))), \
+             patch.object(sync, "fetch_snapshot", AsyncMock(side_effect=BrokerError("잔고 종목코드 오류"))):
+            with self.assertRaisesRegex(BrokerError, "잔고 종목코드"):
+                await sync.sync_account("u1", self.aid, include_activity=True)
+        self.assertEqual((await broker_activity.state("u1", self.aid))["error"], "거래내역 일련번호 누락")
+        self.assertEqual((await brokers.get_link("u1", self.aid))["sync_error"], "잔고 종목코드 오류")
+        self.assertEqual((await broker_activity.history("u1", self.aid))["items"], [])
 
     async def test_partial_fetch_invalid_payloads_and_account_isolation(self):
         for data in (cash_row(trd_sno=""), cash_row(trd_sno=None), cash_row(trd_sno=True),
@@ -136,7 +146,7 @@ class ActivityTests(TempDbMixin):
              patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
             result = await sync.sync_account("u1", self.aid, include_activity=True)
         self.assertTrue(result["ok"])
-        self.assertIn("거래일자·일련번호", result["activity_error"])
+        self.assertIn("거래 일련번호", result["activity_error"])
         self.assertEqual((await account_holdings.list_positions("u1", self.aid))[0]["quantity"], 10846)
         history = await broker_activity.history("u1", self.aid)
         self.assertEqual(history["items"], [])

@@ -85,8 +85,10 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
             return {"ok": True, "holdings_count": len(rows), "synced_at": now, "balances": balances,
                     "activity_error": activity_error}
         except BrokerError as exc:
-            if import_activity:
-                await broker_activity.set_error(user, aid, str(exc))
+            # 잔고 해석 실패를 수입·입출금 조회 오류로 복사하지 않는다.
+            # 두 조회가 모두 실패했다면 각자의 원인을 보존한다.
+            if import_activity and activity_error:
+                await broker_activity.set_error(user, aid, activity_error)
             async with transaction() as db:
                 await db.execute("UPDATE broker_account_links SET sync_error=? WHERE google_sub=? AND account_id=?", (str(exc), user, aid))
             raise

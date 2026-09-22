@@ -114,8 +114,9 @@ function pfRenderAccounts() {
     const error = row.connection?.sync_error;
     return `<section class="pf-account-card" data-account="${escapeHtml(row.account_id)}"><h3>${escapeHtml(row.name)}</h3>
       <p>${escapeHtml(detail)}${row.broker ? ' · ' + pfBrokerName(row.broker) + ' ' + escapeHtml(row.connection.account_no) + (row.connection.environment === 'mock' ? ' · 모의계좌' : '') : ' · 수동 관리'}</p>
-      ${error ? `<p class="pf-account-error">${escapeHtml(error)}</p>` : ''}
-      ${row.connection?.activity_error ? `<p class="pf-account-error">수입·입출금 내역 확인 필요 · ${escapeHtml(row.connection.activity_error)}</p>` : ''}
+      ${row.broker ? `<p class="pf-account-sync-status">${row.connection?.last_sync_at ? '최근 잔고 갱신 · ' + escapeHtml(new Date(row.connection.last_sync_at).toLocaleString('ko-KR')) : '첫 잔고 갱신 대기'}</p>` : ''}
+      ${error ? `<p class="pf-account-error">잔고 갱신 보류 · ${escapeHtml(error)}</p>` : ''}
+      ${row.connection?.activity_error ? `<div class="pf-account-notice"><strong>수입·입출금 내역 가져오기 보류</strong><p>${escapeHtml(row.connection.activity_error)}</p><p>잔고 갱신과는 별도로 재시도합니다.</p></div>` : ''}
       <div class="pf-account-actions"><button type="button" data-account-action="view">이 계좌 보기</button><button type="button" data-account-action="rename">이름 수정</button>
       ${row.broker ? '<button type="button" data-account-action="sync">잔고 동기화</button><button type="button" data-account-action="disconnect">연결 해제</button>' : '<button type="button" data-account-action="connect">증권사 계좌 연동</button>'}
       <button type="button" data-account-action="activity">수입·입출금 내역</button>

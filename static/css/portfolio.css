@@ -3680,3 +3680,8 @@ body.pf-compact-rows .pf-row-drag-handle {
   transform: translateY(-50%);
   margin: 0;
 }
+
+/* 잔고 갱신 시각과 거래내역 가져오기 제한을 각각 표시한다. */
+.pf-account-sync-status { color: var(--text-secondary); }
+.pf-account-notice { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid #b7791f; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+.pf-account-notice p { margin: 4px 0 0; }
