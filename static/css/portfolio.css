@@ -2650,18 +2650,16 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   background: var(--border); margin: 0 4px;
 }
 /* === 컴팩트 보기 (body.pf-compact-rows) ===
-   태그·순서이동 핸들을 숨기고 종목명을 한 줄(말줄임)로, 행 위아래 간격을
+   태그를 숨기고 종목명을 한 줄(말줄임)로, 행 위아래 간격을
    좁혀 한 화면에 더 많은 종목을 본다. 데스크톱·모바일 공통 옵션. */
-body.pf-compact-rows .pf-stock-tags,
-body.pf-compact-rows .pf-row-drag-handle {
+body.pf-compact-rows .pf-stock-tags {
   display: none !important;
 }
 body.pf-compact-rows .pf-stock-cell-with-drag {
-  /* td 를 본래의 table-cell 로 되돌려 vertical-align:middle 이 살아나게 한다.
-     display:block 이면 셀이 행 높이를 못 따라가(그룹 select·벤치마크 2줄 등으로
-     행이 높을 때) 종목명이 위로 붙는다. grid 가 풀리므로 드래그 핸들(숨김)이
-     차지하던 16px 들여쓰기도 함께 사라져 종목명이 셀 왼쪽부터 시작한다. */
+  /* 셀의 세로 정렬은 유지하고 이동 손잡이는 왼쪽 여백에 배치한다. */
   display: table-cell;
+  position: relative;
+  padding-left: 30px;
 }
 body.pf-compact-rows .pf-stock-line {
   flex-wrap: nowrap;
@@ -3673,3 +3671,12 @@ body.pf-compact-rows .pf-row-actions .js-pf-account-detail { display:none; }
 #pfActivityTotals { padding: 12px 0; }
 #pfActivityTotals h3 { font-size: 15px; }
 @media(max-width:600px) { .pf-activity-dialog input, .pf-activity-dialog select { font-size: 16px; } }
+
+/* 컴팩트 모드에서도 잔고 변경 없이 종목 순서를 옮길 수 있다. */
+body.pf-compact-rows .pf-row-drag-handle {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+}

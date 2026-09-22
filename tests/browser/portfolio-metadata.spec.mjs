@@ -99,6 +99,16 @@ test('연동 종목의 설정 편집·위치 이동은 허용하고 잔고는 �
   await expect(row.locator('.pf-col-target')).toHaveText('-');
   await page.locator('#pfCompactToggle').check();
   await expect(row.locator('.js-pf-edit')).not.toBeVisible();
+  await expect(row.locator('.js-pf-row-drag')).toBeVisible();
+  const compactFrom = page.locator('#pfBody tr').last();
+  const compactTo = page.locator('#pfBody tr').first();
+  const compactFromCode = await compactFrom.getAttribute('data-code');
+  const compactOrderSaved = page.waitForResponse(r => r.request().method() === 'PUT' && r.url().endsWith('/portfolio/order'));
+  await compactFrom.locator('.js-pf-row-drag').dragTo(compactTo.locator('.js-pf-row-drag'), {targetPosition: {x: 12, y: 2}});
+  expect((await compactOrderSaved).ok()).toBe(true);
+  await expect(page.locator('#pfBody tr').first()).toHaveAttribute('data-code', compactFromCode);
+  await page.evaluate(() => {window.scrollTo(0,0); document.querySelector('#pfHoldingsTab .pf-table-wrap').scrollLeft=0;});
+  await page.screenshot({path:testInfo.outputPath('linked-compact-drag.png'),fullPage:true});
   await page.locator('#pfCompactToggle').uncheck();
   await expect(row.locator('.js-pf-edit')).toBeVisible();
 });

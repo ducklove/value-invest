@@ -39,7 +39,7 @@ const PF_PATH_TO_VIEW = {
 };
 let _pfPointerGuardUntil = 0;
 const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
-// 컴팩트 보기: 종목명을 한 줄로, 태그·순서이동 핸들을 숨기고 행 간격을 좁힌다.
+// 컴팩트 보기: 종목명을 한 줄로, 태그를 숨기고 행 간격을 좁힌다. 순서 이동은 유지한다.
 // 모바일 전용인 pf-mobile-simple 과 달리 데스크톱에서도 동작하는 보기 옵션.
 const PF_COMPACT_ROWS_KEY = 'pf_compact_rows';
 try { PfStore.prefs.compactRows = localStorage.getItem(PF_COMPACT_ROWS_KEY) === '1'; } catch (e) {}
@@ -315,7 +315,7 @@ function _pfRenderColToggles() {
     + `<span class="pf-heat-summary" id="pfHeatSummary" role="status" aria-live="polite"${heatOn ? '' : ' hidden'}></span>`
     + `<span class="pf-col-toggle-sep" aria-hidden="true"></span>`;
   const compactToggle =
-    `<label class="pf-compact-toggle" title="태그·순서이동 아이콘을 숨기고 종목명을 한 줄로, 행 간격을 좁게 표시">`
+    `<label class="pf-compact-toggle" title="태그·매매·수정·삭제 버튼을 숨기고 종목명을 한 줄로, 행 간격을 좁게 표시">`
     + `<input type="checkbox" id="pfCompactToggle" class="js-pf-compact-toggle"${PfStore.prefs.compactRows ? ' checked' : ''}> 컴팩트</label>`
     + `<span class="pf-col-toggle-sep" aria-hidden="true"></span>`;
   const colToggles = PF_COL_DEFS.map(c =>
