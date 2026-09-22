@@ -25,6 +25,7 @@ from core.request_security import MutationOriginMiddleware
 from core.static_routes import register_static_routes
 from deps import get_current_user
 from repositories import bootstrap, db, financial, snapshots, users
+from repositories import notifications as notification_channels
 from repositories import portfolio as holdings
 from routes import (
     accounts,
@@ -47,6 +48,9 @@ async def lifespan(app):
         db.DB_PATH = Path(tmp) / "browser.db"
         await bootstrap.init_db()
         user = await users.create_local_user(email="browser@example.com", name="브라우저 검증", password_hash=auth_service.hash_password("browser-test-password"))
+        await notification_channels.upsert_notification_channel(
+            user["google_sub"], "telegram", config={"chat_id": "browser-test", "username": "testbot"}
+        )
         await holdings.save_portfolio_item(user["google_sub"], "005930", "삼성전자", 10, 70000)
         await holdings.save_portfolio_item(user["google_sub"], "CASH_KRW", "원화", 1000000, 1)
         today = today_kst_date()

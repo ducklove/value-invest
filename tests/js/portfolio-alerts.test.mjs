@@ -317,6 +317,15 @@ test("경제캘린더 구독이 없으면 안내 문구를 보여준다", async 
   assert.match(html, /구독 중인 경제지표 결과 알림이 없습니다/);
 });
 
+test('경제캘린더 자동 조건도 알림 설정 요약에 표시한다', async () => {
+  const w = loadAlertsWithCalendar();
+  w.apiFetch = async () => ({ ok: true, json: async () => ({ event_ids: ['manual'], automatic_event_ids: ['auto'], rules: [{country: 'us'}] }) });
+  await w.pfAlertsLoadCalendarSummary();
+  const html = w.document.getElementById('pfAlertCalendarSummary').innerHTML;
+  assert.match(html, /국가별 조건 <strong>1<\/strong>개/);
+  assert.match(html, /대기 <strong>2<\/strong>건/);
+});
+
 test("경제캘린더 구독 조회 실패 시 오류 문구로 대체된다 (throw 하지 않음)", async () => {
   const w = loadAlertsWithCalendar();
   w.apiFetch = async () => { throw new Error("network down"); };

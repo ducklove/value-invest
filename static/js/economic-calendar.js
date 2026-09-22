@@ -37,6 +37,47 @@ let _ecShellReady = false;
 let _ecSubs = new Set();
 let _ecEventById = {};
 let _ecSubsLoaded = false;
+let _ecAutoSubs = new Set();
+let _ecRules = [];
+let _ecRuleDraft = [];
+let _ecRuleCountries = [];
+let _ecUserKey = '';
+let _ecLastData = { events: [] };
+
+function _ecCurrentUserKey() {
+  return currentUser ? String(currentUser.google_sub || currentUser.id || currentUser.email || '') : '';
+}
+
+function _ecResetUserState() {
+  const key = _ecCurrentUserKey();
+  if (key === _ecUserKey) return;
+  _ecUserKey = key;
+  _ecSubsLoaded = false;
+  _ecSubs = new Set();
+  _ecAutoSubs = new Set();
+  _ecRules = [];
+  _ecRuleDraft = [];
+  const panel = document.getElementById('econCalAlertSettings');
+  if (panel) panel.hidden = true;
+  document.getElementById('econCalAlertsToggle')?.setAttribute('aria-expanded', 'false');
+}
+
+function _ecRuleMatches(ev) {
+  const eid = String(ev.index_id || '');
+  return _ecRules.some(rule => {
+    if (rule.country !== ev.country) return false;
+    if (rule.min_importance !== 'all' && ev.importance !== 'high'
+        && !(rule.min_importance === 'mid' && ev.importance === 'mid')) return false;
+    if (_ecAutoSubs.has(eid)) return true;
+    const since = new Date(rule.starts_at);
+    const raw = String(ev.datetime || '').replace(' ', 'T');
+    const scheduled = raw ? new Date(/(?:Z|[+-]\d\d:\d\d)$/.test(raw) ? raw : raw + '+09:00') : null;
+    if (scheduled) return scheduled >= since;
+    const day = ev.date || '';
+    return day > rule.starts_at.slice(0, 10)
+      || (day === rule.starts_at.slice(0, 10) && !String(ev.actual || '').trim());
+  });
+}
 
 function _ecFmtDate(d) {
   const y = d.getFullYear();
@@ -128,6 +169,9 @@ function _ecIsPast(ev) {
 function _ecBellCell(ev) {
   const hasActual = ev.actual && String(ev.actual).trim() !== '';
   const eid = String(ev.index_id || '').trim();
+  if (eid && _ecRuleMatches(ev)) {
+    return '<span class="ec-bell-cell"><span class="ec-rule-badge" role="img" aria-label="조건 알림 대상" title="국가·중요도 조건 알림 대상입니다. 알림 조건에서 변경하세요."><span>🔔</span><span>조건</span></span></span>';
+  }
   // 구독했던 이벤트의 결과가 나오면 🔔 마커를 남겨(행 배경 강조와 함께) 눈에 띄게 한다.
   if (hasActual) {
     if (eid && _ecSubs.has(eid)) {
@@ -150,7 +194,7 @@ function _ecRowHtml(ev) {
   const actualCls = hasActual ? _ecActualClass(ev.actual, ev.forecast) : 'ec-flat';
   // 내가 알림 구독한 일정의 결과가 나왔으면 행 배경으로 강조.
   const eid = String(ev.index_id || '').trim();
-  const alerted = hasActual && eid && _ecSubs.has(eid);
+  const alerted = hasActual && eid && (_ecSubs.has(eid) || _ecRuleMatches(ev));
   return `<div class="ec-row${alerted ? ' ec-row-alerted' : ''}">`
     + `<span class="ec-time">${escapeHtml(String(ev.time || '').trim() || '-')}</span>`
     + `<span class="ec-country" title="${escapeHtml(String(ev.country_name || ''))}">`
@@ -222,6 +266,7 @@ function _ecRowsWithNowLine(sortedRows) {
 function _ecRenderBody(data) {
   const body = document.getElementById('econCalBody');
   if (!body) return;
+  _ecLastData = data || { events: [] };
   const events = (data && data.events) || [];
   // 토글 시 구독 메타(날짜·국가·예상치 등) 조회용 인덱스.
   _ecEventById = {};
@@ -293,9 +338,11 @@ function _ecRenderShell() {
     + `<input type="date" class="ec-date" id="econCalStart" value="${_ecStart}" aria-label="시작일">`
     + '<span class="ec-date-sep">~</span>'
     + `<input type="date" class="ec-date" id="econCalEnd" value="${_ecEnd}" aria-label="종료일">`
-    + '<button class="ec-settings-toggle" id="econCalSettingsToggle" type="button" aria-expanded="false">⚙ 설정</button>'
+    + '<button class="ec-settings-toggle" id="econCalSettingsToggle" type="button" aria-expanded="false">⚙ 표시 설정</button>'
+    + '<button class="ec-settings-toggle" id="econCalAlertsToggle" type="button" aria-expanded="false" aria-controls="econCalAlertSettings">🔔 알림 조건</button>'
     + '</div>'
     + '<div class="ec-settings" id="econCalSettings" hidden></div>'
+    + '<div class="ec-alert-settings" id="econCalAlertSettings" hidden></div>'
     + '</div>'
     + '<div class="ec-body" id="econCalBody"><div class="md-loading">경제 일정을 불러오는 중입니다...</div></div>';
 
@@ -320,6 +367,14 @@ function _ecRenderShell() {
     toggle.classList.toggle('active', show);
   });
 
+  document.getElementById('econCalAlertsToggle')?.addEventListener('click', async () => {
+    _ecResetUserState();
+    const panel = document.getElementById('econCalAlertSettings');
+    panel.hidden = !panel.hidden;
+    document.getElementById('econCalAlertsToggle').setAttribute('aria-expanded', String(!panel.hidden));
+    if (!panel.hidden) await _ecLoadRules();
+  });
+
   // 🔔 체크박스는 본문이 매 렌더마다 다시 그려지므로 위임 리스너로 처리.
   const body = document.getElementById('econCalBody');
   if (body) {
@@ -335,14 +390,113 @@ function _ecRenderShell() {
 
 // 구독 목록을 세션당 1회 로드(로그인 시). 필터 변경 시엔 메모리 _ecSubs를 재사용.
 async function _ecLoadSubs() {
+  _ecResetUserState();
   if (_ecSubsLoaded || !currentUser) return;
+  const userKey = _ecCurrentUserKey();
   try {
-    const d = await apiFetchJson('/api/notifications/calendar', { fallback: { event_ids: [] } });
+    const d = await apiFetchJson('/api/notifications/calendar', { errorMessage: '알림 설정을 불러오지 못했습니다.' });
+    if (_ecCurrentUserKey() !== userKey) return;
     _ecSubs = new Set(d.event_ids || []);
+    _ecAutoSubs = new Set(d.automatic_event_ids || []);
+    _ecRules = d.rules || [];
+    _ecSubsLoaded = true;
   } catch (e) {
     console.warn('calendar subscriptions load failed', e);
+  }
+}
+
+async function _ecLoadRules() {
+  const panel = document.getElementById('econCalAlertSettings');
+  if (!currentUser) {
+    panel.innerHTML = '<p>조건 알림은 로그인 후 이용할 수 있습니다.</p><button type="button" class="ec-settings-toggle" onclick="_ecPromptLogin()">로그인</button>';
+    return;
+  }
+  const userKey = _ecCurrentUserKey();
+  panel.textContent = '알림 조건을 불러오는 중…';
+  try {
+    const data = await apiFetchJson('/api/notifications/calendar/rules', { errorMessage: '알림 조건을 불러오지 못했습니다.' });
+    if (_ecCurrentUserKey() !== userKey) return;
+    _ecRules = data.rules || [];
+    _ecRuleDraft = _ecRules.map(rule => ({ country: rule.country, min_importance: rule.min_importance }));
+    _ecRuleCountries = data.countries || [];
+    _ecRenderRulePanel();
+  } catch (e) {
+    panel.innerHTML = '<p role="alert">알림 조건을 불러오지 못했습니다.</p><button type="button" class="ec-settings-toggle" onclick="_ecLoadRules()">다시 시도</button>';
+  }
+}
+
+function _ecRenderRulePanel() {
+  const panel = document.getElementById('econCalAlertSettings');
+  const rows = _ecRuleDraft.map((rule, i) => {
+    const countries = _ecRuleCountries.map(c => `<option value="${escapeHtml(c.code)}"${c.code === rule.country ? ' selected' : ''}${_ecRuleDraft.some((r, j) => j !== i && r.country === c.code) ? ' disabled' : ''}>${escapeHtml(c.flag)} ${escapeHtml(c.name)}</option>`).join('');
+    return `<div class="ec-rule-row" data-rule-index="${i}">
+      <label>국가 <select data-field="country" aria-label="${i + 1}번째 알림 국가">${countries}</select></label>
+      <label>중요도 <select data-field="min_importance" aria-label="${i + 1}번째 알림 중요도">
+        <option value="all"${rule.min_importance === 'all' ? ' selected' : ''}>전체</option>
+        <option value="mid"${rule.min_importance === 'mid' ? ' selected' : ''}>중 이상</option>
+        <option value="high"${rule.min_importance === 'high' ? ' selected' : ''}>상</option>
+      </select></label>
+      <button type="button" class="ec-settings-toggle" data-remove="${i}" aria-label="${escapeHtml(_ecRuleCountries.find(c => c.code === rule.country)?.name || rule.country)} 알림 조건 삭제">삭제</button>
+    </div>`;
+  }).join('');
+  panel.innerHTML = `<form id="econCalRuleForm">
+    <h3>국가·중요도별 결과 알림</h3>
+    <p>설정 이후의 일정에 자동 적용됩니다. 화면을 닫아도 결과 발표 후 텔레그램·카카오톡으로 알려드립니다.</p>
+    <p class="ec-rule-hint">예: 한국 — 전체, 미국 — 중 이상, 일본 — 상. 표시 설정과 별도로 저장되며, 개별 알림과 겹쳐도 한 번만 보냅니다.</p>
+    <fieldset id="econCalRuleFields"><legend class="sr-only">알림 조건</legend>
+      <div id="econCalRuleRows">${rows || '<p class="ec-rule-empty">설정한 조건이 없습니다. 알림을 받을 국가를 추가하세요.</p>'}</div>
+      <div class="ec-rule-actions">
+        <button type="button" id="econCalRuleAdd" class="ec-settings-toggle"${_ecRuleDraft.length >= _ecRuleCountries.length ? ' disabled' : ''}>+ 국가 추가</button>
+        <button type="submit" class="ec-settings-toggle" id="econCalRuleSave">알림 조건 저장</button>
+      </div>
+    </fieldset>
+    <p id="econCalRuleStatus" role="status" aria-live="polite"></p>
+    <p class="ec-rule-hint">조건을 삭제하고 저장하면 해당 조건의 대기 알림도 취소됩니다. 개별로 신청한 알림은 유지됩니다.</p>
+  </form>`;
+  panel.querySelector('form').addEventListener('submit', e => { e.preventDefault(); _ecSaveRules(); });
+  panel.querySelector('#econCalRuleAdd').addEventListener('click', () => {
+    const next = _ecRuleCountries.find(c => !_ecRuleDraft.some(r => r.country === c.code));
+    if (next) _ecRuleDraft.push({ country: next.code, min_importance: 'all' });
+    _ecRenderRulePanel();
+  });
+  panel.querySelectorAll('[data-remove]').forEach(button => button.addEventListener('click', () => {
+    _ecRuleDraft.splice(Number(button.dataset.remove), 1);
+    _ecRenderRulePanel();
+  }));
+  panel.querySelectorAll('[data-field]').forEach(select => select.addEventListener('change', () => {
+    const index = Number(select.closest('[data-rule-index]').dataset.ruleIndex);
+    _ecRuleDraft[index][select.dataset.field] = select.value;
+    // Disable already chosen countries without replacing the focused select.
+    panel.querySelectorAll('select[data-field="country"]').forEach((countrySelect, i) => {
+      [...countrySelect.options].forEach(option => {
+        option.disabled = _ecRuleDraft.some((r, j) => i !== j && r.country === option.value);
+      });
+    });
+    document.getElementById('econCalRuleStatus').textContent = '';
+  }));
+}
+
+async function _ecSaveRules() {
+  const fields = document.getElementById('econCalRuleFields');
+  const status = document.getElementById('econCalRuleStatus');
+  if (!fields || fields.disabled) return;
+  const userKey = _ecCurrentUserKey();
+  fields.disabled = true;
+  status.textContent = '저장 중…';
+  try {
+    const data = await apiFetchJson('/api/notifications/calendar/rules', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: _ecRuleDraft }), errorMessage: '알림 조건을 저장하지 못했습니다.',
+    });
+    if (_ecCurrentUserKey() !== userKey) return;
+    _ecRules = data.rules || [];
+    status.textContent = '저장했습니다.';
+    _ecRenderBody(_ecLastData);
+  } catch (e) {
+    status.textContent = e.message || '저장하지 못했습니다. 다시 시도하세요.';
+    if (e?.status === 409) _ecPromptChannel();
   } finally {
-    _ecSubsLoaded = true;
+    fields.disabled = false;
   }
 }
 
@@ -404,6 +558,7 @@ async function _ecToggleSubscription(cb) {
 async function loadEconomicCalendar() {
   const root = document.getElementById('econCalContent');
   if (!root) return;
+  _ecResetUserState();
   if (!_ecShellReady) {
     _ecLoadLevels();   // 저장된 중요도별 국가 선택 복원(셸 렌더 전에)
     _ecRenderShell();

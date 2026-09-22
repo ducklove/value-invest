@@ -141,8 +141,11 @@ async function pfAlertsLoadCalendarSummary() {
   try {
     const resp = await pfAlertsApi('/calendar');
     const data = await resp.json();
-    const count = (data.event_ids || []).length;
-    const label = count > 0
+    const count = (data.event_ids || []).length + (data.automatic_event_ids || []).length;
+    const ruleCount = (data.rules || []).length;
+    const label = ruleCount > 0
+      ? `국가별 조건 <strong>${ruleCount}</strong>개로 새 일정을 자동 구독합니다. 현재 발표 대기 <strong>${count}</strong>건.`
+      : count > 0
       ? `발표 대기 중인 경제지표 <strong>${count}</strong>건의 결과 알림을 구독하고 있습니다.`
       : '구독 중인 경제지표 결과 알림이 없습니다.';
     el.innerHTML = `<span>${label}</span><button class="pf-alert-btn" type="button" onclick="pfAlertsGoToCalendar()">경제 캘린더에서 확인</button>`;

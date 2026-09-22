@@ -734,6 +734,14 @@ CREATE TABLE IF NOT EXISTS economic_calendar_subscriptions (
 );
 CREATE INDEX IF NOT EXISTS idx_econ_cal_subs_pending ON economic_calendar_subscriptions(fired, event_date);
 
+CREATE TABLE IF NOT EXISTS economic_calendar_alert_rules (
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    country TEXT NOT NULL,
+    min_importance TEXT NOT NULL CHECK(min_importance IN ('all', 'mid', 'high')),
+    starts_at TEXT NOT NULL,
+    PRIMARY KEY (google_sub, country)
+);
+
 -- 리밸런싱 목표 비중: scope='stock'(target_key=종목코드) 또는
 -- scope='group'(target_key=그룹명) 단위 목표 비중(%)과 드리프트 허용
 -- 오차(%p). CRUD 는 repositories/rebalance_targets.py 소유.
@@ -1041,6 +1049,7 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     # Notification edge-trigger and priority flags.
     ("portfolio_alerts", "state_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("portfolio_alerts", "important", "INTEGER NOT NULL DEFAULT 0"),
+    ("economic_calendar_subscriptions", "automatic", "INTEGER NOT NULL DEFAULT 0"),
     # 이 입출금의 유닛이 어느 날짜 정산의 total_units 에 반영됐는지.
     # NULL = 미반영 (다음 정산이 date <= 정산일 조건으로 집어간다).
     # 없던 시절에는 '정산일 == date 정확 일치 + 그날 첫 정산'에서만 유닛이

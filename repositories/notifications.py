@@ -384,7 +384,7 @@ async def release_notification_delivery(
 
 _ECON_SUB_COLUMNS = (
     "id, google_sub, event_id, event_date, event_datetime, country, country_name,"
-    " event, importance, forecast, previous, fired, created_at, updated_at"
+    " event, importance, forecast, previous, fired, automatic, created_at, updated_at"
 )
 
 
@@ -430,6 +430,7 @@ async def upsert_calendar_subscription(
                 importance = excluded.importance,
                 forecast = excluded.forecast,
                 previous = excluded.previous,
+                automatic = 0,
                 fired = 0,
                 updated_at = excluded.updated_at
             """,

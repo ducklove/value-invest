@@ -30,13 +30,14 @@ import json
 import logging
 from datetime import datetime
 
+from repositories import calendar_rules as calendar_rules_repo
 from repositories import corp_codes
 from repositories import db as db_repo
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from services.krx_limits import krx_lower_limit, krx_upper_limit
-from services.notifications import alert_delivery, channels
+from services.notifications import alert_delivery, calendar_rules, channels
 from services.portfolio import foreign, runtime_quotes
 from services.portfolio.identifiers import common_stock_code, is_preferred_stock
 from services.portfolio.target_resolver import (
@@ -49,6 +50,7 @@ from services.portfolio.time_windows import portfolio_today_baseline_date, settl
 
 logger = logging.getLogger(__name__)
 _evaluate_all_lock = asyncio.Lock()
+_evaluate_calendar_lock = asyncio.Lock()
 
 PRICE_TYPES = frozenset({"price_above", "price_below"})            # scope=stock
 NAV_TYPES = frozenset({"nav_above", "nav_below"})                  # scope=portfolio
@@ -940,41 +942,54 @@ def _format_calendar_message(sub: dict, ev: dict) -> str:
 
 
 async def evaluate_calendar_all() -> dict:
+    if _evaluate_calendar_lock.locked():
+        return {"subs": 0, "sent": 0, "skipped": "already_running"}
+    async with _evaluate_calendar_lock:
+        return await _evaluate_calendar_all()
+
+
+async def _evaluate_calendar_all() -> dict:
     """Fire 'result released' alerts for subscribed calendar events.
 
-    One shared calendar fetch covers all pending subscriptions: we union their
-    countries over the [oldest pending date .. today] window, index the result
-    by zeroin ``index_id``, then notify each user whose subscribed event now has
-    an ``actual`` value. Edge-triggered via the ``fired`` flag (one send each).
+    One shared fetch covers pending subscriptions and recurring rules. Rules
+    discover the next seven days of events; recent past dates catch delayed
+    releases. Manual and automatic subscriptions share an event's fired flag.
     """
     from collections import defaultdict
-    from datetime import date, timedelta
+    from datetime import timedelta
 
     import economic_calendar
 
+    today_date = alert_delivery.now_kst().date()
+    today = today_date.isoformat()
+    stale_cutoff = (today_date - timedelta(days=_CALENDAR_STALE_DAYS)).isoformat()
+    await notifications_repo.delete_stale_calendar_subscriptions(stale_cutoff)
     pending = await notifications_repo.list_pending_calendar_subscriptions()
-    if not pending:
+    rules = await calendar_rules_repo.list_rules()
+    if not pending and not rules:
         return {"subs": 0, "sent": 0}
 
-    today = date.today().isoformat()
-    stale_cutoff = (date.today() - timedelta(days=_CALENDAR_STALE_DAYS)).isoformat()
     # A future event has no result yet; only dates up to today can fire.
     candidates = [s for s in pending if (s.get("event_date") or "") <= today]
 
     events_by_id: dict[str, dict] = {}
     dates = [s["event_date"] for s in candidates if s.get("event_date") and s["event_date"] >= stale_cutoff]
+    dates.extend(max(r["starts_at"][:10], stale_cutoff) for r in rules)
     if dates:
-        countries = sorted({s.get("country") for s in candidates if s.get("country")})
+        countries = sorted({s.get("country") for s in candidates if s.get("country")} | {r["country"] for r in rules})
         try:
             data = await economic_calendar.fetch_economic_calendar(
                 start_date=min(dates),
-                end_date=today,
+                end_date=(today_date + timedelta(days=7)).isoformat() if rules else today,
                 countries=countries or None,
                 importance=["high", "mid", "low"],
             )
             events_by_id = {
-                e["index_id"]: e for e in data.get("events", []) if e.get("index_id")
+                str(e["index_id"]): e for e in data.get("events", []) if e.get("index_id")
             }
+            await calendar_rules.discover(rules, list(events_by_id.values()))
+            pending = await notifications_repo.list_pending_calendar_subscriptions()
+            candidates = [s for s in pending if s["event_date"] <= today]
         except Exception as exc:
             logger.warning("calendar alert fetch failed: %s", exc)
 
@@ -991,16 +1006,17 @@ async def evaluate_calendar_all() -> dict:
                 ev = events_by_id.get(sub.get("event_id"))
                 if not ev or not (ev.get("actual") or "").strip():
                     continue
-                await channels.dispatch(google_sub, _format_calendar_message(sub, ev))
-                await notifications_repo.mark_calendar_subscription_fired(sub["id"])
-                sent += 1
+                if sub.get("automatic"):
+                    current_rules = await calendar_rules_repo.list_rules(google_sub)
+                    if not any(calendar_rules.matches(r, ev) for r in current_rules):
+                        continue
+                delivered = await channels.dispatch(google_sub, _format_calendar_message(sub, ev))
+                if delivered:
+                    await notifications_repo.mark_calendar_subscription_fired(sub["id"])
+                    sent += 1
         except Exception as exc:
             logger.warning("calendar alert eval failed for %s: %s", google_sub[:8], exc)
 
-    try:
-        await notifications_repo.delete_stale_calendar_subscriptions(stale_cutoff)
-    except Exception as exc:
-        logger.warning("calendar stale subscription cleanup failed: %s", exc)
     return {"subs": len(pending), "sent": sent}
 
 

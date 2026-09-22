@@ -20,9 +20,10 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 
 from deps import get_current_user
+from repositories import calendar_rules as calendar_rules_repo
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
-from services.notifications import alert_delivery, channels, engine, kakao, telegram
+from services.notifications import alert_delivery, calendar_rules, channels, engine, kakao, telegram
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 logger = logging.getLogger(__name__)
@@ -522,7 +523,31 @@ async def get_calendar_subscriptions(request: Request):
     체크박스 상태를 복원한다(아직 발송 전인 것만)."""
     user = _require_user(await get_current_user(request))
     subs = await notifications_repo.list_calendar_subscriptions(user["google_sub"], pending_only=True)
-    return {"event_ids": [s["event_id"] for s in subs]}
+    return {
+        "event_ids": [s["event_id"] for s in subs if not s["automatic"]],
+        "automatic_event_ids": [s["event_id"] for s in subs if s["automatic"]],
+        "rules": (await calendar_rules.settings(user["google_sub"]))["rules"],
+    }
+
+
+@router.get("/calendar/rules")
+async def get_calendar_rules(request: Request):
+    user = _require_user(await get_current_user(request))
+    return await calendar_rules.settings(user["google_sub"])
+
+
+@router.put("/calendar/rules")
+async def put_calendar_rules(request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    try:
+        rules = calendar_rules.validate_rules(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    sub = user["google_sub"]
+    if rules and not await channels.has_active_channel(sub):
+        raise HTTPException(status_code=409, detail="알림을 받으려면 먼저 텔레그램 또는 카카오톡을 연결하세요.")
+    await calendar_rules_repo.replace_rules(sub, rules, alert_delivery.now_kst().isoformat())
+    return await calendar_rules.settings(sub)
 
 
 @router.post("/calendar")
@@ -610,6 +635,7 @@ async def calendar_alert_status(request: Request):
 
     return {
         "alert_loop_enabled": interval > 0,
+        "rules": (await calendar_rules.settings(sub))["rules"],
         "alert_interval_s": interval,
         "has_active_channel": has_channel,
         "server_today": today,
