@@ -141,6 +141,17 @@ async def get_holdings(request: Request):
     return rows
 
 
+app.add_api_route("/api/portfolio/order", portfolio.save_portfolio_order, methods=["PUT"])
+app.add_api_route("/api/portfolio/{stock_code}/metadata", portfolio.save_holding_metadata, methods=["PUT"])
+app.add_api_route("/api/portfolio/{stock_code}/group", portfolio.set_holding_group, methods=["PUT"])
+
+
+@app.put("/api/portfolio/{stock_code}/benchmark")
+async def edit_benchmark(stock_code: str, request: Request, payload: dict = Body(...)):
+    with patch.object(portfolio, "_fetch_benchmark_quote", AsyncMock(return_value={})):
+        return await portfolio.update_benchmark(stock_code, request, payload)
+
+
 @app.put("/api/portfolio/{code}")
 async def save_holding(code: str, request: Request, payload: dict = Body(...)):
     with patch.object(portfolio.foreign, "resolve_domestic_code_alias", AsyncMock(return_value=None)), \

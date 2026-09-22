@@ -1016,6 +1016,7 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     ("user_portfolio", "avg_price_currency", "TEXT NOT NULL DEFAULT 'KRW'"),
     ("user_portfolio", "group_name", "TEXT"),
     ("user_portfolio", "benchmark_code", "TEXT"),
+    ("user_portfolio", "stock_name_custom", "INTEGER NOT NULL DEFAULT 0"),
     # Manual target override fields.
     ("user_portfolio", "target_price", "REAL"),
     ("user_portfolio", "target_price_disabled", "INTEGER NOT NULL DEFAULT 0"),

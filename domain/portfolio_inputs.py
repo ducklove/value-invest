@@ -50,6 +50,36 @@ class HoldingInput(BaseModel):
         return None if isinstance(value, str) and not value.strip() else value
 
 
+class HoldingMetadataInput(BaseModel):
+    """연동 여부와 무관하게 편집하는 종목 공통 설정. 잔고 필드는 거절한다."""
+
+    model_config = {"extra": "forbid"}
+    stock_name: Annotated[str, Field(min_length=1, max_length=80)] | None = None
+    group_name: str | None = None
+    target_price: Price | None = None
+    target_price_formula: str | None = None
+    target_price_disabled: StrictBool = False
+    created_at: date | None = None
+    memo: Annotated[str, Field(max_length=500)] | None = None
+
+    @field_validator("stock_name", mode="before")
+    @classmethod
+    def valid_name(cls, value):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("종목명을 입력해 주세요.")
+        return value.strip()
+
+    @field_validator("target_price", mode="before")
+    @classmethod
+    def valid_target(cls, value):
+        return HoldingInput.empty_target(HoldingInput.reject_boolean_number(value))
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def valid_date(cls, value):
+        return HoldingInput.calendar_date(value)
+
+
 class CashflowInput(BaseModel):
     type: Literal["deposit", "withdrawal"]
     amount: Annotated[float, Field(allow_inf_nan=False, gt=0, le=1_000_000_000_000)]

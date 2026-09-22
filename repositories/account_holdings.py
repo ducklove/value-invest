@@ -171,7 +171,8 @@ async def annotate(user: str, items: list[dict], account_id: str | None = None) 
         if account_id and not rows:
             continue
         if account_id:
-            item.update(rows[0])
+            # 표시명·등록일은 종목 공통 설정이며 증권사 원장 값으로 덮지 않는다.
+            item.update({key: value for key, value in rows[0].items() if key not in {"stock_name", "created_at"}})
         item["account_positions"] = rows
         item["account_count"] = len(rows)
         output.append(item)

@@ -635,6 +635,7 @@ async def _save_portfolio_projection(
     target_price_disabled=_TARGET_DISABLED_UNCHANGED,
     target_price_formula=_TARGET_FORMULA_UNCHANGED,
     memo=_MEMO_UNCHANGED,
+    custom_name: str | None = None,
 ) -> dict:
     """target_price 인자의 의미:
       - 인자 미전달 (sentinel) → 기존 값 그대로 유지 (수량/매입가만 편집할 때)
@@ -663,10 +664,15 @@ async def _save_portfolio_projection(
         # date). Only overwrite created_at when the caller explicitly passes
         # one — that's how the UI's 등록일자 edit gets through.
         cursor = await db.execute(
-            "SELECT sort_order, group_name, benchmark_code, created_at, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula, pair_long_code, memo FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
+            "SELECT stock_name, stock_name_custom, sort_order, group_name, benchmark_code, created_at, COALESCE(avg_price_currency, 'KRW') AS avg_price_currency, target_price, COALESCE(target_price_disabled, 0) AS target_price_disabled, target_price_formula, pair_long_code, memo FROM user_portfolio WHERE google_sub = ? AND stock_code = ?",
             (google_sub, stock_code),
         )
         existing = await cursor.fetchone()
+        stock_name_custom = int(custom_name is not None or bool(existing and existing["stock_name_custom"]))
+        if custom_name is not None:
+            stock_name = custom_name
+        elif stock_name_custom:
+            stock_name = existing["stock_name"]
         sort_order = existing["sort_order"] if existing else None
         # 페어된 숏은 그룹을 직접 바꿀 수 없다 — 항상 롱의 현재 그룹을 따른다.
         if existing and existing["pair_long_code"]:
@@ -762,6 +768,10 @@ async def _save_portfolio_projection(
         await db.execute(
             "UPDATE user_portfolio SET group_name = ?, updated_at = ? WHERE google_sub = ? AND pair_long_code = ?",
             (group_name, now, google_sub, stock_code),
+        )
+        await db.execute(
+            "UPDATE user_portfolio SET stock_name_custom=? WHERE google_sub=? AND stock_code=?",
+            (stock_name_custom, google_sub, stock_code),
         )
     return {
         "stock_code": stock_code, "stock_name": stock_name,

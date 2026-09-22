@@ -578,7 +578,7 @@ function renderPortfolio(options = {}) {
     }
   }
 
-  const canManualDrag = PfStore.filters.group === null && !PfStore.sort.key && !PfStore.sort.groupSort && !searchText && currentUser && !PfStore.edit.code;
+  const canManualDrag = !PfStore.sort.key && !PfStore.sort.groupSort && currentUser && !PfStore.edit.code;
 
   // 컬러 모드 게이지의 분모는 "지금 보이는 행들의 최대 |등락률|" — 필터/검색
   // 결과에 맞춰 매 렌더 다시 잡아야 한 화면 안의 상대 크기가 의미를 가진다.
@@ -611,7 +611,9 @@ function renderPortfolio(options = {}) {
     const editAttrs = isSaving ? ' disabled' : '';
     const saveAttrs = isSaving ? ' disabled aria-busy="true"' : '';
     const rowClass = isSaving ? ' class="pf-row-saving" aria-busy="true"' : '';
-    const canEditAvgPriceCurrency = pfCanEditAvgPriceCurrency(r.stock_code);
+    const metadataOnly = typeof pfAccountNeedsSelection === 'function' && !!pfAccountNeedsSelection();
+    const balanceAttrs = metadataOnly ? ' disabled data-balance-locked title="증권사 잔고 또는 계좌별 잔고에서 관리합니다"' : editAttrs;
+    const canEditAvgPriceCurrency = !metadataOnly && pfCanEditAvgPriceCurrency(r.stock_code);
     const avgPriceCurrencyControl = canEditAvgPriceCurrency
       ? `<select class="pf-price-currency-select js-pf-edit-price-currency" id="pfEditPriceCurrency"${editAttrs}>${pfAvgPriceCurrencyOptions(r.avgPriceCurrency)}</select>`
       : `<span class="pf-price-currency-lock">${escapeHtml(r.avgPriceCurrency)}</span>`;
@@ -655,11 +657,11 @@ function renderPortfolio(options = {}) {
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
-        <td class="pf-col-num pf-col-buyprice"><span class="pf-price-edit-wrap"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="any"${editAttrs}>${avgPriceCurrencyControl}</span></td>
+        <td class="pf-col-num pf-col-buyprice"><span class="pf-price-edit-wrap"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="any"${balanceAttrs}>${avgPriceCurrencyControl}</span></td>
         <td class="pf-col-num pf-col-target"${targetTitle}><span class="pf-target-edit-wrap"><input class="pf-edit-input js-pf-edit-target" id="pfEditTarget" value="${escapeHtml(targetInputValue)}" type="text" inputmode="decimal" placeholder="자동 또는 BPS*0.4+DPS*10" title="${escapeHtml(targetHelp)}"${editAttrs}><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 표시 안 함 (- 로 고정)"${editAttrs}>×</button></span></td>
         <td class="pf-col-num pf-col-achiev"${targetTitle}>${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
         <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
-        <td class="pf-col-num pf-col-qty"><input class="pf-edit-input js-pf-edit-qty" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"${editAttrs}></td>
+        <td class="pf-col-num pf-col-qty"><input class="pf-edit-input js-pf-edit-qty" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"${balanceAttrs}></td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
         <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
         <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield, false) : '-'}</td>
@@ -690,11 +692,11 @@ function renderPortfolio(options = {}) {
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
       <td class="pf-col-date">${r.createdAtSort || '-'}</td>
       <td class="pf-col-memo">${memoCell}</td>
-      <td class="pf-col-act"><div class="pf-row-actions">${typeof pfAccountNeedsSelection === 'function' && pfAccountNeedsSelection() ? '<button type="button" class="pf-row-btn js-pf-account-detail">계좌별 보기</button>' : `
+      <td class="pf-col-act"><div class="pf-row-actions">${metadataOnly ? '<button type="button" class="pf-row-btn js-pf-account-detail">계좌별 보기</button>' : `
         ${document.getElementById('pfTradeDialog') && r.qty >= 0 && !isFuturesValue ? `<button type="button" class="pf-row-btn js-pf-trade" title="${isCash ? '다른 통화로 환전 기록' : '매수·매도 기록'}">${isCash ? '환전' : '매매'}</button>` : ''}
-        <button type="button" class="pf-row-btn edit js-pf-edit" title="보유 수량·매입가 정정 (현금 변동 없음)" aria-label="${escapeHtml(r.stock_name)} 보유 정보 편집">✎</button>
         <button type="button" class="pf-row-btn delete js-pf-delete" title="매도 또는 등록 삭제" aria-label="${escapeHtml(r.stock_name)} 보유분 정리">✕</button>
       `}
+        <button type="button" class="pf-row-btn edit js-pf-edit" title="${metadataOnly ? '종목명·그룹·목표가·벤치마크·등록일·메모 수정' : '보유 정보 수정 (현금 변동 없음)'}" aria-label="${escapeHtml(r.stock_name)} 보유 정보 편집">✎</button>
       </div></td>
     </tr>`;
   }).join('');

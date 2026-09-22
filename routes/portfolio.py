@@ -11,9 +11,9 @@ from fastapi.responses import StreamingResponse
 import asset_insights
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
-from domain.portfolio_inputs import CashflowInput, HoldingInput, validate_input
+from domain.portfolio_inputs import CashflowInput, HoldingInput, HoldingMetadataInput, validate_input
 from repositories import benchmark_daily as benchmark_repo
-from repositories import corp_codes
+from repositories import corp_codes, portfolio_metadata
 from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
@@ -701,88 +701,37 @@ async def save_portfolio_order(request: Request, payload: dict = Body(...)):
     if not codes:
         raise HTTPException(status_code=400, detail="정렬할 종목 목록이 필요합니다.")
 
-    current = await portfolio_repo.get_portfolio(user["google_sub"])
-    current_codes = [item["stock_code"] for item in current]
-    current_set = set(current_codes)
-    requested_set = set(codes)
-    if len(codes) != len(current_codes) or requested_set != current_set:
-        missing = [code for code in current_codes if code not in requested_set]
-        unknown = [code for code in codes if code not in current_set]
-        detail = "포트폴리오 전체 종목 순서와 맞지 않습니다."
-        parts = []
-        if missing:
-            parts.append("missing=" + ",".join(missing[:8]))
-        if unknown:
-            parts.append("unknown=" + ",".join(unknown[:8]))
-        if parts:
-            detail += " " + " ".join(parts)
-        raise HTTPException(status_code=400, detail=detail)
+    async with db_repo.transaction():
+        account_id = request.headers.get("X-Portfolio-Account") if request else None
+        current = await portfolio_repo.get_portfolio(user["google_sub"], account_id)
+        current_codes = [item["stock_code"] for item in current]
+        current_set = set(current_codes)
+        requested_set = set(codes)
+        if len(codes) != len(current_codes) or requested_set != current_set:
+            missing = [code for code in current_codes if code not in requested_set]
+            unknown = [code for code in codes if code not in current_set]
+            detail = "포트폴리오 전체 종목 순서와 맞지 않습니다."
+            parts = []
+            if missing:
+                parts.append("missing=" + ",".join(missing[:8]))
+            if unknown:
+                parts.append("unknown=" + ",".join(unknown[:8]))
+            if parts:
+                detail += " " + " ".join(parts)
+            raise HTTPException(status_code=400, detail=detail)
 
-    await portfolio_repo.save_portfolio_order(user["google_sub"], codes)
+        ordered_codes = codes
+        if account_id:
+            # 선택 계좌에 속한 슬롯만 재배치하고 다른 계좌의 종목 순서는 보존한다.
+            all_items = await portfolio_repo.get_portfolio(user["google_sub"])
+            reordered = iter(codes)
+            ordered_codes = [next(reordered) if item["stock_code"] in requested_set else item["stock_code"]
+                             for item in all_items]
+        await portfolio_repo.save_portfolio_order(user["google_sub"], ordered_codes)
     return {"ok": True, "count": len(codes)}
 
 
-@router.put("/api/portfolio/{stock_code}")
-async def save_portfolio_item(stock_code: str, request: Request, payload: dict = Body(...)):
-    user = _require_user(await get_current_user(request))
-    payload = validate_input(HoldingInput, payload)
-    stock_code = _normalize_portfolio_code(stock_code)
-
-    stock_name = str(payload.get("stock_name") or "").strip()
-    domestic_alias = await foreign.resolve_domestic_code_alias(stock_code)
-    if domestic_alias:
-        stock_code = domestic_alias["stock_code"]
-        if not stock_name:
-            stock_name = domestic_alias["corp_name"]
-
-    if not stock_name:
-        resolved = await foreign.resolve_name(stock_code)
-        if resolved:
-            stock_name = resolved
-        else:
-            raise HTTPException(status_code=400, detail="종목명을 입력해 주세요.")
-
-    quantity = payload.get("quantity")
-    avg_price = payload.get("avg_price")
-    if quantity is None or avg_price is None:
-        raise HTTPException(status_code=400, detail="수량과 매입가를 입력해 주세요.")
-
-    try:
-        quantity = float(quantity)
-        avg_price = float(avg_price)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="수량과 매입가는 숫자여야 합니다.")
-
-    if quantity == 0:
-        raise HTTPException(status_code=400, detail="수량은 0이 아닌 값이어야 합니다.")
-    if abs(quantity) > 1_000_000_000:
-        raise HTTPException(status_code=400, detail="수량이 너무 큽니다.")
-    if avg_price < 0:
-        raise HTTPException(status_code=400, detail="매입가는 0 이상이어야 합니다.")
-    if avg_price > 1_000_000_000_000:
-        raise HTTPException(status_code=400, detail="매입가가 너무 큽니다.")
-
-    currency = str(payload.get("currency") or "").upper()
-    if not currency:
-        if _is_cash_asset(stock_code):
-            currency = stock_code.replace("CASH_", "")
-        elif _is_korean_stock(stock_code) or _is_special_asset(stock_code):
-            currency = "KRW"
-        else:
-            currency = foreign.infer_yf_currency(foreign.yfinance_direct_ticker(stock_code))
-    elif _is_cash_asset(stock_code):
-        currency = stock_code.replace("CASH_", "")
-    elif _is_korean_stock(stock_code) or _is_special_asset(stock_code):
-        currency = "KRW"
-    avg_price_currency = _parse_avg_price_currency(payload.get("avg_price_currency"))
-    if avg_price_currency and (_is_cash_asset(stock_code) or _is_korean_stock(stock_code) or _is_special_asset(stock_code)):
-        avg_price_currency = "KRW"
-    if avg_price_currency is None:
-        existing_item = await portfolio_repo.get_portfolio_item(user["google_sub"], stock_code, (request.headers.get("X-Portfolio-Account") if request else None))
-        avg_price_currency = fx.normalize_price_currency((existing_item or {}).get("avg_price_currency"))
-    # 저장 전에 필요한 환율을 한 번만 확인한다. 저장 후 환율 장애로 실패를
-    # 응답하거나, 통화 미전달 시 기존 외화 매입가를 원화로 오인하지 않는다.
-    avg_price_krw = await fx.price_to_krw(avg_price, avg_price_currency)
+async def _parse_holding_metadata(user: dict, stock_code: str, payload: dict, avg_price_krw: float) -> dict:
     group_name = str(payload.get("group_name") or "").strip() or None
     if group_name:
         groups = await portfolio_repo.get_portfolio_groups(user["google_sub"])
@@ -860,13 +809,108 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
             )
         memo_kwarg["memo"] = memo_value or None
 
+    return {
+        "group_name": group_name, "benchmark_code": benchmark_code, "created_at": created_at,
+        **target_price_kwarg, **memo_kwarg,
+    }
+
+
+@router.put("/api/portfolio/{stock_code}/metadata")
+async def save_holding_metadata(stock_code: str, request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    payload = validate_input(HoldingMetadataInput, payload)
+    code = _normalize_portfolio_code(stock_code)
+    account_id = request.headers.get("X-Portfolio-Account")
+    item = await portfolio_repo.get_portfolio_item(user["google_sub"], code, account_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="보유 종목을 찾을 수 없습니다.")
+    # 수식에 필요한 경우에만 환율 조회. 이름·메모 변경은 시세 장애와 무관하다.
+    avg_price_krw = 0
+    if payload.get("target_price_formula"):
+        avg_price_krw = await fx.price_to_krw(item["avg_price"], item["avg_price_currency"])
+    metadata = await _parse_holding_metadata(user, code, payload, avg_price_krw)
+    if "stock_name" in payload:
+        metadata["custom_name"] = payload["stock_name"]
+    result = await portfolio_metadata.save(user["google_sub"], code, **metadata)
+    if result is None:
+        raise HTTPException(status_code=404, detail="보유 종목을 찾을 수 없습니다.")
+    # 계좌별 편집 응답에 합산 잔고가 섞이지 않도록 설정만 반환한다.
+    fields = {"stock_code", "stock_name", "group_name", "benchmark_code", "created_at",
+              "target_price", "target_price_formula", "target_price_disabled", "memo"}
+    return {"ok": True, **{key: value for key, value in result.items() if key in fields}}
+
+
+@router.put("/api/portfolio/{stock_code}")
+async def save_portfolio_item(stock_code: str, request: Request, payload: dict = Body(...)):
+    user = _require_user(await get_current_user(request))
+    payload = validate_input(HoldingInput, payload)
+    stock_code = _normalize_portfolio_code(stock_code)
+
+    stock_name = str(payload.get("stock_name") or "").strip()
+    domestic_alias = await foreign.resolve_domestic_code_alias(stock_code)
+    if domestic_alias:
+        stock_code = domestic_alias["stock_code"]
+        if not stock_name:
+            stock_name = domestic_alias["corp_name"]
+
+    if not stock_name:
+        resolved = await foreign.resolve_name(stock_code)
+        if resolved:
+            stock_name = resolved
+        else:
+            raise HTTPException(status_code=400, detail="종목명을 입력해 주세요.")
+
+    quantity = payload.get("quantity")
+    avg_price = payload.get("avg_price")
+    if quantity is None or avg_price is None:
+        raise HTTPException(status_code=400, detail="수량과 매입가를 입력해 주세요.")
+
+    try:
+        quantity = float(quantity)
+        avg_price = float(avg_price)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="수량과 매입가는 숫자여야 합니다.")
+
+    if quantity == 0:
+        raise HTTPException(status_code=400, detail="수량은 0이 아닌 값이어야 합니다.")
+    if abs(quantity) > 1_000_000_000:
+        raise HTTPException(status_code=400, detail="수량이 너무 큽니다.")
+    if avg_price < 0:
+        raise HTTPException(status_code=400, detail="매입가는 0 이상이어야 합니다.")
+    if avg_price > 1_000_000_000_000:
+        raise HTTPException(status_code=400, detail="매입가가 너무 큽니다.")
+
+    currency = str(payload.get("currency") or "").upper()
+    if not currency:
+        if _is_cash_asset(stock_code):
+            currency = stock_code.replace("CASH_", "")
+        elif _is_korean_stock(stock_code) or _is_special_asset(stock_code):
+            currency = "KRW"
+        else:
+            currency = foreign.infer_yf_currency(foreign.yfinance_direct_ticker(stock_code))
+    elif _is_cash_asset(stock_code):
+        currency = stock_code.replace("CASH_", "")
+    elif _is_korean_stock(stock_code) or _is_special_asset(stock_code):
+        currency = "KRW"
+    avg_price_currency = _parse_avg_price_currency(payload.get("avg_price_currency"))
+    if avg_price_currency and (_is_cash_asset(stock_code) or _is_korean_stock(stock_code) or _is_special_asset(stock_code)):
+        avg_price_currency = "KRW"
+    if avg_price_currency is None:
+        existing_item = await portfolio_repo.get_portfolio_item(user["google_sub"], stock_code, (request.headers.get("X-Portfolio-Account") if request else None))
+        avg_price_currency = fx.normalize_price_currency((existing_item or {}).get("avg_price_currency"))
+    # 저장 전에 필요한 환율을 한 번만 확인한다. 저장 후 환율 장애로 실패를
+    # 응답하거나, 통화 미전달 시 기존 외화 매입가를 원화로 오인하지 않는다.
+    avg_price_krw = await fx.price_to_krw(avg_price, avg_price_currency)
+    metadata = await _parse_holding_metadata(user, stock_code, payload, avg_price_krw)
+    if payload.get("stock_name"):
+        metadata["custom_name"] = stock_name
+
     result = await portfolio_repo.save_portfolio_item(
         user["google_sub"], stock_code, stock_name, quantity, avg_price,
-        currency, group_name, benchmark_code, created_at,
+        currency,
         avg_price_currency=avg_price_currency,
         account_id=(request.headers.get("X-Portfolio-Account") if request else None),
-        **target_price_kwarg,
-        **memo_kwarg,
+        **metadata,
     )
     result["avg_price_krw"] = avg_price_krw
 

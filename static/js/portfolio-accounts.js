@@ -374,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _pfAccountEl('pfNhDialog')?.addEventListener('close', () => { for (const id of ['pfNhKey', 'pfNhSecret', 'pfKisAccount', 'pfKisHts']) _pfAccountEl(id).value = ''; });
   document.addEventListener('click', event => {
     if (event.target.closest('.js-pf-account-detail')) { event.preventDefault(); pfOpenAccountManager(event.target.closest('tr[data-code]')?.dataset.code); return; }
-    if (event.target.closest('.js-pf-trade,.js-pf-edit,.js-pf-delete,.js-pf-dividend-receipt,.js-pf-distribution,.js-pf-cashflow,#pfAddToggle') && pfAccountNeedsSelection()) {
+    if (event.target.closest('.js-pf-trade,.js-pf-delete,.js-pf-dividend-receipt,.js-pf-distribution,.js-pf-cashflow,#pfAddToggle') && pfAccountNeedsSelection()) {
       event.preventDefault(); event.stopImmediatePropagation();
       pfOpenAccountManager(event.target.closest('tr[data-code]')?.dataset.code);
     }

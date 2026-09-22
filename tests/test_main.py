@@ -1,4 +1,5 @@
 import unittest
+from contextlib import nullcontext
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -176,7 +177,8 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_portfolio_order_saves_full_normalized_code_list(self):
         request = _request_with_headers("/api/portfolio/order")
         saver = AsyncMock()
-        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+        with patch("routes.portfolio.db_repo.transaction", return_value=nullcontext()), \
+             patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
              patch("repositories.portfolio.get_portfolio", new=AsyncMock(return_value=[
                  {"stock_code": "BBB"},
                  {"stock_code": "AAA"},
@@ -193,7 +195,8 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_portfolio_order_rejects_partial_or_unknown_code_list(self):
         request = _request_with_headers("/api/portfolio/order")
         saver = AsyncMock()
-        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+        with patch("routes.portfolio.db_repo.transaction", return_value=nullcontext()), \
+             patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
              patch("repositories.portfolio.get_portfolio", new=AsyncMock(return_value=[
                  {"stock_code": "AAA"},
                  {"stock_code": "BBB"},

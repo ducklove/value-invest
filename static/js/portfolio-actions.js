@@ -133,7 +133,7 @@ function _pfSetEditSaving(stockCode, saving, row) {
       el.title = saving ? '저장 중입니다' : '저장';
       return;
     }
-    el.disabled = !!saving;
+    el.disabled = !!saving || el.hasAttribute('data-balance-locked');
   });
 }
 
@@ -148,9 +148,10 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     showToast('편집 행을 찾지 못했습니다. 다시 수정해 주세요.');
     return;
   }
+  const metadataOnly = typeof pfAccountNeedsSelection === 'function' && !!pfAccountNeedsSelection();
   const qty = Number(qtyEl.value);
   const price = Number(priceEl.value);
-  if (!Number.isFinite(qty) || qty === 0 || !Number.isFinite(price) || price < 0) {
+  if (!metadataOnly && (!Number.isFinite(qty) || qty === 0 || !Number.isFinite(price) || price < 0)) {
     showToast('수량과 매입가를 올바르게 입력해 주세요.');
     return;
   }
@@ -167,7 +168,9 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   const createdAtEl = editRow.querySelector('.js-pf-edit-created-at') || document.getElementById('pfEditCreatedAt');
   const createdAt = createdAtEl ? createdAtEl.value.trim() : '';
   const avgPriceCurrency = priceCurrencyEl ? pfAvgPriceCurrency({ avg_price_currency: priceCurrencyEl.value }) : (existingItem?.avg_price_currency || 'KRW');
-  const body = { stock_name: stockName, quantity: qty, avg_price: price, avg_price_currency: avgPriceCurrency };
+  const body = metadataOnly ? {}
+    : { stock_name: stockName, quantity: qty, avg_price: price, avg_price_currency: avgPriceCurrency };
+  if (metadataOnly && stockName !== existingItem?.stock_name) body.stock_name = stockName;
   if (createdAt) body.created_at = createdAt;
   // 메모는 값이 바뀐 경우에만 payload 에 실는다 — 메모 컬럼을 숨겨둔
   // 사용자가 수량만 고쳐도 input 이 렌더되긴 하므로, 변경분만 보내면
@@ -213,7 +216,7 @@ async function savePortfolioEdit(stockCode, stockName, row) {
   }
   _pfSetEditSaving(stockCode, true, editRow);
   try {
-    const data = await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
+    const data = await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}${metadataOnly ? '/metadata' : ''}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -222,10 +225,12 @@ async function savePortfolioEdit(stockCode, stockName, row) {
     // Update local item without full reload
     const item = PfStore.items.find(i => i.stock_code === stockCode);
     if (item) {
-      item.quantity = qty;
-      item.avg_price = price;
-      item.avg_price_currency = data.avg_price_currency || avgPriceCurrency;
-      item.avg_price_krw = Number.isFinite(Number(data.avg_price_krw)) ? Number(data.avg_price_krw) : pfAvgPriceKrw(item);
+      if (!metadataOnly) {
+        item.quantity = qty;
+        item.avg_price = price;
+        item.avg_price_currency = data.avg_price_currency || avgPriceCurrency;
+        item.avg_price_krw = Number.isFinite(Number(data.avg_price_krw)) ? Number(data.avg_price_krw) : pfAvgPriceKrw(item);
+      }
       item.stock_name = data.stock_name || stockName;
       // Server may have normalized or kept created_at — trust its echo.
       if (data.created_at) item.created_at = data.created_at;
@@ -258,13 +263,10 @@ async function clearPortfolioTargetPrice(stockCode) {
     return;
   }
   try {
-    const data = await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}`, {
+    const data = await apiFetchJson(`/api/portfolio/${encodeURIComponent(stockCode)}/metadata`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        stock_name: item.stock_name,
-        quantity: item.quantity,
-        avg_price: item.avg_price,
         target_price: null,
         target_price_formula: null,
         target_price_disabled: true,

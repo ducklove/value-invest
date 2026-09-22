@@ -300,7 +300,7 @@ def test_portfolio_reorder_persists_snapshot_and_checks_save_response():
     assert "errorMessage: 'Portfolio order save failed'," in order
     assert "await loadPortfolio({ force: true });" in order
     assert "async function pfDropRow" not in actions
-    assert "const canManualDrag = PfStore.filters.group === null && !PfStore.sort.key && !PfStore.sort.groupSort && !searchText && currentUser && !PfStore.edit.code;" in render
+    assert "const canManualDrag = !PfStore.sort.key && !PfStore.sort.groupSort && currentUser && !PfStore.edit.code;" in render
     assert "_pfDropPositionForEvent(e, tr)" in render
     assert "_pfClearPortfolioDragOver(tbody)" in render
     assert "pfDropRow(fromCode, toCode, dropPosition)" in render
