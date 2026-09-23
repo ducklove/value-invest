@@ -120,6 +120,15 @@ class _SeededDbTestCase(TempDbMixin):
 
 
 class NavSnapshotFreshnessTests(_SeededDbTestCase):
+    async def test_other_users_fresh_snapshot_cannot_hide_missing_settlement(self):
+        await self._seed_user_with_holdings("u1")
+        await self._seed_user_with_holdings("u2")
+        await self._seed_snapshot("2026-06-09", "u1")
+        await self._seed_snapshot("2026-06-10", "u2")
+        result = await data_quality.check_nav_snapshot_freshness(now=WED_LATE)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["missing_accounts"], [{"account": "u1", "latest": "2026-06-09", "gap": 1}])
+
     async def test_fresh_snapshot_is_ok(self):
         await self._seed_user_with_holdings()
         await self._seed_snapshot("2026-06-10")
@@ -127,11 +136,11 @@ class NavSnapshotFreshnessTests(_SeededDbTestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["value"], 0)
 
-    async def test_one_trading_day_behind_is_warn(self):
+    async def test_one_trading_day_behind_is_error(self):
         await self._seed_user_with_holdings()
         await self._seed_snapshot("2026-06-09")
         result = await data_quality.check_nav_snapshot_freshness(now=WED_LATE)
-        self.assertEqual(result["status"], "warn")
+        self.assertEqual(result["status"], "error")
         self.assertEqual(result["value"], 1)
 
     async def test_many_trading_days_behind_is_error(self):

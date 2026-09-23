@@ -321,7 +321,12 @@ async def get_nav_input_state(google_sub: str) -> tuple:
     db = await get_db()
     state = []
     for sql in (
-        "SELECT * FROM user_portfolio WHERE google_sub = ? ORDER BY stock_code",
+        # 증권사 동기화의 updated_at만 바뀌어도 전체 시세를 재조회하던 문제를
+        # 막는다. 평가·그룹 귀속에 영향을 주는 입력은 모두 비교한다.
+        "SELECT stock_code, quantity, avg_price, avg_price_currency, currency, group_name, pair_long_code "
+        "FROM user_portfolio WHERE google_sub = ? ORDER BY stock_code",
+        "SELECT account_id, stock_code, quantity, avg_price, avg_price_currency, currency "
+        "FROM account_holdings WHERE google_sub = ? ORDER BY account_id, stock_code",
         "SELECT * FROM portfolio_cashflows WHERE google_sub = ? ORDER BY id",
         "SELECT * FROM portfolio_distributions WHERE google_sub = ? ORDER BY id",
         "SELECT * FROM portfolio_dividend_receipts WHERE google_sub = ? ORDER BY id",

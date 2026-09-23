@@ -482,9 +482,9 @@ function renderPortfolio(options = {}) {
   // Today compares against the previous 20:00 KST settlement snapshot.
   const _todayBaseDate = PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.date;
   // Slice YYYY-MM-DD directly to avoid timezone-off-by-one browser parsing.
-  const _todayLabel = _todayBaseDate
+  const _todayLabel = (PfStore.snapshots.prevDay?.settlement_pending ? '정산 미완료 · ' : '') + (_todayBaseDate
     ? `${_todayBaseDate.slice(5, 7)}/${_todayBaseDate.slice(8, 10)} 20시 정산 기준`
-    : '기준 없음';
+    : '기준 없음');
   const _mtdLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}`;
   const _ytdLabel = `${_now.getFullYear()}`;
 

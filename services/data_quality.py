@@ -44,8 +44,6 @@ SETTLED_MINUTES = 20 * 60 + 10
 # 장중 스냅샷은 09:00 장 시작 이후에만 의미가 있다 — 그 전엔 검사 생략.
 _INTRADAY_CHECK_FROM_MINUTES = 10 * 60
 
-# NAV 스냅샷: 1~2 거래일 지연 → warn, 3거래일 이상 → error.
-_NAV_ERROR_TRADING_DAYS = 3
 # 현재 보유 종목별 스냅샷도 NAV와 같은 기준으로 본다. 전체 NAV가 최신이어도
 # 특정 해외/특수 종목만 조용히 빠지는 경우를 잡기 위함이다.
 _STOCK_SNAPSHOT_ERROR_TRADING_DAYS = 3
@@ -104,34 +102,35 @@ def trading_day_gap(expected: date, latest: date) -> int:
 # ---------------------------------------------------------------------------
 
 async def check_nav_snapshot_freshness(now: datetime | None = None) -> dict:
-    """NAV 스냅샷 신선도 — portfolio_snapshots 의 MAX(date) vs 기대 거래일."""
+    """보유 계정별 정산 누락을 확인한다. 다른 계정의 성공으로 가리지 않는다."""
+    from services.portfolio.time_windows import now_kst
+
     check = "nav_snapshot_freshness"
-    now = now or datetime.now()
+    now = now or now_kst()
     expected = last_expected_trading_day(now, settled_minutes=SETTLED_MINUTES)
     db = await get_db()
-    cursor = await db.execute("SELECT MAX(date) AS d FROM portfolio_snapshots")
-    row = await cursor.fetchone()
-    latest = row["d"] if row else None
-    if not latest:
-        # 포트폴리오 사용자가 아예 없으면 스냅샷이 없는 게 정상이다.
-        cursor = await db.execute("SELECT COUNT(*) AS n FROM user_portfolio")
-        has_holdings = int((await cursor.fetchone())["n"]) > 0
-        if not has_holdings:
-            return {"check": check, "status": "ok", "detail": "포트폴리오 사용자 없음 — 검사 생략", "value": None}
-        return {"check": check, "status": "error", "detail": "NAV 스냅샷 데이터 없음 (보유 종목은 존재)", "value": None}
-    try:
-        latest_d = date.fromisoformat(str(latest))
-    except ValueError:
-        return {"check": check, "status": "error", "detail": f"스냅샷 날짜 파싱 실패: {latest}", "value": None}
-    gap = trading_day_gap(expected, latest_d)
-    if gap <= 0:
-        return {"check": check, "status": "ok", "detail": f"최신 {latest} (기대 {expected})", "value": 0}
-    status = "error" if gap >= _NAV_ERROR_TRADING_DAYS else "warn"
+    rows = await (await db.execute(
+        "SELECT p.google_sub, MAX(s.date) AS latest FROM "
+        "(SELECT DISTINCT google_sub FROM user_portfolio) p "
+        "LEFT JOIN portfolio_snapshots s ON s.google_sub=p.google_sub GROUP BY p.google_sub"
+    )).fetchall()
+    if not rows:
+        return {"check": check, "status": "ok", "detail": "포트폴리오 사용자 없음 — 검사 생략", "value": None}
+    missing = []
+    max_gap = 0
+    for row in rows:
+        latest = row["latest"]
+        try:
+            gap = trading_day_gap(expected, date.fromisoformat(latest)) if latest else None
+        except (ValueError, TypeError):
+            gap = None
+        if gap is None or gap > 0:
+            missing.append({"account": row["google_sub"][:8], "latest": latest, "gap": gap})
+            max_gap = max(max_gap, gap or 0)
     return {
-        "check": check,
-        "status": status,
-        "detail": f"최신 {latest} — 기대 {expected} 대비 거래일 {gap}일 지연",
-        "value": gap,
+        "check": check, "status": "error" if missing else "ok",
+        "detail": f"기대 {expected}: {len(rows)}개 계정 중 {len(missing)}개 정산 누락",
+        "value": max_gap, "missing_accounts": missing,
     }
 
 

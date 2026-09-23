@@ -1,9 +1,12 @@
 [Unit]
-Description=Run portfolio snapshot daily at 20:05 KST
+Description=Settle portfolio at 20:05 KST and retry missing settlements
 
 [Timer]
-OnCalendar=*-*-* 20:05:00
-Persistent=true
+OnCalendar=*-*-* 20:05,15,25,45:00 Asia/Seoul
+OnCalendar=*-*-* 21:05,35:00 Asia/Seoul
+# Catch up in the same settlement evening; never label a morning valuation
+# as the missed previous evening's settlement after a host restart.
+Persistent=false
 
 [Install]
 WantedBy=timers.target

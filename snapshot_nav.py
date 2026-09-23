@@ -138,6 +138,11 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
             else:
                 quote = await portfolio_quotes.fetch_quote(item["stock_code"])
             price = None if not quote or quote.get("_stale") is True else _safe_float(quote.get("price"))
+            # 당일 REST가 429/장애이면 독립 종가 소스에서 같은 날짜를 조회한다.
+            # 전일 평가액을 복사하기 전에 날짜가 검증된 가격으로 회복한다.
+            if price is None and portfolio_quotes.is_korean_stock(item["stock_code"]) and snap_date == _today_kst().isoformat():
+                quote = await _fetch_historical_korean_quote(item["stock_code"], snap_date)
+                price = _safe_float(quote.get("price"))
             if price is not None:
                 mv = qty * price
             elif item["stock_code"] in prev_stock_map:
@@ -183,7 +188,7 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
     return total_value, total_invested, per_stock
 
 
-async def take_snapshot(google_sub: str, snap_date: str) -> int:
+async def take_snapshot(google_sub: str, snap_date: str, *, require_fresh: bool = False) -> int:
     """평가 전후의 잔고·원장·정산 이력을 검증한 뒤 원자적으로 정산한다.
 
     외부 시세를 기다리는 동안 잠금을 잡지 않는다. 입력이 바뀌면 시세를
@@ -194,6 +199,8 @@ async def take_snapshot(google_sub: str, snap_date: str) -> int:
             expected = await snapshots_repo.get_nav_input_state(google_sub)
             cutoff = datetime.now(KST).replace(tzinfo=None).isoformat()
         total_value, total_invested, per_stock = await _fetch_total_value(google_sub, snap_date)
+        if require_fresh and any(row.get("priced_from_fallback") for row in per_stock):
+            raise SnapshotIncomplete("이전 정산 가격이 포함되어 확정하지 않았습니다. 시세 복구 후 재시도합니다.")
         async with db_repo.transaction():
             if await snapshots_repo.get_nav_input_state(google_sub) != expected:
                 logger.info("NAV inputs changed; retry %d for %s", attempt + 1, google_sub[:8])
@@ -375,7 +382,7 @@ async def _fetch_fx_usdkrw():
         logger.warning("Failed to fetch FX rate: %s", e)
 
 
-async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True):
+async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True, *, only_missing: bool = False):
     """Take snapshots for all users with portfolio items.
 
     When invoked inside the web process (via /api/internal/snapshot/nav)
@@ -405,7 +412,10 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     fallback_holdings = 0
     for google_sub in users:
         try:
-            fallback_count = await take_snapshot(google_sub, snap_date)
+            if only_missing and await snapshots_repo.get_snapshot_by_date(google_sub, snap_date):
+                success_count += 1
+                continue
+            fallback_count = await take_snapshot(google_sub, snap_date, require_fresh=only_missing)
             success_count += 1
             if fallback_count:
                 fallback_users.append(google_sub[:8])
@@ -428,7 +438,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     await observability.record_event(
         "snapshot_nav",
         "tick_ok" if not degraded else "tick_partial",
-        level="info" if not degraded else "warning",
+        level="error" if failed_users else "warning" if degraded else "info",
         details={
             "date": snap_date,
             "users_total": len(users),
@@ -442,6 +452,14 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     )
     if manage_db:
         await bootstrap.close_db()
+    # 개별 사용자 실패를 로그에만 남기면 내부 API가 200을 반환해
+    # systemd의 curl -f / OnFailure가 정산 누락을 성공으로 처리한다.
+    # 다른 사용자의 정산과 이벤트 기록을 마친 뒤 호출자에게 실패를 전파한다.
+    if failed_users:
+        raise SnapshotIncomplete(
+            f"NAV settlement incomplete for {snap_date}: "
+            f"{len(failed_users)}/{len(users)} users failed"
+        )
 
 
 if __name__ == "__main__":

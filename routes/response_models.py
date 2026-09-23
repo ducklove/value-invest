@@ -57,6 +57,8 @@ class CashflowDelta(BaseModel):
 
 class PreviousDayResponse(BaseModel):
     date: str | None
+    expected_date: str | None = None
+    settlement_pending: bool = False
     total_value: FiniteFloat | None
     fx_usdkrw: FiniteFloat | None
     nav: FiniteFloat | None

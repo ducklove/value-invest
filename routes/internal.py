@@ -12,6 +12,7 @@ external attack surface.
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -22,6 +23,7 @@ from core.errors import AppError
 
 router = APIRouter(prefix="/api/internal", include_in_schema=False)
 logger = logging.getLogger(__name__)
+_nav_snapshot_lock = asyncio.Lock()
 
 
 def _job_failed(kind: str, exc: Exception) -> AppError:
@@ -80,7 +82,8 @@ async def run_nav_snapshot(request: Request):
     _require_loopback(request)
     import snapshot_nav
     try:
-        await snapshot_nav.run_all_snapshots(manage_db=False)
+        async with _nav_snapshot_lock:
+            await snapshot_nav.run_all_snapshots(manage_db=False, only_missing=True)
         return {"ok": True, "kind": "nav"}
     except Exception as exc:
         raise _job_failed("nav snapshot", exc) from exc

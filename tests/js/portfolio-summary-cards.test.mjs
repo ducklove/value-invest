@@ -188,3 +188,15 @@ test('Today 기준선 이후 입금도 최신 NAV에 정산됐다면 좌수를 �
   }
   w.close();
 });
+
+test('정산 누락이면 이전 날짜와 함께 미완료 상태를 표시한다', () => {
+  const w = loadSummaryDom();
+  seedPortfolio(w);
+  w.PfStore.snapshots.prevDay.settlement_pending = true;
+  w.renderPortfolio({ summaryOnly: true });
+  assert.match(cardByLabel(w, 'Today').textContent, /정산 미완료/);
+  w.PfStore.snapshots.prevDay.settlement_pending = false;
+  w.renderPortfolio({ summaryOnly: true });
+  assert.doesNotMatch(cardByLabel(w, 'Today').textContent, /정산 미완료/);
+  w.close();
+});

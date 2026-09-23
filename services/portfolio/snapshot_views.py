@@ -1,5 +1,7 @@
 """화면별 정산 기준선과 입출금 조회. 한 응답은 같은 DB 스냅샷을 사용한다."""
 
+from datetime import date, timedelta
+
 from repositories import snapshots
 from repositories.db import read_snapshot
 from services.portfolio.time_windows import settlement_marker_seconds
@@ -19,6 +21,9 @@ async def net_cashflow_since_snapshot(user: str, snap_date: str) -> tuple[float,
 async def previous_day(user: str, baseline_date: str) -> dict:
     snapshot = await snapshots.get_snapshot_on_or_before(user, baseline_date) or {}
     snap_date = snapshot.get("date")
+    expected = date.fromisoformat(baseline_date)
+    while expected.weekday() >= 5:
+        expected -= timedelta(days=1)
     stocks = await snapshots.get_stock_snapshots_exact_date(user, snap_date) if snap_date else []
     marker = settlement_marker_seconds(snap_date) if snap_date else baseline_date
     rows = await snapshots.get_cashflows_created_after(user, marker)
@@ -33,6 +38,8 @@ async def previous_day(user: str, baseline_date: str) -> dict:
             code = row.get("cash_code", "CASH_KRW")
             by_stock[code] = by_stock.get(code, 0) + signed
     return {
+        "expected_date": expected.isoformat(),
+        "settlement_pending": not snap_date or snap_date < expected.isoformat(),
         "date": snap_date, "total_value": snapshot.get("total_value"),
         "fx_usdkrw": snapshot.get("fx_usdkrw"), "nav": snapshot.get("nav"),
         "return_nav": snapshot.get("return_nav"), "return_factor": snapshot.get("return_factor", 1),
