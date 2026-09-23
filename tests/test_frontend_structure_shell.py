@@ -114,9 +114,52 @@ def test_mobile_portfolio_touch_targets_and_tablet_table_scroll_contract():
     assert ".pf-currency-btn," in shell_css
     assert ".pf-target-clear," in shell_css
     assert "min-height: 44px" in shell_css
-    assert "@media (min-width: 761px) and (max-width: 900px)" in shell_css
-    assert ".pf-table-wrap { overflow-x: auto; }" in shell_css
-    assert ".pf-table { min-width: 1180px; }" in shell_css
+
+    # 표는 모든 폭에서 컨테이너 안 가로 스크롤 + 종목명 열 고정이다. 예전 overflow:hidden
+    # 은 노트북(사이드바 포함)에서 넘친 오른쪽 열을 잘랐고, 태블릿의 1180px 강제 폭은
+    # 사용자가 열을 줄여도 표를 넓게 유지했다.
+    portfolio_css = (STATIC / "css" / "portfolio.css").read_text(encoding="utf-8")
+    wrap_rule = portfolio_css[portfolio_css.index(".pf-table-wrap {"):]
+    assert "overflow-x: auto;" in wrap_rule[:wrap_rule.index("}")]
+    assert ".pf-table { min-width: 1180px; }" not in shell_css
+    assert "body:not(.pf-mobile-simple) .pf-table tbody td.pf-stock-cell {\n  min-width: 150px;" in portfolio_css
+    assert "position: sticky;\n  left: 0;" in portfolio_css
+    # '매매' 버튼이 한 글자씩 줄바꿈돼 모든 행이 59px 로 커지던 36px 고정 폭은 쓰지 않는다.
+    assert ".pf-col-act { width: 36px;" not in portfolio_css
+    assert ".pf-col-act { width: 1%; text-align: center; white-space: nowrap; }" in portfolio_css
+
+
+def test_mobile_shell_media_matches_js_compact_viewport():
+    # CSS 모바일 셸(하단 탭바·시황 테이프 숨김)과 JS 판정(isCompactMobileViewport,
+    # 간편 모드)이 같은 범위여야 한다 — 어긋나면 932×430 가로 폰에서 데스크톱 셸이 나와
+    # 시황 테이프가 표를 덮었다.
+    shell_css = (STATIC / "css" / "mobile-shell.css").read_text(encoding="utf-8")
+    auth = (JS / "auth.js").read_text(encoding="utf-8")
+    query = "(max-width: 900px), (max-height: 520px) and (max-width: 1180px)"
+    assert f"window.matchMedia('{query}')" in auth
+    assert f"@media {query} {{\n  /* 시황 테이프를 숨기므로" in shell_css
+    # 모바일은 window 가 스크롤한다 — .main 이 스크롤 컨테이너면 sticky 가 붙지 않는다.
+    assert "overflow-x: clip;\n    overflow-y: visible;" in shell_css
+
+
+def test_simple_mode_columns_scale_with_width_and_landscape_scrolls_page():
+    css = (STATIC / "css" / "mobile-overrides.css").read_text(encoding="utf-8")
+    # 폴드 펼침(690~750px)에서 5열만 보이고 종목명 칸만 벌어지던 낭비 방지:
+    # 폭 구간별로 숨김 규칙만 두고(사용자 열 설정 우선), 넓어질수록 열이 늘어난다.
+    for query, col in [
+        ("@media (max-width: 379px)", ".pf-col-curprice"),
+        ("@media (max-width: 599px)", ".pf-col-qty"),
+        ("@media (max-width: 699px)", ".pf-col-divyield"),
+        ("@media (max-width: 819px)", ".pf-col-dividend"),
+    ]:
+        block = css[css.index(query):]
+        assert f"body.pf-mobile-simple {col}" in block[:block.index("}")]
+    always_hidden = css[:css.index("@media (max-width: 379px)")]
+    assert "body.pf-mobile-simple .pf-col-qty,\n" not in always_hidden
+    # 가로 폰은 표 상자 높이 제한을 풀고 페이지째 스크롤한다(overflow:clip 은 머리행
+    # sticky 를 페이지 기준으로 둔다).
+    landscape = css[css.index("@media (max-height: 520px) and (max-width: 1180px) {"):]
+    assert "max-height: none;\n    overflow: clip;" in landscape
 
 def test_simple_mode_table_height_is_measured_not_a_constant():
     # 간편 모드 표 박스가 화면보다 길면 페이지가 스크롤되면서 맨 위 요약 카드가

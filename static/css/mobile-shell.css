@@ -107,7 +107,11 @@
 }
 .mobile-login:hover { filter: brightness(0.96); }
 
-@media (max-width: 900px) {
+/* 모바일 셸 적용 범위는 JS 의 isCompactMobileViewport()·간편 모드 판정과 같다 —
+   세로 ≤900px 에 더해 가로로 눕힌 폰(높이 ≤520px, 폭 ≤1180px). 예전엔 CSS 만
+   ≤900px 라 932×430(대화면 폰 가로)에서 데스크톱 상단 탭·시황 테이프가 나와
+   테이프가 표 마지막 줄들을 덮었다. */
+@media (max-width: 900px), (max-height: 520px) and (max-width: 1180px) {
   /* 시황 테이프를 숨기므로 그 보정용 body 하단 패딩(52px)은 모바일에서 불필요 —
      하단 탭바 여백은 .main 의 padding-bottom 으로 처리한다. */
   body { --m-header-h: 50px; padding-bottom: 0; }
@@ -139,6 +143,12 @@
   .main {
     padding: 12px 14px;
     padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+    /* 모바일은 창(window)이 스크롤한다. base 의 overflow-y:auto 가 남아 있으면 .main
+       이 스크롤되지 않는 스크롤 컨테이너가 되어 그 안의 sticky(슬림 헤더·심층 분석
+       점프 내비·표 머리행)가 붙지 않고 함께 밀려 올라갔다. clip 은 스크롤 컨테이너를
+       만들지 않으면서 가로 넘침만 잘라낸다. */
+    overflow-x: clip;
+    overflow-y: visible;
   }
 
   /* 하단 탭바 노출 */
@@ -171,11 +181,26 @@
   }
 }
 
-/* 761~900px 태블릿은 모바일 간편 모드가 강제되지 않는다. 17열 표를 숨김
-   overflow 안에 가두지 않고 컨테이너 내부에서 명시적으로 스크롤시킨다. */
-@media (min-width: 761px) and (max-width: 900px) {
-  .pf-table-wrap { overflow-x: auto; }
-  .pf-table { min-width: 1180px; }
+/* 761~900px 태블릿은 모바일 간편 모드가 강제되지 않는다. 표는 모든 폭에서
+   컨테이너 안 가로 스크롤(.pf-table-wrap, portfolio.css)이고 종목명 열이 고정되므로
+   예전처럼 1180px 로 강제로 넓히지 않는다 — 사용자가 열을 줄이면 표도 그만큼 좁아진다. */
+
+/* 가로로 눕힌 폰: 하단 탭바를 아이콘·글자 한 줄로 낮춰(62→44px) 세로 공간을
+   표에 돌려준다. 버튼 폭이 넓어 터치 영역은 충분하다. */
+@media (max-height: 520px) and (max-width: 1180px) {
+  .mnav-btn {
+    flex-direction: row;
+    gap: 6px;
+    padding: 10px 4px;
+    font-size: 12px;
+  }
+  .mnav-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+  .main {
+    padding-bottom: calc(46px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* 헤더 높이를 참조하는 포트폴리오 간편모드의 sticky 탭바 오프셋을

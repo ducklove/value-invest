@@ -105,3 +105,20 @@ defer로 로드한다. CDN의 가변 버전 대신 저장소에 포함한 고정
 ## 투자 판단 도구
 
 `portfolio-attribution.js`(수익 분해·배당 분류)와 `portfolio-theses.js`(논거 CRUD·변경 이력)를 `portfolio-reports.js` 앞에 로드한다. 심층 분석 탭에서 각각 독립 요청으로 불러오며, 기간 보고서는 같은 수익 분해 렌더러를 재사용한다. 투자일지의 연결 버튼과 액션 보드의 논거 항목은 해당 카드로 이동한다. 상세 계약은 [investment-insights.md](investment-insights.md)에 정리한다.
+
+## 화면 폭별 보유종목 표시 (2026-09-23)
+
+JS 판정(`isCompactMobileViewport`, 간편 모드)과 CSS 모바일 셸은 같은 범위다:
+`(max-width: 900px), (max-height: 520px) and (max-width: 1180px)`. 모바일 셸에서는
+창이 스크롤하므로 `.main`을 스크롤 컨테이너로 만들지 않는다(`overflow-x: clip`).
+그래야 헤더·표 머리행 sticky가 붙는다.
+
+- 간편 모드(`body.pf-mobile-simple`, 기본 ≤760px): 폭에 따라 열이 늘어난다.
+  380px 미만은 현재가를 빼고, 600px부터 매입가·수량·비중, 700px부터 배당수익률,
+  820px부터 배당액을 보인다. `mobile-overrides.css`에는 숨김 규칙만 두므로 사용자가
+  숨긴 열은 계속 숨겨진다.
+- 가로로 눕힌 폰(높이 ≤520px): 표 높이 제한을 풀고 페이지째 스크롤한다. 머리행만 화면 위에 고정한다.
+- 일반 보기: 표가 넓으면 `.pf-table-wrap` 안에서 가로로 스크롤하고, 종목명 열은
+  `position: sticky`로 고정한다. 최소 폭은 150px이다.
+- ≤900px 탭바: 버튼을 한 줄로 두고 가로로 스크롤한다. 오른쪽 끝은 흐리게 표시한다.
+- ≤1440px: 사이드바를 280px로 줄이고 표 셀 좌우 패딩을 8px로 줄인다.

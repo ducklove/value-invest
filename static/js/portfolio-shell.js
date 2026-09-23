@@ -140,8 +140,9 @@ function _pfApplySimpleMode(enabled, { persist = false } = {}) {
 // CSS 상수(calc(100dvh - 182px))만으로는 위/아래 크롬 높이 변화 — 터치영역 44px 확보로
 // 커진 pf-tab-bar, iOS safe-area 만큼 두꺼워지는 하단 탭바 — 를 따라가지 못해 실제로
 // 60px 가까이 어긋났다. 그래서 실측값을 CSS 변수로 넣고 상수는 폴백으로만 둔다.
-// 하한은 "가로모드에서도 실측값이 그대로 쓰일 만큼" 낮게 둔다 — 하한이 실측값보다
-// 크면 그만큼 표가 하단 탭바에 다시 가린다(가로 375px 기준 실측 ≈ 144px).
+// 하한은 실측값이 그대로 쓰일 만큼 낮게 둔다 — 하한이 실측값보다 크면 그만큼 표가
+// 하단 탭바에 다시 가린다. 가로로 눕힌 폰(높이 ≤520px)은 CSS 가 이 상한을 풀고
+// 페이지째 스크롤하므로(mobile-overrides.css) 여기서 잰 값을 쓰지 않는다.
 const PF_SIMPLE_TABLE_MIN_PX = 120;
 const PF_SIMPLE_TABLE_GAP_PX = 4;     // 하단 탭바와 맞닿지 않을 만큼의 여백
 let _pfSimpleTableSyncFrame = 0;

@@ -127,6 +127,11 @@
     display: none !important;
   }
 }
+/* 600px 넘는 태블릿·폴드 펼침 화면은 요약 카드 4장을 한 줄에 둔다 — 2×2 로
+   쌓이면 표 위에서만 130px 를 썼다. 값은 금액/%라 카드당 150px 이면 충분하다. */
+@media (min-width: 601px) and (max-width: 900px) {
+  .pf-summary-card { flex-basis: calc(25% - 6px); }
+}
 
 @media (max-width: 900px), (max-height: 520px) and (max-width: 1180px) {
   body {
@@ -168,7 +173,9 @@ body.pf-mobile-simple .mobile-auth-name {
 }
 body.pf-mobile-simple .pf-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* TOTAL 은 금액(자릿수 많음), 나머지 셋은 %라 짧다 — 균등 분할이면 폴드
+     커버(344px)에서 총액이 "59,8…"로 잘렸다. */
+  grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-bottom: 8px;
 }
@@ -194,11 +201,49 @@ body.pf-mobile-simple .pf-summary-label {
 }
 body.pf-mobile-simple .pf-summary-value {
   margin-top: 2px;
-  font-size: 14px;
+  font-size: clamp(12px, 3.8vw, 14px);
   line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 계좌 줄은 한 줄로 — 안내 문구가 다음 줄로 떨어져 좁은 폰에서 57px 를 쓰던 것을
+   선택 상자 옆 남는 폭에 두 줄까지 접어 넣는다. 빈 상태 칸은 자리를 차지하지 않는다. */
+body.pf-mobile-simple .pf-account-toolbar {
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+body.pf-mobile-simple .pf-account-toolbar select {
+  min-width: 0;
+  max-width: 48%;
+}
+body.pf-mobile-simple .pf-account-toolbar button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+body.pf-mobile-simple .pf-account-toolbar span {
+  flex: 1 1 0;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.3;
+}
+body.pf-mobile-simple .pf-account-toolbar span:empty {
+  display: none;
+}
+@media (max-width: 480px) {
+  body.pf-mobile-simple .pf-account-toolbar label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
 }
 body.pf-mobile-simple .pf-tab-bar {
   position: sticky;
@@ -207,7 +252,8 @@ body.pf-mobile-simple .pf-tab-bar {
   align-items: center;
   gap: 4px;
   margin: 0 0 8px;
-  padding: 4px 0;
+  /* 오른쪽 20px 는 가로 스크롤 끝 흐림 영역(portfolio.css ≤900px 탭바 규칙) 몫. */
+  padding: 4px 20px 4px 0;
   background: var(--bg);
 }
 body.pf-mobile-simple .pf-tab {
@@ -269,6 +315,9 @@ body.pf-mobile-simple .pf-table thead th {
   position: sticky;
   top: 0;
   z-index: 3;
+  /* 칸 폭이 숫자에 맞춰져 있어 12px 머리글("배당수익률")이 잘린다 — 본문과 같은 11px. */
+  font-size: 11px;
+  letter-spacing: 0;
 }
 body.pf-mobile-simple .pf-table thead th,
 body.pf-mobile-simple .pf-table tbody td,
@@ -279,29 +328,55 @@ body.pf-mobile-simple .pf-table tfoot td {
 body.pf-mobile-simple .pf-col-group,
 body.pf-mobile-simple .pf-col-benchmark,
 body.pf-mobile-simple .pf-col-invested,
-body.pf-mobile-simple .pf-col-buyprice,
 body.pf-mobile-simple .pf-col-target,
 body.pf-mobile-simple .pf-col-achiev,
-body.pf-mobile-simple .pf-col-qty,
-body.pf-mobile-simple .pf-col-dividend,
-body.pf-mobile-simple .pf-col-divyield,
-body.pf-mobile-simple .pf-col-weight,
 body.pf-mobile-simple .pf-col-date,
 body.pf-mobile-simple .pf-col-memo,
 body.pf-mobile-simple .pf-col-act {
   display: none !important;
 }
+/* 간편 모드 컬럼은 화면 폭에 따라 단계적으로 늘린다. 고정 5열이던 때는 폴드
+   펼침(690~750px)·아이패드 미니에서 종목명 칸만 450px 넘게 벌어졌고, 폴드
+   커버(344px)에서는 종목명이 50px 로 눌려 서너 글자만 보였다.
+   - 380px 미만: 현재가를 빼 종목명 폭 확보 (등락률로 당일 움직임은 보인다)
+   - 600px 이상: 매입가·수량·비중, 700px 이상: 배당수익률, 820px 이상: 배당액
+   사용자 컬럼 설정에서 숨긴 열은 여기서 다시 보이지 않는다(숨김 규칙만 둔다). */
+@media (max-width: 379px) {
+  body.pf-mobile-simple .pf-col-curprice { display: none !important; }
+}
+@media (max-width: 599px) {
+  body.pf-mobile-simple .pf-col-buyprice,
+  body.pf-mobile-simple .pf-col-qty,
+  body.pf-mobile-simple .pf-col-weight { display: none !important; }
+}
+@media (max-width: 699px) {
+  body.pf-mobile-simple .pf-col-divyield { display: none !important; }
+}
+@media (max-width: 819px) {
+  body.pf-mobile-simple .pf-col-dividend { display: none !important; }
+}
 /* 종목명은 폭을 고정하지 않고 나머지 공간을 흡수(width:auto), 긴 이름은 말줄임.
-   숫자 컬럼은 흔한 값이 안 잘릴 만큼 고정 px — 평가금액은 십억대("1,234,567,890"≈66px)
-   까지 들어가도록 80px, 등락률은 두 자릿수%("+15.04%")까지 56px. */
+   숫자 컬럼은 흔한 값이 안 잘릴 만큼 고정 px(11px 글꼴 실측 + 좌우 패딩 6px) —
+   평가금액은 억 단위("123,456,789")까지 80px, 등락률은 두 자릿수%("+15.04%")까지
+   56px, 수량은 현금 행("1,000,000")까지 66px. 합계 행은 굵은 글씨라 더 넓다 —
+   총수익률("+107.54%" 굵게 60px)·비중 합계("+100.00%")가 들어가도록 68px,
+   600px 이상에서는 평가금액 합계가 십억대(굵게 86px)여도 들어가도록 92px. */
 body.pf-mobile-simple .pf-table thead th.pf-col-name,
 body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
   width: auto;
 }
 body.pf-mobile-simple .pf-col-changepct { width: 56px; }
 body.pf-mobile-simple .pf-col-curprice { width: 64px; }
-body.pf-mobile-simple .pf-col-return { width: 56px; }
+body.pf-mobile-simple .pf-col-return { width: 68px; }
 body.pf-mobile-simple .pf-col-mktval { width: 80px; }
+body.pf-mobile-simple .pf-col-buyprice { width: 64px; }
+body.pf-mobile-simple .pf-col-qty { width: 66px; }
+body.pf-mobile-simple .pf-col-weight { width: 68px; }
+body.pf-mobile-simple .pf-col-divyield { width: 60px; }
+body.pf-mobile-simple .pf-col-dividend { width: 72px; }
+@media (min-width: 600px) {
+  body.pf-mobile-simple .pf-col-mktval { width: 92px; }
+}
 body.pf-mobile-simple .pf-stock-cell {
   min-width: 0;
   white-space: normal;
@@ -375,11 +450,25 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
   body.pf-mobile-simple .pf-filter-bar {
     display: none !important;
   }
+  /* 가로로 눕힌 폰은 높이가 390px 안팎이라, 헤더·요약·계좌·탭을 고정한 채 표
+     상자만 스크롤하면 표에 두 줄만 보였다. 가로에서는 표 높이 제한(실측
+     --pf-simple-table-max)을 풀고 페이지째 스크롤한다 — 요약·탭은 위로 밀려나고
+     표 머리행만 화면 위에 붙어 8~9줄이 보인다. 앱 헤더도 고정하지 않는다
+     (이동은 하단 탭바). overflow:clip 은 스크롤 컨테이너를 만들지 않아 머리행
+     sticky 가 페이지 기준으로 동작한다. */
+  body.pf-mobile-simple .header,
+  body.pf-mobile-simple .pf-tab-bar {
+    position: static;
+  }
+  body.pf-mobile-simple .main {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+  }
   body.pf-mobile-simple .pf-table-wrap {
-    /* 폴백 상수만 가로 화면용으로 낮춘다 — max-height 선언 자체는 위 간편 모드
-       규칙 한 곳에 두고(실측값 --pf-simple-table-max 를 인라인으로 덮어씀),
-       여기서 상수를 또 max-height 로 선언하면 실측값이 덮여버린다. */
-    --pf-simple-table-max: calc(100dvh - 150px);
+    max-height: none;
+    overflow: clip;
+  }
+  body.pf-mobile-simple .pf-table tfoot td {
+    position: static;
   }
   body.pf-mobile-simple .pf-nav-chart-container.pf-nav-tall,
   body.pf-mobile-simple .pf-nav-chart-container.pf-nav-short,

@@ -919,3 +919,12 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .stock-hover-tip .sct-foot { margin-top: 6px; font-size: 10px; color: var(--text-secondary); }
 
 .market-bar .mi-stale { font-size: 9px; color: var(--text-secondary); border-bottom: 1px dotted currentColor; }
+
+/* 사이드바 340px 은 넓은 화면 기준이다. 노트북·가로 태블릿(≤1440px)에서는 본문
+   (보유종목 표·차트)이 폭을 더 쓰도록 사이드바와 본문 여백을 줄인다 — 1280px
+   노트북에서 표가 60px 넓어진다. ≤900px 는 mobile-shell.css 가 사이드바를 숨기고
+   본문 여백을 따로 정한다(로드 순서상 그쪽이 이긴다). */
+@media (max-width: 1440px) {
+  .sidebar { width: 280px; padding: 16px; }
+  .main { padding: 20px; }
+}

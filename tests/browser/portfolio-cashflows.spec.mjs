@@ -37,6 +37,8 @@ test('매매 기록 옆 버튼에서 입출금을 등록하고 심층 분석에�
   await expect(dialog).toBeHidden();
   await expect(page.locator('#pfCfBody')).toContainText('상단 버튼 출금');
   expect(await cash()).toBe(before);
-  expect(await page.locator('.pf-tab-bar').evaluate(el => el.scrollWidth > el.clientWidth)).toBe(false);
+  // 좁은 폭의 탭바는 한 줄 가로 스크롤이다 — 버튼이 잘리지 않고(스크롤로 닿음) 페이지는 넘치지 않아야 한다.
+  expect(await page.locator('.pf-tab-bar').evaluate(el => (el.scrollWidth <= el.clientWidth || getComputedStyle(el).overflowX === 'auto')
+    && document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 });

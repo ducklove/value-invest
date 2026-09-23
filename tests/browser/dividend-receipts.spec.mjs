@@ -58,5 +58,7 @@ test('배당 스케줄 수취와 분배금 출금이 현금·누계에 반영되
   const balances = await page.evaluate(async () => (await fetch('/api/portfolio/distributions/balances')).json());
   expect(balances[0].available_amount).toBe(0);
   expect(balances[0].distributed_amount).toBe(846);
-  expect(await page.locator('.pf-tab-bar').evaluate(el => el.scrollWidth > el.clientWidth)).toBe(false);
+  // 좁은 폭의 탭바는 한 줄 가로 스크롤이다 — 버튼이 잘리지 않고(스크롤로 닿음) 페이지는 넘치지 않아야 한다.
+  expect(await page.locator('.pf-tab-bar').evaluate(el => (el.scrollWidth <= el.clientWidth || getComputedStyle(el).overflowX === 'auto')
+    && document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

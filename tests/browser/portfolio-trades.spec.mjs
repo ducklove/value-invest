@@ -28,7 +28,9 @@ test('매매 기록에서 미리보기·매수·매도 후 현금과 보유 수�
   expect(bought.find(i => i.stock_code === 'CASH_KRW').quantity).toBe(cashBefore.quantity - 160100);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.locator('.pf-tab-bar').evaluate(el => el.scrollWidth > el.clientWidth)).toBe(false);
+  // 좁은 폭의 탭바는 한 줄 가로 스크롤이다 — 버튼이 잘리지 않고(스크롤로 닿음) 페이지는 넘치지 않아야 한다.
+  expect(await page.locator('.pf-tab-bar').evaluate(el => (el.scrollWidth <= el.clientWidth || getComputedStyle(el).overflowX === 'auto')
+    && document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: '매매 기록', exact: true }).click();
   await page.locator('#pfTradeStock').fill('삼성전자 (005930)');
   await page.locator('#pfTradeSide').selectOption('sell');

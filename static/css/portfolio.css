@@ -565,6 +565,7 @@
 /* Portfolio tab bar */
 .pf-tab-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-bottom: 16px;
@@ -575,6 +576,7 @@
 }
 .pf-tab {
   min-height: 34px; padding: 0 16px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  white-space: nowrap;
   background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 700;
   cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
@@ -2214,8 +2216,11 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 .pf-csv-btn.cancel { background: var(--surface); color: var(--text-secondary); }
 .pf-csv-btn.cancel:hover { color: var(--text); }
 .pf-dropdown { max-width: 500px; }
+/* 열이 폭보다 많으면(노트북+사이드바, 태블릿) 표 안에서 가로 스크롤한다. 예전
+   overflow:hidden 은 넘친 오른쪽 열(비중·버튼)을 조용히 잘라냈다. 종목명 열은
+   아래 sticky 규칙으로 스크롤 중에도 왼쪽에 남는다. */
 .pf-table-wrap {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); overflow-x: auto;
 }
 .pf-load-status {
   margin: 8px 0 10px;
@@ -2256,7 +2261,9 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 .pf-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
 .pf-table tfoot td { font-weight: 700; background: var(--sidebar-bg); border-top: 2px solid var(--border); position: sticky; bottom: 0; z-index: 1; }
 .pf-col-num { text-align: right; }
-.pf-col-act { width: 36px; text-align: center; }
+/* 너비 1% = 내용만큼만. 36px 고정이면 '매매' 버튼 글자가 한 자씩 줄바꿈돼 모든
+   행 높이가 59px 로 커졌다. */
+.pf-col-act { width: 1%; text-align: center; white-space: nowrap; }
 /* 메모 — 기본 숨김 컬럼(PF_COL_DEFS). 표의 다른 칸은 한 줄 유지가
    중요하지만 메모는 폭이 부족하면 셀 안에서 줄바꿈시켜 행 높이만
    늘어나게 한다 (가로 스크롤을 메모 때문에 더 늘리지 않는다). */
@@ -2349,10 +2356,11 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 }
 .pf-stock-link strong {
   /* 종목명이 길면(예: 영문 ETF 풀네임) 한 줄로 말줄임. 전체 이름은 title hover.
-     table-layout:auto 라 셀이 내용따라 늘어나므로 max-width(%가 아닌 고정값)로
-     상한을 둬야 말줄임이 실제로 걸린다. */
+     table-layout:auto 라 셀이 내용따라 늘어나므로 고정값 상한(200px)을 둬야
+     말줄임이 실제로 걸린다. 표가 폭보다 넓어 종목명 칸이 최소폭(150px)까지
+     줄면 100%(칸 폭)가 상한이 된다 — 고정값만 있으면 옆 그룹 배지 위로 넘쳤다. */
   display: inline-block;
-  max-width: 200px;
+  max-width: min(200px, 100%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2677,6 +2685,7 @@ body.pf-compact-rows .pf-table tfoot td {
 .pf-row-btn {
   border: none; background: none; cursor: pointer; color: var(--text-secondary);
   font-size: 14px; padding: 2px 4px; border-radius: 4px; transition: color 0.15s;
+  white-space: nowrap;
 }
 .pf-row-btn:disabled { cursor: wait; opacity: 0.75; }
 .pf-row-btn:hover { color: var(--primary); }
@@ -3581,7 +3590,20 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 .pf-trade-history p { margin:6px 0; }
 .pf-trade-history small { color:var(--text-secondary); }
 @media(max-width:600px) { .pf-trade-dialog { padding:16px; } .pf-trade-fields input,.pf-trade-fields select { font-size:16px; } }
-@media(max-width:900px) { .pf-tab-bar:has(.js-pf-trade) { flex-wrap:wrap; } }
+/* ≤900px: 탭·기록 버튼이 여러 줄로 쌓이면 폴드 커버(344px)에서만 150px 를 썼다.
+   한 줄로 두고 넘치는 버튼은 가로로 밀어 본다 — 모든 버튼은 스크롤로 닿고 페이지
+   자체는 넘치지 않는다. 오른쪽 끝을 흐리게 해 버튼이 더 있음을 알린다(끝 여백은
+   흐림 영역만큼 둬 마지막 통화 버튼은 흐려지지 않는다). */
+@media(max-width:900px) {
+  .pf-tab-bar:has(.js-pf-trade) {
+    flex-wrap:nowrap; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none;
+    padding-right:20px;
+    -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);
+    mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);
+  }
+  .pf-tab-bar:has(.js-pf-trade)::-webkit-scrollbar { display:none; }
+  .pf-tab-bar:has(.js-pf-trade) > * { flex:0 0 auto; }
+}
 .pf-trade-costs { padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:6px; font-size:13px; line-height:1.7; font-variant-numeric:tabular-nums; }
 .pf-divcal-receipt { display:block; margin-top:6px; min-height:32px; }
 .pf-cf-table th:nth-child(2), .pf-cf-table td:nth-child(2) { width:100px; }
@@ -3695,3 +3717,51 @@ body.pf-compact-rows .pf-row-drag-handle {
 .pf-alert-quiet-form label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .pf-alert-quiet-form input[type="time"], .pf-alert-quiet-form select { min-width: 0; max-width: 100%; padding: 7px 9px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
 .pf-alert-quiet-form > button { justify-self: start; }
+
+/* === 보유종목 표 — 가로 스크롤 시 종목명 고정 (일반 보기) ===
+   간편 보기는 table-layout:fixed 로 화면 폭에 맞추므로 제외한다.
+   - 종목명 열 최소 폭: 이동 손잡이 그리드(16px minmax(0,1fr))는 내용 최소폭이 0 이라
+     표가 좁아지면 종목명 칸이 56px 까지 눌려 옆 그룹 배지와 겹쳤다.
+   - sticky 셀은 불투명 배경이 있어야 스크롤되는 열이 비치지 않는다 — 행(tr)의
+     zebra·hover 색을 inherit 로 받고, 홀수 행 기본색을 surface 로 둔다. */
+.pf-table tbody tr { background-color: var(--surface); }
+body:not(.pf-mobile-simple) .pf-table thead th.pf-col-name,
+body:not(.pf-mobile-simple) .pf-table tbody td.pf-stock-cell {
+  min-width: 150px;
+}
+body:not(.pf-mobile-simple) .pf-table thead th.pf-col-name,
+body:not(.pf-mobile-simple) .pf-table tbody td.pf-stock-cell,
+body:not(.pf-mobile-simple) .pf-table tfoot td:first-child {
+  position: sticky;
+  left: 0;
+}
+body:not(.pf-mobile-simple) .pf-table thead th.pf-col-name,
+body:not(.pf-mobile-simple) .pf-table tfoot td:first-child {
+  z-index: 3;
+}
+body:not(.pf-mobile-simple) .pf-table tbody td.pf-stock-cell {
+  z-index: 1;
+  background-color: inherit;
+}
+body:not(.pf-mobile-simple) .pf-table tbody tr.pf-row-saving > td.pf-stock-cell {
+  background-color: color-mix(in srgb, var(--primary) 7%, var(--surface));
+}
+/* 컬러 모드: 행 틴트는 tr 의 그라디언트라 불투명한 종목명 칸에 가려진다. 그라디언트
+   시작 농도(1.2a)를 단색으로 깔아 이어지게 한다. */
+body.pf-heat-mode:not(.pf-mobile-simple) .pf-table tbody tr[data-heat-dir] > td.pf-stock-cell {
+  background-image: linear-gradient(
+    rgba(var(--pf-heat-rgb), calc(var(--pf-heat-a) * 1.2)),
+    rgba(var(--pf-heat-rgb), calc(var(--pf-heat-a) * 1.2))
+  );
+}
+/* 노트북·가로 태블릿(≤1440px, 사이드바 280px)에서는 셀 좌우 패딩을 12→8px 로 —
+   기본 13열 기준 표가 약 100px 좁아져 1440px 노트북에서 가로 스크롤 없이 들어온다.
+   ≤900px 는 mobile-overrides.css 가 더 좁힌다. */
+@media (max-width: 1440px) {
+  .pf-table thead th,
+  .pf-table tbody td,
+  .pf-table tfoot td {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
