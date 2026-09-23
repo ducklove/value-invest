@@ -371,6 +371,9 @@ def _format_report_message(rule: dict, name: str, item: dict) -> str:
         extras.append(f"목표가 {tp}")
     if extras:
         lines.append(" / ".join(extras))
+    url = str(item.get("pdf_url") or "").strip() or str(item.get("source_url") or "").strip()
+    if url:
+        lines.append(url)
     return "\n".join(lines) + _note_suffix(rule)
 
 
