@@ -36,13 +36,16 @@ def test_deploy_restores_code_units_and_environment(tmp_path, failure):
     _script(source / "deploy/migrate_env_to_single_file.sh", "exit 0\n")
     _script(source / "deploy/repairs/run_one_time_repairs.sh", "exit 0\n")
     (source / "deploy/value-invest.service").write_text("old-unit\n")
+    (source / "portfolio-snapshot.timer").write_text("old-timer\n")
     (source / "requirements-dev.lock").write_text("")
     _run(["git", "add", "."], source)
     _run(["git", "commit", "-m", "old"], source)
     old = _run(["git", "rev-parse", "HEAD"], source).stdout.strip()
     _run(["git", "clone", str(source), str(app)], tmp_path)
     (units / "value-invest.service").write_text("old-unit\n")
+    (units / "portfolio-snapshot.timer").write_text("old-timer\n")
     (source / "deploy/value-invest.service").write_text("new-unit\n")
+    (source / "portfolio-snapshot.timer").write_text("new-timer\n")
     _run(["git", "commit", "-am", "new"], source)
     new = _run(["git", "rev-parse", "HEAD"], source).stdout.strip()
 
@@ -57,6 +60,7 @@ PY
 fi
 ''')
     _script(bins / "sudo", '''
+printf '%s\\n' "$*" >>"$TEST_STATE/unit-commands"
 if [[ "$1" == /bin/systemctl ]]; then
   shift
   if [[ "$1" == is-enabled || "$1" == is-active ]]; then echo disabled; exit 1; fi
@@ -101,6 +105,12 @@ exec "$@"
     head = _run(["git", "rev-parse", "HEAD"], app).stdout.strip()
     assert head == (new if failure == "none" else old)
     assert (units / "value-invest.service").read_text() == ("new-unit\n" if failure == "none" else "old-unit\n")
+    assert (units / "portfolio-snapshot.timer").read_text() == ("new-timer\n" if failure == "none" else "old-timer\n")
+    if failure == "none":
+        commands = (tmp_path / "unit-commands").read_text().splitlines()
+        assert commands.index("/bin/systemctl stop portfolio-snapshot.timer") < commands.index("/bin/systemctl daemon-reload")
+        assert commands.index("/bin/systemctl restart value-invest.service") < commands.index("/bin/systemctl restart portfolio-snapshot.timer")
+        assert "/bin/systemctl enable --now portfolio-snapshot.timer" not in commands
     if failure != "none":
         assert not (app / ".venv-current").exists()
     if failure in {"restart", "health"}:

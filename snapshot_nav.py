@@ -392,6 +392,13 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     if manage_db:
         await bootstrap.init_db()
     if snap_date is None:
+        # systemd의 설정 재적용/수동 실행으로 아침에 호출되어도 그날의
+        # 20시 정산을 미리 생성해서 이후 정상 정산을 건너뛰지 않게 한다.
+        if datetime.now(KST).hour < 20:
+            logger.info("Scheduled NAV snapshot skipped before 20:00 KST")
+            if manage_db:
+                await bootstrap.close_db()
+            return
         snap_date = _today_kst().isoformat()
     if date.fromisoformat(snap_date).weekday() >= 5:
         logger.info("Snapshot skipped: %s is a weekend", snap_date)

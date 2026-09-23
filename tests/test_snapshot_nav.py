@@ -613,3 +613,22 @@ async def test_retry_only_values_missing_users_and_preserves_completed_settlemen
     ):
         await snapshot_nav.run_all_snapshots("2026-09-23", manage_db=False, only_missing=True)
     take.assert_awaited_once_with("missing", "2026-09-23", require_fresh=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("manage_db", [False, True])
+async def test_unexpected_morning_timer_tick_cannot_create_tonights_settlement(manage_db):
+    from datetime import datetime
+
+    with (
+        patch.object(snapshot_nav, "datetime") as clock,
+        patch.object(snapshot_nav.bootstrap, "init_db", new=AsyncMock()),
+        patch.object(snapshot_nav.bootstrap, "close_db", new=AsyncMock()) as close,
+        patch.object(snapshot_nav, "_fetch_fx_usdkrw", new=AsyncMock()) as fetch,
+        patch.object(snapshot_nav, "take_snapshot", new=AsyncMock()) as take,
+    ):
+        clock.now.return_value = datetime(2026, 9, 24, 6, 45, tzinfo=snapshot_nav.KST)
+        await snapshot_nav.run_all_snapshots(manage_db=manage_db, only_missing=True)
+    fetch.assert_not_awaited()
+    take.assert_not_awaited()
+    assert close.await_count == int(manage_db)

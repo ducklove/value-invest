@@ -170,6 +170,9 @@ for src in "${REPO_UNITS[@]}"; do
   if ! sudo cmp -s "$src" "$UNIT_DST/$unit" 2>/dev/null; then
     MUTATED_UNITS+=("$unit")
     RUNTIME_CHANGED=1
+    # Stop active timers before reloading their calendars. Otherwise systemd
+    # can dispatch a catch-up against the old web process during deployment.
+    if [[ "$unit" == *.timer ]]; then sudo /bin/systemctl stop "$unit"; fi
     sudo cp "$src" "$UNIT_DST/$unit"
   fi
 done
@@ -177,7 +180,7 @@ if (( ${#MUTATED_UNITS[@]} > 0 )); then
   sudo /bin/systemctl daemon-reload
   for unit in "${MUTATED_UNITS[@]}"; do
     if [[ "$unit" == *.timer ]]; then
-      sudo /bin/systemctl enable --now "$unit"
+      sudo /bin/systemctl enable "$unit"
     fi
   done
 fi
@@ -189,6 +192,9 @@ RUNTIME_CHANGED=1
 sudo /bin/systemctl restart "$SERVICE"
 wait_for_healthz
 curl -fsSk --max-time 10 "${HEALTH_URL%/healthz}/readyz" >/dev/null
+for unit in "${MUTATED_UNITS[@]}"; do
+  if [[ "$unit" == *.timer ]]; then sudo /bin/systemctl restart "$unit"; fi
+done
 trap - ERR
 
 # 데이터 보정은 되돌릴 수 있는 코드 배포와 별개다. 실패 시 새 서비스는 유지한다.
