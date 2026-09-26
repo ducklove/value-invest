@@ -161,3 +161,12 @@ def test_bond_mate_base_url_is_overridable(monkeypatch):
 
     assert config["baseUrl"] == "http://127.0.0.1:8731"
     assert config["dataUrl"] == "http://127.0.0.1:8731/data/current.json"
+
+
+def test_all_about_gold_publication_url_and_override(monkeypatch):
+    config = integrations.build_public_integrations()["allAboutGold"]
+    assert config["baseUrl"] == "https://ducklove.github.io/all-about-gold"
+    assert config["dataUrl"].endswith("/all-about-gold/data/current.json")
+    monkeypatch.setenv("ALL_ABOUT_GOLD_BASE_URL", "http://localhost:8765/")
+    config = integrations.build_public_integrations()["allAboutGold"]
+    assert config["baseUrl"] == "http://localhost:8765"

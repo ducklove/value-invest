@@ -16,7 +16,7 @@ const read = (p) => readFileSync(join(__dirname, "..", "..", "static", "js", p),
 const UTILS = read("utils.js");
 const DASH = read("market-dashboard.js");
 
-function load() {
+function load(config = {}) {
   const dom = new JSDOM(
     "<!doctype html><html><body>"
       + "<div class='md-grid' id='marketDashboard'>"
@@ -25,6 +25,7 @@ function load() {
       + "</div></body></html>",
     { runScripts: "dangerously", url: "https://app.example.com/" },
   );
+  dom.window.APP_CONFIG = config;
   for (const src of [UTILS, DASH]) {
     const s = dom.window.document.createElement("script");
     s.textContent = src;
@@ -767,4 +768,19 @@ test("_mdRenderDashboard renders 국채 chart containers + yield-curve table", (
   assert.match(main.textContent, /국가별 금리/);
   // 국가별 10년물은 그래프만 두고 텍스트 표는 제거됨.
   assert.equal(main.querySelector("#bondCountryTable"), null, "country table removed");
+});
+
+test("gold research tool works without insight data and keeps theme before the fragment", () => {
+  const w = load({integrations: {allAboutGold: {baseUrl: 'https://ducklove.github.io/all-about-gold'}}});
+  w.document.documentElement.setAttribute('data-theme', 'dark');
+  const root = w.document.getElementById('externalTools');
+  w._extRender(root, {});
+  assert.equal(root.querySelectorAll('.ext-card').length, 1);
+  assert.match(root.textContent, /금 투자 리서치/);
+  const links = [...root.querySelectorAll('.ext-row')];
+  assert.equal(links.length, 4);
+  const url = new URL(links[0].href);
+  assert.equal(url.searchParams.get('theme'), 'dark');
+  assert.equal(url.hash, '#gold-history');
+  assert.equal(new URL(links[3].href).hash, '#investing');
 });

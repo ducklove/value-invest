@@ -12,6 +12,7 @@ URLs or server-side environment variables instead of copying their code.
 | `preferredSpread` | `https://github.com/ducklove/common_preferred_spread` | `../common_preferred_spread` | Links preferred-stock rows to the spread dashboard. |
 | `spacHunter` | `https://github.com/ducklove/spac-hunter` | `../spac-hunter` | Links SPAC portfolio rows to the spac dashboard via `?code=`. Exposes `baseUrl` only (no local `config.json`). |
 | `buybacks` | `https://github.com/ducklove/buybacks` | — | Links the analysis-tools card to the buybacks dashboard and summarizes published holding snapshots by treasury-stock holding ratio. Exposes `baseUrl` only. |
+| `allAboutGold` | `https://github.com/ducklove/all-about-gold` | `../all-about-gold` | Links the 분석 도구 gold research card to long-term prices, ratios, mining/reserves and investment methods. `data/current.json` is published by finance-pi to GitHub Pages. |
 | `goldGap` | `https://github.com/ducklove/gold_gap` | `../gold_gap` | Links `KRX_GOLD` and `CRYPTO_BTC` portfolio rows to the gold/bitcoin gap dashboard. |
 | `npsTracker` | `https://github.com/ducklove/nps-tracker` | — | Embeds the NPS domestic-equity portfolio dashboard in the NPS tab via iframe and summarizes `current.json` for the 투자정보 insight card. Exposes `baseUrl` only. |
 | `eiayn` | `https://github.com/ducklove/eiayn` | `../eiayn` | Links ETF rows and the daily recommendation card to ETF analysis via `?code=` and summarizes `data/rankings.json`. Visual theme uses `?theme=light|dark`; ETF category filters use `?etf_theme=`. |
@@ -20,7 +21,7 @@ URLs or server-side environment variables instead of copying their code.
 
 > `finance-pi` (`../finance-pi`, Raspberry Pi 데이터레이크 `:8400`)는 위 integration
 > registry에 속하지 않는 인프라 백엔드다. `value-invest`는 이를 `CLOSE_PRICE_API_BASE_URL`
-> 종가 백업 소스로만 쓴다(아래 Local Config Discovery 참고).
+> 종가 백업 소스로 쓰며, All About Gold의 공개 스냅샷도 수집·발행한다(아래 Local Config Discovery 참고).
 
 ## Operating Model
 
@@ -143,6 +144,7 @@ Public base URLs can be overridden with:
 - `HOLDING_VALUE_BASE_URL`
 - `PREFERRED_SPREAD_BASE_URL`
 - `SPAC_HUNTER_BASE_URL`
+- `ALL_ABOUT_GOLD_BASE_URL`
 - `GOLD_GAP_BASE_URL`
 - `NPS_TRACKER_BASE_URL`
 - `BOND_MATE_BASE_URL`

@@ -19,6 +19,10 @@ window.APP_CONFIG = {
     buybacks: {
       baseUrl: "https://ducklove.github.io/buybacks"
     },
+    allAboutGold: {
+      baseUrl: "https://ducklove.github.io/all-about-gold",
+      dataUrl: "https://ducklove.github.io/all-about-gold/data/current.json"
+    },
     goldGap: {
       baseUrl: "https://ducklove.github.io/gold_gap",
       configUrl: "https://ducklove.github.io/gold_gap/config.json",

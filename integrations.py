@@ -12,6 +12,7 @@ DEFAULT_BASE_URLS = {
     "spacHunter": "https://ducklove.github.io/spac-hunter",
     "buybacks": "https://ducklove.github.io/buybacks",
     "goldGap": "https://ducklove.github.io/gold_gap",
+    "allAboutGold": "https://ducklove.github.io/all-about-gold",
     "npsTracker": "https://ducklove.github.io/nps-tracker",
     "bondMate": "https://ducklove.github.io/bond-mate",
     "kisProxy": "http://ducklove.duckdns.org:3288",
@@ -51,6 +52,7 @@ def build_public_integrations(workspace_root: Path | None = None) -> dict[str, A
         "spacHunter": _spac_hunter_config(),
         "buybacks": _buybacks_config(),
         "goldGap": _gold_gap_config(root),
+        "allAboutGold": _all_about_gold_config(),
         "npsTracker": _nps_tracker_config(),
         "bondMate": _bond_mate_config(),
         "kisProxy": _kis_proxy_config(),
@@ -284,6 +286,11 @@ def _spac_hunter_config() -> dict[str, Any]:
     # spac-hunter 는 별도 서브 프로젝트(SPA)로, 종목 코드를 ?code= 쿼리로만
     # 받는다. 로컬 config 를 읽을 필요가 없어 baseUrl 만 노출한다.
     return {"baseUrl": _base_url("spacHunter", "SPAC_HUNTER_BASE_URL")}
+
+
+def _all_about_gold_config() -> dict[str, Any]:
+    base_url = _base_url("allAboutGold", "ALL_ABOUT_GOLD_BASE_URL")
+    return {"baseUrl": base_url, "dataUrl": f"{base_url}/data/current.json"}
 
 
 def _buybacks_config() -> dict[str, Any]:

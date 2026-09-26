@@ -1048,7 +1048,10 @@ function _withTheme(url) {
   const u = String(url || '');
   if (!/^https?:\/\//.test(u)) return u;
   const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-  return u + (u.includes('?') ? '&' : '?') + 'theme=' + theme;
+  const hashAt = u.indexOf('#');
+  const base = hashAt < 0 ? u : u.slice(0, hashAt);
+  const hash = hashAt < 0 ? '' : u.slice(hashAt);
+  return base + (base.includes('?') ? '&' : '?') + 'theme=' + theme + hash;
 }
 
 function _extHref(url) {
@@ -1151,6 +1154,21 @@ function _extRender(root, data) {
         + `<span class="ext-val ${cls}">${escapeHtml(_extPct(a.gap, true))}</span></a>`;
     }).join('');
     cards.push(_extCard('김치프리미엄', g.url, '국내가 vs 국제가', rows));
+  }
+  const goldResearch = getIntegrationConfig('allAboutGold');
+  if (/^https?:\/\//.test(goldResearch.baseUrl || '')) {
+    const base = goldResearch.baseUrl.replace(/\/$/, '') + '/';
+    const rows = [
+      ['금의 장기 가격', '1960년부터', 'gold-history'],
+      ['금/은 · 비트코인/금', '상대가치 추이', 'ratios'],
+      ['채굴량 · 국가별 보유량', '공급과 수요', 'supply'],
+      ['금 투자 방법', 'KRX 현물 비교', 'investing'],
+    ].map(([name, detail, section]) =>
+      `<a class="ext-row" href="${escapeHtml(_extHref(base + '#' + section))}" target="_blank" rel="noopener noreferrer">`
+      + `<span class="ext-name">${escapeHtml(name)}</span>`
+      + `<span class="ext-val">${escapeHtml(detail)}</span></a>`
+    ).join('');
+    cards.push(_extCard('금 투자 리서치', base, 'All About Gold · finance-pi 데이터', rows));
   }
   const ep = data && data.etfPicks;
   if (ep && (ep.top || []).length) {
