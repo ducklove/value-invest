@@ -1,0 +1,68 @@
+[
+  {
+    "project": "value-invest",
+    "html": "static/index.html",
+    "asset": "static/js/analytics.js",
+    "src": "./js/analytics.js"
+  },
+  {
+    "project": "spac-hunter",
+    "html": "index.html",
+    "asset": "assets/analytics.js",
+    "src": "./assets/analytics.js"
+  },
+  {
+    "project": "holding_value",
+    "html": "index.html",
+    "asset": "analytics.js",
+    "src": "./analytics.js"
+  },
+  {
+    "project": "common_preferred_spread",
+    "html": "index.html",
+    "asset": "analytics.js",
+    "src": "./analytics.js"
+  },
+  {
+    "project": "gold_gap",
+    "html": "templates/index.html",
+    "asset": "static/analytics.js",
+    "src": "./static/analytics.js"
+  },
+  {
+    "project": "nps-tracker",
+    "html": "index.html",
+    "asset": "analytics.js",
+    "src": "./analytics.js"
+  },
+  {
+    "project": "eiayn",
+    "html": "index.html",
+    "asset": "public/value-analytics.js",
+    "src": "%BASE_URL%value-analytics.js"
+  },
+  {
+    "project": "buybacks",
+    "html": "index.html",
+    "asset": "public/value-analytics.js",
+    "src": "%BASE_URL%value-analytics.js"
+  },
+  {
+    "project": "bond-mate",
+    "html": "templates/index.html",
+    "asset": "static/analytics.js",
+    "src": "./static/analytics.js"
+  },
+  {
+    "project": "index-popup",
+    "html": "index.html",
+    "asset": "public/value-analytics.js",
+    "src": "%BASE_URL%value-analytics.js"
+  },
+  {
+    "project": "all-about-gold",
+    "html": "index.html",
+    "asset": "static/analytics.js",
+    "src": "./static/analytics.js"
+  }
+]

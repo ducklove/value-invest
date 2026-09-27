@@ -27,24 +27,9 @@ if (SHOULD_REDIRECT_TO_APP_SERVER) {
   window.location.replace(redirectTarget.toString());
 }
 
-window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-const GA_MEASUREMENT_ID = 'G-KE611DTCFZ';
-const GA_STREAM_ID = '13881342022';
-const IS_LOCALHOST = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-
-window['ga-disable-' + GA_MEASUREMENT_ID] = IS_LOCALHOST;
-if (!SHOULD_REDIRECT_TO_APP_SERVER) {
-  gtag('js', new Date());
-  gtag('config', GA_MEASUREMENT_ID, { anonymize_ip: true });
-}
-
-function trackEvent(name, params = {}) {
-  if (IS_LOCALHOST || SHOULD_REDIRECT_TO_APP_SERVER || typeof gtag !== 'function') return;
-  gtag('event', name, { stream_id: GA_STREAM_ID, ...params });
-}
+const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
 </script>
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-KE611DTCFZ"></script>
+<script src="./js/analytics.js" data-project="value-invest"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
