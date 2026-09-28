@@ -258,17 +258,17 @@ function buildIntegrationUrl(key, path = '', query = {}) {
 }
 
 // Visit the hub in the new tab first so even browsers blocking third-party
-// cookies can pass a fresh holdings snapshot to these three dashboards.
+// cookies can pass a fresh holdings snapshot to linked dashboards.
 function portfolioIntegrationHref(href) {
   try {
     const target = new URL(href);
-    for (const key of ['holdingValue', 'preferredSpread', 'spacHunter']) {
+    for (const key of ['holdingValue', 'preferredSpread', 'spacHunter', 'buybacks', 'eiayn']) {
       const base = getIntegrationConfig(key).baseUrl;
       if (!base) continue;
       const expected = new URL(base);
       if (target.origin !== expected.origin || target.pathname.replace(/\/$/, '') !== expected.pathname.replace(/\/$/, '')) continue;
       const query = new URLSearchParams();
-      for (const name of ['code', 'theme']) {
+      for (const name of ['code', 'theme', 'stock']) {
         if (target.searchParams.has(name)) query.set(name, target.searchParams.get(name));
       }
       return buildApiUrl(`/api/portfolio/open/${key}?${query}`);

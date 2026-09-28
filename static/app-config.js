@@ -19,6 +19,9 @@ window.APP_CONFIG = {
     buybacks: {
       baseUrl: "https://ducklove.github.io/buybacks"
     },
+    eiayn: {
+      baseUrl: "https://ducklove.github.io/eiayn"
+    },
     allAboutGold: {
       baseUrl: "https://ducklove.github.io/all-about-gold",
       dataUrl: "https://ducklove.github.io/all-about-gold/data/current.json"

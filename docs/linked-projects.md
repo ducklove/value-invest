@@ -65,19 +65,24 @@ URLs or server-side environment variables instead of copying their code.
 
 ## Portfolio holding badges
 
-The holding-value, common/preferred, and SPAC dashboards load the hub's shared
+The holding-value, common/preferred, SPAC, buybacks, and eiayn dashboards load the hub's shared
 `/js/portfolio-held-badges.js`. Stock labels opt in with `data-portfolio-code`;
 the script matches exact codes (including `.KS`/`.KQ` ticker normalization) and
 adds a **보유** badge. Common and preferred shares use separate codes. Labels
 also supply `data-portfolio-price` with the displayed per-share KRW price. Badge
 tooltips show quantity and valuation (quantity × displayed price), and update
 when that price changes. Missing prices/quantities show 확인 불가, never zero.
+Eiayn also supplies `data-portfolio-currency` (native quote currency, no FX conversion)
+and explicit ticker aliases in `data-portfolio-aliases` (comma-separated). Only
+`.KS`/`.KQ`/`.US` are normalized; other exchange suffixes remain distinct.
+Quantities for matching aliases are summed without double-counting repeated aliases.
+React dashboards use an empty span host so React does not reconcile badge children.
 
 Hub links first visit `/api/portfolio/open/{integration_key}` in the new tab.
 This first-party request reads the current session and redirects to one of the
-three configured dashboards with positive-quantity domestic positions in
+five configured dashboards with positive-quantity positions (domestic only except eiayn) in
 `#vc-held=code:quantity,...` (older code-only links still display badges). Only
-`code` and `theme` query parameters are forwarded; arbitrary
+`code`, `stock` (buybacks), and `theme` query parameters are forwarded; arbitrary
 redirect destinations are never accepted. The dashboard consumes and removes the
 fragment immediately, keeping the snapshot only in memory. Quantities aggregate
 all portfolio accounts; purchase prices, account details, identity, and

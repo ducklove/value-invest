@@ -160,3 +160,28 @@ test('API quantities update on refresh, while legacy links and invalid data neve
     legacy.window.close();
   }
 });
+
+test('ETF aliases sum quantities, preserve markets, and update native currency valuation', async t => {
+  const dom = setup(() => { throw new Error('snapshot must not fetch'); },
+    '#vc-held=SPY:2.5,SPY.US:1,SCHP.K:4,1570.T:3');
+  t.after(() => dom.window.close());
+  const list = dom.window.document.getElementById('list');
+  list.innerHTML = `<span data-portfolio-code="SPY" data-portfolio-aliases="SPY,SPY.US" data-portfolio-price="500.25" data-portfolio-currency="USD"></span>
+    <span data-portfolio-code="SCHP" data-portfolio-aliases="SCHP.K" data-portfolio-price="20" data-portfolio-currency="USD"></span>
+    <span data-portfolio-code="1570.T" data-portfolio-price="69540" data-portfolio-currency="JPY"></span>
+    <span data-portfolio-code="1570.HK" data-portfolio-price="10" data-portfolio-currency="HKD"></span>`;
+  await tick();
+  const labels = list.children;
+  assert.match(labels[0].textContent, /보유/);
+  assert.match(labels[0].firstElementChild.title, /보유수량: 3.5주\n평가액: 1,750.88 USD/);
+  assert.match(labels[1].firstElementChild.title, /보유수량: 4주\n평가액: 80 USD/);
+  assert.match(labels[2].firstElementChild.title, /평가액: 208,620 JPY/);
+  assert.equal(labels[3].children.length, 0);
+  labels[0].dataset.portfolioPrice = '600';
+  await tick();
+  assert.match(labels[0].firstElementChild.title, /평가액: 2,100 USD/);
+  labels[0].dataset.portfolioCurrency = 'UNKNOWN';
+  await tick();
+  assert.match(labels[0].firstElementChild.title, /평가액: 확인 불가/);
+  assert.equal(dom.window.location.hash, '');
+});

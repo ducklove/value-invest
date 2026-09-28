@@ -88,6 +88,7 @@ def test_build_public_integrations_reads_sibling_project_configs(tmp_path):
     assert preferred["pairsByPreferredCode"]["005935"]["commonCode"] == "005930"
 
     assert public_config["buybacks"]["baseUrl"] == "https://ducklove.github.io/buybacks"
+    assert public_config["eiayn"]["baseUrl"] == "https://ducklove.github.io/eiayn"
 
     gold = public_config["goldGap"]
     assert gold["assetByPortfolioCode"]["KRX_GOLD"] == "gold"

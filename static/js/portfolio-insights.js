@@ -160,7 +160,7 @@ function _etfInfoAction(etf) {
     id: 'etf-info',
     label: 'ETF 상세',
     hint: 'eiayn ETF 분석',
-    run: () => { if (url) window.open(url, '_blank', 'noopener'); },
+    run: () => { if (url) window.open(portfolioIntegrationHref(url), '_blank', 'noopener'); },
   };
 }
 

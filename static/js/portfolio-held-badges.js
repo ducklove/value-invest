@@ -7,17 +7,21 @@
   let codes = new Set();
   let quantities = new Map();
   let pending;
-  const normalize = value => String(value || '').trim().toUpperCase().replace(/\.(KS|KQ)$/, '');
+  const normalize = value => String(value || '').trim().toUpperCase().replace(/\.(KS|KQ|US)$/, '');
+  function addQuantity(code, value) {
+    if (Number.isFinite(value) && value > 0) quantities.set(code, (quantities.get(code) || 0) + value);
+  }
   const fragment = new URLSearchParams(location.hash.slice(1));
   const hasSnapshot = fragment.has('vc-held');
   if (hasSnapshot) {
     for (const entry of (fragment.get('vc-held') || '').split(',')) {
-      const [code, quantity] = entry.split(':');
-      if (!/^[0-9][0-9A-Z]{5}$/.test(code)) continue;
+      const [rawCode, quantity] = entry.split(':');
+      if (!/^[A-Z0-9][A-Z0-9.-]{0,29}$/.test(rawCode)) continue;
+      const code = normalize(rawCode);
       // Older links contain codes only. Keep their badges without inventing quantities.
       codes.add(code);
       const value = Number(quantity);
-      if (Number.isFinite(value) && value > 0) quantities.set(code, value);
+      addQuantity(code, value);
     }
     fragment.delete('vc-held');
     const rest = fragment.toString();
@@ -36,13 +40,22 @@
     }`;
   document.head.appendChild(style);
 
-  function tooltip(label) {
-    const quantity = quantities.get(normalize(label.dataset.portfolioCode));
+  function matchedCodes(label) {
+    return [...new Set([label.dataset.portfolioCode, ...(label.dataset.portfolioAliases || '').split(',')]
+      .map(normalize).filter(code => codes.has(code)))];
+  }
+
+  function tooltip(label, matches) {
+    const quantity = matches.every(code => quantities.has(code))
+      ? matches.reduce((sum, code) => sum + quantities.get(code), 0) : undefined;
     const price = Number(label.dataset.portfolioPrice);
     const value = quantity * price;
+    const currency = label.dataset.portfolioCurrency || 'KRW';
+    const currencyValid = /^[A-Z]{3}$/.test(currency);
+    const digits = ['KRW', 'JPY', 'VND'].includes(currency) ? 0 : 2;
     const quantityText = quantity == null ? '확인 불가' : `${quantity.toLocaleString('ko-KR', { maximumFractionDigits: 20 })}주`;
-    const valueText = quantity != null && Number.isFinite(price) && price > 0 && Number.isFinite(value)
-      ? `${value.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}원` : '확인 불가';
+    const valueText = quantity != null && currencyValid && Number.isFinite(price) && price > 0 && Number.isFinite(value)
+      ? `${value.toLocaleString('ko-KR', { maximumFractionDigits: digits })}${currency === 'KRW' ? '원' : ' ' + currency}` : '확인 불가';
     return `보유수량: ${quantityText}\n평가액: ${valueText}\n화면 현재가 기준${hasSnapshot ? ' · 수량은 링크를 연 시점 기준' : ''}`;
   }
 
@@ -51,8 +64,8 @@
     observer.disconnect();
     document.querySelectorAll(selector).forEach(label => {
       let badge = Array.from(label.children).find(child => child.classList.contains('portfolio-held-badge'));
-      const held = codes.has(normalize(label.dataset.portfolioCode));
-      if (!held) {
+      const matches = matchedCodes(label);
+      if (!matches.length) {
         badge?.remove();
       } else {
         if (!badge) {
@@ -61,13 +74,13 @@
           badge.textContent = '보유';
           label.appendChild(badge);
         }
-        badge.title = tooltip(label);
+        badge.title = tooltip(label, matches);
         badge.setAttribute('aria-label', `보유 · ${badge.title}`);
       }
     });
     observer.observe(document.body, {
       childList: true, subtree: true, attributes: true,
-      attributeFilter: ['data-portfolio-code', 'data-portfolio-price'],
+      attributeFilter: ['data-portfolio-code', 'data-portfolio-price', 'data-portfolio-currency', 'data-portfolio-aliases'],
     });
   }
 
@@ -89,9 +102,8 @@
       if (controller !== pending || controller.signal.aborted) return;
       codes = new Set((Array.isArray(data.codes) ? data.codes : [])
         .filter(code => typeof code === 'string' && code.trim()).map(normalize));
-      quantities = new Map(Object.entries(data.quantities || {})
-        .filter(([, value]) => Number.isFinite(value) && value > 0)
-        .map(([code, value]) => [normalize(code), value]));
+      quantities = new Map();
+      for (const [code, value] of Object.entries(data.quantities || {})) addQuantity(normalize(code), value);
       render();
     } catch (_) {
       // Optional personalization: unavailable sessions/network leave the dashboard usable.

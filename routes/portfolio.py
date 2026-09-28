@@ -631,9 +631,9 @@ async def get_held_codes(request: Request, response: Response):
 
 
 @router.get("/api/portfolio/open/{integration_key}")
-async def open_portfolio_integration(request: Request, integration_key: str, code: str = "", theme: str = "light"):
+async def open_portfolio_integration(request: Request, integration_key: str, code: str = "", theme: str = "light", stock: str = ""):
     """Top-level navigation reads first-party cookies before handing off a snapshot."""
-    if integration_key not in {"holdingValue", "preferredSpread", "spacHunter"}:
+    if integration_key not in {"holdingValue", "preferredSpread", "spacHunter", "buybacks", "eiayn"}:
         raise HTTPException(status_code=404, detail="지원하지 않는 연결 도구입니다.")
     config = integrations.build_public_integrations()[integration_key]
     target = urlsplit(config["baseUrl"])
@@ -641,11 +641,17 @@ async def open_portfolio_integration(request: Request, integration_key: str, cod
         raise HTTPException(status_code=503, detail="연결 도구 주소를 확인해 주세요.")
     user = await get_current_user(request)
     items = await portfolio_repo.get_portfolio(user["google_sub"]) if user else []
+    def supported_code(value: str) -> bool:
+        if integration_key == "eiayn":
+            return bool(re.fullmatch(r"[A-Z0-9][A-Z0-9.-]{0,29}", value))
+        return _is_korean_stock(value)
+
     positions = sorted(f'{item["stock_code"]}:{item["quantity"]}' for item in items
-                       if item["quantity"] > 0 and _is_korean_stock(item["stock_code"]))
+                       if item["quantity"] > 0 and supported_code(item["stock_code"]))
     query = {"theme": "dark" if theme == "dark" else "light"}
-    if _is_korean_stock(code):
-        query["code"] = code
+    code = (code or (stock if integration_key == "buybacks" else "")).strip().upper()
+    if supported_code(code):
+        query["stock" if integration_key == "buybacks" else "code"] = code
     url = urlunsplit((target.scheme, target.netloc, target.path.rstrip("/") + "/",
                      urlencode(query), urlencode({"vc-held": ",".join(positions)})))
     return RedirectResponse(url, status_code=303, headers={
