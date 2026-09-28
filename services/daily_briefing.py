@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import timedelta
+from math import copysign, isfinite
 
 import ai_config
 import close_price_client
@@ -324,45 +325,55 @@ def _movers(
     names: dict[str, str],
     price_changes: dict[str, dict] | None = None,
     *,
-    allow_value_fallback: bool = False,
+    allow_snapshot_fallback: bool = False,
 ) -> dict:
-    """종목별 일 변동액(주당 가격 변동 × 보유 수량)으로 기여 상위/하위를 계산한다.
+    """두 결산에 공통으로 남은 수량 × 주당 가격 변화. 매매 원금은 제외한다.
 
-    전일 평가액 × 변동률은 스냅샷 사이의 매매(수량 변경)를 반영하지 못해
-    비중을 줄인 종목이 과대, 늘린 종목이 과소 집계된다. 그래서 기여액은
-    당일 스냅샷 평가액에서 역산한 보유 수량(mv/price) × 주당 일 변동액으로
-    잡는다 — 새로 매수한 종목도 포함되고, 숏(음수 평가액)은 부호가 반대로
-    잡혀 자연히 맞는다. 현금성 코드는 제외한다. 일별 종가 API가 비거나 특정
-    코드만 빠진 날에는 브리핑이 NAV 한 줄로 축소되지 않도록 평가액 변화
-    기준 폴백을 쓴다. 이 폴백은 종목별 설명에 "평가액"으로 표시한다.
+    같은 방향의 포지션만 작은 절대 수량으로 계산한다. 신규·전량 매도·방향
+    전환은 제외한다. 종가가 없으면 수량으로 나눈 원화 단가 변화만 사용하며,
+    수량 누락이나 대체 시세는 평가액 증감으로 추측하지 않는다. 스냅샷 사이
+    동일 수량의 장중 왕복매매는 구분하지 못하므로 실제 매매손익과는 다르다.
     """
-    prev_by_code = {r["stock_code"]: float(r.get("market_value") or 0) for r in prev_rows}
+    prev_by_code = {r["stock_code"]: r for r in prev_rows}
     price_changes = price_changes or {}
     deltas: list[dict] = []
     for row in curr_rows:
         code = row["stock_code"]
         if code.startswith("CASH_"):
             continue
-        mv = float(row.get("market_value") or 0)
-        prev_mv = prev_by_code.get(code)
+        previous = prev_by_code.get(code)
+        if not previous or row.get("priced_from_fallback") or previous.get("priced_from_fallback"):
+            continue
+        quantity = _safe_float(row.get("quantity"))
+        prev_quantity = _safe_float(previous.get("quantity"))
+        mv = _safe_float(row.get("market_value"))
+        prev_mv = _safe_float(previous.get("market_value"))
+        if any(value is None or not isfinite(value) for value in (quantity, prev_quantity, mv, prev_mv)):
+            continue
+        if quantity == 0 or prev_quantity == 0 or (quantity > 0) != (prev_quantity > 0):
+            continue
+        unit_price, prev_unit_price = mv / quantity, prev_mv / prev_quantity
+        if not all(isfinite(value) and value > 0 for value in (unit_price, prev_unit_price)):
+            continue
+        common_quantity = copysign(min(abs(quantity), abs(prev_quantity)), quantity)
         price_change = price_changes.get(code)
-        if price_change and mv:
+        if price_change:
             price = price_change["price"]
-            change = mv * (price - price_change["prev_price"]) / price
+            change = common_quantity * unit_price * (price - price_change["prev_price"]) / price
             change_pct = price_change["change_pct"]
             basis = "price"
             extra = {
                 "price": price,
                 "prev_price": price_change["prev_price"],
             }
-        elif allow_value_fallback and prev_mv is not None and prev_mv > 0:
-            change = mv - prev_mv
-            if change == 0:
-                continue
-            change_pct = change / prev_mv * 100.0
-            basis = "market_value"
+        elif allow_snapshot_fallback:
+            change = common_quantity * (unit_price - prev_unit_price)
+            change_pct = (unit_price / prev_unit_price - 1.0) * 100.0
+            basis = "snapshot_price"
             extra = {}
         else:
+            continue
+        if not isfinite(change) or not isfinite(change_pct) or change == 0:
             continue
         deltas.append(
             {
@@ -371,6 +382,7 @@ def _movers(
                 "change_krw": change,
                 "change_pct": change_pct,
                 "basis": basis,
+                "quantity": common_quantity,
                 **extra,
             }
         )
@@ -566,17 +578,17 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
                 latest["distribution_amount"] = sum(row["amount"] for row in await snapshots_repo.get_distribution_flows(google_sub)
                                                       if row["applied_snapshot_date"] == latest["date"])
                 context["nav"] = _nav_block(latest, prev)
-                curr_rows = await snapshots_repo.get_stock_snapshots_by_date(google_sub, latest["date"])
-                prev_rows = await snapshots_repo.get_stock_snapshots_before_date(google_sub, latest["date"])
-                names = {
-                    r["stock_code"]: r.get("stock_name") or r["stock_code"]
-                    for r in await snapshots_repo.get_latest_stock_snapshot_rows(google_sub)
-                }
-                # 신규 매수 종목(전일 스냅샷에 없음)도 일 변동 기여에 포함한다.
+                curr_rows = await snapshots_repo.get_stock_snapshot_rows_on_or_before(google_sub, latest["date"])
+                prev_rows = await snapshots_repo.get_stock_snapshot_rows_on_or_before(google_sub, prev["date"]) if prev else []
+                # 총평가 결산과 날짜가 다른 종목 스냅샷으로 기여도를 만들지 않는다.
+                curr_rows = [row for row in curr_rows if row["date"] == latest["date"]]
+                prev_rows = [row for row in prev_rows if prev and row["date"] == prev["date"]]
+                names = {r["stock_code"]: r.get("stock_name") or r["stock_code"] for r in prev_rows + curr_rows}
+                prev_codes = {row["stock_code"] for row in prev_rows}
                 mover_codes = sorted(
                     row["stock_code"]
                     for row in curr_rows
-                    if not row["stock_code"].startswith("CASH_")
+                    if row["stock_code"] in prev_codes and not row["stock_code"].startswith("CASH_")
                 )
                 price_changes = await _daily_price_changes_by_code(
                     mover_codes,
@@ -588,14 +600,16 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
                     prev_rows,
                     names,
                     price_changes,
-                    allow_value_fallback=True,
+                    allow_snapshot_fallback=True,
                 )
                 movers = (context["movers"].get("top") or []) + (context["movers"].get("bottom") or [])
                 context["diagnostics"] = {
                     "mover_candidates": len(mover_codes),
                     "price_change_codes": len(price_changes),
-                    "mover_value_fallbacks": sum(1 for m in movers if m.get("basis") == "market_value"),
+                    "mover_value_fallbacks": 0,
+                    "mover_snapshot_price_fallbacks": sum(1 for m in movers if m.get("basis") == "snapshot_price"),
                 }
+                context["mover_basis_note"] = "기여도는 전일·당일 결산의 공통 보유 수량 기준입니다. 당일 매매손익은 포함하지 않습니다."
         except Exception as exc:
             logger.warning("briefing NAV block failed user=%s: %s", google_sub[:8], exc)
 
@@ -768,7 +782,7 @@ def _fmt_signed_krw(value: float) -> str:
 
 def _fmt_mover(mover: dict) -> str:
     pct = mover.get("change_pct")
-    label = "가격" if mover.get("basis") == "price" else "평가액"
+    label = {"price": "가격", "snapshot_price": "원화 단가"}.get(mover.get("basis"), "평가액")
     pct_text = f" ({label} {pct:+.1f}%)" if pct is not None else ""
     return f"{mover['stock_name']} {_fmt_signed_krw(mover['change_krw'])}{pct_text}"
 
@@ -973,6 +987,8 @@ def _context_sections(context: dict, custom_instructions: str | None = None) -> 
     if kind != "market_close":
         add(_section("📈 상승 기여", [_fmt_mover(m) for m in movers.get("top") or []]))
         add(_section("📉 하락 기여", [_fmt_mover(m) for m in movers.get("bottom") or []]))
+        if context.get("mover_basis_note"):
+            add([context["mover_basis_note"]])
 
     if kind != "night":
         for section in _feed_sections(context, night=False):
@@ -1027,7 +1043,7 @@ def _template_body_sections(context: dict, custom_instructions: str | None = Non
     movers = context.get("movers") or {}
     kind = context.get("briefing_type") or DEFAULT_BRIEFING_TYPE
     if kind != "market_close" and context.get("nav") and not movers.get("top") and not movers.get("bottom"):
-        sections.append(["기여 종목: 종목별 종가 데이터가 비어 있어 세부 기여는 생략했습니다."])
+        sections.append(["기여 종목: 공통 보유분의 확인 가능한 가격 변동이 없어 세부 기여는 생략했습니다."])
     if sum(len(section) for section in sections) < MIN_USABLE_AI_LINES:
         sections.append(["오늘 확인: 큰 변동의 원인을 종목별 가격·환율·현금흐름으로 나눠 점검하세요."])
     return sections

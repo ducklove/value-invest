@@ -714,6 +714,7 @@ async def get_stock_snapshot_rows_on_or_before(google_sub: str, date: str) -> li
             ps.market_value,
             ps.quantity,
             ps.unit_price,
+            ps.priced_from_fallback,
             ps.avg_price_krw,
             ps.cost_basis
         FROM portfolio_stock_snapshots ps

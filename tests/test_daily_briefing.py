@@ -80,13 +80,13 @@ class DailyBriefingHarness(TempDbMixin):
         await snapshots_repo.save_snapshot(sub, d_prev, 1_000_000, 900_000, 1000.0, 1000.0)
         await snapshots_repo.save_snapshot(sub, d_last, 1_050_000, 900_000, 1050.0, 1000.0)
         await snapshots_repo.save_stock_snapshots(sub, d_prev, [
-            {"stock_code": "005930", "market_value": 500_000},
-            {"stock_code": "000660", "market_value": 300_000},
+            {"stock_code": "005930", "market_value": 500_000, "quantity": 500},
+            {"stock_code": "000660", "market_value": 300_000, "quantity": 300},
             {"stock_code": "CASH_KRW", "market_value": 200_000},
         ])
         await snapshots_repo.save_stock_snapshots(sub, d_last, [
-            {"stock_code": "005930", "market_value": 570_000},
-            {"stock_code": "000660", "market_value": 280_000},
+            {"stock_code": "005930", "market_value": 570_000, "quantity": 500},
+            {"stock_code": "000660", "market_value": 280_000, "quantity": 300},
             {"stock_code": "CASH_KRW", "market_value": 200_000},
         ])
         return d_prev, d_last
@@ -181,8 +181,8 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertIn("+5.00%", text)
         self.assertIn("가격 +2.0%", text)
 
-    async def test_movers_reflect_trades_via_current_quantity(self):
-        """기여액은 당일 보유 수량 기준 — 매도분은 줄고, 신규 매수 종목도 포함된다."""
+    async def test_movers_use_common_quantity_and_exclude_new_purchases(self):
+        """기여액은 양일 공통 수량 기준 — 매도분과 신규 매수분은 제외한다."""
         await self._seed_user()
         d_prev = (date.today() - timedelta(days=2)).isoformat()
         d_last = (date.today() - timedelta(days=1)).isoformat()
@@ -190,11 +190,11 @@ class BriefingContextTests(DailyBriefingHarness):
         await snapshots_repo.save_snapshot("u1", d_last, 1_050_000, 900_000, 1050.0, 1000.0)
         # 005930 은 대부분 매도(500주 → 50주), 000660 은 어제 신규 매수(1,000주).
         await snapshots_repo.save_stock_snapshots("u1", d_prev, [
-            {"stock_code": "005930", "market_value": 500_000},
+            {"stock_code": "005930", "market_value": 500_000, "quantity": 500},
         ])
         await snapshots_repo.save_stock_snapshots("u1", d_last, [
-            {"stock_code": "005930", "market_value": 51_000},
-            {"stock_code": "000660", "market_value": 970_000},
+            {"stock_code": "005930", "market_value": 51_000, "quantity": 50},
+            {"stock_code": "000660", "market_value": 970_000, "quantity": 1000},
         ])
         price_rows = {
             "005930": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 1020}],
@@ -206,18 +206,18 @@ class BriefingContextTests(DailyBriefingHarness):
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
             ctx = await self._build_settlement_context()
 
-        # 신규 매수 종목도 종가 조회 대상에 포함된다 (전일 스냅샷 존재 조건 없음).
-        self.assertEqual(set(prices.await_args.args[0]), {"005930", "000660"})
+        # 신규 매수 종목은 기여도 및 종가 조회 대상에서 제외한다.
+        self.assertEqual(set(prices.await_args.args[0]), {"005930"})
         top = ctx["movers"]["top"]
         bottom = ctx["movers"]["bottom"]
         # 매도 후 남은 50주(51,000/1,020) × +20원 = +1,000 — 전일 평가액(500주) 기준 +10,000 이 아니다.
         self.assertEqual([m["stock_code"] for m in top], ["005930"])
         self.assertAlmostEqual(top[0]["change_krw"], 1_000)
-        # 신규 매수 1,000주(970,000/970) × -30원 = -30,000 이 하락 기여로 잡힌다.
-        self.assertEqual([m["stock_code"] for m in bottom], ["000660"])
-        self.assertAlmostEqual(bottom[0]["change_krw"], -30_000)
+        # 전일 보유가 없는 신규 매수의 하루 전체 가격변동을 손익으로 잡지 않는다.
+        self.assertEqual(bottom, [])
+        self.assertIn("공통 보유 수량", daily_briefing.render_template_briefing(ctx))
 
-    async def test_movers_fall_back_to_market_value_when_daily_prices_empty(self):
+    async def test_movers_fall_back_to_quantity_adjusted_unit_prices(self):
         await self._seed_user()
         await self._seed_snapshots()
         with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
@@ -230,12 +230,34 @@ class BriefingContextTests(DailyBriefingHarness):
         bottom = ctx["movers"]["bottom"]
         self.assertEqual([m["stock_code"] for m in top], ["005930"])
         self.assertEqual([m["stock_code"] for m in bottom], ["000660"])
-        self.assertEqual(top[0]["basis"], "market_value")
-        self.assertEqual(bottom[0]["basis"], "market_value")
+        self.assertEqual(top[0]["basis"], "snapshot_price")
+        self.assertEqual(bottom[0]["basis"], "snapshot_price")
         self.assertEqual(ctx["diagnostics"]["price_change_codes"], 0)
-        self.assertEqual(ctx["diagnostics"]["mover_value_fallbacks"], 2)
+        self.assertEqual(ctx["diagnostics"]["mover_value_fallbacks"], 0)
+        self.assertEqual(ctx["diagnostics"]["mover_snapshot_price_fallbacks"], 2)
         text = daily_briefing.render_template_briefing(ctx)
-        self.assertIn("평가액 +14.0%", text)
+        self.assertIn("원화 단가 +14.0%", text)
+
+    async def test_missing_quotes_do_not_rank_purchase_principal_as_a_gain(self):
+        await self._seed_user()
+        d_prev, d_last = await self._seed_snapshots()
+        await snapshots_repo.save_stock_snapshots("u1", d_prev, [
+            {"stock_code": "005930", "market_value": 100000, "quantity": 100},
+        ])
+        await snapshots_repo.save_stock_snapshots("u1", d_last, [
+            {"stock_code": "005930", "market_value": 153000, "quantity": 150},
+        ])
+        with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
+             patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
+             patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
+             patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value={})):
+            ctx = await self._build_settlement_context()
+        # 현재 잔고(10주)가 아닌 각 날짜에 저장된 100주/150주를 사용한다.
+        mover = ctx["movers"]["top"][0]
+        self.assertEqual(mover["quantity"], 100)
+        self.assertEqual(mover["change_krw"], 2000)  # 기존 오류: +53,000
+        self.assertIn("공통 보유 수량", daily_briefing.build_prompt(ctx))
+        self.assertIn("당일 매매손익은 포함하지 않습니다", daily_briefing.render_template_briefing(ctx))
 
     async def test_context_with_empty_db_is_safe(self):
         await self._seed_user("u-empty")
@@ -1092,3 +1114,48 @@ class InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CommonHoldingMoverTests(unittest.TestCase):
+    def movers(self, old_qty, new_qty, old_price=1000, new_price=1000, *, prices=False):
+        old = [{"stock_code": "005930", "quantity": old_qty, "market_value": old_qty * old_price}] if old_qty is not None else []
+        new = [{"stock_code": "005930", "quantity": new_qty, "market_value": new_qty * new_price}] if new_qty is not None else []
+        changes = {"005930": {"price": new_price, "prev_price": old_price,
+                               "change_pct": (new_price / old_price - 1) * 100}} if prices else {}
+        return daily_briefing._movers(new, old, {}, changes, allow_snapshot_fallback=True)
+
+    def test_flat_price_trades_never_create_profit_or_loss(self):
+        for old_qty, new_qty in ((100, 150), (100, 40), (None, 100), (100, None),
+                                 (100, 0), (0, 100), (100, -100), (-100, 100)):
+            for prices in (False, True):
+                with self.subTest(old_qty=old_qty, new_qty=new_qty, prices=prices):
+                    self.assertEqual(self.movers(old_qty, new_qty, prices=prices), {"top": [], "bottom": []})
+
+    def test_partial_buys_and_sales_only_count_common_shares(self):
+        for old_qty, new_qty, expected in ((100, 150, 2000), (100, 40, 800),
+                                          (-100, -150, -2000), (-100, -40, -800)):
+            for prices in (False, True):
+                with self.subTest(old_qty=old_qty, new_qty=new_qty, prices=prices):
+                    result = self.movers(old_qty, new_qty, new_price=1020, prices=prices)
+                    mover = (result["top"] + result["bottom"])[0]
+                    self.assertAlmostEqual(mover["change_krw"], expected)
+                    self.assertAlmostEqual(mover["change_pct"], 2)
+                    self.assertEqual(abs(mover["quantity"]), min(abs(old_qty), abs(new_qty)))
+
+    def test_missing_or_unreliable_quantity_is_not_replaced_by_value_delta(self):
+        for field, value in (("quantity", None), ("quantity", float("nan")), ("quantity", float("inf")),
+                             ("market_value", float("inf")), ("priced_from_fallback", 1)):
+            for bad_side in ("old", "new"):
+                with self.subTest(field=field, value=value, bad_side=bad_side):
+                    old = {"stock_code": "005930", "quantity": 100, "market_value": 100000}
+                    new = {"stock_code": "005930", "quantity": 150, "market_value": 153000}
+                    (old if bad_side == "old" else new)[field] = value
+                    for changes in ({}, {"005930": {"price": 1020, "prev_price": 1000, "change_pct": 2}}):
+                        self.assertEqual(daily_briefing._movers([new], [old], {}, changes, allow_snapshot_fallback=True),
+                                         {"top": [], "bottom": []})
+
+    def test_foreign_snapshot_fallback_keeps_krw_units(self):
+        # 원화 단가에는 환율도 포함된다. 수량 증가분의 원금은 제거한다.
+        result = self.movers(10, 25, old_price=13000, new_price=13200)
+        self.assertEqual(result["top"][0]["change_krw"], 2000)
+        self.assertEqual(result["top"][0]["basis"], "snapshot_price")
