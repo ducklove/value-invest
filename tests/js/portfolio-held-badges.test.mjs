@@ -7,9 +7,9 @@ const source = readFileSync(new URL('../../static/js/portfolio-held-badges.js', 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 function setup(fetch, fragment = '') {
   const dom = new JSDOM(`<body><div id="list">
-    <span data-portfolio-code="005930.KS">보통주</span>
-    <span data-portfolio-code="005935.KS">우선주</span>
-    <span data-portfolio-code="0131D0">스팩</span>
+    <span data-portfolio-code="005930.KS" data-portfolio-price="75000">보통주</span>
+    <span data-portfolio-code="005935.KS" data-portfolio-price="60000">우선주</span>
+    <span data-portfolio-code="0131D0" data-portfolio-price="2000">스팩</span>
     <span data-portfolio-code="">평균</span></div></body>`, {
     url: 'https://ducklove.github.io/common_preferred_spread/?code=005935&theme=dark' + fragment, runScripts: 'dangerously',
   });
@@ -38,7 +38,7 @@ test('credentialed minimal API matches exact codes, including KRX letter codes; 
   assert.equal(calls[0].url, 'https://hub.example/api/portfolio/held-codes');
   assert.equal(calls[0].options.credentials, 'include');
   assert.equal(calls[0].options.cache, 'no-store');
-  dom.window.document.getElementById('list').innerHTML = '<strong data-portfolio-code="0131D0">다른 목록</strong>';
+  dom.window.document.getElementById('list').innerHTML = '<strong data-portfolio-code="0131D0" data-portfolio-price="2000">다른 목록</strong>';
   await tick();
   assert.deepEqual(badgeCodes(dom), ['0131D0']);
   dom.window.document.querySelector('strong').dataset.portfolioCode = '005935';
@@ -121,4 +121,42 @@ test('an explicit empty snapshot never falls back to another session', async t =
   await tick();
   assert.deepEqual(badgeCodes(dom), []);
   assert.equal(dom.window.location.hash, '');
+});
+
+
+test('snapshot quantities produce formatted tooltips and valuation follows live displayed prices', async t => {
+  const dom = setup(async () => { throw new Error('must not fetch'); }, '#vc-held=005930:1234.5,0131D0:50');
+  t.after(() => { dom.window.dispatchEvent(new dom.window.Event('pagehide')); dom.window.close(); });
+  await tick();
+  const label = dom.window.document.querySelector('[data-portfolio-code="005930.KS"]');
+  const badge = label.querySelector('.portfolio-held-badge');
+  assert.equal(badge.title, '보유수량: 1,234.5주\n평가액: 92,587,500원\n화면 현재가 기준 · 수량은 링크를 연 시점 기준');
+  assert.ok(badge.getAttribute('aria-label').includes('92,587,500원'));
+  assert.equal(dom.window.location.hash, '');
+  label.dataset.portfolioPrice = '80000';
+  await tick();
+  assert.ok(badge.title.includes('98,760,000원'));
+  label.removeAttribute('data-portfolio-price');
+  await tick();
+  assert.ok(badge.title.includes('평가액: 확인 불가'));
+  assert.equal(label.querySelectorAll('.portfolio-held-badge').length, 1);
+});
+
+test('API quantities update on refresh, while legacy links and invalid data never fabricate zero valuations', async t => {
+  let quantity = 2;
+  const dom = setup(async () => ({ok: true, json: async () => ({codes: ['005930'], quantities: {'005930': quantity}})}));
+  t.after(() => { dom.window.dispatchEvent(new dom.window.Event('pagehide')); dom.window.close(); });
+  await tick();
+  assert.ok(dom.window.document.querySelector('.portfolio-held-badge').title.includes('평가액: 150,000원'));
+  quantity = 3;
+  dom.window.dispatchEvent(new dom.window.Event('focus'));
+  await tick();
+  assert.ok(dom.window.document.querySelector('.portfolio-held-badge').title.includes('평가액: 225,000원'));
+  for (const fragment of ['#vc-held=005930', '#vc-held=005930:-1', '#vc-held=005930:Infinity']) {
+    const legacy = setup(async () => { throw new Error('must not fetch'); }, fragment);
+    await tick();
+    assert.ok(legacy.window.document.querySelector('.portfolio-held-badge').title.includes('보유수량: 확인 불가\n평가액: 확인 불가'));
+    legacy.window.dispatchEvent(new legacy.window.Event('pagehide'));
+    legacy.window.close();
+  }
 });

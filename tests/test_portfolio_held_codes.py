@@ -5,7 +5,7 @@ import httpx
 from _harness import TempDbMixin, seed_user
 from fastapi import FastAPI
 
-from repositories import portfolio
+from repositories import accounts, portfolio
 from routes import portfolio as portfolio_route
 
 
@@ -31,16 +31,16 @@ class HeldCodesTests(TempDbMixin):
     async def test_only_current_users_positive_positions_are_returned(self):
         response = await self.request({"google_sub": "u1"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"codes": ["005930", "0131D0"]})
+        self.assertEqual(response.json(), {"codes": ["005930", "0131D0"], "quantities": {"005930": 2, "0131D0": 1}})
         self.assertEqual(response.headers["cache-control"], "private, no-store")
         response = await self.request({"google_sub": "u2"})
-        self.assertEqual(response.json(), {"codes": ["005935"]})
+        self.assertEqual(response.json(), {"codes": ["005935"], "quantities": {"005935": 5}})
 
     async def test_guest_does_not_read_portfolio(self):
         with patch.object(portfolio_route.portfolio_repo, "get_portfolio", AsyncMock()) as read:
             response = await self.request(None)
         read.assert_not_awaited()
-        self.assertEqual(response.json(), {"codes": []})
+        self.assertEqual(response.json(), {"codes": [], "quantities": {}})
         self.assertEqual(response.headers["cache-control"], "private, no-store")
 
     async def test_handoff_reads_current_session_and_uses_fragment_only(self):
@@ -51,7 +51,9 @@ class HeldCodesTests(TempDbMixin):
             target = urlsplit(response.headers["location"])
             self.assertEqual(target.hostname, "ducklove.github.io")
             self.assertEqual(parse_qs(target.query), {"code": ["0131D0"], "theme": ["dark"]})
-            self.assertEqual(parse_qs(target.fragment), {"vc-held": ["005930,0131D0"]})
+            positions = parse_qs(target.fragment)["vc-held"][0].split(",")
+            self.assertEqual({code: float(qty) for code, qty in (entry.split(":") for entry in positions)},
+                             {"005930": 2, "0131D0": 1})
             self.assertEqual(response.headers["cache-control"], "private, no-store")
 
     async def test_handoff_guest_invalid_code_and_unknown_tool(self):
@@ -61,3 +63,11 @@ class HeldCodesTests(TempDbMixin):
         self.assertEqual(parse_qs(target.query), {"theme": ["light"]})
         response = await self.request({"google_sub": "u1"}, "/api/portfolio/open/unknown")
         self.assertEqual(response.status_code, 404)
+
+    async def test_quantities_aggregate_all_accounts_without_cost_or_account_details(self):
+        second = await accounts.create_account("u1", name="다른 계좌")
+        await portfolio.save_portfolio_item("u1", "005930", "삼성전자", 3.5, 200,
+                                            account_id=second["account_id"])
+        response = await self.request({"google_sub": "u1"})
+        self.assertEqual(response.json(), {"codes": ["005930", "0131D0"],
+                                          "quantities": {"005930": 5.5, "0131D0": 1}})

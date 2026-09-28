@@ -620,13 +620,14 @@ def _parse_avg_price_currency(raw: object) -> str | None:
 
 @router.get("/api/portfolio/held-codes")
 async def get_held_codes(request: Request, response: Response):
-    """연결 대시보드의 보유 배지용. 수량·매입가 등은 외부에 전달하지 않는다."""
+    """연결 대시보드의 보유 배지용 코드·수량. 매입가나 계좌 정보는 제외한다."""
     response.headers["Cache-Control"] = "private, no-store"
     user = await get_current_user(request)
     if not user:
-        return {"codes": []}
+        return {"codes": [], "quantities": {}}
     items = await portfolio_repo.get_portfolio(user["google_sub"])
-    return {"codes": sorted({item["stock_code"] for item in items if item["quantity"] > 0})}
+    quantities = {item["stock_code"]: item["quantity"] for item in items if item["quantity"] > 0}
+    return {"codes": sorted(quantities), "quantities": quantities}
 
 
 @router.get("/api/portfolio/open/{integration_key}")
@@ -640,13 +641,13 @@ async def open_portfolio_integration(request: Request, integration_key: str, cod
         raise HTTPException(status_code=503, detail="연결 도구 주소를 확인해 주세요.")
     user = await get_current_user(request)
     items = await portfolio_repo.get_portfolio(user["google_sub"]) if user else []
-    codes = sorted({item["stock_code"] for item in items
-                    if item["quantity"] > 0 and _is_korean_stock(item["stock_code"])})
+    positions = sorted(f'{item["stock_code"]}:{item["quantity"]}' for item in items
+                       if item["quantity"] > 0 and _is_korean_stock(item["stock_code"]))
     query = {"theme": "dark" if theme == "dark" else "light"}
     if _is_korean_stock(code):
         query["code"] = code
     url = urlunsplit((target.scheme, target.netloc, target.path.rstrip("/") + "/",
-                     urlencode(query), urlencode({"vc-held": ",".join(codes)})))
+                     urlencode(query), urlencode({"vc-held": ",".join(positions)})))
     return RedirectResponse(url, status_code=303, headers={
         "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
     })

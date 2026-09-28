@@ -68,21 +68,27 @@ URLs or server-side environment variables instead of copying their code.
 The holding-value, common/preferred, and SPAC dashboards load the hub's shared
 `/js/portfolio-held-badges.js`. Stock labels opt in with `data-portfolio-code`;
 the script matches exact codes (including `.KS`/`.KQ` ticker normalization) and
-adds a **보유** badge. Common and preferred shares use separate codes.
+adds a **보유** badge. Common and preferred shares use separate codes. Labels
+also supply `data-portfolio-price` with the displayed per-share KRW price. Badge
+tooltips show quantity and valuation (quantity × displayed price), and update
+when that price changes. Missing prices/quantities show 확인 불가, never zero.
 
 Hub links first visit `/api/portfolio/open/{integration_key}` in the new tab.
 This first-party request reads the current session and redirects to one of the
-three configured dashboards with positive-quantity domestic stock codes in
-`#vc-held=...`. Only `code` and `theme` query parameters are forwarded; arbitrary
+three configured dashboards with positive-quantity domestic positions in
+`#vc-held=code:quantity,...` (older code-only links still display badges). Only
+`code` and `theme` query parameters are forwarded; arbitrary
 redirect destinations are never accepted. The dashboard consumes and removes the
-fragment immediately, keeping the snapshot only in memory. No quantities,
-prices, identity, or credentials are transferred. This works even when browsers
+fragment immediately, keeping the snapshot only in memory. Quantities aggregate
+all portfolio accounts; purchase prices, account details, identity, and
+credentials are never transferred. This works even when browsers
 block third-party cookies. Badges describe holdings when the link was opened;
 open the link again from the hub for a fresh snapshot.
 
 Direct visits without a snapshot can use `GET /api/portfolio/held-codes` with the
 existing cross-site session cookie, when the browser permits it. Guests receive
-an empty list. Responses and redirects are private/no-store. API-backed badges
+empty codes/quantities. Responses and redirects are private/no-store. API-backed
+badges
 refresh on focus/visibility and clear on request failure. Both paths survive
 list rerenders and leave the public dashboard usable if personalization fails.
 Deploy the hub API/script and all three dashboard changes together (hub first).
