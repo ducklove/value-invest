@@ -631,12 +631,12 @@ function _mdBondCountries(codes, catalog, dataMap) {
 
 function _bondCurveTableHtml(curve) {
   if (!curve.labels.length) return '';
-  // 금리(값)와 전일대비 변동(%p)을 국가별 별도 컬럼으로 분리해 자리를 맞춘다.
+  // 금리(값)와 전일대비 변동(bp)을 국가별 별도 컬럼으로 분리해 자리를 맞춘다.
   const valCell = (v, grp) => `<td class="bt-val${grp ? ' bt-grp' : ''}">${v == null ? '-' : v.toFixed(2)}</td>`;
   const chgCell = (c) => {
     if (c == null || !isFinite(c)) return '<td class="bt-chg">-</td>';
     const cls = c > 0 ? 'md-up' : (c < 0 ? 'md-down' : 'md-flat');
-    return `<td class="bt-chg ${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</td>`;
+    return `<td class="bt-chg ${cls}">${c > 0 ? '+' : ''}${(c * 100).toFixed(2)}</td>`;
   };
   const rows = curve.labels.map((lab, i) =>
     `<tr><td class="bt-mat">${escapeHtml(lab)}</td>`
@@ -670,7 +670,7 @@ function _mdBondSectionHtml() {
     + '<div class="md-bond-head"><h3 class="md-section-title">국채</h3><span>기준금리 · 수익률 곡선 · 10년물 비교</span>'
     + _mdBondMateLinkHtml('government', '히스토리') + '</div>'
     + '<div class="md-bond-panel md-bond-panel-curve">'
-    + '<div class="md-bond-panel-head"><div><strong>한·미·일 기간별 금리</strong><span>Yield Curve · 기준금리 포함</span></div><em>변동: 전일대비 %p</em></div>'
+    + '<div class="md-bond-panel-head"><div><strong>한·미·일 기간별 금리</strong><span>Yield Curve · 기준금리 포함</span></div><em>변동: 전일대비 bp</em></div>'
     + '<div class="md-bond-chart" id="bondYieldCurve"></div>'
     + '<div class="md-bond-table" id="bondCurveTable"></div>'
     + '</div>'
