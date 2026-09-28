@@ -1,0 +1,124 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
+
+const source = readFileSync(new URL('../../static/js/portfolio-held-badges.js', import.meta.url), 'utf8');
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+function setup(fetch, fragment = '') {
+  const dom = new JSDOM(`<body><div id="list">
+    <span data-portfolio-code="005930.KS">보통주</span>
+    <span data-portfolio-code="005935.KS">우선주</span>
+    <span data-portfolio-code="0131D0">스팩</span>
+    <span data-portfolio-code="">평균</span></div></body>`, {
+    url: 'https://ducklove.github.io/common_preferred_spread/?code=005935&theme=dark' + fragment, runScripts: 'dangerously',
+  });
+  dom.window.fetch = fetch;
+  const script = dom.window.document.createElement('script');
+  script.src = 'https://hub.example/js/portfolio-held-badges.js?v=1';
+  Object.defineProperty(dom.window.document, 'currentScript', { value: script });
+  dom.window.eval(source);
+  return dom;
+}
+const badgeCodes = dom => [...dom.window.document.querySelectorAll('.portfolio-held-badge')]
+  .map(badge => badge.parentElement.dataset.portfolioCode);
+
+test('credentialed minimal API matches exact codes, including KRX letter codes; rerenders stay marked', async t => {
+  const calls = [];
+  const dom = setup(async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => ({ codes: ['005930', '0131D0'] }) };
+  });
+  t.after(() => {
+    dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+    dom.window.close();
+  });
+  await tick();
+  assert.deepEqual(badgeCodes(dom), ['005930.KS', '0131D0']);
+  assert.equal(calls[0].url, 'https://hub.example/api/portfolio/held-codes');
+  assert.equal(calls[0].options.credentials, 'include');
+  assert.equal(calls[0].options.cache, 'no-store');
+  dom.window.document.getElementById('list').innerHTML = '<strong data-portfolio-code="0131D0">다른 목록</strong>';
+  await tick();
+  assert.deepEqual(badgeCodes(dom), ['0131D0']);
+  dom.window.document.querySelector('strong').dataset.portfolioCode = '005935';
+  await tick();
+  assert.deepEqual(badgeCodes(dom), []);
+});
+
+test('logout, account change and network failure clear previous badges without persisting positions', async t => {
+  let codes = ['005935'];
+  let fails = false;
+  const dom = setup(async () => {
+    if (fails) throw new Error('offline');
+    return { ok: true, json: async () => ({ codes }) };
+  });
+  t.after(() => {
+    dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+    dom.window.close();
+  });
+  await tick();
+  assert.deepEqual(badgeCodes(dom), ['005935.KS']);
+  codes = [];
+  dom.window.dispatchEvent(new dom.window.Event('focus'));
+  await tick();
+  assert.deepEqual(badgeCodes(dom), []);
+  codes = ['0131D0'];
+  dom.window.dispatchEvent(new dom.window.Event('focus'));
+  await tick();
+  assert.deepEqual(badgeCodes(dom), ['0131D0']);
+  fails = true;
+  dom.window.dispatchEvent(new dom.window.Event('focus'));
+  await tick();
+  assert.deepEqual(badgeCodes(dom), []);
+  assert.equal(dom.window.localStorage.length, 0);
+});
+
+test('an old in-flight response cannot restore another users badges', async t => {
+  let resolveOld;
+  let calls = 0;
+  const dom = setup(() => {
+    if (++calls === 1) return new Promise(resolve => { resolveOld = resolve; });
+    return Promise.resolve({ ok: true, json: async () => ({ codes: [] }) });
+  });
+  t.after(() => {
+    dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+    dom.window.close();
+  });
+  dom.window.dispatchEvent(new dom.window.Event('focus'));
+  await tick();
+  resolveOld({ ok: true, json: async () => ({ codes: ['005930'] }) });
+  await tick();
+  assert.deepEqual(badgeCodes(dom), []);
+});
+
+
+test('fragment handoff works with blocked cross-site cookies and is immediately removed from the URL', async t => {
+  let requests = 0;
+  const dom = setup(async () => { requests++; throw new Error('third-party cookies blocked'); }, '#vc-held=005935%2C0131D0');
+  t.after(() => {
+    dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+    dom.window.close();
+  });
+  await tick();
+  assert.deepEqual(badgeCodes(dom), ['005935.KS', '0131D0']);
+  assert.equal(dom.window.location.hash, '');
+  assert.equal(dom.window.location.search, '?code=005935&theme=dark');
+  dom.window.dispatchEvent(new dom.window.Event('focus'));
+  await tick();
+  assert.deepEqual(badgeCodes(dom), ['005935.KS', '0131D0']);
+  assert.equal(requests, 0);
+  assert.equal(dom.window.localStorage.length, 0);
+  assert.equal(dom.window.sessionStorage.length, 0);
+});
+
+test('an explicit empty snapshot never falls back to another session', async t => {
+  const dom = setup(async () => { throw new Error('should not fetch'); }, '#vc-held=');
+  t.after(() => {
+    dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+    dom.window.close();
+  });
+  await tick();
+  assert.deepEqual(badgeCodes(dom), []);
+  assert.equal(dom.window.location.hash, '');
+});

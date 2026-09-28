@@ -96,3 +96,19 @@ test("guest recent list round-trips through localStorage and is capped", () => {
     ["000660"],
   );
 });
+
+test('portfolio links use a first-party handoff for all three dashboards without changing data URLs', () => {
+  const w = loadUtils();
+  w.eval(`APP_INTEGRATIONS.holdingValue = {baseUrl: 'https://ducklove.github.io/holding_value'};
+    APP_INTEGRATIONS.preferredSpread = {baseUrl: 'https://ducklove.github.io/common_preferred_spread'};
+    APP_INTEGRATIONS.spacHunter = {baseUrl: 'https://ducklove.github.io/spac-hunter'};`);
+  for (const [key, path] of [['holdingValue', 'holding_value'], ['preferredSpread', 'common_preferred_spread'], ['spacHunter', 'spac-hunter']]) {
+    assert.equal(w.portfolioIntegrationHref(`https://ducklove.github.io/${path}/?theme=dark&code=005935`),
+      `/api/portfolio/open/${key}?code=005935&theme=dark`);
+    const data = `https://ducklove.github.io/${path}/config.json`;
+    assert.equal(w.portfolioIntegrationHref(data), data);
+    const lookalike = `https://other.example/${path}/`;
+    assert.equal(w.portfolioIntegrationHref(lookalike), lookalike);
+  }
+  w.close();
+});

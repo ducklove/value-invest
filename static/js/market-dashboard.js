@@ -1055,7 +1055,7 @@ function _withTheme(url) {
 }
 
 function _extHref(url) {
-  return _extSafeUrl(_withTheme(url));
+  return portfolioIntegrationHref(_extSafeUrl(_withTheme(url)));
 }
 
 // 도구 요약의 퍼센트 표기 — 숫자 포맷은 공용 fmtPct 로 위임하고, 이 화면 고유의

@@ -56,7 +56,7 @@ test("스팩 종목은 '분석 화면' 대신 '스팩 분석' 액션을 받고 s
   let openedUrl = "";
   w.open = (url) => { openedUrl = url; };
   first.run();
-  assert.equal(openedUrl, "https://ducklove.github.io/spac-hunter/?theme=light&code=0131D0");
+  assert.equal(openedUrl, "https://ducklove.duckdns.org:3691/api/portfolio/open/spacHunter?code=0131D0&theme=light");
 });
 
 test("일반 국내 종목은 '분석 화면' 액션을 유지한다", () => {

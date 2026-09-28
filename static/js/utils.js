@@ -257,6 +257,26 @@ function buildIntegrationUrl(key, path = '', query = {}) {
   }
 }
 
+// Visit the hub in the new tab first so even browsers blocking third-party
+// cookies can pass a fresh holdings snapshot to these three dashboards.
+function portfolioIntegrationHref(href) {
+  try {
+    const target = new URL(href);
+    for (const key of ['holdingValue', 'preferredSpread', 'spacHunter']) {
+      const base = getIntegrationConfig(key).baseUrl;
+      if (!base) continue;
+      const expected = new URL(base);
+      if (target.origin !== expected.origin || target.pathname.replace(/\/$/, '') !== expected.pathname.replace(/\/$/, '')) continue;
+      const query = new URLSearchParams();
+      for (const name of ['code', 'theme']) {
+        if (target.searchParams.has(name)) query.set(name, target.searchParams.get(name));
+      }
+      return buildApiUrl(`/api/portfolio/open/${key}?${query}`);
+    }
+  } catch (_) { /* Leave non-integration links untouched. */ }
+  return href;
+}
+
 function openIntegration(key, path = '', query = {}) {
   // 새 탭으로 열리는 연결 대시보드가 현재 앱 테마(라이트/다크)로 뜨도록 전달.
   const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
@@ -265,7 +285,7 @@ function openIntegration(key, path = '', query = {}) {
     showToast('Integration URL is not configured.', 'warning');
     return;
   }
-  window.open(url, '_blank', 'noopener');
+  window.open(portfolioIntegrationHref(url), '_blank', 'noopener');
 }
 
 // apiFetch 기본 타임아웃. 일반 JSON API 는 20초가 지나면 AbortController 로

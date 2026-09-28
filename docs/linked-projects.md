@@ -63,6 +63,30 @@ URLs or server-side environment variables instead of copying their code.
 - 투자정보 국채·환율 섹션의 "히스토리 ↗" 는 `bondMate` 를 `?tab=government|fx` 로 연다.
 - 도구 허브의 "채권·금리"(`/bonds`) 는 `bondMate` 를 `?embed=<탭>&theme=` 로 iframe 임베드한다 (탭: overview·government·policy·fx·credit·issuance — 서버 `integrations.bondMate.views` 가 목록의 주인).
 
+## Portfolio holding badges
+
+The holding-value, common/preferred, and SPAC dashboards load the hub's shared
+`/js/portfolio-held-badges.js`. Stock labels opt in with `data-portfolio-code`;
+the script matches exact codes (including `.KS`/`.KQ` ticker normalization) and
+adds a **보유** badge. Common and preferred shares use separate codes.
+
+Hub links first visit `/api/portfolio/open/{integration_key}` in the new tab.
+This first-party request reads the current session and redirects to one of the
+three configured dashboards with positive-quantity domestic stock codes in
+`#vc-held=...`. Only `code` and `theme` query parameters are forwarded; arbitrary
+redirect destinations are never accepted. The dashboard consumes and removes the
+fragment immediately, keeping the snapshot only in memory. No quantities,
+prices, identity, or credentials are transferred. This works even when browsers
+block third-party cookies. Badges describe holdings when the link was opened;
+open the link again from the hub for a fresh snapshot.
+
+Direct visits without a snapshot can use `GET /api/portfolio/held-codes` with the
+existing cross-site session cookie, when the browser permits it. Guests receive
+an empty list. Responses and redirects are private/no-store. API-backed badges
+refresh on focus/visibility and clear on request failure. Both paths survive
+list rerenders and leave the public dashboard usable if personalization fails.
+Deploy the hub API/script and all three dashboard changes together (hub first).
+
 ## Server-side External Insights
 
 Separate from the browser deep-links above, `external_tools.py`

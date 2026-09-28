@@ -4,11 +4,13 @@ import logging
 import os
 import re
 import time
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 import asset_insights
+import integrations
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from domain.portfolio_inputs import CashflowInput, HoldingInput, HoldingMetadataInput, validate_input
@@ -614,6 +616,40 @@ def _parse_avg_price_currency(raw: object) -> str | None:
     if currency not in fx.SUPPORTED_PRICE_CURRENCIES:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 단가 통화입니다: {currency}")
     return currency
+
+
+@router.get("/api/portfolio/held-codes")
+async def get_held_codes(request: Request, response: Response):
+    """연결 대시보드의 보유 배지용. 수량·매입가 등은 외부에 전달하지 않는다."""
+    response.headers["Cache-Control"] = "private, no-store"
+    user = await get_current_user(request)
+    if not user:
+        return {"codes": []}
+    items = await portfolio_repo.get_portfolio(user["google_sub"])
+    return {"codes": sorted({item["stock_code"] for item in items if item["quantity"] > 0})}
+
+
+@router.get("/api/portfolio/open/{integration_key}")
+async def open_portfolio_integration(request: Request, integration_key: str, code: str = "", theme: str = "light"):
+    """Top-level navigation reads first-party cookies before handing off a snapshot."""
+    if integration_key not in {"holdingValue", "preferredSpread", "spacHunter"}:
+        raise HTTPException(status_code=404, detail="지원하지 않는 연결 도구입니다.")
+    config = integrations.build_public_integrations()[integration_key]
+    target = urlsplit(config["baseUrl"])
+    if target.scheme not in {"https", "http"} or not target.netloc:
+        raise HTTPException(status_code=503, detail="연결 도구 주소를 확인해 주세요.")
+    user = await get_current_user(request)
+    items = await portfolio_repo.get_portfolio(user["google_sub"]) if user else []
+    codes = sorted({item["stock_code"] for item in items
+                    if item["quantity"] > 0 and _is_korean_stock(item["stock_code"])})
+    query = {"theme": "dark" if theme == "dark" else "light"}
+    if _is_korean_stock(code):
+        query["code"] = code
+    url = urlunsplit((target.scheme, target.netloc, target.path.rstrip("/") + "/",
+                     urlencode(query), urlencode({"vc-held": ",".join(codes)})))
+    return RedirectResponse(url, status_code=303, headers={
+        "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
+    })
 
 
 @router.get("/api/portfolio", response_model=list[HoldingResponse], response_model_exclude_unset=True)
