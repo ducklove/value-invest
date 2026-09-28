@@ -635,8 +635,9 @@ function _bondCurveTableHtml(curve) {
   const valCell = (v, grp) => `<td class="bt-val${grp ? ' bt-grp' : ''}">${v == null ? '-' : v.toFixed(2)}</td>`;
   const chgCell = (c) => {
     if (c == null || !isFinite(c)) return '<td class="bt-chg">-</td>';
-    const cls = c > 0 ? 'md-up' : (c < 0 ? 'md-down' : 'md-flat');
-    return `<td class="bt-chg ${cls}">${c > 0 ? '+' : ''}${(c * 100).toFixed(2)}</td>`;
+    const bp = Number((c * 100).toFixed(0));
+    const cls = bp > 0 ? 'md-up' : (bp < 0 ? 'md-down' : 'md-flat');
+    return `<td class="bt-chg ${cls}">${bp > 0 ? '+' : ''}${bp}bp</td>`;
   };
   const rows = curve.labels.map((lab, i) =>
     `<tr><td class="bt-mat">${escapeHtml(lab)}</td>`
