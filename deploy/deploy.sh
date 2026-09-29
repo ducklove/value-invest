@@ -174,7 +174,10 @@ for src in "${REPO_UNITS[@]}"; do
     RUNTIME_CHANGED=1
     # Stop active timers before reloading their calendars. Otherwise systemd
     # can dispatch a catch-up against the old web process during deployment.
-    if [[ "$unit" == *.timer ]]; then sudo /bin/systemctl stop "$unit"; fi
+    # New timers have no loaded unit yet; stopping them makes systemctl fail.
+    if [[ "$unit" == *.timer && -f "$UNIT_DST/$unit" ]]; then
+      sudo /bin/systemctl stop "$unit"
+    fi
     sudo cp "$src" "$UNIT_DST/$unit"
   fi
 done
@@ -195,7 +198,11 @@ sudo /bin/systemctl restart "$SERVICE"
 wait_for_healthz
 curl -fsSk --max-time 10 "${HEALTH_URL%/healthz}/readyz" >/dev/null
 for unit in "${MUTATED_UNITS[@]}"; do
-  if [[ "$unit" == *.timer ]]; then sudo /bin/systemctl restart "$unit"; fi
+  if [[ "$unit" == *.timer ]]; then
+    sudo /bin/systemctl restart "$unit"
+    log "Timer state: $unit"
+    sudo /bin/systemctl show "$unit" -p ActiveState -p NextElapseUSecRealtime -p TimersCalendar
+  fi
 done
 trap - ERR
 

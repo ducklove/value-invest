@@ -69,6 +69,7 @@ printf '%s\\n' "$*" >>"$TEST_STATE/unit-commands"
 if [[ "$1" == /bin/systemctl ]]; then
   shift
   if [[ "$1" == is-enabled || "$1" == is-active ]]; then echo disabled; exit 1; fi
+  if [[ "$1" == stop && "$2" == portfolio-after-close.timer && ! -f "$UNIT_DST/$2" ]]; then exit 5; fi
   if [[ "$1" == restart && "$2" == value-invest.service ]]; then
     if [[ ! -f "$TEST_STATE/restarted" ]]; then
       touch "$TEST_STATE/restarted"
@@ -123,6 +124,9 @@ exec "$@"
         assert commands.index("/bin/systemctl stop portfolio-snapshot.timer") < commands.index("/bin/systemctl daemon-reload")
         assert commands.index("/bin/systemctl restart value-invest.service") < commands.index("/bin/systemctl restart portfolio-snapshot.timer")
         assert "/bin/systemctl enable --now portfolio-snapshot.timer" not in commands
+        assert "/bin/systemctl stop portfolio-after-close.timer" not in commands
+        assert commands.index("/bin/systemctl daemon-reload") < commands.index("/bin/systemctl enable portfolio-after-close.timer")
+        assert commands.index("/bin/systemctl restart value-invest.service") < commands.index("/bin/systemctl restart portfolio-after-close.timer")
     if failure != "none":
         assert not (app / ".venv-current").exists()
     if failure in {"restart", "health"}:
