@@ -77,6 +77,9 @@ Markdown 라이브러리는 `package-lock.json`과 일치하는 파일을 `stati
 
 ## 운영 메모
 
+- 일정산: 거래일 15:30 기준, 15:35 실행. 오후 브리핑은 확정 일간 성과,
+  저녁은 장후 변화, 아침은 해외시장 중심이다. 가격·입출금·과거 자료 전환은
+  [정규장 정산 운영 절차](docs/regular-close-settlement.md)를 따른다.
 - 배치: systemd timer가 내부 API(`routes/internal.py`)를 호출한다 — NAV/장중
   스냅샷, 조건 알림, 경제캘린더 알림, 위키/DART 인제스트, DB 백업.
 - 백업: `scripts/backup_cache_db.sh`가 매일 WAL-safe 온라인 백업 + 무결성 검사,

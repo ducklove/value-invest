@@ -1,10 +1,11 @@
 [Unit]
-Description=AI market close briefing push on weekdays at 15:35 KST
+Description=AI market close briefing push on weekdays at 15:45 KST
 
 [Timer]
-# 평일 15:35 — KRX 정규장 마감 직후 마감 흐름과 보유 종목 변동을 보낸다.
+# 15:35 정산 성공 후 확정 성과를 보낸다. 미정산 사용자는 발송하지 않는다.
 # Persistent=false: 장마감 브리핑은 시점성이 강하므로 놓친 실행은 따라잡지 않는다.
-OnCalendar=Mon..Fri *-*-* 15:35:00
+OnCalendar=Mon..Fri *-*-* 15:45:00 Asia/Seoul
+OnCalendar=Mon..Fri *-*-* 16:45:00 Asia/Seoul
 Persistent=false
 RandomizedDelaySec=1m
 

@@ -1,11 +1,11 @@
 [Unit]
-Description=Daily data-quality checks at 20:30 KST
+Description=Data-quality checks after regular-close settlement and after-market capture
 
 [Timer]
-# 20:05 NAV 스냅샷(+벤치마크 증분)이 끝난 직후가 '오늘 데이터가 다
-# 정착했어야 하는' 시점 — 20:30 에 하루 한 번 점검한다. Persistent 로
-# 꺼져 있던 날도 부팅 후 따라잡는다. 시스템 시계는 KST.
-OnCalendar=*-*-* 20:30:00
+# 정규장 정산과 저녁 자료 갱신 후 점검. 놓친 점검은 부팅 후 따라잡는다.
+OnCalendar=*-*-* 15:43:00 Asia/Seoul
+OnCalendar=*-*-* 16:43:00 Asia/Seoul
+OnCalendar=*-*-* 20:30:00 Asia/Seoul
 Persistent=true
 RandomizedDelaySec=2m
 

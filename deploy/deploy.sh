@@ -20,6 +20,8 @@ REPO_UNITS=(
   "portfolio-intraday.timer"
   "portfolio-snapshot.service"
   "portfolio-snapshot.timer"
+  "portfolio-after-close.service"
+  "portfolio-after-close.timer"
   "value-invest-backup.service"
   "value-invest-backup.timer"
   "dart-review-ingestion.service"

@@ -108,6 +108,12 @@ async def capture(google_sub: str) -> dict:
 
         async def quote(code: str) -> dict:
             async with semaphore:
+                from domain.portfolio_codes import is_korean_stock, is_special_asset
+                from services.portfolio import fx, regular_close
+                if not is_korean_stock(code) and not is_special_asset(code):
+                    q = await regular_close.foreign_close(code, now)
+                    rate = await fx.fx_rate_for_currency(q["currency"])
+                    return {**q, "price": q["native_price"] * rate, "as_of": q["price_date"], "fetched_at": time_windows.now_kst().isoformat()}
                 return await runtime_quotes.fetch_quote(code, force_refresh=True, use_ws_cache=False)
 
         quotes = await asyncio.gather(*(quote(r["stock_code"]) for r in holdings), return_exceptions=True)

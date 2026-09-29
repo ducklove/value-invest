@@ -1,4 +1,4 @@
-"""Daily portfolio snapshot + NAV calculation. Run via systemd timer at 20:05 KST."""
+"""Daily regular-close portfolio snapshot + NAV calculation. First attempt at 15:35 KST."""
 
 import asyncio
 import logging
@@ -188,12 +188,19 @@ async def _fetch_total_value(google_sub: str, snap_date: str) -> tuple[float, fl
     return total_value, total_invested, per_stock
 
 
-async def take_snapshot(google_sub: str, snap_date: str, *, require_fresh: bool = False) -> int:
+async def take_snapshot(google_sub: str, snap_date: str, *, require_fresh: bool = False, regular: bool = False) -> int:
     """평가 전후의 잔고·원장·정산 이력을 검증한 뒤 원자적으로 정산한다.
 
     외부 시세를 기다리는 동안 잠금을 잡지 않는다. 입력이 바뀌면 시세를
     포함해 재시도하므로 평가액과 입출금이 다른 시점으로 저장되지 않는다.
     """
+    if regular:
+        from services.portfolio.regular_close import settle
+        await settle(google_sub, snap_date)
+        return 0
+    existing = await snapshots_repo.get_snapshot_by_date(google_sub, snap_date)
+    if existing and existing.get("price_basis") == "regular_close_v1":
+        raise SnapshotIncomplete("정규장 정산은 최신가로 덮어쓸 수 없습니다.")
     for attempt in range(3):
         async with db_repo.transaction():
             expected = await snapshots_repo.get_nav_input_state(google_sub)
@@ -211,12 +218,16 @@ async def take_snapshot(google_sub: str, snap_date: str, *, require_fresh: bool 
 
 async def _persist_snapshot(
     google_sub: str, snap_date: str, total_value: float, total_invested: float,
-    per_stock: list[dict], cutoff: str,
+    per_stock: list[dict], cutoff: str, *, frozen: dict | None = None, frozen_fx: float | None = None,
 ) -> int:
     """호출자가 보유한 transaction 안에서 NAV·원장·종목을 함께 저장한다."""
     existing = await snapshots_repo.get_snapshot_by_date(google_sub, snap_date)
     previous_day = None if existing else await snapshots_repo.get_latest_snapshot_before_date(google_sub, snap_date)
     prev = existing or previous_day
+    if frozen is not None and prev and prev.get("price_basis") != "regular_close_v1":
+        # 기준 변경 차이를 투자손익으로 기록하지 않는다. 구 이력은 보존한다.
+        prev = previous_day = None
+    selected_fx = frozen_fx if frozen is not None else _fx_usdkrw
 
     if prev is None and total_value == 0:
         return 0
@@ -233,7 +244,18 @@ async def _persist_snapshot(
     # 새로 입력된 미반영분은 처리한다 — applied_snapshot_date 마킹이
     # 이중 반영을 막으므로 "첫 정산에서만" 제한이 더는 필요 없다.
     # (existing 의 total_units 에는 이미 반영된 유닛이 들어 있다.)
-    cashflows = await snapshots_repo.get_pending_cashflows(google_sub, snap_date)
+    cashflows = ([r for r in frozen["portfolio_cashflows"] if not r["applied_snapshot_date"] and r["date"] <= snap_date]
+                 if frozen is not None else await snapshots_repo.get_pending_cashflows(google_sub, snap_date))
+    if frozen is not None:
+        db = await db_repo.get_db()
+        for table in ("portfolio_cashflows", "portfolio_distributions", "portfolio_dividend_receipts"):
+            for row in frozen[table]:
+                if row.get("applied_snapshot_date"):
+                    continue
+                live = await (await db.execute(f"SELECT applied_snapshot_date FROM {table} WHERE id=? AND google_sub=?", (row["id"], google_sub))).fetchone()
+                if not live or live["applied_snapshot_date"]:
+                    raise SnapshotIncomplete("마감 원장이 변경되었습니다. 정산 귀속을 확인해야 합니다.")
+
     if prev is None:
         # 첫 스냅샷: total_units = total_value/BASE_NAV 로 만들므로 지금까지의
         # 입출금은 이미 유닛에 녹아 있다. 발행 없이 반영 완료로만 마킹해
@@ -260,7 +282,15 @@ async def _persist_snapshot(
     issue_nav = nav
     # 이미 좌수가 정해진 과거 거래도 먼저 분모에 포함한다.
     preset_units = sum(cf["units_change"] for cf in preset)
-    distributions = await snapshots_repo.get_pending_distributions(google_sub, snap_date)
+    distributions = ([r for r in frozen["portfolio_distributions"] if not r["applied_snapshot_date"] and r["date"] <= snap_date]
+                     if frozen is not None else await snapshots_repo.get_pending_distributions(google_sub, snap_date))
+    if frozen is not None and prev is None:
+        # 첫 기준점 이전 분배금을 새 수익률 구간에 가산하지 않는다.
+        db = await db_repo.get_db()
+        for row in distributions:
+            await db.execute("UPDATE portfolio_distributions SET applied_snapshot_date=? WHERE id=?", (snap_date, row["id"]))
+        distributions = []
+
     distribution_units = total_units + preset_units
     if distributions and distribution_units <= 0:
         raise SnapshotIncomplete("분배금을 반영할 NAV 좌수가 없습니다.")
@@ -320,6 +350,8 @@ async def _persist_snapshot(
     for row in distributions:
         marking_updates.append(("UPDATE portfolio_distributions SET applied_snapshot_date=? WHERE id=?", (snap_date, row["id"])))
 
+    if frozen is not None:
+        distribution_options["price_basis"] = "regular_close_v1"
     if marking_updates:
         # 마킹과 스냅샷 저장은 한 트랜잭션 — 둘이 갈라지면 어느 쪽이든
         # 유닛이 유실(마킹만 커밋)되거나 이중 반영(스냅샷만 커밋 후 재실행)
@@ -328,10 +360,18 @@ async def _persist_snapshot(
         async with db_repo.transaction() as db:
             for sql, params in marking_updates:
                 await db.execute(sql, params)
-            await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw, cashflow_cutoff_at=cutoff, **distribution_options)
+            await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, selected_fx, cashflow_cutoff_at=cutoff, **distribution_options)
     else:
-        await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, _fx_usdkrw, cashflow_cutoff_at=cutoff, **distribution_options)
-    await snapshots_repo.settle_dividend_receipts(google_sub, snap_date)
+        await snapshots_repo.save_snapshot(google_sub, snap_date, total_value, total_invested, nav, total_units, selected_fx, cashflow_cutoff_at=cutoff, **distribution_options)
+    if frozen is None:
+        await snapshots_repo.settle_dividend_receipts(google_sub, snap_date)
+    else:
+        db = await db_repo.get_db()
+        for receipt in frozen["portfolio_dividend_receipts"]:
+            if not receipt["applied_snapshot_date"]:
+                await db.execute("UPDATE portfolio_dividend_receipts SET applied_snapshot_date=? WHERE id=?", (snap_date, receipt["id"]))
+                await db.execute("UPDATE portfolio_income_events SET date=? WHERE id=? AND google_sub=?", (snap_date, receipt["income_event_id"], google_sub))
+
     await snapshots_repo.save_stock_snapshots(google_sub, snap_date, per_stock)
     fallback_count = sum(1 for s in per_stock if s.get("priced_from_fallback"))
     logger.info(
@@ -391,26 +431,13 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     """
     if manage_db:
         await bootstrap.init_db()
-    if snap_date is None:
-        # systemd의 설정 재적용/수동 실행으로 아침에 호출되어도 그날의
-        # 20시 정산을 미리 생성해서 이후 정상 정산을 건너뛰지 않게 한다.
-        if datetime.now(KST).hour < 20:
-            logger.info("Scheduled NAV snapshot skipped before 20:00 KST")
-            if manage_db:
-                await bootstrap.close_db()
-            return
-        snap_date = _today_kst().isoformat()
-    if date.fromisoformat(snap_date).weekday() >= 5:
-        logger.info("Snapshot skipped: %s is a weekend", snap_date)
-        import observability
-        await observability.record_event(
-            "snapshot_nav", "skipped_weekend",
-            level="info", details={"date": snap_date}, wait=True,
-        )
+    from services.portfolio import regular_close, time_windows
+    snap_date = snap_date or time_windows.today_kst_date().isoformat()
+    close = regular_close.closing_at(snap_date)
+    if close is None or time_windows.now_kst() < close + timedelta(minutes=5):
         if manage_db:
             await bootstrap.close_db()
         return
-    await _fetch_fx_usdkrw()
     users = await snapshots_repo.get_all_users_with_portfolio()
     logger.info("Taking snapshots for %d users on %s", len(users), snap_date)
     success_count = 0
@@ -422,7 +449,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
             if only_missing and await snapshots_repo.get_snapshot_by_date(google_sub, snap_date):
                 success_count += 1
                 continue
-            fallback_count = await take_snapshot(google_sub, snap_date, require_fresh=only_missing)
+            fallback_count = await take_snapshot(google_sub, snap_date, require_fresh=True, regular=True)
             success_count += 1
             if fallback_count:
                 fallback_users.append(google_sub[:8])
@@ -430,13 +457,12 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
         except Exception as e:
             logger.error("Snapshot failed for %s: %s", google_sub[:8], e)
             failed_users.append(google_sub[:8])
-    await _save_gold_close()
     await _update_benchmark_history()
     # Record tick outcome for the dashboard. `wait=True` because this is
     # a batch script that's about to close the DB handle — can't detach.
     #
     # A user whose whole portfolio was carried forward from the previous
-    # settlement (quote source outage at 20:05) still "succeeds", so we must
+    # settlement (quote source outage during the closing window) still "succeeds", so we must
     # not paint the tick green on fallback alone — otherwise a stale copy of
     # yesterday reads as a healthy settlement. Degrade to tick_partial/warning
     # whenever any holding was fallback-priced, and expose the breakdown.

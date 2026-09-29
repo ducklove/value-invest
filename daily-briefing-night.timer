@@ -2,9 +2,9 @@
 Description=AI night briefing push on weekdays at 20:40 KST
 
 [Timer]
-# 평일 20:40 — 일일 NAV 스냅샷(20:05)과 데이터 품질 점검(20:30) 이후 보낸다.
+# 평일 20:40 — 장후 평가(20:05)과 데이터 품질 점검(20:30) 이후 보낸다.
 # Persistent=false: 밤 브리핑도 놓친 실행은 따라잡지 않는다.
-OnCalendar=Mon..Fri *-*-* 20:40:00
+OnCalendar=Mon..Fri *-*-* 20:40:00 Asia/Seoul
 Persistent=false
 RandomizedDelaySec=1m
 

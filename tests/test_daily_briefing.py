@@ -94,10 +94,14 @@ class DailyBriefingHarness(TempDbMixin):
 
 class BriefingContextTests(DailyBriefingHarness):
     async def _build_settlement_context(self):
-        with patch.object(daily_briefing, "_fetch_today_portfolio_block", new=AsyncMock(return_value=None)), \
+        db = await db_repo.get_db()
+        await db.execute("UPDATE portfolio_snapshots SET price_basis='regular_close_v1'")
+        await db.commit()
+        with patch.object(daily_briefing.time_windows, "today_kst_date", return_value=date.today() - timedelta(days=1)), \
+              patch.object(daily_briefing, "_fetch_today_portfolio_block", new=AsyncMock(return_value=None)), \
              patch.object(daily_briefing, "_fetch_domestic_market_block", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing, "_fetch_market_flow_block", new=AsyncMock(return_value=[])):
-            return await daily_briefing.build_briefing_context("u1", "night")
+            return await daily_briefing.build_briefing_context("u1", "market_close")
 
     async def test_context_assembly_from_seeded_db(self):
         await self._seed_user()
@@ -154,14 +158,12 @@ class BriefingContextTests(DailyBriefingHarness):
         self.assertEqual(top_codes, ["005930"])
         self.assertEqual(bottom_codes, ["000660"])
         self.assertEqual(ctx["movers"]["top"][0]["stock_name"], "삼성전자")
-        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_krw"], 570_000 * 20 / 1020)
-        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_pct"], 2.0)
-        self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_krw"], 280_000 * -30 / 970)
-        self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_pct"], -3.0)
+        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_krw"], 70_000)
+        self.assertAlmostEqual(ctx["movers"]["top"][0]["change_pct"], 14.0)
+        self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_krw"], -20_000)
+        self.assertAlmostEqual(ctx["movers"]["bottom"][0]["change_pct"], -20_000 / 300_000 * 100)
         self.assertNotIn("CASH_KRW", top_codes + bottom_codes)
-        self.assertEqual(set(prices.await_args.args[0]), {"005930", "000660"})
-        self.assertEqual(prices.await_args.kwargs["since"], d_prev)
-        self.assertEqual(prices.await_args.kwargs["until"], d_last)
+        prices.assert_not_awaited()
         # 신규 공시 리뷰 / 리포트
         self.assertEqual(ctx["filings"][0]["report_name"], "분기보고서 (2026.03)")
         self.assertEqual(ctx["reports"][0]["title"], "HBM 사이클 점검")
@@ -172,14 +174,14 @@ class BriefingContextTests(DailyBriefingHarness):
 
         # 템플릿 렌더도 핵심 수치를 담는다 (LLM 폴백 본문)
         text = daily_briefing.render_template_briefing(ctx)
-        self.assertTrue(text.startswith("🌙 나이트 브리핑"))
+        self.assertTrue(text.startswith("🔔 클로징 브리핑"))
         self.assertIn("삼성전자", text)
         self.assertIn("SK하이닉스", text)
         self.assertNotIn("[000660]", text)
         self.assertIn("총평가 1,050,000", text)
         self.assertNotIn("총평가 1,050,000원", text)
         self.assertIn("+5.00%", text)
-        self.assertIn("가격 +2.0%", text)
+        self.assertIn("원화 단가 +14.0%", text)
 
     async def test_movers_use_common_quantity_and_exclude_new_purchases(self):
         """기여액은 양일 공통 수량 기준 — 매도분과 신규 매수분은 제외한다."""
@@ -207,7 +209,7 @@ class BriefingContextTests(DailyBriefingHarness):
             ctx = await self._build_settlement_context()
 
         # 신규 매수 종목은 기여도 및 종가 조회 대상에서 제외한다.
-        self.assertEqual(set(prices.await_args.args[0]), {"005930"})
+        prices.assert_not_awaited()
         top = ctx["movers"]["top"]
         bottom = ctx["movers"]["bottom"]
         # 매도 후 남은 50주(51,000/1,020) × +20원 = +1,000 — 전일 평가액(500주) 기준 +10,000 이 아니다.
@@ -362,12 +364,7 @@ class BriefingContextTests(DailyBriefingHarness):
         with patch("snapshot_intraday._fetch_total_value", new=AsyncMock(return_value=1_110_000)):
             block = await daily_briefing._fetch_today_portfolio_block("u1", date.today().isoformat())
 
-        self.assertEqual(block["source"], "live")
-        self.assertEqual(block["total_value"], 1_110_000)
-        self.assertEqual(block["prev_value"], 1_050_000)
-        self.assertEqual(block["net_cashflow"], 10_000)
-        self.assertAlmostEqual(block["change_krw"], 50_000)
-        self.assertAlmostEqual(block["change_pct"], 50_000 / 1_050_000 * 100)
+        self.assertIsNone(block)  # 확정 정산 전에는 실시간 가격으로 대체하지 않는다.
 
     async def test_closing_template_prioritizes_domestic_market_flows_and_today_performance(self):
         ctx = {
@@ -406,13 +403,13 @@ class BriefingContextTests(DailyBriefingHarness):
 
         self.assertEqual(
             _section_headers(text)[:3],
-            ["🇰🇷 국내 지수", "💰 수급 동향", "📊 오늘 (2026-06-23)"],
+            ["📊 오늘 (2026-06-23)", "📈 상승 기여", "📉 하락 기여"],
         )
         self.assertIn("입출금 제외", text)
         self.assertNotIn("📊 어제", text)
         self.assertNotIn("최근 결산", text)
-        self.assertNotIn("상승 기여", text)
-        self.assertNotIn("하락 기여", text)
+        self.assertIn("상승 기여", text)
+        self.assertIn("하락 기여", text)
         self.assertNotIn("기여 종목", text)
         self.assertNotIn("해외 그룹 성과", text)
         self.assertNotIn("야간선물", text)
@@ -434,7 +431,7 @@ class BriefingContextTests(DailyBriefingHarness):
              patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
             ctx = await daily_briefing.build_briefing_context("u1", "market_close")
 
-        latest_snapshot.assert_not_awaited()
+        latest_snapshot.assert_awaited_once()
         overseas.assert_not_awaited()
         night_futures.assert_not_awaited()
         self.assertIsNone(ctx["nav"])
@@ -476,7 +473,7 @@ class BriefingContextTests(DailyBriefingHarness):
 
         self.assertEqual(
             _section_headers(text)[:2],
-            ["🕘 장 마감 이후 변경", "📊 오늘 (2026-06-23)"],
+            ["장후 평가 미수집 — 정규장 일간 성과로 대체하지 않습니다.", "🕘 장 마감 이후 변경"],
         )
         self.assertIn("• 리포트 [SK하이닉스] 한국증권 · HBM 점검", text)
         self.assertIn("내일 주요 일정", text)
@@ -1081,6 +1078,17 @@ class InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
              patch.object(daily_briefing, "send_briefings", new=AsyncMock(return_value=payload)):
             result = await internal.run_daily_briefing_send(request)
         self.assertEqual(result, {"ok": True, **payload})
+
+    async def test_partial_failure_reaches_systemd_failure_hook(self):
+        from core.errors import AppError
+        request = _request("/api/internal/daily-briefing/send")
+        request.scope["query_string"] = b"kind=market_close"
+        payload = {"users": 2, "sent": 1, "failed": 1, "skipped": 0}
+        with patch.dict("os.environ", {}, clear=True), \
+             patch.object(daily_briefing, "send_briefings", new=AsyncMock(return_value=payload)):
+            with self.assertRaises(AppError) as exc:
+                await internal.run_daily_briefing_send(request)
+        self.assertEqual(exc.exception.status_code, 500)
 
     async def test_loopback_passes_briefing_kind(self):
         request = _request("/api/internal/daily-briefing/send")

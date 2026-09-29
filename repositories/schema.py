@@ -1060,6 +1060,7 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     ("portfolio_cashflows", "account_id", "TEXT"),
     ("portfolio_snapshots", "fx_usdkrw", "REAL"),
     ("portfolio_snapshots", "cashflow_cutoff_at", "TEXT"),
+    ("portfolio_snapshots", "price_basis", "TEXT NOT NULL DEFAULT 'legacy_latest'"),
     ("portfolio_stock_snapshots", "group_name", "TEXT"),
     ("portfolio_stock_snapshots", "quantity", "REAL"),
     ("portfolio_stock_snapshots", "unit_price", "REAL"),

@@ -1,0 +1,10 @@
+[Unit]
+Description=Capture after-market prices separately from regular-close NAV
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 20:05,10:00 Asia/Seoul
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

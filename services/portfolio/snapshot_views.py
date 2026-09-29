@@ -7,6 +7,35 @@ from repositories.db import read_snapshot
 from services.portfolio.time_windows import settlement_marker_seconds
 
 
+@read_snapshot()
+async def regular_performance(user: str, day: str) -> dict | None:
+    current = await snapshots.get_snapshot_by_date(user, day)
+    if not current or current.get("price_basis") != "regular_close_v1":
+        return None
+    previous = await snapshots.get_latest_snapshot_before_date(user, day)
+    comparable = bool(previous and previous.get("price_basis") == current["price_basis"])
+    flows = await snapshots.get_cashflows(user)
+    flows = [r for r in flows if r.get("applied_snapshot_date") == day]
+    net = sum(r["amount"] * (1 if r["type"] == "deposit" else -1) for r in flows)
+    pnl = current["total_value"] - previous["total_value"] - net if comparable else None
+    pct = (current["return_nav"] / previous["return_nav"] - 1) * 100 if comparable and previous["return_nav"] > 0 else None
+    after = await snapshots.get_cashflows_created_after(user, current["cashflow_cutoff_at"])
+    after_net = sum(r["amount"] * (1 if r["type"] == "deposit" else -1) for r in after)
+    usd_change = usd_pct = usd_value_change = None
+    current_fx, previous_fx = current.get("fx_usdkrw"), (previous or {}).get("fx_usdkrw")
+    if comparable and current_fx and previous_fx:
+        usd_value_change = current["total_value"] / current_fx - previous["total_value"] / previous_fx
+        usd_change = usd_value_change - net / current_fx
+        if previous["return_nav"] > 0:
+            usd_pct = (current["return_nav"] / current_fx / (previous["return_nav"] / previous_fx) - 1) * 100
+    return {**current, "prev_date": previous["date"] if comparable else None,
+            "prev_value": previous["total_value"] if comparable else None,
+            "change_krw": pnl, "change_pct": pct, "net_cashflow": net,
+            "change_usd": usd_change, "change_usd_pct": usd_pct, "value_change_usd": usd_value_change,
+            "after_close_net_cashflow": after_net, "source": "regular_close",
+            "comparison_unavailable": not comparable}
+
+
 async def net_cashflow_since_snapshot(user: str, snap_date: str) -> tuple[float, dict[str, float]]:
     rows = await snapshots.get_cashflows_created_after(user, settlement_marker_seconds(snap_date))
     by_stock = {}
@@ -24,6 +53,12 @@ async def previous_day(user: str, baseline_date: str) -> dict:
     expected = date.fromisoformat(baseline_date)
     while expected.weekday() >= 5:
         expected -= timedelta(days=1)
+    from domain.market_calendar import closing_at
+    try:
+        while closing_at(expected.isoformat()) is None:
+            expected -= timedelta(days=1)
+    except ValueError:
+        pass  # 미확인 과거 달력이 정산 원자료의 조회까지 막지는 않는다.
     stocks = await snapshots.get_stock_snapshots_exact_date(user, snap_date) if snap_date else []
     marker = settlement_marker_seconds(snap_date) if snap_date else baseline_date
     rows = await snapshots.get_cashflows_created_after(user, marker)
@@ -38,6 +73,8 @@ async def previous_day(user: str, baseline_date: str) -> dict:
             code = row.get("cash_code", "CASH_KRW")
             by_stock[code] = by_stock.get(code, 0) + signed
     return {
+        "regular_close": await regular_performance(user, (date.fromisoformat(baseline_date) + timedelta(days=1)).isoformat()),
+        "price_basis": snapshot.get("price_basis"), "cashflow_cutoff_at": snapshot.get("cashflow_cutoff_at"),
         "expected_date": expected.isoformat(),
         "settlement_pending": not snap_date or snap_date < expected.isoformat(),
         "date": snap_date, "total_value": snapshot.get("total_value"),
@@ -53,6 +90,9 @@ async def previous_day(user: str, baseline_date: str) -> dict:
 @read_snapshot()
 async def period_start(user: str, *, yearly: bool = False) -> dict:
     snapshot = await (snapshots.get_year_start_snapshot(user) if yearly else snapshots.get_month_end_snapshot(user))
+    latest = await snapshots.get_latest_snapshot(user)
+    if snapshot and latest and snapshot.get("price_basis") != latest.get("price_basis"):
+        return {"stock_values": {}, "comparison_unavailable": True, "reason": "정산 기준 변경"}
     result = dict(snapshot) if snapshot else {}
     result["stock_values"] = {}
     if snapshot and snapshot.get("date"):

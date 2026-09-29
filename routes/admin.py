@@ -245,7 +245,7 @@ async def _require_admin_mutation(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 
 _TIMERS = [
-    {"name": "portfolio-snapshot", "label": "포트폴리오 일일정산", "schedule": "매일 20:05"},
+    {"name": "portfolio-snapshot", "label": "포트폴리오 일일정산", "schedule": "거래일 15:35 (정규장)"},
     {"name": "portfolio-intraday", "label": "포트폴리오 장중", "schedule": "08:00~20:00 (10분)"},
 ]
 
@@ -353,15 +353,20 @@ def _compute_staleness(job_name: str, latest_data_date: str | None) -> dict:
     it a looser treatment.
     """
     today = date.today()
-    # Expected latest date = last trading day <= today. The 20:00 KST
-    # daily jobs write for the same day, so if today is a weekday after
-    # 20:00 we'd expect today; before 20:00 we'd expect yesterday. Use
-    # yesterday as the conservative expectation so the dashboard doesn't
-    # cry "stale" between 09:00–20:00.
+    # 일반 작업은 보수적으로 전일을 기대한다. NAV는 마감 후 정산 누락을
+    # 바로 확인할 수 있도록 정산 배치와 같은 달력·시각을 사용한다.
     probe = today - timedelta(days=1) if today.weekday() < 5 else today
     while probe.weekday() >= 5:
         probe -= timedelta(days=1)
     expected = probe.isoformat()
+    if job_name == "portfolio-snapshot":
+        from services.data_quality import SETTLED_MINUTES, last_expected_trading_day
+        from services.portfolio.time_windows import now_kst
+        try:
+            expected = last_expected_trading_day(now_kst(), settled_minutes=SETTLED_MINUTES).isoformat()
+        except ValueError as exc:
+            return {"level": "stale", "expected_latest": None,
+                    "trading_days_behind": None, "note": str(exc)}
 
     if not latest_data_date:
         return {"level": "missing", "expected_latest": expected,

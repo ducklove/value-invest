@@ -5,7 +5,7 @@ systemd timer 배치가 결산 데이터로 브리핑을 만들어
 이미 연결된 알림 채널(텔레그램/카카오)로 보낸다.
 
 구성:
-* ``build_briefing_context``  — 모닝 07:00 평가/해외 성과, 나이트 결산 변화,
+* ``build_briefing_context``  — 모닝 07:00 평가/해외 성과, 오후 확정 성과, 나이트 장후 변화,
   기여 상위/하위 종목, 신규 공시·리포트, 오늘 경제 일정, 시장 지표. 모두
   기존 저장 데이터/캐시에서 읽는다 — 새 스크래핑 없음.
 * ``generate_briefing``       — 'daily_briefing' 모델 프로필로 LLM 호출
@@ -40,7 +40,7 @@ from repositories import wiki as wiki_repo
 from services import ai_client
 from services.market.formatting import format_indicator_change as _indicator_change_text
 from services.notifications import channels
-from services.portfolio import ai_analysis, morning_valuation, time_windows
+from services.portfolio import after_close, ai_analysis, morning_valuation, snapshot_views, time_windows
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ MAX_CUSTOM_INSTRUCTIONS_CHARS = 1200
 DOMESTIC_INDEX_LABELS = {"KOSPI": "코스피", "KOSDAQ": "코스닥"}
 FLOW_MARKET_LABELS = {"kospi": "코스피", "kosdaq": "코스닥"}
 FLOW_INVESTOR_LABELS = {"individual": "개인", "foreign": "외국인", "institution": "기관"}
-TODAY_PORTFOLIO_BRIEFING_TYPES = {"market_close", "night"}
+TODAY_PORTFOLIO_BRIEFING_TYPES = {"market_close"}
 
 BRIEFING_PROFILES: dict[str, dict[str, str]] = {
     "morning": {
@@ -79,11 +79,11 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
     "market_close": {
         "name": "클로징 브리핑",
         "title": "🔔 클로징 브리핑",
-        "schedule_label": "평일 15:35",
+        "schedule_label": "평일 15:45 (정산 완료 후)",
         "description": "정규장 마감 직후, 당일 국내장 흐름과 보유 종목 변동을 정리합니다.",
         "focus": "정규장 마감 직후 코스피·코스닥 지수, 투자자 수급, 오늘 포트폴리오 성과를 우선합니다.",
         "outline": (
-            "코스피·코스닥 지수와 수급 동향을 먼저 요약하고, 이어서 오늘 포트폴리오 성과, "
+            "확정된 정규장 일간 성과와 주요 기여 종목을 먼저 설명하고, 코스피·코스닥 지수와 수급 동향, "
             "새 공시·리포트, 마감 후 확인할 포인트 1~2개."
         ),
         "enabled_key": "daily_briefing_market_close_enabled",
@@ -93,11 +93,11 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
         "name": "나이트 브리핑",
         "title": "🌙 나이트 브리핑",
         "schedule_label": "평일 20:40",
-        "description": "정산 직후, 장후 변화·하루 결산·내일 포인트를 정리합니다.",
-        "focus": "장 마감 이후 변경 내용, 오늘 포트폴리오 성과, 내일 시장 전망 재료를 우선합니다.",
+        "description": "정규장 종가 대비 애프터마켓 변화와 장후 공시·뉴스를 정리합니다.",
+        "focus": "정규장 종가 대비 애프터마켓 가격 변화와 장후 공시·뉴스를 우선합니다. 정규장 일간 성과를 장후 성과로 설명하지 않습니다.",
         "outline": (
             "장 마감 이후 새 공시·리포트와 해외/야간 변수 변화를 먼저 정리하고, "
-            "오늘 포트폴리오 성과, 야간선물·환율·미국장 등 내일 시장 전망 재료, "
+            "정규장 종가 대비 장후 변동, 야간선물·환율 등 내일 시장 전망 재료, "
             "내일 확인할 포인트 1~2개."
         ),
         "enabled_key": "daily_briefing_night_enabled",
@@ -455,42 +455,8 @@ async def _net_cashflow_since_settlement(google_sub: str, snap_date: str | None)
 
 
 async def _fetch_today_portfolio_block(google_sub: str, today_iso: str) -> dict | None:
-    """Today-card style portfolio performance for closing/night briefings.
-
-    Before the 20:00 settlement exists, value the current portfolio with live
-    quotes. After the settlement exists, use that snapshot. In both cases,
-    compare against the previous settlement and remove same-day cashflows from
-    the performance delta.
-    """
-    prev = await snapshots_repo.get_latest_snapshot_before_date(google_sub, today_iso)
-    if not prev or not prev.get("total_value"):
-        return None
-
-    today_snapshot = await snapshots_repo.get_snapshot_by_date(google_sub, today_iso)
-    source = "settlement" if today_snapshot and today_snapshot.get("total_value") else "live"
-    if source == "settlement":
-        total_value = _safe_float(today_snapshot.get("total_value"))
-    else:
-        import snapshot_intraday
-
-        total_value = await snapshot_intraday._fetch_total_value(google_sub, today_iso)
-
-    prev_value = _safe_float(prev.get("total_value"))
-    if total_value is None or total_value <= 0 or prev_value is None or prev_value <= 0:
-        return None
-
-    net_cashflow = await _net_cashflow_since_settlement(google_sub, prev.get("date"))
-    investment_change = total_value - net_cashflow - prev_value
-    return {
-        "date": today_iso,
-        "prev_date": prev.get("date"),
-        "total_value": total_value,
-        "prev_value": prev_value,
-        "change_krw": investment_change,
-        "change_pct": investment_change / prev_value * 100.0,
-        "net_cashflow": net_cashflow,
-        "source": source,
-    }
+    """확정 정규장 성과. 미정산 자료를 현재가로 대체하지 않는다."""
+    return await snapshot_views.regular_performance(google_sub, today_iso)
 
 
 def _signed_indicator_value(value: str | None, direction: str | None) -> str:
@@ -569,12 +535,16 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
         "market": [],
     }
 
-    # --- 나이트 결산 변화 + 기여 종목. 모닝의 07:00 평가와 분리한다. ---
-    if profile["kind"] == "night":
+    # --- 오후 정규장 확정 성과와 기여 종목. ---
+    if profile["kind"] == "market_close":
         try:
             latest = await snapshots_repo.get_latest_snapshot(google_sub)
             if latest:
+                if latest["date"] != today.isoformat() or latest.get("price_basis") != "regular_close_v1":
+                    raise ValueError("당일 정규장 정산 미완료")
                 prev = await snapshots_repo.get_latest_snapshot_before_date(google_sub, latest["date"])
+                if prev and prev.get("price_basis") != latest["price_basis"]:
+                    prev = None
                 latest["distribution_amount"] = sum(row["amount"] for row in await snapshots_repo.get_distribution_flows(google_sub)
                                                       if row["applied_snapshot_date"] == latest["date"])
                 context["nav"] = _nav_block(latest, prev)
@@ -590,11 +560,7 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
                     for row in curr_rows
                     if row["stock_code"] in prev_codes and not row["stock_code"].startswith("CASH_")
                 )
-                price_changes = await _daily_price_changes_by_code(
-                    mover_codes,
-                    prev.get("date") if prev else None,
-                    latest["date"],
-                )
+                price_changes = {}  # 정규장 스냅샷 단가만 사용: 기존 일봉은 장후 가격을 포함할 수 있다.
                 context["movers"] = _movers(
                     curr_rows,
                     prev_rows,
@@ -619,6 +585,9 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
             context["portfolio_today"] = await _fetch_today_portfolio_block(google_sub, today.isoformat())
         except Exception as exc:
             logger.warning("briefing today portfolio block failed user=%s: %s", google_sub[:8], exc)
+
+    if profile["kind"] == "night":
+        context["after_close"] = await after_close.load(google_sub, today.isoformat())
 
     # --- 모닝은 07:00에 고정한 평가·해외 성과만 사용한다. 전일 결산으로 대체하지 않는다. ---
     if profile["kind"] == "morning":
@@ -868,7 +837,9 @@ def _nav_section(nav: dict, label: str, notes: list[str] | None = None) -> list[
 
 
 def _today_portfolio_section(today: dict) -> list[str]:
-    notes = []
+    notes = ["정규장 확정 평가"] if today.get("source") == "regular_close" else []
+    if today.get("comparison_unavailable"):
+        notes.append("정산 기준 변경 · 첫 기준점")
     if today.get("source") == "live":
         notes.append("실시간 평가액 기준")
     if today.get("net_cashflow"):
@@ -963,11 +934,19 @@ def _context_sections(context: dict, custom_instructions: str | None = None) -> 
     domestic_market = context.get("domestic_market") or []
     market_flows = context.get("market_flows") or []
 
-    if kind == "market_close":
-        add(_section("🇰🇷 국내 지수", domestic_market))
-        add(_section("💰 수급 동향", market_flows))
 
     if kind == "night":
+        valuation = context.get("after_close")
+        if valuation:
+            moves = sorted(valuation["holdings"], key=lambda r: abs(r.get("change_pct") or 0), reverse=True)
+            add(_section("🌙 정규장 종가 대비 장후 변동", [
+                f"{r['stock_name']} {r['change_pct']:+.2f}%" for r in moves[:5] if r.get("change_pct") is not None
+            ]))
+            add([valuation["basis_note"]])
+            if valuation["missing"]:
+                add(["장후 시세 일부 미수집: " + ", ".join(valuation["missing"])])
+        else:
+            add(["장후 평가 미수집 — 정규장 일간 성과로 대체하지 않습니다."])
         for section in _feed_sections(context, night=True):
             add(section)
 
@@ -980,15 +959,22 @@ def _context_sections(context: dict, custom_instructions: str | None = None) -> 
         add(_today_portfolio_section(portfolio_today))
 
     nav = context.get("nav")
-    if nav and kind == "night" and not portfolio_today:
+    if kind == "market_close" and not portfolio_today:
+        add(["정규장 정산 미완료 — 확정 일간 성과 대기 중"])
+    if nav and kind == "market_close" and not portfolio_today:
         add(_nav_section(nav, "최근 결산"))
 
     movers = context.get("movers") or {}
-    if kind != "market_close":
+    if kind in {"market_close", "morning"}:
         add(_section("📈 상승 기여", [_fmt_mover(m) for m in movers.get("top") or []]))
         add(_section("📉 하락 기여", [_fmt_mover(m) for m in movers.get("bottom") or []]))
         if context.get("mover_basis_note"):
             add([context["mover_basis_note"]])
+
+    if kind == "market_close":
+        add(_section("🇰🇷 국내 지수", domestic_market))
+        add(_section("💰 수급 동향", market_flows))
+
 
     if kind != "night":
         for section in _feed_sections(context, night=False):
@@ -1273,6 +1259,17 @@ async def send_briefings(briefing_type: object = None) -> dict:
 
     profile = briefing_profile(briefing_type)
     users = await opted_in_users(profile["kind"])
+    if profile["kind"] in {"market_close", "night"}:
+        from domain.market_calendar import closing_at
+        now = time_windows.now_kst()
+        close = closing_at(now.date().isoformat())
+        # 정상일 15:45 / 지연 마감일 16:45 중 해당 세션 한 번만 실행한다.
+        outside = close is None or (profile["kind"] == "market_close" and
+                                    not close + timedelta(minutes=15) <= now < close + timedelta(minutes=25))
+        if outside:
+            return {"briefing_type": profile["kind"], "briefing_name": profile["name"],
+                    "users": len(users), "sent": 0, "failed": 0, "skipped": len(users),
+                    "reason": "outside_market_session"}
     sent = failed = skipped = 0
     for google_sub in users:
         try:
@@ -1290,6 +1287,10 @@ async def send_briefings(briefing_type: object = None) -> dict:
                     wait=True,
                 )
                 continue
+            if profile["kind"] == "market_close":
+                snapshot = await snapshots_repo.get_snapshot_by_date(google_sub, time_windows.today_kst_date().isoformat())
+                if not snapshot or snapshot.get("price_basis") != "regular_close_v1":
+                    raise ValueError("당일 정규장 정산 미완료: 확정 성과 브리핑 발송 보류")
             briefing = await generate_briefing(google_sub, profile["kind"])
             delivered = await channels.dispatch(google_sub, briefing["text"])
             if delivered > 0:

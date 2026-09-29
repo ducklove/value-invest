@@ -5,6 +5,7 @@ __pycache__/
 .venvs/
 .venv-current
 .deploy-state/
+.deploy-repairs/
 test-results/
 playwright-report/
 .claude/

@@ -342,14 +342,14 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["avg_price_krw"], 140000)
         self.assertEqual(saver.await_args.kwargs["avg_price_currency"], "USD")
 
-    def test_portfolio_today_baseline_resets_at_20(self):
+    def test_portfolio_today_baseline_keeps_previous_day_after_close(self):
         self.assertEqual(
             portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 19, 59, 59)),
             "2026-04-30",
         )
         self.assertEqual(
             portfolio._portfolio_today_baseline_date(datetime(2026, 5, 1, 20, 0, 0)),
-            "2026-05-01",
+            "2026-04-30",
         )
 
     def test_analysis_snapshot_staleness(self):

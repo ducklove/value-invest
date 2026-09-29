@@ -8,7 +8,7 @@ the repositories.db.transaction boundary.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import aiosqlite
@@ -204,7 +204,7 @@ def _return_snapshot(row) -> dict | None:
 async def get_latest_snapshot(google_sub: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, total_value, total_invested, nav, total_units, distribution_per_unit, return_factor FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date DESC LIMIT 1",
+        "SELECT date, total_value, total_invested, nav, total_units, distribution_per_unit, return_factor, price_basis, cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date DESC LIMIT 1",
         (google_sub,),
     )
     row = await cursor.fetchone()
@@ -214,7 +214,7 @@ async def get_latest_snapshot(google_sub: str) -> dict | None:
 async def get_snapshot_by_date(google_sub: str, snap_date: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor FROM portfolio_snapshots WHERE google_sub = ? AND date = ?",
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor, price_basis, cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? AND date = ?",
         (google_sub, snap_date),
     )
     row = await cursor.fetchone()
@@ -224,14 +224,14 @@ async def get_snapshot_by_date(google_sub: str, snap_date: str) -> dict | None:
 async def get_latest_snapshot_before_date(google_sub: str, snap_date: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor FROM portfolio_snapshots WHERE google_sub = ? AND date < ? ORDER BY date DESC LIMIT 1",
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor, price_basis, cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? AND date < ? ORDER BY date DESC LIMIT 1",
         (google_sub, snap_date),
     )
     row = await cursor.fetchone()
     return _return_snapshot(row)
 
 
-async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float, fx_usdkrw: float | None = None, *, cashflow_cutoff_at: str | None = None, distribution_per_unit: float | None = None, return_factor: float | None = None):
+async def save_snapshot(google_sub: str, date: str, total_value: float, total_invested: float, nav: float, total_units: float, fx_usdkrw: float | None = None, *, cashflow_cutoff_at: str | None = None, distribution_per_unit: float | None = None, return_factor: float | None = None, price_basis: str = "legacy_latest"):
     # 단문이지만 공유 커넥션 위의 맨 commit 은 다른 task 의 진행 중 쓰기를
     # 같이 커밋할 수 있어 transaction() 으로 통일한다 (이하 쓰기 헬퍼 동일).
     async with transaction() as db:
@@ -239,9 +239,9 @@ async def save_snapshot(google_sub: str, date: str, total_value: float, total_in
         distribution_per_unit = previous.get("distribution_per_unit", 0) if distribution_per_unit is None else distribution_per_unit
         return_factor = previous.get("return_factor", 1) if return_factor is None else return_factor
         await db.execute(
-            """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw, cashflow_cutoff_at, distribution_per_unit, return_factor)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw, cashflow_cutoff_at, distribution_per_unit, return_factor),
+            """INSERT OR REPLACE INTO portfolio_snapshots (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw, cashflow_cutoff_at, distribution_per_unit, return_factor, price_basis)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (google_sub, date, total_value, total_invested, nav, total_units, fx_usdkrw, cashflow_cutoff_at, distribution_per_unit, return_factor, price_basis),
         )
 
 
@@ -251,7 +251,7 @@ async def get_month_end_snapshot(google_sub: str) -> dict | None:
     month_end = date.today().replace(day=1) - timedelta(days=1)
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor, price_basis, cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (google_sub, month_end.isoformat()),
     )
     row = await cursor.fetchone()
@@ -264,7 +264,7 @@ async def get_year_start_snapshot(google_sub: str) -> dict | None:
     year_end = date(date.today().year - 1, 12, 31).isoformat()
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor, price_basis, cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (google_sub, year_end),
     )
     row = await cursor.fetchone()
@@ -279,7 +279,7 @@ async def get_snapshot_on_or_before(google_sub: str, snap_date: str) -> dict | N
     """
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor "
+        "SELECT date, total_value, total_invested, nav, total_units, fx_usdkrw, distribution_per_unit, return_factor, price_basis, cashflow_cutoff_at "
         "FROM portfolio_snapshots WHERE google_sub = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (google_sub, snap_date),
     )
@@ -297,11 +297,11 @@ async def get_cashflows_created_after(google_sub: str, created_after: str) -> li
     db = await get_db()
     snapshot_date = created_after[:10]
     cursor = await db.execute(
-        "SELECT cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? AND date = ?",
+        "SELECT cashflow_cutoff_at,price_basis FROM portfolio_snapshots WHERE google_sub = ? AND date = ?",
         (google_sub, snapshot_date),
     )
     snap = await cursor.fetchone()
-    cutoff = (snap["cashflow_cutoff_at"] if snap else None) or created_after
+    cutoff = (snap["cashflow_cutoff_at"] if snap else None) or (snapshot_date + "T20:00:00" if snap and snap["price_basis"] == "legacy_latest" else created_after)
     cursor = await db.execute(
         "SELECT id, date, type, amount, nav_at_time, units_change, applied_snapshot_date, created_at "
         "FROM portfolio_cashflows WHERE google_sub = ? AND "
@@ -337,13 +337,14 @@ async def get_nav_input_state(google_sub: str) -> tuple:
     return tuple(state)
 
 
-async def get_nav_history(google_sub: str) -> list[dict]:
+async def get_nav_history(google_sub: str, *, include_legacy: bool = False) -> list[dict]:
     db = await get_db()
     cursor = await db.execute(
-        "SELECT date, nav, total_value, total_invested, total_units, fx_usdkrw, distribution_per_unit, return_factor FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date ASC",
+        "SELECT date, nav, total_value, total_invested, total_units, fx_usdkrw, distribution_per_unit, return_factor, price_basis, cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date ASC",
         (google_sub,),
     )
-    return [_return_snapshot(row) for row in await cursor.fetchall()]
+    rows = [_return_snapshot(row) for row in await cursor.fetchall()]
+    return rows if include_legacy or not rows else [r for r in rows if r["price_basis"] == rows[-1]["price_basis"]]
 
 
 async def get_group_weight_history(google_sub: str) -> list[dict]:
@@ -583,7 +584,25 @@ async def delete_cashflow_and_sync_cash(google_sub: str, cf_id: int) -> bool:
             raise CashflowCancellationError("취소 거래는 삭제할 수 없습니다. 새 입출금으로 정정해 주세요.")
         reverse_delta = -cf["amount"] if cf["type"] == "deposit" else cf["amount"]
         aid = await _sync_cash(db, google_sub, reverse_delta, now, cf["account_id"])
-        if cf["applied_snapshot_date"]:
+        from domain.market_calendar import closing_at
+        started = await (await db.execute("SELECT started_at FROM settlement_history_start WHERE id=1")).fetchone()
+        crossed_close = False
+        if started:
+            first = max(started["started_at"], cf["created_at"])
+            probe = date.fromisoformat(first[:10])
+            while probe.isoformat() <= now[:10]:
+                try:
+                    close = closing_at(probe.isoformat())
+                except ValueError:
+                    # 미확인 거래일도 삭제 대신 반대 거래로 남겨 복원 가능성을 보존한다.
+                    crossed_close = True
+                    break
+                marker = close.replace(tzinfo=None).isoformat(timespec="milliseconds") if close else None
+                if marker and first <= marker < now:
+                    crossed_close = True
+                    break
+                probe += timedelta(days=1)
+        if cf["applied_snapshot_date"] or crossed_close:
             await db.execute(
                 "INSERT INTO portfolio_cashflows (google_sub, date, type, amount, memo, created_at, reversal_of_id, account_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -658,7 +677,7 @@ async def get_stock_snapshots_exact_date(google_sub: str, snap_date: str) -> lis
     """합계와 같은 날짜의 종목별 금액만 반환한다. 누락을 다른 날짜로 채우지 않는다."""
     db = await get_db()
     cursor = await db.execute(
-        "SELECT stock_code, market_value FROM portfolio_stock_snapshots WHERE google_sub = ? AND date = ?",
+        "SELECT stock_code, market_value, quantity, unit_price, group_name, currency, fx_rate FROM portfolio_stock_snapshots WHERE google_sub = ? AND date = ?",
         (google_sub, snap_date),
     )
     return [dict(row) for row in await cursor.fetchall()]

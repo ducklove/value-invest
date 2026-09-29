@@ -200,3 +200,64 @@ test('정산 누락이면 이전 날짜와 함께 미완료 상태를 표시한�
   assert.doesNotMatch(cardByLabel(w, 'Today').textContent, /정산 미완료/);
   w.close();
 });
+
+test('정규장 성과는 장후 가격이 바뀌어도 유지하고 최신 평가와 별도로 표시한다', () => {
+  const w = loadSummaryDom();
+  seedPortfolio(w);
+  w.PfStore.snapshots.prevDay.regular_close = {
+    date: '2026-08-26', total_value: 980000, prev_value: 950000,
+    change_krw: 30000, change_pct: 3.16, after_close_net_cashflow: 10000,
+    cashflow_cutoff_at: '2026-08-26T15:30:00',
+  };
+  w.renderPortfolio({ summaryOnly: true });
+  let today = cardByLabel(w, 'Today');
+  assert.equal(today.querySelector('.pf-summary-value').textContent, '+3.16%');
+  assert.match(today.textContent, /정규장 확정/);
+  assert.match(today.textContent, /정산 이후 \+10,000/);
+  w.PfStore.items[0].quote.price = 110000;
+  w.renderPortfolio({ summaryOnly: true });
+  today = cardByLabel(w, 'Today');
+  assert.equal(today.querySelector('.pf-summary-value').textContent, '+3.16%');
+  assert.match(today.textContent, /정산 이후 \+110,000/);
+  assert.match(cardByLabel(w, 'Total').textContent, /1,100,000/);
+  assert.equal(w.PfStore.items[0].quote.price, 110000);
+  w.close();
+});
+
+test('첫 정규장 기준점은 구 정산과 비교한 수익률을 표시하지 않는다', () => {
+  const w = loadSummaryDom();
+  seedPortfolio(w);
+  w.PfStore.snapshots.prevDay.regular_close = {
+    date: '2026-08-26', total_value: 980000, prev_value: null,
+    change_krw: null, change_pct: null, after_close_net_cashflow: 0,
+    comparison_unavailable: true, price_basis: 'regular_close_v1', nav: 1000, total_units: 980,
+  };
+  w.renderPortfolio({ summaryOnly: true });
+  const today = cardByLabel(w, 'Today');
+  assert.equal(today.querySelector('.pf-summary-value').textContent, '-');
+  assert.match(today.textContent, /새 기준 시작/);
+  assert.equal(cardByLabel(w, 'MTD').querySelector('.pf-summary-value').textContent, '-');
+  assert.match(cardByLabel(w, 'Total').textContent, /1020\.41/); // 새 좌수로 계산한 최신 NAV
+  w.close();
+});
+
+test('확정 달러 성과는 최신 환율이 바뀌어도 마감 환율로 유지한다', () => {
+  const w = loadSummaryDom();
+  seedPortfolio(w);
+  w.pfFx = n => n / w.PfStore.currency.fxRate;
+  w.PfStore.currency.unit = 'USD';
+  w.PfStore.currency.fxRate = 1400;
+  w.PfStore.snapshots.prevDay.regular_close = {
+    date: '2026-08-26', total_value: 980000, prev_value: 950000, fx_usdkrw: 1400,
+    change_krw: 30000, change_pct: 3.16, after_close_net_cashflow: 0,
+    change_usd: 20, change_usd_pct: 2.8, value_change_usd: 20,
+  };
+  for (const rate of [1400, 1500]) {
+    w.PfStore.currency.fxRate = rate;
+    w.renderPortfolio({ summaryOnly: true });
+    const today = cardByLabel(w, 'Today');
+    assert.equal(today.querySelector('.pf-summary-value').textContent, '+2.80%');
+    assert.match(today.textContent, /손익 \+\$20/);
+  }
+  w.close();
+});

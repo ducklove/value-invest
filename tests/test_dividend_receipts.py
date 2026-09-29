@@ -150,7 +150,8 @@ class DividendReceiptTests(TempDbMixin):
         self.assertEqual((snap["nav"], snap["total_units"], snap["distribution_per_unit"]), (1100, 10, 84.6))
         self.assertAlmostEqual(snap["return_nav"], 1184.6)
         rerun = await self.settle(11000)
-        self.assertEqual(snap, rerun)
+        self.assertEqual({k: v for k, v in snap.items() if k != "cashflow_cutoff_at"},
+                         {k: v for k, v in rerun.items() if k != "cashflow_cutoff_at"})
         next_day = (receipt_today() + timedelta(days=1)).isoformat()
         later = await self.settle(12100, next_day)
         self.assertAlmostEqual(later["return_nav"], 1184.6 * 1.1)

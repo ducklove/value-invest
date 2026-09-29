@@ -9,6 +9,7 @@ from core.errors import AppError
 from repositories import snapshots
 from repositories.db import transaction
 from services import daily_briefing
+from services.portfolio import fx, regular_close
 from services.portfolio import morning_valuation as morning
 from services.portfolio.time_windows import KST
 
@@ -39,7 +40,15 @@ class MorningValuationTests(TempDbMixin):
         async def quote(code, **kwargs):
             return overrides.get(code, {"price": self.prices[code]})
 
+        async def regular_quote(code, cutoff):
+            q = await quote(code)
+            if q.get("_stale") or q.get("price") is None:
+                raise ValueError("미수집")
+            return {"native_price": q["price"], "currency": "KRW", "price_date": "2026-09-15"}
+
         with patch.object(morning.time_windows, "now_kst", return_value=self.now), \
+             patch.object(regular_close, "foreign_close", new=AsyncMock(side_effect=regular_quote)), \
+             patch.object(fx, "fx_rate_for_currency", new=AsyncMock(return_value=1)), \
              patch.object(morning.runtime_quotes, "fetch_quote", new=AsyncMock(side_effect=quote)):
             return await morning.capture("u")
 

@@ -4,8 +4,8 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
-SETTLEMENT_HOUR = 20
-SETTLEMENT_MINUTE = 0
+SETTLEMENT_HOUR = 15
+SETTLEMENT_MINUTE = 30
 
 
 def now_kst() -> datetime:
@@ -25,17 +25,8 @@ def today_kst_date(now: datetime | None = None) -> date:
 
 
 def portfolio_today_baseline_date(now: datetime | None = None, *, settlement_hour: int = SETTLEMENT_HOUR) -> str:
-    """Return the settlement date used by the Today card.
-
-    Portfolio snapshots use the 20:00 KST settlement boundary. Until 19:59
-    the active Today window compares against the previous settlement; from 20:00 onward
-    it compares against the current date's settlement.
-    """
-    current = _as_kst(now)
-    baseline = current.date()
-    if current.hour < settlement_hour:
-        baseline -= timedelta(days=1)
-    return baseline.isoformat()
+    """오늘 성과는 마감 후에도 직전 거래일을 기준으로 유지한다."""
+    return (_as_kst(now).date() - timedelta(days=1)).isoformat()
 
 
 def settlement_marker(
@@ -65,12 +56,12 @@ def intraday_axis_window(now: datetime | None = None, *, settlement_hour: int = 
     baseline = portfolio_today_baseline_date(now, settlement_hour=settlement_hour)
     return (
         settlement_marker(baseline, settlement_hour=settlement_hour),
-        next_settlement_marker(baseline, settlement_hour=settlement_hour),
+        f"{today_kst_date(now).isoformat()}T20:00",
     )
 
 
 def is_after_settlement_marker(ts: object, baseline_date: str, *, settlement_hour: int = SETTLEMENT_HOUR) -> bool:
-    return str(ts or "") > settlement_marker(baseline_date, settlement_hour=settlement_hour)
+    return str(ts or "") > settlement_marker_seconds(baseline_date, settlement_hour=settlement_hour)
 
 
 def intraday_axis_baseline_ts(query_date: date | str) -> str:

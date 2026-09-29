@@ -1,8 +1,10 @@
 """격리된 Git 저장소와 가짜 systemctl로 실제 배포 스크립트의 복구를 검사한다."""
 
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -46,7 +48,10 @@ def test_deploy_restores_code_units_and_environment(tmp_path, failure):
     (units / "portfolio-snapshot.timer").write_text("old-timer\n")
     (source / "deploy/value-invest.service").write_text("new-unit\n")
     (source / "portfolio-snapshot.timer").write_text("new-timer\n")
-    _run(["git", "commit", "-am", "new"], source)
+    for name in ("portfolio-after-close.timer", "portfolio-after-close.service"):
+        (source / name).write_text("new-after-close-unit\n")
+    _run(["git", "add", "."], source)
+    _run(["git", "commit", "-m", "new"], source)
     new = _run(["git", "rev-parse", "HEAD"], source).stdout.strip()
 
     _script(bins / "python3", '''
@@ -80,6 +85,11 @@ exec "$@"
 ''')
     for name in ("npm", "node", "sleep"):
         _script(bins / name, "exit 0\n")
+    if sys.platform == "darwin":
+        # BSD mv에는 -T가 없다. 이 테스트의 GNU mv -Tf(원자적 링크 교체)를
+        # 같은 rename 동작으로 모의한다. Linux CI에서는 실제 GNU mv를 쓴다.
+        _script(bins / "mv", '[ "$#" = 3 ] && [ "$1" = -Tf ] || exit 1\n'
+                + f'exec {shlex.quote(sys.executable)} -c \'import os, sys; os.replace(sys.argv[1], sys.argv[2])\' "$2" "$3"\n')
     if os.name == "nt":
         # MSYS는 권한 없는 symlink를 디렉터리 복사로 흉내 낸다. 환경 선택만
         # 파일 포인터로 모의하고 실제 Linux symlink는 CI에서 검증한다.
@@ -106,6 +116,8 @@ exec "$@"
     assert head == (new if failure == "none" else old)
     assert (units / "value-invest.service").read_text() == ("new-unit\n" if failure == "none" else "old-unit\n")
     assert (units / "portfolio-snapshot.timer").read_text() == ("new-timer\n" if failure == "none" else "old-timer\n")
+    for name in ("portfolio-after-close.timer", "portfolio-after-close.service"):
+        assert (units / name).exists() == (failure == "none")
     if failure == "none":
         commands = (tmp_path / "unit-commands").read_text().splitlines()
         assert commands.index("/bin/systemctl stop portfolio-snapshot.timer") < commands.index("/bin/systemctl daemon-reload")

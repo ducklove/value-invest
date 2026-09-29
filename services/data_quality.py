@@ -37,10 +37,9 @@ logger = logging.getLogger(__name__)
 SOURCE = "data_quality"
 SUMMARY_KIND = "check_summary"
 
-# NAV 스냅샷(20:05)·벤치마크 증분이 끝난 뒤 20:30 점검이 도는 전제 —
-# 평일 20:10 이후에만 '당일' 데이터를 기대한다. 그 전(수동 실행 등)에는
-# 직전 거래일까지만 기대해 거짓 경보를 막는다.
-SETTLED_MINUTES = 20 * 60 + 10
+# 정규장 마감 10분 뒤부터 당일 NAV를 기대한다. 휴장일·변경된 마감 시간은
+# 정산과 같은 거래일 달력을 사용한다. 벤치마크의 해외 시차는 별도로 허용한다.
+SETTLED_MINUTES = 15 * 60 + 40
 # 장중 스냅샷은 09:00 장 시작 이후에만 의미가 있다 — 그 전엔 검사 생략.
 _INTRADAY_CHECK_FROM_MINUTES = 10 * 60
 
@@ -60,9 +59,7 @@ DEFAULT_MAX_DIVIDEND_JUMP = 5.0
 
 
 # ---------------------------------------------------------------------------
-# 거래일 헬퍼 — 한국 공휴일은 무시한다. 휴장일의 거짓 경보(warn 1건)가
-# 휴일 캘린더를 통째로 들이는 비용보다 싸다 (admin._compute_staleness 와
-# 동일한 트레이드오프).
+# NAV는 거래일 달력, 기타 데이터는 소스별 지연을 고려한 평일 기준을 사용한다.
 # ---------------------------------------------------------------------------
 
 def _prev_weekday(d: date) -> date:
@@ -78,6 +75,18 @@ def last_expected_trading_day(now: datetime, *, settled_minutes: int | None = No
     settled_minutes 가 주어지면 평일 그 시각(분 단위) 이후에만 당일을
     기대하고, 그 전에는 직전 거래일로 물러난다.
     """
+    if settled_minutes == SETTLED_MINUTES:
+        from domain.market_calendar import closing_at
+        from services.portfolio.time_windows import KST
+        now = now.astimezone(KST) if now.tzinfo else now.replace(tzinfo=KST)
+        d = now.date()
+        close = closing_at(d.isoformat())
+        if close and now >= close + timedelta(minutes=10):
+            return d
+        d -= timedelta(days=1)
+        while closing_at(d.isoformat()) is None:
+            d -= timedelta(days=1)
+        return d
     d = now.date()
     if d.weekday() < 5:
         if settled_minutes is None or now.hour * 60 + now.minute >= settled_minutes:
@@ -152,12 +161,26 @@ async def check_portfolio_stock_snapshot_freshness(now: datetime | None = None) 
     db = await get_db()
     cursor = await db.execute(
         """
-        WITH holdings AS (
+        WITH regular AS (
+            SELECT google_sub,cashflow_cutoff_at FROM portfolio_snapshots
+            WHERE date=? AND price_basis='regular_close_v1'
+        ), frozen AS (
+            SELECT v.google_sub,v.payload,ROW_NUMBER() OVER (
+                PARTITION BY v.google_sub,v.row_key ORDER BY v.recorded_at DESC,v.id DESC
+            ) AS n
+            FROM settlement_versions v JOIN regular r ON r.google_sub=v.google_sub
+            WHERE v.table_name='user_portfolio' AND v.recorded_at<=r.cashflow_cutoff_at
+        ), holdings AS (
             SELECT google_sub, stock_code
             FROM user_portfolio
             WHERE stock_code IS NOT NULL
               AND stock_code NOT LIKE 'CASH_%'
               AND COALESCE(quantity, 0) > 0
+              AND google_sub NOT IN (SELECT google_sub FROM regular)
+            UNION
+            SELECT google_sub,json_extract(payload,'$.stock_code') FROM frozen
+            WHERE n=1 AND payload IS NOT NULL AND json_extract(payload,'$.quantity')>0
+              AND json_extract(payload,'$.stock_code') NOT LIKE 'CASH_%'
         ),
         latest AS (
             SELECT google_sub, stock_code, MAX(date) AS latest_date
@@ -171,7 +194,7 @@ async def check_portfolio_stock_snapshot_freshness(now: datetime | None = None) 
           ON l.google_sub = h.google_sub
          AND l.stock_code = h.stock_code
         ORDER BY h.google_sub, h.stock_code
-        """
+        """, (expected.isoformat(),)
     )
     rows = [dict(row) for row in await cursor.fetchall()]
     if not rows:

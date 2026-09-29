@@ -135,8 +135,8 @@ function _sparkLocalMinuteValue(ts) {
   ) / 60000;
 }
 
-// TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축으로 그린다. 결산창(직전 20:00→
-// 다음 20:00)의 야간 빈 구간을 잘라 장전·장중·장후 활성 시간대만 보여준다.
+// TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축으로 그린다.
+// 공식 정산이 있으면 마감까지, 정산 전이면 현재 시각까지 표시한다.
 const SPARK_DAILY_START_HOUR = 8;
 const SPARK_DAILY_END_HOUR = 20;
 // 세션일 = intraday 최신 점의 날짜(주말·공휴일에도 장중 점이 몰리지 않음). 없으면 현재 KST.
@@ -222,7 +222,7 @@ function _sparkTrendColor(isUp) {
 }
 
 function _renderSummarySparklines(currentTotalValue) {
-  if (PfStore.accountId) {
+  if (PfStore.accountId || PfStore.filters.group !== null || String(PfStore.filters.searchText || '').trim()) {
     for (const id of ['sparkTotalReturn', 'sparkMonthly', 'sparkDaily']) _drawSparkline(id, [], _sparkTrendColor(true), 252, 'right');
     return;
   }
@@ -270,9 +270,10 @@ function _renderSummarySparklines(currentTotalValue) {
     _drawSparklinePoints('sparkMonthly', [], _sparkTrendColor(true), 31);
   }
 
-  // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 20:00 결산(prevClose)
+  // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 정규장 결산(prevClose)
   // 대비 등락%. 축은 _sparkDailyAxis() 가 세션일 기준으로 만든다(now 까지 그려지고
   // 우측 빈 구간은 미래 시간).
+  const _regularClose = PfStore.snapshots.prevDay?.regular_close;
   const _prevClose = (PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.total_value > 0)
     ? PfStore.snapshots.prevDay.total_value
     : null;
@@ -280,18 +281,22 @@ function _renderSummarySparklines(currentTotalValue) {
   const axisStartTs = _dailyAxis.start;
   const axisEndTs = _dailyAxis.end;
   const _dailyAxisHours = SPARK_DAILY_END_HOUR - SPARK_DAILY_START_HOUR;
-  if (!_prevClose) {
+  // 장중 환율 이력이 없으므로 USD 공식 성과와 원화 장중선을 혼합하지 않는다.
+  if (!_prevClose || _regularClose?.comparison_unavailable || (_regularClose && PfStore.currency.unit === 'USD')) {
     _drawSparklinePoints('sparkDaily', [], _sparkTrendColor(true), _dailyAxisHours);
   } else {
     const raw = [{ x: 0, y: 0 }];
     for (const d of PfStore.snapshots.intraday) {
-      if (!d || !d.total_value) continue;
+      if (!d || !d.total_value || (_regularClose && d.ts > _regularClose.cashflow_cutoff_at)) continue;
       const x = _sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs);
       if (x === null) continue;
       const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);
       raw.push({ x, y: (adjustedTotal / _prevClose - 1) * 100 });
     }
-    if (currentTotalValue) {
+    if (_regularClose && _regularClose.change_pct != null) {
+      const x = _sparkAxisHoursFromTs(_regularClose.cashflow_cutoff_at, axisStartTs, axisEndTs);
+      if (x !== null) raw.push({ x, y: _regularClose.change_pct });
+    } else if (!_regularClose && currentTotalValue) {
       const x = _sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs);
       if (x !== null) {
         raw.push({ x, y: (currentTotalValue / _prevClose - 1) * 100 });

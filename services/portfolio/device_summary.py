@@ -315,7 +315,7 @@ async def _current_nav(google_sub: str, total_value: float, baseline: dict) -> f
 
 
 async def _baseline(google_sub: str) -> dict:
-    """Today 카드의 기준선: 직전 20:00 정산 스냅샷 + 그 뒤의 입출금."""
+    """Today 카드의 기준선: 직전 정산 스냅샷 + 그 뒤의 입출금."""
     baseline_date = time_windows.portfolio_today_baseline_date()
     snapshot = await snapshots_repo.get_snapshot_on_or_before(google_sub, baseline_date)
     created_after = (
@@ -420,9 +420,17 @@ async def build_summary(
         return pnl, pct
 
     day_pnl, day_pct = period(baseline["snapshot"], subtract_cashflow=True)
+    latest = await snapshots_repo.get_latest_snapshot(google_sub)
+    if year_start and latest and year_start.get("price_basis") != latest.get("price_basis"):
+        year_start = None
     ytd_pnl, ytd_pct = period(year_start, subtract_cashflow=False)
+    from services.portfolio.snapshot_views import regular_performance
+    closing = await regular_performance(google_sub, time_windows.today_kst_date().isoformat())
+    if closing:
+        day_pnl, day_pct = closing["change_krw"], closing["change_pct"]
 
     return {
+        "day_basis": "regular_close" if closing else "latest",
         "total_value": round(total_value),
         "day_pnl": round(day_pnl) if day_pnl is not None else None,
         "day_pnl_pct": day_pct,

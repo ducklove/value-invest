@@ -17,6 +17,7 @@ def isolate_snapshot_unit_tests(monkeypatch):
         yield AsyncMock()
     monkeypatch.setattr(snapshot_nav.db_repo, "transaction", fake_transaction)
     monkeypatch.setattr(snapshot_nav.snapshots_repo, "get_nav_input_state", AsyncMock(return_value=()))
+    monkeypatch.setattr(snapshot_nav.snapshots_repo, "get_snapshot_by_date", AsyncMock(return_value=None))
     monkeypatch.setattr(snapshot_nav.snapshots_repo, "get_pending_distributions", AsyncMock(return_value=[]))
     monkeypatch.setattr(snapshot_nav.snapshots_repo, "settle_dividend_receipts", AsyncMock())
 
@@ -612,7 +613,7 @@ async def test_retry_only_values_missing_users_and_preserves_completed_settlemen
         patch("observability.record_event", new=AsyncMock()),
     ):
         await snapshot_nav.run_all_snapshots("2026-09-23", manage_db=False, only_missing=True)
-    take.assert_awaited_once_with("missing", "2026-09-23", require_fresh=True)
+    take.assert_awaited_once_with("missing", "2026-09-23", require_fresh=True, regular=True)
 
 
 @pytest.mark.asyncio
@@ -621,13 +622,13 @@ async def test_unexpected_morning_timer_tick_cannot_create_tonights_settlement(m
     from datetime import datetime
 
     with (
-        patch.object(snapshot_nav, "datetime") as clock,
+        patch("services.portfolio.time_windows.now_kst") as clock,
         patch.object(snapshot_nav.bootstrap, "init_db", new=AsyncMock()),
         patch.object(snapshot_nav.bootstrap, "close_db", new=AsyncMock()) as close,
         patch.object(snapshot_nav, "_fetch_fx_usdkrw", new=AsyncMock()) as fetch,
         patch.object(snapshot_nav, "take_snapshot", new=AsyncMock()) as take,
     ):
-        clock.now.return_value = datetime(2026, 9, 24, 6, 45, tzinfo=snapshot_nav.KST)
+        clock.return_value = datetime(2026, 9, 23, 6, 45, tzinfo=snapshot_nav.KST)
         await snapshot_nav.run_all_snapshots(manage_db=manage_db, only_missing=True)
     fetch.assert_not_awaited()
     take.assert_not_awaited()

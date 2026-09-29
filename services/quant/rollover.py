@@ -4,22 +4,10 @@ import re
 from collections import defaultdict
 from datetime import date, timedelta
 
+from domain.market_calendar import CALENDAR_VERSION, HOLIDAYS
 from repositories.quant import QuantError
 
 POLICY = "front-month-roll-2-trading-days-v1"
-CALENDAR_VERSION = "krx-2026-2027-reviewed-20260916"
-# 공휴일·대체공휴일 + 근로자의 날·연말 휴장. 임시 휴장은 확인 후 추가한다.
-# 2026: finance-pi 달력과 대조, 제헌절 포함.
-# 2027: 우주항공청 2026-06-29 월력요항과 KRX 휴장 규칙.
-# https://www.kasa.go.kr/prog/plcyBrf/brief/kor/sub01_01_04/view.do?plcyBrfNo=431
-# https://www.krx.co.kr/contents/OPN/01/01040401/OPN01040401T1.jsp
-HOLIDAYS = {
-    2026: frozenset("01-01 02-16 02-17 02-18 03-02 05-01 05-05 05-25 06-03 07-17 "
-                    "08-17 09-24 09-25 10-05 10-09 12-25 12-31".split()),
-    2027: frozenset("01-01 02-06 02-07 02-08 02-09 03-01 05-01 05-03 05-05 05-13 "
-                    "06-06 07-17 07-19 08-15 08-16 09-14 09-15 09-16 10-03 10-04 "
-                    "10-09 10-11 12-25 12-27 12-31".split()),
-}
 
 
 def trading_day(day):

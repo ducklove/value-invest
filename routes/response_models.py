@@ -32,6 +32,8 @@ class HoldingResponse(ExtensibleResponse):
 
 
 class NavPoint(BaseModel):
+    price_basis: str = "legacy_latest"
+    cashflow_cutoff_at: str | None = None
     date: str
     nav: FiniteFloat
     return_nav: FiniteFloat | None = None
@@ -56,6 +58,9 @@ class CashflowDelta(BaseModel):
 
 
 class PreviousDayResponse(BaseModel):
+    regular_close: dict | None = None
+    price_basis: str | None = None
+    cashflow_cutoff_at: str | None = None
     date: str | None
     expected_date: str | None = None
     settlement_pending: bool = False

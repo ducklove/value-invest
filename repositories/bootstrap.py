@@ -59,6 +59,8 @@ async def init_db():
         for row in rows:
             await initialize(writer, row["google_sub"])
         await backfill_hong_kong_rmb_currency(writer)
+        from repositories.settlement_inputs import initialize as initialize_settlement_history
+        await initialize_settlement_history(writer)
 
 
 async def close_db():

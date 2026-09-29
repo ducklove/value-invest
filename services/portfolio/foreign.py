@@ -21,6 +21,7 @@ import re
 from datetime import datetime, timezone
 from functools import partial
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -628,6 +629,7 @@ async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = 
                     continue
                 rows.append({
                     "date": datetime.fromtimestamp(int(ts), tz=timezone.utc).date().isoformat(),
+                    "session_date": datetime.fromtimestamp(int(ts), tz=ZoneInfo(meta.get("exchangeTimezoneName") or "UTC")).date().isoformat(),
                     "close": round(float(close), 6),
                 })
             except Exception:

@@ -101,7 +101,7 @@ YEAR_START = {"date": "2025-12-30", "total_value": 300_000, "nav": 3000.0}
 class BuildSummaryMixin:
     async def _build(self, *, items=None, cashflows=(), latest=LATEST,
                      baseline=BASELINE, year_start=YEAR_START, top_n=10,
-                     movers_n=10, stale_quote=None, bulk=None, brief=None):
+                     movers_n=10, stale_quote=None, bulk=None, brief=None, closing=None):
         """stale_quote 를 주면 개별 조회까지 실패한 코드가 낡은 캐시로 채워진다."""
         async def fetch_quote(code, **kwargs):
             return PER_CODE.get(code, {})
@@ -123,6 +123,8 @@ class BuildSummaryMixin:
                    new=AsyncMock(return_value=latest)), \
              patch("repositories.market_brief.get_daily_market_brief",
                    new=brief if callable(brief) else AsyncMock(return_value=brief)), \
+             patch("services.portfolio.snapshot_views.regular_performance",
+                   new=AsyncMock(return_value=closing)), \
              patch("repositories.snapshots.get_year_start_snapshot",
                    new=AsyncMock(return_value=year_start)):
             return await device_summary.build_summary(
@@ -131,6 +133,12 @@ class BuildSummaryMixin:
 
 
 class DeviceSummaryTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_regular_daily_result_stays_fixed_while_total_remains_latest(self):
+        result = await self._build(closing={"change_krw": 1000, "change_pct": 0.25})
+        self.assertEqual((result["day_pnl"], result["day_pnl_pct"], result["day_basis"]),
+                         (1000, 0.25, "regular_close"))
+        self.assertEqual(result["total_value"], 412000)
+
     async def test_empty_portfolio_returns_zeroed_summary(self):
         with patch("repositories.portfolio.get_portfolio", new=AsyncMock(return_value=[])):
             result = await device_summary.build_summary("sub-1")

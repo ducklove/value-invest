@@ -89,6 +89,18 @@ async def run_nav_snapshot(request: Request):
         raise _job_failed("nav snapshot", exc) from exc
 
 
+@router.post("/snapshot/after-close")
+async def run_after_close_snapshot(request: Request):
+    _require_loopback(request)
+    from services.portfolio import after_close
+    try:
+        async with _nav_snapshot_lock:
+            await after_close.capture_all()
+        return {"ok": True, "kind": "after_close"}
+    except Exception as exc:
+        raise _job_failed("after close snapshot", exc) from exc
+
+
 @router.post("/snapshot/intraday")
 async def run_intraday_snapshot(request: Request):
     _require_loopback(request)
@@ -237,6 +249,8 @@ async def run_daily_briefing_send(request: Request):
     try:
         kind = request.query_params.get("kind") or request.query_params.get("briefing_type")
         result = await daily_briefing.send_briefings(kind)
+        if result.get("failed"):
+            raise RuntimeError(f"브리핑 {result['failed']}개 발송 보류/실패 — 사용자별 이벤트를 확인하세요.")
         return {"ok": True, **result}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
