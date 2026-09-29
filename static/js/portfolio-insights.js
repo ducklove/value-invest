@@ -289,6 +289,8 @@ function _renderAssetInsight(data) {
   const returns = metrics.returns || {};
   const volatility = metrics.volatility || {};
   const valuation = data.valuation || {};
+  const spac = data.spac || {};
+  const isSpac = Boolean(profile.isSpac || spac.applicable);
   const benchmark = data.benchmark || {};
   const benchmarkReturns = benchmark.returns || {};
   const relativeReturns = benchmark.relativeReturns || {};
@@ -315,7 +317,12 @@ function _renderAssetInsight(data) {
     _renderInsightCard('평가금액', _fmtInsightAmount(position.marketValue, positionCurrency), `투입 ${_fmtInsightAmount(position.invested, positionCurrency)}`),
     _renderInsightCard('보유 수익률', _fmtInsightPct(position.returnPct), _fmtInsightSignedAmount(position.pnl, positionCurrency), _insightClass(position.returnPct)),
     _renderInsightCard('오늘 손익', _fmtInsightPct(position.dailyChangePct), _fmtInsightSignedAmount(position.dailyPnl, positionCurrency), _insightClass(position.dailyPnl)),
-    ...(valuation.applicable ? [
+    ...(isSpac ? [
+      _renderInsightCard('청산가', _fmtInsightPrice(spac.currentLiquidationValue, 'KRW'), spac.currentLiquidationValue != null ? `${spac.asOf || ''} 기준 추정 · SPAC Hunter` : 'SPAC Hunter 청산가 데이터 없음'),
+      _renderInsightCard('청산가 괴리율', _fmtInsightPct(spac.liquidationDiscountPct), '(청산가 − 현재가) / 청산가', _insightClass(spac.liquidationDiscountPct)),
+      _renderInsightCard('연환산 기대수익률', _fmtInsightPct(spac.annualizedReturnPct), spac.payoutDate ? `청산금 수령 예정 ${spac.payoutDate}` : '청산금 수령 예정일 기준', _insightClass(spac.annualizedReturnPct)),
+      _renderInsightCard('상장일', spac.listingDate || '-', spac.updatedAt ? `SPAC Hunter · ${spac.updatedAt}` : 'SPAC Hunter'),
+    ] : valuation.applicable ? [
       _renderInsightCard('PBR', _fmtInsightMultiple(valuation.pbr), valuation.bps !== null && valuation.bps !== undefined ? `BPS ${_fmtInsightPrice(valuation.bps, 'KRW')}` : valuationBasis),
       _renderInsightCard('PER', _fmtInsightMultiple(valuation.per), valuation.eps !== null && valuation.eps !== undefined ? `EPS ${_fmtInsightPrice(valuation.eps, 'KRW')}` : valuationBasis),
       _renderInsightCard('ROE', _fmtInsightPct(valuation.roe, false), valuationBasis),

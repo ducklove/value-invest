@@ -39,6 +39,7 @@ from services.portfolio import (
     names,
     quote_service,
     snapshot_views,
+    spac,
     target_resolver,
 )
 from services.portfolio.benchmarks import (
@@ -259,7 +260,12 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
         **asset_insights.classify_asset(stock_code, item.get("stock_name") or "", item.get("currency") or ""),
     }
     indicator_task = asyncio.create_task(insights.fetch_insight_indicators(insights.macro_codes_for_asset(profile, item.get("currency"))))
-    valuation_task = asyncio.create_task(insights.fetch_insight_valuation_basis(stock_code))
+    is_spac = spac.is_spac(stock_code, profile["name"])
+    profile["isSpac"] = is_spac
+    valuation_task = asyncio.create_task(
+        spac.fetch_spac_context(stock_code, profile["name"]) if is_spac
+        else insights.fetch_insight_valuation_basis(stock_code)
+    )
 
     quote, history_payload, benchmark_quote, benchmark_name, benchmark_rows, indicators, valuation_basis = await asyncio.gather(
         quote_task,
@@ -277,7 +283,8 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
     benchmark_returns = benchmark_metrics.get("returns") or {}
     relative = asset_insights.relative_returns(metrics.get("returns") or {}, benchmark_returns)
     position = asset_insights.calculate_position(item, quote)
-    valuation = insights.build_insight_valuation(quote, valuation_basis)
+    spac_insight = spac.build_spac_insight(valuation_basis, quote) if is_spac else None
+    valuation = {"applicable": False} if is_spac else insights.build_insight_valuation(quote, valuation_basis)
     gold_gap = insights.gold_gap_for_asset(stock_code)
     holding = insights.holding_context_for_asset(stock_code)
     import external_tools
@@ -297,6 +304,7 @@ async def asset_insight(stock_code: str, request: Request, response: Response):
         "position": position,
         "quote": quote or {},
         "valuation": valuation,
+        "spac": spac_insight,
         "metrics": metrics,
         "benchmark": benchmark,
         "macro": insights.format_macro(indicators),

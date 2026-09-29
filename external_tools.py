@@ -460,6 +460,24 @@ async def _spac_summary() -> dict | None:
     return _summarize_spac(data)
 
 
+async def fetch_spac_data() -> dict:
+    """Full SPAC Hunter valuation inputs; current.json only contains summary prices."""
+    key = "spac-hunter/data"
+    cached = _raw_cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        data = await _get_json(f"{_RAW}/spac-hunter/main/data.json")
+        if not isinstance(data, dict) or not isinstance(data.get("spacs"), list):
+            raise ValueError("Invalid SPAC Hunter data")
+        _raw_cache.set(key, data)
+        return data
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("SPAC Hunter valuation fetch failed: %s", exc)
+        entry = _raw_cache.get_entry(key, allow_stale=True)
+        return entry.value if entry else {}
+
+
 async def _nps_summary() -> dict | None:
     # nps-tracker 도 기본 브랜치가 main 이고 current.json 만으로 요약 가능하다
     # (종목명이 holdings 안에 들어 있어 별도 config 가 필요 없음).

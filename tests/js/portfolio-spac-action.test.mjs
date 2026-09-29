@@ -32,9 +32,10 @@ function loadPortfolioActions(items) {
     url: "https://app.example.com/",
   });
   const { window } = dom;
-  // jsdom 에는 fetch 가 없다. insights.js 의 holdings 동기화 IIFE 가 호출하므로
-  // 거부 프로미스 스텁만 둔다(.catch 로 흡수됨).
-  window.fetch = () => Promise.reject(new Error("no fetch in test"));
+  // These registration panels and the holdings request are outside this fixture.
+  window.pfInitInitialRegistration = () => {};
+  window.pfInitHoldingRemoval = () => {};
+  window.fetch = async () => ({ json: async () => [] });
   for (const src of SOURCES) {
     const script = window.document.createElement("script");
     script.textContent = src;
@@ -63,4 +64,53 @@ test("일반 국내 종목은 '분석 화면' 액션을 유지한다", () => {
   const w = loadPortfolioActions([{ stock_code: "005930", stock_name: "삼성전자" }]);
   const actions = w._portfolioLinkActions("005930", { includeInsight: false });
   assert.equal(actions[0].label, "분석 화면");
+});
+
+function insightCards(w, data) {
+  const container = w.document.createElement('div');
+  container.innerHTML = w._renderAssetInsight(data);
+  return Object.fromEntries([...container.querySelectorAll('.pf-insight-card')].map(card => [
+    card.querySelector('.pf-insight-card-label').textContent,
+    card.querySelector('.pf-insight-card-value').textContent,
+  ]));
+}
+
+test('스팩 인사이트는 일반 기업 지표 대신 청산 지표와 상장일을 표시한다', () => {
+  const w = loadPortfolioActions([{ stock_code: '0209J0', stock_name: 'KB제34호스팩' }]);
+  const cards = insightCards(w, {
+    profile: { code: '0209J0', name: 'KB제34호스팩', isSpac: true },
+    valuation: { applicable: true, per: 10, pbr: 1, roe: 10, treasuryShareRatioPct: 5 },
+    spac: { applicable: true, currentLiquidationValue: 2001.54, liquidationDiscountPct: 5.97,
+      annualizedReturnPct: 4.06, listingDate: '2026-09-22', asOf: '2026-09-29' },
+  });
+  assert.equal(cards['청산가'], '2,001.54');
+  assert.equal(cards['청산가 괴리율'], '+5.97%');
+  assert.equal(cards['연환산 기대수익률'], '+4.06%');
+  assert.equal(cards['상장일'], '2026-09-22');
+  for (const label of ['PBR', 'PER', 'ROE', '자사주 비율']) assert.ok(!(label in cards));
+  assert.ok('현재가' in cards);
+  w.close();
+});
+
+test('스팩 원본 데이터가 없어도 청산 항목을 유지하고 0%는 누락하지 않는다', () => {
+  const w = loadPortfolioActions([{ stock_code: '0209J0', stock_name: 'KB제34호스팩' }]);
+  const profile = { code: '0209J0', name: 'KB제34호스팩', isSpac: true };
+  const cards = insightCards(w, { profile, valuation: { applicable: true } });
+  for (const label of ['청산가', '청산가 괴리율', '연환산 기대수익률', '상장일']) assert.equal(cards[label], '-');
+  assert.ok(!('PER' in cards));
+  const zero = insightCards(w, { profile, spac: { liquidationDiscountPct: 0, annualizedReturnPct: 0 } });
+  assert.equal(zero['청산가 괴리율'], '0.00%');
+  assert.equal(zero['연환산 기대수익률'], '0.00%');
+  w.close();
+});
+
+test('일반 종목 인사이트는 기존 기업 지표를 유지한다', () => {
+  const w = loadPortfolioActions([{ stock_code: '005930', stock_name: '삼성전자' }]);
+  const cards = insightCards(w, {
+    profile: { code: '005930', name: '삼성전자' },
+    valuation: { applicable: true, per: 10, pbr: 1, roe: 10, treasuryShareRatioPct: 5 },
+  });
+  for (const label of ['PBR', 'PER', 'ROE', '자사주 비율']) assert.ok(label in cards);
+  assert.ok(!('청산가' in cards));
+  w.close();
 });
