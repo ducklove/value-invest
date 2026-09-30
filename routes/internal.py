@@ -188,6 +188,8 @@ async def send_notification(request: Request, payload: dict = Body(...)):
       source      선택. 발신 프로젝트 표기 (마지막 줄 "— <source>").
       google_sub  선택. 지정 시 해당 사용자에게만, 생략 시 활성 채널을 가진
                   전체 사용자에게 보낸다.
+      audience    선택. "admins" 면 관리자(is_admin) 사용자에게만 보낸다 —
+                  systemd 실패 알림(scripts/notify_failure.sh)처럼 운영자용 메시지.
     """
     _require_loopback(request)
     text = str((payload or {}).get("text") or "").strip()
@@ -210,8 +212,13 @@ async def send_notification(request: Request, payload: dict = Body(...)):
     from services.notifications import channels
 
     requested_sub = str(payload.get("google_sub") or "").strip()
+    audience = str(payload.get("audience") or "").strip().lower()
+    if audience not in ("", "all", "admins"):
+        raise HTTPException(status_code=400, detail="audience must be 'all' or 'admins'")
     if requested_sub:
         targets = [requested_sub]
+    elif audience == "admins":
+        targets = [u["google_sub"] for u in await users_repo.get_all_users() if u.get("is_admin")]
     else:
         targets = [u["google_sub"] for u in await users_repo.get_all_users()]
 

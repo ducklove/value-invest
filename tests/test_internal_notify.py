@@ -97,3 +97,25 @@ class InternalNotifyTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InternalNotifyAudienceTests(unittest.IsolatedAsyncioTestCase):
+    """운영 실패 알림은 관리자에게만 — audience="admins"."""
+
+    async def test_admins_audience_targets_only_admin_users(self):
+        users = [{"google_sub": "admin", "is_admin": 1}, {"google_sub": "family", "is_admin": 0}]
+        dispatch = AsyncMock(return_value=1)
+        with patch.dict("os.environ", {}, clear=True), \
+             patch("repositories.users.get_all_users", new=AsyncMock(return_value=users)), \
+             patch("services.notifications.channels.dispatch", new=dispatch):
+            result = await internal.send_notification(
+                _request(), payload={"text": "timer failed", "audience": "admins"}
+            )
+        self.assertEqual([c.args[0] for c in dispatch.await_args_list], ["admin"])
+        self.assertEqual(result, {"ok": True, "sent": 1, "users": 1})
+
+    async def test_unknown_audience_is_rejected(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(HTTPException) as exc_info:
+                await internal.send_notification(_request(), payload={"text": "x", "audience": "everyone"})
+        self.assertEqual(exc_info.exception.status_code, 400)
