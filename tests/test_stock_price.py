@@ -51,7 +51,6 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fetch_market_data_uses_financial_data_when_kis_financials_fail(self):
         with patch("services.stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
-             patch("services.stock_price._group_close_by_year_series", return_value={2024: 1000.0}), \
              patch("services.stock_price._group_last_by_year_series", return_value={}), \
              patch("services.stock_price._group_sum_by_year_series", return_value={}), \
              patch("services.stock_price.kis_proxy_client.get_history", new=AsyncMock(side_effect=RuntimeError("history down"))), \
@@ -77,7 +76,6 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fetch_market_data_prefers_dart_dividend_per_share(self):
         with patch("services.stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
-             patch("services.stock_price._group_close_by_year_series", return_value={}), \
              patch("services.stock_price._group_last_by_year_series", return_value={}), \
              patch("services.stock_price._group_sum_by_year_series", return_value={2025: 10000.0}), \
              patch("services.stock_price._group_close_by_year", return_value={2025: 420500.0}), \
@@ -104,10 +102,6 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fetch_market_data_prefers_local_adjusted_close_over_kis_and_yfinance(self):
         with patch("services.stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
-             patch("services.stock_price._group_close_by_year_series", return_value={
-                 2000: -35781.39,
-                 2001: -24564.82,
-             }), \
              patch("services.stock_price._group_last_by_year_series", return_value={}), \
              patch("services.stock_price._group_sum_by_year_series", return_value={}), \
              patch("services.stock_price._group_close_by_year", side_effect=[
@@ -132,7 +126,6 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fetch_market_data_uses_local_daily_close_when_kis_yearly_empty(self):
         with patch("services.stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
-             patch("services.stock_price._group_close_by_year_series", return_value={2000: -35781.39}), \
              patch("services.stock_price._group_last_by_year_series", return_value={}), \
              patch("services.stock_price._group_sum_by_year_series", return_value={}), \
              patch("services.stock_price.kis_proxy_client.get_history", new=AsyncMock(return_value={"items": []})), \
@@ -149,7 +142,6 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fetch_market_data_does_not_use_yfinance_close_as_korean_price(self):
         with patch("services.stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
-             patch("services.stock_price._group_close_by_year_series", return_value={2000: 84525.0}), \
              patch("services.stock_price._group_last_by_year_series", return_value={}), \
              patch("services.stock_price._group_sum_by_year_series", return_value={}), \
              patch("services.stock_price.kis_proxy_client.get_history", new=AsyncMock(return_value={"items": []})), \
@@ -169,7 +161,6 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fetch_market_data_prefers_kis_dividend_over_yfinance_dividend(self):
         with patch("services.stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
-             patch("services.stock_price._group_close_by_year_series", return_value={2002: -3725.38}), \
              patch("services.stock_price._group_last_by_year_series", return_value={}), \
              patch("services.stock_price._group_sum_by_year_series", return_value={2002: 12600.01}), \
              patch("services.stock_price._group_close_by_year", side_effect=[
@@ -192,7 +183,6 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fetch_market_data_ignores_yfinance_dividend_when_kis_missing(self):
         with patch("services.stock_price._get_yfinance_aux", return_value=(None, None, None, None)), \
-             patch("services.stock_price._group_close_by_year_series", return_value={2002: 5880.0}), \
              patch("services.stock_price._group_last_by_year_series", return_value={}), \
              patch("services.stock_price._group_sum_by_year_series", return_value={2002: 12600.01}), \
              patch("services.stock_price.kis_proxy_client.get_history", new=AsyncMock(return_value={"items": []})), \

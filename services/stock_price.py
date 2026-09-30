@@ -319,16 +319,6 @@ def _group_sum_by_year_series(series) -> dict[int, float]:
     return {int(year): _safe_float(value, zero_as_none=False) for year, value in grouped.items()}
 
 
-def _group_close_by_year_series(series) -> dict[int, float]:
-    if pd is None or series is None or series.empty:
-        return {}
-    cleaned = series.dropna()
-    if cleaned.empty:
-        return {}
-    grouped = cleaned.groupby(cleaned.index.year).last()
-    return {int(year): _safe_float(value, zero_as_none=False) for year, value in grouped.items()}
-
-
 def _normalized_split_events(series) -> list[tuple[datetime, float]]:
     if pd is None or series is None or series.empty:
         return []
