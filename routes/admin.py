@@ -438,52 +438,86 @@ async def batch_status(request: Request):
 # Manual trigger
 # ---------------------------------------------------------------------------
 
-_running_jobs: dict[str, asyncio.subprocess.Process] = {}
+# 수동 실행은 systemd timer 가 부르는 /api/internal/snapshot/* 와 같은
+# in-process 서비스 함수를 같은 NAV 락 아래에서 실행한다. 예전에는
+# `/usr/bin/python3 snapshot_*.py` 서브프로세스를 띄웠는데, 시스템 파이썬에는
+# 앱 venv 의존성이 없어 운영에서 실패했고, 별도 DB 커넥션으로 NAV 락을 우회해
+# 타이머 정산과 동시에 같은 날짜를 쓸 수 있었다.
+_running_jobs: dict[str, asyncio.Task] = {}
 
-_JOB_SCRIPTS = {
-    "portfolio-snapshot": "snapshot_nav.py",
-    "portfolio-intraday": "snapshot_intraday.py",
+
+async def _run_portfolio_snapshot(snap_date: str | None) -> None:
+    import snapshot_nav
+    from routes.internal import _nav_snapshot_lock
+
+    async with _nav_snapshot_lock:
+        # 수동 실행은 기존 CLI(`snapshot_nav.py [date]`)와 같이 only_missing=False
+        # — 해당 날짜를 전 사용자 재정산한다.
+        await snapshot_nav.run_all_snapshots(snap_date, manage_db=False)
+
+
+async def _run_portfolio_intraday(_snap_date: str | None) -> None:
+    import snapshot_intraday
+
+    # /api/internal/snapshot/intraday 와 동일 — 장중 포인트는 NAV 락을 쓰지 않는다.
+    await snapshot_intraday.run(manage_db=False)
+
+
+_JOB_RUNNERS = {
+    "portfolio-snapshot": _run_portfolio_snapshot,
+    "portfolio-intraday": _run_portfolio_intraday,
 }
 
 
-async def _run_snapshot_job(job_name: str, snap_date: str | None = None):
-    """Run a snapshot script as a subprocess to avoid DB connection conflicts."""
-    script = _JOB_SCRIPTS[job_name]
-    cmd = ["/usr/bin/python3", script]
-    if snap_date and job_name != "portfolio-intraday":
-        cmd.append(snap_date)
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, cwd=str(Path(__file__).parent.parent),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        )
-        _running_jobs[job_name] = proc
-        stdout, _ = await proc.communicate()
-        if proc.returncode == 0:
-            logger.info("Manual job completed: %s (date=%s)", job_name, snap_date)
-        else:
-            logger.error("Manual job failed: %s exit=%d\n%s", job_name, proc.returncode, stdout.decode()[-500:])
-    except Exception as e:
-        logger.error("Manual job error: %s: %s", job_name, e)
-    finally:
+def _log_job_result(job_name: str, snap_date: str | None, task: asyncio.Task) -> None:
+    if _running_jobs.get(job_name) is task:
         _running_jobs.pop(job_name, None)
+    if task.cancelled():
+        logger.warning("Manual job cancelled: %s (date=%s)", job_name, snap_date)
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("Manual job failed: %s (date=%s): %s", job_name, snap_date, exc, exc_info=exc)
+    else:
+        logger.info("Manual job completed: %s (date=%s)", job_name, snap_date)
+
+
+def _start_manual_job(job_name: str, snap_date: str | None) -> asyncio.Task:
+    runner = _JOB_RUNNERS[job_name]
+    task = asyncio.create_task(runner(snap_date), name=f"admin-manual-{job_name}")
+    _running_jobs[job_name] = task
+    task.add_done_callback(lambda t: _log_job_result(job_name, snap_date, t))
+    return task
+
+
+def _parse_manual_job_date(value) -> str | None:
+    if value in (None, ""):
+        return None
+    try:
+        return date.fromisoformat(str(value)).isoformat()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date 는 YYYY-MM-DD 형식이어야 합니다.") from exc
 
 
 @router.post("/trigger/{job_name}")
 async def trigger_job(job_name: str, request: Request):
     user = await _require_admin_mutation(request)
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
-    snap_date = body.get("date")
+    if not isinstance(body, dict):
+        body = {}
 
     valid_jobs = {t["name"] for t in _TIMERS}
-    if job_name not in valid_jobs:
+    if job_name not in valid_jobs or job_name not in _JOB_RUNNERS:
         raise HTTPException(status_code=400, detail=f"Unknown job: {job_name}")
+    # 장중 스냅샷(_run_portfolio_intraday)은 항상 현재 시각 기준이라 날짜를
+    # 무시한다(기존 동작).
+    snap_date = _parse_manual_job_date(body.get("date"))
 
-    proc = _running_jobs.get(job_name)
-    if proc and proc.returncode is None:
+    running = _running_jobs.get(job_name)
+    if running is not None and not running.done():
         raise HTTPException(status_code=409, detail="이미 실행 중입니다.")
 
-    asyncio.create_task(_run_snapshot_job(job_name, snap_date))
+    _start_manual_job(job_name, snap_date)
     await observability.record_event(
         "admin",
         "manual_job_triggered",

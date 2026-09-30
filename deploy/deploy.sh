@@ -136,6 +136,53 @@ rollback() {
 }
 trap 'rollback $?' ERR
 
+# 정상 배포 뒤에만 호출한다. .venvs/<sha> 는 현재(.venv-current 대상=NEW_VENV)와
+# 직전(OLD_VENV — 수동 롤백 대상)만 남기고, .deploy-state 는 이번 것과 바로
+# 이전 것만 남긴다(.env 사본 보관 개수 제한). 이번 배포보다 나중에 만들어진
+# 상태 디렉터리, SHA 형식이 아닌 디렉터리, 심볼릭 링크는 건드리지 않는다.
+# 실패해도 배포 결과에는 영향이 없도록 호출부에서 `|| log` 로 감싼다.
+prune_deploy_artifacts() {
+  local venvs_dir="$APP_DIR/.venvs" state_root="$APP_DIR/.deploy-state"
+  local keep_new keep_old keep_cur dir name
+  keep_new="$(basename "$NEW_VENV")"
+  keep_old="${OLD_VENV:+$(basename "$OLD_VENV")}"
+  keep_cur="$(readlink "$APP_DIR/.venv-current" || true)"
+  keep_cur="${keep_cur:+$(basename "$keep_cur")}"
+  if [[ -d "$venvs_dir" && ! -L "$venvs_dir" ]]; then
+    while IFS= read -r dir; do
+      name="$(basename "$dir")"
+      [[ "$name" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || continue
+      [[ "$name" == "$keep_new" || "$name" == "$keep_old" || "$name" == "$keep_cur" ]] && continue
+      log "Pruning old venv $name"
+      rm -rf -- "$dir"
+    done < <(find "$venvs_dir" -mindepth 1 -maxdepth 1 -type d)
+  fi
+
+  # 스테이징 소스(+node_modules)는 배포가 끝나면 쓰지 않는다(롤백은 git reset).
+  rm -rf -- "$STATE_DIR/source"
+  [[ -d "$state_root" && ! -L "$state_root" ]] || return 0
+  local current_epoch previous="" epoch
+  current_epoch="$(basename "$STATE_DIR")"
+  current_epoch="${current_epoch%%-*}"
+  local older=()
+  while IFS= read -r name; do
+    [[ "$name" =~ ^([0-9]+)-[0-9]+$ ]] || continue
+    [[ "$state_root/$name" == "$STATE_DIR" ]] && continue
+    epoch="${BASH_REMATCH[1]}"
+    (( epoch <= current_epoch )) || continue
+    older+=("$name")
+  done < <(find "$state_root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort -t- -k1,1n -k2,2n)
+  if (( ${#older[@]} > 0 )); then
+    previous="${older[${#older[@]}-1]}"
+    rm -rf -- "$state_root/$previous/source"
+    for name in "${older[@]}"; do
+      [[ "$name" == "$previous" ]] && continue
+      log "Pruning old deploy state $name"
+      rm -rf -- "${state_root:?}/$name"
+    done
+  fi
+}
+
 log "Deploying $OLD_SHA -> $NEW_SHA"
 STAGED_DIR="$STATE_DIR/source"
 mkdir -p "$STAGED_DIR"
@@ -205,6 +252,7 @@ for unit in "${MUTATED_UNITS[@]}"; do
   fi
 done
 trap - ERR
+prune_deploy_artifacts || log "WARNING: pruning old venvs/deploy state failed (deploy itself succeeded)"
 
 # 데이터 보정은 되돌릴 수 있는 코드 배포와 별개다. 실패 시 새 서비스는 유지한다.
 PATH="$NEW_VENV/bin:$PATH" bash deploy/repairs/run_one_time_repairs.sh

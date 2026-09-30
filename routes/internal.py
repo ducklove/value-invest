@@ -7,8 +7,18 @@ KIS/Naver/yfinance rate budget on stocks the web process had just queried
 seconds earlier.
 
 These endpoints run the same snapshot logic inside the web process where
-those caches are warm. Access is restricted to loopback so there's no
-external attack surface.
+those caches are warm.
+
+Access control (``_require_loopback``): a request is accepted when EITHER
+  * it carries a valid ``X-Internal-Token`` (== ``INTERNAL_API_TOKEN``,
+    constant-time compare) — how cross-host callers (finance-pi, buybacks, …)
+    authenticate; OR
+  * it comes from a direct loopback peer (127.0.0.1 / ::1) with no
+    ``X-Forwarded-For`` / ``X-Real-IP`` / ``Forwarded`` header — the systemd
+    timers' plain ``curl https://127.0.0.1:3691/...`` calls.
+The loopback path works whether or not ``INTERNAL_API_TOKEN`` is configured,
+so setting the token never breaks the timers. Proxied or non-loopback callers
+without a valid token get 403.
 """
 from __future__ import annotations
 
@@ -20,6 +30,7 @@ import os
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from core.errors import AppError
+from domain.market_calendar import MarketCalendarUnknown
 
 router = APIRouter(prefix="/api/internal", include_in_schema=False)
 logger = logging.getLogger(__name__)
@@ -41,38 +52,64 @@ def _job_failed(kind: str, exc: Exception) -> AppError:
 
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+# 이 중 하나라도 있으면 리버스 프록시를 거친 요청으로 보고 loopback 예외를
+# 적용하지 않는다(프록시의 peer 주소가 127.0.0.1 이어도).
+_PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded")
+_TOKEN_HEADERS = ("x-internal-token", "x-value-invest-internal-token")
+
+
+def _provided_token(request: Request) -> str:
+    for name in _TOKEN_HEADERS:
+        value = (request.headers.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _token_is_valid(request: Request) -> bool:
+    """Constant-time check of X-Internal-Token against INTERNAL_API_TOKEN.
+
+    An unset/blank configured token never matches (not even an empty header).
+    """
+    expected_token = os.getenv("INTERNAL_API_TOKEN", "").strip()
+    provided_token = _provided_token(request)
+    if not expected_token or not provided_token:
+        return False
+    # bytes 로 비교 — 비 ASCII 헤더 값에서 compare_digest(str) 가 TypeError 를
+    # 내지 않도록 한다.
+    return hmac.compare_digest(
+        provided_token.encode("utf-8"), expected_token.encode("utf-8")
+    )
+
+
+def _is_direct_loopback(request: Request) -> bool:
+    client = request.client
+    host = client.host if client else ""
+    if host not in _LOOPBACK_HOSTS:
+        return False
+    return not any(request.headers.get(name) for name in _PROXY_HEADERS)
 
 
 def _require_loopback(request: Request) -> None:
-    """Protect internal jobs from public reverse-proxy traffic.
+    """Accept (valid token) OR (direct loopback peer without proxy headers).
 
-    Direct loopback calls remain supported for systemd timers. If
-    INTERNAL_API_TOKEN is configured, callers must send X-Internal-Token.
+    Direct loopback calls stay supported for the systemd timers whether or
+    not INTERNAL_API_TOKEN is configured. Proxied (X-Forwarded-For /
+    X-Real-IP / Forwarded) or non-loopback callers need a valid
+    X-Internal-Token, compared in constant time.
     """
-    expected_token = os.getenv("INTERNAL_API_TOKEN", "").strip()
-    provided_token = (
-        request.headers.get("x-internal-token")
-        or request.headers.get("x-value-invest-internal-token")
-        or ""
-    ).strip()
-    if expected_token:
-        if hmac.compare_digest(provided_token, expected_token):
-            return
-        logger.warning("internal endpoint rejected missing/invalid token")
-        raise HTTPException(status_code=403, detail="internal token required")
-
-    client = request.client
-    host = client.host if client else ""
-    forwarded_for = request.headers.get("x-forwarded-for")
-    real_ip = request.headers.get("x-real-ip")
-    if host in _LOOPBACK_HOSTS and not forwarded_for and not real_ip:
+    if _token_is_valid(request):
+        return
+    if _is_direct_loopback(request):
         return
 
+    client = request.client
     logger.warning(
-        "internal endpoint rejected host=%s forwarded_for=%s real_ip=%s",
-        host,
-        forwarded_for,
-        real_ip,
+        "internal endpoint rejected host=%s forwarded_for=%s real_ip=%s token_sent=%s",
+        client.host if client else "",
+        request.headers.get("x-forwarded-for"),
+        request.headers.get("x-real-ip"),
+        bool(_provided_token(request)),
     )
     raise HTTPException(status_code=403, detail="internal only")
 
@@ -252,6 +289,10 @@ async def run_daily_briefing_send(request: Request):
         if result.get("failed"):
             raise RuntimeError(f"브리핑 {result['failed']}개 발송 보류/실패 — 사용자별 이벤트를 확인하세요.")
         return {"ok": True, **result}
+    except MarketCalendarUnknown as exc:
+        # 미설정 특수 세션일(수능일 등)·미등록 연도: 잘못된 요청(400)이 아니라
+        # 운영자 조치가 필요한 작업 실패 — 로그 + 500 → systemd OnFailure 알림.
+        raise _job_failed("daily briefing send", exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

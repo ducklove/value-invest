@@ -281,8 +281,6 @@ CREATE TABLE IF NOT EXISTS portfolio_stock_snapshots (
     FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_stock_snapshots_sub_date ON portfolio_stock_snapshots(google_sub, date);
-
 CREATE TABLE IF NOT EXISTS portfolio_group_snapshots (
     google_sub TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -294,8 +292,6 @@ CREATE TABLE IF NOT EXISTS portfolio_group_snapshots (
     PRIMARY KEY (google_sub, date, group_name),
     FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_group_snapshots_sub_date ON portfolio_group_snapshots(google_sub, date);
 
 CREATE TABLE IF NOT EXISTS portfolio_stock_weight_snapshots (
     google_sub TEXT NOT NULL,
@@ -322,8 +318,6 @@ CREATE TABLE IF NOT EXISTS portfolio_intraday (
     FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_intraday_sub_ts ON portfolio_intraday(google_sub, ts);
-
 -- DEPRECATED: 국민연금 데이터는 nps-tracker(별도 정적 대시보드)로 분리됐다.
 -- 아래 두 테이블은 더 이상 기록되지 않으며, 과거 데이터 보존을 위해 drop만
 -- 보류한 상태다(롤백 안전장치). 새 코드는 참조하지 말 것.
@@ -347,8 +341,6 @@ CREATE TABLE IF NOT EXISTS nps_snapshots (
     generated_html TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_nps_holdings_date ON nps_holdings(date);
-
 CREATE TABLE IF NOT EXISTS user_settings (
     google_sub TEXT NOT NULL,
     key TEXT NOT NULL,
@@ -358,7 +350,6 @@ CREATE TABLE IF NOT EXISTS user_settings (
     FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_sub_date ON portfolio_snapshots(google_sub, date);
 CREATE INDEX IF NOT EXISTS idx_portfolio_cashflows_sub ON portfolio_cashflows(google_sub, date);
 
 CREATE TABLE IF NOT EXISTS ticker_map (
@@ -594,8 +585,6 @@ CREATE TABLE IF NOT EXISTS benchmark_daily (
     fetched_at  TEXT NOT NULL,
     PRIMARY KEY (code, date)
 );
-CREATE INDEX IF NOT EXISTS idx_benchmark_daily_code_date
-    ON benchmark_daily(code, date);
 
 -- Q&A history: audit log + per-user rate limit source.
 CREATE TABLE IF NOT EXISTS stock_qa_history (
@@ -932,6 +921,77 @@ async def create_core_schema(db: aiosqlite.Connection) -> None:
     """Create the core application tables and indexes if they do not exist."""
     await db.executescript(CORE_SCHEMA_SQL)
     await db.executescript(INVESTMENT_INSIGHTS_SCHEMA_SQL)
+    await drop_redundant_pk_indexes(db)
+
+
+# 과거 스키마가 만들던 인덱스 중 PRIMARY KEY 자동 인덱스(sqlite_autoindex_*)와
+# 완전히 같거나 그 leftmost prefix 라서 조회에는 쓸모없고 쓰기 증폭만 일으키던
+# 것들. CREATE 문은 CORE_SCHEMA_SQL 에서 제거했고, 기존 DB 에서는 아래
+# drop_redundant_pk_indexes() 가 테이블의 실제 PK 를 확인한 뒤에만 지운다.
+# (index, table, indexed columns)
+REDUNDANT_PK_INDEXES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("idx_intraday_sub_ts", "portfolio_intraday", ("google_sub", "ts")),  # PK (google_sub, ts)
+    ("idx_portfolio_snapshots_sub_date", "portfolio_snapshots", ("google_sub", "date")),  # PK (google_sub, date)
+    ("idx_stock_snapshots_sub_date", "portfolio_stock_snapshots", ("google_sub", "date")),  # PK (google_sub, date, stock_code)
+    ("idx_group_snapshots_sub_date", "portfolio_group_snapshots", ("google_sub", "date")),  # PK (google_sub, date, group_name)
+    ("idx_nps_holdings_date", "nps_holdings", ("date",)),  # PK (date, stock_code)
+    ("idx_benchmark_daily_code_date", "benchmark_daily", ("code", "date")),  # PK (code, date)
+)
+
+
+async def _pk_index_columns(db: aiosqlite.Connection, table: str) -> list[tuple[str, int, str]] | None:
+    """Key columns (name, desc, collation) of the table's PRIMARY KEY autoindex."""
+    table = _validate_identifier(table, kind="table")
+    async with db.execute(f"PRAGMA index_list({table})") as cursor:
+        indexes = await cursor.fetchall()
+    for row in indexes:
+        # (seq, name, unique, origin, partial)
+        name, origin, partial = row[1], row[3], row[4]
+        if origin != "pk" or partial:
+            continue
+        async with db.execute(f"PRAGMA index_xinfo({_validate_identifier(name, kind='index')})") as cursor:
+            info = await cursor.fetchall()
+        # (seqno, cid, name, desc, coll, key)
+        return [(r[2], r[3], r[4]) for r in info if r[5] == 1]
+    return None
+
+
+async def _index_columns(db: aiosqlite.Connection, index: str) -> list[tuple[str, int, str]] | None:
+    index = _validate_identifier(index, kind="index")
+    async with db.execute(f"PRAGMA index_xinfo({index})") as cursor:
+        info = await cursor.fetchall()
+    if not info:
+        return None
+    return [(r[2], r[3], r[4]) for r in info if r[5] == 1]
+
+
+async def drop_redundant_pk_indexes(db: aiosqlite.Connection) -> list[str]:
+    """Drop REDUNDANT_PK_INDEXES whose columns are a leftmost prefix of the PK.
+
+    Idempotent. Each index is dropped only when (1) it exists on the expected
+    table with exactly the expected plain (ASC, BINARY, non-partial) key
+    columns and (2) the table's actual PRIMARY KEY autoindex starts with the
+    same columns — so an old DB whose table predates the PK keeps its index.
+    Returns the names actually dropped.
+    """
+    dropped: list[str] = []
+    for index, table, columns in REDUNDANT_PK_INDEXES:
+        async with db.execute(
+            "SELECT tbl_name, sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (index,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None or row[0] != table or " WHERE " in str(row[1] or "").upper():
+            continue
+        wanted = [(col, 0, "BINARY") for col in columns]
+        if await _index_columns(db, index) != wanted:
+            continue
+        pk_columns = await _pk_index_columns(db, table)
+        if not pk_columns or pk_columns[: len(wanted)] != wanted:
+            continue
+        await db.execute(f"DROP INDEX IF EXISTS {_validate_identifier(index, kind='index')}")
+        dropped.append(index)
+    return dropped
 
 
 INVESTMENT_INSIGHTS_SCHEMA_SQL = """
