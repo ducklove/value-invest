@@ -242,6 +242,19 @@ def test_gold_gap_latest_prefers_cached_published_data(tmp_path):
     assert gold["updatedAt"] == "2026-09-27 08:47 KST"
 
 
+def test_gold_gap_stale_cache_does_not_override_newer_local_file(tmp_path):
+    _write_gold(tmp_path)
+    local = integrations.build_public_integrations(workspace_root=tmp_path)["goldGap"]["assets"]["gold"]
+    external_tools._raw_cache.set("gold_gap/latest", {
+        "updated_at": "2000-01-01 08:47 KST",
+        "gold": {"gap_pct": [9.99], "dates": ["2000-01-01"]},
+    })
+    gold = integrations.build_public_integrations(workspace_root=tmp_path)["goldGap"]
+    assert gold["assets"]["gold"]["latestGapPct"] == local["latestGapPct"]
+    assert gold["assets"]["gold"]["latestDate"] == local["latestDate"]
+    assert gold["updatedAt"] != "2000-01-01 08:47 KST"
+
+
 def test_kis_proxy_is_server_side_only(monkeypatch):
     monkeypatch.setenv("KIS_PROXY_BASE_URL", "http://127.0.0.1:3288/")
     config = integrations.build_app_config()

@@ -58,6 +58,8 @@ class GoRedirectTests(TempDbMixin):
         self.assertEqual(gold.geturl(), "https://ducklove.github.io/gold_gap/?asset=bitcoin&theme=light")
         bond = self.location(await self.get("/go/bond-mate?view=credit&embed=1"))
         self.assertEqual(parse_qs(bond.query), {"tab": ["credit"], "embed": ["credit"]})
+        bond_embed = self.location(await self.get("/go/bond-mate?embed=1"))
+        self.assertEqual(bond_embed.query, "embed=")  # 뷰 없는 embed 도 embed 로 간다
         gold_embed = self.location(await self.get("/go/gold_gap?embed=1"))
         self.assertEqual(parse_qs(gold_embed.query), {"embed": ["1"]})
         aag = self.location(await self.get("/go/all-about-gold?view=etf"))

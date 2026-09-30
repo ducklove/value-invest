@@ -20,6 +20,7 @@ URL 은 전부 레지스트리(``core.ecosystem``)에서 만들고 도구의 ``e
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 from typing import Any, Awaitable, Callable
@@ -201,7 +202,8 @@ async def fetch_summary(tool_id: str) -> dict | None:
     envelope, joined = await single_flight(("ecosystem.summary", tool_id), lambda: _refresh(tool_id))
     if envelope is None:
         return None
-    return dict(envelope) if joined else envelope
+    # 합류한 호출자끼리 중첩 data 를 공유하지 않게 깊은 복사(cached_fetch 와 같은 의미).
+    return copy.deepcopy(envelope) if joined else envelope
 
 
 def invalidate(tool_id: str, reason: str) -> None:

@@ -126,7 +126,11 @@ def go_url(
         values["asset"] = asset
         builder.apply(entry["assetLink"]["template"], {"asset": asset})
     if embed and isinstance(entry.get("embed"), dict):
-        builder.apply(entry["embed"].get("template"), values)
+        # ``?embed={view}`` 처럼 값 자리가 있는 템플릿은 값이 없으면 빈 값(``?embed=``)으로
+        # 채운다 — 딥링크 계약 §5-1: embed 값은 선택적 뷰 이름이고 빈 값도 embed 다.
+        template = entry["embed"].get("template")
+        blanks = {name[1:-1]: "" for name in _PLACEHOLDER_RE.findall(str(template or ""))}
+        builder.apply(template, {**blanks, **values})
     if entry.get("themeParam") and theme in THEMES:
         builder.apply("?theme={theme}", {"theme": str(theme)})
     return builder.build()

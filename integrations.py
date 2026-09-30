@@ -48,11 +48,11 @@ def handoff_integration_keys() -> frozenset[str]:
     return ecosystem.handoff_keys()
 
 
-# 로컬 형제 파일 파싱 결과 메모: 경로 → ((mtime_ns, 크기), 파싱값). 요청마다 SD 카드에서
+# 로컬 형제 파일 파싱 결과 메모: 경로 → ((mtime_ns, 크기, inode), 파싱값). 요청마다 SD 카드에서
 # 수십 KB 를 다시 읽고 파싱하지 않는다 — stat 한 번으로 바뀌었는지만 본다. 메모한 값은
 # 공유 객체이므로 빌더는 절대 변경하지 않고 새 dict 를 만든다(_merge_gold_gap_assets 참고).
 _file_memo_lock = threading.Lock()
-_file_memo: dict[tuple[str, str], tuple[tuple[int, int], Any]] = {}
+_file_memo: dict[tuple[str, str], tuple[tuple[int, int, int], Any]] = {}
 
 
 def build_public_integrations(workspace_root: Path | None = None) -> dict[str, Any]:
@@ -86,7 +86,8 @@ def _memoized_file(path: Path | None, kind: str, parse) -> Any:
     except OSError:
         return None
     key = (str(path), kind)
-    signature = (stat.st_mtime_ns, stat.st_size)
+    # mv 로 교체된 파일(sync 스크립트)은 inode 가 바뀐다 — mtime 해상도가 거친 FS 대비.
+    signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
     with _file_memo_lock:
         hit = _file_memo.get(key)
     if hit is not None and hit[0] == signature:
@@ -430,8 +431,12 @@ def _apply_gold_gap_latest(config: dict[str, Any]) -> None:
         latest_gap = _last_number(asset_data.get("gap_pct"))
         if latest_gap is None:
             continue
-        asset_config["latestGapPct"] = latest_gap
         latest_date = _last_value(asset_data.get("dates"))
+        local_date = asset_config.get("latestDate")
+        # 캐시는 fetch 실패 시 1일까지 stale 로 남는다 — 동기화된 로컬 값이 더 새로우면 그대로 둔다.
+        if latest_date and local_date and str(latest_date) < str(local_date):
+            continue
+        asset_config["latestGapPct"] = latest_gap
         if latest_date:
             asset_config["latestDate"] = latest_date
         applied = True
