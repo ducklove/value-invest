@@ -7,7 +7,7 @@ concurrency bounds are preserved exactly from the original implementation;
 only the function names were promoted from ``_private`` to module-public.
 
 Dependency direction: this module imports ``cache``, ``cache_layer``,
-``kis_proxy_client``, ``httpx``, ``yfinance`` (lazily) and the sibling
+``services.market.sources.kis_proxy``, ``httpx``, ``yfinance`` (lazily) and the sibling
 ``services.portfolio`` modules (``fx``, ``currencies``, ``identifiers``).
 It must never import ``routes`` — the router depends on this module, not the
 other way around.
@@ -22,12 +22,12 @@ from functools import partial
 
 import httpx
 
-import kis_proxy_client
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
 from domain.portfolio_codes import is_hong_kong_rmb_counter
 from repositories import corp_codes
 from repositories import ticker_map as ticker_map_repo
+from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo, yfinance_runner
 from services.portfolio import currencies, fx
 from services.portfolio.identifiers import (

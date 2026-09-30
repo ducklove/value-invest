@@ -14,8 +14,8 @@ from core.errors import (
 
 
 def test_hierarchy_keeps_runtimeerror_compat_for_rebased_client_errors():
-    import kis_proxy_client
     from services.market.sources import close_price as close_price_client
+    from services.market.sources import kis_proxy as kis_proxy_client
 
     # 재베이스된 클라이언트 예외는 계층에 속하면서도 기존
     # ``except RuntimeError`` 핸들러에 계속 잡혀야 한다.

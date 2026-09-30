@@ -11,10 +11,10 @@ from urllib.parse import quote
 import httpx
 from bs4 import BeautifulSoup
 
-import kis_proxy_client
 from core.http import get_http_client, timeout_for
 from repositories.cache_values import get_cache_value_entry, set_cache_value
 from repositories.ticker_map import load_ticker_map
+from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo
 from services.portfolio.identifiers import is_korean_stock, static_foreign_ticker
 

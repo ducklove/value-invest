@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-import kis_proxy_client
+from services.market.sources import kis_proxy as kis_proxy_client
 
 
 class _FakeResponse:

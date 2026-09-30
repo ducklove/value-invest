@@ -5,10 +5,10 @@ import math
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import kis_proxy_client
 from domain.market_calendar import closing_at
 from domain.portfolio_codes import is_korean_stock, is_special_asset
 from repositories import settlement_inputs
+from services.market.sources import kis_proxy as kis_proxy_client
 from services.portfolio import foreign, fx, runtime_quotes, time_windows
 
 BASIS = "regular_close_v1"

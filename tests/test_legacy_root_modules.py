@@ -30,6 +30,7 @@ MOVED: dict[str, str] = {
     "integrations": "services.ecosystem.integrations",
     "external_tools": "services.ecosystem.external_tools",
     "close_price_client": "services.market.sources.close_price",
+    "kis_proxy_client": "services.market.sources.kis_proxy",
 }
 
 # 루트 shim 을 남긴 모듈(외부가 경로로 import). 저장소 안 코드는 여전히 정본을 쓴다.

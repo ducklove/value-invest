@@ -46,7 +46,7 @@ def _reset_short_lived_quote_caches():
     if stock_quotes is not None:
         stock_quotes._bulk_micro_cache.clear()
         stock_quotes._bulk_inflight.clear()
-    kis_proxy_client = sys.modules.get("kis_proxy_client")
+    kis_proxy_client = sys.modules.get("services.market.sources.kis_proxy")
     if kis_proxy_client is not None:
         kis_proxy_client.clear_response_cache()
     yfinance_runner = sys.modules.get("services.market.sources.yfinance_runner")

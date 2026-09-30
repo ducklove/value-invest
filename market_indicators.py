@@ -21,10 +21,10 @@ from urllib.parse import urljoin
 
 import httpx
 
-import kis_proxy_client
 from cache_layer import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 from services.market import naver_indicators
+from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo
 
 # ---------------------------------------------------------------------------
