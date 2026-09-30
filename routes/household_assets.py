@@ -9,6 +9,7 @@ import uuid
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import household_assets as household_repo
 from services.household_assets import (
     ASSET_CATEGORIES,
@@ -22,12 +23,6 @@ router = APIRouter(prefix="/api/household-assets", tags=["household-assets"])
 MAX_ITEMS = 100
 MAX_AMOUNT = 10_000_000_000_000_000
 _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
-
-
-def _require_user(user: dict | None) -> dict:
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 def _bounded_number(value, *, field: str, minimum: float, maximum: float, integer: bool = False):

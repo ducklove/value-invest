@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 import benchmark_history
 from cache_layer import MemoryTTLCache
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import benchmark_daily as benchmark_daily_repo
 from repositories import snapshots as snapshots_repo
 from services.portfolio import benchmarks, risk
@@ -35,12 +36,6 @@ DEFAULT_BENCHMARK = "IDX_KOSPI"
 _BENCHMARK_CODE_RE = re.compile(r"^[A-Z0-9_.\-^=]{1,24}$")
 
 _risk_cache = MemoryTTLCache("portfolio.risk", RISK_CACHE_TTL_SECONDS)
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 def _risk_free_rate_pct() -> float:

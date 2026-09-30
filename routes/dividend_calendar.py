@@ -13,6 +13,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from deps import get_current_user
+from deps import require_user as _require_user
 from services import dividend_calendar
 
 logger = logging.getLogger(__name__)
@@ -22,12 +23,6 @@ router = APIRouter()
 MONTHS_BACK = 2
 MIN_MONTHS, MAX_MONTHS = 3, 24
 
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 @router.get("/api/portfolio/dividend-calendar")

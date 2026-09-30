@@ -20,6 +20,7 @@ from cache_layer import MemoryTTLCache
 from core.http import get_http_client, shared_http_client
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import corp_codes
 from repositories import dart_review as dart_review_repo
 from repositories import db as db_repo
@@ -44,12 +45,6 @@ QA_CTX_PER_ENTRY_CHARS = 800
 QA_DART_REVIEW_CHARS = int(os.environ.get("WIKI_QA_DART_REVIEW_CHARS", "2600"))
 QA_MAX_TOKENS = int(os.environ.get("WIKI_QA_MAX_TOKENS", "2400"))
 QA_EMPTY_RETRY_MAX_TOKENS = int(os.environ.get("WIKI_QA_EMPTY_RETRY_MAX_TOKENS", "2400"))
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 def _today_kst_iso() -> str:

@@ -188,15 +188,15 @@ class PortfolioTradeTests(TempDbMixin):
         register_exception_handlers(app)
         request = await self.prepared()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            with patch.object(routes, "get_current_user", AsyncMock(return_value=None)):
+            with patch("deps.get_current_user", AsyncMock(return_value=None)):
                 self.assertEqual((await client.get('/api/portfolio/trades')).status_code, 401)
-            with patch.object(routes, "get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
+            with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
                 for field, value in [("quantity", True), ("quantity", 0), ("price", "NaN"), ("fees", -1), ("currency", "XYZ")]:
                     payload = request.model_dump(mode="json")
                     payload[field] = value
                     self.assertEqual((await client.post('/api/portfolio/trades', json=payload)).status_code, 422)
                 self.assertEqual((await client.post('/api/portfolio/trades', json=request.model_dump(mode="json"))).status_code, 200)
-            with patch.object(routes, "get_current_user", AsyncMock(return_value={"google_sub": "u2"})):
+            with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u2"})):
                 self.assertEqual((await client.get('/api/portfolio/trades')).json(), [])
                 response = await client.post('/api/portfolio/trades', json=request.model_dump(mode="json"))
                 self.assertEqual(response.status_code, 409)

@@ -2,21 +2,14 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 
-from deps import get_current_user
+from deps import require_user_id as _user_id
 from domain.dividend_receipts import DividendCreate, DividendInput, DividendPreview, DividendRecord
 from repositories import dividend_receipts as repo
 from services import dividend_calendar
 
 router = APIRouter(prefix="/api/portfolio/dividend-receipts")
-
-
-async def _user_id(request: Request) -> str:
-    user = await get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user["google_sub"]
 
 
 @router.get("/candidates")

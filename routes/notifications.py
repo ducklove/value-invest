@@ -20,6 +20,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import calendar_rules as calendar_rules_repo
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
@@ -29,12 +30,6 @@ router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 logger = logging.getLogger(__name__)
 
 LINK_TTL_MINUTES = 10
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 async def _briefing_payload(daily_briefing, google_sub: str, *, ok: bool | None = None) -> dict:

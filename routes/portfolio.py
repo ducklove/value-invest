@@ -13,6 +13,7 @@ import asset_insights
 import integrations
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
+from deps import require_user as _require_user
 from domain.portfolio_inputs import CashflowInput, HoldingInput, HoldingMetadataInput, validate_input
 from repositories import benchmark_daily as benchmark_repo
 from repositories import corp_codes, portfolio_metadata, portfolio_order
@@ -608,12 +609,6 @@ async def asset_quotes_batch(payload: dict = Body(...), request: Request = None)
         except Exception:
             pass
     return results
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 def _parse_avg_price_currency(raw: object) -> str | None:

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 
 import observability
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import insight_posts as insight_posts_repo
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
@@ -23,12 +24,6 @@ MAX_BODY_CHARS = 8000
 MAX_RESULT_JSON_CHARS = 200_000
 ALLOWED_VISIBILITY = {"public", "private"}
 ALLOWED_SOURCE_TYPES = {"manual", "backtest", "valuation", "portfolio", "memo"}
-
-
-def _require_user(user: dict | None) -> dict:
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 def _clean_tags(value: Any) -> list[str]:

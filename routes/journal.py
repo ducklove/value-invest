@@ -30,6 +30,7 @@ import re
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import journal as journal_repo
 from services import stock_quotes
 
@@ -40,12 +41,6 @@ router = APIRouter()
 # CASH_KRW). 대문자 정규화 후 검사한다.
 _STOCK_CODE_RE = re.compile(r"^[A-Z0-9._\-]{1,24}$")
 NOTE_MAX_LENGTH = 2000
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 def _validate_stock_code(raw) -> str:

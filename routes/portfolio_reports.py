@@ -5,15 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from deps import get_current_user
+from deps import require_user as _require_user
 from services.portfolio import period_reports
 
 router = APIRouter()
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 @router.get("/api/portfolio/period-reports/periods")

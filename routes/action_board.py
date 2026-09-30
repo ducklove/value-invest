@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import action_reviews
 from services.portfolio import action_board
 
@@ -12,12 +13,6 @@ router = APIRouter()
 
 MAX_ACTION_KEY_LENGTH = 180
 MAX_NOTE_LENGTH = 500
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 def _validate_action_key(raw: str) -> str:

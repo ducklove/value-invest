@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
+from deps import require_user_id as _user_id
 from domain.portfolio_distributions import (
     DistributionCreate,
     DistributionInput,
@@ -11,7 +12,6 @@ from domain.portfolio_distributions import (
     DistributionRecord,
 )
 from repositories import portfolio_distributions as repo
-from routes.dividend_receipts import _user_id
 
 router = APIRouter(prefix="/api/portfolio/distributions")
 

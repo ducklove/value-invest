@@ -6,7 +6,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 
 import auth_service
 from repositories import users as users_repo
@@ -100,6 +100,21 @@ async def get_current_user(request: Request) -> dict | None:
     except RuntimeError:
         return None
     return await users_repo.get_user_by_session(token_hash)
+
+
+LOGIN_REQUIRED_DETAIL = "로그인이 필요합니다."
+
+
+def require_user(user: dict | None) -> dict:
+    """로그인 사용자 dict를 그대로 돌려주고, 없으면 401."""
+    if not user:
+        raise HTTPException(status_code=401, detail=LOGIN_REQUIRED_DETAIL)
+    return user
+
+
+async def require_user_id(request: Request) -> str:
+    """현재 세션 사용자의 google_sub. 비로그인이면 401."""
+    return require_user(await get_current_user(request))["google_sub"]
 
 
 def set_session_cookie(response: Response, request: Request, session_token: str):

@@ -2,22 +2,15 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 
-from deps import get_current_user
+from deps import require_user_id as _user_id
 from domain.portfolio_exchanges import ExchangeCreate, ExchangeInput, ExchangePreview, ExchangeRecord
 from domain.portfolio_trades import TradeCreate, TradeInput, TradePreview, TradeRecord
 from repositories import portfolio_exchanges as exchanges
 from repositories import portfolio_trades as repo
 
 router = APIRouter(prefix="/api/portfolio/trades")
-
-
-async def _user_id(request: Request) -> str:
-    user = await get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user["google_sub"]
 
 
 @router.post("/preview", response_model=TradePreview | ExchangePreview)

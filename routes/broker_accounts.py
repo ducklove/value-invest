@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Body, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from deps import get_current_user
+from deps import require_user_id as user_id
 from repositories import account_holdings, broker_activity, brokers
 from repositories.broker_secrets import BrokerError, decrypt, encrypt
 from services.brokers import realtime
@@ -17,13 +17,6 @@ from services.brokers.registry import catalog, get_adapter
 from services.brokers.sync import fetch_snapshot, sync_account
 
 router = APIRouter()
-
-
-async def user_id(request) -> str:
-    user = await get_current_user(request)
-    if not user:
-        raise HTTPException(401, "로그인이 필요합니다.")
-    return user["google_sub"]
 
 
 def selection(user: str, payload: dict, provider: str = "namuh") -> dict:

@@ -183,7 +183,7 @@ class CalendarTests(TempDbMixin):
         self.assertEqual(changed["expected_amount_krw"], first["expected_amount_krw"] * 2)
 
     async def test_receipt_candidates_exclude_predictions_and_detect_legacy(self):
-        with patch.object(receipts, "get_current_user", AsyncMock(return_value={"google_sub": "u1"})), patch.object(receipts.repo, "received_source_keys", AsyncMock(return_value={"SCHP:estimated:2026-09-15"})):
+        with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u1"})), patch.object(receipts.repo, "received_source_keys", AsyncMock(return_value={"SCHP:estimated:2026-09-15"})):
             result = await receipts.candidates(request())
         self.assertFalse(any(e["type"] == "estimated" for e in result["events"]))
         schp = next(e for e in result["events"] if e["stock_code"] == "SCHP")

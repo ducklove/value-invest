@@ -16,6 +16,7 @@ import logging
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import rebalance_targets as targets_repo
 from services.portfolio import rebalance as rebalance_service
 
@@ -25,12 +26,6 @@ router = APIRouter()
 # 그룹명/종목코드 키 길이 상한 — portfolio_groups 의 그룹명도 이 안에 든다.
 _MAX_KEY_LEN = 100
 _MAX_TARGETS = 200
-
-
-def _require_user(user):
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 def _validate_target(raw: dict, index: int) -> dict:

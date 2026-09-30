@@ -146,14 +146,14 @@ class PortfolioExchangeTests(TempDbMixin):
         await trades.record_trade("u1", TradeCreate(**trade.model_dump(), request_id=uuid4(), expected_revision=preview["revision"]))
         request = await self.prepared()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            with patch.object(routes, "get_current_user", AsyncMock(return_value=None)):
+            with patch("deps.get_current_user", AsyncMock(return_value=None)):
                 self.assertEqual((await client.post('/api/portfolio/trades', json=request.model_dump(mode="json"))).status_code, 401)
-            with patch.object(routes, "get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
+            with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
                 self.assertEqual((await client.post('/api/portfolio/trades/preview', json=request.model_dump(mode="json", exclude={"request_id", "expected_revision"}))).status_code, 200)
                 self.assertEqual((await client.post('/api/portfolio/trades', json=request.model_dump(mode="json"))).status_code, 200)
                 history = (await client.get('/api/portfolio/trades')).json()
                 self.assertEqual([row["side"] for row in history], ["exchange", "buy"])
                 self.assertEqual((await client.post('/api/portfolio/trades', json={**request.model_dump(mode="json"), "rate": True})).status_code, 422)
-            with patch.object(routes, "get_current_user", AsyncMock(return_value={"google_sub": "u2"})):
+            with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u2"})):
                 self.assertEqual((await client.get('/api/portfolio/trades')).json(), [])
                 self.assertEqual((await client.post('/api/portfolio/trades', json=request.model_dump(mode="json"))).status_code, 409)

@@ -1,9 +1,9 @@
 """로그인 사용자 전용 퀀트 연구 API. 주문 활성화 API는 제공하지 않는다."""
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from deps import get_current_user
+from deps import require_user_id as user_id
 from repositories import quant, quant_basis, quant_forward, quant_scanner
 from services.quant import basis, scanner, service
 from services.quant import paper_service as quant_paper
@@ -71,13 +71,6 @@ async def basis_runs(request: Request):
 @router.get("/basis/runs/{rid}")
 async def basis_detail(rid: str, request: Request):
     return await quant_basis.get(await user_id(request), rid)
-
-
-async def user_id(request):
-    user = await get_current_user(request)
-    if not user:
-        raise HTTPException(401, "로그인이 필요합니다.")
-    return user["google_sub"]
 
 
 @router.get("/capabilities")

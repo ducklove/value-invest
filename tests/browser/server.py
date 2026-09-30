@@ -23,7 +23,7 @@ from core.config import PROJECT_ROOT, AppSettings
 from core.errors import register_exception_handlers
 from core.request_security import MutationOriginMiddleware
 from core.static_routes import register_static_routes
-from deps import get_current_user
+from deps import get_current_user, require_user
 from repositories import bootstrap, db, financial, snapshots, users
 from repositories import notifications as notification_channels
 from repositories import portfolio as holdings
@@ -139,7 +139,7 @@ async def config():
 
 @app.get("/api/portfolio")
 async def get_holdings(request: Request):
-    user = portfolio._require_user(await get_current_user(request))
+    user = require_user(await get_current_user(request))
     rows = await holdings.get_portfolio(user["google_sub"], request.query_params.get("account_id"))
     for row in rows:
         quote = {"price": 1, "previous_close": 1, "change_pct": 0} if row["stock_code"] in {"CASH_KRW", "FUTURES_BASE_KRW", "FUTURES_PNL_KRW"} else {"price": 75000, "previous_close": 74000, "change_pct": 1.35}
@@ -167,7 +167,7 @@ async def save_holding(code: str, request: Request, payload: dict = Body(...)):
 
 @app.get("/api/portfolio/groups")
 async def groups(request: Request):
-    user = portfolio._require_user(await get_current_user(request))
+    user = require_user(await get_current_user(request))
     return await holdings.get_portfolio_groups(user["google_sub"])
 
 

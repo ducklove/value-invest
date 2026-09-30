@@ -21,17 +21,12 @@ from fastapi import APIRouter, Body, HTTPException, Request
 
 from core.errors import AppError
 from deps import get_current_user
+from deps import require_user as _require_user
 from repositories import accounts as accounts_repo
 
 router = APIRouter(prefix="/api/portfolio/accounts", tags=["accounts"])
 
 MAX_REORDER_IDS = 20
-
-
-def _require_user(user: dict | None) -> dict:
-    if not user:
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return user
 
 
 @router.get("")
