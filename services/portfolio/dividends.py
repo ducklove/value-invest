@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 DIVIDEND_WARMUP_TTL = 6 * 60 * 60
 WARMUP_START_DELAY = 10  # seconds before a scheduled warmup hits upstreams
+# 한 번에 하나씩: 종목당 KIS 호출 ~5건 + finance-pi 전체 이력 조회(수 초)라,
+# 보유 종목 수십 개를 동시에 돌리면 kis-proxy IP당 한도(분당 120건)에 걸려 429가
+# 나고 finance-pi 조회도 줄을 서서 10초 제한을 넘는다(재시작 직후 로그로 확인).
+WARMUP_CONCURRENCY = 1
 
 
 def dividend_warmup_targets(code: str) -> list[str]:
@@ -68,6 +72,18 @@ def due_dividend_warmup_targets(
 
 _warmup_last: dict[str, float] = {}
 _warmup_tasks: dict[str, asyncio.Task] = {}
+_warmup_slots: asyncio.Semaphore | None = None
+_warmup_slots_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _warmup_semaphore() -> asyncio.Semaphore:
+    """실행 중인 이벤트 루프에 묶인 예열 동시 실행 제한(테스트마다 루프가 바뀐다)."""
+    global _warmup_slots, _warmup_slots_loop
+    loop = asyncio.get_running_loop()
+    if _warmup_slots is None or _warmup_slots_loop is not loop:
+        _warmup_slots = asyncio.Semaphore(WARMUP_CONCURRENCY)
+        _warmup_slots_loop = loop
+    return _warmup_slots
 
 
 async def refresh_domestic_dividend_from_dart(code: str) -> int:
@@ -126,7 +142,8 @@ def start_warmup_task(code: str, now: float) -> asyncio.Task | None:
     try:
         async def _delayed_warmup():
             await asyncio.sleep(WARMUP_START_DELAY)
-            await warm_market_data_for_dividend(code)
+            async with _warmup_semaphore():
+                await warm_market_data_for_dividend(code)
 
         task = asyncio.create_task(_delayed_warmup())
     except RuntimeError:

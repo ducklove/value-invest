@@ -115,3 +115,31 @@ async def test_warm_for_response_is_noop_within_ttl():
         assert dividends._warmup_tasks == {}
     finally:
         dividends.reset_warmup_state()
+
+
+async def test_background_warmups_run_one_at_a_time():
+    # 재시작 직후 보유 종목 수십 개의 예열이 한꺼번에 돌면 kis-proxy 429와
+    # finance-pi 10초 초과가 났다 — 배경 예열은 한 번에 하나씩 돈다.
+    dividends.reset_warmup_state()
+    active = 0
+    peak = 0
+
+    async def fake_warm(code):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+
+    try:
+        with patch.object(dividends, "WARMUP_START_DELAY", 0), \
+             patch.object(dividends, "warm_market_data_for_dividend", new=fake_warm):
+            for code in ("005930", "000660", "035420"):
+                _seed_expired(code)
+            dividends.schedule_for_portfolio(["005930", "000660", "035420"])
+            tasks = list(dividends._warmup_tasks.values())
+            assert len(tasks) == 3
+            await asyncio.gather(*tasks)
+        assert peak == dividends.WARMUP_CONCURRENCY == 1
+    finally:
+        dividends.reset_warmup_state()

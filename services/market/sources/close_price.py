@@ -271,7 +271,7 @@ async def get_daily_closes(
     except Exception as exc:
         if _should_mark_failure(exc):
             _mark_failure()
-        logger.warning("internal close price API failed (%s): %s", ticker, exc)
+        logger.warning("internal close price API failed (%s): %r", ticker, exc)
         raise ClosePriceClientError(f"internal close price API failed: {ticker}") from exc
 
 
@@ -305,7 +305,7 @@ async def get_daily_prices(
     except Exception as exc:
         if _should_mark_failure(exc):
             _mark_failure()
-        logger.warning("internal daily price API failed (%s): %s", ticker, exc)
+        logger.warning("internal daily price API failed (%s): %r", ticker, exc)
         raise ClosePriceClientError(f"internal daily price API failed: {ticker}") from exc
 
 
@@ -368,7 +368,7 @@ async def get_daily_prices_batch(
     except Exception as exc:
         if _should_mark_failure(exc):
             _mark_failure()
-        logger.warning("internal batch daily price API failed (%s): %s", ",".join(codes[:5]), exc)
+        logger.warning("internal batch daily price API failed (%s): %r", ",".join(codes[:5]), exc)
         raise ClosePriceClientError("internal batch daily price API failed") from exc
 
 
