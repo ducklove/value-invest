@@ -45,6 +45,9 @@ from services.portfolio.identifiers import (
 from services.portfolio.identifiers import (
     static_foreign_ticker as _static_foreign_ticker,
 )
+from services.portfolio.identifiers import (
+    yahoo_symbol as _yahoo_symbol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +67,6 @@ _YFINANCE_SUFFIXES = (
     "", ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".L", ".AX", ".T",
     ".HK", ".SS", ".SZ", ".SW", ".ST", ".CO",
 )
-_REUTERS_STRIP_SUFFIXES = (".OQ", ".PK", ".O", ".K")
 
 # --- Concurrency bounds & deadlines for external calls ---
 # Limits how many in-flight calls can hit each external dependency at once,
@@ -91,6 +93,15 @@ _ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 ->
 _ticker_map_loaded = False
 
 
+def _is_pseudo_code(code: str | None) -> bool:
+    """외부 종목 조회 대상이 아닌 허브 가상 코드(현금·금·RP·코인·선물 평가)인가.
+
+    이런 코드는 어느 거래소에도 없으므로 해외 종목 조회 진입점마다 이걸로 즉시
+    끊는다 — 예전에는 CASH_CNY 하나가 접미사 탐색으로 네이버 22회·yfinance 16회·
+    Yahoo chart 조회를 알림 패스마다 반복했다."""
+    return _is_special_asset(code)
+
+
 async def fetch_naver_stock_name(stock_code: str) -> str | None:
     try:
         async with _NAVER_SEM:
@@ -111,6 +122,8 @@ async def resolve_name(stock_code: str) -> str | None:
         return _SPECIAL_ASSET_NAMES[stock_code]
     if stock_code in _CASH_NAMES:
         return _CASH_NAMES[stock_code]
+    if _is_pseudo_code(stock_code):
+        return None
     static = _static_foreign_ticker(stock_code)
     if static:
         return static["name"]
@@ -139,6 +152,8 @@ async def resolve_domestic_code_alias(stock_code: str) -> dict | None:
 
 async def fetch_naver_world_stock(reuters_code: str) -> dict | None:
     """Fetch foreign stock info from Naver world stock API."""
+    if _is_pseudo_code(reuters_code):
+        return None
     try:
         async with _NAVER_SEM:
             client = await get_http_client("naver")
@@ -173,6 +188,8 @@ async def yf_run(fn):
 
 async def resolve_foreign_name(ticker: str) -> str | None:
     """Try yfinance first, then Naver as fallback."""
+    if _is_pseudo_code(ticker):
+        return None
     static = _static_foreign_ticker(ticker)
     if static:
         return static["name"]
@@ -197,6 +214,8 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
     """Find a working yfinance ticker, trying various exchange suffixes.
     Bounded by the yfinance runner and a per-call timeout; results (positive and negative)
     are cached to avoid re-running the suffix loop on every quote refresh."""
+    if _is_pseudo_code(ticker):
+        return None
     static = _static_foreign_ticker(ticker)
     if static:
         return static["ticker"]
@@ -229,29 +248,14 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
     return None
 
 
-def _strip_reuters_suffix(ticker: str) -> str | None:
-    upper = (ticker or "").upper()
-    for suffix in _REUTERS_STRIP_SUFFIXES:
-        if upper.endswith(suffix):
-            return ticker[: -len(suffix)]
-    return None
-
-
 def _yfinance_candidates(ticker: str) -> list[str]:
     ticker = (ticker or "").strip()
     if not ticker:
         return []
     if "." not in ticker:
         return [ticker + suffix for suffix in _YFINANCE_SUFFIXES]
-
-    candidates = [ticker]
-    stripped = _strip_reuters_suffix(ticker)
-    if stripped:
-        candidates.append(stripped)
-    direct = yfinance_direct_ticker(ticker)
-    if direct != ticker:
-        candidates.append(direct)
-    return list(dict.fromkeys(candidates))
+    # Yahoo 표기(GOOGL.O → GOOGL, BRK.B → BRK-B)를 먼저, 원래 표기는 그다음에.
+    return list(dict.fromkeys([_yahoo_symbol(ticker), ticker]))
 
 
 async def yfinance_resolve_name(ticker: str) -> str | None:
@@ -275,6 +279,8 @@ async def yfinance_resolve_name(ticker: str) -> str | None:
 
 async def resolve_foreign_reuters(ticker: str) -> str | None:
     """Find a working yfinance ticker, or fall back to Naver reuters code."""
+    if _is_pseudo_code(ticker):
+        return ticker
     # yfinance first — more reliable for foreign stocks
     static = _static_foreign_ticker(ticker)
     if static:
@@ -347,6 +353,8 @@ async def kis_fetch_foreign_quote(ticker: str) -> dict:
 
 
 async def fetch_foreign_quote(reuters_code: str) -> dict:
+    if _is_pseudo_code(reuters_code):
+        return {}
     # 베트남 거래소 식별자는 Naver 형식이다. Yahoo의 미국 종목으로 재해석하지 않는다.
     if reuters_code.upper().endswith((".HM", ".HN")):
         return await fetch_naver_foreign_quote(reuters_code)
@@ -419,7 +427,7 @@ async def fetch_naver_foreign_quote(reuters_code: str) -> dict:
 
 
 async def yfinance_fetch_quote(ticker: str) -> dict:
-    if yf_marked_failed(ticker):
+    if _is_pseudo_code(ticker) or yf_marked_failed(ticker):
         return {}
     try:
         import yfinance as yf
@@ -430,7 +438,7 @@ async def yfinance_fetch_quote(ticker: str) -> dict:
             return fi.last_price, fi.previous_close, (fi.currency or "USD").upper()
 
         try:
-            price, prev, currency = await yf_run(partial(_snap, ticker))
+            price, prev, currency = await yf_run(partial(_snap, _yahoo_symbol(ticker)))
         except asyncio.TimeoutError:
             logger.warning("yfinance 시세 타임아웃(%s)", ticker)
             return {}
@@ -453,19 +461,11 @@ async def yfinance_fetch_quote(ticker: str) -> dict:
 def yfinance_direct_ticker(code: str) -> str:
     """Normalize a portfolio code into a direct yfinance ticker.
 
-    Yahoo uses dash class shares (BRK-B / BF-B) but keeps exchange suffixes such
-    as ``7203.T`` unchanged. Slashes become dashes.
+    ``domain.portfolio_codes.yahoo_symbol`` 위임 — Reuters 미국 거래소 접미사
+    제거(GOOGL.O → GOOGL), .HM → .VN, 클래스 주식 대시(BRK.B → BRK-B), Yahoo
+    거래소 접미사(7203.T, BP.L)는 유지.
     """
-    ticker = (code or "").strip()
-    if "/" in ticker:
-        ticker = ticker.replace("/", "-")
-    if "." in ticker:
-        prefix, suffix = ticker.rsplit(".", 1)
-        # Yahoo uses BRK-B/BF-B for US class shares, but keeps exchange
-        # suffixes such as 7203.T unchanged.
-        if len(suffix) == 1 and prefix.replace(".", "").isalpha():
-            ticker = f"{prefix}-{suffix}"
-    return ticker
+    return _yahoo_symbol(code)
 
 
 def _looks_like_direct_foreign_ticker(query: str) -> bool:
@@ -594,9 +594,10 @@ async def search_foreign_tickers(query: str, *, limit: int = 8) -> list[dict]:
 
 async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = "1d") -> dict:
     """``{rows: [{date, session_date, close}], currency, meta}`` — 공용 Yahoo
-    chart provider 위임. 테스트가 이 모듈 이름을 patch 하므로 래퍼로 남긴다."""
+    chart provider 위임. 테스트가 이 모듈 이름을 patch 하므로 래퍼로 남긴다.
+    허브 코드(GOOGL.O, FUEVFVND.HM)는 Yahoo 심볼로 바꿔 요청한다."""
     return await yahoo.fetch_close_series(
-        ticker, range_=range_, interval=interval, currency_fallback=infer_yf_currency,
+        _yahoo_symbol(ticker), range_=range_, interval=interval, currency_fallback=infer_yf_currency,
     )
 
 
@@ -604,6 +605,8 @@ async def yfinance_fetch_quote_fast(ticker: str) -> dict:
     # No negative-cache gate here: the chart API is a single cheap, reliable
     # call, so it must not be skipped just because the unreliable fast_info
     # path marked this ticker as failed (that is exactly when we want it).
+    if _is_pseudo_code(ticker):
+        return {}
     try:
         payload = await asyncio.wait_for(fetch_yahoo_chart(ticker, range_="5d"), timeout=7.0)
         values = [row["close"] for row in payload.get("rows") or [] if row.get("close") is not None]
@@ -656,6 +659,9 @@ async def save_ticker(stock_code: str, resolved: str):
 
 
 async def detect_currency(stock_code: str) -> str:
+    if _is_pseudo_code(stock_code):
+        code = _normalize_portfolio_code(stock_code)
+        return code.removeprefix("CASH_") if code.startswith("CASH_") else "KRW"
     if is_hong_kong_rmb_counter(stock_code):
         return "CNY"
     static = _static_foreign_ticker(stock_code)

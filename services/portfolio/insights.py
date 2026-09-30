@@ -130,7 +130,7 @@ async def asset_history_for_insight(code: str, item: dict) -> dict:
     if static:
         return await download_yfinance_history(static["ticker"])
     await foreign.ensure_ticker_map()
-    ticker = foreign._ticker_map.get(code) or foreign.yfinance_direct_ticker(code)
+    ticker = foreign.yfinance_direct_ticker(foreign._ticker_map.get(code) or code)
     return await download_yfinance_history(ticker)
 
 

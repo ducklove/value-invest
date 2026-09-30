@@ -186,8 +186,9 @@ async def resolve_benchmark_name(code: str) -> str:
         return builtin_name
     if code in benchmark_name_cache:
         return benchmark_name_cache[code]
-    # For codes with dots/slashes, try dash variant first (faster for yfinance)
-    alt = code.replace(".", "-").replace("/", "-") if not is_korean_stock(code) else None
+    # For codes with dots/slashes, try the Yahoo symbol first (GOOGL.O → GOOGL,
+    # BRK.B → BRK-B; 7203.T keeps its exchange suffix).
+    alt = foreign.yfinance_direct_ticker(code) if not is_korean_stock(code) else None
     if alt and alt != code:
         name = await foreign.yfinance_resolve_name(alt)
         if not name:

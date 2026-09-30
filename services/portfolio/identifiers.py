@@ -10,6 +10,7 @@ from domain.portfolio_codes import (
     is_preferred_stock,
     is_special_asset,
     normalize_portfolio_code,
+    yahoo_symbol,
 )
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "is_special_asset",
     "normalize_portfolio_code",
     "static_foreign_ticker",
+    "yahoo_symbol",
 ]
 
 CASH_NAMES = {

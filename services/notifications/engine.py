@@ -47,7 +47,7 @@ from repositories import snapshots as snapshots_repo
 from services.krx_limits import krx_lower_limit, krx_upper_limit
 from services.notifications import alert_delivery, calendar_rules, channels
 from services.portfolio import foreign, runtime_quotes
-from services.portfolio.identifiers import common_stock_code, is_preferred_stock
+from services.portfolio.identifiers import common_stock_code, is_preferred_stock, is_special_asset
 from services.portfolio.target_resolver import (
     holding_value_meta,
     holding_value_meta_map,
@@ -61,6 +61,12 @@ _evaluate_all_lock = asyncio.Lock()
 _evaluate_calendar_lock = asyncio.Lock()
 # 패스 공유 시세의 개별 조회 동시성(벌크가 못 채운 국내·해외·특수자산).
 QUOTE_FETCH_CONCURRENCY = 4
+# 외부 시세 조회 기한. notify-alerts 타이머(curl --max-time 120) 안에 패스가 끝나도록
+# 종목별·패스 전체 상한을 둔다. 기한을 넘긴 종목은 조회 실패({})와 같다 — 규칙은
+# 건너뛰고 NAV 는 기존 결측 처리를 따른다.
+ALERT_QUOTE_TIMEOUT_SECONDS = 20.0
+REGULAR_DAILY_QUOTE_TIMEOUT_SECONDS = 10.0
+ALERT_QUOTE_PASS_BUDGET_SECONDS = 60.0
 
 PRICE_TYPES = frozenset({"price_above", "price_below"})            # scope=stock
 NAV_TYPES = frozenset({"nav_above", "nav_below"})                  # scope=portfolio
@@ -136,20 +142,32 @@ def _quote_change_pct(quote: dict) -> float | None:
     return _to_float((quote or {}).get("change_pct"))
 
 
+def _is_foreign_stock(code: str) -> bool:
+    """해외 종목인가 — 국내 코드와 현금·금·RP·코인·선물 같은 가상 코드는 아니다."""
+    return not runtime_quotes.is_korean_stock(code) and not is_special_asset(code)
+
+
 async def _regular_daily_quote(code: str) -> dict:
-    """Regular-session daily quote for foreign stock daily-change alerts."""
+    """Regular-session daily quote for foreign stock daily-change alerts.
+
+    해외 종목만 Yahoo 심볼(GOOGL.O → GOOGL)로 조회하고, 전체를
+    ``REGULAR_DAILY_QUOTE_TIMEOUT_SECONDS`` 안에 끝낸다. 가상 코드(CASH_* 등)는
+    외부 조회 없이 ``{}``."""
+    if not _is_foreign_stock(code):
+        return {}
     try:
-        await foreign.ensure_ticker_map()
-        ticker = foreign._ticker_map.get(code) or foreign.yfinance_direct_ticker(code)
-        quote = await foreign.yfinance_fetch_quote_fast(ticker)
-        if not quote:
-            resolved = await foreign.resolve_foreign_reuters(code)
-            if resolved and resolved != ticker:
-                await foreign.save_ticker(code, resolved)
-                quote = await foreign.yfinance_fetch_quote_fast(resolved)
-        return quote or {}
+        async with asyncio.timeout(REGULAR_DAILY_QUOTE_TIMEOUT_SECONDS):
+            await foreign.ensure_ticker_map()
+            ticker = foreign.yfinance_direct_ticker(foreign._ticker_map.get(code) or code)
+            quote = await foreign.yfinance_fetch_quote_fast(ticker)
+            if not quote:
+                resolved = await foreign.resolve_foreign_reuters(code)
+                if resolved and foreign.yfinance_direct_ticker(resolved) != ticker:
+                    await foreign.save_ticker(code, resolved)
+                    quote = await foreign.yfinance_fetch_quote_fast(resolved)
+            return quote or {}
     except Exception as exc:
-        logger.info("regular daily quote failed for %s: %s", code, exc)
+        logger.info("regular daily quote failed for %s: %s", code, str(exc) or type(exc).__name__)
         return {}
 
 
@@ -160,23 +178,24 @@ async def _safe_quote(code: str, *, regular_daily_change: bool = False, market_o
     캐시된 마지막 시세를 우선하는 일반 조회를 쓴다.
     """
     try:
-        if runtime_quotes.is_korean_stock(code):
-            if market_open:
-                quote = await runtime_quotes.fetch_quote(code, force_refresh=True, use_ws_cache=False)
+        async with asyncio.timeout(ALERT_QUOTE_TIMEOUT_SECONDS):
+            if runtime_quotes.is_korean_stock(code):
+                if market_open:
+                    quote = await runtime_quotes.fetch_quote(code, force_refresh=True, use_ws_cache=False)
+                else:
+                    quote = await runtime_quotes.fetch_quote(code)
             else:
-                quote = await runtime_quotes.fetch_quote(code)
-        else:
-            quote = await runtime_quotes.fetch_quote(
-                code,
-                force_refresh=regular_daily_change,
-                use_ws_cache=not regular_daily_change,
-            )
+                quote = await runtime_quotes.fetch_quote(
+                    code,
+                    force_refresh=regular_daily_change,
+                    use_ws_cache=not regular_daily_change,
+                )
     except Exception as exc:
-        logger.warning("alert quote fetch failed for %s: %s", code, exc)
+        logger.warning("alert quote fetch failed for %s: %s", code, str(exc) or type(exc).__name__)
         return {}
     if not quote or quote.get("_stale") is True:
         quote = {}
-    if regular_daily_change and not runtime_quotes.is_korean_stock(code):
+    if regular_daily_change and _is_foreign_stock(code):
         daily_quote = await _regular_daily_quote(code)
         daily_change_pct = _quote_change_pct(daily_quote)
         if daily_change_pct is not None:
@@ -858,17 +877,32 @@ async def _plan_user(google_sub: str) -> _UserPlan | int:
 async def _gather_safe_quotes(
     codes: list[str], daily_codes: set[str], *, market_open: bool
 ) -> dict[str, dict]:
-    """``_safe_quote`` 를 동시성 제한으로 병렬 실행한다(실패는 ``{}``)."""
-    semaphore = asyncio.Semaphore(QUOTE_FETCH_CONCURRENCY)
+    """``_safe_quote`` 를 동시성 제한으로 병렬 실행한다(실패는 ``{}``).
 
-    async def _one(code: str) -> dict:
+    패스 전체가 ``ALERT_QUOTE_PASS_BUDGET_SECONDS`` 를 넘기면 남은 조회를 취소하고
+    ``{}`` 로 둔다 — 느린 외부 조회 몇 개가 알림 타이머 기한을 넘기지 않게."""
+    semaphore = asyncio.Semaphore(QUOTE_FETCH_CONCURRENCY)
+    results: dict[str, dict] = {code: {} for code in codes}
+    finished: set[str] = set()
+
+    async def _one(code: str) -> None:
         async with semaphore:
             if code in daily_codes:
-                return await _safe_quote(code, regular_daily_change=True, market_open=market_open)
-            return await _safe_quote(code, market_open=market_open)
+                results[code] = await _safe_quote(code, regular_daily_change=True, market_open=market_open)
+            else:
+                results[code] = await _safe_quote(code, market_open=market_open)
+            finished.add(code)
 
-    results = await asyncio.gather(*(_one(code) for code in codes))
-    return dict(zip(codes, results))
+    try:
+        async with asyncio.timeout(ALERT_QUOTE_PASS_BUDGET_SECONDS):
+            await asyncio.gather(*(_one(code) for code in codes))
+    except TimeoutError:
+        unfinished = [code for code in codes if code not in finished]
+        logger.warning(
+            "alert quote pass exceeded %.0fs; %d codes left unpriced: %s",
+            ALERT_QUOTE_PASS_BUDGET_SECONDS, len(unfinished), ", ".join(unfinished[:8]),
+        )
+    return results
 
 
 async def _prefetch_pass_quotes(plans: list[_UserPlan], *, market_open: bool) -> _PassQuotes:

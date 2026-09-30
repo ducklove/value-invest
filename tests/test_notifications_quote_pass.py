@@ -7,6 +7,8 @@ evaluate_all 은 전 사용자 규칙을 먼저 계획해 코드 합집합을 �
 
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -184,3 +186,137 @@ class PassQuotesUnitTests(TempDbMixin):
             quote = await engine._safe_quote("SIVR", regular_daily_change=True)
         self.assertTrue(quote["_daily_only"])
         self.assertEqual(quote["change_pct"], 2.0)
+
+
+class _ForeignProbes:
+    """해외 종목 탐색 경로(yfinance·Yahoo chart·네이버/야후 HTTP·KIS 해외)를 모두 막고
+    호출 여부를 기록한다. 호출부가 예외를 삼키므로 side_effect 대신 await 여부로 본다."""
+
+    def __init__(self) -> None:
+        from services.portfolio import foreign
+
+        self.mocks = {
+            "yfinance": AsyncMock(return_value=None),
+            "yahoo_chart": AsyncMock(return_value={}),
+            "http": AsyncMock(),
+            "kis_overseas": AsyncMock(return_value={}),
+        }
+        self._patches = [
+            patch.object(foreign, "yf_run", new=self.mocks["yfinance"]),
+            patch.object(foreign.yahoo, "fetch_chart_json", new=self.mocks["yahoo_chart"]),
+            patch.object(foreign, "get_http_client", new=self.mocks["http"]),
+            patch.object(foreign.kis_proxy_client, "get_overseas_quote", new=self.mocks["kis_overseas"]),
+        ]
+
+    def __enter__(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+
+    def calls(self) -> dict[str, int]:
+        return {name: mock.await_count for name, mock in self.mocks.items() if mock.await_count}
+
+
+PSEUDO_HOLDINGS = ("CASH_KRW", "CASH_CNY", "CASH_EUR", "CASH_AUD", "KRX_GOLD", "CMA_RP_KRW", "CRYPTO_BTC", "FUTURES_PNL_KRW")
+
+
+class PseudoCodeAlertPassTests(TempDbMixin):
+    async def test_alert_pass_with_cash_and_special_holdings_makes_zero_foreign_probes(self):
+        from services.portfolio import quote_service
+
+        db = await db_repo.get_db()
+        await db.execute(
+            "INSERT OR IGNORE INTO users (google_sub, email, name, picture, email_verified, created_at, last_login_at)"
+            " VALUES ('u1', 'u1@x', 'U', '', 1, 't', 't')"
+        )
+        for code in PSEUDO_HOLDINGS:
+            await db.execute(
+                "INSERT OR IGNORE INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, created_at, updated_at)"
+                " VALUES ('u1', ?, ?, 1, 1, 't', 't')",
+                (code, code),
+            )
+        await db.commit()
+        await notifications_repo.upsert_notification_channel(
+            "u1", "telegram", config={"chat_id": 100, "username": "t"}, enabled=True, verified=True
+        )
+        # 일간 등락률 blanket 규칙은 전 보유종목을 '정규장 일간 시세' 보강 대상으로 만든다 —
+        # 예전에는 여기서 CASH_* 가 Yahoo chart → yfinance 16회 → 네이버 22회 탐색으로 흘렀다.
+        await notifications_repo.create_portfolio_alert("u1", scope="all_stocks", alert_type="daily_change_abs", threshold=5.0)
+
+        with _ForeignProbes() as probes, \
+             patch.object(engine.runtime_quotes, "kr_trading_day", return_value=True), \
+             patch.object(quote_service.fx, "fetch_fx_daily_change",
+                          new=AsyncMock(return_value={"price": 190.0, "change": 1.0, "change_pct": 0.5})), \
+             patch.object(quote_service.special_assets, "fetch_krx_gold_quote",
+                          new=AsyncMock(return_value={"price": 150000.0, "change": 150.0, "change_pct": 0.1})), \
+             patch.object(quote_service.special_assets, "fetch_crypto_quote",
+                          new=AsyncMock(return_value={"price": 1.0e8, "change": 1.0e6, "change_pct": 1.0})), \
+             patch.object(channels, "dispatch", new=AsyncMock()):
+            result = await engine.evaluate_all()
+
+        self.assertEqual(result["evaluated"], 1)
+        self.assertEqual(probes.calls(), {})
+
+    async def test_regular_daily_quote_skips_pseudo_codes_without_io(self):
+        with _ForeignProbes() as probes:
+            for code in PSEUDO_HOLDINGS:
+                self.assertEqual(await engine._regular_daily_quote(code), {})
+        self.assertEqual(probes.calls(), {})
+
+    async def test_regular_daily_quote_uses_yahoo_symbol_for_reuters_codes(self):
+        from services.portfolio import foreign
+
+        fast = AsyncMock(return_value={"price": 20000.0, "change_pct": 1.5})
+        resolve = AsyncMock(side_effect=AssertionError("mapped symbol must not need discovery"))
+        # 운영처럼 ticker_map 에 네이버 reutersCode 가 그대로 있어도 Yahoo 심볼로 조회한다.
+        with patch.dict(foreign._ticker_map, {"AGNC.O": "AGNC.O"}, clear=True), \
+             patch.object(foreign, "ensure_ticker_map", new=AsyncMock()), \
+             patch.object(foreign, "yfinance_fetch_quote_fast", new=fast), \
+             patch.object(foreign, "resolve_foreign_reuters", new=resolve):
+            self.assertEqual((await engine._regular_daily_quote("AGNC.O"))["change_pct"], 1.5)
+            self.assertEqual((await engine._regular_daily_quote("GOOGL.O"))["change_pct"], 1.5)
+        self.assertEqual([c.args[0] for c in fast.await_args_list], ["AGNC", "GOOGL"])
+
+
+class AlertQuoteDeadlineTests(TempDbMixin):
+    async def test_regular_daily_quote_is_bounded(self):
+        from services.portfolio import foreign
+
+        async def hang(*_args, **_kwargs):
+            await asyncio.sleep(30)
+
+        with patch.object(engine, "REGULAR_DAILY_QUOTE_TIMEOUT_SECONDS", 0.05), \
+             patch.object(foreign, "ensure_ticker_map", new=AsyncMock()), \
+             patch.object(foreign, "yfinance_fetch_quote_fast", new=hang):
+            started = time.monotonic()
+            self.assertEqual(await engine._regular_daily_quote("AAPL"), {})
+        self.assertLess(time.monotonic() - started, 2.0)
+
+    async def test_safe_quote_is_bounded_per_code(self):
+        async def hang(*_args, **_kwargs):
+            await asyncio.sleep(30)
+
+        with patch.object(engine, "ALERT_QUOTE_TIMEOUT_SECONDS", 0.05), \
+             patch.object(engine.runtime_quotes, "fetch_quote", new=hang):
+            started = time.monotonic()
+            self.assertEqual(await engine._safe_quote("AAPL"), {})
+        self.assertLess(time.monotonic() - started, 2.0)
+
+    async def test_pass_budget_leaves_unfinished_codes_unpriced(self):
+        async def fetch(code, **_kwargs):
+            if code == "SLOW":
+                await asyncio.sleep(30)
+            return {"price": 100.0, "change_pct": 1.0}
+
+        with patch.object(engine, "ALERT_QUOTE_PASS_BUDGET_SECONDS", 0.1), \
+             patch.object(engine.runtime_quotes, "fetch_quote", new=fetch):
+            started = time.monotonic()
+            quotes = await engine._gather_safe_quotes(["AAPL", "SLOW", "005930"], set(), market_open=True)
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(quotes["SLOW"], {})
+        self.assertEqual(quotes["AAPL"]["price"], 100.0)
+        self.assertEqual(quotes["005930"]["price"], 100.0)

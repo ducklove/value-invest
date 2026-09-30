@@ -48,3 +48,42 @@ def is_preferred_stock(code: str | None) -> bool:
 def common_stock_code(code: str | None) -> str:
     normalized = normalize_portfolio_code(code)
     return normalized[:5] + "0"
+
+
+# 허브 코드(Reuters/네이버 표기) → Yahoo 심볼 변환 규칙.
+# 미국 상장 Reuters 거래소 접미사 — Yahoo 는 미국 종목에 접미사를 붙이지 않는다
+# (GOOGL.O → GOOGL). .O/.OQ 나스닥, .N NYSE, .K NYSE Arca, .PK 장외.
+# .A(NYSE American)는 일부러 뺀다: 클래스 주식 표기(BRK.A, BF.A → BRK-A, BF-A)와
+# 구분할 수 없어서다.
+_REUTERS_US_EXCHANGE_SUFFIXES = frozenset({"O", "OQ", "N", "K", "PK"})
+# 허브와 Yahoo 가 다르게 쓰는 거래소 접미사 (.HM 호찌민 HOSE → Yahoo .VN).
+_YAHOO_SUFFIX_ALIASES = {"HM": "VN"}
+# 한 글자 Yahoo 거래소 접미사. 그 외 한 글자 접미사는 미국 클래스 주식이다.
+_YAHOO_ONE_LETTER_EXCHANGES = frozenset({"L", "F", "T", "V"})
+
+
+def _yahoo_class_share(symbol: str) -> str:
+    root, dot, suffix = symbol.rpartition(".")
+    if (dot and len(suffix) == 1 and suffix not in _YAHOO_ONE_LETTER_EXCHANGES
+            and root.replace(".", "").isalpha()):
+        return f"{root}-{suffix}"
+    return symbol
+
+
+def yahoo_symbol(code: str | None) -> str:
+    """허브/Reuters 표기 종목 코드를 Yahoo chart·yfinance 심볼로 바꾼다.
+
+    GOOGL.O → GOOGL, FUEVFVND.HM → FUEVFVND.VN, BRK.B·BRK/B → BRK-B.
+    Yahoo 가 쓰는 거래소 접미사(7203.T, BP.L, A200.AX, 0005.HK …)와
+    접미사 없는 코드는 그대로 둔다. 멱등이다.
+    """
+    symbol = normalize_portfolio_code(code).replace("/", "-")
+    root, dot, suffix = symbol.rpartition(".")
+    if not dot or not root:
+        return symbol
+    if suffix in _REUTERS_US_EXCHANGE_SUFFIXES:
+        return _yahoo_class_share(root)
+    alias = _YAHOO_SUFFIX_ALIASES.get(suffix)
+    if alias:
+        return f"{root}.{alias}"
+    return _yahoo_class_share(symbol)

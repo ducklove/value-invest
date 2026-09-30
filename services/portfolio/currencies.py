@@ -72,7 +72,7 @@ def infer_yf_currency(ticker: str) -> str:
     ticker = (ticker or "").strip().upper()
     if ticker.endswith(".T"):
         return "JPY"
-    if ticker.endswith((".HM", ".HN")):
+    if ticker.endswith((".HM", ".HN", ".VN")):
         return "VND"
     if ticker.endswith(".HK"):
         return "CNY" if is_hong_kong_rmb_counter(ticker) else "HKD"
