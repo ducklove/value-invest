@@ -403,3 +403,37 @@ def test_ux_polish_theme_wiki_badge_and_nps_reload_and_tab_bar_divider():
 
     # P2⑨: 뷰 전환 탭(보유종목/심층 분석)과 표시 옵션(액션/간편/통화) 사이의 구분선.
     assert ".pf-action-toggle::before" in styles
+
+
+def test_ecosystem_tokens_and_theme_boot_precede_the_css_split_contract():
+    # 생태계 공통 토큰(vc-tokens.css)은 CSS 분할 계약(base→…→labs) 바로 앞에 붙는다 —
+    # --vc-* 만 정의하므로 허브 토큰(base.css)과 충돌하지 않고, 뒤의 허브 규칙이 이긴다.
+    # 첫 페인트 테마는 <head> 의 vc:theme-boot 블록(정본 static/ecosystem/vc-theme-boot.js,
+    # scripts/sync-ecosystem.mjs 가 검증·재생성)이 모든 스타일시트보다 먼저 정한다.
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    tokens = html.index('href="./static/ecosystem/vc-tokens.css"')
+    base = html.index('href="./css/base.css"')
+    boot = html.index("<!-- vc:theme-boot --><script>")
+    assert html.count("<!-- vc:theme-boot -->") == 1
+    assert boot < tokens < base
+    assert boot < html.index('<link rel="stylesheet"')
+    canonical = (STATIC / "ecosystem" / "vc-theme-boot.js").read_text(encoding="utf-8").rstrip()
+    assert f"<!-- vc:theme-boot --><script>\n{canonical}\n</script><!-- /vc:theme-boot -->" in html
+    # 허브 CSS 는 --vc-* 를 쓰지 않는다(쓰면 _all_css 변수 정의 검사가 토큰 파일을 모른다).
+    assert "var(--vc-" not in _all_css()
+
+
+def test_ecosystem_scripts_and_header_tool_switcher_are_wired():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    shell = html.index('<script src="./static/ecosystem/vc-shell.js" defer></script>')
+    utils = html.index('<script src="./js/utils.js" defer></script>')
+    links = html.index('<script src="./js/ecosystem-links.js" defer></script>')
+    search = html.index('<script src="./js/search.js" defer></script>')
+    # vc-shell(아이콘·<vc-shell>) → utils(buildApiUrl·portfolioIntegrationHref) → ecosystem-links → search(테마 토글).
+    assert shell < utils < links < search
+    header = html[html.index('<div class="header">'):html.index('<div id="investingView">')]
+    switcher = header.index('<vc-shell tool="value-invest" variant="menu" class="hub-tool-switch"></vc-shell>')
+    assert switcher < header.index('class="theme-toggle"'), "도구 전환은 테마 토글 옆(앞)"
+    shell_css = (STATIC / "css" / "mobile-shell.css").read_text(encoding="utf-8")
+    assert ".header vc-shell.hub-tool-switch { display: inline-block; min-height: 0;" in shell_css
+    assert ".header:has(vc-shell.hub-tool-switch[open]) { z-index: 890; }" in shell_css

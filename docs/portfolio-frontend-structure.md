@@ -35,9 +35,25 @@ defer로 로드한다. CDN의 가변 버전 대신 저장소에 포함한 고정
 `initApp()`은 인증 후 URL에 맞는 화면을 먼저 열고 최근 목록·시장 지표·시장바 설정을
 병렬로 준비한다. 브라우저 계약 검증은 `npm run test:e2e`로 실행한다.
 
+2026-09-30 (생태계 통합): `<head>`의 `<!-- vc:theme-boot -->` 블록이 모든 스타일시트보다
+먼저 테마를 정한다(`?theme=light|dark` > localStorage `theme` > OS 설정, `?theme`은 저장하지
+않음). 블록 내용의 정본은 `static/ecosystem/vc-theme-boot.js`이고 손으로 고치지 않는다 —
+`node scripts/sync-ecosystem.mjs`가 허브 index.html 블록까지 검증하고 `--write`가 재생성한다.
+`search.js`의 테마 코드도 같은 우선순위를 따르며, 저장된 선택이 없으면 OS 설정 변경을 따라간다.
+
+CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS 계약(`base.css`→…→`labs.css`)
+**바로 앞**에 온다. `--vc-*` 변수만 정의하고 값은 `base.css`와 같아 허브 화면은 바뀌지 않는다
+(부수 효과는 `color-scheme` 선언과 `vc-shell` 높이 예약뿐). 허브 CSS는 `var(--vc-*)`를 쓰지 않는다.
+
 `static/index.html`은 아래 순서로 포트폴리오 기능을 로드한다. 순서가 곧 의존성 계약이므로 임의로 바꾸지 않는다.
 
+0. `./static/ecosystem/vc-shell.js`: 생태계 도구 전환(`<vc-shell tool="value-invest" variant="menu">`,
+   헤더의 테마 토글 옆)과 `VCShell` API(아이콘 스프라이트 등). 의존성 없음 — `utils.js` 앞.
 1. `utils.js`: 공통 API fetch, 포맷, 앱 설정, markdown 렌더링.
+1a. `ecosystem-links.js`: `APP_CONFIG.ecosystem`(레지스트리 공개 투영) 헬퍼 — 형제 대시보드
+   딥링크(stockLink/viewLink), 도구 화면 '연결 대시보드'(`/go/{id}` 새 탭), 분석 헤더 칩이 쓰는
+   `ecoStockTools`·`ecoArrivalTool`·`ecoLinkHref`, iframe 메시지 브리지(`vc:ready`/`vc:height`/
+   `vc:theme`/`vc:open-stock` + bond-mate 구 `height`). 다른 파일은 `typeof`로 확인하고 쓴다.
 2. `stock-hover-chart.js`: 종목 hover 당일 일중(1일) 그래프 툴팁 — utils.js(`apiFetchJson`, `escapeHtml`)만 의존하는 전 화면 공통 위임 핸들러. 새 표면은 요소에 `data-candle-code`를 붙이면 자동 적용.
 3. `portfolio-trend-chart.js`: NAV/평가금액 추이용 canvas chart adapter.
 4. `quote-manager.js`: WebSocket 시세와 polling fallback lifecycle.
@@ -70,6 +86,16 @@ defer로 로드한다. CDN의 가변 버전 대신 저장소에 포함한 고정
 29. `portfolio-events.js`: document-level delegated event handlers.
 30. `insights.js`: 인사이트 목록 UI.
 31. `app-main.js`: 앱 초기화와 전역 lifecycle 연결.
+
+## 딥링크 (2026-09-30)
+
+| 주소 | 동작 | 코드 |
+|---|---|---|
+| `/analysis?code=CODE` | 분석 성공 시 `history.replaceState`로 되쓴다. `?theme`은 적용 후 걷어내고 `?from`은 같은 종목일 때만 유지. 뒤로/앞으로가기는 `popstate`가 다른 종목일 때만 다시 분석 | `analysis.js` `syncAnalysisUrl`, `app-main.js` |
+| `/analysis?code=CODE&from=<도구 id>` | 레지스트리 공개 도구면 헤더에 '← {도구}(으)로 돌아가기' 칩(그 도구 stockLink, 같은 종목) | `analysis-valuation.js` `renderAnalysisToolLinks` |
+| `/portfolio?focus=CODE` | 보유 행으로 한 번 스크롤하고 4초 강조(보유하지 않으면 조용히 무시) | `portfolio-render.js` `pfFocusHolding` |
+| `/bonds?view=<탭>` | bond-mate 임베드 탭 선택(레지스트리 viewLink.accepts), 탭 전환은 URL을 되쓴다 | `market-bond-mate.js` |
+| `?theme=light\|dark` | 모든 화면 — 첫 페인트 전 적용, 저장하지 않음 | vc:theme-boot, `search.js` |
 
 ## Legacy Entrypoint
 

@@ -784,3 +784,74 @@ test("gold research tool works without insight data and keeps theme before the f
   assert.equal(url.hash, '#gold-history');
   assert.equal(new URL(links[3].href).hash, '#investing');
 });
+
+// --- 생태계 레지스트리: index-popup 주소 · 분석 도구 카드 딥링크 · vc:ready 테마 postMessage ---
+const ECO_TOOLS = {
+  version: 1,
+  hub: "https://ducklove.duckdns.org:3691",
+  categories: [],
+  tools: [
+    { id: "index-popup", url: "https://widgets.example.org:4443", deploy: "self-hosted", themeParam: true,
+      viewLink: { template: "?index={view}", accepts: "^[a-z0-9_-]{1,32}$" }, embed: { template: "?headless=1" } },
+    { id: "holding_value", url: "https://ducklove.github.io/holding_value", deploy: "github-pages", themeParam: true,
+      stockLink: { template: "?code={code}", accepts: "^[0-9A-Z]{6}$" } },
+    { id: "spac-hunter", url: "https://ducklove.github.io/spac-hunter", deploy: "github-pages", themeParam: true,
+      stockLink: { template: "?code={code}", accepts: "^[0-9A-Z]{6}$" } },
+  ],
+};
+
+function loadWithEcosystem(ecosystem) {
+  const dom = new JSDOM("<!doctype html><html><body><div id='externalTools'></div></body></html>",
+    { runScripts: "dangerously", url: "https://app.example.com/" });
+  dom.window.APP_CONFIG = { ecosystem };
+  for (const src of [UTILS, read("ecosystem-links.js"), DASH]) {
+    const s = dom.window.document.createElement("script");
+    s.textContent = src;
+    dom.window.document.body.appendChild(s);
+  }
+  return dom.window;
+}
+
+test("index-popup 위젯 주소는 레지스트리 url 을 따르고, 없으면 기존 상수로 폴백한다", () => {
+  const w = loadWithEcosystem(ECO_TOOLS);
+  assert.equal(w._mdIndexFrameUrl("ekospi"), "https://widgets.example.org:4443/?index=ekospi&theme=light&period=1D&headless=1");
+  assert.match(w._mdIndexFrameHtml("KOSPI", "KOSPI"), /data-vc-tool="index-popup"/);
+  w.close();
+  const legacy = load();
+  assert.equal(legacy._mdIndexFrameUrl("ekospi"), "https://ducklove.duckdns.org:3358/?index=ekospi&theme=light&period=1D&headless=1");
+  legacy.close();
+});
+
+test("vc:ready 를 보낸 지수 위젯은 테마를 postMessage 로 받고 src 는 그대로다", () => {
+  const w = loadWithEcosystem(ECO_TOOLS);
+  w.document.body.insertAdjacentHTML("beforeend", w._mdIndexFrameHtml("KOSPI", "KOSPI") + w._mdIndexFrameHtml("KOSDAQ", "KOSDAQ"));
+  const [ready, legacyFrame] = w.document.querySelectorAll("iframe[data-md-frame-index]");
+  const posted = [];
+  ready.contentWindow.postMessage = (message, origin) => posted.push(JSON.parse(JSON.stringify({ message, origin })));
+  w.dispatchEvent(new w.MessageEvent("message", {
+    data: { source: "vc", type: "vc:ready" }, origin: "https://widgets.example.org:4443", source: ready.contentWindow,
+  }));
+  const readySrc = ready.getAttribute("src");
+  w.document.documentElement.setAttribute("data-theme", "dark");
+  w.syncMarketDashboardFrameTheme();
+  assert.equal(ready.getAttribute("src"), readySrc);
+  assert.deepEqual(posted.at(-1), { message: { source: "vc", type: "vc:theme", theme: "dark" }, origin: "https://widgets.example.org:4443" });
+  assert.match(legacyFrame.getAttribute("src"), /index=kosdaq&theme=dark/, "a child that never said vc:ready keeps the src reload");
+  w.close();
+});
+
+test("분석 도구 카드의 종목 딥링크는 레지스트리 stockLink 로 만든다(지주사·스팩만)", () => {
+  const w = loadWithEcosystem(ECO_TOOLS);
+  const root = w.document.getElementById("externalTools");
+  w._extRender(root, {
+    holding: { url: "https://ducklove.github.io/holding_value/", top: [{ code: "000670", name: "영풍", ratio: 700 }, { code: "bad code", name: "x", ratio: 1 }] },
+    spac: { url: "https://ducklove.github.io/spac-hunter/", top: [{ code: "123450", name: "스팩", currentPrice: 2000 }] },
+    spread: { url: "https://ducklove.github.io/common_preferred_spread/", top: [{ code: "005935", name: "삼성전자우", spread: 20 }] },
+  });
+  const hrefs = [...root.querySelectorAll("a.ext-row")].map((a) => a.getAttribute("href"));
+  assert.ok(hrefs.includes("https://ducklove.github.io/holding_value/?code=000670&theme=light"), hrefs.join(" "));
+  assert.ok(hrefs.includes("https://ducklove.github.io/holding_value/?theme=light"), "codes the tool does not accept go to the tool home");
+  assert.ok(hrefs.includes("https://ducklove.github.io/spac-hunter/?code=123450&theme=light"));
+  assert.ok(hrefs.includes("https://ducklove.github.io/common_preferred_spread/?theme=light"), "spread rows keep linking to the tool home");
+  w.close();
+});

@@ -269,7 +269,7 @@ test('double load is a no-op and the registry excludes internal infrastructure',
   const first = s.w.VCShell;
   s.w.eval(SHELL);
   assert.equal(s.w.VCShell, first);
-  assert.equal(first.version, '1.0.0');
+  assert.equal(first.version, '1.1.0'); // 1.1.0: variant="menu" + VCShell.icon (additive)
   const text = JSON.stringify(first.tools);
   for (const needle of ['192.168.', ':3288', ':8400', 'finance-pi', 'kis-proxy', 'vendor']) assert.ok(!text.includes(needle), needle);
   assert.equal(SHELL.includes('fetch('), false, 'no network requests');
@@ -314,4 +314,62 @@ test('links never leave http(s), even if a registry url were tampered with', () 
   const item = dom.window.document.querySelector('vc-shell').shadowRoot.querySelector('[data-tool="holding_value"]');
   assert.doesNotMatch(item.getAttribute('href'), /javascript:/i);
   dom.window.close();
+});
+
+// --- variant="menu": the hub header's compact tool switcher -------------------------------
+const HUB = 'https://ducklove.duckdns.org:3691/analysis?code=005930';
+const HUB_MENU = '<header id="hdr"><vc-shell tool="value-invest" variant="menu"></vc-shell></header><main id="app">app</main>';
+
+test('variant="menu" renders only the switch button + the same popover (no bar, brand or stock chip)', () => {
+  const s = setup({ url: HUB, body: HUB_MENU });
+  const sr = s.el.shadowRoot;
+  assert.equal(sr.querySelector('.bar'), null);
+  assert.equal(sr.querySelector('a.brand'), null);
+  assert.equal(sr.querySelector('a[data-stock-link]'), null);
+  const button = sr.querySelector('button.current.compact');
+  assert.ok(button);
+  assert.equal(button.getAttribute('aria-haspopup'), 'menu');
+  assert.equal(button.getAttribute('aria-label'), 'Value Compass 도구 전환');
+  const items = [...sr.querySelectorAll('[role="menuitem"]')].map(a => a.dataset.tool);
+  const full = setup({ url: HUB, body: '<vc-shell tool="value-invest"></vc-shell>' });
+  assert.deepEqual(items, [...full.el.shadowRoot.querySelectorAll('[role="menuitem"]')].map(a => a.dataset.tool),
+    'same registry-driven popover as the full bar');
+  full.w.close();
+  assert.deepEqual([...sr.querySelectorAll('[aria-current]')].map(a => a.dataset.tool), ['value-invest']);
+
+  // open / close reflect on the host ([open]) so the page can lift its header stacking context.
+  button.click();
+  assert.equal(sr.querySelector('.menu').hidden, false);
+  assert.equal(s.el.hasAttribute('open'), true);
+  assert.equal(sr.querySelector('.menu').style.left, '', 'CSS anchors the compact popover, no bar offset');
+  s.w.document.getElementById('app').click();
+  assert.equal(sr.querySelector('.menu').hidden, true);
+  assert.equal(s.el.hasAttribute('open'), false);
+  s.w.close();
+});
+
+test('hub menu links: siblings carry from=value-invest, hub pages stay on the current origin', () => {
+  const s = setup({ url: 'http://localhost:8000/portfolio', body: HUB_MENU });
+  const href = id => s.el.shadowRoot.querySelector(`[data-tool="${id}"]`).getAttribute('href');
+  assert.equal(href('holding_value'), 'https://ducklove.github.io/holding_value/?theme=light&from=value-invest');
+  assert.equal(href('hub:screener'), 'http://localhost:8000/screener?theme=light', 'dev/staging hub keeps its own origin');
+  assert.equal(href('value-invest'), 'http://localhost:8000/?theme=light');
+  s.root.setAttribute('data-theme', 'dark');
+  return tick().then(() => {
+    assert.equal(href('holding_value'), 'https://ducklove.github.io/holding_value/?theme=dark&from=value-invest');
+    s.w.close();
+  });
+});
+
+test('variant switch re-renders in place, and the menu variant is hidden when embedded', () => {
+  const s = setup({ url: HUB, body: HUB_MENU });
+  s.el.removeAttribute('variant');
+  assert.ok(s.el.shadowRoot.querySelector('.bar'), 'dropping the variant restores the full bar');
+  s.el.setAttribute('variant', 'menu');
+  assert.equal(s.el.shadowRoot.querySelector('.bar'), null);
+  s.w.close();
+  const e = setup({ url: HUB + '&vc-shell=0', body: HUB_MENU });
+  assert.equal(e.el.hidden, true);
+  assert.equal(e.el.shadowRoot, null);
+  e.w.close();
 });

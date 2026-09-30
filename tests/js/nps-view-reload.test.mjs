@@ -73,3 +73,31 @@ test("npsContent가 없으면 조용히 아무 것도 하지 않는다", () => {
   w.document.getElementById("npsContent").remove();
   assert.doesNotThrow(() => w.loadNpsView());
 });
+
+test("테마 전환: vc:ready 를 보낸 nps-tracker 에는 postMessage, 아니면 기존처럼 src 를 갱신한다", () => {
+  const w = buildDom();
+  w.APP_CONFIG = { ecosystem: { version: 1, hub: "https://ducklove.duckdns.org:3691", categories: [], tools: [
+    { id: "nps-tracker", url: "https://ducklove.github.io/nps-tracker", deploy: "github-pages", themeParam: true },
+  ] } };
+  appendScript(w, read("static", "js", "utils.js"));
+  appendScript(w, read("static", "js", "ecosystem-links.js"));
+  w.loadNpsView();
+  const frame = w.document.querySelector("#npsContent iframe.nps-frame");
+  assert.equal(frame.dataset.vcTool, "nps-tracker");
+
+  // Not ready → reload with the new theme (legacy behaviour).
+  w.document.documentElement.setAttribute("data-theme", "dark");
+  w.syncNpsFrameTheme();
+  assert.match(frame.src, /theme=dark/);
+
+  const posted = [];
+  frame.contentWindow.postMessage = (message) => posted.push(JSON.parse(JSON.stringify(message)));
+  w.dispatchEvent(new w.MessageEvent("message", {
+    data: { source: "vc", type: "vc:ready" }, origin: "https://ducklove.github.io", source: frame.contentWindow,
+  }));
+  const src = frame.src;
+  w.document.documentElement.setAttribute("data-theme", "light");
+  w.syncNpsFrameTheme();
+  assert.equal(frame.src, src, "ready child keeps its document (and scroll position)");
+  assert.deepEqual(posted.at(-1), { source: "vc", type: "vc:theme", theme: "light" });
+});

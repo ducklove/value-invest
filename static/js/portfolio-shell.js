@@ -347,8 +347,15 @@ function switchView(view, options = {}) {
   // 라우팅(app-main.js initApp, 이미 그 URL에 있으므로 다시 쓸 필요 없음)과 (b) popstate
   // 핸들러 자신(브라우저가 이미 URL을 바꿨으므로 여기서 또 pushState 하면 안 됨) 에서 쓴다.
   if (!options.skipHistory) {
-    const path = PF_VIEW_PATHS[view] || '/investing';
-    if (window.location.pathname.replace(/\/+$/, '') !== path) {
+    const viewPath = PF_VIEW_PATHS[view] || '/investing';
+    // 분석 탭으로 돌아올 때 보고 있던 종목이 있으면 /analysis?code= 로 남겨 새로고침·공유가
+    // 같은 종목으로 복원되게 한다(analysis.js 가 분석 성공 때 쓰는 주소와 같은 모양).
+    const code = view === 'analysis' && typeof activeStockCode !== 'undefined' && activeStockCode
+      ? String(activeStockCode) : '';
+    const path = code ? `${viewPath}?code=${encodeURIComponent(code)}` : viewPath;
+    const here = window.location.pathname.replace(/\/+$/, '');
+    const sameCode = new URLSearchParams(window.location.search).get('code') === code;
+    if (here !== viewPath || (code && !sameCode)) {
       history.pushState({ pfView: view }, '', path);
     }
   }
@@ -473,13 +480,18 @@ function loadNpsView({ force = false } = {}) {
   iframe.title = '국민연금 국내주식 포트폴리오';
   iframe.loading = 'lazy';
   iframe.className = 'nps-frame';
+  // 생태계 iframe 메시지 브리지(ecosystem-links.js)가 vc:ready·vc:height 를 이 도구로 매칭한다.
+  iframe.dataset.vcTool = 'nps-tracker';
   iframe.setAttribute('referrerpolicy', 'no-referrer');
   container.classList.add('is-frame');
   container.innerHTML = '';
   container.appendChild(iframe);
 }
-// 테마 토글 시 임베드된 nps-tracker 도 같은 테마로 다시 로드한다(쿼리 갱신).
+// 테마 토글 시 임베드된 nps-tracker 도 같은 테마로 맞춘다. vc:ready 를 보낸 자식이면
+// postMessage(vc:theme)로 바꿔 스크롤을 지키고, 아니면 기존처럼 쿼리를 갱신해 다시 로드한다.
 function syncNpsFrameTheme() {
   const ifr = document.querySelector('#npsContent iframe.nps-frame');
-  if (ifr) ifr.src = _npsFrameSrc();
+  if (!ifr) return;
+  if (typeof ecoPostFrameTheme === 'function' && ecoPostFrameTheme(ifr)) return;
+  ifr.src = _npsFrameSrc();
 }

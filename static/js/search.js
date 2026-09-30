@@ -1,26 +1,72 @@
 // Theme
-function toggleTheme() {
-  const html = document.documentElement;
-  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  html.setAttribute('data-theme', next);
-  localStorage.setItem('theme', next);
-  Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });
+// 우선순위(생태계 계약, docs/ecosystem): ?theme=light|dark(적용만·저장 안 함) >
+// localStorage 'theme' > prefers-color-scheme. 첫 페인트 전 적용은 index.html <head> 의
+// vc:theme-boot 블록(static/ecosystem/vc-theme-boot.js 정본)이 이미 했다 — 여기서는 같은
+// 규칙으로 다시 맞추고(부트 블록이 없던 캐시 HTML 대비), 토글·OS 설정 변경·다른 탭의
+// 변경(vc-shell 의 storage 리스너가 보내는 vc:themechange)을 따라간다.
+function _themeValid(t) { return t === 'light' || t === 'dark' ? t : null; }
+function _themeFromUrl() {
+  try { return _themeValid(new URLSearchParams(window.location.search).get('theme')); } catch (e) { return null; }
+}
+function _themeStored() {
+  try { return _themeValid(localStorage.getItem('theme')); } catch (e) { return null; }
+}
+function _themeSystemQuery() {
+  return window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+}
+function resolveTheme() {
+  const mq = _themeSystemQuery();
+  return _themeFromUrl() || _themeStored() || (mq && mq.matches ? 'dark' : 'light');
+}
+let _themeSyncedFor = null;
+// 테마가 실제로 바뀐 경우에만 차트·임베드 iframe·생태계 링크를 한 번 동기화한다
+// (토글·OS 변경·vc:themechange 가 같은 변경을 겹쳐 알려도 iframe 을 두 번 다시 받지 않는다).
+function _syncThemeDependents() {
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  if (theme === _themeSyncedFor) return;
+  _themeSyncedFor = theme;
+  if (typeof charts !== 'undefined') Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });
   if (typeof syncNpsFrameTheme === 'function') syncNpsFrameTheme();
   if (typeof syncBondsFrameTheme === 'function') syncBondsFrameTheme();
   if (typeof syncMarketDashboardFrameTheme === 'function') syncMarketDashboardFrameTheme();
+  if (typeof ecoRefreshLinks === 'function') ecoRefreshLinks();
+}
+function applyTheme(theme) {
+  const next = _themeValid(theme) || resolveTheme();
+  if (document.documentElement.getAttribute('data-theme') !== next) {
+    document.documentElement.setAttribute('data-theme', next);
+  }
+  _syncThemeDependents();
+  return next;
+}
+// 사용자가 고른 테마는 저장하고, 한 번만 쓰는 ?theme 은 URL 에서 걷어낸다
+// (남겨 두면 새로고침·공유 때 방금 고른 테마를 덮는다).
+function _dropThemeParam() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('theme')) return;
+    params.delete('theme');
+    const query = params.toString();
+    history.replaceState(history.state, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+  } catch (e) { /* URL 정리는 부가 기능 */ }
+}
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem('theme', next); } catch (e) { /* 사생활 보호 모드: 이 페이지에만 적용 */ }
+  _dropThemeParam();
+  applyTheme(next);
   trackEvent('theme_toggle', { theme: next });
 }
 (function initTheme() {
-  const saved = localStorage.getItem('theme');
-  if (saved) {
-    document.documentElement.setAttribute('data-theme', saved);
-    return;
-  }
-  // 사용자가 명시적으로 고른 적이 없으면 OS 다크모드 설정을 따른다(UX 감사 P3).
-  // localStorage 에 저장하지 않아 OS 설정이 바뀌면 다음 방문에도 계속 따라간다.
-  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    document.documentElement.setAttribute('data-theme', 'dark');
-  }
+  document.documentElement.setAttribute('data-theme', resolveTheme());
+  _themeSyncedFor = document.documentElement.getAttribute('data-theme');
+  // 저장된 선택도 ?theme 도 없으면 OS 다크모드 설정을 실시간으로 따라간다(UX 감사 P3).
+  // localStorage 에 저장하지 않으므로 다음 방문에도 계속 OS 설정을 따른다.
+  const mq = _themeSystemQuery();
+  const onSystemChange = () => { if (!_themeFromUrl() && !_themeStored()) applyTheme(); };
+  if (mq && mq.addEventListener) mq.addEventListener('change', onSystemChange);
+  else if (mq && mq.addListener) mq.addListener(onSystemChange);
+  document.addEventListener('vc:themechange', () => _syncThemeDependents());
 })();
 
 // Search

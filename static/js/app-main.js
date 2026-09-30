@@ -155,6 +155,8 @@ async function initApp() {
   //   /insights              → 도구 허브의 인사이트 보드 (직접 URL, 실험)
   //   /screener              → 도구 허브의 밸류 스크리너 (직접 URL)
   //   /?code=005930          → (기존 호환) 분석 탭 + 자동 분석
+  //   /portfolio?focus=005930 → 포트폴리오 탭 + 그 보유 행으로 스크롤·강조
+  //   /bonds?view=fx         → 채권·금리 화면의 해당 bond-mate 탭 (market-bond-mate.js)
   // 서버가 이 path 들을 모두 index.html 로 서빙하므로 SPA 진입 후
   // pathname 만 보고 탭을 정하면 됨.
   const params = new URLSearchParams(window.location.search);
@@ -181,11 +183,14 @@ async function initApp() {
     // 기본 주소도 화면 진입을 실행해야 투자정보 데이터 로딩이 시작된다.
     switchView('investing', { skipHistory: true });
   }
+  if (!code && viewFromPath) _applyViewDeepLink(viewFromPath, params);
   // 모바일 첫 진입은 최상단에서 — 포트폴리오 요약(집계 숫자)이 화면 맨 위라
   // 조금만 밀려 있어도 가장 먼저 가려진다. 기본값 진입과 경로 진입(/portfolio)
   // 모두 대상이고, 데이터가 채워진 뒤의 뒤늦은 위치 복원까지 되돌린다
-  // (holdPageScrollTop 주석 참고). code= 딥링크는 분석 결과로 가는 흐름이라 제외.
-  if (!code && typeof isCompactMobileViewport === 'function' && isCompactMobileViewport()) {
+  // (holdPageScrollTop 주석 참고). code= 딥링크는 분석 결과로 가는 흐름이라 제외하고,
+  // /portfolio?focus= 는 보유 행으로 스크롤하는 흐름이라 맨 위로 되돌리면 안 된다.
+  const focusDeepLink = viewFromPath === 'portfolio' && !!params.get('focus');
+  if (!code && !focusDeepLink && typeof isCompactMobileViewport === 'function' && isCompactMobileViewport()) {
     holdPageScrollTop();
   }
   // URL에 맞는 화면과 필수 데이터부터 시작하고 부가 데이터는 독립적으로 준비한다.
@@ -208,14 +213,35 @@ async function initApp() {
 
 }
 
+// 화면 안의 딥링크 쿼리 — 최초 진입과 뒤로/앞으로가기가 같이 쓴다.
+// (?code 는 분석 흐름이라 호출부가 따로 처리하고, /bonds?view 는 최초 진입 때
+// loadBondsView 가 스스로 읽는다.)
+function _applyViewDeepLink(view, params) {
+  if (view === 'portfolio') {
+    const focus = String(params.get('focus') || '').trim().toUpperCase();
+    if (focus && typeof pfFocusHolding === 'function') pfFocusHolding(focus);
+  }
+}
+
 initApp();
 
 // 뒤로/앞으로가기 복원. switchView 가 매 전환마다 pushState 하므로, 브라우저가 URL을
 // 이미 바꾼 뒤 이 리스너는 화면만 그 URL에 맞춰 동기화한다(skipHistory 로 재-push 방지).
+// /analysis?code=X 는 분석이 성공할 때 analysis.js 가 replaceState 로 남긴 주소다 —
+// 지금 보고 있는 종목과 다르면 그 종목을 다시 분석해 URL 과 화면을 맞춘다.
 window.addEventListener('popstate', () => {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
-  const view = PF_PATH_TO_VIEW[path] || 'investing';
+  const params = new URLSearchParams(window.location.search);
+  const code = String(params.get('code') || '').trim().toUpperCase();
+  const view = code && (path === '/analysis' || path === '/') ? 'analysis' : (PF_PATH_TO_VIEW[path] || 'investing');
   switchView(view, { skipHistory: true, allowMobileLockOverride: true });
+  if (view === 'analysis' && code) {
+    if (code !== String(activeStockCode || '').toUpperCase()) analyzeStock(code);
+  } else if (view === 'bonds' && params.get('view') && typeof loadBondsView === 'function') {
+    loadBondsView({ view: params.get('view') });
+  } else {
+    _applyViewDeepLink(view, params);
+  }
 });
 
 window.addEventListener('pageshow', (event) => {

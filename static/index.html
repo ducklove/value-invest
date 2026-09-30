@@ -3,6 +3,32 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- 첫 페인트 전 테마(?theme > localStorage theme > OS). 정본: static/ecosystem/vc-theme-boot.js —
+     블록 안은 손으로 고치지 말고 `node scripts/sync-ecosystem.mjs --write` 로 재생성한다. -->
+<!-- vc:theme-boot --><script>
+/* vc-theme-boot v1 (value-invest static/ecosystem/vc-theme-boot.js) — pre-paint theme; inlined by sync-ecosystem, do not edit copies. */
+(function () {
+  var d = document.documentElement, p = null, s = null, t, v, i;
+  var legacy = ['bondmate.theme', 'eiayn:theme:v1', 'spac-hunter-theme', 'preferred-theme', 'nps-theme'];
+  try { p = new URLSearchParams(location.search); } catch (e) { p = null; }
+  try {
+    s = localStorage.getItem('theme');
+    if (s === null) {
+      for (i = 0; i < legacy.length && s === null; i++) {
+        v = localStorage.getItem(legacy[i]);
+        if (v && v.charAt(0) === '"') { try { v = JSON.parse(v); } catch (e) { v = null; } }
+        if (v === 'light' || v === 'dark') { s = v; localStorage.setItem('theme', v); }
+      }
+    }
+  } catch (e) { s = null; }
+  t = p && p.get('theme');
+  if (t !== 'light' && t !== 'dark') t = s === 'light' || s === 'dark' ? s : null;
+  if (!t) t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  d.setAttribute('data-theme', t);
+  v = p && p.get('embed');
+  if ((v !== null && v !== undefined && v !== '0' && v !== 'false') || (p && p.get('headless') === '1')) d.setAttribute('data-embed', v || '');
+})();
+</script><!-- /vc:theme-boot -->
 <meta name="description" content="Value Compass는 주식, 포트폴리오, 대체자산을 가치 중심으로 분석하는 투자 인사이트 허브입니다. Value is All You Need.">
 <meta property="og:title" content="Value Compass">
 <meta property="og:description" content="Value is All You Need. 가치 중심의 투자 분석과 포트폴리오 인사이트를 한곳에서 확인하세요.">
@@ -35,6 +61,9 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <!-- echarts loaded lazily on first chart render -->
+<!-- 생태계 공통 토큰(--vc-*) — base.css 와 같은 값이라 허브 화면에는 영향이 없고 <vc-shell> 이 읽는다.
+     base.css 보다 앞(허브 자체 토큰이 뒤에서 이긴다). -->
+<link rel="stylesheet" href="./static/ecosystem/vc-tokens.css">
 <!-- CSS 로드 순서 = 구 styles.css 의 원본 순서(캐스케이드 계약) — 순서 변경 금지 -->
 <link rel="stylesheet" href="./css/base.css">
 <link rel="stylesheet" href="./css/dashboard.css">
@@ -105,6 +134,9 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
       <button class="mobile-auth-logout" onclick="event.stopPropagation(); logout()">로그아웃</button>
     </div>
     <a class="mobile-login" id="mobileLoginBtn" href="#" style="display:none;">로그인</a>
+    <!-- 생태계 도구 전환(▾) — 레지스트리(config/ecosystem.json)에서 만든 팝오버만 쓰는 variant="menu".
+         데스크톱은 테마 토글 옆, 모바일은 슬림 헤더 안에서 바텀시트로 열린다. -->
+    <vc-shell tool="value-invest" variant="menu" class="hub-tool-switch"></vc-shell>
     <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환" aria-label="테마 전환">🌓</button>
   </div>
 
@@ -171,6 +203,8 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
       </div>
     </div>
     <div class="meta" id="companyMeta"></div>
+    <!-- ?from=<도구> 돌아가기 칩 + 이 종목을 받는 연결 도구 칩 (analysis-valuation.js renderAnalysisToolLinks) -->
+    <div class="analysis-eco-links" id="analysisEcoLinks" hidden></div>
     <div class="personalization-panel" id="personalizationPanel">
       <div class="personalization-actions">
         <button class="personalization-btn" id="favoriteBtn" type="button" onclick="toggleFavorite()">관심종목</button>
@@ -847,6 +881,15 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
           <strong>열기 →</strong>
         </a>
       </div>
+      <!-- 레지스트리(APP_CONFIG.ecosystem)의 공개 형제 대시보드 전부 — /api/external/insights
+           데이터 유무와 무관하게 항상 보인다(ecosystem-links.js renderLabEcosystem). -->
+      <section class="lab-ecosystem" id="labEcosystem" aria-labelledby="labEcoTitle" hidden>
+        <div class="lab-eco-head">
+          <h3 id="labEcoTitle">연결 대시보드</h3>
+          <p>Value Compass 생태계의 독립 대시보드입니다. 새 탭에서 지금 테마로 열립니다.</p>
+        </div>
+        <div class="lab-eco-grid" id="labEcoGrid"></div>
+      </section>
     </div>
   </div>
 
@@ -1196,7 +1239,9 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 
 <script src="./js/vendor/marked.js" defer></script>
 <script src="./js/vendor/purify.js" defer></script>
+<script src="./static/ecosystem/vc-shell.js" defer></script>
 <script src="./js/utils.js" defer></script>
+<script src="./js/ecosystem-links.js" defer></script>
 <script src="./js/feature-loader.js" defer></script>
 <script src="./js/stock-hover-chart.js" defer></script>
 <script src="./js/portfolio-trend-chart.js" defer></script>

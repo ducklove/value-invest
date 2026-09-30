@@ -286,3 +286,17 @@ def test_bonds_labs_view_embeds_bond_mate_as_deep_linkable_panel():
     assert ".bonds-page" in styles
     assert ".bonds-tab" in styles
     assert ".bonds-frame" in styles
+
+
+def test_labs_view_has_registry_driven_ecosystem_section():
+    # '연결 대시보드'는 레지스트리(APP_CONFIG.ecosystem)로 ecosystem-links.js 가 그린다 —
+    # /api/external/insights 데이터와 무관하게 labsView 안에 항상 자리가 있다.
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    labs = html[html.index('<div id="labsView"'):html.index('<div id="quantView"')]
+    assert '<section class="lab-ecosystem" id="labEcosystem"' in labs
+    assert '<div class="lab-eco-grid" id="labEcoGrid"></div>' in labs
+    links = (JS / "ecosystem-links.js").read_text(encoding="utf-8")
+    assert "function renderLabEcosystem()" in links
+    assert "ecoGoHref(t.id)" in links, "새 탭 핸드오프는 허브 /go/{id} 경유"
+    css = (STATIC / "css" / "labs.css").read_text(encoding="utf-8")
+    assert css.index(".lab-eco-grid") > css.index(".quant-page"), "새 규칙은 labs.css 끝에"
