@@ -43,6 +43,10 @@ class NavPoint(BaseModel):
     total_invested: FiniteFloat
     total_units: FiniteFloat
     fx_usdkrw: FiniteFloat | None
+    # 정산 기준 경계 이전 행을 최신 구간 척도로 연결했을 때만 채워진다(nav_link).
+    linked: bool | None = None
+    nav_link_factor: FiniteFloat | None = None
+    raw_nav: FiniteFloat | None = None
 
 
 class CashflowDelta(BaseModel):

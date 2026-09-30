@@ -17,7 +17,7 @@ from typing import Any
 
 from repositories import portfolio_reports as reports_repo
 from repositories import snapshots as snapshots_repo
-from services.portfolio import attribution, foreign, identifiers, risk
+from services.portfolio import attribution, foreign, identifiers, nav_link, risk
 from services.portfolio.time_windows import today_kst_date
 
 # v3: holdings.end_snapshot(기간 종료 시점 전체 보유 스냅샷) 추가.
@@ -297,12 +297,12 @@ def build_period_performance(
 
 
 async def period_performance(google_sub: str) -> dict[str, Any]:
-    nav_history = await snapshots_repo.get_nav_history(google_sub)
+    nav_history = await nav_link.get_nav_history(google_sub)
     return build_period_performance(nav_history)
 
 
 async def available_periods(google_sub: str) -> dict[str, Any]:
-    nav_history = await snapshots_repo.get_nav_history(google_sub)
+    nav_history = await nav_link.get_nav_history(google_sub)
     saved = await reports_repo.list_period_reports(google_sub, limit=36)
     periods = _period_keys_from_nav(nav_history)
     periods["saved"] = [_saved_meta(row) for row in saved]
@@ -1050,7 +1050,7 @@ async def build_period_report(
     period_key: str,
 ) -> dict[str, Any]:
     period = period_bounds(period_type, period_key)
-    nav_history = await snapshots_repo.get_nav_history(google_sub)
+    nav_history = await nav_link.get_nav_history(google_sub)
     if not nav_history:
         raise PeriodReportError("포트폴리오 NAV 스냅샷이 없어 보고서를 생성할 수 없습니다.")
 

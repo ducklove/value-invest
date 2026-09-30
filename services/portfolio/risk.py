@@ -1,7 +1,7 @@
 """포트폴리오 NAV 히스토리 기반 리스크 지표 계산 (로드맵 신규 기능 ②).
 
 순수 계산 모듈 — DB/네트워크 의존이 없어 단독으로 단위 테스트할 수 있다.
-routes/portfolio_risk.py 가 repositories.snapshots.get_nav_history() 결과
+routes/portfolio_risk.py 가 services.portfolio.nav_link.get_nav_history() 결과
 ([{date, nav, total_value, ...}] 날짜 오름차순)와
 repositories.benchmark_daily.get_benchmark_rows() 결과([{date, close}])를
 그대로 넘겨 호출한다.

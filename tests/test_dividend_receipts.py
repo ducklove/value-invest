@@ -18,7 +18,7 @@ from repositories.db import get_db, transaction
 from routes import dividend_receipts as receipt_routes
 from routes import portfolio_distributions as distribution_routes
 from services.notifications import engine as notification_engine
-from services.portfolio import attribution, period_reports, risk, snapshot_views
+from services.portfolio import attribution, nav_link, period_reports, risk, snapshot_views
 from services.portfolio import nav_snapshot as snapshot_nav
 
 
@@ -156,7 +156,7 @@ class DividendReceiptTests(TempDbMixin):
         later = await self.settle(12100, next_day)
         self.assertAlmostEqual(later["return_nav"], 1184.6 * 1.1)
         self.assertEqual(later["distribution_per_unit"], 0)
-        history = await snapshots.get_nav_history("u1")
+        history = await nav_link.get_nav_history("u1")
         self.assertAlmostEqual(risk.clean_series(history)[1][1], 1184.6)
         self.assertAlmostEqual(period_reports._nav_points(history, receipt_today())[1]["nav"], 1184.6)
 

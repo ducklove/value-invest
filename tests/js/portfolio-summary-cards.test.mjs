@@ -262,3 +262,33 @@ test('Today 값은 금일 정산 유무와 무관하다(원화·달러)', () => 
     w.close();
   }
 });
+
+test('서버가 기준 경계를 연결한 MTD/YTD 기준점(linked)은 새 기준 NAV 와 비교한다', () => {
+  // 최신 정산은 정규장 기준(NAV 1,000 재시작), 월말·연초는 구 기준 행을 연결한 값.
+  const w = loadSummaryDom();
+  const latest = { date: '2026-10-01', nav: 1000, return_nav: 1000, total_units: 1000,
+    total_value: 1000000, price_basis: 'regular_close_v1' };
+  w.PfStore.items = [{ stock_code: 'CASH_KRW', stock_name: '원화', quantity: 1050000,
+    avg_price: 1, currency: 'KRW', quote: { price: 1, change: 0 } }];
+  w.PfStore.navHistory = [
+    { date: '2026-09-29', nav: 875, return_nav: 875, raw_nav: 860, total_units: 1100,
+      total_value: 946000, price_basis: 'legacy_latest', linked: true, nav_link_factor: 875 / 860 },
+    latest,
+  ];
+  w.PfStore.snapshots.prevDay = { ...latest, today_net_cashflow: 0, today_cashflows: [] };
+  w.PfStore.snapshots.monthEnd = { date: '2026-09-30', total_value: 900000, nav: 875, return_nav: 875,
+    price_basis: 'legacy_latest', linked: true, nav_link_factor: 1.01, net_cashflow: 0, stock_values: {} };
+  w.PfStore.snapshots.yearStart = { date: '2025-12-31', total_value: 700000, nav: 700, return_nav: 700,
+    price_basis: 'legacy_latest', linked: true, nav_link_factor: 1.01, net_cashflow: 0, stock_values: {} };
+  w.renderPortfolio({ summaryOnly: true });
+  // 현재 NAV = 1,050,000 / 1,000좌 = 1,050
+  assert.equal(cardByLabel(w, 'MTD').querySelector('.pf-summary-value').textContent, '+20.00%'); // 1050/875
+  assert.equal(cardByLabel(w, 'YTD').querySelector('.pf-summary-value').textContent, '+50.00%'); // 1050/700
+  assert.match(cardByLabel(w, 'YTD').textContent, /손익\s*\+350,000/); // 금액은 원래 평가액 기준
+
+  // 연결 표시가 없는 구 기준 행(연결 불가)은 여전히 비교하지 않는다.
+  w.PfStore.snapshots.yearStart = { ...w.PfStore.snapshots.yearStart, linked: undefined };
+  w.renderPortfolio({ summaryOnly: true });
+  assert.equal(cardByLabel(w, 'YTD').querySelector('.pf-summary-value').textContent, '-');
+  w.close();
+});

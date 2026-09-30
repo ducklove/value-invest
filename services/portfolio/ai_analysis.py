@@ -32,12 +32,11 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 import ai_config
 from core.http import get_http_client, shared_http_client
 from repositories import portfolio as portfolio_repo
-from repositories import snapshots as snapshots_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
 from services.market import indicators as market_indicators
 from services.market.formatting import format_indicator_change as _market_summary_change
-from services.portfolio import quote_service
+from services.portfolio import nav_link, quote_service
 
 logger = logging.getLogger(__name__)
 
@@ -377,7 +376,7 @@ async def prepare_analysis(payload: dict, user: dict) -> AnalysisContext:
 
     enriched = await quote_service.enrich_with_cached_quotes(items)
     holdings_lines, total_value = holdings_summary(enriched)
-    perf_lines = performance_lines(await snapshots_repo.get_nav_history(google_sub))
+    perf_lines = performance_lines(await nav_link.get_nav_history(google_sub))
     market_lines = await market_summary_lines()
     wiki_lines, wiki_used_count = await wiki_research_lines(enriched)
 

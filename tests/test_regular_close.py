@@ -9,7 +9,7 @@ from _harness import seed_user
 from repositories import portfolio, settlement_inputs, snapshots
 from repositories.db import transaction
 from services.market.sources import yahoo
-from services.portfolio import foreign, regular_close, snapshot_views, time_windows
+from services.portfolio import foreign, nav_link, regular_close, snapshot_views, time_windows
 
 DAY = "2026-09-30"
 CUTOFF = DAY + "T15:30:00.000"
@@ -136,9 +136,19 @@ async def test_legacy_segment_preserved_without_fake_transition_return(temp_db):
         await db.execute("UPDATE portfolio_snapshots SET price_basis='legacy_latest'")
     with patch.object(time_windows, "now_kst", return_value=NOW), patch.object(regular_close.kis_proxy_client, "get_quote", AsyncMock(return_value={"raw": {"stck_prpr": 200}})):
         await regular_close.settle("u1", DAY)
-    assert len(await snapshots.get_nav_history("u1")) == 1
-    assert len(await snapshots.get_nav_history("u1", include_legacy=True)) == 2
-    assert (await snapshot_views.regular_performance("u1", DAY))["change_pct"] is None
+    raw = await nav_link.get_nav_history("u1", include_legacy=True)
+    assert [r["nav"] for r in raw] == [1000, 1000]  # 새 기준 첫 날은 NAV 1,000 재시작
+    assert not any(r.get("linked") for r in raw)
+    linked = await nav_link.get_nav_history("u1")
+    assert len(linked) == 2 and linked[0]["linked"] and linked[0]["price_basis"] == "legacy_latest"
+    # 입출금 없는 전환: 연결된 일간 NAV 수익률 = 평가액 수익률 12000/11000 − 1
+    assert linked[1]["return_nav"] / linked[0]["return_nav"] == pytest.approx(12000 / 11000)
+    # 정산 브리핑의 전환일 성과도 연결 이력과 같은 값이다(비교 보류가 아니다).
+    summary = await snapshot_views.regular_performance("u1", DAY)
+    assert summary["comparison_unavailable"] is False
+    assert summary["change_pct"] == pytest.approx((12000 / 11000 - 1) * 100)
+    assert summary["change_pct"] == pytest.approx((linked[1]["return_nav"] / linked[0]["return_nav"] - 1) * 100)
+    assert summary["change_krw"] == 1000
     assert (await snapshots.get_snapshot_by_date("u1", "2026-09-29"))["nav"] == 1000
 
 

@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from repositories import snapshots
 from repositories.db import read_snapshot
+from services.portfolio import nav_link
 from services.portfolio.time_windows import settlement_marker_seconds
 
 
@@ -13,10 +14,20 @@ async def regular_performance(user: str, day: str) -> dict | None:
     if not current or current.get("price_basis") != "regular_close_v1":
         return None
     previous = await snapshots.get_latest_snapshot_before_date(user, day)
-    comparable = bool(previous and previous.get("price_basis") == current["price_basis"])
-    flows = await snapshots.get_cashflows(user)
-    flows = [r for r in flows if r.get("applied_snapshot_date") == day]
-    net = sum(r["amount"] * (1 if r["type"] == "deposit" else -1) for r in flows)
+    link_factor = None
+    if previous and previous.get("price_basis") != current["price_basis"]:
+        # 새 기준 첫 날: 이전 구간 마지막 정산과 NAV 를 연결해 비교한다(nav_link 와 같은
+        # 규칙 — 연결 이력의 전환일 수익률과 같은 값). 연결할 수 없을 때만 비교 보류.
+        net = await nav_link.boundary_net_cashflow(user, previous, current)
+        link_factor = nav_link.link_factor(previous, current, net)
+        comparable = link_factor is not None
+        if comparable:
+            previous = {**previous, "return_nav": previous["return_nav"] * link_factor}
+    else:
+        comparable = previous is not None
+        flows = await snapshots.get_cashflows(user)
+        flows = [r for r in flows if r.get("applied_snapshot_date") == day]
+        net = sum(r["amount"] * (1 if r["type"] == "deposit" else -1) for r in flows)
     pnl = current["total_value"] - previous["total_value"] - net if comparable else None
     pct = (current["return_nav"] / previous["return_nav"] - 1) * 100 if comparable and previous["return_nav"] > 0 else None
     after = await snapshots.get_cashflows_created_after(user, current["cashflow_cutoff_at"])
@@ -33,7 +44,8 @@ async def regular_performance(user: str, day: str) -> dict | None:
             "change_krw": pnl, "change_pct": pct, "net_cashflow": net,
             "change_usd": usd_change, "change_usd_pct": usd_pct, "value_change_usd": usd_value_change,
             "after_close_net_cashflow": after_net, "source": "regular_close",
-            "comparison_unavailable": not comparable}
+            "comparison_unavailable": not comparable,
+            "prev_nav_link_factor": link_factor}
 
 
 async def net_cashflow_since_snapshot(user: str, snap_date: str) -> tuple[float, dict[str, float]]:
@@ -66,7 +78,7 @@ async def previous_day(user: str, baseline_date: str) -> dict:
     net = 0.0
     by_stock = {}
     for row in rows:
-        signed = row["amount"] if row["type"] == "deposit" else -row["amount"] if row["type"] in {"withdrawal", "distribution"} else 0
+        signed = nav_link.signed_cashflow(row)
         net += signed
         if signed:
             cashflows.append({**row, "signed_amount": signed})
@@ -90,9 +102,12 @@ async def previous_day(user: str, baseline_date: str) -> dict:
 @read_snapshot()
 async def period_start(user: str, *, yearly: bool = False) -> dict:
     snapshot = await (snapshots.get_year_start_snapshot(user) if yearly else snapshots.get_month_end_snapshot(user))
-    latest = await snapshots.get_latest_snapshot(user)
-    if snapshot and latest and snapshot.get("price_basis") != latest.get("price_basis"):
+    # 기준점 뒤에 정산 기준 변경이 있으면 NAV 계열 값만 최신 구간 척도로 연결한다.
+    # 금액(total_value)·종목별 금액·입출금은 원래 값 그대로다.
+    linked = await nav_link.link_snapshot(user, snapshot)
+    if snapshot and linked is None:
         return {"stock_values": {}, "comparison_unavailable": True, "reason": "정산 기준 변경"}
+    snapshot = linked
     result = dict(snapshot) if snapshot else {}
     result["stock_values"] = {}
     if snapshot and snapshot.get("date"):
