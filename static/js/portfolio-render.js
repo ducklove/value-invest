@@ -397,9 +397,12 @@ function renderPortfolio(options = {}) {
   // pnl = 입출금 차감 손익 (%와 같은 의미축), valueChange = 평가액 변동(입금 포함).
   // crossBasis: 정산 기준(price_basis)이 달라도 금액 비교는 한다(Today 전용). NAV 는
   // 새 기준 첫날 1,000 으로 다시 시작하므로 이때 NAV 수익률은 쓰지 않는다.
+  // 단, 서버가 기준 경계를 연결해 준 기준점(linked=true, MTD/YTD)은 NAV 가 이미
+  // 최신 구간 척도라 같은 기준으로 비교한다(services/portfolio/nav_link.py).
   const _periodReturn = (snap, navField, { crossBasis = false } = {}) => {
     if (!snap) return { pct: null, pnl: null, valueChange: null };
-    const sameBasis = !(latestSnap?.price_basis && (snap.price_basis || 'legacy_latest') !== latestSnap.price_basis);
+    const sameBasis = Boolean(snap.linked)
+      || !(latestSnap?.price_basis && (snap.price_basis || 'legacy_latest') !== latestSnap.price_basis);
     if (!sameBasis && !crossBasis) {
       return { pct: null, pnl: null, valueChange: null };
     }

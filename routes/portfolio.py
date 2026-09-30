@@ -39,6 +39,7 @@ from services.portfolio import (
     fx,
     insights,
     names,
+    nav_link,
     quote_service,
     snapshot_views,
     spac,
@@ -1213,7 +1214,7 @@ async def get_year_start_value(request: Request):
 @router.get("/api/portfolio/nav-history", response_model=list[NavPoint], response_model_exclude_unset=True)
 async def get_nav_history(request: Request, include_legacy: bool = False):
     user = _require_user(await get_current_user(request))
-    return await snapshots_repo.get_nav_history(user["google_sub"], include_legacy=include_legacy)
+    return await nav_link.get_nav_history(user["google_sub"], include_legacy=include_legacy)
 
 
 @router.get("/api/portfolio/group-weight-history")

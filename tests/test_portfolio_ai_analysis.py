@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from repositories import portfolio as portfolio_repo
-from repositories import snapshots as snapshots_repo
 from services.portfolio import ai_analysis
 
 _PROFILES = {"fast": "m-fast", "balanced": "m-bal", "premium": "m-prem"}
@@ -205,7 +204,7 @@ async def test_prepare_analysis_builds_context_and_clamps_query():
          patch.object(ai_analysis, "resolve_model", new=AsyncMock(return_value=("m-bal", "balanced"))), \
          patch.object(portfolio_repo, "get_portfolio", new=AsyncMock(return_value=items)), \
          patch.object(ai_analysis.quote_service, "enrich_with_cached_quotes", new=AsyncMock(return_value=enriched)), \
-         patch.object(snapshots_repo, "get_nav_history", new=AsyncMock(return_value=[])), \
+         patch.object(ai_analysis.nav_link, "get_nav_history", new=AsyncMock(return_value=[])), \
          patch.object(ai_analysis, "market_summary_lines", new=AsyncMock(return_value=["- KOSPI: 3000"])), \
          patch.object(ai_analysis, "wiki_research_lines", new=AsyncMock(return_value=(["### 삼성전자 (005930)"], 1))):
         ctx = await ai_analysis.prepare_analysis({"query": long_query}, {"google_sub": "u1"})
@@ -226,7 +225,7 @@ async def test_prepare_analysis_uses_medium_reasoning_for_premium_profile():
          patch.object(ai_analysis, "resolve_model", new=AsyncMock(return_value=("openai/gpt-5.6-terra", "premium"))), \
          patch.object(portfolio_repo, "get_portfolio", new=AsyncMock(return_value=[item])), \
          patch.object(ai_analysis.quote_service, "enrich_with_cached_quotes", new=AsyncMock(return_value=[{**item, "quote": {}}])), \
-         patch.object(snapshots_repo, "get_nav_history", new=AsyncMock(return_value=[])), \
+         patch.object(ai_analysis.nav_link, "get_nav_history", new=AsyncMock(return_value=[])), \
          patch.object(ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
          patch.object(ai_analysis, "wiki_research_lines", new=AsyncMock(return_value=([], 0))):
         ctx = await ai_analysis.prepare_analysis({"profile": "premium"}, {"google_sub": "u1"})

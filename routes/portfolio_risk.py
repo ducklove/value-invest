@@ -2,7 +2,7 @@
 
 GET /api/portfolio/risk?window=1Y&benchmark=IDX_KOSPI
 
-NAV 스냅샷 히스토리(repositories.snapshots.get_nav_history)와 벤치마크 일별
+NAV 스냅샷 히스토리(services.portfolio.nav_link.get_nav_history, 기준 경계 연결)와 벤치마크 일별
 종가(repositories.benchmark_daily.get_benchmark_rows)를 읽어
 services.portfolio.risk 의 순수 계산 모듈에 넘긴다. 스냅샷은 하루 한 번
 갱신되므로 결과는 사용자+윈도+벤치마크 키로 10분 TTL 메모리 캐시.
@@ -20,8 +20,7 @@ from cache_layer import MemoryTTLCache
 from deps import get_current_user
 from deps import require_user as _require_user
 from repositories import benchmark_daily as benchmark_daily_repo
-from repositories import snapshots as snapshots_repo
-from services.portfolio import benchmark_history, benchmarks, risk
+from services.portfolio import benchmark_history, benchmarks, nav_link, risk
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -72,7 +71,7 @@ async def get_portfolio_risk(
     if cached is not None:
         return cached
 
-    nav_series = await snapshots_repo.get_nav_history(user["google_sub"])
+    nav_series = await nav_link.get_nav_history(user["google_sub"])
     bench_rows: list[dict] = []
     if nav_series:
         # NAV 시리즈 시작일 이후 구간만 읽는다(교집합 밖 데이터는 쓸 일 없음).

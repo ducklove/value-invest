@@ -335,14 +335,40 @@ async def get_nav_input_state(google_sub: str) -> tuple:
     return tuple(state)
 
 
-async def get_nav_history(google_sub: str, *, include_legacy: bool = False) -> list[dict]:
+async def get_raw_nav_history(google_sub: str) -> list[dict]:
+    """저장된 NAV 행 전체, 날짜 오름차순. 정산 기준(price_basis) 구간마다 NAV 척도가 다르다.
+
+    수익률·차트용 이력은 기준 경계를 연결하는
+    ``services.portfolio.nav_link.get_nav_history`` 를 쓴다. 이 함수는 감사
+    (``include_legacy=true``)와 연결 계산의 원자료다.
+    """
     db = await get_db()
     cursor = await db.execute(
         "SELECT date, nav, total_value, total_invested, total_units, fx_usdkrw, distribution_per_unit, return_factor, price_basis, cashflow_cutoff_at FROM portfolio_snapshots WHERE google_sub = ? ORDER BY date ASC",
         (google_sub,),
     )
-    rows = [_return_snapshot(row) for row in await cursor.fetchall()]
-    return rows if include_legacy or not rows else [r for r in rows if r["price_basis"] == rows[-1]["price_basis"]]
+    return [_return_snapshot(row) for row in await cursor.fetchall()]
+
+
+async def get_basis_boundaries(google_sub: str, after_date: str | None = None) -> list[tuple[dict, dict]]:
+    """정산 기준이 바뀐 인접 스냅샷 쌍 [(이전 구간 마지막 행, 새 구간 첫 행)], 날짜 오름차순.
+
+    ``after_date`` 를 주면 새 구간 첫 행이 그 날짜보다 뒤인 경계만 돌려준다.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT prev_date, date FROM ("
+        " SELECT date, price_basis, LAG(price_basis) OVER (ORDER BY date) AS prev_basis,"
+        " LAG(date) OVER (ORDER BY date) AS prev_date"
+        " FROM portfolio_snapshots WHERE google_sub = ?"
+        ") WHERE prev_basis IS NOT NULL AND prev_basis != price_basis AND date > ? ORDER BY date",
+        (google_sub, after_date or ""),
+    )
+    pairs = []
+    for row in await cursor.fetchall():
+        pairs.append((await get_snapshot_by_date(google_sub, row["prev_date"]),
+                      await get_snapshot_by_date(google_sub, row["date"])))
+    return pairs
 
 
 async def get_group_weight_history(google_sub: str) -> list[dict]:

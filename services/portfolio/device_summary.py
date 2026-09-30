@@ -422,7 +422,10 @@ async def build_summary(
     day_pnl, day_pct = period(baseline["snapshot"], subtract_cashflow=True)
     latest = await snapshots_repo.get_latest_snapshot(google_sub)
     if year_start and latest and year_start.get("price_basis") != latest.get("price_basis"):
-        year_start = None
+        # 연초 기준점과 최신 정산의 기준이 다르면 NAV 를 연결해 비교한다(웹 YTD 와 같은
+        # services/portfolio/nav_link 규칙). 연결할 수 없을 때만 YTD 를 비운다.
+        from services.portfolio import nav_link
+        year_start = await nav_link.link_snapshot(google_sub, year_start)
     ytd_pnl, ytd_pct = period(year_start, subtract_cashflow=False)
     from services.portfolio.snapshot_views import regular_performance
     closing = await regular_performance(google_sub, time_windows.today_kst_date().isoformat())

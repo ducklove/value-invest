@@ -12,6 +12,7 @@ from math import isclose
 from repositories import investment_insights as repo
 from repositories import snapshots
 from repositories.db import read_snapshot
+from services.portfolio import nav_link
 from services.portfolio.identifiers import is_korean_stock, is_special_asset
 from services.portfolio.theses import number
 from services.portfolio.time_windows import today_kst_date
@@ -118,7 +119,7 @@ async def build_attribution(user: str, start: str, end: str) -> dict:
     start_date, end_date = date.fromisoformat(start), date.fromisoformat(end)
     if start_date > end_date or end_date > today or (end_date-start_date).days > 3660:
         raise ValueError("기간은 과거부터 오늘까지, 최대 10년으로 지정해 주세요.")
-    nav = [row for row in await snapshots.get_nav_history(user)
+    nav = [row for row in await nav_link.get_nav_history(user)
            if row["date"] <= end and number(row.get("total_value")) is not None]
     before = [row for row in nav if row["date"] < start]
     inside = [row for row in nav if start <= row["date"] <= end]

@@ -217,6 +217,25 @@ class DeviceSummaryTests(BuildSummaryMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["ytd_pnl_pct"], 37.33)     # NAV 기준 성과
         self.assertEqual(result["ytd_pnl"], -488_000)      # 412,000 - 900,000
 
+    async def test_ytd_across_price_basis_change_uses_linked_year_start_nav(self):
+        """연초가 구 기준(legacy)이고 최신이 정규장 기준이면 연결된 NAV 로 비교한다."""
+        latest = {**LATEST, "price_basis": "regular_close_v1"}
+        year_start = {**YEAR_START, "price_basis": "legacy_latest"}
+        linked = {**year_start, "nav": 2500.0, "return_nav": 2500.0, "linked": True, "nav_link_factor": 2500 / 3000}
+        with patch("services.portfolio.nav_link.link_snapshot", new=AsyncMock(return_value=linked)) as link:
+            result = await self._build(latest=latest, year_start=year_start)
+        link.assert_awaited_once_with("sub-1", year_start)
+        self.assertEqual(result["ytd_pnl_pct"], 64.8)   # 4,120 / 2,500 - 1
+        self.assertEqual(result["ytd_pnl"], 112_000)    # 금액은 연결과 무관한 평가액 차이
+
+    async def test_ytd_is_blank_only_when_the_basis_change_cannot_be_linked(self):
+        latest = {**LATEST, "price_basis": "regular_close_v1"}
+        year_start = {**YEAR_START, "price_basis": "legacy_latest"}
+        with patch("services.portfolio.nav_link.link_snapshot", new=AsyncMock(return_value=None)):
+            result = await self._build(latest=latest, year_start=year_start)
+        self.assertIsNone(result["ytd_pnl_pct"])
+        self.assertIsNone(result["ytd_pnl"])
+
     async def test_missing_snapshots_leave_returns_blank_not_zero(self):
         result = await self._build(baseline=None, year_start=None, latest=None)
         self.assertIsNone(result["day_pnl"])

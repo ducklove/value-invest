@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from repositories import snapshots
 from repositories.db import read_snapshot
+from services.portfolio import nav_link
 from services.portfolio.time_windows import settlement_marker_seconds
 
 
@@ -66,7 +67,7 @@ async def previous_day(user: str, baseline_date: str) -> dict:
     net = 0.0
     by_stock = {}
     for row in rows:
-        signed = row["amount"] if row["type"] == "deposit" else -row["amount"] if row["type"] in {"withdrawal", "distribution"} else 0
+        signed = nav_link.signed_cashflow(row)
         net += signed
         if signed:
             cashflows.append({**row, "signed_amount": signed})
@@ -90,9 +91,12 @@ async def previous_day(user: str, baseline_date: str) -> dict:
 @read_snapshot()
 async def period_start(user: str, *, yearly: bool = False) -> dict:
     snapshot = await (snapshots.get_year_start_snapshot(user) if yearly else snapshots.get_month_end_snapshot(user))
-    latest = await snapshots.get_latest_snapshot(user)
-    if snapshot and latest and snapshot.get("price_basis") != latest.get("price_basis"):
+    # 기준점 뒤에 정산 기준 변경이 있으면 NAV 계열 값만 최신 구간 척도로 연결한다.
+    # 금액(total_value)·종목별 금액·입출금은 원래 값 그대로다.
+    linked = await nav_link.link_snapshot(user, snapshot)
+    if snapshot and linked is None:
         return {"stock_values": {}, "comparison_unavailable": True, "reason": "정산 기준 변경"}
+    snapshot = linked
     result = dict(snapshot) if snapshot else {}
     result["stock_values"] = {}
     if snapshot and snapshot.get("date"):
