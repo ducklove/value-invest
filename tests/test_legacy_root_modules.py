@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import ast
 import importlib
+import runpy
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,14 +35,19 @@ MOVED: dict[str, str] = {
     "kis_proxy_client": "services.market.sources.kis_proxy",
     "market_indicators": "services.market.indicators",
     "stock_price": "services.stock_price",
+    "snapshot_nav": "services.portfolio.nav_snapshot",
 }
 
 # 루트 shim 을 남긴 모듈(외부가 경로로 import). 저장소 안 코드는 여전히 정본을 쓴다.
-SHIMMED: frozenset[str] = frozenset()
+SHIMMED: frozenset[str] = frozenset({
+    "snapshot_nav",  # deploy/repairs/* 가 import·직접 실행한다
+})
 
-# 이미 실행된 1회성 복구 스크립트는 리팩터링하지 않는다(마커 기반, 경로 import 유지).
 _SKIP_DIRS = {"node_modules", "__pycache__", "static"}  # + 모든 dot 디렉터리(.venv, .claude 워크트리 …)
-_SKIP_PREFIXES = (("deploy", "repairs"),)
+# 저장소 루트 기준 제외 경로:
+# - deploy/repairs: 이미 실행된 1회성 복구 스크립트는 리팩터링하지 않는다(마커 기반, 경로 import 유지).
+# - data: gitignore 된 운영 산출물(복구 준비 스크립트 등) — 옛 경로 import 는 shim 이 받는다.
+_SKIP_PREFIXES = (("deploy", "repairs"), ("data",))
 
 
 def _repo_python_files():
@@ -86,3 +93,18 @@ def test_moved_modules_import_from_canonical_location():
 def test_shims_point_at_canonical_module():
     for name in SHIMMED:
         assert importlib.import_module(name) is importlib.import_module(MOVED[name])
+
+
+def test_snapshot_nav_shim_keeps_cli_entrypoint(monkeypatch):
+    """deploy/repairs/repair_2026_05_18_nav_v3.sh 의 ``python3 snapshot_nav.py <date>`` 경로."""
+    from services.portfolio import nav_snapshot
+
+    called: list[str | None] = []
+
+    async def fake_run_all_snapshots(target_date=None):
+        called.append(target_date)
+
+    monkeypatch.setattr(nav_snapshot, "run_all_snapshots", fake_run_all_snapshots)
+    monkeypatch.setattr(sys, "argv", ["snapshot_nav.py", "2026-05-18"])
+    runpy.run_path(str(ROOT / "snapshot_nav.py"), run_name="__main__")
+    assert called == ["2026-05-18"]

@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin, seed_user
 
-import snapshot_nav
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
+from services.portfolio import nav_snapshot as snapshot_nav
 
 
 class PortfolioCashflowTransactionTests(TempDbMixin):

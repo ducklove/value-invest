@@ -2,7 +2,7 @@
 
 cache.py 해체(Phase 2)로 이관. 스키마 생성·컬럼 마이그레이션·1회성 백필을
 한 경로로 실행한다. FastAPI lifespan(core/lifespan.py)과 단독 프로세스
-(snapshot_nav/snapshot_intraday, deploy/repairs/*, scripts/*)가 같은
+(services/portfolio/nav_snapshot·intraday_snapshot, deploy/repairs/*, scripts/*)가 같은
 초기화·종료 경로를 공유한다.
 """
 

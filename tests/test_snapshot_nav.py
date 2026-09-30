@@ -4,7 +4,7 @@ from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
-import snapshot_nav
+from services.portfolio import nav_snapshot as snapshot_nav
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,7 +23,7 @@ def isolate_snapshot_unit_tests(monkeypatch):
 
 
 def test_snapshot_nav_does_not_import_portfolio_route_private_helpers():
-    source = (ROOT / "snapshot_nav.py").read_text(encoding="utf-8")
+    source = (ROOT / "services" / "portfolio" / "nav_snapshot.py").read_text(encoding="utf-8")
 
     assert "from routes.portfolio import" not in source
 
@@ -641,7 +641,7 @@ def test_dead_gold_prev_close_write_is_removed():
         text = path.read_text(encoding="utf-8", errors="replace")
         if "gold_prev_close" in text or "_save_gold_close" in text:
             offenders.append(str(path.relative_to(ROOT)))
-    assert ROOT / "snapshot_nav.py" in scanned
+    assert ROOT / "services" / "portfolio" / "nav_snapshot.py" in scanned
     assert offenders == []
 
 

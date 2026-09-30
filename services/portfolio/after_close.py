@@ -65,7 +65,7 @@ async def capture(user):
 
 
 async def capture_all():
-    import snapshot_nav
+    from services.portfolio import nav_snapshot as snapshot_nav
 
     if regular_close.closing_at(time_windows.today_kst_date().isoformat()) is None:
         return

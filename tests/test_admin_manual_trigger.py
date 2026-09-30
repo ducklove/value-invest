@@ -57,7 +57,7 @@ class AdminManualTriggerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_snapshot_runs_in_process_with_date_and_no_subprocess(self):
         run = AsyncMock()
-        with patch("snapshot_nav.run_all_snapshots", new=run), \
+        with patch("services.portfolio.nav_snapshot.run_all_snapshots", new=run), \
              patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
             result = await admin.trigger_job("portfolio-snapshot", _request("portfolio-snapshot", {"date": "2026-09-29"}))
             await self._wait_job("portfolio-snapshot")
@@ -68,7 +68,7 @@ class AdminManualTriggerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_snapshot_without_date_passes_none(self):
         run = AsyncMock()
-        with patch("snapshot_nav.run_all_snapshots", new=run):
+        with patch("services.portfolio.nav_snapshot.run_all_snapshots", new=run):
             result = await admin.trigger_job("portfolio-snapshot", _request("portfolio-snapshot"))
             await self._wait_job("portfolio-snapshot")
         self.assertIsNone(result["date"])
@@ -78,7 +78,7 @@ class AdminManualTriggerTests(unittest.IsolatedAsyncioTestCase):
         run = AsyncMock()
         # Fresh lock bound to this test's loop — the module-level lock must not
         # get bound to a loop that later tests no longer run.
-        with patch("snapshot_nav.run_all_snapshots", new=run), \
+        with patch("services.portfolio.nav_snapshot.run_all_snapshots", new=run), \
              patch.object(internal, "_nav_snapshot_lock", asyncio.Lock()):
             await internal._nav_snapshot_lock.acquire()
             try:
@@ -103,7 +103,7 @@ class AdminManualTriggerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failure_is_logged_not_raised(self):
         run = AsyncMock(side_effect=RuntimeError("upstream down"))
-        with patch("snapshot_nav.run_all_snapshots", new=run), \
+        with patch("services.portfolio.nav_snapshot.run_all_snapshots", new=run), \
              self.assertLogs("routes.admin", level="ERROR") as logs:
             await admin.trigger_job("portfolio-snapshot", _request("portfolio-snapshot"))
             await self._wait_job("portfolio-snapshot")

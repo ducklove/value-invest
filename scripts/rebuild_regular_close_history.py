@@ -16,9 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import snapshot_nav  # noqa: E402
 from repositories import bootstrap, settlement_inputs  # noqa: E402
 from repositories import db as db_repo  # noqa: E402
+from services.portfolio import nav_snapshot as snapshot_nav  # noqa: E402
 from services.portfolio import regular_close  # noqa: E402
 
 SNAPSHOT_TABLES = ("portfolio_snapshots", "portfolio_stock_snapshots", "portfolio_group_snapshots", "portfolio_stock_weight_snapshots")

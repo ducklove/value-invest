@@ -9,7 +9,6 @@ from _harness import TempDbMixin, seed_user
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-import snapshot_nav
 from core.errors import DBError, register_exception_handlers
 from domain.dividend_receipts import DividendCreate, DividendInput, receipt_today
 from domain.portfolio_distributions import DistributionCreate, DistributionInput
@@ -20,6 +19,7 @@ from routes import dividend_receipts as receipt_routes
 from routes import portfolio_distributions as distribution_routes
 from services.notifications import engine as notification_engine
 from services.portfolio import attribution, period_reports, risk, snapshot_views
+from services.portfolio import nav_snapshot as snapshot_nav
 
 
 class DividendReceiptTests(TempDbMixin):

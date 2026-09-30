@@ -137,9 +137,9 @@ def value_inputs(inputs: dict, quotes: dict) -> tuple[float, float, list[dict]]:
 
 
 async def settle(user: str, day: str):
-    import snapshot_nav
     from repositories import snapshots
     from repositories.db import transaction
+    from services.portfolio import nav_snapshot as snapshot_nav
 
     close = closing_at(day)
     if close is None or time_windows.now_kst() < close + timedelta(minutes=5):

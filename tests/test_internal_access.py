@@ -114,7 +114,7 @@ class InternalRouteAccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_nav_snapshot_route_allows_timer_when_token_configured(self):
         run = AsyncMock()
         with patch.dict("os.environ", {"INTERNAL_API_TOKEN": SECRET}, clear=True), \
-             patch("snapshot_nav.run_all_snapshots", new=run):
+             patch("services.portfolio.nav_snapshot.run_all_snapshots", new=run):
             result = await internal.run_nav_snapshot(_request())
         self.assertEqual(result, {"ok": True, "kind": "nav"})
         run.assert_awaited_once_with(manage_db=False, only_missing=True)
@@ -122,7 +122,7 @@ class InternalRouteAccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_nav_snapshot_route_rejects_proxied_call_without_token(self):
         run = AsyncMock()
         with patch.dict("os.environ", {"INTERNAL_API_TOKEN": SECRET}, clear=True), \
-             patch("snapshot_nav.run_all_snapshots", new=run):
+             patch("services.portfolio.nav_snapshot.run_all_snapshots", new=run):
             with self.assertRaises(HTTPException) as ctx:
                 await internal.run_nav_snapshot(_request({"X-Real-IP": "203.0.113.10"}))
         self.assertEqual(ctx.exception.status_code, 403)

@@ -447,8 +447,8 @@ _running_jobs: dict[str, asyncio.Task] = {}
 
 
 async def _run_portfolio_snapshot(snap_date: str | None) -> None:
-    import snapshot_nav
     from routes.internal import _nav_snapshot_lock
+    from services.portfolio import nav_snapshot as snapshot_nav
 
     async with _nav_snapshot_lock:
         # 수동 실행은 기존 CLI(`snapshot_nav.py [date]`)와 같이 only_missing=False

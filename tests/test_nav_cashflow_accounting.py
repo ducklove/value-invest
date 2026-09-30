@@ -4,12 +4,12 @@ from unittest.mock import AsyncMock, patch
 from _harness import TempDbMixin, seed_user
 from pydantic import ValidationError
 
-import snapshot_nav
 from domain.portfolio_inputs import CashflowInput
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as repo
 from routes import portfolio as routes
+from services.portfolio import nav_snapshot as snapshot_nav
 
 
 class NavCashflowAccountingTests(TempDbMixin):

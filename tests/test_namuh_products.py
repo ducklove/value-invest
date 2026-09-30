@@ -83,7 +83,7 @@ class NamuhProductsTests(TempDbMixin):
         self.assertEqual({p["stock_code"]: p["quantity"] for p in positions}, {"FUTURES_BASE_KRW": 1000, "FUTURES_PNL_KRW": -100})
         values = [p["quantity"] * (await quote_service.fetch_quote(p["stock_code"]))["price"] for p in positions]
         self.assertEqual(sum(values), 900)
-        import snapshot_nav
+        from services.portfolio import nav_snapshot as snapshot_nav
         with patch.object(snapshot_nav.asyncio, "sleep", AsyncMock()):
             total_value, invested, stocks = await snapshot_nav._fetch_total_value("u1", "2026-09-18")
         self.assertEqual((total_value, invested), (900, 1000))

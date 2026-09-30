@@ -117,7 +117,7 @@ def _require_loopback(request: Request) -> None:
 @router.post("/snapshot/nav")
 async def run_nav_snapshot(request: Request):
     _require_loopback(request)
-    import snapshot_nav
+    from services.portfolio import nav_snapshot as snapshot_nav
     try:
         async with _nav_snapshot_lock:
             await snapshot_nav.run_all_snapshots(manage_db=False, only_missing=True)
