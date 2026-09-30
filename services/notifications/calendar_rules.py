@@ -3,8 +3,9 @@
 from datetime import date, datetime
 
 import economic_calendar
+from domain.timeutil import KST
 from repositories import calendar_rules as rules_repo
-from services.notifications.alert_delivery import KST, now_kst
+from services.notifications.alert_delivery import now_kst
 
 
 def validate_rules(payload: dict) -> list[dict]:

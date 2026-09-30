@@ -1,8 +1,9 @@
 """KRX 애프터마켓 시행일과 거래소 간 체결 시각 비교."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 
-KST = timezone(timedelta(hours=9))
+from domain.timeutil import KST
+
 KRX_AFTERMARKET_START = date(2026, 9, 14)
 
 

@@ -11,6 +11,7 @@ import httpx
 
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from domain.timeutil import KST as _KST
 from services.portfolio import currencies, fx
 from services.portfolio.identifiers import static_foreign_ticker
 
@@ -18,7 +19,6 @@ logger = logging.getLogger(__name__)
 _master = MemoryTTLCache("namuh.overseas_master", 86400)
 _instruments: dict[str, dict] = {}
 _lock = asyncio.Lock()
-_KST = ZoneInfo("Asia/Seoul")
 _MARKETS = {
     "NQQ": ("", "America/New_York"), "NYY": ("", "America/New_York"),
     "ASQ": ("", "America/New_York"), "BTQ": ("", "America/New_York"),

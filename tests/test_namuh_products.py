@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin, seed_user
 
+from domain.timeutil import KST
 from repositories import account_holdings, accounts, brokers, portfolio
 from repositories.broker_secrets import BrokerError
 from services.brokers import derivatives, namuh, sync
@@ -74,7 +75,7 @@ class NamuhProductsTests(TempDbMixin):
         await self.link("krfuture")
         for hour, suffix in ((10, "balance"), (20, "nightBalance"), (3, "nightBalance")):
             with self.subTest(hour=hour), self.owned(), \
-                 patch.object(derivatives, "now_kst", return_value=datetime(2026, 9, 18, hour, tzinfo=derivatives._KST)), \
+                 patch.object(derivatives, "now_kst", return_value=datetime(2026, 9, 18, hour, tzinfo=KST)), \
                  patch.object(namuh, "pages", AsyncMock(return_value=self.domestic())) as api:
                 await sync.sync_account("u1", self.aid)
             self.assertTrue(api.await_args.args[2].endswith("/" + suffix))
@@ -111,7 +112,7 @@ class NamuhProductsTests(TempDbMixin):
                 {"iem_cd": "ORDER_ONLY", "cur_cd": "USD", "byn_ny_stl_bnc_qty": 0, "sll_ny_stl_bnc_qty": 0}]}]
 
         with self.owned(), patch.object(namuh, "pages", side_effect=pages), \
-             patch.object(derivatives, "now_kst", return_value=datetime(2026, 9, 18, 10, tzinfo=derivatives._KST)):
+             patch.object(derivatives, "now_kst", return_value=datetime(2026, 9, 18, 10, tzinfo=KST)):
             rows, balances = await sync.fetch_snapshot("u1", self.link_data("gbfuture"))
         self.assertEqual([body["cur_cd"] for _, body in calls], ["TKR", "KRW"])
         self.assertTrue(all(body["sls_dt"] == "20260918" for _, body in calls))

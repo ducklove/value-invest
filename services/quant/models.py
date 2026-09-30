@@ -1,13 +1,15 @@
 """연구 요청의 공개 계약. 지원하지 않는 전략·파라미터는 거절한다."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from domain.timeutil import KST
+
 
 def completed_date():
-    return datetime.now(timezone(timedelta(hours=9))).date() - timedelta(days=1)
+    return datetime.now(KST).date() - timedelta(days=1)
 
 
 class ResearchConfig(BaseModel):

@@ -1,16 +1,15 @@
 """키움 공식 REST API: 키에 연결된 계좌, 국내·미국주식과 금현물 조회."""
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from cache_layer import MemoryTTLCache
 from domain.broker_catalog import BROKERS
+from domain.timeutil import KST
 from repositories.broker_secrets import BrokerError
 from services.brokers.normalized import merge, no_debt, number, position, records, stock_code
 from services.brokers.rest import Endpoint, RestAdapter
 from services.brokers.symbols import foreign_code
-
-KST = timezone(timedelta(hours=9))
 
 
 class KiwoomAdapter(RestAdapter):

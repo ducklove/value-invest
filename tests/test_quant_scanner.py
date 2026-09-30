@@ -7,12 +7,13 @@ import pytest
 from _harness import TempDbMixin, seed_user
 from test_quant_rollover import contract
 
+from domain.timeutil import KST
 from repositories import quant_scanner
 from repositories.broker_secrets import BrokerError
 from repositories.quant import QuantError
 from services.brokers import namuh
 from services.quant import rollover, scanner, scanner_feed
-from services.quant.scanner_model import KST, ScannerConfig, book, edge, master_rows, realtime_book, watch_list
+from services.quant.scanner_model import ScannerConfig, book, edge, master_rows, realtime_book, watch_list
 
 NOW = datetime(2026, 9, 16, 10, 0, 0, tzinfo=KST)
 

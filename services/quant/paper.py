@@ -6,8 +6,9 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from domain.timeutil import KST
 from services.quant import rollover
-from services.quant.scanner_model import KST, edge
+from services.quant.scanner_model import edge
 
 MODEL = "live-book-pair-fok-v1"
 

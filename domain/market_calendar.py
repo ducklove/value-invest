@@ -13,7 +13,8 @@
 import json
 import os
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+
+from domain.timeutil import KST
 
 CALENDAR_VERSION = "krx-2026-2027-reviewed-20260916"
 # 공휴일·대체공휴일 + 근로자의 날·연말 휴장. 임시 휴장은 확인 후 추가한다.
@@ -55,7 +56,7 @@ def closing_at(day: str) -> datetime | None:
     overrides = session_overrides()
     if day in overrides:
         clock = overrides[day]
-        return datetime.fromisoformat(f"{day}T{clock}:00").replace(tzinfo=ZoneInfo("Asia/Seoul")) if clock else None
+        return datetime.fromisoformat(f"{day}T{clock}:00").replace(tzinfo=KST) if clock else None
     if parsed.year not in HOLIDAYS:
         raise MarketCalendarUnknown(f"{parsed.year}년 거래일 달력을 확인해야 합니다.")
     if parsed.weekday() >= 5 or parsed.strftime("%m-%d") in HOLIDAYS[parsed.year]:
@@ -63,7 +64,7 @@ def closing_at(day: str) -> datetime | None:
     # 수능일의 변경 시간을 추정해 적용하지 않는다. KRX 공지 확인 후 override.
     if is_csat_candidate(parsed):
         raise MarketCalendarUnknown("수능일 거래시간 확인 필요: PORTFOLIO_MARKET_SESSIONS 설정")
-    return datetime.fromisoformat(f"{day}T15:30:00").replace(tzinfo=ZoneInfo("Asia/Seoul"))
+    return datetime.fromisoformat(f"{day}T15:30:00").replace(tzinfo=KST)
 
 
 def unconfigured_special_sessions(start: date, days: int, overrides: dict | None = None) -> list[date]:

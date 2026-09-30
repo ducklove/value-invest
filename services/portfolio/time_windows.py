@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
-KST = ZoneInfo("Asia/Seoul")
+from domain.timeutil import KST, now_kst
+
 SETTLEMENT_HOUR = 15
 SETTLEMENT_MINUTE = 30
-
-
-def now_kst() -> datetime:
-    return datetime.now(KST)
 
 
 def _as_kst(now: datetime | None) -> datetime:

@@ -1,6 +1,6 @@
 """배당금 수취 입력과 세후 현금 계산. 세율은 수정 가능한 입력 기본값이다."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Literal
 from uuid import UUID
@@ -9,13 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 
 from domain.portfolio_codes import is_special_asset
 from domain.portfolio_trades import TaxRate, TradeCurrency, TradeError, TradeNumber, money_unit, withholding
+from domain.timeutil import today_kst
 
 DividendCountry = Literal["KR", "US", "CN", "HK", "OTHER"]
 DIVIDEND_TAX_RATES = {"KR": Decimal("15.4"), "US": Decimal("15"), "CN": Decimal("14.4"), "HK": Decimal("15.4"), "OTHER": Decimal(0)}
 
 
 def receipt_today() -> date:
-    return datetime.now(timezone(timedelta(hours=9))).date()
+    return today_kst()
 
 
 class DividendInput(BaseModel):

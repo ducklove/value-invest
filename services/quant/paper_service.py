@@ -2,10 +2,10 @@
 
 from datetime import datetime
 
+from domain.timeutil import KST
 from repositories import quant_paper
 from repositories.quant import QuantError
 from services.quant import paper
-from services.quant.scanner_model import KST
 
 
 async def get(user, limit=60):

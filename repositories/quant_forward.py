@@ -2,8 +2,9 @@
 
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
+from domain.timeutil import KST
 from repositories import quant
 from repositories.db import get_db, transaction
 
@@ -13,7 +14,7 @@ async def start(user, rid):
     if run["status"] != "succeeded":
         raise quant.QuantError("완료된 연구만 전진 평가할 수 있습니다.")
     # 오늘 장중에 본 정보와 겹치지 않도록 다음 한국 날짜부터 고정한다.
-    start_date = str(datetime.now(timezone(timedelta(hours=9))).date() + timedelta(days=1))
+    start_date = str(datetime.now(KST).date() + timedelta(days=1))
     async with transaction() as db:
         existing = await (await db.execute("SELECT status FROM quant_forward WHERE run_id=?", (rid,))).fetchone()
         if existing:

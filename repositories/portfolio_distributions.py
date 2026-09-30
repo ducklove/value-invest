@@ -2,11 +2,12 @@
 
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from decimal import Decimal
 
 from domain.portfolio_distributions import DistributionCreate, DistributionInput, calculate_distribution
 from domain.portfolio_trades import TradeConflict, TradeError
+from domain.timeutil import KST
 from repositories import dividend_receipts, portfolio, snapshots
 from repositories.account_holdings import account_operation, current
 from repositories.db import get_db, read_snapshot, transaction
@@ -66,7 +67,7 @@ async def record_distribution(user: str, payload: DistributionCreate):
         if revision != payload.expected_revision:
             raise TradeConflict("현금·배당 누적액·NAV 정산 상태가 변경됐습니다. 다시 확인해 주세요.")
         result = calculate_distribution(payload, cash, available)
-        now = datetime.now(timezone(timedelta(hours=9))).replace(tzinfo=None).isoformat()
+        now = datetime.now(KST).replace(tzinfo=None).isoformat()
         result.update(account_id=current(user), request_id=request_id, date=now[:10], created_at=now, replayed=False)
         await portfolio.save_portfolio_item(user, f"CASH_{payload.currency}", cash["stock_name"], result["cash_after"],
                                             cash["avg_price"], payload.currency, avg_price_currency=cash["avg_price_currency"])

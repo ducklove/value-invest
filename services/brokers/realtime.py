@@ -9,13 +9,14 @@ import random
 import re
 import ssl
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import aiosqlite
 import truststore
 import websockets
 
 from cache_layer import MemoryTTLCache
+from domain.timeutil import KST as _KST
 from repositories import account_holdings, brokers
 from repositories.broker_secrets import BrokerError
 from services.brokers import namuh, notifications, overseas_realtime
@@ -24,7 +25,6 @@ from services.portfolio.quotes import should_accept_quote_snapshot
 
 _quotes = MemoryTTLCache("namuh.realtime", 90)
 _status: dict[object, dict] = {}
-_KST = timezone(timedelta(hours=9))
 logger = logging.getLogger(__name__)
 
 

@@ -2,10 +2,11 @@
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 import close_price_client
 import kis_proxy_client
+from domain.timeutil import KST, today_kst
 from repositories import bootstrap
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
@@ -17,7 +18,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 BASE_NAV = 1000.0
-KST = timezone(timedelta(hours=9))
 
 
 class SnapshotIncomplete(RuntimeError):
@@ -25,7 +25,7 @@ class SnapshotIncomplete(RuntimeError):
 
 
 def _today_kst() -> date:
-    return datetime.now(KST).date()
+    return today_kst()
 
 
 def _safe_float(value) -> float | None:

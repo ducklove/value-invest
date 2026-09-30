@@ -35,7 +35,7 @@ import logging
 import random
 import sqlite3
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Iterator
 
 import httpx
@@ -43,12 +43,12 @@ import httpx
 from cache_layer import MemoryTTLCache
 from core.errors import DBError
 from core.http import get_http_client
+from domain.timeutil import KST
 from services.ecosystem import adapters, links, siblings
 from services.ecosystem.fetch import FETCH_ERRORS, cached_fetch, stale_value
 
 logger = logging.getLogger(__name__)
 
-KST = timezone(timedelta(hours=9))
 
 # SITE 키 → 레지스트리 도구 id.
 _SITE_TOOLS = {

@@ -2,14 +2,12 @@
 
 import math
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from repositories.quant import QuantError
 from services.quant.rollover import trading_day
-
-KST = timezone(timedelta(hours=9))
 
 
 class ScannerConfig(BaseModel):

@@ -1,10 +1,11 @@
 """LS 공식 Open API: 국내·미국주식, CMA RP와 결제 반영 예수금."""
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from cache_layer import MemoryTTLCache
 from domain.broker_catalog import BROKERS
+from domain.timeutil import KST
 from repositories.broker_secrets import BrokerError
 from services.brokers.normalized import merge, no_debt, number, position, records, stock_code, summary
 from services.brokers.rest import Endpoint, RestAdapter
@@ -111,7 +112,7 @@ class LsAdapter(RestAdapter):
                 balances[currency] = {key: number(row, key) for key in ("PrsmptFcurrDps2", "PrsmptFcurrDps4")}
                 rows.append(position("CASH_" + currency, currency + " 현금", balances[currency]["PrsmptFcurrDps4"], 1, currency))
         if link.get("include_overseas", True):
-            today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
+            today = datetime.now(KST).strftime("%Y%m%d")
             seen = set()
             for page in await self.pages(user, cid, env, "COSOQ00201", {"RecCnt": 1, "BaseDt": today, "CrcyCode": "ALL", "AstkBalTpCode": "00"}):
                 no_debt(summary(page, "COSOQ00201OutBlock2"), "LoanAmt")

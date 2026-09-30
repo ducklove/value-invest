@@ -2,8 +2,9 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
+from domain.timeutil import KST, today_kst
 from repositories import bootstrap
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -12,7 +13,6 @@ from services.portfolio import runtime_quotes as portfolio_quotes
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-KST = timezone(timedelta(hours=9))
 
 
 class IntradaySnapshotIncomplete(RuntimeError):
@@ -20,7 +20,7 @@ class IntradaySnapshotIncomplete(RuntimeError):
 
 
 def _today_kst() -> str:
-    return datetime.now(KST).date().isoformat()
+    return today_kst().isoformat()
 
 
 def _quote_price(quote: dict | None) -> float | None:

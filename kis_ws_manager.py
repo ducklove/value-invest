@@ -20,13 +20,14 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from datetime import time as dtime
 from typing import Any
 
 import websockets
 
 from cache_layer import MemoryTTLCache
+from domain.timeutil import KST
 from services.market.quote_policy import integrated_market_enabled
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
@@ -44,7 +45,6 @@ WS_URI = "ws://ops.koreainvestment.com:21000"
 _ACCEPTED_TR_IDS = {"H0STCNT0", "H0NXCNT0", "H0UNCNT0"}
 MAX_SUBSCRIPTIONS = 40  # KIS hard limit ~41
 
-KST = timezone(timedelta(hours=9))
 _KRX_OPEN = dtime(9, 0)
 _KRX_CLOSE = dtime(15, 30)
 _NXT_AFTER_CLOSE = dtime(20, 0)
@@ -186,9 +186,7 @@ def mark_nxt_unsupported(code: str) -> None:
 def _flush_stale_cache() -> None:
     """Clear the entire WS quote cache when the KST date rolls over."""
     global _quote_cache_date
-    from datetime import datetime, timedelta, timezone
-    kst = timezone(timedelta(hours=9))
-    today = datetime.now(kst).strftime("%Y%m%d")
+    today = datetime.now(KST).strftime("%Y%m%d")
     if _quote_cache_date and _quote_cache_date != today:
         _quote_cache.clear()
         logger.info("WS quote cache cleared (date rolled %s → %s)", _quote_cache_date, today)

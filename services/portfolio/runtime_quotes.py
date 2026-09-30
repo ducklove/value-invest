@@ -4,9 +4,9 @@ import asyncio
 import logging
 from datetime import date, datetime
 from typing import Any, Iterable, Protocol
-from zoneinfo import ZoneInfo
 
 from domain import market_calendar
+from domain.timeutil import KST as _KST
 
 # 재수출(seam): snapshot_nav/snapshot_intraday 등 배치 호출자가 identifiers를
 # 직접 import하지 않고 이 모듈을 통해 쓴다. 테스트도 이 경로를 patch한다.
@@ -27,7 +27,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-_KST = ZoneInfo("Asia/Seoul")
 # 패스당 개별 조회 동시성. KIS 프록시는 자체 4 req/s limiter 로 직렬화한다.
 QUOTE_MAP_CONCURRENCY = 4
 

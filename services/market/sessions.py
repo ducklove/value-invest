@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-KST = timezone(timedelta(hours=9))
+from domain.timeutil import KST
 
 # Market codes this clock knows about.
 MARKETS = ("KR", "US", "JP", "HK", "CN")

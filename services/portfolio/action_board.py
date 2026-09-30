@@ -12,15 +12,14 @@ persisted so stale external data cannot leave old action bodies in the DB.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import external_tools
+from domain.timeutil import KST
 from repositories import action_reviews as reviews_repo
 from repositories import portfolio as portfolio_repo
 from services.portfolio import rebalance as rebalance_service
 from services.portfolio import theses
-
-KST = timezone(timedelta(hours=9))
 
 SEVERITY_RANK = {"high": 0, "watch": 1, "info": 2}
 

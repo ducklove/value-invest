@@ -6,18 +6,11 @@
 """
 
 import re
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
+from domain.timeutil import now_kst
 from repositories.broker_secrets import BrokerError
 from services.brokers import namuh
 from services.brokers.parsing import number, object_block, record_block
-
-_KST = ZoneInfo("Asia/Seoul")
-
-
-def now_kst() -> datetime:
-    return datetime.now(_KST)
 
 
 def contract_code(row: dict) -> str:

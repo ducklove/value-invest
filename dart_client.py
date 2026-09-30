@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from cache_layer import MemoryTTLCache, cached_fetch
 from core.errors import ExternalServiceError, RateLimitError
 from core.http import get_http_client
+from domain.timeutil import KST
 
 logger = logging.getLogger(__name__)
 
@@ -361,7 +362,6 @@ async def fetch_recent_disclosures(corp_code: str, *, days: int = 30, page_count
 # * 시간 게이트: 마켓테이프의 공시 조회는 07:00–20:00 KST 에만 한다
 #   (``in_disclosure_hours``).
 
-KST = timezone(timedelta(hours=9))
 DAILY_QUOTA = int(os.getenv("OPENDART_DAILY_QUOTA", "20000"))
 NONESSENTIAL_BUDGET = int(os.getenv("OPENDART_NONESSENTIAL_BUDGET", "16000"))
 LIST_CACHE_TTL_S = float(os.getenv("OPENDART_LIST_CACHE_TTL_S", "600"))

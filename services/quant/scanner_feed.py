@@ -7,10 +7,11 @@ from datetime import datetime
 import httpx
 
 from core.http import get_http_client
+from domain.timeutil import KST
 from repositories.broker_secrets import BrokerError
 from repositories.quant import QuantError
 from services.brokers import namuh
-from services.quant.scanner_model import KST, book, master_rows, number
+from services.quant.scanner_model import book, master_rows, number
 
 _master = []
 _master_at = 0.0

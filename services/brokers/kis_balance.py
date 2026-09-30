@@ -2,9 +2,10 @@
 
 import math
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from cache_layer import MemoryTTLCache
+from domain.timeutil import KST
 from repositories.broker_secrets import BrokerError
 from services.brokers import kis
 from services.brokers.symbols import foreign_code
@@ -55,7 +56,7 @@ async def listed(user: str, link: dict, code: str) -> bool:
     if len(rows) != 1:
         raise BrokerError("한국투자증권 종목의 상장 상태를 확인하지 못했습니다.")
     row = rows[0]
-    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
+    today = datetime.now(KST).strftime("%Y%m%d")
     def valid_date(value):
         return isinstance(value, str) and bool(re.fullmatch(r"[12][0-9]{7}", value))
     abolished = str(row.get("lstg_abol_dt") or "").strip()

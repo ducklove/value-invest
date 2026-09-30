@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import aiosqlite
 
+from domain.timeutil import KST
 from repositories.db import get_db, transaction
-
-KST = ZoneInfo("Asia/Seoul")
 
 
 async def _refresh_group_snapshots(db: aiosqlite.Connection, google_sub: str | None = None, snap_date: str | None = None):

@@ -14,13 +14,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import httpx
 from bs4 import BeautifulSoup
 
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from domain.timeutil import KST
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +251,7 @@ async def fetch_investor_flows() -> dict:
     if cached is not None:
         return cached
     # bizdate를 미래로 줘도 가장 가까운 과거 영업일을 반환하므로 KST '오늘'이면 충분
-    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
+    today = datetime.now(KST).strftime("%Y%m%d")
     out: dict = {}
     try:
         for sosok, key in (("01", "kospi"), ("02", "kosdaq")):

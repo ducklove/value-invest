@@ -13,17 +13,17 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from domain.timeutil import KST
 from repositories import users as users_repo
 from services.portfolio import device_summary
 
 router = APIRouter(prefix="/api/device", include_in_schema=False)
 logger = logging.getLogger(__name__)
 
-KST = timezone(timedelta(hours=9))
 
 
 def _require_device_token(request: Request) -> None:

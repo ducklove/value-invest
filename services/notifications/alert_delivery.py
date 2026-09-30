@@ -6,19 +6,14 @@ import hashlib
 import json
 import re
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
+from domain.timeutil import KST, now_kst
 from repositories import notifications as notifications_repo
 from repositories import user_settings
 from services.notifications import channels
 
 SETTING_KEY = "portfolio_alert_quiet_hours"
 DEFAULT_SETTINGS = {"enabled": True, "start": "21:00", "end": "08:00", "mode": "skip"}
-KST = ZoneInfo("Asia/Seoul")
-
-
-def now_kst() -> datetime:
-    return datetime.now(KST)
 
 
 def validate_settings(payload: dict) -> dict:
