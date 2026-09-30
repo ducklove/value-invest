@@ -543,3 +543,19 @@
   --recomm-hold: #9ca3af;
   --recomm-hold-strong: #d1d5db;
 }
+
+/* === 분석 헤더 생태계 칩 (#analysisEcoLinks — analysis-valuation.js renderAnalysisToolLinks) ===
+   '← 도구로 돌아가기'(?from=) + 이 종목을 받는 '연결 도구' 칩. 도구 accent 는 인라인 --eco-chip-accent. */
+.analysis-eco-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; }
+.analysis-eco-links[hidden] { display: none; }
+.eco-chip-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.eco-chip-label { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.eco-chip {
+  --eco-chip-accent: var(--primary);
+  display: inline-flex; align-items: center; min-height: 28px; padding: 3px 10px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap;
+}
+.eco-chip:hover { border-color: var(--eco-chip-accent); color: var(--eco-chip-accent); }
+.eco-chip:focus-visible { outline: none; box-shadow: var(--ring); }
+.eco-chip-back { border-color: var(--eco-chip-accent); color: var(--eco-chip-accent); }

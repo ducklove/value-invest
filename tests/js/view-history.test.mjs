@@ -127,3 +127,21 @@ test('늦게 끝난 화면 다운로드가 사용자의 최신 탭 선택을 덮
     assert.equal(w.document.getElementById('screenerView').style.display, 'none');
   } finally { w.close(); }
 });
+
+test('switchView("analysis") keeps the stock being viewed in the URL (/analysis?code=)', () => {
+  const w = buildDom('https://app.example.com/portfolio');
+  try {
+    w.switchView('analysis');
+    assert.equal(w.location.pathname + w.location.search, '/analysis', 'no stock yet → bare path');
+    w.switchView('portfolio');
+    appendScript(w, "var activeStockCode = '005930';");
+    const before = w.history.length;
+    w.switchView('analysis');
+    assert.equal(w.location.pathname + w.location.search, '/analysis?code=005930');
+    assert.equal(w.history.length, before + 1);
+    w.switchView('analysis');
+    assert.equal(w.history.length, before + 1, 'same view + same code → no duplicate entry');
+    w.switchView('investing');
+    assert.equal(w.location.search, '', 'other views keep their bare paths');
+  } finally { w.close(); }
+});

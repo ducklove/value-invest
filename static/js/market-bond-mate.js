@@ -45,15 +45,26 @@ function _bmConfig() {
   return integrations.bondMate || null;
 }
 
+// 생태계 레지스트리(APP_CONFIG.ecosystem)의 bond-mate 항목 — url·viewLink(?tab=)·뷰 키 정규식.
+function _bmRegistryTool() {
+  return typeof ecoTool === 'function' ? ecoTool('bond-mate') : null;
+}
+
 function bondMateBaseUrl() {
   const cfg = _bmConfig();
-  return cfg && cfg.baseUrl ? String(cfg.baseUrl).replace(/\/+$/, '') : '';
+  if (cfg && cfg.baseUrl) return String(cfg.baseUrl).replace(/\/+$/, '');
+  const tool = _bmRegistryTool();
+  return tool && /^https?:\/\//.test(String(tool.url || '')) ? String(tool.url).replace(/\/+$/, '') : '';
 }
 
 /** 특정 화면으로 바로 가는 링크. 히스토리는 bond-mate 쪽에서 본다. */
 function bondMateLink(view) {
   const base = bondMateBaseUrl();
-  return base ? `${base}/?tab=${encodeURIComponent(view || 'overview')}` : '';
+  if (!base) return '';
+  const key = view || 'overview';
+  const path = typeof ecoDeepPath === 'function' ? ecoDeepPath('bond-mate', 'viewLink', key) : null;
+  // 레지스트리 viewLink 템플릿(?tab={view}) — 없으면 같은 모양의 기존 규칙.
+  return path ? `${base}/${path}` : `${base}/?tab=${encodeURIComponent(key)}`;
 }
 
 /** 스냅샷을 받아온다. 실패하면 null — 호출부는 병합을 건너뛴다. */
@@ -210,11 +221,51 @@ const BM_VIEW_LABELS = {
 const BM_DEFAULT_VIEWS = ['overview', 'government', 'policy', 'fx', 'credit', 'issuance'];
 let _bmEmbedView = 'overview';
 
-/** 임베드로 보여줄 화면 목록 [{key,label}]. 계약의 주인은 서버 config 다. */
+/** 레지스트리 viewLink.accepts 로 bond-mate 가 받는 화면 키인지 본다(레지스트리가 없으면 통과). */
+function _bmRegistryAcceptsView(view) {
+  const tool = _bmRegistryTool();
+  const link = tool && tool.viewLink;
+  if (!link || !link.accepts) return true;
+  try { return new RegExp(link.accepts).test(view); } catch (e) { return true; }
+}
+
+/**
+ * 임베드로 보여줄 화면 목록 [{key,label}]. 계약의 주인은 서버 config(views)와 생태계
+ * 레지스트리(viewLink.accepts)다. 레지스트리에는 라벨 필드가 없어 한글 라벨만 여기 둔다.
+ */
 function bondMateEmbedViews() {
   const cfg = _bmConfig();
   const views = (cfg && Array.isArray(cfg.views) && cfg.views.length) ? cfg.views : BM_DEFAULT_VIEWS;
-  return views.filter((v) => BM_VIEW_LABELS[v]).map((v) => ({ key: v, label: BM_VIEW_LABELS[v] }));
+  return views
+    .filter((v) => BM_VIEW_LABELS[v] && _bmRegistryAcceptsView(v))
+    .map((v) => ({ key: v, label: BM_VIEW_LABELS[v] }));
+}
+
+/** /bonds?view=<key> 딥링크 — 첫 진입 때 한 번만 읽는다(이후 탭 전환은 URL 을 되쓴다). */
+let _bmUrlViewConsumed = false;
+function _bmViewFromUrl() {
+  if (_bmUrlViewConsumed) return null;
+  _bmUrlViewConsumed = true;
+  try {
+    const path = window.location.pathname.replace(/\/+$/, '');
+    if (path !== '/bonds') return null;
+    const view = new URLSearchParams(window.location.search).get('view');
+    return view && bondMateEmbedViews().some((v) => v.key === view) ? view : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 지금 보는 화면을 /bonds?view= 로 되써서 새로고침·공유가 같은 화면으로 돌아오게 한다. */
+function _bmSyncViewUrl(view) {
+  try {
+    if (window.location.pathname.replace(/\/+$/, '') !== '/bonds') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('view') === view) return;
+    if (view === 'overview') params.delete('view'); else params.set('view', view);
+    const query = params.toString();
+    history.replaceState(history.state, '', '/bonds' + (query ? '?' + query : '') + window.location.hash);
+  } catch (e) { /* URL 정리는 부가 기능 */ }
 }
 
 /** 임베드 URL — 앱 테마를 넘기고, nonce 로 GitHub Pages 캐시의 stale 을 피한다. */
@@ -252,10 +303,13 @@ function _bmRenderTabs(active) {
 function loadBondsView({ force = false, view = null } = {}) {
   const container = document.getElementById('bondsContent');
   if (!container) return;
-  const next = (view && BM_VIEW_LABELS[view]) ? view : _bmEmbedView;
+  const fromUrl = view ? null : _bmViewFromUrl();
+  const requested = view || fromUrl;
+  const next = (requested && BM_VIEW_LABELS[requested]) ? requested : _bmEmbedView;
   const changed = next !== _bmEmbedView;
   _bmEmbedView = next;
   _bmRenderTabs(next);
+  if (view) _bmSyncViewUrl(next);
   const existing = container.querySelector('iframe.bonds-frame');
   if (existing && !force && !changed) return;
 
@@ -270,16 +324,23 @@ function loadBondsView({ force = false, view = null } = {}) {
   iframe.title = 'bond-mate 채권·금리 대시보드';
   iframe.loading = 'lazy';
   iframe.className = 'bonds-frame';
+  // 생태계 iframe 메시지 브리지(ecosystem-links.js)가 vc:ready·vc:height·구 height 메시지를 매칭한다.
+  iframe.dataset.vcTool = 'bond-mate';
   iframe.setAttribute('referrerpolicy', 'no-referrer');
   container.classList.add('is-frame');
   container.innerHTML = '';
   container.appendChild(iframe);
 }
 
-/** 테마 토글 시 임베드도 같은 테마로 다시 로드한다(nps 임베드와 같은 처리). */
+/**
+ * 테마 토글 시 임베드도 같은 테마로 맞춘다(nps 임베드와 같은 처리). vc:ready 를 보낸
+ * 자식에게는 postMessage(vc:theme)로 보내 스크롤을 지키고, 아니면 다시 로드한다.
+ */
 function syncBondsFrameTheme() {
   const ifr = document.querySelector('#bondsContent iframe.bonds-frame');
-  if (ifr) ifr.src = bondMateEmbedSrc(_bmEmbedView);
+  if (!ifr) return;
+  if (typeof ecoPostFrameTheme === 'function' && ecoPostFrameTheme(ifr)) return;
+  ifr.src = bondMateEmbedSrc(_bmEmbedView);
 }
 
 // jsdom 테스트에서 모듈 단위로 부르기 위해 export (브라우저에서는 무시된다).

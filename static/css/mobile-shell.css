@@ -269,3 +269,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   outline: none;
 }
 /* 모션 최소화(prefers-reduced-motion) 규칙은 위 ST-05 블록에 통합됐다. */
+
+/* === 허브 헤더 생태계 도구 전환 (<vc-shell variant="menu">) ===
+   vc-tokens.css 의 vc-shell{display:block;min-height:바 높이} 예약은 막대(bar)용이라 헤더 안의
+   ▾ 버튼에는 풀어 준다. 모바일에서는 팝오버가 바텀시트(position:fixed)로 열리는데 슬림 헤더의
+   쌓임 맥락(z-index 820)이 하단 탭바(880)보다 낮으므로, 열린 동안만 헤더를 탭바 위로 올린다.
+   margin-left:auto — 헤더가 space-between 이라 ▾ 버튼이 가운데 뜨지 않고 테마 토글 옆에 붙는다. */
+.header vc-shell.hub-tool-switch { display: inline-block; min-height: 0; flex: 0 0 auto; margin-left: auto; }
+.header vc-shell.hub-tool-switch[hidden] { display: none; }
+.header:has(vc-shell.hub-tool-switch[open]) { z-index: 890; }

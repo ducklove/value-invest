@@ -748,3 +748,7 @@
   .ec-rule-row select { min-width: 0; font-size: 16px; }
   .ec-rule-row .ec-settings-toggle { margin-left: 0; }
 }
+
+/* index-popup 위젯이 vc:height 로 높이를 알려 오면(ecoApplyFrameHeight) 감싸는 박스의 고정 높이를 푼다. */
+.md-index-frame-wrap:has(> .vc-auto-height),
+.md-kospi-futures-frame-wrap:has(> .vc-auto-height) { height: auto; }

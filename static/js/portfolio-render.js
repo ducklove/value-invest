@@ -807,6 +807,45 @@ function renderPortfolio(options = {}) {
       });
     });
   }
+  _pfApplyFocus();
+}
+
+// --- /portfolio?focus=CODE 딥링크 — 보유 행으로 한 번 스크롤하고 잠시 강조한다 ---
+// app-main.js 가 URL 을 읽어 pfFocusHolding 을 부른다. 목록이 아직 없으면 다음 전체 렌더를
+// 기다리고, 강조 시간 안에 시세 갱신으로 행이 다시 그려지면 클래스를 다시 붙인다.
+const PF_FOCUS_HIGHLIGHT_MS = 4000;
+let _pfFocus = null;  // { code, until } — until 은 첫 스크롤 시각 + 강조 시간(0 = 아직 못 찾음)
+let _pfFocusTimer = null;
+
+function pfFocusHolding(code) {
+  const c = String(code || '').trim().toUpperCase();
+  if (!c) return;
+  _pfFocus = { code: c, until: 0 };
+  _pfApplyFocus();
+}
+
+function _pfClearFocus() {
+  _pfFocus = null;
+  clearTimeout(_pfFocusTimer);
+  document.querySelectorAll('#pfBody tr.pf-row-focus').forEach(tr => tr.classList.remove('pf-row-focus'));
+}
+
+function _pfApplyFocus() {
+  if (!_pfFocus) return;
+  const tbody = document.getElementById('pfBody');
+  const row = tbody ? [...tbody.querySelectorAll('tr[data-code]')].find(tr => tr.dataset.code === _pfFocus.code) : null;
+  if (!row) {
+    // 목록은 왔는데 행이 없다(보유하지 않았거나 필터로 가려짐) — 조용히 포기한다.
+    if (_pfFocus.until || (PfStore.items || []).length) _pfClearFocus();
+    return;
+  }
+  if (!_pfFocus.until) {
+    _pfFocus.until = Date.now() + PF_FOCUS_HIGHLIGHT_MS;
+    if (typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    clearTimeout(_pfFocusTimer);
+    _pfFocusTimer = setTimeout(_pfClearFocus, PF_FOCUS_HIGHLIGHT_MS);
+  }
+  row.classList.add('pf-row-focus');
 }
 
 function returnClass(val) {

@@ -1,14 +1,16 @@
-/* vc-shell.js v1.0.0 — Value Compass ecosystem bar (<vc-shell> + window.VCShell).
+/* vc-shell.js v1.1.0 — Value Compass ecosystem bar (<vc-shell> + window.VCShell).
  * Canonical copy: value-invest/static/ecosystem/vc-shell.js. The registry between the
  * vc:registry markers is generated from config/ecosystem.json by scripts/sync-ecosystem.mjs
  * (public tools only). Vendored byte-identical into sibling repos — do not edit copies.
- * Classic script, no dependencies, no network requests. */
+ * Classic script, no dependencies, no network requests.
+ * <vc-shell tool="<id>" variant="menu"> renders only the ▾ tool switcher + popover (no bar), for
+ * a host header that already has its own brand/theme controls (the hub header uses it). */
 (function () {
   'use strict';
   if (window.VCShell) return; // double-load guard
 
   var REGISTRY = /* vc:registry:start */ {"version":1,"hub":"https://ducklove.duckdns.org:3691","categories":[{"id":"hub","label":"Value Compass"},{"id":"equity","label":"종목 밸류에이션"},{"id":"etf","label":"ETF·자산배분"},{"id":"real-assets","label":"실물자산·크립토"},{"id":"macro","label":"거시·채권·지수"},{"id":"flows","label":"기관·수급"},{"id":"hub-tools","label":"허브 도구"}],"tools":[{"id":"value-invest","name":"Value Compass","description":"가치투자 포트폴리오·종목분석 허브","category":"hub","icon":"compass","accent":"#2563eb","url":"https://ducklove.duckdns.org:3691","deploy":"self-hosted","stockLink":{"template":"/analysis?code={code}","accepts":"^[0-9A-Z]{6}$"},"hubView":"/","themeParam":true,"handoff":false,"heldBadges":false},{"id":"holding_value","integrationKey":"holdingValue","name":"지주사 지분가치","description":"지주사 보유지분가치 대비 시가총액 비율과 할인율 추이","category":"equity","icon":"building","accent":"#2d66d6","url":"https://ducklove.github.io/holding_value","deploy":"github-pages","stockLink":{"template":"?code={code}","accepts":"^[0-9A-Z]{6}$"},"embed":{"template":"?embed=1"},"themeParam":true,"handoff":true,"heldBadges":true},{"id":"common_preferred_spread","integrationKey":"preferredSpread","name":"우선주 괴리율","description":"보통주·우선주 괴리율과 백분위, 전환 전략","category":"equity","icon":"split","accent":"#315bdb","url":"https://ducklove.github.io/common_preferred_spread","deploy":"github-pages","stockLink":{"template":"?code={code}","accepts":"^[0-9A-Z]{6}$"},"embed":{"template":"?embed=1"},"themeParam":true,"handoff":true,"heldBadges":true},{"id":"spac-hunter","integrationKey":"spacHunter","name":"스팩 헌터","description":"SPAC 청산가치·합병 일정과 하방이 막힌 수익률","category":"equity","icon":"rocket","accent":"#0b7285","url":"https://ducklove.github.io/spac-hunter","deploy":"github-pages","stockLink":{"template":"?code={code}","accepts":"^[0-9A-Z]{6}$"},"embed":{"template":"?embed=1"},"themeParam":true,"handoff":true,"heldBadges":true},{"id":"buybacks","integrationKey":"buybacks","name":"자사주 분석","description":"자사주 매입·처분·소각 공시와 보유 비율 추이","category":"equity","icon":"buyback","accent":"#007f78","url":"https://ducklove.github.io/buybacks","deploy":"github-pages","stockLink":{"template":"?stock={code}","accepts":"^[0-9A-Z]{6}$"},"embed":{"template":"?embed=1"},"themeParam":true,"handoff":true,"heldBadges":true},{"id":"eiayn","integrationKey":"eiayn","name":"ETF 평가 (EIAYN)","description":"국내외 ETF 비용·추적·위험 평가와 랭킹","category":"etf","icon":"etf","accent":"#009b7d","url":"https://ducklove.github.io/eiayn","deploy":"github-pages","stockLink":{"template":"?code={code}","accepts":"^[A-Z0-9][A-Z0-9.-]{0,29}$"},"themeParam":true,"handoff":true,"heldBadges":true},{"id":"gold_gap","integrationKey":"goldGap","name":"김치프리미엄","description":"금·비트코인·USDT의 국내외 가격 괴리","category":"real-assets","icon":"coin","accent":"#2d66d6","url":"https://ducklove.github.io/gold_gap","deploy":"github-pages","assetLink":{"template":"?asset={asset}","accepts":"^[a-z][a-z0-9_]{0,31}$"},"embed":{"template":"?embed=1"},"themeParam":true,"handoff":false,"heldBadges":false},{"id":"all-about-gold","integrationKey":"allAboutGold","name":"All About Gold","description":"금 가격·수급·ETF·세제를 한곳에 모은 금 투자 리서치","category":"real-assets","icon":"gold","accent":"#b7791f","url":"https://ducklove.github.io/all-about-gold","deploy":"github-pages","viewLink":{"template":"#{view}","accepts":"^[a-z0-9][a-z0-9-]{0,39}$"},"embed":{"template":"?embed=1"},"themeParam":true,"handoff":false,"heldBadges":false},{"id":"nps-tracker","integrationKey":"npsTracker","name":"국민연금 포트폴리오","description":"국민연금 국내주식 보유 종목과 비중 변화 추적","category":"flows","icon":"pension","accent":"#2563eb","url":"https://ducklove.github.io/nps-tracker","deploy":"github-pages","hubView":"/nps","embed":{"template":"?embed=true"},"themeParam":true,"handoff":false,"heldBadges":false},{"id":"bond-mate","integrationKey":"bondMate","name":"채권·금리","description":"세계 국채 커브·정책금리·환율·회사채 스프레드","category":"macro","icon":"bond","accent":"#2563eb","url":"https://ducklove.github.io/bond-mate","deploy":"github-pages","viewLink":{"template":"?tab={view}","accepts":"^(overview|government|policy|fx|credit|issuance)$"},"hubView":"/bonds","embed":{"template":"?embed={view}"},"themeParam":true,"handoff":false,"heldBadges":false},{"id":"index-popup","name":"지수 위젯","description":"KOSPI·KOSDAQ 등 실시간 지수 미니 차트","category":"macro","icon":"chart","accent":"#2563eb","url":"https://ducklove.duckdns.org:3358","deploy":"self-hosted","viewLink":{"template":"?index={view}","accepts":"^[a-z0-9_-]{1,32}$"},"embed":{"template":"?headless=1"},"themeParam":true,"handoff":false,"heldBadges":false},{"id":"hub:screener","name":"밸류 스크리너","description":"P/E·P/B·ROE·배당수익률 조건으로 KOSPI/KOSDAQ 전체 스캔","category":"hub-tools","icon":"grid","accent":"#2563eb","url":"https://ducklove.duckdns.org:3691/screener","deploy":"hub","hubView":"/screener","themeParam":true,"handoff":false,"heldBadges":false},{"id":"hub:quant","name":"퀀트 운용실","description":"보통주·우선주 교체 전략 검증과 일별 신호 관찰","category":"hub-tools","icon":"gauge","accent":"#2563eb","url":"https://ducklove.duckdns.org:3691/quant","deploy":"hub","hubView":"/quant","themeParam":true,"handoff":false,"heldBadges":false},{"id":"hub:insights","name":"인사이트 보드","description":"외부 실험 결과와 수동 메모를 남기는 기록장","category":"hub-tools","icon":"chart","accent":"#2563eb","url":"https://ducklove.duckdns.org:3691/insights","deploy":"hub","hubView":"/insights","themeParam":true,"handoff":false,"heldBadges":false},{"id":"hub:masters","name":"투자 대가의 전략","description":"대표 투자 철학 비교와 참고용 자산배분 시뮬레이션","category":"hub-tools","icon":"compass","accent":"#2563eb","url":"https://ducklove.duckdns.org:3691/masters","deploy":"hub","hubView":"/masters","themeParam":true,"handoff":false,"heldBadges":false}]} /* vc:registry:end */;
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var KEY = 'theme';
   var HUB_CODE = /^[0-9A-Z]{6}$/;
   var root = document.documentElement;
@@ -100,8 +102,19 @@
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
     if (t.themeParam !== false) u.searchParams.set('theme', pageTheme());
     var source = from === undefined ? currentToolId() : from;
+    if (source === 'value-invest' && u.origin === hubOrigin()) {
+      // Inside the hub, its own pages stay on the current origin (dev/staging hosts) and carry no from.
+      var here = window.location;
+      if ((here.protocol === 'https:' || here.protocol === 'http:') && here.origin !== u.origin) {
+        u = new URL(u.pathname + u.search + u.hash, here.origin);
+      }
+      return u.href;
+    }
     if (source) u.searchParams.set('from', source);
     return u.href;
+  }
+  function hubOrigin() {
+    try { return new URL(REGISTRY.hub).origin; } catch (_) { return ''; }
   }
   function hubAnalysisUrl(code, from) {
     var c = String(code || '').trim().toUpperCase();
@@ -183,6 +196,12 @@
     '.n{font-weight:600;font-size:13px;line-height:1.2}',
     '.d{font-size:11.5px;line-height:1.35;color:var(--_muted)}',
     '.scrim{display:none}',
+    // variant="menu": only the switch button + the same popover (e.g. inside a host header).
+    ':host([variant="menu"]){display:inline-block;min-height:0;vertical-align:middle}',
+    '.compact{display:inline-flex;align-items:center;gap:4px;min-height:36px;padding:0 10px;background:var(--_bg);',
+    'color:var(--_text);border:1px solid var(--_border);border-radius:8px}',
+    '.compact:hover{background:var(--_bg);border-color:var(--_brand)}',
+    ':host([variant="menu"]) .menu{left:auto;right:0}',
     '@media (max-width:600px){.bar{padding:0 8px;gap:4px}.brand-text,.stock-long{display:none}.short{display:inline}',
     '.stock{max-width:none;padding:5px 8px}',
     '.menu{position:fixed;top:auto;left:0!important;right:0;bottom:0;width:auto;max-height:75vh;border-radius:14px 14px 0 0;',
@@ -200,7 +219,7 @@
   var VCShellElement = function () {};
   if (window.HTMLElement && window.customElements) {
     VCShellElement = class extends HTMLElement {
-      static get observedAttributes() { return ['tool', 'stock', 'stock-name', 'theme-toggle']; }
+      static get observedAttributes() { return ['tool', 'variant', 'stock', 'stock-name', 'theme-toggle']; }
       connectedCallback() {
         if (embedded()) { this.hidden = true; return; }
         if (!this.shadowRoot) {
@@ -237,6 +256,16 @@
             esc(cat.label) + '</div>' + items + '</div>' : '';
         }).join('');
         this.setAttribute('data-theme', pageTheme());
+        var popover = '<div class="scrim" hidden></div><div class="menu" id="vc-menu" role="menu" aria-label="도구 전환" hidden>' +
+          '<div class="cols">' + groups + '</div></div>';
+        if (this.getAttribute('variant') === 'menu') {
+          this.shadowRoot.innerHTML = '<style>' + CSS + '</style>' +
+            '<div class="switch"><button class="current compact" type="button" aria-haspopup="menu" aria-expanded="false"' +
+            ' aria-controls="vc-menu" aria-label="Value Compass 도구 전환" title="도구 전환">' + icon('grid') +
+            '<span class="caret" aria-hidden="true">▾</span></button>' + popover + '</div>';
+          this.refresh();
+          return;
+        }
         this.shadowRoot.innerHTML = '<style>' + CSS + '</style>' +
           '<nav class="bar" aria-label="Value Compass 도구 이동">' +
           '<a class="brand" data-tool="value-invest" href="' + esc(this._href('value-invest')) + '" aria-label="Value Compass 허브">' +
@@ -245,7 +274,7 @@
           '<div class="switch"><button class="current" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="vc-menu">' +
           icon(current ? current.icon : 'grid') + '<span class="name">' + esc(current ? current.name : '도구') + '</span>' +
           '<span class="caret" aria-hidden="true">▾</span></button>' +
-          '<div class="scrim" hidden></div><div class="menu" id="vc-menu" role="menu" aria-label="도구 전환" hidden><div class="cols">' + groups + '</div></div></div>' +
+          popover + '</div>' +
           '<span class="spacer"></span>' +
           (analysis ? '<a class="stock" data-stock-link href="' + esc(analysis) + '" title="허브 종목분석에서 열기">' +
             '<span class="stock-long">' + (stockName ? '<span class="stock-name">' + esc(stockName) + '</span> → ' : '') +
@@ -289,6 +318,7 @@
         this._place(p);
         p.scrim.hidden = false;
         p.button.setAttribute('aria-expanded', 'true');
+        this.setAttribute('open', '');
         items = this._items();
         var start = items.filter(function (a) { return a.hasAttribute('aria-current'); })[0] || items[0];
         if (focus === 'last') start = items[items.length - 1];
@@ -297,7 +327,9 @@
       _place(p) {
         // Desktop: align under the trigger but keep the popover inside the viewport.
         // (The mobile bottom sheet is position:fixed and ignores this offset.)
-        var bar = this.shadowRoot.querySelector('.bar').getBoundingClientRect();
+        var barEl = this.shadowRoot.querySelector('.bar');
+        if (!barEl) { p.menu.style.left = ''; return; } // variant="menu": CSS anchors it to the button's right edge
+        var bar = barEl.getBoundingClientRect();
         var btn = p.button.getBoundingClientRect(), vw = window.innerWidth || 0;
         var width = p.menu.offsetWidth || 0, left = btn.left - bar.left;
         if (vw && width) left = Math.min(left, vw - bar.left - width - 12);
@@ -309,6 +341,7 @@
         p.menu.hidden = true;
         p.scrim.hidden = true;
         p.button.setAttribute('aria-expanded', 'false');
+        this.removeAttribute('open');
         if (returnFocus) p.button.focus();
       }
       _onOutside(e) {
@@ -365,6 +398,7 @@
     setTheme: setTheme,
     setStock: setStock,
     linkTo: function (id, vars) { return linkTo(id, vars); },
+    icon: function (name) { return icon(name); },
     hubAnalysisUrl: function (code) { return hubAnalysisUrl(code); }
   };
 })();

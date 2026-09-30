@@ -275,3 +275,79 @@ test("bond-mate 설정이 없으면 안내만 남기고 iframe 을 만들지 않
   assert.equal(win.document.querySelector("#bondsContent iframe.bonds-frame"), null);
   assert.match(win.document.getElementById("bondsContent").textContent, /찾지 못했습니다/);
 });
+
+// --- 딥링크 /bonds?view= · 생태계 레지스트리 · vc:ready 테마 postMessage ---
+const REGISTRY_BM = {
+  version: 1,
+  hub: "https://ducklove.duckdns.org:3691",
+  categories: [{ id: "macro", label: "거시·채권·지수" }],
+  tools: [{
+    id: "bond-mate", name: "채권·금리", category: "macro", icon: "bond", accent: "#0f766e",
+    url: "https://ducklove.github.io/bond-mate", deploy: "github-pages", themeParam: true,
+    viewLink: { template: "?tab={view}", accepts: "^(overview|government|policy|fx|credit|issuance)$" },
+    embed: { template: "?embed={view}" },
+  }],
+};
+
+function loadBondsAt(url, { ecosystem = null, integrations = BOND_MATE_EMBED_CONFIG } = {}) {
+  const dom = new JSDOM(`<!doctype html><html><body><a id="bondsOpenLink" href="#"></a>
+    <div class="bonds-tabs" id="bondsTabs"></div><div id="bondsContent" class="bonds-embed"></div></body></html>`, {
+    runScripts: "dangerously", url,
+  });
+  const w = dom.window;
+  w.APP_CONFIG = { integrations, ...(ecosystem ? { ecosystem } : {}) };
+  for (const src of [UTILS, read("ecosystem-links.js"), BOND_MATE]) {
+    const script = w.document.createElement("script");
+    script.textContent = src;
+    w.document.body.appendChild(script);
+  }
+  return w;
+}
+
+test("/bonds?view=<탭> 딥링크는 첫 진입에서 그 탭을 임베드하고, 탭 전환은 URL 을 되쓴다", () => {
+  const w = loadBondsAt("https://app.example.com/bonds?view=fx");
+  w.loadBondsView();
+  const frame = w.document.querySelector("#bondsContent iframe.bonds-frame");
+  assert.ok(frame.src.includes("?embed=fx&"), `unexpected src: ${frame.src}`);
+  assert.equal(w.document.querySelector("#bondsTabs .bonds-tab.active").textContent, "환율");
+  assert.equal(frame.dataset.vcTool, "bond-mate", "registered for the iframe message bridge");
+
+  w.loadBondsView({ view: "credit" });
+  assert.equal(w.location.pathname + w.location.search, "/bonds?view=credit");
+  w.loadBondsView({ view: "overview" });
+  assert.equal(w.location.pathname + w.location.search, "/bonds", "기본 탭은 쿼리 없이");
+  w.close();
+
+  const bad = loadBondsAt("https://app.example.com/bonds?view=%3Cscript%3E");
+  bad.loadBondsView();
+  assert.ok(bad.document.querySelector("#bondsContent iframe.bonds-frame").src.includes("?embed=overview&"));
+  bad.close();
+});
+
+test("레지스트리가 있으면 bond-mate 링크·탭 키를 레지스트리 viewLink 에서 가져온다", () => {
+  const w = loadBondsAt("https://app.example.com/bonds", {
+    ecosystem: REGISTRY_BM,
+    integrations: { bondMate: { views: ["overview", "fx", "junk"] } },   // baseUrl 없음 → 레지스트리 url
+  });
+  assert.equal(w.bondMateBaseUrl(), "https://ducklove.github.io/bond-mate");
+  assert.equal(w.bondMateLink("fx"), "https://ducklove.github.io/bond-mate/?tab=fx");
+  assert.deepEqual(w.bondMateEmbedViews().map((v) => v.key), ["overview", "fx"]);
+  w.close();
+});
+
+test("vc:ready 를 보낸 임베드에는 테마를 postMessage 로 보내고 다시 로드하지 않는다", () => {
+  const w = loadBondsAt("https://app.example.com/bonds", { ecosystem: REGISTRY_BM });
+  w.loadBondsView();
+  const frame = w.document.querySelector("#bondsContent iframe.bonds-frame");
+  const posted = [];
+  frame.contentWindow.postMessage = (message, origin) => posted.push(JSON.parse(JSON.stringify({ message, origin })));
+  w.dispatchEvent(new w.MessageEvent("message", {
+    data: { source: "vc", type: "vc:ready" }, origin: "https://ducklove.github.io", source: frame.contentWindow,
+  }));
+  const src = frame.getAttribute("src");
+  w.document.documentElement.setAttribute("data-theme", "dark");
+  w.syncBondsFrameTheme();
+  assert.equal(frame.getAttribute("src"), src, "no reload — scroll position survives");
+  assert.deepEqual(posted.at(-1), { message: { source: "vc", type: "vc:theme", theme: "dark" }, origin: "https://ducklove.github.io" });
+  w.close();
+});

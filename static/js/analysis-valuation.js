@@ -4,7 +4,8 @@
 // index.html 로드 순서: analysis-charts → analysis-filings → analysis-valuation
 // → analysis. 전역 의존: activeIndicators/activeQuoteSnapshot/activeStockCode
 // (analysis.js), _lastWeeklyIndicators·_dateDaysAgo(analysis-charts.js),
-// allReports(analysis-filings.js), escapeHtml·apiFetchJson(utils.js).
+// allReports(analysis-filings.js), escapeHtml·apiFetchJson(utils.js). 생태계 링크는
+// ecosystem-links.js(ecoStockTools·ecoLinkHref …)를 typeof 로 확인하고 쓴다(없으면 기존 url).
 
 function getLatestIndicatorValue(series) {
   const entries = (series || []).filter(item => item && item.value !== null && item.value !== undefined && Number.isFinite(Number(item.value)));
@@ -186,27 +187,43 @@ function _sxlPct(v) {
   return isFinite(n) ? n.toFixed(1) + '%' : '-';
 }
 
+// 카드 링크 — 생태계 레지스트리(APP_CONFIG.ecosystem)가 있으면 그 도구의 stockLink 로
+// 지금 종목·테마를 실어 보낸다(보유 스냅샷 도구는 /api/portfolio/open 경유). data-vc-* 는
+// 테마 전환 때 ecoRefreshLinks 가 href 를 다시 계산하는 표식. 레지스트리가 없거나 도구가
+// 이 코드를 받지 않으면 서버가 준 url 을 그대로 쓴다.
+function _sxlToolLink(toolId, fallbackUrl) {
+  const code = typeof activeStockCode !== 'undefined' && activeStockCode ? String(activeStockCode) : '';
+  const href = code && toolId && typeof ecoLinkHref === 'function' && typeof ecoStockPath === 'function'
+    && ecoStockPath(toolId, code) ? ecoLinkHref('tool', toolId, { code }) : null;
+  if (!href) return { href: _sxlSafeUrl(fallbackUrl), attrs: '' };
+  return {
+    href,
+    attrs: ` data-vc-tool="${escapeHtml(toolId)}" data-vc-link="tool" data-vc-code="${escapeHtml(code)}"`,
+  };
+}
+
 // links = {preferred?, holding?} → valuation-card(링크) HTML 배열.
 function _externalValuationCards(links) {
   if (!links) return [];
-  const card = (label, value, sub, url) => (
-    `<a class="valuation-card is-link" href="${escapeHtml(_sxlSafeUrl(url))}" target="_blank" rel="noopener noreferrer" title="외부 분석 도구로 이동">`
+  const card = (label, value, sub, url, toolId) => {
+    const link = _sxlToolLink(toolId, url);
+    return `<a class="valuation-card is-link" href="${escapeHtml(link.href)}"${link.attrs} target="_blank" rel="noopener noreferrer" title="외부 분석 도구로 이동">`
     + `<span class="valuation-label">${escapeHtml(label)}</span>`
     + `<span class="valuation-value">${escapeHtml(value)}</span>`
     + (sub ? `<span class="valuation-sub">${sub}</span>` : '')
-    + '</a>'
-  );
+    + '</a>';
+  };
   const cards = [];
   const p = links.preferred;
   if (p) {
     const sub = `${escapeHtml(String(p.name || ''))} ${_sxlNum(p.commonPrice)}`
       + ` · ${escapeHtml(String(p.preferredName || '우선주'))} ${_sxlNum(p.preferredPrice)}`;
-    cards.push(card('우선주 괴리율', _sxlPct(p.spread), sub, p.url));
+    cards.push(card('우선주 괴리율', _sxlPct(p.spread), sub, p.url, 'common_preferred_spread'));
   }
   const h = links.holding;
   if (h) {
     const sub = `보유 ${_sxlNum(h.holdingValue)} · 시총 ${_sxlNum(h.marketCap)} (억)`;
-    cards.push(card('지주사 보유가치/시총', _sxlPct(h.ratio), sub, h.url));
+    cards.push(card('지주사 보유가치/시총', _sxlPct(h.ratio), sub, h.url, 'holding_value'));
   }
   const e = links.etf;
   if (e && e.url) {
@@ -244,6 +261,71 @@ function _renderCoverage() {
   // 실제 렌더된 카드 수로 열 수를 정한다 — DR sanity 가드로 일부가 숨겨질 수
   // 있어 _currentDr.length 가 아니라 DOM 의 실제 .valuation-card 수를 센다.
   el.dataset.count = String(el.querySelectorAll('.valuation-card').length);
+  // 외부 도구 신호(_currentStockLinks)가 바뀌면 헤더의 '연결 도구' 칩도 같이 맞춘다.
+  renderAnalysisToolLinks();
+}
+
+// --- 분석 헤더 생태계 칩: '← 도구로 돌아가기' + '연결 도구' (#analysisEcoLinks) ---
+// 레지스트리 stockLink.accepts 가 이 코드를 받는 도구 중에서 고른다. 관련성 신호가 있는
+// 도구는 위 밸류에이션 카드가 대표하므로 칩으로 겹쳐 띄우지 않는다(지주사 → holding_value,
+// 우선주 쌍 → common_preferred_spread, ETF → eiayn: 신호가 없으면 관련 없는 종목이다).
+// 신호가 이름뿐인 도구(스팩)는 이름으로 거르고, 나머지(자사주 등)는 일반 칩으로 둔다.
+const ANALYSIS_TOOL_CARD_SIGNALS = {
+  holding_value: 'holding',
+  common_preferred_spread: 'preferred',
+  eiayn: 'etf',
+};
+const ANALYSIS_TOOL_NAME_SIGNALS = {
+  'spac-hunter': /스팩|SPAC/i,
+};
+
+function analysisRelatedTools(code, corpName) {
+  if (typeof ecoStockTools !== 'function') return [];
+  return ecoStockTools(code).filter((tool) => {
+    if (tool.deploy === 'hub') return false;
+    if (ANALYSIS_TOOL_CARD_SIGNALS[tool.id]) return false;  // 카드(신호 있을 때만)가 담당
+    const nameSignal = ANALYSIS_TOOL_NAME_SIGNALS[tool.id];
+    return nameSignal ? nameSignal.test(String(corpName || '')) : true;
+  });
+}
+
+function _analysisEcoChip(tool, code, { back = false } = {}) {
+  const href = ecoLinkHref('tool', tool.id, { code });
+  if (!href) return '';
+  const label = back ? `← ${tool.name}${ecoJosaRo(tool.name)} 돌아가기` : tool.name;
+  const accent = /^#[0-9a-fA-F]{6}$/.test(String(tool.accent || '')) ? ` style="--eco-chip-accent:${tool.accent}"` : '';
+  return `<a class="eco-chip${back ? ' eco-chip-back' : ''}" href="${escapeHtml(href)}"`
+    + ` data-vc-tool="${escapeHtml(tool.id)}" data-vc-link="tool" data-vc-code="${escapeHtml(code)}"${accent}`
+    + (back ? '' : ' target="_blank" rel="noopener"')
+    + ` title="${escapeHtml(back ? `${tool.name}에서 이 종목 다시 보기` : String(tool.description || tool.name))}">`
+    + `${escapeHtml(label)}</a>`;
+}
+
+function renderAnalysisToolLinks() {
+  const el = document.getElementById('analysisEcoLinks');
+  if (!el) return;
+  const code = typeof activeStockCode !== 'undefined' && activeStockCode ? String(activeStockCode) : '';
+  if (!code || typeof ecoStockTools !== 'function' || typeof ecoLinkHref !== 'function') {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const data = typeof _lastAnalysisData !== 'undefined' ? _lastAnalysisData : null;
+  const corpName = data && data.stock_code === code ? data.corp_name : '';
+  const parts = [];
+  const back = typeof ecoArrivalTool === 'function' ? ecoArrivalTool(code) : null;
+  if (back) parts.push(_analysisEcoChip(back, code, { back: true }));
+  const chips = analysisRelatedTools(code, corpName)
+    .filter((tool) => !back || tool.id !== back.id)
+    .map((tool) => _analysisEcoChip(tool, code))
+    .filter(Boolean);
+  if (chips.length) {
+    parts.push('<span class="eco-chip-row" role="group" aria-label="연결 도구">'
+      + `<span class="eco-chip-label">연결 도구</span>${chips.join('')}</span>`);
+  }
+  const html = parts.filter(Boolean).join('');
+  el.innerHTML = html;
+  el.hidden = !html;
 }
 
 async function loadStockExternalLinks(stockCode) {

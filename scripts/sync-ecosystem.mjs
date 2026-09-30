@@ -10,6 +10,7 @@
 //   1. validate the registry (+ config/analytics-projects.json consistency)
 //   2. regenerate the public registry block inside static/ecosystem/vc-shell.js
 //   3. check vc-tokens.css: the prefers-color-scheme block mirrors [data-theme="dark"]
+//   3b. the hub's own static/index.html must carry an up-to-date theme-boot block
 //   4. per public sibling checkout: vendored vc-shell.js / vc-tokens.css (byte-identical),
 //      inline theme-boot block between <!-- vc:theme-boot --> markers, <vc-shell> adoption,
 //      held-badges ?v= tag, vendored publish helpers (vc_publish.py / vc-publish.mjs)
@@ -233,7 +234,8 @@ function main() {
   const hub = reg.tools.find(t => t.id === HUB_ID);
   if (hub && hub.vendor) {
     const htmlPath = resolve(root, hub.vendor.html);
-    syncBootBlock(`${HUB_ID} ${hub.vendor.html}`, htmlPath, readFileSync(htmlPath, 'utf8'), block, hub.vendor.themeBoot);
+    // The hub's own page always carries the boot block (vendor.themeBoot only gates siblings' adoption).
+    syncBootBlock(`${HUB_ID} ${hub.vendor.html}`, htmlPath, readFileSync(htmlPath, 'utf8'), block, true);
   }
   if (hubOnly) return;
 

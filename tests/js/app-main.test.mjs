@@ -48,3 +48,67 @@ for (const [label, path, width, loggedIn, expected] of [
     }
   });
 }
+
+// --- 딥링크: 최초 진입 ?focus, 뒤로/앞으로가기의 ?code / ?focus / ?view 복원 ---
+function bootApp(path, extra = {}) {
+  const dom = new JSDOM('', { url: `https://example.test${path}`, runScripts: 'outside-only' });
+  const w = dom.window;
+  const calls = [];
+  let finish;
+  const ready = new Promise(resolve => { finish = resolve; });
+  Object.assign(w, {
+    innerWidth: 1200, currentUser: { id: 1 },
+    PfStore: { items: [], activeView: 'investing' },
+    recentListItems: [], activeStockCode: null,
+    QuoteManager: { connect() {}, updateSubscriptions() {} },
+    initAuth: async () => {},
+    switchView: (view) => calls.push(['view', view]),
+    analyzeStock: (code) => calls.push(['analyze', code]),
+    pfFocusHolding: (code) => calls.push(['focus', code]),
+    loadBondsView: (opts) => calls.push(['bonds', opts && opts.view]),
+    loadRecentList: async () => {},
+    _mbLoadCatalog: async () => {}, _mbLoadCodes: async () => {},
+    loadMarketSummary() {}, loadMarketTape() {}, loadDailyMarketBrief() {},
+    _pollBenchmarkQuotes() {}, syncAuthState() {},
+    trackEvent: () => finish(),
+    ...extra,
+  });
+  w.eval(routes + '\n' + app);
+  return { w, calls, ready };
+}
+
+test('/portfolio?focus=CODE 로 들어오면 포트폴리오를 열고 그 보유 행을 강조한다', async () => {
+  const { w, calls, ready } = bootApp('/portfolio?focus=005930');
+  try {
+    await ready;
+    assert.deepEqual(calls, [['view', 'portfolio'], ['focus', '005930']]);
+  } finally { w.close(); }
+});
+
+test('popstate: /analysis?code 는 다른 종목일 때만 다시 분석하고, ?focus·?view 도 복원한다', async () => {
+  const { w, calls, ready } = bootApp('/investing');
+  try {
+    await ready;
+    calls.length = 0;
+    const pop = (url) => { w.history.replaceState(null, '', url); w.dispatchEvent(new w.PopStateEvent('popstate')); };
+
+    pop('/analysis?code=000670');
+    assert.deepEqual(calls.splice(0), [['view', 'analysis'], ['analyze', '000670']]);
+
+    w.eval("activeStockCode = '000670'");
+    pop('/analysis?code=000670&from=holding_value');
+    assert.deepEqual(calls.splice(0), [['view', 'analysis']], 'same stock → no re-analysis');
+
+    pop('/?code=005930');
+    assert.deepEqual(calls.splice(0), [['view', 'analysis'], ['analyze', '005930']]);
+
+    pop('/portfolio?focus=035720');
+    assert.deepEqual(calls.splice(0), [['view', 'portfolio'], ['focus', '035720']]);
+
+    pop('/bonds?view=fx');
+    assert.deepEqual(calls.splice(0), [['view', 'bonds'], ['bonds', 'fx']]);
+
+    pop('/labs');
+    assert.deepEqual(calls.splice(0), [['view', 'labs']]);
+  } finally { w.close(); }
+});

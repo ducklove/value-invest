@@ -168,3 +168,15 @@ def test_analysis_wiki_qa_and_journal_are_collapsed_by_default():
     assert '<label for="wikiQaInput" class="wiki-qa-label sr-only">' in html
     assert "list-style: none" in styles
     assert "::-webkit-details-marker" in styles
+
+
+def test_analysis_header_has_ecosystem_chip_slot_and_url_rewrite():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    info = html[html.index('<div class="company-info" id="companyInfo">'):html.index('id="personalizationPanel"')]
+    assert '<div class="analysis-eco-links" id="analysisEcoLinks" hidden></div>' in info
+    valuation = (JS / "analysis-valuation.js").read_text(encoding="utf-8")
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+    assert "function renderAnalysisToolLinks()" in valuation
+    assert "history.replaceState({ pfView: 'analysis' }, '', next)" in analysis
+    css = (CSS / "analysis.css").read_text(encoding="utf-8")
+    assert ".analysis-eco-links[hidden] { display: none; }" in css

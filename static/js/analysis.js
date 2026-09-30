@@ -188,6 +188,37 @@ function cancelAnalysis() {
   }
 }
 
+// 분석이 성공하면 URL 을 /analysis?code=CODE 로 되쓴다(history.replaceState) — 공유·북마크·
+// 새로고침이 같은 종목으로 돌아오고, 뒤로가기는 app-main.js 의 popstate 가 ?code 로 복원한다.
+// 다른 쿼리(from 등)는 유지하되, 한 번만 쓰는 ?theme 은 이미 적용됐으므로 걷어내고,
+// ?from(연결 도구에서 들어온 출처)은 같은 종목을 보는 동안에만 남긴다.
+function analysisUrlFor(stockCode, search = window.location.search, hash = window.location.hash) {
+  const code = String(stockCode || '').trim().toUpperCase();
+  const current = new URLSearchParams(search || '');
+  const sameStock = String(current.get('code') || '').trim().toUpperCase() === code;
+  const next = new URLSearchParams();
+  next.set('code', code);
+  for (const [key, value] of current) {
+    if (key === 'code' || key === 'theme' || key === 'focus' || key === 'view') continue;
+    if (key === 'from' && !sameStock) continue;
+    next.append(key, value);
+  }
+  return `/analysis?${next.toString()}${hash || ''}`;
+}
+
+function syncAnalysisUrl(stockCode) {
+  if (!stockCode) return;
+  // 분석을 기다리는 사이 다른 화면으로 옮겨 갔으면 그 화면의 URL 을 건드리지 않는다.
+  if (typeof PfStore !== 'undefined' && PfStore.activeView && PfStore.activeView !== 'analysis') return;
+  try {
+    const next = analysisUrlFor(stockCode);
+    if (window.location.pathname + window.location.search + window.location.hash !== next) {
+      history.replaceState({ pfView: 'analysis' }, '', next);
+    }
+  } catch (e) { /* URL 동기화는 부가 기능 — 분석 결과에는 영향 없음 */ }
+  if (typeof renderAnalysisToolLinks === 'function') renderAnalysisToolLinks();
+}
+
 async function analyzeStock(stockCode) {
   try {
     requireApiConfiguration();
@@ -227,6 +258,7 @@ async function analyzeStock(stockCode) {
       }
       const data = await resp.json();
       renderResult(data);
+      syncAnalysisUrl(data.stock_code || stockCode);
       if (!currentUser) saveGuestRecent(data.stock_code, data.corp_name);
       if (activeTab === 'starred' && currentUser && !data.user_preference?.is_starred) {
         await autoStarCurrentStock();
@@ -322,6 +354,7 @@ async function analyzeStock(stockCode) {
     if (resultData) {
       await new Promise(r => setTimeout(r, 300));
       renderResult(resultData);
+      syncAnalysisUrl(resultData.stock_code || stockCode);
       if (!currentUser) saveGuestRecent(resultData.stock_code, resultData.corp_name);
       if (activeTab === 'starred' && currentUser && !resultData.user_preference?.is_starred) {
         await autoStarCurrentStock();

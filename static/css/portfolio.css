@@ -3765,3 +3765,10 @@ body.pf-heat-mode:not(.pf-mobile-simple) .pf-table tbody tr[data-heat-dir] > td.
     padding-right: 8px;
   }
 }
+
+/* /portfolio?focus=CODE 딥링크 강조 (portfolio-render.js pfFocusHolding) — 잠시 뒤 클래스가 빠진다. */
+.pf-table tbody tr.pf-row-focus > td { background: var(--down-tint); }
+.pf-table tbody tr.pf-row-focus > td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
+
+/* nps-tracker 임베드가 vc:height 로 높이를 알려 오면 그 높이를 따른다(이중 스크롤 제거). */
+.nps-frame.vc-auto-height { min-height: 0; }

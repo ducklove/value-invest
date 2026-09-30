@@ -14,6 +14,8 @@ let _mdInFlight = null;
 
 // Display order for category groups; unknown categories fall to the end.
 const MD_CATEGORY_ORDER = ['국내 지수', '해외 지수', '국채', '원자재', '환율', '야간선물', '하이퍼리퀴드'];
+// index-popup 주소의 정본은 생태계 레지스트리(APP_CONFIG.ecosystem 의 'index-popup'.url)다.
+// 레지스트리가 없을 때(옛 app-config·테스트)만 이 상수로 폴백한다.
 const MD_INDEX_FRAME_BASE_URL = 'https://ducklove.duckdns.org:3358/';
 const MD_INDEX_FRAME_CODES = { KOSPI: 'ekospi', KOSDAQ: 'kosdaq' };
 const MD_INDEX_DISPLAY_LABELS = { KOSPI: 'eKOSPI', KOSDAQ: 'KOSDAQ' };
@@ -95,9 +97,15 @@ function _mdCurrentTheme() {
   return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
 }
 
+function _mdIndexFrameBaseUrl() {
+  const tool = typeof ecoTool === 'function' ? ecoTool('index-popup') : null;
+  const url = tool ? String(tool.url || '') : '';
+  return /^https?:\/\//.test(url) ? url.replace(/\/+$/, '') + '/' : MD_INDEX_FRAME_BASE_URL;
+}
+
 function _mdIndexFrameUrl(index, theme = _mdCurrentTheme(), period = MD_INDEX_FRAME_DEFAULT_PERIOD) {
   const params = new URLSearchParams({ index, theme, period, headless: '1' });
-  return `${MD_INDEX_FRAME_BASE_URL}?${params.toString()}`;
+  return `${_mdIndexFrameBaseUrl()}?${params.toString()}`;
 }
 
 function _mdIndexFrameHtml(code, label) {
@@ -106,14 +114,16 @@ function _mdIndexFrameHtml(code, label) {
   const url = _mdIndexFrameUrl(index);
   return '<div class="md-index-frame-wrap">'
     + `<iframe class="md-index-frame" src="${escapeHtml(url)}" `
-    + `data-md-frame-index="${escapeHtml(index)}" `
+    + `data-md-frame-index="${escapeHtml(index)}" data-vc-tool="index-popup" `
     + `data-md-frame-period="${escapeHtml(MD_INDEX_FRAME_DEFAULT_PERIOD)}" `
     + `title="${escapeHtml(label)} 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>`
     + '</div>';
 }
 
+// vc:ready 를 보낸 위젯은 postMessage(vc:theme)로, 아니면 기존처럼 src 를 새 테마로 다시 받는다.
 function syncMarketDashboardFrameTheme() {
   document.querySelectorAll('iframe[data-md-frame-index]').forEach((frame) => {
+    if (typeof ecoPostFrameTheme === 'function' && ecoPostFrameTheme(frame)) return;
     const index = frame.dataset.mdFrameIndex;
     const period = frame.dataset.mdFramePeriod || MD_INDEX_FRAME_DEFAULT_PERIOD;
     if (index) frame.src = _mdIndexFrameUrl(index, _mdCurrentTheme(), period);
@@ -236,7 +246,7 @@ function _mdKospiFuturesSectionHtml() {
     + '<h3 class="md-section-title">야간선물</h3>'
     + '<div class="md-kospi-futures-frame-wrap">'
     + `<iframe class="md-kospi-futures-frame" src="${escapeHtml(_mdIndexFrameUrl(index, _mdCurrentTheme(), period))}" `
-    + `data-md-frame-index="${escapeHtml(index)}" `
+    + `data-md-frame-index="${escapeHtml(index)}" data-vc-tool="index-popup" `
     + `data-md-frame-period="${escapeHtml(period)}" `
     + 'title="야간선물 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>'
     + '</div></section>';
@@ -1069,10 +1079,19 @@ function _extPct(v, signed) {
   return fmtPct(n, !!signed, signed ? 2 : 1);
 }
 
-function _extLinkRows(rows, valKey, baseUrl, useCode) {
+// 종목 딥링크 — 생태계 레지스트리의 stockLink 템플릿(?code= / ?stock= …)과 accepts 정규식을
+// 따른다. 레지스트리가 없으면 기존 규칙(?code=)으로 폴백, 코드를 받지 않는 도구면 홈으로.
+function _extStockHref(toolId, baseUrl, code) {
+  if (!code) return baseUrl;
+  const path = typeof ecoStockPath === 'function' ? ecoStockPath(toolId, code) : null;
+  if (path === null) return `${baseUrl}?code=${encodeURIComponent(code)}`;
+  return path ? baseUrl + path : baseUrl;
+}
+
+function _extLinkRows(rows, valKey, baseUrl, stockToolId) {
   return (rows || []).map((r) => {
-    // holding 도구만 ?code= deep-link 지원. 그 외엔 도구 홈으로.
-    const href = useCode && r.code ? `${baseUrl}?code=${encodeURIComponent(r.code)}` : baseUrl;
+    // 종목 딥링크는 stockToolId 로 지정한 카드만(지주사). 그 외엔 도구 홈으로.
+    const href = stockToolId && r.code ? _extStockHref(stockToolId, baseUrl, r.code) : baseUrl;
     return `<a class="ext-row" href="${escapeHtml(_extHref(href))}" target="_blank" rel="noopener noreferrer">`
       + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
       + `<span class="ext-val">${escapeHtml(_extPct(r[valKey]))}</span></a>`;
@@ -1082,7 +1101,7 @@ function _extLinkRows(rows, valKey, baseUrl, useCode) {
 function _extSpacRows(rows, baseUrl) {
   // 스팩은 현재가(원)를 그대로 보여준다(저가순). spac-hunter 는 ?code= deep-link 지원.
   return (rows || []).map((r) => {
-    const href = r.code ? `${baseUrl}?code=${encodeURIComponent(r.code)}` : baseUrl;
+    const href = _extStockHref('spac-hunter', baseUrl, r.code);
     const n = Number(r.currentPrice);
     const price = (r.currentPrice != null && isFinite(n)) ? n.toLocaleString() : '-';
     return `<a class="ext-row" href="${escapeHtml(_extHref(href))}" target="_blank" rel="noopener noreferrer">`
@@ -1128,17 +1147,17 @@ function _extRender(root, data) {
   const h = data && data.holding;
   if (h && (h.top || []).length) {
     const sub = h.averageRatio != null ? `평균 ${_extPct(h.averageRatio)} · 보유가치/시총` : '보유가치/시총';
-    cards.push(_extCard('지주사 저평가', h.url, sub, _extLinkRows(h.top, 'ratio', h.url, true)));
+    cards.push(_extCard('지주사 저평가', h.url, sub, _extLinkRows(h.top, 'ratio', h.url, 'holding_value')));
   }
   const s = data && data.spread;
   if (s && (s.top || []).length) {
     const sub = s.averageSpread != null ? `평균 괴리율 ${_extPct(s.averageSpread)}` : '우선주 괴리율';
-    cards.push(_extCard('우선주 괴리율', s.url, sub, _extLinkRows(s.top, 'spread', s.url, false)));
+    cards.push(_extCard('우선주 괴리율', s.url, sub, _extLinkRows(s.top, 'spread', s.url, null)));
   }
   const bb = data && data.buybacks;
   if (bb && (bb.top || []).length) {
     const sub = bb.asOf ? `${bb.asOf} 기준 · 보유비중 상위` : '보유비중 상위';
-    cards.push(_extCard('자사주', bb.url, sub, _extLinkRows(bb.top, 'treasuryRatioPct', bb.url, false)));
+    cards.push(_extCard('자사주', bb.url, sub, _extLinkRows(bb.top, 'treasuryRatioPct', bb.url, null)));
   }
   const p = data && data.spac;
   if (p && (p.top || []).length) {
@@ -1195,7 +1214,7 @@ function _extRender(root, data) {
     const sub = nps.nav != null
       ? `NAV ${Number(nps.nav).toFixed(1)} · 비중 상위`
       : '포트폴리오 비중 상위';
-    cards.push(_extCard('국민연금', nps.url, sub, _extLinkRows(nps.top, 'weight', nps.url, false)));
+    cards.push(_extCard('국민연금', nps.url, sub, _extLinkRows(nps.top, 'weight', nps.url, null)));
   }
   const bm = data && data.bondMate;
   if (bm) {
