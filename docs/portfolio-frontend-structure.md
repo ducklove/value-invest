@@ -1,6 +1,6 @@
 # Portfolio Frontend Structure
 
-작성일: 2026-04-30 · 갱신: 2026-06-10 (analysis/admin 분할, PfStore 상태 통합 반영)
+작성일: 2026-04-30 · 갱신: 2026-09-30 (생태계 셸·utils.js 공용 헬퍼 의존성 반영)
 
 `static/js/portfolio.js`가 4,000줄을 넘으면서 작은 UI 변경이 실시간 시세, 그래프, 메뉴, 태그, 현금흐름에 예상치 못한 영향을 주는 상태가 되었다. 1차 리팩토링은 빌드 시스템을 새로 도입하지 않고, classic script 전역 계약과 실행 순서를 유지하면서 기능별 파일 경계를 나누는 방식으로 진행했다.
 
@@ -9,8 +9,9 @@
 2026-09-08: `utils.js` 다음의 `feature-loader.js`가 화면별 classic script를
 필요할 때 로드한다. `index.html`의 `data-feature`·`data-src`가 로드 목록이며,
 같은 그룹의 파일은 HTML 순서대로 실행한다. 성공한 파일은 재실행하지 않고,
-실패한 파일부터 재시도한다. `core/static_routes.py`는 `data-src`에도 같은
-배포 버전을 붙인다.
+실패한 파일부터 재시도한다. `core/static_routes.py`는 `href`/`src`/`data-src`에
+파일별 콘텐츠 해시(`?v=` sha1 앞 10자, `core/runtime.AssetManifest`)를 붙이고, 현재 해시와
+같은 요청만 `immutable`로 캐시한다(2026-09-30).
 
 - 심층 분석 진입: 수익 분해, 논거, 보고서, 리스크, 리밸런싱, 배당, 투자일지 7개.
 - 가계부 진입: `portfolio-household.js`.
@@ -49,7 +50,18 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
 
 0. `./static/ecosystem/vc-shell.js`: 생태계 도구 전환(`<vc-shell tool="value-invest" variant="menu">`,
    헤더의 테마 토글 옆)과 `VCShell` API(아이콘 스프라이트 등). 의존성 없음 — `utils.js` 앞.
-1. `utils.js`: 공통 API fetch, 포맷, 앱 설정, markdown 렌더링.
+1. `utils.js`: 공통 API fetch, 포맷, 앱 설정, markdown 렌더링. 2026-09-30부터 아래 공용 헬퍼도
+   여기 있다 — 뒤에 오는 파일(지연 그룹 포함)은 사본을 두지 말고 이것을 쓴다.
+   - `cssToken(name, fallback)`: `:root` CSS 변수 값(없으면 fallback) — 캔버스 차트 색.
+     사용: `stock-hover-chart.js`, `portfolio-trend-chart.js`, `analysis-charts.js`,
+     `market-dashboard.js`, `masters.js`(지연), `admin-charts.js`.
+   - `isDarkTheme()`: `html[data-theme="dark"]` 여부. 사용: `analysis-charts.js`, `market-dashboard.js`, `admin.js`.
+   - `schedulePoll(name, fn, ms, {freshMs, when, runNow, refreshOnVisible})` / `cancelPoll(name)`:
+     이름당 타이머 하나, 숨은 탭에서 멈추고 복귀 시 신선도 창을 넘겼으면 한 번 즉시 실행.
+     사용: `quote-manager.js`, `market-dashboard.js`, `app-main.js`, `admin-observability.js`.
+     새 `setInterval` 폴링 대신 이것을 쓴다.
+   - `safeStorageGet/Set/Remove(key, …, area)`: 차단·용량 초과에도 던지지 않는 local/session
+     저장소 접근. 사용: `quote-manager.js`, `market-dashboard.js`, `admin.js`.
 1a. `ecosystem-links.js`: `APP_CONFIG.ecosystem`(레지스트리 공개 투영) 헬퍼 — 형제 대시보드
    딥링크(stockLink/viewLink), 도구 화면 '연결 대시보드'(`/go/{id}` 새 탭), 분석 헤더 칩이 쓰는
    `ecoStockTools`·`ecoArrivalTool`·`ecoLinkHref`, iframe 메시지 브리지(`vc:ready`/`vc:height`/
@@ -124,7 +136,7 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
 
 ## Admin Page
 
-`static/admin.html`은 inline `apiFetch` → `admin.js`(부트스트랩·AI 설정·공용 헬퍼) →
+`static/admin.html`은 `utils.js`(apiFetch·escapeHtml·cssToken·isDarkTheme·schedulePoll·safeStorage*; 옛 inline `apiFetch` 사본은 제거) → `admin.js`(부트스트랩·AI 설정) →
 `admin-observability.js`(관측성 패널·라이브 갱신·수동 잡) →
 `admin-linked-projects.js`(연결 프로젝트 config·외국/우선주 배당 관리) 순서로 로드한다.
 
