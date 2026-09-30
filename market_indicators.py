@@ -12,7 +12,6 @@ import io
 import json as _json
 import os
 import re
-import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import asynccontextmanager
@@ -23,7 +22,7 @@ from urllib.parse import urljoin
 import httpx
 
 import kis_proxy_client
-from cache_layer import MemoryTTLCache
+from cache_layer import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 from services.market import naver_indicators
 
@@ -141,20 +140,6 @@ async def _market_indicators_client() -> AsyncIterator[httpx.AsyncClient]:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _decode_naver_spans(html_fragment: str) -> str:
-    """Decode spans like <span class="no5">5</span><span class="jum">.</span> into '5.'"""
-    result = []
-    for m in re.finditer(r'class="(no\d|jum|shim)"[^>]*>([^<]*)', html_fragment):
-        cls, text = m.group(1), m.group(2)
-        if cls == "jum":
-            result.append(".")
-        elif cls == "shim":
-            result.append(",")
-        elif cls.startswith("no"):
-            result.append(text.strip())
-    return "".join(result)
-
-
 def _fmt(val: float, decimals: int = 2) -> str:
     """Format number with commas and decimal places."""
     return f"{val:,.{decimals}f}"
@@ -178,163 +163,6 @@ def _indicator_has_value(data: dict | None) -> bool:
         return False
     value = data.get("value")
     return value is not None and str(value).strip() != ""
-
-
-# ---------------------------------------------------------------------------
-# Korean index fetchers (KOSPI, KOSDAQ, KOSPI200)
-# ---------------------------------------------------------------------------
-
-_KR_INDEX_CODES = {"KOSPI": "KOSPI", "KOSDAQ": "KOSDAQ", "KOSPI200": "KPI200"}
-
-
-async def _fetch_kr_index(client: httpx.AsyncClient, naver_code: str) -> dict:
-    try:
-        r = await client.get(
-            f"https://finance.naver.com/sise/sise_index.naver?code={naver_code}",
-            headers=_HEADERS,
-        )
-        html = r.content.decode("euc-kr", errors="ignore")
-
-        # Value: try direct text first (KOSPI/KOSDAQ), then nested <strong> (KPI200)
-        value_m = re.search(r'id="now_value"[^>]*>([^<]+)', html)
-        value_str = value_m.group(1).strip() if value_m and value_m.group(1).strip() else ""
-        if not value_str:
-            value_m2 = re.search(r'id="now_value"[^>]*>.*?<strong[^>]*>([^<]+)', html, re.DOTALL)
-            value_str = value_m2.group(1).strip() if value_m2 else ""
-
-        # Direction: try quotient class (KOSPI/KOSDAQ)
-        direction_m = re.search(r'class="quotient\s+(up|dn)"', html)
-        d = direction_m.group(1) if direction_m else ""
-
-        # Change: try change_value_and_rate (KOSPI/KOSDAQ)
-        change_block = re.search(
-            r'change_value_and_rate"[^>]*><span>([^<]+)</span>\s*([-+]?[0-9.]+%)',
-            html,
-        )
-        if change_block:
-            change_val = change_block.group(1).strip()
-            change_pct = change_block.group(2).strip().lstrip("+-")
-        else:
-            # Fallback: KPI200 layout. The change magnitude lives in a <span>
-            # inside id="change_value" and the signed rate in a <strong> inside
-            # id="change_rate". Anchoring on those exact tags avoids grabbing
-            # stray digits (e.g. an <img width="7">) or an unrelated "0.00%".
-            chg_m = re.search(
-                r'id="change_value".*?<span[^>]*>\s*([\d,.]+)\s*<', html, re.DOTALL
-            )
-            change_val = chg_m.group(1).strip() if chg_m else ""
-            rate_m = re.search(
-                r'id="change_rate".*?<strong[^>]*>\s*([+-]?[\d,.]+)\s*%', html, re.DOTALL
-            )
-            rate_raw = rate_m.group(1).strip() if rate_m else ""
-            # A rate is only trustworthy alongside a parsed magnitude; otherwise
-            # leave it blank so downstream omits the index instead of asserting 0%.
-            change_pct = rate_raw.lstrip("+-") + "%" if (rate_raw and change_val) else ""
-            if not d:
-                if rate_raw.startswith("-"):
-                    d = "dn"
-                elif re.search(r'id="change_value".*?ico_down\.gif', html, re.DOTALL):
-                    d = "dn"
-                elif re.search(r'id="change_value".*?ico_up\.gif', html, re.DOTALL):
-                    d = "up"
-                elif rate_raw and float(rate_raw) > 0:
-                    d = "up"
-
-        direction = "up" if d == "up" else "down" if d == "dn" else ""
-
-        # Reconcile: recompute the rate from value + magnitude and prefer it when
-        # the scraped rate is missing or inconsistent. This is the structural fix
-        # for the "변동 없이 0.00%" bug — a fabricated/stray rate can no longer
-        # survive a cross-check against the actual value and change.
-        if value_str and change_val and direction:
-            recomputed = _calc_change_pct(value_str, change_val, direction)
-            if recomputed:
-                scraped = float(change_pct.rstrip("%")) if change_pct.rstrip("%").replace(".", "").isdigit() else None
-                if scraped is None or abs(scraped - float(recomputed.rstrip("%"))) > 0.1:
-                    change_pct = recomputed
-        elif not change_val:
-            # No reliable magnitude → never emit a change/rate at all.
-            change_val = ""
-            change_pct = ""
-
-        return {
-            "value": value_str,
-            "change": change_val,
-            "change_pct": change_pct,
-            "direction": direction,
-        }
-    except Exception:
-        return dict(_EMPTY)
-
-
-# ---------------------------------------------------------------------------
-# Foreign index fetchers
-# ---------------------------------------------------------------------------
-
-_FOREIGN_SYMBOLS = {
-    "SPX": "SPI@SPX",
-    "IXIC": "NAS@IXIC",
-    "DJI": "DJI@DJI",
-    "NI225": "NII@NI225",
-    "HSI": "HSI@HSI",
-    "SHC": "SHS@SHC",
-}
-
-
-async def _fetch_foreign_index(client: httpx.AsyncClient, symbol: str) -> dict:
-    try:
-        r = await client.get(
-            f"https://finance.naver.com/world/sise.naver?symbol={symbol}",
-            headers=_HEADERS,
-        )
-        html = r.content.decode("euc-kr", errors="ignore")
-
-        # Value: class="no_today"
-        today_m = re.search(r'class="no_today".*?<em[^>]*>(.*?)</em>', html, re.DOTALL)
-        value_str = _decode_naver_spans(today_m.group(1)) if today_m else ""
-
-        # Change and direction: class="no_exday"
-        exday_m = re.search(r'class="no_exday".*?</dl>', html, re.DOTALL)
-        change_str = ""
-        change_pct = ""
-        direction = ""
-        if exday_m:
-            block = exday_m.group(0)
-            # Direction from class="no_(up|down)" on em tags
-            dir_m = re.search(r'class="no_(up|down)"', block)
-            direction = dir_m.group(1) if dir_m else ""
-            # Find all em tags within the block
-            ems = re.findall(r'<em[^>]*>(.*?)</em>', block, re.DOTALL)
-            if len(ems) >= 1:
-                change_str = _decode_naver_spans(ems[0])
-            if len(ems) >= 2:
-                pct_raw = _decode_naver_spans(ems[1])
-                change_pct = pct_raw.strip().strip("%").strip()
-                if change_pct:
-                    change_pct = change_pct + "%"
-
-        # Format value with commas and 2 decimals
-        try:
-            val_num = float(value_str.replace(",", ""))
-            value_str = _fmt(val_num)
-        except (ValueError, AttributeError):
-            pass
-
-        # Format change
-        try:
-            chg_num = float(change_str.replace(",", ""))
-            change_str = _fmt(chg_num)
-        except (ValueError, AttributeError):
-            pass
-
-        return {
-            "value": value_str,
-            "change": change_str,
-            "change_pct": change_pct,
-            "direction": direction,
-        }
-    except Exception:
-        return dict(_EMPTY)
 
 
 # ---------------------------------------------------------------------------
@@ -432,58 +260,8 @@ async def _fetch_hyperliquid_tickers(
 
 
 # ---------------------------------------------------------------------------
-# Marketindex page (gold, WTI, exchange rates, KR bonds)
+# Marketindex page (KR 3Y bond)
 # ---------------------------------------------------------------------------
-
-_MARKETINDEX_COMMODITY_MAP = {
-}
-
-_MARKETINDEX_FX_MAP = {
-    "USD_KRW": "head usd",
-    "EUR_KRW": "head eur",
-    "JPY_KRW": "head jpy",
-    "CNY_KRW": "head cny",
-    "USD_IDX": "head usd_idx",  # 달러지수 — 메인 페이지 head 블록 구조가 환율과 동일
-}
-
-
-def _parse_marketindex_block(html: str, head_class: str) -> dict:
-    """Parse a head block from the marketindex page (commodities or FX)."""
-    pattern = rf'class="{re.escape(head_class)}".*?</a>'
-    m = re.search(pattern, html, re.DOTALL)
-    if not m:
-        return dict(_EMPTY)
-    block = m.group(0)
-    val_m = re.search(r'class="value">([0-9,.]+)', block)
-    chg_m = re.search(r'class="change">\s*([0-9,.]+)', block)
-    dir_m = re.search(r'class="head_info\s+point_(up|dn|down)"', block)
-    value_str = val_m.group(1) if val_m else ""
-    change_str = chg_m.group(1) if chg_m else ""
-    d = dir_m.group(1) if dir_m else ""
-    direction = "up" if d == "up" else "down" if d in ("dn", "down") else ""
-
-    # Format value
-    try:
-        val_num = float(value_str.replace(",", ""))
-        value_str = _fmt(val_num)
-    except (ValueError, AttributeError):
-        pass
-
-    # Format change
-    try:
-        chg_num = float(change_str.replace(",", ""))
-        change_str = _fmt(chg_num)
-    except (ValueError, AttributeError):
-        pass
-
-    change_pct = _calc_change_pct(value_str, change_str, direction)
-    return {
-        "value": value_str,
-        "change": change_str,
-        "change_pct": change_pct,
-        "direction": direction,
-    }
-
 
 def _parse_kr_bond(html: str) -> dict:
     """Parse Korean 3Y bond rate from marketindex page interest rate table."""
@@ -682,50 +460,6 @@ async def _fetch_sofr(client: httpx.AsyncClient) -> dict:
             "change": f"{abs(diff):.2f}",
             "change_pct": change_pct,
             "direction": "up" if diff > 0 else "down",
-        }
-    except Exception:
-        return dict(_EMPTY)
-
-
-# ---------------------------------------------------------------------------
-# FX daily quote (AUD, VND — not on the marketindex front-page head blocks)
-# ---------------------------------------------------------------------------
-
-_FX_DAILY_MAP = {
-    "AUD_KRW": "FX_AUDKRW",
-    "VND_KRW": "FX_VNDKRW",  # 네이버 표기와 동일하게 100동당 원으로 인용
-}
-
-
-async def _fetch_fx_daily(client: httpx.AsyncClient, fx_code: str) -> dict:
-    """Fetch an FX rate + daily change from Naver's exchangeDailyQuote page.
-
-    Used for currencies absent from the marketindex front-page head blocks
-    (AUD, VND). The first two rows are today's and the previous business day's
-    rates; the daily change is derived from them.
-    """
-    try:
-        r = await client.get(
-            f"https://finance.naver.com/marketindex/exchangeDailyQuote.naver?marketindexCd={fx_code}",
-            headers=_HEADERS,
-        )
-        html = r.content.decode("euc-kr", errors="ignore")
-        rows = re.findall(
-            r'<tr class="(?:up|down)">\s*<td class="date">[^<]+</td>\s*<td class="num">([\d,\.]+)</td>',
-            html,
-        )
-        if not rows:
-            return dict(_EMPTY)
-        price = float(rows[0].replace(",", ""))
-        prev = float(rows[1].replace(",", "")) if len(rows) >= 2 else price
-        diff = price - prev
-        direction = "up" if diff > 0 else "down" if diff < 0 else ""
-        change_pct = f"{abs(diff) / prev * 100:.2f}%" if prev else ""
-        return {
-            "value": _fmt(price),
-            "change": _fmt(abs(diff)),
-            "change_pct": change_pct,
-            "direction": direction,
         }
     except Exception:
         return dict(_EMPTY)
@@ -963,6 +697,9 @@ def _parse_fed_openmarket_page(html: str) -> dict:
     return _quote_from_current_prev(values[0], values[1] if len(values) >= 2 else None, decimals=2)
 
 
+_FRED_DFEDTARU_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU"
+
+
 async def _fetch_us_policy_rate(client: httpx.AsyncClient) -> dict:
     """Fetch the Fed funds target range upper bound from official public sources."""
     try:
@@ -976,14 +713,14 @@ async def _fetch_us_policy_rate(client: httpx.AsyncClient) -> dict:
                 return parsed
     except Exception:
         pass
+    # FRED 폴백 — 예전 urllib+to_thread 우회 대신 core/http 공유 클라이언트('fred').
     try:
-        req = urllib.request.Request(
-            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU",
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
-        blob = await asyncio.to_thread(lambda: urllib.request.urlopen(req, timeout=6).read())
-        return _parse_fred_policy_csv(blob.decode("utf-8", errors="ignore"))
-    except Exception:
+        fred = await get_http_client("fred")
+        r = await fred.get(_FRED_DFEDTARU_URL, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return dict(_EMPTY)
+        return _parse_fred_policy_csv(r.content.decode("utf-8", errors="ignore"))
+    except (httpx.HTTPError, csv.Error, ValueError):
         return dict(_EMPTY)
 
 
@@ -1387,30 +1124,85 @@ async def _fetch_night_futures() -> dict:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+# 소스 그룹별 TTL (X2/O3). 예전에는 87개 코드 전체가 60초 TTL 하나를 써서 캐시
+# miss 한 번에 BIS·BOJ XLSX·MOF CSV·ECOS 등 ~42개 upstream 요청이 매분 반복됐다.
+# 일·월 단위로만 바뀌는 시계열은 그 주기에 맞춰 오래 캐시한다.
+SOURCE_GROUP_TTL: dict[str, int] = {
+    # 장중 시세 — Naver JSON, Yahoo, CNBC, Hyperliquid, KIS 야간선물, Naver marketindex
+    "quote": 60,
+    # 일 단위 공표 — ECOS, NY Fed SOFR, MOF JGB, BOJ TONA, Fed/BOK/BOJ 공식 정책금리 페이지
+    "daily": 1800,
+    # 월 단위 — BIS CBPOL 정책금리
+    "monthly": 21600,
+}
+_DAILY_SOURCE_CODES = frozenset({"US_SOFR", "JP_TONA", "US_BASE", "KR_BASE", "JP_BASE"})
+
+
+def source_group(code: str) -> str:
+    """Indicator code → source group key of :data:`SOURCE_GROUP_TTL`."""
+    if code in _BIS_POLICY_RATE_MAP:
+        return "monthly"
+    if code in _DAILY_SOURCE_CODES or code in _ECOS_BOND_MAP or code in _MOF_JGB_MAP:
+        return "daily"
+    return "quote"
+
+
+# 수집 실패(값 없음)·stale 값은 그룹 TTL 과 무관하게 장중 주기로 재시도한다 —
+# BIS 한 번 실패가 6시간 동안 굳지 않게.
+_RETRY_TTL = SOURCE_GROUP_TTL["quote"]
+
+
+def _item_ttl(code: str, data: dict | None) -> int:
+    if not _indicator_has_value(data) or (data or {}).get("_stale"):
+        return _RETRY_TTL
+    return SOURCE_GROUP_TTL[source_group(code)]
+
 
 # Module-level cache so AI analysis / market-bar polling / admin page
-# don't each re-scrape Naver on every call. Keyed by the sorted codes tuple
-# so different code sets don't collide.
-_INDICATORS_TTL = 60  # seconds — market bar ticks every 60s anyway
+# don't each re-scrape on every call. The batch cache is keyed by the sorted
+# codes tuple; the item cache holds each code with its source-group TTL.
+_INDICATORS_TTL = 60  # seconds — default (intraday) TTL; market bar ticks every 60s
 _indicators_cache = MemoryTTLCache("market_indicators.batch", _INDICATORS_TTL)
 _indicator_item_cache = MemoryTTLCache("market_indicators.item", _INDICATORS_TTL)
+# code → 그 코드를 수집 중인 배치 task. 서로 다른 코드 묶음을 요청한 동시 호출
+# (대시보드·indicator_health·테이프·AI)이 같은 코드를 중복 수집하지 않게 한다.
+_code_inflight: dict[str, asyncio.Task] = {}
+
+
+def _batch_ttl(codes: list[str]) -> float:
+    """Batch-cache TTL = the shortest remaining item TTL among ``codes``."""
+    remaining: list[float] = []
+    for code in codes:
+        entry = _indicator_item_cache.get_entry(code, allow_stale=True, copy=False)
+        age = _indicator_item_cache.age_seconds(code)
+        if entry is None or entry.ttl_seconds is None or age is None:
+            remaining.append(_RETRY_TTL)
+            continue
+        remaining.append(entry.ttl_seconds - age)
+    return max(1.0, min(remaining)) if remaining else float(_RETRY_TTL)
 
 
 async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     """Fetch multiple indicators in parallel. Returns {code: result_dict}."""
-    results: dict[str, dict] = {}
     if not codes:
-        return results
+        return {}
     requested_codes = list(dict.fromkeys(codes))
     key = tuple(sorted(requested_codes))
-    cached = _indicators_cache.get(key)
-    if cached:
-        return dict(cached)
+    return await cached_fetch(
+        _indicators_cache,
+        key,
+        lambda: _load_indicators(requested_codes),
+        ttl=lambda _value: _batch_ttl(requested_codes),
+    )
 
+
+async def _load_indicators(requested_codes: list[str]) -> dict[str, dict]:
+    results: dict[str, dict] = {}
     fetch_codes: list[str] = []
     stale_results: dict[str, dict] = {}
     for code in requested_codes:
-        item_cached = _indicator_item_cache.get_entry(code, allow_stale=True)
+        # 항목 값은 평평한 dict 라 얕은 dict() 복사로 충분 — deepcopy 생략.
+        item_cached = _indicator_item_cache.get_entry(code, allow_stale=True, copy=False)
         if item_cached and item_cached.fresh:
             results[code] = dict(item_cached.value)
         else:
@@ -1418,16 +1210,58 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
                 stale_results[code] = dict(item_cached.value)
             fetch_codes.append(code)
 
-    if not fetch_codes:
-        _indicators_cache.set(key, dict(results))
-        return dict(results)
+    if fetch_codes:
+        fetched = await _fetch_codes_coalesced(fetch_codes)
+        # Fill in any missing codes with empty (or the last good value, marked stale)
+        for code in fetch_codes:
+            current = fetched.get(code) or dict(_EMPTY)
+            if not _indicator_has_value(current) and code in stale_results:
+                current = {**stale_results[code], "_stale": True}
+            results[code] = current
+            _indicator_item_cache.set(code, dict(current), ttl_seconds=_item_ttl(code, current))
 
-    # Group codes by source to minimize HTTP requests
-    kr_indices = []       # need individual fetches
-    foreign_indices = []  # need individual fetches
-    marketindex_items = []  # share one page fetch
+    return {code: dict(results.get(code) or _EMPTY) for code in requested_codes}
+
+
+def _release_codes(codes: tuple[str, ...], task: asyncio.Task) -> None:
+    for code in codes:
+        if _code_inflight.get(code) is task:
+            del _code_inflight[code]
+    if not task.cancelled():
+        task.exception()  # 결과를 아무도 읽지 않아도 경고가 남지 않게
+
+
+async def _fetch_codes_coalesced(codes: list[str]) -> dict[str, dict]:
+    """Fetch ``codes`` from upstream, joining any in-flight fetch of the same code."""
+    joined = {code: _code_inflight[code] for code in codes if code in _code_inflight}
+    mine = [code for code in codes if code not in joined]
+    own_task: asyncio.Task | None = None
+    if mine:
+        own_task = asyncio.ensure_future(_fetch_from_sources(mine))
+        for code in mine:
+            _code_inflight[code] = own_task
+        own_task.add_done_callback(lambda done, cs=tuple(mine): _release_codes(cs, done))
+
+    tasks: list[asyncio.Task] = []
+    for task in [*joined.values(), own_task]:
+        if task is not None and all(task is not seen for seen in tasks):
+            tasks.append(task)
+    outcomes = await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+
+    out: dict[str, dict] = {}
+    for code in codes:
+        owner = joined.get(code) or own_task
+        outcome = next((res for task, res in zip(tasks, outcomes) if task is owner), None)
+        if isinstance(outcome, dict) and outcome.get(code):
+            out[code] = dict(outcome[code])
+    return out
+
+
+async def _fetch_from_sources(fetch_codes: list[str]) -> dict[str, dict]:
+    """One upstream pass for ``fetch_codes``, grouped by source to minimise requests."""
+    results: dict[str, dict] = {}
+    marketindex_items = []  # KR3Y — Naver marketindex page (one fetch)
     world_daily_items = []  # need individual fetches
-    fx_daily_items = []   # AUD/VND — exchangeDailyQuote, one request each
     cnbc_bond_items = []  # government bonds — one batched CNBC request
     ecos_bond_items = []  # Korean bonds — one batched ECOS request
     policy_rate_items = []  # central bank policy rates — one batched fan-out
@@ -1442,20 +1276,17 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     naver_json_items = []
 
     for code in fetch_codes:
+        # 국내·해외 지수와 환율은 전부 naver_indicators(JSON)가 담당한다. 예전 PC
+        # HTML 스크레이퍼(_fetch_kr_index/_fetch_foreign_index/_fetch_fx_daily/FX
+        # marketindex 블록)는 이 분기 뒤에서 도달 불가라 삭제했다(X9/D-02).
         if code in naver_indicators.CODES:
             naver_json_items.append(code)
         elif code == "CMDT_GC":
             gold_needed = True
         elif code == "OIL_CL":
             wti_needed = True
-        elif code in _KR_INDEX_CODES:
-            kr_indices.append(code)
-        elif code in _FOREIGN_SYMBOLS:
-            foreign_indices.append(code)
-        elif code in _MARKETINDEX_COMMODITY_MAP or code in _MARKETINDEX_FX_MAP or code == "KR3Y":
+        elif code == "KR3Y":
             marketindex_items.append(code)
-        elif code in _FX_DAILY_MAP:
-            fx_daily_items.append(code)
         elif code in _CNBC_BOND_MAP:
             cnbc_bond_items.append(code)
         elif code in _ECOS_BOND_MAP:
@@ -1477,8 +1308,6 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
         elif code in _HYPERLIQUID_MAP:
             hyperliquid_items.append(code)
 
-    need_marketindex_page = len(marketindex_items) > 0
-
     async with _market_indicators_client() as client:
         tasks = []
         task_keys = []
@@ -1487,20 +1316,8 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             tasks.append(naver_indicators.fetch_indicators(client, naver_json_items))
             task_keys.append(("naver_json", None))
 
-        # Korean indices — each needs a separate fetch
-        for code in kr_indices:
-            naver_code = _KR_INDEX_CODES[code]
-            tasks.append(_fetch_kr_index(client, naver_code))
-            task_keys.append(("kr", code))
-
-        # Foreign indices — each needs a separate fetch
-        for code in foreign_indices:
-            symbol = _FOREIGN_SYMBOLS[code]
-            tasks.append(_fetch_foreign_index(client, symbol))
-            task_keys.append(("foreign", code))
-
-        # Marketindex page — fetch once
-        if need_marketindex_page:
+        # Marketindex page — fetch once (KR3Y)
+        if marketindex_items:
             tasks.append(_fetch_marketindex_page(client))
             task_keys.append(("marketindex_page", None))
 
@@ -1509,11 +1326,6 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
             market_code = _WORLD_DAILY_CODES[code]
             tasks.append(_fetch_world_daily_quote(client, market_code))
             task_keys.append(("world_daily", code))
-
-        # FX daily quote (AUD, VND) — each needs a separate fetch
-        for code in fx_daily_items:
-            tasks.append(_fetch_fx_daily(client, _FX_DAILY_MAP[code]))
-            task_keys.append(("fx_daily", code))
 
         # Government bonds (CNBC) — one batched request covers all symbols
         if cnbc_bond_items:
@@ -1571,97 +1383,51 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
         # Run all in parallel
         fetched = await asyncio.gather(*tasks, return_exceptions=True)
 
-        marketindex_html = None
+    marketindex_html = None
+    batched_items = {
+        "naver_json": naver_json_items,
+        "cnbc_bonds": cnbc_bond_items,
+        "ecos_bonds": ecos_bond_items,
+        "policy_rates": policy_rate_items,
+        "mof_jgb_bonds": mof_jgb_items,
+        "hyperliquid": hyperliquid_items,
+    }
+    single_items = {
+        "gold": "CMDT_GC",
+        "wti": "OIL_CL",
+        "us10y": "US10Y",
+        "sofr": "US_SOFR",
+        "jp_tona": "JP_TONA",
+        "night_futures": "NIGHT_FUTURES",
+    }
 
-        for (kind, code), result in zip(task_keys, fetched):
-            if isinstance(result, Exception):
-                result = dict(_EMPTY)
+    for (kind, code), result in zip(task_keys, fetched):
+        if isinstance(result, Exception):
+            result = dict(_EMPTY)
 
-            if kind == "naver_json":
-                for c in naver_json_items:
+        if kind in batched_items:
+            # result is {internal_code: data}; copy only requested codes so
+            # an unexpected shape can't overwrite unrelated entries.
+            if isinstance(result, dict):
+                for c in batched_items[kind]:
                     if c in result:
                         results[c] = result[c]
-            elif kind == "kr":
-                results[code] = result
-            elif kind == "foreign":
-                results[code] = result
-            elif kind == "marketindex_page":
-                marketindex_html = result
-            elif kind == "world_daily":
-                results[code] = result
-            elif kind == "fx_daily":
-                results[code] = result
-            elif kind == "cnbc_bonds":
-                # result is {internal_code: data}; copy only requested codes so
-                # an unexpected shape can't overwrite unrelated entries.
-                if isinstance(result, dict):
-                    for c in cnbc_bond_items:
-                        if c in result:
-                            results[c] = result[c]
-            elif kind == "ecos_bonds":
-                if isinstance(result, dict):
-                    for c in ecos_bond_items:
-                        if c in result:
-                            results[c] = result[c]
-            elif kind == "policy_rates":
-                if isinstance(result, dict):
-                    for c in policy_rate_items:
-                        if c in result:
-                            results[c] = result[c]
-            elif kind == "mof_jgb_bonds":
-                if isinstance(result, dict):
-                    for c in mof_jgb_items:
-                        if c in result:
-                            results[c] = result[c]
-            elif kind == "gold":
-                results["CMDT_GC"] = result
-            elif kind == "wti":
-                results["OIL_CL"] = result
-            elif kind == "us10y":
-                results["US10Y"] = result
-            elif kind == "sofr":
-                results["US_SOFR"] = result
-            elif kind == "jp_tona":
-                results["JP_TONA"] = result
-            elif kind == "night_futures":
-                results["NIGHT_FUTURES"] = result
-            elif kind == "hyperliquid":
-                # result is {code: data}; copy only requested codes.
-                if isinstance(result, dict):
-                    for c in hyperliquid_items:
-                        if c in result:
-                            results[c] = result[c]
+        elif kind == "marketindex_page":
+            marketindex_html = result
+        elif kind == "world_daily":
+            results[code] = result
+        elif kind in single_items:
+            results[single_items[kind]] = result
 
-        # Parse marketindex page items
-        if marketindex_html:
-            for code in marketindex_items:
-                try:
-                    if code in _MARKETINDEX_COMMODITY_MAP:
-                        results[code] = _parse_marketindex_block(
-                            marketindex_html, _MARKETINDEX_COMMODITY_MAP[code]
-                        )
-                    elif code in _MARKETINDEX_FX_MAP:
-                        results[code] = _parse_marketindex_block(
-                            marketindex_html, _MARKETINDEX_FX_MAP[code]
-                        )
-                    elif code == "KR3Y":
-                        results[code] = _parse_kr_bond(marketindex_html)
-                except Exception:
-                    results[code] = dict(_EMPTY)
+    # Parse marketindex page items
+    if isinstance(marketindex_html, str) and marketindex_html:
+        for code in marketindex_items:
+            try:
+                results[code] = _parse_kr_bond(marketindex_html)
+            except (AttributeError, IndexError, TypeError, ValueError):
+                results[code] = dict(_EMPTY)
 
-    # Fill in any missing codes with empty
-    for code in fetch_codes:
-        current = results.get(code) or dict(_EMPTY)
-        if not _indicator_has_value(current) and code in stale_results:
-            current = {**stale_results[code], "_stale": True}
-        results[code] = current
-
-    for code in fetch_codes:
-        _indicator_item_cache.set(code, dict(results.get(code) or _EMPTY))
-
-    final_results = {code: dict(results.get(code) or _EMPTY) for code in requested_codes}
-    _indicators_cache.set(key, dict(final_results))
-    return final_results
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -1682,10 +1448,11 @@ async def fetch_indicators_live(codes: list[str]) -> dict[str, dict]:
     if not wanted:
         return {}
     key = tuple(sorted(wanted))
-    cached = _live_cache.get(key)
-    if cached:
-        return dict(cached)
+    # 8초 캐시 + single-flight: 동시에 들어온 WS 폴백 폴링이 한 번만 수집한다.
+    return await cached_fetch(_live_cache, key, lambda: _load_live(wanted))
 
+
+async def _load_live(wanted: list[str]) -> dict[str, dict]:
     results: dict[str, dict] = {}
     hyperliquid_items = [c for c in wanted if c in _HYPERLIQUID_MAP]
     async with _market_indicators_client() as client:
@@ -1708,5 +1475,4 @@ async def fetch_indicators_live(codes: list[str]) -> dict[str, dict]:
 
     for c in wanted:
         results.setdefault(c, dict(_EMPTY))
-    _live_cache.set(key, dict(results))
-    return dict(results)
+    return results
