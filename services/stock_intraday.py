@@ -172,7 +172,7 @@ def _resolve_yahoo_ticker(code: str) -> str:
     static = static_foreign_ticker(code)
     if static:
         return static["ticker"]
-    return foreign._ticker_map.get(code) or foreign.yfinance_direct_ticker(code)
+    return foreign.yfinance_direct_ticker(foreign._ticker_map.get(code) or code)
 
 
 async def _yahoo_intraday(ticker: str) -> dict | None:

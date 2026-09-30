@@ -30,6 +30,9 @@ from services.portfolio.identifiers import (
 from services.portfolio.identifiers import (
     is_korean_stock as _is_korean_stock,
 )
+from services.portfolio.identifiers import (
+    is_special_asset as _is_special_asset,
+)
 
 # How fresh a cached WebSocket quote must be to satisfy a quote request before
 # falling back to a REST/polling fetch.
@@ -72,6 +75,9 @@ async def fetch_external_quote_for_stock_service(stock_code: str) -> dict:
         return {"price": 1, "change": 0, "change_pct": 0}
     elif special_assets.is_crypto_asset(stock_code):
         return await special_assets.fetch_crypto_quote(stock_code)
+    elif _is_special_asset(stock_code):
+        # 위에서 처리하지 않은 가상 코드 — 해외 종목 탐색(Yahoo·네이버)으로 보내지 않는다.
+        return {}
     elif not _is_korean_stock(stock_code):
         # Use resolved ticker if available, otherwise try to resolve
         await foreign.ensure_ticker_map()

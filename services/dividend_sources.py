@@ -16,7 +16,7 @@ from repositories.cache_values import get_cache_value_entry, set_cache_value
 from repositories.ticker_map import load_ticker_map
 from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo
-from services.portfolio.identifiers import is_korean_stock, static_foreign_ticker
+from services.portfolio.identifiers import is_korean_stock, static_foreign_ticker, yahoo_symbol
 
 logger = logging.getLogger(__name__)
 NAMESPACE = "dividend.schedule.v1"
@@ -197,11 +197,7 @@ async def get_histories(codes: list[str]) -> dict[str, dict]:
     for code in codes:
         static = static_foreign_ticker(code) or {}
         ticker = ticker_map.get(code) or static.get("ticker") or (code + ".KS" if is_korean_stock(code) else code)
-        for suffix in (".OQ", ".O", ".K", ".PK"):
-            if ticker.endswith(suffix):
-                ticker = ticker[:-len(suffix)]
-                break
-        tickers[code] = ticker
+        tickers[code] = yahoo_symbol(ticker)
     semaphore = asyncio.Semaphore(6)
     tasks = {ticker: asyncio.create_task(_history(ticker, semaphore)) for ticker in set(tickers.values())}
     if not tasks:

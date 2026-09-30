@@ -10,7 +10,7 @@ from services.market.sources import close_price as close_price_client
 from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo
 from services.portfolio.currencies import infer_yf_currency
-from services.portfolio.identifiers import is_korean_stock
+from services.portfolio.identifiers import is_korean_stock, yahoo_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +29,10 @@ LOCAL_BENCHMARK_COMMODITIES = {
 
 async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = "1d") -> dict:
     """``{rows: [{date, close}], currency, meta}`` — 공용 Yahoo chart provider
-    위임. insight 히스토리 응답 모양을 유지하려고 session_date 는 뺀다."""
+    위임. insight 히스토리 응답 모양을 유지하려고 session_date 는 뺀다.
+    허브 코드(GOOGL.O 등)는 Yahoo 심볼로 바꿔 요청한다."""
     return await yahoo.fetch_close_series(
-        ticker, range_=range_, interval=interval, session_date=False,
+        yahoo_symbol(ticker), range_=range_, interval=interval, session_date=False,
         currency_fallback=infer_yf_currency,
     )
 

@@ -1,12 +1,15 @@
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 from _harness import seed_user
 
 from repositories import portfolio, settlement_inputs, snapshots
 from repositories.db import transaction
-from services.portfolio import regular_close, snapshot_views, time_windows
+from services.market.sources import yahoo
+from services.portfolio import foreign, regular_close, snapshot_views, time_windows
 
 DAY = "2026-09-30"
 CUTOFF = DAY + "T15:30:00.000"
@@ -275,3 +278,63 @@ async def test_history_rebuild_on_copy_and_apply_match_original_regular_values(t
     assert result["applied"]
     assert not result["blocked"]
     assert await snapshots.get_snapshot_by_date("u1", DAY) == before
+
+
+def _yahoo_daily_chart(currency: str, zone: str, gmtoffset: int, regular_end: datetime, bars: list[tuple[datetime, float]]) -> dict:
+    return {"chart": {"result": [{
+        "meta": {"currency": currency, "exchangeTimezoneName": zone, "gmtoffset": gmtoffset,
+                 "currentTradingPeriod": {"regular": {"end": int(regular_end.timestamp())}}},
+        "timestamp": [int(at.timestamp()) for at, _ in bars],
+        "indicators": {"quote": [{"close": [close for _, close in bars]}]},
+    }], "error": None}}
+
+
+@pytest.mark.asyncio
+async def test_reuters_suffixed_foreign_holdings_settle_from_mapped_yahoo_symbols(temp_db):
+    """허브가 Reuters/네이버 표기(AGNC.O, FUEVFVND.HM)로 저장한 해외 보유종목은
+    Yahoo 심볼(AGNC, FUEVFVND.VN)로 완료된 정규장 일봉 종가를 받는다 — 예전에는
+    AGNC.O 그대로 요청해 404 → '해외 정규장 종료 시각 누락'으로 정산이 실패했다."""
+    marker = await seed()
+    await portfolio.save_portfolio_item("u1", "AGNC.O", "AGNC Investment", 10, 10, "USD")
+    await portfolio.save_portfolio_item("u1", "FUEVFVND.HM", "DCVFMVN Diamond ETF", 100, 30000, "VND")
+    async with transaction() as db:
+        await db.execute("UPDATE settlement_versions SET recorded_at='2026-09-30T15:29:00.000' WHERE id>?", (marker,))
+
+    new_york, saigon = ZoneInfo("America/New_York"), ZoneInfo("Asia/Ho_Chi_Minh")
+    charts = {
+        # 뉴욕 9/30 정규장은 아직 열리지도 않았다 → 9/29 종가가 완료된 최신 종가.
+        "AGNC": _yahoo_daily_chart("USD", "America/New_York", -14400, datetime(2026, 9, 30, 16, tzinfo=new_york), [
+            (datetime(2026, 9, 28, 9, 30, tzinfo=new_york), 14.10),
+            (datetime(2026, 9, 29, 9, 30, tzinfo=new_york), 14.25),
+        ]),
+        # 호찌민 9/30 정규장(15:00 ICT = 17:00 KST)은 정산 시각에 진행 중 → 제외.
+        "FUEVFVND.VN": _yahoo_daily_chart("VND", "Asia/Ho_Chi_Minh", 25200, datetime(2026, 9, 30, 15, tzinfo=saigon), [
+            (datetime(2026, 9, 29, 9, tzinfo=saigon), 33800.0),
+            (datetime(2026, 9, 30, 9, tzinfo=saigon), 99999.0),
+        ]),
+    }
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        symbol = request.url.path.rsplit("/", 1)[-1]
+        requested.append(symbol)
+        return httpx.Response(200, json=charts[symbol]) if symbol in charts else httpx.Response(404)
+
+    yahoo.reset_rate_limit_state()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        # 운영 사례처럼 ticker_map 에 네이버 reutersCode 가 그대로 저장돼 있어도 매핑된다.
+        with patch.dict(foreign._ticker_map, {"AGNC.O": "AGNC.O"}, clear=True), \
+             patch.object(foreign, "ensure_ticker_map", AsyncMock()), \
+             patch.object(yahoo, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(time_windows, "now_kst", return_value=NOW), \
+             patch.object(regular_close.kis_proxy_client, "get_quote", AsyncMock(return_value={"raw": {"stck_prpr": "200"}})):
+            await regular_close.settle("u1", DAY)
+
+    assert sorted(requested) == ["AGNC", "FUEVFVND.VN"]
+    saved = (await settlement_inputs.prices("u1", DAY))["prices"]
+    assert saved["AGNC.O"]["native_price"] == 14.25 and saved["AGNC.O"]["price_date"] == "2026-09-29"
+    assert saved["AGNC.O"]["price"] == pytest.approx(14.25 * 1400)
+    assert saved["FUEVFVND.HM"]["native_price"] == 33800.0 and saved["FUEVFVND.HM"]["price_date"] == "2026-09-29"
+    assert saved["FUEVFVND.HM"]["currency"] == "VND"
+    row = await snapshots.get_snapshot_by_date("u1", DAY)
+    assert row["total_value"] == pytest.approx(10 * 200 + 10000 + 10 * 14.25 * 1400 + 100 * 33800.0 * 1400)

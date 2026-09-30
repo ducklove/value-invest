@@ -211,8 +211,11 @@ def test_cached_quote_for_code_reads_stock_service_cache_for_korean_stock():
 
 
 def test_yfinance_candidates_strip_reuters_suffixes():
-    assert foreign._yfinance_candidates("DAX.O")[:2] == ["DAX.O", "DAX"]
-    assert foreign._yfinance_candidates("BRK.B") == ["BRK.B", "BRK-B"]
+    # Yahoo 심볼을 먼저 탐색한다 — Reuters 표기(.O)는 Yahoo 에서 항상 404 다.
+    assert foreign._yfinance_candidates("DAX.O") == ["DAX", "DAX.O"]
+    assert foreign._yfinance_candidates("BRK.B") == ["BRK-B", "BRK.B"]
+    assert foreign._yfinance_candidates("FUEVFVND.HM") == ["FUEVFVND.VN", "FUEVFVND.HM"]
+    assert foreign._yfinance_candidates("7203.T") == ["7203.T"]
 
 
 def test_foreign_search_normalizes_yahoo_quotes_to_portfolio_items():
@@ -587,3 +590,48 @@ async def test_force_refreshed_stale_quote_keeps_fresh_cache_value():
         )
 
     assert result["price"] == fresh_quote["price"]
+
+
+@pytest.mark.asyncio
+async def test_pseudo_codes_never_reach_foreign_symbol_probing():
+    """현금·특수자산 가상 코드는 해외 종목 조회/이름 해석에서 외부 호출 없이 끝난다."""
+    probes = {
+        "yfinance": AsyncMock(return_value=None),
+        "yahoo_chart": AsyncMock(return_value={}),
+        "http": AsyncMock(),
+        "kis_overseas": AsyncMock(return_value={}),
+    }
+    with patch.object(foreign, "yf_run", new=probes["yfinance"]), \
+         patch.object(foreign.yahoo, "fetch_chart_json", new=probes["yahoo_chart"]), \
+         patch.object(foreign, "get_http_client", new=probes["http"]), \
+         patch.object(foreign.kis_proxy_client, "get_overseas_quote", new=probes["kis_overseas"]), \
+         patch.object(foreign, "ensure_ticker_map", new=AsyncMock()):
+        for code in ("CASH_CNY", "CASH_SGD", "KRX_GOLD", "CMA_RP_KRW", "CRYPTO_BTC", "FUTURES_BASE_KRW"):
+            assert await foreign.resolve_foreign_reuters(code) == code
+            assert await foreign.resolve_foreign_name(code) is None
+            assert await foreign.yfinance_find_ticker(code) is None
+            assert await foreign.fetch_foreign_quote(code) == {}
+            assert await foreign.yfinance_fetch_quote_fast(code) == {}
+            assert await foreign.yfinance_fetch_quote(code) == {}
+        assert await foreign.fetch_naver_world_stock("CASH_CNY.O") is None
+        assert await foreign.resolve_name("CASH_CNY") == "중국 위안"
+        assert await foreign.resolve_name("CASH_SGD") is None
+        assert await foreign.resolve_name("FUTURES_BASE_KRW") is None
+        assert await foreign.detect_currency("CASH_CNY") == "CNY"
+        assert await foreign.detect_currency("KRX_GOLD") == "KRW"
+        assert await quote_service.fetch_external_quote_for_stock_service("CASH_SGD") == {}
+        assert await quote_service.fetch_external_quote_for_stock_service("FUTURES_PNL_KRW") == {"price": 1, "change": 0, "change_pct": 0}
+    assert {name: m.await_count for name, m in probes.items() if m.await_count} == {}
+
+
+@pytest.mark.asyncio
+async def test_foreign_yahoo_fallbacks_request_yahoo_symbols_for_reuters_codes():
+    chart = AsyncMock(return_value={"rows": [{"date": "2026-09-28", "close": 14.0}, {"date": "2026-09-29", "close": 14.28}],
+                                    "currency": "USD", "meta": {}})
+    with patch.object(foreign.yahoo, "fetch_close_series", new=chart), \
+         patch.object(foreign, "kis_fetch_foreign_quote", new=AsyncMock(return_value={})), \
+         patch.object(foreign.fx, "fx_rate_for_currency", new=AsyncMock(return_value=1400.0)):
+        # KIS 해외시세가 429 여도 Yahoo 차트 폴백이 GOOGL.O 를 GOOGL 로 조회해 채운다.
+        quote = await foreign.fetch_foreign_quote("GOOGL.O")
+    assert quote["price"] == round(14.28 * 1400)
+    assert chart.await_args.args[0] == "GOOGL"

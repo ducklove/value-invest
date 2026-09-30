@@ -26,6 +26,7 @@ from repositories import foreign_dividends as foreign_dividends_repo
 from services.market.sources import yfinance_runner
 from services.portfolio import runtime_quotes as portfolio_quotes
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
+from services.portfolio.identifiers import is_special_asset, yahoo_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +37,8 @@ def _is_korean_code(code: str) -> bool:
 
 
 def _is_cash_or_special(code: str) -> bool:
-    if code.startswith("CASH_"):
-        return True
-    return code in {"KRX_GOLD", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"}
+    # 현금·금·RP·코인·선물 평가 등 가상 코드 전부 — yfinance 조회 대상이 아니다.
+    return is_special_asset(code)
 
 
 async def select_foreign_target_codes() -> list[str]:
@@ -198,7 +198,7 @@ async def refresh_foreign_dividends(
     }
 
     for code in stock_codes:
-        ticker = ticker_map.get(code, code)
+        ticker = yahoo_symbol(ticker_map.get(code) or code)
         try:
             info = await _fetch_one(ticker)
         except Exception as exc:
