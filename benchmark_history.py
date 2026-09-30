@@ -23,11 +23,11 @@ several hundred ms the HTTP round-trip takes.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date, timedelta
 
 from repositories import benchmark_daily as benchmark_repo
+from services.market.sources import yfinance_runner
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +99,7 @@ def series_code(code: str | None) -> str | None:
 
 
 async def _download(ticker: str, start: str, end: str) -> list[dict]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _download_sync, ticker, start, end)
+    return await yfinance_runner.run(_download_sync, ticker, start, end)
 
 
 async def backfill_benchmark(code: str, start: str) -> int:

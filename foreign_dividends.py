@@ -18,12 +18,12 @@ typically stable over a reporting period, and the stock list is small
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime
 
 from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
+from services.market.sources import yfinance_runner
 from services.portfolio import runtime_quotes as portfolio_quotes
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
@@ -157,8 +157,7 @@ def _fetch_one_sync(ticker: str) -> dict | None:
 
 
 async def _fetch_one(ticker: str) -> dict | None:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _fetch_one_sync, ticker)
+    return await yfinance_runner.run(_fetch_one_sync, ticker)
 
 
 async def refresh_foreign_dividends(

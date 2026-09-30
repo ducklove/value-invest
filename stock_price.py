@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from statistics import median
 
@@ -25,16 +24,17 @@ import kis_proxy_client
 import kis_ws_manager
 from core.http import get_http_client
 from domain.numbers import parse_number
+from services.market.sources import yfinance_runner
 
 logger = logging.getLogger(__name__)
 
 KRW_PER_EOK = 100_000_000
 WS_QUOTE_MAX_AGE_SECONDS = 90
 
-# yfinance 는 블로킹이고 wait_for 타임아웃 뒤에도 스레드가 계속 돈다. 기본
-# executor 를 쓰면 멈춘 Yahoo 호출이 asyncio.to_thread 사용처 전체를 굶긴다.
-# 전용 소형 풀로 격리해 최악에도 이 풀만 막히게 한다.
-YF_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="yf")
+# yfinance 는 블로킹이고 wait_for 타임아웃 뒤에도 스레드가 계속 돈다. 모든
+# yfinance 호출은 services.market.sources.yfinance_runner 의 전용 소형 풀·
+# 동시성 한도·짧은 negative cache 를 거친다.
+YF_AUX_TIMEOUT_SECONDS = 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -852,13 +852,14 @@ async def fetch_market_data(
     start_date = date(start_year, 1, 1)
     end_date = date(end_year, 12, 31)
 
-    loop = asyncio.get_event_loop()
     # Bound yfinance to a hard wall-clock deadline so a stuck Yahoo response
-    # cannot pin a thread-pool worker indefinitely.
-    yf_future = asyncio.wait_for(
-        loop.run_in_executor(YF_EXECUTOR, _get_yfinance_aux, stock_code, start_year, end_year),
-        timeout=15.0,
-    )
+    # cannot pin a thread-pool worker indefinitely. 아래 KIS·DART 조회와 동시에
+    # 돌도록 태스크로 먼저 띄운다.
+    yf_future = asyncio.ensure_future(yfinance_runner.run(
+        _get_yfinance_aux, stock_code, start_year, end_year,
+        timeout=YF_AUX_TIMEOUT_SECONDS,
+        negative_key=f"aux:{stock_code}",
+    ))
     dart_dividends_future = (
         dart_client.fetch_dividend_per_share_by_year(corp_code, start_year, end_year)
         if corp_code

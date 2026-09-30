@@ -49,4 +49,7 @@ def _reset_short_lived_quote_caches():
     kis_proxy_client = sys.modules.get("kis_proxy_client")
     if kis_proxy_client is not None:
         kis_proxy_client.clear_response_cache()
+    yfinance_runner = sys.modules.get("services.market.sources.yfinance_runner")
+    if yfinance_runner is not None:
+        yfinance_runner.reset_negative_cache()
     yield

@@ -419,7 +419,7 @@ async def stream_portfolio_quotes(request: Request):
         import json as _json
 
         # Fire every quote fetch in parallel — backpressure is enforced by
-        # the per-upstream semaphores (foreign._NAVER_SEM, foreign._YF_SEM, KIS proxy sem),
+        # the per-upstream semaphores (foreign._NAVER_SEM, yfinance_runner, KIS proxy sem),
         # so we don't serialize here. Stream results as they arrive.
         async def _one_quote(code: str) -> tuple[str, dict]:
             try:

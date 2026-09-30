@@ -532,11 +532,10 @@ async def inspect_stock(
     cache/stock_price(yfinance·pandas) 는 함수 안에서 lazy import —
     웹 프로세스가 이 모듈을 임포트할 때 무거운 의존성을 끌고 오지 않게.
     """
-    import asyncio
-
     import stock_price
     from repositories import corp_codes
     from repositories import financial as financial_repo
+    from services.market.sources import yfinance_runner
 
     corp_name = await corp_codes.get_corp_name(stock_code) or stock_code
     corp_code = await corp_codes.get_corp_code(stock_code)
@@ -551,10 +550,8 @@ async def inspect_stock(
         corp_code=corp_code,
     )
 
-    loop = asyncio.get_event_loop()
     try:
-        _, _, raw_dividends, raw_splits = await loop.run_in_executor(
-            None,
+        _, _, raw_dividends, raw_splits = await yfinance_runner.run(
             stock_price._get_yfinance_aux,
             stock_code,
             start_year,

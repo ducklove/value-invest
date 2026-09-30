@@ -28,7 +28,7 @@ from core.http import get_http_client
 from domain.portfolio_codes import is_hong_kong_rmb_counter
 from repositories import corp_codes
 from repositories import ticker_map as ticker_map_repo
-from services.market.sources import yahoo
+from services.market.sources import yahoo, yfinance_runner
 from services.portfolio import currencies, fx
 from services.portfolio.identifiers import (
     CASH_NAMES as _CASH_NAMES,
@@ -70,7 +70,6 @@ _REUTERS_STRIP_SUFFIXES = (".OQ", ".PK", ".O", ".K")
 # Limits how many in-flight calls can hit each external dependency at once,
 # so a slow upstream cannot pin every uvicorn worker thread.
 _NAVER_SEM = asyncio.Semaphore(6)
-_YF_SEM = asyncio.Semaphore(3)
 _YF_CALL_TIMEOUT = 8.0
 _NAVER_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 _YAHOO_SEARCH_TIMEOUT = httpx.Timeout(4.0, connect=2.0)
@@ -167,13 +166,9 @@ def yf_mark_failed(ticker: str) -> None:
 
 
 async def yf_run(fn):
-    """Run a synchronous yfinance call in the executor, bounded by a
-    semaphore and a hard wall-clock deadline. Raises on timeout."""
-    loop = asyncio.get_event_loop()
-    async with _YF_SEM:
-        return await asyncio.wait_for(
-            loop.run_in_executor(None, fn), timeout=_YF_CALL_TIMEOUT
-        )
+    """Run a synchronous yfinance call on the shared yfinance runner (dedicated
+    pool + concurrency limit) with a hard wall-clock deadline. Raises on timeout."""
+    return await yfinance_runner.run(fn, timeout=_YF_CALL_TIMEOUT)
 
 
 async def resolve_foreign_name(ticker: str) -> str | None:
@@ -200,7 +195,7 @@ async def resolve_foreign_name(ticker: str) -> str | None:
 
 async def yfinance_find_ticker(ticker: str) -> str | None:
     """Find a working yfinance ticker, trying various exchange suffixes.
-    Bounded by _YF_SEM and a per-call timeout; results (positive and negative)
+    Bounded by the yfinance runner and a per-call timeout; results (positive and negative)
     are cached to avoid re-running the suffix loop on every quote refresh."""
     static = _static_foreign_ticker(ticker)
     if static:

@@ -379,10 +379,15 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
 
 
 class YFinanceExecutorTests(unittest.TestCase):
-    """O13: 블로킹 yfinance 는 기본 executor 가 아닌 전용 소형 풀에서만 돈다."""
+    """O13: 블로킹 yfinance 는 기본 executor 가 아닌 전용 소형 풀에서만 돈다.
+
+    풀은 services.market.sources.yfinance_runner 로 옮겨 모든 yfinance
+    호출처(stock_price·foreign·benchmark_history·foreign_dividends)가 공유한다."""
 
     def test_yfinance_executor_is_small_and_dedicated(self):
-        executor = stock_price.YF_EXECUTOR
+        from services.market.sources import yfinance_runner
+
+        executor = yfinance_runner.EXECUTOR
         self.assertLessEqual(executor._max_workers, 4)
         self.assertEqual(executor._thread_name_prefix, "yf")
 
@@ -391,7 +396,13 @@ class YFinanceExecutorTests(unittest.TestCase):
         from pathlib import Path
 
         source = Path(stock_price.__file__).read_text(encoding="utf-8")
-        calls = re.findall(r"run_in_executor\(\s*([^,]+),\s*(_get_\w*yfinance\w*)", source)
+        calls = re.findall(r"yfinance_runner\.run\(\s*(_get_\w*yfinance\w*)", source)
         self.assertTrue(calls)
-        self.assertEqual({executor.strip() for executor, _ in calls}, {"YF_EXECUTOR"})
+        self.assertNotRegex(source, r"run_in_executor\(")
         self.assertNotRegex(source, r"to_thread\(\s*_get_\w*yfinance")
+        root = Path(stock_price.__file__).resolve().parent
+        for rel in ("benchmark_history.py", "foreign_dividends.py", "services/portfolio/foreign.py",
+                    "services/data_quality.py"):
+            text = (root / rel).read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"run_in_executor\(", rel)
+            self.assertIn("yfinance_runner.run(", text, rel)
