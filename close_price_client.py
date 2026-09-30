@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from core.errors import ExternalServiceError
+from domain.numbers import parse_number
 
 logger = logging.getLogger(__name__)
 
@@ -96,24 +97,6 @@ def _parse_date(value: Any) -> str | None:
         return None
 
 
-def _parse_close(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(str(value).replace(",", "").strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_number(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(str(value).replace(",", "").strip())
-    except (TypeError, ValueError):
-        return None
-
-
 def _extract_price_rows(payload: Any, ticker: str | None = None) -> list[Any]:
     if isinstance(payload, dict):
         raw_rows = payload.get("prices") or payload.get("items") or payload.get("rows") or []
@@ -148,7 +131,7 @@ def normalize_close_rows(payload: Any, ticker: str | None = None) -> list[dict[s
         trade_date = _parse_date(
             raw.get("date") or raw.get("trade_date") or raw.get("business_date") or raw.get("stck_bsop_date")
         )
-        close = _parse_close(raw.get("close") or raw.get("close_price") or raw.get("stck_clpr"))
+        close = parse_number(raw.get("close") or raw.get("close_price") or raw.get("stck_clpr"))
         if trade_date and close is not None:
             rows.append({"date": trade_date, "close": close})
     rows.sort(key=lambda row: row["date"])
@@ -165,7 +148,7 @@ def normalize_daily_rows(payload: Any, ticker: str | None = None) -> list[dict[s
         trade_date = _parse_date(
             raw.get("date") or raw.get("trade_date") or raw.get("business_date") or raw.get("stck_bsop_date")
         )
-        close = _parse_close(raw.get("close") or raw.get("close_price") or raw.get("stck_clpr"))
+        close = parse_number(raw.get("close") or raw.get("close_price") or raw.get("stck_clpr"))
         if not trade_date or close is None:
             continue
         row: dict[str, Any] = {"date": trade_date, "close": close}
@@ -189,7 +172,7 @@ def normalize_daily_rows(payload: Any, ticker: str | None = None) -> list[dict[s
             value = None
             for key in keys:
                 if key in raw:
-                    value = _parse_number(raw.get(key))
+                    value = parse_number(raw.get(key))
                     break
             if value is not None:
                 row[target] = value
@@ -215,7 +198,7 @@ def normalize_value_rows(payload: Any, *, keys: tuple[str, ...]) -> list[dict[st
         if not isinstance(raw, dict):
             continue
         trade_date = _parse_date(raw.get("date") or raw.get("trade_date") or raw.get("business_date"))
-        value = _parse_close(raw.get("close") or raw.get("value") or raw.get("price") or raw.get("index_value"))
+        value = parse_number(raw.get("close") or raw.get("value") or raw.get("price") or raw.get("index_value"))
         if trade_date and value is not None:
             rows.append({"date": trade_date, "close": value})
     rows.sort(key=lambda row: row["date"])

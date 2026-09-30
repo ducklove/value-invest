@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 
 import close_price_client
 import kis_proxy_client
+from domain.numbers import parse_number as _safe_float
 from domain.timeutil import KST, today_kst
 from repositories import bootstrap
 from repositories import db as db_repo
@@ -26,15 +27,6 @@ class SnapshotIncomplete(RuntimeError):
 
 def _today_kst() -> date:
     return today_kst()
-
-
-def _safe_float(value) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(str(value).replace(",", "").strip())
-    except (TypeError, ValueError):
-        return None
 
 
 def _item_date(item: dict) -> str:

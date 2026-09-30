@@ -24,6 +24,7 @@ import dart_client
 import kis_proxy_client
 import kis_ws_manager
 from core.http import get_http_client
+from domain.numbers import parse_number
 
 logger = logging.getLogger(__name__)
 
@@ -197,15 +198,8 @@ async def fetch_bulk_quotes_kr(codes: list[str]) -> dict[str, dict]:
 
 
 def _safe_float(value, *, zero_as_none: bool = True):
-    if value in (None, ""):
-        return None
-    try:
-        numeric = float(str(value).replace(",", "").strip())
-    except (TypeError, ValueError):
-        return None
-    if zero_as_none and numeric == 0:
-        return None
-    return numeric
+    # 이 모듈은 0 을 "값 없음"으로 보는 것이 기본이다.
+    return parse_number(value, zero_as_none=zero_as_none)
 
 
 def _get_first(mapping: dict | None, *keys: str):

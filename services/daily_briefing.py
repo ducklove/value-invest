@@ -31,6 +31,7 @@ import ai_config
 import close_price_client
 import market_indicators
 import market_movers
+from domain.numbers import parse_number as _safe_float
 from repositories import dart_review as dart_review_repo
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo
@@ -247,15 +248,6 @@ def _nav_block(latest: dict | None, prev: dict | None) -> dict | None:
             change_pct=change / prev_value * 100.0,
         )
     return block
-
-
-def _safe_float(value) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(str(value).replace(",", "").strip())
-    except (TypeError, ValueError):
-        return None
 
 
 def _price_row_date(row: dict) -> str | None:
