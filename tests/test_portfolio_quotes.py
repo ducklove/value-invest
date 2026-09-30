@@ -263,6 +263,24 @@ async def test_kis_foreign_quote_timeout_returns_empty_for_fallback():
 
 
 @pytest.mark.asyncio
+async def test_yahoo_vietnam_symbol_never_probes_kis_us_exchanges():
+    """HOSE 보유종목이 Yahoo 심볼(.VN)로 해석돼도(검색 결과·ticker_map 재해석)
+    KIS 미국 거래소에서 같은 심볼(VNM = NYSE Arca 베트남 ETF)을 시세로 잡지 않는다."""
+    kis = AsyncMock(return_value={"summary": {"price": 15.0, "change": 0.1, "change_pct": 0.5}})
+    chart = AsyncMock(return_value={"rows": [{"date": "2026-09-29", "close": 61000.0}, {"date": "2026-09-30", "close": 61500.0}],
+                                    "currency": "VND", "meta": {}})
+    assert foreign.guess_kis_exchanges("VNM.VN") == []
+    assert foreign.guess_kis_exchanges("SHB.HN") == []
+    with patch.object(foreign.kis_proxy_client, "get_overseas_quote", new=kis), \
+         patch.object(foreign.yahoo, "fetch_close_series", new=chart), \
+         patch.object(foreign.fx, "fx_rate_for_currency", new=AsyncMock(return_value=0.055)):
+        quote = await foreign.fetch_foreign_quote("VNM.VN")
+    kis.assert_not_awaited()
+    assert chart.await_args.args[0] == "VNM.VN"
+    assert quote["price"] == round(61500.0 * 0.055)
+
+
+@pytest.mark.asyncio
 async def test_hong_kong_rmb_quote_uses_cny_conversion_for_kis_and_naver():
     async def convert(nation, value):
         assert nation == "CHN"

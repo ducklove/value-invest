@@ -314,7 +314,10 @@ def guess_kis_exchanges(ticker: str) -> list[str]:
     if upper.endswith((".SZ",)):
         return ["SZS"]
     # Suffixes that indicate non-KIS markets (AUS, Germany, etc.)
-    if upper.endswith((".AX", ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".SW", ".ST", ".CO", ".HE", ".L", ".HM")):
+    # 베트남(.HM/.HN 네이버, .VN Yahoo)도 여기다 — 미국 거래소로 흘리면 같은 심볼의
+    # 미국 종목(VNM.VN → NYSE Arca VNM ETF)을 시세로 잡는다.
+    if upper.endswith((".AX", ".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".SW", ".ST", ".CO", ".HE", ".L",
+                       ".HM", ".HN", ".VN")):
         return []
     # US-listed: try AMS (NYSE Arca), NAS, NYS
     return ["AMS", "NAS", "NYS"]
