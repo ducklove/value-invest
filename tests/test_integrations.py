@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import external_tools
-import integrations
+from services.ecosystem import integrations
 
 
 @pytest.fixture(autouse=True)
@@ -261,3 +261,10 @@ def test_kis_proxy_is_server_side_only(monkeypatch):
     assert "kisProxy" not in config["integrations"]
     assert "3288" not in json.dumps(config)
     assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == "http://127.0.0.1:3288"
+
+
+def test_default_workspace_root_is_repo_parent_after_move():
+    # services/ecosystem/ 로 옮긴 뒤에도 형제 체크아웃 기본 위치는 저장소의 부모 디렉터리다.
+    repo_root = Path(__file__).resolve().parents[1]
+    assert integrations.PROJECT_ROOT == repo_root
+    assert integrations.DEFAULT_WORKSPACE_ROOT == repo_root.parent

@@ -7,7 +7,7 @@ from typing import Any
 
 from core import ecosystem
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WORKSPACE_ROOT = PROJECT_ROOT.parent
 
 # 연결 도구 기본 주소는 config/ecosystem.json(생태계 레지스트리)에서 파생한다.

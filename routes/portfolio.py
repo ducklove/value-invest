@@ -10,7 +10,6 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 import asset_insights
-import integrations
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from deps import require_user as _require_user
@@ -30,6 +29,7 @@ from routes.response_models import (
     QuoteResponse,
 )
 from services import stock_quotes
+from services.ecosystem import integrations
 from services.ecosystem import links as eco_links
 from services.portfolio import (
     ai_analysis,

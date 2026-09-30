@@ -2,7 +2,7 @@
 
 레지스트리는 허브와 형제 대시보드 목록의 유일한 정본이다. 여기서 파생되는 것:
 
-- ``integrations.DEFAULT_BASE_URLS`` (``integrationKey`` 가 있는 항목, env override 유지)
+- ``services.ecosystem.integrations.DEFAULT_BASE_URLS`` (``integrationKey`` 가 있는 항목, env override 유지)
 - ``routes/portfolio.py`` ``/api/portfolio/open/{key}`` handoff 허용 목록 (``handoff: true``)
 - ``/app-config.js`` 의 ``APP_CONFIG.ecosystem`` — :func:`public_projection` (공개 항목만)
 - ``static/ecosystem/vc-shell.js`` 인라인 레지스트리 블록 (``scripts/sync-ecosystem.mjs`` 가

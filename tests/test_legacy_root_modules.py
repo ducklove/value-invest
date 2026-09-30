@@ -27,6 +27,7 @@ MOVED: dict[str, str] = {
     "economic_calendar": "services.market.economic_calendar",
     "benchmark_history": "services.portfolio.benchmark_history",
     "dart_client": "services.dart.client",
+    "integrations": "services.ecosystem.integrations",
 }
 
 # 루트 shim 을 남긴 모듈(외부가 경로로 import). 저장소 안 코드는 여전히 정본을 쓴다.

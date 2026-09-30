@@ -3,7 +3,7 @@
 #
 # 왜 따로 도는가: deploy/deploy.sh 는 value-invest 체크아웃만 origin/master 로
 # 맞춘다. hodling-value·gold_gap 같은 형제 저장소는 각자의 스케줄로 갱신되므로,
-# integrations.py 가 로컬 파일로 읽는 스냅샷(지분가치/금·비트코인 괴리)은
+# services/ecosystem/integrations.py 가 로컬 파일로 읽는 스냅샷(지분가치/금·비트코인 괴리)은
 # 배포와 무관하게 오래된 채로 남는다.
 #
 # 왜 git pull 이 아닌가: config.json 은 /admin.html 이 이 서버 위에서 직접

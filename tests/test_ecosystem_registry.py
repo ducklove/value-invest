@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-import integrations
 from core import ecosystem
+from services.ecosystem import integrations
 
 ROOT = Path(__file__).resolve().parent.parent
 

@@ -16,8 +16,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-import integrations
 from core import ecosystem
+from services.ecosystem import integrations
 
 PROJECT_SPECS: dict[str, dict[str, Any]] = {
     "holdingValue": {
