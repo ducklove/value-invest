@@ -200,3 +200,15 @@ def test_failed_deploy_prunes_nothing_and_rolls_back_to_previous_venv(tmp_path, 
     for stamp in ("100-1", "200-2", "300-3", "300-4", "9999999999-1"):
         assert (app / ".deploy-state" / stamp).is_dir()
     assert "Pruning" not in log_text
+
+
+def test_run_app_bounds_graceful_shutdown_below_systemd_stop_timeout():
+    # 열린 WebSocket 때문에 uvicorn 이 종료를 무한정 기다리면 systemd(TimeoutStopSec 90s)가
+    # SIGKILL 해 배포마다 '실패'로 기록된다. 종료 대기 상한은 그보다 충분히 짧아야 한다.
+    import re
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parents[1] / "deploy" / "run_app.sh").read_text(encoding="utf-8")
+    match = re.search(r"--timeout-graceful-shutdown\s+(\d+)", script)
+    assert match, "run_app.sh must pass --timeout-graceful-shutdown to uvicorn"
+    assert 0 < int(match.group(1)) <= 30
