@@ -143,7 +143,12 @@ async def test_legacy_segment_preserved_without_fake_transition_return(temp_db):
     assert len(linked) == 2 and linked[0]["linked"] and linked[0]["price_basis"] == "legacy_latest"
     # 입출금 없는 전환: 연결된 일간 NAV 수익률 = 평가액 수익률 12000/11000 − 1
     assert linked[1]["return_nav"] / linked[0]["return_nav"] == pytest.approx(12000 / 11000)
-    assert (await snapshot_views.regular_performance("u1", DAY))["change_pct"] is None
+    # 정산 브리핑의 전환일 성과도 연결 이력과 같은 값이다(비교 보류가 아니다).
+    summary = await snapshot_views.regular_performance("u1", DAY)
+    assert summary["comparison_unavailable"] is False
+    assert summary["change_pct"] == pytest.approx((12000 / 11000 - 1) * 100)
+    assert summary["change_pct"] == pytest.approx((linked[1]["return_nav"] / linked[0]["return_nav"] - 1) * 100)
+    assert summary["change_krw"] == 1000
     assert (await snapshots.get_snapshot_by_date("u1", "2026-09-29"))["nav"] == 1000
 
 

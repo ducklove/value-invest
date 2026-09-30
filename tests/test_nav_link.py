@@ -270,3 +270,47 @@ async def test_period_start_unlinkable_boundary_keeps_comparison_unavailable(tem
     await save(snap(first, 1260, 1000, REGULAR))
     mtd = await snapshot_views.period_start("u1")
     assert mtd["comparison_unavailable"] is True
+
+
+# ---------------------------------------------------------------- 정산 브리핑(regular_performance)
+
+
+@pytest.mark.asyncio
+async def test_regular_performance_first_new_basis_day_matches_linked_history(temp_db):
+    """운영 경계 수치: 9/30 브리핑 성과 = 연결 이력의 전환일 수익률(−0.356%)."""
+    await seed_user()
+    await save(A_D0)
+    await save(A_D1)
+    summary = await snapshot_views.regular_performance("u1", A_D1["date"])
+    linked = await nav_link.get_nav_history("u1")
+    assert summary["comparison_unavailable"] is False
+    assert summary["prev_date"] == A_D0["date"]
+    assert summary["change_pct"] == pytest.approx(-0.35591314, abs=1e-7)
+    assert summary["change_pct"] == pytest.approx((linked[1]["return_nav"] / linked[0]["return_nav"] - 1) * 100)
+    assert summary["change_krw"] == pytest.approx(A_D1["total_value"] - A_D0["total_value"])
+    assert summary["prev_nav_link_factor"] == pytest.approx(1.01732723, abs=1e-7)
+
+
+@pytest.mark.asyncio
+async def test_regular_performance_boundary_removes_flows_between_cutoffs(temp_db):
+    await seed_user()
+    await save(snap("2026-09-29", 1000, 1000, LEGACY, "2026-09-29T20:05:00.808100"))
+    await save(snap("2026-09-30", 1600, 1000, REGULAR, "2026-09-30T15:30:00.000"))
+    # 전일 20:05 정산 뒤 ~ 금일 정산 전 입금(미반영이어도 잔고에 들어 있음)
+    await add_flow("deposit", 500, "2026-09-29T21:00:00", None)
+    summary = await snapshot_views.regular_performance("u1", "2026-09-30")
+    assert summary["net_cashflow"] == 500
+    assert summary["change_krw"] == pytest.approx(100)
+    assert summary["change_pct"] == pytest.approx(10.0)
+    linked = await nav_link.get_nav_history("u1")
+    assert summary["change_pct"] == pytest.approx((linked[1]["nav"] / linked[0]["nav"] - 1) * 100)
+
+
+@pytest.mark.asyncio
+async def test_regular_performance_unlinkable_boundary_stays_unavailable(temp_db):
+    await seed_user()
+    await save({**snap("2026-09-29", 0, 960, LEGACY), "total_units": 0})
+    await save(snap("2026-09-30", 1260, 1000, REGULAR, "2026-09-30T15:30:00.000"))
+    summary = await snapshot_views.regular_performance("u1", "2026-09-30")
+    assert summary["comparison_unavailable"] is True
+    assert summary["change_pct"] is None and summary["change_krw"] is None and summary["prev_date"] is None

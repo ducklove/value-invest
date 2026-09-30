@@ -14,10 +14,20 @@ async def regular_performance(user: str, day: str) -> dict | None:
     if not current or current.get("price_basis") != "regular_close_v1":
         return None
     previous = await snapshots.get_latest_snapshot_before_date(user, day)
-    comparable = bool(previous and previous.get("price_basis") == current["price_basis"])
-    flows = await snapshots.get_cashflows(user)
-    flows = [r for r in flows if r.get("applied_snapshot_date") == day]
-    net = sum(r["amount"] * (1 if r["type"] == "deposit" else -1) for r in flows)
+    link_factor = None
+    if previous and previous.get("price_basis") != current["price_basis"]:
+        # 새 기준 첫 날: 이전 구간 마지막 정산과 NAV 를 연결해 비교한다(nav_link 와 같은
+        # 규칙 — 연결 이력의 전환일 수익률과 같은 값). 연결할 수 없을 때만 비교 보류.
+        net = await nav_link.boundary_net_cashflow(user, previous, current)
+        link_factor = nav_link.link_factor(previous, current, net)
+        comparable = link_factor is not None
+        if comparable:
+            previous = {**previous, "return_nav": previous["return_nav"] * link_factor}
+    else:
+        comparable = previous is not None
+        flows = await snapshots.get_cashflows(user)
+        flows = [r for r in flows if r.get("applied_snapshot_date") == day]
+        net = sum(r["amount"] * (1 if r["type"] == "deposit" else -1) for r in flows)
     pnl = current["total_value"] - previous["total_value"] - net if comparable else None
     pct = (current["return_nav"] / previous["return_nav"] - 1) * 100 if comparable and previous["return_nav"] > 0 else None
     after = await snapshots.get_cashflows_created_after(user, current["cashflow_cutoff_at"])
@@ -34,7 +44,8 @@ async def regular_performance(user: str, day: str) -> dict | None:
             "change_krw": pnl, "change_pct": pct, "net_cashflow": net,
             "change_usd": usd_change, "change_usd_pct": usd_pct, "value_change_usd": usd_value_change,
             "after_close_net_cashflow": after_net, "source": "regular_close",
-            "comparison_unavailable": not comparable}
+            "comparison_unavailable": not comparable,
+            "prev_nav_link_factor": link_factor}
 
 
 async def net_cashflow_since_snapshot(user: str, snap_date: str) -> tuple[float, dict[str, float]]:
