@@ -2,6 +2,18 @@ import httpx
 import pytest
 
 from services.market import naver_indicators as ni
+from services.market.sources import yahoo
+from services.portfolio import fx
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shared_sources():
+    # 환율 원본은 services.portfolio.fx 캐시를, Yahoo 대체 경로는 provider 쿨다운을 공유한다.
+    fx._fx_daily_cache.clear()
+    yahoo.reset_rate_limit_state()
+    yield
+    fx._fx_daily_cache.clear()
+    yahoo.reset_rate_limit_state()
 
 
 @pytest.mark.asyncio
@@ -85,3 +97,60 @@ async def test_provider_failure_recovers_via_yahoo_with_explicit_source():
     assert result["KOSPI"]["source"] == "yahoo_fallback"
     assert result["KOSPI"]["_degraded"] is True
     assert result["KOSPI"]["as_of"].startswith("2026-09-11")
+
+
+@pytest.mark.asyncio
+async def test_fx_indicator_reuses_shared_payload_for_60_seconds_with_original_fetch_time(monkeypatch):
+    calls = []
+    clock = [5000.0]
+    monkeypatch.setattr(fx.time, "monotonic", lambda: clock[0])
+    row = {"reutersCode": "FX_USDKRW", "unit": "KRW", "closePrice": "1,391.50", "fluctuations": "2.50",
+           "fluctuationsRatio": "0.18", "localTradedAt": "2026-09-30T10:00:00+09:00"}
+
+    def respond(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json={"exchangeInfo": row})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        first = await ni.fetch_indicators(client, ["USD_KRW"])
+        clock[0] += ni.FX_MAX_AGE_SECONDS - 1
+        second = await ni.fetch_indicators(client, ["USD_KRW"])
+        assert calls == ["/marketindex/exchange/FX_USDKRW"]
+        # 재사용한 값은 원래 받은 시각을 fetched_at 으로 유지한다.
+        assert second["USD_KRW"] == first["USD_KRW"]
+        clock[0] += 2
+        await ni.fetch_indicators(client, ["USD_KRW"])
+    assert len(calls) == 2
+    assert first["USD_KRW"]["direction"] == "up"
+    assert first["USD_KRW"]["change"] == "2.50"
+
+
+@pytest.mark.asyncio
+async def test_yahoo_fallback_uses_previous_close_not_chart_previous_close():
+    def respond(request):
+        if request.url.host != "query1.finance.yahoo.com":
+            return httpx.Response(503)
+        assert request.url.raw_path.decode().startswith("/v8/finance/chart/%5EGSPC?")
+        assert dict(request.url.params) == {"range": "1d", "interval": "1m"}
+        return httpx.Response(200, json={"chart": {"result": [{"meta": {
+            "regularMarketPrice": 110.0, "previousClose": 100.0, "chartPreviousClose": 50.0,
+            "regularMarketTime": 1789088240,
+        }}]}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await ni.fetch_indicators(client, ["SPX"])
+    assert result["SPX"]["change"] == "10.00"
+    assert result["SPX"]["change_pct"] == "10.00%"
+
+
+@pytest.mark.asyncio
+async def test_yahoo_fallback_without_previous_close_is_dropped():
+    def respond(request):
+        if request.url.host != "query1.finance.yahoo.com":
+            return httpx.Response(503)
+        return httpx.Response(200, json={"chart": {"result": [{"meta": {
+            "regularMarketPrice": 110.0, "chartPreviousClose": 50.0, "regularMarketTime": 1789088240,
+        }}]}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        assert await ni.fetch_indicators(client, ["SPX"]) == {}

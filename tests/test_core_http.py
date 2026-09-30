@@ -116,3 +116,23 @@ async def test_concurrent_get_does_not_create_duplicates():
     manager = http_manager._manager
     assert manager is not None
     assert len(manager._clients) == 1
+
+
+@pytest.mark.asyncio
+async def test_openrouter_stream_profile_has_no_read_timeout():
+    """SSE(추론 모델) 스트림은 토큰 사이 대기가 길어 read timeout 이 없어야 한다."""
+    client = await http_manager.get_http_client("openrouter_stream")
+    assert client.timeout.read is None
+    assert client.timeout.connect == pytest.approx(60.0)
+    assert client.timeout.pool == pytest.approx(60.0)
+
+
+@pytest.mark.asyncio
+async def test_shared_http_client_reuses_pool_and_does_not_close_it():
+    """``async with shared_http_client(name)`` 은 공유 클라이언트를 빌려줄 뿐 닫지 않는다."""
+    async with http_manager.shared_http_client("openrouter_stream") as first:
+        pass
+    async with http_manager.shared_http_client("openrouter_stream") as second:
+        assert second is first
+    assert not first.is_closed
+    assert first is await http_manager.get_http_client("openrouter_stream")

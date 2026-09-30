@@ -374,3 +374,25 @@ async def test_stream_analysis_stops_on_client_disconnect():
     # Aborted before any event was emitted and without a usage write.
     assert events == []
     record.assert_not_awaited()
+
+
+async def test_stream_analysis_uses_shared_openrouter_stream_client():
+    """요청마다 httpx.AsyncClient 를 만들지 않고 core.http 공유 클라이언트를 쓴다."""
+    shared = object()
+    seen = {}
+
+    @asynccontextmanager
+    async def fake(client, payload, *, openrouter_key=None):
+        seen["client"] = client
+        yield _FakeResp(200, lines=['data: {"choices":[{"delta":{"content":"ok"}}]}', "data: [DONE]"])
+
+    getter = AsyncMock(return_value=shared)
+    with patch.object(ai_analysis.ai_client, "stream_chat_completion", fake), \
+         patch.object(ai_analysis.ai_config, "record_usage", AsyncMock()), \
+         patch("core.http.get_http_client", getter):
+        events = [e async for e in ai_analysis.stream_analysis(
+            _ctx(), is_disconnected=AsyncMock(return_value=False),
+        )]
+    getter.assert_awaited_once_with("openrouter_stream")
+    assert seen["client"] is shared
+    assert events[0] == {"content": "ok"}

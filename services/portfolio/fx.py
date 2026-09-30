@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 
 import httpx
 
@@ -26,8 +27,13 @@ _FX_DAILY_CACHE_TTL = 300
 # 2026-09 구형 환율 HTML은 HTTP 410. 시장지표와 같은 네이버 JSON을 사용한다.
 _FX_HTTP_TIMEOUT = 5.0
 
+_NAVER_EXCHANGE_URL = "https://api.stock.naver.com/marketindex/exchange/{symbol}"
+
 _fx_cache = MemoryTTLCache("portfolio.fx_rates", None)
+# 키: 통화 코드(FX_USDKRW 등) → 검증된 환산값, "payload:<symbol>" → 네이버 원본 응답.
 _fx_daily_cache = MemoryTTLCache("portfolio.fx_daily", _FX_DAILY_CACHE_TTL)
+_PAYLOAD_KEY_PREFIX = "payload:"
+_SUPPORTED_FX_CODES = frozenset(currencies.CURRENCY_TO_FX_CODE.values())
 SUPPORTED_PRICE_CURRENCIES = frozenset({"KRW", *currencies.CURRENCY_TO_FX_CODE.keys()})
 
 
@@ -64,34 +70,75 @@ def _fx_number(value) -> float:
     return number
 
 
+def _parse_fx_payload(fx_code: str, payload: dict) -> dict:
+    """포트폴리오 환산용 검증: 종목·단위(KRW)·양수 가격을 모두 확인한다."""
+    row = payload.get("exchangeInfo") if isinstance(payload, dict) else None
+    if not isinstance(row, dict) or row.get("reutersCode") != fx_code or row.get("unit") != "KRW":
+        raise ValueError("환율 종목 또는 단위 불일치")
+    price = _fx_number(row.get("closePrice"))
+    change = _fx_number(row.get("fluctuations"))
+    change_pct = _fx_number(row.get("fluctuationsRatio"))
+    if price <= 0 or price - change <= 0:
+        raise ValueError("환율은 양수여야 합니다")
+    return {"price": price, "change": change, "change_pct": change_pct,
+            "source": "naver_json", "as_of": row.get("localTradedAt")}
+
+
+async def fetch_exchange_payload(
+    symbol: str,
+    *,
+    max_age: float = 0.0,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[dict, float]:
+    """네이버 ``marketindex/exchange/{symbol}`` 원본 JSON 과 수신 시각(epoch).
+
+    허브에서 이 엔드포인트를 부르는 유일한 함수다 — 시장지표 바(60초)와
+    포트폴리오 환산(300초)이 같은 응답을 공유한다. ``max_age`` 초 이내에 받은
+    응답이 있으면 재사용하고, 새로 받은 KRW 환율은 포트폴리오 환산 캐시에도
+    반영해 대시보드와 포트폴리오가 같은 시점의 환율을 쓰게 한다. 원본 해석은
+    호출부 몫이다(지표 바는 표시용 필드, 포트폴리오는 단위 검증).
+    """
+    key = _PAYLOAD_KEY_PREFIX + symbol
+    if max_age > 0:
+        cached = _fx_daily_cache.get(key, allow_stale=True)
+        if cached and time.monotonic() - cached["mono"] <= max_age:
+            return cached["payload"], cached["fetched_at"]
+    if client is None:
+        client = await get_http_client("naver")
+        timeout = _FX_HTTP_TIMEOUT
+    else:
+        timeout = httpx.USE_CLIENT_DEFAULT
+    resp = await client.get(
+        _NAVER_EXCHANGE_URL.format(symbol=symbol),
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, dict):
+        raise ValueError("환율 응답 형식 변경")
+    fetched_at = time.time()
+    _fx_daily_cache.set(key, {"payload": payload, "mono": time.monotonic(), "fetched_at": fetched_at})
+    if symbol in _SUPPORTED_FX_CODES:
+        try:
+            _fx_daily_cache.set(symbol, _parse_fx_payload(symbol, payload))
+        except (ValueError, TypeError) as exc:
+            logger.debug("FX payload not usable for conversion (%s): %s", symbol, exc)
+    return payload, fetched_at
+
+
 async def fetch_fx_daily_change(fx_code: str) -> dict:
     """네이버 고시 환율과 전일 대비. JPY·VND는 원본의 100단위 호가를 유지한다."""
-    if fx_code not in currencies.CURRENCY_TO_FX_CODE.values():
+    if fx_code not in _SUPPORTED_FX_CODES:
         return {}
     cached = _fx_daily_cache.get_entry(fx_code, allow_stale=True)
     if cached is not None and cached.fresh:
         return dict(cached.value)
     try:
-        client = await get_http_client("naver")
-        resp = await client.get(
-            f"https://api.stock.naver.com/marketindex/exchange/{fx_code}",
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=_FX_HTTP_TIMEOUT,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-        row = payload.get("exchangeInfo") if isinstance(payload, dict) else None
-        if not isinstance(row, dict) or row.get("reutersCode") != fx_code or row.get("unit") != "KRW":
-            raise ValueError("환율 종목 또는 단위 불일치")
-        price = _fx_number(row.get("closePrice"))
-        change = _fx_number(row.get("fluctuations"))
-        change_pct = _fx_number(row.get("fluctuationsRatio"))
-        if price <= 0 or price - change <= 0:
-            raise ValueError("환율은 양수여야 합니다")
-        result = {"price": price, "change": change, "change_pct": change_pct,
-                  "source": "naver_json", "as_of": row.get("localTradedAt")}
+        payload, _fetched_at = await fetch_exchange_payload(fx_code)
+        result = _parse_fx_payload(fx_code, payload)
         _fx_daily_cache.set(fx_code, result)
-        return result
+        return dict(result)
     except (httpx.HTTPError, UnicodeError, ValueError, TypeError) as e:
         logger.warning("FX daily fetch failed for %s: %s", fx_code, e)
     if cached is not None:

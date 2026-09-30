@@ -133,8 +133,11 @@ class PortfolioAIWikiTests(TempDbMixin):
         # Domain logic lives in services.portfolio.ai_analysis, which reaches
         # quote enrichment / market indicators through shared module objects —
         # patch those directly instead of via the routes.portfolio namespace.
+        # The SSE stream uses the shared "openrouter_stream" client from
+        # core.http (no per-request AsyncClient) — hand it the fake.
+        shared_client = AsyncMock(return_value=_FakeClient())
         with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value=user)), \
-             patch("httpx.AsyncClient", _FakeClient), \
+             patch("core.http.get_http_client", shared_client), \
              patch("services.portfolio.quote_service.enrich_with_cached_quotes", new=AsyncMock(return_value=[{
                  "stock_code": "005930", "stock_name": "삼성전자",
                  "quantity": 10, "avg_price": 70000,
@@ -144,8 +147,9 @@ class PortfolioAIWikiTests(TempDbMixin):
             response = await pf.ai_portfolio_analysis(_mk_request(), {})
             # Drain the stream INSIDE the patch context — the generator
             # is iterated lazily, so exiting `with patch(...)` before
-            # draining would expose the real httpx.AsyncClient.
+            # draining would expose the real shared client.
             _, dones = await _consume_stream(response)
+        shared_client.assert_awaited_once_with("openrouter_stream")
         return captured.get("payload") or {}, (dones[-1] if dones else {})
 
     async def test_prompt_skips_wiki_when_empty(self):

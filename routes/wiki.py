@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 
 import ai_config
 from cache_layer import MemoryTTLCache
-from core.http import get_http_client
+from core.http import get_http_client, shared_http_client
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from repositories import corp_codes
@@ -705,7 +705,7 @@ async def ask_stock(
         output_tokens = 0
         cost = 0.0
         used_model = model
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
+        async with shared_http_client("openrouter_stream") as client:
             try:
                 async with ai_client.stream_chat_completion(
                     client,

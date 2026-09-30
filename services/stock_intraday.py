@@ -2,7 +2,8 @@
 
 - 국내 주식: Naver fchart 분봉. count 파라미터와 무관하게 최근 수 세션 버퍼를
   통째로 주므로 최신 세션 날짜의 분만 추려 쓴다. 전일종가는 같은 API 의
-  일봉(timeframe=day)에서 얻는다. 인증 불필요.
+  일봉(timeframe=day)에서 얻는다. 인증 불필요. 같은 거래일의 신선한
+  시세(stock_quotes 캐시)가 있으면 그 전일종가를 쓰고 일봉 요청은 생략한다.
 - 해외 주식/ETF: Yahoo v8 chart ``range=1d&interval=5m`` — meta 의
   chartPreviousClose·currentTradingPeriod·gmtoffset 으로 전일종가·정규장
   시간대를 거래소 현지 시각(HH:MM)으로 맞춘다. ticker 해석은 asset-insight 와
@@ -18,14 +19,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 from datetime import datetime, timezone
-from urllib.parse import quote
 
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from services import stock_quotes
+from services.market.sources import yahoo
 from services.portfolio import foreign
-from services.portfolio import history as portfolio_history
 from services.portfolio.identifiers import (
     is_korean_stock,
     is_special_asset,
@@ -123,13 +125,35 @@ async def _fetch_fchart(symbol: str, timeframe: str, count: int) -> str:
     return resp.content.decode("euc-kr", errors="ignore")
 
 
+def _cached_quote_prev_close(code: str) -> tuple[str, float] | None:
+    """시세 캐시(stock_quotes, TTL 60s)가 신선하면 (거래일, 전일종가)를 준다."""
+    stock = stock_quotes.get_stock_cached(code, allow_stale=False)
+    if stock is None or stock.stale or not stock.quote_date:
+        return None
+    prev = stock.previous_close
+    if prev is None or not math.isfinite(prev) or prev <= 0:
+        return None
+    return stock.quote_date, float(prev)
+
+
 async def _korean_intraday(code: str) -> dict:
-    minute_text, day_text = await asyncio.gather(
-        _fetch_fchart(code, "minute", 480),
-        _fetch_fchart(code, "day", 5),
-    )
-    date_iso, points = extract_latest_session_points(parse_fchart_rows(minute_text))
-    prev_close = extract_prev_close(parse_fchart_rows(day_text), date_iso)
+    cached_prev = _cached_quote_prev_close(code)
+    if cached_prev is None:
+        minute_text, day_text = await asyncio.gather(
+            _fetch_fchart(code, "minute", 480),
+            _fetch_fchart(code, "day", 5),
+        )
+        date_iso, points = extract_latest_session_points(parse_fchart_rows(minute_text))
+        prev_close = extract_prev_close(parse_fchart_rows(day_text), date_iso)
+    else:
+        # 같은 거래일의 신선한 시세가 있으면 일봉 요청을 생략한다.
+        minute_text = await _fetch_fchart(code, "minute", 480)
+        date_iso, points = extract_latest_session_points(parse_fchart_rows(minute_text))
+        if date_iso == cached_prev[0]:
+            prev_close = cached_prev[1]
+        else:
+            day_text = await _fetch_fchart(code, "day", 5)
+            prev_close = extract_prev_close(parse_fchart_rows(day_text), date_iso)
     # 15:40~16:00 장후 종가 거래는 ETF에도 있다. 16시 이후 실제
     # 분봉이 있을 때만 20시까지 확장하고, 그 전에는 받은 시각까지 표시한다.
     session = dict(KR_SESSION)
@@ -152,29 +176,20 @@ def _resolve_yahoo_ticker(code: str) -> str:
 
 
 async def _yahoo_intraday(ticker: str) -> dict | None:
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(ticker, safe='')}"
-    async with portfolio_history.YAHOO_SEM:
-        client = await get_http_client("yahoo")
-        resp = await client.get(
-            url,
-            params={"range": "1d", "interval": "5m", "includePrePost": "false"},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=portfolio_history.YAHOO_HTTP_TIMEOUT,
-        )
-        resp.raise_for_status()
-    result = (((resp.json() or {}).get("chart") or {}).get("result") or [None])[0]
-    if not result:
+    chart = yahoo.parse_chart(await yahoo.fetch_chart_json(
+        ticker, range_="1d", interval="5m", include_pre_post=False,
+    ))
+    if chart is None:
         return None
-    meta = result.get("meta") or {}
-    gmtoff = int(meta.get("gmtoffset") or 0)
+    meta = chart.meta
+    gmtoff = chart.gmtoffset
 
     def _local(ts: int) -> datetime:
         return datetime.fromtimestamp(int(ts) + gmtoff, tz=timezone.utc)
 
-    timestamps = result.get("timestamp") or []
-    closes = ((((result.get("indicators") or {}).get("quote") or [{}])[0]) or {}).get("close") or []
+    timestamps = chart.timestamps
     points = []
-    for ts, close in zip(timestamps, closes):
+    for ts, close in zip(timestamps, chart.closes):
         if close is None:
             continue
         points.append({"t": f"{_local(ts):%H:%M}", "p": round(float(close), 6)})
@@ -186,14 +201,15 @@ async def _yahoo_intraday(ticker: str) -> dict | None:
             "start": f"{_local(regular['start']):%H:%M}",
             "end": f"{_local(regular['end']):%H:%M}",
         }
-    prev_close = meta.get("chartPreviousClose") or meta.get("previousClose")
+    # range=1d 이므로 chartPreviousClose 가 곧 전일 종가다.
+    prev_close = yahoo.previous_close(meta, single_day_range=True)
     date_iso = f"{_local(timestamps[-1]):%Y-%m-%d}" if timestamps else None
     return {
         "points": points,
         "session": session,
-        "prev_close": float(prev_close) if prev_close is not None else None,
+        "prev_close": prev_close,
         "date": date_iso,
-        "currency": (meta.get("currency") or "").upper() or None,
+        "currency": chart.currency,
     }
 
 
