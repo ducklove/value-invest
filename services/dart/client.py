@@ -46,11 +46,29 @@ async def fetch_corp_codes() -> list[dict]:
         f"{BASE_URL}/corpCode.xml", params={"crtfc_key": api_key()}, timeout=30
     )
     resp.raise_for_status()
+    return _parse_corp_codes_zip(resp.content)
 
+
+def _parse_corp_codes_zip(content: bytes) -> list[dict]:
+    """corpCode.xml zip 을 상장사 목록으로 푼다.
+
+    키 누락·쿼터 초과 등에서 DART 는 200 과 함께 zip 대신 오류 JSON/XML 을
+    준다. BadZipFile 은 ValueError 계열이 아니어서 그대로 두면 시작 시
+    corp_codes 갱신 실패가 앱 기동 실패로 번진다 — 도메인 오류로 바꾼다.
+    """
     codes = []
-    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-        xml_name = zf.namelist()[0]
-        tree = ET.parse(zf.open(xml_name))
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile as exc:
+        raise ExternalServiceError("DART corpCode 응답이 zip 이 아닙니다 (키·쿼터 확인)") from exc
+    with zf:
+        names = zf.namelist()
+        if not names:
+            raise ExternalServiceError("DART corpCode zip 이 비어 있습니다")
+        try:
+            tree = ET.parse(zf.open(names[0]))
+        except ET.ParseError as exc:
+            raise ExternalServiceError("DART corpCode XML 을 해석하지 못했습니다") from exc
         root = tree.getroot()
         for item in root.iter("list"):
             stock_code = item.findtext("stock_code", "").strip()
