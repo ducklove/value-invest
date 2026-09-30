@@ -16,7 +16,7 @@
 | # | 조치 | 방법 |
 |---|---|---|
 | S1 | **nps-tracker 수정 배포 후 KIS 토큰 폐기** | ① nps-tracker `vc-ecosystem-2026-09`를 main에 머지·push(Pages가 `scripts/stage_pages.py` 허용 목록 `_site`만 올린다). ② `curl -I https://ducklove.github.io/nps-tracker/data/kis_token.json`과 `/data/price_cache.json`이 404인지, `data.json`·`current.json`·`summary.json`·`vc-shell.js`가 200인지 확인. ③ 노출된 KIS 액세스 토큰을 폐기(KIS `/oauth2/revokeP`)하거나 앱키를 교체하고, `KIS_APP_KEY`/`KIS_APP_SECRET`/`KIS_ACCESS_TOKEN` 시크릿을 갱신. 공개 기간에 옛 아티팩트를 누구나 받을 수 있었다 |
-| S2 | `KIS_PROXY_BASE_URL` 정리 | Pi `.env`에 `http://ducklove.duckdns.org:3288`(`.env.example` 값)이 있으면 지우거나 `http://127.0.0.1:3288`로. 값이 있으면 항상 이기므로, 그대로 두면 프록시 토큰이 공용 DNS 평문으로 나간다. 운영 프로필 기본값은 이제 루프백이다 |
+| S2 | `KIS_PROXY_BASE_URL` 정리 | Pi `.env`에 `http://ducklove.duckdns.org:3288`(옛 `.env.example` 값, 지금은 주석 처리)이 있으면 지우거나 `http://127.0.0.1:3288`로. 값이 있으면 항상 이기므로, 그대로 두면 프록시 토큰이 공용 DNS 평문으로 나간다. 운영 프로필 기본값은 이제 루프백이다 |
 | S3 | `INTERNAL_API_TOKEN`(선택) | 이제 설정해도 로컬 타이머가 깨지지 않는다(루프백 직접 연결은 토큰 없이 통과). 설정하면 buybacks 저장소 시크릿 `VALUE_INVEST_NOTIFY_URL`, `VALUE_INVEST_INTERNAL_TOKEN`(= 허브 토큰)을 넣어야 실패 알림이 도착한다. 지금은 둘 중 하나라도 없으면 알림을 건너뛴다 |
 | S4 | buybacks `VITE_KIS_PROXY_URL` | `secrets.KIS_PROXY_URL`이 공개 번들에 인라인된다. 비밀이 아니므로 repository variables로 옮긴다 |
 
