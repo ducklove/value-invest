@@ -389,7 +389,11 @@ async def ingest_stock(
         reports = cached["reports"]
     else:
         try:
-            reports = await report_client.fetch_reports(stock_code)
+            # 만료된 이전 목록이 있으면 그 nid 상세는 재사용한다.
+            previous = await cache_values.get_report_list(stock_code)
+            reports = await report_client.fetch_reports(
+                stock_code, known_reports=(previous or {}).get("reports") or []
+            )
             if reports:
                 await cache_values.save_report_list(stock_code, reports)
         except Exception as exc:

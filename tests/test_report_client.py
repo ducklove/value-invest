@@ -258,6 +258,37 @@ class FetchReportsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r["title"] for r in reports], ["R1", "R2"])
 
 
+class KnownDetailReuseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_known_nids_skip_detail_calls(self):
+        client = _FakeClient(
+            list_pages={0: {"hasNext": False, "items": [_list_item(n, title=f"R{n}") for n in (3, 2, 1)]}},
+            details={str(n): _detail_body(n, pdf=f"https://stock.pstatic.net/stock-research/company/56/{n}.pdf") for n in (1, 2, 3)},
+        )
+        with _patch_client(client):
+            first = await fetch_reports("005930", max_pages=1)
+        detail_calls = [c for c in client.calls if c[0] != NAVER_RESEARCH_API]
+        self.assertEqual(len(detail_calls), 3)
+
+        # nid 2 는 이전에 상세 실패(pdf_url 없음) — 다시 시도한다.
+        known = [dict(first[0]), dict(first[1], pdf_url=""), dict(first[2])]
+        client.calls.clear()
+        with _patch_client(client):
+            second = await fetch_reports("005930", max_pages=1, known_reports=known)
+        detail_calls = [c[0].rsplit("/", 1)[-1] for c in client.calls if c[0] != NAVER_RESEARCH_API]
+        self.assertEqual(detail_calls, ["2"])
+        self.assertEqual(second, first)
+
+    async def test_garbage_known_rows_are_ignored(self):
+        client = _FakeClient(
+            list_pages={0: {"hasNext": False, "items": [_list_item(1)]}},
+            details={"1": _detail_body(1)},
+        )
+        with _patch_client(client):
+            reports = await fetch_reports("005930", max_pages=1, known_reports=[None, "x", {"nid": ""}])
+        self.assertTrue(reports[0]["pdf_url"])
+        self.assertEqual(len([c for c in client.calls if c[0] != NAVER_RESEARCH_API]), 1)
+
+
 class DedupeReportsTests(unittest.TestCase):
     def test_keeps_unique_rows(self):
         rows = [

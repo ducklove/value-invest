@@ -32,7 +32,7 @@ class ReportsRouteCacheTests(TempDbMixin):
         fetch = AsyncMock(return_value=[FAKE_REPORT])
         with patch("report_client.fetch_reports", fetch):
             out = await reports_route.get_reports("005930")
-        fetch.assert_awaited_once_with("005930")
+        fetch.assert_awaited_once_with("005930", known_reports=[])
         self.assertFalse(out["cached"])
         self.assertEqual([r["title"] for r in out["reports"]], [FAKE_REPORT["title"]])
 
@@ -64,6 +64,13 @@ class ReportsRouteCacheTests(TempDbMixin):
         fetch.assert_awaited_once()
         self.assertFalse(out["cached"])
         self.assertEqual(out["reports"][0]["title"], "새 리포트")
+
+    async def test_refresh_passes_previous_list_for_detail_reuse(self):
+        await cache_values.save_report_list("005930", [FAKE_REPORT])
+        fetch = AsyncMock(return_value=[FAKE_REPORT])
+        with patch("report_client.fetch_reports", fetch):
+            await reports_route.get_reports("005930", refresh=True)
+        fetch.assert_awaited_once_with("005930", known_reports=[FAKE_REPORT])
 
     async def test_fetch_failure_returns_empty_with_error(self):
         with patch("report_client.fetch_reports", AsyncMock(side_effect=RuntimeError("upstream down"))):

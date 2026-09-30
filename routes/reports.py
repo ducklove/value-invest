@@ -63,7 +63,11 @@ async def get_reports(stock_code: str, refresh: bool = False):
                     "stale": cached_reports.get("stale", False),
                 }
 
-        reports = await report_client.fetch_reports(stock_code)
+        # 이전 목록(만료 포함)에 상세가 있는 nid 는 상세 호출을 생략한다.
+        previous = await cache_values.get_report_list(stock_code)
+        reports = await report_client.fetch_reports(
+            stock_code, known_reports=(previous or {}).get("reports") or []
+        )
         await cache_values.save_report_list(stock_code, reports)
         if reports:
             await cache_values.save_latest_report(stock_code, reports[0])

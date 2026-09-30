@@ -232,15 +232,51 @@ def _dedupe_reports(reports: list[dict]) -> list[dict]:
     return out
 
 
-async def fetch_reports(stock_code: str, max_pages: int = 2, per_page: int = 50) -> list[dict]:
-    """최근 3년치 리포트 (기본 최대 100건). 각 건은 상세 호출로 PDF 링크를 채운다."""
+# 상세 호출이 채우는 필드 — 이미 받아 둔 리포트(같은 nid)에서 재사용한다.
+_DETAIL_KEYS = (
+    "pdf_url", "summary", "target_price", "recommendation", "analyst",
+    "prev_target_price", "price_at_write_date",
+)
+
+
+def _known_details(known_reports: list[dict] | None) -> dict[str, dict]:
+    """이전에 상세까지 받아 둔 리포트(pdf_url 있음)의 nid → 상세 필드.
+
+    발행된 리포트의 상세(PDF 링크·직전 목표가·작성일 주가)는 바뀌지 않으므로
+    새로고침 때 이미 본 nid 는 상세를 다시 부르지 않는다. 상세가 실패했던
+    건(pdf_url 없음)은 다시 시도한다."""
+    out: dict[str, dict] = {}
+    for row in known_reports or ():
+        if not isinstance(row, dict):
+            continue
+        nid = str(row.get("nid") or "").strip()
+        if nid and row.get("pdf_url"):
+            out[nid] = {key: row[key] for key in _DETAIL_KEYS if row.get(key)}
+    return out
+
+
+async def fetch_reports(
+    stock_code: str,
+    max_pages: int = 2,
+    per_page: int = 50,
+    *,
+    known_reports: list[dict] | None = None,
+) -> list[dict]:
+    """최근 3년치 리포트 (기본 최대 100건). 각 건은 상세 호출로 PDF 링크를 채운다.
+
+    ``known_reports`` (이전에 저장한 목록)에 상세가 있는 nid 는 상세 호출 없이
+    그 값을 쓴다."""
     cutoff_year = datetime.now().year - 3
     reports: list[dict] = []
     detail_limit = asyncio.Semaphore(6)
+    known = _known_details(known_reports)
 
     client = await get_http_client("report")
 
     async def enrich(report: dict) -> dict:
+        cached = known.get(report.get("nid", ""))
+        if cached is not None:
+            return _merge_detail(report, cached)
         async with detail_limit:
             detail = await _fetch_report_detail(client, report.get("nid", ""))
         return _merge_detail(report, detail)
