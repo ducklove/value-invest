@@ -9,6 +9,7 @@ preserved verbatim from the original implementation.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import math
 import time
@@ -102,7 +103,8 @@ async def fetch_exchange_payload(
     if max_age > 0:
         cached = _fx_daily_cache.get(key, allow_stale=True)
         if cached and time.monotonic() - cached["mono"] <= max_age:
-            return cached["payload"], cached["fetched_at"]
+            # 캐시 원본을 호출부가 변경하지 못하게 사본을 준다.
+            return copy.deepcopy(cached["payload"]), cached["fetched_at"]
     if client is None:
         client = await get_http_client("naver")
         timeout = _FX_HTTP_TIMEOUT
@@ -124,7 +126,7 @@ async def fetch_exchange_payload(
             _fx_daily_cache.set(symbol, _parse_fx_payload(symbol, payload))
         except (ValueError, TypeError) as exc:
             logger.debug("FX payload not usable for conversion (%s): %s", symbol, exc)
-    return payload, fetched_at
+    return copy.deepcopy(payload), fetched_at
 
 
 async def fetch_fx_daily_change(fx_code: str) -> dict:

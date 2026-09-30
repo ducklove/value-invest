@@ -121,3 +121,16 @@ async def test_invalid_indicator_payload_does_not_seed_portfolio_rate():
         await naver_indicators.fetch_indicators(client, ["USD_KRW"])
     assert fx._fx_daily_cache.get("FX_USDKRW") is None
     assert fx.cached_rate_for_currency("USD") is None
+
+
+@pytest.mark.asyncio
+async def test_exchange_payload_returns_copies_not_the_cached_object():
+    calls = []
+    async with _counting_client(calls, payload("FX_USDKRW", "1,391.50")) as client:
+        first, _ = await fx.fetch_exchange_payload("FX_USDKRW", max_age=60, client=client)
+        first["exchangeInfo"]["closePrice"] = "0"
+        again, _ = await fx.fetch_exchange_payload("FX_USDKRW", max_age=60, client=client)
+        again["exchangeInfo"].clear()
+        third, _ = await fx.fetch_exchange_payload("FX_USDKRW", max_age=60, client=client)
+    assert calls == ["/marketindex/exchange/FX_USDKRW"]
+    assert third["exchangeInfo"]["closePrice"] == "1,391.50"
