@@ -149,7 +149,19 @@ async def transaction():
         _txn_owner = current
         try:
             db = await get_db()
-            await db.execute("BEGIN IMMEDIATE")
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+            except BaseException:
+                # BEGIN 은 aiosqlite 스레드에서 끝났는데 기다리던 task 만 취소됐을
+                # 수 있다(asyncio.timeout 등). 롤백은 같은 스레드 큐에서 BEGIN 뒤에
+                # 실행되고, 트랜잭션이 없으면 아무 일도 하지 않는다. 그대로 두면
+                # 공유 쓰기 연결이 트랜잭션에 남아 이후 모든 쓰기가 실패한다.
+                # 원래 예외(취소·sqlite 오류)는 그대로 다시 던진다.
+                try:
+                    await db.rollback()
+                except BaseException:
+                    pass
+                raise
             try:
                 yield db
                 await db.commit()

@@ -108,3 +108,32 @@ async def test_cancellation_releases_writer_and_read_snapshot(temp_db):
     async with db.transaction() as tx:
         await tx.execute("UPDATE isolation_probe SET value=50")
     assert await value() == 50
+
+
+async def test_cancel_right_after_begin_does_not_leave_connection_in_transaction(temp_db, monkeypatch):
+    # BEGIN IMMEDIATE 는 aiosqlite 스레드에서 끝났는데 기다리던 task 만 취소되면
+    # (알림 패스의 asyncio.timeout 등) 공유 쓰기 연결이 트랜잭션에 남아, 재시작 전까지
+    # 모든 쓰기가 "cannot start a transaction within a transaction" 으로 실패했다.
+    await seed()
+    async with db.transaction() as writer:  # 트랜잭션은 조회와 다른 쓰기 연결을 쓴다
+        conn = writer
+    original_execute = conn.execute
+    calls = {"n": 0}
+
+    async def begin_then_cancel(sql, *args, **kwargs):
+        result = await original_execute(sql, *args, **kwargs)
+        if sql == "BEGIN IMMEDIATE" and calls["n"] == 0:
+            calls["n"] += 1
+            raise asyncio.CancelledError()
+        return result
+
+    monkeypatch.setattr(conn, "execute", begin_then_cancel)
+    with pytest.raises(asyncio.CancelledError):
+        async with db.transaction() as tx:
+            await tx.execute("UPDATE isolation_probe SET value=1")
+    monkeypatch.setattr(conn, "execute", original_execute)
+
+    assert not conn.in_transaction
+    async with db.transaction() as tx:  # 다음 쓰기가 정상 동작해야 한다
+        await tx.execute("UPDATE isolation_probe SET value=30")
+    assert await value() == 30
