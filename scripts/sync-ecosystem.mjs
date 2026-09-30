@@ -13,6 +13,7 @@
 //   3b. the hub's own static/index.html must carry an up-to-date theme-boot block
 //   4. per public sibling checkout: vendored vc-shell.js / vc-tokens.css (byte-identical),
 //      inline theme-boot block between <!-- vc:theme-boot --> markers, <vc-shell> adoption,
+//      vc-shell.js / vc-tokens.css ?v= cache labels (must equal VCShell.version when present),
 //      held-badges ?v= tag, vendored publish helpers (vc_publish.py / vc-publish.mjs)
 // --write only writes files in working trees; it never runs git.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -184,6 +185,33 @@ export function bootBlock(bootSource) {
   return `<!-- vc:theme-boot --><script>\n${bootSource.replace(/\s+$/, '')}\n</script><!-- /vc:theme-boot -->`;
 }
 
+// vc-shell.js / vc-tokens.css travel together, so an adopting sibling's cache-busting ?v= label
+// (when it has one) is the canonical VCShell.version — a stale label keeps browsers on old copies.
+const SHELL_VERSION = /\bvar VERSION = '([^']+)';/;
+const ASSET_LABEL = /\b(vc-shell\.js|vc-tokens\.css)\?v=([^"'&\s>]*)/g;
+export function shellVersion(shellSource) {
+  const match = shellSource.match(SHELL_VERSION);
+  return match ? match[1] : null;
+}
+export function assetVersionLabels(html) {
+  return [...html.matchAll(ASSET_LABEL)].map(m => ({ asset: m[1], version: m[2] }));
+}
+export function relabelAssets(html, version) {
+  return html.replace(ASSET_LABEL, (_, asset) => `${asset}?v=${version}`);
+}
+function syncAssetLabels(scope, htmlPath, html, version) {
+  const stale = assetVersionLabels(html).filter(label => label.version !== version);
+  if (!stale.length) { log.ok(scope, `vc asset ?v= labels match VCShell.version ${version}`); return html; }
+  if (!write) {
+    log.fail(scope, `stale ?v= label(s) ${stale.map(l => `${l.asset}?v=${l.version}`).join(', ')} (VCShell.version ${version})`);
+    return html;
+  }
+  const next = relabelAssets(html, version);
+  writeFileSync(htmlPath, next);
+  log.wrote(scope, `${htmlPath} (vc asset ?v=${version})`);
+  return next;
+}
+
 // ---- helpers -------------------------------------------------------------------
 function read(file) { return existsSync(file) ? readFileSync(file, 'utf8') : null; }
 function syncCopy(scope, source, target, { missingIsFailure }) {
@@ -224,6 +252,8 @@ function main() {
 
   const shellSource = readFileSync(paths.shell, 'utf8');
   const shell = renderShell(shellSource, reg);
+  const version = shellVersion(shell);
+  if (!version) log.fail('static/ecosystem/vc-shell.js', "VERSION constant (var VERSION = '…') missing");
   if (shell === shellSource) log.ok('static/ecosystem/vc-shell.js', 'registry block up to date');
   else if (write) { writeFileSync(paths.shell, shell); log.wrote('static/ecosystem/vc-shell.js', 'registry block regenerated'); }
   else log.fail('static/ecosystem/vc-shell.js', 'registry block is stale (run npm run sync:ecosystem:write)');
@@ -267,6 +297,7 @@ function main() {
       if (!html.includes(`src="${v.src}vc-shell.js`)) missing.push(`${v.src}vc-shell.js <script>`);
       if (missing.length) log.fail(tool.id, `shell adoption incomplete: ${missing.join(', ')}`);
       else log.ok(tool.id, 'shell adopted');
+      if (version) html = syncAssetLabels(`${tool.id} ${v.html}`, htmlPath, html, version);
     } else {
       log.info(tool.id, 'shell not adopted (vendor.shell=false)');
     }
