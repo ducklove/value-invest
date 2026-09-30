@@ -36,7 +36,7 @@ const CACHE_NAME = 'vc-static-v2';
 // 오리진 저장 용량이 작은 모바일에서 결국 한도를 넘고, 그때부터 cache.put
 // 이 실패한다. 그 실패가 응답까지 깨뜨리면 렌더 차단 CSS/JS 가 네트워크 오류로
 // 떨어져 흰 화면이 된다. 그래서 (1) 저장 실패는 삼키고 (2) 최근 N개만 남긴다.
-const MAX_CACHED_ASSETS = 120; // ≈ 최근 배포 2회분
+const MAX_CACHED_ASSETS = 120; // ≈ 자산 전체 2벌분(파일별 해시라 배포마다 일부만 교체)
 
 // Small, stable shell extras worth precaching for the install prompt.
 const PRECACHE_URLS = [

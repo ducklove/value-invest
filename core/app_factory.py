@@ -238,7 +238,7 @@ class _RequestLatencyMiddleware:
 # - 1KB 미만은 압축 이득보다 헤더·CPU 비용이 커서 그대로 보낸다.
 # - compresslevel 6: 9 대비 크기 차이는 미미하고 파이 CPU 는 훨씬 덜 쓴다.
 # - text/event-stream(SSE)은 Starlette 기본 제외 목록에 있어 청크 단위로 그대로
-#   흘러간다(버퍼링되면 스트림이 끝까지 멈춘다) — tests/test_app_factory.py 가 고정.
+#   흘러간다(버퍼링되면 스트림이 끝까지 멈춘다) — tests/test_static_assets.py 가 고정.
 _GZIP_MINIMUM_SIZE = 1024
 _GZIP_LEVEL = 6
 
