@@ -267,3 +267,12 @@ def test_default_workspace_root_is_repo_parent_after_move():
     repo_root = Path(__file__).resolve().parents[1]
     assert integrations.PROJECT_ROOT == repo_root
     assert integrations.DEFAULT_WORKSPACE_ROOT == repo_root.parent
+
+
+def test_server_kis_proxy_follows_profile_default(monkeypatch):
+    # env 미설정이면 실제 클라이언트와 같은 프로필 기본값(production=loopback)을 보여 준다.
+    monkeypatch.delenv("KIS_PROXY_BASE_URL", raising=False)
+    monkeypatch.setenv("VALUE_INVEST_ENV", "production")
+    assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == "http://127.0.0.1:3288"
+    monkeypatch.setenv("VALUE_INVEST_ENV", "development")
+    assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == "http://ducklove.duckdns.org:3288"

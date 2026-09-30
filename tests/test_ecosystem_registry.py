@@ -137,7 +137,9 @@ def test_app_config_projection_hides_internal_tools(monkeypatch):
     # kisProxy 는 브라우저 코드가 쓰지 않는다 — 공개 /app-config.js 에서 빠지고 서버 설정만 남는다.
     assert "kisProxy" not in config["integrations"]
     assert ":3288" not in json.dumps(config, ensure_ascii=False)
-    assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == "http://ducklove.duckdns.org:3288"
+    from services.market.sources import kis_proxy
+
+    assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == kis_proxy.resolve_base_url()
 
 
 def test_sibling_registry_follow_ups():

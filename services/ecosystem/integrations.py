@@ -471,8 +471,12 @@ def _last_value(values: Any) -> Any:
 
 
 def _kis_proxy_config() -> dict[str, Any]:
+    # 실제 호출 주소와 같은 규칙(env > 프로필 기본값: production=loopback)을 쓴다 —
+    # 레지스트리의 공개 기본값을 따로 읽으면 운영에서 두 값이 어긋난다.
+    from services.market.sources import kis_proxy
+
     return {
-        "baseUrl": _base_url("kisProxy", "KIS_PROXY_BASE_URL"),
+        "baseUrl": kis_proxy.resolve_base_url(),
         "role": "server-side",
         "settings": {"source": "environment", "available": True},
     }
