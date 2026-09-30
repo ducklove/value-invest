@@ -43,11 +43,22 @@ logger = logging.getLogger(__name__)
 # 튜닝 시 한 곳에서 조정한다.
 _DEFAULT_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20)
 
-# 서비스 이름 → 기본 timeout (초). 호출부에서 per-request 로 덮어쓸 수 있다.
-# 이 목록에 없는 이름은 "default" 프로파일(아래)을 쓴다.
-_TIMEOUT_PROFILES: dict[str, float] = {
+# 서비스 이름 → 기본 timeout (초 또는 httpx.Timeout). 호출부에서 per-request 로
+# 덮어쓸 수 있다. 이 목록에 없는 이름은 "default" 프로파일(아래)을 쓴다.
+#
+# 프로파일 메모:
+# * "yahoo" — services/market/sources/yahoo.py 전용(호스트 동시성·429 쿨다운은
+#   provider 가 담당, per-request 6s/connect 3s).
+# * "openrouter_stream" — SSE 스트리밍(wiki Q&A, 포트폴리오 AI 분석). 추론
+#   모델은 토큰 사이가 길게 멈출 수 있어 read timeout 이 없다(connect/write/pool
+#   60s). 요청마다 AsyncClient 를 새로 열던 경로를 이 공유 풀로 옮겼다.
+# * 호스트 계열 풀 통합(예: naver/naver_bulk/market_indicators 를 한 풀로)은
+#   하지 않는다 — 클라이언트 기본 timeout 이 이름별로 달라 호출부마다
+#   per-request timeout 을 명시해야 하므로, 호출부 이전이 끝난 뒤에 한다.
+_TIMEOUT_PROFILES: dict[str, float | httpx.Timeout] = {
     "dart": 45.0,
     "openrouter": 90.0,
+    "openrouter_stream": httpx.Timeout(60.0, read=None),
     "naver_bulk": 15.0,
     "naver": 8.0,
     "yahoo": 10.0,
@@ -74,7 +85,7 @@ _TIMEOUT_PROFILES: dict[str, float] = {
 }
 
 
-def timeout_for(name: str) -> float:
+def timeout_for(name: str) -> float | httpx.Timeout:
     """서비스 이름의 기본 timeout. 미등록 이름은 default 프로파일."""
     return _TIMEOUT_PROFILES.get(name, _TIMEOUT_PROFILES["default"])
 
@@ -171,6 +182,13 @@ async def get_http_client(name: str = "default") -> httpx.AsyncClient:
             if _manager is None:
                 _manager = HttpClientManager()
     return await _manager.get(name)
+
+
+@asynccontextmanager
+async def shared_http_client(name: str = "default") -> AsyncIterator[httpx.AsyncClient]:
+    """``async with httpx.AsyncClient(...) as client:`` 를 공유 클라이언트로
+    바꾸는 드롭인. 빠져나갈 때 닫지 않는다(lifespan 이 close 책임)."""
+    yield await get_http_client(name)
 
 
 @asynccontextmanager

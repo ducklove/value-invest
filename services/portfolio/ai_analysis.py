@@ -29,11 +29,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, AsyncIterator, Awaitable, Callable
 
-import httpx
-
 import ai_config
 import market_indicators
-from core.http import get_http_client
+from core.http import get_http_client, shared_http_client
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from repositories import wiki as wiki_repo
@@ -449,7 +447,7 @@ async def stream_analysis(
     # in the JSON payload, defeating the purpose and inflating latency
     # until the model finishes. With stream() the first token reaches
     # the browser as soon as OpenRouter emits it.
-    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
+    async with shared_http_client("openrouter_stream") as client:
         request_payload = {
             "model": ctx.model,
             "messages": [

@@ -1,8 +1,12 @@
 """hover 툴팁용 당일 일중 시세 API — services/stock_intraday + /api/stocks/{code}/intraday."""
 import unittest
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
-from services import stock_intraday
+import httpx
+
+from services import stock_intraday, stock_quotes
+from services.market.sources import yahoo as yahoo_source
 
 # fchart 분봉 응답 축약본 — 직전 세션(07-20) 꼬리 + 최신 세션(07-21) 분봉.
 FCHART_MINUTE = """<?xml version="1.0" encoding="EUC-KR" ?>
@@ -53,9 +57,12 @@ class StockIntradayParsingTests(unittest.TestCase):
 class StockIntradayServiceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         stock_intraday._intraday_cache.clear()
+        # 전일종가 단축 경로가 다른 테스트의 시세 캐시에 좌우되지 않게 한다.
+        stock_quotes._stock_cache.clear()
 
     async def asyncTearDown(self):
         stock_intraday._intraday_cache.clear()
+        stock_quotes._stock_cache.clear()
 
     async def test_korean_intraday_uses_naver_fchart(self):
         with patch.object(stock_intraday, "_fetch_fchart", new=AsyncMock(side_effect=_fake_fchart())) as fetch:
@@ -121,6 +128,102 @@ class StockIntradayServiceTests(unittest.IsolatedAsyncioTestCase):
             result = await stock_intraday.get_intraday("005930")
         self.assertEqual(fetch.await_count, 2)
         self.assertEqual(len(result["points"]), 3)
+
+
+def _cached_stock(code="005930", *, quote_date="2026-07-21", previous_close=244500.0, stale=False):
+    return stock_quotes.Stock(
+        code=code, current_price=246000.0, previous_close=previous_close, volume=None,
+        created_at=datetime(2026, 7, 21, 9, 2), stale=stale, quote_date=quote_date,
+    )
+
+
+class StockIntradayPrevCloseCacheTests(unittest.IsolatedAsyncioTestCase):
+    """X13 — 같은 거래일의 신선한 시세 캐시가 있으면 일봉(전일종가) 요청을 생략한다."""
+
+    async def asyncSetUp(self):
+        stock_intraday._intraday_cache.clear()
+        stock_quotes._stock_cache.clear()
+
+    async def asyncTearDown(self):
+        stock_intraday._intraday_cache.clear()
+        stock_quotes._stock_cache.clear()
+
+    async def test_fresh_same_day_quote_skips_day_chart(self):
+        stock_quotes._stock_cache.set("005930", _cached_stock())
+        with patch.object(stock_intraday, "_fetch_fchart", new=AsyncMock(side_effect=_fake_fchart())) as fetch:
+            result = await stock_intraday.get_intraday("005930")
+        self.assertEqual([call.args[1] for call in fetch.await_args_list], ["minute"])
+        self.assertEqual(result["prevClose"], 244500.0)
+        self.assertEqual(result["date"], "2026-07-21")
+        self.assertEqual(len(result["points"]), 3)
+
+    async def test_quote_from_other_session_falls_back_to_day_chart(self):
+        stock_quotes._stock_cache.set("005930", _cached_stock(quote_date="2026-07-20", previous_close=255000.0))
+        with patch.object(stock_intraday, "_fetch_fchart", new=AsyncMock(side_effect=_fake_fchart())) as fetch:
+            result = await stock_intraday.get_intraday("005930")
+        self.assertEqual([call.args[1] for call in fetch.await_args_list], ["minute", "day"])
+        self.assertEqual(result["prevClose"], 244000.0)  # 일봉 기준(캐시값 아님)
+
+    async def test_stale_or_unusable_quotes_are_ignored(self):
+        for stock in (_cached_stock(stale=True), _cached_stock(previous_close=None),
+                      _cached_stock(previous_close=0.0), _cached_stock(quote_date=None)):
+            stock_intraday._intraday_cache.clear()
+            stock_quotes._stock_cache.set("005930", stock)
+            with patch.object(stock_intraday, "_fetch_fchart", new=AsyncMock(side_effect=_fake_fchart())) as fetch:
+                result = await stock_intraday.get_intraday("005930")
+            self.assertEqual(fetch.await_count, 2)
+            self.assertEqual(result["prevClose"], 244000.0)
+
+    async def test_expired_quote_cache_is_not_used(self):
+        stock_quotes._stock_cache.set("005930", _cached_stock(), ttl_seconds=-1)
+        with patch.object(stock_intraday, "_fetch_fchart", new=AsyncMock(side_effect=_fake_fchart())) as fetch:
+            result = await stock_intraday.get_intraday("005930")
+        self.assertEqual(fetch.await_count, 2)
+        self.assertEqual(result["prevClose"], 244000.0)
+
+
+# range=1d / 5분봉 — 뉴욕 정규장(09:30~16:00, gmtoffset -4h).
+AAPL_INTRADAY_CHART = {"chart": {"result": [{
+    "meta": {"currency": "usd", "gmtoffset": -14400, "chartPreviousClose": 227.5, "previousClose": 226.0,
+             "currentTradingPeriod": {"regular": {"start": 1789133400, "end": 1789156800}}},
+    "timestamp": [1789133400, 1789133700, 1789134000],
+    "indicators": {"quote": [{"close": [228.1, None, 229.25]}]},
+}]}}
+
+
+class StockIntradayYahooProviderTests(unittest.IsolatedAsyncioTestCase):
+    """해외 일중 차트는 공용 Yahoo provider(services.market.sources.yahoo)를 쓴다."""
+
+    async def asyncSetUp(self):
+        yahoo_source.reset_rate_limit_state()
+
+    async def asyncTearDown(self):
+        yahoo_source.reset_rate_limit_state()
+
+    async def test_yahoo_intraday_parses_chart_via_shared_provider(self):
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return httpx.Response(200, json=AAPL_INTRADAY_CHART)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with patch.object(yahoo_source, "get_http_client", AsyncMock(return_value=client)) as getter:
+                chart = await stock_intraday._yahoo_intraday("AAPL")
+        getter.assert_awaited_once_with("yahoo")
+        self.assertEqual(seen[0].url.path, "/v8/finance/chart/AAPL")
+        self.assertEqual(dict(seen[0].url.params), {"range": "1d", "interval": "5m", "includePrePost": "false"})
+        self.assertEqual(chart["points"], [{"t": "09:30", "p": 228.1}, {"t": "09:40", "p": 229.25}])
+        self.assertEqual(chart["session"], {"start": "09:30", "end": "16:00"})
+        self.assertEqual(chart["prev_close"], 227.5)  # range=1d → chartPreviousClose 우선
+        self.assertEqual(chart["date"], "2026-09-11")
+        self.assertEqual(chart["currency"], "USD")
+
+    async def test_yahoo_intraday_without_result_is_none(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json={"chart": {"result": []}}))) as client:
+            with patch.object(yahoo_source, "get_http_client", AsyncMock(return_value=client)):
+                self.assertIsNone(await stock_intraday._yahoo_intraday("AAPL"))
 
 
 class StockIntradayRouteTests(unittest.IsolatedAsyncioTestCase):

@@ -104,6 +104,38 @@ class CacheTests(TempDbMixin):
         self.assertEqual(paths, ["/v8/finance/chart/123456.KS", "/v8/finance/chart/123456.KQ"])
         self.assertEqual(result["events"], [])
 
+    async def test_yahoo_history_goes_through_shared_provider_limits(self):
+        """Yahoo 배당 이력은 공용 provider(호스트 동시성·429 쿨다운)를 거친다."""
+        from services.market.sources import yahoo
+
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return httpx.Response(200, json={"chart": {"result": [{"meta": {"currency": "usd", "gmtoffset": -14400},
+                "events": {"dividends": {"1": {"amount": 0.12, "date": 1788183000}}}}]}})
+
+        yahoo.reset_rate_limit_state()
+        try:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                getter = AsyncMock(return_value=client)
+                with patch.object(sources, "get_http_client", getter):
+                    result = await sources.fetch_history("O")
+                    self.assertEqual([call.args[0] for call in getter.await_args_list], ["dividend_schedule", "yahoo"])
+                    self.assertEqual(dict(seen[0].url.params), {"range": "2y", "interval": "1d", "events": "div"})
+                    # 배당 일정 프로파일(8초) timeout 을 그대로 쓴다.
+                    self.assertEqual(seen[0].extensions["timeout"]["read"], 8.0)
+                    self.assertEqual(result["events"][0]["currency"], "USD")
+                    self.assertEqual(result["events"][0]["ex_date"], "2026-08-31")
+
+                    # 429 쿨다운 중에는 네트워크에 닿지 않고 HTTP 오류로 실패한다(캐시 경로가 stale 처리).
+                    yahoo._start_cooldown(None)
+                    with self.assertRaises(httpx.HTTPError):
+                        await sources.fetch_history("O")
+            self.assertEqual(len(seen), 1)
+        finally:
+            yahoo.reset_rate_limit_state()
+
     async def test_existing_payment_dates_survive_kis_fallback_to_ex_date_history(self):
         old = {"events": [{"pay_date": "2026-08-20"}], "official": True, "fetched_at": "2026-09-01", "status": "fresh"}
         await set_cache_value(sources.NAMESPACE, "005930.KS", old, ttl_seconds=-1)

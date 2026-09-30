@@ -1,5 +1,7 @@
 """Tests for /api/analysis/{code}/wiki and .../ask routes."""
+import json
 import unittest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin, seed_corp_codes, seed_user
@@ -144,6 +146,48 @@ class WikiAskRouteTests(TempDbMixin):
             with self.assertRaises(HTTPException) as exc_info:
                 await wiki_route.ask_stock("005930", _mk_request(), {"question": "전망은?"})
         self.assertEqual(exc_info.exception.status_code, 429)
+
+    async def test_ask_streams_through_shared_openrouter_stream_client(self):
+        """SSE 스트림은 요청마다 AsyncClient 를 새로 열지 않고 core.http 공유
+        'openrouter_stream' 클라이언트(read timeout 없음)를 쓰며, 끝나도 닫지 않는다."""
+        user = {"google_sub": "u1", "is_admin": False}
+        shared = object()
+        seen = {}
+
+        class _Resp:
+            status_code = 200
+
+            async def aiter_lines(self):
+                yield 'data: {"choices":[{"delta":{"content":"답변"}}]}'
+                yield 'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":3,"completion_tokens":1}}'
+                yield "data: [DONE]"
+
+        @asynccontextmanager
+        async def fake_stream(client, payload, *, openrouter_key=None):
+            seen["client"] = client
+            yield _Resp()
+
+        getter = AsyncMock(return_value=shared)
+        request = _mk_request()
+        request.is_disconnected = AsyncMock(return_value=False)
+        with patch("routes.wiki.get_current_user", new=AsyncMock(return_value=user)), \
+             patch.object(wiki_route, "_try_shortcut", new=AsyncMock(return_value=None)), \
+             patch.object(wiki_route.ai_config, "get_openrouter_key", new=AsyncMock(return_value="k")), \
+             patch.object(wiki_route.ai_config, "get_model_for_feature", new=AsyncMock(return_value="m")), \
+             patch.object(wiki_route.ai_config, "record_usage", new=AsyncMock()), \
+             patch.object(wiki_route, "_load_stock_summary", new=AsyncMock(return_value="삼성전자")), \
+             patch.object(wiki_route, "_load_dart_review_context", new=AsyncMock(return_value="")), \
+             patch.object(wiki_route, "_load_macro_context", new=AsyncMock(return_value="")), \
+             patch.object(wiki_route, "_fetch_recent_news", new=AsyncMock(return_value=[])), \
+             patch.object(wiki_route.ai_client, "stream_chat_completion", fake_stream), \
+             patch("core.http.get_http_client", getter):
+            response = await wiki_route.ask_stock("005930", request, {"question": "전망은?"})
+            chunks = [chunk if isinstance(chunk, str) else chunk.decode() async for chunk in response.body_iterator]
+        getter.assert_awaited_once_with("openrouter_stream")
+        self.assertIs(seen["client"], shared)
+        events = [json.loads(line[6:]) for line in "".join(chunks).splitlines() if line.startswith("data: ")]
+        self.assertEqual(events[0], {"content": "답변"})
+        self.assertTrue(events[-1]["done"])
 
     def test_build_qa_context_formats_entries(self):
         entries = [

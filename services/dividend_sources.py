@@ -12,9 +12,10 @@ import httpx
 from bs4 import BeautifulSoup
 
 import kis_proxy_client
-from core.http import get_http_client
+from core.http import get_http_client, timeout_for
 from repositories.cache_values import get_cache_value_entry, set_cache_value
 from repositories.ticker_map import load_ticker_map
+from services.market.sources import yahoo
 from services.portfolio.identifiers import is_korean_stock, static_foreign_ticker
 
 logger = logging.getLogger(__name__)
@@ -95,18 +96,17 @@ def parse_kis_dividends(payload: dict, code: str) -> list[dict]:
 
 
 def parse_yahoo_chart(payload: dict, ticker: str) -> list[dict]:
-    results = payload.get("chart", {}).get("result") or []
-    if not results:
+    chart = yahoo.parse_chart(payload)
+    if chart is None:
         raise ValueError("배당 이력 응답이 없습니다")
-    result = results[0]
-    currency = result.get("meta", {}).get("currency")
+    currency = chart.currency
     if not currency:
         raise ValueError("배당 통화를 확인할 수 없습니다")
     # Yahoo의 dividends 타임스탬프는 배당락일이다. 지급일로 사용하지 않는다.
-    offset = float(result.get("meta", {}).get("gmtoffset") or 0)
+    offset = float(chart.meta.get("gmtoffset") or 0)
     zone = timezone(timedelta(seconds=offset))
     events = []
-    for row in (result.get("events", {}).get("dividends") or {}).values():
+    for row in chart.dividends:
         amount = number(row.get("amount"))
         stamp = number(row.get("date"))
         if amount is None or stamp is None:
@@ -114,11 +114,19 @@ def parse_yahoo_chart(payload: dict, ticker: str) -> list[dict]:
         events.append({
             "ex_date": datetime.fromtimestamp(stamp, zone).date().isoformat(),
             "record_date": None, "pay_date": None, "declaration_date": None,
-            "amount_per_share": amount, "currency": currency.upper(),
+            "amount_per_share": amount, "currency": currency,
             "source": "Yahoo 배당락 이력",
             "source_url": f"https://finance.yahoo.com/quote/{quote(ticker, safe='')}/history/?filter=div",
         })
     return events
+
+
+async def _fetch_yahoo_dividends(client: httpx.AsyncClient, ticker: str) -> dict:
+    # 공용 Yahoo provider(호스트 동시성·429 쿨다운). timeout 은 기존 배당 일정 프로파일 유지.
+    return await yahoo.fetch_chart_json(
+        ticker, range_="2y", interval="1d", events="div",
+        client=client, timeout=timeout_for("dividend_schedule"),
+    )
 
 
 async def fetch_history(ticker: str) -> dict:
@@ -145,18 +153,15 @@ async def fetch_history(ticker: str) -> dict:
         response.raise_for_status()
         events = await asyncio.to_thread(parse_official_html, response.text, ticker)
     else:
-        response = await client.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(ticker, safe='')}",
-            params={"range": "2y", "interval": "1d", "events": "div"}, headers=headers,
-        )
-        if response.status_code == 404 and ticker.endswith(".KS"):
+        yahoo_client = await get_http_client("yahoo")
+        try:
+            payload = await _fetch_yahoo_dividends(yahoo_client, ticker)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404 or not ticker.endswith(".KS"):
+                raise
             ticker = ticker[:-3] + ".KQ"
-            response = await client.get(
-                f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(ticker, safe='')}",
-                params={"range": "2y", "interval": "1d", "events": "div"}, headers=headers,
-            )
-        response.raise_for_status()
-        events = parse_yahoo_chart(response.json(), ticker)
+            payload = await _fetch_yahoo_dividends(yahoo_client, ticker)
+        events = parse_yahoo_chart(payload, ticker)
     cutoff = (date.today() - timedelta(days=800)).isoformat()
     events = [event for event in events if (event.get("pay_date") or event.get("ex_date") or event.get("record_date") or "") >= cutoff]
     return {
