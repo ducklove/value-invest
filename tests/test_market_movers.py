@@ -2,9 +2,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import market_movers
 import market_news
 from routes import stocks as stocks_route
+from services.market import movers as market_movers
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -137,7 +137,7 @@ class MarketMoversEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_endpoint_returns_items_and_clamps_limit(self):
         fake = AsyncMock(return_value=[{"rank": "1", "code": "005930", "name": "삼성전자",
                                         "price": "317,000", "change_pct": "+5.84%", "direction": "up"}])
-        # The endpoint does `import market_movers` internally, so patching the
+        # The endpoint imports services.market.movers lazily, so patching the
         # module's fetch is what intercepts it.
         with patch.object(market_movers, "fetch_market_movers", new=fake):
             result = await stocks_route.get_market_movers(kind="market_cap", market="kospi", limit=999)

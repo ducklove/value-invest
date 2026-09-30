@@ -30,7 +30,6 @@ from math import copysign, isfinite
 import ai_config
 import close_price_client
 import market_indicators
-import market_movers
 from domain.numbers import parse_number as _safe_float
 from repositories import dart_review as dart_review_repo
 from repositories import notifications as notifications_repo
@@ -39,6 +38,7 @@ from repositories import snapshots as snapshots_repo
 from repositories import user_settings as user_settings_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.market import movers as market_movers
 from services.market.formatting import format_indicator_change as _indicator_change_text
 from services.notifications import channels
 from services.portfolio import after_close, ai_analysis, morning_valuation, snapshot_views, time_windows

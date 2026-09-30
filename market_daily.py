@@ -16,13 +16,13 @@ import httpx
 import ai_config
 import dart_client
 import market_indicators
-import market_movers
 import market_news
 import market_sessions
 from cache_layer import MemoryTTLCache, cached_fetch_result
 from core.http import get_http_client
 from repositories import corp_codes
 from services import ai_client
+from services.market import movers as market_movers
 
 logger = logging.getLogger(__name__)
 

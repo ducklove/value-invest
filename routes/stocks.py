@@ -41,7 +41,7 @@ async def list_indicators():
 @router.get("/api/market/movers")
 async def get_market_movers(kind: str = "market_cap", market: str = "kospi", limit: int = 10):
     """Public 시장 랭킹 — 시총상위/거래상위/급상승/급하락 (Naver sise)."""
-    import market_movers
+    from services.market import movers as market_movers
 
     limit = max(1, min(int(limit), 30))
     items = await market_movers.fetch_market_movers(kind, market, limit)
@@ -51,7 +51,7 @@ async def get_market_movers(kind: str = "market_cap", market: str = "kospi", lim
 @router.get("/api/market/sectors")
 async def get_market_sectors(limit: int = 12):
     """Public 업종별 등락 (Naver sise_group)."""
-    import market_movers
+    from services.market import movers as market_movers
 
     limit = max(1, min(int(limit), 40))
     items = await market_movers.fetch_sectors(limit)
@@ -71,7 +71,7 @@ async def get_market_news(limit: int = 8):
 @router.get("/api/market/investor-flows")
 async def get_investor_flows():
     """Public 투자자별 매매동향 — 코스피·코스닥 개인/외국인/기관 순매수(최근 영업일)."""
-    import market_movers
+    from services.market import movers as market_movers
 
     flows = await market_movers.fetch_investor_flows()
     return {"flows": flows}
