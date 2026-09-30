@@ -1257,7 +1257,7 @@ async def refresh_preferred_dividends_endpoint(request: Request):
     루프(12h)가 알아서 돌지만, 시트 관리자가 방금 값을 바꾼 직후에는
     기다리지 않고 바로 반영하고 싶을 때 쓰기 위함."""
     user = await _require_admin_mutation(request)
-    import preferred_dividends
+    from services.dividends import preferred as preferred_dividends
     result = await preferred_dividends.refresh_preferred_dividends()
     # Attach current cached row count so the dashboard can show before/after.
     result["total_cached"] = await portfolio_repo.get_preferred_dividends_count()

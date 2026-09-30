@@ -476,7 +476,7 @@ CREATE TABLE IF NOT EXISTS foreign_dividends (
 -- 배당 원화). market_data 파이프라인은 보통주 코드만 인덱싱하므로
 -- 우선주는 기존엔 보통주 값으로 근사할 수밖에 없었는데, 실제
 -- 우선주 배당은 보통주 + 프리미엄이라 정확한 값이 시트에 들어있음.
--- preferred_dividends.py 가 주기적으로 fetch 해서 upsert.
+-- services/dividends/preferred.py 가 주기적으로 fetch 해서 upsert.
 CREATE TABLE IF NOT EXISTS preferred_dividends (
     stock_code          TEXT PRIMARY KEY,
     dividend_per_share  REAL,

@@ -18,9 +18,9 @@ from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin
 
-import preferred_dividends as pd_mod
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
+from services.dividends import preferred as pd_mod
 
 # Minimal CSV that mirrors the real sheet's layout. Column count matches
 # the header so the parser's slicing logic is exercised. AI column
