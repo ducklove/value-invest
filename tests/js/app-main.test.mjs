@@ -19,6 +19,7 @@ for (const [label, path, width, loggedIn, expected] of [
     const dom = new JSDOM('', { url: `https://example.test${path}`, runScripts: 'outside-only' });
     const w = dom.window;
     const visits = [];
+    const polls = [];
     let finish;
     const ready = new Promise(resolve => { finish = resolve; });
     Object.assign(w, {
@@ -36,6 +37,10 @@ for (const [label, path, width, loggedIn, expected] of [
       _mbLoadCatalog: async () => {}, _mbLoadCodes: async () => {},
       loadMarketSummary() {}, loadMarketTape() {}, loadDailyMarketBrief() {},
       _pollBenchmarkQuotes() {}, syncAuthState() {},
+      schedulePoll: (name, fn, ms, options = {}) => {
+        polls.push({ name, ms, options });
+        return { cancel() {} };
+      },
       trackEvent: () => finish(),
     });
     try {
@@ -43,6 +48,14 @@ for (const [label, path, width, loggedIn, expected] of [
       await ready;
       assert.deepEqual(visits, [expected]);
       assert.equal(w.location.pathname + w.location.search, path);
+      // 주기 갱신은 전부 가시성 인지 폴링(schedulePoll)으로 — 이름당 하나씩.
+      assert.deepEqual(polls.map(p => [p.name, p.ms]), [
+        ['mb.summary', 60_000], ['mb.tape', 45_000], ['pf.benchmarks', 60_000],
+        ['pf.todayState', 300_000], ['wiki.stats', 300_000],
+      ]);
+      // 벤치마크 시세는 로그인 사용자 전용 API — 비로그인이면 틱을 건너뛴다.
+      const benchmarks = polls.find(p => p.name === 'pf.benchmarks');
+      assert.equal(benchmarks.options.when(), loggedIn);
     } finally {
       w.close();
     }

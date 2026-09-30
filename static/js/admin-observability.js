@@ -54,9 +54,12 @@ function _renderHttpMetricsSection(httpMetrics) {
 
 // --- Live updates every 5s for CPU temp, load, memory ---
 
+// 5초 라이브 갱신은 가시성 인지 폴링(utils.js schedulePoll)으로 돈다 — 탭이
+// 숨으면 멈추고, 돌아오면 5초 넘게 지났을 때만 즉시 한 번 갱신한다. 같은 이름으로
+// 다시 걸면 이전 타이머가 해제되므로 loadAdminView 재호출에도 타이머가 쌓이지 않는다.
 function _startLiveUpdates() {
-  if (_liveInterval) clearInterval(_liveInterval);
-  _liveInterval = setInterval(_updateLiveStats, 5000);
+  if (_liveInterval) _liveInterval.cancel();
+  _liveInterval = schedulePoll('admin.liveStats', _updateLiveStats, 5000);
 }
 
 async function _updateLiveStats() {

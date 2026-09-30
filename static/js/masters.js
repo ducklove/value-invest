@@ -25,12 +25,7 @@ const _MASTERS_ASSET_FALLBACK_COLOR = '#64748b';
 // 자산색은 dashboard.css 의 --masters-asset-* 토큰에서 소싱하고, 토큰이 비어
 // 있으면(jsdom·CSS 미로드) 위 상수를 폴백으로 쓴다(폴백=토큰 정의값).
 function _maCssColor(varName, fallback) {
-  try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-    return v || fallback;
-  } catch (e) {
-    return fallback;
-  }
+  return cssToken(varName, fallback);  // utils.js 단일 소스(D-07)
 }
 
 function _mastersAssetColor(asset) {

@@ -596,3 +596,55 @@ test("disconnect() detaches onclose so the deferred close event cannot resurrect
   await clock.tick(5_000);
   assert.equal(MockWebSocket.instances.length, 1, "no reconnection after explicit disconnect");
 });
+
+// F1-F3: 폴링은 utils.js schedulePoll 로 돈다 — 숨은 탭에서는 인터벌 자체를
+// 멈추고, 다시 보이면 주기보다 오래됐을 때만 즉시 한 번 조회한 뒤 재개한다.
+test("general poll pauses while the tab is hidden and refreshes once on return", async () => {
+  const quotes = { "005930": { price: 70000, source: "rest", date: "20260610" } };
+  const { w, qm, clock, MockWebSocket, fetchCalls } = createHarness({ quotes });
+  let now = 10_000_000;
+  w.Date.now = () => now;
+  let state = "visible";
+  Object.defineProperty(w.document, "visibilityState", { configurable: true, get: () => state });
+  const setState = (next) => { state = next; w.document.dispatchEvent(new w.Event("visibilitychange")); };
+
+  qm.connect();
+  MockWebSocket.instances[0].onopen();
+  qm.updateSubscriptions({ portfolio: ["005930"] });
+  assert.equal(fetchCalls.length, 0);
+
+  setState("hidden");
+  assert.equal(clock.pending(), 0, "hidden: the 60s interval is cleared");
+  now += 5 * 60_000;
+  await clock.tick(5 * 60_000);
+  assert.equal(fetchCalls.length, 0, "no polling while hidden");
+
+  setState("visible");
+  await flush();
+  assert.equal(fetchCalls.length, 1, "stale on return → exactly one immediate poll");
+  assert.equal(clock.pending(), 1, "interval re-armed once (no duplicate timers)");
+  setState("visible");
+  await flush();
+  assert.equal(fetchCalls.length, 1, "a repeated visible event inside the window does not refetch");
+
+  now += 60_000;
+  await clock.tick(60_000);
+  assert.equal(fetchCalls.length, 2, "regular cadence resumes");
+  qm.disconnect();
+  assert.equal(clock.pending(), 0);
+});
+
+test("restarting general/overflow polling never stacks timers", () => {
+  const { qm, clock } = createHarness();
+  qm._startGeneralPolling();
+  qm._startGeneralPolling();
+  qm._startGeneralPolling();
+  assert.equal(clock.pending(), 1);
+  qm.overflowCodes = ["AAPL"];
+  qm._pollOverflow = () => {};
+  qm._startOverflowPolling();
+  qm._startOverflowPolling();
+  assert.equal(clock.pending(), 2);
+  qm.disconnect();
+  assert.equal(clock.pending(), 0);
+});

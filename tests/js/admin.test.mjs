@@ -345,3 +345,62 @@ test("죽은 코드: _renderDeployCard/_renderServerCard 는 정의되지 않는
     assert.equal(typeof w._renderOperationsOverview, "function");
   });
 });
+
+// (g) D-01 — _esc 는 utils.js escapeHtml 에 위임한다. 과거 textContent→innerHTML
+// 구현은 따옴표를 이스케이프하지 않아 value="…" 속성 안에서 속성이 깨졌다.
+test("_esc: 따옴표까지 이스케이프하고 null/false 는 빈 문자열, 0 은 '0'", async () => {
+  await withDom(async (w) => {
+    assert.equal(w._esc('a"b'), "a&quot;b");
+    assert.equal(w._esc("it's"), "it&#39;s");
+    assert.equal(w._esc("<b>"), "&lt;b&gt;");
+    assert.equal(w._esc(null), "");
+    assert.equal(w._esc(undefined), "");
+    assert.equal(w._esc(false), "");
+    assert.equal(w._esc(0), "0");
+    assert.equal(w._esc(1234), "1234");
+  });
+});
+
+test("_esc: 따옴표가 든 검색어도 value 속성을 깨지 않고 그대로 되돌아온다", async () => {
+  await withDom(async (w) => {
+    const hostile = '대덕"우 onfocus="alert(1)" x="';
+    w.filterPreferredDividendList(hostile);
+    const host = w.document.createElement("div");
+    host.innerHTML = w._renderPreferredDividendCoverage([]);
+    const input = host.querySelector("#prefDivSearch");
+    assert.ok(input, "검색 입력이 렌더돼야 한다");
+    assert.equal(input.value, hostile);
+    assert.equal(input.getAttribute("onfocus"), null, "속성 주입이 없어야 한다");
+  });
+});
+
+// (h) 브랜드 — Value Compass 생태계 이름으로 통일.
+test("브랜드: 상단바는 'Value Compass Admin' 과 VC 마크를 쓴다", async () => {
+  await withDom(async (w) => {
+    installFetch(w);
+    await w.loadAdminView();
+    const brand = w.document.querySelector(".admin-brand");
+    assert.ok(brand);
+    assert.equal(brand.querySelector("h1").textContent, "Value Compass Admin");
+    assert.equal(brand.querySelector(".admin-brand-mark").textContent, "VC");
+    assert.ok(!w.document.getElementById("adminContent").textContent.includes("Value Invest"));
+  });
+});
+
+// (i) R12-F7 — 사설 모드처럼 저장소 접근 자체가 throw 해도 admin 부트와
+// 테마 토글이 죽지 않는다(저장만 조용히 생략).
+test("저장소 차단: localStorage getter 가 throw 해도 부트·테마 토글이 동작한다", async () => {
+  await withDom(async (w) => {
+    assert.equal(typeof w.loadAdminView, "function", "admin.js 가 끝까지 로드돼야 한다");
+    assert.equal(w.document.documentElement.getAttribute("data-theme"), "light");
+    w.toggleAdminTheme();
+    assert.equal(w.document.documentElement.getAttribute("data-theme"), "dark");
+  }, {
+    prepare: (w) => {
+      Object.defineProperty(w, "localStorage", {
+        configurable: true,
+        get() { throw new w.DOMException("The operation is insecure.", "SecurityError"); },
+      });
+    },
+  });
+});

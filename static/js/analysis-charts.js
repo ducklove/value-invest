@@ -51,13 +51,11 @@ let _lastWeeklyIndicators = null;
 // 토큰이 없으면 라이트 팔레트 폴백). 종전의 Buy=빨강 하드코딩은 국내 시세
 // 규약(빨강=상승/파랑=하락)과 겹쳐 '상승 표시'로 오독될 수 있어 초록으로 통일.
 function _recommScatterColors() {
-  const styles = getComputedStyle(document.documentElement);
-  const token = (name, fallback) => (styles.getPropertyValue(name).trim() || fallback);
   return {
-    buy: token('--recomm-buy', '#16a34a'),
-    buyBorder: token('--recomm-buy-strong', '#15803d'),
-    hold: token('--recomm-hold', '#6b7280'),
-    holdBorder: token('--recomm-hold-strong', '#4b5563'),
+    buy: cssToken('--recomm-buy', '#16a34a'),
+    buyBorder: cssToken('--recomm-buy-strong', '#15803d'),
+    hold: cssToken('--recomm-hold', '#6b7280'),
+    holdBorder: cssToken('--recomm-hold-strong', '#4b5563'),
   };
 }
 
@@ -255,8 +253,8 @@ async function _overlayTargetPrices(reports) {
   // 목표가 차트는 echarts 전용 — 모바일(uPlot)에서도 echarts 를 보장 로드한다.
   await loadEcharts();
 
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';
+  const textColor = cssToken('--text-secondary', '#888');
+  const gridColor = cssToken('--border', '#ccc');
   const labels = dates.map(formatWeeklyTickLabel);
 
   const ec = echarts.init(innerDiv);
@@ -291,8 +289,8 @@ async function _openTargetPriceModal(dates, prices, targetLine, scatterData, lab
   // 모바일(uPlot)에서도 모달 목표가 차트는 echarts 가 필요하므로 보장 로드.
   await loadEcharts();
 
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';
+  const textColor = cssToken('--text-secondary', '#888');
+  const gridColor = cssToken('--border', '#ccc');
 
   const ec = echarts.init(canvas);
   ec.setOption(buildTargetPriceChartOption({ dates, prices, targetLine, scatterData, labels, textColor, gridColor, modal: true }));
@@ -396,8 +394,8 @@ function openChartModal(title, opts) {
 
   if (_modalChart) { _modalChart.dispose(); _modalChart = null; }
 
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#ccc';
+  const textColor = cssToken('--text-secondary', '#888');
+  const gridColor = cssToken('--border', '#ccc');
   const color = opts.color || '#3b82f6';
   const labels = opts.labels || [];
   const rawLabels = opts.rawLabels || labels;
@@ -525,7 +523,7 @@ async function _renderValuationCharts(indicators) {
   // Remove all cards except target price
   Array.from(grid.children).forEach(c => { if (c.id !== 'targetPriceChartCard') c.remove(); });
 
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark = isDarkTheme();
   const gridColor = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)';
   const tickColor = isDark ? '#94a3b8' : '#666';
 

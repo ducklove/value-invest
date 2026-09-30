@@ -855,3 +855,93 @@ test("분석 도구 카드의 종목 딥링크는 레지스트리 stockLink 로 
   assert.ok(hrefs.includes("https://ducklove.github.io/common_preferred_spread/?theme=light"), "spread rows keep linking to the tool home");
   w.close();
 });
+
+// ── F1-F3: 신선도 창 + 가시성 복귀 갱신 ─────────────────────────────────
+// loadInvestingDashboard 는 90초 안에 다시 불리면(뷰 전환) 요청을 건너뛰고,
+// 새로고침 버튼(refresh=true)은 창을 무시한다. 탭이 다시 보일 때는 창이 지났을
+// 때만 한 번 갱신한다.
+function loadDashboardHarness() {
+  const w = load();
+  let now = 5_000_000;
+  w.Date.now = () => now;
+  let hidden = false;
+  Object.defineProperty(w.document, "hidden", { configurable: true, get: () => hidden });
+  Object.defineProperty(w.document, "visibilityState", {
+    configurable: true, get: () => (hidden ? "hidden" : "visible"),
+  });
+  const calls = { fetch: [], siblings: 0, stream: 0 };
+  w.apiFetchJson = async (url) => {
+    calls.fetch.push(url.split("?")[0]);
+    return url.startsWith("/api/market-indicators") ? CATALOG : {};
+  };
+  for (const name of ["loadMarketMovers", "loadSectors", "loadMarketNews", "loadExternalInsights", "loadEconomicCalendar"]) {
+    w[name] = () => { calls.siblings += 1; };
+  }
+  w.loadInvestorFlows = () => {};
+  w._hlStartStream = () => { calls.stream += 1; };
+  return {
+    w, calls,
+    advance: (ms) => { now += ms; },
+    setHidden: (value) => {
+      hidden = value;
+      w.document.dispatchEvent(new w.Event("visibilitychange"));
+    },
+  };
+}
+
+const settle = () => new Promise((r) => setImmediate(r));
+
+test("loadInvestingDashboard: 90초 신선도 창 안의 재진입은 요청을 건너뛰고, 새로고침은 창을 무시한다", async () => {
+  const { w, calls, advance } = loadDashboardHarness();
+  await w.loadInvestingDashboard();
+  assert.deepEqual(calls.fetch, ["/api/market-indicators", "/api/market-summary"]);
+  assert.equal(calls.siblings, 5);
+
+  advance(30_000);
+  await w.loadInvestingDashboard();
+  assert.equal(calls.fetch.length, 2, "신선하면 지표 재요청 없음");
+  assert.equal(calls.siblings, 5, "형제 위젯도 재요청 없음");
+  assert.equal(calls.stream, 2, "실시간 스트림만 다시 잇는다");
+
+  await w.loadInvestingDashboard(true);
+  assert.deepEqual(calls.fetch.slice(2), ["/api/market-indicators", "/api/market-summary"]);
+  assert.equal(calls.siblings, 10);
+
+  advance(91_000);
+  await w.loadInvestingDashboard();
+  assert.deepEqual(calls.fetch.slice(4), ["/api/market-summary"], "창이 지나면 시세만 다시(카탈로그 캐시)");
+  assert.equal(calls.siblings, 15);
+});
+
+test("loadInvestingDashboard: 진행 중인 로드와 겹치면 형제 위젯까지 중복 발사하지 않는다", async () => {
+  const { w, calls } = loadDashboardHarness();
+  const first = w.loadInvestingDashboard();
+  const second = w.loadInvestingDashboard();
+  await Promise.all([first, second]);
+  assert.equal(calls.siblings, 5);
+  assert.equal(calls.fetch.length, 2);
+});
+
+test("탭 복귀: 창이 지났을 때만 한 번 갱신하고, 숨김 전환·신선한 복귀는 요청하지 않는다", async () => {
+  const { w, calls, advance, setHidden } = loadDashboardHarness();
+  await w.loadInvestingDashboard();
+  assert.equal(calls.fetch.length, 2);
+
+  setHidden(true);
+  advance(20_000);
+  setHidden(false);
+  await settle();
+  assert.equal(calls.fetch.length, 2, "창 안 복귀는 요청 없음");
+
+  setHidden(true);
+  advance(120_000);
+  await settle();
+  assert.equal(calls.fetch.length, 2, "숨어 있는 동안에는 요청 없음");
+  setHidden(false);
+  await settle();
+  assert.deepEqual(calls.fetch.slice(2), ["/api/market-summary"], "오래된 복귀 → 정확히 한 번 갱신");
+  assert.equal(calls.siblings, 10);
+  w.document.dispatchEvent(new w.Event("visibilitychange"));
+  await settle();
+  assert.equal(calls.fetch.length, 3, "이미 갱신했으니 두 번째 이벤트는 무시");
+});

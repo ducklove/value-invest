@@ -114,3 +114,207 @@ test('portfolio links use a first-party handoff for all five dashboards without 
   }
   w.close();
 });
+
+// ── R12-F7: storage guards ────────────────────────────────────────────
+// Safari private mode / blocked site data make the storage *getter* itself
+// throw. The helpers must swallow that and fall back instead of aborting the
+// calling script.
+function blockStorage(w) {
+  for (const name of ["localStorage", "sessionStorage"]) {
+    Object.defineProperty(w, name, {
+      configurable: true,
+      get() { throw new w.DOMException("The operation is insecure.", "SecurityError"); },
+    });
+  }
+}
+
+test("safeStorage helpers round-trip and fall back when storage throws", () => {
+  const w = loadUtils();
+  try {
+    assert.equal(w.safeStorageGet("missing", "fallback"), "fallback");
+    assert.equal(w.safeStorageSet("k", 1), true);
+    assert.equal(w.safeStorageGet("k"), "1");
+    assert.equal(w.safeStorageSet("s", "x", "session"), true);
+    assert.equal(w.sessionStorage.getItem("s"), "x");
+    assert.equal(w.safeStorageRemove("s", "session"), true);
+    assert.equal(w.sessionStorage.getItem("s"), null);
+
+    blockStorage(w);
+    assert.equal(w.safeStorageGet("k", "fallback"), "fallback");
+    assert.equal(w.safeStorageSet("k", "v"), false);
+    assert.equal(w.safeStorageRemove("k", "session"), false);
+    // Guest recent list keeps working (empty) instead of throwing.
+    assert.doesNotThrow(() => w.saveGuestRecent("005930", "삼성전자"));
+    assert.doesNotThrow(() => w.removeGuestRecent("005930"));
+    assert.equal(w.getGuestRecent().length, 0);
+  } finally { w.close(); }
+});
+
+// ── D-07: cssToken / isDarkTheme ──────────────────────────────────────
+test("cssToken reads trimmed custom properties, falls back when empty or on error", () => {
+  const w = loadUtils();
+  try {
+    const style = w.document.createElement("style");
+    style.textContent = ":root { --probe: #123456 ; } [data-theme=\"dark\"] { --probe: #abcdef; }";
+    w.document.head.appendChild(style);
+    assert.equal(w.cssToken("--probe", "#000"), "#123456");
+    assert.equal(w.cssToken("--undefined-token", "#000"), "#000");
+    assert.equal(w.cssToken("--undefined-token"), "");
+    w.document.documentElement.setAttribute("data-theme", "dark");
+    assert.equal(w.cssToken("--probe", "#000"), "#abcdef");
+    w.getComputedStyle = () => { throw new Error("no layout"); };
+    assert.equal(w.cssToken("--probe", "#fallback"), "#fallback");
+  } finally { w.close(); }
+});
+
+test("isDarkTheme follows the data-theme attribute the hub CSS keys on", () => {
+  const w = loadUtils();
+  try {
+    const root = w.document.documentElement;
+    assert.equal(w.isDarkTheme(), false);
+    root.setAttribute("data-theme", "dark");
+    assert.equal(w.isDarkTheme(), true);
+    root.setAttribute("data-theme", "light");
+    assert.equal(w.isDarkTheme(), false);
+  } finally { w.close(); }
+});
+
+// ── F1-F3: visibility-aware polling ───────────────────────────────────
+function installPollClock(w) {
+  const timers = new Map();
+  let nextId = 1;
+  let now = 1_000_000;
+  w.Date.now = () => now;
+  w.setInterval = (fn, ms) => { const id = nextId++; timers.set(id, { fn, at: now + ms, every: ms }); return id; };
+  w.clearInterval = (id) => timers.delete(id);
+  async function tick(ms) {
+    const end = now + ms;
+    for (;;) {
+      let dueId = null;
+      for (const [id, t] of timers) if (t.at <= end && (dueId === null || t.at < timers.get(dueId).at)) dueId = id;
+      if (dueId === null) break;
+      const t = timers.get(dueId);
+      now = t.at;
+      t.at = now + t.every;
+      t.fn();
+      await new Promise((r) => setImmediate(r));
+    }
+    now = end;
+  }
+  return { tick, pending: () => timers.size, advance: (ms) => { now += ms; } };
+}
+
+function setVisibility(w, state) {
+  Object.defineProperty(w.document, "visibilityState", { configurable: true, get: () => state });
+  w.document.dispatchEvent(new w.Event("visibilitychange"));
+}
+
+test("schedulePoll ticks on its interval and re-scheduling a name never duplicates timers", async () => {
+  const w = loadUtils();
+  try {
+    const clock = installPollClock(w);
+    let runs = 0;
+    w.schedulePoll("probe", () => { runs += 1; }, 1000);
+    w.schedulePoll("probe", () => { runs += 1; }, 1000);
+    assert.equal(clock.pending(), 1, "same name replaces the previous timer");
+    await clock.tick(3000);
+    assert.equal(runs, 3);
+    assert.equal(w.cancelPoll("probe"), true);
+    assert.equal(clock.pending(), 0);
+    await clock.tick(3000);
+    assert.equal(runs, 3);
+  } finally { w.close(); }
+});
+
+test("schedulePoll pauses while hidden and refreshes once on return only when stale", async () => {
+  const w = loadUtils();
+  try {
+    const clock = installPollClock(w);
+    let runs = 0;
+    const handle = w.schedulePoll("probe", () => { runs += 1; }, 60_000);
+
+    setVisibility(w, "hidden");
+    assert.equal(clock.pending(), 0, "hidden tab: interval is cleared");
+    await clock.tick(10 * 60_000);
+    assert.equal(runs, 0, "no polling while hidden");
+
+    setVisibility(w, "visible");
+    assert.equal(runs, 1, "stale on return → exactly one immediate refresh");
+    assert.equal(clock.pending(), 1, "interval re-armed once");
+    setVisibility(w, "visible");
+    assert.equal(runs, 1, "a second visible event within the window does not refetch");
+    assert.equal(clock.pending(), 1, "no duplicate timer");
+
+    // Quick hide/show inside the freshness window: resume without refetching.
+    setVisibility(w, "hidden");
+    clock.advance(10_000);
+    setVisibility(w, "visible");
+    assert.equal(runs, 1);
+    await clock.tick(60_000);
+    assert.equal(runs, 2, "regular cadence resumes");
+
+    handle.cancel();
+    assert.equal(clock.pending(), 0);
+  } finally { w.close(); }
+});
+
+test("schedulePoll honours when(), refreshOnVisible:false and skips overlapping runs", async () => {
+  const w = loadUtils();
+  try {
+    const clock = installPollClock(w);
+    let allowed = false;
+    let gated = 0;
+    w.schedulePoll("gated", () => { gated += 1; }, 1000, { when: () => allowed });
+    await clock.tick(2000);
+    assert.equal(gated, 0);
+    allowed = true;
+    await clock.tick(1000);
+    assert.equal(gated, 1);
+
+    let quiet = 0;
+    w.schedulePoll("quiet", () => { quiet += 1; }, 1000, { refreshOnVisible: false });
+    setVisibility(w, "hidden");
+    clock.advance(5000);
+    setVisibility(w, "visible");
+    assert.equal(quiet, 0, "refreshOnVisible:false leaves the immediate refresh to the caller");
+
+    let release;
+    let slow = 0;
+    w.schedulePoll("slow", () => { slow += 1; return new Promise((r) => { release = r; }); }, 1000);
+    await clock.tick(3000);
+    assert.equal(slow, 1, "a still-running poll is not fired again");
+    release();
+    await new Promise((r) => setImmediate(r));
+    await clock.tick(1000);
+    assert.equal(slow, 2);
+  } finally {
+    for (const name of ["gated", "quiet", "slow"]) w.cancelPoll(name);
+    w.close();
+  }
+});
+
+test("schedulePoll re-fires a run that has hung for more than 3 intervals", async () => {
+  const w = loadUtils();
+  try {
+    const clock = installPollClock(w);
+    const releases = [];
+    let runs = 0;
+    w.schedulePoll("hung", () => { runs += 1; return new Promise((r) => { releases.push(r); }); }, 1000);
+    await clock.tick(3000);
+    assert.equal(runs, 1, "within 3 intervals the pending run blocks new ones");
+    await clock.tick(1000);
+    assert.equal(runs, 2, "after 3 intervals the hung run is treated as stuck");
+    // The stale run resolving late must not clear the flag of the newer run.
+    releases[0]();
+    await new Promise((r) => setImmediate(r));
+    await clock.tick(1000);
+    assert.equal(runs, 2, "newer run is still in flight");
+    releases[1]();
+    await new Promise((r) => setImmediate(r));
+    await clock.tick(1000);
+    assert.equal(runs, 3);
+  } finally {
+    w.cancelPoll("hung");
+    w.close();
+  }
+});

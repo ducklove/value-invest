@@ -34,19 +34,19 @@ function _renderSafeMarkdown(mdText) {
 }
 
 function getGuestRecent() {
-  try { return JSON.parse(localStorage.getItem(GUEST_RECENT_KEY)) || []; } catch { return []; }
+  try { return JSON.parse(safeStorageGet(GUEST_RECENT_KEY)) || []; } catch { return []; }
 }
 
 function saveGuestRecent(stockCode, corpName) {
   const list = getGuestRecent().filter(i => i.stock_code !== stockCode);
   list.unshift({ stock_code: stockCode, corp_name: corpName });
   if (list.length > GUEST_RECENT_MAX) list.length = GUEST_RECENT_MAX;
-  localStorage.setItem(GUEST_RECENT_KEY, JSON.stringify(list));
+  safeStorageSet(GUEST_RECENT_KEY, JSON.stringify(list));
 }
 
 function removeGuestRecent(stockCode) {
   const list = getGuestRecent().filter(i => i.stock_code !== stockCode);
-  localStorage.setItem(GUEST_RECENT_KEY, JSON.stringify(list));
+  safeStorageSet(GUEST_RECENT_KEY, JSON.stringify(list));
 }
 
 function quoteIsUsable(q) {
@@ -1213,4 +1213,175 @@ function describeChart(container, label, options) {
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
+}
+
+// ── 안전한 Web Storage 접근 (R12-F7) ─────────────────────────────────
+// 사파리 사설 모드·쿠키 차단·저장소 용량 초과에서는 localStorage/sessionStorage
+// 의 *접근 자체*(getter)나 setItem 이 예외를 던진다. 그 예외가 최상위 스크립트에서
+// 새면 그 파일 나머지(초기화·이벤트 배선)가 통째로 죽으므로, 저장소는 항상 이
+// 헬퍼를 거친다. 저장은 부가 기능이다 — 실패하면 기본값으로 계속 동작한다.
+function _vcStorageArea(area) {
+  return area === 'session' ? window.sessionStorage : window.localStorage;
+}
+
+function safeStorageGet(key, fallback = null, area = 'local') {
+  try {
+    const value = _vcStorageArea(area).getItem(key);
+    return value == null ? fallback : value;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function safeStorageSet(key, value, area = 'local') {
+  try {
+    _vcStorageArea(area).setItem(key, String(value));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function safeStorageRemove(key, area = 'local') {
+  try {
+    _vcStorageArea(area).removeItem(key);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// ── CSS 토큰·테마 (D-07) ─────────────────────────────────────────────
+// 차트는 렌더 시점의 CSS 변수 값을 옵션에 굽는다. 토큰이 비어 있으면(jsdom·CSS
+// 미로드) 폴백을 쓴다 — 폴백은 각 토큰의 라이트 정의와 같게 넘길 것.
+function cssToken(name, fallback = '') {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+// 허브 CSS 는 [data-theme="dark"] 만 다크로 칠한다(속성 없음 = 라이트) —
+// 판정도 그와 똑같이 속성만 본다.
+function isDarkTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'dark';
+}
+
+// ── 가시성 인지 폴링 (F1-F3) ─────────────────────────────────────────
+// schedulePoll(name, fn, ms, {when, freshMs, refreshOnVisible, runNow})
+// - 같은 name 으로 다시 부르면 이전 타이머를 먼저 해제한다(중복 타이머 없음).
+// - 탭이 숨으면(visibilitychange → hidden) 인터벌을 멈추고, 다시 보이면 마지막
+//   실행이 freshMs(기본 = ms)보다 오래됐을 때만 즉시 한 번 실행한 뒤 재개한다.
+// - 틱 시점에 숨어 있거나 when() 이 false 면 건너뛴다. 이전 실행(Promise)이
+//   아직 안 끝났으면 겹쳐 쏘지 않는다(단, 주기 x3 넘게 걸려 있으면 멈춤으로 보고 재실행).
+// 숨김 판정은 visibilityState === 'hidden' 만 본다(jsdom 기본값 'prerender' 는
+// 보이는 것으로 취급 — 테스트 하니스가 타이머를 그대로 돌릴 수 있게).
+const _vcPolls = new Map();
+let _vcPollVisibilityWired = false;
+
+function _vcPageHidden() {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+function _vcPollArm(poll) {
+  if (poll.timer != null || poll.cancelled) return;
+  poll.timer = setInterval(() => _vcPollRun(poll), poll.intervalMs);
+}
+
+function _vcPollDisarm(poll) {
+  if (poll.timer == null) return;
+  clearInterval(poll.timer);
+  poll.timer = null;
+}
+
+// 이전 실행이 이 배수 x 주기보다 오래 안 끝나면(응답 없는 요청) 멈춘 것으로 보고
+// 다시 쏜다 — 한 번 걸린 요청 때문에 폴링이 영영 끊기지 않게.
+const _VC_POLL_STUCK_FACTOR = 3;
+
+function _vcPollRun(poll) {
+  if (poll.cancelled || _vcPageHidden()) return false;
+  if (poll.running && Date.now() - poll.lastRunAt < poll.intervalMs * _VC_POLL_STUCK_FACTOR) return false;
+  if (poll.when) {
+    let allowed = false;
+    try { allowed = !!poll.when(); } catch (_) { allowed = false; }
+    if (!allowed) return false;
+  }
+  poll.lastRunAt = Date.now();
+  const run = (poll.runId || 0) + 1;
+  poll.runId = run;
+  poll.running = true;
+  let result;
+  try {
+    result = poll.fn();
+  } catch (e) {
+    poll.running = false;
+    console.warn(`poll ${poll.name} failed`, e);
+    return true;
+  }
+  if (result && typeof result.then === 'function') {
+    Promise.resolve(result)
+      .catch((e) => console.warn(`poll ${poll.name} failed`, e))
+      // 멈춤으로 간주돼 새 실행이 시작됐다면, 늦게 끝난 옛 실행이 플래그를 풀지 않는다.
+      .then(() => { if (poll.runId === run) poll.running = false; });
+  } else {
+    poll.running = false;
+  }
+  return true;
+}
+
+function _vcPollHandleVisibility() {
+  const hidden = _vcPageHidden();
+  for (const poll of [..._vcPolls.values()]) {
+    if (hidden) {
+      _vcPollDisarm(poll);
+      continue;
+    }
+    if (poll.refreshOnVisible && Date.now() - poll.lastRunAt >= poll.freshMs) _vcPollRun(poll);
+    _vcPollArm(poll);
+  }
+}
+
+function cancelPoll(name) {
+  const poll = _vcPolls.get(name);
+  if (!poll) return false;
+  poll.cancelled = true;
+  _vcPollDisarm(poll);
+  _vcPolls.delete(name);
+  return true;
+}
+
+function schedulePoll(name, fn, intervalMs, options = {}) {
+  cancelPoll(name);
+  const poll = {
+    name,
+    fn,
+    intervalMs,
+    freshMs: options.freshMs != null ? options.freshMs : intervalMs,
+    when: typeof options.when === 'function' ? options.when : null,
+    refreshOnVisible: options.refreshOnVisible !== false,
+    // 호출부가 보통 직전에 한 번 직접 불러 두므로 '방금 실행됨'으로 시작한다.
+    lastRunAt: options.runNow ? 0 : Date.now(),
+    timer: null,
+    running: false,
+    runId: 0,
+    cancelled: false,
+  };
+  _vcPolls.set(name, poll);
+  if (!_vcPollVisibilityWired && typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', _vcPollHandleVisibility);
+    _vcPollVisibilityWired = true;
+  }
+  // 숨은 채 시작한 탭이라도 인터벌은 건다(틱이 알아서 건너뛴다) — 첫
+  // visibilitychange 부터는 위 핸들러가 멈춤/재개를 맡는다.
+  _vcPollArm(poll);
+  if (options.runNow) _vcPollRun(poll);
+  return {
+    name,
+    cancel: () => (_vcPolls.get(name) === poll ? cancelPoll(name) : false),
+    runNow: () => _vcPollRun(poll),
+    markFresh: () => { poll.lastRunAt = Date.now(); },
+    isActive: () => !poll.cancelled,
+  };
 }
