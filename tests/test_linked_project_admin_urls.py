@@ -1,6 +1,6 @@
 """linked_project_admin 공개 config.json 주소 — 레지스트리(config/ecosystem.json) + envOverride."""
 
-import linked_project_admin
+from services.ecosystem import linked_admin as linked_project_admin
 
 
 def test_public_config_urls_come_from_registry():
