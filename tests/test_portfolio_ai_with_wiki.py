@@ -143,7 +143,7 @@ class PortfolioAIWikiTests(TempDbMixin):
                  "quantity": 10, "avg_price": 70000,
                  "quote": {"price": 80000, "change_pct": 1.5},
              }])), \
-             patch("market_indicators.fetch_indicators", new=AsyncMock(return_value={})):
+             patch("services.market.indicators.fetch_indicators", new=AsyncMock(return_value={})):
             response = await pf.ai_portfolio_analysis(_mk_request(), {})
             # Drain the stream INSIDE the patch context — the generator
             # is iterated lazily, so exiting `with patch(...)` before

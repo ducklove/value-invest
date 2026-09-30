@@ -1,4 +1,4 @@
-import market_indicators as mi
+from services.market import indicators as mi
 
 
 def test_japan_short_bond_catalog_entries_exist():

@@ -12,7 +12,7 @@ NOW = datetime(2026, 9, 11, 1, 0, tzinfo=timezone.utc)
 class IndicatorHealthTests(TempDbMixin):
     async def test_persistent_failure_notifies_once_and_recovery_notifies_once(self):
         with patch.object(health, "CODES", ["KOSPI"]), \
-             patch("market_indicators.fetch_indicators", AsyncMock(return_value={})) as fetch, \
+             patch("services.market.indicators.fetch_indicators", AsyncMock(return_value={})) as fetch, \
              patch.object(health, "_notify", AsyncMock(return_value=1)) as notify:
             initial = await health.check_once(now=NOW)
             self.assertEqual(initial["status"], "warn")
@@ -36,7 +36,7 @@ class IndicatorHealthTests(TempDbMixin):
 
     async def test_notification_failure_retries_and_total_timeout_counts_as_failure(self):
         with patch.object(health, "CODES", ["KOSPI"]), \
-             patch("market_indicators.fetch_indicators", AsyncMock(side_effect=TimeoutError)), \
+             patch("services.market.indicators.fetch_indicators", AsyncMock(side_effect=TimeoutError)), \
              patch.object(health, "_notify", AsyncMock(side_effect=[0, 1])) as notify:
             await health.check_once(now=NOW)
             first = await health.check_once(now=NOW + timedelta(minutes=10))

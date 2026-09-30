@@ -21,9 +21,9 @@ import os
 import time
 
 import asset_insights
-import market_indicators
 from cache_layer import MemoryTTLCache
 from services.ecosystem import integrations, links
+from services.market import indicators as market_indicators
 from services.portfolio import benchmarks, foreign, quote_service
 from services.portfolio import history as portfolio_history
 from services.portfolio.identifiers import (

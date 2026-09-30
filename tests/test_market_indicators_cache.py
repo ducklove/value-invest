@@ -2,7 +2,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-import market_indicators
+from services.market import indicators as market_indicators
 
 
 class MarketIndicatorsCacheTests(unittest.IsolatedAsyncioTestCase):

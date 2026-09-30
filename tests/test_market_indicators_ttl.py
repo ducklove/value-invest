@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 
 import cache_layer
-import market_indicators as mi
 from services.market import indicator_health, naver_indicators
+from services.market import indicators as mi
 
 QUOTE = {"value": "100.00", "change": "1.00", "change_pct": "1.00%", "direction": "up"}
 RATE = {"value": "4.25", "change": "", "change_pct": "", "direction": ""}

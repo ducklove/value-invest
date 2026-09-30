@@ -30,12 +30,12 @@ from datetime import date
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 import ai_config
-import market_indicators
 from core.http import get_http_client, shared_http_client
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.market import indicators as market_indicators
 from services.market.formatting import format_indicator_change as _market_summary_change
 from services.portfolio import quote_service
 

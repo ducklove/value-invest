@@ -28,7 +28,6 @@ from datetime import timedelta
 from math import copysign, isfinite
 
 import ai_config
-import market_indicators
 from domain.numbers import parse_number as _safe_float
 from repositories import dart_review as dart_review_repo
 from repositories import notifications as notifications_repo
@@ -37,6 +36,7 @@ from repositories import snapshots as snapshots_repo
 from repositories import user_settings as user_settings_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.market import indicators as market_indicators
 from services.market import movers as market_movers
 from services.market.formatting import format_indicator_change as _indicator_change_text
 from services.market.sources import close_price as close_price_client

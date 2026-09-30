@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-import market_indicators
+from services.market import indicators as market_indicators
 
 HL_CODES = ["HL_KR200", "HL_SAMSUNG", "HL_SKHYNIX", "HL_HYUNDAI", "HL_GOLD"]
 

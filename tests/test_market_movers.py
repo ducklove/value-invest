@@ -101,7 +101,7 @@ class MarketSummaryRouteTests(unittest.IsolatedAsyncioTestCase):
             return {code: {"value": "1.00"} for code in codes}
 
         codes = [f"C{i:03d}" for i in range(70)] + ["JP_BASE", "ES10Y", "ID10Y", "BR10Y"]
-        with patch("market_indicators.fetch_indicators", new=AsyncMock(side_effect=fake_fetch_indicators)):
+        with patch("services.market.indicators.fetch_indicators", new=AsyncMock(side_effect=fake_fetch_indicators)):
             result = await stocks_route.market_summary(",".join(codes))
 
         self.assertIn("JP_BASE", captured)

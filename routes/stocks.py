@@ -11,7 +11,7 @@ router = APIRouter()
 
 @router.get("/api/market-summary")
 async def market_summary(codes: str = ""):
-    import market_indicators
+    from services.market import indicators as market_indicators
 
     code_list = (
         [c.strip()[:30] for c in codes.split(",") if c.strip()][:160]
@@ -25,7 +25,7 @@ async def market_summary(codes: str = ""):
 @router.get("/api/market/live")
 async def market_live(codes: str = ""):
     """야간선물·Hyperliquid의 짧은 TTL REST 폴백을 제공한다."""
-    import market_indicators
+    from services.market import indicators as market_indicators
 
     code_list = [c.strip()[:30] for c in codes.split(",") if c.strip()][:10]
     return await market_indicators.fetch_indicators_live(code_list)
@@ -33,7 +33,7 @@ async def market_live(codes: str = ""):
 
 @router.get("/api/market-indicators")
 async def list_indicators():
-    import market_indicators
+    from services.market import indicators as market_indicators
 
     return market_indicators.CATALOG
 

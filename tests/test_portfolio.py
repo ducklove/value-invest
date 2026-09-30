@@ -352,7 +352,7 @@ class PortfolioTests(TempDbMixin):
         # shared market_indicators module object — patch it directly instead of
         # reaching through the routes.portfolio namespace.
         with patch(
-            "market_indicators.fetch_indicators",
+            "services.market.indicators.fetch_indicators",
             new=AsyncMock(return_value={"SPX": {"value": "", "change_pct": "", "direction": ""}}),
         ):
             result = await portfolio_route._fetch_benchmark_quote("IDX_SP500")

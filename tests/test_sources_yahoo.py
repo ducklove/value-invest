@@ -277,7 +277,7 @@ async def test_close_series_never_raises_and_infers_currency():
 # --- market_indicators (legacy root) callers ------------------------------
 
 def test_market_indicators_yahoo_quotes_go_through_provider():
-    import market_indicators as mi
+    from services.market import indicators as mi
 
     seen = []
 
@@ -308,7 +308,7 @@ def test_market_indicators_yahoo_quotes_go_through_provider():
 
 
 def test_market_indicators_yahoo_quote_falls_back_to_chart_previous_close():
-    import market_indicators as mi
+    from services.market import indicators as mi
 
     payload = {"chart": {"result": [{
         "meta": {"regularMarketPrice": 1234.5, "chartPreviousClose": 1200.0},

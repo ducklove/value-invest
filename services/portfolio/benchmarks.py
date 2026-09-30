@@ -4,9 +4,9 @@ import asyncio
 import logging
 from typing import Any
 
-import market_indicators
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from services.market import indicators as market_indicators
 from services.portfolio import foreign, fx, quote_service
 from services.portfolio.identifiers import (
     CASH_FX_CODE,

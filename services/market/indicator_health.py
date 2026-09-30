@@ -50,7 +50,7 @@ async def _notify(text: str, key: str) -> int:
 
 
 async def check_once(*, now: datetime | None = None) -> dict:
-    import market_indicators
+    from services.market import indicators as market_indicators
 
     now = now or datetime.now(timezone.utc)
     previous_entry = await cache_values.get_cache_value_entry(NAMESPACE, KEY, allow_stale=True)

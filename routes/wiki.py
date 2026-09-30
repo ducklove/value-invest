@@ -286,7 +286,7 @@ async def _load_macro_context() -> str:
     """Current market backdrop. Uses market_indicators which already has
     a 60s module-level cache so this is cheap."""
     try:
-        import market_indicators
+        from services.market import indicators as market_indicators
         data = await market_indicators.fetch_indicators([
             "KOSPI", "KOSDAQ", "USD_KRW", "US10Y", "SPX",
         ])

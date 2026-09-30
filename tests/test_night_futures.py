@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import market_indicators as mi
+from services.market import indicators as mi
 
 SUMMARY_UP = {
     "symbol": "A01609",
