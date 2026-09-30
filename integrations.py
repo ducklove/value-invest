@@ -3,21 +3,16 @@ import os
 from pathlib import Path
 from typing import Any
 
+from core import ecosystem
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_WORKSPACE_ROOT = PROJECT_ROOT.parent
 
-DEFAULT_BASE_URLS = {
-    "holdingValue": "https://ducklove.github.io/holding_value",
-    "preferredSpread": "https://ducklove.github.io/common_preferred_spread",
-    "spacHunter": "https://ducklove.github.io/spac-hunter",
-    "buybacks": "https://ducklove.github.io/buybacks",
-    "eiayn": "https://ducklove.github.io/eiayn",
-    "goldGap": "https://ducklove.github.io/gold_gap",
-    "allAboutGold": "https://ducklove.github.io/all-about-gold",
-    "npsTracker": "https://ducklove.github.io/nps-tracker",
-    "bondMate": "https://ducklove.github.io/bond-mate",
-    "kisProxy": "http://ducklove.duckdns.org:3288",
-}
+# 연결 도구 기본 주소는 config/ecosystem.json(생태계 레지스트리)에서 파생한다.
+# integrationKey 가 있는 항목만 — kisProxy 처럼 visibility "internal" 인 서버 전용
+# 항목도 여기엔 포함되지만, 브라우저용 APP_CONFIG.ecosystem 투영에는 빠진다.
+# 각 항목의 envOverride(HOLDING_VALUE_BASE_URL 등)는 _base_url 이 그대로 존중한다.
+DEFAULT_BASE_URLS = ecosystem.default_base_urls()
 
 DEFAULT_GOLD_GAP_ASSETS = {
     "gold": {
@@ -42,7 +37,13 @@ def build_app_config(api_base_url: str = "", workspace_root: Path | None = None)
     return {
         "apiBaseUrl": api_base_url,
         "integrations": build_public_integrations(workspace_root=workspace_root),
+        "ecosystem": ecosystem.public_projection(),
     }
+
+
+def handoff_integration_keys() -> frozenset[str]:
+    """보유 스냅샷(#vc-held) handoff 를 받는 연결 도구 키 — 레지스트리 ``handoff: true``."""
+    return ecosystem.handoff_keys()
 
 
 def build_public_integrations(workspace_root: Path | None = None) -> dict[str, Any]:

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:spac-hunter:1",
+  "title": "spac-hunter summary.json data (v1)",
+  "description": "Every listed SPAC with the fields the hub needs: the '스팩 저가순' card (currentPrice asc) and services/portfolio/spac.py liquidation metrics (escrowRatePeriods + valuationBasis + valuationAssumptions). Replaces the 3.8 MB data.json download; history/filings/events stay out.",
+  "type": "object",
+  "required": ["lastUpdated", "summary", "valuationAssumptions", "spacs"],
+  "properties": {
+    "lastUpdated": {"type": ["string", "null"]},
+    "summary": {
+      "type": "object",
+      "required": ["totalCount", "belowIpoCount", "averageAnnualizedReturn"],
+      "properties": {
+        "totalCount": {"type": ["integer", "null"], "minimum": 0},
+        "belowIpoCount": {"type": ["integer", "null"], "minimum": 0},
+        "averageRatio": {"$ref": "#/$defs/num"},
+        "averageAnnualizedReturn": {"$ref": "#/$defs/num"}
+      }
+    },
+    "valuationAssumptions": {
+      "type": "object",
+      "description": "Defaults used when a SPAC's valuationBasis leaves a field null.",
+      "properties": {
+        "trustFeePct": {"$ref": "#/$defs/num"},
+        "interestTaxPct": {"$ref": "#/$defs/num"},
+        "payoutLagDays": {"type": ["integer", "null"]}
+      }
+    },
+    "spacs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "name", "currentPrice", "ipoPrice", "ratio", "annualizedReturn", "listingDate", "liquidationDate", "payoutDate", "liquidationValuePerShare", "escrowRatePeriods", "valuationBasis"],
+        "properties": {
+          "code": {"type": "string", "pattern": "^[0-9A-Z]{6}$"},
+          "name": {"type": "string", "minLength": 1},
+          "currentPrice": {"$ref": "#/$defs/num"},
+          "ipoPrice": {"$ref": "#/$defs/num"},
+          "ratio": {"$ref": "#/$defs/num", "description": "currentPrice / ipoPrice."},
+          "annualizedReturn": {"$ref": "#/$defs/num", "description": "% p.a. to the expected payout."},
+          "status": {"type": ["string", "null"]},
+          "mergerStatus": {"type": ["string", "null"]},
+          "listingDate": {"$ref": "#/$defs/dateOrNull"},
+          "liquidationDate": {"$ref": "#/$defs/dateOrNull"},
+          "payoutDate": {"$ref": "#/$defs/dateOrNull"},
+          "liquidationValuePerShare": {"$ref": "#/$defs/num", "description": "Expected payout per share at payoutDate (KRW)."},
+          "escrowRatePeriods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["startDate", "ratePct"],
+              "properties": {
+                "startDate": {"$ref": "#/$defs/dateOrNull"},
+                "ratePct": {"$ref": "#/$defs/num"}
+              }
+            }
+          },
+          "valuationBasis": {
+            "type": "object",
+            "required": ["trustStartDate", "trustFeePct", "interestTaxPct", "rolloverMonths", "anchor"],
+            "properties": {
+              "trustStartDate": {"$ref": "#/$defs/dateOrNull"},
+              "trustFeePct": {"$ref": "#/$defs/num"},
+              "interestTaxPct": {"$ref": "#/$defs/num"},
+              "rolloverMonths": {"type": ["integer", "null"], "minimum": 1},
+              "anchor": {
+                "anyOf": [
+                  {"type": "null"},
+                  {
+                    "type": "object",
+                    "required": ["date", "valuePerShare"],
+                    "properties": {
+                      "date": {"$ref": "#/$defs/date"},
+                      "valuePerShare": {"$ref": "#/$defs/num"}
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]},
+    "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "dateOrNull": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+  }
+}

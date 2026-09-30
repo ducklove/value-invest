@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:buybacks:1",
+  "title": "buybacks summary.json data (v1)",
+  "description": "Treasury-share ratio from the latest COMMON-stock holding snapshot per code (same selection as value-invest external_tools._summarize_buybacks). 'top' feeds the '자사주' card; 'ratios' is a compact per-code map for portfolio signals (replaces the 1.2 MB holding_snapshots.json).",
+  "type": "object",
+  "required": ["asOf", "count", "top", "ratios", "ratioAsOf"],
+  "properties": {
+    "asOf": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Most recent snapshot as_of_date; default for 'ratios' entries."},
+    "count": {"type": "integer", "minimum": 0, "description": "Number of codes in 'ratios' in the full publication."},
+    "top": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["code", "name", "asOf", "treasuryRatioPct"],
+        "properties": {
+          "code": {"$ref": "#/$defs/krCode"},
+          "name": {"type": "string", "minLength": 1},
+          "asOf": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+          "stockKind": {"type": ["string", "null"]},
+          "treasuryRatioPct": {"type": "number", "minimum": 0},
+          "endingQty": {"type": ["integer", "null"]},
+          "issuedShares": {"type": ["integer", "null"]}
+        }
+      }
+    },
+    "ratios": {
+      "type": "object",
+      "description": "code -> treasury ratio in % (2 decimals).",
+      "propertyNames": {"pattern": "^[0-9A-Z]{6}$"},
+      "additionalProperties": {"type": "number", "minimum": 0}
+    },
+    "ratioAsOf": {
+      "type": "object",
+      "description": "code -> snapshot date, ONLY for codes whose date differs from data.asOf.",
+      "propertyNames": {"pattern": "^[0-9A-Z]{6}$"},
+      "additionalProperties": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+    }
+  },
+  "$defs": {
+    "krCode": {"type": "string", "pattern": "^[0-9A-Z]{6}$"}
+  }
+}

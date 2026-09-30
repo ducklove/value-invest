@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:bond-mate:1",
+  "title": "bond-mate summary.json data (v1)",
+  "description": "Latest value of every rate/FX series (no history) + highlights for the '채권 시황' card. Enough for both the server card (external_tools._summarize_bond_mate) and the browser merge (market-bond-mate.js mergeBondMate). Replaces the 112 KB data/current.json.",
+  "type": "object",
+  "required": ["highlights", "creditSpreadBp", "latestOffering", "rates", "fx"],
+  "properties": {
+    "highlights": {
+      "type": "object",
+      "required": ["usCurveSpreadBp", "usCurveInverted", "krCurveSpreadBp"],
+      "properties": {
+        "usCurveSpreadBp": {"$ref": "#/$defs/num", "description": "US 10Y - 2Y, bp."},
+        "usCurveInverted": {"type": ["boolean", "null"]},
+        "krCurveSpreadBp": {"$ref": "#/$defs/num", "description": "KR 10Y - 3Y, bp."},
+        "igHySpreadBp": {"$ref": "#/$defs/num"}
+      }
+    },
+    "creditSpreadBp": {
+      "type": "object",
+      "description": "Rating -> OAS in bp (1 decimal), e.g. {\"BBB\": 97}.",
+      "additionalProperties": {"type": "number"}
+    },
+    "latestOffering": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["issuerName", "totalAmount"],
+          "properties": {
+            "issuer": {"type": ["string", "null"]},
+            "issuerName": {"type": ["string", "null"]},
+            "filingDate": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+            "totalAmount": {"$ref": "#/$defs/num", "description": "USD"},
+            "tranches": {"type": ["integer", "null"]}
+          }
+        }
+      ]
+    },
+    "rates": {
+      "type": "object",
+      "description": "bond-mate series id (US10Y, KR3Y, US_BASE, US_ON, ...) -> latest quote. maturity: years; 0 = overnight; -1 = policy rate.",
+      "propertyNames": {"pattern": "^[A-Z0-9_]{2,16}$"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["country", "maturity", "value", "change", "date"],
+        "properties": {
+          "country": {"type": "string", "pattern": "^[A-Z]{2}$"},
+          "maturity": {"type": "number"},
+          "tenor": {"type": ["string", "null"]},
+          "value": {"$ref": "#/$defs/num", "description": "%"},
+          "change": {"$ref": "#/$defs/num", "description": "%p vs previous observation."},
+          "changePct": {"$ref": "#/$defs/num"},
+          "date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+        }
+      }
+    },
+    "fx": {
+      "type": "object",
+      "description": "Pair (USD_KRW, EUR_USD, ...) -> latest quote.",
+      "propertyNames": {"pattern": "^[A-Z]{3}_[A-Z]{3}$"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["value", "change", "date"],
+        "properties": {
+          "label": {"type": ["string", "null"]},
+          "value": {"$ref": "#/$defs/num"},
+          "change": {"$ref": "#/$defs/num"},
+          "changePct": {"$ref": "#/$defs/num"},
+          "date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]}
+  }
+}

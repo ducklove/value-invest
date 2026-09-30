@@ -641,9 +641,12 @@ async def get_held_codes(request: Request, response: Response):
 @router.get("/api/portfolio/open/{integration_key}")
 async def open_portfolio_integration(request: Request, integration_key: str, code: str = "", theme: str = "light", stock: str = ""):
     """Top-level navigation reads first-party cookies before handing off a snapshot."""
-    if integration_key not in {"holdingValue", "preferredSpread", "spacHunter", "buybacks", "eiayn"}:
+    # 허용 목록은 config/ecosystem.json 의 handoff:true 항목에서 파생한다.
+    if integration_key not in integrations.handoff_integration_keys():
         raise HTTPException(status_code=404, detail="지원하지 않는 연결 도구입니다.")
-    config = integrations.build_public_integrations()[integration_key]
+    config = integrations.build_public_integrations().get(integration_key)
+    if not config:
+        raise HTTPException(status_code=404, detail="지원하지 않는 연결 도구입니다.")
     target = urlsplit(config["baseUrl"])
     if target.scheme not in {"https", "http"} or not target.netloc:
         raise HTTPException(status_code=503, detail="연결 도구 주소를 확인해 주세요.")

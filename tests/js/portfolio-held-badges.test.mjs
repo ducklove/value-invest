@@ -185,3 +185,29 @@ test('ETF aliases sum quantities, preserve markets, and update native currency v
   assert.match(labels[0].firstElementChild.title, /평가액: 확인 불가/);
   assert.equal(dom.window.location.hash, '');
 });
+
+test('only the vc-held fragment segment is consumed; other fragments survive byte-for-byte', async () => {
+  const cases = [
+    ['#vc-held=005935%3A3&gold-history', '#gold-history'],
+    ['#gold-history&vc-held=005935:3', '#gold-history'],
+    ['#section=a%20b&vc-held=005935&x=1&flag', '#section=a%20b&x=1&flag'],
+    ['#vc-held=005935', ''],
+  ];
+  for (const [fragment, expected] of cases) {
+    const dom = setup(async () => { throw new Error('snapshot must not fetch'); }, fragment);
+    await tick();
+    assert.deepEqual(badgeCodes(dom), ['005935.KS'], fragment);
+    assert.equal(dom.window.location.hash, expected, fragment);
+    assert.equal(dom.window.location.search, '?code=005935&theme=dark');
+    dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+    dom.window.close();
+  }
+  // No snapshot segment: the fragment is untouched and the API path is used.
+  let calls = 0;
+  const plain = setup(async () => { calls++; return { ok: true, json: async () => ({ codes: [] }) }; }, '#gold-history');
+  await tick();
+  assert.equal(plain.window.location.hash, '#gold-history');
+  assert.equal(calls, 1);
+  plain.window.dispatchEvent(new plain.window.Event('pagehide'));
+  plain.window.close();
+});

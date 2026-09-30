@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:all-about-gold:1",
+  "title": "all-about-gold summary.json data (v1)",
+  "description": "Headline metrics for the '금 투자 리서치' card: latest monthly prices, gold/silver and bitcoin/gold ratios, above-ground stock and market size. Built from the finance-pi publication at Pages build time.",
+  "type": "object",
+  "required": ["publishedAt", "prices", "ratios", "marketSize"],
+  "properties": {
+    "publishedAt": {"type": ["string", "null"], "description": "finance-pi publication timestamp (as published, UTC ISO8601)."},
+    "prices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "unit", "date", "value"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9_-]+$", "description": "gold | silver | bitcoin | dollar | usdkrw ..."},
+          "name": {"type": "string", "minLength": 1},
+          "unit": {"type": ["string", "null"]},
+          "date": {"$ref": "#/$defs/month"},
+          "value": {"$ref": "#/$defs/num"},
+          "prevDate": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/month"}]},
+          "prevValue": {"$ref": "#/$defs/num"},
+          "changePct": {"$ref": "#/$defs/num", "description": "Month-over-month, %."}
+        }
+      }
+    },
+    "ratios": {
+      "type": "object",
+      "required": ["date", "goldSilver", "bitcoinGold"],
+      "properties": {
+        "date": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/month"}]},
+        "goldSilver": {"$ref": "#/$defs/num"},
+        "bitcoinGold": {"$ref": "#/$defs/num"}
+      }
+    },
+    "marketSize": {
+      "type": "object",
+      "required": ["date", "aboveGroundTonnes", "marketCapUsd"],
+      "properties": {
+        "date": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/month"}]},
+        "aboveGroundTonnes": {"$ref": "#/$defs/num"},
+        "miningTonnes": {"$ref": "#/$defs/num"},
+        "marketCapUsd": {"$ref": "#/$defs/num"},
+        "goldDebtRatioPct": {"$ref": "#/$defs/num"},
+        "stockToFlowYears": {"$ref": "#/$defs/num"}
+      }
+    }
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]},
+    "month": {"type": "string", "pattern": "^\\d{4}-\\d{2}$"}
+  }
+}

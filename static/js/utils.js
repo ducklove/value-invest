@@ -259,10 +259,19 @@ function buildIntegrationUrl(key, path = '', query = {}) {
 
 // Visit the hub in the new tab first so even browsers blocking third-party
 // cookies can pass a fresh holdings snapshot to linked dashboards.
+// 허용 목록은 생태계 레지스트리(config/ecosystem.json → APP_CONFIG.ecosystem)의
+// handoff:true 항목에서 파생한다. 구버전 app-config(ecosystem 없음)는 기존 5개로 폴백.
+const PORTFOLIO_HANDOFF_FALLBACK_KEYS = ['holdingValue', 'preferredSpread', 'spacHunter', 'buybacks', 'eiayn'];
+function portfolioHandoffKeys() {
+  const tools = (APP_CONFIG_DATA.ecosystem || {}).tools;
+  if (!Array.isArray(tools)) return PORTFOLIO_HANDOFF_FALLBACK_KEYS;
+  return tools.filter(tool => tool && tool.handoff === true && tool.integrationKey).map(tool => tool.integrationKey);
+}
+
 function portfolioIntegrationHref(href) {
   try {
     const target = new URL(href);
-    for (const key of ['holdingValue', 'preferredSpread', 'spacHunter', 'buybacks', 'eiayn']) {
+    for (const key of portfolioHandoffKeys()) {
       const base = getIntegrationConfig(key).baseUrl;
       if (!base) continue;
       const expected = new URL(base);

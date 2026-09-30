@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:eiayn:1",
+  "title": "eiayn summary.json data (v1)",
+  "description": "ETF coverage universe (for ETF deep links / portfolio signals, replaces the 9.3 MB etfs.json) and the AIYN TOP-N ranking (for '오늘의 추천 ETF'; the hub draws its daily picks from it).",
+  "type": "object",
+  "required": ["scoreModelVersion", "universeSize", "universe", "rankings"],
+  "properties": {
+    "scoreModelVersion": {"type": ["string", "null"]},
+    "universeSize": {"type": "integer", "minimum": 0},
+    "universe": {
+      "type": "array",
+      "description": "Covered codes, upper-case, sorted, unique (KRX 6-char codes and overseas tickers such as VOO or 1321.T).",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/etfCode"}
+    },
+    "rankings": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["rank", "code", "name", "score"],
+        "properties": {
+          "rank": {"type": "integer", "minimum": 1},
+          "code": {"$ref": "#/$defs/etfCode"},
+          "name": {"type": ["string", "null"]},
+          "score": {"type": ["number", "null"], "description": "AIYN score."},
+          "market": {"type": ["string", "null"], "description": "'국내' | '미국' | '일본' ..."}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "etfCode": {"type": "string", "pattern": "^[A-Z0-9][A-Z0-9.-]{0,29}$"}
+  }
+}

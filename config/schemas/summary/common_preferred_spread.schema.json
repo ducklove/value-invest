@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:common_preferred_spread:1",
+  "title": "common_preferred_spread summary.json data (v1)",
+  "description": "Common/preferred spread. 'pairs' is the FULL list in config.json order. The hub derives the TOP card (spread desc, one row per commonCode = the widest spread) and per-code lookups (first pair whose commonCode or preferredCode matches).",
+  "type": "object",
+  "required": ["lastUpdated", "averageSpread", "averageSpreadChange", "pairs"],
+  "properties": {
+    "lastUpdated": {"type": ["string", "null"]},
+    "averageSpread": {"$ref": "#/$defs/num"},
+    "averageSpreadChange": {"$ref": "#/$defs/num"},
+    "indexSpread": {"$ref": "#/$defs/num"},
+    "indexSpreadChange": {"$ref": "#/$defs/num"},
+    "pairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "commonCode", "preferredCode", "spread", "spreadChange", "commonPrice", "preferredPrice"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "name": {"type": "string", "minLength": 1},
+          "preferredName": {"type": ["string", "null"]},
+          "commonCode": {"$ref": "#/$defs/krCode"},
+          "preferredCode": {"$ref": "#/$defs/krCode"},
+          "spread": {"$ref": "#/$defs/num", "description": "(common - preferred) / common, %."},
+          "spreadChange": {"$ref": "#/$defs/num", "description": "%p vs previous close."},
+          "commonPrice": {"$ref": "#/$defs/num"},
+          "preferredPrice": {"$ref": "#/$defs/num"},
+          "date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]},
+    "krCode": {"type": "string", "pattern": "^[0-9A-Z]{6}$"}
+  }
+}

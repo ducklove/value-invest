@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:holding_value:1",
+  "title": "holding_value summary.json data (v1)",
+  "description": "Holding-company NAV discount. 'pairs' is the FULL list in config.json order (current.json pseudo-rows such as '_average' are excluded; averageRatio carries it), so the hub derives both the TOP card (ratio desc) and per-code lookups (first pair whose code matches). Money is in 억원 as in current.json.",
+  "type": "object",
+  "required": ["lastUpdated", "isPartial", "pairCount", "averageRatio", "pairs"],
+  "properties": {
+    "lastUpdated": {"type": ["string", "null"], "description": "current.json lastUpdated (KST, 'YYYY-MM-DD HH:MM:SS')."},
+    "isPartial": {"type": "boolean"},
+    "pairCount": {"type": ["integer", "null"], "minimum": 0},
+    "averageRatio": {"$ref": "#/$defs/num"},
+    "pairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "code", "ratio", "ratioChange", "holdingValue", "marketCap"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "name": {"type": "string", "minLength": 1, "description": "Pair label, e.g. '영풍→고려아연'."},
+          "holdingName": {"type": ["string", "null"]},
+          "code": {"$ref": "#/$defs/krCode", "description": "Holding company stock code (6 chars, no .KS suffix)."},
+          "ratio": {"$ref": "#/$defs/num", "description": "Holding value / adjusted market cap, %. Higher = deeper discount."},
+          "ratioChange": {"$ref": "#/$defs/num"},
+          "holdingValue": {"$ref": "#/$defs/num", "description": "억원"},
+          "marketCap": {"$ref": "#/$defs/num", "description": "억원"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]},
+    "krCode": {"type": "string", "pattern": "^[0-9A-Z]{6}$"}
+  }
+}

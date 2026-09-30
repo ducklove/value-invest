@@ -11,10 +11,18 @@
   function addQuantity(code, value) {
     if (Number.isFinite(value) && value > 0) quantities.set(code, (quantities.get(code) || 0) + value);
   }
-  const fragment = new URLSearchParams(location.hash.slice(1));
-  const hasSnapshot = fragment.has('vc-held');
+  // Consume only the `vc-held=` segment of the fragment. Every other segment
+  // (e.g. `#gold-history`, `#section=a&b`) is kept byte-for-byte; re-serialising
+  // through URLSearchParams would turn `#gold-history` into `#gold-history=`.
+  // Script version tag: 20260930-vc (config/ecosystem.json heldBadges.version).
+  const isHeldSegment = segment => segment === 'vc-held' || segment.startsWith('vc-held=');
+  const segments = location.hash.slice(1).split('&');
+  const heldSegment = segments.find(isHeldSegment);
+  const hasSnapshot = heldSegment !== undefined;
   if (hasSnapshot) {
-    for (const entry of (fragment.get('vc-held') || '').split(',')) {
+    let heldValue = heldSegment.slice('vc-held='.length).replace(/\+/g, ' ');
+    try { heldValue = decodeURIComponent(heldValue); } catch (_) { heldValue = ''; }
+    for (const entry of heldValue.split(',')) {
       const [rawCode, quantity] = entry.split(':');
       if (!/^[A-Z0-9][A-Z0-9.-]{0,29}$/.test(rawCode)) continue;
       const code = normalize(rawCode);
@@ -23,8 +31,7 @@
       const value = Number(quantity);
       addQuantity(code, value);
     }
-    fragment.delete('vc-held');
-    const rest = fragment.toString();
+    const rest = segments.filter(segment => !isHeldSegment(segment)).join('&');
     history.replaceState(history.state, '', location.pathname + location.search + (rest ? '#' + rest : ''));
   }
   const style = document.createElement('style');

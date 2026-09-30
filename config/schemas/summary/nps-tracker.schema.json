@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:nps-tracker:1",
+  "title": "nps-tracker summary.json data (v1)",
+  "description": "NPS domestic-equity portfolio headline: summary (total value, NAV, returns), fund-level asset allocation and the TOP holdings by weight. Replaces the 313 KB current.json.",
+  "type": "object",
+  "required": ["lastUpdated", "summary", "allocation", "top"],
+  "properties": {
+    "lastUpdated": {"type": ["string", "null"]},
+    "source": {"type": ["string", "null"]},
+    "summary": {
+      "type": "object",
+      "required": ["totalValue", "nav", "count", "todayPct", "asOf"],
+      "properties": {
+        "totalValue": {"$ref": "#/$defs/num", "description": "KRW"},
+        "nav": {"$ref": "#/$defs/num"},
+        "count": {"type": ["integer", "null"], "minimum": 0},
+        "todayPct": {"$ref": "#/$defs/num"},
+        "mtdPct": {"$ref": "#/$defs/num"},
+        "ytdPct": {"$ref": "#/$defs/num"},
+        "asOf": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+      }
+    },
+    "allocation": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["classes"],
+          "properties": {
+            "asOf": {"type": ["string", "null"]},
+            "estimated": {"type": "boolean"},
+            "classes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key", "label", "pct"],
+                "properties": {
+                  "key": {"type": "string", "minLength": 1},
+                  "label": {"type": "string", "minLength": 1},
+                  "pct": {"$ref": "#/$defs/num"},
+                  "target": {"$ref": "#/$defs/num", "description": "Published target weight, % (optional; hub falls back to its constant)."}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "top": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["code", "name", "weight"],
+        "properties": {
+          "code": {"type": "string", "pattern": "^[0-9A-Z]{6}$"},
+          "name": {"type": ["string", "null"]},
+          "weight": {"$ref": "#/$defs/num", "description": "% of the tracked portfolio."},
+          "marketValue": {"$ref": "#/$defs/num", "description": "KRW"},
+          "changePct": {"$ref": "#/$defs/num"},
+          "ownershipPct": {"$ref": "#/$defs/num"},
+          "sector": {"type": ["string", "null"]}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]}
+  }
+}

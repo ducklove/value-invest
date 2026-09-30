@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:value-compass:schema:summary:gold_gap:1",
+  "title": "gold_gap summary.json data (v1)",
+  "description": "Latest domestic-vs-international gap per asset ('김치프리미엄' card + KRX_GOLD / CRYPTO_* portfolio signals). Replaces the 563 KB data.json.",
+  "type": "object",
+  "required": ["updatedAt", "assets"],
+  "properties": {
+    "updatedAt": {"type": ["string", "null"], "description": "data.json updated_at as published (e.g. '2026-09-27 08:47 KST')."},
+    "goldIntlMode": {"type": ["string", "null"], "description": "International reference used for gold's gap (default_intl_mode, e.g. 'ny_futures')."},
+    "assets": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["key", "label", "date", "gap"],
+        "properties": {
+          "key": {"enum": ["gold", "bitcoin", "eth", "usdt"]},
+          "label": {"type": "string", "minLength": 1},
+          "date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+          "gap": {"$ref": "#/$defs/num", "description": "% (positive = domestic premium)."},
+          "prevGap": {"$ref": "#/$defs/num"},
+          "domesticPrice": {"$ref": "#/$defs/num", "description": "KRW"},
+          "intlPrice": {"$ref": "#/$defs/num", "description": "KRW-converted"},
+          "usdKrw": {"$ref": "#/$defs/num"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]}
+  }
+}

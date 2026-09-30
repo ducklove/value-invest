@@ -7,6 +7,8 @@
   "scripts": {
     "test": "node tests/js/run-tests.mjs",
     "vendor": "node scripts/vendor_frontend.mjs",
+    "sync:ecosystem": "node scripts/sync-ecosystem.mjs",
+    "sync:ecosystem:write": "node scripts/sync-ecosystem.mjs --write",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
