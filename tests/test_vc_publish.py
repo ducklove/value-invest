@@ -411,3 +411,28 @@ def test_mini_validator_catches_contract_breaks():
     bdata["ratioAsOf"]["005930"] = 20251231
     errs = _mini_validate(bdata, bb, bb)
     assert any("005930.KS" in e for e in errs) and any("ratioAsOf.005930" in e for e in errs)
+
+
+def test_spac_hunter_schema_accepts_optional_liquidation_fields():
+    # spac-hunter 가 추가로 발행하는 선택 필드(valuationDate · currentLiquidationValue ·
+    # liquidationDiscountPct)는 스키마에 적혀 있고, 없어도·null 이어도 통과한다(additive).
+    schema = _load(SCHEMAS / "summary" / "spac-hunter.schema.json")
+    data = _load(FIXTURES / "spac-hunter.summary.json")["data"]
+    assert _schema_errors(data, schema) == []  # 필드 없는 옛 발행분
+    item = schema["properties"]["spacs"]["items"]
+    for field in ("currentLiquidationValue", "liquidationDiscountPct"):
+        assert field in item["properties"] and field not in item["required"]
+    assert "valuationDate" in schema["properties"] and "valuationDate" not in schema["required"]
+
+    extended = json.loads(json.dumps(data))
+    extended["valuationDate"] = "2026-09-28"
+    extended["spacs"][0].update(currentLiquidationValue=2137.86, liquidationDiscountPct=8.79)
+    extended["spacs"][1].update(currentLiquidationValue=None, liquidationDiscountPct=None)
+    assert _schema_errors(extended, schema) == []
+
+    broken = json.loads(json.dumps(extended))
+    broken["valuationDate"] = "20260928"
+    broken["spacs"][0]["liquidationDiscountPct"] = "8.79"
+    errors = _schema_errors(broken, schema)
+    assert any("valuationDate" in e for e in errors)
+    assert any("liquidationDiscountPct" in e for e in errors)

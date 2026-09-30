@@ -7,6 +7,7 @@
   "required": ["lastUpdated", "summary", "valuationAssumptions", "spacs"],
   "properties": {
     "lastUpdated": {"type": ["string", "null"]},
+    "valuationDate": {"$ref": "#/$defs/dateOrNull", "description": "Optional. Date (= envelope asOf) the per-SPAC currentLiquidationValue / liquidationDiscountPct are computed for."},
     "summary": {
       "type": "object",
       "required": ["totalCount", "belowIpoCount", "averageAnnualizedReturn"],
@@ -44,6 +45,8 @@
           "liquidationDate": {"$ref": "#/$defs/dateOrNull"},
           "payoutDate": {"$ref": "#/$defs/dateOrNull"},
           "liquidationValuePerShare": {"$ref": "#/$defs/num", "description": "Expected payout per share at payoutDate (KRW)."},
+          "currentLiquidationValue": {"$ref": "#/$defs/num", "description": "Optional. Accrued liquidation value per share at valuationDate (KRW); null when it cannot be computed."},
+          "liquidationDiscountPct": {"$ref": "#/$defs/num", "description": "Optional. (currentLiquidationValue - currentPrice) / currentLiquidationValue x 100 — the list's 청산가 괴리."},
           "escrowRatePeriods": {
             "type": "array",
             "items": {

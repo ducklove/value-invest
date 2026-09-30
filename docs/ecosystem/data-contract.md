@@ -181,6 +181,7 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | `lastUpdated` | string\|null | |
+| `valuationDate` | date\|null (선택) | 아래 `currentLiquidationValue`·`liquidationDiscountPct`의 기준일(= envelope `asOf`) |
 | `summary.totalCount, belowIpoCount` | int\|null | |
 | `summary.averageRatio, averageAnnualizedReturn` | number\|null | |
 | `valuationAssumptions` | `{trustFeePct, interestTaxPct, payoutLagDays}` | 스팩별 `valuationBasis`가 비었을 때 쓰는 기본값 |
@@ -190,6 +191,7 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | `spacs[].status, mergerStatus` | string\|null | |
 | `spacs[].listingDate, liquidationDate, payoutDate` | date\|null | |
 | `spacs[].liquidationValuePerShare` | number\|null | 수령 예정일 기준 예상 분배금/주 |
+| `spacs[].currentLiquidationValue, liquidationDiscountPct` | number\|null (선택) | `valuationDate` 기준 누적 청산가/주와 청산가 괴리(%) — spac-hunter 목록의 '청산가 괴리'와 같은 식 |
 | `spacs[].escrowRatePeriods[]` | `{startDate, ratePct}` | 예치 이율 구간(출처 필드는 뺀다) |
 | `spacs[].valuationBasis` | `{trustStartDate, trustFeePct, interestTaxPct, rolloverMonths, anchor: {date, valuePerShare}\|null}` | `current_liquidation_value()` 입력 |
 
