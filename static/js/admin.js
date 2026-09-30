@@ -84,9 +84,9 @@ function _renderAdminTopbar() {
   return `
     <header class="admin-topbar">
       <div class="admin-brand">
-        <div class="admin-brand-mark">VI</div>
+        <div class="admin-brand-mark">VC</div>
         <div>
-          <h1>Value Invest Admin</h1>
+          <h1>Value Compass Admin</h1>
           <p>운영 콘솔 · 배포, 시스템, 사용자, 데이터 파이프라인</p>
         </div>
       </div>
@@ -203,26 +203,26 @@ const ADMIN_THEME_KEY = 'theme';
 const ADMIN_LEGACY_THEME_KEY = 'valueInvestAdminTheme';
 
 function toggleAdminTheme() {
-  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  const next = isDarkTheme() ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
-  try { localStorage.setItem(ADMIN_THEME_KEY, next); } catch (_) {}
+  safeStorageSet(ADMIN_THEME_KEY, next);
   // SVG 차트는 렌더 시점의 CSS 토큰 색을 인라인으로 굽는다 — 테마가 바뀌면
   // 세 차트(서버/이벤트/HTTP)를 다시 그려 새 토큰 색을 반영한다(admin-charts.js).
   if (typeof _renderAdminCharts === 'function') _renderAdminCharts();
 }
 
-try {
-  let savedAdminTheme = localStorage.getItem(ADMIN_THEME_KEY);
+(function initAdminTheme() {
+  let savedAdminTheme = safeStorageGet(ADMIN_THEME_KEY);
   if (!savedAdminTheme) {
-    const legacyTheme = localStorage.getItem(ADMIN_LEGACY_THEME_KEY);
+    const legacyTheme = safeStorageGet(ADMIN_LEGACY_THEME_KEY);
     if (legacyTheme) {
       savedAdminTheme = legacyTheme;
-      localStorage.setItem(ADMIN_THEME_KEY, legacyTheme);
+      safeStorageSet(ADMIN_THEME_KEY, legacyTheme);
     }
   }
-  localStorage.removeItem(ADMIN_LEGACY_THEME_KEY);
+  safeStorageRemove(ADMIN_LEGACY_THEME_KEY);
   if (savedAdminTheme) document.documentElement.setAttribute('data-theme', savedAdminTheme);
-} catch (_) {}
+})();
 
 // --- AI operations ------------------------------------------------------
 
@@ -530,8 +530,10 @@ function _adminInputStyle() {
   return 'min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-primary);font:inherit;font-size:13px;';
 }
 
+// admin 전 패널 공용 이스케이프 — utils.js escapeHtml 단일 소스에 위임한다.
+// 과거 구현(textContent→innerHTML)은 따옴표를 이스케이프하지 않아 value="…"
+// 같은 속성 안에 끼우면 속성이 깨졌다(D-01). null/undefined/false 는 빈 문자열,
+// 0 같은 숫자는 그대로 문자열화한다.
 function _esc(str) {
-  const el = document.createElement('span');
-  el.textContent = str || '';
-  return el.innerHTML;
+  return escapeHtml(str == null || str === false ? '' : str);
 }

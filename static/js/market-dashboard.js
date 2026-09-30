@@ -29,13 +29,9 @@ let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
 
 // 차트 색은 dashboard.css 의 CSS 토큰에서 소싱한다(다크 전환 시 재렌더로 갱신).
 // 토큰이 비어 있으면(jsdom·CSS 미로드) 폴백 hex 를 쓴다 — 폴백은 토큰 정의와 동일.
+// 토큰 읽기는 utils.js cssToken 단일 소스에 위임한다(D-07).
 function _mdCssColor(varName, fallback) {
-  try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-    return v || fallback;
-  } catch (e) {
-    return fallback;
-  }
+  return cssToken(varName, fallback);
 }
 function _bondCurveColors() {
   return {
@@ -92,7 +88,7 @@ const MD_HERO_CATEGORIES = ['국내 지수'];
 const MD_MAIN_CATEGORIES = [];
 
 function _mdCurrentTheme() {
-  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  return isDarkTheme() ? 'dark' : 'light';  // utils.js 단일 판정(D-07)
 }
 
 function _mdIndexFrameUrl(index, theme = _mdCurrentTheme(), period = MD_INDEX_FRAME_DEFAULT_PERIOD) {
@@ -250,11 +246,10 @@ let _hlCcy = null;  // 'KRW' | 'USD' — lazy init(localStorage)
 function _hlCurrentCcy() {
   if (_hlCcy == null) {
     _hlCcy = 'KRW';
-    try {
-      const saved = localStorage.getItem('hlCcy');
-      // 기존 바이낸스 USDT 선택도 한 번 이어받아 사용자 설정을 보존한다.
-      if (saved === 'USD' || (!saved && localStorage.getItem('bnbCcy') === 'USDT')) _hlCcy = 'USD';
-    } catch (e) { /* noop */ }
+    // 저장소 접근은 utils.js safeStorage* 로만(사설 모드에서 throw 해도 기본값 유지).
+    const saved = safeStorageGet('hlCcy');
+    // 기존 바이낸스 USDT 선택도 한 번 이어받아 사용자 설정을 보존한다.
+    if (saved === 'USD' || (!saved && safeStorageGet('bnbCcy') === 'USDT')) _hlCcy = 'USD';
   }
   return _hlCcy;
 }
@@ -325,7 +320,7 @@ function _mdWireHyperliquidToggle(catalog, dataMap) {
       const ccy = button.dataset.hlCcy === 'USD' ? 'USD' : 'KRW';
       if (ccy === _hlCurrentCcy()) return;
       _hlCcy = ccy;
-      try { localStorage.setItem('hlCcy', ccy); } catch (e) { /* noop */ }
+      safeStorageSet('hlCcy', ccy);
       section.querySelectorAll('[data-hl-ccy]').forEach((item) =>
         item.classList.toggle('active', item.dataset.hlCcy === ccy));
       const rowsEl = section.querySelector('.md-rows');
@@ -526,8 +521,13 @@ function _hlHandleVisibilityChange() {
 
 function _hlStartStream() {
   _hlStopped = false;
-  if (!_hlFallbackTimer && typeof setInterval !== 'undefined') {
-    _hlFallbackTimer = setInterval(_hlRestFallbackRefresh, HL_FALLBACK_INTERVAL_MS);
+  if (!_hlFallbackTimer) {
+    // 가시성 인지 폴링(utils.js schedulePoll): 숨은 탭에선 멈춘다. 보일 때의
+    // 즉시 갱신은 아래 _hlHandleVisibilityChange 가 맡으므로 중복 호출하지 않는다.
+    _hlFallbackTimer = schedulePoll('md.hlFallback', _hlRestFallbackRefresh, HL_FALLBACK_INTERVAL_MS, {
+      when: _mdLiveActive,
+      refreshOnVisible: false,
+    });
   }
   if (!_hlLifecycleWired) {
     document.addEventListener('visibilitychange', _hlHandleVisibilityChange);
@@ -540,7 +540,7 @@ function _hlStartStream() {
 function _hlStopStream() {
   _hlStopped = true;
   if (_hlReconnectTimer) clearTimeout(_hlReconnectTimer);
-  if (_hlFallbackTimer) clearInterval(_hlFallbackTimer);
+  if (_hlFallbackTimer) _hlFallbackTimer.cancel();
   _hlReconnectTimer = null;
   _hlFallbackTimer = null;
   _hlCloseSocket();
@@ -691,10 +691,9 @@ function _disposeBondCharts() {
 }
 
 function _bondChartTheme() {
-  const cs = getComputedStyle(document.documentElement);
   return {
-    text: cs.getPropertyValue('--text-secondary').trim() || '#888',
-    grid: cs.getPropertyValue('--border').trim() || '#333',
+    text: cssToken('--text-secondary', '#888'),
+    grid: cssToken('--border', '#333'),
   };
 }
 
@@ -892,7 +891,33 @@ function _mdRenderDashboard(catalog, dataMap) {
   if (bondCodes) _mdRenderBonds(bondCodes, catalog, dataMap);
 }
 
+// 신선도 창(F1-F3): 뷰 전환마다 대시보드 전체(지표 + 형제 위젯 5종 ≈ 8요청)를
+// 다시 쏘지 않도록, 마지막 성공 로드가 이 창 안이면 재요청을 건너뛴다.
+// refresh=true 는 창을 무시한다. 탭이 다시 보일 때 창이 지났으면 한 번 갱신한다.
+const MD_DASHBOARD_FRESH_MS = 90_000;
+let _mdLastLoadedAt = 0;
+let _mdVisibilityWired = false;
+
+function _mdDashboardIsFresh() {
+  return _mdLastLoadedAt > 0 && Date.now() - _mdLastLoadedAt < MD_DASHBOARD_FRESH_MS;
+}
+
+function _mdHandleDashboardVisibility() {
+  if (!_mdLiveActive() || _mdDashboardIsFresh()) return;
+  loadInvestingDashboard();
+}
+
 async function loadInvestingDashboard(refresh = false) {
+  if (!_mdVisibilityWired && typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', _mdHandleDashboardVisibility);
+    _mdVisibilityWired = true;
+  }
+  if (_mdInFlight) return _mdInFlight;
+  if (!refresh && _mdDashboardIsFresh()) {
+    // 데이터는 신선하다 — 요청 없이 실시간 스트림만 (끊겼으면) 다시 잇는다.
+    _hlStartStream();
+    return undefined;
+  }
   // Sibling widgets load independently so a slow/failed indicator fetch never
   // blocks them (and vice versa).
   if (typeof loadMarketMovers === 'function') loadMarketMovers();
@@ -900,7 +925,6 @@ async function loadInvestingDashboard(refresh = false) {
   if (typeof loadMarketNews === 'function') loadMarketNews();
   if (typeof loadExternalInsights === 'function') loadExternalInsights();
   if (typeof loadEconomicCalendar === 'function') loadEconomicCalendar();
-  if (_mdInFlight) return _mdInFlight;
   _mdInFlight = (async () => {
     try {
       if (!_mdCatalog || refresh) {
@@ -922,6 +946,7 @@ async function loadInvestingDashboard(refresh = false) {
       _mdCatalog = merged.catalog;
       _mdRenderDashboard(merged.catalog, merged.dataMap);
       _mdLoadedOnce = true;
+      _mdLastLoadedAt = Date.now();
       _hlStartStream();  // Hyperliquid WebSocket + REST fallback (single connection)
       // 수급 슬롯은 hero 섹션과 함께 생성되므로 렌더 직후 채운다.
       if (typeof loadInvestorFlows === 'function') loadInvestorFlows();
@@ -1048,7 +1073,7 @@ function _extSafeUrl(url) {
 function _withTheme(url) {
   const u = String(url || '');
   if (!/^https?:\/\//.test(u)) return u;
-  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const theme = _mdCurrentTheme();
   const hashAt = u.indexOf('#');
   const base = hashAt < 0 ? u : u.slice(0, hashAt);
   const hash = hashAt < 0 ? '' : u.slice(hashAt);

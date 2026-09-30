@@ -32,8 +32,7 @@
   }
 
   function resolveThemeColor(name, fallback) {
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return value || fallback;
+    return cssToken(name, fallback);  // utils.js 단일 소스(D-07)
   }
 
   class PortfolioCanvasChart {

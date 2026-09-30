@@ -88,13 +88,9 @@ function _schcFmtPrice(v, currency) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+// 토큰 읽기는 utils.js cssToken 단일 소스에 위임한다(D-07).
 function _schcCssColor(name, fallback) {
-  try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v || fallback;
-  } catch (_) {
-    return fallback;
-  }
+  return cssToken(name, fallback);
 }
 
 // 전일종가 파싱 — null/undefined 는 null 유지 (Number(null)===0 함정 방지).

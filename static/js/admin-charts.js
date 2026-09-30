@@ -48,9 +48,9 @@ function _pushServerSample(s) {
 // 차트 색은 전부 admin.html 의 CSS 토큰에서 읽는다(하드코딩 금지) — 다크
 // 전환 시 toggleAdminTheme → _renderAdminCharts 재렌더로 색이 함께 갱신된다.
 // fallback 은 라이트 테마 토큰과 동일한 값(토큰 미정의 문서 방어용).
+// 토큰 읽기는 utils.js cssToken 단일 소스에 위임한다(D-07).
 function _adminChartToken(name, fallback) {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value || fallback;
+  return cssToken(name, fallback);
 }
 
 function _adminChartTextColor() {

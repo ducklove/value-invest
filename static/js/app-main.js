@@ -194,13 +194,16 @@ async function initApp() {
   loadMarketTape();
   loadDailyMarketBrief();
   loadWikiStats();
-  setInterval(loadMarketSummary, 60_000);
-  setInterval(() => loadMarketTape(false), 45_000);
-  setInterval(_pollBenchmarkQuotes, 60_000);
-  setInterval(_refreshActivePortfolioTodayState, 5 * 60_000);
+  // 가시성 인지 폴링(utils.js schedulePoll): 숨은 탭에선 멈추고, 보일 때 주기보다
+  // 오래됐으면 한 번 즉시 갱신한다. 시장 요약·오늘 수익은 아래 visibilitychange
+  // 핸들러가 이미 즉시 갱신하므로 refreshOnVisible:false 로 중복을 막는다.
+  schedulePoll('mb.summary', loadMarketSummary, 60_000, { refreshOnVisible: false });
+  schedulePoll('mb.tape', () => loadMarketTape(false), 45_000);
+  schedulePoll('pf.benchmarks', _pollBenchmarkQuotes, 60_000, { when: () => !!currentUser });
+  schedulePoll('pf.todayState', _refreshActivePortfolioTodayState, 5 * 60_000, { refreshOnVisible: false });
   // Refresh wiki stats every 5 minutes so the badge reflects ongoing
   // background ingestion without needing a reload.
-  setInterval(loadWikiStats, 5 * 60_000);
+  schedulePoll('wiki.stats', loadWikiStats, 5 * 60_000);
   QuoteManager.connect();
   _updateQuoteSubscriptions();
   trackEvent('app_ready', { auth_state: currentUser ? 'logged_in' : 'guest' });

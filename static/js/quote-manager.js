@@ -100,14 +100,12 @@ const QuoteManager = {
   },
 
   _loadDesiredActive() {
-    try { return sessionStorage.getItem(QUOTE_MANAGER_MANUAL_WS_KEY) === '1'; } catch { return false; }
+    return safeStorageGet(QUOTE_MANAGER_MANUAL_WS_KEY, null, 'session') === '1';
   },
 
   _saveDesiredActive() {
-    try {
-      if (this.desiredActive) sessionStorage.setItem(QUOTE_MANAGER_MANUAL_WS_KEY, '1');
-      else sessionStorage.removeItem(QUOTE_MANAGER_MANUAL_WS_KEY);
-    } catch (e) {}
+    if (this.desiredActive) safeStorageSet(QUOTE_MANAGER_MANUAL_WS_KEY, '1', 'session');
+    else safeStorageRemove(QUOTE_MANAGER_MANUAL_WS_KEY, 'session');
   },
 
   setManualControlAllowed(allowed) {
@@ -225,8 +223,8 @@ const QuoteManager = {
     this.namuhAutoSlot = false;
     this._clearPingTimer();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    if (this.overflowTimer) { clearInterval(this.overflowTimer); this.overflowTimer = null; }
-    if (this.generalPollTimer) { clearInterval(this.generalPollTimer); this.generalPollTimer = null; }
+    this._stopOverflowPolling();
+    if (this.generalPollTimer) { this.generalPollTimer.cancel(); this.generalPollTimer = null; }
     if (this.ws) {
       // close 이벤트가 비동기로 도착해 onclose의 재접속 경로를 되살리지
       // 않도록, 명시적 해제에서는 핸들러를 먼저 뗀다.
@@ -392,10 +390,7 @@ const QuoteManager = {
     this.wsCodes = new Set();
     this.overflowCodes = [];
     this.lastWsQuoteAt = {};
-    if (this.overflowTimer) {
-      clearInterval(this.overflowTimer);
-      this.overflowTimer = null;
-    }
+    this._stopOverflowPolling();
   },
 
   _controlStatusText() {
@@ -543,16 +538,24 @@ const QuoteManager = {
     await this._fetchQuotes(this.overflowCodes);
   },
 
+  // 폴링은 가시성 인지 헬퍼(utils.js schedulePoll)로 돈다: 숨은 탭에서는 멈추고,
+  // 다시 보이면 마지막 폴링이 주기보다 오래됐을 때만 즉시 한 번 갱신한 뒤 재개한다.
+  // 이름이 고정이라 재호출해도 타이머가 겹치지 않는다.
+  _stopOverflowPolling() {
+    if (this.overflowTimer) { this.overflowTimer.cancel(); this.overflowTimer = null; }
+  },
+
   _startOverflowPolling() {
-    if (this.overflowTimer) clearInterval(this.overflowTimer);
+    this._stopOverflowPolling();
     if (!this.overflowCodes.length) return;
     this._pollOverflow();
-    this.overflowTimer = setInterval(() => this._pollOverflow(), QUOTE_MANAGER_OVERFLOW_POLL_MS);
+    this.overflowTimer = schedulePoll('quotes.overflow', () => this._pollOverflow(), QUOTE_MANAGER_OVERFLOW_POLL_MS);
   },
 
   _startGeneralPolling() {
-    if (this.generalPollTimer) clearInterval(this.generalPollTimer);
-    this.generalPollTimer = setInterval(() => this._pollAll(), QUOTE_MANAGER_GENERAL_POLL_MS);
+    if (this.generalPollTimer) this.generalPollTimer.cancel();
+    // 연결 직후엔 초기 조회가 따로 돌므로 '방금 폴링함'으로 시작한다(runNow 없음).
+    this.generalPollTimer = schedulePoll('quotes.general', () => this._pollAll(), QUOTE_MANAGER_GENERAL_POLL_MS);
   },
 
   async _pollAll() {

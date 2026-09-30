@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from core.config import AppSettings, get_settings, load_environment
@@ -233,6 +234,19 @@ class _RequestLatencyMiddleware:
         )
 
 
+# 라즈베리파이에서 콜드 로드마다 ~1.2MB 가 비압축으로 나가던 것을 줄인다(O1).
+# - 1KB 미만은 압축 이득보다 헤더·CPU 비용이 커서 그대로 보낸다.
+# - compresslevel 6: 9 대비 크기 차이는 미미하고 파이 CPU 는 훨씬 덜 쓴다.
+# - text/event-stream(SSE)은 Starlette 기본 제외 목록에 있어 청크 단위로 그대로
+#   흘러간다(버퍼링되면 스트림이 끝까지 멈춘다) — tests/test_app_factory.py 가 고정.
+_GZIP_MINIMUM_SIZE = 1024
+_GZIP_LEVEL = 6
+
+
+def _register_compression(app: FastAPI) -> None:
+    app.add_middleware(GZipMiddleware, minimum_size=_GZIP_MINIMUM_SIZE, compresslevel=_GZIP_LEVEL)
+
+
 def _register_latency_observer(app: FastAPI) -> None:
     app.state.slow_request_ms = _slow_request_threshold_ms()
     app.add_middleware(_RequestLatencyMiddleware)
@@ -273,6 +287,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     )
 
     register_exception_handlers(app)
+    # add_middleware 는 나중에 붙인 것이 바깥 — 압축은 보안 헤더·지연 관측 안쪽.
+    _register_compression(app)
     _register_security_headers(app)
     _register_latency_observer(app)
     _register_feature_routers(app)

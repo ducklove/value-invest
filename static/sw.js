@@ -2,8 +2,9 @@
  *
  * CACHING STRATEGY — deliberately conservative. Read before changing.
  *
- * The server injects ?v=<commit-hash> into asset URLs at HTML serve time
- * (core/static_routes.py) and serves HTML with Cache-Control: no-cache.
+ * The server injects ?v=<per-file content hash> (sha1[:10], falling back to
+ * the commit hash) into asset URLs at HTML serve time (core/static_routes.py)
+ * and serves HTML with Cache-Control: no-cache.
  * A service worker that cached HTML, or stale-while-revalidated assets,
  * would keep serving old ?v= references after a deploy and break cache
  * busting. Therefore:
@@ -13,8 +14,9 @@
  *   is intentionally no offline app shell.
  * - /api/*: network-only — the SW never intercepts or caches API responses.
  * - ?v=-stamped static assets: cache-first. These URLs are immutable by
- *   construction (the hash changes on deploy, so a new URL is fetched).
- *   배포마다 URL 이 통째로 바뀌므로 캐시는 최근 MAX_CACHED_ASSETS 개만 남기고,
+ *   construction (a file's hash changes only when its bytes do, so a new URL
+ *   is fetched; the server also sends Cache-Control: immutable for them).
+ *   배포 때 바뀐 파일의 URL 만 새로 생기지만, 캐시는 최근 MAX_CACHED_ASSETS 개만 남기고,
  *   저장 실패(용량 초과)는 응답에 영향을 주지 않는다 — 아래 cacheFirst 참고.
  * - manifest + icons: cache-first (small, safe to refresh via new cache
  *   name when this file changes).
@@ -29,8 +31,9 @@
 
 const CACHE_NAME = 'vc-static-v2';
 
-// ?v= URL 은 배포마다 통째로 바뀐다 — 캐시에 계속 쌓기만 하면(배포 1회 = 자산 55개,
-// 약 1.1MB) 오리진 저장 용량이 작은 모바일에서 결국 한도를 넘고, 그때부터 cache.put
+// ?v= URL 은 내용이 바뀐 파일마다 새로 생긴다(파일별 해시 — 예전 커밋 해시 방식은
+// 배포 1회 = 자산 55개·약 1.1MB 가 통째로 바뀌었다). 캐시에 계속 쌓기만 하면
+// 오리진 저장 용량이 작은 모바일에서 결국 한도를 넘고, 그때부터 cache.put
 // 이 실패한다. 그 실패가 응답까지 깨뜨리면 렌더 차단 CSS/JS 가 네트워크 오류로
 // 떨어져 흰 화면이 된다. 그래서 (1) 저장 실패는 삼키고 (2) 최근 N개만 남긴다.
 const MAX_CACHED_ASSETS = 120; // ≈ 최근 배포 2회분
@@ -71,7 +74,8 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// ?v=<commit-hash> URLs are immutable by construction — safe to cache-first.
+// ?v=<content-hash> URLs are immutable by construction — safe to cache-first.
+// 판정은 여전히 'v' 파라미터 유무만 본다(해시 형식과 무관 — 폴백 커밋 해시도 동일 취급).
 function isVersionStampedAsset(url) {
   return url.origin === self.location.origin && url.searchParams.has('v');
 }

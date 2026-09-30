@@ -14,6 +14,14 @@ import { JSDOM } from "jsdom";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..");
 const CHARTS_SRC = readFileSync(join(root, "static", "js", "analysis-charts.js"), "utf8");
+// utils.js 전체를 싣으면 `let charts` 렉시컬 바인딩이 아래 w.charts 스텁을 가린다 —
+// 토큰/테마 헬퍼(cssToken·isDarkTheme)만 실제 소스에서 잘라 싣는다(D-07).
+const UTILS_SRC = readFileSync(join(root, "static", "js", "utils.js"), "utf8");
+const THEME_HELPERS_SRC = ["cssToken", "isDarkTheme"].map((name) => {
+  const match = UTILS_SRC.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n}\\n`));
+  if (!match) throw new Error(`utils.js ${name} not found`);
+  return match[0];
+}).join("\n");
 
 function appendScript(w, source) {
   const script = w.document.createElement("script");
@@ -63,6 +71,7 @@ function buildWindow({ style = "", theme = "" } = {}) {
   w._renderCoverage = () => {};
   w.buildReportPdfUrl = (u) => u;
   w.allReports = [];
+  appendScript(w, THEME_HELPERS_SRC);
   appendScript(w, CHARTS_SRC);
   return { w, setOptions };
 }

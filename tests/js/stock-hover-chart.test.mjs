@@ -17,6 +17,11 @@ const SCRIPT = readFileSync(
   join(__dirname, "..", "..", "static", "js", "stock-hover-chart.js"),
   "utf8",
 );
+// 브라우저 순서대로 utils.js(cssToken 등 공용 헬퍼)를 먼저 싣는다.
+const UTILS = readFileSync(
+  join(__dirname, "..", "..", "static", "js", "utils.js"),
+  "utf8",
+);
 
 const FIXTURE = {
   code: "005930",
@@ -49,6 +54,9 @@ function load({ hoverCapable = true, fixture = FIXTURE } = {}) {
     { runScripts: "dangerously", url: "https://app.example.com/" },
   );
   const w = dom.window;
+  const utils = w.document.createElement("script");
+  utils.textContent = UTILS;
+  w.document.body.appendChild(utils);
   const calls = [];
   w.STOCK_CANDLE_TIP_DELAY_MS = 0;
   w.matchMedia = () => ({ matches: hoverCapable });
