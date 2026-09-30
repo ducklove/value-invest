@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import time
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -29,6 +29,7 @@ from routes.response_models import (
     QuoteResponse,
 )
 from services import stock_quotes
+from services.ecosystem import links as eco_links
 from services.portfolio import (
     ai_analysis,
     benchmarks,
@@ -640,7 +641,10 @@ async def get_held_codes(request: Request, response: Response):
 
 @router.get("/api/portfolio/open/{integration_key}")
 async def open_portfolio_integration(request: Request, integration_key: str, code: str = "", theme: str = "light", stock: str = ""):
-    """Top-level navigation reads first-party cookies before handing off a snapshot."""
+    """Top-level navigation reads first-party cookies before handing off a snapshot.
+
+    ``/go/{tool_id}`` (routes/ecosystem.py) 의 handoff 경로와 같은 빌더를 쓰는 별칭이다.
+    """
     # 허용 목록은 config/ecosystem.json 의 handoff:true 항목에서 파생한다.
     if integration_key not in integrations.handoff_integration_keys():
         raise HTTPException(status_code=404, detail="지원하지 않는 연결 도구입니다.")
@@ -652,19 +656,12 @@ async def open_portfolio_integration(request: Request, integration_key: str, cod
         raise HTTPException(status_code=503, detail="연결 도구 주소를 확인해 주세요.")
     user = await get_current_user(request)
     items = await portfolio_repo.get_portfolio(user["google_sub"]) if user else []
-    def supported_code(value: str) -> bool:
-        if integration_key == "eiayn":
-            return bool(re.fullmatch(r"[A-Z0-9][A-Z0-9.-]{0,29}", value))
-        return _is_korean_stock(value)
-
-    positions = sorted(f'{item["stock_code"]}:{item["quantity"]}' for item in items
-                       if item["quantity"] > 0 and supported_code(item["stock_code"]))
-    query = {"theme": "dark" if theme == "dark" else "light"}
-    code = (code or (stock if integration_key == "buybacks" else "")).strip().upper()
-    if supported_code(code):
-        query["stock" if integration_key == "buybacks" else "code"] = code
-    url = urlunsplit((target.scheme, target.netloc, target.path.rstrip("/") + "/",
-                     urlencode(query), urlencode({"vc-held": ",".join(positions)})))
+    url = eco_links.handoff_url(
+        config["baseUrl"], integration_key,
+        code=code or (stock if integration_key == "buybacks" else ""),
+        theme="dark" if theme == "dark" else "light",
+        positions=eco_links.held_positions(integration_key, items),
+    )
     return RedirectResponse(url, status_code=303, headers={
         "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
     })
