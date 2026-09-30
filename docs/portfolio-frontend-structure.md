@@ -94,7 +94,7 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
 | `/analysis?code=CODE` | 분석 성공 시 `history.replaceState`로 되쓴다. `?theme`은 적용 후 걷어내고 `?from`은 같은 종목일 때만 유지. 뒤로/앞으로가기는 `popstate`가 다른 종목일 때만 다시 분석 | `analysis.js` `syncAnalysisUrl`, `app-main.js` |
 | `/analysis?code=CODE&from=<도구 id>` | 레지스트리 공개 도구면 헤더에 '← {도구}(으)로 돌아가기' 칩(그 도구 stockLink, 같은 종목) | `analysis-valuation.js` `renderAnalysisToolLinks` |
 | `/portfolio?focus=CODE` | 보유 행으로 한 번 스크롤하고 4초 강조(보유하지 않으면 조용히 무시) | `portfolio-render.js` `pfFocusHolding` |
-| `/bonds?view=<탭>` | bond-mate 임베드 탭 선택(레지스트리 viewLink.accepts), 탭 전환은 URL을 되쓴다 | `market-bond-mate.js` |
+| `/bonds?view=<탭>` | bond-mate 임베드 탭 선택(레지스트리 viewLink.accepts, 탭 라벨은 viewLink.labels), 탭 전환은 URL을 되쓴다 | `market-bond-mate.js` |
 | `?theme=light\|dark` | 모든 화면 — 첫 페인트 전 적용, 저장하지 않음 | vc:theme-boot, `search.js` |
 
 ## Legacy Entrypoint

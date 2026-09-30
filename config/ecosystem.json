@@ -58,13 +58,14 @@
       "data": [
         {"id": "current", "url": "https://raw.githubusercontent.com/ducklove/holding_value/master/current.json", "consumers": ["value-invest"]},
         {"id": "config", "url": "https://raw.githubusercontent.com/ducklove/holding_value/master/config.json", "consumers": ["value-invest"]},
-        {"id": "holdings", "url": "https://ducklove.github.io/holding_value/api/holdings.json", "consumers": ["value-invest"]}
+        {"id": "holdings", "url": "https://ducklove.github.io/holding_value/api/holdings.json", "consumers": ["value-invest"]},
+        {"id": "summary", "url": "https://ducklove.github.io/holding_value/summary.json", "consumers": ["value-invest"]}
       ],
       "repo": "ducklove/holding_value",
       "branch": "master",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "index.html", "dir": ".", "src": "./", "shell": false, "themeBoot": false, "python": "pipeline", "js": null}
+      "vendor": {"html": "index.html", "dir": ".", "src": "./", "shell": true, "themeBoot": true, "python": "pipeline", "js": null}
     },
     {
       "id": "common_preferred_spread",
@@ -84,13 +85,14 @@
       "heldBadges": true,
       "data": [
         {"id": "current", "url": "https://raw.githubusercontent.com/ducklove/common_preferred_spread/master/current.json", "consumers": ["value-invest"]},
-        {"id": "config", "url": "https://raw.githubusercontent.com/ducklove/common_preferred_spread/master/config.json", "consumers": ["value-invest"]}
+        {"id": "config", "url": "https://raw.githubusercontent.com/ducklove/common_preferred_spread/master/config.json", "consumers": ["value-invest"]},
+        {"id": "summary", "url": "https://ducklove.github.io/common_preferred_spread/summary.json", "consumers": ["value-invest"]}
       ],
       "repo": "ducklove/common_preferred_spread",
       "branch": "master",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "index.html", "dir": ".", "src": "./", "shell": false, "themeBoot": false, "python": ".", "js": null}
+      "vendor": {"html": "index.html", "dir": ".", "src": "./", "shell": true, "themeBoot": true, "python": ".", "js": null}
     },
     {
       "id": "spac-hunter",
@@ -110,13 +112,14 @@
       "heldBadges": true,
       "data": [
         {"id": "current", "url": "https://raw.githubusercontent.com/ducklove/spac-hunter/main/current.json", "consumers": ["value-invest"]},
-        {"id": "data", "url": "https://raw.githubusercontent.com/ducklove/spac-hunter/main/data.json", "consumers": ["value-invest"]}
+        {"id": "data", "url": "https://raw.githubusercontent.com/ducklove/spac-hunter/main/data.json", "consumers": ["value-invest"]},
+        {"id": "summary", "url": "https://ducklove.github.io/spac-hunter/summary.json", "consumers": ["value-invest"]}
       ],
       "repo": "ducklove/spac-hunter",
       "branch": "main",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "index.html", "dir": "assets", "src": "./assets/", "shell": false, "themeBoot": false, "python": "spac_hunter", "js": null}
+      "vendor": {"html": "index.html", "dir": "assets", "src": "./assets/", "shell": true, "themeBoot": true, "python": "spac_hunter", "js": null}
     },
     {
       "id": "buybacks",
@@ -135,13 +138,14 @@
       "handoff": true,
       "heldBadges": true,
       "data": [
-        {"id": "holding-snapshots", "url": "https://ducklove.github.io/buybacks/data/buybacks/holding_snapshots.json", "consumers": ["value-invest"]}
+        {"id": "holding-snapshots", "url": "https://ducklove.github.io/buybacks/data/buybacks/holding_snapshots.json", "consumers": ["value-invest"]},
+        {"id": "summary", "url": "https://ducklove.github.io/buybacks/summary.json", "consumers": ["value-invest"]}
       ],
       "repo": "ducklove/buybacks",
       "branch": "master",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "index.html", "dir": "public", "src": "%BASE_URL%", "shell": false, "themeBoot": false, "python": "scripts/buybacks", "js": null}
+      "vendor": {"html": "index.html", "dir": "public", "src": "%BASE_URL%", "shell": true, "themeBoot": true, "python": "scripts/buybacks", "js": null}
     },
     {
       "id": "eiayn",
@@ -154,20 +158,22 @@
       "url": "https://ducklove.github.io/eiayn",
       "envOverride": "EIAYN_BASE_URL",
       "stockLink": {"template": "?code={code}", "accepts": "^[A-Z0-9][A-Z0-9.-]{0,29}$"},
+      "viewLink": {"template": "?view={view}", "accepts": "^(list|ranking|analysis|compare)$"},
       "hubView": null,
-      "embed": null,
+      "embed": {"template": "?embed=1"},
       "themeParam": true,
       "handoff": true,
       "heldBadges": true,
       "data": [
         {"id": "etfs", "url": "https://ducklove.github.io/eiayn/data/etfs.json", "consumers": ["value-invest"]},
-        {"id": "rankings", "url": "https://ducklove.github.io/eiayn/data/rankings.json", "consumers": ["value-invest"]}
+        {"id": "rankings", "url": "https://ducklove.github.io/eiayn/data/rankings.json", "consumers": ["value-invest"]},
+        {"id": "summary", "url": "https://ducklove.github.io/eiayn/summary.json", "consumers": ["value-invest"]}
       ],
       "repo": "ducklove/eiayn",
       "branch": "main",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "index.html", "dir": "public", "src": "%BASE_URL%", "shell": false, "themeBoot": false, "python": null, "js": "scripts"}
+      "vendor": {"html": "index.html", "dir": "public", "src": "%BASE_URL%", "shell": true, "themeBoot": true, "python": null, "js": "scripts"}
     },
     {
       "id": "gold_gap",
@@ -187,13 +193,14 @@
       "handoff": false,
       "heldBadges": false,
       "data": [
-        {"id": "data", "url": "https://ducklove.github.io/gold_gap/data.json", "consumers": ["value-invest"]}
+        {"id": "data", "url": "https://ducklove.github.io/gold_gap/data.json", "consumers": ["value-invest"]},
+        {"id": "summary", "url": "https://ducklove.github.io/gold_gap/summary.json", "consumers": ["value-invest"]}
       ],
       "repo": "ducklove/gold_gap",
       "branch": "master",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "templates/index.html", "dir": "static", "src": "./static/", "shell": false, "themeBoot": false, "python": "goldgap", "js": null}
+      "vendor": {"html": "templates/index.html", "dir": "static", "src": "./static/", "shell": true, "themeBoot": true, "python": "goldgap", "js": null}
     },
     {
       "id": "all-about-gold",
@@ -212,12 +219,14 @@
       "themeParam": true,
       "handoff": false,
       "heldBadges": false,
-      "data": [],
+      "data": [
+        {"id": "summary", "url": "https://ducklove.github.io/all-about-gold/summary.json", "consumers": ["value-invest"]}
+      ],
       "repo": "ducklove/all-about-gold",
       "branch": "main",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "index.html", "dir": "static", "src": "./static/", "shell": false, "themeBoot": false, "python": "scripts", "js": null}
+      "vendor": {"html": "index.html", "dir": "static", "src": "./static/", "shell": true, "themeBoot": true, "python": "scripts", "js": null}
     },
     {
       "id": "nps-tracker",
@@ -229,20 +238,21 @@
       "accent": "#2563eb",
       "url": "https://ducklove.github.io/nps-tracker",
       "envOverride": "NPS_TRACKER_BASE_URL",
-      "stockLink": null,
+      "stockLink": {"template": "?code={code}", "accepts": "^[0-9A-Z]{6}$"},
       "hubView": "/nps",
-      "embed": {"template": "?embed=true"},
+      "embed": {"template": "?embed=1"},
       "themeParam": true,
       "handoff": false,
       "heldBadges": false,
       "data": [
-        {"id": "current", "url": "https://raw.githubusercontent.com/ducklove/nps-tracker/main/current.json", "consumers": ["value-invest"]}
+        {"id": "current", "url": "https://raw.githubusercontent.com/ducklove/nps-tracker/main/current.json", "consumers": ["value-invest"]},
+        {"id": "summary", "url": "https://ducklove.github.io/nps-tracker/summary.json", "consumers": ["value-invest"]}
       ],
       "repo": "ducklove/nps-tracker",
       "branch": "main",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "index.html", "dir": ".", "src": "./", "shell": false, "themeBoot": false, "python": "nps_tracker", "js": null}
+      "vendor": {"html": "index.html", "dir": ".", "src": "./", "shell": true, "themeBoot": true, "python": "nps_tracker", "js": null}
     },
     {
       "id": "bond-mate",
@@ -255,20 +265,22 @@
       "url": "https://ducklove.github.io/bond-mate",
       "envOverride": "BOND_MATE_BASE_URL",
       "stockLink": null,
-      "viewLink": {"template": "?tab={view}", "accepts": "^(overview|government|policy|fx|credit|issuance)$"},
+      "viewLink": {"template": "?tab={view}", "accepts": "^(overview|government|policy|fx|credit|issuance)$",
+        "labels": {"overview": "개요", "government": "국채", "policy": "기준금리", "fx": "환율", "credit": "신용", "issuance": "발행"}},
       "hubView": "/bonds",
       "embed": {"template": "?embed={view}"},
       "themeParam": true,
       "handoff": false,
       "heldBadges": false,
       "data": [
-        {"id": "current", "url": "https://ducklove.github.io/bond-mate/data/current.json", "consumers": ["value-invest"]}
+        {"id": "current", "url": "https://ducklove.github.io/bond-mate/data/current.json", "consumers": ["value-invest"]},
+        {"id": "summary", "url": "https://ducklove.github.io/bond-mate/summary.json", "consumers": ["value-invest"]}
       ],
       "repo": "ducklove/bond-mate",
       "branch": "master",
       "deploy": "github-pages",
       "visibility": "public",
-      "vendor": {"html": "templates/index.html", "dir": "static", "src": "./static/", "shell": false, "themeBoot": false, "python": "bondmate", "js": null}
+      "vendor": {"html": "templates/index.html", "dir": "static", "src": "./static/", "shell": true, "themeBoot": true, "python": "bondmate", "js": null}
     },
     {
       "id": "index-popup",
@@ -292,7 +304,7 @@
       "branch": "main",
       "deploy": "self-hosted",
       "visibility": "public",
-      "vendor": {"html": "index.html", "dir": "public", "src": "%BASE_URL%", "shell": false, "themeBoot": false, "python": null, "js": null}
+      "vendor": {"html": "index.html", "dir": "public", "src": "%BASE_URL%", "shell": true, "themeBoot": true, "python": null, "js": null}
     },
     {
       "id": "hub:screener",

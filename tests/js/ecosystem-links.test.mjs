@@ -100,7 +100,8 @@ test('registry deep links follow stockLink/viewLink templates and accepts regexe
     'https://ducklove.github.io/buybacks/?stock=005930&theme=light&from=value-invest',
   );
   assert.deepEqual(w.ecoStockTools('000670').map(t => t.id).sort(),
-    ['buybacks', 'common_preferred_spread', 'eiayn', 'holding_value', 'spac-hunter']);
+    ['buybacks', 'common_preferred_spread', 'eiayn', 'holding_value', 'nps-tracker', 'spac-hunter']);
+  assert.equal(w.ecoStockPath('nps-tracker', '005930'), '?code=005930');
   // ?from is honoured only for a registry tool and only while the URL code matches.
   assert.equal(w.ecoArrivalTool('000670').id, 'holding_value');
   assert.equal(w.ecoArrivalTool('005930'), null);

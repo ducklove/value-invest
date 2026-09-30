@@ -229,16 +229,24 @@ function _bmRegistryAcceptsView(view) {
   try { return new RegExp(link.accepts).test(view); } catch (e) { return true; }
 }
 
+/** 화면 라벨 — 레지스트리 viewLink.labels(bond-mate 탭 이름과 같은 목록)가 우선, 없으면 BM_VIEW_LABELS. */
+function _bmViewLabel(view) {
+  const tool = _bmRegistryTool();
+  const labels = tool && tool.viewLink && tool.viewLink.labels;
+  const label = labels && typeof labels[view] === 'string' ? labels[view] : '';
+  return label || BM_VIEW_LABELS[view] || '';
+}
+
 /**
  * 임베드로 보여줄 화면 목록 [{key,label}]. 계약의 주인은 서버 config(views)와 생태계
- * 레지스트리(viewLink.accepts)다. 레지스트리에는 라벨 필드가 없어 한글 라벨만 여기 둔다.
+ * 레지스트리(viewLink.accepts·labels)다. BM_VIEW_LABELS 는 레지스트리가 없을 때의 폴백.
  */
 function bondMateEmbedViews() {
   const cfg = _bmConfig();
   const views = (cfg && Array.isArray(cfg.views) && cfg.views.length) ? cfg.views : BM_DEFAULT_VIEWS;
   return views
-    .filter((v) => BM_VIEW_LABELS[v] && _bmRegistryAcceptsView(v))
-    .map((v) => ({ key: v, label: BM_VIEW_LABELS[v] }));
+    .filter((v) => _bmViewLabel(v) && _bmRegistryAcceptsView(v))
+    .map((v) => ({ key: v, label: _bmViewLabel(v) }));
 }
 
 /** /bonds?view=<key> 딥링크 — 첫 진입 때 한 번만 읽는다(이후 탭 전환은 URL 을 되쓴다). */
@@ -305,7 +313,7 @@ function loadBondsView({ force = false, view = null } = {}) {
   if (!container) return;
   const fromUrl = view ? null : _bmViewFromUrl();
   const requested = view || fromUrl;
-  const next = (requested && BM_VIEW_LABELS[requested]) ? requested : _bmEmbedView;
+  const next = (requested && _bmViewLabel(requested)) ? requested : _bmEmbedView;
   const changed = next !== _bmEmbedView;
   _bmEmbedView = next;
   _bmRenderTabs(next);

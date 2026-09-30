@@ -335,6 +335,19 @@ test("레지스트리가 있으면 bond-mate 링크·탭 키를 레지스트리 
   w.close();
 });
 
+test("탭 라벨은 레지스트리 viewLink.labels 가 우선하고, 없는 키는 기존 한글 라벨로 폴백한다", () => {
+  const registry = JSON.parse(JSON.stringify(REGISTRY_BM));
+  registry.tools[0].viewLink.labels = { overview: "요약", credit: "신용" };
+  const w = loadBondsAt("https://app.example.com/bonds?view=credit", {
+    ecosystem: registry,
+    integrations: { bondMate: { views: ["overview", "government", "credit"] } },
+  });
+  assert.deepEqual(w.bondMateEmbedViews().map((v) => v.label), ["요약", "국채", "신용"]);
+  w.loadBondsView();
+  assert.equal(w.document.querySelector("#bondsTabs .bonds-tab.active").textContent, "신용");
+  w.close();
+});
+
 test("vc:ready 를 보낸 임베드에는 테마를 postMessage 로 보내고 다시 로드하지 않는다", () => {
   const w = loadBondsAt("https://app.example.com/bonds", { ecosystem: REGISTRY_BM });
   w.loadBondsView();

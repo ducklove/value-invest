@@ -278,12 +278,16 @@ const ANALYSIS_TOOL_CARD_SIGNALS = {
 const ANALYSIS_TOOL_NAME_SIGNALS = {
   'spac-hunter': /스팩|SPAC/i,
 };
+// stockLink 는 있지만(형제 간 linkTo·/go 딥링크용) 허브에 종목별 관련성 신호가 아직 없는 도구 —
+// 모든 종목에 칩을 띄우면 소음이다(nps-tracker: 국민연금 보유 여부를 분석 화면이 모른다).
+const ANALYSIS_TOOL_NO_CHIP = new Set(['nps-tracker']);
 
 function analysisRelatedTools(code, corpName) {
   if (typeof ecoStockTools !== 'function') return [];
   return ecoStockTools(code).filter((tool) => {
     if (tool.deploy === 'hub') return false;
     if (ANALYSIS_TOOL_CARD_SIGNALS[tool.id]) return false;  // 카드(신호 있을 때만)가 담당
+    if (ANALYSIS_TOOL_NO_CHIP.has(tool.id)) return false;
     const nameSignal = ANALYSIS_TOOL_NAME_SIGNALS[tool.id];
     return nameSignal ? nameSignal.test(String(corpName || '')) : true;
   });

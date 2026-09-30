@@ -47,6 +47,10 @@ EXPECTED_IDS = {
     "finance-pi", "kis-proxy", "the_admin", "portfolio-epaper", "x3", "morning-bell",
 }
 INTERNAL_IDS = {"finance-pi", "kis-proxy", "the_admin", "portfolio-epaper", "x3", "morning-bell"}
+ADOPTED_SIBLINGS = {
+    "holding_value", "common_preferred_spread", "spac-hunter", "buybacks", "eiayn",
+    "gold_gap", "all-about-gold", "nps-tracker", "bond-mate", "index-popup",
+}
 
 
 def _registry() -> dict:
@@ -66,8 +70,11 @@ def test_registry_is_valid_and_lists_every_project():
                 re.compile(tool[field]["accepts"])
         vendor = tool.get("vendor")
         if vendor:
-            # 형제 채택은 orchestrator 가 플래그를 뒤집을 때까지 꺼 둔다.
-            assert vendor["shell"] is False and vendor["themeBoot"] is False
+            # Wave B: 형제 10곳이 <vc-shell>·theme-boot 를 채택했다(sync-ecosystem 이 엄격 검사).
+            # 허브 자신은 vendoring 원본이라 플래그가 적용되지 않는다(false 유지).
+            adopted = tool["id"] in ADOPTED_SIBLINGS
+            assert vendor["shell"] is adopted and vendor["themeBoot"] is adopted, tool["id"]
+    assert {t["id"] for t in data["tools"] if (t.get("vendor") or {}).get("shell")} == ADOPTED_SIBLINGS
 
 
 @pytest.mark.parametrize("mutate, message", [
@@ -131,6 +138,23 @@ def test_app_config_projection_hides_internal_tools(monkeypatch):
     assert "kisProxy" not in config["integrations"]
     assert ":3288" not in json.dumps(config, ensure_ascii=False)
     assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == "http://ducklove.duckdns.org:3288"
+
+
+def test_sibling_registry_follow_ups():
+    """Wave B 형제 보고의 레지스트리 후속 반영(딥링크·임베드·라벨·summary 데이터 항목)."""
+    tools = {t["id"]: t for t in ecosystem.tools()}
+    assert tools["eiayn"]["embed"] == {"template": "?embed=1"}
+    assert tools["eiayn"]["viewLink"]["template"] == "?view={view}"
+    assert re.fullmatch(tools["eiayn"]["viewLink"]["accepts"], "compare")
+    assert tools["nps-tracker"]["stockLink"] == {"template": "?code={code}", "accepts": "^[0-9A-Z]{6}$"}
+    assert tools["nps-tracker"]["embed"] == {"template": "?embed=1"}
+    bm_view = tools["bond-mate"]["viewLink"]
+    assert list(bm_view["labels"]) == ["overview", "government", "policy", "fx", "credit", "issuance"]
+    assert all(re.fullmatch(bm_view["accepts"], key) for key in bm_view["labels"])
+    assert bm_view["labels"]["credit"] == "신용"
+    for tool_id in ADOPTED_SIBLINGS - {"index-popup"}:
+        summary = next(d for d in tools[tool_id]["data"] if d["id"] == "summary")
+        assert summary["url"] == tools[tool_id]["url"] + "/summary.json", tool_id
 
 
 def test_analytics_projects_match_registry_vendor_dirs():

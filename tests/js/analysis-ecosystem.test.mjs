@@ -123,6 +123,8 @@ test('연결 도구 chips: registry stockLink tools, relevance-gated by existing
   stubAnalyze(w, { stock_code: '005930', corp_name: '삼성전자' });
   await w.analyzeStock('005930');
   // Plain stock: holding/preferred/ETF tools need a signal (their valuation card) → only generic tools.
+  // nps-tracker accepts ?code= too, but the hub has no per-stock NPS holding signal → no chip.
+  assert.ok(ECOSYSTEM.tools.find(t => t.id === 'nps-tracker').stockLink, 'registry advertises the nps-tracker stockLink');
   assert.deepEqual(chips(w).map(a => a.dataset.vcTool), ['buybacks']);
   const bb = chips(w)[0];
   assert.equal(bb.getAttribute('target'), '_blank');
