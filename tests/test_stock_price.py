@@ -376,3 +376,22 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["change_pct"], -1.63)
         self.assertEqual(result["market"], "J")
         self.assertNotIn("_stale", result)
+
+
+class YFinanceExecutorTests(unittest.TestCase):
+    """O13: 블로킹 yfinance 는 기본 executor 가 아닌 전용 소형 풀에서만 돈다."""
+
+    def test_yfinance_executor_is_small_and_dedicated(self):
+        executor = stock_price.YF_EXECUTOR
+        self.assertLessEqual(executor._max_workers, 4)
+        self.assertEqual(executor._thread_name_prefix, "yf")
+
+    def test_yfinance_calls_never_use_the_default_executor(self):
+        import re
+        from pathlib import Path
+
+        source = Path(stock_price.__file__).read_text(encoding="utf-8")
+        calls = re.findall(r"run_in_executor\(\s*([^,]+),\s*(_get_\w*yfinance\w*)", source)
+        self.assertTrue(calls)
+        self.assertEqual({executor.strip() for executor, _ in calls}, {"YF_EXECUTOR"})
+        self.assertNotRegex(source, r"to_thread\(\s*_get_\w*yfinance")

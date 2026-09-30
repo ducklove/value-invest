@@ -6,12 +6,10 @@ from datetime import date, datetime, timedelta, timezone
 
 import close_price_client
 import kis_proxy_client
-from core.http import batch_http_client
 from repositories import bootstrap
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
-from repositories import user_settings as user_settings_repo
 from services.portfolio import fx, snapshot_attribution
 from services.portfolio import runtime_quotes as portfolio_quotes
 
@@ -379,20 +377,6 @@ async def _persist_snapshot(
         google_sub[:8], snap_date, total_value, nav, total_units, len(per_stock), fallback_count, _fx_usdkrw or 0,
     )
     return fallback_count
-
-
-async def _save_gold_close():
-    """Save current XAU spot price as prev close for tomorrow's market bar."""
-    try:
-        async with batch_http_client(name="gold_api", timeout=10) as client:
-            r = await client.get("https://api.gold-api.com/price/XAU/USD", headers={"User-Agent": "Mozilla/5.0"})
-            if r.status_code == 200:
-                price = r.json().get("price")
-                if price:
-                    await user_settings_repo.set_user_setting("__system__", "gold_prev_close", str(price))
-                    logger.info("Gold prev close saved: %.2f", price)
-    except Exception as e:
-        logger.warning("Failed to save gold close: %s", e)
 
 
 async def _update_benchmark_history():

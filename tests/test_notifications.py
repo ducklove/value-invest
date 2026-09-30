@@ -431,6 +431,11 @@ class AlertEngineHarness(TempDbMixin):
         clock = patch.object(alert_delivery, "now_kst", return_value=datetime(2026, 9, 23, 12, tzinfo=alert_delivery.KST))
         clock.start()
         self.addCleanup(clock.stop)
+        # evaluate_all 의 패스 공유 벌크 시세가 네트워크(네이버)에 닿지 않게 한다.
+        # 벌크가 비면 모든 코드가 _safe_quote 로 가므로 기존 테스트의 시세 mock 이 그대로 쓰인다.
+        bulk = patch.object(engine.runtime_quotes, "fetch_bulk_kr_quotes", new=AsyncMock(return_value={}))
+        bulk.start()
+        self.addCleanup(bulk.stop)
         await _seed_user_and_holding()
         await notifications_repo.upsert_notification_channel(
             "u1", "telegram", config={"chat_id": 123, "username": "t"}, enabled=True, verified=True

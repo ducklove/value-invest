@@ -15,6 +15,7 @@
      (NXT 실패 시 KRX 1회 재시도) → 일봉 히스토리 종가(stale 표기).
      다건은 ``get_bulk_quote_snapshots`` 가 네이버 벌크 API 1회 호출로
      처리하고, 빠진 코드만 위 개별 경로로 흘려보낸다(호출자 책임).
+     벌크 결과는 코드별 5초 micro-cache + in-flight 공유로 중복 호출을 막는다.
    - 해외 주식·특수자산: ``register_quote_fetcher`` 로 주입된 외부 fetcher
      (``services.portfolio.quote_service`` — 현금/FX 환율 스크레이프,
      KRX 금, 암호화폐, 해외는 ticker 해석 후 yfinance/Naver).
@@ -25,6 +26,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import math
 from dataclasses import dataclass, replace
@@ -39,6 +41,7 @@ from services.portfolio.quotes import should_accept_quote_snapshot
 STOCK_CACHE_TTL_SECONDS = 60
 DEAD_STOCK_TTL_SECONDS = 300
 STOCK_CONT_POLL_SECONDS = 5.0
+BULK_MICRO_CACHE_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,10 @@ class StockSubscription:
 
 _stock_cache = MemoryTTLCache("stock.current", STOCK_CACHE_TTL_SECONDS)
 _dead_stock_cache = MemoryTTLCache("stock.current.dead", DEAD_STOCK_TTL_SECONDS)
+# 벌크(네이버) 결과의 코드별 micro-cache + in-flight 공유. 수 초 안에 겹치는
+# 페이지 로드·기기 폴링·배치가 같은 벌크 호출을 반복하지 않게 한다.
+_bulk_micro_cache = MemoryTTLCache("stock.bulk.micro", BULK_MICRO_CACHE_SECONDS)
+_bulk_inflight: dict[str, asyncio.Future] = {}
 _last_known: dict[str, Stock] = {}
 _locks: dict[str, asyncio.Lock] = {}
 _locks_guard = asyncio.Lock()
@@ -313,6 +320,35 @@ async def get_quote_snapshot(code: str, **kwargs: Any) -> dict[str, Any]:
     return stock_to_quote(await get_stock(code, **kwargs))
 
 
+async def _fetch_bulk_uncached(codes: list[str]) -> dict[str, dict[str, Any]]:
+    bulk = await stock_price.fetch_bulk_quotes_kr(codes)
+    results: dict[str, dict[str, Any]] = {}
+    for code, quote in bulk.items():
+        remembered = remember_quote(code, quote)
+        results[_normalize_code(code)] = stock_to_quote(remembered) if remembered else quote
+    return results
+
+
+def _resolve_waiter(future: asyncio.Future, value: dict[str, Any] | None) -> None:
+    if not future.done():
+        # 소유 호출자가 받은 dict 를 변경해도 대기자에게 새지 않게 복사본을 넘긴다.
+        future.set_result(copy.deepcopy(value))
+
+
+def _micro_cached_quote(code: str) -> dict[str, Any] | None:
+    """micro-cache 적중 시 돌려줄 시세. 그 사이 WS 틱 등으로 단건 캐시
+    (``_last_known``)가 갱신됐으면 더 새로운 그 값을 준다 — 캐시는 업스트림
+    호출만 줄이고, 캐시가 없을 때보다 오래된 값을 내놓지 않는다."""
+    cached = _bulk_micro_cache.get(code)
+    if cached is None:
+        return None
+    if cached.get("_stale") is not True:
+        current = _last_known.get(code)
+        if current is not None and not current.stale:
+            return stock_to_quote(current)
+    return cached
+
+
 async def get_bulk_quote_snapshots(codes: list[str]) -> dict[str, dict[str, Any]]:
     """국내(KRX) 코드 다건을 한 번의 업스트림 호출로 조회해 캐시에 반영한다.
 
@@ -320,15 +356,49 @@ async def get_bulk_quote_snapshots(codes: list[str]) -> dict[str, dict[str, Any]
     빠진 코드를 개별 경로(``get_stock``/``get_quote_snapshot``)로 폴백해야
     한다. 성공한 시세는 단건 경로와 같은 캐시(``remember_quote``)에 기록돼
     이후 단건 조회·cached 조회와 일관된 값을 돌려준다.
+
+    탭·기기·배치 폴링이 수 초 간격으로 겹치므로 코드별 micro-cache
+    (``BULK_MICRO_CACHE_SECONDS``)와 in-flight 공유를 둔다. 캐시에 있는 코드는
+    업스트림을 치지 않고, 다른 호출이 이미 받고 있는 코드는 그 결과를 기다리며,
+    나머지 코드만 한 번의 벌크 호출로 받는다.
     """
     normalized = [c for c in dict.fromkeys(_normalize_code(c) for c in codes) if c]
     if not normalized:
         return {}
-    bulk = await stock_price.fetch_bulk_quotes_kr(normalized)
     results: dict[str, dict[str, Any]] = {}
-    for code, quote in bulk.items():
-        remembered = remember_quote(code, quote)
-        results[_normalize_code(code)] = stock_to_quote(remembered) if remembered else quote
+    waiting: dict[str, asyncio.Future] = {}
+    to_fetch: list[str] = []
+    for code in normalized:
+        cached = _micro_cached_quote(code)
+        if cached is not None:
+            results[code] = cached
+        elif code in _bulk_inflight:
+            waiting[code] = _bulk_inflight[code]
+        else:
+            to_fetch.append(code)
+
+    if to_fetch:
+        loop = asyncio.get_running_loop()
+        owned = {code: loop.create_future() for code in to_fetch}
+        _bulk_inflight.update(owned)
+        fetched: dict[str, dict[str, Any]] = {}
+        try:
+            fetched = await _fetch_bulk_uncached(to_fetch)
+            for code, quote in fetched.items():
+                if quote:
+                    _bulk_micro_cache.set(code, quote)
+            results.update(fetched)
+        finally:
+            # 실패·취소여도 대기자는 풀어 준다(None = 이번 벌크에서 빠짐).
+            for code, future in owned.items():
+                if _bulk_inflight.get(code) is future:
+                    del _bulk_inflight[code]
+                _resolve_waiter(future, fetched.get(code))
+
+    for code, future in waiting.items():
+        quote = await asyncio.shield(future)
+        if quote:
+            results[code] = copy.deepcopy(quote)
     return results
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import os
 from datetime import date
@@ -9,9 +10,29 @@ from typing import Any
 import httpx
 
 import close_price_client
+from cache_layer import MemoryTTLCache
+from core import config as app_config
 from core.errors import ExternalServiceError
 
-BASE_URL = os.getenv("KIS_PROXY_BASE_URL", "http://ducklove.duckdns.org:3288").rstrip("/")
+# 허브와 kis-proxy 는 운영에서 같은 호스트에 있다. 운영 기본값은 loopback 이라
+# 토큰이 DDNS NAT hairpin 을 거치는 평문 HTTP 로 나가지 않는다. 개발 PC 에는
+# 로컬 프록시가 없으므로 공개 주소를 유지한다. env 값이 있으면 항상 우선한다.
+LOOPBACK_BASE_URL = "http://127.0.0.1:3288"
+PUBLIC_BASE_URL = "http://ducklove.duckdns.org:3288"
+
+
+def default_base_url(environment: str | None = None) -> str:
+    """프로필별 기본 KIS 프록시 주소 (production → loopback, 그 외 → 공개 주소)."""
+    env = app_config._normalize_env(environment) if environment else app_config._current_env()
+    return LOOPBACK_BASE_URL if env == "production" else PUBLIC_BASE_URL
+
+
+def resolve_base_url(environment: str | None = None) -> str:
+    override = (os.getenv("KIS_PROXY_BASE_URL") or "").strip()
+    return (override or default_base_url(environment)).rstrip("/")
+
+
+BASE_URL = resolve_base_url()
 TIMEOUT_SECONDS = float(os.getenv("KIS_PROXY_TIMEOUT_SECONDS", "20"))
 PROXY_TOKEN = os.getenv("KIS_PROXY_TOKEN", os.getenv("KIS_PROXY_PUBLIC_TOKEN", "")).strip()
 logger = logging.getLogger(__name__)
@@ -183,12 +204,67 @@ async def get_history(
     return payload
 
 
+# 재무·배당은 하루에도 거의 바뀌지 않는데 분석 1회가 재무를 최대 4번, 배당을
+# 약 3번 부른다. 모두 실시간 시세와 같은 4 req/s limiter 를 공유하므로
+# 60분 TTL + in-flight 공유로 같은 요청을 한 번만 보낸다.
+RESPONSE_CACHE_TTL_SECONDS = float(os.getenv("KIS_PROXY_RESPONSE_CACHE_TTL_SECONDS", "3600"))
+_response_cache = MemoryTTLCache("kis_proxy.responses", RESPONSE_CACHE_TTL_SECONDS)
+_response_inflight: dict[str, asyncio.Future] = {}
+
+
+def clear_response_cache() -> None:
+    _response_cache.clear()
+    _response_inflight.clear()
+
+
+async def _cached_get(key: str, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """TTL 캐시 + single-flight 로 감싼 ``_get``. 빈 응답과 실패는 캐시하지 않는다."""
+    cached = _response_cache.get(key)
+    if cached is not None:
+        return cached
+    pending = _response_inflight.get(key)
+    if pending is not None:
+        # 먼저 시작한 호출의 결과(또는 예외)를 공유한다.
+        try:
+            return copy.deepcopy(await asyncio.shield(pending))
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if pending.cancelled() and not (task and task.cancelling()):
+                # 소유 호출만 취소됐다 — 이 호출은 스스로 다시 받는다.
+                return await _cached_get(key, path, params)
+            raise
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    _response_inflight[key] = future
+    try:
+        payload = await _get(path, params=params)
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
+    except Exception as exc:
+        if not future.done():
+            future.set_exception(exc)
+            # 대기자가 없을 때 "exception was never retrieved" 경고를 막는다.
+            future.exception()
+        raise
+    else:
+        if payload:
+            _response_cache.set(key, payload)
+        if not future.done():
+            # 소유 호출자가 payload 를 변경해도 대기자에게 새지 않게 복사본을 넘긴다.
+            future.set_result(copy.deepcopy(payload))
+        return payload
+    finally:
+        if _response_inflight.get(key) is future:
+            del _response_inflight[key]
+
+
 async def get_financials(
     symbol: str,
     *,
     period_div_code: str = "0",
 ) -> dict[str, Any]:
-    return await _get(
+    return await _cached_get(
+        f"financials:{symbol}:{period_div_code}",
         f"/v1/stocks/{symbol}/financials",
         params={"period_div_code": period_div_code},
     )
@@ -209,10 +285,12 @@ async def get_dividends(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> dict[str, Any]:
-    return await _get(
+    params = {
+        "start_date": _iso(start_date),
+        "end_date": _iso(end_date),
+    }
+    return await _cached_get(
+        f"dividends:{symbol}:{params['start_date']}:{params['end_date']}",
         f"/v1/stocks/{symbol}/dividends",
-        params={
-            "start_date": _iso(start_date),
-            "end_date": _iso(end_date),
-        },
+        params=params,
     )

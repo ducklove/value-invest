@@ -488,10 +488,6 @@ async def test_run_all_snapshots_degrades_tick_when_holdings_fall_back():
         new=AsyncMock(),
     ), patch.object(
         snapshot_nav,
-        "_save_gold_close",
-        new=AsyncMock(),
-    ), patch.object(
-        snapshot_nav,
         "_update_benchmark_history",
         new=AsyncMock(),
     ), patch("observability.record_event", new=_record):
@@ -527,10 +523,6 @@ async def test_run_all_snapshots_reports_tick_ok_when_all_fresh():
         new=AsyncMock(),
     ), patch.object(
         snapshot_nav,
-        "_save_gold_close",
-        new=AsyncMock(),
-    ), patch.object(
-        snapshot_nav,
         "_update_benchmark_history",
         new=AsyncMock(),
     ), patch("observability.record_event", new=_record):
@@ -552,7 +544,6 @@ async def test_run_all_snapshots_propagates_missing_settlement_after_other_users
                      new=AsyncMock(return_value=["userAAAA1111", "userBBBB2222"])),
         patch.object(snapshot_nav, "take_snapshot", new=take),
         patch.object(snapshot_nav, "_fetch_fx_usdkrw", new=AsyncMock()),
-        patch.object(snapshot_nav, "_save_gold_close", new=AsyncMock()),
         patch.object(snapshot_nav, "_update_benchmark_history", new=AsyncMock()),
         patch.object(snapshot_nav.bootstrap, "init_db", new=AsyncMock()) as init_db,
         patch.object(snapshot_nav.bootstrap, "close_db", new=AsyncMock()) as close_db,
@@ -608,7 +599,6 @@ async def test_retry_only_values_missing_users_and_preserves_completed_settlemen
         patch.object(snapshot_nav.snapshots_repo, "get_snapshot_by_date", new=AsyncMock(side_effect=[{"nav": 1000}, None])),
         patch.object(snapshot_nav, "take_snapshot", new=AsyncMock(return_value=0)) as take,
         patch.object(snapshot_nav, "_fetch_fx_usdkrw", new=AsyncMock()),
-        patch.object(snapshot_nav, "_save_gold_close", new=AsyncMock()),
         patch.object(snapshot_nav, "_update_benchmark_history", new=AsyncMock()),
         patch("observability.record_event", new=AsyncMock()),
     ):
@@ -633,3 +623,29 @@ async def test_unexpected_morning_timer_tick_cannot_create_tonights_settlement(m
     fetch.assert_not_awaited()
     take.assert_not_awaited()
     assert close.await_count == int(manage_db)
+
+
+def test_dead_gold_prev_close_write_is_removed():
+    # O9: __system__/gold_prev_close 는 읽는 곳이 없었다 — 쓰기도 없어야 한다.
+    assert not hasattr(snapshot_nav, "_save_gold_close")
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in ROOT.rglob("*.py")
+        if not any(part in {".venv", ".claude", "node_modules", "tests", "__pycache__"} for part in path.parts)
+        and ("gold_prev_close" in path.read_text(encoding="utf-8") or "_save_gold_close" in path.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
+@pytest.mark.asyncio
+async def test_after_close_capture_keeps_benchmark_update_without_gold_write():
+    from services.portfolio import after_close
+
+    with patch.object(after_close.regular_close, "closing_at", return_value=object()), \
+         patch.object(after_close.snapshots, "get_all_users_with_portfolio", new=AsyncMock(return_value=[])), \
+         patch.object(snapshot_nav, "_update_benchmark_history", new=AsyncMock()) as benchmark, \
+         patch("repositories.user_settings.set_user_setting", new=AsyncMock()) as set_setting:
+        await after_close.capture_all()
+
+    benchmark.assert_awaited_once()
+    set_setting.assert_not_awaited()
