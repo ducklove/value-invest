@@ -363,3 +363,16 @@ def test_resolve_base_url_always_honours_env_override(monkeypatch):
     assert kis_proxy_client.resolve_base_url("development") == "http://proxy.example:9999"
     monkeypatch.setenv("KIS_PROXY_BASE_URL", "   ")
     assert kis_proxy_client.resolve_base_url("development") == "http://ducklove.duckdns.org:3288"
+
+
+@pytest.mark.asyncio
+async def test_kis_proxy_uses_shared_client_with_env_timeout():
+    from core import http as http_manager
+
+    assert http_manager.timeout_for(kis_proxy_client.HTTP_CLIENT_NAME) == kis_proxy_client.TIMEOUT_SECONDS
+    manager = http_manager.HttpClientManager()
+    with patch.object(http_manager, "_manager", manager):
+        client = await kis_proxy_client._get_client()
+        assert client is await http_manager.get_http_client("kis_proxy")
+        assert client.timeout.read == kis_proxy_client.TIMEOUT_SECONDS
+    await manager.close_all()

@@ -13,6 +13,7 @@ import close_price_client
 from cache_layer import MemoryTTLCache
 from core import config as app_config
 from core.errors import ExternalServiceError
+from core.http import get_http_client, register_timeout_profile
 
 # 허브와 kis-proxy 는 운영에서 같은 호스트에 있다. 운영 기본값은 loopback 이라
 # 토큰이 DDNS NAT hairpin 을 거치는 평문 HTTP 로 나가지 않는다. 개발 PC 에는
@@ -36,8 +37,9 @@ BASE_URL = resolve_base_url()
 TIMEOUT_SECONDS = float(os.getenv("KIS_PROXY_TIMEOUT_SECONDS", "20"))
 PROXY_TOKEN = os.getenv("KIS_PROXY_TOKEN", os.getenv("KIS_PROXY_PUBLIC_TOKEN", "")).strip()
 logger = logging.getLogger(__name__)
-_client: httpx.AsyncClient | None = None
-_client_lock: asyncio.Lock | None = None
+# 공유 core/http 클라이언트 이름. 기본 timeout 은 KIS_PROXY_TIMEOUT_SECONDS.
+HTTP_CLIENT_NAME = "kis_proxy"
+register_timeout_profile(HTTP_CLIENT_NAME, TIMEOUT_SECONDS)
 
 # Hard rate limit: KIS Open API caps at 5 transactions / second per app key
 # and returns EGW00201 ("초당 거래건수를 초과하였습니다.") on overshoot. We
@@ -75,38 +77,16 @@ class KISProxyError(ExternalServiceError):
     pass
 
 
-def _get_client_lock() -> asyncio.Lock:
-    global _client_lock
-    if _client_lock is None:
-        _client_lock = asyncio.Lock()
-    return _client_lock
-
-
 async def init_client():
     await _get_client()
 
 
 async def close_client():
-    global _client
-    async with _get_client_lock():
-        client = _client
-        _client = None
-    if client is not None:
-        await client.aclose()
+    """lifespan 훅 — 공유 'kis_proxy' 클라이언트는 core/http 매니저가 닫는다."""
 
 
 async def _get_client() -> httpx.AsyncClient:
-    global _client
-    if _client is not None:
-        return _client
-
-    async with _get_client_lock():
-        if _client is None:
-            _client = httpx.AsyncClient(
-                timeout=TIMEOUT_SECONDS,
-                follow_redirects=True,
-            )
-        return _client
+    return await get_http_client(HTTP_CLIENT_NAME)
 
 
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

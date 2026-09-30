@@ -87,6 +87,12 @@ _TIMEOUT_PROFILES: dict[str, float | httpx.Timeout] = {
 }
 
 
+def register_timeout_profile(name: str, timeout: float | httpx.Timeout) -> None:
+    """env 로 timeout 을 정하는 클라이언트(예: kis_proxy)가 import 시점에 기본
+    timeout 을 등록한다. 이미 만들어진 클라이언트에는 적용되지 않는다."""
+    _TIMEOUT_PROFILES[name] = timeout
+
+
 def timeout_for(name: str) -> float | httpx.Timeout:
     """서비스 이름의 기본 timeout. 미등록 이름은 default 프로파일."""
     return _TIMEOUT_PROFILES.get(name, _TIMEOUT_PROFILES["default"])

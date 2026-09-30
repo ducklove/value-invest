@@ -55,9 +55,9 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     import observability
 
     # 공유 httpx 클라이언트 매니저 — ``async with httpx.AsyncClient()`` 패턴을
-    # 쓰던 외부 호출이 core/http.get_http_client() 로 전환한다. kis_proxy 는
-    # 자체 rate-limit 회로를 가진 싱글톤을 유지한다. close_price(finance-pi)는
-    # 공유 'finance_pi' 클라이언트를 쓰며 init/close 훅은 호환용으로 남았다.
+    # 쓰던 외부 호출이 core/http.get_http_client() 로 전환한다. kis_proxy·
+    # close_price(finance-pi)도 공유 클라이언트('kis_proxy'·'finance_pi')를 쓰고
+    # 자체 rate-limit·쿨다운 회로만 유지한다. 둘의 init/close 훅은 호환용이다.
     from core import http as http_manager
     from repositories import bootstrap, corp_codes
     from repositories import users as users_repo
