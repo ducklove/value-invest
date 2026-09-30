@@ -22,6 +22,7 @@ MOVED: dict[str, str] = {
     "market_sessions": "services.market.sessions",
     "preferred_dividends": "services.dividends.preferred",
     "foreign_dividends": "services.dividends.foreign",
+    "snapshot_intraday": "services.portfolio.intraday_snapshot",
 }
 
 # 루트 shim 을 남긴 모듈(외부가 경로로 import). 저장소 안 코드는 여전히 정본을 쓴다.

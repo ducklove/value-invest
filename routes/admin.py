@@ -457,7 +457,7 @@ async def _run_portfolio_snapshot(snap_date: str | None) -> None:
 
 
 async def _run_portfolio_intraday(_snap_date: str | None) -> None:
-    import snapshot_intraday
+    from services.portfolio import intraday_snapshot as snapshot_intraday
 
     # /api/internal/snapshot/intraday 와 동일 — 장중 포인트는 NAV 락을 쓰지 않는다.
     await snapshot_intraday.run(manage_db=False)

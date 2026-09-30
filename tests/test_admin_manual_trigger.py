@@ -96,7 +96,7 @@ class AdminManualTriggerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_intraday_runs_in_process_and_ignores_date(self):
         run = AsyncMock()
-        with patch("snapshot_intraday.run", new=run):
+        with patch("services.portfolio.intraday_snapshot.run", new=run):
             await admin.trigger_job("portfolio-intraday", _request("portfolio-intraday", {"date": "2026-09-29"}))
             await self._wait_job("portfolio-intraday")
         run.assert_awaited_once_with(manage_db=False)

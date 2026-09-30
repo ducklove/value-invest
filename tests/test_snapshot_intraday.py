@@ -3,13 +3,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import snapshot_intraday
+from services.portfolio import intraday_snapshot as snapshot_intraday
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_snapshot_intraday_does_not_import_portfolio_route_private_helpers():
-    source = (ROOT / "snapshot_intraday.py").read_text(encoding="utf-8")
+    source = (ROOT / "services" / "portfolio" / "intraday_snapshot.py").read_text(encoding="utf-8")
 
     assert "from routes.portfolio import" not in source
 

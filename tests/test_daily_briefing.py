@@ -361,7 +361,7 @@ class BriefingContextTests(DailyBriefingHarness):
         )
         await db.commit()
 
-        with patch("snapshot_intraday._fetch_total_value", new=AsyncMock(return_value=1_110_000)):
+        with patch("services.portfolio.intraday_snapshot._fetch_total_value", new=AsyncMock(return_value=1_110_000)):
             block = await daily_briefing._fetch_today_portfolio_block("u1", date.today().isoformat())
 
         self.assertIsNone(block)  # 확정 정산 전에는 실시간 가격으로 대체하지 않는다.

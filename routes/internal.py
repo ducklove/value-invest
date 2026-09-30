@@ -141,7 +141,7 @@ async def run_after_close_snapshot(request: Request):
 @router.post("/snapshot/intraday")
 async def run_intraday_snapshot(request: Request):
     _require_loopback(request)
-    import snapshot_intraday
+    from services.portfolio import intraday_snapshot as snapshot_intraday
     try:
         await snapshot_intraday.run(manage_db=False)
         return {"ok": True, "kind": "intraday"}

@@ -19,7 +19,7 @@ Data sources are reused so alerts agree with what the UI shows:
 * effective 목표가 → 수식이면 라이브 평가, else ``target_price`` column, else
   우선주 본주가, else 지주사 지분가치/주, else 매입가×1.3. 동적(수식·보유지분)
   목표가를 라이브로 못 구하면 폴백 없이 건너뛴다 — ``_effective_target`` 참고
-* portfolio NAV → ``snapshot_intraday._fetch_total_value``
+* portfolio NAV → ``services.portfolio.intraday_snapshot._fetch_total_value``
 * prev-close NAV → latest ``portfolio_snapshots`` row (the Today baseline)
 
 Quote fetching is shared per evaluation pass (``evaluate_all``): every user's
@@ -262,7 +262,7 @@ async def _portfolio_nav(
     matches the stored snapshots exactly. Returns None if it can't be valued.
 
     ``quote_map`` 은 패스 공유 시세 — 맵에 없는 종목만 개별 조회한다."""
-    import snapshot_intraday
+    from services.portfolio import intraday_snapshot as snapshot_intraday
     try:
         if quote_map is None:
             total = await snapshot_intraday._fetch_total_value(google_sub)
