@@ -4,8 +4,8 @@ import asyncio
 import logging
 from datetime import date, timedelta
 
-import stock_price
 from cache_layer import MemoryTTLCache
+from services import stock_price
 from services.market.sources import close_price as close_price_client
 from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo

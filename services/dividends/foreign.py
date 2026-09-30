@@ -1,7 +1,7 @@
 """Fetch trailing-annual dividend per share for overseas tickers via yfinance.
 
 Scope limited to foreign stocks because:
-  * Korean stocks are covered by the market_data pipeline (stock_price.py)
+  * Korean stocks are covered by the market_data pipeline (services/stock_price.py)
   * Preferred stocks have their own curated sheet (services/dividends/preferred.py)
   * Cash / gold / crypto obviously have no dividend concept
 

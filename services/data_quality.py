@@ -532,9 +532,9 @@ async def inspect_stock(
     cache/stock_price(yfinance·pandas) 는 함수 안에서 lazy import —
     웹 프로세스가 이 모듈을 임포트할 때 무거운 의존성을 끌고 오지 않게.
     """
-    import stock_price
     from repositories import corp_codes
     from repositories import financial as financial_repo
+    from services import stock_price
     from services.market.sources import yfinance_runner
 
     corp_name = await corp_codes.get_corp_name(stock_code) or stock_code

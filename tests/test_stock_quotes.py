@@ -32,7 +32,7 @@ async def test_cash_vnd_keeps_per_unit_precision_in_daily_and_fallback_quotes():
 
 def test_runtime_quote_callers_use_stock_quotes_service_boundary():
     allowed = {
-        ROOT / "stock_price.py",  # low-level REST/WS implementation
+        ROOT / "services" / "stock_price.py",  # low-level REST/WS implementation
         ROOT / "services" / "stock_quotes.py",  # public current-price service
     }
     offenders = []

@@ -2,8 +2,7 @@ from copy import deepcopy
 from unittest.mock import AsyncMock, patch
 
 import kis_ws_manager
-import stock_price
-from services import stock_intraday, stock_quotes
+from services import stock_intraday, stock_price, stock_quotes
 from services.portfolio.quotes import should_accept_quote_snapshot
 
 

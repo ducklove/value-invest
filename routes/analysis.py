@@ -5,7 +5,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 import analyzer
-import stock_price
 from deps import (
     ANALYSIS_SEMAPHORE,
     analysis_snapshot_is_stale,
@@ -19,7 +18,7 @@ from repositories import benchmark_daily as benchmark_repo
 from repositories import cache_values, corp_codes
 from repositories import financial as financial_repo
 from repositories import user_stocks as user_stocks_repo
-from services import stock_quotes
+from services import stock_price, stock_quotes
 from services.dart import client as dart_client
 
 logger = logging.getLogger(__name__)

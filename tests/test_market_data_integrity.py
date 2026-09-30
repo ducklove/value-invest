@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin
 
-import stock_price
 from repositories import financial as financial_repo
 from repositories import portfolio as portfolio_repo
+from services import stock_price
 from services.portfolio import valuation
 
 

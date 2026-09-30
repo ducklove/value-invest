@@ -394,9 +394,9 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
     hide the true trailing yield.
 
     Excluded: the current calendar year, to avoid the "0 until announced"
-    trap the analysis page had (see stock_price.py dividend fallback).
+    trap the analysis page had (see services/stock_price.py dividend fallback).
 
-    Preferred-stock fallback: the market_data pipeline (stock_price.py)
+    Preferred-stock fallback: the market_data pipeline (services/stock_price.py)
     indexes by common-stock code, so a 005935 holding will miss unless
     we also look up its common counterpart 005930. The actual dividend
     paid to preferred holders is usually slightly higher (typical 1%p

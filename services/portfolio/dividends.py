@@ -5,9 +5,9 @@ import logging
 import time
 from datetime import datetime
 
-import stock_price
 from repositories import corp_codes
 from repositories import financial as financial_repo
+from services import stock_price
 from services.dart import client as dart_client
 from services.portfolio.identifiers import (
     common_stock_code,

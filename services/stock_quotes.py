@@ -34,8 +34,8 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 import kis_ws_manager
-import stock_price
 from cache_layer import MemoryTTLCache
+from services import stock_price
 from services.portfolio.quotes import should_accept_quote_snapshot
 
 STOCK_CACHE_TTL_SECONDS = 60

@@ -2,8 +2,8 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
-import stock_price
-from stock_price import (
+from services import stock_price
+from services.stock_price import (
     _adjust_dividends_by_price_factors,
     _build_dividend_events,
     _estimate_price_adjustment_factors,
