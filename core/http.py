@@ -69,6 +69,7 @@ _TIMEOUT_PROFILES: dict[str, float] = {
     "dividend_schedule": 8.0,
     "preferred_dividends": 30.0,
     "market_indicators": 8.0,
+    "fred": 6.0,
     "default": 30.0,
 }
 

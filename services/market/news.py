@@ -16,7 +16,7 @@ import logging
 
 from bs4 import BeautifulSoup
 
-from cache_layer import MemoryTTLCache
+from cache_layer import FETCH_ERRORS, MemoryTTLCache, cached_fetch_result
 from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,8 @@ _SEM = asyncio.Semaphore(3)
 # Naver 뉴스는 가벼운 GET — 공유 "naver" 클라이언트(기본 8s)에서 per-request
 # 로 더 짧은 timeout 을 건다. 커넥션 풀은 앱 매니저가 재사용한다.
 _HTTP_TIMEOUT = 6.0
+# 뉴스 섹션은 절대 예외를 올리지 않는다 — 네트워크·HTTP·파싱 오류를 모두 흡수.
+_NEWS_ERRORS = (*FETCH_ERRORS, AttributeError)
 
 
 def _parse_news(html: str) -> list[dict]:
@@ -72,28 +74,36 @@ def _parse_news(html: str) -> list[dict]:
     return items
 
 
+async def _load_market_news() -> list[dict]:
+    async with _SEM:
+        client = await get_http_client("naver")
+        resp = await client.get(
+            _NEWS_URL,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=_HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+    return _parse_news(resp.content.decode("euc-kr", errors="replace"))
+
+
 async def fetch_market_news(limit: int = 8) -> list[dict]:
-    """Fetch 주요 뉴스 (cached). Falls back to stale cache on upstream failure."""
-    key = "mainnews"
-    cached = _news_cache.get(key)
-    if cached is not None:
-        return cached[:limit]
+    """Fetch 주요 뉴스 (cached). Falls back to stale cache on upstream failure.
+
+    ``cached_fetch``: 동시 cold 요청은 upstream 한 번(single-flight), 실패하거나
+    빈 목록이면 마지막 정상 목록(나이 무관)을 돌려준다. 빈 목록은 캐시하지 않는다.
+    """
     try:
-        async with _SEM:
-            client = await get_http_client("naver")
-            resp = await client.get(
-                _NEWS_URL,
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=_HTTP_TIMEOUT,
-            )
-            resp.raise_for_status()
-        items = _parse_news(resp.content.decode("euc-kr", errors="replace"))
-        if items:
-            _news_cache.set(key, items)
-        return items[:limit]
-    except Exception as exc:
+        result = await cached_fetch_result(
+            _news_cache,
+            "mainnews",
+            _load_market_news,
+            stale_ttl=float("inf"),
+            is_valid=bool,
+            errors=_NEWS_ERRORS,
+        )
+    except _NEWS_ERRORS as exc:
         logger.warning("market news fetch failed: %s", exc)
-        entry = _news_cache.get_entry(key, allow_stale=True) if hasattr(_news_cache, "get_entry") else None
-        if entry and getattr(entry, "value", None):
-            return list(entry.value)[:limit]
         return []
+    if result.error is not None:
+        logger.warning("market news fetch failed: %s", result.error)
+    return list(result.value)[:limit]

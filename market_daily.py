@@ -19,7 +19,7 @@ import market_indicators
 import market_movers
 import market_news
 import market_sessions
-from cache_layer import MemoryTTLCache
+from cache_layer import MemoryTTLCache, cached_fetch_result
 from core.http import get_http_client
 from repositories import corp_codes
 from services import ai_client
@@ -47,6 +47,8 @@ BRIEF_MOVER_LIMIT = int(os.environ.get("MARKET_DAILY_MOVER_LIMIT", "24"))
 # 소스별 수집 타임아웃 — 업스트림 하나가 매달려도 브리프 전체가 hang 하지 않게.
 BRIEF_SOURCE_TIMEOUT_S = float(os.environ.get("MARKET_DAILY_SOURCE_TIMEOUT_S", "25"))
 MARKET_TAPE_TTL_SECONDS = int(os.environ.get("MARKET_TAPE_TTL_SECONDS", "45"))
+# 테이프 빌드 실패 시 직전 테이프를 대신 보여줄 최대 나이(초).
+MARKET_TAPE_STALE_SECONDS = int(os.environ.get("MARKET_TAPE_STALE_SECONDS", "600"))
 MARKET_TAPE_EVENT_LIMIT = int(os.environ.get("MARKET_TAPE_EVENT_LIMIT", "40"))
 # 마켓테이프 종목 선정(시장 전체 기준) — 시총상위/급등락 각 시장별 상한 개수
 TAPE_MARKET_CAP_COUNT = int(os.environ.get("MARKET_TAPE_MARKET_CAP_COUNT", "6"))
@@ -348,7 +350,16 @@ async def _tape_movers() -> list[dict[str, Any]]:
     return list(best.values())
 
 
-async def _fetch_dart_disclosures(interests: list[dict[str, Any]], brief_date: str) -> tuple[list[dict[str, Any]], list[str]]:
+async def _fetch_dart_disclosures(
+    interests: list[dict[str, Any]],
+    brief_date: str,
+    *,
+    essential: bool = True,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """이슈 종목의 당일 공시. list.json 은 dart_client 단일 클라이언트(10분 캐시·쿼터 가드)를 지난다.
+
+    ``essential=False`` (마켓테이프) 는 DART 일일 예산이 바닥나면 upstream 을 부르지 않는다.
+    """
     warnings: list[str] = []
     if not dart_client.api_key():
         return [], ["OPENDART_API_KEY가 없어 관심종목 공시 조회를 건너뜀"]
@@ -365,50 +376,63 @@ async def _fetch_dart_disclosures(interests: list[dict[str, Any]], brief_date: s
     yyyymmdd = brief_date.replace("-", "")
     semaphore = asyncio.Semaphore(max(1, DISCLOSURE_CONCURRENCY))
     disclosures: list[dict[str, Any]] = []
+    quota_blocked: list[str] = []
 
-    async with _market_daily_client("dart") as client:
-        async def fetch_one(item: dict[str, Any], corp_code: str) -> None:
-            async with semaphore:
-                params = {
-                    "crtfc_key": dart_client.api_key(),
-                    "corp_code": corp_code,
-                    "bgn_de": yyyymmdd,
-                    "end_de": yyyymmdd,
-                    "page_count": "20",
-                }
-                try:
-                    resp = await client.get(f"{dart_client.BASE_URL}/list.json", params=params, timeout=10.0)
-                    if resp.status_code != 200:
-                        warnings.append(f"{item['stock_code']} DART HTTP {resp.status_code}")
-                        return
-                    payload = resp.json()
-                except Exception as exc:
+    async def fetch_one(item: dict[str, Any], corp_code: str) -> None:
+        async with semaphore:
+            try:
+                rows = await dart_client.fetch_filing_list(
+                    corp_code,
+                    yyyymmdd,
+                    yyyymmdd,
+                    page_count=20,
+                    timeout=10.0,
+                    essential=essential,
+                )
+            except dart_client.DartQuotaError as exc:
+                quota_blocked.append(str(exc))
+                return
+            except dart_client.DartListError as exc:
+                if exc.http_status is not None:
+                    warnings.append(f"{item['stock_code']} DART HTTP {exc.http_status}")
+                elif exc.dart_status is not None:
+                    warnings.append(f"{item['stock_code']} DART status {exc.dart_status}")
+                else:
                     warnings.append(f"{item['stock_code']} DART 조회 실패: {exc}")
-                    return
-                if payload.get("status") not in {"000", "013"}:
-                    warnings.append(f"{item['stock_code']} DART status {payload.get('status')}")
-                    return
-                for raw in payload.get("list") or []:
-                    report_name = str(raw.get("report_nm") or "").strip()
-                    rcept_no = str(raw.get("rcept_no") or "").strip()
-                    reason = _material_disclosure_reason(report_name)
-                    disclosures.append(
-                        {
-                            "stock_code": item["stock_code"],
-                            "stock_name": item.get("stock_name") or raw.get("corp_name") or item["stock_code"],
-                            "corp_name": raw.get("corp_name") or item.get("stock_name") or "",
-                            "report_name": report_name,
-                            "rcept_no": rcept_no,
-                            "rcept_dt": raw.get("rcept_dt") or "",
-                            "filer": raw.get("flr_nm") or "",
-                            "remark": raw.get("rm") or "",
-                            "url": DART_VIEWER_URL.format(rcept_no=rcept_no) if rcept_no else "",
-                            "is_material": bool(reason),
-                            "material_reason": reason,
-                        }
-                    )
+                return
+            except httpx.HTTPError as exc:
+                warnings.append(f"{item['stock_code']} DART 조회 실패: {exc}")
+                return
+            for raw in rows:
+                report_name = str(raw.get("report_nm") or "").strip()
+                rcept_no = str(raw.get("rcept_no") or "").strip()
+                reason = _material_disclosure_reason(report_name)
+                disclosures.append(
+                    {
+                        "stock_code": item["stock_code"],
+                        "stock_name": item.get("stock_name") or raw.get("corp_name") or item["stock_code"],
+                        "corp_name": raw.get("corp_name") or item.get("stock_name") or "",
+                        "report_name": report_name,
+                        "rcept_no": rcept_no,
+                        "rcept_dt": raw.get("rcept_dt") or "",
+                        "filer": raw.get("flr_nm") or "",
+                        "remark": raw.get("rm") or "",
+                        "url": DART_VIEWER_URL.format(rcept_no=rcept_no) if rcept_no else "",
+                        "is_material": bool(reason),
+                        "material_reason": reason,
+                    }
+                )
 
-        await asyncio.gather(*(fetch_one(item, corp_code) for item, corp_code in corp_rows))
+    outcomes = await asyncio.gather(
+        *(fetch_one(item, corp_code) for item, corp_code in corp_rows), return_exceptions=True
+    )
+    for (item, _corp_code), outcome in zip(corp_rows, outcomes):
+        if isinstance(outcome, BaseException):
+            # 한 종목의 예기치 못한 실패가 공시 섹션 전체를 막지 않게 경고로 격리.
+            logger.warning("DART disclosure fetch crashed for %s: %r", item["stock_code"], outcome)
+            warnings.append(f"{item['stock_code']} DART 조회 실패: {outcome}")
+    if quota_blocked:
+        warnings.append(f"DART 호출 한도 보호로 공시 {len(quota_blocked)}건 조회를 건너뜀")
 
     disclosures.sort(key=lambda row: (0 if row.get("is_material") else 1, row.get("stock_code") or ""))
     return disclosures[:30], warnings[:8]
@@ -819,11 +843,21 @@ def build_market_tape_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
 async def build_market_tape(*, google_sub: str | None = None, refresh: bool = False) -> dict[str, Any]:
     # 테이프는 시장 전체 기준(열린 시장 지수·시총상위·상하한가·급등락)이라 사용자별로
     # 달라지지 않는다 → 공용 캐시 키 하나로 모든 사용자가 공유한다(google_sub는 무시).
-    cache_key = "public"
-    cached = _TAPE_CACHE.get_entry(cache_key)
-    if cached is not None and not refresh:
-        return {**cached.value, "cached": True}
+    # cached_fetch: 동시에 들어온 cold 요청은 한 번만 빌드(single-flight)하고, 빌드가
+    # 실패하면 직전 테이프를 MARKET_TAPE_STALE_SECONDS 까지 대신 돌려준다.
+    result = await cached_fetch_result(
+        _TAPE_CACHE,
+        "public",
+        _build_market_tape_uncached,
+        force=refresh,
+        stale_ttl=MARKET_TAPE_STALE_SECONDS,
+    )
+    if result.from_cache or result.stale:
+        return {**result.value, "cached": True}
+    return result.value
 
+
+async def _build_market_tape_uncached() -> dict[str, Any]:
     brief_date = _today_iso()
     market_rows = await _tape_index_rows()
     movers = await _tape_movers()
@@ -836,9 +870,13 @@ async def build_market_tape(*, google_sub: str | None = None, refresh: bool = Fa
     focus_codes = [m["stock_code"] for m in focus]
     names = {m["stock_code"]: m["stock_name"] for m in movers}
 
-    disclosures, disclosure_warnings = (
-        await _fetch_dart_disclosures(focus_interests, brief_date) if focus_interests else ([], [])
-    )
+    # 시간 게이트: 07–20시 KST 밖에서는 테이프 공시 조회를 하지 않는다(쿼터 보호, 경고 없음).
+    if focus_interests and dart_client.in_disclosure_hours():
+        disclosures, disclosure_warnings = await _fetch_dart_disclosures(
+            focus_interests, brief_date, essential=False
+        )
+    else:
+        disclosures, disclosure_warnings = [], []
     news = await _news_for_focus_codes(focus_codes, names) if focus_codes else []
     payload = {
         "brief_date": brief_date,
@@ -863,7 +901,6 @@ async def build_market_tape(*, google_sub: str | None = None, refresh: bool = Fa
             "disclosures": len(disclosures),
         },
     }
-    _TAPE_CACHE.set(cache_key, result)
     return result
 
 

@@ -109,32 +109,34 @@ async def fetch_periodic_filings(corp_code: str, *, limit: int = 8) -> list[dict
 
     end = date.today()
     start = end - timedelta(days=REPORT_LOOKBACK_DAYS)
-    params = {
-        "crtfc_key": api_key,
-        "corp_code": corp_code,
-        "bgn_de": start.strftime("%Y%m%d"),
-        "end_de": end.strftime("%Y%m%d"),
-        "last_reprt_at": "Y",
-        "pblntf_ty": "A",
-        "sort": "date",
-        "sort_mth": "desc",
-        "page_no": "1",
-        "page_count": "100",
-    }
-    client = await get_http_client("dart")
-    resp = await client.get(f"{dart_client.BASE_URL}/list.json", params=params, timeout=20.0)
-    resp.raise_for_status()
-    data = resp.json()
-    status = str(data.get("status") or "")
-    if status != "000":
-        if status in {"013", "014"}:
+    # list.json 은 dart_client 단일 클라이언트(쿼리 캐시·쿼터 가드)를 지난다.
+    try:
+        items = await dart_client.fetch_filing_list(
+            corp_code,
+            start.strftime("%Y%m%d"),
+            end.strftime("%Y%m%d"),
+            last_reprt_at="Y",
+            pblntf_ty="A",
+            sort="date",
+            sort_mth="desc",
+            page_no=1,
+            page_count=100,
+            timeout=20.0,
+        )
+    except dart_client.DartListError as exc:
+        if exc.dart_status is None:
+            raise  # HTTP/파싱 오류 — 예전 raise_for_status 처럼 그대로 전파
+        if exc.dart_status == "014":
             _filings_cache.set(cache_key, [])
             return []
-        raise DartReportReviewError(data.get("message") or f"DART 공시검색 실패({status})")
+        raise DartReportReviewError(exc.message or f"DART 공시검색 실패({exc.dart_status})") from exc
+    if not items:
+        _filings_cache.set(cache_key, [])
+        return []
 
     filings: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for item in data.get("list") or []:
+    for item in items:
         report_name = str(item.get("report_nm") or "")
         if not any(keyword in report_name for keyword in PERIODIC_REPORT_KEYWORDS):
             continue
