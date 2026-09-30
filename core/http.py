@@ -15,13 +15,14 @@ timeout은 호출 시점 인자로 덮어쓸 수 있다(httpx 는
   OpenRouter 90s, Naver bulk 15s). 매니저는 서비스 이름 → 기본 timeout
   매핑을 갖고, 같은 서비스 호출은 같은 클라이언트(커넥션 풀)를 재사용한다.
 * **lazy init**. ``get()`` 는 클라이언트가 없으면 생성한다. 덕분에 lifespan
-  을 거치지 않는 배치 스크립트(snapshot_*.py)에서도 동작한다 — 다만 명시적
+  을 거치지 않는 배치 CLI(nav_snapshot 등)·scripts 에서도 동작한다 — 다만 명시적
   close 가 없으면 커넥션이 프로세스 종료 시까지 남으므로, 배치에서는
   ``batch_http_client()`` 컨텍스트 매니저 사용을 권장한다.
-* **기존 자체 싱글톤 유지**. ``kis_proxy_client``·``close_price_client`` 는
-  rate limiting·회로차단 등 추가 로직을 가진 자체 클라이언트를 이미 쓴다.
-  이 레지스트리는 그 두 클라이언트를 대체하지 않고, 나머지 ``async with``
-  패턴을 재사용으로 전환한다.
+* **소스 클라이언트도 레지스트리 경유**. ``services.market.sources.kis_proxy``
+  (``register_timeout_profile`` 로 env timeout 등록)와
+  ``services.market.sources.close_price``(``finance_pi`` provider 경유)도
+  ``get_http_client`` 로 클라이언트를 받는다 — rate limiting·쿨다운 같은
+  추가 로직은 각 모듈에 남는다.
 * **per-request timeout**. 서비스 기본 timeout 이 부적절한 특정 호출은
   ``client.get(url, timeout=…)`` 로 덮어쓴다. 클라이언트의 기본 timeout 은
   해당 서비스의 일반적 상한선이다.
