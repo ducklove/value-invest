@@ -1,7 +1,8 @@
 """Tests for ST-03 — 루트 레거시 모듈 → services/market/ 패키지 이관.
 
-이관 후 (1) 새 패키지 경로가 동작하고, (2) 루트 호환 재수출이 동일 구현을
-가리키며, (3) 순환 import 없이 로드되는지 검증한다.
+이관 후 (1) 새 패키지 경로가 동작하고, (2) 순환 import 없이 로드되는지 검증한다.
+루트 호환 shim(market_news·market_sessions)은 호출부 이전 후 삭제됐다 — 재도입
+방지는 tests/test_legacy_root_modules.py 가 맡는다.
 """
 
 from __future__ import annotations
@@ -26,24 +27,6 @@ def test_new_package_path_exposes_news():
     from services.market import news
 
     assert callable(news.fetch_market_news)
-
-
-def test_root_market_sessions_reexports_same_implementation():
-    """루트 market_sessions 는 services.market.sessions 와 같은 객체를 가리킨다."""
-    import market_sessions
-    from services.market import sessions
-
-    assert market_sessions.open_markets is sessions.open_markets
-    assert market_sessions.MARKETS is sessions.MARKETS
-    assert market_sessions.KST is sessions.KST
-
-
-def test_root_market_news_reexports_same_implementation():
-    """루트 market_news 는 services.market.news 와 같은 객체를 가리킨다."""
-    import market_news
-    from services.market import news
-
-    assert market_news.fetch_market_news is news.fetch_market_news
 
 
 def test_no_circular_import_on_package_load():

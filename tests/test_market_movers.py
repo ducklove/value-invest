@@ -2,9 +2,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import market_news
 from routes import stocks as stocks_route
 from services.market import movers as market_movers
+from services.market import news as market_news
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 

@@ -1,9 +1,9 @@
 """Market-data collection domain (ST-03 progressive migration).
 
-루트 평면 모듈(market_sessions, market_news, market_movers 등)이 점진 이관되는
-패키지. 각 모듈은 순수 도메인 로직만 담고, ``repositories``·``core`` 만
-의존한다(순환 import 방지). 루트 모듈은 호환 재수출 레이어로 남아 기존
-``import market_X`` 호출부를 깨지 않게 한다 — 후속 커밋에서 단계 제거.
+루트 평면 모듈(market_sessions, market_news, market_movers 등)이 이관된 패키지
+(D-18). 호출부는 새 경로를 직접 import 하고, 루트 호환 shim 은 두지 않는다
+(tests/test_legacy_root_modules.py 가 재도입을 막는다). 이 ``__init__`` 은 가벼운
+심볼만 재수출한다 — 무거운 하위 모듈을 여기서 import 하면 순환 import 위험이 커진다.
 """
 
 from services.market.news import (

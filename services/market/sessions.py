@@ -12,9 +12,8 @@ for *featuring* a market on the tape, not for trading decisions. Korea has no DS
 2nd-Sunday-March .. 1st-Sunday-November rule.
 
 이관 노트(ST-03): 루트의 평면 ``market_sessions.py`` 에서 이 패키지로 옮겨옴.
-루트 모듈은 호환 재수출 레이어로 남아 있어 기존 ``import market_sessions``
-호출부가 깨지지 않는다. 새 코드는 ``from services.market import sessions``
-또는 ``from services.market.sessions import open_markets`` 를 쓴다.
+루트 호환 shim 은 호출부 이전 후 삭제됐다(D-18) — ``from services.market import
+sessions`` 또는 ``from services.market.sessions import open_markets`` 를 쓴다.
 """
 
 from __future__ import annotations

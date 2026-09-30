@@ -7,8 +7,8 @@ All instants are injected so the suite is deterministic and tz-database free.
 import unittest
 from datetime import date, datetime
 
-import market_sessions
-from market_sessions import KST
+from services.market import sessions as market_sessions
+from services.market.sessions import KST
 
 
 class MarketSessionsTest(unittest.TestCase):
