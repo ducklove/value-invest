@@ -112,3 +112,18 @@ test('popstate: /analysis?code 는 다른 종목일 때만 다시 분석하고, 
     assert.deepEqual(calls.splice(0), [['view', 'labs']]);
   } finally { w.close(); }
 });
+
+test('모바일 /portfolio?focus= 진입은 맨 위 고정(holdPageScrollTop)을 건너뛰어 강조 행 스크롤을 지킨다', async () => {
+  for (const [path, expectHold] of [['/portfolio?focus=005930', false], ['/portfolio', true]]) {
+    let held = 0;
+    const { w, ready } = bootApp(path, {
+      innerWidth: 390,
+      isCompactMobileViewport: () => true,
+      holdPageScrollTop: () => { held += 1; },
+    });
+    try {
+      await ready;
+      assert.equal(held > 0, expectHold, path);
+    } finally { w.close(); }
+  }
+});

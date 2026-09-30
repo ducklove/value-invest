@@ -187,8 +187,10 @@ async function initApp() {
   // 모바일 첫 진입은 최상단에서 — 포트폴리오 요약(집계 숫자)이 화면 맨 위라
   // 조금만 밀려 있어도 가장 먼저 가려진다. 기본값 진입과 경로 진입(/portfolio)
   // 모두 대상이고, 데이터가 채워진 뒤의 뒤늦은 위치 복원까지 되돌린다
-  // (holdPageScrollTop 주석 참고). code= 딥링크는 분석 결과로 가는 흐름이라 제외.
-  if (!code && typeof isCompactMobileViewport === 'function' && isCompactMobileViewport()) {
+  // (holdPageScrollTop 주석 참고). code= 딥링크는 분석 결과로 가는 흐름이라 제외하고,
+  // /portfolio?focus= 는 보유 행으로 스크롤하는 흐름이라 맨 위로 되돌리면 안 된다.
+  const focusDeepLink = viewFromPath === 'portfolio' && !!params.get('focus');
+  if (!code && !focusDeepLink && typeof isCompactMobileViewport === 'function' && isCompactMobileViewport()) {
     holdPageScrollTop();
   }
   // URL에 맞는 화면과 필수 데이터부터 시작하고 부가 데이터는 독립적으로 준비한다.
