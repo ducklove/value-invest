@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import Response
 
-import external_tools
 from routes import portfolio as pf
+from services.ecosystem import external_tools
 from services.portfolio import spac
 
 ITEM = {

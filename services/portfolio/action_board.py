@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import external_tools
 from domain.timeutil import KST
 from repositories import action_reviews as reviews_repo
 from repositories import portfolio as portfolio_repo
+from services.ecosystem import external_tools
 from services.portfolio import rebalance as rebalance_service
 from services.portfolio import theses
 

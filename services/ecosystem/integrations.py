@@ -418,7 +418,7 @@ def _apply_gold_gap_latest(config: dict[str, Any]) -> None:
     로컬 ``gold_gap/data.json`` 은 orphan ``data`` 브랜치에만 있어 오래되기 쉽다 — 캐시가
     비어 있으면(아직 한 번도 안 받았으면) 로컬 파일 값을 그대로 둔다. 네트워크는 타지 않는다.
     """
-    import external_tools
+    from services.ecosystem import external_tools
 
     latest = external_tools.peek_gold_latest()
     if not isinstance(latest, dict):

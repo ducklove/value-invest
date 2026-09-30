@@ -16,8 +16,8 @@ import calendar
 import math
 from datetime import date
 
-import external_tools
 from asset_insights import safe_float
+from services.ecosystem import external_tools
 from services.portfolio.identifiers import is_korean_stock
 from services.portfolio.time_windows import today_kst_date
 

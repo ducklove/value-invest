@@ -5,6 +5,7 @@
 - :mod:`services.ecosystem.siblings` — summary.json 우선 로더(ETag·음성 캐시·stale 1일) + 레거시 폴백
 - :mod:`services.ecosystem.adapters` — summary ``data`` → 기존 허브 모양(레거시 파일 모양) 변환
 - :mod:`services.ecosystem.links`    — 레지스트리 기반 딥링크/handoff URL 조립(``/go``)
+- :mod:`services.ecosystem.external_tools` — 형제 대시보드 요약(허브 위젯·종목 딥링크·포트폴리오 신호)(구 루트 ``external_tools``)
 - :mod:`services.ecosystem.integrations` — 연결 도구 설정(``/app-config.js``·``/api/integrations``·handoff)(구 루트 ``integrations``)
 - :mod:`services.ecosystem.linked_admin` — 관리자 화면의 형제 ``config.json`` 읽기·검증·쓰기(구 루트 ``linked_project_admin``)
 

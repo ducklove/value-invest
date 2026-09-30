@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import external_tools
 from routes import stocks as stocks_route
+from services.ecosystem import external_tools
 
 
 class ExternalSummaryTests(unittest.TestCase):

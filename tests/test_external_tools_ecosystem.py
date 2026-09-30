@@ -9,8 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-import external_tools
-from services.ecosystem import adapters, siblings
+from services.ecosystem import adapters, external_tools, siblings
 from services.portfolio import spac
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "ecosystem"

@@ -3,8 +3,7 @@ from pathlib import Path
 
 import pytest
 
-import external_tools
-from services.ecosystem import integrations
+from services.ecosystem import external_tools, integrations
 
 
 @pytest.fixture(autouse=True)

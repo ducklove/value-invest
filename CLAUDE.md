@@ -42,7 +42,7 @@
 4. `tests/test_portfolio.py`에 roundtrip 테스트 (`TempDbMixin` 하니스).
 
 **B. 외부 데이터 API 엔드포인트 추가**
-모범 예시: [routes/stocks.py](routes/stocks.py)의 `/api/external/insights` + [external_tools.py](external_tools.py) — `get_http_client` fetch → `MemoryTTLCache` → 독립 실패 허용.
+모범 예시: [routes/stocks.py](routes/stocks.py)의 `/api/external/insights` + [services/ecosystem/external_tools.py](services/ecosystem/external_tools.py) — `get_http_client` fetch → `MemoryTTLCache` → 독립 실패 허용.
 
 **C. 대시보드 위젯 추가**
 1. index.html에 컨테이너 `<div id="…">` (main 컬럼/우측 rail 구분은 HTML 주석 참고).
