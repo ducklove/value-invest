@@ -3,8 +3,8 @@
 이전에는 foreign·history·stock_intraday·dividend_sources·naver_indicators 가
 각자 URL 을 만들고 JSON 을 파싱했으며, 세마포어도 제각각(4+4+지표 4+…)이라
 Yahoo 는 한 순간 8~14 개의 동시 요청을 받았다. 이 모듈이 그 경로를 하나로
-모은다. (레거시 루트 ``market_indicators.py`` 의 ^TNX·지표 호출은 아직 자체
-URL 을 쓴다 — 다음 이전 대상.)
+모은다. 레거시 루트 ``market_indicators.py`` 의 ^TNX·GC=F·CL=F 지표도 이
+provider 를 거친다.
 
 * **fetch** — ``fetch_chart_json()`` 이 URL·쿼리·헤더를 만들고, 호스트 단위
   동시성 한도(``host_limit()``)와 429 처리를 거쳐 원본 JSON(dict)을 돌려준다.

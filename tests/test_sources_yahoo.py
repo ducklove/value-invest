@@ -272,3 +272,53 @@ async def test_close_series_never_raises_and_infers_currency():
     with patch.object(yahoo, "get_http_client", getter):
         assert await portfolio_history.fetch_yahoo_chart("AAPL") == {"rows": [], "currency": None, "meta": {}}
     getter.assert_not_awaited()
+
+
+# --- market_indicators (legacy root) callers ------------------------------
+
+def test_market_indicators_yahoo_quotes_go_through_provider():
+    import market_indicators as mi
+
+    seen = []
+
+    def handler(request):
+        symbol = request.url.raw_path.decode().split("?", 1)[0].rsplit("/", 1)[-1]
+        seen.append((symbol, dict(request.url.params)))
+        if symbol == "CL%3DF":
+            return httpx.Response(500)
+        return httpx.Response(200, json=TNX_CHART)
+
+    client = _client(handler)
+
+    async def run():
+        with patch.object(yahoo, "get_http_client", AsyncMock(return_value=client)):
+            return (
+                await mi._fetch_us10y(),
+                await mi._fetch_gold_live(),
+                await mi._fetch_yahoo_commodity("CL=F"),
+            )
+
+    us10y, gold, wti = asyncio.run(run())
+    # 전일값 = 마지막에서 두 번째 유효 종가(4.12) — 기존 파서와 같은 규칙.
+    assert us10y == {"value": "4.21", "change": "0.09", "change_pct": "2.18%", "direction": "up"}
+    assert gold == {"value": "4.21", "change": "0.09", "change_pct": "2.18%", "direction": "up"}
+    assert wti == mi._EMPTY
+    assert [symbol for symbol, _ in seen] == ["%5ETNX", "GC%3DF", "CL%3DF"]
+    assert all(params == {"range": "5d", "interval": "1d"} for _, params in seen)
+
+
+def test_market_indicators_yahoo_quote_falls_back_to_chart_previous_close():
+    import market_indicators as mi
+
+    payload = {"chart": {"result": [{
+        "meta": {"regularMarketPrice": 1234.5, "chartPreviousClose": 1200.0},
+        "timestamp": [_ts(2026, 9, 29)], "indicators": {"quote": [{"close": [1234.5]}]}}]}}
+    client = _client(lambda request: httpx.Response(200, json=payload))
+
+    async def run():
+        with patch.object(yahoo, "get_http_client", AsyncMock(return_value=client)):
+            return await mi._fetch_yahoo_commodity("GC=F")
+
+    assert asyncio.run(run()) == {
+        "value": "1,234.50", "change": "34.50", "change_pct": "2.88%", "direction": "up",
+    }

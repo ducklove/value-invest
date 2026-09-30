@@ -25,6 +25,7 @@ import kis_proxy_client
 from cache_layer import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 from services.market import naver_indicators
+from services.market.sources import yahoo
 
 # ---------------------------------------------------------------------------
 # Catalog
@@ -393,35 +394,9 @@ async def _fetch_world_daily_quote(client: httpx.AsyncClient, market_code: str) 
 # ---------------------------------------------------------------------------
 
 
-async def _fetch_us10y(client: httpx.AsyncClient) -> dict:
+async def _fetch_us10y() -> dict:
     """Fetch US 10Y Treasury yield from Yahoo Finance (^TNX)."""
-    try:
-        r = await client.get(
-            "https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX",
-            params={"interval": "1d", "range": "5d"},
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
-        )
-        if r.status_code != 200:
-            return dict(_EMPTY)
-        data = _json.loads(r.text)
-        meta = data["chart"]["result"][0]["meta"]
-        price = meta["regularMarketPrice"]
-        closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-        valid_closes = [c for c in closes if c is not None]
-        prev = valid_closes[-2] if len(valid_closes) >= 2 else meta.get("chartPreviousClose", price)
-        diff = price - prev
-        pct = abs(diff) / prev * 100 if prev else 0
-        direction = "up" if diff > 0 else "down" if diff < 0 else ""
-        return {
-            "value": f"{price:.2f}",
-            "change": f"{abs(diff):.2f}",
-            "change_pct": f"{pct:.2f}%",
-            "direction": direction,
-        }
-    except Exception:
-        return dict(_EMPTY)
+    return await _fetch_yahoo_daily_quote("^TNX", lambda v: f"{v:.2f}")
 
 
 # ---------------------------------------------------------------------------
@@ -1030,44 +1005,51 @@ async def _fetch_ecos_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict
 # ---------------------------------------------------------------------------
 
 
-async def _fetch_yahoo_commodity(client: httpx.AsyncClient, symbol: str) -> dict:
-    """Fetch commodity futures from Yahoo Finance (e.g., CL=F)."""
+# Yahoo 호출은 services/market/sources/yahoo.py 공유 클라이언트(호스트 동시성·
+# 429 쿨다운)를 거친다. timeout 은 예전 market_indicators 클라이언트 기본값과 같다.
+_YAHOO_TIMEOUT = 8.0
+_YAHOO_QUOTE_ERRORS = (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError, ZeroDivisionError)
+
+
+async def _fetch_yahoo_daily_quote(symbol: str, fmt) -> dict:
+    """Yahoo v8 일봉 5일 → 지표 dict. 전일값은 마지막에서 두 번째 유효 종가
+    (없으면 chartPreviousClose, 그것도 없으면 현재가)."""
     try:
-        r = await client.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-            params={"interval": "1d", "range": "5d"},
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
+        payload = await yahoo.fetch_chart_json(
+            symbol, range_="5d", interval="1d", timeout=_YAHOO_TIMEOUT,
         )
-        if r.status_code != 200:
+        chart = yahoo.parse_chart(payload)
+        if chart is None:
             return dict(_EMPTY)
-        data = _json.loads(r.text)
-        meta = data["chart"]["result"][0]["meta"]
+        meta = chart.meta
         price = meta["regularMarketPrice"]
-        closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-        valid_closes = [c for c in closes if c is not None]
+        valid_closes = [c for c in chart.closes if c is not None]
         prev = valid_closes[-2] if len(valid_closes) >= 2 else meta.get("chartPreviousClose", price)
         diff = price - prev
         pct = abs(diff) / prev * 100 if prev else 0
         direction = "up" if diff > 0 else "down" if diff < 0 else ""
         return {
-            "value": _fmt(price),
-            "change": _fmt(abs(diff)),
+            "value": fmt(price),
+            "change": fmt(abs(diff)),
             "change_pct": f"{pct:.2f}%",
             "direction": direction,
         }
-    except Exception:
+    except _YAHOO_QUOTE_ERRORS:
         return dict(_EMPTY)
 
 
-async def _fetch_gold_live(client: httpx.AsyncClient) -> dict:
+async def _fetch_yahoo_commodity(symbol: str) -> dict:
+    """Fetch commodity futures from Yahoo Finance (e.g., CL=F)."""
+    return await _fetch_yahoo_daily_quote(symbol, _fmt)
+
+
+async def _fetch_gold_live() -> dict:
     """Fetch a fast gold futures daily quote for dashboard/benchmark use."""
     # The spot API can hang past its nominal timeout in some network states.
     # For the dashboard/benchmark UI, a fast daily futures move is safer than
     # blocking the whole market summary while waiting for a marginally fresher
     # spot quote.
-    return await _fetch_yahoo_commodity(client, "GC=F")
+    return await _fetch_yahoo_commodity("GC=F")
 
 
 # ---------------------------------------------------------------------------
@@ -1349,7 +1331,7 @@ async def _fetch_from_sources(fetch_codes: list[str]) -> dict[str, dict]:
 
         # US 10Y bond
         if us10y_needed:
-            tasks.append(_fetch_us10y(client))
+            tasks.append(_fetch_us10y())
             task_keys.append(("us10y", None))
 
         # US overnight RFR (SOFR)
@@ -1364,10 +1346,10 @@ async def _fetch_from_sources(fetch_codes: list[str]) -> dict[str, dict]:
 
         # Commodities
         if gold_needed:
-            tasks.append(_fetch_gold_live(client))
+            tasks.append(_fetch_gold_live())
             task_keys.append(("gold", None))
         if wti_needed:
-            tasks.append(_fetch_yahoo_commodity(client, "CL=F"))
+            tasks.append(_fetch_yahoo_commodity("CL=F"))
             task_keys.append(("wti", None))
 
         # Night futures
