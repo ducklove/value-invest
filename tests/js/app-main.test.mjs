@@ -83,6 +83,7 @@ function bootApp(path, extra = {}) {
     _mbLoadCatalog: async () => {}, _mbLoadCodes: async () => {},
     loadMarketSummary() {}, loadMarketTape() {}, loadDailyMarketBrief() {},
     _pollBenchmarkQuotes() {}, syncAuthState() {},
+    schedulePoll: () => ({ cancel() {} }),
     trackEvent: () => finish(),
     ...extra,
   });
