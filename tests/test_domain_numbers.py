@@ -44,9 +44,9 @@ def test_zero_as_none(value):
 
 
 def test_hub_copies_are_the_single_parser():
-    import close_price_client
     import snapshot_nav
     from services import daily_briefing
+    from services.market.sources import close_price as close_price_client
 
     assert snapshot_nav._safe_float is parse_number
     assert daily_briefing._safe_float is parse_number

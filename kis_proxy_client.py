@@ -9,11 +9,11 @@ from typing import Any
 
 import httpx
 
-import close_price_client
 from cache_layer import MemoryTTLCache
 from core import config as app_config
 from core.errors import ExternalServiceError
 from core.http import get_http_client, register_timeout_profile
+from services.market.sources import close_price as close_price_client
 
 # 허브와 kis-proxy 는 운영에서 같은 호스트에 있다. 운영 기본값은 loopback 이라
 # 토큰이 DDNS NAT hairpin 을 거치는 평문 HTTP 로 나가지 않는다. 개발 PC 에는

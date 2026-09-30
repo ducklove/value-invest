@@ -23,10 +23,10 @@ import hashlib
 import json
 from typing import Any
 
-from close_price_client import ClosePriceClientError, get_screener_snapshot
 from core.errors import AppError, ExternalServiceError
 from repositories import cache_values
 from repositories import screener as screener_repo
+from services.market.sources.close_price import ClosePriceClientError, get_screener_snapshot
 
 # Which metrics may be filtered, with a human label and sane bounds. Bounds
 # exist to reject nonsense (e.g. P/E of 1e9) that would still run but produce

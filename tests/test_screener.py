@@ -250,9 +250,9 @@ class ScreenerServiceTests(TempDbMixin):
         self.assertEqual(specs["coverage"]["fundamentals"], 3)
 
     async def test_run_screen_maps_finance_pi_failure_to_502(self):
-        from close_price_client import ClosePriceClientError
         from core.errors import ExternalServiceError
         from repositories import cache_values
+        from services.market.sources.close_price import ClosePriceClientError
         # 스냅샷 캐시를 비워 _get_snapshot 이 실제 get_screener_snapshot 을 호출하게 한다.
         await cache_values.delete_cache_value(
             screener_service._SNAPSHOT_CACHE_NS, "latest"

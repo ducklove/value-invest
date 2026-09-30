@@ -2,10 +2,10 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import close_price_client
 import kis_proxy_client
 from repositories import portfolio as portfolio_repo
 from routes import portfolio as pf
+from services.market.sources import close_price as close_price_client
 from services.portfolio import insights
 
 

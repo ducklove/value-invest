@@ -4,7 +4,6 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta
 
-import close_price_client
 import kis_proxy_client
 from domain.numbers import parse_number as _safe_float
 from domain.timeutil import KST, today_kst
@@ -12,6 +11,7 @@ from repositories import bootstrap
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
+from services.market.sources import close_price as close_price_client
 from services.portfolio import fx, snapshot_attribution
 from services.portfolio import runtime_quotes as portfolio_quotes
 

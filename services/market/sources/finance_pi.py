@@ -1,7 +1,7 @@
 """finance-pi 내부 API provider — 주소·인증·클라이언트·장애 쿨다운의 단일 출처.
 
 finance-pi(라즈베리파이 데이터레이크, 기본 ``http://192.168.68.84:8400``)는
-종가·일봉·거시지표·기초재무·스크리너(``close_price_client``)와 퀀트 연구
+종가·일봉·거시지표·기초재무·스크리너(``services.market.sources.close_price``, 구 루트 ``close_price_client``)와 퀀트 연구
 엔드포인트(``services/quant``)를 제공한다. 예전에는 두 쪽이 각자 URL·
 ``X-Admin-Token`` 헤더를 만들었고 close_price_client 는 자체 AsyncClient 를
 열었다. 이제 둘 다 이 모듈을 거친다.

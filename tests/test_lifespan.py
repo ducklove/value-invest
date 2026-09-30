@@ -8,7 +8,6 @@ import httpx
 import pytest
 
 import ai_config
-import close_price_client
 import dart_report_review
 import kis_key_manager
 import kis_proxy_client
@@ -20,6 +19,7 @@ from core.app_factory import create_app
 from core.config import AppSettings
 from repositories import bootstrap, corp_codes, db
 from services.dart import client as dart_client
+from services.market.sources import close_price as close_price_client
 from services.notifications import engine
 from services.portfolio import insights
 

@@ -5,9 +5,9 @@ from datetime import date, datetime
 from typing import Any
 
 import asset_insights
-import close_price_client
 from cache_layer import MemoryTTLCache
 from repositories import portfolio as portfolio_repo
+from services.market.sources import close_price as close_price_client
 from services.portfolio.identifiers import common_stock_code, is_korean_stock, is_preferred_stock
 from services.portfolio.time_windows import today_kst_date
 

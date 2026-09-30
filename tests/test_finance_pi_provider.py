@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-import close_price_client
+from services.market.sources import close_price as close_price_client
 from services.market.sources import finance_pi
 
 
