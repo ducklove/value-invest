@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+from bs4 import ParserRejectedMarkup
 
 from services.market import news
 
@@ -54,9 +55,13 @@ async def test_upstream_error_without_history_returns_empty():
         assert await news.fetch_market_news() == []
 
 
-async def test_parse_failure_is_swallowed():
+@pytest.mark.parametrize(
+    "exc",
+    [AttributeError("layout changed"), IndexError("no rows"), ParserRejectedMarkup("bad markup")],
+)
+async def test_parse_failure_is_swallowed(exc):
     async def broken():
-        raise AttributeError("layout changed")
+        raise exc
 
     with patch.object(news, "_load_market_news", broken):
         assert await news.fetch_market_news() == []

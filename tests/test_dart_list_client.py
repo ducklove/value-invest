@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -259,15 +260,16 @@ async def test_tape_single_flight_and_cache_flag():
     assert refreshed["cached"] is False
 
 
-async def test_tape_serves_previous_tape_when_rebuild_fails():
-    market_daily._TAPE_CACHE.clear()
-    market_daily._TAPE_CACHE["public"] = (0.0, {"events": ["old"], "cached": False})
+async def test_tape_serves_previous_tape_when_rebuild_fails(caplog):
     market_daily._TAPE_CACHE.clear()
     market_daily._TAPE_CACHE.set("public", {"events": ["old"], "cached": False}, ttl_seconds=0)
-    with patch.object(market_daily, "_build_market_tape_uncached", new=AsyncMock(side_effect=httpx.ConnectError("x"))):
+    with caplog.at_level(logging.WARNING, logger=market_daily.logger.name), \
+         patch.object(market_daily, "_build_market_tape_uncached", new=AsyncMock(side_effect=httpx.ConnectError("x"))):
         result = await market_daily.build_market_tape()
     market_daily._TAPE_CACHE.clear()
     assert result == {"events": ["old"], "cached": True}
+    # 실패 원인이 stale 응답 뒤에 묻히지 않고 로그로 남는다.
+    assert any("serving previous tape" in rec.getMessage() for rec in caplog.records)
 
 
 # ---------------------------------------------------------------------------

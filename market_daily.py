@@ -852,6 +852,9 @@ async def build_market_tape(*, google_sub: str | None = None, refresh: bool = Fa
         force=refresh,
         stale_ttl=MARKET_TAPE_STALE_SECONDS,
     )
+    if result.stale:
+        # 빌드 실패를 조용히 삼키지 않게 — 직전 테이프를 내주되 원인은 로그로 남긴다.
+        logger.warning("market tape rebuild failed, serving previous tape: %r", result.error)
     if result.from_cache or result.stale:
         return {**result.value, "cached": True}
     return result.value

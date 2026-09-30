@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, ParserRejectedMarkup
 
 from cache_layer import FETCH_ERRORS, MemoryTTLCache, cached_fetch_result
 from core.http import get_http_client
@@ -30,7 +30,7 @@ _SEM = asyncio.Semaphore(3)
 # 로 더 짧은 timeout 을 건다. 커넥션 풀은 앱 매니저가 재사용한다.
 _HTTP_TIMEOUT = 6.0
 # 뉴스 섹션은 절대 예외를 올리지 않는다 — 네트워크·HTTP·파싱 오류를 모두 흡수.
-_NEWS_ERRORS = (*FETCH_ERRORS, AttributeError)
+_NEWS_ERRORS = (*FETCH_ERRORS, AttributeError, LookupError, ParserRejectedMarkup)
 
 
 def _parse_news(html: str) -> list[dict]:
