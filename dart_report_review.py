@@ -46,7 +46,7 @@ DART_REVIEW_TARGET_LIMIT = int(os.getenv("DART_REVIEW_TARGET_LIMIT", "12"))
 DART_REVIEW_MAX_TOKENS = int(os.getenv("DART_REVIEW_MAX_TOKENS", "4096"))
 DART_REVIEW_MAX_TOKENS_RETRY = int(os.getenv("DART_REVIEW_MAX_TOKENS_RETRY", "8000"))
 
-_filings_cache = MemoryTTLCache("dart_report_review.filings", DART_FILINGS_CACHE_TTL_S)
+_filings_cache = MemoryTTLCache("dart_report_review.filings", DART_FILINGS_CACHE_TTL_S, evict_expired_after=0)
 _pipeline_lock = asyncio.Lock()
 
 

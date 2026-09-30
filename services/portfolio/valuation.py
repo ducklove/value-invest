@@ -14,7 +14,7 @@ from services.portfolio.time_windows import today_kst_date
 logger = logging.getLogger(__name__)
 
 _VALUATION_CACHE_TTL_SECONDS = 300
-_valuation_basis_cache = MemoryTTLCache("portfolio.valuation_basis", _VALUATION_CACHE_TTL_SECONDS)
+_valuation_basis_cache = MemoryTTLCache("portfolio.valuation_basis", _VALUATION_CACHE_TTL_SECONDS, evict_expired_after=0)
 
 
 def _as_of_key(as_of: date | datetime | str | None) -> str:

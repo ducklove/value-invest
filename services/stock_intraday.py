@@ -37,7 +37,7 @@ from services.portfolio.identifiers import (
 logger = logging.getLogger(__name__)
 
 INTRADAY_CACHE_TTL_SECONDS = 120
-_intraday_cache = MemoryTTLCache("stock.intraday", INTRADAY_CACHE_TTL_SECONDS)
+_intraday_cache = MemoryTTLCache("stock.intraday", INTRADAY_CACHE_TTL_SECONDS, evict_expired_after=0)
 
 NAVER_FCHART_URL = "https://fchart.stock.naver.com/sise.nhn"
 KR_SESSION = {"start": "09:00", "end": "15:30"}

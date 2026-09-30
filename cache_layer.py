@@ -103,13 +103,31 @@ class MemoryTTLCache:
       read-only consumers of large payloads — mutating it corrupts the cache.
       ``set(..., copy=False)`` likewise stores the caller's object as-is (the
       caller promises never to mutate it afterwards).
+
+    Expired records are kept by default: ``get_entry(allow_stale=True)`` and
+    :func:`cached_fetch`'s ``stale_ttl`` serve them as a fallback. Caches with
+    an unbounded key space (per stock code, per query) whose readers never ask
+    for stale values opt in with ``evict_expired_after`` — every
+    ``PRUNE_EVERY_SETS`` writes, records expired for at least that many
+    seconds are dropped (amortised O(1) per write). :meth:`prune_expired`
+    runs the same sweep on demand.
     """
 
-    def __init__(self, namespace: str, default_ttl_seconds: float | None = None):
+    PRUNE_EVERY_SETS = 256
+
+    def __init__(
+        self,
+        namespace: str,
+        default_ttl_seconds: float | None = None,
+        *,
+        evict_expired_after: float | None = None,
+    ):
         self.namespace = namespace
         self.default_ttl_seconds = default_ttl_seconds
+        self.evict_expired_after = evict_expired_after
         self._data: dict[str, _MemoryRecord] = {}
         self._flight: SingleFlight | None = None
+        self._sets_since_prune = 0
 
     @property
     def flight(self) -> "SingleFlight":
@@ -195,6 +213,7 @@ class MemoryTTLCache:
             ttl_seconds=effective_ttl,
         )
         self._data[key] = record
+        self._maybe_prune()
         # 반환 entry 는 호출자 원본을 가리킨다(저장본과 분리돼 있으므로 두 번째
         # 복사가 필요 없다).
         return CacheEntry(
@@ -205,6 +224,31 @@ class MemoryTTLCache:
             ttl_seconds=effective_ttl,
             stale=self._is_stale(record, record.monotonic_at),
         )
+
+    def _maybe_prune(self) -> None:
+        if self.evict_expired_after is None:
+            return
+        self._sets_since_prune += 1
+        if self._sets_since_prune >= self.PRUNE_EVERY_SETS:
+            self.prune_expired()
+
+    def prune_expired(self, grace_seconds: float | None = None) -> int:
+        """Drop records expired for at least ``grace_seconds`` (default:
+        ``evict_expired_after``, else 0). Records without a TTL are kept.
+        Returns the number of records removed."""
+        self._sets_since_prune = 0
+        if grace_seconds is None:
+            grace_seconds = self.evict_expired_after or 0.0
+        now = _monotonic()
+        doomed = [
+            key
+            for key, record in self._data.items()
+            if record.ttl_seconds is not None
+            and (now - record.monotonic_at) >= record.ttl_seconds + grace_seconds
+        ]
+        for key in doomed:
+            del self._data[key]
+        return len(doomed)
 
     def get_or_set(
         self,

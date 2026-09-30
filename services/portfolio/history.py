@@ -15,7 +15,7 @@ from services.portfolio.identifiers import is_korean_stock
 logger = logging.getLogger(__name__)
 
 ASSET_HISTORY_CACHE_TTL = 15 * 60
-asset_history_cache = MemoryTTLCache("portfolio.asset_history", ASSET_HISTORY_CACHE_TTL)
+asset_history_cache = MemoryTTLCache("portfolio.asset_history", ASSET_HISTORY_CACHE_TTL, evict_expired_after=0)
 
 LOCAL_BENCHMARK_INDEX_SERIES = {
     "IDX_KOSPI": "KOSPI",

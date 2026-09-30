@@ -208,7 +208,7 @@ async def get_history(
 # 약 3번 부른다. 모두 실시간 시세와 같은 4 req/s limiter 를 공유하므로
 # 60분 TTL + in-flight 공유로 같은 요청을 한 번만 보낸다.
 RESPONSE_CACHE_TTL_SECONDS = float(os.getenv("KIS_PROXY_RESPONSE_CACHE_TTL_SECONDS", "3600"))
-_response_cache = MemoryTTLCache("kis_proxy.responses", RESPONSE_CACHE_TTL_SECONDS)
+_response_cache = MemoryTTLCache("kis_proxy.responses", RESPONSE_CACHE_TTL_SECONDS, evict_expired_after=0)
 _response_inflight: dict[str, asyncio.Future] = {}
 
 

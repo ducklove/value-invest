@@ -35,7 +35,7 @@ DEFAULT_BENCHMARK = "IDX_KOSPI"
 # benchmark_daily.code 는 IDX_KOSPI / GOLD / FX_USDKRW 같은 영대문자 코드.
 _BENCHMARK_CODE_RE = re.compile(r"^[A-Z0-9_.\-^=]{1,24}$")
 
-_risk_cache = MemoryTTLCache("portfolio.risk", RISK_CACHE_TTL_SECONDS)
+_risk_cache = MemoryTTLCache("portfolio.risk", RISK_CACHE_TTL_SECONDS, evict_expired_after=0)
 
 
 def _risk_free_rate_pct() -> float:

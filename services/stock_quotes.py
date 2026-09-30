@@ -80,10 +80,10 @@ class StockSubscription:
 
 
 _stock_cache = MemoryTTLCache("stock.current", STOCK_CACHE_TTL_SECONDS)
-_dead_stock_cache = MemoryTTLCache("stock.current.dead", DEAD_STOCK_TTL_SECONDS)
+_dead_stock_cache = MemoryTTLCache("stock.current.dead", DEAD_STOCK_TTL_SECONDS, evict_expired_after=0)
 # 벌크(네이버) 결과의 코드별 micro-cache + in-flight 공유. 수 초 안에 겹치는
 # 페이지 로드·기기 폴링·배치가 같은 벌크 호출을 반복하지 않게 한다.
-_bulk_micro_cache = MemoryTTLCache("stock.bulk.micro", BULK_MICRO_CACHE_SECONDS)
+_bulk_micro_cache = MemoryTTLCache("stock.bulk.micro", BULK_MICRO_CACHE_SECONDS, evict_expired_after=0)
 _bulk_inflight: dict[str, asyncio.Future] = {}
 _last_known: dict[str, Stock] = {}
 _locks: dict[str, asyncio.Lock] = {}

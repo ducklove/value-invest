@@ -85,7 +85,7 @@ _FOREIGN_SEARCH_QUOTE_TYPES = {"EQUITY", "ETF", "MUTUALFUND"}
 # (not a permanent set) so a transient Yahoo error or rate-limit can no longer
 # block a ticker until the next server restart; it self-heals after the TTL.
 _FAILED_YF_TTL = 300
-_failed_yf_cache = MemoryTTLCache("portfolio.failed_yf", _FAILED_YF_TTL)
+_failed_yf_cache = MemoryTTLCache("portfolio.failed_yf", _FAILED_YF_TTL, evict_expired_after=0)
 
 
 _ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 -> A200.AX)

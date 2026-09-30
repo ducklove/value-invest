@@ -368,7 +368,7 @@ LIST_CACHE_TTL_S = float(os.getenv("OPENDART_LIST_CACHE_TTL_S", "600"))
 RECENT_DISCLOSURES_CACHE_TTL_S = float(os.getenv("OPENDART_RECENT_CACHE_TTL_S", "60"))
 DISCLOSURE_HOURS_KST = (7, 20)  # [시작, 끝) — 마켓테이프 공시 조회 허용 시간대
 
-_list_cache = MemoryTTLCache("dart.list", LIST_CACHE_TTL_S)
+_list_cache = MemoryTTLCache("dart.list", LIST_CACHE_TTL_S, evict_expired_after=0)
 
 
 class DartListError(ExternalServiceError):
