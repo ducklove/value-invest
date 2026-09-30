@@ -197,7 +197,9 @@ def test_daily_price_rows_are_normalized_to_kis_history_items():
 async def test_internal_close_price_requires_explicit_date_range():
     getter = AsyncMock(side_effect=AssertionError("internal close API should not be called without dates"))
 
-    with patch.object(kis_proxy_client.close_price_client, "_get_client", new=getter):
+    from services.market.sources import finance_pi
+
+    with patch.object(finance_pi, "_get_client", new=getter):
         rows = await kis_proxy_client.close_price_client.get_daily_closes("005930")
 
     assert rows == []

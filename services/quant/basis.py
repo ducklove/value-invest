@@ -4,11 +4,10 @@ import asyncio
 
 import httpx
 
-import close_price_client
 from core.errors import ExternalServiceError
-from core.http import get_http_client
 from repositories import quant_basis
 from repositories.quant import QuantError, digest, encode
+from services.market.sources import finance_pi
 
 VERSION = "cash-futures-1"
 _slot = asyncio.Semaphore(2)
@@ -54,14 +53,13 @@ async def run(user, key, payload):
     old = await quant_basis.existing(user, key, payload)
     if old:
         return old
-    if not close_price_client.ENABLED:
+    if not finance_pi.ENABLED:
         raise ExternalServiceError("finance-pi 연결이 비활성입니다.")
     async with _slot:
-        client = await get_http_client("quant_research")
-        headers = {"X-Admin-Token": close_price_client.API_TOKEN} if close_price_client.API_TOKEN else {}
         try:
-            response = await client.post(
-                close_price_client.BASE_URL + "/api/research/basis-analysis", json=payload, headers=headers
+            response = await finance_pi.request(
+                "POST", "/api/research/basis-analysis", json=payload,
+                client_name=finance_pi.RESEARCH_CLIENT_NAME,
             )
             if response.status_code == 400:
                 detail = response.json().get("error", "연구 입력을 확인하세요.")

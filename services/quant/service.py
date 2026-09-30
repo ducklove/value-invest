@@ -7,10 +7,9 @@ import logging
 import aiosqlite
 import httpx
 
-import close_price_client
 from core.errors import ExternalServiceError
-from core.http import get_http_client
 from repositories import quant, quant_forward
+from services.market.sources import finance_pi
 from services.quant.models import completed_date
 
 logger = logging.getLogger(__name__)
@@ -19,12 +18,12 @@ EXPECTED_ENGINES = {"preferred_switch": EXPECTED_ENGINE, "etf_switch": "etf-swit
 
 
 async def fetch(path, params=None):
-    if not close_price_client.ENABLED:
+    if not finance_pi.ENABLED:
         raise ExternalServiceError("finance-pi 연결이 비활성화돼 있습니다.")
-    client = await get_http_client("quant_research")
-    headers = {"X-Admin-Token": close_price_client.API_TOKEN} if close_price_client.API_TOKEN else {}
     try:
-        response = await client.get(close_price_client.BASE_URL + path, params=params, headers=headers)
+        response = await finance_pi.request(
+            "GET", path, params=params, client_name=finance_pi.RESEARCH_CLIENT_NAME
+        )
         if response.status_code == 400:
             raise quant.QuantError(
                 "연구 입력 또는 가격 자료를 확인해 주세요. 자료 부족·중복·미지원 관계일 수 있습니다."

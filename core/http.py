@@ -80,6 +80,9 @@ _TIMEOUT_PROFILES: dict[str, float | httpx.Timeout] = {
     "preferred_dividends": 30.0,
     "market_indicators": 8.0,
     "fred": 6.0,
+    # finance-pi 가격·재무 조회(services/market/sources/finance_pi.py). 호출부가
+    # 엔드포인트별 timeout 을 넘긴다; 이 값은 기본값(CLOSE_PRICE_API_TIMEOUT_SECONDS 기본과 같음).
+    "finance_pi": 2.5,
     "default": 30.0,
 }
 

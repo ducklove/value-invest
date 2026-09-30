@@ -186,9 +186,12 @@ Public base URLs can be overridden with:
 - `KIS_PROXY_BASE_URL`
 - `KIS_PROXY_TOKEN` (optional, sent as `X-KIS-Proxy-Token` when the proxy is
   configured with `KIS_PROXY_PUBLIC_TOKENS`)
-- `CLOSE_PRICE_API_BASE_URL` (optional, defaults to `http://192.168.68.84`; this
-  is the `finance-pi` data-lake internal API, used as a backup source for daily
-  adjusted close history when KIS history fails or is empty)
+- `FINANCE_PI_BASE_URL` (optional, legacy alias `CLOSE_PRICE_API_BASE_URL`;
+  defaults to `http://192.168.68.84:8400`; this is the `finance-pi` data-lake
+  internal API, used as a backup source for daily adjusted close history when
+  KIS history fails or is empty). `FINANCE_PI_API_TOKEN` (legacy alias
+  `CLOSE_PRICE_API_TOKEN`) is sent as `X-Admin-Token`. Both are read by
+  `services/market/sources/finance_pi.py`.
 - `CLOSE_PRICE_API_ENABLED` (set to `0` to disable the internal close-price
   shortcut and always use the KIS proxy)
 

@@ -63,7 +63,7 @@ class BasisTests(TempDbMixin):
     async def test_repeated_request_does_not_recompute_or_call_broker(self):
         payload = {"config": {}, "scenario": {}}
         row = await quant_basis.save("u1", "basis-key", payload, response(payload))
-        with patch.object(basis, "get_http_client", AsyncMock()) as client:
+        with patch.object(basis.finance_pi, "get_http_client", AsyncMock()) as client:
             repeated = await basis.run("u1", "basis-key", payload)
         self.assertEqual(row["id"], repeated["id"])
         client.assert_not_awaited()

@@ -1,0 +1,140 @@
+"""finance-pi 내부 API provider — 주소·인증·클라이언트·장애 쿨다운의 단일 출처.
+
+finance-pi(라즈베리파이 데이터레이크, 기본 ``http://192.168.68.84:8400``)는
+종가·일봉·거시지표·기초재무·스크리너(``close_price_client``)와 퀀트 연구
+엔드포인트(``services/quant``)를 제공한다. 예전에는 두 쪽이 각자 URL·
+``X-Admin-Token`` 헤더를 만들었고 close_price_client 는 자체 AsyncClient 를
+열었다. 이제 둘 다 이 모듈을 거친다.
+
+환경변수 (표준 이름 우선, 구 이름은 별칭):
+
+* ``FINANCE_PI_BASE_URL``  ← 별칭 ``CLOSE_PRICE_API_BASE_URL``
+* ``FINANCE_PI_API_TOKEN`` ← 별칭 ``CLOSE_PRICE_API_TOKEN``
+* ``CLOSE_PRICE_API_ENABLED`` (0/false/no/off 면 비활성)
+* ``CLOSE_PRICE_API_TIMEOUT_SECONDS`` / ``..._FUNDAMENTALS_TIMEOUT_SECONDS`` /
+  ``..._FAILURE_COOLDOWN_SECONDS``
+
+클라이언트는 ``core/http`` 공유 풀(``finance_pi`` = 가격·재무 조회,
+``quant_research`` = 긴 연구 계산)을 쓴다. 쿨다운은 가격 엔드포인트의
+5xx/429/연결 실패가 켜고, 켜져 있는 동안 가격 조회는 네트워크에 닿지 않는다.
+연구 엔드포인트는 기존처럼 쿨다운과 무관하다(``request`` 는 쿨다운을 보지
+않는다 — 호출부가 ``cooldown_active()`` 로 판단한다).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from contextlib import contextmanager
+from typing import Any, Iterator
+
+import httpx
+
+from core.http import get_http_client
+
+DEFAULT_BASE_URL = "http://192.168.68.84:8400"
+
+
+def _env(*names: str, default: str = "") -> str:
+    """첫 번째로 설정된(빈 문자열이 아닌) 환경변수 값."""
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value.strip():
+            return value
+    return default
+
+
+BASE_URL = _env("FINANCE_PI_BASE_URL", "CLOSE_PRICE_API_BASE_URL", default=DEFAULT_BASE_URL).strip().rstrip("/")
+API_TOKEN = _env("FINANCE_PI_API_TOKEN", "CLOSE_PRICE_API_TOKEN").strip()
+ENABLED = os.getenv("CLOSE_PRICE_API_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_TIMEOUT_SECONDS", "2.5"))
+FUNDAMENTALS_TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_FUNDAMENTALS_TIMEOUT_SECONDS", "6.0"))
+FAILURE_COOLDOWN_SECONDS = float(os.getenv("CLOSE_PRICE_API_FAILURE_COOLDOWN_SECONDS", "60"))
+
+CLIENT_NAME = "finance_pi"
+RESEARCH_CLIENT_NAME = "quant_research"
+
+_skip_until: float = 0.0
+
+
+def auth_headers() -> dict[str, str]:
+    return {"X-Admin-Token": API_TOKEN} if API_TOKEN else {}
+
+
+def url(path: str) -> str:
+    return f"{BASE_URL}{path}"
+
+
+async def _get_client(client_name: str = CLIENT_NAME) -> httpx.AsyncClient:
+    return await get_http_client(client_name)
+
+
+async def request(
+    method: str,
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+    json: Any = None,
+    timeout: Any = httpx.USE_CLIENT_DEFAULT,
+    client_name: str = CLIENT_NAME,
+) -> httpx.Response:
+    """인증 헤더를 붙여 finance-pi 에 요청하고 응답을 그대로 돌려준다.
+    상태 코드 해석·쿨다운 판단은 호출부 몫이다."""
+    client = await _get_client(client_name)
+    kwargs: dict[str, Any] = {"headers": auth_headers() or None, "timeout": timeout}
+    if params is not None:
+        kwargs["params"] = params
+    if json is not None:
+        kwargs["json"] = json
+    return await client.request(method, url(path), **kwargs)
+
+
+async def get_json(path: str, params: dict[str, Any], *, timeout: Any = None) -> Any:
+    """가격·재무 조회용 GET → JSON. 비 2xx 는 ``httpx.HTTPStatusError``.
+
+    ``timeout=None`` 은 httpx 의미 그대로(시간 제한 없음) 전달된다 — 기존
+    close_price_client 동작 보존."""
+    response = await request("GET", path, params=params, timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+# --- 장애 쿨다운 (circuit) ------------------------------------------------
+
+def cooldown_active() -> bool:
+    if _skip_until <= 0:
+        return False
+    return asyncio.get_event_loop().time() < _skip_until
+
+
+def mark_failure() -> None:
+    global _skip_until
+    if FAILURE_COOLDOWN_SECONDS > 0:
+        _skip_until = asyncio.get_event_loop().time() + FAILURE_COOLDOWN_SECONDS
+
+
+def should_mark_failure(exc: BaseException) -> bool:
+    """5xx·429·전송 실패만 쿨다운 대상. 4xx 는 요청 문제라 켜지 않는다."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status == 429 or status >= 500
+    return True
+
+
+def reset_cooldown() -> None:
+    """테스트·운영 도구용."""
+    global _skip_until
+    _skip_until = 0.0
+
+
+@contextmanager
+def cooldown_bypassed() -> Iterator[None]:
+    """블록 안에서만 쿨다운을 무시한다. 블록 안에서 새로 켜진 쿨다운과 기존
+    쿨다운 중 늦은 쪽이 남는다."""
+    global _skip_until
+    saved = _skip_until
+    _skip_until = 0.0
+    try:
+        yield
+    finally:
+        _skip_until = max(_skip_until, saved)

@@ -1,28 +1,29 @@
+"""finance-pi 가격·재무 조회 클라이언트 (종가·일봉·거시지표·기초재무·스크리너).
+
+주소·인증·공유 클라이언트·장애 쿨다운은 ``services.market.sources.finance_pi``
+가 소유한다. 이 모듈은 엔드포인트별 파라미터와 응답 정규화만 맡는다.
+``BASE_URL``·``API_TOKEN``·``ENABLED`` 등은 기존 import 경로 호환용 재노출이다.
+"""
+
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from datetime import date, datetime
 from typing import Any
 
-import httpx
-
 from core.errors import ExternalServiceError
 from domain.numbers import parse_number
+from services.market.sources import finance_pi
+from services.market.sources.finance_pi import (  # noqa: F401 — 호환 재노출
+    API_TOKEN,
+    BASE_URL,
+    ENABLED,
+    FAILURE_COOLDOWN_SECONDS,
+    FUNDAMENTALS_TIMEOUT_SECONDS,
+    TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
-
-BASE_URL = os.getenv("CLOSE_PRICE_API_BASE_URL", "http://192.168.68.84:8400").rstrip("/")
-TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_TIMEOUT_SECONDS", "2.5"))
-FUNDAMENTALS_TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_FUNDAMENTALS_TIMEOUT_SECONDS", "6.0"))
-FAILURE_COOLDOWN_SECONDS = float(os.getenv("CLOSE_PRICE_API_FAILURE_COOLDOWN_SECONDS", "60"))
-ENABLED = os.getenv("CLOSE_PRICE_API_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
-API_TOKEN = os.getenv("CLOSE_PRICE_API_TOKEN", os.getenv("FINANCE_PI_API_TOKEN", "")).strip()
-
-_client: httpx.AsyncClient | None = None
-_client_lock: asyncio.Lock | None = None
-_skip_until: float = 0.0
 
 
 class ClosePriceClientError(ExternalServiceError):
@@ -36,36 +37,14 @@ def _fundamentals_timeout_for_count(count: int) -> float:
     return max(FUNDAMENTALS_TIMEOUT_SECONDS, min(20.0, FUNDAMENTALS_TIMEOUT_SECONDS + max(0, count - 1) * 1.5))
 
 
-def _get_client_lock() -> asyncio.Lock:
-    global _client_lock
-    if _client_lock is None:
-        _client_lock = asyncio.Lock()
-    return _client_lock
-
-
 async def init_client() -> None:
+    """lifespan 훅 — 공유 ``finance_pi`` 클라이언트를 미리 만든다."""
     if ENABLED:
-        await _get_client()
+        await finance_pi._get_client()
 
 
 async def close_client() -> None:
-    global _client
-    async with _get_client_lock():
-        client = _client
-        _client = None
-    if client is not None:
-        await client.aclose()
-
-
-async def _get_client() -> httpx.AsyncClient:
-    global _client
-    if _client is not None:
-        return _client
-
-    async with _get_client_lock():
-        if _client is None:
-            _client = httpx.AsyncClient(timeout=TIMEOUT_SECONDS, follow_redirects=True)
-        return _client
+    """lifespan 훅 — 공유 클라이언트는 core/http 매니저가 닫는다."""
 
 
 def _iso(value: date | datetime | str | None) -> str | None:
@@ -254,30 +233,19 @@ def daily_rows_to_kis_items(rows: Any) -> list[dict[str, Any]]:
 
 
 def _cooldown_active() -> bool:
-    if _skip_until <= 0:
-        return False
-    return asyncio.get_event_loop().time() < _skip_until
+    return finance_pi.cooldown_active()
 
 
 def _mark_failure() -> None:
-    global _skip_until
-    if FAILURE_COOLDOWN_SECONDS > 0:
-        _skip_until = asyncio.get_event_loop().time() + FAILURE_COOLDOWN_SECONDS
+    finance_pi.mark_failure()
 
 
 def _should_mark_failure(exc: Exception) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError):
-        status = exc.response.status_code
-        return status == 429 or status >= 500
-    return True
+    return finance_pi.should_mark_failure(exc)
 
 
 async def _get_json(path: str, params: dict[str, Any], *, timeout: float | None = None) -> Any:
-    client = await _get_client()
-    headers = {"X-Admin-Token": API_TOKEN} if API_TOKEN else None
-    response = await client.get(f"{BASE_URL}{path}", params=params, headers=headers, timeout=timeout)
-    response.raise_for_status()
-    return response.json()
+    return await finance_pi.get_json(path, params, timeout=timeout)
 
 
 async def get_daily_closes(
@@ -364,13 +332,8 @@ async def get_daily_price_items(
         # `/api/prices/close` is cheaper and older clients already know its
         # shape. If the richer daily endpoint hiccups, still serve adjusted
         # closes rather than immediately falling back to slower upstreams.
-        global _skip_until
-        saved_skip_until = _skip_until
-        _skip_until = 0.0
-        try:
+        with finance_pi.cooldown_bypassed():
             return await get_daily_close_items(ticker, since=since, until=until)
-        finally:
-            _skip_until = max(_skip_until, saved_skip_until)
     return await get_daily_close_items(ticker, since=since, until=until)
 
 

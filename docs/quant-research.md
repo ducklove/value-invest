@@ -95,8 +95,9 @@ ETF 선택 시 매도세 연구 기본값을 0bp로 바꾸고 비용 입력란�
 | `repositories/quant.py` | 사용자별 실험, 재시작 복구, 관찰 원본 및 상태 저장 |
 | `/api/quant/*`, `static/js/quant-research.js` | 인증된 사용자 API와 화면 |
 
-기존 `CLOSE_PRICE_API_ENABLED`, `CLOSE_PRICE_API_BASE_URL` 설정과 API 토큰을 재사용한다.
-실제 환경 변수명은 `close_price_client.py`가 기준이다. 새 증권사 비밀키는 요구하지 않는다.
+finance-pi 연결 설정(`FINANCE_PI_BASE_URL`·`FINANCE_PI_API_TOKEN`, 구 이름
+`CLOSE_PRICE_API_BASE_URL`·`CLOSE_PRICE_API_TOKEN` 별칭, `CLOSE_PRICE_API_ENABLED`)을 재사용한다.
+실제 환경 변수명은 `services/market/sources/finance_pi.py`가 기준이다. 새 증권사 비밀키는 요구하지 않는다.
 연구는 전역 대기 10개, 사용자당 보관 100개, 활성 관찰 5개로 제한한다.
 finance-pi는 동시 연구 1개만 허용한다. 결과는 건당 8MB 이내이며 주문 실행 권한은 없다.
 현재 단일 앱 프로세스에서 실행한다. 다중 프로세스 전환 전 작업 임대·소유권을 추가해야 한다.
