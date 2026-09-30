@@ -628,12 +628,20 @@ async def test_unexpected_morning_timer_tick_cannot_create_tonights_settlement(m
 def test_dead_gold_prev_close_write_is_removed():
     # O9: __system__/gold_prev_close 는 읽는 곳이 없었다 — 쓰기도 없어야 한다.
     assert not hasattr(snapshot_nav, "_save_gold_close")
-    offenders = [
-        str(path.relative_to(ROOT))
-        for path in ROOT.rglob("*.py")
-        if not any(part in {".venv", ".claude", "node_modules", "tests", "__pycache__"} for part in path.parts)
-        and ("gold_prev_close" in path.read_text(encoding="utf-8") or "_save_gold_close" in path.read_text(encoding="utf-8"))
-    ]
+    # ROOT 기준 상대 경로로 거른다 — 절대 경로로 거르면 .claude/worktrees 아래
+    # 체크아웃에서는 모든 파일이 제외돼 검사가 공허해진다. 숨김 디렉터리(.venv,
+    # .venvs, .git …)는 서드파티·배포 상태라 건너뛴다.
+    scanned = []
+    offenders = []
+    for path in ROOT.rglob("*.py"):
+        parts = path.relative_to(ROOT).parts
+        if any(part.startswith(".") or part in {"node_modules", "tests", "__pycache__"} for part in parts):
+            continue
+        scanned.append(path)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "gold_prev_close" in text or "_save_gold_close" in text:
+            offenders.append(str(path.relative_to(ROOT)))
+    assert ROOT / "snapshot_nav.py" in scanned
     assert offenders == []
 
 
