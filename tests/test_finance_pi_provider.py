@@ -144,3 +144,21 @@ def test_should_mark_failure(status, expected):
     exc = httpx.HTTPStatusError("x", request=request, response=httpx.Response(status, request=request))
     assert finance_pi.should_mark_failure(exc) is expected
     assert finance_pi.should_mark_failure(httpx.ConnectError("down")) is True
+
+
+def test_price_calls_use_ten_second_timeout_by_default(monkeypatch):
+    # 가격·거시 조회는 예전에 timeout=None(무제한)이었다 — 이제 기본 10초.
+    from services.market.sources import finance_pi
+
+    seen = {}
+
+    async def fake_request(method, path, *, params=None, json=None, timeout=None, client_name=None):
+        seen["timeout"] = timeout
+        return httpx.Response(200, json={"prices": []}, request=httpx.Request(method, "http://fp.test" + path))
+
+    monkeypatch.setattr(finance_pi, "request", fake_request)
+    asyncio.run(finance_pi.get_json("/api/prices/close", {"ticker": "005930"}))
+    assert finance_pi.PRICE_TIMEOUT_SECONDS == 10.0
+    assert seen["timeout"] == 10.0
+    asyncio.run(finance_pi.get_json("/api/fundamentals/screener", {}, timeout=30.0))
+    assert seen["timeout"] == 30.0

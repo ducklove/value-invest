@@ -253,6 +253,12 @@ def _get_history_close_series(history):
     return _empty_series()
 
 
+def yahoo_lists_krx_code(stock_code: str) -> bool:
+    """야후 파이낸스가 ``<code>.KS`` 로 싣는 KRX 코드인지 — 숫자 6자리만 해당한다."""
+    code = str(stock_code or "").strip()
+    return len(code) == 6 and code.isdigit()
+
+
 def _get_yfinance_aux(stock_code: str, start_year: int, end_year: int):
     if yf is None:
         raise RuntimeError("yfinance is not available")
@@ -845,11 +851,17 @@ async def fetch_market_data(
     # Bound yfinance to a hard wall-clock deadline so a stuck Yahoo response
     # cannot pin a thread-pool worker indefinitely. 아래 KIS·DART 조회와 동시에
     # 돌도록 태스크로 먼저 띄운다.
-    yf_future = asyncio.ensure_future(yfinance_runner.run(
-        _get_yfinance_aux, stock_code, start_year, end_year,
-        timeout=YF_AUX_TIMEOUT_SECONDS,
-        negative_key=f"aux:{stock_code}",
-    ))
+    # 야후는 KRX 숫자 코드만 싣는다. 스팩·ETN 등 영문이 섞인 신형 코드(예: 0165X0)는
+    # 항상 'possibly delisted' 로 실패하므로 조회하지 않고 빈 시계열로 둔다.
+    if yahoo_lists_krx_code(stock_code):
+        yf_future = asyncio.ensure_future(yfinance_runner.run(
+            _get_yfinance_aux, stock_code, start_year, end_year,
+            timeout=YF_AUX_TIMEOUT_SECONDS,
+            negative_key=f"aux:{stock_code}",
+        ))
+    else:
+        empty = _empty_series()
+        yf_future = asyncio.ensure_future(asyncio.sleep(0, result=(empty, empty, empty, empty)))
     dart_dividends_future = (
         dart_client.fetch_dividend_per_share_by_year(corp_code, start_year, end_year)
         if corp_code

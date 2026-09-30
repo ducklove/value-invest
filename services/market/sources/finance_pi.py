@@ -18,6 +18,9 @@ finance-pi(라즈베리파이 데이터레이크, 기본 ``http://192.168.68.84:
 * ``CLOSE_PRICE_API_ENABLED`` (0/false/no/off 면 비활성)
 * ``CLOSE_PRICE_API_TIMEOUT_SECONDS`` / ``..._FUNDAMENTALS_TIMEOUT_SECONDS`` /
   ``..._FAILURE_COOLDOWN_SECONDS``
+* ``CLOSE_PRICE_API_PRICE_TIMEOUT_SECONDS`` (기본 10) — 가격·거시 조회 제한 시간.
+  예전에는 이 호출들이 ``timeout=None`` 으로 나가 finance-pi 가 멈추면 요청이
+  끝없이 기다렸다. 전체 이력(1985~) 조회가 수 초 걸리므로 2.5초 기본값 대신 따로 둔다.
 
 클라이언트는 ``core/http`` 공유 풀(``finance_pi`` = 가격·재무 조회,
 ``quant_research`` = 긴 연구 계산)을 쓴다. 쿨다운은 가격 엔드포인트의
@@ -56,6 +59,7 @@ ENABLED = os.getenv("CLOSE_PRICE_API_ENABLED", "1").strip().lower() not in {"0",
 TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_TIMEOUT_SECONDS", "2.5"))
 FUNDAMENTALS_TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_FUNDAMENTALS_TIMEOUT_SECONDS", "6.0"))
 FAILURE_COOLDOWN_SECONDS = float(os.getenv("CLOSE_PRICE_API_FAILURE_COOLDOWN_SECONDS", "60"))
+PRICE_TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_PRICE_TIMEOUT_SECONDS", "10"))
 
 CLIENT_NAME = "finance_pi"
 RESEARCH_CLIENT_NAME = "quant_research"
@@ -95,12 +99,14 @@ async def request(
     return await client.request(method, url(path), **kwargs)
 
 
-async def get_json(path: str, params: dict[str, Any], *, timeout: Any = None) -> Any:
+async def get_json(path: str, params: dict[str, Any], *, timeout: float | None = None) -> Any:
     """가격·재무 조회용 GET → JSON. 비 2xx 는 ``httpx.HTTPStatusError``.
 
-    ``timeout=None`` 은 httpx 의미 그대로(시간 제한 없음) 전달된다 — 기존
-    close_price_client 동작 보존."""
-    response = await request("GET", path, params=params, timeout=timeout)
+    ``timeout`` 을 주지 않으면 :data:`PRICE_TIMEOUT_SECONDS` (기본 10초)를 쓴다.
+    제한 시간 초과는 ``httpx.TimeoutException`` (전송 오류)이라 호출부의
+    쿨다운 판단에 걸린다."""
+    effective = PRICE_TIMEOUT_SECONDS if timeout is None else timeout
+    response = await request("GET", path, params=params, timeout=effective)
     response.raise_for_status()
     return response.json()
 

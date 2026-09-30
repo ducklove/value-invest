@@ -46,7 +46,7 @@
 | 항목 | 내용 |
 |---|---|
 | eiayn 색 관례 | 상승·하락 색이 서구식(초록/빨강)에서 한국식(빨강/파랑)으로 바뀐다. 머지 전 확인 |
-| finance-pi 가격·매크로 타임아웃 | 원래부터 `timeout=None`(무제한)이다. `CLOSE_PRICE_API_TIMEOUT_SECONDS`(2.5초)는 이 호출에 적용되지 않는다. 값을 정해 고칠지 결정 |
+| ~~finance-pi 가격·매크로 타임아웃~~ | 2026-09-30 해결: 가격·거시 조회에 10초 제한(`CLOSE_PRICE_API_PRICE_TIMEOUT_SECONDS`). 이전에는 `timeout=None`(무제한) |
 | finance-pi env 우선순위 | `FINANCE_PI_*`와 `CLOSE_PRICE_API_*`가 둘 다 있으면 **구 이름이 이긴다**. Pi `.env`에 둘 다 다른 값으로 있는지 확인 |
 | 형제 `?v=` 라벨 | holding_value·spac-hunter·gold_gap·nps-tracker의 셸·토큰 라벨을 날짜(`20260930-vc`)에서 `1.1.0`으로 바꿨다. 날짜 라벨을 허용하려면 검사를 완화하고 그 커밋을 되돌린다 |
 | kis-proxy 뒤 프록시 | 루프백이 아닌 리버스 프록시 뒤에 두면 `KIS_PROXY_TRUSTED_PROXIES`를 설정해야 한다. 아니면 모든 클라이언트가 한 IP로 레이트리밋된다 |

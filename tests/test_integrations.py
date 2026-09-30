@@ -254,11 +254,13 @@ def test_gold_gap_stale_cache_does_not_override_newer_local_file(tmp_path):
     assert gold["updatedAt"] != "2000-01-01 08:47 KST"
 
 
-def test_kis_proxy_is_server_side_only(monkeypatch):
+def test_kis_proxy_is_server_side_only(monkeypatch, tmp_path):
     monkeypatch.setenv("KIS_PROXY_BASE_URL", "http://127.0.0.1:3288/")
-    config = integrations.build_app_config()
+    # 빈 작업공간: 실제 형제 체크아웃의 데이터 숫자(예: holdingValue 32886.5)가
+    # 문자열 검사에 걸리지 않게 한다.
+    config = integrations.build_app_config(workspace_root=tmp_path)
     assert "kisProxy" not in config["integrations"]
-    assert "3288" not in json.dumps(config)
+    assert ":3288" not in json.dumps(config)
     assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == "http://127.0.0.1:3288"
 
 

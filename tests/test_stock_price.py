@@ -396,3 +396,28 @@ class YFinanceExecutorTests(unittest.TestCase):
             text = (root / rel).read_text(encoding="utf-8")
             self.assertNotRegex(text, r"run_in_executor\(", rel)
             self.assertIn("yfinance_runner.run(", text, rel)
+
+
+class YahooKrxCodeTests(unittest.IsolatedAsyncioTestCase):
+    """스팩 등 영문이 섞인 신형 KRX 코드는 야후에 없다 — 조회 자체를 하지 않는다."""
+
+    def test_yahoo_lists_only_numeric_six_digit_codes(self):
+        self.assertTrue(stock_price.yahoo_lists_krx_code("005930"))
+        self.assertFalse(stock_price.yahoo_lists_krx_code("0165X0"))
+        self.assertFalse(stock_price.yahoo_lists_krx_code(""))
+
+    async def test_fetch_market_data_skips_yahoo_for_alphanumeric_code(self):
+        run = AsyncMock(side_effect=AssertionError("yfinance must not be called"))
+        with patch("services.stock_price.yfinance_runner.run", new=run), \
+             patch("services.stock_price.kis_proxy_client.get_history", new=AsyncMock(return_value={})), \
+             patch("services.stock_price.kis_proxy_client.get_dividends", new=AsyncMock(return_value={})), \
+             patch("services.stock_price.kis_proxy_client.get_financials", new=AsyncMock(return_value={})), \
+             patch("services.stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={"summary": {"listed_shares": "100"}})), \
+             patch("services.stock_price.close_price_client.get_daily_price_items", new=AsyncMock(return_value=[
+                 {"stck_bsop_date": "20260930", "stck_clpr": "1970"},
+             ])):
+            result = await stock_price.fetch_market_data("0165X0", start_year=2026, end_year=2026)
+
+        run.assert_not_called()
+        self.assertEqual(result[0]["year"], 2026)
+        self.assertEqual(result[0]["close_price"], 1970.0)
