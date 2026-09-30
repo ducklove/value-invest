@@ -48,7 +48,6 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
 
     import ai_config
     import close_price_client
-    import dart_client
     import kis_key_manager
     import kis_proxy_client
     import kis_ws_manager
@@ -61,6 +60,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     from core import http as http_manager
     from repositories import bootstrap, corp_codes
     from repositories import users as users_repo
+    from services.dart import client as dart_client
     from services.portfolio import insights as portfolio_insights
 
     kis_key_manager.load_keys()

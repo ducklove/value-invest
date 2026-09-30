@@ -5,10 +5,10 @@ import logging
 import time
 from datetime import datetime
 
-import dart_client
 import stock_price
 from repositories import corp_codes
 from repositories import financial as financial_repo
+from services.dart import client as dart_client
 from services.portfolio.identifiers import (
     common_stock_code,
     is_korean_stock,

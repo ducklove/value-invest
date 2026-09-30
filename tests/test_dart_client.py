@@ -1,6 +1,6 @@
 import unittest
 
-import dart_client
+from services.dart import client as dart_client
 
 
 class DartDividendParserTests(unittest.TestCase):

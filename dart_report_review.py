@@ -18,7 +18,6 @@ import httpx
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 import ai_config
-import dart_client
 import observability
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
@@ -27,6 +26,7 @@ from repositories import dart_review as dart_review_repo
 from repositories import financial as financial_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.dart import client as dart_client
 
 logger = logging.getLogger(__name__)
 

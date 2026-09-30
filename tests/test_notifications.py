@@ -846,7 +846,7 @@ class AlertEngineHarness(TempDbMixin):
             {"rcept_no": "299", "report_nm": "주요사항보고서(자기주식취득결정)", "rcept_dt": "20260102", "corp_name": "삼성전자"},
         ]
         with patch.object(corp_codes, "get_corp_code", new=AsyncMock(return_value="00126380")), \
-             patch("dart_client.fetch_recent_disclosures", new=AsyncMock(return_value=raw)):
+             patch("services.dart.client.fetch_recent_disclosures", new=AsyncMock(return_value=raw)):
             latest = await engine._fetch_latest_disclosure("005930")
         self.assertIsNotNone(latest)
         self.assertEqual(latest["rcept_no"], "299")

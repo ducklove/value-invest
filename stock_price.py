@@ -19,11 +19,11 @@ except ImportError:  # pragma: no cover - optional dependency
 import httpx
 
 import close_price_client
-import dart_client
 import kis_proxy_client
 import kis_ws_manager
 from core.http import get_http_client
 from domain.numbers import parse_number
+from services.dart import client as dart_client
 from services.market.sources import yfinance_runner
 
 logger = logging.getLogger(__name__)

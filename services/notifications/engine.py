@@ -599,7 +599,7 @@ def _is_excluded_disclosure(report_nm: str) -> bool:
 
 
 async def _fetch_latest_disclosure(code: str) -> dict | None:
-    import dart_client
+    from services.dart import client as dart_client
     try:
         corp_code = await corp_codes.get_corp_code(code)
         if not corp_code:
