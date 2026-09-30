@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 from domain.timeutil import KST, today_kst
 from repositories import bootstrap
@@ -119,10 +119,26 @@ async def build_shared_quote_map(
     return await portfolio_quotes.fetch_quote_map(codes, force_kr=force_kr)
 
 
+# 보존 기한(7일) 정리는 날짜 기준이라 하루 한 번이면 충분하다. 5분 틱은 앱
+# 프로세스 안(/api/internal/snapshot/intraday)에서 돌므로, 그날 첫 틱만 지우고
+# 같은 날 나머지 틱은 건너뛴다(삭제 대상이 없던 no-op DELETE 를 생략).
+_INTRADAY_KEEP_DAYS = 7
+_intraday_pruned_on: date | None = None
+
+
+async def _prune_old_intraday_daily() -> None:
+    global _intraday_pruned_on
+    today = date.today()  # delete_old_intraday 의 cutoff 와 같은 기준 날짜
+    if _intraday_pruned_on == today:
+        return
+    await snapshots_repo.delete_old_intraday(days_to_keep=_INTRADAY_KEEP_DAYS)
+    _intraday_pruned_on = today
+
+
 async def run(manage_db: bool = True):
     if manage_db:
         await bootstrap.init_db()
-    await snapshots_repo.delete_old_intraday(days_to_keep=7)
+    await _prune_old_intraday_daily()
     ts = datetime.now(KST).strftime("%Y-%m-%dT%H:%M")
     users = await snapshots_repo.get_all_users_with_portfolio()
     logger.info("Intraday snapshot for %d users at %s", len(users), ts)

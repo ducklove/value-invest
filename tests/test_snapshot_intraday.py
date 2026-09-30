@@ -279,3 +279,37 @@ async def test_fetch_total_value_treats_empty_shared_quote_as_missing():
 
     fetch_quote.assert_not_awaited()
     assert total == 1234 + 300.0
+
+
+@pytest.mark.asyncio
+async def test_intraday_retention_prune_runs_once_per_day():
+    from datetime import date
+
+    delete = AsyncMock()
+    days = iter([date(2026, 9, 29), date(2026, 9, 29), date(2026, 9, 30)])
+
+    class _FakeDate:
+        @staticmethod
+        def today():
+            return next(days)
+
+    with patch.object(snapshot_intraday, "_intraday_pruned_on", None), \
+         patch.object(snapshot_intraday, "date", _FakeDate), \
+         patch.object(snapshot_intraday.snapshots_repo, "delete_old_intraday", new=delete):
+        for _ in range(3):
+            await snapshot_intraday._prune_old_intraday_daily()
+        assert delete.await_count == 2
+        delete.assert_awaited_with(days_to_keep=7)
+        assert snapshot_intraday._intraday_pruned_on == date(2026, 9, 30)
+
+
+@pytest.mark.asyncio
+async def test_intraday_retention_prune_failure_is_retried_next_tick():
+    delete = AsyncMock(side_effect=[RuntimeError("db locked"), None])
+    with patch.object(snapshot_intraday, "_intraday_pruned_on", None), \
+         patch.object(snapshot_intraday.snapshots_repo, "delete_old_intraday", new=delete):
+        with pytest.raises(RuntimeError):
+            await snapshot_intraday._prune_old_intraday_daily()
+        await snapshot_intraday._prune_old_intraday_daily()
+        await snapshot_intraday._prune_old_intraday_daily()
+    assert delete.await_count == 2
