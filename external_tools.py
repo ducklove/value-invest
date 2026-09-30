@@ -12,8 +12,20 @@ public JSON을 읽어, 투자정보 대시보드의 허브 위젯과 종목분�
 - eiayn                 : ETF 평가(AIYN 점수) — 오늘의 추천 ETF(TOP 100 일일 추첨 5선)
 - buybacks              : 자사주 매입·처분·소각 분석(자사주 보유비중 상위)
 
-데이터는 raw.githubusercontent 에서 받아 길게 캐시한다(배치가 분 단위로만 갱신).
-각 도구 fetch는 서로 독립적으로 실패를 허용해, 하나가 죽어도 나머지는 표시된다.
+데이터 출처(docs/ecosystem/data-contract.md §7):
+
+1. 도구별 ``<레지스트리 url>/summary.json``(발행 데이터 계약 v1 envelope)을 먼저 본다
+   (:mod:`services.ecosystem.siblings` — ETag·음성 캐시·stale 1일).
+2. 없거나 계약 위반이면 레지스트리 ``data[]`` 의 레거시 파일(current.json/data.json …)과
+   아래 기존 요약기로 폴백한다. summary 는 :mod:`services.ecosystem.adapters` 가 레거시
+   모양으로 되돌리므로 응답 모양은 소스와 무관하게 같다(프론트 변경 없음).
+
+URL 은 전부 ``config/ecosystem.json``(``core.ecosystem``)에서 오고 각 도구의 envOverride
+(``HOLDING_VALUE_BASE_URL`` 등)를 따른다. 모든 형제 JSON fetch 는 ``MemoryTTLCache`` +
+single-flight(:func:`services.ecosystem.fetch.cached_fetch`)를 거친다 — 큰 파일
+(holding_snapshots 1.2 MB, gold_gap data.json 563 KB, etfs.json 9.3 MB)은 쓰는 부분만
+남긴 슬림 모양으로 캐시한다. 각 도구 fetch 는 서로 독립적으로 실패를 허용해, 하나가 죽어도
+나머지는 표시된다.
 """
 
 from __future__ import annotations
@@ -21,72 +33,126 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from typing import Any, Awaitable, Callable, Iterator
 
 import httpx
 
 from cache_layer import MemoryTTLCache
+from core.errors import DBError
 from core.http import get_http_client
+from services.ecosystem import adapters, siblings
+from services.ecosystem.fetch import FETCH_ERRORS, cached_fetch, stale_value
 
 logger = logging.getLogger(__name__)
 
 KST = timezone(timedelta(hours=9))
 
-_RAW = "https://raw.githubusercontent.com/ducklove"
-# 사용자에게 보여줄(새 탭) 도구 홈 — GitHub Pages
-SITE = {
-    "holding": "https://ducklove.github.io/holding_value/",
-    "spread": "https://ducklove.github.io/common_preferred_spread/",
-    "goldGap": "https://ducklove.github.io/gold_gap/",
-    "spac": "https://ducklove.github.io/spac-hunter/",
-    "nps": "https://ducklove.github.io/nps-tracker/",
-    "etf": "https://ducklove.github.io/eiayn/",
-    "buybacks": "https://ducklove.github.io/buybacks/",
-    "bondMate": "https://ducklove.github.io/bond-mate/",
+# SITE 키 → 레지스트리 도구 id.
+_SITE_TOOLS = {
+    "holding": "holding_value",
+    "spread": "common_preferred_spread",
+    "goldGap": "gold_gap",
+    "spac": "spac-hunter",
+    "nps": "nps-tracker",
+    "etf": "eiayn",
+    "buybacks": "buybacks",
+    "bondMate": "bond-mate",
 }
+
+
+class _SiteMap(Mapping):
+    """사용자에게 보여줄(새 탭) 도구 홈. 조회 시점에 레지스트리 + envOverride 로 만든다."""
+
+    def __getitem__(self, key: str) -> str:
+        return siblings.site_url(_SITE_TOOLS[key])
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(_SITE_TOOLS)
+
+    def __len__(self) -> int:
+        return len(_SITE_TOOLS)
+
+
+SITE: Mapping[str, str] = _SiteMap()
 
 _TTL = 900  # 15분 — 배치 갱신 주기에 맞춤
 _cache = MemoryTTLCache("external.tools", _TTL)
-_raw_cache = MemoryTTLCache("external.raw", _TTL)  # (current, config) 원본 — 요약·deep-link 공용
+_raw_cache = MemoryTTLCache("external.raw", _TTL)  # 형제 원본(슬림) — 요약·deep-link·액션보드 공용
 _SEM = asyncio.Semaphore(3)
 _TIMEOUT = httpx.Timeout(8.0, connect=4.0)
 
 # eiayn(ETF) 프로젝트의 커버 종목 universe. 우선주·지주사처럼 "외부 프로젝트가
 # 발행한 목록과 코드 매칭" 패턴 — 국내(6자리/6자 KRX)·해외(VOO 등 티커) 모두 포함.
-# 파일이 크고(수 MB) 느리게 바뀌므로 길게 캐시한다.
-_ETF_DATA_URL = "https://ducklove.github.io/eiayn/data/etfs.json"
+# 레거시 파일이 크고(수 MB) 느리게 바뀌므로 길게 캐시한다.
 _ETF_UNIVERSE_TTL = 6 * 3600  # 6시간
 _etf_universe_cache = MemoryTTLCache("external.etf_universe", _ETF_UNIVERSE_TTL)
 _ETF_TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 
 
+def _data_url(tool_id: str, data_id: str) -> str:
+    """레지스트리 ``data[]`` 레거시 파일 URL(envOverride 반영)."""
+    return siblings.data_url(tool_id, data_id)
+
+
+async def _sibling(
+    key: str,
+    tool_id: str,
+    from_summary: Callable[[dict], Any],
+    legacy: Callable[[], Awaitable[Any]],
+    *,
+    cache: MemoryTTLCache | None = None,
+) -> Any:
+    """summary 우선·레거시 폴백 결과를 ``cache``(기본 ``_raw_cache``)에 single-flight 로 캐시."""
+    return await cached_fetch(
+        cache if cache is not None else _raw_cache,
+        key,
+        lambda: siblings.summary_or_legacy(tool_id, from_summary, legacy),
+    )
+
+
+async def _legacy_etf_universe() -> set[str]:
+    async with _SEM:
+        client = await get_http_client("external_tools_etf")
+        resp = await client.get(
+            _data_url("eiayn", "etfs"),
+            headers={"User-Agent": "value-invest/1.0"},
+            timeout=_ETF_TIMEOUT,
+        )
+        resp.raise_for_status()
+    data = resp.json()
+    universe = {
+        str(c).strip().upper()
+        for c in (data.get("universe") or [])
+        if str(c).strip()
+    }
+    if not universe:  # 빈 목록은 캐시하지 않는다(다음 호출이 다시 시도)
+        raise ValueError("empty ETF universe")
+    return universe
+
+
+def _summary_universe(envelope: dict) -> set[str]:
+    universe = adapters.eiayn_universe(envelope["data"])
+    if not universe:
+        raise ValueError("empty ETF universe in summary.json")
+    return universe
+
+
 async def fetch_etf_universe() -> set[str]:
     """eiayn 이 커버하는 ETF 코드 집합(대문자 정규화). 실패 시 스테일/빈 집합."""
-    cached = _etf_universe_cache.get("universe")
-    if cached is not None:
-        return cached
     try:
-        async with _SEM:
-            client = await get_http_client("external_tools_etf")
-            resp = await client.get(
-                _ETF_DATA_URL,
-                headers={"User-Agent": "value-invest/1.0"},
-                timeout=_ETF_TIMEOUT,
-            )
-            resp.raise_for_status()
-        data = resp.json()
-        universe = {
-            str(c).strip().upper()
-            for c in (data.get("universe") or [])
-            if str(c).strip()
-        }
-        if universe:
-            _etf_universe_cache.set("universe", universe)
-        return universe
-    except Exception as exc:
+        universe = await _sibling(
+            "universe", "eiayn",
+            _summary_universe,
+            _legacy_etf_universe,
+            cache=_etf_universe_cache,
+        )
+    except FETCH_ERRORS as exc:
         logger.warning("ETF universe fetch failed: %s", exc)
-        entry = _etf_universe_cache.get_entry("universe", allow_stale=True) if hasattr(_etf_universe_cache, "get_entry") else None
-        return entry.value if entry and getattr(entry, "value", None) else set()
+        return set()
+    return universe or set()
 
 
 def etf_deep_link(code: str) -> str:
@@ -393,17 +459,27 @@ def _summarize_buybacks(holdings: list, top_n: int = 5) -> dict:
     }
 
 
+_PAIR_ADAPTERS: dict[str, Callable[[dict], tuple[dict, list]]] = {
+    "holding_value": adapters.holding_pair,
+    "common_preferred_spread": adapters.spread_pair,
+}
+
+
 async def _load_pair(repo: str) -> tuple[dict, list]:
-    """(current, config) 원본을 받아 캐시. 요약과 deep-link가 함께 쓴다."""
-    cached = _raw_cache.get(repo)
-    if cached is not None:
-        return cached
-    cur, cfg = await asyncio.gather(
-        _get_json(f"{_RAW}/{repo}/master/current.json"),
-        _get_json(f"{_RAW}/{repo}/master/config.json"),
-    )
-    _raw_cache.set(repo, (cur, cfg))
-    return cur, cfg
+    """(current, config) 원본 모양을 받아 캐시. 요약·deep-link·액션보드가 함께 쓴다.
+
+    ``repo`` 는 레지스트리 도구 id(holding_value / common_preferred_spread).
+    """
+    adapt = _PAIR_ADAPTERS[repo]
+
+    async def legacy() -> tuple[dict, list]:
+        cur, cfg = await asyncio.gather(
+            _get_json(_data_url(repo, "current")),
+            _get_json(_data_url(repo, "config")),
+        )
+        return cur, cfg
+
+    return await _sibling(repo, repo, lambda env: adapt(env["data"]), legacy)
 
 
 async def _holding_summary() -> dict | None:
@@ -416,10 +492,46 @@ async def _spread_summary() -> dict | None:
     return _summarize_spread(cur, cfg)
 
 
+def _slim_gold(data: dict) -> dict:
+    """gold_gap data.json(563 KB, 자산별 전체 히스토리) → 마지막 값만 남긴 같은 모양.
+
+    ``_summarize_gold`` 와 ``integrations`` 의 최신 갭 표시는 마지막 값만 읽는다.
+    """
+    if not isinstance(data, dict):
+        raise TypeError("gold_gap data.json must be an object")
+    out: dict[str, Any] = {"updated_at": data.get("updated_at")}
+    for key in _GOLD_LABELS:
+        asset = data.get(key)
+        if not isinstance(asset, dict):
+            continue
+        gaps = asset.get("gap_pct") or []
+        dates = asset.get("dates") or []
+        if not gaps:
+            continue
+        out[key] = {"gap_pct": [gaps[-1]], "dates": [dates[-1]] if dates else []}
+    return out
+
+
+async def _gold_latest() -> dict:
+    """gold_gap 자산별 최신 갭(data.json 모양, 마지막 값만).
+
+    data.json 은 gold_gap master 에 없다(orphan ``data`` 브랜치 → Pages 배포). 레거시
+    경로는 레지스트리의 Pages URL 을 쓴다.
+    """
+
+    async def legacy() -> dict:
+        return _slim_gold(await _get_json(_data_url("gold_gap", "data")))
+
+    return await _sibling("gold_gap/latest", "gold_gap", lambda env: adapters.gold_data(env["data"]), legacy)
+
+
+def peek_gold_latest() -> dict | None:
+    """캐시에 있는 gold_gap 최신 갭(만료 1일까지). 네트워크를 타지 않는다 — integrations 용."""
+    return stale_value(_raw_cache, "gold_gap/latest")
+
+
 async def _gold_summary() -> dict | None:
-    # data.json 은 repo 에서 제거되고 GitHub Pages 산출물로만 존재한다(raw 는 404).
-    data = await _get_json("https://ducklove.github.io/gold_gap/data.json")
-    return _summarize_gold(data)
+    return _summarize_gold(await _gold_latest())
 
 
 async def _fill_etf_changes(picks: list[dict]) -> None:
@@ -446,48 +558,106 @@ async def _fill_etf_changes(picks: list[dict]) -> None:
             p["changePct"] = q["change_pct"]
 
 
+async def _etf_rankings() -> dict:
+    async def legacy() -> dict:
+        return await _get_json(_data_url("eiayn", "rankings"))
+
+    return await _sibling(
+        "eiayn/rankings", "eiayn",
+        lambda env: adapters.eiayn_rankings(env, etf_deep_link),
+        legacy,
+    )
+
+
 async def _etf_picks_summary() -> dict | None:
-    data = await _get_json("https://ducklove.github.io/eiayn/data/rankings.json")
+    data = await _etf_rankings()
     out = _summarize_etf_picks(data, datetime.now(KST).strftime("%Y-%m-%d"))
     await _fill_etf_changes(out["top"])
     return out
 
 
 async def _spac_summary() -> dict | None:
-    # spac-hunter 는 기본 브랜치가 main 이고 current.json 만으로 요약 가능하다
+    # spac-hunter 는 current.json 만으로 요약 가능하다
     # (종목명이 prices 안에 들어 있어 별도 config 가 필요 없음).
-    data = await _get_json(f"{_RAW}/spac-hunter/main/current.json")
+    async def legacy() -> dict:
+        return await _get_json(_data_url("spac-hunter", "current"))
+
+    data = await _sibling(
+        "spac-hunter/current", "spac-hunter",
+        lambda env: adapters.spac_current(env["data"]), legacy,
+    )
     return _summarize_spac(data)
 
 
+def _valid_spac_data(data: Any) -> dict:
+    if not isinstance(data, dict) or not isinstance(data.get("spacs"), list):
+        raise ValueError("Invalid SPAC Hunter data")
+    return data
+
+
 async def fetch_spac_data() -> dict:
-    """Full SPAC Hunter valuation inputs; current.json only contains summary prices."""
-    key = "spac-hunter/data"
-    cached = _raw_cache.get(key)
-    if cached is not None:
-        return cached
+    """Full SPAC Hunter valuation inputs; current.json only contains summary prices.
+
+    summary.json(§6.3)이 있으면 그 ``spacs``/``valuationAssumptions`` 를, 없으면 3.8 MB
+    data.json 을 쓴다. 둘 다 실패하면 1일 이내 stale, 그것도 없으면 ``{}``.
+    """
+
+    async def legacy() -> dict:
+        return _valid_spac_data(await _get_json(_data_url("spac-hunter", "data")))
+
     try:
-        data = await _get_json(f"{_RAW}/spac-hunter/main/data.json")
-        if not isinstance(data, dict) or not isinstance(data.get("spacs"), list):
-            raise ValueError("Invalid SPAC Hunter data")
-        _raw_cache.set(key, data)
-        return data
-    except (httpx.HTTPError, ValueError) as exc:
+        return await _sibling(
+            "spac-hunter/data", "spac-hunter",
+            lambda env: _valid_spac_data(adapters.spac_valuation(env["data"])),
+            legacy,
+        )
+    except FETCH_ERRORS as exc:
         logger.warning("SPAC Hunter valuation fetch failed: %s", exc)
-        entry = _raw_cache.get_entry(key, allow_stale=True)
-        return entry.value if entry else {}
+        return {}
+
+
+async def _nps_card() -> dict:
+    # nps-tracker current.json(313 KB)은 카드로 줄여서 캐시한다.
+    async def legacy() -> dict:
+        return _summarize_nps(await _get_json(_data_url("nps-tracker", "current")))
+
+    return await _sibling(
+        "nps-tracker/card", "nps-tracker",
+        lambda env: _summarize_nps(adapters.nps_current(env["data"])), legacy,
+    )
 
 
 async def _nps_summary() -> dict | None:
-    # nps-tracker 도 기본 브랜치가 main 이고 current.json 만으로 요약 가능하다
-    # (종목명이 holdings 안에 들어 있어 별도 config 가 필요 없음).
-    data = await _get_json(f"{_RAW}/nps-tracker/main/current.json")
-    return _summarize_nps(data)
+    return await _nps_card()
+
+
+def _buybacks_index(holdings: list) -> dict:
+    """holding_snapshots.json(1.2 MB) → {"card": 인사이트 카드, "byCode": 종목별 매칭}.
+
+    card 는 ``_summarize_buybacks``, byCode 는 ``_match_buyback`` 과 같은 결과다(한 번 훑어서
+    만든다). summary.json 경로(``adapters.buybacks_index``)와 같은 모양이라 캐시 하나로 쓴다.
+    """
+    if not isinstance(holdings, list):
+        raise TypeError("buybacks holding_snapshots.json must be a list")
+    return {
+        "card": _summarize_buybacks(holdings),
+        "byCode": {code: _buyback_match_row(code, row) for code, row in _latest_common_buybacks(holdings).items()},
+    }
+
+
+async def _buybacks_data() -> dict:
+    async def legacy() -> dict:
+        return _buybacks_index(await _get_json(_data_url("buybacks", "holding-snapshots")))
+
+    return await _sibling(
+        "buybacks/index", "buybacks",
+        lambda env: adapters.buybacks_index(env["data"], SITE["buybacks"]),
+        legacy,
+    )
 
 
 async def _buybacks_summary() -> dict | None:
-    data = await _get_json(f"{SITE['buybacks']}data/buybacks/holding_snapshots.json")
-    return _summarize_buybacks(data)
+    return (await _buybacks_data())["card"]
 
 
 def _summarize_bond_mate(current: dict) -> dict:
@@ -533,8 +703,13 @@ def _summarize_bond_mate(current: dict) -> dict:
 
 
 async def _bond_mate_summary() -> dict | None:
-    data = await _get_json(f"{SITE['bondMate']}data/current.json")
-    return _summarize_bond_mate(data)
+    async def legacy() -> dict:
+        return _summarize_bond_mate(await _get_json(_data_url("bond-mate", "current")))
+
+    return await _sibling(
+        "bond-mate/card", "bond-mate",
+        lambda env: _summarize_bond_mate(adapters.bond_current(env)), legacy,
+    )
 
 
 async def fetch_external_insights() -> dict:
@@ -605,35 +780,55 @@ def _match_holding(code: str, current: dict, config: list) -> dict | None:
     return None
 
 
-def _match_buyback(code: str, holdings: list) -> dict | None:
-    """Return the latest common-stock buyback snapshot for one code."""
-    latest: dict | None = None
+def _latest_common_buybacks(holdings: list) -> dict[str, dict]:
+    """종목코드별 최신 보통주 스냅샷(treasury_ratio 가 있는 행 중에서) — 한 번 훑는다."""
+    latest: dict[str, dict] = {}
     for row in holdings or []:
         if not isinstance(row, dict):
             continue
-        if str(row.get("stock_code") or "").strip().upper() != code:
-            continue
-        if not _buyback_is_common(row):
+        code = str(row.get("stock_code") or "").strip().upper()
+        if not code or not _buyback_is_common(row):
             continue
         if _num(row.get("treasury_ratio")) is None:
             continue
-        if latest is None or _buyback_is_newer(row, latest):
-            latest = row
-    if latest is None:
-        return None
-    ratio = _num(latest.get("treasury_ratio"))
-    if ratio is None:
-        return None
+        current = latest.get(code)
+        if current is None or _buyback_is_newer(row, current):
+            latest[code] = row
+    return latest
+
+
+def _buyback_match_row(code: str, row: dict) -> dict:
+    ratio = _num(row.get("treasury_ratio"))
     return {
-        "name": latest.get("corp_name") or code,
-        "asOf": latest.get("as_of_date"),
-        "stockKind": latest.get("stock_kind"),
+        "name": row.get("corp_name") or code,
+        "asOf": row.get("as_of_date"),
+        "stockKind": row.get("stock_kind"),
         "treasuryRatio": ratio,
         "treasuryRatioPct": ratio * 100,
-        "endingQty": latest.get("ending_qty"),
-        "issuedShares": latest.get("issued_shares"),
+        "endingQty": row.get("ending_qty"),
+        "issuedShares": row.get("issued_shares"),
         "url": SITE["buybacks"],
     }
+
+
+def _match_buyback(code: str, holdings: list) -> dict | None:
+    """Return the latest common-stock buyback snapshot for one code."""
+    code = str(code or "").strip().upper()
+    row = _latest_common_buybacks(
+        [r for r in holdings or [] if isinstance(r, dict) and str(r.get("stock_code") or "").strip().upper() == code]
+    ).get(code)
+    return _buyback_match_row(code, row) if row is not None else None
+
+
+async def _buyback_stock_name(code: str) -> str | None:
+    """summary.json 의 ``ratios`` 에는 종목명이 없다 — 허브 DART 코드표에서 찾는다."""
+    from repositories import corp_codes
+
+    try:
+        return await corp_codes.get_corp_name(code)
+    except (sqlite3.Error, OSError, DBError) as exc:
+        logger.info("buyback stock name lookup failed (%s): %s", code, exc)
+        return None
 
 
 def _match_gold_gap_asset(code: str, summary: dict) -> dict | None:
@@ -747,11 +942,12 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
         logger.warning("portfolio signal etf lookup failed: %s", exc)
 
     try:
-        data = await _get_json(f"{SITE['buybacks']}data/buybacks/holding_snapshots.json")
+        by_code = (await _buybacks_data())["byCode"]
         for code in normalized:
-            buyback = _match_buyback(code, data)
+            buyback = by_code.get(code)
             if not buyback:
                 continue
+            name = buyback.get("name") or await _buyback_stock_name(code)
             ratio_pct = _num(buyback.get("treasuryRatioPct"))
             severity = "high" if ratio_pct is not None and ratio_pct >= 20 else "watch"
             detail = f"자사주 보유비중 {ratio_pct:.1f}%" if ratio_pct is not None else "자사주 데이터 신호"
@@ -759,7 +955,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                 detail += f" · {buyback['asOf']} 기준"
             out[code].append(_signal(
                 "buybacks",
-                f"{buyback.get('name') or code} 자사주",
+                f"{name or code} 자사주",
                 detail,
                 SITE["buybacks"] + f"?code={code}",
                 severity=severity,

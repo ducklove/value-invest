@@ -1,6 +1,19 @@
 import json
+from pathlib import Path
 
+import pytest
+
+import external_tools
 import integrations
+
+
+@pytest.fixture(autouse=True)
+def _isolate_gold_cache():
+    # goldGap 최신 갭은 external_tools 의 gold_gap 캐시를 우선한다 — 다른 테스트가 채운
+    # 캐시가 로컬 파일 검증을 가리지 않게 비운다.
+    external_tools._raw_cache.delete("gold_gap/latest")
+    yield
+    external_tools._raw_cache.delete("gold_gap/latest")
 
 
 def test_build_public_integrations_reads_sibling_project_configs(tmp_path):
@@ -171,3 +184,67 @@ def test_all_about_gold_publication_url_and_override(monkeypatch):
     monkeypatch.setenv("ALL_ABOUT_GOLD_BASE_URL", "http://localhost:8765/")
     config = integrations.build_public_integrations()["allAboutGold"]
     assert config["baseUrl"] == "http://localhost:8765"
+
+
+def _write_gold(tmp_path, gap=4.25, date="2026-04-24"):
+    gold_dir = tmp_path / "gold_gap"
+    gold_dir.mkdir(exist_ok=True)
+    (gold_dir / "data.json").write_text(
+        json.dumps({"updated_at": "2026-04-25 09:00 KST", "gold": {"dates": [date], "gap_pct": [gap]}}),
+        encoding="utf-8",
+    )
+    return gold_dir
+
+
+def test_sibling_files_are_memoized_by_mtime(tmp_path, monkeypatch):
+    gold_dir = _write_gold(tmp_path)
+    reads: list[str] = []
+    original = Path.read_text
+
+    def counting(self, *args, **kwargs):
+        reads.append(str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting)
+    first = integrations.build_public_integrations(workspace_root=tmp_path)
+    data_path = str(gold_dir / "data.json")
+    assert reads.count(data_path) == 1
+    second = integrations.build_public_integrations(workspace_root=tmp_path)
+    assert reads.count(data_path) == 1  # 두 번째 호출은 파일을 다시 열지 않는다
+    assert first == second
+    second["goldGap"]["assets"]["gold"]["portfolioCodes"].append("MUTATED")
+    third = integrations.build_public_integrations(workspace_root=tmp_path)
+    assert "MUTATED" not in third["goldGap"]["assets"]["gold"]["portfolioCodes"]
+    assert "MUTATED" not in integrations.DEFAULT_GOLD_GAP_ASSETS["gold"]["portfolioCodes"]
+
+    # 파일이 바뀌면(mtime/크기) 다시 읽는다.
+    _write_gold(tmp_path, gap=-12.75, date="2026-04-26")  # 크기도 달라진다
+    changed = integrations.build_public_integrations(workspace_root=tmp_path)
+    assert reads.count(data_path) == 2
+    assert changed["goldGap"]["assets"]["gold"]["latestGapPct"] == -12.75
+
+
+def test_gold_gap_latest_prefers_cached_published_data(tmp_path):
+    _write_gold(tmp_path)  # 로컬 data.json 은 오래된 값(4.25)
+    local = integrations.build_public_integrations(workspace_root=tmp_path)["goldGap"]
+    assert local["assets"]["gold"]["latestGapPct"] == 4.25
+
+    external_tools._raw_cache.set("gold_gap/latest", {
+        "updated_at": "2026-09-27 08:47 KST",
+        "gold": {"gap_pct": [1.07], "dates": ["2026-09-27"]},
+        "bitcoin": {"gap_pct": [0.42], "dates": ["2026-09-27"]},
+    })
+    gold = integrations.build_public_integrations(workspace_root=tmp_path)["goldGap"]
+    assert gold["assets"]["gold"]["latestGapPct"] == 1.07
+    assert gold["assets"]["gold"]["latestDate"] == "2026-09-27"
+    assert gold["assets"]["bitcoin"]["latestGapPct"] == 0.42
+    assert "latestGapPct" not in gold["assets"]["usdt"]
+    assert gold["updatedAt"] == "2026-09-27 08:47 KST"
+
+
+def test_kis_proxy_is_server_side_only(monkeypatch):
+    monkeypatch.setenv("KIS_PROXY_BASE_URL", "http://127.0.0.1:3288/")
+    config = integrations.build_app_config()
+    assert "kisProxy" not in config["integrations"]
+    assert "3288" not in json.dumps(config)
+    assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == "http://127.0.0.1:3288"

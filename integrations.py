@@ -1,5 +1,7 @@
+import copy
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -46,8 +48,59 @@ def handoff_integration_keys() -> frozenset[str]:
     return ecosystem.handoff_keys()
 
 
+# 로컬 형제 파일 파싱 결과 메모: 경로 → ((mtime_ns, 크기), 파싱값). 요청마다 SD 카드에서
+# 수십 KB 를 다시 읽고 파싱하지 않는다 — stat 한 번으로 바뀌었는지만 본다. 메모한 값은
+# 공유 객체이므로 빌더는 절대 변경하지 않고 새 dict 를 만든다(_merge_gold_gap_assets 참고).
+_file_memo_lock = threading.Lock()
+_file_memo: dict[tuple[str, str], tuple[tuple[int, int], Any]] = {}
+
+
 def build_public_integrations(workspace_root: Path | None = None) -> dict[str, Any]:
+    """브라우저(/app-config.js, /api/integrations)로 나가는 연결 도구 설정.
+
+    kisProxy 같은 서버 전용 항목은 여기 없다(:func:`build_server_integrations`).
+    """
     root = _workspace_root(workspace_root)
+    result = _build_public_integrations(root)
+    _apply_gold_gap_latest(result["goldGap"])
+    return result
+
+
+def build_server_integrations() -> dict[str, Any]:
+    """서버 전용 연결 설정(브라우저로 내보내지 않는다) — 지금은 KIS 프록시뿐."""
+    return {"kisProxy": _kis_proxy_config()}
+
+
+def clear_file_memo() -> None:
+    """테스트용 — 다음 호출이 파일을 다시 읽는다."""
+    with _file_memo_lock:
+        _file_memo.clear()
+
+
+def _memoized_file(path: Path | None, kind: str, parse) -> Any:
+    """``parse(text)`` 결과를 (경로, mtime_ns, 크기)로 메모한다. 파일이 없으면 None."""
+    if not path:
+        return None
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = (str(path), kind)
+    signature = (stat.st_mtime_ns, stat.st_size)
+    with _file_memo_lock:
+        hit = _file_memo.get(key)
+    if hit is not None and hit[0] == signature:
+        return hit[1]
+    try:
+        value = parse(path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    with _file_memo_lock:
+        _file_memo[key] = (signature, value)
+    return value
+
+
+def _build_public_integrations(root: Path) -> dict[str, Any]:
     return {
         "holdingValue": _holding_value_config(root),
         "preferredSpread": _preferred_spread_config(root),
@@ -58,7 +111,6 @@ def build_public_integrations(workspace_root: Path | None = None) -> dict[str, A
         "allAboutGold": _all_about_gold_config(),
         "npsTracker": _nps_tracker_config(),
         "bondMate": _bond_mate_config(),
-        "kisProxy": _kis_proxy_config(),
     }
 
 
@@ -85,19 +137,17 @@ def _project_dir(root: Path, env_name: str, candidates: list[str]) -> Path | Non
 
 
 def _read_json(path: Path | None) -> Any:
-    if not path or not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    def parse(text: str) -> Any:
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return None
+
+    return _memoized_file(path, "json", parse)
 
 
 def _read_js_object(path: Path | None, const_name: str) -> Any:
-    if not path or not path.exists():
-        return None
-    try:
-        text = path.read_text(encoding="utf-8")
+    def parse(text: str) -> Any:
         marker_idx = text.find(f"const {const_name}")
         if marker_idx < 0:
             return None
@@ -109,9 +159,12 @@ def _read_js_object(path: Path | None, const_name: str) -> Any:
             end = text.rfind("}")
         if end < start:
             return None
-        return json.loads(text[start : end + 1])
-    except (OSError, json.JSONDecodeError):
-        return None
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+
+    return _memoized_file(path, f"js:{const_name}", parse)
 
 
 def _ticker_code(ticker: Any) -> str:
@@ -358,12 +411,41 @@ def _gold_gap_config(root: Path) -> dict[str, Any]:
     }
 
 
+def _apply_gold_gap_latest(config: dict[str, Any]) -> None:
+    """최신 갭은 external_tools 의 gold_gap 캐시(Pages data.json/summary.json)가 있으면 그걸 쓴다.
+
+    로컬 ``gold_gap/data.json`` 은 orphan ``data`` 브랜치에만 있어 오래되기 쉽다 — 캐시가
+    비어 있으면(아직 한 번도 안 받았으면) 로컬 파일 값을 그대로 둔다. 네트워크는 타지 않는다.
+    """
+    import external_tools
+
+    latest = external_tools.peek_gold_latest()
+    if not isinstance(latest, dict):
+        return
+    applied = False
+    for asset_key, asset_config in (config.get("assets") or {}).items():
+        asset_data = latest.get(asset_key)
+        if not isinstance(asset_data, dict):
+            continue
+        latest_gap = _last_number(asset_data.get("gap_pct"))
+        if latest_gap is None:
+            continue
+        asset_config["latestGapPct"] = latest_gap
+        latest_date = _last_value(asset_data.get("dates"))
+        if latest_date:
+            asset_config["latestDate"] = latest_date
+        applied = True
+    if applied and latest.get("updated_at"):
+        config["updatedAt"] = latest["updated_at"]
+
+
 def _merge_gold_gap_assets(raw_config: Any) -> dict[str, dict[str, Any]]:
-    assets = {key: dict(value) for key, value in DEFAULT_GOLD_GAP_ASSETS.items()}
+    # 기본값·메모된 파일 값은 공유 객체다 — 깊은 복사로 새 dict 를 만든다.
+    assets = copy.deepcopy(DEFAULT_GOLD_GAP_ASSETS)
     if isinstance(raw_config, dict) and isinstance(raw_config.get("assets"), dict):
         for key, value in raw_config["assets"].items():
             if isinstance(value, dict):
-                assets.setdefault(key, {}).update(value)
+                assets.setdefault(key, {}).update(copy.deepcopy(value))
     return assets
 
 

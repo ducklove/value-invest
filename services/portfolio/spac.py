@@ -3,6 +3,11 @@
 Current liquidation value follows spac-hunter/assets/valuation.js:
 net simple interest within each contract, capitalized at rate changes/rollovers.
 The future payout value is kept separate and comes directly from SPAC Hunter.
+
+When SPAC Hunter publishes its own pipeline-computed value for the same day
+(optional ``spacs[].currentLiquidationValue`` + ``currentLiquidationValueAsOf`` in
+summary.json / data.json), that number wins; the Python port below is the fallback
+for other days and for payloads that do not carry it yet.
 """
 
 from __future__ import annotations
@@ -84,6 +89,16 @@ def current_liquidation_value(item: dict, as_of: date, assumptions: dict) -> flo
     return value if math.isfinite(value) and value > 0 else None
 
 
+def pipeline_liquidation_value(item: dict, as_of: date) -> float | None:
+    """SPAC Hunter 파이프라인이 계산한 ``as_of`` 당일 청산가치(없거나 다른 날짜면 None)."""
+    value = safe_float(item.get("currentLiquidationValue"))
+    if value is None or not math.isfinite(value) or value <= 0:
+        return None
+    if _date(item.get("currentLiquidationValueAsOf")) != as_of:
+        return None
+    return value
+
+
 async def fetch_spac_context(stock_code: str, name: str) -> dict | None:
     if not is_spac(stock_code, name):
         return None
@@ -106,7 +121,9 @@ def build_spac_insight(context: dict | None, quote: dict | None, *, as_of: date 
     price = safe_float((quote or {}).get("price"))
     if price is None or price <= 0:
         price = safe_float(item.get("currentPrice"))
-    value = current_liquidation_value(item, as_of, context["assumptions"])
+    value = pipeline_liquidation_value(item, as_of)
+    if value is None:
+        value = current_liquidation_value(item, as_of, context["assumptions"])
     target = safe_float(item.get("liquidationValuePerShare"))
     payout = _date(item.get("payoutDate") or item.get("liquidationDate"))
     annualized = None

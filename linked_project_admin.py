@@ -17,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import integrations
+from core import ecosystem
 
 PROJECT_SPECS: dict[str, dict[str, Any]] = {
     "holdingValue": {
@@ -26,7 +27,6 @@ PROJECT_SPECS: dict[str, dict[str, Any]] = {
         "candidates": ["hodling-value", "holding_value"],
         "config_kind": "holding",
         "base_url_key": "holdingValue",
-        "base_url_env": "HOLDING_VALUE_BASE_URL",
     },
     "preferredSpread": {
         "label": "우선주 pair 목록",
@@ -35,7 +35,6 @@ PROJECT_SPECS: dict[str, dict[str, Any]] = {
         "candidates": ["common_preferred_spread"],
         "config_kind": "preferred",
         "base_url_key": "preferredSpread",
-        "base_url_env": "PREFERRED_SPREAD_BASE_URL",
     },
     "goldGap": {
         "label": "금/비트코인 gap 설정",
@@ -44,7 +43,6 @@ PROJECT_SPECS: dict[str, dict[str, Any]] = {
         "candidates": ["gold_gap"],
         "config_kind": "gold",
         "base_url_key": "goldGap",
-        "base_url_env": "GOLD_GAP_BASE_URL",
     },
 }
 
@@ -187,15 +185,19 @@ def _read_json(path: Path | None) -> Any:
 
 
 def _remote_config_url(spec: dict[str, Any]) -> str:
+    """공개 config.json 주소 — 레지스트리(config/ecosystem.json) 도구 url + envOverride."""
     base_key = spec.get("base_url_key")
     if not base_key:
         return ""
-    base_url = os.getenv(spec.get("base_url_env", ""), integrations.DEFAULT_BASE_URLS.get(base_key, ""))
-    base_url = str(base_url or "").rstrip("/")
+    tool = next((t for t in ecosystem.tools() if t.get("integrationKey") == base_key), None)
+    base_url = (ecosystem.resolved_url(tool) if tool else None) or ""
     return f"{base_url}/config.json" if base_url else ""
 
 
 def _read_remote_json(url: str, timeout: float = 5.0) -> tuple[Any, str | None]:
+    # urlopen 을 유지한다: 이 모듈은 routes/admin.py 가 asyncio.to_thread 로 부르는 동기
+    # 코드이고, core/http 의 공유 클라이언트는 이벤트 루프에 묶인 AsyncClient 뿐이라
+    # 워커 스레드에서 쓸 수 없다(동기 클라이언트 헬퍼가 생기면 그걸로 옮긴다).
     try:
         req = Request(url, headers={"User-Agent": "value-invest-admin/1.0"})
         with urlopen(req, timeout=timeout) as response:

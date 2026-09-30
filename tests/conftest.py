@@ -18,6 +18,9 @@ from _harness import close_temp_db, open_temp_db
 # 먼저 import 되므로 모듈 import 시점에 env 를 읽는 클라이언트에도 적용)
 os.environ.setdefault("KIS_PROXY_BASE_URL", "http://127.0.0.1:1")
 os.environ.setdefault("CLOSE_PRICE_API_ENABLED", "0")
+# 형제 summary.json(services/ecosystem/siblings.py) 단계는 기본 꺼 둔다 — 기존 테스트는
+# 레거시 fetch(_get_json/_load_pair)만 패치한다. summary 경로 테스트는 켜고 쓴다.
+os.environ.setdefault("ECOSYSTEM_SUMMARIES", "0")
 
 
 @pytest.fixture

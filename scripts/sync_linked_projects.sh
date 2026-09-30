@@ -15,10 +15,13 @@ set -uo pipefail
 
 ROOT="${LINKED_PROJECTS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
-# "디렉터리후보(|로 구분):업스트림에서 가져올 파일(,로 구분)"
+# "디렉터리후보(|로 구분)[@원격브랜치]:업스트림에서 가져올 파일(,로 구분)"
+# @원격브랜치가 없으면 추적 브랜치(없으면 origin/HEAD·main·master)를 쓴다.
+# gold_gap 의 data.json 은 master 에 없다 — Actions 가 orphan `data` 브랜치에만
+# 커밋하고 Pages 로 배포한다. 그래서 origin/data 를 명시한다.
 PROJECTS=(
   "hodling-value|holding_value:current.json"
-  "gold_gap:data.json"
+  "gold_gap@origin/data:data.json"
 )
 
 resolve_upstream() {
@@ -39,8 +42,13 @@ resolve_upstream() {
 
 status=0
 for entry in "${PROJECTS[@]}"; do
-  dirs="${entry%%:*}"
+  spec="${entry%%:*}"
   files="${entry#*:}"
+  dirs="${spec%%@*}"
+  pinned=""
+  if [[ "$spec" == *@* ]]; then
+    pinned="${spec#*@}"
+  fi
 
   repo=""
   IFS='|' read -ra candidates <<<"$dirs"
@@ -61,7 +69,17 @@ for entry in "${PROJECTS[@]}"; do
     continue
   fi
 
-  if ! upstream="$(resolve_upstream "$repo")"; then
+  if [[ -n "$pinned" ]]; then
+    # single-branch 클론이면 기본 fetch 가 그 브랜치를 받지 않는다 — 명시적으로 받는다.
+    branch="${pinned#origin/}"
+    git -C "$repo" fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || true
+    if ! git -C "$repo" rev-parse --verify --quiet "$pinned" >/dev/null; then
+      echo "warn: $repo $pinned 브랜치를 찾지 못했습니다"
+      status=1
+      continue
+    fi
+    upstream="$pinned"
+  elif ! upstream="$(resolve_upstream "$repo")"; then
     echo "warn: $repo 업스트림 브랜치를 찾지 못했습니다"
     status=1
     continue

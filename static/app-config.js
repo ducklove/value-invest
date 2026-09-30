@@ -39,10 +39,6 @@ window.APP_CONFIG = {
         KRX_GOLD: "gold",
         CRYPTO_BTC: "bitcoin"
       }
-    },
-    kisProxy: {
-      baseUrl: "http://ducklove.duckdns.org:3288",
-      role: "server-side"
     }
   }
 };

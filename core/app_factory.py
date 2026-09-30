@@ -43,6 +43,7 @@ def _register_feature_routers(app: FastAPI) -> None:
     from routes.device import router as device_router
     from routes.dividend_calendar import router as dividend_calendar_router
     from routes.dividend_receipts import router as dividend_receipts_router
+    from routes.ecosystem import router as ecosystem_router
     from routes.household_assets import router as household_assets_router
     from routes.internal import router as internal_router
     from routes.investment_insights import router as investment_insights_router
@@ -87,6 +88,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         screener_router,
         masters_router,
         admin_router,
+        ecosystem_router,
     ):
         app.include_router(router)
 

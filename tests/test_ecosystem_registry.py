@@ -127,8 +127,10 @@ def test_app_config_projection_hides_internal_tools(monkeypatch):
         assert needle not in text
     for tool in projection["tools"]:
         assert tool["url"].startswith("https://")
-    # kisProxy 서버 설정은 그대로 유지된다(서버 전용).
-    assert config["integrations"]["kisProxy"]["baseUrl"] == "http://ducklove.duckdns.org:3288"
+    # kisProxy 는 브라우저 코드가 쓰지 않는다 — 공개 /app-config.js 에서 빠지고 서버 설정만 남는다.
+    assert "kisProxy" not in config["integrations"]
+    assert ":3288" not in json.dumps(config, ensure_ascii=False)
+    assert integrations.build_server_integrations()["kisProxy"]["baseUrl"] == "http://ducklove.duckdns.org:3288"
 
 
 def test_analytics_projects_match_registry_vendor_dirs():
@@ -184,7 +186,15 @@ def test_theme_boot_snippet_stays_tiny():
 
 def test_every_integration_key_is_served_by_build_public_integrations():
     # handoff 라우트는 build_public_integrations()[key] 로 주소를 찾는다 — 레지스트리에만 있는 키가 생기면 404.
+    # 서버 전용(internal) 항목은 build_server_integrations() 가 맡는다.
     served = integrations.build_public_integrations()
+    server = integrations.build_server_integrations()
     for tool in ecosystem.tools():
-        if tool.get("integrationKey"):
+        if not tool.get("integrationKey"):
+            continue
+        if tool["visibility"] == "public":
             assert tool["integrationKey"] in served, tool["id"]
+            assert tool["integrationKey"] not in server, tool["id"]
+        else:
+            assert tool["integrationKey"] in server, tool["id"]
+            assert tool["integrationKey"] not in served, tool["id"]
