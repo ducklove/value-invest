@@ -12,6 +12,7 @@ from datetime import datetime
 
 import httpx
 
+from cache_layer import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
@@ -65,25 +66,46 @@ async def fetch_krx_gold_quote() -> dict:
     return {}
 
 
+# Upbit 는 한 요청에 여러 market 을 받는다. 포트폴리오 새로고침이 코인 종목마다
+# 따로 부르던 호출을 한 번으로 묶는다 — 짧은 TTL 안의 호출(동시 호출 포함)은
+# 같은 응답을 공유한다.
+UPBIT_TICKER_URL = "https://api.upbit.com/v1/ticker"
+UPBIT_BATCH_TTL_SECONDS = 5.0
+_UPBIT_ERRORS = (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError)
+_upbit_tickers_cache = MemoryTTLCache(
+    "portfolio.upbit_tickers", UPBIT_BATCH_TTL_SECONDS, evict_expired_after=0
+)
+
+
+async def _load_upbit_tickers() -> dict[str, dict]:
+    markets = ",".join(CRYPTO_UPBIT_MAP.values())
+    client = await get_http_client("upbit")
+    resp = await client.get(
+        f"{UPBIT_TICKER_URL}?markets={markets}",
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=5,
+    )
+    data = resp.json()
+    if not isinstance(data, list):
+        return {}
+    return {row["market"]: row for row in data if isinstance(row, dict) and row.get("market")}
+
+
 async def fetch_crypto_quote(stock_code: str) -> dict:
     """Fetch a crypto price in KRW from the Upbit API."""
     market = CRYPTO_UPBIT_MAP.get(stock_code)
     if not market:
         return {}
     try:
-        client = await get_http_client("upbit")
-        resp = await client.get(
-            f"https://api.upbit.com/v1/ticker?markets={market}",
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=5,
+        tickers = await cached_fetch(
+            _upbit_tickers_cache, "tickers", _load_upbit_tickers, is_valid=bool,
         )
-        data = resp.json()
-        if data and isinstance(data, list):
-            d = data[0]
+        d = tickers.get(market)
+        if d:
             price = round(d["trade_price"])
             change = round(d["signed_change_price"])
             change_pct = round(d["signed_change_rate"] * 100, 2)
             return {"price": price, "change": change, "change_pct": change_pct}
-    except Exception as e:
+    except _UPBIT_ERRORS as e:
         logger.warning("Crypto quote fetch failed for %s: %s", stock_code, e)
     return {}
