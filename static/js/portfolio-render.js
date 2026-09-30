@@ -395,9 +395,12 @@ function renderPortfolio(options = {}) {
 
   // Helper: compute return % / PnL / raw value change for a period, group-aware.
   // pnl = 입출금 차감 손익 (%와 같은 의미축), valueChange = 평가액 변동(입금 포함).
-  const _periodReturn = (snap, navField) => {
+  // crossBasis: 정산 기준(price_basis)이 달라도 금액 비교는 한다(Today 전용). NAV 는
+  // 새 기준 첫날 1,000 으로 다시 시작하므로 이때 NAV 수익률은 쓰지 않는다.
+  const _periodReturn = (snap, navField, { crossBasis = false } = {}) => {
     if (!snap) return { pct: null, pnl: null, valueChange: null };
-    if (latestSnap?.price_basis && (snap.price_basis || 'legacy_latest') !== latestSnap.price_basis) {
+    const sameBasis = !(latestSnap?.price_basis && (snap.price_basis || 'legacy_latest') !== latestSnap.price_basis);
+    if (!sameBasis && !crossBasis) {
       return { pct: null, pnl: null, valueChange: null };
     }
     const baseVal = _periodBaseValue(snap);
@@ -414,7 +417,7 @@ function renderPortfolio(options = {}) {
     }
     // Whole portfolio: NAV-based % + cashflow-adjusted PnL
     const nav = _navAdj(snap.return_nav ?? snap[navField || 'nav'], snap.fx_usdkrw);
-    const pct = nav && curNav ? ((curNav / nav - 1) * 100) : null;
+    const pct = sameBasis && nav && curNav ? ((curNav / nav - 1) * 100) : null;
     const valueChange = baseVal != null ? _currentFxVal - baseVal : null;
     const netCf = Number(snap.today_net_cashflow ?? snap.net_cashflow ?? 0) || 0;
     const pnl = valueChange != null ? valueChange - _fxConv(netCf, null) : null;
@@ -453,7 +456,7 @@ function renderPortfolio(options = {}) {
 
   // --- Daily return ---
   const _dailyBaseValue = _periodBaseValue(PfStore.snapshots.prevDay);
-  const _daily = _periodReturn(PfStore.snapshots.prevDay, 'nav');
+  const _daily = _periodReturn(PfStore.snapshots.prevDay, 'nav', { crossBasis: true });
   let dailyNavPct = _daily.pct;
   let totalDailyPnlDisplay = _daily.pnl ?? 0;
   let _dailyValueChange = _daily.valueChange;
@@ -464,20 +467,8 @@ function renderPortfolio(options = {}) {
     // the amount. Use the cashflow-adjusted live PnL over the same base value.
     dailyNavPct = totalDailyPnlDisplay / _dailyBaseValue * 100;
   }
-  const _regularClose = !isFiltered && !PfStore.accountId ? PfStore.snapshots.prevDay?.regular_close : null;
-  if (_regularClose) {
-    dailyNavPct = (_isUsd ? _regularClose.change_usd_pct : _regularClose.change_pct) ?? null;
-    totalDailyPnlDisplay = (_isUsd ? _regularClose.change_usd : _regularClose.change_krw) ?? null;
-    _dailyValueChange = _isUsd ? (_regularClose.value_change_usd ?? null)
-      : (_regularClose.prev_value == null ? null : _regularClose.total_value - _regularClose.prev_value);
-  }
-  let _afterClosePnl = _regularClose && allQuotesLoaded
-    ? _fxConv(grandTotalMarketValue - _regularClose.total_value - _regularClose.after_close_net_cashflow, null) : null;
-  if (_regularClose && allQuotesLoaded && _isUsd) {
-    _afterClosePnl = _regularClose.fx_usdkrw
-      ? (grandTotalMarketValue - _regularClose.after_close_net_cashflow) / PfStore.currency.fxRate - _regularClose.total_value / _regularClose.fx_usdkrw
-      : null;
-  }
+  // Today 카드는 하루 종일(금일 정산이 생긴 15:35~24:00 포함) 전날 정산 대비 최신 평가다.
+  // 금일 정산(prevDay.regular_close)은 NAV 좌수(latestSnap)에만 쓰고 Today 값을 바꾸지 않는다.
   // Table footer uses quote-session changes; Today uses the settlement basis.
   const tableDailyBaseValue = totalMarketValue - totalDailyPnl;
   const dailyReturnPct = tableDailyBaseValue > 0 ? (totalDailyPnl / tableDailyBaseValue * 100) : null;
@@ -502,11 +493,9 @@ function renderPortfolio(options = {}) {
   // Today retains the previous settlement baseline after the market closes.
   const _todayBaseDate = PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.date;
   // Slice YYYY-MM-DD directly to avoid timezone-off-by-one browser parsing.
-  const _todayLabel = _regularClose
-    ? `${_regularClose.date.slice(5).replace('-', '/')} 정규장 확정${_regularClose.comparison_unavailable ? ' · 새 기준 시작' : ''}`
-    : (PfStore.snapshots.prevDay?.settlement_pending ? '정산 미완료 · ' : '') + (_todayBaseDate
-      ? `${_todayBaseDate.slice(5).replace('-', '/')} ${PfStore.snapshots.prevDay?.price_basis === 'regular_close_v1' ? '정규장' : '기존'} 정산 대비 · 최신 평가`
-      : '기준 없음');
+  const _todayLabel = (PfStore.snapshots.prevDay?.settlement_pending ? '정산 미완료 · ' : '') + (_todayBaseDate
+    ? `${_todayBaseDate.slice(5).replace('-', '/')} ${PfStore.snapshots.prevDay?.price_basis === 'regular_close_v1' ? '정규장' : '기존'} 정산 대비 · 최신 평가`
+    : '기준 없음');
   const _mtdLabel = `${_now.getFullYear()}/${String(_now.getMonth()+1).padStart(2,'0')}`;
   const _ytdLabel = `${_now.getFullYear()}`;
 
@@ -553,9 +542,8 @@ function renderPortfolio(options = {}) {
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
-        <div class="pf-summary-value ${(_regularClose || _l) ? returnClass(dailyNavPct) : ''}">${(_regularClose || _l) ? (dailyNavPct !== null ? fmtPct(dailyNavPct) : '-') : '-'}</div>
-        ${(_regularClose || _l) && dailyNavPct !== null ? _subPair(totalDailyPnlDisplay, _dailyValueChange) : '<div class="pf-summary-sub">비교 기준 대기</div>'}
-        ${_afterClosePnl !== null ? `<div class="pf-summary-sub">정산 이후 ${_fsv(_afterClosePnl)} · 최신 평가</div>` : ''}
+        <div class="pf-summary-value ${_l ? returnClass(dailyNavPct) : ''}">${_l ? (dailyNavPct !== null ? fmtPct(dailyNavPct) : '-') : '-'}</div>
+        ${_l && dailyNavPct !== null ? _subPair(totalDailyPnlDisplay, _dailyValueChange) : '<div class="pf-summary-sub">비교 기준 대기</div>'}
       </div>
       <canvas class="pf-sparkline" id="sparkDaily"></canvas>
     </div>

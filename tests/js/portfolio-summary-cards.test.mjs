@@ -201,7 +201,7 @@ test('정산 누락이면 이전 날짜와 함께 미완료 상태를 표시한�
   w.close();
 });
 
-test('정규장 성과는 장후 가격이 바뀌어도 유지하고 최신 평가와 별도로 표시한다', () => {
+test('Today 는 금일 정산(15:35~24:00)이 있어도 전날 정산 대비 최신 평가다', () => {
   const w = loadSummaryDom();
   seedPortfolio(w);
   w.PfStore.snapshots.prevDay.regular_close = {
@@ -211,20 +211,19 @@ test('정규장 성과는 장후 가격이 바뀌어도 유지하고 최신 평�
   };
   w.renderPortfolio({ summaryOnly: true });
   let today = cardByLabel(w, 'Today');
-  assert.equal(today.querySelector('.pf-summary-value').textContent, '+3.16%');
-  assert.match(today.textContent, /정규장 확정/);
-  assert.match(today.textContent, /정산 이후 \+10,000/);
+  // 전날(08/25) 정산 950,000 대비 최신 평가 1,000,000 → +5.26% (금일 확정 +3.16% 아님)
+  assert.equal(today.querySelector('.pf-summary-value').textContent, '+5.26%');
+  assert.match(today.textContent, /08\/25 기존 정산 대비 · 최신 평가/);
+  assert.doesNotMatch(today.textContent, /정규장 확정|정산 이후/);
   w.PfStore.items[0].quote.price = 110000;
   w.renderPortfolio({ summaryOnly: true });
   today = cardByLabel(w, 'Today');
-  assert.equal(today.querySelector('.pf-summary-value').textContent, '+3.16%');
-  assert.match(today.textContent, /정산 이후 \+110,000/);
+  assert.equal(today.querySelector('.pf-summary-value').textContent, '+15.79%');
   assert.match(cardByLabel(w, 'Total').textContent, /1,100,000/);
-  assert.equal(w.PfStore.items[0].quote.price, 110000);
   w.close();
 });
 
-test('첫 정규장 기준점은 구 정산과 비교한 수익률을 표시하지 않는다', () => {
+test('새 정산 기준 첫날에도 Today 는 전날 정산 대비, MTD 는 기준 변경으로 비교하지 않는다', () => {
   const w = loadSummaryDom();
   seedPortfolio(w);
   w.PfStore.snapshots.prevDay.regular_close = {
@@ -234,30 +233,32 @@ test('첫 정규장 기준점은 구 정산과 비교한 수익률을 표시하�
   };
   w.renderPortfolio({ summaryOnly: true });
   const today = cardByLabel(w, 'Today');
-  assert.equal(today.querySelector('.pf-summary-value').textContent, '-');
-  assert.match(today.textContent, /새 기준 시작/);
+  // 전날(08/25, 기존 기준) 정산 950,000 대비 최신 평가 1,000,000 — 새 기준 첫날에도 금액 비교
+  assert.equal(today.querySelector('.pf-summary-value').textContent, '+5.26%');
+  assert.match(today.textContent, /08\/25 기존 정산 대비 · 최신 평가/);
   assert.equal(cardByLabel(w, 'MTD').querySelector('.pf-summary-value').textContent, '-');
   assert.match(cardByLabel(w, 'Total').textContent, /1020\.41/); // 새 좌수로 계산한 최신 NAV
   w.close();
 });
 
-test('확정 달러 성과는 최신 환율이 바뀌어도 마감 환율로 유지한다', () => {
-  const w = loadSummaryDom();
-  seedPortfolio(w);
-  w.pfFx = n => n / w.PfStore.currency.fxRate;
-  w.PfStore.currency.unit = 'USD';
-  w.PfStore.currency.fxRate = 1400;
-  w.PfStore.snapshots.prevDay.regular_close = {
-    date: '2026-08-26', total_value: 980000, prev_value: 950000, fx_usdkrw: 1400,
-    change_krw: 30000, change_pct: 3.16, after_close_net_cashflow: 0,
-    change_usd: 20, change_usd_pct: 2.8, value_change_usd: 20,
-  };
-  for (const rate of [1400, 1500]) {
-    w.PfStore.currency.fxRate = rate;
+test('Today 값은 금일 정산 유무와 무관하다(원화·달러)', () => {
+  for (const unit of ['KRW', 'USD']) {
+    const w = loadSummaryDom();
+    seedPortfolio(w);
+    if (unit === 'USD') {
+      w.pfFx = n => n / w.PfStore.currency.fxRate;
+      w.PfStore.currency.unit = 'USD';
+      w.PfStore.currency.fxRate = 1400;
+    }
     w.renderPortfolio({ summaryOnly: true });
-    const today = cardByLabel(w, 'Today');
-    assert.equal(today.querySelector('.pf-summary-value').textContent, '+2.80%');
-    assert.match(today.textContent, /손익 \+\$20/);
+    const before = cardByLabel(w, 'Today').textContent;
+    w.PfStore.snapshots.prevDay.regular_close = {
+      date: '2026-08-26', total_value: 980000, prev_value: 950000, fx_usdkrw: 1400,
+      change_krw: 30000, change_pct: 3.16, after_close_net_cashflow: 0,
+      change_usd: 20, change_usd_pct: 2.8, value_change_usd: 20,
+    };
+    w.renderPortfolio({ summaryOnly: true });
+    assert.equal(cardByLabel(w, 'Today').textContent, before, unit);
+    w.close();
   }
-  w.close();
 });

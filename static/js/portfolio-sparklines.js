@@ -273,7 +273,7 @@ function _renderSummarySparklines(currentTotalValue) {
   // TODAY sparkline 은 세션일 08:00~20:00(KST) 고정 축. y 는 직전 정규장 결산(prevClose)
   // 대비 등락%. 축은 _sparkDailyAxis() 가 세션일 기준으로 만든다(now 까지 그려지고
   // 우측 빈 구간은 미래 시간).
-  const _regularClose = PfStore.snapshots.prevDay?.regular_close;
+  // 금일 정산(15:35) 뒤에도 전날 정산 대비로 끝까지 그린다(Today 카드와 같은 기준).
   const _prevClose = (PfStore.snapshots.prevDay && PfStore.snapshots.prevDay.total_value > 0)
     ? PfStore.snapshots.prevDay.total_value
     : null;
@@ -282,21 +282,18 @@ function _renderSummarySparklines(currentTotalValue) {
   const axisEndTs = _dailyAxis.end;
   const _dailyAxisHours = SPARK_DAILY_END_HOUR - SPARK_DAILY_START_HOUR;
   // 장중 환율 이력이 없으므로 USD 공식 성과와 원화 장중선을 혼합하지 않는다.
-  if (!_prevClose || _regularClose?.comparison_unavailable || (_regularClose && PfStore.currency.unit === 'USD')) {
+  if (!_prevClose) {
     _drawSparklinePoints('sparkDaily', [], _sparkTrendColor(true), _dailyAxisHours);
   } else {
     const raw = [{ x: 0, y: 0 }];
     for (const d of PfStore.snapshots.intraday) {
-      if (!d || !d.total_value || (_regularClose && d.ts > _regularClose.cashflow_cutoff_at)) continue;
+      if (!d || !d.total_value) continue;
       const x = _sparkAxisHoursFromTs(d.ts, axisStartTs, axisEndTs);
       if (x === null) continue;
       const adjustedTotal = Number(d.total_value) - _sparkTodayCashflowThroughTs(d.ts);
       raw.push({ x, y: (adjustedTotal / _prevClose - 1) * 100 });
     }
-    if (_regularClose && _regularClose.change_pct != null) {
-      const x = _sparkAxisHoursFromTs(_regularClose.cashflow_cutoff_at, axisStartTs, axisEndTs);
-      if (x !== null) raw.push({ x, y: _regularClose.change_pct });
-    } else if (!_regularClose && currentTotalValue) {
+    if (currentTotalValue) {
       const x = _sparkAxisHoursFromTs(_sparkNowKstIsoMinute(), axisStartTs, axisEndTs);
       if (x !== null) {
         raw.push({ x, y: (currentTotalValue / _prevClose - 1) * 100 });
