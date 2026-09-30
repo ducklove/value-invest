@@ -94,7 +94,7 @@ async def get_economic_calendar(
     """
     from datetime import date, datetime, timedelta
 
-    import economic_calendar
+    from services.market import economic_calendar
 
     def _parse_date(s: str):
         try:

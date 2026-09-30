@@ -18,13 +18,13 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from _harness import TempDbMixin
 
-import economic_calendar
 from core.app_factory import create_app
 from core.config import PROJECT_ROOT, AppSettings
 from repositories import corp_codes
 from repositories import db as db_repo
 from repositories import notifications as notifications_repo
 from routes import notifications as notif_route
+from services.market import economic_calendar
 from services.notifications import alert_delivery, channels, engine, kakao, telegram
 from services.portfolio import target_resolver
 

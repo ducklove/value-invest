@@ -141,7 +141,7 @@ class BriefingContextTests(DailyBriefingHarness):
             "005930": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 1020}],
             "000660": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 970}],
         }
-        with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value=calendar_payload)), \
+        with patch("services.market.economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value=calendar_payload)), \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=["- KOSPI: 2900 (+0.5%)"])), \
              patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
@@ -202,7 +202,7 @@ class BriefingContextTests(DailyBriefingHarness):
             "005930": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 1020}],
             "000660": [{"date": d_prev, "close": 1000}, {"date": d_last, "close": 970}],
         }
-        with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
+        with patch("services.market.economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value=price_rows)) as prices:
@@ -222,7 +222,7 @@ class BriefingContextTests(DailyBriefingHarness):
     async def test_movers_fall_back_to_quantity_adjusted_unit_prices(self):
         await self._seed_user()
         await self._seed_snapshots()
-        with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
+        with patch("services.market.economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value={})):
@@ -249,7 +249,7 @@ class BriefingContextTests(DailyBriefingHarness):
         await snapshots_repo.save_stock_snapshots("u1", d_last, [
             {"stock_code": "005930", "market_value": 153000, "quantity": 150},
         ])
-        with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
+        with patch("services.market.economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.close_price_client, "get_daily_prices_batch", new=AsyncMock(return_value={})):
@@ -263,7 +263,7 @@ class BriefingContextTests(DailyBriefingHarness):
 
     async def test_context_with_empty_db_is_safe(self):
         await self._seed_user("u-empty")
-        with patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
+        with patch("services.market.economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})), \
              patch.object(daily_briefing.market_indicators, "fetch_indicators", new=AsyncMock(return_value={})), \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])):
             ctx = await daily_briefing.build_briefing_context("u-empty")
@@ -428,7 +428,7 @@ class BriefingContextTests(DailyBriefingHarness):
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing.dart_review_repo, "list_recent_reviews", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing.wiki_repo, "list_recent_entries", new=AsyncMock(return_value=[])), \
-             patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
+             patch("services.market.economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
             ctx = await daily_briefing.build_briefing_context("u1", "market_close")
 
         latest_snapshot.assert_awaited_once()
@@ -495,7 +495,7 @@ class BriefingContextTests(DailyBriefingHarness):
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing.dart_review_repo, "list_recent_reviews", new=reviews), \
              patch.object(daily_briefing.wiki_repo, "list_recent_entries", new=entries), \
-             patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
+             patch("services.market.economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
             ctx = await daily_briefing.build_briefing_context("u1", "night")
 
         expected_since = f"{date.today().isoformat()}T15:30:00"

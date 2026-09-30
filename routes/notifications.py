@@ -596,7 +596,7 @@ async def calendar_alert_status(request: Request):
     import os
     from datetime import date
 
-    import economic_calendar
+    from services.market import economic_calendar
 
     user = _require_user(await get_current_user(request))
     sub = user["google_sub"]

@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 import test_notifications as existing
 
-import economic_calendar
 from repositories import bootstrap
 from repositories import calendar_rules as rules_repo
 from repositories import notifications as repo
 from routes import notifications as routes
+from services.market import economic_calendar
 from services.notifications import alert_delivery, calendar_rules, channels, engine
 
 RULES = [

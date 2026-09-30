@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 from starlette.requests import Request
 
-import economic_calendar
 from routes import stocks as stocks_route
+from services.market import economic_calendar
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 

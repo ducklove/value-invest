@@ -112,7 +112,7 @@ class MorningValuationTests(TempDbMixin):
              patch.object(daily_briefing.snapshots_repo, "get_latest_snapshot", new=AsyncMock()) as latest, \
              patch.object(daily_briefing.ai_analysis, "market_summary_lines", new=AsyncMock(return_value=[])), \
              patch.object(daily_briefing, "_fetch_night_futures_block", new=AsyncMock(return_value=None)), \
-             patch("economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
+             patch("services.market.economic_calendar.fetch_economic_calendar", new=AsyncMock(return_value={"events": []})):
             context = await daily_briefing.build_briefing_context("u", "morning")
         latest.assert_not_awaited()
         self.assertIsNone(context["nav"])

@@ -1142,7 +1142,7 @@ async def _evaluate_calendar_all() -> dict:
     from collections import defaultdict
     from datetime import timedelta
 
-    import economic_calendar
+    from services.market import economic_calendar
 
     today_date = alert_delivery.now_kst().date()
     today = today_date.isoformat()

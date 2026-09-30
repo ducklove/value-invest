@@ -2,9 +2,9 @@
 
 from datetime import date, datetime
 
-import economic_calendar
 from domain.timeutil import KST
 from repositories import calendar_rules as rules_repo
+from services.market import economic_calendar
 from services.notifications.alert_delivery import now_kst
 
 

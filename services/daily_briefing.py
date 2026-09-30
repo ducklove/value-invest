@@ -618,7 +618,7 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
 
     # --- 오늘 주요 경제 일정 (캐시되는 기존 캘린더 fetch — 중요도 '상'만) ---
     try:
-        import economic_calendar
+        from services.market import economic_calendar
 
         data = await economic_calendar.fetch_economic_calendar(
             start_date=today.isoformat(),
@@ -640,7 +640,7 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
     # --- 내일 주요 일정 (나이트 브리핑 전망 재료) ---
     if profile["kind"] == "night":
         try:
-            import economic_calendar
+            from services.market import economic_calendar
 
             tomorrow = today + timedelta(days=1)
             data = await economic_calendar.fetch_economic_calendar(
