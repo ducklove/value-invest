@@ -16,13 +16,12 @@ import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-import benchmark_history
 from cache_layer import MemoryTTLCache
 from deps import get_current_user
 from deps import require_user as _require_user
 from repositories import benchmark_daily as benchmark_daily_repo
 from repositories import snapshots as snapshots_repo
-from services.portfolio import benchmarks, risk
+from services.portfolio import benchmark_history, benchmarks, risk
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

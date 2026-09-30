@@ -281,7 +281,7 @@ async def check_intraday_points(now: datetime | None = None) -> dict:
 
 async def check_benchmark_freshness(now: datetime | None = None) -> list[dict]:
     """벤치마크 일별 종가 신선도 — 추적 코드(YF_TICKER)별로 하나씩."""
-    import benchmark_history
+    from services.portfolio import benchmark_history
 
     now = now or datetime.now()
     expected = last_expected_trading_day(now, settled_minutes=SETTLED_MINUTES)

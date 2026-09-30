@@ -575,7 +575,7 @@ CREATE INDEX IF NOT EXISTS idx_daily_market_briefs_updated
 
 -- Daily closing prices for market benchmarks we overlay on the NAV
 -- chart (KOSPI / SP500 / GOLD / ...). Keyed by (code, date) so a
--- re-download is a no-op upsert. Populated by benchmark_history —
+-- re-download is a no-op upsert. Populated by services/portfolio/benchmark_history —
 -- lazy backfill on first query + nightly increment from snapshot_nav.
 CREATE TABLE IF NOT EXISTS benchmark_daily (
     code        TEXT NOT NULL,

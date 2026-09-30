@@ -14,9 +14,9 @@ from unittest.mock import patch
 
 from _harness import TempDbMixin
 
-import benchmark_history
 from repositories import benchmark_daily as benchmark_repo
 from routes import portfolio as pf
+from services.portfolio import benchmark_history
 
 
 class BenchmarkCacheTests(TempDbMixin):

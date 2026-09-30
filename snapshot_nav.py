@@ -376,7 +376,7 @@ async def _update_benchmark_history():
     overlays (KOSPI / SP500 / GOLD). Best-effort — a yfinance outage just
     delays one row; must not block the snapshot itself."""
     try:
-        import benchmark_history
+        from services.portfolio import benchmark_history
         written = await benchmark_history.update_benchmark_today()
         logger.info("Benchmark history increment: %s", written)
     except Exception as e:

@@ -305,7 +305,7 @@ async def get_stock_beta(stock_code: str):
     """
     from datetime import date, timedelta
 
-    import benchmark_history
+    from services.portfolio import benchmark_history
 
     # 베타는 1년 일봉 회귀라 일중 변동 의미가 없어 월 1회만 갱신한다. 캐시 hit 시
     # KIS 일봉/KOSPI 재조회 없이 즉시 반환(종목분석 재방문 속도 개선).

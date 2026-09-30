@@ -401,7 +401,7 @@ class YFinanceExecutorTests(unittest.TestCase):
         self.assertNotRegex(source, r"run_in_executor\(")
         self.assertNotRegex(source, r"to_thread\(\s*_get_\w*yfinance")
         root = Path(__file__).resolve().parents[1]
-        for rel in ("benchmark_history.py", "services/dividends/foreign.py", "services/portfolio/foreign.py",
+        for rel in ("services/portfolio/benchmark_history.py", "services/dividends/foreign.py", "services/portfolio/foreign.py",
                     "services/data_quality.py"):
             text = (root / rel).read_text(encoding="utf-8")
             self.assertNotRegex(text, r"run_in_executor\(", rel)

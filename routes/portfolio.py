@@ -1248,7 +1248,7 @@ async def get_benchmark_history(code: str = Query(...), start: str = Query(...))
     import asyncio
     import logging
 
-    import benchmark_history
+    from services.portfolio import benchmark_history
 
     code_up = code.upper()
     if code_up not in benchmark_history.YF_TICKER:

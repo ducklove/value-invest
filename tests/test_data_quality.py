@@ -286,7 +286,7 @@ class IntradayPointsTests(_SeededDbTestCase):
 
 class BenchmarkFreshnessTests(_SeededDbTestCase):
     async def test_covers_every_tracked_code(self):
-        import benchmark_history
+        from services.portfolio import benchmark_history
         results = await data_quality.check_benchmark_freshness(now=WED_LATE)
         checks = {r["check"] for r in results}
         for code in benchmark_history.YF_TICKER:
