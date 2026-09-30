@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import market_daily
+from services.market import daily as market_daily
 
 
 def _llm_env_patches(post_mock):

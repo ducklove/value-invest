@@ -589,7 +589,7 @@ _rep_cache: dict[str, tuple[float, dict | None]] = {}
 
 def _is_excluded_disclosure(report_nm: str) -> bool:
     """발행 관련 저신호 공시(증권발행실적보고서·증권신고서·투자설명서 등) 제외."""
-    from market_daily import (
+    from services.market.daily import (
         _SECURITIES_LOW_SIGNAL_DISCLOSURE_KEYWORDS,
         _compact_disclosure_text,
         _matches_disclosure_keyword,

@@ -12,7 +12,7 @@ import pytest
 
 import dart_client
 import dart_report_review
-import market_daily
+from services.market import daily as market_daily
 
 KST = timezone(timedelta(hours=9))
 
