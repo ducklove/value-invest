@@ -18,11 +18,20 @@ function renderCashflows(data, navData = _navChartData) {
     const sign = n > 0 ? '+' : '';
     return sign + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+  // 서버가 정산 기준 경계 이전 발행 NAV 를 연결 척도로 환산해 준다(nav_link) — 저장값은 툴팁으로.
+  const cfNavTitle = (cf) => {
+    if (cf.raw_nav_at_time == null) return '';
+    const text = cf.nav_link_unavailable
+      ? `저장 NAV ${fmtCfDecimal(cf.raw_nav_at_time)} — 정산 기준 경계를 연결할 수 없음`
+      : `저장 NAV ${fmtCfDecimal(cf.raw_nav_at_time)} × 연결 배수 ${Number(cf.nav_link_factor).toFixed(6)}`;
+    return ` title="${escapeHtml(text)}"`;
+  };
   const snapshotUnits = (snapshot) => {
     const units = Number(snapshot?.total_units);
     if (Number.isFinite(units) && units > 0) return units;
     const value = Number(snapshot?.total_value);
-    const nav = Number(snapshot?.nav);
+    // 연결된 이력 행의 nav 는 환산값이라 평가액/좌수 역산에는 저장 NAV(raw_nav)를 쓴다.
+    const nav = Number(snapshot?.raw_nav ?? snapshot?.nav);
     return Number.isFinite(value) && Number.isFinite(nav) && nav > 0 ? value / nav : null;
   };
   const compareCashflows = (a, b) => {
@@ -60,7 +69,7 @@ function renderCashflows(data, navData = _navChartData) {
     <td>${escapeHtml(cf.date || '')}</td>
     <td><span class="pf-cf-type ${isDeposit ? 'deposit' : 'withdrawal'}">${isDeposit ? '입금' : cf.type === 'distribution' ? '분배금 출금' : '출금'}</span></td>
     <td class="pf-col-num pf-cf-amount ${isDeposit ? 'deposit' : 'withdrawal'}">${fmtNum(Math.round(cf.amount))}원${cf.type === 'distribution' && cf.currency && cf.currency !== 'KRW' ? `<small class="pf-cf-native">${Number(cf.native_amount).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${escapeHtml(cf.currency)}</small>` : ''}</td>
-    <td class="pf-col-num">${fmtCfDecimal(cf.nav_at_time)}</td>
+    <td class="pf-col-num"${cfNavTitle(cf)}>${fmtCfDecimal(cf.nav_at_time)}</td>
     <td class="pf-col-num">${cf.type === 'distribution' ? '0.00' : fmtCfSignedDecimal(cf.units_change)}</td>
     <td class="pf-col-num">${fmtCfDecimal(remainingUnitsById.get(String(cf.id)))}</td>
     <td title="${escapeHtml(cf.memo || '')}">${escapeHtml(cf.memo || '')}</td>

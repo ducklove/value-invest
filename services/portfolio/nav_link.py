@@ -20,6 +20,12 @@ k 를 곱한다. netCF 는 d0 정산 이후 ~ d1 정산까지 반영된 입출�
 NAV × 좌수로 다시 계산하지 말아야 한다. 연결된 행은 ``linked=True``,
 ``nav_link_factor``, ``raw_nav`` 를 갖는다. 평가액이 없거나 0 이라 연결할 수
 없는 경계가 있으면 그 이전 행은 예전처럼 숨기고 경고를 남긴다.
+
+입출금 내역의 ``nav_at_time``(좌수 발행 NAV)도 같은 k 로 환산한다
+(``link_cashflows``). 발행 NAV 는 반영 정산일(``applied_snapshot_date``, 없으면
+``date``)이 속한 구간의 척도이므로 그 구간의 누적 k 를 곱한다. ``units_change`` 는
+실제 좌수라 그대로다. 연결된 행은 ``raw_nav_at_time``, ``nav_link_factor`` 를 갖고,
+연결할 수 없는 구간의 행은 ``nav_at_time=None`` + ``nav_link_unavailable=True``.
 """
 
 from __future__ import annotations
@@ -120,6 +126,46 @@ def apply_links(rows: list[dict], factors: dict[str, float | None]) -> list[dict
     return out
 
 
+def cumulative_factor(day: str, factors: dict[str, float | None]) -> float | None:
+    """``day`` 가 속한 구간을 최신 구간 척도로 옮기는 누적 k — ``apply_links`` 와 같은 규칙.
+
+    뒤에 경계가 없으면 1.0, 뒤에 연결할 수 없는 경계가 있으면 None.
+    """
+    cumulative = 1.0
+    for start in sorted(factors, reverse=True):
+        if day >= start:
+            break
+        k = factors[start]
+        if k is None:
+            return None
+        cumulative *= k
+    return cumulative
+
+
+def link_cashflow_rows(rows: list[dict], factors: dict[str, float | None]) -> list[dict]:
+    """입출금 행의 발행 NAV(``nav_at_time``)를 최신 구간 척도로 환산한 사본."""
+    if not factors:
+        return rows
+    out: list[dict] = []
+    for row in rows:
+        nav = row.get("nav_at_time")
+        day = row.get("applied_snapshot_date") or row.get("date")
+        if nav is None or not day or not any(day < start for start in factors):
+            out.append(row)
+            continue
+        factor = cumulative_factor(day, factors)
+        linked = dict(row)
+        linked["raw_nav_at_time"] = nav
+        if factor is None:
+            linked["nav_at_time"] = None
+            linked["nav_link_unavailable"] = True
+        else:
+            linked["nav_at_time"] = nav * factor
+            linked["nav_link_factor"] = factor
+        out.append(linked)
+    return out
+
+
 async def boundary_net_cashflow(user: str, prev: dict, nxt: dict) -> float:
     """d0 정산 이후 ~ d1 정산까지 잔고에 반영된 순입출금(입금 +)."""
     rows = await snapshots.get_cashflows_created_after(user, settlement_marker_seconds(prev["date"]))
@@ -181,3 +227,14 @@ async def link_snapshot(user: str, snapshot: dict | None) -> dict | None:
         return snapshot
     linked = apply_links([snapshot], await _factors(user, pairs))
     return linked[0] if linked else None
+
+
+@read_snapshot()
+async def link_cashflows(user: str, rows: list[dict]) -> list[dict]:
+    """입출금 내역의 ``nav_at_time`` 을 연결된 NAV 이력과 같은 척도로 맞춘다(저장 행 불변)."""
+    if not any(row.get("nav_at_time") is not None for row in rows):
+        return rows
+    pairs = await snapshots.get_basis_boundaries(user)
+    if not pairs:
+        return rows
+    return link_cashflow_rows(rows, await _factors(user, pairs))

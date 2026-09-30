@@ -1279,7 +1279,8 @@ async def get_intraday(request: Request):
 @router.get("/api/portfolio/cashflows")
 async def get_cashflows(request: Request):
     user = _require_user(await get_current_user(request))
-    return await snapshots_repo.get_cashflows(user["google_sub"])
+    # 발행 NAV 를 정산 기준 경계 너머까지 연결된 NAV 이력과 같은 척도로 보여 준다.
+    return await nav_link.link_cashflows(user["google_sub"], await snapshots_repo.get_cashflows(user["google_sub"]))
 
 
 @router.post("/api/portfolio/cashflows")

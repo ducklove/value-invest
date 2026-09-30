@@ -81,6 +81,11 @@ Today 기준으로 쓰인다(2026-09-30 변경). 저녁 브리핑 이후 현재�
 - MTD/YTD 기준점(`month-end-value`/`year-start-value`, 전자잉크 YTD)도 기준점
   뒤에 경계가 있으면 NAV만 같은 방식으로 연결해 비교한다. 금액 손익은 원래
   평가액 기준이다. 연결할 수 없을 때만 `comparison_unavailable`을 돌려준다.
+- `/api/portfolio/cashflows`(심층 분석 입출금 표의 '당시 NAV'): 발행 NAV
+  `nav_at_time`도 반영 정산일(`applied_snapshot_date`, 없으면 `date`)이 속한 구간의
+  누적 `k`를 곱해 연결 이력과 같은 척도로 보여 준다. 좌수(`units_change`)는 실제
+  값이라 그대로다. 연결된 행에는 `raw_nav_at_time`(저장 값)·`nav_link_factor`가
+  붙고, 연결할 수 없는 구간의 행은 `nav_at_time=null`, `nav_link_unavailable=true`.
 
 예: 2026-09-29 `legacy_latest` 평가액 6,693,228,966원(NAV 986.48) → 2026-09-30
 `regular_close_v1` 6,669,406,885원(NAV 1,000), 그 사이 입출금이 없으면

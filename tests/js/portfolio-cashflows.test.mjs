@@ -96,3 +96,44 @@ test('정산 취소는 원거래와 취소 거래를 보여주고 반복 삭제�
   assert.equal(rows[1].children[5].textContent, '-');
   dom.window.close();
 });
+
+test('정산 기준 경계 이전 입출금은 연결된 NAV 를 보여 주고 좌수는 저장값 그대로다', () => {
+  const dom = new JSDOM('<table><tbody id="pfCfBody"></tbody></table>', { runScripts: 'outside-only' });
+  const w = dom.window;
+  w.escapeHtml = s => String(s);
+  w.fmtNum = n => String(n);
+  w.eval(script);
+  w.renderCashflows([
+    { id: 2, date: '2026-09-30', type: 'deposit', amount: 1000, nav_at_time: 1000, units_change: 1,
+      applied_snapshot_date: '2026-09-30' },
+    { id: 1, date: '2026-09-29', type: 'deposit', amount: 986478.89, nav_at_time: 1003.5718440923,
+      raw_nav_at_time: 986.4788943804621, nav_link_factor: 1.017327233057, units_change: 1000,
+      applied_snapshot_date: '2026-09-29' },
+  ], [
+    // 연결된 이력 행: nav 는 환산값, 좌수 역산에는 raw_nav 를 쓴다.
+    { date: '2026-09-29', total_value: 986478.89, nav: 1003.5718440923, raw_nav: 986.4788943804621, linked: true },
+    { date: '2026-09-30', total_units: 1001, nav: 1000 },
+  ]);
+  const [newer, linked] = w.document.querySelectorAll('tr');
+  assert.equal(linked.children[3].textContent, (1003.5718440923).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  assert.match(linked.children[3].title, /저장 NAV 986\.48 × 연결 배수 1\.017327/);
+  assert.equal(linked.children[4].textContent, '+1,000.00');
+  assert.equal(linked.children[5].textContent, '1,000.00');
+  assert.equal(newer.children[3].textContent, '1,000.00');
+  assert.equal(newer.children[3].title, '');
+  dom.window.close();
+});
+
+test('연결할 수 없는 구간의 발행 NAV 는 비우고 저장값을 툴팁으로 남긴다', () => {
+  const dom = new JSDOM('<table><tbody id="pfCfBody"></tbody></table>', { runScripts: 'outside-only' });
+  const w = dom.window;
+  w.escapeHtml = s => String(s);
+  w.fmtNum = n => String(n);
+  w.eval(script);
+  w.renderCashflows([{ id: 1, date: '2026-09-01', type: 'deposit', amount: 1000, nav_at_time: null,
+    raw_nav_at_time: 950, nav_link_unavailable: true, units_change: 1, applied_snapshot_date: '2026-09-01' }], []);
+  const cell = w.document.querySelector('tr').children[3];
+  assert.equal(cell.textContent, '-');
+  assert.match(cell.title, /연결할 수 없음/);
+  dom.window.close();
+});
