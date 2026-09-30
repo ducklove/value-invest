@@ -43,7 +43,7 @@ import httpx
 from cache_layer import MemoryTTLCache
 from core.errors import DBError
 from core.http import get_http_client
-from services.ecosystem import adapters, siblings
+from services.ecosystem import adapters, links, siblings
 from services.ecosystem.fetch import FETCH_ERRORS, cached_fetch, stale_value
 
 logger = logging.getLogger(__name__)
@@ -156,8 +156,8 @@ async def fetch_etf_universe() -> set[str]:
 
 
 def etf_deep_link(code: str) -> str:
-    """eiayn 종목 딥링크. 쿼리 파라미터 방식(예: .../eiayn/?code=VOO)."""
-    return f"{SITE['etf']}?code={code}"
+    """eiayn 종목 딥링크 — 레지스트리 stockLink(예: .../eiayn/?code=VOO)."""
+    return links.go_url("eiayn", code=code)
 
 
 async def etf_link_for(code: str) -> dict | None:
@@ -179,12 +179,14 @@ async def etf_link_for(code: str) -> dict | None:
 
 _GOLD_LABELS = {"gold": "금", "bitcoin": "비트코인", "eth": "이더리움", "usdt": "USDT"}
 # gold_gap deep-link용 기본 소스(gold만 소스 선택이 있음)
-_GOLD_LINK = {
-    "gold": "?asset=gold&gold_source=ny_futures",
-    "bitcoin": "?asset=bitcoin",
-    "eth": "?asset=eth",
-    "usdt": "?asset=usdt",
-}
+# gold_gap 자산 딥링크는 레지스트리 assetLink(?asset={asset}); 금은 뉴욕 선물 기준 비교를 덧붙인다.
+_GOLD_LINK_EXTRA = {"gold": "gold_source=ny_futures"}
+
+
+def _gold_asset_link(key: str) -> str:
+    url = links.go_url("gold_gap", asset=key)
+    extra = _GOLD_LINK_EXTRA.get(key)
+    return f"{url}&{extra}" if extra else url
 
 
 async def _get_json(url: str):
@@ -297,7 +299,7 @@ def _summarize_gold(data: dict) -> dict:
             "label": _GOLD_LABELS[key],
             "gap": gp[-1],
             "date": dates[-1] if dates else None,
-            "link": SITE["goldGap"] + _GOLD_LINK.get(key, ""),
+            "link": _gold_asset_link(key),
         })
     return {"assets": assets, "updatedAt": data.get("updated_at"), "url": SITE["goldGap"]}
 
@@ -775,7 +777,7 @@ def _match_holding(code: str, current: dict, config: list) -> dict | None:
                 "ratioChange": p.get("ratioChange"),
                 "holdingValue": p.get("holdingValue"),
                 "marketCap": p.get("marketCap"),
-                "url": SITE["holding"] + f"?code={code}",
+                "url": links.go_url("holding_value", code=code),
             }
     return None
 
@@ -893,7 +895,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                 "preferred",
                 f"{pref.get('name') or code} 우선주 괴리",
                 detail,
-                SITE["spread"] + f"?code={code}",
+                links.go_url("common_preferred_spread", code=code),
                 severity=severity,
                 metric=spread,
                 short_label="우선주",
@@ -914,7 +916,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                 "holding",
                 f"{hold.get('name') or code} 지주사 NAV",
                 detail,
-                hold.get("url") or (SITE["holding"] + f"?code={code}"),
+                hold.get("url") or links.go_url("holding_value", code=code),
                 severity=severity,
                 metric=ratio,
                 short_label="지주사",
@@ -957,7 +959,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                 "buybacks",
                 f"{name or code} 자사주",
                 detail,
-                SITE["buybacks"] + f"?code={code}",
+                links.go_url("buybacks", code=code),  # 레지스트리 stockLink: ?stock={code}
                 severity=severity,
                 metric=ratio_pct,
                 short_label="자사주",

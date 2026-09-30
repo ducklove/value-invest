@@ -19,12 +19,12 @@ import asyncio
 import logging
 import os
 import time
-from urllib.parse import quote
 
 import asset_insights
 import integrations
 import market_indicators
 from cache_layer import MemoryTTLCache
+from services.ecosystem import links
 from services.portfolio import benchmarks, foreign, quote_service
 from services.portfolio import history as portfolio_history
 from services.portfolio.identifiers import (
@@ -301,7 +301,7 @@ def gold_gap_for_asset(code: str) -> dict | None:
         "latestDate": asset.get("latestDate"),
         "thresholdPct": asset.get("thresholdPct"),
         "updatedAt": config.get("updatedAt"),
-        "url": f"{config.get('baseUrl', '').rstrip('/')}/?asset={asset_key}" if config.get("baseUrl") else "",
+        "url": links.go_url("gold_gap", asset=asset_key) if config.get("baseUrl") else "",
     }
 
 
@@ -316,7 +316,7 @@ def holding_context_for_asset(code: str) -> dict | None:
         "applicable": True,
         "code": code,
         "baseUrl": base_url,
-        "url": f"{base_url}/?code={quote(code)}" if base_url else "",
+        "url": links.go_url("holding_value", code=code) if base_url else "",
         "subsidiaryCount": len(subsidiaries),
         "meta": meta,
     }

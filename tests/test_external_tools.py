@@ -362,6 +362,14 @@ class PortfolioSignalFetchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out["VOO"][0]["kind"], "etf")
         self.assertEqual(out["KRX_GOLD"][0]["kind"], "goldGap")
         self.assertIn("?code=005930", out["005930"][0]["url"])
+        # 형제 딥링크는 레지스트리 stockLink/assetLink 템플릿으로 만든다(buybacks 는 ?stock=).
+        urls = {sig["kind"]: sig["url"] for sig in out["005930"]}
+        self.assertEqual(urls["preferred"], "https://ducklove.github.io/common_preferred_spread/?code=005930")
+        self.assertEqual(urls["buybacks"], "https://ducklove.github.io/buybacks/?stock=005930")
+        self.assertEqual(out["000670"][0]["url"], "https://ducklove.github.io/holding_value/?code=000670")
+        self.assertEqual(out["VOO"][0]["url"], "https://ducklove.github.io/eiayn/?code=VOO")
+        self.assertEqual(out["KRX_GOLD"][0]["url"],
+                         "https://ducklove.github.io/gold_gap/?asset=gold&gold_source=ny_futures")
 
 
 class EtfLinkTests(unittest.IsolatedAsyncioTestCase):
