@@ -23,9 +23,11 @@ def _script(path, text):
     path.chmod(0o755)
 
 
-@pytest.mark.skipif(not Path(BASH or "").is_file(), reason="Bash 실행 환경 필요")
-@pytest.mark.parametrize("failure", ["restart", "health", "unit", "python", "none"])
-def test_deploy_restores_code_units_and_environment(tmp_path, failure):
+def _prepare_and_run_deploy(tmp_path, failure, seed=None):
+    """Build origin/app repos + fake binaries, optionally seed app state, run deploy.sh.
+
+    Returns (code, log_text, app, units, old_sha, new_sha).
+    """
     source, app, units, bins = [tmp_path / name for name in ("origin", "app", "units", "bin")]
     source.mkdir()
     units.mkdir()
@@ -96,6 +98,8 @@ exec "$@"
         # 파일 포인터로 모의하고 실제 Linux symlink는 CI에서 검증한다.
         _script(bins / "ln", 'printf "%s\\n" "$2" >"$3"\n')
         _script(bins / "readlink", '[[ ! -f "$1" ]] || cat "$1"\n')
+    if seed is not None:
+        seed(app)
     env = {**os.environ, "FAILURE": failure, "TEST_STATE": tmp_path.as_posix(),
            "APP_DIR": app.as_posix(), "UNIT_DST": units.as_posix(),
            "PATH": str(bins) + os.pathsep + os.environ["PATH"]}
@@ -112,7 +116,14 @@ exec "$@"
             else:
                 process.kill()
             raise AssertionError(log_path.read_text(encoding="utf-8")) from None
-    assert code == (0 if failure == "none" else 1), log_path.read_text(encoding="utf-8")
+    return code, log_path.read_text(encoding="utf-8"), app, units, old, new
+
+
+@pytest.mark.skipif(not Path(BASH or "").is_file(), reason="Bash 실행 환경 필요")
+@pytest.mark.parametrize("failure", ["restart", "health", "unit", "python", "none"])
+def test_deploy_restores_code_units_and_environment(tmp_path, failure):
+    code, log_text, app, units, old, new = _prepare_and_run_deploy(tmp_path, failure)
+    assert code == (0 if failure == "none" else 1), log_text
     head = _run(["git", "rev-parse", "HEAD"], app).stdout.strip()
     assert head == (new if failure == "none" else old)
     assert (units / "value-invest.service").read_text() == ("new-unit\n" if failure == "none" else "old-unit\n")
@@ -131,3 +142,61 @@ exec "$@"
         assert not (app / ".venv-current").exists()
     if failure in {"restart", "health"}:
         assert (tmp_path / "rollback-restart").exists()
+
+
+_SHA = "{:040x}".format
+
+
+def _seed_old_deploys(app):
+    """Three old venvs + a non-SHA dir, .venv-current -> the previous venv, and
+    four old .deploy-state dirs (one with a staged source tree)."""
+    venvs = app / ".venvs"
+    for n in (1, 2, 3):
+        (venvs / _SHA(n) / "bin").mkdir(parents=True)
+        (venvs / _SHA(n) / ".installed").touch()
+    (venvs / "keep-me-not-a-sha").mkdir()
+    os.symlink(str(venvs / _SHA(3)), str(app / ".venv-current"))
+    for stamp in ("100-1", "200-2", "300-3", "300-4"):
+        state = app / ".deploy-state" / stamp
+        (state / "units").mkdir(parents=True)
+        (state / "env").write_text(f"SECRET={stamp}\n")
+    (app / ".deploy-state" / "300-4" / "source" / "node_modules").mkdir(parents=True)
+    # 이번 배포보다 나중(epoch 가 미래)인 디렉터리는 절대 건드리지 않는다.
+    (app / ".deploy-state" / "9999999999-1").mkdir()
+
+
+@pytest.mark.skipif(not Path(BASH or "").is_file() or os.name == "nt", reason="Bash + symlink 필요")
+def test_healthy_deploy_prunes_old_venvs_and_deploy_state(tmp_path):
+    code, log_text, app, _units, _old, new = _prepare_and_run_deploy(tmp_path, "none", seed=_seed_old_deploys)
+    assert code == 0, log_text
+    assert "log 'WARNING: pruning" not in log_text, log_text
+    venvs = sorted(p.name for p in (app / ".venvs").iterdir())
+    # 현재(new) + 직전(.venv-current 였던 SHA 3 — 롤백 대상) + SHA 형식 아닌 디렉터리만 남는다.
+    assert venvs == sorted([new, _SHA(3), "keep-me-not-a-sha"]), log_text
+    assert os.readlink(app / ".venv-current") == str(app / ".venvs" / new)
+    states = sorted(p.name for p in (app / ".deploy-state").iterdir())
+    assert "300-4" in states and "9999999999-1" in states, states
+    assert not {"100-1", "200-2", "300-3"} & set(states), states
+    assert len(states) == 3, states  # current + previous + future
+    current = [s for s in states if s not in {"300-4", "9999999999-1"}]
+    assert len(current) == 1
+    # 스테이징 소스(node_modules 포함)는 이번 것도 직전 것도 지운다. .env 사본은 유지.
+    assert not (app / ".deploy-state" / current[0] / "source").exists()
+    assert not (app / ".deploy-state" / "300-4" / "source").exists()
+    assert (app / ".deploy-state" / "300-4" / "env").read_text() == "SECRET=300-4\n"
+
+
+@pytest.mark.skipif(not Path(BASH or "").is_file() or os.name == "nt", reason="Bash + symlink 필요")
+@pytest.mark.parametrize("failure", ["health", "python"])
+def test_failed_deploy_prunes_nothing_and_rolls_back_to_previous_venv(tmp_path, failure):
+    code, log_text, app, _units, old, _new = _prepare_and_run_deploy(tmp_path, failure, seed=_seed_old_deploys)
+    assert code == 1, log_text
+    assert _run(["git", "rev-parse", "HEAD"], app).stdout.strip() == old
+    # 롤백 대상 venv 는 그대로 있고 .venv-current 는 다시 그것을 가리킨다.
+    assert os.readlink(app / ".venv-current") == str(app / ".venvs" / _SHA(3))
+    assert (app / ".venvs" / _SHA(3) / ".installed").exists()
+    for n in (1, 2):
+        assert (app / ".venvs" / _SHA(n)).is_dir()
+    for stamp in ("100-1", "200-2", "300-3", "300-4", "9999999999-1"):
+        assert (app / ".deploy-state" / stamp).is_dir()
+    assert "Pruning" not in log_text

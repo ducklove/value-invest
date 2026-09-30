@@ -4,12 +4,13 @@ The application is assembled in `core.app_factory` so tests, local dev, and
 production can create the same app with explicit settings.
 """
 
-import logging
-
 from core.app_factory import create_app
 from core.config import get_settings, load_environment
+from core.logging_setup import install_logging
 
-logging.basicConfig(level=logging.INFO)
+# basicConfig(INFO) + httpx/httpcore -> WARNING + secret-redacting filter on
+# every handler (DART crtfc_key, ECOS key, Telegram /bot<token>/ …).
+install_logging()
 
 load_environment()
 SETTINGS = get_settings()

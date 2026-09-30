@@ -329,6 +329,50 @@ async def check_system_events_error_rate(now: datetime | None = None, *, hours: 
     return {"check": check, "status": status, "detail": f"최근 {hours:g}시간 error {total}건 ({top})", "value": total}
 
 
+# 특수 세션일(수능일 후보) override 누락은 30일 전부터, 휴장일 달력 연도
+# 누락은 60일 전부터 경고한다 — 둘 다 해당일에 NAV 정산·장후 스냅샷·마감
+# 브리핑이 "달력 확인 필요" 오류로 실패하기 전에 운영자가 조치하도록.
+CALENDAR_SPECIAL_SESSION_WARN_DAYS = 30
+CALENDAR_YEAR_WARN_DAYS = 60
+
+
+async def check_market_calendar_coverage(now: datetime | None = None) -> dict:
+    """KRX 달력 커버리지 — 미설정 특수 세션일(30일)·미등록 연도(60일) 경고.
+
+    세션 시각은 추정하지 않는다. 운영자가 KRX 공지를 확인해
+    PORTFOLIO_MARKET_SESSIONS 에 {"YYYY-MM-DD": "HH:MM"} 로 설정한다.
+    """
+    from domain import market_calendar
+
+    check = "market_calendar_coverage"
+    today = (now or datetime.now()).date()
+    try:
+        overrides = market_calendar.session_overrides()
+    except ValueError as exc:  # json.JSONDecodeError 포함
+        return {"check": check, "status": "error",
+                "detail": f"{market_calendar.SESSIONS_ENV} JSON 파싱 실패: {exc}", "value": None}
+    problems = []
+    special = market_calendar.unconfigured_special_sessions(
+        today, CALENDAR_SPECIAL_SESSION_WARN_DAYS, overrides)
+    if special:
+        days = ", ".join(d.isoformat() for d in special)
+        problems.append(
+            f"특수 세션일(수능일 후보) {days} 거래시간 미설정 — KRX 공지 확인 후 "
+            f"{market_calendar.SESSIONS_ENV} 에 {{\"{special[0].isoformat()}\":\"HH:MM\"}} 설정"
+        )
+    years = market_calendar.missing_holiday_years(today, CALENDAR_YEAR_WARN_DAYS)
+    if years:
+        problems.append(
+            f"{', '.join(map(str, years))}년 KRX 휴장일 달력 미등록 — domain/market_calendar.py HOLIDAYS 추가 필요"
+        )
+    if problems:
+        return {"check": check, "status": "warn", "detail": " / ".join(problems),
+                "value": [d.isoformat() for d in special] + [str(y) for y in years]}
+    return {"check": check, "status": "ok",
+            "detail": f"향후 {CALENDAR_SPECIAL_SESSION_WARN_DAYS}일 특수 세션·{CALENDAR_YEAR_WARN_DAYS}일 휴장 달력 확인됨",
+            "value": 0}
+
+
 # ---------------------------------------------------------------------------
 # 실행 + 기록
 # ---------------------------------------------------------------------------
@@ -357,6 +401,7 @@ async def run_all_checks(*, now: datetime | None = None, record: bool = True) ->
     results += await _safe("intraday_points", check_intraday_points(now=now))
     results += await _safe("benchmark_freshness", check_benchmark_freshness(now=now))
     results += await _safe("system_events_error_rate", check_system_events_error_rate(now=now))
+    results += await _safe("market_calendar_coverage", check_market_calendar_coverage(now=now))
     from services.market import indicator_health
 
     results += await _safe("market_indicators", indicator_health.summary())
