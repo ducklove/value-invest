@@ -6,10 +6,15 @@ finance-pi(라즈베리파이 데이터레이크, 기본 ``http://192.168.68.84:
 ``X-Admin-Token`` 헤더를 만들었고 close_price_client 는 자체 AsyncClient 를
 열었다. 이제 둘 다 이 모듈을 거친다.
 
-환경변수 (표준 이름 우선, 구 이름은 별칭):
+환경변수 (새 이름 ``FINANCE_PI_*``, 구 이름 ``CLOSE_PRICE_API_*`` 도 동작):
 
-* ``FINANCE_PI_BASE_URL``  ← 별칭 ``CLOSE_PRICE_API_BASE_URL``
-* ``FINANCE_PI_API_TOKEN`` ← 별칭 ``CLOSE_PRICE_API_TOKEN``
+* ``FINANCE_PI_BASE_URL``  / 구 이름 ``CLOSE_PRICE_API_BASE_URL``
+* ``FINANCE_PI_API_TOKEN`` / 구 이름 ``CLOSE_PRICE_API_TOKEN``
+
+둘 다 설정돼 있으면 **구 이름이 우선**한다 — 운영 ``.env`` 에 이미 있는 값이
+이 모듈 도입 전과 똑같이 쓰이게 하기 위해서다(예전 코드는 BASE_URL 에 구
+이름만 읽었고, 토큰은 ``CLOSE_PRICE_API_TOKEN`` 을 먼저 봤다). ``.env`` 를 새
+이름으로 옮길 때는 구 이름 줄을 지운다.
 * ``CLOSE_PRICE_API_ENABLED`` (0/false/no/off 면 비활성)
 * ``CLOSE_PRICE_API_TIMEOUT_SECONDS`` / ``..._FUNDAMENTALS_TIMEOUT_SECONDS`` /
   ``..._FAILURE_COOLDOWN_SECONDS``
@@ -44,8 +49,9 @@ def _env(*names: str, default: str = "") -> str:
     return default
 
 
-BASE_URL = _env("FINANCE_PI_BASE_URL", "CLOSE_PRICE_API_BASE_URL", default=DEFAULT_BASE_URL).strip().rstrip("/")
-API_TOKEN = _env("FINANCE_PI_API_TOKEN", "CLOSE_PRICE_API_TOKEN").strip()
+# 구 이름 우선 — 기존 운영 .env 동작 보존(위 docstring 참고).
+BASE_URL = _env("CLOSE_PRICE_API_BASE_URL", "FINANCE_PI_BASE_URL", default=DEFAULT_BASE_URL).strip().rstrip("/")
+API_TOKEN = _env("CLOSE_PRICE_API_TOKEN", "FINANCE_PI_API_TOKEN").strip()
 ENABLED = os.getenv("CLOSE_PRICE_API_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_TIMEOUT_SECONDS", "2.5"))
 FUNDAMENTALS_TIMEOUT_SECONDS = float(os.getenv("CLOSE_PRICE_API_FUNDAMENTALS_TIMEOUT_SECONDS", "6.0"))

@@ -199,7 +199,9 @@ async def test_internal_close_price_requires_explicit_date_range():
 
     from services.market.sources import finance_pi
 
-    with patch.object(finance_pi, "_get_client", new=getter):
+    # ENABLED 를 켜야 "날짜 없음" 가드 자체를 검증한다(conftest 는 비활성).
+    with patch.object(finance_pi, "_get_client", new=getter), \
+         patch.object(kis_proxy_client.close_price_client, "ENABLED", True):
         rows = await kis_proxy_client.close_price_client.get_daily_closes("005930")
 
     assert rows == []

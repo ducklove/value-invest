@@ -164,7 +164,9 @@ async def _run_tick(*, bulk, fetch_quote, trading_day=True):
         saved[google_sub] = total
 
     get_portfolio = AsyncMock(side_effect=lambda sub: [dict(item) for item in _PORTFOLIOS[sub]])
-    with patch.object(snapshot_intraday.snapshots_repo, "delete_old_intraday", new=AsyncMock()), \
+    # _intraday_pruned_on 은 모듈 전역 — 틱 헬퍼가 다른 테스트로 새지 않게 격리.
+    with patch.object(snapshot_intraday, "_intraday_pruned_on", None), \
+         patch.object(snapshot_intraday.snapshots_repo, "delete_old_intraday", new=AsyncMock()), \
          patch.object(snapshot_intraday.snapshots_repo, "get_all_users_with_portfolio",
                       new=AsyncMock(return_value=list(_PORTFOLIOS))), \
          patch.object(snapshot_intraday.snapshots_repo, "get_stock_snapshots_by_date", new=AsyncMock(return_value=[])), \

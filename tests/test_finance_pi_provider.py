@@ -26,23 +26,25 @@ def _reload_with_env(monkeypatch, env):
     return importlib.reload(finance_pi)
 
 
-def test_standard_env_names_win_over_legacy_aliases(monkeypatch):
+def test_legacy_env_names_win_when_both_set_to_preserve_existing_env(monkeypatch):
+    # 운영 .env 에 이미 있는 구 이름 값이 도입 전과 똑같이 쓰여야 한다
+    # (예전 코드: BASE_URL 은 구 이름만, 토큰은 CLOSE_PRICE_API_TOKEN 우선).
     try:
         mod = _reload_with_env(monkeypatch, {
             "FINANCE_PI_BASE_URL": "http://pi.test:8400/",
-            "CLOSE_PRICE_API_BASE_URL": "http://legacy.test",
+            "CLOSE_PRICE_API_BASE_URL": "http://legacy.test/",
             "FINANCE_PI_API_TOKEN": "std-token",
             "CLOSE_PRICE_API_TOKEN": "legacy-token",
         })
-        assert mod.BASE_URL == "http://pi.test:8400"
-        assert mod.API_TOKEN == "std-token"
-
-        mod = _reload_with_env(monkeypatch, {
-            "CLOSE_PRICE_API_BASE_URL": "http://legacy.test/",
-            "CLOSE_PRICE_API_TOKEN": " legacy-token ",
-        })
         assert mod.BASE_URL == "http://legacy.test"
         assert mod.API_TOKEN == "legacy-token"
+
+        mod = _reload_with_env(monkeypatch, {
+            "FINANCE_PI_BASE_URL": "http://pi.test:8400/",
+            "FINANCE_PI_API_TOKEN": " std-token ",
+        })
+        assert mod.BASE_URL == "http://pi.test:8400"
+        assert mod.API_TOKEN == "std-token"
 
         mod = _reload_with_env(monkeypatch, {})
         assert mod.BASE_URL == finance_pi.DEFAULT_BASE_URL

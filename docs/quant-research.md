@@ -96,7 +96,7 @@ ETF 선택 시 매도세 연구 기본값을 0bp로 바꾸고 비용 입력란�
 | `/api/quant/*`, `static/js/quant-research.js` | 인증된 사용자 API와 화면 |
 
 finance-pi 연결 설정(`FINANCE_PI_BASE_URL`·`FINANCE_PI_API_TOKEN`, 구 이름
-`CLOSE_PRICE_API_BASE_URL`·`CLOSE_PRICE_API_TOKEN` 별칭, `CLOSE_PRICE_API_ENABLED`)을 재사용한다.
+`CLOSE_PRICE_API_BASE_URL`·`CLOSE_PRICE_API_TOKEN` 도 동작하며 둘 다 있으면 구 이름 우선, `CLOSE_PRICE_API_ENABLED`)을 재사용한다.
 실제 환경 변수명은 `services/market/sources/finance_pi.py`가 기준이다. 새 증권사 비밀키는 요구하지 않는다.
 연구는 전역 대기 10개, 사용자당 보관 100개, 활성 관찰 5개로 제한한다.
 finance-pi는 동시 연구 1개만 허용한다. 결과는 건당 8MB 이내이며 주문 실행 권한은 없다.

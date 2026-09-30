@@ -191,7 +191,9 @@ Public base URLs can be overridden with:
   internal API, used as a backup source for daily adjusted close history when
   KIS history fails or is empty). `FINANCE_PI_API_TOKEN` (legacy alias
   `CLOSE_PRICE_API_TOKEN`) is sent as `X-Admin-Token`. Both are read by
-  `services/market/sources/finance_pi.py`.
+  `services/market/sources/finance_pi.py`; when both the new and the legacy
+  name are set, the legacy name wins (keeps existing `.env` files behaving as
+  before), so drop the legacy line when migrating.
 - `CLOSE_PRICE_API_ENABLED` (set to `0` to disable the internal close-price
   shortcut and always use the KIS proxy)
 
