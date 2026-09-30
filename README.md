@@ -5,9 +5,10 @@
 (`cache.db`) 하나에 분석 캐시·사용자·포트폴리오·NAV 스냅샷·AI 사용량·공시/
 리포트 요약을 저장한다. 운영은 라즈베리파이 + systemd.
 
-연결 서브프로젝트(지주사/우선주/스팩/금·BTC 대시보드, nps-tracker, kis-proxy,
-finance-pi)는 독립 배포를 유지하고, 이 허브는 딥링크·published JSON·서버사이드
-프록시로만 결합한다 — [docs/linked-projects.md](docs/linked-projects.md) 참고.
+연결 대시보드 9개(지주사·우선주·스팩·자사주·ETF·김치프리미엄·금 리서치·국민연금·채권)와
+index-popup, kis-proxy, finance-pi 등은 독립 배포를 유지한다. 허브는 도구 레지스트리
+[config/ecosystem.json](config/ecosystem.json)(정본), 딥링크, 형제가 발행하는 `summary.json`,
+공용 셸(`static/ecosystem/`)로만 결합한다 — [docs/ecosystem/](docs/ecosystem/README.md) 참고.
 
 ## 빠른 시작 (로컬 개발)
 
@@ -38,27 +39,30 @@ python3 -m pytest --cov=. -q  # 커버리지 측정 (게이트 아님)
 
 ```
 main.py               ASGI 진입점 (조립은 core.app_factory)
-core/                 config(env 프로파일)·app factory·lifespan·정적 라우트
-routes/               HTTP/WS 핸들러 (포트폴리오·분석·알림·관리자·위키 …)
+core/                 config(env 프로파일)·app factory·lifespan·정적 라우트·http 클라이언트·
+                      ecosystem(레지스트리 로더)·logging_setup(비밀 마스킹)
+routes/               HTTP/WS 핸들러 (포트폴리오·분석·알림·관리자·위키·ecosystem(/go, /api/ecosystem) …)
 services/             도메인 로직
   portfolio/          NAV 정산(nav_snapshot)·장중 스냅샷·벤치마크·시세·리포트 …
   market/             시장 지표(indicators)·브리프/테이프(daily)·등락(movers)·경제캘린더·뉴스
   market/sources/     외부 provider (finance_pi·close_price·kis_proxy·yahoo·yfinance_runner)
-  ecosystem/          형제 대시보드 요약·연결 도구 설정·config 편집 (external_tools·integrations·linked_admin)
+  ecosystem/          형제 도구: summary 로더(siblings)·링크(links)·요약(external_tools)·
+                      연결 설정(integrations)·config 편집(linked_admin)
   dart/, dividends/   OpenDART 클라이언트, 우선주·해외 배당 수집기
   notifications/ …    알림 엔진·채널, stock_price(국내 시세 저수준)·stock_quotes(시세 경계)
 repositories/         SQLite 접근 (테이블별 모듈; db=커넥션/transaction,
                       bootstrap=init_db/close_db, schema=스키마·마이그레이션)
+domain/               순수 도메인 규칙 (market_calendar·timeutil·numbers …)
+config/               ecosystem.json(도구 레지스트리 정본)·schemas/(summary.json 계약)·analytics-projects.json
+ecosystem/            형제에 벤더링되는 발행 헬퍼 정본 (python/vc_publish.py, js/vc-publish.mjs)
 루트 *.py (main 외)   [레거시] ai_config·cache_layer·observability·wiki_ingestion 등 —
                       services/core로 이전 중. snapshot_nav.py 는 복구 스크립트용 shim
-static/               빌드 없는 vanilla JS SPA (로드 순서가 계약)
-scripts/, deploy/     운영 스크립트, 배포 스크립트, systemd 유닛(저장소 루트)
+static/               빌드 없는 vanilla JS SPA (로드 순서가 계약). static/ecosystem/ = 공용 셸·토큰·theme-boot 정본
+scripts/, deploy/     운영 스크립트(sync-ecosystem.mjs 등), 배포 스크립트, systemd 유닛(저장소 루트)
 ```
-
-리팩토링 방향과 현재 진행 상태는
-[docs/rearchitecture-plan.md](docs/rearchitecture-plan.md)와
-[docs/refactoring-review-2026-06.html](docs/refactoring-review-2026-06.html)이
-기준 문서다.
+리팩토링 방향과 현재 진행 상태는 [docs/rearchitecture-plan.md](docs/rearchitecture-plan.md),
+생태계 차원의 중복 정리·백로그는 [docs/ecosystem/modularization.md](docs/ecosystem/modularization.md)가
+기준 문서다. 지난 리뷰 보고서는 [docs/archive/](docs/archive/README.md)에 있다.
 
 ## 배포
 
@@ -109,16 +113,33 @@ Markdown 라이브러리는 `package-lock.json`과 일치하는 파일을 `stati
 
 ## 문서 색인 (docs/)
 
+생태계(허브 + 연결 대시보드 + 인프라):
+
 | 문서 | 내용 |
 | --- | --- |
-| refactoring-review-2026-06.html | 전체 구조·품질 평가 + 리팩토링 로드맵 + 기능 제언 |
-| rearchitecture-plan.md | 단계별 재설계 계획 (진행 상태 포함) |
+| [ecosystem/README.md](docs/ecosystem/README.md) | 생태계 문서 색인, 프로젝트 표, 어디서부터 읽나 |
+| [ecosystem/architecture.md](docs/ecosystem/architecture.md) | 전체 구조도·데이터 흐름·호스팅/배포·통합 계약 |
+| [ecosystem/ui-contract.md](docs/ecosystem/ui-contract.md) | 딥링크 계약·테마·공용 셸(vc-shell)·iframe 메시지·새 도구 추가 절차 |
+| [ecosystem/data-contract.md](docs/ecosystem/data-contract.md) | 형제 → 허브 `summary.json` 발행 계약 |
+| [ecosystem/external-data.md](docs/ecosystem/external-data.md) | 외부 데이터 소스·인증 env·캐시·중복 |
+| [ecosystem/modularization.md](docs/ecosystem/modularization.md) | 중복 정리 현황과 백로그 |
+| [ecosystem/roadmap.md](docs/ecosystem/roadmap.md) | 소유자 조치·후속 과제·확장 아이디어 |
+| [linked-projects.md](docs/linked-projects.md) | 허브 쪽 연동 설정·환경변수·공용 알림 API |
+
+허브:
+
+| 문서 | 내용 |
+| --- | --- |
+| [rearchitecture-plan.md](docs/rearchitecture-plan.md) | 단계별 재설계 계획 (진행 상태 포함) |
 | [architecture-improvements-2026-09.md](docs/architecture-improvements-2026-09.md) | 조회 격리·출처 검증·종료 정리·응답 계약·지연 로딩 개선 |
-| project-architecture-graph.md | 허브·서브프로젝트·외부 소스 전체 그래프 |
-| linked-projects.md | 서브프로젝트 연동 방식·환경변수 |
-| environment-profiles.md | `.env` 단일 설정 소스·프로파일 |
-| project-health-review.md | 2026-04 전체 점검 기록 |
-| nps-separation-plan.md | NPS 분리 계획 (대시보드 분리 완료) |
-| nav-trend-performance.md | NAV 차트 성능 개선 기록 |
-| portfolio-frontend-structure.md | 프런트 JS 분할 구조·로드 순서 계약 |
-| local-prod-portfolio-import.md | 운영 DB → 로컬 import 절차 |
+| [portfolio-frontend-structure.md](docs/portfolio-frontend-structure.md) | 프런트 JS 분할 구조·로드 순서 계약 |
+| [environment-profiles.md](docs/environment-profiles.md) | `.env` 단일 설정 소스·프로파일 |
+| [regular-close-settlement.md](docs/regular-close-settlement.md) | 정규장 정산 운영 절차 |
+| [dependency-policy.md](docs/dependency-policy.md) | 의존성 정책 |
+| [analytics.md](docs/analytics.md) | GA4 공용 analytics.js |
+| [nav-trend-performance.md](docs/nav-trend-performance.md) | NAV 차트 성능 개선 기록 |
+| [local-prod-portfolio-import.md](docs/local-prod-portfolio-import.md) | 운영 DB → 로컬 import 절차 |
+| [archive/](docs/archive/README.md) | 지난 리뷰·감사 보고서(시점 기록) |
+
+기능별 설계 문서(브로커·퀀트·배당·NAV 회계 등)는 `docs/`에 주제별 파일로 있다.
+[project-architecture-graph.md](docs/project-architecture-graph.md)는 ecosystem/architecture.md로 옮겨졌다는 안내만 남아 있다.

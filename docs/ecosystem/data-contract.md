@@ -102,7 +102,7 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | eiayn | `dist/summary.json`, `dist/version.json` (빌드 산출물, 커밋하지 않음) | `npm run build` 끝에서 `build-rankings.mjs` 다음에 실행하는 `node scripts/build-summary.mjs` | `scripts/vc-publish.mjs` |
 | gold_gap | **data 브랜치** 루트 `summary.json`, `version.json` → `deploy.yml`이 `_site/`로 복사 | `update-data.yml`: `generate_data.py` 다음. data 브랜치 커밋 여부를 `cmp -s data.json` 대신 헬퍼 반환값으로 정한다 | `goldgap/vc_publish.py` |
 | all-about-gold | `_site/summary.json`, `_site/version.json` (빌드 산출물) | `scripts/build_pages.py --snapshot …` | `scripts/vc_publish.py` |
-| nps-tracker | 루트 (main). X0(아티팩트 축소) 이후에는 `_site/` 스테이징 목록에 두 파일을 추가 | `pages.yml`: `fetch_data.py` 다음, `Commit refreshed data` 목록에 추가 | `nps_tracker/vc_publish.py` |
+| nps-tracker | 루트 (main) → `scripts/stage_pages.py` 허용 목록이 `_site/`로 복사 | `pages.yml`: `fetch_data.py` 다음, `Commit refreshed data` 목록에 추가 | `nps_tracker/vc_publish.py` |
 | bond-mate | **data 브랜치** `data/summary.json`, `data/version.json` → `deploy.yml`이 `_site/summary.json`, `_site/version.json`으로 복사 (현재의 `for name in current rates …` 루프와 별도 단계) | `update-data.yml` | `bondmate/vc_publish.py` |
 
 빌드 시점에 만드는 도구(eiayn, all-about-gold)는 이전 파일이 없어서 no-op 비교를 할 수 없다. 이런

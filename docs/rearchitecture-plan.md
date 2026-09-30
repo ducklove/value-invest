@@ -136,7 +136,7 @@ flowchart TD
 
 ## 2026-06-11 진행 기록
 
-리팩토링 리뷰(`docs/refactoring-review-2026-06.html`) Phase 2 잔여 2건 처리:
+리팩토링 리뷰(`docs/archive/refactoring-review-2026-06.html`) Phase 2 잔여 2건 처리:
 
 - **2-1 시세 단일화 마무리**: 국내 벌크 시세(`fetch_bulk_quotes_kr`)의 마지막
   직접 호출(`routes/portfolio.py`)을 `services/stock_quotes.get_bulk_quote_snapshots`
@@ -157,7 +157,7 @@ flowchart TD
 
 ## 2026-06-10 진행 기록
 
-상세 평가와 후속 로드맵은 `docs/refactoring-review-2026-06.html` 참고.
+상세 평가와 후속 로드맵은 `docs/archive/refactoring-review-2026-06.html` 참고.
 
 - **4단계 완료**: `repositories/db.py`가 커넥션 싱글턴(DB_PATH/get_db/close_db)과
   `transaction()`(공유 단일 커넥션 직렬화, BEGIN IMMEDIATE, 재진입 합류)을 소유.

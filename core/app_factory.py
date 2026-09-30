@@ -164,7 +164,7 @@ def _register_security_headers(app: FastAPI) -> None:
 class _RequestLatencyMiddleware:
     """Record slow `/api/*` calls and 5xx responses to the in-app event log.
 
-    This is the data source the admin dashboard and `docs/project-health-review.md`
+    This is the data source the admin dashboard and `docs/archive/project-health-review.md`
     ask for: "which endpoint is slow / failing", answered with measured durations
     instead of guesses. Design notes:
 
