@@ -139,7 +139,7 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 ## 6. 도구별 payload (`data`)
 
 설계 원칙은 "허브가 지금 쓰는 필드만, 그러나 허브가 원본 파일 없이 기존 기능을 전부 재현할 수 있을
-만큼"이다. 기준이 된 허브 소비자는 `external_tools.py`(인사이트 카드 `_summarize_*`, 종목 딥링크
+만큼"이다. 기준이 된 허브 소비자는 `services/ecosystem/external_tools.py`(인사이트 카드 `_summarize_*`, 종목 딥링크
 `_match_*`, 액션보드 `fetch_portfolio_signals`, ETF `fetch_etf_universe`/`etf_link_for`, 스팩
 `fetch_spac_data`), `services/portfolio/spac.py`(청산가치 지표), `static/js/market-bond-mate.js`
 (브라우저 금리·환율 병합)다. 크기는 실데이터 기준 전체 발행 시 추정치(압축 전)다.

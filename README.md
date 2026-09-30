@@ -40,10 +40,17 @@ python3 -m pytest --cov=. -q  # 커버리지 측정 (게이트 아님)
 main.py               ASGI 진입점 (조립은 core.app_factory)
 core/                 config(env 프로파일)·app factory·lifespan·정적 라우트
 routes/               HTTP/WS 핸들러 (포트폴리오·분석·알림·관리자·위키 …)
-services/             도메인 로직 (portfolio/*, notifications/*, stock_quotes)
+services/             도메인 로직
+  portfolio/          NAV 정산(nav_snapshot)·장중 스냅샷·벤치마크·시세·리포트 …
+  market/             시장 지표(indicators)·브리프/테이프(daily)·등락(movers)·경제캘린더·뉴스
+  market/sources/     외부 provider (finance_pi·close_price·kis_proxy·yahoo·yfinance_runner)
+  ecosystem/          형제 대시보드 요약·연결 도구 설정·config 편집 (external_tools·integrations·linked_admin)
+  dart/, dividends/   OpenDART 클라이언트, 우선주·해외 배당 수집기
+  notifications/ …    알림 엔진·채널, stock_price(국내 시세 저수준)·stock_quotes(시세 경계)
 repositories/         SQLite 접근 (테이블별 모듈; db=커넥션/transaction,
                       bootstrap=init_db/close_db, schema=스키마·마이그레이션)
-stock_price.py 등     [레거시] 시세·시장 데이터 수집 모듈 — services로 이전 중
+루트 *.py (main 외)   [레거시] ai_config·cache_layer·observability·wiki_ingestion 등 —
+                      services/core로 이전 중. snapshot_nav.py 는 복구 스크립트용 shim
 static/               빌드 없는 vanilla JS SPA (로드 순서가 계약)
 scripts/, deploy/     운영 스크립트, 배포 스크립트, systemd 유닛(저장소 루트)
 ```

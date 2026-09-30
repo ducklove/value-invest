@@ -17,7 +17,7 @@ URLs or server-side environment variables instead of copying their code.
 | `npsTracker` | `https://github.com/ducklove/nps-tracker` | — | Embeds the NPS domestic-equity portfolio dashboard in the NPS tab via iframe and summarizes `current.json` for the 투자정보 insight card. Exposes `baseUrl` only. |
 | `eiayn` | `https://github.com/ducklove/eiayn` | `../eiayn` | Links ETF rows and the daily recommendation card to ETF analysis via `?code=` and summarizes `data/rankings.json`. Visual theme uses `?theme=light|dark`; ETF category filters use `?etf_theme=`. |
 | `bondMate` | `https://github.com/ducklove/bond-mate` | `../bond-mate` | Source of record for the 투자정보 국채·환율 panels: the browser merges its `data/current.json` into the indicator catalog and links out for history. The 도구 허브 `/bonds` view also embeds its screens (`?embed=<tab>`) so 기준금리·신용·발행 stay on the original dashboard. Exposes `baseUrl`/`dataUrl`/`embedUrl`/`views` only. |
-| `kisProxy` | `https://github.com/ducklove/kis-proxy` | `../kis-proxy` | Used server-side by `kis_proxy_client.py` through `KIS_PROXY_BASE_URL`. |
+| `kisProxy` | `https://github.com/ducklove/kis-proxy` | `../kis-proxy` | Used server-side by `services/market/sources/kis_proxy.py` through `KIS_PROXY_BASE_URL`. |
 
 > `finance-pi` (`../finance-pi`, Raspberry Pi 데이터레이크 `:8400`)는 위 integration
 > registry에 속하지 않는 인프라 백엔드다. `value-invest`는 이를 `CLOSE_PRICE_API_BASE_URL`
@@ -100,7 +100,7 @@ Deploy the hub API/script and all three dashboard changes together (hub first).
 
 ## Server-side External Insights
 
-Separate from the browser deep-links above, `external_tools.py`
+Separate from the browser deep-links above, `services/ecosystem/external_tools.py`
 (`fetch_external_insights`) pulls each dashboard's published JSON from
 `raw.githubusercontent`, summarizes it, and feeds the AI portfolio-insight layer.
 Results are cached ~15 minutes and each fetch fails independently:

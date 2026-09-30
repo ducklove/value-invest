@@ -9,11 +9,11 @@
 | 위치 | 역할 |
 |---|---|
 | `routes/` | HTTP/WS 핸들러. 기존 파일에 `@router.get` 추가는 그걸로 끝. **새 라우터 파일**을 만들면 `core/app_factory.py`에 include_router 등록 |
-| `services/` | 도메인 로직 (`portfolio/*`, `notifications/*`, `market/*`, `stock_quotes`) |
+| `services/` | 도메인 로직 — `portfolio/*`(NAV 정산 `nav_snapshot`·장중 `intraday_snapshot`·`benchmark_history` 포함), `market/*`(`indicators`·`daily`·`movers`·`economic_calendar`·`news`·`sessions`), `market/sources/*`(외부 provider: `finance_pi`·`close_price`·`kis_proxy`·`yahoo`), `ecosystem/*`(형제 대시보드: `external_tools`·`integrations`·`linked_admin`), `dart/client`, `dividends/*`, `notifications/*`, `stock_price`·`stock_quotes` |
 | `repositories/` | 테이블별 SQLite 접근. `db.py`=커넥션 싱글톤+`transaction()`, `schema.py`=스키마·마이그레이션, `bootstrap.py`=`init_db()`/`close_db()` |
 | `core/` | config(env 프로파일)·app_factory·lifespan·정적 라우트·http 클라이언트·errors |
 | `static/` | 프론트엔드 — 아래 "프론트엔드 계약" 필독 |
-| 루트 `*.py` 32개 | [레거시] 시장데이터 수집기 등. services로 이전 중 — **새 코드를 여기 만들지 말 것** |
+| 루트 `*.py` 15개 | `main.py`(ASGI 진입점) + [레거시] `ai_config`·`analyzer`·`asset_insights`·`auth_service`·`cache_layer`·`dart_report_review`·`deps`·`dr_registry`·`kis_key_manager`·`kis_ws_manager`·`observability`·`report_client`·`wiki_ingestion` — services/core로 이전 중, **새 코드를 여기 만들지 말 것**. `snapshot_nav.py`는 deploy/repairs 용 호환 shim(정본 `services/portfolio/nav_snapshot`). 옮긴 모듈의 옛 이름 import 는 `tests/test_legacy_root_modules.py`가 막는다 |
 
 `cache.py`는 2026-07 삭제됐다. 오래된 문서·커밋에서 `cache.get_db` 류를 보면
 `repositories/{db,bootstrap,corp_codes,cache_values}`가 현재 위치다.
