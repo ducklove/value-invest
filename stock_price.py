@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from statistics import median
 
@@ -28,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 KRW_PER_EOK = 100_000_000
 WS_QUOTE_MAX_AGE_SECONDS = 90
+
+# yfinance 는 블로킹이고 wait_for 타임아웃 뒤에도 스레드가 계속 돈다. 기본
+# executor 를 쓰면 멈춘 Yahoo 호출이 asyncio.to_thread 사용처 전체를 굶긴다.
+# 전용 소형 풀로 격리해 최악에도 이 풀만 막히게 한다.
+YF_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="yf")
 
 
 # ---------------------------------------------------------------------------
@@ -856,7 +862,7 @@ async def fetch_market_data(
     # Bound yfinance to a hard wall-clock deadline so a stuck Yahoo response
     # cannot pin a thread-pool worker indefinitely.
     yf_future = asyncio.wait_for(
-        loop.run_in_executor(None, _get_yfinance_aux, stock_code, start_year, end_year),
+        loop.run_in_executor(YF_EXECUTOR, _get_yfinance_aux, stock_code, start_year, end_year),
         timeout=15.0,
     )
     dart_dividends_future = (

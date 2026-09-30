@@ -5,6 +5,7 @@ unittest 클래스 기반 테스트는 tests/_harness.py 의 ``TempDbMixin`` 을
 아래 ``temp_db`` fixture 로 같은 temp-DB 수명주기를 쓴다.
 """
 import os
+import sys
 import tempfile
 
 import pytest
@@ -29,3 +30,20 @@ async def temp_db():
         yield db_path
     finally:
         await close_temp_db(tmp, db_patch)
+
+
+@pytest.fixture(autouse=True)
+def _reset_short_lived_quote_caches():
+    """모듈 전역 단기 캐시(벌크 시세 micro-cache, KIS 재무/배당 TTL)를 테스트마다 비운다.
+
+    같은 종목코드를 다른 mock 값으로 조회하는 테스트끼리 캐시로 값이 새지 않게
+    한다. 이미 import 된 모듈만 건드려 import 부작용(env 고정 순서)을 만들지 않는다.
+    """
+    stock_quotes = sys.modules.get("services.stock_quotes")
+    if stock_quotes is not None:
+        stock_quotes._bulk_micro_cache.clear()
+        stock_quotes._bulk_inflight.clear()
+    kis_proxy_client = sys.modules.get("kis_proxy_client")
+    if kis_proxy_client is not None:
+        kis_proxy_client.clear_response_cache()
+    yield

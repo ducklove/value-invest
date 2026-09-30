@@ -21,6 +21,13 @@ Data sources are reused so alerts agree with what the UI shows:
   목표가를 라이브로 못 구하면 폴백 없이 건너뛴다 — ``_effective_target`` 참고
 * portfolio NAV → ``snapshot_intraday._fetch_total_value``
 * prev-close NAV → latest ``portfolio_snapshots`` row (the Today baseline)
+
+Quote fetching is shared per evaluation pass (``evaluate_all``): every user's
+rules are planned first, the union of codes is fetched once — domestic codes
+with one bulk call, the rest (and bulk misses) with a bounded gather — and the
+resulting map feeds both rule evaluation and the NAV valuation. On KRX
+non-trading days domestic misses use the cached last price instead of a forced
+REST refresh.
 """
 
 from __future__ import annotations
@@ -28,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from repositories import calendar_rules as calendar_rules_repo
@@ -51,6 +59,8 @@ from services.portfolio.time_windows import portfolio_today_baseline_date, settl
 logger = logging.getLogger(__name__)
 _evaluate_all_lock = asyncio.Lock()
 _evaluate_calendar_lock = asyncio.Lock()
+# 패스 공유 시세의 개별 조회 동시성(벌크가 못 채운 국내·해외·특수자산).
+QUOTE_FETCH_CONCURRENCY = 4
 
 PRICE_TYPES = frozenset({"price_above", "price_below"})            # scope=stock
 NAV_TYPES = frozenset({"nav_above", "nav_below"})                  # scope=portfolio
@@ -143,11 +153,18 @@ async def _regular_daily_quote(code: str) -> dict:
         return {}
 
 
-async def _safe_quote(code: str, *, regular_daily_change: bool = False) -> dict:
-    """Fetch a quote dict ({price, change_pct, ...}) or {} on any failure."""
+async def _safe_quote(code: str, *, regular_daily_change: bool = False, market_open: bool = True) -> dict:
+    """Fetch a quote dict ({price, change_pct, ...}) or {} on any failure.
+
+    ``market_open=False`` (KRX 휴장일) 이면 국내 종목을 REST 강제 조회하지 않고
+    캐시된 마지막 시세를 우선하는 일반 조회를 쓴다.
+    """
     try:
         if runtime_quotes.is_korean_stock(code):
-            quote = await runtime_quotes.fetch_quote(code, force_refresh=True, use_ws_cache=False)
+            if market_open:
+                quote = await runtime_quotes.fetch_quote(code, force_refresh=True, use_ws_cache=False)
+            else:
+                quote = await runtime_quotes.fetch_quote(code)
         else:
             quote = await runtime_quotes.fetch_quote(
                 code,
@@ -163,8 +180,12 @@ async def _safe_quote(code: str, *, regular_daily_change: bool = False) -> dict:
         daily_quote = await _regular_daily_quote(code)
         daily_change_pct = _quote_change_pct(daily_quote)
         if daily_change_pct is not None:
+            daily_only = not quote
             quote = dict(quote or daily_quote)
             quote["change_pct"] = daily_change_pct
+            if daily_only:
+                # 가격까지 정규장 일간 시세에서 왔다 — NAV 합산에는 쓰지 않는다.
+                quote["_daily_only"] = True
     if not quote or quote.get("_stale") is True:
         return {}
     return quote
@@ -231,12 +252,24 @@ async def _effective_target(
     return avg * 1.3 if avg and avg > 0 else None
 
 
-async def _portfolio_nav(google_sub: str) -> float | None:
+async def _portfolio_nav(
+    google_sub: str,
+    *,
+    quote_map: dict[str, dict] | None = None,
+    market_open: bool = True,
+) -> float | None:
     """Canonical intraday NAV — reuse the snapshot summation so the alert NAV
-    matches the stored snapshots exactly. Returns None if it can't be valued."""
+    matches the stored snapshots exactly. Returns None if it can't be valued.
+
+    ``quote_map`` 은 패스 공유 시세 — 맵에 없는 종목만 개별 조회한다."""
     import snapshot_intraday
     try:
-        total = await snapshot_intraday._fetch_total_value(google_sub)
+        if quote_map is None:
+            total = await snapshot_intraday._fetch_total_value(google_sub)
+        else:
+            total = await snapshot_intraday._fetch_total_value(
+                google_sub, quote_map=quote_map, force_kr=market_open
+            )
     except Exception as exc:
         logger.info("alert NAV unavailable for %s: %s", google_sub[:8], exc)
         return None
@@ -710,8 +743,55 @@ async def _eval_blanket_feed(
     return sent
 
 
-async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> int:
-    """Evaluate all enabled rules for one user. Returns alerts sent."""
+@dataclass
+class _UserPlan:
+    """한 사용자의 평가 준비물 — 규칙·보유·필요한 시세 코드."""
+
+    google_sub: str
+    rules: list[dict]
+    items_by_code: dict[str, dict]
+    pending_sent: int
+    needed: set[str] = field(default_factory=set)
+    daily_metric_codes: set[str] = field(default_factory=set)
+    override_disc: set[str] = field(default_factory=set)
+    override_rep: set[str] = field(default_factory=set)
+    needs_nav: bool = False
+    needs_pf_daily: bool = False
+
+    @property
+    def nav_codes(self) -> set[str]:
+        return set(self.items_by_code) if (self.needs_nav or self.needs_pf_daily) else set()
+
+
+@dataclass
+class _PassQuotes:
+    """한 평가 패스가 사용자 전체에 공유하는 시세.
+
+    ``quotes`` 는 ``_safe_quote`` 결과(stale·실패는 ``{}``)와 같은 형식이다.
+    ``daily_codes`` 는 정규장 일간 등락률로 보강해 받은 코드들.
+    """
+
+    quotes: dict[str, dict] = field(default_factory=dict)
+    daily_codes: set[str] = field(default_factory=set)
+    market_open: bool = True
+
+    def for_user(self, plan: _UserPlan) -> dict[str, dict]:
+        user_map: dict[str, dict] = {}
+        for code in plan.needed:
+            quote = self.quotes.get(code, {})
+            if quote.get("_daily_only") and code not in plan.daily_metric_codes:
+                # 종전에는 일간 보강 없이 조회해 결측이었을 값이다.
+                quote = {}
+            user_map[code] = quote
+        return user_map
+
+    def nav_map(self) -> dict[str, dict]:
+        # 일간 시세로만 가격을 얻은 종목은 NAV 합산에서 빼 개별 조회로 돌린다.
+        return {code: quote for code, quote in self.quotes.items() if not quote.get("_daily_only")}
+
+
+async def _plan_user(google_sub: str) -> _UserPlan | int:
+    """규칙·보유를 읽고 필요한 시세를 계산한다. 평가할 게 없으면 발송 수(int)."""
     rules = await notifications_repo.list_portfolio_alerts(google_sub, enabled_only=True)
     if not rules:
         return 0
@@ -734,6 +814,106 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
             if not rules:
                 return pending_sent
 
+    plan = _UserPlan(google_sub=google_sub, rules=rules, items_by_code=items_by_code, pending_sent=pending_sent)
+
+    # --- which quotes do we need? ---
+    # price + 개별 종목 일간등락률 규칙의 종목 시세가 필요하다.
+    metric_codes = {
+        r["stock_code"] for r in rules
+        if r["alert_type"] in (PRICE_TYPES | STOCK_DAILY_ABS_TYPES) and r.get("stock_code")
+    }
+    plan.daily_metric_codes = {
+        r["stock_code"] for r in rules
+        if r["alert_type"] in STOCK_DAILY_ABS_TYPES and r.get("stock_code")
+    }
+    has_quote_blanket = any(r["alert_type"] in BLANKET_QUOTE_TYPES for r in rules)
+    has_daily_blanket = any(r["alert_type"] in DAILY_ABS_TYPES for r in rules)
+    plan.needed = set(metric_codes)
+    if has_quote_blanket:
+        plan.needed |= set(items_by_code)
+    if has_daily_blanket:
+        plan.daily_metric_codes |= set(items_by_code)
+    # 전체 신규 공시/리포트(blanket feed)가 있으면, 개별 규칙이 걸린 종목은 그 종목의
+    # 개별 설정(켜짐/꺼짐)이 우선하므로 blanket 평가에서 제외한다(enabled 무관 조회).
+    if any(r["alert_type"] in BLANKET_FEED_TYPES for r in rules):
+        for r in await notifications_repo.list_portfolio_alerts(google_sub):
+            code = r.get("stock_code")
+            if not code:
+                continue
+            if r.get("alert_type") == "disclosure_new":
+                plan.override_disc.add(code)
+            elif r.get("alert_type") == "report_new":
+                plan.override_rep.add(code)
+    # 우선주 자동 목표가는 본주가를 추가로 조회해야 한다.
+    if any(r["alert_type"] in TARGET_TYPES for r in rules):
+        for code, item in items_by_code.items():
+            if item.get("target_price") in (None, "") and not item.get("target_price_disabled") and is_preferred_stock(code):
+                plan.needed.add(common_stock_code(code))
+
+    plan.needs_nav = any(r["alert_type"] in NAV_TYPES for r in rules)
+    plan.needs_pf_daily = any(r["alert_type"] in PORTFOLIO_DAILY_TYPES for r in rules)
+    return plan
+
+
+async def _gather_safe_quotes(
+    codes: list[str], daily_codes: set[str], *, market_open: bool
+) -> dict[str, dict]:
+    """``_safe_quote`` 를 동시성 제한으로 병렬 실행한다(실패는 ``{}``)."""
+    semaphore = asyncio.Semaphore(QUOTE_FETCH_CONCURRENCY)
+
+    async def _one(code: str) -> dict:
+        async with semaphore:
+            if code in daily_codes:
+                return await _safe_quote(code, regular_daily_change=True, market_open=market_open)
+            return await _safe_quote(code, market_open=market_open)
+
+    results = await asyncio.gather(*(_one(code) for code in codes))
+    return dict(zip(codes, results))
+
+
+async def _prefetch_pass_quotes(plans: list[_UserPlan], *, market_open: bool) -> _PassQuotes:
+    """패스의 모든 사용자 코드 합집합을 한 번만 조회한다.
+
+    국내 코드는 벌크 1회(``runtime_quotes.fetch_bulk_kr_quotes``)로 먼저 채우고,
+    벌크가 못 채운 코드와 해외·특수자산은 ``_safe_quote`` 로 병렬 조회한다.
+    """
+    needed: set[str] = set()
+    daily: set[str] = set()
+    for plan in plans:
+        needed |= plan.needed | plan.nav_codes
+        daily |= plan.daily_metric_codes
+    pass_quotes = _PassQuotes(daily_codes=daily, market_open=market_open)
+    if not needed:
+        return pass_quotes
+    ordered = sorted(needed)
+    korean = [code for code in ordered if runtime_quotes.is_korean_stock(code)]
+    if korean:
+        # best-effort: 벌크 실패는 개별 조회로 흡수한다(return_exceptions).
+        (bulk,) = await asyncio.gather(runtime_quotes.fetch_bulk_kr_quotes(korean), return_exceptions=True)
+        if isinstance(bulk, BaseException):
+            logger.warning("alert bulk quote prefetch failed; falling back per code: %s", bulk)
+            bulk = {}
+        for code in korean:
+            quote = bulk.get(code)
+            if runtime_quotes.usable_quote(quote):
+                pass_quotes.quotes[code] = quote
+    misses = [code for code in ordered if code not in pass_quotes.quotes]
+    pass_quotes.quotes.update(await _gather_safe_quotes(misses, daily, market_open=market_open))
+    return pass_quotes
+
+
+async def _evaluate_plan(
+    plan: _UserPlan,
+    quote_map: dict[str, dict],
+    *,
+    feed_cache: dict | None,
+    nav_quotes: dict[str, dict] | None = None,
+    market_open: bool = True,
+) -> int:
+    google_sub = plan.google_sub
+    rules = plan.rules
+    items_by_code = plan.items_by_code
+
     async def _name(code: str | None) -> str:
         item = items_by_code.get(code or "")
         nm = item.get("stock_name") if item else None
@@ -744,69 +924,26 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
         except Exception:
             return code or ""
 
-    # --- which quotes do we need? ---
-    # price + 개별 종목 일간등락률 규칙의 종목 시세가 필요하다.
-    metric_codes = {
-        r["stock_code"] for r in rules
-        if r["alert_type"] in (PRICE_TYPES | STOCK_DAILY_ABS_TYPES) and r.get("stock_code")
-    }
-    daily_metric_codes = {
-        r["stock_code"] for r in rules
-        if r["alert_type"] in STOCK_DAILY_ABS_TYPES and r.get("stock_code")
-    }
-    has_quote_blanket = any(r["alert_type"] in BLANKET_QUOTE_TYPES for r in rules)
-    has_daily_blanket = any(r["alert_type"] in DAILY_ABS_TYPES for r in rules)
-    needed: set[str] = set(metric_codes)
-    if has_quote_blanket:
-        needed |= set(items_by_code)
-    if has_daily_blanket:
-        daily_metric_codes |= set(items_by_code)
-    # 전체 신규 공시/리포트(blanket feed)가 있으면, 개별 규칙이 걸린 종목은 그 종목의
-    # 개별 설정(켜짐/꺼짐)이 우선하므로 blanket 평가에서 제외한다(enabled 무관 조회).
-    override_disc: set[str] = set()
-    override_rep: set[str] = set()
-    if any(r["alert_type"] in BLANKET_FEED_TYPES for r in rules):
-        for r in await notifications_repo.list_portfolio_alerts(google_sub):
-            code = r.get("stock_code")
-            if not code:
-                continue
-            if r.get("alert_type") == "disclosure_new":
-                override_disc.add(code)
-            elif r.get("alert_type") == "report_new":
-                override_rep.add(code)
-    # 우선주 자동 목표가는 본주가를 추가로 조회해야 한다.
-    if any(r["alert_type"] in TARGET_TYPES for r in rules):
-        for code, item in items_by_code.items():
-            if item.get("target_price") in (None, "") and not item.get("target_price_disabled") and is_preferred_stock(code):
-                needed.add(common_stock_code(code))
-
-    quote_map: dict[str, dict] = {}
-    for code in needed:
-        if code in daily_metric_codes:
-            quote_map[code] = await _safe_quote(code, regular_daily_change=True)
-        else:
-            quote_map[code] = await _safe_quote(code)
-        await asyncio.sleep(0.1)
-
-    needs_nav = any(r["alert_type"] in NAV_TYPES for r in rules)
-    needs_pf_daily = any(r["alert_type"] in PORTFOLIO_DAILY_TYPES for r in rules)
     nav: float | None = None  # 오늘 총평가액 (총평가액 알림 + 일간등락 분자)
     pf_daily_pct: float | None = None
-    if needs_nav or needs_pf_daily:
-        nav = await _portfolio_nav(google_sub)
-    if needs_pf_daily and nav is not None:
+    if plan.needs_nav or plan.needs_pf_daily:
+        if nav_quotes is None:
+            nav = await _portfolio_nav(google_sub)
+        else:
+            nav = await _portfolio_nav(google_sub, quote_map=nav_quotes, market_open=market_open)
+    if plan.needs_pf_daily and nav is not None:
         prev_total, prev_date = await _prev_close_value(google_sub)
         if prev_total:
             # 오늘 들어온/나간 현금은 수익률에서 제외 (Today 카드와 동일).
             net_cf = await _net_cashflow_since_settlement(google_sub, prev_date)
             pf_daily_pct = (nav - net_cf - prev_total) / prev_total * 100.0
 
-    sent = pending_sent
+    sent = plan.pending_sent
     for rule in rules:
         alert_type = rule["alert_type"]
 
         if alert_type in BLANKET_FEED_TYPES:
-            override = override_disc if alert_type == "disclosure_new_all" else override_rep
+            override = plan.override_disc if alert_type == "disclosure_new_all" else plan.override_rep
             sent += await _eval_blanket_feed(google_sub, rule, items_by_code, override, feed_cache)
             continue
 
@@ -862,12 +999,36 @@ async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> i
     return sent
 
 
+async def evaluate_user(google_sub: str, *, feed_cache: dict | None = None) -> int:
+    """Evaluate all enabled rules for one user. Returns alerts sent.
+
+    단독 호출은 이 사용자에게 필요한 시세만 종목별로 조회한다. 여러 사용자를
+    한 패스로 평가할 때는 ``evaluate_all`` 이 시세를 한 번에 받아 공유한다.
+    """
+    plan = await _plan_user(google_sub)
+    if isinstance(plan, int):
+        return plan
+    quote_map = await _gather_safe_quotes(sorted(plan.needed), plan.daily_metric_codes, market_open=True)
+    return await _evaluate_plan(plan, quote_map, feed_cache=feed_cache)
+
+
+async def _guard_user(google_sub: str, coro):
+    """사용자 하나의 실패가 패스 전체를 멈추지 않게 한다(실패 시 None)."""
+    try:
+        return await coro
+    except Exception as exc:
+        logger.warning("alert evaluation failed for %s: %s", google_sub[:8], exc)
+        return None
+
+
 async def evaluate_all() -> dict:
     """One evaluation pass over every user with portfolio holdings or alert rules.
 
     개별 종목(분석 화면) 알림은 보유 종목이 아닐 수 있으므로, 보유 사용자에 더해
     알림 규칙이 하나라도 있는 사용자도 평가 대상에 포함한다. 같은 공시/리포트
     종목을 여러 사용자가 구독해도 외부 API 를 한 번만 치도록 feed_cache 를 공유한다.
+    시세도 같은 방식으로 공유한다 — 전 사용자 규칙을 먼저 계획해 코드 합집합을
+    한 번만 조회하고(국내 벌크 1회), 그 맵으로 규칙과 NAV 를 함께 평가한다.
     """
     if _evaluate_all_lock.locked():
         logger.info("alert evaluation skipped: previous pass still running")
@@ -881,12 +1042,32 @@ async def evaluate_all() -> dict:
         feed_cache: dict = {}
         total_sent = 0
         evaluated = 0
+        plans: list[_UserPlan] = []
         for google_sub in users:
-            try:
-                total_sent += await evaluate_user(google_sub, feed_cache=feed_cache)
+            outcome = await _guard_user(google_sub, _plan_user(google_sub))
+            if isinstance(outcome, _UserPlan):
+                plans.append(outcome)
+            elif outcome is not None:
+                total_sent += outcome
                 evaluated += 1
-            except Exception as exc:
-                logger.warning("alert evaluation failed for %s: %s", google_sub[:8], exc)
+        if plans:
+            market_open = runtime_quotes.kr_trading_day()
+            pass_quotes = await _prefetch_pass_quotes(plans, market_open=market_open)
+            nav_quotes = pass_quotes.nav_map()
+            for plan in plans:
+                sent = await _guard_user(
+                    plan.google_sub,
+                    _evaluate_plan(
+                        plan,
+                        pass_quotes.for_user(plan),
+                        feed_cache=feed_cache,
+                        nav_quotes=nav_quotes,
+                        market_open=market_open,
+                    ),
+                )
+                if sent is not None:
+                    total_sent += sent
+                    evaluated += 1
         return {"users": len(users), "evaluated": evaluated, "sent": total_sent}
 
 

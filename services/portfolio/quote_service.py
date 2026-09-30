@@ -136,6 +136,9 @@ class _PortfolioRuntimeQuoteProvider:
     async def fetch_cash_quote(self, stock_code: str) -> dict[str, Any]:
         return await fetch_cash_quote(stock_code)
 
+    async def fetch_bulk_kr_quotes(self, stock_codes: list[str]) -> dict[str, dict[str, Any]]:
+        return await stock_quotes.get_bulk_quote_snapshots(stock_codes)
+
     async def load_ticker_map(self) -> dict[str, str]:
         await foreign.ensure_ticker_map()
         return dict(foreign._ticker_map)

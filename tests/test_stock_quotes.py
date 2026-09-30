@@ -317,3 +317,120 @@ async def test_get_stock_cont_calls_back_once_immediately_even_without_change():
         sub.cancel()
 
     assert calls == [stock]
+
+
+# ---------------------------------------------------------------------------
+# O13 — 벌크 micro-cache + in-flight 공유
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bulk_micro_cache_serves_repeat_calls_without_upstream():
+    upstream = AsyncMock(return_value={"005930": _naver_bulk_quote(70500), "000660": _naver_bulk_quote(200000)})
+    with patch.object(stock_quotes.stock_price, "fetch_bulk_quotes_kr", new=upstream):
+        first = await stock_quotes.get_bulk_quote_snapshots(["005930", "000660"])
+        second = await stock_quotes.get_bulk_quote_snapshots(["000660", "005930"])
+
+    upstream.assert_awaited_once_with(["005930", "000660"])
+    assert second == first
+    # 결과 dict 는 호출마다 독립 — 호출자 변경이 캐시로 새지 않는다.
+    second["005930"]["price"] = 1
+    with patch.object(stock_quotes.stock_price, "fetch_bulk_quotes_kr", new=upstream):
+        third = await stock_quotes.get_bulk_quote_snapshots(["005930"])
+    assert third["005930"]["price"] == 70500
+
+
+@pytest.mark.asyncio
+async def test_bulk_micro_cache_partial_miss_fetches_only_missing_codes():
+    upstream = AsyncMock(side_effect=[
+        {"005930": _naver_bulk_quote(70500)},
+        {"000660": _naver_bulk_quote(200000), "035420": _naver_bulk_quote(180000)},
+    ])
+    with patch.object(stock_quotes.stock_price, "fetch_bulk_quotes_kr", new=upstream):
+        await stock_quotes.get_bulk_quote_snapshots(["005930"])
+        results = await stock_quotes.get_bulk_quote_snapshots(["005930", "000660", "035420"])
+
+    assert upstream.await_args_list[1].args == (["000660", "035420"],)
+    assert {code: quote["price"] for code, quote in results.items()} == {
+        "005930": 70500,
+        "000660": 200000,
+        "035420": 180000,
+    }
+
+
+@pytest.mark.asyncio
+async def test_bulk_micro_cache_expires_after_ttl():
+    upstream = AsyncMock(return_value={"005930": _naver_bulk_quote(70500)})
+    with patch.object(stock_quotes.stock_price, "fetch_bulk_quotes_kr", new=upstream), \
+         patch.object(stock_quotes._bulk_micro_cache, "default_ttl_seconds", 0):
+        await stock_quotes.get_bulk_quote_snapshots(["005930"])
+        await stock_quotes.get_bulk_quote_snapshots(["005930"])
+    assert upstream.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_bulk_micro_cache_hit_prefers_newer_single_code_quote():
+    # micro-cache 는 업스트림 호출만 줄인다 — 그 사이 들어온 WS 틱이 더 새롭다면 그 값.
+    upstream = AsyncMock(return_value={"005930": _naver_bulk_quote(70500)})
+    with patch.object(stock_quotes.stock_price, "fetch_bulk_quotes_kr", new=upstream):
+        await stock_quotes.get_bulk_quote_snapshots(["005930"])
+        stock_quotes._last_known["005930"] = stock_quotes.Stock(
+            code="005930",
+            current_price=70700,
+            previous_close=69000,
+            volume=None,
+            created_at=datetime.now(),
+            source="ws",
+        )
+        results = await stock_quotes.get_bulk_quote_snapshots(["005930"])
+
+    upstream.assert_awaited_once()
+    assert results["005930"]["price"] == 70700
+
+
+@pytest.mark.asyncio
+async def test_concurrent_bulk_calls_share_inflight_request():
+    release = asyncio.Event()
+    calls = []
+
+    async def slow_bulk(codes):
+        calls.append(list(codes))
+        await release.wait()
+        return {code: _naver_bulk_quote(1000 + index) for index, code in enumerate(codes)}
+
+    with patch.object(stock_quotes.stock_price, "fetch_bulk_quotes_kr", new=slow_bulk):
+        first = asyncio.create_task(stock_quotes.get_bulk_quote_snapshots(["005930", "000660"]))
+        await asyncio.sleep(0)
+        # 두 번째 페이지 로드: 겹치는 코드는 기다리고, 새 코드만 따로 받는다.
+        second = asyncio.create_task(stock_quotes.get_bulk_quote_snapshots(["000660", "035420"]))
+        await asyncio.sleep(0)
+        release.set()
+        first_result, second_result = await asyncio.gather(first, second)
+
+    assert calls == [["005930", "000660"], ["035420"]]
+    assert first_result["000660"]["price"] == second_result["000660"]["price"] == 1001
+    assert second_result["035420"]["price"] == 1000
+    assert stock_quotes._bulk_inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_failed_bulk_releases_waiters_as_misses():
+    release = asyncio.Event()
+
+    async def failing_bulk(codes):
+        await release.wait()
+        raise RuntimeError("naver down")
+
+    with patch.object(stock_quotes.stock_price, "fetch_bulk_quotes_kr", new=failing_bulk):
+        owner = asyncio.create_task(stock_quotes.get_bulk_quote_snapshots(["005930"]))
+        await asyncio.sleep(0)
+        waiter = asyncio.create_task(stock_quotes.get_bulk_quote_snapshots(["005930"]))
+        await asyncio.sleep(0)
+        release.set()
+        owner_outcome, waiter_outcome = await asyncio.gather(owner, waiter, return_exceptions=True)
+
+    # 소유 호출자는 종전처럼 예외를 받고, 대기자는 결측(개별 폴백 대상)으로 끝난다.
+    assert isinstance(owner_outcome, RuntimeError)
+    assert waiter_outcome == {}
+    assert stock_quotes._bulk_inflight == {}
+    assert stock_quotes._bulk_micro_cache.get("005930") is None

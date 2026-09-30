@@ -77,8 +77,7 @@ async def capture_all():
                 failed.append(user)
         except Exception:
             failed.append(user)
-    # 금 기준가격과 해외 벤치마크 갱신의 기존 저녁 관측 시각은 유지한다.
-    await snapshot_nav._save_gold_close()
+    # 해외 벤치마크 갱신의 기존 저녁 관측 시각은 유지한다.
     await snapshot_nav._update_benchmark_history()
     if failed:
         raise ValueError(f"장후 평가 {len(failed)}개 포트폴리오 미완료")
