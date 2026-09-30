@@ -13,17 +13,17 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import foreign_dividends
 from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from routes import admin as admin_route
+from services.dividends import foreign as foreign_dividends
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_foreign_dividends_does_not_import_portfolio_route_private_helpers():
-    source = (ROOT / "foreign_dividends.py").read_text(encoding="utf-8")
+    source = (ROOT / "services/dividends/foreign.py").read_text(encoding="utf-8")
 
     assert "from routes.portfolio import" not in source
 
@@ -61,7 +61,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
         return _patch.dict("sys.modules", {"yfinance": fake_yf})
 
     def test_trailing_preferred_when_positive(self):
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
         with self._patch_yf({
             "trailingAnnualDividendRate": 1.03, "dividendRate": 1.04,
             "yield": 0.004, "regularMarketPrice": 270.0, "currency": "USD",
@@ -71,7 +71,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
         self.assertEqual(r["currency"], "USD")
 
     def test_forward_used_when_trailing_zero(self):
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
         with self._patch_yf({
             "trailingAnnualDividendRate": 0.0, "dividendRate": 2264.0,
             "currency": "KRW",
@@ -85,7 +85,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
     def test_yield_times_price_used_when_trailing_and_forward_missing(self):
         """핵심 회귀: 83199.HK 처럼 trailing=0, forward 없음, yield 만
         있는 채권 ETF. yield × price 로 역산해야 함."""
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
         with self._patch_yf({
             "trailingAnnualDividendRate": 0.0,
             "yield": 0.0345, "regularMarketPrice": 104.75,
@@ -98,7 +98,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
 
     def test_yield_fallback_uses_current_price_or_previous_close(self):
         """regularMarketPrice 가 없으면 currentPrice / previousClose 순으로 fallback."""
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
         with self._patch_yf({
             "trailingAnnualDividendRate": None,
             "yield": 0.04, "previousClose": 100.0,
@@ -109,7 +109,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
 
     def test_all_zero_stays_zero(self):
         """trailing=0 forward 없음 yield=0 → 0.0 ('확정 배당 없음')."""
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
         with self._patch_yf({
             "trailingAnnualDividendRate": 0.0,
             "yield": 0.0, "regularMarketPrice": 100.0,
@@ -125,7 +125,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
         from unittest.mock import MagicMock
         from unittest.mock import patch as _patch
 
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
 
         def make_ticker_factory():
             call_log = []
@@ -166,7 +166,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
 
         import pandas as pd
 
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
 
         # 최근 1년 내 4회 지급 (총 1.4874)
         now = pd.Timestamp.now(tz="UTC")
@@ -207,7 +207,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
         from unittest.mock import MagicMock
         from unittest.mock import patch as _patch
 
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
         fake_ticker = MagicMock()
         fake_ticker.info = {}
         fake_yf = MagicMock()
@@ -217,7 +217,7 @@ class FetchOneResolutionOrderTests(unittest.TestCase):
         self.assertIsNone(r)
 
     def test_currency_defaults_to_usd(self):
-        import foreign_dividends as fd
+        from services.dividends import foreign as fd
         with self._patch_yf({
             "trailingAnnualDividendRate": 1.0,
             "longName": "Weird Inc", "regularMarketPrice": 10.0,

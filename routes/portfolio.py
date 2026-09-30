@@ -969,7 +969,7 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
             if existing_div is None:
                 async def _bg_fetch_dividend(code: str):
                     try:
-                        import foreign_dividends
+                        from services.dividends import foreign as foreign_dividends
                         await foreign_dividends.refresh_foreign_dividends([code])
                     except Exception as exc:
                         logger.warning("auto foreign dividend fetch failed (%s): %s", code, exc)

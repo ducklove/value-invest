@@ -2,7 +2,7 @@
 
 Scope limited to foreign stocks because:
   * Korean stocks are covered by the market_data pipeline (stock_price.py)
-  * Preferred stocks have their own curated sheet (preferred_dividends.py)
+  * Preferred stocks have their own curated sheet (services/dividends/preferred.py)
   * Cash / gold / crypto obviously have no dividend concept
 
 We write the trailingAnnualDividendRate (last 12 months actual payouts in

@@ -1160,7 +1160,7 @@ async def refresh_foreign_dividends_endpoint(request: Request):
     dividend 를 일괄 fetch + KRW 환산 + upsert. source='manual' 인
     수동 override 는 건드리지 않음."""
     user = await _require_admin_mutation(request)
-    import foreign_dividends
+    from services.dividends import foreign as foreign_dividends
     result = await foreign_dividends.refresh_foreign_dividends()
     result["total_cached"] = await foreign_dividends_repo.get_foreign_dividends_count()
     await observability.record_event(
