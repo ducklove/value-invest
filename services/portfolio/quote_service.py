@@ -83,6 +83,14 @@ async def fetch_external_quote_for_stock_service(stock_code: str) -> dict:
         await foreign.ensure_ticker_map()
         ticker = foreign._ticker_map.get(stock_code, stock_code)
         q = await foreign.fetch_foreign_quote(ticker)
+        if ticker != stock_code:
+            if q:
+                foreign.note_mapped_quote_ok(stock_code)
+            elif await foreign.heal_stale_mapping(stock_code, ticker):
+                # 죽은 매핑(예: AAPL → AAPL.DE)을 지웠다 — 원래 코드로 한 번 더
+                # 조회하고, 그래도 없으면 아래에서 다시 해석한다.
+                ticker = stock_code
+                q = await foreign.fetch_foreign_quote(ticker)
         if not q and ticker == stock_code:
             resolved = await foreign.resolve_foreign_reuters(stock_code)
             if resolved and resolved != stock_code:

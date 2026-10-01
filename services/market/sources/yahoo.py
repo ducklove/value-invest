@@ -27,6 +27,12 @@ provider 를 거친다.
 ``previous_close()`` 의 우선순위 — ``chartPreviousClose`` 는 "조회 구간 시작
 직전 종가" 라 ``range=1d`` 일 때만 전일 종가와 같다. 다일 구간에서는
 ``previousClose`` 만 전일 종가로 본다.
+
+상장 여부 — ``probe_listing()`` 은 심볼이 있음/없음/모름(present/absent/unknown)을
+가른다. 없음은 404·``chart.error`` "Not Found"·통화·가격·봉이 전혀 없는 빈 껍데기
+응답뿐이고, 시간 초과·5xx·429·쿨다운은 모름이다. ``fetch_chart_json()`` 은 모든
+chart 조회에서 없음 증거를 ``MISSING_SYMBOL_TTL_SECONDS`` 동안 남겨
+(``symbol_missing()``), 호출부가 방금 실패한 조회의 원인을 추가 호출 없이 안다.
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from cache_layer import MemoryTTLCache
 from core.errors import RateLimitError
 from core.http import get_http_client
 
@@ -62,6 +69,13 @@ RETRY_BASE_DELAY = 1.0
 MAX_INLINE_RETRY_DELAY = 3.0
 COOLDOWN_SECONDS = 30.0
 MAX_COOLDOWN_SECONDS = 300.0
+
+LISTING_PRESENT = "present"
+LISTING_ABSENT = "absent"
+LISTING_UNKNOWN = "unknown"
+# chart 조회가 "그런 심볼 없음"을 돌려준 증거를 남겨 두는 시간.
+MISSING_SYMBOL_TTL_SECONDS = 900.0
+_missing_symbols = MemoryTTLCache("yahoo.missing_symbol", MISSING_SYMBOL_TTL_SECONDS, evict_expired_after=0)
 
 _cooldown_until = 0.0
 # asyncio.Semaphore 는 처음 대기한 이벤트 루프에 묶인다. 운영은 루프 1개지만
@@ -97,6 +111,23 @@ def reset_rate_limit_state() -> None:
     """테스트·운영 도구용: 쿨다운을 해제한다."""
     global _cooldown_until
     _cooldown_until = 0.0
+
+
+def symbol_missing(symbol: str, *, max_age_seconds: float | None = None) -> bool:
+    """최근 ``MISSING_SYMBOL_TTL_SECONDS``(또는 ``max_age_seconds``) 안에 이 심볼의
+    chart 조회가 "없음"(404·Not Found·빈 껍데기)이었고 그 뒤로 정상 응답이 없었는가."""
+    key = (symbol or "").strip()
+    if not _missing_symbols.get(key):
+        return False
+    if max_age_seconds is None:
+        return True
+    age = _missing_symbols.age_seconds(key)
+    return age is not None and age <= max_age_seconds
+
+
+def reset_missing_symbols() -> None:
+    """테스트용: 없음 증거를 지운다."""
+    _missing_symbols.clear()
 
 
 def _start_cooldown(retry_after: float | None) -> float:
@@ -179,10 +210,19 @@ async def fetch_chart_json(
         params["includePrePost"] = "true" if include_pre_post else "false"
     if events:
         params["events"] = events
-    response = await _get(chart_url(symbol), params=params, client=client, timeout=timeout)
+    try:
+        response = await _get(chart_url(symbol), params=params, client=client, timeout=timeout)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            _missing_symbols.set(symbol, True)
+        raise
     payload = response.json()
     if not isinstance(payload, dict):
         raise ValueError("Yahoo chart 응답 형식 변경")
+    if classify_listing(payload) == LISTING_ABSENT:
+        _missing_symbols.set(symbol, True)
+    else:
+        _missing_symbols.delete(symbol)
     return payload
 
 
@@ -280,6 +320,51 @@ def _positive(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) and number > 0 else None
+
+
+def classify_listing(payload: Any) -> str:
+    """2xx chart 응답 → ``LISTING_PRESENT``/``ABSENT``/``UNKNOWN``.
+
+    없음: ``chart.error.code`` 가 "Not Found" 이거나, 결과는 있는데 통화·가격·봉·
+    거래 시각이 하나도 없는 빈 껍데기다 — Yahoo 는 모르는 나스닥형 심볼(THF, GOO)에
+    404 대신 이런 ECNQUOTE 결과를 준다. 있음: 통화와 가격(또는 봉)이 있다.
+    그 밖의 애매한 모양은 모름이다."""
+    chart = payload.get("chart") if isinstance(payload, dict) else None
+    if not isinstance(chart, dict):
+        return LISTING_UNKNOWN
+    error = chart.get("error")
+    if isinstance(error, dict) and str(error.get("code") or "").strip().lower() == "not found":
+        return LISTING_ABSENT
+    results = chart.get("result")
+    if not isinstance(results, list) or not results or not isinstance(results[0], dict):
+        return LISTING_UNKNOWN
+    result = results[0]
+    meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+    has_bars = bool(result.get("timestamp"))
+    has_price = _positive(meta.get("regularMarketPrice")) is not None
+    if meta.get("currency") and (has_price or has_bars):
+        return LISTING_PRESENT
+    if not meta.get("currency") and not has_price and not has_bars and not meta.get("regularMarketTime"):
+        return LISTING_ABSENT
+    return LISTING_UNKNOWN
+
+
+async def probe_listing(symbol: str, *, timeout: Any = DEFAULT_TIMEOUT) -> str:
+    """Yahoo 심볼의 상장 여부 — chart 1회(5d). 404·Not Found·빈 껍데기만 없음,
+    시간 초과·5xx·429·쿨다운·형식 오류는 모름(``LISTING_UNKNOWN``)이다."""
+    symbol = (symbol or "").strip()
+    if not symbol:
+        return LISTING_UNKNOWN
+    try:
+        payload = await fetch_chart_json(
+            symbol, range_="5d", interval="1d", include_pre_post=False, timeout=timeout,
+        )
+    except httpx.HTTPStatusError as exc:
+        return LISTING_ABSENT if exc.response.status_code == 404 else LISTING_UNKNOWN
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.info("Yahoo 상장 확인 실패 (%s): %s", symbol, exc)
+        return LISTING_UNKNOWN
+    return classify_listing(payload)
 
 
 def previous_close(meta: dict, *, single_day_range: bool) -> float | None:

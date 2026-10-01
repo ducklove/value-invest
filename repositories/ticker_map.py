@@ -24,3 +24,17 @@ async def save_ticker(stock_code: str, resolved_ticker: str):
                ON CONFLICT(stock_code) DO UPDATE SET resolved_ticker = excluded.resolved_ticker, updated_at = excluded.updated_at""",
             (stock_code, resolved_ticker, datetime.now().isoformat()),
         )
+
+
+async def delete_ticker(stock_code: str, *, expected_ticker: str | None = None) -> bool:
+    """매핑 한 줄을 지운다. ``expected_ticker`` 를 주면 저장값이 그 티커일 때만
+    지워(그 사이 다른 경로가 새로 해석해 저장한 값은 건드리지 않는다). 지웠으면 True."""
+    async with transaction() as db:
+        if expected_ticker is None:
+            cursor = await db.execute("DELETE FROM ticker_map WHERE stock_code = ?", (stock_code,))
+        else:
+            cursor = await db.execute(
+                "DELETE FROM ticker_map WHERE stock_code = ? AND resolved_ticker = ?",
+                (stock_code, expected_ticker),
+            )
+        return (cursor.rowcount or 0) > 0

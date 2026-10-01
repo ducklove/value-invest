@@ -23,6 +23,7 @@ from functools import partial
 import httpx
 
 from cache_layer import MemoryTTLCache
+from core.errors import DBError
 from core.http import get_http_client
 from domain.portfolio_codes import is_hong_kong_rmb_counter
 from repositories import corp_codes
@@ -35,6 +36,9 @@ from services.portfolio.identifiers import (
 )
 from services.portfolio.identifiers import (
     is_korean_stock as _is_korean_stock,
+)
+from services.portfolio.identifiers import (
+    is_plain_us_ticker as _is_plain_us_ticker,
 )
 from services.portfolio.identifiers import (
     is_special_asset as _is_special_asset,
@@ -87,6 +91,23 @@ _FOREIGN_SEARCH_QUOTE_TYPES = {"EQUITY", "ETF", "MUTUALFUND"}
 # block a ticker until the next server restart; it self-heals after the TTL.
 _FAILED_YF_TTL = 300
 _failed_yf_cache = MemoryTTLCache("portfolio.failed_yf", _FAILED_YF_TTL, evict_expired_after=0)
+
+# 미국식 티커(AAPL, BRK-B)의 미국 상장 "없음"이 확인된 코드. 이때만 해외 접미사
+# 매핑(…DE, …L)을 허용한다 — 미국 조회가 시간 초과·429 로 실패했을 뿐인데 해외
+# 접미사로 넘어가 AAPL → AAPL.DE 가 영구 저장됐던 사고를 막는다.
+_us_listing_absent_cache = MemoryTTLCache("portfolio.us_listing_absent", _FAILED_YF_TTL, evict_expired_after=0)
+# ticker_map 자가 치유. 저장된 매핑 티커가 시세 체인 전체 실패 + Yahoo "없음"으로
+# 두 번(최소 간격 _MAPPING_STRIKE_MIN_GAP, 창 _MAPPING_STRIKE_WINDOW 안) 확인되면
+# 매핑을 지운다. 지운 티커는 _DEAD_TICKER_TTL 동안 재해석 후보에서 뺀다(되돌이 방지).
+_MAPPING_STRIKE_WINDOW = 1800
+_MAPPING_STRIKE_MIN_GAP = 120
+# "없음" 증거는 방금 실패한 시세 체인이 남긴 것만 센다(체인 전체 상한 ≈ 30초).
+_MAPPING_EVIDENCE_MAX_AGE = 60
+_mapping_strike_cache = MemoryTTLCache("portfolio.ticker_map_strike", _MAPPING_STRIKE_WINDOW, evict_expired_after=0)
+_DEAD_TICKER_TTL = 24 * 3600
+_dead_ticker_cache = MemoryTTLCache("portfolio.ticker_map_dead", _DEAD_TICKER_TTL, evict_expired_after=0)
+# 미국식 티커의 미국 상장 여부를 모를 때 네이버 폴백이 받아도 되는 접미사(미국 거래소).
+_NAVER_US_SUFFIXES = ("", ".O", ".K", ".N")
 
 
 _ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 -> A200.AX)
@@ -213,7 +234,11 @@ async def resolve_foreign_name(ticker: str) -> str | None:
 async def yfinance_find_ticker(ticker: str) -> str | None:
     """Find a working yfinance ticker, trying various exchange suffixes.
     Bounded by the yfinance runner and a per-call timeout; results (positive and negative)
-    are cached to avoid re-running the suffix loop on every quote refresh."""
+    are cached to avoid re-running the suffix loop on every quote refresh.
+
+    미국식 티커(AAPL, BRK-B)는 Yahoo chart 로 미국 상장부터 확인한다. 있으면 그
+    심볼, 확실히 없을 때(404·빈 결과)만 해외 접미사를 찾고, 모르면(시간 초과·
+    5xx·429·쿨다운) 아무것도 저장하지 않고 실패 TTL 뒤에 다시 본다."""
     if _is_pseudo_code(ticker):
         return None
     static = _static_foreign_ticker(ticker)
@@ -223,9 +248,21 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
         return _ticker_map[ticker]
     if yf_marked_failed(ticker):
         return None
+    candidates = _yfinance_candidates(ticker)
+    if _is_plain_us_ticker(ticker):
+        us_symbol = _yahoo_symbol(ticker)
+        status = await yahoo.probe_listing(us_symbol)
+        if status == yahoo.LISTING_PRESENT:
+            await save_ticker(ticker, us_symbol)
+            return us_symbol
+        if status != yahoo.LISTING_ABSENT:
+            yf_mark_failed(ticker)
+            return None
+        _us_listing_absent_cache.set(ticker, True)
+        candidates = [c for c in candidates if _yahoo_symbol(c) != us_symbol]
+    candidates = [c for c in candidates if not ticker_known_dead(c)]
     try:
         import yfinance as yf
-        candidates = _yfinance_candidates(ticker)
 
         def _probe(cand):
             t = yf.Ticker(cand)
@@ -294,7 +331,11 @@ async def resolve_foreign_reuters(ticker: str) -> str | None:
         d = await fetch_naver_world_stock(upper)
         if d:
             return d.get("reutersCode") or upper
-    for suffix in _EXCHANGE_SUFFIXES:
+    # 미국식 티커는 미국 상장 "없음"이 확인됐을 때만 해외 거래소 접미사를 받는다.
+    suffixes = _EXCHANGE_SUFFIXES
+    if _is_plain_us_ticker(ticker) and not _us_listing_absent_cache.get(ticker):
+        suffixes = _NAVER_US_SUFFIXES
+    for suffix in suffixes:
         code = upper + suffix if suffix else upper
         d = await fetch_naver_world_stock(code)
         if d:
@@ -659,6 +700,66 @@ async def save_ticker(stock_code: str, resolved: str):
         await ticker_map_repo.save_ticker(stock_code, resolved)
     except Exception as exc:
         logger.warning("Ticker map save failed (%s -> %s): %s", stock_code, resolved, exc)
+
+
+def reset_resolution_state() -> None:
+    """테스트용: 해석·자가 치유의 단기 관측(미국 없음·실패 관측·죽은 티커)을 지운다."""
+    _us_listing_absent_cache.clear()
+    _mapping_strike_cache.clear()
+    _dead_ticker_cache.clear()
+
+
+def ticker_known_dead(ticker: str) -> bool:
+    """자가 치유로 최근 매핑에서 내린 티커인가 — 재해석 후보에서 뺀다."""
+    return bool(_dead_ticker_cache.get(_yahoo_symbol(ticker)))
+
+
+async def drop_ticker(stock_code: str, resolved: str) -> bool:
+    """``stock_code → resolved`` 매핑을 메모리와 DB 에서 지운다. 그 사이 다른
+    경로가 새 값을 저장했으면 그 값은 두고 False."""
+    if _ticker_map.get(stock_code) == resolved:
+        del _ticker_map[stock_code]
+    try:
+        return await ticker_map_repo.delete_ticker(stock_code, expected_ticker=resolved)
+    except DBError as exc:
+        logger.warning("Ticker map delete failed (%s -> %s): %s", stock_code, resolved, exc)
+        return False
+
+
+def note_mapped_quote_ok(stock_code: str) -> None:
+    """매핑 티커로 시세를 받았다 — 쌓인 실패 관측을 지운다."""
+    _mapping_strike_cache.delete(stock_code)
+
+
+async def heal_stale_mapping(stock_code: str, mapped: str) -> bool:
+    """매핑 티커로 시세 체인(KIS·Yahoo·네이버)이 전부 실패한 직후 부른다.
+
+    매핑이 원래 코드와 다른 Yahoo 심볼을 가리키고, 방금 그 심볼의 chart 가
+    "없음"(404·빈 결과)이었다면 실패 관측으로 센다. 관측이 최소 간격
+    ``_MAPPING_STRIKE_MIN_GAP`` 이상 떨어져 창 ``_MAPPING_STRIKE_WINDOW`` 안에서
+    두 번 쌓이면 매핑을 지우고 True — 호출부는 원래 코드로 다시 조회·해석한다.
+    판단은 방금 실패한 조회가 남긴 증거만 쓰므로 업스트림 호출을 더 하지 않는다.
+    시간 초과·5xx·429 같은 모름 실패는 세지 않고, 지운 티커는
+    ``_DEAD_TICKER_TTL`` 동안 재해석 후보에서 빠져 같은 매핑으로 되돌지 않는다.
+    """
+    if not mapped or _ticker_map.get(stock_code) != mapped:
+        return False
+    symbol = _yahoo_symbol(mapped)
+    if symbol == _yahoo_symbol(stock_code):
+        return False
+    if not yahoo.symbol_missing(symbol, max_age_seconds=_MAPPING_EVIDENCE_MAX_AGE):
+        return False
+    if _mapping_strike_cache.get(stock_code) != mapped:
+        _mapping_strike_cache.set(stock_code, mapped)
+        logger.info("ticker_map 매핑 실패 관측 1회: %s → %s (Yahoo 에 없음)", stock_code, mapped)
+        return False
+    if (_mapping_strike_cache.age_seconds(stock_code) or 0.0) < _MAPPING_STRIKE_MIN_GAP:
+        return False
+    _mapping_strike_cache.delete(stock_code)
+    _dead_ticker_cache.set(symbol, True)
+    await drop_ticker(stock_code, mapped)
+    logger.warning("ticker_map 자가 치유: %s → %s 매핑 삭제 (Yahoo 에 없음, 시세 연속 실패)", stock_code, mapped)
+    return True
 
 
 async def detect_currency(stock_code: str) -> str:

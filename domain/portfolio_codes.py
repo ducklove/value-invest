@@ -87,3 +87,20 @@ def yahoo_symbol(code: str | None) -> str:
     if alias:
         return f"{root}.{alias}"
     return _yahoo_class_share(symbol)
+
+
+# 거래소 접미사 없는 미국식 티커의 Yahoo 표기: 영문 1~5자 + 선택적 클래스(-B).
+_PLAIN_US_TICKER_RE = re.compile(r"[A-Z]{1,5}(?:-[A-Z])?")
+
+
+def is_plain_us_ticker(code: str | None) -> bool:
+    """거래소 접미사 없는 미국식 티커인가 — AAPL, BRK.B·BRK-B·BRK/B, GOOGL.O.
+
+    Yahoo 표기로 바꾼 뒤(미국 Reuters 접미사 제거, 클래스 주식 대시) 영문 1~5자
+    (+클래스 한 글자)만 남는 코드다. 거래소 접미사(BP.L, EUN2.DE, VNM.HM),
+    숫자가 섞인 코드(국내 6자리, 홍콩·일본 숫자 코드, A200·EUN2), 가상 코드는
+    아니다. 이런 코드는 미국 상장을 먼저 찾아야 한다 — 미국 조회가 일시적으로
+    실패했다고 독일·런던 등 해외 접미사로 넘어가면 AAPL → AAPL.DE 같은 엉뚱한
+    매핑이 영구히 남는다.
+    """
+    return bool(_PLAIN_US_TICKER_RE.fullmatch(yahoo_symbol(code)))
