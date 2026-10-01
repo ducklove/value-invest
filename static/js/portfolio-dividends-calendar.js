@@ -122,25 +122,44 @@ function _pfDivCalShortDay(value) {
   return m ? `${Number(m[1])}/${Number(m[2])}` : String(value || '');
 }
 
+// 기준 시점에 보유했지만 수량을 모르는 이유(quantity_unknown_reason).
+const _PF_DIVCAL_QUANTITY_UNKNOWN = {
+  changed_before_record: '수량 미상(수량 기록 전 매매)',
+  not_recorded: '수량 기록 없음',
+};
+
 // 지난 배당의 보유 근거(문자열, 호출부에서 escape). 미래·예상(현재 보유)은 빈 문자열.
 // snapshot: '보유 120주 · 9/24 기준', earliest_snapshot: '기록 시작(3/31) 보유 기준',
-// 수량을 다른 날 정산에서 가져왔으면 '(수량 6/30 기록)'을 붙인다.
+// 수량을 다른 날 정산에서 가져왔으면 '(수량 6/30 기록)', 수량을 모르면 '보유 · 수량 미상(수량 기록 전 매매)'.
 function _pfDivCalHolding(ev) {
   const hasShares = ev.shares !== null && ev.shares !== undefined && Number.isFinite(Number(ev.shares));
-  const quantity = hasShares ? `보유 ${Number(ev.shares).toLocaleString()}주` : '보유 수량 미상';
+  const unknown = _PF_DIVCAL_QUANTITY_UNKNOWN[ev.quantity_unknown_reason] || '수량 미상';
   const quantityNote = ev.quantity_as_of ? ` (수량 ${_pfDivCalShortDay(ev.quantity_as_of)} 기록)` : '';
-  if (ev.holding_basis === 'snapshot') return `${quantity}${quantityNote} · ${_pfDivCalShortDay(ev.holding_as_of)} 기준`;
-  if (ev.holding_basis === 'earliest_snapshot') return `기록 시작(${_pfDivCalShortDay(ev.holding_as_of)}) 보유 기준${quantityNote}`;
+  const day = _pfDivCalShortDay(ev.holding_as_of);
+  if (ev.holding_basis === 'snapshot') {
+    return `${hasShares ? `보유 ${Number(ev.shares).toLocaleString()}주${quantityNote}` : `보유 · ${unknown}`} · ${day} 기준`;
+  }
+  if (ev.holding_basis === 'earliest_snapshot') return `기록 시작(${day}) 보유 기준${hasShares ? quantityNote : ` · ${unknown}`}`;
   if (ev.holding_basis === 'current_fallback') return '보유 기록 없음 · 현재 수량 기준';
   return '';
 }
 
+// 보유 근거 줄의 title: 배당 기준(규칙)과 실제로 쓴 정산일. reference_date는 '그 이하 마지막 정산'의 상한일 뿐이라
+// 주말·휴장일이거나 배당락일 당일(미국·유럽)일 수 있다.
 function _pfDivCalHoldingTitle(ev) {
   if (!ev.reference_date) return '';
-  const rules = { krx_record_t2: '기준일 2거래일 전 종가', ex_date_prev_day: '배당락 전 거래일 종가',
-    ex_date_same_day: '배당락 전 거래일 종가', record_date: '해외 기준일, 근사', pay_date: '지급일 전날, 근사' };
+  const rules = {
+    krx_record_t2: '배당기준일 2거래일 전 종가 보유(T+2 결제)',
+    ex_date_prev_day: '배당락 전 거래일 종가 보유',
+    ex_date_same_day: '현지 배당락 전 거래일 종가 보유(그 장은 배당락일 KST 정산에 반영)',
+    record_date: '해외 기준일로 근사',
+    pay_date: '지급일 전날로 근사',
+  };
   const rule = rules[ev.reference_rule] || '근사';
-  return `배당 기준 시점 ${ev.reference_date}(${rule}) 이하 마지막 장 마감 정산의 보유입니다.`;
+  const used = ev.holding_basis === 'earliest_snapshot'
+    ? `기록 시작 전이라 첫 장 마감 정산(${ev.holding_as_of})의 보유로 추정합니다.`
+    : `${ev.reference_date} 이하 마지막 장 마감 정산(${ev.holding_as_of || '-'})의 보유입니다.`;
+  return `배당 기준: ${rule}. ${used}${ev.quantity_as_of ? ` 수량은 ${ev.quantity_as_of} 정산 기록입니다.` : ''}`;
 }
 
 function _pfDivCalCheckedDay(value) {
@@ -207,7 +226,7 @@ function _pfDivCalMonthHtml(monthRow, eventsByMonth, todayMonth, todayIso) {
   const head = `<div class="${rowCls}" data-month="${escapeHtml(month)}"${empty ? '' : ` onclick="pfDivCalToggleMonth('${escapeHtml(month)}')"`}>
     <span class="pf-divcal-caret">${empty ? '·' : (open ? '▾' : '▸')}</span>
     <span class="pf-divcal-month-label">${_pfDivCalMonthLabel(month)}${isNow ? ' <span class="pf-divcal-sub">(이번 달)</span>' : ''}</span>
-    <span class="pf-divcal-month-total">${events.length ? `${events.length}건 · ` : ''}${total}${monthRow.unconverted_count ? ' + 환산 미확인' : ''}${monthRow.announced_krw > 0 || monthRow.estimated_krw > 0 || monthRow.nh_only_krw > 0 ? `<span class="pf-divcal-sub">공시 ${fmtKrw(monthRow.announced_krw || 0)}원 · 예상 ${fmtKrw(monthRow.estimated_krw || 0)}원${monthRow.nh_only_krw > 0 ? ` · NH 입금 ${fmtKrw(monthRow.nh_only_krw)}원` : ''}</span>` : ''}</span>
+    <span class="pf-divcal-month-total">${events.length ? `${events.length}건 · ` : ''}${total}${monthRow.unconverted_count ? ' + 환산 미확인' : ''}${monthRow.quantity_unknown_count ? ' + 수량 미상' : ''}${monthRow.announced_krw > 0 || monthRow.estimated_krw > 0 || monthRow.nh_only_krw > 0 ? `<span class="pf-divcal-sub">공시 ${fmtKrw(monthRow.announced_krw || 0)}원 · 예상 ${fmtKrw(monthRow.estimated_krw || 0)}원${monthRow.nh_only_krw > 0 ? ` · NH 입금 ${fmtKrw(monthRow.nh_only_krw)}원` : ''}</span>` : ''}</span>
   </div>`;
   if (empty) return head;
   const list = `<div class="pf-divcal-events" data-month-events="${escapeHtml(month)}" style="display:${open ? '' : 'none'};">

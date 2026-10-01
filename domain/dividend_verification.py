@@ -372,11 +372,12 @@ def link_calendar(events: list[dict], records: list[dict], receipts: list[dict],
     3) 연결되면 금액으로 판정한다(amount_covers): NH 세전 합계가 주당 배당 × 기준 시점 수량을 덮으면 NH 확인,
        수량이 그 시점 그대로(exact_quantity)인데 뚜렷이 적으면 NH 일부 확인(다른 계좌 몫이 있다). 비교할 수 없거나
        (금액·수량 모름, 통화 다름) 근사 수량에서 적으면 현재 NH 연동 계좌에만 보유한 종목(nh_only)은 NH 확인,
-       그 밖은 NH 일부 확인(nh_only=None이면 전부 확인).
+       그 밖은 NH 일부 확인(nh_only=None이면 전부 확인). 지금 보유하지 않는 종목(held_now False — 매도)은 현재 계좌
+       구성이 그때를 말해 주지 않으므로 NH 확인이다(매도 종목이 일정에 없을 때 그런 입금은 확인된 'NH 입금' 행이었다).
        NH로 확인된 수동 수취가 일정 source_key에 연결돼 있으면 금액과 관계없이 NH 확인이다.
     4) 연결이 없을 때: 지난 지급일(오늘 전)은 미확인. 배당락·기준일은 NH 연동 계좌에만 보유한 종목이고 대기 범위
-       (배당락 +60일, 기준일·국내 +130일)가 지났으며, 그 시점 보유가 정산 기록으로 확인됐거나(holding_basis 'snapshot')
-       그 전에 같은 종목 NH 배당이 있었을 때만 미확인, 그 밖은 None.
+       (배당락 +60일, 기준일·국내 +130일)가 지났으며 그 권리일 전에 같은 종목 NH 배당이 있었을 때만 미확인, 그 밖은
+       None. 정산 기록은 전 계좌 합산이라 그때 NH 계좌에 있었는지는 말해 주지 않는다(nh_only는 지금 기준).
     """
     pairs = _pair_indexes(receipts, records)
     receipt_keys = {receipts[i].get("source_key"): j for i, j in pairs.items() if receipts[i].get("source_key")}
@@ -461,7 +462,7 @@ def link_calendar(events: list[dict], records: list[dict], receipts: list[dict],
             elif covers is False and exact_quantity(ev):
                 whole = False
             else:
-                whole = nh_only is None or str(ev.get("stock_code") or "") in nh_only
+                whole = nh_only is None or ev.get("held_now") is False or str(ev.get("stock_code") or "") in nh_only
             out.append({**ev, "verification": NH_CONFIRMED if whole else NH_PARTIAL, "nh_match": group_evidence(group),
                         "paid_date": group[0].get("date")})
         elif i in payments:
@@ -470,9 +471,9 @@ def link_calendar(events: list[dict], records: list[dict], receipts: list[dict],
         elif i in rights:
             day = _day(ev["date"])
             waited = day + timedelta(days=_wait_days(ev)) < today
-            # 그 시점 보유가 정산 기록으로 확인된 행이거나, 그 전에 같은 종목 NH 배당을 받은 적이 있을 때만
-            # (그때도 NH로 보유) 받을 배당을 못 본 것으로 판정한다. 첫 정산 근사·정산 기록 없는 행은 단정하지 않는다.
-            held = ev.get("holding_basis") == "snapshot" or any(days[j] < day for j in of_stock(i))
+            # 그 전에 같은 종목 NH 배당을 받은 적이 있을 때만(그때도 NH로 보유) 받을 배당을 못 본 것으로 판정한다.
+            # 정산 기록(전 계좌 합산)의 보유는 NH 계좌 보유를 뜻하지 않는다 — nh_only는 지금 계좌 구성이다.
+            held = any(days[j] < day for j in of_stock(i))
             missing = waited and held and nh_only is not None and str(ev.get("stock_code") or "") in nh_only
             out.append({**ev, "verification": UNCONFIRMED if missing else None, "nh_match": None})
         else:

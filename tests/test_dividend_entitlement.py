@@ -4,6 +4,8 @@ import unittest
 from datetime import date
 
 from domain.dividend_entitlement import (
+    QUANTITY_CHANGED,
+    QUANTITY_NOT_RECORDED,
     HoldingHistory,
     entitlement,
     holding_identity,
@@ -14,9 +16,13 @@ from domain.dividend_entitlement import (
 from domain.market_calendar import is_trading_day
 
 
-def rows(table: dict) -> list[dict]:
-    """{날짜: {코드: 수량}} → 정산 행. 수량 None은 수량 기록 전 정산(평가액만 있음)."""
-    return [{"date": day, "stock_code": code, "quantity": qty, "market_value": 1000.0}
+def rows(table: dict, values: dict | None = None) -> list[dict]:
+    """{날짜: {코드: 수량}} → 정산 행. 수량 None은 수량 기록 전 정산(평가액만 있음).
+
+    평가액은 values[(날짜, 코드)], 없으면 1000(가격 변동 없음)이다.
+    """
+    values = values or {}
+    return [{"date": day, "stock_code": code, "quantity": qty, "market_value": values.get((day, code), 1000.0)}
             for day, holdings in table.items() for code, qty in holdings.items()]
 
 
@@ -63,8 +69,13 @@ class ReferencePointTests(unittest.TestCase):
         self.assertEqual(krx_record_entitlement_day(date(2026, 12, 31)), (date(2026, 12, 28), False))
         point = reference_point({"record_date": "2026-09-28", "pay_date": "2026-11-20"}, "005930")
         self.assertEqual((point["date"], point["rule"], point["approximate"]), (date(2026, 9, 22), "krx_record_t2", False))
-        # 휴장일 달력이 없는 연도는 평일로 근사한다.
-        self.assertEqual(krx_record_entitlement_day(date(2025, 12, 31)), (date(2025, 12, 29), True))
+        # 휴장일 달력이 없는 연도는 주말·양력 고정 휴장일·연말 휴장일을 빼서 근사한다:
+        # 2025-12-31(연말 휴장) → 12/30, 2거래일 전 = 12/29, 12/26(12/25 성탄절).
+        self.assertEqual(krx_record_entitlement_day(date(2025, 12, 31)), (date(2025, 12, 26), True))
+        # 12/31이 토요일이면 그 직전 평일(12/30)이 연말 휴장이다: 2022-12-31 기준일 → 12/29 → 12/28, 12/27.
+        self.assertEqual(krx_record_entitlement_day(date(2022, 12, 31)), (date(2022, 12, 27), True))
+        # 양력 고정 휴장일(2025-08-15 금 광복절) 건너뛰기: 8/18(월) 기준일 → 8/14, 8/13.
+        self.assertEqual(krx_record_entitlement_day(date(2025, 8, 18)), (date(2025, 8, 13), True))
 
     def test_overseas_record_and_payment_only_are_approximate(self):
         point = reference_point({"record_date": "2026-09-15"}, "AAPL")
@@ -92,18 +103,17 @@ class HoldingHistoryTests(unittest.TestCase):
         self.assertFalse(history.at("000880", date(2026, 9, 14))["held"])
         self.assertFalse(history.at("005930", date(2026, 9, 14))["held"])
 
-    def test_single_snapshot_gap_is_filled_with_previous_quantity(self):
-        # 운영 사례: 9/14 하루만 빠졌다가 9/15에 같은 수량으로 다시 보인다.
-        history = HoldingHistory(rows({"2026-09-11": {"003200": 3000, "X": 1}, "2026-09-14": {"X": 1},
-                                       "2026-09-15": {"003200": 3000, "X": 1}}))
-        point = history.at("003200", date(2026, 9, 14))
-        self.assertEqual((point["held"], point["quantity"], point["gap_filled"], point["quantity_as_of"]),
-                         (True, 3000.0, True, "2026-09-11"))
-        # 오래 빠진 종목(매도 후 재매수)은 메우지 않는다.
-        long_gap = {f"2026-05-{d:02d}": {"X": 1} for d in (11, 12, 13, 14, 15, 18, 19, 20, 21)}
-        long_gap["2026-05-11"]["35320K"] = 1
-        long_gap["2026-05-21"]["35320K"] = 1
-        self.assertFalse(HoldingHistory(rows(long_gap)).at("35320K", date(2026, 5, 15))["held"])
+    def test_absent_at_reference_is_not_held_even_if_held_before_and_after(self):
+        # 배당락 전날 팔고 배당락일에 다시 산 왕복 매매(국내 배당소득세 회피 패턴)는 권리가 없다.
+        # 정산은 그 시점 잔고의 전 종목을 쓰므로 하루 빠진 종목을 앞뒤 정산으로 메우지 않는다.
+        history = HoldingHistory(rows({"2026-09-14": {"005930": 100, "X": 1}, "2026-09-15": {"X": 1},
+                                       "2026-09-16": {"005930": 100, "X": 1}}))
+        point = entitlement("005930", {"ex_date": "2026-09-16"}, date(2026, 10, 1), history, 100.0)
+        self.assertEqual((point["held"], point["holding_as_of"], point["excluded_reason"]),
+                         (False, "2026-09-15", "not_held_at_reference"))
+        us = HoldingHistory(rows({"2026-09-14": {"VOO": 10, "X": 1}, "2026-09-15": {"X": 1},
+                                  "2026-09-16": {"VOO": 10, "X": 1}}))
+        self.assertFalse(entitlement("VOO", {"ex_date": "2026-09-15"}, date(2026, 10, 1), us, 10.0)["held"])
 
     def test_legacy_rows_without_quantity_take_nearest_known_quantity(self):
         history = HoldingHistory(rows({"2026-06-26": {"SCHP.O": None}, "2026-06-29": {"SCHP.O": None},
@@ -115,6 +125,41 @@ class HoldingHistoryTests(unittest.TestCase):
         # 평가액이 없는 수량 미기록 행은 보유가 아니다.
         empty = HoldingHistory([{"date": "2026-06-26", "stock_code": "SCHP", "quantity": None, "market_value": 0}])
         self.assertFalse(empty.at("SCHP", date(2026, 6, 26))["held"])
+
+    def test_quantity_is_not_carried_across_a_trade_visible_in_market_value(self):
+        # 운영 사례(SCHP): 6/8 평가액 0.80배(8,000 → 6,500주 매도). 6/30 수량 6,500을 그 전 배당에 쓰지 않는다.
+        table = {"2026-06-05": {"SCHP": None}, "2026-06-08": {"SCHP": None}, "2026-06-30": {"SCHP": 6500}}
+        values = {("2026-06-05", "SCHP"): 8_000_000.0, ("2026-06-08", "SCHP"): 6_400_000.0, ("2026-06-30", "SCHP"): 6_500_000.0}
+        history = HoldingHistory(rows(table, values))
+        before = history.at("SCHP", date(2026, 6, 5))
+        self.assertEqual((before["held"], before["quantity"], before["quantity_as_of"], before["quantity_unknown"]),
+                         (True, None, None, QUANTITY_CHANGED))
+        after = history.at("SCHP", date(2026, 6, 8))
+        self.assertEqual((after["quantity"], after["quantity_as_of"], after["quantity_unknown"]), (6500.0, "2026-06-30", None))
+        # 국내: 가격제한폭(±30%) 밖의 하루 변화(0.69배)는 매매다. 제한폭 안(0.75배)은 가격으로 보고 수량을 옮긴다.
+        for ratio, quantity in ((0.69, None), (0.75, 400.0)):
+            kr = HoldingHistory(rows({"2026-06-12": {"051915": None}, "2026-06-15": {"051915": None}, "2026-06-30": {"051915": 400}},
+                                     {("2026-06-12", "051915"): 100.0, ("2026-06-15", "051915"): 100.0 * ratio,
+                                      ("2026-06-30", "051915"): 100.0 * ratio}))
+            self.assertEqual(kr.at("051915", date(2026, 6, 12))["quantity"], quantity, ratio)
+        # 정산 사이 평일이 여럿이면 하루 한계를 거듭제곱한다(4/1·4/2 정산 없음: 3/31 → 4/3, 0.6배는 3거래일 하락 안).
+        gap = HoldingHistory(rows({"2026-03-31": {"005930": None}, "2026-04-03": {"005930": None}, "2026-06-30": {"005930": 10}},
+                                  {("2026-03-31", "005930"): 100.0, ("2026-04-03", "005930"): 60.0, ("2026-06-30", "005930"): 60.0}))
+        self.assertEqual(gap.at("005930", date(2026, 3, 31))["quantity"], 10.0)
+        # 해외: 1.25배(A200 4/21 운영 사례)는 매매, 1.15배는 가격 변동으로 본다.
+        for ratio, quantity in ((1.25, None), (1.15, 200.0)):
+            au = HoldingHistory(rows({"2026-04-20": {"A200.AX": None}, "2026-04-21": {"A200.AX": None}, "2026-06-30": {"A200.AX": 200}},
+                                     {("2026-04-20", "A200.AX"): 100.0, ("2026-04-21", "A200.AX"): 100.0 * ratio,
+                                      ("2026-06-30", "A200.AX"): 100.0 * ratio}))
+            self.assertEqual(au.at("A200.AX", date(2026, 4, 20))["quantity"], quantity, ratio)
+
+    def test_sold_before_quantities_were_recorded_has_unknown_quantity(self):
+        history = HoldingHistory(rows({"2026-03-31": {"028260": None, "X": 1}, "2026-04-09": {"028260": None, "X": 1},
+                                       "2026-04-10": {"X": 1}, "2026-06-30": {"X": 1}}))
+        point = history.at("028260", date(2026, 3, 31))
+        self.assertEqual((point["held"], point["quantity"], point["quantity_unknown"]), (True, None, QUANTITY_NOT_RECORDED))
+        row = entitlement("028260", {"record_date": "2026-03-31", "pay_date": "2026-04-17"}, date(2026, 10, 1), history, None)
+        self.assertEqual((row["held"], row["quantity"], row["quantity_unknown_reason"]), (True, None, QUANTITY_NOT_RECORDED))
 
 
 class EntitlementTests(unittest.TestCase):

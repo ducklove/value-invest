@@ -338,12 +338,18 @@ test('지난 배당은 기준 시점 보유 근거와 매도 태그를 보여 �
     { date: '2026-09-20', stock_code: '005930', stock_name: '삼성전자', label: '분기배당 · 지급일', type: 'payment', date_kind: 'payment',
       date_status: 'announced', amount_per_share: 370, currency: 'KRW', shares: null, expected_amount_krw: null, confirmed: true,
       cashflow: true, holding_basis: 'snapshot', holding_as_of: '2026-06-26', reference_date: '2026-06-26',
-      reference_rule: 'krx_record_t2', held_now: true, source_key: '005930:ex_date:2026-06-30' },
+      reference_rule: 'krx_record_t2', held_now: true, quantity_unknown_reason: 'changed_before_record',
+      source_key: '005930:ex_date:2026-06-30' },
+    { date: '2026-09-28', stock_code: '000660', stock_name: 'SK하이닉스', label: '배당락일 · 지급일 미확인', type: 'ex_date',
+      date_kind: 'ex_date', date_status: 'observed', amount_per_share: 375, currency: 'KRW', shares: 7, expected_amount_krw: 2625,
+      confirmed: false, holding_basis: 'snapshot', holding_as_of: '2026-09-23', reference_date: '2026-09-27',
+      reference_rule: 'ex_date_prev_day', held_now: true, source_key: '000660:ex_date:2026-09-28' },
     { date: '2026-10-09', stock_code: 'AGNC', stock_name: 'AGNC', label: '월배당 · 지급일', type: 'payment', date_kind: 'payment',
       date_status: 'announced', amount_per_share: 0.12, currency: 'USD', shares: 10, expected_amount_krw: 1680, confirmed: true,
       cashflow: true, holding_basis: 'current', held_now: true, source_key: 'AGNC:ex_date:2026-09-30' },
   ];
-  payload.monthly = [{ month: '2026-08', total_krw: 0, count: 1 }, { month: '2026-09', total_krw: 11340, count: 3 },
+  payload.monthly = [{ month: '2026-08', total_krw: 0, count: 1 },
+    { month: '2026-09', total_krw: 11340, count: 4, quantity_unknown_count: 1, unconverted_count: 0 },
     { month: '2026-10', total_krw: 1680, count: 1 }];
   payload.coverage = [{ stock_code: 'O', stock_name: '리얼티인컴', held: false, frequency_label: '월배당', status: 'fresh', has_payment_dates: true }];
   payload.summary = { ...payload.summary, not_held_count: 3 };
@@ -357,7 +363,13 @@ test('지난 배당은 기준 시점 보유 근거와 매도 태그를 보여 �
 
   const googl = find('구글');
   assert.equal(holding(googl).textContent, '보유 10주 · 9/8 기준');
-  assert.match(holding(googl).title, /배당 기준 시점 2026-09-08\(배당락 전 거래일 종가\)/);
+  // 미국 배당락: 기준 시점이 배당락일 당일이므로 '배당락 전 거래일'이라는 날짜로 쓰지 않는다.
+  assert.match(holding(googl).title, /현지 배당락 전 거래일 종가 보유\(그 장은 배당락일 KST 정산에 반영\)/);
+  assert.match(holding(googl).title, /2026-09-08 이하 마지막 장 마감 정산\(2026-09-08\)/);
+  // 국내 배당락 9/28(월): 상한일 9/27(일)이 아니라 실제로 쓴 정산(9/23, 추석 전)을 보여 준다.
+  const hynix = find('SK하이닉스');
+  assert.equal(holding(hynix).textContent, '보유 7주 · 9/23 기준');
+  assert.match(holding(hynix).title, /배당락 전 거래일 종가 보유\. 2026-09-27 이하 마지막 장 마감 정산\(2026-09-23\)/);
   assert.equal(googl.querySelector('.pf-divcal-badge.sold'), null);
   assert.equal(holding(find('호주 단기채')).textContent, '기록 시작(3/31) 보유 기준 (수량 6/30 기록)');
   const realty = rows.find(row => row.querySelector('.pf-divcal-badge.sold'));
@@ -367,8 +379,12 @@ test('지난 배당은 기준 시점 보유 근거와 매도 태그를 보여 �
   assert.equal(holding(realty).textContent, '보유 30주 · 9/1 기준');
   const samsung = find('삼성전자');
   assert.match(samsung.textContent, /주당 370원 × 수량 미상/);
-  assert.equal(holding(samsung).textContent, '보유 수량 미상 · 6/26 기준');
-  assert.match(holding(samsung).title, /기준일 2거래일 전 종가/);
+  assert.equal(holding(samsung).textContent, '보유 · 수량 미상(수량 기록 전 매매) · 6/26 기준');
+  assert.match(holding(samsung).title, /배당기준일 2거래일 전 종가 보유/);
+  // 수량을 모르는 지급 행은 환율 문제가 아니라 '수량 미상'으로 월 합계에 표시한다.
+  const sept = w.document.querySelector('.pf-divcal-month[data-month="2026-09"] .pf-divcal-month-total').textContent;
+  assert.match(sept, /\+ 수량 미상/);
+  assert.doesNotMatch(sept, /환산 미확인/);
   // 미래 일정(현재 보유)은 보유 근거 줄이 없다.
   const agnc = w.document.querySelector('[data-month-events="2026-10"] .pf-divcal-event');
   assert.equal(holding(agnc), null);

@@ -234,3 +234,29 @@ test('지난 일정은 기준 시점 보유 수량을, 미래·예상 일정은 
     assert.equal(s.el('Quantity').value, '10'); // 예상 일정은 현재 보유 수량
   } finally { await new Promise(resolve => setImmediate(resolve)); s.dom.window.close(); }
 });
+
+test('수량을 다른 날 정산에서 가져왔으면 그 날짜를, 기준 시점 수량을 모르면 현재 수량 대신 빈칸을 둔다', async () => {
+  const borrowed = { stock_code: '005930', stock_name: '삼성전자', date: '2026-04-24', type: 'payment', date_kind: 'payment', confirmed: true,
+    amount_per_share: 370, currency: 'KRW', shares: 5, holding_basis: 'snapshot', holding_as_of: '2026-03-31',
+    quantity_as_of: '2026-06-30', source_key: '005930:record_date:2025-12-31', received: false };
+  const unknown = { stock_code: '005930', stock_name: '삼성전자', date: '2026-04-17', type: 'payment', date_kind: 'payment', confirmed: true,
+    amount_per_share: 361, currency: 'KRW', shares: null, holding_basis: 'snapshot', holding_as_of: '2026-03-31',
+    quantity_unknown_reason: 'changed_before_record', source_key: '005930:record_date:2025-12-30', received: false };
+  const soldRights = { stock_code: '028260', stock_name: '삼성물산', date: '2025-12-31', type: 'record_date', date_kind: 'record_date',
+    confirmed: true, amount_per_share: 2600, currency: 'KRW', shares: null, holding_basis: 'earliest_snapshot', holding_as_of: '2026-03-31',
+    quantity_unknown_reason: 'not_recorded', held_now: false, source_key: '028260:record_date:2025-12-31', received: false };
+  const s = setup(path => path.endsWith('/candidates') ? { events: [borrowed, unknown, soldRights] } : undefined);
+  try {
+    await s.w.pfOpenDividendReceipt(borrowed.source_key);
+    assert.equal(s.el('Quantity').value, '5');
+    assert.match(s.el('ScheduleNote').textContent, /기준 시점 보유 수량\(2026-06-30 기록\)/);
+    await s.w.pfOpenDividendReceipt(unknown.source_key);
+    assert.equal(s.el('Quantity').value, ''); // 지금 10주를 그때 수량처럼 채우지 않는다
+    assert.match(s.el('ScheduleNote').textContent, /기준 시점 수량 기록이 없어 수량은 직접 입력/);
+    assert.doesNotMatch(s.el('ScheduleNote').textContent, /현재 보유 수량/);
+    await s.w.pfOpenDividendReceipt(soldRights.source_key);
+    assert.equal(s.el('Quantity').value, '');
+    assert.match(s.el('ScheduleNote').textContent, /기준 시점 수량 기록이 없어 수량을 비웠습니다/);
+    assert.doesNotMatch(s.el('ScheduleNote').textContent, /현재 보유 수량/);
+  } finally { await new Promise(resolve => setImmediate(resolve)); s.dom.window.close(); }
+});

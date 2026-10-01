@@ -97,8 +97,13 @@ class PointInTimeCalendarTests(TempDbMixin):
         self.data = histories()
         self.records: list[dict] = []
         self.nh_only: set[str] = set()
-        for target, value in (("services.dividend_sources.get_histories",
-                               AsyncMock(side_effect=lambda codes: copy.deepcopy({k: v for k, v in self.data.items() if k in codes}))),
+        self.history_calls: list[tuple[list[str], float | None]] = []
+
+        def get_histories(codes, timeout=None):
+            self.history_calls.append((list(codes), timeout))
+            return copy.deepcopy({k: v for k, v in self.data.items() if k in codes})
+
+        for target, value in (("services.dividend_sources.get_histories", AsyncMock(side_effect=get_histories)),
                               ("services.portfolio.fx.fx_rate_for_currency", AsyncMock(side_effect=lambda c: RATES[c])),
                               ("repositories.broker_activity.dividend_records", AsyncMock(side_effect=lambda user: copy.deepcopy(self.records))),
                               ("repositories.broker_activity.dividend_adjustments", AsyncMock(return_value=[])),
@@ -110,12 +115,13 @@ class PointInTimeCalendarTests(TempDbMixin):
         brief.start()
         self.addCleanup(brief.stop)
 
-    async def snapshots(self, dates=DATES, changes=CHANGES, user="u1", missing_quantity=()):
+    async def snapshots(self, dates=DATES, changes=CHANGES, user="u1", missing_quantity=(), values=None):
+        values = values or {}
         async with transaction() as db:
             for day in dates:
                 for code, qty in holdings_on(day, changes).items():
                     await db.execute("INSERT INTO portfolio_stock_snapshots (google_sub,date,stock_code,market_value,quantity) VALUES (?,?,?,?,?)",
-                                     (user, day, code, 1000.0 * qty, None if (day, code) in missing_quantity else qty))
+                                     (user, day, code, values.get((day, code), 1000.0 * qty), None if (day, code) in missing_quantity else qty))
 
     async def build(self, user="u1"):
         return await cal.build_calendar(user, months_back=2, months_forward=2, today=TODAY)
@@ -222,6 +228,31 @@ class PointInTimeCalendarTests(TempDbMixin):
         self.assertNotIn("AGNC:ex_date:2026-07-31", keys)                        # 매수 전 배당은 후보가 아니다
         self.assertEqual(keys["AGNC:ex_date:2026-09-30"]["shares"], 10.0)
 
+    async def test_sold_histories_only_use_the_time_left_after_held_histories(self):
+        await self.snapshots()
+        await self.build()
+        (held, held_timeout), (sold, sold_timeout) = self.history_calls
+        self.assertEqual(sorted(held), sorted(CURRENT))
+        self.assertIsNone(held_timeout)                    # 보유 종목: 기본 15초 전부
+        self.assertEqual(sorted(sold), ["000660", "O"])    # 매도한 종목: 그 뒤 남은 시간만
+        self.assertTrue(0 <= sold_timeout <= cal.dividend_sources.BATCH_TIMEOUT)
+        self.history_calls.clear()
+        with patch.object(cal, "_clock", side_effect=[100.0, 100.0 + cal.dividend_sources.BATCH_TIMEOUT + 2]):
+            await self.build()
+        self.assertEqual(self.history_calls[1][1], 0.0)    # 보유 종목이 시간을 다 쓰면 매도 종목은 캐시만
+
+    async def test_unknown_reference_quantity_is_counted_apart_from_fx(self):
+        # 9/1 정산에 O 수량이 없고 평가액이 앞뒤 정산(30주)의 5배다. 가격만으로는 설명되지 않으므로(그 사이 매매)
+        # 앞뒤 기록 수량을 9/1 배당에 쓰지 않는다.
+        values = {("2026-09-01", "O"): 150000.0}
+        await self.snapshots(missing_quantity={("2026-09-01", "O")}, values=values)
+        result = await self.build()
+        row = self.rows(result, "O")["2026-09-15"]
+        self.assertEqual((row["shares"], row["expected_amount_krw"], row["quantity_unknown_reason"]),
+                         (None, None, "changed_before_record"))
+        sept = next(m for m in result["monthly"] if m["month"] == "2026-09")
+        self.assertEqual((sept["quantity_unknown_count"], sept["unconverted_count"]), (1, 0))
+
 
 def ex_row(code, day, currency="USD", **extra):
     return {"stock_code": code, "date": day, "ex_date": day, "record_date": None, "date_kind": "ex_date", "type": "ex_date",
@@ -270,12 +301,28 @@ class AmountVerdictTests(TempDbMixin):
         out, unlinked = link_calendar(events, deposit, [], TODAY, {"AAA.AX"})  # 경계가 없으면 +60일 안이라 붙는다
         self.assertEqual((out[0]["paid_date"], unlinked), ("2026-09-15", []))
 
-    def test_rights_row_held_by_record_is_unconfirmed_after_waiting(self):
+    def test_rights_row_needs_an_earlier_nh_dividend_to_be_unconfirmed(self):
         late = date(2026, 11, 15)
         snapshot = ex_row("AAA.AX", "2026-08-03", "AUD", holding_basis="snapshot")
-        out, _ = link_calendar([snapshot], [], [], late, {"AAA.AX"})
-        self.assertEqual(out[0]["verification"], UNCONFIRMED)
-        # 첫 기록 근사·기록 없음 행은 이전 NH 배당이 없으면 단정하지 않는다.
-        for basis in ("earliest_snapshot", "current_fallback"):
+        # 정산 기록(전 계좌 합산)의 보유는 그때 NH 계좌에 있었다는 뜻이 아니다(nh_only는 지금 계좌 구성).
+        for basis in ("snapshot", "earliest_snapshot", "current_fallback"):
             out, _ = link_calendar([{**snapshot, "holding_basis": basis}], [], [], late, {"AAA.AX"})
-            self.assertIsNone(out[0]["verification"])
+            self.assertIsNone(out[0]["verification"], basis)
+        # 그 전에 같은 종목 NH 배당을 받았으면(그때도 NH로 보유) 받을 배당을 못 본 것이다.
+        earlier = [record(1, "2026-06-15", "AAA.AX", 20.0, "AUD")]
+        out, _ = link_calendar([snapshot], earlier, [], late, {"AAA.AX"})
+        self.assertEqual(out[0]["verification"], UNCONFIRMED)
+
+    def test_sold_stock_with_incomparable_amount_is_nh_confirmed(self):
+        # 지금 보유하지 않는 종목은 지금 계좌 구성(nh_only)이 그때를 말해 주지 않는다. 금액으로 판정할 수 없으면
+        # NH 입금을 그 배당으로 본다(예전에는 'NH 입금' 행이었다) — 수취 입력 버튼으로 현금을 이중 기록하지 않게.
+        deposit = [record(1, "2026-09-16", "O", 8.1)]
+        for extra in ({"amount_per_share": None, "shares": 30.0, "holding_basis": "snapshot"},
+                      {"amount_per_share": 0.27, "shares": 40.0, "holding_basis": "snapshot", "quantity_as_of": "2026-06-30"},
+                      {"amount_per_share": 0.27, "shares": None, "holding_basis": "earliest_snapshot"}):
+            out, _ = link_calendar([ex_row("O", "2026-09-01", held_now=False, **extra)], deposit, [], TODAY, set())
+            self.assertEqual(out[0]["verification"], NH_CONFIRMED, extra)
+        # 수량이 그 시점 그대로인데 NH가 뚜렷이 적으면 매도한 종목도 일부 확인이다(다른 계좌 몫).
+        exact = {"amount_per_share": 0.27, "shares": 60.0, "holding_basis": "snapshot"}
+        out, _ = link_calendar([ex_row("O", "2026-09-01", held_now=False, **exact)], deposit, [], TODAY, set())
+        self.assertEqual(out[0]["verification"], NH_PARTIAL)

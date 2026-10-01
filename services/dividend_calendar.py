@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import date, timedelta
 
-from domain.dividend_entitlement import GAP_MAX_DAYS, HoldingHistory, entitlement, holding_identity, reference_point
+from domain.dividend_entitlement import HoldingHistory, entitlement, holding_identity, reference_point
 from domain.dividend_schedule import FREQUENCY_LABELS, calendar_event, event_day, frequency_of, project_events
 from domain.dividend_verification import (
     NH_CONFIRMED,
@@ -33,9 +34,11 @@ from services.portfolio.identifiers import is_special_asset, normalize_portfolio
 from services.portfolio.time_windows import today_kst_date
 
 # 조회 시작보다 이 일수 앞부터 정산에 보유로 남은 종목은 지금 없어도 넣는다(기준 시점 보유 뒤 매도한 종목의 지급 행).
-# 국내 결산배당(12월 기준일 → 4월 지급)이 조회 시작 직후 지급되는 경우를 덮는다.
+# 국내 결산배당(12월 기준일 → 4월 지급)이 조회 시작 직후 지급되는 경우를 덮는다. 이 종목들의 이력은 보유 종목 수집이
+# 끝난 뒤 남은 시간에만 가져온다(_histories).
 SOLD_LOOKBACK_DAYS = 130
-_POINT_FIELDS = ("holding_basis", "holding_as_of", "quantity_as_of", "holding_gap_filled", "reference_date",
+_clock = time.monotonic
+_POINT_FIELDS = ("holding_basis", "holding_as_of", "quantity_as_of", "quantity_unknown_reason", "reference_date",
                  "reference_rule", "reference_approximate")
 
 
@@ -74,6 +77,8 @@ def _monthly_aggregation(events: list[dict], months: list[tuple[int, int]]) -> l
       실제 NH 금액은 더하지 않는다(연결된 배당락·기준일 행은 원래대로 합계 밖).
     - NH 입금 행(date_status 'nh', 어느 일정에도 연결되지 않은 NH 배당): 실제 세전 원화(NH 환율 검산분)를 더한다.
       nh_only_krw·nh_only_count로 따로 보여 준다. 한 NH 입금은 한 행에만 쓰이므로 이중 집계가 없다.
+    - 금액이 없는 지급일 행: 기준 시점 수량을 모르는 일정 행은 quantity_unknown_count, 그 밖(환율·주당 금액 없음,
+      검산되지 않은 NH 외화)은 unconverted_count로 센다.
     """
     rows = []
     for year, month in months:
@@ -81,6 +86,7 @@ def _monthly_aggregation(events: list[dict], months: list[tuple[int, int]]) -> l
         selected = [e for e in events if e["date"].startswith(key)]
         payments = [e for e in selected if e["cashflow"]]
         nh_rows = [e for e in payments if e["date_status"] == "nh"]
+        quantity_unknown = [e["date_status"] != "nh" and e.get("shares") is None for e in payments]
         rows.append({"month": key, "count": len(selected),
                      "total_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments)),
                      "announced_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments if e["confirmed"])),
@@ -88,7 +94,9 @@ def _monthly_aggregation(events: list[dict], months: list[tuple[int, int]]) -> l
                      "nh_only_krw": round(sum(e["expected_amount_krw"] or 0 for e in nh_rows)),
                      "nh_only_count": len(nh_rows),
                      "nh_count": sum(bool(e.get("nh_match")) for e in selected),
-                     "unconverted_count": sum(e["expected_amount_krw"] is None for e in payments)})
+                     "quantity_unknown_count": sum(quantity_unknown),
+                     "unconverted_count": sum(e["expected_amount_krw"] is None and not unknown
+                                              for e, unknown in zip(payments, quantity_unknown))})
     return rows
 
 
@@ -131,6 +139,20 @@ async def _sold_holdings(google_sub: str, since: date, holdings: list[dict], rec
     return sorted(out, key=lambda h: h["stock_code"])
 
 
+async def _histories(held_codes: list[str], sold_codes: list[str]) -> dict[str, dict]:
+    """배당 이력. 보유 종목이 수집 시간(BATCH_TIMEOUT)을 먼저 쓰고, 매도한 종목은 남은 시간만 쓴다.
+
+    한 배치에 넣으면 만료된 이력이 많을 때 시간 제한에 보유 종목 수집이 잘려 예상 일정이 빠진다. 매도한 종목은
+    지난 행만 만들므로 이번에 못 가져오면(남은 시간이 없으면 캐시만) 다음 조회에 채워진다. 전체 대기는 그대로 최대 15초다.
+    """
+    started = _clock()
+    histories = await dividend_sources.get_histories(held_codes) if held_codes else {}
+    if sold_codes:
+        remaining = dividend_sources.BATCH_TIMEOUT - (_clock() - started)
+        histories.update(await dividend_sources.get_histories(sold_codes, timeout=max(0.0, remaining)))
+    return histories
+
+
 async def build_calendar(google_sub: str, months_back: int = 2, months_forward: int = 10, *, today: date | None = None) -> dict:
     today = today or today_kst_date()
     months = window_months(today, months_back, months_forward)
@@ -145,7 +167,7 @@ async def build_calendar(google_sub: str, months_back: int = 2, months_forward: 
     sold = await _sold_holdings(google_sub, start - timedelta(days=SOLD_LOOKBACK_DAYS), holdings, records)
     entries = holdings + sold
     codes = [h["stock_code"] for h in entries]
-    histories = await dividend_sources.get_histories(codes) if codes else {}
+    histories = await _histories(held_codes, [h["stock_code"] for h in sold])
     # 기존 브리프의 배당기준일을 배당락일로 해석하지 않는다(보유 중인 종목만).
     for row in await _latest_brief_upcoming_events(google_sub) if held_codes else []:
         code = normalize_portfolio_code(row.get("stock_code")) if isinstance(row, dict) else ""
@@ -176,10 +198,10 @@ async def build_calendar(google_sub: str, months_back: int = 2, months_forward: 
         for item in [*raw, *projected]:
             if start.isoformat() <= event_day(item) < end.isoformat():
                 candidates.append((holding, item, frequency, feed))
-    # 기준 시점이 지난 일정의 가장 이른 시점보다 며칠 앞 정산부터 읽는다(그 시점의 기록 누락을 앞뒤 정산으로 판단).
+    # 기준 시점이 지난 일정의 가장 이른 시점 이하 마지막 정산부터 읽는다.
     past = [ref["date"] for ref in (reference_point(item, h["stock_code"]) for h, item, *_ in candidates if not item.get("estimated"))
             if ref and ref["date"] < today]
-    since = (min(past) - timedelta(days=GAP_MAX_DAYS)).isoformat() if past else None
+    since = min(past).isoformat() if past else None
     history = HoldingHistory(await snapshots_repo.get_stock_holdings_from(google_sub, since) if since else [])
     events, excluded = [], []
     for holding, item, frequency, feed in candidates:

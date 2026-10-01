@@ -73,7 +73,7 @@ def project_events(events: list[dict], today: date, end: date, frequency: str) -
 
 
 # 배당 한 건의 보유 근거(domain.dividend_entitlement.entitlement)에서 일정 행으로 옮기는 값.
-HOLDING_FIELDS = ("holding_as_of", "quantity_as_of", "holding_gap_filled", "reference_date", "reference_rule",
+HOLDING_FIELDS = ("holding_as_of", "quantity_as_of", "quantity_unknown_reason", "reference_date", "reference_rule",
                   "reference_approximate", "held_now")
 
 
