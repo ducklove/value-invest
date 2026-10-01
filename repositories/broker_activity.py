@@ -31,17 +31,30 @@ async def set_error(user: str, aid: str, message: str | None):
 def _record(row: dict, data: dict | None = None) -> dict:
     """수동 수취·배당 일정 대조용 NH 배당 기록. 계좌번호 등 식별 원문은 포함하지 않는다."""
     data = data if data is not None else json.loads(row["data_json"])
-    return {"id": row["id"], "account_id": row["account_id"], "kind": row["kind"],
+    return {"id": row["id"], "account_id": row["account_id"], "kind": row["kind"], "income_krw": row.get("income_krw"),
             **{key: data.get(key) for key in ("date", "booked_date", "stock_code", "symbol", "stock_name", "currency",
-                                               "net_amount", "gross_amount", "fx_rate", "domestic_tax_krw")}}
+                                               "net_amount", "gross_amount", "tax_amount", "fx_rate", "domestic_tax_krw",
+                                               "gross_krw", "net_krw", "description", "refund_base_gross")}}
 
 
 async def dividend_records(user: str) -> list[dict]:
     """NH에서 가져온 배당 입금(세금 정산 제외). 사용자가 배당 외로 재분류한 행은 제외한다."""
     db = await get_db()
     rows = await (await db.execute(
-        "SELECT id,account_id,kind,data_json FROM broker_transactions WHERE google_sub=? AND kind IN ('dividend','review') "
+        "SELECT id,account_id,kind,income_krw,data_json FROM broker_transactions WHERE google_sub=? AND kind IN ('dividend','review') "
         "AND json_extract(data_json,'$.nh_dividend')=1", (user,))).fetchall()
+    return [_record(dict(row)) for row in rows]
+
+
+async def dividend_adjustments(user: str) -> list[dict]:
+    """NH 외화 배당 세금 정산('외화제세금환급'). 배당이 아니라 같은 종목 배당의 조정이다.
+
+    income_krw = 원화 순효과(환급 외화의 원화 환산 − 국내 징수). 환율 미검산이면 None.
+    """
+    db = await get_db()
+    rows = await (await db.execute(
+        "SELECT id,account_id,kind,income_krw,data_json FROM broker_transactions WHERE google_sub=? AND kind IN ('dividend','review') "
+        "AND json_extract(data_json,'$.adjustment')='tax_refund'", (user,))).fetchall()
     return [_record(dict(row)) for row in rows]
 
 

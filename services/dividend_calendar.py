@@ -7,7 +7,14 @@ import json
 from datetime import date
 
 from domain.dividend_schedule import FREQUENCY_LABELS, calendar_event, event_day, frequency_of, project_events
-from domain.dividend_verification import NH_CONFIRMED, NH_PARTIAL, UNCONFIRMED, annotate_calendar
+from domain.dividend_verification import (
+    NH_CONFIRMED,
+    NH_PARTIAL,
+    UNCONFIRMED,
+    attach_adjustments,
+    link_calendar,
+    nh_payment_event,
+)
 from repositories import broker_activity
 from repositories import db as db_repo
 from repositories import dividend_receipts as dividend_receipts_repo
@@ -48,15 +55,26 @@ async def _latest_brief_upcoming_events(google_sub: str) -> list[dict]:
 
 
 def _monthly_aggregation(events: list[dict], months: list[tuple[int, int]]) -> list[dict]:
+    """월별 세전 합계. 지급일이 있는 행(cashflow)만 더한다.
+
+    - 일정 행: 주당 금액 × 현재 보유 수량. NH 입금이 연결돼도 이 예상 금액을 그대로 쓰고
+      실제 NH 금액은 더하지 않는다(연결된 배당락·기준일 행은 원래대로 합계 밖).
+    - NH 입금 행(date_status 'nh', 어느 일정에도 연결되지 않은 NH 배당): 실제 세전 원화(NH 환율 검산분)를 더한다.
+      nh_only_krw·nh_only_count로 따로 보여 준다. 한 NH 입금은 한 행에만 쓰이므로 이중 집계가 없다.
+    """
     rows = []
     for year, month in months:
         key = _month_key(year, month)
         selected = [e for e in events if e["date"].startswith(key)]
         payments = [e for e in selected if e["cashflow"]]
+        nh_rows = [e for e in payments if e["date_status"] == "nh"]
         rows.append({"month": key, "count": len(selected),
                      "total_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments)),
                      "announced_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments if e["confirmed"])),
                      "estimated_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments if e["date_status"] == "estimated")),
+                     "nh_only_krw": round(sum(e["expected_amount_krw"] or 0 for e in nh_rows)),
+                     "nh_only_count": len(nh_rows),
+                     "nh_count": sum(bool(e.get("nh_match")) for e in selected),
                      "unconverted_count": sum(e["expected_amount_krw"] is None for e in payments)})
     return rows
 
@@ -114,14 +132,18 @@ async def build_calendar(google_sub: str, months_back: int = 2, months_forward: 
                 rate = stored["dps_krw"] / stored["dps_native"]
                 rate_source = "stored"
             events.append({**calendar_event(holding, item, rate, frequency, feed), "fx_source": rate_source if rate else "unavailable"})
-    events.sort(key=lambda event: (event["date"], event["stock_code"]))
-    if events:
-        # 지난 지급일에 NH 배당 입금(또는 NH로 확인된 수동 수취)이 없으면 '미확인'으로 표시한다.
-        records = await broker_activity.dividend_records(google_sub)
-        receipts = await dividend_receipts_repo.list_receipts(google_sub, limit=10000, verify=False)
+    # NH 배당 입금을 일정에 연결한다(지급일 ±, 배당락·기준일 이후 다음 권리일 전). 세금 정산은 해당 배당에 붙인다.
+    records, orphans = attach_adjustments(await broker_activity.dividend_records(google_sub),
+                                          await broker_activity.dividend_adjustments(google_sub))
+    if events or records:
+        receipts = await dividend_receipts_repo.list_receipts(google_sub, limit=10000, verify=False) if events else []
         # 일정은 전 계좌 합산이다. NH 연동 계좌에만 있는 종목만 NH 입금으로 전체 확인된다.
-        nh_only = await broker_activity.nh_only_codes(google_sub)
-        events = annotate_calendar(events, records, receipts, today, nh_only)
+        nh_only = await broker_activity.nh_only_codes(google_sub) if events else set()
+        events, unlinked = link_calendar(events, records, receipts, today, nh_only)
+        # 연결할 일정이 없는 NH 입금(미보유·이력 없음·창 밖 권리일)은 실제 입금 행으로 보여 준다.
+        events += [nh_payment_event(records[j]) for j in unlinked
+                   if start.isoformat() <= str(records[j].get("date") or "") < end.isoformat()]
+    events.sort(key=lambda event: (event["date"], event["stock_code"]))
     monthly = _monthly_aggregation(events, months)
     return {"as_of": today.isoformat(), "months_back": months_back, "months_forward": months_forward,
             "start_month": _month_key(*months[0]), "end_month": _month_key(*months[-1]),
@@ -134,4 +156,9 @@ async def build_calendar(google_sub: str, months_back: int = 2, months_forward: 
                         "stale_count": sum(c["status"] != "fresh" for c in coverage),
                         "unconfirmed_count": sum(e.get("verification") == UNCONFIRMED for e in events),
                         "nh_confirmed_count": sum(e.get("verification") == NH_CONFIRMED for e in events),
-                        "nh_partial_count": sum(e.get("verification") == NH_PARTIAL for e in events)}}
+                        "nh_partial_count": sum(e.get("verification") == NH_PARTIAL for e in events),
+                        # NH 입금이 연결된 행(일정 + NH 입금 행)과 그중 NH 입금 행.
+                        "nh_count": sum(bool(e.get("nh_match")) for e in events),
+                        "nh_only_count": sum(e["date_status"] == "nh" for e in events),
+                        "nh_only_krw": sum(m["nh_only_krw"] for m in monthly),
+                        "nh_unattached_adjustment_count": len(orphans)}}

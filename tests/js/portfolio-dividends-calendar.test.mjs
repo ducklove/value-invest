@@ -250,7 +250,7 @@ test('지난 지급일은 NH 입금 확인/미확인 태그를 달고, NH 확인
   const agnc = rows.find(row => /AGNC/.test(row.textContent));
   const ssec = rows.find(row => /삼성전자/.test(row.textContent));
   assert.equal(agnc.querySelector('.pf-divcal-badge.nh').textContent, 'NH 확인');
-  assert.match(agnc.querySelector('.pf-divcal-badge.nh').title, /NH 입금 2026-05-11/);
+  assert.match(agnc.querySelector('.pf-divcal-badge.nh').title, /지급 2026-05-11 · 세후 1.02 USD/);
   assert.equal(agnc.querySelector('.js-pf-dividend-receipt'), null);
   assert.equal(ssec.querySelector('.pf-divcal-badge.unconfirmed').textContent, '미확인');
   assert.ok(ssec.querySelector('.js-pf-dividend-receipt'));
@@ -258,5 +258,63 @@ test('지난 지급일은 NH 입금 확인/미확인 태그를 달고, NH 확인
   const realty = rows.find(row => /리얼티인컴/.test(row.textContent));
   assert.equal(realty.querySelector('.pf-divcal-badge.nh.partial').textContent, 'NH 일부 확인');
   assert.ok(realty.querySelector('.js-pf-dividend-receipt'));
-  assert.match(w.document.querySelector('.pf-chart-range').textContent, /지난 지급 미확인 1건/);
+  assert.match(w.document.querySelector('.pf-chart-range').textContent, /지난 배당 미확인 1건/);
+});
+
+test('해외 배당락 행에 연결된 NH 입금은 실제 지급일·세후·세금 정산을 보여 주고, 일정 없는 입금은 NH 입금 행이다', async () => {
+  const payload = structuredClone(FULL_PAYLOAD);
+  payload.as_of = '2026-10-01';
+  payload.events = [
+    { date: '2026-09-01', stock_code: 'AAA.AX', stock_name: '호주 단기채', label: '월배당 · 배당락일 · 지급일 미확인', type: 'ex_date',
+      date_kind: 'ex_date', date_status: 'observed', ex_date: '2026-09-01', amount_per_share: 0.2, currency: 'AUD', shares: 100,
+      expected_amount_krw: 19000, confirmed: false, cashflow: false, source_key: 'AAA.AX:ex_date:2026-09-01',
+      verification: 'nh_confirmed', paid_date: '2026-09-15',
+      nh_match: { date: '2026-09-15', net_amount: 21, currency: 'AUD', domestic_tax_krw: 2100, adjustments: [] } },
+    { date: '2026-09-08', stock_code: 'GOOGL', stock_name: '구글', label: '분기배당 · 배당락일 · 지급일 미확인', type: 'ex_date',
+      date_kind: 'ex_date', date_status: 'observed', amount_per_share: 0.21, currency: 'USD', shares: 15, expected_amount_krw: 4410,
+      confirmed: false, cashflow: false, source_key: 'GOOGL:ex_date:2026-09-08', verification: 'nh_partial', paid_date: '2026-09-16',
+      nh_match: { date: '2026-09-16', net_amount: 1.7, currency: 'USD', adjustments: [{ date: '2026-09-25', income_krw: -55, currency: 'USD' }],
+        parts: [{ id: 3, net_amount: 1.2 }, { id: 4, net_amount: 0.5 }] } },
+    { date: '2026-09-02', stock_code: 'EUN2.DE', stock_name: '유로스탁 50', label: '반기배당 · 배당락일 · 지급일 미확인', type: 'ex_date',
+      date_kind: 'ex_date', date_status: 'observed', amount_per_share: 0.3, currency: 'EUR', shares: 10, expected_amount_krw: 4900,
+      confirmed: false, cashflow: false, source_key: 'EUN2.DE:ex_date:2026-09-02', verification: 'unconfirmed', nh_match: null },
+    { date: '2026-09-20', stock_code: 'XYZ', stock_name: '<img src=x onerror=alert(1)>', label: 'NH 배당 입금', type: 'payment',
+      date_kind: 'payment', date_status: 'nh', currency: 'USD', gross_amount: 10, shares: null, expected_amount_krw: 14000,
+      confirmed: false, cashflow: true, receiptable: false, source_key: null, verification: 'nh_confirmed', paid_date: '2026-09-20',
+      nh_match: { date: '2026-09-20', gross_amount: 10, tax_amount: 1.5, net_amount: 8.5, currency: 'USD', adjustments: [] } },
+  ];
+  payload.monthly = [{ month: '2026-09', total_krw: 14000, announced_krw: 0, estimated_krw: 0, nh_only_krw: 14000, nh_only_count: 1, nh_count: 3, count: 4 }];
+  payload.summary = { ...payload.summary, nh_count: 3, nh_only_count: 1, unconfirmed_count: 1 };
+  const { w } = loadPanel(payload);
+  await w.pfLoadDividendCalendarPanel();
+  w.pfDivCalToggleMonth('2026-09');
+  const rows = [...w.document.querySelectorAll('[data-month-events="2026-09"] .pf-divcal-event')];
+  const find = (text) => rows.find(row => row.textContent.includes(text));
+  const aaa = find('호주 단기채');
+  const badge = aaa.querySelector('.pf-divcal-badge.nh');
+  assert.equal(badge.textContent, 'NH 확인');
+  assert.match(badge.title, /지급 2026-09-15 · 세후 21 AUD · 국내세 2,100원/);
+  assert.match(aaa.querySelector('.pf-divcal-nh-line').textContent, /지급 2026-09-15 · 세후 21 AUD/);
+  assert.match(aaa.querySelector('.pf-divcal-date').textContent, /2026-09-01/); // 배당락일은 그대로
+  assert.equal(aaa.querySelector('.js-pf-dividend-receipt'), null);
+  const googl = find('구글');
+  assert.equal(googl.querySelector('.pf-divcal-badge.nh.partial').textContent, 'NH 일부 확인');
+  assert.match(googl.querySelector('.pf-divcal-nh-line').textContent, /지급 2026-09-16 · 입금 2건 합계 · 세후 1.7 USD · 세금 정산 −55원/);
+  assert.doesNotMatch(aaa.querySelector('.pf-divcal-nh-line').textContent, /건 합계/);
+  assert.ok(googl.querySelector('.js-pf-dividend-receipt'));
+  const eun = find('유로스탁');
+  assert.equal(eun.querySelector('.pf-divcal-badge.unconfirmed').textContent, '미확인');
+  assert.match(eun.querySelector('.pf-divcal-badge.unconfirmed').title, /배당락일 이후/);
+  const deposit = rows.find(row => row.querySelector('.pf-divcal-badge.deposit'));
+  assert.equal(deposit.querySelector('.pf-divcal-badge.deposit').textContent, 'NH 입금');
+  assert.equal(deposit.querySelector('img'), null); // 종목명은 escape
+  assert.match(deposit.textContent, /<img src=x/);
+  assert.equal(deposit.querySelector('.js-pf-dividend-receipt'), null);
+  assert.equal(deposit.querySelector('.pf-divcal-badge.nh:not(.deposit)'), null);
+  assert.match(deposit.querySelector('.pf-divcal-nh-line').textContent, /세전 10 USD · 현지세 1.5 USD · 세후 8.5 USD/);
+  assert.match(deposit.querySelector('.pf-divcal-amount').textContent, /14,000원/);
+  assert.ok(!deposit.classList.contains('pf-divcal-est'));
+  const head = w.document.querySelector('.pf-divcal-month[data-month="2026-09"]');
+  assert.match(head.textContent, /NH 입금 14,000원/);
+  assert.match(w.document.querySelector('.pf-chart-range').textContent, /NH 입금 연결 3건\(일정 없는 입금 1건\)/);
 });
