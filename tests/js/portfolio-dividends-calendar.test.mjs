@@ -258,7 +258,7 @@ test('지난 지급일은 NH 입금 확인/미확인 태그를 달고, NH 확인
   const realty = rows.find(row => /리얼티인컴/.test(row.textContent));
   assert.equal(realty.querySelector('.pf-divcal-badge.nh.partial').textContent, 'NH 일부 확인');
   assert.ok(realty.querySelector('.js-pf-dividend-receipt'));
-  assert.match(w.document.querySelector('.pf-chart-range').textContent, /지난 지급 미확인 1건/);
+  assert.match(w.document.querySelector('.pf-chart-range').textContent, /지난 배당 미확인 1건/);
 });
 
 test('해외 배당락 행에 연결된 NH 입금은 실제 지급일·세후·세금 정산을 보여 주고, 일정 없는 입금은 NH 입금 행이다', async () => {
