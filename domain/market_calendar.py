@@ -67,6 +67,18 @@ def closing_at(day: str) -> datetime | None:
     return datetime.fromisoformat(f"{day}T15:30:00").replace(tzinfo=KST)
 
 
+def is_trading_day(day: date) -> bool | None:
+    """KRX 정규장 거래일인가. 휴장일 달력이 없는 연도는 None(호출자가 근사 처리를 정한다).
+
+    수능일 후보는 개장·마감 시각만 바뀌는 거래일로 본다. ``PORTFOLIO_MARKET_SESSIONS`` 로
+    휴장을 지정한 날은 휴장이다(``closing_at`` 과 같은 규칙).
+    """
+    try:
+        return closing_at(day.isoformat()) is not None
+    except MarketCalendarUnknown:
+        return True if day.year in HOLIDAYS else None
+
+
 def unconfigured_special_sessions(start: date, days: int, overrides: dict | None = None) -> list[date]:
     """[start, start+days] 중 override 없는 특수 세션 후보일(수능일 후보).
 

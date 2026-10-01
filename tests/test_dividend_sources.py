@@ -91,6 +91,34 @@ class CacheTests(TempDbMixin):
         self.assertEqual(result["FAST"]["status"], "fresh")
         self.assertEqual(result["SLOW"]["status"], "unavailable")
 
+    async def test_zero_timeout_returns_cache_without_waiting_for_fetches(self):
+        # 배당 캘린더는 매도한 종목 이력을 보유 종목 수집 뒤 남은 시간에만 가져온다. 남은 시간이 0이면 캐시만 쓴다.
+        fresh = {"events": [{"ex_date": "2026-08-31"}], "fetched_at": "2026-09-30T00:00:00Z", "status": "fresh"}
+        old = {"events": [{"ex_date": "2026-05-29"}], "fetched_at": "2026-06-01T00:00:00Z", "status": "fresh"}
+        await set_cache_value(sources.NAMESPACE, "AGNC", fresh, ttl_seconds=3600)
+        await set_cache_value(sources.NAMESPACE, "SCHP", old, ttl_seconds=-1)
+
+        async def fetch(ticker):
+            await asyncio.sleep(1)
+            return {"events": [], "status": "fresh"}
+        with patch.object(sources, "fetch_history", side_effect=fetch):
+            result = await sources.get_histories(["AGNC", "SCHP", "NEW"], timeout=0)
+        self.assertEqual(result["AGNC"], fresh)                       # 유효한 캐시는 그대로(갱신 필요 아님)
+        self.assertEqual((result["SCHP"]["events"], result["SCHP"]["status"]), (old["events"], "stale"))
+        self.assertEqual((result["NEW"]["events"], result["NEW"]["status"]), ([], "unavailable"))
+
+    async def test_valid_cache_does_not_queue_behind_slow_fetches(self):
+        # 동시 수집 자리가 모두 찼어도(여기서는 0개) 유효한 캐시는 바로 돌려준다 — 시간 제한에 잘려 'stale'이 되지 않는다.
+        cached = {"events": [], "fetched_at": "2026-09-30T00:00:00Z", "status": "fresh"}
+        await set_cache_value(sources.NAMESPACE, "CACHED", cached, ttl_seconds=3600)
+        real_semaphore = asyncio.Semaphore
+        with patch.object(sources.asyncio, "Semaphore", lambda _: real_semaphore(0)), \
+             patch.object(sources, "fetch_history", AsyncMock(return_value={"events": [], "status": "fresh"})), \
+             patch.object(sources, "BATCH_TIMEOUT", 0.05):
+            result = await sources.get_histories(["SLOW", "CACHED"])
+        self.assertEqual(result["CACHED"], cached)
+        self.assertEqual(result["SLOW"]["status"], "unavailable")
+
     async def test_kosdaq_fallback_after_ks_404(self):
         paths = []
         def handler(request):

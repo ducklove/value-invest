@@ -84,6 +84,23 @@ function _pfDividendSelectSchedule() {
     return;
   }
   _pfDividendSetStock(event.stock_code, event.stock_name, event.currency || 'KRW');
+  // 지난 일정은 배당 기준 시점의 보유 수량(장 마감 정산 기록)으로 채운다. 미래·예상 일정은 현재 보유 수량이다.
+  // 기준 시점 수량을 모르면(기록 전 매매·기록 없음) 현재 수량을 넣지 않고 비운다.
+  const pastBasis = ['snapshot', 'earliest_snapshot'].includes(event.holding_basis);
+  const pointInTime = pastBasis && Number(event.shares) > 0;
+  if (pastBasis) _pfDividendEl('Quantity').value = pointInTime ? Number(event.shares) : '';
+  // 수량을 다른 날 정산에서 가져왔으면(quantity_as_of) 그 날짜를 수량의 출처로 적는다.
+  const recordDay = event.quantity_as_of || event.holding_as_of || '기준 시점';
+  const estimate = event.holding_basis === 'earliest_snapshot' ? '(기록 시작 시점으로 추정)' : '';
+  const heldNote = event.quantity_as_of ? `, 기준 시점 보유는 ${event.holding_as_of} 기록` : '';
+  const quantityNote = pointInTime
+    ? `수량은 ${recordDay} 보유 기록${estimate}${heldNote}이므로 계좌별 실제 배당 대상 수량을 확인하세요.`
+    : pastBasis
+      ? '기준 시점 수량 기록이 없어 수량을 비웠습니다. 배당 대상 수량을 직접 입력하세요.'
+      : '수량은 현재 보유 수량이므로 배당 대상 수량을 확인하세요.';
+  const filled = pointInTime ? `주당 배당금과 기준 시점 보유 수량(${recordDay} 기록${estimate})을 채웠습니다.`
+    : pastBasis ? '주당 배당금을 채웠습니다. 기준 시점 수량 기록이 없어 수량은 직접 입력하세요.'
+      : '주당 배당금과 현재 보유 수량을 채웠습니다.';
   _pfDividendEl('Mode').value = 'shares';
   _pfDividendEl('PerShare').value = event.amount_per_share > 0 ? event.amount_per_share : '';
   const isPayment = event.date_kind ? event.date_kind === 'payment' : event.type !== 'ex_date';
@@ -94,8 +111,8 @@ function _pfDividendSelectSchedule() {
     _pfDividendEl('FxText').textContent = `수취 환율: 1 ${event.currency} = ? KRW · 스케줄 참고 환율, 실제 수취 환율 확인`;
   }
   _pfDividendEl('ScheduleNote').textContent = !isPayment
-    ? `${event.date}는 ${event.date_kind === 'ex_date' ? '배당락일' : '배당기준일'}입니다. 실제 수취일을 입력하세요. 수량은 현재 보유 수량이므로 배당 대상 수량을 확인하세요.`
-    : `${event.date} ${event.confirmed ? '공시 지급일' : '지급 예상'} · 주당 배당금과 현재 보유 수량을 채웠습니다. 증권사 실제 입금일·금액·배당 대상 수량을 확인하세요.`;
+    ? `${event.date}는 ${event.date_kind === 'ex_date' ? '배당락일' : '배당기준일'}입니다. 실제 수취일을 입력하세요. ${quantityNote}`
+    : `${event.date} ${event.confirmed ? '공시 지급일' : '지급 예상'} · ${filled} 증권사 실제 입금일·금액·배당 대상 수량을 확인하세요.`;
   _pfDividendAmounts();
 }
 
@@ -266,7 +283,7 @@ async function pfOpenDividendReceipt(sourceKey) {
     if (!_pfDividend.dirty && !_pfDividend.pending && !_pfDividend.busy) {
       const selected = _pfDividend.events.find(ev => ev.source_key === sourceKey && !done(ev));
       if (selected) { _pfDividendEl('Schedule').value = sourceKey; _pfDividendSelectSchedule(); }
-      else _pfDividendEl('ScheduleNote').textContent = '스케줄을 선택하면 주당 배당금·현재 보유 수량·기본 세율을 채웁니다. 배당기준일은 지급일이 아닙니다.';
+      else _pfDividendEl('ScheduleNote').textContent = '스케줄을 선택하면 주당 배당금·보유 수량(지난 일정은 기준 시점 보유 기록)·기본 세율을 채웁니다. 배당기준일은 지급일이 아닙니다.';
     }
   } catch (error) { if (generation === _pfDividend.generation) _pfDividendEl('ScheduleNote').textContent = `${error.message} 직접 입력은 계속 사용할 수 있습니다.`; }
 }

@@ -10,6 +10,9 @@
 // - 지급일만 현금 합계에 포함한다. 배당락일과 기준일은 권리일 안내다.
 // - NH 배당 입금: 연결된 일정은 'NH 확인'(실제 지급일·세후·세금 정산), 연결할 일정이
 //   없는 입금은 'NH 입금' 행(실제 금액, 수취 입력 없음)으로 그린다(docs/dividend-calendar.md).
+// - 지난 배당은 기준 시점(배당락 전 거래일 종가·국내 기준일 2거래일 전 종가)에 보유한 종목만
+//   그때 수량으로 온다. 행마다 보유 근거('보유 120주 · 9/24 기준', '기록 시작(3/31) 보유 기준')와
+//   지금은 없는 종목의 '매도' 태그를 보여 준다.
 //   공시 / 수집 이력 / 날짜 전후 예상과 출처·갱신 시점을 함께 표시한다.
 // - 백그라운드 로드 오류는 reportApiError silent + 패널 내 안내.
 // 포맷터(fmtKrw/escapeHtml)는 portfolio-render.js / utils.js 공용 헬퍼를
@@ -113,6 +116,52 @@ function _pfDivCalVerify(ev) {
   return '';
 }
 
+// '2026-09-24' → '9/24'
+function _pfDivCalShortDay(value) {
+  const m = String(value || '').match(/^\d{4}-(\d{2})-(\d{2})/);
+  return m ? `${Number(m[1])}/${Number(m[2])}` : String(value || '');
+}
+
+// 기준 시점에 보유했지만 수량을 모르는 이유(quantity_unknown_reason).
+const _PF_DIVCAL_QUANTITY_UNKNOWN = {
+  changed_before_record: '수량 미상(수량 기록 전 매매)',
+  not_recorded: '수량 기록 없음',
+};
+
+// 지난 배당의 보유 근거(문자열, 호출부에서 escape). 미래·예상(현재 보유)은 빈 문자열.
+// snapshot: '보유 120주 · 9/24 기준', earliest_snapshot: '기록 시작(3/31) 보유 기준',
+// 수량을 다른 날 정산에서 가져왔으면 '(수량 6/30 기록)', 수량을 모르면 '보유 · 수량 미상(수량 기록 전 매매)'.
+function _pfDivCalHolding(ev) {
+  const hasShares = ev.shares !== null && ev.shares !== undefined && Number.isFinite(Number(ev.shares));
+  const unknown = _PF_DIVCAL_QUANTITY_UNKNOWN[ev.quantity_unknown_reason] || '수량 미상';
+  const quantityNote = ev.quantity_as_of ? ` (수량 ${_pfDivCalShortDay(ev.quantity_as_of)} 기록)` : '';
+  const day = _pfDivCalShortDay(ev.holding_as_of);
+  if (ev.holding_basis === 'snapshot') {
+    return `${hasShares ? `보유 ${Number(ev.shares).toLocaleString()}주${quantityNote}` : `보유 · ${unknown}`} · ${day} 기준`;
+  }
+  if (ev.holding_basis === 'earliest_snapshot') return `기록 시작(${day}) 보유 기준${hasShares ? quantityNote : ` · ${unknown}`}`;
+  if (ev.holding_basis === 'current_fallback') return '보유 기록 없음 · 현재 수량 기준';
+  return '';
+}
+
+// 보유 근거 줄의 title: 배당 기준(규칙)과 실제로 쓴 정산일. reference_date는 '그 이하 마지막 정산'의 상한일 뿐이라
+// 주말·휴장일이거나 배당락일 당일(미국·유럽)일 수 있다.
+function _pfDivCalHoldingTitle(ev) {
+  if (!ev.reference_date) return '';
+  const rules = {
+    krx_record_t2: '배당기준일 2거래일 전 종가 보유(T+2 결제)',
+    ex_date_prev_day: '배당락 전 거래일 종가 보유',
+    ex_date_same_day: '현지 배당락 전 거래일 종가 보유(그 장은 배당락일 KST 정산에 반영)',
+    record_date: '해외 기준일로 근사',
+    pay_date: '지급일 전날로 근사',
+  };
+  const rule = rules[ev.reference_rule] || '근사';
+  const used = ev.holding_basis === 'earliest_snapshot'
+    ? `기록 시작 전이라 첫 장 마감 정산(${ev.holding_as_of})의 보유로 추정합니다.`
+    : `${ev.reference_date} 이하 마지막 장 마감 정산(${ev.holding_as_of || '-'})의 보유입니다.`;
+  return `배당 기준: ${rule}. ${used}${ev.quantity_as_of ? ` 수량은 ${ev.quantity_as_of} 정산 기록입니다.` : ''}`;
+}
+
 function _pfDivCalCheckedDay(value) {
   const day = new Date(value);
   return Number.isNaN(day.getTime()) ? String(value || '').slice(0, 10)
@@ -138,21 +187,27 @@ function _pfDivCalEventHtml(ev, todayIso) {
   if (!ev.confirmed && !nhOnly) classes.push('pf-divcal-est');
   if (nhOnly) classes.push('pf-divcal-nh');
   if (ev.date >= todayIso) classes.push('pf-divcal-upcoming');
-  const shares = Number(ev.shares || 0);
+  const hasShares = ev.shares !== null && ev.shares !== undefined;
   const nativeGross = nhOnly ? _pfDivCalMoney(ev.gross_amount, ev.currency) : '';
   const amount = (ev.expected_amount_krw === null || ev.expected_amount_krw === undefined)
     ? (nativeGross ? escapeHtml(nativeGross) : '-') : `${fmtKrw(ev.expected_amount_krw)}원`;
   const detail = nhOnly
     ? `${escapeHtml(ev.label || 'NH 배당 입금')} · 실제 입금 금액`
-    : `${escapeHtml(ev.label || '')} · 주당 ${_pfDivCalPerShare(ev)} × ${shares.toLocaleString()}주`;
+    : `${escapeHtml(ev.label || '')} · 주당 ${_pfDivCalPerShare(ev)} × ${hasShares ? `${Number(ev.shares).toLocaleString()}주` : '수량 미상'}`;
   const nhLine = ev.nh_match ? _pfDivCalNhLine(ev) : '';
+  const holding = nhOnly ? '' : _pfDivCalHolding(ev);
+  const holdingTitle = holding ? _pfDivCalHoldingTitle(ev) : '';
+  // 지금은 보유하지 않지만 기준 시점에 보유한 종목(매도 뒤 지급·지난 권리일).
+  const sold = ev.held_now === false && !nhOnly
+    ? ' <span class="pf-divcal-badge sold" title="지금은 보유하지 않지만 배당 기준 시점에 보유한 종목입니다.">매도</span>' : '';
   const receipt = ev.receiptable === false || ev.verification === 'nh_confirmed' ? ''
     : `<button type="button" class="pf-mini-btn pf-divcal-receipt js-pf-dividend-receipt" data-dividend-source="${escapeHtml(ev.source_key || `${ev.stock_code}:${ev.type}:${ev.date}`)}">수취 입력</button>`;
   return `<div class="${classes.join(' ')}">
     <span class="pf-divcal-date">${escapeHtml(ev.date)}${ev.date_precision === 'approximate' ? ' 전후' : ''}</span>
     <span class="pf-divcal-stock">
-      <span class="pf-divcal-stock-name">${escapeHtml(ev.stock_name || ev.stock_code)} ${_pfDivCalBadge(ev)}${_pfDivCalVerify(ev)}</span>
+      <span class="pf-divcal-stock-name">${escapeHtml(ev.stock_name || ev.stock_code)} ${_pfDivCalBadge(ev)}${_pfDivCalVerify(ev)}${sold}</span>
       <span class="pf-divcal-sub">${detail}</span>
+      ${holding ? `<span class="pf-divcal-sub pf-divcal-holding"${holdingTitle ? ` title="${escapeHtml(holdingTitle)}"` : ''}>${escapeHtml(holding)}</span>` : ''}
       ${nhLine ? `<span class="pf-divcal-sub pf-divcal-nh-line">${escapeHtml(nhLine)}</span>` : ''}
       ${nhOnly ? '' : _pfDivCalSource(ev)}
     </span>
@@ -171,7 +226,7 @@ function _pfDivCalMonthHtml(monthRow, eventsByMonth, todayMonth, todayIso) {
   const head = `<div class="${rowCls}" data-month="${escapeHtml(month)}"${empty ? '' : ` onclick="pfDivCalToggleMonth('${escapeHtml(month)}')"`}>
     <span class="pf-divcal-caret">${empty ? '·' : (open ? '▾' : '▸')}</span>
     <span class="pf-divcal-month-label">${_pfDivCalMonthLabel(month)}${isNow ? ' <span class="pf-divcal-sub">(이번 달)</span>' : ''}</span>
-    <span class="pf-divcal-month-total">${events.length ? `${events.length}건 · ` : ''}${total}${monthRow.unconverted_count ? ' + 환산 미확인' : ''}${monthRow.announced_krw > 0 || monthRow.estimated_krw > 0 || monthRow.nh_only_krw > 0 ? `<span class="pf-divcal-sub">공시 ${fmtKrw(monthRow.announced_krw || 0)}원 · 예상 ${fmtKrw(monthRow.estimated_krw || 0)}원${monthRow.nh_only_krw > 0 ? ` · NH 입금 ${fmtKrw(monthRow.nh_only_krw)}원` : ''}</span>` : ''}</span>
+    <span class="pf-divcal-month-total">${events.length ? `${events.length}건 · ` : ''}${total}${monthRow.unconverted_count ? ' + 환산 미확인' : ''}${monthRow.quantity_unknown_count ? ' + 수량 미상' : ''}${monthRow.announced_krw > 0 || monthRow.estimated_krw > 0 || monthRow.nh_only_krw > 0 ? `<span class="pf-divcal-sub">공시 ${fmtKrw(monthRow.announced_krw || 0)}원 · 예상 ${fmtKrw(monthRow.estimated_krw || 0)}원${monthRow.nh_only_krw > 0 ? ` · NH 입금 ${fmtKrw(monthRow.nh_only_krw)}원` : ''}</span>` : ''}</span>
   </div>`;
   if (empty) return head;
   const list = `<div class="pf-divcal-events" data-month-events="${escapeHtml(month)}" style="display:${open ? '' : 'none'};">
@@ -206,13 +261,14 @@ function _pfRenderDividendCalendar(data) {
     + ` · 지급일 기준 세전 합계 <strong>${fmtKrw(summary.total_expected_krw || 0)}원</strong>`
     + ` · 공시 ${Number(summary.confirmed_count || 0)}건 / 예상 ${Number(summary.estimated_count || 0)}건 / 수집 이력 ${Number(summary.observed_count || 0)}건`
     + (summary.nh_count ? ` · NH 입금 연결 ${Number(summary.nh_count)}건${summary.nh_only_count ? `(일정 없는 입금 ${Number(summary.nh_only_count)}건)` : ''}` : '')
-    + (summary.unconfirmed_count ? ` · 지난 배당 미확인 ${Number(summary.unconfirmed_count)}건` : '');
-  const coverageHtml = coverage.length ? `<details class="pf-divcal-coverage"><summary>종목별 일정 확인 · 지급일 미확인 ${Number(summary.unknown_payment_count || 0)}종목${summary.stale_count ? ` · 갱신 미완료 ${Number(summary.stale_count)}종목` : ''}</summary>${coverage.map(c => `<div><strong>${escapeHtml(c.stock_name)}</strong> · ${escapeHtml(c.frequency_label)} · ${c.has_payment_dates ? '지급일 수집' : '지급일 미확인'}${c.status !== 'fresh' ? ' · 갱신 필요' : ''}${c.fetched_at ? ` · 확인 ${escapeHtml(_pfDivCalCheckedDay(c.fetched_at))}` : ''}</div>`).join('')}</details>` : '';
+    + (summary.unconfirmed_count ? ` · 지난 배당 미확인 ${Number(summary.unconfirmed_count)}건` : '')
+    + (summary.not_held_count ? ` · 기준 시점 미보유 ${Number(summary.not_held_count)}건 제외` : '');
+  const coverageHtml = coverage.length ? `<details class="pf-divcal-coverage"><summary>종목별 일정 확인 · 지급일 미확인 ${Number(summary.unknown_payment_count || 0)}종목${summary.stale_count ? ` · 갱신 미완료 ${Number(summary.stale_count)}종목` : ''}</summary>${coverage.map(c => `<div><strong>${escapeHtml(c.stock_name)}</strong> · ${escapeHtml(c.frequency_label)}${c.held === false ? ' · 매도' : ''} · ${c.has_payment_dates ? '지급일 수집' : '지급일 미확인'}${c.status !== 'fresh' ? ' · 갱신 필요' : ''}${c.fetched_at ? ` · 확인 ${escapeHtml(_pfDivCalCheckedDay(c.fetched_at))}` : ''}</div>`).join('')}</details>` : '';
   el.innerHTML = `<div class="pf-divcal-list">
     ${monthly.map((m) => _pfDivCalMonthHtml(m, eventsByMonth, todayMonth, todayIso)).join('')}
   </div>
   <div class="pf-chart-range">${totalLine}</div>
-  <div class="pf-divcal-note">공시 지급일을 우선하며, 예상(점선)은 최근 지급 패턴을 반복한 날짜 전후의 추정입니다. 월배당도 지급이 없는 달이나 같은 달 복수 지급이 있을 수 있습니다. 배당락일·기준일은 월 합계에서 제외됩니다. 지난 지급일·배당락일에는 NH 배당 입금을 연결해 실제 지급일과 세후 금액을 보여 줍니다(없으면 미확인). 연결할 일정이 없는 NH 입금은 'NH 입금' 행으로 실제 세전 금액을 월 합계에 더합니다. 금액은 세전·현재 보유 수량 기준이며 실제 수취·권리 수량·증권사 입금일과 다를 수 있습니다. 예상 건은 공시 후 수취 입력에 연결됩니다.</div>${coverageHtml}`;
+  <div class="pf-divcal-note">공시 지급일을 우선하며, 예상(점선)은 최근 지급 패턴을 반복한 날짜 전후의 추정입니다. 월배당도 지급이 없는 달이나 같은 달 복수 지급이 있을 수 있습니다. 배당락일·기준일은 월 합계에서 제외됩니다. 지난 지급일·배당락일에는 NH 배당 입금을 연결해 실제 지급일과 세후 금액을 보여 줍니다(없으면 미확인). 연결할 일정이 없는 NH 입금은 'NH 입금' 행으로 실제 세전 금액을 월 합계에 더합니다. 지난 배당은 기준 시점(배당락 전 거래일 종가, 국내 기준일은 2거래일 전 종가)에 보유한 종목만 그때 수량으로 셉니다. 보유는 매일 장 마감 정산 기록(전 계좌 합산)이며, 지금은 없는 종목도 그때 보유했으면 '매도'로 보여 줍니다. 기록 시작 전 배당은 첫 기록의 보유로 추정합니다. 미래·예상 금액은 현재 보유 수량 기준입니다. 금액은 세전이며 실제 수취·계좌별 권리 수량·증권사 입금일과 다를 수 있습니다. 예상 건은 공시 후 수취 입력에 연결됩니다.</div>${coverageHtml}`;
 }
 
 // 월 행 클릭 — 이벤트 목록 펼침/접힘 (상태는 _pfDivCalOpenMonths 에 유지).

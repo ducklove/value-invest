@@ -172,10 +172,11 @@ async def fetch_history(ticker: str) -> dict:
 
 
 async def _history(ticker: str, semaphore: asyncio.Semaphore) -> dict:
+    # 유효한 캐시는 동시 수집 자리를 기다리지 않는다(느린 수집 뒤에 줄 서다 시간 제한에 잘리지 않게).
+    cached = await get_cache_value_entry(NAMESPACE, ticker, allow_stale=True)
+    if cached and not cached.stale:
+        return cached.value
     async with semaphore:
-        cached = await get_cache_value_entry(NAMESPACE, ticker, allow_stale=True)
-        if cached and not cached.stale:
-            return cached.value
         try:
             result = await fetch_history(ticker)
             if cached and cached.value.get("official") and not result.get("official"):
@@ -190,8 +191,11 @@ async def _history(ticker: str, semaphore: asyncio.Semaphore) -> dict:
         return result
 
 
-async def get_histories(codes: list[str]) -> dict[str, dict]:
-    """전체 첫 조회도 15초로 제한. 실패한 종목은 기존 캐시와 상태를 반환한다."""
+async def get_histories(codes: list[str], *, timeout: float | None = None) -> dict[str, dict]:
+    """전체 첫 조회도 15초(timeout, 기본 BATCH_TIMEOUT)로 제한. 실패·시간 초과 종목은 기존 캐시와 상태를 반환한다.
+
+    timeout이 0이면 수집을 기다리지 않고 캐시만 돌려준다(유효한 캐시는 그대로, 만료 캐시는 'stale', 없으면 'unavailable').
+    """
     ticker_map = await load_ticker_map()
     tickers = {}
     for code in codes:
@@ -203,7 +207,7 @@ async def get_histories(codes: list[str]) -> dict[str, dict]:
     if not tasks:
         return {}
     try:
-        await asyncio.wait(tasks.values(), timeout=BATCH_TIMEOUT)
+        await asyncio.wait(tasks.values(), timeout=BATCH_TIMEOUT if timeout is None else timeout)
     finally:
         for task in tasks.values():
             if not task.done():
@@ -214,7 +218,10 @@ async def get_histories(codes: list[str]) -> dict[str, dict]:
         task = tasks[ticker]
         if task.cancelled():
             cached = await get_cache_value_entry(NAMESPACE, ticker, allow_stale=True)
-            results[code] = {**(cached.value if cached else {"events": [], "fetched_at": None}), "status": "stale" if cached else "unavailable"}
+            if cached and not cached.stale:
+                results[code] = cached.value
+            else:
+                results[code] = {**(cached.value if cached else {"events": [], "fetched_at": None}), "status": "stale" if cached else "unavailable"}
         else:
             results[code] = task.result()
     return results
