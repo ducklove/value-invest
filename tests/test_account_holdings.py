@@ -11,6 +11,31 @@ from services.portfolio import fx
 
 
 class AccountHoldingsTests(TempDbMixin):
+    async def test_suffixed_domestic_etf_currency_and_startup_repair(self):
+        for code in ("0074K0.KS", "0074K0.KQ"):
+            await portfolio.save_portfolio_item(
+                "u1", code, "ETF", 10, 21000, "USD", account_id=self.second
+            )
+            db = await get_db()
+            row = await (await db.execute(
+                "SELECT currency FROM account_holdings WHERE stock_code=?", (code,)
+            )).fetchone()
+            self.assertEqual(row["currency"], "KRW")
+            for table in ("account_holdings", "user_portfolio"):
+                await db.execute(f"UPDATE {table} SET currency='USD' WHERE stock_code=?", (code,))
+            await db.commit()
+            for aid in (None, self.second):
+                item = next(r for r in await portfolio.get_portfolio("u1", aid) if r["stock_code"] == code)
+                self.assertEqual(item["currency"], "KRW")
+                self.assertEqual(item["account_positions"][0]["currency"], "KRW")
+            await bootstrap.init_db()
+            for table in ("account_holdings", "user_portfolio"):
+                row = await (await db.execute(
+                    f"SELECT currency, avg_price FROM {table} WHERE stock_code=?", (code,)
+                )).fetchone()
+                self.assertEqual(row["currency"], "KRW")
+                self.assertEqual(row["avg_price"], 21000)
+
     async def test_domestic_etf_currency_survives_account_overlay_and_repairs_ledger(self):
         await portfolio.save_portfolio_item(
             "u1", "0074K0", "ETF", 10, 21000, "USD", account_id=self.second

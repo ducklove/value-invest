@@ -42,7 +42,8 @@ def test_yahoo_currency_inference_is_shared_across_quote_and_history_paths():
 
 
 @pytest.mark.asyncio
-async def test_domestic_currency_detection_skips_foreign_lookup():
+@pytest.mark.parametrize("code", ["0074K0", "0074K0.KS", "0074K0.KQ", " 0074k0.ks "])
+async def test_domestic_currency_detection_skips_foreign_lookup(code):
     with patch.object(foreign, "yfinance_find_ticker", new_callable=AsyncMock) as lookup:
-        assert await foreign.detect_currency("0074K0") == "KRW"
+        assert await foreign.detect_currency(code) == "KRW"
         lookup.assert_not_awaited()

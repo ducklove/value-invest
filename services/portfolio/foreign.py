@@ -25,7 +25,7 @@ import httpx
 from cache_layer import MemoryTTLCache
 from core.errors import DBError
 from core.http import get_http_client
-from domain.portfolio_codes import is_hong_kong_rmb_counter
+from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_listing
 from repositories import corp_codes
 from repositories import ticker_map as ticker_map_repo
 from services.market.sources import kis_proxy as kis_proxy_client
@@ -784,7 +784,7 @@ async def heal_stale_mapping(stock_code: str, mapped: str) -> bool:
 
 
 async def detect_currency(stock_code: str) -> str:
-    if _is_korean_stock(stock_code):
+    if is_korean_listing(stock_code):
         return "KRW"
     if _is_pseudo_code(stock_code):
         code = _normalize_portfolio_code(stock_code)

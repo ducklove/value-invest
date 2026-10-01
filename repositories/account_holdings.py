@@ -5,7 +5,7 @@ from contextvars import ContextVar
 from datetime import datetime
 from decimal import Decimal
 
-from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_stock
+from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_listing
 from repositories import accounts
 from repositories.db import get_db, transaction
 
@@ -13,7 +13,7 @@ _scope: ContextVar[tuple[str, str] | None] = ContextVar("holding_account", defau
 
 
 def _normalize_quote_currency(position: dict) -> dict:
-    if is_korean_stock(position["stock_code"]):
+    if is_korean_listing(position["stock_code"]):
         position["currency"] = "KRW"
     return position
 
@@ -23,7 +23,7 @@ async def backfill_korean_quote_currency(db) -> None:
         rows = await (await db.execute(
             f"SELECT DISTINCT stock_code FROM {table} WHERE currency IS NULL OR currency != 'KRW'"
         )).fetchall()
-        codes = [(row["stock_code"],) for row in rows if is_korean_stock(row["stock_code"])]
+        codes = [(row["stock_code"],) for row in rows if is_korean_listing(row["stock_code"])]
         if codes:
             await db.executemany(f"UPDATE {table} SET currency='KRW' WHERE stock_code=?", codes)
 
@@ -144,7 +144,7 @@ async def rebuild(user: str, code: str, **metadata) -> dict | None:
 
 
 async def save(user, code, name, quantity, avg_price, currency="KRW", *, account_id=None, avg_price_currency=None, **metadata):
-    if is_korean_stock(code):
+    if is_korean_listing(code):
         currency = "KRW"
     async with transaction() as db:
         await initialize(db, user)

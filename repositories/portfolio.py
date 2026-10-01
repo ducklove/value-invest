@@ -13,8 +13,8 @@ from datetime import datetime
 
 import aiosqlite
 
+from domain.portfolio_codes import is_korean_listing, is_special_asset
 from domain.portfolio_codes import is_korean_stock as _is_portfolio_korean_stock
-from domain.portfolio_codes import is_special_asset
 from repositories import accounts as accounts_repo
 from repositories.db import get_db, read_snapshot, transaction
 
@@ -157,7 +157,7 @@ async def get_portfolio(google_sub: str, account_id: str | None = None) -> list[
     items = [dict(row) for row in await cursor.fetchall()]
     for item in items:
         # Legacy holdings may predate support for alphanumeric KRX ETF codes.
-        if _is_portfolio_korean_stock(item["stock_code"]):
+        if is_korean_listing(item["stock_code"]):
             item["currency"] = "KRW"
     if not items:
         return []
@@ -656,7 +656,7 @@ async def _save_portfolio_projection(
       - None / 빈 문자열   → 메모 삭제
       - 문자열             → 저장 (MEMO_MAX_LEN 로 잘림)
     """
-    if _is_portfolio_korean_stock(stock_code):
+    if is_korean_listing(stock_code):
         currency = "KRW"
     target_price_provided = target_price is not _TARGET_PRICE_UNCHANGED
     target_formula_provided = target_price_formula is not _TARGET_FORMULA_UNCHANGED
