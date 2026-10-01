@@ -314,3 +314,110 @@ async def test_regular_performance_unlinkable_boundary_stays_unavailable(temp_db
     summary = await snapshot_views.regular_performance("u1", "2026-09-30")
     assert summary["comparison_unavailable"] is True
     assert summary["change_pct"] is None and summary["change_krw"] is None and summary["prev_date"] is None
+
+
+# ---------------------------------------------------------------- 입출금 내역 발행 NAV
+
+
+K_A = 1.017327233057
+
+
+async def add_issued_flow(day, nav_at_time, units, applied, *, kind="deposit", amount=1000.0, user="u1"):
+    async with transaction() as db:
+        await db.execute(
+            "INSERT INTO portfolio_cashflows (google_sub,date,type,amount,nav_at_time,units_change,applied_snapshot_date,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (user, day, kind, amount, nav_at_time, units, applied, f"{day}T10:00:00"),
+        )
+
+
+def test_cumulative_factor_matches_apply_links():
+    factors = {"2026-09-30": 1.5, "2026-10-10": 2.0}
+    assert nav_link.cumulative_factor("2026-10-10", factors) == 1.0
+    assert nav_link.cumulative_factor("2026-10-01", factors) == 2.0
+    assert nav_link.cumulative_factor("2026-09-29", factors) == 3.0
+    assert nav_link.cumulative_factor("2026-09-29", {"2026-09-30": None, "2026-10-10": 2.0}) is None
+    assert nav_link.cumulative_factor("2026-10-01", {"2026-09-30": None, "2026-10-10": 2.0}) == 2.0
+    rows = [{"date": d, "nav": 100.0} for d in ("2026-09-29", "2026-10-01", "2026-10-10")]
+    linked = nav_link.apply_links(rows, factors)
+    assert [r["nav"] for r in linked] == [100.0 * nav_link.cumulative_factor(r["date"], factors) for r in rows]
+
+
+@pytest.mark.asyncio
+async def test_cashflow_nav_links_flows_before_boundary_with_real_factor(temp_db):
+    await seed_user()
+    for row in (A_D0, A_D1):
+        await save(row)
+    await add_issued_flow("2026-09-29", A_D0["nav"], 1000 / A_D0["nav"], "2026-09-29")
+    await add_issued_flow("2026-09-28", 980.0, -2.0, None, kind="withdrawal")  # 미반영 preset → date 로 구간 판정
+    # 새 구간 반영분은 경계 두 정산 사이가 아니어서 k 에 영향이 없다(실제 k 유지).
+    await add_issued_flow("2026-10-01", 1000.0, 1.0, "2026-10-01")
+    await add_issued_flow("2026-09-28", None, None, "2026-09-28")  # NAV 없는 행은 경계 이전이라도 None
+    await add_distribution(500, "2026-09-29T11:00:00", "2026-09-29")
+    raw = await snapshots.get_cashflows("u1")
+    linked = await nav_link.link_cashflows("u1", raw)
+    by_id = {r["id"]: r for r in linked}
+    raw_by_id = {r["id"]: r for r in raw}
+
+    old = by_id[1]
+    assert old["nav_link_factor"] == pytest.approx(K_A, abs=1e-9)
+    assert old["nav_at_time"] == pytest.approx(1003.57184409, abs=1e-6)
+    assert old["raw_nav_at_time"] == A_D0["nav"]
+    assert old["units_change"] == raw_by_id[1]["units_change"] == pytest.approx(1000 / A_D0["nav"])
+    # 연결된 NAV 이력의 9/29 값과 같다.
+    history = {r["date"]: r for r in await nav_link.get_nav_history("u1")}
+    assert old["nav_at_time"] == pytest.approx(history["2026-09-29"]["nav"])
+
+    pending = by_id[2]
+    assert pending["nav_at_time"] == pytest.approx(980.0 * K_A) and pending["units_change"] == -2.0
+
+    for cid in (3, 4, -1):
+        assert by_id[cid] == raw_by_id[cid]
+        assert "raw_nav_at_time" not in by_id[cid] and "nav_link_factor" not in by_id[cid]
+    assert by_id[3]["nav_at_time"] == 1000.0
+    assert by_id[4]["nav_at_time"] is None and by_id[-1]["nav_at_time"] is None
+
+    # 저장 행은 그대로다.
+    assert {r["id"]: r["nav_at_time"] for r in await snapshots.get_cashflows("u1")}[1] == A_D0["nav"]
+
+
+@pytest.mark.asyncio
+async def test_cashflow_nav_unchanged_without_boundary(temp_db):
+    await seed_user()
+    await save(snap("2026-09-29", 1000, 1000, REGULAR))
+    await save(snap("2026-09-30", 1100, 1100, REGULAR))
+    await add_issued_flow("2026-09-29", 1000.0, 1.0, "2026-09-29")
+    raw = await snapshots.get_cashflows("u1")
+    assert await nav_link.link_cashflows("u1", raw) == raw
+
+
+@pytest.mark.asyncio
+async def test_cashflow_nav_unlinkable_boundary_blanks_older_nav(temp_db):
+    await seed_user()
+    await save(snap("2026-09-28", 1000, 1000, LEGACY))
+    await save({**snap("2026-09-29", 0, 1000, LEGACY), "total_units": 0})
+    await save(snap("2026-09-30", 900, 1000, REGULAR, "2026-09-30T15:30:00.000"))
+    await add_issued_flow("2026-09-28", 1000.0, 1.0, "2026-09-28")
+    await add_issued_flow("2026-09-30", 1000.0, 1.0, "2026-09-30")
+    by_id = {r["id"]: r for r in await nav_link.link_cashflows("u1", await snapshots.get_cashflows("u1"))}
+    assert by_id[1]["nav_at_time"] is None and by_id[1]["nav_link_unavailable"] is True
+    assert by_id[1]["raw_nav_at_time"] == 1000.0 and by_id[1]["units_change"] == 1.0
+    assert by_id[2]["nav_at_time"] == 1000.0 and "nav_link_unavailable" not in by_id[2]
+
+
+@pytest.mark.asyncio
+async def test_cashflows_route_serves_linked_nav_with_raw_marker(temp_db):
+    await seed_user()
+    for row in (A_D0, A_D1):
+        await save(row)
+    await add_issued_flow("2026-09-29", A_D0["nav"], 1.5, "2026-09-29")
+    await add_issued_flow("2026-10-01", 1000.0, 1.0, "2026-10-01")
+    app = create_app()
+    with patch.object(portfolio, "get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+            rows = {r["id"]: r for r in (await client.get("/api/portfolio/cashflows")).json()}
+    assert rows[1]["nav_at_time"] == pytest.approx(1003.57184409, abs=1e-6)
+    assert rows[1]["raw_nav_at_time"] == A_D0["nav"]
+    assert rows[1]["nav_link_factor"] == pytest.approx(K_A, abs=1e-9)
+    assert rows[1]["units_change"] == 1.5
+    assert rows[2]["nav_at_time"] == 1000.0 and "raw_nav_at_time" not in rows[2]
