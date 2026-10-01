@@ -216,6 +216,15 @@ async def test_share_class_ticker_resolves_to_yahoo_dash_symbol():
         save.assert_awaited_once_with(code, "BF-B")
 
 
+async def test_fresh_chart_404_skips_the_redundant_us_probe():
+    yahoo._missing_symbols.set("SGO", True)  # 방금 시세 체인의 chart 가 SGO 404 를 봤다
+    calls: list[str] = []
+    found, probed, save = await _find("SGO", {}, yf_hits={"SGO.PA"}, calls=calls)
+    assert found == "SGO.PA"
+    assert calls == []  # 같은 chart 를 다시 부르지 않는다
+    save.assert_awaited_once_with("SGO", "SGO.PA")
+
+
 async def test_known_dead_ticker_is_not_picked_again():
     foreign._dead_ticker_cache.set("SXR8.DE", True)
     found, probed, _ = await _find("SXR8", {}, yf_hits={"SXR8.DE", "SXR8.F"})
@@ -240,6 +249,48 @@ async def test_naver_fallback_accepts_only_us_exchanges_until_us_absence_is_know
         assert await foreign.resolve_foreign_reuters("SGO") == "SGO.DE"
         # 미국식이 아닌 코드는 원래대로 전체 접미사.
         assert await foreign.resolve_foreign_reuters("SXR8") == "SXR8.DE"
+
+
+async def test_naver_fallback_trusts_a_fresh_chart_404_as_us_absence():
+    # 시세 체인의 Yahoo chart 가 방금 "없음"을 확인했으면 추가 호출 없이 해외 거래소도 받는다
+    # (HPG 는 호찌민 상장 — 시세 경로에서는 yfinance 실패 표시 때문에 상장 확인까지 못 간다).
+    clock = _Clock()
+    seen: list[str] = []
+
+    async def naver(code):
+        seen.append(code)
+        return {"stockName": "x", "reutersCode": code} if code.endswith(".HM") else None
+
+    async with _yahoo_client({}) as client:
+        with patch.object(cache_layer, "_monotonic", clock), \
+             patch.object(yahoo, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(foreign, "yfinance_find_ticker", AsyncMock(return_value=None)), \
+             patch.object(foreign, "fetch_naver_world_stock", new=naver):
+            await yahoo.fetch_close_series("HPG", range_="5d")  # 404 → 없음 증거
+            assert await foreign.resolve_foreign_reuters("HPG") == "HPG.HM"
+            # 오래된 증거(체인 밖)는 세지 않는다 — 다시 미국 거래소만.
+            foreign.reset_resolution_state()
+            seen.clear()
+            clock.now += foreign._MAPPING_EVIDENCE_MAX_AGE + 1
+            assert await foreign.resolve_foreign_reuters("HPG") == "HPG"
+            assert seen == ["HPG", "HPG.O", "HPG.K", "HPG.N"]
+
+
+async def test_naver_fallback_never_returns_a_ticker_healing_just_dropped():
+    foreign._dead_ticker_cache.set("SXR8.DE", True)
+    foreign._dead_ticker_cache.set("ABC.F", True)
+
+    async def naver(code):
+        if code in ("SXR8.DE", "SXR8.F"):
+            return {"stockName": "x", "reutersCode": code}
+        if code == "ABC.DE":  # 점이 있는 코드: 네이버가 다른 상장(죽은 티커)으로 돌려주는 경우
+            return {"stockName": "x", "reutersCode": "ABC.F"}
+        return None
+
+    with patch.object(foreign, "yfinance_find_ticker", AsyncMock(return_value=None)), \
+         patch.object(foreign, "fetch_naver_world_stock", new=naver):
+        assert await foreign.resolve_foreign_reuters("SXR8") == "SXR8.F"
+        assert await foreign.resolve_foreign_reuters("ABC.DE") == "ABC.DE"
 
 
 # --- 자가 치유 ----------------------------------------------------------------------
@@ -370,6 +421,94 @@ class TickerMapHealTests(TempDbMixin):
         saved = await ticker_map_repo.load_ticker_map()
         self.assertEqual(saved["EUN2"], "EUN2.DE")
         self.assertEqual(saved["GOOGL"], "GOOGL.O")
+
+    async def test_unmapped_plain_non_us_code_resolves_from_the_chains_own_404(self):
+        # 호찌민 HPG: Yahoo HPG 404, 네이버 HPG 409, HPG.HM 만 있다. 운영처럼 fast_info
+        # 실패가 yfinance 실패 표시를 남겨 상장 확인(probe)까지 가지 않아도 풀려야 한다.
+        naver_calls: list[str] = []
+
+        async def naver(code):
+            naver_calls.append(code)
+            if code == "HPG.HM":
+                return {"stockName": "Hoa Phat", "reutersCode": "HPG.HM", "closePrice": "27,000",
+                        "compareToPreviousClosePrice": "100", "fluctuationsRatio": "0.37", "nationType": "VNM"}
+            return None
+
+        async def fast_info_fails(ticker):
+            foreign.yf_mark_failed(ticker)
+            return {}
+
+        with patch.object(foreign, "fetch_naver_world_stock", new=naver), \
+             patch.object(foreign, "yfinance_fetch_quote", new=fast_info_fails), \
+             patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=lambda nation, amount: amount * 0.055)):
+            quote = await self._quote("HPG")
+        self.assertEqual(quote["price"], round(27000 * 0.055))
+        self.assertEqual(foreign._ticker_map["HPG"], "HPG.HM")
+        self.assertEqual((await ticker_map_repo.load_ticker_map())["HPG"], "HPG.HM")
+        self.assertEqual(self.chart_calls, ["HPG"])  # 상장 확인용 추가 chart 호출 없음
+        self.assertIn("HPG.HM", naver_calls)
+
+    async def test_unmapped_us_ticker_with_transient_chart_failure_never_takes_a_foreign_listing(self):
+        # 같은 경로에서 미국 조회가 5xx·시간 초과로 실패하면 "없음" 증거가 아니다.
+        self.chart_routes["NVDA"] = httpx.ReadTimeout("slow")
+
+        async def naver(code):
+            return {"stockName": "x", "reutersCode": code} if code.endswith(".DE") else None
+
+        async def fast_info_fails(ticker):
+            foreign.yf_mark_failed(ticker)
+            return {}
+
+        with patch.object(foreign, "fetch_naver_world_stock", new=naver), \
+             patch.object(foreign, "yfinance_fetch_quote", new=fast_info_fails), \
+             patch.object(foreign, "kis_fetch_foreign_quote", AsyncMock(return_value={})):
+            self.assertEqual(await self._quote("NVDA"), {})
+        self.assertNotIn("NVDA", foreign._ticker_map)
+        self.assertNotIn("NVDA", await ticker_map_repo.load_ticker_map())
+
+    async def test_heal_re_resolves_a_plain_non_us_code_to_its_live_listing(self):
+        # SGO → SGO.DE 가 죽고 SGO.PA 가 살아 있다. 치유 뒤 원래 코드 조회의 chart 404 가
+        # 미국 상장 없음 증거가 되어 네이버 폴백이 SGO.PA 로 다시 푼다.
+        await ticker_map_repo.save_ticker("SGO", "SGO.DE")
+        self.chart_routes["SGO.PA"] = httpx.Response(200, json=REAL_CHART)
+
+        async def naver(code):
+            return {"stockName": "Saint-Gobain", "reutersCode": code} if code in ("SGO.DE", "SGO.PA") else None
+
+        async def fast_info_fails(ticker):
+            foreign.yf_mark_failed(ticker)
+            return {}
+
+        with patch.object(foreign, "fetch_naver_world_stock", new=naver), \
+             patch.object(foreign, "yfinance_fetch_quote", new=fast_info_fails):
+            self.assertEqual(await self._quote("SGO"), {})  # 1차 관측
+            self.clock.now += foreign._FAILED_YF_TTL + 5
+            quote = await self._quote("SGO")  # 2차 → 삭제 → SGO.PA 로 재해석
+        self.assertEqual(quote["price"], round(330.74 * 1400))
+        self.assertEqual(foreign._ticker_map["SGO"], "SGO.PA")
+        self.assertEqual((await ticker_map_repo.load_ticker_map())["SGO"], "SGO.PA")
+
+    async def test_healed_mapping_is_not_saved_back_from_naver(self):
+        # 네이버가 SXR8.DE 이름은 알지만 시세가 비어 있는 경우 — 지운 매핑을 같은 주기에
+        # 네이버 폴백이 되살리면 10분마다 지움·저장을 되풀이한다.
+        await ticker_map_repo.save_ticker("SXR8", "SXR8.DE")
+
+        async def naver(code):
+            return {"stockName": "iShares", "reutersCode": "SXR8.DE"} if code == "SXR8.DE" else None
+
+        with patch.object(foreign, "fetch_naver_world_stock", new=naver), \
+             patch.object(foreign, "yf_run", AsyncMock(return_value=None)):
+            self.assertEqual(await self._quote("SXR8"), {})  # 1차 관측
+            self.clock.now += foreign._FAILED_YF_TTL + 5
+            self.assertEqual(await self._quote("SXR8"), {})  # 2차 → 삭제
+            self.assertTrue(foreign.ticker_known_dead("SXR8.DE"))
+            self.assertNotIn("SXR8", foreign._ticker_map)
+            self.assertNotIn("SXR8", await ticker_map_repo.load_ticker_map())
+            for _ in range(3):
+                foreign._failed_yf_cache.clear()
+                self.clock.now += foreign._FAILED_YF_TTL + 5
+                self.assertEqual(await self._quote("SXR8"), {})
+                self.assertNotIn("SXR8", await ticker_map_repo.load_ticker_map())
 
     async def test_delete_ticker_only_removes_the_expected_value(self):
         self.assertFalse(await ticker_map_repo.delete_ticker("AAPL", expected_ticker="AAPL"))

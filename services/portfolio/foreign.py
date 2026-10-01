@@ -102,6 +102,7 @@ _us_listing_absent_cache = MemoryTTLCache("portfolio.us_listing_absent", _FAILED
 _MAPPING_STRIKE_WINDOW = 1800
 _MAPPING_STRIKE_MIN_GAP = 120
 # "없음" 증거는 방금 실패한 시세 체인이 남긴 것만 센다(체인 전체 상한 ≈ 30초).
+# 자가 치유 판단과, 미국식 티커의 미국 상장 없음 판단(_us_listing_known_absent)이 같이 쓴다.
 _MAPPING_EVIDENCE_MAX_AGE = 60
 _mapping_strike_cache = MemoryTTLCache("portfolio.ticker_map_strike", _MAPPING_STRIKE_WINDOW, evict_expired_after=0)
 _DEAD_TICKER_TTL = 24 * 3600
@@ -251,7 +252,10 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
     candidates = _yfinance_candidates(ticker)
     if _is_plain_us_ticker(ticker):
         us_symbol = _yahoo_symbol(ticker)
-        status = await yahoo.probe_listing(us_symbol)
+        if _us_listing_known_absent(ticker):
+            status = yahoo.LISTING_ABSENT
+        else:
+            status = await yahoo.probe_listing(us_symbol)
         if status == yahoo.LISTING_PRESENT:
             await save_ticker(ticker, us_symbol)
             return us_symbol
@@ -325,21 +329,26 @@ async def resolve_foreign_reuters(ticker: str) -> str | None:
     found = await yfinance_find_ticker(ticker)
     if found:
         return found
-    # Naver fallback
+    # Naver fallback — 자가 치유가 방금 내린 티커는 받지 않는다(지운 매핑을 같은
+    # 주기에 다시 저장해 지움·저장을 되풀이하지 않게).
     upper = ticker.upper()
     if "." in upper:
         d = await fetch_naver_world_stock(upper)
         if d:
-            return d.get("reutersCode") or upper
+            reuters = d.get("reutersCode") or upper
+            if not ticker_known_dead(reuters):
+                return reuters
     # 미국식 티커는 미국 상장 "없음"이 확인됐을 때만 해외 거래소 접미사를 받는다.
     suffixes = _EXCHANGE_SUFFIXES
-    if _is_plain_us_ticker(ticker) and not _us_listing_absent_cache.get(ticker):
+    if _is_plain_us_ticker(ticker) and not _us_listing_known_absent(ticker):
         suffixes = _NAVER_US_SUFFIXES
     for suffix in suffixes:
         code = upper + suffix if suffix else upper
         d = await fetch_naver_world_stock(code)
         if d:
-            return d.get("reutersCode") or code
+            reuters = d.get("reutersCode") or code
+            if not ticker_known_dead(reuters):
+                return reuters
     return ticker
 
 
@@ -707,6 +716,18 @@ def reset_resolution_state() -> None:
     _us_listing_absent_cache.clear()
     _mapping_strike_cache.clear()
     _dead_ticker_cache.clear()
+
+
+def _us_listing_known_absent(ticker: str) -> bool:
+    """미국식 티커의 미국 상장 "없음"을 아는가 — 상장 확인(``probe_listing``) 결과,
+    또는 방금 시세 체인의 Yahoo chart 가 남긴 없음 증거(404·Not Found·빈 껍데기,
+    ``_MAPPING_EVIDENCE_MAX_AGE`` 이내). 시세 경로는 fast_info 실패 표시 때문에
+    ``yfinance_find_ticker`` 가 상장 확인 전에 돌아가므로, 체인 증거가 없으면 미국에
+    없는 종목(호찌민 HPG 등)을 네이버 폴백으로도 영영 못 푼다. 시간 초과·5xx·429 는
+    증거를 남기지 않으므로 AAPL → AAPL.DE 같은 오매핑으로 이어지지 않는다."""
+    if _us_listing_absent_cache.get(ticker):
+        return True
+    return yahoo.symbol_missing(_yahoo_symbol(ticker), max_age_seconds=_MAPPING_EVIDENCE_MAX_AGE)
 
 
 def ticker_known_dead(ticker: str) -> bool:
