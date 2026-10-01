@@ -9,6 +9,8 @@ import re
 from datetime import date
 
 NH_CONFIRMED = "nh_confirmed"
+# NH 계좌 몫만 입금 확인. 같은 종목을 수동·다른 증권사 계좌에도 보유해 그 몫은 확인할 수 없다.
+NH_PARTIAL = "nh_partial"
 UNCONFIRMED = "unconfirmed"
 NEEDS_REVIEW = "needs_review"
 
@@ -118,8 +120,13 @@ def annotate_receipts(receipts: list[dict], records: list[dict]) -> list[dict]:
              "nh_match": evidence(pairs[i]) if i in pairs else None} for i, r in enumerate(receipts)]
 
 
-def annotate_calendar(events: list[dict], records: list[dict], receipts: list[dict], today: date) -> list[dict]:
-    """지난 지급일 일정에 NH 확인/미확인을 붙인다. 미래·배당락·기준일·예상 건은 판정하지 않는다."""
+def annotate_calendar(events: list[dict], records: list[dict], receipts: list[dict], today: date,
+                      nh_only: set[str] | None = None) -> list[dict]:
+    """지난 지급일 일정에 NH 확인/미확인을 붙인다. 미래·배당락·기준일·예상 건은 판정하지 않는다.
+
+    일정은 전 계좌 합산 보유 기준이다. nh_only(NH 연동 계좌에만 보유한 종목)를 주면 그 밖의
+    종목은 NH 입금이 있어도 다른 계좌 몫이 확인되지 않았으므로 'NH 일부 확인'이다.
+    """
     confirmed_receipts = annotate_receipts(receipts, records)
     receipt_keys = {r.get("source_key"): r for r in confirmed_receipts if r.get("source_key") and r["verification"] == NH_CONFIRMED}
     pending = [i for i, ev in enumerate(events)
@@ -142,9 +149,29 @@ def annotate_calendar(events: list[dict], records: list[dict], receipts: list[di
         if i not in pending:
             out.append({**ev, "verification": None, "nh_match": None})
         elif i in matched:
-            out.append({**ev, "verification": NH_CONFIRMED, "nh_match": evidence(matched[i])})
+            whole = nh_only is None or str(ev.get("stock_code") or "") in nh_only
+            out.append({**ev, "verification": NH_CONFIRMED if whole else NH_PARTIAL, "nh_match": evidence(matched[i])})
         elif ev.get("source_key") in receipt_keys:
             out.append({**ev, "verification": NH_CONFIRMED, "nh_match": receipt_keys[ev["source_key"]]["nh_match"]})
         else:
             out.append({**ev, "verification": UNCONFIRMED, "nh_match": None})
     return out
+
+
+def nh_duplicate(receipt: dict, records: list[dict], nh_only: set[str]) -> dict | None:
+    """NH 연동 계좌에만 있는 종목의 수동 수취가 이미 가져온 NH 배당과 같은 지급으로 보이면 그 기록.
+
+    수동 수취는 수동 계좌 현금을 늘리고 NH 계좌 현금은 증권사 잔고가 이미 반영했으므로
+    같은 배당을 다시 기록하면 현금이 중복된다(수익은 짝짓기로 한 번만 집계된다).
+    """
+    code = str(receipt.get("stock_code") or "").strip().upper()
+    received = _day(receipt.get("received_date"))
+    if not code or code not in nh_only or not received:
+        return None
+    window = max(CALENDAR_DAYS_AFTER, RECEIPT_DAY_TOLERANCE)
+    for record in records:
+        days = [d for d in (_day(record.get("date")), _day(record.get("booked_date"))) if d]
+        if (record.get("currency") == receipt.get("currency") and same_stock(code, record)
+                and days and min(abs((received - d).days) for d in days) <= window):
+            return record
+    return None

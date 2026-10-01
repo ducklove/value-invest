@@ -124,6 +124,8 @@ def normalize(row: dict, link: dict) -> dict:
 GB_DAILY = "/gbstock/inquiry/v1/dailyTransaction"
 # 조회할 내역이 없으면 Output 블록 없이 이 응답코드만 온다(운영 확인).
 EMPTY_RESPONSE_CODES = frozenset({"13578"})
+# 종합거래내역 한 번 조회 기간(시작~종료 일수 차). 운영 탐사의 365일 단일 조회와 같다.
+DOMESTIC_WINDOW_DAYS = 365
 # 내용 버전에서 제외하는 파생 값. 조회 범위·종목 마스터에 따라 달라질 수 있다.
 VOLATILE_FIELDS = frozenset({"balance_check", "stock_code"})
 
@@ -303,7 +305,8 @@ def _put(collected: dict, data: dict):
 async def _domestic_dividends(user: str, link: dict, start: date, end: date, collected: dict):
     ordinals: dict[tuple, int] = {}
     while start <= end:
-        until = min(start + timedelta(days=30), end)
+        # 운영에서 365일 한 번 조회(연속 조회 포함)를 확인했다. 빈 구간 호출 수를 줄인다.
+        until = min(start + timedelta(days=DOMESTIC_WINDOW_DAYS), end)
         pages = await namuh.pages(user, link["credential_id"], "/common/inquiry/v1/totalTransaction", {
             "act_no": link["account_no"], "iqr_tp_cd": "1", "iqr_rge_cd": "2",
             "iqr_sta_dt": start.strftime("%Y%m%d"), "iqr_end_dt": until.strftime("%Y%m%d"),
@@ -313,6 +316,9 @@ async def _domestic_dividends(user: str, link: dict, start: date, end: date, col
         for page in pages:
             _check_message(page)
             rows = page.get("Output_0")
+            if rows is None and str(page.get("rsp_cd") or "").strip() in EMPTY_RESPONSE_CODES:
+                # 내역이 없는 기간은 Output 블록 없이 '조회할 내역이 없습니다'만 온다.
+                continue
             if not isinstance(rows, list):
                 # 누락 블록을 0건 성공으로 처리하면 누락된 내역이 이후에도 숨겨진다.
                 raise BrokerError("NH 거래내역 응답을 확인할 수 없어 이전 내역을 유지했습니다.")

@@ -5,7 +5,7 @@ import math
 from decimal import ROUND_HALF_UP, Decimal
 
 from domain.broker_activity import INCOME_KINDS, KINDS, stamp
-from domain.dividend_verification import NEEDS_REVIEW, receipt_matches
+from domain.dividend_verification import NEEDS_REVIEW, pair_receipts
 from repositories import account_holdings, brokers
 from repositories.broker_secrets import BrokerError
 from repositories.db import get_db, transaction
@@ -17,12 +17,15 @@ async def state(user: str, aid: str) -> dict | None:
     return dict(row) if row else None
 
 
-async def set_error(user: str, aid: str, message: str):
+async def set_error(user: str, aid: str, message: str | None):
+    """가져오기 실패 기록. 연속 실패 횟수·시도 시각은 자동 재조회 백오프에 쓴다(None = 오류 문구 유지)."""
     async with transaction() as db:
         link = await brokers.get_link(user, aid)
-        await db.execute("INSERT INTO broker_activity_state (google_sub,account_id,account_fingerprint,started_at,error) VALUES (?,?,?,?,?) "
-                         "ON CONFLICT(account_id) DO UPDATE SET error=excluded.error",
-                         (user, aid, link["account_fingerprint"], stamp(), message))
+        now = stamp()
+        await db.execute("INSERT INTO broker_activity_state (google_sub,account_id,account_fingerprint,started_at,error,failed_attempts,attempted_at) "
+                         "VALUES (?,?,?,?,?,1,?) ON CONFLICT(account_id) DO UPDATE SET error=COALESCE(excluded.error,error),"
+                         "failed_attempts=failed_attempts+1,attempted_at=excluded.attempted_at",
+                         (user, aid, link["account_fingerprint"], now, message, now))
 
 
 def _record(row: dict, data: dict | None = None) -> dict:
@@ -40,6 +43,28 @@ async def dividend_records(user: str) -> list[dict]:
         "SELECT id,account_id,kind,data_json FROM broker_transactions WHERE google_sub=? AND kind IN ('dividend','review') "
         "AND json_extract(data_json,'$.nh_dividend')=1", (user,))).fetchall()
     return [_record(dict(row)) for row in rows]
+
+
+async def receipt_duplicates(user: str) -> set[int]:
+    """수동 배당 수취와 일대일로 짝지어진 NH 배당 행 id. 그 수취가 이미 수익으로 분류했다."""
+    db = await get_db()
+    receipts = await (await db.execute("SELECT result_json FROM portfolio_dividend_receipts WHERE google_sub=?", (user,))).fetchall()
+    if not receipts:
+        return set()
+    pairs = pair_receipts([json.loads(r["result_json"]) for r in receipts], await dividend_records(user))
+    return {record["id"] for record in pairs.values()}
+
+
+async def nh_only_codes(user: str) -> set[str]:
+    """NH 실계좌 연동 계좌에만 보유한 종목. 다른 계좌 몫의 배당은 NH 입금으로 확인할 수 없다."""
+    db = await get_db()
+    rows = await (await db.execute(
+        "SELECT h.stock_code,l.provider,l.environment FROM account_holdings h LEFT JOIN broker_account_links l "
+        "ON l.google_sub=h.google_sub AND l.account_id=h.account_id WHERE h.google_sub=? AND h.quantity!=0", (user,))).fetchall()
+    nh, other = set(), set()
+    for row in rows:
+        (nh if row["provider"] == "namuh" and row["environment"] == "live" else other).add(row["stock_code"])
+    return nh - other
 
 
 async def _project(db, row: dict):
@@ -67,13 +92,8 @@ async def _project(db, row: dict):
             amount = float(converted - Decimal(str(data["domestic_tax_krw"])))
         else:
             amount = round(income * fx, 2)
-        if kind == "dividend" and not data.get("adjustment"):
-            # 같은 계좌·종목·수취일(±며칠)·통화·실수령액(반올림 허용)의 수동 배당 수취가 있으면
-            # 그 수취가 이미 수익으로 분류했으므로 다시 집계하지 않는다.
-            receipts = await (await db.execute("SELECT result_json FROM portfolio_dividend_receipts WHERE google_sub=?", (user,))).fetchall()
-            record = _record(row, data)
-            if any(receipt_matches(json.loads(item["result_json"]), record) for item in receipts):
-                amount = None
+    # 수동 배당 수취와의 중복은 여기서 고정하지 않는다. 조회 시 receipt_duplicates()의
+    # 일대일 짝짓기로만 제외해야 수취 하나가 여러 NH 배당을 지우지 않는다.
     await db.execute("UPDATE broker_transactions SET projected_flow=?,income_krw=? WHERE id=?", (target_flow, amount, row["id"]))
 
 
@@ -110,11 +130,46 @@ async def store(user: str, link: dict, entries: list[dict]):
             row = dict(await (await db.execute("SELECT * FROM broker_transactions WHERE id=?", (tid,))).fetchone())
             await _project(db, row)
             changed += 1
-        await db.execute("INSERT INTO broker_activity_state (google_sub,account_id,account_fingerprint,started_at,last_import_at) VALUES (?,?,?,?,?) "
+        await db.execute("INSERT INTO broker_activity_state (google_sub,account_id,account_fingerprint,started_at,last_import_at,attempted_at) VALUES (?,?,?,?,?,?) "
                          "ON CONFLICT(account_id) DO UPDATE SET account_fingerprint=excluded.account_fingerprint,started_at=excluded.started_at,"
-                         "last_import_at=excluded.last_import_at,error=NULL",
-                         (user, link["account_id"], link["account_fingerprint"], now if initial else old_state["started_at"], now))
+                         "last_import_at=excluded.last_import_at,error=NULL,failed_attempts=0,attempted_at=excluded.attempted_at",
+                         (user, link["account_id"], link["account_fingerprint"], now if initial else old_state["started_at"], now, now))
         return changed
+
+
+async def _totals(user: str, aid: str) -> list[dict]:
+    """종류·통화별 수입 합계. amount 와 amount_krw 는 같은 행의 원통화·원화 값이다.
+
+    외화 세금 정산(adjustment)은 배당 원금이 아니므로 adjustment_krw 로 따로 두고,
+    수동 수취와 짝지어진 NH 배당은 수익 집계(income_events)와 같이 제외한다.
+    """
+    db = await get_db()
+    rows = await (await db.execute(
+        "SELECT id,kind,income_krw,data_json FROM broker_transactions WHERE google_sub=? AND account_id=? "
+        "AND kind IN ('dividend','interest','other_income')", (user, aid))).fetchall()
+    duplicate = await receipt_duplicates(user) if any(row["kind"] == "dividend" for row in rows) else set()
+    groups: dict[tuple, dict] = {}
+
+    def add(total, key, value):
+        if value is not None:
+            total[key] = (total[key] or 0) + float(value)
+
+    for row in rows:
+        if row["id"] in duplicate:
+            continue
+        data = json.loads(row["data_json"])
+        total = groups.setdefault((row["kind"], data.get("currency")), {
+            "kind": row["kind"], "currency": data.get("currency"), "amount": None, "amount_krw": None, "adjustment_krw": None})
+        if data.get("adjustment"):
+            add(total, "adjustment_krw", row["income_krw"])
+            continue
+        add(total, "amount", data.get("income_amount"))
+        if data.get("income_amount") is not None:
+            add(total, "amount_krw", row["income_krw"])
+    for total in groups.values():
+        if total["amount"] is None and total["adjustment_krw"] is not None:
+            total["amount"] = 0.0  # 기간 안에 세금 정산만 있는 통화
+    return [groups[key] for key in sorted(groups, key=lambda key: (key[0], key[1] or ""))]
 
 
 async def history(user: str, aid: str, limit: int = 200, offset: int = 0) -> dict:
@@ -130,13 +185,8 @@ async def history(user: str, aid: str, limit: int = 200, offset: int = 0) -> dic
             verification = NEEDS_REVIEW
         items.append({**data, "id": row["id"], "kind": row["kind"], "reason": row["reason"], "revision": row["revision"],
                       "baseline": bool(row["baseline"]), "income_krw": row["income_krw"], "verification": verification})
-    totals = await (await db.execute(
-        "SELECT kind,json_extract(data_json,'$.currency') AS currency,SUM(CAST(json_extract(data_json,'$.income_amount') AS REAL)) AS amount,"
-        "SUM(income_krw) AS amount_krw "
-        "FROM broker_transactions WHERE google_sub=? AND account_id=? AND kind IN ('dividend','interest','other_income') GROUP BY kind,currency",
-        (user, aid))).fetchall()
     progress = await state(user, aid)
-    return {"items": items, "has_more": len(rows) > limit, "totals": [dict(row) for row in totals],
+    return {"items": items, "has_more": len(rows) > limit, "totals": await _totals(user, aid),
             # NH 종합거래내역에 거래 식별자가 없어 배당만 자동 반영한다(이자·입출금 등은 보류).
             "auto_import": "dividends",
             "state": {key: progress[key] for key in ("started_at", "last_import_at", "error")} if progress else None}

@@ -262,7 +262,7 @@ async function pfOpenDividendReceipt(sourceKey) {
     _pfDividend.events = (data.events || []).slice().sort((a, b) => b.date.localeCompare(a.date));
     // NH 배당 입금으로 이미 수익에 반영된 일정은 다시 수취하면 현금이 중복되므로 선택하지 않는다.
     const done = ev => ev.received || ev.verification === 'nh_confirmed';
-    _pfDividendEl('Schedule').innerHTML += _pfDividend.events.map(ev => `<option value="${escapeHtml(ev.source_key)}"${done(ev) ? ' disabled' : ''}>${escapeHtml(ev.date)} · ${escapeHtml(ev.stock_name)} · ${escapeHtml(ev.label || (ev.type === 'ex_date' ? '배당기준일' : '예상 지급'))}${ev.received ? (ev.legacy_receipt_match ? ' · 기존 수취 내역 확인' : ' · 수취 완료') : ev.verification === 'nh_confirmed' ? ' · NH 입금 확인' : ev.verification === 'unconfirmed' ? ' · 미확인' : ''}</option>`).join('');
+    _pfDividendEl('Schedule').innerHTML += _pfDividend.events.map(ev => `<option value="${escapeHtml(ev.source_key)}"${done(ev) ? ' disabled' : ''}>${escapeHtml(ev.date)} · ${escapeHtml(ev.stock_name)} · ${escapeHtml(ev.label || (ev.type === 'ex_date' ? '배당기준일' : '예상 지급'))}${ev.received ? (ev.legacy_receipt_match ? ' · 기존 수취 내역 확인' : ' · 수취 완료') : ev.verification === 'nh_confirmed' ? ' · NH 입금 확인' : ev.verification === 'nh_partial' ? ' · NH 일부 확인' : ev.verification === 'unconfirmed' ? ' · 미확인' : ''}</option>`).join('');
     if (!_pfDividend.dirty && !_pfDividend.pending && !_pfDividend.busy) {
       const selected = _pfDividend.events.find(ev => ev.source_key === sourceKey && !done(ev));
       if (selected) { _pfDividendEl('Schedule').value = sourceKey; _pfDividendSelectSchedule(); }

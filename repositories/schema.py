@@ -1110,6 +1110,9 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     ("portfolio_alerts", "state_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("portfolio_alerts", "important", "INTEGER NOT NULL DEFAULT 0"),
     ("economic_calendar_subscriptions", "automatic", "INTEGER NOT NULL DEFAULT 0"),
+    # 증권사 거래내역 가져오기 연속 실패 횟수·마지막 시도 시각(자동 재조회 백오프).
+    ("broker_activity_state", "failed_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("broker_activity_state", "attempted_at", "TEXT"),
     # 이 입출금의 유닛이 어느 날짜 정산의 total_units 에 반영됐는지.
     # NULL = 미반영 (다음 정산이 date <= 정산일 조건으로 집어간다).
     # 없던 시절에는 '정산일 == date 정확 일치 + 그날 첫 정산'에서만 유닛이

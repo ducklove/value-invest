@@ -89,7 +89,7 @@ async function pfLoadActivity() {
     if (generation !== PfActivity.generation) return;
     PfActivity.items = data.items;
     PfActivity.dirty.clear();
-    _pfActivityEl('pfActivityTotals').innerHTML = '<h3>가져온 기간의 수입 합계</h3>' + (data.totals.map(row => `<span>${escapeHtml(_pfActivityKinds[row.kind])} ${_pfActivityMoney(row.amount)} ${escapeHtml(row.currency)}${row.currency !== 'KRW' && row.amount_krw != null ? ` (원화 ${_pfActivityMoney(row.amount_krw)}원)` : ''}</span>`).join(' · ') || '<p>수입 내역이 없습니다.</p>');
+    _pfActivityEl('pfActivityTotals').innerHTML = '<h3>가져온 기간의 수입 합계</h3>' + (data.totals.map(row => `<span>${escapeHtml(_pfActivityKinds[row.kind])} ${_pfActivityMoney(row.amount)} ${escapeHtml(row.currency)}${row.currency !== 'KRW' && row.amount_krw != null ? ` (원화 ${_pfActivityMoney(row.amount_krw)}원)` : ''}${row.adjustment_krw != null ? ` · 세금 정산 ${_pfActivityMoney(row.adjustment_krw)}원` : ''}</span>`).join(' · ') || '<p>수입 내역이 없습니다.</p>');
     _pfActivityEl('pfActivityRows').innerHTML = data.items.map(row => `<form class="pf-activity-row" data-transaction="${Number(row.id)}">
       <h3>${escapeHtml(row.date)} · ${escapeHtml(row.description || '거래내역')} · ${_pfActivityMoney(row.net_amount)} ${escapeHtml(row.currency)}${_pfActivityTag(row)}</h3>
       <p>${_pfActivityDetail(row)}</p>

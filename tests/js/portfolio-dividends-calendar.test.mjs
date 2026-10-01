@@ -237,8 +237,11 @@ test('지난 지급일은 NH 입금 확인/미확인 태그를 달고, NH 확인
     { date: '2026-05-20', stock_code: '005930', stock_name: '삼성전자', label: '분기 배당 · 지급일', type: 'payment', date_kind: 'payment',
       amount_per_share: 361, currency: 'KRW', shares: 10, expected_amount_krw: 3610, confirmed: true,
       source_key: '005930:ex_date:2026-03-31', verification: 'unconfirmed', nh_match: null },
+    { date: '2026-05-25', stock_code: 'O', stock_name: '리얼티인컴', label: '월 배당 · 지급일', type: 'payment', date_kind: 'payment',
+      amount_per_share: 0.26, currency: 'USD', shares: 30, expected_amount_krw: 10920, confirmed: true,
+      source_key: 'O:ex_date:2026-04-30', verification: 'nh_partial', nh_match: { date: '2026-05-26', net_amount: 2.2, currency: 'USD' } },
   ];
-  payload.monthly = [{ month: '2026-05', total_krw: 5290, count: 2 }];
+  payload.monthly = [{ month: '2026-05', total_krw: 16210, count: 3 }];
   payload.summary = { ...payload.summary, unconfirmed_count: 1 };
   const { w } = loadPanel(payload);
   await w.pfLoadDividendCalendarPanel();
@@ -251,5 +254,9 @@ test('지난 지급일은 NH 입금 확인/미확인 태그를 달고, NH 확인
   assert.equal(agnc.querySelector('.js-pf-dividend-receipt'), null);
   assert.equal(ssec.querySelector('.pf-divcal-badge.unconfirmed').textContent, '미확인');
   assert.ok(ssec.querySelector('.js-pf-dividend-receipt'));
+  // NH 밖 계좌에도 보유한 종목은 NH 몫만 확인 — 나머지 몫의 수취 입력은 그대로 둔다.
+  const realty = rows.find(row => /리얼티인컴/.test(row.textContent));
+  assert.equal(realty.querySelector('.pf-divcal-badge.nh.partial').textContent, 'NH 일부 확인');
+  assert.ok(realty.querySelector('.js-pf-dividend-receipt'));
   assert.match(w.document.querySelector('.pf-chart-range').textContent, /지난 지급 미확인 1건/);
 });

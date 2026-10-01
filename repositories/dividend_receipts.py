@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from domain.dividend_receipts import DividendCreate, DividendInput, calculate_dividend
-from domain.dividend_verification import annotate_receipts
+from domain.dividend_verification import annotate_receipts, nh_duplicate
 from domain.portfolio_trades import TradeConflict
 from repositories import broker_activity, investment_insights, portfolio
 from repositories.account_holdings import account_operation, current
@@ -25,6 +25,13 @@ async def _state(user: str, receipt: DividendInput) -> tuple:
         )).fetchone()
         if existing:
             raise TradeConflict("이미 수취 기록한 배당 스케줄입니다. 최근 수취 내역을 확인해 주세요.")
+    # NH 연동 계좌에만 있는 종목의 배당은 NH 입금으로 이미 가져왔다. 수동 계좌에 다시 넣으면 현금이 중복된다.
+    nh_only = await broker_activity.nh_only_codes(user)
+    if receipt.stock_code in nh_only:
+        duplicate = nh_duplicate(receipt.model_dump(mode="json"), await broker_activity.dividend_records(user), nh_only)
+        if duplicate:
+            raise TradeConflict(f"NH 계좌에서 {duplicate.get('date')} 배당 입금을 이미 가져왔습니다. "
+                                "이 종목은 NH 연동 계좌에만 있어 수동 수취를 기록하면 현금이 중복됩니다.")
     cash = await portfolio.get_portfolio_item(user, f"CASH_{receipt.currency}")
     return cash, _digest(cash)
 

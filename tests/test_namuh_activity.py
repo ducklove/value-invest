@@ -170,7 +170,12 @@ class ActivityTests(TempDbMixin):
         self.assertIsNone(history["state"]["last_import_at"])
         account = next(r for r in await accounts.list_accounts("u1") if r["account_id"] == self.aid)
         self.assertEqual(account["connection"]["activity_error"], result["activity_error"])
-        with patch.object(activity, "fetch", AsyncMock(return_value=[self.normalized()])), \
+        # 실패 직후의 자동 동기화는 백오프 동안 거래내역을 다시 조회하지 않는다(잔고만 갱신).
+        retry = AsyncMock(return_value=[self.normalized()])
+        with patch.object(activity, "fetch", retry), patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
+            await sync.sync_account("u1", self.aid, include_activity=True)
+        retry.assert_not_called()
+        with patch.object(activity, "fetch", retry), patch.object(sync, "ACTIVITY_MIN_INTERVAL", 0), \
              patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
             result = await sync.sync_account("u1", self.aid, include_activity=True)
         self.assertIsNone(result["activity_error"])

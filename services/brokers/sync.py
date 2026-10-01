@@ -23,15 +23,27 @@ ACTIVITY_OVERLAP_DAYS = 30
 ACTIVITY_INITIAL_DAYS = 365
 # 자동 동기화의 거래내역 재조회 최소 간격(초). 기간 지정 가져오기는 제한하지 않는다.
 ACTIVITY_MIN_INTERVAL = 300
+# 가져오기 실패 후 자동 재조회 간격 상한(초). 실패할 때마다 최소 간격의 2배로 늘린다.
+ACTIVITY_MAX_BACKOFF = 3600
 
 
-def _recent(stamp_text: str) -> bool:
+def _recent(stamp_text: str | None, seconds: float | None = None) -> bool:
+    if not stamp_text:
+        return False
     try:
         last = datetime.fromisoformat(stamp_text)
     except ValueError:
         return False
     now = datetime.now(activity.KST).replace(tzinfo=None)
-    return 0 <= (now - last.replace(tzinfo=None)).total_seconds() < ACTIVITY_MIN_INTERVAL
+    return 0 <= (now - last.replace(tzinfo=None)).total_seconds() < (ACTIVITY_MIN_INTERVAL if seconds is None else seconds)
+
+
+def _backing_off(state: dict | None) -> bool:
+    """연속 실패 후에는 마지막 시도부터 5분·10분·20분…(최대 1시간) 동안 자동 재조회하지 않는다."""
+    failures = (state or {}).get("failed_attempts") or 0
+    if not failures:
+        return False
+    return _recent(state.get("attempted_at"), min(ACTIVITY_MIN_INTERVAL * 2 ** (failures - 1), ACTIVITY_MAX_BACKOFF))
 
 
 async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
@@ -58,8 +70,9 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                                   if last else until - timedelta(days=ACTIVITY_INITIAL_DAYS))
                 if start is None:
                     since = max(since, until - timedelta(days=ACTIVITY_INITIAL_DAYS))
-            if import_activity and start is None and end is None and last and _recent(last):
+            if import_activity and start is None and end is None and (_recent(last) or _backing_off(previous_state)):
                 # 배당 전용 통보가 없어 자주 재조회할 이유가 없다. 잔고는 계속 60초마다 갱신한다.
+                # 실패한 가져오기도 같은 간격(이후 지수 증가)으로만 재시도해 최초 365일 조회 반복을 막는다.
                 import_activity = False
             if import_activity:
                 try:
@@ -111,6 +124,9 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
             # 두 조회가 모두 실패했다면 각자의 원인을 보존한다.
             if import_activity and activity_error:
                 await broker_activity.set_error(user, aid, activity_error)
+            elif entries is not None:
+                # 가져온 내역이 잔고 실패로 함께 롤백됐다. 같은 조회를 매 주기 반복하지 않도록 시도만 기록한다.
+                await broker_activity.set_error(user, aid, None)
             async with transaction() as db:
                 await db.execute("UPDATE broker_account_links SET sync_error=? WHERE google_sub=? AND account_id=?", (str(exc), user, aid))
             raise

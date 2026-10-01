@@ -5,12 +5,14 @@
 
 import copy
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin, seed_user
 
-from domain.dividend_verification import NH_CONFIRMED, UNCONFIRMED, annotate_calendar, annotate_receipts
+from domain.dividend_receipts import DividendInput
+from domain.dividend_verification import NH_CONFIRMED, NH_PARTIAL, UNCONFIRMED, annotate_calendar, annotate_receipts
+from domain.portfolio_trades import TradeConflict
 from repositories import (
     account_holdings,
     accounts,
@@ -79,6 +81,8 @@ class FakeNH:
         raise AssertionError(path)
 
 
+AAPL = {"stock_code": "AAPL", "stock_name": "Apple", "quantity": 10, "avg_price": 1, "avg_price_currency": "USD", "currency": "USD"}
+SAMSUNG = {"stock_code": "005930", "stock_name": "삼성전자", "quantity": 10, "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}
 CASH = [{"stock_code": "CASH_KRW", "stock_name": "원화", "quantity": 18460, "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"},
         {"stock_code": "CASH_USD", "stock_name": "USD 현금", "quantity": 108.5, "avg_price": 1, "avg_price_currency": "USD", "currency": "USD"}]
 
@@ -93,8 +97,9 @@ class NHDividendTests(TempDbMixin):
         await brokers.link_account("u1", self.aid, self.cid, ACCOUNT, "live")
         self.link = await brokers.get_link("u1", self.aid)
 
-    async def sync(self, fake, **kwargs):
-        with patch.object(namuh, "pages", fake), patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(copy.deepcopy(CASH), {}))):
+    async def sync(self, fake, snapshot=None, **kwargs):
+        rows = copy.deepcopy(CASH) + copy.deepcopy(snapshot or [])
+        with patch.object(namuh, "pages", fake), patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
             return await sync.sync_account("u1", self.aid, include_activity=True, **kwargs)
 
     async def rows(self):
@@ -237,6 +242,94 @@ class NHDividendTests(TempDbMixin):
             with self.assertRaises(BrokerError):
                 await activity.fetch("u1", self.link, TODAY - timedelta(days=5), TODAY)
 
+    async def test_empty_domestic_period_is_zero_rows_not_failure(self):
+        # NH 는 내역이 없는 기간에 Output 블록 없이 13578 만 돌려준다(해외 일별거래내역과 같은 규약).
+        class EmptyAware(FakeNH):
+            async def __call__(self, user, cid, path, body, environment="live"):
+                pages = await super().__call__(user, cid, path, body, environment)
+                if path == TOTAL and not pages[0]["Output_0"]:
+                    return [{"rsp_cd": "13578", "rsp_msg": "조회할 내역이 없습니다."}]
+                return pages
+        fake = EmptyAware([], [daily_row()])
+        result = await self.sync(fake)
+        self.assertIsNone(result["activity_error"])
+        self.assertEqual([json.loads(r["data_json"])["currency"] for r in await self.rows()], ["USD"])
+        # 최초 365일은 종합거래내역 한 번(운영 확인 범위)으로 읽는다.
+        totals = [body for path, body in fake.calls if path == TOTAL]
+        self.assertEqual([(b["iqr_sta_dt"], b["iqr_end_dt"]) for b in totals], [(ymd(TODAY - timedelta(days=365)), ymd(TODAY))])
+        # 이후 조용한 계좌의 겹침 재조회도 빈 기간을 실패로 보지 않는다.
+        fake.total = [total_row()]
+        with patch.object(sync, "ACTIVITY_MIN_INTERVAL", 0):
+            self.assertIsNone((await self.sync(fake))["activity_error"])
+        self.assertEqual(len(await self.rows()), 2)
+        # 13578 이 아닌 응답에서 Output_0 가 빠지면 계속 보류한다.
+        async def missing(user, cid, path, body, environment="live"):
+            return [{"rsp_cd": "00000"}]
+        with patch.object(namuh, "pages", missing), self.assertRaises(BrokerError):
+            await activity.fetch("u1", self.link, TODAY - timedelta(days=5), TODAY)
+
+    async def test_failed_import_backs_off_instead_of_rereading_every_sync(self):
+        class Failing(FakeNH):
+            async def __call__(self, user, cid, path, body, environment="live"):
+                await super().__call__(user, cid, path, body, environment)
+                if path == activity.GB_DAILY:
+                    raise BrokerError("일시 오류")
+                return [{"rsp_cd": "00000", "Output_0": []}]
+        fake = Failing()
+        self.assertEqual((await self.sync(fake))["activity_error"], "일시 오류")
+        first = len(fake.calls)
+        self.assertEqual(first, 2)
+        await self.sync(fake)  # 60초 뒤 자동 동기화: 잔고만 갱신
+        self.assertEqual(len(fake.calls), first)
+        state = await broker_activity.state("u1", self.aid)
+        self.assertEqual((state["failed_attempts"], state["last_import_at"]), (1, None))
+        db = await get_db()
+
+        async def attempted(minutes, failures):
+            stamp_text = (datetime.now(activity.KST).replace(tzinfo=None) - timedelta(minutes=minutes)).isoformat()
+            await db.execute("UPDATE broker_activity_state SET attempted_at=?,failed_attempts=? WHERE account_id=?", (stamp_text, failures, self.aid))
+            await db.commit()
+        await attempted(15, 3)  # 3회 연속 실패 → 20분 대기
+        await self.sync(fake)
+        self.assertEqual(len(fake.calls), first)
+        await attempted(25, 3)
+        await self.sync(fake)
+        self.assertEqual(len(fake.calls), first + 2)
+        self.assertEqual((await broker_activity.state("u1", self.aid))["failed_attempts"], 4)
+        # 기간 지정 가져오기는 백오프와 무관하고, 성공하면 실패 횟수를 지운다.
+        await self.sync(FakeNH([total_row()], None), start=TODAY - timedelta(days=30), end=TODAY)
+        state = await broker_activity.state("u1", self.aid)
+        self.assertEqual((state["failed_attempts"], state["error"]), (0, None))
+
+    async def test_history_totals_pair_same_rows_and_separate_tax_settlement(self):
+        refund = daily_row(9, sps_cd_nm="외화제세금환급", fc_trd_amt=1.5, fc_tax_sum=10.0, fc_icm_tax=10.0, tax_sum=2156,
+                           krw_sas_amt=14005, trd_bf_fc_dca=108.5, trd_af_fc_dca=110.0, trd_bf_dca=0, trd_af_dca=-2156)
+        await self.receipt(n=1, account_id=None)  # 국내 배당은 수동 수취로 이미 분류
+        await self.sync(FakeNH([total_row()], [daily_row(), refund]))
+        totals = (await broker_activity.history("u1", self.aid))["totals"]
+        self.assertEqual(totals, [{"kind": "dividend", "currency": "USD", "amount": 8.5, "amount_krw": 11904.0, "adjustment_krw": -55.0}])
+
+    async def test_one_receipt_offsets_only_one_nh_dividend(self):
+        # 수취 하나(계좌 미지정)가 같은 종목·날짜·금액의 NH 배당 두 건과 맞아도 한 건만 상쇄한다.
+        await self.receipt(n=1, account_id=None)
+        await self.sync(FakeNH([total_row(), total_row()], None))
+        self.assertTrue(all(r["income_krw"] == 8460 for r in await self.rows()))
+        events = await investment_insights.income_events("u1", "2000-01-01", "2100-01-01")
+        self.assertEqual([e["amount_krw"] for e in events if e.get("from_broker")], [8460])
+
+    async def test_server_refuses_manual_receipt_for_nh_only_dividend(self):
+        await self.sync(FakeNH([total_row()], None), snapshot=[SAMSUNG])
+        payload = {"stock_code": "005930", "stock_name": "삼성전자", "country": "KR", "currency": "KRW",
+                   "received_date": (TODAY - timedelta(days=9)).isoformat(), "gross_amount": 10000}
+        with self.assertRaises(TradeConflict):
+            await dividend_receipts.preview_dividend("u1", DividendInput(**payload))
+        # 다른 날짜의 배당(NH 입금 없음)은 막지 않는다.
+        far = {**payload, "received_date": (TODAY - timedelta(days=60)).isoformat()}
+        self.assertEqual((await dividend_receipts.preview_dividend("u1", DividendInput(**far)))["net_amount"], 8460)
+        # 수동 계좌에도 보유하면 그 몫의 수취는 기록할 수 있다.
+        await portfolio.save_portfolio_item("u1", "005930", "삼성전자", 5, 1, account_id=await accounts.get_default_account_id("u1"))
+        self.assertEqual((await dividend_receipts.preview_dividend("u1", DividendInput(**payload)))["net_amount"], 8460)
+
     def test_read_paths_include_only_read_inquiries(self):
         self.assertIn(activity.GB_DAILY, namuh.READ_PATHS)
         self.assertFalse(any("order" in path.lower() for path in namuh.READ_PATHS))
@@ -303,16 +396,36 @@ class NHDividendTests(TempDbMixin):
         self.assertEqual(alone[0]["verification"], UNCONFIRMED)
 
     async def test_calendar_api_marks_unconfirmed_past_payment(self):
-        await portfolio.save_portfolio_item("u1", "AAPL", "Apple", 10, 1, "USD")
         today = TODAY
         paid, missed = today - timedelta(days=12), today - timedelta(days=40)
         history = {"AAPL": {"events": [{"pay_date": d.isoformat(), "ex_date": None, "record_date": None, "currency": "USD", "amount_per_share": 0.25}
                                        for d in (missed, paid)], "status": "fresh", "official": True, "fetched_at": today.isoformat()}}
-        await self.sync(FakeNH([], [daily_row(day=paid)]))
-        with patch("services.dividend_sources.get_histories", AsyncMock(return_value=history)), \
-             patch("services.portfolio.fx.fx_rate_for_currency", AsyncMock(return_value=1400)):
-            result = await cal.build_calendar("u1", months_back=2, months_forward=1, today=today)
-        status = {e["date"]: e["verification"] for e in result["events"] if e["stock_code"] == "AAPL" and e["date_kind"] == "payment" and e["type"] != "estimated"}
+        await self.sync(FakeNH([], [daily_row(day=paid)]), snapshot=[AAPL])
+
+        async def calendar():
+            with patch("services.dividend_sources.get_histories", AsyncMock(return_value=history)), \
+                 patch("services.portfolio.fx.fx_rate_for_currency", AsyncMock(return_value=1400)):
+                result = await cal.build_calendar("u1", months_back=2, months_forward=1, today=today)
+            return result, {e["date"]: e["verification"] for e in result["events"]
+                            if e["stock_code"] == "AAPL" and e["date_kind"] == "payment" and e["type"] != "estimated"}
+        result, status = await calendar()
         self.assertEqual(status[paid.isoformat()], NH_CONFIRMED)
         self.assertEqual(status[missed.isoformat()], UNCONFIRMED)
         self.assertGreaterEqual(result["summary"]["unconfirmed_count"], 1)
+        # 같은 종목을 수동 계좌에도 보유하면 NH 입금은 NH 계좌 몫만 확인한다(수동 몫은 수취 입력 대상).
+        manual = await accounts.get_default_account_id("u1")
+        await portfolio.save_portfolio_item("u1", "AAPL", "Apple", 100, 1, "USD", account_id=manual)
+        result, status = await calendar()
+        self.assertEqual(status[paid.isoformat()], NH_PARTIAL)
+        self.assertEqual(status[missed.isoformat()], UNCONFIRMED)
+        self.assertEqual(result["summary"]["nh_partial_count"], 1)
+
+    def test_calendar_mixed_account_holdings_are_partial(self):
+        today = date(2026, 9, 10)
+        events = [{"stock_code": "005930", "date": "2026-08-20", "date_kind": "payment", "type": "payment", "shares": 110,
+                   "source_key": "005930:ex_date:2026-06-29"}]
+        nh = [{"id": 1, "account_id": "nh", "date": "2026-08-20", "stock_code": "005930", "currency": "KRW", "net_amount": 3384.0}]
+        self.assertEqual(annotate_calendar(events, nh, [], today, {"005930"})[0]["verification"], NH_CONFIRMED)
+        mixed = annotate_calendar(events, nh, [], today, set())[0]
+        self.assertEqual((mixed["verification"], mixed["nh_match"]["date"]), (NH_PARTIAL, "2026-08-20"))
+        self.assertEqual(annotate_calendar(events, [], [], today, set())[0]["verification"], UNCONFIRMED)

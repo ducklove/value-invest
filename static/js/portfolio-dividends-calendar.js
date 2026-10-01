@@ -53,6 +53,8 @@ function _pfDivCalVerify(ev) {
     const title = m.date ? `NH 입금 ${m.date}${m.net_amount != null ? ` · ${Number(m.net_amount).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${m.currency || ''}` : ''}` : 'NH 배당 입금 확인';
     return ` <span class="pf-divcal-badge nh" title="${escapeHtml(title)}">NH 확인</span>`;
   }
+  // 같은 종목을 NH 밖 계좌에도 보유: NH 계좌 몫만 확인, 나머지 몫은 미확인(수취 입력 유지).
+  if (ev.verification === 'nh_partial') return ' <span class="pf-divcal-badge nh partial" title="NH 계좌 몫의 배당 입금만 확인했습니다. 다른 계좌 몫은 미확인입니다.">NH 일부 확인</span>';
   if (ev.verification === 'unconfirmed') return ' <span class="pf-divcal-badge unconfirmed" title="지급일이 지났지만 NH 배당 입금을 찾지 못했습니다.">미확인</span>';
   return '';
 }

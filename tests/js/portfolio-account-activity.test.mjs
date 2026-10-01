@@ -83,7 +83,7 @@ test('NH 배당은 확인 태그와 해외 세전·현지세·국내세·원화 
     const review={...dividend,id:4,kind:'review',fx_rate:null,net_krw:null,gross_amount:null,verification:'needs_review'};
     const refund={...dividend,id:5,description:'외화제세금환급 · 배당 세금 정산',net_amount:1.5,domestic_tax_krw:2156,adjustment:'tax_refund',gross_amount:null};
     const domestic={...row,id:6,description:'배당금',kind:'dividend',net_amount:8460,income_amount:8460,gross_amount:10000,tax_amount:1540,fee_amount:0,verification:'nh_confirmed'};
-    s.w.apiFetchJson=async()=>({items:[dividend,review,refund,domestic],totals:[{kind:'dividend',currency:'USD',amount:18.5,amount_krw:13950}],has_more:false,auto_import:'dividends',state:{last_import_at:'2026-10-01T10:00:00'}});
+    s.w.apiFetchJson=async()=>({items:[dividend,review,refund,domestic],totals:[{kind:'dividend',currency:'USD',amount:8.5,amount_krw:11904,adjustment_krw:-55}],has_more:false,auto_import:'dividends',state:{last_import_at:'2026-10-01T10:00:00'}});
     await s.w.pfOpenAccountActivity({account_id:'a',name:'NH',broker:'namuh'});
     assert.match(s.el('pfActivityPollingHelp').textContent,/배당·분배금은 NH 거래내역에서 자동/);
     assert.match(s.el('pfActivityPollingHelp').textContent,/이자·입출금 등은 .*보류/);
@@ -96,6 +96,7 @@ test('NH 배당은 확인 태그와 해외 세전·현지세·국내세·원화 
     assert.match(forms[1].textContent,/환율 확인 전/);
     assert.match(forms[2].textContent,/배당 세금 정산 · 환급 1\.5 USD · 국내세 2,156원/);
     assert.match(forms[3].textContent,/세전 10,000, 세금 1,540/);
-    assert.match(s.el('pfActivityTotals').textContent,/18\.5 USD \(원화 13,950원\)/);
+    // 원통화·원화 합계는 같은 배당 행이고, 외화 세금 정산은 따로 보인다.
+    assert.match(s.el('pfActivityTotals').textContent,/8\.5 USD \(원화 11,904원\) · 세금 정산 -55원/);
   } finally {s.dom.window.close();}
 });

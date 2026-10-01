@@ -4,7 +4,6 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from domain.dividend_verification import pair_receipts
 from repositories.db import get_db, transaction
 
 
@@ -105,11 +104,7 @@ async def income_events(user: str, start: str, end: str) -> list[dict]:
     duplicate = set()
     if any(row["kind"] == "dividend" for row in imported):
         from repositories import broker_activity
-        receipts = await (await db.execute("SELECT result_json FROM portfolio_dividend_receipts WHERE google_sub=?", (user,))).fetchall()
-        if receipts:
-            records = await broker_activity.dividend_records(user)
-            pairs = pair_receipts([json.loads(r["result_json"]) for r in receipts], records)
-            duplicate = {record["id"] for record in pairs.values()}
+        duplicate = await broker_activity.receipt_duplicates(user)
     for row in imported:
         if row["id"] in duplicate:
             continue
