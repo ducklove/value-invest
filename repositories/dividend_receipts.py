@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from domain.dividend_receipts import DividendCreate, DividendInput, calculate_dividend
+from domain.dividend_verification import annotate_receipts
 from domain.portfolio_trades import TradeConflict
-from repositories import investment_insights, portfolio
+from repositories import broker_activity, investment_insights, portfolio
 from repositories.account_holdings import account_operation, current
 from repositories.db import get_db, read_snapshot, transaction
 
@@ -70,12 +71,16 @@ async def record_dividend(user: str, receipt: DividendCreate) -> dict:
     return result
 
 
-async def list_receipts(user: str, limit: int = 20) -> list[dict]:
+async def list_receipts(user: str, limit: int = 20, *, verify: bool = True) -> list[dict]:
     db = await get_db()
     rows = await (await db.execute(
         "SELECT result_json FROM portfolio_dividend_receipts WHERE google_sub=? ORDER BY id DESC LIMIT ?", (user, limit),
     )).fetchall()
-    return [json.loads(row["result_json"]) for row in rows]
+    receipts = [json.loads(row["result_json"]) for row in rows]
+    if not verify or not receipts:
+        return receipts
+    # NH 배당 입금과 대응되면 'NH 확인', 아니면 '미확인'. 저장된 원장은 바꾸지 않는다.
+    return annotate_receipts(receipts, await broker_activity.dividend_records(user))
 
 
 async def received_source_keys(user: str) -> set[str]:

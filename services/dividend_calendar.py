@@ -7,7 +7,10 @@ import json
 from datetime import date
 
 from domain.dividend_schedule import FREQUENCY_LABELS, calendar_event, event_day, frequency_of, project_events
+from domain.dividend_verification import NH_CONFIRMED, UNCONFIRMED, annotate_calendar
+from repositories import broker_activity
 from repositories import db as db_repo
+from repositories import dividend_receipts as dividend_receipts_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from repositories import portfolio as portfolio_repo
 from services import dividend_sources
@@ -112,6 +115,11 @@ async def build_calendar(google_sub: str, months_back: int = 2, months_forward: 
                 rate_source = "stored"
             events.append({**calendar_event(holding, item, rate, frequency, feed), "fx_source": rate_source if rate else "unavailable"})
     events.sort(key=lambda event: (event["date"], event["stock_code"]))
+    if events:
+        # 지난 지급일에 NH 배당 입금(또는 NH로 확인된 수동 수취)이 없으면 '미확인'으로 표시한다.
+        records = await broker_activity.dividend_records(google_sub)
+        receipts = await dividend_receipts_repo.list_receipts(google_sub, limit=10000, verify=False)
+        events = annotate_calendar(events, records, receipts, today)
     monthly = _monthly_aggregation(events, months)
     return {"as_of": today.isoformat(), "months_back": months_back, "months_forward": months_forward,
             "start_month": _month_key(*months[0]), "end_month": _month_key(*months[-1]),
@@ -121,4 +129,6 @@ async def build_calendar(google_sub: str, months_back: int = 2, months_forward: 
                         "observed_count": sum(e["date_status"] == "observed" for e in events),
                         "total_expected_krw": sum(m["total_krw"] for m in monthly),
                         "unknown_payment_count": sum(not c["has_payment_dates"] for c in coverage),
-                        "stale_count": sum(c["status"] != "fresh" for c in coverage)}}
+                        "stale_count": sum(c["status"] != "fresh" for c in coverage),
+                        "unconfirmed_count": sum(e.get("verification") == UNCONFIRMED for e in events),
+                        "nh_confirmed_count": sum(e.get("verification") == NH_CONFIRMED for e in events)}}

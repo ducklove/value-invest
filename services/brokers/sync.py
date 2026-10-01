@@ -17,6 +17,21 @@ from services.brokers.symbols import records as records
 from services.brokers.symbols import summary as summary
 
 _sync_locks: dict[str, asyncio.Lock] = {}
+# 배당 입금은 처리일(trd_dt)보다 실거래일이 앞서는 소급 등록이 있어 넉넉히 겹쳐 다시 읽는다.
+ACTIVITY_OVERLAP_DAYS = 30
+# 최초 가져오기는 최근 12개월(운영에서 365일 한 번 조회 확인).
+ACTIVITY_INITIAL_DAYS = 365
+# 자동 동기화의 거래내역 재조회 최소 간격(초). 기간 지정 가져오기는 제한하지 않는다.
+ACTIVITY_MIN_INTERVAL = 300
+
+
+def _recent(stamp_text: str) -> bool:
+    try:
+        last = datetime.fromisoformat(stamp_text)
+    except ValueError:
+        return False
+    now = datetime.now(activity.KST).replace(tzinfo=None)
+    return 0 <= (now - last.replace(tzinfo=None)).total_seconds() < ACTIVITY_MIN_INTERVAL
 
 
 async def fetch_snapshot(user: str, link: dict) -> tuple[list[dict], dict]:
@@ -37,9 +52,16 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
             activity_error = None
             if import_activity:
                 previous_state = await broker_activity.state(user, aid)
+                last = previous_state["last_import_at"] if previous_state else None
                 until = end or datetime.now(activity.KST).date()
-                since = start or (date.fromisoformat(previous_state["last_import_at"][:10]) - timedelta(days=7)
-                                  if previous_state and previous_state["last_import_at"] else until - timedelta(days=90))
+                since = start or (date.fromisoformat(last[:10]) - timedelta(days=ACTIVITY_OVERLAP_DAYS)
+                                  if last else until - timedelta(days=ACTIVITY_INITIAL_DAYS))
+                if start is None:
+                    since = max(since, until - timedelta(days=ACTIVITY_INITIAL_DAYS))
+            if import_activity and start is None and end is None and last and _recent(last):
+                # 배당 전용 통보가 없어 자주 재조회할 이유가 없다. 잔고는 계속 60초마다 갱신한다.
+                import_activity = False
+            if import_activity:
                 try:
                     entries = await adapter.fetch_activity(user, link, since, until)
                 except BrokerError as exc:

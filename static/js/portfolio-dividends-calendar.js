@@ -46,6 +46,17 @@ function _pfDivCalBadge(ev) {
     : '<span class="pf-divcal-badge">예상</span>';
 }
 
+// 지난 지급일: NH 배당 입금(또는 NH로 확인된 수동 수취)이 있으면 'NH 확인', 없으면 '미확인'.
+function _pfDivCalVerify(ev) {
+  if (ev.verification === 'nh_confirmed') {
+    const m = ev.nh_match || {};
+    const title = m.date ? `NH 입금 ${m.date}${m.net_amount != null ? ` · ${Number(m.net_amount).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${m.currency || ''}` : ''}` : 'NH 배당 입금 확인';
+    return ` <span class="pf-divcal-badge nh" title="${escapeHtml(title)}">NH 확인</span>`;
+  }
+  if (ev.verification === 'unconfirmed') return ' <span class="pf-divcal-badge unconfirmed" title="지급일이 지났지만 NH 배당 입금을 찾지 못했습니다.">미확인</span>';
+  return '';
+}
+
 function _pfDivCalCheckedDay(value) {
   const day = new Date(value);
   return Number.isNaN(day.getTime()) ? String(value || '').slice(0, 10)
@@ -75,11 +86,11 @@ function _pfDivCalEventHtml(ev, todayIso) {
   return `<div class="${classes.join(' ')}">
     <span class="pf-divcal-date">${escapeHtml(ev.date)}${ev.date_precision === 'approximate' ? ' 전후' : ''}</span>
     <span class="pf-divcal-stock">
-      <span class="pf-divcal-stock-name">${escapeHtml(ev.stock_name || ev.stock_code)} ${_pfDivCalBadge(ev)}</span>
+      <span class="pf-divcal-stock-name">${escapeHtml(ev.stock_name || ev.stock_code)} ${_pfDivCalBadge(ev)}${_pfDivCalVerify(ev)}</span>
       <span class="pf-divcal-sub">${escapeHtml(ev.label || '')} · 주당 ${_pfDivCalPerShare(ev)} × ${shares.toLocaleString()}주</span>
       ${_pfDivCalSource(ev)}
     </span>
-    <span class="pf-divcal-amount">${amount}${ev.receiptable === false ? '' : `<button type="button" class="pf-mini-btn pf-divcal-receipt js-pf-dividend-receipt" data-dividend-source="${escapeHtml(ev.source_key || `${ev.stock_code}:${ev.type}:${ev.date}`)}">수취 입력</button>`}</span>
+    <span class="pf-divcal-amount">${amount}${ev.receiptable === false || ev.verification === 'nh_confirmed' ? '' : `<button type="button" class="pf-mini-btn pf-divcal-receipt js-pf-dividend-receipt" data-dividend-source="${escapeHtml(ev.source_key || `${ev.stock_code}:${ev.type}:${ev.date}`)}">수취 입력</button>`}</span>
   </div>`;
 }
 
@@ -127,13 +138,14 @@ function _pfRenderDividendCalendar(data) {
   const summary = data.summary || {};
   const totalLine = `기간 <strong>${escapeHtml(data.start_month || '')} ~ ${escapeHtml(data.end_month || '')}</strong>`
     + ` · 지급일 기준 세전 합계 <strong>${fmtKrw(summary.total_expected_krw || 0)}원</strong>`
-    + ` · 공시 ${Number(summary.confirmed_count || 0)}건 / 예상 ${Number(summary.estimated_count || 0)}건 / 수집 이력 ${Number(summary.observed_count || 0)}건`;
+    + ` · 공시 ${Number(summary.confirmed_count || 0)}건 / 예상 ${Number(summary.estimated_count || 0)}건 / 수집 이력 ${Number(summary.observed_count || 0)}건`
+    + (summary.unconfirmed_count ? ` · 지난 지급 미확인 ${Number(summary.unconfirmed_count)}건` : '');
   const coverageHtml = coverage.length ? `<details class="pf-divcal-coverage"><summary>종목별 일정 확인 · 지급일 미확인 ${Number(summary.unknown_payment_count || 0)}종목${summary.stale_count ? ` · 갱신 미완료 ${Number(summary.stale_count)}종목` : ''}</summary>${coverage.map(c => `<div><strong>${escapeHtml(c.stock_name)}</strong> · ${escapeHtml(c.frequency_label)} · ${c.has_payment_dates ? '지급일 수집' : '지급일 미확인'}${c.status !== 'fresh' ? ' · 갱신 필요' : ''}${c.fetched_at ? ` · 확인 ${escapeHtml(_pfDivCalCheckedDay(c.fetched_at))}` : ''}</div>`).join('')}</details>` : '';
   el.innerHTML = `<div class="pf-divcal-list">
     ${monthly.map((m) => _pfDivCalMonthHtml(m, eventsByMonth, todayMonth, todayIso)).join('')}
   </div>
   <div class="pf-chart-range">${totalLine}</div>
-  <div class="pf-divcal-note">공시 지급일을 우선하며, 예상(점선)은 최근 지급 패턴을 반복한 날짜 전후의 추정입니다. 월배당도 지급이 없는 달이나 같은 달 복수 지급이 있을 수 있습니다. 배당락일·기준일은 월 합계에서 제외됩니다. 금액은 세전·현재 보유 수량 기준이며 실제 수취·권리 수량·증권사 입금일과 다를 수 있습니다. 예상 건은 공시 후 수취 입력에 연결됩니다.</div>${coverageHtml}`;
+  <div class="pf-divcal-note">공시 지급일을 우선하며, 예상(점선)은 최근 지급 패턴을 반복한 날짜 전후의 추정입니다. 월배당도 지급이 없는 달이나 같은 달 복수 지급이 있을 수 있습니다. 배당락일·기준일은 월 합계에서 제외됩니다. 지난 지급일에 NH 배당 입금이 없으면 미확인으로 표시합니다. 금액은 세전·현재 보유 수량 기준이며 실제 수취·권리 수량·증권사 입금일과 다를 수 있습니다. 예상 건은 공시 후 수취 입력에 연결됩니다.</div>${coverageHtml}`;
 }
 
 // 월 행 클릭 — 이벤트 목록 펼침/접힘 (상태는 _pfDivCalOpenMonths 에 유지).

@@ -183,3 +183,28 @@ test('늦게 도착한 스케줄은 사용자가 입력 중인 종목과 금액�
     assert.equal(s.el('Code').value, 'MANUAL');
   } finally { s.dom.window.close(); }
 });
+
+test('수취 내역은 NH 입금 대조 결과를 NH 확인/미확인 태그로 보이고 NH 입금 일정은 다시 수취하지 않는다', async () => {
+  const history = [{ ...result, request_id: 'r1', created_at: '2026-09-09T00:00:00Z', memo: '', verification: 'nh_confirmed',
+    nh_match: { date: '2026-01-16', net_amount: 846, currency: 'KRW' } },
+  { ...result, stock_name: '기아', request_id: 'r2', created_at: '2026-09-09T00:00:00Z', memo: '', verification: 'unconfirmed', nh_match: null }];
+  const nhEvent = { ...events[0], source_key: '005930:ex_date:2026-01-10', verification: 'nh_confirmed' };
+  const missed = { ...events[0], stock_name: '기아', source_key: '000270:ex_date:2026-01-10', verification: 'unconfirmed' };
+  const s = setup(path => path.includes('?limit=') ? history : path.endsWith('/candidates') ? { events: [nhEvent, missed] } : undefined);
+  try {
+    await s.w.pfOpenDividendReceipt(nhEvent.source_key);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const articles = [...s.el('History').querySelectorAll('article')];
+    assert.equal(articles[0].querySelector('.pf-div-verify.nh').textContent, 'NH 확인');
+    assert.match(articles[0].querySelector('.pf-div-verify.nh').title, /NH 입금 2026-01-16/);
+    assert.equal(articles[1].querySelector('.pf-div-verify.unconfirmed').textContent, '미확인');
+    const options = [...s.el('Schedule').options];
+    const nhOption = options.find(o => o.value === nhEvent.source_key);
+    assert.ok(nhOption.disabled);
+    assert.match(nhOption.textContent, /NH 입금 확인/);
+    const missedOption = options.find(o => o.value === missed.source_key);
+    assert.equal(missedOption.disabled, false);
+    assert.match(missedOption.textContent, /미확인/);
+    assert.equal(s.el('Schedule').value, '');
+  } finally { s.dom.window.close(); }
+});

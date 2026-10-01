@@ -136,8 +136,8 @@ class ActivityTests(TempDbMixin):
                 await activity.fetch("u1", self.link, date.today(), date.today())
         self.assertIsNone(await broker_activity.state("u1", self.aid))
 
-    async def test_missing_live_activity_identity_does_not_block_initial_balance_and_recovers(self):
-        # 운영 API가 실제로 생략하는 필드를 재현한다. 임의 식별자·통화·수입을 만들지 않는다.
+    async def test_non_dividend_rows_without_identity_stay_on_hold_and_balance_syncs(self):
+        # 운영 API가 실제로 생략하는 필드를 재현한다. 배당이 아닌 행은 임의 식별자를 만들지 않고 보류한다.
         raw = cash_row(label="예탁금이용료", cur_cd="")
         del raw["trd_sno"], raw["trd_bf_dca"]
         rows = [{"stock_code": "CASH_KRW", "stock_name": "원화", "quantity": 10846,
@@ -146,18 +146,30 @@ class ActivityTests(TempDbMixin):
              patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
             result = await sync.sync_account("u1", self.aid, include_activity=True)
         self.assertTrue(result["ok"])
-        self.assertIn("거래 일련번호", result["activity_error"])
+        self.assertIsNone(result["activity_error"])
         self.assertEqual((await account_holdings.list_positions("u1", self.aid))[0]["quantity"], 10846)
         history = await broker_activity.history("u1", self.aid)
         self.assertEqual(history["items"], [])
-        self.assertIsNone(history["state"]["last_import_at"])
-        self.assertEqual(history["state"]["error"], result["activity_error"])
+        self.assertEqual(history["auto_import"], "dividends")
+        self.assertIsNotNone(history["state"]["last_import_at"])
         account = next(r for r in await accounts.list_accounts("u1") if r["account_id"] == self.aid)
         self.assertIsNone(account["connection"]["sync_error"])
         self.assertIsNotNone(account["connection"]["last_sync_at"])
-        self.assertEqual(account["connection"]["activity_error"], result["activity_error"])
         self.assertEqual(await accounts.list_accounts("u2"), [])
         self.assertEqual(await snapshots.get_cashflows("u1"), [])
+        self.assertEqual(await investment_insights.income_events("u1", "2000-01-01", "2100-01-01"), [])
+
+    async def test_activity_error_recovers_on_next_import(self):
+        rows = [{"stock_code": "CASH_KRW", "stock_name": "원화", "quantity": 10846,
+                 "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"}]
+        with patch.object(activity, "fetch", AsyncMock(side_effect=BrokerError("거래 일련번호 누락"))), \
+             patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
+            result = await sync.sync_account("u1", self.aid, include_activity=True)
+        self.assertIn("거래 일련번호", result["activity_error"])
+        history = await broker_activity.history("u1", self.aid)
+        self.assertIsNone(history["state"]["last_import_at"])
+        account = next(r for r in await accounts.list_accounts("u1") if r["account_id"] == self.aid)
+        self.assertEqual(account["connection"]["activity_error"], result["activity_error"])
         with patch.object(activity, "fetch", AsyncMock(return_value=[self.normalized()])), \
              patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(rows, {}))):
             result = await sync.sync_account("u1", self.aid, include_activity=True)
