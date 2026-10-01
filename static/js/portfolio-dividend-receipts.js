@@ -84,6 +84,12 @@ function _pfDividendSelectSchedule() {
     return;
   }
   _pfDividendSetStock(event.stock_code, event.stock_name, event.currency || 'KRW');
+  // 지난 일정은 배당 기준 시점의 보유 수량(장 마감 정산 기록)으로 채운다. 미래·예상 일정은 현재 보유 수량이다.
+  const pointInTime = ['snapshot', 'earliest_snapshot'].includes(event.holding_basis) && Number(event.shares) > 0;
+  if (pointInTime) _pfDividendEl('Quantity').value = Number(event.shares);
+  const quantityNote = pointInTime
+    ? `수량은 ${event.holding_as_of || '기준 시점'} 보유 기록${event.holding_basis === 'earliest_snapshot' ? '(기록 시작 시점으로 추정)' : ''}이므로 계좌별 실제 배당 대상 수량을 확인하세요.`
+    : '수량은 현재 보유 수량이므로 배당 대상 수량을 확인하세요.';
   _pfDividendEl('Mode').value = 'shares';
   _pfDividendEl('PerShare').value = event.amount_per_share > 0 ? event.amount_per_share : '';
   const isPayment = event.date_kind ? event.date_kind === 'payment' : event.type !== 'ex_date';
@@ -94,8 +100,8 @@ function _pfDividendSelectSchedule() {
     _pfDividendEl('FxText').textContent = `수취 환율: 1 ${event.currency} = ? KRW · 스케줄 참고 환율, 실제 수취 환율 확인`;
   }
   _pfDividendEl('ScheduleNote').textContent = !isPayment
-    ? `${event.date}는 ${event.date_kind === 'ex_date' ? '배당락일' : '배당기준일'}입니다. 실제 수취일을 입력하세요. 수량은 현재 보유 수량이므로 배당 대상 수량을 확인하세요.`
-    : `${event.date} ${event.confirmed ? '공시 지급일' : '지급 예상'} · 주당 배당금과 현재 보유 수량을 채웠습니다. 증권사 실제 입금일·금액·배당 대상 수량을 확인하세요.`;
+    ? `${event.date}는 ${event.date_kind === 'ex_date' ? '배당락일' : '배당기준일'}입니다. 실제 수취일을 입력하세요. ${quantityNote}`
+    : `${event.date} ${event.confirmed ? '공시 지급일' : '지급 예상'} · 주당 배당금과 ${pointInTime ? '기준 시점' : '현재'} 보유 수량을 채웠습니다. 증권사 실제 입금일·금액·배당 대상 수량을 확인하세요.`;
   _pfDividendAmounts();
 }
 
@@ -266,7 +272,7 @@ async function pfOpenDividendReceipt(sourceKey) {
     if (!_pfDividend.dirty && !_pfDividend.pending && !_pfDividend.busy) {
       const selected = _pfDividend.events.find(ev => ev.source_key === sourceKey && !done(ev));
       if (selected) { _pfDividendEl('Schedule').value = sourceKey; _pfDividendSelectSchedule(); }
-      else _pfDividendEl('ScheduleNote').textContent = '스케줄을 선택하면 주당 배당금·현재 보유 수량·기본 세율을 채웁니다. 배당기준일은 지급일이 아닙니다.';
+      else _pfDividendEl('ScheduleNote').textContent = '스케줄을 선택하면 주당 배당금·보유 수량(지난 일정은 기준 시점 보유 기록)·기본 세율을 채웁니다. 배당기준일은 지급일이 아닙니다.';
     }
   } catch (error) { if (generation === _pfDividend.generation) _pfDividendEl('ScheduleNote').textContent = `${error.message} 직접 입력은 계속 사용할 수 있습니다.`; }
 }

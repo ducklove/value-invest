@@ -3789,3 +3789,6 @@ body.pf-heat-mode:not(.pf-mobile-simple) .pf-table tbody tr[data-heat-dir] > td.
 /* NH 배당 입금 연결 — 'NH 입금'(일정 없는 실제 입금 행)과 연결된 일정의 실제 지급·세후 줄. */
 .pf-divcal-badge.nh.deposit { background: var(--primary); color: var(--surface); }
 .pf-divcal-sub.pf-divcal-nh-line { color: var(--primary); }
+
+/* 배당 캘린더 기준 시점 보유 — 지난 배당의 보유 근거 줄과 지금은 보유하지 않은 종목의 '매도' 태그. */
+.pf-divcal-badge.sold { border-style: solid; }

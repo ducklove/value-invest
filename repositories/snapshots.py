@@ -791,6 +791,59 @@ async def get_stock_snapshots_before_date(google_sub: str, date: str) -> list[di
     return [dict(r) for r in await cursor.fetchall()]
 
 
+async def get_stock_holdings_from(google_sub: str, bound: str) -> list[dict]:
+    """bound 이하 마지막 정산일(없으면 첫 정산일)부터의 종목별 보유: date, stock_code, quantity, market_value.
+
+    배당 캘린더의 기준 시점 보유 판정용. 수량은 전 계좌 합산이며 옛 정산은 수량이 없을 수 있다(None).
+    """
+    db = await get_db()
+    row = await (await db.execute(
+        "SELECT COALESCE((SELECT MAX(date) FROM portfolio_stock_snapshots WHERE google_sub = ? AND date <= ?),"
+        " (SELECT MIN(date) FROM portfolio_stock_snapshots WHERE google_sub = ?)) AS anchor",
+        (google_sub, bound, google_sub),
+    )).fetchone()
+    if not row or not row["anchor"]:
+        return []
+    cursor = await db.execute(
+        "SELECT date, stock_code, quantity, market_value FROM portfolio_stock_snapshots"
+        " WHERE google_sub = ? AND date >= ? ORDER BY date",
+        (google_sub, row["anchor"]),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_held_codes_since(google_sub: str, since: str) -> list[dict]:
+    """since 이후 정산에 보유(수량 > 0, 수량 미기록 정산은 평가액 > 0)로 남은 종목.
+
+    반환: stock_code, last_date(마지막 보유 정산일).
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT stock_code, MAX(date) AS last_date FROM portfolio_stock_snapshots"
+        " WHERE google_sub = ? AND date >= ? AND (quantity > 0 OR (quantity IS NULL AND market_value > 0))"
+        " GROUP BY stock_code",
+        (google_sub, since),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_snapshot_stock_names(google_sub: str, codes: list[str]) -> dict[str, str]:
+    """종목코드 → 비중 정산에 남은 가장 최근 종목명(코드만 남은 행 제외). 매도한 종목 표시용."""
+    if not codes:
+        return {}
+    db = await get_db()
+    marks = ",".join("?" * len(codes))
+    cursor = await db.execute(
+        f"SELECT stock_code, stock_name FROM portfolio_stock_weight_snapshots"
+        f" WHERE google_sub = ? AND stock_code IN ({marks}) AND stock_name != stock_code ORDER BY date DESC",
+        (google_sub, *codes),
+    )
+    names: dict[str, str] = {}
+    for row in await cursor.fetchall():
+        names.setdefault(row["stock_code"], row["stock_name"])
+    return names
+
+
 async def get_latest_stock_snapshot_rows(google_sub: str) -> list[dict]:
     """가장 최근 스냅샷 날짜의 종목별 평가액 행 (리밸런싱 현재 비중 기반).
 

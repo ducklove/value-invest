@@ -72,13 +72,23 @@ def project_events(events: list[dict], today: date, end: date, frequency: str) -
     return results
 
 
+# 배당 한 건의 보유 근거(domain.dividend_entitlement.entitlement)에서 일정 행으로 옮기는 값.
+HOLDING_FIELDS = ("holding_as_of", "quantity_as_of", "holding_gap_filled", "reference_date", "reference_rule",
+                  "reference_approximate", "held_now")
+
+
 def calendar_event(holding: dict, raw: dict, rate: float | None, frequency: str, feed: dict) -> dict:
+    """일정 행. shares·금액은 holding의 quantity(기준 시점 보유 수량, 미래·예상은 현재 수량)다.
+
+    holding_basis: 'current'(현재 보유), 'snapshot'(기준 시점 이하 마지막 정산), 'earliest_snapshot'(첫 정산으로 근사),
+    'current_fallback'(정산 기록 없음). 수량을 모르면 shares·원화 금액은 None이다.
+    """
     code = holding["stock_code"]
     day = event_day(raw)
     kind = "payment" if raw.get("pay_date") else "ex_date" if raw.get("ex_date") else "record_date"
     estimated = bool(raw.get("estimated"))
     amount = raw.get("amount_per_share")
-    shares = float(holding["quantity"])
+    shares = None if holding.get("quantity") is None else float(holding["quantity"])
     confirmed = bool(raw.get("official", feed.get("official"))) and not estimated
     label = {"payment": "지급일", "ex_date": "배당락일 · 지급일 미확인", "record_date": "배당기준일 · 지급일 미확인"}[kind]
     source_day = raw.get("ex_date") or raw.get("record_date") or day
@@ -90,8 +100,9 @@ def calendar_event(holding: dict, raw: dict, rate: float | None, frequency: str,
             "date_precision": "approximate" if estimated else "day", "confirmed": confirmed,
             "date_status": "estimated" if estimated else "announced" if confirmed else "observed",
             "amount_status": "unknown" if amount is None else "estimated" if estimated else "reported", "shares": shares,
-            "holding_basis": "current", "frequency": frequency,
-            "expected_amount_krw": round(amount * rate * shares) if amount is not None and rate else None,
+            "holding_basis": holding.get("holding_basis") or "current", "frequency": frequency,
+            **{key: holding[key] for key in HOLDING_FIELDS if key in holding},
+            "expected_amount_krw": round(amount * rate * shares) if amount is not None and rate and shares is not None else None,
             "cashflow": kind == "payment", "receiptable": not estimated and (amount is None or amount > 0),
             "source_key": source_key if not estimated else None,
             "source_aliases": [f"{code}:estimated:{day}", f"{code}:estimated:{day[:7]}-15"] if not estimated else [],

@@ -318,3 +318,63 @@ test('해외 배당락 행에 연결된 NH 입금은 실제 지급일·세후·�
   assert.match(head.textContent, /NH 입금 14,000원/);
   assert.match(w.document.querySelector('.pf-chart-range').textContent, /NH 입금 연결 3건\(일정 없는 입금 1건\)/);
 });
+
+test('지난 배당은 기준 시점 보유 근거와 매도 태그를 보여 주고, 미래·예상 행에는 붙이지 않는다', async () => {
+  const payload = structuredClone(FULL_PAYLOAD);
+  payload.as_of = '2026-10-01';
+  payload.events = [
+    { date: '2026-08-03', stock_code: 'AAA.AX', stock_name: '호주 단기채', label: '월배당 · 배당락일 · 지급일 미확인', type: 'ex_date',
+      date_kind: 'ex_date', date_status: 'observed', amount_per_share: 0.2, currency: 'AUD', shares: 100, expected_amount_krw: 19000,
+      confirmed: false, holding_basis: 'earliest_snapshot', holding_as_of: '2026-03-31', quantity_as_of: '2026-06-30',
+      reference_date: '2026-08-02', reference_rule: 'ex_date_prev_day', held_now: true, source_key: 'AAA.AX:ex_date:2026-08-03' },
+    { date: '2026-09-08', stock_code: 'GOOGL', stock_name: '구글', label: '분기배당 · 배당락일 · 지급일 미확인', type: 'ex_date',
+      date_kind: 'ex_date', date_status: 'observed', amount_per_share: 0.21, currency: 'USD', shares: 10, expected_amount_krw: 2940,
+      confirmed: false, holding_basis: 'snapshot', holding_as_of: '2026-09-08', reference_date: '2026-09-08',
+      reference_rule: 'ex_date_same_day', held_now: true, source_key: 'GOOGL:ex_date:2026-09-08' },
+    { date: '2026-09-15', stock_code: 'O', stock_name: '<b>리얼티</b>', label: '월배당 · 지급일', type: 'payment', date_kind: 'payment',
+      date_status: 'announced', amount_per_share: 0.27, currency: 'USD', shares: 30, expected_amount_krw: 11340, confirmed: true,
+      cashflow: true, holding_basis: 'snapshot', holding_as_of: '2026-09-01', reference_date: '2026-09-01',
+      reference_rule: 'ex_date_same_day', held_now: false, source_key: 'O:ex_date:2026-09-01' },
+    { date: '2026-09-20', stock_code: '005930', stock_name: '삼성전자', label: '분기배당 · 지급일', type: 'payment', date_kind: 'payment',
+      date_status: 'announced', amount_per_share: 370, currency: 'KRW', shares: null, expected_amount_krw: null, confirmed: true,
+      cashflow: true, holding_basis: 'snapshot', holding_as_of: '2026-06-26', reference_date: '2026-06-26',
+      reference_rule: 'krx_record_t2', held_now: true, source_key: '005930:ex_date:2026-06-30' },
+    { date: '2026-10-09', stock_code: 'AGNC', stock_name: 'AGNC', label: '월배당 · 지급일', type: 'payment', date_kind: 'payment',
+      date_status: 'announced', amount_per_share: 0.12, currency: 'USD', shares: 10, expected_amount_krw: 1680, confirmed: true,
+      cashflow: true, holding_basis: 'current', held_now: true, source_key: 'AGNC:ex_date:2026-09-30' },
+  ];
+  payload.monthly = [{ month: '2026-08', total_krw: 0, count: 1 }, { month: '2026-09', total_krw: 11340, count: 3 },
+    { month: '2026-10', total_krw: 1680, count: 1 }];
+  payload.coverage = [{ stock_code: 'O', stock_name: '리얼티인컴', held: false, frequency_label: '월배당', status: 'fresh', has_payment_dates: true }];
+  payload.summary = { ...payload.summary, not_held_count: 3 };
+  const { w } = loadPanel(payload);
+  await w.pfLoadDividendCalendarPanel();
+  w.pfDivCalToggleMonth('2026-08');
+  w.pfDivCalToggleMonth('2026-09');
+  const rows = [...w.document.querySelectorAll('.pf-divcal-event')];
+  const find = (text) => rows.find(row => row.textContent.includes(text));
+  const holding = (row) => row.querySelector('.pf-divcal-holding');
+
+  const googl = find('구글');
+  assert.equal(holding(googl).textContent, '보유 10주 · 9/8 기준');
+  assert.match(holding(googl).title, /배당 기준 시점 2026-09-08\(배당락 전 거래일 종가\)/);
+  assert.equal(googl.querySelector('.pf-divcal-badge.sold'), null);
+  assert.equal(holding(find('호주 단기채')).textContent, '기록 시작(3/31) 보유 기준 (수량 6/30 기록)');
+  const realty = rows.find(row => row.querySelector('.pf-divcal-badge.sold'));
+  assert.equal(realty.querySelector('.pf-divcal-badge.sold').textContent, '매도');
+  assert.equal(realty.querySelector('b'), null); // 종목명은 escape
+  assert.match(realty.textContent, /<b>리얼티<\/b>/);
+  assert.equal(holding(realty).textContent, '보유 30주 · 9/1 기준');
+  const samsung = find('삼성전자');
+  assert.match(samsung.textContent, /주당 370원 × 수량 미상/);
+  assert.equal(holding(samsung).textContent, '보유 수량 미상 · 6/26 기준');
+  assert.match(holding(samsung).title, /기준일 2거래일 전 종가/);
+  // 미래 일정(현재 보유)은 보유 근거 줄이 없다.
+  const agnc = w.document.querySelector('[data-month-events="2026-10"] .pf-divcal-event');
+  assert.equal(holding(agnc), null);
+
+  const content = w.document.getElementById('pfDivCalContent');
+  assert.match(content.querySelector('.pf-chart-range').textContent, /기준 시점 미보유 3건 제외/);
+  assert.match(content.querySelector('.pf-divcal-note').textContent, /기준 시점\(배당락 전 거래일 종가, 국내 기준일은 2거래일 전 종가\)에 보유한 종목만/);
+  assert.match(content.querySelector('.pf-divcal-coverage').textContent, /리얼티인컴 · 월배당 · 매도/);
+});

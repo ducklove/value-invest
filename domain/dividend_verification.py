@@ -253,15 +253,17 @@ def _wait_days(ev: dict) -> int:
     return RIGHTS_FALLBACK_DAYS["record_date"] if ev.get("currency") == "KRW" else RIGHTS_FALLBACK_DAYS[ev["date_kind"]]
 
 
-def _late_windows(events: list[dict], pending: list[int]) -> dict[int, tuple[date, date]]:
+def _late_windows(events: list[dict], pending: list[int], boundaries: list[dict] = ()) -> dict[int, tuple[date, date]]:
     """권리일 순서 배정 대상 일정 index → [시작, 끝) 입금일 범위.
 
     - 배당락·기준일: 권리일 −1일부터. 해외는 같은 종목의 다음 권리일 전까지(없으면 +60일), 국내(원화)는 +130일까지
       (결산배당이 다음 분기 기준일 뒤에 지급되므로 다음 권리일에서 끊지 않는다). 최대 +130일.
     - 지급일 ±에서 연결되지 못한 지급일 일정: 지급일 −3일부터 다음 일정 전까지, 최대 +60일(늦게 입금된 해외 배당).
+    - boundaries: 기준 시점에 보유하지 않아 캘린더에서 뺀 일정. 연결 대상은 아니지만 다음 권리일 경계로 남겨
+      앞 회차가 그 회차 입금을 가져가지 않게 한다.
     """
     timeline: dict[str, list[date]] = {}
-    for ev in events:
+    for ev in [*events, *boundaries]:
         day = _rights_day(ev) or _day(ev.get("date"))
         if day and ev.get("type") != "estimated":
             timeline.setdefault(str(ev.get("stock_code") or "").upper(), []).append(day)
@@ -322,19 +324,59 @@ def _record_rank(record: dict) -> tuple:
     return (-(record.get("gross_amount") or record.get("net_amount") or 0), str(record.get("id") or ""))
 
 
+# NH 입금 세전 합계가 기준 시점 수량 × 주당 배당보다 이만큼(비율) 적어도 전체 확인으로 본다(반올림·세목 배분 차이).
+AMOUNT_TOLERANCE = 0.03
+
+
+def amount_covers(ev: dict, group: list[dict]) -> bool | None:
+    """연결된 NH 입금(세전, 원통화 합계)이 일정의 예상 세전(주당 배당 × 기준 시점 수량)을 덮는가.
+
+    True: NH ≥ 예상 − 허용오차(max(3%, 통화 반올림)) — 그 배당 전체가 NH로 들어왔다. False: 뚜렷이 적다(다른 계좌 몫).
+    None: 비교할 수 없다(주당 금액·수량·세전 없음, 통화 불일치).
+    """
+    try:
+        amount, shares = float(ev.get("amount_per_share")), float(ev.get("shares"))
+    except (TypeError, ValueError):
+        return None
+    currency = ev.get("currency")
+    if amount <= 0 or shares <= 0 or not currency or any(r.get("currency") != currency for r in group):
+        return None
+    grosses = [r.get("gross_amount") for r in group]
+    if not grosses or any(g is None for g in grosses):
+        return None
+    expected = amount * shares
+    return sum(grosses) >= expected - max(expected * AMOUNT_TOLERANCE, _tolerance(currency, expected))
+
+
+def exact_quantity(ev: dict) -> bool:
+    """일정 수량이 그 배당의 기준 시점 수량 그대로인가(그 시점 정산 수량, 미래·예상은 현재 수량).
+
+    첫 정산 근사·정산 기록 없음·수량을 다른 날 정산에서 가져온 행은 아니다. 그런 행에서 NH가 예상보다 적은 것은
+    다른 계좌 몫이 아니라 그때 수량이 적었던 것일 수 있다.
+    """
+    return ev.get("holding_basis") in {"snapshot", "current"} and not ev.get("quantity_as_of")
+
+
 def link_calendar(events: list[dict], records: list[dict], receipts: list[dict], today: date,
-                  nh_only: set[str] | None = None) -> tuple[list[dict], list[int]]:
+                  nh_only: set[str] | None = None, *, boundaries: list[dict] = ()) -> tuple[list[dict], list[int]]:
     """배당 일정에 NH 입금을 연결한다. 반환: (판정한 일정, 어느 일정에도 연결되지 않은 NH 기록 index).
+
+    일정은 기준 시점(배당락 전 거래일·국내 기준일 2거래일 전)에 보유한 배당만 있다(domain.dividend_entitlement).
+    boundaries는 그 시점에 보유하지 않아 뺀 일정으로, 연결하지 않고 입금 범위의 다음 권리일 경계로만 쓴다.
 
     1) 지급일 일정(공시·수집, 오늘 이후 포함 — NH 기록이 있으면 그것이 근거다): 같은 종목·통화 NH 배당이 지급일
        −3일~+10일이면 일대일 연결(가까운 날 우선). 같은 날 같은 종목 입금이 더 있으면(NH 계좌 여러 개) 그 일정에 함께 붙인다.
     2) 배당락·기준일 일정(예상 제외)과 1)에서 연결되지 못한 지급일 일정: 종목별로 순서를 지키는 배정
        (_ordered_assignment, 범위는 _late_windows). 같은 날 같은 종목 입금은 한 묶음으로 한 일정에 붙는다(Yahoo가
        같은 날 정규·추가 분배를 한 건으로 합친 경우, NH 계좌 여러 개). 일정 날짜는 바꾸지 않고 실제 입금일을 paid_date로 준다.
-    3) 연결되면 NH 연동 계좌에만 보유한 종목은 NH 확인, 그 밖은 NH 일부 확인(nh_only=None이면 전부 확인).
-       NH로 확인된 수동 수취가 일정 source_key에 연결돼 있어도 NH 확인이다.
+    3) 연결되면 금액으로 판정한다(amount_covers): NH 세전 합계가 주당 배당 × 기준 시점 수량을 덮으면 NH 확인,
+       수량이 그 시점 그대로(exact_quantity)인데 뚜렷이 적으면 NH 일부 확인(다른 계좌 몫이 있다). 비교할 수 없거나
+       (금액·수량 모름, 통화 다름) 근사 수량에서 적으면 현재 NH 연동 계좌에만 보유한 종목(nh_only)은 NH 확인,
+       그 밖은 NH 일부 확인(nh_only=None이면 전부 확인).
+       NH로 확인된 수동 수취가 일정 source_key에 연결돼 있으면 금액과 관계없이 NH 확인이다.
     4) 연결이 없을 때: 지난 지급일(오늘 전)은 미확인. 배당락·기준일은 NH 연동 계좌에만 보유한 종목이고 대기 범위
-       (배당락 +60일, 기준일·국내 +130일)가 지났으며 그 전에 같은 종목 NH 배당이 있었을 때만 미확인, 그 밖은 None.
+       (배당락 +60일, 기준일·국내 +130일)가 지났으며, 그 시점 보유가 정산 기록으로 확인됐거나(holding_basis 'snapshot')
+       그 전에 같은 종목 NH 배당이 있었을 때만 미확인, 그 밖은 None.
     """
     pairs = _pair_indexes(receipts, records)
     receipt_keys = {receipts[i].get("source_key"): j for i, j in pairs.items() if receipts[i].get("source_key")}
@@ -390,7 +432,7 @@ def link_calendar(events: list[dict], records: list[dict], receipts: list[dict],
             link(i, matched[i] + extra)
     # 배당락·기준일, 늦게 입금된 지급일: 종목·통화별 순서 배정.
     pending = sorted(i for i in rights | payments if i not in matched)
-    windows = _late_windows(events, pending)
+    windows = _late_windows(events, pending, boundaries)
     groups: dict[tuple, list[int]] = {}
     for i in pending:
         groups.setdefault((str(events[i].get("stock_code") or "").upper(), events[i].get("currency")), []).append(i)
@@ -413,7 +455,13 @@ def link_calendar(events: list[dict], records: list[dict], receipts: list[dict],
     for i, ev in enumerate(events):
         if i in matched:
             group = [records[j] for j in matched[i]]
-            whole = nh_only is None or str(ev.get("stock_code") or "") in nh_only or i in via_receipt
+            covers = amount_covers(ev, group)
+            if i in via_receipt or covers:
+                whole = True
+            elif covers is False and exact_quantity(ev):
+                whole = False
+            else:
+                whole = nh_only is None or str(ev.get("stock_code") or "") in nh_only
             out.append({**ev, "verification": NH_CONFIRMED if whole else NH_PARTIAL, "nh_match": group_evidence(group),
                         "paid_date": group[0].get("date")})
         elif i in payments:
@@ -422,9 +470,9 @@ def link_calendar(events: list[dict], records: list[dict], receipts: list[dict],
         elif i in rights:
             day = _day(ev["date"])
             waited = day + timedelta(days=_wait_days(ev)) < today
-            # 일정은 현재 보유 기준이라 나중에 산 종목의 지난 배당락도 보인다. 그 전에 같은 종목 NH 배당을
-            # 받은 적이 있을 때만(그때도 NH로 보유) 받을 배당을 못 본 것으로 판정한다.
-            held = any(days[j] < day for j in of_stock(i))
+            # 그 시점 보유가 정산 기록으로 확인된 행이거나, 그 전에 같은 종목 NH 배당을 받은 적이 있을 때만
+            # (그때도 NH로 보유) 받을 배당을 못 본 것으로 판정한다. 첫 정산 근사·정산 기록 없는 행은 단정하지 않는다.
+            held = ev.get("holding_basis") == "snapshot" or any(days[j] < day for j in of_stock(i))
             missing = waited and held and nh_only is not None and str(ev.get("stock_code") or "") in nh_only
             out.append({**ev, "verification": UNCONFIRMED if missing else None, "nh_match": None})
         else:
