@@ -11,6 +11,30 @@ from services.portfolio import fx
 
 
 class AccountHoldingsTests(TempDbMixin):
+    async def test_domestic_etf_currency_survives_account_overlay_and_repairs_ledger(self):
+        await portfolio.save_portfolio_item(
+            "u1", "0074K0", "ETF", 10, 21000, "USD", account_id=self.second
+        )
+        db = await get_db()
+        row = await (await db.execute(
+            "SELECT currency FROM account_holdings WHERE stock_code='0074K0'"
+        )).fetchone()
+        self.assertEqual(row["currency"], "KRW")
+        await db.execute("UPDATE account_holdings SET currency='USD' WHERE stock_code='0074K0'")
+        await db.execute("UPDATE user_portfolio SET currency='USD' WHERE stock_code='0074K0'")
+        await db.commit()
+        item = (await portfolio.get_portfolio("u1", self.second))[0]
+        self.assertEqual(item["currency"], "KRW")
+        self.assertEqual(item["account_positions"][0]["currency"], "KRW")
+        self.assertEqual(item["avg_price"], 21000)
+        await bootstrap.init_db()
+        for table in ("account_holdings", "user_portfolio"):
+            row = await (await db.execute(
+                f"SELECT currency, avg_price FROM {table} WHERE stock_code='0074K0'"
+            )).fetchone()
+            self.assertEqual(row["currency"], "KRW")
+            self.assertEqual(row["avg_price"], 21000)
+
     async def seed(self):
         await seed_user()
         await seed_user("u2", "second@example.com")

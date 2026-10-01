@@ -5,11 +5,27 @@ from contextvars import ContextVar
 from datetime import datetime
 from decimal import Decimal
 
-from domain.portfolio_codes import is_hong_kong_rmb_counter
+from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_stock
 from repositories import accounts
 from repositories.db import get_db, transaction
 
 _scope: ContextVar[tuple[str, str] | None] = ContextVar("holding_account", default=None)
+
+
+def _normalize_quote_currency(position: dict) -> dict:
+    if is_korean_stock(position["stock_code"]):
+        position["currency"] = "KRW"
+    return position
+
+
+async def backfill_korean_quote_currency(db) -> None:
+    for table in ("account_holdings", "user_portfolio"):
+        rows = await (await db.execute(
+            f"SELECT DISTINCT stock_code FROM {table} WHERE currency IS NULL OR currency != 'KRW'"
+        )).fetchall()
+        codes = [(row["stock_code"],) for row in rows if is_korean_stock(row["stock_code"])]
+        if codes:
+            await db.executemany(f"UPDATE {table} SET currency='KRW' WHERE stock_code=?", codes)
 
 
 async def backfill_hong_kong_rmb_currency(db) -> None:
@@ -84,7 +100,7 @@ async def list_positions(user: str, account_id: str | None = None) -> list[dict]
         sql += " AND h.account_id=?"
         args.append(account_id)
     rows = await (await db.execute(sql + " ORDER BY a.sort_order,h.stock_code", args)).fetchall()
-    return [dict(r) for r in rows]
+    return [_normalize_quote_currency(dict(r)) for r in rows]
 
 
 async def get_position(user: str, code: str, account_id: str) -> dict | None:
@@ -95,7 +111,7 @@ async def get_position(user: str, code: str, account_id: str) -> dict | None:
         "LEFT JOIN user_portfolio p ON p.google_sub=h.google_sub AND p.stock_code=h.stock_code "
         "WHERE h.google_sub=? AND h.account_id=? AND h.stock_code=?", (user, account_id, code),
     )).fetchone()
-    return dict(row) if row else None
+    return _normalize_quote_currency(dict(row)) if row else None
 
 
 async def choose_account(user: str, code: str, account_id: str | None = None) -> str:
@@ -128,6 +144,8 @@ async def rebuild(user: str, code: str, **metadata) -> dict | None:
 
 
 async def save(user, code, name, quantity, avg_price, currency="KRW", *, account_id=None, avg_price_currency=None, **metadata):
+    if is_korean_stock(code):
+        currency = "KRW"
     async with transaction() as db:
         await initialize(db, user)
         aid = await choose_account(user, code, account_id)
