@@ -21,7 +21,7 @@ silently, as conversion output would change):
 
 from __future__ import annotations
 
-from domain.portfolio_codes import is_hong_kong_rmb_counter
+from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_stock
 
 # Currency (ISO) → internal nation code.
 CURRENCY_TO_NATION: dict[str, str] = {
@@ -70,6 +70,8 @@ FX_UNIT: dict[str, int] = {"FX_JPYKRW": 100, "FX_VNDKRW": 100}
 def infer_yf_currency(ticker: str) -> str:
     """Infer Yahoo Finance quote currency from an exchange suffix."""
     ticker = (ticker or "").strip().upper()
+    if is_korean_stock(ticker) or ticker.endswith((".KS", ".KQ")):
+        return "KRW"
     if ticker.endswith(".T"):
         return "JPY"
     if ticker.endswith((".HM", ".HN", ".VN")):

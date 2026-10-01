@@ -45,6 +45,18 @@ class PortfolioTests(TempDbMixin):
         self.assertEqual(items[0]["avg_price_currency"], "KRW")
         self.assertEqual(items[0]["tags"], [])
 
+    async def test_domestic_etf_currency_corrects_legacy_usd_and_new_writes(self):
+        await portfolio_repo.save_portfolio_item("u1", "0074K0", "KoAct K ETF", 10, 21000, "USD")
+        db = await db_repo.get_db()
+        cursor = await db.execute("SELECT currency FROM user_portfolio WHERE stock_code = '0074K0'")
+        self.assertEqual((await cursor.fetchone())["currency"], "KRW")
+        await db.execute("UPDATE user_portfolio SET currency = 'USD' WHERE stock_code = '0074K0'")
+        await db.commit()
+        item = (await portfolio_repo.get_portfolio("u1"))[0]
+        self.assertEqual(item["currency"], "KRW")
+        self.assertEqual(item["avg_price"], 21000)
+        self.assertEqual(item["avg_price_currency"], "KRW")
+
     async def test_avg_price_currency_roundtrip_and_preserve(self):
         await portfolio_repo.save_portfolio_item(
             "u1", "AAPL", "Apple", 2, 100, "USD", avg_price_currency="USD"

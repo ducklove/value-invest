@@ -662,6 +662,8 @@ async def save_ticker(stock_code: str, resolved: str):
 
 
 async def detect_currency(stock_code: str) -> str:
+    if _is_korean_stock(stock_code):
+        return "KRW"
     if _is_pseudo_code(stock_code):
         code = _normalize_portfolio_code(stock_code)
         return code.removeprefix("CASH_") if code.startswith("CASH_") else "KRW"

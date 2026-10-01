@@ -155,6 +155,10 @@ async def get_portfolio(google_sub: str, account_id: str | None = None) -> list[
         (google_sub,),
     )
     items = [dict(row) for row in await cursor.fetchall()]
+    for item in items:
+        # Legacy holdings may predate support for alphanumeric KRX ETF codes.
+        if _is_portfolio_korean_stock(item["stock_code"]):
+            item["currency"] = "KRW"
     if not items:
         return []
     tag_rows = await get_portfolio_tags_for_user(google_sub)
@@ -652,6 +656,8 @@ async def _save_portfolio_projection(
       - None / 빈 문자열   → 메모 삭제
       - 문자열             → 저장 (MEMO_MAX_LEN 로 잘림)
     """
+    if _is_portfolio_korean_stock(stock_code):
+        currency = "KRW"
     target_price_provided = target_price is not _TARGET_PRICE_UNCHANGED
     target_formula_provided = target_price_formula is not _TARGET_FORMULA_UNCHANGED
     now = datetime.now().isoformat()

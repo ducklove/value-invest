@@ -1,8 +1,17 @@
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from services.portfolio import currencies, foreign, history
 
 
 def test_yahoo_currency_inference_is_shared_across_quote_and_history_paths():
     expected = {
+        "0074K0": "KRW",
+        " 0074k0 ": "KRW",
+        "005930": "KRW",
+        "005930.KS": "KRW",
+        "247540.KQ": "KRW",
         "7203.T": "JPY",
         "0005.HK": "HKD",
         "83188.HK": "CNY",
@@ -30,3 +39,10 @@ def test_yahoo_currency_inference_is_shared_across_quote_and_history_paths():
 
     assert foreign.infer_yf_currency is currencies.infer_yf_currency
     assert history.infer_yf_currency is currencies.infer_yf_currency
+
+
+@pytest.mark.asyncio
+async def test_domestic_currency_detection_skips_foreign_lookup():
+    with patch.object(foreign, "yfinance_find_ticker", new_callable=AsyncMock) as lookup:
+        assert await foreign.detect_currency("0074K0") == "KRW"
+        lookup.assert_not_awaited()
