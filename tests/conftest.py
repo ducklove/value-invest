@@ -52,4 +52,10 @@ def _reset_short_lived_quote_caches():
     yfinance_runner = sys.modules.get("services.market.sources.yfinance_runner")
     if yfinance_runner is not None:
         yfinance_runner.reset_negative_cache()
+    yahoo = sys.modules.get("services.market.sources.yahoo")
+    if yahoo is not None:
+        yahoo.reset_missing_symbols()
+    foreign = sys.modules.get("services.portfolio.foreign")
+    if foreign is not None:
+        foreign.reset_resolution_state()
     yield
