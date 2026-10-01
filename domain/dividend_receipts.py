@@ -95,6 +95,9 @@ class DividendRecord(DividendResult):
     created_at: str
     income_event_id: int | None
     replayed: bool
+    # 내역 조회 시 NH 배당 입금 대조 결과: nh_confirmed | unconfirmed (저장 응답에는 없음)
+    verification: Literal["nh_confirmed", "unconfirmed"] | None = None
+    nh_match: dict | None = None
 
 
 def calculate_dividend(receipt: DividendInput, cash: dict | None) -> dict:

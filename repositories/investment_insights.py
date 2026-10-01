@@ -100,7 +100,14 @@ async def income_events(user: str, start: str, end: str) -> list[dict]:
         "AND json_extract(data_json,'$.date')>=? AND json_extract(data_json,'$.date')<=? AND income_krw!=0",
         (user, start, end))).fetchall()
     events = [dict(row) for row in rows]
+    # 수동 수취로 이미 분류한 배당은 나중에 가져온 NH 배당과 짝지어 한 번만 집계한다.
+    duplicate = set()
+    if any(row["kind"] == "dividend" for row in imported):
+        from repositories import broker_activity
+        duplicate = await broker_activity.receipt_duplicates(user)
     for row in imported:
+        if row["id"] in duplicate:
+            continue
         data = json.loads(row["data_json"])
         events.append({"id": -row["id"], "date": data["date"], "stock_code": data["stock_code"],
                        "kind": row["kind"], "amount_krw": row["income_krw"], "account_id": row["account_id"],

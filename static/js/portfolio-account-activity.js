@@ -3,6 +3,31 @@ const PfActivity = { account: null, items: [], offset: 0, busy: false, generatio
 const _pfActivityKinds = { dividend: '배당·분배금', interest: '이자', other_income: '기타 수입', transfer: '원금 입출금', internal: '계좌 내 자금 이동', trade: '매매·입출고', fee: '수수료·세금', review: '확인 필요' };
 const _pfActivityEl = id => document.getElementById(id);
 const _pfActivityMoney = value => value == null ? '확인 필요' : Number(value).toLocaleString('ko-KR', { maximumFractionDigits: 6 });
+const _pfActivityAutoHelp = '배당·분배금은 NH 거래내역에서 자동으로 가져옵니다(국내 종합거래내역, 해외 일별거래내역). 이자·입출금 등은 거래 식별자 확인 전까지 자동 반영을 보류합니다. 수입 기록은 현금에 다시 더하지 않습니다.';
+
+// NH 배당 행의 확인 상태. 환율·세금 검산이 안 되거나 증권사 정정이 있으면 '확인 필요'.
+function _pfActivityTag(row) {
+  if (row.verification === 'nh_confirmed' && row.kind === 'dividend') return ' <span class="pf-activity-tag nh">NH 확인</span>';
+  if (row.verification === 'needs_review' || (row.verification && row.kind === 'review')) return ' <span class="pf-activity-tag review">확인 필요</span>';
+  return '';
+}
+
+function _pfActivityDetail(row) {
+  const parts = [escapeHtml(row.stock_name || row.stock_code || '')];
+  const cur = escapeHtml(row.currency);
+  if (row.adjustment === 'tax_refund') {
+    parts.push(`배당 세금 정산 · 환급 ${_pfActivityMoney(row.net_amount)} ${cur}${row.domestic_tax_krw ? ` · 국내세 ${_pfActivityMoney(row.domestic_tax_krw)}원` : ''}`);
+  } else if (row.currency !== 'KRW' && row.domestic_tax_krw != null) {
+    if (row.gross_amount != null) parts.push(`세전 ${_pfActivityMoney(row.gross_amount)} ${cur} · 현지세 ${_pfActivityMoney(row.tax_amount)} ${cur}`);
+    parts.push(`국내세 ${_pfActivityMoney(row.domestic_tax_krw)}원`);
+    if (row.net_krw != null) parts.push(`원화 세후 ${_pfActivityMoney(row.net_krw)}원 (적용환율 ${_pfActivityMoney(row.fx_rate)})`);
+  } else {
+    if (row.income_amount != null) parts.push(`수입 ${_pfActivityMoney(row.income_amount)} ${cur}`);
+    if (row.gross_amount != null) parts.push(`세전 ${_pfActivityMoney(row.gross_amount)}, 세금 ${_pfActivityMoney(row.tax_amount)}, 수수료 ${_pfActivityMoney(row.fee_amount)}`);
+  }
+  if (row.booked_date && row.booked_date !== row.date) parts.push(`NH 처리일 ${escapeHtml(row.booked_date)}`);
+  return parts.filter(Boolean).join(' · ');
+}
 
 function pfActivityDialog() {
   if (_pfActivityEl('pfActivityDialog')) return _pfActivityEl('pfActivityDialog');
@@ -11,7 +36,7 @@ function pfActivityDialog() {
   dialog.setAttribute('aria-labelledby', 'pfActivityTitle');
   dialog.innerHTML = `<h2 id="pfActivityTitle">수입·입출금 내역</h2><button type="button" id="pfActivityClose">닫기</button>
     <p id="pfActivityHelp">NH에서 확인한 실제 수입과 입출금입니다. 사유·분류를 수정해도 현금을 다시 더하지 않습니다.</p>
-    <p id="pfActivityPollingHelp">주문·체결은 통보 후 재조회하며, 배당·이자·입출금은 60초마다 확인합니다. 최초 가져오기의 과거 입출금은 시작 잔고에 포함된 내역으로 보존합니다.</p>
+    <p id="pfActivityPollingHelp"></p>
     <form id="pfActivityImport"><label>시작일 <input type="date" id="pfActivityStart" required></label><label>종료일 <input type="date" id="pfActivityEnd" required></label><button type="submit">기간 내역 가져오기</button></form>
     <p id="pfActivityStatus" role="status"></p><div id="pfActivityTotals"></div><div id="pfActivityRows"></div>
     <div class="pf-account-actions"><button type="button" id="pfActivityPrev">이전</button><button type="button" id="pfActivityNext">다음</button><button type="button" id="pfActivityReload">새로 조회</button></div>`;
@@ -44,6 +69,7 @@ async function pfOpenAccountActivity(account) {
     ? '이 증권사는 잔고 자동 동기화를 지원합니다. 배당·이자·입출금 거래내역 자동 수집은 아직 지원하지 않습니다. 기존에 보존한 내역이 있으면 아래에 표시합니다.'
     : 'NH에서 확인한 실제 수입과 입출금입니다. 사유·분류를 수정해도 현금을 다시 더하지 않습니다.';
   _pfActivityEl('pfActivityPollingHelp').hidden = !canImport;
+  _pfActivityEl('pfActivityPollingHelp').textContent = _pfActivityAutoHelp;
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
   _pfActivityEl('pfActivityStart').value = today.slice(0, 4) + '-01-01';
   _pfActivityEl('pfActivityEnd').value = today;
@@ -63,14 +89,14 @@ async function pfLoadActivity() {
     if (generation !== PfActivity.generation) return;
     PfActivity.items = data.items;
     PfActivity.dirty.clear();
-    _pfActivityEl('pfActivityTotals').innerHTML = '<h3>가져온 기간의 수입 합계</h3>' + (data.totals.map(row => `<span>${escapeHtml(_pfActivityKinds[row.kind])} ${_pfActivityMoney(row.amount)} ${escapeHtml(row.currency)}</span>`).join(' · ') || '<p>수입 내역이 없습니다.</p>');
+    _pfActivityEl('pfActivityTotals').innerHTML = '<h3>가져온 기간의 수입 합계</h3>' + (data.totals.map(row => `<span>${escapeHtml(_pfActivityKinds[row.kind])} ${_pfActivityMoney(row.amount)} ${escapeHtml(row.currency)}${row.currency !== 'KRW' && row.amount_krw != null ? ` (원화 ${_pfActivityMoney(row.amount_krw)}원)` : ''}${row.adjustment_krw != null ? ` · 세금 정산 ${_pfActivityMoney(row.adjustment_krw)}원` : ''}</span>`).join(' · ') || '<p>수입 내역이 없습니다.</p>');
     _pfActivityEl('pfActivityRows').innerHTML = data.items.map(row => `<form class="pf-activity-row" data-transaction="${Number(row.id)}">
-      <h3>${escapeHtml(row.date)} · ${escapeHtml(row.description || '거래내역')} · ${_pfActivityMoney(row.net_amount)} ${escapeHtml(row.currency)}</h3>
-      <p>${escapeHtml(row.stock_name || row.stock_code || '')}${row.income_amount != null ? ` · 수입 ${_pfActivityMoney(row.income_amount)} ${escapeHtml(row.currency)}` : ''}${row.gross_amount != null ? ` · 세전 ${_pfActivityMoney(row.gross_amount)}, 세금 ${_pfActivityMoney(row.tax_amount)}, 수수료 ${_pfActivityMoney(row.fee_amount)}` : ''}</p>
+      <h3>${escapeHtml(row.date)} · ${escapeHtml(row.description || '거래내역')} · ${_pfActivityMoney(row.net_amount)} ${escapeHtml(row.currency)}${_pfActivityTag(row)}</h3>
+      <p>${_pfActivityDetail(row)}</p>
       <label>분류 <select name="kind">${Object.entries(_pfActivityKinds).map(([value, label]) => `<option value="${value}" ${row.kind === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
       <label class="pf-activity-income" ${['dividend', 'interest', 'other_income'].includes(row.kind) ? '' : 'hidden'}>세후 수입액 · 원금 제외 (${escapeHtml(row.currency)}) <input name="income_amount" type="number" step="any" value="${row.income_amount == null ? '' : Number(row.income_amount)}" placeholder="수입 분류 시 입력 · 취소는 음수"></label>
       <label>사유 <input name="reason" maxlength="500" value="${escapeHtml(row.reason)}" placeholder="예: 생활비 출금, 투자금 추가, 계좌 간 이체"></label>
-      ${row.currency !== 'KRW' ? `<label>1 ${escapeHtml(row.currency)}당 원화 환율 <input name="fx_rate" type="number" min="0.000001" max="10000000" step="any" value="${row.fx_rate == null ? '' : Number(row.fx_rate)}" placeholder="원화 합산에 사용할 실제 환율"></label><small>환율 확인 전에는 원통화로 집계하며, 원화 수익 분해·입출금 계산에 포함하지 않습니다.</small>` : ''}
+      ${row.currency !== 'KRW' ? `<label>1 ${escapeHtml(row.currency)}당 원화 환율 <input name="fx_rate" type="number" min="0.000001" max="10000000" step="any" value="${row.fx_rate == null ? '' : Number(row.fx_rate)}" placeholder="원화 합산에 사용할 실제 환율"></label><small>${row.verification === 'nh_confirmed' && row.fx_rate != null ? 'NH 적용환율을 원화 과세표준으로 검산했습니다.' : '환율 확인 전에는 원통화로 집계하며, 원화 수익 분해·입출금 계산에 포함하지 않습니다.'}</small>` : ''}
       ${row.baseline && row.kind === 'transfer' ? '<small>시작 잔고에 포함된 과거 입출금</small>' : ''}
       <button type="submit">사유·분류 저장</button></form>`).join('') || '<p>가져온 거래내역이 없습니다.</p>';
     _pfActivityEl('pfActivityPrev').disabled = PfActivity.offset === 0;
