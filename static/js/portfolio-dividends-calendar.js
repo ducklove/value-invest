@@ -70,11 +70,14 @@ function _pfDivCalAdjustments(m) {
 }
 
 // NH 입금 요약(문자열, 호출부에서 escape): '지급 2026-09-15 · 세후 12.5 USD · 국내세 300원 · 세금 정산 −55원'
+// (같은 날 여러 입금이면 '입금 2건 합계')
 function _pfDivCalNhLine(ev) {
   const m = ev.nh_match || {};
   const paid = ev.paid_date || m.date;
   const parts = [];
   if (paid) parts.push(`지급 ${paid}`);
+  // 같은 날 여러 입금(다른 NH 계좌·추가 분배)이 한 일정에 붙으면 금액은 합계다.
+  if (Array.isArray(m.parts) && m.parts.length > 1) parts.push(`입금 ${m.parts.length}건 합계`);
   if (ev.date_status === 'nh') {
     const gross = _pfDivCalMoney(m.gross_amount, m.currency);
     if (gross) parts.push(`세전 ${gross}`);

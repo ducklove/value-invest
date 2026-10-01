@@ -139,11 +139,14 @@ class LinkCalendarTests(TempDbMixin):
                      rec(3, "2026-09-10", "AAA AU", "USD", 1.0, code="AAA.AX")]
         exact = rec(10, "2026-09-25", "GOOGL US", "USD", 0.32, code="GOOGL", gross=None, refund_base_gross=2.1, income_krw=-55.0,
                     domestic_tax_krw=500)
-        nearest = rec(11, "2026-09-26", "GOOGL US", "USD", 0.01, code="GOOGL", gross=None, refund_base_gross=9.99, income_krw=0)
+        # 원배당 세전을 모르는 정산만 가장 가까운 이전 배당에 붙는다.
+        nearest = rec(11, "2026-09-26", "GOOGL US", "USD", 0.01, code="GOOGL", gross=None, refund_base_gross=None, income_krw=0)
         orphan = rec(12, "2026-05-01", "GOOGL US", "USD", 0.3, code="GOOGL", gross=None, refund_base_gross=2.1)
-        linked, orphans = attach_adjustments(dividends, [nearest, exact, orphan])
+        # 원배당 세전(693.0)이 가져온 어느 배당과도 같지 않으면 가져온 기간 밖 배당의 정산 — 붙이지 않는다.
+        foreign = rec(13, "2026-09-27", "GOOGL US", "USD", 5.0, code="GOOGL", gross=None, refund_base_gross=693.0)
+        linked, orphans = attach_adjustments(dividends, [nearest, exact, orphan, foreign])
         self.assertEqual([[a["id"] for a in r["adjustments"]] for r in linked], [[10], [11], []])
-        self.assertEqual([o["id"] for o in orphans], [12])
+        self.assertEqual(sorted(o["id"] for o in orphans), [12, 13])
         self.assertEqual(dividends[0].get("adjustments"), None)  # 원본은 바꾸지 않는다
         events = [ex("GOOGL", "2026-06-09", "USD")]
         out, unlinked = link_calendar(events, linked, [], TODAY, {"GOOGL"})
@@ -178,6 +181,107 @@ class LinkCalendarTests(TempDbMixin):
 
 AAA = {"stock_code": "AAA.AX", "stock_name": "호주 단기채", "quantity": 100, "avg_price": 50, "avg_price_currency": "AUD", "currency": "AUD"}
 GOOGL = {"stock_code": "GOOGL", "stock_name": "구글", "quantity": 10, "avg_price": 150, "avg_price_currency": "USD", "currency": "USD"}
+
+
+def pay(code, day, currency, **extra):
+    """공시 지급일 일정(cashflow)."""
+    return {"stock_code": code, "date": day, "pay_date": day, "date_kind": "payment", "type": "payment", "currency": currency,
+            "date_status": "announced", "confirmed": True, "cashflow": True, "receiptable": True,
+            "expected_amount_krw": 10000, "source_key": f"{code}:ex_date:{day}", **extra}
+
+
+def months_total(events, records, unlinked, month):
+    rows = events + [nh_payment_event(records[j]) for j in unlinked]
+    return cal._monthly_aggregation(rows, [month])[0]
+
+
+class LinkReviewFindingTests(TempDbMixin):
+    """독립 검증 지적의 재현 사례."""
+
+    def test_payment_on_today_or_early_deposit_links_and_is_counted_once(self):
+        # 지급일 당일 입금(국내), 해외 지급일 2일 전 입금 — 오늘 이후 일정이어도 NH 기록이 있으면 연결한다.
+        for today, deposit in ((date(2026, 10, 7), "2026-10-07"), (date(2026, 10, 6), "2026-10-05")):
+            records = [rec(1, deposit, "SCHP US", "USD", 8.5, code="SCHP", gross=10.0, gross_krw=10000.0)]
+            out, unlinked = link_calendar([pay("SCHP", "2026-10-07", "USD")], records, [], today, {"SCHP"})
+            self.assertEqual((out[0]["verification"], out[0]["paid_date"], unlinked), (NH_CONFIRMED, deposit, []))
+            month = months_total(out, records, unlinked, (2026, 10))
+            self.assertEqual((month["total_krw"], month["nh_only_count"]), (10000, 0))
+        # 기록이 없으면 오늘·미래 지급일은 판정하지 않는다(미확인은 지난 지급일만).
+        out, _ = link_calendar([pay("SCHP", "2026-10-01", "USD")], [], [], TODAY, {"SCHP"})
+        self.assertIsNone(out[0]["verification"])
+        # 배당락이 오늘이고 같은 날 입금돼도 그 배당락 행에 붙는다.
+        out, unlinked = link_calendar([ex("AAA.AX", "2026-10-01", "AUD")], [rec(1, "2026-10-01", "AAA AU", "AUD", 3.0, code="AAA.AX")],
+                                      [], TODAY, {"AAA.AX"})
+        self.assertEqual((out[0]["verification"], unlinked), (NH_CONFIRMED, []))
+        # 예상 지급일(내일)보다 일찍 들어온 입금도 예상 행에 붙어 NH 입금 행과 이중 합산되지 않는다.
+        estimated = {**pay("SCHP", "2026-10-03", "USD"), "type": "estimated", "date_status": "estimated", "confirmed": False}
+        records = [rec(1, "2026-10-01", "SCHP US", "USD", 8.5, code="SCHP", gross=10.0, gross_krw=10000.0)]
+        out, unlinked = link_calendar([estimated], records, [], TODAY, {"SCHP"})
+        self.assertEqual((out[0]["verification"], unlinked), (NH_CONFIRMED, []))
+        self.assertEqual(months_total(out, records, unlinked, (2026, 10))["total_krw"], 10000)
+
+    def test_same_day_deposits_join_one_ex_row(self):
+        # QTUM: Yahoo가 같은 날 정규 분배(세전 212.5)와 추가 분배(10.1, 비과세)를 한 배당락으로 합쳤다.
+        records = [rec(1, "2025-12-31", "QTUM US", "USD", 10.1, code="QTUM", gross=10.1, tax_amount=0.0, gross_krw=14645.0),
+                   rec(2, "2025-12-31", "QTUM US", "USD", 180.62, code="QTUM", gross=212.5, tax_amount=31.88, gross_krw=308125.0)]
+        out, unlinked = link_calendar([ex("QTUM", "2025-12-29", "USD")], records, [], date(2026, 1, 10), {"QTUM"})
+        match = out[0]["nh_match"]
+        self.assertEqual(unlinked, [])
+        self.assertEqual((match["gross_amount"], match["net_amount"], match["tax_amount"], match["gross_krw"]),
+                         (222.6, 190.72, 31.88, 322770.0))
+        self.assertEqual(match["id"], [2, 1])  # 대표는 세전이 큰 정규 분배
+        self.assertEqual([p["id"] for p in match["parts"]], [2, 1])
+        # 지급일 일정도 같은 날 다른 NH 계좌 입금을 함께 붙인다(남는 입금이 NH 입금 행이 되지 않는다).
+        two = [rec(1, "2026-08-20", "", "KRW", 846.0, code="005930", gross=1000.0),
+               {**rec(2, "2026-08-20", "", "KRW", 1692.0, code="005930", gross=2000.0), "account_id": "nh2"}]
+        out, unlinked = link_calendar([pay("005930", "2026-08-20", "KRW")], two, [], TODAY, {"005930"})
+        self.assertEqual((unlinked, out[0]["nh_match"]["gross_amount"], out[0]["nh_match"]["account_id"]), ([], 3000.0, None))
+        # 같은 날 일정이 두 건이면 한 건씩 나눠 갖는다.
+        out, unlinked = link_calendar([pay("005930", "2026-08-20", "KRW"), pay("005930", "2026-08-20", "KRW")], two, [], TODAY,
+                                      {"005930"})
+        self.assertEqual(sorted(e["nh_match"]["id"] for e in out), [1, 2])
+
+    def test_deposit_on_day_before_next_ex_stays_with_its_own_month(self):
+        events = [ex("XYZ.AX", d, "AUD") for d in ("2026-03-02", "2026-04-01", "2026-05-01", "2026-06-01")]
+        # 다음 배당락 −1일 입금(겹치는 하루)과 다음 달 5일 입금(지급 지연이 배당 간격과 비슷).
+        for days in (("2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30"), ("2026-03-30", "2026-04-29", "2026-05-29", "2026-06-29")):
+            records = [rec(k, d, "XYZ AU", "AUD", 1.0, code="XYZ.AX") for k, d in enumerate(days)]
+            out, unlinked = link_calendar(events, records, [], TODAY, {"XYZ.AX"})
+            self.assertEqual([e["paid_date"] for e in out], list(days))
+            self.assertEqual(unlinked, [])
+        # 경계일 입금 한 건뿐이면 권리일 전(−1일) 입금보다 자기 회차를 택한다.
+        out, _ = link_calendar(events[:2], [rec(1, "2026-03-31", "XYZ AU", "AUD", 1.0, code="XYZ.AX")], [], TODAY, {"XYZ.AX"})
+        self.assertEqual([e.get("paid_date") for e in out], ["2026-03-31", None])
+
+    def test_domestic_year_end_dividend_paid_after_next_record_date(self):
+        # 국내 분기배당: 12월 기준일 결산배당은 4월, 3월 기준일 1분기 배당은 5월에 지급된다.
+        events = [ex("005930", d, "KRW", kind="record_date") for d in ("2025-12-31", "2026-03-31", "2026-06-30")]
+        records = [rec(0, "2025-08-20", "", "KRW", 1.0, code="005930"), rec(1, "2026-04-17", "", "KRW", 1.0, code="005930"),
+                   rec(2, "2026-05-20", "", "KRW", 1.0, code="005930"), rec(3, "2026-08-20", "", "KRW", 1.0, code="005930")]
+        out, unlinked = link_calendar(events, records, [], TODAY, {"005930"})
+        self.assertEqual([(e["verification"], e["paid_date"]) for e in out],
+                         [(NH_CONFIRMED, "2026-04-17"), (NH_CONFIRMED, "2026-05-20"), (NH_CONFIRMED, "2026-08-20")])
+        self.assertEqual(unlinked, [0])  # 지난해 8월 입금(창 이전 회차)만 남는다
+        # Yahoo .KS 배당락 대체 이력도 원화면 같은 범위다.
+        ks = [ex("005930", d, "KRW") for d in ("2025-12-30", "2026-03-30", "2026-06-29")]
+        out, _ = link_calendar(ks, records, [], TODAY, {"005930"})
+        self.assertEqual([e["paid_date"] for e in out], ["2026-04-17", "2026-05-20", "2026-08-20"])
+
+    def test_late_deposit_beyond_payment_window_links_instead_of_new_row(self):
+        records = [rec(1, "2026-09-25", "83199 HK", "CNY", 30.0, code="83199.HK", gross_krw=5800.0)]
+        events = [pay("83199.HK", "2026-09-10", "CNY"), pay("83199.HK", "2026-10-10", "CNY")]
+        out, unlinked = link_calendar(events, records, [], TODAY, {"83199.HK"})
+        self.assertEqual([(e["verification"], e.get("paid_date")) for e in out], [(NH_CONFIRMED, "2026-09-25"), (None, None)])
+        self.assertEqual(unlinked, [])
+        self.assertEqual(months_total(out, records, unlinked, (2026, 9))["total_krw"], 10000)
+
+    def test_server_guard_matches_calendar_window_for_domestic_record_dates(self):
+        records = [rec(1, "2026-04-17", "", "KRW", 846.0, code="005930"), rec(2, "2026-05-20", "", "KRW", 846.0, code="005930")]
+        picked = {"stock_code": "005930", "currency": "KRW", "received_date": "2025-12-31", "source_key": "005930:ex_date:2025-12-31"}
+        self.assertEqual(nh_duplicate(picked, records, {"005930"})["id"], 1)
+        # 아직 입금되지 않은 회차(6월 기준일)는 막지 않는다.
+        later = {**picked, "received_date": "2026-07-01", "source_key": "005930:ex_date:2026-06-30"}
+        self.assertIsNone(nh_duplicate(later, records, {"005930"}))
 
 
 def nh_row(serial, day, symbol, name, currency, net, tax, rate, **values):

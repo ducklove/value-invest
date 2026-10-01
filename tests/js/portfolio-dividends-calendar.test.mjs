@@ -273,7 +273,8 @@ test('해외 배당락 행에 연결된 NH 입금은 실제 지급일·세후·�
     { date: '2026-09-08', stock_code: 'GOOGL', stock_name: '구글', label: '분기배당 · 배당락일 · 지급일 미확인', type: 'ex_date',
       date_kind: 'ex_date', date_status: 'observed', amount_per_share: 0.21, currency: 'USD', shares: 15, expected_amount_krw: 4410,
       confirmed: false, cashflow: false, source_key: 'GOOGL:ex_date:2026-09-08', verification: 'nh_partial', paid_date: '2026-09-16',
-      nh_match: { date: '2026-09-16', net_amount: 1.7, currency: 'USD', adjustments: [{ date: '2026-09-25', income_krw: -55, currency: 'USD' }] } },
+      nh_match: { date: '2026-09-16', net_amount: 1.7, currency: 'USD', adjustments: [{ date: '2026-09-25', income_krw: -55, currency: 'USD' }],
+        parts: [{ id: 3, net_amount: 1.2 }, { id: 4, net_amount: 0.5 }] } },
     { date: '2026-09-02', stock_code: 'EUN2.DE', stock_name: '유로스탁 50', label: '반기배당 · 배당락일 · 지급일 미확인', type: 'ex_date',
       date_kind: 'ex_date', date_status: 'observed', amount_per_share: 0.3, currency: 'EUR', shares: 10, expected_amount_krw: 4900,
       confirmed: false, cashflow: false, source_key: 'EUN2.DE:ex_date:2026-09-02', verification: 'unconfirmed', nh_match: null },
@@ -298,7 +299,8 @@ test('해외 배당락 행에 연결된 NH 입금은 실제 지급일·세후·�
   assert.equal(aaa.querySelector('.js-pf-dividend-receipt'), null);
   const googl = find('구글');
   assert.equal(googl.querySelector('.pf-divcal-badge.nh.partial').textContent, 'NH 일부 확인');
-  assert.match(googl.querySelector('.pf-divcal-nh-line').textContent, /세금 정산 −55원/);
+  assert.match(googl.querySelector('.pf-divcal-nh-line').textContent, /지급 2026-09-16 · 입금 2건 합계 · 세후 1.7 USD · 세금 정산 −55원/);
+  assert.doesNotMatch(aaa.querySelector('.pf-divcal-nh-line').textContent, /건 합계/);
   assert.ok(googl.querySelector('.js-pf-dividend-receipt'));
   const eun = find('유로스탁');
   assert.equal(eun.querySelector('.pf-divcal-badge.unconfirmed').textContent, '미확인');

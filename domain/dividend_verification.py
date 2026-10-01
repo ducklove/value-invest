@@ -178,6 +178,32 @@ def evidence(record: dict) -> dict:
     return out
 
 
+_SUM_KEYS = ("net_amount", "gross_amount", "gross_krw", "net_krw")
+_TAX_KEYS = ("tax_amount", "domestic_tax_krw")
+
+
+def group_evidence(records: list[dict]) -> dict:
+    """한 일정에 붙은 NH 입금(같은 날 여러 건일 수 있다)의 근거. 여러 건이면 금액은 합계, parts에 건별 근거.
+
+    원화 환산액은 모든 건이 검산됐을 때만 더한다(하나라도 없으면 None). 세금은 없는 건을 0으로 본다.
+    """
+    out = evidence(records[0])
+    if len(records) == 1:
+        return out
+    for key in _SUM_KEYS:
+        values = [r.get(key) for r in records]
+        out[key] = round(sum(values), 6) if all(v is not None for v in values) else None
+    for key in _TAX_KEYS:
+        values = [r.get(key) for r in records if r.get(key) is not None]
+        out[key] = round(sum(values), 6) if values else None
+    if len({r.get("account_id") for r in records}) > 1:
+        out["account_id"] = None
+    out["id"] = [r.get("id") for r in records]
+    out["adjustments"] = [_adjustment_evidence(a) for r in records for a in r.get("adjustments") or []]
+    out["parts"] = [{key: value for key, value in evidence(r).items() if key != "adjustments"} for r in records]
+    return out
+
+
 def annotate_receipts(receipts: list[dict], records: list[dict]) -> list[dict]:
     pairs = pair_receipts(receipts, records)
     return [{**r, "verification": NH_CONFIRMED if i in pairs else UNCONFIRMED,
@@ -185,10 +211,11 @@ def annotate_receipts(receipts: list[dict], records: list[dict]) -> list[dict]:
 
 
 def attach_adjustments(records: list[dict], adjustments: list[dict]) -> tuple[list[dict], list[dict]]:
-    """세금 정산을 같은 계좌·종목·통화의 가장 가까운 이전 NH 배당에 붙인다.
+    """세금 정산을 같은 계좌·종목·통화의 이전 NH 배당에 붙인다.
 
-    원배당 세전(refund_base_gross)이 정확히 같은 배당을 우선하고, 없으면 날짜가 가장 가까운 이전 배당이다.
-    반환: (adjustments 키를 채운 배당 기록 사본, 붙일 배당이 없는 정산).
+    원배당 세전(refund_base_gross)이 있으면 세전이 정확히 같은 이전 배당에만 붙인다. 없으면 가져온 기간 밖
+    배당의 정산으로 보고 붙이지 않는다(엉뚱한 회차에 '세금 정산'이 보이지 않게). 원배당 세전을 모르면
+    날짜가 가장 가까운 이전 배당이다. 반환: (adjustments 키를 채운 배당 기록 사본, 붙일 배당이 없는 정산).
     """
     out = [{**r, "adjustments": []} for r in records]
     orphans = []
@@ -202,10 +229,10 @@ def attach_adjustments(records: list[dict], adjustments: list[dict]) -> tuple[li
                     or (adj.get("account_id") and record.get("account_id") and adj["account_id"] != record["account_id"])
                     or not _same_record_stock(record, adj)):
                 continue
-            exact = base is not None and record.get("gross_amount") is not None and abs(record["gross_amount"] - base) <= 0.005
-            key = (not exact, (day - got).days)
-            if best is None or key < best[0]:
-                best = (key, j)
+            if base is not None and (record.get("gross_amount") is None or abs(record["gross_amount"] - base) > 0.005):
+                continue
+            if best is None or (day - got).days < best[0]:
+                best = ((day - got).days, j)
         if best is None:
             orphans.append(adj)
         else:
@@ -221,11 +248,21 @@ def _currency_ok(ev: dict, record: dict) -> bool:
     return not ev.get("currency") or not record.get("currency") or ev["currency"] == record["currency"]
 
 
-def _rights_windows(events: list[dict], pending: list[int]) -> dict[int, tuple[date, date]]:
-    """배당락·기준일 일정 index → [시작, 끝) 입금일 범위."""
+def _wait_days(ev: dict) -> int:
+    """배당락·기준일 이후 입금을 기다리는 기간. 국내(원화)는 결산배당이 다음 분기 기준일 뒤(4월)에 지급된다."""
+    return RIGHTS_FALLBACK_DAYS["record_date"] if ev.get("currency") == "KRW" else RIGHTS_FALLBACK_DAYS[ev["date_kind"]]
+
+
+def _late_windows(events: list[dict], pending: list[int]) -> dict[int, tuple[date, date]]:
+    """권리일 순서 배정 대상 일정 index → [시작, 끝) 입금일 범위.
+
+    - 배당락·기준일: 권리일 −1일부터. 해외는 같은 종목의 다음 권리일 전까지(없으면 +60일), 국내(원화)는 +130일까지
+      (결산배당이 다음 분기 기준일 뒤에 지급되므로 다음 권리일에서 끊지 않는다). 최대 +130일.
+    - 지급일 ±에서 연결되지 못한 지급일 일정: 지급일 −3일부터 다음 일정 전까지, 최대 +60일(늦게 입금된 해외 배당).
+    """
     timeline: dict[str, list[date]] = {}
     for ev in events:
-        day = _rights_day(ev)
+        day = _rights_day(ev) or _day(ev.get("date"))
         if day and ev.get("type") != "estimated":
             timeline.setdefault(str(ev.get("stock_code") or "").upper(), []).append(day)
     out = {}
@@ -233,86 +270,161 @@ def _rights_windows(events: list[dict], pending: list[int]) -> dict[int, tuple[d
         ev = events[i]
         day = _day(ev.get("date"))
         later = [d for d in timeline.get(str(ev.get("stock_code") or "").upper(), []) if d > day]
-        end = min(later) if later else day + timedelta(days=RIGHTS_FALLBACK_DAYS[ev["date_kind"]])
+        if ev.get("date_kind") == "payment":
+            end = min([*later, day + timedelta(days=RIGHTS_FALLBACK_DAYS["ex_date"])])
+            out[i] = (day - timedelta(days=CALENDAR_DAYS_BEFORE), end)
+            continue
+        if ev.get("currency") == "KRW":
+            end = day + timedelta(days=RIGHTS_MAX_DAYS)
+        else:
+            end = min(later) if later else day + timedelta(days=_wait_days(ev))
         out[i] = (day - timedelta(days=RIGHTS_DAYS_BEFORE), min(end, day + timedelta(days=RIGHTS_MAX_DAYS)))
     return out
 
 
-def _greedy(candidates: list[tuple], matched: dict, used: set):
-    for _, i, j in sorted(candidates):
-        if i in matched or j in used:
-            continue
-        matched[i] = j
-        used.add(j)
+def _ordered_assignment(rows: list[tuple[date, int]], units: list[tuple[date, list[int]]],
+                        allowed) -> dict[int, list[int]]:
+    """한 종목의 일정(날짜순)과 입금 묶음(날짜순)을 순서를 지키며 짝짓는다.
+
+    k번째 입금이 그보다 앞선 일정에 배정되면 그 뒤 입금은 더 앞선 일정에 가지 않는다(교차 금지). 연결 수가
+    가장 많은 배정을 고르고, 같으면 권리일 전 입금이 적고, 그다음 권리일~입금일 합이 작은 배정이다.
+    그래서 월배당 경계일(다음 배당락 −1일) 입금이 다음 회차로 밀리지 않고, 국내 결산배당(12월 기준일 →
+    4월 지급)이 3월 기준일을 건너 자기 회차에 붙는다.
+    """
+    n, m = len(rows), len(units)
+    # score = (연결 수, −권리일 전 입금 수, −일수 합) 최대화.
+    best = [[(0, 0, 0)] * (m + 1) for _ in range(n + 1)]
+    move = [[None] * (m + 1) for _ in range(n + 1)]
+    for a in range(1, n + 1):
+        for b in range(1, m + 1):
+            options = [(best[a - 1][b], "row"), (best[a][b - 1], "unit")]
+            if allowed(rows[a - 1][1], units[b - 1]):
+                lag = (units[b - 1][0] - rows[a - 1][0]).days
+                prev = best[a - 1][b - 1]
+                options.append(((prev[0] + 1, prev[1] - (lag < 0), prev[2] - abs(lag)), "pair"))
+            best[a][b], move[a][b] = max(options, key=lambda item: item[0])
+    out: dict[int, list[int]] = {}
+    a, b = n, m
+    while a and b:
+        step = move[a][b]
+        if step == "pair":
+            out[rows[a - 1][1]] = units[b - 1][1]
+            a, b = a - 1, b - 1
+        elif step == "row":
+            a -= 1
+        else:
+            b -= 1
+    return out
+
+
+def _record_rank(record: dict) -> tuple:
+    """같은 날 같은 종목 입금 중 대표(세전이 큰 정규 배당)를 고르는 정렬 키."""
+    return (-(record.get("gross_amount") or record.get("net_amount") or 0), str(record.get("id") or ""))
 
 
 def link_calendar(events: list[dict], records: list[dict], receipts: list[dict], today: date,
                   nh_only: set[str] | None = None) -> tuple[list[dict], list[int]]:
-    """배당 일정에 NH 입금을 일대일로 연결한다. 반환: (판정한 일정, 어느 일정에도 연결되지 않은 NH 기록 index).
+    """배당 일정에 NH 입금을 연결한다. 반환: (판정한 일정, 어느 일정에도 연결되지 않은 NH 기록 index).
 
-    1) 지난 지급일 일정(공시·수집): 같은 종목·통화 NH 배당이 지급일 −3일~+10일이면 연결(가까운 날 우선).
-    2) 지난 배당락·기준일 일정(예상 제외): 권리일 −1일 ≤ 입금일 < 같은 종목의 다음 권리일(없으면 +60일,
-       국내 기준일 +130일, 최대 +130일)이면 연결(권리일에서 가까운 입금 우선). 일정 날짜는 바꾸지 않고
-       실제 입금일을 paid_date로 준다.
+    1) 지급일 일정(공시·수집, 오늘 이후 포함 — NH 기록이 있으면 그것이 근거다): 같은 종목·통화 NH 배당이 지급일
+       −3일~+10일이면 일대일 연결(가까운 날 우선). 같은 날 같은 종목 입금이 더 있으면(NH 계좌 여러 개) 그 일정에 함께 붙인다.
+    2) 배당락·기준일 일정(예상 제외)과 1)에서 연결되지 못한 지급일 일정: 종목별로 순서를 지키는 배정
+       (_ordered_assignment, 범위는 _late_windows). 같은 날 같은 종목 입금은 한 묶음으로 한 일정에 붙는다(Yahoo가
+       같은 날 정규·추가 분배를 한 건으로 합친 경우, NH 계좌 여러 개). 일정 날짜는 바꾸지 않고 실제 입금일을 paid_date로 준다.
     3) 연결되면 NH 연동 계좌에만 보유한 종목은 NH 확인, 그 밖은 NH 일부 확인(nh_only=None이면 전부 확인).
        NH로 확인된 수동 수취가 일정 source_key에 연결돼 있어도 NH 확인이다.
-    4) 연결이 없을 때: 지난 지급일은 미확인. 배당락·기준일은 NH 연동 계좌에만 보유한 종목이고 대기 범위
-       (배당락 +60일, 기준일 +130일)가 지났으며 그 전에 같은 종목 NH 배당이 있었을 때만 미확인, 그 밖은 None.
+    4) 연결이 없을 때: 지난 지급일(오늘 전)은 미확인. 배당락·기준일은 NH 연동 계좌에만 보유한 종목이고 대기 범위
+       (배당락 +60일, 기준일·국내 +130일)가 지났으며 그 전에 같은 종목 NH 배당이 있었을 때만 미확인, 그 밖은 None.
     """
     pairs = _pair_indexes(receipts, records)
     receipt_keys = {receipts[i].get("source_key"): j for i, j in pairs.items() if receipts[i].get("source_key")}
-    payments = {i for i, ev in enumerate(events)
-                if ev.get("date_kind") == "payment" and ev.get("type") != "estimated" and (_day(ev.get("date")) or today) < today}
-    rights = {i for i, ev in enumerate(events)
-              if ev.get("date_kind") in RIGHTS_FALLBACK_DAYS and ev.get("type") != "estimated" and _day(ev.get("date"))
-              and _day(ev.get("date")) < today}
-    matched: dict[int, int] = {}
+    real = {i for i, ev in enumerate(events) if ev.get("type") != "estimated" and _day(ev.get("date"))}
+    payments = {i for i in real if events[i].get("date_kind") == "payment"}
+    rights = {i for i in real if events[i].get("date_kind") in RIGHTS_FALLBACK_DAYS}
+    # 예상 지급일(오늘 이후)도 −3일 일찍 들어온 입금은 받는다. 그렇지 않으면 NH 입금 행과 함께 두 번 합산된다.
+    linkable = payments | {i for i, ev in enumerate(events)
+                           if ev.get("type") == "estimated" and ev.get("date_kind") == "payment" and _day(ev.get("date"))}
+    matched: dict[int, list[int]] = {}
     used: set[int] = set()
+
+    def link(i: int, js: list[int]):
+        matched[i] = sorted(js, key=lambda j: _record_rank(records[j]))
+        used.update(js)
+
+    days = [_day(r.get("date")) for r in records]
+    stock_records: dict[tuple, list[int]] = {}
+
+    def of_stock(i: int) -> list[int]:
+        """일정과 같은 종목·통화인 NH 기록 index(종목·통화별로 한 번만 계산)."""
+        ev = events[i]
+        key = (str(ev.get("stock_code") or "").upper(), ev.get("currency"))
+        if key not in stock_records:
+            stock_records[key] = [j for j, record in enumerate(records)
+                                  if days[j] and _currency_ok(ev, record) and same_stock(ev.get("stock_code"), record, ev.get("currency"))]
+        return stock_records[key]
+
     # 수동 수취로 이미 연결된 NH 기록은 그 일정의 근거로 남긴다(다른 일정·NH 단독 행으로 다시 쓰지 않는다).
     via_receipt = set()
     for i, ev in enumerate(events):
         j = receipt_keys.get(ev.get("source_key")) if ev.get("source_key") else None
         if j is not None and j not in used and (i in payments or i in rights):
-            matched[i] = j
-            used.add(j)
+            link(i, [j])
             via_receipt.add(i)
     candidates = []
-    for i in sorted(payments):
-        if i in matched:
+    for i in sorted(linkable - set(matched)):
+        day = _day(events[i]["date"])
+        for j in of_stock(i):
+            if j not in used and -CALENDAR_DAYS_BEFORE <= (days[j] - day).days <= CALENDAR_DAYS_AFTER:
+                candidates.append((abs((days[j] - day).days), _record_rank(records[j]), i, j))
+    for *_, i, j in sorted(candidates):
+        if i not in matched and j not in used:
+            link(i, [j])
+    # 같은 날 같은 종목 입금(다른 NH 계좌·추가 분배)은 이미 그 날짜로 연결된 지급일 일정에 함께 붙인다.
+    for i in sorted(matched):
+        if i not in linkable:
             continue
-        ev, day = events[i], _day(events[i].get("date"))
-        for j, record in enumerate(records):
-            got = _day(record.get("date"))
-            if (got and _currency_ok(ev, record) and same_stock(ev.get("stock_code"), record, ev.get("currency"))
-                    and -CALENDAR_DAYS_BEFORE <= (got - day).days <= CALENDAR_DAYS_AFTER):
-                candidates.append((abs((got - day).days), i, j))
-    _greedy(candidates, matched, used)
-    windows = _rights_windows(events, sorted(i for i in rights if i not in matched))
-    candidates = []
-    for i, (start, end) in windows.items():
-        ev, day = events[i], _day(events[i].get("date"))
-        for j, record in enumerate(records):
-            got = _day(record.get("date"))
-            if (j not in used and got and start <= got < end and _currency_ok(ev, record)
-                    and same_stock(ev.get("stock_code"), record, ev.get("currency"))):
-                candidates.append((abs((got - day).days), i, j))
-    _greedy(candidates, matched, used)
+        first = records[matched[i][0]]
+        extra = [j for j in of_stock(i) if j not in used and records[j].get("date") == first.get("date")
+                 and records[j].get("currency") == first.get("currency")]
+        if extra:
+            link(i, matched[i] + extra)
+    # 배당락·기준일, 늦게 입금된 지급일: 종목·통화별 순서 배정.
+    pending = sorted(i for i in rights | payments if i not in matched)
+    windows = _late_windows(events, pending)
+    groups: dict[tuple, list[int]] = {}
+    for i in pending:
+        groups.setdefault((str(events[i].get("stock_code") or "").upper(), events[i].get("currency")), []).append(i)
+    for rows in groups.values():
+        # 한 그룹의 일정은 종목·통화가 같으므로 후보 NH 기록도 같다.
+        by_day: dict[tuple, list[int]] = {}
+        for j in of_stock(rows[0]):
+            if j not in used:
+                by_day.setdefault((days[j], records[j].get("currency")), []).append(j)
+        units = sorted(((day, members) for (day, _), members in by_day.items()), key=lambda u: (u[0], u[1]))
+
+        def allowed(i: int, unit: tuple[date, list[int]]) -> bool:
+            start, end = windows[i]
+            return start <= unit[0] < end
+
+        assigned = _ordered_assignment(sorted((_day(events[i]["date"]), i) for i in rows), units, allowed)
+        for i, members in assigned.items():
+            link(i, members)
     out = []
     for i, ev in enumerate(events):
         if i in matched:
-            record = records[matched[i]]
+            group = [records[j] for j in matched[i]]
             whole = nh_only is None or str(ev.get("stock_code") or "") in nh_only or i in via_receipt
-            out.append({**ev, "verification": NH_CONFIRMED if whole else NH_PARTIAL, "nh_match": evidence(record),
-                        "paid_date": record.get("date")})
+            out.append({**ev, "verification": NH_CONFIRMED if whole else NH_PARTIAL, "nh_match": group_evidence(group),
+                        "paid_date": group[0].get("date")})
         elif i in payments:
-            out.append({**ev, "verification": UNCONFIRMED, "nh_match": None})
+            past = _day(ev["date"]) < today
+            out.append({**ev, "verification": UNCONFIRMED if past else None, "nh_match": None})
         elif i in rights:
             day = _day(ev["date"])
-            waited = day + timedelta(days=RIGHTS_FALLBACK_DAYS[ev["date_kind"]]) < today
+            waited = day + timedelta(days=_wait_days(ev)) < today
             # 일정은 현재 보유 기준이라 나중에 산 종목의 지난 배당락도 보인다. 그 전에 같은 종목 NH 배당을
             # 받은 적이 있을 때만(그때도 NH로 보유) 받을 배당을 못 본 것으로 판정한다.
-            held = any(_day(r.get("date")) and _day(r.get("date")) < day and _currency_ok(ev, r)
-                       and same_stock(ev.get("stock_code"), r, ev.get("currency")) for r in records)
+            held = any(days[j] < day for j in of_stock(i))
             missing = waited and held and nh_only is not None and str(ev.get("stock_code") or "") in nh_only
             out.append({**ev, "verification": UNCONFIRMED if missing else None, "nh_match": None})
         else:
@@ -363,22 +475,27 @@ def nh_duplicate(receipt: dict, records: list[dict], nh_only: set[str]) -> dict 
     수동 수취는 수동 계좌 현금을 늘리고 NH 계좌 현금은 증권사 잔고가 이미 반영했으므로
     같은 배당을 다시 기록하면 현금이 중복된다(수익은 짝짓기로 한 번만 집계된다).
     국내·해외 모두 수취일 ±10일 안의 같은 종목·통화 NH 입금(실거래일 또는 처리일)이면 중복이다.
-    배당락·기준일 일정(source_key)에서 온 수취는 그 권리일 −1일~+35일의 NH 입금도 같은 회차로 본다.
+    배당락·기준일 일정(source_key)에서 온 수취는 그 권리일 −1일 이후 첫 NH 입금이 해외 +35일(월배당 다음 회차와
+    겹치지 않게), 국내 +130일(결산배당 4월 지급 — 캘린더 연결 범위와 같다) 안이면 같은 회차로 본다.
     """
     code = str(receipt.get("stock_code") or "").strip().upper()
     received = _day(receipt.get("received_date"))
     if not code or code not in nh_only or not received:
         return None
     window = max(CALENDAR_DAYS_AFTER, RECEIPT_DAY_TOLERANCE)
-    source = re.fullmatch(r"(.+):ex_date:(\d{4}-\d{2}-\d{2})", str(receipt.get("source_key") or ""))
-    rights = _day(source[2]) if source and source[1].strip().upper() == code else None
-    for record in records:
-        if record.get("currency") != receipt.get("currency") or not same_stock(code, record, receipt.get("currency")):
-            continue
+    candidates = [r for r in records
+                  if r.get("currency") == receipt.get("currency") and same_stock(code, r, receipt.get("currency"))]
+    for record in candidates:
         days = [d for d in (_day(record.get("date")), _day(record.get("booked_date"))) if d]
         if days and min(abs((received - d).days) for d in days) <= window:
             return record
-        paid = _day(record.get("date"))
-        if rights and paid and -RIGHTS_DAYS_BEFORE <= (paid - rights).days <= SOURCE_RIGHTS_DAYS:
-            return record
+    source = re.fullmatch(r"(.+):ex_date:(\d{4}-\d{2}-\d{2})", str(receipt.get("source_key") or ""))
+    rights = _day(source[2]) if source and source[1].strip().upper() == code else None
+    if not rights:
+        return None
+    after = sorted((r for r in candidates if _day(r.get("date")) and (_day(r["date"]) - rights).days >= -RIGHTS_DAYS_BEFORE),
+                   key=lambda r: str(r["date"]))
+    limit = RIGHTS_MAX_DAYS if receipt.get("currency") == "KRW" else SOURCE_RIGHTS_DAYS
+    if after and (_day(after[0]["date"]) - rights).days <= limit:
+        return after[0]
     return None
