@@ -433,6 +433,7 @@ class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.await_args.args[0], "005930")
 
     async def test_insights_partial_failure_keeps_others(self):
+        from services.ecosystem import live_cards
         # 한 도구 fetch가 실패해도 나머지는 살아남는다.
         external_tools._cache.clear()
         with patch.object(external_tools, "_holding_summary", new=AsyncMock(side_effect=RuntimeError("boom"))), \
@@ -441,7 +442,9 @@ class ExternalEndpointTests(unittest.IsolatedAsyncioTestCase):
              patch.object(external_tools, "_spac_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
              patch.object(external_tools, "_nps_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
              patch.object(external_tools, "_etf_picks_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
-             patch.object(external_tools, "_buybacks_summary", new=AsyncMock(return_value={"top": [], "url": "u"})):
+             patch.object(external_tools, "_buybacks_summary", new=AsyncMock(return_value={"top": [], "url": "u"})), \
+             patch.object(external_tools, "_bond_mate_summary", new=AsyncMock(return_value=None)), \
+             patch.object(live_cards, "refresh", new=AsyncMock()):
             out = await external_tools.fetch_external_insights()
         self.assertNotIn("holding", out)
         self.assertIn("spread", out)

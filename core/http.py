@@ -68,6 +68,7 @@ _TIMEOUT_PROFILES: dict[str, float | httpx.Timeout] = {
     "telegram": 10.0,
     "wiki": 60.0,
     "upbit": 5.0,
+    "bithumb": 5.0,
     "kis": 15.0,
     "kis_account": 20.0,
     "kiwoom_account": 20.0,

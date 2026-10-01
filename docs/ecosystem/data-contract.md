@@ -278,7 +278,7 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
    - `data`가 도구 스키마의 필수 키를 갖추지 않음
 
    도구 하나가 실패해도 나머지 도구는 영향을 받지 않는다.
-2. **캐시**: `MemoryTTLCache` 900초. TTL이 만료되면 조건부 GET(`If-None-Match`/ETag, Pages가 지원)을 보낸다. 304 응답이면 TTL만 연장한다. 404는 **음성 캐시**한다(TTL 동안 summary를 다시 시도하지 않고 바로 레거시로 간다). 사이블링이 아직 summary를 발행하지 않은 동안 요청이 두 배로 늘지 않게 하기 위해서다.
+2. **캐시**: `MemoryTTLCache` 300초. TTL이 만료되면 조건부 GET(`If-None-Match`/ETag, Pages가 지원)을 보낸다. 304 응답이면 TTL만 연장한다. 404·계약 위반은 **900초 음성 캐시**한다(그동안 summary를 다시 시도하지 않고 바로 레거시로 간다). 사이블링이 아직 summary를 발행하지 않은 동안 요청이 두 배로 늘지 않게 하기 위해서다. 허브 카드의 가격 의존 값은 별도 120초 캐시의 공유 시세로 갱신한다([linked-projects](../linked-projects.md#서버-쪽-외부-인사이트)).
 3. **변경 감지(선택)**: 워치독이나 폴러는 `version.json`만 받는다. `files["summary.json"]`이 캐시한 `contentHash`와 같으면 본문을 다시 받지 않는다.
 4. **stale-while-error**: 새로 받는 데 실패하면 마지막으로 성공한 envelope를 `stale: true`로 표시해 1일까지 쓴다.
 5. **신선도**: `asOf`가 도구별 허용치(예: 장중 도구 1거래일, buybacks 분기, all-about-gold 월)를 넘으면 UI에 "기준일" 경고를 붙인다. 판정 기준은 `generatedAt`이 아니라 `asOf`다. no-op 규칙 때문에 `generatedAt`은 갱신되지 않을 수 있다.

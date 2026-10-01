@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from services.ecosystem import adapters, external_tools, siblings
+from services.ecosystem import adapters, external_tools, live_cards, siblings
 from services.portfolio import spac
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "ecosystem"
@@ -135,6 +135,8 @@ def reset_caches():
     external_tools._cache.clear()
     external_tools._raw_cache.clear()
     external_tools._etf_universe_cache.clear()
+    live_cards._config_cache.clear()
+    live_cards._quotes_cache.clear()
     siblings.reset()
 
 
@@ -164,6 +166,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
             patch.object(external_tools, "_get_json", new=AsyncMock(side_effect=self.fake_get_json)),
             patch.object(external_tools, "_legacy_etf_universe", new=AsyncMock(side_effect=universe)),
             patch.object(external_tools, "_fill_etf_changes", new=AsyncMock()),
+            patch.object(live_cards, "refresh", new=AsyncMock()),
         ]
         if summary_http is not None:
             stack.append(patch.object(siblings, "_http_get", new=AsyncMock(side_effect=summary_http)))

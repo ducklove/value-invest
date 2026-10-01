@@ -90,7 +90,7 @@ holding_value, common_preferred_spread, spac-hunter, buybacks, eiayn **다섯** 
 (`fetch_external_insights`, 액션보드 신호, 종목 링크)가 형제 데이터를 요약해 AI 포트폴리오 인사이트와 카드에 쓴다.
 
 - 도구마다 [services/ecosystem/siblings.py](../services/ecosystem/siblings.py)가 `<레지스트리 url>/summary.json`을 먼저 받는다
-  (900초 캐시, `If-None-Match`, 404·계약 위반은 900초 음성 캐시, 네트워크 오류면 마지막 성공값을 1일까지). 실패하면 그 도구만
+  (300초 캐시, `If-None-Match`, 404·계약 위반은 900초 음성 캐시, 네트워크 오류면 마지막 성공값을 1일까지). 실패하면 그 도구만
   레지스트리 `data[]`의 레거시 파일로 폴백하고, `adapters.py`가 summary를 레거시 모양으로 바꿔 기존 요약기를 그대로 쓴다.
 - 모든 형제 fetch는 `MemoryTTLCache` + single-flight이고 실패 시 1일 stale을 허용한다. 액션보드의 buybacks·gold_gap 데이터도 캐시한다.
 - URL은 레지스트리 도구 `url`(+`*_BASE_URL` env override)에서 만든다. `raw.githubusercontent` 주소는 레지스트리 `data[]`에만 남아 있다
@@ -99,6 +99,41 @@ holding_value, common_preferred_spread, spac-hunter, buybacks, eiayn **다섯** 
   npsTracker 비중 상위·NAV·총액, buybacks 최신 보통주 자사주 비율 상위, bondMate 장단기 스프레드·주요국 금리·달러/원·신용 스프레드·최근 발행,
   eiayn AIYN 상위 100에서 뽑은 오늘의 ETF(허브가 등락률 보강).
 - `ECOSYSTEM_SUMMARIES=0`이면 summary 단계를 끄고 항상 레거시 파일을 쓴다(비상 스위치).
+
+### 카드의 가격 갱신 (2026-10-01)
+
+`market-dashboard.js` → `/api/external/insights` → `external_tools` → `siblings`의
+summary/레거시 요약 → `live_cards.refresh` → 화면 순서다. 화면이 보이는 투자정보
+뷰에서만 2분 폴링하며 숨은 브라우저 탭에서는 멈춘다. API 응답은 KST 날짜별
+120초 캐시·single-flight로 묶어 기기/사용자 수만큼 수집이 늘어나지 않게 한다.
+형제 원본은 300초, 지주사 보유주식수 설정은 6시간 캐시한다.
+
+- 지주사: 전체 지주사·국내 자회사 가격을 일괄 조회하여
+  `Σ(보유주식수 × 자회사 가격) / (자사주 차감 주식수 × 지주사 가격) × 100`으로
+  다시 계산한다. `holdingAdjustedShares`를 우선하고 없으면 총주식수에서 자사주를
+  뺀다. 해외 자회사가 있거나 필요한 시세가 누락되면 그 쌍은 원본을 유지한다.
+  `averageRatio`는 형제와 동일한 중앙값 정의를 유지한다.
+- 우선주: 전체 보통주·우선주 가격으로 `(보통주 − 우선주) / 보통주 × 100`을
+  계산한 뒤 보통주별 최대 괴리 쌍을 고르고 이 대표 쌍들로 평균을 낸다.
+  스팩은 전체 후보의 현재가를 받은 뒤 저가순으로 다시 정렬한다.
+  국내 일괄 시세는 08–20시 거래일에 120초,
+  장외·휴장에 900초 캐시하며 개장 때 캐시 키를 바꾼다.
+- ETF: 추천 목록은 KST 일일 추첨을 유지하고 등락률은 2분 응답마다 보강한다.
+  국내는 `stock_quotes` 벌크, 해외는 등록된 단건 시세 경로를 쓴다.
+- 김치 프리미엄: 기존 `gold_gap`과 같은 기준을 사용한다. 금은 KRX 원/g와
+  COMEX GC=F USD/oz(31.1035g/oz), BTC·ETH는 업비트와 Yahoo USD 가격,
+  USDT는 빗썸 USDT/KRW와 Yahoo USDT-USD다. USD/KRW는 공유 시장 지표를 쓴다.
+  필요한 어느 시세든 누락·스테일이면 해당 자산의 원본 갭을 유지한다.
+- 채권: 공유 시장 지표로 미국·한국 정책금리와 국채 금리를 보강한다. 두 만기의
+  usable 값이 모두 있을 때만 커브 스프레드를 다시 계산한다. 지표 서비스의
+  시세 60초·일 공표 30분·월 공표 6시간 캐시를 공유한다. 신용스프레드와 최근
+  발행은 bond-mate 원본을 따른다.
+
+카드는 `quoteCheckedAt`(시세 조회 시각)과 `lastUpdated`/`asOf`(원본 기준시각)를
+구분해서 표시한다. 일부 후보만 시세를 얻었으면 `partialQuotes`로 원본 혼합을
+표시한다. 개별 제공처 실패는 나머지 갱신을 막지 않으며, 전체 API 실패도 화면의
+마지막 카드를 지우지 않는다. 기준금리·공시 정보는 조회 시각이 새로워져도 원천의
+공표 주기보다 빨리 바뀌지 않는다.
 
 로컬 설정이나 `/admin.html` 없이도 형제의 공개 Pages/raw 주소만 닿으면 동작한다.
 

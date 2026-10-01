@@ -43,6 +43,7 @@ import httpx
 from cache_layer import MemoryTTLCache
 from core.errors import DBError
 from core.http import get_http_client
+from domain.portfolio_codes import is_korean_stock
 from domain.timeutil import KST
 from services.ecosystem import adapters, links, siblings
 from services.ecosystem.fetch import FETCH_ERRORS, cached_fetch, stale_value
@@ -78,8 +79,9 @@ class _SiteMap(Mapping):
 
 SITE: Mapping[str, str] = _SiteMap()
 
-_TTL = 900  # 15분 — 배치 갱신 주기에 맞춤
-_cache = MemoryTTLCache("external.tools", _TTL)
+_TTL = 300  # 형제 배치 파일은 5분마다 확인(시세는 별도 2분 캐시).
+_INSIGHTS_TTL = 120
+_cache = MemoryTTLCache("external.tools", _INSIGHTS_TTL)
 _raw_cache = MemoryTTLCache("external.raw", _TTL)  # 형제 원본(슬림) — 요약·deep-link·액션보드 공용
 _SEM = asyncio.Semaphore(3)
 _TIMEOUT = httpx.Timeout(8.0, connect=4.0)
@@ -540,24 +542,33 @@ async def _fill_etf_changes(picks: list[dict]) -> None:
     """추천 ETF 의 일간 등락률(changePct)을 실시간 시세로 채운다.
 
     rankings.json 은 일배치 산출물이라 등락률이 하루 묵는다 — 목록(추첨)만
-    거기서 쓰고 등락률은 시세 서비스(벌크)로 별도 조회한다. TOP 100 이 전부
-    국내(KRX) ETF 라 벌크 한 번이면 충분하고, 시세를 못 구한 종목은
+    거기서 쓰고 등락률은 시세 서비스로 별도 조회한다.
+    국내(KRX)는 벌크로, 해외는 공유 단건 서비스로 조회하고, 시세를 못 구한 종목은
     changePct 없이 둔다(프론트는 '-' 표시).
     """
-    codes = [str(p.get("code") or "").strip() for p in picks]
-    codes = [c for c in codes if c]
+    codes = list(dict.fromkeys(str(p.get("code") or "").strip().upper() for p in picks if p.get("code")))
     if not codes:
         return
     try:
         from services import stock_quotes
-        quotes = await stock_quotes.get_bulk_quote_snapshots(codes)
+        from services.ecosystem import live_cards
+        domestic = [c for c in codes if is_korean_stock(c)]
+        foreign = [c for c in codes if not is_korean_stock(c)]
+        results = await asyncio.gather(
+            asyncio.wait_for(live_cards.domestic_quotes(domestic), 10) if domestic else asyncio.sleep(0, result={}),
+            *(asyncio.wait_for(stock_quotes.get_quote_snapshot(c), 10) for c in foreign),
+            return_exceptions=True,
+        )
+        quotes = results[0] if isinstance(results[0], dict) else {}
+        quotes.update({c: q for c, q in zip(foreign, results[1:]) if isinstance(q, dict)})
     except Exception as exc:
         logger.warning("ETF picks quote fetch failed: %s", exc)
         return
     for p in picks:
-        q = quotes.get(str(p.get("code") or "").strip())
-        if isinstance(q, dict) and q.get("change_pct") is not None:
+        q = quotes.get(str(p.get("code") or "").strip().upper())
+        if isinstance(q, dict) and q.get("_stale") is not True and q.get("change_pct") is not None:
             p["changePct"] = q["change_pct"]
+            p["asOf"] = q.get("as_of") or q.get("date")
 
 
 async def _etf_rankings() -> dict:
@@ -575,20 +586,26 @@ async def _etf_picks_summary() -> dict | None:
     data = await _etf_rankings()
     out = _summarize_etf_picks(data, datetime.now(KST).strftime("%Y-%m-%d"))
     await _fill_etf_changes(out["top"])
+    if any(p.get("changePct") is not None for p in out["top"]):
+        out["quoteCheckedAt"] = datetime.now(KST).isoformat(timespec="seconds")
+        out["partialQuotes"] = any(p.get("changePct") is None for p in out["top"])
     return out
 
 
-async def _spac_summary() -> dict | None:
+async def _spac_current() -> dict:
     # spac-hunter 는 current.json 만으로 요약 가능하다
     # (종목명이 prices 안에 들어 있어 별도 config 가 필요 없음).
     async def legacy() -> dict:
         return await _get_json(_data_url("spac-hunter", "current"))
 
-    data = await _sibling(
+    return await _sibling(
         "spac-hunter/current", "spac-hunter",
         lambda env: adapters.spac_current(env["data"]), legacy,
     )
-    return _summarize_spac(data)
+
+
+async def _spac_summary() -> dict | None:
+    return _summarize_spac(await _spac_current())
 
 
 def _valid_spac_data(data: Any) -> dict:
@@ -715,10 +732,17 @@ async def _bond_mate_summary() -> dict | None:
 
 
 async def fetch_external_insights() -> dict:
-    """외부 도구 요약을 한 번에. 도구별 독립 실패 허용 + 길게 캐시."""
-    cached = _cache.get("insights")
-    if cached is not None:
-        return cached
+    """120초 캐시 + single-flight. 일일 ETF 추첨은 KST 날짜별로 분리한다."""
+    key = "insights:" + datetime.now(KST).strftime("%Y-%m-%d")
+    try:
+        return await cached_fetch(_cache, key, _load_external_insights)
+    except FETCH_ERRORS as exc:
+        logger.warning("external insights unavailable: %s", exc)
+        return {}
+
+
+async def _load_external_insights() -> dict:
+    from services.ecosystem import live_cards
 
     results = await asyncio.gather(
         _holding_summary(), _spread_summary(), _gold_summary(), _spac_summary(), _nps_summary(),
@@ -734,13 +758,10 @@ async def fetch_external_insights() -> dict:
         out[key] = res
 
     if out:
-        _cache.set("insights", out)
+        await live_cards.refresh(out)
         return out
-    # 전부 실패 시 스테일 폴백
-    entry = _cache.get_entry("insights", allow_stale=True) if hasattr(_cache, "get_entry") else None
-    if entry and getattr(entry, "value", None):
-        return dict(entry.value)
-    return out
+    # cached_fetch가 24시간 이내의 마지막 성공 응답으로 제한해 폴백한다.
+    raise ValueError("all external insight sources failed")
 
 
 def _match_preferred(code: str, current: dict, config: list) -> dict | None:

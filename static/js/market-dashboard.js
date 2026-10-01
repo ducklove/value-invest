@@ -933,7 +933,7 @@ async function loadInvestingDashboard(refresh = false) {
   if (typeof loadMarketMovers === 'function') loadMarketMovers();
   if (typeof loadSectors === 'function') loadSectors();
   if (typeof loadMarketNews === 'function') loadMarketNews();
-  if (typeof loadExternalInsights === 'function') loadExternalInsights();
+  if (typeof loadExternalInsights === 'function') loadExternalInsights(refresh);
   if (typeof loadEconomicCalendar === 'function') loadEconomicCalendar();
   _mdInFlight = (async () => {
     try {
@@ -1073,6 +1073,9 @@ async function loadSectors() {
 // public JSON 요약을 한 섹션에 카드로 묶고, 항목 클릭 시 해당 도구로(새 탭,
 // 가능하면 deep-link).
 let _extInFlight = false;
+const EXT_REFRESH_MS = 120_000;
+let _extPoll = null;
+let _extLastLoadedAt = 0;
 
 function _extSafeUrl(url) {
   return /^https?:\/\//.test(String(url || '')) ? String(url) : '#';
@@ -1159,12 +1162,22 @@ function _extAllocRows(classes, url) {
   }).join('');
 }
 
-function _extCard(title, url, subText, bodyHtml) {
+function _extCard(title, url, subText, bodyHtml, data = {}) {
+  const sourceAt = data.lastUpdated || data.updatedAt || data.asOf || data.generatedAt;
+  const checkedAt = data.quoteCheckedAt;
+  const kstTime = checkedAt && new Date(checkedAt).toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+  const freshness = checkedAt
+    ? `시세 조회 ${kstTime}${data.partialQuotes ? ' · 일부 원본' : ''}`
+    : sourceAt ? `원본 기준 ${sourceAt}` : '';
   return '<div class="ext-card">'
     + `<div class="ext-head"><span>${escapeHtml(title)}</span>`
     + `<a href="${escapeHtml(_extHref(url))}" target="_blank" rel="noopener noreferrer" class="ext-more" title="도구 열기">↗</a></div>`
     + (subText ? `<div class="ext-sub">${escapeHtml(subText)}</div>` : '')
-    + `<div class="ext-rows">${bodyHtml}</div></div>`;
+    + `<div class="ext-rows">${bodyHtml}</div>`
+    + (freshness ? `<div class="ext-freshness" title="${escapeHtml(sourceAt ? '원본 기준 ' + sourceAt : freshness)}">${escapeHtml(freshness)}</div>` : '')
+    + '</div>';
 }
 
 function _extRender(root, data) {
@@ -1172,22 +1185,22 @@ function _extRender(root, data) {
   const h = data && data.holding;
   if (h && (h.top || []).length) {
     const sub = h.averageRatio != null ? `평균 ${_extPct(h.averageRatio)} · 보유가치/시총` : '보유가치/시총';
-    cards.push(_extCard('지주사 저평가', h.url, sub, _extLinkRows(h.top, 'ratio', h.url, 'holding_value')));
+    cards.push(_extCard('지주사 저평가', h.url, sub, _extLinkRows(h.top, 'ratio', h.url, 'holding_value'), h));
   }
   const s = data && data.spread;
   if (s && (s.top || []).length) {
     const sub = s.averageSpread != null ? `평균 괴리율 ${_extPct(s.averageSpread)}` : '우선주 괴리율';
-    cards.push(_extCard('우선주 괴리율', s.url, sub, _extLinkRows(s.top, 'spread', s.url, null)));
+    cards.push(_extCard('우선주 괴리율', s.url, sub, _extLinkRows(s.top, 'spread', s.url, null), s));
   }
   const bb = data && data.buybacks;
   if (bb && (bb.top || []).length) {
     const sub = bb.asOf ? `${bb.asOf} 기준 · 보유비중 상위` : '보유비중 상위';
-    cards.push(_extCard('자사주', bb.url, sub, _extLinkRows(bb.top, 'treasuryRatioPct', bb.url, null)));
+    cards.push(_extCard('자사주', bb.url, sub, _extLinkRows(bb.top, 'treasuryRatioPct', bb.url, null), bb));
   }
   const p = data && data.spac;
   if (p && (p.top || []).length) {
     // 현재가가 낮은(공모가 대비 할인 큰) 순. spac-hunter 는 ?code= deep-link 지원.
-    cards.push(_extCard('스팩 저가순', p.url, '현재가 낮은 순', _extSpacRows(p.top, p.url)));
+    cards.push(_extCard('스팩 저가순', p.url, '현재가 낮은 순', _extSpacRows(p.top, p.url), p));
   }
   const g = data && data.goldGap;
   if (g && (g.assets || []).length) {
@@ -1198,7 +1211,7 @@ function _extRender(root, data) {
         + `<span class="ext-name">${escapeHtml(String(a.label || a.key || ''))}</span>`
         + `<span class="ext-val ${cls}">${escapeHtml(_extPct(a.gap, true))}</span></a>`;
     }).join('');
-    cards.push(_extCard('김치프리미엄', g.url, '국내가 vs 국제가', rows));
+    cards.push(_extCard('김치프리미엄', g.url, '국내가 vs 국제가', rows, g));
   }
   const goldResearch = getIntegrationConfig('allAboutGold');
   if (/^https?:\/\//.test(goldResearch.baseUrl || '')) {
@@ -1227,19 +1240,19 @@ function _extRender(root, data) {
         + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
         + `<span class="ext-val ${cls}">${escapeHtml(_extPct(r.changePct, true))}</span></a>`;
     }).join('');
-    cards.push(_extCard('오늘의 추천 ETF', ep.url, 'AIYN TOP 100 중 오늘의 5선', rows));
+    cards.push(_extCard('오늘의 추천 ETF', ep.url, 'AIYN TOP 100 중 오늘의 5선', rows, ep));
   }
   const nps = data && data.nps;
   const npsAlloc = nps && nps.allocation;
   if (npsAlloc && (npsAlloc.classes || []).length) {
     // 기금 자산배분(국내주식/해외주식/국내채권/해외채권/대체투자): 추정 현재
     // 비중과 괄호 안 목표 비중을 함께 표시한다.
-    cards.push(_extCard('국민연금 자산 비중', nps.url, '자산배분 (목표치)', _extAllocRows(npsAlloc.classes, nps.url)));
+    cards.push(_extCard('국민연금 자산 비중', nps.url, '자산배분 (목표치)', _extAllocRows(npsAlloc.classes, nps.url), nps));
   } else if (nps && (nps.top || []).length) {
     const sub = nps.nav != null
       ? `NAV ${Number(nps.nav).toFixed(1)} · 비중 상위`
       : '포트폴리오 비중 상위';
-    cards.push(_extCard('국민연금', nps.url, sub, _extLinkRows(nps.top, 'weight', nps.url, null)));
+    cards.push(_extCard('국민연금', nps.url, sub, _extLinkRows(nps.top, 'weight', nps.url, null), nps));
   }
   const bm = data && data.bondMate;
   if (bm) {
@@ -1275,7 +1288,7 @@ function _extRender(root, data) {
     }
     if (rows.length) {
       const sub = bm.usCurveInverted ? '장단기 역전 중' : '금리·신용 스프레드';
-      cards.push(_extCard('채권 시황', bm.url, sub, rows.join('')));
+      cards.push(_extCard('채권 시황', bm.url, sub, rows.join(''), bm));
     }
   }
   if (!cards.length) {
@@ -1287,13 +1300,23 @@ function _extRender(root, data) {
     + `<div class="ext-grid">${cards.join('')}</div></section>`;
 }
 
-async function loadExternalInsights() {
+async function loadExternalInsights(refresh = false) {
   const root = document.getElementById('externalTools');
   if (!root || _extInFlight) return;
+  if (!_extPoll) {
+    _extPoll = schedulePoll('md.externalInsights', loadExternalInsights, EXT_REFRESH_MS, {
+      when: _mdLiveActive,
+    });
+  }
+  if (!refresh && _extLastLoadedAt && Date.now() - _extLastLoadedAt < EXT_REFRESH_MS) return;
   _extInFlight = true;
   try {
-    const data = await apiFetchJson('/api/external/insights', { fallback: {} });
+    const data = await apiFetchJson('/api/external/insights', { fallback: null, timeoutMs: 35_000 });
+    // 일시적인 실패가 기존 카드를 지우지 않게 한다. 서버는 도구별로 실패를 격리한다.
+    if (!data || !Object.keys(data).length) return;
     _extRender(root, data);
+    _extLastLoadedAt = Date.now();
+    _extPoll.markFresh();
   } catch (e) {
     console.warn('external insights load failed', e);
   } finally {

@@ -7,7 +7,7 @@ HTTP 오류(404 포함) · JSON 파싱 실패 · ``validate_envelope`` 실패(�
 
 캐시 규칙:
 
-- summary 는 ``MemoryTTLCache`` 900초. 만료되면 ``If-None-Match`` 조건부 GET, 304 면 TTL 만 연장.
+- summary 는 ``MemoryTTLCache`` 300초. 만료되면 ``If-None-Match`` 조건부 GET, 304 면 TTL 만 연장.
 - 404/410 과 계약 위반은 **음성 캐시**(900초) — 형제가 아직 summary 를 발행하지 않는
   동안 요청이 두 배로 늘지 않게 곧장 레거시로 간다.
 - 네트워크 오류면 마지막 성공 envelope 를 1일까지 쓴다(stale 표시).
@@ -35,14 +35,14 @@ from services.ecosystem.fetch import FETCH_ERRORS, entry_age_seconds, single_fli
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_TTL = 900
+SUMMARY_TTL = 300
 STALE_MAX_SECONDS = 24 * 3600
 _HTTP_CLIENT = "external_tools"  # core/http 에 등록된 형제 JSON 프로파일(8초)
 _TIMEOUT = httpx.Timeout(8.0, connect=4.0)
 _HEADERS = {"User-Agent": "value-invest/1.0"}
 
 _summary_cache = MemoryTTLCache("ecosystem.summary", SUMMARY_TTL)
-_missing_cache = MemoryTTLCache("ecosystem.summary.missing", SUMMARY_TTL)
+_missing_cache = MemoryTTLCache("ecosystem.summary.missing", 900)
 # 도구별 마지막 로드 결과 — /api/ecosystem 신선도 표시용(캐시가 아니라 상태 기록).
 _status: dict[str, dict[str, Any]] = {}
 

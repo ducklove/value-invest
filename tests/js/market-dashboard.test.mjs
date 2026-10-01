@@ -945,3 +945,88 @@ test("탭 복귀: 창이 지났을 때만 한 번 갱신하고, 숨김 전환·�
   await settle();
   assert.equal(calls.fetch.length, 3, "이미 갱신했으니 두 번째 이벤트는 무시");
 });
+
+// Tool cards poll independently of the main dashboard and retain the last good UI.
+test('분석 도구는 2분마다 보이는 투자정보 화면에서만 갱신하고 동시 호출을 합친다', async () => {
+  const w = load();
+  let now = 5_000_000;
+  w.Date.now = () => now;
+  Object.defineProperty(w.document, 'hidden', { configurable: true, value: false });
+  const polls = [];
+  w.schedulePoll = (name, fn, ms, options) => {
+    const handle = { name, fn, ms, options, fresh: 0, markFresh() { this.fresh++; } };
+    polls.push(handle);
+    return handle;
+  };
+  let resolve;
+  let calls = 0;
+  w.apiFetchJson = () => {
+    calls++;
+    return new Promise((r) => { resolve = r; });
+  };
+  const first = w.loadExternalInsights();
+  await w.loadExternalInsights();
+  assert.equal(calls, 1);
+  resolve({ spac: { url: 'https://example.com/', top: [{ code: '000001', currentPrice: 1800 }] } });
+  await first;
+  assert.equal(polls.length, 1);
+  assert.equal(polls[0].ms, 120_000);
+  assert.equal(polls[0].options.when(), true);
+  Object.defineProperty(w.document, 'hidden', { configurable: true, value: true });
+  assert.equal(polls[0].options.when(), false);
+  Object.defineProperty(w.document, 'hidden', { configurable: true, value: false });
+  const view = w.document.createElement('div');
+  view.id = 'investingView';
+  w.document.body.appendChild(view);
+  assert.equal(polls[0].options.when(), false, '다른 앱 화면에서는 폴링하지 않는다');
+  view.remove();
+  now += 119_000;
+  await w.loadExternalInsights();
+  assert.equal(calls, 1);
+  now += 2_000;
+  const next = polls[0].fn();
+  assert.equal(calls, 2);
+  resolve({ spac: { url: 'https://example.com/', top: [{ code: '000001', currentPrice: 1810 }] } });
+  await next;
+  assert.match(w.document.getElementById('externalTools').textContent, /1,810/);
+  assert.equal(polls.length, 1, '첫 로드 이후 타이머를 중복 등록하지 않는다');
+  assert.equal(polls[0].fresh, 2);
+  w.close();
+});
+
+test('분석 도구의 요청 실패는 마지막 카드를 보존하고 다음 요청에서 회복한다', async () => {
+  const w = load();
+  w.schedulePoll = () => ({ markFresh() {} });
+  let data = { spac: { url: 'https://example.com/', top: [{ currentPrice: 1883 }] } };
+  w.apiFetchJson = async () => data;
+  await w.loadExternalInsights();
+  const root = w.document.getElementById('externalTools');
+  const original = root.innerHTML;
+  data = null;
+  await w.loadExternalInsights(true);
+  assert.equal(root.innerHTML, original);
+  data = {};
+  await w.loadExternalInsights(true);
+  assert.equal(root.innerHTML, original);
+  data = { spac: { url: 'https://example.com/', top: [{ currentPrice: 1900 }] } };
+  await w.loadExternalInsights(true);
+  assert.match(root.textContent, /1,900/);
+  w.close();
+});
+
+test('카드의 원본 기준시각과 시세 조회 시각을 구분하고 부분 갱신을 표시한다', () => {
+  const w = load();
+  const root = w.document.getElementById('externalTools');
+  w._extRender(root, {
+    spac: { url: 'https://example.com/', lastUpdated: '2026-09-29 22:14 KST',
+      quoteCheckedAt: '2026-10-01T09:02:00+09:00', partialQuotes: true, top: [{ currentPrice: 1900 }] },
+    spread: { url: 'https://example.com/', lastUpdated: '2026-09-29', top: [{ spread: 42 }] },
+  });
+  const stamps = [...root.querySelectorAll('.ext-freshness')];
+  assert.match(stamps[0].textContent, /원본 기준 2026-09-29/);
+  assert.match(stamps[1].textContent, /시세 조회/);
+  assert.match(stamps[1].textContent, /09:02/);
+  assert.match(stamps[1].textContent, /일부 원본/);
+  assert.match(stamps[1].title, /2026-09-29 22:14/);
+  w.close();
+});

@@ -320,6 +320,7 @@
 .ext-more { text-decoration: none; color: var(--text-secondary); font-size: 14px; }
 .ext-more:hover { color: var(--accent, #2563eb); }
 .ext-sub { font-size: 11px; color: var(--text-secondary); margin: 2px 0 6px; }
+.ext-freshness { font-size: 10px; color: var(--text-secondary); margin-top: 6px; }
 .ext-rows { display: flex; flex-direction: column; }
 .ext-row {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
