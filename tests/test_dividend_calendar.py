@@ -38,6 +38,21 @@ def request():
 
 
 class PatternTests(unittest.TestCase):
+    def test_cached_kis_zero_is_unknown_and_remains_receiptable(self):
+        raw = {"record_date": "2026-09-30", "pay_date": None, "amount_per_share": 0,
+               "currency": "KRW", "source": "KIS·예탁원 배당 일정"}
+        event = calendar_event({"stock_code": "005935", "quantity": 100}, raw, 1, "quarterly", feed([raw]))
+        self.assertIsNone(event["amount_per_share"])
+        self.assertIsNone(event["expected_amount_krw"])
+        self.assertEqual(event["amount_status"], "unknown")
+        self.assertTrue(event["receiptable"])
+        self.assertFalse(event["cashflow"])
+        # 지급일이 있는 0원 및 다른 공급자의 0원은 그대로 보존한다.
+        for reported in ({**raw, "pay_date": "2026-11-20"}, {**raw, "source": "Schwab 공시"}):
+            event = calendar_event({"stock_code": "005935", "quantity": 100}, reported, 1, "quarterly", feed([reported]))
+            self.assertEqual(event["amount_per_share"], 0)
+            self.assertEqual(event["expected_amount_krw"], 0)
+
     def test_windows_cross_years(self):
         self.assertEqual(cal._shift_month(2026, 1, -2), (2025, 11))
         self.assertEqual(cal.window_months(TODAY, 2, 10)[-1], (2027, 7))

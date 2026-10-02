@@ -77,6 +77,14 @@ HOLDING_FIELDS = ("holding_as_of", "quantity_as_of", "quantity_unknown_reason", 
                   "reference_approximate", "held_now")
 
 
+def schedule_amount(raw: dict) -> float | None:
+    """지급일 없는 KIS의 0은 무배당 근거로 쓰지 않는다. 기존 캐시에도 적용한다."""
+    amount = raw.get("amount_per_share")
+    if amount == 0 and raw.get("source") == "KIS·예탁원 배당 일정" and not raw.get("pay_date"):
+        return None
+    return amount
+
+
 def calendar_event(holding: dict, raw: dict, rate: float | None, frequency: str, feed: dict) -> dict:
     """일정 행. shares·금액은 holding의 quantity(기준 시점 보유 수량, 미래·예상은 현재 수량)다.
 
@@ -87,14 +95,14 @@ def calendar_event(holding: dict, raw: dict, rate: float | None, frequency: str,
     day = event_day(raw)
     kind = "payment" if raw.get("pay_date") else "ex_date" if raw.get("ex_date") else "record_date"
     estimated = bool(raw.get("estimated"))
-    amount = raw.get("amount_per_share")
+    amount = schedule_amount(raw)
     shares = None if holding.get("quantity") is None else float(holding["quantity"])
     confirmed = bool(raw.get("official", feed.get("official"))) and not estimated
     label = {"payment": "지급일", "ex_date": "배당락일 · 지급일 미확인", "record_date": "배당기준일 · 지급일 미확인"}[kind]
     source_day = raw.get("ex_date") or raw.get("record_date") or day
     # 배당락일을 지급일로 보강해도 수취 건의 식별자는 유지한다.
     source_key = f"{code}:ex_date:{source_day}"
-    return {**raw, "date": day, "stock_code": code, "stock_name": holding.get("stock_name") or code,
+    return {**raw, "amount_per_share": amount, "date": day, "stock_code": code, "stock_name": holding.get("stock_name") or code,
             "label": f"{FREQUENCY_LABELS[frequency]} · {label}" + (" (예상)" if estimated else ""),
             "type": "estimated" if estimated else kind, "date_kind": kind,
             "date_precision": "approximate" if estimated else "day", "confirmed": confirmed,

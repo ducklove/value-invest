@@ -16,6 +16,16 @@ SCHP_HTML = """<table><thead><tr><th></th><th></th><th>Ex-Date</th><th>Record Da
 
 
 class ParserTests(unittest.TestCase):
+    def test_kis_zero_without_payment_date_is_unknown_not_zero_dividend(self):
+        rows = {"items": [
+            {"sht_cd": "005935", "record_date": "20260930", "per_sto_divi_amt": "0", "divi_pay_dt": ""},
+            {"sht_cd": "005935", "record_date": "20260630", "per_sto_divi_amt": "0", "divi_pay_dt": "20260820"},
+        ]}
+        pending, reported = sources.parse_kis_dividends(rows, "005935")
+        self.assertIsNone(pending["amount_per_share"])
+        self.assertIsNone(pending["pay_date"])
+        self.assertEqual(reported["amount_per_share"], 0)
+
     def test_kis_record_cash_payment_and_stock_dividend_are_not_interchangeable(self):
         rows = {"items": [{"sht_cd": "005930", "record_date": "20250630", "divi_pay_dt": "2025/08/20", "per_sto_divi_amt": "367"},
                           {"sht_cd": "005930", "record_date": "20260331", "stk_div_pay_dt": "2026/05/20", "per_sto_divi_amt": ""},

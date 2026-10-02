@@ -10,9 +10,14 @@ test('배당 캘린더는 지급·권리일과 출처를 구분하고 모바일 
   const estimated = { ...payment, stock_code: 'SCHP', stock_name: 'SCHP', date: '2026-09-20', pay_date: '2026-09-20',
     label: '월배당 · 지급일 (예상)', source: 'Schwab 공시', source_url: 'https://www.schwabassetmanagement.com/products/schp',
     type: 'estimated', date_precision: 'approximate', confirmed: false, receiptable: false, source_key: null };
+  const pending = { ...payment, stock_code: '005935', stock_name: '삼성전자우', date: '2026-09-30',
+    type: 'record_date', date_kind: 'record_date', record_date: '2026-09-30', ex_date: null, pay_date: null,
+    frequency: 'quarterly', amount_status: 'unknown', amount_per_share: null, expected_amount_krw: null,
+    currency: 'KRW', shares: 100, holding_basis: 'snapshot', holding_as_of: '2026-09-23',
+    verification: null, receiptable: false, source: 'KIS·예탁원 배당 일정' };
   await page.route('**/api/portfolio/dividend-calendar?*', route => route.fulfill({ json: {
-    as_of: '2026-09-10', start_month: '2026-09', end_month: '2026-09', events: [payment, estimated],
-    monthly: [{ month: '2026-09', count: 2, total_krw: 3360, announced_krw: 1680, estimated_krw: 1680 }],
+    as_of: '2026-09-10', start_month: '2026-09', end_month: '2026-09', events: [payment, estimated, pending],
+    monthly: [{ month: '2026-09', count: 3, total_krw: 3360, announced_krw: 1680, estimated_krw: 1680 }],
     summary: { total_expected_krw: 3360, confirmed_count: 1, estimated_count: 1 },
   } }));
   await page.route('**/api/portfolio/dividend-receipts/candidates', route => route.fulfill({ json: { events: [payment] } }));
@@ -23,10 +28,16 @@ test('배당 캘린더는 지급·권리일과 출처를 구분하고 모바일 
   await expect(page.locator('#pfBody tr[data-code="005930"]')).toBeVisible();
   await page.locator('.pf-tab[data-tab="performance"]').click();
   const calendar = page.locator('#pfDivCalWrap');
-  await expect(calendar).toContainText('배당락 2026-08-31');
+  await expect(calendar).toContainText('배당락일 2026-08-31');
+  const pendingRow = calendar.locator('.pf-divcal-event').filter({ hasText: '삼성전자우' });
+  await expect(pendingRow.locator('.pf-divcal-date-kind')).toHaveText('배당기준일');
+  await expect(pendingRow).toContainText('주당 배당금 미확인 · 보유 100주');
+  await expect(pendingRow).not.toContainText('0원');
   await expect(calendar).toContainText('2026-09-20 전후');
   await expect(calendar.getByRole('button', { name: '수취 입력' })).toHaveCount(1);
   await expect(calendar.locator('a').filter({ hasText: 'AGNC 공시' })).toHaveAttribute('href', payment.source_url);
+  await calendar.locator('.pf-divcal-source').first().locator('summary').click();
+  await expect(calendar.getByRole('link', { name: 'AGNC 공시' })).toBeVisible();
   await calendar.screenshot({ path: testInfo.outputPath('calendar-desktop.png') });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('#pfSimpleToggle')).toBeVisible();

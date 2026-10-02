@@ -12,6 +12,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from core.http import get_http_client, timeout_for
+from domain.dividend_schedule import schedule_amount
 from repositories.cache_values import get_cache_value_entry, set_cache_value
 from repositories.ticker_map import load_ticker_map
 from services.market.sources import kis_proxy as kis_proxy_client
@@ -92,6 +93,7 @@ def parse_kis_dividends(payload: dict, code: str) -> list[dict]:
         events[record] = {"record_date": record, "ex_date": None, "pay_date": parse_day(row.get("divi_pay_dt")),
                           "amount_per_share": number(row.get("per_sto_divi_amt")), "currency": "KRW",
                           "source": "KIS·예탁원 배당 일정", "source_url": "https://apiportal.koreainvestment.com/"}
+        events[record]["amount_per_share"] = schedule_amount(events[record])
     return list(events.values())
 
 
