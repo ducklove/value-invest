@@ -3,7 +3,7 @@
 //
 // 실제 소스(utils → store → render → dividends-calendar)를 브라우저와 같은
 // 순서로 올리고 apiFetch 만 모킹해 검증한다: 월 행 렌더 + 합계 포맷(fmtKrw),
-// 월 펼침 이벤트 목록(확정/예상 배지, 주당 × 수량 = 금액), 빈 상태,
+// 월 펼침 표(표준 컬럼, 지급일 증권사 배지, 실제 세금·입금액), 빈 상태,
 // 메모(재호출 시 재요청 없음), silent 오류 처리.
 
 import test from "node:test";
@@ -43,10 +43,10 @@ const FULL_PAYLOAD = {
   end_month: "2027-04",
   events: [
     { date: "2026-04-15", stock_code: "005930", stock_name: "삼성전자",
-      label: "연간 배당 (예상)", type: "estimated", amount_per_share: 1500,
+      label: "연간 배당 (예상)", type: "estimated", date_kind: "payment", pay_date: "2026-04-15", amount_per_share: 1500,
       currency: "KRW", shares: 10, expected_amount_krw: 15000, confirmed: false },
     { date: "2026-06-15", stock_code: "AAPL", stock_name: "Apple",
-      label: "분기 배당 (예상)", type: "estimated", amount_per_share: 0.25,
+      label: "분기 배당 (예상)", type: "estimated", date_kind: "payment", pay_date: "2026-06-15", amount_per_share: 0.25,
       currency: "USD", shares: 5, expected_amount_krw: 1750, confirmed: false },
     { date: "2026-06-26", stock_code: "005930", stock_name: "삼성전자",
       label: "배당기준일 (확정)", type: "record_date", amount_per_share: 361,
@@ -120,7 +120,49 @@ test("월 행 렌더 — 합계는 fmtKrw 포맷, 이번 달 강조 + 기본 펼
   assert.match(range.textContent, /16,750원/);
   assert.match(range.textContent, /공시 1건 \/ 예상 2건/);
   // 추정 휴리스틱 + 기준일 제외 안내문.
-  assert.match(content.querySelector(".pf-divcal-note").textContent, /월 합계에서 제외/);
+  assert.match(content.querySelector(".pf-divcal-help").textContent, /월 합계에서 제외/);
+  const headers = [...juneList.querySelectorAll('thead th')].map(cell => cell.textContent);
+  assert.deepEqual(headers, ['종목', '배당기준일', '지급일', '배당락 여부', '주당 배당액', '수량', '배당총액', '세금', '지급액']);
+});
+
+test('입금이 확인된 행은 실제 세전·세금·지급액을 사용하고 증권사 배지는 지급일에만 붙는다', async () => {
+  const paid = { date: '2026-09-20', date_kind: 'payment', pay_date: '2026-09-20', record_date: '2026-08-31',
+    ex_date: '2026-08-28', stock_code: '005930', stock_name: '삼성전자', confirmed: true,
+    amount_per_share: 370, shares: 100, currency: 'KRW', expected_amount_krw: 37000,
+    verification: 'nh_confirmed', paid_date: '2026-09-21',
+    nh_match: { date: '2026-09-21', broker_name: 'NH', currency: 'KRW', gross_amount: 37400, tax_amount: 5750, net_amount: 31650 } };
+  const zeroTax = { ...paid, stock_name: '면세 입금', nh_match: { ...paid.nh_match, broker_name: '다른증권사', tax_amount: 0, net_amount: 37400 } };
+  const pending = { ...paid, stock_name: '입금 전', verification: null, nh_match: null, paid_date: null };
+  const { w } = loadPanel({ as_of: '2026-09-30', events: [paid, zeroTax, pending], monthly: [{ month: '2026-09', count: 3 }], summary: {} });
+  await w.pfLoadDividendCalendarPanel();
+  const [row, zeroRow, pendingRow] = [...w.document.querySelectorAll('.pf-divcal-event')];
+  assert.match(row.querySelector('.pf-divcal-payment-date').textContent, /2026-09-21.*NH.*공시 2026-09-20/);
+  assert.equal(row.querySelectorAll('.broker').length, 1);
+  assert.equal(row.querySelector('.pf-divcal-stock .broker'), null);
+  assert.match(row.querySelector('.pf-divcal-gross').textContent, /37,400원.*실제 세전/);
+  assert.equal(row.querySelector('.pf-divcal-tax').textContent, '5,750원');
+  assert.match(row.querySelector('.pf-divcal-net').textContent, /31,650원.*실제 입금/);
+  assert.equal(zeroRow.querySelector('.pf-divcal-payment-date .broker').textContent, '다른증권사');
+  assert.equal(zeroRow.querySelector('.pf-divcal-tax').textContent, '0원');
+  assert.equal(pendingRow.querySelector('.broker'), null);
+  assert.equal(pendingRow.querySelector('.pf-divcal-tax').textContent, '미확인');
+  assert.match(pendingRow.querySelector('.pf-divcal-net').textContent, /^미확인/);
+});
+
+test('외화 일부 입금은 확인분·현지세·국내세를 구분하고 배당락 예정일을 표시한다', async () => {
+  const event = { date: '2026-09-10', ex_date: '2026-09-10', date_kind: 'ex_date', stock_name: '해외 종목',
+    stock_code: 'AAA', currency: 'USD', amount_per_share: 0.21, shares: 15, verification: 'nh_partial', paid_date: '2026-09-16',
+    nh_match: { date: '2026-09-16', currency: 'USD', gross_amount: 2, tax_amount: 0.3, domestic_tax_krw: 300, net_amount: 1.7 } };
+  const unverified = { ...event, stock_name: '근거 없는 확인 상태', verification: 'nh_confirmed', nh_match: null, paid_date: null };
+  const { w } = loadPanel({ as_of: '2026-09-01', events: [event, unverified], monthly: [{ month: '2026-09', count: 2 }], summary: {} });
+  await w.pfLoadDividendCalendarPanel();
+  const [row, unverifiedRow] = [...w.document.querySelectorAll('.pf-divcal-event')];
+  assert.match(row.querySelector('.pf-divcal-payment-date').textContent, /일부 입금/);
+  assert.match(row.querySelector('.pf-divcal-gross').textContent, /^2 USD.*계좌 확인분/);
+  assert.match(row.querySelector('.pf-divcal-tax').textContent, /현지 0.3 USD.*국내 300원/);
+  assert.match(row.querySelector('.pf-divcal-net').textContent, /^1.7 USD.*국내세 별도/);
+  assert.match(row.querySelector('.pf-divcal-ex-status').textContent, /예정.*2026-09-10/);
+  assert.equal(unverifiedRow.querySelector('.broker'), null);
 });
 
 test("이벤트 행 — 확정/예상 배지, 주당 × 수량 = 금액, 예상·임박 구분 클래스", async () => {
@@ -136,16 +178,19 @@ test("이벤트 행 — 확정/예상 배지, 주당 × 수량 = 금액, 예상�
   assert.ok(aapl.classList.contains("pf-divcal-est"));
   assert.ok(aapl.classList.contains("pf-divcal-upcoming"));
   assert.equal(aapl.querySelector(".pf-divcal-badge").textContent, "예상");
-  assert.match(aapl.textContent, /주당 0\.25 USD × 5주/);
-  assert.match(aapl.querySelector(".pf-divcal-amount").textContent, /1,750원/);
+  assert.equal(aapl.querySelector('.pf-divcal-per-share').textContent, '0.25 USD');
+  assert.equal(aapl.querySelector('.pf-divcal-quantity').textContent, '5주');
+  assert.match(aapl.querySelector('.pf-divcal-gross').textContent, /1.25 USD/);
+  assert.match(aapl.querySelector(".pf-divcal-gross").textContent, /1,750원/);
 
   // 삼성전자 확정 행: confirmed 배지 + est 클래스 없음.
-  const ssec = june.find((row) => /배당기준일/.test(row.textContent));
+  const ssec = june.find((row) => /삼성전자/.test(row.textContent));
   assert.ok(!ssec.classList.contains("pf-divcal-est"));
   assert.equal(ssec.querySelector(".pf-divcal-badge").textContent, "공시");
   assert.ok(ssec.querySelector(".pf-divcal-badge").classList.contains("confirmed"));
-  assert.match(ssec.textContent, /주당 361원 × 10주/);
-  assert.match(ssec.querySelector(".pf-divcal-amount").textContent, /3,610원/);
+  assert.equal(ssec.querySelector('.pf-divcal-per-share').textContent, '361원');
+  assert.equal(ssec.querySelector('.pf-divcal-quantity').textContent, '10주');
+  assert.match(ssec.querySelector(".pf-divcal-gross").textContent, /3,610원/);
 
   // 과거(2026-04-15 < as_of) 이벤트는 upcoming 클래스 없음.
   const april = content.querySelector('[data-month-events="2026-04"] .pf-divcal-event');
@@ -249,14 +294,16 @@ test('지난 지급일은 NH 입금 확인/미확인 태그를 달고, NH 확인
   const rows = [...w.document.querySelectorAll('[data-month-events="2026-05"] .pf-divcal-event')];
   const agnc = rows.find(row => /AGNC/.test(row.textContent));
   const ssec = rows.find(row => /삼성전자/.test(row.textContent));
-  assert.equal(agnc.querySelector('.pf-divcal-badge.nh').textContent, 'NH 입금 확인');
-  assert.match(agnc.querySelector('.pf-divcal-badge.nh').title, /NH 입금일 2026-05-11 · 세후 1.02 USD/);
+  assert.equal(agnc.querySelector('.pf-divcal-payment-date .pf-divcal-badge.broker').textContent, 'NH');
+  assert.match(agnc.querySelector('.pf-divcal-payment-date').textContent, /2026-05-11.*NH/);
+  assert.match(agnc.querySelector('.pf-divcal-net').textContent, /1.02 USD/);
   assert.equal(agnc.querySelector('.js-pf-dividend-receipt'), null);
-  assert.equal(ssec.querySelector('.pf-divcal-badge.unconfirmed').textContent, 'NH 입금 미확인');
+  assert.match(ssec.querySelector('.pf-divcal-payment-date').textContent, /입금 미확인/);
+  assert.equal(ssec.querySelector('.pf-divcal-badge.broker'), null);
   assert.ok(ssec.querySelector('.js-pf-dividend-receipt'));
   // NH 밖 계좌에도 보유한 종목은 NH 몫만 확인 — 나머지 몫의 수취 입력은 그대로 둔다.
   const realty = rows.find(row => /리얼티인컴/.test(row.textContent));
-  assert.equal(realty.querySelector('.pf-divcal-badge.nh.partial').textContent, 'NH 일부 입금 확인');
+  assert.equal(realty.querySelector('.pf-divcal-payment-date .pf-divcal-badge.broker.partial').textContent, 'NH');
   assert.ok(realty.querySelector('.js-pf-dividend-receipt'));
   assert.match(w.document.querySelector('.pf-chart-range').textContent, /NH 입금 미확인 1건/);
 });
@@ -291,30 +338,33 @@ test('해외 배당락 행에 연결된 NH 입금은 실제 지급일·세후·�
   const rows = [...w.document.querySelectorAll('[data-month-events="2026-09"] .pf-divcal-event')];
   const find = (text) => rows.find(row => row.textContent.includes(text));
   const aaa = find('호주 단기채');
-  const badge = aaa.querySelector('.pf-divcal-badge.nh');
-  assert.equal(badge.textContent, 'NH 입금 확인');
-  assert.match(badge.title, /NH 입금일 2026-09-15 · 세후 21 AUD · 국내세 2,100원/);
-  assert.match(aaa.querySelector('.pf-divcal-nh-line').textContent, /NH 입금일 2026-09-15 · 세후 21 AUD/);
-  assert.match(aaa.querySelector('.pf-divcal-date').textContent, /2026-09-01/); // 배당락일은 그대로
-  assert.equal(aaa.querySelector('.pf-divcal-date-kind').textContent, '배당락일');
-  assert.doesNotMatch(aaa.textContent, /지급일 미확인/); // 실제 입금일이 있으면 상충 안내를 숨긴다.
+  const badge = aaa.querySelector('.pf-divcal-payment-date .pf-divcal-badge.broker');
+  assert.equal(badge.textContent, 'NH');
+  assert.match(badge.title, /NH 실제 계좌 입금 확인/);
+  assert.match(aaa.querySelector('.pf-divcal-payment-date').textContent, /2026-09-15.*NH/);
+  assert.match(aaa.querySelector('.pf-divcal-net').textContent, /21 AUD/);
+  assert.match(aaa.querySelector('.pf-divcal-ex-status').textContent, /배당락.*2026-09-01/);
+  assert.equal(aaa.querySelector('.pf-divcal-stock .broker'), null);
   assert.equal(aaa.querySelector('.js-pf-dividend-receipt'), null);
   const googl = find('구글');
-  assert.equal(googl.querySelector('.pf-divcal-badge.nh.partial').textContent, 'NH 일부 입금 확인');
-  assert.match(googl.querySelector('.pf-divcal-nh-line').textContent, /NH 입금일 2026-09-16 · 입금 2건 합계 · 세후 1.7 USD · 세금 정산 −55원/);
-  assert.doesNotMatch(aaa.querySelector('.pf-divcal-nh-line').textContent, /건 합계/);
+  assert.equal(googl.querySelector('.pf-divcal-payment-date .broker.partial').textContent, 'NH');
+  assert.match(googl.querySelector('.pf-divcal-payment-date').textContent, /2026-09-16.*일부 입금/);
+  assert.match(googl.querySelector('.pf-divcal-net').textContent, /1.7 USD.*계좌 확인분/);
+  assert.match(googl.querySelector('.pf-divcal-tax').textContent, /세금 정산 −55원/);
   assert.ok(googl.querySelector('.js-pf-dividend-receipt'));
   const eun = find('유로스탁');
-  assert.equal(eun.querySelector('.pf-divcal-badge.unconfirmed').textContent, 'NH 입금 미확인');
-  assert.match(eun.querySelector('.pf-divcal-badge.unconfirmed').title, /배당락일 이후/);
-  const deposit = rows.find(row => row.querySelector('.pf-divcal-badge.deposit'));
-  assert.equal(deposit.querySelector('.pf-divcal-badge.deposit').textContent, 'NH 입금');
-  assert.equal(deposit.querySelector('img'), null); // 종목명은 escape
+  assert.match(eun.querySelector('.pf-divcal-payment-date').textContent, /미확인.*입금 미확인/);
+  assert.equal(eun.querySelector('.broker'), null);
+  const deposit = rows.find(row => row.classList.contains('pf-divcal-nh'));
+  assert.equal(deposit.querySelector('.pf-divcal-payment-date .broker').textContent, 'NH');
+  assert.equal(deposit.querySelector('img'), null);
   assert.match(deposit.textContent, /<img src=x/);
   assert.equal(deposit.querySelector('.js-pf-dividend-receipt'), null);
-  assert.equal(deposit.querySelector('.pf-divcal-badge.nh:not(.deposit)'), null);
-  assert.match(deposit.querySelector('.pf-divcal-nh-line').textContent, /세전 10 USD · 현지세 1.5 USD · 세후 8.5 USD/);
-  assert.match(deposit.querySelector('.pf-divcal-amount').textContent, /14,000원/);
+  assert.match(deposit.querySelector('.pf-divcal-tax').textContent, /현지 1.5 USD/);
+  assert.match(deposit.querySelector('.pf-divcal-net').textContent, /8.5 USD/);
+  assert.match(deposit.querySelector('.pf-divcal-gross').textContent, /10 USD.*실제 세전/);
+  assert.equal(deposit.querySelector('.pf-divcal-record-date').textContent, '미확인');
+  assert.equal(deposit.querySelector('.pf-divcal-ex-status').textContent, '미확인');
   assert.ok(!deposit.classList.contains('pf-divcal-est'));
   const head = w.document.querySelector('.pf-divcal-month[data-month="2026-09"]');
   assert.match(head.textContent, /NH 입금 14,000원/);
@@ -381,7 +431,9 @@ test('지난 배당은 기준 시점 보유 근거와 매도 태그를 보여 �
   assert.match(realty.textContent, /<b>리얼티<\/b>/);
   assert.equal(holding(realty).textContent, '수량 근거: 9/1 보유 기록');
   const samsung = find('삼성전자');
-  assert.match(samsung.textContent, /주당 370원 × 수량 미상/);
+  assert.equal(samsung.querySelector('.pf-divcal-per-share').textContent, '370원');
+  assert.match(samsung.querySelector('.pf-divcal-quantity').textContent, /미확인/);
+  assert.equal(samsung.querySelector('.pf-divcal-gross').textContent, '미확인');
   assert.equal(holding(samsung).textContent, '수량 근거: 6/26 보유 기록 · 수량 미상(수량 기록 전 매매)');
   assert.match(holding(samsung).title, /배당기준일 2거래일 전 종가 보유/);
   // 수량을 모르는 지급 행은 환율 문제가 아니라 '수량 미상'으로 월 합계에 표시한다.
@@ -411,16 +463,18 @@ test('삼성전자우 배당금 미확인과 NH 입금 미확인은 구분하고
   const { w } = loadPanel(payload);
   await w.pfLoadDividendCalendarPanel();
   const [row, zeroRow] = [...w.document.querySelectorAll('.pf-divcal-event')];
-  assert.equal(row.querySelector('.pf-divcal-date-kind').textContent, '배당기준일');
-  assert.match(row.textContent, /주당 배당금 미확인 · 보유 100주/);
+  assert.equal(row.querySelector('.pf-divcal-record-date').textContent, '2026-09-30');
+  assert.equal(row.querySelector('.pf-divcal-per-share').textContent, '미확인');
+  assert.match(row.querySelector('.pf-divcal-quantity').textContent, /100주/);
   assert.equal((row.textContent.match(/100주/g) || []).length, 1);
   assert.doesNotMatch(row.textContent, /0원/);
-  assert.match(row.querySelector('.pf-divcal-amount').textContent, /배당금 미확인/);
-  assert.match(row.querySelector('.pf-divcal-payment-note').textContent, /지급일 미확인 · 월 합계 제외/);
-  assert.equal(row.querySelector('.pf-divcal-badge.unconfirmed').textContent, 'NH 입금 미확인');
+  assert.equal(row.querySelector('.pf-divcal-gross').textContent, '미확인');
+  assert.match(row.querySelector('.pf-divcal-payment-date').textContent, /미확인.*입금 미확인/);
+  assert.equal(row.querySelector('.pf-divcal-payment-date .broker'), null);
   assert.match(row.querySelector('.pf-divcal-source summary').textContent, /자료 확인 2026-10-02/);
   assert.equal(row.querySelector('.pf-divcal-source').open, false);
-  assert.match(zeroRow.textContent, /주당 0원 × 100주/);
-  assert.equal(zeroRow.querySelector('.pf-divcal-date-kind').textContent, '지급일');
+  assert.equal(zeroRow.querySelector('.pf-divcal-per-share').textContent, '0원');
+  assert.match(zeroRow.querySelector('.pf-divcal-gross').textContent, /0원/);
+  assert.match(zeroRow.querySelector('.pf-divcal-payment-date').textContent, /2026-09-30/);
   assert.match(w.document.querySelector('.pf-divcal-help').textContent, /무배당이나 0원 확정을 뜻하지 않습니다/);
 });

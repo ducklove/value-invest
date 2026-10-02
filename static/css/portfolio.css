@@ -1312,45 +1312,47 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
   margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .pf-divcal-caret { width: 14px; text-align: center; color: var(--text-secondary); font-size: 11px; }
-.pf-divcal-events { padding: 2px 6px 8px 28px; }
-.pf-divcal-event {
-  display: grid; grid-template-columns: 86px minmax(0, 1fr) auto;
-  gap: 2px 10px; align-items: center; padding: 6px 0; font-size: 12.5px;
-  border-bottom: 1px dashed var(--border);
-}
-.pf-divcal-event:last-child { border-bottom: none; }
-.pf-divcal-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pf-divcal-date-kind, .pf-divcal-amount-label { display: block; margin-top: 3px; }
-.pf-divcal-stock { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.pf-divcal-stock-name { font-weight: 600; }
-.pf-divcal-sub { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
-.pf-divcal-amount {
-  text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600;
-}
-/* 예상 이벤트 — 확정 대비 흐리게(추정치임을 시각적으로 강조). */
-.pf-divcal-event.pf-divcal-est .pf-divcal-stock-name,
-.pf-divcal-event.pf-divcal-est .pf-divcal-amount { color: var(--text-secondary); font-weight: 500; }
-/* 다가오는(오늘 이후) 이벤트 — 날짜를 강조해 임박 일정이 한눈에 띄게. */
-.pf-divcal-event.pf-divcal-upcoming .pf-divcal-date { color: var(--primary); font-weight: 700; }
-.pf-divcal-badge {
-  display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px;
-  font-weight: 700; background: transparent; color: var(--text-secondary);
-  border: 1px dashed var(--border); vertical-align: middle;
-}
+.pf-divcal-events { padding: 8px 0 16px; }
+.pf-divcal-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.pf-divcal-table { --pf-divcal-hover: color-mix(in srgb, var(--surface) 90%, #94a3b8 10%); width: 100%; min-width: 1060px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.pf-divcal-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.pf-divcal-table th, .pf-divcal-table td { padding: 12px 10px; vertical-align: top; text-align: left; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.pf-divcal-table thead th { background: var(--pf-divcal-hover); color: var(--text-secondary); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pf-divcal-table th:nth-child(1) { width: 16%; }
+.pf-divcal-table th:nth-child(2) { width: 10%; }
+.pf-divcal-table th:nth-child(3) { width: 14%; }
+.pf-divcal-table th:nth-child(4), .pf-divcal-table th:nth-child(5), .pf-divcal-table th:nth-child(8) { width: 10%; }
+.pf-divcal-table th:nth-child(6) { width: 6%; }
+.pf-divcal-table th:nth-child(7), .pf-divcal-table th:nth-child(9) { width: 12%; }
+.pf-divcal-table .pf-divcal-stock { position: sticky; left: 0; z-index: 1; background: var(--surface); font-weight: 400; border-right: 1px solid var(--border); }
+.pf-divcal-table thead th:first-child { position: sticky; left: 0; z-index: 2; background: var(--pf-divcal-hover); }
+.pf-divcal-table tbody tr:last-child > * { border-bottom: 0; }
+.pf-divcal-table tbody tr:hover > * { background: var(--pf-divcal-hover); }
+.pf-divcal-table .pf-divcal-number { text-align: right; }
+.pf-divcal-stock-name { display: block; font-size: 14px; font-weight: 700; color: var(--text); }
+.pf-divcal-sub, .pf-divcal-cell-note { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
+.pf-divcal-cell-note { display: block; margin-top: 5px; line-height: 1.5; }
+.pf-divcal-unknown { color: var(--text-secondary); font-weight: 400; }
+.pf-divcal-gross, .pf-divcal-net { font-weight: 600; }
+.pf-divcal-event.pf-divcal-upcoming .pf-divcal-pay-day { color: var(--primary); }
+.pf-divcal-event.pf-divcal-paid .pf-divcal-net { color: var(--primary); }
+.pf-divcal-event.pf-divcal-est { background: var(--bg); }
+.pf-divcal-badge { display: inline-block; padding: 2px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; background: transparent; color: var(--text-secondary); border: 1px dashed var(--border); vertical-align: middle; }
 .pf-divcal-badge.confirmed { color: var(--primary); border: 1px solid var(--primary); }
-.pf-divcal-note { margin-top: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
-.pf-divcal-help summary, .pf-divcal-source summary { cursor: pointer; }
+.pf-divcal-badge.broker { color: var(--surface); background: var(--primary); border: 1px solid var(--primary); }
+.pf-divcal-badge.broker.partial { border-style: dashed; color: var(--primary); background: var(--surface); }
+.pf-divcal-note { margin-top: 8px; font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
+.pf-divcal-help summary, .pf-divcal-source summary, .pf-divcal-quantity-source summary, .pf-divcal-tax-adjustments summary { cursor: pointer; }
 .pf-divcal-help dl { display: grid; grid-template-columns: minmax(90px, auto) 1fr; gap: 8px 14px; }
 .pf-divcal-help dt { font-weight: 600; color: var(--text); }
 .pf-divcal-help dd { margin: 0; }
-.pf-divcal-source { margin-top: 3px; }
+.pf-divcal-source, .pf-divcal-quantity-source, .pf-divcal-tax-adjustments { margin-top: 6px; font-size: 11px; line-height: 1.6; font-weight: 400; color: var(--text-secondary); }
+.pf-divcal-quantity-source, .pf-divcal-tax-adjustments { text-align: left; }
 @media (max-width: 760px) {
   .pf-divcal-help dl { grid-template-columns: 1fr; gap: 4px; }
   .pf-divcal-help dd { margin-bottom: 8px; }
-  /* 모바일은 2열로 접는다(.pf-risk-grid 패턴) — 날짜/금액, 종목은 풀폭. */
-  .pf-divcal-event { grid-template-columns: minmax(0, 1fr) auto; }
-  .pf-divcal-event .pf-divcal-stock { grid-column: 1 / -1; }
-  .pf-divcal-events { padding-left: 16px; }
+  .pf-divcal-month { align-items: flex-start; }
+  .pf-divcal-month-total { white-space: normal; text-align: right; }
 }
 
 /* Investment journal (투자 일지) — 분석 화면 #stockJournalSection 과 성과 탭
@@ -3624,14 +3626,6 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 .pf-divcal-coverage summary { cursor:pointer; color:var(--text-secondary); }
 .pf-divcal-badge.observed { border-style:solid; }
 .pf-divcal-stock .pf-divcal-sub { overflow-wrap:anywhere; }
-@media (min-width:761px) {
-  .pf-divcal-event { grid-template-columns:128px minmax(0, 1fr) auto; }
-}
-@media (max-width:760px) {
-  .pf-divcal-date { grid-column:1; grid-row:1; }
-  .pf-divcal-amount { grid-column:2; grid-row:1; }
-}
-
 /* 개별 입력: 초기 잔고 등록과 실제 매수의 현금 처리를 구분한다. */
 .pf-add-modes { display:flex; flex-wrap:wrap; gap:10px; border:0; padding:0; margin:12px 0; }
 .pf-add-modes legend { font-size:12px; color:var(--text-secondary); margin-bottom:6px; }

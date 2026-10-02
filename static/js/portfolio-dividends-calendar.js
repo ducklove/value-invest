@@ -1,15 +1,13 @@
 // 배당 캘린더 — 성과 탭의 '배당 캘린더' 카드 (#pfRebalanceWrap 다음).
 //
 // GET /api/portfolio/dividend-calendar?months=12 (routes/dividend_calendar.py)
-// 를 소비해 월별 예상 배당 현금흐름(월 행 + 합계)과 펼침식 이벤트 목록
-// (날짜 · 종목 · 확정/예상 배지 · 주당 배당 × 보유수량 = 금액)을 렌더링한다.
+// 를 소비해 월별 합계와 표준 배당 내역 표(종목 + 날짜·배당락·주당액·수량·총액·세금·지급액)를 렌더링한다.
 //
 // - lazy: 성과 탭이 처음 보일 때 pfSwitchTab(portfolio-performance.js)이
 //   pfLoadDividendCalendarPanel() 을 호출한다. 응답은 인메모리 메모
 //   (_pfDivCalData)는 사용자·수량·날짜가 같을 때 5분 이내에서만 재사용한다.
 // - 지급일만 현금 합계에 포함한다. 배당락일과 기준일은 권리일 안내다.
-// - NH 배당 입금: 연결된 일정은 'NH 입금 확인'(실제 입금일·세후·세금 정산), 연결할 일정이
-//   없는 입금은 'NH 입금' 행(실제 금액, 수취 입력 없음)으로 그린다(docs/dividend-calendar.md).
+// - 실제 입금 근거가 있으면 지급일 칸에 증권사 배지를 붙인다. 일정 연결 여부와 관계없이 같은 컬럼을 쓴다.
 // - 지난 배당은 기준 시점(배당락 전 거래일 종가·국내 기준일 2거래일 전 종가)에 보유한 종목만
 //   그때 수량으로 온다. 행마다 보유 근거('수량 근거: 9/24 보유 기록', '첫 보유 기록으로 추정')와
 //   지금은 없는 종목의 '매도' 태그를 보여 준다.
@@ -46,7 +44,7 @@ function _pfDivCalPerShare(ev) {
 
 function _pfDivCalBadge(ev) {
   // 어느 일정에도 연결되지 않은 NH 배당 입금 — 실제 입금 행.
-  if (ev.date_status === 'nh') return `<span class="pf-divcal-badge nh deposit" title="${escapeHtml(_pfDivCalNhTitle(ev))}">NH 입금</span>`;
+  if (ev.date_status === 'nh') return '<span class="pf-divcal-sub">입금 내역</span>';
   if (ev.date_status === 'observed') return '<span class="pf-divcal-badge observed">수집 이력</span>';
   return ev.confirmed
     ? '<span class="pf-divcal-badge confirmed" title="공시 자료에 있는 일정입니다. 배당금과 입금 여부는 별도로 표시합니다.">공시</span>'
@@ -72,48 +70,17 @@ function _pfDivCalAdjustments(m) {
   });
 }
 
-// NH 입금 요약(문자열, 호출부에서 escape): 'NH 입금일 2026-09-15 · 세후 12.5 USD · 국내세 300원 · 세금 정산 −55원'
-// (같은 날 여러 입금이면 '입금 2건 합계')
-function _pfDivCalNhLine(ev) {
-  const m = ev.nh_match || {};
-  const paid = ev.paid_date || m.date;
-  const parts = [];
-  if (paid) parts.push(`NH 입금일 ${paid}`);
-  // 같은 날 여러 입금(다른 NH 계좌·추가 분배)이 한 일정에 붙으면 금액은 합계다.
-  if (Array.isArray(m.parts) && m.parts.length > 1) parts.push(`입금 ${m.parts.length}건 합계`);
-  if (ev.date_status === 'nh') {
-    const gross = _pfDivCalMoney(m.gross_amount, m.currency);
-    if (gross) parts.push(`세전 ${gross}`);
-    if (m.tax_amount) parts.push(`현지세 ${_pfDivCalMoney(m.tax_amount, m.currency)}`);
-  }
-  const net = _pfDivCalMoney(m.net_amount, m.currency);
-  if (net) parts.push(`세후 ${net}`);
-  if (m.currency && m.currency !== 'KRW' && m.domestic_tax_krw) parts.push(`국내세 ${fmtKrw(Number(m.domestic_tax_krw))}원`);
-  return parts.concat(_pfDivCalAdjustments(m)).join(' · ');
+// 입금 확인은 실제 거래 근거가 있는 경우에만 표시한다.
+function _pfDivCalPaymentEvidence(ev) {
+  return ev.nh_match && (ev.verification === 'nh_confirmed' || ev.verification === 'nh_partial' || ev.date_status === 'nh')
+    ? ev.nh_match : null;
 }
 
-function _pfDivCalNhTitle(ev) {
-  const line = _pfDivCalNhLine(ev);
-  return line ? `NH 입금 확인 · ${line}` : 'NH 배당 입금 확인';
-}
-
-// NH 배당 입금 대조: 일정·배당금 확인 여부와 구분해 입금 상태를 명시한다.
-function _pfDivCalVerify(ev) {
-  if (ev.date_status === 'nh') return '';
-  if (ev.verification === 'nh_confirmed') {
-    return ` <span class="pf-divcal-badge nh" title="${escapeHtml(_pfDivCalNhTitle(ev))}">NH 입금 확인</span>`;
-  }
-  // 같은 종목을 NH 밖 계좌에도 보유: NH 계좌 몫만 확인, 나머지 몫은 미확인(수취 입력 유지).
-  if (ev.verification === 'nh_partial') {
-    const line = _pfDivCalNhLine(ev);
-    return ` <span class="pf-divcal-badge nh partial" title="${escapeHtml(`NH 계좌 몫의 배당 입금만 확인했습니다. 다른 계좌 몫은 미확인입니다.${line ? ` (${line})` : ''}`)}">NH 일부 입금 확인</span>`;
-  }
-  if (ev.verification === 'unconfirmed') {
-    const title = ev.date_kind === 'payment' ? '지급일이 지났지만 NH 배당 입금을 찾지 못했습니다.'
-      : `${ev.date_kind === 'record_date' ? '기준일' : '배당락일'} 이후 대기 기간이 지났지만 NH 배당 입금을 찾지 못했습니다.`;
-    return ` <span class="pf-divcal-badge unconfirmed" title="${escapeHtml(title)} 다른 증권사 입금 여부는 알 수 없습니다.">NH 입금 미확인</span>`;
-  }
-  return '';
+function _pfDivCalBrokerBadge(ev, evidence) {
+  if (!evidence) return '';
+  const broker = evidence.broker_name || 'NH';
+  const partial = ev.verification === 'nh_partial';
+  return `<span class="pf-divcal-badge broker${partial ? ' partial' : ''}" title="${escapeHtml(`${broker} 실제 계좌 입금 확인${partial ? ' · 다른 계좌 몫은 미확인' : ''}`)}">${escapeHtml(broker)}</span>`;
 }
 
 // '2026-09-24' → '9/24'
@@ -128,7 +95,7 @@ const _PF_DIVCAL_QUANTITY_UNKNOWN = {
   not_recorded: '수량 기록 없음',
 };
 
-// 수량은 계산 줄에 한 번만 표시하고, 이 줄에는 보유 기록의 날짜·추정 근거를 적는다.
+// 수량은 수량 칸에 한 번만 표시하고, 펼침 영역에는 보유 기록의 날짜·추정 근거를 적는다.
 // 미래·예상(현재 보유)은 빈 문자열. 다른 날 수량 사용과 수량 미상 사유는 유지한다.
 function _pfDivCalHolding(ev) {
   const hasShares = ev.shares !== null && ev.shares !== undefined && Number.isFinite(Number(ev.shares));
@@ -143,9 +110,34 @@ function _pfDivCalHolding(ev) {
   return '';
 }
 
-function _pfDivCalDateKind(ev) {
-  const kind = ev.date_kind || (ev.type === 'estimated' ? (ev.pay_date ? 'payment' : ev.ex_date ? 'ex_date' : ev.record_date ? 'record_date' : '') : ev.type);
-  return { payment: '지급일', ex_date: '배당락일', record_date: '배당기준일' }[kind] || '일정';
+function _pfDivCalDay(ev, field) {
+  const kinds = { pay_date: 'payment', ex_date: 'ex_date', record_date: 'record_date' };
+  return ev[field] || (ev.date_kind === kinds[field] || ev.type === kinds[field] ? ev.date : null);
+}
+
+function _pfDivCalDateHtml(day, ev) {
+  if (!day) return '<span class="pf-divcal-unknown">미확인</span>';
+  return `${escapeHtml(day)}${ev.date_precision === 'approximate' && day === ev.date ? ' 전후' : ''}`;
+}
+
+function _pfDivCalHasNumber(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+}
+
+function _pfDivCalValue(value, currency) {
+  return _pfDivCalHasNumber(value) ? escapeHtml(_pfDivCalMoney(value, currency))
+    : '<span class="pf-divcal-unknown">미확인</span>';
+}
+
+function _pfDivCalTaxHtml(evidence, currency) {
+  if (!evidence) return '<span class="pf-divcal-unknown">미확인</span>';
+  const foreign = currency !== 'KRW';
+  const localTax = _pfDivCalValue(evidence.tax_amount, currency);
+  const domestic = foreign && _pfDivCalHasNumber(evidence.domestic_tax_krw)
+    ? `<span class="pf-divcal-cell-note">국내 ${escapeHtml(_pfDivCalMoney(evidence.domestic_tax_krw, 'KRW'))}</span>` : '';
+  const adjustments = _pfDivCalAdjustments(evidence);
+  const detail = adjustments.length ? `<details class="pf-divcal-tax-adjustments"><summary>세금 정산 ${adjustments.length}건</summary>${adjustments.map(line => `<div>${escapeHtml(line)}</div>`).join('')}</details>` : '';
+  return `${foreign ? '현지 ' : ''}${localTax}${domestic}${detail}`;
 }
 
 // 보유 근거 줄의 title: 배당 기준(규칙)과 실제로 쓴 정산일. reference_date는 '그 이하 마지막 정산'의 상한일 뿐이라
@@ -186,43 +178,63 @@ function _pfDivCalSource(ev) {
 }
 
 function _pfDivCalEventHtml(ev, todayIso) {
-  const classes = ['pf-divcal-event'];
+  const evidence = _pfDivCalPaymentEvidence(ev);
   const nhOnly = ev.date_status === 'nh';
-  if (!ev.confirmed && !nhOnly) classes.push('pf-divcal-est');
+  const estimated = ev.date_status === 'estimated' || ev.type === 'estimated';
+  const partial = ev.verification === 'nh_partial';
+  const currency = evidence?.currency || ev.currency || 'KRW';
+  const classes = ['pf-divcal-event'];
+  if (estimated) classes.push('pf-divcal-est');
+  if (evidence) classes.push('pf-divcal-paid');
   if (nhOnly) classes.push('pf-divcal-nh');
   if (ev.date >= todayIso) classes.push('pf-divcal-upcoming');
-  const hasShares = ev.shares !== null && ev.shares !== undefined;
-  const unknownAmount = ev.amount_status === 'unknown' || ev.amount_per_share === null || ev.amount_per_share === undefined;
-  const nativeGross = nhOnly ? _pfDivCalMoney(ev.gross_amount, ev.currency) : '';
-  const amount = (ev.expected_amount_krw === null || ev.expected_amount_krw === undefined)
-    ? (nativeGross ? escapeHtml(nativeGross) : nhOnly ? '원화 환산 미확인' : unknownAmount ? '배당금 미확인' : !hasShares ? '수량 미상' : '원화 환산 미확인') : `${fmtKrw(ev.expected_amount_krw)}원`;
-  const frequency = { monthly: '월배당', quarterly: '분기배당', semiannual: '반기배당', annual: '연배당', irregular: '비정기 배당' }[ev.frequency];
-  const amountDetail = unknownAmount ? '주당 배당금 미확인' : `주당 ${_pfDivCalPerShare(ev)}`;
-  const detail = nhOnly
-    ? 'NH 배당 입금 · 실제 입금 금액'
-    : `${frequency ? `${frequency} · ` : ''}${amountDetail}${unknownAmount ? ' · 보유 ' : ' × '}${hasShares ? `${Number(ev.shares).toLocaleString()}주` : '수량 미상'}`;
-  const nhLine = ev.nh_match ? _pfDivCalNhLine(ev) : '';
-  const paymentNote = !nhOnly && _pfDivCalDateKind(ev) !== '지급일' && !nhLine
-    ? '<span class="pf-divcal-sub pf-divcal-payment-note">지급일 미확인 · 월 합계 제외</span>' : '';
+
+  const recordDay = _pfDivCalDay(ev, 'record_date');
+  const exDay = _pfDivCalDay(ev, 'ex_date');
+  const scheduledPay = _pfDivCalDay(ev, 'pay_date');
+  const actualPay = evidence ? ev.paid_date || evidence.date : null;
+  const payDay = actualPay || scheduledPay;
+  const paymentNotes = [];
+  if (actualPay && scheduledPay && actualPay !== scheduledPay) paymentNotes.push(`공시 ${scheduledPay}`);
+  if (partial) paymentNotes.push('일부 입금');
+  else if (evidence) paymentNotes.push('입금 확인');
+  else if (ev.verification === 'unconfirmed') paymentNotes.push('입금 미확인');
+  else if (scheduledPay) paymentNotes.push(estimated ? '예상' : '지급 일정');
+  const payNote = paymentNotes.length ? `<span class="pf-divcal-cell-note">${paymentNotes.map(escapeHtml).join(' · ')}</span>` : '';
+  const exStatus = exDay ? `${exDay <= todayIso ? '배당락' : '예정'}<span class="pf-divcal-cell-note">${_pfDivCalDateHtml(exDay, ev)}</span>`
+    : '<span class="pf-divcal-unknown">미확인</span>';
+
+  const hasShares = _pfDivCalHasNumber(ev.shares);
+  const hasPerShare = ev.amount_status !== 'unknown' && _pfDivCalHasNumber(ev.amount_per_share);
+  const calculatedGross = hasShares && hasPerShare ? Number(ev.shares) * Number(ev.amount_per_share) : null;
+  const actualGross = evidence?.gross_amount;
+  const gross = _pfDivCalHasNumber(actualGross) ? actualGross : nhOnly ? ev.gross_amount : calculatedGross;
+  const grossNote = _pfDivCalHasNumber(actualGross) ? (partial ? '계좌 확인분' : '실제 세전')
+    : _pfDivCalHasNumber(gross) ? (estimated ? '예상 세전' : '주당액 × 수량') : '';
+  const converted = !evidence && ev.currency !== 'KRW' && _pfDivCalHasNumber(ev.expected_amount_krw)
+    ? `<span class="pf-divcal-cell-note">약 ${fmtKrw(ev.expected_amount_krw)}원</span>` : '';
   const holding = nhOnly ? '' : _pfDivCalHolding(ev);
   const holdingTitle = holding ? _pfDivCalHoldingTitle(ev) : '';
-  // 지금은 보유하지 않지만 기준 시점에 보유한 종목(매도 뒤 지급·지난 권리일).
-  const sold = ev.held_now === false && !nhOnly
-    ? ' <span class="pf-divcal-badge sold" title="지금은 보유하지 않지만 배당 기준 시점에 보유한 종목입니다.">매도</span>' : '';
+  const quantity = hasShares ? `${Number(ev.shares).toLocaleString()}주` : '<span class="pf-divcal-unknown">미확인</span>';
+  const quantityDetail = holding ? `<details class="pf-divcal-quantity-source"><summary>근거</summary><span class="pf-divcal-holding" title="${escapeHtml(holdingTitle)}">${escapeHtml(holding)}</span></details>` : '';
+  const sold = ev.held_now === false && !nhOnly ? ' <span class="pf-divcal-badge sold">매도</span>' : '';
+  const code = ev.stock_name && ev.stock_name !== ev.stock_code ? `<span class="pf-divcal-cell-note">${escapeHtml(ev.stock_code || '')}</span>` : '';
   const receipt = ev.receiptable === false || ev.verification === 'nh_confirmed' ? ''
     : `<button type="button" class="pf-mini-btn pf-divcal-receipt js-pf-dividend-receipt" data-dividend-source="${escapeHtml(ev.source_key || `${ev.stock_code}:${ev.type}:${ev.date}`)}">수취 입력</button>`;
-  return `<div class="${classes.join(' ')}">
-    <span class="pf-divcal-date">${escapeHtml(ev.date)}${ev.date_precision === 'approximate' ? ' 전후' : ''}<span class="pf-divcal-sub pf-divcal-date-kind">${nhOnly ? 'NH 입금일' : _pfDivCalDateKind(ev)}</span></span>
-    <div class="pf-divcal-stock">
-      <span class="pf-divcal-stock-name">${escapeHtml(ev.stock_name || ev.stock_code)} ${_pfDivCalBadge(ev)}${_pfDivCalVerify(ev)}${sold}</span>
-      <span class="pf-divcal-sub">${detail}</span>
-      ${holding ? `<span class="pf-divcal-sub pf-divcal-holding"${holdingTitle ? ` title="${escapeHtml(holdingTitle)}"` : ''}>${escapeHtml(holding)}</span>` : ''}
-      ${nhLine ? `<span class="pf-divcal-sub pf-divcal-nh-line">${escapeHtml(nhLine)}</span>` : ''}
-      ${paymentNote}
-      ${nhOnly ? '' : _pfDivCalSource(ev)}
-    </div>
-    <span class="pf-divcal-amount"><span class="pf-divcal-sub pf-divcal-amount-label">${nhOnly ? '실제 입금액(세전)' : '배당액(세전)'}</span>${amount}${receipt}</span>
-  </div>`;
+  const netNote = evidence && _pfDivCalHasNumber(evidence.net_amount)
+    ? `<span class="pf-divcal-cell-note">${partial ? '계좌 확인분' : '실제 입금'}${currency !== 'KRW' && Number(evidence.domestic_tax_krw) > 0 ? ' · 국내세 별도' : ''}</span>` : '';
+
+  return `<tr class="${classes.join(' ')}">
+    <th scope="row" class="pf-divcal-stock"><span class="pf-divcal-stock-name">${escapeHtml(ev.stock_name || ev.stock_code)}${sold}</span>${code}${_pfDivCalBadge(ev)}${_pfDivCalSource(ev)}</th>
+    <td class="pf-divcal-record-date">${_pfDivCalDateHtml(recordDay, ev)}</td>
+    <td class="pf-divcal-payment-date"><span class="pf-divcal-pay-day">${_pfDivCalDateHtml(payDay, actualPay ? {} : ev)}</span> ${actualPay ? _pfDivCalBrokerBadge(ev, evidence) : ''}${payNote}</td>
+    <td class="pf-divcal-ex-status">${exStatus}</td>
+    <td class="pf-divcal-per-share pf-divcal-number">${hasPerShare ? _pfDivCalPerShare(ev) : '<span class="pf-divcal-unknown">미확인</span>'}</td>
+    <td class="pf-divcal-quantity pf-divcal-number" title="${nhOnly ? '입금 내역에 배당 권리 수량이 없습니다.' : '배당 기준 시점의 전 계좌 합산 수량입니다.'}">${quantity}${quantityDetail}</td>
+    <td class="pf-divcal-gross pf-divcal-number">${_pfDivCalValue(gross, currency)}${grossNote ? `<span class="pf-divcal-cell-note">${grossNote}</span>` : ''}${converted}</td>
+    <td class="pf-divcal-tax pf-divcal-number">${_pfDivCalTaxHtml(evidence, currency)}</td>
+    <td class="pf-divcal-net pf-divcal-number">${_pfDivCalValue(evidence?.net_amount, currency)}${netNote}${receipt}</td>
+  </tr>`;
 }
 
 function _pfDivCalMonthHtml(monthRow, eventsByMonth, todayMonth, todayIso) {
@@ -236,11 +248,16 @@ function _pfDivCalMonthHtml(monthRow, eventsByMonth, todayMonth, todayIso) {
   const head = `<div class="${rowCls}" data-month="${escapeHtml(month)}"${empty ? '' : ` onclick="pfDivCalToggleMonth('${escapeHtml(month)}')"`}>
     <span class="pf-divcal-caret">${empty ? '·' : (open ? '▾' : '▸')}</span>
     <span class="pf-divcal-month-label">${_pfDivCalMonthLabel(month)}${isNow ? ' <span class="pf-divcal-sub">(이번 달)</span>' : ''}</span>
-    <span class="pf-divcal-month-total">${events.length ? `${events.length}건 · ` : ''}${total}${monthRow.unconverted_count ? ' + 환산 미확인' : ''}${monthRow.quantity_unknown_count ? ' + 수량 미상' : ''}${monthRow.announced_krw > 0 || monthRow.estimated_krw > 0 || monthRow.nh_only_krw > 0 ? `<span class="pf-divcal-sub">공시 ${fmtKrw(monthRow.announced_krw || 0)}원 · 예상 ${fmtKrw(monthRow.estimated_krw || 0)}원${monthRow.nh_only_krw > 0 ? ` · NH 입금 ${fmtKrw(monthRow.nh_only_krw)}원` : ''}</span>` : ''}</span>
+    <span class="pf-divcal-month-total">${events.length ? `${events.length}건 · ` : ''}${total}<span class="pf-divcal-sub">지급 일정 기준 세전 계산 합계</span>${monthRow.unconverted_count ? ' + 환산 미확인' : ''}${monthRow.quantity_unknown_count ? ' + 수량 미상' : ''}${monthRow.announced_krw > 0 || monthRow.estimated_krw > 0 || monthRow.nh_only_krw > 0 ? `<span class="pf-divcal-sub">공시 ${fmtKrw(monthRow.announced_krw || 0)}원 · 예상 ${fmtKrw(monthRow.estimated_krw || 0)}원${monthRow.nh_only_krw > 0 ? ` · NH 입금 ${fmtKrw(monthRow.nh_only_krw)}원` : ''}</span>` : ''}</span>
   </div>`;
   if (empty) return head;
   const list = `<div class="pf-divcal-events" data-month-events="${escapeHtml(month)}" style="display:${open ? '' : 'none'};">
-    ${events.map((ev) => _pfDivCalEventHtml(ev, todayIso)).join('')}
+    <div class="pf-divcal-table-scroll" role="region" aria-label="${escapeHtml(_pfDivCalMonthLabel(month))} 배당 내역" tabindex="0">
+      <table class="pf-divcal-table"><caption>${escapeHtml(_pfDivCalMonthLabel(month))} 배당 내역</caption>
+        <thead><tr>${['종목', '배당기준일', '지급일', '배당락 여부', '주당 배당액', '수량', '배당총액', '세금', '지급액'].map((name, index) => `<th scope="col"${index >= 4 ? ' class="pf-divcal-number"' : ''}>${name}</th>`).join('')}</tr></thead>
+        <tbody>${events.map((ev) => _pfDivCalEventHtml(ev, todayIso)).join('')}</tbody>
+      </table>
+    </div>
   </div>`;
   return head + list;
 }
@@ -268,7 +285,7 @@ function _pfRenderDividendCalendar(data) {
   }
   const summary = data.summary || {};
   const totalLine = `기간 <strong>${escapeHtml(data.start_month || '')} ~ ${escapeHtml(data.end_month || '')}</strong>`
-    + ` · 지급일 기준 세전 합계 <strong>${fmtKrw(summary.total_expected_krw || 0)}원</strong>`
+    + ` · 지급 일정 기준 세전 계산 합계 <strong>${fmtKrw(summary.total_expected_krw || 0)}원</strong>`
     + ` · 공시 ${Number(summary.confirmed_count || 0)}건 / 예상 ${Number(summary.estimated_count || 0)}건 / 수집 이력 ${Number(summary.observed_count || 0)}건`
     + (summary.nh_count ? ` · NH 입금 연결 ${Number(summary.nh_count)}건${summary.nh_only_count ? `(일정 없는 입금 ${Number(summary.nh_only_count)}건)` : ''}` : '')
     + (summary.unconfirmed_count ? ` · NH 입금 미확인 ${Number(summary.unconfirmed_count)}건` : '')
@@ -278,19 +295,17 @@ function _pfRenderDividendCalendar(data) {
     ${monthly.map((m) => _pfDivCalMonthHtml(m, eventsByMonth, todayMonth, todayIso)).join('')}
   </div>
   <div class="pf-chart-range">${totalLine}</div>
-  <div class="pf-divcal-note">날짜 아래에 지급일·배당락일·배당기준일을 구분해 표시합니다. 월 합계는 지급일이 있는 배당의 세전 금액과 일정에 연결되지 않은 NH 입금으로 계산합니다. 배당락일·배당기준일만 있는 행은 월 합계에서 제외됩니다.</div>
-  <details class="pf-divcal-help pf-divcal-note"><summary>날짜와 확인 상태는 무슨 뜻인가요?</summary>
-    <dl>
-      <dt>배당락일</dt><dd>이날부터 산 주식은 해당 회차 배당을 받을 권리가 없습니다. 돈이 들어오는 날과는 다릅니다.</dd>
-      <dt>배당기준일</dt><dd>회사가 이번 배당을 받을 주주를 정하는 날입니다. 매수 후 결제 기간이 있어, 이날 매수한다고 배당을 받는 것은 아닙니다.</dd>
-      <dt>지급일 / NH 입금일</dt><dd>지급일은 자료에 기재된 배당 지급 날짜입니다. NH 입금일은 연결된 NH 계좌에서 실제 입금이 확인된 날짜로, 지급일과 다를 수 있습니다.</dd>
-      <dt>지급일 미확인</dt><dd>배당락일이나 배당기준일만 수집되어 언제 지급하는지 알 수 없습니다.</dd>
-      <dt>배당금 미확인</dt><dd>주당 배당액을 확인할 수 없어 금액을 계산하지 않습니다. 무배당이나 0원 확정을 뜻하지 않습니다.</dd>
-      <dt>NH 입금 미확인</dt><dd>일정에 대응하는 NH 배당 입금 기록을 찾지 못했습니다. 배당금·일정의 확정 여부와 별개이며, 다른 증권사 입금 여부는 알 수 없습니다.</dd>
-      <dt>공시 / 수집 이력 / 예상</dt><dd>공시는 공시 자료의 일정, 수집 이력은 외부에서 가져온 배당 이력입니다. 예상(점선·날짜 전후)은 과거 패턴으로 추정한 일정과 금액으로 바뀔 수 있습니다. 공시 배지 자체가 배당금 확정이나 입금 완료를 뜻하지 않습니다.</dd>
-      <dt>보유 수량과 금액</dt><dd>지난 배당은 기준 시점(배당락 전 거래일 종가, 국내 기준일은 2거래일 전 종가)에 보유한 종목만 그때 수량으로 셉니다. 수량 근거는 전 계좌 합산 보유 기록이며, 첫 기록으로 추정하거나 다른 날 수량을 사용한 경우 표시합니다. 미래·예상 금액은 현재 수량 기준입니다. 금액은 세전이며 실제 수취액과 다를 수 있습니다. 지금은 보유하지 않는 종목은 '매도'로 표시합니다.</dd>
-    </dl>
-  </details>${coverageHtml}`;
+  <div class="pf-divcal-note">지급일의 증권사 배지는 실제 계좌 입금 확인을 뜻합니다. 세금·지급액은 계좌에서 확인된 값만 표시하며, 미확인은 0원이 아닙니다. 모바일에서는 표를 좌우로 이동할 수 있습니다.</div>
+  <details class="pf-divcal-help pf-divcal-note"><summary>표의 날짜·금액 기준</summary><dl>
+    <dt>배당기준일</dt><dd>회사가 이번 배당을 받을 주주를 정하는 날입니다. 매수 후 결제 기간이 있어 이날 매수한다고 배당을 받는 것은 아닙니다.</dd>
+    <dt>지급일</dt><dd>입금이 확인되면 실제 계좌 입금일과 증권사 배지를 표시합니다. 입금 전에는 수집한 지급 일정이나 예상 날짜를 표시합니다. 일부 입금은 확인된 계좌 몫만 받은 상태입니다.</dd>
+    <dt>배당락 여부</dt><dd>배당락 날짜가 지났으면 배당락, 앞으로면 예정으로 표시합니다. 배당락일부터 산 주식은 해당 회차 배당을 받을 권리가 없습니다. 날짜 자료가 없으면 미확인입니다.</dd>
+    <dt>배당총액</dt><dd>계좌 세전 금액이 있으면 실제 금액을 표시하고, 없으면 주당 배당액 × 수량으로 계산합니다. 일부 입금 행의 실제 금액은 확인된 계좌 몫입니다.</dd>
+    <dt>세금 / 지급액</dt><dd>세금은 실제 계좌 기록의 원천징수액, 지급액은 실제 계좌 입금액입니다. 해외 배당의 현지세와 원화 국내세는 통화를 구분합니다. 외화 지급액에서 원화 국내세가 별도로 차감될 수 있고, 후속 세금 정산은 세금 칸에서 펼쳐 봅니다.</dd>
+    <dt>수량</dt><dd>지난 배당은 기준 시점(배당락 전 거래일 종가, 국내 기준일은 2거래일 전 종가)에 보유한 종목만 그때 수량으로 셉니다. 수량은 전 계좌 합산이며 미래·예상은 현재 수량입니다. 보유 기록 날짜와 추정 여부는 수량 칸의 근거에서 확인합니다.</dd>
+    <dt>월 합계</dt><dd>기존 지급 일정의 세전 계산액과 일정에 연결되지 않은 실제 입금을 합산합니다. 배당락일·배당기준일만 있는 일정은 월 합계에서 제외됩니다. 표의 계좌 실제 금액·세후 지급액 합계와는 다를 수 있습니다. 월은 수집 일정의 대표 날짜 기준이며 입금 내역만 있는 행은 실제 입금월에 표시합니다.</dd>
+    <dt>미확인</dt><dd>해당 날짜·금액 자료가 없다는 뜻입니다. 무배당이나 0원 확정을 뜻하지 않습니다. 공시는 일정의 출처, 예상은 과거 패턴의 추정으로 실제 입금 확인과 별개입니다.</dd>
+  </dl></details>${coverageHtml}`;
 }
 
 // 월 행 클릭 — 이벤트 목록 펼침/접힘 (상태는 _pfDivCalOpenMonths 에 유지).

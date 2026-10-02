@@ -63,6 +63,13 @@ class SameStockTests(TempDbMixin):
 
 
 class LinkCalendarTests(TempDbMixin):
+    def test_payment_evidence_exposes_broker_display_name(self):
+        unmatched = nh_payment_event(rec(1, "2026-09-15", "AAA AU", "AUD", 20))
+        self.assertEqual(unmatched["nh_match"]["broker_name"], "NH")
+        linked, _ = link_calendar([ex("AAA.AX", "2026-09-01", "AUD")],
+                                  [rec(1, "2026-09-15", "AAA AU", "AUD", 20)], [], TODAY)
+        self.assertEqual(linked[0]["nh_match"]["broker_name"], "NH")
+
     def test_monthly_ex_dates_each_link_own_mid_month_payment(self):
         events = [ex("AAA.AX", d, "AUD") for d in ("2026-07-01", "2026-08-03", "2026-09-01")]
         records = [rec(3, "2026-09-15", "AAA AU", "AUD", 3.0, code="AAA.AX"),

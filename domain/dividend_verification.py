@@ -174,6 +174,8 @@ def evidence(record: dict) -> dict:
     out = {key: record.get(key) for key in ("date", "booked_date", "currency", "net_amount", "gross_amount", "account_id", "id",
                                             "tax_amount", "domestic_tax_krw", "fx_rate", "gross_krw", "net_krw",
                                             "stock_name", "symbol")}
+    # 현재 입력은 NH 거래내역이다. 표시명은 근거에 담아 UI가 증권사명을 선택할 수 있게 한다.
+    out["broker_name"] = record.get("broker_name") or "NH"
     out["adjustments"] = [_adjustment_evidence(a) for a in record.get("adjustments") or []]
     return out
 
