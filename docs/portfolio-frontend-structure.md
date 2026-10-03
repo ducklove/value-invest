@@ -17,7 +17,7 @@
 - 가계부 진입: `portfolio-household.js`.
 - 매매 기록 열기: `portfolio-trades.js` (`trades` 그룹). 현금·현물의 원자적 변경과 재시도 계약은 [매매 기록](portfolio-trades.md)을 따른다.
 - 개별 등록의 초기 잔고 입력·보유분 정리 선택 창: `portfolio-add-search.js`. 초안은 창 안에서만 유지하고 저장 전 보유 목록에 넣지 않는다. 매수·매도는 같은 `trades` 그룹으로 종목과 입력 기본값을 전달한다.
-- 배당 수취 / 분배금 출금: `portfolio-dividend-receipts.js` (`dividend-receipts` 그룹), `portfolio-distributions.js` (`distributions` 그룹). 캘린더 입력 준비와 NAV·총수익 분리 계약은 [배당금과 분배금](dividend-receipts.md)을 따른다.
+- 분배금 출금: `portfolio-distributions.js` (`distributions` 그룹). 수동 배당 수취 입력은 제거했다. 기존 원장과 NAV·총수익 분리 계약은 [배당 기록과 분배금](dividend-receipts.md)을 따른다.
 - 도구 진입: `insights.js`, `screener.js`, `masters.js`를 각 화면에서 로드.
 - 퀀트 운용실 `/quant`: `quant-research.js` → `quant-scanner.js` → `quant-basis.js`를 `quant` 그룹으로 지연 로드한다. 첫 화면은 전체 순회·후보 호가 감시이며 기존 연구는 접힌 보조 메뉴다. 스타일은 `labs.css`, [감시 설계·현재 구현 범위](realtime-arbitrage-terminal.md)와 [퀀트 연구 안내](quant-research.md)를 따른다.
 - `switchView()`·`pfSwitchTab()`은 필요한 파일이 준비되면 화면을 열며, 그 사이

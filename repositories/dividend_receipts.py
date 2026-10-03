@@ -90,14 +90,6 @@ async def list_receipts(user: str, limit: int = 20, *, verify: bool = True) -> l
     return annotate_receipts(receipts, await broker_activity.dividend_records(user))
 
 
-async def received_source_keys(user: str) -> set[str]:
-    db = await get_db()
-    rows = await (await db.execute(
-        "SELECT source_key FROM portfolio_dividend_receipts WHERE google_sub=? AND source_key IS NOT NULL", (user,),
-    )).fetchall()
-    return {row["source_key"] for row in rows}
-
-
 async def receipt_totals(user: str, account_id: str | None = None) -> list[dict]:
     from repositories import accounts
     default_id = await accounts.get_default_account_id(user) if account_id else None

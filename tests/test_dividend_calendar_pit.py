@@ -216,18 +216,6 @@ class PointInTimeCalendarTests(TempDbMixin):
         self.assertEqual(self.rows(result, "AAPL")["2026-09-15"]["verification"], NH_PARTIAL)
         self.assertFalse(any(e["date_status"] == "nh" for e in result["events"]))
 
-    async def test_receipt_candidates_use_reference_quantity(self):
-        from routes import dividend_receipts as route
-        await self.snapshots()
-        with patch.object(route, "_user_id", AsyncMock(return_value="u1")), \
-             patch.object(route.repo, "received_source_keys", AsyncMock(return_value=set())):
-            data = await route.candidates(None)
-        keys = {e["source_key"]: e for e in data["events"]}
-        self.assertEqual((keys["GOOGL:ex_date:2026-09-08"]["shares"], keys["GOOGL:ex_date:2026-09-08"]["holding_basis"]), (10.0, "snapshot"))
-        self.assertEqual(keys["O:ex_date:2026-09-01"]["shares"], 30.0)            # 매도한 종목도 수취 입력 대상
-        self.assertNotIn("AGNC:ex_date:2026-07-31", keys)                        # 매수 전 배당은 후보가 아니다
-        self.assertEqual(keys["AGNC:ex_date:2026-09-30"]["shares"], 10.0)
-
     async def test_sold_histories_only_use_the_time_left_after_held_histories(self):
         await self.snapshots()
         await self.build()

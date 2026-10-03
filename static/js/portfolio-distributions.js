@@ -144,7 +144,6 @@ async function pfOpenDistribution() {
     _pfDistributionEl('Status').textContent = '확인 중인 분배금 출금이 있습니다. 저장 결과를 먼저 확인해 주세요.';
   } else _pfDistributionInvalidate();
   _pfDistributionCurrency(false);
-  document.getElementById('pfDividendDialog')?.close();
   if (!_pfDistributionEl('Dialog').open) _pfDistributionEl('Dialog').showModal();
   pfLoadDistributions();
   try {

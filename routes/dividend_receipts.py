@@ -1,46 +1,19 @@
-"""배당 스케줄 입력 준비와 실제 배당금 수취 API."""
+"""기존 배당 수취 기록과 누계의 조회 API. 수동 입력 기능은 종료했다."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
 from deps import require_user_id as _user_id
-from domain.dividend_receipts import DividendCreate, DividendInput, DividendPreview, DividendRecord
+from domain.dividend_receipts import DividendRecord
 from repositories import dividend_receipts as repo
-from services import dividend_calendar
 
 router = APIRouter(prefix="/api/portfolio/dividend-receipts")
-
-
-@router.get("/candidates")
-async def candidates(request: Request) -> dict:
-    user = await _user_id(request)
-    calendar = await dividend_calendar.build_calendar(user, months_back=12, months_forward=3)
-    received = await repo.received_source_keys(user)
-    events = []
-    for event in calendar["events"]:
-        if event.get("receiptable") is False:
-            continue
-        key = event.get("source_key") or f"{event['stock_code']}:{event['type']}:{event['date']}"
-        legacy_match = any(alias in received for alias in event.get("source_aliases", []))
-        events.append({**event, "source_key": key, "received": key in received or legacy_match,
-                       "legacy_receipt_match": legacy_match})
-    return {"as_of": calendar["as_of"], "events": events}
-
-
-@router.post("/preview", response_model=DividendPreview)
-async def preview(request: Request, payload: DividendInput) -> dict:
-    return await repo.preview_dividend(await _user_id(request), payload)
 
 
 @router.get("/totals")
 async def totals(request: Request) -> list[dict]:
     return await repo.receipt_totals(await _user_id(request))
-
-
-@router.post("", response_model=DividendRecord)
-async def record(request: Request, payload: DividendCreate) -> dict:
-    return await repo.record_dividend(await _user_id(request), payload)
 
 
 @router.get("", response_model=list[DividendRecord])

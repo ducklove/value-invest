@@ -1314,33 +1314,32 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 .pf-divcal-caret { width: 14px; text-align: center; color: var(--text-secondary); font-size: 11px; }
 .pf-divcal-events { padding: 8px 0 16px; }
 .pf-divcal-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.pf-divcal-table { --pf-divcal-hover: color-mix(in srgb, var(--surface) 90%, #94a3b8 10%); width: 100%; min-width: 980px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.pf-divcal-table { --pf-divcal-hover: color-mix(in srgb, var(--surface) 90%, #94a3b8 10%); width: 100%; min-width: 980px; table-layout: auto; border-collapse: separate; border-spacing: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
 .pf-divcal-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.pf-divcal-table th, .pf-divcal-table td { padding: 12px 10px; vertical-align: top; text-align: left; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.pf-divcal-table th, .pf-divcal-table td { padding: 12px 10px; vertical-align: middle; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .pf-divcal-table thead th { background: var(--pf-divcal-hover); color: var(--text-secondary); font-size: 12px; font-weight: 700; white-space: nowrap; }
-.pf-divcal-table thead th:nth-child(1) { width: 13%; }
-.pf-divcal-table thead th:nth-child(2) { width: 18%; }
-.pf-divcal-table th:nth-child(3) { width: 14%; }
-.pf-divcal-table thead th:nth-child(4) { width: 11%; }
-.pf-divcal-table thead th:nth-child(5) { width: 7%; }
-.pf-divcal-table thead th:nth-child(6), .pf-divcal-table thead th:nth-child(8) { width: 13%; }
-.pf-divcal-table thead th:nth-child(7) { width: 11%; }
+.pf-divcal-table thead th:nth-child(1) { width: 17%; }
+.pf-divcal-table thead th:nth-child(2) { width: 21%; }
+.pf-divcal-table thead th:nth-child(3) { width: 15%; }
+.pf-divcal-table thead th:nth-child(4) { width: 10%; }
+.pf-divcal-table thead th:nth-child(5) { width: 6%; }
+.pf-divcal-table thead th:nth-child(6), .pf-divcal-table thead th:nth-child(8) { width: 11%; }
+.pf-divcal-table thead th:nth-child(7) { width: 9%; }
 .pf-divcal-table .pf-divcal-record-date { position: sticky; left: 0; z-index: 1; background: var(--surface); border-right: 1px solid var(--border); }
 .pf-divcal-table .pf-divcal-stock { font-weight: 400; }
 .pf-divcal-table thead th:first-child { position: sticky; left: 0; z-index: 2; background: var(--pf-divcal-hover); }
 .pf-divcal-table tbody tr:last-child > * { border-bottom: 0; }
 .pf-divcal-table tbody tr:hover > * { background: var(--pf-divcal-hover); }
 .pf-divcal-table .pf-divcal-number { text-align: right; }
-.pf-divcal-stock-name { display: block; font-size: 14px; font-weight: 700; color: var(--text); }
-.pf-divcal-basis-day { display: block; white-space: nowrap; margin-bottom: 6px; }
-.pf-divcal-sub, .pf-divcal-cell-note { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
-.pf-divcal-cell-note { display: block; margin-top: 5px; line-height: 1.5; }
+.pf-divcal-stock-name { font-size: 14px; font-weight: 700; color: var(--text); }
+.pf-divcal-basis-day { white-space: nowrap; }
+.pf-divcal-sub { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
 .pf-divcal-unknown { color: var(--text-secondary); font-weight: 400; }
 .pf-divcal-gross, .pf-divcal-net { font-weight: 600; }
 .pf-divcal-event.pf-divcal-upcoming .pf-divcal-pay-day { color: var(--primary); }
 .pf-divcal-event.pf-divcal-est { background: var(--bg); }
 .pf-divcal-badge { display: inline-block; padding: 2px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; background: transparent; color: var(--text-secondary); border: 1px dashed var(--border); vertical-align: middle; }
-.pf-divcal-badge.confirmed { color: var(--primary); border: 1px solid var(--primary); }
+.pf-divcal-table .pf-divcal-badge { margin-left: 6px; }
 .pf-divcal-badge.broker { color: var(--surface); background: var(--primary); border: 1px solid var(--primary); }
 .pf-divcal-badge.broker:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .pf-divcal-badge.ex { color: var(--text); border-style: solid; background: var(--pf-divcal-hover); }
@@ -3616,7 +3615,6 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
   .pf-tab-bar:has(.js-pf-trade) > * { flex:0 0 auto; }
 }
 .pf-trade-costs { padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:6px; font-size:13px; line-height:1.7; font-variant-numeric:tabular-nums; }
-.pf-divcal-receipt { display:block; margin-top:6px; min-height:32px; }
 .pf-cf-table th:nth-child(2), .pf-cf-table td:nth-child(2) { width:100px; }
 .pf-cf-table th:nth-child(8), .pf-cf-table td:nth-child(8) { width:76px; }
 .pf-cf-native { display:block; margin-top:4px; color:var(--text-secondary); font-weight:400; }
@@ -3625,8 +3623,6 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 .pf-divcal-month-total .pf-divcal-sub { display:block; text-align:right; }
 .pf-divcal-coverage { margin-top:12px; font-size:12px; line-height:1.8; }
 .pf-divcal-coverage summary { cursor:pointer; color:var(--text-secondary); }
-.pf-divcal-badge.observed { border-style:solid; }
-.pf-divcal-stock .pf-divcal-sub { overflow-wrap:anywhere; }
 /* 개별 입력: 초기 잔고 등록과 실제 매수의 현금 처리를 구분한다. */
 .pf-add-modes { display:flex; flex-wrap:wrap; gap:10px; border:0; padding:0; margin:12px 0; }
 .pf-add-modes legend { font-size:12px; color:var(--text-secondary); margin-bottom:6px; }

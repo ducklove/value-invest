@@ -14,7 +14,6 @@ from domain.dividend_schedule import calendar_event, frequency_of, project_event
 from repositories import portfolio
 from repositories.db import transaction
 from routes import dividend_calendar as route
-from routes import dividend_receipts as receipts
 from services import dividend_calendar as cal
 from services.portfolio.fx import FXUnavailableError
 
@@ -196,12 +195,3 @@ class CalendarTests(TempDbMixin):
         first = next(e for e in before["events"] if e["stock_code"] == "AGNC")
         changed = next(e for e in after["events"] if e["stock_code"] == "AGNC" and e["date"] == first["date"])
         self.assertEqual(changed["expected_amount_krw"], first["expected_amount_krw"] * 2)
-
-    async def test_receipt_candidates_exclude_predictions_and_detect_legacy(self):
-        with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u1"})), patch.object(receipts.repo, "received_source_keys", AsyncMock(return_value={"SCHP:estimated:2026-09-15"})):
-            result = await receipts.candidates(request())
-        self.assertFalse(any(e["type"] == "estimated" for e in result["events"]))
-        schp = next(e for e in result["events"] if e["stock_code"] == "SCHP")
-        self.assertTrue(schp["received"])
-        self.assertTrue(schp["legacy_receipt_match"])
-        self.assertEqual(schp["source_key"], "SCHP:ex_date:2026-09-01")

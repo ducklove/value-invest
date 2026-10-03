@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('배당 캘린더는 기준일·계산액·계좌 툴팁을 구분하고 모바일 수취 입력을 연결한다', async ({ page }, testInfo) => {
+test('배당 캘린더는 기준일·계산액·계좌 툴팁을 구분하고 데스크톱과 모바일에서 단일 행으로 표시한다', async ({ page }, testInfo) => {
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   const payment = { stock_code: 'AGNC', stock_name: 'AGNC', date: '2026-09-10', type: 'payment', date_kind: 'payment',
     label: '월배당 · 지급일', pay_date: '2026-09-10', ex_date: '2026-08-31', record_date: '2026-08-31',
@@ -35,7 +35,6 @@ test('배당 캘린더는 기준일·계산액·계좌 툴팁을 구분하고 �
     monthly: [{ month: '2026-09', count: 5, total_krw: 3360, announced_krw: 1680, estimated_krw: 1680 }],
     summary: { total_expected_krw: 3360, confirmed_count: 1, estimated_count: 1 },
   } }));
-  await page.route('**/api/portfolio/dividend-receipts/candidates', route => route.fulfill({ json: { events: [payment] } }));
   await page.goto('/login?return_to=/portfolio');
   await page.locator('#loginEmail').fill('browser@example.com');
   await page.locator('#loginPassword').fill('browser-test-password');
@@ -50,7 +49,10 @@ test('배당 캘린더는 기준일·계산액·계좌 툴팁을 구분하고 �
   await expect(pendingRow.locator('.pf-divcal-quantity')).toContainText('100주');
   await expect(pendingRow).not.toContainText('0원');
   await expect(calendar).toContainText('2026-09-20 전후');
-  await expect(calendar.getByRole('button', { name: '수취 입력' })).toHaveCount(1);
+  await expect(calendar.getByRole('button', { name: '수취 입력' })).toHaveCount(0);
+  await expect(calendar.locator('.pf-divcal-badge.confirmed, .pf-divcal-badge.observed')).toHaveCount(0);
+  await expect(pendingRow.locator('.pf-divcal-stock')).toHaveText('삼성전자우');
+  await expect(calendar.locator('.pf-divcal-stock').filter({ hasText: '호주단기채' })).toHaveText('호주단기채');
   await expect(calendar.locator('.pf-divcal-source, .pf-divcal-quantity-source, .pf-divcal-ex-status')).toHaveCount(0);
   await expect(calendar).not.toContainText('입금 확인');
   await expect(calendar).not.toContainText('입금 미확인');
@@ -64,6 +66,11 @@ test('배당 캘린더는 기준일·계산액·계좌 툴팁을 구분하고 �
   await expect(calendar.locator('.pf-divcal-event').filter({ hasText: '83188.HK' }).locator('.broker')).toHaveAttribute('title', 'NH 계좌 수령액: 108 CNY');
   await expect(calendar.locator('.pf-divcal-event').filter({ hasText: '83188.HK' }).locator('.pf-divcal-net')).toHaveText('미확인');
   await expect(calendar.locator('.pf-divcal-event').filter({ hasText: 'AGNC' }).locator('.pf-divcal-tax')).toHaveText('0.18 USD');
+  expect(await calendar.locator('.pf-divcal-table-scroll').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  expect(await calendar.locator('.pf-divcal-event').evaluateAll(rows => rows.every(row => {
+    const heights = [...row.cells].map(cell => cell.getBoundingClientRect().height);
+    return heights.every(height => height < 55) && [...row.cells].every(cell => getComputedStyle(cell).whiteSpace === 'nowrap');
+  }))).toBe(true);
   await calendar.screenshot({ path: testInfo.outputPath('calendar-desktop.png') });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('#pfSimpleToggle')).toBeVisible();
@@ -81,9 +88,5 @@ test('배당 캘린더는 기준일·계산액·계좌 툴팁을 구분하고 �
   });
   await expect(calendar.locator('.pf-divcal-event').filter({ hasText: '83188.HK' }).locator('.pf-divcal-net')).toBeVisible();
   await calendar.screenshot({ path: testInfo.outputPath('calendar-mobile.png') });
-  await calendar.getByRole('button', { name: '수취 입력' }).click();
-  await expect(page.locator('#pfDividendSchedule')).toHaveValue(payment.source_key);
-  await expect(page.locator('#pfDividendPerShare')).toHaveValue('0.12');
-  await expect(page.locator('#pfDividendDate')).toHaveValue('2026-09-10');
-  await expect(page.locator('#pfDividendScheduleNote')).toContainText('공시 지급일');
+  await expect(page.locator('#pfDividendDialog, .js-pf-dividend-receipt')).toHaveCount(0);
 });

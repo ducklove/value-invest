@@ -65,10 +65,6 @@
       } else if ((el = t.closest('.js-pf-distribution'))) {
         e.preventDefault();
         loadFeatureScripts('distributions').then(() => pfOpenDistribution()).catch(err => reportApiError(err, '분배금 출금'));
-      } else if ((el = t.closest('.js-pf-dividend-receipt'))) {
-        e.preventDefault();
-        const sourceKey = el.dataset.dividendSource;
-        loadFeatureScripts('dividend-receipts').then(() => pfOpenDividendReceipt(sourceKey)).catch(err => reportApiError(err, '배당금 수취'));
       } else if ((el = t.closest('.js-pf-trade'))) {
         e.preventDefault();
         const code = codeFromTr(el);

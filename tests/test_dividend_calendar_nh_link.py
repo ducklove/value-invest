@@ -369,15 +369,7 @@ class CalendarNHIntegrationTests(TempDbMixin):
         self.assertEqual((summary["nh_count"], summary["nh_only_count"], summary["nh_partial_count"]), (4, 1, 1))
         self.assertEqual(summary["nh_unattached_adjustment_count"], 0)
 
-    async def test_receipt_candidates_hide_nh_rows_and_server_refuses_overseas_duplicate(self):
-        from routes import dividend_receipts as route
-        with patch.object(route.dividend_calendar, "build_calendar", AsyncMock(return_value=await self.calendar())), \
-             patch.object(route, "_user_id", AsyncMock(return_value="u1")):
-            data = await route.candidates(None)
-        keys = {e["source_key"]: e for e in data["events"]}
-        self.assertNotIn("XYZ", {e["stock_code"] for e in data["events"]})  # NH 입금 행은 수취 대상이 아니다
-        self.assertEqual(keys["AAA.AX:ex_date:2026-09-01"]["verification"], NH_CONFIRMED)
-        self.assertEqual(keys["GOOGL:ex_date:2026-09-08"]["verification"], NH_PARTIAL)
+    async def test_legacy_receipt_helper_refuses_overseas_duplicate(self):
         payload = {"stock_code": "AAA.AX", "stock_name": "호주 단기채", "country": "OTHER", "currency": "AUD",
                    "received_date": "2026-09-16", "gross_amount": 21.1, "fx_rate": 950}
         with self.assertRaises(TradeConflict):

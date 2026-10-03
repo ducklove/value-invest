@@ -46,4 +46,4 @@ API는 `/api/portfolio/trades/preview` POST, `/api/portfolio/trades` POST/GET이
 
 회귀 검사는 원자적 롤백, 동시 요청, 미리보기 후 변경, 중복 요청, 사용자 격리, 현금·수량·매입가 계산, 외화·소수 수량, 응답 유실 재시도, 데스크톱·모바일 실제 DB 저장을 다룬다.
 
-배당 수취·분배금 출금은 [배당금과 분배금](dividend-receipts.md)을 따른다.
+기존 배당 원장·분배금 출금은 [배당 기록과 분배금](dividend-receipts.md)을 따른다.

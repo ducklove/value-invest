@@ -879,7 +879,7 @@ def test_performance_tab_includes_dividend_calendar_panel():
     # 월별 표 + 예상·임박 구분 + 모바일 가로 스크롤과 기준일 열 고정.
     assert ".pf-divcal-month" in styles
     assert ".pf-divcal-event" in styles
-    assert ".pf-divcal-badge.confirmed" in styles
+    assert ".pf-divcal-badge.confirmed" not in styles
     assert ".pf-divcal-event.pf-divcal-est" in styles
     assert ".pf-divcal-event.pf-divcal-upcoming .pf-divcal-pay-day" in styles
     assert ".pf-divcal-table-scroll" in styles

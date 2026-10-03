@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from fastapi import Body, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
 os.environ["SESSION_SECRET"] = "browser-test-only-secret"
 os.environ["GOOGLE_CLIENT_ID"] = ""
@@ -188,6 +188,9 @@ async def add_cashflow(request: Request, payload: dict = Body(...)):
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT"])
 async def auxiliary(path: str):
+    # 실제 수취 조회 라우터의 누락·제거된 경로를 보조 API 모킹으로 가리지 않는다.
+    if path.startswith("portfolio/dividend-receipts"):
+        raise HTTPException(404)
     if path == "market-indicators":
         await asyncio.sleep(2)
         return {}

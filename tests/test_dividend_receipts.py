@@ -228,7 +228,7 @@ class DividendReceiptTests(TempDbMixin):
         self.assertIsNone((await snapshots.get_distribution_flows("u1"))[0]["applied_snapshot_date"])
         self.assertEqual((await snapshots.get_latest_snapshot("u1"))["date"], self.yesterday)
 
-    async def test_routes_auth_isolation_and_schedule_candidates(self):
+    async def test_readonly_receipt_routes_and_distribution_auth_isolation(self):
         app = FastAPI()
         app.include_router(receipt_routes.router)
         app.include_router(distribution_routes.router)
@@ -242,11 +242,12 @@ class DividendReceiptTests(TempDbMixin):
             with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u2"})):
                 self.assertEqual((await client.get('/api/portfolio/distributions/balances')).json(), [])
                 self.assertEqual((await client.get('/api/portfolio/dividend-receipts')).json(), [])
-            with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u1"})), patch.object(
-                receipt_routes.dividend_calendar, "build_calendar", AsyncMock(return_value={"as_of": self.today, "events": [{"stock_code": "005930", "type": "estimated", "date": self.today}]}),
-            ):
-                result = (await client.get('/api/portfolio/dividend-receipts/candidates')).json()
-                self.assertEqual((result["events"][0]["source_key"], result["events"][0]["received"]), (source, True))
+            with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
+                for endpoint, method, expected in (("", "POST", 405), ("/preview", "POST", 404), ("/candidates", "GET", 404)):
+                    response = await client.request(method, '/api/portfolio/dividend-receipts' + endpoint)
+                    self.assertEqual(response.status_code, expected)
+                self.assertEqual(len((await client.get('/api/portfolio/dividend-receipts')).json()), 1)
+                self.assertEqual((await client.get('/api/portfolio/dividend-receipts/totals')).json()[0]['net_amount'], 846)
                 request = await self.distribution()
                 response = await client.post('/api/portfolio/distributions', json=request.model_dump(mode="json"))
                 self.assertEqual(response.status_code, 200, response.text)

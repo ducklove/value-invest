@@ -10,7 +10,7 @@ from domain.portfolio_trades import money_unit, withholding
 
 
 def dividend_country(code: str, currency: str) -> str:
-    """수취 입력의 국가·기본 세율 선택 규칙과 같다."""
+    """기존 국가별 기본 세율 선택 규칙을 사용한다."""
     code = holding_identity(code)
     if market_side(code) == "KR":
         return "KR"
