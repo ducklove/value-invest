@@ -65,7 +65,7 @@ BRIEFING_PROFILES: dict[str, dict[str, str]] = {
     "morning": {
         "name": "모닝 브리핑",
         "title": "🌅 모닝 브리핑",
-        "schedule_label": "평일 07:30",
+        "schedule_label": "월~토 07:30",
         "description": "오늘 07:00 평가와 간밤 해외그룹 성과, 개장 전 확인할 일정을 정리합니다.",
         "focus": "오늘 07:00 KST 평가 기준으로 간밤 해외주식과 해외그룹 손익·기여 종목을 먼저 설명합니다.",
         "outline": (

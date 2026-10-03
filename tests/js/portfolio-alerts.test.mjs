@@ -165,7 +165,7 @@ test("채널: 텔레그램 연결됨 행 + 카카오 등록 폼", () => {
         {
           kind: "morning",
           name: "모닝 브리핑",
-          schedule_label: "평일 07:30",
+          schedule_label: "월~토 07:30",
           description: "개장 전",
           enabled: true,
           custom_instructions: "환율 영향부터",

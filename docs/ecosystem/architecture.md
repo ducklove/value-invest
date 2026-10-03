@@ -200,7 +200,7 @@ flowchart LR
 | 03:30 | cache.db 백업 | `value-invest-backup.timer` |
 | 04:30 | 증권사 리포트 위키 수집 | `wiki-ingestion.timer` |
 | 05:10 / 12:10 / 18:10 | DART 정기보고서 AI 리뷰 | `dart-review-ingestion.timer` |
-| 07:00 / 07:30 평일 | 밸류에이션 브리핑 / 아침 브리핑 | `daily-briefing-valuation`, `daily-briefing` |
+| 07:00 / 07:30 월~토 | 밸류에이션 브리핑 / 아침 브리핑 | `daily-briefing-valuation`, `daily-briefing` |
 | 08:00~19:50(10분) + 20:00 | 인트라데이 스냅샷(사용자 간 시세 공유 맵) | `portfolio-intraday.timer` |
 | 5분 / 10분 상시 | 가격·공시·리포트 알림 / 경제캘린더 알림 | `notify-alerts`, `notify-calendar` |
 | 15:35~16:45 평일(재시도 슬롯) | 정규장 종가 NAV 정산 | `portfolio-snapshot.timer` |

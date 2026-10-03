@@ -260,7 +260,7 @@ function pfAlertsBriefingItems(br) {
   return [{
     kind: 'morning',
     name: '모닝 브리핑',
-    schedule_label: '평일 07:30',
+    schedule_label: '월~토 07:30',
     description: '개장 전, 전일 결산과 오늘 확인할 이벤트를 정리합니다.',
     enabled: !!(br && br.enabled),
     custom_instructions: (br && br.custom_instructions) || '',

@@ -1,8 +1,8 @@
 [Unit]
-Description=Capture morning portfolio valuation at 07:00 KST
+Description=Capture morning portfolio valuation Monday through Saturday at 07:00 KST
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 07:00:00 Asia/Seoul
+OnCalendar=Mon..Sat *-*-* 07:00:00 Asia/Seoul
 AccuracySec=1s
 Persistent=false
 
