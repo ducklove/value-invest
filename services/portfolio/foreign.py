@@ -491,13 +491,19 @@ async def yfinance_fetch_quote(ticker: str) -> dict:
         def _snap(c):
             t = yf.Ticker(c)
             fi = t.fast_info
-            return fi.last_price, fi.previous_close, (fi.currency or "USD").upper()
+            return fi.last_price, fi.previous_close, fi.currency or "USD"
 
         try:
-            price, prev, currency = await yf_run(partial(_snap, _yahoo_symbol(ticker)))
+            price, prev, quoted_currency = await yf_run(partial(_snap, _yahoo_symbol(ticker)))
         except asyncio.TimeoutError:
             logger.warning("yfinance 시세 타임아웃(%s)", ticker)
             return {}
+        # fast_info 도 런던 종목을 펜스(GBp)로 준다 — Yahoo provider 의 표로 주 통화 단위로.
+        currency, factor = yahoo.minor_currency_unit(quoted_currency) or (quoted_currency.upper(), 1)
+        if price:
+            price /= factor
+        if prev:
+            prev /= factor
         change = round(price - prev, 4) if price and prev else 0
         change_pct = round(change / prev * 100, 2) if prev else None
         nation = currencies.CURRENCY_TO_NATION.get(currency, "USA")
@@ -572,7 +578,7 @@ def _normalize_yahoo_search_quote(raw: dict) -> dict | None:
         or str(raw.get("fullExchangeName") or "").strip()
         or str(raw.get("exchange") or "").strip()
     )
-    currency = _normalize_portfolio_code(raw.get("currency")) or infer_yf_currency(symbol)
+    currency = yahoo.major_currency(raw.get("currency")) or infer_yf_currency(symbol)
     return {
         "stock_code": symbol,
         "ticker": symbol,
@@ -818,7 +824,7 @@ async def detect_currency(stock_code: str) -> str:
         found = await yfinance_find_ticker(stock_code)
         if found:
             def _curr(c):
-                return (yf.Ticker(c).fast_info.currency or "USD").upper()
+                return yahoo.major_currency(yf.Ticker(c).fast_info.currency) or "USD"
             return await yf_run(partial(_curr, found))
     except (asyncio.TimeoutError, Exception):
         pass

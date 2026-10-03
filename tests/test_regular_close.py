@@ -348,3 +348,55 @@ async def test_reuters_suffixed_foreign_holdings_settle_from_mapped_yahoo_symbol
     assert saved["FUEVFVND.HM"]["currency"] == "VND"
     row = await snapshots.get_snapshot_by_date("u1", DAY)
     assert row["total_value"] == pytest.approx(10 * 200 + 10000 + 10 * 14.25 * 1400 + 100 * 33800.0 * 1400)
+
+
+def _london_bp_chart() -> dict:
+    """런던 BP.L 일봉 — Yahoo 는 가격을 펜스(GBp)로 준다. 정산 시각(15:35 KST =
+    07:35 BST)에 9/30 런던 정규장은 아직 열리지 않았다 → 9/29 종가가 완료된 최신 종가."""
+    london = ZoneInfo("Europe/London")
+    return _yahoo_daily_chart("GBp", "Europe/London", 3600, datetime(2026, 9, 30, 16, 30, tzinfo=london), [
+        (datetime(2026, 9, 28, 8, tzinfo=london), 549.4),
+        (datetime(2026, 9, 29, 8, tzinfo=london), 557.1),
+    ])
+
+
+async def _serve_charts(charts: dict):
+    def handler(request: httpx.Request) -> httpx.Response:
+        symbol = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json=charts[symbol]) if symbol in charts else httpx.Response(404)
+
+    yahoo.reset_rate_limit_state()
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.asyncio
+async def test_london_pence_close_is_settled_in_pounds():
+    async with await _serve_charts({"BP.L": _london_bp_chart()}) as client:
+        with patch.object(foreign, "ensure_ticker_map", AsyncMock()), \
+             patch.object(yahoo, "get_http_client", AsyncMock(return_value=client)):
+            result = await regular_close.foreign_close("BP.L", NOW)
+    assert result["currency"] == "GBP"
+    assert result["native_price"] == pytest.approx(5.571)  # 557.1p — 펜스 그대로면 100배
+    assert result["price_date"] == "2026-09-29"
+
+
+@pytest.mark.asyncio
+async def test_london_holding_nav_uses_pounds_at_regular_close(temp_db):
+    marker = await seed()
+    await portfolio.save_portfolio_item("u1", "BP.L", "BP", 100, 5.0, "GBP")
+    async with transaction() as db:
+        await db.execute("UPDATE settlement_versions SET recorded_at='2026-09-30T15:29:00.000' WHERE id>?", (marker,))
+
+    async with await _serve_charts({"BP.L": _london_bp_chart()}) as client:
+        with patch.dict(foreign._ticker_map, {}, clear=True), \
+             patch.object(foreign, "ensure_ticker_map", AsyncMock()), \
+             patch.object(yahoo, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(time_windows, "now_kst", return_value=NOW), \
+             patch.object(regular_close.kis_proxy_client, "get_quote", AsyncMock(return_value={"raw": {"stck_prpr": "200"}})):
+            await regular_close.settle("u1", DAY)
+
+    saved = (await settlement_inputs.prices("u1", DAY))["prices"]["BP.L"]
+    assert saved["currency"] == "GBP" and saved["native_price"] == pytest.approx(5.571)
+    assert saved["price"] == pytest.approx(5.571 * 1400)
+    row = await snapshots.get_snapshot_by_date("u1", DAY)
+    assert row["total_value"] == pytest.approx(10 * 200 + 10000 + 100 * 5.571 * 1400)

@@ -24,6 +24,13 @@ provider 를 거친다.
 즉시 낸다. 이 예외는 ``httpx.HTTPError`` 이기도 해서, 기존에 HTTP 오류를
 잡던 호출부가 그대로 "조회 실패" 로 처리한다.
 
+보조 통화 단위 — Yahoo 는 런던(.L) 종목을 펜스(``GBp``/``GBX``), 요하네스버그를
+센트(``ZAc``), 텔아비브를 아고라(``ILA``)로 준다. ``parse_chart()`` 가 시계열·배당·
+meta 가격을 주 통화로 나누고 meta.currency 를 주 통화(GBP·ZAR·ILS)로 바꾼다.
+그래서 ``ChartResult`` 와 ``fetch_close_series()`` 의 가격은 언제나 주 통화
+단위이고, 호출부는 100 으로 나누지 않는다. yfinance 경로는
+``minor_currency_unit()`` 표를 같이 쓴다.
+
 ``previous_close()`` 의 우선순위 — ``chartPreviousClose`` 는 "조회 구간 시작
 직전 종가" 라 ``range=1d`` 일 때만 전일 종가와 같다. 다일 구간에서는
 ``previousClose`` 만 전일 종가로 본다.
@@ -42,7 +49,7 @@ import logging
 import math
 import time
 import weakref
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import quote
@@ -76,6 +83,20 @@ LISTING_UNKNOWN = "unknown"
 # chart 조회가 "그런 심볼 없음"을 돌려준 증거를 남겨 두는 시간.
 MISSING_SYMBOL_TTL_SECONDS = 900.0
 _missing_symbols = MemoryTTLCache("yahoo.missing_symbol", MISSING_SYMBOL_TTL_SECONDS, evict_expired_after=0)
+
+# 보조 단위 통화 표기(대문자) → (주 통화, 배율). "GBp"(펜스)의 대문자는 파운드
+# "GBP" 라 표에 넣지 않고 ``minor_currency_unit()`` 이 대소문자를 가려 따로 본다.
+_MINOR_CURRENCY_UNITS: dict[str, tuple[str, int]] = {
+    "GBX": ("GBP", 100),
+    "ZAC": ("ZAR", 100),
+    "ILA": ("ILS", 100),
+}
+# 보조 단위 차트에서 함께 나누는 meta 가격 필드(비율·거래량·시각은 그대로).
+_META_PRICE_KEYS = (
+    "regularMarketPrice", "chartPreviousClose", "previousClose",
+    "regularMarketDayHigh", "regularMarketDayLow", "fiftyTwoWeekHigh", "fiftyTwoWeekLow",
+    "fulldayPrice", "fulldayChange",
+)
 
 _cooldown_until = 0.0
 # asyncio.Semaphore 는 처음 대기한 이벤트 루프에 묶인다. 운영은 루프 1개지만
@@ -279,13 +300,67 @@ class ChartResult:
         return rows
 
 
+def minor_currency_unit(currency: Any) -> tuple[str, int] | None:
+    """Yahoo·yfinance 통화 표기가 보조 단위면 ``(주 통화, 배율)``, 아니면 None.
+    GBp/GBX → GBP, ZAc → ZAR, ILA → ILS (모두 ÷100)."""
+    raw = str(currency or "").strip()
+    if raw == "GBp":
+        return "GBP", 100
+    return _MINOR_CURRENCY_UNITS.get(raw.upper())
+
+
+def major_currency(currency: Any) -> str | None:
+    """대문자 주 통화 코드. 보조 단위 표기는 주 통화로 바꾸고, 빈 값은 None."""
+    unit = minor_currency_unit(currency)
+    if unit is not None:
+        return unit[0]
+    return str(currency or "").strip().upper() or None
+
+
+def _scaled(value: Any, factor: int) -> Any:
+    if value is None or isinstance(value, bool):
+        return value
+    try:
+        return float(value) / factor
+    except (TypeError, ValueError):
+        return value
+
+
+def _in_major_unit(chart: ChartResult) -> ChartResult:
+    """보조 단위(GBp 등) 차트의 가격·배당을 주 통화 단위로 바꾼다. 원래 표기는
+    meta.sourceCurrency 에 남긴다. 그 밖의 통화는 그대로 돌려준다."""
+    unit = minor_currency_unit(chart.meta.get("currency"))
+    if unit is None:
+        return chart
+    major, factor = unit
+    meta = {**chart.meta, "currency": major, "sourceCurrency": chart.meta.get("currency")}
+    for key in _META_PRICE_KEYS:
+        if key in meta:
+            meta[key] = _scaled(meta[key], factor)
+
+    def scaled(values: list) -> list:
+        return [_scaled(value, factor) for value in values]
+
+    return replace(
+        chart,
+        meta=meta,
+        opens=scaled(chart.opens),
+        highs=scaled(chart.highs),
+        lows=scaled(chart.lows),
+        closes=scaled(chart.closes),
+        adjcloses=scaled(chart.adjcloses),
+        dividends=[{**row, "amount": _scaled(row["amount"], factor)} if "amount" in row else row
+                   for row in chart.dividends],
+    )
+
+
 def _series(block: Any, key: str) -> list:
     values = block.get(key) if isinstance(block, dict) else None
     return list(values) if isinstance(values, list) else []
 
 
 def parse_chart(payload: Any) -> ChartResult | None:
-    """v8 chart JSON → ``ChartResult``. 결과가 없으면 None."""
+    """v8 chart JSON → ``ChartResult``(가격은 주 통화 단위). 결과가 없으면 None."""
     chart = payload.get("chart") if isinstance(payload, dict) else None
     results = chart.get("result") if isinstance(chart, dict) else None
     if not isinstance(results, list) or not results or not isinstance(results[0], dict):
@@ -299,7 +374,7 @@ def parse_chart(payload: Any) -> ChartResult | None:
     adj_block = adj[0] if adj and isinstance(adj[0], dict) else {}
     events = result.get("events") if isinstance(result.get("events"), dict) else {}
     dividends = events.get("dividends") if isinstance(events.get("dividends"), dict) else {}
-    return ChartResult(
+    return _in_major_unit(ChartResult(
         meta=meta,
         timestamps=_series(result, "timestamp"),
         opens=_series(quote_block, "open"),
@@ -309,7 +384,7 @@ def parse_chart(payload: Any) -> ChartResult | None:
         adjcloses=_series(adj_block, "adjclose"),
         volumes=_series(quote_block, "volume"),
         dividends=[row for row in dividends.values() if isinstance(row, dict)],
-    )
+    ))
 
 
 def _positive(value: Any) -> float | None:

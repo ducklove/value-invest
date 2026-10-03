@@ -335,6 +335,34 @@ async def test_hong_kong_rmb_quote_uses_cny_conversion_for_kis_and_naver():
 
 
 @pytest.mark.asyncio
+async def test_yfinance_fast_info_pence_quote_is_valued_in_pounds():
+    """yfinance fast_info 도 .L 종목을 펜스(GBp)로 준다 — 파운드로 나눠 GBP 환산."""
+    with patch.object(foreign, "yf_run", AsyncMock(return_value=(557.8, 558.5, "GBp"))), \
+         patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=lambda nation, amount: amount * 1800)) as fx:
+        quote = await foreign.yfinance_fetch_quote("BP.L")
+    assert fx.await_args_list[0].args == ("GBR", pytest.approx(5.578))
+    assert quote == {"price": 10040, "change": -13, "change_pct": -0.13}  # 펜스 그대로면 1,004,040원
+
+
+@pytest.mark.asyncio
+async def test_minor_unit_currency_labels_become_major_currencies():
+    from types import SimpleNamespace
+
+    for quoted, major in (("GBp", "GBP"), ("ZAc", "ZAR"), ("ILA", "ILS"), ("usd", "USD")):
+        item = foreign._normalize_yahoo_search_quote({"symbol": "X.L", "quoteType": "EQUITY", "currency": quoted})
+        assert item["currency"] == major
+
+    async def run_now(fn):
+        return fn()
+
+    fake_ticker = SimpleNamespace(fast_info=SimpleNamespace(currency="ZAc"))
+    with patch.object(foreign, "yfinance_find_ticker", AsyncMock(return_value="NPN.JO")), \
+         patch.object(foreign, "yf_run", new=run_now), \
+         patch("yfinance.Ticker", return_value=fake_ticker):
+        assert await foreign.detect_currency("NPN.JO") == "ZAR"
+
+
+@pytest.mark.asyncio
 async def test_yfinance_fast_quote_uses_adjacent_daily_close_as_previous_close():
     payload = {
         "rows": [
