@@ -98,7 +98,7 @@ async def fetch_external_quote_for_stock_service(stock_code: str) -> dict:
         q = await foreign.fetch_foreign_quote(ticker)
         if ticker != stock_code:
             if q:
-                foreign.note_mapped_quote_ok(stock_code)
+                await foreign.note_mapped_quote_ok(stock_code)
             elif await foreign.heal_stale_mapping(stock_code, ticker):
                 # 죽은 매핑(예: AAPL → AAPL.DE)을 지웠다 — 원래 코드로 한 번 더
                 # 조회하고, 그래도 없으면 아래에서 다시 해석한다.
@@ -107,8 +107,9 @@ async def fetch_external_quote_for_stock_service(stock_code: str) -> dict:
         if not q and ticker == stock_code:
             resolved = await foreign.resolve_foreign_reuters(stock_code)
             if resolved and resolved != stock_code:
-                await foreign.save_ticker(stock_code, resolved)
                 q = await foreign.fetch_foreign_quote(resolved)
+                # 보유 종목이고 시세가 실제로 풀렸을 때만 ticker_map(DB)에 남긴다.
+                await foreign.remember_quote_ticker(stock_code, resolved, quote_ok=bool(q))
         return q
     return {}
 

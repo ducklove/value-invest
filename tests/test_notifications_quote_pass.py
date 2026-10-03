@@ -315,6 +315,21 @@ class PseudoCodeAlertPassTests(TempDbMixin):
             quote = await engine._regular_daily_quote("QTUM")
             self.assertEqual(quote["change_pct"], 3.41)
 
+    async def test_regular_daily_quote_saves_a_resolution_only_through_the_held_gate(self):
+        from services.portfolio import foreign
+
+        fast = AsyncMock(side_effect=[{}, {"price": 30.0, "change_pct": 0.5}])
+        remember = AsyncMock(return_value=False)
+        with patch.dict(foreign._ticker_map, {}, clear=True), \
+             patch.object(foreign, "ensure_ticker_map", new=AsyncMock()), \
+             patch.object(foreign, "yfinance_fetch_quote_fast", new=fast), \
+             patch.object(foreign, "resolve_foreign_reuters", new=AsyncMock(return_value="SGO.PA")), \
+             patch.object(foreign, "save_ticker", new=AsyncMock(side_effect=AssertionError("no direct save"))), \
+             patch.object(foreign, "remember_quote_ticker", new=remember):
+            self.assertEqual((await engine._regular_daily_quote("SGO"))["change_pct"], 0.5)
+        self.assertEqual([c.args[0] for c in fast.await_args_list], ["SGO", "SGO.PA"])
+        remember.assert_awaited_once_with("SGO", "SGO.PA", quote_ok=True)
+
 
 class AlertQuoteDeadlineTests(TempDbMixin):
     async def test_regular_daily_quote_is_bounded(self):

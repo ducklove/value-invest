@@ -401,7 +401,8 @@ async def test_berkshire_class_b_quote_uses_static_yahoo_ticker():
 
 
 @pytest.mark.asyncio
-async def test_foreign_quote_resolves_reuters_suffix_after_direct_quote_fails():
+@pytest.mark.parametrize("held", [True, False])
+async def test_foreign_quote_resolves_reuters_suffix_after_direct_quote_fails(held):
     with patch.dict(quote_service.foreign._ticker_map, {}, clear=True), \
          patch.object(quote_service.foreign, "ensure_ticker_map", new=AsyncMock()), \
          patch.object(
@@ -414,13 +415,22 @@ async def test_foreign_quote_resolves_reuters_suffix_after_direct_quote_fails():
              "resolve_foreign_reuters",
              new=AsyncMock(return_value="DAX"),
          ) as resolve_foreign_reuters, \
+         patch.object(quote_service.foreign, "is_held_code", new=AsyncMock(return_value=held)) as is_held_code, \
          patch.object(quote_service.foreign, "save_ticker", new=AsyncMock()) as save_ticker:
         result = await quote_service.fetch_external_quote_for_stock_service("DAX.O")
+        mapped = quote_service.foreign._ticker_map.get("DAX.O")
 
     assert result == {"price": 68705, "change_pct": 1.87}
     assert [call.args[0] for call in fetch_foreign_quote.await_args_list] == ["DAX.O", "DAX"]
     resolve_foreign_reuters.assert_awaited_once_with("DAX.O")
-    save_ticker.assert_awaited_once_with("DAX.O", "DAX")
+    is_held_code.assert_awaited_once_with("DAX.O")
+    if held:
+        # 보유 종목 시세가 매핑 티커로 풀렸다 — ticker_map 에 저장한다.
+        save_ticker.assert_awaited_once_with("DAX.O", "DAX")
+    else:
+        # 아무도 보유하지 않은 코드는 이번 프로세스 메모리에만 매핑을 둔다.
+        save_ticker.assert_not_awaited()
+        assert mapped == "DAX"
 
 
 @pytest.mark.asyncio

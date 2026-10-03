@@ -1,20 +1,28 @@
-"""ticker_map 해석 규칙과 자가 치유.
+"""ticker_map 해석 규칙과 자가 치유, 저장 조건.
 
 운영 사고: 미국 종목 AAPL 이 2026-04 에 AAPL.DE(Yahoo 에 없는 심볼)로 저장돼,
 조광피혁(004700) 보유지분 자회사 시세를 그리는 화면이 5분마다 404 를 반복했다.
 원인은 yfinance 접미사 탐색이 미국 심볼 조회의 일시 실패(429·시간 초과)를
 "없음"으로 보고 독일 접미사로 넘어간 것이다.
+
+운영 사고 2: 2026-06-18 밤, 포트폴리오 추가 검색창이 입력 조각마다
+/api/portfolio/resolve-name 을 불렀고 그 해석이 매번 ticker_map 에 저장돼
+TSL·QQ→QQ.L·GOL→GOL.L·MIC→MIC.L 같은 아무도 보유하지 않은 행이 수십 개 쌓였다.
+이제 탐색 결과는 메모리에만 두고 DB 에는 보유 종목만 저장한다.
 """
 
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from _harness import TempDbMixin
+from _harness import TempDbMixin, seed_user
+from starlette.requests import Request
 
 import cache_layer
+import repositories.db
 from domain.portfolio_codes import is_plain_us_ticker
 from repositories import ticker_map as ticker_map_repo
+from routes import portfolio as portfolio_routes
 from services.market.sources import yahoo
 from services.portfolio import foreign, quote_service
 
@@ -47,6 +55,11 @@ def _yahoo_client(routes: dict[str, httpx.Response | Exception], calls: list[str
         return answer if answer is not None else httpx.Response(404, json=NOT_FOUND_BODY)
 
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def _put_request(path: str) -> Request:
+    return Request({"type": "http", "method": "PUT", "path": path, "headers": [], "query_string": b"",
+                    "client": ("127.0.0.1", 12345), "server": ("testserver", 80), "scheme": "http"})
 
 
 class _Clock:
@@ -145,7 +158,10 @@ async def test_chart_fetch_records_and_clears_missing_symbol_evidence():
 # --- 해석: 미국식 티커는 미국 상장부터 ------------------------------------------------
 
 async def _find(code: str, routes: dict, *, yf_hits: set[str] = frozenset(), calls: list | None = None):
-    """yfinance .info 탐색은 yf_hits 에 있는 후보만 맞힌다."""
+    """yfinance .info 탐색은 yf_hits 에 있는 후보만 맞힌다.
+
+    탐색은 이름 조회·검색어 해석도 거치는 경로라 ticker_map(DB)에 쓰지 않는다 —
+    찾은 값은 ``remembered``(메모리 전용 조회 캐시)로 돌려준다."""
     probed: list[str] = []
 
     async def fake_yf_run(fn):
@@ -161,13 +177,13 @@ async def _find(code: str, routes: dict, *, yf_hits: set[str] = frozenset(), cal
              patch.object(foreign, "yf_run", new=fake_yf_run), \
              patch.object(foreign, "save_ticker", new=save):
             found = await foreign.yfinance_find_ticker(code)
-    return found, probed, save
+    save.assert_not_awaited()
+    return found, probed, foreign._lookup_ticker_cache.get(code)
 
 
 async def test_us_listing_wins_even_if_a_foreign_suffix_would_answer():
-    found, probed, save = await _find("AAPL", {"AAPL": httpx.Response(200, json=REAL_CHART)}, yf_hits={"AAPL.DE"})
-    assert found == "AAPL"
-    save.assert_awaited_once_with("AAPL", "AAPL")
+    found, probed, remembered = await _find("AAPL", {"AAPL": httpx.Response(200, json=REAL_CHART)}, yf_hits={"AAPL.DE"})
+    assert found == remembered == "AAPL"
     assert probed == []  # 접미사 탐색(yfinance .info)까지 가지 않는다
 
 
@@ -177,52 +193,46 @@ async def test_us_listing_wins_even_if_a_foreign_suffix_would_answer():
 )
 async def test_transient_us_failure_never_maps_to_a_foreign_suffix(answer):
     # 2026-04 사고 재현: 미국 심볼 조회가 일시 실패해도 AAPL.DE 로 넘어가지 않는다.
-    found, probed, save = await _find("AAPL", {"AAPL": answer}, yf_hits={"AAPL.DE"})
-    assert found is None
+    found, probed, remembered = await _find("AAPL", {"AAPL": answer}, yf_hits={"AAPL.DE"})
+    assert found is None and remembered is None
     assert probed == []
-    save.assert_not_awaited()
     assert foreign.yf_marked_failed("AAPL")  # 실패 TTL 뒤에 다시 본다
 
 
 async def test_us_cooldown_never_maps_to_a_foreign_suffix():
     yahoo._start_cooldown(None)
-    found, probed, save = await _find("AAPL", {}, yf_hits={"AAPL.DE"})
-    assert (found, probed) == (None, [])
-    save.assert_not_awaited()
+    found, probed, remembered = await _find("AAPL", {}, yf_hits={"AAPL.DE"})
+    assert (found, probed, remembered) == (None, [], None)
 
 
 @pytest.mark.parametrize("answer", [httpx.Response(404, json=NOT_FOUND_BODY), httpx.Response(200, json=PHANTOM_CHART)])
 async def test_foreign_suffix_only_after_us_listing_is_positively_absent(answer):
-    found, probed, save = await _find("SGO", {"SGO": answer}, yf_hits={"SGO.PA"})
-    assert found == "SGO.PA"
-    save.assert_awaited_once_with("SGO", "SGO.PA")
+    found, probed, remembered = await _find("SGO", {"SGO": answer}, yf_hits={"SGO.PA"})
+    assert found == remembered == "SGO.PA"
     assert "SGO" not in probed and probed[-1] == "SGO.PA"
 
 
 async def test_non_us_codes_keep_suffix_search_without_us_probe():
     calls: list[str] = []
-    found, probed, save = await _find("SXR8", {}, yf_hits={"SXR8.DE"}, calls=calls)
-    assert found == "SXR8.DE"
+    found, probed, remembered = await _find("SXR8", {}, yf_hits={"SXR8.DE"}, calls=calls)
+    assert found == remembered == "SXR8.DE"
     assert calls == []  # 숫자가 섞인 코드는 미국 상장 확인을 하지 않는다
     assert probed == ["SXR8", "SXR8.DE"]
-    save.assert_awaited_once_with("SXR8", "SXR8.DE")
 
 
 async def test_share_class_ticker_resolves_to_yahoo_dash_symbol():
     for code in ("BF-B", "BF.B", "BF/B"):
-        found, probed, save = await _find(code, {"BF-B": httpx.Response(200, json=REAL_CHART)}, yf_hits={"BF-B.DE"})
-        assert found == "BF-B"
+        found, probed, remembered = await _find(code, {"BF-B": httpx.Response(200, json=REAL_CHART)}, yf_hits={"BF-B.DE"})
+        assert found == remembered == "BF-B"
         assert probed == []
-        save.assert_awaited_once_with(code, "BF-B")
 
 
 async def test_fresh_chart_404_skips_the_redundant_us_probe():
     yahoo._missing_symbols.set("SGO", True)  # 방금 시세 체인의 chart 가 SGO 404 를 봤다
     calls: list[str] = []
-    found, probed, save = await _find("SGO", {}, yf_hits={"SGO.PA"}, calls=calls)
-    assert found == "SGO.PA"
+    found, probed, remembered = await _find("SGO", {}, yf_hits={"SGO.PA"}, calls=calls)
+    assert found == remembered == "SGO.PA"
     assert calls == []  # 같은 chart 를 다시 부르지 않는다
-    save.assert_awaited_once_with("SGO", "SGO.PA")
 
 
 async def test_known_dead_ticker_is_not_picked_again():
@@ -230,6 +240,20 @@ async def test_known_dead_ticker_is_not_picked_again():
     found, probed, _ = await _find("SXR8", {}, yf_hits={"SXR8.DE", "SXR8.F"})
     assert found == "SXR8.F"
     assert "SXR8.DE" not in probed
+
+
+async def test_repeat_lookup_is_answered_from_memory_without_probing():
+    found, _, _ = await _find("SGO", {"SGO": httpx.Response(404, json=NOT_FOUND_BODY)}, yf_hits={"SGO.PA"})
+    assert found == "SGO.PA"
+    calls: list[str] = []
+    again, probed, _ = await _find("SGO", {}, calls=calls)
+    assert again == "SGO.PA"
+    assert (probed, calls) == ([], [])
+    # 치유가 내린 티커는 조회 캐시에 남아 있어도 다시 쓰지 않는다.
+    foreign._dead_ticker_cache.set("SGO.PA", True)
+    third, probed, _ = await _find("SGO", {}, yf_hits={"SGO.PA", "SGO.F"})
+    assert third == "SGO.F"
+    assert "SGO.PA" not in probed
 
 
 async def test_naver_fallback_accepts_only_us_exchanges_until_us_absence_is_known():
@@ -295,8 +319,20 @@ async def test_naver_fallback_never_returns_a_ticker_healing_just_dropped():
 
 # --- 자가 치유 ----------------------------------------------------------------------
 
+async def _hold(*codes: str) -> None:
+    """누군가(u1) 보유한 종목으로 만든다 — ticker_map 저장 조건. seed_user() 뒤에 부른다."""
+    db = await repositories.db.get_db()
+    await db.executemany(
+        "INSERT INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, created_at, updated_at)"
+        " VALUES ('u1', ?, ?, 1, 0, '2026-10-01T00:00:00', '2026-10-01T00:00:00')",
+        [(code, code) for code in codes],
+    )
+    await db.commit()
+
+
 class TickerMapHealTests(TempDbMixin):
     async def seed(self):
+        await seed_user()
         await ticker_map_repo.save_ticker("AAPL", "AAPL.DE")
         await ticker_map_repo.save_ticker("EUN2", "EUN2.DE")
         await ticker_map_repo.save_ticker("GOOGL", "GOOGL.O")
@@ -422,24 +458,33 @@ class TickerMapHealTests(TempDbMixin):
         self.assertEqual(saved["EUN2"], "EUN2.DE")
         self.assertEqual(saved["GOOGL"], "GOOGL.O")
 
+    def _hpg_naver(self, naver_calls: list[str] | None = None, *, priced: bool = True):
+        """호찌민 HPG: 네이버에는 HPG.HM 만 있다. ``priced=False`` 면 이름만 있고 시세가 비었다."""
+
+        async def naver(code):
+            if naver_calls is not None:
+                naver_calls.append(code)
+            if code != "HPG.HM":
+                return None
+            row = {"stockName": "Hoa Phat", "reutersCode": "HPG.HM", "nationType": "VNM"}
+            if priced:
+                row.update(closePrice="27,000", compareToPreviousClosePrice="100", fluctuationsRatio="0.37")
+            return row
+
+        return naver
+
+    @staticmethod
+    async def _fast_info_fails(ticker):
+        foreign.yf_mark_failed(ticker)
+        return {}
+
     async def test_unmapped_plain_non_us_code_resolves_from_the_chains_own_404(self):
         # 호찌민 HPG: Yahoo HPG 404, 네이버 HPG 409, HPG.HM 만 있다. 운영처럼 fast_info
         # 실패가 yfinance 실패 표시를 남겨 상장 확인(probe)까지 가지 않아도 풀려야 한다.
+        await _hold("HPG")  # 보유 종목이라 풀린 매핑을 저장한다
         naver_calls: list[str] = []
-
-        async def naver(code):
-            naver_calls.append(code)
-            if code == "HPG.HM":
-                return {"stockName": "Hoa Phat", "reutersCode": "HPG.HM", "closePrice": "27,000",
-                        "compareToPreviousClosePrice": "100", "fluctuationsRatio": "0.37", "nationType": "VNM"}
-            return None
-
-        async def fast_info_fails(ticker):
-            foreign.yf_mark_failed(ticker)
-            return {}
-
-        with patch.object(foreign, "fetch_naver_world_stock", new=naver), \
-             patch.object(foreign, "yfinance_fetch_quote", new=fast_info_fails), \
+        with patch.object(foreign, "fetch_naver_world_stock", new=self._hpg_naver(naver_calls)), \
+             patch.object(foreign, "yfinance_fetch_quote", new=self._fast_info_fails), \
              patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=lambda nation, amount: amount * 0.055)):
             quote = await self._quote("HPG")
         self.assertEqual(quote["price"], round(27000 * 0.055))
@@ -447,6 +492,34 @@ class TickerMapHealTests(TempDbMixin):
         self.assertEqual((await ticker_map_repo.load_ticker_map())["HPG"], "HPG.HM")
         self.assertEqual(self.chart_calls, ["HPG"])  # 상장 확인용 추가 chart 호출 없음
         self.assertIn("HPG.HM", naver_calls)
+
+    async def test_quote_mapping_for_a_code_nobody_holds_stays_in_memory(self):
+        # 분석 화면·벤치마크처럼 보유하지 않은 코드: 이번 프로세스에서는 매핑을 쓰되 DB 에는 없다.
+        with patch.object(foreign, "fetch_naver_world_stock", new=self._hpg_naver()), \
+             patch.object(foreign, "yfinance_fetch_quote", new=self._fast_info_fails), \
+             patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=lambda nation, amount: amount * 0.055)):
+            self.assertTrue(await self._quote("HPG"))
+            self.assertEqual(foreign._ticker_map["HPG"], "HPG.HM")
+            self.assertNotIn("HPG", await ticker_map_repo.load_ticker_map())
+            # 다음 조회는 매핑 티커로 바로 간다(원래 코드 chart·재해석 없음).
+            self.chart_calls.clear()
+            self.assertTrue(await self._quote("HPG"))
+            self.assertEqual(self.chart_calls, [])
+            self.assertNotIn("HPG", await ticker_map_repo.load_ticker_map())
+
+    async def test_held_mapping_is_saved_only_once_its_quote_resolves(self):
+        await _hold("HPG")
+        fx_patch = patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=lambda nation, amount: amount * 0.055))
+        with fx_patch, patch.object(foreign, "yfinance_fetch_quote", new=self._fast_info_fails):
+            # 네이버가 이름만 주고 시세가 비었다 — 매핑은 메모리에만.
+            with patch.object(foreign, "fetch_naver_world_stock", new=self._hpg_naver(priced=False)):
+                self.assertEqual(await self._quote("HPG"), {})
+            self.assertEqual(foreign._ticker_map["HPG"], "HPG.HM")
+            self.assertNotIn("HPG", await ticker_map_repo.load_ticker_map())
+            # 매핑 티커로 시세를 받은 순간 저장한다.
+            with patch.object(foreign, "fetch_naver_world_stock", new=self._hpg_naver()):
+                self.assertTrue(await self._quote("HPG"))
+        self.assertEqual((await ticker_map_repo.load_ticker_map())["HPG"], "HPG.HM")
 
     async def test_unmapped_us_ticker_with_transient_chart_failure_never_takes_a_foreign_listing(self):
         # 같은 경로에서 미국 조회가 5xx·시간 초과로 실패하면 "없음" 증거가 아니다.
@@ -470,6 +543,7 @@ class TickerMapHealTests(TempDbMixin):
         # SGO → SGO.DE 가 죽고 SGO.PA 가 살아 있다. 치유 뒤 원래 코드 조회의 chart 404 가
         # 미국 상장 없음 증거가 되어 네이버 폴백이 SGO.PA 로 다시 푼다.
         await ticker_map_repo.save_ticker("SGO", "SGO.DE")
+        await _hold("SGO")
         self.chart_routes["SGO.PA"] = httpx.Response(200, json=REAL_CHART)
 
         async def naver(code):
@@ -516,3 +590,98 @@ class TickerMapHealTests(TempDbMixin):
         self.assertTrue(await ticker_map_repo.delete_ticker("AAPL", expected_ticker="AAPL.DE"))
         self.assertNotIn("AAPL", await ticker_map_repo.load_ticker_map())
         self.assertFalse(await ticker_map_repo.delete_ticker("AAPL"))
+
+
+# --- 이름 조회·보유 등록과 ticker_map 저장 ------------------------------------------------
+
+class TickerMapPersistenceTests(TempDbMixin):
+    """resolve-name·이름 조회는 ticker_map 에 쓰지 않고, 보유 등록이 확정된 코드만 저장한다."""
+
+    async def seed(self):
+        await seed_user()
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.chart_calls: list[str] = []
+        self.probed: list[str] = []
+        # 2026-06-18 의 입력 조각들: GOL·MIC 은 미국에 없고 런던에만, TSL 은 미국 상장(가상).
+        self.chart_routes = {"TSL": httpx.Response(200, json=REAL_CHART), "AAPL": httpx.Response(200, json=REAL_CHART)}
+        self.yf_hits = {"GOL.L", "MIC.L", "SGO.PA", "AAPL.DE"}
+        self.naver_codes = {"GOL.L", "MIC.L", "SGO.PA", "TSL"}
+        self.client = _yahoo_client(self.chart_routes, self.chart_calls)
+        self.patches = [
+            patch.dict(foreign._ticker_map, {}, clear=True),
+            patch.object(yahoo, "get_http_client", AsyncMock(return_value=self.client)),
+            patch.object(yahoo, "MAX_INLINE_RETRY_DELAY", 0.0),
+            patch.object(foreign, "yf_run", new=self._yf_run),
+            patch.object(foreign, "fetch_naver_world_stock", new=self._naver),
+        ]
+        for p in self.patches:
+            p.start()
+
+    async def asyncTearDown(self):
+        for p in reversed(self.patches):
+            p.stop()
+        await self.client.aclose()
+        await super().asyncTearDown()
+
+    async def _yf_run(self, fn):
+        candidate = fn.args[0]
+        self.probed.append(candidate)
+        return candidate if candidate in self.yf_hits else None
+
+    async def _naver(self, code):
+        return {"stockName": f"{code} name", "reutersCode": code} if code in self.naver_codes else None
+
+    async def test_resolve_name_endpoint_never_writes_ticker_map(self):
+        for fragment in ("GOL", "MIC", "TSL"):
+            await portfolio_routes.resolve_name(code=fragment)
+        self.assertEqual(await ticker_map_repo.load_ticker_map(), {})
+        self.assertEqual(foreign._ticker_map, {})
+        self.assertEqual(foreign._lookup_ticker_cache.get("GOL"), "GOL.L")
+        # 같은 조각을 다시 쳐도 메모리 캐시가 답한다(접미사 탐색·chart 재호출 없음).
+        self.probed.clear()
+        self.chart_calls.clear()
+        response = await portfolio_routes.resolve_name(code="GOL")
+        self.assertEqual(response["stock_code"], "GOL.L")
+        self.assertEqual((self.probed, self.chart_calls), ([], []))
+        self.assertEqual(await ticker_map_repo.load_ticker_map(), {})
+
+    async def test_name_lookup_keeps_us_first_rule_without_writing(self):
+        await foreign.resolve_name("AAPL")
+        self.assertEqual(foreign._lookup_ticker_cache.get("AAPL"), "AAPL")
+        self.assertNotIn("AAPL.DE", self.probed)  # 미국 상장이 있으면 해외 접미사 탐색까지 가지 않는다
+        self.assertEqual(await ticker_map_repo.load_ticker_map(), {})
+
+    async def test_holding_added_under_the_canonical_code_does_not_save_the_fragment(self):
+        response = await portfolio_routes.resolve_name(code="GOL")
+        self.assertEqual(response["stock_code"], "GOL.L")
+        # UI 는 resolve-name 이 돌려준 정식 코드로 등록한다 — GOL → GOL.L 매핑은 쓸 일이 없다.
+        self.assertFalse(await foreign.save_holding_ticker("GOL.L"))
+        self.assertEqual(await ticker_map_repo.load_ticker_map(), {})
+
+    async def test_holding_added_by_raw_code_saves_its_lookup(self):
+        # 이름 없이 원래 코드(SGO)로 등록: 이름 조회가 찾은 SGO.PA 를 등록 확정 뒤 저장한다.
+        request = _put_request("/api/portfolio/SGO")
+        saver = AsyncMock(return_value={"stock_code": "SGO", "stock_name": "SGO.PA"})
+        with patch("routes.portfolio.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
+             patch("repositories.portfolio.save_portfolio_item", new=saver), \
+             patch("repositories.portfolio.get_portfolio_item", new=AsyncMock(return_value=None)), \
+             patch("repositories.foreign_dividends.get_foreign_dividend", new=AsyncMock(return_value={"dps_krw": 0})), \
+             patch("routes.portfolio.dividends.schedule_for_portfolio"):
+            await portfolio_routes.save_portfolio_item("SGO", request, {"stock_name": "", "quantity": 1, "avg_price": 0})
+        saver.assert_awaited_once()
+        self.assertEqual(await ticker_map_repo.load_ticker_map(), {"SGO": "SGO.PA"})
+        self.assertEqual(foreign._ticker_map["SGO"], "SGO.PA")
+
+    async def test_save_holding_ticker_skips_self_mappings_saved_rows_and_unknown_codes(self):
+        await foreign.resolve_name("TSL")
+        self.assertEqual(foreign._lookup_ticker_cache.get("TSL"), "TSL")
+        self.probed.clear()
+        self.assertFalse(await foreign.save_holding_ticker("TSL"))  # 자기 매핑은 저장할 이유가 없다
+        self.assertFalse(await foreign.save_holding_ticker("NVDA"))  # 조회한 적 없는 코드는 새로 찾지 않는다
+        await foreign.save_ticker("SGO", "SGO.DE")
+        foreign._lookup_ticker_cache.set("SGO", "SGO.PA")
+        self.assertFalse(await foreign.save_holding_ticker("SGO"))  # 이미 저장된 매핑은 그대로
+        self.assertEqual(await ticker_map_repo.load_ticker_map(), {"SGO": "SGO.DE"})
+        self.assertEqual(self.probed, [])

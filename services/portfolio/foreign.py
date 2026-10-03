@@ -19,6 +19,7 @@ import asyncio
 import logging
 import math
 import re
+import sqlite3
 from datetime import datetime
 from functools import partial
 from zoneinfo import ZoneInfo
@@ -30,6 +31,7 @@ from core.errors import DBError
 from core.http import get_http_client
 from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_listing
 from repositories import corp_codes
+from repositories import portfolio as portfolio_repo
 from repositories import ticker_map as ticker_map_repo
 from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo, yfinance_runner
@@ -112,10 +114,19 @@ _DEAD_TICKER_TTL = 24 * 3600
 _dead_ticker_cache = MemoryTTLCache("portfolio.ticker_map_dead", _DEAD_TICKER_TTL, evict_expired_after=0)
 # 미국식 티커의 미국 상장 여부를 모를 때 네이버 폴백이 받아도 되는 접미사(미국 거래소).
 _NAVER_US_SUFFIXES = ("", ".O", ".K", ".N")
+# yfinance 접미사 탐색이 찾은 티커(메모리 전용). 이름 조회·검색어 해석은 여기까지만
+# 남기고 ticker_map(DB)에 쓰지 않는다 — 예전에는 검색창 입력 조각마다 resolve-name 이
+# 매핑을 저장해 2026-06-18 하룻밤에 TSL·QQ→QQ.L·GOL→GOL.L 같은 행 수십 개가 쌓였다.
+# DB 저장은 보유 종목일 때만: 보유 등록 직후(save_holding_ticker)와 보유 종목 시세가
+# 매핑 티커로 풀렸을 때(remember_quote_ticker·note_mapped_quote_ok).
+_LOOKUP_TICKER_TTL = 6 * 3600
+_lookup_ticker_cache = MemoryTTLCache("portfolio.ticker_lookup", _LOOKUP_TICKER_TTL, evict_expired_after=0)
 
 
 _ticker_map: dict[str, str] = {}  # stock_code -> resolved ticker (e.g., A200 -> A200.AX)
 _ticker_map_loaded = False
+# _ticker_map 중 DB 에 없는(시세 경로가 보유하지 않은 코드로 푼) 매핑의 코드.
+_unsaved_ticker_codes: set[str] = set()
 
 
 def _is_pseudo_code(code: str | None) -> bool:
@@ -242,7 +253,11 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
 
     미국식 티커(AAPL, BRK-B)는 Yahoo chart 로 미국 상장부터 확인한다. 있으면 그
     심볼, 확실히 없을 때(404·빈 결과)만 해외 접미사를 찾고, 모르면(시간 초과·
-    5xx·429·쿨다운) 아무것도 저장하지 않고 실패 TTL 뒤에 다시 본다."""
+    5xx·429·쿨다운) 아무것도 기억하지 않고 실패 TTL 뒤에 다시 본다.
+
+    찾은 티커는 메모리(``_lookup_ticker_cache``)에만 둔다. 이름 조회·통화 판별·
+    검색어 해석도 이 함수를 거치므로, 여기서 DB 에 쓰면 아무도 보유하지 않은
+    입력 조각이 ticker_map 에 영구히 남는다."""
     if _is_pseudo_code(ticker):
         return None
     static = _static_foreign_ticker(ticker)
@@ -250,6 +265,9 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
         return static["ticker"]
     if ticker in _ticker_map:
         return _ticker_map[ticker]
+    looked_up = _lookup_ticker_cache.get(ticker)
+    if looked_up and not ticker_known_dead(looked_up):
+        return looked_up
     if yf_marked_failed(ticker):
         return None
     candidates = _yfinance_candidates(ticker)
@@ -260,7 +278,7 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
         else:
             status = await yahoo.probe_listing(us_symbol)
         if status == yahoo.LISTING_PRESENT:
-            await save_ticker(ticker, us_symbol)
+            _lookup_ticker_cache.set(ticker, us_symbol)
             return us_symbol
         if status != yahoo.LISTING_ABSENT:
             yf_mark_failed(ticker)
@@ -282,7 +300,7 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
             try:
                 hit = await yf_run(partial(_probe, candidate))
                 if hit:
-                    await save_ticker(ticker, hit)
+                    _lookup_ticker_cache.set(ticker, hit)
                     return hit
             except (asyncio.TimeoutError, Exception):
                 continue
@@ -729,17 +747,65 @@ async def ensure_ticker_map():
 async def save_ticker(stock_code: str, resolved: str):
     """Save a resolved ticker to both memory and DB."""
     _ticker_map[stock_code] = resolved
+    _unsaved_ticker_codes.discard(stock_code)
     try:
         await ticker_map_repo.save_ticker(stock_code, resolved)
     except Exception as exc:
         logger.warning("Ticker map save failed (%s -> %s): %s", stock_code, resolved, exc)
 
 
+async def is_held_code(stock_code: str) -> bool:
+    """누군가 보유한 코드인가. 조회가 실패하면 False(=DB 에 쓰지 않음)."""
+    try:
+        return await portfolio_repo.is_code_held(stock_code)
+    except (DBError, sqlite3.Error) as exc:
+        logger.warning("보유 종목 확인 실패(%s): %s", stock_code, exc)
+        return False
+
+
+async def remember_quote_ticker(stock_code: str, resolved: str, *, quote_ok: bool) -> bool:
+    """시세 경로가 ``stock_code`` 를 ``resolved`` 로 다시 풀었다.
+
+    다음 조회가 바로 그 티커로 가고 자가 치유가 판단할 수 있게 메모리 매핑은
+    항상 남긴다. DB 에는 그 티커로 시세를 실제로 받았고(``quote_ok``) 누군가
+    보유한 코드일 때만 저장한다 — 분석 화면·벤치마크처럼 보유하지 않은 코드의
+    매핑은 재시작과 함께 사라진다. 저장했으면 True."""
+    if quote_ok and await is_held_code(stock_code):
+        await save_ticker(stock_code, resolved)
+        return True
+    _ticker_map[stock_code] = resolved
+    _unsaved_ticker_codes.add(stock_code)
+    return False
+
+
+async def save_holding_ticker(stock_code: str) -> bool:
+    """보유 종목으로 막 등록된 코드의 해석 결과를 ticker_map 에 저장한다.
+
+    등록 흐름의 이름 조회·통화 판별이 메모리에 남긴 값만 쓰고 새로 조회하지
+    않는다. 이미 저장된 매핑, 원래 코드와 같은 값(자기 매핑)은 건너뛴다.
+    resolve-name 이 정식 코드(SGO → SGO.PA)를 돌려줘 그 코드로 등록한 경우에는
+    입력 조각(SGO)의 매핑이 필요 없으므로 저장되지 않는다. 저장했으면 True."""
+    code = _normalize_portfolio_code(stock_code)
+    if code in _unsaved_ticker_codes:
+        resolved = _ticker_map.get(code)
+    elif code in _ticker_map:
+        return False
+    else:
+        resolved = _lookup_ticker_cache.get(code)
+    if not resolved or resolved == code or ticker_known_dead(resolved):
+        return False
+    await save_ticker(code, resolved)
+    return True
+
+
 def reset_resolution_state() -> None:
-    """테스트용: 해석·자가 치유의 단기 관측(미국 없음·실패 관측·죽은 티커)을 지운다."""
+    """테스트용: 해석·자가 치유의 단기 관측(미국 없음·실패 관측·죽은 티커)과
+    메모리 전용 해석 결과를 지운다."""
     _us_listing_absent_cache.clear()
     _mapping_strike_cache.clear()
     _dead_ticker_cache.clear()
+    _lookup_ticker_cache.clear()
+    _unsaved_ticker_codes.clear()
 
 
 def _us_listing_known_absent(ticker: str) -> bool:
@@ -764,6 +830,7 @@ async def drop_ticker(stock_code: str, resolved: str) -> bool:
     경로가 새 값을 저장했으면 그 값은 두고 False."""
     if _ticker_map.get(stock_code) == resolved:
         del _ticker_map[stock_code]
+        _unsaved_ticker_codes.discard(stock_code)
     try:
         return await ticker_map_repo.delete_ticker(stock_code, expected_ticker=resolved)
     except DBError as exc:
@@ -771,9 +838,15 @@ async def drop_ticker(stock_code: str, resolved: str) -> bool:
         return False
 
 
-def note_mapped_quote_ok(stock_code: str) -> None:
-    """매핑 티커로 시세를 받았다 — 쌓인 실패 관측을 지운다."""
+async def note_mapped_quote_ok(stock_code: str) -> None:
+    """매핑 티커로 시세를 받았다 — 쌓인 실패 관측을 지우고, 메모리에만 있던
+    매핑이면 그사이 보유 종목이 됐을 때 저장한다."""
     _mapping_strike_cache.delete(stock_code)
+    if stock_code not in _unsaved_ticker_codes or not await is_held_code(stock_code):
+        return
+    resolved = _ticker_map.get(stock_code)  # 확인하는 사이 치유가 지웠을 수 있다
+    if resolved and stock_code in _unsaved_ticker_codes:
+        await save_ticker(stock_code, resolved)
 
 
 async def heal_stale_mapping(stock_code: str, mapped: str) -> bool:

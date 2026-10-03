@@ -599,6 +599,13 @@ async def get_portfolio_item(google_sub: str, stock_code: str, account_id: str |
     return dict(row) if row else None
 
 
+async def is_code_held(stock_code: str) -> bool:
+    """어느 사용자든 이 코드를 보유 종목(합산 테이블)으로 갖고 있는가."""
+    db = await get_db()
+    cursor = await db.execute("SELECT 1 FROM user_portfolio WHERE stock_code = ? LIMIT 1", (stock_code,))
+    return await cursor.fetchone() is not None
+
+
 _TARGET_PRICE_UNCHANGED = object()
 _TARGET_DISABLED_UNCHANGED = object()
 _TARGET_FORMULA_UNCHANGED = object()

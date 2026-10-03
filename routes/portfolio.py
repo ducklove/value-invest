@@ -979,6 +979,8 @@ async def save_portfolio_item(stock_code: str, request: Request, payload: dict =
         **metadata,
     )
     result["avg_price_krw"] = avg_price_krw
+    # 이름 조회가 메모리에만 남긴 티커 해석은 보유가 확정된 지금 ticker_map 에 저장한다.
+    await foreign.save_holding_ticker(stock_code)
 
     # 신규 해외 종목이면 yfinance 배당을 백그라운드로 fetch. 기존 동일
     # 코드에 대해 이미 foreign_dividends row 가 있으면 (auto/manual 무관)
@@ -1203,6 +1205,8 @@ async def bulk_import(request: Request, payload: dict = Body(...)):
                     user["google_sub"], item["stock_code"], item["stock_name"], item["quantity"], item["avg_price"], item["currency"],
                     account_id=(request.headers.get("X-Portfolio-Account") if request else None),
                 )
+    for item in resolved:
+        await foreign.save_holding_ticker(item["stock_code"])
     dividends.schedule_for_portfolio([item["stock_code"] for item in resolved])
 
     return {"ok": True, "imported": len(resolved), "mode": mode}

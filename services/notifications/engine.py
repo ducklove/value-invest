@@ -163,8 +163,8 @@ async def _regular_daily_quote(code: str) -> dict:
             if not quote:
                 resolved = await foreign.resolve_foreign_reuters(code)
                 if resolved and foreign.yfinance_direct_ticker(resolved) != ticker:
-                    await foreign.save_ticker(code, resolved)
                     quote = await foreign.yfinance_fetch_quote_fast(resolved, require_regular_session=True)
+                    await foreign.remember_quote_ticker(code, resolved, quote_ok=bool(quote))
             return quote or {}
     except Exception as exc:
         logger.info("regular daily quote failed for %s: %s", code, str(exc) or type(exc).__name__)
