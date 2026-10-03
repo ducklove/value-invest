@@ -364,6 +364,8 @@ class CalendarNHIntegrationTests(TempDbMixin):
                          (14000, 14000, 1))
         self.assertEqual((monthly["2026-09"]["total_krw"], monthly["2026-09"]["nh_count"]), (0, 2))
         summary = result["summary"]
+        self.assertEqual(summary["calculated_total_krw"], 0)
+        self.assertTrue(all(e["calculated_gross_amount"] is None for e in result["events"] if e["date_status"] == "nh"))
         self.assertEqual((summary["nh_count"], summary["nh_only_count"], summary["nh_partial_count"]), (4, 1, 1))
         self.assertEqual(summary["nh_unattached_adjustment_count"], 0)
 

@@ -12,6 +12,7 @@ import json
 import time
 from datetime import date, timedelta
 
+from domain.dividend_calendar_display import display_values
 from domain.dividend_entitlement import HoldingHistory, entitlement, holding_identity, reference_point
 from domain.dividend_schedule import FREQUENCY_LABELS, calendar_event, event_day, frequency_of, project_events
 from domain.dividend_verification import (
@@ -89,6 +90,7 @@ def _monthly_aggregation(events: list[dict], months: list[tuple[int, int]]) -> l
         quantity_unknown = [e["date_status"] != "nh" and e.get("shares") is None for e in payments]
         rows.append({"month": key, "count": len(selected),
                      "total_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments)),
+                     "calculated_total_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments if e["date_status"] != "nh")),
                      "announced_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments if e["confirmed"])),
                      "estimated_krw": round(sum(e["expected_amount_krw"] or 0 for e in payments if e["date_status"] == "estimated")),
                      "nh_only_krw": round(sum(e["expected_amount_krw"] or 0 for e in nh_rows)),
@@ -231,12 +233,14 @@ async def build_calendar(google_sub: str, months_back: int = 2, months_forward: 
         # 연결할 일정이 없는 NH 입금(미보유·이력 없음·창 밖 권리일)은 실제 입금 행으로 보여 준다.
         events += [nh_payment_event(records[j]) for j in unlinked
                    if start.isoformat() <= str(records[j].get("date") or "") < end.isoformat()]
+    events = [{**event, **display_values(event)} for event in events]
     events.sort(key=lambda event: (event["date"], event["stock_code"]))
     monthly = _monthly_aggregation(events, months)
     return {"as_of": today.isoformat(), "months_back": months_back, "months_forward": months_forward,
             "start_month": _month_key(*months[0]), "end_month": _month_key(*months[-1]),
             "events": events, "monthly": monthly, "coverage": coverage_rows,
             "summary": {"event_count": len(events), "confirmed_count": sum(e["confirmed"] for e in events),
+                        "calculated_total_krw": sum(row["calculated_total_krw"] for row in monthly),
                         "estimated_count": sum(e["date_status"] == "estimated" for e in events),
                         "observed_count": sum(e["date_status"] == "observed" for e in events),
                         "total_expected_krw": sum(m["total_krw"] for m in monthly),
