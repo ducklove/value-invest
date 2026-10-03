@@ -1251,6 +1251,14 @@ async def send_briefings(briefing_type: object = None) -> dict:
 
     profile = briefing_profile(briefing_type)
     users = await opted_in_users(profile["kind"])
+    if profile["kind"] == "morning":
+        now = time_windows.now_kst()
+        start = now.replace(hour=7, minute=30, second=0, microsecond=0)
+        # 타이머 달력 변경 후 지난 실행이 즉시 기동돼도 한낮에 발송하지 않는다.
+        if now.weekday() == 6 or not start <= now < start + timedelta(minutes=10):
+            return {"briefing_type": profile["kind"], "briefing_name": profile["name"],
+                    "users": len(users), "sent": 0, "failed": 0, "skipped": len(users),
+                    "reason": "outside_morning_session"}
     if profile["kind"] in {"market_close", "night"}:
         from domain.market_calendar import closing_at
         now = time_windows.now_kst()
@@ -1279,6 +1287,11 @@ async def send_briefings(briefing_type: object = None) -> dict:
                     wait=True,
                 )
                 continue
+            if profile["kind"] == "morning":
+                # 직접 내부 호출에도 동일한 보장: 진행 중인 수집은 capture의
+                # 잠금으로 기다리고, 저장 전 실패하면 미수집 본문을 보내지 않는다.
+                if await morning_valuation.load(google_sub, now.date().isoformat()) is None:
+                    await morning_valuation.capture(google_sub)
             if profile["kind"] == "market_close":
                 snapshot = await snapshots_repo.get_snapshot_by_date(google_sub, time_windows.today_kst_date().isoformat())
                 if not snapshot or snapshot.get("price_basis") != "regular_close_v1":

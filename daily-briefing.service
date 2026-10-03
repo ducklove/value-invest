@@ -1,6 +1,7 @@
 [Unit]
 Description=Value Invest AI morning briefing push
-After=network.target
+Wants=daily-briefing-valuation.service
+After=network.target daily-briefing-valuation.service
 OnFailure=value-invest-notify@%n.service
 
 [Service]
@@ -12,6 +13,7 @@ Group=cantabile
 # 텔레그램/카카오로 푸시한다. 웹 프로세스 안(loopback 내부 엔드포인트)에서
 # 실행되어 따뜻한 캐시·동일한 DB 기준을 공유한다. 사용자별 결과는
 # system_events(source='daily_briefing') 에 남는다.
+# 07:00 수집 실패·배포 중 동시 기동 시에도 평가 수집 종료를 먼저 기다린다.
 # LLM 호출이 사용자 수만큼 직렬로 일어나므로 타임아웃을 넉넉히 둔다.
 ExecStart=/usr/bin/curl -fsSk --max-time 600 -X POST https://127.0.0.1:3691/api/internal/daily-briefing/send
 NoNewPrivileges=yes

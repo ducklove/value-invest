@@ -797,6 +797,53 @@ class GenerateBriefingTests(DailyBriefingHarness):
 
 
 class SendBriefingsTests(DailyBriefingHarness):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.now = datetime(2026, 10, 3, 7, 30, tzinfo=daily_briefing.time_windows.KST)
+        clock = patch.object(daily_briefing.time_windows, "now_kst", return_value=self.now)
+        clock.start()
+        self.addCleanup(clock.stop)
+        self.valuation = AsyncMock(return_value={"date": "2026-10-03", "total_value": 1000})
+        saved = patch.object(daily_briefing.morning_valuation, "load", new=self.valuation)
+        saved.start()
+        self.addCleanup(saved.stop)
+
+    async def test_morning_skips_late_deploy_early_calls_and_sunday(self):
+        await self._seed_user("u1")
+        await daily_briefing.set_enabled("u1", True)
+        for now in (
+            self.now.replace(minute=29, second=59),
+            self.now.replace(minute=40),
+            self.now.replace(hour=9, minute=7, second=42),
+            self.now.replace(day=4),
+        ):
+            with self.subTest(now=now), \
+                 patch.object(daily_briefing.time_windows, "now_kst", return_value=now), \
+                 patch.object(daily_briefing, "generate_briefing", new=AsyncMock()) as generate, \
+                 patch.object(daily_briefing.morning_valuation, "capture", new=AsyncMock()) as capture, \
+                 patch.object(daily_briefing.channels, "dispatch", new=AsyncMock()) as dispatch:
+                result = await daily_briefing.send_briefings()
+            self.assertEqual(result["reason"], "outside_morning_session")
+            self.assertEqual(result["sent"], 0)
+            self.assertEqual(result["skipped"], 1)
+            generate.assert_not_awaited()
+            capture.assert_not_awaited()
+            dispatch.assert_not_awaited()
+
+    async def test_missing_morning_capture_failure_blocks_send(self):
+        await self._seed_user("u1")
+        await daily_briefing.set_enabled("u1", True)
+        self.valuation.return_value = None
+        with patch.object(daily_briefing.morning_valuation, "capture", new=AsyncMock(side_effect=RuntimeError("수집 실패"))), \
+             patch.object(daily_briefing.channels, "has_active_channel", new=AsyncMock(return_value=True)), \
+             patch.object(daily_briefing, "generate_briefing", new=AsyncMock()) as generate, \
+             patch.object(daily_briefing.channels, "dispatch", new=AsyncMock()) as dispatch:
+            result = await daily_briefing.send_briefings()
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["sent"], 0)
+        generate.assert_not_awaited()
+        dispatch.assert_not_awaited()
+
     async def test_opt_in_filtering_default_off(self):
         for sub in ("u1", "u2", "u3"):
             await self._seed_user(sub)

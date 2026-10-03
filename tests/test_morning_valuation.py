@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from _harness import TempDbMixin
 
 from core.errors import AppError
-from repositories import snapshots
+from repositories import snapshots, user_settings
 from repositories.db import transaction
 from services import daily_briefing
 from services.portfolio import fx, regular_close
@@ -105,6 +105,61 @@ class MorningValuationTests(TempDbMixin):
         self.now = self.now.replace(hour=6, minute=59)
         with self.assertRaises(AppError):
             await self.capture()
+
+    async def test_saturday_send_waits_for_inflight_valuation(self):
+        self.now = datetime(2026, 10, 3, 7, 30, tzinfo=KST)
+        await user_settings.set_user_setting("u", "daily_briefing_enabled", "true")
+        started, release, waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        load = morning.load
+        empty_loads = 0
+
+        async def read_saved(user, day):
+            nonlocal empty_loads
+            value = await load(user, day)
+            if value is None:
+                empty_loads += 1
+                if empty_loads == 2:
+                    waiting.set()
+            return value
+
+        async def quote(code, **kwargs):
+            started.set()
+            await release.wait()
+            return {"price": self.prices[code]}
+
+        async def regular_quote(code, cutoff):
+            q = await quote(code)
+            return {"native_price": q["price"], "currency": "KRW", "price_date": "2026-10-02"}
+
+        async def generate(user, kind):
+            value = await load(user, self.now.date().isoformat())
+            self.assertEqual(value["total_value"], 1430)
+            return {"text": "수집 완료 브리핑", "source": "template", "model": None}
+
+        with patch.object(morning.time_windows, "now_kst", return_value=self.now), \
+             patch.object(morning, "load", new=AsyncMock(side_effect=read_saved)), \
+             patch.object(regular_close, "foreign_close", new=AsyncMock(side_effect=regular_quote)), \
+             patch.object(fx, "fx_rate_for_currency", new=AsyncMock(return_value=1)), \
+             patch.object(morning.runtime_quotes, "fetch_quote", new=AsyncMock(side_effect=quote)), \
+             patch.object(daily_briefing, "generate_briefing", new=AsyncMock(side_effect=generate)), \
+             patch.object(daily_briefing.channels, "has_active_channel", new=AsyncMock(return_value=True)), \
+             patch.object(daily_briefing.channels, "dispatch", new=AsyncMock(return_value=1)) as dispatch:
+            capture_task = asyncio.create_task(morning.capture("u"))
+            send_task = None
+            try:
+                await asyncio.wait_for(started.wait(), timeout=5)
+                send_task = asyncio.create_task(daily_briefing.send_briefings())
+                await asyncio.wait_for(waiting.wait(), timeout=5)
+                dispatch.assert_not_awaited()
+                self.assertFalse(send_task.done())
+                release.set()
+                value, result = await asyncio.wait_for(asyncio.gather(capture_task, send_task), timeout=5)
+            finally:
+                release.set()
+                await asyncio.gather(capture_task, *([send_task] if send_task else []), return_exceptions=True)
+        self.assertEqual(value["source"], "late")
+        self.assertEqual(result["sent"], 1)
+        dispatch.assert_awaited_once_with("u", "수집 완료 브리핑")
 
     async def test_morning_context_uses_saved_value_and_never_night_snapshot(self):
         value = await self.capture()
