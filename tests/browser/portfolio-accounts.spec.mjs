@@ -39,6 +39,7 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
       const row = page.locator('#pfBody [data-code="KRFUT_KA486B000"]');
       await expect(row.locator('.pf-col-qty')).toContainText('-20');
       await expect(row.locator('.pf-col-curprice')).toContainText('355');
+      await expect(row.locator('.pf-col-changepct')).toContainText('+2.50%');
       await expect(row.locator('.pf-col-mktval')).toContainText('-7,100');
       await expect(page.locator('#pfBody [data-code="CASH_KRW"] .pf-col-qty')).toContainText('8,000');
       await page.locator('.js-pf-col-toggle[data-col-key="memo"]').check();

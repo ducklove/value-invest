@@ -61,7 +61,7 @@ async def lifespan(app):
             await snapshots.save_stock_snapshots(user["google_sub"], day, [{"stock_code": "005930", "quantity": 10,
                 "market_value": price*10, "unit_price": price, "currency": "KRW", "fx_rate": 1}])
         try:
-            from services.brokers import activity, derivatives, kis, namuh, sync
+            from services.brokers import activity, derivatives, futures_underlyings, kis, namuh, sync
             from services.brokers.registry import get_adapter
             from services.quant import scanner_feed
             nh_rows = [{"stock_code": "005930", "stock_name": "삼성전자", "quantity": 3,
@@ -108,6 +108,7 @@ async def lifespan(app):
                     "trd_bf_dca": "10000", "trd_af_dca": "10846", "trd_amt": "1000", "tax_sum": "154", "trd_orn_fee": "0", "int_amt": "0"}, link)
                     for i, label in enumerate(("현금배당 입금", "예탁금이용료", "이체입금"), 1)]
             with patch.object(scanner_feed, "catalog", AsyncMock(return_value=[])), \
+                 patch.object(futures_underlyings, "underlying_codes", AsyncMock(return_value={"KA486B000": "006800"})), \
                  patch.object(get_adapter("kiwoom"), "pages", side_effect=kiwoom_pages), \
                  patch.object(get_adapter("ls"), "pages", side_effect=ls_pages), \
                  patch.object(kis, "token", AsyncMock(return_value="test-kis-token")), \
@@ -154,6 +155,9 @@ async def get_holdings(request: Request):
             from repositories.broker_quotes import futures_quote
             quote = await futures_quote(row["stock_code"])
         row.update(avg_price_krw=row["avg_price"], quote=quote)
+    from services.portfolio import futures_quotes
+    with patch.object(futures_quotes, "namuh_quote", return_value={"price": 40000, "change_pct": 2.5}):
+        await futures_quotes.enrich_items(rows, user["google_sub"])
     return rows
 
 

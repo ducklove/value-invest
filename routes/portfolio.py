@@ -13,6 +13,7 @@ import asset_insights
 from core.rate_limit import enforce_rate_limit
 from deps import get_current_user
 from deps import require_user as _require_user
+from domain.broker_assets import is_futures_contract
 from domain.portfolio_inputs import CashflowInput, HoldingInput, HoldingMetadataInput, validate_input
 from repositories import benchmark_daily as benchmark_repo
 from repositories import corp_codes, portfolio_metadata, portfolio_order
@@ -36,6 +37,7 @@ from services.portfolio import (
     benchmarks,
     dividends,
     foreign,
+    futures_quotes,
     fx,
     insights,
     names,
@@ -425,7 +427,9 @@ async def stream_portfolio_quotes(request: Request):
         async def _one_quote(code: str) -> tuple[str, dict]:
             try:
                 from services.brokers.realtime import quote as namuh_quote
-                return code, namuh_quote(user["google_sub"], code) or await _fetch_quote(code)
+                quote = namuh_quote(user["google_sub"], code) or await _fetch_quote(code)
+                enriched = await futures_quotes.enrich_quotes({code: quote}, user["google_sub"])
+                return code, enriched[code]
             except Exception:
                 return code, {}
 
@@ -486,7 +490,7 @@ async def asset_quote(stock_code: str, request: Request = None):
         q = nh.get(stock_code) or await _fetch_quote(stock_code)
         if not q:
             raise HTTPException(status_code=404, detail="시세를 가져올 수 없습니다.")
-        return q
+        return (await _futures_quotes_for_request(request, {stock_code: q}))[stock_code]
     except HTTPException:
         raise
     except Exception:
@@ -511,6 +515,14 @@ async def _namuh_quotes_for_request(request: Request | None, codes: list[str]) -
         return {}
     return {code: tick for code in codes if (tick := namuh_quote(user["google_sub"], code))}
 
+
+async def _futures_quotes_for_request(request: Request | None, quotes: dict[str, dict]) -> dict[str, dict]:
+    if not any(is_futures_contract(code) for code in quotes):
+        return quotes
+    user = await get_current_user(request) if request is not None else None
+    return await futures_quotes.enrich_quotes(quotes, user["google_sub"] if user else None)
+
+
 @router.post("/api/asset-quotes", response_model=dict[str, QuoteResponse], response_model_exclude_unset=True)
 async def asset_quotes_batch(payload: dict = Body(...), request: Request = None):
     """Fetch quotes for multiple codes in one request."""
@@ -528,7 +540,7 @@ async def asset_quotes_batch(payload: dict = Body(...), request: Request = None)
     fresh = bool(payload.get("fresh", True))
     nh = await _namuh_quotes_for_request(request, codes)
     if not fresh:
-        return {code: nh.get(code) or _cached_quote_for_code(code) for code in codes}
+        return await _futures_quotes_for_request(request, {code: nh.get(code) or _cached_quote_for_code(code) for code in codes})
 
     results: dict[str, dict] = {code: {} for code in codes}
     results.update(nh)
@@ -552,7 +564,7 @@ async def asset_quotes_batch(payload: dict = Body(...), request: Request = None)
 
     remaining = [code for code in codes if not results.get(code)]
     if not remaining:
-        return results
+        return await _futures_quotes_for_request(request, results)
 
     # Per-code path for foreign / special assets and any domestic code the
     # bulk call missed. Low concurrency keeps these upstreams rate-friendly;
@@ -609,7 +621,7 @@ async def asset_quotes_batch(payload: dict = Body(...), request: Request = None)
             pass
         except Exception:
             pass
-    return results
+    return await _futures_quotes_for_request(request, results)
 
 
 def _parse_avg_price_currency(raw: object) -> str | None:
@@ -712,6 +724,7 @@ async def get_portfolio(request: Request):
         if nh_quote and should_accept_quote_snapshot(item.get("quote"), nh_quote):
             item["quote"] = nh_quote
     await _fill_snapshot_quotes(user["google_sub"], enriched)
+    await futures_quotes.enrich_items(enriched, user["google_sub"])
     insights.schedule_asset_insight_warmup(enriched)
     elapsed_ms = (time.perf_counter() - started) * 1000
     if elapsed_ms > 1000:
